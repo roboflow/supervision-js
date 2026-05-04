@@ -63,5 +63,9 @@
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.59.1",
     "vitest": "^4.1.5"
+  },
+  "dependencies": {
+    "mediabunny": "^1.43.1",
+    "pixi.js": "^8.18.1"
   }
 }

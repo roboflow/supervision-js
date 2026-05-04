@@ -1,6 +1,4 @@
-import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import "supervision-js";
 
 import { App } from "./App";
 
@@ -10,8 +8,4 @@ if (!rootElement) {
   throw new Error("Demo root element not found.");
 }
 
-createRoot(rootElement).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-);
+createRoot(rootElement).render(<App />);

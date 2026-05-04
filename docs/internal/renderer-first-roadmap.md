@@ -6,12 +6,15 @@ observable, measurable, and demoable.
 
 ## Milestone 1: Render Media Inside Pixi
 
-Goal: load and display browser media as a Pixi-owned texture.
+Goal: load and display decoded media frames as a Pixi-owned texture.
+
+For the current proof, Mediabunny owns media reading and video-frame decode from
+day 0. Pixi owns only visual composition and texture presentation.
 
 The renderer should control the visible scene rather than placing annotations
 over a separate DOM media element. The first success case can be narrow: one
-video source, one Pixi application, correct sizing, and a predictable render
-loop.
+video source, one decode path, one Pixi application, correct sizing, and a
+predictable render loop.
 
 Done when: a local demo renders a playing video inside a Pixi-owned scene,
 resizes correctly, and exposes basic playback or frame timing diagnostics.

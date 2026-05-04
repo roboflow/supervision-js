@@ -21,9 +21,11 @@ and annotations into separate render systems.
 
 ## Media Ownership Means Visual Ownership
 
-The renderer may still use browser media primitives as decode and playback
-sources. For example, a Pixi video texture may be backed by an internal
-`HTMLVideoElement`.
+The renderer may still use browser-capable media infrastructure as decode and
+playback sources. For Milestone 1, that source is Mediabunny reading and decoding
+video frames for upload into Pixi. A future proof may revisit browser media
+primitives directly, but a visible DOM media element should not become the
+composition surface.
 
 The architectural constraint is visual composition: users should see one
 renderer-owned scene, not a visible DOM video element with an independently
