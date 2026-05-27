@@ -4,13 +4,14 @@
 
 This proof checks the smallest renderer-first claim: decoded video frames can be
 presented inside a renderer-owned Pixi scene without a visible DOM media element.
-Mediabunny owns media reading, demuxing, and video-frame decode. Pixi owns the
-visible composition surface: one canvas appended to the caller-provided
-container, with decoded frames uploaded as a texture-backed sprite.
+Mediabunny owns media source reading, container parsing, and video-frame decode.
+Pixi owns the visible composition surface: one canvas appended to the
+caller-provided container, with decoded frames uploaded as a texture-backed
+sprite.
 
 This is not an annotation API and not a general renderer abstraction. It is only
 enough code to prove media ownership, frame upload, sizing, playback lifecycle,
-and basic timing/container diagnostics.
+and basic source/timing/container diagnostics.
 
 ## Media And Composition Ownership
 
@@ -40,7 +41,7 @@ synchronization model.
 - Playback advances by clock-driven Mediabunny sample retrieval, not browser
   video callbacks.
 - The sprite resizes to fit the renderer canvas with `contain` or `cover`.
-- The proof exposes small metadata/timing diagnostics and disposes the
+- The proof exposes small source probe and timing diagnostics and disposes the
   Mediabunny input during cleanup.
 - The React demo consumes the package export, uses a local MP4 fixture to avoid
   remote CORS instability, and cleans up the proof on unmount.

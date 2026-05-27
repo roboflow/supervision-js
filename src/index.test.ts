@@ -32,6 +32,17 @@ const pixiMock = vi.hoisted(() => ({
   appInit: vi.fn(async () => undefined),
   canvasSourceOptions: [] as unknown[],
   canvasSourceUpdate: vi.fn(),
+  containerAddChild: vi.fn(),
+  containerInstances: [] as Array<{
+    children: unknown[];
+    position: { set: ReturnType<typeof vi.fn> };
+    scale: { set: ReturnType<typeof vi.fn> };
+  }>,
+  graphicsInstances: [] as Array<{
+    clear: ReturnType<typeof vi.fn>;
+    rect: ReturnType<typeof vi.fn>;
+    stroke: ReturnType<typeof vi.fn>;
+  }>,
   stageAddChild: vi.fn(),
   tickerAdd: vi.fn(),
   tickerRemove: vi.fn(),
@@ -104,6 +115,32 @@ vi.mock("pixi.js", () => {
     update = vi.fn();
   }
 
+  class Container {
+    children: unknown[] = [];
+    position = { set: vi.fn() };
+    scale = { set: vi.fn() };
+
+    constructor() {
+      pixiMock.containerInstances.push(this);
+    }
+
+    addChild(...children: unknown[]) {
+      this.children.push(...children);
+      pixiMock.containerAddChild(...children);
+      return children[0];
+    }
+  }
+
+  class Graphics {
+    clear = vi.fn(() => this);
+    rect = vi.fn(() => this);
+    stroke = vi.fn(() => this);
+
+    constructor() {
+      pixiMock.graphicsInstances.push(this);
+    }
+  }
+
   class Sprite {
     anchor = { set: vi.fn() };
     height = 0;
@@ -113,7 +150,7 @@ vi.mock("pixi.js", () => {
     constructor(public readonly options: unknown) {}
   }
 
-  return { Application, CanvasSource, Sprite, Texture };
+  return { Application, CanvasSource, Container, Graphics, Sprite, Texture };
 });
 
 vi.mock("mediabunny", () => {
@@ -207,6 +244,9 @@ describe("package entrypoint", () => {
     pixiMock.appInit.mockResolvedValue(undefined);
     pixiMock.canvasSourceOptions.length = 0;
     pixiMock.canvasSourceUpdate.mockClear();
+    pixiMock.containerAddChild.mockClear();
+    pixiMock.containerInstances.length = 0;
+    pixiMock.graphicsInstances.length = 0;
     pixiMock.stageAddChild.mockClear();
     pixiMock.tickerAdd.mockClear();
     pixiMock.tickerRemove.mockClear();
@@ -287,7 +327,11 @@ describe("package entrypoint", () => {
     } as unknown as HTMLElement;
   }
 
-  async function createProof(autoPlay = false, loop = true) {
+  async function createProof(
+    autoPlay = false,
+    loop = true,
+    overrides: Record<string, unknown> = {},
+  ) {
     const { createMediaRendererProof } = await import("./index");
 
     return createMediaRendererProof({
@@ -295,6 +339,7 @@ describe("package entrypoint", () => {
       container: createContainer(),
       loop,
       src: "sample.mp4",
+      ...overrides,
     });
   }
 
@@ -417,6 +462,188 @@ describe("package entrypoint", () => {
     proof.destroy();
   });
 
+  it("selects overlay frames from decoded sample timestamps", async () => {
+    resetMocks();
+    mediaMock.samples = [
+      createMockSample(0, 0),
+      createMockSample(0.04, 0),
+      createMockSample(0.08, 0),
+    ];
+
+    const onFrame = vi.fn();
+    const proof = await createProof(false, false, {
+      onFrame,
+      overlayFrames: [
+        {
+          mediaTime: 0.07,
+          rects: [
+            {
+              height: 40,
+              strokeColor: 0xff0000,
+              width: 30,
+              x: 20,
+              y: 10,
+            },
+          ],
+        },
+        {
+          mediaTime: 0.04,
+          rects: [
+            {
+              height: 20,
+              strokeAlpha: 0.5,
+              strokeWidth: 4,
+              width: 10,
+              x: 4,
+              y: 5,
+            },
+          ],
+        },
+      ],
+    });
+    const overlayGraphics = pixiMock.graphicsInstances[0];
+
+    expect(overlayGraphics.rect).not.toHaveBeenCalled();
+    expect(onFrame).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        activeOverlayFrameTime: null,
+        activeOverlayRectCount: 0,
+        mediaTime: 0,
+      }),
+    );
+
+    mediaMock.getSample.mockClear();
+    await proof.play();
+    flushAnimationFrame(70);
+    await vi.waitFor(() => {
+      expect(mediaMock.samples[1].draw).toHaveBeenCalledOnce();
+    });
+
+    const [requestedMediaTime] = mediaMock.getSample.mock.calls[0];
+    expect(requestedMediaTime).toBeCloseTo(0.07);
+    expect(overlayGraphics.clear).toHaveBeenCalledTimes(2);
+    expect(overlayGraphics.rect).toHaveBeenLastCalledWith(4, 5, 10, 20);
+    expect(overlayGraphics.stroke).toHaveBeenLastCalledWith({
+      alpha: 0.5,
+      color: 0x00ff66,
+      width: 4,
+    });
+    expect(proof.getState()).toMatchObject({
+      activeOverlayFrameTime: 0.04,
+      activeOverlayRectCount: 1,
+    });
+
+    flushAnimationFrame(80);
+    await vi.waitFor(() => {
+      expect(mediaMock.samples[2].draw).toHaveBeenCalledOnce();
+    });
+
+    expect(overlayGraphics.rect).toHaveBeenLastCalledWith(20, 10, 30, 40);
+    expect(overlayGraphics.stroke).toHaveBeenLastCalledWith({
+      alpha: 1,
+      color: 0xff0000,
+      width: 2,
+    });
+    expect(onFrame).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        activeOverlayFrameTime: 0.07,
+        activeOverlayRectCount: 1,
+        mediaTime: 0.08,
+      }),
+    );
+
+    proof.destroy();
+  });
+
+  it("presents the first sample and first overlay again at a loop boundary", async () => {
+    resetMocks();
+    mediaMock.getDurationFromMetadata.mockResolvedValue(0.08);
+    mediaMock.samples = [createMockSample(0, 0), createMockSample(0.04, 0)];
+
+    const proof = await createProof(false, true, {
+      overlayFrames: [
+        {
+          mediaTime: 0,
+          rects: [{ height: 20, width: 10, x: 4, y: 5 }],
+        },
+        {
+          mediaTime: 0.04,
+          rects: [{ height: 40, width: 30, x: 20, y: 10 }],
+        },
+      ],
+    });
+
+    mediaMock.getSample.mockClear();
+    await proof.play();
+    flushAnimationFrame(40);
+    await vi.waitFor(() => {
+      expect(mediaMock.samples[1].draw).toHaveBeenCalledOnce();
+    });
+    expect(proof.getState()).toMatchObject({
+      activeOverlayFrameTime: 0.04,
+      activeOverlayRectCount: 1,
+      currentTime: 0.04,
+      presentedFrames: 2,
+    });
+
+    flushAnimationFrame(80);
+    await vi.waitFor(() => {
+      expect(mediaMock.samples[0].draw).toHaveBeenCalledTimes(2);
+    });
+
+    expect(mediaMock.getSample).toHaveBeenLastCalledWith(0, {
+      skipLiveWait: true,
+    });
+    expect(proof.getState()).toMatchObject({
+      activeOverlayFrameTime: 0,
+      activeOverlayRectCount: 1,
+      currentTime: 0,
+      presentedFrames: 3,
+    });
+
+    proof.destroy();
+  });
+
+  it("does not redraw overlays or update overlay diagnostics for duplicate samples", async () => {
+    resetMocks();
+
+    const proof = await createProof(false, false, {
+      overlayFrames: [
+        {
+          mediaTime: 0,
+          rects: [{ height: 20, width: 10, x: 4, y: 5 }],
+        },
+        {
+          mediaTime: 0.04,
+          rects: [{ height: 40, width: 30, x: 20, y: 10 }],
+        },
+      ],
+    });
+    const overlayGraphics = pixiMock.graphicsInstances[0];
+    const initialOverlayRectCalls = overlayGraphics.rect.mock.calls.length;
+    const initialOverlayClearCalls = overlayGraphics.clear.mock.calls.length;
+
+    mediaMock.getSample.mockResolvedValueOnce(mediaMock.samples[0]);
+    await proof.play();
+    flushAnimationFrame(40);
+    await vi.waitFor(() => {
+      expect(mediaMock.samples[0].close).toHaveBeenCalledTimes(2);
+    });
+
+    expect(overlayGraphics.rect).toHaveBeenCalledTimes(initialOverlayRectCalls);
+    expect(overlayGraphics.clear).toHaveBeenCalledTimes(
+      initialOverlayClearCalls,
+    );
+    expect(proof.getState()).toMatchObject({
+      activeOverlayFrameTime: 0,
+      activeOverlayRectCount: 1,
+      currentTime: 0,
+      presentedFrames: 1,
+    });
+
+    proof.destroy();
+  });
+
   it("does not overlap decode requests while getSample is in flight", async () => {
     resetMocks();
 
@@ -504,7 +731,7 @@ describe("package entrypoint", () => {
     const proof = await createProof(false);
 
     expect(proof.getState().playbackState).toBe("error");
-    expect(proof.getState().demux).toMatchObject({
+    expect(proof.getState().source).toMatchObject({
       errorMessage: "decode failed",
       status: "error",
     });

@@ -16,16 +16,18 @@ over a separate DOM media element. The first success case can be narrow: one
 video source, one decode path, one Pixi application, correct sizing, and a
 predictable render loop.
 
-Done when: a local demo renders a playing video inside a Pixi-owned scene,
-resizes correctly, and exposes basic playback or frame timing diagnostics.
+Done when: a local demo renders a playing video from Mediabunny-decoded frames
+inside a Pixi-owned scene, resizes correctly, and exposes basic source,
+playback, and frame timing diagnostics through one experimental package export.
 
 Not included: annotation primitives, React integration, playback controls beyond
-what the proof needs, or public package exports.
+what the proof needs, or a stable public package API.
 
 Questions to answer:
 
 - Can media playback be represented cleanly as renderer-owned visual state?
-- What browser media events and frame callbacks are needed for reliable timing?
+- What proof-grade clock is sufficient for Mediabunny sample retrieval, and
+  where does it break?
 - What resize and device-pixel-ratio behavior is required for a credible demo?
 
 ## Milestone 2: Synchronize Simple Overlays To Media Frames
@@ -39,6 +41,12 @@ semantics.
 
 Done when: a demo updates simple overlays from media frame timing and shows
 enough timing diagnostics to evaluate timestamp or frame mismatch.
+
+Milestone 2 proof note: see
+[`milestone-2-synchronized-overlays.md`](milestone-2-synchronized-overlays.md)
+for the current synchronized overlay proof. It selects overlay frames from
+decoded media sample timestamps and renders rectangles in the Pixi scene. It is
+not an annotation schema or a `Box2D` API.
 
 Not included: a formal annotation schema, editing interactions, labels, tracks,
 or persistence.

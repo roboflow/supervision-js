@@ -1,19 +1,78 @@
 import { useEffect, useRef, useState } from "react";
 import {
   createMediaRendererProof,
-  type MediaDemuxProbeState,
   type MediaRendererProof,
+  type MediaRendererProofOverlayFrame,
   type MediaRendererProofState,
+  type MediaSourceProbeState,
 } from "supervision-js";
 
 const sampleVideoSrc = "/media/proof.mp4";
+const proofOverlayFrames: readonly MediaRendererProofOverlayFrame[] = [
+  {
+    mediaTime: 0,
+    rects: [
+      {
+        height: 168,
+        strokeAlpha: 0.9,
+        strokeColor: 0x00ff66,
+        strokeWidth: 4,
+        width: 224,
+        x: 88,
+        y: 72,
+      },
+    ],
+  },
+  {
+    mediaTime: 1.25,
+    rects: [
+      {
+        height: 164,
+        strokeAlpha: 0.9,
+        strokeColor: 0x38bdf8,
+        strokeWidth: 4,
+        width: 224,
+        x: 320,
+        y: 128,
+      },
+    ],
+  },
+  {
+    mediaTime: 2.5,
+    rects: [
+      {
+        height: 180,
+        strokeAlpha: 0.95,
+        strokeColor: 0xfacc15,
+        strokeWidth: 5,
+        width: 280,
+        x: 560,
+        y: 240,
+      },
+    ],
+  },
+  {
+    mediaTime: 3.75,
+    rects: [
+      {
+        height: 220,
+        strokeAlpha: 0.9,
+        strokeColor: 0xfb7185,
+        strokeWidth: 4,
+        width: 360,
+        x: 760,
+        y: 340,
+      },
+    ],
+  },
+];
 
 export function App() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const effectRunRef = useRef(0);
   const [rendererState, setRendererState] =
     useState<MediaRendererProofState | null>(null);
-  const [demuxState, setDemuxState] = useState<MediaDemuxProbeState | null>(
+  const [sourceState, setSourceState] = useState<MediaSourceProbeState | null>(
     null,
   );
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -40,9 +99,9 @@ export function App() {
       container,
       fit: "contain",
       loop: true,
-      onDemux: (state) => {
+      onSource: (state) => {
         if (isActive()) {
-          setDemuxState(state);
+          setSourceState(state);
         }
       },
       onFrame: () => {
@@ -55,6 +114,7 @@ export function App() {
         lastReadoutAt = now;
         setRendererState(renderer.getState());
       },
+      overlayFrames: proofOverlayFrames,
       src: sampleVideoSrc,
     })
       .then(async (createdRenderer) => {
@@ -65,7 +125,7 @@ export function App() {
 
         renderer = createdRenderer;
         setRendererState(createdRenderer.getState());
-        setDemuxState(createdRenderer.getState().demux);
+        setSourceState(createdRenderer.getState().source);
 
         try {
           await createdRenderer.play();
@@ -140,7 +200,17 @@ export function App() {
           }
         />
         <Readout
-          label="Media"
+          label="Overlay"
+          value={
+            rendererState
+              ? rendererState.activeOverlayFrameTime === null
+                ? `none | ${rendererState.activeOverlayRectCount} rects`
+                : `${rendererState.activeOverlayFrameTime.toFixed(2)}s | ${rendererState.activeOverlayRectCount} rects`
+              : "-"
+          }
+        />
+        <Readout
+          label="Size"
           value={
             rendererState?.mediaWidth && rendererState.mediaHeight
               ? `${rendererState.mediaWidth} x ${rendererState.mediaHeight}`
@@ -148,17 +218,18 @@ export function App() {
           }
         />
         <Readout
-          label="Decode"
+          label="Source"
           value={
-            demuxState
+            sourceState
               ? [
-                  demuxState.status,
-                  demuxState.formatName,
-                  demuxState.duration === null
+                  sourceState.status,
+                  sourceState.formatName,
+                  sourceState.duration === null
                     ? null
-                    : `${demuxState.duration.toFixed(2)}s`,
-                  demuxState.primaryVideoWidth && demuxState.primaryVideoHeight
-                    ? `${demuxState.primaryVideoWidth} x ${demuxState.primaryVideoHeight}`
+                    : `${sourceState.duration.toFixed(2)}s`,
+                  sourceState.primaryVideoWidth &&
+                  sourceState.primaryVideoHeight
+                    ? `${sourceState.primaryVideoWidth} x ${sourceState.primaryVideoHeight}`
                     : null,
                 ]
                   .filter(Boolean)
@@ -172,7 +243,7 @@ export function App() {
           <Readout
             label="Error"
             value={
-              rendererState.demux.errorMessage ??
+              rendererState.source.errorMessage ??
               "Unable to decode media with Mediabunny."
             }
           />

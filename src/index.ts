@@ -1,20 +1,20 @@
-export enum MediaRendererProofFit {
-  Contain = "contain",
-  Cover = "cover",
-}
+export type MediaRendererProofFit = "contain" | "cover";
 
-export enum MediaRendererProofPlaybackState {
-  Loading = "loading",
-  Ready = "ready",
-  Playing = "playing",
-  Paused = "paused",
-  Error = "error",
-  Destroyed = "destroyed",
-}
+export type MediaRendererProofPlaybackState =
+  | "loading"
+  | "ready"
+  | "playing"
+  | "paused"
+  | "error"
+  | "destroyed";
 
-export enum RenderEnginePreference {
-  WebGL = "webgl",
-}
+export type MediaSourceProbeStatus =
+  | "loading"
+  | "ready"
+  | "error"
+  | "destroyed";
+
+type RenderEnginePreference = "webgl";
 
 export interface MediaFrameDiagnostics {
   readonly mediaTime: number;
@@ -24,10 +24,12 @@ export interface MediaFrameDiagnostics {
   readonly mediaWidth: number;
   readonly mediaHeight: number;
   readonly expectedDisplayTime: null;
+  readonly activeOverlayFrameTime: number | null;
+  readonly activeOverlayRectCount: number;
 }
 
-export interface MediaDemuxProbeState {
-  readonly status: MediaRendererProofPlaybackState;
+export interface MediaSourceProbeState {
+  readonly status: MediaSourceProbeStatus;
   readonly canRead: boolean | null;
   readonly formatName: string | null;
   readonly formatMimeType: string | null;
@@ -49,7 +51,24 @@ export interface MediaRendererProofState {
   readonly mediaWidth: number;
   readonly mediaHeight: number;
   readonly presentedFrames: number;
-  readonly demux: MediaDemuxProbeState;
+  readonly activeOverlayFrameTime: number | null;
+  readonly activeOverlayRectCount: number;
+  readonly source: MediaSourceProbeState;
+}
+
+export interface MediaRendererProofOverlayRect {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+  readonly strokeColor?: number;
+  readonly strokeAlpha?: number;
+  readonly strokeWidth?: number;
+}
+
+export interface MediaRendererProofOverlayFrame {
+  readonly mediaTime: number;
+  readonly rects: readonly MediaRendererProofOverlayRect[];
 }
 
 export interface MediaRendererProofOptions {
@@ -62,8 +81,9 @@ export interface MediaRendererProofOptions {
    */
   readonly muted?: boolean;
   readonly fit?: MediaRendererProofFit;
+  readonly overlayFrames?: readonly MediaRendererProofOverlayFrame[];
   readonly onFrame?: (diagnostics: MediaFrameDiagnostics) => void;
-  readonly onDemux?: (state: MediaDemuxProbeState) => void;
+  readonly onSource?: (state: MediaSourceProbeState) => void;
 }
 
 export interface MediaRendererProof {
@@ -111,6 +131,21 @@ type TextureUpload = {
 };
 
 const ALREADY_PRESENTED_SAMPLE_EPSILON_SECONDS = 1e-6;
+const DEFAULT_OVERLAY_STROKE_ALPHA = 1;
+const DEFAULT_OVERLAY_STROKE_COLOR = 0x00ff66;
+const DEFAULT_OVERLAY_STROKE_WIDTH = 2;
+const RENDER_ENGINE_PREFERENCE: RenderEnginePreference = "webgl";
+
+function copySortedOverlayFrames(
+  overlayFrames: readonly MediaRendererProofOverlayFrame[] | undefined,
+): MediaRendererProofOverlayFrame[] {
+  return (overlayFrames ?? [])
+    .map((frame) => ({
+      mediaTime: frame.mediaTime,
+      rects: frame.rects.map((rect) => ({ ...rect })),
+    }))
+    .sort((left, right) => left.mediaTime - right.mediaTime);
+}
 
 /**
  * Experimental proof-only media renderer. Mediabunny owns media reading and
@@ -121,15 +156,16 @@ const ALREADY_PRESENTED_SAMPLE_EPSILON_SECONDS = 1e-6;
 export async function createMediaRendererProof(
   options: MediaRendererProofOptions,
 ): Promise<MediaRendererProof> {
-  const fit = options.fit ?? MediaRendererProofFit.Contain;
-  const { Application, CanvasSource, Sprite, Texture } =
+  const fit = options.fit ?? "contain";
+  const overlayFrames = copySortedOverlayFrames(options.overlayFrames);
+  const { Application, CanvasSource, Container, Graphics, Sprite, Texture } =
     await import("pixi.js");
   const app = new Application();
 
   await app.init({
     autoDensity: true,
     backgroundColor: 0x111111,
-    preference: RenderEnginePreference.WebGL,
+    preference: RENDER_ENGINE_PREFERENCE,
     resizeTo: options.container,
     resolution: window.devicePixelRatio || 1,
   });
@@ -140,9 +176,8 @@ export async function createMediaRendererProof(
   rendererCanvas.style.width = "100%";
   options.container.appendChild(rendererCanvas);
 
-  let playbackState: MediaRendererProofPlaybackState =
-    MediaRendererProofPlaybackState.Loading;
-  let demuxState: MediaDemuxProbeState = {
+  let playbackState: MediaRendererProofPlaybackState = "loading";
+  let sourceState: MediaSourceProbeState = {
     audioTrackCount: null,
     canRead: null,
     duration: null,
@@ -152,7 +187,7 @@ export async function createMediaRendererProof(
     mimeType: null,
     primaryVideoHeight: null,
     primaryVideoWidth: null,
-    status: MediaRendererProofPlaybackState.Loading,
+    status: "loading",
     trackCount: null,
     videoTrackCount: null,
   };
@@ -162,6 +197,8 @@ export async function createMediaRendererProof(
   let mediaHeight = 0;
   let mediaWidth = 0;
   let presentedFrames = 0;
+  let activeOverlayFrameTime: number | null = null;
+  let activeOverlayRectCount = 0;
   let destroyed = false;
   let playbackRunId = 0;
   let playbackOriginMediaTime = 0;
@@ -172,33 +209,34 @@ export async function createMediaRendererProof(
     | undefined;
   let mediaInput: DisposableMediaInput | undefined;
   let sampleSink: DecodedVideoSampleSink | undefined;
-  let sprite: InstanceType<typeof Sprite> | undefined;
+  let mediaScene: InstanceType<typeof Container> | undefined;
+  let overlayGraphics: InstanceType<typeof Graphics> | undefined;
   let stagingTexture: TextureUpload | undefined;
   let stagingTextureSource: TextureUploadSource | undefined;
 
-  const emitDemuxState = () => {
-    options.onDemux?.({ ...demuxState });
+  const emitSourceState = () => {
+    options.onSource?.({ ...sourceState });
   };
 
-  const setDemuxState = (patch: Partial<MediaDemuxProbeState>) => {
-    demuxState = {
-      ...demuxState,
+  const setSourceState = (patch: Partial<MediaSourceProbeState>) => {
+    sourceState = {
+      ...sourceState,
       ...patch,
     };
-    emitDemuxState();
+    emitSourceState();
   };
 
   const setRenderError = (error: unknown) => {
-    playbackState = MediaRendererProofPlaybackState.Error;
-    setDemuxState({
+    playbackState = "error";
+    setSourceState({
       errorMessage:
         error instanceof Error ? error.message : "Media decode failed.",
-      status: MediaRendererProofPlaybackState.Error,
+      status: "error",
     });
   };
 
-  const updateSpriteFit = () => {
-    if (!sprite || mediaWidth <= 0 || mediaHeight <= 0) {
+  const updateMediaSceneFit = () => {
+    if (!mediaScene || mediaWidth <= 0 || mediaHeight <= 0) {
       return;
     }
 
@@ -210,17 +248,57 @@ export async function createMediaRendererProof(
     }
 
     const scale =
-      fit === MediaRendererProofFit.Cover
+      fit === "cover"
         ? Math.max(screenWidth / mediaWidth, screenHeight / mediaHeight)
         : Math.min(screenWidth / mediaWidth, screenHeight / mediaHeight);
 
-    sprite.width = mediaWidth * scale;
-    sprite.height = mediaHeight * scale;
-    sprite.position.set(screenWidth / 2, screenHeight / 2);
+    mediaScene.scale.set(scale);
+    mediaScene.position.set(
+      (screenWidth - mediaWidth * scale) / 2,
+      (screenHeight - mediaHeight * scale) / 2,
+    );
+  };
+
+  const selectOverlayFrame = (mediaTime: number) => {
+    let selectedFrame: MediaRendererProofOverlayFrame | undefined;
+    let low = 0;
+    let high = overlayFrames.length - 1;
+
+    while (low <= high) {
+      const middle = Math.floor((low + high) / 2);
+      const frame = overlayFrames[middle];
+
+      if (frame.mediaTime <= mediaTime) {
+        selectedFrame = frame;
+        low = middle + 1;
+      } else {
+        high = middle - 1;
+      }
+    }
+
+    return selectedFrame;
+  };
+
+  const drawOverlayFrame = (mediaTime: number) => {
+    const overlayFrame = selectOverlayFrame(mediaTime);
+
+    activeOverlayFrameTime = overlayFrame?.mediaTime ?? null;
+    activeOverlayRectCount = overlayFrame?.rects.length ?? 0;
+    overlayGraphics?.clear();
+
+    for (const rect of overlayFrame?.rects ?? []) {
+      overlayGraphics?.rect(rect.x, rect.y, rect.width, rect.height).stroke({
+        alpha: rect.strokeAlpha ?? DEFAULT_OVERLAY_STROKE_ALPHA,
+        color: rect.strokeColor ?? DEFAULT_OVERLAY_STROKE_COLOR,
+        width: rect.strokeWidth ?? DEFAULT_OVERLAY_STROKE_WIDTH,
+      });
+    }
   };
 
   const emitFrameDiagnostics = (sample: DecodedVideoSample) => {
     options.onFrame?.({
+      activeOverlayFrameTime,
+      activeOverlayRectCount,
       currentTime,
       duration,
       expectedDisplayTime: null,
@@ -239,9 +317,10 @@ export async function createMediaRendererProof(
       sample.draw(context, 0, 0, mediaWidth, mediaHeight);
       stagingTextureSource?.update();
       stagingTexture?.update();
+      drawOverlayFrame(sample.timestamp);
       currentTime = sample.timestamp;
       presentedFrames += 1;
-      updateSpriteFit();
+      updateMediaSceneFit();
       emitFrameDiagnostics(sample);
     } finally {
       sample.close();
@@ -268,9 +347,7 @@ export async function createMediaRendererProof(
   }
 
   const isPlaybackRunActive = (runId: number) =>
-    !destroyed &&
-    playbackRunId === runId &&
-    playbackState === MediaRendererProofPlaybackState.Playing;
+    !destroyed && playbackRunId === runId && playbackState === "playing";
 
   const schedulePlaybackFrame = (runId: number) => {
     if (!isPlaybackRunActive(runId) || animationFrameHandle !== undefined) {
@@ -296,10 +373,11 @@ export async function createMediaRendererProof(
       playbackOriginMediaTime + (now - playbackOriginNow) / 1000;
     const playableEnd =
       duration === null ? null : firstTimestamp + Math.max(duration, 0);
+    let shouldPresentLoopStartSample = false;
 
     if (playableEnd !== null && requestedMediaTime >= playableEnd) {
       if (options.loop === false) {
-        playbackState = MediaRendererProofPlaybackState.Paused;
+        playbackState = "paused";
         return;
       }
 
@@ -307,6 +385,7 @@ export async function createMediaRendererProof(
       playbackOriginMediaTime = firstTimestamp;
       playbackOriginNow = now;
       requestedMediaTime = firstTimestamp;
+      shouldPresentLoopStartSample = true;
     }
 
     try {
@@ -321,8 +400,11 @@ export async function createMediaRendererProof(
 
       if (
         sample &&
-        sample.timestamp >
-          currentTime + ALREADY_PRESENTED_SAMPLE_EPSILON_SECONDS
+        (sample.timestamp >
+          currentTime + ALREADY_PRESENTED_SAMPLE_EPSILON_SECONDS ||
+          (shouldPresentLoopStartSample &&
+            Math.abs(sample.timestamp - firstTimestamp) <=
+              ALREADY_PRESENTED_SAMPLE_EPSILON_SECONDS))
       ) {
         drawSample(sample, stagingContext);
       } else {
@@ -346,7 +428,7 @@ export async function createMediaRendererProof(
 
       if (playbackState === "error") {
         throw new Error(
-          demuxState.errorMessage ?? "Media renderer is in error state.",
+          sourceState.errorMessage ?? "Media renderer is in error state.",
         );
       }
 
@@ -358,7 +440,7 @@ export async function createMediaRendererProof(
         return;
       }
 
-      playbackState = MediaRendererProofPlaybackState.Playing;
+      playbackState = "playing";
       playbackRunId += 1;
       playbackOriginMediaTime = currentTime;
       playbackOriginNow = performance.now();
@@ -370,7 +452,7 @@ export async function createMediaRendererProof(
         return;
       }
 
-      playbackState = MediaRendererProofPlaybackState.Paused;
+      playbackState = "paused";
       playbackRunId += 1;
       cancelScheduledFrame();
     },
@@ -378,13 +460,15 @@ export async function createMediaRendererProof(
     getState() {
       return {
         currentTime,
-        demux: { ...demuxState },
         duration,
         fit,
         mediaHeight,
         mediaWidth,
         playbackState,
         presentedFrames,
+        activeOverlayFrameTime,
+        activeOverlayRectCount,
+        source: { ...sourceState },
       };
     },
 
@@ -394,14 +478,14 @@ export async function createMediaRendererProof(
       }
 
       destroyed = true;
-      playbackState = MediaRendererProofPlaybackState.Destroyed;
+      playbackState = "destroyed";
       playbackRunId += 1;
       cancelScheduledFrame();
       stopActiveIterator();
       mediaInput?.dispose();
       mediaInput = undefined;
-      setDemuxState({ status: MediaRendererProofPlaybackState.Destroyed });
-      app.ticker.remove(updateSpriteFit);
+      setSourceState({ status: "destroyed" });
+      app.ticker.remove(updateMediaSceneFit);
       app.destroy(
         { removeView: true },
         {
@@ -413,8 +497,8 @@ export async function createMediaRendererProof(
     },
   };
 
-  app.ticker.add(updateSpriteFit);
-  emitDemuxState();
+  app.ticker.add(updateMediaSceneFit);
+  emitSourceState();
 
   try {
     const { Input, MATROSKA, MP4, QTFF, UrlSource, VideoSampleSink, WEBM } =
@@ -482,15 +566,21 @@ export async function createMediaRendererProof(
       dynamic: true,
       source: canvasSource,
     });
+    const scene = new Container();
     const mediaSprite = new Sprite({ texture });
-    mediaSprite.anchor.set(0.5);
-    app.stage.addChild(mediaSprite);
-    sprite = mediaSprite;
+    const overlays = new Graphics();
+
+    mediaSprite.width = mediaWidth;
+    mediaSprite.height = mediaHeight;
+    scene.addChild(mediaSprite, overlays);
+    app.stage.addChild(scene);
+    mediaScene = scene;
+    overlayGraphics = overlays;
     stagingTextureSource = canvasSource;
     stagingTexture = texture;
     sampleSink = new VideoSampleSink(primaryVideoTrack);
 
-    setDemuxState({
+    setSourceState({
       audioTrackCount: audioTracks.length,
       canRead,
       duration,
@@ -500,7 +590,7 @@ export async function createMediaRendererProof(
       mimeType,
       primaryVideoHeight: mediaHeight,
       primaryVideoWidth: mediaWidth,
-      status: MediaRendererProofPlaybackState.Ready,
+      status: "ready",
       trackCount: tracks.length,
       videoTrackCount: videoTracks.length,
     });
@@ -518,7 +608,7 @@ export async function createMediaRendererProof(
     }
 
     drawSample(firstSampleResult.value, stagingContext);
-    playbackState = MediaRendererProofPlaybackState.Ready;
+    playbackState = "ready";
 
     if (options.autoPlay ?? true) {
       await proof.play();
