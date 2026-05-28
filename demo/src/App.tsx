@@ -1,14 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  createMediaRendererProof,
-  type MediaRendererProof,
-  type MediaRendererProofOverlayFrame,
-  type MediaRendererProofState,
-  type MediaSourceProbeState,
+  createMediaRenderer,
+  MediaRendererFit,
+  MediaRendererPlaybackState,
+  type MediaRenderer,
+  type MediaOverlayFrame,
+  type MediaRendererState,
+  type MediaSourceState,
 } from "supervision-js";
 
-const sampleVideoSrc = "/media/proof.mp4";
-const proofOverlayFrames: readonly MediaRendererProofOverlayFrame[] = [
+const sampleVideoSrc = "/media/sample.mp4";
+const sampleOverlayFrames: readonly MediaOverlayFrame[] = [
   {
     mediaTime: 0,
     rects: [
@@ -70,11 +72,10 @@ const proofOverlayFrames: readonly MediaRendererProofOverlayFrame[] = [
 export function App() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const effectRunRef = useRef(0);
-  const [rendererState, setRendererState] =
-    useState<MediaRendererProofState | null>(null);
-  const [sourceState, setSourceState] = useState<MediaSourceProbeState | null>(
+  const [rendererState, setRendererState] = useState<MediaRendererState | null>(
     null,
   );
+  const [sourceState, setSourceState] = useState<MediaSourceState | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -86,7 +87,7 @@ export function App() {
 
     const runId = effectRunRef.current + 1;
     effectRunRef.current = runId;
-    let renderer: MediaRendererProof | undefined;
+    let renderer: MediaRenderer | undefined;
     let lastReadoutAt = 0;
     let cleanedUp = false;
     const isActive = () => !cleanedUp && effectRunRef.current === runId;
@@ -96,10 +97,10 @@ export function App() {
     setRendererState(null);
     setSourceState(null);
 
-    void createMediaRendererProof({
+    void createMediaRenderer({
       autoPlay: false,
       container,
-      fit: "contain",
+      fit: MediaRendererFit.Contain,
       loop: true,
       onSource: (state) => {
         if (isActive()) {
@@ -116,7 +117,7 @@ export function App() {
         lastReadoutAt = now;
         setRendererState(renderer.getState());
       },
-      overlayFrames: proofOverlayFrames,
+      overlayFrames: sampleOverlayFrames,
       src: sampleVideoSrc,
     })
       .then(async (createdRenderer) => {
@@ -140,7 +141,7 @@ export function App() {
             setErrorMessage(
               error instanceof Error
                 ? error.message
-                : "Unable to play the media renderer proof.",
+                : "Unable to play the media renderer.",
             );
           }
         }
@@ -150,7 +151,7 @@ export function App() {
           setErrorMessage(
             error instanceof Error
               ? error.message
-              : "Unable to start the media renderer proof.",
+              : "Unable to start the media renderer.",
           );
         }
       });
@@ -241,7 +242,8 @@ export function App() {
         />
         <Readout label="Audio" value="video-only" />
         {errorMessage ? <Readout label="Error" value={errorMessage} /> : null}
-        {!errorMessage && rendererState?.playbackState === "error" ? (
+        {!errorMessage &&
+        rendererState?.playbackState === MediaRendererPlaybackState.Error ? (
           <Readout
             label="Error"
             value={

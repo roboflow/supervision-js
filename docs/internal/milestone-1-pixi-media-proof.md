@@ -32,7 +32,8 @@ synchronization model.
 
 ## Done Criteria
 
-- The library exports one narrow experimental factory for creating the proof.
+- The library exposes `createMediaRenderer` for creating the Pixi-backed media
+  renderer proven by this milestone.
 - The factory creates a PixiJS v8 application using WebGL preference.
 - Mediabunny reads the media URL with a narrow video-oriented format list:
   `MP4`, `QTFF`, `WEBM`, and `MATROSKA`.

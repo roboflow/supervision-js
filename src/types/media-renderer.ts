@@ -1,0 +1,97 @@
+export enum MediaRendererFit {
+  Contain = "contain",
+  Cover = "cover",
+}
+
+export enum MediaRendererPlaybackState {
+  Loading = "loading",
+  Ready = "ready",
+  Playing = "playing",
+  Paused = "paused",
+  Error = "error",
+  Destroyed = "destroyed",
+}
+
+export enum MediaSourceStatus {
+  Loading = "loading",
+  Ready = "ready",
+  Error = "error",
+  Destroyed = "destroyed",
+}
+
+export interface MediaFrameDiagnostics {
+  readonly mediaTime: number;
+  readonly presentedFrames: number;
+  readonly currentTime: number;
+  readonly duration: number | null;
+  readonly mediaWidth: number;
+  readonly mediaHeight: number;
+  readonly expectedDisplayTime: null;
+  readonly activeOverlayFrameTime: number | null;
+  readonly activeOverlayRectCount: number;
+}
+
+export interface MediaSourceState {
+  readonly status: MediaSourceStatus;
+  readonly canRead: boolean | null;
+  readonly formatName: string | null;
+  readonly formatMimeType: string | null;
+  readonly mimeType: string | null;
+  readonly duration: number | null;
+  readonly trackCount: number | null;
+  readonly videoTrackCount: number | null;
+  readonly audioTrackCount: number | null;
+  readonly primaryVideoWidth: number | null;
+  readonly primaryVideoHeight: number | null;
+  readonly errorMessage: string | null;
+}
+
+export interface MediaRendererState {
+  readonly playbackState: MediaRendererPlaybackState;
+  readonly fit: MediaRendererFit;
+  readonly currentTime: number;
+  readonly duration: number | null;
+  readonly mediaWidth: number;
+  readonly mediaHeight: number;
+  readonly presentedFrames: number;
+  readonly activeOverlayFrameTime: number | null;
+  readonly activeOverlayRectCount: number;
+  readonly source: MediaSourceState;
+}
+
+export interface MediaOverlayRect {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+  readonly strokeColor?: number;
+  readonly strokeAlpha?: number;
+  readonly strokeWidth?: number;
+}
+
+export interface MediaOverlayFrame {
+  readonly mediaTime: number;
+  readonly rects: readonly MediaOverlayRect[];
+}
+
+export interface MediaRendererOptions {
+  readonly container: HTMLElement;
+  readonly src: string;
+  readonly autoPlay?: boolean;
+  readonly loop?: boolean;
+  /**
+   * No-op in the current video-only renderer. Audio playback is deferred.
+   */
+  readonly muted?: boolean;
+  readonly fit?: MediaRendererFit;
+  readonly overlayFrames?: readonly MediaOverlayFrame[];
+  readonly onFrame?: (diagnostics: MediaFrameDiagnostics) => void;
+  readonly onSource?: (state: MediaSourceState) => void;
+}
+
+export interface MediaRenderer {
+  play(): Promise<void>;
+  pause(): void;
+  getState(): MediaRendererState;
+  destroy(): void;
+}

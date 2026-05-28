@@ -33,8 +33,9 @@ overlay, or Pixi `VideoSource`. The user sees one renderer-owned Pixi canvas.
 
 ## Done Criteria
 
-- The package runtime entrypoint still exposes only `createMediaRendererProof`.
-- TypeScript-only proof interfaces describe timestamped overlay frames and
+- The package runtime entrypoint exposes `createMediaRenderer` plus the
+  renderer string enums needed by plain JavaScript consumers.
+- TypeScript-only `MediaRenderer*` interfaces describe timestamped overlay frames and
   simple rectangle draw instructions.
 - The demo passes a small local synthetic overlay timeline and displays timing
   diagnostics for the active overlay frame and rect count.

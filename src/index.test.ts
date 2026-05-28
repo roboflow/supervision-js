@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { MediaRendererPlaybackState, MediaSourceStatus } from "./index";
+
 type MockVideoSample = {
   close: ReturnType<typeof vi.fn>;
   draw: ReturnType<typeof vi.fn>;
@@ -327,14 +329,14 @@ describe("package entrypoint", () => {
     } as unknown as HTMLElement;
   }
 
-  async function createProof(
+  async function createRenderer(
     autoPlay = false,
     loop = true,
     overrides: Record<string, unknown> = {},
   ) {
-    const { createMediaRendererProof } = await import("./index");
+    const { createMediaRenderer } = await import("./index");
 
-    return createMediaRendererProof({
+    return createMediaRenderer({
       autoPlay,
       container: createContainer(),
       loop,
@@ -354,19 +356,56 @@ describe("package entrypoint", () => {
     callback(now);
   }
 
-  it("exposes only the experimental media renderer proof", async () => {
+  it("exposes the media renderer and public renderer enums", async () => {
     const entrypoint = await import("./index");
 
     expect(Object.keys(entrypoint).sort()).toEqual([
-      "createMediaRendererProof",
+      "MediaRendererFit",
+      "MediaRendererPlaybackState",
+      "MediaSourceStatus",
+      "createMediaRenderer",
     ]);
-    expect(entrypoint.createMediaRendererProof).toEqual(expect.any(Function));
+    expect(entrypoint.createMediaRenderer).toEqual(expect.any(Function));
+    expect(entrypoint.MediaRendererFit).toEqual({
+      Contain: "contain",
+      Cover: "cover",
+    });
+    expect(entrypoint.MediaRendererPlaybackState).toEqual({
+      Destroyed: "destroyed",
+      Error: "error",
+      Loading: "loading",
+      Paused: "paused",
+      Playing: "playing",
+      Ready: "ready",
+    });
+    expect(entrypoint.MediaSourceStatus).toEqual({
+      Destroyed: "destroyed",
+      Error: "error",
+      Loading: "loading",
+      Ready: "ready",
+    });
+  });
+
+  it("keeps renderer orchestration behind renderer and media boundaries", async () => {
+    const fsModuleName = "node:fs/promises";
+    const { readFile } = (await import(fsModuleName)) as {
+      readFile(path: URL, encoding: "utf8"): Promise<string>;
+    };
+    const source = await readFile(
+      new URL("./renderers/media-renderer.ts", import.meta.url),
+      "utf8",
+    );
+
+    expect(source).toContain("createMediaPlaybackController");
+    expect(source).toContain("createPixiMediaScene");
+    expect(source).not.toContain('import("pixi.js")');
+    expect(source).not.toContain('import("mediabunny")');
   });
 
   it("uses Mediabunny and does not create a video element", async () => {
     resetMocks();
 
-    const proof = await createProof(false, false);
+    const renderer = await createRenderer(false, false);
 
     expect(domMock.createElement).toHaveBeenCalledWith("canvas");
     expect(
@@ -386,13 +425,13 @@ describe("package entrypoint", () => {
       mediaMock.primaryVideoTrack,
     );
 
-    proof.destroy();
+    renderer.destroy();
   });
 
   it("draws the first decoded sample during create without starting playback", async () => {
     resetMocks();
 
-    const proof = await createProof(false, false);
+    const renderer = await createRenderer(false, false);
 
     expect(mediaMock.samplesCallStarts).toEqual([0]);
     expect(mediaMock.iteratorReturn).toHaveBeenCalledOnce();
@@ -401,24 +440,24 @@ describe("package entrypoint", () => {
     expect(mediaMock.samples[0].close).toHaveBeenCalledOnce();
     expect(pixiMock.canvasSourceUpdate).toHaveBeenCalledOnce();
     expect(domMock.requestAnimationFrame).not.toHaveBeenCalled();
-    expect(proof.getState()).toMatchObject({
+    expect(renderer.getState()).toMatchObject({
       currentTime: 0,
       mediaHeight: 720,
       mediaWidth: 1280,
-      playbackState: "ready",
+      playbackState: MediaRendererPlaybackState.Ready,
       presentedFrames: 1,
     });
 
-    proof.destroy();
+    renderer.destroy();
   });
 
   it("play requests a later media timestamp and draws that sample", async () => {
     resetMocks();
     mediaMock.samples = [createMockSample(0, 0), createMockSample(0.04, 0)];
 
-    const proof = await createProof(false, false);
+    const renderer = await createRenderer(false, false);
     mediaMock.getSample.mockClear();
-    await proof.play();
+    await renderer.play();
     await vi.waitFor(() => {
       expect(domMock.requestAnimationFrame).toHaveBeenCalledOnce();
     });
@@ -432,34 +471,36 @@ describe("package entrypoint", () => {
     const [requestedMediaTime, options] = mediaMock.getSample.mock.calls[0];
     expect(requestedMediaTime).toBeCloseTo(0.04);
     expect(options).toEqual({ skipLiveWait: true });
-    expect(proof.getState()).toMatchObject({
+    expect(renderer.getState()).toMatchObject({
       currentTime: 0.04,
       presentedFrames: 2,
     });
-    expect(proof.getState().playbackState).toBe("playing");
+    expect(renderer.getState().playbackState).toBe(
+      MediaRendererPlaybackState.Playing,
+    );
 
-    proof.destroy();
+    renderer.destroy();
   });
 
   it("closes duplicate samples without counting them as presented", async () => {
     resetMocks();
 
-    const proof = await createProof(false, false);
+    const renderer = await createRenderer(false, false);
     mediaMock.getSample.mockResolvedValueOnce(mediaMock.samples[0]);
-    await proof.play();
+    await renderer.play();
     flushAnimationFrame(40);
     await vi.waitFor(() => {
       expect(mediaMock.samples[0].close).toHaveBeenCalledTimes(2);
     });
 
-    expect(proof.getState()).toMatchObject({
+    expect(renderer.getState()).toMatchObject({
       currentTime: 0,
       presentedFrames: 1,
     });
     expect(mediaMock.samples[0].draw).toHaveBeenCalledOnce();
     expect(mediaMock.samples[1].draw).not.toHaveBeenCalled();
 
-    proof.destroy();
+    renderer.destroy();
   });
 
   it("selects overlay frames from decoded sample timestamps", async () => {
@@ -471,7 +512,7 @@ describe("package entrypoint", () => {
     ];
 
     const onFrame = vi.fn();
-    const proof = await createProof(false, false, {
+    const renderer = await createRenderer(false, false, {
       onFrame,
       overlayFrames: [
         {
@@ -513,7 +554,7 @@ describe("package entrypoint", () => {
     );
 
     mediaMock.getSample.mockClear();
-    await proof.play();
+    await renderer.play();
     flushAnimationFrame(70);
     await vi.waitFor(() => {
       expect(mediaMock.samples[1].draw).toHaveBeenCalledOnce();
@@ -528,7 +569,7 @@ describe("package entrypoint", () => {
       color: 0x00ff66,
       width: 4,
     });
-    expect(proof.getState()).toMatchObject({
+    expect(renderer.getState()).toMatchObject({
       activeOverlayFrameTime: 0.04,
       activeOverlayRectCount: 1,
     });
@@ -552,7 +593,7 @@ describe("package entrypoint", () => {
       }),
     );
 
-    proof.destroy();
+    renderer.destroy();
   });
 
   it("presents the first sample and first overlay again at a loop boundary", async () => {
@@ -560,7 +601,7 @@ describe("package entrypoint", () => {
     mediaMock.getDurationFromMetadata.mockResolvedValue(0.08);
     mediaMock.samples = [createMockSample(0, 0), createMockSample(0.04, 0)];
 
-    const proof = await createProof(false, true, {
+    const renderer = await createRenderer(false, true, {
       overlayFrames: [
         {
           mediaTime: 0,
@@ -574,12 +615,12 @@ describe("package entrypoint", () => {
     });
 
     mediaMock.getSample.mockClear();
-    await proof.play();
+    await renderer.play();
     flushAnimationFrame(40);
     await vi.waitFor(() => {
       expect(mediaMock.samples[1].draw).toHaveBeenCalledOnce();
     });
-    expect(proof.getState()).toMatchObject({
+    expect(renderer.getState()).toMatchObject({
       activeOverlayFrameTime: 0.04,
       activeOverlayRectCount: 1,
       currentTime: 0.04,
@@ -594,20 +635,20 @@ describe("package entrypoint", () => {
     expect(mediaMock.getSample).toHaveBeenLastCalledWith(0, {
       skipLiveWait: true,
     });
-    expect(proof.getState()).toMatchObject({
+    expect(renderer.getState()).toMatchObject({
       activeOverlayFrameTime: 0,
       activeOverlayRectCount: 1,
       currentTime: 0,
       presentedFrames: 3,
     });
 
-    proof.destroy();
+    renderer.destroy();
   });
 
   it("does not redraw overlays or update overlay diagnostics for duplicate samples", async () => {
     resetMocks();
 
-    const proof = await createProof(false, false, {
+    const renderer = await createRenderer(false, false, {
       overlayFrames: [
         {
           mediaTime: 0,
@@ -624,7 +665,7 @@ describe("package entrypoint", () => {
     const initialOverlayClearCalls = overlayGraphics.clear.mock.calls.length;
 
     mediaMock.getSample.mockResolvedValueOnce(mediaMock.samples[0]);
-    await proof.play();
+    await renderer.play();
     flushAnimationFrame(40);
     await vi.waitFor(() => {
       expect(mediaMock.samples[0].close).toHaveBeenCalledTimes(2);
@@ -634,14 +675,14 @@ describe("package entrypoint", () => {
     expect(overlayGraphics.clear).toHaveBeenCalledTimes(
       initialOverlayClearCalls,
     );
-    expect(proof.getState()).toMatchObject({
+    expect(renderer.getState()).toMatchObject({
       activeOverlayFrameTime: 0,
       activeOverlayRectCount: 1,
       currentTime: 0,
       presentedFrames: 1,
     });
 
-    proof.destroy();
+    renderer.destroy();
   });
 
   it("does not redraw overlays when presented samples stay within the same active overlay frame", async () => {
@@ -653,7 +694,7 @@ describe("package entrypoint", () => {
       createMockSample(0.08, 0),
     ];
 
-    const proof = await createProof(false, false, {
+    const renderer = await createRenderer(false, false, {
       overlayFrames: [
         {
           mediaTime: 0,
@@ -671,7 +712,7 @@ describe("package entrypoint", () => {
     expect(overlayGraphics.rect).toHaveBeenCalledOnce();
     expect(overlayGraphics.stroke).toHaveBeenCalledOnce();
 
-    await proof.play();
+    await renderer.play();
     flushAnimationFrame(20);
     await vi.waitFor(() => {
       expect(mediaMock.samples[1].draw).toHaveBeenCalledOnce();
@@ -680,7 +721,7 @@ describe("package entrypoint", () => {
     expect(overlayGraphics.clear).toHaveBeenCalledOnce();
     expect(overlayGraphics.rect).toHaveBeenCalledOnce();
     expect(overlayGraphics.stroke).toHaveBeenCalledOnce();
-    expect(proof.getState()).toMatchObject({
+    expect(renderer.getState()).toMatchObject({
       activeOverlayFrameTime: 0,
       activeOverlayRectCount: 1,
       currentTime: 0.02,
@@ -695,7 +736,7 @@ describe("package entrypoint", () => {
     expect(overlayGraphics.clear).toHaveBeenCalledOnce();
     expect(overlayGraphics.rect).toHaveBeenCalledOnce();
     expect(overlayGraphics.stroke).toHaveBeenCalledOnce();
-    expect(proof.getState()).toMatchObject({
+    expect(renderer.getState()).toMatchObject({
       activeOverlayFrameTime: 0,
       activeOverlayRectCount: 1,
       currentTime: 0.04,
@@ -711,25 +752,25 @@ describe("package entrypoint", () => {
     expect(overlayGraphics.rect).toHaveBeenCalledTimes(2);
     expect(overlayGraphics.stroke).toHaveBeenCalledTimes(2);
     expect(overlayGraphics.rect).toHaveBeenLastCalledWith(20, 10, 30, 40);
-    expect(proof.getState()).toMatchObject({
+    expect(renderer.getState()).toMatchObject({
       activeOverlayFrameTime: 0.08,
       activeOverlayRectCount: 1,
       currentTime: 0.08,
       presentedFrames: 4,
     });
 
-    proof.destroy();
+    renderer.destroy();
   });
 
   it("does not overlap decode requests while getSample is in flight", async () => {
     resetMocks();
 
-    const proof = await createProof(false, false);
+    const renderer = await createRenderer(false, false);
     const deferred = createDeferred<MockVideoSample | null>();
     mediaMock.getSample.mockClear();
     mediaMock.getSample.mockReturnValueOnce(deferred.promise);
 
-    await proof.play();
+    await renderer.play();
     flushAnimationFrame(40);
 
     expect(mediaMock.getSample).toHaveBeenCalledOnce();
@@ -741,79 +782,87 @@ describe("package entrypoint", () => {
       expect(domMock.rafCallbacks).toHaveLength(1);
     });
 
-    proof.destroy();
+    renderer.destroy();
   });
 
   it("pause prevents late async samples from drawing", async () => {
     resetMocks();
 
-    const proof = await createProof(false, false);
+    const renderer = await createRenderer(false, false);
     const deferred = createDeferred<MockVideoSample | null>();
     mediaMock.getSample.mockClear();
     mediaMock.getSample.mockReturnValueOnce(deferred.promise);
 
-    await proof.play();
+    await renderer.play();
     flushAnimationFrame(40);
-    proof.pause();
+    renderer.pause();
     deferred.resolve(mediaMock.samples[1]);
 
     await vi.waitFor(() => {
       expect(mediaMock.samples[1].close).toHaveBeenCalledOnce();
     });
     expect(mediaMock.samples[1].draw).not.toHaveBeenCalled();
-    expect(proof.getState().playbackState).toBe("paused");
+    expect(renderer.getState().playbackState).toBe(
+      MediaRendererPlaybackState.Paused,
+    );
 
-    proof.destroy();
+    renderer.destroy();
   });
 
   it("destroy prevents late async samples from drawing", async () => {
     resetMocks();
 
-    const proof = await createProof(false, false);
+    const renderer = await createRenderer(false, false);
     const deferred = createDeferred<MockVideoSample | null>();
     mediaMock.getSample.mockClear();
     mediaMock.getSample.mockReturnValueOnce(deferred.promise);
 
-    await proof.play();
+    await renderer.play();
     flushAnimationFrame(40);
-    proof.destroy();
+    renderer.destroy();
     deferred.resolve(mediaMock.samples[1]);
 
     await vi.waitFor(() => {
       expect(mediaMock.samples[1].close).toHaveBeenCalledOnce();
     });
     expect(mediaMock.samples[1].draw).not.toHaveBeenCalled();
-    expect(proof.getState().playbackState).toBe("destroyed");
+    expect(renderer.getState().playbackState).toBe(
+      MediaRendererPlaybackState.Destroyed,
+    );
   });
 
   it("cleans up scheduled frames, media input, and Pixi on destroy", async () => {
     resetMocks();
 
-    const proof = await createProof(false);
-    await proof.play();
-    proof.destroy();
+    const renderer = await createRenderer(false);
+    await renderer.play();
+    renderer.destroy();
 
     expect(domMock.cancelAnimationFrame).toHaveBeenCalled();
     expect(mediaMock.dispose).toHaveBeenCalledOnce();
     expect(pixiMock.appDestroy).toHaveBeenCalledOnce();
-    expect(proof.getState().playbackState).toBe("destroyed");
+    expect(renderer.getState().playbackState).toBe(
+      MediaRendererPlaybackState.Destroyed,
+    );
   });
 
-  it("puts the proof in error state when Mediabunny decode setup fails", async () => {
+  it("puts the renderer in error state when Mediabunny decode setup fails", async () => {
     resetMocks();
     mediaMock.getPrimaryVideoTrack.mockRejectedValue(
       new Error("decode failed"),
     );
 
-    const proof = await createProof(false);
+    const renderer = await createRenderer(false);
 
-    expect(proof.getState().playbackState).toBe("error");
-    expect(proof.getState().source).toMatchObject({
+    expect(renderer.getState().playbackState).toBe(
+      MediaRendererPlaybackState.Error,
+    );
+    expect(renderer.getState().source).toMatchObject({
       errorMessage: "decode failed",
-      status: "error",
+      status: MediaSourceStatus.Error,
     });
     expect(pixiMock.stageAddChild).not.toHaveBeenCalled();
 
-    proof.destroy();
+    renderer.destroy();
   });
 });

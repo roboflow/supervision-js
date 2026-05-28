@@ -22,13 +22,18 @@ foundation before designing a broad annotation framework.
 - Do not make React part of the core renderer. React belongs in `demo/` or
   future wrapper packages.
 - Keep media and overlays visually composed inside the renderer-owned scene.
-- Treat PixiJS as the first 2D backend proof, not as the public architecture.
+- Treat PixiJS as the first 2D backend implementation, not as the public architecture.
 - Avoid final public APIs, primitive hierarchies, or annotation schemas until
   renderer milestones create real constraints.
 
 ## Repo Shape
 
 - `src/` is the package source.
+- `src/index.ts` is a minimal package entrypoint. Keep public media renderer
+  enums/interfaces in `src/types/`, constants in `src/constants/`, pure helpers
+  in `src/utils/`, media-source adapters and source state helpers in
+  `src/media/`, playback scheduling in `src/playback/`, and Pixi scene
+  composition plus renderer implementations in `src/renderers/`.
 - `demo/` is a React + Vite consumer demo.
 - `benchmark/initial/` is the isolated Milestone 3 dense-shape benchmark.
   Benchmark renderer code belongs there, not in the package entrypoint or the
