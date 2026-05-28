@@ -4,12 +4,22 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "baseUrl": ".",
+    "paths": {
+      "#constants/*": ["src/constants/*"],
+      "#media/*": ["src/media/*"],
+      "#playback/*": ["src/playback/*"],
+      "#renderers/*": ["src/renderers/*"],
+      "#types/*": ["src/types/*"],
+      "#utils/*": ["src/utils/*"]
+    },
     "strict": true,
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
     "outDir": "dist",
     "rootDir": "src",
+    "ignoreDeprecations": "6.0",
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,
     "noEmitOnError": true

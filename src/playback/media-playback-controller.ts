@@ -1,8 +1,8 @@
-import { ALREADY_PRESENTED_SAMPLE_EPSILON_SECONDS } from "../constants/media-renderer";
+import { ALREADY_PRESENTED_SAMPLE_EPSILON_SECONDS } from "#constants/media-renderer";
 import type {
   DecodedVideoSample,
   DecodedVideoSampleSink,
-} from "../media/media-source";
+} from "#media/media-source";
 
 export interface MediaPlaybackController {
   play(): void;

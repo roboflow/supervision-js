@@ -1,6 +1,6 @@
 import type { DecodedMediaSourceMetadata } from "./media-source";
-import { MediaSourceStatus } from "../types/media-renderer";
-import type { MediaSourceState } from "../types/media-renderer";
+import { MediaSourceStatus } from "#types/media-renderer";
+import type { MediaSourceState } from "#types/media-renderer";
 
 export function createLoadingMediaSourceState(): MediaSourceState {
   return {

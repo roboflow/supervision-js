@@ -21,6 +21,32 @@
       "import": "./dist/index.js"
     }
   },
+  "imports": {
+    "#constants/*": {
+      "types": "./dist/constants/*.d.ts",
+      "import": "./dist/constants/*.js"
+    },
+    "#media/*": {
+      "types": "./dist/media/*.d.ts",
+      "import": "./dist/media/*.js"
+    },
+    "#playback/*": {
+      "types": "./dist/playback/*.d.ts",
+      "import": "./dist/playback/*.js"
+    },
+    "#renderers/*": {
+      "types": "./dist/renderers/*.d.ts",
+      "import": "./dist/renderers/*.js"
+    },
+    "#types/*": {
+      "types": "./dist/types/*.d.ts",
+      "import": "./dist/types/*.js"
+    },
+    "#utils/*": {
+      "types": "./dist/utils/*.d.ts",
+      "import": "./dist/utils/*.js"
+    }
+  },
   "files": [
     "dist"
   ],

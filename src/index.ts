@@ -1,4 +1,4 @@
-export { createMediaRenderer } from "./renderers/media-renderer";
+export { createMediaRenderer } from "#renderers/media-renderer";
 export {
   MediaRendererFit,
   MediaRendererPlaybackState,
@@ -10,4 +10,4 @@ export {
   type MediaOverlayRect,
   type MediaRendererState,
   type MediaSourceState,
-} from "./types/media-renderer";
+} from "#types/media-renderer";

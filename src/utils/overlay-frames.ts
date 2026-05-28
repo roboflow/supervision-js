@@ -1,4 +1,4 @@
-import type { MediaOverlayFrame } from "../types/media-renderer";
+import type { MediaOverlayFrame } from "#types/media-renderer";
 
 export function copySortedOverlayFrames(
   overlayFrames: readonly MediaOverlayFrame[] | undefined,

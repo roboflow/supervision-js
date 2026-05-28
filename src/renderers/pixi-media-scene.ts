@@ -1,18 +1,11 @@
-import {
-  DEFAULT_OVERLAY_STROKE_ALPHA,
-  DEFAULT_OVERLAY_STROKE_COLOR,
-  DEFAULT_OVERLAY_STROKE_WIDTH,
-  RENDER_ENGINE_PREFERENCE,
-} from "../constants/media-renderer";
-import type { DecodedVideoSample } from "../media/media-source";
+import { RENDER_ENGINE_PREFERENCE } from "#constants/media-renderer";
+import type { DecodedVideoSample } from "#media/media-source";
 import {
   MediaRendererFit,
   type MediaOverlayFrame,
-} from "../types/media-renderer";
-import {
-  copySortedOverlayFrames,
-  selectOverlayFrame,
-} from "../utils/overlay-frames";
+} from "#types/media-renderer";
+import { createPixiOverlayLayer } from "./pixi-overlay-layer";
+import { calculatePixiSceneFit } from "./pixi-scene-fit";
 import type {
   Application as PixiApplication,
   CanvasSource as PixiCanvasSource,
@@ -46,10 +39,12 @@ export async function createPixiMediaScene(options: {
   readonly fit: MediaRendererFit;
   readonly overlayFrames: readonly MediaOverlayFrame[] | undefined;
 }): Promise<PixiMediaScene> {
-  const overlayFrames = copySortedOverlayFrames(options.overlayFrames);
   const { Application, CanvasSource, Container, Graphics, Sprite, Texture } =
     await import("pixi.js");
   const app: PixiApplication = new Application();
+  const overlayLayer = createPixiOverlayLayer({
+    overlayFrames: options.overlayFrames,
+  });
 
   await app.init({
     autoDensity: true,
@@ -75,9 +70,6 @@ export async function createPixiMediaScene(options: {
   let mediaHeight = 0;
   let mediaWidth = 0;
   let mediaScene: PixiContainer | undefined;
-  let overlayGraphics: PixiGraphics | undefined;
-  let lastDrawnOverlayFrame: MediaOverlayFrame | undefined;
-  let hasDrawnOverlayFrame = false;
   let stagingTexture: TextureUpload | undefined;
   let stagingTextureSource: TextureUploadSource | undefined;
 
@@ -89,48 +81,20 @@ export async function createPixiMediaScene(options: {
     const screenWidth = app.screen.width || options.container.clientWidth;
     const screenHeight = app.screen.height || options.container.clientHeight;
 
-    if (screenWidth <= 0 || screenHeight <= 0) {
+    const fit = calculatePixiSceneFit({
+      fit: options.fit,
+      mediaHeight,
+      mediaWidth,
+      screenHeight,
+      screenWidth,
+    });
+
+    if (!fit) {
       return;
     }
 
-    const scale =
-      options.fit === MediaRendererFit.Cover
-        ? Math.max(screenWidth / mediaWidth, screenHeight / mediaHeight)
-        : Math.min(screenWidth / mediaWidth, screenHeight / mediaHeight);
-
-    mediaScene.scale.set(scale);
-    mediaScene.position.set(
-      (screenWidth - mediaWidth * scale) / 2,
-      (screenHeight - mediaHeight * scale) / 2,
-    );
-  };
-
-  const drawOverlayFrame = (mediaTime: number) => {
-    const overlayFrame = selectOverlayFrame(overlayFrames, mediaTime);
-
-    if (hasDrawnOverlayFrame && overlayFrame === lastDrawnOverlayFrame) {
-      return {
-        activeOverlayFrameTime: overlayFrame?.mediaTime ?? null,
-        activeOverlayRectCount: overlayFrame?.rects.length ?? 0,
-      };
-    }
-
-    hasDrawnOverlayFrame = true;
-    lastDrawnOverlayFrame = overlayFrame;
-    overlayGraphics?.clear();
-
-    for (const rect of overlayFrame?.rects ?? []) {
-      overlayGraphics?.rect(rect.x, rect.y, rect.width, rect.height).stroke({
-        alpha: rect.strokeAlpha ?? DEFAULT_OVERLAY_STROKE_ALPHA,
-        color: rect.strokeColor ?? DEFAULT_OVERLAY_STROKE_COLOR,
-        width: rect.strokeWidth ?? DEFAULT_OVERLAY_STROKE_WIDTH,
-      });
-    }
-
-    return {
-      activeOverlayFrameTime: overlayFrame?.mediaTime ?? null,
-      activeOverlayRectCount: overlayFrame?.rects.length ?? 0,
-    };
+    mediaScene.scale.set(fit.scale);
+    mediaScene.position.set(fit.x, fit.y);
   };
 
   app.ticker.add(updateMediaSceneFit);
@@ -158,10 +122,10 @@ export async function createPixiMediaScene(options: {
 
       mediaSprite.width = mediaWidth;
       mediaSprite.height = mediaHeight;
+      overlayLayer.attachGraphics(overlays);
       scene.addChild(mediaSprite, overlays);
       app.stage.addChild(scene);
       mediaScene = scene;
-      overlayGraphics = overlays;
       stagingTextureSource = canvasSource;
       stagingTexture = texture;
       updateMediaSceneFit();
@@ -176,7 +140,7 @@ export async function createPixiMediaScene(options: {
         sample.draw(stagingContext, 0, 0, mediaWidth, mediaHeight);
         stagingTextureSource?.update();
         stagingTexture?.update();
-        const overlayState = drawOverlayFrame(sample.timestamp);
+        const overlayState = overlayLayer.drawFrame(sample.timestamp);
         updateMediaSceneFit();
 
         return {

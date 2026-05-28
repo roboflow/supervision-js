@@ -1,30 +1,23 @@
-import { openMediabunnyMediaSource } from "../media/mediabunny-media-source";
+import { openMediabunnyMediaSource } from "#media/mediabunny-media-source";
+import {
+  readFirstDecodedVideoSample,
+  type DecodedVideoSampleIterator,
+} from "#media/decoded-video-sample-reader";
 import type {
   DecodedVideoSample,
   DisposableMediaInput,
-} from "../media/media-source";
-import {
-  createLoadingMediaSourceState,
-  createReadyMediaSourceState,
-} from "../media/media-source-state";
+} from "#media/media-source";
 import {
   createMediaPlaybackController,
   type MediaPlaybackController,
-} from "../playback/media-playback-controller";
+} from "#playback/media-playback-controller";
 import {
   MediaRendererFit,
-  MediaRendererPlaybackState,
-  MediaSourceStatus,
-  type MediaFrameDiagnostics,
   type MediaRenderer,
   type MediaRendererOptions,
-  type MediaRendererState,
-  type MediaSourceState,
-} from "../types/media-renderer";
-import {
-  createPixiMediaScene,
-  type PresentedMediaSample,
-} from "./pixi-media-scene";
+} from "#types/media-renderer";
+import { createMediaRendererRuntimeState } from "./media-renderer-state";
+import { createPixiMediaScene } from "./pixi-media-scene";
 
 /**
  * Mediabunny owns media reading and video decode; Pixi owns the visible
@@ -40,68 +33,18 @@ export async function createMediaRenderer(
     fit,
     overlayFrames: options.overlayFrames,
   });
-
-  let playbackState: MediaRendererPlaybackState =
-    MediaRendererPlaybackState.Loading;
-  let sourceState = createLoadingMediaSourceState();
-  let currentTime = 0;
-  let duration: number | null = null;
-  let mediaHeight = 0;
-  let mediaWidth = 0;
-  let presentedFrames = 0;
-  let activeOverlayFrameTime: number | null = null;
-  let activeOverlayRectCount = 0;
-  let destroyed = false;
-  let activeSampleIterator:
-    | AsyncGenerator<DecodedVideoSample, void, unknown>
-    | undefined;
+  const runtimeState = createMediaRendererRuntimeState({
+    fit,
+    onFrame: options.onFrame,
+    onSource: options.onSource,
+  });
+  let activeSampleIterator: DecodedVideoSampleIterator | undefined;
   let mediaInput: DisposableMediaInput | undefined;
   let playbackController: MediaPlaybackController | undefined;
 
-  const emitSourceState = () => {
-    options.onSource?.({ ...sourceState });
-  };
-
-  const setSourceState = (patch: Partial<MediaSourceState>) => {
-    sourceState = {
-      ...sourceState,
-      ...patch,
-    };
-    emitSourceState();
-  };
-
-  const setRenderError = (error: unknown) => {
-    playbackState = MediaRendererPlaybackState.Error;
-    setSourceState({
-      errorMessage:
-        error instanceof Error ? error.message : "Media decode failed.",
-      status: MediaSourceStatus.Error,
-    });
-  };
-
-  const emitFrameDiagnostics = (sample: PresentedMediaSample) => {
-    const diagnostics: MediaFrameDiagnostics = {
-      activeOverlayFrameTime,
-      activeOverlayRectCount,
-      currentTime,
-      duration,
-      expectedDisplayTime: null,
-      mediaHeight,
-      mediaTime: sample.mediaTime,
-      mediaWidth,
-      presentedFrames,
-    };
-
-    options.onFrame?.(diagnostics);
-  };
-
   const presentSample = (sample: DecodedVideoSample) => {
     const presentedSample = mediaScene.presentSample(sample);
-    currentTime = presentedSample.mediaTime;
-    presentedFrames += 1;
-    activeOverlayFrameTime = presentedSample.activeOverlayFrameTime;
-    activeOverlayRectCount = presentedSample.activeOverlayRectCount;
-    emitFrameDiagnostics(presentedSample);
+    runtimeState.recordPresentedSample(presentedSample);
   };
 
   const stopActiveIterator = () => {
@@ -116,13 +59,13 @@ export async function createMediaRenderer(
 
   const renderer: MediaRenderer = {
     async play() {
-      if (destroyed) {
+      if (runtimeState.isDestroyed()) {
         throw new Error("Media renderer has been destroyed.");
       }
 
-      if (playbackState === MediaRendererPlaybackState.Error) {
+      if (runtimeState.isError()) {
         throw new Error(
-          sourceState.errorMessage ?? "Media renderer is in error state.",
+          runtimeState.errorMessage() ?? "Media renderer is in error state.",
         );
       }
 
@@ -130,104 +73,80 @@ export async function createMediaRenderer(
         throw new Error("Media renderer is not ready.");
       }
 
-      if (playbackState === MediaRendererPlaybackState.Playing) {
+      if (runtimeState.isPlaying()) {
         return;
       }
 
-      playbackState = MediaRendererPlaybackState.Playing;
+      runtimeState.setPlaying();
       playbackController.play();
     },
 
     pause() {
-      if (destroyed || playbackState !== MediaRendererPlaybackState.Playing) {
+      if (runtimeState.isDestroyed() || !runtimeState.isPlaying()) {
         return;
       }
 
-      playbackState = MediaRendererPlaybackState.Paused;
+      runtimeState.setPaused();
       playbackController?.pause();
     },
 
-    getState(): MediaRendererState {
-      return {
-        activeOverlayFrameTime,
-        activeOverlayRectCount,
-        currentTime,
-        duration,
-        fit,
-        mediaHeight,
-        mediaWidth,
-        playbackState,
-        presentedFrames,
-        source: { ...sourceState },
-      };
+    getState() {
+      return runtimeState.snapshot();
     },
 
     destroy() {
-      if (destroyed) {
+      if (runtimeState.isDestroyed()) {
         return;
       }
 
-      destroyed = true;
-      playbackState = MediaRendererPlaybackState.Destroyed;
+      runtimeState.markDestroyed();
       playbackController?.destroy();
       stopActiveIterator();
       destroyMediaInput();
-      setSourceState({ status: MediaSourceStatus.Destroyed });
+      runtimeState.setSourceDestroyed();
       mediaScene.destroy();
     },
   };
 
-  emitSourceState();
+  runtimeState.emitSourceState();
 
   try {
     const mediaSource = await openMediabunnyMediaSource(options.src);
     mediaInput = mediaSource.input;
 
-    if (destroyed) {
+    if (runtimeState.isDestroyed()) {
       destroyMediaInput();
       return renderer;
     }
 
     const { metadata } = mediaSource;
 
-    mediaWidth = metadata.primaryVideoWidth;
-    mediaHeight = metadata.primaryVideoHeight;
-    duration = metadata.duration;
-    mediaScene.initializeMedia({ height: mediaHeight, width: mediaWidth });
+    const mediaDimensions = runtimeState.recordMediaMetadata(metadata);
+    mediaScene.initializeMedia(mediaDimensions);
+    runtimeState.setSourceReady(metadata);
 
-    sourceState = createReadyMediaSourceState(metadata);
-    emitSourceState();
-
-    const firstSampleIterator = mediaSource.sampleSink.samples(
-      metadata.firstTimestamp,
-      undefined,
-      {
-        skipLiveWait: true,
+    const firstSample = await readFirstDecodedVideoSample({
+      sampleSink: mediaSource.sampleSink,
+      setActiveIterator(iterator) {
+        activeSampleIterator = iterator;
       },
-    );
-    activeSampleIterator = firstSampleIterator;
-    const firstSampleResult = await firstSampleIterator.next();
-    await firstSampleIterator.return?.();
-    activeSampleIterator = undefined;
+      startTimestamp: metadata.firstTimestamp,
+    });
 
-    if (firstSampleResult.done) {
-      throw new Error("No decoded video samples were produced.");
-    }
-
-    presentSample(firstSampleResult.value);
-    playbackState = MediaRendererPlaybackState.Ready;
+    presentSample(firstSample);
+    runtimeState.setReady();
     playbackController = createMediaPlaybackController({
-      duration,
+      duration: runtimeState.duration(),
       firstTimestamp: metadata.firstTimestamp,
-      initialMediaTime: currentTime,
+      initialMediaTime: runtimeState.currentTime(),
       loop: options.loop !== false,
       onCurrentTimeChange(nextCurrentTime) {
-        currentTime = nextCurrentTime;
+        runtimeState.setCurrentTime(nextCurrentTime);
       },
       onEnded() {
-        playbackState = MediaRendererPlaybackState.Paused;
+        runtimeState.setPaused();
       },
-      onError: setRenderError,
+      onError: runtimeState.setRenderError,
       presentSample,
       sampleSink: mediaSource.sampleSink,
     });
@@ -236,8 +155,8 @@ export async function createMediaRenderer(
       await renderer.play();
     }
   } catch (error) {
-    if (!destroyed) {
-      setRenderError(error);
+    if (!runtimeState.isDestroyed()) {
+      runtimeState.setRenderError(error);
     }
   }
 
