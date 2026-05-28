@@ -17,6 +17,7 @@ import {
 type PackageEntrypoint = typeof import("./index");
 
 let BaseBoxStyle: PackageEntrypoint["BaseBoxStyle"];
+let DetectionBufferStatus: PackageEntrypoint["DetectionBufferStatus"];
 let RoundedBoxStyle: PackageEntrypoint["RoundedBoxStyle"];
 let MediaRendererPlaybackState: PackageEntrypoint["MediaRendererPlaybackState"];
 let MediaSourceStatus: PackageEntrypoint["MediaSourceStatus"];
@@ -26,6 +27,7 @@ describe("package entrypoint", () => {
     const entrypoint = await import("./index");
 
     BaseBoxStyle = entrypoint.BaseBoxStyle;
+    DetectionBufferStatus = entrypoint.DetectionBufferStatus;
     RoundedBoxStyle = entrypoint.RoundedBoxStyle;
     MediaRendererPlaybackState = entrypoint.MediaRendererPlaybackState;
     MediaSourceStatus = entrypoint.MediaSourceStatus;
@@ -37,6 +39,7 @@ describe("package entrypoint", () => {
     expect(Object.keys(entrypoint).sort()).toEqual([
       "BaseBoxStyle",
       "BoxShape",
+      "DetectionBufferStatus",
       "MediaNormalizationAudioCodec",
       "MediaNormalizationContainer",
       "MediaNormalizationFit",
@@ -45,6 +48,10 @@ describe("package entrypoint", () => {
       "MediaRendererPlaybackState",
       "MediaSourceStatus",
       "RoundedBoxStyle",
+      "createArrayDetectionFrameSource",
+      "createBrowserColdDetectionFrameStore",
+      "createBufferedDetectionTimeline",
+      "createColdDetectionFrameSource",
       "createMediaRenderer",
       "normalizeMedia",
     ]);
@@ -71,6 +78,13 @@ describe("package entrypoint", () => {
     expect(entrypoint.MediaSourceStatus).toEqual({
       Destroyed: "destroyed",
       Error: "error",
+      Loading: "loading",
+      Ready: "ready",
+    });
+    expect(entrypoint.DetectionBufferStatus).toEqual({
+      Destroyed: "destroyed",
+      Error: "error",
+      Idle: "idle",
       Loading: "loading",
       Ready: "ready",
     });
@@ -159,6 +173,13 @@ describe("package entrypoint", () => {
     expect(domMock.requestAnimationFrame).not.toHaveBeenCalled();
     expect(renderer.getState()).toMatchObject({
       currentTime: 0,
+      detectionBuffer: {
+        bufferEndTime: 5,
+        bufferStartTime: 0,
+        detectionCount: 0,
+        frameCount: 0,
+        status: DetectionBufferStatus.Ready,
+      },
       mediaHeight: 720,
       mediaWidth: 1280,
       playbackState: MediaRendererPlaybackState.Ready,
@@ -199,6 +220,85 @@ describe("package entrypoint", () => {
     expect(renderer.getState().playbackState).toBe(
       MediaRendererPlaybackState.Playing,
     );
+
+    renderer.destroy();
+  });
+
+  it("seek uses random sample lookup and updates detections and buffer state", async () => {
+    resetMocks();
+    mediaMock.samples = [
+      createMockSample(0, 0),
+      createMockSample(0.04, 0),
+      createMockSample(0.08, 0),
+    ];
+
+    const renderer = await createRenderer(false, false, {
+      detectionFrames: [
+        {
+          detections: [{ rect: { height: 20, width: 10, x: 4, y: 5 } }],
+          mediaTime: 0,
+        },
+        {
+          detections: [{ rect: { height: 40, width: 30, x: 20, y: 10 } }],
+          mediaTime: 0.08,
+        },
+      ],
+    });
+    const boxGraphics = pixiMock.graphicsInstances[0];
+
+    mediaMock.getSample.mockClear();
+    mediaMock.samplesCallStarts.length = 0;
+
+    await renderer.seek(0.08);
+
+    expect(mediaMock.getSample).toHaveBeenCalledOnce();
+    expect(mediaMock.getSample).toHaveBeenLastCalledWith(0.08, {
+      skipLiveWait: true,
+    });
+    expect(mediaMock.samplesCallStarts).toEqual([]);
+    expect(mediaMock.samples[2].draw).toHaveBeenCalledOnce();
+    expect(boxGraphics.rect).toHaveBeenLastCalledWith(20, 10, 30, 40);
+    expect(renderer.getState()).toMatchObject({
+      activeDetectionCount: 1,
+      activeDetectionFrameTime: 0.08,
+      currentTime: 0.08,
+      detectionBuffer: {
+        bufferStartTime: 0,
+        detectionCount: 2,
+        frameCount: 2,
+        status: DetectionBufferStatus.Ready,
+      },
+      presentedFrames: 2,
+    });
+
+    renderer.destroy();
+  });
+
+  it("seek preserves playing state and restarts sequential playback at the new time", async () => {
+    resetMocks();
+    mediaMock.samples = [
+      createMockSample(0, 0),
+      createMockSample(0.04, 0),
+      createMockSample(0.08, 0),
+    ];
+
+    const renderer = await createRenderer(false, false);
+
+    mediaMock.getSample.mockClear();
+    mediaMock.samplesCallStarts.length = 0;
+    await renderer.play();
+    await vi.waitFor(() => {
+      expect(mediaMock.samplesCallStarts).toEqual([0]);
+    });
+
+    await renderer.seek(0.08);
+
+    expect(mediaMock.getSample).toHaveBeenCalledOnce();
+    expect(mediaMock.samplesCallStarts).toEqual([0, 0.08]);
+    expect(renderer.getState()).toMatchObject({
+      currentTime: 0.08,
+      playbackState: MediaRendererPlaybackState.Playing,
+    });
 
     renderer.destroy();
   });
@@ -315,6 +415,11 @@ describe("package entrypoint", () => {
       expect.objectContaining({
         activeDetectionCount: 0,
         activeDetectionFrameTime: null,
+        detectionBuffer: expect.objectContaining({
+          detectionCount: 2,
+          frameCount: 2,
+          status: DetectionBufferStatus.Ready,
+        }),
         mediaTime: 0,
       }),
     );
@@ -339,6 +444,16 @@ describe("package entrypoint", () => {
     expect(renderer.getState()).toMatchObject({
       activeDetectionCount: 1,
       activeDetectionFrameTime: 0.04,
+      detectionBuffer: {
+        bufferEndTime: 5,
+        bufferStartTime: 0,
+        detectionCount: 2,
+        errorMessage: null,
+        frameCount: 2,
+        requestedEndTime: 5,
+        requestedStartTime: 0,
+        status: DetectionBufferStatus.Ready,
+      },
     });
 
     flushAnimationFrame(80);
@@ -356,6 +471,11 @@ describe("package entrypoint", () => {
       expect.objectContaining({
         activeDetectionCount: 1,
         activeDetectionFrameTime: 0.07,
+        detectionBuffer: expect.objectContaining({
+          detectionCount: 2,
+          frameCount: 2,
+          status: DetectionBufferStatus.Ready,
+        }),
         mediaTime: 0.08,
       }),
     );
@@ -888,6 +1008,29 @@ describe("package entrypoint", () => {
     );
     expect(renderer.getState().source).toMatchObject({
       errorMessage: "decode failed",
+      status: MediaSourceStatus.Error,
+    });
+    expect(pixiMock.stageAddChild).not.toHaveBeenCalled();
+
+    renderer.destroy();
+  });
+
+  it("reports a helpful error when both detectionFrames and detectionSource are supplied", async () => {
+    resetMocks();
+
+    const renderer = await createRenderer(false, false, {
+      detectionFrames: [],
+      detectionSource: {
+        loadFrames: vi.fn(async () => []),
+      },
+    });
+
+    expect(renderer.getState().playbackState).toBe(
+      MediaRendererPlaybackState.Error,
+    );
+    expect(renderer.getState().source).toMatchObject({
+      errorMessage:
+        "Provide either detectionFrames or detectionSource, not both.",
       status: MediaSourceStatus.Error,
     });
     expect(pixiMock.stageAddChild).not.toHaveBeenCalled();

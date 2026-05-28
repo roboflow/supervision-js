@@ -1,3 +1,9 @@
+import { createArrayDetectionFrameSource } from "#detections/array-detection-frame-source";
+import {
+  createBufferedDetectionTimeline,
+  createIdleDetectionBufferState,
+} from "#detections/buffered-detection-timeline";
+import type { BufferedDetectionTimeline } from "#types/detection-timeline";
 import {
   readFirstDecodedVideoSample,
   type DecodedVideoSampleIterator,
@@ -5,6 +11,7 @@ import {
 import type {
   DecodedMediaSource,
   DecodedVideoSample,
+  DecodedVideoSampleSink,
   DisposableMediaInput,
 } from "#media/media-source";
 import {
@@ -32,24 +39,29 @@ export async function createMediaRendererCore(
   providers: MediaRendererCoreProviders,
 ): Promise<MediaRenderer> {
   const fit = options.fit ?? MediaRendererFit.Contain;
-  const mediaScene = await providers.createScene({
-    boxStyle: options.boxStyle,
-    container: options.container,
-    detectionFrames: options.detectionFrames,
-    fit,
-  });
+  let detectionTimeline: BufferedDetectionTimeline | undefined;
+  let mediaScene: MediaRendererScene | undefined;
   const runtimeState = createMediaRendererRuntimeState({
     fit,
+    getDetectionBufferState: () =>
+      detectionTimeline?.getState() ?? createIdleDetectionBufferState(),
     onFrame: options.onFrame,
     onSource: options.onSource,
   });
   let activeSampleIterator: DecodedVideoSampleIterator | undefined;
   let mediaInput: DisposableMediaInput | undefined;
   let playbackController: MediaPlaybackController | undefined;
+  let sampleSink: DecodedVideoSampleSink | undefined;
+  let firstTimestamp = 0;
 
   const presentSample = (sample: DecodedVideoSample) => {
+    if (!mediaScene) {
+      throw new Error("Media renderer scene is not ready.");
+    }
+
     const presentedSample = mediaScene.presentSample(sample);
     runtimeState.recordPresentedSample(presentedSample);
+    detectionTimeline?.prefetch(presentedSample.mediaTime);
   };
 
   const stopActiveIterator = () => {
@@ -60,6 +72,20 @@ export async function createMediaRendererCore(
   const destroyMediaInput = () => {
     mediaInput?.dispose();
     mediaInput = undefined;
+  };
+
+  const prepareAndPresentSample = async (sample: DecodedVideoSample) => {
+    let shouldCloseSample = true;
+
+    try {
+      await detectionTimeline?.prepare(sample.timestamp);
+      presentSample(sample);
+      shouldCloseSample = false;
+    } finally {
+      if (shouldCloseSample) {
+        sample.close();
+      }
+    }
   };
 
   const renderer: MediaRenderer = {
@@ -95,6 +121,52 @@ export async function createMediaRendererCore(
       playbackController?.pause();
     },
 
+    async seek(mediaTime) {
+      if (runtimeState.isDestroyed()) {
+        throw new Error("Media renderer has been destroyed.");
+      }
+
+      if (runtimeState.isError()) {
+        throw new Error(
+          runtimeState.errorMessage() ?? "Media renderer is in error state.",
+        );
+      }
+
+      if (!playbackController || !sampleSink) {
+        throw new Error("Media renderer is not ready.");
+      }
+
+      const wasPlaying = runtimeState.isPlaying();
+      const targetTime = clampSeekTime({
+        duration: runtimeState.duration(),
+        firstTimestamp,
+        mediaTime,
+      });
+
+      playbackController.pause();
+
+      try {
+        const sample = await sampleSink.getSample(targetTime, {
+          skipLiveWait: true,
+        });
+
+        if (!sample) {
+          throw new Error("No decoded video sample was found for seek.");
+        }
+
+        await prepareAndPresentSample(sample);
+        playbackController.seek(runtimeState.currentTime());
+
+        if (wasPlaying) {
+          runtimeState.setPlaying();
+          playbackController.play();
+        }
+      } catch (error) {
+        runtimeState.setRenderError(error);
+        throw error;
+      }
+    },
+
     getState() {
       return runtimeState.snapshot();
     },
@@ -109,15 +181,39 @@ export async function createMediaRendererCore(
       stopActiveIterator();
       destroyMediaInput();
       runtimeState.setSourceDestroyed();
-      mediaScene.destroy();
+      mediaScene?.destroy();
+      detectionTimeline?.destroy();
     },
   };
 
   runtimeState.emitSourceState();
 
   try {
+    if (
+      options.detectionFrames !== undefined &&
+      options.detectionSource !== undefined
+    ) {
+      throw new Error(
+        "Provide either detectionFrames or detectionSource, not both.",
+      );
+    }
+
+    detectionTimeline = createBufferedDetectionTimeline({
+      source:
+        options.detectionSource ??
+        createArrayDetectionFrameSource(options.detectionFrames),
+      ...options.detectionBuffer,
+    });
+    mediaScene = await providers.createScene({
+      boxStyle: options.boxStyle,
+      container: options.container,
+      detectionTimeline,
+      fit,
+    });
+
     const mediaSource = await providers.openMediaSource(options.src);
     mediaInput = mediaSource.input;
+    sampleSink = mediaSource.sampleSink;
 
     if (runtimeState.isDestroyed()) {
       destroyMediaInput();
@@ -126,6 +222,7 @@ export async function createMediaRendererCore(
 
     const { metadata } = mediaSource;
 
+    firstTimestamp = metadata.firstTimestamp;
     const mediaDimensions = runtimeState.recordMediaMetadata(metadata);
     mediaScene.initializeMedia(mediaDimensions);
     runtimeState.setSourceReady(metadata);
@@ -138,7 +235,7 @@ export async function createMediaRendererCore(
       startTimestamp: metadata.firstTimestamp,
     });
 
-    presentSample(firstSample);
+    await prepareAndPresentSample(firstSample);
     runtimeState.setReady();
     playbackController = createMediaPlaybackController({
       duration: runtimeState.duration(),
@@ -166,4 +263,21 @@ export async function createMediaRendererCore(
   }
 
   return renderer;
+}
+
+function clampSeekTime(options: {
+  readonly mediaTime: number;
+  readonly firstTimestamp: number;
+  readonly duration: number | null;
+}) {
+  const mediaTime = Number.isFinite(options.mediaTime)
+    ? options.mediaTime
+    : options.firstTimestamp;
+  const startTime = options.firstTimestamp;
+  const endTime =
+    options.duration === null
+      ? null
+      : options.firstTimestamp + Math.max(options.duration, 0);
+
+  return Math.min(Math.max(mediaTime, startTime), endTime ?? mediaTime);
 }

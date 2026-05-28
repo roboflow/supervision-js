@@ -4,11 +4,8 @@ import {
   type BoxDrawInstruction,
   type BoxStyle,
 } from "#types/box-style";
+import type { BufferedDetectionTimeline } from "#types/detection-timeline";
 import type { DetectionFrame } from "#types/detections";
-import {
-  copySortedDetectionFrames,
-  selectDetectionFrame,
-} from "#utils/detection-frames";
 import type { Graphics as PixiGraphics } from "pixi.js";
 
 export interface PixiBoxLayerState {
@@ -22,13 +19,12 @@ export interface PixiBoxLayer {
 }
 
 export function createPixiBoxLayer(options: {
-  readonly detectionFrames: readonly DetectionFrame[] | undefined;
+  readonly detectionTimeline: BufferedDetectionTimeline;
   readonly boxStyle: BoxStyle | undefined;
 }): PixiBoxLayer {
-  const detectionFrames = copySortedDetectionFrames(options.detectionFrames);
   const boxStyle = options.boxStyle ?? new BaseBoxStyle();
   let boxGraphics: PixiGraphics | undefined;
-  let lastDrawnDetectionFrame: DetectionFrame | undefined;
+  let lastDrawnDetectionFrameTime: number | null = null;
   let hasDrawnDetectionFrame = false;
 
   return {
@@ -37,17 +33,18 @@ export function createPixiBoxLayer(options: {
     },
 
     drawFrame(mediaTime) {
-      const detectionFrame = selectDetectionFrame(detectionFrames, mediaTime);
+      const detectionFrame = options.detectionTimeline.selectFrame(mediaTime);
+      const detectionFrameTime = detectionFrame?.mediaTime ?? null;
 
       if (
         hasDrawnDetectionFrame &&
-        detectionFrame === lastDrawnDetectionFrame
+        detectionFrameTime === lastDrawnDetectionFrameTime
       ) {
         return getBoxLayerState(detectionFrame);
       }
 
       hasDrawnDetectionFrame = true;
-      lastDrawnDetectionFrame = detectionFrame;
+      lastDrawnDetectionFrameTime = detectionFrameTime;
       boxGraphics?.clear();
 
       if (detectionFrame) {

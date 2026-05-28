@@ -26,6 +26,10 @@
       "types": "./dist/constants/*.d.ts",
       "import": "./dist/constants/*.js"
     },
+    "#detections/*": {
+      "types": "./dist/detections/*.d.ts",
+      "import": "./dist/detections/*.js"
+    },
     "#media/*": {
       "types": "./dist/media/*.d.ts",
       "import": "./dist/media/*.js"

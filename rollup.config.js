@@ -6,6 +6,7 @@ import typescript from "@rollup/plugin-typescript";
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
 const sourceAliasRoots = new Set([
   "constants",
+  "detections",
   "media",
   "playback",
   "renderers",

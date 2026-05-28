@@ -10,6 +10,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "#constants": sourceAlias("constants"),
+      "#detections": sourceAlias("detections"),
       "#media": sourceAlias("media"),
       "#playback": sourceAlias("playback"),
       "#renderers": sourceAlias("renderers"),

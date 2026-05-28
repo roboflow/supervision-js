@@ -1,4 +1,9 @@
 import type { BoxStyle } from "#types/box-style";
+import type {
+  DetectionBufferOptions,
+  DetectionBufferState,
+  DetectionFrameSource,
+} from "#types/detection-timeline";
 import type { DetectionFrame } from "#types/detections";
 
 export enum MediaRendererFit {
@@ -32,6 +37,7 @@ export interface MediaFrameDiagnostics {
   readonly expectedDisplayTime: null;
   readonly activeDetectionFrameTime: number | null;
   readonly activeDetectionCount: number;
+  readonly detectionBuffer: DetectionBufferState;
 }
 
 export interface MediaSourceState {
@@ -59,6 +65,7 @@ export interface MediaRendererState {
   readonly presentedFrames: number;
   readonly activeDetectionFrameTime: number | null;
   readonly activeDetectionCount: number;
+  readonly detectionBuffer: DetectionBufferState;
   readonly source: MediaSourceState;
 }
 
@@ -73,6 +80,8 @@ export interface MediaRendererOptions {
   readonly muted?: boolean;
   readonly fit?: MediaRendererFit;
   readonly detectionFrames?: readonly DetectionFrame[];
+  readonly detectionSource?: DetectionFrameSource;
+  readonly detectionBuffer?: DetectionBufferOptions;
   readonly boxStyle?: BoxStyle;
   readonly onFrame?: (diagnostics: MediaFrameDiagnostics) => void;
   readonly onSource?: (state: MediaSourceState) => void;
@@ -81,6 +90,7 @@ export interface MediaRendererOptions {
 export interface MediaRenderer {
   play(): Promise<void>;
   pause(): void;
+  seek(mediaTime: number): Promise<void>;
   getState(): MediaRendererState;
   destroy(): void;
 }

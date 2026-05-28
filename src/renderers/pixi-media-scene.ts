@@ -29,7 +29,7 @@ export async function createPixiMediaScene(
   const app: PixiApplication = new Application();
   const boxLayer = createPixiBoxLayer({
     boxStyle: options.boxStyle,
-    detectionFrames: options.detectionFrames,
+    detectionTimeline: options.detectionTimeline,
   });
 
   await app.init({
@@ -130,6 +130,7 @@ export async function createPixiMediaScene(
         updateMediaSceneFit();
 
         return {
+          detectionBuffer: options.detectionTimeline.getState(),
           mediaTime: sample.timestamp,
           ...boxState,
         };

@@ -15,6 +15,7 @@ const PLAYBACK_SAMPLE_QUEUE_CAPACITY = 6;
 export interface MediaPlaybackController {
   play(): void;
   pause(): void;
+  seek(mediaTime: number): void;
   destroy(): void;
 }
 
@@ -329,6 +330,33 @@ export function createMediaPlaybackController(options: {
       cancelScheduledFrame();
       closeQueuedSamples();
       stopActiveSampleIterator();
+    },
+
+    seek(mediaTime) {
+      if (destroyed) {
+        return;
+      }
+
+      const shouldResume = playing;
+
+      playing = false;
+      playbackRunId += 1;
+      cancelScheduledFrame();
+      closeQueuedSamples();
+      stopActiveSampleIterator();
+      setCurrentTime(mediaTime);
+      playbackOriginMediaTime = mediaTime;
+      playbackOriginNow = performance.now();
+
+      if (!shouldResume) {
+        return;
+      }
+
+      playing = true;
+      playbackRunId += 1;
+      resetSampleIterator(mediaTime);
+      startSamplePrefetch(playbackRunId);
+      schedulePlaybackFrame(playbackRunId);
     },
 
     destroy() {

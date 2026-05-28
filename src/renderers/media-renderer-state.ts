@@ -3,6 +3,7 @@ import {
   createReadyMediaSourceState,
 } from "#media/media-source-state";
 import type { DecodedMediaSourceMetadata } from "#media/media-source";
+import type { DetectionBufferState } from "#types/detection-timeline";
 import {
   MediaRendererPlaybackState,
   MediaSourceStatus,
@@ -15,6 +16,7 @@ import type { PresentedMediaSample } from "./media-renderer-scene";
 
 interface MediaRendererRuntimeStateOptions {
   readonly fit: MediaRendererFit;
+  readonly getDetectionBufferState: () => DetectionBufferState;
   readonly onFrame?: (diagnostics: MediaFrameDiagnostics) => void;
   readonly onSource?: (state: MediaSourceState) => void;
 }
@@ -74,6 +76,7 @@ export function createMediaRendererRuntimeState(
     activeDetectionCount,
     activeDetectionFrameTime,
     currentTime,
+    detectionBuffer: options.getDetectionBufferState(),
     duration,
     fit: options.fit,
     mediaHeight,
@@ -89,6 +92,7 @@ export function createMediaRendererRuntimeState(
     activeDetectionCount,
     activeDetectionFrameTime,
     currentTime,
+    detectionBuffer: sample.detectionBuffer,
     duration,
     expectedDisplayTime: null,
     mediaHeight,
