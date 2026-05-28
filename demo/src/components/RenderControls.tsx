@@ -1,4 +1,5 @@
 import { BoxShape } from "supervision-js";
+import type { CSSProperties } from "react";
 import type { BasketballPresentationSettings } from "../presentation/basketball-presentation";
 
 export function RenderControls({
@@ -80,17 +81,17 @@ export function RenderControls({
         onChange={(value) => updateSettings("boxFillAlpha", value)}
         step={0.01}
         value={settings.boxFillAlpha}
-        valueLabel={settings.boxFillAlpha.toFixed(2)}
+        valueLabel={formatPercent(settings.boxFillAlpha)}
       />
       <SliderControl
         disabled={!settings.masksEnabled}
         label="Mask"
-        max={0.65}
+        max={1}
         min={0}
         onChange={(value) => updateSettings("maskAlpha", value)}
         step={0.01}
         value={settings.maskAlpha}
-        valueLabel={settings.maskAlpha.toFixed(2)}
+        valueLabel={formatPercent(settings.maskAlpha)}
       />
       <SliderControl
         label="Confidence"
@@ -124,8 +125,13 @@ function SliderControl({
   readonly value: number;
   readonly valueLabel: string;
 }) {
+  const progress = max === min ? 0 : ((value - min) / (max - min)) * 100;
+
   return (
-    <label className="render-control render-control--slider">
+    <label
+      className="render-control render-control--slider"
+      style={{ "--control-progress": `${progress}%` } as SliderControlStyle}
+    >
       <span className="render-control__label">
         <span>{label}</span>
         <strong>{valueLabel}</strong>
@@ -141,4 +147,12 @@ function SliderControl({
       />
     </label>
   );
+}
+
+type SliderControlStyle = CSSProperties & {
+  readonly "--control-progress": string;
+};
+
+function formatPercent(value: number) {
+  return `${Math.round(value * 100)}%`;
 }

@@ -109,10 +109,12 @@ function createBasketballMaskStyle(
       }
 
       return {
-        alpha:
+        alpha: Math.min(
           detection.className === "basketball"
-            ? Math.min(settings.maskAlpha * 1.6, 0.65)
+            ? settings.maskAlpha * 1.2
             : settings.maskAlpha,
+          1,
+        ),
         color: resolveClassStyle(detection).fill,
         mask: detection.mask,
       };

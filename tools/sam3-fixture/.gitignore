@@ -1,0 +1,5 @@
+output/
+frames*.jsonl
+raw*.jsonl
+extracted*.jsonl
+*.webm

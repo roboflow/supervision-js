@@ -48,13 +48,14 @@ export function TimelineView({
       detectionBuffer?.bufferStartTime ?? null,
       detectionBuffer?.bufferEndTime ?? null,
     );
+  const inputMax = mediaDuration ?? visualDuration;
+  const inputValue = clamp(currentTime, 0, inputMax);
   const playheadLeft = toPercent(currentTime, visualDuration);
+  const playheadProgress = toPercent(inputValue, inputMax);
   const activeFrameLeft =
     activeDetectionFrameTime === null
       ? null
       : toPercent(activeDetectionFrameTime, visualDuration);
-  const inputMax = mediaDuration ?? visualDuration;
-  const inputValue = clamp(currentTime, 0, inputMax);
   const stripClassName = [
     "timeline-view__strip",
     !disabled && mediaDuration !== null
@@ -134,6 +135,9 @@ export function TimelineView({
         min={0}
         onChange={handleSeek}
         step={0.01}
+        style={
+          { "--timeline-progress": playheadProgress } as TimelineInputStyle
+        }
         type="range"
         value={inputValue}
       />
@@ -148,6 +152,10 @@ type TimelineRangeStyle = CSSProperties & {
 
 type TimelineMarkerStyle = CSSProperties & {
   readonly "--timeline-left": string;
+};
+
+type TimelineInputStyle = CSSProperties & {
+  readonly "--timeline-progress": string;
 };
 
 function createRangeStyle({

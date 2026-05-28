@@ -59,7 +59,10 @@ export function StatusPanel({
   return (
     <section className="status-panel" aria-label="Renderer status">
       <StatusGroup title="Playback">
-        <Readout label="Fixture" value="Basketball / Rapid" />
+        <Readout
+          label="Fixture"
+          value={fixtureSummary?.fixtureName ?? "loading"}
+        />
         <Readout label="State" value={playbackState ?? "-"} />
         <Readout
           label="Detection Frame"
@@ -102,7 +105,7 @@ export function StatusPanel({
                   rendererState.detectionBuffer.frameCount,
                 )} frames | ${formatInteger(
                   rendererState.detectionBuffer.detectionCount,
-                )} boxes`
+                )} detections`
               : "-"
           }
         />
@@ -141,12 +144,12 @@ export function StatusPanel({
           }
         />
         <Readout
-          label="Fixture Boxes"
+          label="Fixture Detections"
           value={
             fixtureSummary
               ? `${formatInteger(fixtureSummary.frameCount)} frames | ${formatInteger(
                   fixtureSummary.detectionCount,
-                )} boxes`
+                )} detections`
               : "loading"
           }
         />
@@ -194,7 +197,15 @@ export function StatusPanel({
         <Readout label="Media" value={mediaState.status} />
         <Readout
           label="Inference"
-          value="Rapid 30 fps | compressed RLE masks"
+          value={
+            fixtureSummary
+              ? `${fixtureSummary.inferenceLabel} ${formatInteger(
+                  fixtureSummary.inferenceFrameRate,
+                )} fps | compressed RLE masks ${formatInteger(
+                  fixtureSummary.maskWidth,
+                )} x ${formatInteger(fixtureSummary.maskHeight)}`
+              : "-"
+          }
         />
         <Readout label="Audio" value="video-only fixture" />
       </StatusGroup>

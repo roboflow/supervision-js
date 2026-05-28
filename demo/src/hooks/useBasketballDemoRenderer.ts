@@ -21,8 +21,9 @@ import type {
 } from "../fixtures/basketball-sample";
 import {
   createBasketballSampleColdDetectionSource,
+  defaultBasketballSampleFixture,
+  loadBasketballSampleMedia,
   loadBasketballSampleFixture,
-  loadNormalizedBasketballSampleMedia,
 } from "../fixtures/basketball-sample";
 import {
   createBasketballSamplePresentation,
@@ -68,6 +69,8 @@ const initialColdDetectionState: DemoColdDetectionState = {
   writeSummary: null,
 };
 
+const activeBasketballFixture = defaultBasketballSampleFixture;
+
 export function useBasketballDemoRenderer(): BasketballDemoRendererState {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const effectRunRef = useRef(0);
@@ -86,7 +89,7 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
     useState<DemoColdDetectionState>(initialColdDetectionState);
   const [mediaState, setMediaState] = useState<DemoMediaState>({
     errorMessage: null,
-    status: "normalizing WebM 30fps",
+    status: activeBasketballFixture.mediaLoadingStatusLabel,
   });
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [presentationSettings, setPresentationSettingsState] =
@@ -112,7 +115,6 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
     effectRunRef.current = runId;
     let coldDetectionSource: BasketballSampleColdDetectionSource | undefined;
     let renderer: MediaRenderer | undefined;
-    let revokeMediaSource: (() => void) | undefined;
     let lastReadoutAt = 0;
     let cleanedUp = false;
     const isActive = () => !cleanedUp && effectRunRef.current === runId;
@@ -124,16 +126,21 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
     setFixtureSummary(null);
     setMediaState({
       errorMessage: null,
-      status: "normalizing WebM 30fps",
+      status: activeBasketballFixture.mediaLoadingStatusLabel,
     });
     setRendererState(null);
     setSourceState(null);
 
     void (async () => {
       try {
-        const fixture = await loadBasketballSampleFixture();
+        const fixture = await loadBasketballSampleFixture(
+          activeBasketballFixture,
+        );
         const createdColdDetectionSource =
-          await createBasketballSampleColdDetectionSource(fixture);
+          await createBasketballSampleColdDetectionSource(
+            fixture,
+            activeBasketballFixture,
+          );
         coldDetectionSource = createdColdDetectionSource;
 
         if (!isActive()) {
@@ -149,37 +156,19 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
           writeSummary: createdColdDetectionSource.writeSummary,
         });
 
-        const mediaSource = await loadNormalizedBasketballSampleMedia({
-          onProgress: ({ progress }) => {
-            if (isActive()) {
-              setMediaState({
-                errorMessage: null,
-                status: `normalizing WebM 30fps ${Math.round(progress * 100)}%`,
-              });
-            }
-          },
-        });
+        const mediaSource = await loadBasketballSampleMedia(
+          activeBasketballFixture,
+        );
 
         if (!isActive()) {
-          mediaSource.revoke?.();
           createdColdDetectionSource.destroy();
           return;
         }
 
-        revokeMediaSource = mediaSource.revoke;
-        setMediaState(
-          mediaSource.normalized
-            ? {
-                errorMessage: null,
-                status: "normalized WebM 30fps",
-              }
-            : {
-                errorMessage:
-                  mediaSource.error?.message ??
-                  "Media normalization is unavailable in this browser.",
-                status: "source MP4 fallback",
-              },
-        );
+        setMediaState({
+          errorMessage: mediaSource.error?.message ?? null,
+          status: mediaSource.statusLabel,
+        });
 
         const presentation = createBasketballSamplePresentation(
           presentationSettingsRef.current,
@@ -265,7 +254,6 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
       rendererRef.current = null;
       renderer?.destroy();
       coldDetectionSource?.destroy();
-      revokeMediaSource?.();
     };
   }, [syncRendererState]);
 
