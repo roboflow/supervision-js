@@ -44,7 +44,9 @@ const mockState = vi.hoisted(() => {
     }>,
     graphicsInstances: [] as Array<{
       clear: ReturnType<typeof vi.fn>;
+      fill: ReturnType<typeof vi.fn>;
       rect: ReturnType<typeof vi.fn>;
+      roundRect: ReturnType<typeof vi.fn>;
       stroke: ReturnType<typeof vi.fn>;
     }>,
     stageAddChild: vi.fn(),
@@ -142,7 +144,9 @@ vi.mock("pixi.js", () => {
 
   class Graphics {
     clear = vi.fn(() => this);
+    fill = vi.fn(() => this);
     rect = vi.fn(() => this);
+    roundRect = vi.fn(() => this);
     stroke = vi.fn(() => this);
 
     constructor() {

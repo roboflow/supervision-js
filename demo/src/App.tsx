@@ -1,71 +1,81 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  RoundedBoxStyle,
   createMediaRenderer,
   MediaRendererFit,
   MediaRendererPlaybackState,
+  type DetectionFrame,
   type MediaRenderer,
-  type MediaOverlayFrame,
   type MediaRendererState,
   type MediaSourceState,
 } from "supervision-js";
 
 const sampleVideoSrc = "/media/sample.mp4";
-const sampleOverlayFrames: readonly MediaOverlayFrame[] = [
+const sampleBoxStyle = new RoundedBoxStyle({
+  cornerRadius: 8,
+  fill: { alpha: 0.08, color: 0x00ff66 },
+  stroke: { alpha: 0.95, color: 0x00ff66, width: 4 },
+});
+const sampleDetectionFrames: readonly DetectionFrame[] = [
   {
+    detections: [
+      {
+        className: "sample-object",
+        confidence: 0.92,
+        rect: {
+          height: 168,
+          width: 224,
+          x: 88,
+          y: 72,
+        },
+      },
+    ],
     mediaTime: 0,
-    rects: [
-      {
-        height: 168,
-        strokeAlpha: 0.9,
-        strokeColor: 0x00ff66,
-        strokeWidth: 4,
-        width: 224,
-        x: 88,
-        y: 72,
-      },
-    ],
   },
   {
+    detections: [
+      {
+        className: "sample-object",
+        confidence: 0.88,
+        rect: {
+          height: 164,
+          width: 224,
+          x: 320,
+          y: 128,
+        },
+      },
+    ],
     mediaTime: 1.25,
-    rects: [
-      {
-        height: 164,
-        strokeAlpha: 0.9,
-        strokeColor: 0x38bdf8,
-        strokeWidth: 4,
-        width: 224,
-        x: 320,
-        y: 128,
-      },
-    ],
   },
   {
+    detections: [
+      {
+        className: "sample-object",
+        confidence: 0.84,
+        rect: {
+          height: 180,
+          width: 280,
+          x: 560,
+          y: 240,
+        },
+      },
+    ],
     mediaTime: 2.5,
-    rects: [
-      {
-        height: 180,
-        strokeAlpha: 0.95,
-        strokeColor: 0xfacc15,
-        strokeWidth: 5,
-        width: 280,
-        x: 560,
-        y: 240,
-      },
-    ],
   },
   {
-    mediaTime: 3.75,
-    rects: [
+    detections: [
       {
-        height: 220,
-        strokeAlpha: 0.9,
-        strokeColor: 0xfb7185,
-        strokeWidth: 4,
-        width: 360,
-        x: 760,
-        y: 340,
+        className: "sample-object",
+        confidence: 0.9,
+        rect: {
+          height: 220,
+          width: 360,
+          x: 760,
+          y: 340,
+        },
       },
     ],
+    mediaTime: 3.75,
   },
 ];
 
@@ -99,7 +109,9 @@ export function App() {
 
     void createMediaRenderer({
       autoPlay: false,
+      boxStyle: sampleBoxStyle,
       container,
+      detectionFrames: sampleDetectionFrames,
       fit: MediaRendererFit.Contain,
       loop: true,
       onSource: (state) => {
@@ -117,7 +129,6 @@ export function App() {
         lastReadoutAt = now;
         setRendererState(renderer.getState());
       },
-      overlayFrames: sampleOverlayFrames,
       src: sampleVideoSrc,
     })
       .then(async (createdRenderer) => {
@@ -203,12 +214,12 @@ export function App() {
           }
         />
         <Readout
-          label="Overlay"
+          label="Detections"
           value={
             rendererState
-              ? rendererState.activeOverlayFrameTime === null
-                ? `none | ${rendererState.activeOverlayRectCount} rects`
-                : `${rendererState.activeOverlayFrameTime.toFixed(2)}s | ${rendererState.activeOverlayRectCount} rects`
+              ? rendererState.activeDetectionFrameTime === null
+                ? `none | ${rendererState.activeDetectionCount} detections`
+                : `${rendererState.activeDetectionFrameTime.toFixed(2)}s | ${rendererState.activeDetectionCount} detections`
               : "-"
           }
         />

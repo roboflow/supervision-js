@@ -13,6 +13,7 @@ export default defineConfig({
       "#media": sourceAlias("media"),
       "#playback": sourceAlias("playback"),
       "#renderers": sourceAlias("renderers"),
+      "#styles": sourceAlias("styles"),
       "#types": sourceAlias("types"),
       "#utils": sourceAlias("utils"),
     },

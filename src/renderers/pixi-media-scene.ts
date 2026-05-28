@@ -3,7 +3,7 @@ import type {
   MediaRendererScene,
   MediaRendererSceneOptions,
 } from "./media-renderer-scene";
-import { createPixiOverlayLayer } from "./pixi-overlay-layer";
+import { createPixiBoxLayer } from "./pixi-box-layer";
 import { calculatePixiSceneFit } from "./pixi-scene-fit";
 import type {
   Application as PixiApplication,
@@ -27,8 +27,9 @@ export async function createPixiMediaScene(
   const { Application, CanvasSource, Container, Graphics, Sprite, Texture } =
     await import("pixi.js");
   const app: PixiApplication = new Application();
-  const overlayLayer = createPixiOverlayLayer({
-    overlayFrames: options.overlayFrames,
+  const boxLayer = createPixiBoxLayer({
+    boxStyle: options.boxStyle,
+    detectionFrames: options.detectionFrames,
   });
 
   await app.init({
@@ -103,12 +104,12 @@ export async function createPixiMediaScene(
       });
       const scene: PixiContainer = new Container();
       const mediaSprite = new Sprite({ texture });
-      const overlays: PixiGraphics = new Graphics();
+      const boxes: PixiGraphics = new Graphics();
 
       mediaSprite.width = mediaWidth;
       mediaSprite.height = mediaHeight;
-      overlayLayer.attachGraphics(overlays);
-      scene.addChild(mediaSprite, overlays);
+      boxLayer.attachGraphics(boxes);
+      scene.addChild(mediaSprite, boxes);
       app.stage.addChild(scene);
       mediaScene = scene;
       stagingTextureSource = canvasSource;
@@ -125,12 +126,12 @@ export async function createPixiMediaScene(
         sample.draw(stagingContext, 0, 0, mediaWidth, mediaHeight);
         stagingTextureSource?.update();
         stagingTexture?.update();
-        const overlayState = overlayLayer.drawFrame(sample.timestamp);
+        const boxState = boxLayer.drawFrame(sample.timestamp);
         updateMediaSceneFit();
 
         return {
           mediaTime: sample.timestamp,
-          ...overlayState,
+          ...boxState,
         };
       } finally {
         sample.close();

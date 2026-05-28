@@ -33,9 +33,10 @@ export async function createMediaRendererCore(
 ): Promise<MediaRenderer> {
   const fit = options.fit ?? MediaRendererFit.Contain;
   const mediaScene = await providers.createScene({
+    boxStyle: options.boxStyle,
     container: options.container,
+    detectionFrames: options.detectionFrames,
     fit,
-    overlayFrames: options.overlayFrames,
   });
   const runtimeState = createMediaRendererRuntimeState({
     fit,

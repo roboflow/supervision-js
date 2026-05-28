@@ -1,3 +1,6 @@
+import type { BoxStyle } from "#types/box-style";
+import type { DetectionFrame } from "#types/detections";
+
 export enum MediaRendererFit {
   Contain = "contain",
   Cover = "cover",
@@ -27,8 +30,8 @@ export interface MediaFrameDiagnostics {
   readonly mediaWidth: number;
   readonly mediaHeight: number;
   readonly expectedDisplayTime: null;
-  readonly activeOverlayFrameTime: number | null;
-  readonly activeOverlayRectCount: number;
+  readonly activeDetectionFrameTime: number | null;
+  readonly activeDetectionCount: number;
 }
 
 export interface MediaSourceState {
@@ -54,24 +57,9 @@ export interface MediaRendererState {
   readonly mediaWidth: number;
   readonly mediaHeight: number;
   readonly presentedFrames: number;
-  readonly activeOverlayFrameTime: number | null;
-  readonly activeOverlayRectCount: number;
+  readonly activeDetectionFrameTime: number | null;
+  readonly activeDetectionCount: number;
   readonly source: MediaSourceState;
-}
-
-export interface MediaOverlayRect {
-  readonly x: number;
-  readonly y: number;
-  readonly width: number;
-  readonly height: number;
-  readonly strokeColor?: number;
-  readonly strokeAlpha?: number;
-  readonly strokeWidth?: number;
-}
-
-export interface MediaOverlayFrame {
-  readonly mediaTime: number;
-  readonly rects: readonly MediaOverlayRect[];
 }
 
 export interface MediaRendererOptions {
@@ -84,7 +72,8 @@ export interface MediaRendererOptions {
    */
   readonly muted?: boolean;
   readonly fit?: MediaRendererFit;
-  readonly overlayFrames?: readonly MediaOverlayFrame[];
+  readonly detectionFrames?: readonly DetectionFrame[];
+  readonly boxStyle?: BoxStyle;
   readonly onFrame?: (diagnostics: MediaFrameDiagnostics) => void;
   readonly onSource?: (state: MediaSourceState) => void;
 }

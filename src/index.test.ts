@@ -1,5 +1,7 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
+import type { BoxStyle } from "#types/box-style";
+
 import {
   createDeferred,
   createMockSample,
@@ -14,6 +16,8 @@ import {
 
 type PackageEntrypoint = typeof import("./index");
 
+let BaseBoxStyle: PackageEntrypoint["BaseBoxStyle"];
+let RoundedBoxStyle: PackageEntrypoint["RoundedBoxStyle"];
 let MediaRendererPlaybackState: PackageEntrypoint["MediaRendererPlaybackState"];
 let MediaSourceStatus: PackageEntrypoint["MediaSourceStatus"];
 
@@ -21,6 +25,8 @@ describe("package entrypoint", () => {
   beforeAll(async () => {
     const entrypoint = await import("./index");
 
+    BaseBoxStyle = entrypoint.BaseBoxStyle;
+    RoundedBoxStyle = entrypoint.RoundedBoxStyle;
     MediaRendererPlaybackState = entrypoint.MediaRendererPlaybackState;
     MediaSourceStatus = entrypoint.MediaSourceStatus;
   });
@@ -29,12 +35,21 @@ describe("package entrypoint", () => {
     const entrypoint = await import("./index");
 
     expect(Object.keys(entrypoint).sort()).toEqual([
+      "BaseBoxStyle",
+      "BoxShape",
       "MediaRendererFit",
       "MediaRendererPlaybackState",
       "MediaSourceStatus",
+      "RoundedBoxStyle",
       "createMediaRenderer",
     ]);
     expect(entrypoint.createMediaRenderer).toEqual(expect.any(Function));
+    expect(entrypoint.BaseBoxStyle).toEqual(expect.any(Function));
+    expect(entrypoint.RoundedBoxStyle).toEqual(expect.any(Function));
+    expect(entrypoint.BoxShape).toEqual({
+      Rect: "rect",
+      RoundedRect: "roundedRect",
+    });
     expect(entrypoint.MediaRendererFit).toEqual({
       Contain: "contain",
       Cover: "cover",
@@ -180,7 +195,7 @@ describe("package entrypoint", () => {
     renderer.destroy();
   });
 
-  it("selects overlay frames from decoded sample timestamps", async () => {
+  it("selects detection frames from decoded sample timestamps", async () => {
     resetMocks();
     mediaMock.samples = [
       createMockSample(0, 0),
@@ -190,42 +205,50 @@ describe("package entrypoint", () => {
 
     const onFrame = vi.fn();
     const renderer = await createRenderer(false, false, {
-      onFrame,
-      overlayFrames: [
+      boxStyle: new BaseBoxStyle({
+        stroke: {
+          alpha: 0.5,
+          color: 0x38bdf8,
+          width: 4,
+        },
+      }),
+      detectionFrames: [
         {
-          mediaTime: 0.07,
-          rects: [
+          detections: [
             {
-              height: 40,
-              strokeColor: 0xff0000,
-              width: 30,
-              x: 20,
-              y: 10,
+              rect: {
+                height: 40,
+                width: 30,
+                x: 20,
+                y: 10,
+              },
             },
           ],
+          mediaTime: 0.07,
         },
         {
-          mediaTime: 0.04,
-          rects: [
+          detections: [
             {
-              height: 20,
-              strokeAlpha: 0.5,
-              strokeWidth: 4,
-              width: 10,
-              x: 4,
-              y: 5,
+              rect: {
+                height: 20,
+                width: 10,
+                x: 4,
+                y: 5,
+              },
             },
           ],
+          mediaTime: 0.04,
         },
       ],
+      onFrame,
     });
-    const overlayGraphics = pixiMock.graphicsInstances[0];
+    const boxGraphics = pixiMock.graphicsInstances[0];
 
-    expect(overlayGraphics.rect).not.toHaveBeenCalled();
+    expect(boxGraphics.rect).not.toHaveBeenCalled();
     expect(onFrame).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        activeOverlayFrameTime: null,
-        activeOverlayRectCount: 0,
+        activeDetectionCount: 0,
+        activeDetectionFrameTime: null,
         mediaTime: 0,
       }),
     );
@@ -239,16 +262,16 @@ describe("package entrypoint", () => {
 
     const [requestedMediaTime] = mediaMock.getSample.mock.calls[0];
     expect(requestedMediaTime).toBeCloseTo(0.07);
-    expect(overlayGraphics.clear).toHaveBeenCalledTimes(2);
-    expect(overlayGraphics.rect).toHaveBeenLastCalledWith(4, 5, 10, 20);
-    expect(overlayGraphics.stroke).toHaveBeenLastCalledWith({
+    expect(boxGraphics.clear).toHaveBeenCalledTimes(2);
+    expect(boxGraphics.rect).toHaveBeenLastCalledWith(4, 5, 10, 20);
+    expect(boxGraphics.stroke).toHaveBeenLastCalledWith({
       alpha: 0.5,
-      color: 0x00ff66,
+      color: 0x38bdf8,
       width: 4,
     });
     expect(renderer.getState()).toMatchObject({
-      activeOverlayFrameTime: 0.04,
-      activeOverlayRectCount: 1,
+      activeDetectionCount: 1,
+      activeDetectionFrameTime: 0.04,
     });
 
     flushAnimationFrame(80);
@@ -256,16 +279,16 @@ describe("package entrypoint", () => {
       expect(mediaMock.samples[2].draw).toHaveBeenCalledOnce();
     });
 
-    expect(overlayGraphics.rect).toHaveBeenLastCalledWith(20, 10, 30, 40);
-    expect(overlayGraphics.stroke).toHaveBeenLastCalledWith({
-      alpha: 1,
-      color: 0xff0000,
-      width: 2,
+    expect(boxGraphics.rect).toHaveBeenLastCalledWith(20, 10, 30, 40);
+    expect(boxGraphics.stroke).toHaveBeenLastCalledWith({
+      alpha: 0.5,
+      color: 0x38bdf8,
+      width: 4,
     });
     expect(onFrame).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        activeOverlayFrameTime: 0.07,
-        activeOverlayRectCount: 1,
+        activeDetectionCount: 1,
+        activeDetectionFrameTime: 0.07,
         mediaTime: 0.08,
       }),
     );
@@ -273,20 +296,185 @@ describe("package entrypoint", () => {
     renderer.destroy();
   });
 
-  it("presents the first sample and first overlay again at a loop boundary", async () => {
+  it("draws BaseBoxStyle defaults and skips detections without rects", async () => {
+    resetMocks();
+
+    const renderer = await createRenderer(false, false, {
+      detectionFrames: [
+        {
+          detections: [
+            { className: "missing-rect" },
+            {
+              rect: {
+                height: 20,
+                width: 10,
+                x: 4,
+                y: 5,
+              },
+            },
+          ],
+          mediaTime: 0,
+        },
+      ],
+    });
+    const boxGraphics = pixiMock.graphicsInstances[0];
+
+    expect(boxGraphics.clear).toHaveBeenCalledOnce();
+    expect(boxGraphics.rect).toHaveBeenCalledOnce();
+    expect(boxGraphics.rect).toHaveBeenLastCalledWith(4, 5, 10, 20);
+    expect(boxGraphics.stroke).toHaveBeenLastCalledWith({
+      alpha: 1,
+      color: 0x00ff66,
+      width: 2,
+    });
+    expect(renderer.getState()).toMatchObject({
+      activeDetectionCount: 2,
+      activeDetectionFrameTime: 0,
+    });
+
+    renderer.destroy();
+  });
+
+  it("draws RoundedBoxStyle boxes with fill and stroke", async () => {
+    resetMocks();
+
+    const renderer = await createRenderer(false, false, {
+      boxStyle: new RoundedBoxStyle({
+        cornerRadius: 8,
+        fill: {
+          alpha: 0.25,
+          color: 0x112233,
+        },
+        stroke: {
+          alpha: 0.75,
+          color: 0xabcdef,
+          width: 3,
+        },
+      }),
+      detectionFrames: [
+        {
+          detections: [
+            {
+              rect: {
+                height: 20,
+                width: 10,
+                x: 4,
+                y: 5,
+              },
+            },
+          ],
+          mediaTime: 0,
+        },
+      ],
+    });
+    const boxGraphics = pixiMock.graphicsInstances[0];
+
+    expect(boxGraphics.roundRect).toHaveBeenCalledOnce();
+    expect(boxGraphics.roundRect).toHaveBeenLastCalledWith(4, 5, 10, 20, 8);
+    expect(boxGraphics.fill).toHaveBeenLastCalledWith({
+      alpha: 0.25,
+      color: 0x112233,
+    });
+    expect(boxGraphics.stroke).toHaveBeenLastCalledWith({
+      alpha: 0.75,
+      color: 0xabcdef,
+      width: 3,
+    });
+
+    renderer.destroy();
+  });
+
+  it("defaults partial box fill values", async () => {
+    resetMocks();
+
+    const renderer = await createRenderer(false, false, {
+      boxStyle: new BaseBoxStyle({
+        fill: {},
+      }),
+      detectionFrames: [
+        {
+          detections: [
+            {
+              rect: {
+                height: 20,
+                width: 10,
+                x: 4,
+                y: 5,
+              },
+            },
+          ],
+          mediaTime: 0,
+        },
+      ],
+    });
+    const boxGraphics = pixiMock.graphicsInstances[0];
+
+    expect(boxGraphics.fill).toHaveBeenLastCalledWith({
+      alpha: 1,
+      color: 0x00ff66,
+    });
+
+    renderer.destroy();
+  });
+
+  it("passes detection indexes to box styles", async () => {
+    resetMocks();
+
+    const resolve = vi.fn<BoxStyle["resolve"]>(() => undefined);
+    const detectionFrame = {
+      detections: [
+        { rect: { height: 20, width: 10, x: 4, y: 5 } },
+        { rect: { height: 40, width: 30, x: 20, y: 10 } },
+      ],
+      mediaTime: 0,
+    };
+
+    const renderer = await createRenderer(false, false, {
+      boxStyle: { resolve },
+      detectionFrames: [detectionFrame],
+    });
+
+    expect(resolve).toHaveBeenCalledTimes(2);
+    expect(resolve.mock.calls[0]?.[1]).toMatchObject({
+      detectionIndex: 0,
+      frame: {
+        detections: expect.arrayContaining([
+          expect.objectContaining(detectionFrame.detections[0]),
+          expect.objectContaining(detectionFrame.detections[1]),
+        ]),
+        mediaTime: 0,
+      },
+      mediaTime: 0,
+    });
+    expect(resolve.mock.calls[1]?.[1]).toMatchObject({
+      detectionIndex: 1,
+      frame: {
+        detections: expect.arrayContaining([
+          expect.objectContaining(detectionFrame.detections[0]),
+          expect.objectContaining(detectionFrame.detections[1]),
+        ]),
+        mediaTime: 0,
+      },
+      mediaTime: 0,
+    });
+
+    renderer.destroy();
+  });
+
+  it("presents the first sample and first detection frame again at a loop boundary", async () => {
     resetMocks();
     mediaMock.getDurationFromMetadata.mockResolvedValue(0.08);
     mediaMock.samples = [createMockSample(0, 0), createMockSample(0.04, 0)];
 
     const renderer = await createRenderer(false, true, {
-      overlayFrames: [
+      detectionFrames: [
         {
+          detections: [{ rect: { height: 20, width: 10, x: 4, y: 5 } }],
           mediaTime: 0,
-          rects: [{ height: 20, width: 10, x: 4, y: 5 }],
         },
         {
+          detections: [{ rect: { height: 40, width: 30, x: 20, y: 10 } }],
           mediaTime: 0.04,
-          rects: [{ height: 40, width: 30, x: 20, y: 10 }],
         },
       ],
     });
@@ -298,8 +486,8 @@ describe("package entrypoint", () => {
       expect(mediaMock.samples[1].draw).toHaveBeenCalledOnce();
     });
     expect(renderer.getState()).toMatchObject({
-      activeOverlayFrameTime: 0.04,
-      activeOverlayRectCount: 1,
+      activeDetectionCount: 1,
+      activeDetectionFrameTime: 0.04,
       currentTime: 0.04,
       presentedFrames: 2,
     });
@@ -313,8 +501,8 @@ describe("package entrypoint", () => {
       skipLiveWait: true,
     });
     expect(renderer.getState()).toMatchObject({
-      activeOverlayFrameTime: 0,
-      activeOverlayRectCount: 1,
+      activeDetectionCount: 1,
+      activeDetectionFrameTime: 0,
       currentTime: 0,
       presentedFrames: 3,
     });
@@ -322,24 +510,24 @@ describe("package entrypoint", () => {
     renderer.destroy();
   });
 
-  it("does not redraw overlays or update overlay diagnostics for duplicate samples", async () => {
+  it("does not redraw boxes or update detection diagnostics for duplicate samples", async () => {
     resetMocks();
 
     const renderer = await createRenderer(false, false, {
-      overlayFrames: [
+      detectionFrames: [
         {
+          detections: [{ rect: { height: 20, width: 10, x: 4, y: 5 } }],
           mediaTime: 0,
-          rects: [{ height: 20, width: 10, x: 4, y: 5 }],
         },
         {
+          detections: [{ rect: { height: 40, width: 30, x: 20, y: 10 } }],
           mediaTime: 0.04,
-          rects: [{ height: 40, width: 30, x: 20, y: 10 }],
         },
       ],
     });
-    const overlayGraphics = pixiMock.graphicsInstances[0];
-    const initialOverlayRectCalls = overlayGraphics.rect.mock.calls.length;
-    const initialOverlayClearCalls = overlayGraphics.clear.mock.calls.length;
+    const boxGraphics = pixiMock.graphicsInstances[0];
+    const initialBoxRectCalls = boxGraphics.rect.mock.calls.length;
+    const initialBoxClearCalls = boxGraphics.clear.mock.calls.length;
 
     mediaMock.getSample.mockResolvedValueOnce(mediaMock.samples[0]);
     await renderer.play();
@@ -348,13 +536,11 @@ describe("package entrypoint", () => {
       expect(mediaMock.samples[0].close).toHaveBeenCalledTimes(2);
     });
 
-    expect(overlayGraphics.rect).toHaveBeenCalledTimes(initialOverlayRectCalls);
-    expect(overlayGraphics.clear).toHaveBeenCalledTimes(
-      initialOverlayClearCalls,
-    );
+    expect(boxGraphics.rect).toHaveBeenCalledTimes(initialBoxRectCalls);
+    expect(boxGraphics.clear).toHaveBeenCalledTimes(initialBoxClearCalls);
     expect(renderer.getState()).toMatchObject({
-      activeOverlayFrameTime: 0,
-      activeOverlayRectCount: 1,
+      activeDetectionCount: 1,
+      activeDetectionFrameTime: 0,
       currentTime: 0,
       presentedFrames: 1,
     });
@@ -362,7 +548,7 @@ describe("package entrypoint", () => {
     renderer.destroy();
   });
 
-  it("does not redraw overlays when presented samples stay within the same active overlay frame", async () => {
+  it("does not redraw boxes when presented samples stay within the same active detection frame", async () => {
     resetMocks();
     mediaMock.samples = [
       createMockSample(0, 0),
@@ -372,22 +558,22 @@ describe("package entrypoint", () => {
     ];
 
     const renderer = await createRenderer(false, false, {
-      overlayFrames: [
+      detectionFrames: [
         {
+          detections: [{ rect: { height: 20, width: 10, x: 4, y: 5 } }],
           mediaTime: 0,
-          rects: [{ height: 20, width: 10, x: 4, y: 5 }],
         },
         {
+          detections: [{ rect: { height: 40, width: 30, x: 20, y: 10 } }],
           mediaTime: 0.08,
-          rects: [{ height: 40, width: 30, x: 20, y: 10 }],
         },
       ],
     });
-    const overlayGraphics = pixiMock.graphicsInstances[0];
+    const boxGraphics = pixiMock.graphicsInstances[0];
 
-    expect(overlayGraphics.clear).toHaveBeenCalledOnce();
-    expect(overlayGraphics.rect).toHaveBeenCalledOnce();
-    expect(overlayGraphics.stroke).toHaveBeenCalledOnce();
+    expect(boxGraphics.clear).toHaveBeenCalledOnce();
+    expect(boxGraphics.rect).toHaveBeenCalledOnce();
+    expect(boxGraphics.stroke).toHaveBeenCalledOnce();
 
     await renderer.play();
     flushAnimationFrame(20);
@@ -395,12 +581,12 @@ describe("package entrypoint", () => {
       expect(mediaMock.samples[1].draw).toHaveBeenCalledOnce();
     });
 
-    expect(overlayGraphics.clear).toHaveBeenCalledOnce();
-    expect(overlayGraphics.rect).toHaveBeenCalledOnce();
-    expect(overlayGraphics.stroke).toHaveBeenCalledOnce();
+    expect(boxGraphics.clear).toHaveBeenCalledOnce();
+    expect(boxGraphics.rect).toHaveBeenCalledOnce();
+    expect(boxGraphics.stroke).toHaveBeenCalledOnce();
     expect(renderer.getState()).toMatchObject({
-      activeOverlayFrameTime: 0,
-      activeOverlayRectCount: 1,
+      activeDetectionCount: 1,
+      activeDetectionFrameTime: 0,
       currentTime: 0.02,
       presentedFrames: 2,
     });
@@ -410,12 +596,12 @@ describe("package entrypoint", () => {
       expect(mediaMock.samples[2].draw).toHaveBeenCalledOnce();
     });
 
-    expect(overlayGraphics.clear).toHaveBeenCalledOnce();
-    expect(overlayGraphics.rect).toHaveBeenCalledOnce();
-    expect(overlayGraphics.stroke).toHaveBeenCalledOnce();
+    expect(boxGraphics.clear).toHaveBeenCalledOnce();
+    expect(boxGraphics.rect).toHaveBeenCalledOnce();
+    expect(boxGraphics.stroke).toHaveBeenCalledOnce();
     expect(renderer.getState()).toMatchObject({
-      activeOverlayFrameTime: 0,
-      activeOverlayRectCount: 1,
+      activeDetectionCount: 1,
+      activeDetectionFrameTime: 0,
       currentTime: 0.04,
       presentedFrames: 3,
     });
@@ -425,13 +611,13 @@ describe("package entrypoint", () => {
       expect(mediaMock.samples[3].draw).toHaveBeenCalledOnce();
     });
 
-    expect(overlayGraphics.clear).toHaveBeenCalledTimes(2);
-    expect(overlayGraphics.rect).toHaveBeenCalledTimes(2);
-    expect(overlayGraphics.stroke).toHaveBeenCalledTimes(2);
-    expect(overlayGraphics.rect).toHaveBeenLastCalledWith(20, 10, 30, 40);
+    expect(boxGraphics.clear).toHaveBeenCalledTimes(2);
+    expect(boxGraphics.rect).toHaveBeenCalledTimes(2);
+    expect(boxGraphics.stroke).toHaveBeenCalledTimes(2);
+    expect(boxGraphics.rect).toHaveBeenLastCalledWith(20, 10, 30, 40);
     expect(renderer.getState()).toMatchObject({
-      activeOverlayFrameTime: 0.08,
-      activeOverlayRectCount: 1,
+      activeDetectionCount: 1,
+      activeDetectionFrameTime: 0.08,
       currentTime: 0.08,
       presentedFrames: 4,
     });

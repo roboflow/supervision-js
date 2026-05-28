@@ -10,6 +10,7 @@
       "#media/*": ["src/media/*"],
       "#playback/*": ["src/playback/*"],
       "#renderers/*": ["src/renderers/*"],
+      "#styles/*": ["src/styles/*"],
       "#types/*": ["src/types/*"],
       "#utils/*": ["src/utils/*"]
     },

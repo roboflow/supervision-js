@@ -54,8 +54,8 @@ export function createMediaRendererRuntimeState(
   let mediaHeight = 0;
   let mediaWidth = 0;
   let presentedFrames = 0;
-  let activeOverlayFrameTime: number | null = null;
-  let activeOverlayRectCount = 0;
+  let activeDetectionFrameTime: number | null = null;
+  let activeDetectionCount = 0;
   let destroyed = false;
 
   const emitSourceState = () => {
@@ -71,8 +71,8 @@ export function createMediaRendererRuntimeState(
   };
 
   const createStateSnapshot = (): MediaRendererState => ({
-    activeOverlayFrameTime,
-    activeOverlayRectCount,
+    activeDetectionCount,
+    activeDetectionFrameTime,
     currentTime,
     duration,
     fit: options.fit,
@@ -86,8 +86,8 @@ export function createMediaRendererRuntimeState(
   const createFrameDiagnostics = (
     sample: PresentedMediaSample,
   ): MediaFrameDiagnostics => ({
-    activeOverlayFrameTime,
-    activeOverlayRectCount,
+    activeDetectionCount,
+    activeDetectionFrameTime,
     currentTime,
     duration,
     expectedDisplayTime: null,
@@ -144,8 +144,8 @@ export function createMediaRendererRuntimeState(
     recordPresentedSample(sample) {
       currentTime = sample.mediaTime;
       presentedFrames += 1;
-      activeOverlayFrameTime = sample.activeOverlayFrameTime;
-      activeOverlayRectCount = sample.activeOverlayRectCount;
+      activeDetectionFrameTime = sample.activeDetectionFrameTime;
+      activeDetectionCount = sample.activeDetectionCount;
 
       options.onFrame?.(createFrameDiagnostics(sample));
     },

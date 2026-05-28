@@ -9,6 +9,7 @@ const sourceAliasRoots = new Set([
   "media",
   "playback",
   "renderers",
+  "styles",
   "types",
   "utils",
 ]);
