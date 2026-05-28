@@ -21,6 +21,7 @@ export type {
 } from "#types/mask-style";
 export {
   DetectionBufferStatus,
+  DetectionFrameSelectionMode,
   type BufferedDetectionTimeline,
   type ColdDetectionFrameStore,
   type ColdDetectionFrameStoreLoadOptions,
@@ -28,6 +29,7 @@ export {
   type ColdDetectionFrameStoreWriteSummary,
   type DetectionBufferOptions,
   type DetectionBufferState,
+  type DetectionFrameSelectionOptions,
   type DetectionFrameSource,
 } from "#types/detection-timeline";
 export {
@@ -57,6 +59,7 @@ export {
   type MediaFrameDiagnostics,
   type MediaRenderer,
   type MediaRendererOptions,
+  type MediaRendererPresentation,
   type MediaRendererState,
   type MediaSourceState,
 } from "#types/media-renderer";

@@ -2,7 +2,7 @@ import type {
   DetectionBufferState,
   MediaRendererPlaybackState,
 } from "supervision-js";
-import { formatTime } from "../format";
+import { formatExactTime, formatTime } from "../format";
 import { PlaybackControls } from "./PlaybackControls";
 import { Readout } from "./Readout";
 import { TimelineView } from "./TimelineView";
@@ -44,7 +44,11 @@ export function ControlBar({
       <div className="control-bar__time">
         <Readout
           label="Time"
-          value={`${formatTime(currentTime)} / ${formatTime(duration)}`}
+          value={`${formatExactTime(currentTime)} / ${formatTime(duration)}`}
+        />
+        <Readout
+          label="Detection"
+          value={formatExactTime(activeDetectionFrameTime)}
         />
       </div>
     </section>

@@ -1,19 +1,14 @@
 import {
-  BoxShape,
   DetectionMaskEncoding,
   MediaNormalizationContainer,
   MediaNormalizationVideoCodec,
   createBrowserColdDetectionFrameStore,
   createColdDetectionFrameSource,
   normalizeMedia,
-  type BoxDrawInstruction,
-  type BoxStyle,
   type ColdDetectionFrameStoreWriteSummary,
   type Detection,
   type DetectionFrame,
   type DetectionFrameSource,
-  type MaskDrawInstruction,
-  type MaskStyle,
   type MediaNormalizationProgress,
   type NormalizedMedia,
 } from "supervision-js";
@@ -96,82 +91,6 @@ export interface BasketballSampleMediaSource {
   readonly normalized: NormalizedMedia | null;
   readonly error: Error | null;
 }
-
-const classStyles: Record<
-  string,
-  {
-    readonly fill: number;
-    readonly stroke: number;
-    readonly strokeWidth: number;
-  }
-> = {
-  basketball: {
-    fill: 0xff7a1a,
-    stroke: 0xffa23a,
-    strokeWidth: 3,
-  },
-  "white team player": {
-    fill: 0xf8fafc,
-    stroke: 0xffffff,
-    strokeWidth: 4,
-  },
-  "yellow team player": {
-    fill: 0xfacc15,
-    stroke: 0xfde047,
-    strokeWidth: 4,
-  },
-};
-
-const fallbackStyle = {
-  fill: 0x38bdf8,
-  stroke: 0x7dd3fc,
-  strokeWidth: 3,
-};
-
-export const basketballSampleBoxStyle: BoxStyle = {
-  resolve(detection: Detection): BoxDrawInstruction | undefined {
-    if (!detection.rect) {
-      return undefined;
-    }
-
-    const style = detection.className
-      ? (classStyles[detection.className] ?? fallbackStyle)
-      : fallbackStyle;
-
-    return {
-      fill: {
-        alpha: detection.className === "basketball" ? 0.16 : 0.08,
-        color: style.fill,
-      },
-      rect: detection.rect,
-      shape: BoxShape.RoundedRect,
-      stroke: {
-        alpha: 0.95,
-        color: style.stroke,
-        width: style.strokeWidth,
-      },
-      cornerRadius: detection.className === "basketball" ? 12 : 8,
-    };
-  },
-};
-
-export const basketballSampleMaskStyle: MaskStyle = {
-  resolve(detection: Detection): MaskDrawInstruction | undefined {
-    if (!detection.mask) {
-      return undefined;
-    }
-
-    const style = detection.className
-      ? (classStyles[detection.className] ?? fallbackStyle)
-      : fallbackStyle;
-
-    return {
-      alpha: detection.className === "basketball" ? 0.48 : 0.3,
-      color: style.fill,
-      mask: detection.mask,
-    };
-  },
-};
 
 export async function loadBasketballSampleFixture(): Promise<BasketballSampleFixture> {
   const response = await fetch(basketballSampleDetectionsSrc);

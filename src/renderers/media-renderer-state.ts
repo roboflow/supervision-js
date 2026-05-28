@@ -57,6 +57,7 @@ export function createMediaRendererRuntimeState(
   let mediaWidth = 0;
   let presentedFrames = 0;
   let activeDetectionFrameTime: number | null = null;
+  let activeDetectionFrameIndex: number | null = null;
   let activeDetectionCount = 0;
   let destroyed = false;
 
@@ -74,6 +75,7 @@ export function createMediaRendererRuntimeState(
 
   const createStateSnapshot = (): MediaRendererState => ({
     activeDetectionCount,
+    activeDetectionFrameIndex,
     activeDetectionFrameTime,
     currentTime,
     detectionBuffer: options.getDetectionBufferState(),
@@ -90,6 +92,7 @@ export function createMediaRendererRuntimeState(
     sample: PresentedMediaSample,
   ): MediaFrameDiagnostics => ({
     activeDetectionCount,
+    activeDetectionFrameIndex,
     activeDetectionFrameTime,
     currentTime,
     detectionBuffer: sample.detectionBuffer,
@@ -148,6 +151,7 @@ export function createMediaRendererRuntimeState(
     recordPresentedSample(sample) {
       currentTime = sample.mediaTime;
       presentedFrames += 1;
+      activeDetectionFrameIndex = sample.activeDetectionFrameIndex;
       activeDetectionFrameTime = sample.activeDetectionFrameTime;
       activeDetectionCount = sample.activeDetectionCount;
 

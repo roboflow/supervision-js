@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createArrayDetectionFrameSource } from "#detections/array-detection-frame-source";
 import { createBufferedDetectionTimeline } from "#detections/buffered-detection-timeline";
-import { DetectionBufferStatus } from "#types/detection-timeline";
+import {
+  DetectionBufferStatus,
+  DetectionFrameSelectionMode,
+} from "#types/detection-timeline";
 import type { DetectionFrame } from "#types/detections";
 
 const frames: DetectionFrame[] = [
@@ -63,6 +66,34 @@ describe("buffered detection timeline", () => {
     expect(bufferedFrames[0]?.detections[0]?.rect).not.toBe(
       frames[0]?.detections[0]?.rect,
     );
+  });
+
+  it("passes frame-indexed selection options to hot-buffer frame lookup", async () => {
+    const indexedFrames: DetectionFrame[] = [
+      {
+        detections: [],
+        endTime: 52 / 30,
+        frameIndex: 51,
+        mediaTime: 51 / 30,
+      },
+      {
+        detections: [],
+        endTime: 53 / 30,
+        frameIndex: 52,
+        mediaTime: 52 / 30,
+      },
+    ];
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 1,
+      bufferBehindSeconds: 1,
+      frameRate: 30,
+      selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
+      source: createArrayDetectionFrameSource(indexedFrames),
+    });
+
+    await timeline.prepare(1.73);
+
+    expect(timeline.selectFrame(1.73)?.frameIndex).toBe(52);
   });
 
   it("keeps the last good buffer and reports prefetch errors", async () => {

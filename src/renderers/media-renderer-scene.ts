@@ -4,7 +4,10 @@ import type {
   BufferedDetectionTimeline,
   DetectionBufferState,
 } from "#types/detection-timeline";
-import type { MediaRendererFit } from "#types/media-renderer";
+import type {
+  MediaRendererFit,
+  MediaRendererPresentation,
+} from "#types/media-renderer";
 import type { MaskStyle } from "#types/mask-style";
 
 export interface MediaRendererSceneOptions {
@@ -18,6 +21,7 @@ export interface MediaRendererSceneOptions {
 export interface PresentedMediaSample {
   readonly mediaTime: number;
   readonly activeDetectionFrameTime: number | null;
+  readonly activeDetectionFrameIndex: number | null;
   readonly activeDetectionCount: number;
   readonly detectionBuffer: DetectionBufferState;
 }
@@ -25,5 +29,9 @@ export interface PresentedMediaSample {
 export interface MediaRendererScene {
   initializeMedia(dimensions: { width: number; height: number }): void;
   presentSample(sample: DecodedVideoSample): PresentedMediaSample;
+  setPresentation(
+    presentation: MediaRendererPresentation,
+    mediaTime: number,
+  ): void;
   destroy(): void;
 }

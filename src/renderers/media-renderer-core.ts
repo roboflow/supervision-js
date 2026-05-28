@@ -171,6 +171,14 @@ export async function createMediaRendererCore(
       return runtimeState.snapshot();
     },
 
+    setPresentation(presentation) {
+      if (runtimeState.isDestroyed()) {
+        return;
+      }
+
+      mediaScene?.setPresentation(presentation, runtimeState.currentTime());
+    },
+
     destroy() {
       if (runtimeState.isDestroyed()) {
         return;

@@ -3,6 +3,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { BoxStyle } from "#types/box-style";
 import type { BufferedDetectionTimeline } from "#types/detection-timeline";
 import type { Detection } from "#types/detections";
+import type { MaskStyle } from "#types/mask-style";
 
 import {
   createDeferred,
@@ -21,6 +22,7 @@ type PackageEntrypoint = typeof import("./index");
 let BaseBoxStyle: PackageEntrypoint["BaseBoxStyle"];
 let BaseMaskStyle: PackageEntrypoint["BaseMaskStyle"];
 let DetectionBufferStatus: PackageEntrypoint["DetectionBufferStatus"];
+let DetectionFrameSelectionMode: PackageEntrypoint["DetectionFrameSelectionMode"];
 let DetectionMaskEncoding: PackageEntrypoint["DetectionMaskEncoding"];
 let RoundedBoxStyle: PackageEntrypoint["RoundedBoxStyle"];
 let MediaRendererPlaybackState: PackageEntrypoint["MediaRendererPlaybackState"];
@@ -33,6 +35,7 @@ describe("package entrypoint", () => {
     BaseBoxStyle = entrypoint.BaseBoxStyle;
     BaseMaskStyle = entrypoint.BaseMaskStyle;
     DetectionBufferStatus = entrypoint.DetectionBufferStatus;
+    DetectionFrameSelectionMode = entrypoint.DetectionFrameSelectionMode;
     DetectionMaskEncoding = entrypoint.DetectionMaskEncoding;
     RoundedBoxStyle = entrypoint.RoundedBoxStyle;
     MediaRendererPlaybackState = entrypoint.MediaRendererPlaybackState;
@@ -47,6 +50,7 @@ describe("package entrypoint", () => {
       "BaseMaskStyle",
       "BoxShape",
       "DetectionBufferStatus",
+      "DetectionFrameSelectionMode",
       "DetectionMaskEncoding",
       "MediaNormalizationAudioCodec",
       "MediaNormalizationContainer",
@@ -96,6 +100,10 @@ describe("package entrypoint", () => {
       Idle: "idle",
       Loading: "loading",
       Ready: "ready",
+    });
+    expect(DetectionFrameSelectionMode).toEqual({
+      Interval: "interval",
+      NearestFrameIndex: "nearestFrameIndex",
     });
     expect(entrypoint.DetectionMaskEncoding).toEqual({
       CompressedRle: "compressedRle",
@@ -265,10 +273,12 @@ describe("package entrypoint", () => {
       detectionFrames: [
         {
           detections: [{ rect: { height: 20, width: 10, x: 4, y: 5 } }],
+          frameIndex: 0,
           mediaTime: 0,
         },
         {
           detections: [{ rect: { height: 40, width: 30, x: 20, y: 10 } }],
+          frameIndex: 2,
           mediaTime: 0.08,
         },
       ],
@@ -289,6 +299,7 @@ describe("package entrypoint", () => {
     expect(boxGraphics.rect).toHaveBeenLastCalledWith(20, 10, 30, 40);
     expect(renderer.getState()).toMatchObject({
       activeDetectionCount: 1,
+      activeDetectionFrameIndex: 2,
       activeDetectionFrameTime: 0.08,
       currentTime: 0.08,
       detectionBuffer: {
@@ -1083,6 +1094,340 @@ describe("package entrypoint", () => {
     });
 
     renderer.destroy();
+  });
+
+  it("updates box style at runtime and redraws the same active detection frame", async () => {
+    resetMocks();
+    mediaMock.samples = [createMockSample(0, 0), createMockSample(0.02, 0)];
+
+    const renderer = await createRenderer(false, false, {
+      boxStyle: new BaseBoxStyle({
+        stroke: {
+          alpha: 0.5,
+          color: 0x38bdf8,
+          width: 4,
+        },
+      }),
+      detectionFrames: [
+        {
+          detections: [{ rect: { height: 20, width: 10, x: 4, y: 5 } }],
+          mediaTime: 0,
+        },
+      ],
+    });
+    const boxGraphics = pixiMock.graphicsInstances[0];
+
+    expect(boxGraphics.stroke).toHaveBeenLastCalledWith({
+      alpha: 0.5,
+      color: 0x38bdf8,
+      width: 4,
+    });
+
+    renderer.setPresentation({
+      boxStyle: new BaseBoxStyle({
+        stroke: {
+          alpha: 0.8,
+          color: 0xff00ff,
+          width: 7,
+        },
+      }),
+    });
+
+    expect(mediaMock.samples[1].draw).not.toHaveBeenCalled();
+    expect(boxGraphics.clear).toHaveBeenCalledTimes(2);
+    expect(boxGraphics.rect).toHaveBeenCalledTimes(2);
+    expect(boxGraphics.stroke).toHaveBeenLastCalledWith({
+      alpha: 0.8,
+      color: 0xff00ff,
+      width: 7,
+    });
+    expect(renderer.getState()).toMatchObject({
+      activeDetectionCount: 1,
+      activeDetectionFrameTime: 0,
+      currentTime: 0,
+      presentedFrames: 1,
+    });
+
+    await renderer.play();
+    flushAnimationFrame(20);
+    await vi.waitFor(() => {
+      expect(mediaMock.samples[1].draw).toHaveBeenCalledOnce();
+    });
+
+    expect(boxGraphics.clear).toHaveBeenCalledTimes(2);
+    expect(boxGraphics.rect).toHaveBeenCalledTimes(2);
+    expect(boxGraphics.stroke).toHaveBeenLastCalledWith({
+      alpha: 0.8,
+      color: 0xff00ff,
+      width: 7,
+    });
+    expect(renderer.getState()).toMatchObject({
+      activeDetectionCount: 1,
+      activeDetectionFrameTime: 0,
+      currentTime: 0.02,
+      presentedFrames: 2,
+    });
+
+    renderer.destroy();
+  });
+
+  it("disables boxes at runtime and keeps detection diagnostics intact", async () => {
+    resetMocks();
+    mediaMock.samples = [createMockSample(0, 0), createMockSample(0.02, 0)];
+
+    const renderer = await createRenderer(false, false, {
+      detectionFrames: [
+        {
+          detections: [{ rect: { height: 20, width: 10, x: 4, y: 5 } }],
+          mediaTime: 0,
+        },
+      ],
+    });
+    const boxGraphics = pixiMock.graphicsInstances[0];
+
+    expect(boxGraphics.rect).toHaveBeenCalledOnce();
+
+    renderer.setPresentation({ boxStyle: null });
+
+    expect(mediaMock.samples[1].draw).not.toHaveBeenCalled();
+    expect(boxGraphics.clear).toHaveBeenCalledTimes(2);
+    expect(boxGraphics.rect).toHaveBeenCalledOnce();
+    expect(boxGraphics.stroke).toHaveBeenCalledOnce();
+    expect(renderer.getState()).toMatchObject({
+      activeDetectionCount: 1,
+      activeDetectionFrameTime: 0,
+      currentTime: 0,
+      presentedFrames: 1,
+    });
+
+    await renderer.play();
+    flushAnimationFrame(20);
+    await vi.waitFor(() => {
+      expect(mediaMock.samples[1].draw).toHaveBeenCalledOnce();
+    });
+
+    expect(boxGraphics.clear).toHaveBeenCalledTimes(2);
+    expect(boxGraphics.rect).toHaveBeenCalledOnce();
+    expect(boxGraphics.stroke).toHaveBeenCalledOnce();
+    expect(renderer.getState()).toMatchObject({
+      activeDetectionCount: 1,
+      activeDetectionFrameTime: 0,
+      currentTime: 0.02,
+      presentedFrames: 2,
+    });
+
+    renderer.destroy();
+  });
+
+  it("updates mask style at runtime and invalidates cached mask textures", async () => {
+    resetMocks();
+    mediaMock.samples = [createMockSample(0, 0), createMockSample(0.02, 0)];
+
+    const firstResolve = vi.fn<MaskStyle["resolve"]>((detection) =>
+      detection.mask
+        ? {
+            alpha: 0.25,
+            color: 0xff0000,
+            mask: detection.mask,
+          }
+        : undefined,
+    );
+    const secondResolve = vi.fn<MaskStyle["resolve"]>((detection) =>
+      detection.mask
+        ? {
+            alpha: 0.75,
+            color: 0x0000ff,
+            mask: detection.mask,
+          }
+        : undefined,
+    );
+    const renderer = await createRenderer(false, false, {
+      detectionFrames: [
+        {
+          detections: [
+            {
+              mask: {
+                counts: "021",
+                encoding: DetectionMaskEncoding.CompressedRle,
+                height: 2,
+                width: 2,
+              },
+            },
+          ],
+          mediaTime: 0,
+        },
+      ],
+      maskStyle: { resolve: firstResolve },
+    });
+
+    await vi.waitFor(() => {
+      expect(pixiMock.textureOptions).toHaveLength(2);
+    });
+
+    renderer.setPresentation({ maskStyle: { resolve: secondResolve } });
+
+    expect(pixiMock.textureDestroy).toHaveBeenCalledWith(true);
+    await vi.waitFor(() => {
+      expect(pixiMock.textureOptions).toHaveLength(3);
+    });
+    expect(secondResolve).toHaveBeenCalledWith(
+      expect.objectContaining({ mask: expect.any(Object) }),
+      expect.objectContaining({
+        detectionIndex: 0,
+        mediaTime: 0,
+      }),
+    );
+
+    await renderer.play();
+    flushAnimationFrame(20);
+    await vi.waitFor(() => {
+      expect(mediaMock.samples[1].draw).toHaveBeenCalledOnce();
+      expect(pixiMock.textureOptions).toHaveLength(3);
+    });
+
+    expect(firstResolve).toHaveBeenCalled();
+    expect(pixiMock.spriteInstances[1]).toMatchObject({
+      height: 720,
+      texture: expect.any(Object),
+      visible: true,
+      width: 1280,
+    });
+
+    renderer.destroy();
+  });
+
+  it("disables masks at runtime and clears cached mask textures", async () => {
+    resetMocks();
+    mediaMock.samples = [createMockSample(0, 0), createMockSample(0.02, 0)];
+
+    const renderer = await createRenderer(false, false, {
+      detectionFrames: [
+        {
+          detections: [
+            {
+              mask: {
+                counts: "021",
+                encoding: DetectionMaskEncoding.CompressedRle,
+                height: 2,
+                width: 2,
+              },
+            },
+          ],
+          mediaTime: 0,
+        },
+      ],
+      maskStyle: new BaseMaskStyle(),
+    });
+
+    await vi.waitFor(() => {
+      expect(pixiMock.textureOptions).toHaveLength(2);
+      expect(pixiMock.spriteInstances[1]?.visible).toBe(true);
+    });
+
+    renderer.setPresentation({ maskStyle: null });
+
+    expect(mediaMock.samples[1].draw).not.toHaveBeenCalled();
+    expect(pixiMock.textureDestroy).toHaveBeenCalledWith(true);
+    expect(pixiMock.textureOptions).toHaveLength(2);
+    expect(pixiMock.spriteInstances[1]).toMatchObject({
+      visible: false,
+    });
+
+    await renderer.play();
+    flushAnimationFrame(20);
+    await vi.waitFor(() => {
+      expect(mediaMock.samples[1].draw).toHaveBeenCalledOnce();
+    });
+
+    expect(pixiMock.textureDestroy).toHaveBeenCalledWith(true);
+    expect(pixiMock.textureOptions).toHaveLength(2);
+    expect(pixiMock.spriteInstances[1]).toMatchObject({
+      visible: false,
+    });
+
+    renderer.destroy();
+  });
+
+  it("enables masks at runtime without recreating the Pixi scene", async () => {
+    resetMocks();
+    mediaMock.samples = [createMockSample(0, 0), createMockSample(0.02, 0)];
+
+    const renderer = await createRenderer(false, false, {
+      detectionFrames: [
+        {
+          detections: [
+            {
+              mask: {
+                counts: "021",
+                encoding: DetectionMaskEncoding.CompressedRle,
+                height: 2,
+                width: 2,
+              },
+            },
+          ],
+          mediaTime: 0,
+        },
+      ],
+    });
+    const scene = pixiMock.containerInstances[0];
+    const boxGraphics = pixiMock.graphicsInstances[0];
+
+    expect(pixiMock.spriteInstances).toHaveLength(1);
+    expect(scene?.children).toEqual([pixiMock.spriteInstances[0], boxGraphics]);
+
+    renderer.setPresentation({ maskStyle: new BaseMaskStyle() });
+
+    expect(pixiMock.spriteInstances).toHaveLength(2);
+    expect(scene?.children).toEqual([
+      pixiMock.spriteInstances[0],
+      pixiMock.spriteInstances[1],
+      boxGraphics,
+    ]);
+    expect(pixiMock.appInit).toHaveBeenCalledOnce();
+
+    await vi.waitFor(() => {
+      expect(pixiMock.textureOptions).toHaveLength(2);
+    });
+
+    expect(mediaMock.samples[1].draw).not.toHaveBeenCalled();
+    expect(pixiMock.spriteInstances[1]).toMatchObject({
+      height: 720,
+      texture: expect.any(Object),
+      visible: true,
+      width: 1280,
+    });
+
+    await renderer.play();
+    flushAnimationFrame(20);
+    await vi.waitFor(() => {
+      expect(mediaMock.samples[1].draw).toHaveBeenCalledOnce();
+      expect(pixiMock.textureOptions).toHaveLength(2);
+    });
+
+    expect(pixiMock.spriteInstances[1]).toMatchObject({
+      height: 720,
+      texture: expect.any(Object),
+      visible: true,
+      width: 1280,
+    });
+
+    renderer.destroy();
+  });
+
+  it("ignores presentation updates after destroy", async () => {
+    resetMocks();
+
+    const renderer = await createRenderer(false, false);
+
+    renderer.destroy();
+
+    expect(() =>
+      renderer.setPresentation({
+        boxStyle: null,
+        maskStyle: new BaseMaskStyle(),
+      }),
+    ).not.toThrow();
+    expect(pixiMock.appInit).toHaveBeenCalledOnce();
   });
 
   it("does not overlap prefetch reads while a sample iterator read is in flight", async () => {

@@ -1,7 +1,6 @@
 import type {
   ChangeEvent,
   CSSProperties,
-  FormEvent,
   PointerEvent as ReactPointerEvent,
 } from "react";
 import type { DetectionBufferState } from "supervision-js";
@@ -65,9 +64,7 @@ export function TimelineView({
     .filter(Boolean)
     .join(" ");
 
-  const handleSeek = (
-    event: ChangeEvent<HTMLInputElement> | FormEvent<HTMLInputElement>,
-  ) => {
+  const handleSeek = (event: ChangeEvent<HTMLInputElement>) => {
     onSeek(Number(event.currentTarget.value));
   };
   const handleStripPointer = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -136,7 +133,6 @@ export function TimelineView({
         max={inputMax}
         min={0}
         onChange={handleSeek}
-        onInput={handleSeek}
         step={0.01}
         type="range"
         value={inputValue}

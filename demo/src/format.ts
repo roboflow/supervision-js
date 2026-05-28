@@ -8,6 +8,12 @@ export function formatTime(value: number | null) {
     : `${value.toFixed(2)}s`;
 }
 
+export function formatExactTime(value: number | null) {
+  return value === null || !Number.isFinite(value)
+    ? "-"
+    : `${value.toFixed(4)}s`;
+}
+
 export function formatTimeRange(
   startTime: number | null,
   endTime: number | null,

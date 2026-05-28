@@ -37,6 +37,7 @@ export interface MediaFrameDiagnostics {
   readonly mediaHeight: number;
   readonly expectedDisplayTime: null;
   readonly activeDetectionFrameTime: number | null;
+  readonly activeDetectionFrameIndex: number | null;
   readonly activeDetectionCount: number;
   readonly detectionBuffer: DetectionBufferState;
 }
@@ -65,6 +66,7 @@ export interface MediaRendererState {
   readonly mediaHeight: number;
   readonly presentedFrames: number;
   readonly activeDetectionFrameTime: number | null;
+  readonly activeDetectionFrameIndex: number | null;
   readonly activeDetectionCount: number;
   readonly detectionBuffer: DetectionBufferState;
   readonly source: MediaSourceState;
@@ -89,10 +91,16 @@ export interface MediaRendererOptions {
   readonly onSource?: (state: MediaSourceState) => void;
 }
 
+export interface MediaRendererPresentation {
+  readonly boxStyle?: BoxStyle | null;
+  readonly maskStyle?: MaskStyle | null;
+}
+
 export interface MediaRenderer {
   play(): Promise<void>;
   pause(): void;
   seek(mediaTime: number): Promise<void>;
+  setPresentation(presentation: MediaRendererPresentation): void;
   getState(): MediaRendererState;
   destroy(): void;
 }

@@ -2,10 +2,12 @@ import type { ReactNode } from "react";
 
 export function DemoShell({
   controlBar,
+  renderControls,
   statusPanel,
   viewport,
 }: {
   readonly controlBar: ReactNode;
+  readonly renderControls: ReactNode;
   readonly statusPanel: ReactNode;
   readonly viewport: ReactNode;
 }) {
@@ -14,6 +16,7 @@ export function DemoShell({
       <div className="demo-shell__viewport">{viewport}</div>
       <aside className="demo-shell__panel" aria-label="Demo controls">
         {controlBar}
+        {renderControls}
         {statusPanel}
       </aside>
     </main>

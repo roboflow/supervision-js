@@ -3,11 +3,20 @@ import {
   type DetectionFrame,
   type DetectionMask,
 } from "#types/detections";
+import {
+  DetectionFrameSelectionMode,
+  type DetectionFrameSelectionOptions,
+} from "#types/detection-timeline";
 
 export interface DecodedDetectionMask {
   readonly width: number;
   readonly height: number;
   readonly data: Uint8Array;
+}
+
+interface NearestFrameIndexSelection {
+  readonly isApplicable: boolean;
+  readonly frame: DetectionFrame | undefined;
 }
 
 export function copySortedDetectionFrames(
@@ -41,26 +50,22 @@ export function filterDetectionFramesForRange(
 export function selectDetectionFrame(
   detectionFrames: readonly DetectionFrame[],
   mediaTime: number,
+  options: DetectionFrameSelectionOptions = {},
 ): DetectionFrame | undefined {
-  let selectedFrame: DetectionFrame | undefined;
-  let low = 0;
-  let high = detectionFrames.length - 1;
+  if (options.selectionMode === DetectionFrameSelectionMode.NearestFrameIndex) {
+    const selection = selectNearestFrameIndexDetectionFrame(
+      detectionFrames,
+      mediaTime,
+      options.frameRate,
+      options.frameIndexOriginTime,
+    );
 
-  while (low <= high) {
-    const middle = Math.floor((low + high) / 2);
-    const frame = detectionFrames[middle];
-
-    if (frame.mediaTime <= mediaTime) {
-      selectedFrame = frame;
-      low = middle + 1;
-    } else {
-      high = middle - 1;
+    if (selection.isApplicable) {
+      return selection.frame;
     }
   }
 
-  return selectedFrame && isDetectionFrameActive(selectedFrame, mediaTime)
-    ? selectedFrame
-    : undefined;
+  return selectIntervalDetectionFrame(detectionFrames, mediaTime);
 }
 
 export function decodeCompressedRleMask(
@@ -98,6 +103,81 @@ export function decodeCompressedRleMask(
     data,
     height: mask.height,
     width: mask.width,
+  };
+}
+
+function selectIntervalDetectionFrame(
+  detectionFrames: readonly DetectionFrame[],
+  mediaTime: number,
+) {
+  let selectedFrame: DetectionFrame | undefined;
+  let low = 0;
+  let high = detectionFrames.length - 1;
+
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    const frame = detectionFrames[middle];
+
+    if (frame.mediaTime <= mediaTime) {
+      selectedFrame = frame;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+  }
+
+  return selectedFrame && isDetectionFrameActive(selectedFrame, mediaTime)
+    ? selectedFrame
+    : undefined;
+}
+
+function selectNearestFrameIndexDetectionFrame(
+  detectionFrames: readonly DetectionFrame[],
+  mediaTime: number,
+  frameRate: number | undefined,
+  frameIndexOriginTime: number | undefined,
+): NearestFrameIndexSelection {
+  if (!frameRate || !Number.isFinite(frameRate) || frameRate <= 0) {
+    return { frame: undefined, isApplicable: false };
+  }
+
+  const firstIndexedFrame = detectionFrames.find(
+    (frame) => frame.frameIndex !== undefined,
+  );
+
+  if (!firstIndexedFrame || firstIndexedFrame.frameIndex === undefined) {
+    return { frame: undefined, isApplicable: false };
+  }
+
+  const originTime =
+    frameIndexOriginTime !== undefined
+      ? frameIndexOriginTime
+      : firstIndexedFrame.mediaTime - firstIndexedFrame.frameIndex / frameRate;
+  const targetFrameIndex = Math.round((mediaTime - originTime) * frameRate);
+  let nearestFrame: DetectionFrame | undefined;
+  let nearestDistance = Number.POSITIVE_INFINITY;
+
+  for (const frame of detectionFrames) {
+    if (frame.frameIndex === undefined) {
+      continue;
+    }
+
+    const distance = Math.abs(frame.frameIndex - targetFrameIndex);
+
+    if (
+      distance < nearestDistance ||
+      (distance === nearestDistance &&
+        nearestFrame?.frameIndex !== undefined &&
+        frame.frameIndex > nearestFrame.frameIndex)
+    ) {
+      nearestFrame = frame;
+      nearestDistance = distance;
+    }
+  }
+
+  return {
+    frame: nearestDistance <= 1 ? nearestFrame : undefined,
+    isApplicable: true,
   };
 }
 

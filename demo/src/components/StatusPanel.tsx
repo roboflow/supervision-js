@@ -1,14 +1,17 @@
 import type { ReactNode } from "react";
 import {
   MediaRendererPlaybackState,
+  type ColdDetectionFrameStoreWriteSummary,
   type MediaRendererState,
   type MediaSourceState,
 } from "supervision-js";
-import type {
-  BasketballSampleColdDetectionSource,
-  BasketballSampleSummary,
-} from "../fixtures/basketball-sample";
-import { formatInteger, formatTime, formatTimeRange } from "../format";
+import type { BasketballSampleSummary } from "../fixtures/basketball-sample";
+import {
+  formatExactTime,
+  formatInteger,
+  formatTime,
+  formatTimeRange,
+} from "../format";
 import { Readout } from "./Readout";
 
 export interface StatusPanelMediaState {
@@ -20,9 +23,7 @@ export interface StatusPanelColdDetectionState {
   readonly datasetId: string | null;
   readonly errorMessage: string | null;
   readonly status: string;
-  readonly writeSummary:
-    | BasketballSampleColdDetectionSource["writeSummary"]
-    | null;
+  readonly writeSummary: ColdDetectionFrameStoreWriteSummary | null;
 }
 
 export function StatusPanel({
@@ -61,7 +62,17 @@ export function StatusPanel({
         <Readout label="Fixture" value="Basketball / Rapid" />
         <Readout label="State" value={playbackState ?? "-"} />
         <Readout
-          label="Frames"
+          label="Detection Frame"
+          value={
+            rendererState
+              ? rendererState.activeDetectionFrameIndex === null
+                ? "none"
+                : `#${formatInteger(rendererState.activeDetectionFrameIndex)}`
+              : "-"
+          }
+        />
+        <Readout
+          label="Presented"
           value={String(rendererState?.presentedFrames ?? "-")}
         />
         <Readout
@@ -70,7 +81,7 @@ export function StatusPanel({
             rendererState
               ? rendererState.activeDetectionFrameTime === null
                 ? `none | ${rendererState.activeDetectionCount} detections`
-                : `${formatTime(
+                : `${formatExactTime(
                     rendererState.activeDetectionFrameTime,
                   )} | ${rendererState.activeDetectionCount} detections`
               : "-"

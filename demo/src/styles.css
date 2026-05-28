@@ -34,6 +34,12 @@ input {
   font: inherit;
 }
 
+fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
 .demo-shell {
   background: #0d1117;
   color: #edf2f7;
@@ -105,6 +111,8 @@ input {
 }
 
 .playback-controls:focus-visible,
+.render-control button:focus-visible,
+.render-control input:focus-visible,
 .timeline-view__strip:focus-visible,
 .timeline-view__input:focus-visible {
   outline: 2px solid #38bdf8;
@@ -187,6 +195,126 @@ input {
   opacity: 0.55;
 }
 
+.render-controls {
+  align-items: end;
+  background: #10161d;
+  border: 1px solid #263241;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px 12px;
+  grid-template-columns:
+    minmax(110px, auto) minmax(150px, auto)
+    repeat(4, minmax(120px, 1fr));
+  min-width: 0;
+  padding: 8px;
+}
+
+.render-controls__toggles {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.render-control {
+  color: #dbe4ee;
+  min-width: 0;
+}
+
+.render-control--toggle {
+  align-items: center;
+  background: #171f29;
+  border: 1px solid #2a3644;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 650;
+  gap: 6px;
+  min-height: 32px;
+  padding: 6px 8px;
+}
+
+.render-control--toggle input {
+  accent-color: #38bdf8;
+  margin: 0;
+}
+
+.render-control--shape {
+  display: grid;
+  gap: 4px;
+}
+
+.render-control--shape legend,
+.render-control__label {
+  color: #9ca8b8;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+.render-control__segments {
+  background: #171f29;
+  border: 1px solid #2a3644;
+  border-radius: 6px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-height: 32px;
+  overflow: hidden;
+}
+
+.render-control__segments button {
+  background: transparent;
+  border: 0;
+  color: #dbe4ee;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  min-width: 0;
+  padding: 6px 8px;
+}
+
+.render-control__segments button + button {
+  border-left: 1px solid #2a3644;
+}
+
+.render-control__segments button[aria-pressed="true"] {
+  background: #e5e7eb;
+  color: #111827;
+}
+
+.render-control__segments button:disabled {
+  color: #64748b;
+  cursor: not-allowed;
+}
+
+.render-control--slider {
+  display: grid;
+  gap: 5px;
+}
+
+.render-control__label {
+  align-items: baseline;
+  display: flex;
+  justify-content: space-between;
+}
+
+.render-control__label strong {
+  color: #e5e7eb;
+  font-size: 12px;
+}
+
+.render-control--slider input {
+  accent-color: #38bdf8;
+  margin: 0;
+  width: 100%;
+}
+
+.render-control--slider input:disabled {
+  opacity: 0.45;
+}
+
 .status-panel {
   align-items: start;
   display: grid;
@@ -261,6 +389,10 @@ input {
 }
 
 @media (max-width: 1100px) {
+  .render-controls {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .status-panel {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -278,6 +410,10 @@ input {
 
   .control-bar__time {
     grid-column: 1 / -1;
+  }
+
+  .render-controls {
+    grid-template-columns: 1fr;
   }
 
   .status-panel {

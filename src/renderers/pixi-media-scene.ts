@@ -32,7 +32,7 @@ export async function createPixiMediaScene(
     boxStyle: options.boxStyle,
     detectionTimeline: options.detectionTimeline,
   });
-  const maskLayer = options.maskStyle
+  let maskLayer = options.maskStyle
     ? createPixiMaskLayer({
         CanvasSource,
         Sprite,
@@ -66,8 +66,22 @@ export async function createPixiMediaScene(
   let mediaHeight = 0;
   let mediaWidth = 0;
   let mediaScene: PixiContainer | undefined;
+  let boxGraphics: PixiGraphics | undefined;
   let stagingTexture: TextureUpload | undefined;
   let stagingTextureSource: TextureUploadSource | undefined;
+
+  const attachMaskSprite = () => {
+    if (!mediaScene || !maskLayer || !boxGraphics) {
+      return;
+    }
+
+    const maskSprite = maskLayer.createSprite({
+      height: mediaHeight,
+      width: mediaWidth,
+    });
+    mediaScene.addChild(maskSprite);
+    mediaScene.addChild(boxGraphics);
+  };
 
   const updateMediaSceneFit = () => {
     if (!mediaScene || mediaWidth <= 0 || mediaHeight <= 0) {
@@ -123,6 +137,7 @@ export async function createPixiMediaScene(
       mediaSprite.width = mediaWidth;
       mediaSprite.height = mediaHeight;
       boxLayer.attachGraphics(boxes);
+      boxGraphics = boxes;
       if (maskSprite) {
         scene.addChild(mediaSprite, maskSprite, boxes);
       } else {
@@ -156,6 +171,32 @@ export async function createPixiMediaScene(
       } finally {
         sample.close();
       }
+    },
+
+    setPresentation(presentation, mediaTime) {
+      boxLayer.setBoxStyle(presentation.boxStyle);
+
+      if (presentation.maskStyle !== undefined) {
+        if (maskLayer) {
+          maskLayer.setMaskStyle(presentation.maskStyle);
+        } else if (presentation.maskStyle) {
+          maskLayer = createPixiMaskLayer({
+            CanvasSource,
+            Sprite,
+            Texture,
+            detectionTimeline: options.detectionTimeline,
+            maskStyle: presentation.maskStyle,
+          });
+          attachMaskSprite();
+        }
+      }
+
+      if (mediaWidth <= 0 || mediaHeight <= 0) {
+        return;
+      }
+
+      maskLayer?.drawFrame(mediaTime);
+      boxLayer.drawFrame(mediaTime);
     },
 
     destroy() {

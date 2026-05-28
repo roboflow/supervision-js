@@ -58,6 +58,7 @@ type ScheduledMaskTask =
 export interface PixiMaskLayer {
   createSprite(dimensions: { width: number; height: number }): PixiSprite;
   drawFrame(mediaTime: number): void;
+  setMaskStyle(maskStyle: MaskStyle | null | undefined): void;
   destroy(): void;
 }
 
@@ -71,6 +72,7 @@ export function createPixiMaskLayer(options: {
   let mediaHeight = 0;
   let mediaWidth = 0;
   let maskSprite: PixiSprite | undefined;
+  let maskStyle: MaskStyle | null = options.maskStyle;
   let activeFrameKey: string | null = null;
   let lastPreparedBufferSignature: string | null = null;
   let lastPreparedWindowMediaTime: number | null = null;
@@ -84,6 +86,7 @@ export function createPixiMaskLayer(options: {
     const key = getFrameKey(frame);
 
     if (
+      !maskStyle ||
       cache.has(key) ||
       scheduledFrameTasks.has(key) ||
       emptyFrameKeys.has(key) ||
@@ -178,7 +181,7 @@ export function createPixiMaskLayer(options: {
     drawFrame(mediaTime) {
       const detectionFrame = options.detectionTimeline.selectFrame(mediaTime);
 
-      if (!detectionFrame || !maskSprite) {
+      if (!maskStyle || !detectionFrame || !maskSprite) {
         activeFrameKey = null;
         hideSprite();
         return;
@@ -199,22 +202,22 @@ export function createPixiMaskLayer(options: {
       schedulePreparedWindow(detectionFrame, mediaTime);
     },
 
+    setMaskStyle(nextMaskStyle) {
+      if (nextMaskStyle === undefined) {
+        return;
+      }
+
+      maskStyle = nextMaskStyle;
+      clearPreparedFrames();
+
+      if (!maskStyle) {
+        hideSprite();
+      }
+    },
+
     destroy() {
       isDestroyed = true;
-      generation += 1;
-
-      for (const scheduledTask of scheduledFrameTasks.values()) {
-        cancelScheduledMaskTask(scheduledTask);
-      }
-
-      scheduledFrameTasks.clear();
-      emptyFrameKeys.clear();
-
-      for (const cachedTexture of cache.values()) {
-        cachedTexture.texture.destroy(true);
-      }
-
-      cache.clear();
+      clearPreparedFrames();
     },
   };
 
@@ -223,9 +226,13 @@ export function createPixiMaskLayer(options: {
     key: string,
     mediaTime: number,
   ): CachedMaskTexture | undefined {
+    if (!maskStyle) {
+      return undefined;
+    }
+
     const instructions = resolveMaskInstructions({
       frame,
-      maskStyle: options.maskStyle,
+      maskStyle,
       mediaTime,
     });
 
@@ -300,6 +307,26 @@ export function createPixiMaskLayer(options: {
       cache.delete(oldestKey);
       cachedTexture?.texture.destroy(true);
     }
+  }
+
+  function clearPreparedFrames() {
+    generation += 1;
+    activeFrameKey = null;
+    lastPreparedBufferSignature = null;
+    lastPreparedWindowMediaTime = null;
+
+    for (const scheduledTask of scheduledFrameTasks.values()) {
+      cancelScheduledMaskTask(scheduledTask);
+    }
+
+    scheduledFrameTasks.clear();
+    emptyFrameKeys.clear();
+
+    for (const cachedTexture of cache.values()) {
+      cachedTexture.texture.destroy(true);
+    }
+
+    cache.clear();
   }
 }
 

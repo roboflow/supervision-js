@@ -159,6 +159,14 @@ vi.mock("pixi.js", () => {
     }
 
     addChild(...children: unknown[]) {
+      for (const child of children) {
+        const existingIndex = this.children.indexOf(child);
+
+        if (existingIndex >= 0) {
+          this.children.splice(existingIndex, 1);
+        }
+      }
+
       this.children.push(...children);
       pixiMock.containerAddChild(...children);
       return children[0];
