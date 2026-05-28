@@ -36,6 +36,7 @@ export interface BufferedDetectionTimeline {
   prepare(mediaTime: number): Promise<void>;
   prefetch(mediaTime: number): void;
   selectFrame(mediaTime: number): DetectionFrame | undefined;
+  getBufferedFrames(): readonly DetectionFrame[];
   getState(): DetectionBufferState;
   destroy(): void;
 }

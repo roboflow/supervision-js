@@ -5,7 +5,10 @@ import type {
   ColdDetectionFrameStoreWriteSummary,
 } from "#types/detection-timeline";
 import type { DetectionFrame } from "#types/detections";
-import { copySortedDetectionFrames } from "#utils/detection-frames";
+import {
+  copySortedDetectionFrames,
+  filterDetectionFramesForRange,
+} from "#utils/detection-frames";
 
 const DEFAULT_DATABASE_NAME = "supervision-js-detection-frames";
 const DEFAULT_CHUNK_DURATION_SECONDS = 1;
@@ -149,13 +152,15 @@ export function createBrowserColdDetectionFrameStore(options?: {
       await transactionDone;
 
       return copySortedDetectionFrames(
-        chunkRecords
-          .filter((chunk): chunk is DetectionFrameChunkRecord => !!chunk)
-          .flatMap((chunk) => chunk.frames)
-          .filter(
-            (frame) =>
-              frame.mediaTime >= startTime && frame.mediaTime <= endTime,
-          ),
+        dedupeDetectionFrames(
+          chunkRecords
+            .filter((chunk): chunk is DetectionFrameChunkRecord => !!chunk)
+            .flatMap((chunk) => chunk.frames),
+        ).filter(
+          (frame) =>
+            filterDetectionFramesForRange([frame], startTime, endTime).length >
+            0,
+        ),
       );
     },
 
@@ -180,14 +185,26 @@ function createChunkRecords(options: {
   const chunks = new Map<number, DetectionFrame[]>();
 
   for (const frame of options.frames) {
-    const chunkIndex = getChunkIndex(
+    const startChunkIndex = getChunkIndex(
       frame.mediaTime,
       options.chunkDurationSeconds,
     );
-    const chunkFrames = chunks.get(chunkIndex) ?? [];
+    const endChunkIndex = getFrameEndChunkIndex(
+      frame,
+      options.chunkDurationSeconds,
+      startChunkIndex,
+    );
 
-    chunkFrames.push(frame);
-    chunks.set(chunkIndex, chunkFrames);
+    for (
+      let chunkIndex = startChunkIndex;
+      chunkIndex <= endChunkIndex;
+      chunkIndex += 1
+    ) {
+      const chunkFrames = chunks.get(chunkIndex) ?? [];
+
+      chunkFrames.push(frame);
+      chunks.set(chunkIndex, chunkFrames);
+    }
   }
 
   return Array.from(chunks.entries()).map(
@@ -267,10 +284,45 @@ function createWriteSummary(options: {
       (total, frame) => total + frame.detections.length,
       0,
     ),
-    endTime: lastFrame?.mediaTime ?? null,
+    endTime: lastFrame ? getFrameEffectiveEndTime(lastFrame) : null,
     frameCount: options.frames.length,
     startTime: firstFrame?.mediaTime ?? null,
   };
+}
+
+function getFrameEndChunkIndex(
+  frame: DetectionFrame,
+  chunkDurationSeconds: number,
+  startChunkIndex: number,
+) {
+  if (frame.endTime === undefined) {
+    return startChunkIndex;
+  }
+
+  return Math.max(
+    startChunkIndex,
+    Math.ceil(frame.endTime / chunkDurationSeconds) - 1,
+  );
+}
+
+function getFrameEffectiveEndTime(frame: DetectionFrame) {
+  return frame.endTime ?? frame.mediaTime;
+}
+
+function dedupeDetectionFrames(frames: readonly DetectionFrame[]) {
+  const dedupedFrames = new Map<string, DetectionFrame>();
+
+  for (const frame of frames) {
+    dedupedFrames.set(getDetectionFrameDedupeKey(frame), frame);
+  }
+
+  return Array.from(dedupedFrames.values());
+}
+
+function getDetectionFrameDedupeKey(frame: DetectionFrame) {
+  return frame.frameIndex === undefined
+    ? `time:${frame.mediaTime}`
+    : `index:${frame.frameIndex}`;
 }
 
 async function loadDatasetRecord(

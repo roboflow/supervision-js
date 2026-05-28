@@ -4,6 +4,7 @@ import type {
   MediaRendererSceneOptions,
 } from "./media-renderer-scene";
 import { createPixiBoxLayer } from "./pixi-box-layer";
+import { createPixiMaskLayer } from "./pixi-mask-layer";
 import { calculatePixiSceneFit } from "./pixi-scene-fit";
 import type {
   Application as PixiApplication,
@@ -31,6 +32,15 @@ export async function createPixiMediaScene(
     boxStyle: options.boxStyle,
     detectionTimeline: options.detectionTimeline,
   });
+  const maskLayer = options.maskStyle
+    ? createPixiMaskLayer({
+        CanvasSource,
+        Sprite,
+        Texture,
+        detectionTimeline: options.detectionTimeline,
+        maskStyle: options.maskStyle,
+      })
+    : undefined;
 
   await app.init({
     autoDensity: true,
@@ -104,12 +114,20 @@ export async function createPixiMediaScene(
       });
       const scene: PixiContainer = new Container();
       const mediaSprite = new Sprite({ texture });
+      const maskSprite = maskLayer?.createSprite({
+        height: mediaHeight,
+        width: mediaWidth,
+      });
       const boxes: PixiGraphics = new Graphics();
 
       mediaSprite.width = mediaWidth;
       mediaSprite.height = mediaHeight;
       boxLayer.attachGraphics(boxes);
-      scene.addChild(mediaSprite, boxes);
+      if (maskSprite) {
+        scene.addChild(mediaSprite, maskSprite, boxes);
+      } else {
+        scene.addChild(mediaSprite, boxes);
+      }
       app.stage.addChild(scene);
       mediaScene = scene;
       stagingTextureSource = canvasSource;
@@ -126,6 +144,7 @@ export async function createPixiMediaScene(
         sample.draw(stagingContext, 0, 0, mediaWidth, mediaHeight);
         stagingTextureSource?.update();
         stagingTexture?.update();
+        maskLayer?.drawFrame(sample.timestamp);
         const boxState = boxLayer.drawFrame(sample.timestamp);
         updateMediaSceneFit();
 
@@ -141,6 +160,7 @@ export async function createPixiMediaScene(
 
     destroy() {
       app.ticker.remove(updateMediaSceneFit);
+      maskLayer?.destroy();
       app.destroy(
         { removeView: true },
         {

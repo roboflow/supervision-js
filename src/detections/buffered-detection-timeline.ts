@@ -148,6 +148,10 @@ export function createBufferedDetectionTimeline(
       return selectDetectionFrame(buffer, mediaTime);
     },
 
+    getBufferedFrames() {
+      return copySortedDetectionFrames(buffer);
+    },
+
     getState() {
       return { ...state };
     },

@@ -5,6 +5,7 @@ export { createColdDetectionFrameSource } from "#detections/cold-detection-frame
 export { normalizeMedia } from "#media/media-normalization";
 export { createMediaRenderer } from "#renderers/media-renderer";
 export { BaseBoxStyle, RoundedBoxStyle } from "#styles/box-style";
+export { BaseMaskStyle } from "#styles/mask-style";
 export { BoxShape } from "#types/box-style";
 export type {
   BoxDrawInstruction,
@@ -13,6 +14,11 @@ export type {
   BoxStyle,
   BoxStyleContext,
 } from "#types/box-style";
+export type {
+  MaskDrawInstruction,
+  MaskStyle,
+  MaskStyleContext,
+} from "#types/mask-style";
 export {
   DetectionBufferStatus,
   type BufferedDetectionTimeline,
@@ -24,7 +30,14 @@ export {
   type DetectionBufferState,
   type DetectionFrameSource,
 } from "#types/detection-timeline";
-export type { Detection, DetectionFrame, Rect } from "#types/detections";
+export {
+  DetectionMaskEncoding,
+  type CompressedRleDetectionMask,
+  type Detection,
+  type DetectionFrame,
+  type DetectionMask,
+  type Rect,
+} from "#types/detections";
 export {
   MediaNormalizationAudioCodec,
   MediaNormalizationContainer,

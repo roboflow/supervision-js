@@ -209,6 +209,7 @@ export async function createMediaRendererCore(
       container: options.container,
       detectionTimeline,
       fit,
+      maskStyle: options.maskStyle,
     });
 
     const mediaSource = await providers.openMediaSource(options.src);

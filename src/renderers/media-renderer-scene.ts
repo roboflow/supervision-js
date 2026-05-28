@@ -5,12 +5,14 @@ import type {
   DetectionBufferState,
 } from "#types/detection-timeline";
 import type { MediaRendererFit } from "#types/media-renderer";
+import type { MaskStyle } from "#types/mask-style";
 
 export interface MediaRendererSceneOptions {
   readonly container: HTMLElement;
   readonly fit: MediaRendererFit;
   readonly detectionTimeline: BufferedDetectionTimeline;
   readonly boxStyle: BoxStyle | undefined;
+  readonly maskStyle: MaskStyle | undefined;
 }
 
 export interface PresentedMediaSample {

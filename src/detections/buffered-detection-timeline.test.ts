@@ -47,6 +47,24 @@ describe("buffered detection timeline", () => {
     expect(timeline.selectFrame(0.5)).toBeUndefined();
   });
 
+  it("exposes copied buffered frames for background preparation", async () => {
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 2,
+      bufferBehindSeconds: 0,
+      source: createArrayDetectionFrameSource(frames),
+    });
+
+    await timeline.prepare(0);
+
+    const bufferedFrames = timeline.getBufferedFrames();
+
+    expect(bufferedFrames.map((frame) => frame.mediaTime)).toEqual([0, 1]);
+    expect(bufferedFrames[0]).not.toBe(frames[0]);
+    expect(bufferedFrames[0]?.detections[0]?.rect).not.toBe(
+      frames[0]?.detections[0]?.rect,
+    );
+  });
+
   it("keeps the last good buffer and reports prefetch errors", async () => {
     const source = {
       loadFrames: vi

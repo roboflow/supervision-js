@@ -1,6 +1,8 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { BoxStyle } from "#types/box-style";
+import type { BufferedDetectionTimeline } from "#types/detection-timeline";
+import type { Detection } from "#types/detections";
 
 import {
   createDeferred,
@@ -17,7 +19,9 @@ import {
 type PackageEntrypoint = typeof import("./index");
 
 let BaseBoxStyle: PackageEntrypoint["BaseBoxStyle"];
+let BaseMaskStyle: PackageEntrypoint["BaseMaskStyle"];
 let DetectionBufferStatus: PackageEntrypoint["DetectionBufferStatus"];
+let DetectionMaskEncoding: PackageEntrypoint["DetectionMaskEncoding"];
 let RoundedBoxStyle: PackageEntrypoint["RoundedBoxStyle"];
 let MediaRendererPlaybackState: PackageEntrypoint["MediaRendererPlaybackState"];
 let MediaSourceStatus: PackageEntrypoint["MediaSourceStatus"];
@@ -27,7 +31,9 @@ describe("package entrypoint", () => {
     const entrypoint = await import("./index");
 
     BaseBoxStyle = entrypoint.BaseBoxStyle;
+    BaseMaskStyle = entrypoint.BaseMaskStyle;
     DetectionBufferStatus = entrypoint.DetectionBufferStatus;
+    DetectionMaskEncoding = entrypoint.DetectionMaskEncoding;
     RoundedBoxStyle = entrypoint.RoundedBoxStyle;
     MediaRendererPlaybackState = entrypoint.MediaRendererPlaybackState;
     MediaSourceStatus = entrypoint.MediaSourceStatus;
@@ -38,8 +44,10 @@ describe("package entrypoint", () => {
 
     expect(Object.keys(entrypoint).sort()).toEqual([
       "BaseBoxStyle",
+      "BaseMaskStyle",
       "BoxShape",
       "DetectionBufferStatus",
+      "DetectionMaskEncoding",
       "MediaNormalizationAudioCodec",
       "MediaNormalizationContainer",
       "MediaNormalizationFit",
@@ -58,6 +66,7 @@ describe("package entrypoint", () => {
     expect(entrypoint.createMediaRenderer).toEqual(expect.any(Function));
     expect(entrypoint.normalizeMedia).toEqual(expect.any(Function));
     expect(entrypoint.BaseBoxStyle).toEqual(expect.any(Function));
+    expect(entrypoint.BaseMaskStyle).toEqual(expect.any(Function));
     expect(entrypoint.RoundedBoxStyle).toEqual(expect.any(Function));
     expect(entrypoint.BoxShape).toEqual({
       Rect: "rect",
@@ -87,6 +96,9 @@ describe("package entrypoint", () => {
       Idle: "idle",
       Loading: "loading",
       Ready: "ready",
+    });
+    expect(entrypoint.DetectionMaskEncoding).toEqual({
+      CompressedRle: "compressedRle",
     });
     expect(entrypoint.MediaNormalizationContainer).toEqual({
       Mp4: "mp4",
@@ -131,6 +143,23 @@ describe("package entrypoint", () => {
     expect(coreSource).not.toContain("createPixiMediaScene");
     expect(coreSource).not.toContain('"pixi.js"');
     expect(coreSource).not.toContain('"mediabunny"');
+  });
+
+  it("resolves BaseMaskStyle defaults only for detections with masks", () => {
+    const style = new BaseMaskStyle();
+    const mask = {
+      counts: "021",
+      encoding: DetectionMaskEncoding.CompressedRle,
+      height: 2,
+      width: 2,
+    };
+
+    expect(style.resolve({ mask })).toEqual({
+      alpha: 0.35,
+      color: 0x00ff66,
+      mask,
+    });
+    expect(style.resolve({})).toBeUndefined();
   });
 
   it("uses Mediabunny and does not create a video element", async () => {
@@ -569,6 +598,242 @@ describe("package entrypoint", () => {
     });
 
     renderer.destroy();
+  });
+
+  it("does not create mask textures unless a mask style is supplied", async () => {
+    resetMocks();
+
+    const renderer = await createRenderer(false, false, {
+      detectionFrames: [
+        {
+          detections: [
+            {
+              mask: {
+                counts: "021",
+                encoding: DetectionMaskEncoding.CompressedRle,
+                height: 2,
+                width: 2,
+              },
+              rect: {
+                height: 20,
+                width: 10,
+                x: 4,
+                y: 5,
+              },
+            },
+          ],
+          mediaTime: 0,
+        },
+      ],
+    });
+
+    expect(pixiMock.canvasSourceOptions).toHaveLength(1);
+    expect(pixiMock.textureOptions).toHaveLength(1);
+    expect(pixiMock.spriteInstances).toHaveLength(1);
+
+    renderer.destroy();
+  });
+
+  it("cancels scheduled mask preparation when destroyed before it runs", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const renderer = await createRenderer(false, false, {
+        detectionFrames: [
+          {
+            detections: [
+              {
+                mask: {
+                  counts: "021",
+                  encoding: DetectionMaskEncoding.CompressedRle,
+                  height: 2,
+                  width: 2,
+                },
+              },
+            ],
+            mediaTime: 0,
+          },
+        ],
+        maskStyle: new BaseMaskStyle(),
+      });
+
+      expect(pixiMock.canvasSourceOptions).toHaveLength(1);
+      expect(pixiMock.textureOptions).toHaveLength(1);
+
+      renderer.destroy();
+      await vi.runAllTimersAsync();
+
+      expect(pixiMock.canvasSourceOptions).toHaveLength(1);
+      expect(pixiMock.textureOptions).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("prepares a composited mask texture without breaking box drawing", async () => {
+    resetMocks();
+
+    const resolve = vi.fn((detection: Detection) =>
+      detection.mask
+        ? {
+            alpha: 0.5,
+            color: 0xff0000,
+            mask: detection.mask,
+          }
+        : undefined,
+    );
+    const renderer = await createRenderer(false, false, {
+      boxStyle: new BaseBoxStyle({
+        stroke: {
+          alpha: 0.5,
+          color: 0x38bdf8,
+          width: 4,
+        },
+      }),
+      detectionFrames: [
+        {
+          detections: [
+            {
+              mask: {
+                counts: "021",
+                encoding: DetectionMaskEncoding.CompressedRle,
+                height: 2,
+                width: 2,
+              },
+              rect: {
+                height: 20,
+                width: 10,
+                x: 4,
+                y: 5,
+              },
+            },
+          ],
+          mediaTime: 0,
+        },
+      ],
+      maskStyle: { resolve },
+    });
+    const scene = pixiMock.containerInstances[0];
+    const boxGraphics = pixiMock.graphicsInstances[0];
+
+    await vi.waitFor(() => {
+      expect(pixiMock.canvasSourceOptions).toHaveLength(2);
+      expect(pixiMock.textureOptions).toHaveLength(2);
+    });
+
+    expect(resolve).toHaveBeenCalledWith(
+      expect.objectContaining({ mask: expect.any(Object) }),
+      expect.objectContaining({
+        detectionIndex: 0,
+        mediaTime: 0,
+      }),
+    );
+    expect(scene?.children).toEqual([
+      pixiMock.spriteInstances[0],
+      pixiMock.spriteInstances[1],
+      boxGraphics,
+    ]);
+    expect(pixiMock.spriteInstances[1]).toMatchObject({
+      height: 720,
+      texture: expect.any(Object),
+      visible: true,
+      width: 1280,
+    });
+    expect(boxGraphics.rect).toHaveBeenLastCalledWith(4, 5, 10, 20);
+    expect(boxGraphics.stroke).toHaveBeenLastCalledWith({
+      alpha: 0.5,
+      color: 0x38bdf8,
+      width: 4,
+    });
+
+    renderer.destroy();
+
+    expect(pixiMock.textureDestroy).toHaveBeenCalledWith(true);
+  });
+
+  it("does not rescan the mask warm window for every active frame change", async () => {
+    resetMocks();
+
+    const { createPixiMaskLayer } = await import("./renderers/pixi-mask-layer");
+    const { CanvasSource, Sprite, Texture } = await import("pixi.js");
+    const detectionFrames = [
+      {
+        detections: [
+          {
+            mask: {
+              counts: "021",
+              encoding: DetectionMaskEncoding.CompressedRle,
+              height: 2,
+              width: 2,
+            },
+          },
+        ],
+        mediaTime: 0,
+      },
+      {
+        detections: [
+          {
+            mask: {
+              counts: "021",
+              encoding: DetectionMaskEncoding.CompressedRle,
+              height: 2,
+              width: 2,
+            },
+          },
+        ],
+        mediaTime: 0.04,
+      },
+      {
+        detections: [
+          {
+            mask: {
+              counts: "021",
+              encoding: DetectionMaskEncoding.CompressedRle,
+              height: 2,
+              width: 2,
+            },
+          },
+        ],
+        mediaTime: 0.08,
+      },
+    ];
+    const detectionTimeline = {
+      destroy: vi.fn(),
+      getBufferedFrames: vi.fn(() => detectionFrames),
+      getState: vi.fn(() => ({
+        bufferEndTime: 5,
+        bufferStartTime: 0,
+        detectionCount: 3,
+        errorMessage: null,
+        frameCount: 3,
+        requestedEndTime: 5,
+        requestedStartTime: 0,
+        status: DetectionBufferStatus.Ready,
+      })),
+      prepare: vi.fn(),
+      prefetch: vi.fn(),
+      selectFrame: vi.fn((mediaTime: number) =>
+        detectionFrames.find((frame) => frame.mediaTime === mediaTime),
+      ),
+    } satisfies BufferedDetectionTimeline;
+
+    const layer = createPixiMaskLayer({
+      CanvasSource,
+      detectionTimeline,
+      maskStyle: new BaseMaskStyle(),
+      Sprite,
+      Texture,
+    });
+
+    layer.createSprite({ height: 720, width: 1280 });
+    layer.drawFrame(0);
+    layer.drawFrame(0.04);
+    layer.drawFrame(0.08);
+
+    expect(detectionTimeline.getBufferedFrames).toHaveBeenCalledOnce();
+
+    layer.destroy();
   });
 
   it("defaults partial box fill values", async () => {

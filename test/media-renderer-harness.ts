@@ -57,9 +57,18 @@ const mockState = vi.hoisted(() => {
       stroke: ReturnType<typeof vi.fn>;
     }>,
     stageAddChild: vi.fn(),
+    spriteInstances: [] as Array<{
+      height: number;
+      options: unknown;
+      texture: unknown;
+      visible: boolean;
+      width: number;
+    }>,
     tickerAdd: vi.fn(),
     tickerRemove: vi.fn(),
+    textureDestroy: vi.fn(),
     textureOptions: [] as unknown[],
+    textureUpdate: vi.fn(),
   };
   const mediaMock = {
     audioTracks: [{ type: "audio" }],
@@ -130,11 +139,14 @@ vi.mock("pixi.js", () => {
   }
 
   class Texture {
+    readonly id = pixiMock.textureOptions.length;
+
     constructor(options: unknown) {
       pixiMock.textureOptions.push(options);
     }
 
-    update = vi.fn();
+    destroy = pixiMock.textureDestroy;
+    update = pixiMock.textureUpdate;
   }
 
   class Container {
@@ -169,9 +181,14 @@ vi.mock("pixi.js", () => {
     anchor = { set: vi.fn() };
     height = 0;
     position = { set: vi.fn() };
+    texture: unknown;
+    visible = true;
     width = 0;
 
-    constructor(public readonly options: unknown) {}
+    constructor(public readonly options: { texture?: unknown } = {}) {
+      this.texture = options.texture;
+      pixiMock.spriteInstances.push(this);
+    }
   }
 
   return { Application, CanvasSource, Container, Graphics, Sprite, Texture };
@@ -274,6 +291,17 @@ vi.stubGlobal("performance", {
   now: domMock.performanceNow,
 });
 
+vi.stubGlobal(
+  "ImageData",
+  class ImageData {
+    constructor(
+      public readonly data: Uint8ClampedArray,
+      public readonly width: number,
+      public readonly height: number,
+    ) {}
+  },
+);
+
 export function resetMocks() {
   pixiMock.appDestroy.mockClear();
   pixiMock.appInit.mockClear();
@@ -284,9 +312,12 @@ export function resetMocks() {
   pixiMock.containerInstances.length = 0;
   pixiMock.graphicsInstances.length = 0;
   pixiMock.stageAddChild.mockClear();
+  pixiMock.spriteInstances.length = 0;
   pixiMock.tickerAdd.mockClear();
   pixiMock.tickerRemove.mockClear();
+  pixiMock.textureDestroy.mockClear();
   pixiMock.textureOptions.length = 0;
+  pixiMock.textureUpdate.mockClear();
   mediaMock.audioTracks = [{ type: "audio" }];
   mediaMock.canRead.mockClear();
   mediaMock.canRead.mockResolvedValue(true);
@@ -350,7 +381,10 @@ export function resetMocks() {
     };
   });
   domMock.getContext.mockClear();
-  domMock.getContext.mockReturnValue({});
+  domMock.getContext.mockReturnValue({
+    drawImage: vi.fn(),
+    putImageData: vi.fn(),
+  });
   domMock.performanceNow.mockClear();
   domMock.performanceNow.mockReturnValue(0);
   domMock.rafCallbacks.length = 0;
