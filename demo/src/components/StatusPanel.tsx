@@ -181,7 +181,10 @@ export function StatusPanel({
           }
         />
         <Readout label="Media" value={mediaState.status} />
-        <Readout label="Inference" value="Rapid 30 fps | masks to boxes" />
+        <Readout
+          label="Inference"
+          value="Rapid 30 fps | compressed RLE masks"
+        />
         <Readout label="Audio" value="video-only fixture" />
       </StatusGroup>
 

@@ -102,6 +102,21 @@ function deriveMaskBox(mask) {
   };
 }
 
+function normalizeMask(mask) {
+  const [height, width] = mask.size;
+
+  if (height !== MASK_HEIGHT || width !== MASK_WIDTH) {
+    throw new Error(`Unexpected mask size ${height}x${width}`);
+  }
+
+  return {
+    encoding: "compressedRle",
+    width,
+    height,
+    counts: mask.counts,
+  };
+}
+
 function getFrameIndex(eventId) {
   const finalSegment = eventId.split("/").at(-1);
   const frameIndex = Number(finalSegment);
@@ -136,6 +151,7 @@ function normalizeEvent(event) {
   return {
     frameIndex,
     mediaTime: roundTo(frameIndex / INFERENCE_FRAME_RATE, 3),
+    endTime: roundTo((frameIndex + 1) / INFERENCE_FRAME_RATE, 3),
     detections: event.result.map((detection) => {
       if (detection.type !== "mask") {
         throw new Error(`Unexpected detection type: ${detection.type}`);
@@ -146,6 +162,7 @@ function normalizeEvent(event) {
         className: detection.class,
         confidence: roundTo(detection.confidence, 6),
         rect: deriveMaskBox(detection.masks),
+        mask: normalizeMask(detection.masks),
         metadata: {
           rapidClassId: detection.id,
           rapidType: detection.type,
@@ -181,7 +198,7 @@ async function main() {
 
   const payload = {
     schema: "supervision-js.demo.basketball-sample.detections",
-    version: 1,
+    version: 2,
     video: {
       file: "basketball_sample.mp4",
       width: VIDEO_WIDTH,

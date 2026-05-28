@@ -1,5 +1,6 @@
 import {
   BoxShape,
+  DetectionMaskEncoding,
   MediaNormalizationContainer,
   MediaNormalizationVideoCodec,
   createBrowserColdDetectionFrameStore,
@@ -11,6 +12,8 @@ import {
   type Detection,
   type DetectionFrame,
   type DetectionFrameSource,
+  type MaskDrawInstruction,
+  type MaskStyle,
   type MediaNormalizationProgress,
   type NormalizedMedia,
 } from "supervision-js";
@@ -53,7 +56,17 @@ export interface BasketballSampleFixture {
 export interface BasketballSampleFrame {
   readonly frameIndex: number;
   readonly mediaTime: number;
-  readonly detections: readonly Detection[];
+  readonly endTime: number;
+  readonly detections: readonly BasketballSampleDetection[];
+}
+
+export interface BasketballSampleDetection extends Detection {
+  readonly mask: {
+    readonly encoding: DetectionMaskEncoding.CompressedRle;
+    readonly width: number;
+    readonly height: number;
+    readonly counts: string;
+  };
 }
 
 export interface BasketballSampleSummary {
@@ -138,6 +151,24 @@ export const basketballSampleBoxStyle: BoxStyle = {
         width: style.strokeWidth,
       },
       cornerRadius: detection.className === "basketball" ? 12 : 8,
+    };
+  },
+};
+
+export const basketballSampleMaskStyle: MaskStyle = {
+  resolve(detection: Detection): MaskDrawInstruction | undefined {
+    if (!detection.mask) {
+      return undefined;
+    }
+
+    const style = detection.className
+      ? (classStyles[detection.className] ?? fallbackStyle)
+      : fallbackStyle;
+
+    return {
+      alpha: detection.className === "basketball" ? 0.48 : 0.3,
+      color: style.fill,
+      mask: detection.mask,
     };
   },
 };
@@ -243,6 +274,8 @@ export function toDetectionFrames(
 ): DetectionFrame[] {
   return fixture.frames.map((frame) => ({
     detections: frame.detections,
+    endTime: frame.endTime,
+    frameIndex: frame.frameIndex,
     mediaTime: frame.mediaTime,
   }));
 }

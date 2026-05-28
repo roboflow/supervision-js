@@ -17,6 +17,7 @@ import {
 } from "./components/StatusPanel";
 import {
   basketballSampleBoxStyle,
+  basketballSampleMaskStyle,
   createBasketballSampleColdDetectionSource,
   loadBasketballSampleFixture,
   loadNormalizedBasketballSampleMedia,
@@ -151,6 +152,7 @@ export function App() {
           detectionSource: createdColdDetectionSource.detectionSource,
           fit: MediaRendererFit.Contain,
           loop: true,
+          maskStyle: basketballSampleMaskStyle,
           onSource: (state) => {
             if (isActive()) {
               setSourceState(state);
