@@ -1,9 +1,8 @@
 import { RENDER_ENGINE_PREFERENCE } from "#constants/media-renderer";
-import type { DecodedVideoSample } from "#media/media-source";
-import {
-  MediaRendererFit,
-  type MediaOverlayFrame,
-} from "#types/media-renderer";
+import type {
+  MediaRendererScene,
+  MediaRendererSceneOptions,
+} from "./media-renderer-scene";
 import { createPixiOverlayLayer } from "./pixi-overlay-layer";
 import { calculatePixiSceneFit } from "./pixi-scene-fit";
 import type {
@@ -22,23 +21,9 @@ type TextureUpload = {
   update(): void;
 };
 
-export interface PresentedMediaSample {
-  readonly mediaTime: number;
-  readonly activeOverlayFrameTime: number | null;
-  readonly activeOverlayRectCount: number;
-}
-
-export interface PixiMediaScene {
-  initializeMedia(dimensions: { width: number; height: number }): void;
-  presentSample(sample: DecodedVideoSample): PresentedMediaSample;
-  destroy(): void;
-}
-
-export async function createPixiMediaScene(options: {
-  readonly container: HTMLElement;
-  readonly fit: MediaRendererFit;
-  readonly overlayFrames: readonly MediaOverlayFrame[] | undefined;
-}): Promise<PixiMediaScene> {
+export async function createPixiMediaScene(
+  options: MediaRendererSceneOptions,
+): Promise<MediaRendererScene> {
   const { Application, CanvasSource, Container, Graphics, Sprite, Texture } =
     await import("pixi.js");
   const app: PixiApplication = new Application();

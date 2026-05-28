@@ -11,7 +11,7 @@ import {
   type MediaRendererState,
   type MediaSourceState,
 } from "#types/media-renderer";
-import type { PresentedMediaSample } from "./pixi-media-scene";
+import type { PresentedMediaSample } from "./media-renderer-scene";
 
 interface MediaRendererRuntimeStateOptions {
   readonly fit: MediaRendererFit;

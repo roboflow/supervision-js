@@ -34,6 +34,9 @@ foundation before designing a broad annotation framework.
   in `src/utils/`, media-source adapters and source state helpers in
   `src/media/`, playback scheduling in `src/playback/`, and Pixi scene
   composition plus renderer implementations in `src/renderers/`.
+- Keep renderer orchestration provider-agnostic. The public/default renderer
+  factory may wire Mediabunny and Pixi defaults, but the renderer core should
+  depend on small media-source and scene contracts rather than vendor modules.
 - Use package-private TypeScript aliases for cross-folder imports inside
   `src/`: `#constants/...`, `#media/...`, `#playback/...`, `#renderers/...`,
   `#types/...`, and `#utils/...`. Prefer `#types/...` for internal type modules;

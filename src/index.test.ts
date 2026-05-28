@@ -55,20 +55,28 @@ describe("package entrypoint", () => {
     });
   });
 
-  it("keeps renderer orchestration behind renderer and media boundaries", async () => {
+  it("keeps renderer orchestration provider-agnostic behind default adapters", async () => {
     const fsModuleName = "node:fs/promises";
     const { readFile } = (await import(fsModuleName)) as {
       readFile(path: URL, encoding: "utf8"): Promise<string>;
     };
-    const source = await readFile(
+    const defaultFactorySource = await readFile(
       new URL("./renderers/media-renderer.ts", import.meta.url),
       "utf8",
     );
+    const coreSource = await readFile(
+      new URL("./renderers/media-renderer-core.ts", import.meta.url),
+      "utf8",
+    );
 
-    expect(source).toContain("createMediaPlaybackController");
-    expect(source).toContain("createPixiMediaScene");
-    expect(source).not.toContain('import("pixi.js")');
-    expect(source).not.toContain('import("mediabunny")');
+    expect(defaultFactorySource).toContain("openMediabunnyMediaSource");
+    expect(defaultFactorySource).toContain("createPixiMediaScene");
+    expect(defaultFactorySource).toContain("createMediaRendererCore");
+    expect(coreSource).toContain("createMediaPlaybackController");
+    expect(coreSource).not.toContain("openMediabunnyMediaSource");
+    expect(coreSource).not.toContain("createPixiMediaScene");
+    expect(coreSource).not.toContain('"pixi.js"');
+    expect(coreSource).not.toContain('"mediabunny"');
   });
 
   it("uses Mediabunny and does not create a video element", async () => {
