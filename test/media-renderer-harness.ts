@@ -30,6 +30,13 @@ export function createDeferred<T>() {
   return { promise, reject, resolve };
 }
 
+type MockSamplesIterator = AsyncGenerator<MockVideoSample, void, unknown>;
+type MockSamplesImplementation = (
+  startTimestamp?: number,
+  endTimestamp?: number,
+  options?: unknown,
+) => MockSamplesIterator;
+
 const mockState = vi.hoisted(() => {
   const pixiMock = {
     appDestroy: vi.fn(),
@@ -73,8 +80,12 @@ const mockState = vi.hoisted(() => {
     inputConstructor: vi.fn(),
     iteratorReturn: vi.fn(async () => undefined),
     primaryVideoTrack: {} as Record<string, unknown>,
+    sampleNextCalls: [] as number[],
     samples: [] as MockVideoSample[],
+    samplesCallEnds: [] as Array<number | undefined>,
+    samplesCallOptions: [] as unknown[],
     samplesCallStarts: [] as Array<number | undefined>,
+    samplesImplementation: undefined as MockSamplesImplementation | undefined,
     tracks: [{ type: "video" }, { type: "audio" }],
     urlSourceConstructor: vi.fn(),
     videoSampleSinkConstructor: vi.fn(),
@@ -198,8 +209,19 @@ vi.mock("mediabunny", () => {
       return mediaMock.getSample(timestamp, options);
     }
 
-    samples(startTimestamp?: number) {
+    samples(startTimestamp?: number, endTimestamp?: number, options?: unknown) {
       mediaMock.samplesCallStarts.push(startTimestamp);
+      mediaMock.samplesCallEnds.push(endTimestamp);
+      mediaMock.samplesCallOptions.push(options);
+
+      if (mediaMock.samplesImplementation) {
+        return mediaMock.samplesImplementation(
+          startTimestamp,
+          endTimestamp,
+          options,
+        );
+      }
+
       let index = mediaMock.samples.findIndex(
         (sample) =>
           startTimestamp === undefined || sample.timestamp >= startTimestamp,
@@ -211,6 +233,8 @@ vi.mock("mediabunny", () => {
 
       return {
         async next() {
+          mediaMock.sampleNextCalls.push(index);
+
           if (index >= mediaMock.samples.length) {
             return { done: true as const, value: undefined };
           }
@@ -301,8 +325,12 @@ export function resetMocks() {
   mediaMock.getVideoTracks.mockClear();
   mediaMock.inputConstructor.mockClear();
   mediaMock.iteratorReturn.mockClear();
+  mediaMock.sampleNextCalls.length = 0;
   mediaMock.samples = [createMockSample(0), createMockSample(0.04)];
+  mediaMock.samplesCallEnds.length = 0;
+  mediaMock.samplesCallOptions.length = 0;
   mediaMock.samplesCallStarts.length = 0;
+  mediaMock.samplesImplementation = undefined;
   mediaMock.tracks = [{ type: "video" }, { type: "audio" }];
   mediaMock.urlSourceConstructor.mockClear();
   mediaMock.videoSampleSinkConstructor.mockClear();

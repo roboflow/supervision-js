@@ -37,13 +37,19 @@ describe("package entrypoint", () => {
     expect(Object.keys(entrypoint).sort()).toEqual([
       "BaseBoxStyle",
       "BoxShape",
+      "MediaNormalizationAudioCodec",
+      "MediaNormalizationContainer",
+      "MediaNormalizationFit",
+      "MediaNormalizationVideoCodec",
       "MediaRendererFit",
       "MediaRendererPlaybackState",
       "MediaSourceStatus",
       "RoundedBoxStyle",
       "createMediaRenderer",
+      "normalizeMedia",
     ]);
     expect(entrypoint.createMediaRenderer).toEqual(expect.any(Function));
+    expect(entrypoint.normalizeMedia).toEqual(expect.any(Function));
     expect(entrypoint.BaseBoxStyle).toEqual(expect.any(Function));
     expect(entrypoint.RoundedBoxStyle).toEqual(expect.any(Function));
     expect(entrypoint.BoxShape).toEqual({
@@ -67,6 +73,25 @@ describe("package entrypoint", () => {
       Error: "error",
       Loading: "loading",
       Ready: "ready",
+    });
+    expect(entrypoint.MediaNormalizationContainer).toEqual({
+      Mp4: "mp4",
+      WebM: "webm",
+    });
+    expect(entrypoint.MediaNormalizationVideoCodec).toEqual({
+      Av1: "av1",
+      Avc: "avc",
+      Vp8: "vp8",
+      Vp9: "vp9",
+    });
+    expect(entrypoint.MediaNormalizationAudioCodec).toEqual({
+      Aac: "aac",
+      Opus: "opus",
+    });
+    expect(entrypoint.MediaNormalizationFit).toEqual({
+      Contain: "contain",
+      Cover: "cover",
+      Fill: "fill",
     });
   });
 
@@ -143,26 +168,30 @@ describe("package entrypoint", () => {
     renderer.destroy();
   });
 
-  it("play requests a later media timestamp and draws that sample", async () => {
+  it("play reads sequential samples and draws the due sample", async () => {
     resetMocks();
     mediaMock.samples = [createMockSample(0, 0), createMockSample(0.04, 0)];
 
     const renderer = await createRenderer(false, false);
     mediaMock.getSample.mockClear();
+    mediaMock.samplesCallStarts.length = 0;
+    mediaMock.samplesCallEnds.length = 0;
+    mediaMock.samplesCallOptions.length = 0;
     await renderer.play();
     await vi.waitFor(() => {
       expect(domMock.requestAnimationFrame).toHaveBeenCalledOnce();
+      expect(mediaMock.samplesCallStarts).toEqual([0]);
     });
 
     flushAnimationFrame(40);
     await vi.waitFor(() => {
-      expect(mediaMock.getSample).toHaveBeenCalledOnce();
       expect(mediaMock.samples[1].draw).toHaveBeenCalledOnce();
     });
 
-    const [requestedMediaTime, options] = mediaMock.getSample.mock.calls[0];
-    expect(requestedMediaTime).toBeCloseTo(0.04);
-    expect(options).toEqual({ skipLiveWait: true });
+    expect(mediaMock.getSample).not.toHaveBeenCalled();
+    expect(mediaMock.samplesCallStarts).toEqual([0]);
+    expect(mediaMock.samplesCallEnds).toEqual([undefined]);
+    expect(mediaMock.samplesCallOptions).toEqual([{ skipLiveWait: true }]);
     expect(renderer.getState()).toMatchObject({
       currentTime: 0.04,
       presentedFrames: 2,
@@ -176,21 +205,58 @@ describe("package entrypoint", () => {
 
   it("closes duplicate samples without counting them as presented", async () => {
     resetMocks();
+    mediaMock.samples = [createMockSample(0, 0), createMockSample(0, 0)];
 
     const renderer = await createRenderer(false, false);
-    mediaMock.getSample.mockResolvedValueOnce(mediaMock.samples[0]);
+    mediaMock.getSample.mockClear();
     await renderer.play();
     flushAnimationFrame(40);
     await vi.waitFor(() => {
       expect(mediaMock.samples[0].close).toHaveBeenCalledTimes(2);
+      expect(mediaMock.samples[1].close).toHaveBeenCalledOnce();
     });
 
+    expect(mediaMock.getSample).not.toHaveBeenCalled();
     expect(renderer.getState()).toMatchObject({
       currentTime: 0,
       presentedFrames: 1,
     });
     expect(mediaMock.samples[0].draw).toHaveBeenCalledOnce();
     expect(mediaMock.samples[1].draw).not.toHaveBeenCalled();
+
+    renderer.destroy();
+  });
+
+  it("skips stale queued samples to catch up to the playback clock", async () => {
+    resetMocks();
+    mediaMock.samples = [
+      createMockSample(0, 0),
+      createMockSample(0.04, 0),
+      createMockSample(0.08, 0),
+      createMockSample(0.12, 0),
+    ];
+
+    const renderer = await createRenderer(false, false);
+    mediaMock.getSample.mockClear();
+
+    await renderer.play();
+    await vi.waitFor(() => {
+      expect(mediaMock.sampleNextCalls.length).toBeGreaterThanOrEqual(5);
+    });
+    flushAnimationFrame(120);
+    await vi.waitFor(() => {
+      expect(mediaMock.samples[3].draw).toHaveBeenCalledOnce();
+    });
+
+    expect(mediaMock.getSample).not.toHaveBeenCalled();
+    expect(mediaMock.samples[1].draw).not.toHaveBeenCalled();
+    expect(mediaMock.samples[2].draw).not.toHaveBeenCalled();
+    expect(mediaMock.samples[1].close).toHaveBeenCalledOnce();
+    expect(mediaMock.samples[2].close).toHaveBeenCalledOnce();
+    expect(renderer.getState()).toMatchObject({
+      currentTime: 0.12,
+      presentedFrames: 2,
+    });
 
     renderer.destroy();
   });
@@ -254,14 +320,15 @@ describe("package entrypoint", () => {
     );
 
     mediaMock.getSample.mockClear();
+    mediaMock.samplesCallStarts.length = 0;
     await renderer.play();
     flushAnimationFrame(70);
     await vi.waitFor(() => {
       expect(mediaMock.samples[1].draw).toHaveBeenCalledOnce();
     });
 
-    const [requestedMediaTime] = mediaMock.getSample.mock.calls[0];
-    expect(requestedMediaTime).toBeCloseTo(0.07);
+    expect(mediaMock.getSample).not.toHaveBeenCalled();
+    expect(mediaMock.samplesCallStarts).toEqual([0]);
     expect(boxGraphics.clear).toHaveBeenCalledTimes(2);
     expect(boxGraphics.rect).toHaveBeenLastCalledWith(4, 5, 10, 20);
     expect(boxGraphics.stroke).toHaveBeenLastCalledWith({
@@ -480,6 +547,8 @@ describe("package entrypoint", () => {
     });
 
     mediaMock.getSample.mockClear();
+    mediaMock.samplesCallStarts.length = 0;
+    mediaMock.samplesCallOptions.length = 0;
     await renderer.play();
     flushAnimationFrame(40);
     await vi.waitFor(() => {
@@ -497,9 +566,12 @@ describe("package entrypoint", () => {
       expect(mediaMock.samples[0].draw).toHaveBeenCalledTimes(2);
     });
 
-    expect(mediaMock.getSample).toHaveBeenLastCalledWith(0, {
-      skipLiveWait: true,
-    });
+    expect(mediaMock.getSample).not.toHaveBeenCalled();
+    expect(mediaMock.samplesCallStarts).toEqual([0, 0]);
+    expect(mediaMock.samplesCallOptions).toEqual([
+      { skipLiveWait: true },
+      { skipLiveWait: true },
+    ]);
     expect(renderer.getState()).toMatchObject({
       activeDetectionCount: 1,
       activeDetectionFrameTime: 0,
@@ -512,6 +584,7 @@ describe("package entrypoint", () => {
 
   it("does not redraw boxes or update detection diagnostics for duplicate samples", async () => {
     resetMocks();
+    mediaMock.samples = [createMockSample(0, 0), createMockSample(0, 0)];
 
     const renderer = await createRenderer(false, false, {
       detectionFrames: [
@@ -529,13 +602,15 @@ describe("package entrypoint", () => {
     const initialBoxRectCalls = boxGraphics.rect.mock.calls.length;
     const initialBoxClearCalls = boxGraphics.clear.mock.calls.length;
 
-    mediaMock.getSample.mockResolvedValueOnce(mediaMock.samples[0]);
+    mediaMock.getSample.mockClear();
     await renderer.play();
     flushAnimationFrame(40);
     await vi.waitFor(() => {
       expect(mediaMock.samples[0].close).toHaveBeenCalledTimes(2);
+      expect(mediaMock.samples[1].close).toHaveBeenCalledOnce();
     });
 
+    expect(mediaMock.getSample).not.toHaveBeenCalled();
     expect(boxGraphics.rect).toHaveBeenCalledTimes(initialBoxRectCalls);
     expect(boxGraphics.clear).toHaveBeenCalledTimes(initialBoxClearCalls);
     expect(renderer.getState()).toMatchObject({
@@ -625,18 +700,49 @@ describe("package entrypoint", () => {
     renderer.destroy();
   });
 
-  it("does not overlap decode requests while getSample is in flight", async () => {
+  it("does not overlap prefetch reads while a sample iterator read is in flight", async () => {
     resetMocks();
 
     const renderer = await createRenderer(false, false);
-    const deferred = createDeferred<MockVideoSample | null>();
+    const deferred = createDeferred<MockVideoSample>();
+    let iteratorNextCount = 0;
+    let pendingReadCount = 0;
+
     mediaMock.getSample.mockClear();
-    mediaMock.getSample.mockReturnValueOnce(deferred.promise);
+    mediaMock.samplesImplementation = () =>
+      ({
+        async next() {
+          pendingReadCount += 1;
+          iteratorNextCount += 1;
+
+          if (iteratorNextCount > 1) {
+            return { done: true as const, value: undefined };
+          }
+
+          const value = await deferred.promise;
+
+          return { done: false as const, value };
+        },
+        async return() {
+          await mediaMock.iteratorReturn();
+          return { done: true as const, value: undefined };
+        },
+        async throw(error?: unknown) {
+          throw error;
+        },
+        [Symbol.asyncIterator]() {
+          return this;
+        },
+      }) as AsyncGenerator<MockVideoSample, void, unknown>;
 
     await renderer.play();
+    await vi.waitFor(() => {
+      expect(pendingReadCount).toBe(1);
+    });
     flushAnimationFrame(40);
 
-    expect(mediaMock.getSample).toHaveBeenCalledOnce();
+    expect(mediaMock.getSample).not.toHaveBeenCalled();
+    expect(pendingReadCount).toBe(1);
     expect(domMock.rafCallbacks).toHaveLength(0);
 
     deferred.resolve(mediaMock.samples[1]);
@@ -652,18 +758,48 @@ describe("package entrypoint", () => {
     resetMocks();
 
     const renderer = await createRenderer(false, false);
-    const deferred = createDeferred<MockVideoSample | null>();
+    const deferred = createDeferred<MockVideoSample>();
+    let iteratorNextCount = 0;
+    let pendingReadCount = 0;
+
     mediaMock.getSample.mockClear();
-    mediaMock.getSample.mockReturnValueOnce(deferred.promise);
+    mediaMock.samplesImplementation = () =>
+      ({
+        async next() {
+          pendingReadCount += 1;
+          iteratorNextCount += 1;
+
+          if (iteratorNextCount > 1) {
+            return { done: true as const, value: undefined };
+          }
+
+          const value = await deferred.promise;
+
+          return { done: false as const, value };
+        },
+        async return() {
+          await mediaMock.iteratorReturn();
+          return { done: true as const, value: undefined };
+        },
+        async throw(error?: unknown) {
+          throw error;
+        },
+        [Symbol.asyncIterator]() {
+          return this;
+        },
+      }) as AsyncGenerator<MockVideoSample, void, unknown>;
 
     await renderer.play();
-    flushAnimationFrame(40);
+    await vi.waitFor(() => {
+      expect(pendingReadCount).toBe(1);
+    });
     renderer.pause();
     deferred.resolve(mediaMock.samples[1]);
 
     await vi.waitFor(() => {
       expect(mediaMock.samples[1].close).toHaveBeenCalledOnce();
     });
+    expect(mediaMock.getSample).not.toHaveBeenCalled();
     expect(mediaMock.samples[1].draw).not.toHaveBeenCalled();
     expect(renderer.getState().playbackState).toBe(
       MediaRendererPlaybackState.Paused,
@@ -676,18 +812,48 @@ describe("package entrypoint", () => {
     resetMocks();
 
     const renderer = await createRenderer(false, false);
-    const deferred = createDeferred<MockVideoSample | null>();
+    const deferred = createDeferred<MockVideoSample>();
+    let iteratorNextCount = 0;
+    let pendingReadCount = 0;
+
     mediaMock.getSample.mockClear();
-    mediaMock.getSample.mockReturnValueOnce(deferred.promise);
+    mediaMock.samplesImplementation = () =>
+      ({
+        async next() {
+          pendingReadCount += 1;
+          iteratorNextCount += 1;
+
+          if (iteratorNextCount > 1) {
+            return { done: true as const, value: undefined };
+          }
+
+          const value = await deferred.promise;
+
+          return { done: false as const, value };
+        },
+        async return() {
+          await mediaMock.iteratorReturn();
+          return { done: true as const, value: undefined };
+        },
+        async throw(error?: unknown) {
+          throw error;
+        },
+        [Symbol.asyncIterator]() {
+          return this;
+        },
+      }) as AsyncGenerator<MockVideoSample, void, unknown>;
 
     await renderer.play();
-    flushAnimationFrame(40);
+    await vi.waitFor(() => {
+      expect(pendingReadCount).toBe(1);
+    });
     renderer.destroy();
     deferred.resolve(mediaMock.samples[1]);
 
     await vi.waitFor(() => {
       expect(mediaMock.samples[1].close).toHaveBeenCalledOnce();
     });
+    expect(mediaMock.getSample).not.toHaveBeenCalled();
     expect(mediaMock.samples[1].draw).not.toHaveBeenCalled();
     expect(renderer.getState().playbackState).toBe(
       MediaRendererPlaybackState.Destroyed,

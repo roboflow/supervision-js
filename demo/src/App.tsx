@@ -1,83 +1,25 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  RoundedBoxStyle,
   createMediaRenderer,
   MediaRendererFit,
   MediaRendererPlaybackState,
-  type DetectionFrame,
   type MediaRenderer,
   type MediaRendererState,
   type MediaSourceState,
 } from "supervision-js";
+import {
+  basketballSampleBoxStyle,
+  loadNormalizedBasketballSampleMedia,
+  loadBasketballSampleFixture,
+  summarizeBasketballSampleFixture,
+  toDetectionFrames,
+  type BasketballSampleSummary,
+} from "./fixtures/basketball-sample";
 
-const sampleVideoSrc = "/media/sample.mp4";
-const sampleBoxStyle = new RoundedBoxStyle({
-  cornerRadius: 8,
-  fill: { alpha: 0.08, color: 0x00ff66 },
-  stroke: { alpha: 0.95, color: 0x00ff66, width: 4 },
-});
-const sampleDetectionFrames: readonly DetectionFrame[] = [
-  {
-    detections: [
-      {
-        className: "sample-object",
-        confidence: 0.92,
-        rect: {
-          height: 168,
-          width: 224,
-          x: 88,
-          y: 72,
-        },
-      },
-    ],
-    mediaTime: 0,
-  },
-  {
-    detections: [
-      {
-        className: "sample-object",
-        confidence: 0.88,
-        rect: {
-          height: 164,
-          width: 224,
-          x: 320,
-          y: 128,
-        },
-      },
-    ],
-    mediaTime: 1.25,
-  },
-  {
-    detections: [
-      {
-        className: "sample-object",
-        confidence: 0.84,
-        rect: {
-          height: 180,
-          width: 280,
-          x: 560,
-          y: 240,
-        },
-      },
-    ],
-    mediaTime: 2.5,
-  },
-  {
-    detections: [
-      {
-        className: "sample-object",
-        confidence: 0.9,
-        rect: {
-          height: 220,
-          width: 360,
-          x: 760,
-          y: 340,
-        },
-      },
-    ],
-    mediaTime: 3.75,
-  },
-];
+interface DemoMediaState {
+  readonly status: string;
+  readonly errorMessage: string | null;
+}
 
 export function App() {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -86,6 +28,12 @@ export function App() {
     null,
   );
   const [sourceState, setSourceState] = useState<MediaSourceState | null>(null);
+  const [fixtureSummary, setFixtureSummary] =
+    useState<BasketballSampleSummary | null>(null);
+  const [mediaState, setMediaState] = useState<DemoMediaState>({
+    errorMessage: null,
+    status: "normalizing WebM 30fps",
+  });
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -98,40 +46,88 @@ export function App() {
     const runId = effectRunRef.current + 1;
     effectRunRef.current = runId;
     let renderer: MediaRenderer | undefined;
+    let revokeMediaSource: (() => void) | undefined;
     let lastReadoutAt = 0;
     let cleanedUp = false;
     const isActive = () => !cleanedUp && effectRunRef.current === runId;
 
     container.replaceChildren();
     setErrorMessage(null);
+    setFixtureSummary(null);
+    setMediaState({
+      errorMessage: null,
+      status: "normalizing WebM 30fps",
+    });
     setRendererState(null);
     setSourceState(null);
 
-    void createMediaRenderer({
-      autoPlay: false,
-      boxStyle: sampleBoxStyle,
-      container,
-      detectionFrames: sampleDetectionFrames,
-      fit: MediaRendererFit.Contain,
-      loop: true,
-      onSource: (state) => {
-        if (isActive()) {
-          setSourceState(state);
-        }
-      },
-      onFrame: () => {
-        const now = performance.now();
+    void (async () => {
+      try {
+        const fixture = await loadBasketballSampleFixture();
+        const detectionFrames = toDetectionFrames(fixture);
 
-        if (!isActive() || now - lastReadoutAt < 250 || !renderer) {
+        if (!isActive()) {
           return;
         }
 
-        lastReadoutAt = now;
-        setRendererState(renderer.getState());
-      },
-      src: sampleVideoSrc,
-    })
-      .then(async (createdRenderer) => {
+        setFixtureSummary(summarizeBasketballSampleFixture(fixture));
+
+        const mediaSource = await loadNormalizedBasketballSampleMedia({
+          onProgress: ({ progress }) => {
+            if (isActive()) {
+              setMediaState({
+                errorMessage: null,
+                status: `normalizing WebM 30fps ${Math.round(progress * 100)}%`,
+              });
+            }
+          },
+        });
+
+        if (!isActive()) {
+          mediaSource.revoke?.();
+          return;
+        }
+
+        revokeMediaSource = mediaSource.revoke;
+        setMediaState(
+          mediaSource.normalized
+            ? {
+                errorMessage: null,
+                status: "normalized WebM 30fps",
+              }
+            : {
+                errorMessage:
+                  mediaSource.error?.message ??
+                  "Media normalization is unavailable in this browser.",
+                status: "source MP4 fallback",
+              },
+        );
+
+        const createdRenderer = await createMediaRenderer({
+          autoPlay: false,
+          boxStyle: basketballSampleBoxStyle,
+          container,
+          detectionFrames,
+          fit: MediaRendererFit.Contain,
+          loop: true,
+          onSource: (state) => {
+            if (isActive()) {
+              setSourceState(state);
+            }
+          },
+          onFrame: () => {
+            const now = performance.now();
+
+            if (!isActive() || now - lastReadoutAt < 250 || !renderer) {
+              return;
+            }
+
+            lastReadoutAt = now;
+            setRendererState(renderer.getState());
+          },
+          src: mediaSource.src,
+        });
+
         if (!isActive()) {
           createdRenderer.destroy();
           return;
@@ -156,8 +152,7 @@ export function App() {
             );
           }
         }
-      })
-      .catch((error: unknown) => {
+      } catch (error: unknown) {
         if (isActive()) {
           setErrorMessage(
             error instanceof Error
@@ -165,11 +160,13 @@ export function App() {
               : "Unable to start the media renderer.",
           );
         }
-      });
+      }
+    })();
 
     return () => {
       cleanedUp = true;
       renderer?.destroy();
+      revokeMediaSource?.();
     };
   }, []);
 
@@ -202,6 +199,7 @@ export function App() {
           padding: "8px 12px",
         }}
       >
+        <Readout label="Fixture" value="Basketball / Rapid" />
         <Readout label="State" value={rendererState?.playbackState ?? "-"} />
         <Readout
           label="Frames"
@@ -220,6 +218,26 @@ export function App() {
               ? rendererState.activeDetectionFrameTime === null
                 ? `none | ${rendererState.activeDetectionCount} detections`
                 : `${rendererState.activeDetectionFrameTime.toFixed(2)}s | ${rendererState.activeDetectionCount} detections`
+              : "-"
+          }
+        />
+        <Readout
+          label="Fixture Boxes"
+          value={
+            fixtureSummary
+              ? `${formatInteger(fixtureSummary.frameCount)} frames | ${formatInteger(
+                  fixtureSummary.detectionCount,
+                )} boxes`
+              : "loading"
+          }
+        />
+        <Readout
+          label="Missing"
+          value={
+            fixtureSummary
+              ? fixtureSummary.missingFrameIndexes.length === 0
+                ? "none"
+                : fixtureSummary.missingFrameIndexes.join(", ")
               : "-"
           }
         />
@@ -251,7 +269,12 @@ export function App() {
               : "-"
           }
         />
-        <Readout label="Audio" value="video-only" />
+        <Readout label="Media" value={mediaState.status} />
+        {mediaState.errorMessage ? (
+          <Readout label="Media Error" value={mediaState.errorMessage} />
+        ) : null}
+        <Readout label="Inference" value="Rapid 30 fps | masks to boxes" />
+        <Readout label="Audio" value="video-only fixture" />
         {errorMessage ? <Readout label="Error" value={errorMessage} /> : null}
         {!errorMessage &&
         rendererState?.playbackState === MediaRendererPlaybackState.Error ? (
@@ -266,6 +289,10 @@ export function App() {
       </aside>
     </main>
   );
+}
+
+function formatInteger(value: number) {
+  return new Intl.NumberFormat("en-US").format(value);
 }
 
 function Readout({ label, value }: { label: string; value: string }) {
