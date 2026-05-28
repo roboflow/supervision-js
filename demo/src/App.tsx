@@ -1,40 +1,64 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  createMediaRenderer,
   MediaRendererFit,
   MediaRendererPlaybackState,
+  createMediaRenderer,
   type MediaRenderer,
   type MediaRendererState,
   type MediaSourceState,
 } from "supervision-js";
+import { ControlBar } from "./components/ControlBar";
+import { DemoShell } from "./components/DemoShell";
+import { RendererViewport } from "./components/RendererViewport";
+import {
+  StatusPanel,
+  type StatusPanelColdDetectionState,
+  type StatusPanelMediaState,
+} from "./components/StatusPanel";
 import {
   basketballSampleBoxStyle,
-  loadNormalizedBasketballSampleMedia,
+  createBasketballSampleColdDetectionSource,
   loadBasketballSampleFixture,
-  summarizeBasketballSampleFixture,
-  toDetectionFrames,
+  loadNormalizedBasketballSampleMedia,
+  type BasketballSampleColdDetectionSource,
   type BasketballSampleSummary,
 } from "./fixtures/basketball-sample";
 
-interface DemoMediaState {
-  readonly status: string;
-  readonly errorMessage: string | null;
-}
+type DemoMediaState = StatusPanelMediaState;
+type DemoColdDetectionState = StatusPanelColdDetectionState;
+
+const initialColdDetectionState: DemoColdDetectionState = {
+  datasetId: null,
+  errorMessage: null,
+  status: "loading cold store",
+  writeSummary: null,
+};
 
 export function App() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const effectRunRef = useRef(0);
+  const rendererRef = useRef<MediaRenderer | null>(null);
+  const seekRunRef = useRef(0);
   const [rendererState, setRendererState] = useState<MediaRendererState | null>(
     null,
   );
   const [sourceState, setSourceState] = useState<MediaSourceState | null>(null);
   const [fixtureSummary, setFixtureSummary] =
     useState<BasketballSampleSummary | null>(null);
+  const [coldDetectionState, setColdDetectionState] =
+    useState<DemoColdDetectionState>(initialColdDetectionState);
   const [mediaState, setMediaState] = useState<DemoMediaState>({
     errorMessage: null,
     status: "normalizing WebM 30fps",
   });
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const syncRendererState = (renderer: MediaRenderer) => {
+    const state = renderer.getState();
+
+    setRendererState(state);
+    setSourceState(state.source);
+  };
 
   useEffect(() => {
     const container = containerRef.current;
@@ -45,6 +69,7 @@ export function App() {
 
     const runId = effectRunRef.current + 1;
     effectRunRef.current = runId;
+    let coldDetectionSource: BasketballSampleColdDetectionSource | undefined;
     let renderer: MediaRenderer | undefined;
     let revokeMediaSource: (() => void) | undefined;
     let lastReadoutAt = 0;
@@ -52,6 +77,8 @@ export function App() {
     const isActive = () => !cleanedUp && effectRunRef.current === runId;
 
     container.replaceChildren();
+    rendererRef.current = null;
+    setColdDetectionState(initialColdDetectionState);
     setErrorMessage(null);
     setFixtureSummary(null);
     setMediaState({
@@ -64,13 +91,22 @@ export function App() {
     void (async () => {
       try {
         const fixture = await loadBasketballSampleFixture();
-        const detectionFrames = toDetectionFrames(fixture);
+        const createdColdDetectionSource =
+          await createBasketballSampleColdDetectionSource(fixture);
+        coldDetectionSource = createdColdDetectionSource;
 
         if (!isActive()) {
+          createdColdDetectionSource.destroy();
           return;
         }
 
-        setFixtureSummary(summarizeBasketballSampleFixture(fixture));
+        setFixtureSummary(createdColdDetectionSource.fixtureSummary);
+        setColdDetectionState({
+          datasetId: createdColdDetectionSource.datasetId,
+          errorMessage: null,
+          status: createdColdDetectionSource.status,
+          writeSummary: createdColdDetectionSource.writeSummary,
+        });
 
         const mediaSource = await loadNormalizedBasketballSampleMedia({
           onProgress: ({ progress }) => {
@@ -85,6 +121,7 @@ export function App() {
 
         if (!isActive()) {
           mediaSource.revoke?.();
+          createdColdDetectionSource.destroy();
           return;
         }
 
@@ -107,7 +144,11 @@ export function App() {
           autoPlay: false,
           boxStyle: basketballSampleBoxStyle,
           container,
-          detectionFrames,
+          detectionBuffer: {
+            bufferAheadSeconds: 2,
+            bufferBehindSeconds: 0.5,
+          },
+          detectionSource: createdColdDetectionSource.detectionSource,
           fit: MediaRendererFit.Contain,
           loop: true,
           onSource: (state) => {
@@ -123,7 +164,7 @@ export function App() {
             }
 
             lastReadoutAt = now;
-            setRendererState(renderer.getState());
+            syncRendererState(renderer);
           },
           src: mediaSource.src,
         });
@@ -134,30 +175,38 @@ export function App() {
         }
 
         renderer = createdRenderer;
-        setRendererState(createdRenderer.getState());
-        setSourceState(createdRenderer.getState().source);
+        rendererRef.current = createdRenderer;
+        syncRendererState(createdRenderer);
 
         try {
           await createdRenderer.play();
           if (isActive()) {
-            setRendererState(createdRenderer.getState());
+            syncRendererState(createdRenderer);
           }
         } catch (error: unknown) {
           if (isActive()) {
-            setRendererState(createdRenderer.getState());
+            syncRendererState(createdRenderer);
             setErrorMessage(
-              error instanceof Error
-                ? error.message
-                : "Unable to play the media renderer.",
+              getErrorMessage(error, "Unable to play the media renderer."),
             );
           }
         }
       } catch (error: unknown) {
         if (isActive()) {
-          setErrorMessage(
-            error instanceof Error
-              ? error.message
-              : "Unable to start the media renderer.",
+          const message = getErrorMessage(
+            error,
+            "Unable to start the media renderer.",
+          );
+
+          setErrorMessage(message);
+          setColdDetectionState((current) =>
+            current.writeSummary
+              ? current
+              : {
+                  ...current,
+                  errorMessage: message,
+                  status: "error",
+                },
           );
         }
       }
@@ -165,148 +214,111 @@ export function App() {
 
     return () => {
       cleanedUp = true;
+      rendererRef.current = null;
       renderer?.destroy();
+      coldDetectionSource?.destroy();
       revokeMediaSource?.();
     };
   }, []);
 
+  const duration = rendererState?.duration ?? fixtureSummary?.duration ?? null;
+  const playbackState = rendererState?.playbackState ?? null;
+  const canUseRenderer =
+    playbackState !== null &&
+    playbackState !== MediaRendererPlaybackState.Loading &&
+    playbackState !== MediaRendererPlaybackState.Error &&
+    playbackState !== MediaRendererPlaybackState.Destroyed;
+
+  const handleTogglePlayback = () => {
+    const renderer = rendererRef.current;
+
+    if (!renderer || !canUseRenderer) {
+      return;
+    }
+
+    setErrorMessage(null);
+
+    if (
+      renderer.getState().playbackState === MediaRendererPlaybackState.Playing
+    ) {
+      renderer.pause();
+      syncRendererState(renderer);
+      return;
+    }
+
+    void renderer
+      .play()
+      .then(() => {
+        syncRendererState(renderer);
+      })
+      .catch((error: unknown) => {
+        syncRendererState(renderer);
+        setErrorMessage(
+          getErrorMessage(error, "Unable to play the media renderer."),
+        );
+      });
+  };
+
+  const handleSeek = (time: number) => {
+    const renderer = rendererRef.current;
+
+    if (!renderer || !canUseRenderer) {
+      return;
+    }
+
+    const currentSeekRun = seekRunRef.current + 1;
+    seekRunRef.current = currentSeekRun;
+    setErrorMessage(null);
+
+    void renderer
+      .seek(time)
+      .then(() => {
+        if (seekRunRef.current === currentSeekRun) {
+          syncRendererState(renderer);
+        }
+      })
+      .catch((error: unknown) => {
+        if (seekRunRef.current === currentSeekRun) {
+          syncRendererState(renderer);
+          setErrorMessage(
+            getErrorMessage(error, "Unable to seek the media renderer."),
+          );
+        }
+      });
+  };
+
   return (
-    <main
-      style={{
-        background: "#101114",
-        color: "#f5f7fb",
-        display: "grid",
-        gridTemplateRows: "1fr auto",
-        minHeight: "100vh",
-      }}
-    >
-      <div
-        ref={containerRef}
-        style={{
-          minHeight: 0,
-          overflow: "hidden",
-        }}
-      />
-      <aside
-        style={{
-          alignItems: "center",
-          background: "#1a1d23",
-          borderTop: "1px solid #2c3038",
-          display: "flex",
-          flexWrap: "wrap",
-          gap: 16,
-          minHeight: 48,
-          padding: "8px 12px",
-        }}
-      >
-        <Readout label="Fixture" value="Basketball / Rapid" />
-        <Readout label="State" value={rendererState?.playbackState ?? "-"} />
-        <Readout
-          label="Frames"
-          value={String(rendererState?.presentedFrames ?? "-")}
-        />
-        <Readout
-          label="Time"
-          value={
-            rendererState ? `${rendererState.currentTime.toFixed(2)}s` : "-"
+    <DemoShell
+      viewport={<RendererViewport containerRef={containerRef} />}
+      controlBar={
+        <ControlBar
+          activeDetectionFrameTime={
+            rendererState?.activeDetectionFrameTime ?? null
           }
+          canUseRenderer={canUseRenderer}
+          currentTime={rendererState?.currentTime ?? null}
+          detectionBuffer={rendererState?.detectionBuffer ?? null}
+          duration={duration}
+          onSeek={handleSeek}
+          onTogglePlayback={handleTogglePlayback}
+          playbackState={playbackState}
         />
-        <Readout
-          label="Detections"
-          value={
-            rendererState
-              ? rendererState.activeDetectionFrameTime === null
-                ? `none | ${rendererState.activeDetectionCount} detections`
-                : `${rendererState.activeDetectionFrameTime.toFixed(2)}s | ${rendererState.activeDetectionCount} detections`
-              : "-"
-          }
+      }
+      statusPanel={
+        <StatusPanel
+          coldDetectionState={coldDetectionState}
+          errorMessage={errorMessage}
+          fixtureSummary={fixtureSummary}
+          mediaState={mediaState}
+          playbackState={playbackState}
+          rendererState={rendererState}
+          sourceState={sourceState}
         />
-        <Readout
-          label="Fixture Boxes"
-          value={
-            fixtureSummary
-              ? `${formatInteger(fixtureSummary.frameCount)} frames | ${formatInteger(
-                  fixtureSummary.detectionCount,
-                )} boxes`
-              : "loading"
-          }
-        />
-        <Readout
-          label="Missing"
-          value={
-            fixtureSummary
-              ? fixtureSummary.missingFrameIndexes.length === 0
-                ? "none"
-                : fixtureSummary.missingFrameIndexes.join(", ")
-              : "-"
-          }
-        />
-        <Readout
-          label="Size"
-          value={
-            rendererState?.mediaWidth && rendererState.mediaHeight
-              ? `${rendererState.mediaWidth} x ${rendererState.mediaHeight}`
-              : "-"
-          }
-        />
-        <Readout
-          label="Source"
-          value={
-            sourceState
-              ? [
-                  sourceState.status,
-                  sourceState.formatName,
-                  sourceState.duration === null
-                    ? null
-                    : `${sourceState.duration.toFixed(2)}s`,
-                  sourceState.primaryVideoWidth &&
-                  sourceState.primaryVideoHeight
-                    ? `${sourceState.primaryVideoWidth} x ${sourceState.primaryVideoHeight}`
-                    : null,
-                ]
-                  .filter(Boolean)
-                  .join(" | ")
-              : "-"
-          }
-        />
-        <Readout label="Media" value={mediaState.status} />
-        {mediaState.errorMessage ? (
-          <Readout label="Media Error" value={mediaState.errorMessage} />
-        ) : null}
-        <Readout label="Inference" value="Rapid 30 fps | masks to boxes" />
-        <Readout label="Audio" value="video-only fixture" />
-        {errorMessage ? <Readout label="Error" value={errorMessage} /> : null}
-        {!errorMessage &&
-        rendererState?.playbackState === MediaRendererPlaybackState.Error ? (
-          <Readout
-            label="Error"
-            value={
-              rendererState.source.errorMessage ??
-              "Unable to decode media with Mediabunny."
-            }
-          />
-        ) : null}
-      </aside>
-    </main>
+      }
+    />
   );
 }
 
-function formatInteger(value: number) {
-  return new Intl.NumberFormat("en-US").format(value);
-}
-
-function Readout({ label, value }: { label: string; value: string }) {
-  return (
-    <span
-      style={{
-        display: "inline-flex",
-        gap: 6,
-        lineHeight: 1.4,
-        whiteSpace: "nowrap",
-      }}
-    >
-      <strong style={{ color: "#9ca3af", fontWeight: 600 }}>{label}</strong>
-      <span>{value}</span>
-    </span>
-  );
+function getErrorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
 }

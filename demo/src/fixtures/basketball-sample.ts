@@ -2,11 +2,15 @@ import {
   BoxShape,
   MediaNormalizationContainer,
   MediaNormalizationVideoCodec,
+  createBrowserColdDetectionFrameStore,
+  createColdDetectionFrameSource,
   normalizeMedia,
   type BoxDrawInstruction,
   type BoxStyle,
+  type ColdDetectionFrameStoreWriteSummary,
   type Detection,
   type DetectionFrame,
+  type DetectionFrameSource,
   type MediaNormalizationProgress,
   type NormalizedMedia,
 } from "supervision-js";
@@ -20,6 +24,9 @@ const basketballSampleDetectionsSrc = new URL(
   "../../fixtures/basketball_sample/detections.json",
   import.meta.url,
 ).href;
+
+const basketballSampleColdDatasetId = "basketball_sample_v1";
+const basketballSampleColdChunkDurationSeconds = 1;
 
 export interface BasketballSampleFixture {
   readonly schema: string;
@@ -50,9 +57,19 @@ export interface BasketballSampleFrame {
 }
 
 export interface BasketballSampleSummary {
+  readonly duration: number;
   readonly frameCount: number;
   readonly detectionCount: number;
   readonly missingFrameIndexes: readonly number[];
+}
+
+export interface BasketballSampleColdDetectionSource {
+  readonly datasetId: string;
+  readonly detectionSource: DetectionFrameSource;
+  readonly fixtureSummary: BasketballSampleSummary;
+  readonly status: "ready";
+  readonly writeSummary: ColdDetectionFrameStoreWriteSummary;
+  destroy(): void;
 }
 
 export interface BasketballSampleMediaOptions {
@@ -184,6 +201,43 @@ export async function loadNormalizedBasketballSampleMedia(
   }
 }
 
+export async function createBasketballSampleColdDetectionSource(
+  fixture: BasketballSampleFixture,
+): Promise<BasketballSampleColdDetectionSource> {
+  const frames = toDetectionFrames(fixture);
+  const store = createBrowserColdDetectionFrameStore();
+  const writeSummary = await store.putFrames({
+    chunkDurationSeconds: basketballSampleColdChunkDurationSeconds,
+    datasetId: basketballSampleColdDatasetId,
+    frames,
+  });
+  const coldSource = createColdDetectionFrameSource({
+    datasetId: basketballSampleColdDatasetId,
+    store,
+  });
+  let destroyed = false;
+  const destroy = () => {
+    if (destroyed) {
+      return;
+    }
+
+    destroyed = true;
+    store.destroy?.();
+  };
+
+  return {
+    datasetId: basketballSampleColdDatasetId,
+    detectionSource: {
+      destroy,
+      loadFrames: coldSource.loadFrames,
+    },
+    destroy,
+    fixtureSummary: summarizeBasketballSampleFixture(fixture),
+    status: "ready",
+    writeSummary,
+  };
+}
+
 export function toDetectionFrames(
   fixture: BasketballSampleFixture,
 ): DetectionFrame[] {
@@ -201,6 +255,7 @@ export function summarizeBasketballSampleFixture(
       (total, frame) => total + frame.detections.length,
       0,
     ),
+    duration: fixture.video.duration,
     frameCount: fixture.frames.length,
     missingFrameIndexes: fixture.inference.missingFrameIndexes,
   };
