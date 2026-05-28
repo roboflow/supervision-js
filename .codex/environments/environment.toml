@@ -36,6 +36,16 @@ icon = "tool"
 command = "cd \"$CODEX_WORKTREE_PATH\" && npm run demo:build"
 
 [[actions]]
+name = "Benchmark initial dev"
+icon = "run"
+command = "cd \"$CODEX_WORKTREE_PATH\" && npm run benchmark:initial:dev"
+
+[[actions]]
+name = "Build initial benchmark"
+icon = "tool"
+command = "cd \"$CODEX_WORKTREE_PATH\" && npm run benchmark:initial:build"
+
+[[actions]]
 name = "Format check"
 icon = "run"
 command = "cd \"$CODEX_WORKTREE_PATH\" && npm run format:check"

@@ -93,6 +93,8 @@ export function App() {
 
     container.replaceChildren();
     setErrorMessage(null);
+    setRendererState(null);
+    setSourceState(null);
 
     void createMediaRendererProof({
       autoPlay: false,

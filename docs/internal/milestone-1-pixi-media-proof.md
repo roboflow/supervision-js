@@ -2,7 +2,7 @@
 
 ## What This Proves
 
-This proof checks the smallest renderer-first claim: decoded video frames can be
+This completed proof checks the smallest renderer-first claim: decoded video frames can be
 presented inside a renderer-owned Pixi scene without a visible DOM media element.
 Mediabunny owns media source reading, container parsing, and video-frame decode.
 Pixi owns the visible composition surface: one canvas appended to the
@@ -60,5 +60,5 @@ synchronization model.
   This is not a final media scheduler.
 - Looping restarts from the first decoded timestamp and may need more precise
   handling for unusual files.
-- No annotations, boxes, masks, labels, tracks, keypoints, interactions,
+- No benchmark paths, annotations, bounding boxes, masks, labels, tracks, keypoints, interactions,
   persistence, WebGPU, or 3D work are included.

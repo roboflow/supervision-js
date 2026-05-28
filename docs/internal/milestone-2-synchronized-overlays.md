@@ -2,13 +2,13 @@
 
 ## What This Proves
 
-This proof checks the next renderer-first claim: simple visual overlays can be
+This completed proof checks the next renderer-first claim: simple visual overlays can be
 selected from decoded media sample timing and rendered inside the same Pixi
 scene as the media texture.
 
 The overlay input is intentionally tiny: timestamped frames with rectangle draw
 instructions in media pixel coordinates. This is synchronized overlay proof
-data, not an annotation schema, not a `Box2D` API, and not a primitive hierarchy.
+data, not an annotation schema, not a `BoundingBox` API, and not a primitive hierarchy.
 
 ## Media-Time Selection
 
@@ -43,6 +43,6 @@ overlay, or Pixi `VideoSource`. The user sees one renderer-owned Pixi canvas.
 
 ## Not Included
 
-No labels, masks, tracks, keypoints, editing, serialization, persistence,
-annotation identity, public API stability promise, or final `Box2D` model is
-included in this milestone.
+No benchmark path, labels, masks, tracks, keypoints, editing, serialization,
+persistence, annotation identity, public API stability promise, or final
+`BoundingBox` model is included in this milestone.

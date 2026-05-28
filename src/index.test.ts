@@ -644,6 +644,83 @@ describe("package entrypoint", () => {
     proof.destroy();
   });
 
+  it("does not redraw overlays when presented samples stay within the same active overlay frame", async () => {
+    resetMocks();
+    mediaMock.samples = [
+      createMockSample(0, 0),
+      createMockSample(0.02, 0),
+      createMockSample(0.04, 0),
+      createMockSample(0.08, 0),
+    ];
+
+    const proof = await createProof(false, false, {
+      overlayFrames: [
+        {
+          mediaTime: 0,
+          rects: [{ height: 20, width: 10, x: 4, y: 5 }],
+        },
+        {
+          mediaTime: 0.08,
+          rects: [{ height: 40, width: 30, x: 20, y: 10 }],
+        },
+      ],
+    });
+    const overlayGraphics = pixiMock.graphicsInstances[0];
+
+    expect(overlayGraphics.clear).toHaveBeenCalledOnce();
+    expect(overlayGraphics.rect).toHaveBeenCalledOnce();
+    expect(overlayGraphics.stroke).toHaveBeenCalledOnce();
+
+    await proof.play();
+    flushAnimationFrame(20);
+    await vi.waitFor(() => {
+      expect(mediaMock.samples[1].draw).toHaveBeenCalledOnce();
+    });
+
+    expect(overlayGraphics.clear).toHaveBeenCalledOnce();
+    expect(overlayGraphics.rect).toHaveBeenCalledOnce();
+    expect(overlayGraphics.stroke).toHaveBeenCalledOnce();
+    expect(proof.getState()).toMatchObject({
+      activeOverlayFrameTime: 0,
+      activeOverlayRectCount: 1,
+      currentTime: 0.02,
+      presentedFrames: 2,
+    });
+
+    flushAnimationFrame(40);
+    await vi.waitFor(() => {
+      expect(mediaMock.samples[2].draw).toHaveBeenCalledOnce();
+    });
+
+    expect(overlayGraphics.clear).toHaveBeenCalledOnce();
+    expect(overlayGraphics.rect).toHaveBeenCalledOnce();
+    expect(overlayGraphics.stroke).toHaveBeenCalledOnce();
+    expect(proof.getState()).toMatchObject({
+      activeOverlayFrameTime: 0,
+      activeOverlayRectCount: 1,
+      currentTime: 0.04,
+      presentedFrames: 3,
+    });
+
+    flushAnimationFrame(80);
+    await vi.waitFor(() => {
+      expect(mediaMock.samples[3].draw).toHaveBeenCalledOnce();
+    });
+
+    expect(overlayGraphics.clear).toHaveBeenCalledTimes(2);
+    expect(overlayGraphics.rect).toHaveBeenCalledTimes(2);
+    expect(overlayGraphics.stroke).toHaveBeenCalledTimes(2);
+    expect(overlayGraphics.rect).toHaveBeenLastCalledWith(20, 10, 30, 40);
+    expect(proof.getState()).toMatchObject({
+      activeOverlayFrameTime: 0.08,
+      activeOverlayRectCount: 1,
+      currentTime: 0.08,
+      presentedFrames: 4,
+    });
+
+    proof.destroy();
+  });
+
   it("does not overlap decode requests while getSample is in flight", async () => {
     resetMocks();
 

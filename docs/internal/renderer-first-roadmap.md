@@ -42,11 +42,11 @@ semantics.
 Done when: a demo updates simple overlays from media frame timing and shows
 enough timing diagnostics to evaluate timestamp or frame mismatch.
 
-Milestone 2 proof note: see
+Completed Milestone 2 proof note: see
 [`milestone-2-synchronized-overlays.md`](milestone-2-synchronized-overlays.md)
 for the current synchronized overlay proof. It selects overlay frames from
 decoded media sample timestamps and renders rectangles in the Pixi scene. It is
-not an annotation schema or a `Box2D` API.
+not an annotation schema or a `BoundingBox` API.
 
 Not included: a formal annotation schema, editing interactions, labels, tracks,
 or persistence.
@@ -68,9 +68,20 @@ This should produce rough performance numbers and practical constraints for the
 next design step. The project should learn from rendering pressure before
 inventing APIs for boxes, masks, tracks, or labels.
 
-Done when: the repo has a repeatable benchmark or demo note that records browser,
+Done when: the repo has a repeatable benchmark workspace that records browser,
 device, Pixi backend, shape count, frame time or FPS, update strategy, whether
 text is enabled, and any obvious bottlenecks.
+
+Milestone 3 proof note: see the separate `/benchmark/initial` workspace and
+[`milestone-3-dense-shape-measurement.md`](milestone-3-dense-shape-measurement.md)
+for the current dense simple-shape measurement proof. It is a benchmark path
+for renderer constraints, not an annotation API, not a `BoundingBox` model, and
+not a performance target.
+
+Current render strategy conclusions from that proof live in
+[`render-strategy-guidelines.md`](render-strategy-guidelines.md). They keep the
+first real rectangle path on Pixi `Graphics` with media-frame-keyed dirty
+redraws, while leaving higher-density dynamic alternatives as future work.
 
 Not included: final performance targets, worker architecture, masks, labels, or
 general optimization work not required to understand the first bottlenecks.
@@ -106,12 +117,13 @@ The abstraction should answer:
 
 ## Milestone 5: Add The First Concrete Annotation Type
 
-Goal: add one concrete annotation type, likely `Box2D`, after the renderer has
-proven media rendering, synchronization, and dense simple shape performance.
+Goal: add one concrete annotation type, likely a `BoundingBox`, after the
+renderer has proven media rendering, synchronization, and dense simple shape
+performance.
 
-`Box2D` is a good first candidate because it is common, visually simple, and
-useful in demos. It should still be implemented as a measured response to the
-previous milestones, not as the root of a complete primitive hierarchy.
+A bounding box is a good first candidate because it is common, visually simple,
+and useful in demos. It should still be implemented as a measured response to
+the previous milestones, not as the root of a complete primitive hierarchy.
 
 Done when: the renderer can display and update a small set of 2D boxes through
 the minimal annotation path from Milestone 4.

@@ -11,6 +11,7 @@ Before making project-direction or architecture changes, read:
 - [`problem-framing.md`](problem-framing.md)
 - [`architecture-principles.md`](architecture-principles.md)
 - [`renderer-first-roadmap.md`](renderer-first-roadmap.md)
+- [`pixijs-guidance.md`](pixijs-guidance.md)
 
 Those docs define the current product intent: prove the browser rendering
 foundation before designing a broad annotation framework.
@@ -29,6 +30,9 @@ foundation before designing a broad annotation framework.
 
 - `src/` is the package source.
 - `demo/` is a React + Vite consumer demo.
+- `benchmark/initial/` is the isolated Milestone 3 dense-shape benchmark.
+  Benchmark renderer code belongs there, not in the package entrypoint or the
+  normal demo.
 - The demo should consume `supervision-js` through the package boundary, not by
   importing source files directly.
 - Rollup builds package JavaScript.
@@ -51,13 +55,16 @@ Run from the repository root:
 - `npm run test`
 - `npm run build`
 - `npm run demo:build`
+- `npm run benchmark:initial:build`
 
 For focused iterative work, use separate terminals:
 
 - `npm run dev:lib`
 - `npm run demo:dev`
+- `npm run benchmark:initial:dev`
 
 The demo dev server binds to `http://127.0.0.1:5173` by default.
+The initial benchmark dev server binds to `http://127.0.0.1:5174` by default.
 
 ## Commit Checks
 

@@ -4,6 +4,7 @@
   "description": "Private prototype for browser-native computer vision rendering.",
   "private": true,
   "workspaces": [
+    "benchmark/initial",
     "demo"
   ],
   "type": "module",
@@ -34,13 +35,15 @@
     "dev:demo": "npm run dev -w demo",
     "demo:dev": "npm run build && npm run dev:demo",
     "demo:build": "npm run build && npm run build -w demo",
+    "benchmark:initial:dev": "npm run dev -w benchmark/initial",
+    "benchmark:initial:build": "npm run build -w benchmark/initial",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "verify": "npm run format:check && npm run lint && npm run typecheck && npm run test && npm run build && npm run demo:build",
+    "verify": "npm run format:check && npm run lint && npm run typecheck && npm run test && npm run build && npm run demo:build && npm run benchmark:initial:build",
     "prepare": "husky"
   },
   "lint-staged": {
