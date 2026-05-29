@@ -72,31 +72,82 @@ export function createBrowserColdDetectionFrameStore(options?: {
     await transactionDone;
   };
 
+  const putFrames = async (
+    writeOptions: ColdDetectionFrameStoreWriteOptions,
+  ) => {
+    const chunkDurationSeconds =
+      writeOptions.chunkDurationSeconds ?? DEFAULT_CHUNK_DURATION_SECONDS;
+
+    if (chunkDurationSeconds <= 0) {
+      throw new Error("chunkDurationSeconds must be greater than 0.");
+    }
+
+    const frames = copySortedDetectionFrames(writeOptions.frames);
+    const chunks = createChunkRecords({
+      chunkDurationSeconds,
+      datasetId: writeOptions.datasetId,
+      frames,
+    });
+    const summary = createWriteSummary({
+      chunkCount: chunks.length,
+      chunkDurationSeconds,
+      datasetId: writeOptions.datasetId,
+      frames,
+    });
+
+    await clearDataset(writeOptions.datasetId);
+
+    const openedDatabase = await getDatabase();
+    const transaction = openedDatabase.transaction(
+      [CHUNK_STORE_NAME, DATASET_STORE_NAME],
+      "readwrite",
+    );
+    const transactionDone = waitForTransaction(transaction);
+    const chunkStore = transaction.objectStore(CHUNK_STORE_NAME);
+    const datasetStore = transaction.objectStore(DATASET_STORE_NAME);
+
+    for (const chunk of chunks) {
+      chunkStore.put(chunk);
+    }
+
+    datasetStore.put(summary);
+    await transactionDone;
+
+    return summary;
+  };
+
   return {
-    async putFrames(writeOptions: ColdDetectionFrameStoreWriteOptions) {
-      const chunkDurationSeconds =
-        writeOptions.chunkDurationSeconds ?? DEFAULT_CHUNK_DURATION_SECONDS;
+    putFrames,
 
-      if (chunkDurationSeconds <= 0) {
-        throw new Error("chunkDurationSeconds must be greater than 0.");
-      }
-
+    async appendFrames(writeOptions: ColdDetectionFrameStoreWriteOptions) {
+      const openedDatabase = await getDatabase();
+      const existingDataset = await loadDatasetRecord(
+        openedDatabase,
+        writeOptions.datasetId,
+      );
+      const chunkDurationSeconds = resolveAppendChunkDuration(
+        writeOptions,
+        existingDataset,
+      );
       const frames = copySortedDetectionFrames(writeOptions.frames);
       const chunks = createChunkRecords({
         chunkDurationSeconds,
         datasetId: writeOptions.datasetId,
         frames,
       });
-      const summary = createWriteSummary({
-        chunkCount: chunks.length,
-        chunkDurationSeconds,
-        datasetId: writeOptions.datasetId,
-        frames,
-      });
 
-      await clearDataset(writeOptions.datasetId);
+      if (!existingDataset) {
+        return putFrames({
+          ...writeOptions,
+          chunkDurationSeconds,
+          frames,
+        });
+      }
 
-      const openedDatabase = await getDatabase();
+      if (chunks.length === 0) {
+        return existingDataset;
+      }
+
       const transaction = openedDatabase.transaction(
         [CHUNK_STORE_NAME, DATASET_STORE_NAME],
         "readwrite",
@@ -104,8 +155,24 @@ export function createBrowserColdDetectionFrameStore(options?: {
       const transactionDone = waitForTransaction(transaction);
       const chunkStore = transaction.objectStore(CHUNK_STORE_NAME);
       const datasetStore = transaction.objectStore(DATASET_STORE_NAME);
+      const existingChunkRecords = await Promise.all(
+        chunks.map((chunk) =>
+          requestToPromise<DetectionFrameChunkRecord | undefined>(
+            chunkStore.get(chunk.key),
+          ),
+        ),
+      );
+      const mergedChunks = chunks.map((chunk, index) =>
+        mergeChunkRecords(existingChunkRecords[index], chunk),
+      );
+      const summary = createAppendSummary({
+        appendedFrames: frames,
+        existingChunkRecords,
+        existingDataset,
+        mergedChunkRecords: mergedChunks,
+      });
 
-      for (const chunk of chunks) {
+      for (const chunk of mergedChunks) {
         chunkStore.put(chunk);
       }
 
@@ -173,6 +240,32 @@ export function createBrowserColdDetectionFrameStore(options?: {
       databasePromise = undefined;
     },
   };
+}
+
+function resolveAppendChunkDuration(
+  writeOptions: ColdDetectionFrameStoreWriteOptions,
+  existingDataset: DetectionFrameDatasetRecord | undefined,
+) {
+  const chunkDurationSeconds =
+    writeOptions.chunkDurationSeconds ??
+    existingDataset?.chunkDurationSeconds ??
+    DEFAULT_CHUNK_DURATION_SECONDS;
+
+  if (chunkDurationSeconds <= 0) {
+    throw new Error("chunkDurationSeconds must be greater than 0.");
+  }
+
+  if (
+    existingDataset &&
+    writeOptions.chunkDurationSeconds !== undefined &&
+    writeOptions.chunkDurationSeconds !== existingDataset.chunkDurationSeconds
+  ) {
+    throw new Error(
+      "chunkDurationSeconds must match the existing detection dataset.",
+    );
+  }
+
+  return chunkDurationSeconds;
 }
 
 function createChunkRecords(options: {
@@ -286,6 +379,98 @@ function createWriteSummary(options: {
     frameCount: options.frames.length,
     startTime: firstFrame?.mediaTime ?? null,
   };
+}
+
+function createAppendSummary(options: {
+  readonly existingDataset: DetectionFrameDatasetRecord;
+  readonly existingChunkRecords: readonly (
+    | DetectionFrameChunkRecord
+    | undefined
+  )[];
+  readonly mergedChunkRecords: readonly DetectionFrameChunkRecord[];
+  readonly appendedFrames: readonly DetectionFrame[];
+}): DetectionFrameDatasetRecord {
+  const existingAffectedFrames = dedupeDetectionFrames(
+    options.existingChunkRecords
+      .filter((chunk): chunk is DetectionFrameChunkRecord => !!chunk)
+      .flatMap((chunk) => chunk.frames),
+  );
+  const mergedAffectedFrames = dedupeDetectionFrames(
+    options.mergedChunkRecords.flatMap((chunk) => chunk.frames),
+  );
+  const appendedSummary = createWriteSummary({
+    chunkCount: options.mergedChunkRecords.length,
+    chunkDurationSeconds: options.existingDataset.chunkDurationSeconds,
+    datasetId: options.existingDataset.datasetId,
+    frames: options.appendedFrames,
+  });
+
+  return {
+    chunkCount:
+      options.existingDataset.chunkCount +
+      options.existingChunkRecords.filter((record) => !record).length,
+    chunkDurationSeconds: options.existingDataset.chunkDurationSeconds,
+    datasetId: options.existingDataset.datasetId,
+    detectionCount:
+      options.existingDataset.detectionCount -
+      countDetections(existingAffectedFrames) +
+      countDetections(mergedAffectedFrames),
+    endTime: maxNullableNumber(
+      options.existingDataset.endTime,
+      appendedSummary.endTime,
+    ),
+    frameCount:
+      options.existingDataset.frameCount -
+      existingAffectedFrames.length +
+      mergedAffectedFrames.length,
+    startTime: minNullableNumber(
+      options.existingDataset.startTime,
+      appendedSummary.startTime,
+    ),
+  };
+}
+
+function mergeChunkRecords(
+  existingChunk: DetectionFrameChunkRecord | undefined,
+  appendedChunk: DetectionFrameChunkRecord,
+): DetectionFrameChunkRecord {
+  return {
+    ...appendedChunk,
+    frames: copySortedDetectionFrames(
+      dedupeDetectionFrames([
+        ...(existingChunk?.frames ?? []),
+        ...appendedChunk.frames,
+      ]),
+    ),
+  };
+}
+
+function countDetections(frames: readonly DetectionFrame[]) {
+  return frames.reduce((total, frame) => total + frame.detections.length, 0);
+}
+
+function minNullableNumber(left: number | null, right: number | null) {
+  if (left === null) {
+    return right;
+  }
+
+  if (right === null) {
+    return left;
+  }
+
+  return Math.min(left, right);
+}
+
+function maxNullableNumber(left: number | null, right: number | null) {
+  if (left === null) {
+    return right;
+  }
+
+  if (right === null) {
+    return left;
+  }
+
+  return Math.max(left, right);
 }
 
 function getFrameEndChunkIndex(

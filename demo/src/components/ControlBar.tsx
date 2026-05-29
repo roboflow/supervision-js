@@ -3,6 +3,7 @@ import type {
   MediaRendererPlaybackState,
 } from "supervision-js";
 import { formatExactTime, formatTime } from "../format";
+import type { TimelineRange } from "../session/demo-session-types";
 import { PlaybackControls } from "./PlaybackControls";
 import { Readout } from "./Readout";
 import { TimelineView } from "./TimelineView";
@@ -16,6 +17,8 @@ export function ControlBar({
   onSeek,
   onTogglePlayback,
   playbackState,
+  processedRanges,
+  processingRanges,
 }: {
   readonly activeDetectionFrameTime: number | null;
   readonly canUseRenderer: boolean;
@@ -25,6 +28,8 @@ export function ControlBar({
   readonly onSeek: (time: number) => void;
   readonly onTogglePlayback: () => void;
   readonly playbackState: MediaRendererPlaybackState | null;
+  readonly processedRanges: readonly TimelineRange[];
+  readonly processingRanges: readonly TimelineRange[];
 }) {
   return (
     <section className="control-bar" aria-label="Playback controls">
@@ -40,6 +45,8 @@ export function ControlBar({
         disabled={!canUseRenderer}
         duration={duration}
         onSeek={onSeek}
+        processedRanges={processedRanges}
+        processingRanges={processingRanges}
       />
       <div className="control-bar__time">
         <Readout

@@ -3,6 +3,7 @@ export { createBrowserColdDetectionFrameStore } from "#detections/browser-cold-d
 export { createBufferedDetectionTimeline } from "#detections/buffered-detection-timeline";
 export { createChunkedDetectionFrameSource } from "#detections/chunked-detection-frame-source";
 export { createColdDetectionFrameSource } from "#detections/cold-detection-frame-source";
+export { createWritableDetectionFrameSource } from "#detections/writable-detection-frame-source";
 export { normalizeMedia } from "#media/media-normalization";
 export { prepareMedia, MediaPreparationError } from "#media/media-preparation";
 export { probeMedia } from "#media/media-probe";
@@ -43,6 +44,8 @@ export {
   type DetectionFrameChunkManifest,
   type DetectionFrameSelectionOptions,
   type DetectionFrameSource,
+  type DetectionFrameSourceVersionRange,
+  type WritableDetectionFrameSource,
 } from "#types/detection-timeline";
 export {
   DetectionMaskEncoding,

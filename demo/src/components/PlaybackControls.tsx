@@ -20,7 +20,13 @@ export function PlaybackControls({
       onClick={onTogglePlayback}
       type="button"
     >
-      {label}
+      <span
+        aria-hidden="true"
+        className={
+          isPlaying ? "playback-controls__pause" : "playback-controls__play"
+        }
+      />
+      <span className="playback-controls__label">{label}</span>
     </button>
   );
 }

@@ -28,21 +28,38 @@ export function createBufferedDetectionTimeline(
   let state = createIdleDetectionBufferState();
   let destroyed = false;
   let loadId = 0;
+  let bufferedSourceVersion: number | null = null;
+  let bufferedVersionRange: {
+    readonly startTime: number;
+    readonly endTime: number;
+  } | null = null;
   let inFlight:
     | {
         readonly id: number;
         readonly startTime: number;
         readonly endTime: number;
+        readonly sourceVersion: number;
         readonly promise: Promise<void>;
       }
     | undefined;
 
+  const getSourceVersion = (range?: {
+    readonly startTime: number;
+    readonly endTime: number;
+  }) => options.source.getVersion?.(range) ?? 0;
+  const isBufferFresh = () =>
+    bufferedVersionRange !== null &&
+    bufferedSourceVersion === getSourceVersion(bufferedVersionRange);
+
   const loadWindow = (mediaTime: number) => {
     const startTime = Math.max(0, mediaTime - bufferBehindSeconds);
     const endTime = Math.max(startTime, mediaTime + bufferAheadSeconds);
+    const versionRange = { endTime, startTime };
+    const sourceVersion = getSourceVersion(versionRange);
 
     if (
       inFlight &&
+      inFlight.sourceVersion === sourceVersion &&
       rangeContains(inFlight.startTime, inFlight.endTime, startTime, endTime)
     ) {
       return inFlight.promise;
@@ -67,6 +84,8 @@ export function createBufferedDetectionTimeline(
         }
 
         buffer = copySortedDetectionFrames(frames);
+        bufferedVersionRange = versionRange;
+        bufferedSourceVersion = getSourceVersion(versionRange);
         state = {
           bufferEndTime: endTime,
           bufferStartTime: startTime,
@@ -99,6 +118,7 @@ export function createBufferedDetectionTimeline(
       endTime,
       id: currentLoadId,
       promise,
+      sourceVersion,
       startTime,
     };
 
@@ -106,6 +126,7 @@ export function createBufferedDetectionTimeline(
   };
 
   const isBuffered = (mediaTime: number) =>
+    isBufferFresh() &&
     state.bufferStartTime !== null &&
     state.bufferEndTime !== null &&
     mediaTime >= state.bufferStartTime &&
@@ -163,6 +184,8 @@ export function createBufferedDetectionTimeline(
 
       destroyed = true;
       buffer = [];
+      bufferedSourceVersion = null;
+      bufferedVersionRange = null;
       state = {
         ...state,
         bufferEndTime: null,

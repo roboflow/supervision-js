@@ -66,6 +66,92 @@ describe("browser cold detection frame store", () => {
 
     expect(loadedFrames.map((frame) => frame.frameIndex)).toEqual([0, 1]);
   });
+
+  it("appends frames to an existing dataset without replacing earlier chunks", async () => {
+    installMemoryIndexedDb();
+    const store = createBrowserColdDetectionFrameStore({
+      databaseName: "supervision-js-test-append",
+    });
+
+    await store.putFrames({
+      chunkDurationSeconds: 1,
+      datasetId: "dataset",
+      frames: [
+        {
+          detections: [{ id: "first" }],
+          frameIndex: 0,
+          mediaTime: 0,
+        },
+      ],
+    });
+
+    const summary = await store.appendFrames({
+      datasetId: "dataset",
+      frames: [
+        {
+          detections: [{ id: "second" }, { id: "third" }],
+          frameIndex: 30,
+          mediaTime: 1,
+        },
+      ],
+    });
+    const loadedFrames = await store.loadFrames({
+      datasetId: "dataset",
+      endTime: 2,
+      startTime: 0,
+    });
+
+    expect(summary).toMatchObject({
+      chunkCount: 2,
+      detectionCount: 3,
+      endTime: 1,
+      frameCount: 2,
+      startTime: 0,
+    });
+    expect(loadedFrames.map((frame) => frame.frameIndex)).toEqual([0, 30]);
+  });
+
+  it("upserts appended frames with the same frame identity", async () => {
+    installMemoryIndexedDb();
+    const store = createBrowserColdDetectionFrameStore({
+      databaseName: "supervision-js-test-upsert",
+    });
+
+    await store.putFrames({
+      chunkDurationSeconds: 1,
+      datasetId: "dataset",
+      frames: [
+        {
+          detections: [{ id: "stale" }],
+          frameIndex: 0,
+          mediaTime: 0,
+        },
+      ],
+    });
+
+    const summary = await store.appendFrames({
+      datasetId: "dataset",
+      frames: [
+        {
+          detections: [{ id: "fresh" }, { id: "also-fresh" }],
+          frameIndex: 0,
+          mediaTime: 0,
+        },
+      ],
+    });
+    const loadedFrames = await store.loadFrames({
+      datasetId: "dataset",
+      endTime: 1,
+      startTime: 0,
+    });
+
+    expect(summary.frameCount).toBe(1);
+    expect(summary.detectionCount).toBe(2);
+    expect(loadedFrames).toHaveLength(1);
+    expect(
+      loadedFrames[0]?.detections.map((detection) => detection.id),
+    ).toEqual(["fresh", "also-fresh"]);
+  });
 });
 
 function installMemoryIndexedDb() {
@@ -211,11 +297,11 @@ class MemoryIndex {
     const matchingKeys = Array.from(this.records.entries())
       .filter(([, record]) => getDatasetId(record) === range.only)
       .map(([key]) => key);
-    const index = 0;
+    let index = 0;
     const advance = () => {
       request.result =
         index < matchingKeys.length
-          ? new MemoryCursor(this.records, matchingKeys[index]!, advance)
+          ? new MemoryCursor(this.records, matchingKeys[index++]!, advance)
           : undefined;
       request.onsuccess?.();
     };

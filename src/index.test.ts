@@ -69,11 +69,15 @@ describe("package entrypoint", () => {
       "createChunkedDetectionFrameSource",
       "createColdDetectionFrameSource",
       "createMediaRenderer",
+      "createWritableDetectionFrameSource",
       "normalizeMedia",
       "prepareMedia",
       "probeMedia",
     ]);
     expect(entrypoint.createMediaRenderer).toEqual(expect.any(Function));
+    expect(entrypoint.createWritableDetectionFrameSource).toEqual(
+      expect.any(Function),
+    );
     expect(entrypoint.normalizeMedia).toEqual(expect.any(Function));
     expect(entrypoint.prepareMedia).toEqual(expect.any(Function));
     expect(entrypoint.MediaPreparationError).toEqual(expect.any(Function));

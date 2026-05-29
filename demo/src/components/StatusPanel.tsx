@@ -62,7 +62,7 @@ export function StatusPanel({
     <section className="status-panel" aria-label="Renderer status">
       <StatusGroup title="Playback">
         <Readout
-          label="Fixture"
+          label="Source"
           value={fixtureSummary?.fixtureName ?? "loading"}
         />
         <Readout label="State" value={playbackState ?? "-"} />
@@ -146,7 +146,7 @@ export function StatusPanel({
           }
         />
         <Readout
-          label="Fixture Detections"
+          label="Detections"
           value={
             fixtureSummary
               ? `${formatInteger(fixtureSummary.frameCount)} frames | ${formatInteger(
@@ -209,7 +209,7 @@ export function StatusPanel({
               : "-"
           }
         />
-        <Readout label="Audio" value="video-only fixture" />
+        <Readout label="Audio" value="video-only source" />
       </StatusGroup>
 
       {hasErrors ? (

@@ -19,6 +19,11 @@ export interface DetectionFrameSelectionOptions {
   readonly frameIndexOriginTime?: number;
 }
 
+export interface DetectionFrameSourceVersionRange {
+  readonly startTime: number;
+  readonly endTime: number;
+}
+
 export interface DetectionBufferOptions extends DetectionFrameSelectionOptions {
   readonly bufferAheadSeconds?: number;
   readonly bufferBehindSeconds?: number;
@@ -40,6 +45,7 @@ export interface DetectionFrameSource {
     startTime: number,
     endTime: number,
   ): Promise<readonly DetectionFrame[]>;
+  getVersion?(range?: DetectionFrameSourceVersionRange): number;
   destroy?(): void;
 }
 
@@ -113,9 +119,25 @@ export interface ColdDetectionFrameStore {
   putFrames(
     options: ColdDetectionFrameStoreWriteOptions,
   ): Promise<ColdDetectionFrameStoreWriteSummary>;
+  appendFrames(
+    options: ColdDetectionFrameStoreWriteOptions,
+  ): Promise<ColdDetectionFrameStoreWriteSummary>;
   loadFrames(
     options: ColdDetectionFrameStoreLoadOptions,
   ): Promise<readonly DetectionFrame[]>;
   clearDataset(datasetId: string): Promise<void>;
   destroy?(): void;
+}
+
+export interface WritableDetectionFrameSource extends DetectionFrameSource {
+  readonly datasetId: string;
+  appendFrames(
+    frames: readonly DetectionFrame[],
+  ): Promise<ColdDetectionFrameStoreWriteSummary>;
+  replaceFrames(
+    frames: readonly DetectionFrame[],
+  ): Promise<ColdDetectionFrameStoreWriteSummary>;
+  clear(): Promise<void>;
+  getSummary(): ColdDetectionFrameStoreWriteSummary | null;
+  getVersion(range?: DetectionFrameSourceVersionRange): number;
 }

@@ -6,42 +6,37 @@ import {
   type RefObject,
 } from "react";
 import {
-  DetectionFrameSelectionMode,
-  MediaRendererFit,
   MediaRendererPlaybackState,
-  createMediaRenderer,
   type MediaRenderer,
   type MediaRendererState,
   type MediaSourceState,
+  type WritableDetectionFrameSource,
 } from "supervision-js";
 import type {
   BasketballSampleDetectionSource,
-  BasketballSampleDetectionSourceSummary,
   BasketballSampleSummary,
 } from "../fixtures/basketball-sample";
-import {
-  createBasketballSampleDetectionSource,
-  defaultBasketballSampleFixture,
-  loadBasketballSampleMedia,
-  loadBasketballSampleDetectionManifest,
-} from "../fixtures/basketball-sample";
+import { defaultBasketballSampleFixture } from "../fixtures/basketball-sample";
 import {
   createBasketballSamplePresentation,
   defaultBasketballPresentationSettings,
   type BasketballPresentationSettings,
 } from "../presentation/basketball-presentation";
+import { createBasketballSession } from "../session/basketball-session";
+import { DEFAULT_UPLOAD_CLASS_NAMES } from "../session/demo-session-config";
+import {
+  DemoSourceMode,
+  type DemoDetectionSourceState,
+  type DemoMediaState,
+  type UploadInferenceState,
+} from "../session/demo-session-types";
+import {
+  createUploadSession,
+  type UploadRunRequest,
+} from "../session/upload-session";
 
-export interface DemoMediaState {
-  readonly errorMessage: string | null;
-  readonly status: string;
-}
-
-export interface DemoDetectionSourceState {
-  readonly datasetId: string | null;
-  readonly errorMessage: string | null;
-  readonly sourceSummary: BasketballSampleDetectionSourceSummary | null;
-  readonly status: string;
-}
+export { DemoSourceMode };
+export type { DemoDetectionSourceState, DemoMediaState, UploadInferenceState };
 
 export interface BasketballDemoRendererState {
   readonly canUseRenderer: boolean;
@@ -54,13 +49,27 @@ export interface BasketballDemoRendererState {
   readonly playbackState: MediaRendererPlaybackState | null;
   readonly presentationSettings: BasketballPresentationSettings;
   readonly rendererState: MediaRendererState | null;
+  readonly sourceControlsDisabled: boolean;
+  readonly sourceMode: DemoSourceMode;
   readonly sourceState: MediaSourceState | null;
+  readonly uploadApiKey: string;
+  readonly uploadClassNames: string;
+  readonly uploadFileName: string | null;
+  readonly uploadInferenceState: UploadInferenceState;
+  readonly onCancelUploadInference: () => void;
   readonly onSeek: (time: number) => void;
+  readonly onStartUploadInference: () => void;
   readonly onTogglePlayback: () => void;
+  readonly onUploadFileChange: (file: File | null) => void;
   readonly setPresentationSettings: (
     settings: BasketballPresentationSettings,
   ) => void;
+  readonly setSourceMode: (mode: DemoSourceMode) => void;
+  readonly setUploadApiKey: (apiKey: string) => void;
+  readonly setUploadClassNames: (classNames: string) => void;
 }
+
+const activeBasketballFixture = defaultBasketballSampleFixture;
 
 const initialDetectionSourceState: DemoDetectionSourceState = {
   datasetId: null,
@@ -69,13 +78,25 @@ const initialDetectionSourceState: DemoDetectionSourceState = {
   status: "loading cold source",
 };
 
-const activeBasketballFixture = defaultBasketballSampleFixture;
+const initialUploadInferenceState: UploadInferenceState = {
+  completedFrames: 0,
+  errorMessage: null,
+  inferredDetections: 0,
+  preparedMedia: null,
+  processedRanges: [],
+  processingRanges: [],
+  status: "idle",
+  statusLabel: "choose media, API key, and prompts",
+  totalFrames: 0,
+};
 
 export function useBasketballDemoRenderer(): BasketballDemoRendererState {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const effectRunRef = useRef(0);
   const rendererRef = useRef<MediaRenderer | null>(null);
   const seekRunRef = useRef(0);
+  const uploadAbortRef = useRef<AbortController | null>(null);
+  const uploadFileRef = useRef<File | null>(null);
   const presentationSettingsRef = useRef<BasketballPresentationSettings>(
     defaultBasketballPresentationSettings,
   );
@@ -96,6 +117,19 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
     useState<BasketballPresentationSettings>(
       defaultBasketballPresentationSettings,
     );
+  const [sourceMode, setSourceModeState] = useState<DemoSourceMode>(
+    DemoSourceMode.Basketball,
+  );
+  const [uploadApiKey, setUploadApiKey] = useState("");
+  const [uploadClassNames, setUploadClassNames] = useState(
+    DEFAULT_UPLOAD_CLASS_NAMES,
+  );
+  const [uploadFileName, setUploadFileName] = useState<string | null>(null);
+  const [uploadInferenceState, setUploadInferenceState] =
+    useState<UploadInferenceState>(initialUploadInferenceState);
+  const [uploadRun, setUploadRun] = useState<
+    (UploadRunRequest & { readonly id: number }) | null
+  >(null);
 
   const syncRendererState = useCallback((renderer: MediaRenderer) => {
     const state = renderer.getState();
@@ -113,176 +147,124 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
 
     const runId = effectRunRef.current + 1;
     effectRunRef.current = runId;
-    let detectionSource: BasketballSampleDetectionSource | undefined;
+    let detectionSource:
+      | BasketballSampleDetectionSource
+      | WritableDetectionFrameSource
+      | undefined;
     let renderer: MediaRenderer | undefined;
+    let uploadedMediaObjectUrl: string | undefined;
     let lastReadoutAt = 0;
     let cleanedUp = false;
+    const abortController =
+      sourceMode === DemoSourceMode.Upload ? new AbortController() : undefined;
     const isActive = () => !cleanedUp && effectRunRef.current === runId;
+    const onFrame = () => {
+      const now = performance.now();
 
-    container.replaceChildren();
-    rendererRef.current = null;
-    setDetectionSourceState(initialDetectionSourceState);
-    setErrorMessage(null);
-    setFixtureSummary(null);
-    setMediaState({
-      errorMessage: null,
-      status: activeBasketballFixture.mediaLoadingStatusLabel,
-    });
-    setRendererState(null);
-    setSourceState(null);
+      if (!isActive() || now - lastReadoutAt < 250 || !renderer) {
+        return;
+      }
+
+      lastReadoutAt = now;
+      syncRendererState(renderer);
+    };
+
+    if (sourceMode === DemoSourceMode.Upload) {
+      uploadAbortRef.current = abortController ?? null;
+    }
+
+    resetRendererView(container, sourceMode);
 
     void (async () => {
       try {
-        const manifest = await loadBasketballSampleDetectionManifest(
-          activeBasketballFixture,
-        );
-        const createdDetectionSource = createBasketballSampleDetectionSource(
-          manifest,
-          activeBasketballFixture,
-        );
-        detectionSource = createdDetectionSource;
+        if (sourceMode === DemoSourceMode.Basketball) {
+          const session = await createBasketballSession({
+            container,
+            definition: activeBasketballFixture,
+            isActive,
+            onDetectionSourceState: setDetectionSourceState,
+            onFixtureSummary: setFixtureSummary,
+            onFrame,
+            onMediaState: setMediaState,
+            onSourceState: setSourceState,
+            presentationSettings: presentationSettingsRef.current,
+          });
 
-        if (!isActive()) {
-          createdDetectionSource.destroy();
-          return;
+          detectionSource = session.detectionSource;
+          renderer = session.renderer;
+        } else if (uploadRun) {
+          const session = await createUploadSession({
+            abortSignal: abortController!.signal,
+            container,
+            isActive,
+            onDetectionSourceState: setDetectionSourceState,
+            onFixtureSummary: setFixtureSummary,
+            onFrame,
+            onMediaState: setMediaState,
+            onSourceState: setSourceState,
+            onUploadState: setUploadInferenceState,
+            presentationSettings: presentationSettingsRef.current,
+            uploadRun,
+          });
+
+          detectionSource = session.detectionSource;
+          renderer = session.renderer;
+          uploadedMediaObjectUrl = session.mediaObjectUrl;
         }
 
-        setFixtureSummary(createdDetectionSource.fixtureSummary);
-        setDetectionSourceState({
-          datasetId: createdDetectionSource.datasetId,
-          errorMessage: null,
-          sourceSummary: createdDetectionSource.sourceSummary,
-          status: createdDetectionSource.status,
-        });
-
-        const mediaSource = await loadBasketballSampleMedia(
-          activeBasketballFixture,
-        );
-
-        if (!isActive()) {
-          createdDetectionSource.destroy();
-          return;
-        }
-
-        setMediaState({
-          errorMessage: mediaSource.error?.message ?? null,
-          status: mediaSource.statusLabel,
-        });
-
-        const presentation = createBasketballSamplePresentation(
-          presentationSettingsRef.current,
-        );
-        const createdRenderer = await createMediaRenderer({
-          autoPlay: false,
-          boxStyle: presentation.boxStyle ?? undefined,
-          container,
-          detectionBuffer: {
-            bufferAheadSeconds: 2,
-            bufferBehindSeconds: 0.5,
-            frameIndexOriginTime: 0,
-            frameRate: manifest.inference.frameRate,
-            selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
-          },
-          detectionSource: createdDetectionSource.detectionSource,
-          fit: MediaRendererFit.Contain,
-          loop: true,
-          maskStyle: presentation.maskStyle ?? undefined,
-          onSource: (state) => {
-            if (isActive()) {
-              setSourceState(state);
-            }
-          },
-          onFrame: () => {
-            const now = performance.now();
-
-            if (!isActive() || now - lastReadoutAt < 250 || !renderer) {
-              return;
-            }
-
-            lastReadoutAt = now;
-            syncRendererState(renderer);
-          },
-          src: mediaSource.src,
-        });
-
-        if (!isActive()) {
-          createdRenderer.destroy();
-          return;
-        }
-
-        renderer = createdRenderer;
-        rendererRef.current = createdRenderer;
-        syncRendererState(createdRenderer);
-
-        try {
-          await createdRenderer.play();
-          if (isActive()) {
-            syncRendererState(createdRenderer);
+        if (!isActive() || !renderer) {
+          renderer?.destroy();
+          detectionSource?.destroy?.();
+          if (uploadedMediaObjectUrl) {
+            URL.revokeObjectURL(uploadedMediaObjectUrl);
           }
-        } catch (error: unknown) {
-          if (isActive()) {
-            syncRendererState(createdRenderer);
-            setErrorMessage(
-              getErrorMessage(error, "Unable to play the media renderer."),
-            );
-          }
+          return;
         }
+
+        rendererRef.current = renderer;
+        syncRendererState(renderer);
+        await playRenderer(
+          renderer,
+          isActive,
+          setErrorMessage,
+          syncRendererState,
+        );
       } catch (error: unknown) {
         if (isActive()) {
-          const message = getErrorMessage(
-            error,
-            "Unable to start the media renderer.",
-          );
-
-          setErrorMessage(message);
-          setDetectionSourceState((current) =>
-            current.sourceSummary
-              ? current
-              : {
-                  ...current,
-                  errorMessage: message,
-                  status: "error",
-                },
-          );
+          handleSessionError(error, sourceMode);
         }
       }
     })();
 
     return () => {
       cleanedUp = true;
+      abortController?.abort();
       rendererRef.current = null;
       renderer?.destroy();
-      detectionSource?.destroy();
+      detectionSource?.destroy?.();
+      if (uploadedMediaObjectUrl) {
+        URL.revokeObjectURL(uploadedMediaObjectUrl);
+      }
     };
-  }, [syncRendererState]);
+  }, [sourceMode, syncRendererState, uploadRun]);
 
   const playbackState = rendererState?.playbackState ?? null;
   const duration = rendererState?.duration ?? fixtureSummary?.duration ?? null;
   const canUseRenderer =
-    playbackState !== null &&
-    playbackState !== MediaRendererPlaybackState.Loading &&
-    playbackState !== MediaRendererPlaybackState.Error &&
-    playbackState !== MediaRendererPlaybackState.Destroyed;
+    !!rendererRef.current &&
+    !!rendererState &&
+    rendererState.playbackState !== MediaRendererPlaybackState.Destroyed &&
+    rendererState.playbackState !== MediaRendererPlaybackState.Error;
+  const sourceControlsDisabled =
+    uploadInferenceState.status === "preparing" ||
+    uploadInferenceState.status === "running";
 
-  const handleSetPresentationSettings = useCallback(
-    (settings: BasketballPresentationSettings) => {
-      presentationSettingsRef.current = settings;
-      setPresentationSettingsState(settings);
-      rendererRef.current?.setPresentation(
-        createBasketballSamplePresentation(settings),
-      );
-    },
-    [],
-  );
-
-  const handleTogglePlayback = useCallback(() => {
+  const onTogglePlayback = useCallback(() => {
     const renderer = rendererRef.current;
 
-    if (!renderer || !canUseRenderer) {
+    if (!renderer) {
       return;
     }
-
-    setErrorMessage(null);
 
     if (
       renderer.getState().playbackState === MediaRendererPlaybackState.Playing
@@ -294,47 +276,166 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
 
     void renderer
       .play()
-      .then(() => {
-        syncRendererState(renderer);
-      })
+      .then(() => syncRendererState(renderer))
       .catch((error: unknown) => {
-        syncRendererState(renderer);
         setErrorMessage(
-          getErrorMessage(error, "Unable to play the media renderer."),
+          getErrorMessage(error, "Unable to toggle media playback."),
         );
+        syncRendererState(renderer);
       });
-  }, [canUseRenderer, syncRendererState]);
+  }, [syncRendererState]);
 
-  const handleSeek = useCallback(
+  const onSeek = useCallback(
     (time: number) => {
       const renderer = rendererRef.current;
 
-      if (!renderer || !canUseRenderer) {
+      if (!renderer) {
         return;
       }
 
-      const currentSeekRun = seekRunRef.current + 1;
-      seekRunRef.current = currentSeekRun;
-      setErrorMessage(null);
-
+      const seekRunId = seekRunRef.current + 1;
+      seekRunRef.current = seekRunId;
       void renderer
         .seek(time)
         .then(() => {
-          if (seekRunRef.current === currentSeekRun) {
+          if (seekRunRef.current === seekRunId) {
             syncRendererState(renderer);
           }
         })
         .catch((error: unknown) => {
-          if (seekRunRef.current === currentSeekRun) {
+          if (seekRunRef.current === seekRunId) {
+            setErrorMessage(getErrorMessage(error, "Unable to seek media."));
             syncRendererState(renderer);
-            setErrorMessage(
-              getErrorMessage(error, "Unable to seek the media renderer."),
-            );
           }
         });
     },
-    [canUseRenderer, syncRendererState],
+    [syncRendererState],
   );
+
+  const setPresentationSettings = useCallback(
+    (settings: BasketballPresentationSettings) => {
+      presentationSettingsRef.current = settings;
+      setPresentationSettingsState(settings);
+
+      const renderer = rendererRef.current;
+      if (!renderer) {
+        return;
+      }
+
+      renderer.setPresentation(createBasketballSamplePresentation(settings));
+      syncRendererState(renderer);
+    },
+    [syncRendererState],
+  );
+
+  const setSourceMode = useCallback((mode: DemoSourceMode) => {
+    if (mode === DemoSourceMode.Basketball) {
+      uploadAbortRef.current?.abort();
+      setUploadRun(null);
+      setUploadInferenceState(initialUploadInferenceState);
+    }
+
+    setSourceModeState(mode);
+  }, []);
+
+  const onUploadFileChange = useCallback((file: File | null) => {
+    uploadFileRef.current = file;
+    setUploadFileName(file?.name ?? null);
+    setUploadInferenceState(initialUploadInferenceState);
+  }, []);
+
+  const onStartUploadInference = useCallback(() => {
+    const file = uploadFileRef.current;
+    const classNames = parseClassNames(uploadClassNames);
+    const trimmedApiKey = uploadApiKey.trim();
+
+    if (!file) {
+      setUploadInferenceState(createUploadErrorState("Choose a media file."));
+      return;
+    }
+
+    if (!trimmedApiKey) {
+      setUploadInferenceState(
+        createUploadErrorState("Enter a Roboflow API key."),
+      );
+      return;
+    }
+
+    if (classNames.length === 0) {
+      setUploadInferenceState(
+        createUploadErrorState("Enter at least one class name or prompt."),
+      );
+      return;
+    }
+
+    setSourceModeState(DemoSourceMode.Upload);
+    setUploadInferenceState({
+      ...initialUploadInferenceState,
+      status: "preparing",
+      statusLabel: "preparing uploaded media",
+    });
+    setUploadRun({
+      apiKey: trimmedApiKey,
+      classNames,
+      file,
+      id: Date.now(),
+    });
+  }, [uploadApiKey, uploadClassNames]);
+
+  const onCancelUploadInference = useCallback(() => {
+    uploadAbortRef.current?.abort();
+    setUploadInferenceState((current) => ({
+      ...current,
+      status: "idle",
+      statusLabel: "upload inference canceled",
+    }));
+  }, []);
+
+  function resetRendererView(
+    container: HTMLDivElement,
+    nextSourceMode: DemoSourceMode,
+  ) {
+    container.replaceChildren();
+    rendererRef.current = null;
+    setDetectionSourceState(initialDetectionSourceState);
+    setErrorMessage(null);
+    setFixtureSummary(null);
+    setMediaState({
+      errorMessage: null,
+      status:
+        nextSourceMode === DemoSourceMode.Basketball
+          ? activeBasketballFixture.mediaLoadingStatusLabel
+          : "waiting for upload inference",
+    });
+    setRendererState(null);
+    setSourceState(null);
+  }
+
+  function handleSessionError(error: unknown, nextSourceMode: DemoSourceMode) {
+    const message = getErrorMessage(
+      error,
+      "Unable to start the media renderer.",
+    );
+
+    setErrorMessage(message);
+    setDetectionSourceState((current) =>
+      current.sourceSummary
+        ? current
+        : {
+            ...current,
+            errorMessage: message,
+            status: "error",
+          },
+    );
+    if (nextSourceMode === DemoSourceMode.Upload) {
+      setUploadInferenceState((current) => ({
+        ...current,
+        errorMessage: message,
+        status: "error",
+        statusLabel: message,
+      }));
+    }
+  }
 
   return {
     canUseRenderer,
@@ -344,14 +445,63 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
     errorMessage,
     fixtureSummary,
     mediaState,
-    onSeek: handleSeek,
-    onTogglePlayback: handleTogglePlayback,
+    onCancelUploadInference,
+    onSeek,
+    onStartUploadInference,
+    onTogglePlayback,
+    onUploadFileChange,
     playbackState,
     presentationSettings,
     rendererState,
-    setPresentationSettings: handleSetPresentationSettings,
+    setPresentationSettings,
+    setSourceMode,
+    setUploadApiKey,
+    setUploadClassNames,
+    sourceControlsDisabled,
+    sourceMode,
     sourceState,
+    uploadApiKey,
+    uploadClassNames,
+    uploadFileName,
+    uploadInferenceState,
   };
+}
+
+async function playRenderer(
+  renderer: MediaRenderer,
+  isActive: () => boolean,
+  setErrorMessage: (message: string) => void,
+  syncRendererState: (renderer: MediaRenderer) => void,
+) {
+  try {
+    await renderer.play();
+    if (isActive()) {
+      syncRendererState(renderer);
+    }
+  } catch (error: unknown) {
+    if (isActive()) {
+      syncRendererState(renderer);
+      setErrorMessage(
+        getErrorMessage(error, "Unable to play the media renderer."),
+      );
+    }
+  }
+}
+
+function createUploadErrorState(message: string): UploadInferenceState {
+  return {
+    ...initialUploadInferenceState,
+    errorMessage: message,
+    status: "error",
+    statusLabel: message,
+  };
+}
+
+function parseClassNames(value: string) {
+  return value
+    .split(/[\n,]/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
 }
 
 function getErrorMessage(error: unknown, fallback: string) {

@@ -190,6 +190,52 @@ describe("buffered detection timeline", () => {
     expect(source.loadFrames).not.toHaveBeenCalled();
     expect(timeline.getState().status).toBe(DetectionBufferStatus.Destroyed);
   });
+
+  it("reloads a buffered range when the source version changes", async () => {
+    let version = 0;
+    const source = {
+      getVersion: vi.fn(() => version),
+      loadFrames: vi
+        .fn()
+        .mockResolvedValueOnce([frames[0]])
+        .mockResolvedValueOnce([frames[1]]),
+    };
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 2,
+      bufferBehindSeconds: 0,
+      source,
+    });
+
+    await timeline.prepare(0);
+    version += 1;
+    await timeline.prepare(0.5);
+
+    expect(source.loadFrames).toHaveBeenCalledTimes(2);
+    expect(timeline.selectFrame(1)?.mediaTime).toBe(1);
+  });
+
+  it("keeps the current hot buffer when source changes do not overlap it", async () => {
+    let globalVersion = 0;
+    const currentRangeVersion = 0;
+    const source = {
+      getVersion: vi.fn((range?: { startTime: number; endTime: number }) =>
+        range && range.endTime <= 2 ? currentRangeVersion : globalVersion,
+      ),
+      loadFrames: vi.fn().mockResolvedValue([frames[0]]),
+    };
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 2,
+      bufferBehindSeconds: 0,
+      source,
+    });
+
+    await timeline.prepare(0);
+    globalVersion += 1;
+    await timeline.prepare(0.5);
+
+    expect(source.loadFrames).toHaveBeenCalledOnce();
+    expect(timeline.selectFrame(0.5)?.mediaTime).toBe(0);
+  });
 });
 
 function createDeferred<T>() {
