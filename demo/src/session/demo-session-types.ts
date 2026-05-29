@@ -28,6 +28,7 @@ export interface UploadInferenceState {
   readonly completedFrames: number;
   readonly errorMessage: string | null;
   readonly inferredDetections: number;
+  readonly normalizedRanges: readonly TimelineRange[];
   readonly preparedMedia: PreparedUploadMedia | null;
   readonly processedRanges: readonly TimelineRange[];
   readonly processingRanges: readonly TimelineRange[];

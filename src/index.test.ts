@@ -71,6 +71,7 @@ describe("package entrypoint", () => {
       "createMediaRenderer",
       "createWritableDetectionFrameSource",
       "normalizeMedia",
+      "normalizeMediaProgressively",
       "prepareMedia",
       "probeMedia",
     ]);
@@ -79,6 +80,9 @@ describe("package entrypoint", () => {
       expect.any(Function),
     );
     expect(entrypoint.normalizeMedia).toEqual(expect.any(Function));
+    expect(entrypoint.normalizeMediaProgressively).toEqual(
+      expect.any(Function),
+    );
     expect(entrypoint.prepareMedia).toEqual(expect.any(Function));
     expect(entrypoint.MediaPreparationError).toEqual(expect.any(Function));
     expect(entrypoint.probeMedia).toEqual(expect.any(Function));

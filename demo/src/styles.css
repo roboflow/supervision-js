@@ -464,6 +464,11 @@ fieldset {
   box-shadow: 0 0 12px rgba(103, 232, 249, 0.42);
 }
 
+.timeline-view__chip--normalized .timeline-view__chip-dot {
+  background: #a78bfa;
+  box-shadow: 0 0 12px rgba(167, 139, 250, 0.42);
+}
+
 .timeline-view__chip--processing .timeline-view__chip-dot {
   background: var(--amber);
   box-shadow: 0 0 12px rgba(255, 209, 102, 0.42);
@@ -501,6 +506,11 @@ fieldset {
 .timeline-view__segment--processed {
   background: linear-gradient(90deg, rgba(103, 232, 249, 0.68), #67e8f9);
   box-shadow: 0 0 14px rgba(103, 232, 249, 0.26);
+}
+
+.timeline-view__segment--normalized {
+  background: linear-gradient(90deg, rgba(167, 139, 250, 0.42), #a78bfa);
+  box-shadow: 0 0 14px rgba(167, 139, 250, 0.22);
 }
 
 .timeline-view__segment--processing {

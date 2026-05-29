@@ -6,6 +6,7 @@ import type {
 } from "#types/detection-timeline";
 import type { DetectionFrame } from "#types/detections";
 import type { MaskStyle } from "#types/mask-style";
+import type { DecodedMediaSource } from "#media/media-source";
 
 export enum MediaRendererFit {
   Contain = "contain",
@@ -74,7 +75,8 @@ export interface MediaRendererState {
 
 export interface MediaRendererOptions {
   readonly container: HTMLElement;
-  readonly src: string;
+  readonly src?: string;
+  readonly source?: MediaRendererSource;
   readonly autoPlay?: boolean;
   readonly loop?: boolean;
   /**
@@ -89,6 +91,10 @@ export interface MediaRendererOptions {
   readonly maskStyle?: MaskStyle;
   readonly onFrame?: (diagnostics: MediaFrameDiagnostics) => void;
   readonly onSource?: (state: MediaSourceState) => void;
+}
+
+export interface MediaRendererSource {
+  open(): Promise<DecodedMediaSource>;
 }
 
 export interface MediaRendererPresentation {

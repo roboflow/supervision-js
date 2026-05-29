@@ -1,13 +1,28 @@
 import type { DecodedMediaSource } from "./media-source";
+import type { MediaRendererSource } from "#types/media-renderer";
+import type { InputFormat, Source } from "mediabunny";
+
+export interface MediabunnyMediaSourceInput {
+  readonly formats?: readonly InputFormat[];
+  readonly source: Source;
+}
 
 export async function openMediabunnyMediaSource(
-  src: string,
+  sourceInput: string | MediabunnyMediaSourceInput,
 ): Promise<DecodedMediaSource> {
   const { Input, MATROSKA, MP4, QTFF, UrlSource, VideoSampleSink, WEBM } =
     await import("mediabunny");
+  const source =
+    typeof sourceInput === "string"
+      ? new UrlSource(sourceInput)
+      : sourceInput.source;
+  const formats =
+    typeof sourceInput === "string"
+      ? [MP4, QTFF, WEBM, MATROSKA]
+      : [...(sourceInput.formats ?? [MP4, QTFF, WEBM, MATROSKA])];
   const input = new Input({
-    formats: [MP4, QTFF, WEBM, MATROSKA],
-    source: new UrlSource(src),
+    formats,
+    source,
   });
 
   try {
@@ -65,4 +80,14 @@ export async function openMediabunnyMediaSource(
     input.dispose();
     throw error;
   }
+}
+
+export function createMediabunnyMediaRendererSource(
+  sourceInput: MediabunnyMediaSourceInput,
+): MediaRendererSource {
+  return {
+    open() {
+      return openMediabunnyMediaSource(sourceInput);
+    },
+  };
 }

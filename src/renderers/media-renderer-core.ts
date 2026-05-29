@@ -220,7 +220,7 @@ export async function createMediaRendererCore(
       maskStyle: options.maskStyle,
     });
 
-    const mediaSource = await providers.openMediaSource(options.src);
+    const mediaSource = await openRendererMediaSource(options, providers);
     mediaInput = mediaSource.input;
     sampleSink = mediaSource.sampleSink;
 
@@ -272,6 +272,25 @@ export async function createMediaRendererCore(
   }
 
   return renderer;
+}
+
+async function openRendererMediaSource(
+  options: MediaRendererOptions,
+  providers: MediaRendererCoreProviders,
+) {
+  if (options.src !== undefined && options.source !== undefined) {
+    throw new Error("Provide either src or source, not both.");
+  }
+
+  if (options.source) {
+    return options.source.open();
+  }
+
+  if (options.src === undefined) {
+    throw new Error("Provide either src or source.");
+  }
+
+  return providers.openMediaSource(options.src);
 }
 
 function clampSeekTime(options: {

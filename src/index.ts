@@ -4,7 +4,10 @@ export { createBufferedDetectionTimeline } from "#detections/buffered-detection-
 export { createChunkedDetectionFrameSource } from "#detections/chunked-detection-frame-source";
 export { createColdDetectionFrameSource } from "#detections/cold-detection-frame-source";
 export { createWritableDetectionFrameSource } from "#detections/writable-detection-frame-source";
-export { normalizeMedia } from "#media/media-normalization";
+export {
+  normalizeMedia,
+  normalizeMediaProgressively,
+} from "#media/media-normalization";
 export { prepareMedia, MediaPreparationError } from "#media/media-preparation";
 export { probeMedia } from "#media/media-probe";
 export { createMediaRenderer } from "#renderers/media-renderer";
@@ -65,6 +68,7 @@ export {
   type MediaNormalizationAudioOptions,
   type MediaNormalizationInputMetadata,
   type MediaNormalizationOptions,
+  type MediaNormalizationOutputProgress,
   type MediaNormalizationProgress,
   type MediaNormalizationVideoOptions,
   type MediaProbeIssue,
@@ -73,6 +77,7 @@ export {
   type MediaProbeTargetProfile,
   type MediaProbeVideoTrack,
   type NormalizedMedia,
+  type ProgressiveNormalizedMedia,
 } from "#types/media-normalization";
 export {
   MediaRendererFit,
@@ -82,6 +87,7 @@ export {
   type MediaRenderer,
   type MediaRendererOptions,
   type MediaRendererPresentation,
+  type MediaRendererSource,
   type MediaRendererState,
   type MediaSourceState,
 } from "#types/media-renderer";

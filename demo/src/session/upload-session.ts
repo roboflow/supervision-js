@@ -7,6 +7,7 @@ import {
   createWritableDetectionFrameSource,
   type ColdDetectionFrameStoreWriteSummary,
   type DetectionFrame,
+  type MediaNormalizationProgress,
   type MediaRenderer,
   type WritableDetectionFrameSource,
 } from "supervision-js";
@@ -18,6 +19,7 @@ import { inferSam3FrameBatchStream } from "../inference/roboflow-sam3";
 import {
   extractInferenceFrameBatches,
   prepareUploadedMedia,
+  UploadedMediaKind,
   type PreparedUploadMedia,
 } from "../media/upload-media";
 import { createBasketballSamplePresentation } from "../presentation/basketball-presentation";
@@ -53,7 +55,7 @@ export async function createUploadSession(
   } & DemoSessionCallbacks,
 ): Promise<{
   readonly detectionSource: WritableDetectionFrameSource;
-  readonly mediaObjectUrl: string;
+  readonly mediaObjectUrl: string | null;
   readonly renderer: MediaRenderer;
 }> {
   const datasetId = `upload_${Date.now()}`;
@@ -79,15 +81,18 @@ export async function createUploadSession(
     onProgress(progress) {
       options.onUploadState((current) => ({
         ...current,
+        normalizedRanges: createNormalizationTimelineRanges(progress),
         status: "preparing",
-        statusLabel: `normalizing media ${Math.round(progress.progress * 100)}%`,
+        statusLabel: `stream-normalizing media ${Math.round(
+          progress.progress * 100,
+        )}%`,
       }));
     },
     signal: options.abortSignal,
   });
 
   if (!options.isActive()) {
-    URL.revokeObjectURL(preparedMedia.objectUrl);
+    releasePreparedMedia(preparedMedia);
     detectionSource.destroy?.();
     throw new Error("Upload session was canceled.");
   }
@@ -101,12 +106,22 @@ export async function createUploadSession(
     completedFrames: 0,
     errorMessage: null,
     inferredDetections: 0,
+    normalizedRanges:
+      preparedMedia.kind === UploadedMediaKind.Image
+        ? [{ endTime: preparedMedia.duration, startTime: 0 }]
+        : [],
     preparedMedia,
     processedRanges: [],
     processingRanges: [],
     status: "running",
     statusLabel: "running SAM3",
     totalFrames: preparedMedia.frameCount,
+  });
+  watchNormalizationCompletion({
+    isActive: options.isActive,
+    onMediaState: options.onMediaState,
+    onUploadState: options.onUploadState,
+    preparedMedia,
   });
 
   const presentation = createBasketballSamplePresentation(
@@ -132,10 +147,10 @@ export async function createUploadSession(
       maskStyle: presentation.maskStyle ?? undefined,
       onFrame: options.onFrame,
       onSource: options.onSourceState,
-      src: preparedMedia.objectUrl,
+      ...createRendererSourceOption(preparedMedia),
     });
   } catch (error) {
-    URL.revokeObjectURL(preparedMedia.objectUrl);
+    releasePreparedMedia(preparedMedia);
     detectionSource.destroy?.();
     throw error;
   }
@@ -157,6 +172,70 @@ export async function createUploadSession(
     mediaObjectUrl: preparedMedia.objectUrl,
     renderer,
   };
+}
+
+function createRendererSourceOption(preparedMedia: PreparedUploadMedia) {
+  if (preparedMedia.rendererSource) {
+    return { source: preparedMedia.rendererSource };
+  }
+
+  if (preparedMedia.objectUrl) {
+    return { src: preparedMedia.objectUrl };
+  }
+
+  throw new Error("Prepared upload media has no renderer source.");
+}
+
+function releasePreparedMedia(preparedMedia: PreparedUploadMedia) {
+  preparedMedia.destroy();
+
+  if (preparedMedia.objectUrl) {
+    URL.revokeObjectURL(preparedMedia.objectUrl);
+  }
+}
+
+function watchNormalizationCompletion(options: {
+  readonly isActive: () => boolean;
+  readonly onMediaState: DemoSessionCallbacks["onMediaState"];
+  readonly onUploadState: UploadInferenceStateSetter;
+  readonly preparedMedia: PreparedUploadMedia;
+}) {
+  if (!options.preparedMedia.normalizationCompletion) {
+    return;
+  }
+
+  void options.preparedMedia.normalizationCompletion
+    .then(() => {
+      if (!options.isActive()) {
+        return;
+      }
+
+      options.onMediaState({
+        errorMessage: null,
+        status: `upload normalized WebM ${options.preparedMedia.frameRate}fps complete`,
+      });
+      options.onUploadState((current) => ({
+        ...current,
+        normalizedRanges: [
+          { endTime: options.preparedMedia.duration, startTime: 0 },
+        ],
+      }));
+    })
+    .catch((error: unknown) => {
+      if (!options.isActive()) {
+        return;
+      }
+
+      const message = getErrorMessage(error, "Media normalization failed.");
+
+      options.onMediaState({ errorMessage: message, status: "error" });
+      options.onUploadState((current) => ({
+        ...current,
+        errorMessage: message,
+        status: "error",
+        statusLabel: message,
+      }));
+    });
 }
 
 async function runUploadInference(options: {
@@ -351,6 +430,16 @@ function createUploadSummary(
     maskWidth: media.width,
     missingFrameIndexes: [],
   };
+}
+
+function createNormalizationTimelineRanges(
+  progress: MediaNormalizationProgress,
+) {
+  if (progress.processedTime <= 0) {
+    return [];
+  }
+
+  return [{ endTime: progress.processedTime, startTime: 0 }];
 }
 
 function getDetectionSourceSummary(

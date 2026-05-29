@@ -82,6 +82,7 @@ const initialUploadInferenceState: UploadInferenceState = {
   completedFrames: 0,
   errorMessage: null,
   inferredDetections: 0,
+  normalizedRanges: [],
   preparedMedia: null,
   processedRanges: [],
   processingRanges: [],
@@ -152,7 +153,7 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
       | WritableDetectionFrameSource
       | undefined;
     let renderer: MediaRenderer | undefined;
-    let uploadedMediaObjectUrl: string | undefined;
+    let uploadedMediaObjectUrl: string | null | undefined;
     let lastReadoutAt = 0;
     let cleanedUp = false;
     const abortController =

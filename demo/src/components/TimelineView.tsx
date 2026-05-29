@@ -13,6 +13,7 @@ export function TimelineView({
   detectionBuffer,
   disabled,
   duration,
+  normalizedRanges = [],
   onSeek,
   processedRanges = [],
   processingRanges = [],
@@ -22,6 +23,7 @@ export function TimelineView({
   readonly detectionBuffer: DetectionBufferState | null;
   readonly disabled: boolean;
   readonly duration: number | null;
+  readonly normalizedRanges?: readonly TimelineRange[];
   readonly onSeek: (time: number) => void;
   readonly processedRanges?: readonly TimelineRange[];
   readonly processingRanges?: readonly TimelineRange[];
@@ -34,6 +36,7 @@ export function TimelineView({
       detectionBuffer?.bufferEndTime ?? 0,
       detectionBuffer?.requestedEndTime ?? 0,
       activeDetectionFrameTime ?? 0,
+      getMaxRangeEnd(normalizedRanges),
       getMaxRangeEnd(processedRanges),
       getMaxRangeEnd(processingRanges),
       1,
@@ -54,6 +57,10 @@ export function TimelineView({
   );
   const processingRangeStyles = createSegmentStyles(
     processingRanges,
+    visualDuration,
+  );
+  const normalizedRangeStyles = createSegmentStyles(
+    normalizedRanges,
     visualDuration,
   );
   const showRequestedRange =
@@ -137,6 +144,10 @@ export function TimelineView({
           <span className="timeline-view__chip-dot" />
           Processed
         </span>
+        <span className="timeline-view__chip timeline-view__chip--normalized">
+          <span className="timeline-view__chip-dot" />
+          Normalized
+        </span>
         <span className="timeline-view__chip timeline-view__chip--processing">
           <span className="timeline-view__chip-dot" />
           Processing
@@ -145,6 +156,13 @@ export function TimelineView({
 
       <div className="timeline-view__scrubber">
         <div className="timeline-view__lane" aria-hidden="true">
+          {normalizedRangeStyles.map(({ key, style }) => (
+            <span
+              className="timeline-view__segment timeline-view__segment--normalized"
+              key={key}
+              style={style}
+            />
+          ))}
           {processedRangeStyles.map(({ key, style }) => (
             <span
               className="timeline-view__segment timeline-view__segment--processed"

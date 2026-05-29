@@ -19,6 +19,10 @@ export function App() {
     demo.sourceMode === DemoSourceMode.Upload
       ? demo.uploadInferenceState.processingRanges
       : [];
+  const normalizedRanges =
+    demo.sourceMode === DemoSourceMode.Upload
+      ? demo.uploadInferenceState.normalizedRanges
+      : [];
 
   return (
     <DemoShell
@@ -51,6 +55,7 @@ export function App() {
           onSeek={demo.onSeek}
           onTogglePlayback={demo.onTogglePlayback}
           playbackState={demo.playbackState}
+          normalizedRanges={normalizedRanges}
           processedRanges={processedRanges}
           processingRanges={processingRanges}
         />

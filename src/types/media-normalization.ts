@@ -1,3 +1,5 @@
+import type { MediaRendererSource } from "#types/media-renderer";
+
 export enum MediaNormalizationContainer {
   WebM = "webm",
   Mp4 = "mp4",
@@ -64,6 +66,13 @@ export interface MediaNormalizationOptions {
   readonly audio?: MediaNormalizationAudioOptions;
   readonly signal?: AbortSignal;
   readonly onProgress?: (progress: MediaNormalizationProgress) => void;
+  readonly onOutputProgress?: (
+    progress: MediaNormalizationOutputProgress,
+  ) => void;
+}
+
+export interface MediaNormalizationOutputProgress {
+  readonly bytesWritten: number;
 }
 
 export interface MediaNormalizationInputMetadata {
@@ -83,6 +92,16 @@ export interface NormalizedMedia {
   readonly extension: string;
   readonly size: number;
   readonly inputMetadata: MediaNormalizationInputMetadata;
+}
+
+export interface ProgressiveNormalizedMedia {
+  readonly completion: Promise<NormalizedMedia>;
+  readonly container: MediaNormalizationContainer;
+  readonly extension: string;
+  readonly inputMetadata: MediaNormalizationInputMetadata;
+  readonly mimeType: string;
+  readonly rendererSource: MediaRendererSource;
+  cancel(): Promise<void>;
 }
 
 export interface MediaProbeTargetProfile {

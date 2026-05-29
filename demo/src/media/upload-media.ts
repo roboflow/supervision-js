@@ -1,8 +1,9 @@
 import {
   MediaNormalizationContainer,
   MediaNormalizationVideoCodec,
-  normalizeMedia,
+  normalizeMediaProgressively,
   type MediaNormalizationProgress,
+  type MediaRendererSource,
 } from "supervision-js";
 import type { WrappedCanvas } from "mediabunny";
 
@@ -19,13 +20,17 @@ export enum UploadedMediaKind {
 }
 
 export interface PreparedUploadMedia {
-  readonly blob: Blob;
+  readonly blob: Blob | null;
+  readonly destroy: () => void;
   readonly duration: number;
   readonly frameCount: number;
   readonly frameRate: number;
   readonly height: number;
   readonly kind: UploadedMediaKind;
-  readonly objectUrl: string;
+  readonly normalizationCompletion: Promise<void> | null;
+  readonly objectUrl: string | null;
+  readonly rendererSource: MediaRendererSource | null;
+  readonly sourceFile: File | null;
   readonly statusLabel: string;
   readonly width: number;
 }
@@ -55,10 +60,17 @@ export async function* extractInferenceFrameBatches(options: {
   readonly quality?: number;
   readonly signal?: AbortSignal;
 }): AsyncGenerator<readonly ExtractedInferenceFrame[], void, unknown> {
-  const { BlobSource, CanvasSink, Input, WEBM } = await import("mediabunny");
+  const { ALL_FORMATS, BlobSource, CanvasSink, Input, WEBM } =
+    await import("mediabunny");
+  const sourceBlob = options.media.blob ?? options.media.sourceFile;
+
+  if (!sourceBlob) {
+    throw new Error("Prepared upload media has no readable inference source.");
+  }
+
   const input = new Input({
-    formats: [WEBM],
-    source: new BlobSource(options.media.blob),
+    formats: options.media.blob ? [WEBM] : ALL_FORMATS,
+    source: new BlobSource(sourceBlob),
   });
 
   try {
@@ -132,7 +144,7 @@ async function prepareUploadedVideo(options: {
   readonly signal?: AbortSignal;
   readonly onProgress?: (progress: MediaNormalizationProgress) => void;
 }): Promise<PreparedUploadMedia> {
-  const normalizedMedia = await normalizeMedia(options.file, {
+  const normalizedMedia = await normalizeMediaProgressively(options.file, {
     audio: { discard: true },
     container: MediaNormalizationContainer.WebM,
     onProgress: options.onProgress,
@@ -151,14 +163,20 @@ async function prepareUploadedVideo(options: {
   const height = metadata.primaryVideoHeight ?? 0;
 
   return {
-    blob: normalizedMedia.blob,
+    blob: null,
+    destroy() {
+      void normalizedMedia.cancel().catch(() => undefined);
+    },
     duration,
     frameCount: Math.max(1, Math.ceil(duration * TARGET_FRAME_RATE)),
     frameRate: TARGET_FRAME_RATE,
     height,
     kind: UploadedMediaKind.Video,
-    objectUrl: URL.createObjectURL(normalizedMedia.blob),
-    statusLabel: `upload normalized WebM ${TARGET_FRAME_RATE}fps | ${formatMbps(
+    normalizationCompletion: normalizedMedia.completion.then(() => undefined),
+    objectUrl: null,
+    rendererSource: normalizedMedia.rendererSource,
+    sourceFile: options.file,
+    statusLabel: `upload stream-normalizing WebM ${TARGET_FRAME_RATE}fps | ${formatMbps(
       NORMALIZED_VIDEO_BITRATE,
     )}`,
     width,
@@ -188,12 +206,18 @@ async function prepareUploadedImage(options: {
 
     return {
       blob,
+      destroy() {
+        // Blob URLs are owned by the upload session cleanup.
+      },
       duration: IMAGE_MEDIA_DURATION_SECONDS,
       frameCount: 1,
       frameRate: TARGET_FRAME_RATE,
       height: canvas.height,
       kind: UploadedMediaKind.Image,
+      normalizationCompletion: null,
       objectUrl: URL.createObjectURL(blob),
+      rendererSource: null,
+      sourceFile: null,
       statusLabel: "image upload encoded as one-frame WebM",
       width: canvas.width,
     };

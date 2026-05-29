@@ -14,6 +14,7 @@ export function ControlBar({
   currentTime,
   detectionBuffer,
   duration,
+  normalizedRanges,
   onSeek,
   onTogglePlayback,
   playbackState,
@@ -25,6 +26,7 @@ export function ControlBar({
   readonly currentTime: number | null;
   readonly detectionBuffer: DetectionBufferState | null;
   readonly duration: number | null;
+  readonly normalizedRanges: readonly TimelineRange[];
   readonly onSeek: (time: number) => void;
   readonly onTogglePlayback: () => void;
   readonly playbackState: MediaRendererPlaybackState | null;
@@ -44,6 +46,7 @@ export function ControlBar({
         detectionBuffer={detectionBuffer}
         disabled={!canUseRenderer}
         duration={duration}
+        normalizedRanges={normalizedRanges}
         onSeek={onSeek}
         processedRanges={processedRanges}
         processingRanges={processingRanges}
