@@ -72,7 +72,7 @@ export interface MediaSession {
     | WritableDetectionFrameSource;
   readonly media: MediaSessionMediaState;
   readonly renderer: MediaRenderer;
-  appendDetections(
+  appendDetectionFrames(
     frames: readonly DetectionFrame[],
   ): Promise<ColdDetectionFrameStoreWriteSummary>;
   getDetectionSummary(): ColdDetectionFrameStoreWriteSummary | null;

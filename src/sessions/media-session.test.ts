@@ -51,7 +51,9 @@ describe("media session", () => {
       renderer: { autoPlay: false },
     });
 
-    await expect(session.appendDetections(frames)).resolves.toEqual(summary);
+    await expect(session.appendDetectionFrames(frames)).resolves.toEqual(
+      summary,
+    );
     expect(store.appendFrames).toHaveBeenCalledWith({
       chunkDurationSeconds: 1,
       datasetId: "session",

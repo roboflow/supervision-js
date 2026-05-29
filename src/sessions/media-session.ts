@@ -66,7 +66,7 @@ export async function createMediaSession(
       media: preparedMedia.state,
       renderer,
 
-      appendDetections(frames) {
+      appendDetectionFrames(frames) {
         if (destroyed) {
           throw new Error("Media session has been destroyed.");
         }
@@ -176,6 +176,8 @@ async function prepareSessionMedia(
       media,
       normalizationOptions,
     );
+
+    void normalizedMedia.completion.catch(() => undefined);
 
     return {
       destroy() {

@@ -78,19 +78,18 @@ export async function createUploadSession(
   let preparedMedia: PreparedUploadMedia | undefined;
   let session: MediaSession | undefined;
 
-  if (isImageUpload) {
-    preparedMedia = await prepareUploadedImageMedia({
-      file: options.uploadRun.file,
-      signal: options.abortSignal,
-    });
-  }
-
-  if (!options.isActive()) {
-    store.destroy?.();
-    throw new Error("Upload session was canceled.");
-  }
-
   try {
+    if (isImageUpload) {
+      preparedMedia = await prepareUploadedImageMedia({
+        file: options.uploadRun.file,
+        signal: options.abortSignal,
+      });
+    }
+
+    if (!options.isActive()) {
+      throw new Error("Upload session was canceled.");
+    }
+
     session = await createMediaSession({
       container: options.container,
       detections: {
@@ -312,7 +311,7 @@ async function runUploadInference(options: {
         prompts: options.uploadRun.classNames,
         signal: options.abortSignal,
       })) {
-        const summary = await options.session.appendDetections([
+        const summary = await options.session.appendDetectionFrames([
           detectionFrame,
         ]);
 
