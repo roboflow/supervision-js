@@ -38,6 +38,10 @@
       "types": "./dist/playback/*.d.ts",
       "import": "./dist/playback/*.js"
     },
+    "#render-preparation/*": {
+      "types": "./dist/render-preparation/*.d.ts",
+      "import": "./dist/render-preparation/*.js"
+    },
     "#renderers/*": {
       "types": "./dist/renderers/*.d.ts",
       "import": "./dist/renderers/*.js"

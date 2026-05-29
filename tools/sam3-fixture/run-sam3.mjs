@@ -105,7 +105,7 @@ function parseArgs(args) {
     limit: undefined,
     modelId: "sam3/sam3_final",
     nmsIouThreshold: 0.5,
-    outputProbThresh: 0.5,
+    outputProbThresh: 0.1,
     startFrame: 0,
   };
 

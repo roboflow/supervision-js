@@ -66,6 +66,20 @@ dense changing rectangles.
 
 ## Strategy Notes
 
+Keep a prepared render window between the hot detection window and Pixi scene
+objects. Cold detections should stay semantic, while the prepared window builds
+renderer-friendly artifacts for a small set of nearby frames. The first concrete
+artifact is a composited mask canvas per detection frame, which Pixi can upload
+once and present as a single sprite. Future artifacts may include grouped box
+draw instructions, text layout/cache entries, track paths, heatmaps, or custom
+geometry.
+
+Do not assume every prepared artifact should be an image. Masks and heatmaps
+fit texture artifacts well; boxes often fit grouped `Graphics` instructions
+better until measured pressure says otherwise. The common rule is to move
+expensive decode, style resolution, sorting, and grouping out of the per-sample
+presentation path.
+
 Static dense layers can use `Graphics`. Use `static-cached` when the layer is
 complex and rarely changes, but avoid repeated recaching. Treat recache as a
 costly redraw plus texture update, not as a cheap per-frame optimization.

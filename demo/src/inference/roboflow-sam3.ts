@@ -6,7 +6,7 @@ const SAM3_PROXY_ENDPOINT = "/api/roboflow/sam3/concept_segment";
 const SAM3_STREAM_ENDPOINT = "/api/roboflow/sam3/concept_segment_stream";
 const API_KEY_HEADER = "x-roboflow-api-key";
 const SAM3_MODEL_ID = "sam3/sam3_final";
-const DEFAULT_OUTPUT_PROBABILITY_THRESHOLD = 0.5;
+const DEFAULT_OUTPUT_PROBABILITY_THRESHOLD = 0.1;
 const DEFAULT_NMS_IOU_THRESHOLD = 0.5;
 
 export interface Sam3FrameRequest {

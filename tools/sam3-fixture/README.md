@@ -101,7 +101,7 @@ The runner posts to
 - `yellow team player`
 - `basketball`
 
-Defaults are `output_prob_thresh: 0.5`, `format: "rle"`,
+Defaults are `output_prob_thresh: 0.1`, `format: "rle"`,
 `model_id: "sam3/sam3_final"`, and `nms_iou_threshold: 0.5`.
 
 Raw SAM3 responses are appended incrementally as JSONL with request metadata but

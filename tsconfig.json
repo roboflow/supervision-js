@@ -10,6 +10,7 @@
       "#detections/*": ["src/detections/*"],
       "#media/*": ["src/media/*"],
       "#playback/*": ["src/playback/*"],
+      "#render-preparation/*": ["src/render-preparation/*"],
       "#renderers/*": ["src/renderers/*"],
       "#sessions/*": ["src/sessions/*"],
       "#styles/*": ["src/styles/*"],

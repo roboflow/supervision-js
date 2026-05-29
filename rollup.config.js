@@ -9,6 +9,7 @@ const sourceAliasRoots = new Set([
   "detections",
   "media",
   "playback",
+  "render-preparation",
   "renderers",
   "sessions",
   "styles",

@@ -33,18 +33,18 @@ foundation before designing a broad annotation framework.
   enums/interfaces in `src/types/`, constants in `src/constants/`, pure helpers
   in `src/utils/`, media-source adapters and source state helpers in
   `src/media/`, playback scheduling in `src/playback/`, renderer-neutral
-  presentation styles in `src/styles/`, session-level orchestration in
-  `src/sessions/`, and Pixi scene composition plus renderer implementations in
-  `src/renderers/`.
+  presentation styles in `src/styles/`, prepared render-window artifacts in
+  `src/render-preparation/`, session-level orchestration in `src/sessions/`,
+  and Pixi scene composition plus renderer implementations in `src/renderers/`.
 - Keep renderer orchestration provider-agnostic. The public/default renderer
   factory may wire Mediabunny and Pixi defaults, but the renderer core should
   depend on small media-source and scene contracts rather than vendor modules.
 - Use package-private TypeScript aliases for cross-folder imports inside
   `src/`: `#constants/...`, `#media/...`, `#playback/...`, `#renderers/...`,
-  `#sessions/...`, `#styles/...`, `#types/...`, and `#utils/...`. Prefer
-  `#types/...` for internal type modules; do not use `@types/...`, which reads
-  like DefinitelyTyped package space. Same-folder imports may stay relative
-  when that is clearer.
+  `#render-preparation/...`, `#sessions/...`, `#styles/...`, `#types/...`,
+  and `#utils/...`. Prefer `#types/...` for internal type modules; do not use
+  `@types/...`, which reads like DefinitelyTyped package space. Same-folder
+  imports may stay relative when that is clearer.
 - `demo/` is a React + Vite consumer demo.
 - `benchmark/initial/` is the isolated Milestone 3 dense-shape benchmark.
   Benchmark renderer code belongs there, not in the package entrypoint or the

@@ -49,7 +49,7 @@ export const defaultBasketballPresentationSettings: BasketballPresentationSettin
     boxFillAlpha: 0.1,
     boxShape: BoxShape.RoundedRect,
     boxStrokeWidth: 4,
-    confidenceThreshold: 0,
+    confidenceThreshold: 0.5,
     maskAlpha: 0.3,
     masksEnabled: true,
   };
