@@ -33,10 +33,15 @@ function sourceAliasResolver() {
 }
 
 export default {
-  input: "src/index.ts",
+  input: {
+    index: "src/index.ts",
+    "mask-preparation.worker":
+      "src/render-preparation/mask-preparation.worker.ts",
+  },
   external: ["mediabunny", "pixi.js"],
   output: {
-    file: "dist/index.js",
+    dir: "dist",
+    entryFileNames: "[name].js",
     format: "es",
     sourcemap: true,
   },

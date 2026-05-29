@@ -6,8 +6,14 @@ import {
   type BufferedDetectionTimeline,
 } from "#types/detection-timeline";
 import { DetectionMaskEncoding, type DetectionFrame } from "#types/detections";
+import {
+  RenderPreparationExecutionMode,
+  RenderPreparationMode,
+  RenderPreparationWorkerStatus,
+} from "#types/render-preparation";
 
 import { resetMocks } from "../../test/media-renderer-harness";
+import { MaskPreparationWorkerMessageType } from "./mask-preparation-worker-protocol";
 import { createPreparedRenderWindow } from "./prepared-render-window";
 
 const frames: DetectionFrame[] = [
@@ -94,7 +100,95 @@ describe("prepared render window", () => {
       vi.useRealTimers();
     }
   });
+
+  it("can prepare mask artifacts with an injected worker factory", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const fakeWorker = createFakeMaskPreparationWorker();
+      const onDiagnostics = vi.fn();
+      const renderWindow = createPreparedRenderWindow({
+        detectionTimeline: createTimeline(frames),
+        maskStyle: new BaseMaskStyle(),
+        renderPreparation: {
+          mode: RenderPreparationMode.Worker,
+          onDiagnostics,
+          workerFactory: {
+            createWorker: () => fakeWorker.worker,
+          },
+        },
+      });
+
+      expect(renderWindow.getFrame(0)?.maskFrame).toBeUndefined();
+
+      await vi.runOnlyPendingTimersAsync();
+      await vi.runOnlyPendingTimersAsync();
+
+      expect(fakeWorker.messages).toHaveLength(2);
+      expect(renderWindow.getFrame(0)?.maskFrame).toMatchObject({
+        height: 2,
+        key: "0:0",
+        width: 2,
+      });
+      expect(onDiagnostics).toHaveBeenCalledWith(
+        expect.objectContaining({
+          executionMode: RenderPreparationExecutionMode.Worker,
+          workerStatus: RenderPreparationWorkerStatus.Ready,
+        }),
+      );
+
+      renderWindow.destroy();
+      expect(fakeWorker.terminated).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
+
+function createFakeMaskPreparationWorker() {
+  const messages: unknown[] = [];
+  const listeners: Array<(event: MessageEvent<unknown>) => void> = [];
+  let terminated = false;
+  const worker = {
+    addEventListener(type: string, listener: (event: MessageEvent) => void) {
+      if (type === "message") {
+        listeners.push(listener as (event: MessageEvent<unknown>) => void);
+      }
+    },
+
+    postMessage(message: {
+      readonly job: { readonly key: string };
+      readonly requestId: number;
+    }) {
+      messages.push(message);
+      setTimeout(() => {
+        for (const listener of listeners) {
+          listener({
+            data: {
+              imageData: new ImageData(new Uint8ClampedArray(2 * 2 * 4), 2, 2),
+              key: message.job.key,
+              requestId: message.requestId,
+              type: MaskPreparationWorkerMessageType.Complete,
+            },
+          } as MessageEvent<unknown>);
+        }
+      }, 0);
+    },
+
+    terminate() {
+      terminated = true;
+    },
+  } as unknown as Worker;
+
+  return {
+    get terminated() {
+      return terminated;
+    },
+    messages,
+    worker,
+  };
+}
 
 function createTimeline(
   detectionFrames: readonly DetectionFrame[],

@@ -11,6 +11,7 @@ import {
   type MediaRenderer,
   type MediaRendererState,
   type MediaSourceState,
+  type RenderPreparationDiagnostics,
 } from "supervision-js";
 import type { BasketballSampleSummary } from "../fixtures/basketball-sample";
 import { defaultBasketballSampleFixture } from "../fixtures/basketball-sample";
@@ -46,6 +47,7 @@ export interface BasketballDemoRendererState {
   readonly playbackState: MediaRendererPlaybackState | null;
   readonly presentationSettings: BasketballPresentationSettings;
   readonly rendererState: MediaRendererState | null;
+  readonly renderPreparationDiagnostics: RenderPreparationDiagnostics | null;
   readonly sourceControlsDisabled: boolean;
   readonly sourceMode: DemoSourceMode;
   readonly sourceState: MediaSourceState | null;
@@ -102,6 +104,8 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
     null,
   );
   const [sourceState, setSourceState] = useState<MediaSourceState | null>(null);
+  const [renderPreparationDiagnostics, setRenderPreparationDiagnostics] =
+    useState<RenderPreparationDiagnostics | null>(null);
   const [fixtureSummary, setFixtureSummary] =
     useState<BasketballSampleSummary | null>(null);
   const [detectionSourceState, setDetectionSourceState] =
@@ -180,6 +184,7 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
             onFixtureSummary: setFixtureSummary,
             onFrame,
             onMediaState: setMediaState,
+            onRenderPreparationDiagnostics: setRenderPreparationDiagnostics,
             onSourceState: setSourceState,
             presentationSettings: presentationSettingsRef.current,
           });
@@ -195,6 +200,7 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
             onFixtureSummary: setFixtureSummary,
             onFrame,
             onMediaState: setMediaState,
+            onRenderPreparationDiagnostics: setRenderPreparationDiagnostics,
             onSourceState: setSourceState,
             onUploadState: setUploadInferenceState,
             presentationSettings: presentationSettingsRef.current,
@@ -401,6 +407,7 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
           : "waiting for upload inference",
     });
     setRendererState(null);
+    setRenderPreparationDiagnostics(null);
     setSourceState(null);
   }
 
@@ -445,6 +452,7 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
     onUploadFileChange,
     playbackState,
     presentationSettings,
+    renderPreparationDiagnostics,
     rendererState,
     setPresentationSettings,
     setSourceMode,

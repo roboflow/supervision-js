@@ -62,6 +62,9 @@ describe("package entrypoint", () => {
       "MediaRendererFit",
       "MediaRendererPlaybackState",
       "MediaSourceStatus",
+      "RenderPreparationExecutionMode",
+      "RenderPreparationMode",
+      "RenderPreparationWorkerStatus",
       "RoundedBoxStyle",
       "createArrayDetectionFrameSource",
       "createBrowserColdDetectionFrameStore",
@@ -758,7 +761,8 @@ describe("package entrypoint", () => {
     const boxGraphics = pixiMock.graphicsInstances[0];
 
     await vi.waitFor(() => {
-      expect(pixiMock.canvasSourceOptions).toHaveLength(2);
+      expect(pixiMock.canvasSourceOptions).toHaveLength(1);
+      expect(pixiMock.imageSourceOptions).toHaveLength(1);
       expect(pixiMock.textureOptions).toHaveLength(2);
     });
 
@@ -796,7 +800,7 @@ describe("package entrypoint", () => {
     resetMocks();
 
     const { createPixiMaskLayer } = await import("./renderers/pixi-mask-layer");
-    const { CanvasSource, Sprite, Texture } = await import("pixi.js");
+    const { ImageSource, Sprite, Texture } = await import("pixi.js");
     const detectionFrames = [
       {
         detections: [
@@ -859,8 +863,8 @@ describe("package entrypoint", () => {
     } satisfies BufferedDetectionTimeline;
 
     const layer = createPixiMaskLayer({
-      CanvasSource,
       detectionTimeline,
+      ImageSource,
       maskStyle: new BaseMaskStyle(),
       Sprite,
       Texture,

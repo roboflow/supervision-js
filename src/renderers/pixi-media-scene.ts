@@ -25,8 +25,15 @@ type TextureUpload = {
 export async function createPixiMediaScene(
   options: MediaRendererSceneOptions,
 ): Promise<MediaRendererScene> {
-  const { Application, CanvasSource, Container, Graphics, Sprite, Texture } =
-    await import("pixi.js");
+  const {
+    Application,
+    CanvasSource,
+    Container,
+    Graphics,
+    ImageSource,
+    Sprite,
+    Texture,
+  } = await import("pixi.js");
   const app: PixiApplication = new Application();
   const boxLayer = createPixiBoxLayer({
     boxStyle: options.boxStyle,
@@ -34,11 +41,12 @@ export async function createPixiMediaScene(
   });
   let maskLayer = options.maskStyle
     ? createPixiMaskLayer({
-        CanvasSource,
+        ImageSource,
         Sprite,
         Texture,
         detectionTimeline: options.detectionTimeline,
         maskStyle: options.maskStyle,
+        renderPreparation: options.renderPreparation,
       })
     : undefined;
 
@@ -181,11 +189,12 @@ export async function createPixiMediaScene(
           maskLayer.setMaskStyle(presentation.maskStyle);
         } else if (presentation.maskStyle) {
           maskLayer = createPixiMaskLayer({
-            CanvasSource,
+            ImageSource,
             Sprite,
             Texture,
             detectionTimeline: options.detectionTimeline,
             maskStyle: presentation.maskStyle,
+            renderPreparation: options.renderPreparation,
           });
           attachMaskSprite();
         }

@@ -7,6 +7,7 @@ import type {
 import type { DetectionFrame } from "#types/detections";
 import type { MaskStyle } from "#types/mask-style";
 import type { DecodedMediaSource } from "#media/media-source";
+import type { RenderPreparationOptions } from "#types/render-preparation";
 
 export enum MediaRendererFit {
   Contain = "contain",
@@ -89,6 +90,7 @@ export interface MediaRendererOptions {
   readonly detectionBuffer?: DetectionBufferOptions;
   readonly boxStyle?: BoxStyle;
   readonly maskStyle?: MaskStyle;
+  readonly renderPreparation?: RenderPreparationOptions;
   readonly onFrame?: (diagnostics: MediaFrameDiagnostics) => void;
   readonly onSource?: (state: MediaSourceState) => void;
 }

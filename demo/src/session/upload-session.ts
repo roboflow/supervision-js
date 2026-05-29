@@ -139,6 +139,9 @@ export async function createUploadSession(
         fit: MediaRendererFit.Contain,
         loop: true,
         onFrame: options.onFrame,
+        renderPreparation: {
+          onDiagnostics: options.onRenderPreparationDiagnostics,
+        },
         onSource: options.onSourceState,
       },
     });

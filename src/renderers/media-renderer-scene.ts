@@ -9,6 +9,7 @@ import type {
   MediaRendererPresentation,
 } from "#types/media-renderer";
 import type { MaskStyle } from "#types/mask-style";
+import type { RenderPreparationOptions } from "#types/render-preparation";
 
 export interface MediaRendererSceneOptions {
   readonly container: HTMLElement;
@@ -16,6 +17,7 @@ export interface MediaRendererSceneOptions {
   readonly detectionTimeline: BufferedDetectionTimeline;
   readonly boxStyle: BoxStyle | undefined;
   readonly maskStyle: MaskStyle | undefined;
+  readonly renderPreparation: RenderPreparationOptions | undefined;
 }
 
 export interface PresentedMediaSample {

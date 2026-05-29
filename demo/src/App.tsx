@@ -73,6 +73,7 @@ export function App() {
           fixtureSummary={demo.fixtureSummary}
           mediaState={demo.mediaState}
           playbackState={demo.playbackState}
+          renderPreparationDiagnostics={demo.renderPreparationDiagnostics}
           rendererState={demo.rendererState}
           sourceState={demo.sourceState}
         />

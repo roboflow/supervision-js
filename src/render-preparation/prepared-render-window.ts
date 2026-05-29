@@ -1,7 +1,12 @@
+import {
+  createMaskFramePreparer,
+  type PreparedMaskFrame,
+} from "#render-preparation/mask-frame-preparer";
+import type { SerializableMaskInstruction } from "#render-preparation/mask-preparation-worker-protocol";
 import type { BufferedDetectionTimeline } from "#types/detection-timeline";
 import type { DetectionFrame } from "#types/detections";
-import type { MaskDrawInstruction, MaskStyle } from "#types/mask-style";
-import { decodeCompressedRleMask } from "#utils/detection-frames";
+import type { MaskStyle } from "#types/mask-style";
+import type { RenderPreparationOptions } from "#types/render-preparation";
 
 const DEFAULT_MASK_FRAME_CACHE_SIZE = 10;
 const DEFAULT_MASK_PREFETCH_FRAME_COUNT = 4;
@@ -29,13 +34,6 @@ type ScheduledPreparationTask =
       readonly type: "timeout";
     };
 
-export interface PreparedMaskFrame {
-  readonly canvas: HTMLCanvasElement;
-  readonly height: number;
-  readonly key: string;
-  readonly width: number;
-}
-
 export interface PreparedRenderFrame {
   readonly detectionFrame: DetectionFrame;
   readonly key: string;
@@ -48,6 +46,8 @@ export interface PreparedRenderWindow {
   destroy(): void;
 }
 
+export type { PreparedMaskFrame } from "./mask-frame-preparer";
+
 export function createPreparedRenderWindow(options: {
   readonly detectionTimeline: BufferedDetectionTimeline;
   readonly maskStyle?: MaskStyle | null;
@@ -57,6 +57,7 @@ export function createPreparedRenderWindow(options: {
   readonly onMaskFramesCleared?: () => void;
   readonly prefetchFrameCount?: number;
   readonly preparedWindowScanIntervalSeconds?: number;
+  readonly renderPreparation?: RenderPreparationOptions;
 }): PreparedRenderWindow {
   const maxMaskFrameCacheSize = Math.max(
     1,
@@ -69,6 +70,10 @@ export function createPreparedRenderWindow(options: {
   const preparedWindowScanIntervalSeconds =
     options.preparedWindowScanIntervalSeconds ??
     DEFAULT_PREPARED_WINDOW_SCAN_INTERVAL_SECONDS;
+  const maskFramePreparer = createMaskFramePreparer({
+    onStatusChange: emitDiagnostics,
+    renderPreparation: options.renderPreparation,
+  });
 
   let maskStyle = options.maskStyle ?? null;
   let lastPreparedBufferSignature: string | null = null;
@@ -77,6 +82,7 @@ export function createPreparedRenderWindow(options: {
   let generation = 0;
   const preparedMaskFrames = new Map<string, PreparedMaskFrame>();
   const scheduledMaskFrameTasks = new Map<string, ScheduledPreparationTask>();
+  const pendingMaskFrameKeys = new Set<string>();
   const emptyMaskFrameKeys = new Set<string>();
 
   const scheduleMaskFrame = (frame: DetectionFrame, mediaTime: number) => {
@@ -85,7 +91,7 @@ export function createPreparedRenderWindow(options: {
     if (
       !maskStyle ||
       preparedMaskFrames.has(key) ||
-      scheduledMaskFrameTasks.has(key) ||
+      pendingMaskFrameKeys.has(key) ||
       emptyMaskFrameKeys.has(key) ||
       isDestroyed
     ) {
@@ -94,28 +100,61 @@ export function createPreparedRenderWindow(options: {
 
     const scheduledMaskStyle = maskStyle;
     const scheduledGeneration = generation;
+    pendingMaskFrameKeys.add(key);
+    emitDiagnostics();
+
     const scheduledTask = schedulePreparationTask(() => {
       scheduledMaskFrameTasks.delete(key);
 
       if (isDestroyed || scheduledGeneration !== generation) {
+        pendingMaskFrameKeys.delete(key);
+        emitDiagnostics();
         return;
       }
 
-      const maskFrame = createPreparedMaskFrame({
+      const instructions = resolveMaskInstructions({
         frame,
-        key,
         maskStyle: scheduledMaskStyle,
         mediaTime,
       });
 
-      if (!maskFrame) {
+      if (instructions.length === 0) {
         emptyMaskFrameKeys.add(key);
+        pendingMaskFrameKeys.delete(key);
+        emitDiagnostics();
         return;
       }
 
-      preparedMaskFrames.set(key, maskFrame);
-      evictPreparedMaskFrames();
-      options.onMaskFramePrepared?.(maskFrame);
+      void maskFramePreparer
+        .prepare({ instructions, key })
+        .then((maskFrame) => {
+          pendingMaskFrameKeys.delete(key);
+
+          if (isDestroyed || scheduledGeneration !== generation) {
+            maskFrame?.close();
+            emitDiagnostics();
+            return;
+          }
+
+          if (!maskFrame) {
+            emptyMaskFrameKeys.add(key);
+            emitDiagnostics();
+            return;
+          }
+
+          preparedMaskFrames.set(key, maskFrame);
+          evictPreparedMaskFrames();
+          options.onMaskFramePrepared?.(maskFrame);
+          emitDiagnostics();
+        })
+        .catch((error: unknown) => {
+          pendingMaskFrameKeys.delete(key);
+          emitDiagnostics(
+            error instanceof Error
+              ? error.message
+              : "Unable to prepare mask frame.",
+          );
+        });
     });
 
     scheduledMaskFrameTasks.set(key, scheduledTask);
@@ -208,8 +247,21 @@ export function createPreparedRenderWindow(options: {
 
       isDestroyed = true;
       clearPreparedMaskFrames();
+      maskFramePreparer.destroy();
     },
   };
+
+  function emitDiagnostics(message?: string) {
+    const status = maskFramePreparer.getStatus();
+
+    options.renderPreparation?.onDiagnostics?.({
+      executionMode: status.executionMode,
+      message: message ?? status.message,
+      pendingMaskFrameCount: pendingMaskFrameKeys.size,
+      preparedMaskFrameCount: preparedMaskFrames.size,
+      workerStatus: status.workerStatus,
+    });
+  }
 
   function evictPreparedMaskFrames() {
     while (preparedMaskFrames.size > maxMaskFrameCacheSize) {
@@ -219,8 +271,11 @@ export function createPreparedRenderWindow(options: {
         return;
       }
 
+      const maskFrame = preparedMaskFrames.get(oldestKey);
+
       preparedMaskFrames.delete(oldestKey);
       options.onMaskFrameEvicted?.(oldestKey);
+      maskFrame?.close();
     }
   }
 
@@ -234,57 +289,22 @@ export function createPreparedRenderWindow(options: {
     }
 
     scheduledMaskFrameTasks.clear();
+    pendingMaskFrameKeys.clear();
     emptyMaskFrameKeys.clear();
 
     if (preparedMaskFrames.size > 0) {
+      const maskFrames = Array.from(preparedMaskFrames.values());
+
       preparedMaskFrames.clear();
       options.onMaskFramesCleared?.();
+
+      for (const maskFrame of maskFrames) {
+        maskFrame.close();
+      }
     }
+
+    emitDiagnostics();
   }
-}
-
-function createPreparedMaskFrame(options: {
-  readonly frame: DetectionFrame;
-  readonly key: string;
-  readonly maskStyle: MaskStyle;
-  readonly mediaTime: number;
-}): PreparedMaskFrame | undefined {
-  const instructions = resolveMaskInstructions(options);
-
-  if (instructions.length === 0) {
-    return undefined;
-  }
-
-  const width = Math.max(...instructions.map(({ mask }) => mask.width));
-  const height = Math.max(...instructions.map(({ mask }) => mask.height));
-  const canvas = document.createElement("canvas");
-  const context = canvas.getContext("2d");
-
-  if (!context) {
-    return undefined;
-  }
-
-  canvas.width = width;
-  canvas.height = height;
-
-  const imageData = new ImageData(
-    new Uint8ClampedArray(width * height * 4),
-    width,
-    height,
-  );
-
-  for (const instruction of instructions) {
-    compositeInstruction(imageData.data, width, instruction);
-  }
-
-  context.putImageData(imageData, 0, 0);
-
-  return {
-    canvas,
-    height,
-    key: options.key,
-    width,
-  };
 }
 
 function resolveMaskInstructions(options: {
@@ -292,7 +312,7 @@ function resolveMaskInstructions(options: {
   readonly maskStyle: MaskStyle;
   readonly mediaTime: number;
 }) {
-  const instructions: MaskDrawInstruction[] = [];
+  const instructions: SerializableMaskInstruction[] = [];
 
   for (const [
     detectionIndex,
@@ -310,34 +330,6 @@ function resolveMaskInstructions(options: {
   }
 
   return instructions;
-}
-
-function compositeInstruction(
-  rgba: Uint8ClampedArray,
-  canvasWidth: number,
-  instruction: MaskDrawInstruction,
-) {
-  const decodedMask = decodeCompressedRleMask(instruction.mask);
-  const red = (instruction.color >> 16) & 0xff;
-  const green = (instruction.color >> 8) & 0xff;
-  const blue = instruction.color & 0xff;
-  const alpha = Math.round(Math.max(0, Math.min(instruction.alpha, 1)) * 255);
-
-  for (let y = 0; y < decodedMask.height; y += 1) {
-    for (let x = 0; x < decodedMask.width; x += 1) {
-      const maskOffset = y * decodedMask.width + x;
-
-      if (!decodedMask.data[maskOffset]) {
-        continue;
-      }
-
-      const rgbaOffset = (y * canvasWidth + x) * 4;
-      rgba[rgbaOffset] = red;
-      rgba[rgbaOffset + 1] = green;
-      rgba[rgbaOffset + 2] = blue;
-      rgba[rgbaOffset + 3] = alpha;
-    }
-  }
 }
 
 function getFrameKey(frame: DetectionFrame) {

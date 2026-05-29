@@ -17,6 +17,7 @@ import type {
   MediaRenderer,
   MediaRendererFit,
   MediaRendererPresentation,
+  MediaRendererOptions,
   MediaRendererSource,
   MediaRendererState,
   MediaSourceState,
@@ -47,6 +48,7 @@ export interface MediaSessionRendererOptions {
   readonly loop?: boolean;
   readonly muted?: boolean;
   readonly fit?: MediaRendererFit;
+  readonly renderPreparation?: MediaRendererOptions["renderPreparation"];
   readonly onFrame?: (diagnostics: MediaFrameDiagnostics) => void;
   readonly onSource?: (state: MediaSourceState) => void;
 }

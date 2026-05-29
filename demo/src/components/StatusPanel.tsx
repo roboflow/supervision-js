@@ -3,6 +3,7 @@ import {
   MediaRendererPlaybackState,
   type MediaRendererState,
   type MediaSourceState,
+  type RenderPreparationDiagnostics,
 } from "supervision-js";
 import type {
   BasketballSampleDetectionSourceSummary,
@@ -34,6 +35,7 @@ export function StatusPanel({
   fixtureSummary,
   mediaState,
   playbackState,
+  renderPreparationDiagnostics,
   rendererState,
   sourceState,
 }: {
@@ -42,6 +44,7 @@ export function StatusPanel({
   readonly fixtureSummary: BasketballSampleSummary | null;
   readonly mediaState: StatusPanelMediaState;
   readonly playbackState: MediaRendererPlaybackState | null;
+  readonly renderPreparationDiagnostics: RenderPreparationDiagnostics | null;
   readonly rendererState: MediaRendererState | null;
   readonly sourceState: MediaSourceState | null;
 }) {
@@ -165,6 +168,43 @@ export function StatusPanel({
               : "-"
           }
         />
+      </StatusGroup>
+
+      <StatusGroup title="Render Prep">
+        <Readout
+          label="Execution"
+          value={renderPreparationDiagnostics?.executionMode ?? "-"}
+        />
+        <Readout
+          label="Worker"
+          value={renderPreparationDiagnostics?.workerStatus ?? "-"}
+        />
+        <Readout
+          label="Prepared Masks"
+          value={
+            renderPreparationDiagnostics
+              ? formatInteger(
+                  renderPreparationDiagnostics.preparedMaskFrameCount,
+                )
+              : "-"
+          }
+        />
+        <Readout
+          label="Pending Masks"
+          value={
+            renderPreparationDiagnostics
+              ? formatInteger(
+                  renderPreparationDiagnostics.pendingMaskFrameCount,
+                )
+              : "-"
+          }
+        />
+        {renderPreparationDiagnostics?.message ? (
+          <Readout
+            label="Message"
+            value={renderPreparationDiagnostics.message}
+          />
+        ) : null}
       </StatusGroup>
 
       <StatusGroup title="Media Source">

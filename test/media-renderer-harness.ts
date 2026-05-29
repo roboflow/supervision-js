@@ -56,6 +56,7 @@ const mockState = vi.hoisted(() => {
       roundRect: ReturnType<typeof vi.fn>;
       stroke: ReturnType<typeof vi.fn>;
     }>,
+    imageSourceOptions: [] as unknown[],
     stageAddChild: vi.fn(),
     spriteInstances: [] as Array<{
       height: number;
@@ -138,6 +139,12 @@ vi.mock("pixi.js", () => {
     }
   }
 
+  class ImageSource {
+    constructor(options: unknown) {
+      pixiMock.imageSourceOptions.push(options);
+    }
+  }
+
   class Texture {
     readonly id = pixiMock.textureOptions.length;
 
@@ -199,7 +206,15 @@ vi.mock("pixi.js", () => {
     }
   }
 
-  return { Application, CanvasSource, Container, Graphics, Sprite, Texture };
+  return {
+    Application,
+    CanvasSource,
+    Container,
+    Graphics,
+    ImageSource,
+    Sprite,
+    Texture,
+  };
 });
 
 vi.mock("mediabunny", () => {
@@ -319,6 +334,7 @@ export function resetMocks() {
   pixiMock.containerAddChild.mockClear();
   pixiMock.containerInstances.length = 0;
   pixiMock.graphicsInstances.length = 0;
+  pixiMock.imageSourceOptions.length = 0;
   pixiMock.stageAddChild.mockClear();
   pixiMock.spriteInstances.length = 0;
   pixiMock.tickerAdd.mockClear();

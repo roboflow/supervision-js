@@ -74,6 +74,12 @@ once and present as a single sprite. Future artifacts may include grouped box
 draw instructions, text layout/cache entries, track paths, heatmaps, or custom
 geometry.
 
+Mask artifact preparation should prefer Web Workers when available. The main
+thread may still resolve style objects into serializable draw instructions, but
+expensive RLE decode and RGBA composition belong behind the prepared-window
+preparer boundary. Keep a main-thread fallback and a custom `workerFactory`
+escape hatch so strict CSP or unusual bundlers can still use the library.
+
 Do not assume every prepared artifact should be an image. Masks and heatmaps
 fit texture artifacts well; boxes often fit grouped `Graphics` instructions
 better until measured pressure says otherwise. The common rule is to move

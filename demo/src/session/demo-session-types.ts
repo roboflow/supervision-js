@@ -1,5 +1,8 @@
 import type { Dispatch, SetStateAction } from "react";
-import type { MediaSourceState } from "supervision-js";
+import type {
+  MediaSourceState,
+  RenderPreparationDiagnostics,
+} from "supervision-js";
 import type {
   BasketballSampleDetectionSourceSummary,
   BasketballSampleSummary,
@@ -48,6 +51,9 @@ export interface DemoSessionCallbacks {
   readonly onFixtureSummary: (summary: BasketballSampleSummary) => void;
   readonly onFrame: () => void;
   readonly onMediaState: (state: DemoMediaState) => void;
+  readonly onRenderPreparationDiagnostics: (
+    diagnostics: RenderPreparationDiagnostics,
+  ) => void;
   readonly onSourceState: (state: MediaSourceState) => void;
   readonly presentationSettings: BasketballPresentationSettings;
 }

@@ -4,22 +4,23 @@ import {
 } from "#render-preparation/prepared-render-window";
 import type { BufferedDetectionTimeline } from "#types/detection-timeline";
 import type { MaskStyle } from "#types/mask-style";
+import type { RenderPreparationOptions } from "#types/render-preparation";
 import type {
-  CanvasSource as PixiCanvasSource,
+  ImageSource as PixiImageSource,
   Sprite as PixiSprite,
   Texture as PixiTexture,
 } from "pixi.js";
 
-type CanvasSourceConstructor = new (options: {
+type ImageSourceConstructor = new (options: {
   dynamic: boolean;
   height: number;
-  resource: HTMLCanvasElement;
+  resource: HTMLCanvasElement | ImageBitmap;
   width: number;
-}) => PixiCanvasSource;
+}) => PixiImageSource;
 
 type TextureConstructor = new (options: {
   dynamic: boolean;
-  source: PixiCanvasSource;
+  source: PixiImageSource;
 }) => PixiTexture;
 
 type SpriteConstructor = new (options?: {
@@ -34,11 +35,12 @@ export interface PixiMaskLayer {
 }
 
 export function createPixiMaskLayer(options: {
-  readonly CanvasSource: CanvasSourceConstructor;
+  readonly ImageSource: ImageSourceConstructor;
   readonly Sprite: SpriteConstructor;
   readonly Texture: TextureConstructor;
   readonly detectionTimeline: BufferedDetectionTimeline;
   readonly maskStyle: MaskStyle;
+  readonly renderPreparation?: RenderPreparationOptions;
 }): PixiMaskLayer {
   let mediaHeight = 0;
   let mediaWidth = 0;
@@ -66,6 +68,7 @@ export function createPixiMaskLayer(options: {
       destroyTextures();
       hideSprite();
     },
+    renderPreparation: options.renderPreparation,
   });
 
   return {
@@ -118,15 +121,15 @@ export function createPixiMaskLayer(options: {
       return existingTexture;
     }
 
-    const canvasSource = new options.CanvasSource({
+    const imageSource = new options.ImageSource({
       dynamic: false,
       height: maskFrame.height,
-      resource: maskFrame.canvas,
+      resource: maskFrame.source,
       width: maskFrame.width,
     });
     const texture = new options.Texture({
       dynamic: false,
-      source: canvasSource,
+      source: imageSource,
     });
 
     maskTextures.set(maskFrame.key, texture);

@@ -102,3 +102,11 @@ export {
   type MediaRendererState,
   type MediaSourceState,
 } from "#types/media-renderer";
+export {
+  RenderPreparationExecutionMode,
+  RenderPreparationMode,
+  RenderPreparationWorkerStatus,
+  type RenderPreparationDiagnostics,
+  type RenderPreparationOptions,
+  type RenderPreparationWorkerFactory,
+} from "#types/render-preparation";

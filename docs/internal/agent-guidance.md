@@ -54,6 +54,9 @@ foundation before designing a broad annotation framework.
 - `test/` holds reusable Vitest harness helpers that should not be emitted as
   package source.
 - Rollup builds package JavaScript.
+- Rollup emits the default render-preparation worker beside `dist/index.js`;
+  keep worker entrypoints package-internal unless a public API explicitly needs
+  them.
 - TypeScript emits declarations and performs typechecking.
 - Vitest tests the library source. Rollup is verified by the build step rather
   than used as a test runner.
