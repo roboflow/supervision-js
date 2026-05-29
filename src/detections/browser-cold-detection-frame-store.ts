@@ -7,7 +7,7 @@ import type {
 import type { DetectionFrame } from "#types/detections";
 import {
   copySortedDetectionFrames,
-  filterDetectionFramesForRange,
+  detectionFrameOverlapsRange,
 } from "#utils/detection-frames";
 
 const DEFAULT_DATABASE_NAME = "supervision-js-detection-frames";
@@ -156,10 +156,8 @@ export function createBrowserColdDetectionFrameStore(options?: {
           chunkRecords
             .filter((chunk): chunk is DetectionFrameChunkRecord => !!chunk)
             .flatMap((chunk) => chunk.frames),
-        ).filter(
-          (frame) =>
-            filterDetectionFramesForRange([frame], startTime, endTime).length >
-            0,
+        ).filter((frame) =>
+          detectionFrameOverlapsRange(frame, startTime, endTime),
         ),
       );
     },

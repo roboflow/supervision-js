@@ -1,0 +1,94 @@
+{
+  "chunkDurationSeconds": 1,
+  "chunks": [
+    {
+      "chunkIndex": 0,
+      "endTime": 1,
+      "frameCount": 30,
+      "src": "detections/000000.json",
+      "startTime": 0
+    },
+    {
+      "chunkIndex": 1,
+      "endTime": 2,
+      "frameCount": 30,
+      "src": "detections/000001.json",
+      "startTime": 1
+    },
+    {
+      "chunkIndex": 2,
+      "endTime": 3,
+      "frameCount": 30,
+      "src": "detections/000002.json",
+      "startTime": 2
+    },
+    {
+      "chunkIndex": 3,
+      "endTime": 4,
+      "frameCount": 30,
+      "src": "detections/000003.json",
+      "startTime": 3
+    },
+    {
+      "chunkIndex": 4,
+      "endTime": 5,
+      "frameCount": 30,
+      "src": "detections/000004.json",
+      "startTime": 4
+    },
+    {
+      "chunkIndex": 5,
+      "endTime": 6,
+      "frameCount": 30,
+      "src": "detections/000005.json",
+      "startTime": 5
+    },
+    {
+      "chunkIndex": 6,
+      "endTime": 7,
+      "frameCount": 30,
+      "src": "detections/000006.json",
+      "startTime": 6
+    },
+    {
+      "chunkIndex": 7,
+      "endTime": 8,
+      "frameCount": 30,
+      "src": "detections/000007.json",
+      "startTime": 7
+    },
+    {
+      "chunkIndex": 8,
+      "endTime": 9,
+      "frameCount": 30,
+      "src": "detections/000008.json",
+      "startTime": 8
+    }
+  ],
+  "datasetId": "basketball_sam3_v1",
+  "detectionCount": 2981,
+  "duration": 9,
+  "frameCount": 270,
+  "frameRate": 30,
+  "inference": {
+    "frameRate": 30,
+    "mask": {
+      "height": 1080,
+      "width": 1920
+    },
+    "missingFrameIndexes": [],
+    "modelId": "sam3/sam3_final",
+    "prompts": ["white team player", "yellow team player", "basketball"],
+    "sourceFile": "raw-sam3.corrected.jsonl"
+  },
+  "schema": "supervision-js.detection-frame-chunk-manifest",
+  "sourceFile": "detections.json",
+  "version": 1,
+  "video": {
+    "duration": 9,
+    "file": "basketball_sample.normalized.webm",
+    "frameRate": 30,
+    "height": 1080,
+    "width": 1920
+  }
+}

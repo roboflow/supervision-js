@@ -1,11 +1,13 @@
 import type { ReactNode } from "react";
 import {
   MediaRendererPlaybackState,
-  type ColdDetectionFrameStoreWriteSummary,
   type MediaRendererState,
   type MediaSourceState,
 } from "supervision-js";
-import type { BasketballSampleSummary } from "../fixtures/basketball-sample";
+import type {
+  BasketballSampleDetectionSourceSummary,
+  BasketballSampleSummary,
+} from "../fixtures/basketball-sample";
 import {
   formatExactTime,
   formatInteger,
@@ -19,15 +21,15 @@ export interface StatusPanelMediaState {
   readonly status: string;
 }
 
-export interface StatusPanelColdDetectionState {
+export interface StatusPanelDetectionSourceState {
   readonly datasetId: string | null;
   readonly errorMessage: string | null;
+  readonly sourceSummary: BasketballSampleDetectionSourceSummary | null;
   readonly status: string;
-  readonly writeSummary: ColdDetectionFrameStoreWriteSummary | null;
 }
 
 export function StatusPanel({
-  coldDetectionState,
+  detectionSourceState,
   errorMessage,
   fixtureSummary,
   mediaState,
@@ -35,7 +37,7 @@ export function StatusPanel({
   rendererState,
   sourceState,
 }: {
-  readonly coldDetectionState: StatusPanelColdDetectionState;
+  readonly detectionSourceState: StatusPanelDetectionSourceState;
   readonly errorMessage: string | null;
   readonly fixtureSummary: BasketballSampleSummary | null;
   readonly mediaState: StatusPanelMediaState;
@@ -54,7 +56,7 @@ export function StatusPanel({
     Boolean(errorMessage) ||
     Boolean(rendererErrorMessage) ||
     Boolean(mediaState.errorMessage) ||
-    Boolean(coldDetectionState.errorMessage);
+    Boolean(detectionSourceState.errorMessage);
 
   return (
     <section className="status-panel" aria-label="Renderer status">
@@ -122,23 +124,23 @@ export function StatusPanel({
         />
       </StatusGroup>
 
-      <StatusGroup title="Cold Store">
+      <StatusGroup title="Cold Source">
         <Readout
-          label="Cold Store"
+          label="Cold Source"
           value={
-            coldDetectionState.writeSummary
-              ? `${coldDetectionState.status} | ${coldDetectionState.datasetId}`
-              : coldDetectionState.status
+            detectionSourceState.sourceSummary
+              ? `${detectionSourceState.status} | ${detectionSourceState.datasetId}`
+              : detectionSourceState.status
           }
         />
         <Readout
-          label="Cold Chunks"
+          label="Source Chunks"
           value={
-            coldDetectionState.writeSummary
+            detectionSourceState.sourceSummary
               ? `${formatInteger(
-                  coldDetectionState.writeSummary.chunkCount,
+                  detectionSourceState.sourceSummary.chunkCount,
                 )} x ${formatTime(
-                  coldDetectionState.writeSummary.chunkDurationSeconds,
+                  detectionSourceState.sourceSummary.chunkDurationSeconds,
                 )}`
               : "-"
           }
@@ -219,11 +221,11 @@ export function StatusPanel({
               value={mediaState.errorMessage}
             />
           ) : null}
-          {coldDetectionState.errorMessage ? (
+          {detectionSourceState.errorMessage ? (
             <Readout
-              label="Cold Error"
+              label="Source Error"
               tone="danger"
-              value={coldDetectionState.errorMessage}
+              value={detectionSourceState.errorMessage}
             />
           ) : null}
           {errorMessage ? (

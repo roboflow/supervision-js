@@ -33,7 +33,7 @@ export function App() {
       }
       statusPanel={
         <StatusPanel
-          coldDetectionState={demo.coldDetectionState}
+          detectionSourceState={demo.detectionSourceState}
           errorMessage={demo.errorMessage}
           fixtureSummary={demo.fixtureSummary}
           mediaState={demo.mediaState}

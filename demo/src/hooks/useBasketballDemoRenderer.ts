@@ -10,20 +10,20 @@ import {
   MediaRendererFit,
   MediaRendererPlaybackState,
   createMediaRenderer,
-  type ColdDetectionFrameStoreWriteSummary,
   type MediaRenderer,
   type MediaRendererState,
   type MediaSourceState,
 } from "supervision-js";
 import type {
-  BasketballSampleColdDetectionSource,
+  BasketballSampleDetectionSource,
+  BasketballSampleDetectionSourceSummary,
   BasketballSampleSummary,
 } from "../fixtures/basketball-sample";
 import {
-  createBasketballSampleColdDetectionSource,
+  createBasketballSampleDetectionSource,
   defaultBasketballSampleFixture,
   loadBasketballSampleMedia,
-  loadBasketballSampleFixture,
+  loadBasketballSampleDetectionManifest,
 } from "../fixtures/basketball-sample";
 import {
   createBasketballSamplePresentation,
@@ -36,16 +36,16 @@ export interface DemoMediaState {
   readonly status: string;
 }
 
-export interface DemoColdDetectionState {
+export interface DemoDetectionSourceState {
   readonly datasetId: string | null;
   readonly errorMessage: string | null;
+  readonly sourceSummary: BasketballSampleDetectionSourceSummary | null;
   readonly status: string;
-  readonly writeSummary: ColdDetectionFrameStoreWriteSummary | null;
 }
 
 export interface BasketballDemoRendererState {
   readonly canUseRenderer: boolean;
-  readonly coldDetectionState: DemoColdDetectionState;
+  readonly detectionSourceState: DemoDetectionSourceState;
   readonly containerRef: RefObject<HTMLDivElement | null>;
   readonly duration: number | null;
   readonly errorMessage: string | null;
@@ -62,11 +62,11 @@ export interface BasketballDemoRendererState {
   ) => void;
 }
 
-const initialColdDetectionState: DemoColdDetectionState = {
+const initialDetectionSourceState: DemoDetectionSourceState = {
   datasetId: null,
   errorMessage: null,
-  status: "loading cold store",
-  writeSummary: null,
+  sourceSummary: null,
+  status: "loading cold source",
 };
 
 const activeBasketballFixture = defaultBasketballSampleFixture;
@@ -85,8 +85,8 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
   const [sourceState, setSourceState] = useState<MediaSourceState | null>(null);
   const [fixtureSummary, setFixtureSummary] =
     useState<BasketballSampleSummary | null>(null);
-  const [coldDetectionState, setColdDetectionState] =
-    useState<DemoColdDetectionState>(initialColdDetectionState);
+  const [detectionSourceState, setDetectionSourceState] =
+    useState<DemoDetectionSourceState>(initialDetectionSourceState);
   const [mediaState, setMediaState] = useState<DemoMediaState>({
     errorMessage: null,
     status: activeBasketballFixture.mediaLoadingStatusLabel,
@@ -113,7 +113,7 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
 
     const runId = effectRunRef.current + 1;
     effectRunRef.current = runId;
-    let coldDetectionSource: BasketballSampleColdDetectionSource | undefined;
+    let detectionSource: BasketballSampleDetectionSource | undefined;
     let renderer: MediaRenderer | undefined;
     let lastReadoutAt = 0;
     let cleanedUp = false;
@@ -121,7 +121,7 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
 
     container.replaceChildren();
     rendererRef.current = null;
-    setColdDetectionState(initialColdDetectionState);
+    setDetectionSourceState(initialDetectionSourceState);
     setErrorMessage(null);
     setFixtureSummary(null);
     setMediaState({
@@ -133,27 +133,26 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
 
     void (async () => {
       try {
-        const fixture = await loadBasketballSampleFixture(
+        const manifest = await loadBasketballSampleDetectionManifest(
           activeBasketballFixture,
         );
-        const createdColdDetectionSource =
-          await createBasketballSampleColdDetectionSource(
-            fixture,
-            activeBasketballFixture,
-          );
-        coldDetectionSource = createdColdDetectionSource;
+        const createdDetectionSource = createBasketballSampleDetectionSource(
+          manifest,
+          activeBasketballFixture,
+        );
+        detectionSource = createdDetectionSource;
 
         if (!isActive()) {
-          createdColdDetectionSource.destroy();
+          createdDetectionSource.destroy();
           return;
         }
 
-        setFixtureSummary(createdColdDetectionSource.fixtureSummary);
-        setColdDetectionState({
-          datasetId: createdColdDetectionSource.datasetId,
+        setFixtureSummary(createdDetectionSource.fixtureSummary);
+        setDetectionSourceState({
+          datasetId: createdDetectionSource.datasetId,
           errorMessage: null,
-          status: createdColdDetectionSource.status,
-          writeSummary: createdColdDetectionSource.writeSummary,
+          sourceSummary: createdDetectionSource.sourceSummary,
+          status: createdDetectionSource.status,
         });
 
         const mediaSource = await loadBasketballSampleMedia(
@@ -161,7 +160,7 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
         );
 
         if (!isActive()) {
-          createdColdDetectionSource.destroy();
+          createdDetectionSource.destroy();
           return;
         }
 
@@ -181,10 +180,10 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
             bufferAheadSeconds: 2,
             bufferBehindSeconds: 0.5,
             frameIndexOriginTime: 0,
-            frameRate: fixture.inference.frameRate,
+            frameRate: manifest.inference.frameRate,
             selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
           },
-          detectionSource: createdColdDetectionSource.detectionSource,
+          detectionSource: createdDetectionSource.detectionSource,
           fit: MediaRendererFit.Contain,
           loop: true,
           maskStyle: presentation.maskStyle ?? undefined,
@@ -236,8 +235,8 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
           );
 
           setErrorMessage(message);
-          setColdDetectionState((current) =>
-            current.writeSummary
+          setDetectionSourceState((current) =>
+            current.sourceSummary
               ? current
               : {
                   ...current,
@@ -253,7 +252,7 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
       cleanedUp = true;
       rendererRef.current = null;
       renderer?.destroy();
-      coldDetectionSource?.destroy();
+      detectionSource?.destroy();
     };
   }, [syncRendererState]);
 
@@ -339,8 +338,8 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
 
   return {
     canUseRenderer,
-    coldDetectionState,
     containerRef,
+    detectionSourceState,
     duration,
     errorMessage,
     fixtureSummary,

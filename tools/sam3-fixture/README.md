@@ -115,11 +115,24 @@ counts become `compressedRle` masks. Uncompressed or uncertain RLE shapes are
 kept under detection metadata and only used for box derivation when width,
 height, and counts are clear.
 
+After writing the normalized detections JSON, generate the chunked runtime
+fixture:
+
+```sh
+npm run fixture:sam3:chunk
+```
+
+This writes `detections.manifest.json` plus one-second JSON chunks under
+`demo/fixtures/basketball_sam3/detections/`. The demo imports those chunks as
+separate Vite URL assets, which keeps the manifest cheap and lets the renderer
+load only the buffered detection window.
+
 Treat extracted frame JSONL, raw SAM3 JSONL, and other files in
 `tools/sam3-fixture/output/` as temporary local artifacts. The fixture outputs to
 keep are the normalized WebM at
 `demo/fixtures/basketball_sam3/basketball_sample.normalized.webm` and the
-normalized detections JSON in the same fixture directory.
+normalized detection timeline plus chunked manifest in the same fixture
+directory.
 
 ## Verification
 

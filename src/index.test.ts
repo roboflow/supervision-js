@@ -56,6 +56,8 @@ describe("package entrypoint", () => {
       "MediaNormalizationContainer",
       "MediaNormalizationFit",
       "MediaNormalizationVideoCodec",
+      "MediaProbeIssueCode",
+      "MediaProbeStatus",
       "MediaRendererFit",
       "MediaRendererPlaybackState",
       "MediaSourceStatus",
@@ -63,12 +65,15 @@ describe("package entrypoint", () => {
       "createArrayDetectionFrameSource",
       "createBrowserColdDetectionFrameStore",
       "createBufferedDetectionTimeline",
+      "createChunkedDetectionFrameSource",
       "createColdDetectionFrameSource",
       "createMediaRenderer",
       "normalizeMedia",
+      "probeMedia",
     ]);
     expect(entrypoint.createMediaRenderer).toEqual(expect.any(Function));
     expect(entrypoint.normalizeMedia).toEqual(expect.any(Function));
+    expect(entrypoint.probeMedia).toEqual(expect.any(Function));
     expect(entrypoint.BaseBoxStyle).toEqual(expect.any(Function));
     expect(entrypoint.BaseMaskStyle).toEqual(expect.any(Function));
     expect(entrypoint.RoundedBoxStyle).toEqual(expect.any(Function));
@@ -126,6 +131,16 @@ describe("package entrypoint", () => {
       Contain: "contain",
       Cover: "cover",
       Fill: "fill",
+    });
+    expect(entrypoint.MediaProbeStatus).toEqual({
+      Supported: "supported",
+      Unsupported: "unsupported",
+    });
+    expect(entrypoint.MediaProbeIssueCode).toEqual({
+      InputCannotRead: "inputCannotRead",
+      PrimaryVideoCannotDecode: "primaryVideoCannotDecode",
+      PrimaryVideoMissing: "primaryVideoMissing",
+      TargetVideoCannotEncode: "targetVideoCannotEncode",
     });
   });
 

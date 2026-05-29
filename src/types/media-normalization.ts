@@ -21,6 +21,18 @@ export enum MediaNormalizationFit {
   Cover = "cover",
 }
 
+export enum MediaProbeStatus {
+  Supported = "supported",
+  Unsupported = "unsupported",
+}
+
+export enum MediaProbeIssueCode {
+  InputCannotRead = "inputCannotRead",
+  PrimaryVideoMissing = "primaryVideoMissing",
+  PrimaryVideoCannotDecode = "primaryVideoCannotDecode",
+  TargetVideoCannotEncode = "targetVideoCannotEncode",
+}
+
 export interface MediaNormalizationVideoOptions {
   readonly frameRate?: number;
   readonly width?: number;
@@ -71,4 +83,38 @@ export interface NormalizedMedia {
   readonly extension: string;
   readonly size: number;
   readonly inputMetadata: MediaNormalizationInputMetadata;
+}
+
+export interface MediaProbeTargetProfile {
+  readonly container: MediaNormalizationContainer;
+  readonly videoCodec: MediaNormalizationVideoCodec;
+  readonly frameRate?: number;
+  readonly width?: number;
+  readonly height?: number;
+  readonly bitrate?: number;
+}
+
+export interface MediaProbeVideoTrack {
+  readonly canDecode: boolean;
+  readonly codec: string | null;
+  readonly width: number;
+  readonly height: number;
+}
+
+export interface MediaProbeIssue {
+  readonly code: MediaProbeIssueCode;
+  readonly message: string;
+}
+
+export interface MediaProbeOptions {
+  readonly targets?: readonly MediaProbeTargetProfile[];
+}
+
+export interface MediaProbeResult {
+  readonly canRead: boolean;
+  readonly inputMetadata: MediaNormalizationInputMetadata;
+  readonly primaryVideo: MediaProbeVideoTrack | null;
+  readonly target: MediaProbeTargetProfile | null;
+  readonly issues: readonly MediaProbeIssue[];
+  readonly status: MediaProbeStatus;
 }

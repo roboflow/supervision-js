@@ -43,6 +43,34 @@ export interface DetectionFrameSource {
   destroy?(): void;
 }
 
+export interface DetectionFrameChunkDescriptor {
+  readonly chunkIndex: number;
+  readonly startTime: number;
+  readonly endTime: number;
+  readonly frameCount: number;
+  readonly src: string;
+}
+
+export interface DetectionFrameChunk {
+  readonly frames: readonly DetectionFrame[];
+}
+
+export interface DetectionFrameChunkManifest {
+  readonly schema: "supervision-js.detection-frame-chunk-manifest";
+  readonly version: 1;
+  readonly datasetId: string;
+  readonly duration: number;
+  readonly frameRate: number;
+  readonly chunkDurationSeconds: number;
+  readonly frameCount?: number;
+  readonly detectionCount?: number;
+  readonly chunks: readonly DetectionFrameChunkDescriptor[];
+}
+
+export type DetectionFrameChunkFetch = (
+  chunk: DetectionFrameChunkDescriptor,
+) => Promise<DetectionFrameChunk>;
+
 export interface BufferedDetectionTimeline {
   prepare(mediaTime: number): Promise<void>;
   prefetch(mediaTime: number): void;

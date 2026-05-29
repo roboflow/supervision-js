@@ -1,10 +1,9 @@
 import {
   DetectionMaskEncoding,
-  createBrowserColdDetectionFrameStore,
-  createColdDetectionFrameSource,
-  type ColdDetectionFrameStoreWriteSummary,
+  createChunkedDetectionFrameSource,
   type Detection,
-  type DetectionFrame,
+  type DetectionFrameChunkFetch,
+  type DetectionFrameChunkManifest,
   type DetectionFrameSource,
 } from "supervision-js";
 
@@ -13,16 +12,22 @@ const basketballSam3SampleVideoSrc = new URL(
   import.meta.url,
 ).href;
 
-const basketballSam3SampleDetectionsSrc = new URL(
-  "../../fixtures/basketball_sam3/detections.json",
+const basketballSam3SampleDetectionsManifestSrc = new URL(
+  "../../fixtures/basketball_sam3/detections.manifest.json",
   import.meta.url,
 ).href;
-
-const basketballSampleColdChunkDurationSeconds = 1;
+const basketballSam3SampleDetectionChunkUrls = import.meta.glob(
+  "../../fixtures/basketball_sam3/detections/*.json",
+  {
+    eager: true,
+    import: "default",
+    query: "?url",
+  },
+) as Record<string, string>;
 
 export interface BasketballSampleFixtureDefinition {
   readonly datasetId: string;
-  readonly detectionsSrc: string;
+  readonly detectionsManifestSrc: string;
   readonly displayName: string;
   readonly inferenceLabel: string;
   readonly mediaLoadingStatusLabel: string;
@@ -32,7 +37,7 @@ export interface BasketballSampleFixtureDefinition {
 
 export const basketballSam3SampleFixture: BasketballSampleFixtureDefinition = {
   datasetId: "basketball_sam3_v1",
-  detectionsSrc: basketballSam3SampleDetectionsSrc,
+  detectionsManifestSrc: basketballSam3SampleDetectionsManifestSrc,
   displayName: "Basketball / deterministic SAM3",
   inferenceLabel: "SAM3",
   mediaLoadingStatusLabel: "loading deterministic SAM3 normalized WebM",
@@ -43,9 +48,7 @@ export const basketballSam3SampleFixture: BasketballSampleFixtureDefinition = {
 export const defaultBasketballSampleFixture = basketballSam3SampleFixture;
 export const basketballSampleVideoSrc = defaultBasketballSampleFixture.videoSrc;
 
-export interface BasketballSampleFixture {
-  readonly schema: string;
-  readonly version: number;
+export interface BasketballSampleDetectionManifest extends DetectionFrameChunkManifest {
   readonly video: {
     readonly file: string;
     readonly width: number;
@@ -64,14 +67,7 @@ export interface BasketballSampleFixture {
     readonly modelId?: string;
     readonly prompts?: readonly string[];
   };
-  readonly frames: readonly BasketballSampleFrame[];
-}
-
-export interface BasketballSampleFrame {
-  readonly frameIndex: number;
-  readonly mediaTime: number;
-  readonly endTime: number;
-  readonly detections: readonly BasketballSampleDetection[];
+  readonly sourceFile?: string;
 }
 
 export interface BasketballSampleDetection extends Detection {
@@ -95,12 +91,22 @@ export interface BasketballSampleSummary {
   readonly missingFrameIndexes: readonly number[];
 }
 
-export interface BasketballSampleColdDetectionSource {
+export interface BasketballSampleDetectionSourceSummary {
+  readonly datasetId: string;
+  readonly chunkDurationSeconds: number;
+  readonly chunkCount: number;
+  readonly frameCount: number;
+  readonly detectionCount: number;
+  readonly startTime: number | null;
+  readonly endTime: number | null;
+}
+
+export interface BasketballSampleDetectionSource {
   readonly datasetId: string;
   readonly detectionSource: DetectionFrameSource;
   readonly fixtureSummary: BasketballSampleSummary;
+  readonly sourceSummary: BasketballSampleDetectionSourceSummary;
   readonly status: "ready";
-  readonly writeSummary: ColdDetectionFrameStoreWriteSummary;
   destroy(): void;
 }
 
@@ -110,10 +116,10 @@ export interface BasketballSampleMediaSource {
   readonly statusLabel: string;
 }
 
-export async function loadBasketballSampleFixture(
+export async function loadBasketballSampleDetectionManifest(
   definition: BasketballSampleFixtureDefinition = defaultBasketballSampleFixture,
-): Promise<BasketballSampleFixture> {
-  const response = await fetch(definition.detectionsSrc);
+): Promise<BasketballSampleDetectionManifest> {
+  const response = await fetch(definition.detectionsManifestSrc);
 
   if (!response.ok) {
     throw new Error(
@@ -121,7 +127,7 @@ export async function loadBasketballSampleFixture(
     );
   }
 
-  return (await response.json()) as BasketballSampleFixture;
+  return (await response.json()) as BasketballSampleDetectionManifest;
 }
 
 export async function loadBasketballSampleMedia(
@@ -134,20 +140,14 @@ export async function loadBasketballSampleMedia(
   };
 }
 
-export async function createBasketballSampleColdDetectionSource(
-  fixture: BasketballSampleFixture,
+export function createBasketballSampleDetectionSource(
+  manifest: BasketballSampleDetectionManifest,
   definition: BasketballSampleFixtureDefinition = defaultBasketballSampleFixture,
-): Promise<BasketballSampleColdDetectionSource> {
-  const frames = toDetectionFrames(fixture);
-  const store = createBrowserColdDetectionFrameStore();
-  const writeSummary = await store.putFrames({
-    chunkDurationSeconds: basketballSampleColdChunkDurationSeconds,
-    datasetId: definition.datasetId,
-    frames,
-  });
-  const coldSource = createColdDetectionFrameSource({
-    datasetId: definition.datasetId,
-    store,
+): BasketballSampleDetectionSource {
+  const detectionSource = createChunkedDetectionFrameSource({
+    baseUrl: definition.detectionsManifestSrc,
+    fetchChunk: fetchBasketballSampleDetectionChunk,
+    manifest,
   });
   let destroyed = false;
   const destroy = () => {
@@ -156,49 +156,74 @@ export async function createBasketballSampleColdDetectionSource(
     }
 
     destroyed = true;
-    store.destroy?.();
+    detectionSource.destroy?.();
   };
 
   return {
     datasetId: definition.datasetId,
-    detectionSource: {
-      destroy,
-      loadFrames: coldSource.loadFrames,
-    },
+    detectionSource,
     destroy,
-    fixtureSummary: summarizeBasketballSampleFixture(fixture, definition),
+    fixtureSummary: summarizeBasketballSampleManifest(manifest, definition),
+    sourceSummary: summarizeBasketballSampleDetectionSource(manifest),
     status: "ready",
-    writeSummary,
   };
 }
 
-export function toDetectionFrames(
-  fixture: BasketballSampleFixture,
-): DetectionFrame[] {
-  return fixture.frames.map((frame) => ({
-    detections: frame.detections,
-    endTime: frame.endTime,
-    frameIndex: frame.frameIndex,
-    mediaTime: frame.mediaTime,
-  }));
-}
+const fetchBasketballSampleDetectionChunk: DetectionFrameChunkFetch = async (
+  chunk,
+) => {
+  const chunkUrl =
+    basketballSam3SampleDetectionChunkUrls[
+      `../../fixtures/basketball_sam3/${chunk.src}`
+    ];
 
-export function summarizeBasketballSampleFixture(
-  fixture: BasketballSampleFixture,
+  if (!chunkUrl) {
+    throw new Error(`Unknown basketball detection chunk: ${chunk.src}`);
+  }
+
+  const response = await fetch(chunkUrl);
+
+  if (!response.ok) {
+    throw new Error(
+      `Unable to load basketball detection chunk ${chunk.src}: ${response.status} ${response.statusText}`,
+    );
+  }
+
+  return (await response.json()) as Awaited<
+    ReturnType<DetectionFrameChunkFetch>
+  >;
+};
+
+export function summarizeBasketballSampleManifest(
+  manifest: BasketballSampleDetectionManifest,
   definition: BasketballSampleFixtureDefinition = defaultBasketballSampleFixture,
 ): BasketballSampleSummary {
   return {
-    detectionCount: fixture.frames.reduce(
-      (total, frame) => total + frame.detections.length,
-      0,
-    ),
-    duration: fixture.video.duration,
-    frameCount: fixture.frames.length,
+    detectionCount: manifest.detectionCount ?? 0,
+    duration: manifest.video.duration,
+    frameCount: manifest.frameCount ?? 0,
     fixtureName: definition.displayName,
-    inferenceFrameRate: fixture.inference.frameRate,
+    inferenceFrameRate: manifest.inference.frameRate,
     inferenceLabel: definition.inferenceLabel,
-    maskHeight: fixture.inference.mask.height,
-    maskWidth: fixture.inference.mask.width,
-    missingFrameIndexes: fixture.inference.missingFrameIndexes,
+    maskHeight: manifest.inference.mask.height,
+    maskWidth: manifest.inference.mask.width,
+    missingFrameIndexes: manifest.inference.missingFrameIndexes,
+  };
+}
+
+function summarizeBasketballSampleDetectionSource(
+  manifest: BasketballSampleDetectionManifest,
+): BasketballSampleDetectionSourceSummary {
+  const firstChunk = manifest.chunks[0];
+  const lastChunk = manifest.chunks.at(-1);
+
+  return {
+    chunkCount: manifest.chunks.length,
+    chunkDurationSeconds: manifest.chunkDurationSeconds,
+    datasetId: manifest.datasetId,
+    detectionCount: manifest.detectionCount ?? 0,
+    endTime: lastChunk?.endTime ?? null,
+    frameCount: manifest.frameCount ?? 0,
+    startTime: firstChunk?.startTime ?? null,
   };
 }

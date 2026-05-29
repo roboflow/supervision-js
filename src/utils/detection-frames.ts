@@ -188,7 +188,7 @@ function isDetectionFrameActive(frame: DetectionFrame, mediaTime: number) {
   );
 }
 
-function detectionFrameOverlapsRange(
+export function detectionFrameOverlapsRange(
   frame: DetectionFrame,
   startTime: number,
   endTime: number,

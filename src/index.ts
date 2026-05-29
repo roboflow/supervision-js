@@ -1,8 +1,10 @@
 export { createArrayDetectionFrameSource } from "#detections/array-detection-frame-source";
 export { createBrowserColdDetectionFrameStore } from "#detections/browser-cold-detection-frame-store";
 export { createBufferedDetectionTimeline } from "#detections/buffered-detection-timeline";
+export { createChunkedDetectionFrameSource } from "#detections/chunked-detection-frame-source";
+export type { ChunkedDetectionFrameSourceOptions } from "#detections/chunked-detection-frame-source";
 export { createColdDetectionFrameSource } from "#detections/cold-detection-frame-source";
-export { normalizeMedia } from "#media/media-normalization";
+export { normalizeMedia, probeMedia } from "#media/media-normalization";
 export { createMediaRenderer } from "#renderers/media-renderer";
 export { BaseBoxStyle, RoundedBoxStyle } from "#styles/box-style";
 export { BaseMaskStyle } from "#styles/mask-style";
@@ -29,6 +31,10 @@ export {
   type ColdDetectionFrameStoreWriteSummary,
   type DetectionBufferOptions,
   type DetectionBufferState,
+  type DetectionFrameChunk,
+  type DetectionFrameChunkDescriptor,
+  type DetectionFrameChunkFetch,
+  type DetectionFrameChunkManifest,
   type DetectionFrameSelectionOptions,
   type DetectionFrameSource,
 } from "#types/detection-timeline";
@@ -45,11 +51,18 @@ export {
   MediaNormalizationContainer,
   MediaNormalizationFit,
   MediaNormalizationVideoCodec,
+  MediaProbeIssueCode,
+  MediaProbeStatus,
   type MediaNormalizationAudioOptions,
   type MediaNormalizationInputMetadata,
   type MediaNormalizationOptions,
   type MediaNormalizationProgress,
   type MediaNormalizationVideoOptions,
+  type MediaProbeIssue,
+  type MediaProbeOptions,
+  type MediaProbeResult,
+  type MediaProbeTargetProfile,
+  type MediaProbeVideoTrack,
   type NormalizedMedia,
 } from "#types/media-normalization";
 export {

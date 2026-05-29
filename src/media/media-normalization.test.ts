@@ -1,15 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  MediaProbeIssueCode,
+  MediaProbeStatus,
   MediaNormalizationContainer,
   MediaNormalizationVideoCodec,
   normalizeMedia,
+  probeMedia,
 } from "#media/media-normalization";
 
 const mockState = vi.hoisted(() => {
   const normalizationMock = {
     blobSourceConstructor: vi.fn(),
     bufferTargetConstructor: vi.fn(),
+    canEncodeVideo: vi.fn(),
     conversionInit: vi.fn(),
     conversionInstance: undefined as
       | {
@@ -25,6 +29,7 @@ const mockState = vi.hoisted(() => {
       | undefined,
     conversionOptions: [] as unknown[],
     inputConstructor: vi.fn(),
+    inputCanRead: vi.fn(async () => true),
     inputDispose: vi.fn(),
     inputFormat: { mimeType: "video/mp4", name: "MP4" },
     inputMimeType: 'video/mp4; codecs="avc1.42e01e"',
@@ -32,6 +37,8 @@ const mockState = vi.hoisted(() => {
     outputFormatInstances: [] as string[],
     outputTargets: [] as Array<{ buffer: ArrayBuffer | null }>,
     primaryVideoTrack: {
+      canDecode: vi.fn(async () => true),
+      getCodec: vi.fn(async () => "avc"),
       getDisplayHeight: vi.fn(async () => 720),
       getDisplayWidth: vi.fn(async () => 1280),
       type: "video",
@@ -67,6 +74,8 @@ vi.mock("mediabunny", () => {
     dispose = normalizationMock.inputDispose;
 
     getDurationFromMetadata = vi.fn(async () => 1.25);
+
+    canRead = normalizationMock.inputCanRead;
 
     getFormat = vi.fn(async () => normalizationMock.inputFormat);
 
@@ -117,6 +126,7 @@ vi.mock("mediabunny", () => {
     ALL_FORMATS: [{ name: "mock-format" }],
     BlobSource,
     BufferTarget,
+    canEncodeVideo: normalizationMock.canEncodeVideo,
     Conversion,
     Input,
     Mp4OutputFormat,
@@ -129,20 +139,121 @@ describe("normalizeMedia", () => {
   beforeEach(() => {
     normalizationMock.blobSourceConstructor.mockClear();
     normalizationMock.bufferTargetConstructor.mockClear();
+    normalizationMock.canEncodeVideo.mockClear();
+    normalizationMock.canEncodeVideo.mockImplementation(
+      async (codec: string) => codec === "vp9",
+    );
     normalizationMock.conversionInit.mockClear();
     normalizationMock.conversionInstance = undefined;
     normalizationMock.conversionOptions.length = 0;
     normalizationMock.inputConstructor.mockClear();
+    normalizationMock.inputCanRead.mockClear();
+    normalizationMock.inputCanRead.mockResolvedValue(true);
     normalizationMock.inputDispose.mockClear();
     normalizationMock.inputFormat = { mimeType: "video/mp4", name: "MP4" };
     normalizationMock.inputMimeType = 'video/mp4; codecs="avc1.42e01e"';
     normalizationMock.outputConstructor.mockClear();
     normalizationMock.outputFormatInstances.length = 0;
     normalizationMock.outputTargets.length = 0;
+    normalizationMock.primaryVideoTrack.canDecode.mockClear();
+    normalizationMock.primaryVideoTrack.canDecode.mockResolvedValue(true);
+    normalizationMock.primaryVideoTrack.getCodec.mockClear();
+    normalizationMock.primaryVideoTrack.getCodec.mockResolvedValue("avc");
     normalizationMock.primaryVideoTrack.getDisplayHeight.mockClear();
     normalizationMock.primaryVideoTrack.getDisplayHeight.mockResolvedValue(720);
     normalizationMock.primaryVideoTrack.getDisplayWidth.mockClear();
     normalizationMock.primaryVideoTrack.getDisplayWidth.mockResolvedValue(1280);
+  });
+
+  it("probes media and selects the first encodable normalization target", async () => {
+    normalizationMock.canEncodeVideo.mockImplementation(
+      async (codec: string) => codec === "vp8",
+    );
+
+    const probe = await probeMedia(new Blob(["source"], { type: "video/mp4" }));
+
+    expect(probe).toMatchObject({
+      canRead: true,
+      inputMetadata: {
+        detectedMimeType: 'video/mp4; codecs="avc1.42e01e"',
+        duration: 1.25,
+        formatMimeType: "video/mp4",
+        formatName: "MP4",
+        primaryVideoHeight: 720,
+        primaryVideoWidth: 1280,
+        sourceMimeType: "video/mp4",
+      },
+      issues: [],
+      primaryVideo: {
+        canDecode: true,
+        codec: "avc",
+        height: 720,
+        width: 1280,
+      },
+      status: MediaProbeStatus.Supported,
+      target: {
+        container: MediaNormalizationContainer.WebM,
+        frameRate: 30,
+        videoCodec: MediaNormalizationVideoCodec.Vp8,
+      },
+    });
+    expect(normalizationMock.inputCanRead).toHaveBeenCalledOnce();
+    expect(
+      normalizationMock.primaryVideoTrack.canDecode,
+    ).toHaveBeenCalledOnce();
+    expect(normalizationMock.canEncodeVideo).toHaveBeenCalledTimes(2);
+    expect(normalizationMock.canEncodeVideo).toHaveBeenNthCalledWith(1, "vp9", {
+      height: 720,
+      width: 1280,
+    });
+    expect(normalizationMock.canEncodeVideo).toHaveBeenNthCalledWith(2, "vp8", {
+      height: 720,
+      width: 1280,
+    });
+    expect(normalizationMock.inputDispose).toHaveBeenCalledOnce();
+  });
+
+  it("reports unsupported media when the primary video cannot decode", async () => {
+    normalizationMock.primaryVideoTrack.canDecode.mockResolvedValue(false);
+
+    const probe = await probeMedia(
+      new Blob(["source"], { type: "video/x-ms-wmv" }),
+    );
+
+    expect(probe.status).toBe(MediaProbeStatus.Unsupported);
+    expect(probe.target).toBeNull();
+    expect(probe.primaryVideo).toMatchObject({
+      canDecode: false,
+      codec: "avc",
+      height: 720,
+      width: 1280,
+    });
+    expect(probe.issues).toEqual([
+      {
+        code: MediaProbeIssueCode.PrimaryVideoCannotDecode,
+        message: "Primary video track cannot be decoded by this browser.",
+      },
+    ]);
+    expect(normalizationMock.canEncodeVideo).not.toHaveBeenCalled();
+    expect(normalizationMock.inputDispose).toHaveBeenCalledOnce();
+  });
+
+  it("reports unsupported media when no target profile can encode", async () => {
+    normalizationMock.canEncodeVideo.mockResolvedValue(false);
+
+    const probe = await probeMedia(new Blob(["source"], { type: "video/mp4" }));
+
+    expect(probe.status).toBe(MediaProbeStatus.Unsupported);
+    expect(probe.target).toBeNull();
+    expect(probe.issues).toEqual([
+      {
+        code: MediaProbeIssueCode.TargetVideoCannotEncode,
+        message:
+          "No requested normalization target can be encoded by this browser.",
+      },
+    ]);
+    expect(normalizationMock.canEncodeVideo).toHaveBeenCalledTimes(2);
+    expect(normalizationMock.inputDispose).toHaveBeenCalledOnce();
   });
 
   it("configures default WebM VP9 30fps video-only normalization", async () => {
