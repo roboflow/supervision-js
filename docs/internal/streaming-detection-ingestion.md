@@ -37,12 +37,20 @@ the core package yet. Producers should normalize their output into
 
 For uploaded media, the demo prepares the media into a renderer-friendly profile,
 creates one writable detection source, and extracts inference frames in batches
-with Mediabunny in the browser. Batches are posted to the demo server, which
-fans out SAM3 requests with a fixed concurrency limit and streams completed
-frame results back as NDJSON. Each completed frame appends into cold storage as
-it arrives. The writable source records the time range touched by each append.
-The hot buffer checks the version for its current window, so detections ingested
-elsewhere in the video do not invalidate the visible buffered window.
+with Mediabunny in the browser. Batches are posted to the demo server over a
+plain HTTP request whose response streams NDJSON events. This is not an SSE
+session yet. The server fans out SAM3 requests with a fixed concurrency limit,
+retries retryable per-frame failures, and streams completed frame results back
+as they arrive. Each completed frame appends into cold storage. The writable
+source records the time range touched by each append. The hot buffer checks the
+version for its current window, so detections ingested elsewhere in the video do
+not invalidate the visible buffered window.
+
+Cancellation is handled by aborting the active browser request. The demo server
+observes the closed response and aborts in-flight Roboflow requests. A future
+SSE/session design is still possible if we need reconnect/resume semantics, but
+the current direction is intentionally simpler: browser-extracted batches,
+server-side fan-out, and streamed HTTP responses.
 
 Full replacement and clear operations still invalidate every range because
 existing frame membership may have changed anywhere in the dataset.
