@@ -71,6 +71,13 @@ export type DetectionFrameChunkFetch = (
   chunk: DetectionFrameChunkDescriptor,
 ) => Promise<DetectionFrameChunk>;
 
+export interface ChunkedDetectionFrameSourceOptions {
+  readonly manifest: DetectionFrameChunkManifest;
+  readonly baseUrl?: string | URL;
+  readonly fetchChunk?: DetectionFrameChunkFetch;
+  readonly maxCachedChunks?: number;
+}
+
 export interface BufferedDetectionTimeline {
   prepare(mediaTime: number): Promise<void>;
   prefetch(mediaTime: number): void;

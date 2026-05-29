@@ -1,8 +1,8 @@
 import type {
+  ChunkedDetectionFrameSourceOptions,
   DetectionFrameChunk,
   DetectionFrameChunkDescriptor,
   DetectionFrameChunkFetch,
-  DetectionFrameChunkManifest,
   DetectionFrameSource,
 } from "#types/detection-timeline";
 import type { DetectionFrame } from "#types/detections";
@@ -12,13 +12,6 @@ import {
 } from "#utils/detection-frames";
 
 const DEFAULT_MAX_CACHED_CHUNKS = 12;
-
-export interface ChunkedDetectionFrameSourceOptions {
-  readonly manifest: DetectionFrameChunkManifest;
-  readonly baseUrl?: string | URL;
-  readonly fetchChunk?: DetectionFrameChunkFetch;
-  readonly maxCachedChunks?: number;
-}
 
 export function createChunkedDetectionFrameSource(
   options: ChunkedDetectionFrameSourceOptions,
