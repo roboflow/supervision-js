@@ -56,6 +56,7 @@ describe("package entrypoint", () => {
       "MediaNormalizationContainer",
       "MediaNormalizationFit",
       "MediaNormalizationVideoCodec",
+      "MediaPreparationError",
       "MediaProbeIssueCode",
       "MediaProbeStatus",
       "MediaRendererFit",
@@ -69,10 +70,13 @@ describe("package entrypoint", () => {
       "createColdDetectionFrameSource",
       "createMediaRenderer",
       "normalizeMedia",
+      "prepareMedia",
       "probeMedia",
     ]);
     expect(entrypoint.createMediaRenderer).toEqual(expect.any(Function));
     expect(entrypoint.normalizeMedia).toEqual(expect.any(Function));
+    expect(entrypoint.prepareMedia).toEqual(expect.any(Function));
+    expect(entrypoint.MediaPreparationError).toEqual(expect.any(Function));
     expect(entrypoint.probeMedia).toEqual(expect.any(Function));
     expect(entrypoint.BaseBoxStyle).toEqual(expect.any(Function));
     expect(entrypoint.BaseMaskStyle).toEqual(expect.any(Function));

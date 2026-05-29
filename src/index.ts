@@ -4,6 +4,7 @@ export { createBufferedDetectionTimeline } from "#detections/buffered-detection-
 export { createChunkedDetectionFrameSource } from "#detections/chunked-detection-frame-source";
 export { createColdDetectionFrameSource } from "#detections/cold-detection-frame-source";
 export { normalizeMedia } from "#media/media-normalization";
+export { prepareMedia, MediaPreparationError } from "#media/media-preparation";
 export { probeMedia } from "#media/media-probe";
 export { createMediaRenderer } from "#renderers/media-renderer";
 export { BaseBoxStyle, RoundedBoxStyle } from "#styles/box-style";
@@ -21,6 +22,10 @@ export type {
   MaskStyle,
   MaskStyleContext,
 } from "#types/mask-style";
+export type {
+  MediaPreparationOptions,
+  PreparedMedia,
+} from "#types/media-preparation";
 export {
   DetectionBufferStatus,
   DetectionFrameSelectionMode,
