@@ -61,13 +61,17 @@ fieldset {
 .demo-shell {
   background: #060708;
   color: var(--text);
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
   height: 100vh;
+  height: 100dvh;
+  min-height: 0;
   overflow: hidden;
   position: relative;
 }
 
 .demo-shell__viewport {
-  height: 100%;
+  height: auto;
   min-height: 0;
 }
 
@@ -76,16 +80,15 @@ fieldset {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 12px 12px 0 0;
-  bottom: 0;
   box-shadow: 0 -18px 60px rgba(0, 0, 0, 0.52);
   display: grid;
   gap: 10px;
-  left: 10px;
+  margin: 0 10px;
   max-height: min(42vh, 380px);
+  min-height: 0;
   overflow: auto;
   padding: 10px;
-  position: fixed;
-  right: 10px;
+  position: relative;
   z-index: 5;
 }
 

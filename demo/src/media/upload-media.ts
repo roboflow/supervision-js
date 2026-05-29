@@ -7,7 +7,9 @@ import {
 import type { WrappedCanvas } from "mediabunny";
 
 const TARGET_FRAME_RATE = 30;
+const NORMALIZED_VIDEO_BITRATE = 8_000_000;
 const IMAGE_MEDIA_DURATION_SECONDS = 1;
+const IMAGE_MEDIA_BITRATE = 8_000_000;
 const DEFAULT_JPEG_QUALITY = 0.9;
 const DEFAULT_FRAME_BATCH_SIZE = 30;
 
@@ -136,6 +138,7 @@ async function prepareUploadedVideo(options: {
     onProgress: options.onProgress,
     signal: options.signal,
     video: {
+      bitrate: NORMALIZED_VIDEO_BITRATE,
       codec: MediaNormalizationVideoCodec.Vp9,
       forceTranscode: true,
       frameRate: TARGET_FRAME_RATE,
@@ -155,7 +158,9 @@ async function prepareUploadedVideo(options: {
     height,
     kind: UploadedMediaKind.Video,
     objectUrl: URL.createObjectURL(normalizedMedia.blob),
-    statusLabel: `upload normalized WebM ${TARGET_FRAME_RATE}fps`,
+    statusLabel: `upload normalized WebM ${TARGET_FRAME_RATE}fps | ${formatMbps(
+      NORMALIZED_VIDEO_BITRATE,
+    )}`,
     width,
   };
 }
@@ -210,7 +215,7 @@ async function encodeCanvasAsWebM(
     target,
   });
   const source = new CanvasSource(canvas, {
-    bitrate: 2_000_000,
+    bitrate: IMAGE_MEDIA_BITRATE,
     codec: "vp9",
     keyFrameInterval: 1,
   });
@@ -299,4 +304,8 @@ function throwIfAborted(signal: AbortSignal | undefined) {
   if (signal?.aborted) {
     throw new Error("Upload media processing was aborted.");
   }
+}
+
+function formatMbps(bitrate: number) {
+  return `${bitrate / 1_000_000}Mbps`;
 }
