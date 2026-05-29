@@ -11,6 +11,7 @@
       "#media/*": ["src/media/*"],
       "#playback/*": ["src/playback/*"],
       "#renderers/*": ["src/renderers/*"],
+      "#sessions/*": ["src/sessions/*"],
       "#styles/*": ["src/styles/*"],
       "#types/*": ["src/types/*"],
       "#utils/*": ["src/utils/*"]

@@ -42,6 +42,10 @@
       "types": "./dist/renderers/*.d.ts",
       "import": "./dist/renderers/*.js"
     },
+    "#sessions/*": {
+      "types": "./dist/sessions/*.d.ts",
+      "import": "./dist/sessions/*.js"
+    },
     "#styles/*": {
       "types": "./dist/styles/*.d.ts",
       "import": "./dist/styles/*.js"

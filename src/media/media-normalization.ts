@@ -214,7 +214,7 @@ export async function normalizeMediaProgressively(
       }),
     );
     const output = new Output({
-      format: new WebMOutputFormat(),
+      format: new WebMOutputFormat({ appendOnly: true }),
       target,
     });
 

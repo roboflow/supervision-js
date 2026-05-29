@@ -1,12 +1,14 @@
 import {
   DetectionFrameSelectionMode,
+  MediaNormalizationContainer,
+  MediaNormalizationVideoCodec,
   MediaRendererFit,
   MediaRendererPlaybackState,
   createBrowserColdDetectionFrameStore,
-  createMediaRenderer,
-  createWritableDetectionFrameSource,
+  createMediaSession,
   type ColdDetectionFrameStoreWriteSummary,
   type DetectionFrame,
+  type MediaSession,
   type MediaNormalizationProgress,
   type MediaRenderer,
   type WritableDetectionFrameSource,
@@ -17,8 +19,11 @@ import type {
 } from "../fixtures/basketball-sample";
 import { inferSam3FrameBatchStream } from "../inference/roboflow-sam3";
 import {
+  NORMALIZED_UPLOAD_VIDEO_BITRATE,
+  TARGET_UPLOAD_FRAME_RATE,
+  createPreparedUploadedVideoMedia,
   extractInferenceFrameBatches,
-  prepareUploadedMedia,
+  prepareUploadedImageMedia,
   UploadedMediaKind,
   type PreparedUploadMedia,
 } from "../media/upload-media";
@@ -53,22 +58,12 @@ export async function createUploadSession(
     readonly onUploadState: UploadInferenceStateSetter;
     readonly uploadRun: UploadRunRequest;
   } & DemoSessionCallbacks,
-): Promise<{
-  readonly detectionSource: WritableDetectionFrameSource;
-  readonly mediaObjectUrl: string | null;
-  readonly renderer: MediaRenderer;
-}> {
+): Promise<MediaSession> {
   const datasetId = `upload_${Date.now()}`;
   const store = createBrowserColdDetectionFrameStore({
     databaseName: "supervision-js-demo-upload-detections",
   });
-  const detectionSource = createWritableDetectionFrameSource({
-    chunkDurationSeconds: UPLOAD_DETECTION_CHUNK_SECONDS,
-    datasetId,
-    store,
-  });
 
-  await detectionSource.clear();
   options.onDetectionSourceState({
     datasetId,
     errorMessage: null,
@@ -76,26 +71,102 @@ export async function createUploadSession(
     status: "ready | waiting for SAM3 frames",
   });
 
-  const preparedMedia = await prepareUploadedMedia({
-    file: options.uploadRun.file,
-    onProgress(progress) {
-      options.onUploadState((current) => ({
-        ...current,
-        normalizedRanges: createNormalizationTimelineRanges(progress),
-        status: "preparing",
-        statusLabel: `stream-normalizing media ${Math.round(
-          progress.progress * 100,
-        )}%`,
-      }));
-    },
-    signal: options.abortSignal,
-  });
+  const presentation = createBasketballSamplePresentation(
+    options.presentationSettings,
+  );
+  const isImageUpload = options.uploadRun.file.type.startsWith("image/");
+  let preparedMedia: PreparedUploadMedia | undefined;
+  let session: MediaSession | undefined;
+
+  if (isImageUpload) {
+    preparedMedia = await prepareUploadedImageMedia({
+      file: options.uploadRun.file,
+      signal: options.abortSignal,
+    });
+  }
 
   if (!options.isActive()) {
-    releasePreparedMedia(preparedMedia);
-    detectionSource.destroy?.();
+    store.destroy?.();
     throw new Error("Upload session was canceled.");
   }
+
+  try {
+    session = await createMediaSession({
+      container: options.container,
+      detections: {
+        buffer: {
+          bufferAheadSeconds: UPLOAD_DETECTION_BUFFER_AHEAD_SECONDS,
+          bufferBehindSeconds: UPLOAD_DETECTION_BUFFER_BEHIND_SECONDS,
+          frameIndexOriginTime: 0,
+          frameRate: TARGET_UPLOAD_FRAME_RATE,
+          selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
+        },
+        writable: {
+          chunkDurationSeconds: UPLOAD_DETECTION_CHUNK_SECONDS,
+          clearOnCreate: true,
+          datasetId,
+          store,
+        },
+      },
+      media: preparedMedia?.blob ?? options.uploadRun.file,
+      normalize: isImageUpload
+        ? false
+        : {
+            audio: { discard: true },
+            container: MediaNormalizationContainer.WebM,
+            onProgress(progress) {
+              options.onUploadState((current) => ({
+                ...current,
+                normalizedRanges: createNormalizationTimelineRanges(progress),
+                status: "preparing",
+                statusLabel: `stream-normalizing media ${Math.round(
+                  progress.progress * 100,
+                )}%`,
+              }));
+            },
+            signal: options.abortSignal,
+            stream: true,
+            video: {
+              bitrate: NORMALIZED_UPLOAD_VIDEO_BITRATE,
+              codec: MediaNormalizationVideoCodec.Vp9,
+              forceTranscode: true,
+              frameRate: TARGET_UPLOAD_FRAME_RATE,
+              keyFrameInterval: 1,
+            },
+          },
+      presentation,
+      renderer: {
+        autoPlay: false,
+        fit: MediaRendererFit.Contain,
+        loop: true,
+        onFrame: options.onFrame,
+        onSource: options.onSourceState,
+      },
+    });
+  } catch (error) {
+    session?.destroy();
+    store.destroy?.();
+    throw error;
+  }
+
+  if (!isImageUpload) {
+    preparedMedia = createPreparedUploadedVideoMedia({
+      file: options.uploadRun.file,
+      media: session.media,
+    });
+  }
+
+  if (!preparedMedia) {
+    session.destroy();
+    throw new Error("Upload media could not be prepared.");
+  }
+
+  if (!options.isActive()) {
+    session.destroy();
+    throw new Error("Upload session was canceled.");
+  }
+
+  const detectionSource = getWritableSessionDetectionSource(session);
 
   options.onMediaState({
     errorMessage: null,
@@ -124,37 +195,6 @@ export async function createUploadSession(
     preparedMedia,
   });
 
-  const presentation = createBasketballSamplePresentation(
-    options.presentationSettings,
-  );
-  let renderer: MediaRenderer;
-
-  try {
-    renderer = await createMediaRenderer({
-      autoPlay: false,
-      boxStyle: presentation.boxStyle ?? undefined,
-      container: options.container,
-      detectionBuffer: {
-        bufferAheadSeconds: UPLOAD_DETECTION_BUFFER_AHEAD_SECONDS,
-        bufferBehindSeconds: UPLOAD_DETECTION_BUFFER_BEHIND_SECONDS,
-        frameIndexOriginTime: 0,
-        frameRate: preparedMedia.frameRate,
-        selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
-      },
-      detectionSource,
-      fit: MediaRendererFit.Contain,
-      loop: true,
-      maskStyle: presentation.maskStyle ?? undefined,
-      onFrame: options.onFrame,
-      onSource: options.onSourceState,
-      ...createRendererSourceOption(preparedMedia),
-    });
-  } catch (error) {
-    releasePreparedMedia(preparedMedia);
-    detectionSource.destroy?.();
-    throw error;
-  }
-
   void runUploadInference({
     abortSignal: options.abortSignal,
     detectionSource,
@@ -163,35 +203,28 @@ export async function createUploadSession(
     onFixtureSummary: options.onFixtureSummary,
     onUploadState: options.onUploadState,
     preparedMedia,
-    renderer,
+    session,
     uploadRun: options.uploadRun,
   });
 
-  return {
-    detectionSource,
-    mediaObjectUrl: preparedMedia.objectUrl,
-    renderer,
-  };
+  return session;
 }
 
-function createRendererSourceOption(preparedMedia: PreparedUploadMedia) {
-  if (preparedMedia.rendererSource) {
-    return { source: preparedMedia.rendererSource };
+function getWritableSessionDetectionSource(
+  session: MediaSession,
+): WritableDetectionFrameSource {
+  const detectionSource = session.detectionSource;
+
+  if (
+    !detectionSource ||
+    !("appendFrames" in detectionSource) ||
+    !("getSummary" in detectionSource) ||
+    !("datasetId" in detectionSource)
+  ) {
+    throw new Error("Upload media session did not create writable detections.");
   }
 
-  if (preparedMedia.objectUrl) {
-    return { src: preparedMedia.objectUrl };
-  }
-
-  throw new Error("Prepared upload media has no renderer source.");
-}
-
-function releasePreparedMedia(preparedMedia: PreparedUploadMedia) {
-  preparedMedia.destroy();
-
-  if (preparedMedia.objectUrl) {
-    URL.revokeObjectURL(preparedMedia.objectUrl);
-  }
+  return detectionSource as WritableDetectionFrameSource;
 }
 
 function watchNormalizationCompletion(options: {
@@ -246,7 +279,7 @@ async function runUploadInference(options: {
   readonly onFixtureSummary: DemoSessionCallbacks["onFixtureSummary"];
   readonly onUploadState: UploadInferenceStateSetter;
   readonly preparedMedia: PreparedUploadMedia;
-  readonly renderer: MediaRenderer;
+  readonly session: MediaSession;
   readonly uploadRun: Pick<UploadRunRequest, "apiKey" | "classNames">;
 }) {
   try {
@@ -279,7 +312,7 @@ async function runUploadInference(options: {
         prompts: options.uploadRun.classNames,
         signal: options.abortSignal,
       })) {
-        const summary = await options.detectionSource.appendFrames([
+        const summary = await options.session.appendDetections([
           detectionFrame,
         ]);
 
@@ -312,7 +345,7 @@ async function runUploadInference(options: {
           statusLabel: "SAM3 frames streaming into cold storage",
           totalFrames: options.preparedMedia.frameCount,
         }));
-        refreshPausedRendererForFrame(options.renderer, detectionFrame);
+        refreshPausedRendererForFrame(options.session.renderer, detectionFrame);
       }
 
       options.onUploadState((current) => ({
@@ -327,7 +360,7 @@ async function runUploadInference(options: {
     }
 
     if (options.isActive()) {
-      const summary = options.detectionSource.getSummary();
+      const summary = options.session.getDetectionSummary();
 
       options.onUploadState((current) => ({
         ...current,

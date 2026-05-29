@@ -6,6 +6,7 @@ import {
   MediaNormalizationContainer,
   MediaNormalizationVideoCodec,
   normalizeMedia,
+  normalizeMediaProgressively,
   probeMedia,
 } from "#media/media-normalization";
 
@@ -33,9 +34,12 @@ const mockState = vi.hoisted(() => {
     inputDispose: vi.fn(),
     inputFormat: { mimeType: "video/mp4", name: "MP4" },
     inputMimeType: 'video/mp4; codecs="avc1.42e01e"',
+    appendOnlyStreamTargetConstructor: vi.fn(),
     outputConstructor: vi.fn(),
     outputFormatInstances: [] as string[],
+    outputFormatOptions: [] as unknown[],
     outputTargets: [] as Array<{ buffer: ArrayBuffer | null }>,
+    readableStreamSourceConstructor: vi.fn(),
     primaryVideoTrack: {
       canDecode: vi.fn(async () => true),
       getCodec: vi.fn(async () => "avc"),
@@ -63,6 +67,12 @@ vi.mock("mediabunny", () => {
     constructor() {
       normalizationMock.bufferTargetConstructor();
       normalizationMock.outputTargets.push(this);
+    }
+  }
+
+  class AppendOnlyStreamTarget {
+    constructor(writable: WritableStream<Uint8Array>) {
+      normalizationMock.appendOnlyStreamTargetConstructor(writable);
     }
   }
 
@@ -99,8 +109,15 @@ vi.mock("mediabunny", () => {
   }
 
   class WebMOutputFormat {
-    constructor() {
+    constructor(options?: unknown) {
       normalizationMock.outputFormatInstances.push("webm");
+      normalizationMock.outputFormatOptions.push(options);
+    }
+  }
+
+  class ReadableStreamSource {
+    constructor(stream: ReadableStream<Uint8Array>, options?: unknown) {
+      normalizationMock.readableStreamSourceConstructor(stream, options);
     }
   }
 
@@ -124,6 +141,7 @@ vi.mock("mediabunny", () => {
 
   return {
     ALL_FORMATS: [{ name: "mock-format" }],
+    AppendOnlyStreamTarget,
     BlobSource,
     BufferTarget,
     canEncodeVideo: normalizationMock.canEncodeVideo,
@@ -131,6 +149,8 @@ vi.mock("mediabunny", () => {
     Input,
     Mp4OutputFormat,
     Output,
+    ReadableStreamSource,
+    WEBM: { name: "WebM" },
     WebMOutputFormat,
   };
 });
@@ -138,6 +158,7 @@ vi.mock("mediabunny", () => {
 describe("normalizeMedia", () => {
   beforeEach(() => {
     normalizationMock.blobSourceConstructor.mockClear();
+    normalizationMock.appendOnlyStreamTargetConstructor.mockClear();
     normalizationMock.bufferTargetConstructor.mockClear();
     normalizationMock.canEncodeVideo.mockClear();
     normalizationMock.canEncodeVideo.mockImplementation(
@@ -154,7 +175,9 @@ describe("normalizeMedia", () => {
     normalizationMock.inputMimeType = 'video/mp4; codecs="avc1.42e01e"';
     normalizationMock.outputConstructor.mockClear();
     normalizationMock.outputFormatInstances.length = 0;
+    normalizationMock.outputFormatOptions.length = 0;
     normalizationMock.outputTargets.length = 0;
+    normalizationMock.readableStreamSourceConstructor.mockClear();
     normalizationMock.primaryVideoTrack.canDecode.mockClear();
     normalizationMock.primaryVideoTrack.canDecode.mockResolvedValue(true);
     normalizationMock.primaryVideoTrack.getCodec.mockClear();
@@ -302,6 +325,45 @@ describe("normalizeMedia", () => {
     expect(
       normalizationMock.conversionInstance?.execute,
     ).toHaveBeenCalledOnce();
+  });
+
+  it("configures progressive WebM normalization as append-only", async () => {
+    const inputBlob = new Blob(["source"], { type: "video/mp4" });
+
+    const normalized = await normalizeMediaProgressively(inputBlob);
+
+    expect(
+      normalizationMock.appendOnlyStreamTargetConstructor,
+    ).toHaveBeenCalledOnce();
+    expect(normalizationMock.outputFormatInstances).toEqual(["webm"]);
+    expect(normalizationMock.outputFormatOptions).toEqual([
+      { appendOnly: true },
+    ]);
+    expect(normalizationMock.conversionInit).toHaveBeenCalledWith({
+      audio: { discard: true },
+      input: expect.any(Object),
+      output: expect.any(Object),
+      showWarnings: false,
+      tracks: "primary",
+      video: {
+        codec: "vp9",
+        forceTranscode: true,
+        frameRate: 30,
+        keyFrameInterval: 1,
+      },
+    });
+    expect(
+      normalizationMock.readableStreamSourceConstructor,
+    ).toHaveBeenCalledWith(expect.any(ReadableStream), {
+      maxCacheSize: 512 * 2 ** 20,
+    });
+    await expect(normalized.completion).resolves.toMatchObject({
+      container: MediaNormalizationContainer.WebM,
+      extension: "webm",
+      mimeType: "video/webm",
+      size: 0,
+    });
+    expect(normalizationMock.inputDispose).toHaveBeenCalledOnce();
   });
 
   it("rejects already-aborted signals before conversion starts", async () => {

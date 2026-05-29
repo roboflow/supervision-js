@@ -11,6 +11,7 @@ export {
 export { prepareMedia, MediaPreparationError } from "#media/media-preparation";
 export { probeMedia } from "#media/media-probe";
 export { createMediaRenderer } from "#renderers/media-renderer";
+export { createMediaSession } from "#sessions/media-session";
 export { BaseBoxStyle, RoundedBoxStyle } from "#styles/box-style";
 export { BaseMaskStyle } from "#styles/mask-style";
 export { BoxShape } from "#types/box-style";
@@ -79,6 +80,16 @@ export {
   type NormalizedMedia,
   type ProgressiveNormalizedMedia,
 } from "#types/media-normalization";
+export {
+  type MediaSession,
+  type MediaSessionDetectionOptions,
+  type MediaSessionMedia,
+  type MediaSessionMediaState,
+  type MediaSessionNormalizationOptions,
+  type MediaSessionOptions,
+  type MediaSessionRendererOptions,
+  type MediaSessionWritableDetectionOptions,
+} from "#types/media-session";
 export {
   MediaRendererFit,
   MediaRendererPlaybackState,

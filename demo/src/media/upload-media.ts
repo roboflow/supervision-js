@@ -1,14 +1,8 @@
-import {
-  MediaNormalizationContainer,
-  MediaNormalizationVideoCodec,
-  normalizeMediaProgressively,
-  type MediaNormalizationProgress,
-  type MediaRendererSource,
-} from "supervision-js";
+import { type MediaSessionMediaState } from "supervision-js";
 import type { WrappedCanvas } from "mediabunny";
 
-const TARGET_FRAME_RATE = 30;
-const NORMALIZED_VIDEO_BITRATE = 8_000_000;
+export const TARGET_UPLOAD_FRAME_RATE = 30;
+export const NORMALIZED_UPLOAD_VIDEO_BITRATE = 8_000_000;
 const IMAGE_MEDIA_DURATION_SECONDS = 1;
 const IMAGE_MEDIA_BITRATE = 8_000_000;
 const DEFAULT_JPEG_QUALITY = 0.9;
@@ -21,15 +15,12 @@ export enum UploadedMediaKind {
 
 export interface PreparedUploadMedia {
   readonly blob: Blob | null;
-  readonly destroy: () => void;
   readonly duration: number;
   readonly frameCount: number;
   readonly frameRate: number;
   readonly height: number;
   readonly kind: UploadedMediaKind;
   readonly normalizationCompletion: Promise<void> | null;
-  readonly objectUrl: string | null;
-  readonly rendererSource: MediaRendererSource | null;
   readonly sourceFile: File | null;
   readonly statusLabel: string;
   readonly width: number;
@@ -42,16 +33,72 @@ export interface ExtractedInferenceFrame {
   readonly imageBase64: string;
 }
 
-export async function prepareUploadedMedia(options: {
+export function createPreparedUploadedVideoMedia(options: {
   readonly file: File;
-  readonly signal?: AbortSignal;
-  readonly onProgress?: (progress: MediaNormalizationProgress) => void;
-}): Promise<PreparedUploadMedia> {
-  if (options.file.type.startsWith("image/")) {
-    return prepareUploadedImage(options);
+  readonly media: MediaSessionMediaState;
+}): PreparedUploadMedia {
+  const metadata = options.media.inputMetadata;
+
+  if (!metadata) {
+    throw new Error("Uploaded video session did not expose input metadata.");
   }
 
-  return prepareUploadedVideo(options);
+  const duration = metadata.duration ?? 0;
+  const width = metadata.primaryVideoWidth ?? 0;
+  const height = metadata.primaryVideoHeight ?? 0;
+
+  return {
+    blob: null,
+    duration,
+    frameCount: Math.max(1, Math.ceil(duration * TARGET_UPLOAD_FRAME_RATE)),
+    frameRate: TARGET_UPLOAD_FRAME_RATE,
+    height,
+    kind: UploadedMediaKind.Video,
+    normalizationCompletion: getNormalizationCompletion(options.media),
+    sourceFile: options.file,
+    statusLabel: `upload stream-normalizing WebM ${TARGET_UPLOAD_FRAME_RATE}fps | ${formatMbps(
+      NORMALIZED_UPLOAD_VIDEO_BITRATE,
+    )}`,
+    width,
+  };
+}
+
+export async function prepareUploadedImageMedia(options: {
+  readonly file: File;
+  readonly signal?: AbortSignal;
+}): Promise<PreparedUploadMedia> {
+  throwIfAborted(options.signal);
+  const bitmap = await createImageBitmap(options.file);
+
+  try {
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
+
+    if (!context) {
+      throw new Error("Unable to create image upload canvas.");
+    }
+
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    context.drawImage(bitmap, 0, 0);
+
+    const blob = await encodeCanvasAsWebM(canvas, options.signal);
+
+    return {
+      blob,
+      duration: IMAGE_MEDIA_DURATION_SECONDS,
+      frameCount: 1,
+      frameRate: TARGET_UPLOAD_FRAME_RATE,
+      height: canvas.height,
+      kind: UploadedMediaKind.Image,
+      normalizationCompletion: null,
+      sourceFile: null,
+      statusLabel: "image upload encoded as one-frame WebM",
+      width: canvas.width,
+    };
+  } finally {
+    bitmap.close();
+  }
 }
 
 export async function* extractInferenceFrameBatches(options: {
@@ -136,93 +183,6 @@ export async function* extractInferenceFrameBatches(options: {
     }
   } finally {
     input.dispose();
-  }
-}
-
-async function prepareUploadedVideo(options: {
-  readonly file: File;
-  readonly signal?: AbortSignal;
-  readonly onProgress?: (progress: MediaNormalizationProgress) => void;
-}): Promise<PreparedUploadMedia> {
-  const normalizedMedia = await normalizeMediaProgressively(options.file, {
-    audio: { discard: true },
-    container: MediaNormalizationContainer.WebM,
-    onProgress: options.onProgress,
-    signal: options.signal,
-    video: {
-      bitrate: NORMALIZED_VIDEO_BITRATE,
-      codec: MediaNormalizationVideoCodec.Vp9,
-      forceTranscode: true,
-      frameRate: TARGET_FRAME_RATE,
-      keyFrameInterval: 1,
-    },
-  });
-  const metadata = normalizedMedia.inputMetadata;
-  const duration = metadata.duration ?? 0;
-  const width = metadata.primaryVideoWidth ?? 0;
-  const height = metadata.primaryVideoHeight ?? 0;
-
-  return {
-    blob: null,
-    destroy() {
-      void normalizedMedia.cancel().catch(() => undefined);
-    },
-    duration,
-    frameCount: Math.max(1, Math.ceil(duration * TARGET_FRAME_RATE)),
-    frameRate: TARGET_FRAME_RATE,
-    height,
-    kind: UploadedMediaKind.Video,
-    normalizationCompletion: normalizedMedia.completion.then(() => undefined),
-    objectUrl: null,
-    rendererSource: normalizedMedia.rendererSource,
-    sourceFile: options.file,
-    statusLabel: `upload stream-normalizing WebM ${TARGET_FRAME_RATE}fps | ${formatMbps(
-      NORMALIZED_VIDEO_BITRATE,
-    )}`,
-    width,
-  };
-}
-
-async function prepareUploadedImage(options: {
-  readonly file: File;
-  readonly signal?: AbortSignal;
-}): Promise<PreparedUploadMedia> {
-  throwIfAborted(options.signal);
-  const bitmap = await createImageBitmap(options.file);
-
-  try {
-    const canvas = document.createElement("canvas");
-    const context = canvas.getContext("2d");
-
-    if (!context) {
-      throw new Error("Unable to create image upload canvas.");
-    }
-
-    canvas.width = bitmap.width;
-    canvas.height = bitmap.height;
-    context.drawImage(bitmap, 0, 0);
-
-    const blob = await encodeCanvasAsWebM(canvas, options.signal);
-
-    return {
-      blob,
-      destroy() {
-        // Blob URLs are owned by the upload session cleanup.
-      },
-      duration: IMAGE_MEDIA_DURATION_SECONDS,
-      frameCount: 1,
-      frameRate: TARGET_FRAME_RATE,
-      height: canvas.height,
-      kind: UploadedMediaKind.Image,
-      normalizationCompletion: null,
-      objectUrl: URL.createObjectURL(blob),
-      rendererSource: null,
-      sourceFile: null,
-      statusLabel: "image upload encoded as one-frame WebM",
-      width: canvas.width,
-    };
-  } finally {
-    bitmap.close();
   }
 }
 
@@ -328,6 +288,16 @@ function throwIfAborted(signal: AbortSignal | undefined) {
   if (signal?.aborted) {
     throw new Error("Upload media processing was aborted.");
   }
+}
+
+function getNormalizationCompletion(media: MediaSessionMediaState) {
+  const normalizedMedia = media.normalizedMedia;
+
+  if (normalizedMedia && "completion" in normalizedMedia) {
+    return normalizedMedia.completion.then(() => undefined);
+  }
+
+  return null;
 }
 
 function formatMbps(bitrate: number) {

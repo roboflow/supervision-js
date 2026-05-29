@@ -7,15 +7,12 @@ import {
 } from "react";
 import {
   MediaRendererPlaybackState,
+  type MediaSession,
   type MediaRenderer,
   type MediaRendererState,
   type MediaSourceState,
-  type WritableDetectionFrameSource,
 } from "supervision-js";
-import type {
-  BasketballSampleDetectionSource,
-  BasketballSampleSummary,
-} from "../fixtures/basketball-sample";
+import type { BasketballSampleSummary } from "../fixtures/basketball-sample";
 import { defaultBasketballSampleFixture } from "../fixtures/basketball-sample";
 import {
   createBasketballSamplePresentation,
@@ -148,12 +145,8 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
 
     const runId = effectRunRef.current + 1;
     effectRunRef.current = runId;
-    let detectionSource:
-      | BasketballSampleDetectionSource
-      | WritableDetectionFrameSource
-      | undefined;
+    let activeSession: MediaSession | undefined;
     let renderer: MediaRenderer | undefined;
-    let uploadedMediaObjectUrl: string | null | undefined;
     let lastReadoutAt = 0;
     let cleanedUp = false;
     const abortController =
@@ -191,7 +184,7 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
             presentationSettings: presentationSettingsRef.current,
           });
 
-          detectionSource = session.detectionSource;
+          activeSession = session;
           renderer = session.renderer;
         } else if (uploadRun) {
           const session = await createUploadSession({
@@ -208,16 +201,15 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
             uploadRun,
           });
 
-          detectionSource = session.detectionSource;
+          activeSession = session;
           renderer = session.renderer;
-          uploadedMediaObjectUrl = session.mediaObjectUrl;
         }
 
         if (!isActive() || !renderer) {
-          renderer?.destroy();
-          detectionSource?.destroy?.();
-          if (uploadedMediaObjectUrl) {
-            URL.revokeObjectURL(uploadedMediaObjectUrl);
+          if (activeSession) {
+            activeSession.destroy();
+          } else {
+            renderer?.destroy();
           }
           return;
         }
@@ -241,10 +233,10 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
       cleanedUp = true;
       abortController?.abort();
       rendererRef.current = null;
-      renderer?.destroy();
-      detectionSource?.destroy?.();
-      if (uploadedMediaObjectUrl) {
-        URL.revokeObjectURL(uploadedMediaObjectUrl);
+      if (activeSession) {
+        activeSession.destroy();
+      } else {
+        renderer?.destroy();
       }
     };
   }, [sourceMode, syncRendererState, uploadRun]);

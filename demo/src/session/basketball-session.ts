@@ -1,13 +1,10 @@
 import {
   DetectionFrameSelectionMode,
   MediaRendererFit,
-  createMediaRenderer,
-  type MediaRenderer,
+  createMediaSession,
+  type MediaSession,
 } from "supervision-js";
-import type {
-  BasketballSampleDetectionSource,
-  BasketballSampleFixtureDefinition,
-} from "../fixtures/basketball-sample";
+import type { BasketballSampleFixtureDefinition } from "../fixtures/basketball-sample";
 import {
   createBasketballSampleDetectionSource,
   loadBasketballSampleDetectionManifest,
@@ -25,10 +22,7 @@ export async function createBasketballSession(
     readonly container: HTMLDivElement;
     readonly definition: BasketballSampleFixtureDefinition;
   } & DemoSessionCallbacks,
-): Promise<{
-  readonly detectionSource: BasketballSampleDetectionSource;
-  readonly renderer: MediaRenderer;
-}> {
+): Promise<MediaSession> {
   const manifest = await loadBasketballSampleDetectionManifest(
     options.definition,
   );
@@ -65,25 +59,34 @@ export async function createBasketballSession(
   const presentation = createBasketballSamplePresentation(
     options.presentationSettings,
   );
-  const renderer = await createMediaRenderer({
-    autoPlay: false,
-    boxStyle: presentation.boxStyle ?? undefined,
-    container: options.container,
-    detectionBuffer: {
-      bufferAheadSeconds: UPLOAD_DETECTION_BUFFER_AHEAD_SECONDS,
-      bufferBehindSeconds: UPLOAD_DETECTION_BUFFER_BEHIND_SECONDS,
-      frameIndexOriginTime: 0,
-      frameRate: manifest.inference.frameRate,
-      selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
-    },
-    detectionSource: detectionSource.detectionSource,
-    fit: MediaRendererFit.Contain,
-    loop: true,
-    maskStyle: presentation.maskStyle ?? undefined,
-    onFrame: options.onFrame,
-    onSource: options.onSourceState,
-    src: mediaSource.src,
-  });
 
-  return { detectionSource, renderer };
+  try {
+    const session = await createMediaSession({
+      container: options.container,
+      detections: {
+        buffer: {
+          bufferAheadSeconds: UPLOAD_DETECTION_BUFFER_AHEAD_SECONDS,
+          bufferBehindSeconds: UPLOAD_DETECTION_BUFFER_BEHIND_SECONDS,
+          frameIndexOriginTime: 0,
+          frameRate: manifest.inference.frameRate,
+          selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
+        },
+        source: detectionSource.detectionSource,
+      },
+      media: mediaSource.src,
+      presentation,
+      renderer: {
+        autoPlay: false,
+        fit: MediaRendererFit.Contain,
+        loop: true,
+        onFrame: options.onFrame,
+        onSource: options.onSourceState,
+      },
+    });
+
+    return session;
+  } catch (error) {
+    detectionSource.destroy();
+    throw error;
+  }
 }
