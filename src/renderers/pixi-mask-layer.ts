@@ -1,5 +1,6 @@
 import {
   createPreparedRenderWindow,
+  PreparedRenderFrameMaskStatus,
   type PreparedMaskFrame,
 } from "#render-preparation/prepared-render-window";
 import type { BufferedDetectionTimeline } from "#types/detection-timeline";
@@ -10,6 +11,8 @@ import type {
   Sprite as PixiSprite,
   Texture as PixiTexture,
 } from "pixi.js";
+
+const MAX_PENDING_MASK_HOLD_SECONDS = 0.05;
 
 type ImageSourceConstructor = new (options: {
   dynamic: boolean;
@@ -46,6 +49,8 @@ export function createPixiMaskLayer(options: {
   let mediaWidth = 0;
   let maskSprite: PixiSprite | undefined;
   let activeFrameKey: string | null = null;
+  let activeFrameMediaTime: number | null = null;
+  let visibleMaskMediaTime: number | null = null;
   let isDestroyed = false;
   const maskTextures = new Map<string, PixiTexture>();
   const preparedRenderWindow = createPreparedRenderWindow({
@@ -55,16 +60,18 @@ export function createPixiMaskLayer(options: {
       destroyTexture(key);
       if (key === activeFrameKey) {
         activeFrameKey = null;
+        activeFrameMediaTime = null;
         hideSprite();
       }
     },
     onMaskFramePrepared(maskFrame) {
       if (!isDestroyed && maskFrame.key === activeFrameKey) {
-        showMaskFrame(maskFrame);
+        showMaskFrame(maskFrame, activeFrameMediaTime);
       }
     },
     onMaskFramesCleared() {
       activeFrameKey = null;
+      activeFrameMediaTime = null;
       destroyTextures();
       hideSprite();
     },
@@ -85,14 +92,35 @@ export function createPixiMaskLayer(options: {
     drawFrame(mediaTime) {
       const preparedFrame = preparedRenderWindow.getFrame(mediaTime);
 
-      if (!preparedFrame?.maskFrame || !maskSprite) {
+      if (!preparedFrame || !maskSprite) {
         activeFrameKey = preparedFrame?.key ?? null;
+        activeFrameMediaTime = preparedFrame?.detectionFrame.mediaTime ?? null;
         hideSprite();
         return;
       }
 
       activeFrameKey = preparedFrame.key;
-      showMaskFrame(preparedFrame.maskFrame);
+      activeFrameMediaTime = preparedFrame.detectionFrame.mediaTime;
+
+      if (preparedFrame.maskFrame) {
+        showMaskFrame(
+          preparedFrame.maskFrame,
+          preparedFrame.detectionFrame.mediaTime,
+        );
+        return;
+      }
+
+      if (
+        preparedFrame.maskStatus === PreparedRenderFrameMaskStatus.Empty ||
+        preparedFrame.maskStatus === PreparedRenderFrameMaskStatus.Disabled
+      ) {
+        hideSprite();
+        return;
+      }
+
+      if (!canHoldVisibleMaskFor(preparedFrame.detectionFrame.mediaTime)) {
+        hideSprite();
+      }
     },
 
     setMaskStyle(nextMaskStyle) {
@@ -110,7 +138,11 @@ export function createPixiMaskLayer(options: {
     },
   };
 
-  function showMaskFrame(maskFrame: PreparedMaskFrame) {
+  function showMaskFrame(
+    maskFrame: PreparedMaskFrame,
+    mediaTime: number | null,
+  ) {
+    visibleMaskMediaTime = mediaTime;
     showTexture(getTexture(maskFrame));
   }
 
@@ -149,9 +181,19 @@ export function createPixiMaskLayer(options: {
   }
 
   function hideSprite() {
+    visibleMaskMediaTime = null;
+
     if (maskSprite) {
       maskSprite.visible = false;
     }
+  }
+
+  function canHoldVisibleMaskFor(mediaTime: number) {
+    return (
+      visibleMaskMediaTime !== null &&
+      Math.abs(mediaTime - visibleMaskMediaTime) <=
+        MAX_PENDING_MASK_HOLD_SECONDS
+    );
   }
 
   function destroyTexture(key: string) {

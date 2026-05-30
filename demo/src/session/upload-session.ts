@@ -29,8 +29,6 @@ import {
 } from "../media/upload-media";
 import { createBasketballSamplePresentation } from "../presentation/basketball-presentation";
 import {
-  UPLOAD_DETECTION_BUFFER_AHEAD_SECONDS,
-  UPLOAD_DETECTION_BUFFER_BEHIND_SECONDS,
   UPLOAD_DETECTION_CHUNK_SECONDS,
   UPLOAD_PREDICTION_PLAYBACK_GATE_SECONDS,
 } from "./demo-session-config";
@@ -95,8 +93,6 @@ export async function createUploadSession(
       container: options.container,
       detections: {
         buffer: {
-          bufferAheadSeconds: UPLOAD_DETECTION_BUFFER_AHEAD_SECONDS,
-          bufferBehindSeconds: UPLOAD_DETECTION_BUFFER_BEHIND_SECONDS,
           frameIndexOriginTime: 0,
           frameRate: TARGET_UPLOAD_FRAME_RATE,
           selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,

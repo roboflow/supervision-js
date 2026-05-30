@@ -16,6 +16,7 @@ export function ControlBar({
   duration,
   normalizedRanges,
   onSeek,
+  onStepFrame,
   onTogglePlayback,
   playbackState,
   processedRanges,
@@ -28,6 +29,7 @@ export function ControlBar({
   readonly duration: number | null;
   readonly normalizedRanges: readonly TimelineRange[];
   readonly onSeek: (time: number) => void;
+  readonly onStepFrame: (frameDelta: number) => void;
   readonly onTogglePlayback: () => void;
   readonly playbackState: MediaRendererPlaybackState | null;
   readonly processedRanges: readonly TimelineRange[];
@@ -37,6 +39,7 @@ export function ControlBar({
     <section className="control-bar" aria-label="Playback controls">
       <PlaybackControls
         disabled={!canUseRenderer}
+        onStepFrame={onStepFrame}
         onTogglePlayback={onTogglePlayback}
         playbackState={playbackState}
       />

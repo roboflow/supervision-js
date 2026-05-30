@@ -3,10 +3,12 @@ import { MediaRendererPlaybackState } from "supervision-js";
 export function PlaybackControls({
   playbackState,
   disabled,
+  onStepFrame,
   onTogglePlayback,
 }: {
   readonly playbackState: MediaRendererPlaybackState | null;
   readonly disabled: boolean;
+  readonly onStepFrame: (frameDelta: number) => void;
   readonly onTogglePlayback: () => void;
 }) {
   const isPlaybackActive =
@@ -16,24 +18,48 @@ export function PlaybackControls({
   const label = isPlaybackActive ? "Pause" : "Play";
 
   return (
-    <button
-      aria-label={label}
+    <div
       className="playback-controls"
-      disabled={disabled}
-      onClick={onTogglePlayback}
-      type="button"
+      aria-label="Playback controls"
+      role="group"
     >
-      <span
-        aria-hidden="true"
-        className={
-          isPlaybackActive
-            ? "playback-controls__pause"
-            : "playback-controls__play"
-        }
-      />
-      <span className="playback-controls__label">
-        {isBuffering ? "Buffering" : label}
-      </span>
-    </button>
+      <button
+        aria-label="Previous frame"
+        className="playback-controls__step"
+        disabled={disabled}
+        onClick={() => onStepFrame(-1)}
+        type="button"
+      >
+        -1
+      </button>
+      <button
+        aria-label={label}
+        className="playback-controls__toggle"
+        disabled={disabled}
+        onClick={onTogglePlayback}
+        type="button"
+      >
+        <span
+          aria-hidden="true"
+          className={
+            isPlaybackActive
+              ? "playback-controls__pause"
+              : "playback-controls__play"
+          }
+        />
+        <span className="playback-controls__label">
+          {isBuffering ? "Buffering" : label}
+        </span>
+      </button>
+      <button
+        aria-label="Next frame"
+        className="playback-controls__step"
+        disabled={disabled}
+        onClick={() => onStepFrame(1)}
+        type="button"
+      >
+        +1
+      </button>
+    </div>
   );
 }

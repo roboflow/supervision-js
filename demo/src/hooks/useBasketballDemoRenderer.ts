@@ -58,6 +58,7 @@ export interface BasketballDemoRendererState {
   readonly onCancelUploadInference: () => void;
   readonly onSeek: (time: number) => void;
   readonly onStartUploadInference: () => void;
+  readonly onStepFrame: (frameDelta: number) => void;
   readonly onTogglePlayback: () => void;
   readonly onUploadFileChange: (file: File | null) => void;
   readonly setPresentationSettings: (
@@ -324,6 +325,33 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
     [syncRendererState],
   );
 
+  const onStepFrame = useCallback(
+    (frameDelta: number) => {
+      const renderer = rendererRef.current;
+
+      if (!renderer) {
+        return;
+      }
+
+      const state = renderer.getState();
+      const frameRate = fixtureSummary?.inferenceFrameRate ?? 30;
+      const currentFrameIndex =
+        state.activeDetectionFrameIndex ??
+        Math.round(Math.max(0, state.currentTime) * frameRate);
+      const duration = state.duration ?? fixtureSummary?.duration ?? null;
+      const targetTime = Math.max(
+        0,
+        Math.min(
+          (currentFrameIndex + frameDelta) / frameRate,
+          duration ?? Number.POSITIVE_INFINITY,
+        ),
+      );
+
+      onSeek(targetTime);
+    },
+    [fixtureSummary, onSeek],
+  );
+
   const setPresentationSettings = useCallback(
     (settings: BasketballPresentationSettings) => {
       presentationSettingsRef.current = settings;
@@ -461,6 +489,7 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
     onCancelUploadInference,
     onSeek,
     onStartUploadInference,
+    onStepFrame,
     onTogglePlayback,
     onUploadFileChange,
     playbackState,

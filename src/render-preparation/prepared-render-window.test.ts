@@ -75,6 +75,41 @@ describe("prepared render window", () => {
     }
   });
 
+  it("does not wait for browser idle time to start active mask preparation", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    const browserWindow = window as typeof window & {
+      requestIdleCallback?: (callback: () => void) => number;
+    };
+    const originalRequestIdleCallback = browserWindow.requestIdleCallback;
+
+    try {
+      browserWindow.requestIdleCallback = vi.fn(() => 1);
+
+      const renderWindow = createPreparedRenderWindow({
+        detectionTimeline: createTimeline(frames),
+        maskStyle: new BaseMaskStyle(),
+      });
+
+      expect(renderWindow.getFrame(0)?.maskFrame).toBeUndefined();
+
+      await vi.runOnlyPendingTimersAsync();
+
+      expect(browserWindow.requestIdleCallback).not.toHaveBeenCalled();
+      expect(renderWindow.getFrame(0)?.maskFrame).toMatchObject({
+        height: 2,
+        key: "0:0",
+        width: 2,
+      });
+
+      renderWindow.destroy();
+    } finally {
+      browserWindow.requestIdleCallback = originalRequestIdleCallback;
+      vi.useRealTimers();
+    }
+  });
+
   it("evicts prepared mask artifacts through the eviction callback", async () => {
     vi.useFakeTimers();
     resetMocks();

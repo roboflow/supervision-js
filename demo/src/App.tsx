@@ -53,6 +53,7 @@ export function App() {
           detectionBuffer={demo.rendererState?.detectionBuffer ?? null}
           duration={demo.duration}
           onSeek={demo.onSeek}
+          onStepFrame={demo.onStepFrame}
           onTogglePlayback={demo.onTogglePlayback}
           playbackState={demo.playbackState}
           normalizedRanges={normalizedRanges}

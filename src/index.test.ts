@@ -952,6 +952,72 @@ describe("package entrypoint", () => {
     layer.destroy();
   });
 
+  it("does not keep a stale mask visible while the active frame mask is still pending", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const { createPixiMaskLayer } =
+        await import("./renderers/pixi-mask-layer");
+      const { ImageSource, Sprite, Texture } = await import("pixi.js");
+      const detectionFrames = Array.from({ length: 14 }, (_, index) => ({
+        detections: [
+          {
+            mask: {
+              counts: "021",
+              encoding: DetectionMaskEncoding.CompressedRle,
+              height: 2,
+              width: 2,
+            },
+          },
+        ],
+        mediaTime: index * 0.04,
+      }));
+      const detectionTimeline = {
+        destroy: vi.fn(),
+        getBufferedFrames: vi.fn(() => detectionFrames),
+        getState: vi.fn(() => ({
+          bufferEndTime: 5,
+          bufferStartTime: 0,
+          detectionCount: detectionFrames.length,
+          errorMessage: null,
+          frameCount: detectionFrames.length,
+          requestedEndTime: 5,
+          requestedStartTime: 0,
+          status: DetectionBufferStatus.Ready,
+        })),
+        prepare: vi.fn(),
+        prefetch: vi.fn(),
+        selectFrame: vi.fn((mediaTime: number) =>
+          detectionFrames.find((frame) => frame.mediaTime === mediaTime),
+        ),
+      } satisfies BufferedDetectionTimeline;
+
+      const layer = createPixiMaskLayer({
+        detectionTimeline,
+        ImageSource,
+        maskStyle: new BaseMaskStyle(),
+        Sprite,
+        Texture,
+      });
+
+      const sprite = layer.createSprite({ height: 720, width: 1280 });
+      layer.drawFrame(0);
+      await vi.runOnlyPendingTimersAsync();
+      layer.drawFrame(0);
+
+      expect(sprite.visible).toBe(true);
+
+      layer.drawFrame(0.52);
+
+      expect(sprite.visible).toBe(false);
+
+      layer.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("defaults partial box fill values", async () => {
     resetMocks();
 

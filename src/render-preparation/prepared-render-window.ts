@@ -11,36 +11,24 @@ import {
   type RenderPreparationOptions,
 } from "#types/render-preparation";
 
-const DEFAULT_MASK_FRAME_CACHE_SIZE = 10;
-const DEFAULT_MASK_PREFETCH_FRAME_COUNT = 4;
-const DEFAULT_PREPARED_WINDOW_SCAN_INTERVAL_SECONDS = 0.5;
+const DEFAULT_MASK_FRAME_CACHE_SIZE = 24;
+const DEFAULT_MASK_PREFETCH_FRAME_COUNT = 12;
+const DEFAULT_PREPARED_WINDOW_SCAN_INTERVAL_SECONDS = 0.15;
 
-type BrowserIdleDeadline = {
-  readonly didTimeout: boolean;
-  timeRemaining(): number;
-};
-
-type BrowserIdleCallback = (deadline: BrowserIdleDeadline) => void;
-
-type RenderPreparationWindow = Window & {
-  cancelIdleCallback?: (handle: number) => void;
-  requestIdleCallback?: (callback: BrowserIdleCallback) => number;
-};
-
-type ScheduledPreparationTask =
-  | {
-      readonly handle: number;
-      readonly type: "idle";
-    }
-  | {
-      readonly handle: ReturnType<typeof setTimeout>;
-      readonly type: "timeout";
-    };
+type ScheduledPreparationTask = ReturnType<typeof setTimeout>;
 
 export interface PreparedRenderFrame {
   readonly detectionFrame: DetectionFrame;
   readonly key: string;
   readonly maskFrame?: PreparedMaskFrame;
+  readonly maskStatus: PreparedRenderFrameMaskStatus;
+}
+
+export enum PreparedRenderFrameMaskStatus {
+  Disabled = "disabled",
+  Empty = "empty",
+  Pending = "pending",
+  Prepared = "prepared",
 }
 
 export interface PreparedRenderWindow {
@@ -231,6 +219,7 @@ export function createPreparedRenderWindow(options: {
         detectionFrame,
         key,
         maskFrame: preparedMaskFrames.get(key),
+        maskStatus: getMaskStatus(key),
       };
     },
 
@@ -313,6 +302,22 @@ export function createPreparedRenderWindow(options: {
 
     emitDiagnostics();
   }
+
+  function getMaskStatus(key: string) {
+    if (!maskStyle) {
+      return PreparedRenderFrameMaskStatus.Disabled;
+    }
+
+    if (preparedMaskFrames.has(key)) {
+      return PreparedRenderFrameMaskStatus.Prepared;
+    }
+
+    if (emptyMaskFrameKeys.has(key)) {
+      return PreparedRenderFrameMaskStatus.Empty;
+    }
+
+    return PreparedRenderFrameMaskStatus.Pending;
+  }
 }
 
 function resolveMaskInstructions(options: {
@@ -347,27 +352,9 @@ function getFrameKey(frame: DetectionFrame) {
 function schedulePreparationTask(
   callback: () => void,
 ): ScheduledPreparationTask {
-  const browserWindow = window as RenderPreparationWindow;
-
-  if (browserWindow.requestIdleCallback) {
-    return {
-      handle: browserWindow.requestIdleCallback(callback),
-      type: "idle",
-    };
-  }
-
-  return {
-    handle: setTimeout(callback, 0),
-    type: "timeout",
-  };
+  return setTimeout(callback, 0);
 }
 
 function cancelScheduledPreparationTask(task: ScheduledPreparationTask) {
-  if (task.type === "idle") {
-    const browserWindow = window as RenderPreparationWindow;
-    browserWindow.cancelIdleCallback?.(task.handle);
-    return;
-  }
-
-  clearTimeout(task.handle);
+  clearTimeout(task);
 }
