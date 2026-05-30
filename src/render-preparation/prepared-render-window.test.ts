@@ -9,6 +9,7 @@ import { DetectionMaskEncoding, type DetectionFrame } from "#types/detections";
 import type { MaskStyle } from "#types/mask-style";
 import {
   RenderPreparationArtifactKind,
+  RenderPreparationArtifactFrameStatus,
   RenderPreparationExecutionMode,
   RenderPreparationMode,
   RenderPreparationWorkerStatus,
@@ -69,6 +70,61 @@ describe("prepared render window", () => {
         key: "0:0",
         width: 2,
       });
+
+      renderWindow.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reports active mask frame status separately from background pending work", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const onDiagnostics = vi.fn();
+      const renderWindow = createPreparedRenderWindow({
+        detectionTimeline: createTimeline(frames),
+        maskStyle: new BaseMaskStyle(),
+        renderPreparation: {
+          onDiagnostics,
+        },
+      });
+
+      renderWindow.getFrame(0);
+
+      expect(onDiagnostics).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          artifacts: [
+            expect.objectContaining({
+              activeFrame: {
+                key: "0:0",
+                mediaTime: 0,
+                status: RenderPreparationArtifactFrameStatus.Pending,
+              },
+              kind: RenderPreparationArtifactKind.MaskFrame,
+            }),
+          ],
+        }),
+      );
+
+      await vi.runOnlyPendingTimersAsync();
+      renderWindow.getFrame(0);
+
+      expect(onDiagnostics).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          artifacts: [
+            expect.objectContaining({
+              activeFrame: {
+                key: "0:0",
+                mediaTime: 0,
+                status: RenderPreparationArtifactFrameStatus.Prepared,
+              },
+              kind: RenderPreparationArtifactKind.MaskFrame,
+            }),
+          ],
+        }),
+      );
 
       renderWindow.destroy();
     } finally {

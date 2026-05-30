@@ -66,6 +66,7 @@ describe("package entrypoint", () => {
       "MediaSessionActivityStatus",
       "MediaSessionStatus",
       "MediaSourceStatus",
+      "RenderPreparationArtifactFrameStatus",
       "RenderPreparationArtifactKind",
       "RenderPreparationExecutionMode",
       "RenderPreparationMode",
@@ -146,6 +147,12 @@ describe("package entrypoint", () => {
       Error: "error",
       Running: "running",
       Waiting: "waiting",
+    });
+    expect(entrypoint.RenderPreparationArtifactFrameStatus).toEqual({
+      Disabled: "disabled",
+      Empty: "empty",
+      Pending: "pending",
+      Prepared: "prepared",
     });
     expect(entrypoint.DetectionBufferStatus).toEqual({
       Destroyed: "destroyed",

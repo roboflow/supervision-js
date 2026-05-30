@@ -1,5 +1,6 @@
 import type { CSSProperties, RefObject } from "react";
 import {
+  MediaSessionActivityKind,
   MediaSessionActivityStatus,
   MediaSessionStatus,
   type MediaSessionActivity,
@@ -115,11 +116,19 @@ function selectViewportActivity(sessionState: MediaSessionState | null) {
 
   return (
     sessionState.activities.find((activity) => activity.blockingPlayback) ??
+    sessionState.activities.find((activity) => activity.blockingPresentation) ??
     sessionState.activities.find(
       (activity) => activity.status === MediaSessionActivityStatus.Error,
     ) ??
-    sessionState.activities[0] ??
+    sessionState.activities.find(isForegroundActivity) ??
     null
+  );
+}
+
+function isForegroundActivity(activity: MediaSessionActivity) {
+  return (
+    activity.kind !== MediaSessionActivityKind.DetectionsLoading &&
+    activity.kind !== MediaSessionActivityKind.RenderPreparing
   );
 }
 

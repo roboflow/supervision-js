@@ -4,7 +4,10 @@ import {
   MediaSourceStatus,
   type MediaRendererState,
 } from "#types/media-renderer";
-import type { RenderPreparationDiagnostics } from "#types/render-preparation";
+import {
+  RenderPreparationArtifactFrameStatus,
+  type RenderPreparationDiagnostics,
+} from "#types/render-preparation";
 import {
   MediaSessionActivityKind,
   MediaSessionActivityStatus,
@@ -78,19 +81,32 @@ export function createMediaSessionStateSnapshot({
 
   for (const artifact of renderPreparation?.artifacts ?? []) {
     const totalCount = artifact.pendingCount + artifact.preparedCount;
+    const activeFrameIsPending =
+      artifact.activeFrame?.status ===
+      RenderPreparationArtifactFrameStatus.Pending;
 
-    if (artifact.pendingCount <= 0) {
+    if (artifact.pendingCount <= 0 && !activeFrameIsPending) {
       continue;
     }
 
     activities.push({
       artifactKind: artifact.kind,
+      blockingPresentation: activeFrameIsPending,
+      detail: activeFrameIsPending
+        ? `Active frame ${artifact.activeFrame.mediaTime.toFixed(
+            3,
+          )}s is waiting for ${artifact.kind}`
+        : null,
       kind: MediaSessionActivityKind.RenderPreparing,
-      label: "Preparing render artifacts",
+      label: activeFrameIsPending
+        ? "Preparing active render artifact"
+        : "Preparing render artifacts",
       pendingCount: artifact.pendingCount,
       preparedCount: artifact.preparedCount,
       progress: totalCount > 0 ? artifact.preparedCount / totalCount : 0,
-      status: MediaSessionActivityStatus.Running,
+      status: activeFrameIsPending
+        ? MediaSessionActivityStatus.Waiting
+        : MediaSessionActivityStatus.Running,
     });
   }
 

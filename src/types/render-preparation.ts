@@ -20,11 +20,25 @@ export enum RenderPreparationArtifactKind {
   MaskFrame = "maskFrame",
 }
 
+export enum RenderPreparationArtifactFrameStatus {
+  Disabled = "disabled",
+  Empty = "empty",
+  Pending = "pending",
+  Prepared = "prepared",
+}
+
 export interface RenderPreparationWorkerFactory {
   createWorker(): Worker;
 }
 
+export interface RenderPreparationActiveFrameDiagnostics {
+  readonly key: string;
+  readonly mediaTime: number;
+  readonly status: RenderPreparationArtifactFrameStatus;
+}
+
 export interface RenderPreparationArtifactDiagnostics {
+  readonly activeFrame?: RenderPreparationActiveFrameDiagnostics | null;
   readonly kind: RenderPreparationArtifactKind;
   readonly pendingCount: number;
   readonly preparedCount: number;

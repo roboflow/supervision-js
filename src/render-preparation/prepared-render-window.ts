@@ -7,6 +7,7 @@ import type { BufferedDetectionTimeline } from "#types/detection-timeline";
 import type { DetectionFrame } from "#types/detections";
 import type { MaskStyle } from "#types/mask-style";
 import {
+  RenderPreparationArtifactFrameStatus,
   RenderPreparationArtifactKind,
   type RenderPreparationOptions,
 } from "#types/render-preparation";
@@ -70,6 +71,11 @@ export function createPreparedRenderWindow(options: {
   let maskStyle = options.maskStyle ?? null;
   let lastPreparedBufferSignature: string | null = null;
   let lastPreparedWindowMediaTime: number | null = null;
+  let activeMaskFrame: {
+    readonly key: string;
+    readonly mediaTime: number;
+  } | null = null;
+  let activeMaskFrameSignature: string | null = null;
   let isDestroyed = false;
   let generation = 0;
   const preparedMaskFrames = new Map<string, PreparedMaskFrame>();
@@ -207,12 +213,17 @@ export function createPreparedRenderWindow(options: {
       const detectionFrame = options.detectionTimeline.selectFrame(mediaTime);
 
       if (!detectionFrame) {
+        setActiveMaskFrame(null);
         schedulePreparedWindow(undefined, mediaTime);
         return undefined;
       }
 
       const key = getFrameKey(detectionFrame);
 
+      setActiveMaskFrame({
+        key,
+        mediaTime: detectionFrame.mediaTime,
+      });
       scheduleMaskFrame(detectionFrame, mediaTime);
       schedulePreparedWindow(detectionFrame, mediaTime);
 
@@ -258,6 +269,15 @@ export function createPreparedRenderWindow(options: {
     options.renderPreparation?.onDiagnostics?.({
       artifacts: [
         {
+          activeFrame: activeMaskFrame
+            ? {
+                key: activeMaskFrame.key,
+                mediaTime: activeMaskFrame.mediaTime,
+                status: toArtifactFrameStatus(
+                  getMaskStatus(activeMaskFrame.key),
+                ),
+              }
+            : null,
           kind: RenderPreparationArtifactKind.MaskFrame,
           pendingCount: pendingMaskFrameKeys.size,
           preparedCount: preparedMaskFrames.size,
@@ -327,6 +347,42 @@ export function createPreparedRenderWindow(options: {
 
     return PreparedRenderFrameMaskStatus.Pending;
   }
+
+  function setActiveMaskFrame(
+    nextActiveFrame: {
+      readonly key: string;
+      readonly mediaTime: number;
+    } | null,
+  ) {
+    const nextSignature = nextActiveFrame
+      ? `${nextActiveFrame.key}:${nextActiveFrame.mediaTime}`
+      : null;
+
+    activeMaskFrame = nextActiveFrame;
+
+    if (nextSignature === activeMaskFrameSignature) {
+      return;
+    }
+
+    activeMaskFrameSignature = nextSignature;
+    emitDiagnostics();
+  }
+}
+
+function toArtifactFrameStatus(status: PreparedRenderFrameMaskStatus) {
+  if (status === PreparedRenderFrameMaskStatus.Disabled) {
+    return RenderPreparationArtifactFrameStatus.Disabled;
+  }
+
+  if (status === PreparedRenderFrameMaskStatus.Empty) {
+    return RenderPreparationArtifactFrameStatus.Empty;
+  }
+
+  if (status === PreparedRenderFrameMaskStatus.Prepared) {
+    return RenderPreparationArtifactFrameStatus.Prepared;
+  }
+
+  return RenderPreparationArtifactFrameStatus.Pending;
 }
 
 function resolveMaskInstructions(options: {

@@ -8,6 +8,7 @@ import {
   type MediaRendererState,
 } from "#types/media-renderer";
 import {
+  RenderPreparationArtifactFrameStatus,
   RenderPreparationArtifactKind,
   RenderPreparationExecutionMode,
   RenderPreparationWorkerStatus,
@@ -90,6 +91,90 @@ describe("media session state", () => {
         pendingCount: 2,
         preparedCount: 6,
         progress: 0.75,
+        status: MediaSessionActivityStatus.Running,
+      }),
+    ]);
+  });
+
+  it("marks active-frame render preparation as presentation-blocking", () => {
+    const state = createMediaSessionStateSnapshot({
+      errorMessage: null,
+      media: {
+        inputMetadata: null,
+        normalizedMedia: null,
+        objectUrl: null,
+      },
+      normalization: null,
+      renderPreparation: {
+        artifacts: [
+          {
+            activeFrame: {
+              key: "12:0.4",
+              mediaTime: 0.4,
+              status: RenderPreparationArtifactFrameStatus.Pending,
+            },
+            kind: RenderPreparationArtifactKind.MaskFrame,
+            pendingCount: 5,
+            preparedCount: 10,
+          },
+        ],
+        executionMode: RenderPreparationExecutionMode.Worker,
+        message: null,
+        workerStatus: RenderPreparationWorkerStatus.Ready,
+      },
+      renderer: createRendererState({
+        detectionBufferStatus: DetectionBufferStatus.Ready,
+        playbackState: MediaRendererPlaybackState.Playing,
+      }),
+    });
+
+    expect(state.activities).toEqual([
+      expect.objectContaining({
+        blockingPresentation: true,
+        detail: "Active frame 0.400s is waiting for maskFrame",
+        kind: MediaSessionActivityKind.RenderPreparing,
+        status: MediaSessionActivityStatus.Waiting,
+      }),
+    ]);
+  });
+
+  it("keeps background-only render preparation non-blocking", () => {
+    const state = createMediaSessionStateSnapshot({
+      errorMessage: null,
+      media: {
+        inputMetadata: null,
+        normalizedMedia: null,
+        objectUrl: null,
+      },
+      normalization: null,
+      renderPreparation: {
+        artifacts: [
+          {
+            activeFrame: {
+              key: "12:0.4",
+              mediaTime: 0.4,
+              status: RenderPreparationArtifactFrameStatus.Prepared,
+            },
+            kind: RenderPreparationArtifactKind.MaskFrame,
+            pendingCount: 5,
+            preparedCount: 10,
+          },
+        ],
+        executionMode: RenderPreparationExecutionMode.Worker,
+        message: null,
+        workerStatus: RenderPreparationWorkerStatus.Ready,
+      },
+      renderer: createRendererState({
+        detectionBufferStatus: DetectionBufferStatus.Ready,
+        playbackState: MediaRendererPlaybackState.Playing,
+      }),
+    });
+
+    expect(state.activities).toEqual([
+      expect.objectContaining({
+        artifactKind: RenderPreparationArtifactKind.MaskFrame,
+        blockingPresentation: false,
+        kind: MediaSessionActivityKind.RenderPreparing,
         status: MediaSessionActivityStatus.Running,
       }),
     ]);

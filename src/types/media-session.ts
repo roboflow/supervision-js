@@ -107,6 +107,7 @@ export enum MediaSessionActivityStatus {
 export interface MediaSessionActivity {
   readonly artifactKind?: RenderPreparationArtifactKind;
   readonly blockingPlayback?: boolean;
+  readonly blockingPresentation?: boolean;
   readonly detail?: string | null;
   readonly errorMessage?: string | null;
   readonly kind: MediaSessionActivityKind;
