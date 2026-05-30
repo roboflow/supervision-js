@@ -19,6 +19,7 @@ interface MediaRendererRuntimeStateOptions {
   readonly getDetectionBufferState: () => DetectionBufferState;
   readonly onFrame?: (diagnostics: MediaFrameDiagnostics) => void;
   readonly onSource?: (state: MediaSourceState) => void;
+  readonly onState?: (state: MediaRendererState) => void;
 }
 
 export interface MediaRendererRuntimeState {
@@ -27,6 +28,8 @@ export interface MediaRendererRuntimeState {
   errorMessage(): string | null;
   isDestroyed(): boolean;
   isError(): boolean;
+  isPlaybackActive(): boolean;
+  isBuffering(): boolean;
   isPlaying(): boolean;
   emitSourceState(): void;
   recordMediaMetadata(metadata: DecodedMediaSourceMetadata): {
@@ -38,6 +41,7 @@ export interface MediaRendererRuntimeState {
   recordPresentedSample(sample: PresentedMediaSample): void;
   setReady(): void;
   setPlaying(): void;
+  setBuffering(): void;
   setPaused(): void;
   setRenderError(error: unknown): void;
   markDestroyed(): void;
@@ -104,6 +108,10 @@ export function createMediaRendererRuntimeState(
     presentedFrames,
   });
 
+  const emitState = () => {
+    options.onState?.(createStateSnapshot());
+  };
+
   return {
     currentTime() {
       return currentTime;
@@ -123,6 +131,17 @@ export function createMediaRendererRuntimeState(
 
     isError() {
       return playbackState === MediaRendererPlaybackState.Error;
+    },
+
+    isPlaybackActive() {
+      return (
+        playbackState === MediaRendererPlaybackState.Playing ||
+        playbackState === MediaRendererPlaybackState.Buffering
+      );
+    },
+
+    isBuffering() {
+      return playbackState === MediaRendererPlaybackState.Buffering;
     },
 
     isPlaying() {
@@ -156,28 +175,39 @@ export function createMediaRendererRuntimeState(
       activeDetectionCount = sample.activeDetectionCount;
 
       options.onFrame?.(createFrameDiagnostics(sample));
+      emitState();
     },
 
     setReady() {
       playbackState = MediaRendererPlaybackState.Ready;
+      emitState();
     },
 
     setPlaying() {
       playbackState = MediaRendererPlaybackState.Playing;
+      emitState();
+    },
+
+    setBuffering() {
+      playbackState = MediaRendererPlaybackState.Buffering;
+      emitState();
     },
 
     setPaused() {
       playbackState = MediaRendererPlaybackState.Paused;
+      emitState();
     },
 
     setRenderError(error) {
       playbackState = MediaRendererPlaybackState.Error;
       setSourceState(createMediaRenderErrorSourcePatch(error));
+      emitState();
     },
 
     markDestroyed() {
       destroyed = true;
       playbackState = MediaRendererPlaybackState.Destroyed;
+      emitState();
     },
 
     setSourceDestroyed() {

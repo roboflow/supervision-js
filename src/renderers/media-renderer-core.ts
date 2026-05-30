@@ -47,6 +47,7 @@ export async function createMediaRendererCore(
       detectionTimeline?.getState() ?? createIdleDetectionBufferState(),
     onFrame: options.onFrame,
     onSource: options.onSource,
+    onState: options.onState,
   });
   let activeSampleIterator: DecodedVideoSampleIterator | undefined;
   let mediaInput: DisposableMediaInput | undefined;
@@ -78,7 +79,11 @@ export async function createMediaRendererCore(
     let shouldCloseSample = true;
 
     try {
-      await detectionTimeline?.prepare(sample.timestamp);
+      await detectionTimeline?.prepare(sample.timestamp, {
+        duration: runtimeState.duration(),
+        firstTimestamp,
+      });
+
       presentSample(sample);
       shouldCloseSample = false;
     } finally {
@@ -104,7 +109,7 @@ export async function createMediaRendererCore(
         throw new Error("Media renderer is not ready.");
       }
 
-      if (runtimeState.isPlaying()) {
+      if (runtimeState.isPlaybackActive()) {
         return;
       }
 
@@ -113,7 +118,7 @@ export async function createMediaRendererCore(
     },
 
     pause() {
-      if (runtimeState.isDestroyed() || !runtimeState.isPlaying()) {
+      if (runtimeState.isDestroyed() || !runtimeState.isPlaybackActive()) {
         return;
       }
 
@@ -247,6 +252,8 @@ export async function createMediaRendererCore(
 
     await prepareAndPresentSample(firstSample);
     runtimeState.setReady();
+    const shouldGatePlayback =
+      options.detectionBuffer?.playbackGate?.enabled === true;
     playbackController = createMediaPlaybackController({
       duration: runtimeState.duration(),
       firstTimestamp: metadata.firstTimestamp,
@@ -259,8 +266,26 @@ export async function createMediaRendererCore(
         runtimeState.setPaused();
       },
       onError: runtimeState.setRenderError,
+      onResume() {
+        if (runtimeState.isBuffering()) {
+          runtimeState.setPlaying();
+        }
+      },
+      onWaiting() {
+        if (runtimeState.isPlaybackActive()) {
+          runtimeState.setBuffering();
+        }
+      },
       presentSample,
       sampleSink: mediaSource.sampleSink,
+      waitForSample: shouldGatePlayback
+        ? (sample) =>
+            detectionTimeline?.prepare(sample.timestamp, {
+              duration: runtimeState.duration(),
+              firstTimestamp,
+              gatePlayback: true,
+            }) ?? Promise.resolve()
+        : undefined,
     });
 
     if (options.autoPlay ?? true) {

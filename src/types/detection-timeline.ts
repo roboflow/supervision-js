@@ -27,6 +27,18 @@ export interface DetectionFrameSourceVersionRange {
 export interface DetectionBufferOptions extends DetectionFrameSelectionOptions {
   readonly bufferAheadSeconds?: number;
   readonly bufferBehindSeconds?: number;
+  readonly playbackGate?: DetectionPlaybackGateOptions;
+}
+
+export interface DetectionPlaybackGateOptions {
+  readonly enabled?: boolean;
+  readonly requiredAheadSeconds?: number;
+}
+
+export interface DetectionBufferPrepareOptions {
+  readonly duration?: number | null;
+  readonly firstTimestamp?: number;
+  readonly gatePlayback?: boolean;
 }
 
 export interface DetectionBufferState {
@@ -45,6 +57,8 @@ export interface DetectionFrameSource {
     startTime: number,
     endTime: number,
   ): Promise<readonly DetectionFrame[]>;
+  waitForRange?(range: DetectionFrameSourceVersionRange): Promise<void>;
+  getAvailableRanges?(): readonly DetectionFrameSourceVersionRange[];
   getVersion?(range?: DetectionFrameSourceVersionRange): number;
   destroy?(): void;
 }
@@ -85,7 +99,10 @@ export interface ChunkedDetectionFrameSourceOptions {
 }
 
 export interface BufferedDetectionTimeline {
-  prepare(mediaTime: number): Promise<void>;
+  prepare(
+    mediaTime: number,
+    options?: DetectionBufferPrepareOptions,
+  ): Promise<void>;
   prefetch(mediaTime: number): void;
   selectFrame(mediaTime: number): DetectionFrame | undefined;
   getBufferedFrames(): readonly DetectionFrame[];
@@ -138,6 +155,8 @@ export interface WritableDetectionFrameSource extends DetectionFrameSource {
     frames: readonly DetectionFrame[],
   ): Promise<ColdDetectionFrameStoreWriteSummary>;
   clear(): Promise<void>;
+  waitForRange(range: DetectionFrameSourceVersionRange): Promise<void>;
+  getAvailableRanges(): readonly DetectionFrameSourceVersionRange[];
   getSummary(): ColdDetectionFrameStoreWriteSummary | null;
   getVersion(range?: DetectionFrameSourceVersionRange): number;
 }

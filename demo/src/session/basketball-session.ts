@@ -80,6 +80,7 @@ export async function createBasketballSession(
         fit: MediaRendererFit.Contain,
         loop: true,
         onFrame: options.onFrame,
+        onState: options.onRendererState,
         renderPreparation: {
           onDiagnostics: options.onRenderPreparationDiagnostics,
         },

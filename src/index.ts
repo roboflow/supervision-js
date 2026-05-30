@@ -41,6 +41,7 @@ export {
   type ColdDetectionFrameStoreWriteSummary,
   type ChunkedDetectionFrameSourceOptions,
   type DetectionBufferOptions,
+  type DetectionBufferPrepareOptions,
   type DetectionBufferState,
   type DetectionFrameChunk,
   type DetectionFrameChunkDescriptor,
@@ -49,6 +50,7 @@ export {
   type DetectionFrameSelectionOptions,
   type DetectionFrameSource,
   type DetectionFrameSourceVersionRange,
+  type DetectionPlaybackGateOptions,
   type WritableDetectionFrameSource,
 } from "#types/detection-timeline";
 export {

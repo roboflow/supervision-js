@@ -18,6 +18,7 @@ export enum MediaRendererPlaybackState {
   Loading = "loading",
   Ready = "ready",
   Playing = "playing",
+  Buffering = "buffering",
   Paused = "paused",
   Error = "error",
   Destroyed = "destroyed",
@@ -93,6 +94,7 @@ export interface MediaRendererOptions {
   readonly renderPreparation?: RenderPreparationOptions;
   readonly onFrame?: (diagnostics: MediaFrameDiagnostics) => void;
   readonly onSource?: (state: MediaSourceState) => void;
+  readonly onState?: (state: MediaRendererState) => void;
 }
 
 export interface MediaRendererSource {

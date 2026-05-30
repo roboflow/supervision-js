@@ -1,5 +1,6 @@
 import type { Dispatch, SetStateAction } from "react";
 import type {
+  MediaRendererState,
   MediaSourceState,
   RenderPreparationDiagnostics,
 } from "supervision-js";
@@ -54,6 +55,7 @@ export interface DemoSessionCallbacks {
   readonly onRenderPreparationDiagnostics: (
     diagnostics: RenderPreparationDiagnostics,
   ) => void;
+  readonly onRendererState: (state: MediaRendererState) => void;
   readonly onSourceState: (state: MediaSourceState) => void;
   readonly presentationSettings: BasketballPresentationSettings;
 }

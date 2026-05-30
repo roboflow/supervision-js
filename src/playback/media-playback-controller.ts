@@ -26,9 +26,12 @@ export function createMediaPlaybackController(options: {
   readonly loop: boolean;
   readonly initialMediaTime: number;
   readonly presentSample: (sample: DecodedVideoSample) => void;
+  readonly waitForSample?: (sample: DecodedVideoSample) => Promise<void>;
   readonly onCurrentTimeChange: (currentTime: number) => void;
   readonly onEnded: () => void;
   readonly onError: (error: unknown) => void;
+  readonly onWaiting?: () => void;
+  readonly onResume?: () => void;
 }): MediaPlaybackController {
   let destroyed = false;
   let playing = false;
@@ -297,6 +300,26 @@ export function createMediaPlaybackController(options: {
     );
 
     if (sample) {
+      try {
+        if (options.waitForSample) {
+          options.onWaiting?.();
+          await options.waitForSample(sample);
+
+          if (!isPlaybackRunActive(runId)) {
+            sample.close();
+            return;
+          }
+
+          options.onResume?.();
+          playbackOriginMediaTime = sample.timestamp;
+          playbackOriginNow = performance.now();
+        }
+      } catch (error) {
+        sample.close();
+        stopPlaybackWithError(runId, error);
+        return;
+      }
+
       options.presentSample(sample);
       setCurrentTime(sample.timestamp);
     }

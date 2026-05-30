@@ -19,6 +19,8 @@ The library owns:
 - `DetectionFrameSource` as the renderer-readable contract.
 - cold detection storage for frames that should not all live in hot memory.
 - writable detection ingestion for append/upsert workflows.
+- optional prediction-coverage gating so playback can wait for annotation data
+  the same way media playback waits for decoded media.
 - hot buffer refresh when a source version changes.
 
 The demo owns:
@@ -54,6 +56,20 @@ server-side fan-out, and streamed HTTP responses.
 
 Full replacement and clear operations still invalidate every range because
 existing frame membership may have changed anywhere in the dataset.
+
+## Prediction-Gated Playback
+
+Some sessions should treat missing predictions as missing media. In those cases,
+the writable source tracks appended time ranges and exposes range waiters. The
+renderer can opt into a playback gate with a required lookahead window. When
+playback reaches media time that does not yet have prediction coverage ahead,
+the renderer reports `buffering`, waits for the writable source to cover that
+range, then resumes from the same media timestamp instead of letting video and
+annotations drift apart.
+
+This gate belongs in the media session/renderer path, not in React. The demo may
+show processed and processing ranges, but it should not run its own pause/play
+loop to enforce synchronization.
 
 ## Image Handling
 

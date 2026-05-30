@@ -145,6 +145,43 @@ describe("buffered detection timeline", () => {
     await initialLoad;
   });
 
+  it("waits for source coverage before loading when playback gating is enabled", async () => {
+    const coverage = createDeferred<void>();
+    const source = {
+      loadFrames: vi.fn(async () => [frames[0]]),
+      waitForRange: vi.fn(() => coverage.promise),
+    };
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 1,
+      bufferBehindSeconds: 0,
+      playbackGate: {
+        enabled: true,
+        requiredAheadSeconds: 2,
+      },
+      source,
+    });
+    const prepare = timeline.prepare(1, { gatePlayback: true });
+
+    await Promise.resolve();
+
+    expect(source.waitForRange).toHaveBeenCalledWith({
+      endTime: 3,
+      startTime: 1,
+    });
+    expect(source.loadFrames).not.toHaveBeenCalled();
+    expect(timeline.getState()).toMatchObject({
+      requestedEndTime: 3,
+      requestedStartTime: 1,
+      status: DetectionBufferStatus.Loading,
+    });
+
+    coverage.resolve();
+    await prepare;
+
+    expect(source.loadFrames).toHaveBeenCalledWith(1, 2);
+    expect(timeline.getState().status).toBe(DetectionBufferStatus.Ready);
+  });
+
   it("starts a new load when an in-flight range overlaps without covering the request", async () => {
     const firstLoad = createDeferred<DetectionFrame[]>();
     const secondLoad = createDeferred<DetectionFrame[]>();

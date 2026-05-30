@@ -166,6 +166,14 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
       lastReadoutAt = now;
       syncRendererState(renderer);
     };
+    const onRendererState = (state: MediaRendererState) => {
+      if (!isActive()) {
+        return;
+      }
+
+      setRendererState(state);
+      setSourceState(state.source);
+    };
 
     if (sourceMode === DemoSourceMode.Upload) {
       uploadAbortRef.current = abortController ?? null;
@@ -185,6 +193,7 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
             onFrame,
             onMediaState: setMediaState,
             onRenderPreparationDiagnostics: setRenderPreparationDiagnostics,
+            onRendererState,
             onSourceState: setSourceState,
             presentationSettings: presentationSettingsRef.current,
           });
@@ -201,6 +210,7 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
             onFrame,
             onMediaState: setMediaState,
             onRenderPreparationDiagnostics: setRenderPreparationDiagnostics,
+            onRendererState,
             onSourceState: setSourceState,
             onUploadState: setUploadInferenceState,
             presentationSettings: presentationSettingsRef.current,
@@ -265,8 +275,11 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
       return;
     }
 
+    const playbackState = renderer.getState().playbackState;
+
     if (
-      renderer.getState().playbackState === MediaRendererPlaybackState.Playing
+      playbackState === MediaRendererPlaybackState.Playing ||
+      playbackState === MediaRendererPlaybackState.Buffering
     ) {
       renderer.pause();
       syncRendererState(renderer);

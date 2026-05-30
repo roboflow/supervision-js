@@ -9,8 +9,11 @@ export function PlaybackControls({
   readonly disabled: boolean;
   readonly onTogglePlayback: () => void;
 }) {
-  const isPlaying = playbackState === MediaRendererPlaybackState.Playing;
-  const label = isPlaying ? "Pause" : "Play";
+  const isPlaybackActive =
+    playbackState === MediaRendererPlaybackState.Playing ||
+    playbackState === MediaRendererPlaybackState.Buffering;
+  const isBuffering = playbackState === MediaRendererPlaybackState.Buffering;
+  const label = isPlaybackActive ? "Pause" : "Play";
 
   return (
     <button
@@ -23,10 +26,14 @@ export function PlaybackControls({
       <span
         aria-hidden="true"
         className={
-          isPlaying ? "playback-controls__pause" : "playback-controls__play"
+          isPlaybackActive
+            ? "playback-controls__pause"
+            : "playback-controls__play"
         }
       />
-      <span className="playback-controls__label">{label}</span>
+      <span className="playback-controls__label">
+        {isBuffering ? "Buffering" : label}
+      </span>
     </button>
   );
 }

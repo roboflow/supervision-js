@@ -54,7 +54,12 @@ export async function createMediaSession(
       ...preparedMedia.rendererSourceOption,
       boxStyle: options.presentation?.boxStyle ?? undefined,
       container: options.container,
-      detectionBuffer: options.detections?.buffer,
+      detectionBuffer: {
+        ...options.detections?.buffer,
+        playbackGate:
+          options.detections?.playbackGate ??
+          options.detections?.buffer?.playbackGate,
+      },
       detectionFrames: sessionDetections.detectionFrames,
       detectionSource: sessionDetections.detectionSource,
       maskStyle: options.presentation?.maskStyle ?? undefined,

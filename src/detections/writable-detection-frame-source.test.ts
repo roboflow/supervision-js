@@ -93,6 +93,46 @@ describe("writable detection frame source", () => {
     expect(source.getVersion({ endTime: 4, startTime: 2 })).toBe(1);
     expect(source.getVersion()).toBe(1);
   });
+
+  it("waits until appended frames cover a requested range", async () => {
+    const store = createStore();
+    const source = createWritableDetectionFrameSource({
+      datasetId: "dataset",
+      store,
+    });
+    let resolved = false;
+    const waitForRange = source
+      .waitForRange({ endTime: 2, startTime: 0 })
+      .then(() => {
+        resolved = true;
+      });
+
+    await source.appendFrames([
+      {
+        detections: [],
+        endTime: 2,
+        frameIndex: 1,
+        mediaTime: 1,
+      },
+    ]);
+    await Promise.resolve();
+
+    expect(resolved).toBe(false);
+    expect(source.getAvailableRanges()).toEqual([{ endTime: 2, startTime: 1 }]);
+
+    await source.appendFrames([
+      {
+        detections: [],
+        endTime: 1,
+        frameIndex: 0,
+        mediaTime: 0,
+      },
+    ]);
+    await waitForRange;
+
+    expect(resolved).toBe(true);
+    expect(source.getAvailableRanges()).toEqual([{ endTime: 2, startTime: 0 }]);
+  });
 });
 
 function createStore(): ColdDetectionFrameStore {

@@ -2,6 +2,7 @@ import {
   DetectionBufferStatus,
   type BufferedDetectionTimeline,
   type DetectionBufferOptions,
+  type DetectionBufferPrepareOptions,
   type DetectionBufferState,
   type DetectionFrameSource,
 } from "#types/detection-timeline";
@@ -23,6 +24,7 @@ export function createBufferedDetectionTimeline(
     options.bufferAheadSeconds ?? DEFAULT_BUFFER_AHEAD_SECONDS;
   const bufferBehindSeconds =
     options.bufferBehindSeconds ?? DEFAULT_BUFFER_BEHIND_SECONDS;
+  const playbackGate = options.playbackGate;
 
   let buffer: DetectionFrame[] = [];
   let state = createIdleDetectionBufferState();
@@ -51,9 +53,15 @@ export function createBufferedDetectionTimeline(
     bufferedVersionRange !== null &&
     bufferedSourceVersion === getSourceVersion(bufferedVersionRange);
 
-  const loadWindow = (mediaTime: number) => {
+  const getLoadRange = (mediaTime: number) => {
     const startTime = Math.max(0, mediaTime - bufferBehindSeconds);
     const endTime = Math.max(startTime, mediaTime + bufferAheadSeconds);
+
+    return { endTime, startTime };
+  };
+
+  const loadWindow = (mediaTime: number) => {
+    const { endTime, startTime } = getLoadRange(mediaTime);
     const versionRange = { endTime, startTime };
     const sourceVersion = getSourceVersion(versionRange);
 
@@ -145,8 +153,20 @@ export function createBufferedDetectionTimeline(
   };
 
   return {
-    async prepare(mediaTime) {
-      if (destroyed || isBuffered(mediaTime)) {
+    async prepare(mediaTime, prepareOptions) {
+      if (destroyed) {
+        return;
+      }
+
+      if (shouldWaitForPlaybackGate(prepareOptions)) {
+        await waitForPlaybackGate(mediaTime, prepareOptions);
+
+        if (destroyed) {
+          return;
+        }
+      }
+
+      if (isBuffered(mediaTime)) {
         return;
       }
 
@@ -197,6 +217,62 @@ export function createBufferedDetectionTimeline(
       options.source.destroy?.();
     },
   };
+
+  function shouldWaitForPlaybackGate(
+    prepareOptions: DetectionBufferPrepareOptions | undefined,
+  ) {
+    return (
+      prepareOptions?.gatePlayback === true &&
+      playbackGate?.enabled === true &&
+      Boolean(options.source.waitForRange)
+    );
+  }
+
+  async function waitForPlaybackGate(
+    mediaTime: number,
+    prepareOptions: DetectionBufferPrepareOptions | undefined,
+  ) {
+    if (!playbackGate?.enabled || !options.source.waitForRange) {
+      return;
+    }
+
+    const requiredAheadSeconds = Math.max(
+      0,
+      playbackGate.requiredAheadSeconds ?? 0,
+    );
+    const endTime = getRequiredCoverageEndTime({
+      duration: prepareOptions?.duration,
+      firstTimestamp: prepareOptions?.firstTimestamp,
+      mediaTime,
+      requiredAheadSeconds,
+    });
+
+    if (endTime <= mediaTime) {
+      return;
+    }
+
+    state = {
+      ...state,
+      errorMessage: null,
+      requestedEndTime: endTime,
+      requestedStartTime: mediaTime,
+      status: DetectionBufferStatus.Loading,
+    };
+
+    try {
+      await options.source.waitForRange({ endTime, startTime: mediaTime });
+    } catch (error) {
+      if (!destroyed) {
+        state = {
+          ...state,
+          errorMessage: getErrorMessage(error),
+          status: DetectionBufferStatus.Error,
+        };
+      }
+
+      throw error;
+    }
+  }
 }
 
 export function createIdleDetectionBufferState(): DetectionBufferState {
@@ -229,4 +305,22 @@ function getErrorMessage(error: unknown) {
   return error instanceof Error
     ? error.message
     : "Detection buffer load failed.";
+}
+
+function getRequiredCoverageEndTime(options: {
+  readonly duration?: number | null;
+  readonly firstTimestamp?: number;
+  readonly mediaTime: number;
+  readonly requiredAheadSeconds: number;
+}) {
+  const requestedEndTime = options.mediaTime + options.requiredAheadSeconds;
+
+  if (options.duration === null || options.duration === undefined) {
+    return requestedEndTime;
+  }
+
+  return Math.min(
+    requestedEndTime,
+    (options.firstTimestamp ?? 0) + Math.max(options.duration, 0),
+  );
 }

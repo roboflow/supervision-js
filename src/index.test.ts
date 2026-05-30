@@ -104,6 +104,7 @@ describe("package entrypoint", () => {
       Cover: "cover",
     });
     expect(entrypoint.MediaRendererPlaybackState).toEqual({
+      Buffering: "buffering",
       Destroyed: "destroyed",
       Error: "error",
       Loading: "loading",
@@ -293,6 +294,73 @@ describe("package entrypoint", () => {
     expect(renderer.getState().playbackState).toBe(
       MediaRendererPlaybackState.Playing,
     );
+
+    renderer.destroy();
+  });
+
+  it("buffers playback until prediction coverage reaches the required lookahead", async () => {
+    resetMocks();
+    mediaMock.samples = [
+      createMockSample(0, 0),
+      createMockSample(0.04, 0),
+      createMockSample(0.08, 0),
+    ];
+    const predictionCoverage = createDeferred<void>();
+    const detectionSource = {
+      loadFrames: vi.fn(async () => []),
+      waitForRange: vi.fn(
+        (range: { readonly endTime: number; readonly startTime: number }) =>
+          range.endTime > 0.04 ? predictionCoverage.promise : Promise.resolve(),
+      ),
+    };
+    const onState = vi.fn();
+
+    const renderer = await createRenderer(false, false, {
+      detectionBuffer: {
+        playbackGate: {
+          enabled: true,
+          requiredAheadSeconds: 0.08,
+        },
+      },
+      detectionSource,
+      onState,
+    });
+
+    mediaMock.getSample.mockClear();
+    mediaMock.samplesCallStarts.length = 0;
+    await renderer.play();
+    await vi.waitFor(() => {
+      expect(mediaMock.samplesCallStarts).toEqual([0]);
+      expect(mediaMock.sampleNextCalls.length).toBeGreaterThanOrEqual(3);
+    });
+
+    flushAnimationFrame(40);
+    await vi.waitFor(() => {
+      expect(detectionSource.waitForRange).toHaveBeenCalledWith({
+        endTime: 0.12,
+        startTime: 0.04,
+      });
+    });
+
+    expect(mediaMock.samples[1].draw).not.toHaveBeenCalled();
+    expect(renderer.getState().playbackState).toBe(
+      MediaRendererPlaybackState.Buffering,
+    );
+    expect(onState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        playbackState: MediaRendererPlaybackState.Buffering,
+      }),
+    );
+
+    predictionCoverage.resolve();
+    await vi.waitFor(() => {
+      expect(mediaMock.samples[1].draw).toHaveBeenCalledOnce();
+    });
+
+    expect(renderer.getState()).toMatchObject({
+      currentTime: 0.04,
+      playbackState: MediaRendererPlaybackState.Playing,
+    });
 
     renderer.destroy();
   });

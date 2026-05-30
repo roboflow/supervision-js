@@ -2,6 +2,7 @@ import type {
   ColdDetectionFrameStore,
   ColdDetectionFrameStoreWriteSummary,
   DetectionBufferOptions,
+  DetectionPlaybackGateOptions,
   DetectionFrameSource,
   WritableDetectionFrameSource,
 } from "#types/detection-timeline";
@@ -41,6 +42,7 @@ export interface MediaSessionDetectionOptions {
   readonly source?: DetectionFrameSource;
   readonly writable?: MediaSessionWritableDetectionOptions;
   readonly buffer?: DetectionBufferOptions;
+  readonly playbackGate?: DetectionPlaybackGateOptions;
 }
 
 export interface MediaSessionRendererOptions {
@@ -51,6 +53,7 @@ export interface MediaSessionRendererOptions {
   readonly renderPreparation?: MediaRendererOptions["renderPreparation"];
   readonly onFrame?: (diagnostics: MediaFrameDiagnostics) => void;
   readonly onSource?: (state: MediaSourceState) => void;
+  readonly onState?: (state: MediaRendererState) => void;
 }
 
 export interface MediaSessionOptions {
