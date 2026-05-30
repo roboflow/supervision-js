@@ -9,8 +9,16 @@ export enum DetectionBufferStatus {
 }
 
 export enum DetectionFrameSelectionMode {
+  /**
+   * Select the detection frame whose media-time interval contains the rendered
+   * media timestamp.
+   */
   Interval = "interval",
-  NearestFrameIndex = "nearestFrameIndex",
+  /**
+   * Select the displayed frame index at or before the rendered media timestamp.
+   * This is for indexed external timelines and must not select future frames.
+   */
+  FrameIndex = "frameIndex",
 }
 
 export interface DetectionFrameSelectionOptions {

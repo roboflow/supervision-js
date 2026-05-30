@@ -45,8 +45,10 @@ endTime = mediaTime + decoded sample duration
 ```
 
 Valid frame indexes are `0` through `269`. The renderer uses
-`DetectionFrameSelectionMode.NearestFrameIndex` with `frameRate = 30`, so a
-media time resolves to the nearest deterministic 30 fps frame slot.
+`DetectionFrameSelectionMode.FrameIndex` with `frameRate = 30`, so a
+media time resolves to the displayed deterministic 30 fps frame slot at or
+before that timestamp. It must not select a future prediction before the media
+frame is actually displayed.
 
 Frames were extracted by sampling the center of each 30 fps slot. This avoids
 selecting the previous decoded sample at slot boundaries where WebM millisecond

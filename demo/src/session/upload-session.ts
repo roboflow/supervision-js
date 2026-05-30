@@ -97,9 +97,9 @@ export async function createUploadSession(
         buffer: {
           bufferAheadSeconds: UPLOAD_DETECTION_BUFFER_AHEAD_SECONDS,
           bufferBehindSeconds: UPLOAD_DETECTION_BUFFER_BEHIND_SECONDS,
-          frameIndexOriginTime: 0,
-          frameRate: TARGET_UPLOAD_FRAME_RATE,
-          selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
+          // Uploaded detections are generated from normalized media samples,
+          // so actual sample intervals are the sync source of truth.
+          selectionMode: DetectionFrameSelectionMode.Interval,
         },
         playbackGate: {
           enabled: true,

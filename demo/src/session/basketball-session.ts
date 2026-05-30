@@ -69,7 +69,7 @@ export async function createBasketballSession(
           bufferBehindSeconds: UPLOAD_DETECTION_BUFFER_BEHIND_SECONDS,
           frameIndexOriginTime: 0,
           frameRate: manifest.inference.frameRate,
-          selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
+          selectionMode: DetectionFrameSelectionMode.FrameIndex,
         },
         source: detectionSource.detectionSource,
       },

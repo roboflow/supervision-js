@@ -127,7 +127,7 @@ describe("package entrypoint", () => {
     });
     expect(DetectionFrameSelectionMode).toEqual({
       Interval: "interval",
-      NearestFrameIndex: "nearestFrameIndex",
+      FrameIndex: "frameIndex",
     });
     expect(entrypoint.DetectionMaskEncoding).toEqual({
       CompressedRle: "compressedRle",

@@ -21,7 +21,7 @@ describe("detection frame utilities", () => {
     expect(selectDetectionFrame(frames, 3)?.mediaTime).toBe(3);
   });
 
-  it("selects frame-indexed detections on the nearest inference frame grid", () => {
+  it("selects frame-indexed detections on the displayed frame grid", () => {
     const frames: DetectionFrame[] = [
       {
         detections: [],
@@ -41,12 +41,27 @@ describe("detection frame utilities", () => {
     expect(
       selectDetectionFrame(frames, 1.73, {
         frameRate: 30,
-        selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
+        selectionMode: DetectionFrameSelectionMode.FrameIndex,
       })?.frameIndex,
-    ).toBe(52);
+    ).toBe(51);
   });
 
-  it("uses the nearest available frame index for a one-frame detection gap", () => {
+  it("does not select a future indexed frame before it is displayed", () => {
+    const frames = createIndexedFrameSequence({
+      count: 3,
+      frameRate: 30,
+      originTime: 0,
+    });
+
+    expect(
+      selectDetectionFrame(frames, 1 / 30 - 1e-4, {
+        frameRate: 30,
+        selectionMode: DetectionFrameSelectionMode.FrameIndex,
+      })?.frameIndex,
+    ).toBe(0);
+  });
+
+  it("uses a previous available frame index for a one-frame detection gap", () => {
     const frames: DetectionFrame[] = [
       {
         detections: [],
@@ -65,9 +80,27 @@ describe("detection frame utilities", () => {
     expect(
       selectDetectionFrame(frames, 149 / 30, {
         frameRate: 30,
-        selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
+        selectionMode: DetectionFrameSelectionMode.FrameIndex,
       })?.frameIndex,
-    ).toBe(150);
+    ).toBe(148);
+  });
+
+  it("does not use future indexed frames to fill a missing current frame", () => {
+    const frames: DetectionFrame[] = [
+      {
+        detections: [],
+        endTime: 151 / 30,
+        frameIndex: 150,
+        mediaTime: 150 / 30,
+      },
+    ];
+
+    expect(
+      selectDetectionFrame(frames, 149 / 30, {
+        frameRate: 30,
+        selectionMode: DetectionFrameSelectionMode.FrameIndex,
+      }),
+    ).toBeUndefined();
   });
 
   it("uses an explicit frame-index origin when buffered media times are rounded", () => {
@@ -90,9 +123,51 @@ describe("detection frame utilities", () => {
       selectDetectionFrame(frames, (47.5 + 1e-8) / 30, {
         frameIndexOriginTime: 0,
         frameRate: 30,
-        selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
+        selectionMode: DetectionFrameSelectionMode.FrameIndex,
       })?.frameIndex,
-    ).toBe(48);
+    ).toBe(47);
+  });
+
+  it("keeps frame-indexed detections aligned when sample timestamps have a non-zero origin", () => {
+    const frames = createIndexedFrameSequence({
+      count: 4,
+      frameRate: 30,
+      originTime: 0.015,
+    });
+
+    expect(
+      selectDetectionFrame(frames, 0.015 + 2 / 30 - 1e-4, {
+        frameIndexOriginTime: 0.015,
+        frameRate: 30,
+        selectionMode: DetectionFrameSelectionMode.FrameIndex,
+      })?.frameIndex,
+    ).toBe(1);
+    expect(
+      selectDetectionFrame(frames, 0.015 + 2 / 30, {
+        frameIndexOriginTime: 0.015,
+        frameRate: 30,
+        selectionMode: DetectionFrameSelectionMode.FrameIndex,
+      })?.frameIndex,
+    ).toBe(2);
+  });
+
+  it("selects drifted interval detections from the media timestamp reference", () => {
+    const frames: DetectionFrame[] = [
+      {
+        detections: [],
+        endTime: 11.9983,
+        frameIndex: 359,
+        mediaTime: 11.965,
+      },
+      {
+        detections: [],
+        endTime: 12.0316,
+        frameIndex: 360,
+        mediaTime: 11.9983,
+      },
+    ];
+
+    expect(selectDetectionFrame(frames, 12)?.frameIndex).toBe(360);
   });
 
   it("does not fall back to a stale interval frame when indexed frames are outside tolerance", () => {
@@ -108,7 +183,7 @@ describe("detection frame utilities", () => {
     expect(
       selectDetectionFrame(frames, 10 / 30, {
         frameRate: 30,
-        selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
+        selectionMode: DetectionFrameSelectionMode.FrameIndex,
       }),
     ).toBeUndefined();
   });
@@ -178,6 +253,23 @@ describe("detection frame utilities", () => {
     });
   });
 });
+
+function createIndexedFrameSequence(options: {
+  readonly count: number;
+  readonly frameRate: number;
+  readonly originTime: number;
+}) {
+  return Array.from({ length: options.count }, (_, frameIndex) => {
+    const mediaTime = options.originTime + frameIndex / options.frameRate;
+
+    return {
+      detections: [],
+      endTime: mediaTime + 1 / options.frameRate,
+      frameIndex,
+      mediaTime,
+    } satisfies DetectionFrame;
+  });
+}
 
 function encodeCompressedRleCounts(counts: readonly number[]) {
   return counts

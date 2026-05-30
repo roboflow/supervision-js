@@ -8,13 +8,16 @@ import {
   type DetectionFrameSelectionOptions,
 } from "#types/detection-timeline";
 
+const FRAME_INDEX_EPSILON = 1e-6;
+const MAX_PREVIOUS_FRAME_INDEX_DISTANCE = 1;
+
 export interface DecodedDetectionMask {
   readonly width: number;
   readonly height: number;
   readonly data: Uint8Array;
 }
 
-interface NearestFrameIndexSelection {
+interface DisplayedFrameIndexSelection {
   readonly isApplicable: boolean;
   readonly frame: DetectionFrame | undefined;
 }
@@ -52,8 +55,8 @@ export function selectDetectionFrame(
   mediaTime: number,
   options: DetectionFrameSelectionOptions = {},
 ): DetectionFrame | undefined {
-  if (options.selectionMode === DetectionFrameSelectionMode.NearestFrameIndex) {
-    const selection = selectNearestFrameIndexDetectionFrame(
+  if (options.selectionMode === DetectionFrameSelectionMode.FrameIndex) {
+    const selection = selectDisplayedFrameIndexDetectionFrame(
       detectionFrames,
       mediaTime,
       options.frameRate,
@@ -131,12 +134,12 @@ function selectIntervalDetectionFrame(
     : undefined;
 }
 
-function selectNearestFrameIndexDetectionFrame(
+function selectDisplayedFrameIndexDetectionFrame(
   detectionFrames: readonly DetectionFrame[],
   mediaTime: number,
   frameRate: number | undefined,
   frameIndexOriginTime: number | undefined,
-): NearestFrameIndexSelection {
+): DisplayedFrameIndexSelection {
   if (!frameRate || !Number.isFinite(frameRate) || frameRate <= 0) {
     return { frame: undefined, isApplicable: false };
   }
@@ -153,7 +156,9 @@ function selectNearestFrameIndexDetectionFrame(
     frameIndexOriginTime !== undefined
       ? frameIndexOriginTime
       : firstIndexedFrame.mediaTime - firstIndexedFrame.frameIndex / frameRate;
-  const targetFrameIndex = Math.round((mediaTime - originTime) * frameRate);
+  const targetFrameIndex = Math.floor(
+    (mediaTime - originTime) * frameRate + FRAME_INDEX_EPSILON,
+  );
   let nearestFrame: DetectionFrame | undefined;
   let nearestDistance = Number.POSITIVE_INFINITY;
 
@@ -162,13 +167,17 @@ function selectNearestFrameIndexDetectionFrame(
       continue;
     }
 
-    const distance = Math.abs(frame.frameIndex - targetFrameIndex);
+    if (frame.frameIndex > targetFrameIndex) {
+      continue;
+    }
+
+    const distance = targetFrameIndex - frame.frameIndex;
 
     if (
       distance < nearestDistance ||
       (distance === nearestDistance &&
         nearestFrame?.frameIndex !== undefined &&
-        frame.frameIndex > nearestFrame.frameIndex)
+        frame.mediaTime > nearestFrame.mediaTime)
     ) {
       nearestFrame = frame;
       nearestDistance = distance;
@@ -176,7 +185,10 @@ function selectNearestFrameIndexDetectionFrame(
   }
 
   return {
-    frame: nearestDistance <= 1 ? nearestFrame : undefined,
+    frame:
+      nearestDistance <= MAX_PREVIOUS_FRAME_INDEX_DISTANCE
+        ? nearestFrame
+        : undefined,
     isApplicable: true,
   };
 }

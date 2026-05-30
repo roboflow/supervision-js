@@ -68,7 +68,7 @@ describe("buffered detection timeline", () => {
     );
   });
 
-  it("passes frame-indexed selection options to hot-buffer frame lookup", async () => {
+  it("passes displayed frame-index selection options to hot-buffer frame lookup", async () => {
     const indexedFrames: DetectionFrame[] = [
       {
         detections: [],
@@ -87,13 +87,13 @@ describe("buffered detection timeline", () => {
       bufferAheadSeconds: 1,
       bufferBehindSeconds: 1,
       frameRate: 30,
-      selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
+      selectionMode: DetectionFrameSelectionMode.FrameIndex,
       source: createArrayDetectionFrameSource(indexedFrames),
     });
 
     await timeline.prepare(1.73);
 
-    expect(timeline.selectFrame(1.73)?.frameIndex).toBe(52);
+    expect(timeline.selectFrame(1.73)?.frameIndex).toBe(51);
   });
 
   it("keeps the last good buffer and reports prefetch errors", async () => {
