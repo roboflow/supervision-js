@@ -3,6 +3,7 @@ import { createDefaultRenderPreparationWorkerFactory } from "#render-preparation
 import {
   MaskPreparationWorkerMessageType,
   type MaskFramePreparationJob,
+  type MaskPreparationWorkerRequest,
   type MaskPreparationWorkerResponse,
 } from "#render-preparation/mask-preparation-worker-protocol";
 import {
@@ -12,6 +13,7 @@ import {
   type RenderPreparationOptions,
   type RenderPreparationWorkerFactory,
 } from "#types/render-preparation";
+import { createWorkerRpcClient } from "#workers/worker-rpc-client";
 
 export interface PreparedMaskFrame {
   readonly height: number;
@@ -202,116 +204,60 @@ function createWorkerMaskFramePreparer(
   workerFactory: RenderPreparationWorkerFactory,
 ): MaskFramePreparer {
   const worker = workerFactory.createWorker();
-  let isDestroyed = false;
-  let failureMessage: string | null = null;
-  let nextRequestId = 1;
   let latestMessage: string | null = null;
-  const pendingRequests = new Map<
-    number,
-    {
-      reject(error: unknown): void;
-      resolve(frame: PreparedMaskFrame | undefined): void;
-    }
-  >();
-
-  worker.addEventListener("message", (event) => {
-    handleWorkerMessage(event.data as unknown);
-  });
-  worker.addEventListener("error", (event) => {
-    rejectPendingRequests(event.message || "Mask preparation worker failed.");
-  });
-  worker.addEventListener("messageerror", () => {
-    rejectPendingRequests("Mask preparation worker message failed.");
+  const workerRpc = createWorkerRpcClient<
+    MaskPreparationWorkerRequest,
+    MaskPreparationWorkerResponse
+  >({
+    defaultErrorMessage: "Mask preparation worker failed.",
+    isResponse: isWorkerResponse,
+    onOrphanedResponse: closeWorkerResponse,
+    worker,
   });
 
   return {
     destroy() {
-      if (isDestroyed) {
-        return;
-      }
-
-      isDestroyed = true;
-      rejectPendingRequests("Mask frame preparer has been destroyed.");
-      worker.terminate();
+      workerRpc.destroy();
     },
 
     getStatus() {
+      const failureMessage = workerRpc.getFailureMessage();
+
       return {
         executionMode: RenderPreparationExecutionMode.Worker,
-        message: latestMessage,
+        message: latestMessage ?? failureMessage,
         workerStatus: failureMessage
           ? RenderPreparationWorkerStatus.Error
           : RenderPreparationWorkerStatus.Ready,
       };
     },
 
-    prepare(job) {
-      if (isDestroyed) {
-        return Promise.reject(
-          new Error("Mask frame preparer has been destroyed."),
-        );
-      }
-
-      if (failureMessage) {
-        return Promise.reject(new Error(failureMessage));
-      }
-
-      const requestId = nextRequestId;
-      nextRequestId += 1;
-
-      return new Promise<PreparedMaskFrame | undefined>((resolve, reject) => {
-        pendingRequests.set(requestId, { reject, resolve });
-        worker.postMessage({
-          job,
-          requestId,
-          type: MaskPreparationWorkerMessageType.Prepare,
-        });
+    async prepare(job) {
+      const message = await workerRpc.request({
+        job,
+        type: MaskPreparationWorkerMessageType.Prepare,
       });
+
+      if (message.type === MaskPreparationWorkerMessageType.Empty) {
+        return undefined;
+      }
+
+      if (message.type === MaskPreparationWorkerMessageType.Error) {
+        latestMessage = message.error;
+        throw new Error(message.error);
+      }
+
+      try {
+        return createPreparedFrameFromWorkerResponse(message);
+      } catch (error) {
+        latestMessage = getErrorMessage(
+          error,
+          "Unable to read mask preparation worker response.",
+        );
+        throw error;
+      }
     },
   };
-
-  function handleWorkerMessage(message: unknown) {
-    if (!isWorkerResponse(message)) {
-      return;
-    }
-
-    const pendingRequest = pendingRequests.get(message.requestId);
-
-    if (!pendingRequest) {
-      closeWorkerResponse(message);
-      return;
-    }
-
-    pendingRequests.delete(message.requestId);
-
-    if (message.type === MaskPreparationWorkerMessageType.Empty) {
-      pendingRequest.resolve(undefined);
-      return;
-    }
-
-    if (message.type === MaskPreparationWorkerMessageType.Error) {
-      latestMessage = message.error;
-      pendingRequest.reject(new Error(message.error));
-      return;
-    }
-
-    try {
-      pendingRequest.resolve(createPreparedFrameFromWorkerResponse(message));
-    } catch (error) {
-      pendingRequest.reject(error);
-    }
-  }
-
-  function rejectPendingRequests(message: string) {
-    failureMessage = message;
-    latestMessage = message;
-
-    for (const pendingRequest of pendingRequests.values()) {
-      pendingRequest.reject(new Error(message));
-    }
-
-    pendingRequests.clear();
-  }
 }
 
 function createPreparedFrameFromWorkerResponse(

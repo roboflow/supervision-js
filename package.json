@@ -61,6 +61,10 @@
     "#utils/*": {
       "types": "./dist/utils/*.d.ts",
       "import": "./dist/utils/*.js"
+    },
+    "#workers/*": {
+      "types": "./dist/workers/*.d.ts",
+      "import": "./dist/workers/*.js"
     }
   },
   "files": [

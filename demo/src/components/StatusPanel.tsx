@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import {
   MediaRendererPlaybackState,
+  RenderPreparationArtifactKind,
   type MediaRendererState,
   type MediaSourceState,
   type RenderPreparationDiagnostics,
@@ -60,6 +61,9 @@ export function StatusPanel({
     Boolean(rendererErrorMessage) ||
     Boolean(mediaState.errorMessage) ||
     Boolean(detectionSourceState.errorMessage);
+  const maskFrameArtifact = renderPreparationDiagnostics?.artifacts.find(
+    (artifact) => artifact.kind === RenderPreparationArtifactKind.MaskFrame,
+  );
 
   return (
     <section className="status-panel" aria-label="Renderer status">
@@ -182,20 +186,16 @@ export function StatusPanel({
         <Readout
           label="Prepared Masks"
           value={
-            renderPreparationDiagnostics
-              ? formatInteger(
-                  renderPreparationDiagnostics.preparedMaskFrameCount,
-                )
+            maskFrameArtifact
+              ? formatInteger(maskFrameArtifact.preparedCount)
               : "-"
           }
         />
         <Readout
           label="Pending Masks"
           value={
-            renderPreparationDiagnostics
-              ? formatInteger(
-                  renderPreparationDiagnostics.pendingMaskFrameCount,
-                )
+            maskFrameArtifact
+              ? formatInteger(maskFrameArtifact.pendingCount)
               : "-"
           }
         />

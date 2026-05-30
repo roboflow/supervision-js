@@ -6,7 +6,10 @@ import type { SerializableMaskInstruction } from "#render-preparation/mask-prepa
 import type { BufferedDetectionTimeline } from "#types/detection-timeline";
 import type { DetectionFrame } from "#types/detections";
 import type { MaskStyle } from "#types/mask-style";
-import type { RenderPreparationOptions } from "#types/render-preparation";
+import {
+  RenderPreparationArtifactKind,
+  type RenderPreparationOptions,
+} from "#types/render-preparation";
 
 const DEFAULT_MASK_FRAME_CACHE_SIZE = 10;
 const DEFAULT_MASK_PREFETCH_FRAME_COUNT = 4;
@@ -255,10 +258,15 @@ export function createPreparedRenderWindow(options: {
     const status = maskFramePreparer.getStatus();
 
     options.renderPreparation?.onDiagnostics?.({
+      artifacts: [
+        {
+          kind: RenderPreparationArtifactKind.MaskFrame,
+          pendingCount: pendingMaskFrameKeys.size,
+          preparedCount: preparedMaskFrames.size,
+        },
+      ],
       executionMode: status.executionMode,
       message: message ?? status.message,
-      pendingMaskFrameCount: pendingMaskFrameKeys.size,
-      preparedMaskFrameCount: preparedMaskFrames.size,
       workerStatus: status.workerStatus,
     });
   }

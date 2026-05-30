@@ -19,6 +19,7 @@ export default defineConfig({
       "#styles": sourceAlias("styles"),
       "#types": sourceAlias("types"),
       "#utils": sourceAlias("utils"),
+      "#workers": sourceAlias("workers"),
     },
   },
   test: {

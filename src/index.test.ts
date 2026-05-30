@@ -62,6 +62,7 @@ describe("package entrypoint", () => {
       "MediaRendererFit",
       "MediaRendererPlaybackState",
       "MediaSourceStatus",
+      "RenderPreparationArtifactKind",
       "RenderPreparationExecutionMode",
       "RenderPreparationMode",
       "RenderPreparationWorkerStatus",
@@ -158,6 +159,9 @@ describe("package entrypoint", () => {
       PrimaryVideoCannotDecode: "primaryVideoCannotDecode",
       PrimaryVideoMissing: "primaryVideoMissing",
       TargetVideoCannotEncode: "targetVideoCannotEncode",
+    });
+    expect(entrypoint.RenderPreparationArtifactKind).toEqual({
+      MaskFrame: "maskFrame",
     });
   });
 

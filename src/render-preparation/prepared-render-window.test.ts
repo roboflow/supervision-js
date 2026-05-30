@@ -7,6 +7,7 @@ import {
 } from "#types/detection-timeline";
 import { DetectionMaskEncoding, type DetectionFrame } from "#types/detections";
 import {
+  RenderPreparationArtifactKind,
   RenderPreparationExecutionMode,
   RenderPreparationMode,
   RenderPreparationWorkerStatus,
@@ -133,6 +134,11 @@ describe("prepared render window", () => {
       });
       expect(onDiagnostics).toHaveBeenCalledWith(
         expect.objectContaining({
+          artifacts: [
+            expect.objectContaining({
+              kind: RenderPreparationArtifactKind.MaskFrame,
+            }),
+          ],
           executionMode: RenderPreparationExecutionMode.Worker,
           workerStatus: RenderPreparationWorkerStatus.Ready,
         }),

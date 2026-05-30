@@ -103,9 +103,11 @@ export {
   type MediaSourceState,
 } from "#types/media-renderer";
 export {
+  RenderPreparationArtifactKind,
   RenderPreparationExecutionMode,
   RenderPreparationMode,
   RenderPreparationWorkerStatus,
+  type RenderPreparationArtifactDiagnostics,
   type RenderPreparationDiagnostics,
   type RenderPreparationOptions,
   type RenderPreparationWorkerFactory,

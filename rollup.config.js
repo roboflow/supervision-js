@@ -15,6 +15,7 @@ const sourceAliasRoots = new Set([
   "styles",
   "types",
   "utils",
+  "workers",
 ]);
 
 function sourceAliasResolver() {

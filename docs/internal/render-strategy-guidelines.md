@@ -79,6 +79,9 @@ thread may still resolve style objects into serializable draw instructions, but
 expensive RLE decode and RGBA composition belong behind the prepared-window
 preparer boundary. Keep a main-thread fallback and a custom `workerFactory`
 escape hatch so strict CSP or unusual bundlers can still use the library.
+Shared worker plumbing belongs in `src/workers/`; feature-specific preparers
+should translate their own request and artifact shapes rather than each
+rebuilding request IDs, pending promises, worker errors, and orphan cleanup.
 
 Do not assume every prepared artifact should be an image. Masks and heatmaps
 fit texture artifacts well; boxes often fit grouped `Graphics` instructions

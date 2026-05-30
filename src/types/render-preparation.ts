@@ -16,15 +16,24 @@ export enum RenderPreparationWorkerStatus {
   Error = "error",
 }
 
+export enum RenderPreparationArtifactKind {
+  MaskFrame = "maskFrame",
+}
+
 export interface RenderPreparationWorkerFactory {
   createWorker(): Worker;
 }
 
+export interface RenderPreparationArtifactDiagnostics {
+  readonly kind: RenderPreparationArtifactKind;
+  readonly pendingCount: number;
+  readonly preparedCount: number;
+}
+
 export interface RenderPreparationDiagnostics {
+  readonly artifacts: readonly RenderPreparationArtifactDiagnostics[];
   readonly executionMode: RenderPreparationExecutionMode;
   readonly message: string | null;
-  readonly pendingMaskFrameCount: number;
-  readonly preparedMaskFrameCount: number;
   readonly workerStatus: RenderPreparationWorkerStatus;
 }
 
