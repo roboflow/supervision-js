@@ -5,6 +5,7 @@ import type {
   DetectionFrameSource,
 } from "#types/detection-timeline";
 import type { DetectionFrame } from "#types/detections";
+import type { LabelStyle } from "#types/label-style";
 import type { MaskStyle } from "#types/mask-style";
 import type { DecodedMediaSource } from "#media/media-source";
 import type { RenderPreparationOptions } from "#types/render-preparation";
@@ -90,6 +91,7 @@ export interface MediaRendererOptions {
   readonly detectionSource?: DetectionFrameSource;
   readonly detectionBuffer?: DetectionBufferOptions;
   readonly boxStyle?: BoxStyle;
+  readonly labelStyle?: LabelStyle;
   readonly maskStyle?: MaskStyle;
   readonly renderPreparation?: RenderPreparationOptions;
   readonly onFrame?: (diagnostics: MediaFrameDiagnostics) => void;
@@ -103,6 +105,7 @@ export interface MediaRendererSource {
 
 export interface MediaRendererPresentation {
   readonly boxStyle?: BoxStyle | null;
+  readonly labelStyle?: LabelStyle | null;
   readonly maskStyle?: MaskStyle | null;
 }
 

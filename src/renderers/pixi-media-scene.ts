@@ -4,6 +4,7 @@ import type {
   MediaRendererSceneOptions,
 } from "./media-renderer-scene";
 import { createPixiBoxLayer } from "./pixi-box-layer";
+import { createPixiLabelLayer } from "./pixi-label-layer";
 import { createPixiMaskLayer } from "./pixi-mask-layer";
 import { calculatePixiSceneFit } from "./pixi-scene-fit";
 import type {
@@ -32,6 +33,7 @@ export async function createPixiMediaScene(
     Graphics,
     ImageSource,
     Sprite,
+    Text,
     Texture,
   } = await import("pixi.js");
   const app: PixiApplication = new Application();
@@ -47,6 +49,15 @@ export async function createPixiMediaScene(
         detectionTimeline: options.detectionTimeline,
         maskStyle: options.maskStyle,
         renderPreparation: options.renderPreparation,
+      })
+    : undefined;
+  let labelLayer = options.labelStyle
+    ? createPixiLabelLayer({
+        Container,
+        Graphics,
+        Text,
+        detectionTimeline: options.detectionTimeline,
+        labelStyle: options.labelStyle,
       })
     : undefined;
 
@@ -75,20 +86,32 @@ export async function createPixiMediaScene(
   let mediaWidth = 0;
   let mediaScene: PixiContainer | undefined;
   let boxGraphics: PixiGraphics | undefined;
+  let labelContainer: PixiContainer | undefined;
+  let maskSprite: InstanceType<typeof Sprite> | undefined;
+  let mediaSprite: InstanceType<typeof Sprite> | undefined;
   let stagingTexture: TextureUpload | undefined;
   let stagingTextureSource: TextureUploadSource | undefined;
 
-  const attachMaskSprite = () => {
-    if (!mediaScene || !maskLayer || !boxGraphics) {
+  const syncSceneChildren = () => {
+    if (!mediaScene || !mediaSprite || !boxGraphics) {
       return;
     }
 
-    const maskSprite = maskLayer.createSprite({
-      height: mediaHeight,
-      width: mediaWidth,
-    });
-    mediaScene.addChild(maskSprite);
-    mediaScene.addChild(boxGraphics);
+    const children: Array<
+      PixiContainer | PixiGraphics | InstanceType<typeof Sprite>
+    > = [mediaSprite];
+
+    if (maskSprite) {
+      children.push(maskSprite);
+    }
+
+    children.push(boxGraphics);
+
+    if (labelContainer) {
+      children.push(labelContainer);
+    }
+
+    mediaScene.addChild(...children);
   };
 
   const updateMediaSceneFit = () => {
@@ -135,24 +158,21 @@ export async function createPixiMediaScene(
         source: canvasSource,
       });
       const scene: PixiContainer = new Container();
-      const mediaSprite = new Sprite({ texture });
-      const maskSprite = maskLayer?.createSprite({
+      mediaSprite = new Sprite({ texture });
+      maskSprite = maskLayer?.createSprite({
         height: mediaHeight,
         width: mediaWidth,
       });
+      labelContainer = labelLayer?.createContainer();
       const boxes: PixiGraphics = new Graphics();
 
       mediaSprite.width = mediaWidth;
       mediaSprite.height = mediaHeight;
       boxLayer.attachGraphics(boxes);
       boxGraphics = boxes;
-      if (maskSprite) {
-        scene.addChild(mediaSprite, maskSprite, boxes);
-      } else {
-        scene.addChild(mediaSprite, boxes);
-      }
       app.stage.addChild(scene);
       mediaScene = scene;
+      syncSceneChildren();
       stagingTextureSource = canvasSource;
       stagingTexture = texture;
       updateMediaSceneFit();
@@ -169,6 +189,7 @@ export async function createPixiMediaScene(
         stagingTexture?.update();
         maskLayer?.drawFrame(sample.timestamp);
         const boxState = boxLayer.drawFrame(sample.timestamp);
+        labelLayer?.drawFrame(sample.timestamp);
         updateMediaSceneFit();
 
         return {
@@ -196,7 +217,27 @@ export async function createPixiMediaScene(
             maskStyle: presentation.maskStyle,
             renderPreparation: options.renderPreparation,
           });
-          attachMaskSprite();
+          maskSprite = maskLayer.createSprite({
+            height: mediaHeight,
+            width: mediaWidth,
+          });
+          syncSceneChildren();
+        }
+      }
+
+      if (presentation.labelStyle !== undefined) {
+        if (labelLayer) {
+          labelLayer.setLabelStyle(presentation.labelStyle);
+        } else if (presentation.labelStyle) {
+          labelLayer = createPixiLabelLayer({
+            Container,
+            Graphics,
+            Text,
+            detectionTimeline: options.detectionTimeline,
+            labelStyle: presentation.labelStyle,
+          });
+          labelContainer = labelLayer.createContainer();
+          syncSceneChildren();
         }
       }
 
@@ -206,11 +247,13 @@ export async function createPixiMediaScene(
 
       maskLayer?.drawFrame(mediaTime);
       boxLayer.drawFrame(mediaTime);
+      labelLayer?.drawFrame(mediaTime);
     },
 
     destroy() {
       app.ticker.remove(updateMediaSceneFit);
       maskLayer?.destroy();
+      labelLayer?.destroy();
       app.destroy(
         { removeView: true },
         {

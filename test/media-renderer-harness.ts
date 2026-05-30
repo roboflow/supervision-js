@@ -55,6 +55,9 @@ const mockState = vi.hoisted(() => {
       rect: ReturnType<typeof vi.fn>;
       roundRect: ReturnType<typeof vi.fn>;
       stroke: ReturnType<typeof vi.fn>;
+      visible: boolean;
+      x: number;
+      y: number;
     }>,
     imageSourceOptions: [] as unknown[],
     stageAddChild: vi.fn(),
@@ -70,6 +73,17 @@ const mockState = vi.hoisted(() => {
     textureDestroy: vi.fn(),
     textureOptions: [] as unknown[],
     textureUpdate: vi.fn(),
+    textInstances: [] as Array<{
+      alpha: number;
+      destroy: ReturnType<typeof vi.fn>;
+      height: number;
+      style: unknown;
+      text: string;
+      visible: boolean;
+      width: number;
+      x: number;
+      y: number;
+    }>,
   };
   const mediaMock = {
     audioTracks: [{ type: "audio" }],
@@ -186,6 +200,9 @@ vi.mock("pixi.js", () => {
     rect = vi.fn(() => this);
     roundRect = vi.fn(() => this);
     stroke = vi.fn(() => this);
+    visible = true;
+    x = 0;
+    y = 0;
 
     constructor() {
       pixiMock.graphicsInstances.push(this);
@@ -206,6 +223,34 @@ vi.mock("pixi.js", () => {
     }
   }
 
+  class Text {
+    alpha = 1;
+    destroy = vi.fn();
+    height = 16;
+    style: unknown;
+    visible = true;
+    width = 0;
+    x = 0;
+    y = 0;
+
+    constructor(options: { text?: string; style?: unknown } = {}) {
+      this.text = options.text ?? "";
+      this.style = options.style;
+      pixiMock.textInstances.push(this);
+    }
+
+    private value = "";
+
+    get text() {
+      return this.value;
+    }
+
+    set text(value: string) {
+      this.value = value;
+      this.width = value.length * 8;
+    }
+  }
+
   return {
     Application,
     CanvasSource,
@@ -213,6 +258,7 @@ vi.mock("pixi.js", () => {
     Graphics,
     ImageSource,
     Sprite,
+    Text,
     Texture,
   };
 });
@@ -342,6 +388,7 @@ export function resetMocks() {
   pixiMock.textureDestroy.mockClear();
   pixiMock.textureOptions.length = 0;
   pixiMock.textureUpdate.mockClear();
+  pixiMock.textInstances.length = 0;
   mediaMock.audioTracks = [{ type: "audio" }];
   mediaMock.canRead.mockClear();
   mediaMock.canRead.mockResolvedValue(true);

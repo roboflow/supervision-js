@@ -1,4 +1,5 @@
 import type { DetectionMask } from "#types/detections";
+import type { MaskStrokeStyle } from "#types/mask-style";
 
 export enum MaskPreparationWorkerMessageType {
   Complete = "complete",
@@ -11,6 +12,7 @@ export interface SerializableMaskInstruction {
   readonly alpha: number;
   readonly color: number;
   readonly mask: DetectionMask;
+  readonly stroke?: MaskStrokeStyle;
 }
 
 export interface MaskFramePreparationJob {

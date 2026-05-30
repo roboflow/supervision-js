@@ -222,6 +222,7 @@ export async function createMediaRendererCore(
       container: options.container,
       detectionTimeline,
       fit,
+      labelStyle: options.labelStyle,
       maskStyle: options.maskStyle,
       renderPreparation: options.renderPreparation,
     });

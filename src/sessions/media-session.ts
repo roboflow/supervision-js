@@ -62,6 +62,7 @@ export async function createMediaSession(
       },
       detectionFrames: sessionDetections.detectionFrames,
       detectionSource: sessionDetections.detectionSource,
+      labelStyle: options.presentation?.labelStyle ?? undefined,
       maskStyle: options.presentation?.maskStyle ?? undefined,
     });
     let destroyed = false;

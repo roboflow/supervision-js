@@ -1,9 +1,14 @@
 import type { Detection } from "#types/detections";
-import type { MaskDrawInstruction, MaskStyle } from "#types/mask-style";
+import type {
+  MaskDrawInstruction,
+  MaskStrokeStyle,
+  MaskStyle,
+} from "#types/mask-style";
 
 export interface BaseMaskStyleOptions {
   readonly color?: number;
   readonly alpha?: number;
+  readonly stroke?: MaskStrokeStyle;
 }
 
 export class BaseMaskStyle implements MaskStyle {
@@ -11,11 +16,13 @@ export class BaseMaskStyle implements MaskStyle {
   readonly opacity: number;
 
   private readonly color: number;
+  private readonly stroke: MaskStrokeStyle | undefined;
 
   constructor(options: BaseMaskStyleOptions = {}) {
     this.color = options.color ?? 0x00ff66;
     this.opacity = clampOpacity(options.alpha ?? 0.35);
-    this.artifactKey = `base:${this.color}`;
+    this.stroke = options.stroke;
+    this.artifactKey = `base:${this.color}:${serializeStroke(this.stroke)}`;
   }
 
   resolve(detection: Detection): MaskDrawInstruction | undefined {
@@ -27,10 +34,19 @@ export class BaseMaskStyle implements MaskStyle {
       alpha: 1,
       color: this.color,
       mask: detection.mask,
+      stroke: this.stroke,
     };
   }
 }
 
 function clampOpacity(opacity: number) {
   return Number.isFinite(opacity) ? Math.max(0, Math.min(opacity, 1)) : 1;
+}
+
+function serializeStroke(stroke: MaskStrokeStyle | undefined) {
+  if (!stroke) {
+    return "none";
+  }
+
+  return `${stroke.color}:${stroke.alpha}:${stroke.width}`;
 }

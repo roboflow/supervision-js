@@ -13,6 +13,7 @@ export { probeMedia } from "#media/media-probe";
 export { createMediaRenderer } from "#renderers/media-renderer";
 export { createMediaSession } from "#sessions/media-session";
 export { BaseBoxStyle, RoundedBoxStyle } from "#styles/box-style";
+export { BaseLabelStyle } from "#styles/label-style";
 export { BaseMaskStyle } from "#styles/mask-style";
 export { BoxShape } from "#types/box-style";
 export type {
@@ -23,7 +24,15 @@ export type {
   BoxStyleContext,
 } from "#types/box-style";
 export type {
+  LabelBackgroundStyle,
+  LabelDrawInstruction,
+  LabelStyle,
+  LabelStyleContext,
+  LabelTextStyle,
+} from "#types/label-style";
+export type {
   MaskDrawInstruction,
+  MaskStrokeStyle,
   MaskStyle,
   MaskStyleContext,
 } from "#types/mask-style";

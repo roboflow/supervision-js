@@ -1,53 +1,120 @@
 import { BoxShape } from "supervision-js";
-import type { CSSProperties } from "react";
-import type { BasketballPresentationSettings } from "../presentation/basketball-presentation";
+import { useState, type CSSProperties } from "react";
+import {
+  resolveBasketballClassStyle,
+  type BasketballClassStyle,
+  type BasketballPresentationSettings,
+} from "../presentation/basketball-presentation";
+
+enum RenderControlsTab {
+  Global = "global",
+  Classes = "classes",
+}
 
 export function RenderControls({
+  classNames,
   onChange,
   settings,
 }: {
+  readonly classNames: readonly string[];
   readonly onChange: (settings: BasketballPresentationSettings) => void;
   readonly settings: BasketballPresentationSettings;
 }) {
+  const [activeTab, setActiveTab] = useState(RenderControlsTab.Global);
   const updateSettings = <Key extends keyof BasketballPresentationSettings>(
     key: Key,
     value: BasketballPresentationSettings[Key],
   ) => {
     onChange({ ...settings, [key]: value });
   };
+  const updateClassStyle = (
+    className: string,
+    key: keyof BasketballClassStyle,
+    value: number,
+  ) => {
+    const currentStyle = resolveBasketballClassStyle(settings, className);
+
+    onChange({
+      ...settings,
+      classStyles: {
+        ...settings.classStyles,
+        [className]: {
+          ...currentStyle,
+          [key]: value,
+        },
+      },
+    });
+  };
 
   return (
     <section className="render-controls" aria-label="Render controls">
+      <div className="render-controls__tabs" role="tablist">
+        <button
+          aria-pressed={activeTab === RenderControlsTab.Global}
+          onClick={() => setActiveTab(RenderControlsTab.Global)}
+          type="button"
+        >
+          Global
+        </button>
+        <button
+          aria-pressed={activeTab === RenderControlsTab.Classes}
+          onClick={() => setActiveTab(RenderControlsTab.Classes)}
+          type="button"
+        >
+          Classes
+        </button>
+      </div>
+
+      {activeTab === RenderControlsTab.Global ? (
+        <GlobalRenderControls onChange={updateSettings} settings={settings} />
+      ) : (
+        <ClassRenderControls
+          classNames={classNames}
+          onChange={updateClassStyle}
+          settings={settings}
+        />
+      )}
+    </section>
+  );
+}
+
+function GlobalRenderControls({
+  onChange,
+  settings,
+}: {
+  readonly onChange: <Key extends keyof BasketballPresentationSettings>(
+    key: Key,
+    value: BasketballPresentationSettings[Key],
+  ) => void;
+  readonly settings: BasketballPresentationSettings;
+}) {
+  return (
+    <div className="render-controls__panel render-controls__panel--global">
       <div className="render-controls__toggles">
-        <label className="render-control render-control--toggle">
-          <input
-            checked={settings.boxesEnabled}
-            onChange={(event) =>
-              updateSettings("boxesEnabled", event.currentTarget.checked)
-            }
-            type="checkbox"
-          />
-          <span>Boxes</span>
-        </label>
-        <label className="render-control render-control--toggle">
-          <input
-            checked={settings.masksEnabled}
-            onChange={(event) =>
-              updateSettings("masksEnabled", event.currentTarget.checked)
-            }
-            type="checkbox"
-          />
-          <span>Masks</span>
-        </label>
+        <ToggleControl
+          checked={settings.boxesEnabled}
+          label="Boxes"
+          onChange={(checked) => onChange("boxesEnabled", checked)}
+        />
+        <ToggleControl
+          checked={settings.masksEnabled}
+          label="Masks"
+          onChange={(checked) => onChange("masksEnabled", checked)}
+        />
+        <ToggleControl
+          checked={settings.labelsEnabled}
+          label="Labels"
+          onChange={(checked) => onChange("labelsEnabled", checked)}
+        />
       </div>
 
       <fieldset className="render-control render-control--shape">
-        <legend>Shape</legend>
+        <legend>Box Shape</legend>
         <div className="render-control__segments">
           <button
             aria-pressed={settings.boxShape === BoxShape.Rect}
             disabled={!settings.boxesEnabled}
-            onClick={() => updateSettings("boxShape", BoxShape.Rect)}
+            onClick={() => onChange("boxShape", BoxShape.Rect)}
             type="button"
           >
             Rect
@@ -55,7 +122,7 @@ export function RenderControls({
           <button
             aria-pressed={settings.boxShape === BoxShape.RoundedRect}
             disabled={!settings.boxesEnabled}
-            onClick={() => updateSettings("boxShape", BoxShape.RoundedRect)}
+            onClick={() => onChange("boxShape", BoxShape.RoundedRect)}
             type="button"
           >
             Rounded
@@ -65,10 +132,10 @@ export function RenderControls({
 
       <SliderControl
         disabled={!settings.boxesEnabled}
-        label="Stroke"
+        label="Box Stroke"
         max={8}
         min={1}
-        onChange={(value) => updateSettings("boxStrokeWidth", value)}
+        onChange={(value) => onChange("boxStrokeWidth", value)}
         step={1}
         value={settings.boxStrokeWidth}
         valueLabel={`${settings.boxStrokeWidth}px`}
@@ -78,7 +145,7 @@ export function RenderControls({
         label="Box Fill"
         max={0.35}
         min={0}
-        onChange={(value) => updateSettings("boxFillAlpha", value)}
+        onChange={(value) => onChange("boxFillAlpha", value)}
         step={0.01}
         value={settings.boxFillAlpha}
         valueLabel={formatPercent(settings.boxFillAlpha)}
@@ -88,21 +155,165 @@ export function RenderControls({
         label="Mask"
         max={1}
         min={0}
-        onChange={(value) => updateSettings("maskAlpha", value)}
+        onChange={(value) => onChange("maskAlpha", value)}
         step={0.01}
         value={settings.maskAlpha}
         valueLabel={formatPercent(settings.maskAlpha)}
       />
       <SliderControl
+        disabled={!settings.masksEnabled}
+        label="Mask Border"
+        max={8}
+        min={0}
+        onChange={(value) => onChange("maskStrokeWidth", value)}
+        step={1}
+        value={settings.maskStrokeWidth}
+        valueLabel={`${settings.maskStrokeWidth}px`}
+      />
+      <SliderControl
+        disabled={!settings.masksEnabled || settings.maskStrokeWidth === 0}
+        label="Border Alpha"
+        max={1}
+        min={0}
+        onChange={(value) => onChange("maskStrokeAlpha", value)}
+        step={0.01}
+        value={settings.maskStrokeAlpha}
+        valueLabel={formatPercent(settings.maskStrokeAlpha)}
+      />
+      <SliderControl
+        disabled={!settings.labelsEnabled}
+        label="Label Size"
+        max={22}
+        min={10}
+        onChange={(value) => onChange("labelFontSize", value)}
+        step={1}
+        value={settings.labelFontSize}
+        valueLabel={`${settings.labelFontSize}px`}
+      />
+      <SliderControl
+        disabled={!settings.labelsEnabled}
+        label="Label BG"
+        max={1}
+        min={0}
+        onChange={(value) => onChange("labelBackgroundAlpha", value)}
+        step={0.01}
+        value={settings.labelBackgroundAlpha}
+        valueLabel={formatPercent(settings.labelBackgroundAlpha)}
+      />
+      <SliderControl
         label="Confidence"
         max={1}
         min={0}
-        onChange={(value) => updateSettings("confidenceThreshold", value)}
+        onChange={(value) => onChange("confidenceThreshold", value)}
         step={0.01}
         value={settings.confidenceThreshold}
         valueLabel={`${Math.round(settings.confidenceThreshold * 100)}%`}
       />
-    </section>
+    </div>
+  );
+}
+
+function ClassRenderControls({
+  classNames,
+  onChange,
+  settings,
+}: {
+  readonly classNames: readonly string[];
+  readonly onChange: (
+    className: string,
+    key: keyof BasketballClassStyle,
+    value: number,
+  ) => void;
+  readonly settings: BasketballPresentationSettings;
+}) {
+  return (
+    <div className="render-controls__panel render-controls__panel--classes">
+      {classNames.map((className) => {
+        const style = resolveBasketballClassStyle(settings, className);
+
+        return (
+          <article className="class-style-card" key={className}>
+            <header>
+              <span
+                className="class-style-card__swatch"
+                style={
+                  { "--class-color": toHexColor(style.fill) } as ClassColorStyle
+                }
+              />
+              <strong>{className}</strong>
+            </header>
+            <div className="class-style-card__controls">
+              <ColorControl
+                label="Fill"
+                onChange={(value) => onChange(className, "fill", value)}
+                value={style.fill}
+              />
+              <ColorControl
+                label="Border"
+                onChange={(value) => onChange(className, "stroke", value)}
+                value={style.stroke}
+              />
+              <ColorControl
+                label="Label"
+                onChange={(value) =>
+                  onChange(className, "labelBackground", value)
+                }
+                value={style.labelBackground}
+              />
+              <ColorControl
+                label="Text"
+                onChange={(value) => onChange(className, "labelText", value)}
+                value={style.labelText}
+              />
+            </div>
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
+function ToggleControl({
+  checked,
+  label,
+  onChange,
+}: {
+  readonly checked: boolean;
+  readonly label: string;
+  readonly onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="render-control render-control--toggle">
+      <input
+        checked={checked}
+        onChange={(event) => onChange(event.currentTarget.checked)}
+        type="checkbox"
+      />
+      <span>{label}</span>
+    </label>
+  );
+}
+
+function ColorControl({
+  label,
+  onChange,
+  value,
+}: {
+  readonly label: string;
+  readonly onChange: (value: number) => void;
+  readonly value: number;
+}) {
+  return (
+    <label className="class-color-control">
+      <span>{label}</span>
+      <input
+        onChange={(event) =>
+          onChange(Number.parseInt(event.currentTarget.value.slice(1), 16))
+        }
+        type="color"
+        value={toHexColor(value)}
+      />
+    </label>
   );
 }
 
@@ -149,10 +360,18 @@ function SliderControl({
   );
 }
 
+type ClassColorStyle = CSSProperties & {
+  readonly "--class-color": string;
+};
+
 type SliderControlStyle = CSSProperties & {
   readonly "--control-progress": string;
 };
 
 function formatPercent(value: number) {
   return `${Math.round(value * 100)}%`;
+}
+
+function toHexColor(color: number) {
+  return `#${color.toString(16).padStart(6, "0").slice(-6)}`;
 }

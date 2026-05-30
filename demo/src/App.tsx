@@ -8,6 +8,7 @@ import {
   DemoSourceMode,
   useBasketballDemoRenderer,
 } from "./hooks/useBasketballDemoRenderer";
+import { defaultBasketballClassNames } from "./presentation/basketball-presentation";
 
 export function App() {
   const demo = useBasketballDemoRenderer();
@@ -23,6 +24,10 @@ export function App() {
     demo.sourceMode === DemoSourceMode.Upload
       ? demo.uploadInferenceState.normalizedRanges
       : [];
+  const styleClassNames =
+    demo.sourceMode === DemoSourceMode.Upload
+      ? parseClassNames(demo.uploadClassNames)
+      : defaultBasketballClassNames;
 
   return (
     <DemoShell
@@ -63,6 +68,7 @@ export function App() {
       }
       renderControls={
         <RenderControls
+          classNames={styleClassNames}
           onChange={demo.setPresentationSettings}
           settings={demo.presentationSettings}
         />
@@ -81,4 +87,11 @@ export function App() {
       }
     />
   );
+}
+
+function parseClassNames(value: string) {
+  return value
+    .split(/[\n,]/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
 }

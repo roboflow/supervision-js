@@ -365,6 +365,8 @@ fieldset {
 .playback-controls__toggle:focus-visible,
 .render-control button:focus-visible,
 .render-control input:focus-visible,
+.render-controls__tabs button:focus-visible,
+.class-color-control input:focus-visible,
 .timeline-view__strip:focus-visible,
 .timeline-view__input:focus-visible {
   outline: 2px solid var(--cyan);
@@ -737,17 +739,62 @@ fieldset {
 }
 
 .render-controls {
-  align-items: end;
   background: var(--surface-strong);
   border: 1px solid var(--line);
   border-radius: 10px;
   display: grid;
-  gap: 10px 12px;
-  grid-template-columns:
-    minmax(112px, auto) minmax(160px, auto)
-    repeat(4, minmax(118px, 1fr));
+  gap: 10px;
   min-width: 0;
   padding: 10px;
+}
+
+.render-controls__tabs {
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-height: 34px;
+  overflow: hidden;
+}
+
+.render-controls__tabs button {
+  background: transparent;
+  border: 0;
+  color: var(--muted-strong);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 850;
+  min-width: 0;
+  padding: 8px 10px;
+}
+
+.render-controls__tabs button + button {
+  border-left: 1px solid var(--line);
+}
+
+.render-controls__tabs button[aria-pressed="true"] {
+  background: #f8fafc;
+  color: #07080a;
+}
+
+.render-controls__panel {
+  min-width: 0;
+}
+
+.render-controls__panel--global {
+  align-items: end;
+  display: grid;
+  gap: 10px 12px;
+  grid-template-columns:
+    minmax(150px, auto) minmax(160px, auto)
+    repeat(4, minmax(118px, 1fr));
+}
+
+.render-controls__panel--classes {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .render-controls__toggles {
@@ -858,6 +905,86 @@ fieldset {
   font-size: 12px;
 }
 
+.class-style-card {
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px;
+}
+
+.class-style-card header {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.class-style-card strong {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 850;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.class-style-card__swatch {
+  background: var(--class-color);
+  border: 1px solid rgba(255, 255, 255, 0.46);
+  border-radius: 999px;
+  box-shadow: 0 0 16px color-mix(in srgb, var(--class-color) 45%, transparent);
+  flex: 0 0 auto;
+  height: 13px;
+  width: 13px;
+}
+
+.class-style-card__controls {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.class-color-control {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.class-color-control span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 780;
+}
+
+.class-color-control input {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  height: 30px;
+  padding: 0;
+  width: 100%;
+}
+
+.class-color-control input::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.class-color-control input::-webkit-color-swatch {
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 8px;
+}
+
+.class-color-control input::-moz-color-swatch {
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 8px;
+}
+
 .status-panel {
   align-items: start;
   display: grid;
@@ -934,7 +1061,8 @@ fieldset {
 }
 
 @media (max-width: 1200px) {
-  .render-controls {
+  .render-controls__panel--global,
+  .render-controls__panel--classes {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
@@ -988,8 +1116,13 @@ fieldset {
     justify-content: start;
   }
 
-  .render-controls,
+  .render-controls__panel--global,
+  .render-controls__panel--classes,
   .status-panel {
     grid-template-columns: 1fr;
+  }
+
+  .class-style-card__controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

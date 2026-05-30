@@ -47,6 +47,7 @@ describe("package entrypoint", () => {
 
     expect(Object.keys(entrypoint).sort()).toEqual([
       "BaseBoxStyle",
+      "BaseLabelStyle",
       "BaseMaskStyle",
       "BoxShape",
       "DetectionBufferStatus",
@@ -93,6 +94,7 @@ describe("package entrypoint", () => {
     expect(entrypoint.MediaPreparationError).toEqual(expect.any(Function));
     expect(entrypoint.probeMedia).toEqual(expect.any(Function));
     expect(entrypoint.BaseBoxStyle).toEqual(expect.any(Function));
+    expect(entrypoint.BaseLabelStyle).toEqual(expect.any(Function));
     expect(entrypoint.BaseMaskStyle).toEqual(expect.any(Function));
     expect(entrypoint.RoundedBoxStyle).toEqual(expect.any(Function));
     expect(entrypoint.BoxShape).toEqual({
@@ -711,6 +713,88 @@ describe("package entrypoint", () => {
       alpha: 0.75,
       color: 0xabcdef,
       width: 3,
+    });
+
+    renderer.destroy();
+  });
+
+  it("draws labels for the active detection frame", async () => {
+    resetMocks();
+
+    const resolve = vi.fn((detection: Detection) =>
+      detection.rect
+        ? {
+            background: {
+              alpha: 0.7,
+              color: 0x111827,
+              cornerRadius: 4,
+              paddingX: 6,
+              paddingY: 3,
+            },
+            rect: detection.rect,
+            text: `${detection.className} ${Math.round(
+              (detection.confidence ?? 0) * 100,
+            )}%`,
+            textStyle: {
+              alpha: 1,
+              color: 0xffffff,
+              fontFamily: "Inter, sans-serif",
+              fontSize: 14,
+              fontWeight: "600",
+            },
+          }
+        : undefined,
+    );
+    const renderer = await createRenderer(false, false, {
+      detectionFrames: [
+        {
+          detections: [
+            {
+              className: "player",
+              confidence: 0.84,
+              rect: {
+                height: 20,
+                width: 10,
+                x: 4,
+                y: 20,
+              },
+            },
+          ],
+          mediaTime: 0,
+        },
+      ],
+      labelStyle: { resolve },
+    });
+
+    expect(resolve).toHaveBeenCalledWith(
+      expect.objectContaining({ className: "player" }),
+      expect.objectContaining({
+        detectionIndex: 0,
+        mediaTime: 0,
+      }),
+    );
+    expect(pixiMock.textInstances[0]).toMatchObject({
+      style: expect.objectContaining({
+        fill: 0xffffff,
+        fontFamily: "Inter, sans-serif",
+        fontSize: 14,
+        fontWeight: "600",
+      }),
+      text: "player 84%",
+      visible: true,
+      x: 10,
+      y: 3,
+    });
+    expect(pixiMock.graphicsInstances[1]?.roundRect).toHaveBeenLastCalledWith(
+      4,
+      0,
+      92,
+      22,
+      4,
+    );
+    expect(pixiMock.graphicsInstances[1]?.fill).toHaveBeenLastCalledWith({
+      alpha: 0.7,
+      color: 0x111827,
     });
 
     renderer.destroy();

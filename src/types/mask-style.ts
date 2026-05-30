@@ -10,10 +10,17 @@ export interface MaskStyleContext {
   readonly detectionIndex: number;
 }
 
+export interface MaskStrokeStyle {
+  readonly color: number;
+  readonly alpha: number;
+  readonly width: number;
+}
+
 export interface MaskDrawInstruction {
   readonly mask: DetectionMask;
   readonly color: number;
   readonly alpha: number;
+  readonly stroke?: MaskStrokeStyle;
 }
 
 export interface MaskStyle {
