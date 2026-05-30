@@ -6,6 +6,7 @@ import {
   type BufferedDetectionTimeline,
 } from "#types/detection-timeline";
 import { DetectionMaskEncoding, type DetectionFrame } from "#types/detections";
+import type { MaskStyle } from "#types/mask-style";
 import {
   RenderPreparationArtifactKind,
   RenderPreparationExecutionMode,
@@ -106,6 +107,34 @@ describe("prepared render window", () => {
       renderWindow.destroy();
     } finally {
       browserWindow.requestIdleCallback = originalRequestIdleCallback;
+      vi.useRealTimers();
+    }
+  });
+
+  it("reuses prepared mask artifacts when only presentation opacity changes", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const onMaskFramesCleared = vi.fn();
+      const renderWindow = createPreparedRenderWindow({
+        detectionTimeline: createTimeline(frames),
+        maskStyle: createArtifactStableMaskStyle(0.2),
+        onMaskFramesCleared,
+      });
+
+      renderWindow.getFrame(0);
+      await vi.runOnlyPendingTimersAsync();
+
+      const preparedFrame = renderWindow.getFrame(0)?.maskFrame;
+
+      renderWindow.setMaskStyle(createArtifactStableMaskStyle(0.8));
+
+      expect(onMaskFramesCleared).not.toHaveBeenCalled();
+      expect(renderWindow.getFrame(0)?.maskFrame).toBe(preparedFrame);
+
+      renderWindow.destroy();
+    } finally {
       vi.useRealTimers();
     }
   });
@@ -228,6 +257,26 @@ function createFakeMaskPreparationWorker() {
     },
     messages,
     worker,
+  };
+}
+
+function createArtifactStableMaskStyle(
+  opacity: number,
+): MaskStyle & { readonly artifactKey: string; readonly opacity: number } {
+  return {
+    artifactKey: "stable-mask-artifact",
+    opacity,
+    resolve(detection) {
+      if (!detection.mask) {
+        return undefined;
+      }
+
+      return {
+        alpha: 1,
+        color: 0x00ff66,
+        mask: detection.mask,
+      };
+    },
   };
 }
 

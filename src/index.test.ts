@@ -200,10 +200,11 @@ describe("package entrypoint", () => {
     };
 
     expect(style.resolve({ mask })).toEqual({
-      alpha: 0.35,
+      alpha: 1,
       color: 0x00ff66,
       mask,
     });
+    expect(style.opacity).toBe(0.35);
     expect(style.resolve({})).toBeUndefined();
   });
 
@@ -1018,6 +1019,79 @@ describe("package entrypoint", () => {
     }
   });
 
+  it("updates artifact-stable mask opacity without rebuilding the mask texture", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const { createPixiMaskLayer } =
+        await import("./renderers/pixi-mask-layer");
+      const { ImageSource, Sprite, Texture } = await import("pixi.js");
+      const detectionFrames = [
+        {
+          detections: [
+            {
+              mask: {
+                counts: "021",
+                encoding: DetectionMaskEncoding.CompressedRle,
+                height: 2,
+                width: 2,
+              },
+            },
+          ],
+          mediaTime: 0,
+        },
+      ];
+      const detectionTimeline = {
+        destroy: vi.fn(),
+        getBufferedFrames: vi.fn(() => detectionFrames),
+        getState: vi.fn(() => ({
+          bufferEndTime: 5,
+          bufferStartTime: 0,
+          detectionCount: detectionFrames.length,
+          errorMessage: null,
+          frameCount: detectionFrames.length,
+          requestedEndTime: 5,
+          requestedStartTime: 0,
+          status: DetectionBufferStatus.Ready,
+        })),
+        prepare: vi.fn(),
+        prefetch: vi.fn(),
+        selectFrame: vi.fn((mediaTime: number) =>
+          detectionFrames.find((frame) => frame.mediaTime === mediaTime),
+        ),
+      } satisfies BufferedDetectionTimeline;
+
+      const layer = createPixiMaskLayer({
+        detectionTimeline,
+        ImageSource,
+        maskStyle: createArtifactStableMaskStyle(0.2),
+        Sprite,
+        Texture,
+      });
+
+      const sprite = layer.createSprite({ height: 720, width: 1280 });
+      layer.drawFrame(0);
+      await vi.runOnlyPendingTimersAsync();
+      layer.drawFrame(0);
+
+      expect(sprite.visible).toBe(true);
+      expect(sprite.alpha).toBe(0.2);
+      expect(pixiMock.textureOptions).toHaveLength(1);
+
+      layer.setMaskStyle(createArtifactStableMaskStyle(0.8));
+
+      expect(sprite.alpha).toBe(0.8);
+      expect(sprite.visible).toBe(true);
+      expect(pixiMock.textureOptions).toHaveLength(1);
+      expect(pixiMock.textureDestroy).not.toHaveBeenCalled();
+
+      layer.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("defaults partial box fill values", async () => {
     resetMocks();
 
@@ -1819,3 +1893,23 @@ describe("package entrypoint", () => {
     renderer.destroy();
   });
 });
+
+function createArtifactStableMaskStyle(
+  opacity: number,
+): MaskStyle & { readonly artifactKey: string; readonly opacity: number } {
+  return {
+    artifactKey: "stable-mask-artifact",
+    opacity,
+    resolve(detection) {
+      if (!detection.mask) {
+        return undefined;
+      }
+
+      return {
+        alpha: 1,
+        color: 0x00ff66,
+        mask: detection.mask,
+      };
+    },
+  };
+}

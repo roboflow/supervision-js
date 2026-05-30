@@ -17,6 +17,16 @@ export interface MaskDrawInstruction {
 }
 
 export interface MaskStyle {
+  /**
+   * Stable identity for the prepared mask pixels. Exclude presentation-only
+   * controls such as global opacity so cached mask artifacts can be reused.
+   */
+  readonly artifactKey?: string;
+  /**
+   * Presentation opacity applied by the renderer after the mask artifact is
+   * prepared. Use this for cheap live opacity updates.
+   */
+  readonly opacity?: number;
   resolve(
     detection: Detection,
     context: MaskStyleContext,

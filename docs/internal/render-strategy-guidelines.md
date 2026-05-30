@@ -83,6 +83,13 @@ Shared worker plumbing belongs in `src/workers/`; feature-specific preparers
 should translate their own request and artifact shapes rather than each
 rebuilding request IDs, pending promises, worker errors, and orphan cleanup.
 
+Keep prepared artifact identity separate from presentation-only controls. For
+masks, the style `artifactKey` should include values that change prepared
+pixels, such as color grouping or confidence filtering, while renderer-level
+`opacity` should remain outside the prepared artifact. This lets opacity
+sliders update the Pixi sprite immediately without recompositing every cached
+mask frame.
+
 Do not assume every prepared artifact should be an image. Masks and heatmaps
 fit texture artifacts well; boxes often fit grouped `Graphics` instructions
 better until measured pressure says otherwise. The common rule is to move

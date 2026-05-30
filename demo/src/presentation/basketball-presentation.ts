@@ -103,18 +103,16 @@ function createBasketballMaskStyle(
   settings: BasketballPresentationSettings,
 ): MaskStyle {
   return {
+    artifactKey: `basketball-mask:${settings.confidenceThreshold}`,
+    opacity: settings.maskAlpha,
+
     resolve(detection: Detection): MaskDrawInstruction | undefined {
       if (!detection.mask || !passesConfidenceThreshold(detection, settings)) {
         return undefined;
       }
 
       return {
-        alpha: Math.min(
-          detection.className === "basketball"
-            ? settings.maskAlpha * 1.2
-            : settings.maskAlpha,
-          1,
-        ),
+        alpha: 1,
         color: resolveClassStyle(detection).fill,
         mask: detection.mask,
       };

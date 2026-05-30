@@ -228,7 +228,15 @@ export function createPreparedRenderWindow(options: {
         return;
       }
 
+      const previousMaskStyle = maskStyle;
+
       maskStyle = nextMaskStyle;
+
+      if (canReusePreparedMaskFrames(previousMaskStyle, nextMaskStyle)) {
+        emitDiagnostics();
+        return;
+      }
+
       clearPreparedMaskFrames();
     },
 
@@ -318,6 +326,21 @@ export function createPreparedRenderWindow(options: {
 
     return PreparedRenderFrameMaskStatus.Pending;
   }
+}
+
+function canReusePreparedMaskFrames(
+  previousMaskStyle: MaskStyle | null,
+  nextMaskStyle: MaskStyle | null,
+) {
+  if (previousMaskStyle === nextMaskStyle) {
+    return true;
+  }
+
+  return (
+    previousMaskStyle?.artifactKey !== undefined &&
+    nextMaskStyle?.artifactKey !== undefined &&
+    previousMaskStyle.artifactKey === nextMaskStyle.artifactKey
+  );
 }
 
 function resolveMaskInstructions(options: {

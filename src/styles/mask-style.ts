@@ -7,12 +7,15 @@ export interface BaseMaskStyleOptions {
 }
 
 export class BaseMaskStyle implements MaskStyle {
+  readonly artifactKey: string;
+  readonly opacity: number;
+
   private readonly color: number;
-  private readonly alpha: number;
 
   constructor(options: BaseMaskStyleOptions = {}) {
     this.color = options.color ?? 0x00ff66;
-    this.alpha = options.alpha ?? 0.35;
+    this.opacity = clampOpacity(options.alpha ?? 0.35);
+    this.artifactKey = `base:${this.color}`;
   }
 
   resolve(detection: Detection): MaskDrawInstruction | undefined {
@@ -21,9 +24,13 @@ export class BaseMaskStyle implements MaskStyle {
     }
 
     return {
-      alpha: this.alpha,
+      alpha: 1,
       color: this.color,
       mask: detection.mask,
     };
   }
+}
+
+function clampOpacity(opacity: number) {
+  return Number.isFinite(opacity) ? Math.max(0, Math.min(opacity, 1)) : 1;
 }
