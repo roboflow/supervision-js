@@ -135,6 +135,7 @@ export async function createUploadSession(
             },
           },
       presentation,
+      onState: options.onSessionState,
       renderer: {
         autoPlay: false,
         fit: MediaRendererFit.Contain,

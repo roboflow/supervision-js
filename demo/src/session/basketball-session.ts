@@ -11,10 +11,6 @@ import {
   loadBasketballSampleMedia,
 } from "../fixtures/basketball-sample";
 import { createBasketballSamplePresentation } from "../presentation/basketball-presentation";
-import {
-  UPLOAD_DETECTION_BUFFER_AHEAD_SECONDS,
-  UPLOAD_DETECTION_BUFFER_BEHIND_SECONDS,
-} from "./demo-session-config";
 import type { DemoSessionCallbacks } from "./demo-session-types";
 
 export async function createBasketballSession(
@@ -65,8 +61,6 @@ export async function createBasketballSession(
       container: options.container,
       detections: {
         buffer: {
-          bufferAheadSeconds: UPLOAD_DETECTION_BUFFER_AHEAD_SECONDS,
-          bufferBehindSeconds: UPLOAD_DETECTION_BUFFER_BEHIND_SECONDS,
           frameIndexOriginTime: 0,
           frameRate: manifest.inference.frameRate,
           selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
@@ -74,6 +68,7 @@ export async function createBasketballSession(
         source: detectionSource.detectionSource,
       },
       media: mediaSource.src,
+      onState: options.onSessionState,
       presentation,
       renderer: {
         autoPlay: false,

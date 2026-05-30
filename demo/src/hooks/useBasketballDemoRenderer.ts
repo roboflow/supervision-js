@@ -10,6 +10,7 @@ import {
   type MediaSession,
   type MediaRenderer,
   type MediaRendererState,
+  type MediaSessionState,
   type MediaSourceState,
   type RenderPreparationDiagnostics,
 } from "supervision-js";
@@ -50,6 +51,7 @@ export interface BasketballDemoRendererState {
   readonly renderPreparationDiagnostics: RenderPreparationDiagnostics | null;
   readonly sourceControlsDisabled: boolean;
   readonly sourceMode: DemoSourceMode;
+  readonly sessionState: MediaSessionState | null;
   readonly sourceState: MediaSourceState | null;
   readonly uploadApiKey: string;
   readonly uploadClassNames: string;
@@ -107,6 +109,9 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
   const [sourceState, setSourceState] = useState<MediaSourceState | null>(null);
   const [renderPreparationDiagnostics, setRenderPreparationDiagnostics] =
     useState<RenderPreparationDiagnostics | null>(null);
+  const [sessionState, setSessionState] = useState<MediaSessionState | null>(
+    null,
+  );
   const [fixtureSummary, setFixtureSummary] =
     useState<BasketballSampleSummary | null>(null);
   const [detectionSourceState, setDetectionSourceState] =
@@ -195,6 +200,7 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
             onMediaState: setMediaState,
             onRenderPreparationDiagnostics: setRenderPreparationDiagnostics,
             onRendererState,
+            onSessionState: setSessionState,
             onSourceState: setSourceState,
             presentationSettings: presentationSettingsRef.current,
           });
@@ -212,6 +218,7 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
             onMediaState: setMediaState,
             onRenderPreparationDiagnostics: setRenderPreparationDiagnostics,
             onRendererState,
+            onSessionState: setSessionState,
             onSourceState: setSourceState,
             onUploadState: setUploadInferenceState,
             presentationSettings: presentationSettingsRef.current,
@@ -449,6 +456,7 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
     });
     setRendererState(null);
     setRenderPreparationDiagnostics(null);
+    setSessionState(null);
     setSourceState(null);
   }
 
@@ -500,6 +508,7 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
     setSourceMode,
     setUploadApiKey,
     setUploadClassNames,
+    sessionState,
     sourceControlsDisabled,
     sourceMode,
     sourceState,

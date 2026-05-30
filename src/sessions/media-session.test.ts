@@ -5,6 +5,10 @@ import type {
   ColdDetectionFrameStoreWriteSummary,
 } from "#types/detection-timeline";
 import type { DetectionFrame } from "#types/detections";
+import {
+  MediaSessionActivityKind,
+  MediaSessionStatus,
+} from "#types/media-session";
 
 import {
   createContainer,
@@ -66,6 +70,44 @@ describe("media session", () => {
 
     expect(pixiMock.appDestroy).toHaveBeenCalledOnce();
     expect(store.destroy).toHaveBeenCalledOnce();
+  });
+
+  it("emits aggregate state and exposes it from the session", async () => {
+    resetMocks();
+    const { createMediaSession } = await import("../index");
+    const onState = vi.fn();
+
+    const session = await createMediaSession({
+      container: createContainer(),
+      media: "sample.mp4",
+      onState,
+      renderer: { autoPlay: false },
+    });
+
+    expect(onState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        activities: [
+          expect.objectContaining({
+            kind: MediaSessionActivityKind.MediaOpening,
+          }),
+        ],
+        renderer: null,
+        status: MediaSessionStatus.Loading,
+      }),
+    );
+    expect(session.getState()).toMatchObject({
+      activities: [],
+      renderer: expect.objectContaining({
+        currentTime: 0,
+      }),
+      status: MediaSessionStatus.Ready,
+    });
+
+    session.destroy();
+
+    expect(session.getState()).toMatchObject({
+      status: MediaSessionStatus.Destroyed,
+    });
   });
 
   it("revokes direct Blob object URLs when destroyed", async () => {

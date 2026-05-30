@@ -93,12 +93,18 @@ export {
 } from "#types/media-normalization";
 export {
   type MediaSession,
+  MediaSessionActivityKind,
+  MediaSessionActivityStatus,
+  MediaSessionStatus,
+  type MediaSessionActivity,
   type MediaSessionDetectionOptions,
   type MediaSessionMedia,
   type MediaSessionMediaState,
+  type MediaSessionNormalizationState,
   type MediaSessionNormalizationOptions,
   type MediaSessionOptions,
   type MediaSessionRendererOptions,
+  type MediaSessionState,
   type MediaSessionWritableDetectionOptions,
 } from "#types/media-session";
 export {

@@ -3,6 +3,7 @@ import {
   MediaRendererPlaybackState,
   RenderPreparationArtifactKind,
   type MediaRendererState,
+  type MediaSessionState,
   type MediaSourceState,
   type RenderPreparationDiagnostics,
 } from "supervision-js";
@@ -38,6 +39,7 @@ export function StatusPanel({
   playbackState,
   renderPreparationDiagnostics,
   rendererState,
+  sessionState,
   sourceState,
 }: {
   readonly detectionSourceState: StatusPanelDetectionSourceState;
@@ -47,6 +49,7 @@ export function StatusPanel({
   readonly playbackState: MediaRendererPlaybackState | null;
   readonly renderPreparationDiagnostics: RenderPreparationDiagnostics | null;
   readonly rendererState: MediaRendererState | null;
+  readonly sessionState: MediaSessionState | null;
   readonly sourceState: MediaSourceState | null;
 }) {
   const rendererErrorMessage =
@@ -205,6 +208,22 @@ export function StatusPanel({
             value={renderPreparationDiagnostics.message}
           />
         ) : null}
+      </StatusGroup>
+
+      <StatusGroup title="Session">
+        <Readout label="State" value={sessionState?.status ?? "-"} />
+        <Readout
+          label="Activities"
+          value={
+            sessionState
+              ? sessionState.activities.length === 0
+                ? "none"
+                : sessionState.activities
+                    .map((activity) => activity.label)
+                    .join(" | ")
+              : "-"
+          }
+        />
       </StatusGroup>
 
       <StatusGroup title="Media Source">

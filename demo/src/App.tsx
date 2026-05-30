@@ -31,7 +31,17 @@ export function App() {
 
   return (
     <DemoShell
-      viewport={<RendererViewport containerRef={demo.containerRef} />}
+      viewport={
+        <RendererViewport
+          containerRef={demo.containerRef}
+          sessionState={demo.sessionState}
+          uploadInferenceState={
+            demo.sourceMode === DemoSourceMode.Upload
+              ? demo.uploadInferenceState
+              : null
+          }
+        />
+      }
       sourceControls={
         <SourceControls
           apiKey={demo.uploadApiKey}
@@ -82,6 +92,7 @@ export function App() {
           playbackState={demo.playbackState}
           renderPreparationDiagnostics={demo.renderPreparationDiagnostics}
           rendererState={demo.rendererState}
+          sessionState={demo.sessionState}
           sourceState={demo.sourceState}
         />
       }

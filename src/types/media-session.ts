@@ -9,6 +9,7 @@ import type {
 import type { DetectionFrame } from "#types/detections";
 import type {
   MediaNormalizationInputMetadata,
+  MediaNormalizationProgress,
   MediaNormalizationOptions,
   NormalizedMedia,
   ProgressiveNormalizedMedia,
@@ -23,6 +24,10 @@ import type {
   MediaRendererState,
   MediaSourceState,
 } from "#types/media-renderer";
+import type {
+  RenderPreparationArtifactKind,
+  RenderPreparationDiagnostics,
+} from "#types/render-preparation";
 
 export type MediaSessionMedia = string | Blob | MediaRendererSource;
 
@@ -61,6 +66,7 @@ export interface MediaSessionOptions {
   readonly media: MediaSessionMedia;
   readonly normalize?: false | MediaSessionNormalizationOptions;
   readonly detections?: MediaSessionDetectionOptions;
+  readonly onState?: (state: MediaSessionState) => void;
   readonly presentation?: MediaRendererPresentation;
   readonly renderer?: MediaSessionRendererOptions;
 }
@@ -69,6 +75,61 @@ export interface MediaSessionMediaState {
   readonly inputMetadata: MediaNormalizationInputMetadata | null;
   readonly normalizedMedia: NormalizedMedia | ProgressiveNormalizedMedia | null;
   readonly objectUrl: string | null;
+}
+
+export enum MediaSessionStatus {
+  Buffering = "buffering",
+  Destroyed = "destroyed",
+  Error = "error",
+  Loading = "loading",
+  Paused = "paused",
+  Playing = "playing",
+  Processing = "processing",
+  Ready = "ready",
+}
+
+export enum MediaSessionActivityKind {
+  DetectionsBuffering = "detectionsBuffering",
+  DetectionsLoading = "detectionsLoading",
+  Error = "error",
+  MediaNormalizing = "mediaNormalizing",
+  MediaOpening = "mediaOpening",
+  PlaybackBuffering = "playbackBuffering",
+  RenderPreparing = "renderPreparing",
+}
+
+export enum MediaSessionActivityStatus {
+  Error = "error",
+  Running = "running",
+  Waiting = "waiting",
+}
+
+export interface MediaSessionActivity {
+  readonly artifactKind?: RenderPreparationArtifactKind;
+  readonly blockingPlayback?: boolean;
+  readonly detail?: string | null;
+  readonly errorMessage?: string | null;
+  readonly kind: MediaSessionActivityKind;
+  readonly label: string;
+  readonly pendingCount?: number;
+  readonly preparedCount?: number;
+  readonly progress?: number;
+  readonly status: MediaSessionActivityStatus;
+}
+
+export interface MediaSessionNormalizationState {
+  readonly active: boolean;
+  readonly progress: MediaNormalizationProgress | null;
+}
+
+export interface MediaSessionState {
+  readonly activities: readonly MediaSessionActivity[];
+  readonly errorMessage: string | null;
+  readonly media: MediaSessionMediaState;
+  readonly normalization: MediaSessionNormalizationState | null;
+  readonly renderPreparation: RenderPreparationDiagnostics | null;
+  readonly renderer: MediaRendererState | null;
+  readonly status: MediaSessionStatus;
 }
 
 export interface MediaSession {
@@ -85,6 +146,6 @@ export interface MediaSession {
   pause(): void;
   seek(mediaTime: number): Promise<void>;
   setPresentation(presentation: MediaRendererPresentation): void;
-  getState(): MediaRendererState;
+  getState(): MediaSessionState;
   destroy(): void;
 }

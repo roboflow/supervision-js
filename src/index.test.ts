@@ -62,6 +62,9 @@ describe("package entrypoint", () => {
       "MediaProbeStatus",
       "MediaRendererFit",
       "MediaRendererPlaybackState",
+      "MediaSessionActivityKind",
+      "MediaSessionActivityStatus",
+      "MediaSessionStatus",
       "MediaSourceStatus",
       "RenderPreparationArtifactKind",
       "RenderPreparationExecutionMode",
@@ -119,6 +122,30 @@ describe("package entrypoint", () => {
       Error: "error",
       Loading: "loading",
       Ready: "ready",
+    });
+    expect(entrypoint.MediaSessionStatus).toEqual({
+      Buffering: "buffering",
+      Destroyed: "destroyed",
+      Error: "error",
+      Loading: "loading",
+      Paused: "paused",
+      Playing: "playing",
+      Processing: "processing",
+      Ready: "ready",
+    });
+    expect(entrypoint.MediaSessionActivityKind).toEqual({
+      DetectionsBuffering: "detectionsBuffering",
+      DetectionsLoading: "detectionsLoading",
+      Error: "error",
+      MediaNormalizing: "mediaNormalizing",
+      MediaOpening: "mediaOpening",
+      PlaybackBuffering: "playbackBuffering",
+      RenderPreparing: "renderPreparing",
+    });
+    expect(entrypoint.MediaSessionActivityStatus).toEqual({
+      Error: "error",
+      Running: "running",
+      Waiting: "waiting",
     });
     expect(entrypoint.DetectionBufferStatus).toEqual({
       Destroyed: "destroyed",

@@ -14,13 +14,17 @@ import type {
   MediaSessionMedia,
   MediaSessionMediaState,
   MediaSessionNormalizationOptions,
+  MediaSessionNormalizationState,
   MediaSessionOptions,
 } from "#types/media-session";
 import type {
   MediaRendererOptions,
   MediaRendererPresentation,
   MediaRendererSource,
+  MediaRendererState,
 } from "#types/media-renderer";
+import type { RenderPreparationDiagnostics } from "#types/render-preparation";
+import { createMediaSessionStateSnapshot } from "./media-session-state";
 
 interface PreparedSessionMedia {
   readonly rendererSourceOption: Pick<MediaRendererOptions, "source" | "src">;
@@ -39,19 +43,67 @@ interface PreparedSessionDetections {
 export async function createMediaSession(
   options: MediaSessionOptions,
 ): Promise<MediaSession> {
-  const preparedMedia = await prepareSessionMedia(
-    options.media,
-    options.normalize,
-  );
+  let rendererState: MediaRendererState | null = null;
+  let renderPreparationState: RenderPreparationDiagnostics | null = null;
+  let normalizationState: MediaSessionNormalizationState | null = null;
+  let sessionErrorMessage: string | null = null;
+  let sessionMediaState: MediaSessionMediaState = createEmptyMediaState();
+  const emitSessionState = () => {
+    options.onState?.(
+      createMediaSessionStateSnapshot({
+        errorMessage: sessionErrorMessage,
+        media: sessionMediaState,
+        normalization: normalizationState,
+        renderPreparation: renderPreparationState,
+        renderer: rendererState,
+      }),
+    );
+  };
+  const createSessionState = () =>
+    createMediaSessionStateSnapshot({
+      errorMessage: sessionErrorMessage,
+      media: sessionMediaState,
+      normalization: normalizationState,
+      renderPreparation: renderPreparationState,
+      renderer: rendererState,
+    });
+
+  emitSessionState();
+
+  let preparedMedia: PreparedSessionMedia | undefined;
   let preparedDetections: PreparedSessionDetections | undefined;
 
   try {
+    preparedMedia = await prepareSessionMedia(
+      options.media,
+      options.normalize,
+      {
+        onNormalizationComplete() {
+          normalizationState = normalizationState
+            ? { ...normalizationState, active: false }
+            : null;
+          emitSessionState();
+        },
+        onNormalizationProgress(progress) {
+          normalizationState = { active: true, progress };
+          emitSessionState();
+        },
+        onNormalizationStart() {
+          normalizationState = { active: true, progress: null };
+          emitSessionState();
+        },
+      },
+    );
+    sessionMediaState = preparedMedia.state;
+    emitSessionState();
+    const sessionMedia = preparedMedia;
+
     preparedDetections = await prepareSessionDetections(options.detections);
     const sessionDetections = preparedDetections;
 
     const renderer = await createMediaRenderer({
       ...options.renderer,
-      ...preparedMedia.rendererSourceOption,
+      ...sessionMedia.rendererSourceOption,
       boxStyle: options.presentation?.boxStyle ?? undefined,
       container: options.container,
       detectionBuffer: {
@@ -64,12 +116,27 @@ export async function createMediaSession(
       detectionSource: sessionDetections.detectionSource,
       labelStyle: options.presentation?.labelStyle ?? undefined,
       maskStyle: options.presentation?.maskStyle ?? undefined,
+      onState(state) {
+        rendererState = state;
+        options.renderer?.onState?.(state);
+        emitSessionState();
+      },
+      renderPreparation: {
+        ...options.renderer?.renderPreparation,
+        onDiagnostics(diagnostics) {
+          renderPreparationState = diagnostics;
+          options.renderer?.renderPreparation?.onDiagnostics?.(diagnostics);
+          emitSessionState();
+        },
+      },
     });
+    rendererState = renderer.getState();
+    emitSessionState();
     let destroyed = false;
 
     return {
       detectionSource: sessionDetections.detectionSource,
-      media: preparedMedia.state,
+      media: sessionMedia.state,
       renderer,
 
       appendDetectionFrames(frames) {
@@ -107,7 +174,8 @@ export async function createMediaSession(
       },
 
       getState() {
-        return renderer.getState();
+        rendererState = renderer.getState();
+        return createSessionState();
       },
 
       destroy() {
@@ -117,19 +185,36 @@ export async function createMediaSession(
 
         destroyed = true;
         renderer.destroy();
-        preparedMedia.destroy();
+        rendererState = renderer.getState();
+        sessionMedia.destroy();
+        emitSessionState();
       },
     };
   } catch (error) {
-    preparedMedia.destroy();
+    sessionErrorMessage = getErrorMessage(
+      error,
+      "Unable to create media session.",
+    );
+    emitSessionState();
+    preparedMedia?.destroy();
     preparedDetections?.detectionSource?.destroy?.();
     throw error;
   }
 }
 
+interface PrepareSessionMediaCallbacks {
+  onNormalizationComplete(): void;
+  onNormalizationProgress(progress: {
+    progress: number;
+    processedTime: number;
+  }): void;
+  onNormalizationStart(): void;
+}
+
 async function prepareSessionMedia(
   media: MediaSessionMedia,
   normalize: false | MediaSessionNormalizationOptions | undefined,
+  callbacks: PrepareSessionMediaCallbacks,
 ): Promise<PreparedSessionMedia> {
   if (typeof media === "string") {
     return {
@@ -177,13 +262,22 @@ async function prepareSessionMedia(
 
   const { stream, ...normalizationOptions } = normalize;
 
-  if (stream) {
-    const normalizedMedia = await normalizeMediaProgressively(
-      media,
-      normalizationOptions,
-    );
+  callbacks.onNormalizationStart();
 
-    void normalizedMedia.completion.catch(() => undefined);
+  if (stream) {
+    const normalizedMedia = await normalizeMediaProgressively(media, {
+      ...normalizationOptions,
+      onProgress(progress) {
+        callbacks.onNormalizationProgress(progress);
+        normalizationOptions.onProgress?.(progress);
+      },
+    });
+
+    void normalizedMedia.completion
+      .then(() => {
+        callbacks.onNormalizationComplete();
+      })
+      .catch(() => undefined);
 
     return {
       destroy() {
@@ -198,7 +292,14 @@ async function prepareSessionMedia(
     };
   }
 
-  const normalizedMedia = await normalizeMedia(media, normalizationOptions);
+  const normalizedMedia = await normalizeMedia(media, {
+    ...normalizationOptions,
+    onProgress(progress) {
+      callbacks.onNormalizationProgress(progress);
+      normalizationOptions.onProgress?.(progress);
+    },
+  });
+  callbacks.onNormalizationComplete();
   const objectUrl = URL.createObjectURL(normalizedMedia.blob);
 
   return {
@@ -211,6 +312,14 @@ async function prepareSessionMedia(
       normalizedMedia,
       objectUrl,
     },
+  };
+}
+
+function createEmptyMediaState(): MediaSessionMediaState {
+  return {
+    inputMetadata: null,
+    normalizedMedia: null,
+    objectUrl: null,
   };
 }
 
@@ -265,4 +374,8 @@ function isRendererSource(
   media: Exclude<MediaSessionMedia, string>,
 ): media is MediaRendererSource {
   return typeof (media as MediaRendererSource).open === "function";
+}
+
+function getErrorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
 }

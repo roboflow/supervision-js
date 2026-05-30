@@ -140,6 +140,76 @@ fieldset {
   display: block;
 }
 
+.renderer-viewport__overlay {
+  align-items: center;
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  pointer-events: none;
+  position: absolute;
+  z-index: 2;
+}
+
+.renderer-viewport__overlay-card {
+  backdrop-filter: blur(16px) saturate(1.2);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.1), transparent),
+    rgba(8, 10, 13, 0.76);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 10px;
+  box-shadow:
+    0 18px 48px rgba(0, 0, 0, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  display: grid;
+  gap: 6px;
+  max-width: min(360px, calc(100vw - 48px));
+  min-width: 240px;
+  padding: 14px 16px;
+  text-align: center;
+}
+
+.renderer-viewport__overlay-card strong {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 850;
+  line-height: 1.25;
+}
+
+.renderer-viewport__overlay-card span {
+  color: var(--muted-strong);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.renderer-viewport__overlay-kicker {
+  color: var(--cyan);
+  text-transform: uppercase;
+}
+
+.renderer-viewport__overlay--waiting .renderer-viewport__overlay-kicker {
+  color: var(--amber);
+}
+
+.renderer-viewport__overlay--error .renderer-viewport__overlay-kicker {
+  color: var(--danger);
+}
+
+.renderer-viewport__overlay-progress {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  height: 6px;
+  margin-top: 3px;
+  overflow: hidden;
+}
+
+.renderer-viewport__overlay-progress span {
+  background: linear-gradient(90deg, rgba(103, 232, 249, 0.72), var(--cyan));
+  border-radius: inherit;
+  display: block;
+  height: 100%;
+  width: var(--overlay-progress);
+}
+
 .source-controls {
   background: var(--surface-strong);
   border: 1px solid var(--line);
