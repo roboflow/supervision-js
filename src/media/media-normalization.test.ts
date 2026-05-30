@@ -34,6 +34,7 @@ const mockState = vi.hoisted(() => {
     inputDispose: vi.fn(),
     inputFormat: { mimeType: "video/mp4", name: "MP4" },
     inputMimeType: 'video/mp4; codecs="avc1.42e01e"',
+    appendOnlyWritable: null as WritableStream<Uint8Array> | null,
     appendOnlyStreamTargetConstructor: vi.fn(),
     outputConstructor: vi.fn(),
     outputFormatInstances: [] as string[],
@@ -72,6 +73,7 @@ vi.mock("mediabunny", () => {
 
   class AppendOnlyStreamTarget {
     constructor(writable: WritableStream<Uint8Array>) {
+      normalizationMock.appendOnlyWritable = writable;
       normalizationMock.appendOnlyStreamTargetConstructor(writable);
     }
   }
@@ -158,6 +160,7 @@ vi.mock("mediabunny", () => {
 describe("normalizeMedia", () => {
   beforeEach(() => {
     normalizationMock.blobSourceConstructor.mockClear();
+    normalizationMock.appendOnlyWritable = null;
     normalizationMock.appendOnlyStreamTargetConstructor.mockClear();
     normalizationMock.bufferTargetConstructor.mockClear();
     normalizationMock.canEncodeVideo.mockClear();
@@ -366,6 +369,24 @@ describe("normalizeMedia", () => {
     expect(normalizationMock.inputDispose).toHaveBeenCalledOnce();
   });
 
+  it("does not let a paused renderer stream backpressure progressive normalization", async () => {
+    await normalizeMediaProgressively(
+      new Blob(["source"], { type: "video/mp4" }),
+    );
+
+    const writable = normalizationMock.appendOnlyWritable;
+
+    expect(writable).not.toBeNull();
+
+    const writer = writable!.getWriter();
+    const write = writer.write(new Uint8Array([1, 2, 3]));
+    const writeStatus = await settleStatus(write);
+
+    write.catch(() => undefined);
+
+    expect(writeStatus).toBe("resolved");
+  });
+
   it("rejects already-aborted signals before conversion starts", async () => {
     const controller = new AbortController();
     controller.abort();
@@ -536,3 +557,12 @@ describe("normalizeMedia", () => {
     );
   });
 });
+
+async function settleStatus(promise: Promise<unknown>) {
+  return Promise.race([
+    promise.then(() => "resolved"),
+    new Promise<"pending">((resolve) => {
+      setTimeout(() => resolve("pending"), 25);
+    }),
+  ]);
+}
