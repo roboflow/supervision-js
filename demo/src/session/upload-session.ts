@@ -1,4 +1,5 @@
 import {
+  DetectionFrameSelectionMode,
   MediaNormalizationContainer,
   MediaNormalizationVideoCodec,
   MediaRendererFit,
@@ -96,6 +97,9 @@ export async function createUploadSession(
         buffer: {
           bufferAheadSeconds: UPLOAD_DETECTION_BUFFER_AHEAD_SECONDS,
           bufferBehindSeconds: UPLOAD_DETECTION_BUFFER_BEHIND_SECONDS,
+          frameIndexOriginTime: 0,
+          frameRate: TARGET_UPLOAD_FRAME_RATE,
+          selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
         },
         playbackGate: {
           enabled: true,

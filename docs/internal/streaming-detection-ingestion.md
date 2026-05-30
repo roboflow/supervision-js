@@ -35,11 +35,6 @@ Do not put SAM3, Roboflow authentication, or model-specific response shapes in
 the core package yet. Producers should normalize their output into
 `DetectionFrame` records before handing data to the library.
 
-`DetectionFrame` records are canonical only after they are anchored to the media
-timeline with `mediaTime` and, for sampled video frames, `endTime`. Frame indexes
-may be kept as metadata for diagnostics or ingestion traceability, but the
-renderer should not use frame indexes as its synchronization clock.
-
 ## Current Model
 
 For uploaded media, the demo prepares the media into a renderer-friendly profile,

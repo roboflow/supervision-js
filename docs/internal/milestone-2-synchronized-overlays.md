@@ -13,8 +13,8 @@ data, not an annotation schema, not a `BoundingBox` API, and not a primitive hie
 ## Media-Time Selection
 
 The renderer copies and sorts proof overlay frames once when the proof is
-created. On each newly presented decoded video sample, it selects the overlay
-frame whose `mediaTime` / `endTime` interval contains the sample timestamp.
+created. On each newly presented decoded video sample, it selects the latest
+overlay frame whose `mediaTime` is less than or equal to the sample timestamp.
 
 This means overlay state follows Mediabunny decoded sample timestamps, not
 React state, `requestAnimationFrame()` time alone, or an independent app clock.

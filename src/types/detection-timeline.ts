@@ -8,12 +8,23 @@ export enum DetectionBufferStatus {
   Destroyed = "destroyed",
 }
 
+export enum DetectionFrameSelectionMode {
+  Interval = "interval",
+  NearestFrameIndex = "nearestFrameIndex",
+}
+
+export interface DetectionFrameSelectionOptions {
+  readonly selectionMode?: DetectionFrameSelectionMode;
+  readonly frameRate?: number;
+  readonly frameIndexOriginTime?: number;
+}
+
 export interface DetectionFrameSourceVersionRange {
   readonly startTime: number;
   readonly endTime: number;
 }
 
-export interface DetectionBufferOptions {
+export interface DetectionBufferOptions extends DetectionFrameSelectionOptions {
   readonly bufferAheadSeconds?: number;
   readonly bufferBehindSeconds?: number;
   readonly playbackGate?: DetectionPlaybackGateOptions;

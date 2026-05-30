@@ -45,8 +45,8 @@ endTime = mediaTime + decoded sample duration
 ```
 
 Valid frame indexes are `0` through `269`. The renderer uses
-the `mediaTime` / `endTime` interval as the sync source of truth. `frameIndex`
-is retained only as metadata for diagnostics and fixture review.
+`DetectionFrameSelectionMode.NearestFrameIndex` with `frameRate = 30`, so a
+media time resolves to the nearest deterministic 30 fps frame slot.
 
 Frames were extracted by sampling the center of each 30 fps slot. This avoids
 selecting the previous decoded sample at slot boundaries where WebM millisecond

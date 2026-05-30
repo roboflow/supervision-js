@@ -19,9 +19,9 @@ export interface PreparedUploadMedia {
   readonly frameCount: number;
   readonly frameRate: number;
   readonly height: number;
-  readonly inferenceSource: Blob;
   readonly kind: UploadedMediaKind;
   readonly normalizationCompletion: Promise<void> | null;
+  readonly sourceFile: File | null;
   readonly statusLabel: string;
   readonly width: number;
 }
@@ -53,9 +53,9 @@ export function createPreparedUploadedVideoMedia(options: {
     frameCount: Math.max(1, Math.ceil(duration * TARGET_UPLOAD_FRAME_RATE)),
     frameRate: TARGET_UPLOAD_FRAME_RATE,
     height,
-    inferenceSource: options.file,
     kind: UploadedMediaKind.Video,
     normalizationCompletion: getNormalizationCompletion(options.media),
+    sourceFile: options.file,
     statusLabel: `upload stream-normalizing WebM ${TARGET_UPLOAD_FRAME_RATE}fps | ${formatMbps(
       NORMALIZED_UPLOAD_VIDEO_BITRATE,
     )}`,
@@ -90,9 +90,9 @@ export async function prepareUploadedImageMedia(options: {
       frameCount: 1,
       frameRate: TARGET_UPLOAD_FRAME_RATE,
       height: canvas.height,
-      inferenceSource: blob,
       kind: UploadedMediaKind.Image,
       normalizationCompletion: null,
+      sourceFile: null,
       statusLabel: "image upload encoded as one-frame WebM",
       width: canvas.width,
     };
@@ -109,11 +109,15 @@ export async function* extractInferenceFrameBatches(options: {
 }): AsyncGenerator<readonly ExtractedInferenceFrame[], void, unknown> {
   const { ALL_FORMATS, BlobSource, CanvasSink, Input, WEBM } =
     await import("mediabunny");
+  const sourceBlob = options.media.blob ?? options.media.sourceFile;
+
+  if (!sourceBlob) {
+    throw new Error("Prepared upload media has no readable inference source.");
+  }
 
   const input = new Input({
-    formats:
-      options.media.kind === UploadedMediaKind.Image ? [WEBM] : ALL_FORMATS,
-    source: new BlobSource(options.media.inferenceSource),
+    formats: options.media.blob ? [WEBM] : ALL_FORMATS,
+    source: new BlobSource(sourceBlob),
   });
 
   try {
@@ -127,37 +131,55 @@ export async function* extractInferenceFrameBatches(options: {
     const batchSize = options.batchSize ?? DEFAULT_FRAME_BATCH_SIZE;
     const quality = options.quality ?? DEFAULT_JPEG_QUALITY;
 
-    let frameIndex = 0;
-    let batch: ExtractedInferenceFrame[] = [];
-
-    for await (const wrappedCanvas of sink.canvases(
-      0,
-      Number.POSITIVE_INFINITY,
-      { skipLiveWait: true },
-    )) {
+    for (
+      let startFrameIndex = 0;
+      startFrameIndex < options.media.frameCount;
+      startFrameIndex += batchSize
+    ) {
       throwIfAborted(options.signal);
-
-      if (frameIndex >= options.media.frameCount) {
-        break;
-      }
-
-      batch.push(
-        await createExtractedInferenceFrame({
-          frameIndex,
-          quality,
-          wrappedCanvas,
-        }),
+      const count = Math.min(
+        batchSize,
+        options.media.frameCount - startFrameIndex,
       );
-      frameIndex += 1;
+      const frameIndexes = Array.from(
+        { length: count },
+        (_, offset) => startFrameIndex + offset,
+      );
+      const sampleQueryTimes = frameIndexes.map(
+        (frameIndex) => (frameIndex + 0.5) / options.media.frameRate,
+      );
+      const frames: ExtractedInferenceFrame[] = [];
+      let frameOffset = 0;
 
-      if (batch.length >= batchSize) {
-        yield batch;
-        batch = [];
+      for await (const wrappedCanvas of sink.canvasesAtTimestamps(
+        sampleQueryTimes,
+        { skipLiveWait: true },
+      )) {
+        throwIfAborted(options.signal);
+        const frameIndex = frameIndexes[frameOffset];
+
+        frameOffset += 1;
+
+        if (frameIndex === undefined) {
+          break;
+        }
+
+        if (!wrappedCanvas) {
+          throw new Error(`Unable to decode uploaded frame #${frameIndex}.`);
+        }
+
+        frames.push(
+          await createExtractedInferenceFrame({
+            frameIndex,
+            quality,
+            wrappedCanvas,
+          }),
+        );
       }
-    }
 
-    if (batch.length > 0) {
-      yield batch;
+      if (frames.length > 0) {
+        yield frames;
+      }
     }
   } finally {
     input.dispose();

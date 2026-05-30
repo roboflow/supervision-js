@@ -33,6 +33,7 @@ export type {
 } from "#types/media-preparation";
 export {
   DetectionBufferStatus,
+  DetectionFrameSelectionMode,
   type BufferedDetectionTimeline,
   type ColdDetectionFrameStore,
   type ColdDetectionFrameStoreLoadOptions,
@@ -46,6 +47,7 @@ export {
   type DetectionFrameChunkDescriptor,
   type DetectionFrameChunkFetch,
   type DetectionFrameChunkManifest,
+  type DetectionFrameSelectionOptions,
   type DetectionFrameSource,
   type DetectionFrameSourceVersionRange,
   type DetectionPlaybackGateOptions,
