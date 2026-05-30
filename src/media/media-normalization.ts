@@ -185,8 +185,10 @@ export async function normalizeMediaProgressively(
   });
   let conversion: MediabunnyConversion | undefined;
   let abortConversion: (() => void) | undefined;
+  const outputStream = new TransformStream<Uint8Array, Uint8Array>();
+  const rendererReadable = outputStream.readable;
+  const outputWriter = outputStream.writable.getWriter();
   const chunks: Uint8Array<ArrayBuffer>[] = [];
-  const rendererOutput = createProgressiveRendererStream(chunks);
   let bytesWritten = 0;
 
   try {
@@ -198,15 +200,16 @@ export async function normalizeMediaProgressively(
         async write(chunk) {
           const stableChunk = new Uint8Array(chunk);
 
-          rendererOutput.append(stableChunk);
+          chunks.push(stableChunk);
           bytesWritten += stableChunk.byteLength;
           options.onOutputProgress?.({ bytesWritten });
+          await outputWriter.write(stableChunk);
         },
-        close() {
-          rendererOutput.close();
+        async close() {
+          await outputWriter.close();
         },
-        abort(error) {
-          rendererOutput.abort(error);
+        async abort(error) {
+          await outputWriter.abort(error);
         },
       }),
     );
@@ -256,7 +259,7 @@ export async function normalizeMediaProgressively(
       input,
       inputMetadata,
       mimeType,
-      abortOutput: rendererOutput.abort,
+      outputWriter,
       removeAbortListener() {
         if (options.signal && abortConversion) {
           options.signal.removeEventListener("abort", abortConversion);
@@ -276,7 +279,7 @@ export async function normalizeMediaProgressively(
       mimeType,
       rendererSource: createMediabunnyMediaRendererSource({
         formats: [WEBM],
-        source: new ReadableStreamSource(rendererOutput.readable, {
+        source: new ReadableStreamSource(rendererReadable, {
           maxCacheSize: 512 * 2 ** 20,
         }),
       }),
@@ -286,7 +289,11 @@ export async function normalizeMediaProgressively(
       options.signal.removeEventListener("abort", abortConversion);
     }
     input.dispose();
-    rendererOutput.abort(error);
+    try {
+      await outputWriter.abort(error);
+    } catch {
+      // The stream may already be closed if setup failed late.
+    }
     throw error;
   }
 }
@@ -297,78 +304,6 @@ function throwIfAborted(signal: AbortSignal | undefined) {
   }
 }
 
-function createProgressiveRendererStream(chunks: Uint8Array<ArrayBuffer>[]): {
-  readonly readable: ReadableStream<Uint8Array<ArrayBuffer>>;
-  append(chunk: Uint8Array<ArrayBuffer>): void;
-  close(): void;
-  abort(error: unknown): void;
-} {
-  let controller:
-    | ReadableStreamDefaultController<Uint8Array<ArrayBuffer>>
-    | undefined;
-  let cursor = 0;
-  let closed = false;
-  let errored = false;
-
-  const pump = () => {
-    if (!controller || errored) {
-      return;
-    }
-
-    while ((controller.desiredSize ?? 0) > 0 && cursor < chunks.length) {
-      controller.enqueue(chunks[cursor]!);
-      cursor += 1;
-    }
-
-    if (closed && cursor >= chunks.length) {
-      controller.close();
-      controller = undefined;
-    }
-  };
-  const readable = new ReadableStream<Uint8Array<ArrayBuffer>>({
-    cancel() {
-      controller = undefined;
-    },
-    pull(nextController) {
-      controller = nextController;
-      pump();
-    },
-    start(nextController) {
-      controller = nextController;
-      pump();
-    },
-  });
-
-  return {
-    abort(error) {
-      if (errored) {
-        return;
-      }
-
-      errored = true;
-      controller?.error(error);
-      controller = undefined;
-    },
-    append(chunk) {
-      if (closed || errored) {
-        return;
-      }
-
-      chunks.push(chunk);
-      pump();
-    },
-    close() {
-      if (closed || errored) {
-        return;
-      }
-
-      closed = true;
-      pump();
-    },
-    readable,
-  };
-}
-
 async function executeProgressiveConversion(options: {
   readonly chunks: readonly Uint8Array<ArrayBuffer>[];
   readonly container: MediaNormalizationContainer;
@@ -376,7 +311,7 @@ async function executeProgressiveConversion(options: {
   readonly input: { dispose(): void };
   readonly inputMetadata: MediaNormalizationInputMetadata;
   readonly mimeType: string;
-  readonly abortOutput: (error: unknown) => void;
+  readonly outputWriter: WritableStreamDefaultWriter<Uint8Array>;
   readonly removeAbortListener: () => void;
   readonly signal?: AbortSignal;
 }): Promise<NormalizedMedia> {
@@ -384,7 +319,7 @@ async function executeProgressiveConversion(options: {
     try {
       await options.conversion.execute();
     } catch (error: unknown) {
-      options.abortOutput(error);
+      await abortProgressiveOutput(options.outputWriter, error);
 
       if (isConversionAbortError(error, options.signal)) {
         throw createMediaNormalizationAbortError();
@@ -406,6 +341,17 @@ async function executeProgressiveConversion(options: {
   } finally {
     options.removeAbortListener();
     options.input.dispose();
+  }
+}
+
+async function abortProgressiveOutput(
+  outputWriter: WritableStreamDefaultWriter<Uint8Array>,
+  error: unknown,
+) {
+  try {
+    await outputWriter.abort(error);
+  } catch {
+    // The target may have already closed or aborted the stream.
   }
 }
 
