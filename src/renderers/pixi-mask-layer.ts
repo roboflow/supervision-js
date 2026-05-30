@@ -6,6 +6,7 @@ import {
 import type { BufferedDetectionTimeline } from "#types/detection-timeline";
 import type { MaskStyle } from "#types/mask-style";
 import type { RenderPreparationOptions } from "#types/render-preparation";
+import { resolveMaskStyleOpacity } from "#utils/mask-style";
 import type {
   ImageSource as PixiImageSource,
   Sprite as PixiSprite,
@@ -50,7 +51,7 @@ export function createPixiMaskLayer(options: {
   let maskSprite: PixiSprite | undefined;
   let activeFrameKey: string | null = null;
   let activeFrameMediaTime: number | null = null;
-  let maskOpacity = resolveMaskOpacity(options.maskStyle);
+  let maskOpacity = resolveMaskStyleOpacity(options.maskStyle);
   let visibleMaskMediaTime: number | null = null;
   let isDestroyed = false;
   const maskTextures = new Map<string, PixiTexture>();
@@ -127,7 +128,7 @@ export function createPixiMaskLayer(options: {
 
     setMaskStyle(nextMaskStyle) {
       if (nextMaskStyle !== undefined) {
-        maskOpacity = resolveMaskOpacity(nextMaskStyle);
+        maskOpacity = resolveMaskStyleOpacity(nextMaskStyle);
         applyMaskOpacity();
       }
 
@@ -224,14 +225,4 @@ export function createPixiMaskLayer(options: {
 
     maskTextures.clear();
   }
-}
-
-function resolveMaskOpacity(maskStyle: MaskStyle | null | undefined) {
-  const opacity = maskStyle?.opacity;
-
-  if (opacity === undefined) {
-    return 1;
-  }
-
-  return Number.isFinite(opacity) ? Math.max(0, Math.min(opacity, 1)) : 1;
 }

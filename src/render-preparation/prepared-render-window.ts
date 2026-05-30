@@ -10,6 +10,7 @@ import {
   RenderPreparationArtifactKind,
   type RenderPreparationOptions,
 } from "#types/render-preparation";
+import { canReuseMaskStyleArtifacts } from "#utils/mask-style";
 
 const DEFAULT_MASK_FRAME_CACHE_SIZE = 24;
 const DEFAULT_MASK_PREFETCH_FRAME_COUNT = 12;
@@ -232,7 +233,7 @@ export function createPreparedRenderWindow(options: {
 
       maskStyle = nextMaskStyle;
 
-      if (canReusePreparedMaskFrames(previousMaskStyle, nextMaskStyle)) {
+      if (canReuseMaskStyleArtifacts(previousMaskStyle, nextMaskStyle)) {
         emitDiagnostics();
         return;
       }
@@ -326,21 +327,6 @@ export function createPreparedRenderWindow(options: {
 
     return PreparedRenderFrameMaskStatus.Pending;
   }
-}
-
-function canReusePreparedMaskFrames(
-  previousMaskStyle: MaskStyle | null,
-  nextMaskStyle: MaskStyle | null,
-) {
-  if (previousMaskStyle === nextMaskStyle) {
-    return true;
-  }
-
-  return (
-    previousMaskStyle?.artifactKey !== undefined &&
-    nextMaskStyle?.artifactKey !== undefined &&
-    previousMaskStyle.artifactKey === nextMaskStyle.artifactKey
-  );
 }
 
 function resolveMaskInstructions(options: {
