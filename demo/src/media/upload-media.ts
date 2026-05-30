@@ -19,7 +19,7 @@ export interface PreparedUploadMedia {
   readonly frameCount: number;
   readonly frameRate: number;
   readonly height: number;
-  readonly inferenceSource: Promise<Blob>;
+  readonly inferenceSource: Blob;
   readonly kind: UploadedMediaKind;
   readonly normalizationCompletion: Promise<void> | null;
   readonly statusLabel: string;
@@ -34,6 +34,7 @@ export interface ExtractedInferenceFrame {
 }
 
 export function createPreparedUploadedVideoMedia(options: {
+  readonly file: File;
   readonly media: MediaSessionMediaState;
 }): PreparedUploadMedia {
   const metadata = options.media.inputMetadata;
@@ -52,7 +53,7 @@ export function createPreparedUploadedVideoMedia(options: {
     frameCount: Math.max(1, Math.ceil(duration * TARGET_UPLOAD_FRAME_RATE)),
     frameRate: TARGET_UPLOAD_FRAME_RATE,
     height,
-    inferenceSource: getNormalizedInferenceSource(options.media),
+    inferenceSource: options.file,
     kind: UploadedMediaKind.Video,
     normalizationCompletion: getNormalizationCompletion(options.media),
     statusLabel: `upload stream-normalizing WebM ${TARGET_UPLOAD_FRAME_RATE}fps | ${formatMbps(
@@ -89,7 +90,7 @@ export async function prepareUploadedImageMedia(options: {
       frameCount: 1,
       frameRate: TARGET_UPLOAD_FRAME_RATE,
       height: canvas.height,
-      inferenceSource: Promise.resolve(blob),
+      inferenceSource: blob,
       kind: UploadedMediaKind.Image,
       normalizationCompletion: null,
       statusLabel: "image upload encoded as one-frame WebM",
@@ -106,12 +107,13 @@ export async function* extractInferenceFrameBatches(options: {
   readonly quality?: number;
   readonly signal?: AbortSignal;
 }): AsyncGenerator<readonly ExtractedInferenceFrame[], void, unknown> {
-  const { BlobSource, CanvasSink, Input, WEBM } = await import("mediabunny");
-  const sourceBlob = await options.media.inferenceSource;
+  const { ALL_FORMATS, BlobSource, CanvasSink, Input, WEBM } =
+    await import("mediabunny");
 
   const input = new Input({
-    formats: [WEBM],
-    source: new BlobSource(sourceBlob),
+    formats:
+      options.media.kind === UploadedMediaKind.Image ? [WEBM] : ALL_FORMATS,
+    source: new BlobSource(options.media.inferenceSource),
   });
 
   try {
@@ -274,25 +276,6 @@ function getNormalizationCompletion(media: MediaSessionMediaState) {
   }
 
   return null;
-}
-
-async function getNormalizedInferenceSource(
-  media: MediaSessionMediaState,
-): Promise<Blob> {
-  const normalizedMedia = media.normalizedMedia;
-
-  if (!normalizedMedia) {
-    throw new Error("Uploaded video session did not expose normalized media.");
-  }
-
-  if ("completion" in normalizedMedia) {
-    // Inference samples the same normalized WebM artifact the renderer uses.
-    const completedMedia = await normalizedMedia.completion;
-
-    return completedMedia.blob;
-  }
-
-  return normalizedMedia.blob;
 }
 
 function formatMbps(bitrate: number) {

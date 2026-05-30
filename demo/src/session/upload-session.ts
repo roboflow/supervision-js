@@ -155,6 +155,7 @@ export async function createUploadSession(
 
   if (!isImageUpload) {
     preparedMedia = createPreparedUploadedVideoMedia({
+      file: options.uploadRun.file,
       media: session.media,
     });
   }
@@ -188,10 +189,7 @@ export async function createUploadSession(
     processedRanges: [],
     processingRanges: [],
     status: "running",
-    statusLabel:
-      preparedMedia.kind === UploadedMediaKind.Video
-        ? "waiting for normalized media before SAM3"
-        : "running SAM3",
+    statusLabel: "running SAM3",
     totalFrames: preparedMedia.frameCount,
   });
   watchNormalizationCompletion({
