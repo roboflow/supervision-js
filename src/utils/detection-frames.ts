@@ -3,23 +3,11 @@ import {
   type DetectionFrame,
   type DetectionMask,
 } from "#types/detections";
-import {
-  DetectionFrameSelectionMode,
-  type DetectionFrameSelectionOptions,
-} from "#types/detection-timeline";
-
-const FRAME_INDEX_EPSILON = 1e-6;
-const MAX_PREVIOUS_FRAME_INDEX_DISTANCE = 1;
 
 export interface DecodedDetectionMask {
   readonly width: number;
   readonly height: number;
   readonly data: Uint8Array;
-}
-
-interface DisplayedFrameIndexSelection {
-  readonly isApplicable: boolean;
-  readonly frame: DetectionFrame | undefined;
 }
 
 export function copySortedDetectionFrames(
@@ -53,21 +41,7 @@ export function filterDetectionFramesForRange(
 export function selectDetectionFrame(
   detectionFrames: readonly DetectionFrame[],
   mediaTime: number,
-  options: DetectionFrameSelectionOptions = {},
 ): DetectionFrame | undefined {
-  if (options.selectionMode === DetectionFrameSelectionMode.FrameIndex) {
-    const selection = selectDisplayedFrameIndexDetectionFrame(
-      detectionFrames,
-      mediaTime,
-      options.frameRate,
-      options.frameIndexOriginTime,
-    );
-
-    if (selection.isApplicable) {
-      return selection.frame;
-    }
-  }
-
   return selectIntervalDetectionFrame(detectionFrames, mediaTime);
 }
 
@@ -132,65 +106,6 @@ function selectIntervalDetectionFrame(
   return selectedFrame && isDetectionFrameActive(selectedFrame, mediaTime)
     ? selectedFrame
     : undefined;
-}
-
-function selectDisplayedFrameIndexDetectionFrame(
-  detectionFrames: readonly DetectionFrame[],
-  mediaTime: number,
-  frameRate: number | undefined,
-  frameIndexOriginTime: number | undefined,
-): DisplayedFrameIndexSelection {
-  if (!frameRate || !Number.isFinite(frameRate) || frameRate <= 0) {
-    return { frame: undefined, isApplicable: false };
-  }
-
-  const firstIndexedFrame = detectionFrames.find(
-    (frame) => frame.frameIndex !== undefined,
-  );
-
-  if (!firstIndexedFrame || firstIndexedFrame.frameIndex === undefined) {
-    return { frame: undefined, isApplicable: false };
-  }
-
-  const originTime =
-    frameIndexOriginTime !== undefined
-      ? frameIndexOriginTime
-      : firstIndexedFrame.mediaTime - firstIndexedFrame.frameIndex / frameRate;
-  const targetFrameIndex = Math.floor(
-    (mediaTime - originTime) * frameRate + FRAME_INDEX_EPSILON,
-  );
-  let nearestFrame: DetectionFrame | undefined;
-  let nearestDistance = Number.POSITIVE_INFINITY;
-
-  for (const frame of detectionFrames) {
-    if (frame.frameIndex === undefined) {
-      continue;
-    }
-
-    if (frame.frameIndex > targetFrameIndex) {
-      continue;
-    }
-
-    const distance = targetFrameIndex - frame.frameIndex;
-
-    if (
-      distance < nearestDistance ||
-      (distance === nearestDistance &&
-        nearestFrame?.frameIndex !== undefined &&
-        frame.mediaTime > nearestFrame.mediaTime)
-    ) {
-      nearestFrame = frame;
-      nearestDistance = distance;
-    }
-  }
-
-  return {
-    frame:
-      nearestDistance <= MAX_PREVIOUS_FRAME_INDEX_DISTANCE
-        ? nearestFrame
-        : undefined,
-    isApplicable: true,
-  };
 }
 
 function isDetectionFrameActive(frame: DetectionFrame, mediaTime: number) {

@@ -22,7 +22,6 @@ type PackageEntrypoint = typeof import("./index");
 let BaseBoxStyle: PackageEntrypoint["BaseBoxStyle"];
 let BaseMaskStyle: PackageEntrypoint["BaseMaskStyle"];
 let DetectionBufferStatus: PackageEntrypoint["DetectionBufferStatus"];
-let DetectionFrameSelectionMode: PackageEntrypoint["DetectionFrameSelectionMode"];
 let DetectionMaskEncoding: PackageEntrypoint["DetectionMaskEncoding"];
 let RoundedBoxStyle: PackageEntrypoint["RoundedBoxStyle"];
 let MediaRendererPlaybackState: PackageEntrypoint["MediaRendererPlaybackState"];
@@ -35,7 +34,6 @@ describe("package entrypoint", () => {
     BaseBoxStyle = entrypoint.BaseBoxStyle;
     BaseMaskStyle = entrypoint.BaseMaskStyle;
     DetectionBufferStatus = entrypoint.DetectionBufferStatus;
-    DetectionFrameSelectionMode = entrypoint.DetectionFrameSelectionMode;
     DetectionMaskEncoding = entrypoint.DetectionMaskEncoding;
     RoundedBoxStyle = entrypoint.RoundedBoxStyle;
     MediaRendererPlaybackState = entrypoint.MediaRendererPlaybackState;
@@ -50,7 +48,6 @@ describe("package entrypoint", () => {
       "BaseMaskStyle",
       "BoxShape",
       "DetectionBufferStatus",
-      "DetectionFrameSelectionMode",
       "DetectionMaskEncoding",
       "MediaNormalizationAudioCodec",
       "MediaNormalizationContainer",
@@ -124,10 +121,6 @@ describe("package entrypoint", () => {
       Idle: "idle",
       Loading: "loading",
       Ready: "ready",
-    });
-    expect(DetectionFrameSelectionMode).toEqual({
-      Interval: "interval",
-      FrameIndex: "frameIndex",
     });
     expect(entrypoint.DetectionMaskEncoding).toEqual({
       CompressedRle: "compressedRle",

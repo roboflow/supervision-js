@@ -1,5 +1,4 @@
 import {
-  DetectionFrameSelectionMode,
   MediaRendererFit,
   createMediaSession,
   type MediaSession,
@@ -67,9 +66,6 @@ export async function createBasketballSession(
         buffer: {
           bufferAheadSeconds: UPLOAD_DETECTION_BUFFER_AHEAD_SECONDS,
           bufferBehindSeconds: UPLOAD_DETECTION_BUFFER_BEHIND_SECONDS,
-          frameIndexOriginTime: 0,
-          frameRate: manifest.inference.frameRate,
-          selectionMode: DetectionFrameSelectionMode.FrameIndex,
         },
         source: detectionSource.detectionSource,
       },

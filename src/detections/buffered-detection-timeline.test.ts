@@ -2,10 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createArrayDetectionFrameSource } from "#detections/array-detection-frame-source";
 import { createBufferedDetectionTimeline } from "#detections/buffered-detection-timeline";
-import {
-  DetectionBufferStatus,
-  DetectionFrameSelectionMode,
-} from "#types/detection-timeline";
+import { DetectionBufferStatus } from "#types/detection-timeline";
 import type { DetectionFrame } from "#types/detections";
 
 const frames: DetectionFrame[] = [
@@ -68,32 +65,31 @@ describe("buffered detection timeline", () => {
     );
   });
 
-  it("passes displayed frame-index selection options to hot-buffer frame lookup", async () => {
+  it("selects hot-buffer frames by media-time intervals", async () => {
     const indexedFrames: DetectionFrame[] = [
       {
         detections: [],
-        endTime: 52 / 30,
+        endTime: 2,
         frameIndex: 51,
-        mediaTime: 51 / 30,
+        mediaTime: 1,
       },
       {
         detections: [],
-        endTime: 53 / 30,
+        endTime: 3,
         frameIndex: 52,
-        mediaTime: 52 / 30,
+        mediaTime: 2,
       },
     ];
     const timeline = createBufferedDetectionTimeline({
       bufferAheadSeconds: 1,
       bufferBehindSeconds: 1,
-      frameRate: 30,
-      selectionMode: DetectionFrameSelectionMode.FrameIndex,
       source: createArrayDetectionFrameSource(indexedFrames),
     });
 
-    await timeline.prepare(1.73);
+    await timeline.prepare(1.5);
 
-    expect(timeline.selectFrame(1.73)?.frameIndex).toBe(51);
+    expect(timeline.selectFrame(1.5)?.frameIndex).toBe(51);
+    expect(timeline.selectFrame(2.5)?.frameIndex).toBe(52);
   });
 
   it("keeps the last good buffer and reports prefetch errors", async () => {

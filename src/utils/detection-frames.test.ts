@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 
-import { DetectionFrameSelectionMode } from "#types/detection-timeline";
 import { DetectionMaskEncoding, type DetectionFrame } from "#types/detections";
 import {
   copySortedDetectionFrames,
@@ -21,134 +20,24 @@ describe("detection frame utilities", () => {
     expect(selectDetectionFrame(frames, 3)?.mediaTime).toBe(3);
   });
 
-  it("selects frame-indexed detections on the displayed frame grid", () => {
+  it("uses media-time intervals instead of frame-index proximity", () => {
     const frames: DetectionFrame[] = [
       {
         detections: [],
-        endTime: 52 / 30,
-        frameIndex: 51,
-        mediaTime: 51 / 30,
+        endTime: 2,
+        frameIndex: 100,
+        mediaTime: 1,
       },
       {
         detections: [],
-        endTime: 53 / 30,
-        frameIndex: 52,
-        mediaTime: 52 / 30,
+        endTime: 3,
+        frameIndex: 1,
+        mediaTime: 2,
       },
     ];
 
-    expect(selectDetectionFrame(frames, 1.73)?.frameIndex).toBe(51);
-    expect(
-      selectDetectionFrame(frames, 1.73, {
-        frameRate: 30,
-        selectionMode: DetectionFrameSelectionMode.FrameIndex,
-      })?.frameIndex,
-    ).toBe(51);
-  });
-
-  it("does not select a future indexed frame before it is displayed", () => {
-    const frames = createIndexedFrameSequence({
-      count: 3,
-      frameRate: 30,
-      originTime: 0,
-    });
-
-    expect(
-      selectDetectionFrame(frames, 1 / 30 - 1e-4, {
-        frameRate: 30,
-        selectionMode: DetectionFrameSelectionMode.FrameIndex,
-      })?.frameIndex,
-    ).toBe(0);
-  });
-
-  it("uses a previous available frame index for a one-frame detection gap", () => {
-    const frames: DetectionFrame[] = [
-      {
-        detections: [],
-        endTime: 149 / 30,
-        frameIndex: 148,
-        mediaTime: 148 / 30,
-      },
-      {
-        detections: [],
-        endTime: 151 / 30,
-        frameIndex: 150,
-        mediaTime: 150 / 30,
-      },
-    ];
-
-    expect(
-      selectDetectionFrame(frames, 149 / 30, {
-        frameRate: 30,
-        selectionMode: DetectionFrameSelectionMode.FrameIndex,
-      })?.frameIndex,
-    ).toBe(148);
-  });
-
-  it("does not use future indexed frames to fill a missing current frame", () => {
-    const frames: DetectionFrame[] = [
-      {
-        detections: [],
-        endTime: 151 / 30,
-        frameIndex: 150,
-        mediaTime: 150 / 30,
-      },
-    ];
-
-    expect(
-      selectDetectionFrame(frames, 149 / 30, {
-        frameRate: 30,
-        selectionMode: DetectionFrameSelectionMode.FrameIndex,
-      }),
-    ).toBeUndefined();
-  });
-
-  it("uses an explicit frame-index origin when buffered media times are rounded", () => {
-    const frames: DetectionFrame[] = [
-      {
-        detections: [],
-        endTime: 48 / 30,
-        frameIndex: 47,
-        mediaTime: 1.567,
-      },
-      {
-        detections: [],
-        endTime: 49 / 30,
-        frameIndex: 48,
-        mediaTime: 1.6,
-      },
-    ];
-
-    expect(
-      selectDetectionFrame(frames, (47.5 + 1e-8) / 30, {
-        frameIndexOriginTime: 0,
-        frameRate: 30,
-        selectionMode: DetectionFrameSelectionMode.FrameIndex,
-      })?.frameIndex,
-    ).toBe(47);
-  });
-
-  it("keeps frame-indexed detections aligned when sample timestamps have a non-zero origin", () => {
-    const frames = createIndexedFrameSequence({
-      count: 4,
-      frameRate: 30,
-      originTime: 0.015,
-    });
-
-    expect(
-      selectDetectionFrame(frames, 0.015 + 2 / 30 - 1e-4, {
-        frameIndexOriginTime: 0.015,
-        frameRate: 30,
-        selectionMode: DetectionFrameSelectionMode.FrameIndex,
-      })?.frameIndex,
-    ).toBe(1);
-    expect(
-      selectDetectionFrame(frames, 0.015 + 2 / 30, {
-        frameIndexOriginTime: 0.015,
-        frameRate: 30,
-        selectionMode: DetectionFrameSelectionMode.FrameIndex,
-      })?.frameIndex,
-    ).toBe(2);
+    expect(selectDetectionFrame(frames, 1.5)?.frameIndex).toBe(100);
+    expect(selectDetectionFrame(frames, 2.5)?.frameIndex).toBe(1);
   });
 
   it("selects drifted interval detections from the media timestamp reference", () => {
@@ -170,22 +59,17 @@ describe("detection frame utilities", () => {
     expect(selectDetectionFrame(frames, 12)?.frameIndex).toBe(360);
   });
 
-  it("does not fall back to a stale interval frame when indexed frames are outside tolerance", () => {
+  it("does not fall back to a stale frame after its interval ends", () => {
     const frames: DetectionFrame[] = [
       {
         detections: [],
-        endTime: 30,
+        endTime: 1,
         frameIndex: 0,
         mediaTime: 0,
       },
     ];
 
-    expect(
-      selectDetectionFrame(frames, 10 / 30, {
-        frameRate: 30,
-        selectionMode: DetectionFrameSelectionMode.FrameIndex,
-      }),
-    ).toBeUndefined();
+    expect(selectDetectionFrame(frames, 1)).toBeUndefined();
   });
 
   it("filters frames that overlap a load range", () => {
@@ -253,23 +137,6 @@ describe("detection frame utilities", () => {
     });
   });
 });
-
-function createIndexedFrameSequence(options: {
-  readonly count: number;
-  readonly frameRate: number;
-  readonly originTime: number;
-}) {
-  return Array.from({ length: options.count }, (_, frameIndex) => {
-    const mediaTime = options.originTime + frameIndex / options.frameRate;
-
-    return {
-      detections: [],
-      endTime: mediaTime + 1 / options.frameRate,
-      frameIndex,
-      mediaTime,
-    } satisfies DetectionFrame;
-  });
-}
 
 function encodeCompressedRleCounts(counts: readonly number[]) {
   return counts

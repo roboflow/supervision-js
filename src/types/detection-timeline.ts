@@ -8,31 +8,12 @@ export enum DetectionBufferStatus {
   Destroyed = "destroyed",
 }
 
-export enum DetectionFrameSelectionMode {
-  /**
-   * Select the detection frame whose media-time interval contains the rendered
-   * media timestamp.
-   */
-  Interval = "interval",
-  /**
-   * Select the displayed frame index at or before the rendered media timestamp.
-   * This is for indexed external timelines and must not select future frames.
-   */
-  FrameIndex = "frameIndex",
-}
-
-export interface DetectionFrameSelectionOptions {
-  readonly selectionMode?: DetectionFrameSelectionMode;
-  readonly frameRate?: number;
-  readonly frameIndexOriginTime?: number;
-}
-
 export interface DetectionFrameSourceVersionRange {
   readonly startTime: number;
   readonly endTime: number;
 }
 
-export interface DetectionBufferOptions extends DetectionFrameSelectionOptions {
+export interface DetectionBufferOptions {
   readonly bufferAheadSeconds?: number;
   readonly bufferBehindSeconds?: number;
   readonly playbackGate?: DetectionPlaybackGateOptions;

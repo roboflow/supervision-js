@@ -186,7 +186,7 @@ export function createBufferedDetectionTimeline(
         return undefined;
       }
 
-      return selectDetectionFrame(buffer, mediaTime, options);
+      return selectDetectionFrame(buffer, mediaTime);
     },
 
     getBufferedFrames() {
