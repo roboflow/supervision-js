@@ -301,16 +301,16 @@ export function createMediaPlaybackController(options: {
 
     if (sample) {
       try {
-        if (options.waitForSample) {
-          options.onWaiting?.();
-          await options.waitForSample(sample);
+        const didWait = options.waitForSample
+          ? await waitForSampleReadiness(sample)
+          : false;
 
-          if (!isPlaybackRunActive(runId)) {
-            sample.close();
-            return;
-          }
+        if (!isPlaybackRunActive(runId)) {
+          sample.close();
+          return;
+        }
 
-          options.onResume?.();
+        if (didWait) {
           playbackOriginMediaTime = sample.timestamp;
           playbackOriginNow = performance.now();
         }
@@ -326,6 +326,31 @@ export function createMediaPlaybackController(options: {
 
     startSamplePrefetch(runId);
     schedulePlaybackFrame(runId);
+  };
+
+  const waitForSampleReadiness = async (sample: DecodedVideoSample) => {
+    if (!options.waitForSample) {
+      return false;
+    }
+
+    let didNotifyWaiting = false;
+    const waitingTimer = setTimeout(() => {
+      didNotifyWaiting = true;
+      options.onWaiting?.();
+    }, 0);
+
+    try {
+      await options.waitForSample(sample);
+    } finally {
+      clearTimeout(waitingTimer);
+    }
+
+    if (!didNotifyWaiting) {
+      return false;
+    }
+
+    options.onResume?.();
+    return true;
   };
 
   return {

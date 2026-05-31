@@ -42,6 +42,7 @@ export interface RenderPreparationMaskFrameOptions {
 
 export interface RenderPreparationPlaybackGateOptions {
   readonly enabled?: boolean;
+  readonly minimumAheadSeconds?: number;
   readonly requiredAheadSeconds?: number;
 }
 

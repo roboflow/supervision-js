@@ -494,6 +494,57 @@ describe("prepared render window", () => {
     }
   });
 
+  it("does not wait when prepared lookahead remains above the low watermark", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const fakeWorker = createFakeMaskPreparationWorker({
+        autoComplete: false,
+      });
+      const renderWindow = createPreparedRenderWindow({
+        detectionTimeline: createTimeline(manyFrames),
+        maskStyle: new BaseMaskStyle(),
+        renderPreparation: {
+          maskFrame: {
+            maxPendingFrameCount: 4,
+            prefetchFrameCount: 4,
+            scheduleBatchSize: 4,
+            scanIntervalSeconds: 0,
+            workerCount: 1,
+          },
+          mode: RenderPreparationMode.Worker,
+          workerFactory: {
+            createWorker: () => fakeWorker.worker,
+          },
+        },
+      });
+
+      renderWindow.getFrame(0);
+      await vi.runOnlyPendingTimersAsync();
+      fakeWorker.completeNext();
+      await flushMaskPreparationTimers(2);
+      fakeWorker.completeNext();
+      await flushMaskPreparationTimers(2);
+
+      const ready = vi.fn();
+
+      void renderWindow
+        .waitForReady(0, {
+          minimumAheadSeconds: 0.04,
+          requiredAheadSeconds: 0.12,
+        })
+        .then(ready);
+      await Promise.resolve();
+
+      expect(ready).toHaveBeenCalledOnce();
+
+      renderWindow.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("refreshes the prepared target window around playback-gated frames", async () => {
     vi.useFakeTimers();
     resetMocks();

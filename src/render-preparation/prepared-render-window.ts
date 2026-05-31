@@ -435,15 +435,27 @@ export function createPreparedRenderWindow(options: {
     getFrame,
 
     waitForReady(mediaTime, waitOptions) {
+      if (waitOptions.enabled === false) {
+        return Promise.resolve();
+      }
+
       getFrame(mediaTime, { forcePreparedWindow: true });
 
-      if (isReadyForPresentation(mediaTime, waitOptions)) {
+      if (
+        isReadyForPresentation(mediaTime, getMinimumAheadSeconds(waitOptions))
+      ) {
         return Promise.resolve();
       }
 
       return new Promise((resolve) => {
         const checkReady = () => {
-          if (!isDestroyed && !isReadyForPresentation(mediaTime, waitOptions)) {
+          if (
+            !isDestroyed &&
+            !isReadyForPresentation(
+              mediaTime,
+              getRequiredAheadSeconds(waitOptions),
+            )
+          ) {
             return;
           }
 
@@ -712,9 +724,9 @@ export function createPreparedRenderWindow(options: {
 
   function isReadyForPresentation(
     mediaTime: number,
-    waitOptions: RenderPreparationPlaybackGateOptions,
+    requiredAheadSeconds: number,
   ) {
-    if (isDestroyed || !maskStyle || waitOptions.enabled === false) {
+    if (isDestroyed || !maskStyle) {
       return true;
     }
 
@@ -733,11 +745,6 @@ export function createPreparedRenderWindow(options: {
     if (activeStatus === PreparedRenderFrameMaskStatus.Pending) {
       return false;
     }
-
-    const requiredAheadSeconds = Math.max(
-      waitOptions.requiredAheadSeconds ?? 0,
-      0,
-    );
 
     if (requiredAheadSeconds <= 0) {
       return true;
@@ -759,6 +766,23 @@ export function createPreparedRenderWindow(options: {
     for (const waiter of Array.from(readinessWaiters)) {
       waiter();
     }
+  }
+
+  function getRequiredAheadSeconds(
+    waitOptions: RenderPreparationPlaybackGateOptions,
+  ) {
+    return Math.max(waitOptions.requiredAheadSeconds ?? 0, 0);
+  }
+
+  function getMinimumAheadSeconds(
+    waitOptions: RenderPreparationPlaybackGateOptions,
+  ) {
+    const requiredAheadSeconds = getRequiredAheadSeconds(waitOptions);
+
+    return Math.min(
+      Math.max(waitOptions.minimumAheadSeconds ?? requiredAheadSeconds, 0),
+      requiredAheadSeconds,
+    );
   }
 
   function createPreparer() {

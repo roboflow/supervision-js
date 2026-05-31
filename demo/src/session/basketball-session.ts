@@ -21,6 +21,7 @@ import {
   BASKETBALL_MASK_FRAME_SCAN_INTERVAL_SECONDS,
   BASKETBALL_MASK_FRAME_SCHEDULE_BATCH_SIZE,
   BASKETBALL_MASK_FRAME_WORKER_COUNT,
+  BASKETBALL_RENDER_PREPARATION_PLAYBACK_GATE_MINIMUM_SECONDS,
   BASKETBALL_RENDER_PREPARATION_PLAYBACK_GATE_SECONDS,
 } from "./demo-session-config";
 import type { DemoSessionCallbacks } from "./demo-session-types";
@@ -111,6 +112,8 @@ export async function createBasketballSession(
           onDiagnostics: options.onRenderPreparationDiagnostics,
           playbackGate: {
             enabled: true,
+            minimumAheadSeconds:
+              BASKETBALL_RENDER_PREPARATION_PLAYBACK_GATE_MINIMUM_SECONDS,
             requiredAheadSeconds:
               BASKETBALL_RENDER_PREPARATION_PLAYBACK_GATE_SECONDS,
           },

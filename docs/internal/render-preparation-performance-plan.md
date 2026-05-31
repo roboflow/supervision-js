@@ -159,6 +159,9 @@ Spec:
 
 - Add an optional playback gate that waits for a minimum prepared-artifact
   lookahead, similar to detection prediction buffering.
+- Use high/low watermarks so playback does not wait a tiny amount before every
+  frame. Below the low watermark, the gate buffers back up to the requested
+  lookahead.
 - Gate only on artifact kinds enabled by the current presentation.
 - Keep media playback ungated by default unless the caller opts in.
 - Keep the renderer core generic: it asks the scene to wait for render
@@ -177,7 +180,8 @@ Manual observation:
 - Once playing, masks should feel less flickery because prepared frames are
   already available.
 - The demo enables a 1s render-preparation playback gate for the basketball and
-  upload flows so this can be exercised without changing package defaults.
+  upload flows with a 0.25s low watermark so this can be exercised without
+  turning playback into a continuous speed governor.
 
 ### 5. Future Mask Representation Research
 

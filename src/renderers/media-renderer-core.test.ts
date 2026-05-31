@@ -20,6 +20,52 @@ import { createMediaRendererCore } from "./media-renderer-core";
 import type { MediaRendererScene } from "./media-renderer-scene";
 
 describe("media renderer core", () => {
+  it("does not enter buffering when render preparation is already ready", async () => {
+    resetMocks();
+
+    const samples = [
+      createMockSample(0, 0),
+      createMockSample(0.04, 0),
+    ] as unknown as DecodedVideoSample[];
+    const onState = vi.fn();
+    const scene = createScene({
+      waitForRenderPreparation: vi.fn(async () => undefined),
+    });
+    const renderer = await createMediaRendererCore(
+      {
+        autoPlay: false,
+        container: {} as HTMLElement,
+        loop: false,
+        onState,
+        renderPreparation: {
+          playbackGate: {
+            enabled: true,
+            requiredAheadSeconds: 0.04,
+          },
+        },
+        source: createSource(samples),
+      } satisfies MediaRendererOptions,
+      {
+        createScene: vi.fn(async () => scene),
+        openMediaSource: vi.fn(),
+      },
+    );
+
+    await renderer.play();
+    flushAnimationFrame(40);
+
+    await vi.waitFor(() => {
+      expect(scene.presentSample).toHaveBeenCalledTimes(2);
+    });
+    expect(onState).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        playbackState: MediaRendererPlaybackState.Buffering,
+      }),
+    );
+
+    renderer.destroy();
+  });
+
   it("buffers playback until render preparation reaches the requested lookahead", async () => {
     resetMocks();
 
