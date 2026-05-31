@@ -145,6 +145,27 @@ describe("buffered detection timeline", () => {
     await initialLoad;
   });
 
+  it("can refresh the hot buffer continuously before it reaches the end", async () => {
+    const source = {
+      loadFrames: vi.fn(async () => frames),
+    };
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 5,
+      bufferBehindSeconds: 0.5,
+      refreshIntervalSeconds: 0.5,
+      source,
+    });
+
+    await timeline.prepare(0);
+    timeline.prefetch(0.5);
+
+    await vi.waitFor(() => {
+      expect(source.loadFrames).toHaveBeenCalledTimes(2);
+    });
+    expect(source.loadFrames).toHaveBeenNthCalledWith(1, 0, 5);
+    expect(source.loadFrames).toHaveBeenNthCalledWith(2, 0, 5.5);
+  });
+
   it("waits for source coverage before loading when playback gating is enabled", async () => {
     const coverage = createDeferred<void>();
     const source = {
@@ -182,7 +203,7 @@ describe("buffered detection timeline", () => {
     expect(timeline.getState().status).toBe(DetectionBufferStatus.Ready);
   });
 
-  it("starts a new load when an in-flight range overlaps without covering the request", async () => {
+  it("does not start redundant prefetch loads covered by an in-flight range", async () => {
     const firstLoad = createDeferred<DetectionFrame[]>();
     const secondLoad = createDeferred<DetectionFrame[]>();
     const pendingLoads = [firstLoad, secondLoad];
@@ -201,16 +222,13 @@ describe("buffered detection timeline", () => {
     const initialLoad = timeline.prepare(0);
     timeline.prefetch(4);
 
-    expect(source.loadFrames).toHaveBeenCalledTimes(2);
+    expect(source.loadFrames).toHaveBeenCalledOnce();
     expect(source.loadFrames).toHaveBeenNthCalledWith(1, 0, 5);
-    expect(source.loadFrames).toHaveBeenNthCalledWith(2, 4, 9);
 
     firstLoad.resolve([frames[0]]);
-    secondLoad.resolve([frames[2]]);
     await initialLoad;
-    await vi.waitFor(() => {
-      expect(timeline.getState().status).toBe(DetectionBufferStatus.Ready);
-    });
+    expect(timeline.getState().status).toBe(DetectionBufferStatus.Ready);
+    secondLoad.resolve([frames[2]]);
   });
 
   it("destroys its source and prevents further loads", async () => {

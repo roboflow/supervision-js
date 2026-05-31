@@ -11,6 +11,16 @@ import {
   loadBasketballSampleMedia,
 } from "../fixtures/basketball-sample";
 import { createBasketballSamplePresentation } from "../presentation/basketball-presentation";
+import {
+  BASKETBALL_DETECTION_BUFFER_AHEAD_SECONDS,
+  BASKETBALL_DETECTION_BUFFER_BEHIND_SECONDS,
+  BASKETBALL_DETECTION_BUFFER_REFRESH_SECONDS,
+  BASKETBALL_MASK_FRAME_CACHE_SECONDS,
+  BASKETBALL_MASK_FRAME_MAX_PENDING_COUNT,
+  BASKETBALL_MASK_FRAME_PREFETCH_SECONDS,
+  BASKETBALL_MASK_FRAME_SCAN_INTERVAL_SECONDS,
+  BASKETBALL_MASK_FRAME_SCHEDULE_BATCH_SIZE,
+} from "./demo-session-config";
 import type { DemoSessionCallbacks } from "./demo-session-types";
 
 export async function createBasketballSession(
@@ -55,14 +65,25 @@ export async function createBasketballSession(
   const presentation = createBasketballSamplePresentation(
     options.presentationSettings,
   );
+  const maskFrameCacheCount = secondsToFrameCount(
+    BASKETBALL_MASK_FRAME_CACHE_SECONDS,
+    manifest.inference.frameRate,
+  );
+  const maskFramePrefetchCount = secondsToFrameCount(
+    BASKETBALL_MASK_FRAME_PREFETCH_SECONDS,
+    manifest.inference.frameRate,
+  );
 
   try {
     const session = await createMediaSession({
       container: options.container,
       detections: {
         buffer: {
+          bufferAheadSeconds: BASKETBALL_DETECTION_BUFFER_AHEAD_SECONDS,
+          bufferBehindSeconds: BASKETBALL_DETECTION_BUFFER_BEHIND_SECONDS,
           frameIndexOriginTime: 0,
           frameRate: manifest.inference.frameRate,
+          refreshIntervalSeconds: BASKETBALL_DETECTION_BUFFER_REFRESH_SECONDS,
           selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
         },
         source: detectionSource.detectionSource,
@@ -77,6 +98,13 @@ export async function createBasketballSession(
         onFrame: options.onFrame,
         onState: options.onRendererState,
         renderPreparation: {
+          maskFrame: {
+            maxCacheFrameCount: maskFrameCacheCount,
+            maxPendingFrameCount: BASKETBALL_MASK_FRAME_MAX_PENDING_COUNT,
+            prefetchFrameCount: maskFramePrefetchCount,
+            scanIntervalSeconds: BASKETBALL_MASK_FRAME_SCAN_INTERVAL_SECONDS,
+            scheduleBatchSize: BASKETBALL_MASK_FRAME_SCHEDULE_BATCH_SIZE,
+          },
           onDiagnostics: options.onRenderPreparationDiagnostics,
         },
         onSource: options.onSourceState,
@@ -88,4 +116,8 @@ export async function createBasketballSession(
     detectionSource.destroy();
     throw error;
   }
+}
+
+function secondsToFrameCount(seconds: number, frameRate: number) {
+  return Math.max(1, Math.ceil(seconds * frameRate));
 }

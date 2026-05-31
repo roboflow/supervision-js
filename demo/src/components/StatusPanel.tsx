@@ -202,6 +202,44 @@ export function StatusPanel({
               : "-"
           }
         />
+        <Readout
+          label="Ready Ahead"
+          value={
+            maskFrameArtifact
+              ? `${formatInteger(
+                  maskFrameArtifact.preparedAheadFrameCount ?? 0,
+                )} frames | ${formatExactTime(
+                  maskFrameArtifact.preparedAheadSeconds ?? 0,
+                )}`
+              : "-"
+          }
+        />
+        <Readout
+          label="Mask Window"
+          value={
+            maskFrameArtifact
+              ? `${formatInteger(maskFrameArtifact.prefetchCount ?? 0)} prefetch | ${formatInteger(
+                  maskFrameArtifact.maxPreparedCount ?? 0,
+                )} cache`
+              : "-"
+          }
+        />
+        <Readout
+          label="Mask Queue"
+          value={
+            maskFrameArtifact
+              ? `${formatInteger(maskFrameArtifact.pendingCount)} / ${formatInteger(
+                  maskFrameArtifact.maxPendingCount ?? 0,
+                )} pending | ${formatInteger(
+                  maskFrameArtifact.scheduleBatchSize ?? 0,
+                )} batch`
+              : "-"
+          }
+        />
+        <Readout
+          label="Active Mask"
+          value={maskFrameArtifact?.activeFrame?.status ?? "-"}
+        />
         {renderPreparationDiagnostics?.message ? (
           <Readout
             label="Message"

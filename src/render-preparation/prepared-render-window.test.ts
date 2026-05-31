@@ -49,6 +49,34 @@ const frames: DetectionFrame[] = [
     mediaTime: 0.04,
   },
 ];
+const denseFrames = Array.from({ length: 4 }, (_, frameIndex) => ({
+  detections: [
+    {
+      mask: {
+        counts: "021",
+        encoding: DetectionMaskEncoding.CompressedRle,
+        height: 2,
+        width: 2,
+      },
+    },
+  ],
+  frameIndex,
+  mediaTime: frameIndex * 0.04,
+})) satisfies DetectionFrame[];
+const manyFrames = Array.from({ length: 10 }, (_, frameIndex) => ({
+  detections: [
+    {
+      mask: {
+        counts: "021",
+        encoding: DetectionMaskEncoding.CompressedRle,
+        height: 2,
+        width: 2,
+      },
+    },
+  ],
+  frameIndex,
+  mediaTime: frameIndex * 0.04,
+})) satisfies DetectionFrame[];
 
 describe("prepared render window", () => {
   it("prepares and returns a cached mask artifact for the active frame", async () => {
@@ -121,6 +149,8 @@ describe("prepared render window", () => {
                 status: RenderPreparationArtifactFrameStatus.Prepared,
               },
               kind: RenderPreparationArtifactKind.MaskFrame,
+              preparedAheadFrameCount: 1,
+              preparedAheadSeconds: 0,
             }),
           ],
         }),
@@ -222,6 +252,272 @@ describe("prepared render window", () => {
     }
   });
 
+  it("honors mask-frame render-preparation prefetch and cache options", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const onDiagnostics = vi.fn();
+      const onMaskFrameEvicted = vi.fn();
+      const renderWindow = createPreparedRenderWindow({
+        detectionTimeline: createTimeline(denseFrames),
+        maskStyle: new BaseMaskStyle(),
+        onMaskFrameEvicted,
+        renderPreparation: {
+          maskFrame: {
+            maxCacheFrameCount: 2,
+            prefetchFrameCount: 3,
+            scanIntervalSeconds: 0,
+          },
+          onDiagnostics,
+        },
+      });
+
+      renderWindow.getFrame(0);
+      await flushMaskPreparationTimers(4);
+
+      expect(onMaskFrameEvicted).toHaveBeenCalledWith("0:0");
+      expect(onDiagnostics).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          artifacts: [
+            expect.objectContaining({
+              kind: RenderPreparationArtifactKind.MaskFrame,
+              maxPreparedCount: 2,
+              prefetchCount: 3,
+              preparedCount: 2,
+            }),
+          ],
+        }),
+      );
+
+      renderWindow.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reports only the contiguous prepared run ahead of the active frame", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const onDiagnostics = vi.fn();
+      const renderWindow = createPreparedRenderWindow({
+        detectionTimeline: createTimeline(denseFrames),
+        maskStyle: new BaseMaskStyle(),
+        renderPreparation: {
+          maskFrame: {
+            maxCacheFrameCount: 4,
+            prefetchFrameCount: 1,
+            scanIntervalSeconds: 0,
+          },
+          onDiagnostics,
+        },
+      });
+
+      renderWindow.getFrame(0.12);
+      await flushMaskPreparationTimers(2);
+      renderWindow.getFrame(0);
+      await flushMaskPreparationTimers(2);
+
+      expect(onDiagnostics).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          artifacts: [
+            expect.objectContaining({
+              activeFrame: {
+                key: "0:0",
+                mediaTime: 0,
+                status: RenderPreparationArtifactFrameStatus.Prepared,
+              },
+              preparedAheadFrameCount: 1,
+              preparedAheadSeconds: 0,
+            }),
+          ],
+        }),
+      );
+
+      renderWindow.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps warming the last prepared target without waiting for playback ticks", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const onDiagnostics = vi.fn();
+      const renderWindow = createPreparedRenderWindow({
+        detectionTimeline: createTimeline(manyFrames),
+        maskStyle: new BaseMaskStyle(),
+        renderPreparation: {
+          maskFrame: {
+            maxCacheFrameCount: 10,
+            prefetchFrameCount: 10,
+            scheduleBatchSize: 2,
+            scanIntervalSeconds: 0,
+          },
+          onDiagnostics,
+        },
+      });
+
+      renderWindow.getFrame(0);
+      await flushMaskPreparationTimers(30);
+
+      expect(onDiagnostics).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          artifacts: [
+            expect.objectContaining({
+              preparedAheadFrameCount: 10,
+              preparedAheadSeconds: 0.36,
+              preparedCount: 10,
+            }),
+          ],
+        }),
+      );
+
+      renderWindow.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("limits background mask scheduling while always admitting the active frame", () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const onDiagnostics = vi.fn();
+      const renderWindow = createPreparedRenderWindow({
+        detectionTimeline: createTimeline(manyFrames),
+        maskStyle: new BaseMaskStyle(),
+        renderPreparation: {
+          maskFrame: {
+            maxPendingFrameCount: 2,
+            prefetchFrameCount: 10,
+            scheduleBatchSize: 2,
+            scanIntervalSeconds: 0,
+          },
+          onDiagnostics,
+        },
+      });
+
+      renderWindow.getFrame(0);
+
+      expect(onDiagnostics).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          artifacts: [
+            expect.objectContaining({
+              maxPendingCount: 2,
+              pendingCount: 2,
+              scheduleBatchSize: 2,
+            }),
+          ],
+        }),
+      );
+
+      renderWindow.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the mask queue bounded when active frames advance faster than preparation", () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const fakeWorker = createFakeMaskPreparationWorker({
+        autoComplete: false,
+      });
+      const onDiagnostics = vi.fn();
+      const renderWindow = createPreparedRenderWindow({
+        detectionTimeline: createTimeline(manyFrames),
+        maskStyle: new BaseMaskStyle(),
+        renderPreparation: {
+          maskFrame: {
+            maxPendingFrameCount: 3,
+            prefetchFrameCount: 10,
+            scheduleBatchSize: 2,
+            scanIntervalSeconds: 0,
+          },
+          mode: RenderPreparationMode.Worker,
+          onDiagnostics,
+          workerFactory: {
+            createWorker: () => fakeWorker.worker,
+          },
+        },
+      });
+
+      for (const frame of manyFrames) {
+        renderWindow.getFrame(frame.mediaTime);
+      }
+
+      expect(onDiagnostics).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          artifacts: [
+            expect.objectContaining({
+              activeFrame: {
+                key: "9:0.36",
+                mediaTime: 0.36,
+                status: RenderPreparationArtifactFrameStatus.Pending,
+              },
+              maxPendingCount: 3,
+              pendingCount: 1,
+            }),
+          ],
+        }),
+      );
+
+      renderWindow.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("resets pending worker work when mask style invalidates artifacts", () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const workers = [createFakeMaskPreparationWorker()];
+      const renderWindow = createPreparedRenderWindow({
+        detectionTimeline: createTimeline(frames),
+        maskStyle: createArtifactStableMaskStyle(0.2, "first"),
+        renderPreparation: {
+          mode: RenderPreparationMode.Worker,
+          workerFactory: {
+            createWorker: () => {
+              const worker =
+                workers[workers.length - 1] ??
+                createFakeMaskPreparationWorker();
+
+              if (worker.terminated) {
+                const nextWorker = createFakeMaskPreparationWorker();
+                workers.push(nextWorker);
+                return nextWorker.worker;
+              }
+
+              return worker.worker;
+            },
+          },
+        },
+      });
+
+      renderWindow.getFrame(0);
+      renderWindow.setMaskStyle(createArtifactStableMaskStyle(0.8, "second"));
+      renderWindow.getFrame(0);
+
+      expect(workers[0]?.terminated).toBe(true);
+      expect(workers).toHaveLength(2);
+
+      renderWindow.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("can prepare mask artifacts with an injected worker factory", async () => {
     vi.useFakeTimers();
     resetMocks();
@@ -243,8 +539,7 @@ describe("prepared render window", () => {
 
       expect(renderWindow.getFrame(0)?.maskFrame).toBeUndefined();
 
-      await vi.runOnlyPendingTimersAsync();
-      await vi.runOnlyPendingTimersAsync();
+      await flushMaskPreparationTimers(4);
 
       expect(fakeWorker.messages).toHaveLength(2);
       expect(renderWindow.getFrame(0)?.maskFrame).toMatchObject({
@@ -272,7 +567,10 @@ describe("prepared render window", () => {
   });
 });
 
-function createFakeMaskPreparationWorker() {
+function createFakeMaskPreparationWorker(
+  options: { readonly autoComplete?: boolean } = {},
+) {
+  const autoComplete = options.autoComplete ?? true;
   const messages: unknown[] = [];
   const listeners: Array<(event: MessageEvent<unknown>) => void> = [];
   let terminated = false;
@@ -288,6 +586,10 @@ function createFakeMaskPreparationWorker() {
       readonly requestId: number;
     }) {
       messages.push(message);
+      if (!autoComplete) {
+        return;
+      }
+
       setTimeout(() => {
         for (const listener of listeners) {
           listener({
@@ -316,11 +618,19 @@ function createFakeMaskPreparationWorker() {
   };
 }
 
+async function flushMaskPreparationTimers(count: number) {
+  for (let index = 0; index < count; index += 1) {
+    await vi.runOnlyPendingTimersAsync();
+    await Promise.resolve();
+  }
+}
+
 function createArtifactStableMaskStyle(
   opacity: number,
+  artifactKey = "stable-mask-artifact",
 ): MaskStyle & { readonly artifactKey: string; readonly opacity: number } {
   return {
-    artifactKey: "stable-mask-artifact",
+    artifactKey,
     opacity,
     resolve(detection) {
       if (!detection.mask) {

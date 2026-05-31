@@ -128,6 +128,7 @@ export {
   type RenderPreparationActiveFrameDiagnostics,
   type RenderPreparationArtifactDiagnostics,
   type RenderPreparationDiagnostics,
+  type RenderPreparationMaskFrameOptions,
   type RenderPreparationOptions,
   type RenderPreparationWorkerFactory,
 } from "#types/render-preparation";

@@ -31,6 +31,14 @@ export interface RenderPreparationWorkerFactory {
   createWorker(): Worker;
 }
 
+export interface RenderPreparationMaskFrameOptions {
+  readonly maxCacheFrameCount?: number;
+  readonly maxPendingFrameCount?: number;
+  readonly prefetchFrameCount?: number;
+  readonly scheduleBatchSize?: number;
+  readonly scanIntervalSeconds?: number;
+}
+
 export interface RenderPreparationActiveFrameDiagnostics {
   readonly key: string;
   readonly mediaTime: number;
@@ -40,8 +48,14 @@ export interface RenderPreparationActiveFrameDiagnostics {
 export interface RenderPreparationArtifactDiagnostics {
   readonly activeFrame?: RenderPreparationActiveFrameDiagnostics | null;
   readonly kind: RenderPreparationArtifactKind;
+  readonly maxPendingCount?: number;
+  readonly maxPreparedCount?: number;
   readonly pendingCount: number;
+  readonly preparedAheadFrameCount?: number;
+  readonly preparedAheadSeconds?: number;
+  readonly prefetchCount?: number;
   readonly preparedCount: number;
+  readonly scheduleBatchSize?: number;
 }
 
 export interface RenderPreparationDiagnostics {
@@ -52,6 +66,7 @@ export interface RenderPreparationDiagnostics {
 }
 
 export interface RenderPreparationOptions {
+  readonly maskFrame?: RenderPreparationMaskFrameOptions;
   readonly mode?: RenderPreparationMode;
   readonly onDiagnostics?: (diagnostics: RenderPreparationDiagnostics) => void;
   readonly workerFactory?: RenderPreparationWorkerFactory;

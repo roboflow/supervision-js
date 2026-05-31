@@ -27,6 +27,7 @@ export interface DetectionFrameSourceVersionRange {
 export interface DetectionBufferOptions extends DetectionFrameSelectionOptions {
   readonly bufferAheadSeconds?: number;
   readonly bufferBehindSeconds?: number;
+  readonly refreshIntervalSeconds?: number;
   readonly playbackGate?: DetectionPlaybackGateOptions;
 }
 

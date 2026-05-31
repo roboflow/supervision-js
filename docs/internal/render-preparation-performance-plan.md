@@ -38,6 +38,14 @@ current frame is wrong.
 - Web workers help with CPU-heavy RLE decoding and compositing, but texture
   upload remains a renderer/GPU concern. Worker pools need backpressure, task
   priority, and cancellation after seeks.
+- Hot detection windows and prepared render windows should roll forward
+  continuously. If the hot detection window only jumps near its end, the
+  prepared window discovers a large amount of new mask work at once and creates
+  a queue cliff.
+- More lookahead without bounded scheduling can make the queue worse. The
+  scheduler should admit a small amount of background work each scan, always
+  admit the active frame, and refuse far-future work when pending work is
+  already saturated.
 - Some applications should let media keep playing while artifacts catch up;
   others should gate playback until predictions and prepared artifacts are ready.
   The library should support both without conflating them.
@@ -72,7 +80,7 @@ Manual observation:
 
 ### 2. Prepared Window And Cache Controls
 
-Status: planned.
+Status: complete.
 
 Spec:
 
@@ -91,21 +99,36 @@ Manual observation:
 
 - Increasing the prepared window should reduce active-frame pending overlays.
 - Very large values should increase memory use and may delay style changes.
+- The basketball demo currently uses a 5s mask prefetch window and a 5s
+  prepared mask cache, derived from the fixture inference frame rate, so we can
+  test whether a larger ready-ahead window removes active-frame misses without
+  changing package defaults.
 
-### 3. Worker Pool And Backpressure
+### 3. Rolling Windows, Worker Pool, And Backpressure
 
-Status: planned.
+Status: in progress.
 
 Spec:
 
-- Replace the single mask-preparation worker client with a small worker pool.
-- Add a configurable concurrency limit.
+- Refresh hot detection windows in smaller rolling increments instead of only
+  near the end of the current loaded range.
+- Bound pending mask-frame preparation work so background prefetch cannot grow
+  unbounded.
+- Schedule a small number of new background frames per scan instead of dumping
+  the entire prepared window.
 - Prioritize active frame work, then nearby future frames, then farther frames.
 - Cancel or ignore stale work after seeks or style changes.
+- Reset stale worker work when a style change invalidates mask artifacts.
+- Replace the single mask-preparation worker client with a small worker pool.
+- Add a configurable concurrency limit.
 - Preserve main-thread fallback when workers are unavailable.
 
 Test:
 
+- Detection hot buffers can refresh continuously before reaching the end of the
+  current range.
+- Mask preparation respects max pending work and per-scan schedule limits.
+- Style changes reset stale pending worker work.
 - Multiple pending mask jobs are distributed across workers.
 - Active frame jobs are scheduled before background jobs.
 - Stale jobs do not install artifacts after generation changes.
@@ -113,6 +136,12 @@ Test:
 
 Manual observation:
 
+- Pending masks should no longer grow without bound during normal basketball
+  playback.
+- The hot predictions timeline range should move more continuously instead of
+  jumping only when playback is near the end of the current range.
+- Style changes that invalidate mask pixels should recover quickly instead of
+  waiting behind stale queued work.
 - Dense videos should prepare future masks faster.
 - CPU usage may rise, but the main UI should remain responsive.
 

@@ -14,10 +14,20 @@ import {
 import { canReuseMaskStyleArtifacts } from "#utils/mask-style";
 
 const DEFAULT_MASK_FRAME_CACHE_SIZE = 24;
+const DEFAULT_MASK_PENDING_FRAME_COUNT = 8;
 const DEFAULT_MASK_PREFETCH_FRAME_COUNT = 12;
+const DEFAULT_MASK_SCHEDULE_BATCH_SIZE = 2;
 const DEFAULT_PREPARED_WINDOW_SCAN_INTERVAL_SECONDS = 0.15;
 
 type ScheduledPreparationTask = ReturnType<typeof setTimeout>;
+
+interface PendingMaskFrame {
+  readonly frame: DetectionFrame;
+  readonly generation: number;
+  readonly key: string;
+  readonly maskStyle: MaskStyle;
+  readonly mediaTime: number;
+}
 
 export interface PreparedRenderFrame {
   readonly detectionFrame: DetectionFrame;
@@ -52,25 +62,40 @@ export function createPreparedRenderWindow(options: {
   readonly preparedWindowScanIntervalSeconds?: number;
   readonly renderPreparation?: RenderPreparationOptions;
 }): PreparedRenderWindow {
+  const maskFrameOptions = options.renderPreparation?.maskFrame;
   const maxMaskFrameCacheSize = Math.max(
     1,
-    options.maxMaskFrameCacheSize ?? DEFAULT_MASK_FRAME_CACHE_SIZE,
+    options.maxMaskFrameCacheSize ??
+      maskFrameOptions?.maxCacheFrameCount ??
+      DEFAULT_MASK_FRAME_CACHE_SIZE,
   );
   const prefetchFrameCount = Math.max(
     0,
-    options.prefetchFrameCount ?? DEFAULT_MASK_PREFETCH_FRAME_COUNT,
+    options.prefetchFrameCount ??
+      maskFrameOptions?.prefetchFrameCount ??
+      DEFAULT_MASK_PREFETCH_FRAME_COUNT,
   );
-  const preparedWindowScanIntervalSeconds =
+  const preparedWindowScanIntervalSeconds = Math.max(
+    0,
     options.preparedWindowScanIntervalSeconds ??
-    DEFAULT_PREPARED_WINDOW_SCAN_INTERVAL_SECONDS;
-  const maskFramePreparer = createMaskFramePreparer({
-    onStatusChange: emitDiagnostics,
-    renderPreparation: options.renderPreparation,
-  });
+      maskFrameOptions?.scanIntervalSeconds ??
+      DEFAULT_PREPARED_WINDOW_SCAN_INTERVAL_SECONDS,
+  );
+  const maxPendingFrameCount = Math.max(
+    1,
+    maskFrameOptions?.maxPendingFrameCount ?? DEFAULT_MASK_PENDING_FRAME_COUNT,
+  );
+  const scheduleBatchSize = Math.max(
+    1,
+    maskFrameOptions?.scheduleBatchSize ?? DEFAULT_MASK_SCHEDULE_BATCH_SIZE,
+  );
 
   let maskStyle = options.maskStyle ?? null;
+  let maskFramePreparer = createPreparer();
   let lastPreparedBufferSignature: string | null = null;
   let lastPreparedWindowMediaTime: number | null = null;
+  let lastPreparedWindowFrames: readonly DetectionFrame[] = [];
+  let lastPreparedTargetFrames: readonly DetectionFrame[] = [];
   let activeMaskFrame: {
     readonly key: string;
     readonly mediaTime: number;
@@ -79,84 +104,252 @@ export function createPreparedRenderWindow(options: {
   let isDestroyed = false;
   let generation = 0;
   const preparedMaskFrames = new Map<string, PreparedMaskFrame>();
-  const scheduledMaskFrameTasks = new Map<string, ScheduledPreparationTask>();
-  const pendingMaskFrameKeys = new Set<string>();
+  const pendingMaskFrames = new Map<string, PendingMaskFrame>();
+  const queuedMaskFrameKeys: string[] = [];
+  const inFlightMaskFrameKeys = new Set<string>();
   const emptyMaskFrameKeys = new Set<string>();
+  let scheduledQueuePump: ScheduledPreparationTask | undefined;
 
-  const scheduleMaskFrame = (frame: DetectionFrame, mediaTime: number) => {
+  const scheduleMaskFrame = (
+    frame: DetectionFrame,
+    mediaTime: number,
+    scheduleOptions: { readonly force?: boolean } = {},
+  ) => {
     const key = getFrameKey(frame);
 
     if (
       !maskStyle ||
       preparedMaskFrames.has(key) ||
-      pendingMaskFrameKeys.has(key) ||
       emptyMaskFrameKeys.has(key) ||
       isDestroyed
     ) {
+      return false;
+    }
+
+    if (pendingMaskFrames.has(key)) {
+      if (scheduleOptions.force) {
+        pruneStaleQueuedMaskFrames(mediaTime, key);
+        promotePendingMaskFrame(key, mediaTime);
+      }
+
+      return false;
+    }
+
+    if (scheduleOptions.force) {
+      pruneStaleQueuedMaskFrames(mediaTime);
+
+      if (pendingMaskFrames.size >= maxPendingFrameCount) {
+        evictFarthestQueuedMaskFrame(mediaTime);
+      }
+    }
+
+    if (
+      !scheduleOptions.force &&
+      pendingMaskFrames.size >= maxPendingFrameCount
+    ) {
+      return false;
+    }
+
+    if (pendingMaskFrames.size >= maxPendingFrameCount) {
+      return false;
+    }
+
+    pendingMaskFrames.set(key, {
+      frame,
+      generation,
+      key,
+      maskStyle,
+      mediaTime,
+    });
+
+    if (scheduleOptions.force) {
+      queuedMaskFrameKeys.unshift(key);
+    } else {
+      queuedMaskFrameKeys.push(key);
+    }
+
+    emitDiagnostics();
+    pumpMaskFrameQueue();
+
+    return true;
+  };
+
+  function pumpMaskFrameQueue() {
+    if (scheduledQueuePump || isDestroyed) {
       return;
     }
 
-    const scheduledMaskStyle = maskStyle;
-    const scheduledGeneration = generation;
-    pendingMaskFrameKeys.add(key);
-    emitDiagnostics();
+    scheduledQueuePump = schedulePreparationTask(() => {
+      scheduledQueuePump = undefined;
+      startQueuedMaskFrameJobs();
+    });
+  }
 
-    const scheduledTask = schedulePreparationTask(() => {
-      scheduledMaskFrameTasks.delete(key);
+  function startQueuedMaskFrameJobs() {
+    if (isDestroyed || inFlightMaskFrameKeys.size > 0) {
+      return;
+    }
 
-      if (isDestroyed || scheduledGeneration !== generation) {
-        pendingMaskFrameKeys.delete(key);
+    while (queuedMaskFrameKeys.length > 0) {
+      const key = queuedMaskFrameKeys.shift();
+
+      if (!key) {
+        return;
+      }
+
+      const job = pendingMaskFrames.get(key);
+
+      if (!job || job.generation !== generation) {
+        pendingMaskFrames.delete(key);
+        emitDiagnostics();
+        continue;
+      }
+
+      inFlightMaskFrameKeys.add(key);
+
+      if (isDestroyed || job.generation !== generation) {
+        pendingMaskFrames.delete(key);
+        inFlightMaskFrameKeys.delete(key);
         emitDiagnostics();
         return;
       }
 
       const instructions = resolveMaskInstructions({
-        frame,
-        maskStyle: scheduledMaskStyle,
-        mediaTime,
+        frame: job.frame,
+        maskStyle: job.maskStyle,
+        mediaTime: job.mediaTime,
       });
 
       if (instructions.length === 0) {
         emptyMaskFrameKeys.add(key);
-        pendingMaskFrameKeys.delete(key);
+        pendingMaskFrames.delete(key);
+        inFlightMaskFrameKeys.delete(key);
+        schedulePreparedTargetBatch();
         emitDiagnostics();
-        return;
+        continue;
       }
 
       void maskFramePreparer
         .prepare({ instructions, key })
         .then((maskFrame) => {
-          pendingMaskFrameKeys.delete(key);
+          inFlightMaskFrameKeys.delete(key);
+          const pendingJob = pendingMaskFrames.get(key);
 
-          if (isDestroyed || scheduledGeneration !== generation) {
+          pendingMaskFrames.delete(key);
+
+          if (
+            isDestroyed ||
+            job.generation !== generation ||
+            pendingJob !== job
+          ) {
             maskFrame?.close();
+            schedulePreparedTargetBatch();
             emitDiagnostics();
+            pumpMaskFrameQueue();
             return;
           }
 
           if (!maskFrame) {
             emptyMaskFrameKeys.add(key);
+            schedulePreparedTargetBatch();
             emitDiagnostics();
+            pumpMaskFrameQueue();
             return;
           }
 
           preparedMaskFrames.set(key, maskFrame);
           evictPreparedMaskFrames();
           options.onMaskFramePrepared?.(maskFrame);
+          schedulePreparedTargetBatch();
           emitDiagnostics();
+          pumpMaskFrameQueue();
         })
         .catch((error: unknown) => {
-          pendingMaskFrameKeys.delete(key);
+          inFlightMaskFrameKeys.delete(key);
+          pendingMaskFrames.delete(key);
+          schedulePreparedTargetBatch();
           emitDiagnostics(
             error instanceof Error
               ? error.message
               : "Unable to prepare mask frame.",
           );
+          pumpMaskFrameQueue();
         });
-    });
 
-    scheduledMaskFrameTasks.set(key, scheduledTask);
-  };
+      return;
+    }
+  }
+
+  function promotePendingMaskFrame(key: string, mediaTime: number) {
+    const job = pendingMaskFrames.get(key);
+
+    if (!job || inFlightMaskFrameKeys.has(key)) {
+      return;
+    }
+
+    pendingMaskFrames.set(key, {
+      ...job,
+      mediaTime,
+    });
+    removeQueuedMaskFrameKey(key);
+    queuedMaskFrameKeys.unshift(key);
+    emitDiagnostics();
+    pumpMaskFrameQueue();
+  }
+
+  function pruneStaleQueuedMaskFrames(mediaTime: number, exemptKey?: string) {
+    for (let index = queuedMaskFrameKeys.length - 1; index >= 0; index -= 1) {
+      const key = queuedMaskFrameKeys[index];
+      const job = key ? pendingMaskFrames.get(key) : undefined;
+
+      if (key !== exemptKey && (!job || job.mediaTime < mediaTime)) {
+        queuedMaskFrameKeys.splice(index, 1);
+
+        if (key) {
+          pendingMaskFrames.delete(key);
+        }
+      }
+    }
+  }
+
+  function evictFarthestQueuedMaskFrame(mediaTime: number) {
+    let farthestIndex = -1;
+    let farthestDistance = -1;
+
+    for (const [index, key] of queuedMaskFrameKeys.entries()) {
+      const job = pendingMaskFrames.get(key);
+
+      if (!job) {
+        farthestIndex = index;
+        break;
+      }
+
+      const distance = Math.abs(job.mediaTime - mediaTime);
+
+      if (distance > farthestDistance) {
+        farthestDistance = distance;
+        farthestIndex = index;
+      }
+    }
+
+    if (farthestIndex < 0) {
+      return;
+    }
+
+    const [key] = queuedMaskFrameKeys.splice(farthestIndex, 1);
+
+    if (key) {
+      pendingMaskFrames.delete(key);
+    }
+  }
+
+  function removeQueuedMaskFrameKey(key: string) {
+    const index = queuedMaskFrameKeys.indexOf(key);
+
+    if (index >= 0) {
+      queuedMaskFrameKeys.splice(index, 1);
+    }
+  }
 
   const schedulePreparedWindow = (
     detectionFrame: DetectionFrame | undefined,
@@ -185,24 +378,42 @@ export function createPreparedRenderWindow(options: {
     lastPreparedWindowMediaTime = mediaTime;
 
     const bufferedFrames = options.detectionTimeline.getBufferedFrames();
-    const upcomingFrames = bufferedFrames
+    lastPreparedWindowFrames = bufferedFrames;
+    lastPreparedTargetFrames = bufferedFrames
       .filter((frame) => frame.mediaTime >= mediaTime)
       .slice(0, prefetchFrameCount);
 
     if (
       detectionFrame &&
-      !upcomingFrames.some((frame) => getFrameKey(frame) === frameKey)
+      !lastPreparedTargetFrames.some((frame) => getFrameKey(frame) === frameKey)
     ) {
-      upcomingFrames.unshift(detectionFrame);
+      lastPreparedTargetFrames = [detectionFrame, ...lastPreparedTargetFrames];
     }
 
-    for (const frame of upcomingFrames) {
-      scheduleMaskFrame(
-        frame,
-        getFrameKey(frame) === frameKey ? mediaTime : frame.mediaTime,
-      );
-    }
+    schedulePreparedTargetBatch();
   };
+
+  function schedulePreparedTargetBatch() {
+    if (isDestroyed) {
+      return;
+    }
+
+    let scheduledFrameCount = 0;
+
+    for (const frame of lastPreparedTargetFrames) {
+      if (scheduledFrameCount >= scheduleBatchSize) {
+        break;
+      }
+
+      const scheduled = scheduleMaskFrame(frame, frame.mediaTime, {
+        force: false,
+      });
+
+      if (scheduled) {
+        scheduledFrameCount += 1;
+      }
+    }
+  }
 
   return {
     getFrame(mediaTime) {
@@ -224,7 +435,7 @@ export function createPreparedRenderWindow(options: {
         key,
         mediaTime: detectionFrame.mediaTime,
       });
-      scheduleMaskFrame(detectionFrame, mediaTime);
+      scheduleMaskFrame(detectionFrame, mediaTime, { force: true });
       schedulePreparedWindow(detectionFrame, mediaTime);
 
       return {
@@ -249,7 +460,7 @@ export function createPreparedRenderWindow(options: {
         return;
       }
 
-      clearPreparedMaskFrames();
+      clearPreparedMaskFrames({ resetPreparer: true });
     },
 
     destroy() {
@@ -265,6 +476,7 @@ export function createPreparedRenderWindow(options: {
 
   function emitDiagnostics(message?: string) {
     const status = maskFramePreparer.getStatus();
+    const preparedAhead = getPreparedAheadDiagnostics();
 
     options.renderPreparation?.onDiagnostics?.({
       artifacts: [
@@ -279,8 +491,14 @@ export function createPreparedRenderWindow(options: {
               }
             : null,
           kind: RenderPreparationArtifactKind.MaskFrame,
-          pendingCount: pendingMaskFrameKeys.size,
+          maxPendingCount: maxPendingFrameCount,
+          maxPreparedCount: maxMaskFrameCacheSize,
+          pendingCount: pendingMaskFrames.size,
+          preparedAheadFrameCount: preparedAhead.frameCount,
+          preparedAheadSeconds: preparedAhead.seconds,
+          prefetchCount: prefetchFrameCount,
           preparedCount: preparedMaskFrames.size,
+          scheduleBatchSize,
         },
       ],
       executionMode: status.executionMode,
@@ -305,17 +523,23 @@ export function createPreparedRenderWindow(options: {
     }
   }
 
-  function clearPreparedMaskFrames() {
+  function clearPreparedMaskFrames(
+    clearOptions: { readonly resetPreparer?: boolean } = {},
+  ) {
     generation += 1;
     lastPreparedBufferSignature = null;
     lastPreparedWindowMediaTime = null;
+    lastPreparedWindowFrames = [];
+    lastPreparedTargetFrames = [];
 
-    for (const scheduledTask of scheduledMaskFrameTasks.values()) {
-      cancelScheduledPreparationTask(scheduledTask);
+    if (scheduledQueuePump) {
+      cancelScheduledPreparationTask(scheduledQueuePump);
+      scheduledQueuePump = undefined;
     }
 
-    scheduledMaskFrameTasks.clear();
-    pendingMaskFrameKeys.clear();
+    pendingMaskFrames.clear();
+    queuedMaskFrameKeys.length = 0;
+    inFlightMaskFrameKeys.clear();
     emptyMaskFrameKeys.clear();
 
     if (preparedMaskFrames.size > 0) {
@@ -327,6 +551,11 @@ export function createPreparedRenderWindow(options: {
       for (const maskFrame of maskFrames) {
         maskFrame.close();
       }
+    }
+
+    if (clearOptions.resetPreparer && !isDestroyed) {
+      maskFramePreparer.destroy();
+      maskFramePreparer = createPreparer();
     }
 
     emitDiagnostics();
@@ -366,6 +595,46 @@ export function createPreparedRenderWindow(options: {
 
     activeMaskFrameSignature = nextSignature;
     emitDiagnostics();
+  }
+
+  function getPreparedAheadDiagnostics() {
+    if (!activeMaskFrame) {
+      return { frameCount: 0, seconds: 0 };
+    }
+
+    const activeFrameIndex = lastPreparedWindowFrames.findIndex(
+      (frame) => getFrameKey(frame) === activeMaskFrame?.key,
+    );
+
+    if (activeFrameIndex < 0) {
+      return { frameCount: 0, seconds: 0 };
+    }
+
+    let frameCount = 0;
+    let latestPreparedTime = activeMaskFrame.mediaTime;
+
+    for (const frame of lastPreparedWindowFrames.slice(activeFrameIndex)) {
+      const key = getFrameKey(frame);
+
+      if (!preparedMaskFrames.has(key) && !emptyMaskFrameKeys.has(key)) {
+        break;
+      }
+
+      frameCount += 1;
+      latestPreparedTime = frame.mediaTime;
+    }
+
+    return {
+      frameCount,
+      seconds: Math.max(0, latestPreparedTime - activeMaskFrame.mediaTime),
+    };
+  }
+
+  function createPreparer() {
+    return createMaskFramePreparer({
+      onStatusChange: emitDiagnostics,
+      renderPreparation: options.renderPreparation,
+    });
   }
 }
 

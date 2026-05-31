@@ -24,6 +24,10 @@ export function createBufferedDetectionTimeline(
     options.bufferAheadSeconds ?? DEFAULT_BUFFER_AHEAD_SECONDS;
   const bufferBehindSeconds =
     options.bufferBehindSeconds ?? DEFAULT_BUFFER_BEHIND_SECONDS;
+  const refreshIntervalSeconds =
+    options.refreshIntervalSeconds === undefined
+      ? null
+      : Math.max(0, options.refreshIntervalSeconds);
   const playbackGate = options.playbackGate;
 
   let buffer: DetectionFrame[] = [];
@@ -145,6 +149,10 @@ export function createBufferedDetectionTimeline(
       return true;
     }
 
+    if (shouldRefreshRollingWindow(mediaTime)) {
+      return true;
+    }
+
     if (state.bufferEndTime === null || bufferAheadSeconds <= 0) {
       return false;
     }
@@ -175,6 +183,14 @@ export function createBufferedDetectionTimeline(
 
     prefetch(mediaTime) {
       if (destroyed || !shouldPrefetch(mediaTime)) {
+        return;
+      }
+
+      if (
+        inFlight &&
+        mediaTime >= inFlight.startTime &&
+        mediaTime <= inFlight.endTime
+      ) {
         return;
       }
 
@@ -272,6 +288,24 @@ export function createBufferedDetectionTimeline(
 
       throw error;
     }
+  }
+
+  function shouldRefreshRollingWindow(mediaTime: number) {
+    if (
+      refreshIntervalSeconds === null ||
+      refreshIntervalSeconds <= 0 ||
+      state.bufferStartTime === null ||
+      state.bufferEndTime === null
+    ) {
+      return false;
+    }
+
+    const { endTime, startTime } = getLoadRange(mediaTime);
+
+    return (
+      Math.abs(startTime - state.bufferStartTime) >= refreshIntervalSeconds ||
+      Math.abs(endTime - state.bufferEndTime) >= refreshIntervalSeconds
+    );
   }
 }
 
