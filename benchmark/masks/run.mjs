@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
+import zlib from "node:zlib";
 
 const rootDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -17,9 +18,13 @@ const defaultSampleFrameCount = 45;
 const defaultWarmupFrameCount = 5;
 const defaultThresholds = [0.5, 0.1];
 const defaultPreparedWindowSeconds = 5;
+const pngCompressionLevels = [1, 6];
 const bytesPerRgbaPixel = 4;
 const bytesPerId8Pixel = 1;
 const bytesPerId16Pixel = 2;
+const pngSignature = Buffer.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+]);
 const basketballClassStyles = {
   basketball: {
     fill: 0xff7a1a,
@@ -100,6 +105,21 @@ async function main() {
         warmupInputs,
       }),
     );
+
+    for (const compressionLevel of pngCompressionLevels) {
+      cases.push(
+        await benchmarkCase({
+          caseName: `id-mask-png-level-${compressionLevel}-threshold-${confidenceThreshold}`,
+          fixture,
+          frameInputs,
+          run(input) {
+            return buildIdMaskPngFrame(input, { compressionLevel });
+          },
+          sampledInputs,
+          warmupInputs,
+        }),
+      );
+    }
   }
 
   const report = {
@@ -337,6 +357,120 @@ function buildIdMaskFrame(frameInput) {
     height,
     width,
   };
+}
+
+function buildIdMaskPngFrame(frameInput, options) {
+  const idMask = buildIdMaskFrame(frameInput);
+
+  if (!idMask) {
+    return undefined;
+  }
+
+  if (!(idMask.data instanceof Uint8Array)) {
+    throw new Error(
+      "PNG ID-mask benchmark only supports 8-bit masks for this fixture.",
+    );
+  }
+
+  return {
+    data: encodeGrayscalePng({
+      compressionLevel: options.compressionLevel,
+      height: idMask.height,
+      pixels: idMask.data,
+      width: idMask.width,
+    }),
+    height: idMask.height,
+    width: idMask.width,
+  };
+}
+
+function encodeGrayscalePng(options) {
+  const rawScanlines = createFilterlessPngScanlines({
+    height: options.height,
+    pixels: options.pixels,
+    width: options.width,
+  });
+  const ihdr = Buffer.alloc(13);
+
+  ihdr.writeUInt32BE(options.width, 0);
+  ihdr.writeUInt32BE(options.height, 4);
+  ihdr[8] = 8; // Bit depth.
+  ihdr[9] = 0; // Grayscale.
+  ihdr[10] = 0; // Deflate compression.
+  ihdr[11] = 0; // Adaptive filtering, with filter 0 per row below.
+  ihdr[12] = 0; // No interlace.
+
+  const compressed = zlib.deflateSync(rawScanlines, {
+    level: options.compressionLevel,
+  });
+
+  return Buffer.concat([
+    pngSignature,
+    createPngChunk("IHDR", ihdr),
+    createPngChunk("IDAT", compressed),
+    createPngChunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+
+function createFilterlessPngScanlines(options) {
+  const rowStride = options.width + 1;
+  const scanlines = Buffer.alloc(rowStride * options.height);
+
+  for (let y = 0; y < options.height; y += 1) {
+    const sourceOffset = y * options.width;
+    const targetOffset = y * rowStride;
+
+    scanlines[targetOffset] = 0;
+    scanlines.set(
+      options.pixels.subarray(sourceOffset, sourceOffset + options.width),
+      targetOffset + 1,
+    );
+  }
+
+  return scanlines;
+}
+
+function createPngChunk(type, data) {
+  const typeBuffer = Buffer.from(type, "ascii");
+  const chunk = Buffer.alloc(12 + data.length);
+
+  chunk.writeUInt32BE(data.length, 0);
+  typeBuffer.copy(chunk, 4);
+  data.copy(chunk, 8);
+  chunk.writeUInt32BE(
+    crc32(Buffer.concat([typeBuffer, data])),
+    8 + data.length,
+  );
+
+  return chunk;
+}
+
+const crc32Table = createCrc32Table();
+
+function createCrc32Table() {
+  const table = new Uint32Array(256);
+
+  for (let i = 0; i < table.length; i += 1) {
+    let value = i;
+
+    for (let bit = 0; bit < 8; bit += 1) {
+      value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+    }
+
+    table[i] = value >>> 0;
+  }
+
+  return table;
+}
+
+function crc32(buffer) {
+  let crc = 0xffffffff;
+
+  for (const byte of buffer) {
+    crc = crc32Table[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  }
+
+  return (crc ^ 0xffffffff) >>> 0;
 }
 
 function compositeMaskFrame(instructions) {
@@ -645,16 +779,24 @@ function createRecommendations(options) {
   const idPreparedWindowBytes =
     preparedWindowFrames * fixture.idMaskBytesPerFrame;
   const paletteBytesPerClassStyleChange = fixture.classCount * 4;
+  const pngPreparedWindowBytes = options.cases
+    .filter((result) => result.caseName.startsWith("id-mask-png-"))
+    .map((result) => ({
+      caseName: result.caseName,
+      preparedWindowBytes: preparedWindowFrames * result.artifactBytes.mean,
+    }));
 
   return {
     idMaskPreparedWindowBytes: idPreparedWindowBytes,
     paletteBytesPerClassStyleChange,
     preparedWindowFrames,
     preparedWindowSeconds: options.preparedWindowSeconds,
+    pngPreparedWindowBytes,
     rgbaPreparedWindowBytes,
     summary: [
       "Current RGBA artifacts are simple and renderer-friendly, but full-frame mask frames are byte-heavy.",
       "An ID-mask representation would reduce upload/cache bytes and make per-class style changes palette-sized instead of prepared-window-sized.",
+      "PNG ID-mask artifacts are dramatically smaller on this sparse fixture, but encode time is still paid on top of RLE decode.",
       "Actual shader complexity and Pixi integration still need a browser/GPU prototype before replacing the current stable path.",
     ],
   };
@@ -695,6 +837,12 @@ function renderConsoleSummary(report) {
     `5s ID-mask prepared window: ${formatBytes(
       report.recommendations.idMaskPreparedWindowBytes,
     )}`,
+    ...report.recommendations.pngPreparedWindowBytes.map(
+      (result) =>
+        `5s ${result.caseName} prepared window: ${formatBytes(
+          result.preparedWindowBytes,
+        )}`,
+    ),
   ];
 
   return lines.join("\n");
@@ -709,6 +857,12 @@ function renderMarkdownReport(report) {
         )} | ${formatMs(result.timingMs.p95)} | ${formatMs(
           result.projectedFullFixtureMs,
         )} | ${formatBytes(result.artifactBytes.mean)} |`,
+    )
+    .join("\n");
+  const pngPreparedWindowRows = report.recommendations.pngPreparedWindowBytes
+    .map(
+      (result) =>
+        `- ${result.caseName}: ${formatBytes(result.preparedWindowBytes)}`,
     )
     .join("\n");
 
@@ -749,6 +903,7 @@ ${rows}
 - ID-mask candidate: ${formatBytes(
     report.recommendations.idMaskPreparedWindowBytes,
   )}
+${pngPreparedWindowRows}
 - Per-class palette update: ${formatBytes(
     report.recommendations.paletteBytesPerClassStyleChange,
   )}
@@ -761,6 +916,9 @@ ${report.recommendations.summary.map((item) => `- ${item}`).join("\n")}
 
 - Timing measures CPU artifact preparation in Node.js using the same RLE decode
   and current RGBA compositor path used by the library.
+- PNG timing measures a benchmark-only filterless grayscale PNG ID mask encoded
+  with Node zlib. It does not measure browser-native image decode or Pixi/GPU
+  texture upload.
 - Texture upload bytes are estimated from artifact byte sizes. Actual GPU upload
   and fragment shader time require a browser/GPU benchmark.
 - Results are local-machine measurements; use trends and ratios, not absolute
