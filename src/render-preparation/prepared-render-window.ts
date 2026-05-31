@@ -2,6 +2,7 @@ import {
   createMaskFramePreparer,
   type PreparedMaskFrame,
 } from "#render-preparation/mask-frame-preparer";
+import { getBrowserMaskPreparationWorkerCount } from "#render-preparation/mask-preparation-worker-count";
 import type { SerializableMaskInstruction } from "#render-preparation/mask-preparation-worker-protocol";
 import type { BufferedDetectionTimeline } from "#types/detection-timeline";
 import type { DetectionFrame } from "#types/detections";
@@ -18,7 +19,6 @@ const DEFAULT_MASK_FRAME_CACHE_SIZE = 24;
 const DEFAULT_MASK_PENDING_FRAME_COUNT = 8;
 const DEFAULT_MASK_PREFETCH_FRAME_COUNT = 12;
 const DEFAULT_MASK_SCHEDULE_BATCH_SIZE = 2;
-const DEFAULT_MASK_PREPARATION_WORKER_COUNT = 2;
 const DEFAULT_PREPARED_WINDOW_SCAN_INTERVAL_SECONDS = 0.15;
 
 type ScheduledPreparationTask = ReturnType<typeof setTimeout>;
@@ -91,11 +91,8 @@ export function createPreparedRenderWindow(options: {
     1,
     maskFrameOptions?.scheduleBatchSize ?? DEFAULT_MASK_SCHEDULE_BATCH_SIZE,
   );
-  const workerCount = Math.max(
-    1,
-    Math.floor(
-      maskFrameOptions?.workerCount ?? DEFAULT_MASK_PREPARATION_WORKER_COUNT,
-    ),
+  const workerCount = getBrowserMaskPreparationWorkerCount(
+    maskFrameOptions?.workerCount,
   );
 
   let maskStyle = options.maskStyle ?? null;

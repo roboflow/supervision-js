@@ -146,6 +146,10 @@ Manual observation:
 - CPU usage may rise, but the main UI should remain responsive.
 - The basketball demo currently uses a 4-worker mask-preparation pool and
   exposes in-flight worker diagnostics so throughput can be observed directly.
+- Automatic worker count uses a conservative browser-aware default: roughly half
+  of `navigator.hardwareConcurrency`, capped at 4 workers. Explicit worker
+  counts are clamped to a small safe range so callers can tune without creating
+  runaway worker pools.
 
 ### 4. Prepared-Artifact Playback Gate
 

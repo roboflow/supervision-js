@@ -1,5 +1,6 @@
 import { compositeMaskFrame } from "#render-preparation/mask-frame-compositor";
 import { createDefaultRenderPreparationWorkerFactory } from "#render-preparation/default-render-preparation-worker";
+import { getBrowserMaskPreparationWorkerCount } from "#render-preparation/mask-preparation-worker-count";
 import {
   MaskPreparationWorkerMessageType,
   type MaskFramePreparationJob,
@@ -14,8 +15,6 @@ import {
   type RenderPreparationWorkerFactory,
 } from "#types/render-preparation";
 import { createWorkerRpcClient } from "#workers/worker-rpc-client";
-
-const DEFAULT_MASK_PREPARATION_WORKER_COUNT = 2;
 
 export interface PreparedMaskFrame {
   readonly height: number;
@@ -118,7 +117,7 @@ function createWorkerPreparerIfAvailable(options: {
   const workerFactory =
     options.renderPreparation?.workerFactory ??
     createDefaultRenderPreparationWorkerFactory();
-  const workerCount = resolveWorkerCount(
+  const workerCount = getBrowserMaskPreparationWorkerCount(
     options.renderPreparation?.maskFrame?.workerCount,
   );
 
@@ -413,14 +412,6 @@ function isWorkerResponse(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function resolveWorkerCount(workerCount: number | undefined) {
-  if (workerCount === undefined) {
-    return DEFAULT_MASK_PREPARATION_WORKER_COUNT;
-  }
-
-  return Math.max(1, Math.floor(workerCount));
 }
 
 function getErrorMessage(error: unknown, fallback: string) {
