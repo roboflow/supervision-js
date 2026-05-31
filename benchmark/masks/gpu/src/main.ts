@@ -1,4 +1,13 @@
-import { Application, ImageSource, Sprite, Texture } from "pixi.js";
+import {
+  Application,
+  ImageSource,
+  Mesh,
+  MeshGeometry,
+  Shader,
+  Sprite,
+  Texture,
+  UniformGroup,
+} from "pixi.js";
 
 const fixtureDetectionsPath = "/demo/fixtures/basketball_sam3/detections.json";
 const fixtureManifestPath =
@@ -7,6 +16,7 @@ const sampleFrameCount = 45;
 const warmupFrameCount = 5;
 const yieldEveryArtifactCount = 2;
 const yieldEveryRenderCount = 5;
+const maxPaletteEntries = 32;
 const thresholds = [0.5, 0.1] as const;
 const pngSignature = new Uint8Array([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
@@ -32,6 +42,111 @@ const fallbackClassStyle = {
   fill: 0x38bdf8,
   stroke: 0x7dd3fc,
 };
+
+const paletteShaderVertexGl = `#version 300 es
+precision highp float;
+
+in vec2 aPosition;
+in vec2 aUV;
+
+uniform mat3 uProjectionMatrix;
+uniform mat3 uWorldTransformMatrix;
+uniform vec4 uWorldColorAlpha;
+uniform mat3 uTransformMatrix;
+uniform vec4 uColor;
+
+out vec2 vUV;
+out vec4 vColor;
+
+void main(void) {
+  mat3 modelViewProjectionMatrix =
+    uProjectionMatrix * uWorldTransformMatrix * uTransformMatrix;
+
+  gl_Position =
+    vec4((modelViewProjectionMatrix * vec3(aPosition, 1.0)).xy, 0.0, 1.0);
+  vUV = aUV;
+  vColor = uWorldColorAlpha * uColor;
+}
+`;
+
+const paletteShaderFragmentGl = `#version 300 es
+precision highp float;
+precision highp int;
+
+in vec2 vUV;
+in vec4 vColor;
+
+uniform sampler2D uTexture;
+uniform vec4 uFillPalette[${maxPaletteEntries}];
+uniform vec4 uStrokePalette[${maxPaletteEntries}];
+uniform vec2 uTextureSize;
+uniform float uBorderEnabled;
+
+out vec4 finalColor;
+
+float sampleMaskId(vec2 uv) {
+  return floor(texture(uTexture, uv).r * 255.0 + 0.5);
+}
+
+vec4 readFill(float maskId) {
+  int paletteIndex = int(clamp(maskId, 0.0, float(${maxPaletteEntries - 1})));
+
+  return uFillPalette[paletteIndex];
+}
+
+vec4 readStroke(float maskId) {
+  int paletteIndex = int(clamp(maskId, 0.0, float(${maxPaletteEntries - 1})));
+
+  return uStrokePalette[paletteIndex];
+}
+
+bool differs(float left, float right) {
+  return abs(left - right) > 0.5;
+}
+
+float neighboringMaskId(vec2 texel) {
+  float right = sampleMaskId(vUV + vec2(texel.x, 0.0));
+  float left = sampleMaskId(vUV + vec2(-texel.x, 0.0));
+  float down = sampleMaskId(vUV + vec2(0.0, texel.y));
+  float up = sampleMaskId(vUV + vec2(0.0, -texel.y));
+
+  return max(max(right, left), max(down, up));
+}
+
+void main(void) {
+  float centerId = sampleMaskId(vUV);
+  vec2 texel = 1.0 / uTextureSize;
+
+  if (centerId < 0.5) {
+    if (uBorderEnabled > 0.5) {
+      float borderId = neighboringMaskId(texel);
+
+      if (borderId > 0.5) {
+        finalColor = readStroke(borderId) * vColor;
+        return;
+      }
+    }
+
+    finalColor = vec4(0.0);
+    return;
+  }
+
+  if (uBorderEnabled > 0.5) {
+    bool isBoundary =
+      differs(sampleMaskId(vUV + vec2(texel.x, 0.0)), centerId) ||
+      differs(sampleMaskId(vUV + vec2(-texel.x, 0.0)), centerId) ||
+      differs(sampleMaskId(vUV + vec2(0.0, texel.y)), centerId) ||
+      differs(sampleMaskId(vUV + vec2(0.0, -texel.y)), centerId);
+
+    if (isBoundary) {
+      finalColor = readStroke(centerId) * vColor;
+      return;
+    }
+  }
+
+  finalColor = readFill(centerId) * vColor;
+}
+`;
 
 interface DetectionMask {
   readonly counts: string;
@@ -175,12 +290,27 @@ interface PngArtifact {
   readonly width: number;
 }
 
+interface PngPaletteArtifact extends PngArtifact {
+  readonly fillPalette: Float32Array<ArrayBuffer>;
+  readonly strokePalette: Float32Array<ArrayBuffer>;
+}
+
 interface RenderResource {
   readonly decodeMs: number;
   readonly height: number;
   readonly resource: ImageBitmap;
   readonly width: number;
   close(): void;
+}
+
+interface PaletteRenderResource extends RenderResource {
+  readonly fillPalette: Float32Array<ArrayBuffer>;
+  readonly strokePalette: Float32Array<ArrayBuffer>;
+}
+
+interface PaletteShaderRenderer {
+  render(resource: PaletteRenderResource): void;
+  destroy(): void;
 }
 
 declare global {
@@ -276,6 +406,40 @@ async function run() {
         caseName: "pixi-png-id-mask-decode-upload-render",
         confidenceThreshold,
         frameInputs,
+        sampledInputs,
+        sprite,
+        warmupInputs,
+      }),
+    );
+
+    setStatus(
+      `Preparing PNG ID-mask palette shader artifacts at ${confidenceThreshold}...`,
+    );
+    cases.push(
+      await benchmarkPngPaletteShaderCase({
+        app,
+        artifactFactory: createPngPaletteArtifact,
+        caseName: "pixi-png-id-mask-palette-shader",
+        confidenceThreshold,
+        frameInputs,
+        includeBorder: false,
+        sampledInputs,
+        sprite,
+        warmupInputs,
+      }),
+    );
+
+    setStatus(
+      `Preparing PNG ID-mask palette border shader artifacts at ${confidenceThreshold}...`,
+    );
+    cases.push(
+      await benchmarkPngPaletteShaderCase({
+        app,
+        artifactFactory: createPngPaletteArtifact,
+        caseName: "pixi-png-id-mask-palette-border-shader",
+        confidenceThreshold,
+        frameInputs,
+        includeBorder: true,
         sampledInputs,
         sprite,
         warmupInputs,
@@ -429,6 +593,82 @@ async function benchmarkPngDecodeUploadCase(options: {
   });
 }
 
+async function benchmarkPngPaletteShaderCase(options: {
+  readonly app: Application;
+  readonly artifactFactory: (
+    input: BenchmarkFrameInput,
+  ) => Promise<PngPaletteArtifact>;
+  readonly caseName: string;
+  readonly confidenceThreshold: number;
+  readonly frameInputs: readonly BenchmarkFrameInput[];
+  readonly includeBorder: boolean;
+  readonly sampledInputs: readonly BenchmarkFrameInput[];
+  readonly sprite: Sprite;
+  readonly warmupInputs: readonly BenchmarkFrameInput[];
+}): Promise<GpuBenchmarkCase> {
+  const shaderRenderer = createPaletteShaderRenderer(options.app, {
+    height: options.sampledInputs[0]?.detections[0]?.mask.height ?? 1,
+    includeBorder: options.includeBorder,
+    width: options.sampledInputs[0]?.detections[0]?.mask.width ?? 1,
+  });
+
+  try {
+    options.sprite.visible = false;
+
+    const warmupArtifacts = await prepareArtifacts(
+      options.warmupInputs,
+      options.artifactFactory,
+    );
+
+    for (const artifact of warmupArtifacts) {
+      const resource = await decodePngPaletteArtifact(artifact);
+
+      shaderRenderer.render(resource);
+      resource.close();
+      await yieldToBrowser();
+    }
+
+    const sampledArtifacts = await prepareArtifacts(
+      options.sampledInputs,
+      options.artifactFactory,
+    );
+    const resources: PaletteRenderResource[] = [];
+
+    for (let index = 0; index < sampledArtifacts.length; index += 1) {
+      const artifact = sampledArtifacts[index];
+
+      if (!artifact) {
+        continue;
+      }
+
+      resources.push(await decodePngPaletteArtifact(artifact));
+
+      if (index % yieldEveryArtifactCount === 0) {
+        await yieldToBrowser();
+      }
+    }
+
+    return await runRenderBenchmark({
+      app: options.app,
+      artifactBytes: sampledArtifacts.map((artifact) => artifact.artifactBytes),
+      caseName: options.caseName,
+      confidenceThreshold: options.confidenceThreshold,
+      frameInputs: options.frameInputs,
+      renderResource: (resource) =>
+        shaderRenderer.render(resource as PaletteRenderResource),
+      resources,
+      sampledDetectionCount: options.sampledInputs.reduce(
+        (count, input) => count + input.detections.length,
+        0,
+      ),
+      sampledFrameCount: options.sampledInputs.length,
+    });
+  } finally {
+    shaderRenderer.destroy();
+    options.sprite.visible = true;
+  }
+}
+
 async function runUploadBenchmark(options: {
   readonly app: Application;
   readonly artifactBytes: readonly number[];
@@ -439,6 +679,31 @@ async function runUploadBenchmark(options: {
   readonly sampledFrameCount: number;
   readonly sprite: Sprite;
   readonly resources: readonly RenderResource[];
+}): Promise<GpuBenchmarkCase> {
+  return await runRenderBenchmark({
+    app: options.app,
+    artifactBytes: options.artifactBytes,
+    caseName: options.caseName,
+    confidenceThreshold: options.confidenceThreshold,
+    frameInputs: options.frameInputs,
+    renderResource: (resource) =>
+      renderResource(options.app, options.sprite, resource),
+    resources: options.resources,
+    sampledDetectionCount: options.sampledDetectionCount,
+    sampledFrameCount: options.sampledFrameCount,
+  });
+}
+
+async function runRenderBenchmark(options: {
+  readonly app: Application;
+  readonly artifactBytes: readonly number[];
+  readonly caseName: string;
+  readonly confidenceThreshold: number;
+  readonly frameInputs: readonly BenchmarkFrameInput[];
+  readonly renderResource: (resource: RenderResource) => void;
+  readonly resources: readonly RenderResource[];
+  readonly sampledDetectionCount: number;
+  readonly sampledFrameCount: number;
 }): Promise<GpuBenchmarkCase> {
   const totalDurationsMs: number[] = [];
   const decodeDurationsMs: number[] = [];
@@ -453,7 +718,7 @@ async function runUploadBenchmark(options: {
 
     const renderStart = performance.now();
 
-    renderResource(options.app, options.sprite, resource);
+    options.renderResource(resource);
 
     const end = performance.now();
     const textureRenderMs = end - renderStart;
@@ -555,6 +820,102 @@ function renderResource(
   texture.destroy(true);
 }
 
+function createPaletteShaderRenderer(
+  app: Application,
+  options: {
+    readonly height: number;
+    readonly includeBorder: boolean;
+    readonly width: number;
+  },
+): PaletteShaderRenderer {
+  const uniformGroup = new UniformGroup({
+    uBorderEnabled: { value: options.includeBorder ? 1 : 0, type: "f32" },
+    uFillPalette: {
+      size: maxPaletteEntries,
+      type: "vec4<f32>",
+      value: new Float32Array(maxPaletteEntries * 4),
+    },
+    uStrokePalette: {
+      size: maxPaletteEntries,
+      type: "vec4<f32>",
+      value: new Float32Array(maxPaletteEntries * 4),
+    },
+    uTextureSize: {
+      type: "vec2<f32>",
+      value: new Float32Array([options.width, options.height]),
+    },
+  });
+  const shader = Shader.from({
+    gl: {
+      fragment: paletteShaderFragmentGl,
+      vertex: paletteShaderVertexGl,
+    },
+    resources: {
+      maskUniforms: uniformGroup,
+      uSampler: Texture.EMPTY.source.style,
+      uTexture: Texture.EMPTY.source,
+    },
+  });
+  const geometry = new MeshGeometry({
+    indices: new Uint32Array([0, 1, 2, 0, 2, 3]),
+    positions: new Float32Array([
+      0,
+      0,
+      options.width,
+      0,
+      options.width,
+      options.height,
+      0,
+      options.height,
+    ]),
+    shrinkBuffersToFit: true,
+    topology: "triangle-list",
+    uvs: new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]),
+  });
+  const mesh = new Mesh({ geometry, shader });
+
+  mesh.visible = false;
+  app.stage.addChild(mesh);
+
+  return {
+    destroy() {
+      app.stage.removeChild(mesh);
+      mesh.destroy();
+      shader.destroy(true);
+      geometry.destroy();
+    },
+    render(resource: PaletteRenderResource) {
+      const texture = new Texture({
+        dynamic: false,
+        source: new ImageSource({
+          dynamic: false,
+          height: resource.height,
+          resource: resource.resource,
+          width: resource.width,
+        }),
+      });
+
+      shader.resources.uTexture = texture.source;
+      shader.resources.uSampler = texture.source.style;
+      uniformGroup.uniforms.uFillPalette = resource.fillPalette;
+      uniformGroup.uniforms.uStrokePalette = resource.strokePalette;
+      uniformGroup.uniforms.uTextureSize = new Float32Array([
+        resource.width,
+        resource.height,
+      ]);
+      uniformGroup.uniforms.uBorderEnabled = options.includeBorder ? 1 : 0;
+      uniformGroup.update();
+      mesh.visible = true;
+      app.render();
+      forceGpuFinish(app.renderer);
+      mesh.visible = false;
+      shader.resources.uTexture = Texture.EMPTY.source;
+      shader.resources.uSampler = Texture.EMPTY.source.style;
+      texture.destroy(true);
+    },
+  };
+}
+
 async function createRgbaBitmapArtifact(
   input: BenchmarkFrameInput,
   options: { readonly includeStroke: boolean },
@@ -603,6 +964,18 @@ async function createPngIdMaskArtifact(
   };
 }
 
+async function createPngPaletteArtifact(
+  input: BenchmarkFrameInput,
+): Promise<PngPaletteArtifact> {
+  const artifact = await createPngIdMaskArtifact(input);
+
+  return {
+    ...artifact,
+    fillPalette: createClassPalette(input, { alpha: 0.3, role: "fill" }),
+    strokePalette: createClassPalette(input, { alpha: 1, role: "stroke" }),
+  };
+}
+
 async function decodePngArtifact(
   artifact: PngArtifact,
 ): Promise<RenderResource> {
@@ -618,6 +991,18 @@ async function decodePngArtifact(
     height: artifact.height,
     resource: bitmap,
     width: artifact.width,
+  };
+}
+
+async function decodePngPaletteArtifact(
+  artifact: PngPaletteArtifact,
+): Promise<PaletteRenderResource> {
+  const resource = await decodePngArtifact(artifact);
+
+  return {
+    ...resource,
+    fillPalette: artifact.fillPalette,
+    strokePalette: artifact.strokePalette,
   };
 }
 
@@ -664,6 +1049,39 @@ function resolveClassStyle(className: string | undefined) {
   return className
     ? (basketballClassStyles[className] ?? fallbackClassStyle)
     : fallbackClassStyle;
+}
+
+function createClassPalette(
+  frameInput: BenchmarkFrameInput,
+  options: {
+    readonly alpha: number;
+    readonly role: "fill" | "stroke";
+  },
+) {
+  const palette = new Float32Array(maxPaletteEntries * 4);
+  const entryCount = Math.min(
+    frameInput.detections.length,
+    maxPaletteEntries - 1,
+  );
+
+  for (let index = 0; index < entryCount; index += 1) {
+    const detection = frameInput.detections[index];
+
+    if (!detection) {
+      continue;
+    }
+
+    const style = resolveClassStyle(detection.className);
+    const color = options.role === "fill" ? style.fill : style.stroke;
+    const offset = (index + 1) * 4;
+
+    palette[offset] = ((color >> 16) & 0xff) / 255;
+    palette[offset + 1] = ((color >> 8) & 0xff) / 255;
+    palette[offset + 2] = (color & 0xff) / 255;
+    palette[offset + 3] = options.alpha;
+  }
+
+  return palette;
 }
 
 function buildIdMaskFrame(

@@ -9,7 +9,9 @@ CPU artifact preparation cost plus transfer/upload-size pressure for:
 - current RGBA composited mask artifacts with mask borders;
 - an ID-mask artifact candidate for future shader/palette styling;
 - frame-level grayscale PNG ID-mask artifacts at fast and normal compression
-  levels.
+  levels;
+- browser/Pixi upload, decode, palette shader, and border shader costs for
+  PNG ID-mask artifacts.
 
 Run from the repo root:
 
