@@ -31,6 +31,7 @@ import { createBasketballSamplePresentation } from "../presentation/basketball-p
 import {
   UPLOAD_DETECTION_CHUNK_SECONDS,
   UPLOAD_PREDICTION_PLAYBACK_GATE_SECONDS,
+  UPLOAD_RENDER_PREPARATION_PLAYBACK_GATE_SECONDS,
 } from "./demo-session-config";
 import type {
   DemoSessionCallbacks,
@@ -144,6 +145,11 @@ export async function createUploadSession(
         onState: options.onRendererState,
         renderPreparation: {
           onDiagnostics: options.onRenderPreparationDiagnostics,
+          playbackGate: {
+            enabled: true,
+            requiredAheadSeconds:
+              UPLOAD_RENDER_PREPARATION_PLAYBACK_GATE_SECONDS,
+          },
         },
         onSource: options.onSourceState,
       },

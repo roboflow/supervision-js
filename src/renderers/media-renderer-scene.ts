@@ -10,7 +10,10 @@ import type {
 } from "#types/media-renderer";
 import type { LabelStyle } from "#types/label-style";
 import type { MaskStyle } from "#types/mask-style";
-import type { RenderPreparationOptions } from "#types/render-preparation";
+import type {
+  RenderPreparationOptions,
+  RenderPreparationPlaybackGateOptions,
+} from "#types/render-preparation";
 
 export interface MediaRendererSceneOptions {
   readonly container: HTMLElement;
@@ -33,6 +36,10 @@ export interface PresentedMediaSample {
 export interface MediaRendererScene {
   initializeMedia(dimensions: { width: number; height: number }): void;
   presentSample(sample: DecodedVideoSample): PresentedMediaSample;
+  waitForRenderPreparation?(
+    mediaTime: number,
+    options: RenderPreparationPlaybackGateOptions,
+  ): Promise<void>;
   setPresentation(
     presentation: MediaRendererPresentation,
     mediaTime: number,

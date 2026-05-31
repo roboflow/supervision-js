@@ -434,6 +434,121 @@ describe("prepared render window", () => {
     }
   });
 
+  it("waits until the active mask and requested lookahead are prepared", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const fakeWorker = createFakeMaskPreparationWorker({
+        autoComplete: false,
+      });
+      const renderWindow = createPreparedRenderWindow({
+        detectionTimeline: createTimeline(manyFrames),
+        maskStyle: new BaseMaskStyle(),
+        renderPreparation: {
+          maskFrame: {
+            maxPendingFrameCount: 3,
+            prefetchFrameCount: 3,
+            scheduleBatchSize: 3,
+            scanIntervalSeconds: 0,
+            workerCount: 1,
+          },
+          mode: RenderPreparationMode.Worker,
+          workerFactory: {
+            createWorker: () => fakeWorker.worker,
+          },
+        },
+      });
+      const ready = vi.fn();
+
+      void (
+        renderWindow as unknown as {
+          waitForReady(
+            mediaTime: number,
+            options: { readonly requiredAheadSeconds: number },
+          ): Promise<void>;
+        }
+      )
+        .waitForReady(0, { requiredAheadSeconds: 0.08 })
+        .then(ready);
+
+      await vi.runOnlyPendingTimersAsync();
+
+      expect(ready).not.toHaveBeenCalled();
+
+      fakeWorker.completeNext();
+      await flushMaskPreparationTimers(2);
+      expect(ready).not.toHaveBeenCalled();
+
+      fakeWorker.completeNext();
+      await flushMaskPreparationTimers(2);
+      expect(ready).not.toHaveBeenCalled();
+
+      fakeWorker.completeNext();
+      await flushMaskPreparationTimers(2);
+      expect(ready).toHaveBeenCalledOnce();
+
+      renderWindow.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("refreshes the prepared target window around playback-gated frames", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const fakeWorker = createFakeMaskPreparationWorker({
+        autoComplete: false,
+      });
+      const renderWindow = createPreparedRenderWindow({
+        detectionTimeline: createTimeline(manyFrames),
+        maskStyle: new BaseMaskStyle(),
+        renderPreparation: {
+          maskFrame: {
+            maxPendingFrameCount: 4,
+            prefetchFrameCount: 3,
+            scheduleBatchSize: 3,
+            scanIntervalSeconds: 10,
+            workerCount: 1,
+          },
+          mode: RenderPreparationMode.Worker,
+          workerFactory: {
+            createWorker: () => fakeWorker.worker,
+          },
+        },
+      });
+
+      renderWindow.getFrame(0);
+      await vi.runOnlyPendingTimersAsync();
+      fakeWorker.completeNext();
+      await flushMaskPreparationTimers(2);
+
+      const ready = vi.fn();
+
+      void renderWindow
+        .waitForReady(0.04, { requiredAheadSeconds: 0.08 })
+        .then(ready);
+
+      fakeWorker.completeNext();
+      await flushMaskPreparationTimers(2);
+      expect(ready).not.toHaveBeenCalled();
+
+      fakeWorker.completeNext();
+      await flushMaskPreparationTimers(2);
+      expect(ready).not.toHaveBeenCalled();
+
+      fakeWorker.completeNext();
+      await flushMaskPreparationTimers(2);
+      expect(ready).toHaveBeenCalledOnce();
+
+      renderWindow.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("limits background mask scheduling while always admitting the active frame", () => {
     vi.useFakeTimers();
     resetMocks();
@@ -624,7 +739,23 @@ function createFakeMaskPreparationWorker(
   const autoComplete = options.autoComplete ?? true;
   const messages: unknown[] = [];
   const listeners: Array<(event: MessageEvent<unknown>) => void> = [];
+  let completedMessageCount = 0;
   let terminated = false;
+  const completeMessage = (message: {
+    readonly job: { readonly key: string };
+    readonly requestId: number;
+  }) => {
+    for (const listener of listeners) {
+      listener({
+        data: {
+          imageData: new ImageData(new Uint8ClampedArray(2 * 2 * 4), 2, 2),
+          key: message.job.key,
+          requestId: message.requestId,
+          type: MaskPreparationWorkerMessageType.Complete,
+        },
+      } as MessageEvent<unknown>);
+    }
+  };
   const worker = {
     addEventListener(type: string, listener: (event: MessageEvent) => void) {
       if (type === "message") {
@@ -642,16 +773,8 @@ function createFakeMaskPreparationWorker(
       }
 
       setTimeout(() => {
-        for (const listener of listeners) {
-          listener({
-            data: {
-              imageData: new ImageData(new Uint8ClampedArray(2 * 2 * 4), 2, 2),
-              key: message.job.key,
-              requestId: message.requestId,
-              type: MaskPreparationWorkerMessageType.Complete,
-            },
-          } as MessageEvent<unknown>);
-        }
+        completeMessage(message);
+        completedMessageCount += 1;
       }, 0);
     },
 
@@ -661,6 +784,21 @@ function createFakeMaskPreparationWorker(
   } as unknown as Worker;
 
   return {
+    completeNext() {
+      const message = messages[completedMessageCount] as
+        | {
+            readonly job: { readonly key: string };
+            readonly requestId: number;
+          }
+        | undefined;
+
+      if (!message) {
+        throw new Error("No pending fake worker message to complete.");
+      }
+
+      completeMessage(message);
+      completedMessageCount += 1;
+    },
     get terminated() {
       return terminated;
     },

@@ -153,7 +153,7 @@ Manual observation:
 
 ### 4. Prepared-Artifact Playback Gate
 
-Status: planned.
+Status: implemented.
 
 Spec:
 
@@ -161,6 +161,9 @@ Spec:
   lookahead, similar to detection prediction buffering.
 - Gate only on artifact kinds enabled by the current presentation.
 - Keep media playback ungated by default unless the caller opts in.
+- Keep the renderer core generic: it asks the scene to wait for render
+  preparation, while Pixi masks are the only current prepared artifact behind
+  that boundary.
 
 Test:
 
@@ -173,6 +176,8 @@ Manual observation:
 - With the gate enabled, playback may wait briefly before motion starts.
 - Once playing, masks should feel less flickery because prepared frames are
   already available.
+- The demo enables a 1s render-preparation playback gate for the basketball and
+  upload flows so this can be exercised without changing package defaults.
 
 ### 5. Future Mask Representation Research
 

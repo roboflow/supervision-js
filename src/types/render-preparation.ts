@@ -40,6 +40,11 @@ export interface RenderPreparationMaskFrameOptions {
   readonly workerCount?: number;
 }
 
+export interface RenderPreparationPlaybackGateOptions {
+  readonly enabled?: boolean;
+  readonly requiredAheadSeconds?: number;
+}
+
 export interface RenderPreparationActiveFrameDiagnostics {
   readonly key: string;
   readonly mediaTime: number;
@@ -72,5 +77,6 @@ export interface RenderPreparationOptions {
   readonly maskFrame?: RenderPreparationMaskFrameOptions;
   readonly mode?: RenderPreparationMode;
   readonly onDiagnostics?: (diagnostics: RenderPreparationDiagnostics) => void;
+  readonly playbackGate?: RenderPreparationPlaybackGateOptions;
   readonly workerFactory?: RenderPreparationWorkerFactory;
 }

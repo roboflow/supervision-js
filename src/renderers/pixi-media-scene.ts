@@ -202,6 +202,13 @@ export async function createPixiMediaScene(
       }
     },
 
+    waitForRenderPreparation(mediaTime, gateOptions) {
+      return (
+        maskLayer?.waitForRenderPreparation(mediaTime, gateOptions) ??
+        Promise.resolve()
+      );
+    },
+
     setPresentation(presentation, mediaTime) {
       boxLayer.setBoxStyle(presentation.boxStyle);
 

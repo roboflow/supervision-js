@@ -5,7 +5,10 @@ import {
 } from "#render-preparation/prepared-render-window";
 import type { BufferedDetectionTimeline } from "#types/detection-timeline";
 import type { MaskStyle } from "#types/mask-style";
-import type { RenderPreparationOptions } from "#types/render-preparation";
+import type {
+  RenderPreparationOptions,
+  RenderPreparationPlaybackGateOptions,
+} from "#types/render-preparation";
 import { resolveMaskStyleOpacity } from "#utils/mask-style";
 import type {
   ImageSource as PixiImageSource,
@@ -34,6 +37,10 @@ type SpriteConstructor = new (options?: {
 export interface PixiMaskLayer {
   createSprite(dimensions: { width: number; height: number }): PixiSprite;
   drawFrame(mediaTime: number): void;
+  waitForRenderPreparation(
+    mediaTime: number,
+    options: RenderPreparationPlaybackGateOptions,
+  ): Promise<void>;
   setMaskStyle(maskStyle: MaskStyle | null | undefined): void;
   destroy(): void;
 }
@@ -124,6 +131,10 @@ export function createPixiMaskLayer(options: {
       if (!canHoldVisibleMaskFor(preparedFrame.detectionFrame.mediaTime)) {
         hideSprite();
       }
+    },
+
+    waitForRenderPreparation(mediaTime, gateOptions) {
+      return preparedRenderWindow.waitForReady(mediaTime, gateOptions);
     },
 
     setMaskStyle(nextMaskStyle) {

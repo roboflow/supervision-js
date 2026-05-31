@@ -12,6 +12,7 @@ import {
   RenderPreparationArtifactFrameStatus,
   RenderPreparationArtifactKind,
   type RenderPreparationOptions,
+  type RenderPreparationPlaybackGateOptions,
 } from "#types/render-preparation";
 import { canReuseMaskStyleArtifacts } from "#utils/mask-style";
 
@@ -47,6 +48,10 @@ export enum PreparedRenderFrameMaskStatus {
 
 export interface PreparedRenderWindow {
   getFrame(mediaTime: number): PreparedRenderFrame | undefined;
+  waitForReady(
+    mediaTime: number,
+    options: RenderPreparationPlaybackGateOptions,
+  ): Promise<void>;
   setMaskStyle(maskStyle: MaskStyle | null | undefined): void;
   destroy(): void;
 }
@@ -113,6 +118,7 @@ export function createPreparedRenderWindow(options: {
   const queuedMaskFrameKeys: string[] = [];
   const inFlightMaskFrameKeys = new Set<string>();
   const emptyMaskFrameKeys = new Set<string>();
+  const readinessWaiters = new Set<() => void>();
   let scheduledQueuePump: ScheduledPreparationTask | undefined;
 
   const scheduleMaskFrame = (
@@ -362,6 +368,7 @@ export function createPreparedRenderWindow(options: {
   const schedulePreparedWindow = (
     detectionFrame: DetectionFrame | undefined,
     mediaTime: number,
+    scheduleOptions: { readonly force?: boolean } = {},
   ) => {
     const bufferState = options.detectionTimeline.getState();
     const bufferSignature = [
@@ -372,6 +379,7 @@ export function createPreparedRenderWindow(options: {
     ].join(":");
     const frameKey = detectionFrame ? getFrameKey(detectionFrame) : null;
     const shouldScanWindow =
+      scheduleOptions.force ||
       bufferSignature !== lastPreparedBufferSignature ||
       lastPreparedWindowMediaTime === null ||
       mediaTime < lastPreparedWindowMediaTime ||
@@ -424,34 +432,27 @@ export function createPreparedRenderWindow(options: {
   }
 
   return {
-    getFrame(mediaTime) {
-      if (isDestroyed) {
-        return undefined;
+    getFrame,
+
+    waitForReady(mediaTime, waitOptions) {
+      getFrame(mediaTime, { forcePreparedWindow: true });
+
+      if (isReadyForPresentation(mediaTime, waitOptions)) {
+        return Promise.resolve();
       }
 
-      const detectionFrame = options.detectionTimeline.selectFrame(mediaTime);
+      return new Promise((resolve) => {
+        const checkReady = () => {
+          if (!isDestroyed && !isReadyForPresentation(mediaTime, waitOptions)) {
+            return;
+          }
 
-      if (!detectionFrame) {
-        setActiveMaskFrame(null);
-        schedulePreparedWindow(undefined, mediaTime);
-        return undefined;
-      }
+          readinessWaiters.delete(checkReady);
+          resolve();
+        };
 
-      const key = getFrameKey(detectionFrame);
-
-      setActiveMaskFrame({
-        key,
-        mediaTime: detectionFrame.mediaTime,
+        readinessWaiters.add(checkReady);
       });
-      scheduleMaskFrame(detectionFrame, mediaTime, { force: true });
-      schedulePreparedWindow(detectionFrame, mediaTime);
-
-      return {
-        detectionFrame,
-        key,
-        maskFrame: preparedMaskFrames.get(key),
-        maskStatus: getMaskStatus(key),
-      };
     },
 
     setMaskStyle(nextMaskStyle) {
@@ -479,8 +480,46 @@ export function createPreparedRenderWindow(options: {
       isDestroyed = true;
       clearPreparedMaskFrames();
       maskFramePreparer.destroy();
+      notifyReadinessWaiters();
     },
   };
+
+  function getFrame(
+    mediaTime: number,
+    getFrameOptions: { readonly forcePreparedWindow?: boolean } = {},
+  ) {
+    if (isDestroyed) {
+      return undefined;
+    }
+
+    const detectionFrame = options.detectionTimeline.selectFrame(mediaTime);
+
+    if (!detectionFrame) {
+      setActiveMaskFrame(null);
+      schedulePreparedWindow(undefined, mediaTime, {
+        force: getFrameOptions.forcePreparedWindow,
+      });
+      return undefined;
+    }
+
+    const key = getFrameKey(detectionFrame);
+
+    setActiveMaskFrame({
+      key,
+      mediaTime: detectionFrame.mediaTime,
+    });
+    scheduleMaskFrame(detectionFrame, mediaTime, { force: true });
+    schedulePreparedWindow(detectionFrame, mediaTime, {
+      force: getFrameOptions.forcePreparedWindow,
+    });
+
+    return {
+      detectionFrame,
+      key,
+      maskFrame: preparedMaskFrames.get(key),
+      maskStatus: getMaskStatus(key),
+    };
+  }
 
   function emitDiagnostics(message?: string) {
     const status = maskFramePreparer.getStatus();
@@ -516,6 +555,7 @@ export function createPreparedRenderWindow(options: {
       message: message ?? status.message,
       workerStatus: status.workerStatus,
     });
+    notifyReadinessWaiters();
   }
 
   function evictPreparedMaskFrames() {
@@ -613,8 +653,15 @@ export function createPreparedRenderWindow(options: {
       return { frameCount: 0, seconds: 0 };
     }
 
+    return getPreparedAheadDiagnosticsFor(activeMaskFrame);
+  }
+
+  function getPreparedAheadDiagnosticsFor(frameRef: {
+    readonly key: string;
+    readonly mediaTime: number;
+  }) {
     const activeFrameIndex = lastPreparedWindowFrames.findIndex(
-      (frame) => getFrameKey(frame) === activeMaskFrame?.key,
+      (frame) => getFrameKey(frame) === frameRef.key,
     );
 
     if (activeFrameIndex < 0) {
@@ -622,7 +669,7 @@ export function createPreparedRenderWindow(options: {
     }
 
     let frameCount = 0;
-    let latestPreparedTime = activeMaskFrame.mediaTime;
+    let latestPreparedTime = frameRef.mediaTime;
 
     for (const frame of lastPreparedWindowFrames.slice(activeFrameIndex)) {
       const key = getFrameKey(frame);
@@ -637,8 +684,81 @@ export function createPreparedRenderWindow(options: {
 
     return {
       frameCount,
-      seconds: Math.max(0, latestPreparedTime - activeMaskFrame.mediaTime),
+      seconds: Math.max(0, latestPreparedTime - frameRef.mediaTime),
     };
+  }
+
+  function getPreparedTargetAheadSeconds(frameRef: {
+    readonly key: string;
+    readonly mediaTime: number;
+  }) {
+    const activeFrameIndex = lastPreparedTargetFrames.findIndex(
+      (frame) => getFrameKey(frame) === frameRef.key,
+    );
+
+    if (activeFrameIndex < 0) {
+      return 0;
+    }
+
+    const lastTargetFrame =
+      lastPreparedTargetFrames[lastPreparedTargetFrames.length - 1];
+
+    if (!lastTargetFrame) {
+      return 0;
+    }
+
+    return Math.max(0, lastTargetFrame.mediaTime - frameRef.mediaTime);
+  }
+
+  function isReadyForPresentation(
+    mediaTime: number,
+    waitOptions: RenderPreparationPlaybackGateOptions,
+  ) {
+    if (isDestroyed || !maskStyle || waitOptions.enabled === false) {
+      return true;
+    }
+
+    const detectionFrame = options.detectionTimeline.selectFrame(mediaTime);
+
+    if (!detectionFrame) {
+      return true;
+    }
+
+    const frameRef = {
+      key: getFrameKey(detectionFrame),
+      mediaTime: detectionFrame.mediaTime,
+    };
+    const activeStatus = getMaskStatus(frameRef.key);
+
+    if (activeStatus === PreparedRenderFrameMaskStatus.Pending) {
+      return false;
+    }
+
+    const requiredAheadSeconds = Math.max(
+      waitOptions.requiredAheadSeconds ?? 0,
+      0,
+    );
+
+    if (requiredAheadSeconds <= 0) {
+      return true;
+    }
+
+    const availableAheadSeconds = getPreparedTargetAheadSeconds(frameRef);
+    const requiredAvailableAheadSeconds = Math.min(
+      requiredAheadSeconds,
+      availableAheadSeconds,
+    );
+
+    return (
+      getPreparedAheadDiagnosticsFor(frameRef).seconds >=
+      requiredAvailableAheadSeconds
+    );
+  }
+
+  function notifyReadinessWaiters() {
+    for (const waiter of Array.from(readinessWaiters)) {
+      waiter();
+    }
   }
 
   function createPreparer() {
