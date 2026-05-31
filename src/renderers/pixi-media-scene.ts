@@ -32,9 +32,13 @@ export async function createPixiMediaScene(
     Container,
     Graphics,
     ImageSource,
+    Mesh,
+    MeshGeometry,
     Sprite,
+    Shader,
     Text,
     Texture,
+    UniformGroup,
   } = await import("pixi.js");
   const app: PixiApplication = new Application();
   const boxLayer = createPixiBoxLayer({
@@ -43,9 +47,14 @@ export async function createPixiMediaScene(
   });
   let maskLayer = options.maskStyle
     ? createPixiMaskLayer({
+        Container,
         ImageSource,
+        Mesh,
+        MeshGeometry,
+        Shader,
         Sprite,
         Texture,
+        UniformGroup,
         detectionTimeline: options.detectionTimeline,
         maskStyle: options.maskStyle,
         renderPreparation: options.renderPreparation,
@@ -87,7 +96,11 @@ export async function createPixiMediaScene(
   let mediaScene: PixiContainer | undefined;
   let boxGraphics: PixiGraphics | undefined;
   let labelContainer: PixiContainer | undefined;
-  let maskSprite: InstanceType<typeof Sprite> | undefined;
+  let maskDisplay:
+    | PixiContainer
+    | InstanceType<typeof Sprite>
+    | InstanceType<typeof Mesh>
+    | undefined;
   let mediaSprite: InstanceType<typeof Sprite> | undefined;
   let stagingTexture: TextureUpload | undefined;
   let stagingTextureSource: TextureUploadSource | undefined;
@@ -98,11 +111,14 @@ export async function createPixiMediaScene(
     }
 
     const children: Array<
-      PixiContainer | PixiGraphics | InstanceType<typeof Sprite>
+      | PixiContainer
+      | PixiGraphics
+      | InstanceType<typeof Mesh>
+      | InstanceType<typeof Sprite>
     > = [mediaSprite];
 
-    if (maskSprite) {
-      children.push(maskSprite);
+    if (maskDisplay) {
+      children.push(maskDisplay);
     }
 
     children.push(boxGraphics);
@@ -159,7 +175,7 @@ export async function createPixiMediaScene(
       });
       const scene: PixiContainer = new Container();
       mediaSprite = new Sprite({ texture });
-      maskSprite = maskLayer?.createSprite({
+      maskDisplay = maskLayer?.createSprite({
         height: mediaHeight,
         width: mediaWidth,
       });
@@ -217,14 +233,19 @@ export async function createPixiMediaScene(
           maskLayer.setMaskStyle(presentation.maskStyle);
         } else if (presentation.maskStyle) {
           maskLayer = createPixiMaskLayer({
+            Container,
             ImageSource,
+            Mesh,
+            MeshGeometry,
+            Shader,
             Sprite,
             Texture,
+            UniformGroup,
             detectionTimeline: options.detectionTimeline,
             maskStyle: presentation.maskStyle,
             renderPreparation: options.renderPreparation,
           });
-          maskSprite = maskLayer.createSprite({
+          maskDisplay = maskLayer.createSprite({
             height: mediaHeight,
             width: mediaWidth,
           });

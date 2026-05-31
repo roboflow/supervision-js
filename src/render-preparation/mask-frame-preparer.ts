@@ -1,5 +1,12 @@
-import { compositeMaskFrame } from "#render-preparation/mask-frame-compositor";
+import {
+  compositeMaskFrame,
+  createPngIdMaskFrame,
+} from "#render-preparation/mask-frame-compositor";
 import { createDefaultRenderPreparationWorkerFactory } from "#render-preparation/default-render-preparation-worker";
+import {
+  PreparedMaskFrameKind,
+  type PreparedMaskFrame,
+} from "#render-preparation/mask-frame-artifact";
 import { getBrowserMaskPreparationWorkerCount } from "#render-preparation/mask-preparation-worker-count";
 import {
   MaskPreparationWorkerMessageType,
@@ -16,13 +23,7 @@ import {
 } from "#types/render-preparation";
 import { createWorkerRpcClient } from "#workers/worker-rpc-client";
 
-export interface PreparedMaskFrame {
-  readonly height: number;
-  readonly key: string;
-  readonly source: HTMLCanvasElement | ImageBitmap;
-  readonly width: number;
-  close(): void;
-}
+export { PreparedMaskFrameKind, type PreparedMaskFrame };
 
 export interface MaskFramePreparerStatus {
   readonly executionMode: RenderPreparationExecutionMode;
@@ -159,6 +160,12 @@ function createMainThreadMaskFramePreparer(
         throw new Error("Mask frame preparer has been destroyed.");
       }
 
+      const pngIdMaskFrame = await createPreparedPngIdMaskFrame(job);
+
+      if (pngIdMaskFrame) {
+        return pngIdMaskFrame;
+      }
+
       const compositedFrame = compositeMaskFrame(job.instructions);
 
       if (!compositedFrame) {
@@ -191,6 +198,7 @@ function createMainThreadMaskFramePreparer(
         },
         height: compositedFrame.height,
         key: job.key,
+        kind: PreparedMaskFrameKind.RgbaImage,
         source: canvas,
         width: compositedFrame.width,
       };
@@ -202,6 +210,47 @@ function createMainThreadMaskFramePreparer(
   };
 
   return preparer;
+}
+
+async function createPreparedPngIdMaskFrame(
+  job: MaskFramePreparationJob,
+): Promise<PreparedMaskFrame | undefined> {
+  if (
+    typeof Blob === "undefined" ||
+    typeof createImageBitmap === "undefined" ||
+    typeof CompressionStream === "undefined"
+  ) {
+    return undefined;
+  }
+
+  try {
+    const frame = await createPngIdMaskFrame(job.instructions);
+
+    if (!frame) {
+      return undefined;
+    }
+
+    const imageBitmap = await createImageBitmap(
+      new Blob([frame.png], { type: "image/png" }),
+    );
+
+    return {
+      close() {
+        imageBitmap.close();
+      },
+      fillPalette: frame.fillPalette,
+      hasStroke: frame.hasStroke,
+      height: imageBitmap.height,
+      key: job.key,
+      kind: PreparedMaskFrameKind.PngIdMask,
+      png: frame.png,
+      source: imageBitmap,
+      strokePalette: frame.strokePalette,
+      width: imageBitmap.width,
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 function createWorkerMaskFramePreparer(
@@ -349,6 +398,34 @@ function createPreparedFrameFromWorkerResponse(
     { readonly type: MaskPreparationWorkerMessageType.Complete }
   >,
 ): PreparedMaskFrame {
+  if (message.artifactKind === PreparedMaskFrameKind.PngIdMask) {
+    if (
+      !message.imageBitmap ||
+      !message.fillPalette ||
+      !message.png ||
+      !message.strokePalette
+    ) {
+      throw new Error(
+        "Mask preparation worker returned an incomplete ID mask artifact.",
+      );
+    }
+
+    return {
+      close() {
+        message.imageBitmap?.close();
+      },
+      fillPalette: message.fillPalette,
+      hasStroke: message.hasStroke ?? false,
+      height: message.imageBitmap.height,
+      key: message.key,
+      kind: PreparedMaskFrameKind.PngIdMask,
+      png: message.png,
+      source: message.imageBitmap,
+      strokePalette: message.strokePalette,
+      width: message.imageBitmap.width,
+    };
+  }
+
   if (message.imageBitmap) {
     return {
       close() {
@@ -356,6 +433,7 @@ function createPreparedFrameFromWorkerResponse(
       },
       height: message.imageBitmap.height,
       key: message.key,
+      kind: PreparedMaskFrameKind.RgbaImage,
       source: message.imageBitmap,
       width: message.imageBitmap.width,
     };
@@ -383,6 +461,7 @@ function createPreparedFrameFromWorkerResponse(
     },
     height: message.imageData.height,
     key: message.key,
+    kind: PreparedMaskFrameKind.RgbaImage,
     source: canvas,
     width: message.imageData.width,
   };

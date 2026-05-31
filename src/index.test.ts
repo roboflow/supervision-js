@@ -964,10 +964,16 @@ describe("package entrypoint", () => {
         mediaTime: 0,
       }),
     );
+    const maskContainer = pixiMock.containerInstances[1];
+
     expect(scene?.children).toEqual([
       pixiMock.spriteInstances[0],
-      pixiMock.spriteInstances[1],
+      maskContainer,
       boxGraphics,
+    ]);
+    expect(maskContainer?.children).toEqual([
+      pixiMock.spriteInstances[1],
+      pixiMock.meshInstances[0],
     ]);
     expect(pixiMock.spriteInstances[1]).toMatchObject({
       height: 720,
@@ -1206,6 +1212,107 @@ describe("package entrypoint", () => {
 
       layer.destroy();
     } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("renders PNG ID-mask artifacts through the Pixi shader path", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    const originalCreateImageBitmap = globalThis.createImageBitmap;
+    const imageBitmap = {
+      close: vi.fn(),
+      height: 2,
+      width: 2,
+    } as unknown as ImageBitmap;
+
+    globalThis.createImageBitmap = vi.fn(async () => imageBitmap);
+
+    try {
+      const { createPixiMaskLayer } =
+        await import("./renderers/pixi-mask-layer");
+      const {
+        Container,
+        ImageSource,
+        Mesh,
+        MeshGeometry,
+        Shader,
+        Sprite,
+        Texture,
+        UniformGroup,
+      } = await import("pixi.js");
+      const detectionFrames = [
+        {
+          detections: [
+            {
+              mask: {
+                counts: "021",
+                encoding: DetectionMaskEncoding.CompressedRle,
+                height: 2,
+                width: 2,
+              },
+            },
+          ],
+          mediaTime: 0,
+        },
+      ];
+      const detectionTimeline = {
+        destroy: vi.fn(),
+        getBufferedFrames: vi.fn(() => detectionFrames),
+        getState: vi.fn(() => ({
+          bufferEndTime: 5,
+          bufferStartTime: 0,
+          detectionCount: detectionFrames.length,
+          errorMessage: null,
+          frameCount: detectionFrames.length,
+          requestedEndTime: 5,
+          requestedStartTime: 0,
+          status: DetectionBufferStatus.Ready,
+        })),
+        prepare: vi.fn(),
+        prefetch: vi.fn(),
+        selectFrame: vi.fn((mediaTime: number) =>
+          detectionFrames.find((frame) => frame.mediaTime === mediaTime),
+        ),
+      } satisfies BufferedDetectionTimeline;
+
+      const layer = createPixiMaskLayer({
+        Container,
+        detectionTimeline,
+        ImageSource,
+        maskStyle: new BaseMaskStyle(),
+        Mesh,
+        MeshGeometry,
+        Shader,
+        Sprite,
+        Texture,
+        UniformGroup,
+      });
+
+      layer.createSprite({ height: 720, width: 1280 });
+      layer.drawFrame(0);
+      await vi.runOnlyPendingTimersAsync();
+      await vi.waitFor(() => {
+        expect(globalThis.createImageBitmap).toHaveBeenCalled();
+      });
+      layer.drawFrame(0);
+
+      expect(pixiMock.shaderFrom).toHaveBeenCalledOnce();
+      await vi.waitFor(() => {
+        expect(pixiMock.meshInstances[0]?.visible).toBe(true);
+      });
+      expect(pixiMock.imageSourceOptions).toContainEqual(
+        expect.objectContaining({
+          autoGenerateMipmaps: false,
+          scaleMode: "nearest",
+        }),
+      );
+      expect(pixiMock.spriteInstances[0]?.visible).toBe(false);
+
+      layer.destroy();
+    } finally {
+      globalThis.createImageBitmap = originalCreateImageBitmap;
       vi.useRealTimers();
     }
   });
@@ -1740,11 +1847,17 @@ describe("package entrypoint", () => {
 
     renderer.setPresentation({ maskStyle: new BaseMaskStyle() });
 
+    const maskContainer = pixiMock.containerInstances[1];
+
     expect(pixiMock.spriteInstances).toHaveLength(2);
     expect(scene?.children).toEqual([
       pixiMock.spriteInstances[0],
-      pixiMock.spriteInstances[1],
+      maskContainer,
       boxGraphics,
+    ]);
+    expect(maskContainer?.children).toEqual([
+      pixiMock.spriteInstances[1],
+      pixiMock.meshInstances[0],
     ]);
     expect(pixiMock.appInit).toHaveBeenCalledOnce();
 

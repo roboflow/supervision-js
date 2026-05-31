@@ -2,9 +2,89 @@ import { describe, expect, it } from "vitest";
 
 import { DetectionMaskEncoding } from "#types/detections";
 
-import { compositeMaskFrame } from "./mask-frame-compositor";
+import {
+  compositeMaskFrame,
+  createIdMaskFrame,
+  createPngIdMaskFrame,
+} from "./mask-frame-compositor";
+
+const pngSignature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
 describe("mask frame compositor", () => {
+  it("encodes style-indexed ID masks as PNG artifacts", async () => {
+    const frame = await createPngIdMaskFrame([
+      {
+        alpha: 0.5,
+        color: 0xff0000,
+        mask: {
+          counts: encodeCompressedRleCounts([0, 1, 3]),
+          encoding: DetectionMaskEncoding.CompressedRle,
+          height: 2,
+          width: 2,
+        },
+      },
+    ]);
+
+    expect(frame).toBeDefined();
+    expect([...frame!.png.slice(0, 8)]).toEqual(pngSignature);
+    expect([...frame!.data]).toEqual([1, 0, 0, 0]);
+  });
+
+  it("builds style-indexed ID mask artifacts for shader rendering", () => {
+    const frame = createIdMaskFrame([
+      {
+        alpha: 0.5,
+        color: 0xff0000,
+        mask: {
+          counts: encodeCompressedRleCounts([0, 1, 3]),
+          encoding: DetectionMaskEncoding.CompressedRle,
+          height: 2,
+          width: 2,
+        },
+        stroke: {
+          alpha: 1,
+          color: 0xffffff,
+          width: 1,
+        },
+      },
+      {
+        alpha: 0.5,
+        color: 0xff0000,
+        mask: {
+          counts: encodeCompressedRleCounts([1, 1, 2]),
+          encoding: DetectionMaskEncoding.CompressedRle,
+          height: 2,
+          width: 2,
+        },
+        stroke: {
+          alpha: 1,
+          color: 0xffffff,
+          width: 1,
+        },
+      },
+      {
+        alpha: 0.25,
+        color: 0x00ff00,
+        mask: {
+          counts: encodeCompressedRleCounts([2, 1, 1]),
+          encoding: DetectionMaskEncoding.CompressedRle,
+          height: 2,
+          width: 2,
+        },
+      },
+    ]);
+
+    expect(frame).toBeDefined();
+    expect([...frame!.data]).toEqual([1, 2, 1, 0]);
+    expect([...frame!.fillPalette.slice(4, 12)]).toEqual([
+      1, 0, 0, 0.5, 0, 1, 0, 0.25,
+    ]);
+    expect([...frame!.strokePalette.slice(4, 12)]).toEqual([
+      1, 1, 1, 1, 0, 0, 0, 0,
+    ]);
+    expect(frame!.hasStroke).toBe(true);
+  });
+
   it("composites mask strokes into the prepared frame artifact", () => {
     const frame = compositeMaskFrame([
       {

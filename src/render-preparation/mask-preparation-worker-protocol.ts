@@ -1,5 +1,6 @@
 import type { DetectionMask } from "#types/detections";
 import type { MaskStrokeStyle } from "#types/mask-style";
+import type { PreparedMaskFrameKind } from "./mask-frame-artifact";
 
 export enum MaskPreparationWorkerMessageType {
   Complete = "complete",
@@ -27,10 +28,15 @@ export interface MaskPreparationWorkerPrepareMessage {
 }
 
 export interface MaskPreparationWorkerCompleteMessage {
+  readonly artifactKind?: PreparedMaskFrameKind;
+  readonly fillPalette?: Float32Array<ArrayBuffer>;
+  readonly hasStroke?: boolean;
   readonly imageBitmap?: ImageBitmap;
   readonly imageData?: ImageData;
   readonly key: string;
+  readonly png?: Uint8Array<ArrayBuffer>;
   readonly requestId: number;
+  readonly strokePalette?: Float32Array<ArrayBuffer>;
   readonly type: MaskPreparationWorkerMessageType.Complete;
 }
 

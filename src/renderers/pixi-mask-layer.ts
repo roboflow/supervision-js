@@ -3,6 +3,7 @@ import {
   PreparedRenderFrameMaskStatus,
   type PreparedMaskFrame,
 } from "#render-preparation/prepared-render-window";
+import { PreparedMaskFrameKind } from "#render-preparation/mask-frame-artifact";
 import type { BufferedDetectionTimeline } from "#types/detection-timeline";
 import type { MaskStyle } from "#types/mask-style";
 import type {
@@ -10,18 +11,26 @@ import type {
   RenderPreparationPlaybackGateOptions,
 } from "#types/render-preparation";
 import { resolveMaskStyleOpacity } from "#utils/mask-style";
+import { createPixiIdMaskShaderRenderer } from "./pixi-id-mask-shader";
 import type {
+  Container as PixiContainer,
   ImageSource as PixiImageSource,
+  Mesh as PixiMesh,
+  MeshGeometry as PixiMeshGeometry,
+  Shader as PixiShader,
   Sprite as PixiSprite,
   Texture as PixiTexture,
+  UniformGroup as PixiUniformGroup,
 } from "pixi.js";
 
 const MAX_PENDING_MASK_HOLD_SECONDS = 0.05;
 
 type ImageSourceConstructor = new (options: {
+  autoGenerateMipmaps?: boolean;
   dynamic: boolean;
   height: number;
   resource: HTMLCanvasElement | ImageBitmap;
+  scaleMode?: "linear" | "nearest";
   width: number;
 }) => PixiImageSource;
 
@@ -29,13 +38,49 @@ type TextureConstructor = new (options: {
   dynamic: boolean;
   source: PixiImageSource;
 }) => PixiTexture;
+type TextureConstructorWithEmpty = TextureConstructor & {
+  readonly EMPTY: PixiTexture;
+};
 
 type SpriteConstructor = new (options?: {
   texture?: PixiTexture;
 }) => PixiSprite;
 
+type ContainerConstructor = new () => PixiContainer;
+
+type MeshConstructor = new (options: {
+  geometry: PixiMeshGeometry;
+  shader: PixiShader;
+}) => PixiMesh;
+
+type MeshGeometryConstructor = new (options: {
+  indices: Uint32Array;
+  positions: Float32Array;
+  shrinkBuffersToFit: boolean;
+  topology: "triangle-list";
+  uvs: Float32Array;
+}) => PixiMeshGeometry;
+
+type ShaderFactory = {
+  from(options: {
+    gl: { fragment: string; vertex: string };
+    resources: Record<string, unknown>;
+  }): PixiShader;
+};
+
+type UniformGroupConstructor = new (
+  uniforms: Record<
+    string,
+    | { type: "f32"; value: number }
+    | { size?: number; type: "vec2<f32>" | "vec4<f32>"; value: Float32Array }
+  >,
+) => PixiUniformGroup;
+
 export interface PixiMaskLayer {
-  createSprite(dimensions: { width: number; height: number }): PixiSprite;
+  createSprite(dimensions: {
+    width: number;
+    height: number;
+  }): PixiContainer | PixiSprite;
   drawFrame(mediaTime: number): void;
   waitForRenderPreparation(
     mediaTime: number,
@@ -46,15 +91,23 @@ export interface PixiMaskLayer {
 }
 
 export function createPixiMaskLayer(options: {
+  readonly Container?: ContainerConstructor;
   readonly ImageSource: ImageSourceConstructor;
+  readonly Mesh?: MeshConstructor;
+  readonly MeshGeometry?: MeshGeometryConstructor;
+  readonly Shader?: ShaderFactory;
   readonly Sprite: SpriteConstructor;
-  readonly Texture: TextureConstructor;
+  readonly Texture: TextureConstructorWithEmpty;
+  readonly UniformGroup?: UniformGroupConstructor;
   readonly detectionTimeline: BufferedDetectionTimeline;
   readonly maskStyle: MaskStyle;
   readonly renderPreparation?: RenderPreparationOptions;
 }): PixiMaskLayer {
   let mediaHeight = 0;
   let mediaWidth = 0;
+  let idMaskRenderer:
+    | ReturnType<typeof createPixiIdMaskShaderRenderer>
+    | undefined;
   let maskSprite: PixiSprite | undefined;
   let activeFrameKey: string | null = null;
   let activeFrameMediaTime: number | null = null;
@@ -96,7 +149,18 @@ export function createPixiMaskLayer(options: {
       maskSprite.visible = false;
       maskSprite.width = mediaWidth;
       maskSprite.height = mediaHeight;
-      return maskSprite;
+
+      idMaskRenderer = createIdMaskRenderer();
+      idMaskRenderer?.setOpacity(maskOpacity);
+
+      if (!idMaskRenderer || !options.Container) {
+        return maskSprite;
+      }
+
+      const maskContainer = new options.Container();
+      maskContainer.addChild(maskSprite, idMaskRenderer.mesh);
+
+      return maskContainer;
     },
 
     drawFrame(mediaTime) {
@@ -153,6 +217,7 @@ export function createPixiMaskLayer(options: {
 
       isDestroyed = true;
       preparedRenderWindow.destroy();
+      idMaskRenderer?.destroy();
       destroyTextures();
     },
   };
@@ -162,7 +227,13 @@ export function createPixiMaskLayer(options: {
     mediaTime: number | null,
   ) {
     visibleMaskMediaTime = mediaTime;
-    showTexture(getTexture(maskFrame));
+
+    if (maskFrame.kind === PreparedMaskFrameKind.PngIdMask && idMaskRenderer) {
+      showIdMaskFrame(maskFrame);
+      return;
+    }
+
+    showRgbaMaskFrame(maskFrame);
   }
 
   function getTexture(maskFrame: PreparedMaskFrame) {
@@ -173,9 +244,14 @@ export function createPixiMaskLayer(options: {
     }
 
     const imageSource = new options.ImageSource({
+      autoGenerateMipmaps: false,
       dynamic: false,
       height: maskFrame.height,
       resource: maskFrame.source,
+      scaleMode:
+        maskFrame.kind === PreparedMaskFrameKind.PngIdMask
+          ? "nearest"
+          : "linear",
       width: maskFrame.width,
     });
     const texture = new options.Texture({
@@ -188,16 +264,33 @@ export function createPixiMaskLayer(options: {
     return texture;
   }
 
-  function showTexture(texture: PixiTexture) {
+  function showRgbaMaskFrame(maskFrame: PreparedMaskFrame) {
     if (!maskSprite) {
       return;
     }
+
+    const texture = getTexture(maskFrame);
 
     maskSprite.texture = texture;
     applyMaskOpacity();
     maskSprite.width = mediaWidth;
     maskSprite.height = mediaHeight;
     maskSprite.visible = true;
+    idMaskRenderer?.hide();
+  }
+
+  function showIdMaskFrame(
+    maskFrame: Extract<
+      PreparedMaskFrame,
+      { readonly kind: PreparedMaskFrameKind.PngIdMask }
+    >,
+  ) {
+    if (!idMaskRenderer || !maskSprite) {
+      return;
+    }
+
+    maskSprite.visible = false;
+    idMaskRenderer.render(maskFrame, getTexture(maskFrame));
   }
 
   function hideSprite() {
@@ -206,6 +299,8 @@ export function createPixiMaskLayer(options: {
     if (maskSprite) {
       maskSprite.visible = false;
     }
+
+    idMaskRenderer?.hide();
   }
 
   function canHoldVisibleMaskFor(mediaTime: number) {
@@ -220,6 +315,8 @@ export function createPixiMaskLayer(options: {
     if (maskSprite) {
       maskSprite.alpha = maskOpacity;
     }
+
+    idMaskRenderer?.setOpacity(maskOpacity);
   }
 
   function destroyTexture(key: string) {
@@ -235,5 +332,30 @@ export function createPixiMaskLayer(options: {
     }
 
     maskTextures.clear();
+  }
+
+  function createIdMaskRenderer() {
+    if (
+      !options.Mesh ||
+      !options.MeshGeometry ||
+      !options.Shader ||
+      !options.UniformGroup
+    ) {
+      return undefined;
+    }
+
+    try {
+      return createPixiIdMaskShaderRenderer({
+        Mesh: options.Mesh,
+        MeshGeometry: options.MeshGeometry,
+        Shader: options.Shader,
+        Texture: options.Texture,
+        UniformGroup: options.UniformGroup,
+        mediaHeight,
+        mediaWidth,
+      });
+    } catch {
+      return undefined;
+    }
   }
 }

@@ -12,7 +12,10 @@ import {
   type MaskFramePreparationJob,
   MaskPreparationWorkerMessageType,
 } from "./mask-preparation-worker-protocol";
-import { createMaskFramePreparer } from "./mask-frame-preparer";
+import {
+  createMaskFramePreparer,
+  PreparedMaskFrameKind,
+} from "./mask-frame-preparer";
 
 const maskPreparationJob: MaskFramePreparationJob = {
   instructions: [
@@ -31,6 +34,43 @@ const maskPreparationJob: MaskFramePreparationJob = {
 };
 
 describe("mask frame preparer", () => {
+  it("uses PNG ID-mask artifacts on the main thread when browser support exists", async () => {
+    resetMocks();
+
+    const imageBitmap = {
+      close: vi.fn(),
+      height: 2,
+      width: 2,
+    } as unknown as ImageBitmap;
+    const originalCreateImageBitmap = globalThis.createImageBitmap;
+    const createImageBitmap = vi.fn(async () => imageBitmap);
+
+    globalThis.createImageBitmap = createImageBitmap;
+
+    try {
+      const preparer = createMaskFramePreparer({
+        renderPreparation: {
+          mode: RenderPreparationMode.MainThread,
+        },
+      });
+
+      await expect(preparer.prepare(maskPreparationJob)).resolves.toMatchObject(
+        {
+          height: 2,
+          key: "0:0",
+          kind: PreparedMaskFrameKind.PngIdMask,
+          source: imageBitmap,
+          width: 2,
+        },
+      );
+      expect(createImageBitmap).toHaveBeenCalledWith(expect.any(Blob));
+
+      preparer.destroy();
+    } finally {
+      globalThis.createImageBitmap = originalCreateImageBitmap;
+    }
+  });
+
   it("distributes concurrent worker requests across the configured worker pool", async () => {
     vi.useFakeTimers();
     resetMocks();
@@ -178,6 +218,60 @@ describe("mask frame preparer", () => {
         executionMode: RenderPreparationExecutionMode.MainThread,
         message: "Mask preparation worker returned no image artifact.",
         workerStatus: RenderPreparationWorkerStatus.Disabled,
+      });
+
+      preparer.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("hydrates PNG ID-mask worker artifacts without losing shader palettes", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const imageBitmap = {
+        close: vi.fn(),
+        height: 2,
+        width: 2,
+      } as unknown as ImageBitmap;
+      const fillPalette = new Float32Array([0, 0, 0, 0, 1, 0, 0, 0.5]);
+      const strokePalette = new Float32Array([0, 0, 0, 0, 1, 1, 1, 1]);
+      const png = new Uint8Array([1, 2, 3]);
+      const fakeWorker = createFakeMaskPreparationWorker((message) => ({
+        artifactKind: PreparedMaskFrameKind.PngIdMask,
+        fillPalette,
+        hasStroke: true,
+        imageBitmap,
+        key: message.job.key,
+        png,
+        requestId: message.requestId,
+        strokePalette,
+        type: MaskPreparationWorkerMessageType.Complete,
+      }));
+      const preparer = createMaskFramePreparer({
+        renderPreparation: {
+          mode: RenderPreparationMode.Worker,
+          workerFactory: {
+            createWorker: () => fakeWorker.worker,
+          },
+        },
+      });
+      const framePromise = preparer.prepare(maskPreparationJob);
+
+      await vi.runOnlyPendingTimersAsync();
+
+      await expect(framePromise).resolves.toMatchObject({
+        fillPalette,
+        hasStroke: true,
+        height: 2,
+        key: "0:0",
+        kind: PreparedMaskFrameKind.PngIdMask,
+        png,
+        source: imageBitmap,
+        strokePalette,
+        width: 2,
       });
 
       preparer.destroy();

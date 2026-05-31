@@ -60,6 +60,18 @@ const mockState = vi.hoisted(() => {
       y: number;
     }>,
     imageSourceOptions: [] as unknown[],
+    meshGeometryDestroy: vi.fn(),
+    meshGeometryOptions: [] as unknown[],
+    meshInstances: [] as Array<{
+      destroy: ReturnType<typeof vi.fn>;
+      visible: boolean;
+    }>,
+    shaderDestroy: vi.fn(),
+    shaderFrom: vi.fn(),
+    shaderInstances: [] as Array<{
+      destroy: ReturnType<typeof vi.fn>;
+      resources: Record<string, unknown>;
+    }>,
     stageAddChild: vi.fn(),
     spriteInstances: [] as Array<{
       height: number;
@@ -83,6 +95,10 @@ const mockState = vi.hoisted(() => {
       width: number;
       x: number;
       y: number;
+    }>,
+    uniformGroupInstances: [] as Array<{
+      uniforms: Record<string, unknown>;
+      update: ReturnType<typeof vi.fn>;
     }>,
   };
   const mediaMock = {
@@ -154,15 +170,21 @@ vi.mock("pixi.js", () => {
   }
 
   class ImageSource {
+    style = {};
+
     constructor(options: unknown) {
       pixiMock.imageSourceOptions.push(options);
     }
   }
 
   class Texture {
-    readonly id = pixiMock.textureOptions.length;
+    static EMPTY = { source: { style: {} } };
 
-    constructor(options: unknown) {
+    readonly id = pixiMock.textureOptions.length;
+    readonly source: unknown;
+
+    constructor(options: { source?: unknown }) {
+      this.source = options.source;
       pixiMock.textureOptions.push(options);
     }
 
@@ -190,6 +212,18 @@ vi.mock("pixi.js", () => {
 
       this.children.push(...children);
       pixiMock.containerAddChild(...children);
+      return children[0];
+    }
+
+    removeChild(...children: unknown[]) {
+      for (const child of children) {
+        const index = this.children.indexOf(child);
+
+        if (index >= 0) {
+          this.children.splice(index, 1);
+        }
+      }
+
       return children[0];
     }
   }
@@ -220,6 +254,52 @@ vi.mock("pixi.js", () => {
     constructor(public readonly options: { texture?: unknown } = {}) {
       this.texture = options.texture;
       pixiMock.spriteInstances.push(this);
+    }
+  }
+
+  class Mesh {
+    destroy = vi.fn();
+    visible = true;
+
+    constructor(public readonly options: unknown) {
+      pixiMock.meshInstances.push(this);
+    }
+  }
+
+  class MeshGeometry {
+    destroy = pixiMock.meshGeometryDestroy;
+
+    constructor(options: unknown) {
+      pixiMock.meshGeometryOptions.push(options);
+    }
+  }
+
+  class Shader {
+    resources: Record<string, unknown>;
+    destroy = pixiMock.shaderDestroy;
+
+    constructor(options: { resources?: Record<string, unknown> } = {}) {
+      this.resources = options.resources ?? {};
+      pixiMock.shaderInstances.push(this);
+    }
+
+    static from(options: { resources?: Record<string, unknown> }) {
+      pixiMock.shaderFrom(options);
+      return new Shader(options);
+    }
+  }
+
+  class UniformGroup {
+    uniforms: Record<string, unknown> = {};
+    update = vi.fn();
+
+    constructor(uniforms: Record<string, unknown>) {
+      for (const [key, value] of Object.entries(uniforms)) {
+        this.uniforms[key] =
+          isRecord(value) && "value" in value ? value.value : value;
+      }
+
+      pixiMock.uniformGroupInstances.push(this);
     }
   }
 
@@ -257,9 +337,13 @@ vi.mock("pixi.js", () => {
     Container,
     Graphics,
     ImageSource,
+    Mesh,
+    MeshGeometry,
     Sprite,
+    Shader,
     Text,
     Texture,
+    UniformGroup,
   };
 });
 
@@ -381,6 +465,12 @@ export function resetMocks() {
   pixiMock.containerInstances.length = 0;
   pixiMock.graphicsInstances.length = 0;
   pixiMock.imageSourceOptions.length = 0;
+  pixiMock.meshGeometryDestroy.mockClear();
+  pixiMock.meshGeometryOptions.length = 0;
+  pixiMock.meshInstances.length = 0;
+  pixiMock.shaderDestroy.mockClear();
+  pixiMock.shaderFrom.mockClear();
+  pixiMock.shaderInstances.length = 0;
   pixiMock.stageAddChild.mockClear();
   pixiMock.spriteInstances.length = 0;
   pixiMock.tickerAdd.mockClear();
@@ -389,6 +479,7 @@ export function resetMocks() {
   pixiMock.textureOptions.length = 0;
   pixiMock.textureUpdate.mockClear();
   pixiMock.textInstances.length = 0;
+  pixiMock.uniformGroupInstances.length = 0;
   mediaMock.audioTracks = [{ type: "audio" }];
   mediaMock.canRead.mockClear();
   mediaMock.canRead.mockResolvedValue(true);
@@ -460,6 +551,10 @@ export function resetMocks() {
   domMock.performanceNow.mockReturnValue(0);
   domMock.rafCallbacks.length = 0;
   domMock.requestAnimationFrame.mockClear();
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 export function createContainer() {
