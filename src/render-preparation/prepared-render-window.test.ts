@@ -383,6 +383,57 @@ describe("prepared render window", () => {
     }
   });
 
+  it("starts concurrent mask preparations up to the configured worker count", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const fakeWorkers: ReturnType<typeof createFakeMaskPreparationWorker>[] =
+        [];
+      const renderWindow = createPreparedRenderWindow({
+        detectionTimeline: createTimeline(manyFrames),
+        maskStyle: new BaseMaskStyle(),
+        renderPreparation: {
+          maskFrame: {
+            maxPendingFrameCount: 6,
+            prefetchFrameCount: 6,
+            scheduleBatchSize: 6,
+            scanIntervalSeconds: 0,
+            workerCount: 3,
+          },
+          mode: RenderPreparationMode.Worker,
+          workerFactory: {
+            createWorker: () => {
+              const fakeWorker = createFakeMaskPreparationWorker({
+                autoComplete: false,
+              });
+
+              fakeWorkers.push(fakeWorker);
+              return fakeWorker.worker;
+            },
+          },
+        },
+      });
+
+      renderWindow.getFrame(0);
+      await vi.runOnlyPendingTimersAsync();
+
+      expect(fakeWorkers).toHaveLength(3);
+      expect(
+        fakeWorkers.flatMap((worker) =>
+          worker.messages.map(
+            (message) =>
+              (message as { readonly job: { readonly key: string } }).job.key,
+          ),
+        ),
+      ).toEqual(["0:0", "1:0.04", "2:0.08"]);
+
+      renderWindow.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("limits background mask scheduling while always admitting the active frame", () => {
     vi.useFakeTimers();
     resetMocks();

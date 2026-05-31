@@ -20,6 +20,7 @@ import {
   BASKETBALL_MASK_FRAME_PREFETCH_SECONDS,
   BASKETBALL_MASK_FRAME_SCAN_INTERVAL_SECONDS,
   BASKETBALL_MASK_FRAME_SCHEDULE_BATCH_SIZE,
+  BASKETBALL_MASK_FRAME_WORKER_COUNT,
 } from "./demo-session-config";
 import type { DemoSessionCallbacks } from "./demo-session-types";
 
@@ -104,6 +105,7 @@ export async function createBasketballSession(
             prefetchFrameCount: maskFramePrefetchCount,
             scanIntervalSeconds: BASKETBALL_MASK_FRAME_SCAN_INTERVAL_SECONDS,
             scheduleBatchSize: BASKETBALL_MASK_FRAME_SCHEDULE_BATCH_SIZE,
+            workerCount: BASKETBALL_MASK_FRAME_WORKER_COUNT,
           },
           onDiagnostics: options.onRenderPreparationDiagnostics,
         },

@@ -15,6 +15,8 @@ import {
 } from "#types/render-preparation";
 import { createWorkerRpcClient } from "#workers/worker-rpc-client";
 
+const DEFAULT_MASK_PREPARATION_WORKER_COUNT = 2;
+
 export interface PreparedMaskFrame {
   readonly height: number;
   readonly key: string;
@@ -116,9 +118,12 @@ function createWorkerPreparerIfAvailable(options: {
   const workerFactory =
     options.renderPreparation?.workerFactory ??
     createDefaultRenderPreparationWorkerFactory();
+  const workerCount = resolveWorkerCount(
+    options.renderPreparation?.maskFrame?.workerCount,
+  );
 
   try {
-    return createWorkerMaskFramePreparer(workerFactory);
+    return createWorkerMaskFramePreparer(workerFactory, workerCount);
   } catch (error) {
     if (options.mode === RenderPreparationMode.Worker) {
       throw error;
@@ -202,26 +207,23 @@ function createMainThreadMaskFramePreparer(
 
 function createWorkerMaskFramePreparer(
   workerFactory: RenderPreparationWorkerFactory,
+  workerCount: number,
 ): MaskFramePreparer {
-  const worker = workerFactory.createWorker();
   let latestMessage: string | null = null;
-  const workerRpc = createWorkerRpcClient<
-    MaskPreparationWorkerRequest,
-    MaskPreparationWorkerResponse
-  >({
-    defaultErrorMessage: "Mask preparation worker failed.",
-    isResponse: isWorkerResponse,
-    onOrphanedResponse: closeWorkerResponse,
-    worker,
-  });
+  const workers = createWorkerRpcPool(workerFactory, workerCount);
 
   return {
     destroy() {
-      workerRpc.destroy();
+      for (const worker of workers) {
+        worker.rpc.destroy();
+      }
     },
 
     getStatus() {
-      const failureMessage = workerRpc.getFailureMessage();
+      const failureMessage =
+        workers
+          .find((worker) => worker.rpc.getFailureMessage())
+          ?.rpc.getFailureMessage() ?? null;
 
       return {
         executionMode: RenderPreparationExecutionMode.Worker,
@@ -233,31 +235,113 @@ function createWorkerMaskFramePreparer(
     },
 
     async prepare(job) {
-      const message = await workerRpc.request({
+      return prepareWithWorker(
+        selectLeastBusyWorker(workers),
         job,
-        type: MaskPreparationWorkerMessageType.Prepare,
-      });
-
-      if (message.type === MaskPreparationWorkerMessageType.Empty) {
-        return undefined;
-      }
-
-      if (message.type === MaskPreparationWorkerMessageType.Error) {
-        latestMessage = message.error;
-        throw new Error(message.error);
-      }
-
-      try {
-        return createPreparedFrameFromWorkerResponse(message);
-      } catch (error) {
-        latestMessage = getErrorMessage(
-          error,
-          "Unable to read mask preparation worker response.",
-        );
-        throw error;
-      }
+        (message) => {
+          latestMessage = message;
+        },
+      );
     },
   };
+}
+
+interface WorkerMaskFramePreparerEntry {
+  activeRequestCount: number;
+  readonly rpc: ReturnType<
+    typeof createWorkerRpcClient<
+      MaskPreparationWorkerRequest,
+      MaskPreparationWorkerResponse
+    >
+  >;
+}
+
+function createWorkerRpcPool(
+  workerFactory: RenderPreparationWorkerFactory,
+  workerCount: number,
+): WorkerMaskFramePreparerEntry[] {
+  const workers: WorkerMaskFramePreparerEntry[] = [];
+
+  try {
+    for (let index = 0; index < workerCount; index += 1) {
+      workers.push({
+        activeRequestCount: 0,
+        rpc: createWorkerRpcClient<
+          MaskPreparationWorkerRequest,
+          MaskPreparationWorkerResponse
+        >({
+          defaultErrorMessage: "Mask preparation worker failed.",
+          isResponse: isWorkerResponse,
+          onOrphanedResponse: closeWorkerResponse,
+          worker: workerFactory.createWorker(),
+        }),
+      });
+    }
+  } catch (error) {
+    for (const worker of workers) {
+      worker.rpc.destroy();
+    }
+
+    throw error;
+  }
+
+  return workers;
+}
+
+function selectLeastBusyWorker(
+  workers: readonly WorkerMaskFramePreparerEntry[],
+) {
+  let selectedWorker = workers[0];
+
+  if (!selectedWorker) {
+    throw new Error("Mask preparation worker pool is empty.");
+  }
+
+  for (const worker of workers.slice(1)) {
+    if (worker.activeRequestCount < selectedWorker.activeRequestCount) {
+      selectedWorker = worker;
+    }
+  }
+
+  return selectedWorker;
+}
+
+async function prepareWithWorker(
+  worker: WorkerMaskFramePreparerEntry,
+  job: MaskFramePreparationJob,
+  setLatestMessage: (message: string) => void,
+) {
+  worker.activeRequestCount += 1;
+
+  try {
+    const message = await worker.rpc.request({
+      job,
+      type: MaskPreparationWorkerMessageType.Prepare,
+    });
+
+    if (message.type === MaskPreparationWorkerMessageType.Empty) {
+      return undefined;
+    }
+
+    if (message.type === MaskPreparationWorkerMessageType.Error) {
+      setLatestMessage(message.error);
+      throw new Error(message.error);
+    }
+
+    try {
+      return createPreparedFrameFromWorkerResponse(message);
+    } catch (error) {
+      setLatestMessage(
+        getErrorMessage(
+          error,
+          "Unable to read mask preparation worker response.",
+        ),
+      );
+      throw error;
+    }
+  } finally {
+    worker.activeRequestCount -= 1;
+  }
 }
 
 function createPreparedFrameFromWorkerResponse(
@@ -329,6 +413,14 @@ function isWorkerResponse(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function resolveWorkerCount(workerCount: number | undefined) {
+  if (workerCount === undefined) {
+    return DEFAULT_MASK_PREPARATION_WORKER_COUNT;
+  }
+
+  return Math.max(1, Math.floor(workerCount));
 }
 
 function getErrorMessage(error: unknown, fallback: string) {

@@ -106,7 +106,7 @@ Manual observation:
 
 ### 3. Rolling Windows, Worker Pool, And Backpressure
 
-Status: in progress.
+Status: complete.
 
 Spec:
 
@@ -144,6 +144,8 @@ Manual observation:
   waiting behind stale queued work.
 - Dense videos should prepare future masks faster.
 - CPU usage may rise, but the main UI should remain responsive.
+- The basketball demo currently uses a 4-worker mask-preparation pool and
+  exposes in-flight worker diagnostics so throughput can be observed directly.
 
 ### 4. Prepared-Artifact Playback Gate
 

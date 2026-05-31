@@ -37,6 +37,7 @@ export interface RenderPreparationMaskFrameOptions {
   readonly prefetchFrameCount?: number;
   readonly scheduleBatchSize?: number;
   readonly scanIntervalSeconds?: number;
+  readonly workerCount?: number;
 }
 
 export interface RenderPreparationActiveFrameDiagnostics {
@@ -47,7 +48,9 @@ export interface RenderPreparationActiveFrameDiagnostics {
 
 export interface RenderPreparationArtifactDiagnostics {
   readonly activeFrame?: RenderPreparationActiveFrameDiagnostics | null;
+  readonly inFlightCount?: number;
   readonly kind: RenderPreparationArtifactKind;
+  readonly maxInFlightCount?: number;
   readonly maxPendingCount?: number;
   readonly maxPreparedCount?: number;
   readonly pendingCount: number;

@@ -237,6 +237,16 @@ export function StatusPanel({
           }
         />
         <Readout
+          label="Mask Workers"
+          value={
+            maskFrameArtifact
+              ? `${formatInteger(maskFrameArtifact.inFlightCount ?? 0)} / ${formatInteger(
+                  maskFrameArtifact.maxInFlightCount ?? 0,
+                )} in flight`
+              : "-"
+          }
+        />
+        <Readout
           label="Active Mask"
           value={maskFrameArtifact?.activeFrame?.status ?? "-"}
         />

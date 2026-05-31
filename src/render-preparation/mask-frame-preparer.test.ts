@@ -31,6 +31,70 @@ const maskPreparationJob: MaskFramePreparationJob = {
 };
 
 describe("mask frame preparer", () => {
+  it("distributes concurrent worker requests across the configured worker pool", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const fakeWorkers: ReturnType<typeof createFakeMaskPreparationWorker>[] =
+        [];
+      const preparer = createMaskFramePreparer({
+        renderPreparation: {
+          maskFrame: {
+            workerCount: 2,
+          },
+          mode: RenderPreparationMode.Worker,
+          workerFactory: {
+            createWorker: () => {
+              const fakeWorker = createFakeMaskPreparationWorker((message) => ({
+                imageData: new ImageData(
+                  new Uint8ClampedArray(2 * 2 * 4),
+                  2,
+                  2,
+                ),
+                key: message.job.key,
+                requestId: message.requestId,
+                type: MaskPreparationWorkerMessageType.Complete,
+              }));
+
+              fakeWorkers.push(fakeWorker);
+              return fakeWorker.worker;
+            },
+          },
+        },
+      });
+      const firstFramePromise = preparer.prepare(maskPreparationJob);
+      const secondFramePromise = preparer.prepare({
+        ...maskPreparationJob,
+        key: "1:0.04",
+      });
+
+      expect(fakeWorkers).toHaveLength(2);
+      expect(
+        fakeWorkers[0]?.messages.map((message) => message.job.key),
+      ).toEqual(["0:0"]);
+      expect(
+        fakeWorkers[1]?.messages.map((message) => message.job.key),
+      ).toEqual(["1:0.04"]);
+
+      await vi.runOnlyPendingTimersAsync();
+
+      await expect(
+        Promise.all([firstFramePromise, secondFramePromise]),
+      ).resolves.toEqual([
+        expect.objectContaining({ key: "0:0" }),
+        expect.objectContaining({ key: "1:0.04" }),
+      ]);
+
+      preparer.destroy();
+      expect(fakeWorkers.map((worker) => worker.terminateCount)).toEqual([
+        1, 1,
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("falls back once when concurrent worker requests fail", async () => {
     vi.useFakeTimers();
     resetMocks();
@@ -46,6 +110,9 @@ describe("mask frame preparer", () => {
       const preparer = createMaskFramePreparer({
         onStatusChange,
         renderPreparation: {
+          maskFrame: {
+            workerCount: 1,
+          },
           mode: RenderPreparationMode.Worker,
           workerFactory: {
             createWorker: () => fakeWorker.worker,
@@ -91,6 +158,9 @@ describe("mask frame preparer", () => {
       }));
       const preparer = createMaskFramePreparer({
         renderPreparation: {
+          maskFrame: {
+            workerCount: 1,
+          },
           mode: RenderPreparationMode.Worker,
           workerFactory: {
             createWorker: () => fakeWorker.worker,
@@ -129,6 +199,10 @@ function createFakeMaskPreparationWorker(
   ) => unknown,
 ) {
   const listeners: Array<(event: MessageEvent<unknown>) => void> = [];
+  const messages: Array<{
+    readonly job: MaskFramePreparationJob;
+    readonly requestId: number;
+  }> = [];
   let terminateCount = 0;
   const worker = {
     addEventListener(type: string, listener: (event: MessageEvent) => void) {
@@ -141,6 +215,7 @@ function createFakeMaskPreparationWorker(
       readonly job: MaskFramePreparationJob;
       readonly requestId: number;
     }) {
+      messages.push(message);
       setTimeout(() => {
         for (const listener of listeners) {
           listener({
@@ -156,6 +231,7 @@ function createFakeMaskPreparationWorker(
   } as unknown as Worker;
 
   return {
+    messages,
     get terminateCount() {
       return terminateCount;
     },

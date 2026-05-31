@@ -7,6 +7,7 @@ import type { BufferedDetectionTimeline } from "#types/detection-timeline";
 import type { DetectionFrame } from "#types/detections";
 import type { MaskStyle } from "#types/mask-style";
 import {
+  RenderPreparationExecutionMode,
   RenderPreparationArtifactFrameStatus,
   RenderPreparationArtifactKind,
   type RenderPreparationOptions,
@@ -17,6 +18,7 @@ const DEFAULT_MASK_FRAME_CACHE_SIZE = 24;
 const DEFAULT_MASK_PENDING_FRAME_COUNT = 8;
 const DEFAULT_MASK_PREFETCH_FRAME_COUNT = 12;
 const DEFAULT_MASK_SCHEDULE_BATCH_SIZE = 2;
+const DEFAULT_MASK_PREPARATION_WORKER_COUNT = 2;
 const DEFAULT_PREPARED_WINDOW_SCAN_INTERVAL_SECONDS = 0.15;
 
 type ScheduledPreparationTask = ReturnType<typeof setTimeout>;
@@ -88,6 +90,12 @@ export function createPreparedRenderWindow(options: {
   const scheduleBatchSize = Math.max(
     1,
     maskFrameOptions?.scheduleBatchSize ?? DEFAULT_MASK_SCHEDULE_BATCH_SIZE,
+  );
+  const workerCount = Math.max(
+    1,
+    Math.floor(
+      maskFrameOptions?.workerCount ?? DEFAULT_MASK_PREPARATION_WORKER_COUNT,
+    ),
   );
 
   let maskStyle = options.maskStyle ?? null;
@@ -186,11 +194,14 @@ export function createPreparedRenderWindow(options: {
   }
 
   function startQueuedMaskFrameJobs() {
-    if (isDestroyed || inFlightMaskFrameKeys.size > 0) {
+    if (isDestroyed) {
       return;
     }
 
-    while (queuedMaskFrameKeys.length > 0) {
+    while (
+      queuedMaskFrameKeys.length > 0 &&
+      inFlightMaskFrameKeys.size < getMaxInFlightMaskFrameCount()
+    ) {
       const key = queuedMaskFrameKeys.shift();
 
       if (!key) {
@@ -276,7 +287,7 @@ export function createPreparedRenderWindow(options: {
           pumpMaskFrameQueue();
         });
 
-      return;
+      continue;
     }
   }
 
@@ -477,6 +488,7 @@ export function createPreparedRenderWindow(options: {
   function emitDiagnostics(message?: string) {
     const status = maskFramePreparer.getStatus();
     const preparedAhead = getPreparedAheadDiagnostics();
+    const maxInFlightCount = getMaxInFlightMaskFrameCount();
 
     options.renderPreparation?.onDiagnostics?.({
       artifacts: [
@@ -490,7 +502,9 @@ export function createPreparedRenderWindow(options: {
                 ),
               }
             : null,
+          inFlightCount: inFlightMaskFrameKeys.size,
           kind: RenderPreparationArtifactKind.MaskFrame,
+          maxInFlightCount,
           maxPendingCount: maxPendingFrameCount,
           maxPreparedCount: maxMaskFrameCacheSize,
           pendingCount: pendingMaskFrames.size,
@@ -635,6 +649,16 @@ export function createPreparedRenderWindow(options: {
       onStatusChange: emitDiagnostics,
       renderPreparation: options.renderPreparation,
     });
+  }
+
+  function getMaxInFlightMaskFrameCount() {
+    const status = maskFramePreparer.getStatus();
+
+    if (status.executionMode === RenderPreparationExecutionMode.Worker) {
+      return workerCount;
+    }
+
+    return 1;
   }
 }
 
