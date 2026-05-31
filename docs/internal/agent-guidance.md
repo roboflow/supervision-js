@@ -78,6 +78,7 @@ Run from the repository root:
 - `npm run build`
 - `npm run demo:build`
 - `npm run benchmark:initial:build`
+- `npm run benchmark:masks`
 
 For focused iterative work, use separate terminals:
 

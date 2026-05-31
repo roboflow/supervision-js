@@ -185,7 +185,7 @@ Manual observation:
 
 ### 5. Future Mask Representation Research
 
-Status: planned.
+Status: baseline benchmark added.
 
 Spec:
 
@@ -194,13 +194,26 @@ Spec:
 - Preserve current RLE cold storage and prepared artifact boundary.
 - Design for per-class color, opacity, borders, hover, and labels.
 - Do not replace the current implementation until benchmarks show the pressure.
+- Run `npm run benchmark:masks` to benchmark the basketball SAM3 fixture without
+  involving the demo UI.
 
 Test:
 
-- Add a benchmark route or benchmark app mode that measures dense mask prep,
-  texture upload, style changes, and playback smoothness.
+- Programmatically measure current RGBA artifact preparation, RGBA artifact
+  preparation with mask borders, and an ID-mask candidate.
+- Report source fixture bytes, RLE payload bytes, prepared artifact bytes,
+  projected prepared-window byte pressure, and local CPU preparation timings.
+- Treat GPU upload/render timings as a separate browser/GPU follow-up because
+  the current Node benchmark estimates upload bytes but does not exercise Pixi
+  or the GPU.
 
-Manual observation:
+Current takeaway:
 
-- The benchmark should make it clear when full-frame RGBA is enough and when we
-  need ID masks or shaders.
+- Current RGBA mask artifacts remain the stable implementation path because they
+  are simple and already work.
+- The basketball fixture shows full-frame RGBA artifacts are byte-heavy: a 5s
+  prepared window is roughly 1.2 GB of raw RGBA artifact bytes at 1920 x 1080.
+- The ID-mask candidate cuts that same 5s window to roughly 297 MB and makes
+  per-class style updates palette-sized instead of prepared-window-sized.
+- CPU mask borders are expensive enough that future border styling should move
+  toward an ID-mask/shader path rather than thicker CPU contour preparation.

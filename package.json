@@ -83,6 +83,7 @@
     "demo:build": "npm run build && npm run build -w demo",
     "benchmark:initial:dev": "npm run dev -w benchmark/initial",
     "benchmark:initial:build": "npm run build -w benchmark/initial",
+    "benchmark:masks": "npm run build && node benchmark/masks/run.mjs",
     "fixture:sam3:dev": "npm run build && vite --config tools/sam3-fixture/vite.config.ts",
     "fixture:sam3:build": "npm run build && tsc --noEmit -p tools/sam3-fixture/tsconfig.json && vite build --config tools/sam3-fixture/vite.config.ts",
     "fixture:sam3:chunk": "node tools/sam3-fixture/chunk-detections.mjs",
