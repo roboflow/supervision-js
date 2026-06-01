@@ -72,6 +72,9 @@ export async function createBasketballSession(
       presentation,
       renderer: {
         autoPlay: false,
+        diagnostics: {
+          frameTimings: true,
+        },
         fit: MediaRendererFit.Contain,
         interaction: {
           mode: MediaInteractionMode.PausedOnly,

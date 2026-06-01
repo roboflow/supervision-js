@@ -202,6 +202,7 @@ function createRendererState(options: {
     },
     duration: null,
     fit: MediaRendererFit.Contain,
+    lastFrameRenderTimings: null,
     mediaHeight: 0,
     mediaWidth: 0,
     playbackState: options.playbackState,

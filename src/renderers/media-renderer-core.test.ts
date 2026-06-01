@@ -167,6 +167,57 @@ describe("media renderer core", () => {
 
     renderer.destroy();
   });
+
+  it("records frame render timings in state and frame diagnostics", async () => {
+    resetMocks();
+
+    const renderTimings = {
+      boxMs: 0.2,
+      fitMs: 0.05,
+      interactionMs: 0.1,
+      labelMs: 0.3,
+      maskMs: 0.4,
+      mediaUploadMs: 1.2,
+      totalMs: 2.25,
+    };
+    const onFrame = vi.fn();
+    const renderer = await createMediaRendererCore(
+      {
+        autoPlay: false,
+        container: {} as HTMLElement,
+        onFrame,
+        source: createSource([
+          createMockSample(0, 0) as unknown as DecodedVideoSample,
+        ]),
+      } satisfies MediaRendererOptions,
+      {
+        createScene: vi.fn(async () =>
+          createScene({
+            presentSample: vi.fn((sample) => {
+              sample.close();
+
+              return {
+                activeDetectionCount: 0,
+                activeDetectionFrameIndex: null,
+                activeDetectionFrameTime: null,
+                detectionBuffer: createIdleDetectionBufferState(),
+                mediaTime: sample.timestamp,
+                renderTimings,
+              };
+            }),
+          }),
+        ),
+        openMediaSource: vi.fn(),
+      },
+    );
+
+    expect(renderer.getState().lastFrameRenderTimings).toEqual(renderTimings);
+    expect(onFrame).toHaveBeenCalledWith(
+      expect.objectContaining({ renderTimings }),
+    );
+
+    renderer.destroy();
+  });
 });
 
 function createScene(

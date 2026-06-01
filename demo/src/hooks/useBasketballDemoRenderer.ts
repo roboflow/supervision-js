@@ -75,6 +75,7 @@ export interface BasketballDemoRendererState {
 }
 
 const activeBasketballFixture = defaultBasketballSampleFixture;
+const RENDERER_READOUT_INTERVAL_MS = 250;
 
 const initialDetectionSourceState: DemoDetectionSourceState = {
   datasetId: null,
@@ -165,31 +166,57 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
     let activeSession: MediaSession | undefined;
     let renderer: MediaRenderer | undefined;
     let lastReadoutAt = 0;
+    let lastPlaybackState: MediaRendererPlaybackState | null = null;
+    let lastPublishedPlaybackState: MediaRendererPlaybackState | null = null;
     let cleanedUp = false;
     const abortController =
       sourceMode === DemoSourceMode.Upload ? new AbortController() : undefined;
     const isActive = () => !cleanedUp && effectRunRef.current === runId;
-    const onFrame = () => {
+    const publishRendererState = (
+      state: MediaRendererState,
+      options: { readonly force?: boolean } = {},
+    ) => {
       const now = performance.now();
+      const playbackStateChanged =
+        state.playbackState !== lastPublishedPlaybackState;
 
-      if (!isActive() || now - lastReadoutAt < 250 || !renderer) {
+      if (
+        !isActive() ||
+        (!options.force &&
+          !playbackStateChanged &&
+          now - lastReadoutAt < RENDERER_READOUT_INTERVAL_MS)
+      ) {
         return;
       }
 
       lastReadoutAt = now;
-      syncRendererState(renderer);
+      lastPublishedPlaybackState = state.playbackState;
+      setRendererState(state);
+      setSourceState(state.source);
+    };
+    const onFrame = () => {
+      if (!renderer) {
+        return;
+      }
+
+      publishRendererState(renderer.getState());
     };
     const onRendererState = (state: MediaRendererState) => {
       if (!isActive()) {
         return;
       }
 
-      setRendererState(state);
-      setSourceState(state.source);
-      if (
+      const wasPlaybackActive =
+        lastPlaybackState === MediaRendererPlaybackState.Playing ||
+        lastPlaybackState === MediaRendererPlaybackState.Buffering;
+      const isPlaybackActive =
         state.playbackState === MediaRendererPlaybackState.Playing ||
-        state.playbackState === MediaRendererPlaybackState.Buffering
-      ) {
+        state.playbackState === MediaRendererPlaybackState.Buffering;
+
+      lastPlaybackState = state.playbackState;
+      publishRendererState(state);
+
+      if (isPlaybackActive && !wasPlaybackActive) {
         setHoveredDetectionPick(null);
         setSelectedDetectionPick(null);
       }

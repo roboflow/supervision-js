@@ -15,6 +15,7 @@ import type {
 import {
   formatExactTime,
   formatInteger,
+  formatMilliseconds,
   formatTime,
   formatTimeRange,
 } from "../format";
@@ -265,6 +266,8 @@ export function StatusPanel({
         ) : null}
       </StatusGroup>
 
+      <RenderTimingStatusGroup rendererState={rendererState} />
+
       <InteractionStatusGroup
         hoveredDetectionPick={hoveredDetectionPick}
         selectedDetectionPick={selectedDetectionPick}
@@ -356,6 +359,44 @@ export function StatusPanel({
         </StatusGroup>
       ) : null}
     </section>
+  );
+}
+
+function RenderTimingStatusGroup({
+  rendererState,
+}: {
+  readonly rendererState: MediaRendererState | null;
+}) {
+  const timings = rendererState?.lastFrameRenderTimings ?? null;
+
+  return (
+    <StatusGroup title="Frame Time">
+      <Readout
+        label="Total"
+        value={formatMilliseconds(timings?.totalMs ?? null)}
+      />
+      <Readout
+        label="Media"
+        value={formatMilliseconds(timings?.mediaUploadMs ?? null)}
+      />
+      <Readout
+        label="Masks"
+        value={formatMilliseconds(timings?.maskMs ?? null)}
+      />
+      <Readout
+        label="Boxes"
+        value={formatMilliseconds(timings?.boxMs ?? null)}
+      />
+      <Readout
+        label="Labels"
+        value={formatMilliseconds(timings?.labelMs ?? null)}
+      />
+      <Readout
+        label="Picking"
+        value={formatMilliseconds(timings?.interactionMs ?? null)}
+      />
+      <Readout label="Fit" value={formatMilliseconds(timings?.fitMs ?? null)} />
+    </StatusGroup>
   );
 }
 

@@ -5,6 +5,8 @@ import type {
   DetectionBufferState,
 } from "#types/detection-timeline";
 import type {
+  MediaRendererDiagnosticsOptions,
+  MediaFrameRenderTimings,
   MediaRendererFit,
   MediaRendererPresentation,
 } from "#types/media-renderer";
@@ -26,6 +28,7 @@ export interface MediaRendererSceneOptions {
   readonly interaction: MediaInteractionOptions | undefined;
   readonly canInteract: () => boolean;
   readonly renderPreparation: RenderPreparationOptions | undefined;
+  readonly diagnostics: MediaRendererDiagnosticsOptions | undefined;
 }
 
 export interface PresentedMediaSample {
@@ -34,6 +37,7 @@ export interface PresentedMediaSample {
   readonly activeDetectionFrameIndex: number | null;
   readonly activeDetectionCount: number;
   readonly detectionBuffer: DetectionBufferState;
+  readonly renderTimings?: MediaFrameRenderTimings;
 }
 
 export interface MediaRendererScene {

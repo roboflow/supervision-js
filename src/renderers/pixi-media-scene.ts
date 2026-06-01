@@ -3,7 +3,7 @@ import type {
   MediaRendererScene,
   MediaRendererSceneOptions,
 } from "./media-renderer-scene";
-import { createPixiBoxLayer } from "./pixi-box-layer";
+import { createPixiBoxLayer, type PixiBoxLayerState } from "./pixi-box-layer";
 import { createPixiInteractionLayer } from "./pixi-interaction-layer";
 import { createPixiLabelLayer } from "./pixi-label-layer";
 import { createPixiMaskLayer } from "./pixi-mask-layer";
@@ -119,6 +119,7 @@ export async function createPixiMediaScene(
   let mediaSprite: InstanceType<typeof Sprite> | undefined;
   let stagingTexture: TextureUpload | undefined;
   let stagingTextureSource: TextureUploadSource | undefined;
+  const collectFrameTimings = options.diagnostics?.frameTimings === true;
 
   const syncSceneChildren = () => {
     if (!mediaScene || !mediaSprite || !boxGraphics) {
@@ -227,18 +228,69 @@ export async function createPixiMediaScene(
       }
 
       try {
-        sample.draw(stagingContext, 0, 0, mediaWidth, mediaHeight);
-        stagingTextureSource?.update();
-        stagingTexture?.update();
-        maskLayer?.drawFrame(sample.timestamp);
-        const boxState = boxLayer.drawFrame(sample.timestamp);
-        interactionLayer?.drawFrame(sample.timestamp);
-        labelLayer?.drawFrame(sample.timestamp);
-        updateMediaSceneFit();
+        if (!collectFrameTimings) {
+          sample.draw(stagingContext, 0, 0, mediaWidth, mediaHeight);
+          stagingTextureSource?.update();
+          stagingTexture?.update();
+          maskLayer?.drawFrame(sample.timestamp);
+          const boxState = boxLayer.drawFrame(sample.timestamp);
+          interactionLayer?.drawFrame(sample.timestamp);
+          labelLayer?.drawFrame(sample.timestamp);
+          updateMediaSceneFit();
+
+          return {
+            detectionBuffer: options.detectionTimeline.getState(),
+            mediaTime: sample.timestamp,
+            ...boxState,
+          };
+        }
+
+        const totalStart = now();
+        let mediaUploadMs = 0;
+        let maskMs = 0;
+        let boxMs = 0;
+        let interactionMs = 0;
+        let labelMs = 0;
+        let fitMs = 0;
+        let boxState: PixiBoxLayerState | undefined;
+
+        mediaUploadMs = measure(() => {
+          sample.draw(stagingContext, 0, 0, mediaWidth, mediaHeight);
+          stagingTextureSource?.update();
+          stagingTexture?.update();
+        });
+        maskMs = measure(() => {
+          maskLayer?.drawFrame(sample.timestamp);
+        });
+        boxMs = measure(() => {
+          boxState = boxLayer.drawFrame(sample.timestamp);
+        });
+        interactionMs = measure(() => {
+          interactionLayer?.drawFrame(sample.timestamp);
+        });
+        labelMs = measure(() => {
+          labelLayer?.drawFrame(sample.timestamp);
+        });
+        fitMs = measure(updateMediaSceneFit);
+
+        if (!boxState) {
+          throw new Error("Unable to draw Pixi box layer.");
+        }
+
+        const renderTimings = {
+          boxMs,
+          fitMs,
+          interactionMs,
+          labelMs,
+          maskMs,
+          mediaUploadMs,
+          totalMs: elapsedSince(totalStart),
+        };
 
         return {
           detectionBuffer: options.detectionTimeline.getState(),
           mediaTime: sample.timestamp,
+          renderTimings,
           ...boxState,
         };
       } finally {
@@ -322,4 +374,18 @@ export async function createPixiMediaScene(
       );
     },
   };
+}
+
+function measure(work: () => void) {
+  const start = now();
+  work();
+  return elapsedSince(start);
+}
+
+function elapsedSince(start: number) {
+  return now() - start;
+}
+
+function now() {
+  return globalThis.performance?.now?.() ?? Date.now();
 }

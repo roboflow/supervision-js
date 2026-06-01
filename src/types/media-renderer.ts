@@ -45,6 +45,21 @@ export interface MediaFrameDiagnostics {
   readonly activeDetectionFrameIndex: number | null;
   readonly activeDetectionCount: number;
   readonly detectionBuffer: DetectionBufferState;
+  readonly renderTimings: MediaFrameRenderTimings | null;
+}
+
+export interface MediaFrameRenderTimings {
+  readonly totalMs: number;
+  readonly mediaUploadMs: number;
+  readonly maskMs: number;
+  readonly boxMs: number;
+  readonly interactionMs: number;
+  readonly labelMs: number;
+  readonly fitMs: number;
+}
+
+export interface MediaRendererDiagnosticsOptions {
+  readonly frameTimings?: boolean;
 }
 
 export interface MediaSourceState {
@@ -74,6 +89,7 @@ export interface MediaRendererState {
   readonly activeDetectionFrameIndex: number | null;
   readonly activeDetectionCount: number;
   readonly detectionBuffer: DetectionBufferState;
+  readonly lastFrameRenderTimings: MediaFrameRenderTimings | null;
   readonly source: MediaSourceState;
 }
 
@@ -96,6 +112,7 @@ export interface MediaRendererOptions {
   readonly maskStyle?: MaskStyle;
   readonly interaction?: MediaInteractionOptions;
   readonly renderPreparation?: RenderPreparationOptions;
+  readonly diagnostics?: MediaRendererDiagnosticsOptions;
   readonly onFrame?: (diagnostics: MediaFrameDiagnostics) => void;
   readonly onSource?: (state: MediaSourceState) => void;
   readonly onState?: (state: MediaRendererState) => void;

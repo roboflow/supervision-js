@@ -68,6 +68,7 @@ export interface MediaSessionRendererOptions {
   readonly fit?: MediaRendererFit;
   readonly interaction?: MediaInteractionOptions;
   readonly renderPreparation?: MediaRendererOptions["renderPreparation"];
+  readonly diagnostics?: MediaRendererOptions["diagnostics"];
   readonly onFrame?: (diagnostics: MediaFrameDiagnostics) => void;
   readonly onSource?: (state: MediaSourceState) => void;
   readonly onState?: (state: MediaRendererState) => void;

@@ -8,6 +8,7 @@ import {
   MediaRendererPlaybackState,
   MediaSourceStatus,
   type MediaFrameDiagnostics,
+  type MediaFrameRenderTimings,
   type MediaRendererFit,
   type MediaRendererState,
   type MediaSourceState,
@@ -63,6 +64,7 @@ export function createMediaRendererRuntimeState(
   let activeDetectionFrameTime: number | null = null;
   let activeDetectionFrameIndex: number | null = null;
   let activeDetectionCount = 0;
+  let lastFrameRenderTimings: MediaFrameRenderTimings | null = null;
   let destroyed = false;
 
   const emitSourceState = () => {
@@ -85,6 +87,7 @@ export function createMediaRendererRuntimeState(
     detectionBuffer: options.getDetectionBufferState(),
     duration,
     fit: options.fit,
+    lastFrameRenderTimings,
     mediaHeight,
     mediaWidth,
     playbackState,
@@ -106,6 +109,7 @@ export function createMediaRendererRuntimeState(
     mediaTime: sample.mediaTime,
     mediaWidth,
     presentedFrames,
+    renderTimings: lastFrameRenderTimings,
   });
 
   const emitState = () => {
@@ -173,6 +177,7 @@ export function createMediaRendererRuntimeState(
       activeDetectionFrameIndex = sample.activeDetectionFrameIndex;
       activeDetectionFrameTime = sample.activeDetectionFrameTime;
       activeDetectionCount = sample.activeDetectionCount;
+      lastFrameRenderTimings = sample.renderTimings ?? null;
 
       options.onFrame?.(createFrameDiagnostics(sample));
       emitState();

@@ -229,6 +229,7 @@ export async function createMediaRendererCore(
       labelStyle: options.labelStyle,
       maskStyle: options.maskStyle,
       renderPreparation: options.renderPreparation,
+      diagnostics: options.diagnostics,
     });
 
     const mediaSource = await openRendererMediaSource(options, providers);
