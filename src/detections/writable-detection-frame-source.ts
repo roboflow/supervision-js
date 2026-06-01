@@ -1,9 +1,11 @@
 import type {
   ColdDetectionFrameStore,
   ColdDetectionFrameStoreWriteSummary,
+  DetectionFrameRetentionOptions,
   DetectionFrameSourceVersionRange,
   WritableDetectionFrameSource,
 } from "#types/detection-timeline";
+import { DetectionFrameRetentionMode as RetentionMode } from "#types/detection-timeline";
 import type { DetectionFrame } from "#types/detections";
 
 const RANGE_EPSILON_SECONDS = 1e-6;
@@ -27,6 +29,7 @@ export function createWritableDetectionFrameSource(options: {
   readonly store: ColdDetectionFrameStore;
   readonly datasetId: string;
   readonly chunkDurationSeconds?: number;
+  readonly retention?: DetectionFrameRetentionOptions;
 }): WritableDetectionFrameSource {
   let summary: ColdDetectionFrameStoreWriteSummary | null = null;
   let version = 0;
@@ -87,16 +90,24 @@ export function createWritableDetectionFrameSource(options: {
         writeOptions(frames),
       );
       const changedRange = getDetectionFramesRange(frames);
+      const retainedSummary = await applyRetention(nextSummary);
 
-      return changedRange
-        ? recordRangeWrite(nextSummary, changedRange)
-        : nextSummary;
+      if (retainedSummary !== nextSummary) {
+        return recordAllRangesWrite(retainedSummary);
+      }
+
+      if (!changedRange) {
+        summary = nextSummary;
+        return nextSummary;
+      }
+
+      return recordRangeWrite(nextSummary, changedRange);
     },
 
     async replaceFrames(frames) {
-      return recordAllRangesWrite(
-        await options.store.putFrames(writeOptions(frames)),
-      );
+      const nextSummary = await options.store.putFrames(writeOptions(frames));
+
+      return recordAllRangesWrite(await applyRetention(nextSummary));
     },
 
     async clear() {
@@ -170,6 +181,50 @@ export function createWritableDetectionFrameSource(options: {
     },
   };
 
+  async function applyRetention(
+    nextSummary: ColdDetectionFrameStoreWriteSummary,
+  ) {
+    const retention = options.retention;
+
+    if (
+      retention === undefined ||
+      !shouldApplyWindowRetention(retention) ||
+      nextSummary.endTime === null
+    ) {
+      return nextSummary;
+    }
+
+    const retentionWindowSeconds = retention.windowSeconds;
+
+    if (
+      retentionWindowSeconds === undefined ||
+      !Number.isFinite(retentionWindowSeconds) ||
+      retentionWindowSeconds <= 0
+    ) {
+      throw new Error("retention.windowSeconds must be greater than 0.");
+    }
+
+    const retentionStartTime = Math.max(
+      0,
+      nextSummary.endTime - retentionWindowSeconds,
+    );
+
+    if (
+      nextSummary.startTime !== null &&
+      nextSummary.startTime + RANGE_EPSILON_SECONDS >= retentionStartTime
+    ) {
+      return nextSummary;
+    }
+
+    const retainedFrames = await options.store.loadFrames({
+      datasetId: options.datasetId,
+      endTime: nextSummary.endTime,
+      startTime: retentionStartTime,
+    });
+
+    return options.store.putFrames(writeOptions(retainedFrames));
+  }
+
   function resolveCoveredWaiters() {
     for (let index = waiters.length - 1; index >= 0; index -= 1) {
       const waiter = waiters[index];
@@ -182,6 +237,15 @@ export function createWritableDetectionFrameSource(options: {
       waiter.resolve();
     }
   }
+}
+
+function shouldApplyWindowRetention(
+  retention: DetectionFrameRetentionOptions | undefined,
+) {
+  return (
+    retention?.mode === RetentionMode.PersistWindow ||
+    retention?.mode === RetentionMode.MemoryOnly
+  );
 }
 
 function getDetectionFramesRange(

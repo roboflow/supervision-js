@@ -1,8 +1,10 @@
 import {
+  DetectionFrameRetentionMode,
   DetectionFrameSelectionMode,
   MediaNormalizationContainer,
   MediaNormalizationVideoCodec,
   MediaRendererFit,
+  MediaSessionMode,
   MediaRendererPlaybackState,
   createBrowserColdDetectionFrameStore,
   createMediaSession,
@@ -28,12 +30,7 @@ import {
   type PreparedUploadMedia,
 } from "../media/upload-media";
 import { createBasketballSamplePresentation } from "../presentation/basketball-presentation";
-import {
-  UPLOAD_DETECTION_CHUNK_SECONDS,
-  UPLOAD_PREDICTION_PLAYBACK_GATE_SECONDS,
-  UPLOAD_RENDER_PREPARATION_PLAYBACK_GATE_MINIMUM_SECONDS,
-  UPLOAD_RENDER_PREPARATION_PLAYBACK_GATE_SECONDS,
-} from "./demo-session-config";
+import { UPLOAD_DETECTION_CHUNK_SECONDS } from "./demo-session-config";
 import type {
   DemoSessionCallbacks,
   UploadInferenceStateSetter,
@@ -99,18 +96,16 @@ export async function createUploadSession(
           frameRate: TARGET_UPLOAD_FRAME_RATE,
           selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
         },
-        playbackGate: {
-          enabled: true,
-          requiredAheadSeconds: UPLOAD_PREDICTION_PLAYBACK_GATE_SECONDS,
-        },
         writable: {
           chunkDurationSeconds: UPLOAD_DETECTION_CHUNK_SECONDS,
           clearOnCreate: true,
           datasetId,
+          retention: { mode: DetectionFrameRetentionMode.PersistAll },
           store,
         },
       },
       media: preparedMedia?.blob ?? options.uploadRun.file,
+      mode: MediaSessionMode.File,
       normalize: isImageUpload
         ? false
         : {
@@ -146,13 +141,6 @@ export async function createUploadSession(
         onState: options.onRendererState,
         renderPreparation: {
           onDiagnostics: options.onRenderPreparationDiagnostics,
-          playbackGate: {
-            enabled: true,
-            minimumAheadSeconds:
-              UPLOAD_RENDER_PREPARATION_PLAYBACK_GATE_MINIMUM_SECONDS,
-            requiredAheadSeconds:
-              UPLOAD_RENDER_PREPARATION_PLAYBACK_GATE_SECONDS,
-          },
         },
         onSource: options.onSourceState,
       },

@@ -3,6 +3,7 @@ export { createBrowserColdDetectionFrameStore } from "#detections/browser-cold-d
 export { createBufferedDetectionTimeline } from "#detections/buffered-detection-timeline";
 export { createChunkedDetectionFrameSource } from "#detections/chunked-detection-frame-source";
 export { createColdDetectionFrameSource } from "#detections/cold-detection-frame-source";
+export { createMemoryColdDetectionFrameStore } from "#detections/memory-cold-detection-frame-store";
 export { createWritableDetectionFrameSource } from "#detections/writable-detection-frame-source";
 export {
   normalizeMedia,
@@ -42,6 +43,7 @@ export type {
 } from "#types/media-preparation";
 export {
   DetectionBufferStatus,
+  DetectionFrameRetentionMode,
   DetectionFrameSelectionMode,
   type BufferedDetectionTimeline,
   type ColdDetectionFrameStore,
@@ -56,6 +58,7 @@ export {
   type DetectionFrameChunkDescriptor,
   type DetectionFrameChunkFetch,
   type DetectionFrameChunkManifest,
+  type DetectionFrameRetentionOptions,
   type DetectionFrameSelectionOptions,
   type DetectionFrameSource,
   type DetectionFrameSourceVersionRange,
@@ -96,6 +99,7 @@ export {
   type MediaSession,
   MediaSessionActivityKind,
   MediaSessionActivityStatus,
+  MediaSessionMode,
   MediaSessionStatus,
   type MediaSessionActivity,
   type MediaSessionDetectionOptions,

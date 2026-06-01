@@ -1,9 +1,11 @@
+import { createMemoryColdDetectionFrameStore } from "#detections/memory-cold-detection-frame-store";
 import { createWritableDetectionFrameSource } from "#detections/writable-detection-frame-source";
 import {
   normalizeMedia,
   normalizeMediaProgressively,
 } from "#media/media-normalization";
 import { createMediaRenderer } from "#renderers/media-renderer";
+import { DetectionFrameRetentionMode } from "#types/detection-timeline";
 import type {
   DetectionFrameSource,
   WritableDetectionFrameSource,
@@ -24,6 +26,10 @@ import type {
   MediaRendererState,
 } from "#types/media-renderer";
 import type { RenderPreparationDiagnostics } from "#types/render-preparation";
+import {
+  resolveMediaSessionDefaults,
+  resolveMediaSessionWritableRetention,
+} from "./media-session-defaults";
 import { createMediaSessionStateSnapshot } from "./media-session-state";
 
 interface PreparedSessionMedia {
@@ -97,8 +103,16 @@ export async function createMediaSession(
     sessionMediaState = preparedMedia.state;
     emitSessionState();
     const sessionMedia = preparedMedia;
+    const sessionDefaults = resolveMediaSessionDefaults({
+      detections: options.detections,
+      mode: options.mode,
+      renderer: options.renderer,
+    });
 
-    preparedDetections = await prepareSessionDetections(options.detections);
+    preparedDetections = await prepareSessionDetections({
+      detections: options.detections,
+      mode: options.mode,
+    });
     const sessionDetections = preparedDetections;
 
     const renderer = await createMediaRenderer({
@@ -106,12 +120,7 @@ export async function createMediaSession(
       ...sessionMedia.rendererSourceOption,
       boxStyle: options.presentation?.boxStyle ?? undefined,
       container: options.container,
-      detectionBuffer: {
-        ...options.detections?.buffer,
-        playbackGate:
-          options.detections?.playbackGate ??
-          options.detections?.buffer?.playbackGate,
-      },
+      detectionBuffer: sessionDefaults.detectionBuffer,
       detectionFrames: sessionDetections.detectionFrames,
       detectionSource: sessionDetections.detectionSource,
       labelStyle: options.presentation?.labelStyle ?? undefined,
@@ -122,7 +131,7 @@ export async function createMediaSession(
         emitSessionState();
       },
       renderPreparation: {
-        ...options.renderer?.renderPreparation,
+        ...sessionDefaults.renderPreparation,
         onDiagnostics(diagnostics) {
           renderPreparationState = diagnostics;
           options.renderer?.renderPreparation?.onDiagnostics?.(diagnostics);
@@ -323,9 +332,12 @@ function createEmptyMediaState(): MediaSessionMediaState {
   };
 }
 
-async function prepareSessionDetections(
-  detections: MediaSessionDetectionOptions | undefined,
-): Promise<PreparedSessionDetections> {
+async function prepareSessionDetections(options: {
+  readonly detections: MediaSessionDetectionOptions | undefined;
+  readonly mode: MediaSessionOptions["mode"];
+}): Promise<PreparedSessionDetections> {
+  const { detections } = options;
+
   if (!detections) {
     return {};
   }
@@ -343,10 +355,19 @@ async function prepareSessionDetections(
   }
 
   if (detections.writable) {
+    const retention = resolveMediaSessionWritableRetention({
+      mode: options.mode,
+      writable: detections.writable,
+    });
+    const store =
+      retention.mode === DetectionFrameRetentionMode.MemoryOnly
+        ? createMemoryColdDetectionFrameStore()
+        : (detections.writable.store ?? createMemoryColdDetectionFrameStore());
     const writableSource = createWritableDetectionFrameSource({
       chunkDurationSeconds: detections.writable.chunkDurationSeconds,
       datasetId: detections.writable.datasetId,
-      store: detections.writable.store,
+      retention,
+      store,
     });
 
     try {

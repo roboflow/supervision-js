@@ -72,6 +72,33 @@ describe("media session", () => {
     expect(store.destroy).toHaveBeenCalledOnce();
   });
 
+  it("can own an in-memory writable detection source by default", async () => {
+    resetMocks();
+    const { createMediaSession } = await import("../index");
+
+    const session = await createMediaSession({
+      container: createContainer(),
+      detections: {
+        writable: {
+          datasetId: "memory-session",
+        },
+      },
+      media: "sample.mp4",
+      renderer: { autoPlay: false },
+    });
+
+    const writeSummary = await session.appendDetectionFrames(frames);
+
+    expect(writeSummary).toMatchObject({
+      datasetId: "memory-session",
+      detectionCount: 1,
+      frameCount: 1,
+    });
+    expect(await session.detectionSource?.loadFrames(0, 1)).toEqual(frames);
+
+    session.destroy();
+  });
+
   it("emits aggregate state and exposes it from the session", async () => {
     resetMocks();
     const { createMediaSession } = await import("../index");

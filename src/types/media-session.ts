@@ -2,6 +2,7 @@ import type {
   ColdDetectionFrameStore,
   ColdDetectionFrameStoreWriteSummary,
   DetectionBufferOptions,
+  DetectionFrameRetentionOptions,
   DetectionPlaybackGateOptions,
   DetectionFrameSource,
   WritableDetectionFrameSource,
@@ -36,10 +37,11 @@ export interface MediaSessionNormalizationOptions extends MediaNormalizationOpti
 }
 
 export interface MediaSessionWritableDetectionOptions {
-  readonly store: ColdDetectionFrameStore;
+  readonly store?: ColdDetectionFrameStore;
   readonly datasetId: string;
   readonly chunkDurationSeconds?: number;
   readonly clearOnCreate?: boolean;
+  readonly retention?: DetectionFrameRetentionOptions;
 }
 
 export interface MediaSessionDetectionOptions {
@@ -64,11 +66,17 @@ export interface MediaSessionRendererOptions {
 export interface MediaSessionOptions {
   readonly container: HTMLElement;
   readonly media: MediaSessionMedia;
+  readonly mode?: MediaSessionMode;
   readonly normalize?: false | MediaSessionNormalizationOptions;
   readonly detections?: MediaSessionDetectionOptions;
   readonly onState?: (state: MediaSessionState) => void;
   readonly presentation?: MediaRendererPresentation;
   readonly renderer?: MediaSessionRendererOptions;
+}
+
+export enum MediaSessionMode {
+  File = "file",
+  Stream = "stream",
 }
 
 export interface MediaSessionMediaState {

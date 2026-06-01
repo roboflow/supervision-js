@@ -51,6 +51,7 @@ describe("package entrypoint", () => {
       "BaseMaskStyle",
       "BoxShape",
       "DetectionBufferStatus",
+      "DetectionFrameRetentionMode",
       "DetectionFrameSelectionMode",
       "DetectionMaskEncoding",
       "MediaNormalizationAudioCodec",
@@ -64,6 +65,7 @@ describe("package entrypoint", () => {
       "MediaRendererPlaybackState",
       "MediaSessionActivityKind",
       "MediaSessionActivityStatus",
+      "MediaSessionMode",
       "MediaSessionStatus",
       "MediaSourceStatus",
       "RenderPreparationArtifactFrameStatus",
@@ -79,6 +81,7 @@ describe("package entrypoint", () => {
       "createColdDetectionFrameSource",
       "createMediaRenderer",
       "createMediaSession",
+      "createMemoryColdDetectionFrameStore",
       "createWritableDetectionFrameSource",
       "normalizeMedia",
       "normalizeMediaProgressively",
@@ -161,9 +164,18 @@ describe("package entrypoint", () => {
       Loading: "loading",
       Ready: "ready",
     });
+    expect(entrypoint.DetectionFrameRetentionMode).toEqual({
+      MemoryOnly: "memoryOnly",
+      PersistAll: "persistAll",
+      PersistWindow: "persistWindow",
+    });
     expect(DetectionFrameSelectionMode).toEqual({
       Interval: "interval",
       NearestFrameIndex: "nearestFrameIndex",
+    });
+    expect(entrypoint.MediaSessionMode).toEqual({
+      File: "file",
+      Stream: "stream",
     });
     expect(entrypoint.DetectionMaskEncoding).toEqual({
       CompressedRle: "compressedRle",

@@ -41,6 +41,17 @@ export interface DetectionPlaybackGateOptions {
   readonly requiredAheadSeconds?: number;
 }
 
+export enum DetectionFrameRetentionMode {
+  MemoryOnly = "memoryOnly",
+  PersistAll = "persistAll",
+  PersistWindow = "persistWindow",
+}
+
+export interface DetectionFrameRetentionOptions {
+  readonly mode?: DetectionFrameRetentionMode;
+  readonly windowSeconds?: number;
+}
+
 export interface DetectionBufferPrepareOptions {
   readonly duration?: number | null;
   readonly firstTimestamp?: number;

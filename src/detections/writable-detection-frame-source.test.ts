@@ -5,6 +5,7 @@ import type {
   ColdDetectionFrameStore,
   ColdDetectionFrameStoreWriteSummary,
 } from "#types/detection-timeline";
+import { DetectionFrameRetentionMode } from "#types/detection-timeline";
 import type { DetectionFrame } from "#types/detections";
 
 const summary: ColdDetectionFrameStoreWriteSummary = {
@@ -133,6 +134,45 @@ describe("writable detection frame source", () => {
     expect(resolved).toBe(true);
     expect(source.getAvailableRanges()).toEqual([{ endTime: 2, startTime: 0 }]);
   });
+
+  it("applies rolling retention after appending frames", async () => {
+    const frameStore: DetectionFrame[] = [];
+    const store = createMutableStore(frameStore);
+    const source = createWritableDetectionFrameSource({
+      datasetId: "dataset",
+      retention: {
+        mode: DetectionFrameRetentionMode.PersistWindow,
+        windowSeconds: 1,
+      },
+      store,
+    });
+    const earlyFrame: DetectionFrame = {
+      detections: [{ id: "early" }],
+      endTime: 0.25,
+      frameIndex: 0,
+      mediaTime: 0,
+    };
+    const retainedFrame: DetectionFrame = {
+      detections: [{ id: "retained" }],
+      endTime: 2.1,
+      frameIndex: 60,
+      mediaTime: 2,
+    };
+
+    await source.appendFrames([earlyFrame]);
+    const retainedSummary = await source.appendFrames([retainedFrame]);
+
+    expect(retainedSummary).toMatchObject({
+      detectionCount: 1,
+      endTime: 2.1,
+      frameCount: 1,
+      startTime: 2,
+    });
+    expect(await source.loadFrames(0, 3)).toEqual([retainedFrame]);
+    expect(source.getAvailableRanges()).toEqual([
+      { endTime: 2.1, startTime: 2 },
+    ]);
+  });
 });
 
 function createStore(): ColdDetectionFrameStore {
@@ -142,4 +182,68 @@ function createStore(): ColdDetectionFrameStore {
     loadFrames: vi.fn(async () => frames),
     putFrames: vi.fn(async () => summary),
   };
+}
+
+function createMutableStore(
+  storedFrames: DetectionFrame[],
+): ColdDetectionFrameStore {
+  return {
+    async appendFrames(options) {
+      storedFrames.splice(
+        0,
+        storedFrames.length,
+        ...dedupeFrames([...storedFrames, ...options.frames]),
+      );
+
+      return createSummary(options.datasetId, storedFrames);
+    },
+    async clearDataset() {
+      storedFrames.length = 0;
+    },
+    async loadFrames(options) {
+      return storedFrames.filter(
+        (frame) =>
+          frame.mediaTime <= options.endTime &&
+          (frame.endTime ?? frame.mediaTime) > options.startTime,
+      );
+    },
+    async putFrames(options) {
+      storedFrames.splice(0, storedFrames.length, ...options.frames);
+
+      return createSummary(options.datasetId, storedFrames);
+    },
+  };
+}
+
+function createSummary(
+  datasetId: string,
+  storedFrames: readonly DetectionFrame[],
+): ColdDetectionFrameStoreWriteSummary {
+  const firstFrame = storedFrames[0];
+  const lastFrame = storedFrames.at(-1);
+
+  return {
+    chunkCount: storedFrames.length === 0 ? 0 : 1,
+    chunkDurationSeconds: 1,
+    datasetId,
+    detectionCount: storedFrames.reduce(
+      (total, frame) => total + frame.detections.length,
+      0,
+    ),
+    endTime: lastFrame ? (lastFrame.endTime ?? lastFrame.mediaTime) : null,
+    frameCount: storedFrames.length,
+    startTime: firstFrame?.mediaTime ?? null,
+  };
+}
+
+function dedupeFrames(frames: readonly DetectionFrame[]) {
+  const deduped = new Map<string, DetectionFrame>();
+
+  for (const frame of frames) {
+    deduped.set(`${frame.frameIndex ?? "time"}:${frame.mediaTime}`, frame);
+  }
+
+  return Array.from(deduped.values()).sort(
+    (left, right) => left.mediaTime - right.mediaTime,
+  );
 }
