@@ -51,6 +51,7 @@ export function ControlBar({
         duration={duration}
         normalizedRanges={normalizedRanges}
         onSeek={onSeek}
+        playbackState={playbackState}
         processedRanges={processedRanges}
         processingRanges={processingRanges}
       />

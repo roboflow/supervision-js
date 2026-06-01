@@ -1,5 +1,7 @@
+import { useState } from "react";
 import { ControlBar } from "./components/ControlBar";
 import { DemoShell } from "./components/DemoShell";
+import { PerformanceStrip } from "./components/PerformanceStrip";
 import { RenderControls } from "./components/RenderControls";
 import { RendererViewport } from "./components/RendererViewport";
 import { SourceControls } from "./components/SourceControls";
@@ -9,9 +11,11 @@ import {
   useBasketballDemoRenderer,
 } from "./hooks/useBasketballDemoRenderer";
 import { defaultBasketballClassNames } from "./presentation/basketball-presentation";
+import { DemoViewMode } from "./session/demo-view-mode";
 
 export function App() {
   const demo = useBasketballDemoRenderer();
+  const [viewMode, setViewMode] = useState(DemoViewMode.Demo);
   const processedRanges =
     demo.sourceMode === DemoSourceMode.Basketball && demo.duration !== null
       ? [{ endTime: demo.duration, startTime: 0 }]
@@ -31,6 +35,8 @@ export function App() {
 
   return (
     <DemoShell
+      mode={viewMode}
+      onModeChange={setViewMode}
       viewport={
         <RendererViewport
           containerRef={demo.containerRef}
@@ -81,6 +87,12 @@ export function App() {
           classNames={styleClassNames}
           onChange={demo.setPresentationSettings}
           settings={demo.presentationSettings}
+        />
+      }
+      performanceStrip={
+        <PerformanceStrip
+          renderPreparationDiagnostics={demo.renderPreparationDiagnostics}
+          rendererState={demo.rendererState}
         />
       }
       statusPanel={

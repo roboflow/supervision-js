@@ -3,7 +3,11 @@ import type {
   CSSProperties,
   PointerEvent as ReactPointerEvent,
 } from "react";
-import type { DetectionBufferState } from "supervision-js";
+import { useEffect, useRef, useState } from "react";
+import {
+  MediaRendererPlaybackState,
+  type DetectionBufferState,
+} from "supervision-js";
 import { formatTimeRange } from "../format";
 import type { TimelineRange } from "../session/demo-session-types";
 
@@ -15,6 +19,7 @@ export function TimelineView({
   duration,
   normalizedRanges = [],
   onSeek,
+  playbackState,
   processedRanges = [],
   processingRanges = [],
 }: {
@@ -25,14 +30,21 @@ export function TimelineView({
   readonly duration: number | null;
   readonly normalizedRanges?: readonly TimelineRange[];
   readonly onSeek: (time: number) => void;
+  readonly playbackState: MediaRendererPlaybackState | null;
   readonly processedRanges?: readonly TimelineRange[];
   readonly processingRanges?: readonly TimelineRange[];
 }) {
   const mediaDuration = duration !== null && duration > 0 ? duration : null;
+  const timelineCurrentTime = useSmoothTimelineCurrentTime({
+    currentTime,
+    disabled,
+    duration: mediaDuration,
+    playbackState,
+  });
   const visualDuration =
     mediaDuration ??
     Math.max(
-      currentTime,
+      timelineCurrentTime,
       detectionBuffer?.bufferEndTime ?? 0,
       detectionBuffer?.requestedEndTime ?? 0,
       activeDetectionFrameTime ?? 0,
@@ -72,8 +84,8 @@ export function TimelineView({
       detectionBuffer?.bufferEndTime ?? null,
     );
   const inputMax = mediaDuration ?? visualDuration;
-  const inputValue = clamp(currentTime, 0, inputMax);
-  const playheadLeft = toPercent(currentTime, visualDuration);
+  const inputValue = clamp(timelineCurrentTime, 0, inputMax);
+  const playheadLeft = toPercent(timelineCurrentTime, visualDuration);
   const playheadProgress = toPercent(inputValue, inputMax);
   const activeFrameLeft =
     activeDetectionFrameTime === null
@@ -230,6 +242,103 @@ export function TimelineView({
       </div>
     </div>
   );
+}
+
+interface SmoothTimelineCurrentTimeOptions {
+  readonly currentTime: number;
+  readonly disabled: boolean;
+  readonly duration: number | null;
+  readonly playbackState: MediaRendererPlaybackState | null;
+}
+
+interface TimelineClockAnchor {
+  readonly mediaTime: number;
+  readonly performanceTime: number;
+}
+
+const TIMELINE_DISCONTINUITY_THRESHOLD_SECONDS = 0.25;
+const TIMELINE_RENDER_EPSILON_SECONDS = 0.001;
+
+function useSmoothTimelineCurrentTime({
+  currentTime,
+  disabled,
+  duration,
+  playbackState,
+}: SmoothTimelineCurrentTimeOptions) {
+  const isPlaying = playbackState === MediaRendererPlaybackState.Playing;
+  const [timelineCurrentTime, setTimelineCurrentTime] = useState(currentTime);
+  const timelineCurrentTimeRef = useRef(currentTime);
+  const anchorRef = useRef<TimelineClockAnchor>({
+    mediaTime: currentTime,
+    performanceTime: performance.now(),
+  });
+  const lastAuthoritativeTimeRef = useRef(currentTime);
+
+  const updateTimelineCurrentTime = (nextCurrentTime: number) => {
+    timelineCurrentTimeRef.current = nextCurrentTime;
+    setTimelineCurrentTime((previousCurrentTime) =>
+      Math.abs(previousCurrentTime - nextCurrentTime) <
+      TIMELINE_RENDER_EPSILON_SECONDS
+        ? previousCurrentTime
+        : nextCurrentTime,
+    );
+  };
+
+  useEffect(() => {
+    const now = performance.now();
+    const previousAuthoritativeTime = lastAuthoritativeTimeRef.current;
+    const currentVisualTime = timelineCurrentTimeRef.current;
+    const jumpedBackward =
+      currentTime < previousAuthoritativeTime - TIMELINE_RENDER_EPSILON_SECONDS;
+    const driftedFromAuthority =
+      Math.abs(currentTime - currentVisualTime) >
+      TIMELINE_DISCONTINUITY_THRESHOLD_SECONDS;
+
+    lastAuthoritativeTimeRef.current = currentTime;
+    anchorRef.current = {
+      mediaTime: currentTime,
+      performanceTime: now,
+    };
+
+    if (!isPlaying || disabled || jumpedBackward || driftedFromAuthority) {
+      updateTimelineCurrentTime(currentTime);
+    }
+  }, [currentTime, disabled, isPlaying]);
+
+  useEffect(() => {
+    if (!isPlaying || disabled) {
+      return;
+    }
+
+    let animationFrameHandle: number | undefined;
+    const tick = (now: number) => {
+      const anchor = anchorRef.current;
+      const elapsedSeconds = Math.max(0, (now - anchor.performanceTime) / 1000);
+
+      updateTimelineCurrentTime(
+        clampTimelineTime(anchor.mediaTime + elapsedSeconds, duration),
+      );
+      animationFrameHandle = window.requestAnimationFrame(tick);
+    };
+
+    animationFrameHandle = window.requestAnimationFrame(tick);
+
+    return () => {
+      if (animationFrameHandle !== undefined) {
+        window.cancelAnimationFrame(animationFrameHandle);
+      }
+    };
+  }, [disabled, duration, isPlaying]);
+
+  return timelineCurrentTime;
+}
+
+function clampTimelineTime(time: number, duration: number | null) {
+  if (duration === null) {
+    return Math.max(0, time);
+  }
+
+  return clamp(time, 0, duration);
 }
 
 type TimelineRangeStyle = CSSProperties & {
