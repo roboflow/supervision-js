@@ -15,6 +15,12 @@ import type {
 interface PixiLabelEntry {
   readonly background: PixiGraphics;
   readonly label: PixiText;
+  backgroundHeight: number;
+  backgroundKey: string | null;
+  backgroundWidth: number;
+  labelAlpha: number | null;
+  text: string | null;
+  textStyleKey: string | null;
 }
 
 export interface PixiLabelLayerOptions {
@@ -59,7 +65,13 @@ export function createPixiLabelLayer({
     if (!entry) {
       entry = {
         background: new Graphics(),
+        backgroundHeight: 0,
+        backgroundKey: null,
+        backgroundWidth: 0,
         label: new Text({ text: "", style: {} }),
+        labelAlpha: null,
+        text: null,
+        textStyleKey: null,
       };
       entries[index] = entry;
       container?.addChild(entry.background, entry.label);
@@ -145,11 +157,25 @@ function drawInstruction(
   instruction: LabelDrawInstruction,
 ) {
   const textStyle = resolveTextStyle(instruction.textStyle);
+  const textStyleKey = createTextStyleKey(textStyle);
+  const textAlpha = instruction.textStyle?.alpha ?? 1;
 
-  entry.label.text = instruction.text;
-  entry.label.style = textStyle as PixiText["style"];
+  if (entry.text !== instruction.text) {
+    entry.label.text = instruction.text;
+    entry.text = instruction.text;
+  }
+
+  if (entry.textStyleKey !== textStyleKey) {
+    entry.label.style = textStyle as PixiText["style"];
+    entry.textStyleKey = textStyleKey;
+  }
+
   entry.label.visible = true;
-  entry.label.alpha = instruction.textStyle?.alpha ?? 1;
+
+  if (entry.labelAlpha !== textAlpha) {
+    entry.label.alpha = textAlpha;
+    entry.labelAlpha = textAlpha;
+  }
 
   const background = instruction.background;
   const paddingX = background?.paddingX ?? 0;
@@ -166,26 +192,44 @@ function drawInstruction(
   entry.label.y = y + paddingY;
 
   if (!background) {
-    entry.background.clear();
     entry.background.visible = false;
+    entry.backgroundKey = null;
     return;
   }
 
-  drawBackground(entry.background, background, x, y, width, height);
+  drawBackground(entry, background, x, y, width, height);
 }
 
 function drawBackground(
-  graphics: PixiGraphics,
+  entry: PixiLabelEntry,
   background: LabelBackgroundStyle,
   x: number,
   y: number,
   width: number,
   height: number,
 ) {
+  const graphics = entry.background;
+  const backgroundKey = createBackgroundKey(background);
+
   graphics.visible = true;
+  graphics.x = x;
+  graphics.y = y;
+
+  if (
+    entry.backgroundKey === backgroundKey &&
+    entry.backgroundWidth === width &&
+    entry.backgroundHeight === height
+  ) {
+    return;
+  }
+
+  entry.backgroundKey = backgroundKey;
+  entry.backgroundWidth = width;
+  entry.backgroundHeight = height;
+
   graphics
     .clear()
-    .roundRect(x, y, width, height, background.cornerRadius ?? 0)
+    .roundRect(0, 0, width, height, background.cornerRadius ?? 0)
     .fill({
       alpha: background.alpha,
       color: background.color,
@@ -199,6 +243,25 @@ function resolveTextStyle(textStyle: LabelTextStyle | undefined) {
     fontSize: textStyle?.fontSize ?? 13,
     fontWeight: textStyle?.fontWeight ?? "600",
   };
+}
+
+function createTextStyleKey(textStyle: ReturnType<typeof resolveTextStyle>) {
+  return [
+    textStyle.fill,
+    textStyle.fontFamily,
+    textStyle.fontSize,
+    textStyle.fontWeight,
+  ].join(":");
+}
+
+function createBackgroundKey(background: LabelBackgroundStyle) {
+  return [
+    background.alpha,
+    background.color,
+    background.cornerRadius ?? 0,
+    background.paddingX ?? 0,
+    background.paddingY ?? 0,
+  ].join(":");
 }
 
 function createFrameKey(frame: DetectionFrame) {

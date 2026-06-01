@@ -1,11 +1,9 @@
 import {
-  DetectionFrameRetentionMode,
   DetectionFrameSelectionMode,
   MediaNormalizationContainer,
   MediaNormalizationVideoCodec,
   MediaInteractionMode,
   MediaRendererFit,
-  MediaSessionMode,
   MediaRendererPlaybackState,
   createBrowserColdDetectionFrameStore,
   createMediaSession,
@@ -92,21 +90,19 @@ export async function createUploadSession(
     session = await createMediaSession({
       container: options.container,
       detections: {
-        buffer: {
+        appendable: {
+          chunkDurationSeconds: UPLOAD_DETECTION_CHUNK_SECONDS,
+          clearOnCreate: true,
+          datasetId,
+          store,
+        },
+        sync: {
           frameIndexOriginTime: 0,
           frameRate: TARGET_UPLOAD_FRAME_RATE,
           selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
         },
-        writable: {
-          chunkDurationSeconds: UPLOAD_DETECTION_CHUNK_SECONDS,
-          clearOnCreate: true,
-          datasetId,
-          retention: { mode: DetectionFrameRetentionMode.PersistAll },
-          store,
-        },
       },
       media: preparedMedia?.blob ?? options.uploadRun.file,
-      mode: MediaSessionMode.File,
       normalize: isImageUpload
         ? false
         : {
@@ -174,7 +170,7 @@ export async function createUploadSession(
     throw new Error("Upload session was canceled.");
   }
 
-  const detectionSource = getWritableSessionDetectionSource(session);
+  const detectionSource = getAppendableSessionDetectionSource(session);
 
   options.onMediaState({
     errorMessage: null,
@@ -218,7 +214,7 @@ export async function createUploadSession(
   return session;
 }
 
-function getWritableSessionDetectionSource(
+function getAppendableSessionDetectionSource(
   session: MediaSession,
 ): WritableDetectionFrameSource {
   const detectionSource = session.detectionSource;
@@ -229,7 +225,9 @@ function getWritableSessionDetectionSource(
     !("getSummary" in detectionSource) ||
     !("datasetId" in detectionSource)
   ) {
-    throw new Error("Upload media session did not create writable detections.");
+    throw new Error(
+      "Upload media session did not create an appendable detection source.",
+    );
   }
 
   return detectionSource as WritableDetectionFrameSource;

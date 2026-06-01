@@ -7,8 +7,8 @@ import {
 import { MediaSessionMode } from "#types/media-session";
 
 import {
+  resolveMediaSessionAppendableRetention,
   resolveMediaSessionDefaults,
-  resolveMediaSessionWritableRetention,
 } from "./media-session-defaults";
 
 describe("media session defaults", () => {
@@ -48,20 +48,64 @@ describe("media session defaults", () => {
     });
   });
 
-  it("defaults writable stream sessions to gated prediction playback and rolling retention", () => {
-    const writable = {
+  it("applies session-level detection sync before explicit buffer overrides", () => {
+    const defaults = resolveMediaSessionDefaults({
+      detections: {
+        buffer: {
+          bufferAheadSeconds: 3,
+          frameRate: 15,
+        },
+        source: { loadFrames: async () => [] },
+        sync: {
+          frameIndexOriginTime: 0.25,
+          frameRate: 30,
+          selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
+        },
+      },
+      mode: MediaSessionMode.File,
+      renderer: {},
+    });
+
+    expect(defaults.detectionBuffer).toMatchObject({
+      bufferAheadSeconds: 3,
+      frameIndexOriginTime: 0.25,
+      frameRate: 15,
+      selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
+    });
+  });
+
+  it("sizes render-preparation windows from session-level detection sync", () => {
+    const defaults = resolveMediaSessionDefaults({
+      detections: {
+        source: { loadFrames: async () => [] },
+        sync: {
+          frameRate: 10,
+        },
+      },
+      mode: MediaSessionMode.File,
+      renderer: {},
+    });
+
+    expect(defaults.renderPreparation.maskFrame).toMatchObject({
+      maxCacheFrameCount: 80,
+      prefetchFrameCount: 70,
+    });
+  });
+
+  it("defaults appendable stream sessions to gated prediction playback and rolling retention", () => {
+    const appendable = {
       datasetId: "stream",
     };
     const defaults = resolveMediaSessionDefaults({
       detections: {
-        writable,
+        appendable,
       },
       mode: MediaSessionMode.Stream,
       renderer: {},
     });
-    const retention = resolveMediaSessionWritableRetention({
+    const retention = resolveMediaSessionAppendableRetention({
+      appendable,
       mode: MediaSessionMode.Stream,
-      writable,
     });
 
     expect(defaults.detectionBuffer.playbackGate).toEqual({
@@ -75,7 +119,7 @@ describe("media session defaults", () => {
   });
 
   it("preserves explicit tuning overrides", () => {
-    const writable = {
+    const appendable = {
       datasetId: "upload",
       retention: {
         mode: DetectionFrameRetentionMode.MemoryOnly,
@@ -89,7 +133,7 @@ describe("media session defaults", () => {
           playbackGate: { enabled: false },
         },
         playbackGate: { requiredAheadSeconds: 4 },
-        writable,
+        appendable,
       },
       mode: MediaSessionMode.File,
       renderer: {
@@ -99,9 +143,9 @@ describe("media session defaults", () => {
         },
       },
     });
-    const retention = resolveMediaSessionWritableRetention({
+    const retention = resolveMediaSessionAppendableRetention({
+      appendable,
       mode: MediaSessionMode.File,
-      writable,
     });
 
     expect(defaults.detectionBuffer).toMatchObject({

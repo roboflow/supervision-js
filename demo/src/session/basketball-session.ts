@@ -2,7 +2,6 @@ import {
   DetectionFrameSelectionMode,
   MediaInteractionMode,
   MediaRendererFit,
-  MediaSessionMode,
   createMediaSession,
   type MediaSession,
 } from "supervision-js";
@@ -61,15 +60,14 @@ export async function createBasketballSession(
     const session = await createMediaSession({
       container: options.container,
       detections: {
-        buffer: {
+        source: detectionSource.detectionSource,
+        sync: {
           frameIndexOriginTime: 0,
           frameRate: manifest.inference.frameRate,
           selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
         },
-        source: detectionSource.detectionSource,
       },
       media: mediaSource.src,
-      mode: MediaSessionMode.File,
       onState: options.onSessionState,
       presentation,
       renderer: {

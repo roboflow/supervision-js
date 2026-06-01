@@ -844,12 +844,16 @@ describe("package entrypoint", () => {
       y: 3,
     });
     expect(pixiMock.graphicsInstances[1]?.roundRect).toHaveBeenLastCalledWith(
-      4,
+      0,
       0,
       92,
       22,
       4,
     );
+    expect(pixiMock.graphicsInstances[1]).toMatchObject({
+      x: 4,
+      y: 0,
+    });
     expect(pixiMock.graphicsInstances[1]?.fill).toHaveBeenLastCalledWith({
       alpha: 0.7,
       color: 0x111827,

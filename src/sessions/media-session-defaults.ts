@@ -5,10 +5,10 @@ import type {
 import { DetectionFrameRetentionMode } from "#types/detection-timeline";
 import type { RenderPreparationOptions } from "#types/render-preparation";
 import type {
+  MediaSessionAppendableDetectionOptions,
   MediaSessionDetectionOptions,
   MediaSessionMode,
   MediaSessionRendererOptions,
-  MediaSessionWritableDetectionOptions,
 } from "#types/media-session";
 import { MediaSessionMode as SessionMode } from "#types/media-session";
 
@@ -26,7 +26,7 @@ const STREAM_DETECTION_BUFFER_DEFAULTS = {
   refreshIntervalSeconds: 0.25,
 } satisfies DetectionBufferOptions;
 
-const WRITABLE_PREDICTION_GATE_DEFAULTS = {
+const APPENDABLE_PREDICTION_GATE_DEFAULTS = {
   enabled: true,
   requiredAheadSeconds: 2,
 };
@@ -60,8 +60,12 @@ export function resolveMediaSessionDefaults(options: {
   readonly renderer?: MediaSessionRendererOptions;
 }): ResolvedMediaSessionDefaults {
   const mode = options.mode ?? SessionMode.File;
+  const appendableDetections =
+    options.detections?.appendable ?? options.detections?.writable;
   const userDetectionBuffer = options.detections?.buffer;
-  const frameRate = resolveFrameRate(userDetectionBuffer?.frameRate);
+  const frameRate = resolveFrameRate(
+    userDetectionBuffer?.frameRate ?? options.detections?.sync?.frameRate,
+  );
   const baseDetectionBuffer =
     mode === SessionMode.Stream
       ? STREAM_DETECTION_BUFFER_DEFAULTS
@@ -69,15 +73,16 @@ export function resolveMediaSessionDefaults(options: {
   const detectionPlaybackGate =
     options.detections?.playbackGate ??
     userDetectionBuffer?.playbackGate ??
-    (options.detections?.writable ? WRITABLE_PREDICTION_GATE_DEFAULTS : null);
+    (appendableDetections ? APPENDABLE_PREDICTION_GATE_DEFAULTS : null);
   const detectionBuffer = {
     ...baseDetectionBuffer,
+    ...options.detections?.sync,
     ...userDetectionBuffer,
     ...(detectionPlaybackGate
       ? {
           playbackGate: {
-            ...(options.detections?.writable
-              ? WRITABLE_PREDICTION_GATE_DEFAULTS
+            ...(appendableDetections
+              ? APPENDABLE_PREDICTION_GATE_DEFAULTS
               : undefined),
             ...userDetectionBuffer?.playbackGate,
             ...options.detections?.playbackGate,
@@ -122,12 +127,12 @@ export function resolveMediaSessionDefaults(options: {
   };
 }
 
-export function resolveMediaSessionWritableRetention(options: {
+export function resolveMediaSessionAppendableRetention(options: {
   readonly mode?: MediaSessionMode;
-  readonly writable?: MediaSessionWritableDetectionOptions;
+  readonly appendable?: MediaSessionAppendableDetectionOptions;
 }): DetectionFrameRetentionOptions {
   const mode = options.mode ?? SessionMode.File;
-  const userRetention = options.writable?.retention;
+  const userRetention = options.appendable?.retention;
 
   if (userRetention?.mode === DetectionFrameRetentionMode.MemoryOnly) {
     return {
@@ -157,6 +162,16 @@ export function resolveMediaSessionWritableRetention(options: {
   }
 
   return { mode: DetectionFrameRetentionMode.PersistAll };
+}
+
+export function resolveMediaSessionWritableRetention(options: {
+  readonly mode?: MediaSessionMode;
+  readonly writable?: MediaSessionAppendableDetectionOptions;
+}): DetectionFrameRetentionOptions {
+  return resolveMediaSessionAppendableRetention({
+    appendable: options.writable,
+    mode: options.mode,
+  });
 }
 
 function resolveFrameRate(frameRate: number | undefined) {

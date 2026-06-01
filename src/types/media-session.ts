@@ -3,6 +3,7 @@ import type {
   ColdDetectionFrameStoreWriteSummary,
   DetectionBufferOptions,
   DetectionFrameRetentionOptions,
+  DetectionFrameSelectionOptions,
   DetectionPlaybackGateOptions,
   DetectionFrameSource,
   WritableDetectionFrameSource,
@@ -37,7 +38,7 @@ export interface MediaSessionNormalizationOptions extends MediaNormalizationOpti
   readonly stream?: boolean;
 }
 
-export interface MediaSessionWritableDetectionOptions {
+export interface MediaSessionAppendableDetectionOptions {
   readonly store?: ColdDetectionFrameStore;
   readonly datasetId: string;
   readonly chunkDurationSeconds?: number;
@@ -45,10 +46,17 @@ export interface MediaSessionWritableDetectionOptions {
   readonly retention?: DetectionFrameRetentionOptions;
 }
 
+export type MediaSessionWritableDetectionOptions =
+  MediaSessionAppendableDetectionOptions;
+
+export type MediaSessionDetectionSyncOptions = DetectionFrameSelectionOptions;
+
 export interface MediaSessionDetectionOptions {
   readonly frames?: readonly DetectionFrame[];
   readonly source?: DetectionFrameSource;
+  readonly appendable?: MediaSessionAppendableDetectionOptions;
   readonly writable?: MediaSessionWritableDetectionOptions;
+  readonly sync?: MediaSessionDetectionSyncOptions;
   readonly buffer?: DetectionBufferOptions;
   readonly playbackGate?: DetectionPlaybackGateOptions;
 }

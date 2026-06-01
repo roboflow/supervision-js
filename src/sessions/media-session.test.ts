@@ -37,7 +37,7 @@ const summary: ColdDetectionFrameStoreWriteSummary = {
 };
 
 describe("media session", () => {
-  it("creates a renderer and owned writable detection source", async () => {
+  it("continues to support the writable detection source alias", async () => {
     resetMocks();
     const { createMediaSession } = await import("../index");
     const store = createStore();
@@ -72,14 +72,14 @@ describe("media session", () => {
     expect(store.destroy).toHaveBeenCalledOnce();
   });
 
-  it("can own an in-memory writable detection source by default", async () => {
+  it("can own an in-memory appendable detection source by default", async () => {
     resetMocks();
     const { createMediaSession } = await import("../index");
 
     const session = await createMediaSession({
       container: createContainer(),
       detections: {
-        writable: {
+        appendable: {
           datasetId: "memory-session",
         },
       },
@@ -97,6 +97,25 @@ describe("media session", () => {
     expect(await session.detectionSource?.loadFrames(0, 1)).toEqual(frames);
 
     session.destroy();
+  });
+
+  it("rejects ambiguous appendable and writable detection inputs", async () => {
+    resetMocks();
+    const { createMediaSession } = await import("../index");
+
+    await expect(
+      createMediaSession({
+        container: createContainer(),
+        detections: {
+          appendable: { datasetId: "appendable" },
+          writable: { datasetId: "writable" },
+        },
+        media: "sample.mp4",
+        renderer: { autoPlay: false },
+      }),
+    ).rejects.toThrow(
+      "Provide only one media session appendable detection option.",
+    );
   });
 
   it("emits aggregate state and exposes it from the session", async () => {
