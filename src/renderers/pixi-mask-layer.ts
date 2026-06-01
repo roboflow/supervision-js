@@ -217,8 +217,8 @@ export function createPixiMaskLayer(options: {
 
       isDestroyed = true;
       preparedRenderWindow.destroy();
-      idMaskRenderer?.destroy();
       destroyTextures();
+      idMaskRenderer?.destroy();
     },
   };
 
@@ -322,16 +322,35 @@ export function createPixiMaskLayer(options: {
   function destroyTexture(key: string) {
     const texture = maskTextures.get(key);
 
+    if (!texture) {
+      return;
+    }
+
+    releaseTextureBindings(key, texture);
     maskTextures.delete(key);
-    texture?.destroy(true);
+    texture.destroy(true);
   }
 
   function destroyTextures() {
+    releaseTextureBindings();
+
     for (const texture of maskTextures.values()) {
       texture.destroy(true);
     }
 
     maskTextures.clear();
+  }
+
+  function releaseTextureBindings(key?: string, texture?: PixiTexture) {
+    if (!texture || maskSprite?.texture === texture) {
+      if (maskSprite) {
+        maskSprite.texture = options.Texture.EMPTY;
+      }
+    }
+
+    if (!key || activeFrameKey === key) {
+      idMaskRenderer?.clearTexture();
+    }
   }
 
   function createIdMaskRenderer() {
@@ -346,10 +365,10 @@ export function createPixiMaskLayer(options: {
 
     try {
       return createPixiIdMaskShaderRenderer({
+        ImageSource: options.ImageSource,
         Mesh: options.Mesh,
         MeshGeometry: options.MeshGeometry,
         Shader: options.Shader,
-        Texture: options.Texture,
         UniformGroup: options.UniformGroup,
         mediaHeight,
         mediaWidth,

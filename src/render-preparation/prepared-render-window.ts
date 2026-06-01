@@ -403,7 +403,10 @@ export function createPreparedRenderWindow(options: {
       detectionFrame &&
       !lastPreparedTargetFrames.some((frame) => getFrameKey(frame) === frameKey)
     ) {
-      lastPreparedTargetFrames = [detectionFrame, ...lastPreparedTargetFrames];
+      lastPreparedTargetFrames = [
+        detectionFrame,
+        ...lastPreparedTargetFrames,
+      ].slice(0, prefetchFrameCount);
     }
 
     schedulePreparedTargetBatch();
@@ -572,18 +575,37 @@ export function createPreparedRenderWindow(options: {
 
   function evictPreparedMaskFrames() {
     while (preparedMaskFrames.size > maxMaskFrameCacheSize) {
-      const oldestKey = preparedMaskFrames.keys().next().value;
+      const evictedKey = findPreparedMaskFrameEvictionCandidate();
 
-      if (oldestKey === undefined) {
+      if (evictedKey === undefined) {
         return;
       }
 
-      const maskFrame = preparedMaskFrames.get(oldestKey);
+      const maskFrame = preparedMaskFrames.get(evictedKey);
 
-      preparedMaskFrames.delete(oldestKey);
-      options.onMaskFrameEvicted?.(oldestKey);
+      preparedMaskFrames.delete(evictedKey);
+      options.onMaskFrameEvicted?.(evictedKey);
       maskFrame?.close();
     }
+  }
+
+  function findPreparedMaskFrameEvictionCandidate() {
+    const targetKeys = new Set(lastPreparedTargetFrames.map(getFrameKey));
+    const activeKey = activeMaskFrame?.key ?? null;
+
+    for (const key of preparedMaskFrames.keys()) {
+      if (key !== activeKey && !targetKeys.has(key)) {
+        return key;
+      }
+    }
+
+    for (const key of preparedMaskFrames.keys()) {
+      if (key !== activeKey) {
+        return key;
+      }
+    }
+
+    return undefined;
   }
 
   function clearPreparedMaskFrames(

@@ -953,7 +953,7 @@ describe("package entrypoint", () => {
 
     await vi.waitFor(() => {
       expect(pixiMock.canvasSourceOptions).toHaveLength(1);
-      expect(pixiMock.imageSourceOptions).toHaveLength(1);
+      expect(pixiMock.imageSourceOptions).toHaveLength(2);
       expect(pixiMock.textureOptions).toHaveLength(2);
     });
 
@@ -1299,6 +1299,13 @@ describe("package entrypoint", () => {
       layer.drawFrame(0);
 
       expect(pixiMock.shaderFrom).toHaveBeenCalledOnce();
+      expect(
+        (
+          pixiMock.shaderFrom.mock.calls[0]?.[0] as
+            | { resources?: Record<string, unknown> }
+            | undefined
+        )?.resources?.uTexture,
+      ).not.toBe(Texture.EMPTY.source);
       await vi.waitFor(() => {
         expect(pixiMock.meshInstances[0]?.visible).toBe(true);
       });
@@ -1310,11 +1317,37 @@ describe("package entrypoint", () => {
       );
       expect(pixiMock.spriteInstances[0]?.visible).toBe(false);
 
+      pixiMock.shaderInstances[0]!.resources =
+        null as unknown as (typeof pixiMock.shaderInstances)[number]["resources"];
+
+      expect(() => layer.drawFrame(0)).not.toThrow();
+      expect(pixiMock.shaderFrom).toHaveBeenCalledTimes(2);
+      expect(pixiMock.meshInstances[0]?.visible).toBe(true);
+
       layer.destroy();
     } finally {
       globalThis.createImageBitmap = originalCreateImageBitmap;
       vi.useRealTimers();
     }
+  });
+
+  it("premultiplies PNG ID-mask shader colors for Pixi blending", async () => {
+    const fsModuleName = "node:fs/promises";
+    const { readFile } = (await import(fsModuleName)) as {
+      readFile(path: URL, encoding: "utf8"): Promise<string>;
+    };
+    const shaderSource = await readFile(
+      new URL("./renderers/pixi-id-mask-shader.ts", import.meta.url),
+      "utf8",
+    );
+
+    expect(shaderSource).toContain("vec4 premultiplyAlpha(vec4 color)");
+    expect(shaderSource).toContain(
+      "finalColor = premultiplyAlpha(readFill(centerId) * vColor);",
+    );
+    expect(shaderSource).toContain(
+      "finalColor = premultiplyAlpha(readStroke(centerId) * vColor);",
+    );
   });
 
   it("defaults partial box fill values", async () => {

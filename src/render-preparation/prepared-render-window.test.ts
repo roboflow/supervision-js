@@ -252,6 +252,54 @@ describe("prepared render window", () => {
     }
   });
 
+  it("keeps the selected active frame when prefetch starts after the media timestamp", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const onDiagnostics = vi.fn();
+      const renderWindow = createPreparedRenderWindow({
+        detectionTimeline: createFloorTimeline(manyFrames),
+        maskStyle: new BaseMaskStyle(),
+        renderPreparation: {
+          maskFrame: {
+            maxCacheFrameCount: 3,
+            maxPendingFrameCount: 10,
+            prefetchFrameCount: 3,
+            scheduleBatchSize: 10,
+            scanIntervalSeconds: 0,
+          },
+          onDiagnostics,
+        },
+      });
+
+      renderWindow.getFrame(0.05);
+      await flushMaskPreparationTimers(10);
+
+      expect(renderWindow.getFrame(0.05)?.maskFrame).toMatchObject({
+        key: "1:0.04",
+      });
+      expect(onDiagnostics).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          artifacts: [
+            expect.objectContaining({
+              activeFrame: expect.objectContaining({
+                key: "1:0.04",
+                status: RenderPreparationArtifactFrameStatus.Prepared,
+              }),
+              preparedAheadFrameCount: 3,
+              preparedCount: 3,
+            }),
+          ],
+        }),
+      );
+
+      renderWindow.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("honors mask-frame render-preparation prefetch and cache options", async () => {
     vi.useFakeTimers();
     resetMocks();
@@ -276,7 +324,7 @@ describe("prepared render window", () => {
       renderWindow.getFrame(0);
       await flushMaskPreparationTimers(4);
 
-      expect(onMaskFrameEvicted).toHaveBeenCalledWith("0:0");
+      expect(onMaskFrameEvicted).toHaveBeenCalledWith("1:0.04");
       expect(onDiagnostics).toHaveBeenLastCalledWith(
         expect.objectContaining({
           artifacts: [
@@ -909,6 +957,21 @@ function createTimeline(
     prefetch: vi.fn(),
     selectFrame: vi.fn((mediaTime: number) =>
       detectionFrames.find((frame) => frame.mediaTime === mediaTime),
+    ),
+  };
+}
+
+function createFloorTimeline(
+  detectionFrames: readonly DetectionFrame[],
+): BufferedDetectionTimeline {
+  const sortedFrames = [...detectionFrames].sort(
+    (left, right) => left.mediaTime - right.mediaTime,
+  );
+
+  return {
+    ...createTimeline(sortedFrames),
+    selectFrame: vi.fn((mediaTime: number) =>
+      [...sortedFrames].reverse().find((frame) => frame.mediaTime <= mediaTime),
     ),
   };
 }

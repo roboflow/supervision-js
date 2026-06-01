@@ -59,6 +59,7 @@ const mockState = vi.hoisted(() => {
       x: number;
       y: number;
     }>,
+    imageSourceDestroy: vi.fn(),
     imageSourceOptions: [] as unknown[],
     meshGeometryDestroy: vi.fn(),
     meshGeometryOptions: [] as unknown[],
@@ -170,6 +171,7 @@ vi.mock("pixi.js", () => {
   }
 
   class ImageSource {
+    destroy = pixiMock.imageSourceDestroy;
     style = {};
 
     constructor(options: unknown) {
@@ -464,6 +466,7 @@ export function resetMocks() {
   pixiMock.containerAddChild.mockClear();
   pixiMock.containerInstances.length = 0;
   pixiMock.graphicsInstances.length = 0;
+  pixiMock.imageSourceDestroy.mockClear();
   pixiMock.imageSourceOptions.length = 0;
   pixiMock.meshGeometryDestroy.mockClear();
   pixiMock.meshGeometryOptions.length = 0;

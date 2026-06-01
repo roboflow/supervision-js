@@ -9,10 +9,21 @@ import type {
   UniformGroup as PixiUniformGroup,
 } from "pixi.js";
 
+type PixiIdMaskMesh = PixiMesh<PixiMeshGeometry, PixiShader>;
+
 type MeshConstructor = new (options: {
   geometry: PixiMeshGeometry;
   shader: PixiShader;
-}) => PixiMesh;
+}) => PixiIdMaskMesh;
+
+type ImageSourceConstructor = new (options: {
+  autoGenerateMipmaps?: boolean;
+  dynamic: boolean;
+  height: number;
+  resource: HTMLCanvasElement;
+  scaleMode?: "linear" | "nearest";
+  width: number;
+}) => PixiImageSource;
 
 type MeshGeometryConstructor = new (options: {
   indices: Uint32Array;
@@ -29,11 +40,6 @@ type ShaderFactory = {
   }): PixiShader;
 };
 
-type TextureConstructor = {
-  readonly EMPTY: PixiTexture;
-  new (options: { dynamic: boolean; source: PixiImageSource }): PixiTexture;
-};
-
 type UniformGroupConstructor = new (
   uniforms: Record<
     string,
@@ -43,7 +49,8 @@ type UniformGroupConstructor = new (
 ) => PixiUniformGroup;
 
 export interface PixiIdMaskShaderRenderer {
-  readonly mesh: PixiMesh;
+  readonly mesh: PixiIdMaskMesh;
+  clearTexture(): void;
   hide(): void;
   render(frame: PreparedPngIdMaskFrame, texture: PixiTexture): void;
   setOpacity(opacity: number): void;
@@ -51,10 +58,10 @@ export interface PixiIdMaskShaderRenderer {
 }
 
 export function createPixiIdMaskShaderRenderer(options: {
+  readonly ImageSource: ImageSourceConstructor;
   readonly Mesh: MeshConstructor;
   readonly MeshGeometry: MeshGeometryConstructor;
   readonly Shader: ShaderFactory;
-  readonly Texture: TextureConstructor;
   readonly UniformGroup: UniformGroupConstructor;
   readonly mediaHeight: number;
   readonly mediaWidth: number;
@@ -76,17 +83,15 @@ export function createPixiIdMaskShaderRenderer(options: {
       value: new Float32Array([options.mediaWidth, options.mediaHeight]),
     },
   });
-  const shader = options.Shader.from({
-    gl: {
-      fragment: idMaskFragmentShader,
-      vertex: idMaskVertexShader,
-    },
-    resources: {
-      maskUniforms: uniforms,
-      uSampler: options.Texture.EMPTY.source.style,
-      uTexture: options.Texture.EMPTY.source,
-    },
+  const placeholderSource = new options.ImageSource({
+    autoGenerateMipmaps: false,
+    dynamic: false,
+    height: 1,
+    resource: createPlaceholderCanvas(),
+    scaleMode: "nearest",
+    width: 1,
   });
+  let shader = createShader();
   const geometry = new options.MeshGeometry({
     indices: new Uint32Array([0, 1, 2, 0, 2, 3]),
     positions: new Float32Array([
@@ -108,10 +113,15 @@ export function createPixiIdMaskShaderRenderer(options: {
   mesh.visible = false;
 
   return {
+    clearTexture() {
+      bindTexture(placeholderSource);
+    },
+
     destroy() {
       mesh.destroy();
       shader.destroy(true);
       geometry.destroy();
+      placeholderSource.destroy();
     },
 
     hide() {
@@ -121,8 +131,7 @@ export function createPixiIdMaskShaderRenderer(options: {
     mesh,
 
     render(frame, texture) {
-      shader.resources.uTexture = texture.source;
-      shader.resources.uSampler = texture.source.style;
+      bindTexture(texture.source);
       uniforms.uniforms.uFillPalette = frame.fillPalette;
       uniforms.uniforms.uStrokePalette = frame.strokePalette;
       uniforms.uniforms.uTextureSize = new Float32Array([
@@ -138,6 +147,51 @@ export function createPixiIdMaskShaderRenderer(options: {
       mesh.alpha = opacity;
     },
   };
+
+  function bindTexture(source: PixiImageSource) {
+    try {
+      shader.resources.uTexture = source;
+      shader.resources.uSampler = source.style;
+    } catch {
+      rebuildShader();
+      shader.resources.uTexture = source;
+      shader.resources.uSampler = source.style;
+    }
+  }
+
+  function createShader() {
+    return options.Shader.from({
+      gl: {
+        fragment: idMaskFragmentShader,
+        vertex: idMaskVertexShader,
+      },
+      resources: {
+        maskUniforms: uniforms,
+        uSampler: placeholderSource.style,
+        uTexture: placeholderSource,
+      },
+    });
+  }
+
+  function rebuildShader() {
+    try {
+      shader.destroy(true);
+    } catch {
+      // Pixi has already invalidated this shader's resource group.
+    }
+
+    shader = createShader();
+    mesh.shader = shader;
+  }
+}
+
+function createPlaceholderCanvas() {
+  const canvas = document.createElement("canvas");
+
+  canvas.height = 1;
+  canvas.width = 1;
+
+  return canvas;
 }
 
 const idMaskVertexShader = `#version 300 es
@@ -197,6 +251,10 @@ vec4 readStroke(float maskId) {
   return uStrokePalette[paletteIndex];
 }
 
+vec4 premultiplyAlpha(vec4 color) {
+  return vec4(color.rgb * color.a, color.a);
+}
+
 bool differs(float left, float right) {
   return abs(left - right) > 0.5;
 }
@@ -219,7 +277,7 @@ void main(void) {
       float borderId = neighboringMaskId(texel);
 
       if (borderId > 0.5) {
-        finalColor = readStroke(borderId) * vColor;
+        finalColor = premultiplyAlpha(readStroke(borderId) * vColor);
         return;
       }
     }
@@ -236,11 +294,11 @@ void main(void) {
       differs(sampleMaskId(vUV + vec2(0.0, -texel.y)), centerId);
 
     if (isBoundary) {
-      finalColor = readStroke(centerId) * vColor;
+      finalColor = premultiplyAlpha(readStroke(centerId) * vColor);
       return;
     }
   }
 
-  finalColor = readFill(centerId) * vColor;
+  finalColor = premultiplyAlpha(readFill(centerId) * vColor);
 }
 `;
