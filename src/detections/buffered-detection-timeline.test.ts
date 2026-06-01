@@ -166,6 +166,55 @@ describe("buffered detection timeline", () => {
     expect(source.loadFrames).toHaveBeenNthCalledWith(2, 0, 5.5);
   });
 
+  it("hydrates loop-crossing hot buffers from tail and head source ranges", async () => {
+    const loopFrames: DetectionFrame[] = [
+      {
+        detections: [{ rect: { height: 10, width: 10, x: 0, y: 0 } }],
+        mediaTime: 0,
+      },
+      {
+        detections: [{ rect: { height: 20, width: 20, x: 1, y: 1 } }],
+        mediaTime: 1,
+      },
+      {
+        detections: [{ rect: { height: 30, width: 30, x: 2, y: 2 } }],
+        mediaTime: 4.6,
+      },
+    ];
+    const source = {
+      loadFrames: vi.fn(async (startTime: number, endTime: number) =>
+        loopFrames.filter(
+          (frame) => frame.mediaTime >= startTime && frame.mediaTime <= endTime,
+        ),
+      ),
+    };
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 2,
+      bufferBehindSeconds: 0.5,
+      source,
+    });
+
+    (
+      timeline as unknown as {
+        setTimelineContext(context: {
+          readonly duration: number;
+          readonly loop: boolean;
+        }): void;
+      }
+    ).setTimelineContext({ duration: 5, loop: true });
+
+    await timeline.prepare(4.75);
+
+    expect(source.loadFrames).toHaveBeenCalledTimes(2);
+    expect(source.loadFrames).toHaveBeenNthCalledWith(1, 4.25, 5);
+    expect(source.loadFrames).toHaveBeenNthCalledWith(2, 0, 1.75);
+    expect(
+      timeline.getBufferedFrames().map((frame) => frame.mediaTime),
+    ).toEqual([0, 1, 4.6]);
+    expect(timeline.selectFrame(4.75)?.mediaTime).toBe(4.6);
+    expect(timeline.selectFrame(0.5)?.mediaTime).toBe(0);
+  });
+
   it("waits for source coverage before loading when playback gating is enabled", async () => {
     const coverage = createDeferred<void>();
     const source = {
@@ -201,6 +250,39 @@ describe("buffered detection timeline", () => {
 
     expect(source.loadFrames).toHaveBeenCalledWith(1, 2);
     expect(timeline.getState().status).toBe(DetectionBufferStatus.Ready);
+  });
+
+  it("waits for loop-crossing source coverage when playback gating is enabled", async () => {
+    const source = {
+      loadFrames: vi.fn(async () => []),
+      waitForRange: vi.fn(async () => undefined),
+    };
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 2,
+      bufferBehindSeconds: 0,
+      playbackGate: {
+        enabled: true,
+        requiredAheadSeconds: 2,
+      },
+      source,
+    });
+
+    timeline.setTimelineContext?.({ duration: 5, loop: true });
+    await timeline.prepare(4.75, {
+      duration: 5,
+      firstTimestamp: 0,
+      gatePlayback: true,
+    });
+
+    expect(source.waitForRange).toHaveBeenCalledTimes(2);
+    expect(source.waitForRange).toHaveBeenNthCalledWith(1, {
+      endTime: 5,
+      startTime: 4.75,
+    });
+    expect(source.waitForRange).toHaveBeenNthCalledWith(2, {
+      endTime: 1.75,
+      startTime: 0,
+    });
   });
 
   it("does not start redundant prefetch loads covered by an in-flight range", async () => {

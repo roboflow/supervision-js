@@ -60,6 +60,7 @@ export {
   type DetectionFrameSource,
   type DetectionFrameSourceVersionRange,
   type DetectionPlaybackGateOptions,
+  type DetectionTimelineContext,
   type WritableDetectionFrameSource,
 } from "#types/detection-timeline";
 export {

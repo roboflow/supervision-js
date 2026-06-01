@@ -130,6 +130,43 @@ describe("media renderer core", () => {
 
     renderer.destroy();
   });
+
+  it("passes looping media context to the detection hot buffer before initial prepare", async () => {
+    resetMocks();
+
+    const samples = [
+      createMockSample(4.75, 0),
+    ] as unknown as DecodedVideoSample[];
+    const detectionSource = {
+      loadFrames: vi.fn(async () => []),
+    };
+    const renderer = await createMediaRendererCore(
+      {
+        autoPlay: false,
+        container: {} as HTMLElement,
+        detectionBuffer: {
+          bufferAheadSeconds: 2,
+          bufferBehindSeconds: 0.5,
+        },
+        detectionSource,
+        loop: true,
+        source: createSource(samples, {
+          duration: 5,
+          firstTimestamp: 4.75,
+        }),
+      } satisfies MediaRendererOptions,
+      {
+        createScene: vi.fn(async () => createScene()),
+        openMediaSource: vi.fn(),
+      },
+    );
+
+    expect(detectionSource.loadFrames).toHaveBeenCalledTimes(2);
+    expect(detectionSource.loadFrames).toHaveBeenNthCalledWith(1, 4.25, 5);
+    expect(detectionSource.loadFrames).toHaveBeenNthCalledWith(2, 0, 1.75);
+
+    renderer.destroy();
+  });
 });
 
 function createScene(
@@ -157,6 +194,7 @@ function createScene(
 
 function createSource(
   samples: DecodedVideoSample[],
+  metadataOverrides: Partial<DecodedMediaSource["metadata"]> = {},
 ): MediaRendererOptions["source"] {
   const source: DecodedMediaSource = {
     input: {
@@ -174,6 +212,7 @@ function createSource(
       primaryVideoWidth: 1280,
       trackCount: 1,
       videoTrackCount: 1,
+      ...metadataOverrides,
     },
     sampleSink: {
       async getSample(timestamp) {

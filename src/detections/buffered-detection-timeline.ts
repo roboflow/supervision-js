@@ -5,6 +5,8 @@ import {
   type DetectionBufferPrepareOptions,
   type DetectionBufferState,
   type DetectionFrameSource,
+  type DetectionFrameSourceVersionRange,
+  type DetectionTimelineContext,
 } from "#types/detection-timeline";
 import type { DetectionFrame } from "#types/detections";
 import {
@@ -14,6 +16,12 @@ import {
 
 const DEFAULT_BUFFER_AHEAD_SECONDS = 5;
 const DEFAULT_BUFFER_BEHIND_SECONDS = 0.5;
+
+interface DetectionBufferLoadPlan {
+  readonly endTime: number;
+  readonly sourceRanges: readonly DetectionFrameSourceVersionRange[];
+  readonly startTime: number;
+}
 
 export function createBufferedDetectionTimeline(
   options: {
@@ -39,6 +47,10 @@ export function createBufferedDetectionTimeline(
     readonly startTime: number;
     readonly endTime: number;
   } | null = null;
+  let timelineContext: DetectionTimelineContext = {
+    duration: null,
+    loop: false,
+  };
   let inFlight:
     | {
         readonly id: number;
@@ -49,25 +61,35 @@ export function createBufferedDetectionTimeline(
       }
     | undefined;
 
-  const getSourceVersion = (range?: {
-    readonly startTime: number;
-    readonly endTime: number;
-  }) => options.source.getVersion?.(range) ?? 0;
+  const getSourceVersion = (
+    ranges?: readonly DetectionFrameSourceVersionRange[],
+  ) => {
+    if (!ranges) {
+      return options.source.getVersion?.() ?? 0;
+    }
+
+    return ranges.reduce(
+      (version, range) =>
+        Math.max(version, options.source.getVersion?.(range) ?? 0),
+      0,
+    );
+  };
   const isBufferFresh = () =>
     bufferedVersionRange !== null &&
-    bufferedSourceVersion === getSourceVersion(bufferedVersionRange);
+    bufferedSourceVersion === getSourceVersion(getBufferedSourceRanges());
 
   const getLoadRange = (mediaTime: number) => {
-    const startTime = Math.max(0, mediaTime - bufferBehindSeconds);
-    const endTime = Math.max(startTime, mediaTime + bufferAheadSeconds);
+    const comparableMediaTime = getComparableMediaTime(mediaTime);
+    const startTime = comparableMediaTime - bufferBehindSeconds;
+    const endTime = comparableMediaTime + bufferAheadSeconds;
 
-    return { endTime, startTime };
+    return createLoadPlan(startTime, endTime);
   };
 
   const loadWindow = (mediaTime: number) => {
-    const { endTime, startTime } = getLoadRange(mediaTime);
+    const { endTime, sourceRanges, startTime } = getLoadRange(mediaTime);
     const versionRange = { endTime, startTime };
-    const sourceVersion = getSourceVersion(versionRange);
+    const sourceVersion = getSourceVersion(sourceRanges);
 
     if (
       inFlight &&
@@ -88,16 +110,19 @@ export function createBufferedDetectionTimeline(
       status: DetectionBufferStatus.Loading,
     };
 
-    const promise = options.source
-      .loadFrames(startTime, endTime)
-      .then((frames) => {
+    const promise = Promise.all(
+      sourceRanges.map((range) =>
+        options.source.loadFrames(range.startTime, range.endTime),
+      ),
+    )
+      .then((frameRanges) => {
         if (destroyed || currentLoadId !== loadId) {
           return;
         }
 
-        buffer = copySortedDetectionFrames(frames);
+        buffer = copySortedDetectionFrames(frameRanges.flat());
         bufferedVersionRange = versionRange;
-        bufferedSourceVersion = getSourceVersion(versionRange);
+        bufferedSourceVersion = getSourceVersion(sourceRanges);
         state = {
           bufferEndTime: endTime,
           bufferStartTime: startTime,
@@ -137,12 +162,17 @@ export function createBufferedDetectionTimeline(
     return promise;
   };
 
-  const isBuffered = (mediaTime: number) =>
-    isBufferFresh() &&
-    state.bufferStartTime !== null &&
-    state.bufferEndTime !== null &&
-    mediaTime >= state.bufferStartTime &&
-    mediaTime <= state.bufferEndTime;
+  const isBuffered = (mediaTime: number) => {
+    const comparableMediaTime = getComparableMediaTime(mediaTime);
+
+    return (
+      isBufferFresh() &&
+      state.bufferStartTime !== null &&
+      state.bufferEndTime !== null &&
+      comparableMediaTime >= state.bufferStartTime &&
+      comparableMediaTime <= state.bufferEndTime
+    );
+  };
 
   const shouldPrefetch = (mediaTime: number) => {
     if (!isBuffered(mediaTime)) {
@@ -157,7 +187,10 @@ export function createBufferedDetectionTimeline(
       return false;
     }
 
-    return mediaTime + bufferAheadSeconds / 2 >= state.bufferEndTime;
+    return (
+      getComparableMediaTime(mediaTime) + bufferAheadSeconds / 2 >=
+      state.bufferEndTime
+    );
   };
 
   return {
@@ -186,10 +219,12 @@ export function createBufferedDetectionTimeline(
         return;
       }
 
+      const comparableMediaTime = getComparableMediaTime(mediaTime);
+
       if (
         inFlight &&
-        mediaTime >= inFlight.startTime &&
-        mediaTime <= inFlight.endTime
+        comparableMediaTime >= inFlight.startTime &&
+        comparableMediaTime <= inFlight.endTime
       ) {
         return;
       }
@@ -202,7 +237,17 @@ export function createBufferedDetectionTimeline(
         return undefined;
       }
 
-      return selectDetectionFrame(buffer, mediaTime, options);
+      return selectDetectionFrame(
+        buffer,
+        getSourceMediaTime(mediaTime),
+        options,
+      );
+    },
+
+    setTimelineContext(context) {
+      timelineContext = context;
+      bufferedSourceVersion = null;
+      bufferedVersionRange = null;
     },
 
     getBufferedFrames() {
@@ -256,27 +301,34 @@ export function createBufferedDetectionTimeline(
       0,
       playbackGate.requiredAheadSeconds ?? 0,
     );
+    const comparableMediaTime = getComparableMediaTime(mediaTime);
     const endTime = getRequiredCoverageEndTime({
-      duration: prepareOptions?.duration,
+      duration: isLoopingTimeline() ? null : prepareOptions?.duration,
       firstTimestamp: prepareOptions?.firstTimestamp,
-      mediaTime,
+      mediaTime: comparableMediaTime,
       requiredAheadSeconds,
     });
 
-    if (endTime <= mediaTime) {
+    if (endTime <= comparableMediaTime) {
       return;
     }
+
+    const coveragePlan = createLoadPlan(comparableMediaTime, endTime);
 
     state = {
       ...state,
       errorMessage: null,
-      requestedEndTime: endTime,
-      requestedStartTime: mediaTime,
+      requestedEndTime: coveragePlan.endTime,
+      requestedStartTime: coveragePlan.startTime,
       status: DetectionBufferStatus.Loading,
     };
 
     try {
-      await options.source.waitForRange({ endTime, startTime: mediaTime });
+      await Promise.all(
+        coveragePlan.sourceRanges.map((range) =>
+          options.source.waitForRange?.(range),
+        ),
+      );
     } catch (error) {
       if (!destroyed) {
         state = {
@@ -306,6 +358,101 @@ export function createBufferedDetectionTimeline(
       Math.abs(startTime - state.bufferStartTime) >= refreshIntervalSeconds ||
       Math.abs(endTime - state.bufferEndTime) >= refreshIntervalSeconds
     );
+  }
+
+  function createLoadPlan(
+    requestedStartTime: number,
+    requestedEndTime: number,
+  ): DetectionBufferLoadPlan {
+    const startTime = Math.min(requestedStartTime, requestedEndTime);
+    const endTime = Math.max(startTime, requestedEndTime);
+
+    if (!isLoopingTimeline()) {
+      const clampedStartTime = Math.max(0, startTime);
+      const clampedEndTime = Math.max(clampedStartTime, endTime);
+
+      return {
+        endTime: clampedEndTime,
+        sourceRanges: [
+          {
+            endTime: clampedEndTime,
+            startTime: clampedStartTime,
+          },
+        ],
+        startTime: clampedStartTime,
+      };
+    }
+
+    const duration = timelineContext.duration ?? 0;
+
+    if (endTime - startTime >= duration) {
+      return {
+        endTime: duration,
+        sourceRanges: [{ endTime: duration, startTime: 0 }],
+        startTime: 0,
+      };
+    }
+
+    return {
+      endTime,
+      sourceRanges: getLoopingSourceRanges(startTime, endTime, duration),
+      startTime,
+    };
+  }
+
+  function getBufferedSourceRanges() {
+    if (!bufferedVersionRange) {
+      return [];
+    }
+
+    return createLoadPlan(
+      bufferedVersionRange.startTime,
+      bufferedVersionRange.endTime,
+    ).sourceRanges;
+  }
+
+  function isLoopingTimeline() {
+    return (
+      timelineContext.loop &&
+      timelineContext.duration !== null &&
+      timelineContext.duration > 0
+    );
+  }
+
+  function getComparableMediaTime(mediaTime: number) {
+    if (
+      !isLoopingTimeline() ||
+      state.bufferStartTime === null ||
+      state.bufferEndTime === null ||
+      timelineContext.duration === null
+    ) {
+      return mediaTime;
+    }
+
+    const duration = timelineContext.duration;
+    let comparableMediaTime = mediaTime;
+
+    while (comparableMediaTime < state.bufferStartTime) {
+      comparableMediaTime += duration;
+    }
+
+    while (comparableMediaTime > state.bufferEndTime) {
+      comparableMediaTime -= duration;
+    }
+
+    return comparableMediaTime;
+  }
+
+  function getSourceMediaTime(mediaTime: number) {
+    if (!isLoopingTimeline() || timelineContext.duration === null) {
+      return mediaTime;
+    }
+
+    if (mediaTime >= 0 && mediaTime <= timelineContext.duration) {
+      return mediaTime;
+    }
+
+    return modulo(mediaTime, timelineContext.duration);
   }
 }
 
@@ -357,4 +504,35 @@ function getRequiredCoverageEndTime(options: {
     requestedEndTime,
     (options.firstTimestamp ?? 0) + Math.max(options.duration, 0),
   );
+}
+
+function getLoopingSourceRanges(
+  startTime: number,
+  endTime: number,
+  duration: number,
+): readonly DetectionFrameSourceVersionRange[] {
+  const normalizedStartTime = modulo(startTime, duration);
+  const normalizedEndTime = modulo(endTime, duration);
+  const startCycle = Math.floor(startTime / duration);
+  const endCycle = Math.floor(endTime / duration);
+
+  if (startCycle === endCycle) {
+    return [{ endTime: normalizedEndTime, startTime: normalizedStartTime }];
+  }
+
+  const ranges: DetectionFrameSourceVersionRange[] = [];
+
+  if (normalizedStartTime < duration) {
+    ranges.push({ endTime: duration, startTime: normalizedStartTime });
+  }
+
+  if (normalizedEndTime > 0) {
+    ranges.push({ endTime: normalizedEndTime, startTime: 0 });
+  }
+
+  return ranges;
+}
+
+function modulo(value: number, modulus: number) {
+  return ((value % modulus) + modulus) % modulus;
 }

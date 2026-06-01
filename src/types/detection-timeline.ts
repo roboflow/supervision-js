@@ -31,6 +31,11 @@ export interface DetectionBufferOptions extends DetectionFrameSelectionOptions {
   readonly playbackGate?: DetectionPlaybackGateOptions;
 }
 
+export interface DetectionTimelineContext {
+  readonly duration: number | null;
+  readonly loop: boolean;
+}
+
 export interface DetectionPlaybackGateOptions {
   readonly enabled?: boolean;
   readonly requiredAheadSeconds?: number;
@@ -105,6 +110,7 @@ export interface BufferedDetectionTimeline {
     options?: DetectionBufferPrepareOptions,
   ): Promise<void>;
   prefetch(mediaTime: number): void;
+  setTimelineContext?(context: DetectionTimelineContext): void;
   selectFrame(mediaTime: number): DetectionFrame | undefined;
   getBufferedFrames(): readonly DetectionFrame[];
   getState(): DetectionBufferState;
