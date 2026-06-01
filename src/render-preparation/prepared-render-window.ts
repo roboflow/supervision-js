@@ -4,6 +4,10 @@ import {
 } from "#render-preparation/mask-frame-preparer";
 import { getBrowserMaskPreparationWorkerCount } from "#render-preparation/mask-preparation-worker-count";
 import type { SerializableMaskInstruction } from "#render-preparation/mask-preparation-worker-protocol";
+import {
+  createPreparedWindowTimeline,
+  type PreparedRenderTimelineContext,
+} from "#render-preparation/prepared-window-timeline";
 import type { BufferedDetectionTimeline } from "#types/detection-timeline";
 import type { DetectionFrame } from "#types/detections";
 import type { MaskStyle } from "#types/mask-style";
@@ -58,12 +62,8 @@ export interface PreparedRenderWindow {
   destroy(): void;
 }
 
-export interface PreparedRenderTimelineContext {
-  readonly duration: number | null;
-  readonly loop: boolean;
-}
-
 export type { PreparedMaskFrame } from "./mask-frame-preparer";
+export type { PreparedRenderTimelineContext } from "./prepared-window-timeline";
 
 export function createPreparedRenderWindow(options: {
   readonly detectionTimeline: BufferedDetectionTimeline;
@@ -115,10 +115,7 @@ export function createPreparedRenderWindow(options: {
   let lastPreparedWindowMediaTime: number | null = null;
   let lastPreparedWindowFrames: readonly DetectionFrame[] = [];
   let lastPreparedTargetFrames: readonly DetectionFrame[] = [];
-  let timelineContext: PreparedRenderTimelineContext = {
-    duration: null,
-    loop: false,
-  };
+  const timeline = createPreparedWindowTimeline({ getFrameKey });
   let activeMaskFrame: {
     readonly key: string;
     readonly mediaTime: number;
@@ -132,7 +129,6 @@ export function createPreparedRenderWindow(options: {
   const inFlightMaskFrameKeys = new Set<string>();
   const emptyMaskFrameKeys = new Set<string>();
   const readinessWaiters = new Set<() => void>();
-  const knownFrames = new Map<string, DetectionFrame>();
   let scheduledQueuePump: ScheduledPreparationTask | undefined;
 
   const scheduleMaskFrame = (
@@ -411,8 +407,11 @@ export function createPreparedRenderWindow(options: {
 
     const anchorTime = detectionFrame?.mediaTime ?? mediaTime;
     const bufferedFrames = options.detectionTimeline.getBufferedFrames();
-    rememberKnownFrames(bufferedFrames);
-    lastPreparedWindowFrames = getPreparedWindowFrames(
+    timeline.rememberFrames(
+      bufferedFrames,
+      getKnownFrameRetentionKeys(bufferedFrames),
+    );
+    lastPreparedWindowFrames = timeline.getWindowFrames(
       bufferedFrames,
       anchorTime,
     );
@@ -516,7 +515,7 @@ export function createPreparedRenderWindow(options: {
     },
 
     setTimelineContext(context) {
-      timelineContext = context;
+      timeline.setContext(context);
       lastPreparedWindowMediaTime = null;
       emitDiagnostics();
     },
@@ -678,7 +677,7 @@ export function createPreparedRenderWindow(options: {
     queuedMaskFrameKeys.length = 0;
     inFlightMaskFrameKeys.clear();
     emptyMaskFrameKeys.clear();
-    knownFrames.clear();
+    timeline.clear();
 
     if (preparedMaskFrames.size > 0) {
       const maskFrames = Array.from(preparedMaskFrames.values());
@@ -779,7 +778,10 @@ export function createPreparedRenderWindow(options: {
 
     return {
       frameCount,
-      seconds: getFrameDistance(latestPreparedTime, frameRef.mediaTime),
+      seconds: timeline.getFrameDistance(
+        latestPreparedTime,
+        frameRef.mediaTime,
+      ),
     };
   }
 
@@ -817,7 +819,10 @@ export function createPreparedRenderWindow(options: {
       return 0;
     }
 
-    return getFrameDistance(lastTargetFrame.mediaTime, frameRef.mediaTime);
+    return timeline.getFrameDistance(
+      lastTargetFrame.mediaTime,
+      frameRef.mediaTime,
+    );
   }
 
   function isReadyForPresentation(
@@ -900,15 +905,7 @@ export function createPreparedRenderWindow(options: {
     return 1;
   }
 
-  function rememberKnownFrames(frames: readonly DetectionFrame[]) {
-    for (const frame of frames) {
-      knownFrames.set(getFrameKey(frame), frame);
-    }
-
-    pruneKnownFrames(frames);
-  }
-
-  function pruneKnownFrames(frames: readonly DetectionFrame[]) {
+  function getKnownFrameRetentionKeys(frames: readonly DetectionFrame[]) {
     const retainedKeys = new Set(frames.map(getFrameKey));
 
     for (const key of preparedMaskFrames.keys()) {
@@ -923,55 +920,7 @@ export function createPreparedRenderWindow(options: {
       retainedKeys.add(key);
     }
 
-    for (const key of knownFrames.keys()) {
-      if (!retainedKeys.has(key)) {
-        knownFrames.delete(key);
-      }
-    }
-  }
-
-  function getPreparedWindowFrames(
-    bufferedFrames: readonly DetectionFrame[],
-    mediaTime: number,
-  ) {
-    if (!isLoopingTimeline()) {
-      return bufferedFrames.filter((frame) => frame.mediaTime >= mediaTime);
-    }
-
-    return Array.from(knownFrames.values()).sort(
-      (leftFrame, rightFrame) =>
-        getLoopDistance(leftFrame.mediaTime, mediaTime) -
-        getLoopDistance(rightFrame.mediaTime, mediaTime),
-    );
-  }
-
-  function getFrameDistance(frameTime: number, mediaTime: number) {
-    if (isLoopingTimeline()) {
-      return getLoopDistance(frameTime, mediaTime);
-    }
-
-    return Math.max(0, frameTime - mediaTime);
-  }
-
-  function isLoopingTimeline() {
-    return (
-      timelineContext.loop &&
-      timelineContext.duration !== null &&
-      timelineContext.duration > 0
-    );
-  }
-
-  function getLoopDistance(frameTime: number, mediaTime: number) {
-    if (!isLoopingTimeline() || timelineContext.duration === null) {
-      return Math.max(0, frameTime - mediaTime);
-    }
-
-    const duration = timelineContext.duration;
-    const normalizedFrameTime = modulo(frameTime, duration);
-    const normalizedMediaTime = modulo(mediaTime, duration);
-    const rawDistance = normalizedFrameTime - normalizedMediaTime;
-
-    return rawDistance >= 0 ? rawDistance : rawDistance + duration;
+    return retainedKeys;
   }
 }
 
@@ -1031,10 +980,6 @@ function getPreparedWindowRefillThresholdFrameCount(
     1,
     Math.floor(prefetchFrameCount * PREPARED_WINDOW_REFILL_RATIO),
   );
-}
-
-function modulo(value: number, modulus: number) {
-  return ((value % modulus) + modulus) % modulus;
 }
 
 function schedulePreparationTask(
