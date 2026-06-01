@@ -958,7 +958,10 @@ function resolveMaskInstructions(options: {
     });
 
     if (instruction) {
-      instructions.push(instruction);
+      instructions.push({
+        ...instruction,
+        detectionIndex,
+      });
     }
   }
 

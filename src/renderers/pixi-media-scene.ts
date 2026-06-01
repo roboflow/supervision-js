@@ -107,6 +107,8 @@ export async function createPixiMediaScene(
         canInteract: options.canInteract,
         detectionTimeline: options.detectionTimeline,
         interaction: options.interaction,
+        pickMaskDetectionAtPoint: (point, mediaTime) =>
+          maskLayer?.pickDetectionAtPoint(point, mediaTime) ?? null,
       })
     : undefined;
   let maskDisplay:

@@ -2,6 +2,7 @@ import type { Detection, DetectionFrame } from "#types/detections";
 
 export enum DetectionPickTarget {
   Box = "box",
+  Mask = "mask",
 }
 
 export enum MediaInteractionMode {

@@ -16,6 +16,7 @@ describe("mask frame compositor", () => {
       {
         alpha: 0.5,
         color: 0xff0000,
+        detectionIndex: 0,
         mask: {
           counts: encodeCompressedRleCounts([0, 1, 3]),
           encoding: DetectionMaskEncoding.CompressedRle,
@@ -30,16 +31,17 @@ describe("mask frame compositor", () => {
     expect([...frame!.data]).toEqual([1, 0, 0, 0]);
   });
 
-  it("builds style-indexed ID mask artifacts for shader rendering", () => {
+  it("builds detection-indexed ID mask artifacts for shader rendering and picking", () => {
     const frame = createIdMaskFrame([
       {
         alpha: 0.5,
         color: 0xff0000,
+        detectionIndex: 0,
         mask: {
-          counts: encodeCompressedRleCounts([0, 1, 3]),
+          counts: encodeCompressedRleCounts([0, 1, 2]),
           encoding: DetectionMaskEncoding.CompressedRle,
-          height: 2,
-          width: 2,
+          height: 1,
+          width: 3,
         },
         stroke: {
           alpha: 1,
@@ -50,11 +52,12 @@ describe("mask frame compositor", () => {
       {
         alpha: 0.5,
         color: 0xff0000,
+        detectionIndex: 1,
         mask: {
-          counts: encodeCompressedRleCounts([1, 1, 2]),
+          counts: encodeCompressedRleCounts([1, 1, 1]),
           encoding: DetectionMaskEncoding.CompressedRle,
-          height: 2,
-          width: 2,
+          height: 1,
+          width: 3,
         },
         stroke: {
           alpha: 1,
@@ -65,22 +68,23 @@ describe("mask frame compositor", () => {
       {
         alpha: 0.25,
         color: 0x00ff00,
+        detectionIndex: 2,
         mask: {
-          counts: encodeCompressedRleCounts([2, 1, 1]),
+          counts: encodeCompressedRleCounts([2, 1]),
           encoding: DetectionMaskEncoding.CompressedRle,
-          height: 2,
-          width: 2,
+          height: 1,
+          width: 3,
         },
       },
     ]);
 
     expect(frame).toBeDefined();
-    expect([...frame!.data]).toEqual([1, 2, 1, 0]);
-    expect([...frame!.fillPalette.slice(4, 12)]).toEqual([
-      1, 0, 0, 0.5, 0, 1, 0, 0.25,
+    expect([...frame!.data]).toEqual([1, 2, 3]);
+    expect([...frame!.fillPalette.slice(4, 16)]).toEqual([
+      1, 0, 0, 0.5, 1, 0, 0, 0.5, 0, 1, 0, 0.25,
     ]);
-    expect([...frame!.strokePalette.slice(4, 12)]).toEqual([
-      1, 1, 1, 1, 0, 0, 0, 0,
+    expect([...frame!.strokePalette.slice(4, 16)]).toEqual([
+      1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0,
     ]);
     expect(frame!.hasStroke).toBe(true);
   });
@@ -90,6 +94,7 @@ describe("mask frame compositor", () => {
       {
         alpha: 0.5,
         color: 0xff0000,
+        detectionIndex: 0,
         mask: {
           counts: encodeCompressedRleCounts([12, 1, 12]),
           encoding: DetectionMaskEncoding.CompressedRle,

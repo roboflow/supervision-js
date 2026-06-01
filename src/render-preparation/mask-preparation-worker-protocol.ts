@@ -12,6 +12,7 @@ export enum MaskPreparationWorkerMessageType {
 export interface SerializableMaskInstruction {
   readonly alpha: number;
   readonly color: number;
+  readonly detectionIndex: number;
   readonly mask: DetectionMask;
   readonly stroke?: MaskStrokeStyle;
 }

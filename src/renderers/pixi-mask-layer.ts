@@ -1,3 +1,4 @@
+import { pickDetectionByMaskId } from "#interactions/detection-picker";
 import {
   createPreparedRenderWindow,
   PreparedRenderFrameMaskStatus,
@@ -6,6 +7,10 @@ import {
 } from "#render-preparation/prepared-render-window";
 import { PreparedMaskFrameKind } from "#render-preparation/mask-frame-artifact";
 import type { BufferedDetectionTimeline } from "#types/detection-timeline";
+import type {
+  DetectionPickPoint,
+  DetectionPickResult,
+} from "#types/interaction";
 import type { MaskStyle } from "#types/mask-style";
 import type {
   RenderPreparationOptions,
@@ -87,6 +92,10 @@ export interface PixiMaskLayer {
     mediaTime: number,
     options: RenderPreparationPlaybackGateOptions,
   ): Promise<void>;
+  pickDetectionAtPoint(
+    point: DetectionPickPoint,
+    mediaTime: number,
+  ): DetectionPickResult | null;
   setTimelineContext(context: PreparedRenderTimelineContext): void;
   setMaskStyle(maskStyle: MaskStyle | null | undefined): void;
   destroy(): void;
@@ -114,6 +123,9 @@ export function createPixiMaskLayer(options: {
   let activeFrameKey: string | null = null;
   let activeFrameMediaTime: number | null = null;
   let maskOpacity = resolveMaskStyleOpacity(options.maskStyle);
+  let maskPickCanvas: HTMLCanvasElement | undefined;
+  let maskPickContext: CanvasRenderingContext2D | null | undefined;
+  let maskPickFrameKey: string | null = null;
   let visibleMaskMediaTime: number | null = null;
   let isDestroyed = false;
   const maskTextures = new Map<string, PixiTexture>();
@@ -122,6 +134,9 @@ export function createPixiMaskLayer(options: {
     maskStyle: options.maskStyle,
     onMaskFrameEvicted(key) {
       destroyTexture(key);
+      if (key === maskPickFrameKey) {
+        resetMaskPickCanvas();
+      }
       if (key === activeFrameKey) {
         activeFrameKey = null;
         activeFrameMediaTime = null;
@@ -136,6 +151,7 @@ export function createPixiMaskLayer(options: {
     onMaskFramesCleared() {
       activeFrameKey = null;
       activeFrameMediaTime = null;
+      resetMaskPickCanvas();
       destroyTextures();
       hideSprite();
     },
@@ -203,6 +219,32 @@ export function createPixiMaskLayer(options: {
       return preparedRenderWindow.waitForReady(mediaTime, gateOptions);
     },
 
+    pickDetectionAtPoint(point, mediaTime) {
+      const preparedFrame = preparedRenderWindow.getFrame(mediaTime);
+      const maskFrame = preparedFrame?.maskFrame;
+
+      if (
+        !preparedFrame ||
+        !maskFrame ||
+        maskFrame.kind !== PreparedMaskFrameKind.PngIdMask ||
+        mediaWidth <= 0 ||
+        mediaHeight <= 0
+      ) {
+        return null;
+      }
+
+      const x = Math.floor((point.x / mediaWidth) * maskFrame.width);
+      const y = Math.floor((point.y / mediaHeight) * maskFrame.height);
+
+      if (x < 0 || y < 0 || x >= maskFrame.width || y >= maskFrame.height) {
+        return null;
+      }
+
+      const maskId = readMaskId(maskFrame, x, y);
+
+      return pickDetectionByMaskId(preparedFrame.detectionFrame, maskId, point);
+    },
+
     setTimelineContext(context) {
       preparedRenderWindow.setTimelineContext(context);
     },
@@ -224,6 +266,7 @@ export function createPixiMaskLayer(options: {
       isDestroyed = true;
       preparedRenderWindow.destroy();
       destroyTextures();
+      resetMaskPickCanvas();
       idMaskRenderer?.destroy();
     },
   };
@@ -381,6 +424,73 @@ export function createPixiMaskLayer(options: {
       });
     } catch {
       return undefined;
+    }
+  }
+
+  function readMaskId(
+    maskFrame: Extract<
+      PreparedMaskFrame,
+      { readonly kind: PreparedMaskFrameKind.PngIdMask }
+    >,
+    x: number,
+    y: number,
+  ) {
+    try {
+      const context = getMaskPickContext(maskFrame);
+
+      if (!context) {
+        return 0;
+      }
+
+      return context.getImageData(x, y, 1, 1).data[0] ?? 0;
+    } catch {
+      resetMaskPickCanvas();
+      return 0;
+    }
+  }
+
+  function getMaskPickContext(
+    maskFrame: Extract<
+      PreparedMaskFrame,
+      { readonly kind: PreparedMaskFrameKind.PngIdMask }
+    >,
+  ) {
+    if (typeof document === "undefined") {
+      return null;
+    }
+
+    if (!maskPickCanvas) {
+      maskPickCanvas = document.createElement("canvas");
+      maskPickContext = maskPickCanvas.getContext("2d", {
+        willReadFrequently: true,
+      });
+    }
+
+    if (!maskPickContext) {
+      return null;
+    }
+
+    if (
+      maskPickFrameKey !== maskFrame.key ||
+      maskPickCanvas.width !== maskFrame.width ||
+      maskPickCanvas.height !== maskFrame.height
+    ) {
+      maskPickCanvas.width = maskFrame.width;
+      maskPickCanvas.height = maskFrame.height;
+      maskPickContext.clearRect(0, 0, maskFrame.width, maskFrame.height);
+      maskPickContext.drawImage(maskFrame.source, 0, 0);
+      maskPickFrameKey = maskFrame.key;
+    }
+
+    return maskPickContext;
+  }
+
+  function resetMaskPickCanvas() {
+    maskPickFrameKey = null;
+
+    if (maskPickCanvas) {
+      maskPickCanvas.width = 0;
+      maskPickCanvas.height = 0;
     }
   }
 }

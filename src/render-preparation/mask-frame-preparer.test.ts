@@ -22,6 +22,7 @@ const maskPreparationJob: MaskFramePreparationJob = {
     {
       alpha: 0.5,
       color: 0xff0000,
+      detectionIndex: 0,
       mask: {
         counts: "021",
         encoding: DetectionMaskEncoding.CompressedRle,

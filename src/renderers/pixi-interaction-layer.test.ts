@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createPixiInteractionLayer } from "#renderers/pixi-interaction-layer";
-import { MediaInteractionMode } from "#types/interaction";
+import { DetectionPickTarget, MediaInteractionMode } from "#types/interaction";
 import type { BufferedDetectionTimeline } from "#types/detection-timeline";
 import type { DetectionFrame } from "#types/detections";
 
@@ -77,6 +77,44 @@ describe("pixi interaction layer", () => {
     });
     expect(onHover).toHaveBeenLastCalledWith(null);
     expect(onSelect).toHaveBeenLastCalledWith(null);
+  });
+
+  it("prefers exact mask picks before falling back to box picks", () => {
+    const onHover = vi.fn();
+    const maskPick = {
+      detection: frame.detections[0],
+      detectionIndex: 0,
+      frame,
+      mediaTime: frame.mediaTime,
+      point: { x: 15, y: 20 },
+      target: DetectionPickTarget.Mask,
+    };
+    const pickMaskDetectionAtPoint = vi.fn(() => maskPick);
+    const layer = createPixiInteractionLayer({
+      Container: FakeContainer as never,
+      Graphics: FakeGraphics as never,
+      Rectangle: FakeRectangle as never,
+      canInteract: () => true,
+      detectionTimeline: createTimeline(frame),
+      interaction: {
+        mode: MediaInteractionMode.PausedOnly,
+        onHover,
+      },
+      pickMaskDetectionAtPoint,
+    });
+    const display = layer.createDisplay({
+      height: 80,
+      width: 120,
+    }) as FakeContainer;
+
+    layer.drawFrame(0.1);
+    display.emit("pointermove", createPointerEvent(display, 15, 20));
+
+    expect(pickMaskDetectionAtPoint).toHaveBeenCalledWith(
+      { x: 15, y: 20 },
+      0.1,
+    );
+    expect(onHover).toHaveBeenLastCalledWith(maskPick);
   });
 });
 

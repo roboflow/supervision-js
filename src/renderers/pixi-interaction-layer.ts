@@ -78,6 +78,10 @@ export function createPixiInteractionLayer(options: {
   readonly canInteract: () => boolean;
   readonly detectionTimeline: BufferedDetectionTimeline;
   readonly interaction: MediaInteractionOptions;
+  readonly pickMaskDetectionAtPoint?: (
+    point: DetectionPickPoint,
+    mediaTime: number,
+  ) => DetectionPickResult | null;
 }): PixiInteractionLayer {
   const mode = options.interaction.mode ?? MediaInteractionMode.PausedOnly;
   const pickPadding = options.interaction.padding ?? DEFAULT_PICK_PADDING;
@@ -158,10 +162,20 @@ export function createPixiInteractionLayer(options: {
     }
 
     const point = event.getLocalPosition(container) as DetectionPickPoint;
+    const pickPoint = { x: point.x, y: point.y };
+
+    const maskPick = options.pickMaskDetectionAtPoint?.(
+      pickPoint,
+      currentMediaTime,
+    );
+
+    if (maskPick) {
+      return maskPick;
+    }
 
     return pickDetectionAtPoint(
       options.detectionTimeline.selectFrame(currentMediaTime),
-      { x: point.x, y: point.y },
+      pickPoint,
       { padding: pickPadding },
     );
   }

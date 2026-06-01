@@ -117,6 +117,7 @@ describe("package entrypoint", () => {
     });
     expect(entrypoint.DetectionPickTarget).toEqual({
       Box: "box",
+      Mask: "mask",
     });
     expect(entrypoint.MediaInteractionMode).toEqual({
       Always: "always",

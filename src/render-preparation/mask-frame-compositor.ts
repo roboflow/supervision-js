@@ -73,7 +73,6 @@ export function createIdMaskFrame(
   const strokePalette = new Float32Array(
     new ArrayBuffer(MAX_ID_MASK_PALETTE_ENTRIES * 4 * 4),
   );
-  const styleIds = new Map<string, number>();
   let hasStroke = false;
 
   for (const instruction of instructions) {
@@ -85,32 +84,30 @@ export function createIdMaskFrame(
       return undefined;
     }
 
-    const styleKey = getIdMaskStyleKey(instruction);
-    let styleId = styleIds.get(styleKey);
+    const detectionMaskId = instruction.detectionIndex + 1;
 
-    if (styleId === undefined) {
-      if (styleIds.size >= MAX_ID_MASK_PALETTE_ENTRIES - 1) {
-        return undefined;
-      }
+    if (
+      detectionMaskId <= 0 ||
+      detectionMaskId >= MAX_ID_MASK_PALETTE_ENTRIES
+    ) {
+      return undefined;
+    }
 
-      styleId = styleIds.size + 1;
-      styleIds.set(styleKey, styleId);
+    writePaletteEntry(
+      fillPalette,
+      detectionMaskId,
+      instruction.color,
+      instruction.alpha,
+    );
+
+    if (instruction.stroke && instruction.stroke.width > 0) {
+      hasStroke = true;
       writePaletteEntry(
-        fillPalette,
-        styleId,
-        instruction.color,
-        instruction.alpha,
+        strokePalette,
+        detectionMaskId,
+        instruction.stroke.color,
+        instruction.stroke.alpha,
       );
-
-      if (instruction.stroke && instruction.stroke.width > 0) {
-        hasStroke = true;
-        writePaletteEntry(
-          strokePalette,
-          styleId,
-          instruction.stroke.color,
-          instruction.stroke.alpha,
-        );
-      }
     }
 
     const decodedMask = decodeCompressedRleMask(instruction.mask);
@@ -120,7 +117,7 @@ export function createIdMaskFrame(
         const maskOffset = y * decodedMask.width + x;
 
         if (decodedMask.data[maskOffset]) {
-          data[y * width + x] = styleId;
+          data[y * width + x] = detectionMaskId;
         }
       }
     }
@@ -283,18 +280,6 @@ function writePixel(
   rgba[rgbaOffset + 1] = color.green;
   rgba[rgbaOffset + 2] = color.blue;
   rgba[rgbaOffset + 3] = color.alpha;
-}
-
-function getIdMaskStyleKey(instruction: SerializableMaskInstruction) {
-  const stroke = instruction.stroke;
-
-  return [
-    instruction.color,
-    instruction.alpha,
-    stroke?.color ?? "none",
-    stroke?.alpha ?? "none",
-    stroke?.width ?? "none",
-  ].join(":");
 }
 
 function writePaletteEntry(

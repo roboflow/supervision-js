@@ -81,6 +81,32 @@ export function createDetectionPickKey(pick: DetectionPickResult | null) {
   ].join(":");
 }
 
+export function pickDetectionByMaskId(
+  frame: DetectionFrame | undefined,
+  maskId: number,
+  point: DetectionPickPoint,
+): DetectionPickResult | null {
+  if (!frame || maskId <= 0 || !Number.isInteger(maskId)) {
+    return null;
+  }
+
+  const detectionIndex = maskId - 1;
+  const detection = frame.detections[detectionIndex];
+
+  if (!detection) {
+    return null;
+  }
+
+  return {
+    detection,
+    detectionIndex,
+    frame,
+    mediaTime: frame.mediaTime,
+    point,
+    target: DetectionPickTarget.Mask,
+  };
+}
+
 function padRect(rect: Rect, padding: number): Rect {
   if (padding === 0) {
     return rect;
