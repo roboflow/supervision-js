@@ -194,6 +194,10 @@ export async function createPixiMediaScene(
       updateMediaSceneFit();
     },
 
+    setTimelineContext(context) {
+      maskLayer?.setTimelineContext(context);
+    },
+
     presentSample(sample) {
       if (mediaWidth <= 0 || mediaHeight <= 0) {
         throw new Error("Pixi media scene has not been initialized.");

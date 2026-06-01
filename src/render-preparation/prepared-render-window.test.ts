@@ -431,6 +431,149 @@ describe("prepared render window", () => {
     }
   });
 
+  it("tops the prepared target back up when ready-ahead reaches the low watermark", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const onDiagnostics = vi.fn();
+      const onMaskFramePrepared = vi.fn();
+      const renderWindow = createPreparedRenderWindow({
+        detectionTimeline: createTimeline(manyFrames),
+        maskStyle: new BaseMaskStyle(),
+        onMaskFramePrepared,
+        renderPreparation: {
+          maskFrame: {
+            maxCacheFrameCount: 10,
+            maxPendingFrameCount: 10,
+            prefetchFrameCount: 7,
+            scheduleBatchSize: 10,
+            scanIntervalSeconds: 999,
+          },
+          onDiagnostics,
+        },
+      });
+
+      renderWindow.getFrame(0);
+      await flushMaskPreparationTimers(20);
+
+      expect(onMaskFramePrepared).toHaveBeenCalledTimes(7);
+
+      renderWindow.getFrame(0.04);
+      await flushMaskPreparationTimers(2);
+      expect(onMaskFramePrepared).toHaveBeenCalledTimes(7);
+
+      renderWindow.getFrame(0.08);
+      await flushMaskPreparationTimers(20);
+
+      expect(
+        onMaskFramePrepared.mock.calls.map(
+          (call) => (call[0] as { readonly key: string }).key,
+        ),
+      ).toEqual([
+        "0:0",
+        "1:0.04",
+        "2:0.08",
+        "3:0.12",
+        "4:0.16",
+        "5:0.2",
+        "6:0.24",
+        "7:0.28",
+        "8:0.32",
+      ]);
+      expect(onDiagnostics).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          artifacts: [
+            expect.objectContaining({
+              activeFrame: expect.objectContaining({
+                key: "2:0.08",
+              }),
+              preparedAheadFrameCount: 7,
+              refillThresholdCount: 5,
+            }),
+          ],
+        }),
+      );
+
+      renderWindow.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps prepared lookahead across a looping media boundary", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const onDiagnostics = vi.fn();
+      const onMaskFramePrepared = vi.fn();
+      const renderWindow = createPreparedRenderWindow({
+        detectionTimeline: createTimeline(manyFrames),
+        maskStyle: new BaseMaskStyle(),
+        onMaskFramePrepared,
+        renderPreparation: {
+          maskFrame: {
+            maxCacheFrameCount: 10,
+            maxPendingFrameCount: 10,
+            prefetchFrameCount: 7,
+            scheduleBatchSize: 10,
+            scanIntervalSeconds: 0,
+          },
+          onDiagnostics,
+        },
+      });
+
+      (
+        renderWindow as unknown as {
+          setTimelineContext(context: {
+            readonly duration: number;
+            readonly loop: boolean;
+          }): void;
+        }
+      ).setTimelineContext({ duration: 0.4, loop: true });
+
+      renderWindow.getFrame(0);
+      await flushMaskPreparationTimers(20);
+      renderWindow.getFrame(0.28);
+      await flushMaskPreparationTimers(20);
+
+      expect(
+        onMaskFramePrepared.mock.calls.map(
+          (call) => (call[0] as { readonly key: string }).key,
+        ),
+      ).toEqual([
+        "0:0",
+        "1:0.04",
+        "2:0.08",
+        "3:0.12",
+        "4:0.16",
+        "5:0.2",
+        "6:0.24",
+        "7:0.28",
+        "8:0.32",
+        "9:0.36",
+      ]);
+      expect(onDiagnostics).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          artifacts: [
+            expect.objectContaining({
+              activeFrame: expect.objectContaining({
+                key: "7:0.28",
+              }),
+              preparedAheadFrameCount: 7,
+              preparedAheadSeconds: expect.closeTo(0.24),
+            }),
+          ],
+        }),
+      );
+
+      renderWindow.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("starts concurrent mask preparations up to the configured worker count", async () => {
     vi.useFakeTimers();
     resetMocks();

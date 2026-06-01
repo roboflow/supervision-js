@@ -219,6 +219,8 @@ export function StatusPanel({
           value={
             maskFrameArtifact
               ? `${formatInteger(maskFrameArtifact.prefetchCount ?? 0)} prefetch | ${formatInteger(
+                  maskFrameArtifact.refillThresholdCount ?? 0,
+                )} refill | ${formatInteger(
                   maskFrameArtifact.maxPreparedCount ?? 0,
                 )} cache`
               : "-"

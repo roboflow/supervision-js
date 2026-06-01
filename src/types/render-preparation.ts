@@ -64,6 +64,7 @@ export interface RenderPreparationArtifactDiagnostics {
   readonly preparedAheadSeconds?: number;
   readonly prefetchCount?: number;
   readonly preparedCount: number;
+  readonly refillThresholdCount?: number;
   readonly scheduleBatchSize?: number;
 }
 

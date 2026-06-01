@@ -51,6 +51,11 @@ describe("media renderer core", () => {
       },
     );
 
+    expect(scene.setTimelineContext).toHaveBeenCalledWith({
+      duration: 0.12,
+      loop: false,
+    });
+
     await renderer.play();
     flushAnimationFrame(40);
 
@@ -144,6 +149,7 @@ function createScene(
         mediaTime: sample.timestamp,
       };
     }),
+    setTimelineContext: vi.fn(),
     setPresentation: vi.fn(),
     ...overrides,
   };

@@ -2,6 +2,7 @@ import {
   createPreparedRenderWindow,
   PreparedRenderFrameMaskStatus,
   type PreparedMaskFrame,
+  type PreparedRenderTimelineContext,
 } from "#render-preparation/prepared-render-window";
 import { PreparedMaskFrameKind } from "#render-preparation/mask-frame-artifact";
 import type { BufferedDetectionTimeline } from "#types/detection-timeline";
@@ -86,6 +87,7 @@ export interface PixiMaskLayer {
     mediaTime: number,
     options: RenderPreparationPlaybackGateOptions,
   ): Promise<void>;
+  setTimelineContext(context: PreparedRenderTimelineContext): void;
   setMaskStyle(maskStyle: MaskStyle | null | undefined): void;
   destroy(): void;
 }
@@ -199,6 +201,10 @@ export function createPixiMaskLayer(options: {
 
     waitForRenderPreparation(mediaTime, gateOptions) {
       return preparedRenderWindow.waitForReady(mediaTime, gateOptions);
+    },
+
+    setTimelineContext(context) {
+      preparedRenderWindow.setTimelineContext(context);
     },
 
     setMaskStyle(nextMaskStyle) {

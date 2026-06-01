@@ -35,6 +35,7 @@ export interface PresentedMediaSample {
 
 export interface MediaRendererScene {
   initializeMedia(dimensions: { width: number; height: number }): void;
+  setTimelineContext?(context: MediaRendererSceneTimelineContext): void;
   presentSample(sample: DecodedVideoSample): PresentedMediaSample;
   waitForRenderPreparation?(
     mediaTime: number,
@@ -45,4 +46,9 @@ export interface MediaRendererScene {
     mediaTime: number,
   ): void;
   destroy(): void;
+}
+
+export interface MediaRendererSceneTimelineContext {
+  readonly duration: number | null;
+  readonly loop: boolean;
 }

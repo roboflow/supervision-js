@@ -241,6 +241,10 @@ export async function createMediaRendererCore(
 
     firstTimestamp = metadata.firstTimestamp;
     const mediaDimensions = runtimeState.recordMediaMetadata(metadata);
+    mediaScene.setTimelineContext?.({
+      duration: metadata.duration,
+      loop: options.loop !== false,
+    });
     mediaScene.initializeMedia(mediaDimensions);
     runtimeState.setSourceReady(metadata);
 

@@ -21,6 +21,7 @@ const DEFAULT_MASK_PENDING_FRAME_COUNT = 8;
 const DEFAULT_MASK_PREFETCH_FRAME_COUNT = 12;
 const DEFAULT_MASK_SCHEDULE_BATCH_SIZE = 2;
 const DEFAULT_PREPARED_WINDOW_SCAN_INTERVAL_SECONDS = 0.15;
+const PREPARED_WINDOW_REFILL_RATIO = 5 / 7;
 
 type ScheduledPreparationTask = ReturnType<typeof setTimeout>;
 
@@ -52,8 +53,14 @@ export interface PreparedRenderWindow {
     mediaTime: number,
     options: RenderPreparationPlaybackGateOptions,
   ): Promise<void>;
+  setTimelineContext(context: PreparedRenderTimelineContext): void;
   setMaskStyle(maskStyle: MaskStyle | null | undefined): void;
   destroy(): void;
+}
+
+export interface PreparedRenderTimelineContext {
+  readonly duration: number | null;
+  readonly loop: boolean;
 }
 
 export type { PreparedMaskFrame } from "./mask-frame-preparer";
@@ -82,6 +89,8 @@ export function createPreparedRenderWindow(options: {
       maskFrameOptions?.prefetchFrameCount ??
       DEFAULT_MASK_PREFETCH_FRAME_COUNT,
   );
+  const refillThresholdFrameCount =
+    getPreparedWindowRefillThresholdFrameCount(prefetchFrameCount);
   const preparedWindowScanIntervalSeconds = Math.max(
     0,
     options.preparedWindowScanIntervalSeconds ??
@@ -106,6 +115,10 @@ export function createPreparedRenderWindow(options: {
   let lastPreparedWindowMediaTime: number | null = null;
   let lastPreparedWindowFrames: readonly DetectionFrame[] = [];
   let lastPreparedTargetFrames: readonly DetectionFrame[] = [];
+  let timelineContext: PreparedRenderTimelineContext = {
+    duration: null,
+    loop: false,
+  };
   let activeMaskFrame: {
     readonly key: string;
     readonly mediaTime: number;
@@ -119,6 +132,7 @@ export function createPreparedRenderWindow(options: {
   const inFlightMaskFrameKeys = new Set<string>();
   const emptyMaskFrameKeys = new Set<string>();
   const readinessWaiters = new Set<() => void>();
+  const knownFrames = new Map<string, DetectionFrame>();
   let scheduledQueuePump: ScheduledPreparationTask | undefined;
 
   const scheduleMaskFrame = (
@@ -378,13 +392,15 @@ export function createPreparedRenderWindow(options: {
       bufferState.detectionCount,
     ].join(":");
     const frameKey = detectionFrame ? getFrameKey(detectionFrame) : null;
+    const shouldTopUpPreparedWindow = shouldTopUpPreparedWindowAtLowWatermark();
     const shouldScanWindow =
       scheduleOptions.force ||
       bufferSignature !== lastPreparedBufferSignature ||
       lastPreparedWindowMediaTime === null ||
       mediaTime < lastPreparedWindowMediaTime ||
       mediaTime - lastPreparedWindowMediaTime >=
-        preparedWindowScanIntervalSeconds;
+        preparedWindowScanIntervalSeconds ||
+      shouldTopUpPreparedWindow;
 
     if (!shouldScanWindow) {
       return;
@@ -393,11 +409,17 @@ export function createPreparedRenderWindow(options: {
     lastPreparedBufferSignature = bufferSignature;
     lastPreparedWindowMediaTime = mediaTime;
 
+    const anchorTime = detectionFrame?.mediaTime ?? mediaTime;
     const bufferedFrames = options.detectionTimeline.getBufferedFrames();
-    lastPreparedWindowFrames = bufferedFrames;
-    lastPreparedTargetFrames = bufferedFrames
-      .filter((frame) => frame.mediaTime >= mediaTime)
-      .slice(0, prefetchFrameCount);
+    rememberKnownFrames(bufferedFrames);
+    lastPreparedWindowFrames = getPreparedWindowFrames(
+      bufferedFrames,
+      anchorTime,
+    );
+    lastPreparedTargetFrames = lastPreparedWindowFrames.slice(
+      0,
+      prefetchFrameCount,
+    );
 
     if (
       detectionFrame &&
@@ -411,6 +433,29 @@ export function createPreparedRenderWindow(options: {
 
     schedulePreparedTargetBatch();
   };
+
+  function shouldTopUpPreparedWindowAtLowWatermark() {
+    if (
+      !activeMaskFrame ||
+      prefetchFrameCount === 0 ||
+      lastPreparedWindowFrames.length === 0 ||
+      lastPreparedTargetFrames.length < prefetchFrameCount
+    ) {
+      return false;
+    }
+
+    const preparedAhead =
+      getPreparedAheadDiagnosticsFor(activeMaskFrame).frameCount;
+    const availableAhead = getAvailableAheadFrameCount(activeMaskFrame);
+    const effectiveThreshold = Math.min(
+      refillThresholdFrameCount,
+      availableAhead,
+    );
+
+    return (
+      preparedAhead <= effectiveThreshold && preparedAhead < availableAhead
+    );
+  }
 
   function schedulePreparedTargetBatch() {
     if (isDestroyed) {
@@ -468,6 +513,12 @@ export function createPreparedRenderWindow(options: {
 
         readinessWaiters.add(checkReady);
       });
+    },
+
+    setTimelineContext(context) {
+      timelineContext = context;
+      lastPreparedWindowMediaTime = null;
+      emitDiagnostics();
     },
 
     setMaskStyle(nextMaskStyle) {
@@ -563,6 +614,7 @@ export function createPreparedRenderWindow(options: {
           preparedAheadSeconds: preparedAhead.seconds,
           prefetchCount: prefetchFrameCount,
           preparedCount: preparedMaskFrames.size,
+          refillThresholdCount: refillThresholdFrameCount,
           scheduleBatchSize,
         },
       ],
@@ -626,6 +678,7 @@ export function createPreparedRenderWindow(options: {
     queuedMaskFrameKeys.length = 0;
     inFlightMaskFrameKeys.clear();
     emptyMaskFrameKeys.clear();
+    knownFrames.clear();
 
     if (preparedMaskFrames.size > 0) {
       const maskFrames = Array.from(preparedMaskFrames.values());
@@ -694,9 +747,17 @@ export function createPreparedRenderWindow(options: {
     readonly key: string;
     readonly mediaTime: number;
   }) {
-    const activeFrameIndex = lastPreparedWindowFrames.findIndex(
+    const targetFrameIndex = lastPreparedTargetFrames.findIndex(
       (frame) => getFrameKey(frame) === frameRef.key,
     );
+    const frames =
+      targetFrameIndex >= 0
+        ? lastPreparedTargetFrames
+        : lastPreparedWindowFrames;
+    const activeFrameIndex =
+      targetFrameIndex >= 0
+        ? targetFrameIndex
+        : frames.findIndex((frame) => getFrameKey(frame) === frameRef.key);
 
     if (activeFrameIndex < 0) {
       return { frameCount: 0, seconds: 0 };
@@ -705,7 +766,7 @@ export function createPreparedRenderWindow(options: {
     let frameCount = 0;
     let latestPreparedTime = frameRef.mediaTime;
 
-    for (const frame of lastPreparedWindowFrames.slice(activeFrameIndex)) {
+    for (const frame of frames.slice(activeFrameIndex)) {
       const key = getFrameKey(frame);
 
       if (!preparedMaskFrames.has(key) && !emptyMaskFrameKeys.has(key)) {
@@ -718,8 +779,23 @@ export function createPreparedRenderWindow(options: {
 
     return {
       frameCount,
-      seconds: Math.max(0, latestPreparedTime - frameRef.mediaTime),
+      seconds: getFrameDistance(latestPreparedTime, frameRef.mediaTime),
     };
+  }
+
+  function getAvailableAheadFrameCount(frameRef: {
+    readonly key: string;
+    readonly mediaTime: number;
+  }) {
+    const activeFrameIndex = lastPreparedWindowFrames.findIndex(
+      (frame) => getFrameKey(frame) === frameRef.key,
+    );
+
+    if (activeFrameIndex < 0) {
+      return 0;
+    }
+
+    return lastPreparedWindowFrames.length - activeFrameIndex;
   }
 
   function getPreparedTargetAheadSeconds(frameRef: {
@@ -741,7 +817,7 @@ export function createPreparedRenderWindow(options: {
       return 0;
     }
 
-    return Math.max(0, lastTargetFrame.mediaTime - frameRef.mediaTime);
+    return getFrameDistance(lastTargetFrame.mediaTime, frameRef.mediaTime);
   }
 
   function isReadyForPresentation(
@@ -823,6 +899,80 @@ export function createPreparedRenderWindow(options: {
 
     return 1;
   }
+
+  function rememberKnownFrames(frames: readonly DetectionFrame[]) {
+    for (const frame of frames) {
+      knownFrames.set(getFrameKey(frame), frame);
+    }
+
+    pruneKnownFrames(frames);
+  }
+
+  function pruneKnownFrames(frames: readonly DetectionFrame[]) {
+    const retainedKeys = new Set(frames.map(getFrameKey));
+
+    for (const key of preparedMaskFrames.keys()) {
+      retainedKeys.add(key);
+    }
+
+    for (const key of pendingMaskFrames.keys()) {
+      retainedKeys.add(key);
+    }
+
+    for (const key of emptyMaskFrameKeys) {
+      retainedKeys.add(key);
+    }
+
+    for (const key of knownFrames.keys()) {
+      if (!retainedKeys.has(key)) {
+        knownFrames.delete(key);
+      }
+    }
+  }
+
+  function getPreparedWindowFrames(
+    bufferedFrames: readonly DetectionFrame[],
+    mediaTime: number,
+  ) {
+    if (!isLoopingTimeline()) {
+      return bufferedFrames.filter((frame) => frame.mediaTime >= mediaTime);
+    }
+
+    return Array.from(knownFrames.values()).sort(
+      (leftFrame, rightFrame) =>
+        getLoopDistance(leftFrame.mediaTime, mediaTime) -
+        getLoopDistance(rightFrame.mediaTime, mediaTime),
+    );
+  }
+
+  function getFrameDistance(frameTime: number, mediaTime: number) {
+    if (isLoopingTimeline()) {
+      return getLoopDistance(frameTime, mediaTime);
+    }
+
+    return Math.max(0, frameTime - mediaTime);
+  }
+
+  function isLoopingTimeline() {
+    return (
+      timelineContext.loop &&
+      timelineContext.duration !== null &&
+      timelineContext.duration > 0
+    );
+  }
+
+  function getLoopDistance(frameTime: number, mediaTime: number) {
+    if (!isLoopingTimeline() || timelineContext.duration === null) {
+      return Math.max(0, frameTime - mediaTime);
+    }
+
+    const duration = timelineContext.duration;
+    const normalizedFrameTime = modulo(frameTime, duration);
+    const normalizedMediaTime = modulo(mediaTime, duration);
+    const rawDistance = normalizedFrameTime - normalizedMediaTime;
+
+    return rawDistance >= 0 ? rawDistance : rawDistance + duration;
+  }
 }
 
 function toArtifactFrameStatus(status: PreparedRenderFrameMaskStatus) {
@@ -868,6 +1018,23 @@ function resolveMaskInstructions(options: {
 
 function getFrameKey(frame: DetectionFrame) {
   return `${frame.frameIndex ?? "time"}:${frame.mediaTime}`;
+}
+
+function getPreparedWindowRefillThresholdFrameCount(
+  prefetchFrameCount: number,
+) {
+  if (prefetchFrameCount <= 1) {
+    return 0;
+  }
+
+  return Math.max(
+    1,
+    Math.floor(prefetchFrameCount * PREPARED_WINDOW_REFILL_RATIO),
+  );
+}
+
+function modulo(value: number, modulus: number) {
+  return ((value % modulus) + modulus) % modulus;
 }
 
 function schedulePreparationTask(
