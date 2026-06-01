@@ -8,6 +8,7 @@ import type {
   MediaRendererFit,
   MediaRendererPresentation,
 } from "#types/media-renderer";
+import type { MediaInteractionOptions } from "#types/interaction";
 import type { LabelStyle } from "#types/label-style";
 import type { MaskStyle } from "#types/mask-style";
 import type {
@@ -22,6 +23,8 @@ export interface MediaRendererSceneOptions {
   readonly boxStyle: BoxStyle | undefined;
   readonly labelStyle: LabelStyle | undefined;
   readonly maskStyle: MaskStyle | undefined;
+  readonly interaction: MediaInteractionOptions | undefined;
+  readonly canInteract: () => boolean;
   readonly renderPreparation: RenderPreparationOptions | undefined;
 }
 

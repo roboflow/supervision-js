@@ -7,6 +7,7 @@ import {
 } from "react";
 import {
   MediaRendererPlaybackState,
+  type DetectionPickResult,
   type MediaSession,
   type MediaRenderer,
   type MediaRendererState,
@@ -44,11 +45,13 @@ export interface BasketballDemoRendererState {
   readonly duration: number | null;
   readonly errorMessage: string | null;
   readonly fixtureSummary: BasketballSampleSummary | null;
+  readonly hoveredDetectionPick: DetectionPickResult | null;
   readonly mediaState: DemoMediaState;
   readonly playbackState: MediaRendererPlaybackState | null;
   readonly presentationSettings: BasketballPresentationSettings;
   readonly rendererState: MediaRendererState | null;
   readonly renderPreparationDiagnostics: RenderPreparationDiagnostics | null;
+  readonly selectedDetectionPick: DetectionPickResult | null;
   readonly sourceControlsDisabled: boolean;
   readonly sourceMode: DemoSourceMode;
   readonly sessionState: MediaSessionState | null;
@@ -114,6 +117,10 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
   );
   const [fixtureSummary, setFixtureSummary] =
     useState<BasketballSampleSummary | null>(null);
+  const [hoveredDetectionPick, setHoveredDetectionPick] =
+    useState<DetectionPickResult | null>(null);
+  const [selectedDetectionPick, setSelectedDetectionPick] =
+    useState<DetectionPickResult | null>(null);
   const [detectionSourceState, setDetectionSourceState] =
     useState<DemoDetectionSourceState>(initialDetectionSourceState);
   const [mediaState, setMediaState] = useState<DemoMediaState>({
@@ -179,6 +186,13 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
 
       setRendererState(state);
       setSourceState(state.source);
+      if (
+        state.playbackState === MediaRendererPlaybackState.Playing ||
+        state.playbackState === MediaRendererPlaybackState.Buffering
+      ) {
+        setHoveredDetectionPick(null);
+        setSelectedDetectionPick(null);
+      }
     };
 
     if (sourceMode === DemoSourceMode.Upload) {
@@ -194,6 +208,8 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
             container,
             definition: activeBasketballFixture,
             isActive,
+            onDetectionHover: setHoveredDetectionPick,
+            onDetectionSelect: setSelectedDetectionPick,
             onDetectionSourceState: setDetectionSourceState,
             onFixtureSummary: setFixtureSummary,
             onFrame,
@@ -212,6 +228,8 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
             abortSignal: abortController!.signal,
             container,
             isActive,
+            onDetectionHover: setHoveredDetectionPick,
+            onDetectionSelect: setSelectedDetectionPick,
             onDetectionSourceState: setDetectionSourceState,
             onFixtureSummary: setFixtureSummary,
             onFrame,
@@ -315,6 +333,8 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
 
       const seekRunId = seekRunRef.current + 1;
       seekRunRef.current = seekRunId;
+      setHoveredDetectionPick(null);
+      setSelectedDetectionPick(null);
       void renderer
         .seek(time)
         .then(() => {
@@ -447,6 +467,7 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
     setDetectionSourceState(initialDetectionSourceState);
     setErrorMessage(null);
     setFixtureSummary(null);
+    setHoveredDetectionPick(null);
     setMediaState({
       errorMessage: null,
       status:
@@ -456,6 +477,7 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
     });
     setRendererState(null);
     setRenderPreparationDiagnostics(null);
+    setSelectedDetectionPick(null);
     setSessionState(null);
     setSourceState(null);
   }
@@ -493,6 +515,7 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
     duration,
     errorMessage,
     fixtureSummary,
+    hoveredDetectionPick,
     mediaState,
     onCancelUploadInference,
     onSeek,
@@ -504,6 +527,7 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
     presentationSettings,
     renderPreparationDiagnostics,
     rendererState,
+    selectedDetectionPick,
     setPresentationSettings,
     setSourceMode,
     setUploadApiKey,

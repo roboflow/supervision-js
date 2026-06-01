@@ -1,5 +1,6 @@
 import type { Dispatch, SetStateAction } from "react";
 import type {
+  DetectionPickResult,
   MediaRendererState,
   MediaSessionState,
   MediaSourceState,
@@ -50,6 +51,8 @@ export interface TimelineRange {
 export interface DemoSessionCallbacks {
   readonly isActive: () => boolean;
   readonly onDetectionSourceState: (state: DemoDetectionSourceState) => void;
+  readonly onDetectionHover: (pick: DetectionPickResult | null) => void;
+  readonly onDetectionSelect: (pick: DetectionPickResult | null) => void;
   readonly onFixtureSummary: (summary: BasketballSampleSummary) => void;
   readonly onFrame: () => void;
   readonly onMediaState: (state: DemoMediaState) => void;

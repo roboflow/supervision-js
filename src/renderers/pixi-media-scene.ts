@@ -4,6 +4,7 @@ import type {
   MediaRendererSceneOptions,
 } from "./media-renderer-scene";
 import { createPixiBoxLayer } from "./pixi-box-layer";
+import { createPixiInteractionLayer } from "./pixi-interaction-layer";
 import { createPixiLabelLayer } from "./pixi-label-layer";
 import { createPixiMaskLayer } from "./pixi-mask-layer";
 import { calculatePixiSceneFit } from "./pixi-scene-fit";
@@ -34,6 +35,7 @@ export async function createPixiMediaScene(
     ImageSource,
     Mesh,
     MeshGeometry,
+    Rectangle,
     Sprite,
     Shader,
     Text,
@@ -96,6 +98,17 @@ export async function createPixiMediaScene(
   let mediaScene: PixiContainer | undefined;
   let boxGraphics: PixiGraphics | undefined;
   let labelContainer: PixiContainer | undefined;
+  let interactionDisplay: PixiContainer | undefined;
+  const interactionLayer = options.interaction
+    ? createPixiInteractionLayer({
+        Container,
+        Graphics,
+        Rectangle,
+        canInteract: options.canInteract,
+        detectionTimeline: options.detectionTimeline,
+        interaction: options.interaction,
+      })
+    : undefined;
   let maskDisplay:
     | PixiContainer
     | InstanceType<typeof Sprite>
@@ -122,6 +135,10 @@ export async function createPixiMediaScene(
     }
 
     children.push(boxGraphics);
+
+    if (interactionDisplay) {
+      children.push(interactionDisplay);
+    }
 
     if (labelContainer) {
       children.push(labelContainer);
@@ -180,6 +197,10 @@ export async function createPixiMediaScene(
         width: mediaWidth,
       });
       labelContainer = labelLayer?.createContainer();
+      interactionDisplay = interactionLayer?.createDisplay({
+        height: mediaHeight,
+        width: mediaWidth,
+      }) as PixiContainer | undefined;
       const boxes: PixiGraphics = new Graphics();
 
       mediaSprite.width = mediaWidth;
@@ -209,6 +230,7 @@ export async function createPixiMediaScene(
         stagingTexture?.update();
         maskLayer?.drawFrame(sample.timestamp);
         const boxState = boxLayer.drawFrame(sample.timestamp);
+        interactionLayer?.drawFrame(sample.timestamp);
         labelLayer?.drawFrame(sample.timestamp);
         updateMediaSceneFit();
 
@@ -279,11 +301,13 @@ export async function createPixiMediaScene(
 
       maskLayer?.drawFrame(mediaTime);
       boxLayer.drawFrame(mediaTime);
+      interactionLayer?.drawFrame(mediaTime);
       labelLayer?.drawFrame(mediaTime);
     },
 
     destroy() {
       app.ticker.remove(updateMediaSceneFit);
+      interactionLayer?.destroy();
       maskLayer?.destroy();
       labelLayer?.destroy();
       app.destroy(

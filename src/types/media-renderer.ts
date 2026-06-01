@@ -5,6 +5,7 @@ import type {
   DetectionFrameSource,
 } from "#types/detection-timeline";
 import type { DetectionFrame } from "#types/detections";
+import type { MediaInteractionOptions } from "#types/interaction";
 import type { LabelStyle } from "#types/label-style";
 import type { MaskStyle } from "#types/mask-style";
 import type { DecodedMediaSource } from "#media/media-source";
@@ -93,6 +94,7 @@ export interface MediaRendererOptions {
   readonly boxStyle?: BoxStyle;
   readonly labelStyle?: LabelStyle;
   readonly maskStyle?: MaskStyle;
+  readonly interaction?: MediaInteractionOptions;
   readonly renderPreparation?: RenderPreparationOptions;
   readonly onFrame?: (diagnostics: MediaFrameDiagnostics) => void;
   readonly onSource?: (state: MediaSourceState) => void;

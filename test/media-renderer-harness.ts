@@ -46,8 +46,12 @@ const mockState = vi.hoisted(() => {
     containerAddChild: vi.fn(),
     containerInstances: [] as Array<{
       children: unknown[];
+      cursor?: string;
+      eventMode?: string;
+      hitArea?: unknown;
       position: { set: ReturnType<typeof vi.fn> };
       scale: { set: ReturnType<typeof vi.fn> };
+      on: ReturnType<typeof vi.fn>;
     }>,
     graphicsInstances: [] as Array<{
       clear: ReturnType<typeof vi.fn>;
@@ -196,6 +200,10 @@ vi.mock("pixi.js", () => {
 
   class Container {
     children: unknown[] = [];
+    cursor?: string;
+    eventMode?: string;
+    hitArea?: unknown;
+    on = vi.fn();
     position = { set: vi.fn() };
     scale = { set: vi.fn() };
 
@@ -242,6 +250,24 @@ vi.mock("pixi.js", () => {
 
     constructor() {
       pixiMock.graphicsInstances.push(this);
+    }
+  }
+
+  class Rectangle {
+    constructor(
+      public readonly x: number,
+      public readonly y: number,
+      public readonly width: number,
+      public readonly height: number,
+    ) {}
+
+    contains(x: number, y: number) {
+      return (
+        x >= this.x &&
+        x <= this.x + this.width &&
+        y >= this.y &&
+        y <= this.y + this.height
+      );
     }
   }
 
@@ -341,6 +367,7 @@ vi.mock("pixi.js", () => {
     ImageSource,
     Mesh,
     MeshGeometry,
+    Rectangle,
     Sprite,
     Shader,
     Text,

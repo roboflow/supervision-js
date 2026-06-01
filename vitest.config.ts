@@ -11,6 +11,7 @@ export default defineConfig({
     alias: {
       "#constants": sourceAlias("constants"),
       "#detections": sourceAlias("detections"),
+      "#interactions": sourceAlias("interactions"),
       "#media": sourceAlias("media"),
       "#playback": sourceAlias("playback"),
       "#render-preparation": sourceAlias("render-preparation"),

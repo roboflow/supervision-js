@@ -30,6 +30,10 @@
       "types": "./dist/detections/*.d.ts",
       "import": "./dist/detections/*.js"
     },
+    "#interactions/*": {
+      "types": "./dist/interactions/*.d.ts",
+      "import": "./dist/interactions/*.js"
+    },
     "#media/*": {
       "types": "./dist/media/*.d.ts",
       "import": "./dist/media/*.js"

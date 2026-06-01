@@ -3,6 +3,7 @@ import {
   DetectionFrameSelectionMode,
   MediaNormalizationContainer,
   MediaNormalizationVideoCodec,
+  MediaInteractionMode,
   MediaRendererFit,
   MediaSessionMode,
   MediaRendererPlaybackState,
@@ -136,6 +137,11 @@ export async function createUploadSession(
       renderer: {
         autoPlay: false,
         fit: MediaRendererFit.Contain,
+        interaction: {
+          mode: MediaInteractionMode.PausedOnly,
+          onHover: options.onDetectionHover,
+          onSelect: options.onDetectionSelect,
+        },
         loop: true,
         onFrame: options.onFrame,
         onState: options.onRendererState,

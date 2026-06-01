@@ -5,6 +5,7 @@ export { createChunkedDetectionFrameSource } from "#detections/chunked-detection
 export { createColdDetectionFrameSource } from "#detections/cold-detection-frame-source";
 export { createMemoryColdDetectionFrameStore } from "#detections/memory-cold-detection-frame-store";
 export { createWritableDetectionFrameSource } from "#detections/writable-detection-frame-source";
+export { pickDetectionAtPoint } from "#interactions/detection-picker";
 export {
   normalizeMedia,
   normalizeMediaProgressively,
@@ -74,6 +75,14 @@ export {
   type DetectionMask,
   type Rect,
 } from "#types/detections";
+export {
+  DetectionPickTarget,
+  MediaInteractionMode,
+  type DetectionPickOptions,
+  type DetectionPickPoint,
+  type DetectionPickResult,
+  type MediaInteractionOptions,
+} from "#types/interaction";
 export {
   MediaNormalizationAudioCodec,
   MediaNormalizationContainer,

@@ -88,10 +88,12 @@ export function App() {
           detectionSourceState={demo.detectionSourceState}
           errorMessage={demo.errorMessage}
           fixtureSummary={demo.fixtureSummary}
+          hoveredDetectionPick={demo.hoveredDetectionPick}
           mediaState={demo.mediaState}
           playbackState={demo.playbackState}
           renderPreparationDiagnostics={demo.renderPreparationDiagnostics}
           rendererState={demo.rendererState}
+          selectedDetectionPick={demo.selectedDetectionPick}
           sessionState={demo.sessionState}
           sourceState={demo.sourceState}
         />

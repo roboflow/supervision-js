@@ -8,6 +8,7 @@
     "paths": {
       "#constants/*": ["src/constants/*"],
       "#detections/*": ["src/detections/*"],
+      "#interactions/*": ["src/interactions/*"],
       "#media/*": ["src/media/*"],
       "#playback/*": ["src/playback/*"],
       "#render-preparation/*": ["src/render-preparation/*"],

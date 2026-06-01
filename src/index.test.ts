@@ -54,6 +54,8 @@ describe("package entrypoint", () => {
       "DetectionFrameRetentionMode",
       "DetectionFrameSelectionMode",
       "DetectionMaskEncoding",
+      "DetectionPickTarget",
+      "MediaInteractionMode",
       "MediaNormalizationAudioCodec",
       "MediaNormalizationContainer",
       "MediaNormalizationFit",
@@ -85,6 +87,7 @@ describe("package entrypoint", () => {
       "createWritableDetectionFrameSource",
       "normalizeMedia",
       "normalizeMediaProgressively",
+      "pickDetectionAtPoint",
       "prepareMedia",
       "probeMedia",
     ]);
@@ -111,6 +114,14 @@ describe("package entrypoint", () => {
     expect(entrypoint.MediaRendererFit).toEqual({
       Contain: "contain",
       Cover: "cover",
+    });
+    expect(entrypoint.DetectionPickTarget).toEqual({
+      Box: "box",
+    });
+    expect(entrypoint.MediaInteractionMode).toEqual({
+      Always: "always",
+      Disabled: "disabled",
+      PausedOnly: "pausedOnly",
     });
     expect(entrypoint.MediaRendererPlaybackState).toEqual({
       Buffering: "buffering",

@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import {
   MediaRendererPlaybackState,
   RenderPreparationArtifactKind,
+  type DetectionPickResult,
   type MediaRendererState,
   type MediaSessionState,
   type MediaSourceState,
@@ -35,20 +36,24 @@ export function StatusPanel({
   detectionSourceState,
   errorMessage,
   fixtureSummary,
+  hoveredDetectionPick,
   mediaState,
   playbackState,
   renderPreparationDiagnostics,
   rendererState,
+  selectedDetectionPick,
   sessionState,
   sourceState,
 }: {
   readonly detectionSourceState: StatusPanelDetectionSourceState;
   readonly errorMessage: string | null;
   readonly fixtureSummary: BasketballSampleSummary | null;
+  readonly hoveredDetectionPick: DetectionPickResult | null;
   readonly mediaState: StatusPanelMediaState;
   readonly playbackState: MediaRendererPlaybackState | null;
   readonly renderPreparationDiagnostics: RenderPreparationDiagnostics | null;
   readonly rendererState: MediaRendererState | null;
+  readonly selectedDetectionPick: DetectionPickResult | null;
   readonly sessionState: MediaSessionState | null;
   readonly sourceState: MediaSourceState | null;
 }) {
@@ -260,6 +265,11 @@ export function StatusPanel({
         ) : null}
       </StatusGroup>
 
+      <InteractionStatusGroup
+        hoveredDetectionPick={hoveredDetectionPick}
+        selectedDetectionPick={selectedDetectionPick}
+      />
+
       <StatusGroup title="Session">
         <Readout label="State" value={sessionState?.status ?? "-"} />
         <Readout
@@ -347,6 +357,79 @@ export function StatusPanel({
       ) : null}
     </section>
   );
+}
+
+function InteractionStatusGroup({
+  hoveredDetectionPick,
+  selectedDetectionPick,
+}: {
+  readonly hoveredDetectionPick: DetectionPickResult | null;
+  readonly selectedDetectionPick: DetectionPickResult | null;
+}) {
+  const activePick = selectedDetectionPick ?? hoveredDetectionPick;
+
+  return (
+    <StatusGroup title="Interaction">
+      <Readout label="Mode" value="paused-only" />
+      <Readout
+        label="Active"
+        value={
+          selectedDetectionPick
+            ? "selected"
+            : hoveredDetectionPick
+              ? "hover"
+              : "none"
+        }
+      />
+      <Readout label="Class" value={activePick?.detection.className ?? "-"} />
+      <Readout
+        label="Confidence"
+        value={
+          typeof activePick?.detection.confidence === "number"
+            ? `${Math.round(activePick.detection.confidence * 100)}%`
+            : "-"
+        }
+      />
+      <Readout label="Frame" value={formatPickFrame(activePick)} />
+      <Readout label="Point" value={formatPickPoint(activePick)} />
+      <Readout label="Rect" value={formatPickRect(activePick)} />
+      <Readout label="Target" value={activePick?.target ?? "-"} />
+    </StatusGroup>
+  );
+}
+
+function formatPickFrame(pick: DetectionPickResult | null) {
+  if (!pick) {
+    return "-";
+  }
+
+  return pick.frame.frameIndex === undefined
+    ? formatExactTime(pick.frame.mediaTime)
+    : `#${formatInteger(pick.frame.frameIndex)}`;
+}
+
+function formatPickPoint(pick: DetectionPickResult | null) {
+  if (!pick) {
+    return "-";
+  }
+
+  return `${formatCoordinate(pick.point.x)}, ${formatCoordinate(pick.point.y)}`;
+}
+
+function formatPickRect(pick: DetectionPickResult | null) {
+  if (!pick?.detection.rect) {
+    return "-";
+  }
+
+  const rect = pick.detection.rect;
+
+  return `${formatCoordinate(rect.x)}, ${formatCoordinate(
+    rect.y,
+  )}, ${formatCoordinate(rect.width)} x ${formatCoordinate(rect.height)}`;
+}
+
+function formatCoordinate(value: number) {
+  return value.toFixed(0);
 }
 
 function StatusGroup({

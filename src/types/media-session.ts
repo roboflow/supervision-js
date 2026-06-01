@@ -8,6 +8,7 @@ import type {
   WritableDetectionFrameSource,
 } from "#types/detection-timeline";
 import type { DetectionFrame } from "#types/detections";
+import type { MediaInteractionOptions } from "#types/interaction";
 import type {
   MediaNormalizationInputMetadata,
   MediaNormalizationProgress,
@@ -57,6 +58,7 @@ export interface MediaSessionRendererOptions {
   readonly loop?: boolean;
   readonly muted?: boolean;
   readonly fit?: MediaRendererFit;
+  readonly interaction?: MediaInteractionOptions;
   readonly renderPreparation?: MediaRendererOptions["renderPreparation"];
   readonly onFrame?: (diagnostics: MediaFrameDiagnostics) => void;
   readonly onSource?: (state: MediaSourceState) => void;

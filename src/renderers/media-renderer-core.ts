@@ -23,6 +23,7 @@ import {
   type MediaRenderer,
   type MediaRendererOptions,
 } from "#types/media-renderer";
+import { MediaInteractionMode } from "#types/interaction";
 import type { RenderPreparationPlaybackGateOptions } from "#types/render-preparation";
 import { createMediaRendererRuntimeState } from "./media-renderer-state";
 import type {
@@ -223,6 +224,8 @@ export async function createMediaRendererCore(
       container: options.container,
       detectionTimeline,
       fit,
+      canInteract: () => canInteract(options, runtimeState.isPlaybackActive()),
+      interaction: options.interaction,
       labelStyle: options.labelStyle,
       maskStyle: options.maskStyle,
       renderPreparation: options.renderPreparation,
@@ -361,6 +364,24 @@ async function openRendererMediaSource(
   }
 
   return providers.openMediaSource(options.src);
+}
+
+function canInteract(options: MediaRendererOptions, isPlaybackActive: boolean) {
+  if (!options.interaction) {
+    return false;
+  }
+
+  const mode = options.interaction.mode ?? MediaInteractionMode.PausedOnly;
+
+  if (mode === MediaInteractionMode.Disabled) {
+    return false;
+  }
+
+  if (mode === MediaInteractionMode.Always) {
+    return true;
+  }
+
+  return !isPlaybackActive;
 }
 
 function clampSeekTime(options: {
