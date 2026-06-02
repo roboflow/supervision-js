@@ -9,7 +9,17 @@ export enum DetectionBufferStatus {
 }
 
 export enum DetectionFrameSelectionMode {
+  /**
+   * Select the frame whose `[mediaTime, endTime)` interval contains the media
+   * time. This is the default for interval annotations and timestamped sources.
+   */
   Interval = "interval",
+
+  /**
+   * Select from a known inference frame grid using `frameIndex`, `frameRate`,
+   * and optional `frameIndexOriginTime`. This is useful when inference was run
+   * on normalized frames and playback should snap detections to that grid.
+   */
   NearestFrameIndex = "nearestFrameIndex",
 }
 
@@ -70,6 +80,13 @@ export interface DetectionBufferState {
 }
 
 export interface DetectionFrameSource {
+  /**
+   * Load semantic detection frames for the requested media-time range.
+   *
+   * Sources should return detection data, not renderer artifacts. Implementers
+   * should prefer sorted frames and avoid mutating returned frames after handing
+   * them to the renderer.
+   */
   loadFrames(
     startTime: number,
     endTime: number,

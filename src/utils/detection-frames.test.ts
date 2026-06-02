@@ -46,6 +46,79 @@ describe("detection frame utilities", () => {
     ).toBe(52);
   });
 
+  it("selects interval frames without mutating caller-owned frame data", () => {
+    const frames = deepFreezeDetectionFrames([
+      {
+        detections: [
+          {
+            className: "player",
+            metadata: { source: "fixture" },
+            rect: { height: 20, width: 10, x: 5, y: 6 },
+          },
+        ],
+        endTime: 1,
+        frameIndex: 0,
+        mediaTime: 0,
+      },
+      {
+        detections: [],
+        endTime: 2,
+        frameIndex: 1,
+        mediaTime: 1,
+      },
+    ]);
+
+    const selectedFrame = selectDetectionFrame(frames, 0.5);
+
+    expect(selectedFrame).toBe(frames[0]);
+    expect(frames).toEqual([
+      {
+        detections: [
+          {
+            className: "player",
+            metadata: { source: "fixture" },
+            rect: { height: 20, width: 10, x: 5, y: 6 },
+          },
+        ],
+        endTime: 1,
+        frameIndex: 0,
+        mediaTime: 0,
+      },
+      {
+        detections: [],
+        endTime: 2,
+        frameIndex: 1,
+        mediaTime: 1,
+      },
+    ]);
+  });
+
+  it("selects nearest frame-index detections without mutating caller-owned frame data", () => {
+    const frames = deepFreezeDetectionFrames([
+      {
+        detections: [{ className: "previous" }],
+        endTime: 149 / 30,
+        frameIndex: 148,
+        mediaTime: 148 / 30,
+      },
+      {
+        detections: [{ className: "nearest" }],
+        endTime: 151 / 30,
+        frameIndex: 150,
+        mediaTime: 150 / 30,
+      },
+    ]);
+
+    const selectedFrame = selectDetectionFrame(frames, 149 / 30, {
+      frameRate: 30,
+      selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
+    });
+
+    expect(selectedFrame).toBe(frames[1]);
+    expect(frames.map((frame) => frame.frameIndex)).toEqual([148, 150]);
+    expect(frames[1]?.detections[0]?.className).toBe("nearest");
+  });
+
   it("uses the nearest available frame index for a one-frame detection gap", () => {
     const frames: DetectionFrame[] = [
       {
@@ -205,4 +278,29 @@ function encodeCompressedRleCounts(counts: readonly number[]) {
       return encoded;
     })
     .join("");
+}
+
+function deepFreezeDetectionFrames(frames: readonly DetectionFrame[]) {
+  for (const frame of frames) {
+    for (const detection of frame.detections) {
+      if (detection.rect) {
+        Object.freeze(detection.rect);
+      }
+
+      if (detection.mask) {
+        Object.freeze(detection.mask);
+      }
+
+      if (detection.metadata) {
+        Object.freeze(detection.metadata);
+      }
+
+      Object.freeze(detection);
+    }
+
+    Object.freeze(frame.detections);
+    Object.freeze(frame);
+  }
+
+  return Object.freeze(frames);
 }
