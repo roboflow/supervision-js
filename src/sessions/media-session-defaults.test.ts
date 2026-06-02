@@ -118,6 +118,31 @@ describe("media session defaults", () => {
     });
   });
 
+  it("defaults appendable file sessions to persistent detection storage", () => {
+    const appendable = {
+      datasetId: "file",
+    };
+    const defaults = resolveMediaSessionDefaults({
+      detections: {
+        appendable,
+      },
+      mode: MediaSessionMode.File,
+      renderer: {},
+    });
+    const retention = resolveMediaSessionAppendableRetention({
+      appendable,
+      mode: MediaSessionMode.File,
+    });
+
+    expect(defaults.detectionBuffer.playbackGate).toEqual({
+      enabled: true,
+      requiredAheadSeconds: 2,
+    });
+    expect(retention).toEqual({
+      mode: DetectionFrameRetentionMode.PersistAll,
+    });
+  });
+
   it("preserves explicit tuning overrides", () => {
     const appendable = {
       datasetId: "upload",

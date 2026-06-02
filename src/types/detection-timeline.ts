@@ -52,13 +52,30 @@ export interface DetectionPlaybackGateOptions {
 }
 
 export enum DetectionFrameRetentionMode {
+  /**
+   * Keep writable detections only in an in-memory store. Useful for ephemeral
+   * live streams where old predictions should disappear when evicted.
+   */
   MemoryOnly = "memoryOnly",
+
+  /**
+   * Persist every written detection frame. Useful for finite media where seek
+   * and replay should not require recomputing detections.
+   */
   PersistAll = "persistAll",
+
+  /**
+   * Persist only the most recent retention window. Useful for long-running
+   * streams where replay is bounded to a recent time horizon.
+   */
   PersistWindow = "persistWindow",
 }
 
 export interface DetectionFrameRetentionOptions {
   readonly mode?: DetectionFrameRetentionMode;
+  /**
+   * Retention horizon in seconds for `MemoryOnly` and `PersistWindow`.
+   */
   readonly windowSeconds?: number;
 }
 

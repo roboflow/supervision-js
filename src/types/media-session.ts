@@ -39,6 +39,10 @@ export interface MediaSessionNormalizationOptions extends MediaNormalizationOpti
 }
 
 export interface MediaSessionAppendableDetectionOptions {
+  /**
+   * Optional cold store. If omitted, the session creates an in-memory store.
+   * `MemoryOnly` retention always uses an in-memory store.
+   */
   readonly store?: ColdDetectionFrameStore;
   readonly datasetId: string;
   readonly chunkDurationSeconds?: number;
@@ -52,12 +56,41 @@ export type MediaSessionWritableDetectionOptions =
 export type MediaSessionDetectionSyncOptions = DetectionFrameSelectionOptions;
 
 export interface MediaSessionDetectionOptions {
+  /**
+   * Static detection frames known at session creation time.
+   */
   readonly frames?: readonly DetectionFrame[];
+
+  /**
+   * Caller-owned source for loading detection frames by media-time range.
+   */
   readonly source?: DetectionFrameSource;
+
+  /**
+   * Session-owned writable source for streaming detections into cold storage.
+   * Prefer this name for new code.
+   */
   readonly appendable?: MediaSessionAppendableDetectionOptions;
+
+  /**
+   * Backward-compatible alias for `appendable`.
+   */
   readonly writable?: MediaSessionWritableDetectionOptions;
+
+  /**
+   * Detection-frame selection options shared by the hot buffer and renderer.
+   */
   readonly sync?: MediaSessionDetectionSyncOptions;
+
+  /**
+   * Hot detection-window loading options.
+   */
   readonly buffer?: DetectionBufferOptions;
+
+  /**
+   * Optional playback gate that treats detection coverage as part of media
+   * readiness.
+   */
   readonly playbackGate?: DetectionPlaybackGateOptions;
 }
 

@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createArrayDetectionFrameSource } from "#detections/array-detection-frame-source";
 import { createBufferedDetectionTimeline } from "#detections/buffered-detection-timeline";
+import { createMemoryColdDetectionFrameStore } from "#detections/memory-cold-detection-frame-store";
+import { createWritableDetectionFrameSource } from "#detections/writable-detection-frame-source";
 import {
   DetectionBufferStatus,
   DetectionFrameSelectionMode,
@@ -372,6 +374,56 @@ describe("buffered detection timeline", () => {
 
     expect(source.loadFrames).toHaveBeenCalledOnce();
     expect(timeline.selectFrame(0.5)?.mediaTime).toBe(0);
+  });
+
+  it("keeps the current hot buffer when appended detections are outside the buffered range", async () => {
+    const source = createWritableDetectionFrameSource({
+      datasetId: "stream",
+      store: createMemoryColdDetectionFrameStore(),
+    });
+    const loadFrames = vi.spyOn(source, "loadFrames");
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 2,
+      bufferBehindSeconds: 0,
+      source,
+    });
+
+    await source.appendFrames([
+      { detections: [{ id: "current" }], endTime: 1, mediaTime: 0 },
+    ]);
+    await timeline.prepare(0);
+    await source.appendFrames([
+      { detections: [{ id: "future" }], endTime: 11, mediaTime: 10 },
+    ]);
+    await timeline.prepare(0.5);
+
+    expect(loadFrames).toHaveBeenCalledOnce();
+    expect(timeline.selectFrame(0.5)?.detections[0]?.id).toBe("current");
+  });
+
+  it("reloads the current hot buffer when appended detections overlap the buffered range", async () => {
+    const source = createWritableDetectionFrameSource({
+      datasetId: "stream",
+      store: createMemoryColdDetectionFrameStore(),
+    });
+    const loadFrames = vi.spyOn(source, "loadFrames");
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 2,
+      bufferBehindSeconds: 0,
+      source,
+    });
+
+    await source.appendFrames([
+      { detections: [{ id: "initial" }], endTime: 1, mediaTime: 0 },
+    ]);
+    await timeline.prepare(0);
+    await source.appendFrames([
+      { detections: [{ id: "replacement" }], endTime: 1, mediaTime: 0 },
+    ]);
+    await timeline.prepare(0.5);
+
+    expect(loadFrames).toHaveBeenCalledTimes(2);
+    expect(timeline.selectFrame(0.5)?.detections[0]?.id).toBe("replacement");
   });
 });
 
