@@ -58,7 +58,9 @@ try {
       const batch = await evaluateFixtureBatch(client, {
         count,
         frameIndex,
+        processedFrameCount: frameIndex - options.startFrame,
         quality: options.quality,
+        totalFrameCount: frameCount,
       });
 
       output.write(`${JSON.stringify(batch)}\n`);
@@ -97,8 +99,10 @@ async function evaluateFixtureBatch(client, options) {
     awaitPromise: true,
     expression: `window.getSam3FrameBatch(${JSON.stringify({
       count: options.count,
+      processedFrameCount: options.processedFrameCount,
       quality: options.quality,
       startFrameIndex: options.frameIndex,
+      totalFrameCount: options.totalFrameCount,
     })})`,
     returnByValue: true,
   });

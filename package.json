@@ -100,7 +100,7 @@
     "fixture:sam3:extract": "node tools/sam3-fixture/extract-frames.mjs",
     "fixture:sam3:run": "node tools/sam3-fixture/run-sam3.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
-    "test": "vitest run",
+    "test": "vitest run && node --test tools/sam3-fixture/*.test.mjs",
     "test:watch": "vitest",
     "lint": "eslint .",
     "format": "prettier --write .",

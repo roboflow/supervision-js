@@ -33,11 +33,7 @@ export interface BasketballPresentationSettings {
   readonly confidenceThreshold: number;
 }
 
-export const defaultBasketballClassNames = [
-  "basketball",
-  "white team player",
-  "yellow team player",
-];
+export const defaultBasketballClassNames = ["person", "horse", "cow"];
 
 const defaultBasketballClassStyles: Record<string, BasketballClassStyle> = {
   basketball: {
@@ -57,6 +53,24 @@ const defaultBasketballClassStyles: Record<string, BasketballClassStyle> = {
     labelBackground: 0x713f12,
     labelText: 0xfffbeb,
     stroke: 0xfde047,
+  },
+  cow: {
+    fill: 0xa78bfa,
+    labelBackground: 0x4c1d95,
+    labelText: 0xf5f3ff,
+    stroke: 0xc4b5fd,
+  },
+  horse: {
+    fill: 0x38bdf8,
+    labelBackground: 0x164e63,
+    labelText: 0xecfeff,
+    stroke: 0x7dd3fc,
+  },
+  person: {
+    fill: 0x22c55e,
+    labelBackground: 0x14532d,
+    labelText: 0xf0fdf4,
+    stroke: 0x86efac,
   },
 };
 
@@ -78,9 +92,9 @@ export const defaultBasketballPresentationSettings: BasketballPresentationSettin
     labelBackgroundAlpha: 0.78,
     labelFontSize: 14,
     labelsEnabled: true,
-    maskAlpha: 0.3,
+    maskAlpha: 0.7,
     maskStrokeAlpha: 1,
-    maskStrokeWidth: 1,
+    maskStrokeWidth: 5,
     masksEnabled: true,
   };
 

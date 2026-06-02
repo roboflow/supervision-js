@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import { createWriteStream } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { URL } from "node:url";
 import prettier from "prettier";
+import { readJsonlArray, readJsonlRecords } from "./jsonl.mjs";
 
 const ENDPOINT = "https://serverless.roboflow.com/sam3/concept_segment";
 const FRAME_RATE = 30;
@@ -41,15 +42,8 @@ if (!apiKey) {
 await main(options, apiKey);
 
 async function main(runOptions, apiKeyValue) {
-  const frames = selectFrames(await readExtractedFrames(runOptions.input), {
-    limit: runOptions.limit,
-    startFrame: runOptions.startFrame,
-  });
   const completedFrameIndexes = await readCompletedFrameIndexes(
     runOptions.rawOutput,
-  );
-  const pendingFrames = frames.filter(
-    (frame) => !completedFrameIndexes.has(frame.frameIndex),
   );
 
   await mkdir(path.dirname(runOptions.rawOutput), { recursive: true });
@@ -58,7 +52,11 @@ async function main(runOptions, apiKeyValue) {
 
   try {
     await runWithConcurrency(
-      pendingFrames,
+      iteratePendingExtractedFrames(runOptions.input, {
+        completedFrameIndexes,
+        limit: runOptions.limit,
+        startFrame: runOptions.startFrame,
+      }),
       Math.max(1, runOptions.concurrency),
       async (frame) => {
         const rawRecord = await callSam3(frame, runOptions, apiKeyValue);
@@ -274,19 +272,6 @@ Options:
   --source-file <filename>`);
 }
 
-async function readExtractedFrames(inputPath) {
-  const lines = await readJsonl(inputPath);
-  const frames = [];
-
-  for (const value of lines) {
-    frames.push(...extractFrames(value));
-  }
-
-  return frames
-    .map(normalizeExtractedFrame)
-    .sort((left, right) => left.frameIndex - right.frameIndex);
-}
-
 function extractFrames(value) {
   if (Array.isArray(value)) {
     return value;
@@ -342,27 +327,50 @@ function normalizeExtractedFrame(value) {
   };
 }
 
-function selectFrames(frames, selection) {
-  const filtered = frames.filter(
-    (frame) => frame.frameIndex >= selection.startFrame,
-  );
+async function* iteratePendingExtractedFrames(inputPath, selection) {
+  let selectedCount = 0;
 
-  return selection.limit === undefined
-    ? filtered
-    : filtered.slice(0, selection.limit);
+  for await (const value of readJsonlRecords(inputPath)) {
+    for (const extractedFrame of extractFrames(value)) {
+      const frame = normalizeExtractedFrame(extractedFrame);
+
+      if (frame.frameIndex < selection.startFrame) {
+        continue;
+      }
+
+      if (selection.completedFrameIndexes.has(frame.frameIndex)) {
+        continue;
+      }
+
+      if (selection.limit !== undefined && selectedCount >= selection.limit) {
+        return;
+      }
+
+      selectedCount += 1;
+      yield frame;
+    }
+  }
 }
 
 async function readCompletedFrameIndexes(rawOutputPath) {
   const indexes = new Set();
 
-  for (const record of await readRawRecords(rawOutputPath)) {
-    if (
-      isRecord(record) &&
-      Number.isInteger(record.frameIndex) &&
-      isRecord(record.response)
-    ) {
-      indexes.add(record.frameIndex);
+  try {
+    for await (const record of readJsonlRecords(rawOutputPath)) {
+      if (
+        isRecord(record) &&
+        Number.isInteger(record.frameIndex) &&
+        isRecord(record.response)
+      ) {
+        indexes.add(record.frameIndex);
+      }
     }
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      return indexes;
+    }
+
+    throw error;
   }
 
   return indexes;
@@ -370,7 +378,7 @@ async function readCompletedFrameIndexes(rawOutputPath) {
 
 async function readRawRecords(rawOutputPath) {
   try {
-    return await readJsonl(rawOutputPath);
+    return await readJsonlArray(rawOutputPath);
   } catch (error) {
     if (isNodeError(error) && error.code === "ENOENT") {
       return [];
@@ -380,29 +388,31 @@ async function readRawRecords(rawOutputPath) {
   }
 }
 
-async function readJsonl(inputPath) {
-  const content = await readFile(inputPath, "utf8");
+async function runWithConcurrency(items, concurrency, runItem) {
+  const active = new Set();
 
-  return content
-    .split(/\r?\n/)
-    .filter((line) => line.trim().length > 0)
-    .map((line) => JSON.parse(line));
+  for await (const item of items) {
+    const promise = Promise.resolve()
+      .then(() => runItem(item))
+      .finally(() => active.delete(promise));
+
+    active.add(promise);
+
+    if (active.size >= concurrency) {
+      await waitForRunningItem(active);
+    }
+  }
+
+  await Promise.all(active);
 }
 
-async function runWithConcurrency(items, concurrency, runItem) {
-  let nextIndex = 0;
-  const workers = Array.from(
-    { length: Math.min(concurrency, items.length) },
-    async () => {
-      while (nextIndex < items.length) {
-        const item = items[nextIndex];
-        nextIndex += 1;
-        await runItem(item);
-      }
-    },
-  );
-
-  await Promise.all(workers);
+async function waitForRunningItem(active) {
+  try {
+    await Promise.race(active);
+  } catch (error) {
+    await Promise.allSettled(active);
+    throw error;
+  }
 }
 
 async function callSam3(frame, runOptions, apiKeyValue) {

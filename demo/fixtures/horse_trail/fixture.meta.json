@@ -1,0 +1,14 @@
+{
+  "datasetId": "horse_trail_v1",
+  "displayName": "70s horse trail",
+  "inferenceLabel": "SAM3",
+  "media": {
+    "file": "1min-horse-video.mov",
+    "loadingStatusLabel": "stream-normalizing 70s horse trail",
+    "normalizeInBrowser": true,
+    "readyStatusLabel": "70s horse trail source media | browser-normalized WebM 30fps"
+  },
+  "sampleName": "horse_trail",
+  "schema": "supervision-js.demo.sam3-fixture-meta",
+  "version": 1
+}

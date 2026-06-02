@@ -61,7 +61,9 @@ interface Sam3FixtureManifest {
 interface Sam3FrameBatchOptions {
   readonly startFrameIndex: number;
   readonly count: number;
+  readonly processedFrameCount?: number;
   readonly quality?: number;
+  readonly totalFrameCount?: number;
 }
 
 interface Sam3ExtractedFrame {
@@ -140,6 +142,16 @@ function setStatus(message: string) {
   }
 }
 
+function setProgressStatus(label: string, progress: number) {
+  setStatus(`${label} ${formatProgressPercent(progress)}`);
+}
+
+function formatProgressPercent(progress: number) {
+  const clampedProgress = Math.min(1, Math.max(0, progress));
+
+  return `${Math.round(clampedProgress * 100)}%`;
+}
+
 function setOutput(value: unknown) {
   if (outputElement) {
     outputElement.textContent = JSON.stringify(value, null, 2);
@@ -166,7 +178,7 @@ async function prepareSam3Fixture(
 async function prepareFixture(
   config: Sam3FixtureConfig,
 ): Promise<Sam3FixtureManifest> {
-  setStatus(`Fetching ${config.sourceFile}...`);
+  setProgressStatus("Loading source media", 0);
 
   const sourceResponse = await fetch(config.sourceUrl);
 
@@ -177,18 +189,14 @@ async function prepareFixture(
   }
 
   const sourceBlob = await sourceResponse.blob();
-  setStatus("Normalizing to WebM VP9 at 30fps...");
+  setProgressStatus("Normalizing media", 0);
 
   const normalized = await normalizeSource(sourceBlob, (progress) => {
-    setStatus(
-      `Normalizing to WebM VP9 at 30fps... ${Math.round(
-        progress.progress * 100,
-      )}%`,
-    );
+    setProgressStatus("Normalizing media", progress.progress);
   });
   normalizedBlob = normalized.blob;
 
-  setStatus("Opening normalized WebM...");
+  setProgressStatus("Preparing normalized media", 1);
   normalizedInput = new Input({
     formats: [WEBM],
     source: new BlobSource(normalizedBlob),
@@ -242,7 +250,7 @@ async function prepareFixture(
     },
   };
 
-  setStatus("Ready");
+  setProgressStatus("Ready", 1);
   setOutput(manifest);
 
   return manifest;
@@ -269,9 +277,7 @@ async function getSam3NormalizedMedia(
     version: 1,
   } satisfies Sam3NormalizedMedia;
 
-  setStatus(
-    `Ready: normalized ${normalizedMedia.extension.toUpperCase()} media (${normalizedMedia.size} bytes).`,
-  );
+  setProgressStatus("Ready", 1);
   setOutput({
     ...normalizedMedia,
     base64: `${normalizedMedia.base64.slice(0, 48)}...`,
@@ -300,7 +306,7 @@ async function normalizeSource(
 async function getSam3FrameBatch(
   options: Sam3FrameBatchOptions,
 ): Promise<Sam3FrameBatch> {
-  const preparedManifest = manifest ?? (await prepareSam3Fixture());
+  manifest ??= await prepareSam3Fixture();
   const activeSink = canvasSink;
 
   if (!activeSink) {
@@ -318,10 +324,14 @@ async function getSam3FrameBatch(
     (frameIndex) => (frameIndex + 0.5) / TARGET_FRAME_RATE,
   );
   const frames: Sam3ExtractedFrame[] = [];
+  const setExtractionProgress = (extractedFrameCount: number) => {
+    setProgressStatus(
+      "Extracting frames",
+      calculateExtractionProgress(extractedFrameCount, count, options),
+    );
+  };
 
-  setStatus(
-    `Extracting ${count} frame${count === 1 ? "" : "s"} from index ${startFrameIndex}...`,
-  );
+  setExtractionProgress(0);
 
   let frameOffset = 0;
 
@@ -375,6 +385,7 @@ async function getSam3FrameBatch(
       version: 1,
       width: wrappedCanvas.canvas.width,
     });
+    setExtractionProgress(frames.length);
 
     if (frames.length >= count) {
       break;
@@ -396,9 +407,6 @@ async function getSam3FrameBatch(
     version: 1,
   } satisfies Sam3FrameBatch;
 
-  setStatus(
-    `Ready: extracted ${frames.length} frame${frames.length === 1 ? "" : "s"} from ${preparedManifest.video.width}x${preparedManifest.video.height} normalized media.`,
-  );
   setOutput({
     ...batch,
     frames: batch.frames.map((frame) => ({
@@ -409,6 +417,25 @@ async function getSam3FrameBatch(
   });
 
   return batch;
+}
+
+function calculateExtractionProgress(
+  extractedFrameCount: number,
+  batchFrameCount: number,
+  options: Sam3FrameBatchOptions,
+) {
+  if (
+    options.totalFrameCount !== undefined &&
+    options.totalFrameCount > 0 &&
+    options.processedFrameCount !== undefined
+  ) {
+    return (
+      (options.processedFrameCount + extractedFrameCount) /
+      options.totalFrameCount
+    );
+  }
+
+  return extractedFrameCount / batchFrameCount;
 }
 
 function getSam3FixtureManifest() {

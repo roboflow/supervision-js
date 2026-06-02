@@ -1,0 +1,10 @@
+demo/fixtures/**/*.mp4 filter=lfs diff=lfs merge=lfs -text
+demo/fixtures/**/*.MP4 filter=lfs diff=lfs merge=lfs -text
+demo/fixtures/**/*.mov filter=lfs diff=lfs merge=lfs -text
+demo/fixtures/**/*.MOV filter=lfs diff=lfs merge=lfs -text
+demo/fixtures/**/*.m4v filter=lfs diff=lfs merge=lfs -text
+demo/fixtures/**/*.M4V filter=lfs diff=lfs merge=lfs -text
+demo/fixtures/**/*.webm filter=lfs diff=lfs merge=lfs -text
+demo/fixtures/**/*.WEBM filter=lfs diff=lfs merge=lfs -text
+demo/fixtures/**/detections.json filter=lfs diff=lfs merge=lfs -text
+demo/fixtures/**/raw-sam3.jsonl filter=lfs diff=lfs merge=lfs -text

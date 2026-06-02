@@ -1,0 +1,532 @@
+{
+  "chunkDurationSeconds": 1,
+  "chunks": [
+    {
+      "chunkIndex": 0,
+      "endTime": 1,
+      "frameCount": 30,
+      "src": "detections/000000.json",
+      "startTime": 0
+    },
+    {
+      "chunkIndex": 1,
+      "endTime": 2,
+      "frameCount": 30,
+      "src": "detections/000001.json",
+      "startTime": 1
+    },
+    {
+      "chunkIndex": 2,
+      "endTime": 3,
+      "frameCount": 30,
+      "src": "detections/000002.json",
+      "startTime": 2
+    },
+    {
+      "chunkIndex": 3,
+      "endTime": 4,
+      "frameCount": 30,
+      "src": "detections/000003.json",
+      "startTime": 3
+    },
+    {
+      "chunkIndex": 4,
+      "endTime": 5,
+      "frameCount": 30,
+      "src": "detections/000004.json",
+      "startTime": 4
+    },
+    {
+      "chunkIndex": 5,
+      "endTime": 6,
+      "frameCount": 30,
+      "src": "detections/000005.json",
+      "startTime": 5
+    },
+    {
+      "chunkIndex": 6,
+      "endTime": 7,
+      "frameCount": 30,
+      "src": "detections/000006.json",
+      "startTime": 6
+    },
+    {
+      "chunkIndex": 7,
+      "endTime": 8,
+      "frameCount": 30,
+      "src": "detections/000007.json",
+      "startTime": 7
+    },
+    {
+      "chunkIndex": 8,
+      "endTime": 9,
+      "frameCount": 30,
+      "src": "detections/000008.json",
+      "startTime": 8
+    },
+    {
+      "chunkIndex": 9,
+      "endTime": 10,
+      "frameCount": 30,
+      "src": "detections/000009.json",
+      "startTime": 9
+    },
+    {
+      "chunkIndex": 10,
+      "endTime": 11,
+      "frameCount": 30,
+      "src": "detections/000010.json",
+      "startTime": 10
+    },
+    {
+      "chunkIndex": 11,
+      "endTime": 12,
+      "frameCount": 30,
+      "src": "detections/000011.json",
+      "startTime": 11
+    },
+    {
+      "chunkIndex": 12,
+      "endTime": 13,
+      "frameCount": 30,
+      "src": "detections/000012.json",
+      "startTime": 12
+    },
+    {
+      "chunkIndex": 13,
+      "endTime": 14,
+      "frameCount": 30,
+      "src": "detections/000013.json",
+      "startTime": 13
+    },
+    {
+      "chunkIndex": 14,
+      "endTime": 15,
+      "frameCount": 30,
+      "src": "detections/000014.json",
+      "startTime": 14
+    },
+    {
+      "chunkIndex": 15,
+      "endTime": 16,
+      "frameCount": 30,
+      "src": "detections/000015.json",
+      "startTime": 15
+    },
+    {
+      "chunkIndex": 16,
+      "endTime": 17,
+      "frameCount": 30,
+      "src": "detections/000016.json",
+      "startTime": 16
+    },
+    {
+      "chunkIndex": 17,
+      "endTime": 18,
+      "frameCount": 30,
+      "src": "detections/000017.json",
+      "startTime": 17
+    },
+    {
+      "chunkIndex": 18,
+      "endTime": 19,
+      "frameCount": 30,
+      "src": "detections/000018.json",
+      "startTime": 18
+    },
+    {
+      "chunkIndex": 19,
+      "endTime": 20,
+      "frameCount": 30,
+      "src": "detections/000019.json",
+      "startTime": 19
+    },
+    {
+      "chunkIndex": 20,
+      "endTime": 21,
+      "frameCount": 30,
+      "src": "detections/000020.json",
+      "startTime": 20
+    },
+    {
+      "chunkIndex": 21,
+      "endTime": 22,
+      "frameCount": 30,
+      "src": "detections/000021.json",
+      "startTime": 21
+    },
+    {
+      "chunkIndex": 22,
+      "endTime": 23,
+      "frameCount": 30,
+      "src": "detections/000022.json",
+      "startTime": 22
+    },
+    {
+      "chunkIndex": 23,
+      "endTime": 24,
+      "frameCount": 30,
+      "src": "detections/000023.json",
+      "startTime": 23
+    },
+    {
+      "chunkIndex": 24,
+      "endTime": 25,
+      "frameCount": 30,
+      "src": "detections/000024.json",
+      "startTime": 24
+    },
+    {
+      "chunkIndex": 25,
+      "endTime": 26,
+      "frameCount": 30,
+      "src": "detections/000025.json",
+      "startTime": 25
+    },
+    {
+      "chunkIndex": 26,
+      "endTime": 27,
+      "frameCount": 30,
+      "src": "detections/000026.json",
+      "startTime": 26
+    },
+    {
+      "chunkIndex": 27,
+      "endTime": 28,
+      "frameCount": 30,
+      "src": "detections/000027.json",
+      "startTime": 27
+    },
+    {
+      "chunkIndex": 28,
+      "endTime": 29,
+      "frameCount": 30,
+      "src": "detections/000028.json",
+      "startTime": 28
+    },
+    {
+      "chunkIndex": 29,
+      "endTime": 30,
+      "frameCount": 30,
+      "src": "detections/000029.json",
+      "startTime": 29
+    },
+    {
+      "chunkIndex": 30,
+      "endTime": 31,
+      "frameCount": 30,
+      "src": "detections/000030.json",
+      "startTime": 30
+    },
+    {
+      "chunkIndex": 31,
+      "endTime": 32,
+      "frameCount": 30,
+      "src": "detections/000031.json",
+      "startTime": 31
+    },
+    {
+      "chunkIndex": 32,
+      "endTime": 33,
+      "frameCount": 30,
+      "src": "detections/000032.json",
+      "startTime": 32
+    },
+    {
+      "chunkIndex": 33,
+      "endTime": 34,
+      "frameCount": 30,
+      "src": "detections/000033.json",
+      "startTime": 33
+    },
+    {
+      "chunkIndex": 34,
+      "endTime": 35,
+      "frameCount": 30,
+      "src": "detections/000034.json",
+      "startTime": 34
+    },
+    {
+      "chunkIndex": 35,
+      "endTime": 36,
+      "frameCount": 30,
+      "src": "detections/000035.json",
+      "startTime": 35
+    },
+    {
+      "chunkIndex": 36,
+      "endTime": 37,
+      "frameCount": 30,
+      "src": "detections/000036.json",
+      "startTime": 36
+    },
+    {
+      "chunkIndex": 37,
+      "endTime": 38,
+      "frameCount": 30,
+      "src": "detections/000037.json",
+      "startTime": 37
+    },
+    {
+      "chunkIndex": 38,
+      "endTime": 39,
+      "frameCount": 30,
+      "src": "detections/000038.json",
+      "startTime": 38
+    },
+    {
+      "chunkIndex": 39,
+      "endTime": 40,
+      "frameCount": 30,
+      "src": "detections/000039.json",
+      "startTime": 39
+    },
+    {
+      "chunkIndex": 40,
+      "endTime": 41,
+      "frameCount": 30,
+      "src": "detections/000040.json",
+      "startTime": 40
+    },
+    {
+      "chunkIndex": 41,
+      "endTime": 42,
+      "frameCount": 30,
+      "src": "detections/000041.json",
+      "startTime": 41
+    },
+    {
+      "chunkIndex": 42,
+      "endTime": 43,
+      "frameCount": 30,
+      "src": "detections/000042.json",
+      "startTime": 42
+    },
+    {
+      "chunkIndex": 43,
+      "endTime": 44,
+      "frameCount": 30,
+      "src": "detections/000043.json",
+      "startTime": 43
+    },
+    {
+      "chunkIndex": 44,
+      "endTime": 45,
+      "frameCount": 30,
+      "src": "detections/000044.json",
+      "startTime": 44
+    },
+    {
+      "chunkIndex": 45,
+      "endTime": 46,
+      "frameCount": 30,
+      "src": "detections/000045.json",
+      "startTime": 45
+    },
+    {
+      "chunkIndex": 46,
+      "endTime": 47,
+      "frameCount": 30,
+      "src": "detections/000046.json",
+      "startTime": 46
+    },
+    {
+      "chunkIndex": 47,
+      "endTime": 48,
+      "frameCount": 30,
+      "src": "detections/000047.json",
+      "startTime": 47
+    },
+    {
+      "chunkIndex": 48,
+      "endTime": 49,
+      "frameCount": 30,
+      "src": "detections/000048.json",
+      "startTime": 48
+    },
+    {
+      "chunkIndex": 49,
+      "endTime": 50,
+      "frameCount": 30,
+      "src": "detections/000049.json",
+      "startTime": 49
+    },
+    {
+      "chunkIndex": 50,
+      "endTime": 51,
+      "frameCount": 30,
+      "src": "detections/000050.json",
+      "startTime": 50
+    },
+    {
+      "chunkIndex": 51,
+      "endTime": 52,
+      "frameCount": 30,
+      "src": "detections/000051.json",
+      "startTime": 51
+    },
+    {
+      "chunkIndex": 52,
+      "endTime": 53,
+      "frameCount": 30,
+      "src": "detections/000052.json",
+      "startTime": 52
+    },
+    {
+      "chunkIndex": 53,
+      "endTime": 54,
+      "frameCount": 30,
+      "src": "detections/000053.json",
+      "startTime": 53
+    },
+    {
+      "chunkIndex": 54,
+      "endTime": 55,
+      "frameCount": 30,
+      "src": "detections/000054.json",
+      "startTime": 54
+    },
+    {
+      "chunkIndex": 55,
+      "endTime": 56,
+      "frameCount": 30,
+      "src": "detections/000055.json",
+      "startTime": 55
+    },
+    {
+      "chunkIndex": 56,
+      "endTime": 57,
+      "frameCount": 30,
+      "src": "detections/000056.json",
+      "startTime": 56
+    },
+    {
+      "chunkIndex": 57,
+      "endTime": 58,
+      "frameCount": 30,
+      "src": "detections/000057.json",
+      "startTime": 57
+    },
+    {
+      "chunkIndex": 58,
+      "endTime": 59,
+      "frameCount": 30,
+      "src": "detections/000058.json",
+      "startTime": 58
+    },
+    {
+      "chunkIndex": 59,
+      "endTime": 60,
+      "frameCount": 30,
+      "src": "detections/000059.json",
+      "startTime": 59
+    },
+    {
+      "chunkIndex": 60,
+      "endTime": 61,
+      "frameCount": 30,
+      "src": "detections/000060.json",
+      "startTime": 60
+    },
+    {
+      "chunkIndex": 61,
+      "endTime": 62,
+      "frameCount": 30,
+      "src": "detections/000061.json",
+      "startTime": 61
+    },
+    {
+      "chunkIndex": 62,
+      "endTime": 63,
+      "frameCount": 30,
+      "src": "detections/000062.json",
+      "startTime": 62
+    },
+    {
+      "chunkIndex": 63,
+      "endTime": 64,
+      "frameCount": 30,
+      "src": "detections/000063.json",
+      "startTime": 63
+    },
+    {
+      "chunkIndex": 64,
+      "endTime": 65,
+      "frameCount": 30,
+      "src": "detections/000064.json",
+      "startTime": 64
+    },
+    {
+      "chunkIndex": 65,
+      "endTime": 66,
+      "frameCount": 30,
+      "src": "detections/000065.json",
+      "startTime": 65
+    },
+    {
+      "chunkIndex": 66,
+      "endTime": 67,
+      "frameCount": 30,
+      "src": "detections/000066.json",
+      "startTime": 66
+    },
+    {
+      "chunkIndex": 67,
+      "endTime": 68,
+      "frameCount": 30,
+      "src": "detections/000067.json",
+      "startTime": 67
+    },
+    {
+      "chunkIndex": 68,
+      "endTime": 69,
+      "frameCount": 30,
+      "src": "detections/000068.json",
+      "startTime": 68
+    },
+    {
+      "chunkIndex": 69,
+      "endTime": 70,
+      "frameCount": 30,
+      "src": "detections/000069.json",
+      "startTime": 69
+    },
+    {
+      "chunkIndex": 70,
+      "endTime": 70.4,
+      "frameCount": 12,
+      "src": "detections/000070.json",
+      "startTime": 70
+    }
+  ],
+  "datasetId": "horse_trail_v1",
+  "detectionCount": 100501,
+  "duration": 70.4,
+  "frameCount": 2112,
+  "frameRate": 30,
+  "inference": {
+    "frameRate": 30,
+    "mask": {
+      "height": 2016,
+      "width": 1504
+    },
+    "missingFrameIndexes": [],
+    "modelId": "sam3/sam3_final",
+    "prompts": ["person", "horse", "cow"],
+    "sourceFile": "raw-sam3.jsonl"
+  },
+  "schema": "supervision-js.detection-frame-chunk-manifest",
+  "source": {
+    "file": "1min-horse-video.mov",
+    "sampleName": "horse_trail"
+  },
+  "sourceFile": "detections.json",
+  "version": 1,
+  "video": {
+    "duration": 70.4,
+    "file": "1min-horse-video.mov",
+    "frameRate": 30,
+    "height": 2016,
+    "width": 1504
+  }
+}

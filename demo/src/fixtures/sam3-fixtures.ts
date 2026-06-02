@@ -43,6 +43,8 @@ const sampleDetectionChunkUrls = import.meta.glob(
   },
 ) as Record<string, string>;
 
+const DEFAULT_SAM3_FIXTURE_SAMPLE_NAME = "horse_trail";
+
 interface Sam3FixtureMeta {
   readonly schema: "supervision-js.demo.sam3-fixture-meta";
   readonly version: 1;
@@ -73,12 +75,11 @@ export interface Sam3FixtureDefinition {
 
 export const sam3Fixtures = createSam3Fixtures();
 
-export const basketballSam3Fixture = requireSam3Fixture(
-  sam3Fixtures.find((fixture) => fixture.sampleName === "basketball_sam3") ??
-    sam3Fixtures[0],
+export const defaultSam3Fixture = requireSam3Fixture(
+  sam3Fixtures.find(
+    (fixture) => fixture.sampleName === DEFAULT_SAM3_FIXTURE_SAMPLE_NAME,
+  ) ?? sam3Fixtures[0],
 );
-
-export const defaultSam3Fixture = basketballSam3Fixture;
 export const defaultSam3VideoSrc = defaultSam3Fixture?.videoSrc ?? "";
 
 export interface Sam3FixtureDetectionManifest extends DetectionFrameChunkManifest {
@@ -280,11 +281,11 @@ function createSam3Fixtures(): readonly Sam3FixtureDefinition[] {
   );
 
   return fixtures.sort((left, right) => {
-    if (left.sampleName === "basketball_sam3") {
+    if (left.sampleName === DEFAULT_SAM3_FIXTURE_SAMPLE_NAME) {
       return -1;
     }
 
-    if (right.sampleName === "basketball_sam3") {
+    if (right.sampleName === DEFAULT_SAM3_FIXTURE_SAMPLE_NAME) {
       return 1;
     }
 
