@@ -152,6 +152,9 @@ export interface MediaSessionState {
   readonly status: MediaSessionStatus;
 }
 
+export type MediaSessionStateListener = (state: MediaSessionState) => void;
+export type MediaSessionStateUnsubscribe = () => void;
+
 export interface MediaSession {
   readonly detectionSource?:
     | DetectionFrameSource
@@ -166,6 +169,7 @@ export interface MediaSession {
   pause(): void;
   seek(mediaTime: number): Promise<void>;
   setPresentation(presentation: MediaRendererPresentation): void;
+  subscribe(listener: MediaSessionStateListener): MediaSessionStateUnsubscribe;
   getState(): MediaSessionState;
   destroy(): void;
 }

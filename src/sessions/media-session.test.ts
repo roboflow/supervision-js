@@ -154,6 +154,62 @@ describe("media session", () => {
     expect(session.getState()).toMatchObject({
       status: MediaSessionStatus.Destroyed,
     });
+    expect(onState).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        status: MediaSessionStatus.Destroyed,
+      }),
+    );
+  });
+
+  it("lets consumers subscribe to aggregate state after creation", async () => {
+    resetMocks();
+    const { createMediaSession } = await import("../index");
+    const listener = vi.fn();
+
+    const session = await createMediaSession({
+      container: createContainer(),
+      media: "sample.mp4",
+      renderer: { autoPlay: false },
+    });
+
+    const unsubscribe = session.subscribe(listener);
+
+    expect(listener).toHaveBeenCalledOnce();
+    expect(listener).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        status: MediaSessionStatus.Ready,
+      }),
+    );
+
+    session.destroy();
+
+    expect(listener).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        status: MediaSessionStatus.Destroyed,
+      }),
+    );
+
+    unsubscribe();
+  });
+
+  it("stops sending session state after unsubscribe", async () => {
+    resetMocks();
+    const { createMediaSession } = await import("../index");
+    const listener = vi.fn();
+
+    const session = await createMediaSession({
+      container: createContainer(),
+      media: "sample.mp4",
+      renderer: { autoPlay: false },
+    });
+
+    const unsubscribe = session.subscribe(listener);
+
+    listener.mockClear();
+    unsubscribe();
+    session.destroy();
+
+    expect(listener).not.toHaveBeenCalled();
   });
 
   it("revokes direct Blob object URLs when destroyed", async () => {

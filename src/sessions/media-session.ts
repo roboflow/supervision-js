@@ -4,6 +4,7 @@ import type {
   MediaSessionMediaState,
   MediaSessionNormalizationState,
   MediaSessionOptions,
+  MediaSessionStateListener,
 } from "#types/media-session";
 import type {
   MediaRendererPresentation,
@@ -25,22 +26,12 @@ import { createMediaSessionStateSnapshot } from "./media-session-state";
 export async function createMediaSession(
   options: MediaSessionOptions,
 ): Promise<MediaSession> {
+  const stateListeners = new Set<MediaSessionStateListener>();
   let rendererState: MediaRendererState | null = null;
   let renderPreparationState: RenderPreparationDiagnostics | null = null;
   let normalizationState: MediaSessionNormalizationState | null = null;
   let sessionErrorMessage: string | null = null;
   let sessionMediaState: MediaSessionMediaState = createEmptyMediaState();
-  const emitSessionState = () => {
-    options.onState?.(
-      createMediaSessionStateSnapshot({
-        errorMessage: sessionErrorMessage,
-        media: sessionMediaState,
-        normalization: normalizationState,
-        renderPreparation: renderPreparationState,
-        renderer: rendererState,
-      }),
-    );
-  };
   const createSessionState = () =>
     createMediaSessionStateSnapshot({
       errorMessage: sessionErrorMessage,
@@ -49,6 +40,17 @@ export async function createMediaSession(
       renderPreparation: renderPreparationState,
       renderer: rendererState,
     });
+  const emitSessionState = () => {
+    const state = createSessionState();
+
+    for (const listener of stateListeners) {
+      listener(state);
+    }
+  };
+
+  if (options.onState) {
+    stateListeners.add(options.onState);
+  }
 
   emitSessionState();
 
@@ -158,6 +160,20 @@ export async function createMediaSession(
         renderer.setPresentation(presentation);
       },
 
+      subscribe(listener) {
+        listener(createSessionState());
+
+        if (destroyed) {
+          return () => undefined;
+        }
+
+        stateListeners.add(listener);
+
+        return () => {
+          stateListeners.delete(listener);
+        };
+      },
+
       getState() {
         rendererState = renderer.getState();
         return createSessionState();
@@ -173,6 +189,7 @@ export async function createMediaSession(
         rendererState = renderer.getState();
         sessionMedia.destroy();
         emitSessionState();
+        stateListeners.clear();
       },
     };
   } catch (error) {

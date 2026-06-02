@@ -12,6 +12,7 @@ Before making project-direction or architecture changes, read:
 - [`architecture-principles.md`](architecture-principles.md)
 - [`renderer-first-roadmap.md`](renderer-first-roadmap.md)
 - [`pixijs-guidance.md`](pixijs-guidance.md)
+- [`library-contract.md`](library-contract.md)
 
 Those docs define the current product intent: prove the browser rendering
 foundation before designing a broad annotation framework.
