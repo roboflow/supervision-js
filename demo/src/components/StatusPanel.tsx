@@ -9,9 +9,9 @@ import {
   type RenderPreparationDiagnostics,
 } from "supervision-js";
 import type {
-  BasketballSampleDetectionSourceSummary,
-  BasketballSampleSummary,
-} from "../fixtures/basketball-sample";
+  Sam3FixtureDetectionSourceSummary,
+  Sam3FixtureSummary,
+} from "../fixtures/sam3-fixtures";
 import {
   formatExactTime,
   formatInteger,
@@ -29,7 +29,7 @@ export interface StatusPanelMediaState {
 export interface StatusPanelDetectionSourceState {
   readonly datasetId: string | null;
   readonly errorMessage: string | null;
-  readonly sourceSummary: BasketballSampleDetectionSourceSummary | null;
+  readonly sourceSummary: Sam3FixtureDetectionSourceSummary | null;
   readonly status: string;
 }
 
@@ -48,7 +48,7 @@ export function StatusPanel({
 }: {
   readonly detectionSourceState: StatusPanelDetectionSourceState;
   readonly errorMessage: string | null;
-  readonly fixtureSummary: BasketballSampleSummary | null;
+  readonly fixtureSummary: Sam3FixtureSummary | null;
   readonly hoveredDetectionPick: DetectionPickResult | null;
   readonly mediaState: StatusPanelMediaState;
   readonly playbackState: MediaRendererPlaybackState | null;

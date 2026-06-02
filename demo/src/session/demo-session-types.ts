@@ -7,14 +7,14 @@ import type {
   RenderPreparationDiagnostics,
 } from "supervision-js";
 import type {
-  BasketballSampleDetectionSourceSummary,
-  BasketballSampleSummary,
-} from "../fixtures/basketball-sample";
+  Sam3FixtureDetectionSourceSummary,
+  Sam3FixtureSummary,
+} from "../fixtures/sam3-fixtures";
 import type { PreparedUploadMedia } from "../media/upload-media";
 import type { BasketballPresentationSettings } from "../presentation/basketball-presentation";
 
 export enum DemoSourceMode {
-  Basketball = "basketball",
+  Fixture = "fixture",
   Upload = "upload",
 }
 
@@ -26,7 +26,7 @@ export interface DemoMediaState {
 export interface DemoDetectionSourceState {
   readonly datasetId: string | null;
   readonly errorMessage: string | null;
-  readonly sourceSummary: BasketballSampleDetectionSourceSummary | null;
+  readonly sourceSummary: Sam3FixtureDetectionSourceSummary | null;
   readonly status: string;
 }
 
@@ -53,7 +53,7 @@ export interface DemoSessionCallbacks {
   readonly onDetectionSourceState: (state: DemoDetectionSourceState) => void;
   readonly onDetectionHover: (pick: DetectionPickResult | null) => void;
   readonly onDetectionSelect: (pick: DetectionPickResult | null) => void;
-  readonly onFixtureSummary: (summary: BasketballSampleSummary) => void;
+  readonly onFixtureSummary: (summary: Sam3FixtureSummary) => void;
   readonly onFrame: () => void;
   readonly onMediaState: (state: DemoMediaState) => void;
   readonly onRenderPreparationDiagnostics: (

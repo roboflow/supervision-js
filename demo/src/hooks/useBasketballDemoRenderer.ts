@@ -15,8 +15,12 @@ import {
   type MediaSourceState,
   type RenderPreparationDiagnostics,
 } from "supervision-js";
-import type { BasketballSampleSummary } from "../fixtures/basketball-sample";
-import { defaultBasketballSampleFixture } from "../fixtures/basketball-sample";
+import type { Sam3FixtureSummary } from "../fixtures/sam3-fixtures";
+import {
+  sam3Fixtures,
+  defaultSam3Fixture,
+  type Sam3FixtureDefinition,
+} from "../fixtures/sam3-fixtures";
 import {
   createBasketballSamplePresentation,
   defaultBasketballPresentationSettings,
@@ -44,7 +48,7 @@ export interface BasketballDemoRendererState {
   readonly containerRef: RefObject<HTMLDivElement | null>;
   readonly duration: number | null;
   readonly errorMessage: string | null;
-  readonly fixtureSummary: BasketballSampleSummary | null;
+  readonly fixtureSummary: Sam3FixtureSummary | null;
   readonly hoveredDetectionPick: DetectionPickResult | null;
   readonly mediaState: DemoMediaState;
   readonly playbackState: MediaRendererPlaybackState | null;
@@ -52,6 +56,8 @@ export interface BasketballDemoRendererState {
   readonly rendererState: MediaRendererState | null;
   readonly renderPreparationDiagnostics: RenderPreparationDiagnostics | null;
   readonly selectedDetectionPick: DetectionPickResult | null;
+  readonly sampleFixtureId: string;
+  readonly sampleFixtures: readonly Sam3FixtureDefinition[];
   readonly sourceControlsDisabled: boolean;
   readonly sourceMode: DemoSourceMode;
   readonly sessionState: MediaSessionState | null;
@@ -69,12 +75,12 @@ export interface BasketballDemoRendererState {
   readonly setPresentationSettings: (
     settings: BasketballPresentationSettings,
   ) => void;
+  readonly setSampleFixtureId: (sampleName: string) => void;
   readonly setSourceMode: (mode: DemoSourceMode) => void;
   readonly setUploadApiKey: (apiKey: string) => void;
   readonly setUploadClassNames: (classNames: string) => void;
 }
 
-const activeBasketballFixture = defaultBasketballSampleFixture;
 const RENDERER_READOUT_INTERVAL_MS = 250;
 
 const initialDetectionSourceState: DemoDetectionSourceState = {
@@ -117,7 +123,7 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
     null,
   );
   const [fixtureSummary, setFixtureSummary] =
-    useState<BasketballSampleSummary | null>(null);
+    useState<Sam3FixtureSummary | null>(null);
   const [hoveredDetectionPick, setHoveredDetectionPick] =
     useState<DetectionPickResult | null>(null);
   const [selectedDetectionPick, setSelectedDetectionPick] =
@@ -126,7 +132,7 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
     useState<DemoDetectionSourceState>(initialDetectionSourceState);
   const [mediaState, setMediaState] = useState<DemoMediaState>({
     errorMessage: null,
-    status: activeBasketballFixture.mediaLoadingStatusLabel,
+    status: defaultSam3Fixture.mediaLoadingStatusLabel,
   });
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [presentationSettings, setPresentationSettingsState] =
@@ -134,7 +140,10 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
       defaultBasketballPresentationSettings,
     );
   const [sourceMode, setSourceModeState] = useState<DemoSourceMode>(
-    DemoSourceMode.Basketball,
+    DemoSourceMode.Fixture,
+  );
+  const [sampleFixtureId, setSampleFixtureIdState] = useState(
+    defaultSam3Fixture.sampleName,
   );
   const [uploadApiKey, setUploadApiKey] = useState("");
   const [uploadClassNames, setUploadClassNames] = useState(
@@ -146,6 +155,9 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
   const [uploadRun, setUploadRun] = useState<
     (UploadRunRequest & { readonly id: number }) | null
   >(null);
+  const activeFixture =
+    sam3Fixtures.find((fixture) => fixture.sampleName === sampleFixtureId) ??
+    defaultSam3Fixture;
 
   const syncRendererState = useCallback((renderer: MediaRenderer) => {
     const state = renderer.getState();
@@ -230,10 +242,10 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
 
     void (async () => {
       try {
-        if (sourceMode === DemoSourceMode.Basketball) {
+        if (sourceMode === DemoSourceMode.Fixture) {
           const session = await createBasketballSession({
             container,
-            definition: activeBasketballFixture,
+            definition: activeFixture,
             isActive,
             onDetectionHover: setHoveredDetectionPick,
             onDetectionSelect: setSelectedDetectionPick,
@@ -308,7 +320,7 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
         renderer?.destroy();
       }
     };
-  }, [sourceMode, syncRendererState, uploadRun]);
+  }, [activeFixture, sourceMode, syncRendererState, uploadRun]);
 
   const playbackState = rendererState?.playbackState ?? null;
   const duration = rendererState?.duration ?? fixtureSummary?.duration ?? null;
@@ -423,13 +435,21 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
   );
 
   const setSourceMode = useCallback((mode: DemoSourceMode) => {
-    if (mode === DemoSourceMode.Basketball) {
+    if (mode === DemoSourceMode.Fixture) {
       uploadAbortRef.current?.abort();
       setUploadRun(null);
       setUploadInferenceState(initialUploadInferenceState);
     }
 
     setSourceModeState(mode);
+  }, []);
+
+  const setSampleFixtureId = useCallback((sampleName: string) => {
+    uploadAbortRef.current?.abort();
+    setUploadRun(null);
+    setUploadInferenceState(initialUploadInferenceState);
+    setSampleFixtureIdState(sampleName);
+    setSourceModeState(DemoSourceMode.Fixture);
   }, []);
 
   const onUploadFileChange = useCallback((file: File | null) => {
@@ -498,8 +518,8 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
     setMediaState({
       errorMessage: null,
       status:
-        nextSourceMode === DemoSourceMode.Basketball
-          ? activeBasketballFixture.mediaLoadingStatusLabel
+        nextSourceMode === DemoSourceMode.Fixture
+          ? activeFixture.mediaLoadingStatusLabel
           : "waiting for upload inference",
     });
     setRendererState(null);
@@ -554,7 +574,10 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
     presentationSettings,
     renderPreparationDiagnostics,
     rendererState,
+    sampleFixtureId,
+    sampleFixtures: sam3Fixtures,
     selectedDetectionPick,
+    setSampleFixtureId,
     setPresentationSettings,
     setSourceMode,
     setUploadApiKey,

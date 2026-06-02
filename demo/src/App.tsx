@@ -12,12 +12,13 @@ import {
 } from "./hooks/useBasketballDemoRenderer";
 import { defaultBasketballClassNames } from "./presentation/basketball-presentation";
 import { DemoViewMode } from "./session/demo-view-mode";
+import type { TimelineRange } from "./session/demo-session-types";
 
 export function App() {
   const demo = useBasketballDemoRenderer();
   const [viewMode, setViewMode] = useState(DemoViewMode.Demo);
   const processedRanges =
-    demo.sourceMode === DemoSourceMode.Basketball && demo.duration !== null
+    demo.sourceMode === DemoSourceMode.Fixture && demo.duration !== null
       ? [{ endTime: demo.duration, startTime: 0 }]
       : demo.uploadInferenceState.processedRanges;
   const processingRanges =
@@ -27,11 +28,14 @@ export function App() {
   const normalizedRanges =
     demo.sourceMode === DemoSourceMode.Upload
       ? demo.uploadInferenceState.normalizedRanges
-      : [];
+      : createSampleNormalizationRanges({
+          duration: demo.duration,
+          progress: demo.sessionState?.normalization?.progress ?? null,
+        });
   const styleClassNames =
     demo.sourceMode === DemoSourceMode.Upload
       ? parseClassNames(demo.uploadClassNames)
-      : defaultBasketballClassNames;
+      : (demo.fixtureSummary?.classNames ?? defaultBasketballClassNames);
 
   return (
     <DemoShell
@@ -59,7 +63,10 @@ export function App() {
           onClassNamesChange={demo.setUploadClassNames}
           onFileChange={demo.onUploadFileChange}
           onModeChange={demo.setSourceMode}
+          onSampleChange={demo.setSampleFixtureId}
           onStartUploadInference={demo.onStartUploadInference}
+          sampleFixtureId={demo.sampleFixtureId}
+          sampleFixtures={demo.sampleFixtures}
           selectedFileName={demo.uploadFileName}
           uploadState={demo.uploadInferenceState}
         />
@@ -112,6 +119,37 @@ export function App() {
       }
     />
   );
+}
+
+function createSampleNormalizationRanges({
+  duration,
+  progress,
+}: {
+  readonly duration: number | null;
+  readonly progress: {
+    readonly processedTime: number;
+    readonly progress: number;
+  } | null;
+}): readonly TimelineRange[] {
+  if (duration === null || duration <= 0) {
+    return [];
+  }
+
+  if (progress === null) {
+    return [];
+  }
+
+  const endTime =
+    progress.progress >= 0.999
+      ? duration
+      : Math.min(Math.max(progress.processedTime, 0), duration);
+
+  return [
+    {
+      endTime,
+      startTime: 0,
+    },
+  ];
 }
 
 function parseClassNames(value: string) {

@@ -8,11 +8,15 @@ import prettier from "prettier";
 
 const ENDPOINT = "https://serverless.roboflow.com/sam3/concept_segment";
 const FRAME_RATE = 30;
-const PROMPTS = ["white team player", "yellow team player", "basketball"];
+const DEFAULT_PROMPTS = [
+  "white team player",
+  "yellow team player",
+  "basketball",
+];
+const OUTPUT_PROB_THRESH = 0.1;
 const RAW_RESPONSE_SCHEMA =
   "supervision-js.tools.sam3-fixture.raw-sam3-response";
-const DETECTIONS_SCHEMA =
-  "supervision-js.tools.sam3-fixture.basketball-sample.detections";
+const DETECTIONS_SCHEMA = "supervision-js.tools.sam3-fixture.detections";
 
 const options = parseArgs(process.argv.slice(2));
 
@@ -82,7 +86,11 @@ async function main(runOptions, apiKeyValue) {
   if (runOptions.detectionsOutput) {
     const rawRecords = await readRawRecords(runOptions.rawOutput);
     const detectionsFixture = normalizeSam3Responses(rawRecords, {
+      modelId: runOptions.modelId,
+      prompts: runOptions.prompts,
       rawOutput: runOptions.rawOutput,
+      sampleName: runOptions.sampleName,
+      sourceFile: runOptions.sourceFile,
     });
 
     await mkdir(path.dirname(runOptions.detectionsOutput), { recursive: true });
@@ -105,7 +113,9 @@ function parseArgs(args) {
     limit: undefined,
     modelId: "sam3/sam3_final",
     nmsIouThreshold: 0.5,
-    outputProbThresh: 0.1,
+    prompts: undefined,
+    sampleName: undefined,
+    sourceFile: undefined,
     startFrame: 0,
   };
 
@@ -144,10 +154,15 @@ function parseArgs(args) {
           arg,
         );
         break;
-      case "--output-prob-thresh":
-        parsed.outputProbThresh = parseProbability(
+      case "--class":
+        parsed.prompts = [
+          ...(parsed.prompts ?? []),
           readFlagValue(args, (index += 1), arg),
-          arg,
+        ];
+        break;
+      case "--classes":
+        parsed.prompts = parsePromptList(
+          readFlagValue(args, (index += 1), arg),
         );
         break;
       case "--format":
@@ -162,10 +177,18 @@ function parseArgs(args) {
           arg,
         );
         break;
+      case "--sample-name":
+        parsed.sampleName = readFlagValue(args, (index += 1), arg);
+        break;
+      case "--source-file":
+        parsed.sourceFile = readFlagValue(args, (index += 1), arg);
+        break;
       default:
         throw new Error(`Unknown argument: ${arg}`);
     }
   }
+
+  parsed.prompts = normalizePrompts(parsed.prompts);
 
   return parsed;
 }
@@ -210,21 +233,45 @@ function parseProbability(value, flag) {
   return parsed;
 }
 
+function parsePromptList(value) {
+  return value
+    .split(/[\n,]/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function normalizePrompts(prompts) {
+  const normalized = (prompts ?? DEFAULT_PROMPTS)
+    .map((prompt) => prompt.trim())
+    .filter(Boolean);
+
+  if (normalized.length === 0) {
+    throw new Error("At least one class prompt is required.");
+  }
+
+  return [...new Set(normalized)];
+}
+
 function printHelp() {
   console.log(`Usage:
 node tools/sam3-fixture/run-sam3.mjs \\
   --input tools/sam3-fixture/frames.jsonl \\
   --raw-output tools/sam3-fixture/raw-sam3.jsonl \\
-  --detections-output tools/sam3-fixture/detections.json
+  --detections-output tools/sam3-fixture/detections.json \\
+  --classes "person, horse"
 
 Options:
+  --class <prompt>                   can be repeated
+  --classes <prompt,prompt>
   --limit <count>
   --start-frame <frameIndex>
   --concurrency <count>              default: 1
-  --output-prob-thresh <0..1>         default: 0.5
+  SAM3 output_prob_thresh is fixed at ${OUTPUT_PROB_THRESH}
   --format <format>                  default: rle
   --model-id <id>                    default: sam3/sam3_final
-  --nms-iou-threshold <0..1>          default: 0.5`);
+  --nms-iou-threshold <0..1>          default: 0.5
+  --sample-name <name>
+  --source-file <filename>`);
 }
 
 async function readExtractedFrames(inputPath) {
@@ -367,8 +414,8 @@ async function callSam3(frame, runOptions, apiKeyValue) {
     },
     model_id: runOptions.modelId,
     nms_iou_threshold: runOptions.nmsIouThreshold,
-    output_prob_thresh: runOptions.outputProbThresh,
-    prompts: PROMPTS.map((text) => ({ text, type: "text" })),
+    output_prob_thresh: OUTPUT_PROB_THRESH,
+    prompts: runOptions.prompts.map((text) => ({ text, type: "text" })),
   };
   const endpointUrl = new URL(ENDPOINT);
   endpointUrl.searchParams.set("api_key", apiKeyValue);
@@ -398,8 +445,8 @@ async function callSam3(frame, runOptions, apiKeyValue) {
       format: runOptions.format,
       model_id: runOptions.modelId,
       nms_iou_threshold: runOptions.nmsIouThreshold,
-      output_prob_thresh: runOptions.outputProbThresh,
-      prompts: PROMPTS,
+      output_prob_thresh: OUTPUT_PROB_THRESH,
+      prompts: runOptions.prompts,
     },
     schema: RAW_RESPONSE_SCHEMA,
     version: 1,
@@ -441,7 +488,9 @@ function normalizeSam3Responses(rawRecords, context) {
     const decodedDuration = numberOrNull(rawRecord.timing?.decodedDuration);
 
     frames.push({
-      detections: normalizeFrameDetections(rawRecord.response),
+      detections: normalizeFrameDetections(rawRecord.response, {
+        prompts: getPromptsForRawRecord(rawRecord, context.prompts),
+      }),
       endTime:
         decodedDuration === null
           ? (frameIndex + 1) / FRAME_RATE
@@ -473,15 +522,19 @@ function normalizeSam3Responses(rawRecords, context) {
       missingFrameIndexes: findMissingIndexes(
         frames.map((frame) => frame.frameIndex),
       ),
-      modelId: "sam3/sam3_final",
-      prompts: PROMPTS,
+      modelId: context.modelId,
+      prompts: context.prompts,
       sourceFile: path.basename(context.rawOutput),
     },
     schema: DETECTIONS_SCHEMA,
+    source: removeUndefinedProperties({
+      file: context.sourceFile,
+      sampleName: context.sampleName,
+    }),
     version: 1,
     video: {
       duration: frames.length === 0 ? 0 : frames.at(-1).endTime,
-      file: "basketball_sample.normalized.webm",
+      file: context.sourceFile ?? "source media",
       frameRate: FRAME_RATE,
       height: numberOrNull(firstFrameMetadata?.height) ?? height,
       width: numberOrNull(firstFrameMetadata?.width) ?? width,
@@ -489,9 +542,12 @@ function normalizeSam3Responses(rawRecords, context) {
   };
 }
 
-function normalizeFrameDetections(response) {
+function normalizeFrameDetections(response, context) {
   return extractPromptResultEntries(response).flatMap((entry, promptIndex) => {
-    const promptText = getPromptText(entry.promptResult, promptIndex);
+    const promptText = getPromptText(entry.promptResult, {
+      promptIndex,
+      prompts: context.prompts,
+    });
     const predictions = extractPredictions(entry.promptResult);
 
     return predictions.map((prediction, predictionIndex) =>
@@ -502,6 +558,16 @@ function normalizeFrameDetections(response) {
       }),
     );
   });
+}
+
+function getPromptsForRawRecord(rawRecord, fallbackPrompts) {
+  const prompts = isRecord(rawRecord.request)
+    ? rawRecord.request.prompts
+    : undefined;
+
+  return Array.isArray(prompts)
+    ? prompts.filter((prompt) => typeof prompt === "string")
+    : fallbackPrompts;
 }
 
 function extractPromptResultEntries(response) {
@@ -516,7 +582,7 @@ function extractPromptResultEntries(response) {
   return [{ promptResult: response }];
 }
 
-function getPromptText(promptResult, promptIndex) {
+function getPromptText(promptResult, context) {
   if (isRecord(promptResult)) {
     const echo = isRecord(promptResult.echo) ? promptResult.echo : undefined;
     const candidates = [
@@ -534,7 +600,9 @@ function getPromptText(promptResult, promptIndex) {
     }
   }
 
-  return PROMPTS[promptIndex] ?? `prompt ${promptIndex}`;
+  return (
+    context.prompts[context.promptIndex] ?? `prompt ${context.promptIndex}`
+  );
 }
 
 function extractPredictions(promptResult) {

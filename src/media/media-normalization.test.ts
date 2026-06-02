@@ -33,6 +33,12 @@ const mockState = vi.hoisted(() => {
     inputCanRead: vi.fn(async () => true),
     inputDispose: vi.fn(),
     inputFormat: { mimeType: "video/mp4", name: "MP4" },
+    inputGetAudioTracks: vi.fn(async () => [{ type: "audio" }]),
+    inputGetDurationFromMetadata: vi.fn(
+      async (): Promise<number | null> => 1.25,
+    ),
+    inputGetTracks: vi.fn(async () => [{ type: "video" }, { type: "audio" }]),
+    inputGetVideoTracks: vi.fn(async () => [{ type: "video" }]),
     inputMimeType: 'video/mp4; codecs="avc1.42e01e"',
     appendOnlyStreamTargetConstructor: vi.fn(),
     outputConstructor: vi.fn(),
@@ -45,8 +51,10 @@ const mockState = vi.hoisted(() => {
       getCodec: vi.fn(async () => "avc"),
       getDisplayHeight: vi.fn(async () => 720),
       getDisplayWidth: vi.fn(async () => 1280),
+      getFirstTimestamp: vi.fn(async () => 0),
       type: "video",
     },
+    videoSampleSinkConstructor: vi.fn(),
   };
 
   return { normalizationMock };
@@ -83,7 +91,13 @@ vi.mock("mediabunny", () => {
 
     dispose = normalizationMock.inputDispose;
 
-    getDurationFromMetadata = vi.fn(async () => 1.25);
+    getAudioTracks = normalizationMock.inputGetAudioTracks;
+
+    getDurationFromMetadata = normalizationMock.inputGetDurationFromMetadata;
+
+    getTracks = normalizationMock.inputGetTracks;
+
+    getVideoTracks = normalizationMock.inputGetVideoTracks;
 
     canRead = normalizationMock.inputCanRead;
 
@@ -121,6 +135,18 @@ vi.mock("mediabunny", () => {
     }
   }
 
+  class UrlSource {
+    constructor() {
+      // URL sources are not used by these tests.
+    }
+  }
+
+  class VideoSampleSink {
+    constructor(track: unknown) {
+      normalizationMock.videoSampleSinkConstructor(track);
+    }
+  }
+
   class Conversion {
     static async init(options: unknown) {
       normalizationMock.conversionInit(options);
@@ -147,9 +173,14 @@ vi.mock("mediabunny", () => {
     canEncodeVideo: normalizationMock.canEncodeVideo,
     Conversion,
     Input,
+    MATROSKA: { name: "Matroska" },
+    MP4: { name: "MP4" },
     Mp4OutputFormat,
     Output,
+    QTFF: { name: "QuickTime" },
     ReadableStreamSource,
+    UrlSource,
+    VideoSampleSink,
     WEBM: { name: "WebM" },
     WebMOutputFormat,
   };
@@ -172,6 +203,21 @@ describe("normalizeMedia", () => {
     normalizationMock.inputCanRead.mockResolvedValue(true);
     normalizationMock.inputDispose.mockClear();
     normalizationMock.inputFormat = { mimeType: "video/mp4", name: "MP4" };
+    normalizationMock.inputGetAudioTracks.mockClear();
+    normalizationMock.inputGetAudioTracks.mockResolvedValue([
+      { type: "audio" },
+    ]);
+    normalizationMock.inputGetDurationFromMetadata.mockClear();
+    normalizationMock.inputGetDurationFromMetadata.mockResolvedValue(1.25);
+    normalizationMock.inputGetTracks.mockClear();
+    normalizationMock.inputGetTracks.mockResolvedValue([
+      { type: "video" },
+      { type: "audio" },
+    ]);
+    normalizationMock.inputGetVideoTracks.mockClear();
+    normalizationMock.inputGetVideoTracks.mockResolvedValue([
+      { type: "video" },
+    ]);
     normalizationMock.inputMimeType = 'video/mp4; codecs="avc1.42e01e"';
     normalizationMock.outputConstructor.mockClear();
     normalizationMock.outputFormatInstances.length = 0;
@@ -186,6 +232,9 @@ describe("normalizeMedia", () => {
     normalizationMock.primaryVideoTrack.getDisplayHeight.mockResolvedValue(720);
     normalizationMock.primaryVideoTrack.getDisplayWidth.mockClear();
     normalizationMock.primaryVideoTrack.getDisplayWidth.mockResolvedValue(1280);
+    normalizationMock.primaryVideoTrack.getFirstTimestamp.mockClear();
+    normalizationMock.primaryVideoTrack.getFirstTimestamp.mockResolvedValue(0);
+    normalizationMock.videoSampleSinkConstructor.mockClear();
   });
 
   it("probes media and selects the first encodable normalization target", async () => {
@@ -364,6 +413,23 @@ describe("normalizeMedia", () => {
       size: 0,
     });
     expect(normalizationMock.inputDispose).toHaveBeenCalledOnce();
+  });
+
+  it("carries source duration into progressive renderer sources for live playback loops", async () => {
+    const normalized = await normalizeMediaProgressively(
+      new Blob(["source"], { type: "video/mp4" }),
+    );
+
+    normalizationMock.inputGetDurationFromMetadata.mockResolvedValueOnce(null);
+
+    const source = await normalized.rendererSource.open();
+
+    expect(source.metadata.duration).toBe(1.25);
+    expect(normalizationMock.videoSampleSinkConstructor).toHaveBeenCalledWith(
+      normalizationMock.primaryVideoTrack,
+    );
+
+    source.input.dispose();
   });
 
   it("rejects already-aborted signals before conversion starts", async () => {

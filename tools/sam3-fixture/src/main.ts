@@ -9,20 +9,35 @@ import { BlobSource, CanvasSink, Input, WEBM } from "mediabunny";
 
 import "./style.css";
 
-const BASKETBALL_SAMPLE_VIDEO_URL = new URL(
+const DEFAULT_SOURCE_URL = new URL(
   "../../../demo/fixtures/basketball_sample/basketball_sample.mp4",
   import.meta.url,
 ).href;
+const DEFAULT_SAMPLE_NAME = "basketball_sam3";
+const DEFAULT_SOURCE_FILE = "basketball_sample.mp4";
 const TARGET_FRAME_RATE = 30;
 const DEFAULT_JPEG_QUALITY = 0.92;
 const FRAME_SLOT_TOLERANCE_SECONDS = 0.005;
 
-interface BasketballSam3FixtureManifest {
+interface Sam3FixturePrepareOptions {
+  readonly sampleName?: string;
+  readonly sourceFile?: string;
+  readonly sourceUrl?: string;
+}
+
+interface Sam3FixtureConfig {
+  readonly sampleName: string;
+  readonly sourceFile: string;
+  readonly sourceUrl: string;
+}
+
+interface Sam3FixtureManifest {
   readonly schema: "supervision-js.tools.sam3-fixture.manifest";
   readonly version: 1;
+  readonly sampleName: string;
   readonly source: {
     readonly url: string;
-    readonly file: "basketball_sample.mp4";
+    readonly file: string;
     readonly size: number;
     readonly mimeType: string | null;
   };
@@ -43,13 +58,13 @@ interface BasketballSam3FixtureManifest {
   };
 }
 
-interface BasketballSam3FrameBatchOptions {
+interface Sam3FrameBatchOptions {
   readonly startFrameIndex: number;
   readonly count: number;
   readonly quality?: number;
 }
 
-interface BasketballSam3ExtractedFrame {
+interface Sam3ExtractedFrame {
   readonly schema: "supervision-js.tools.sam3-fixture.extracted-frame";
   readonly version: 1;
   readonly frameIndex: number;
@@ -68,16 +83,16 @@ interface BasketballSam3ExtractedFrame {
   readonly jpegBase64: string;
 }
 
-interface BasketballSam3FrameBatch {
+interface Sam3FrameBatch {
   readonly schema: "supervision-js.tools.sam3-fixture.frame-batch";
   readonly version: 1;
   readonly startFrameIndex: number;
   readonly count: number;
   readonly quality: number;
-  readonly frames: readonly BasketballSam3ExtractedFrame[];
+  readonly frames: readonly Sam3ExtractedFrame[];
 }
 
-interface BasketballSam3NormalizedMedia {
+interface Sam3NormalizedMedia {
   readonly schema: "supervision-js.tools.sam3-fixture.normalized-media";
   readonly version: 1;
   readonly mimeType: string;
@@ -88,20 +103,31 @@ interface BasketballSam3NormalizedMedia {
 
 declare global {
   interface Window {
-    prepareBasketballSam3Fixture: () => Promise<BasketballSam3FixtureManifest>;
-    getBasketballSam3NormalizedMedia: () => Promise<BasketballSam3NormalizedMedia>;
+    prepareSam3Fixture: (
+      options?: Sam3FixturePrepareOptions,
+    ) => Promise<Sam3FixtureManifest>;
+    getSam3NormalizedMedia: (
+      options?: Sam3FixturePrepareOptions,
+    ) => Promise<Sam3NormalizedMedia>;
+    getSam3FrameBatch: (
+      options: Sam3FrameBatchOptions,
+    ) => Promise<Sam3FrameBatch>;
+    getSam3FixtureManifest: () => Sam3FixtureManifest | null;
+    prepareBasketballSam3Fixture: () => Promise<Sam3FixtureManifest>;
+    getBasketballSam3NormalizedMedia: () => Promise<Sam3NormalizedMedia>;
     getBasketballSam3FrameBatch: (
-      options: BasketballSam3FrameBatchOptions,
-    ) => Promise<BasketballSam3FrameBatch>;
-    getBasketballSam3FixtureManifest: () => BasketballSam3FixtureManifest | null;
+      options: Sam3FrameBatchOptions,
+    ) => Promise<Sam3FrameBatch>;
+    getBasketballSam3FixtureManifest: () => Sam3FixtureManifest | null;
   }
 }
 
-let preparePromise: Promise<BasketballSam3FixtureManifest> | undefined;
+let preparePromise: Promise<Sam3FixtureManifest> | undefined;
+let preparedConfigKey: string | undefined;
 let normalizedInput: Input | undefined;
 let normalizedBlob: Blob | undefined;
 let canvasSink: CanvasSink | undefined;
-let manifest: BasketballSam3FixtureManifest | null = null;
+let manifest: Sam3FixtureManifest | null = null;
 
 const statusElement = document.querySelector<HTMLParagraphElement>("#status");
 const outputElement = document.querySelector<HTMLPreElement>("#output");
@@ -120,27 +146,40 @@ function setOutput(value: unknown) {
   }
 }
 
-async function prepareBasketballSam3Fixture() {
-  preparePromise ??= prepareFixture();
+async function prepareSam3Fixture(
+  options: Sam3FixturePrepareOptions = {},
+): Promise<Sam3FixtureManifest> {
+  const config = createFixtureConfig(options);
+  const configKey = createFixtureConfigKey(config);
+
+  if (preparedConfigKey !== configKey) {
+    disposeNormalizedInput();
+    preparePromise = undefined;
+    preparedConfigKey = configKey;
+  }
+
+  preparePromise ??= prepareFixture(config);
+
   return preparePromise;
 }
 
-async function prepareFixture(): Promise<BasketballSam3FixtureManifest> {
-  disposeNormalizedInput();
-  setStatus("Fetching basketball_sample.mp4...");
+async function prepareFixture(
+  config: Sam3FixtureConfig,
+): Promise<Sam3FixtureManifest> {
+  setStatus(`Fetching ${config.sourceFile}...`);
 
-  const sourceResponse = await fetch(BASKETBALL_SAMPLE_VIDEO_URL);
+  const sourceResponse = await fetch(config.sourceUrl);
 
   if (!sourceResponse.ok) {
     throw new Error(
-      `Unable to fetch basketball_sample.mp4: ${sourceResponse.status} ${sourceResponse.statusText}`,
+      `Unable to fetch ${config.sourceFile}: ${sourceResponse.status} ${sourceResponse.statusText}`,
     );
   }
 
   const sourceBlob = await sourceResponse.blob();
   setStatus("Normalizing to WebM VP9 at 30fps...");
 
-  const normalized = await normalizeBasketballSource(sourceBlob, (progress) => {
+  const normalized = await normalizeSource(sourceBlob, (progress) => {
     setStatus(
       `Normalizing to WebM VP9 at 30fps... ${Math.round(
         progress.progress * 100,
@@ -158,7 +197,7 @@ async function prepareFixture(): Promise<BasketballSam3FixtureManifest> {
   const videoTrack = await normalizedInput.getPrimaryVideoTrack();
 
   if (!videoTrack) {
-    throw new Error("The normalized basketball sample has no video track.");
+    throw new Error(`The normalized source has no video track.`);
   }
 
   canvasSink = new CanvasSink(videoTrack);
@@ -185,12 +224,13 @@ async function prepareFixture(): Promise<BasketballSam3FixtureManifest> {
       mimeType: normalized.mimeType,
       size: normalized.size,
     },
+    sampleName: config.sampleName,
     schema: "supervision-js.tools.sam3-fixture.manifest",
     source: {
-      file: "basketball_sample.mp4",
+      file: config.sourceFile,
       mimeType: sourceBlob.type || null,
       size: sourceBlob.size,
-      url: BASKETBALL_SAMPLE_VIDEO_URL,
+      url: config.sourceUrl,
     },
     version: 1,
     video: {
@@ -208,11 +248,13 @@ async function prepareFixture(): Promise<BasketballSam3FixtureManifest> {
   return manifest;
 }
 
-async function getBasketballSam3NormalizedMedia(): Promise<BasketballSam3NormalizedMedia> {
-  await prepareBasketballSam3Fixture();
+async function getSam3NormalizedMedia(
+  options: Sam3FixturePrepareOptions = {},
+): Promise<Sam3NormalizedMedia> {
+  await prepareSam3Fixture(options);
 
   if (!normalizedBlob) {
-    throw new Error("Basketball SAM3 normalized media is not prepared.");
+    throw new Error("SAM3 normalized media is not prepared.");
   }
 
   const dataUrl = await blobToDataUrl(normalizedBlob);
@@ -225,7 +267,7 @@ async function getBasketballSam3NormalizedMedia(): Promise<BasketballSam3Normali
     schema: "supervision-js.tools.sam3-fixture.normalized-media",
     size: normalizedBlob.size,
     version: 1,
-  } satisfies BasketballSam3NormalizedMedia;
+  } satisfies Sam3NormalizedMedia;
 
   setStatus(
     `Ready: normalized ${normalizedMedia.extension.toUpperCase()} media (${normalizedMedia.size} bytes).`,
@@ -238,7 +280,7 @@ async function getBasketballSam3NormalizedMedia(): Promise<BasketballSam3Normali
   return normalizedMedia;
 }
 
-async function normalizeBasketballSource(
+async function normalizeSource(
   sourceBlob: Blob,
   onProgress: (progress: MediaNormalizationProgress) => void,
 ): Promise<NormalizedMedia> {
@@ -255,14 +297,14 @@ async function normalizeBasketballSource(
   });
 }
 
-async function getBasketballSam3FrameBatch(
-  options: BasketballSam3FrameBatchOptions,
-): Promise<BasketballSam3FrameBatch> {
-  const preparedManifest = await prepareBasketballSam3Fixture();
+async function getSam3FrameBatch(
+  options: Sam3FrameBatchOptions,
+): Promise<Sam3FrameBatch> {
+  const preparedManifest = manifest ?? (await prepareSam3Fixture());
   const activeSink = canvasSink;
 
   if (!activeSink) {
-    throw new Error("Basketball SAM3 fixture extraction is not prepared.");
+    throw new Error("SAM3 fixture extraction is not prepared.");
   }
 
   const startFrameIndex = validateFrameIndex(options.startFrameIndex);
@@ -275,7 +317,7 @@ async function getBasketballSam3FrameBatch(
   const sampleQueryTimes = frameIndexes.map(
     (frameIndex) => (frameIndex + 0.5) / TARGET_FRAME_RATE,
   );
-  const frames: BasketballSam3ExtractedFrame[] = [];
+  const frames: Sam3ExtractedFrame[] = [];
 
   setStatus(
     `Extracting ${count} frame${count === 1 ? "" : "s"} from index ${startFrameIndex}...`,
@@ -298,7 +340,7 @@ async function getBasketballSam3FrameBatch(
 
     if (!wrappedCanvas) {
       throw new Error(
-        `Unable to decode requested basketball SAM3 frame: frameIndex=${frameIndex}, sampleQueryTime=${sampleQueryTime}.`,
+        `Unable to decode requested SAM3 frame: frameIndex=${frameIndex}, sampleQueryTime=${sampleQueryTime}.`,
       );
     }
 
@@ -341,7 +383,7 @@ async function getBasketballSam3FrameBatch(
 
   if (frames.length < count) {
     throw new Error(
-      `Unable to decode requested basketball SAM3 frame batch: startFrameIndex=${startFrameIndex}, count=${count}, collected=${frames.length}.`,
+      `Unable to decode requested SAM3 frame batch: startFrameIndex=${startFrameIndex}, count=${count}, collected=${frames.length}.`,
     );
   }
 
@@ -352,7 +394,7 @@ async function getBasketballSam3FrameBatch(
     schema: "supervision-js.tools.sam3-fixture.frame-batch",
     startFrameIndex,
     version: 1,
-  } satisfies BasketballSam3FrameBatch;
+  } satisfies Sam3FrameBatch;
 
   setStatus(
     `Ready: extracted ${frames.length} frame${frames.length === 1 ? "" : "s"} from ${preparedManifest.video.width}x${preparedManifest.video.height} normalized media.`,
@@ -369,8 +411,22 @@ async function getBasketballSam3FrameBatch(
   return batch;
 }
 
-function getBasketballSam3FixtureManifest() {
+function getSam3FixtureManifest() {
   return manifest;
+}
+
+function createFixtureConfig(
+  options: Sam3FixturePrepareOptions,
+): Sam3FixtureConfig {
+  return {
+    sampleName: options.sampleName?.trim() || DEFAULT_SAMPLE_NAME,
+    sourceFile: options.sourceFile?.trim() || DEFAULT_SOURCE_FILE,
+    sourceUrl: options.sourceUrl?.trim() || DEFAULT_SOURCE_URL,
+  };
+}
+
+function createFixtureConfigKey(config: Sam3FixtureConfig) {
+  return JSON.stringify(config);
 }
 
 function validateFrameIndex(value: number) {
@@ -458,14 +514,19 @@ function disposeNormalizedInput() {
   manifest = null;
 }
 
-window.prepareBasketballSam3Fixture = prepareBasketballSam3Fixture;
-window.getBasketballSam3NormalizedMedia = getBasketballSam3NormalizedMedia;
-window.getBasketballSam3FrameBatch = getBasketballSam3FrameBatch;
-window.getBasketballSam3FixtureManifest = getBasketballSam3FixtureManifest;
+window.prepareSam3Fixture = prepareSam3Fixture;
+window.getSam3NormalizedMedia = getSam3NormalizedMedia;
+window.getSam3FrameBatch = getSam3FrameBatch;
+window.getSam3FixtureManifest = getSam3FixtureManifest;
+
+window.prepareBasketballSam3Fixture = () => prepareSam3Fixture();
+window.getBasketballSam3NormalizedMedia = () => getSam3NormalizedMedia();
+window.getBasketballSam3FrameBatch = getSam3FrameBatch;
+window.getBasketballSam3FixtureManifest = getSam3FixtureManifest;
 
 prepareButton?.addEventListener("click", () => {
   prepareButton.disabled = true;
-  prepareBasketballSam3Fixture()
+  prepareSam3Fixture()
     .catch((error: unknown) => {
       setStatus(error instanceof Error ? error.message : "Preparation failed.");
     })
@@ -476,7 +537,7 @@ prepareButton?.addEventListener("click", () => {
 
 sampleButton?.addEventListener("click", () => {
   sampleButton.disabled = true;
-  getBasketballSam3FrameBatch({ count: 3, startFrameIndex: 0 })
+  getSam3FrameBatch({ count: 3, startFrameIndex: 0 })
     .catch((error: unknown) => {
       setStatus(error instanceof Error ? error.message : "Extraction failed.");
     })

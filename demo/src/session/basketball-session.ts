@@ -1,29 +1,33 @@
 import {
   DetectionFrameSelectionMode,
+  MediaNormalizationContainer,
+  MediaNormalizationVideoCodec,
   MediaInteractionMode,
   MediaRendererFit,
   createMediaSession,
   type MediaSession,
 } from "supervision-js";
-import type { BasketballSampleFixtureDefinition } from "../fixtures/basketball-sample";
+import type { Sam3FixtureDefinition } from "../fixtures/sam3-fixtures";
 import {
-  createBasketballSampleDetectionSource,
-  loadBasketballSampleDetectionManifest,
-  loadBasketballSampleMedia,
-} from "../fixtures/basketball-sample";
+  createSam3FixtureDetectionSource,
+  loadSam3FixtureDetectionManifest,
+  loadSam3FixtureMedia,
+} from "../fixtures/sam3-fixtures";
+import {
+  NORMALIZED_UPLOAD_VIDEO_BITRATE,
+  TARGET_UPLOAD_FRAME_RATE,
+} from "../media/upload-media";
 import { createBasketballSamplePresentation } from "../presentation/basketball-presentation";
 import type { DemoSessionCallbacks } from "./demo-session-types";
 
 export async function createBasketballSession(
   options: {
     readonly container: HTMLDivElement;
-    readonly definition: BasketballSampleFixtureDefinition;
+    readonly definition: Sam3FixtureDefinition;
   } & DemoSessionCallbacks,
 ): Promise<MediaSession> {
-  const manifest = await loadBasketballSampleDetectionManifest(
-    options.definition,
-  );
-  const detectionSource = createBasketballSampleDetectionSource(
+  const manifest = await loadSam3FixtureDetectionManifest(options.definition);
+  const detectionSource = createSam3FixtureDetectionSource(
     manifest,
     options.definition,
   );
@@ -41,7 +45,7 @@ export async function createBasketballSession(
     status: detectionSource.status,
   });
 
-  const mediaSource = await loadBasketballSampleMedia(options.definition);
+  const mediaSource = await loadSam3FixtureMedia(options.definition);
 
   if (!options.isActive()) {
     detectionSource.destroy();
@@ -67,7 +71,21 @@ export async function createBasketballSession(
           selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
         },
       },
-      media: mediaSource.src,
+      media: mediaSource.media,
+      normalize: mediaSource.normalizeInBrowser
+        ? {
+            audio: { discard: true },
+            container: MediaNormalizationContainer.WebM,
+            stream: true,
+            video: {
+              bitrate: NORMALIZED_UPLOAD_VIDEO_BITRATE,
+              codec: MediaNormalizationVideoCodec.Vp9,
+              forceTranscode: true,
+              frameRate: TARGET_UPLOAD_FRAME_RATE,
+              keyFrameInterval: 1,
+            },
+          }
+        : false,
       onState: options.onSessionState,
       presentation,
       renderer: {

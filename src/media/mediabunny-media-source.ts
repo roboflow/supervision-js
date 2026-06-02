@@ -4,6 +4,9 @@ import type { InputFormat, Source } from "mediabunny";
 
 export interface MediabunnyMediaSourceInput {
   readonly formats?: readonly InputFormat[];
+  readonly metadata?: {
+    readonly duration?: number | null;
+  };
   readonly source: Source;
 }
 
@@ -59,12 +62,17 @@ export async function openMediabunnyMediaSource(
       primaryVideoTrack.getFirstTimestamp(),
     ]);
 
+    const duration =
+      typeof sourceInput === "string"
+        ? metadataDuration
+        : (sourceInput.metadata?.duration ?? metadataDuration);
+
     return {
       input,
       metadata: {
         audioTrackCount: audioTracks.length,
         canRead,
-        duration: metadataDuration,
+        duration,
         firstTimestamp,
         formatMimeType: format.mimeType,
         formatName: format.name,

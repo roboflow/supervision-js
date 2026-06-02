@@ -36,6 +36,7 @@ export function DemoShell({
               <span>CV media rendering workbench</span>
             </div>
           </div>
+          {sourceControls}
           <div className="demo-shell__mode" role="tablist">
             <button
               aria-pressed={mode === DemoViewMode.Demo}
@@ -53,7 +54,6 @@ export function DemoShell({
             </button>
           </div>
         </div>
-        {sourceControls}
         {controlBar}
         {performanceStrip}
         {renderControls}

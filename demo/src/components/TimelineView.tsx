@@ -167,28 +167,32 @@ export function TimelineView({
       </div>
 
       <div className="timeline-view__scrubber">
-        <div className="timeline-view__lane" aria-hidden="true">
-          {normalizedRangeStyles.map(({ key, style }) => (
-            <span
-              className="timeline-view__segment timeline-view__segment--normalized"
-              key={key}
-              style={style}
-            />
-          ))}
-          {processedRangeStyles.map(({ key, style }) => (
-            <span
-              className="timeline-view__segment timeline-view__segment--processed"
-              key={key}
-              style={style}
-            />
-          ))}
-          {processingRangeStyles.map(({ key, style }) => (
-            <span
-              className="timeline-view__segment timeline-view__segment--processing"
-              key={key}
-              style={style}
-            />
-          ))}
+        <div className="timeline-view__lanes" aria-hidden="true">
+          <div className="timeline-view__lane timeline-view__lane--normalization">
+            {normalizedRangeStyles.map(({ key, style }) => (
+              <span
+                className="timeline-view__segment timeline-view__segment--normalized"
+                key={key}
+                style={style}
+              />
+            ))}
+          </div>
+          <div className="timeline-view__lane timeline-view__lane--detections">
+            {processedRangeStyles.map(({ key, style }) => (
+              <span
+                className="timeline-view__segment timeline-view__segment--processed"
+                key={key}
+                style={style}
+              />
+            ))}
+            {processingRangeStyles.map(({ key, style }) => (
+              <span
+                className="timeline-view__segment timeline-view__segment--processing"
+                key={key}
+                style={style}
+              />
+            ))}
+          </div>
         </div>
         <div
           aria-hidden="true"

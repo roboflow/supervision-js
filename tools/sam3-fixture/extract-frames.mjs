@@ -7,36 +7,53 @@ import process from "node:process";
 const DEFAULT_CHROME_DEBUG_URL = "http://127.0.0.1:9223";
 const DEFAULT_FIXTURE_URL = "http://127.0.0.1:5175/";
 const DEFAULT_OUTPUT = "tools/sam3-fixture/output/frames.jsonl";
-const DEFAULT_COUNT = 270;
 const DEFAULT_QUALITY = 0.92;
 
 const options = parseArgs(process.argv.slice(2));
 
+if (options.help) {
+  printHelp();
+  process.exit(0);
+}
+
 await mkdir(path.dirname(options.output), { recursive: true });
 
-const target = await findPageTarget(options.chromeDebugUrl, options.url);
+const target = await findOrCreatePageTarget(
+  options.chromeDebugUrl,
+  options.url,
+);
 const client = await createCdpClient(target.webSocketDebuggerUrl);
 
 try {
   await client.send("Runtime.enable");
   await client.send("Page.enable");
-  await client.send("Runtime.evaluate", {
-    awaitPromise: true,
-    expression: "window.prepareBasketballSam3Fixture()",
-    returnByValue: true,
+  await client.send("Page.navigate", { url: options.url });
+  await waitForPageLoad(client);
+
+  const manifest = await evaluateFixturePrepare(client, {
+    sampleName: options.sampleName,
+    sourceFile: options.sourceFile,
+    sourceUrl: options.sourceUrl,
   });
+  const frameCount = options.count ?? manifest.video.estimatedFrameCount;
+
+  if (!Number.isInteger(frameCount) || frameCount <= 0) {
+    throw new Error(
+      "Unable to infer frame count from the normalized fixture manifest. Pass --count explicitly.",
+    );
+  }
 
   const output = createWriteStream(options.output, { encoding: "utf8" });
 
   try {
     for (
       let frameIndex = options.startFrame;
-      frameIndex < options.startFrame + options.count;
+      frameIndex < options.startFrame + frameCount;
       frameIndex += options.batchSize
     ) {
       const count = Math.min(
         options.batchSize,
-        options.startFrame + options.count - frameIndex,
+        options.startFrame + frameCount - frameIndex,
       );
       const batch = await evaluateFixtureBatch(client, {
         count,
@@ -58,10 +75,27 @@ try {
   client.close();
 }
 
+async function evaluateFixturePrepare(client, options) {
+  const response = await client.send("Runtime.evaluate", {
+    awaitPromise: true,
+    expression: `window.prepareSam3Fixture(${JSON.stringify(removeUndefinedProperties(options))})`,
+    returnByValue: true,
+  });
+
+  if (response.exceptionDetails) {
+    throw new Error(
+      response.exceptionDetails.text ??
+        "Fixture preparation failed in browser.",
+    );
+  }
+
+  return response.result.value;
+}
+
 async function evaluateFixtureBatch(client, options) {
   const response = await client.send("Runtime.evaluate", {
     awaitPromise: true,
-    expression: `window.getBasketballSam3FrameBatch(${JSON.stringify({
+    expression: `window.getSam3FrameBatch(${JSON.stringify({
       count: options.count,
       quality: options.quality,
       startFrameIndex: options.frameIndex,
@@ -78,18 +112,65 @@ async function evaluateFixtureBatch(client, options) {
   return response.result.value;
 }
 
-async function findPageTarget(chromeDebugUrl, pageUrl) {
-  const response = await globalThis.fetch(`${chromeDebugUrl}/json`);
-  const targets = await response.json();
-  const target = targets.find(
+async function waitForPageLoad(client) {
+  await client.send("Runtime.evaluate", {
+    awaitPromise: true,
+    expression:
+      "document.readyState === 'complete' ? true : new Promise((resolve) => window.addEventListener('load', () => resolve(true), { once: true }))",
+    returnByValue: true,
+  });
+}
+
+async function findOrCreatePageTarget(chromeDebugUrl, pageUrl) {
+  const targets = await fetchTargets(chromeDebugUrl);
+  const existingTarget = targets.find(
     (candidate) => candidate.type === "page" && candidate.url === pageUrl,
   );
 
-  if (!target?.webSocketDebuggerUrl) {
-    throw new Error(`No Chrome page target found for ${pageUrl}.`);
+  if (existingTarget?.webSocketDebuggerUrl) {
+    return existingTarget;
   }
 
-  return target;
+  const reusableTarget = targets.find(
+    (candidate) =>
+      candidate.type === "page" &&
+      typeof candidate.webSocketDebuggerUrl === "string",
+  );
+
+  if (reusableTarget?.webSocketDebuggerUrl) {
+    return reusableTarget;
+  }
+
+  const createdResponse = await globalThis.fetch(
+    `${chromeDebugUrl}/json/new?${encodeURIComponent(pageUrl)}`,
+    { method: "PUT" },
+  );
+
+  if (!createdResponse.ok) {
+    throw new Error(
+      `Unable to create Chrome page target: ${createdResponse.status} ${createdResponse.statusText}`,
+    );
+  }
+
+  const createdTarget = await createdResponse.json();
+
+  if (!createdTarget?.webSocketDebuggerUrl) {
+    throw new Error(`Chrome did not return a websocket target for ${pageUrl}.`);
+  }
+
+  return createdTarget;
+}
+
+async function fetchTargets(chromeDebugUrl) {
+  const response = await globalThis.fetch(`${chromeDebugUrl}/json`);
+
+  if (!response.ok) {
+    throw new Error(
+      `Unable to reach Chrome remote debugging at ${chromeDebugUrl}. Start Chrome with --remote-debugging-port=9223.`,
+    );
+  }
+
+  return response.json();
 }
 
 function createCdpClient(webSocketUrl) {
@@ -153,9 +234,13 @@ function parseArgs(args) {
   const parsed = {
     batchSize: 1,
     chromeDebugUrl: DEFAULT_CHROME_DEBUG_URL,
-    count: DEFAULT_COUNT,
+    count: undefined,
+    help: false,
     output: DEFAULT_OUTPUT,
     quality: DEFAULT_QUALITY,
+    sampleName: undefined,
+    sourceFile: undefined,
+    sourceUrl: undefined,
     startFrame: 0,
     url: DEFAULT_FIXTURE_URL,
   };
@@ -164,7 +249,9 @@ function parseArgs(args) {
     const arg = args[index];
     const next = args[index + 1];
 
-    if (arg === "--batch-size" && next) {
+    if (arg === "--help" || arg === "-h") {
+      parsed.help = true;
+    } else if (arg === "--batch-size" && next) {
       parsed.batchSize = Number(next);
       index += 1;
     } else if (arg === "--chrome-debug-url" && next) {
@@ -178,6 +265,15 @@ function parseArgs(args) {
       index += 1;
     } else if (arg === "--quality" && next) {
       parsed.quality = Number(next);
+      index += 1;
+    } else if (arg === "--sample-name" && next) {
+      parsed.sampleName = next;
+      index += 1;
+    } else if (arg === "--source-file" && next) {
+      parsed.sourceFile = next;
+      index += 1;
+    } else if (arg === "--source-url" && next) {
+      parsed.sourceUrl = next;
       index += 1;
     } else if (arg === "--start-frame" && next) {
       parsed.startFrame = Number(next);
@@ -196,14 +292,45 @@ function parseArgs(args) {
     quality: parsed.quality,
     startFrame: parsed.startFrame,
   })) {
-    if (!Number.isFinite(value)) {
+    if (value !== undefined && !Number.isFinite(value)) {
       throw new Error(`Invalid numeric option: ${key}`);
     }
   }
 
-  if (parsed.batchSize <= 0 || parsed.count <= 0 || parsed.startFrame < 0) {
+  if (
+    parsed.batchSize <= 0 ||
+    (parsed.count !== undefined && parsed.count <= 0) ||
+    parsed.startFrame < 0
+  ) {
     throw new Error("Frame extraction options must be positive.");
   }
 
   return parsed;
+}
+
+function printHelp() {
+  console.log(`Usage:
+node tools/sam3-fixture/extract-frames.mjs \\
+  --output demo/fixtures/my_sample/frames.jsonl \\
+  --sample-name my_sample \\
+  --source-file source.mov \\
+  --source-url /@fs//absolute/repo/path/demo/fixtures/my_sample/source.mov
+
+Options:
+  --batch-size <count>               default: 1
+  --chrome-debug-url <url>            default: ${DEFAULT_CHROME_DEBUG_URL}
+  --count <frames>                    default: normalized manifest frame count
+  --output <path>                     default: ${DEFAULT_OUTPUT}
+  --quality <0..1>                    default: ${DEFAULT_QUALITY}
+  --sample-name <name>
+  --source-file <name>
+  --source-url <url>
+  --start-frame <frameIndex>          default: 0
+  --url <fixture page url>            default: ${DEFAULT_FIXTURE_URL}`);
+}
+
+function removeUndefinedProperties(value) {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, entryValue]) => entryValue !== undefined),
+  );
 }

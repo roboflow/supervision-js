@@ -2,6 +2,7 @@ import {
   DemoSourceMode,
   type UploadInferenceState,
 } from "../session/demo-session-types";
+import type { Sam3FixtureDefinition } from "../fixtures/sam3-fixtures";
 
 export function SourceControls({
   apiKey,
@@ -13,7 +14,10 @@ export function SourceControls({
   onClassNamesChange,
   onFileChange,
   onModeChange,
+  onSampleChange,
   onStartUploadInference,
+  sampleFixtureId,
+  sampleFixtures,
   selectedFileName,
   uploadState,
 }: {
@@ -26,7 +30,10 @@ export function SourceControls({
   readonly onClassNamesChange: (classNames: string) => void;
   readonly onFileChange: (file: File | null) => void;
   readonly onModeChange: (mode: DemoSourceMode) => void;
+  readonly onSampleChange: (sampleName: string) => void;
   readonly onStartUploadInference: () => void;
+  readonly sampleFixtureId: string;
+  readonly sampleFixtures: readonly Sam3FixtureDefinition[];
   readonly selectedFileName: string | null;
   readonly uploadState: UploadInferenceState;
 }) {
@@ -37,14 +44,20 @@ export function SourceControls({
   return (
     <section className="source-controls" aria-label="Media source controls">
       <div className="source-controls__mode">
-        <button
-          aria-pressed={mode === DemoSourceMode.Basketball}
-          disabled={disabled}
-          onClick={() => onModeChange(DemoSourceMode.Basketball)}
-          type="button"
-        >
-          Basketball sample
-        </button>
+        {sampleFixtures.map((fixture) => (
+          <button
+            aria-pressed={
+              mode === DemoSourceMode.Fixture &&
+              sampleFixtureId === fixture.sampleName
+            }
+            disabled={disabled}
+            key={fixture.sampleName}
+            onClick={() => onSampleChange(fixture.sampleName)}
+            type="button"
+          >
+            {fixture.displayName}
+          </button>
+        ))}
         <button
           aria-pressed={mode === DemoSourceMode.Upload}
           disabled={disabled}

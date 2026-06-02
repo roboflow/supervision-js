@@ -279,6 +279,9 @@ export async function normalizeMediaProgressively(
       mimeType,
       rendererSource: createMediabunnyMediaRendererSource({
         formats: [WEBM],
+        metadata: {
+          duration: inputMetadata.duration,
+        },
         source: new ReadableStreamSource(rendererReadable, {
           maxCacheSize: 512 * 2 ** 20,
         }),

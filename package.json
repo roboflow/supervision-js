@@ -96,6 +96,7 @@
     "fixture:sam3:dev": "npm run build && vite --config tools/sam3-fixture/vite.config.ts",
     "fixture:sam3:build": "npm run build && tsc --noEmit -p tools/sam3-fixture/tsconfig.json && vite build --config tools/sam3-fixture/vite.config.ts",
     "fixture:sam3:chunk": "node tools/sam3-fixture/chunk-detections.mjs",
+    "fixture:sam3:create": "node tools/sam3-fixture/create-fixture.mjs",
     "fixture:sam3:extract": "node tools/sam3-fixture/extract-frames.mjs",
     "fixture:sam3:run": "node tools/sam3-fixture/run-sam3.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",

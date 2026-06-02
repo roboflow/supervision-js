@@ -15,9 +15,9 @@ import {
   type WritableDetectionFrameSource,
 } from "supervision-js";
 import type {
-  BasketballSampleDetectionSourceSummary,
-  BasketballSampleSummary,
-} from "../fixtures/basketball-sample";
+  Sam3FixtureDetectionSourceSummary,
+  Sam3FixtureSummary,
+} from "../fixtures/sam3-fixtures";
 import { inferSam3FrameBatchStream } from "../inference/roboflow-sam3";
 import {
   NORMALIZED_UPLOAD_VIDEO_BITRATE,
@@ -179,7 +179,12 @@ export async function createUploadSession(
     errorMessage: null,
     status: preparedMedia.statusLabel,
   });
-  options.onFixtureSummary(createUploadSummary(preparedMedia, 0));
+  options.onFixtureSummary(
+    createUploadSummary(preparedMedia, {
+      classNames: options.uploadRun.classNames,
+      detectionCount: 0,
+    }),
+  );
   options.onUploadState({
     completedFrames: 0,
     errorMessage: null,
@@ -330,7 +335,10 @@ async function runUploadInference(options: {
         }
 
         options.onFixtureSummary(
-          createUploadSummary(options.preparedMedia, summary.detectionCount),
+          createUploadSummary(options.preparedMedia, {
+            classNames: options.uploadRun.classNames,
+            detectionCount: summary.detectionCount,
+          }),
         );
         options.onDetectionSourceState({
           datasetId: options.detectionSource.datasetId,
@@ -462,10 +470,14 @@ function frameOverlapsTime(frame: DetectionFrame, time: number) {
 
 function createUploadSummary(
   media: PreparedUploadMedia,
-  detectionCount: number,
-): BasketballSampleSummary {
+  options: {
+    readonly classNames: readonly string[];
+    readonly detectionCount: number;
+  },
+): Sam3FixtureSummary {
   return {
-    detectionCount,
+    classNames: options.classNames,
+    detectionCount: options.detectionCount,
     duration: media.duration,
     fixtureName: `Uploaded ${media.kind}`,
     frameCount: media.frameCount,
@@ -489,7 +501,7 @@ function createNormalizationTimelineRanges(
 
 function getDetectionSourceSummary(
   source: WritableDetectionFrameSource,
-): BasketballSampleDetectionSourceSummary | null {
+): Sam3FixtureDetectionSourceSummary | null {
   const summary = source.getSummary();
 
   return summary ? convertWriteSummary(summary) : null;
@@ -497,7 +509,7 @@ function getDetectionSourceSummary(
 
 function convertWriteSummary(
   summary: ColdDetectionFrameStoreWriteSummary,
-): BasketballSampleDetectionSourceSummary {
+): Sam3FixtureDetectionSourceSummary {
   return {
     chunkCount: summary.chunkCount,
     chunkDurationSeconds: summary.chunkDurationSeconds,
