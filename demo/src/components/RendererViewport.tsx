@@ -128,6 +128,7 @@ function selectViewportActivity(sessionState: MediaSessionState | null) {
 function isForegroundActivity(activity: MediaSessionActivity) {
   return (
     activity.kind !== MediaSessionActivityKind.DetectionsLoading &&
+    activity.kind !== MediaSessionActivityKind.MediaNormalizing &&
     activity.kind !== MediaSessionActivityKind.RenderPreparing
   );
 }
