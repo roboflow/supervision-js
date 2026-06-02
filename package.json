@@ -84,7 +84,9 @@
     "dev:lib": "rollup -c -w",
     "dev:demo": "npm run dev -w demo",
     "demo:dev": "npm run build && npm run dev:demo",
-    "demo:build": "npm run build && npm run build -w demo",
+    "demo:build": "npm run build && npm run build -w demo && npm run demo:server:build",
+    "demo:server:build": "tsc -p demo/server/tsconfig.json",
+    "demo:serve": "node demo/server-dist/production-server.js",
     "benchmark:initial:dev": "npm run dev -w benchmark/initial",
     "benchmark:initial:build": "npm run build -w benchmark/initial",
     "benchmark:masks": "npm run build && node benchmark/masks/run.mjs",
@@ -115,6 +117,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@rollup/plugin-typescript": "^12.3.0",
+    "@types/node": "^24.12.4",
     "concurrently": "^9.2.1",
     "eslint": "^10.3.0",
     "husky": "^9.1.7",

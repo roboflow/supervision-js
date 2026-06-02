@@ -3,7 +3,12 @@ import tseslint from "typescript-eslint";
 
 export default [
   {
-    ignores: ["**/dist/**", "**/coverage/**", "tools/sam3-fixture/output/**"],
+    ignores: [
+      "**/dist/**",
+      "**/coverage/**",
+      "demo/server-dist/**",
+      "tools/sam3-fixture/output/**",
+    ],
   },
   {
     languageOptions: {

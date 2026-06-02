@@ -2,8 +2,8 @@ import { Buffer } from "node:buffer";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Plugin } from "vite";
 
-const SAM3_PROXY_PATH = "/api/roboflow/sam3/concept_segment";
-const SAM3_STREAM_PATH = "/api/roboflow/sam3/concept_segment_stream";
+export const SAM3_PROXY_PATH = "/api/roboflow/sam3/concept_segment";
+export const SAM3_STREAM_PATH = "/api/roboflow/sam3/concept_segment_stream";
 const SAM3_ENDPOINT = "https://serverless.roboflow.com/sam3/concept_segment";
 const API_KEY_HEADER = "x-roboflow-api-key";
 const SAM3_MODEL_ID = "sam3/sam3_final";
@@ -39,7 +39,7 @@ interface Sam3StreamRequestFrame {
   readonly mediaTime: number;
 }
 
-async function handleSam3ProxyRequest(
+export async function handleSam3ProxyRequest(
   request: IncomingMessage,
   response: ServerResponse,
 ) {
@@ -88,7 +88,7 @@ async function handleSam3ProxyRequest(
   }
 }
 
-async function handleSam3StreamRequest(
+export async function handleSam3StreamRequest(
   request: IncomingMessage,
   response: ServerResponse,
 ) {
