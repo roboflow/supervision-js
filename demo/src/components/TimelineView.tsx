@@ -154,7 +154,7 @@ export function TimelineView({
         </span>
         <span className="timeline-view__chip timeline-view__chip--processed">
           <span className="timeline-view__chip-dot" />
-          Processed
+          Has detections
         </span>
         <span className="timeline-view__chip timeline-view__chip--normalized">
           <span className="timeline-view__chip-dot" />
@@ -162,7 +162,7 @@ export function TimelineView({
         </span>
         <span className="timeline-view__chip timeline-view__chip--processing">
           <span className="timeline-view__chip-dot" />
-          Processing
+          Running inference
         </span>
       </div>
 
