@@ -140,6 +140,7 @@ export function createPreparedRenderWindow(options: {
     frame: DetectionFrame,
     mediaTime: number,
     scheduleOptions: {
+      readonly emitDiagnostics?: boolean;
       readonly priority: PreparedRenderSchedulePriority;
     },
   ) => {
@@ -195,7 +196,9 @@ export function createPreparedRenderWindow(options: {
       queuedMaskFrameKeys.push(key);
     }
 
-    emitDiagnostics();
+    if (scheduleOptions.emitDiagnostics !== false) {
+      emitDiagnostics();
+    }
     pumpMaskFrameQueue();
 
     return true;
@@ -474,11 +477,17 @@ export function createPreparedRenderWindow(options: {
         break;
       }
 
-      const scheduled = scheduleBackgroundMaskFrame(frame);
+      const scheduled = scheduleBackgroundMaskFrame(frame, {
+        emitDiagnostics: false,
+      });
 
       if (scheduled) {
         scheduledFrameCount += 1;
       }
+    }
+
+    if (scheduledFrameCount > 0) {
+      emitDiagnostics();
     }
   }
 
@@ -938,8 +947,12 @@ export function createPreparedRenderWindow(options: {
     });
   }
 
-  function scheduleBackgroundMaskFrame(frame: DetectionFrame) {
+  function scheduleBackgroundMaskFrame(
+    frame: DetectionFrame,
+    options: { readonly emitDiagnostics?: boolean } = {},
+  ) {
     return scheduleMaskFrame(frame, frame.mediaTime, {
+      emitDiagnostics: options.emitDiagnostics,
       priority: PreparedRenderSchedulePriority.Background,
     });
   }

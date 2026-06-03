@@ -476,6 +476,48 @@ describe("prepared render window", () => {
     }
   });
 
+  it("emits one diagnostic update for a background scheduling batch", () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const onDiagnostics = vi.fn();
+      const renderWindow = createPreparedRenderWindow({
+        detectionTimeline: createTimeline(manyFrames),
+        maskStyle: new BaseMaskStyle(),
+        renderPreparation: {
+          maskFrame: {
+            maxPendingFrameCount: 10,
+            prefetchFrameCount: 10,
+            scheduleBatchSize: 10,
+            scanIntervalSeconds: 0,
+          },
+          onDiagnostics,
+        },
+      });
+
+      renderWindow.getFrame(0);
+
+      expect(onDiagnostics).toHaveBeenCalledTimes(3);
+      expect(onDiagnostics).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          artifacts: [
+            expect.objectContaining({
+              pendingCount: 10,
+              window: expect.objectContaining({
+                targetFrameCount: 10,
+              }),
+            }),
+          ],
+        }),
+      );
+
+      renderWindow.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("tops the prepared target back up when ready-ahead reaches the low watermark", async () => {
     vi.useFakeTimers();
     resetMocks();
