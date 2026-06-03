@@ -1,7 +1,14 @@
 const FALLBACK_HARDWARE_CONCURRENCY = 4;
-const MAX_AUTO_MASK_PREPARATION_WORKER_COUNT = 4;
-const MAX_REQUESTED_MASK_PREPARATION_WORKER_COUNT = 8;
-const MIN_MASK_PREPARATION_WORKER_COUNT = 1;
+
+/**
+ * Automatic mask preparation intentionally uses a small pool. RLE decode and
+ * PNG ID-mask creation are CPU-heavy enough to benefit from parallelism, but
+ * worker count also increases memory pressure and can compete with media
+ * decode. Explicit caller requests are allowed higher, but still bounded.
+ */
+export const AUTO_MASK_PREPARATION_WORKER_LIMIT = 4;
+export const REQUESTED_MASK_PREPARATION_WORKER_LIMIT = 8;
+export const MIN_MASK_PREPARATION_WORKER_COUNT = 1;
 
 export function resolveMaskPreparationWorkerCount(
   options: {
@@ -15,7 +22,7 @@ export function resolveMaskPreparationWorkerCount(
   ) {
     return clampWorkerCount(
       Math.floor(options.requestedWorkerCount),
-      MAX_REQUESTED_MASK_PREPARATION_WORKER_COUNT,
+      REQUESTED_MASK_PREPARATION_WORKER_LIMIT,
     );
   }
 
@@ -24,10 +31,7 @@ export function resolveMaskPreparationWorkerCount(
     : FALLBACK_HARDWARE_CONCURRENCY;
   const autoWorkerCount = Math.floor(hardwareConcurrency / 2);
 
-  return clampWorkerCount(
-    autoWorkerCount,
-    MAX_AUTO_MASK_PREPARATION_WORKER_COUNT,
-  );
+  return clampWorkerCount(autoWorkerCount, AUTO_MASK_PREPARATION_WORKER_LIMIT);
 }
 
 export function getBrowserMaskPreparationWorkerCount(

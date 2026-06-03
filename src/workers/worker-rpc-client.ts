@@ -77,7 +77,14 @@ export function createWorkerRpcClient<
 
       return new Promise<Response>((resolve, reject) => {
         pendingRequests.set(request.requestId, { reject, resolve });
-        options.worker.postMessage(request);
+
+        try {
+          options.worker.postMessage(request);
+        } catch (error) {
+          pendingRequests.delete(request.requestId);
+          failureMessage = getErrorMessage(error, options.defaultErrorMessage);
+          reject(new Error(failureMessage));
+        }
       });
     },
   };
@@ -112,4 +119,8 @@ export function createWorkerRpcClient<
 
     pendingRequests.clear();
   }
+}
+
+function getErrorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
 }

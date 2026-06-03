@@ -78,6 +78,32 @@ describe("worker rpc client", () => {
     client.destroy();
   });
 
+  it("rejects and marks the client failed when posting to the worker throws", async () => {
+    const fakeWorker = createFakeWorker({
+      postMessageError: new Error("post failed"),
+    });
+    const client = createWorkerRpcClient<TestWorkerRequest, TestWorkerResponse>(
+      {
+        defaultErrorMessage: "Test worker failed.",
+        isResponse: isTestResponse,
+        worker: fakeWorker.worker,
+      },
+    );
+
+    await expect(
+      client.request({
+        payload: "hello",
+        type: "request",
+      }),
+    ).rejects.toThrow("post failed");
+    await expect(
+      client.request({ payload: "again", type: "request" }),
+    ).rejects.toThrow("post failed");
+    expect(client.getFailureMessage()).toBe("post failed");
+
+    client.destroy();
+  });
+
   it("passes orphaned responses to the caller for cleanup", () => {
     const fakeWorker = createFakeWorker();
     const onOrphanedResponse = vi.fn();
@@ -103,7 +129,7 @@ describe("worker rpc client", () => {
   });
 });
 
-function createFakeWorker() {
+function createFakeWorker(options: { readonly postMessageError?: Error } = {}) {
   const messageListeners: Array<(event: MessageEvent<unknown>) => void> = [];
   const errorListeners: Array<(event: ErrorEvent) => void> = [];
   const messages: unknown[] = [];
@@ -121,6 +147,10 @@ function createFakeWorker() {
     },
 
     postMessage(message: unknown) {
+      if (options.postMessageError) {
+        throw options.postMessageError;
+      }
+
       messages.push(message);
     },
 

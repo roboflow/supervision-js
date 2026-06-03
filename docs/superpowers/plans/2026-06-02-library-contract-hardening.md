@@ -111,13 +111,13 @@ Stop after each checkpoint for manual demo testing.
 - Modify: `src/renderers/pixi-mask-layer.ts`
 - Modify: `src/renderers/pixi-id-mask-shader.ts`
 
-- [ ] Keep worker pool defaults bounded and explainable.
-- [ ] Keep active-frame jobs prioritized over background prefetch.
-- [ ] Keep PNG ID-mask path as the preferred artifact and RGBA as fallback.
-- [ ] Make style changes avoid unnecessary worker rebuilds when the ID-mask shader can handle them.
-- [ ] Add tests around worker fallback, cancellation, destroyed worker clients, and artifact closure.
-- [ ] Run `npm run test -- src/workers src/render-preparation`.
-- [ ] Run `npm run benchmark:masks:gpu:build`.
+- [x] Keep worker pool defaults bounded and explainable.
+- [x] Keep active-frame jobs prioritized over background prefetch.
+- [x] Keep PNG ID-mask path as the preferred artifact and RGBA as fallback.
+- [x] Make style changes avoid unnecessary worker rebuilds when the ID-mask shader can handle them.
+- [x] Add tests around worker fallback, cancellation, destroyed worker clients, and artifact closure.
+- [x] Run focused worker/render-preparation tests.
+- [x] Run `npm run benchmark:masks:gpu:build`.
 
 ### Checkpoint 6: Define Renderer Layer Contracts
 

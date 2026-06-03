@@ -227,6 +227,48 @@ describe("mask frame preparer", () => {
     }
   });
 
+  it("rejects pending worker preparations after destroy instead of falling back", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const fakeWorker = createFakeMaskPreparationWorker((message) => ({
+        imageData: new ImageData(new Uint8ClampedArray(2 * 2 * 4), 2, 2),
+        key: message.job.key,
+        requestId: message.requestId,
+        type: MaskPreparationWorkerMessageType.Complete,
+      }));
+      const preparer = createMaskFramePreparer({
+        renderPreparation: {
+          maskFrame: {
+            workerCount: 1,
+          },
+          mode: RenderPreparationMode.Worker,
+          workerFactory: {
+            createWorker: () => fakeWorker.worker,
+          },
+        },
+      });
+      const framePromise = preparer.prepare(maskPreparationJob);
+
+      expect(fakeWorker.messages).toHaveLength(1);
+
+      preparer.destroy();
+
+      await expect(framePromise).rejects.toThrow(
+        "Worker RPC client has been destroyed.",
+      );
+      await expect(preparer.prepare(maskPreparationJob)).rejects.toThrow(
+        "Mask frame preparer has been destroyed.",
+      );
+      expect(fakeWorker.terminateCount).toBe(1);
+
+      await vi.runOnlyPendingTimersAsync();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("hydrates PNG ID-mask worker artifacts without losing shader palettes", async () => {
     vi.useFakeTimers();
     resetMocks();

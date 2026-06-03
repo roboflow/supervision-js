@@ -56,6 +56,7 @@ export function createMaskFramePreparer(
     mode,
     renderPreparation: options.renderPreparation,
   });
+  let isDestroyed = false;
 
   if (!workerPreparer) {
     return createMainThreadMaskFramePreparer(
@@ -66,6 +67,11 @@ export function createMaskFramePreparer(
 
   return {
     destroy() {
+      if (isDestroyed) {
+        return;
+      }
+
+      isDestroyed = true;
       workerPreparer?.destroy();
       workerPreparer = undefined;
       mainThreadPreparer.destroy();
@@ -76,6 +82,10 @@ export function createMaskFramePreparer(
     },
 
     async prepare(job) {
+      if (isDestroyed) {
+        throw new Error("Mask frame preparer has been destroyed.");
+      }
+
       const activeWorkerPreparer = workerPreparer;
 
       if (!activeWorkerPreparer) {
@@ -85,6 +95,10 @@ export function createMaskFramePreparer(
       try {
         return await activeWorkerPreparer.prepare(job);
       } catch (error) {
+        if (isDestroyed) {
+          throw error;
+        }
+
         if (workerPreparer === activeWorkerPreparer) {
           activeWorkerPreparer.destroy();
           workerPreparer = undefined;
@@ -258,10 +272,17 @@ function createWorkerMaskFramePreparer(
   workerCount: number,
 ): MaskFramePreparer {
   let latestMessage: string | null = null;
+  let isDestroyed = false;
   const workers = createWorkerRpcPool(workerFactory, workerCount);
 
   return {
     destroy() {
+      if (isDestroyed) {
+        return;
+      }
+
+      isDestroyed = true;
+
       for (const worker of workers) {
         worker.rpc.destroy();
       }
@@ -283,6 +304,10 @@ function createWorkerMaskFramePreparer(
     },
 
     async prepare(job) {
+      if (isDestroyed) {
+        throw new Error("Mask frame preparer has been destroyed.");
+      }
+
       return prepareWithWorker(
         selectLeastBusyWorker(workers),
         job,
