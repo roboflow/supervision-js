@@ -12,6 +12,7 @@ export interface PixiBoxLayerState {
   readonly activeDetectionFrameTime: number | null;
   readonly activeDetectionFrameIndex: number | null;
   readonly activeDetectionCount: number;
+  readonly activeDetectionIndexes: readonly number[];
 }
 
 export interface PixiBoxLayer {
@@ -27,6 +28,7 @@ export function createPixiBoxLayer(options: {
   let boxStyle: BoxStyle | null = options.boxStyle ?? new BaseBoxStyle();
   let boxGraphics: PixiGraphics | undefined;
   let lastDrawnDetectionFrameTime: number | null = null;
+  let lastDrawnState: PixiBoxLayerState | undefined;
   let hasDrawnDetectionFrame = false;
   let isDirty = true;
 
@@ -44,13 +46,15 @@ export function createPixiBoxLayer(options: {
         hasDrawnDetectionFrame &&
         detectionFrameTime === lastDrawnDetectionFrameTime
       ) {
-        return getBoxLayerState(detectionFrame);
+        return lastDrawnState ?? getBoxLayerState(detectionFrame, []);
       }
 
       isDirty = false;
       hasDrawnDetectionFrame = true;
       lastDrawnDetectionFrameTime = detectionFrameTime;
       boxGraphics?.clear();
+
+      const activeDetectionIndexes: number[] = [];
 
       if (boxStyle && detectionFrame) {
         for (const [
@@ -67,11 +71,14 @@ export function createPixiBoxLayer(options: {
             continue;
           }
 
+          activeDetectionIndexes.push(detectionIndex);
           drawBoxInstruction(boxGraphics, instruction);
         }
       }
 
-      return getBoxLayerState(detectionFrame);
+      lastDrawnState = getBoxLayerState(detectionFrame, activeDetectionIndexes);
+
+      return lastDrawnState;
     },
 
     setBoxStyle(nextBoxStyle) {
@@ -118,9 +125,11 @@ function drawBoxInstruction(
 
 function getBoxLayerState(
   detectionFrame: DetectionFrame | undefined,
+  activeDetectionIndexes: readonly number[],
 ): PixiBoxLayerState {
   return {
-    activeDetectionCount: detectionFrame?.detections.length ?? 0,
+    activeDetectionCount: activeDetectionIndexes.length,
+    activeDetectionIndexes,
     activeDetectionFrameIndex: detectionFrame?.frameIndex ?? null,
     activeDetectionFrameTime: detectionFrame?.mediaTime ?? null,
   };

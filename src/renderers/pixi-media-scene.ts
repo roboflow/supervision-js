@@ -1,12 +1,23 @@
 import { RENDER_ENGINE_PREFERENCE } from "#constants/media-renderer";
+import { BaseBoxStyle } from "#styles/box-style";
+import type { DetectionFrame } from "#types/detections";
+import type { LabelStyle } from "#types/label-style";
+import type { MaskStyle } from "#types/mask-style";
 import type {
   MediaRendererScene,
   MediaRendererSceneOptions,
+  MediaRendererSceneTimelineContext,
+  PresentedMediaSample,
 } from "./media-renderer-scene";
 import { createPixiBoxLayer, type PixiBoxLayerState } from "./pixi-box-layer";
 import { createPixiInteractionLayer } from "./pixi-interaction-layer";
 import { createPixiLabelLayer } from "./pixi-label-layer";
 import { createPixiMaskLayer } from "./pixi-mask-layer";
+import {
+  createPixiSceneLayerSlot,
+  PixiSceneLayerKind,
+  syncPixiSceneLayerChildren,
+} from "./pixi-scene-layer-slot";
 import { calculatePixiSceneFit } from "./pixi-scene-fit";
 import type {
   Application as PixiApplication,
@@ -43,8 +54,11 @@ export async function createPixiMediaScene(
     UniformGroup,
   } = await import("pixi.js");
   const app: PixiApplication = new Application();
+  const initialBoxStyle = options.boxStyle ?? new BaseBoxStyle();
+  let currentLabelStyle: LabelStyle | null = options.labelStyle ?? null;
+  let currentMaskStyle: MaskStyle | null = options.maskStyle ?? null;
   const boxLayer = createPixiBoxLayer({
-    boxStyle: options.boxStyle,
+    boxStyle: initialBoxStyle,
     detectionTimeline: options.detectionTimeline,
   });
   let maskLayer = options.maskStyle
@@ -96,9 +110,15 @@ export async function createPixiMediaScene(
   let mediaHeight = 0;
   let mediaWidth = 0;
   let mediaScene: PixiContainer | undefined;
-  let boxGraphics: PixiGraphics | undefined;
-  let labelContainer: PixiContainer | undefined;
-  let interactionDisplay: PixiContainer | undefined;
+  let timelineContext: MediaRendererSceneTimelineContext | undefined;
+  const mediaSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Media);
+  const maskSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Mask);
+  const boxSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Box);
+  const interactionSlot = createPixiSceneLayerSlot(
+    PixiSceneLayerKind.Interaction,
+  );
+  const labelSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Label);
+  const layerSlots = [mediaSlot, maskSlot, boxSlot, interactionSlot, labelSlot];
   const interactionLayer = options.interaction
     ? createPixiInteractionLayer({
         Container,
@@ -111,43 +131,13 @@ export async function createPixiMediaScene(
           maskLayer?.pickDetectionAtPoint(point, mediaTime) ?? null,
       })
     : undefined;
-  let maskDisplay:
-    | PixiContainer
-    | InstanceType<typeof Sprite>
-    | InstanceType<typeof Mesh>
-    | undefined;
   let mediaSprite: InstanceType<typeof Sprite> | undefined;
   let stagingTexture: TextureUpload | undefined;
   let stagingTextureSource: TextureUploadSource | undefined;
   const collectFrameTimings = options.diagnostics?.frameTimings === true;
 
   const syncSceneChildren = () => {
-    if (!mediaScene || !mediaSprite || !boxGraphics) {
-      return;
-    }
-
-    const children: Array<
-      | PixiContainer
-      | PixiGraphics
-      | InstanceType<typeof Mesh>
-      | InstanceType<typeof Sprite>
-    > = [mediaSprite];
-
-    if (maskDisplay) {
-      children.push(maskDisplay);
-    }
-
-    children.push(boxGraphics);
-
-    if (interactionDisplay) {
-      children.push(interactionDisplay);
-    }
-
-    if (labelContainer) {
-      children.push(labelContainer);
-    }
-
-    mediaScene.addChild(...children);
+    syncPixiSceneLayerChildren(mediaScene, layerSlots);
   };
 
   const updateMediaSceneFit = () => {
@@ -195,21 +185,21 @@ export async function createPixiMediaScene(
       });
       const scene: PixiContainer = new Container();
       mediaSprite = new Sprite({ texture });
-      maskDisplay = maskLayer?.createSprite({
-        height: mediaHeight,
-        width: mediaWidth,
-      });
-      labelContainer = labelLayer?.createContainer();
-      interactionDisplay = interactionLayer?.createDisplay({
-        height: mediaHeight,
-        width: mediaWidth,
-      }) as PixiContainer | undefined;
       const boxes: PixiGraphics = new Graphics();
 
       mediaSprite.width = mediaWidth;
       mediaSprite.height = mediaHeight;
       boxLayer.attachGraphics(boxes);
-      boxGraphics = boxes;
+      mediaSlot.setDisplay(mediaSprite);
+      boxSlot.setDisplay(boxes);
+      interactionSlot.setDisplay(
+        interactionLayer?.createDisplay({
+          height: mediaHeight,
+          width: mediaWidth,
+        }) as PixiContainer | undefined,
+      );
+      attachMaskLayerDisplay();
+      attachLabelLayerDisplay();
       app.stage.addChild(scene);
       mediaScene = scene;
       syncSceneChildren();
@@ -219,6 +209,7 @@ export async function createPixiMediaScene(
     },
 
     setTimelineContext(context) {
+      timelineContext = context;
       maskLayer?.setTimelineContext(context);
     },
 
@@ -238,11 +229,7 @@ export async function createPixiMediaScene(
           labelLayer?.drawFrame(sample.timestamp);
           updateMediaSceneFit();
 
-          return {
-            detectionBuffer: options.detectionTimeline.getState(),
-            mediaTime: sample.timestamp,
-            ...boxState,
-          };
+          return createPresentedSampleState(sample.timestamp, boxState);
         }
 
         const totalStart = now();
@@ -252,7 +239,6 @@ export async function createPixiMediaScene(
         let interactionMs = 0;
         let labelMs = 0;
         let fitMs = 0;
-        let boxState: PixiBoxLayerState | undefined;
 
         mediaUploadMs = measure(() => {
           sample.draw(stagingContext, 0, 0, mediaWidth, mediaHeight);
@@ -262,6 +248,8 @@ export async function createPixiMediaScene(
         maskMs = measure(() => {
           maskLayer?.drawFrame(sample.timestamp);
         });
+        let boxState: PixiBoxLayerState | undefined;
+
         boxMs = measure(() => {
           boxState = boxLayer.drawFrame(sample.timestamp);
         });
@@ -288,10 +276,8 @@ export async function createPixiMediaScene(
         };
 
         return {
-          detectionBuffer: options.detectionTimeline.getState(),
-          mediaTime: sample.timestamp,
+          ...createPresentedSampleState(sample.timestamp, boxState),
           renderTimings,
-          ...boxState,
         };
       } finally {
         sample.close();
@@ -309,42 +295,29 @@ export async function createPixiMediaScene(
       boxLayer.setBoxStyle(presentation.boxStyle);
 
       if (presentation.maskStyle !== undefined) {
-        if (maskLayer) {
-          maskLayer.setMaskStyle(presentation.maskStyle);
-        } else if (presentation.maskStyle) {
-          maskLayer = createPixiMaskLayer({
-            Container,
-            ImageSource,
-            Mesh,
-            MeshGeometry,
-            Shader,
-            Sprite,
-            Texture,
-            UniformGroup,
-            detectionTimeline: options.detectionTimeline,
-            maskStyle: presentation.maskStyle,
-            renderPreparation: options.renderPreparation,
-          });
-          maskDisplay = maskLayer.createSprite({
-            height: mediaHeight,
-            width: mediaWidth,
-          });
+        currentMaskStyle = presentation.maskStyle;
+        const nextMaskLayer = presentation.maskStyle
+          ? ensureMaskLayer(presentation.maskStyle)
+          : maskLayer;
+
+        nextMaskLayer?.setMaskStyle(presentation.maskStyle);
+
+        if (presentation.maskStyle) {
+          attachMaskLayerDisplay();
           syncSceneChildren();
         }
       }
 
       if (presentation.labelStyle !== undefined) {
-        if (labelLayer) {
-          labelLayer.setLabelStyle(presentation.labelStyle);
-        } else if (presentation.labelStyle) {
-          labelLayer = createPixiLabelLayer({
-            Container,
-            Graphics,
-            Text,
-            detectionTimeline: options.detectionTimeline,
-            labelStyle: presentation.labelStyle,
-          });
-          labelContainer = labelLayer.createContainer();
+        currentLabelStyle = presentation.labelStyle;
+        const nextLabelLayer = presentation.labelStyle
+          ? ensureLabelLayer(presentation.labelStyle)
+          : labelLayer;
+
+        nextLabelLayer?.setLabelStyle(presentation.labelStyle);
+
+        if (presentation.labelStyle) {
+          attachLabelLayerDisplay();
           syncSceneChildren();
         }
       }
@@ -354,9 +327,11 @@ export async function createPixiMediaScene(
       }
 
       maskLayer?.drawFrame(mediaTime);
-      boxLayer.drawFrame(mediaTime);
+      const boxState = boxLayer.drawFrame(mediaTime);
       interactionLayer?.drawFrame(mediaTime);
       labelLayer?.drawFrame(mediaTime);
+
+      return createPresentedSampleState(mediaTime, boxState);
     },
 
     destroy() {
@@ -374,6 +349,126 @@ export async function createPixiMediaScene(
       );
     },
   };
+
+  function createPresentedSampleState(
+    mediaTime: number,
+    boxState: PixiBoxLayerState,
+  ): PresentedMediaSample {
+    const detectionFrame = options.detectionTimeline.selectFrame(mediaTime);
+
+    return {
+      activeDetectionCount: countPresentedDetections(
+        detectionFrame,
+        mediaTime,
+        boxState,
+      ),
+      activeDetectionFrameIndex: detectionFrame?.frameIndex ?? null,
+      activeDetectionFrameTime: detectionFrame?.mediaTime ?? null,
+      detectionBuffer: options.detectionTimeline.getState(),
+      mediaTime,
+    };
+  }
+
+  function countPresentedDetections(
+    frame: DetectionFrame | undefined,
+    mediaTime: number,
+    boxState: PixiBoxLayerState,
+  ) {
+    if (!frame) {
+      return 0;
+    }
+
+    const visibleDetectionIndexes = new Set(boxState.activeDetectionIndexes);
+
+    for (const [detectionIndex, detection] of frame.detections.entries()) {
+      if (visibleDetectionIndexes.has(detectionIndex)) {
+        continue;
+      }
+
+      if (
+        currentMaskStyle?.resolve(detection, {
+          detectionIndex,
+          frame,
+          mediaTime,
+        }) ||
+        currentLabelStyle?.resolve(detection, {
+          detectionIndex,
+          frame,
+          mediaTime,
+        })
+      ) {
+        visibleDetectionIndexes.add(detectionIndex);
+      }
+    }
+
+    return visibleDetectionIndexes.size;
+  }
+
+  function ensureMaskLayer(maskStyle: NonNullable<typeof options.maskStyle>) {
+    if (!maskLayer) {
+      maskLayer = createPixiMaskLayer({
+        Container,
+        ImageSource,
+        Mesh,
+        MeshGeometry,
+        Shader,
+        Sprite,
+        Texture,
+        UniformGroup,
+        detectionTimeline: options.detectionTimeline,
+        maskStyle,
+        renderPreparation: options.renderPreparation,
+      });
+
+      if (timelineContext) {
+        maskLayer.setTimelineContext(timelineContext);
+      }
+    }
+
+    return maskLayer;
+  }
+
+  function attachMaskLayerDisplay() {
+    if (
+      !maskLayer ||
+      maskSlot.getDisplay() ||
+      mediaWidth <= 0 ||
+      mediaHeight <= 0
+    ) {
+      return;
+    }
+
+    maskSlot.setDisplay(
+      maskLayer.createSprite({
+        height: mediaHeight,
+        width: mediaWidth,
+      }) as PixiContainer,
+    );
+  }
+
+  function ensureLabelLayer(
+    labelStyle: NonNullable<typeof options.labelStyle>,
+  ) {
+    if (!labelLayer) {
+      labelLayer = createPixiLabelLayer({
+        Container,
+        Graphics,
+        Text,
+        detectionTimeline: options.detectionTimeline,
+        labelStyle,
+      });
+    }
+
+    return labelLayer;
+  }
+
+  function attachLabelLayerDisplay() {
+    if (!labelLayer || labelSlot.getDisplay()) {
+      return;
+    }
+
+    labelSlot.setDisplay(labelLayer.createContainer());
+  }
 }
 
 function measure(work: () => void) {

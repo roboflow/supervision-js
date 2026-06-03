@@ -51,7 +51,7 @@ export interface MediaRendererScene {
   setPresentation(
     presentation: MediaRendererPresentation,
     mediaTime: number,
-  ): void;
+  ): PresentedMediaSample | void;
   destroy(): void;
 }
 

@@ -40,6 +40,7 @@ export interface MediaRendererRuntimeState {
   setSourceReady(metadata: DecodedMediaSourceMetadata): void;
   setCurrentTime(currentTime: number): void;
   recordPresentedSample(sample: PresentedMediaSample): void;
+  recordPresentationUpdate(sample: PresentedMediaSample): void;
   setReady(): void;
   setPlaying(): void;
   setBuffering(): void;
@@ -180,6 +181,16 @@ export function createMediaRendererRuntimeState(
       lastFrameRenderTimings = sample.renderTimings ?? null;
 
       options.onFrame?.(createFrameDiagnostics(sample));
+      emitState();
+    },
+
+    recordPresentationUpdate(sample) {
+      currentTime = sample.mediaTime;
+      activeDetectionFrameIndex = sample.activeDetectionFrameIndex;
+      activeDetectionFrameTime = sample.activeDetectionFrameTime;
+      activeDetectionCount = sample.activeDetectionCount;
+      lastFrameRenderTimings = sample.renderTimings ?? lastFrameRenderTimings;
+
       emitState();
     },
 

@@ -183,7 +183,14 @@ export async function createMediaRendererCore(
         return;
       }
 
-      mediaScene?.setPresentation(presentation, runtimeState.currentTime());
+      const presentedSample = mediaScene?.setPresentation(
+        presentation,
+        runtimeState.currentTime(),
+      );
+
+      if (presentedSample) {
+        runtimeState.recordPresentationUpdate(presentedSample);
+      }
     },
 
     destroy() {

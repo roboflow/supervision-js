@@ -720,7 +720,7 @@ describe("package entrypoint", () => {
       width: 2,
     });
     expect(renderer.getState()).toMatchObject({
-      activeDetectionCount: 2,
+      activeDetectionCount: 1,
       activeDetectionFrameTime: 0,
     });
 
@@ -1702,7 +1702,7 @@ describe("package entrypoint", () => {
     renderer.destroy();
   });
 
-  it("disables boxes at runtime and keeps detection diagnostics intact", async () => {
+  it("disables boxes at runtime and reports no presented detections", async () => {
     resetMocks();
     mediaMock.samples = [createMockSample(0, 0), createMockSample(0.02, 0)];
 
@@ -1725,7 +1725,7 @@ describe("package entrypoint", () => {
     expect(boxGraphics.rect).toHaveBeenCalledOnce();
     expect(boxGraphics.stroke).toHaveBeenCalledOnce();
     expect(renderer.getState()).toMatchObject({
-      activeDetectionCount: 1,
+      activeDetectionCount: 0,
       activeDetectionFrameTime: 0,
       currentTime: 0,
       presentedFrames: 1,
@@ -1741,7 +1741,7 @@ describe("package entrypoint", () => {
     expect(boxGraphics.rect).toHaveBeenCalledOnce();
     expect(boxGraphics.stroke).toHaveBeenCalledOnce();
     expect(renderer.getState()).toMatchObject({
-      activeDetectionCount: 1,
+      activeDetectionCount: 0,
       activeDetectionFrameTime: 0,
       currentTime: 0.02,
       presentedFrames: 2,

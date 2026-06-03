@@ -130,10 +130,10 @@ Stop after each checkpoint for manual demo testing.
 - Modify: `src/renderers/pixi-label-layer.ts`
 - Modify: `src/types/media-renderer.ts`
 
-- [ ] Keep media, box, mask, label, and interaction layers separately testable.
-- [ ] Keep Pixi types out of public renderer options.
-- [ ] Ensure presentation updates route through layer contracts instead of direct Pixi access.
-- [ ] Run focused renderer tests and `npm run typecheck`.
+- [x] Keep media, box, mask, label, and interaction layers separately testable.
+- [x] Keep Pixi types out of public renderer options.
+- [x] Ensure presentation updates route through layer contracts instead of direct Pixi access.
+- [x] Run focused renderer tests and `npm run typecheck`.
 
 ### Checkpoint 7: Promote Interaction And Picking To Library Feature
 
