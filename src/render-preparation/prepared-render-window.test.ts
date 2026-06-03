@@ -333,12 +333,57 @@ describe("prepared render window", () => {
               maxPreparedCount: 2,
               prefetchCount: 3,
               preparedCount: 2,
+              window: {
+                availableFrameCount: 4,
+                refillThresholdFrameCount: 2,
+                targetFrameCount: 3,
+              },
             }),
           ],
         }),
       );
 
       renderWindow.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("closes prepared mask artifacts when the prepared cache evicts them", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const closeByKey = new Map<string, ReturnType<typeof vi.fn>>();
+      const renderWindow = createPreparedRenderWindow({
+        detectionTimeline: createTimeline(frames),
+        maskStyle: new BaseMaskStyle(),
+        maxMaskFrameCacheSize: 1,
+        onMaskFramePrepared(maskFrame) {
+          const originalClose = maskFrame.close;
+          const close = vi.fn(() => {
+            originalClose();
+          });
+
+          Object.defineProperty(maskFrame, "close", {
+            configurable: true,
+            value: close,
+          });
+          closeByKey.set(maskFrame.key, close);
+        },
+        prefetchFrameCount: 1,
+      });
+
+      renderWindow.getFrame(0);
+      await vi.runOnlyPendingTimersAsync();
+      renderWindow.getFrame(0.04);
+      await vi.runOnlyPendingTimersAsync();
+
+      expect(closeByKey.get("0:0")).toHaveBeenCalledOnce();
+      expect(closeByKey.get("1:0.04")).not.toHaveBeenCalled();
+
+      renderWindow.destroy();
+      expect(closeByKey.get("1:0.04")).toHaveBeenCalledOnce();
     } finally {
       vi.useRealTimers();
     }
@@ -894,6 +939,9 @@ describe("prepared render window", () => {
         detectionTimeline: createTimeline(frames),
         maskStyle: createArtifactStableMaskStyle(0.2, "first"),
         renderPreparation: {
+          maskFrame: {
+            workerCount: 1,
+          },
           mode: RenderPreparationMode.Worker,
           workerFactory: {
             createWorker: () => {
@@ -973,10 +1021,79 @@ describe("prepared render window", () => {
       vi.useRealTimers();
     }
   });
+
+  it("closes orphaned worker artifacts after active style invalidates pending work", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const staleImageBitmap = {
+        close: vi.fn(),
+        height: 2,
+        width: 2,
+      } as unknown as ImageBitmap;
+      const workers = [
+        createFakeMaskPreparationWorker({
+          autoComplete: false,
+          createCompleteData: () => ({ imageBitmap: staleImageBitmap }),
+        }),
+      ];
+      const renderWindow = createPreparedRenderWindow({
+        detectionTimeline: createTimeline(frames),
+        maskStyle: createArtifactStableMaskStyle(0.2, "first"),
+        renderPreparation: {
+          maskFrame: {
+            workerCount: 1,
+          },
+          mode: RenderPreparationMode.Worker,
+          workerFactory: {
+            createWorker: () => {
+              const worker =
+                workers[workers.length - 1] ??
+                createFakeMaskPreparationWorker();
+
+              if (worker.terminated) {
+                const nextWorker = createFakeMaskPreparationWorker({
+                  autoComplete: false,
+                });
+
+                workers.push(nextWorker);
+                return nextWorker.worker;
+              }
+
+              return worker.worker;
+            },
+          },
+        },
+      });
+
+      renderWindow.getFrame(0);
+      await vi.runOnlyPendingTimersAsync();
+
+      renderWindow.setMaskStyle(createArtifactStableMaskStyle(0.8, "second"));
+      workers[0]?.completeNext();
+      await Promise.resolve();
+
+      expect(staleImageBitmap.close).toHaveBeenCalledOnce();
+
+      renderWindow.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 function createFakeMaskPreparationWorker(
-  options: { readonly autoComplete?: boolean } = {},
+  options: {
+    readonly autoComplete?: boolean;
+    readonly createCompleteData?: (message: {
+      readonly job: { readonly key: string };
+      readonly requestId: number;
+    }) => Partial<{
+      readonly imageBitmap: ImageBitmap;
+      readonly imageData: ImageData;
+    }>;
+  } = {},
 ) {
   const autoComplete = options.autoComplete ?? true;
   const messages: unknown[] = [];
@@ -988,9 +1105,13 @@ function createFakeMaskPreparationWorker(
     readonly requestId: number;
   }) => {
     for (const listener of listeners) {
+      const completeData = options.createCompleteData?.(message) ?? {
+        imageData: new ImageData(new Uint8ClampedArray(2 * 2 * 4), 2, 2),
+      };
+
       listener({
         data: {
-          imageData: new ImageData(new Uint8ClampedArray(2 * 2 * 4), 2, 2),
+          ...completeData,
           key: message.job.key,
           requestId: message.requestId,
           type: MaskPreparationWorkerMessageType.Complete,

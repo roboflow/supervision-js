@@ -37,6 +37,11 @@ interface PendingMaskFrame {
   readonly mediaTime: number;
 }
 
+enum PreparedRenderSchedulePriority {
+  Active = "active",
+  Background = "background",
+}
+
 export interface PreparedRenderFrame {
   readonly detectionFrame: DetectionFrame;
   readonly key: string;
@@ -134,9 +139,13 @@ export function createPreparedRenderWindow(options: {
   const scheduleMaskFrame = (
     frame: DetectionFrame,
     mediaTime: number,
-    scheduleOptions: { readonly force?: boolean } = {},
+    scheduleOptions: {
+      readonly priority: PreparedRenderSchedulePriority;
+    },
   ) => {
     const key = getFrameKey(frame);
+    const isActiveFrame =
+      scheduleOptions.priority === PreparedRenderSchedulePriority.Active;
 
     if (
       !maskStyle ||
@@ -148,7 +157,7 @@ export function createPreparedRenderWindow(options: {
     }
 
     if (pendingMaskFrames.has(key)) {
-      if (scheduleOptions.force) {
+      if (isActiveFrame) {
         pruneStaleQueuedMaskFrames(mediaTime, key);
         promotePendingMaskFrame(key, mediaTime);
       }
@@ -156,7 +165,7 @@ export function createPreparedRenderWindow(options: {
       return false;
     }
 
-    if (scheduleOptions.force) {
+    if (isActiveFrame) {
       pruneStaleQueuedMaskFrames(mediaTime);
 
       if (pendingMaskFrames.size >= maxPendingFrameCount) {
@@ -164,10 +173,7 @@ export function createPreparedRenderWindow(options: {
       }
     }
 
-    if (
-      !scheduleOptions.force &&
-      pendingMaskFrames.size >= maxPendingFrameCount
-    ) {
+    if (!isActiveFrame && pendingMaskFrames.size >= maxPendingFrameCount) {
       return false;
     }
 
@@ -183,7 +189,7 @@ export function createPreparedRenderWindow(options: {
       mediaTime,
     });
 
-    if (scheduleOptions.force) {
+    if (isActiveFrame) {
       queuedMaskFrameKeys.unshift(key);
     } else {
       queuedMaskFrameKeys.push(key);
@@ -468,9 +474,7 @@ export function createPreparedRenderWindow(options: {
         break;
       }
 
-      const scheduled = scheduleMaskFrame(frame, frame.mediaTime, {
-        force: false,
-      });
+      const scheduled = scheduleBackgroundMaskFrame(frame);
 
       if (scheduled) {
         scheduledFrameCount += 1;
@@ -573,7 +577,7 @@ export function createPreparedRenderWindow(options: {
       key,
       mediaTime: detectionFrame.mediaTime,
     });
-    scheduleMaskFrame(detectionFrame, mediaTime, { force: true });
+    scheduleActiveMaskFrame(detectionFrame, mediaTime);
     schedulePreparedWindow(detectionFrame, mediaTime, {
       force: getFrameOptions.forcePreparedWindow,
     });
@@ -615,6 +619,11 @@ export function createPreparedRenderWindow(options: {
           preparedCount: preparedMaskFrames.size,
           refillThresholdCount: refillThresholdFrameCount,
           scheduleBatchSize,
+          window: {
+            availableFrameCount: lastPreparedWindowFrames.length,
+            refillThresholdFrameCount,
+            targetFrameCount: lastPreparedTargetFrames.length,
+          },
         },
       ],
       executionMode: status.executionMode,
@@ -921,6 +930,18 @@ export function createPreparedRenderWindow(options: {
     }
 
     return retainedKeys;
+  }
+
+  function scheduleActiveMaskFrame(frame: DetectionFrame, mediaTime: number) {
+    return scheduleMaskFrame(frame, mediaTime, {
+      priority: PreparedRenderSchedulePriority.Active,
+    });
+  }
+
+  function scheduleBackgroundMaskFrame(frame: DetectionFrame) {
+    return scheduleMaskFrame(frame, frame.mediaTime, {
+      priority: PreparedRenderSchedulePriority.Background,
+    });
   }
 }
 

@@ -52,6 +52,12 @@ export interface RenderPreparationActiveFrameDiagnostics {
   readonly status: RenderPreparationArtifactFrameStatus;
 }
 
+export interface RenderPreparationArtifactWindowDiagnostics {
+  readonly availableFrameCount: number;
+  readonly refillThresholdFrameCount: number;
+  readonly targetFrameCount: number;
+}
+
 export interface RenderPreparationArtifactDiagnostics {
   readonly activeFrame?: RenderPreparationActiveFrameDiagnostics | null;
   readonly inFlightCount?: number;
@@ -66,6 +72,7 @@ export interface RenderPreparationArtifactDiagnostics {
   readonly preparedCount: number;
   readonly refillThresholdCount?: number;
   readonly scheduleBatchSize?: number;
+  readonly window?: RenderPreparationArtifactWindowDiagnostics;
 }
 
 export interface RenderPreparationDiagnostics {

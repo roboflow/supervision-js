@@ -145,6 +145,7 @@ export {
   RenderPreparationWorkerStatus,
   type RenderPreparationActiveFrameDiagnostics,
   type RenderPreparationArtifactDiagnostics,
+  type RenderPreparationArtifactWindowDiagnostics,
   type RenderPreparationDiagnostics,
   type RenderPreparationMaskFrameOptions,
   type RenderPreparationOptions,
