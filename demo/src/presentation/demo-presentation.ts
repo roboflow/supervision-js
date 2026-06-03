@@ -10,21 +10,21 @@ import {
   type MediaRendererPresentation,
 } from "supervision-js";
 
-export interface BasketballClassStyle {
+export interface DemoClassStyle {
   readonly fill: number;
   readonly labelBackground: number;
   readonly labelText: number;
   readonly stroke: number;
 }
 
-export interface BasketballPresentationSettings {
+export interface DemoPresentationSettings {
   readonly boxesEnabled: boolean;
   readonly labelsEnabled: boolean;
   readonly masksEnabled: boolean;
   readonly boxShape: BoxShape;
   readonly boxStrokeWidth: number;
   readonly boxFillAlpha: number;
-  readonly classStyles: Record<string, BasketballClassStyle>;
+  readonly classStyles: Record<string, DemoClassStyle>;
   readonly labelBackgroundAlpha: number;
   readonly labelFontSize: number;
   readonly maskAlpha: number;
@@ -33,9 +33,9 @@ export interface BasketballPresentationSettings {
   readonly confidenceThreshold: number;
 }
 
-export const defaultBasketballClassNames = ["person", "horse", "cow"];
+export const defaultDemoClassNames = ["person", "horse", "cow"];
 
-const defaultBasketballClassStyles: Record<string, BasketballClassStyle> = {
+const defaultDemoClassStyles: Record<string, DemoClassStyle> = {
   basketball: {
     fill: 0xff7a1a,
     labelBackground: 0x7c2d12,
@@ -74,47 +74,40 @@ const defaultBasketballClassStyles: Record<string, BasketballClassStyle> = {
   },
 };
 
-const fallbackStyle: BasketballClassStyle = {
+const fallbackStyle: DemoClassStyle = {
   fill: 0x38bdf8,
   labelBackground: 0x164e63,
   labelText: 0xecfeff,
   stroke: 0x7dd3fc,
 };
 
-export const defaultBasketballPresentationSettings: BasketballPresentationSettings =
-  {
-    boxesEnabled: true,
-    boxFillAlpha: 0.1,
-    boxShape: BoxShape.RoundedRect,
-    boxStrokeWidth: 4,
-    classStyles: defaultBasketballClassStyles,
-    confidenceThreshold: 0.5,
-    labelBackgroundAlpha: 0.78,
-    labelFontSize: 14,
-    labelsEnabled: true,
-    maskAlpha: 0.7,
-    maskStrokeAlpha: 1,
-    maskStrokeWidth: 5,
-    masksEnabled: true,
-  };
+export const defaultDemoPresentationSettings: DemoPresentationSettings = {
+  boxesEnabled: true,
+  boxFillAlpha: 0.1,
+  boxShape: BoxShape.RoundedRect,
+  boxStrokeWidth: 4,
+  classStyles: defaultDemoClassStyles,
+  confidenceThreshold: 0.5,
+  labelBackgroundAlpha: 0.78,
+  labelFontSize: 14,
+  labelsEnabled: true,
+  maskAlpha: 0.7,
+  maskStrokeAlpha: 1,
+  maskStrokeWidth: 5,
+  masksEnabled: true,
+};
 
-export function createBasketballSamplePresentation(
-  settings: BasketballPresentationSettings,
+export function createDemoPresentation(
+  settings: DemoPresentationSettings,
 ): MediaRendererPresentation {
   return {
-    boxStyle: settings.boxesEnabled ? createBasketballBoxStyle(settings) : null,
-    labelStyle: settings.labelsEnabled
-      ? createBasketballLabelStyle(settings)
-      : null,
-    maskStyle: settings.masksEnabled
-      ? createBasketballMaskStyle(settings)
-      : null,
+    boxStyle: settings.boxesEnabled ? createDemoBoxStyle(settings) : null,
+    labelStyle: settings.labelsEnabled ? createDemoLabelStyle(settings) : null,
+    maskStyle: settings.masksEnabled ? createDemoMaskStyle(settings) : null,
   };
 }
 
-function createBasketballBoxStyle(
-  settings: BasketballPresentationSettings,
-): BoxStyle {
+function createDemoBoxStyle(settings: DemoPresentationSettings): BoxStyle {
   return {
     resolve(detection: Detection): BoxDrawInstruction | undefined {
       if (!detection.rect || !passesConfidenceThreshold(detection, settings)) {
@@ -146,12 +139,10 @@ function createBasketballBoxStyle(
   };
 }
 
-function createBasketballMaskStyle(
-  settings: BasketballPresentationSettings,
-): MaskStyle {
+function createDemoMaskStyle(settings: DemoPresentationSettings): MaskStyle {
   return {
     artifactKey: [
-      "basketball-mask",
+      "demo-mask",
       settings.confidenceThreshold,
       settings.maskAlpha,
       settings.maskStrokeAlpha,
@@ -184,9 +175,7 @@ function createBasketballMaskStyle(
   };
 }
 
-function createBasketballLabelStyle(
-  settings: BasketballPresentationSettings,
-): LabelStyle {
+function createDemoLabelStyle(settings: DemoPresentationSettings): LabelStyle {
   return {
     resolve(detection: Detection): LabelDrawInstruction | undefined {
       if (!detection.rect || !passesConfidenceThreshold(detection, settings)) {
@@ -224,13 +213,13 @@ function createBasketballLabelStyle(
 
 function passesConfidenceThreshold(
   detection: Detection,
-  settings: BasketballPresentationSettings,
+  settings: DemoPresentationSettings,
 ) {
   return (detection.confidence ?? 1) >= settings.confidenceThreshold;
 }
 
-export function resolveBasketballClassStyle(
-  settings: BasketballPresentationSettings,
+export function resolveDemoClassStyle(
+  settings: DemoPresentationSettings,
   className: string,
 ) {
   return settings.classStyles[className] ?? fallbackStyle;
@@ -238,16 +227,14 @@ export function resolveBasketballClassStyle(
 
 function resolveClassStyle(
   detection: Detection,
-  settings: BasketballPresentationSettings,
+  settings: DemoPresentationSettings,
 ) {
   return detection.className
-    ? resolveBasketballClassStyle(settings, detection.className)
+    ? resolveDemoClassStyle(settings, detection.className)
     : fallbackStyle;
 }
 
-function serializeMaskClassStyles(
-  styles: Record<string, BasketballClassStyle>,
-) {
+function serializeMaskClassStyles(styles: Record<string, DemoClassStyle>) {
   return Object.entries(styles)
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([className, style]) => `${className}:${style.fill}:${style.stroke}`)

@@ -6,18 +6,27 @@ import {
   type MediaSessionActivity,
   type MediaSessionState,
 } from "supervision-js";
-import type { UploadInferenceState } from "../session/demo-session-types";
+import type {
+  DemoMediaState,
+  UploadInferenceState,
+} from "../session/demo-session-types";
 
 export function RendererViewport({
   containerRef,
+  mediaState,
   sessionState,
   uploadInferenceState,
 }: {
   readonly containerRef: RefObject<HTMLDivElement | null>;
+  readonly mediaState: DemoMediaState;
   readonly sessionState: MediaSessionState | null;
   readonly uploadInferenceState: UploadInferenceState | null;
 }) {
-  const overlay = createViewportOverlay(sessionState, uploadInferenceState);
+  const overlay = createViewportOverlay(
+    sessionState,
+    uploadInferenceState,
+    mediaState,
+  );
 
   return (
     <section className="renderer-viewport" aria-label="Renderer viewport">
@@ -67,6 +76,7 @@ type OverlayProgressStyle = CSSProperties & {
 function createViewportOverlay(
   sessionState: MediaSessionState | null,
   uploadInferenceState: UploadInferenceState | null,
+  mediaState: DemoMediaState,
 ): ViewportOverlay | null {
   const activity = selectViewportActivity(sessionState);
 
@@ -103,6 +113,16 @@ function createViewportOverlay(
             uploadInferenceState.totalFrames
           : null,
       tone: "active",
+    };
+  }
+
+  if (!sessionState && mediaState.status) {
+    return {
+      detail: mediaState.errorMessage,
+      kicker: mediaState.errorMessage ? "Error" : "Loading",
+      label: mediaState.status,
+      progress: null,
+      tone: mediaState.errorMessage ? "error" : "active",
     };
   }
 

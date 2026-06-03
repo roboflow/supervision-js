@@ -1,10 +1,10 @@
 import { BoxShape } from "supervision-js";
 import { useState, type CSSProperties } from "react";
 import {
-  resolveBasketballClassStyle,
-  type BasketballClassStyle,
-  type BasketballPresentationSettings,
-} from "../presentation/basketball-presentation";
+  resolveDemoClassStyle,
+  type DemoClassStyle,
+  type DemoPresentationSettings,
+} from "../presentation/demo-presentation";
 
 enum RenderControlsTab {
   Global = "global",
@@ -17,22 +17,22 @@ export function RenderControls({
   settings,
 }: {
   readonly classNames: readonly string[];
-  readonly onChange: (settings: BasketballPresentationSettings) => void;
-  readonly settings: BasketballPresentationSettings;
+  readonly onChange: (settings: DemoPresentationSettings) => void;
+  readonly settings: DemoPresentationSettings;
 }) {
   const [activeTab, setActiveTab] = useState(RenderControlsTab.Global);
-  const updateSettings = <Key extends keyof BasketballPresentationSettings>(
+  const updateSettings = <Key extends keyof DemoPresentationSettings>(
     key: Key,
-    value: BasketballPresentationSettings[Key],
+    value: DemoPresentationSettings[Key],
   ) => {
     onChange({ ...settings, [key]: value });
   };
   const updateClassStyle = (
     className: string,
-    key: keyof BasketballClassStyle,
+    key: keyof DemoClassStyle,
     value: number,
   ) => {
-    const currentStyle = resolveBasketballClassStyle(settings, className);
+    const currentStyle = resolveDemoClassStyle(settings, className);
 
     onChange({
       ...settings,
@@ -82,11 +82,11 @@ function GlobalRenderControls({
   onChange,
   settings,
 }: {
-  readonly onChange: <Key extends keyof BasketballPresentationSettings>(
+  readonly onChange: <Key extends keyof DemoPresentationSettings>(
     key: Key,
-    value: BasketballPresentationSettings[Key],
+    value: DemoPresentationSettings[Key],
   ) => void;
-  readonly settings: BasketballPresentationSettings;
+  readonly settings: DemoPresentationSettings;
 }) {
   return (
     <div className="render-controls__panel render-controls__panel--global">
@@ -221,15 +221,15 @@ function ClassRenderControls({
   readonly classNames: readonly string[];
   readonly onChange: (
     className: string,
-    key: keyof BasketballClassStyle,
+    key: keyof DemoClassStyle,
     value: number,
   ) => void;
-  readonly settings: BasketballPresentationSettings;
+  readonly settings: DemoPresentationSettings;
 }) {
   return (
     <div className="render-controls__panel render-controls__panel--classes">
       {classNames.map((className) => {
-        const style = resolveBasketballClassStyle(settings, className);
+        const style = resolveDemoClassStyle(settings, className);
 
         return (
           <article className="class-style-card" key={className}>

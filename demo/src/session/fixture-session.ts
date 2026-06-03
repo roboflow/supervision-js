@@ -17,10 +17,10 @@ import {
   NORMALIZED_UPLOAD_VIDEO_BITRATE,
   TARGET_UPLOAD_FRAME_RATE,
 } from "../media/upload-media";
-import { createBasketballSamplePresentation } from "../presentation/basketball-presentation";
+import { createDemoPresentation } from "../presentation/demo-presentation";
 import type { DemoSessionCallbacks } from "./demo-session-types";
 
-export async function createBasketballSession(
+export async function createFixtureSession(
   options: {
     readonly container: HTMLDivElement;
     readonly definition: Sam3FixtureDefinition;
@@ -34,7 +34,7 @@ export async function createBasketballSession(
 
   if (!options.isActive()) {
     detectionSource.destroy();
-    throw new Error("Basketball session was canceled.");
+    throw new Error("Fixture session was canceled.");
   }
 
   options.onFixtureSummary(detectionSource.fixtureSummary);
@@ -49,7 +49,7 @@ export async function createBasketballSession(
 
   if (!options.isActive()) {
     detectionSource.destroy();
-    throw new Error("Basketball session was canceled.");
+    throw new Error("Fixture session was canceled.");
   }
 
   options.onMediaState({
@@ -57,9 +57,7 @@ export async function createBasketballSession(
     status: mediaSource.statusLabel,
   });
 
-  const presentation = createBasketballSamplePresentation(
-    options.presentationSettings,
-  );
+  const presentation = createDemoPresentation(options.presentationSettings);
   try {
     const session = await createMediaSession({
       container: options.container,

@@ -22,11 +22,11 @@ import {
   type Sam3FixtureDefinition,
 } from "../fixtures/sam3-fixtures";
 import {
-  createBasketballSamplePresentation,
-  defaultBasketballPresentationSettings,
-  type BasketballPresentationSettings,
-} from "../presentation/basketball-presentation";
-import { createBasketballSession } from "../session/basketball-session";
+  createDemoPresentation,
+  defaultDemoPresentationSettings,
+  type DemoPresentationSettings,
+} from "../presentation/demo-presentation";
+import { createFixtureSession } from "../session/fixture-session";
 import { DEFAULT_UPLOAD_CLASS_NAMES } from "../session/demo-session-config";
 import {
   DemoSourceMode,
@@ -42,7 +42,7 @@ import {
 export { DemoSourceMode };
 export type { DemoDetectionSourceState, DemoMediaState, UploadInferenceState };
 
-export interface BasketballDemoRendererState {
+export interface DemoRendererState {
   readonly canUseRenderer: boolean;
   readonly detectionSourceState: DemoDetectionSourceState;
   readonly containerRef: RefObject<HTMLDivElement | null>;
@@ -52,7 +52,7 @@ export interface BasketballDemoRendererState {
   readonly hoveredDetectionPick: DetectionPickResult | null;
   readonly mediaState: DemoMediaState;
   readonly playbackState: MediaRendererPlaybackState | null;
-  readonly presentationSettings: BasketballPresentationSettings;
+  readonly presentationSettings: DemoPresentationSettings;
   readonly rendererState: MediaRendererState | null;
   readonly renderPreparationDiagnostics: RenderPreparationDiagnostics | null;
   readonly selectedDetectionPick: DetectionPickResult | null;
@@ -73,7 +73,7 @@ export interface BasketballDemoRendererState {
   readonly onTogglePlayback: () => void;
   readonly onUploadFileChange: (file: File | null) => void;
   readonly setPresentationSettings: (
-    settings: BasketballPresentationSettings,
+    settings: DemoPresentationSettings,
   ) => void;
   readonly setSampleFixtureId: (sampleName: string) => void;
   readonly setSourceMode: (mode: DemoSourceMode) => void;
@@ -103,15 +103,15 @@ const initialUploadInferenceState: UploadInferenceState = {
   totalFrames: 0,
 };
 
-export function useBasketballDemoRenderer(): BasketballDemoRendererState {
+export function useDemoRenderer(): DemoRendererState {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const effectRunRef = useRef(0);
   const rendererRef = useRef<MediaRenderer | null>(null);
   const seekRunRef = useRef(0);
   const uploadAbortRef = useRef<AbortController | null>(null);
   const uploadFileRef = useRef<File | null>(null);
-  const presentationSettingsRef = useRef<BasketballPresentationSettings>(
-    defaultBasketballPresentationSettings,
+  const presentationSettingsRef = useRef<DemoPresentationSettings>(
+    defaultDemoPresentationSettings,
   );
   const [rendererState, setRendererState] = useState<MediaRendererState | null>(
     null,
@@ -136,9 +136,7 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
   });
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [presentationSettings, setPresentationSettingsState] =
-    useState<BasketballPresentationSettings>(
-      defaultBasketballPresentationSettings,
-    );
+    useState<DemoPresentationSettings>(defaultDemoPresentationSettings);
   const [sourceMode, setSourceModeState] = useState<DemoSourceMode>(
     DemoSourceMode.Fixture,
   );
@@ -243,7 +241,7 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
     void (async () => {
       try {
         if (sourceMode === DemoSourceMode.Fixture) {
-          const session = await createBasketballSession({
+          const session = await createFixtureSession({
             container,
             definition: activeFixture,
             isActive,
@@ -419,7 +417,7 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
   );
 
   const setPresentationSettings = useCallback(
-    (settings: BasketballPresentationSettings) => {
+    (settings: DemoPresentationSettings) => {
       presentationSettingsRef.current = settings;
       setPresentationSettingsState(settings);
 
@@ -428,7 +426,7 @@ export function useBasketballDemoRenderer(): BasketballDemoRendererState {
         return;
       }
 
-      renderer.setPresentation(createBasketballSamplePresentation(settings));
+      renderer.setPresentation(createDemoPresentation(settings));
       syncRendererState(renderer);
     },
     [syncRendererState],

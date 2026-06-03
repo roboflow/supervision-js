@@ -11,7 +11,7 @@ import type {
   Sam3FixtureSummary,
 } from "../fixtures/sam3-fixtures";
 import type { PreparedUploadMedia } from "../media/upload-media";
-import type { BasketballPresentationSettings } from "../presentation/basketball-presentation";
+import type { DemoPresentationSettings } from "../presentation/demo-presentation";
 
 export enum DemoSourceMode {
   Fixture = "fixture",
@@ -62,7 +62,7 @@ export interface DemoSessionCallbacks {
   readonly onRendererState: (state: MediaRendererState) => void;
   readonly onSessionState: (state: MediaSessionState) => void;
   readonly onSourceState: (state: MediaSourceState) => void;
-  readonly presentationSettings: BasketballPresentationSettings;
+  readonly presentationSettings: DemoPresentationSettings;
 }
 
 export type UploadInferenceStateSetter = Dispatch<

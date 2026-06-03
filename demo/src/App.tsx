@@ -6,16 +6,13 @@ import { RenderControls } from "./components/RenderControls";
 import { RendererViewport } from "./components/RendererViewport";
 import { SourceControls } from "./components/SourceControls";
 import { StatusPanel } from "./components/StatusPanel";
-import {
-  DemoSourceMode,
-  useBasketballDemoRenderer,
-} from "./hooks/useBasketballDemoRenderer";
-import { defaultBasketballClassNames } from "./presentation/basketball-presentation";
+import { DemoSourceMode, useDemoRenderer } from "./hooks/useDemoRenderer";
+import { defaultDemoClassNames } from "./presentation/demo-presentation";
 import { DemoViewMode } from "./session/demo-view-mode";
 import type { TimelineRange } from "./session/demo-session-types";
 
 export function App() {
-  const demo = useBasketballDemoRenderer();
+  const demo = useDemoRenderer();
   const [viewMode, setViewMode] = useState(DemoViewMode.Demo);
   const processedRanges =
     demo.sourceMode === DemoSourceMode.Fixture && demo.duration !== null
@@ -35,7 +32,7 @@ export function App() {
   const styleClassNames =
     demo.sourceMode === DemoSourceMode.Upload
       ? parseClassNames(demo.uploadClassNames)
-      : (demo.fixtureSummary?.classNames ?? defaultBasketballClassNames);
+      : (demo.fixtureSummary?.classNames ?? defaultDemoClassNames);
 
   return (
     <DemoShell
@@ -44,6 +41,7 @@ export function App() {
       viewport={
         <RendererViewport
           containerRef={demo.containerRef}
+          mediaState={demo.mediaState}
           sessionState={demo.sessionState}
           uploadInferenceState={
             demo.sourceMode === DemoSourceMode.Upload

@@ -28,7 +28,7 @@ import {
   UploadedMediaKind,
   type PreparedUploadMedia,
 } from "../media/upload-media";
-import { createBasketballSamplePresentation } from "../presentation/basketball-presentation";
+import { createDemoPresentation } from "../presentation/demo-presentation";
 import { UPLOAD_DETECTION_CHUNK_SECONDS } from "./demo-session-config";
 import type {
   DemoSessionCallbacks,
@@ -68,9 +68,7 @@ export async function createUploadSession(
     status: "ready | waiting for SAM3 frames",
   });
 
-  const presentation = createBasketballSamplePresentation(
-    options.presentationSettings,
-  );
+  const presentation = createDemoPresentation(options.presentationSettings);
   const isImageUpload = options.uploadRun.file.type.startsWith("image/");
   let preparedMedia: PreparedUploadMedia | undefined;
   let session: MediaSession | undefined;
