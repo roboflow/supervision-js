@@ -1,7 +1,9 @@
 import type {
   DetectionBufferState,
   MediaRendererPlaybackState,
+  RenderPreparationDiagnostics,
 } from "supervision-js";
+import { RenderPreparationArtifactKind } from "supervision-js";
 import { formatExactTime, formatTime } from "../format";
 import type { TimelineRange } from "../session/demo-session-types";
 import { PlaybackControls } from "./PlaybackControls";
@@ -21,6 +23,7 @@ export function ControlBar({
   playbackState,
   processedRanges,
   processingRanges,
+  renderPreparationDiagnostics,
 }: {
   readonly activeDetectionFrameTime: number | null;
   readonly canUseRenderer: boolean;
@@ -34,7 +37,12 @@ export function ControlBar({
   readonly playbackState: MediaRendererPlaybackState | null;
   readonly processedRanges: readonly TimelineRange[];
   readonly processingRanges: readonly TimelineRange[];
+  readonly renderPreparationDiagnostics: RenderPreparationDiagnostics | null;
 }) {
+  const maskFrameArtifact = renderPreparationDiagnostics?.artifacts.find(
+    (artifact) => artifact.kind === RenderPreparationArtifactKind.MaskFrame,
+  );
+
   return (
     <section className="control-bar" aria-label="Playback controls">
       <PlaybackControls
@@ -54,6 +62,8 @@ export function ControlBar({
         playbackState={playbackState}
         processedRanges={processedRanges}
         processingRanges={processingRanges}
+        readyAheadFrames={maskFrameArtifact?.preparedAheadFrameCount ?? null}
+        readyAheadSeconds={maskFrameArtifact?.preparedAheadSeconds ?? null}
       />
       <div className="control-bar__time">
         <Readout

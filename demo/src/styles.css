@@ -102,12 +102,13 @@ fieldset {
 .demo-shell__panel {
   backdrop-filter: blur(18px) saturate(1.05);
   background: rgba(8, 10, 14, 0.91);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  box-shadow: var(--shadow-high);
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  box-shadow: none;
   display: grid;
   gap: 9px;
-  margin: 0 10px 10px;
+  margin: 0;
   min-height: 0;
   overflow: auto;
   padding: 10px;
@@ -116,16 +117,7 @@ fieldset {
 }
 
 .demo-shell__panel::before {
-  background: rgba(255, 255, 255, 0.2);
-  border-radius: 999px;
-  content: "";
-  height: 1px;
-  left: 10px;
-  opacity: 0.22;
-  pointer-events: none;
-  position: absolute;
-  right: 10px;
-  top: 0;
+  content: none;
 }
 
 .demo-shell--demo .demo-shell__panel {
@@ -762,6 +754,11 @@ fieldset {
   box-shadow: none;
 }
 
+.timeline-view__chip--ready .timeline-view__chip-dot {
+  background: #9bf6a5;
+  box-shadow: none;
+}
+
 .timeline-view__chip--requested .timeline-view__chip-dot {
   background: rgba(255, 255, 255, 0.66);
 }
@@ -823,6 +820,11 @@ fieldset {
 
 .timeline-view__segment--normalized {
   background: var(--violet);
+  box-shadow: none;
+}
+
+.timeline-view__segment--ready {
+  background: linear-gradient(90deg, rgba(155, 246, 165, 0.95), #e8ffd7);
   box-shadow: none;
 }
 
@@ -1427,9 +1429,9 @@ fieldset {
   }
 
   .demo-shell__panel {
-    border-radius: 18px 18px 0 0;
+    border-radius: 0;
     left: 0;
-    margin: 0 8px;
+    margin: 0;
     overflow: visible;
     position: relative;
     right: 0;

@@ -87,6 +87,7 @@ export function App() {
           normalizedRanges={normalizedRanges}
           processedRanges={processedRanges}
           processingRanges={processingRanges}
+          renderPreparationDiagnostics={demo.renderPreparationDiagnostics}
         />
       }
       renderControls={

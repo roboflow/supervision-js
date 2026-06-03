@@ -22,6 +22,8 @@ export function TimelineView({
   playbackState,
   processedRanges = [],
   processingRanges = [],
+  readyAheadFrames,
+  readyAheadSeconds,
 }: {
   readonly activeDetectionFrameTime: number | null;
   readonly currentTime: number;
@@ -33,6 +35,8 @@ export function TimelineView({
   readonly playbackState: MediaRendererPlaybackState | null;
   readonly processedRanges?: readonly TimelineRange[];
   readonly processingRanges?: readonly TimelineRange[];
+  readonly readyAheadFrames: number | null;
+  readonly readyAheadSeconds: number | null;
 }) {
   const mediaDuration = duration !== null && duration > 0 ? duration : null;
   const timelineCurrentTime = useSmoothTimelineCurrentTime({
@@ -41,13 +45,22 @@ export function TimelineView({
     duration: mediaDuration,
     playbackState,
   });
+  const { flushSeek, onScrubChange, onScrubEnd, onScrubStart, scrubTime } =
+    useDebouncedTimelineSeek({
+      currentTime,
+      disabled,
+      duration: mediaDuration,
+      onSeek,
+    });
+  const displayedCurrentTime = scrubTime ?? timelineCurrentTime;
   const visualDuration =
     mediaDuration ??
     Math.max(
-      timelineCurrentTime,
+      displayedCurrentTime,
       detectionBuffer?.bufferEndTime ?? 0,
       detectionBuffer?.requestedEndTime ?? 0,
       activeDetectionFrameTime ?? 0,
+      currentTime + (readyAheadSeconds ?? 0),
       getMaxRangeEnd(normalizedRanges),
       getMaxRangeEnd(processedRanges),
       getMaxRangeEnd(processingRanges),
@@ -62,6 +75,14 @@ export function TimelineView({
     duration: visualDuration,
     endTime: detectionBuffer?.bufferEndTime ?? null,
     startTime: detectionBuffer?.bufferStartTime ?? null,
+  });
+  const readyAheadRange = createRangeStyle({
+    duration: visualDuration,
+    endTime:
+      readyAheadSeconds === null
+        ? null
+        : currentTime + Math.max(0, readyAheadSeconds),
+    startTime: readyAheadSeconds === null ? null : currentTime,
   });
   const processedRangeStyles = createSegmentStyles(
     processedRanges,
@@ -84,8 +105,8 @@ export function TimelineView({
       detectionBuffer?.bufferEndTime ?? null,
     );
   const inputMax = mediaDuration ?? visualDuration;
-  const inputValue = clamp(timelineCurrentTime, 0, inputMax);
-  const playheadLeft = toPercent(timelineCurrentTime, visualDuration);
+  const inputValue = clamp(displayedCurrentTime, 0, inputMax);
+  const playheadLeft = toPercent(displayedCurrentTime, visualDuration);
   const playheadProgress = toPercent(inputValue, inputMax);
   const activeFrameLeft =
     activeDetectionFrameTime === null
@@ -101,7 +122,13 @@ export function TimelineView({
     .join(" ");
 
   const handleSeek = (event: ChangeEvent<HTMLInputElement>) => {
-    onSeek(Number(event.currentTarget.value));
+    onScrubChange(Number(event.currentTarget.value));
+  };
+  const handleInputPointerDown = () => {
+    onScrubStart(inputValue);
+  };
+  const handleInputPointerUp = () => {
+    onScrubEnd();
   };
   const handleStripPointer = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (disabled || mediaDuration === null) {
@@ -109,24 +136,30 @@ export function TimelineView({
     }
 
     event.currentTarget.setPointerCapture(event.pointerId);
-    seekToPointer(event);
+    const nextTime = getPointerTime(event);
+
+    onScrubStart(nextTime);
+    onScrubChange(nextTime);
   };
   const handleStripPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.buttons !== 1) {
       return;
     }
 
-    seekToPointer(event);
+    onScrubChange(getPointerTime(event));
   };
-  const seekToPointer = (event: ReactPointerEvent<HTMLDivElement>) => {
+  const handleStripPointerUp = () => {
+    onScrubEnd();
+  };
+  const getPointerTime = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (mediaDuration === null) {
-      return;
+      return 0;
     }
 
     const rect = event.currentTarget.getBoundingClientRect();
     const offset = event.clientX - rect.left;
 
-    onSeek(clamp(offset / rect.width, 0, 1) * mediaDuration);
+    return clamp(offset / rect.width, 0, 1) * mediaDuration;
   };
 
   return (
@@ -140,6 +173,15 @@ export function TimelineView({
               detectionBuffer?.bufferStartTime ?? null,
               detectionBuffer?.bufferEndTime ?? null,
             )}
+          </strong>
+        </span>
+        <span className="timeline-view__chip timeline-view__chip--ready">
+          <span className="timeline-view__chip-dot" />
+          Ready ahead{" "}
+          <strong>
+            {readyAheadSeconds === null
+              ? "-"
+              : `${readyAheadSeconds.toFixed(2)}s · ${readyAheadFrames ?? 0}f`}
           </strong>
         </span>
         <span className="timeline-view__chip timeline-view__chip--requested">
@@ -193,12 +235,21 @@ export function TimelineView({
               />
             ))}
           </div>
+          <div className="timeline-view__lane timeline-view__lane--ready">
+            {readyAheadRange ? (
+              <span
+                className="timeline-view__segment timeline-view__segment--ready"
+                style={readyAheadRange}
+              />
+            ) : null}
+          </div>
         </div>
         <div
           aria-hidden="true"
           className={stripClassName}
           onPointerDown={handleStripPointer}
           onPointerMove={handleStripPointerMove}
+          onPointerUp={handleStripPointerUp}
         >
           {showRequestedRange && requestedRange ? (
             <span
@@ -236,6 +287,10 @@ export function TimelineView({
           max={inputMax}
           min={0}
           onChange={handleSeek}
+          onBlur={flushSeek}
+          onKeyUp={flushSeek}
+          onPointerDown={handleInputPointerDown}
+          onPointerUp={handleInputPointerUp}
           step={0.01}
           style={
             { "--timeline-progress": playheadProgress } as TimelineInputStyle
@@ -335,6 +390,111 @@ function useSmoothTimelineCurrentTime({
   }, [disabled, duration, isPlaying]);
 
   return timelineCurrentTime;
+}
+
+interface DebouncedTimelineSeekOptions {
+  readonly currentTime: number;
+  readonly disabled: boolean;
+  readonly duration: number | null;
+  readonly onSeek: (time: number) => void;
+}
+
+const TIMELINE_SEEK_DEBOUNCE_MS = 120;
+const TIMELINE_SCRUB_SETTLE_EPSILON_SECONDS = 0.05;
+
+function useDebouncedTimelineSeek({
+  currentTime,
+  disabled,
+  duration,
+  onSeek,
+}: DebouncedTimelineSeekOptions) {
+  const [scrubTime, setScrubTime] = useState<number | null>(null);
+  const scrubTimeRef = useRef<number | null>(null);
+  const seekTimerRef = useRef<number | undefined>(undefined);
+
+  const clearTimer = () => {
+    if (seekTimerRef.current !== undefined) {
+      window.clearTimeout(seekTimerRef.current);
+      seekTimerRef.current = undefined;
+    }
+  };
+
+  const commitSeek = () => {
+    const nextTime = scrubTimeRef.current;
+
+    clearTimer();
+
+    if (nextTime === null || disabled || duration === null) {
+      return;
+    }
+
+    onSeek(clamp(nextTime, 0, duration));
+  };
+
+  const scheduleSeek = () => {
+    clearTimer();
+
+    seekTimerRef.current = window.setTimeout(() => {
+      commitSeek();
+    }, TIMELINE_SEEK_DEBOUNCE_MS);
+  };
+
+  useEffect(() => {
+    if (scrubTime === null) {
+      return;
+    }
+
+    if (
+      Math.abs(currentTime - scrubTime) <= TIMELINE_SCRUB_SETTLE_EPSILON_SECONDS
+    ) {
+      scrubTimeRef.current = null;
+      setScrubTime(null);
+    }
+  }, [currentTime, scrubTime]);
+
+  useEffect(() => {
+    if (!disabled && duration !== null) {
+      return;
+    }
+
+    clearTimer();
+    scrubTimeRef.current = null;
+    setScrubTime(null);
+  }, [disabled, duration]);
+
+  useEffect(
+    () => () => {
+      clearTimer();
+    },
+    [],
+  );
+
+  return {
+    flushSeek: commitSeek,
+    onScrubChange(nextTime: number) {
+      if (disabled || duration === null) {
+        return;
+      }
+
+      const clampedTime = clamp(nextTime, 0, duration);
+
+      scrubTimeRef.current = clampedTime;
+      setScrubTime(clampedTime);
+      scheduleSeek();
+    },
+    onScrubEnd: commitSeek,
+    onScrubStart(nextTime: number) {
+      if (disabled || duration === null) {
+        return;
+      }
+
+      const clampedTime = clamp(nextTime, 0, duration);
+
+      scrubTimeRef.current = clampedTime;
+      setScrubTime(clampedTime);
+    },
+    scrubTime,
+  };
 }
 
 function clampTimelineTime(time: number, duration: number | null) {
