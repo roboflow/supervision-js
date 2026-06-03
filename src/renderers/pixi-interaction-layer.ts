@@ -3,6 +3,7 @@ import {
   pickDetectionAtPoint,
 } from "#interactions/detection-picker";
 import type { BufferedDetectionTimeline } from "#types/detection-timeline";
+import type { DetectionFrame } from "#types/detections";
 import type {
   DetectionPickPoint,
   DetectionPickResult,
@@ -92,6 +93,7 @@ export function createPixiInteractionLayer(options: {
   let hoveredPickKey: string | null = null;
   let selectedPick: DetectionPickResult | null = null;
   let selectedPickKey: string | null = null;
+  let activeFrame: DetectionFrame | undefined;
   let isDestroyed = false;
 
   return {
@@ -111,10 +113,13 @@ export function createPixiInteractionLayer(options: {
 
     drawFrame(mediaTime) {
       currentMediaTime = mediaTime;
+      activeFrame = options.detectionTimeline.selectFrame(mediaTime);
 
       if (!canHandleInteraction()) {
         setHoveredPick(null);
         setSelectedPick(null);
+      } else {
+        clearStalePicks(activeFrame);
       }
 
       redrawHighlights();
@@ -169,15 +174,23 @@ export function createPixiInteractionLayer(options: {
       currentMediaTime,
     );
 
-    if (maskPick) {
+    if (maskPick && maskPick.frame === activeFrame) {
       return maskPick;
     }
 
-    return pickDetectionAtPoint(
-      options.detectionTimeline.selectFrame(currentMediaTime),
-      pickPoint,
-      { padding: pickPadding },
-    );
+    return pickDetectionAtPoint(activeFrame, pickPoint, {
+      padding: pickPadding,
+    });
+  }
+
+  function clearStalePicks(frame: DetectionFrame | undefined) {
+    if (hoveredPick && hoveredPick.frame !== frame) {
+      setHoveredPick(null);
+    }
+
+    if (selectedPick && selectedPick.frame !== frame) {
+      setSelectedPick(null);
+    }
   }
 
   function setHoveredPick(nextPick: DetectionPickResult | null) {
@@ -219,8 +232,6 @@ export function createPixiInteractionLayer(options: {
     if (!hoveredPick && !selectedPick) {
       return;
     }
-
-    const activeFrame = options.detectionTimeline.selectFrame(currentMediaTime);
 
     drawPickHighlight(selectedPick, selectedPickKey, activeFrame, {
       alpha: 0.18,

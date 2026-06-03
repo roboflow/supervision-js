@@ -145,12 +145,12 @@ Stop after each checkpoint for manual demo testing.
 - Modify: `src/renderers/pixi-mask-layer.ts`
 - Modify: `src/renderers/pixi-box-layer.ts`
 
-- [ ] Keep picking synchronized to active media frame and detection frame.
-- [ ] Support mask and box targets with clear priority.
-- [ ] Support paused-only interaction mode.
-- [ ] Return detection, detection index, frame, media time, point, and target.
-- [ ] Run `npm run test -- src/interactions src/renderers/pixi-interaction-layer.test.ts`.
-- [ ] Run `npm run typecheck`.
+- [x] Keep picking synchronized to active media frame and detection frame.
+- [x] Support mask and box targets with clear priority.
+- [x] Support paused-only interaction mode.
+- [x] Return detection, detection index, frame, media time, point, and target.
+- [x] Run `npx vitest run src/interactions src/renderers/pixi-interaction-layer.test.ts`.
+- [x] Run `npm run typecheck`.
 
 ### Checkpoint 8: Make Loading And Processing State Ergonomic
 

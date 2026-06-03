@@ -17,6 +17,18 @@ const frame: DetectionFrame = {
   mediaTime: 0.1,
 };
 
+const nextFrame: DetectionFrame = {
+  detections: [
+    {
+      className: "player",
+      id: "player-2",
+      rect: { height: 30, width: 20, x: 50, y: 15 },
+    },
+  ],
+  frameIndex: 4,
+  mediaTime: 0.2,
+};
+
 describe("pixi interaction layer", () => {
   it("uses one media-sized hit surface and ignores picking while gated off", () => {
     const onHover = vi.fn();
@@ -116,6 +128,84 @@ describe("pixi interaction layer", () => {
     );
     expect(onHover).toHaveBeenLastCalledWith(maskPick);
   });
+
+  it("picks against the active drawn frame instead of reselecting independently", () => {
+    const onHover = vi.fn();
+    let selectedFrame = frame;
+    const layer = createPixiInteractionLayer({
+      Container: FakeContainer as never,
+      Graphics: FakeGraphics as never,
+      Rectangle: FakeRectangle as never,
+      canInteract: () => true,
+      detectionTimeline: createTimeline(() => selectedFrame),
+      interaction: {
+        mode: MediaInteractionMode.PausedOnly,
+        onHover,
+      },
+    });
+    const display = layer.createDisplay({
+      height: 80,
+      width: 120,
+    }) as FakeContainer;
+
+    layer.drawFrame(0.1);
+    selectedFrame = nextFrame;
+    display.emit("pointermove", createPointerEvent(display, 15, 20));
+
+    expect(onHover).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        detection: frame.detections[0],
+        detectionIndex: 0,
+        frame,
+        mediaTime: frame.mediaTime,
+        target: DetectionPickTarget.Box,
+      }),
+    );
+
+    layer.drawFrame(0.2);
+
+    expect(onHover).toHaveBeenLastCalledWith(null);
+  });
+
+  it("ignores stale mask picks and falls back to boxes on the active frame", () => {
+    const onHover = vi.fn();
+    const staleMaskPick = {
+      detection: nextFrame.detections[0],
+      detectionIndex: 0,
+      frame: nextFrame,
+      mediaTime: nextFrame.mediaTime,
+      point: { x: 15, y: 20 },
+      target: DetectionPickTarget.Mask,
+    };
+    const pickMaskDetectionAtPoint = vi.fn(() => staleMaskPick);
+    const layer = createPixiInteractionLayer({
+      Container: FakeContainer as never,
+      Graphics: FakeGraphics as never,
+      Rectangle: FakeRectangle as never,
+      canInteract: () => true,
+      detectionTimeline: createTimeline(frame),
+      interaction: {
+        mode: MediaInteractionMode.PausedOnly,
+        onHover,
+      },
+      pickMaskDetectionAtPoint,
+    });
+    const display = layer.createDisplay({
+      height: 80,
+      width: 120,
+    }) as FakeContainer;
+
+    layer.drawFrame(0.1);
+    display.emit("pointermove", createPointerEvent(display, 15, 20));
+
+    expect(onHover).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        detection: frame.detections[0],
+        frame,
+        target: DetectionPickTarget.Box,
+      }),
+    );
+  });
 });
 
 class FakeRectangle {
@@ -173,23 +263,26 @@ function createPointerEvent(display: FakeContainer, x: number, y: number) {
 }
 
 function createTimeline(
-  activeFrame: DetectionFrame,
+  activeFrame: DetectionFrame | (() => DetectionFrame),
 ): BufferedDetectionTimeline {
+  const getActiveFrame =
+    typeof activeFrame === "function" ? activeFrame : () => activeFrame;
+
   return {
     destroy() {},
-    getBufferedFrames: () => [activeFrame],
+    getBufferedFrames: () => [getActiveFrame()],
     getState: () => ({
-      bufferEndTime: activeFrame.endTime ?? activeFrame.mediaTime,
-      bufferStartTime: activeFrame.mediaTime,
-      detectionCount: activeFrame.detections.length,
+      bufferEndTime: getActiveFrame().endTime ?? getActiveFrame().mediaTime,
+      bufferStartTime: getActiveFrame().mediaTime,
+      detectionCount: getActiveFrame().detections.length,
       errorMessage: null,
       frameCount: 1,
-      requestedEndTime: activeFrame.endTime ?? activeFrame.mediaTime,
-      requestedStartTime: activeFrame.mediaTime,
+      requestedEndTime: getActiveFrame().endTime ?? getActiveFrame().mediaTime,
+      requestedStartTime: getActiveFrame().mediaTime,
       status: "ready",
     }),
     prepare: async () => undefined,
     prefetch() {},
-    selectFrame: () => activeFrame,
+    selectFrame: () => getActiveFrame(),
   } as unknown as BufferedDetectionTimeline;
 }
