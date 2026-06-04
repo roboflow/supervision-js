@@ -64,6 +64,7 @@ async function main() {
     cases.push(
       await benchmarkCase({
         caseName: `rgba-fill-threshold-${confidenceThreshold}`,
+        role: "runtime-rgba-artifact",
         fixture,
         frameInputs,
         run(input) {
@@ -80,6 +81,7 @@ async function main() {
     cases.push(
       await benchmarkCase({
         caseName: `rgba-fill-stroke-threshold-${confidenceThreshold}`,
+        role: "runtime-rgba-artifact",
         fixture,
         frameInputs,
         run(input) {
@@ -96,6 +98,7 @@ async function main() {
     cases.push(
       await benchmarkCase({
         caseName: `id-mask-threshold-${confidenceThreshold}`,
+        role: "runtime-id-mask-artifact",
         fixture,
         frameInputs,
         run(input) {
@@ -110,6 +113,7 @@ async function main() {
       cases.push(
         await benchmarkCase({
           caseName: `id-mask-png-level-${compressionLevel}-threshold-${confidenceThreshold}`,
+          role: "runtime-png-id-mask-artifact",
           fixture,
           frameInputs,
           run(input) {
@@ -699,6 +703,7 @@ async function benchmarkCase(options) {
     caseName: options.caseName,
     frameCount: options.frameInputs.length,
     projectedFullFixtureMs: timing.total * frameScale,
+    role: options.role,
     sampledDetectionCount,
     sampledFrameCount: options.sampledInputs.length,
     timingMs: timing,
@@ -785,6 +790,10 @@ function createRecommendations(options) {
       caseName: result.caseName,
       preparedWindowBytes: preparedWindowFrames * result.artifactBytes.mean,
     }));
+  const rleHotWindowBytes =
+    fixture.frameCount > 0
+      ? (fixture.rleCountsBytes / fixture.frameCount) * preparedWindowFrames
+      : 0;
 
   return {
     idMaskPreparedWindowBytes: idPreparedWindowBytes,
@@ -792,12 +801,14 @@ function createRecommendations(options) {
     preparedWindowFrames,
     preparedWindowSeconds: options.preparedWindowSeconds,
     pngPreparedWindowBytes,
+    rleHotWindowBytes,
     rgbaPreparedWindowBytes,
     summary: [
-      "Current RGBA artifacts are simple and renderer-friendly, but full-frame mask frames are byte-heavy.",
-      "An ID-mask representation would reduce upload/cache bytes and make per-class style changes palette-sized instead of prepared-window-sized.",
-      "PNG ID-mask artifacts are dramatically smaller on this sparse fixture, but encode time is still paid on top of RLE decode.",
-      "Actual shader complexity and Pixi integration still need a browser/GPU prototype before replacing the current stable path.",
+      "RLE remains the semantic cold-storage format because it is compact, appendable, and renderer-neutral.",
+      "Prepared artifacts are a separate runtime layer: they trade a small amount of upfront work for stable frame-time rendering.",
+      "Current RGBA artifacts are simple and renderer-friendly, but full-frame mask frames are too byte-heavy for larger prepared windows.",
+      "PNG ID-mask artifacts are dramatically smaller on this sparse fixture, while preserving per-class styling through shader palettes.",
+      "Per-class style changes should update palette uniforms instead of rebuilding the semantic detections or prepared mask geometry.",
     ],
   };
 }
@@ -828,7 +839,12 @@ function renderConsoleSummary(report) {
       (result) =>
         `${result.caseName}: ${formatMs(result.timingMs.mean)} mean/frame, ${formatMs(
           result.timingMs.p95,
-        )} p95, ${formatBytes(result.artifactBytes.mean)} artifact/frame`,
+        )} p95, ${formatBytes(
+          result.artifactBytes.mean,
+        )} artifact/frame, ${formatBytes(
+          report.recommendations.preparedWindowFrames *
+            result.artifactBytes.mean,
+        )} prepared window`,
     ),
     "",
     `5s RGBA prepared window: ${formatBytes(
@@ -852,11 +868,14 @@ function renderMarkdownReport(report) {
   const rows = report.cases
     .map(
       (result) =>
-        `| ${result.caseName} | ${result.sampledFrameCount} | ${formatMs(
+        `| ${result.caseName} | ${result.role} | ${result.sampledFrameCount} | ${formatMs(
           result.timingMs.mean,
         )} | ${formatMs(result.timingMs.p95)} | ${formatMs(
           result.projectedFullFixtureMs,
-        )} | ${formatBytes(result.artifactBytes.mean)} |`,
+        )} | ${formatBytes(result.artifactBytes.mean)} | ${formatBytes(
+          report.recommendations.preparedWindowFrames *
+            result.artifactBytes.mean,
+        )} |`,
     )
     .join("\n");
   const pngPreparedWindowRows = report.recommendations.pngPreparedWindowBytes
@@ -888,8 +907,8 @@ Generated: ${report.benchmark.generatedAt}
 
 ## Timings
 
-| Case | Sampled frames | Mean / frame | P95 / frame | Projected full fixture | Artifact bytes / frame |
-| --- | ---: | ---: | ---: | ---: | ---: |
+| Case | Role | Sampled frames | Mean / frame | P95 / frame | Projected full fixture | Artifact bytes / frame | Prepared window bytes |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 ${rows}
 
 ## Prepared Window Byte Pressure
@@ -897,6 +916,9 @@ ${rows}
 - Prepared window: ${report.recommendations.preparedWindowSeconds}s / ${
     report.recommendations.preparedWindowFrames
   } frames
+- RLE hot-window estimate: ${formatBytes(
+    report.recommendations.rleHotWindowBytes,
+  )} semantic data before decoding/preparation
 - Current RGBA artifacts: ${formatBytes(
     report.recommendations.rgbaPreparedWindowBytes,
   )}

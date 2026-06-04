@@ -313,10 +313,22 @@ Generated: ${report.benchmark.generatedAt}
 - Renderer: ${report.environment.rendererType}
 - GPU finish supported: ${report.environment.gpuFinishSupported ? "yes" : "no"}
 - User agent: ${report.environment.userAgent}
+- Interpretation: RLE remains semantic cold storage; PNG ID-mask frames are
+  runtime prepared artifacts measured here for browser decode, Pixi upload, and
+  shader render cost.
 
 | Case | Confidence | Mean / frame | P95 / frame | Decode mean | Texture/render mean | Projected fixture time | Artifact bytes / frame |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 ${rows}
+
+## Decision Inputs
+
+- Use mean and P95 frame timing to decide whether the active prepared artifact
+  can render within a 30fps or 60fps frame budget.
+- Use artifact bytes per frame to estimate hot prepared-window memory and
+  transfer pressure.
+- Prefer palette-shader paths when style changes should not rebuild per-frame
+  mask artifacts.
 `;
 }
 

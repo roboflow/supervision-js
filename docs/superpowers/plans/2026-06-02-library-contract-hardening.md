@@ -192,10 +192,10 @@ Stop after each checkpoint for manual demo testing.
 - Modify: `benchmark/masks/run.mjs`
 - Modify: `benchmark/masks/run-gpu.mjs`
 
-- [ ] Keep benchmark tables focused on RLE preparation cost, prepared artifact size, worker throughput, frame timing, and hot-window memory.
-- [ ] Add notes that RLE is semantic cold storage and PNG ID-mask is runtime representation.
-- [ ] Keep commands reproducible from the repo root.
-- [ ] Run `npm run benchmark:masks` and `npm run benchmark:masks:gpu:build`.
+- [x] Keep benchmark tables focused on RLE preparation cost, prepared artifact size, worker throughput, frame timing, and hot-window memory.
+- [x] Add notes that RLE is semantic cold storage and PNG ID-mask is runtime representation.
+- [x] Keep commands reproducible from the repo root.
+- [x] Run `npm run benchmark:masks` and `npm run benchmark:masks:gpu:build`.
 
 ## Done
 
