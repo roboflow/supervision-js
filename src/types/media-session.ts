@@ -158,8 +158,15 @@ export enum MediaSessionActivityStatus {
 
 export interface MediaSessionActivity {
   readonly artifactKind?: RenderPreparationArtifactKind;
-  readonly blockingPlayback?: boolean;
-  readonly blockingPresentation?: boolean;
+  /**
+   * True when this activity should prevent media playback from advancing.
+   */
+  readonly blockingPlayback: boolean;
+  /**
+   * True when this activity prevents the current visual frame from being fully
+   * presented, while media playback may still be allowed to advance.
+   */
+  readonly blockingPresentation: boolean;
   readonly detail?: string | null;
   readonly errorMessage?: string | null;
   readonly kind: MediaSessionActivityKind;

@@ -36,47 +36,57 @@ export function createMediaSessionStateSnapshot({
   const activities: MediaSessionActivity[] = [];
 
   if (!renderer) {
-    activities.push({
-      kind: MediaSessionActivityKind.MediaOpening,
-      label: "Opening media",
-      status: MediaSessionActivityStatus.Running,
-    });
+    activities.push(
+      createActivity({
+        blockingPlayback: true,
+        blockingPresentation: true,
+        kind: MediaSessionActivityKind.MediaOpening,
+        label: "Opening media",
+        status: MediaSessionActivityStatus.Running,
+      }),
+    );
   }
 
   if (normalization?.active) {
-    activities.push({
-      kind: MediaSessionActivityKind.MediaNormalizing,
-      label: "Normalizing media",
-      progress: normalization.progress?.progress,
-      status: MediaSessionActivityStatus.Running,
-    });
+    activities.push(
+      createActivity({
+        kind: MediaSessionActivityKind.MediaNormalizing,
+        label: "Normalizing media",
+        progress: normalization.progress?.progress,
+        status: MediaSessionActivityStatus.Running,
+      }),
+    );
   }
 
   if (renderer?.playbackState === MediaRendererPlaybackState.Buffering) {
-    activities.push({
-      blockingPlayback: true,
-      kind: MediaSessionActivityKind.PlaybackBuffering,
-      label: "Buffering playback",
-      status: MediaSessionActivityStatus.Waiting,
-    });
+    activities.push(
+      createActivity({
+        blockingPlayback: true,
+        kind: MediaSessionActivityKind.PlaybackBuffering,
+        label: "Buffering playback",
+        status: MediaSessionActivityStatus.Waiting,
+      }),
+    );
   }
 
   if (renderer?.detectionBuffer.status === DetectionBufferStatus.Loading) {
     const blockingPlayback =
       renderer.playbackState === MediaRendererPlaybackState.Buffering;
 
-    activities.push({
-      blockingPlayback,
-      kind: blockingPlayback
-        ? MediaSessionActivityKind.DetectionsBuffering
-        : MediaSessionActivityKind.DetectionsLoading,
-      label: blockingPlayback
-        ? "Waiting for detection buffer"
-        : "Loading detections",
-      status: blockingPlayback
-        ? MediaSessionActivityStatus.Waiting
-        : MediaSessionActivityStatus.Running,
-    });
+    activities.push(
+      createActivity({
+        blockingPlayback,
+        kind: blockingPlayback
+          ? MediaSessionActivityKind.DetectionsBuffering
+          : MediaSessionActivityKind.DetectionsLoading,
+        label: blockingPlayback
+          ? "Waiting for detection buffer"
+          : "Loading detections",
+        status: blockingPlayback
+          ? MediaSessionActivityStatus.Waiting
+          : MediaSessionActivityStatus.Running,
+      }),
+    );
   }
 
   for (const artifact of renderPreparation?.artifacts ?? []) {
@@ -89,43 +99,53 @@ export function createMediaSessionStateSnapshot({
       continue;
     }
 
-    activities.push({
-      artifactKind: artifact.kind,
-      blockingPresentation: activeFrameIsPending,
-      detail: activeFrameIsPending
-        ? `Active frame ${artifact.activeFrame.mediaTime.toFixed(
-            3,
-          )}s is waiting for ${artifact.kind}`
-        : null,
-      kind: MediaSessionActivityKind.RenderPreparing,
-      label: activeFrameIsPending
-        ? "Preparing active render artifact"
-        : "Preparing render artifacts",
-      pendingCount: artifact.pendingCount,
-      preparedCount: artifact.preparedCount,
-      progress: totalCount > 0 ? artifact.preparedCount / totalCount : 0,
-      status: activeFrameIsPending
-        ? MediaSessionActivityStatus.Waiting
-        : MediaSessionActivityStatus.Running,
-    });
+    activities.push(
+      createActivity({
+        artifactKind: artifact.kind,
+        blockingPresentation: activeFrameIsPending,
+        detail: activeFrameIsPending
+          ? `Active frame ${artifact.activeFrame.mediaTime.toFixed(
+              3,
+            )}s is waiting for ${artifact.kind}`
+          : null,
+        kind: MediaSessionActivityKind.RenderPreparing,
+        label: activeFrameIsPending
+          ? "Preparing active render artifact"
+          : "Preparing render artifacts",
+        pendingCount: artifact.pendingCount,
+        preparedCount: artifact.preparedCount,
+        progress: totalCount > 0 ? artifact.preparedCount / totalCount : 0,
+        status: activeFrameIsPending
+          ? MediaSessionActivityStatus.Waiting
+          : MediaSessionActivityStatus.Running,
+      }),
+    );
   }
 
   if (renderer?.playbackState === MediaRendererPlaybackState.Error) {
-    activities.push({
-      errorMessage: renderer.source.errorMessage,
-      kind: MediaSessionActivityKind.Error,
-      label: "Renderer error",
-      status: MediaSessionActivityStatus.Error,
-    });
+    activities.push(
+      createActivity({
+        blockingPlayback: true,
+        blockingPresentation: true,
+        errorMessage: renderer.source.errorMessage,
+        kind: MediaSessionActivityKind.Error,
+        label: "Renderer error",
+        status: MediaSessionActivityStatus.Error,
+      }),
+    );
   }
 
   if (errorMessage) {
-    activities.push({
-      errorMessage,
-      kind: MediaSessionActivityKind.Error,
-      label: "Session error",
-      status: MediaSessionActivityStatus.Error,
-    });
+    activities.push(
+      createActivity({
+        blockingPlayback: true,
+        blockingPresentation: true,
+        errorMessage,
+        kind: MediaSessionActivityKind.Error,
+        label: "Session error",
+        status: MediaSessionActivityStatus.Error,
+      }),
+    );
   }
 
   return {
@@ -136,6 +156,22 @@ export function createMediaSessionStateSnapshot({
     renderPreparation,
     renderer,
     status: resolveSessionStatus(renderer, activities, errorMessage),
+  };
+}
+
+function createActivity(
+  activity: Omit<
+    MediaSessionActivity,
+    "blockingPlayback" | "blockingPresentation"
+  > &
+    Partial<
+      Pick<MediaSessionActivity, "blockingPlayback" | "blockingPresentation">
+    >,
+): MediaSessionActivity {
+  return {
+    blockingPlayback: false,
+    blockingPresentation: false,
+    ...activity,
   };
 }
 

@@ -38,12 +38,102 @@ describe("media session state", () => {
     expect(state).toMatchObject({
       activities: [
         {
+          blockingPlayback: true,
+          blockingPresentation: true,
           kind: MediaSessionActivityKind.MediaOpening,
           status: MediaSessionActivityStatus.Running,
         },
       ],
       status: MediaSessionStatus.Loading,
     });
+  });
+
+  it("reports background normalization without blocking playback or presentation", () => {
+    const state = createMediaSessionStateSnapshot({
+      errorMessage: null,
+      media: {
+        inputMetadata: null,
+        normalizedMedia: null,
+        objectUrl: null,
+      },
+      normalization: {
+        active: true,
+        progress: {
+          processedTime: 3,
+          progress: 0.4,
+        },
+      },
+      renderPreparation: null,
+      renderer: createRendererState({
+        detectionBufferStatus: DetectionBufferStatus.Ready,
+        playbackState: MediaRendererPlaybackState.Playing,
+      }),
+    });
+
+    expect(state.status).toBe(MediaSessionStatus.Processing);
+    expect(state.activities).toEqual([
+      expect.objectContaining({
+        blockingPlayback: false,
+        blockingPresentation: false,
+        kind: MediaSessionActivityKind.MediaNormalizing,
+        progress: 0.4,
+        status: MediaSessionActivityStatus.Running,
+      }),
+    ]);
+  });
+
+  it("reports background detection loading without blocking playback", () => {
+    const state = createMediaSessionStateSnapshot({
+      errorMessage: null,
+      media: {
+        inputMetadata: null,
+        normalizedMedia: null,
+        objectUrl: null,
+      },
+      normalization: null,
+      renderPreparation: null,
+      renderer: createRendererState({
+        detectionBufferStatus: DetectionBufferStatus.Loading,
+        playbackState: MediaRendererPlaybackState.Playing,
+      }),
+    });
+
+    expect(state.status).toBe(MediaSessionStatus.Playing);
+    expect(state.activities).toEqual([
+      expect.objectContaining({
+        blockingPlayback: false,
+        blockingPresentation: false,
+        kind: MediaSessionActivityKind.DetectionsLoading,
+        status: MediaSessionActivityStatus.Running,
+      }),
+    ]);
+  });
+
+  it("marks playback buffering as playback-blocking", () => {
+    const state = createMediaSessionStateSnapshot({
+      errorMessage: null,
+      media: {
+        inputMetadata: null,
+        normalizedMedia: null,
+        objectUrl: null,
+      },
+      normalization: null,
+      renderPreparation: null,
+      renderer: createRendererState({
+        detectionBufferStatus: DetectionBufferStatus.Ready,
+        playbackState: MediaRendererPlaybackState.Buffering,
+      }),
+    });
+
+    expect(state.status).toBe(MediaSessionStatus.Buffering);
+    expect(state.activities).toEqual([
+      expect.objectContaining({
+        blockingPlayback: true,
+        blockingPresentation: false,
+        kind: MediaSessionActivityKind.PlaybackBuffering,
+        status: MediaSessionActivityStatus.Waiting,
+      }),
+    ]);
   });
 
   it("reports blocking detection and render preparation work", () => {
@@ -77,16 +167,20 @@ describe("media session state", () => {
     expect(state.activities).toEqual([
       expect.objectContaining({
         blockingPlayback: true,
+        blockingPresentation: false,
         kind: MediaSessionActivityKind.PlaybackBuffering,
         status: MediaSessionActivityStatus.Waiting,
       }),
       expect.objectContaining({
         blockingPlayback: true,
+        blockingPresentation: false,
         kind: MediaSessionActivityKind.DetectionsBuffering,
         status: MediaSessionActivityStatus.Waiting,
       }),
       expect.objectContaining({
         artifactKind: RenderPreparationArtifactKind.MaskFrame,
+        blockingPlayback: false,
+        blockingPresentation: false,
         kind: MediaSessionActivityKind.RenderPreparing,
         pendingCount: 2,
         preparedCount: 6,
@@ -130,6 +224,7 @@ describe("media session state", () => {
 
     expect(state.activities).toEqual([
       expect.objectContaining({
+        blockingPlayback: false,
         blockingPresentation: true,
         detail: "Active frame 0.400s is waiting for maskFrame",
         kind: MediaSessionActivityKind.RenderPreparing,
@@ -173,17 +268,107 @@ describe("media session state", () => {
     expect(state.activities).toEqual([
       expect.objectContaining({
         artifactKind: RenderPreparationArtifactKind.MaskFrame,
+        blockingPlayback: false,
         blockingPresentation: false,
         kind: MediaSessionActivityKind.RenderPreparing,
         status: MediaSessionActivityStatus.Running,
       }),
     ]);
   });
+
+  it("reports renderer errors as blocking errors", () => {
+    const state = createMediaSessionStateSnapshot({
+      errorMessage: null,
+      media: {
+        inputMetadata: null,
+        normalizedMedia: null,
+        objectUrl: null,
+      },
+      normalization: null,
+      renderPreparation: null,
+      renderer: createRendererState({
+        detectionBufferStatus: DetectionBufferStatus.Ready,
+        playbackState: MediaRendererPlaybackState.Error,
+        sourceErrorMessage: "Decoder failed",
+        sourceStatus: MediaSourceStatus.Error,
+      }),
+    });
+
+    expect(state).toMatchObject({
+      errorMessage: "Decoder failed",
+      status: MediaSessionStatus.Error,
+    });
+    expect(state.activities).toEqual([
+      expect.objectContaining({
+        blockingPlayback: true,
+        blockingPresentation: true,
+        errorMessage: "Decoder failed",
+        kind: MediaSessionActivityKind.Error,
+        status: MediaSessionActivityStatus.Error,
+      }),
+    ]);
+  });
+
+  it("reports session errors as blocking errors", () => {
+    const state = createMediaSessionStateSnapshot({
+      errorMessage: "Session setup failed",
+      media: {
+        inputMetadata: null,
+        normalizedMedia: null,
+        objectUrl: null,
+      },
+      normalization: null,
+      renderPreparation: null,
+      renderer: createRendererState({
+        detectionBufferStatus: DetectionBufferStatus.Ready,
+        playbackState: MediaRendererPlaybackState.Ready,
+      }),
+    });
+
+    expect(state).toMatchObject({
+      errorMessage: "Session setup failed",
+      status: MediaSessionStatus.Error,
+    });
+    expect(state.activities).toEqual([
+      expect.objectContaining({
+        blockingPlayback: true,
+        blockingPresentation: true,
+        errorMessage: "Session setup failed",
+        kind: MediaSessionActivityKind.Error,
+        status: MediaSessionActivityStatus.Error,
+      }),
+    ]);
+  });
+
+  it("reports destroyed sessions without synthetic loading work", () => {
+    const state = createMediaSessionStateSnapshot({
+      errorMessage: null,
+      media: {
+        inputMetadata: null,
+        normalizedMedia: null,
+        objectUrl: null,
+      },
+      normalization: null,
+      renderPreparation: null,
+      renderer: createRendererState({
+        detectionBufferStatus: DetectionBufferStatus.Destroyed,
+        playbackState: MediaRendererPlaybackState.Destroyed,
+        sourceStatus: MediaSourceStatus.Destroyed,
+      }),
+    });
+
+    expect(state).toMatchObject({
+      activities: [],
+      status: MediaSessionStatus.Destroyed,
+    });
+  });
 });
 
 function createRendererState(options: {
   readonly detectionBufferStatus: DetectionBufferStatus;
   readonly playbackState: MediaRendererPlaybackState;
+  readonly sourceErrorMessage?: string | null;
+  readonly sourceStatus?: MediaSourceStatus;
 }): MediaRendererState {
   return {
     activeDetectionCount: 0,
@@ -211,13 +396,13 @@ function createRendererState(options: {
       audioTrackCount: null,
       canRead: null,
       duration: null,
-      errorMessage: null,
+      errorMessage: options.sourceErrorMessage ?? null,
       formatMimeType: null,
       formatName: null,
       mimeType: null,
       primaryVideoHeight: null,
       primaryVideoWidth: null,
-      status: MediaSourceStatus.Loading,
+      status: options.sourceStatus ?? MediaSourceStatus.Loading,
       trackCount: null,
       videoTrackCount: null,
     },

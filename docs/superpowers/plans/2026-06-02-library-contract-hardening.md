@@ -160,12 +160,12 @@ Stop after each checkpoint for manual demo testing.
 - Modify: `src/sessions/media-session-state.ts`
 - Modify: `src/sessions/media-session-state.test.ts`
 
-- [ ] Keep `MediaSessionState.activities` as the canonical high-level state list.
-- [ ] Mark activities that block playback separately from activities that block presentation.
-- [ ] Ensure background normalization and background render prep are not reported as active blocking overlays.
-- [ ] Add tests for media opening, normalization, detection loading, playback buffering, render preparation, errors, and destroyed state.
-- [ ] Run `npm run test -- src/sessions/media-session-state.test.ts`.
-- [ ] Run `npm run typecheck`.
+- [x] Keep `MediaSessionState.activities` as the canonical high-level state list.
+- [x] Mark activities that block playback separately from activities that block presentation.
+- [x] Ensure background normalization and background render prep are not reported as active blocking overlays.
+- [x] Add tests for media opening, normalization, detection loading, playback buffering, render preparation, errors, and destroyed state.
+- [x] Run focused media session state tests.
+- [x] Run `npm run typecheck`.
 
 ### Checkpoint 9: Add Sync Regression Coverage
 
