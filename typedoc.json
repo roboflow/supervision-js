@@ -1,6 +1,15 @@
 {
   "$schema": "https://typedoc.org/schema.json",
-  "entryPoints": ["src/index.ts"],
+  "customCss": "docs/public/typedoc-custom.css",
+  "customJs": "docs/public/typedoc-icons.js",
+  "entryPoints": [
+    "docs/public/api/sessions.ts",
+    "docs/public/api/detections.ts",
+    "docs/public/api/rendering.ts",
+    "docs/public/api/styles.ts",
+    "docs/public/api/interactions.ts",
+    "docs/public/api/media-preparation.ts"
+  ],
   "excludeInternal": true,
   "excludePrivate": true,
   "excludeProtected": true,
@@ -17,5 +26,5 @@
   "searchInComments": true,
   "searchInDocuments": true,
   "sourceLinkExternal": true,
-  "tsconfig": "tsconfig.json"
+  "tsconfig": "tsconfig.docs.json"
 }

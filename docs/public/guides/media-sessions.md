@@ -1,3 +1,9 @@
+---
+title: Media Sessions
+group: Guides
+summary: The primary session API for one renderer-owned media item.
+---
+
 # Media Sessions
 
 `MediaSession` is the primary library primitive. One media item maps to one

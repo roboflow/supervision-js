@@ -1,3 +1,9 @@
+---
+title: Detections And Rendering
+group: Guides
+summary: How semantic detections move through cold storage, hot windows, prepared artifacts, and active renderer frames.
+---
+
 # Detections And Rendering
 
 The rendering pipeline separates semantic detection data from renderer-owned
