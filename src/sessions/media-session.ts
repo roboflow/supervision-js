@@ -23,6 +23,13 @@ import {
 } from "./media-session-media";
 import { createMediaSessionStateSnapshot } from "./media-session-state";
 
+/**
+ * Creates a renderer-owned media session for one browser media item.
+ *
+ * Start with `container` and `media` for the default playback/rendering path.
+ * Add detections, presentation styles, interaction, normalization, or buffering
+ * options only when the host application needs them.
+ */
 export async function createMediaSession(
   options: MediaSessionOptions,
 ): Promise<MediaSession> {

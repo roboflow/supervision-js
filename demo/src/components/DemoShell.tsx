@@ -4,6 +4,7 @@ import { DemoViewMode } from "../session/demo-view-mode";
 export function DemoShell({
   benchmarksPanel,
   controlBar,
+  docsUrl,
   mode,
   onModeChange,
   performanceStrip,
@@ -14,6 +15,7 @@ export function DemoShell({
 }: {
   readonly benchmarksPanel: ReactNode;
   readonly controlBar: ReactNode;
+  readonly docsUrl: string;
   readonly mode: DemoViewMode;
   readonly onModeChange: (mode: DemoViewMode) => void;
   readonly performanceStrip: ReactNode;
@@ -51,6 +53,9 @@ export function DemoShell({
           </div>
           {isBenchmarksMode ? null : sourceControls}
           <div className="demo-shell__mode" role="tablist">
+            <a href={docsUrl} rel="noreferrer" target="_blank">
+              Docs
+            </a>
             <button
               aria-pressed={mode === DemoViewMode.Benchmarks}
               onClick={() => onModeChange(DemoViewMode.Benchmarks)}

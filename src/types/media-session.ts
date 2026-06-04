@@ -32,6 +32,12 @@ import type {
   RenderPreparationDiagnostics,
 } from "#types/render-preparation";
 
+/**
+ * Media input accepted by `createMediaSession`.
+ *
+ * Use a `Blob` for uploaded files, a URL string for already hosted media, or a
+ * custom renderer source when integrating a lower-level media adapter.
+ */
 export type MediaSessionMedia = string | Blob | MediaRendererSource;
 
 export interface MediaSessionNormalizationOptions extends MediaNormalizationOptions {
@@ -108,13 +114,39 @@ export interface MediaSessionRendererOptions {
 }
 
 export interface MediaSessionOptions {
+  /**
+   * DOM element where the renderer should mount its canvas.
+   */
   readonly container: HTMLElement;
+  /**
+   * Media to prepare and render. This can be a URL, an uploaded file/blob, or a
+   * lower-level renderer source.
+   */
   readonly media: MediaSessionMedia;
+  /**
+   * File mode is bounded media. Stream mode tunes defaults for live or
+   * append-only detection sources.
+   */
   readonly mode?: MediaSessionMode;
+  /**
+   * Optional browser media normalization before rendering.
+   */
   readonly normalize?: false | MediaSessionNormalizationOptions;
+  /**
+   * Detection frames or sources to render with the media.
+   */
   readonly detections?: MediaSessionDetectionOptions;
+  /**
+   * Aggregate loading, playback, buffering, processing, and error state.
+   */
   readonly onState?: (state: MediaSessionState) => void;
+  /**
+   * Box, mask, and label presentation styles.
+   */
   readonly presentation?: MediaRendererPresentation;
+  /**
+   * Renderer playback, interaction, diagnostics, and render-preparation options.
+   */
   readonly renderer?: MediaSessionRendererOptions;
 }
 

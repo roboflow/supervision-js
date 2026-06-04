@@ -12,11 +12,24 @@ export {
 } from "#media/media-normalization";
 export { prepareMedia, MediaPreparationError } from "#media/media-preparation";
 export { probeMedia } from "#media/media-probe";
+export type {
+  DecodedMediaSource,
+  DecodedMediaSourceMetadata,
+  DecodedVideoSample,
+  DecodedVideoSampleSink,
+  DisposableMediaInput,
+} from "#media/media-source";
 export { createMediaRenderer } from "#renderers/media-renderer";
 export { createMediaSession } from "#sessions/media-session";
 export { BaseBoxStyle, RoundedBoxStyle } from "#styles/box-style";
+export type {
+  BaseBoxStyleOptions,
+  RoundedBoxStyleOptions,
+} from "#styles/box-style";
 export { BaseLabelStyle } from "#styles/label-style";
+export type { BaseLabelStyleOptions } from "#styles/label-style";
 export { BaseMaskStyle } from "#styles/mask-style";
+export type { BaseMaskStyleOptions } from "#styles/mask-style";
 export { BoxShape } from "#types/box-style";
 export type {
   BoxDrawInstruction,
@@ -121,6 +134,8 @@ export {
   type MediaSessionOptions,
   type MediaSessionRendererOptions,
   type MediaSessionState,
+  type MediaSessionStateListener,
+  type MediaSessionStateUnsubscribe,
   type MediaSessionWritableDetectionOptions,
 } from "#types/media-session";
 export {
@@ -149,5 +164,6 @@ export {
   type RenderPreparationDiagnostics,
   type RenderPreparationMaskFrameOptions,
   type RenderPreparationOptions,
+  type RenderPreparationPlaybackGateOptions,
   type RenderPreparationWorkerFactory,
 } from "#types/render-preparation";

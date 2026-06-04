@@ -12,6 +12,13 @@ import { defaultDemoClassNames } from "./presentation/demo-presentation";
 import { DemoViewMode } from "./session/demo-view-mode";
 import type { TimelineRange } from "./session/demo-session-types";
 
+const docsUrl =
+  import.meta.env.VITE_SUPERVISION_DOCS_URL ??
+  (globalThis.location.hostname === "localhost" ||
+  globalThis.location.hostname === "127.0.0.1"
+    ? "http://127.0.0.1:5175"
+    : "/docs/");
+
 export function App() {
   const demo = useDemoRenderer();
   const [viewMode, setViewMode] = useState(DemoViewMode.Demo);
@@ -38,6 +45,7 @@ export function App() {
   return (
     <DemoShell
       benchmarksPanel={<BenchmarksPanel />}
+      docsUrl={docsUrl}
       mode={viewMode}
       onModeChange={setViewMode}
       viewport={

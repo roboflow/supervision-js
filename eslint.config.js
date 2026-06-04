@@ -6,6 +6,7 @@ export default [
     ignores: [
       "**/dist/**",
       "**/coverage/**",
+      "docs/site/**",
       "demo/server-dist/**",
       "tools/sam3-fixture/output/**",
     ],

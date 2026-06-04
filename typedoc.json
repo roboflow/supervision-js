@@ -1,0 +1,24 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": ["src/index.ts"],
+  "excludeInternal": true,
+  "excludePrivate": true,
+  "excludeProtected": true,
+  "githubPages": true,
+  "hideGenerator": true,
+  "includeVersion": true,
+  "lightHighlightTheme": "github-light",
+  "darkHighlightTheme": "github-dark",
+  "name": "supervision-js",
+  "navigationLinks": {
+    "Demo": "http://127.0.0.1:5173"
+  },
+  "out": "docs/site",
+  "plugin": ["typedoc-rhineai-theme"],
+  "projectDocuments": ["docs/public/guides/*.md"],
+  "readme": "docs/public/index.md",
+  "searchInComments": true,
+  "searchInDocuments": true,
+  "sourceLinkExternal": true,
+  "tsconfig": "tsconfig.json"
+}
