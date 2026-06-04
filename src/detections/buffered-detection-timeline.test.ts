@@ -98,6 +98,67 @@ describe("buffered detection timeline", () => {
     expect(timeline.selectFrame(1.73)?.frameIndex).toBe(52);
   });
 
+  it("selects nearest 30fps frame indexes from the hot buffer", async () => {
+    const indexedFrames: DetectionFrame[] = Array.from(
+      { length: 4 },
+      (_, index) => ({
+        detections: [{ id: `frame-${index}` }],
+        endTime: (index + 1) / 30,
+        frameIndex: index,
+        mediaTime: index / 30,
+      }),
+    );
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 1,
+      bufferBehindSeconds: 0,
+      frameRate: 30,
+      selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
+      source: createArrayDetectionFrameSource(indexedFrames),
+    });
+
+    await timeline.prepare(0);
+
+    expect(timeline.selectFrame(0.49 / 30)?.frameIndex).toBe(0);
+    expect(timeline.selectFrame(0.5 / 30)?.frameIndex).toBe(1);
+    expect(timeline.selectFrame(2.49 / 30)?.frameIndex).toBe(2);
+    expect(timeline.selectFrame(2.5 / 30)?.frameIndex).toBe(3);
+  });
+
+  it("uses a one-frame indexed gap but does not synthesize larger missing gaps", async () => {
+    const indexedFrames: DetectionFrame[] = [
+      {
+        detections: [{ id: "frame-10" }],
+        endTime: 11 / 30,
+        frameIndex: 10,
+        mediaTime: 10 / 30,
+      },
+      {
+        detections: [{ id: "frame-12" }],
+        endTime: 13 / 30,
+        frameIndex: 12,
+        mediaTime: 12 / 30,
+      },
+      {
+        detections: [{ id: "frame-20" }],
+        endTime: 21 / 30,
+        frameIndex: 20,
+        mediaTime: 20 / 30,
+      },
+    ];
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 1,
+      bufferBehindSeconds: 1,
+      frameRate: 30,
+      selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
+      source: createArrayDetectionFrameSource(indexedFrames),
+    });
+
+    await timeline.prepare(11 / 30);
+
+    expect(timeline.selectFrame(11 / 30)?.frameIndex).toBe(12);
+    expect(timeline.selectFrame(16 / 30)).toBeUndefined();
+  });
+
   it("keeps the last good buffer and reports prefetch errors", async () => {
     const source = {
       loadFrames: vi

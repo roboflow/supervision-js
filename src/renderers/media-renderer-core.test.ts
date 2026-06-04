@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createIdleDetectionBufferState } from "#detections/buffered-detection-timeline";
+import { DetectionFrameSelectionMode } from "#types/detection-timeline";
 import type {
   DecodedMediaSource,
   DecodedVideoSample,
@@ -164,6 +165,50 @@ describe("media renderer core", () => {
     expect(detectionSource.loadFrames).toHaveBeenCalledTimes(2);
     expect(detectionSource.loadFrames).toHaveBeenNthCalledWith(1, 4.25, 5);
     expect(detectionSource.loadFrames).toHaveBeenNthCalledWith(2, 0, 1.75);
+
+    renderer.destroy();
+  });
+
+  it("loads detections for the presented sample timestamp after seek", async () => {
+    resetMocks();
+
+    const samples = [
+      createMockSample(0, 1 / 30),
+      createMockSample(1 / 30, 1 / 30),
+    ] as unknown as DecodedVideoSample[];
+    const detectionSource = {
+      loadFrames: vi.fn(async () => []),
+    };
+    const renderer = await createMediaRendererCore(
+      {
+        autoPlay: false,
+        container: {} as HTMLElement,
+        detectionBuffer: {
+          bufferAheadSeconds: 0,
+          bufferBehindSeconds: 0,
+          frameRate: 30,
+          selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
+        },
+        detectionSource,
+        loop: false,
+        source: createSource(samples, {
+          duration: 2 / 30,
+        }),
+      } satisfies MediaRendererOptions,
+      {
+        createScene: vi.fn(async () => createScene()),
+        openMediaSource: vi.fn(),
+      },
+    );
+
+    detectionSource.loadFrames.mockClear();
+
+    await renderer.seek(1.5 / 30);
+
+    expect(detectionSource.loadFrames).toHaveBeenCalledWith(1 / 30, 1 / 30);
+    expect(renderer.getState()).toMatchObject({
+      currentTime: 1 / 30,
+    });
 
     renderer.destroy();
   });

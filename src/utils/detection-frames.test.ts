@@ -46,6 +46,49 @@ describe("detection frame utilities", () => {
     ).toBe(52);
   });
 
+  it("selects exact 30fps grid frames with deterministic half-frame rounding", () => {
+    const frames: DetectionFrame[] = Array.from({ length: 4 }, (_, index) => ({
+      detections: [],
+      endTime: (index + 1) / 30,
+      frameIndex: index,
+      mediaTime: index / 30,
+    }));
+    const options = {
+      frameRate: 30,
+      selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
+    };
+
+    expect(selectDetectionFrame(frames, 0, options)?.frameIndex).toBe(0);
+    expect(selectDetectionFrame(frames, 0.49 / 30, options)?.frameIndex).toBe(
+      0,
+    );
+    expect(selectDetectionFrame(frames, 0.5 / 30, options)?.frameIndex).toBe(1);
+    expect(selectDetectionFrame(frames, 1.49 / 30, options)?.frameIndex).toBe(
+      1,
+    );
+    expect(selectDetectionFrame(frames, 1.5 / 30, options)?.frameIndex).toBe(2);
+  });
+
+  it("selects timestamp interval frames with exclusive end boundaries", () => {
+    const frameDuration = 1 / 30;
+    const frames: DetectionFrame[] = [
+      {
+        detections: [{ className: "zero" }],
+        endTime: frameDuration,
+        mediaTime: 0,
+      },
+      {
+        detections: [{ className: "one" }],
+        endTime: frameDuration * 2,
+        mediaTime: frameDuration,
+      },
+    ];
+
+    expect(selectDetectionFrame(frames, frameDuration - 1e-8)).toBe(frames[0]);
+    expect(selectDetectionFrame(frames, frameDuration)).toBe(frames[1]);
+    expect(selectDetectionFrame(frames, frameDuration * 2)).toBeUndefined();
+  });
+
   it("selects interval frames without mutating caller-owned frame data", () => {
     const frames = deepFreezeDetectionFrames([
       {
@@ -141,6 +184,30 @@ describe("detection frame utilities", () => {
         selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
       })?.frameIndex,
     ).toBe(150);
+  });
+
+  it("does not bridge gaps larger than one missing frame index", () => {
+    const frames: DetectionFrame[] = [
+      {
+        detections: [],
+        endTime: 11 / 30,
+        frameIndex: 10,
+        mediaTime: 10 / 30,
+      },
+      {
+        detections: [],
+        endTime: 15 / 30,
+        frameIndex: 14,
+        mediaTime: 14 / 30,
+      },
+    ];
+
+    expect(
+      selectDetectionFrame(frames, 12 / 30, {
+        frameRate: 30,
+        selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
+      }),
+    ).toBeUndefined();
   });
 
   it("uses an explicit frame-index origin when buffered media times are rounded", () => {

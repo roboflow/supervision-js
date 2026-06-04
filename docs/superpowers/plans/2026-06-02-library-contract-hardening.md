@@ -176,12 +176,12 @@ Stop after each checkpoint for manual demo testing.
 - Modify: `src/playback/media-playback-controller.ts`
 - Modify: `src/renderers/media-renderer-core.test.ts`
 
-- [ ] Test frame-index selection on a 30fps grid.
-- [ ] Test timestamp selection for interval frames.
-- [ ] Test one-frame gaps.
-- [ ] Test seek, pause, loop, and missing frames.
-- [ ] Test normalized media timing does not drift from detection timing.
-- [ ] Run the focused tests and `npm run typecheck`.
+- [x] Test frame-index selection on a 30fps grid.
+- [x] Test timestamp selection for interval frames.
+- [x] Test one-frame gaps.
+- [x] Test seek, pause, loop, and missing frames.
+- [x] Test normalized media timing does not drift from detection timing.
+- [x] Run the focused tests and `npm run typecheck`.
 
 ### Checkpoint 10: Keep Benchmarks Decision-Oriented
 
