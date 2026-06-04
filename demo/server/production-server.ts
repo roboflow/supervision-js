@@ -17,6 +17,10 @@ import {
 const DEFAULT_HOST = "0.0.0.0";
 const DEFAULT_PORT = 3000;
 const DEFAULT_DIST_ROOT = fileURLToPath(new URL("../dist/", import.meta.url));
+const DEFAULT_DOCS_ROOT = fileURLToPath(
+  new URL("../../docs/site/", import.meta.url),
+);
+const DOCS_PATH_PREFIX = "/docs";
 
 type RequestHandler = (
   request: IncomingMessage,
@@ -24,6 +28,7 @@ type RequestHandler = (
 ) => Promise<void> | void;
 
 export interface DemoServerOptions {
+  readonly docsRoot?: string;
   readonly distRoot?: string;
   readonly sam3ProxyHandler?: RequestHandler;
   readonly sam3StreamHandler?: RequestHandler;
@@ -34,6 +39,7 @@ export function createDemoServer(options: DemoServerOptions = {}) {
 }
 
 export function createDemoRequestHandler(options: DemoServerOptions = {}) {
+  const docsRoot = resolve(options.docsRoot ?? DEFAULT_DOCS_ROOT);
   const distRoot = resolve(options.distRoot ?? DEFAULT_DIST_ROOT);
   const sam3ProxyHandler = options.sam3ProxyHandler ?? handleSam3ProxyRequest;
   const sam3StreamHandler =
@@ -50,6 +56,14 @@ export function createDemoRequestHandler(options: DemoServerOptions = {}) {
 
       if (pathname === SAM3_STREAM_PATH) {
         await sam3StreamHandler(request, response);
+        return;
+      }
+
+      if (
+        pathname === DOCS_PATH_PREFIX ||
+        pathname.startsWith(`${DOCS_PATH_PREFIX}/`)
+      ) {
+        serveStaticAsset(request, response, docsRoot, DOCS_PATH_PREFIX);
         return;
       }
 
@@ -87,9 +101,16 @@ export function startDemoServer(options: DemoServerOptions = {}) {
 export function resolveStaticAssetPath(
   requestUrl: string | undefined,
   distRoot: string,
+  pathPrefix = "",
 ) {
   const pathname = getRequestPathname(requestUrl);
-  const decodedPathname = decodeURIComponent(pathname);
+  const unprefixedPathname = stripPathPrefix(pathname, pathPrefix);
+
+  if (unprefixedPathname === null) {
+    return null;
+  }
+
+  const decodedPathname = decodeURIComponent(unprefixedPathname);
   const hasExtension = extname(decodedPathname) !== "";
   const requestedPath =
     decodedPathname === "/" ? "/index.html" : decodedPathname;
@@ -115,6 +136,7 @@ function serveStaticAsset(
   request: IncomingMessage,
   response: ServerResponse,
   distRoot: string,
+  pathPrefix = "",
 ) {
   if (request.method !== "GET" && request.method !== "HEAD") {
     response.statusCode = 405;
@@ -122,7 +144,7 @@ function serveStaticAsset(
     return;
   }
 
-  const assetPath = resolveStaticAssetPath(request.url, distRoot);
+  const assetPath = resolveStaticAssetPath(request.url, distRoot, pathPrefix);
 
   if (!assetPath) {
     response.statusCode = 404;
@@ -144,6 +166,22 @@ function serveStaticAsset(
 
 function getRequestPathname(requestUrl: string | undefined) {
   return new URL(requestUrl ?? "/", "http://localhost").pathname;
+}
+
+function stripPathPrefix(pathname: string, pathPrefix: string) {
+  if (!pathPrefix) {
+    return pathname;
+  }
+
+  if (pathname === pathPrefix) {
+    return "/";
+  }
+
+  if (pathname.startsWith(`${pathPrefix}/`)) {
+    return pathname.slice(pathPrefix.length);
+  }
+
+  return null;
 }
 
 function isPathInside(candidate: string, root: string) {

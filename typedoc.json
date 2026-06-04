@@ -10,9 +10,6 @@
   "lightHighlightTheme": "github-light",
   "darkHighlightTheme": "github-dark",
   "name": "supervision-js",
-  "navigationLinks": {
-    "Demo": "http://127.0.0.1:5173"
-  },
   "out": "docs/site",
   "plugin": ["typedoc-rhineai-theme"],
   "projectDocuments": ["docs/public/guides/*.md"],

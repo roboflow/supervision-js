@@ -48,6 +48,20 @@ describe("production demo server", () => {
     );
   });
 
+  it("serves generated docs from the /docs path prefix", async () => {
+    const docsRoot = await createFixtureDist("docs");
+
+    expect(resolveStaticAssetPath("/docs", docsRoot, "/docs")).toBe(
+      join(docsRoot, "index.html"),
+    );
+    expect(
+      resolveStaticAssetPath("/docs/assets/app.js", docsRoot, "/docs"),
+    ).toBe(join(docsRoot, "assets", "app.js"));
+    expect(
+      resolveStaticAssetPath("/assets/app.js", docsRoot, "/docs"),
+    ).toBeNull();
+  });
+
   it("does not resolve path traversal requests", async () => {
     const distRoot = await createFixtureDist();
 
@@ -55,11 +69,8 @@ describe("production demo server", () => {
   });
 });
 
-async function createFixtureDist() {
-  const root = join(
-    tmpdir(),
-    `supervision-js-demo-server-${crypto.randomUUID()}`,
-  );
+async function createFixtureDist(name = "demo-server") {
+  const root = join(tmpdir(), `supervision-js-${name}-${crypto.randomUUID()}`);
   await mkdir(join(root, "assets"), { recursive: true });
   await writeFile(join(root, "index.html"), "<main>demo</main>");
   await writeFile(join(root, "assets", "app.js"), "console.log('demo');");
