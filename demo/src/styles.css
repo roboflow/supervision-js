@@ -81,6 +81,10 @@ fieldset {
   position: relative;
 }
 
+.demo-shell--benchmarks {
+  grid-template-rows: minmax(0, 1fr);
+}
+
 .demo-shell::before {
   background-image:
     linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
@@ -97,6 +101,16 @@ fieldset {
 .demo-shell__viewport {
   height: auto;
   min-height: 0;
+}
+
+.demo-shell__viewport--hidden {
+  height: 100%;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  visibility: hidden;
+  width: 100%;
 }
 
 .demo-shell__panel {
@@ -128,6 +142,14 @@ fieldset {
   max-height: min(54vh, 540px);
 }
 
+.demo-shell--benchmarks .demo-shell__panel {
+  align-content: start;
+  height: 100vh;
+  height: 100dvh;
+  max-height: none;
+  padding: 16px;
+}
+
 .demo-shell__header {
   align-items: center;
   display: grid;
@@ -135,6 +157,13 @@ fieldset {
   grid-template-columns: minmax(220px, 1fr) auto auto;
   min-width: 0;
   padding: 0 2px;
+}
+
+.demo-shell--benchmarks .demo-shell__header {
+  grid-template-columns: minmax(220px, 1fr) auto;
+  margin: 0 auto;
+  max-width: 1280px;
+  width: 100%;
 }
 
 .demo-shell__brand {
@@ -228,6 +257,10 @@ fieldset {
   grid-row: 1;
   gap: 6px;
   justify-content: flex-end;
+}
+
+.demo-shell--benchmarks .demo-shell__mode {
+  grid-column: 2;
 }
 
 .demo-shell__mode button {
@@ -1054,6 +1087,215 @@ fieldset {
   min-width: 0;
 }
 
+.benchmarks-panel {
+  background: rgba(10, 12, 17, 0.88);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  display: grid;
+  gap: 12px;
+  margin: 0 auto;
+  max-width: 1280px;
+  min-width: 0;
+  padding: 12px;
+  width: 100%;
+}
+
+.benchmark-metrics {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  min-width: 0;
+}
+
+.benchmark-comparison-card {
+  align-items: center;
+  background: rgba(7, 9, 13, 0.72);
+  border: 1px solid rgba(126, 225, 143, 0.24);
+  border-radius: var(--radius-md);
+  display: grid;
+  gap: 8px;
+  grid-column: span 2;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  min-width: 0;
+  padding: 10px;
+}
+
+.benchmark-comparison-card__side {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.benchmark-comparison-card__side:last-of-type {
+  text-align: right;
+}
+
+.benchmark-comparison-card__side span {
+  color: #a3afbf;
+  font-size: 10px;
+  font-weight: 670;
+  letter-spacing: 0.04em;
+  line-height: 1.15;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.benchmark-comparison-card__side strong {
+  color: #ffffff;
+  font-family: var(--font-mono);
+  font-size: 22px;
+  font-weight: 690;
+  line-height: 1.12;
+}
+
+.benchmark-comparison-card__arrow {
+  color: #7ee18f;
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 760;
+  line-height: 1;
+}
+
+.benchmark-comparison-card small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 560;
+  grid-column: 1 / -1;
+  line-height: 1.2;
+}
+
+.benchmark-metric-card {
+  background: rgba(7, 9, 13, 0.72);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 10px;
+}
+
+.benchmark-metric-card span {
+  color: #a3afbf;
+  font-size: 10px;
+  font-weight: 670;
+  letter-spacing: 0.04em;
+  line-height: 1.15;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.benchmark-metric-card strong {
+  color: #ffffff;
+  font-family: var(--font-mono);
+  font-size: 18px;
+  font-weight: 680;
+  line-height: 1.2;
+}
+
+.benchmark-metric-card small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 560;
+  line-height: 1.2;
+}
+
+.benchmarks-grid {
+  align-items: start;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1.7fr) minmax(260px, 0.65fr);
+  min-width: 0;
+}
+
+.benchmarks-grid .benchmark-card:first-child {
+  grid-row: span 2;
+}
+
+.benchmark-card {
+  background: rgba(7, 9, 13, 0.68);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+  padding: 10px;
+}
+
+.benchmark-card h2 {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.benchmark-table {
+  border-collapse: collapse;
+  color: var(--muted-strong);
+  font-size: 12px;
+  min-width: 620px;
+  width: 100%;
+}
+
+.benchmark-card {
+  overflow-x: auto;
+}
+
+.benchmark-table th,
+.benchmark-table td {
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  font-family: var(--font-mono);
+  font-weight: 560;
+  padding: 8px 9px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.benchmark-table thead th {
+  border-top: 0;
+  color: var(--muted);
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 670;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.benchmark-table th:first-child,
+.benchmark-table td:first-child {
+  text-align: left;
+}
+
+.benchmark-table tbody th {
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-weight: 640;
+}
+
+.benchmark-table__row--selected {
+  background: rgba(126, 225, 143, 0.09);
+}
+
+.benchmark-table__row--selected th,
+.benchmark-table__row--selected td {
+  border-color: rgba(126, 225, 143, 0.22);
+  color: #defee6;
+}
+
+.benchmark-table--compact {
+  min-width: 0;
+}
+
+.benchmark-table--compact td {
+  color: #ffffff;
+}
+
 .render-controls__panel--global {
   align-items: end;
   display: grid;
@@ -1403,9 +1645,21 @@ fieldset {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
+  .benchmark-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .benchmark-comparison-card {
+    grid-column: 1 / -1;
+  }
+
   .render-controls__panel--global,
   .render-controls__panel--classes {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .benchmarks-grid {
+    grid-template-columns: 1fr;
   }
 
   .status-panel {
@@ -1438,6 +1692,7 @@ fieldset {
   }
 
   .demo-shell--demo .demo-shell__panel,
+  .demo-shell--benchmarks .demo-shell__panel,
   .demo-shell--debug .demo-shell__panel {
     max-height: none;
   }
@@ -1473,6 +1728,22 @@ fieldset {
 
   .performance-strip {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .benchmark-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .benchmark-comparison-card {
+    grid-template-columns: 1fr;
+  }
+
+  .benchmark-comparison-card__side:last-of-type {
+    text-align: left;
+  }
+
+  .benchmark-comparison-card__arrow {
+    display: none;
   }
 
   .source-controls__upload {

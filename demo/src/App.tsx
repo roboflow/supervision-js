@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { BenchmarksPanel } from "./components/BenchmarksPanel";
 import { ControlBar } from "./components/ControlBar";
 import { DemoShell } from "./components/DemoShell";
 import { PerformanceStrip } from "./components/PerformanceStrip";
@@ -36,6 +37,7 @@ export function App() {
 
   return (
     <DemoShell
+      benchmarksPanel={<BenchmarksPanel />}
       mode={viewMode}
       onModeChange={setViewMode}
       viewport={

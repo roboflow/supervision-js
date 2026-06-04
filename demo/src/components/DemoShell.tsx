@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { DemoViewMode } from "../session/demo-view-mode";
 
 export function DemoShell({
+  benchmarksPanel,
   controlBar,
   mode,
   onModeChange,
@@ -11,6 +12,7 @@ export function DemoShell({
   statusPanel,
   viewport,
 }: {
+  readonly benchmarksPanel: ReactNode;
   readonly controlBar: ReactNode;
   readonly mode: DemoViewMode;
   readonly onModeChange: (mode: DemoViewMode) => void;
@@ -21,10 +23,21 @@ export function DemoShell({
   readonly viewport: ReactNode;
 }) {
   const shellClassName = ["demo-shell", `demo-shell--${mode}`].join(" ");
+  const isBenchmarksMode = mode === DemoViewMode.Benchmarks;
 
   return (
     <main className={shellClassName}>
-      <div className="demo-shell__viewport">{viewport}</div>
+      <div
+        aria-hidden={isBenchmarksMode}
+        className={[
+          "demo-shell__viewport",
+          isBenchmarksMode ? "demo-shell__viewport--hidden" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
+      >
+        {viewport}
+      </div>
       <aside className="demo-shell__panel" aria-label="Demo controls">
         <div className="demo-shell__header">
           <div className="demo-shell__brand">
@@ -36,8 +49,15 @@ export function DemoShell({
               <span>CV media rendering workbench</span>
             </div>
           </div>
-          {sourceControls}
+          {isBenchmarksMode ? null : sourceControls}
           <div className="demo-shell__mode" role="tablist">
+            <button
+              aria-pressed={mode === DemoViewMode.Benchmarks}
+              onClick={() => onModeChange(DemoViewMode.Benchmarks)}
+              type="button"
+            >
+              Benchmarks
+            </button>
             <button
               aria-pressed={mode === DemoViewMode.Demo}
               onClick={() => onModeChange(DemoViewMode.Demo)}
@@ -54,10 +74,16 @@ export function DemoShell({
             </button>
           </div>
         </div>
-        {controlBar}
-        {performanceStrip}
-        {renderControls}
-        {mode === DemoViewMode.Debug ? statusPanel : null}
+        {isBenchmarksMode ? (
+          benchmarksPanel
+        ) : (
+          <>
+            {controlBar}
+            {performanceStrip}
+            {renderControls}
+            {mode === DemoViewMode.Debug ? statusPanel : null}
+          </>
+        )}
       </aside>
     </main>
   );
