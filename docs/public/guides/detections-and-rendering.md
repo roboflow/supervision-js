@@ -23,6 +23,22 @@ runtime artifacts.
    Presents the one media frame and matching annotation artifacts selected from
    the current playback reference.
 
+## Detection Contract
+
+Detection frames are app/model data:
+
+- `mediaTime` is seconds on the renderer media timeline;
+- `endTime` is exclusive when present;
+- `frameIndex` is optional and only used by frame-grid synchronization;
+- rectangles are media-pixel geometry;
+- masks are compressed RLE semantic masks;
+- confidence values are normalized from `0` to `1`;
+- styling belongs to styles, not detections.
+
+The library validates incoming frames before storing or buffering them. Invalid
+geometry, mask dimensions, confidence values, or frame timing fail early instead
+of becoming renderer behavior later.
+
 ## Why Not Draw Every RLE Mask Every Frame?
 
 Compressed RLE is good cold semantic storage. It is not the best thing to loop
@@ -43,3 +59,9 @@ annotators. In `supervision-js`, the equivalent shape is:
 
 This keeps detection data clean and keeps rendering performance decisions inside
 the engine.
+
+Styles are small objects with a `resolve(detection, context)` method. They return
+renderer-neutral draw instructions or `undefined` to skip a detection. The
+default styles are intentionally practical, but custom styles can change class
+colors, opacity, labels, confidence filtering, and shape choices without
+changing the stored detections.

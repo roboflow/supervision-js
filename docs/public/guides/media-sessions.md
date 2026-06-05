@@ -36,6 +36,21 @@ The default path is intentionally boring:
 - state is available through `getState()` and `subscribe()`;
 - advanced buffering, retention, interaction, and diagnostics are opt-in.
 
+## Minimal Start
+
+For a plain browser app, the smallest useful session is:
+
+```ts
+const session = await createMediaSession({
+  container: document.querySelector("#viewer")!,
+  media: fileOrUrl,
+});
+```
+
+That creates one renderer-owned composition for the media. Pixi draws the media
+frame and prediction layers in the same scene, so app code does not coordinate a
+DOM media element with a separate overlay.
+
 ## State
 
 Session state reports whether the media is loading, ready, playing, paused,
@@ -44,6 +59,11 @@ buffering, processing, destroyed, or errored.
 It also includes activity details such as media normalization, detection loading,
 playback buffering, and render artifact preparation. Apps can use this to show
 loading UI without wiring every internal subsystem manually.
+
+`activities` are the host-facing loading contract. They distinguish media
+normalization, detection buffering, playback gates, and render-artifact
+preparation, so apps can choose a compact status chip, a media overlay, or a
+debug panel without reading lower-level renderer internals.
 
 ## Streaming Detections
 
@@ -65,3 +85,7 @@ await session.appendDetectionFrames(frames);
 
 This keeps the public API focused on app-level behavior while the library owns
 storage, buffering, and rendering mechanics.
+
+Appended frames are validated as semantic detection data. Styling and prepared
+render artifacts are not ingested here; the renderer derives those from the
+current presentation and hot detection window.

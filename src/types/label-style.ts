@@ -6,6 +6,9 @@ export interface LabelStyleContext {
   readonly detectionIndex: number;
 }
 
+/**
+ * Text styling for a rendered detection label.
+ */
 export interface LabelTextStyle {
   readonly color: number;
   readonly alpha?: number;
@@ -14,6 +17,9 @@ export interface LabelTextStyle {
   readonly fontWeight?: string | number;
 }
 
+/**
+ * Background styling for a rendered detection label.
+ */
 export interface LabelBackgroundStyle {
   readonly color: number;
   readonly alpha: number;
@@ -22,6 +28,9 @@ export interface LabelBackgroundStyle {
   readonly paddingY?: number;
 }
 
+/**
+ * Renderer-neutral label drawing instruction.
+ */
 export interface LabelDrawInstruction {
   readonly rect: Rect;
   readonly text: string;
@@ -31,6 +40,12 @@ export interface LabelDrawInstruction {
   readonly offsetY?: number;
 }
 
+/**
+ * Label presentation contract.
+ *
+ * This is the `supervision-js` equivalent of a label annotator: it converts one
+ * semantic detection into optional label text and renderer-neutral style data.
+ */
 export interface LabelStyle {
   resolve(
     detection: Detection,

@@ -41,9 +41,16 @@ import type {
 export type MediaSessionMedia = string | Blob | MediaRendererSource;
 
 export interface MediaSessionNormalizationOptions extends MediaNormalizationOptions {
+  /**
+   * When true, media normalization may expose progressive output before the
+   * entire input has finished normalizing.
+   */
   readonly stream?: boolean;
 }
 
+/**
+ * Options for session-owned streaming detection ingestion.
+ */
 export interface MediaSessionAppendableDetectionOptions {
   /**
    * Optional cold store. If omitted, the session creates an in-memory store.
@@ -56,6 +63,9 @@ export interface MediaSessionAppendableDetectionOptions {
   readonly retention?: DetectionFrameRetentionOptions;
 }
 
+/**
+ * @deprecated Use `MediaSessionAppendableDetectionOptions`.
+ */
 export type MediaSessionWritableDetectionOptions =
   MediaSessionAppendableDetectionOptions;
 
@@ -113,6 +123,9 @@ export interface MediaSessionRendererOptions {
   readonly onState?: (state: MediaRendererState) => void;
 }
 
+/**
+ * Options for creating one renderer-owned media session.
+ */
 export interface MediaSessionOptions {
   /**
    * DOM element where the renderer should mount its canvas.
@@ -151,16 +164,29 @@ export interface MediaSessionOptions {
 }
 
 export enum MediaSessionMode {
+  /**
+   * Finite media. Defaults favor seek/replay and persistent detection storage.
+   */
   File = "file",
+  /**
+   * Live or append-only media. Defaults favor rolling windows and bounded
+   * retention.
+   */
   Stream = "stream",
 }
 
+/**
+ * Prepared media state visible to host applications.
+ */
 export interface MediaSessionMediaState {
   readonly inputMetadata: MediaNormalizationInputMetadata | null;
   readonly normalizedMedia: NormalizedMedia | ProgressiveNormalizedMedia | null;
   readonly objectUrl: string | null;
 }
 
+/**
+ * Aggregate lifecycle state for a media session.
+ */
 export enum MediaSessionStatus {
   Buffering = "buffering",
   Destroyed = "destroyed",
@@ -172,6 +198,9 @@ export enum MediaSessionStatus {
   Ready = "ready",
 }
 
+/**
+ * Subsystem currently affecting session readiness or presentation.
+ */
 export enum MediaSessionActivityKind {
   DetectionsBuffering = "detectionsBuffering",
   DetectionsLoading = "detectionsLoading",
@@ -182,12 +211,21 @@ export enum MediaSessionActivityKind {
   RenderPreparing = "renderPreparing",
 }
 
+/**
+ * State of one session activity.
+ */
 export enum MediaSessionActivityStatus {
   Error = "error",
   Running = "running",
   Waiting = "waiting",
 }
 
+/**
+ * One loading, waiting, processing, or error activity.
+ *
+ * Host applications can render these as media overlays, status bars, or debug
+ * panels without reaching into renderer internals.
+ */
 export interface MediaSessionActivity {
   readonly artifactKind?: RenderPreparationArtifactKind;
   /**
@@ -214,6 +252,10 @@ export interface MediaSessionNormalizationState {
   readonly progress: MediaNormalizationProgress | null;
 }
 
+/**
+ * Current aggregate state for media, renderer, detections, render preparation,
+ * loading activities, and errors.
+ */
 export interface MediaSessionState {
   readonly activities: readonly MediaSessionActivity[];
   readonly errorMessage: string | null;
@@ -227,15 +269,28 @@ export interface MediaSessionState {
 export type MediaSessionStateListener = (state: MediaSessionState) => void;
 export type MediaSessionStateUnsubscribe = () => void;
 
+/**
+ * Public controller for one renderer-owned media item.
+ */
 export interface MediaSession {
+  /**
+   * Detection source used by the renderer. Present when the session was created
+   * with static frames, a source, or an appendable source.
+   */
   readonly detectionSource?:
     | DetectionFrameSource
     | WritableDetectionFrameSource;
   readonly media: MediaSessionMediaState;
   readonly renderer: MediaRenderer;
+  /**
+   * Append semantic detection frames to a session-owned appendable source.
+   */
   appendDetectionFrames(
     frames: readonly DetectionFrame[],
   ): Promise<ColdDetectionFrameStoreWriteSummary>;
+  /**
+   * Summary of frames written through `appendDetectionFrames`, when available.
+   */
   getDetectionSummary(): ColdDetectionFrameStoreWriteSummary | null;
   play(): Promise<void>;
   pause(): void;

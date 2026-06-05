@@ -303,6 +303,70 @@ describe("detection frame utilities", () => {
     );
   });
 
+  it("rejects invalid detection frame timing", () => {
+    expect(() =>
+      copySortedDetectionFrames([
+        {
+          detections: [],
+          endTime: 1,
+          mediaTime: 1,
+        },
+      ]),
+    ).toThrow("frames[0].endTime must be greater than 1.");
+
+    expect(() =>
+      copySortedDetectionFrames([
+        {
+          detections: [],
+          frameIndex: 1.25,
+          mediaTime: 0,
+        },
+      ]),
+    ).toThrow("frames[0].frameIndex must be an integer.");
+  });
+
+  it("rejects invalid detection confidence, rectangles, and masks", () => {
+    expect(() =>
+      copySortedDetectionFrames([
+        {
+          detections: [{ confidence: 1.2 }],
+          mediaTime: 0,
+        },
+      ]),
+    ).toThrow("frames[0].detections[0].confidence must be less than or equal");
+
+    expect(() =>
+      copySortedDetectionFrames([
+        {
+          detections: [
+            {
+              rect: { height: 5, width: 0, x: 0, y: 0 },
+            },
+          ],
+          mediaTime: 0,
+        },
+      ]),
+    ).toThrow("frames[0].detections[0].rect.width must be greater than 0.");
+
+    expect(() =>
+      copySortedDetectionFrames([
+        {
+          detections: [
+            {
+              mask: {
+                counts: "",
+                encoding: DetectionMaskEncoding.CompressedRle,
+                height: 10,
+                width: 10,
+              },
+            },
+          ],
+          mediaTime: 0,
+        },
+      ]),
+    ).toThrow("frames[0].detections[0].mask.counts must not be empty.");
+  });
+
   it("decodes compressed RLE masks to row-major binary data", () => {
     const decoded = decodeCompressedRleMask({
       counts: encodeCompressedRleCounts([1, 2, 3]),

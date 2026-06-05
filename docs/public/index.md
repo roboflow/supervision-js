@@ -62,13 +62,13 @@ const session = await createMediaSession({
 await session.appendDetectionFrames([
   {
     frameIndex: 0,
-    time: 0,
+    mediaTime: 0,
     detections: [
       {
         id: "person-1",
         className: "person",
         confidence: 0.92,
-        box: { x: 120, y: 80, width: 240, height: 420 },
+        rect: { x: 120, y: 80, width: 240, height: 420 },
       },
     ],
   },

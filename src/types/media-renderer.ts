@@ -12,10 +12,19 @@ import type { DecodedMediaSource } from "#media/media-source";
 import type { RenderPreparationOptions } from "#types/render-preparation";
 
 export enum MediaRendererFit {
+  /**
+   * Preserve media aspect ratio and fit the full frame inside the canvas.
+   */
   Contain = "contain",
+  /**
+   * Preserve media aspect ratio and fill the canvas, cropping if necessary.
+   */
   Cover = "cover",
 }
 
+/**
+ * Playback lifecycle state reported by the renderer.
+ */
 export enum MediaRendererPlaybackState {
   Loading = "loading",
   Ready = "ready",
@@ -26,6 +35,9 @@ export enum MediaRendererPlaybackState {
   Destroyed = "destroyed",
 }
 
+/**
+ * Lower-level media source readiness.
+ */
 export enum MediaSourceStatus {
   Loading = "loading",
   Ready = "ready",
@@ -33,6 +45,12 @@ export enum MediaSourceStatus {
   Destroyed = "destroyed",
 }
 
+/**
+ * Per-presented-frame diagnostics.
+ *
+ * Emitted from the renderer's frame loop. Keep handlers lightweight if reading
+ * diagnostics at high frequency.
+ */
 export interface MediaFrameDiagnostics {
   readonly mediaTime: number;
   readonly presentedFrames: number;
@@ -48,6 +66,9 @@ export interface MediaFrameDiagnostics {
   readonly renderTimings: MediaFrameRenderTimings | null;
 }
 
+/**
+ * Optional timing breakdown for one rendered frame.
+ */
 export interface MediaFrameRenderTimings {
   readonly totalMs: number;
   readonly mediaUploadMs: number;
@@ -59,9 +80,16 @@ export interface MediaFrameRenderTimings {
 }
 
 export interface MediaRendererDiagnosticsOptions {
+  /**
+   * Measure per-frame render timings. Useful for profiling, but avoid enabling
+   * it permanently in latency-sensitive apps unless needed.
+   */
   readonly frameTimings?: boolean;
 }
 
+/**
+ * Snapshot of the opened media source.
+ */
 export interface MediaSourceState {
   readonly status: MediaSourceStatus;
   readonly canRead: boolean | null;
@@ -77,6 +105,9 @@ export interface MediaSourceState {
   readonly errorMessage: string | null;
 }
 
+/**
+ * Current renderer state.
+ */
 export interface MediaRendererState {
   readonly playbackState: MediaRendererPlaybackState;
   readonly fit: MediaRendererFit;
@@ -93,6 +124,12 @@ export interface MediaRendererState {
   readonly source: MediaSourceState;
 }
 
+/**
+ * Lower-level renderer options.
+ *
+ * Most applications should prefer `createMediaSession`, which wires media
+ * preparation, detection buffering, and render preparation with defaults.
+ */
 export interface MediaRendererOptions {
   readonly container: HTMLElement;
   readonly src?: string;
@@ -118,16 +155,31 @@ export interface MediaRendererOptions {
   readonly onState?: (state: MediaRendererState) => void;
 }
 
+/**
+ * Provider contract for opening decoded media.
+ *
+ * This is primarily useful for advanced integrations. The default session path
+ * supplies the built-in browser/Mediabunny source.
+ */
 export interface MediaRendererSource {
   open(): Promise<DecodedMediaSource>;
 }
 
+/**
+ * Current presentation styles used by renderer layers.
+ */
 export interface MediaRendererPresentation {
   readonly boxStyle?: BoxStyle | null;
   readonly labelStyle?: LabelStyle | null;
   readonly maskStyle?: MaskStyle | null;
 }
 
+/**
+ * Lower-level renderer controller.
+ *
+ * Prefer `MediaSession` for application code unless you need to own media
+ * preparation and detection buffering yourself.
+ */
 export interface MediaRenderer {
   play(): Promise<void>;
   pause(): void;

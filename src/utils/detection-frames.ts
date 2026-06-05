@@ -22,6 +22,8 @@ interface NearestFrameIndexSelection {
 export function copySortedDetectionFrames(
   detectionFrames: readonly DetectionFrame[] | undefined,
 ): DetectionFrame[] {
+  validateDetectionFrames(detectionFrames ?? []);
+
   return (detectionFrames ?? [])
     .map((frame) => ({
       detections: frame.detections.map((detection) => ({
@@ -35,6 +37,97 @@ export function copySortedDetectionFrames(
       mediaTime: frame.mediaTime,
     }))
     .sort((left, right) => left.mediaTime - right.mediaTime);
+}
+
+export function validateDetectionFrames(
+  detectionFrames: readonly DetectionFrame[],
+): void {
+  for (const [frameOffset, frame] of detectionFrames.entries()) {
+    validateNumber(frame.mediaTime, `frames[${frameOffset}].mediaTime`, {
+      min: 0,
+    });
+
+    if (frame.endTime !== undefined) {
+      validateNumber(frame.endTime, `frames[${frameOffset}].endTime`, {
+        exclusiveMin: frame.mediaTime,
+      });
+    }
+
+    if (frame.frameIndex !== undefined) {
+      validateNumber(frame.frameIndex, `frames[${frameOffset}].frameIndex`, {
+        integer: true,
+        min: 0,
+      });
+    }
+
+    for (const [detectionOffset, detection] of frame.detections.entries()) {
+      const detectionPath = `frames[${frameOffset}].detections[${detectionOffset}]`;
+
+      if (detection.confidence !== undefined) {
+        validateNumber(detection.confidence, `${detectionPath}.confidence`, {
+          max: 1,
+          min: 0,
+        });
+      }
+
+      if (detection.rect) {
+        validateNumber(detection.rect.x, `${detectionPath}.rect.x`);
+        validateNumber(detection.rect.y, `${detectionPath}.rect.y`);
+        validateNumber(detection.rect.width, `${detectionPath}.rect.width`, {
+          exclusiveMin: 0,
+        });
+        validateNumber(detection.rect.height, `${detectionPath}.rect.height`, {
+          exclusiveMin: 0,
+        });
+      }
+
+      if (detection.mask) {
+        validateNumber(detection.mask.width, `${detectionPath}.mask.width`, {
+          integer: true,
+          exclusiveMin: 0,
+        });
+        validateNumber(detection.mask.height, `${detectionPath}.mask.height`, {
+          integer: true,
+          exclusiveMin: 0,
+        });
+
+        if (detection.mask.counts.length === 0) {
+          throw new Error(`${detectionPath}.mask.counts must not be empty.`);
+        }
+      }
+    }
+  }
+}
+
+function validateNumber(
+  value: number,
+  path: string,
+  options: {
+    readonly exclusiveMin?: number;
+    readonly integer?: boolean;
+    readonly max?: number;
+    readonly min?: number;
+  } = {},
+) {
+  if (!Number.isFinite(value)) {
+    throw new Error(`${path} must be a finite number.`);
+  }
+
+  if (options.integer && !Number.isInteger(value)) {
+    throw new Error(`${path} must be an integer.`);
+  }
+
+  if (options.min !== undefined && value < options.min) {
+    throw new Error(`${path} must be greater than or equal to ${options.min}.`);
+  }
+
+  if (options.exclusiveMin !== undefined && value <= options.exclusiveMin) {
+    throw new Error(`${path} must be greater than ${options.exclusiveMin}.`);
+  }
+
+  if (options.max !== undefined && value > options.max) {
+    throw new Error(`${path} must be less than or equal to ${options.max}.`);
+  }
 }
 
 export function filterDetectionFramesForRange(

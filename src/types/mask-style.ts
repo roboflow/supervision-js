@@ -10,12 +10,21 @@ export interface MaskStyleContext {
   readonly detectionIndex: number;
 }
 
+/**
+ * Optional outline applied around prepared mask pixels.
+ */
 export interface MaskStrokeStyle {
   readonly color: number;
   readonly alpha: number;
   readonly width: number;
 }
 
+/**
+ * Renderer-neutral mask drawing instruction.
+ *
+ * The `mask` remains semantic detection data. Renderer backends may prepare it
+ * into ID-mask artifacts, textures, or other backend-specific resources.
+ */
 export interface MaskDrawInstruction {
   readonly mask: DetectionMask;
   readonly color: number;
@@ -23,6 +32,12 @@ export interface MaskDrawInstruction {
   readonly stroke?: MaskStrokeStyle;
 }
 
+/**
+ * Mask presentation contract.
+ *
+ * Styles decide which detections are rendered as masks and how they should look.
+ * Expensive mask preparation is owned by the renderer, not by style objects.
+ */
 export interface MaskStyle {
   /**
    * Stable identity for the prepared mask pixels. Exclude presentation-only
