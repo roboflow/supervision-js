@@ -1,0 +1,191 @@
+import { describe, expect, it, vi } from "vitest";
+
+import {
+  createContainer,
+  createMockSample,
+  mediaMock,
+  pixiMock,
+  resetMocks,
+} from "../test/media-renderer-harness";
+
+describe("media session consumer workflows", () => {
+  it("creates a session, appends detections, seeks, updates styles, and destroys cleanly", async () => {
+    resetMocks();
+    mediaMock.samples = [createMockSample(0, 0), createMockSample(0.5, 0)];
+    const {
+      BaseBoxStyle,
+      createMediaSession,
+      DetectionFrameSelectionMode,
+      MediaSessionStatus,
+    } = await import("./index");
+    const session = await createMediaSession({
+      container: createContainer(),
+      detections: {
+        appendable: {
+          datasetId: "consumer-session",
+        },
+        sync: {
+          frameRate: 2,
+          selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
+        },
+      },
+      media: "sample.mp4",
+      renderer: {
+        autoPlay: false,
+        loop: false,
+      },
+    });
+
+    await expect(
+      session.appendDetectionFrames([
+        {
+          detections: [
+            {
+              className: "player",
+              confidence: 0.93,
+              id: "player-1",
+              rect: { height: 40, width: 30, x: 10, y: 20 },
+            },
+          ],
+          endTime: 0.5,
+          frameIndex: 0,
+          mediaTime: 0,
+        },
+        {
+          detections: [
+            {
+              className: "ball",
+              confidence: 0.88,
+              id: "ball-1",
+              rect: { height: 12, width: 12, x: 100, y: 120 },
+            },
+          ],
+          endTime: 1,
+          frameIndex: 1,
+          mediaTime: 0.5,
+        },
+      ]),
+    ).resolves.toMatchObject({
+      datasetId: "consumer-session",
+      detectionCount: 2,
+      frameCount: 2,
+    });
+
+    await session.seek(0.5);
+
+    expect(session.getState()).toMatchObject({
+      playbackBlocked: false,
+      renderer: {
+        activeDetectionCount: 1,
+        activeDetectionFrameIndex: 1,
+        currentTime: 0.5,
+      },
+    });
+
+    session.setPresentation({
+      boxStyle: new BaseBoxStyle({
+        stroke: {
+          alpha: 0.75,
+          color: 0xff00ff,
+          width: 6,
+        },
+      }),
+    });
+
+    const boxGraphics = pixiMock.graphicsInstances[0];
+
+    expect(boxGraphics.rect).toHaveBeenLastCalledWith(100, 120, 12, 12);
+    expect(boxGraphics.stroke).toHaveBeenLastCalledWith({
+      alpha: 0.75,
+      color: 0xff00ff,
+      width: 6,
+    });
+    expect(session.getDetectionSummary()).toMatchObject({
+      datasetId: "consumer-session",
+      detectionCount: 2,
+      frameCount: 2,
+    });
+
+    session.destroy();
+
+    expect(session.getState()).toMatchObject({
+      status: MediaSessionStatus.Destroyed,
+    });
+    expect(pixiMock.appDestroy).toHaveBeenCalledOnce();
+    expect(mediaMock.dispose).toHaveBeenCalledOnce();
+  });
+
+  it("delivers detection picks through session interaction callbacks", async () => {
+    resetMocks();
+    mediaMock.samples = [createMockSample(0, 0)];
+    const { createMediaSession, DetectionPickTarget, MediaInteractionMode } =
+      await import("./index");
+    const onHover = vi.fn();
+    const onSelect = vi.fn();
+    const session = await createMediaSession({
+      container: createContainer(),
+      detections: {
+        frames: [
+          {
+            detections: [
+              {
+                className: "player",
+                id: "player-1",
+                rect: { height: 30, width: 20, x: 10, y: 15 },
+              },
+            ],
+            frameIndex: 0,
+            mediaTime: 0,
+          },
+        ],
+      },
+      media: "sample.mp4",
+      renderer: {
+        autoPlay: false,
+        interaction: {
+          mode: MediaInteractionMode.Always,
+          onHover,
+          onSelect,
+        },
+      },
+    });
+    const interactionContainer = pixiMock.containerInstances.find(
+      (container) => container.eventMode === "static",
+    );
+
+    expect(interactionContainer).toBeDefined();
+
+    const pointerMove = interactionContainer?.on.mock.calls.find(
+      ([eventName]) => eventName === "pointermove",
+    )?.[1] as ((event: unknown) => void) | undefined;
+    const pointerTap = interactionContainer?.on.mock.calls.find(
+      ([eventName]) => eventName === "pointertap",
+    )?.[1] as ((event: unknown) => void) | undefined;
+    const pointerEvent = {
+      getLocalPosition(container: unknown) {
+        expect(container).toBe(interactionContainer);
+        return { x: 15, y: 20 };
+      },
+    };
+
+    pointerMove?.(pointerEvent);
+    pointerTap?.(pointerEvent);
+
+    expect(onHover).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        detection: expect.objectContaining({ id: "player-1" }),
+        detectionIndex: 0,
+        target: DetectionPickTarget.Box,
+      }),
+    );
+    expect(onSelect).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        detection: expect.objectContaining({ id: "player-1" }),
+        detectionIndex: 0,
+        target: DetectionPickTarget.Box,
+      }),
+    );
+
+    session.destroy();
+  });
+});

@@ -109,3 +109,25 @@ Detection input has three preferred shapes:
 - `appendable` for streaming inference results written over time.
 
 Use only one of those shapes per session.
+
+## Runtime Updates
+
+After creation, the same session remains the consumer API:
+
+```ts
+await session.appendDetectionFrames(frames);
+await session.seek(4.2);
+
+session.setPresentation({
+  boxStyle,
+  maskStyle,
+  labelStyle,
+});
+
+session.destroy();
+```
+
+This is the intended integration shape for apps: create one session per media
+item, feed it detections as they become available, update presentation styles
+without rewriting detections, and destroy the session when the media item leaves
+the UI.
