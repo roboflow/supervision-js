@@ -258,14 +258,19 @@ describe("package entrypoint", () => {
       height: 2,
       width: 2,
     };
+    const context = {
+      detectionIndex: 0,
+      frame: { detections: [], mediaTime: 0 },
+      mediaTime: 0,
+    };
 
-    expect(style.resolve({ mask })).toEqual({
+    expect(style.resolve({ mask }, context)).toEqual({
       alpha: 1,
       color: 0x00ff66,
       mask,
     });
     expect(style.opacity).toBe(0.35);
-    expect(style.resolve({})).toBeUndefined();
+    expect(style.resolve({}, context)).toBeUndefined();
   });
 
   it("uses Mediabunny and does not create a video element", async () => {

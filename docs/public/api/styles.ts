@@ -18,6 +18,8 @@ export {
   type BoxStrokeStyle,
   type BoxStyle,
   type BoxStyleContext,
+  type DetectionStylePredicate,
+  type DetectionStyleValue,
   type LabelBackgroundStyle,
   type LabelDrawInstruction,
   type LabelStyle,

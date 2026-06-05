@@ -46,6 +46,10 @@ export type {
   LabelTextStyle,
 } from "#types/label-style";
 export type {
+  DetectionStylePredicate,
+  DetectionStyleValue,
+} from "#types/style";
+export type {
   MaskDrawInstruction,
   MaskStrokeStyle,
   MaskStyle,

@@ -1,55 +1,80 @@
+import { resolveStyleValue } from "#styles/style-value";
 import type { Detection } from "#types/detections";
 import type {
   LabelBackgroundStyle,
   LabelDrawInstruction,
   LabelStyle,
+  LabelStyleContext,
   LabelTextStyle,
 } from "#types/label-style";
+import type {
+  DetectionStylePredicate,
+  DetectionStyleValue,
+} from "#types/style";
 
 export interface BaseLabelStyleOptions {
-  readonly background?: Partial<LabelBackgroundStyle>;
+  /**
+   * Label background style. Pass a resolver for per-class label backgrounds.
+   */
+  readonly background?: DetectionStyleValue<
+    Partial<LabelBackgroundStyle> | undefined,
+    LabelStyleContext
+  >;
+  /**
+   * Include confidence percentage in the default label text.
+   */
   readonly includeConfidence?: boolean;
+  /**
+   * Vertical label offset in media pixels.
+   */
   readonly offsetY?: number;
-  readonly text?: (detection: Detection) => string | undefined;
-  readonly textStyle?: Partial<LabelTextStyle>;
+  /**
+   * Custom label text. Return undefined to fall back to the default class label.
+   */
+  readonly text?: DetectionStyleValue<string | undefined, LabelStyleContext>;
+  /**
+   * Label text style. Pass a resolver for per-class text colors or sizes.
+   */
+  readonly textStyle?: DetectionStyleValue<
+    Partial<LabelTextStyle> | undefined,
+    LabelStyleContext
+  >;
+  /**
+   * Return false to skip rendering a detection in this label style.
+   */
+  readonly shouldRender?: DetectionStylePredicate<LabelStyleContext>;
 }
 
+/**
+ * Default label style.
+ *
+ * Resolves labels from `className`, `metadata.label`, or a custom text
+ * resolver, optionally including confidence.
+ */
 export class BaseLabelStyle implements LabelStyle {
-  private readonly background: LabelBackgroundStyle;
   private readonly includeConfidence: boolean;
   private readonly offsetY: number;
-  private readonly resolveText:
-    | ((detection: Detection) => string | undefined)
-    | undefined;
-  private readonly textStyle: LabelTextStyle;
+  private readonly options: BaseLabelStyleOptions;
 
   constructor(options: BaseLabelStyleOptions = {}) {
-    this.background = {
-      alpha: options.background?.alpha ?? 0.72,
-      color: options.background?.color ?? 0x111827,
-      cornerRadius: options.background?.cornerRadius ?? 4,
-      paddingX: options.background?.paddingX ?? 6,
-      paddingY: options.background?.paddingY ?? 3,
-    };
+    this.options = options;
     this.includeConfidence = options.includeConfidence ?? false;
     this.offsetY = options.offsetY ?? 0;
-    this.resolveText = options.text;
-    this.textStyle = {
-      alpha: options.textStyle?.alpha ?? 1,
-      color: options.textStyle?.color ?? 0xffffff,
-      fontFamily: options.textStyle?.fontFamily ?? "Inter, sans-serif",
-      fontSize: options.textStyle?.fontSize ?? 13,
-      fontWeight: options.textStyle?.fontWeight ?? "600",
-    };
   }
 
-  resolve(detection: Detection): LabelDrawInstruction | undefined {
-    if (!detection.rect) {
+  resolve(
+    detection: Detection,
+    context: LabelStyleContext,
+  ): LabelDrawInstruction | undefined {
+    if (
+      !detection.rect ||
+      this.options.shouldRender?.(detection, context) === false
+    ) {
       return undefined;
     }
 
     const text =
-      this.resolveText?.(detection) ??
+      resolveStyleValue(this.options.text, detection, context) ??
       formatDetectionLabel(detection, this.includeConfidence);
 
     if (!text) {
@@ -57,11 +82,49 @@ export class BaseLabelStyle implements LabelStyle {
     }
 
     return {
-      background: this.background,
+      background: this.resolveBackground(detection, context),
       offsetY: this.offsetY,
       rect: detection.rect,
       text,
-      textStyle: this.textStyle,
+      textStyle: this.resolveTextStyle(detection, context),
+    };
+  }
+
+  private resolveBackground(
+    detection: Detection,
+    context: LabelStyleContext,
+  ): LabelBackgroundStyle {
+    const background = resolveStyleValue(
+      this.options.background,
+      detection,
+      context,
+    );
+
+    return {
+      alpha: background?.alpha ?? 0.72,
+      color: background?.color ?? 0x111827,
+      cornerRadius: background?.cornerRadius ?? 4,
+      paddingX: background?.paddingX ?? 6,
+      paddingY: background?.paddingY ?? 3,
+    };
+  }
+
+  private resolveTextStyle(
+    detection: Detection,
+    context: LabelStyleContext,
+  ): LabelTextStyle {
+    const textStyle = resolveStyleValue(
+      this.options.textStyle,
+      detection,
+      context,
+    );
+
+    return {
+      alpha: textStyle?.alpha ?? 1,
+      color: textStyle?.color ?? 0xffffff,
+      fontFamily: textStyle?.fontFamily ?? "Inter, sans-serif",
+      fontSize: textStyle?.fontSize ?? 13,
+      fontWeight: textStyle?.fontWeight ?? "600",
     };
   }
 }

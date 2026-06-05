@@ -65,3 +65,22 @@ renderer-neutral draw instructions or `undefined` to skip a detection. The
 default styles are intentionally practical, but custom styles can change class
 colors, opacity, labels, confidence filtering, and shape choices without
 changing the stored detections.
+
+The built-in base styles accept static values for simple global styling and
+resolver functions for per-detection behavior:
+
+```ts
+const boxStyle = new RoundedBoxStyle({
+  shouldRender: (detection) => (detection.confidence ?? 0) >= 0.5,
+  stroke: (detection) => ({
+    color: detection.className === "person" ? 0x22c55e : 0xa855f7,
+    width: 3,
+  }),
+});
+
+session.setPresentation({ boxStyle });
+```
+
+Use a custom style object when the base classes are not expressive enough. The
+contract stays the same: detections remain semantic data, and styles resolve how
+that data should be presented.
