@@ -44,6 +44,8 @@ describe("media session state", () => {
           status: MediaSessionActivityStatus.Running,
         },
       ],
+      playbackBlocked: true,
+      presentationBlocked: true,
       status: MediaSessionStatus.Loading,
     });
   });
@@ -71,6 +73,8 @@ describe("media session state", () => {
     });
 
     expect(state.status).toBe(MediaSessionStatus.Processing);
+    expect(state.playbackBlocked).toBe(false);
+    expect(state.presentationBlocked).toBe(false);
     expect(state.activities).toEqual([
       expect.objectContaining({
         blockingPlayback: false,
@@ -99,6 +103,8 @@ describe("media session state", () => {
     });
 
     expect(state.status).toBe(MediaSessionStatus.Playing);
+    expect(state.playbackBlocked).toBe(false);
+    expect(state.presentationBlocked).toBe(false);
     expect(state.activities).toEqual([
       expect.objectContaining({
         blockingPlayback: false,
@@ -126,6 +132,8 @@ describe("media session state", () => {
     });
 
     expect(state.status).toBe(MediaSessionStatus.Buffering);
+    expect(state.playbackBlocked).toBe(true);
+    expect(state.presentationBlocked).toBe(false);
     expect(state.activities).toEqual([
       expect.objectContaining({
         blockingPlayback: true,
@@ -164,6 +172,8 @@ describe("media session state", () => {
     });
 
     expect(state.status).toBe(MediaSessionStatus.Buffering);
+    expect(state.playbackBlocked).toBe(true);
+    expect(state.presentationBlocked).toBe(false);
     expect(state.activities).toEqual([
       expect.objectContaining({
         blockingPlayback: true,
@@ -222,6 +232,8 @@ describe("media session state", () => {
       }),
     });
 
+    expect(state.playbackBlocked).toBe(false);
+    expect(state.presentationBlocked).toBe(true);
     expect(state.activities).toEqual([
       expect.objectContaining({
         blockingPlayback: false,
@@ -265,6 +277,8 @@ describe("media session state", () => {
       }),
     });
 
+    expect(state.playbackBlocked).toBe(false);
+    expect(state.presentationBlocked).toBe(false);
     expect(state.activities).toEqual([
       expect.objectContaining({
         artifactKind: RenderPreparationArtifactKind.MaskFrame,
@@ -296,6 +310,8 @@ describe("media session state", () => {
 
     expect(state).toMatchObject({
       errorMessage: "Decoder failed",
+      playbackBlocked: true,
+      presentationBlocked: true,
       status: MediaSessionStatus.Error,
     });
     expect(state.activities).toEqual([
@@ -327,6 +343,8 @@ describe("media session state", () => {
 
     expect(state).toMatchObject({
       errorMessage: "Session setup failed",
+      playbackBlocked: true,
+      presentationBlocked: true,
       status: MediaSessionStatus.Error,
     });
     expect(state.activities).toEqual([
@@ -359,6 +377,8 @@ describe("media session state", () => {
 
     expect(state).toMatchObject({
       activities: [],
+      playbackBlocked: false,
+      presentationBlocked: false,
       status: MediaSessionStatus.Destroyed,
     });
   });

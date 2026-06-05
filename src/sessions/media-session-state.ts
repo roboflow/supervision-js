@@ -153,6 +153,10 @@ export function createMediaSessionStateSnapshot({
     errorMessage: errorMessage ?? renderer?.source.errorMessage ?? null,
     media,
     normalization,
+    playbackBlocked: activities.some((activity) => activity.blockingPlayback),
+    presentationBlocked: activities.some(
+      (activity) => activity.blockingPresentation,
+    ),
     renderPreparation,
     renderer,
     status: resolveSessionStatus(renderer, activities, errorMessage),

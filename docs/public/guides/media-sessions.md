@@ -65,6 +65,18 @@ normalization, detection buffering, playback gates, and render-artifact
 preparation, so apps can choose a compact status chip, a media overlay, or a
 debug panel without reading lower-level renderer internals.
 
+For common UI decisions, use the aggregate flags first:
+
+```ts
+session.subscribe((state) => {
+  controls.play.disabled = state.playbackBlocked;
+  overlay.hidden = !state.presentationBlocked;
+});
+```
+
+Use `activities` when the app needs to explain why playback or presentation is
+blocked.
+
 ## Streaming Detections
 
 Use `detections.appendable` when predictions arrive over time:
@@ -89,3 +101,11 @@ storage, buffering, and rendering mechanics.
 Appended frames are validated as semantic detection data. Styling and prepared
 render artifacts are not ingested here; the renderer derives those from the
 current presentation and hot detection window.
+
+Detection input has three preferred shapes:
+
+- `frames` for static detections known at session creation;
+- `source` for caller-owned range loading;
+- `appendable` for streaming inference results written over time.
+
+Use only one of those shapes per session.

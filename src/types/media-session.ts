@@ -90,6 +90,8 @@ export interface MediaSessionDetectionOptions {
 
   /**
    * Backward-compatible alias for `appendable`.
+   *
+   * @deprecated Use `appendable`.
    */
   readonly writable?: MediaSessionWritableDetectionOptions;
 
@@ -261,6 +263,15 @@ export interface MediaSessionState {
   readonly errorMessage: string | null;
   readonly media: MediaSessionMediaState;
   readonly normalization: MediaSessionNormalizationState | null;
+  /**
+   * True when at least one activity should prevent playback from advancing.
+   */
+  readonly playbackBlocked: boolean;
+  /**
+   * True when at least one activity prevents the current visual frame from
+   * being fully presented.
+   */
+  readonly presentationBlocked: boolean;
   readonly renderPreparation: RenderPreparationDiagnostics | null;
   readonly renderer: MediaRendererState | null;
   readonly status: MediaSessionStatus;
