@@ -122,11 +122,12 @@
     "fixture:sam3:run": "node tools/sam3-fixture/run-sam3.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run && node --test tools/sam3-fixture/*.test.mjs",
+    "package:smoke": "node --test tools/package-smoke.test.mjs",
     "test:watch": "vitest",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "verify": "npm run format:check && npm run lint && npm run typecheck && npm run test && npm run build && npm run demo:build && npm run benchmark:initial:build && npm run benchmark:masks:gpu:build",
+    "verify": "npm run format:check && npm run lint && npm run typecheck && npm run test && npm run build && npm run package:smoke && npm run demo:build && npm run benchmark:initial:build && npm run benchmark:masks:gpu:build",
     "prepare": "node -e \"process.exit(process.env.CI || process.env.NODE_ENV === 'production' ? 0 : 1)\" || husky"
   },
   "lint-staged": {
