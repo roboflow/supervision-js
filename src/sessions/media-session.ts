@@ -39,6 +39,8 @@ export async function createMediaSession(
   let normalizationState: MediaSessionNormalizationState | null = null;
   let sessionErrorMessage: string | null = null;
   let sessionMediaState: MediaSessionMediaState = createEmptyMediaState();
+  let destroyed = false;
+  let isDestroying = false;
   const createSessionState = () =>
     createMediaSessionStateSnapshot({
       errorMessage: sessionErrorMessage,
@@ -113,6 +115,10 @@ export async function createMediaSession(
       onState(state) {
         rendererState = state;
         options.renderer?.onState?.(state);
+        if (isDestroying) {
+          return;
+        }
+
         emitSessionState();
       },
       renderPreparation: {
@@ -120,20 +126,23 @@ export async function createMediaSession(
         onDiagnostics(diagnostics) {
           renderPreparationState = diagnostics;
           options.renderer?.renderPreparation?.onDiagnostics?.(diagnostics);
+          if (isDestroying) {
+            return;
+          }
+
           emitSessionState();
         },
       },
     });
     rendererState = renderer.getState();
     emitSessionState();
-    let destroyed = false;
 
     return {
       detectionSource: sessionDetections.detectionSource,
       media: sessionMedia.state,
       renderer,
 
-      appendDetectionFrames(frames) {
+      async appendDetectionFrames(frames) {
         if (destroyed) {
           throw new Error("Media session has been destroyed.");
         }
@@ -192,9 +201,11 @@ export async function createMediaSession(
         }
 
         destroyed = true;
+        isDestroying = true;
         renderer.destroy();
         rendererState = renderer.getState();
         sessionMedia.destroy();
+        isDestroying = false;
         emitSessionState();
         stateListeners.clear();
       },

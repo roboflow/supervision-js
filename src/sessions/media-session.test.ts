@@ -241,6 +241,148 @@ describe("media session", () => {
       vi.stubGlobal("URL", originalURL);
     }
   });
+
+  it("can destroy and recreate a session in the same container", async () => {
+    resetMocks();
+    const { createMediaSession, MediaSessionStatus } = await import("../index");
+    const container = createContainer();
+
+    const firstSession = await createMediaSession({
+      container,
+      media: "first.mp4",
+      renderer: { autoPlay: false },
+    });
+
+    firstSession.destroy();
+
+    const secondSession = await createMediaSession({
+      container,
+      media: "second.mp4",
+      renderer: { autoPlay: false },
+    });
+
+    expect(firstSession.getState()).toMatchObject({
+      status: MediaSessionStatus.Destroyed,
+    });
+    expect(secondSession.getState()).toMatchObject({
+      status: MediaSessionStatus.Ready,
+    });
+    expect(mediaMock.urlSourceConstructor).toHaveBeenNthCalledWith(
+      1,
+      "first.mp4",
+    );
+    expect(mediaMock.urlSourceConstructor).toHaveBeenNthCalledWith(
+      2,
+      "second.mp4",
+    );
+    expect(pixiMock.appDestroy).toHaveBeenCalledOnce();
+    expect(mediaMock.dispose).toHaveBeenCalledOnce();
+
+    secondSession.destroy();
+
+    expect(pixiMock.appDestroy).toHaveBeenCalledTimes(2);
+    expect(mediaMock.dispose).toHaveBeenCalledTimes(2);
+  });
+
+  it("makes destroy idempotent and keeps destroyed state stable", async () => {
+    resetMocks();
+    const { createMediaSession, MediaSessionStatus } = await import("../index");
+    const listener = vi.fn();
+    const session = await createMediaSession({
+      container: createContainer(),
+      media: "sample.mp4",
+      renderer: { autoPlay: false },
+    });
+
+    session.subscribe(listener);
+    listener.mockClear();
+
+    session.destroy();
+    session.destroy();
+
+    expect(session.getState()).toMatchObject({
+      status: MediaSessionStatus.Destroyed,
+    });
+    expect(listener).toHaveBeenCalledOnce();
+    expect(listener).toHaveBeenLastCalledWith(
+      expect.objectContaining({ status: MediaSessionStatus.Destroyed }),
+    );
+    expect(pixiMock.appDestroy).toHaveBeenCalledOnce();
+    expect(mediaMock.dispose).toHaveBeenCalledOnce();
+  });
+
+  it("rejects appends and immediately reports destroyed state after destroy", async () => {
+    resetMocks();
+    const { createMediaSession, MediaSessionStatus } = await import("../index");
+    const session = await createMediaSession({
+      container: createContainer(),
+      detections: {
+        appendable: {
+          datasetId: "destroyed-session",
+        },
+      },
+      media: "sample.mp4",
+      renderer: { autoPlay: false },
+    });
+
+    session.destroy();
+
+    await expect(session.appendDetectionFrames(frames)).rejects.toThrow(
+      "Media session has been destroyed.",
+    );
+
+    const listener = vi.fn();
+    const unsubscribe = session.subscribe(listener);
+
+    expect(listener).toHaveBeenCalledOnce();
+    expect(listener).toHaveBeenLastCalledWith(
+      expect.objectContaining({ status: MediaSessionStatus.Destroyed }),
+    );
+
+    unsubscribe();
+  });
+
+  it("enters error state on failed media opening and recovers for the next session", async () => {
+    resetMocks();
+    const { createMediaSession, MediaSessionStatus } = await import("../index");
+    const onState = vi.fn();
+
+    mediaMock.getPrimaryVideoTrack.mockResolvedValueOnce(
+      undefined as unknown as Record<string, unknown>,
+    );
+
+    const failedSession = await createMediaSession({
+      container: createContainer(),
+      media: "broken.mp4",
+      onState,
+      renderer: { autoPlay: false },
+    });
+
+    expect(onState).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        errorMessage: "No video track found in media source.",
+        status: MediaSessionStatus.Error,
+      }),
+    );
+    expect(failedSession.getState()).toMatchObject({
+      errorMessage: "No video track found in media source.",
+      status: MediaSessionStatus.Error,
+    });
+
+    const recoveredSession = await createMediaSession({
+      container: createContainer(),
+      media: "working.mp4",
+      renderer: { autoPlay: false },
+    });
+
+    expect(recoveredSession.getState()).toMatchObject({
+      errorMessage: null,
+      status: MediaSessionStatus.Ready,
+    });
+
+    failedSession.destroy();
+    recoveredSession.destroy();
+  });
 });
 
 function createStore(): ColdDetectionFrameStore {

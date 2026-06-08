@@ -188,4 +188,80 @@ describe("media session consumer workflows", () => {
 
     session.destroy();
   });
+
+  it("keeps multiple media sessions independent on one page", async () => {
+    resetMocks();
+    mediaMock.samples = [createMockSample(0, 0), createMockSample(0.5, 0)];
+    const { createMediaSession, DetectionFrameSelectionMode } =
+      await import("./index");
+    const firstSession = await createMediaSession({
+      container: createContainer(),
+      detections: {
+        appendable: { datasetId: "first-session" },
+        sync: {
+          frameRate: 2,
+          selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
+        },
+      },
+      media: "first.mp4",
+      renderer: { autoPlay: false },
+    });
+    const secondSession = await createMediaSession({
+      container: createContainer(),
+      detections: {
+        appendable: { datasetId: "second-session" },
+        sync: {
+          frameRate: 2,
+          selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
+        },
+      },
+      media: "second.mp4",
+      renderer: { autoPlay: false },
+    });
+
+    await firstSession.appendDetectionFrames([
+      {
+        detections: [
+          {
+            className: "player",
+            id: "first-player",
+            rect: { height: 30, width: 20, x: 10, y: 20 },
+          },
+        ],
+        frameIndex: 1,
+        mediaTime: 0.5,
+      },
+    ]);
+
+    await firstSession.seek(0.5);
+    await secondSession.seek(0.5);
+
+    expect(firstSession.getState()).toMatchObject({
+      renderer: {
+        activeDetectionCount: 1,
+        activeDetectionFrameIndex: 1,
+        currentTime: 0.5,
+      },
+    });
+    expect(secondSession.getState()).toMatchObject({
+      renderer: {
+        activeDetectionCount: 0,
+        currentTime: 0.5,
+      },
+    });
+
+    firstSession.destroy();
+
+    expect(secondSession.getState()).toMatchObject({
+      renderer: {
+        currentTime: 0.5,
+      },
+    });
+    expect(pixiMock.appDestroy).toHaveBeenCalledOnce();
+
+    secondSession.destroy();
+
+    expect(pixiMock.appDestroy).toHaveBeenCalledTimes(2);
+    expect(mediaMock.dispose).toHaveBeenCalledTimes(2);
+  });
 });

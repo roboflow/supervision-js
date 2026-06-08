@@ -97,6 +97,7 @@ Recipes:
 - [Static Detections](docs/public/recipes/static-detections.md)
 - [Streaming Detections](docs/public/recipes/streaming-detections.md)
 - [Progressive Upload Normalization](docs/public/recipes/progressive-upload-normalization.md)
+- [Session Lifecycle](docs/public/recipes/session-lifecycle.md)
 
 When deployed through the demo production server, the minimal vanilla example is
 served at `/examples/vanilla/`.

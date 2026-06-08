@@ -118,6 +118,8 @@ one timing source and avoids drift caused by separate composition layers.
   [Static Detections](recipes/static-detections.md),
   [Streaming Detections](recipes/streaming-detections.md), and
   [Progressive Upload Normalization](recipes/progressive-upload-normalization.md).
+- Read [Session Lifecycle](recipes/session-lifecycle.md) for replacing media,
+  cleaning up viewers, and recovering after session errors.
 - Browse the generated API reference by domain. The Modules page groups exports
   into Media Sessions, Detections, Rendering, Styles, Interactions, and Media
   Preparation.
