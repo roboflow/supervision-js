@@ -1,8 +1,25 @@
 {
   "name": "supervision-js",
   "version": "0.0.0",
-  "description": "Private prototype for browser-native computer vision rendering.",
+  "description": "Browser-native computer vision media rendering and annotation engine.",
   "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/joaomarcoscrs/supervision-js.git"
+  },
+  "homepage": "https://github.com/joaomarcoscrs/supervision-js#readme",
+  "bugs": {
+    "url": "https://github.com/joaomarcoscrs/supervision-js/issues"
+  },
+  "keywords": [
+    "computer-vision",
+    "annotations",
+    "video",
+    "rendering",
+    "pixijs",
+    "mediabunny",
+    "typescript"
+  ],
   "workspaces": [
     "benchmark/initial",
     "demo"
