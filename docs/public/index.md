@@ -112,6 +112,10 @@ one timing source and avoids drift caused by separate composition layers.
   cold, hot, prepared, and active render pipeline.
 - Read [Presentation Styles](guides/presentation-styles.md) for the
   `supervision-js` equivalent of Python supervision annotators.
+- Use the recipes for common integrations:
+  [Static Detections](recipes/static-detections.md),
+  [Streaming Detections](recipes/streaming-detections.md), and
+  [Progressive Upload Normalization](recipes/progressive-upload-normalization.md).
 - Browse the generated API reference by domain. The Modules page groups exports
   into Media Sessions, Detections, Rendering, Styles, Interactions, and Media
   Preparation.

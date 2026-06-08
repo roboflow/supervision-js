@@ -21,7 +21,7 @@
   "name": "supervision-js",
   "out": "docs/site",
   "plugin": ["typedoc-rhineai-theme"],
-  "projectDocuments": ["docs/public/guides/*.md"],
+  "projectDocuments": ["docs/public/guides/*.md", "docs/public/recipes/*.md"],
   "readme": "docs/public/index.md",
   "searchInComments": true,
   "searchInDocuments": true,

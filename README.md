@@ -90,6 +90,12 @@ Start with:
 - [Detections And Rendering](docs/public/guides/detections-and-rendering.md)
 - [Presentation Styles](docs/public/guides/presentation-styles.md)
 
+Recipes:
+
+- [Static Detections](docs/public/recipes/static-detections.md)
+- [Streaming Detections](docs/public/recipes/streaming-detections.md)
+- [Progressive Upload Normalization](docs/public/recipes/progressive-upload-normalization.md)
+
 ## Current Status
 
 Implemented foundation:
