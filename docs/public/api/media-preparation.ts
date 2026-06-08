@@ -15,6 +15,7 @@ export {
   normalizeMedia,
   normalizeMediaProgressively,
   prepareMedia,
+  prepareMediaProgressively,
   probeMedia,
   type DecodedMediaSource,
   type DecodedMediaSourceMetadata,
@@ -35,5 +36,6 @@ export {
   type MediaProbeVideoTrack,
   type NormalizedMedia,
   type PreparedMedia,
+  type ProgressivePreparedMedia,
   type ProgressiveNormalizedMedia,
 } from "../../../src/index";

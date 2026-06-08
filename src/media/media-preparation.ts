@@ -1,9 +1,13 @@
-import { normalizeMedia } from "#media/media-normalization";
+import {
+  normalizeMedia,
+  normalizeMediaProgressively,
+} from "#media/media-normalization";
 import { probeMedia } from "#media/media-probe";
 import { MediaProbeStatus } from "#types/media-normalization";
 import type {
   MediaPreparationOptions,
   PreparedMedia,
+  ProgressivePreparedMedia,
 } from "#types/media-preparation";
 import type {
   MediaNormalizationOptions,
@@ -33,6 +37,27 @@ export async function prepareMedia(
   }
 
   const normalizedMedia = await normalizeMedia(
+    source,
+    createNormalizationOptions(options.normalization, probe.target),
+  );
+
+  return {
+    normalizedMedia,
+    probe,
+  };
+}
+
+export async function prepareMediaProgressively(
+  source: Blob,
+  options: MediaPreparationOptions = {},
+): Promise<ProgressivePreparedMedia> {
+  const probe = await probeMedia(source, options.probe);
+
+  if (probe.status !== MediaProbeStatus.Supported || !probe.target) {
+    throw new MediaPreparationError(probe);
+  }
+
+  const normalizedMedia = await normalizeMediaProgressively(
     source,
     createNormalizationOptions(options.normalization, probe.target),
   );

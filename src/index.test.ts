@@ -89,6 +89,7 @@ describe("package entrypoint", () => {
       "normalizeMediaProgressively",
       "pickDetectionAtPoint",
       "prepareMedia",
+      "prepareMediaProgressively",
       "probeMedia",
     ]);
     expect(entrypoint.createMediaRenderer).toEqual(expect.any(Function));
@@ -101,6 +102,7 @@ describe("package entrypoint", () => {
       expect.any(Function),
     );
     expect(entrypoint.prepareMedia).toEqual(expect.any(Function));
+    expect(entrypoint.prepareMediaProgressively).toEqual(expect.any(Function));
     expect(entrypoint.MediaPreparationError).toEqual(expect.any(Function));
     expect(entrypoint.probeMedia).toEqual(expect.any(Function));
     expect(entrypoint.BaseBoxStyle).toEqual(expect.any(Function));

@@ -10,7 +10,11 @@ export {
   normalizeMedia,
   normalizeMediaProgressively,
 } from "#media/media-normalization";
-export { prepareMedia, MediaPreparationError } from "#media/media-preparation";
+export {
+  prepareMedia,
+  prepareMediaProgressively,
+  MediaPreparationError,
+} from "#media/media-preparation";
 export { probeMedia } from "#media/media-probe";
 export type {
   DecodedMediaSource,
@@ -58,6 +62,7 @@ export type {
 export type {
   MediaPreparationOptions,
   PreparedMedia,
+  ProgressivePreparedMedia,
 } from "#types/media-preparation";
 export {
   DetectionBufferStatus,

@@ -106,6 +106,8 @@ one timing source and avoids drift caused by separate composition layers.
 ## Where To Go Next
 
 - Read [Media Sessions](guides/media-sessions.md) for the working session model.
+- Read [Media Preparation](guides/media-preparation.md) for probe,
+  normalization, and progressive upload handling.
 - Read [Detections And Rendering](guides/detections-and-rendering.md) for the
   cold, hot, prepared, and active render pipeline.
 - Browse the generated API reference by domain. The Modules page groups exports
