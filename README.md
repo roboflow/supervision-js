@@ -86,6 +86,7 @@ Useful commands:
 Start with:
 
 - [Media Sessions](docs/public/guides/media-sessions.md)
+- [Public API](docs/public/guides/public-api.md)
 - [Media Preparation](docs/public/guides/media-preparation.md)
 - [Detections And Rendering](docs/public/guides/detections-and-rendering.md)
 - [Presentation Styles](docs/public/guides/presentation-styles.md)

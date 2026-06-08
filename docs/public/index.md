@@ -106,6 +106,8 @@ one timing source and avoids drift caused by separate composition layers.
 ## Where To Go Next
 
 - Read [Media Sessions](guides/media-sessions.md) for the working session model.
+- Read [Public API](guides/public-api.md) for the intended package boundary
+  between primary APIs, advanced APIs, and internals.
 - Read [Media Preparation](guides/media-preparation.md) for probe,
   normalization, and progressive upload handling.
 - Read [Detections And Rendering](guides/detections-and-rendering.md) for the

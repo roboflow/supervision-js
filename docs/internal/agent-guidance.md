@@ -13,6 +13,7 @@ Before making project-direction or architecture changes, read:
 - [`renderer-first-roadmap.md`](renderer-first-roadmap.md)
 - [`pixijs-guidance.md`](pixijs-guidance.md)
 - [`library-contract.md`](library-contract.md)
+- [`../public/guides/public-api.md`](../public/guides/public-api.md)
 
 Those docs define the current product intent: prove the browser rendering
 foundation before designing a broad annotation framework.
@@ -42,6 +43,10 @@ foundation before designing a broad annotation framework.
 - Keep renderer orchestration provider-agnostic. The public/default renderer
   factory may wire Mediabunny and Pixi defaults, but the renderer core should
   depend on small media-source and scene contracts rather than vendor modules.
+- Treat [`docs/public/guides/public-api.md`](../public/guides/public-api.md) as
+  the public boundary. Prefer `createMediaSession()` for normal consumers,
+  advanced renderer/detection/media hooks for serious integrations, and keep
+  Pixi/Mediabunny/worker/prepared-artifact details internal.
 - Use package-private TypeScript aliases for cross-folder imports inside
   `src/`: `#constants/...`, `#interactions/...`, `#media/...`,
   `#playback/...`, `#renderers/...`, `#render-preparation/...`,

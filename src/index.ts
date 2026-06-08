@@ -1,3 +1,4 @@
+// Advanced detection sources and storage.
 export { createArrayDetectionFrameSource } from "#detections/array-detection-frame-source";
 export { createBrowserColdDetectionFrameStore } from "#detections/browser-cold-detection-frame-store";
 export { createBufferedDetectionTimeline } from "#detections/buffered-detection-timeline";
@@ -5,7 +6,11 @@ export { createChunkedDetectionFrameSource } from "#detections/chunked-detection
 export { createColdDetectionFrameSource } from "#detections/cold-detection-frame-source";
 export { createMemoryColdDetectionFrameStore } from "#detections/memory-cold-detection-frame-store";
 export { createWritableDetectionFrameSource } from "#detections/writable-detection-frame-source";
+
+// Interaction and picking.
 export { pickDetectionAtPoint } from "#interactions/detection-picker";
+
+// Media preparation.
 export {
   normalizeMedia,
   normalizeMediaProgressively,
@@ -16,6 +21,8 @@ export {
   MediaPreparationError,
 } from "#media/media-preparation";
 export { probeMedia } from "#media/media-probe";
+
+// Advanced media-source contracts.
 export type {
   DecodedMediaSource,
   DecodedMediaSourceMetadata,
@@ -23,8 +30,12 @@ export type {
   DecodedVideoSampleSink,
   DisposableMediaInput,
 } from "#media/media-source";
+
+// Renderer and session primitives.
 export { createMediaRenderer } from "#renderers/media-renderer";
 export { createMediaSession } from "#sessions/media-session";
+
+// Presentation styles.
 export { BaseBoxStyle, RoundedBoxStyle } from "#styles/box-style";
 export type {
   BaseBoxStyleOptions,
