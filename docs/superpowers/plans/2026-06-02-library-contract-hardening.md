@@ -41,13 +41,13 @@ Stop after each checkpoint for manual demo testing.
 - Modify: `src/sessions/media-session.test.ts`
 - Modify: `docs/internal/agent-guidance.md`
 
-- [ ] Add `MediaSessionStateListener` and `MediaSessionStateUnsubscribe` types.
-- [ ] Add `session.subscribe(listener)` to emit the current state immediately and on future state changes.
-- [ ] Keep `onState` as creation-time sugar, but route it through the same listener mechanism.
-- [ ] Ensure `destroy()` emits the destroyed state exactly once and clears subscribers.
-- [ ] Test subscription, unsubscribe, immediate state emission, and destroyed-state emission.
-- [ ] Run `npm run test -- src/sessions/media-session.test.ts src/sessions/media-session-state.test.ts`.
-- [ ] Run `npm run typecheck`.
+- [x] Add `MediaSessionStateListener` and `MediaSessionStateUnsubscribe` types.
+- [x] Add `session.subscribe(listener)` to emit the current state immediately and on future state changes.
+- [x] Keep `onState` as creation-time sugar, but route it through the same listener mechanism.
+- [x] Ensure `destroy()` emits the destroyed state exactly once and clears subscribers.
+- [x] Test subscription, unsubscribe, immediate state emission, and destroyed-state emission.
+- [x] Run `npm run test -- src/sessions/media-session.test.ts src/sessions/media-session-state.test.ts`.
+- [x] Run `npm run typecheck`.
 
 ### Checkpoint 2: Tighten The Public Detection Model
 
@@ -58,12 +58,12 @@ Stop after each checkpoint for manual demo testing.
 - Modify: `src/index.ts`
 - Modify tests under `src/detections/` and `src/utils/detection-frames.test.ts`
 
-- [ ] Document which detection fields are semantic input versus render styling.
-- [ ] Keep styling out of `Detection`; style belongs to presentation style classes.
-- [ ] Preserve RLE mask support as cold semantic data.
-- [ ] Add tests that detection frames can be selected by frame index and media time without mutating inputs.
-- [ ] Run `npm run test -- src/detections src/utils/detection-frames.test.ts`.
-- [ ] Run `npm run typecheck`.
+- [x] Document which detection fields are semantic input versus render styling.
+- [x] Keep styling out of `Detection`; style belongs to presentation style classes.
+- [x] Preserve RLE mask support as cold semantic data.
+- [x] Add tests that detection frames can be selected by frame index and media time without mutating inputs.
+- [x] Run `npm run test -- src/detections src/utils/detection-frames.test.ts`.
+- [x] Run `npm run typecheck`.
 
 ### Checkpoint 3: Clean Detection Ingestion And Retention
 
@@ -75,13 +75,13 @@ Stop after each checkpoint for manual demo testing.
 - Modify: `src/detections/memory-cold-detection-frame-store.ts`
 - Modify: `src/types/detection-timeline.ts`
 
-- [ ] Make static, chunked, source-owned, and writable detection modes explicit.
-- [ ] Keep `appendable` and `writable` aliases compatible while preferring one canonical path internally.
-- [ ] Confirm stream retention modes: persist all, persist window, memory-only.
-- [ ] Ensure appending detections outside the current hot window does not reload the current window.
-- [ ] Test retention behavior and range-version updates.
-- [ ] Run `npm run test -- src/detections src/sessions/media-session.test.ts`.
-- [ ] Run `npm run typecheck`.
+- [x] Make static, chunked, source-owned, and writable detection modes explicit.
+- [x] Keep `appendable` and `writable` aliases compatible while preferring one canonical path internally.
+- [x] Confirm stream retention modes: persist all, persist window, memory-only.
+- [x] Ensure appending detections outside the current hot window does not reload the current window.
+- [x] Test retention behavior and range-version updates.
+- [x] Run `npm run test -- src/detections src/sessions/media-session.test.ts`.
+- [x] Run `npm run typecheck`.
 
 ### Checkpoint 4: Formalize Cold, Hot, Prepared, Active Pipeline
 
@@ -93,12 +93,12 @@ Stop after each checkpoint for manual demo testing.
 - Modify: `src/renderers/media-renderer-core.ts`
 - Modify: `src/renderers/media-renderer-state.ts`
 
-- [ ] Keep generic artifact diagnostics by artifact kind, not mask-only names.
-- [ ] Ensure prepared windows use continuous refill, low-water/high-water behavior, and loop-aware retention.
-- [ ] Keep active-frame render preparation separate from background preparation.
-- [ ] Ensure prepared artifact cleanup closes image resources and destroys Pixi textures.
-- [ ] Run `npm run test -- src/render-preparation src/renderers/media-renderer-core.test.ts`.
-- [ ] Run `npm run typecheck`.
+- [x] Keep generic artifact diagnostics by artifact kind, not mask-only names.
+- [x] Ensure prepared windows use continuous refill, low-water/high-water behavior, and loop-aware retention.
+- [x] Keep active-frame render preparation separate from background preparation.
+- [x] Ensure prepared artifact cleanup closes image resources and destroys Pixi textures.
+- [x] Run `npm run test -- src/render-preparation src/renderers/media-renderer-core.test.ts`.
+- [x] Run `npm run typecheck`.
 
 ### Checkpoint 5: Harden Worker-Backed Mask Preparation
 
