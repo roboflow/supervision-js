@@ -10,6 +10,9 @@ Use static detection frames when an app already has predictions for the media.
 This is the simplest way to render a fixture, cached inference result, or local
 JSON file.
 
+For a runnable version of this pattern, see `examples/vanilla` in the repo. It
+uses the basketball fixture with plain TypeScript, Vite, and no framework.
+
 ```ts
 import {
   BaseLabelStyle,

@@ -1,0 +1,17 @@
+{
+  "name": "supervision-js-vanilla-example",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5178",
+    "build": "tsc -p tsconfig.json && vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 4178"
+  },
+  "dependencies": {
+    "supervision-js": "file:../.."
+  },
+  "devDependencies": {
+    "vite": "^8.0.10"
+  }
+}

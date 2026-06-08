@@ -22,7 +22,8 @@
   ],
   "workspaces": [
     "benchmark/initial",
-    "demo"
+    "demo",
+    "examples/vanilla"
   ],
   "type": "module",
   "license": "Apache-2.0",
@@ -108,6 +109,8 @@
     "docs:build": "typedoc",
     "docs:dev": "npm run docs:build && vite docs/site --host 127.0.0.1 --port 5175",
     "docs:serve": "npm run docs:build && vite docs/site --host 127.0.0.1 --port 5175",
+    "example:vanilla:dev": "npm run build && npm run dev -w examples/vanilla",
+    "example:vanilla:build": "npm run build && npm run build -w examples/vanilla",
     "benchmark:initial:dev": "npm run dev -w benchmark/initial",
     "benchmark:initial:build": "npm run build -w benchmark/initial",
     "benchmark:masks": "npm run build && node benchmark/masks/run.mjs",
@@ -127,7 +130,7 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "verify": "npm run format:check && npm run lint && npm run typecheck && npm run test && npm run build && npm run package:smoke && npm run demo:build && npm run benchmark:initial:build && npm run benchmark:masks:gpu:build",
+    "verify": "npm run format:check && npm run lint && npm run typecheck && npm run test && npm run build && npm run package:smoke && npm run demo:build && npm run example:vanilla:build && npm run benchmark:initial:build && npm run benchmark:masks:gpu:build",
     "prepare": "node -e \"process.exit(process.env.CI || process.env.NODE_ENV === 'production' ? 0 : 1)\" || husky"
   },
   "lint-staged": {

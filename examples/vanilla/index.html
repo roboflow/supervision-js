@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>supervision-js vanilla example</title>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Vanilla browser example</p>
+          <h1>supervision-js</h1>
+          <p class="summary">
+            One media session, one basketball fixture, no React.
+          </p>
+        </div>
+        <button id="play-toggle" type="button">Play</button>
+      </section>
+
+      <section class="viewer-card">
+        <div
+          id="viewer"
+          class="viewer"
+          aria-label="Basketball video viewer"
+        ></div>
+      </section>
+
+      <section class="status-grid" aria-label="Session state">
+        <div>
+          <span>Status</span>
+          <strong id="session-status">loading</strong>
+        </div>
+        <div>
+          <span>Time</span>
+          <strong id="session-time">0.00s</strong>
+        </div>
+        <div>
+          <span>Detections</span>
+          <strong id="session-detections">0</strong>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
