@@ -62,6 +62,32 @@ describe("production demo server", () => {
     ).toBeNull();
   });
 
+  it("serves the vanilla example from the /examples/vanilla path prefix", async () => {
+    const vanillaExampleRoot = await createFixtureDist("vanilla-example");
+
+    expect(
+      resolveStaticAssetPath(
+        "/examples/vanilla",
+        vanillaExampleRoot,
+        "/examples/vanilla",
+      ),
+    ).toBe(join(vanillaExampleRoot, "index.html"));
+    expect(
+      resolveStaticAssetPath(
+        "/examples/vanilla/assets/app.js",
+        vanillaExampleRoot,
+        "/examples/vanilla",
+      ),
+    ).toBe(join(vanillaExampleRoot, "assets", "app.js"));
+    expect(
+      resolveStaticAssetPath(
+        "/assets/app.js",
+        vanillaExampleRoot,
+        "/examples/vanilla",
+      ),
+    ).toBeNull();
+  });
+
   it("does not resolve path traversal requests", async () => {
     const distRoot = await createFixtureDist();
 

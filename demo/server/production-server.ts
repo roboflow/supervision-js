@@ -20,7 +20,11 @@ const DEFAULT_DIST_ROOT = fileURLToPath(new URL("../dist/", import.meta.url));
 const DEFAULT_DOCS_ROOT = fileURLToPath(
   new URL("../../docs/site/", import.meta.url),
 );
+const DEFAULT_VANILLA_EXAMPLE_ROOT = fileURLToPath(
+  new URL("../../examples/vanilla/dist/", import.meta.url),
+);
 const DOCS_PATH_PREFIX = "/docs";
+const VANILLA_EXAMPLE_PATH_PREFIX = "/examples/vanilla";
 
 type RequestHandler = (
   request: IncomingMessage,
@@ -32,6 +36,7 @@ export interface DemoServerOptions {
   readonly distRoot?: string;
   readonly sam3ProxyHandler?: RequestHandler;
   readonly sam3StreamHandler?: RequestHandler;
+  readonly vanillaExampleRoot?: string;
 }
 
 export function createDemoServer(options: DemoServerOptions = {}) {
@@ -41,6 +46,9 @@ export function createDemoServer(options: DemoServerOptions = {}) {
 export function createDemoRequestHandler(options: DemoServerOptions = {}) {
   const docsRoot = resolve(options.docsRoot ?? DEFAULT_DOCS_ROOT);
   const distRoot = resolve(options.distRoot ?? DEFAULT_DIST_ROOT);
+  const vanillaExampleRoot = resolve(
+    options.vanillaExampleRoot ?? DEFAULT_VANILLA_EXAMPLE_ROOT,
+  );
   const sam3ProxyHandler = options.sam3ProxyHandler ?? handleSam3ProxyRequest;
   const sam3StreamHandler =
     options.sam3StreamHandler ?? handleSam3StreamRequest;
@@ -64,6 +72,19 @@ export function createDemoRequestHandler(options: DemoServerOptions = {}) {
         pathname.startsWith(`${DOCS_PATH_PREFIX}/`)
       ) {
         serveStaticAsset(request, response, docsRoot, DOCS_PATH_PREFIX);
+        return;
+      }
+
+      if (
+        pathname === VANILLA_EXAMPLE_PATH_PREFIX ||
+        pathname.startsWith(`${VANILLA_EXAMPLE_PATH_PREFIX}/`)
+      ) {
+        serveStaticAsset(
+          request,
+          response,
+          vanillaExampleRoot,
+          VANILLA_EXAMPLE_PATH_PREFIX,
+        );
         return;
       }
 

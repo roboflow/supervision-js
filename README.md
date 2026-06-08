@@ -98,6 +98,9 @@ Recipes:
 - [Streaming Detections](docs/public/recipes/streaming-detections.md)
 - [Progressive Upload Normalization](docs/public/recipes/progressive-upload-normalization.md)
 
+When deployed through the demo production server, the minimal vanilla example is
+served at `/examples/vanilla/`.
+
 ## Current Status
 
 Implemented foundation:
