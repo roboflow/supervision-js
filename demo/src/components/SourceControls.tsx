@@ -43,6 +43,9 @@ export function SourceControls({
 
   return (
     <section className="source-controls" aria-label="Media source controls">
+      <header className="inspector-card__header">
+        <h2>Source</h2>
+      </header>
       <div className="source-controls__mode">
         {sampleFixtures.map((fixture) => (
           <button

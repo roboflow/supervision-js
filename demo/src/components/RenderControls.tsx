@@ -1,5 +1,4 @@
-import { BoxShape } from "supervision-js";
-import { useState, type CSSProperties } from "react";
+import { useState, type CSSProperties, type ReactNode } from "react";
 import {
   resolveDemoClassStyle,
   type DemoClassStyle,
@@ -48,22 +47,25 @@ export function RenderControls({
 
   return (
     <section className="render-controls" aria-label="Render controls">
-      <div className="render-controls__tabs" role="tablist">
-        <button
-          aria-pressed={activeTab === RenderControlsTab.Global}
-          onClick={() => setActiveTab(RenderControlsTab.Global)}
-          type="button"
-        >
-          Global
-        </button>
-        <button
-          aria-pressed={activeTab === RenderControlsTab.Classes}
-          onClick={() => setActiveTab(RenderControlsTab.Classes)}
-          type="button"
-        >
-          Classes
-        </button>
-      </div>
+      <header className="inspector-card__header">
+        <h2>Style</h2>
+        <div className="render-controls__tabs" role="tablist">
+          <button
+            aria-pressed={activeTab === RenderControlsTab.Global}
+            onClick={() => setActiveTab(RenderControlsTab.Global)}
+            type="button"
+          >
+            Global
+          </button>
+          <button
+            aria-pressed={activeTab === RenderControlsTab.Classes}
+            onClick={() => setActiveTab(RenderControlsTab.Classes)}
+            type="button"
+          >
+            Classes
+          </button>
+        </div>
+      </header>
 
       {activeTab === RenderControlsTab.Global ? (
         <GlobalRenderControls onChange={updateSettings} settings={settings} />
@@ -90,137 +92,126 @@ function GlobalRenderControls({
 }) {
   return (
     <div className="render-controls__panel render-controls__panel--global">
-      <div className="render-controls__toggles">
-        <ToggleControl
-          checked={settings.boxesEnabled}
-          label="Boxes"
-          onChange={(checked) => onChange("boxesEnabled", checked)}
-        />
-        <ToggleControl
-          checked={settings.masksEnabled}
-          label="Masks"
-          onChange={(checked) => onChange("masksEnabled", checked)}
-        />
-        <ToggleControl
-          checked={settings.labelsEnabled}
-          label="Labels"
-          onChange={(checked) => onChange("labelsEnabled", checked)}
-        />
-      </div>
-
-      <fieldset className="render-control render-control--shape">
-        <legend>Box Shape</legend>
-        <div className="render-control__segments">
-          <button
-            aria-pressed={settings.boxShape === BoxShape.Rect}
-            disabled={!settings.boxesEnabled}
-            onClick={() => onChange("boxShape", BoxShape.Rect)}
-            type="button"
-          >
-            Rect
-          </button>
-          <button
-            aria-pressed={settings.boxShape === BoxShape.RoundedRect}
-            disabled={!settings.boxesEnabled}
-            onClick={() => onChange("boxShape", BoxShape.RoundedRect)}
-            type="button"
-          >
-            Rounded
-          </button>
+      <ControlSection title="Layers">
+        <div className="render-controls__toggles">
+          <ToggleControl
+            checked={settings.boxesEnabled}
+            label="Boxes"
+            onChange={(checked) => onChange("boxesEnabled", checked)}
+          />
+          <ToggleControl
+            checked={settings.masksEnabled}
+            label="Masks"
+            onChange={(checked) => onChange("masksEnabled", checked)}
+          />
+          <ToggleControl
+            checked={settings.labelsEnabled}
+            label="Labels"
+            onChange={(checked) => onChange("labelsEnabled", checked)}
+          />
         </div>
-      </fieldset>
+      </ControlSection>
 
-      <SliderControl
-        disabled={
-          !settings.boxesEnabled || settings.boxShape !== BoxShape.RoundedRect
-        }
-        label="Corner Radius"
-        max={24}
-        min={0}
-        onChange={(value) => onChange("boxCornerRadius", value)}
-        step={1}
-        value={settings.boxCornerRadius}
-        valueLabel={`${settings.boxCornerRadius}px`}
-      />
-      <SliderControl
-        disabled={!settings.boxesEnabled}
-        label="Box Stroke"
-        max={8}
-        min={1}
-        onChange={(value) => onChange("boxStrokeWidth", value)}
-        step={1}
-        value={settings.boxStrokeWidth}
-        valueLabel={`${settings.boxStrokeWidth}px`}
-      />
-      <SliderControl
-        disabled={!settings.boxesEnabled}
-        label="Box Fill"
-        max={0.35}
-        min={0}
-        onChange={(value) => onChange("boxFillAlpha", value)}
-        step={0.01}
-        value={settings.boxFillAlpha}
-        valueLabel={formatPercent(settings.boxFillAlpha)}
-      />
-      <SliderControl
-        disabled={!settings.masksEnabled}
-        label="Mask"
-        max={1}
-        min={0}
-        onChange={(value) => onChange("maskAlpha", value)}
-        step={0.01}
-        value={settings.maskAlpha}
-        valueLabel={formatPercent(settings.maskAlpha)}
-      />
-      <SliderControl
-        disabled={!settings.masksEnabled}
-        label="Mask Border"
-        max={8}
-        min={0}
-        onChange={(value) => onChange("maskStrokeWidth", value)}
-        step={1}
-        value={settings.maskStrokeWidth}
-        valueLabel={`${settings.maskStrokeWidth}px`}
-      />
-      <SliderControl
-        disabled={!settings.masksEnabled || settings.maskStrokeWidth === 0}
-        label="Border Alpha"
-        max={1}
-        min={0}
-        onChange={(value) => onChange("maskStrokeAlpha", value)}
-        step={0.01}
-        value={settings.maskStrokeAlpha}
-        valueLabel={formatPercent(settings.maskStrokeAlpha)}
-      />
-      <SliderControl
-        disabled={!settings.labelsEnabled}
-        label="Label Size"
-        max={22}
-        min={10}
-        onChange={(value) => onChange("labelFontSize", value)}
-        step={1}
-        value={settings.labelFontSize}
-        valueLabel={`${settings.labelFontSize}px`}
-      />
-      <SliderControl
-        disabled={!settings.labelsEnabled}
-        label="Label BG"
-        max={1}
-        min={0}
-        onChange={(value) => onChange("labelBackgroundAlpha", value)}
-        step={0.01}
-        value={settings.labelBackgroundAlpha}
-        valueLabel={formatPercent(settings.labelBackgroundAlpha)}
-      />
-      <SliderControl
-        label="Confidence"
-        max={1}
-        min={0}
-        onChange={(value) => onChange("confidenceThreshold", value)}
-        step={0.01}
-        value={settings.confidenceThreshold}
-        valueLabel={`${Math.round(settings.confidenceThreshold * 100)}%`}
-      />
+      <ControlSection title="Boxes">
+        <SliderControl
+          disabled={!settings.boxesEnabled}
+          label="Radius"
+          max={24}
+          min={0}
+          onChange={(value) => onChange("boxCornerRadius", value)}
+          step={1}
+          value={settings.boxCornerRadius}
+          valueLabel={`${settings.boxCornerRadius}px`}
+        />
+        <SliderControl
+          disabled={!settings.boxesEnabled}
+          label="Stroke"
+          max={8}
+          min={1}
+          onChange={(value) => onChange("boxStrokeWidth", value)}
+          step={1}
+          value={settings.boxStrokeWidth}
+          valueLabel={`${settings.boxStrokeWidth}px`}
+        />
+        <SliderControl
+          disabled={!settings.boxesEnabled}
+          label="Fill"
+          max={0.35}
+          min={0}
+          onChange={(value) => onChange("boxFillAlpha", value)}
+          step={0.01}
+          value={settings.boxFillAlpha}
+          valueLabel={formatPercent(settings.boxFillAlpha)}
+        />
+      </ControlSection>
+
+      <ControlSection title="Masks">
+        <SliderControl
+          disabled={!settings.masksEnabled}
+          label="Opacity"
+          max={1}
+          min={0}
+          onChange={(value) => onChange("maskAlpha", value)}
+          step={0.01}
+          value={settings.maskAlpha}
+          valueLabel={formatPercent(settings.maskAlpha)}
+        />
+        <SliderControl
+          disabled={!settings.masksEnabled}
+          label="Border"
+          max={8}
+          min={0}
+          onChange={(value) => onChange("maskStrokeWidth", value)}
+          step={1}
+          value={settings.maskStrokeWidth}
+          valueLabel={`${settings.maskStrokeWidth}px`}
+        />
+        <SliderControl
+          disabled={!settings.masksEnabled || settings.maskStrokeWidth === 0}
+          label="Border Alpha"
+          max={1}
+          min={0}
+          onChange={(value) => onChange("maskStrokeAlpha", value)}
+          step={0.01}
+          value={settings.maskStrokeAlpha}
+          valueLabel={formatPercent(settings.maskStrokeAlpha)}
+        />
+      </ControlSection>
+
+      <ControlSection title="Labels">
+        <SliderControl
+          disabled={!settings.labelsEnabled}
+          label="Size"
+          max={22}
+          min={10}
+          onChange={(value) => onChange("labelFontSize", value)}
+          step={1}
+          value={settings.labelFontSize}
+          valueLabel={`${settings.labelFontSize}px`}
+        />
+        <SliderControl
+          disabled={!settings.labelsEnabled}
+          label="Background"
+          max={1}
+          min={0}
+          onChange={(value) => onChange("labelBackgroundAlpha", value)}
+          step={0.01}
+          value={settings.labelBackgroundAlpha}
+          valueLabel={formatPercent(settings.labelBackgroundAlpha)}
+        />
+      </ControlSection>
+
+      <ControlSection title="Filter">
+        <SliderControl
+          label="Confidence"
+          max={1}
+          min={0}
+          onChange={(value) => onChange("confidenceThreshold", value)}
+          step={0.01}
+          value={settings.confidenceThreshold}
+          valueLabel={`${Math.round(settings.confidenceThreshold * 100)}%`}
+        />
+      </ControlSection>
     </div>
   );
 }
@@ -282,6 +273,21 @@ function ClassRenderControls({
         );
       })}
     </div>
+  );
+}
+
+function ControlSection({
+  children,
+  title,
+}: {
+  readonly children: ReactNode;
+  readonly title: string;
+}) {
+  return (
+    <section className="render-control-section">
+      <h3>{title}</h3>
+      <div className="render-control-section__body">{children}</div>
+    </section>
   );
 }
 

@@ -9,6 +9,7 @@ const sourceAlias = (folder: string) => path.resolve(rootDir, "src", folder);
 export default defineConfig({
   resolve: {
     alias: {
+      "supervision-js": path.resolve(rootDir, "src/index.ts"),
       "#constants": sourceAlias("constants"),
       "#detections": sourceAlias("detections"),
       "#interactions": sourceAlias("interactions"),
@@ -25,6 +26,10 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["src/**/*.test.ts", "demo/server/**/*.test.ts"],
+    include: [
+      "src/**/*.test.ts",
+      "demo/server/**/*.test.ts",
+      "demo/src/**/*.test.ts",
+    ],
   },
 });

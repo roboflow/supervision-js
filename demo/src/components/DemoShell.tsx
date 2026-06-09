@@ -29,67 +29,62 @@ export function DemoShell({
 
   return (
     <main className={shellClassName}>
-      <div
-        aria-hidden={isBenchmarksMode}
-        className={[
-          "demo-shell__viewport",
-          isBenchmarksMode ? "demo-shell__viewport--hidden" : "",
-        ]
-          .filter(Boolean)
-          .join(" ")}
-      >
-        {viewport}
-      </div>
-      <aside className="demo-shell__panel" aria-label="Demo controls">
-        <div className="demo-shell__header">
-          <div className="demo-shell__brand">
-            <div className="demo-shell__mark" aria-hidden="true">
-              <span />
-            </div>
-            <div className="demo-shell__title">
-              <strong>supervision-js</strong>
-              <span>CV media rendering workbench</span>
-            </div>
+      <header className="demo-shell__header">
+        <div className="demo-shell__brand">
+          <div className="demo-shell__mark" aria-hidden="true">
+            <span />
           </div>
-          {isBenchmarksMode ? null : sourceControls}
-          <div className="demo-shell__mode" role="tablist">
-            <a href={docsUrl} rel="noreferrer" target="_blank">
-              Docs
-            </a>
-            <button
-              aria-pressed={mode === DemoViewMode.Benchmarks}
-              onClick={() => onModeChange(DemoViewMode.Benchmarks)}
-              type="button"
-            >
-              Benchmarks
-            </button>
-            <button
-              aria-pressed={mode === DemoViewMode.Demo}
-              onClick={() => onModeChange(DemoViewMode.Demo)}
-              type="button"
-            >
-              Demo
-            </button>
-            <button
-              aria-pressed={mode === DemoViewMode.Debug}
-              onClick={() => onModeChange(DemoViewMode.Debug)}
-              type="button"
-            >
-              Debug
-            </button>
+          <div className="demo-shell__title">
+            <strong>supervision-js</strong>
+            <span>CV media rendering workbench</span>
           </div>
         </div>
-        {isBenchmarksMode ? (
-          benchmarksPanel
-        ) : (
-          <>
-            {controlBar}
-            {performanceStrip}
+        <div className="demo-shell__mode" role="tablist">
+          <a href={docsUrl} rel="noreferrer" target="_blank">
+            Docs
+          </a>
+          <button
+            aria-pressed={mode === DemoViewMode.Benchmarks}
+            onClick={() => onModeChange(DemoViewMode.Benchmarks)}
+            type="button"
+          >
+            Benchmarks
+          </button>
+          <button
+            aria-pressed={mode === DemoViewMode.Demo}
+            onClick={() => onModeChange(DemoViewMode.Demo)}
+            type="button"
+          >
+            Demo
+          </button>
+          <button
+            aria-pressed={mode === DemoViewMode.Debug}
+            onClick={() => onModeChange(DemoViewMode.Debug)}
+            type="button"
+          >
+            Debug
+          </button>
+        </div>
+      </header>
+
+      {isBenchmarksMode ? (
+        <section className="demo-shell__benchmarks" aria-label="Benchmarks">
+          {benchmarksPanel}
+        </section>
+      ) : (
+        <div className="demo-shell__workspace">
+          <aside className="demo-shell__inspector" aria-label="Demo controls">
+            {sourceControls}
             {renderControls}
+            {mode === DemoViewMode.Debug ? performanceStrip : null}
             {mode === DemoViewMode.Debug ? statusPanel : null}
-          </>
-        )}
-      </aside>
+          </aside>
+          <section className="demo-shell__stage" aria-label="Renderer stage">
+            <div className="demo-shell__viewport">{viewport}</div>
+            {controlBar}
+          </section>
+        </div>
+      )}
     </main>
   );
 }

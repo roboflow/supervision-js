@@ -21,7 +21,6 @@ export interface DemoPresentationSettings {
   readonly boxesEnabled: boolean;
   readonly labelsEnabled: boolean;
   readonly masksEnabled: boolean;
-  readonly boxShape: BoxShape;
   readonly boxCornerRadius: number;
   readonly boxStrokeWidth: number;
   readonly boxFillAlpha: number;
@@ -86,7 +85,6 @@ export const defaultDemoPresentationSettings: DemoPresentationSettings = {
   boxesEnabled: true,
   boxCornerRadius: 8,
   boxFillAlpha: 0.1,
-  boxShape: BoxShape.RoundedRect,
   boxStrokeWidth: 4,
   classStyles: defaultDemoClassStyles,
   confidenceThreshold: 0.5,
@@ -117,18 +115,17 @@ function createDemoBoxStyle(settings: DemoPresentationSettings): BoxStyle {
       }
 
       const style = resolveClassStyle(detection, settings);
+      const shape = resolveBoxShape(settings.boxCornerRadius);
 
       return {
         cornerRadius:
-          settings.boxShape === BoxShape.RoundedRect
-            ? settings.boxCornerRadius
-            : undefined,
+          shape === BoxShape.RoundedRect ? settings.boxCornerRadius : undefined,
         fill: {
           alpha: settings.boxFillAlpha,
           color: style.fill,
         },
         rect: detection.rect,
-        shape: settings.boxShape,
+        shape,
         stroke: {
           alpha: 0.95,
           color: style.stroke,
@@ -137,6 +134,10 @@ function createDemoBoxStyle(settings: DemoPresentationSettings): BoxStyle {
       };
     },
   };
+}
+
+function resolveBoxShape(cornerRadius: number): BoxShape {
+  return cornerRadius > 0 ? BoxShape.RoundedRect : BoxShape.Rect;
 }
 
 function createDemoMaskStyle(settings: DemoPresentationSettings): MaskStyle {
