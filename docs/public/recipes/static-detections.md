@@ -17,8 +17,9 @@ uses the basketball fixture with plain TypeScript, Vite, and no framework.
 import {
   BaseLabelStyle,
   BaseMaskStyle,
+  BaseBoxStyle,
+  BoxShape,
   createMediaSession,
-  RoundedBoxStyle,
   type DetectionFrame,
 } from "supervision-js";
 
@@ -33,7 +34,9 @@ const session = await createMediaSession({
     frames,
   },
   presentation: {
-    boxStyle: new RoundedBoxStyle({
+    boxStyle: new BaseBoxStyle({
+      cornerRadius: 8,
+      shape: BoxShape.RoundedRect,
       stroke: { alpha: 1, color: 0x38bdf8, width: 3 },
     }),
     labelStyle: new BaseLabelStyle({ includeConfidence: true }),

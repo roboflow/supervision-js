@@ -1,12 +1,13 @@
 import {
   BaseLabelStyle,
   BaseMaskStyle,
+  BaseBoxStyle,
+  BoxShape,
   createChunkedDetectionFrameSource,
   createMediaSession,
   DetectionFrameSelectionMode,
   MediaRendererFit,
   MediaRendererPlaybackState,
-  RoundedBoxStyle,
   type DetectionFrameChunk,
   type DetectionFrameChunkDescriptor,
   type DetectionFrameChunkManifest,
@@ -64,8 +65,9 @@ async function startExample() {
     media: basketballVideoUrl,
     onState: renderSessionState,
     presentation: {
-      boxStyle: new RoundedBoxStyle({
+      boxStyle: new BaseBoxStyle({
         cornerRadius: 8,
+        shape: BoxShape.RoundedRect,
         stroke: (detection) => ({
           alpha: 1,
           color: resolveClassColor(detection.className),

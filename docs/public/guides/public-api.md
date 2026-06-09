@@ -27,7 +27,7 @@ Start here for normal application code:
 - `Rect`
 - `DetectionMask`
 - `BaseBoxStyle`
-- `RoundedBoxStyle`
+- `BoxShape`
 - `BaseMaskStyle`
 - `BaseLabelStyle`
 - `prepareMedia()`

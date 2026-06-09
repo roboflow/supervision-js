@@ -9,7 +9,6 @@ export {
   BaseLabelStyle,
   BaseMaskStyle,
   BoxShape,
-  RoundedBoxStyle,
   type BaseBoxStyleOptions,
   type BaseLabelStyleOptions,
   type BaseMaskStyleOptions,
@@ -29,5 +28,4 @@ export {
   type MaskStrokeStyle,
   type MaskStyle,
   type MaskStyleContext,
-  type RoundedBoxStyleOptions,
 } from "../../../src/index";

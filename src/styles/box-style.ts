@@ -20,6 +20,17 @@ import type {
 
 export interface BaseBoxStyleOptions {
   /**
+   * Box geometry. Pass a resolver for per-class or per-state shape changes.
+   */
+  readonly shape?: DetectionStyleValue<BoxShape, BoxStyleContext>;
+  /**
+   * Rounded rectangle corner radius in media pixels.
+   */
+  readonly cornerRadius?: DetectionStyleValue<
+    number | undefined,
+    BoxStyleContext
+  >;
+  /**
    * Box stroke. Pass `null` to disable strokes, or a resolver for per-detection
    * stroke styling.
    */
@@ -41,11 +52,12 @@ export interface BaseBoxStyleOptions {
 }
 
 /**
- * Default rectangular box style.
+ * Default configurable box style.
  *
  * This is the simplest `supervision-js` equivalent of a box annotator: it
  * converts detections with `rect` geometry into renderer-neutral box draw
- * instructions.
+ * instructions. Use options such as `shape`, `cornerRadius`, `stroke`, and
+ * `fill` for static or per-detection styling.
  */
 export class BaseBoxStyle implements BoxStyle {
   protected readonly options: BaseBoxStyleOptions;
@@ -65,12 +77,44 @@ export class BaseBoxStyle implements BoxStyle {
       return undefined;
     }
 
-    return {
+    const shape = this.resolveShape(detection, context);
+    const cornerRadius = this.resolveCornerRadius(detection, context, shape);
+    const instruction: BoxDrawInstruction = {
       fill: this.resolveFill(detection, context),
       rect: detection.rect,
-      shape: BoxShape.Rect,
+      shape,
       stroke: this.resolveStroke(detection, context),
     };
+
+    if (cornerRadius !== undefined) {
+      return {
+        ...instruction,
+        cornerRadius,
+      };
+    }
+
+    return instruction;
+  }
+
+  protected resolveShape(
+    detection: Detection,
+    context: BoxStyleContext,
+  ): BoxShape {
+    return (
+      resolveStyleValue(this.options.shape, detection, context) ?? BoxShape.Rect
+    );
+  }
+
+  protected resolveCornerRadius(
+    detection: Detection,
+    context: BoxStyleContext,
+    shape: BoxShape,
+  ): number | undefined {
+    if (shape !== BoxShape.RoundedRect) {
+      return undefined;
+    }
+
+    return resolveStyleValue(this.options.cornerRadius, detection, context);
   }
 
   protected resolveStroke(
@@ -103,42 +147,6 @@ export class BaseBoxStyle implements BoxStyle {
     return {
       alpha: fill.alpha ?? 1,
       color: fill.color ?? DEFAULT_BOX_STROKE_COLOR,
-    };
-  }
-}
-
-export interface RoundedBoxStyleOptions extends BaseBoxStyleOptions {
-  /**
-   * Radius in media pixels for rounded box corners.
-   */
-  readonly cornerRadius?: number;
-}
-
-/**
- * Rounded rectangle variant of `BaseBoxStyle`.
- */
-export class RoundedBoxStyle extends BaseBoxStyle {
-  private readonly cornerRadius: number;
-
-  constructor(options: RoundedBoxStyleOptions = {}) {
-    super(options);
-    this.cornerRadius = options.cornerRadius ?? 6;
-  }
-
-  override resolve(
-    detection: Detection,
-    context: BoxStyleContext,
-  ): BoxDrawInstruction | undefined {
-    const instruction = super.resolve(detection, context);
-
-    if (!instruction) {
-      return undefined;
-    }
-
-    return {
-      ...instruction,
-      cornerRadius: this.cornerRadius,
-      shape: BoxShape.RoundedRect,
     };
   }
 }

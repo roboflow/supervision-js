@@ -22,6 +22,7 @@ export interface DemoPresentationSettings {
   readonly labelsEnabled: boolean;
   readonly masksEnabled: boolean;
   readonly boxShape: BoxShape;
+  readonly boxCornerRadius: number;
   readonly boxStrokeWidth: number;
   readonly boxFillAlpha: number;
   readonly classStyles: Record<string, DemoClassStyle>;
@@ -83,6 +84,7 @@ const fallbackStyle: DemoClassStyle = {
 
 export const defaultDemoPresentationSettings: DemoPresentationSettings = {
   boxesEnabled: true,
+  boxCornerRadius: 8,
   boxFillAlpha: 0.1,
   boxShape: BoxShape.RoundedRect,
   boxStrokeWidth: 4,
@@ -119,9 +121,7 @@ function createDemoBoxStyle(settings: DemoPresentationSettings): BoxStyle {
       return {
         cornerRadius:
           settings.boxShape === BoxShape.RoundedRect
-            ? detection.className === "basketball"
-              ? 12
-              : 8
+            ? settings.boxCornerRadius
             : undefined,
         fill: {
           alpha: settings.boxFillAlpha,

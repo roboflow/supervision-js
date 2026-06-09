@@ -39,6 +39,7 @@ describe("media session integration", () => {
         BaseBoxStyle,
         BaseLabelStyle,
         BaseMaskStyle,
+        BoxShape,
         createMediaSession,
         DetectionFrameSelectionMode,
         DetectionMaskEncoding,
@@ -46,7 +47,6 @@ describe("media session integration", () => {
         RenderPreparationExecutionMode,
         RenderPreparationMode,
         RenderPreparationWorkerStatus,
-        RoundedBoxStyle,
       } = await import("./index");
       const states: unknown[] = [];
       const session = await createMediaSession({
@@ -199,8 +199,9 @@ describe("media session integration", () => {
       expect(pixiMock.textInstances[0]?.text).toBe("person 88%");
 
       session.setPresentation({
-        boxStyle: new RoundedBoxStyle({
+        boxStyle: new BaseBoxStyle({
           cornerRadius: 8,
+          shape: BoxShape.RoundedRect,
           stroke: { alpha: 1, color: 0x38bdf8, width: 5 },
         }),
       });

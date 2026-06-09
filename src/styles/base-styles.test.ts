@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { BaseBoxStyle, RoundedBoxStyle } from "#styles/box-style";
+import { BaseBoxStyle } from "#styles/box-style";
 import { BaseLabelStyle } from "#styles/label-style";
 import { BaseMaskStyle } from "#styles/mask-style";
 import { BoxShape } from "#types/box-style";
@@ -14,12 +14,13 @@ const frame: DetectionFrame = {
 
 describe("base presentation styles", () => {
   it("supports confidence filtering and per-class box presentation", () => {
-    const style = new RoundedBoxStyle({
-      cornerRadius: 12,
+    const style = new BaseBoxStyle({
+      cornerRadius: (detection) => (detection.className === "person" ? 12 : 4),
       fill: (detection) =>
         detection.className === "person"
           ? { alpha: 0.2, color: 0x22c55e }
           : null,
+      shape: BoxShape.RoundedRect,
       shouldRender: (detection) => (detection.confidence ?? 0) >= 0.5,
       stroke: (detection) => ({
         color: detection.className === "person" ? 0x22c55e : 0xa855f7,

@@ -33,11 +33,15 @@ const session = await createMediaSession({
 });
 ```
 
-Use `RoundedBoxStyle` when rounded rectangles are the desired box treatment:
+Box shape is just another style option. Use `shape` and `cornerRadius` when
+rounded rectangles are the desired box treatment:
 
 ```ts
 session.setPresentation({
-  boxStyle: new RoundedBoxStyle({ cornerRadius: 8 }),
+  boxStyle: new BaseBoxStyle({
+    cornerRadius: 8,
+    shape: BoxShape.RoundedRect,
+  }),
 });
 ```
 
@@ -61,11 +65,13 @@ const maskStyle = new BaseMaskStyle({
 Use resolver functions for per-class, per-confidence, or frame-aware styling:
 
 ```ts
-const boxStyle = new RoundedBoxStyle({
+const boxStyle = new BaseBoxStyle({
+  cornerRadius: (detection) => (detection.className === "basketball" ? 999 : 8),
   fill: (detection) => ({
     alpha: 0.15,
     color: detection.className === "person" ? 0x22c55e : 0xa855f7,
   }),
+  shape: BoxShape.RoundedRect,
   shouldRender: (detection) => (detection.confidence ?? 0) >= 0.5,
   stroke: (detection) => ({
     alpha: 1,
@@ -74,6 +80,9 @@ const boxStyle = new RoundedBoxStyle({
   }),
 });
 ```
+
+Keep box variants in options rather than wrapper classes. That makes the style
+surface easier to compose as more visual knobs arrive.
 
 ## Labels
 

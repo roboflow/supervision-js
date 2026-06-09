@@ -36,11 +36,8 @@ export { createMediaRenderer } from "#renderers/media-renderer";
 export { createMediaSession } from "#sessions/media-session";
 
 // Presentation styles.
-export { BaseBoxStyle, RoundedBoxStyle } from "#styles/box-style";
-export type {
-  BaseBoxStyleOptions,
-  RoundedBoxStyleOptions,
-} from "#styles/box-style";
+export { BaseBoxStyle } from "#styles/box-style";
+export type { BaseBoxStyleOptions } from "#styles/box-style";
 export { BaseLabelStyle } from "#styles/label-style";
 export type { BaseLabelStyleOptions } from "#styles/label-style";
 export { BaseMaskStyle } from "#styles/mask-style";

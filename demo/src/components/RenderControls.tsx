@@ -131,6 +131,18 @@ function GlobalRenderControls({
       </fieldset>
 
       <SliderControl
+        disabled={
+          !settings.boxesEnabled || settings.boxShape !== BoxShape.RoundedRect
+        }
+        label="Corner Radius"
+        max={24}
+        min={0}
+        onChange={(value) => onChange("boxCornerRadius", value)}
+        step={1}
+        value={settings.boxCornerRadius}
+        valueLabel={`${settings.boxCornerRadius}px`}
+      />
+      <SliderControl
         disabled={!settings.boxesEnabled}
         label="Box Stroke"
         max={8}

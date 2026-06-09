@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
-import type { BoxStyle } from "#types/box-style";
+import { BoxShape, type BoxStyle } from "#types/box-style";
 import type { BufferedDetectionTimeline } from "#types/detection-timeline";
 import type { Detection } from "#types/detections";
 import type { MaskStyle } from "#types/mask-style";
@@ -24,7 +24,6 @@ let BaseMaskStyle: PackageEntrypoint["BaseMaskStyle"];
 let DetectionBufferStatus: PackageEntrypoint["DetectionBufferStatus"];
 let DetectionFrameSelectionMode: PackageEntrypoint["DetectionFrameSelectionMode"];
 let DetectionMaskEncoding: PackageEntrypoint["DetectionMaskEncoding"];
-let RoundedBoxStyle: PackageEntrypoint["RoundedBoxStyle"];
 let MediaRendererPlaybackState: PackageEntrypoint["MediaRendererPlaybackState"];
 let MediaSourceStatus: PackageEntrypoint["MediaSourceStatus"];
 
@@ -37,7 +36,6 @@ describe("package entrypoint", () => {
     DetectionBufferStatus = entrypoint.DetectionBufferStatus;
     DetectionFrameSelectionMode = entrypoint.DetectionFrameSelectionMode;
     DetectionMaskEncoding = entrypoint.DetectionMaskEncoding;
-    RoundedBoxStyle = entrypoint.RoundedBoxStyle;
     MediaRendererPlaybackState = entrypoint.MediaRendererPlaybackState;
     MediaSourceStatus = entrypoint.MediaSourceStatus;
   });
@@ -75,7 +73,6 @@ describe("package entrypoint", () => {
       "RenderPreparationExecutionMode",
       "RenderPreparationMode",
       "RenderPreparationWorkerStatus",
-      "RoundedBoxStyle",
       "createArrayDetectionFrameSource",
       "createBrowserColdDetectionFrameStore",
       "createBufferedDetectionTimeline",
@@ -108,7 +105,6 @@ describe("package entrypoint", () => {
     expect(entrypoint.BaseBoxStyle).toEqual(expect.any(Function));
     expect(entrypoint.BaseLabelStyle).toEqual(expect.any(Function));
     expect(entrypoint.BaseMaskStyle).toEqual(expect.any(Function));
-    expect(entrypoint.RoundedBoxStyle).toEqual(expect.any(Function));
     expect(entrypoint.BoxShape).toEqual({
       Rect: "rect",
       RoundedRect: "roundedRect",
@@ -734,16 +730,17 @@ describe("package entrypoint", () => {
     renderer.destroy();
   });
 
-  it("draws RoundedBoxStyle boxes with fill and stroke", async () => {
+  it("draws rounded BaseBoxStyle boxes with fill and stroke", async () => {
     resetMocks();
 
     const renderer = await createRenderer(false, false, {
-      boxStyle: new RoundedBoxStyle({
+      boxStyle: new BaseBoxStyle({
         cornerRadius: 8,
         fill: {
           alpha: 0.25,
           color: 0x112233,
         },
+        shape: BoxShape.RoundedRect,
         stroke: {
           alpha: 0.75,
           color: 0xabcdef,

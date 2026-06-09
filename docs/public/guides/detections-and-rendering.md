@@ -70,7 +70,9 @@ The built-in base styles accept static values for simple global styling and
 resolver functions for per-detection behavior:
 
 ```ts
-const boxStyle = new RoundedBoxStyle({
+const boxStyle = new BaseBoxStyle({
+  cornerRadius: (detection) => (detection.className === "basketball" ? 999 : 8),
+  shape: BoxShape.RoundedRect,
   shouldRender: (detection) => (detection.confidence ?? 0) >= 0.5,
   stroke: (detection) => ({
     color: detection.className === "person" ? 0x22c55e : 0xa855f7,
