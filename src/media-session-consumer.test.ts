@@ -264,4 +264,122 @@ describe("media session consumer workflows", () => {
     expect(pixiMock.appDestroy).toHaveBeenCalledTimes(2);
     expect(mediaMock.dispose).toHaveBeenCalledTimes(2);
   });
+
+  it("supports repeated create and destroy cycles without leaking session state", async () => {
+    resetMocks();
+    mediaMock.samples = [createMockSample(0, 0)];
+    const { createMediaSession, MediaSessionStatus } = await import("./index");
+    const container = createContainer();
+
+    for (let index = 0; index < 25; index += 1) {
+      const session = await createMediaSession({
+        container,
+        detections: {
+          appendable: { datasetId: `cycle-${index}` },
+        },
+        media: `cycle-${index}.mp4`,
+        renderer: { autoPlay: false },
+      });
+
+      await session.appendDetectionFrames([
+        {
+          detections: [{ id: `detection-${index}` }],
+          frameIndex: index,
+          mediaTime: 0,
+        },
+      ]);
+
+      expect(session.getDetectionSummary()).toMatchObject({
+        datasetId: `cycle-${index}`,
+        detectionCount: 1,
+        frameCount: 1,
+      });
+
+      session.destroy();
+
+      expect(session.getState()).toMatchObject({
+        status: MediaSessionStatus.Destroyed,
+      });
+    }
+
+    expect(pixiMock.appDestroy).toHaveBeenCalledTimes(25);
+    expect(mediaMock.dispose).toHaveBeenCalledTimes(25);
+  });
+
+  it("ignores late inference results after seek and rejects them after destroy", async () => {
+    resetMocks();
+    mediaMock.samples = [
+      createMockSample(0, 0),
+      createMockSample(0.5, 0),
+      createMockSample(10, 0),
+    ];
+    const { createMediaSession, DetectionFrameSelectionMode } =
+      await import("./index");
+    const session = await createMediaSession({
+      container: createContainer(),
+      detections: {
+        appendable: { datasetId: "late-results" },
+        sync: {
+          frameRate: 2,
+          selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
+        },
+      },
+      media: "sample.mp4",
+      renderer: { autoPlay: false },
+    });
+
+    await session.appendDetectionFrames([
+      {
+        detections: [
+          {
+            id: "active",
+            rect: { height: 20, width: 10, x: 5, y: 5 },
+          },
+        ],
+        endTime: 1,
+        frameIndex: 1,
+        mediaTime: 0.5,
+      },
+    ]);
+    await session.seek(0.5);
+
+    expect(session.getState().renderer).toMatchObject({
+      activeDetectionCount: 1,
+      activeDetectionFrameIndex: 1,
+      currentTime: 0.5,
+    });
+
+    await session.appendDetectionFrames([
+      {
+        detections: [
+          {
+            id: "late-future",
+            rect: { height: 20, width: 10, x: 50, y: 50 },
+          },
+        ],
+        endTime: 11,
+        frameIndex: 20,
+        mediaTime: 10,
+      },
+    ]);
+    await session.seek(0.5);
+
+    expect(session.getState().renderer).toMatchObject({
+      activeDetectionCount: 1,
+      activeDetectionFrameIndex: 1,
+      currentTime: 0.5,
+    });
+
+    session.destroy();
+
+    await expect(
+      session.appendDetectionFrames([
+        {
+          detections: [{ id: "too-late" }],
+          frameIndex: 2,
+          mediaTime: 1,
+        },
+      ]),
+    ).rejects.toThrow("Media session has been destroyed.");
+  });
 });

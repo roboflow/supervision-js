@@ -173,6 +173,87 @@ describe("writable detection frame source", () => {
       { endTime: 2.1, startTime: 2 },
     ]);
   });
+
+  it("keeps long-running rolling retention bounded over many appends", async () => {
+    const frameStore: DetectionFrame[] = [];
+    const source = createWritableDetectionFrameSource({
+      datasetId: "stream",
+      retention: {
+        mode: DetectionFrameRetentionMode.PersistWindow,
+        windowSeconds: 2,
+      },
+      store: createMutableStore(frameStore),
+    });
+    const frameRate = 30;
+    const longRunningFrames = Array.from({ length: 300 }, (_, index) => ({
+      detections: [{ id: `frame-${index}` }],
+      endTime: (index + 1) / frameRate,
+      frameIndex: index,
+      mediaTime: index / frameRate,
+    }));
+
+    for (let index = 0; index < longRunningFrames.length; index += 10) {
+      await source.appendFrames(longRunningFrames.slice(index, index + 10));
+    }
+
+    expect(source.getSummary()).toMatchObject({
+      detectionCount: 60,
+      endTime: 10,
+      frameCount: 60,
+      startTime: 8,
+    });
+    expect(await source.loadFrames(0, 10)).toHaveLength(60);
+    expect(source.getAvailableRanges()).toEqual([
+      { endTime: 10, startTime: 8 },
+    ]);
+  });
+
+  it("rejects late operations after destroy without writing to storage", async () => {
+    const store = createStore();
+    const source = createWritableDetectionFrameSource({
+      datasetId: "dataset",
+      store,
+    });
+
+    source.destroy?.();
+
+    await expect(source.appendFrames(frames)).rejects.toThrow(
+      "Detection frame source has been destroyed.",
+    );
+    await expect(source.replaceFrames(frames)).rejects.toThrow(
+      "Detection frame source has been destroyed.",
+    );
+    await expect(source.clear()).rejects.toThrow(
+      "Detection frame source has been destroyed.",
+    );
+    await expect(source.loadFrames(0, 1)).rejects.toThrow(
+      "Detection frame source has been destroyed.",
+    );
+    expect(store.appendFrames).not.toHaveBeenCalled();
+    expect(store.putFrames).not.toHaveBeenCalled();
+    expect(store.clearDataset).not.toHaveBeenCalled();
+    expect(store.loadFrames).not.toHaveBeenCalled();
+  });
+
+  it("rejects an in-flight append that resolves after destroy", async () => {
+    const append = createDeferred<ColdDetectionFrameStoreWriteSummary>();
+    const store = createStore();
+    store.appendFrames = vi.fn(() => append.promise);
+    const source = createWritableDetectionFrameSource({
+      datasetId: "dataset",
+      store,
+    });
+    const pendingAppend = source.appendFrames(frames);
+
+    source.destroy?.();
+    append.resolve(summary);
+
+    await expect(pendingAppend).rejects.toThrow(
+      "Detection frame source has been destroyed.",
+    );
+    expect(source.getSummary()).toBeNull();
+    expect(source.getVersion()).toBe(0);
+  });
 });
 
 function createStore(): ColdDetectionFrameStore {
@@ -246,4 +327,15 @@ function dedupeFrames(frames: readonly DetectionFrame[]) {
   return Array.from(deduped.values()).sort(
     (left, right) => left.mediaTime - right.mediaTime,
   );
+}
+
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+
+  return { promise, reject, resolve };
 }

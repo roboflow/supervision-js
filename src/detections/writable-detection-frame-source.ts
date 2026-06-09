@@ -86,11 +86,16 @@ export function createWritableDetectionFrameSource(options: {
     datasetId: options.datasetId,
 
     async appendFrames(frames) {
+      assertActive();
+
       const nextSummary = await options.store.appendFrames(
         writeOptions(frames),
       );
+      assertActive();
+
       const changedRange = getDetectionFramesRange(frames);
       const retainedSummary = await applyRetention(nextSummary);
+      assertActive();
 
       if (retainedSummary !== nextSummary) {
         return recordAllRangesWrite(retainedSummary);
@@ -105,13 +110,21 @@ export function createWritableDetectionFrameSource(options: {
     },
 
     async replaceFrames(frames) {
-      const nextSummary = await options.store.putFrames(writeOptions(frames));
+      assertActive();
 
-      return recordAllRangesWrite(await applyRetention(nextSummary));
+      const nextSummary = await options.store.putFrames(writeOptions(frames));
+      assertActive();
+      const retainedSummary = await applyRetention(nextSummary);
+      assertActive();
+
+      return recordAllRangesWrite(retainedSummary);
     },
 
     async clear() {
+      assertActive();
+
       await options.store.clearDataset(options.datasetId);
+      assertActive();
       summary = null;
       version += 1;
       allRangeVersion = version;
@@ -119,12 +132,17 @@ export function createWritableDetectionFrameSource(options: {
       availableRanges.length = 0;
     },
 
-    loadFrames(startTime, endTime) {
-      return options.store.loadFrames({
+    async loadFrames(startTime, endTime) {
+      assertActive();
+
+      const loadedFrames = await options.store.loadFrames({
         datasetId: options.datasetId,
         endTime,
         startTime,
       });
+      assertActive();
+
+      return loadedFrames;
     },
 
     getSummary() {
@@ -137,9 +155,7 @@ export function createWritableDetectionFrameSource(options: {
 
     waitForRange(range) {
       if (destroyed) {
-        return Promise.reject(
-          new Error("Detection frame source has been destroyed."),
-        );
+        return Promise.reject(createDestroyedError());
       }
 
       if (isRangeCovered(range, availableRanges)) {
@@ -180,6 +196,12 @@ export function createWritableDetectionFrameSource(options: {
       options.store.destroy?.();
     },
   };
+
+  function assertActive() {
+    if (destroyed) {
+      throw createDestroyedError();
+    }
+  }
 
   async function applyRetention(
     nextSummary: ColdDetectionFrameStoreWriteSummary,
@@ -237,6 +259,10 @@ export function createWritableDetectionFrameSource(options: {
       waiter.resolve();
     }
   }
+}
+
+function createDestroyedError() {
+  return new Error("Detection frame source has been destroyed.");
 }
 
 function shouldApplyWindowRetention(
