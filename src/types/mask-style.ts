@@ -20,6 +20,18 @@ export interface MaskStrokeStyle {
 }
 
 /**
+ * Mask outline options accepted by built-in mask styles.
+ *
+ * Missing values are resolved from the mask color and renderer-friendly
+ * defaults before draw instructions reach a renderer backend.
+ */
+export interface MaskStrokeStyleOptions {
+  readonly color?: number;
+  readonly alpha?: number;
+  readonly width?: number;
+}
+
+/**
  * Renderer-neutral mask drawing instruction.
  *
  * The `mask` remains semantic detection data. Renderer backends may prepare it

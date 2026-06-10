@@ -21,11 +21,13 @@ export {
   type DetectionStyleValue,
   type LabelBackgroundStyle,
   type LabelDrawInstruction,
+  type LabelOffsetStyle,
   type LabelStyle,
   type LabelStyleContext,
   type LabelTextStyle,
   type MaskDrawInstruction,
   type MaskStrokeStyle,
+  type MaskStrokeStyleOptions,
   type MaskStyle,
   type MaskStyleContext,
 } from "../../../src/index";

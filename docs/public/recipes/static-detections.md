@@ -41,8 +41,8 @@ const session = await createMediaSession({
     }),
     labelStyle: new BaseLabelStyle({ includeConfidence: true }),
     maskStyle: new BaseMaskStyle({
-      alpha: 0.6,
       color: 0x38bdf8,
+      opacity: 0.6,
       stroke: { alpha: 1, color: 0xe0f2fe, width: 3 },
     }),
   },

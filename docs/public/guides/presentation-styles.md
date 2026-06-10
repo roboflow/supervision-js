@@ -27,7 +27,7 @@ const session = await createMediaSession({
   media,
   presentation: {
     boxStyle: new BaseBoxStyle(),
-    maskStyle: new BaseMaskStyle({ alpha: 0.5 }),
+    maskStyle: new BaseMaskStyle({ opacity: 0.5 }),
     labelStyle: new BaseLabelStyle({ includeConfidence: true }),
   },
 });
@@ -52,8 +52,8 @@ values for global styling:
 
 ```ts
 const maskStyle = new BaseMaskStyle({
-  alpha: 0.65,
   color: 0x38bdf8,
+  opacity: 0.65,
   stroke: {
     alpha: 1,
     color: 0xe0f2fe,
@@ -102,6 +102,18 @@ const labelStyle = new BaseLabelStyle({
     fontSize: 14,
     fontWeight: "700",
   },
+});
+```
+
+Use `offset` when labels need to move away from the default top-left box edge:
+
+```ts
+const labelStyle = new BaseLabelStyle({
+  includeConfidence: true,
+  offset: (detection) => ({
+    x: detection.className === "basketball" ? 4 : 0,
+    y: 8,
+  }),
 });
 ```
 

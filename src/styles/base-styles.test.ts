@@ -58,19 +58,17 @@ describe("base presentation styles", () => {
 
   it("supports dynamic mask colors while preserving global opacity as a cheap knob", () => {
     const staticStyle = new BaseMaskStyle({
-      alpha: 0.7,
       color: 0x00ff66,
-      stroke: { alpha: 1, color: 0xffffff, width: 1 },
+      opacity: 0.7,
+      stroke: { color: 0xffffff, width: 1 },
     });
     const dynamicStyle = new BaseMaskStyle({
-      alpha: 0.4,
       color: (detection) =>
         detection.className === "person" ? 0x22c55e : 0xa855f7,
+      opacity: 0.4,
       shouldRender: (detection) => detection.className !== "ignore",
       stroke: (detection) =>
-        detection.className === "person"
-          ? { alpha: 1, color: 0xffffff, width: 1 }
-          : undefined,
+        detection.className === "person" ? { width: 1 } : undefined,
     });
     const mask = {
       counts: "04",
@@ -97,7 +95,7 @@ describe("base presentation styles", () => {
       alpha: 1,
       color: 0x22c55e,
       mask,
-      stroke: { alpha: 1, color: 0xffffff, width: 1 },
+      stroke: { alpha: 1, color: 0x22c55e, width: 1 },
     });
     expect(
       dynamicStyle.resolve(
@@ -107,12 +105,22 @@ describe("base presentation styles", () => {
     ).toBeUndefined();
   });
 
+  it("keeps mask alpha as a compatibility alias for opacity", () => {
+    const style = new BaseMaskStyle({ alpha: 0.25 });
+
+    expect(style.opacity).toBe(0.25);
+  });
+
   it("supports dynamic label text and presentation", () => {
     const style = new BaseLabelStyle({
       background: (detection) => ({
         color: detection.className === "person" ? 0x111827 : 0x312e81,
       }),
       includeConfidence: true,
+      offset: (detection) => ({
+        x: detection.className === "person" ? 2 : 0,
+        y: 6,
+      }),
       shouldRender: (detection) => Boolean(detection.rect),
       text: (detection, context) =>
         `${context.detectionIndex + 1}:${detection.className}`,
@@ -137,7 +145,8 @@ describe("base presentation styles", () => {
         paddingX: 6,
         paddingY: 3,
       },
-      offsetY: 0,
+      offsetX: 2,
+      offsetY: 6,
       rect: detection.rect,
       text: "3:person",
       textStyle: {
@@ -147,6 +156,21 @@ describe("base presentation styles", () => {
         fontSize: 16,
         fontWeight: "600",
       },
+    });
+  });
+
+  it("keeps label offsetY as a compatibility shorthand", () => {
+    const style = new BaseLabelStyle({ offsetY: 4 });
+    const detection = {
+      className: "person",
+      rect: { height: 40, width: 20, x: 10, y: 12 },
+    };
+
+    expect(
+      style.resolve(detection, { detectionIndex: 0, frame, mediaTime: 0.25 }),
+    ).toMatchObject({
+      offsetY: 4,
+      text: "person",
     });
   });
 

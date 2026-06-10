@@ -29,6 +29,14 @@ export interface LabelBackgroundStyle {
 }
 
 /**
+ * Label offset in media pixels.
+ */
+export interface LabelOffsetStyle {
+  readonly x?: number;
+  readonly y?: number;
+}
+
+/**
  * Renderer-neutral label drawing instruction.
  */
 export interface LabelDrawInstruction {

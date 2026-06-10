@@ -27,7 +27,7 @@ export interface DemoPresentationSettings {
   readonly classStyles: Record<string, DemoClassStyle>;
   readonly labelBackgroundAlpha: number;
   readonly labelFontSize: number;
-  readonly maskAlpha: number;
+  readonly maskOpacity: number;
   readonly maskStrokeAlpha: number;
   readonly maskStrokeWidth: number;
   readonly confidenceThreshold: number;
@@ -91,7 +91,7 @@ export const defaultDemoPresentationSettings: DemoPresentationSettings = {
   labelBackgroundAlpha: 0.78,
   labelFontSize: 14,
   labelsEnabled: true,
-  maskAlpha: 0.7,
+  maskOpacity: 0.7,
   maskStrokeAlpha: 1,
   maskStrokeWidth: 5,
   masksEnabled: true,
@@ -145,12 +145,11 @@ function createDemoMaskStyle(settings: DemoPresentationSettings): MaskStyle {
     artifactKey: [
       "demo-mask",
       settings.confidenceThreshold,
-      settings.maskAlpha,
       settings.maskStrokeAlpha,
       settings.maskStrokeWidth,
       serializeMaskClassStyles(settings.classStyles),
     ].join(":"),
-    opacity: 1,
+    opacity: settings.maskOpacity,
 
     resolve(detection: Detection): MaskDrawInstruction | undefined {
       if (!detection.mask || !passesConfidenceThreshold(detection, settings)) {
@@ -160,7 +159,7 @@ function createDemoMaskStyle(settings: DemoPresentationSettings): MaskStyle {
       const style = resolveClassStyle(detection, settings);
 
       return {
-        alpha: settings.maskAlpha,
+        alpha: 1,
         color: style.fill,
         mask: detection.mask,
         stroke:

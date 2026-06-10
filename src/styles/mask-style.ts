@@ -3,6 +3,7 @@ import type { Detection } from "#types/detections";
 import type {
   MaskDrawInstruction,
   MaskStrokeStyle,
+  MaskStrokeStyleOptions,
   MaskStyle,
   MaskStyleContext,
 } from "#types/mask-style";
@@ -20,12 +21,19 @@ export interface BaseMaskStyleOptions {
    * Global mask-layer opacity. This stays outside the prepared artifact so it
    * can be updated cheaply at render time.
    */
+  readonly opacity?: number;
+  /**
+   * Compatibility alias for `opacity`.
+   *
+   * Prefer `opacity` for new code. Mask draw instructions still use `alpha`
+   * internally because renderer backends operate on RGBA-like primitives.
+   */
   readonly alpha?: number;
   /**
    * Optional mask outline. Pass a resolver for per-detection outlines.
    */
   readonly stroke?: DetectionStyleValue<
-    MaskStrokeStyle | undefined,
+    MaskStrokeStyleOptions | null | undefined,
     MaskStyleContext
   >;
   /**
@@ -49,7 +57,7 @@ export class BaseMaskStyle implements MaskStyle {
 
   constructor(options: BaseMaskStyleOptions = {}) {
     this.options = options;
-    this.opacity = clampOpacity(options.alpha ?? 0.35);
+    this.opacity = clampOpacity(options.opacity ?? options.alpha ?? 0.35);
     this.artifactKey = createArtifactKey(options);
   }
 
@@ -64,15 +72,25 @@ export class BaseMaskStyle implements MaskStyle {
       return undefined;
     }
 
+    const color =
+      resolveStyleValue(this.options.color, detection, context) ??
+      DEFAULT_MASK_COLOR;
+
     return {
       alpha: 1,
-      color:
-        resolveStyleValue(this.options.color, detection, context) ?? 0x00ff66,
+      color,
       mask: detection.mask,
-      stroke: resolveStyleValue(this.options.stroke, detection, context),
+      stroke: normalizeStroke(
+        resolveStyleValue(this.options.stroke, detection, context),
+        color,
+      ),
     };
   }
 }
+
+const DEFAULT_MASK_COLOR = 0x00ff66;
+const DEFAULT_MASK_STROKE_ALPHA = 1;
+const DEFAULT_MASK_STROKE_WIDTH = 1;
 
 function clampOpacity(opacity: number) {
   return Number.isFinite(opacity) ? Math.max(0, Math.min(opacity, 1)) : 1;
@@ -86,6 +104,21 @@ function serializeStroke(stroke: MaskStrokeStyle | undefined) {
   return `${stroke.color}:${stroke.alpha}:${stroke.width}`;
 }
 
+function normalizeStroke(
+  stroke: MaskStrokeStyleOptions | null | undefined,
+  fallbackColor: number,
+): MaskStrokeStyle | undefined {
+  if (!stroke) {
+    return undefined;
+  }
+
+  return {
+    alpha: stroke.alpha ?? DEFAULT_MASK_STROKE_ALPHA,
+    color: stroke.color ?? fallbackColor,
+    width: stroke.width ?? DEFAULT_MASK_STROKE_WIDTH,
+  };
+}
+
 function createArtifactKey(options: BaseMaskStyleOptions) {
   if (
     typeof options.color === "function" ||
@@ -94,5 +127,7 @@ function createArtifactKey(options: BaseMaskStyleOptions) {
     return undefined;
   }
 
-  return `base:${options.color ?? 0x00ff66}:${serializeStroke(options.stroke)}`;
+  const color = options.color ?? DEFAULT_MASK_COLOR;
+
+  return `base:${color}:${serializeStroke(normalizeStroke(options.stroke, color))}`;
 }

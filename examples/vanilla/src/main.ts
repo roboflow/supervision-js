@@ -82,8 +82,8 @@ async function startExample() {
         includeConfidence: true,
       }),
       maskStyle: new BaseMaskStyle({
-        alpha: 0.45,
         color: (detection) => resolveClassColor(detection.className),
+        opacity: 0.45,
         stroke: (detection) => ({
           alpha: 1,
           color: resolveClassColor(detection.className),

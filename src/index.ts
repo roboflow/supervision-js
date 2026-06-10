@@ -53,6 +53,7 @@ export type {
 export type {
   LabelBackgroundStyle,
   LabelDrawInstruction,
+  LabelOffsetStyle,
   LabelStyle,
   LabelStyleContext,
   LabelTextStyle,
@@ -64,6 +65,7 @@ export type {
 export type {
   MaskDrawInstruction,
   MaskStrokeStyle,
+  MaskStrokeStyleOptions,
   MaskStyle,
   MaskStyleContext,
 } from "#types/mask-style";

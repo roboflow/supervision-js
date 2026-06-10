@@ -3,6 +3,7 @@ import type { Detection } from "#types/detections";
 import type {
   LabelBackgroundStyle,
   LabelDrawInstruction,
+  LabelOffsetStyle,
   LabelStyle,
   LabelStyleContext,
   LabelTextStyle,
@@ -25,7 +26,17 @@ export interface BaseLabelStyleOptions {
    */
   readonly includeConfidence?: boolean;
   /**
-   * Vertical label offset in media pixels.
+   * Label offset in media pixels. Pass a resolver for per-detection label
+   * placement.
+   */
+  readonly offset?: DetectionStyleValue<
+    LabelOffsetStyle | null | undefined,
+    LabelStyleContext
+  >;
+  /**
+   * Compatibility shorthand for `offset: { y }`.
+   *
+   * Prefer `offset` for new code.
    */
   readonly offsetY?: number;
   /**
@@ -83,7 +94,7 @@ export class BaseLabelStyle implements LabelStyle {
 
     return {
       background: this.resolveBackground(detection, context),
-      offsetY: this.offsetY,
+      ...this.resolveOffset(detection, context),
       rect: detection.rect,
       text,
       textStyle: this.resolveTextStyle(detection, context),
@@ -125,6 +136,22 @@ export class BaseLabelStyle implements LabelStyle {
       fontFamily: textStyle?.fontFamily ?? "Inter, sans-serif",
       fontSize: textStyle?.fontSize ?? 13,
       fontWeight: textStyle?.fontWeight ?? "600",
+    };
+  }
+
+  private resolveOffset(
+    detection: Detection,
+    context: LabelStyleContext,
+  ): Pick<LabelDrawInstruction, "offsetX" | "offsetY"> {
+    const offset = resolveStyleValue(this.options.offset, detection, context);
+
+    if (offset === null) {
+      return {};
+    }
+
+    return {
+      ...(offset?.x === undefined ? {} : { offsetX: offset.x }),
+      offsetY: offset?.y ?? this.offsetY,
     };
   }
 }

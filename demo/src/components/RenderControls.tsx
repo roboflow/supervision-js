@@ -151,10 +151,10 @@ function GlobalRenderControls({
           label="Opacity"
           max={1}
           min={0}
-          onChange={(value) => onChange("maskAlpha", value)}
+          onChange={(value) => onChange("maskOpacity", value)}
           step={0.01}
-          value={settings.maskAlpha}
-          valueLabel={formatPercent(settings.maskAlpha)}
+          value={settings.maskOpacity}
+          valueLabel={formatPercent(settings.maskOpacity)}
         />
         <SliderControl
           disabled={!settings.masksEnabled}

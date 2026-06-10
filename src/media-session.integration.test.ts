@@ -68,8 +68,8 @@ describe("media session integration", () => {
           }),
           labelStyle: new BaseLabelStyle({ includeConfidence: true }),
           maskStyle: new BaseMaskStyle({
-            alpha: 0.7,
             color: 0x22c55e,
+            opacity: 0.7,
             stroke: { alpha: 1, color: 0xffffff, width: 2 },
           }),
         },
