@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { BoxShape } from "../../../src/types/box-style";
+import { BoxShape, BoxStrokeAlignment } from "../../../src/types/box-style";
 import {
   DetectionMaskEncoding,
   type Detection,
 } from "../../../src/types/detections";
+import { LabelPlacement } from "../../../src/types/label-style";
+import { MaskRenderMode } from "../../../src/types/mask-style";
 import {
   createDemoPresentation,
   defaultDemoPresentationSettings,
@@ -78,6 +80,47 @@ describe("demo presentation", () => {
       lowOpacityPresentation.maskStyle?.resolve(detection, context),
     ).toMatchObject({
       alpha: 1,
+    });
+  });
+
+  it("maps demo style controls to renderer-neutral draw instructions", () => {
+    const presentation = createDemoPresentation({
+      ...defaultDemoPresentationSettings,
+      boxStrokeAlignment: BoxStrokeAlignment.Inside,
+      labelCornerRadius: 9,
+      labelOffsetX: 3,
+      labelOffsetY: 5,
+      labelPaddingX: 11,
+      labelPaddingY: 6,
+      labelPlacement: LabelPlacement.Bottom,
+      maskMode: MaskRenderMode.StrokeOnly,
+    });
+    const context = {
+      detectionIndex: 0,
+      frame: { detections: [detection], mediaTime: 0 },
+      mediaTime: 0,
+    };
+
+    expect(presentation.boxStyle?.resolve(detection, context)).toMatchObject({
+      stroke: {
+        alignment: BoxStrokeAlignment.Inside,
+      },
+    });
+    expect(presentation.labelStyle?.resolve(detection, context)).toMatchObject({
+      background: {
+        cornerRadius: 9,
+        paddingX: 11,
+        paddingY: 6,
+      },
+      offsetX: 3,
+      offsetY: 5,
+      placement: LabelPlacement.Bottom,
+    });
+    expect(presentation.maskStyle?.resolve(detection, context)).toMatchObject({
+      alpha: 0,
+      stroke: {
+        width: defaultDemoPresentationSettings.maskStrokeWidth,
+      },
     });
   });
 });

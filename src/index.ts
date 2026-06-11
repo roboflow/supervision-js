@@ -42,7 +42,7 @@ export { BaseLabelStyle } from "#styles/label-style";
 export type { BaseLabelStyleOptions } from "#styles/label-style";
 export { BaseMaskStyle } from "#styles/mask-style";
 export type { BaseMaskStyleOptions } from "#styles/mask-style";
-export { BoxShape } from "#types/box-style";
+export { BoxShape, BoxStrokeAlignment } from "#types/box-style";
 export type {
   BoxDrawInstruction,
   BoxFillStyle,
@@ -58,6 +58,7 @@ export type {
   LabelStyleContext,
   LabelTextStyle,
 } from "#types/label-style";
+export { LabelPlacement } from "#types/label-style";
 export type {
   DetectionStylePredicate,
   DetectionStyleValue,
@@ -69,6 +70,7 @@ export type {
   MaskStyle,
   MaskStyleContext,
 } from "#types/mask-style";
+export { MaskRenderMode } from "#types/mask-style";
 export type {
   MediaPreparationOptions,
   PreparedMedia,

@@ -7,6 +7,7 @@ import type {
   MaskStyle,
   MaskStyleContext,
 } from "#types/mask-style";
+import { MaskRenderMode } from "#types/mask-style";
 import type {
   DetectionStylePredicate,
   DetectionStyleValue,
@@ -29,6 +30,10 @@ export interface BaseMaskStyleOptions {
    * internally because renderer backends operate on RGBA-like primitives.
    */
   readonly alpha?: number;
+  /**
+   * Whether to render mask fill, stroke, or both.
+   */
+  readonly mode?: DetectionStyleValue<MaskRenderMode, MaskStyleContext>;
   /**
    * Optional mask outline. Pass a resolver for per-detection outlines.
    */
@@ -75,15 +80,20 @@ export class BaseMaskStyle implements MaskStyle {
     const color =
       resolveStyleValue(this.options.color, detection, context) ??
       DEFAULT_MASK_COLOR;
+    const mode =
+      resolveStyleValue(this.options.mode, detection, context) ??
+      MaskRenderMode.FillAndStroke;
+    const stroke = resolveStroke(
+      resolveStyleValue(this.options.stroke, detection, context),
+      color,
+      mode,
+    );
 
     return {
-      alpha: 1,
+      alpha: mode === MaskRenderMode.StrokeOnly ? 0 : 1,
       color,
       mask: detection.mask,
-      stroke: normalizeStroke(
-        resolveStyleValue(this.options.stroke, detection, context),
-        color,
-      ),
+      stroke: mode === MaskRenderMode.FillOnly ? undefined : stroke,
     };
   }
 }
@@ -119,15 +129,33 @@ function normalizeStroke(
   };
 }
 
+function resolveStroke(
+  stroke: MaskStrokeStyleOptions | null | undefined,
+  fallbackColor: number,
+  mode: MaskRenderMode,
+) {
+  if (mode === MaskRenderMode.FillOnly) {
+    return undefined;
+  }
+
+  if (mode === MaskRenderMode.StrokeOnly && stroke === undefined) {
+    return normalizeStroke({}, fallbackColor);
+  }
+
+  return normalizeStroke(stroke, fallbackColor);
+}
+
 function createArtifactKey(options: BaseMaskStyleOptions) {
   if (
     typeof options.color === "function" ||
+    typeof options.mode === "function" ||
     typeof options.stroke === "function"
   ) {
     return undefined;
   }
 
   const color = options.color ?? DEFAULT_MASK_COLOR;
+  const mode = options.mode ?? MaskRenderMode.FillAndStroke;
 
-  return `base:${color}:${serializeStroke(normalizeStroke(options.stroke, color))}`;
+  return `base:${color}:${mode}:${serializeStroke(resolveStroke(options.stroke, color, mode))}`;
 }

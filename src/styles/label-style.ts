@@ -8,6 +8,7 @@ import type {
   LabelStyleContext,
   LabelTextStyle,
 } from "#types/label-style";
+import { LabelPlacement } from "#types/label-style";
 import type {
   DetectionStylePredicate,
   DetectionStyleValue,
@@ -39,6 +40,10 @@ export interface BaseLabelStyleOptions {
    * Prefer `offset` for new code.
    */
   readonly offsetY?: number;
+  /**
+   * Label placement relative to the detection rectangle.
+   */
+  readonly placement?: DetectionStyleValue<LabelPlacement, LabelStyleContext>;
   /**
    * Custom label text. Return undefined to fall back to the default class label.
    */
@@ -95,6 +100,7 @@ export class BaseLabelStyle implements LabelStyle {
     return {
       background: this.resolveBackground(detection, context),
       ...this.resolveOffset(detection, context),
+      placement: this.resolvePlacement(detection, context),
       rect: detection.rect,
       text,
       textStyle: this.resolveTextStyle(detection, context),
@@ -153,6 +159,16 @@ export class BaseLabelStyle implements LabelStyle {
       ...(offset?.x === undefined ? {} : { offsetX: offset.x }),
       offsetY: offset?.y ?? this.offsetY,
     };
+  }
+
+  private resolvePlacement(
+    detection: Detection,
+    context: LabelStyleContext,
+  ): LabelPlacement {
+    return (
+      resolveStyleValue(this.options.placement, detection, context) ??
+      LabelPlacement.Top
+    );
   }
 }
 

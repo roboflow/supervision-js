@@ -41,6 +41,11 @@ session.setPresentation({
   boxStyle: new BaseBoxStyle({
     cornerRadius: 8,
     shape: BoxShape.RoundedRect,
+    stroke: {
+      alignment: BoxStrokeAlignment.Inside,
+      color: 0x38bdf8,
+      width: 3,
+    },
   }),
 });
 ```
@@ -53,6 +58,7 @@ values for global styling:
 ```ts
 const maskStyle = new BaseMaskStyle({
   color: 0x38bdf8,
+  mode: MaskRenderMode.FillAndStroke,
   opacity: 0.65,
   stroke: {
     alpha: 1,
@@ -61,6 +67,10 @@ const maskStyle = new BaseMaskStyle({
   },
 });
 ```
+
+Use `MaskRenderMode.FillOnly` or `MaskRenderMode.StrokeOnly` for fill-only or
+outline-only masks. Stroke-only masks default to a 1px same-color outline when
+no explicit stroke is provided.
 
 Use resolver functions for per-class, per-confidence, or frame-aware styling:
 
@@ -109,11 +119,17 @@ Use `offset` when labels need to move away from the default top-left box edge:
 
 ```ts
 const labelStyle = new BaseLabelStyle({
+  background: {
+    cornerRadius: 6,
+    paddingX: 8,
+    paddingY: 4,
+  },
   includeConfidence: true,
   offset: (detection) => ({
     x: detection.className === "basketball" ? 4 : 0,
     y: 8,
   }),
+  placement: LabelPlacement.Bottom,
 });
 ```
 

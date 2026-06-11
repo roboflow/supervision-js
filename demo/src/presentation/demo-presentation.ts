@@ -1,5 +1,8 @@
 import {
+  BoxStrokeAlignment,
   BoxShape,
+  LabelPlacement,
+  MaskRenderMode,
   type BoxDrawInstruction,
   type BoxStyle,
   type Detection,
@@ -23,10 +26,18 @@ export interface DemoPresentationSettings {
   readonly masksEnabled: boolean;
   readonly boxCornerRadius: number;
   readonly boxStrokeWidth: number;
+  readonly boxStrokeAlignment: BoxStrokeAlignment;
   readonly boxFillAlpha: number;
   readonly classStyles: Record<string, DemoClassStyle>;
   readonly labelBackgroundAlpha: number;
+  readonly labelCornerRadius: number;
   readonly labelFontSize: number;
+  readonly labelOffsetX: number;
+  readonly labelOffsetY: number;
+  readonly labelPaddingX: number;
+  readonly labelPaddingY: number;
+  readonly labelPlacement: LabelPlacement;
+  readonly maskMode: MaskRenderMode;
   readonly maskOpacity: number;
   readonly maskStrokeAlpha: number;
   readonly maskStrokeWidth: number;
@@ -85,12 +96,20 @@ export const defaultDemoPresentationSettings: DemoPresentationSettings = {
   boxesEnabled: true,
   boxCornerRadius: 8,
   boxFillAlpha: 0.1,
+  boxStrokeAlignment: BoxStrokeAlignment.Center,
   boxStrokeWidth: 4,
   classStyles: defaultDemoClassStyles,
   confidenceThreshold: 0.5,
   labelBackgroundAlpha: 0.78,
+  labelCornerRadius: 5,
   labelFontSize: 14,
+  labelOffsetX: 0,
+  labelOffsetY: 0,
+  labelPaddingX: 7,
+  labelPaddingY: 4,
+  labelPlacement: LabelPlacement.Top,
   labelsEnabled: true,
+  maskMode: MaskRenderMode.FillAndStroke,
   maskOpacity: 0.7,
   maskStrokeAlpha: 1,
   maskStrokeWidth: 5,
@@ -127,6 +146,7 @@ function createDemoBoxStyle(settings: DemoPresentationSettings): BoxStyle {
         rect: detection.rect,
         shape,
         stroke: {
+          alignment: settings.boxStrokeAlignment,
           alpha: 0.95,
           color: style.stroke,
           width: settings.boxStrokeWidth,
@@ -145,6 +165,7 @@ function createDemoMaskStyle(settings: DemoPresentationSettings): MaskStyle {
     artifactKey: [
       "demo-mask",
       settings.confidenceThreshold,
+      settings.maskMode,
       settings.maskStrokeAlpha,
       settings.maskStrokeWidth,
       serializeMaskClassStyles(settings.classStyles),
@@ -159,11 +180,13 @@ function createDemoMaskStyle(settings: DemoPresentationSettings): MaskStyle {
       const style = resolveClassStyle(detection, settings);
 
       return {
-        alpha: 1,
+        alpha: settings.maskMode === MaskRenderMode.StrokeOnly ? 0 : 1,
         color: style.fill,
         mask: detection.mask,
         stroke:
-          settings.maskStrokeWidth > 0 && settings.maskStrokeAlpha > 0
+          settings.maskMode !== MaskRenderMode.FillOnly &&
+          settings.maskStrokeWidth > 0 &&
+          settings.maskStrokeAlpha > 0
             ? {
                 alpha: settings.maskStrokeAlpha,
                 color: style.stroke,
@@ -193,10 +216,13 @@ function createDemoLabelStyle(settings: DemoPresentationSettings): LabelStyle {
         background: {
           alpha: settings.labelBackgroundAlpha,
           color: style.labelBackground,
-          cornerRadius: 5,
-          paddingX: 7,
-          paddingY: 4,
+          cornerRadius: settings.labelCornerRadius,
+          paddingX: settings.labelPaddingX,
+          paddingY: settings.labelPaddingY,
         },
+        offsetX: settings.labelOffsetX,
+        offsetY: settings.labelOffsetY,
+        placement: settings.labelPlacement,
         rect: detection.rect,
         text: `${className}${confidence}`,
         textStyle: {

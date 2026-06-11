@@ -1,5 +1,13 @@
 import type { Detection, DetectionFrame, Rect } from "#types/detections";
 
+export enum LabelPlacement {
+  Top = "top",
+  Bottom = "bottom",
+  InsideTop = "insideTop",
+  InsideBottom = "insideBottom",
+  Center = "center",
+}
+
 export interface LabelStyleContext {
   readonly mediaTime: number;
   readonly frame: DetectionFrame;
@@ -46,6 +54,7 @@ export interface LabelDrawInstruction {
   readonly background?: LabelBackgroundStyle;
   readonly offsetX?: number;
   readonly offsetY?: number;
+  readonly placement?: LabelPlacement;
 }
 
 /**

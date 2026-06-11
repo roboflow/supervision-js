@@ -127,11 +127,20 @@ export class BaseBoxStyle implements BoxStyle {
       return undefined;
     }
 
-    return {
+    const resolvedStroke: BoxStrokeStyle = {
       alpha: stroke?.alpha ?? DEFAULT_BOX_STROKE_ALPHA,
       color: stroke?.color ?? DEFAULT_BOX_STROKE_COLOR,
       width: stroke?.width ?? DEFAULT_BOX_STROKE_WIDTH,
     };
+
+    if (stroke?.alignment !== undefined) {
+      return {
+        ...resolvedStroke,
+        alignment: stroke.alignment,
+      };
+    }
+
+    return resolvedStroke;
   }
 
   protected resolveFill(

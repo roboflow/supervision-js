@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createPixiBoxLayer } from "#renderers/pixi-box-layer";
-import { BoxShape, type BoxStyle } from "#types/box-style";
+import { BoxShape, BoxStrokeAlignment, type BoxStyle } from "#types/box-style";
 import type { BufferedDetectionTimeline } from "#types/detection-timeline";
 import type { DetectionFrame } from "#types/detections";
 
@@ -58,6 +58,41 @@ describe("pixi box layer", () => {
     expect(graphics.stroke).toHaveBeenLastCalledWith({
       alpha: 1,
       color: 0x00ff00,
+      width: 2,
+    });
+  });
+
+  it("maps renderer-neutral box stroke alignment to Pixi stroke alignment", () => {
+    const graphics = new FakeGraphics();
+    const layer = createPixiBoxLayer({
+      boxStyle: {
+        resolve(detection) {
+          if (!detection.rect) {
+            return undefined;
+          }
+
+          return {
+            rect: detection.rect,
+            shape: BoxShape.Rect,
+            stroke: {
+              alignment: BoxStrokeAlignment.Inside,
+              alpha: 1,
+              color: 0xff0000,
+              width: 2,
+            },
+          };
+        },
+      },
+      detectionTimeline: createTimeline(frame),
+    });
+
+    layer.attachGraphics(graphics as never);
+    layer.drawFrame(0.1);
+
+    expect(graphics.stroke).toHaveBeenCalledWith({
+      alignment: 1,
+      alpha: 1,
+      color: 0xff0000,
       width: 2,
     });
   });

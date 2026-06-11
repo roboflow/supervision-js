@@ -10,6 +10,12 @@ export interface MaskStyleContext {
   readonly detectionIndex: number;
 }
 
+export enum MaskRenderMode {
+  FillAndStroke = "fillAndStroke",
+  FillOnly = "fillOnly",
+  StrokeOnly = "strokeOnly",
+}
+
 /**
  * Optional outline applied around prepared mask pixels.
  */

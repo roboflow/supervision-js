@@ -6,6 +6,7 @@ import type {
   LabelStyle,
   LabelTextStyle,
 } from "#types/label-style";
+import { LabelPlacement } from "#types/label-style";
 import type {
   Container as PixiContainer,
   Graphics as PixiGraphics,
@@ -182,11 +183,7 @@ function drawInstruction(
   const paddingY = background?.paddingY ?? 0;
   const width = entry.label.width + paddingX * 2;
   const height = entry.label.height + paddingY * 2;
-  const x = instruction.rect.x + (instruction.offsetX ?? 0);
-  const y = Math.max(
-    0,
-    instruction.rect.y - height - (instruction.offsetY ?? 0),
-  );
+  const { x, y } = resolveLabelPosition(instruction, width, height);
 
   entry.label.x = x + paddingX;
   entry.label.y = y + paddingY;
@@ -198,6 +195,44 @@ function drawInstruction(
   }
 
   drawBackground(entry, background, x, y, width, height);
+}
+
+function resolveLabelPosition(
+  instruction: LabelDrawInstruction,
+  width: number,
+  height: number,
+) {
+  const { rect } = instruction;
+  const offsetX = instruction.offsetX ?? 0;
+  const offsetY = instruction.offsetY ?? 0;
+
+  switch (instruction.placement ?? LabelPlacement.Top) {
+    case LabelPlacement.Bottom:
+      return {
+        x: rect.x + offsetX,
+        y: rect.y + rect.height + offsetY,
+      };
+    case LabelPlacement.Center:
+      return {
+        x: rect.x + rect.width / 2 - width / 2 + offsetX,
+        y: rect.y + rect.height / 2 - height / 2 + offsetY,
+      };
+    case LabelPlacement.InsideBottom:
+      return {
+        x: rect.x + offsetX,
+        y: Math.max(0, rect.y + rect.height - height - offsetY),
+      };
+    case LabelPlacement.InsideTop:
+      return {
+        x: rect.x + offsetX,
+        y: rect.y + offsetY,
+      };
+    case LabelPlacement.Top:
+      return {
+        x: rect.x + offsetX,
+        y: Math.max(0, rect.y - height - offsetY),
+      };
+  }
 }
 
 function drawBackground(

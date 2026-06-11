@@ -1,5 +1,10 @@
 import { useState, type CSSProperties, type ReactNode } from "react";
 import {
+  BoxStrokeAlignment,
+  LabelPlacement,
+  MaskRenderMode,
+} from "supervision-js";
+import {
   resolveDemoClassStyle,
   type DemoClassStyle,
   type DemoPresentationSettings,
@@ -113,6 +118,17 @@ function GlobalRenderControls({
       </ControlSection>
 
       <ControlSection title="Boxes">
+        <SegmentedControl
+          disabled={!settings.boxesEnabled}
+          label="Stroke Align"
+          onChange={(value) => onChange("boxStrokeAlignment", value)}
+          options={[
+            { label: "Inside", value: BoxStrokeAlignment.Inside },
+            { label: "Center", value: BoxStrokeAlignment.Center },
+            { label: "Outside", value: BoxStrokeAlignment.Outside },
+          ]}
+          value={settings.boxStrokeAlignment}
+        />
         <SliderControl
           disabled={!settings.boxesEnabled}
           label="Radius"
@@ -146,6 +162,17 @@ function GlobalRenderControls({
       </ControlSection>
 
       <ControlSection title="Masks">
+        <SegmentedControl
+          disabled={!settings.masksEnabled}
+          label="Mode"
+          onChange={(value) => onChange("maskMode", value)}
+          options={[
+            { label: "Fill + Border", value: MaskRenderMode.FillAndStroke },
+            { label: "Fill", value: MaskRenderMode.FillOnly },
+            { label: "Border", value: MaskRenderMode.StrokeOnly },
+          ]}
+          value={settings.maskMode}
+        />
         <SliderControl
           disabled={!settings.masksEnabled}
           label="Opacity"
@@ -179,6 +206,19 @@ function GlobalRenderControls({
       </ControlSection>
 
       <ControlSection title="Labels">
+        <SegmentedControl
+          disabled={!settings.labelsEnabled}
+          label="Placement"
+          onChange={(value) => onChange("labelPlacement", value)}
+          options={[
+            { label: "Top", value: LabelPlacement.Top },
+            { label: "Bottom", value: LabelPlacement.Bottom },
+            { label: "Inside Top", value: LabelPlacement.InsideTop },
+            { label: "Inside Bottom", value: LabelPlacement.InsideBottom },
+            { label: "Center", value: LabelPlacement.Center },
+          ]}
+          value={settings.labelPlacement}
+        />
         <SliderControl
           disabled={!settings.labelsEnabled}
           label="Size"
@@ -198,6 +238,56 @@ function GlobalRenderControls({
           step={0.01}
           value={settings.labelBackgroundAlpha}
           valueLabel={formatPercent(settings.labelBackgroundAlpha)}
+        />
+        <SliderControl
+          disabled={!settings.labelsEnabled}
+          label="Radius"
+          max={16}
+          min={0}
+          onChange={(value) => onChange("labelCornerRadius", value)}
+          step={1}
+          value={settings.labelCornerRadius}
+          valueLabel={`${settings.labelCornerRadius}px`}
+        />
+        <SliderControl
+          disabled={!settings.labelsEnabled}
+          label="Padding X"
+          max={16}
+          min={0}
+          onChange={(value) => onChange("labelPaddingX", value)}
+          step={1}
+          value={settings.labelPaddingX}
+          valueLabel={`${settings.labelPaddingX}px`}
+        />
+        <SliderControl
+          disabled={!settings.labelsEnabled}
+          label="Padding Y"
+          max={12}
+          min={0}
+          onChange={(value) => onChange("labelPaddingY", value)}
+          step={1}
+          value={settings.labelPaddingY}
+          valueLabel={`${settings.labelPaddingY}px`}
+        />
+        <SliderControl
+          disabled={!settings.labelsEnabled}
+          label="Offset X"
+          max={30}
+          min={-30}
+          onChange={(value) => onChange("labelOffsetX", value)}
+          step={1}
+          value={settings.labelOffsetX}
+          valueLabel={`${settings.labelOffsetX}px`}
+        />
+        <SliderControl
+          disabled={!settings.labelsEnabled}
+          label="Offset Y"
+          max={30}
+          min={-30}
+          onChange={(value) => onChange("labelOffsetY", value)}
+          step={1}
+          value={settings.labelOffsetY}
+          valueLabel={`${settings.labelOffsetY}px`}
         />
       </ControlSection>
 
@@ -309,6 +399,44 @@ function ToggleControl({
       />
       <span>{label}</span>
     </label>
+  );
+}
+
+function SegmentedControl<Value extends string>({
+  disabled = false,
+  label,
+  onChange,
+  options,
+  value,
+}: {
+  readonly disabled?: boolean;
+  readonly label: string;
+  readonly onChange: (value: Value) => void;
+  readonly options: readonly {
+    readonly label: string;
+    readonly value: Value;
+  }[];
+  readonly value: Value;
+}) {
+  return (
+    <div className="render-control render-control--segmented">
+      <span className="render-control__label">
+        <span>{label}</span>
+      </span>
+      <div className="render-control__segments">
+        {options.map((option) => (
+          <button
+            aria-pressed={option.value === value}
+            disabled={disabled}
+            key={option.value}
+            onClick={() => onChange(option.value)}
+            type="button"
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 

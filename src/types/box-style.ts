@@ -5,6 +5,12 @@ export enum BoxShape {
   RoundedRect = "roundedRect",
 }
 
+export enum BoxStrokeAlignment {
+  Inside = "inside",
+  Center = "center",
+  Outside = "outside",
+}
+
 /**
  * Stroke applied to a rendered detection rectangle.
  *
@@ -14,6 +20,7 @@ export interface BoxStrokeStyle {
   readonly color: number;
   readonly alpha: number;
   readonly width: number;
+  readonly alignment?: BoxStrokeAlignment;
 }
 
 /**

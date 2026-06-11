@@ -48,11 +48,14 @@ describe("package entrypoint", () => {
       "BaseLabelStyle",
       "BaseMaskStyle",
       "BoxShape",
+      "BoxStrokeAlignment",
       "DetectionBufferStatus",
       "DetectionFrameRetentionMode",
       "DetectionFrameSelectionMode",
       "DetectionMaskEncoding",
       "DetectionPickTarget",
+      "LabelPlacement",
+      "MaskRenderMode",
       "MediaInteractionMode",
       "MediaNormalizationAudioCodec",
       "MediaNormalizationContainer",
@@ -108,6 +111,23 @@ describe("package entrypoint", () => {
     expect(entrypoint.BoxShape).toEqual({
       Rect: "rect",
       RoundedRect: "roundedRect",
+    });
+    expect(entrypoint.BoxStrokeAlignment).toEqual({
+      Center: "center",
+      Inside: "inside",
+      Outside: "outside",
+    });
+    expect(entrypoint.LabelPlacement).toEqual({
+      Bottom: "bottom",
+      Center: "center",
+      InsideBottom: "insideBottom",
+      InsideTop: "insideTop",
+      Top: "top",
+    });
+    expect(entrypoint.MaskRenderMode).toEqual({
+      FillAndStroke: "fillAndStroke",
+      FillOnly: "fillOnly",
+      StrokeOnly: "strokeOnly",
     });
     expect(entrypoint.MediaRendererFit).toEqual({
       Contain: "contain",

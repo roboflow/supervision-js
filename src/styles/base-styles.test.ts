@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import { BaseBoxStyle } from "#styles/box-style";
 import { BaseLabelStyle } from "#styles/label-style";
 import { BaseMaskStyle } from "#styles/mask-style";
-import { BoxShape } from "#types/box-style";
+import { BoxShape, BoxStrokeAlignment } from "#types/box-style";
 import { DetectionMaskEncoding, type DetectionFrame } from "#types/detections";
+import { LabelPlacement } from "#types/label-style";
+import { MaskRenderMode } from "#types/mask-style";
 
 const frame: DetectionFrame = {
   detections: [],
@@ -23,6 +25,7 @@ describe("base presentation styles", () => {
       shape: BoxShape.RoundedRect,
       shouldRender: (detection) => (detection.confidence ?? 0) >= 0.5,
       stroke: (detection) => ({
+        alignment: BoxStrokeAlignment.Inside,
         color: detection.className === "person" ? 0x22c55e : 0xa855f7,
         width: 3,
       }),
@@ -45,7 +48,12 @@ describe("base presentation styles", () => {
       fill: { alpha: 0.2, color: 0x22c55e },
       rect: person.rect,
       shape: BoxShape.RoundedRect,
-      stroke: { alpha: 1, color: 0x22c55e, width: 3 },
+      stroke: {
+        alignment: BoxStrokeAlignment.Inside,
+        alpha: 1,
+        color: 0x22c55e,
+        width: 3,
+      },
     });
     expect(
       style.resolve(lowConfidence, {
@@ -65,6 +73,10 @@ describe("base presentation styles", () => {
     const dynamicStyle = new BaseMaskStyle({
       color: (detection) =>
         detection.className === "person" ? 0x22c55e : 0xa855f7,
+      mode: (detection) =>
+        detection.className === "person"
+          ? MaskRenderMode.StrokeOnly
+          : MaskRenderMode.FillOnly,
       opacity: 0.4,
       shouldRender: (detection) => detection.className !== "ignore",
       stroke: (detection) =>
@@ -81,7 +93,9 @@ describe("base presentation styles", () => {
       mask,
     };
 
-    expect(staticStyle.artifactKey).toBe("base:65382:16777215:1:1");
+    expect(staticStyle.artifactKey).toBe(
+      "base:65382:fillAndStroke:16777215:1:1",
+    );
     expect(staticStyle.opacity).toBe(0.7);
     expect(dynamicStyle.artifactKey).toBeUndefined();
     expect(dynamicStyle.opacity).toBe(0.4);
@@ -92,10 +106,21 @@ describe("base presentation styles", () => {
         mediaTime: 0.25,
       }),
     ).toEqual({
-      alpha: 1,
+      alpha: 0,
       color: 0x22c55e,
       mask,
       stroke: { alpha: 1, color: 0x22c55e, width: 1 },
+    });
+    expect(
+      dynamicStyle.resolve(
+        { className: "ball", mask },
+        { detectionIndex: 1, frame, mediaTime: 0.25 },
+      ),
+    ).toEqual({
+      alpha: 1,
+      color: 0xa855f7,
+      mask,
+      stroke: undefined,
     });
     expect(
       dynamicStyle.resolve(
@@ -111,6 +136,29 @@ describe("base presentation styles", () => {
     expect(style.opacity).toBe(0.25);
   });
 
+  it("defaults stroke-only masks to a visible same-color outline", () => {
+    const style = new BaseMaskStyle({
+      color: 0x38bdf8,
+      mode: MaskRenderMode.StrokeOnly,
+    });
+    const mask = {
+      counts: "04",
+      encoding: DetectionMaskEncoding.CompressedRle,
+      height: 2,
+      width: 2,
+    } as const;
+
+    expect(style.artifactKey).toBe("base:3718648:strokeOnly:3718648:1:1");
+    expect(
+      style.resolve({ mask }, { detectionIndex: 0, frame, mediaTime: 0.25 }),
+    ).toEqual({
+      alpha: 0,
+      color: 0x38bdf8,
+      mask,
+      stroke: { alpha: 1, color: 0x38bdf8, width: 1 },
+    });
+  });
+
   it("supports dynamic label text and presentation", () => {
     const style = new BaseLabelStyle({
       background: (detection) => ({
@@ -121,6 +169,7 @@ describe("base presentation styles", () => {
         x: detection.className === "person" ? 2 : 0,
         y: 6,
       }),
+      placement: LabelPlacement.InsideTop,
       shouldRender: (detection) => Boolean(detection.rect),
       text: (detection, context) =>
         `${context.detectionIndex + 1}:${detection.className}`,
@@ -147,6 +196,7 @@ describe("base presentation styles", () => {
       },
       offsetX: 2,
       offsetY: 6,
+      placement: LabelPlacement.InsideTop,
       rect: detection.rect,
       text: "3:person",
       textStyle: {

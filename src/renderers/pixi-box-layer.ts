@@ -1,7 +1,9 @@
 import { BaseBoxStyle } from "#styles/box-style";
 import {
+  BoxStrokeAlignment,
   BoxShape,
   type BoxDrawInstruction,
+  type BoxStrokeStyle,
   type BoxStyle,
 } from "#types/box-style";
 import type { BufferedDetectionTimeline } from "#types/detection-timeline";
@@ -119,7 +121,36 @@ function drawBoxInstruction(
   }
 
   if (instruction.stroke) {
-    graphics.stroke(instruction.stroke);
+    graphics.stroke(resolvePixiStroke(instruction.stroke));
+  }
+}
+
+function resolvePixiStroke(stroke: BoxStrokeStyle) {
+  const pixiStroke = {
+    alpha: stroke.alpha,
+    color: stroke.color,
+    width: stroke.width,
+  };
+
+  if (stroke.alignment === undefined) {
+    return pixiStroke;
+  }
+
+  return {
+    ...pixiStroke,
+    alignment: resolvePixiStrokeAlignment(stroke.alignment),
+  };
+}
+
+function resolvePixiStrokeAlignment(alignment: BoxStrokeAlignment | undefined) {
+  switch (alignment) {
+    case BoxStrokeAlignment.Inside:
+      return 1;
+    case BoxStrokeAlignment.Outside:
+      return 0;
+    case BoxStrokeAlignment.Center:
+    case undefined:
+      return 0.5;
   }
 }
 

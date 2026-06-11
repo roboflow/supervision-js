@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createPixiLabelLayer } from "#renderers/pixi-label-layer";
 import type { BufferedDetectionTimeline } from "#types/detection-timeline";
 import type { DetectionFrame } from "#types/detections";
+import { LabelPlacement } from "#types/label-style";
 import type { LabelStyle } from "#types/label-style";
 
 const firstFrame: DetectionFrame = {
@@ -54,6 +55,48 @@ describe("pixi label layer", () => {
     expect(background.roundRect).toHaveBeenCalledTimes(1);
     expect(background.x).toBe(16);
     expect(background.y).toBe(16);
+  });
+
+  it("places labels relative to detection rectangles", () => {
+    const timeline = createTimeline([firstFrame]);
+    const layer = createPixiLabelLayer({
+      Container: FakeContainer as never,
+      Graphics: FakeGraphics as never,
+      Text: FakeText as never,
+      detectionTimeline: timeline,
+      labelStyle: {
+        resolve(detection) {
+          if (!detection.rect) {
+            return undefined;
+          }
+
+          return {
+            background: {
+              alpha: 0.8,
+              color: 0x111111,
+              cornerRadius: 4,
+              paddingX: 7,
+              paddingY: 4,
+            },
+            offsetX: 2,
+            offsetY: 3,
+            placement: LabelPlacement.Bottom,
+            rect: detection.rect,
+            text: "player",
+          };
+        },
+      },
+    });
+    const container = layer.createContainer() as FakeContainer;
+
+    layer.drawFrame(1);
+
+    const [background, label] = container.children as [FakeGraphics, FakeText];
+
+    expect(background.x).toBe(12);
+    expect(background.y).toBe(53);
+    expect(label.x).toBe(19);
+    expect(label.y).toBe(57);
   });
 });
 
