@@ -257,9 +257,11 @@ async function createPreparedPngIdMaskFrame(
       height: imageBitmap.height,
       key: job.key,
       kind: PreparedMaskFrameKind.PngIdMask,
+      maxStrokeWidth: frame.maxStrokeWidth,
       png: frame.png,
       source: imageBitmap,
       strokePalette: frame.strokePalette,
+      strokeWidths: frame.strokeWidths,
       width: imageBitmap.width,
     };
   } catch {
@@ -428,7 +430,8 @@ function createPreparedFrameFromWorkerResponse(
       !message.imageBitmap ||
       !message.fillPalette ||
       !message.png ||
-      !message.strokePalette
+      !message.strokePalette ||
+      !message.strokeWidths
     ) {
       throw new Error(
         "Mask preparation worker returned an incomplete ID mask artifact.",
@@ -444,9 +447,11 @@ function createPreparedFrameFromWorkerResponse(
       height: message.imageBitmap.height,
       key: message.key,
       kind: PreparedMaskFrameKind.PngIdMask,
+      maxStrokeWidth: message.maxStrokeWidth ?? 0,
       png: message.png,
       source: message.imageBitmap,
       strokePalette: message.strokePalette,
+      strokeWidths: message.strokeWidths,
       width: message.imageBitmap.width,
     };
   }

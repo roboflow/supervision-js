@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import { BaseBoxStyle } from "#styles/box-style";
+import { BaseFocusStyle } from "#styles/focus-style";
+import { BaseInteractionStyle } from "#styles/interaction-style";
 import { BaseLabelStyle } from "#styles/label-style";
 import { BaseMaskStyle } from "#styles/mask-style";
 import { BoxShape, BoxStrokeAlignment } from "#types/box-style";
 import { DetectionMaskEncoding, type DetectionFrame } from "#types/detections";
+import { DetectionPickTarget } from "#types/interaction";
+import { FocusTargetMode } from "#types/focus-style";
+import { DetectionInteractionState } from "#types/interaction-style";
 import { LabelPlacement } from "#types/label-style";
 import { MaskRenderMode } from "#types/mask-style";
 
@@ -240,5 +245,124 @@ describe("base presentation styles", () => {
       shape: BoxShape.Rect,
       stroke: undefined,
     });
+  });
+
+  it("resolves hover and selected interaction highlights without touching base layers", () => {
+    const style = new BaseInteractionStyle({
+      fill: (_detection, context) =>
+        context.state === DetectionInteractionState.Selected
+          ? { alpha: 0.2, color: 0xfde047 }
+          : null,
+      stroke: (detection, context) => ({
+        alpha: context.state === DetectionInteractionState.Selected ? 1 : 0.85,
+        color: detection.className === "person" ? 0x22c55e : 0x38bdf8,
+        width: context.state === DetectionInteractionState.Selected ? 5 : 3,
+      }),
+    });
+    const detection = {
+      className: "person",
+      rect: { height: 40, width: 20, x: 10, y: 12 },
+    };
+
+    const hoverPresentation = style.resolve(detection, {
+      detectionIndex: 0,
+      frame,
+      mediaTime: 0.25,
+      point: { x: 12, y: 14 },
+      state: DetectionInteractionState.Hovered,
+      target: DetectionPickTarget.Box,
+    });
+    const selectedPresentation = style.resolve(detection, {
+      detectionIndex: 0,
+      frame,
+      mediaTime: 0.25,
+      point: { x: 12, y: 14 },
+      state: DetectionInteractionState.Selected,
+      target: DetectionPickTarget.Box,
+    });
+
+    expect(
+      hoverPresentation?.boxStyle?.resolve(detection, {
+        detectionIndex: 0,
+        frame,
+        mediaTime: 0.25,
+      }),
+    ).toEqual({
+      fill: undefined,
+      rect: detection.rect,
+      shape: BoxShape.Rect,
+      stroke: {
+        alpha: 0.85,
+        color: 0x22c55e,
+        width: 3,
+      },
+    });
+    expect(
+      selectedPresentation?.boxStyle?.resolve(detection, {
+        detectionIndex: 0,
+        frame,
+        mediaTime: 0.25,
+      }),
+    ).toMatchObject({
+      fill: { alpha: 0.2, color: 0xfde047 },
+      stroke: {
+        alpha: 1,
+        color: 0x22c55e,
+        width: 5,
+      },
+    });
+  });
+
+  it("resolves selected detections into focus targets", () => {
+    const detection = {
+      className: "person",
+      rect: { height: 40, width: 20, x: 10, y: 12 },
+    };
+    const focusFrame = {
+      detections: [detection],
+      mediaTime: 0.25,
+    };
+    const selectedPick = {
+      detection,
+      detectionIndex: 0,
+      frame: focusFrame,
+      mediaTime: 0.25,
+      point: { x: 12, y: 14 },
+      target: DetectionPickTarget.Mask,
+    };
+    const style = new BaseFocusStyle({
+      cornerRadius: 10,
+      fill: { alpha: 0.42, color: 0x020617 },
+      shape: BoxShape.RoundedRect,
+      targetMode: FocusTargetMode.Selected,
+    });
+
+    expect(
+      style.resolve({
+        frame: focusFrame,
+        hoveredPick: null,
+        mediaTime: 0.25,
+        selectedPick,
+      }),
+    ).toEqual({
+      fallback: {
+        cornerRadius: 10,
+        shape: BoxShape.RoundedRect,
+      },
+      fill: {
+        alpha: 0.42,
+        color: 0x020617,
+      },
+      targetMode: FocusTargetMode.Selected,
+      targets: [selectedPick],
+    });
+    expect(
+      style.resolve({
+        frame: focusFrame,
+        hoveredPick: null,
+        mediaTime: 0.25,
+        selectedPick: null,
+      }),
+    ).toBeUndefined();
   });
 });

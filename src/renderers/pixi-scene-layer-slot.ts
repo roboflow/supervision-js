@@ -4,6 +4,7 @@ export enum PixiSceneLayerKind {
   Media = "media",
   Mask = "mask",
   Box = "box",
+  Focus = "focus",
   Interaction = "interaction",
   Label = "label",
 }

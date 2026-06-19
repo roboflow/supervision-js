@@ -392,6 +392,10 @@ function RenderTimingStatusGroup({
         value={formatMilliseconds(timings?.labelMs ?? null)}
       />
       <Readout
+        label="Focus"
+        value={formatMilliseconds(timings?.focusMs ?? null)}
+      />
+      <Readout
         label="Picking"
         value={formatMilliseconds(timings?.interactionMs ?? null)}
       />
@@ -410,10 +414,10 @@ function InteractionStatusGroup({
   const activePick = selectedDetectionPick ?? hoveredDetectionPick;
 
   return (
-    <StatusGroup title="Interaction">
+    <StatusGroup title="Selection">
       <Readout label="Mode" value="paused-only" />
       <Readout
-        label="Active"
+        label="State"
         value={
           selectedDetectionPick
             ? "selected"
@@ -422,6 +426,7 @@ function InteractionStatusGroup({
               : "none"
         }
       />
+      <Readout label="ID" value={activePick?.detection.id ?? "-"} />
       <Readout label="Class" value={activePick?.detection.className ?? "-"} />
       <Readout
         label="Confidence"
@@ -432,6 +437,10 @@ function InteractionStatusGroup({
         }
       />
       <Readout label="Frame" value={formatPickFrame(activePick)} />
+      <Readout
+        label="Time"
+        value={activePick ? formatExactTime(activePick.mediaTime) : "-"}
+      />
       <Readout label="Point" value={formatPickPoint(activePick)} />
       <Readout label="Rect" value={formatPickRect(activePick)} />
       <Readout label="Target" value={activePick?.target ?? "-"} />

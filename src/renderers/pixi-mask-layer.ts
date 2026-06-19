@@ -5,7 +5,10 @@ import {
   type PreparedMaskFrame,
   type PreparedRenderTimelineContext,
 } from "#render-preparation/prepared-render-window";
-import { PreparedMaskFrameKind } from "#render-preparation/mask-frame-artifact";
+import {
+  PreparedMaskFrameKind,
+  type PreparedPngIdMaskFrame,
+} from "#render-preparation/mask-frame-artifact";
 import type { BufferedDetectionTimeline } from "#types/detection-timeline";
 import type {
   DetectionPickPoint,
@@ -78,6 +81,7 @@ type UniformGroupConstructor = new (
   uniforms: Record<
     string,
     | { type: "f32"; value: number }
+    | { size?: number; type: "f32"; value: Float32Array }
     | { size?: number; type: "vec2<f32>" | "vec4<f32>"; value: Float32Array }
   >,
 ) => PixiUniformGroup;
@@ -96,9 +100,15 @@ export interface PixiMaskLayer {
     point: DetectionPickPoint,
     mediaTime: number,
   ): DetectionPickResult | null;
+  getActiveIdMaskFrameTexture(): PixiActiveIdMaskFrameTexture | null;
   setTimelineContext(context: PreparedRenderTimelineContext): void;
   setMaskStyle(maskStyle: MaskStyle | null | undefined): void;
   destroy(): void;
+}
+
+export interface PixiActiveIdMaskFrameTexture {
+  readonly frame: PreparedPngIdMaskFrame;
+  readonly texture: PixiTexture;
 }
 
 export function createPixiMaskLayer(options: {
@@ -243,6 +253,24 @@ export function createPixiMaskLayer(options: {
       const maskId = readMaskId(maskFrame, x, y);
 
       return pickDetectionByMaskId(preparedFrame.detectionFrame, maskId, point);
+    },
+
+    getActiveIdMaskFrameTexture() {
+      if (activeFrameMediaTime === null) {
+        return null;
+      }
+
+      const preparedFrame = preparedRenderWindow.getFrame(activeFrameMediaTime);
+      const maskFrame = preparedFrame?.maskFrame;
+
+      if (!maskFrame || maskFrame.kind !== PreparedMaskFrameKind.PngIdMask) {
+        return null;
+      }
+
+      return {
+        frame: maskFrame,
+        texture: getTexture(maskFrame),
+      };
     },
 
     setTimelineContext(context) {

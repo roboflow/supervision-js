@@ -156,7 +156,7 @@ export interface MediaSessionOptions {
    */
   readonly onState?: (state: MediaSessionState) => void;
   /**
-   * Box, mask, and label presentation styles.
+   * Box, mask, label, interaction, and focus presentation styles.
    */
   readonly presentation?: MediaRendererPresentation;
   /**

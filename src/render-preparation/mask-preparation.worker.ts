@@ -43,6 +43,7 @@ async function prepareMaskFrame(message: MaskPreparationWorkerRequest) {
         pngIdMaskFrame.png.buffer,
         pngIdMaskFrame.fillPalette.buffer,
         pngIdMaskFrame.strokePalette.buffer,
+        pngIdMaskFrame.strokeWidths.buffer,
       ]);
       return;
     }
@@ -106,8 +107,10 @@ async function createPngIdMaskWorkerResponse(
   | (MaskPreparationWorkerResponse & {
       readonly fillPalette: Float32Array<ArrayBuffer>;
       readonly imageBitmap: ImageBitmap;
+      readonly maxStrokeWidth: number;
       readonly png: Uint8Array<ArrayBuffer>;
       readonly strokePalette: Float32Array<ArrayBuffer>;
+      readonly strokeWidths: Float32Array<ArrayBuffer>;
     })
   | undefined
 > {
@@ -147,9 +150,11 @@ async function createPngIdMaskWorkerResponse(
     hasStroke: frame.hasStroke,
     imageBitmap,
     key: message.job.key,
+    maxStrokeWidth: frame.maxStrokeWidth,
     png: frame.png,
     requestId: message.requestId,
     strokePalette: frame.strokePalette,
+    strokeWidths: frame.strokeWidths,
     type: MaskPreparationWorkerMessageType.Complete,
   };
 }

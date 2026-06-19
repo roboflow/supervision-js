@@ -13,7 +13,7 @@ npm run verify
 [[actions]]
 name = "Dev"
 icon = "run"
-command = "cd \"$CODEX_WORKTREE_PATH\" && npm run dev"
+command = "cd \"$CODEX_WORKTREE_PATH\" && npm run dev:demo-docs"
 
 [[actions]]
 name = "Demo dev"

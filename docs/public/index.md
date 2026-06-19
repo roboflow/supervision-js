@@ -116,7 +116,8 @@ one timing source and avoids drift caused by separate composition layers.
   `supervision-js` equivalent of Python supervision annotators.
 - Use the recipes for common integrations:
   [Static Detections](recipes/static-detections.md),
-  [Streaming Detections](recipes/streaming-detections.md), and
+  [Streaming Detections](recipes/streaming-detections.md),
+  [Interactive Picking](recipes/interactive-picking.md), and
   [Progressive Upload Normalization](recipes/progressive-upload-normalization.md).
 - Read [Session Lifecycle](recipes/session-lifecycle.md) for replacing media,
   cleaning up viewers, and recovering after session errors.

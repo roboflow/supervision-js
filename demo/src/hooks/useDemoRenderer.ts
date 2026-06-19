@@ -72,6 +72,7 @@ export interface DemoRendererState {
   readonly onStepFrame: (frameDelta: number) => void;
   readonly onTogglePlayback: () => void;
   readonly onUploadFileChange: (file: File | null) => void;
+  readonly onClearSelectedDetection: () => void;
   readonly setPresentationSettings: (
     settings: DemoPresentationSettings,
   ) => void;
@@ -416,6 +417,19 @@ export function useDemoRenderer(): DemoRendererState {
     [fixtureSummary, onSeek],
   );
 
+  const onClearSelectedDetection = useCallback(() => {
+    const renderer = rendererRef.current;
+
+    if (!renderer) {
+      setSelectedDetectionPick(null);
+      return;
+    }
+
+    renderer.setSelectedDetection(null);
+    setSelectedDetectionPick(null);
+    syncRendererState(renderer);
+  }, [syncRendererState]);
+
   const setPresentationSettings = useCallback(
     (settings: DemoPresentationSettings) => {
       presentationSettingsRef.current = settings;
@@ -563,6 +577,7 @@ export function useDemoRenderer(): DemoRendererState {
     hoveredDetectionPick,
     mediaState,
     onCancelUploadInference,
+    onClearSelectedDetection,
     onSeek,
     onStartUploadInference,
     onStepFrame,

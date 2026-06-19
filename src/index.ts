@@ -38,6 +38,10 @@ export { createMediaSession } from "#sessions/media-session";
 // Presentation styles.
 export { BaseBoxStyle } from "#styles/box-style";
 export type { BaseBoxStyleOptions } from "#styles/box-style";
+export { BaseFocusStyle } from "#styles/focus-style";
+export type { BaseFocusStyleOptions } from "#styles/focus-style";
+export { BaseInteractionStyle } from "#styles/interaction-style";
+export type { BaseInteractionStyleOptions } from "#styles/interaction-style";
 export { BaseLabelStyle } from "#styles/label-style";
 export type { BaseLabelStyleOptions } from "#styles/label-style";
 export { BaseMaskStyle } from "#styles/mask-style";
@@ -50,6 +54,15 @@ export type {
   BoxStyle,
   BoxStyleContext,
 } from "#types/box-style";
+export type {
+  FocusDrawInstruction,
+  FocusFallbackStyle,
+  FocusFillStyle,
+  FocusStyle,
+  FocusStyleContext,
+  FocusStyleValue,
+} from "#types/focus-style";
+export { FocusTargetMode } from "#types/focus-style";
 export type {
   LabelBackgroundStyle,
   LabelDrawInstruction,
@@ -115,8 +128,15 @@ export {
   type DetectionPickOptions,
   type DetectionPickPoint,
   type DetectionPickResult,
+  type DetectionSelectionOptions,
   type MediaInteractionOptions,
 } from "#types/interaction";
+export {
+  DetectionInteractionState,
+  type InteractionPresentation,
+  type InteractionStyle,
+  type InteractionStyleContext,
+} from "#types/interaction-style";
 export {
   MediaNormalizationAudioCodec,
   MediaNormalizationContainer,

@@ -3,14 +3,21 @@ import test from "node:test";
 
 const expectedRuntimeExports = [
   "BaseBoxStyle",
+  "BaseFocusStyle",
+  "BaseInteractionStyle",
   "BaseLabelStyle",
   "BaseMaskStyle",
   "BoxShape",
+  "BoxStrokeAlignment",
   "DetectionBufferStatus",
   "DetectionFrameRetentionMode",
   "DetectionFrameSelectionMode",
+  "DetectionInteractionState",
   "DetectionMaskEncoding",
   "DetectionPickTarget",
+  "FocusTargetMode",
+  "LabelPlacement",
+  "MaskRenderMode",
   "MediaInteractionMode",
   "MediaNormalizationAudioCodec",
   "MediaNormalizationContainer",
@@ -31,7 +38,6 @@ const expectedRuntimeExports = [
   "RenderPreparationExecutionMode",
   "RenderPreparationMode",
   "RenderPreparationWorkerStatus",
-  "RoundedBoxStyle",
   "createArrayDetectionFrameSource",
   "createBrowserColdDetectionFrameStore",
   "createBufferedDetectionTimeline",
@@ -59,6 +65,8 @@ test("built package entrypoint exposes the public runtime API", async () => {
   assert.equal(typeof entrypoint.prepareMedia, "function");
   assert.equal(typeof entrypoint.prepareMediaProgressively, "function");
   assert.equal(typeof entrypoint.BaseBoxStyle, "function");
+  assert.equal(typeof entrypoint.BaseFocusStyle, "function");
+  assert.equal(typeof entrypoint.BaseInteractionStyle, "function");
   assert.equal(typeof entrypoint.BaseMaskStyle, "function");
   assert.equal(typeof entrypoint.BaseLabelStyle, "function");
   assert.equal(entrypoint.MediaSessionStatus.Ready, "ready");
@@ -68,9 +76,18 @@ test("built package entrypoint exposes the public runtime API", async () => {
 test("built style classes can be constructed by package consumers", async () => {
   const entrypoint = await import("../dist/index.js");
 
-  const boxStyle = new entrypoint.RoundedBoxStyle({
+  const boxStyle = new entrypoint.BaseBoxStyle({
     cornerRadius: 8,
+    shape: entrypoint.BoxShape.RoundedRect,
     stroke: { alpha: 1, color: 0x38bdf8, width: 3 },
+  });
+  const focusStyle = new entrypoint.BaseFocusStyle({
+    fill: { alpha: 0.4, color: 0x020617 },
+    targetMode: entrypoint.FocusTargetMode.Selected,
+  });
+  const interactionStyle = new entrypoint.BaseInteractionStyle({
+    hover: { alpha: 1, color: 0x38bdf8, width: 2 },
+    selected: { alpha: 1, color: 0xfacc15, width: 3 },
   });
   const maskStyle = new entrypoint.BaseMaskStyle({
     alpha: 0.7,
@@ -81,6 +98,8 @@ test("built style classes can be constructed by package consumers", async () => 
   });
 
   assert.equal(typeof boxStyle.resolve, "function");
+  assert.equal(typeof focusStyle.resolve, "function");
+  assert.equal(typeof interactionStyle.resolve, "function");
   assert.equal(typeof maskStyle.resolve, "function");
   assert.equal(typeof labelStyle.resolve, "function");
 });

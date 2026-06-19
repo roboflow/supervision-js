@@ -105,13 +105,15 @@ export async function createMediaSession(
     const renderer = await createMediaRenderer({
       ...options.renderer,
       ...sessionMedia.rendererSourceOption,
-      boxStyle: options.presentation?.boxStyle ?? undefined,
+      boxStyle: options.presentation?.boxStyle,
       container: options.container,
       detectionBuffer: sessionDefaults.detectionBuffer,
       detectionFrames: sessionDetections.detectionFrames,
       detectionSource: sessionDetections.detectionSource,
-      labelStyle: options.presentation?.labelStyle ?? undefined,
-      maskStyle: options.presentation?.maskStyle ?? undefined,
+      focusStyle: options.presentation?.focusStyle,
+      interactionStyle: options.presentation?.interactionStyle,
+      labelStyle: options.presentation?.labelStyle,
+      maskStyle: options.presentation?.maskStyle,
       onState(state) {
         rendererState = state;
         options.renderer?.onState?.(state);

@@ -614,6 +614,117 @@ fieldset {
   font-weight: 620;
 }
 
+.selection-panel {
+  background: rgba(7, 9, 13, 0.52);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 9px;
+}
+
+.selection-panel .inspector-card__header button {
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  color: var(--muted-strong);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 650;
+  min-height: 25px;
+  padding: 3px 8px;
+}
+
+.selection-panel .inspector-card__header button:hover {
+  background: rgba(255, 255, 255, 0.075);
+  border-color: var(--line-strong);
+  color: #ffffff;
+}
+
+.selection-panel__hint {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 560;
+  line-height: 1.35;
+  margin: 0;
+}
+
+.selection-details {
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(143, 157, 178, 0.12);
+  border-radius: var(--radius-md);
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px;
+}
+
+.selection-details--empty {
+  gap: 3px;
+}
+
+.selection-details--empty strong,
+.selection-details__title strong {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 720;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.selection-details--empty span,
+.selection-details__title span {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 620;
+}
+
+.selection-details__title {
+  align-items: baseline;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.selection-details__grid {
+  display: grid;
+  gap: 5px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+  min-width: 0;
+}
+
+.selection-details__grid div {
+  min-width: 0;
+}
+
+.selection-details__grid dt {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 680;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.selection-details__grid dd {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 620;
+  line-height: 1.25;
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .control-bar {
   align-items: center;
   background: rgba(10, 12, 17, 0.88);

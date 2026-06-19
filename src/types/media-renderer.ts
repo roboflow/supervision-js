@@ -5,7 +5,13 @@ import type {
   DetectionFrameSource,
 } from "#types/detection-timeline";
 import type { DetectionFrame } from "#types/detections";
-import type { MediaInteractionOptions } from "#types/interaction";
+import type {
+  DetectionPickResult,
+  DetectionSelectionOptions,
+  MediaInteractionOptions,
+} from "#types/interaction";
+import type { FocusStyle } from "#types/focus-style";
+import type { InteractionStyle } from "#types/interaction-style";
 import type { LabelStyle } from "#types/label-style";
 import type { MaskStyle } from "#types/mask-style";
 import type { DecodedMediaSource } from "#media/media-source";
@@ -74,6 +80,7 @@ export interface MediaFrameRenderTimings {
   readonly mediaUploadMs: number;
   readonly maskMs: number;
   readonly boxMs: number;
+  readonly focusMs: number;
   readonly interactionMs: number;
   readonly labelMs: number;
   readonly fitMs: number;
@@ -144,10 +151,12 @@ export interface MediaRendererOptions {
   readonly detectionFrames?: readonly DetectionFrame[];
   readonly detectionSource?: DetectionFrameSource;
   readonly detectionBuffer?: DetectionBufferOptions;
-  readonly boxStyle?: BoxStyle;
-  readonly labelStyle?: LabelStyle;
-  readonly maskStyle?: MaskStyle;
+  readonly boxStyle?: BoxStyle | null;
+  readonly focusStyle?: FocusStyle | null;
+  readonly labelStyle?: LabelStyle | null;
+  readonly maskStyle?: MaskStyle | null;
   readonly interaction?: MediaInteractionOptions;
+  readonly interactionStyle?: InteractionStyle | null;
   readonly renderPreparation?: RenderPreparationOptions;
   readonly diagnostics?: MediaRendererDiagnosticsOptions;
   readonly onFrame?: (diagnostics: MediaFrameDiagnostics) => void;
@@ -170,6 +179,8 @@ export interface MediaRendererSource {
  */
 export interface MediaRendererPresentation {
   readonly boxStyle?: BoxStyle | null;
+  readonly focusStyle?: FocusStyle | null;
+  readonly interactionStyle?: InteractionStyle | null;
   readonly labelStyle?: LabelStyle | null;
   readonly maskStyle?: MaskStyle | null;
 }
@@ -185,6 +196,10 @@ export interface MediaRenderer {
   pause(): void;
   seek(mediaTime: number): Promise<void>;
   setPresentation(presentation: MediaRendererPresentation): void;
+  setSelectedDetection(
+    selection: DetectionSelectionOptions | null,
+  ): DetectionPickResult | null;
+  getActiveDetectionFrame(): DetectionFrame | null;
   getState(): MediaRendererState;
   destroy(): void;
 }

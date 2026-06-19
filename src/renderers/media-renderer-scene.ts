@@ -10,7 +10,13 @@ import type {
   MediaRendererFit,
   MediaRendererPresentation,
 } from "#types/media-renderer";
-import type { MediaInteractionOptions } from "#types/interaction";
+import type {
+  DetectionPickResult,
+  DetectionSelectionOptions,
+  MediaInteractionOptions,
+} from "#types/interaction";
+import type { FocusStyle } from "#types/focus-style";
+import type { InteractionStyle } from "#types/interaction-style";
 import type { LabelStyle } from "#types/label-style";
 import type { MaskStyle } from "#types/mask-style";
 import type {
@@ -22,10 +28,12 @@ export interface MediaRendererSceneOptions {
   readonly container: HTMLElement;
   readonly fit: MediaRendererFit;
   readonly detectionTimeline: BufferedDetectionTimeline;
-  readonly boxStyle: BoxStyle | undefined;
-  readonly labelStyle: LabelStyle | undefined;
-  readonly maskStyle: MaskStyle | undefined;
+  readonly boxStyle: BoxStyle | null | undefined;
+  readonly focusStyle: FocusStyle | null | undefined;
+  readonly labelStyle: LabelStyle | null | undefined;
+  readonly maskStyle: MaskStyle | null | undefined;
   readonly interaction: MediaInteractionOptions | undefined;
+  readonly interactionStyle: InteractionStyle | null | undefined;
   readonly canInteract: () => boolean;
   readonly renderPreparation: RenderPreparationOptions | undefined;
   readonly diagnostics: MediaRendererDiagnosticsOptions | undefined;
@@ -52,6 +60,10 @@ export interface MediaRendererScene {
     presentation: MediaRendererPresentation,
     mediaTime: number,
   ): PresentedMediaSample | void;
+  setSelectedDetection?(
+    selection: DetectionSelectionOptions | null,
+    mediaTime: number,
+  ): DetectionPickResult | null;
   destroy(): void;
 }
 

@@ -18,9 +18,11 @@ export interface PreparedPngIdMaskFrame {
   readonly height: number;
   readonly key: string;
   readonly kind: PreparedMaskFrameKind.PngIdMask;
+  readonly maxStrokeWidth: number;
   readonly png: Uint8Array<ArrayBuffer>;
   readonly source: ImageBitmap;
   readonly strokePalette: Float32Array<ArrayBuffer>;
+  readonly strokeWidths: Float32Array<ArrayBuffer>;
   readonly width: number;
   close(): void;
 }

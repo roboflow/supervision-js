@@ -9,6 +9,45 @@ import {
 } from "../test/media-renderer-harness";
 
 describe("media session integration", () => {
+  it("preserves explicit null box presentation at session creation", async () => {
+    resetMocks();
+    mediaMock.samples = [createMockSample(0, 0)];
+    const { createMediaSession } = await import("./index");
+
+    const session = await createMediaSession({
+      container: createContainer(),
+      detections: {
+        frames: [
+          {
+            detections: [
+              {
+                className: "player",
+                rect: { height: 40, width: 20, x: 10, y: 15 },
+              },
+            ],
+            mediaTime: 0,
+          },
+        ],
+      },
+      media: "sample.mp4",
+      presentation: {
+        boxStyle: null,
+      },
+      renderer: {
+        autoPlay: false,
+      },
+    });
+
+    expect(pixiMock.graphicsInstances[0]?.clear).toHaveBeenCalledOnce();
+    expect(pixiMock.graphicsInstances[0]?.rect).not.toHaveBeenCalled();
+    expect(session.getState().renderer).toMatchObject({
+      activeDetectionCount: 0,
+      activeDetectionFrameTime: 0,
+    });
+
+    session.destroy();
+  });
+
   it("runs a complete appendable media session through rendering, updates, seeking, and cleanup", async () => {
     vi.useFakeTimers();
     resetMocks();

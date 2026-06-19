@@ -1,5 +1,4 @@
 import { RENDER_ENGINE_PREFERENCE } from "#constants/media-renderer";
-import { BaseBoxStyle } from "#styles/box-style";
 import type { DetectionFrame } from "#types/detections";
 import type { LabelStyle } from "#types/label-style";
 import type { MaskStyle } from "#types/mask-style";
@@ -10,7 +9,9 @@ import type {
   PresentedMediaSample,
 } from "./media-renderer-scene";
 import { createPixiBoxLayer, type PixiBoxLayerState } from "./pixi-box-layer";
+import { createPixiFocusLayer } from "./pixi-focus-layer";
 import { createPixiInteractionLayer } from "./pixi-interaction-layer";
+import { createPixiInteractionPresentationLayer } from "./pixi-interaction-presentation-layer";
 import { createPixiLabelLayer } from "./pixi-label-layer";
 import { createPixiMaskLayer } from "./pixi-mask-layer";
 import {
@@ -54,11 +55,10 @@ export async function createPixiMediaScene(
     UniformGroup,
   } = await import("pixi.js");
   const app: PixiApplication = new Application();
-  const initialBoxStyle = options.boxStyle ?? new BaseBoxStyle();
   let currentLabelStyle: LabelStyle | null = options.labelStyle ?? null;
   let currentMaskStyle: MaskStyle | null = options.maskStyle ?? null;
   const boxLayer = createPixiBoxLayer({
-    boxStyle: initialBoxStyle,
+    boxStyle: options.boxStyle,
     detectionTimeline: options.detectionTimeline,
   });
   let maskLayer = options.maskStyle
@@ -114,21 +114,58 @@ export async function createPixiMediaScene(
   const mediaSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Media);
   const maskSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Mask);
   const boxSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Box);
+  const focusSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Focus);
   const interactionSlot = createPixiSceneLayerSlot(
     PixiSceneLayerKind.Interaction,
   );
   const labelSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Label);
-  const layerSlots = [mediaSlot, maskSlot, boxSlot, interactionSlot, labelSlot];
+  const layerSlots = [
+    mediaSlot,
+    maskSlot,
+    boxSlot,
+    focusSlot,
+    interactionSlot,
+    labelSlot,
+  ];
+  let currentMediaTime = 0;
   const interactionLayer = options.interaction
     ? createPixiInteractionLayer({
         Container,
-        Graphics,
         Rectangle,
         canInteract: options.canInteract,
         detectionTimeline: options.detectionTimeline,
         interaction: options.interaction,
+        onStateChange: () => {
+          drawFocusLayer(currentMediaTime);
+          drawInteractionPresentationLayer(currentMediaTime);
+        },
         pickMaskDetectionAtPoint: (point, mediaTime) =>
           maskLayer?.pickDetectionAtPoint(point, mediaTime) ?? null,
+      })
+    : undefined;
+  const interactionPresentationLayer = options.interaction
+    ? createPixiInteractionPresentationLayer({
+        Container,
+        Graphics,
+        ImageSource,
+        Mesh,
+        MeshGeometry,
+        Shader,
+        Text,
+        UniformGroup,
+        interactionStyle: options.interactionStyle,
+      })
+    : undefined;
+  let focusLayer = options.focusStyle
+    ? createPixiFocusLayer({
+        Container,
+        Graphics,
+        ImageSource,
+        Mesh,
+        MeshGeometry,
+        Shader,
+        UniformGroup,
+        focusStyle: options.focusStyle,
       })
     : undefined;
   let mediaSprite: InstanceType<typeof Sprite> | undefined;
@@ -186,18 +223,37 @@ export async function createPixiMediaScene(
       const scene: PixiContainer = new Container();
       mediaSprite = new Sprite({ texture });
       const boxes: PixiGraphics = new Graphics();
+      const interactionDisplay: PixiContainer = new Container();
 
       mediaSprite.width = mediaWidth;
       mediaSprite.height = mediaHeight;
       boxLayer.attachGraphics(boxes);
       mediaSlot.setDisplay(mediaSprite);
       boxSlot.setDisplay(boxes);
-      interactionSlot.setDisplay(
-        interactionLayer?.createDisplay({
+      const interactionPresentationDisplay =
+        interactionPresentationLayer?.createDisplay({
           height: mediaHeight,
           width: mediaWidth,
-        }) as PixiContainer | undefined,
+        });
+      const interactionHitDisplay = interactionLayer?.createDisplay({
+        height: mediaHeight,
+        width: mediaWidth,
+      });
+
+      if (interactionPresentationDisplay) {
+        interactionDisplay.addChild(interactionPresentationDisplay);
+      }
+
+      if (interactionHitDisplay) {
+        interactionDisplay.addChild(interactionHitDisplay as PixiContainer);
+      }
+
+      interactionSlot.setDisplay(
+        interactionPresentationDisplay || interactionHitDisplay
+          ? interactionDisplay
+          : undefined,
       );
+      attachFocusLayerDisplay();
       attachMaskLayerDisplay();
       attachLabelLayerDisplay();
       app.stage.addChild(scene);
@@ -219,6 +275,8 @@ export async function createPixiMediaScene(
       }
 
       try {
+        currentMediaTime = sample.timestamp;
+
         if (!collectFrameTimings) {
           sample.draw(stagingContext, 0, 0, mediaWidth, mediaHeight);
           stagingTextureSource?.update();
@@ -226,6 +284,8 @@ export async function createPixiMediaScene(
           maskLayer?.drawFrame(sample.timestamp);
           const boxState = boxLayer.drawFrame(sample.timestamp);
           interactionLayer?.drawFrame(sample.timestamp);
+          drawFocusLayer(sample.timestamp);
+          drawInteractionPresentationLayer(sample.timestamp);
           labelLayer?.drawFrame(sample.timestamp);
           updateMediaSceneFit();
 
@@ -239,6 +299,7 @@ export async function createPixiMediaScene(
         let interactionMs = 0;
         let labelMs = 0;
         let fitMs = 0;
+        let focusMs = 0;
 
         mediaUploadMs = measure(() => {
           sample.draw(stagingContext, 0, 0, mediaWidth, mediaHeight);
@@ -255,6 +316,10 @@ export async function createPixiMediaScene(
         });
         interactionMs = measure(() => {
           interactionLayer?.drawFrame(sample.timestamp);
+          drawInteractionPresentationLayer(sample.timestamp);
+        });
+        focusMs = measure(() => {
+          drawFocusLayer(sample.timestamp);
         });
         labelMs = measure(() => {
           labelLayer?.drawFrame(sample.timestamp);
@@ -268,6 +333,7 @@ export async function createPixiMediaScene(
         const renderTimings = {
           boxMs,
           fitMs,
+          focusMs,
           interactionMs,
           labelMs,
           maskMs,
@@ -292,6 +358,7 @@ export async function createPixiMediaScene(
     },
 
     setPresentation(presentation, mediaTime) {
+      currentMediaTime = mediaTime;
       boxLayer.setBoxStyle(presentation.boxStyle);
 
       if (presentation.maskStyle !== undefined) {
@@ -322,6 +389,23 @@ export async function createPixiMediaScene(
         }
       }
 
+      interactionPresentationLayer?.setInteractionStyle(
+        presentation.interactionStyle,
+      );
+
+      if (presentation.focusStyle !== undefined) {
+        const nextFocusLayer = presentation.focusStyle
+          ? ensureFocusLayer(presentation.focusStyle)
+          : focusLayer;
+
+        nextFocusLayer?.setFocusStyle(presentation.focusStyle);
+
+        if (presentation.focusStyle) {
+          attachFocusLayerDisplay();
+          syncSceneChildren();
+        }
+      }
+
       if (mediaWidth <= 0 || mediaHeight <= 0) {
         return;
       }
@@ -329,14 +413,36 @@ export async function createPixiMediaScene(
       maskLayer?.drawFrame(mediaTime);
       const boxState = boxLayer.drawFrame(mediaTime);
       interactionLayer?.drawFrame(mediaTime);
+      drawFocusLayer(mediaTime);
+      drawInteractionPresentationLayer(mediaTime);
       labelLayer?.drawFrame(mediaTime);
 
       return createPresentedSampleState(mediaTime, boxState);
     },
 
+    setSelectedDetection(selection, mediaTime) {
+      currentMediaTime = selection?.mediaTime ?? mediaTime;
+      const pick =
+        interactionLayer?.setSelectedDetection(
+          selection === null
+            ? null
+            : {
+                ...selection,
+                mediaTime: selection.mediaTime ?? mediaTime,
+              },
+        ) ?? null;
+
+      drawFocusLayer(currentMediaTime);
+      drawInteractionPresentationLayer(currentMediaTime);
+
+      return pick;
+    },
+
     destroy() {
       app.ticker.remove(updateMediaSceneFit);
       interactionLayer?.destroy();
+      interactionPresentationLayer?.destroy();
+      focusLayer?.destroy();
       maskLayer?.destroy();
       labelLayer?.destroy();
       app.destroy(
@@ -444,6 +550,78 @@ export async function createPixiMediaScene(
         width: mediaWidth,
       }) as PixiContainer,
     );
+  }
+
+  function ensureFocusLayer(
+    focusStyle: NonNullable<typeof options.focusStyle>,
+  ) {
+    if (!focusLayer) {
+      focusLayer = createPixiFocusLayer({
+        Container,
+        Graphics,
+        ImageSource,
+        Mesh,
+        MeshGeometry,
+        Shader,
+        UniformGroup,
+        focusStyle,
+      });
+    }
+
+    return focusLayer;
+  }
+
+  function attachFocusLayerDisplay() {
+    if (
+      !focusLayer ||
+      focusSlot.getDisplay() ||
+      mediaWidth <= 0 ||
+      mediaHeight <= 0
+    ) {
+      return;
+    }
+
+    focusSlot.setDisplay(
+      focusLayer.createDisplay({
+        height: mediaHeight,
+        width: mediaWidth,
+      }) as PixiContainer,
+    );
+  }
+
+  function drawFocusLayer(mediaTime: number) {
+    if (!focusLayer) {
+      return;
+    }
+
+    const frame = options.detectionTimeline.selectFrame(mediaTime);
+
+    const interactionState = interactionLayer?.getState();
+
+    focusLayer.drawFrame({
+      frame,
+      hoveredPick: interactionState?.hoveredPick ?? null,
+      idMaskArtifact: maskLayer?.getActiveIdMaskFrameTexture() ?? null,
+      mediaTime,
+      selectedPick: interactionState?.selectedPick ?? null,
+    });
+  }
+
+  function drawInteractionPresentationLayer(mediaTime: number) {
+    if (!interactionPresentationLayer) {
+      return;
+    }
+
+    const frame = options.detectionTimeline.selectFrame(mediaTime);
+    const interactionState = interactionLayer?.getState();
+
+    interactionPresentationLayer.drawFrame({
+      frame,
+      hoveredPick: interactionState?.hoveredPick ?? null,
+      idMaskArtifact: maskLayer?.getActiveIdMaskFrameTexture() ?? null,
+      mediaTime,
+      selectedPick: interactionState?.selectedPick ?? null,
+    });
   }
 
   function ensureLabelLayer(

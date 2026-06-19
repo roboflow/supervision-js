@@ -178,6 +178,23 @@ export async function createMediaRendererCore(
       return runtimeState.snapshot();
     },
 
+    getActiveDetectionFrame() {
+      return detectionTimeline?.selectFrame(runtimeState.currentTime()) ?? null;
+    },
+
+    setSelectedDetection(selection) {
+      if (runtimeState.isDestroyed()) {
+        return null;
+      }
+
+      return (
+        mediaScene?.setSelectedDetection?.(
+          selection,
+          runtimeState.currentTime(),
+        ) ?? null
+      );
+    },
+
     setPresentation(presentation) {
       if (runtimeState.isDestroyed()) {
         return;
@@ -228,11 +245,13 @@ export async function createMediaRendererCore(
     });
     mediaScene = await providers.createScene({
       boxStyle: options.boxStyle,
+      focusStyle: options.focusStyle,
       container: options.container,
       detectionTimeline,
       fit,
       canInteract: () => canInteract(options, runtimeState.isPlaybackActive()),
       interaction: options.interaction,
+      interactionStyle: options.interactionStyle,
       labelStyle: options.labelStyle,
       maskStyle: options.maskStyle,
       renderPreparation: options.renderPreparation,

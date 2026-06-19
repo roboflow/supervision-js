@@ -86,7 +86,37 @@ describe("mask frame compositor", () => {
     expect([...frame!.strokePalette.slice(4, 16)]).toEqual([
       1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0,
     ]);
+    expect([...frame!.strokeWidths.slice(1, 4)]).toEqual([1, 1, 0]);
+    expect(frame!.maxStrokeWidth).toBe(1);
     expect(frame!.hasStroke).toBe(true);
+  });
+
+  it("keeps thick mask strokes on the PNG ID-mask path", async () => {
+    const frame = await createPngIdMaskFrame([
+      {
+        alpha: 0.5,
+        color: 0xff0000,
+        detectionIndex: 0,
+        mask: {
+          counts: encodeCompressedRleCounts([0, 1, 3]),
+          encoding: DetectionMaskEncoding.CompressedRle,
+          height: 2,
+          width: 2,
+        },
+        stroke: {
+          alpha: 1,
+          color: 0x00ffff,
+          width: 5,
+        },
+      },
+    ]);
+
+    expect(frame).toBeDefined();
+    expect([...frame!.png.slice(0, 8)]).toEqual(pngSignature);
+    expect(frame!.hasStroke).toBe(true);
+    expect(frame!.maxStrokeWidth).toBe(5);
+    expect(frame!.strokeWidths[1]).toBe(5);
+    expect([...frame!.strokePalette.slice(4, 8)]).toEqual([0, 1, 1, 1]);
   });
 
   it("composites mask strokes into the prepared frame artifact", () => {

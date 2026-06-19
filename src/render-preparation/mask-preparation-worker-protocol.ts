@@ -35,9 +35,11 @@ export interface MaskPreparationWorkerCompleteMessage {
   readonly imageBitmap?: ImageBitmap;
   readonly imageData?: ImageData;
   readonly key: string;
+  readonly maxStrokeWidth?: number;
   readonly png?: Uint8Array<ArrayBuffer>;
   readonly requestId: number;
   readonly strokePalette?: Float32Array<ArrayBuffer>;
+  readonly strokeWidths?: Float32Array<ArrayBuffer>;
   readonly type: MaskPreparationWorkerMessageType.Complete;
 }
 

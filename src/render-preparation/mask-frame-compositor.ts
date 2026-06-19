@@ -3,6 +3,7 @@ import type { MaskStrokeStyle } from "#types/mask-style";
 import { decodeCompressedRleMask } from "#utils/detection-frames";
 
 export const MAX_ID_MASK_PALETTE_ENTRIES = 64;
+export const MAX_ID_MASK_STROKE_WIDTH = 16;
 const PNG_SIGNATURE = new Uint8Array([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
 ]);
@@ -31,7 +32,9 @@ export interface IdMaskFrame {
   readonly fillPalette: Float32Array<ArrayBuffer>;
   readonly hasStroke: boolean;
   readonly height: number;
+  readonly maxStrokeWidth: number;
   readonly strokePalette: Float32Array<ArrayBuffer>;
+  readonly strokeWidths: Float32Array<ArrayBuffer>;
   readonly width: number;
 }
 
@@ -73,17 +76,13 @@ export function createIdMaskFrame(
   const strokePalette = new Float32Array(
     new ArrayBuffer(MAX_ID_MASK_PALETTE_ENTRIES * 4 * 4),
   );
+  const strokeWidths = new Float32Array(
+    new ArrayBuffer(MAX_ID_MASK_PALETTE_ENTRIES * 4),
+  );
   let hasStroke = false;
+  let maxStrokeWidth = 0;
 
   for (const instruction of instructions) {
-    if (
-      instruction.stroke &&
-      instruction.stroke.alpha > 0 &&
-      Math.round(instruction.stroke.width) !== 1
-    ) {
-      return undefined;
-    }
-
     const detectionMaskId = instruction.detectionIndex + 1;
 
     if (
@@ -101,7 +100,14 @@ export function createIdMaskFrame(
     );
 
     if (instruction.stroke && instruction.stroke.width > 0) {
+      const strokeWidth = Math.min(
+        Math.max(0, instruction.stroke.width),
+        MAX_ID_MASK_STROKE_WIDTH,
+      );
+
       hasStroke = true;
+      strokeWidths[detectionMaskId] = strokeWidth;
+      maxStrokeWidth = Math.max(maxStrokeWidth, strokeWidth);
       writePaletteEntry(
         strokePalette,
         detectionMaskId,
@@ -128,7 +134,9 @@ export function createIdMaskFrame(
     fillPalette,
     hasStroke,
     height,
+    maxStrokeWidth,
     strokePalette,
+    strokeWidths,
     width,
   };
 }

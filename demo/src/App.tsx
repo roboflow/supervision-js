@@ -5,6 +5,7 @@ import { DemoShell } from "./components/DemoShell";
 import { PerformanceStrip } from "./components/PerformanceStrip";
 import { RenderControls } from "./components/RenderControls";
 import { RendererViewport } from "./components/RendererViewport";
+import { SelectionPanel } from "./components/SelectionPanel";
 import { SourceControls } from "./components/SourceControls";
 import { StatusPanel } from "./components/StatusPanel";
 import { DemoSourceMode, useDemoRenderer } from "./hooks/useDemoRenderer";
@@ -77,6 +78,14 @@ export function App() {
           sampleFixtures={demo.sampleFixtures}
           selectedFileName={demo.uploadFileName}
           uploadState={demo.uploadInferenceState}
+        />
+      }
+      selectionPanel={
+        <SelectionPanel
+          hoveredDetectionPick={demo.hoveredDetectionPick}
+          onClearSelection={demo.onClearSelectedDetection}
+          playbackState={demo.playbackState}
+          selectedDetectionPick={demo.selectedDetectionPick}
         />
       }
       controlBar={

@@ -9,6 +9,7 @@ export function DemoShell({
   onModeChange,
   performanceStrip,
   renderControls,
+  selectionPanel,
   sourceControls,
   statusPanel,
   viewport,
@@ -20,6 +21,7 @@ export function DemoShell({
   readonly onModeChange: (mode: DemoViewMode) => void;
   readonly performanceStrip: ReactNode;
   readonly renderControls: ReactNode;
+  readonly selectionPanel: ReactNode;
   readonly sourceControls: ReactNode;
   readonly statusPanel: ReactNode;
   readonly viewport: ReactNode;
@@ -75,6 +77,7 @@ export function DemoShell({
         <div className="demo-shell__workspace">
           <aside className="demo-shell__inspector" aria-label="Demo controls">
             {sourceControls}
+            {selectionPanel}
             {renderControls}
             {mode === DemoViewMode.Debug ? performanceStrip : null}
             {mode === DemoViewMode.Debug ? statusPanel : null}

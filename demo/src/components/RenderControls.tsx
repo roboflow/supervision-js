@@ -1,6 +1,7 @@
 import { useState, type CSSProperties, type ReactNode } from "react";
 import {
   BoxStrokeAlignment,
+  FocusTargetMode,
   LabelPlacement,
   MaskRenderMode,
 } from "supervision-js";
@@ -113,6 +114,11 @@ function GlobalRenderControls({
             checked={settings.labelsEnabled}
             label="Labels"
             onChange={(checked) => onChange("labelsEnabled", checked)}
+          />
+          <ToggleControl
+            checked={settings.focusEnabled}
+            label="Focus"
+            onChange={(checked) => onChange("focusEnabled", checked)}
           />
         </div>
       </ControlSection>
@@ -302,6 +308,87 @@ function GlobalRenderControls({
           valueLabel={`${Math.round(settings.confidenceThreshold * 100)}%`}
         />
       </ControlSection>
+
+      <ControlSection title="Interaction">
+        <SliderControl
+          label="Hover Fill"
+          max={0.5}
+          min={0}
+          onChange={(value) => onChange("interactionHoverFillAlpha", value)}
+          step={0.01}
+          value={settings.interactionHoverFillAlpha}
+          valueLabel={formatPercent(settings.interactionHoverFillAlpha)}
+        />
+        <SliderControl
+          label="Hover Stroke"
+          max={12}
+          min={1}
+          onChange={(value) => onChange("interactionHoverStrokeWidth", value)}
+          step={1}
+          value={settings.interactionHoverStrokeWidth}
+          valueLabel={`${settings.interactionHoverStrokeWidth}px`}
+        />
+        <SliderControl
+          label="Selected Fill"
+          max={0.65}
+          min={0}
+          onChange={(value) => onChange("interactionSelectedFillAlpha", value)}
+          step={0.01}
+          value={settings.interactionSelectedFillAlpha}
+          valueLabel={formatPercent(settings.interactionSelectedFillAlpha)}
+        />
+        <SliderControl
+          label="Selected Stroke"
+          max={16}
+          min={1}
+          onChange={(value) =>
+            onChange("interactionSelectedStrokeWidth", value)
+          }
+          step={1}
+          value={settings.interactionSelectedStrokeWidth}
+          valueLabel={`${settings.interactionSelectedStrokeWidth}px`}
+        />
+      </ControlSection>
+
+      <ControlSection title="Focus">
+        <SegmentedControl
+          disabled={!settings.focusEnabled}
+          label="Target"
+          onChange={(value) => onChange("focusTargetMode", value)}
+          options={[
+            { label: "Selected", value: FocusTargetMode.Selected },
+            { label: "Hover", value: FocusTargetMode.Hovered },
+            { label: "Both", value: FocusTargetMode.HoveredAndSelected },
+          ]}
+          value={settings.focusTargetMode}
+        />
+        <ColorControl
+          disabled={!settings.focusEnabled}
+          label="Tone"
+          onChange={(value) => onChange("focusDimColor", value)}
+          value={settings.focusDimColor}
+        />
+        <SliderControl
+          disabled={!settings.focusEnabled}
+          label="Dim"
+          max={0.8}
+          min={0}
+          onChange={(value) => onChange("focusDimAlpha", value)}
+          step={0.01}
+          value={settings.focusDimAlpha}
+          valueLabel={formatPercent(settings.focusDimAlpha)}
+        />
+        <SliderControl
+          disabled={!settings.focusEnabled}
+          label="Cutout Radius"
+          max={36}
+          min={0}
+          onChange={(value) => onChange("focusCornerRadius", value)}
+          step={1}
+          value={settings.focusCornerRadius}
+          valueLabel={`${settings.focusCornerRadius}px`}
+        />
+      </ControlSection>
     </div>
   );
 }
@@ -441,10 +528,12 @@ function SegmentedControl<Value extends string>({
 }
 
 function ColorControl({
+  disabled = false,
   label,
   onChange,
   value,
 }: {
+  readonly disabled?: boolean;
   readonly label: string;
   readonly onChange: (value: number) => void;
   readonly value: number;
@@ -453,6 +542,7 @@ function ColorControl({
     <label className="class-color-control">
       <span>{label}</span>
       <input
+        disabled={disabled}
         onChange={(event) =>
           onChange(Number.parseInt(event.currentTarget.value.slice(1), 16))
         }

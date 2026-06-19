@@ -36,7 +36,6 @@ describe("pixi interaction layer", () => {
     let canInteract = false;
     const layer = createPixiInteractionLayer({
       Container: FakeContainer as never,
-      Graphics: FakeGraphics as never,
       Rectangle: FakeRectangle as never,
       canInteract: () => canInteract,
       detectionTimeline: createTimeline(frame),
@@ -104,7 +103,6 @@ describe("pixi interaction layer", () => {
     const pickMaskDetectionAtPoint = vi.fn(() => maskPick);
     const layer = createPixiInteractionLayer({
       Container: FakeContainer as never,
-      Graphics: FakeGraphics as never,
       Rectangle: FakeRectangle as never,
       canInteract: () => true,
       detectionTimeline: createTimeline(frame),
@@ -129,12 +127,53 @@ describe("pixi interaction layer", () => {
     expect(onHover).toHaveBeenLastCalledWith(maskPick);
   });
 
+  it("notifies the host when hover or selected interaction state changes", () => {
+    const onStateChange = vi.fn();
+    const layer = createPixiInteractionLayer({
+      Container: FakeContainer as never,
+      Rectangle: FakeRectangle as never,
+      canInteract: () => true,
+      detectionTimeline: createTimeline(frame),
+      interaction: {
+        mode: MediaInteractionMode.PausedOnly,
+      },
+      onStateChange,
+    });
+    const display = layer.createDisplay({
+      height: 80,
+      width: 120,
+    }) as FakeContainer;
+
+    layer.drawFrame(0.1);
+    display.emit("pointermove", createPointerEvent(display, 15, 20));
+
+    expect(onStateChange).toHaveBeenLastCalledWith({
+      hoveredPick: expect.objectContaining({
+        detection: frame.detections[0],
+        detectionIndex: 0,
+      }),
+      selectedPick: null,
+    });
+
+    display.emit("pointertap", createPointerEvent(display, 15, 20));
+
+    expect(onStateChange).toHaveBeenLastCalledWith({
+      hoveredPick: expect.objectContaining({
+        detection: frame.detections[0],
+        detectionIndex: 0,
+      }),
+      selectedPick: expect.objectContaining({
+        detection: frame.detections[0],
+        detectionIndex: 0,
+      }),
+    });
+  });
+
   it("picks against the active drawn frame instead of reselecting independently", () => {
     const onHover = vi.fn();
     let selectedFrame = frame;
     const layer = createPixiInteractionLayer({
       Container: FakeContainer as never,
-      Graphics: FakeGraphics as never,
       Rectangle: FakeRectangle as never,
       canInteract: () => true,
       detectionTimeline: createTimeline(() => selectedFrame),
@@ -180,7 +219,6 @@ describe("pixi interaction layer", () => {
     const pickMaskDetectionAtPoint = vi.fn(() => staleMaskPick);
     const layer = createPixiInteractionLayer({
       Container: FakeContainer as never,
-      Graphics: FakeGraphics as never,
       Rectangle: FakeRectangle as never,
       canInteract: () => true,
       detectionTimeline: createTimeline(frame),
@@ -206,6 +244,43 @@ describe("pixi interaction layer", () => {
       }),
     );
   });
+
+  it("allows the host to select and clear an active detection programmatically", () => {
+    const onSelect = vi.fn();
+    const layer = createPixiInteractionLayer({
+      Container: FakeContainer as never,
+      Rectangle: FakeRectangle as never,
+      canInteract: () => true,
+      detectionTimeline: createTimeline(frame),
+      interaction: {
+        mode: MediaInteractionMode.PausedOnly,
+        onSelect,
+      },
+    });
+    layer.createDisplay({
+      height: 80,
+      width: 120,
+    });
+    layer.drawFrame(0.1);
+
+    const pick = layer.setSelectedDetection({
+      detectionIndex: 0,
+      target: DetectionPickTarget.Box,
+    });
+
+    expect(pick).toMatchObject({
+      detection: frame.detections[0],
+      detectionIndex: 0,
+      frame,
+      target: DetectionPickTarget.Box,
+    });
+    expect(onSelect).toHaveBeenLastCalledWith(pick);
+    expect(layer.getState().selectedPick).toBe(pick);
+
+    expect(layer.setSelectedDetection(null)).toBeNull();
+    expect(layer.getState().selectedPick).toBeNull();
+    expect(onSelect).toHaveBeenLastCalledWith(null);
+  });
 });
 
 class FakeRectangle {
@@ -224,13 +299,6 @@ class FakeRectangle {
       y <= this.y + this.height
     );
   }
-}
-
-class FakeGraphics {
-  readonly fill = vi.fn(() => this);
-  readonly clear = vi.fn(() => this);
-  readonly rect = vi.fn(() => this);
-  readonly stroke = vi.fn(() => this);
 }
 
 class FakeContainer {

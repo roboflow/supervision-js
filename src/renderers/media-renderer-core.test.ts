@@ -219,6 +219,7 @@ describe("media renderer core", () => {
     const renderTimings = {
       boxMs: 0.2,
       fitMs: 0.05,
+      focusMs: 0.08,
       interactionMs: 0.1,
       labelMs: 0.3,
       maskMs: 0.4,
@@ -259,6 +260,47 @@ describe("media renderer core", () => {
     expect(renderer.getState().lastFrameRenderTimings).toEqual(renderTimings);
     expect(onFrame).toHaveBeenCalledWith(
       expect.objectContaining({ renderTimings }),
+    );
+
+    renderer.destroy();
+  });
+
+  it("exposes the active detection frame and forwards programmatic selection", async () => {
+    resetMocks();
+
+    const detectionFrame = {
+      detections: [
+        {
+          id: "player-1",
+          rect: { height: 30, width: 20, x: 10, y: 15 },
+        },
+      ],
+      frameIndex: 0,
+      mediaTime: 0,
+    };
+    const scene = createScene({
+      setSelectedDetection: vi.fn(() => null),
+    });
+    const renderer = await createMediaRendererCore(
+      {
+        autoPlay: false,
+        container: {} as HTMLElement,
+        detectionFrames: [detectionFrame],
+        source: createSource([
+          createMockSample(0, 0) as unknown as DecodedVideoSample,
+        ]),
+      } satisfies MediaRendererOptions,
+      {
+        createScene: vi.fn(async () => scene),
+        openMediaSource: vi.fn(),
+      },
+    );
+
+    expect(renderer.getActiveDetectionFrame()).toMatchObject(detectionFrame);
+    expect(renderer.setSelectedDetection({ detectionIndex: 0 })).toBeNull();
+    expect(scene.setSelectedDetection).toHaveBeenCalledWith(
+      { detectionIndex: 0 },
+      0,
     );
 
     renderer.destroy();

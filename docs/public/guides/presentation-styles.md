@@ -19,7 +19,8 @@ performance-sensitive drawing strategy.
 
 ## Start With Base Styles
 
-Use `BaseBoxStyle`, `BaseMaskStyle`, and `BaseLabelStyle` for the common path:
+Use `BaseBoxStyle`, `BaseMaskStyle`, `BaseLabelStyle`,
+`BaseInteractionStyle`, and `BaseFocusStyle` for the common path:
 
 ```ts
 const session = await createMediaSession({
@@ -27,6 +28,8 @@ const session = await createMediaSession({
   media,
   presentation: {
     boxStyle: new BaseBoxStyle(),
+    focusStyle: new BaseFocusStyle(),
+    interactionStyle: new BaseInteractionStyle(),
     maskStyle: new BaseMaskStyle({ opacity: 0.5 }),
     labelStyle: new BaseLabelStyle({ includeConfidence: true }),
   },
@@ -149,6 +152,48 @@ For masks, the renderer may reuse prepared ID-mask artifacts when the new style
 can be applied through the shader palette. If a style change affects which masks
 exist or how mask borders are prepared, the renderer rebuilds the affected
 prepared artifacts in the background.
+
+Interaction styles draw hover and selected states in a separate overlay layer.
+They resolve to the same box, mask, and label style contracts as the base
+presentation. Pointer movement does not rebuild prepared mask artifacts:
+
+```ts
+session.setPresentation({
+  interactionStyle: new BaseInteractionStyle({
+    hovered: {
+      maskStyle: new BaseMaskStyle({
+        color: 0x38bdf8,
+        opacity: 0.18,
+        stroke: { alpha: 0.9, color: 0x67e8f9, width: 3 },
+      }),
+    },
+    selected: {
+      maskStyle: new BaseMaskStyle({
+        color: 0x38bdf8,
+        opacity: 0.28,
+        stroke: { alpha: 1, color: 0xfde047, width: 5 },
+      }),
+    },
+  }),
+});
+```
+
+Focus styles dim the rest of the media around the selected or hovered
+detections. The renderer may use the prepared PNG ID-mask artifact for
+shape-accurate mask cutouts and falls back to detection rectangles when no mask
+artifact is available:
+
+```ts
+session.setPresentation({
+  focusStyle: new BaseFocusStyle({
+    fill: {
+      alpha: 0.5,
+      color: 0x020617,
+    },
+    targetMode: FocusTargetMode.Selected,
+  }),
+});
+```
 
 ## Custom Styles
 

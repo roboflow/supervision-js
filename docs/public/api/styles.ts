@@ -1,16 +1,22 @@
 /**
- * Box, mask, and label style APIs used by renderer layers.
+ * Box, mask, label, interaction, and focus style APIs used by renderer layers.
  *
  * @module Styles
  */
 
 export {
   BaseBoxStyle,
+  BaseFocusStyle,
+  BaseInteractionStyle,
   BaseLabelStyle,
   BaseMaskStyle,
   BoxShape,
   BoxStrokeAlignment,
+  DetectionInteractionState,
+  FocusTargetMode,
   type BaseBoxStyleOptions,
+  type BaseFocusStyleOptions,
+  type BaseInteractionStyleOptions,
   type BaseLabelStyleOptions,
   type BaseMaskStyleOptions,
   type BoxDrawInstruction,
@@ -20,6 +26,15 @@ export {
   type BoxStyleContext,
   type DetectionStylePredicate,
   type DetectionStyleValue,
+  type FocusDrawInstruction,
+  type FocusFallbackStyle,
+  type FocusFillStyle,
+  type FocusStyle,
+  type FocusStyleContext,
+  type FocusStyleValue,
+  type InteractionPresentation,
+  type InteractionStyle,
+  type InteractionStyleContext,
   type LabelBackgroundStyle,
   type LabelDrawInstruction,
   type LabelOffsetStyle,

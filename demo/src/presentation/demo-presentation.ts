@@ -1,11 +1,17 @@
 import {
   BoxStrokeAlignment,
   BoxShape,
+  BaseFocusStyle,
+  BaseInteractionStyle,
+  DetectionInteractionState,
+  FocusTargetMode,
   LabelPlacement,
   MaskRenderMode,
   type BoxDrawInstruction,
   type BoxStyle,
   type Detection,
+  type FocusStyle,
+  type InteractionStyle,
   type LabelDrawInstruction,
   type LabelStyle,
   type MaskDrawInstruction,
@@ -22,6 +28,7 @@ export interface DemoClassStyle {
 
 export interface DemoPresentationSettings {
   readonly boxesEnabled: boolean;
+  readonly focusEnabled: boolean;
   readonly labelsEnabled: boolean;
   readonly masksEnabled: boolean;
   readonly boxCornerRadius: number;
@@ -42,6 +49,14 @@ export interface DemoPresentationSettings {
   readonly maskStrokeAlpha: number;
   readonly maskStrokeWidth: number;
   readonly confidenceThreshold: number;
+  readonly interactionHoverFillAlpha: number;
+  readonly interactionHoverStrokeWidth: number;
+  readonly interactionSelectedFillAlpha: number;
+  readonly interactionSelectedStrokeWidth: number;
+  readonly focusCornerRadius: number;
+  readonly focusDimColor: number;
+  readonly focusDimAlpha: number;
+  readonly focusTargetMode: FocusTargetMode;
 }
 
 export const defaultDemoClassNames = ["person", "horse", "cow"];
@@ -93,13 +108,22 @@ const fallbackStyle: DemoClassStyle = {
 };
 
 export const defaultDemoPresentationSettings: DemoPresentationSettings = {
-  boxesEnabled: true,
+  boxesEnabled: false,
   boxCornerRadius: 8,
   boxFillAlpha: 0.1,
   boxStrokeAlignment: BoxStrokeAlignment.Center,
   boxStrokeWidth: 4,
   classStyles: defaultDemoClassStyles,
   confidenceThreshold: 0.5,
+  focusCornerRadius: 10,
+  focusDimAlpha: 0.45,
+  focusDimColor: 0x020617,
+  focusEnabled: true,
+  focusTargetMode: FocusTargetMode.HoveredAndSelected,
+  interactionHoverFillAlpha: 0.12,
+  interactionHoverStrokeWidth: 5,
+  interactionSelectedFillAlpha: 0.22,
+  interactionSelectedStrokeWidth: 7,
   labelBackgroundAlpha: 0.78,
   labelCornerRadius: 5,
   labelFontSize: 14,
@@ -121,6 +145,8 @@ export function createDemoPresentation(
 ): MediaRendererPresentation {
   return {
     boxStyle: settings.boxesEnabled ? createDemoBoxStyle(settings) : null,
+    focusStyle: settings.focusEnabled ? createDemoFocusStyle(settings) : null,
+    interactionStyle: createDemoInteractionStyle(settings),
     labelStyle: settings.labelsEnabled ? createDemoLabelStyle(settings) : null,
     maskStyle: settings.masksEnabled ? createDemoMaskStyle(settings) : null,
   };
@@ -154,6 +180,46 @@ function createDemoBoxStyle(settings: DemoPresentationSettings): BoxStyle {
       };
     },
   };
+}
+
+function createDemoFocusStyle(settings: DemoPresentationSettings): FocusStyle {
+  return new BaseFocusStyle({
+    cornerRadius: settings.focusCornerRadius,
+    fill: {
+      alpha: settings.focusDimAlpha,
+      color: settings.focusDimColor,
+    },
+    shape: resolveBoxShape(settings.focusCornerRadius),
+    shouldRender: (context) => hasRenderableFocusTarget(context, settings),
+    targetMode: settings.focusTargetMode,
+  });
+}
+
+function hasRenderableFocusTarget(
+  context: Parameters<BaseFocusStyle["resolve"]>[0],
+  settings: DemoPresentationSettings,
+) {
+  const picks = [];
+
+  if (
+    (settings.focusTargetMode === FocusTargetMode.Selected ||
+      settings.focusTargetMode === FocusTargetMode.HoveredAndSelected) &&
+    context.selectedPick
+  ) {
+    picks.push(context.selectedPick);
+  }
+
+  if (
+    (settings.focusTargetMode === FocusTargetMode.Hovered ||
+      settings.focusTargetMode === FocusTargetMode.HoveredAndSelected) &&
+    context.hoveredPick
+  ) {
+    picks.push(context.hoveredPick);
+  }
+
+  return picks.some((pick) =>
+    passesConfidenceThreshold(pick.detection, settings),
+  );
 }
 
 function resolveBoxShape(cornerRadius: number): BoxShape {
@@ -231,6 +297,113 @@ function createDemoLabelStyle(settings: DemoPresentationSettings): LabelStyle {
           fontFamily: "Inter, sans-serif",
           fontSize: settings.labelFontSize,
           fontWeight: "750",
+        },
+      };
+    },
+  };
+}
+
+function createDemoInteractionStyle(
+  settings: DemoPresentationSettings,
+): InteractionStyle {
+  return new BaseInteractionStyle({
+    hovered: {
+      boxStyle: settings.boxesEnabled
+        ? createDemoInteractionBoxStyle(
+            settings,
+            DetectionInteractionState.Hovered,
+          )
+        : null,
+      maskStyle: settings.masksEnabled
+        ? createDemoInteractionMaskStyle(
+            settings,
+            DetectionInteractionState.Hovered,
+          )
+        : null,
+    },
+    selected: {
+      boxStyle: settings.boxesEnabled
+        ? createDemoInteractionBoxStyle(
+            settings,
+            DetectionInteractionState.Selected,
+          )
+        : null,
+      maskStyle: settings.masksEnabled
+        ? createDemoInteractionMaskStyle(
+            settings,
+            DetectionInteractionState.Selected,
+          )
+        : null,
+    },
+    shouldRender: (detection) =>
+      passesConfidenceThreshold(detection, settings) &&
+      (settings.boxesEnabled || settings.masksEnabled),
+  });
+}
+
+function createDemoInteractionBoxStyle(
+  settings: DemoPresentationSettings,
+  state: DetectionInteractionState,
+): BoxStyle {
+  return {
+    resolve(detection: Detection): BoxDrawInstruction | undefined {
+      if (!detection.rect || !passesConfidenceThreshold(detection, settings)) {
+        return undefined;
+      }
+
+      const style = resolveClassStyle(detection, settings);
+      const isSelected = state === DetectionInteractionState.Selected;
+      const shape = resolveBoxShape(settings.boxCornerRadius);
+
+      return {
+        cornerRadius:
+          shape === BoxShape.RoundedRect ? settings.boxCornerRadius : undefined,
+        fill: {
+          alpha: isSelected
+            ? settings.interactionSelectedFillAlpha
+            : settings.interactionHoverFillAlpha,
+          color: style.fill,
+        },
+        rect: detection.rect,
+        shape,
+        stroke: {
+          alignment: BoxStrokeAlignment.Outside,
+          alpha: isSelected ? 1 : 0.88,
+          color: style.stroke,
+          width: isSelected
+            ? settings.interactionSelectedStrokeWidth
+            : settings.interactionHoverStrokeWidth,
+        },
+      };
+    },
+  };
+}
+
+function createDemoInteractionMaskStyle(
+  settings: DemoPresentationSettings,
+  state: DetectionInteractionState,
+): MaskStyle {
+  return {
+    resolve(detection: Detection): MaskDrawInstruction | undefined {
+      if (!detection.mask || !passesConfidenceThreshold(detection, settings)) {
+        return undefined;
+      }
+
+      const style = resolveClassStyle(detection, settings);
+      const isSelected = state === DetectionInteractionState.Selected;
+
+      return {
+        alpha: isSelected
+          ? settings.interactionSelectedFillAlpha
+          : settings.interactionHoverFillAlpha,
+        color: style.fill,
+        mask: detection.mask,
+        stroke: {
+          alpha: isSelected ? 1 : 0.9,
+          color: style.stroke,
+          width: isSelected
+            ? settings.interactionSelectedStrokeWidth
+            : settings.interactionHoverStrokeWidth,
         },
       };
     },

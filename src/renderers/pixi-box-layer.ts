@@ -25,9 +25,10 @@ export interface PixiBoxLayer {
 
 export function createPixiBoxLayer(options: {
   readonly detectionTimeline: BufferedDetectionTimeline;
-  readonly boxStyle: BoxStyle | undefined;
+  readonly boxStyle: BoxStyle | null | undefined;
 }): PixiBoxLayer {
-  let boxStyle: BoxStyle | null = options.boxStyle ?? new BaseBoxStyle();
+  let boxStyle: BoxStyle | null =
+    options.boxStyle === undefined ? new BaseBoxStyle() : options.boxStyle;
   let boxGraphics: PixiGraphics | undefined;
   let lastDrawnDetectionFrameTime: number | null = null;
   let lastDrawnState: PixiBoxLayerState | undefined;

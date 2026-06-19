@@ -96,6 +96,26 @@ describe("pixi box layer", () => {
       width: 2,
     });
   });
+
+  it("treats null box style as disabled instead of falling back to defaults", () => {
+    const graphics = new FakeGraphics();
+    const layer = createPixiBoxLayer({
+      boxStyle: null,
+      detectionTimeline: createTimeline(frame),
+    });
+
+    layer.attachGraphics(graphics as never);
+
+    expect(layer.drawFrame(0.1)).toEqual({
+      activeDetectionCount: 0,
+      activeDetectionFrameIndex: 3,
+      activeDetectionIndexes: [],
+      activeDetectionFrameTime: 0.1,
+    });
+    expect(graphics.clear).toHaveBeenCalledOnce();
+    expect(graphics.rect).not.toHaveBeenCalled();
+    expect(graphics.stroke).not.toHaveBeenCalled();
+  });
 });
 
 class FakeGraphics {

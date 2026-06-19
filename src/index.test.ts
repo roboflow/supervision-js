@@ -45,6 +45,8 @@ describe("package entrypoint", () => {
 
     expect(Object.keys(entrypoint).sort()).toEqual([
       "BaseBoxStyle",
+      "BaseFocusStyle",
+      "BaseInteractionStyle",
       "BaseLabelStyle",
       "BaseMaskStyle",
       "BoxShape",
@@ -52,8 +54,10 @@ describe("package entrypoint", () => {
       "DetectionBufferStatus",
       "DetectionFrameRetentionMode",
       "DetectionFrameSelectionMode",
+      "DetectionInteractionState",
       "DetectionMaskEncoding",
       "DetectionPickTarget",
+      "FocusTargetMode",
       "LabelPlacement",
       "MaskRenderMode",
       "MediaInteractionMode",
@@ -106,6 +110,8 @@ describe("package entrypoint", () => {
     expect(entrypoint.MediaPreparationError).toEqual(expect.any(Function));
     expect(entrypoint.probeMedia).toEqual(expect.any(Function));
     expect(entrypoint.BaseBoxStyle).toEqual(expect.any(Function));
+    expect(entrypoint.BaseFocusStyle).toEqual(expect.any(Function));
+    expect(entrypoint.BaseInteractionStyle).toEqual(expect.any(Function));
     expect(entrypoint.BaseLabelStyle).toEqual(expect.any(Function));
     expect(entrypoint.BaseMaskStyle).toEqual(expect.any(Function));
     expect(entrypoint.BoxShape).toEqual({
@@ -141,6 +147,15 @@ describe("package entrypoint", () => {
       Always: "always",
       Disabled: "disabled",
       PausedOnly: "pausedOnly",
+    });
+    expect(entrypoint.DetectionInteractionState).toEqual({
+      Hovered: "hovered",
+      Selected: "selected",
+    });
+    expect(entrypoint.FocusTargetMode).toEqual({
+      Hovered: "hovered",
+      HoveredAndSelected: "hoveredAndSelected",
+      Selected: "selected",
     });
     expect(entrypoint.MediaRendererPlaybackState).toEqual({
       Buffering: "buffering",
@@ -1016,13 +1031,13 @@ describe("package entrypoint", () => {
         mediaTime: 0,
       }),
     );
-    const maskContainer = pixiMock.containerInstances[1];
+    const maskContainer = pixiMock.containerInstances.find((container) =>
+      container.children.includes(pixiMock.spriteInstances[1]),
+    );
 
-    expect(scene?.children).toEqual([
-      pixiMock.spriteInstances[0],
-      maskContainer,
-      boxGraphics,
-    ]);
+    expect(scene?.children[0]).toBe(pixiMock.spriteInstances[0]);
+    expect(scene?.children[1]).toBe(maskContainer);
+    expect(scene?.children[2]).toBe(boxGraphics);
     expect(maskContainer?.children).toEqual([
       pixiMock.spriteInstances[1],
       pixiMock.meshInstances[0],
@@ -1932,14 +1947,14 @@ describe("package entrypoint", () => {
 
     renderer.setPresentation({ maskStyle: new BaseMaskStyle() });
 
-    const maskContainer = pixiMock.containerInstances[1];
+    const maskContainer = pixiMock.containerInstances.find((container) =>
+      container.children.includes(pixiMock.spriteInstances[1]),
+    );
 
     expect(pixiMock.spriteInstances).toHaveLength(2);
-    expect(scene?.children).toEqual([
-      pixiMock.spriteInstances[0],
-      maskContainer,
-      boxGraphics,
-    ]);
+    expect(scene?.children[0]).toBe(pixiMock.spriteInstances[0]);
+    expect(scene?.children[1]).toBe(maskContainer);
+    expect(scene?.children[2]).toBe(boxGraphics);
     expect(maskContainer?.children).toEqual([
       pixiMock.spriteInstances[1],
       pixiMock.meshInstances[0],

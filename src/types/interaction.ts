@@ -29,6 +29,13 @@ export interface DetectionPickOptions {
   readonly padding?: number;
 }
 
+export interface DetectionSelectionOptions {
+  readonly detectionIndex: number;
+  readonly mediaTime?: number;
+  readonly point?: DetectionPickPoint;
+  readonly target?: DetectionPickTarget;
+}
+
 export interface MediaInteractionOptions extends DetectionPickOptions {
   readonly mode?: MediaInteractionMode;
   readonly onHover?: (pick: DetectionPickResult | null) => void;

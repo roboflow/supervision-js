@@ -281,6 +281,7 @@ describe("mask frame preparer", () => {
       } as unknown as ImageBitmap;
       const fillPalette = new Float32Array([0, 0, 0, 0, 1, 0, 0, 0.5]);
       const strokePalette = new Float32Array([0, 0, 0, 0, 1, 1, 1, 1]);
+      const strokeWidths = new Float32Array([0, 5]);
       const png = new Uint8Array([1, 2, 3]);
       const fakeWorker = createFakeMaskPreparationWorker((message) => ({
         artifactKind: PreparedMaskFrameKind.PngIdMask,
@@ -288,9 +289,11 @@ describe("mask frame preparer", () => {
         hasStroke: true,
         imageBitmap,
         key: message.job.key,
+        maxStrokeWidth: 5,
         png,
         requestId: message.requestId,
         strokePalette,
+        strokeWidths,
         type: MaskPreparationWorkerMessageType.Complete,
       }));
       const preparer = createMaskFramePreparer({
@@ -311,9 +314,11 @@ describe("mask frame preparer", () => {
         height: 2,
         key: "0:0",
         kind: PreparedMaskFrameKind.PngIdMask,
+        maxStrokeWidth: 5,
         png,
         source: imageBitmap,
         strokePalette,
+        strokeWidths,
         width: 2,
       });
 

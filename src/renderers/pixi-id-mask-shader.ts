@@ -1,4 +1,7 @@
-import { MAX_ID_MASK_PALETTE_ENTRIES } from "#render-preparation/mask-frame-compositor";
+import {
+  MAX_ID_MASK_PALETTE_ENTRIES,
+  MAX_ID_MASK_STROKE_WIDTH,
+} from "#render-preparation/mask-frame-compositor";
 import type { PreparedPngIdMaskFrame } from "#render-preparation/mask-frame-artifact";
 import type {
   ImageSource as PixiImageSource,
@@ -44,6 +47,7 @@ type UniformGroupConstructor = new (
   uniforms: Record<
     string,
     | { type: "f32"; value: number }
+    | { size?: number; type: "f32"; value: Float32Array }
     | { size?: number; type: "vec2<f32>" | "vec4<f32>"; value: Float32Array }
   >,
 ) => PixiUniformGroup;
@@ -73,10 +77,16 @@ export function createPixiIdMaskShaderRenderer(options: {
       type: "vec4<f32>",
       value: new Float32Array(MAX_ID_MASK_PALETTE_ENTRIES * 4),
     },
+    uMaxStrokeWidth: { type: "f32", value: 0 },
     uStrokePalette: {
       size: MAX_ID_MASK_PALETTE_ENTRIES,
       type: "vec4<f32>",
       value: new Float32Array(MAX_ID_MASK_PALETTE_ENTRIES * 4),
+    },
+    uStrokeWidths: {
+      size: MAX_ID_MASK_PALETTE_ENTRIES,
+      type: "f32",
+      value: new Float32Array(MAX_ID_MASK_PALETTE_ENTRIES),
     },
     uTextureSize: {
       type: "vec2<f32>",
@@ -134,11 +144,16 @@ export function createPixiIdMaskShaderRenderer(options: {
       bindTexture(texture.source);
       uniforms.uniforms.uFillPalette = frame.fillPalette;
       uniforms.uniforms.uStrokePalette = frame.strokePalette;
+      uniforms.uniforms.uStrokeWidths = frame.strokeWidths;
       uniforms.uniforms.uTextureSize = new Float32Array([
         frame.width,
         frame.height,
       ]);
       uniforms.uniforms.uBorderEnabled = frame.hasStroke ? 1 : 0;
+      uniforms.uniforms.uMaxStrokeWidth = Math.min(
+        frame.maxStrokeWidth,
+        MAX_ID_MASK_STROKE_WIDTH,
+      );
       uniforms.update();
       mesh.visible = true;
     },
@@ -230,8 +245,10 @@ in vec4 vColor;
 uniform sampler2D uTexture;
 uniform vec4 uFillPalette[${MAX_ID_MASK_PALETTE_ENTRIES}];
 uniform vec4 uStrokePalette[${MAX_ID_MASK_PALETTE_ENTRIES}];
+uniform float uStrokeWidths[${MAX_ID_MASK_PALETTE_ENTRIES}];
 uniform vec2 uTextureSize;
 uniform float uBorderEnabled;
+uniform float uMaxStrokeWidth;
 
 out vec4 finalColor;
 
@@ -251,6 +268,12 @@ vec4 readStroke(float maskId) {
   return uStrokePalette[paletteIndex];
 }
 
+float readStrokeWidth(float maskId) {
+  int paletteIndex = int(clamp(maskId, 0.0, float(${MAX_ID_MASK_PALETTE_ENTRIES - 1})));
+
+  return uStrokeWidths[paletteIndex];
+}
+
 vec4 premultiplyAlpha(vec4 color) {
   return vec4(color.rgb * color.a, color.a);
 }
@@ -259,13 +282,42 @@ bool differs(float left, float right) {
   return abs(left - right) > 0.5;
 }
 
-float neighboringMaskId(vec2 texel) {
-  float right = sampleMaskId(vUV + vec2(texel.x, 0.0));
-  float left = sampleMaskId(vUV + vec2(-texel.x, 0.0));
-  float down = sampleMaskId(vUV + vec2(0.0, texel.y));
-  float up = sampleMaskId(vUV + vec2(0.0, -texel.y));
+float findNeighborStrokeId(float centerId, vec2 texel) {
+  float bestId = 0.0;
 
-  return max(max(right, left), max(down, up));
+  for (int offsetY = -${MAX_ID_MASK_STROKE_WIDTH}; offsetY <= ${MAX_ID_MASK_STROKE_WIDTH}; offsetY += 1) {
+    for (int offsetX = -${MAX_ID_MASK_STROKE_WIDTH}; offsetX <= ${MAX_ID_MASK_STROKE_WIDTH}; offsetX += 1) {
+      if (offsetX == 0 && offsetY == 0) {
+        continue;
+      }
+
+      float distance = max(abs(float(offsetX)), abs(float(offsetY)));
+
+      if (distance > uMaxStrokeWidth) {
+        continue;
+      }
+
+      float maskId = sampleMaskId(vUV + vec2(float(offsetX), float(offsetY)) * texel);
+
+      if (maskId < 0.5 || !differs(maskId, centerId)) {
+        continue;
+      }
+
+      if (readStrokeWidth(maskId) >= distance && readStroke(maskId).a > 0.0) {
+        bestId = maskId;
+      }
+    }
+  }
+
+  return bestId;
+}
+
+bool isBoundary(float centerId, vec2 texel) {
+  return
+    differs(sampleMaskId(vUV + vec2(texel.x, 0.0)), centerId) ||
+    differs(sampleMaskId(vUV + vec2(-texel.x, 0.0)), centerId) ||
+    differs(sampleMaskId(vUV + vec2(0.0, texel.y)), centerId) ||
+    differs(sampleMaskId(vUV + vec2(0.0, -texel.y)), centerId);
 }
 
 void main(void) {
@@ -273,8 +325,8 @@ void main(void) {
   vec2 texel = 1.0 / uTextureSize;
 
   if (centerId < 0.5) {
-    if (uBorderEnabled > 0.5) {
-      float borderId = neighboringMaskId(texel);
+    if (uBorderEnabled > 0.5 && uMaxStrokeWidth > 0.0) {
+      float borderId = findNeighborStrokeId(centerId, texel);
 
       if (borderId > 0.5) {
         finalColor = premultiplyAlpha(readStroke(borderId) * vColor);
@@ -287,13 +339,12 @@ void main(void) {
   }
 
   if (uBorderEnabled > 0.5) {
-    bool isBoundary =
-      differs(sampleMaskId(vUV + vec2(texel.x, 0.0)), centerId) ||
-      differs(sampleMaskId(vUV + vec2(-texel.x, 0.0)), centerId) ||
-      differs(sampleMaskId(vUV + vec2(0.0, texel.y)), centerId) ||
-      differs(sampleMaskId(vUV + vec2(0.0, -texel.y)), centerId);
+    bool shouldStroke =
+      readStrokeWidth(centerId) > 0.0 &&
+      readStroke(centerId).a > 0.0 &&
+      isBoundary(centerId, texel);
 
-    if (isBoundary) {
+    if (shouldStroke) {
       finalColor = premultiplyAlpha(readStroke(centerId) * vColor);
       return;
     }
