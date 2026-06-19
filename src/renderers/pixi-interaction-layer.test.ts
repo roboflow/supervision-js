@@ -206,6 +206,49 @@ describe("pixi interaction layer", () => {
     expect(onHover).toHaveBeenLastCalledWith(null);
   });
 
+  it("keeps hover and selected picks when the active frame is an equivalent clone", () => {
+    const onHover = vi.fn();
+    const onSelect = vi.fn();
+    let selectedFrame = frame;
+    const layer = createPixiInteractionLayer({
+      Container: FakeContainer as never,
+      Rectangle: FakeRectangle as never,
+      canInteract: () => true,
+      detectionTimeline: createTimeline(() => selectedFrame),
+      interaction: {
+        mode: MediaInteractionMode.PausedOnly,
+        onHover,
+        onSelect,
+      },
+    });
+    const display = layer.createDisplay({
+      height: 80,
+      width: 120,
+    }) as FakeContainer;
+
+    layer.drawFrame(0.1);
+    display.emit("pointermove", createPointerEvent(display, 15, 20));
+    display.emit("pointertap", createPointerEvent(display, 15, 20));
+
+    selectedFrame = cloneDetectionFrame(frame);
+    layer.drawFrame(0.1);
+
+    expect(layer.getState().hoveredPick).toMatchObject({
+      detection: selectedFrame.detections[0],
+      detectionIndex: 0,
+      target: DetectionPickTarget.Box,
+    });
+    expect(layer.getState().selectedPick).toMatchObject({
+      detection: selectedFrame.detections[0],
+      detectionIndex: 0,
+      target: DetectionPickTarget.Box,
+    });
+    expect(layer.getState().hoveredPick?.frame).toBe(selectedFrame);
+    expect(layer.getState().selectedPick?.frame).toBe(selectedFrame);
+    expect(onHover).not.toHaveBeenLastCalledWith(null);
+    expect(onSelect).not.toHaveBeenLastCalledWith(null);
+  });
+
   it("ignores stale mask picks and falls back to boxes on the active frame", () => {
     const onHover = vi.fn();
     const staleMaskPick = {
@@ -353,4 +396,11 @@ function createTimeline(
     prefetch() {},
     selectFrame: () => getActiveFrame(),
   } as unknown as BufferedDetectionTimeline;
+}
+
+function cloneDetectionFrame(sourceFrame: DetectionFrame): DetectionFrame {
+  return {
+    ...sourceFrame,
+    detections: sourceFrame.detections.map((detection) => ({ ...detection })),
+  };
 }

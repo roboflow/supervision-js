@@ -81,6 +81,34 @@ export function createDetectionPickKey(pick: DetectionPickResult | null) {
   ].join(":");
 }
 
+export function rebaseDetectionPickToFrame(
+  pick: DetectionPickResult | null,
+  frame: DetectionFrame | undefined,
+): DetectionPickResult | null {
+  if (!pick || !frame) {
+    return null;
+  }
+
+  const detection = frame.detections[pick.detectionIndex];
+
+  if (!detection) {
+    return null;
+  }
+
+  const rebasedPick = {
+    detection,
+    detectionIndex: pick.detectionIndex,
+    frame,
+    mediaTime: frame.mediaTime,
+    point: pick.point,
+    target: pick.target,
+  };
+
+  return createDetectionPickKey(rebasedPick) === createDetectionPickKey(pick)
+    ? rebasedPick
+    : null;
+}
+
 export function pickDetectionByMaskId(
   frame: DetectionFrame | undefined,
   maskId: number,

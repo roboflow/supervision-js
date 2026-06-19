@@ -1,6 +1,7 @@
 import {
   createDetectionPickKey,
   pickDetectionAtPoint,
+  rebaseDetectionPickToFrame,
 } from "#interactions/detection-picker";
 import type { BufferedDetectionTimeline } from "#types/detection-timeline";
 import type { DetectionFrame } from "#types/detections";
@@ -171,8 +172,13 @@ export function createPixiInteractionLayer(options: {
       currentMediaTime,
     );
 
-    if (maskPick && maskPick.frame === activeFrame) {
-      return maskPick;
+    const activeMaskPick = rebaseDetectionPickToFrame(
+      maskPick ?? null,
+      activeFrame,
+    );
+
+    if (activeMaskPick) {
+      return activeMaskPick;
     }
 
     return pickDetectionAtPoint(activeFrame, pickPoint, {
@@ -206,12 +212,19 @@ export function createPixiInteractionLayer(options: {
   }
 
   function clearStalePicks(frame: DetectionFrame | undefined) {
-    if (hoveredPick && hoveredPick.frame !== frame) {
+    const nextHoveredPick = rebaseDetectionPickToFrame(hoveredPick, frame);
+    const nextSelectedPick = rebaseDetectionPickToFrame(selectedPick, frame);
+
+    if (hoveredPick && !nextHoveredPick) {
       setHoveredPick(null);
+    } else if (nextHoveredPick && nextHoveredPick !== hoveredPick) {
+      setHoveredPick(nextHoveredPick);
     }
 
-    if (selectedPick && selectedPick.frame !== frame) {
+    if (selectedPick && !nextSelectedPick) {
       setSelectedPick(null);
+    } else if (nextSelectedPick && nextSelectedPick !== selectedPick) {
+      setSelectedPick(nextSelectedPick);
     }
   }
 
@@ -219,6 +232,10 @@ export function createPixiInteractionLayer(options: {
     const nextKey = createDetectionPickKey(nextPick);
 
     if (nextKey === hoveredPickKey) {
+      hoveredPick = nextPick;
+      if (container) {
+        container.cursor = nextPick ? "pointer" : "default";
+      }
       return;
     }
 
@@ -235,6 +252,7 @@ export function createPixiInteractionLayer(options: {
     const nextKey = createDetectionPickKey(nextPick);
 
     if (nextKey === selectedPickKey) {
+      selectedPick = nextPick;
       return;
     }
 

@@ -1,4 +1,7 @@
-import { createDetectionPickKey } from "#interactions/detection-picker";
+import {
+  createDetectionPickKey,
+  rebaseDetectionPickToFrame,
+} from "#interactions/detection-picker";
 import { MAX_ID_MASK_PALETTE_ENTRIES } from "#render-preparation/mask-frame-compositor";
 import { PreparedMaskFrameKind } from "#render-preparation/mask-frame-artifact";
 import type { PreparedPngIdMaskFrame } from "#render-preparation/mask-frame-artifact";
@@ -264,19 +267,21 @@ export function createPixiInteractionPresentationLayer(options: {
     mediaTime: number,
     state: DetectionInteractionState,
   ): ActiveInteractionPick | null {
-    if (!pick || pick.frame !== frame) {
+    const activePick = rebaseDetectionPickToFrame(pick, frame);
+
+    if (!activePick) {
       return null;
     }
 
     const context = {
-      detectionIndex: pick.detectionIndex,
-      frame: pick.frame,
+      detectionIndex: activePick.detectionIndex,
+      frame: activePick.frame,
       mediaTime,
-      point: pick.point,
+      point: activePick.point,
       state,
-      target: pick.target,
+      target: activePick.target,
     };
-    const presentation = resolvePresentation(pick.detection, context);
+    const presentation = resolvePresentation(activePick.detection, context);
 
     if (!hasRenderableInteractionPresentation(presentation)) {
       return null;
@@ -284,8 +289,8 @@ export function createPixiInteractionPresentationLayer(options: {
 
     return {
       context,
-      detection: pick.detection,
-      pick,
+      detection: activePick.detection,
+      pick: activePick,
       presentation,
     };
   }
