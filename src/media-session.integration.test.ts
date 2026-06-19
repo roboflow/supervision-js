@@ -69,9 +69,11 @@ describe("media session integration", () => {
           width: 2,
         },
         key: message.job.key,
+        maxStrokeWidth: 1,
         png: new Uint8Array([1, 2, 3]),
         requestId: message.requestId,
         strokePalette: new Float32Array([0, 0, 0, 0, 1, 1, 1, 1]),
+        strokeWidths: new Float32Array([0, 1]),
         type: "complete",
       }));
       const {
