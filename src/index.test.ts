@@ -85,6 +85,7 @@ describe("package entrypoint", () => {
       "createBufferedDetectionTimeline",
       "createChunkedDetectionFrameSource",
       "createColdDetectionFrameSource",
+      "createCompositeDetectionFrameSource",
       "createMediaRenderer",
       "createMediaSession",
       "createMemoryColdDetectionFrameStore",

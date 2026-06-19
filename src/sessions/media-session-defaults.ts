@@ -62,6 +62,11 @@ export function resolveMediaSessionDefaults(options: {
   const mode = options.mode ?? SessionMode.File;
   const appendableDetections =
     options.detections?.appendable ?? options.detections?.writable;
+  const hasAppendableDetections =
+    appendableDetections !== undefined ||
+    options.detections?.sources?.some(
+      (source) => source.appendable !== undefined,
+    ) === true;
   const userDetectionBuffer = options.detections?.buffer;
   const frameRate = resolveFrameRate(
     userDetectionBuffer?.frameRate ?? options.detections?.sync?.frameRate,
@@ -73,7 +78,7 @@ export function resolveMediaSessionDefaults(options: {
   const detectionPlaybackGate =
     options.detections?.playbackGate ??
     userDetectionBuffer?.playbackGate ??
-    (appendableDetections ? APPENDABLE_PREDICTION_GATE_DEFAULTS : null);
+    (hasAppendableDetections ? APPENDABLE_PREDICTION_GATE_DEFAULTS : null);
   const detectionBuffer = {
     ...baseDetectionBuffer,
     ...options.detections?.sync,
@@ -81,7 +86,7 @@ export function resolveMediaSessionDefaults(options: {
     ...(detectionPlaybackGate
       ? {
           playbackGate: {
-            ...(appendableDetections
+            ...(hasAppendableDetections
               ? APPENDABLE_PREDICTION_GATE_DEFAULTS
               : undefined),
             ...userDetectionBuffer?.playbackGate,

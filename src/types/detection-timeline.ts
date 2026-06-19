@@ -165,6 +165,37 @@ export interface DetectionFrameSource {
   destroy?(): void;
 }
 
+export interface CompositeDetectionFrameSourceEntry {
+  /**
+   * Renderer-neutral source identity copied into composed detections.
+   */
+  readonly id: string;
+  /**
+   * Static detection frames for this source.
+   */
+  readonly frames?: readonly DetectionFrame[];
+  /**
+   * Caller-owned frame source for this source.
+   */
+  readonly source?: DetectionFrameSource;
+  /**
+   * Lower order sources are composed first. Later detections render on top.
+   */
+  readonly order?: number;
+  /**
+   * Detection-frame selection options for this source.
+   */
+  readonly sync?: DetectionFrameSelectionOptions;
+  /**
+   * When false, playback gates skip this source's `waitForRange` hook.
+   */
+  readonly requiredForPlayback?: boolean;
+}
+
+export interface CompositeDetectionFrameSourceOptions extends DetectionFrameSelectionOptions {
+  readonly sources: readonly CompositeDetectionFrameSourceEntry[];
+}
+
 export interface DetectionFrameChunkDescriptor {
   /**
    * Zero-based chunk index.

@@ -70,6 +70,24 @@ export function validateDetectionFrames(
         });
       }
 
+      if (
+        detection.sourceId !== undefined &&
+        typeof detection.sourceId !== "string"
+      ) {
+        throw new Error(`${detectionPath}.sourceId must be a string.`);
+      }
+
+      if (detection.sourceDetectionIndex !== undefined) {
+        validateNumber(
+          detection.sourceDetectionIndex,
+          `${detectionPath}.sourceDetectionIndex`,
+          {
+            integer: true,
+            min: 0,
+          },
+        );
+      }
+
       if (detection.rect) {
         validateNumber(detection.rect.x, `${detectionPath}.rect.x`);
         validateNumber(detection.rect.y, `${detectionPath}.rect.y`);

@@ -39,6 +39,31 @@ The library validates incoming frames before storing or buffering them. Invalid
 geometry, mask dimensions, confidence values, or frame timing fail early instead
 of becoming renderer behavior later.
 
+## Source Provenance
+
+When detections are composed from multiple sources, copied detections can carry
+two renderer-neutral provenance fields:
+
+- `sourceId` identifies the source entry that produced the copied detection;
+- `sourceDetectionIndex` identifies the detection's index inside that source
+  frame before composition.
+
+These fields are intentionally generic. A product may decide that one source is
+model output and another is ephemeral user drawing state, but the library only
+uses provenance to support deterministic ordering, source-aware styling, and
+host callbacks.
+
+Advanced integrations can compose sources directly:
+
+```ts
+const source = createCompositeDetectionFrameSource({
+  sources: [
+    { frames: modelFrames, id: "model" },
+    { frames: overlayFrames, id: "overlay", order: 10 },
+  ],
+});
+```
+
 ## Why Not Draw Every RLE Mask Every Frame?
 
 Compressed RLE is good cold semantic storage. It is not the best thing to loop

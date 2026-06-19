@@ -99,6 +99,129 @@ describe("media session", () => {
     session.destroy();
   });
 
+  it("routes append, replace, and clear calls to named appendable sources", async () => {
+    resetMocks();
+    const { createMediaSession } = await import("../index");
+
+    const session = await createMediaSession({
+      container: createContainer(),
+      detections: {
+        sources: [
+          {
+            appendable: { datasetId: "predictions" },
+            id: "predictions",
+          },
+          {
+            appendable: { datasetId: "drawing" },
+            id: "drawing",
+            order: 10,
+          },
+        ],
+      },
+      media: "sample.mp4",
+      renderer: { autoPlay: false },
+    });
+
+    await expect(
+      session.appendDetectionFrames(
+        [
+          {
+            detections: [{ className: "prediction", id: "p0" }],
+            endTime: 1,
+            mediaTime: 0,
+          },
+        ],
+        { sourceId: "predictions" },
+      ),
+    ).resolves.toMatchObject({
+      datasetId: "predictions",
+      detectionCount: 1,
+    });
+    await session.appendDetectionFrames(
+      [
+        {
+          detections: [{ className: "drawing", id: "d0" }],
+          endTime: 1,
+          mediaTime: 0,
+        },
+      ],
+      { sourceId: "drawing" },
+    );
+
+    expect(await session.detectionSource?.loadFrames(0, 1)).toEqual([
+      expect.objectContaining({
+        detections: [
+          expect.objectContaining({
+            className: "prediction",
+            sourceId: "predictions",
+          }),
+          expect.objectContaining({
+            className: "drawing",
+            sourceId: "drawing",
+          }),
+        ],
+      }),
+    ]);
+
+    await session.replaceDetectionFrames(
+      [
+        {
+          detections: [{ className: "replaced", id: "d1" }],
+          endTime: 1,
+          mediaTime: 0,
+        },
+      ],
+      { sourceId: "drawing" },
+    );
+    await session.clearDetectionFrames({ sourceId: "predictions" });
+
+    expect(await session.detectionSource?.loadFrames(0, 1)).toEqual([
+      expect.objectContaining({
+        detections: [
+          expect.objectContaining({
+            className: "replaced",
+            sourceDetectionIndex: 0,
+            sourceId: "drawing",
+          }),
+        ],
+      }),
+    ]);
+
+    session.destroy();
+  });
+
+  it("requires sourceId when writing to multiple appendable sources", async () => {
+    resetMocks();
+    const { createMediaSession } = await import("../index");
+
+    const session = await createMediaSession({
+      container: createContainer(),
+      detections: {
+        sources: [
+          {
+            appendable: { datasetId: "one" },
+            id: "one",
+          },
+          {
+            appendable: { datasetId: "two" },
+            id: "two",
+          },
+        ],
+      },
+      media: "sample.mp4",
+      renderer: { autoPlay: false },
+    });
+
+    await expect(session.appendDetectionFrames(frames)).rejects.toThrow(
+      "sourceId is required when a media session owns multiple appendable detection sources.",
+    );
+    await expect(
+      session.appendDetectionFrames(frames, { sourceId: "missing" }),
+    ).rejects.toThrow("Unknown appendable detection source: missing.");
+
+    session.destroy();
+  });
+
   it("rejects ambiguous appendable and writable detection inputs", async () => {
     resetMocks();
     const { createMediaSession } = await import("../index");
@@ -115,6 +238,25 @@ describe("media session", () => {
       }),
     ).rejects.toThrow(
       "Provide only one media session appendable detection option.",
+    );
+  });
+
+  it("rejects multi-source detections combined with legacy single-source inputs", async () => {
+    resetMocks();
+    const { createMediaSession } = await import("../index");
+
+    await expect(
+      createMediaSession({
+        container: createContainer(),
+        detections: {
+          frames,
+          sources: [{ frames: [], id: "extra" }],
+        },
+        media: "sample.mp4",
+        renderer: { autoPlay: false },
+      }),
+    ).rejects.toThrow(
+      "Provide either detections.sources or one legacy detection input.",
     );
   });
 

@@ -110,6 +110,47 @@ Detection input has three preferred shapes:
 
 Use only one of those shapes per session.
 
+## Multiple Detection Sources
+
+Use `detections.sources` when an app needs to render more than one semantic
+detection stream over the same media. The library does not assign product
+meaning to those streams; it only composes them in order and tags copied
+detections with `sourceId` and `sourceDetectionIndex`.
+
+```ts
+const session = await createMediaSession({
+  container,
+  media,
+  detections: {
+    sources: [
+      {
+        frames: modelFrames,
+        id: "model",
+      },
+      {
+        appendable: { datasetId: "transient-drawing" },
+        id: "drawing",
+        order: 10,
+        presentation: {
+          boxStyle: drawingBoxStyle,
+          maskStyle: null,
+        },
+      },
+    ],
+  },
+});
+
+await session.appendDetectionFrames(drawingFrames, { sourceId: "drawing" });
+```
+
+Source order is ascending by `order`, then declaration order. Later detections
+render on top. Source-level presentation can override `boxStyle`, `maskStyle`,
+and `labelStyle`; `undefined` falls back to the global presentation and `null`
+disables that layer for the source.
+
+Do not combine `detections.sources` with legacy single-source inputs such as
+`frames`, `source`, or `appendable`.
+
 ## Runtime Updates
 
 After creation, the same session remains the consumer API:

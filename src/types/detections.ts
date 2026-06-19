@@ -70,6 +70,16 @@ export interface Detection {
    */
   readonly id?: string | number;
   /**
+   * Optional provenance for detections copied from a composed source.
+   *
+   * This is renderer-neutral source identity, not product workflow state.
+   */
+  readonly sourceId?: string;
+  /**
+   * Optional source-local detection index before composition.
+   */
+  readonly sourceDetectionIndex?: number;
+  /**
    * Optional semantic class name, such as `person`, `vehicle`, or `basketball`.
    */
   readonly className?: string;

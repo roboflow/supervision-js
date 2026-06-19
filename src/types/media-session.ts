@@ -71,7 +71,55 @@ export type MediaSessionWritableDetectionOptions =
 
 export type MediaSessionDetectionSyncOptions = DetectionFrameSelectionOptions;
 
+export type MediaSessionDetectionSourcePresentation = Pick<
+  MediaRendererPresentation,
+  "boxStyle" | "labelStyle" | "maskStyle"
+>;
+
+export interface MediaSessionDetectionSourceOptions {
+  /**
+   * Renderer-neutral source identity copied into composed detections.
+   */
+  readonly id: string;
+  /**
+   * Static detection frames known at session creation time.
+   */
+  readonly frames?: readonly DetectionFrame[];
+  /**
+   * Caller-owned source for loading detection frames by media-time range.
+   */
+  readonly source?: DetectionFrameSource;
+  /**
+   * Session-owned writable source for streaming detections into cold storage.
+   */
+  readonly appendable?: MediaSessionAppendableDetectionOptions;
+  /**
+   * Lower order sources are composed first. Later detections render on top.
+   */
+  readonly order?: number;
+  /**
+   * Optional box, mask, and label presentation overrides for this source.
+   *
+   * `undefined` falls back to the global presentation. `null` disables that
+   * layer for this source.
+   */
+  readonly presentation?: MediaSessionDetectionSourcePresentation;
+  /**
+   * Detection-frame selection options for this source.
+   */
+  readonly sync?: MediaSessionDetectionSyncOptions;
+  /**
+   * When false, playback gates skip this source's readiness checks.
+   */
+  readonly requiredForPlayback?: boolean;
+}
+
 export interface MediaSessionDetectionOptions {
+  /**
+   * Multiple detection sources composed into one active semantic frame.
+   */
+  readonly sources?: readonly MediaSessionDetectionSourceOptions[];
+
   /**
    * Static detection frames known at session creation time.
    */
@@ -280,6 +328,10 @@ export interface MediaSessionState {
 export type MediaSessionStateListener = (state: MediaSessionState) => void;
 export type MediaSessionStateUnsubscribe = () => void;
 
+export interface MediaSessionDetectionWriteOptions {
+  readonly sourceId?: string;
+}
+
 /**
  * Public controller for one renderer-owned media item.
  */
@@ -298,11 +350,21 @@ export interface MediaSession {
    */
   appendDetectionFrames(
     frames: readonly DetectionFrame[],
+    options?: MediaSessionDetectionWriteOptions,
   ): Promise<ColdDetectionFrameStoreWriteSummary>;
+  replaceDetectionFrames(
+    frames: readonly DetectionFrame[],
+    options?: MediaSessionDetectionWriteOptions,
+  ): Promise<ColdDetectionFrameStoreWriteSummary>;
+  clearDetectionFrames(
+    options?: MediaSessionDetectionWriteOptions,
+  ): Promise<void>;
   /**
    * Summary of frames written through `appendDetectionFrames`, when available.
    */
-  getDetectionSummary(): ColdDetectionFrameStoreWriteSummary | null;
+  getDetectionSummary(
+    options?: MediaSessionDetectionWriteOptions,
+  ): ColdDetectionFrameStoreWriteSummary | null;
   play(): Promise<void>;
   pause(): void;
   seek(mediaTime: number): Promise<void>;

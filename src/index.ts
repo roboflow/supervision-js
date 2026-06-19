@@ -4,6 +4,7 @@ export { createBrowserColdDetectionFrameStore } from "#detections/browser-cold-d
 export { createBufferedDetectionTimeline } from "#detections/buffered-detection-timeline";
 export { createChunkedDetectionFrameSource } from "#detections/chunked-detection-frame-source";
 export { createColdDetectionFrameSource } from "#detections/cold-detection-frame-source";
+export { createCompositeDetectionFrameSource } from "#detections/composite-detection-frame-source";
 export { createMemoryColdDetectionFrameStore } from "#detections/memory-cold-detection-frame-store";
 export { createWritableDetectionFrameSource } from "#detections/writable-detection-frame-source";
 
@@ -99,6 +100,8 @@ export {
   type ColdDetectionFrameStoreWriteOptions,
   type ColdDetectionFrameStoreWriteSummary,
   type ChunkedDetectionFrameSourceOptions,
+  type CompositeDetectionFrameSourceEntry,
+  type CompositeDetectionFrameSourceOptions,
   type DetectionBufferOptions,
   type DetectionBufferPrepareOptions,
   type DetectionBufferState,
@@ -167,7 +170,10 @@ export {
   type MediaSessionActivity,
   type MediaSessionAppendableDetectionOptions,
   type MediaSessionDetectionOptions,
+  type MediaSessionDetectionSourceOptions,
+  type MediaSessionDetectionSourcePresentation,
   type MediaSessionDetectionSyncOptions,
+  type MediaSessionDetectionWriteOptions,
   type MediaSessionMedia,
   type MediaSessionMediaState,
   type MediaSessionNormalizationState,

@@ -1,6 +1,8 @@
 import { createMediaRenderer } from "#renderers/media-renderer";
+import { createSourceAwarePresentation } from "#styles/source-presentation";
 import type {
   MediaSession,
+  MediaSessionDetectionWriteOptions,
   MediaSessionMediaState,
   MediaSessionNormalizationState,
   MediaSessionOptions,
@@ -101,19 +103,28 @@ export async function createMediaSession(
       mode: options.mode,
     });
     const sessionDetections = preparedDetections;
+    let currentPresentation = options.presentation;
+    const resolvePresentation = (
+      presentation: MediaRendererPresentation | undefined,
+    ) =>
+      createSourceAwarePresentation(
+        presentation,
+        sessionDetections.sourcePresentations,
+      );
+    const initialPresentation = resolvePresentation(currentPresentation);
 
     const renderer = await createMediaRenderer({
       ...options.renderer,
       ...sessionMedia.rendererSourceOption,
-      boxStyle: options.presentation?.boxStyle,
+      boxStyle: initialPresentation.boxStyle,
       container: options.container,
       detectionBuffer: sessionDefaults.detectionBuffer,
       detectionFrames: sessionDetections.detectionFrames,
       detectionSource: sessionDetections.detectionSource,
-      focusStyle: options.presentation?.focusStyle,
-      interactionStyle: options.presentation?.interactionStyle,
-      labelStyle: options.presentation?.labelStyle,
-      maskStyle: options.presentation?.maskStyle,
+      focusStyle: initialPresentation.focusStyle,
+      interactionStyle: initialPresentation.interactionStyle,
+      labelStyle: initialPresentation.labelStyle,
+      maskStyle: initialPresentation.maskStyle,
       onState(state) {
         rendererState = state;
         options.renderer?.onState?.(state);
@@ -144,22 +155,52 @@ export async function createMediaSession(
       media: sessionMedia.state,
       renderer,
 
-      async appendDetectionFrames(frames) {
+      async appendDetectionFrames(frames, writeOptions) {
         if (destroyed) {
           throw new Error("Media session has been destroyed.");
         }
 
-        if (!sessionDetections.appendableSource) {
-          throw new Error(
-            "This media session does not own an appendable detection source.",
-          );
-        }
+        const appendableSource = resolveAppendableSource(
+          sessionDetections,
+          writeOptions,
+        );
 
-        return sessionDetections.appendableSource.appendFrames(frames);
+        return appendableSource.appendFrames(frames);
       },
 
-      getDetectionSummary() {
-        return sessionDetections.appendableSource?.getSummary() ?? null;
+      async replaceDetectionFrames(frames, writeOptions) {
+        if (destroyed) {
+          throw new Error("Media session has been destroyed.");
+        }
+
+        const appendableSource = resolveAppendableSource(
+          sessionDetections,
+          writeOptions,
+        );
+
+        return appendableSource.replaceFrames(frames);
+      },
+
+      async clearDetectionFrames(writeOptions) {
+        if (destroyed) {
+          throw new Error("Media session has been destroyed.");
+        }
+
+        const appendableSource = resolveAppendableSource(
+          sessionDetections,
+          writeOptions,
+        );
+
+        await appendableSource.clear();
+      },
+
+      getDetectionSummary(writeOptions) {
+        return (
+          resolveAppendableSourceOrNull(
+            sessionDetections,
+            writeOptions,
+          )?.getSummary() ?? null
+        );
       },
 
       play() {
@@ -175,7 +216,8 @@ export async function createMediaSession(
       },
 
       setPresentation(presentation: MediaRendererPresentation) {
-        renderer.setPresentation(presentation);
+        currentPresentation = presentation;
+        renderer.setPresentation(resolvePresentation(currentPresentation));
       },
 
       subscribe(listener) {
@@ -222,6 +264,57 @@ export async function createMediaSession(
     preparedDetections?.detectionSource?.destroy?.();
     throw error;
   }
+}
+
+function resolveAppendableSource(
+  sessionDetections: PreparedSessionDetections,
+  options: MediaSessionDetectionWriteOptions | undefined,
+) {
+  const appendableSource = resolveAppendableSourceOrNull(
+    sessionDetections,
+    options,
+  );
+
+  if (!appendableSource) {
+    throw new Error(
+      "This media session does not own an appendable detection source.",
+    );
+  }
+
+  return appendableSource;
+}
+
+function resolveAppendableSourceOrNull(
+  sessionDetections: PreparedSessionDetections,
+  options: MediaSessionDetectionWriteOptions | undefined,
+) {
+  if (options?.sourceId) {
+    const appendableSource =
+      sessionDetections.appendableSources.get(options.sourceId) ??
+      (sessionDetections.appendableSource?.datasetId === options.sourceId
+        ? sessionDetections.appendableSource
+        : undefined);
+
+    if (!appendableSource) {
+      throw new Error(
+        `Unknown appendable detection source: ${options.sourceId}.`,
+      );
+    }
+
+    return appendableSource;
+  }
+
+  if (sessionDetections.appendableSources.size > 1) {
+    throw new Error(
+      "sourceId is required when a media session owns multiple appendable detection sources.",
+    );
+  }
+
+  return (
+    sessionDetections.appendableSource ??
+    sessionDetections.appendableSources.values().next().value ??
+    null
+  );
 }
 
 function getErrorMessage(error: unknown, fallback: string) {
