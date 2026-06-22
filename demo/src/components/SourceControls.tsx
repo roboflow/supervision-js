@@ -1,10 +1,11 @@
+import { memo } from "react";
 import {
   DemoSourceMode,
   type UploadInferenceState,
 } from "../session/demo-session-types";
 import type { Sam3FixtureDefinition } from "../fixtures/sam3-fixtures";
 
-export function SourceControls({
+export const SourceControls = memo(function SourceControls({
   apiKey,
   classNames,
   disabled,
@@ -141,4 +142,4 @@ export function SourceControls({
       ) : null}
     </section>
   );
-}
+});

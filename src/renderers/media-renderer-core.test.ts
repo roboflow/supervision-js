@@ -305,6 +305,31 @@ describe("media renderer core", () => {
 
     renderer.destroy();
   });
+
+  it("forwards runtime render quality changes to the scene", async () => {
+    resetMocks();
+
+    const scene = createScene();
+    const renderer = await createMediaRendererCore(
+      {
+        autoPlay: false,
+        container: {} as HTMLElement,
+        source: createSource([
+          createMockSample(0, 0) as unknown as DecodedVideoSample,
+        ]),
+      } satisfies MediaRendererOptions,
+      {
+        createScene: vi.fn(async () => scene),
+        openMediaSource: vi.fn(),
+      },
+    );
+
+    renderer.setRenderQuality({ maxDevicePixelRatio: 1.5 });
+
+    expect(scene.setRenderQuality).toHaveBeenCalledWith(1.5);
+
+    renderer.destroy();
+  });
 });
 
 function createScene(
@@ -324,8 +349,10 @@ function createScene(
         mediaTime: sample.timestamp,
       };
     }),
+    rendererBackend: "test",
     setTimelineContext: vi.fn(),
     setPresentation: vi.fn(),
+    setRenderQuality: vi.fn(),
     ...overrides,
   };
 }

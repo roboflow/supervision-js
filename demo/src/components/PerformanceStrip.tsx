@@ -1,3 +1,4 @@
+import { memo } from "react";
 import {
   RenderPreparationArtifactKind,
   type MediaRendererState,
@@ -5,7 +6,7 @@ import {
 } from "supervision-js";
 import { formatExactTime, formatInteger, formatMilliseconds } from "../format";
 
-export function PerformanceStrip({
+export const PerformanceStrip = memo(function PerformanceStrip({
   renderPreparationDiagnostics,
   rendererState,
 }: {
@@ -63,7 +64,7 @@ export function PerformanceStrip({
       />
     </section>
   );
-}
+});
 
 function PerformanceMetric({
   label,

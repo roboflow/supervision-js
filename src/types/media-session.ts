@@ -22,6 +22,7 @@ import type {
   MediaRenderer,
   MediaRendererFit,
   MediaRendererPresentation,
+  MediaRendererQuality,
   MediaRendererOptions,
   MediaRendererSource,
   MediaRendererState,
@@ -165,6 +166,7 @@ export interface MediaSessionRendererOptions {
   readonly loop?: boolean;
   readonly muted?: boolean;
   readonly fit?: MediaRendererFit;
+  readonly maxDevicePixelRatio?: MediaRendererOptions["maxDevicePixelRatio"];
   readonly interaction?: MediaInteractionOptions;
   readonly renderPreparation?: MediaRendererOptions["renderPreparation"];
   readonly diagnostics?: MediaRendererOptions["diagnostics"];
@@ -369,6 +371,7 @@ export interface MediaSession {
   pause(): void;
   seek(mediaTime: number): Promise<void>;
   setPresentation(presentation: MediaRendererPresentation): void;
+  setRenderQuality(quality: MediaRendererQuality): void;
   subscribe(listener: MediaSessionStateListener): MediaSessionStateUnsubscribe;
   getState(): MediaSessionState;
   destroy(): void;

@@ -27,6 +27,7 @@ import type {
 export interface MediaRendererSceneOptions {
   readonly container: HTMLElement;
   readonly fit: MediaRendererFit;
+  readonly maxDevicePixelRatio: number | undefined;
   readonly detectionTimeline: BufferedDetectionTimeline;
   readonly boxStyle: BoxStyle | null | undefined;
   readonly focusStyle: FocusStyle | null | undefined;
@@ -49,6 +50,7 @@ export interface PresentedMediaSample {
 }
 
 export interface MediaRendererScene {
+  readonly rendererBackend: string;
   initializeMedia(dimensions: { width: number; height: number }): void;
   setTimelineContext?(context: MediaRendererSceneTimelineContext): void;
   presentSample(sample: DecodedVideoSample): PresentedMediaSample;
@@ -56,6 +58,7 @@ export interface MediaRendererScene {
     mediaTime: number,
     options: RenderPreparationPlaybackGateOptions,
   ): Promise<void>;
+  setRenderQuality(maxDevicePixelRatio: number | undefined): void;
   setPresentation(
     presentation: MediaRendererPresentation,
     mediaTime: number,

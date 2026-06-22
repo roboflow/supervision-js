@@ -18,6 +18,7 @@ import {
   TARGET_UPLOAD_FRAME_RATE,
 } from "../media/upload-media";
 import { createDemoPresentation } from "../presentation/demo-presentation";
+import { getDemoMaxDevicePixelRatio } from "./render-quality";
 import type { DemoSessionCallbacks } from "./demo-session-types";
 
 export async function createFixtureSession(
@@ -88,9 +89,6 @@ export async function createFixtureSession(
       presentation,
       renderer: {
         autoPlay: false,
-        diagnostics: {
-          frameTimings: true,
-        },
         fit: MediaRendererFit.Contain,
         interaction: {
           mode: MediaInteractionMode.PausedOnly,
@@ -98,6 +96,7 @@ export async function createFixtureSession(
           onSelect: options.onDetectionSelect,
         },
         loop: true,
+        maxDevicePixelRatio: getDemoMaxDevicePixelRatio(options.renderQuality),
         onFrame: options.onFrame,
         onState: options.onRendererState,
         renderPreparation: {

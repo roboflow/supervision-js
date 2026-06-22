@@ -210,6 +210,14 @@ export async function createMediaRendererCore(
       }
     },
 
+    setRenderQuality(quality) {
+      if (runtimeState.isDestroyed()) {
+        return;
+      }
+
+      mediaScene?.setRenderQuality(quality.maxDevicePixelRatio);
+    },
+
     destroy() {
       if (runtimeState.isDestroyed()) {
         return;
@@ -249,6 +257,7 @@ export async function createMediaRendererCore(
       container: options.container,
       detectionTimeline,
       fit,
+      maxDevicePixelRatio: options.maxDevicePixelRatio,
       canInteract: () => canInteract(options, runtimeState.isPlaybackActive()),
       interaction: options.interaction,
       interactionStyle: options.interactionStyle,
@@ -257,6 +266,7 @@ export async function createMediaRendererCore(
       renderPreparation: options.renderPreparation,
       diagnostics: options.diagnostics,
     });
+    runtimeState.setRendererBackend(mediaScene.rendererBackend);
 
     const mediaSource = await openRendererMediaSource(options, providers);
     mediaInput = mediaSource.input;

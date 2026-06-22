@@ -46,6 +46,12 @@ not the first thing most users should reach for:
 - `DetectionFrameSource` for caller-owned range loading;
 - `WritableDetectionFrameSource` and `createWritableDetectionFrameSource()` for
   streaming inference ingestion;
+- `detections.sources`, `MediaSessionDetectionSourceOptions`, and
+  `createCompositeDetectionFrameSource()` for composing model predictions,
+  draft annotations, review overlays, or other app-owned detection streams over
+  one media item;
+- `session.setRenderQuality()` for runtime DPR/quality changes without
+  rebuilding the media session;
 - cold detection stores for custom persistence and testing;
 - chunked detection sources for large static detection datasets;
 - media normalization functions and options;

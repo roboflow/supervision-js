@@ -1,4 +1,4 @@
-import type { CSSProperties, RefObject } from "react";
+import { memo, type CSSProperties, type RefObject } from "react";
 import {
   MediaSessionActivityKind,
   MediaSessionActivityStatus,
@@ -11,17 +11,19 @@ import type {
   UploadInferenceState,
 } from "../session/demo-session-types";
 
-export function RendererViewport({
-  containerRef,
-  mediaState,
-  sessionState,
-  uploadInferenceState,
-}: {
+interface RendererViewportProps {
   readonly containerRef: RefObject<HTMLDivElement | null>;
   readonly mediaState: DemoMediaState;
   readonly sessionState: MediaSessionState | null;
   readonly uploadInferenceState: UploadInferenceState | null;
-}) {
+}
+
+export const RendererViewport = memo(function RendererViewport({
+  containerRef,
+  mediaState,
+  sessionState,
+  uploadInferenceState,
+}: RendererViewportProps) {
   const overlay = createViewportOverlay(
     sessionState,
     uploadInferenceState,
@@ -58,6 +60,48 @@ export function RendererViewport({
         </div>
       ) : null}
     </section>
+  );
+}, areRendererViewportPropsEqual);
+
+function areRendererViewportPropsEqual(
+  previousProps: RendererViewportProps,
+  nextProps: RendererViewportProps,
+) {
+  return (
+    previousProps.containerRef === nextProps.containerRef &&
+    sameViewportOverlay(
+      createViewportOverlay(
+        previousProps.sessionState,
+        previousProps.uploadInferenceState,
+        previousProps.mediaState,
+      ),
+      createViewportOverlay(
+        nextProps.sessionState,
+        nextProps.uploadInferenceState,
+        nextProps.mediaState,
+      ),
+    )
+  );
+}
+
+function sameViewportOverlay(
+  previousOverlay: ViewportOverlay | null,
+  nextOverlay: ViewportOverlay | null,
+) {
+  if (previousOverlay === nextOverlay) {
+    return true;
+  }
+
+  if (!previousOverlay || !nextOverlay) {
+    return false;
+  }
+
+  return (
+    previousOverlay.detail === nextOverlay.detail &&
+    previousOverlay.kicker === nextOverlay.kicker &&
+    previousOverlay.label === nextOverlay.label &&
+    previousOverlay.progress === nextOverlay.progress &&
+    previousOverlay.tone === nextOverlay.tone
   );
 }
 

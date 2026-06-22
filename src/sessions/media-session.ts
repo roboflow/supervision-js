@@ -220,6 +220,12 @@ export async function createMediaSession(
         renderer.setPresentation(resolvePresentation(currentPresentation));
       },
 
+      setRenderQuality(quality) {
+        renderer.setRenderQuality(quality);
+        rendererState = renderer.getState();
+        emitSessionState();
+      },
+
       subscribe(listener) {
         listener(createSessionState());
 

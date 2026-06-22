@@ -20,6 +20,7 @@ export {
   type MediaRendererDiagnosticsOptions,
   type MediaRendererOptions,
   type MediaRendererPresentation,
+  type MediaRendererQuality,
   type MediaRendererSource,
   type MediaRendererState,
   type MediaSourceState,

@@ -195,6 +195,7 @@ export {
   type MediaRenderer,
   type MediaRendererOptions,
   type MediaRendererPresentation,
+  type MediaRendererQuality,
   type MediaRendererSource,
   type MediaRendererState,
   type MediaSourceState,

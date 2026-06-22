@@ -110,6 +110,35 @@ Detection input has three preferred shapes:
 
 Use only one of those shapes per session.
 
+## Renderer Quality
+
+By default the renderer uses the browser's device pixel ratio. Apps that need
+to reduce GPU memory or fill-rate pressure can cap it:
+
+```ts
+const session = await createMediaSession({
+  container,
+  media,
+  renderer: {
+    maxDevicePixelRatio: 1.5,
+  },
+});
+```
+
+Lower values trade some sharpness for smoother playback on constrained devices
+or busy browsers. Leaving the option unset preserves native device resolution.
+
+Quality can also change at runtime without rebuilding the media session:
+
+```ts
+session.setRenderQuality({
+  maxDevicePixelRatio: 2,
+});
+```
+
+The session keeps playback time, prepared detections, interaction state, and
+media buffers alive while the renderer resizes to the new resolution.
+
 ## Multiple Detection Sources
 
 Use `detections.sources` when an app needs to render more than one semantic
@@ -150,6 +179,9 @@ disables that layer for the source.
 
 Do not combine `detections.sources` with legacy single-source inputs such as
 `frames`, `source`, or `appendable`.
+
+For a fuller “model predictions plus draft annotations” walkthrough, see
+[Multiple Detection Sources](../recipes/multiple-detection-sources.md).
 
 ## Runtime Updates
 

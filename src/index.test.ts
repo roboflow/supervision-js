@@ -1790,6 +1790,23 @@ describe("package entrypoint", () => {
     renderer.destroy();
   });
 
+  it("updates render quality at runtime without rebuilding the Pixi app", async () => {
+    resetMocks();
+    mediaMock.samples = [createMockSample(0, 0)];
+
+    const renderer = await createRenderer(false, false);
+
+    expect(pixiMock.appInit).toHaveBeenCalledOnce();
+    expect(pixiMock.rendererResize).not.toHaveBeenCalled();
+
+    renderer.setRenderQuality({ maxDevicePixelRatio: 1 });
+
+    expect(pixiMock.appInit).toHaveBeenCalledOnce();
+    expect(pixiMock.rendererResize).toHaveBeenCalledWith(640, 360, 1);
+
+    renderer.destroy();
+  });
+
   it("updates mask style at runtime and invalidates cached mask textures", async () => {
     resetMocks();
     mediaMock.samples = [createMockSample(0, 0), createMockSample(0.02, 0)];

@@ -12,6 +12,7 @@ import type {
 } from "../fixtures/sam3-fixtures";
 import type { PreparedUploadMedia } from "../media/upload-media";
 import type { DemoPresentationSettings } from "../presentation/demo-presentation";
+import type { DemoRenderQuality } from "./render-quality";
 
 export enum DemoSourceMode {
   Fixture = "fixture",
@@ -63,6 +64,7 @@ export interface DemoSessionCallbacks {
   readonly onSessionState: (state: MediaSessionState) => void;
   readonly onSourceState: (state: MediaSourceState) => void;
   readonly presentationSettings: DemoPresentationSettings;
+  readonly renderQuality: DemoRenderQuality;
 }
 
 export type UploadInferenceStateSetter = Dispatch<

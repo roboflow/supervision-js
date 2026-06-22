@@ -412,6 +412,7 @@ function createRendererState(options: {
     mediaWidth: 0,
     playbackState: options.playbackState,
     presentedFrames: 0,
+    rendererBackend: "test",
     source: {
       audioTrackCount: null,
       canRead: null,

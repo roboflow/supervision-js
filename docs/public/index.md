@@ -117,6 +117,7 @@ one timing source and avoids drift caused by separate composition layers.
 - Use the recipes for common integrations:
   [Static Detections](recipes/static-detections.md),
   [Streaming Detections](recipes/streaming-detections.md),
+  [Multiple Detection Sources](recipes/multiple-detection-sources.md),
   [Interactive Picking](recipes/interactive-picking.md), and
   [Progressive Upload Normalization](recipes/progressive-upload-normalization.md).
 - Read [Session Lifecycle](recipes/session-lifecycle.md) for replacing media,

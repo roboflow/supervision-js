@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type {
   DetectionBufferState,
   MediaRendererPlaybackState,
@@ -10,7 +11,7 @@ import { PlaybackControls } from "./PlaybackControls";
 import { Readout } from "./Readout";
 import { TimelineView } from "./TimelineView";
 
-export function ControlBar({
+export const ControlBar = memo(function ControlBar({
   activeDetectionFrameTime,
   canUseRenderer,
   currentTime,
@@ -77,4 +78,4 @@ export function ControlBar({
       </div>
     </section>
   );
-}
+});

@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { BenchmarksPanel } from "./components/BenchmarksPanel";
 import { ControlBar } from "./components/ControlBar";
 import { DemoShell } from "./components/DemoShell";
 import { PerformanceStrip } from "./components/PerformanceStrip";
+import { QualityControls } from "./components/QualityControls";
 import { RenderControls } from "./components/RenderControls";
 import { RendererViewport } from "./components/RendererViewport";
 import { SelectionPanel } from "./components/SelectionPanel";
@@ -23,25 +24,42 @@ const docsUrl =
 export function App() {
   const demo = useDemoRenderer();
   const [viewMode, setViewMode] = useState(DemoViewMode.Demo);
-  const processedRanges =
-    demo.sourceMode === DemoSourceMode.Fixture && demo.duration !== null
-      ? [{ endTime: demo.duration, startTime: 0 }]
-      : demo.uploadInferenceState.processedRanges;
-  const processingRanges =
-    demo.sourceMode === DemoSourceMode.Upload
-      ? demo.uploadInferenceState.processingRanges
-      : [];
-  const normalizedRanges =
-    demo.sourceMode === DemoSourceMode.Upload
-      ? demo.uploadInferenceState.normalizedRanges
-      : createSampleNormalizationRanges({
-          duration: demo.duration,
-          progress: demo.sessionState?.normalization?.progress ?? null,
-        });
-  const styleClassNames =
-    demo.sourceMode === DemoSourceMode.Upload
-      ? parseClassNames(demo.uploadClassNames)
-      : (demo.fixtureSummary?.classNames ?? defaultDemoClassNames);
+  const processedRanges = useMemo(
+    () =>
+      demo.sourceMode === DemoSourceMode.Fixture && demo.duration !== null
+        ? [{ endTime: demo.duration, startTime: 0 }]
+        : demo.uploadInferenceState.processedRanges,
+    [demo.duration, demo.sourceMode, demo.uploadInferenceState.processedRanges],
+  );
+  const processingRanges = useMemo(
+    () =>
+      demo.sourceMode === DemoSourceMode.Upload
+        ? demo.uploadInferenceState.processingRanges
+        : [],
+    [demo.sourceMode, demo.uploadInferenceState.processingRanges],
+  );
+  const normalizedRanges = useMemo(
+    () =>
+      demo.sourceMode === DemoSourceMode.Upload
+        ? demo.uploadInferenceState.normalizedRanges
+        : createSampleNormalizationRanges({
+            duration: demo.duration,
+            progress: demo.sessionState?.normalization?.progress ?? null,
+          }),
+    [
+      demo.duration,
+      demo.sessionState?.normalization?.progress,
+      demo.sourceMode,
+      demo.uploadInferenceState.normalizedRanges,
+    ],
+  );
+  const styleClassNames = useMemo(
+    () =>
+      demo.sourceMode === DemoSourceMode.Upload
+        ? parseClassNames(demo.uploadClassNames)
+        : (demo.fixtureSummary?.classNames ?? defaultDemoClassNames),
+    [demo.fixtureSummary?.classNames, demo.sourceMode, demo.uploadClassNames],
+  );
 
   return (
     <DemoShell
@@ -78,6 +96,13 @@ export function App() {
           sampleFixtures={demo.sampleFixtures}
           selectedFileName={demo.uploadFileName}
           uploadState={demo.uploadInferenceState}
+        />
+      }
+      qualityControls={
+        <QualityControls
+          disabled={!demo.canUseRenderer}
+          onChange={demo.setRenderQuality}
+          quality={demo.renderQuality}
         />
       }
       selectionPanel={

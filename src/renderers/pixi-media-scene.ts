@@ -91,7 +91,7 @@ export async function createPixiMediaScene(
     backgroundColor: 0x111111,
     preference: RENDER_ENGINE_PREFERENCE,
     resizeTo: options.container,
-    resolution: window.devicePixelRatio || 1,
+    resolution: resolvePixiResolution(options.maxDevicePixelRatio),
   });
 
   const rendererCanvas = app.canvas;
@@ -204,6 +204,8 @@ export async function createPixiMediaScene(
   app.ticker.add(updateMediaSceneFit);
 
   return {
+    rendererBackend: String(app.renderer.name ?? "unknown"),
+
     initializeMedia({ width, height }) {
       mediaWidth = width;
       mediaHeight = height;
@@ -355,6 +357,15 @@ export async function createPixiMediaScene(
         maskLayer?.waitForRenderPreparation(mediaTime, gateOptions) ??
         Promise.resolve()
       );
+    },
+
+    setRenderQuality(maxDevicePixelRatio) {
+      const resolution = resolvePixiResolution(maxDevicePixelRatio);
+      const screenWidth = options.container.clientWidth || app.screen.width;
+      const screenHeight = options.container.clientHeight || app.screen.height;
+
+      app.renderer.resize(screenWidth, screenHeight, resolution);
+      updateMediaSceneFit();
     },
 
     setPresentation(presentation, mediaTime) {
@@ -661,4 +672,18 @@ function elapsedSince(start: number) {
 
 function now() {
   return globalThis.performance?.now?.() ?? Date.now();
+}
+
+function resolvePixiResolution(maxDevicePixelRatio: number | undefined) {
+  const devicePixelRatio = window.devicePixelRatio || 1;
+
+  if (
+    maxDevicePixelRatio === undefined ||
+    !Number.isFinite(maxDevicePixelRatio) ||
+    maxDevicePixelRatio <= 0
+  ) {
+    return devicePixelRatio;
+  }
+
+  return Math.min(devicePixelRatio, maxDevicePixelRatio);
 }

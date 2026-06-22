@@ -39,6 +39,7 @@ export interface MediaRendererRuntimeState {
   };
   setSourceReady(metadata: DecodedMediaSourceMetadata): void;
   setCurrentTime(currentTime: number): void;
+  setRendererBackend(rendererBackend: string | null): void;
   recordPresentedSample(sample: PresentedMediaSample): void;
   recordPresentationUpdate(sample: PresentedMediaSample): void;
   setReady(): void;
@@ -61,6 +62,7 @@ export function createMediaRendererRuntimeState(
   let duration: number | null = null;
   let mediaHeight = 0;
   let mediaWidth = 0;
+  let rendererBackend: string | null = null;
   let presentedFrames = 0;
   let activeDetectionFrameTime: number | null = null;
   let activeDetectionFrameIndex: number | null = null;
@@ -93,6 +95,7 @@ export function createMediaRendererRuntimeState(
     mediaWidth,
     playbackState,
     presentedFrames,
+    rendererBackend,
     source: { ...sourceState },
   });
 
@@ -110,6 +113,7 @@ export function createMediaRendererRuntimeState(
     mediaTime: sample.mediaTime,
     mediaWidth,
     presentedFrames,
+    rendererBackend,
     renderTimings: lastFrameRenderTimings,
   });
 
@@ -170,6 +174,10 @@ export function createMediaRendererRuntimeState(
 
     setCurrentTime(nextCurrentTime) {
       currentTime = nextCurrentTime;
+    },
+
+    setRendererBackend(nextRendererBackend) {
+      rendererBackend = nextRendererBackend;
     },
 
     recordPresentedSample(sample) {

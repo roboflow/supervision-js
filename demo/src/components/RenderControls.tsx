@@ -1,4 +1,4 @@
-import { useState, type CSSProperties, type ReactNode } from "react";
+import { memo, useState, type CSSProperties, type ReactNode } from "react";
 import {
   BoxStrokeAlignment,
   FocusTargetMode,
@@ -16,7 +16,7 @@ enum RenderControlsTab {
   Classes = "classes",
 }
 
-export function RenderControls({
+export const RenderControls = memo(function RenderControls({
   classNames,
   onChange,
   settings,
@@ -84,7 +84,7 @@ export function RenderControls({
       )}
     </section>
   );
-}
+});
 
 function GlobalRenderControls({
   onChange,

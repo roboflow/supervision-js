@@ -22,6 +22,7 @@
   ],
   "workspaces": [
     "benchmark/initial",
+    "benchmark/media-upload",
     "demo",
     "examples/vanilla"
   ],
@@ -114,6 +115,8 @@
     "example:vanilla:build:app": "npm run build -w examples/vanilla",
     "benchmark:initial:dev": "npm run dev -w benchmark/initial",
     "benchmark:initial:build": "npm run build -w benchmark/initial",
+    "benchmark:media-upload:dev": "vite --config benchmark/media-upload/vite.config.ts --host 127.0.0.1 --port 5178",
+    "benchmark:media-upload:build": "tsc --noEmit -p benchmark/media-upload/tsconfig.json && vite build --config benchmark/media-upload/vite.config.ts",
     "benchmark:masks": "npm run build && node benchmark/masks/run.mjs",
     "benchmark:masks:gpu": "npm run benchmark:masks:gpu:build && node benchmark/masks/run-gpu.mjs",
     "benchmark:masks:gpu:dev": "vite --config benchmark/masks/gpu/vite.config.ts --host 127.0.0.1 --port 5176",
@@ -131,7 +134,7 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "verify": "npm run format:check && npm run lint && npm run typecheck && npm run test && npm run build && npm run package:smoke && npm run demo:build && npm run benchmark:initial:build && npm run benchmark:masks:gpu:build",
+    "verify": "npm run format:check && npm run lint && npm run typecheck && npm run test && npm run build && npm run package:smoke && npm run demo:build && npm run benchmark:initial:build && npm run benchmark:media-upload:build && npm run benchmark:masks:gpu:build",
     "prepare": "node -e \"process.exit(process.env.CI || process.env.NODE_ENV === 'production' ? 0 : 1)\" || husky"
   },
   "lint-staged": {

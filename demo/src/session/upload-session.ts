@@ -30,6 +30,7 @@ import {
 } from "../media/upload-media";
 import { createDemoPresentation } from "../presentation/demo-presentation";
 import { UPLOAD_DETECTION_CHUNK_SECONDS } from "./demo-session-config";
+import { getDemoMaxDevicePixelRatio } from "./render-quality";
 import type {
   DemoSessionCallbacks,
   UploadInferenceStateSetter,
@@ -130,9 +131,6 @@ export async function createUploadSession(
       onState: options.onSessionState,
       renderer: {
         autoPlay: false,
-        diagnostics: {
-          frameTimings: true,
-        },
         fit: MediaRendererFit.Contain,
         interaction: {
           mode: MediaInteractionMode.PausedOnly,
@@ -140,6 +138,7 @@ export async function createUploadSession(
           onSelect: options.onDetectionSelect,
         },
         loop: true,
+        maxDevicePixelRatio: getDemoMaxDevicePixelRatio(options.renderQuality),
         onFrame: options.onFrame,
         onState: options.onRendererState,
         renderPreparation: {

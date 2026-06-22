@@ -1,6 +1,7 @@
+import { memo } from "react";
 import { MediaRendererPlaybackState } from "supervision-js";
 
-export function PlaybackControls({
+export const PlaybackControls = memo(function PlaybackControls({
   playbackState,
   disabled,
   onStepFrame,
@@ -62,4 +63,4 @@ export function PlaybackControls({
       </button>
     </div>
   );
-}
+});

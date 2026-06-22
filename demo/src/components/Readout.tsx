@@ -1,6 +1,6 @@
-import type { ReactNode } from "react";
+import { memo, type ReactNode } from "react";
 
-export function Readout({
+export const Readout = memo(function Readout({
   className,
   label,
   tone = "default",
@@ -21,4 +21,4 @@ export function Readout({
       <span className="readout__value">{value}</span>
     </span>
   );
-}
+});

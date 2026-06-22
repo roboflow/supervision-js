@@ -29,6 +29,11 @@ import {
 import { createFixtureSession } from "../session/fixture-session";
 import { DEFAULT_UPLOAD_CLASS_NAMES } from "../session/demo-session-config";
 import {
+  defaultDemoRenderQuality,
+  getDemoMaxDevicePixelRatio,
+  type DemoRenderQuality,
+} from "../session/render-quality";
+import {
   DemoSourceMode,
   type DemoDetectionSourceState,
   type DemoMediaState,
@@ -53,6 +58,7 @@ export interface DemoRendererState {
   readonly mediaState: DemoMediaState;
   readonly playbackState: MediaRendererPlaybackState | null;
   readonly presentationSettings: DemoPresentationSettings;
+  readonly renderQuality: DemoRenderQuality;
   readonly rendererState: MediaRendererState | null;
   readonly renderPreparationDiagnostics: RenderPreparationDiagnostics | null;
   readonly selectedDetectionPick: DetectionPickResult | null;
@@ -76,6 +82,7 @@ export interface DemoRendererState {
   readonly setPresentationSettings: (
     settings: DemoPresentationSettings,
   ) => void;
+  readonly setRenderQuality: (quality: DemoRenderQuality) => void;
   readonly setSampleFixtureId: (sampleName: string) => void;
   readonly setSourceMode: (mode: DemoSourceMode) => void;
   readonly setUploadApiKey: (apiKey: string) => void;
@@ -108,6 +115,7 @@ export function useDemoRenderer(): DemoRendererState {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const effectRunRef = useRef(0);
   const rendererRef = useRef<MediaRenderer | null>(null);
+  const sessionRef = useRef<MediaSession | null>(null);
   const seekRunRef = useRef(0);
   const uploadAbortRef = useRef<AbortController | null>(null);
   const uploadFileRef = useRef<File | null>(null);
@@ -138,6 +146,9 @@ export function useDemoRenderer(): DemoRendererState {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [presentationSettings, setPresentationSettingsState] =
     useState<DemoPresentationSettings>(defaultDemoPresentationSettings);
+  const [renderQuality, setRenderQuality] = useState<DemoRenderQuality>(
+    defaultDemoRenderQuality,
+  );
   const [sourceMode, setSourceModeState] = useState<DemoSourceMode>(
     DemoSourceMode.Fixture,
   );
@@ -183,6 +194,16 @@ export function useDemoRenderer(): DemoRendererState {
     const abortController =
       sourceMode === DemoSourceMode.Upload ? new AbortController() : undefined;
     const isActive = () => !cleanedUp && effectRunRef.current === runId;
+    const renderPreparationPublisher = createThrottledPublisher(
+      setRenderPreparationDiagnostics,
+      isActive,
+      RENDERER_READOUT_INTERVAL_MS,
+    );
+    const sessionStatePublisher = createThrottledPublisher(
+      setSessionState,
+      isActive,
+      RENDERER_READOUT_INTERVAL_MS,
+    );
     const publishRendererState = (
       state: MediaRendererState,
       options: { readonly force?: boolean } = {},
@@ -206,7 +227,10 @@ export function useDemoRenderer(): DemoRendererState {
       setSourceState(state.source);
     };
     const onFrame = () => {
-      if (!renderer) {
+      if (
+        !renderer ||
+        performance.now() - lastReadoutAt < RENDERER_READOUT_INTERVAL_MS
+      ) {
         return;
       }
 
@@ -252,11 +276,12 @@ export function useDemoRenderer(): DemoRendererState {
             onFixtureSummary: setFixtureSummary,
             onFrame,
             onMediaState: setMediaState,
-            onRenderPreparationDiagnostics: setRenderPreparationDiagnostics,
+            onRenderPreparationDiagnostics: renderPreparationPublisher.publish,
             onRendererState,
-            onSessionState: setSessionState,
+            onSessionState: sessionStatePublisher.publish,
             onSourceState: setSourceState,
             presentationSettings: presentationSettingsRef.current,
+            renderQuality,
           });
 
           activeSession = session;
@@ -272,12 +297,13 @@ export function useDemoRenderer(): DemoRendererState {
             onFixtureSummary: setFixtureSummary,
             onFrame,
             onMediaState: setMediaState,
-            onRenderPreparationDiagnostics: setRenderPreparationDiagnostics,
+            onRenderPreparationDiagnostics: renderPreparationPublisher.publish,
             onRendererState,
-            onSessionState: setSessionState,
+            onSessionState: sessionStatePublisher.publish,
             onSourceState: setSourceState,
             onUploadState: setUploadInferenceState,
             presentationSettings: presentationSettingsRef.current,
+            renderQuality,
             uploadRun,
           });
 
@@ -294,6 +320,7 @@ export function useDemoRenderer(): DemoRendererState {
           return;
         }
 
+        sessionRef.current = activeSession ?? null;
         rendererRef.current = renderer;
         syncRendererState(renderer);
         await playRenderer(
@@ -311,8 +338,11 @@ export function useDemoRenderer(): DemoRendererState {
 
     return () => {
       cleanedUp = true;
+      renderPreparationPublisher.cancel();
+      sessionStatePublisher.cancel();
       abortController?.abort();
       rendererRef.current = null;
+      sessionRef.current = null;
       if (activeSession) {
         activeSession.destroy();
       } else {
@@ -442,6 +472,23 @@ export function useDemoRenderer(): DemoRendererState {
 
       renderer.setPresentation(createDemoPresentation(settings));
       syncRendererState(renderer);
+    },
+    [syncRendererState],
+  );
+
+  const setRenderQualityLive = useCallback(
+    (quality: DemoRenderQuality) => {
+      setRenderQuality(quality);
+
+      const session = sessionRef.current;
+      if (!session) {
+        return;
+      }
+
+      session.setRenderQuality({
+        maxDevicePixelRatio: getDemoMaxDevicePixelRatio(quality),
+      });
+      syncRendererState(session.renderer);
     },
     [syncRendererState],
   );
@@ -586,12 +633,14 @@ export function useDemoRenderer(): DemoRendererState {
     playbackState,
     presentationSettings,
     renderPreparationDiagnostics,
+    renderQuality,
     rendererState,
     sampleFixtureId,
     sampleFixtures: sam3Fixtures,
     selectedDetectionPick,
     setSampleFixtureId,
     setPresentationSettings,
+    setRenderQuality: setRenderQualityLive,
     setSourceMode,
     setUploadApiKey,
     setUploadClassNames,
@@ -603,6 +652,65 @@ export function useDemoRenderer(): DemoRendererState {
     uploadClassNames,
     uploadFileName,
     uploadInferenceState,
+  };
+}
+
+function createThrottledPublisher<Value>(
+  publishValue: (value: Value) => void,
+  isActive: () => boolean,
+  intervalMs: number,
+) {
+  let lastPublishedAt = Number.NEGATIVE_INFINITY;
+  let pendingValue: Value | undefined;
+  let timeoutHandle: number | undefined;
+
+  const clearPendingTimeout = () => {
+    if (timeoutHandle === undefined) {
+      return;
+    }
+
+    window.clearTimeout(timeoutHandle);
+    timeoutHandle = undefined;
+  };
+
+  const publishPendingValue = () => {
+    clearPendingTimeout();
+
+    if (!isActive() || pendingValue === undefined) {
+      return;
+    }
+
+    const nextValue = pendingValue;
+
+    pendingValue = undefined;
+    lastPublishedAt = performance.now();
+    publishValue(nextValue);
+  };
+
+  return {
+    cancel() {
+      clearPendingTimeout();
+      pendingValue = undefined;
+    },
+    publish(value: Value) {
+      pendingValue = value;
+
+      const elapsedMs = performance.now() - lastPublishedAt;
+
+      if (elapsedMs >= intervalMs) {
+        publishPendingValue();
+        return;
+      }
+
+      if (timeoutHandle !== undefined) {
+        return;
+      }
+
+      timeoutHandle = window.setTimeout(
+        publishPendingValue,
+        intervalMs - elapsedMs,
+      );
+    },
   };
 }
 

@@ -86,6 +86,7 @@ Run from the repository root:
 - `npm run build`
 - `npm run demo:build`
 - `npm run benchmark:initial:build`
+- `npm run benchmark:media-upload:build`
 - `npm run benchmark:masks`
 
 For focused iterative work, use separate terminals:
@@ -93,9 +94,12 @@ For focused iterative work, use separate terminals:
 - `npm run dev:lib`
 - `npm run demo:dev`
 - `npm run benchmark:initial:dev`
+- `npm run benchmark:media-upload:dev`
 
 The demo dev server binds to `http://127.0.0.1:5173` by default.
 The initial benchmark dev server binds to `http://127.0.0.1:5174` by default.
+The media upload benchmark dev server binds to `http://127.0.0.1:5178` by
+default.
 
 ## Commit Checks
 

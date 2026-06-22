@@ -77,6 +77,7 @@ const mockState = vi.hoisted(() => {
       destroy: ReturnType<typeof vi.fn>;
       resources: Record<string, unknown>;
     }>,
+    rendererResize: vi.fn(),
     stageAddChild: vi.fn(),
     spriteInstances: [] as Array<{
       height: number;
@@ -159,6 +160,7 @@ export const domMock = mockState.domMock;
 vi.mock("pixi.js", () => {
   class Application {
     canvas = { style: {} };
+    renderer = { name: "webgl", resize: pixiMock.rendererResize };
     screen = { height: 360, width: 640 };
     stage = { addChild: pixiMock.stageAddChild };
     ticker = { add: pixiMock.tickerAdd, remove: pixiMock.tickerRemove };
@@ -501,6 +503,7 @@ export function resetMocks() {
   pixiMock.shaderDestroy.mockClear();
   pixiMock.shaderFrom.mockClear();
   pixiMock.shaderInstances.length = 0;
+  pixiMock.rendererResize.mockClear();
   pixiMock.stageAddChild.mockClear();
   pixiMock.spriteInstances.length = 0;
   pixiMock.tickerAdd.mockClear();

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { memo, type ReactNode } from "react";
 import {
   MediaRendererPlaybackState,
   RenderPreparationArtifactKind,
@@ -33,7 +33,7 @@ export interface StatusPanelDetectionSourceState {
   readonly status: string;
 }
 
-export function StatusPanel({
+export const StatusPanel = memo(function StatusPanel({
   detectionSourceState,
   errorMessage,
   fixtureSummary,
@@ -82,6 +82,10 @@ export function StatusPanel({
           value={fixtureSummary?.fixtureName ?? "loading"}
         />
         <Readout label="State" value={playbackState ?? "-"} />
+        <Readout
+          label="Renderer"
+          value={rendererState?.rendererBackend ?? "-"}
+        />
         <Readout
           label="Detection Frame"
           value={
@@ -360,7 +364,7 @@ export function StatusPanel({
       ) : null}
     </section>
   );
-}
+});
 
 function RenderTimingStatusGroup({
   rendererState,

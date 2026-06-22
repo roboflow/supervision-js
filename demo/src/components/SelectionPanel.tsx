@@ -1,10 +1,11 @@
+import { memo } from "react";
 import {
   MediaRendererPlaybackState,
   type DetectionPickResult,
 } from "supervision-js";
 import { formatExactTime, formatInteger, formatTime } from "../format";
 
-export function SelectionPanel({
+export const SelectionPanel = memo(function SelectionPanel({
   hoveredDetectionPick,
   onClearSelection,
   playbackState,
@@ -40,7 +41,7 @@ export function SelectionPanel({
       <SelectionDetails activePick={activePick} />
     </section>
   );
-}
+});
 
 function SelectionDetails({
   activePick,

@@ -58,6 +58,7 @@ export enum MediaSourceStatus {
  * diagnostics at high frequency.
  */
 export interface MediaFrameDiagnostics {
+  readonly rendererBackend: string | null;
   readonly mediaTime: number;
   readonly presentedFrames: number;
   readonly currentTime: number;
@@ -116,6 +117,7 @@ export interface MediaSourceState {
  * Current renderer state.
  */
 export interface MediaRendererState {
+  readonly rendererBackend: string | null;
   readonly playbackState: MediaRendererPlaybackState;
   readonly fit: MediaRendererFit;
   readonly currentTime: number;
@@ -148,6 +150,14 @@ export interface MediaRendererOptions {
    */
   readonly muted?: boolean;
   readonly fit?: MediaRendererFit;
+  /**
+   * Caps Pixi's render resolution relative to device pixels.
+   *
+   * Lower values reduce GPU memory and fill-rate pressure. For example,
+   * capping a Retina display from DPR 2 to 1 renders one quarter as many
+   * pixels, which can be useful for long videos or browsers under load.
+   */
+  readonly maxDevicePixelRatio?: number;
   readonly detectionFrames?: readonly DetectionFrame[];
   readonly detectionSource?: DetectionFrameSource;
   readonly detectionBuffer?: DetectionBufferOptions;
@@ -186,6 +196,19 @@ export interface MediaRendererPresentation {
 }
 
 /**
+ * Runtime renderer quality controls.
+ */
+export interface MediaRendererQuality {
+  /**
+   * Caps Pixi's render resolution relative to device pixels.
+   *
+   * Use `undefined` or a non-positive value to restore native device
+   * resolution.
+   */
+  readonly maxDevicePixelRatio?: number;
+}
+
+/**
  * Lower-level renderer controller.
  *
  * Prefer `MediaSession` for application code unless you need to own media
@@ -196,6 +219,7 @@ export interface MediaRenderer {
   pause(): void;
   seek(mediaTime: number): Promise<void>;
   setPresentation(presentation: MediaRendererPresentation): void;
+  setRenderQuality(quality: MediaRendererQuality): void;
   setSelectedDetection(
     selection: DetectionSelectionOptions | null,
   ): DetectionPickResult | null;
