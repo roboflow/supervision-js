@@ -1,4 +1,3 @@
-import type { BoxStyle } from "supervision-js-core";
 import type {
   DetectionBufferOptions,
   DetectionFrameSource,
@@ -6,8 +5,8 @@ import type {
   MediaRendererDiagnosticsOptions,
   MediaRendererFit,
   MediaRendererPresentation,
-  MediaRendererQuality,
   MediaRendererState,
+  MediaRendererStateController,
   MediaSourceState,
 } from "supervision-js-core";
 import type { DetectionFrame } from "supervision-js-core";
@@ -16,10 +15,6 @@ import type {
   DetectionSelectionOptions,
   MediaInteractionOptions,
 } from "supervision-js-core";
-import type { FocusStyle } from "supervision-js-core";
-import type { InteractionStyle } from "supervision-js-core";
-import type { LabelStyle } from "supervision-js-core";
-import type { MaskStyle } from "supervision-js-core";
 import type { DecodedMediaSource } from "#media/media-source";
 import type { RenderPreparationOptions } from "#types/render-preparation";
 
@@ -44,7 +39,7 @@ export type {
  * Most applications should prefer `createMediaSession`, which wires media
  * preparation, detection buffering, and render preparation with defaults.
  */
-export interface MediaRendererOptions {
+export interface MediaRendererOptions extends MediaRendererPresentation {
   readonly container: HTMLElement;
   readonly src?: string;
   readonly source?: MediaRendererSource;
@@ -66,12 +61,7 @@ export interface MediaRendererOptions {
   readonly detectionFrames?: readonly DetectionFrame[];
   readonly detectionSource?: DetectionFrameSource;
   readonly detectionBuffer?: DetectionBufferOptions;
-  readonly boxStyle?: BoxStyle | null;
-  readonly focusStyle?: FocusStyle | null;
-  readonly labelStyle?: LabelStyle | null;
-  readonly maskStyle?: MaskStyle | null;
   readonly interaction?: MediaInteractionOptions;
-  readonly interactionStyle?: InteractionStyle | null;
   readonly renderPreparation?: RenderPreparationOptions;
   readonly diagnostics?: MediaRendererDiagnosticsOptions;
   readonly onFrame?: (diagnostics: MediaFrameDiagnostics) => void;
@@ -95,16 +85,12 @@ export interface MediaRendererSource {
  * Prefer `MediaSession` for application code unless you need to own media
  * preparation and detection buffering yourself.
  */
-export interface MediaRenderer {
+export interface MediaRenderer extends MediaRendererStateController {
   play(): Promise<void>;
   pause(): void;
   seek(mediaTime: number): Promise<void>;
-  setPresentation(presentation: MediaRendererPresentation): void;
-  setRenderQuality(quality: MediaRendererQuality): void;
   setSelectedDetection(
     selection: DetectionSelectionOptions | null,
   ): DetectionPickResult | null;
-  getActiveDetectionFrame(): DetectionFrame | null;
-  getState(): MediaRendererState;
   destroy(): void;
 }
