@@ -603,7 +603,7 @@ export async function createRenderer(
   loop = true,
   overrides: Record<string, unknown> = {},
 ) {
-  const { createMediaRenderer } = await import("../src/index");
+  const { createMediaRenderer } = await import("../packages/web/src/index");
 
   return createMediaRenderer({
     autoPlay,

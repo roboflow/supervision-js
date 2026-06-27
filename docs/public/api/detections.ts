@@ -44,4 +44,4 @@ export {
   type DetectionTimelineContext,
   type Rect,
   type WritableDetectionFrameSource,
-} from "../../../src/index";
+} from "supervision-js";

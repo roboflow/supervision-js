@@ -4,32 +4,10 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "baseUrl": ".",
-    "paths": {
-      "#constants/*": ["src/constants/*"],
-      "#detections/*": ["src/detections/*"],
-      "#interactions/*": ["src/interactions/*"],
-      "#media/*": ["src/media/*"],
-      "#playback/*": ["src/playback/*"],
-      "#render-preparation/*": ["src/render-preparation/*"],
-      "#renderers/*": ["src/renderers/*"],
-      "#sessions/*": ["src/sessions/*"],
-      "#styles/*": ["src/styles/*"],
-      "#types/*": ["src/types/*"],
-      "#utils/*": ["src/utils/*"],
-      "#workers/*": ["src/workers/*"]
-    },
     "strict": true,
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
-    "outDir": "dist",
-    "rootDir": "src",
     "ignoreDeprecations": "6.0",
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,
     "noEmitOnError": true
-  },
-  "include": ["src"],
-  "exclude": ["src/**/*.test.ts"]
+  }
 }

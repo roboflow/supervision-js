@@ -38,4 +38,4 @@ export {
   type PreparedMedia,
   type ProgressivePreparedMedia,
   type ProgressiveNormalizedMedia,
-} from "../../../src/index";
+} from "supervision-js";

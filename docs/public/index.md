@@ -6,6 +6,11 @@ detections are selected from the same timing reference as the displayed frame.
 
 The main API is `createMediaSession()`. Start there.
 
+The current `supervision-js` package is the browser package. Internally, it is
+built on a platform-neutral core package so detections, timelines, styles, and
+picking contracts can eventually support other renderers without changing the
+browser quickstart.
+
 ## Quickstart
 
 Render media inside a container with the default renderer, media preparation,

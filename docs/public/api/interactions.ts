@@ -20,4 +20,4 @@ export {
   type InteractionStyle,
   type InteractionStyleContext,
   type MediaInteractionOptions,
-} from "../../../src/index";
+} from "supervision-js";

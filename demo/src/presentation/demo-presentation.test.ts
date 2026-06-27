@@ -1,15 +1,16 @@
 import { describe, expect, it } from "vitest";
 
-import { BoxShape, BoxStrokeAlignment } from "../../../src/types/box-style";
 import {
+  BoxShape,
+  BoxStrokeAlignment,
   DetectionMaskEncoding,
   type Detection,
-} from "../../../src/types/detections";
-import { FocusTargetMode } from "../../../src/types/focus-style";
-import { DetectionPickTarget } from "../../../src/types/interaction";
-import { DetectionInteractionState } from "../../../src/types/interaction-style";
-import { LabelPlacement } from "../../../src/types/label-style";
-import { MaskRenderMode } from "../../../src/types/mask-style";
+  DetectionPickTarget,
+  DetectionInteractionState,
+  FocusTargetMode,
+  LabelPlacement,
+  MaskRenderMode,
+} from "supervision-js";
 import {
   createDemoPresentation,
   defaultDemoPresentationSettings,

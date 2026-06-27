@@ -30,16 +30,20 @@ foundation before designing a broad annotation framework.
 
 ## Repo Shape
 
-- `src/` is the package source.
-- `src/index.ts` is a minimal package entrypoint. Keep public media renderer
-  enums/interfaces in `src/types/`, constants in `src/constants/`, pure helpers
-  in `src/utils/`, media-source adapters and source state helpers in
-  `src/media/`, picking and interaction helpers in `src/interactions/`,
-  playback scheduling in `src/playback/`, renderer-neutral presentation styles
-  in `src/styles/`, prepared render-window artifacts in
-  `src/render-preparation/`, session-level orchestration in `src/sessions/`,
-  worker orchestration helpers in `src/workers/`, and Pixi scene composition
-  plus renderer implementations in `src/renderers/`.
+- The root package is a private workspace orchestrator.
+- `packages/core/` is the DOM-free, platform-neutral core package. It owns
+  detections, rectangles, masks, detection timelines, memory-backed sources,
+  retention policies, source composition, picking contracts, style contracts,
+  base style classes, and pure utilities.
+- `packages/web/` is the browser package named `supervision-js`. It owns
+  `createMediaSession()`, `createMediaRenderer()`, Pixi rendering, Mediabunny
+  media adapters, browser normalization/preparation, playback, IndexedDB cold
+  detection storage, workers, and browser render-preparation artifacts.
+- `packages/web/src/index.ts` is the browser package entrypoint. It re-exports
+  the supported core API plus web-only APIs so consumers still import from
+  `supervision-js`.
+- `packages/core/src/index.ts` is the core package entrypoint. Keep it free of
+  DOM/WebWorker APIs and browser/vendor dependencies.
 - Keep renderer orchestration provider-agnostic. The public/default renderer
   factory may wire Mediabunny and Pixi defaults, but the renderer core should
   depend on small media-source and scene contracts rather than vendor modules.
@@ -47,13 +51,15 @@ foundation before designing a broad annotation framework.
   the public boundary. Prefer `createMediaSession()` for normal consumers,
   advanced renderer/detection/media hooks for serious integrations, and keep
   Pixi/Mediabunny/worker/prepared-artifact details internal.
-- Use package-private TypeScript aliases for cross-folder imports inside
-  `src/`: `#constants/...`, `#interactions/...`, `#media/...`,
-  `#playback/...`, `#renderers/...`, `#render-preparation/...`,
-  `#sessions/...`, `#styles/...`, `#types/...`, `#utils/...`, and
-  `#workers/...`. Prefer `#types/...` for internal type
-  modules; do not use `@types/...`, which reads like DefinitelyTyped package
-  space. Same-folder imports may stay relative when that is clearer.
+- Web package code should import core-owned concepts from `supervision-js-core`,
+  not by reaching into `packages/core/src`.
+- Use package-private TypeScript aliases only within each package for
+  package-local cross-folder imports, such as `#media/...`, `#renderers/...`,
+  or `#types/...` in `packages/web`, and `#detections/...`, `#styles/...`, or
+  `#utils/...` in `packages/core`.
+- Prefer `#types/...` for internal type modules; do not use `@types/...`, which
+  reads like DefinitelyTyped package space. Same-folder imports may stay
+  relative when that is clearer.
 - `demo/` is a React + Vite consumer demo.
 - `benchmark/initial/` is the isolated Milestone 3 dense-shape benchmark.
   Benchmark renderer code belongs there, not in the package entrypoint or the
@@ -62,7 +68,7 @@ foundation before designing a broad annotation framework.
   importing source files directly.
 - `test/` holds reusable Vitest harness helpers that should not be emitted as
   package source.
-- Rollup builds package JavaScript.
+- Rollup builds package JavaScript. The root build runs core first, then web.
 - Rollup emits the default render-preparation worker beside `dist/index.js`;
   keep worker entrypoints package-internal unless a public API explicitly needs
   them.

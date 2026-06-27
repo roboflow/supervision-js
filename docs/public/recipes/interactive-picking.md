@@ -25,9 +25,7 @@ const session = await createMediaSession({
   detections: {
     frames,
   },
-  media: {
-    file,
-  },
+  media: file,
   presentation: {
     boxStyle: new BaseBoxStyle(),
     focusStyle: new BaseFocusStyle({

@@ -32,4 +32,4 @@ export {
   type RenderPreparationOptions,
   type RenderPreparationPlaybackGateOptions,
   type RenderPreparationWorkerFactory,
-} from "../../../src/index";
+} from "supervision-js";

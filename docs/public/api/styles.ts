@@ -48,4 +48,4 @@ export {
   type MaskStrokeStyleOptions,
   type MaskStyle,
   type MaskStyleContext,
-} from "../../../src/index";
+} from "supervision-js";

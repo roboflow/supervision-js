@@ -1,0 +1,89 @@
+{
+  "name": "supervision-js",
+  "version": "0.0.0",
+  "description": "Browser-native computer vision media rendering and annotation engine.",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/joaomarcoscrs/supervision-js.git"
+  },
+  "homepage": "https://github.com/joaomarcoscrs/supervision-js#readme",
+  "bugs": {
+    "url": "https://github.com/joaomarcoscrs/supervision-js/issues"
+  },
+  "keywords": [
+    "computer-vision",
+    "annotations",
+    "video",
+    "rendering",
+    "pixijs",
+    "mediabunny",
+    "typescript"
+  ],
+  "type": "module",
+  "license": "Apache-2.0",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "imports": {
+    "#constants/*": {
+      "types": "./dist/constants/*.d.ts",
+      "import": "./dist/constants/*.js"
+    },
+    "#detections/*": {
+      "types": "./dist/detections/*.d.ts",
+      "import": "./dist/detections/*.js"
+    },
+    "#media/*": {
+      "types": "./dist/media/*.d.ts",
+      "import": "./dist/media/*.js"
+    },
+    "#playback/*": {
+      "types": "./dist/playback/*.d.ts",
+      "import": "./dist/playback/*.js"
+    },
+    "#render-preparation/*": {
+      "types": "./dist/render-preparation/*.d.ts",
+      "import": "./dist/render-preparation/*.js"
+    },
+    "#renderers/*": {
+      "types": "./dist/renderers/*.d.ts",
+      "import": "./dist/renderers/*.js"
+    },
+    "#sessions/*": {
+      "types": "./dist/sessions/*.d.ts",
+      "import": "./dist/sessions/*.js"
+    },
+    "#types/*": {
+      "types": "./dist/types/*.d.ts",
+      "import": "./dist/types/*.js"
+    },
+    "#workers/*": {
+      "types": "./dist/workers/*.d.ts",
+      "import": "./dist/workers/*.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "npm run clean && npm run build:types && npm run build:js",
+    "build:js": "rollup -c",
+    "build:types": "tsc --emitDeclarationOnly -p tsconfig.json",
+    "clean": "node -e \"fs.rmSync('dist', { recursive: true, force: true })\"",
+    "dev": "rollup -c -w",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json"
+  },
+  "dependencies": {
+    "mediabunny": "^1.43.1",
+    "pixi.js": "^8.18.1",
+    "supervision-js-core": "file:../core"
+  }
+}

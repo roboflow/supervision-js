@@ -5,6 +5,26 @@ library. It is not public README polish and it is not a final API promise. It is
 the working agreement that keeps implementation moving toward a clean,
 renderer-first package.
 
+## Package Boundary
+
+The repository is split into a private workspace core and the browser package:
+
+- `supervision-js-core` in `packages/core` is platform-neutral. It must not
+  depend on DOM, WebWorker, Pixi, Mediabunny, IndexedDB, fetch, or browser media
+  APIs.
+- `supervision-js` in `packages/web` is the browser package. It depends on core
+  and provides the current public import surface for browser users.
+
+Public examples and docs should keep using:
+
+```ts
+import { createMediaSession } from "supervision-js";
+```
+
+Core exists so future renderers can share detections, timelines, styles,
+retention policies, source composition, and picking contracts without inheriting
+browser implementation details.
+
 ## Primary Primitive: Media Session
 
 `MediaSession` is the main user-facing primitive. One media item maps to one
@@ -90,6 +110,10 @@ shaped around Mediabunny types.
 
 The session should expose normalized media status and playback state, not
 Mediabunny internals.
+
+Browser media, renderer, worker, and storage adapters belong in
+`packages/web`. Core should only model semantic contracts that are not tied to a
+browser runtime.
 
 ## State Contract
 

@@ -12,6 +12,18 @@ easy while keeping renderer internals replaceable.
 This guide describes the current package boundary. It is intentionally smaller
 than the implementation.
 
+Today, `supervision-js` is the browser package. It is built on a
+platform-neutral internal core package, but browser users should continue to
+import from `supervision-js`:
+
+```ts
+import { createMediaSession } from "supervision-js";
+```
+
+The split keeps detections, timelines, styles, retention policies, source
+composition, and picking contracts reusable without making Pixi, Mediabunny,
+workers, or browser storage part of those core concepts.
+
 ## Primary API
 
 Start here for normal application code:
@@ -30,6 +42,8 @@ Start here for normal application code:
 - `BoxShape`
 - `BaseMaskStyle`
 - `BaseLabelStyle`
+- `BaseInteractionStyle`
+- `BaseFocusStyle`
 - `prepareMedia()`
 - `prepareMediaProgressively()`
 - `probeMedia()`
@@ -88,8 +102,9 @@ props into `session.setPresentation()` or session options.
 It should not own media timing, render loops, detection buffering, inference
 ingestion, worker orchestration, or Pixi composition.
 
-The core package remains vanilla browser TypeScript/JavaScript. React wrappers
-should wrap the core; they should not shape it.
+The browser package remains vanilla TypeScript/JavaScript. React wrappers should
+wrap `MediaSession`; they should not shape media timing, rendering, buffering,
+or prepared artifact internals.
 
 ## Compatibility Posture
 

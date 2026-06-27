@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-const expectedRuntimeExports = [
+const expectedWebRuntimeExports = [
   "BaseBoxStyle",
   "BaseFocusStyle",
   "BaseInteractionStyle",
@@ -43,6 +43,7 @@ const expectedRuntimeExports = [
   "createBufferedDetectionTimeline",
   "createChunkedDetectionFrameSource",
   "createColdDetectionFrameSource",
+  "createCompositeDetectionFrameSource",
   "createMediaRenderer",
   "createMediaSession",
   "createMemoryColdDetectionFrameStore",
@@ -55,10 +56,53 @@ const expectedRuntimeExports = [
   "probeMedia",
 ];
 
-test("built package entrypoint exposes the public runtime API", async () => {
-  const entrypoint = await import("../dist/index.js");
+const expectedCoreRuntimeExports = [
+  "BaseBoxStyle",
+  "BaseFocusStyle",
+  "BaseInteractionStyle",
+  "BaseLabelStyle",
+  "BaseMaskStyle",
+  "BoxShape",
+  "BoxStrokeAlignment",
+  "DetectionBufferStatus",
+  "DetectionFrameRetentionMode",
+  "DetectionFrameSelectionMode",
+  "DetectionInteractionState",
+  "DetectionMaskEncoding",
+  "DetectionPickTarget",
+  "FocusTargetMode",
+  "LabelPlacement",
+  "MaskRenderMode",
+  "MediaInteractionMode",
+  "createArrayDetectionFrameSource",
+  "createBufferedDetectionTimeline",
+  "createColdDetectionFrameSource",
+  "createCompositeDetectionFrameSource",
+  "createMemoryColdDetectionFrameStore",
+  "createWritableDetectionFrameSource",
+  "pickDetectionAtPoint",
+];
 
-  assert.deepEqual(Object.keys(entrypoint).sort(), expectedRuntimeExports);
+test("built core package imports without browser APIs", async () => {
+  const entrypoint = await import("../packages/core/dist/index.js");
+
+  for (const exportName of expectedCoreRuntimeExports) {
+    assert.ok(exportName in entrypoint, `Expected core export ${exportName}`);
+  }
+
+  assert.equal(
+    typeof entrypoint.createMemoryColdDetectionFrameStore,
+    "function",
+  );
+  assert.equal(typeof entrypoint.BaseBoxStyle, "function");
+  assert.equal(entrypoint.DetectionMaskEncoding.CompressedRle, "compressedRle");
+  assert.equal(entrypoint.MediaInteractionMode.PausedOnly, "pausedOnly");
+});
+
+test("built package entrypoint exposes the public runtime API", async () => {
+  const entrypoint = await import("../packages/web/dist/index.js");
+
+  assert.deepEqual(Object.keys(entrypoint).sort(), expectedWebRuntimeExports);
   assert.equal(typeof entrypoint.createMediaSession, "function");
   assert.equal(typeof entrypoint.createMediaRenderer, "function");
   assert.equal(typeof entrypoint.probeMedia, "function");
@@ -74,7 +118,7 @@ test("built package entrypoint exposes the public runtime API", async () => {
 });
 
 test("built style classes can be constructed by package consumers", async () => {
-  const entrypoint = await import("../dist/index.js");
+  const entrypoint = await import("../packages/web/dist/index.js");
 
   const boxStyle = new entrypoint.BaseBoxStyle({
     cornerRadius: 8,

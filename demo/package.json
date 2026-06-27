@@ -12,7 +12,7 @@
     "mediabunny": "^1.43.1",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
-    "supervision-js": "file:.."
+    "supervision-js": "file:../packages/web"
   },
   "devDependencies": {
     "@types/react": "^19.2.14",

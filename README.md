@@ -113,6 +113,7 @@ Implemented foundation:
 - worker-backed prepared mask artifacts with PNG ID-mask rendering;
 - box, mask, and label styles;
 - interaction and picking;
+- focus highlights and runtime render-quality controls;
 - decision-oriented mask rendering benchmarks;
 - generated API docs.
 
