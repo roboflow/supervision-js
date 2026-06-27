@@ -33,7 +33,7 @@ export default defineConfig({
         replacement: `${coreSource("styles")}/$1.ts`,
       },
       {
-        find: /^#types\/(box-style|detection-timeline|detections|focus-style|interaction|interaction-style|label-style|mask-style|media|session-lifecycle|style)$/,
+        find: /^#types\/(box-style|detection-timeline|detections|focus-style|interaction|interaction-style|label-style|mask-style|media|media-rendering|session-lifecycle|style)$/,
         replacement: `${coreSource("types")}/$1.ts`,
       },
       {

@@ -35,7 +35,8 @@ foundation before designing a broad annotation framework.
 - `packages/core/` is the DOM-free, platform-neutral core package. It owns
   detections, rectangles, masks, detection timelines, memory-backed sources,
   retention policies, source composition, picking contracts, style contracts,
-  session lifecycle contracts, base style classes, and pure utilities.
+  session lifecycle contracts, media-rendering state/readout contracts, base
+  style classes, and pure utilities.
 - `packages/web/` is the browser package named `supervision-js`. It owns
   `createMediaSession()`, `createMediaRenderer()`, Pixi rendering, Mediabunny
   media adapters, browser normalization/preparation, playback, IndexedDB cold

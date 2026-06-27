@@ -102,6 +102,21 @@ export type {
   PlatformMediaFrameSource,
 } from "#types/media";
 export {
+  MediaRendererFit,
+  MediaRendererPlaybackState,
+  MediaSourceStatus,
+} from "#types/media-rendering";
+export type {
+  MediaFrameDiagnostics,
+  MediaFrameRenderTimings,
+  MediaRendererDiagnosticsOptions,
+  MediaRendererPresentation,
+  MediaRendererQuality,
+  MediaRendererState,
+  MediaRendererStateController,
+  MediaSourceState,
+} from "#types/media-rendering";
+export {
   MediaSessionActivityKind,
   MediaSessionActivityStatus,
   MediaSessionMode,

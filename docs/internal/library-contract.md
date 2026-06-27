@@ -26,7 +26,9 @@ import { createMediaSession } from "supervision-js";
 
 Core exists so future renderers can share detections, timelines, styles,
 retention policies, source composition, picking contracts, and session lifecycle
-contracts without inheriting browser implementation details.
+contracts without inheriting browser implementation details. Core also owns
+renderer-neutral media-rendering readouts such as fit modes, playback/source
+status, frame diagnostics, presentation style bundles, and quality hints.
 
 React Native experiments should share the core semantic model and style
 resolution, but should not reuse Pixi, Mediabunny, browser workers, or IndexedDB.
@@ -110,6 +112,11 @@ Renderer layers should remain internally separated:
 Each layer can use Pixi-specific implementation details, but orchestration
 should flow through renderer-neutral contracts.
 
+Renderer state/readout contracts that do not mention browser APIs belong to
+core. Browser renderer construction, DOM containers, Mediabunny sources, Pixi
+scene adapters, workers, and prepared-artifact implementation details belong to
+`packages/web`.
+
 ## Media Boundary
 
 Mediabunny is the first media engine. It should remain the default adapter for
@@ -126,8 +133,9 @@ browser runtime.
 ## State Contract
 
 Session lifecycle enums, activity records, and the generic lifecycle-state shell
-belong to core. Browser-specific media, renderer, normalization, and
-render-preparation payloads belong to `packages/web`.
+belong to core. Renderer-neutral state/readout payloads also belong to core.
+Browser-specific media, normalization, render-preparation, and implementation
+payloads belong to `packages/web`.
 
 `MediaSessionState` is the browser-bound aggregate state model for consuming
 apps. It should answer:

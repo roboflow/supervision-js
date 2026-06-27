@@ -1,12 +1,10 @@
 import type {
   BoxDrawInstruction,
-  BoxStyle,
   DetectionFrame,
   LabelDrawInstruction,
-  LabelStyle,
   MaskDrawInstruction,
-  MaskStyle,
   MediaFrameMetadata,
+  MediaRendererPresentation,
   PlatformMediaFrame,
 } from "supervision-js-core";
 
@@ -22,10 +20,10 @@ export type ReactNativeMediaFrame<THandle = unknown> =
 export interface ReactNativeFramePresentationOptions<THandle = unknown> {
   readonly mediaFrame: ReactNativeMediaFrame<THandle>;
   readonly detectionFrame: DetectionFrame;
-  readonly boxStyle?: BoxStyle | null;
-  readonly labelStyle?: LabelStyle | null;
-  readonly maskStyle?: MaskStyle | null;
 }
+
+export type ReactNativeFramePresentationStyleOptions =
+  MediaRendererPresentation;
 
 /**
  * Core-resolved draw instructions ready for a React Native renderer adapter.
@@ -44,7 +42,8 @@ export interface ReactNativeFramePresentation<THandle = unknown> {
 }
 
 export function resolveReactNativeFramePresentation<THandle = unknown>(
-  options: ReactNativeFramePresentationOptions<THandle>,
+  options: ReactNativeFramePresentationOptions<THandle> &
+    ReactNativeFramePresentationStyleOptions,
 ): ReactNativeFramePresentation<THandle> {
   const { boxStyle, detectionFrame, labelStyle, maskStyle, mediaFrame } =
     options;
