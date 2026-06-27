@@ -79,9 +79,12 @@ thread may still resolve style objects into serializable draw instructions, but
 expensive RLE decode and RGBA composition belong behind the prepared-window
 preparer boundary. Keep a main-thread fallback and a custom `workerFactory`
 escape hatch so strict CSP or unusual bundlers can still use the library.
-Shared worker plumbing belongs in `src/workers/`; feature-specific preparers
-should translate their own request and artifact shapes rather than each
-rebuilding request IDs, pending promises, worker errors, and orphan cleanup.
+Shared browser worker plumbing belongs in `packages/web/src/workers/`;
+feature-specific preparers should translate their own request and artifact
+shapes rather than each rebuilding request IDs, pending promises, worker
+errors, and orphan cleanup. Core may define renderer-neutral preparation
+contracts, but DOM `Worker`, `Blob`, and worker bundle details stay in the web
+package.
 
 Keep prepared artifact identity separate from presentation-only controls. For
 masks, the style `artifactKey` should include values that change prepared
