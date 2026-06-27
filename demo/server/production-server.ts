@@ -174,7 +174,7 @@ function serveStaticAsset(
   }
 
   response.statusCode = 200;
-  response.setHeader("cache-control", getCacheControl(assetPath));
+  response.setHeader("cache-control", getCacheControl(assetPath, pathPrefix));
   response.setHeader("content-type", getContentType(assetPath));
 
   if (request.method === "HEAD") {
@@ -216,7 +216,11 @@ function isReadableFile(filePath: string) {
   return existsSync(filePath) && statSync(filePath).isFile();
 }
 
-function getCacheControl(filePath: string) {
+function getCacheControl(filePath: string, pathPrefix: string) {
+  if (pathPrefix === DOCS_PATH_PREFIX) {
+    return "no-cache";
+  }
+
   return filePath.includes(`${sep}assets${sep}`)
     ? "public, max-age=31536000, immutable"
     : "no-cache";

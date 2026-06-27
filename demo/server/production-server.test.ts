@@ -62,6 +62,35 @@ describe("production demo server", () => {
     ).toBeNull();
   });
 
+  it("does not cache generated docs assets as immutable", async () => {
+    const docsRoot = await createFixtureDist("docs-cache");
+    const requestHandler = createDemoRequestHandler({ docsRoot });
+    const response = createFakeResponse();
+
+    await requestHandler(
+      createFakeRequest("/docs/assets/app.js", "GET"),
+      response,
+    );
+
+    expect(response.setHeader).toHaveBeenCalledWith(
+      "cache-control",
+      "no-cache",
+    );
+  });
+
+  it("keeps built demo assets immutable", async () => {
+    const distRoot = await createFixtureDist("demo-cache");
+    const requestHandler = createDemoRequestHandler({ distRoot });
+    const response = createFakeResponse();
+
+    await requestHandler(createFakeRequest("/assets/app.js", "GET"), response);
+
+    expect(response.setHeader).toHaveBeenCalledWith(
+      "cache-control",
+      "public, max-age=31536000, immutable",
+    );
+  });
+
   it("serves the vanilla example from the /examples/vanilla path prefix", async () => {
     const vanillaExampleRoot = await createFixtureDist("vanilla-example");
 
@@ -103,9 +132,9 @@ async function createFixtureDist(name = "demo-server") {
   return root;
 }
 
-function createFakeRequest(url: string) {
+function createFakeRequest(url: string, method = "POST") {
   return {
-    method: "POST",
+    method,
     url,
   } as IncomingMessage;
 }
