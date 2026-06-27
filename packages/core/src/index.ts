@@ -101,6 +101,18 @@ export type {
   PlatformMediaFrame,
   PlatformMediaFrameSource,
 } from "#types/media";
+export {
+  MediaSessionActivityKind,
+  MediaSessionActivityStatus,
+  MediaSessionMode,
+  MediaSessionStatus,
+} from "#types/session-lifecycle";
+export type {
+  MediaSessionActivity,
+  MediaSessionLifecycleState,
+  MediaSessionStateListener,
+  MediaSessionStateUnsubscribe,
+} from "#types/session-lifecycle";
 export type {
   FocusDrawInstruction,
   FocusFallbackStyle,

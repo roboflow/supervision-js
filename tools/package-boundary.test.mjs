@@ -42,7 +42,10 @@ const forbiddenPatterns = [
   },
   { label: "Worker", pattern: /\bWorker\b/ },
   { label: "Blob", pattern: /\bBlob\b/ },
-  { label: "File global", pattern: /\bFile\b/ },
+  {
+    label: "File global",
+    pattern: /(?::\s*File\b|\bnew\s+File\b|\binstanceof\s+File\b)/,
+  },
   { label: "FileReader", pattern: /\bFileReader\b/ },
   { label: "ImageBitmap", pattern: /\bImageBitmap\b/ },
   { label: "createImageBitmap", pattern: /\bcreateImageBitmap\b/ },

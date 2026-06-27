@@ -25,8 +25,8 @@ import { createMediaSession } from "supervision-js";
 ```
 
 Core exists so future renderers can share detections, timelines, styles,
-retention policies, source composition, and picking contracts without inheriting
-browser implementation details.
+retention policies, source composition, picking contracts, and session lifecycle
+contracts without inheriting browser implementation details.
 
 React Native experiments should share the core semantic model and style
 resolution, but should not reuse Pixi, Mediabunny, browser workers, or IndexedDB.
@@ -125,8 +125,12 @@ browser runtime.
 
 ## State Contract
 
-`MediaSessionState` is the aggregate state model for consuming apps. It should
-answer:
+Session lifecycle enums, activity records, and the generic lifecycle-state shell
+belong to core. Browser-specific media, renderer, normalization, and
+render-preparation payloads belong to `packages/web`.
+
+`MediaSessionState` is the browser-bound aggregate state model for consuming
+apps. It should answer:
 
 - Is the session loading, ready, playing, paused, buffering, processing,
   destroyed, or errored?

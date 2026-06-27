@@ -6,6 +6,10 @@ import type {
   DetectionFrameSelectionOptions,
   DetectionPlaybackGateOptions,
   DetectionFrameSource,
+  MediaSessionLifecycleState,
+  MediaSessionMode,
+  MediaSessionStateListener as CoreMediaSessionStateListener,
+  MediaSessionStateUnsubscribe,
   WritableDetectionFrameSource,
 } from "supervision-js-core";
 import type { DetectionFrame } from "supervision-js-core";
@@ -28,10 +32,18 @@ import type {
   MediaRendererState,
   MediaSourceState,
 } from "#types/media-renderer";
-import type {
-  RenderPreparationArtifactKind,
-  RenderPreparationDiagnostics,
-} from "#types/render-preparation";
+import type { RenderPreparationDiagnostics } from "#types/render-preparation";
+
+export {
+  MediaSessionActivityKind,
+  MediaSessionActivityStatus,
+  MediaSessionMode,
+  MediaSessionStatus,
+} from "supervision-js-core";
+export type {
+  MediaSessionActivity,
+  MediaSessionStateUnsubscribe,
+} from "supervision-js-core";
 
 /**
  * Media input accepted by `createMediaSession`.
@@ -215,18 +227,6 @@ export interface MediaSessionOptions {
   readonly renderer?: MediaSessionRendererOptions;
 }
 
-export enum MediaSessionMode {
-  /**
-   * Finite media. Defaults favor seek/replay and persistent detection storage.
-   */
-  File = "file",
-  /**
-   * Live or append-only media. Defaults favor rolling windows and bounded
-   * retention.
-   */
-  Stream = "stream",
-}
-
 /**
  * Prepared media state visible to host applications.
  */
@@ -236,99 +236,24 @@ export interface MediaSessionMediaState {
   readonly objectUrl: string | null;
 }
 
-/**
- * Aggregate lifecycle state for a media session.
- */
-export enum MediaSessionStatus {
-  Buffering = "buffering",
-  Destroyed = "destroyed",
-  Error = "error",
-  Loading = "loading",
-  Paused = "paused",
-  Playing = "playing",
-  Processing = "processing",
-  Ready = "ready",
-}
-
-/**
- * Subsystem currently affecting session readiness or presentation.
- */
-export enum MediaSessionActivityKind {
-  DetectionsBuffering = "detectionsBuffering",
-  DetectionsLoading = "detectionsLoading",
-  Error = "error",
-  MediaNormalizing = "mediaNormalizing",
-  MediaOpening = "mediaOpening",
-  PlaybackBuffering = "playbackBuffering",
-  RenderPreparing = "renderPreparing",
-}
-
-/**
- * State of one session activity.
- */
-export enum MediaSessionActivityStatus {
-  Error = "error",
-  Running = "running",
-  Waiting = "waiting",
-}
-
-/**
- * One loading, waiting, processing, or error activity.
- *
- * Host applications can render these as media overlays, status bars, or debug
- * panels without reaching into renderer internals.
- */
-export interface MediaSessionActivity {
-  readonly artifactKind?: RenderPreparationArtifactKind;
-  /**
-   * True when this activity should prevent media playback from advancing.
-   */
-  readonly blockingPlayback: boolean;
-  /**
-   * True when this activity prevents the current visual frame from being fully
-   * presented, while media playback may still be allowed to advance.
-   */
-  readonly blockingPresentation: boolean;
-  readonly detail?: string | null;
-  readonly errorMessage?: string | null;
-  readonly kind: MediaSessionActivityKind;
-  readonly label: string;
-  readonly pendingCount?: number;
-  readonly preparedCount?: number;
-  readonly progress?: number;
-  readonly status: MediaSessionActivityStatus;
-}
-
 export interface MediaSessionNormalizationState {
   readonly active: boolean;
   readonly progress: MediaNormalizationProgress | null;
 }
 
 /**
- * Current aggregate state for media, renderer, detections, render preparation,
- * loading activities, and errors.
+ * Current aggregate browser-session state for media, renderer, detections,
+ * render preparation, loading activities, and errors.
  */
-export interface MediaSessionState {
-  readonly activities: readonly MediaSessionActivity[];
-  readonly errorMessage: string | null;
-  readonly media: MediaSessionMediaState;
-  readonly normalization: MediaSessionNormalizationState | null;
-  /**
-   * True when at least one activity should prevent playback from advancing.
-   */
-  readonly playbackBlocked: boolean;
-  /**
-   * True when at least one activity prevents the current visual frame from
-   * being fully presented.
-   */
-  readonly presentationBlocked: boolean;
-  readonly renderPreparation: RenderPreparationDiagnostics | null;
-  readonly renderer: MediaRendererState | null;
-  readonly status: MediaSessionStatus;
-}
+export type MediaSessionState = MediaSessionLifecycleState<
+  MediaSessionMediaState,
+  MediaRendererState,
+  MediaSessionNormalizationState,
+  RenderPreparationDiagnostics
+>;
 
-export type MediaSessionStateListener = (state: MediaSessionState) => void;
-export type MediaSessionStateUnsubscribe = () => void;
+export type MediaSessionStateListener =
+  CoreMediaSessionStateListener<MediaSessionState>;
 
 export interface MediaSessionDetectionWriteOptions {
   readonly sourceId?: string;

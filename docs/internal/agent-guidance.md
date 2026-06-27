@@ -35,7 +35,7 @@ foundation before designing a broad annotation framework.
 - `packages/core/` is the DOM-free, platform-neutral core package. It owns
   detections, rectangles, masks, detection timelines, memory-backed sources,
   retention policies, source composition, picking contracts, style contracts,
-  base style classes, and pure utilities.
+  session lifecycle contracts, base style classes, and pure utilities.
 - `packages/web/` is the browser package named `supervision-js`. It owns
   `createMediaSession()`, `createMediaRenderer()`, Pixi rendering, Mediabunny
   media adapters, browser normalization/preparation, playback, IndexedDB cold
@@ -90,6 +90,7 @@ Run from the repository root:
 - `npm install`
 - `npm run dev`
 - `npm run verify`
+- `npm run boundary:check`
 - `npm run format:check`
 - `npm run lint`
 - `npm run typecheck`
