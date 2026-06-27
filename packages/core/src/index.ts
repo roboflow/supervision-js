@@ -96,6 +96,12 @@ export {
   type Rect,
 } from "#types/detections";
 export type {
+  MediaFrameMetadata,
+  MediaTimelineMetadata,
+  PlatformMediaFrame,
+  PlatformMediaFrameSource,
+} from "#types/media";
+export type {
   FocusDrawInstruction,
   FocusFallbackStyle,
   FocusFillStyle,

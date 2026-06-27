@@ -125,6 +125,12 @@ export {
   type DetectionMask,
   type Rect,
 } from "supervision-js-core";
+export type {
+  MediaFrameMetadata,
+  MediaTimelineMetadata,
+  PlatformMediaFrame,
+  PlatformMediaFrameSource,
+} from "supervision-js-core";
 export {
   DetectionPickTarget,
   MediaInteractionMode,

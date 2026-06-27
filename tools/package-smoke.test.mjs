@@ -83,6 +83,10 @@ const expectedCoreRuntimeExports = [
   "pickDetectionAtPoint",
 ];
 
+const expectedReactNativeRuntimeExports = [
+  "resolveReactNativeFramePresentation",
+];
+
 test("built core package imports without browser APIs", async () => {
   const entrypoint = await import("../packages/core/dist/index.js");
 
@@ -115,6 +119,19 @@ test("built package entrypoint exposes the public runtime API", async () => {
   assert.equal(typeof entrypoint.BaseLabelStyle, "function");
   assert.equal(entrypoint.MediaSessionStatus.Ready, "ready");
   assert.equal(entrypoint.MediaRendererFit.Contain, "contain");
+});
+
+test("built React Native package imports core without importing web", async () => {
+  const entrypoint = await import("../packages/react-native/dist/index.js");
+
+  assert.deepEqual(
+    Object.keys(entrypoint).sort(),
+    expectedReactNativeRuntimeExports,
+  );
+  assert.equal(
+    typeof entrypoint.resolveReactNativeFramePresentation,
+    "function",
+  );
 });
 
 test("built style classes can be constructed by package consumers", async () => {

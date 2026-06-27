@@ -14,6 +14,9 @@ The repository is split into a private workspace core and the browser package:
   APIs.
 - `supervision-js` in `packages/web` is the browser package. It depends on core
   and provides the current public import surface for browser users.
+- `supervision-js-react-native` in `packages/react-native` is experimental and
+  private. It depends on core, must not depend on the web package, and exists to
+  prove future native rendering boundaries before a stable mobile API exists.
 
 Public examples and docs should keep using:
 
@@ -24,6 +27,11 @@ import { createMediaSession } from "supervision-js";
 Core exists so future renderers can share detections, timelines, styles,
 retention policies, source composition, and picking contracts without inheriting
 browser implementation details.
+
+React Native experiments should share the core semantic model and style
+resolution, but should not reuse Pixi, Mediabunny, browser workers, or IndexedDB.
+Mobile media frame providers, storage, and rendering surfaces are platform
+implementation details.
 
 ## Primary Primitive: Media Session
 

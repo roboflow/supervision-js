@@ -13,6 +13,7 @@ Before making project-direction or architecture changes, read:
 - [`renderer-first-roadmap.md`](renderer-first-roadmap.md)
 - [`pixijs-guidance.md`](pixijs-guidance.md)
 - [`library-contract.md`](library-contract.md)
+- [`react-native-architecture.md`](react-native-architecture.md)
 - [`../public/guides/public-api.md`](../public/guides/public-api.md)
 
 Those docs define the current product intent: prove the browser rendering
@@ -39,6 +40,10 @@ foundation before designing a broad annotation framework.
   `createMediaSession()`, `createMediaRenderer()`, Pixi rendering, Mediabunny
   media adapters, browser normalization/preparation, playback, IndexedDB cold
   detection storage, workers, and browser render-preparation artifacts.
+- `packages/react-native/` is a private experimental package named
+  `supervision-js-react-native`. It depends on `supervision-js-core`, must not
+  depend on `supervision-js`, and must not import Pixi, Mediabunny, DOM APIs, or
+  browser storage.
 - `packages/web/src/index.ts` is the browser package entrypoint. It re-exports
   the supported core API plus web-only APIs so consumers still import from
   `supervision-js`.

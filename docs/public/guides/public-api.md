@@ -106,6 +106,17 @@ The browser package remains vanilla TypeScript/JavaScript. React wrappers should
 wrap `MediaSession`; they should not shape media timing, rendering, buffering,
 or prepared artifact internals.
 
+## React Native Boundary
+
+React Native support is experimental and private. The future mobile package
+should depend on the platform-neutral core concepts, not on the browser package.
+Pixi, Mediabunny, DOM APIs, browser workers, and IndexedDB remain browser
+implementation details.
+
+Mobile apps may eventually feed detections from on-device inference engines, but
+inference is outside the rendering package boundary. The library should render
+and interact with detections regardless of how they were produced.
+
 ## Compatibility Posture
 
 This is still a prototype. The strongest compatibility promise is around the
