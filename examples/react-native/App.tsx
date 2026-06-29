@@ -29,6 +29,7 @@ import {
   BaseLabelStyle,
   BaseMaskStyle,
   BoxShape,
+  LabelPlacement,
   MaskRenderMode,
   type DetectionPickResult,
 } from "supervision-js-core";
@@ -57,8 +58,8 @@ export default function App() {
     null,
   );
 
-  const canvasWidth = Math.max(320, window.width - 32);
-  const canvasHeight = Math.round(canvasWidth * 0.72);
+  const canvasWidth = Math.max(320, window.width - 24);
+  const canvasHeight = Math.round(canvasWidth * 0.58);
   const maskStyle = useMemo(
     () =>
       new BaseMaskStyle({
@@ -91,7 +92,24 @@ export default function App() {
           }),
         }),
         detectionFrame: basketballDetectionFrame,
-        labelStyle: new BaseLabelStyle({ includeConfidence: true }),
+        labelStyle: new BaseLabelStyle({
+          background: (detection) => ({
+            alpha: 0.82,
+            color: colorForClass(detection.className ?? ""),
+            cornerRadius: 4,
+            paddingX: 5,
+            paddingY: 2,
+          }),
+          includeConfidence: true,
+          offsetY: 4,
+          placement: LabelPlacement.InsideTop,
+          textStyle: {
+            alpha: 1,
+            color: 0xffffff,
+            fontSize: 10,
+            fontWeight: "800",
+          },
+        }),
         maskStyle,
         mediaFrame: {
           metadata: {
@@ -195,8 +213,17 @@ export default function App() {
       <StatusBar style="light" />
       <View style={styles.screen}>
         <View style={styles.header}>
-          <Text style={styles.title}>supervision-js</Text>
-          <Text style={styles.subtitle}>React Native rendering proof</Text>
+          <View style={styles.brand}>
+            <BrandMark />
+            <View style={styles.headerCopy}>
+              <Text style={styles.title}>supervision-js</Text>
+              <Text style={styles.subtitle}>React Native rendering proof</Text>
+            </View>
+          </View>
+          <StatusPill
+            tone={maskShaderStatus === "active" ? "ready" : "warning"}
+            value={maskShaderStatus === "active" ? "Skia shader" : "No shader"}
+          />
         </View>
 
         <View
@@ -352,21 +379,27 @@ export default function App() {
               );
             })}
           </Canvas>
+          <View style={styles.stageReadout}>
+            <StatusPill tone="ready" value="media + detections" />
+            <StatusPill
+              value={`${maskPreparation.artifact?.maskCount ?? 0} masks`}
+            />
+            <StatusPill
+              value={`${formatBytes(
+                maskPreparation.artifact?.data.byteLength ?? 0,
+              )} artifact`}
+            />
+          </View>
         </View>
 
-        <View style={styles.card}>
-          <View>
-            <Text style={styles.cardTitle}>Fixture</Text>
-            <Text style={styles.cardValue}>9s basketball sample · frame 0</Text>
-          </View>
-          <View style={styles.metricRow}>
-            <Metric
-              label="Detections"
-              value={String(presentation.boxes.length)}
-            />
-            <Metric label="Scale" value={`${layout.scale.toFixed(3)}x`} />
-            <Metric label="Selected" value={formatSelected(selectedPick)} />
-          </View>
+        <View style={styles.metricsGrid}>
+          <Metric label="Frame" value="#0" />
+          <Metric
+            label="Detections"
+            value={String(presentation.boxes.length)}
+          />
+          <Metric label="Scale" value={`${layout.scale.toFixed(3)}x`} />
+          <Metric label="Selected" value={formatSelected(selectedPick)} />
         </View>
 
         <View
@@ -377,13 +410,19 @@ export default function App() {
               : styles.shaderUnavailable,
           ]}
         >
-          <View>
-            <Text style={styles.cardTitle}>Prepared ID mask</Text>
-            <Text style={styles.cardValue}>
-              {maskShaderStatus === "active"
-                ? "Skia shader active"
-                : "Shader unavailable"}
-            </Text>
+          <View style={styles.cardHeader}>
+            <View>
+              <Text style={styles.cardTitle}>Prepared ID mask</Text>
+              <Text style={styles.cardValue}>
+                {maskShaderStatus === "active"
+                  ? "One frame artifact, one shader pass"
+                  : "Shader unavailable"}
+              </Text>
+            </View>
+            <StatusPill
+              tone={maskShaderStatus === "active" ? "ready" : "warning"}
+              value={maskShaderStatus === "active" ? "gpu path" : "fallback"}
+            />
           </View>
           <View style={styles.metricRow}>
             <Metric
@@ -401,18 +440,20 @@ export default function App() {
         </View>
 
         <View style={styles.card}>
-          <View>
-            <Text style={styles.cardTitle}>Inspect</Text>
-            <Text style={styles.cardValue}>
-              {selectedPick?.detection.className ?? "Tap a detection"}
-            </Text>
+          <View style={styles.cardHeader}>
+            <View>
+              <Text style={styles.cardTitle}>Inspect</Text>
+              <Text style={styles.cardValue}>
+                {selectedPick?.detection.className ?? "Tap a detection"}
+              </Text>
+            </View>
+            <StatusPill value={selectedPick?.target ?? "none"} />
           </View>
           <View style={styles.metricRow}>
             <Metric
               label="Confidence"
               value={formatConfidence(selectedPick?.detection.confidence)}
             />
-            <Metric label="Target" value={selectedPick?.target ?? "none"} />
             <Metric
               label="Point"
               value={
@@ -423,23 +464,65 @@ export default function App() {
                   : "-"
               }
             />
+            <Metric
+              label="Class"
+              value={selectedPick?.detection.className ?? "-"}
+            />
           </View>
         </View>
 
         <View style={styles.control}>
-          <View>
+          <View style={styles.controlCopy}>
             <Text style={styles.cardTitle}>Box style</Text>
-            <Text style={styles.body}>
-              Resolved by core styles, drawn by Skia.
-            </Text>
+            <Text style={styles.body}>Core styles, Skia drawing.</Text>
           </View>
           <View style={styles.toggleRow}>
             <Text style={styles.body}>Rounded</Text>
-            <Switch onValueChange={setRounded} value={rounded} />
+            <Switch
+              ios_backgroundColor="#1b2029"
+              onValueChange={setRounded}
+              thumbColor={rounded ? "#f8fafc" : "#8b95a7"}
+              trackColor={{ false: "#242a35", true: "#77e4f2" }}
+              value={rounded}
+            />
           </View>
         </View>
       </View>
     </SafeAreaView>
+  );
+}
+
+function BrandMark() {
+  return (
+    <View style={styles.mark}>
+      <View style={[styles.markBar, styles.markCyan]} />
+      <View style={[styles.markBar, styles.markMint]} />
+      <View style={[styles.markBar, styles.markViolet]} />
+    </View>
+  );
+}
+
+function StatusPill(props: {
+  readonly tone?: "ready" | "warning";
+  readonly value: string;
+}) {
+  return (
+    <View
+      style={[
+        styles.statusPill,
+        props.tone === "ready" ? styles.statusPillReady : null,
+        props.tone === "warning" ? styles.statusPillWarning : null,
+      ]}
+    >
+      <View
+        style={[
+          styles.statusDot,
+          props.tone === "ready" ? styles.statusDotReady : null,
+          props.tone === "warning" ? styles.statusDotWarning : null,
+        ]}
+      />
+      <Text style={styles.statusPillText}>{props.value}</Text>
+    </View>
   );
 }
 
@@ -478,103 +561,216 @@ function formatBytes(bytes: number) {
 
 const styles = StyleSheet.create({
   body: {
-    color: "#9ca3af",
-    fontSize: 14,
+    color: "#9aa4b2",
+    fontSize: 12,
     fontWeight: "600",
   },
+  brand: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 10,
+  },
   canvasFrame: {
-    borderColor: "#1f2937",
-    borderRadius: 18,
+    backgroundColor: "#05070b",
+    borderColor: "#1a202b",
+    borderRadius: 14,
     borderWidth: 1,
     overflow: "hidden",
   },
   canvasSurface: {
-    borderRadius: 18,
+    borderRadius: 14,
   },
   card: {
-    backgroundColor: "#0b0f17",
-    borderColor: "#1f2937",
-    borderRadius: 18,
+    backgroundColor: "#080b11",
+    borderColor: "#1a202b",
+    borderRadius: 12,
     borderWidth: 1,
-    gap: 16,
-    padding: 16,
+    gap: 10,
+    padding: 10,
+  },
+  cardHeader: {
+    alignItems: "flex-start",
+    flexDirection: "row",
+    gap: 10,
+    justifyContent: "space-between",
   },
   cardTitle: {
-    color: "#9ca3af",
-    fontSize: 12,
+    color: "#9aa4b2",
+    fontSize: 10,
     fontWeight: "800",
     letterSpacing: 1,
     textTransform: "uppercase",
   },
   cardValue: {
-    color: "#f8fafc",
-    fontSize: 18,
+    color: "#f5f7fb",
+    fontSize: 14,
     fontWeight: "800",
-    marginTop: 4,
+    marginTop: 3,
   },
   control: {
     alignItems: "center",
-    backgroundColor: "#0b0f17",
-    borderColor: "#1f2937",
-    borderRadius: 18,
+    backgroundColor: "#080b11",
+    borderColor: "#1a202b",
+    borderRadius: 12,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 12,
+    justifyContent: "space-between",
+    padding: 10,
+  },
+  controlCopy: {
+    flex: 1,
+  },
+  header: {
+    alignItems: "center",
+    backgroundColor: "#080b11",
+    borderColor: "#1a202b",
+    borderRadius: 14,
     borderWidth: 1,
     flexDirection: "row",
     justifyContent: "space-between",
-    padding: 16,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
   },
-  header: {
-    gap: 4,
+  headerCopy: {
+    gap: 1,
+  },
+  mark: {
+    backgroundColor: "#141923",
+    borderColor: "#2b3342",
+    borderRadius: 8,
+    borderWidth: 1,
+    height: 34,
+    overflow: "hidden",
+    position: "relative",
+    width: 34,
+  },
+  markBar: {
+    borderRadius: 4,
+    height: 18,
+    position: "absolute",
+    transform: [{ skewY: "-14deg" }],
+    width: 8,
+  },
+  markCyan: {
+    backgroundColor: "#7ee7f4",
+    left: 9,
+    top: 8,
+  },
+  markMint: {
+    backgroundColor: "#92f2b3",
+    left: 18,
+    top: 6,
+  },
+  markViolet: {
+    backgroundColor: "#8d7df3",
+    left: 12,
+    top: 18,
   },
   metric: {
+    backgroundColor: "#070a10",
+    borderColor: "#1a202b",
+    borderRadius: 11,
+    borderWidth: 1,
     flex: 1,
-    gap: 4,
+    gap: 3,
+    minWidth: 0,
+    paddingHorizontal: 9,
+    paddingVertical: 8,
   },
   metricLabel: {
-    color: "#6b7280",
-    fontSize: 11,
+    color: "#788397",
+    fontSize: 9,
     fontWeight: "800",
     letterSpacing: 1,
     textTransform: "uppercase",
   },
   metricRow: {
     flexDirection: "row",
-    gap: 12,
+    gap: 8,
   },
   metricValue: {
-    color: "#d1fae5",
-    fontSize: 16,
+    color: "#dfffe7",
+    fontSize: 13,
     fontVariant: ["tabular-nums"],
     fontWeight: "800",
   },
+  metricsGrid: {
+    flexDirection: "row",
+    gap: 8,
+  },
   safeArea: {
-    backgroundColor: "#030712",
+    backgroundColor: "#050608",
     flex: 1,
   },
   screen: {
-    backgroundColor: "#030712",
+    backgroundColor: "#050608",
     flex: 1,
-    gap: 16,
-    padding: 16,
+    gap: 10,
+    padding: 12,
   },
   subtitle: {
-    color: "#94a3b8",
-    fontSize: 15,
+    color: "#9aa4b2",
+    fontSize: 11,
     fontWeight: "700",
   },
   shaderReady: {
-    borderColor: "#14532d",
+    borderColor: "#284a34",
   },
   shaderUnavailable: {
-    borderColor: "#7f1d1d",
+    borderColor: "#5b2424",
+  },
+  stageReadout: {
+    bottom: 8,
+    flexDirection: "row",
+    gap: 6,
+    left: 8,
+    position: "absolute",
+    right: 8,
+  },
+  statusDot: {
+    backgroundColor: "#a1a9b8",
+    borderRadius: 4,
+    height: 7,
+    width: 7,
+  },
+  statusDotReady: {
+    backgroundColor: "#8af59d",
+  },
+  statusDotWarning: {
+    backgroundColor: "#ffd976",
+  },
+  statusPill: {
+    alignItems: "center",
+    backgroundColor: "rgba(9, 12, 18, 0.82)",
+    borderColor: "#28303e",
+    borderRadius: 999,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 6,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+  },
+  statusPillReady: {
+    borderColor: "#284a34",
+  },
+  statusPillText: {
+    color: "#d7dde7",
+    fontSize: 10,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "800",
+  },
+  statusPillWarning: {
+    borderColor: "#5f5126",
   },
   title: {
-    color: "#f8fafc",
-    fontSize: 28,
+    color: "#f5f7fb",
+    fontSize: 16,
     fontWeight: "900",
   },
   toggleRow: {
     alignItems: "center",
     flexDirection: "row",
-    gap: 10,
+    gap: 8,
   },
 });
