@@ -50,6 +50,13 @@ export {
   canReuseMaskStyleArtifacts,
   resolveMaskStyleOpacity,
 } from "#utils/mask-style";
+export {
+  MAX_ID_MASK_PALETTE_ENTRIES,
+  MAX_ID_MASK_STROKE_WIDTH,
+  createIdMaskFrame,
+  type IdMaskFrame,
+  type IdMaskInstruction,
+} from "#utils/id-mask-frame";
 export { includeDefined } from "#utils/object";
 
 export { BoxShape, BoxStrokeAlignment } from "#types/box-style";

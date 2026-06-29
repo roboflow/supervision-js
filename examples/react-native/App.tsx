@@ -1,8 +1,15 @@
 import {
+  AlphaType,
   Canvas,
+  ColorType,
+  FilterMode,
+  ImageShader,
   Image as SkiaImage,
+  MipmapMode,
   Rect,
   RoundedRect,
+  Shader,
+  Skia,
   Text as SkiaText,
   matchFont,
   useImage,
@@ -22,10 +29,14 @@ import {
   BaseLabelStyle,
   BaseMaskStyle,
   BoxShape,
+  MaskRenderMode,
   type DetectionPickResult,
 } from "supervision-js-core";
 import {
+  REACT_NATIVE_ID_MASK_SHADER_SOURCE,
+  createReactNativeIdMaskFrame,
   pickReactNativeDetectionAtPoint,
+  resolveReactNativeIdMaskUniforms,
   resolveReactNativeFrameLayout,
   resolveReactNativeFramePresentation,
   resolveReactNativeLabelLayout,
@@ -48,6 +59,20 @@ export default function App() {
 
   const canvasWidth = Math.max(320, window.width - 32);
   const canvasHeight = Math.round(canvasWidth * 0.72);
+  const maskStyle = useMemo(
+    () =>
+      new BaseMaskStyle({
+        color: (detection) => colorForClass(detection.className ?? ""),
+        mode: MaskRenderMode.FillAndStroke,
+        opacity: 0.55,
+        stroke: (detection) => ({
+          alpha: 1,
+          color: colorForClass(detection.className ?? ""),
+          width: detection.className === "basketball" ? 3 : 2,
+        }),
+      }),
+    [],
+  );
 
   const presentation = useMemo(
     () =>
@@ -67,7 +92,7 @@ export default function App() {
         }),
         detectionFrame: basketballDetectionFrame,
         labelStyle: new BaseLabelStyle({ includeConfidence: true }),
-        maskStyle: new BaseMaskStyle({ alpha: 0.5 }),
+        maskStyle,
         mediaFrame: {
           metadata: {
             duration: 1 / 30,
@@ -76,7 +101,7 @@ export default function App() {
           payload: basketballFrame,
         },
       }),
-    [rounded],
+    [maskStyle, rounded],
   );
 
   const layout = useMemo(
@@ -89,6 +114,53 @@ export default function App() {
       }),
     [canvasHeight, canvasWidth, presentation.mediaMetadata],
   );
+
+  const maskPreparation = useMemo(() => {
+    const startedAt = Date.now();
+    const artifact = createReactNativeIdMaskFrame({
+      detectionFrame: basketballDetectionFrame,
+      maskStyle,
+    });
+
+    return {
+      artifact,
+      prepMs: Date.now() - startedAt,
+    };
+  }, [maskStyle]);
+  const maskImage = useMemo(() => {
+    if (!maskPreparation.artifact) {
+      return null;
+    }
+
+    return Skia.Image.MakeImage(
+      {
+        alphaType: AlphaType.Opaque,
+        colorType: ColorType.Alpha_8,
+        height: maskPreparation.artifact.height,
+        width: maskPreparation.artifact.width,
+      },
+      Skia.Data.fromBytes(maskPreparation.artifact.data),
+      maskPreparation.artifact.width,
+    );
+  }, [maskPreparation.artifact]);
+  const maskEffect = useMemo(
+    () => Skia.RuntimeEffect.Make(REACT_NATIVE_ID_MASK_SHADER_SOURCE),
+    [],
+  );
+  const maskUniforms = useMemo(
+    () =>
+      maskPreparation.artifact
+        ? resolveReactNativeIdMaskUniforms({
+            artifact: maskPreparation.artifact,
+            layout,
+          })
+        : null,
+    [layout, maskPreparation.artifact],
+  );
+  const maskShaderStatus =
+    maskPreparation.artifact && maskImage && maskEffect && maskUniforms
+      ? "active"
+      : "unavailable";
 
   const labelLayouts = useMemo(
     () =>
@@ -170,6 +242,28 @@ export default function App() {
                 x={layout.mediaRect.x}
                 y={layout.mediaRect.y}
               />
+            ) : null}
+            {maskEffect && maskImage && maskUniforms ? (
+              <Rect
+                height={layout.mediaRect.height}
+                width={layout.mediaRect.width}
+                x={layout.mediaRect.x}
+                y={layout.mediaRect.y}
+              >
+                <Shader source={maskEffect} uniforms={maskUniforms}>
+                  <ImageShader
+                    fit="fill"
+                    image={maskImage}
+                    rect={layout.mediaRect}
+                    sampling={{
+                      filter: FilterMode.Nearest,
+                      mipmap: MipmapMode.None,
+                    }}
+                    tx="clamp"
+                    ty="clamp"
+                  />
+                </Shader>
+              </Rect>
             ) : null}
             {presentation.boxes.map((box, index) => {
               const rect = layout.mapRect(box.rect);
@@ -275,6 +369,37 @@ export default function App() {
           </View>
         </View>
 
+        <View
+          style={[
+            styles.card,
+            maskShaderStatus === "active"
+              ? styles.shaderReady
+              : styles.shaderUnavailable,
+          ]}
+        >
+          <View>
+            <Text style={styles.cardTitle}>Prepared ID mask</Text>
+            <Text style={styles.cardValue}>
+              {maskShaderStatus === "active"
+                ? "Skia shader active"
+                : "Shader unavailable"}
+            </Text>
+          </View>
+          <View style={styles.metricRow}>
+            <Metric
+              label="Masks"
+              value={String(maskPreparation.artifact?.maskCount ?? 0)}
+            />
+            <Metric
+              label="Artifact"
+              value={formatBytes(
+                maskPreparation.artifact?.data.byteLength ?? 0,
+              )}
+            />
+            <Metric label="Prep" value={`${maskPreparation.prepMs}ms`} />
+          </View>
+        </View>
+
         <View style={styles.card}>
           <View>
             <Text style={styles.cardTitle}>Inspect</Text>
@@ -341,6 +466,14 @@ function formatConfidence(confidence: number | undefined) {
 
 function formatSelected(pick: DetectionPickResult | null) {
   return pick?.detection.className ?? "none";
+}
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024 * 1024) {
+    return `${Math.round(bytes / 1024)} KB`;
+  }
+
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 const styles = StyleSheet.create({
@@ -427,6 +560,12 @@ const styles = StyleSheet.create({
     color: "#94a3b8",
     fontSize: 15,
     fontWeight: "700",
+  },
+  shaderReady: {
+    borderColor: "#14532d",
+  },
+  shaderUnavailable: {
+    borderColor: "#7f1d1d",
   },
   title: {
     color: "#f8fafc",

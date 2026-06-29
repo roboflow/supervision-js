@@ -6,10 +6,14 @@ import {
   DetectionMaskEncoding,
   DetectionPickTarget,
   LabelPlacement,
+  MaskRenderMode,
   type DetectionFrame,
 } from "supervision-js-core";
 import {
+  createReactNativeIdMaskFrame,
   pickReactNativeDetectionAtPoint,
+  REACT_NATIVE_ID_MASK_SHADER_SOURCE,
+  resolveReactNativeIdMaskUniforms,
   resolveReactNativeFrameLayout,
   resolveReactNativeLabelLayout,
   resolveReactNativeFramePresentation,
@@ -252,6 +256,133 @@ describe("resolveReactNativeLabelLayout", () => {
   });
 });
 
+describe("React Native ID-mask artifacts", () => {
+  it("creates one prepared ID-mask artifact from core mask styles", () => {
+    const frame: DetectionFrame = {
+      detections: [
+        {
+          className: "horse",
+          mask: {
+            counts: encodeCompressedRleCounts([0, 2]),
+            encoding: DetectionMaskEncoding.CompressedRle,
+            height: 1,
+            width: 3,
+          },
+        },
+        {
+          className: "person",
+          mask: {
+            counts: encodeCompressedRleCounts([1, 1, 1]),
+            encoding: DetectionMaskEncoding.CompressedRle,
+            height: 1,
+            width: 3,
+          },
+        },
+      ],
+      frameIndex: 1,
+      mediaTime: 1 / 30,
+    };
+
+    const artifact = createReactNativeIdMaskFrame({
+      detectionFrame: frame,
+      maskStyle: new BaseMaskStyle({
+        color: (detection) =>
+          detection.className === "person" ? 0x22c55e : 0x38bdf8,
+        opacity: 0.7,
+        stroke: { alpha: 1, color: 0xffffff, width: 3 },
+      }),
+    });
+
+    expect(artifact).toBeDefined();
+    expect([...artifact!.data]).toEqual([1, 2, 0]);
+    expect(artifact!.maskCount).toBe(2);
+    expect(artifact!.opacity).toBe(0.7);
+    expect(artifact!.hasStroke).toBe(true);
+    expect(artifact!.strokeWidths[1]).toBe(3);
+  });
+
+  it("returns undefined when no masks should render", () => {
+    const frame: DetectionFrame = {
+      detections: [
+        {
+          mask: {
+            counts: encodeCompressedRleCounts([0, 1]),
+            encoding: DetectionMaskEncoding.CompressedRle,
+            height: 1,
+            width: 1,
+          },
+        },
+      ],
+      mediaTime: 0,
+    };
+
+    expect(
+      createReactNativeIdMaskFrame({
+        detectionFrame: frame,
+        maskStyle: new BaseMaskStyle({
+          mode: MaskRenderMode.FillOnly,
+          shouldRender: () => false,
+        }),
+      }),
+    ).toBeUndefined();
+  });
+
+  it("resolves shader uniforms from a prepared ID-mask artifact", () => {
+    const artifact = createReactNativeIdMaskFrame({
+      detectionFrame: {
+        detections: [
+          {
+            mask: {
+              counts: encodeCompressedRleCounts([0, 1]),
+              encoding: DetectionMaskEncoding.CompressedRle,
+              height: 8,
+              width: 4,
+            },
+          },
+        ],
+        mediaTime: 0,
+      },
+      maskStyle: new BaseMaskStyle({
+        color: 0xff0000,
+        opacity: 0.4,
+      }),
+    });
+
+    const uniforms = resolveReactNativeIdMaskUniforms({
+      artifact: artifact!,
+      layout: resolveReactNativeFrameLayout({
+        canvasHeight: 50,
+        canvasWidth: 100,
+        mediaHeight: 8,
+        mediaWidth: 4,
+      }),
+    });
+
+    expect(uniforms.uOpacity).toBe(0.4);
+    expect([...uniforms.uTextureSize]).toEqual([4, 8]);
+    expect([...uniforms.uMediaRect]).toEqual([37.5, 0, 25, 50]);
+    expect(uniforms.uBorderEnabled).toBe(0);
+    expect(Array.isArray(uniforms.uFillPalette)).toBe(true);
+    expect(uniforms.uFillPalette).toHaveLength(256);
+    expect(uniforms.uFillPalette.slice(4, 8)).toEqual([1, 0, 0, 1]);
+  });
+
+  it("uses constant palette lookups for SkSL shader compatibility", () => {
+    expect(REACT_NATIVE_ID_MASK_SHADER_SOURCE).not.toContain(
+      "uFillPalette[maskId]",
+    );
+    expect(REACT_NATIVE_ID_MASK_SHADER_SOURCE).not.toContain(
+      "uStrokePalette[maskId]",
+    );
+    expect(REACT_NATIVE_ID_MASK_SHADER_SOURCE).not.toContain(
+      "uStrokeWidths[maskId]",
+    );
+    expect(REACT_NATIVE_ID_MASK_SHADER_SOURCE).toContain(
+      "return uFillPalette[1];",
+    );
+  });
+});
+
 function expectPresentation(
   presentation: ReactNativeFramePresentation<{
     readonly nativeTextureId: string;
@@ -263,4 +394,32 @@ function expectPresentation(
     mediaTime: 0.2333,
     width: 1920,
   });
+}
+
+function encodeCompressedRleCounts(counts: readonly number[]) {
+  return counts
+    .map((count, index) => {
+      let value = index > 2 ? count - counts[index - 2]! : count;
+      let encoded = "";
+      let more = true;
+
+      while (more) {
+        let charCode = value & 0x1f;
+
+        value >>= 5;
+        more = !(
+          (value === 0 && (charCode & 0x10) === 0) ||
+          (value === -1 && (charCode & 0x10) !== 0)
+        );
+
+        if (more) {
+          charCode |= 0x20;
+        }
+
+        encoded += String.fromCharCode(charCode + 48);
+      }
+
+      return encoded;
+    })
+    .join("");
 }

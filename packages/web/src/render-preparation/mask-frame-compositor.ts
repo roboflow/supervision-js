@@ -1,9 +1,17 @@
 import type { SerializableMaskInstruction } from "#render-preparation/mask-preparation-worker-protocol";
 import type { MaskStrokeStyle } from "supervision-js-core";
-import { decodeCompressedRleMask } from "supervision-js-core";
+import {
+  createIdMaskFrame,
+  decodeCompressedRleMask,
+  type IdMaskFrame,
+} from "supervision-js-core";
+export {
+  MAX_ID_MASK_PALETTE_ENTRIES,
+  MAX_ID_MASK_STROKE_WIDTH,
+  createIdMaskFrame,
+  type IdMaskFrame,
+} from "supervision-js-core";
 
-export const MAX_ID_MASK_PALETTE_ENTRIES = 64;
-export const MAX_ID_MASK_STROKE_WIDTH = 16;
 const PNG_SIGNATURE = new Uint8Array([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
 ]);
@@ -27,17 +35,6 @@ export interface CompositedMaskFrame {
   readonly width: number;
 }
 
-export interface IdMaskFrame {
-  readonly data: Uint8Array<ArrayBuffer>;
-  readonly fillPalette: Float32Array<ArrayBuffer>;
-  readonly hasStroke: boolean;
-  readonly height: number;
-  readonly maxStrokeWidth: number;
-  readonly strokePalette: Float32Array<ArrayBuffer>;
-  readonly strokeWidths: Float32Array<ArrayBuffer>;
-  readonly width: number;
-}
-
 export interface PngIdMaskFrame extends IdMaskFrame {
   readonly png: Uint8Array<ArrayBuffer>;
 }
@@ -58,87 +55,6 @@ export function compositeMaskFrame(
   }
 
   return { data, height, width };
-}
-
-export function createIdMaskFrame(
-  instructions: readonly SerializableMaskInstruction[],
-): IdMaskFrame | undefined {
-  if (instructions.length === 0) {
-    return undefined;
-  }
-
-  const width = Math.max(...instructions.map(({ mask }) => mask.width));
-  const height = Math.max(...instructions.map(({ mask }) => mask.height));
-  const data = new Uint8Array(new ArrayBuffer(width * height));
-  const fillPalette = new Float32Array(
-    new ArrayBuffer(MAX_ID_MASK_PALETTE_ENTRIES * 4 * 4),
-  );
-  const strokePalette = new Float32Array(
-    new ArrayBuffer(MAX_ID_MASK_PALETTE_ENTRIES * 4 * 4),
-  );
-  const strokeWidths = new Float32Array(
-    new ArrayBuffer(MAX_ID_MASK_PALETTE_ENTRIES * 4),
-  );
-  let hasStroke = false;
-  let maxStrokeWidth = 0;
-
-  for (const instruction of instructions) {
-    const detectionMaskId = instruction.detectionIndex + 1;
-
-    if (
-      detectionMaskId <= 0 ||
-      detectionMaskId >= MAX_ID_MASK_PALETTE_ENTRIES
-    ) {
-      return undefined;
-    }
-
-    writePaletteEntry(
-      fillPalette,
-      detectionMaskId,
-      instruction.color,
-      instruction.alpha,
-    );
-
-    if (instruction.stroke && instruction.stroke.width > 0) {
-      const strokeWidth = Math.min(
-        Math.max(0, instruction.stroke.width),
-        MAX_ID_MASK_STROKE_WIDTH,
-      );
-
-      hasStroke = true;
-      strokeWidths[detectionMaskId] = strokeWidth;
-      maxStrokeWidth = Math.max(maxStrokeWidth, strokeWidth);
-      writePaletteEntry(
-        strokePalette,
-        detectionMaskId,
-        instruction.stroke.color,
-        instruction.stroke.alpha,
-      );
-    }
-
-    const decodedMask = decodeCompressedRleMask(instruction.mask);
-
-    for (let y = 0; y < decodedMask.height; y += 1) {
-      for (let x = 0; x < decodedMask.width; x += 1) {
-        const maskOffset = y * decodedMask.width + x;
-
-        if (decodedMask.data[maskOffset]) {
-          data[y * width + x] = detectionMaskId;
-        }
-      }
-    }
-  }
-
-  return {
-    data,
-    fillPalette,
-    hasStroke,
-    height,
-    maxStrokeWidth,
-    strokePalette,
-    strokeWidths,
-    width,
-  };
 }
 
 export async function createPngIdMaskFrame(
@@ -288,20 +204,6 @@ function writePixel(
   rgba[rgbaOffset + 1] = color.green;
   rgba[rgbaOffset + 2] = color.blue;
   rgba[rgbaOffset + 3] = color.alpha;
-}
-
-function writePaletteEntry(
-  palette: Float32Array,
-  id: number,
-  color: number,
-  alpha: number,
-) {
-  const offset = id * 4;
-
-  palette[offset] = ((color >> 16) & 0xff) / 255;
-  palette[offset + 1] = ((color >> 8) & 0xff) / 255;
-  palette[offset + 2] = (color & 0xff) / 255;
-  palette[offset + 3] = Math.max(0, Math.min(alpha, 1));
 }
 
 async function encodeGrayscalePng(options: {

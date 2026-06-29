@@ -81,19 +81,27 @@ const expectedCoreRuntimeExports = [
   "MediaSessionMode",
   "MediaSessionStatus",
   "MediaSourceStatus",
+  "MAX_ID_MASK_PALETTE_ENTRIES",
+  "MAX_ID_MASK_STROKE_WIDTH",
   "createArrayDetectionFrameSource",
   "createBufferedDetectionTimeline",
   "createColdDetectionFrameSource",
   "createCompositeDetectionFrameSource",
+  "createIdMaskFrame",
   "createMemoryColdDetectionFrameStore",
   "createWritableDetectionFrameSource",
   "pickDetectionAtPoint",
 ];
 
 const expectedReactNativeRuntimeExports = [
+  "MAX_ID_MASK_PALETTE_ENTRIES",
+  "MAX_ID_MASK_STROKE_WIDTH",
+  "REACT_NATIVE_ID_MASK_SHADER_SOURCE",
+  "createReactNativeIdMaskFrame",
   "pickReactNativeDetectionAtPoint",
   "resolveReactNativeFrameLayout",
   "resolveReactNativeFramePresentation",
+  "resolveReactNativeIdMaskUniforms",
   "resolveReactNativeLabelLayout",
 ];
 
@@ -109,6 +117,8 @@ test("built core package imports without browser APIs", async () => {
     "function",
   );
   assert.equal(typeof entrypoint.BaseBoxStyle, "function");
+  assert.equal(typeof entrypoint.createIdMaskFrame, "function");
+  assert.equal(entrypoint.MAX_ID_MASK_PALETTE_ENTRIES, 64);
   assert.equal(entrypoint.DetectionMaskEncoding.CompressedRle, "compressedRle");
   assert.equal(entrypoint.MediaInteractionMode.PausedOnly, "pausedOnly");
 });
@@ -145,6 +155,9 @@ test("built React Native package imports core without importing web", async () =
   assert.equal(typeof entrypoint.resolveReactNativeFrameLayout, "function");
   assert.equal(typeof entrypoint.resolveReactNativeLabelLayout, "function");
   assert.equal(typeof entrypoint.pickReactNativeDetectionAtPoint, "function");
+  assert.equal(typeof entrypoint.createReactNativeIdMaskFrame, "function");
+  assert.equal(typeof entrypoint.resolveReactNativeIdMaskUniforms, "function");
+  assert.equal(typeof entrypoint.REACT_NATIVE_ID_MASK_SHADER_SOURCE, "string");
 });
 
 test("built style classes can be constructed by package consumers", async () => {

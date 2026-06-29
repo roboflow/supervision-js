@@ -3,14 +3,114 @@ import type {
   DetectionFrame,
   DetectionPickOptions,
   DetectionPickResult,
+  IdMaskFrame,
+  IdMaskInstruction,
   LabelDrawInstruction,
   MaskDrawInstruction,
+  MaskStyle,
   MediaFrameMetadata,
   MediaRendererPresentation,
   PlatformMediaFrame,
   Rect,
 } from "supervision-js-core";
-import { LabelPlacement, pickDetectionAtPoint } from "supervision-js-core";
+import {
+  createIdMaskFrame,
+  LabelPlacement,
+  MAX_ID_MASK_PALETTE_ENTRIES,
+  MAX_ID_MASK_STROKE_WIDTH,
+  pickDetectionAtPoint,
+} from "supervision-js-core";
+
+export {
+  MAX_ID_MASK_PALETTE_ENTRIES,
+  MAX_ID_MASK_STROKE_WIDTH,
+} from "supervision-js-core";
+
+const fillPaletteLookup = createShaderArrayLookup({
+  fallback: "half4(0.0)",
+  functionName: "resolveFillColor",
+  paletteName: "uFillPalette",
+  returnType: "half4",
+});
+const strokePaletteLookup = createShaderArrayLookup({
+  fallback: "half4(0.0)",
+  functionName: "resolveStrokeColor",
+  paletteName: "uStrokePalette",
+  returnType: "half4",
+});
+const strokeWidthLookup = createShaderArrayLookup({
+  fallback: "0.0",
+  functionName: "resolveStrokeWidth",
+  paletteName: "uStrokeWidths",
+  returnType: "float",
+});
+
+export const REACT_NATIVE_ID_MASK_SHADER_SOURCE = `
+uniform shader uMask;
+uniform half4 uFillPalette[${MAX_ID_MASK_PALETTE_ENTRIES}];
+uniform half4 uStrokePalette[${MAX_ID_MASK_PALETTE_ENTRIES}];
+uniform float uStrokeWidths[${MAX_ID_MASK_PALETTE_ENTRIES}];
+uniform float2 uTextureSize;
+uniform float4 uMediaRect;
+uniform float uOpacity;
+uniform float uBorderEnabled;
+uniform float uMaxStrokeWidth;
+
+float sampleMaskId(float2 point) {
+  half4 sampleColor = uMask.eval(point);
+  float sampleValue = max(
+    max(float(sampleColor.r), float(sampleColor.g)),
+    max(float(sampleColor.b), float(sampleColor.a))
+  );
+
+  return floor(sampleValue * 255.0 + 0.5);
+}
+
+${fillPaletteLookup}
+
+${strokePaletteLookup}
+
+${strokeWidthLookup}
+
+half4 main(float2 coord) {
+  float id = sampleMaskId(coord);
+
+  if (id <= 0.0) {
+    return half4(0.0);
+  }
+
+  int maskId = int(id);
+  half4 fillColor = resolveFillColor(maskId);
+  half4 outputColor = half4(fillColor.rgb, fillColor.a * half(uOpacity));
+  float strokeWidth = resolveStrokeWidth(maskId);
+
+  if (uBorderEnabled > 0.5 && strokeWidth > 0.0) {
+    float2 texel = float2(
+      uMediaRect.z / max(uTextureSize.x, 1.0),
+      uMediaRect.w / max(uTextureSize.y, 1.0)
+    );
+    float radius = min(strokeWidth, uMaxStrokeWidth);
+    bool onBorder = false;
+
+    for (int dy = -${MAX_ID_MASK_STROKE_WIDTH}; dy <= ${MAX_ID_MASK_STROKE_WIDTH}; dy++) {
+      for (int dx = -${MAX_ID_MASK_STROKE_WIDTH}; dx <= ${MAX_ID_MASK_STROKE_WIDTH}; dx++) {
+        float distance = length(float2(float(dx), float(dy)));
+
+        if (distance <= radius && sampleMaskId(coord + texel * float2(float(dx), float(dy))) != id) {
+          onBorder = true;
+        }
+      }
+    }
+
+    if (onBorder) {
+      half4 strokeColor = resolveStrokeColor(maskId);
+      outputColor = half4(strokeColor.rgb, strokeColor.a);
+    }
+  }
+
+  return outputColor;
+}
+`;
 
 /**
  * Externally supplied React Native media frame.
@@ -80,6 +180,34 @@ export interface ReactNativeLabelLayout {
   readonly backgroundRect: Rect;
   readonly cornerRadius: number;
   readonly textPoint: ReactNativePoint;
+}
+
+export interface ReactNativeIdMaskFrameOptions {
+  readonly detectionFrame: DetectionFrame;
+  readonly maskStyle: MaskStyle;
+  readonly mediaTime?: number;
+}
+
+export interface ReactNativeIdMaskFrame extends IdMaskFrame {
+  readonly maskCount: number;
+  readonly opacity: number;
+}
+
+export interface ReactNativeIdMaskUniformOptions {
+  readonly artifact: ReactNativeIdMaskFrame;
+  readonly layout: ReactNativeFrameLayout;
+}
+
+export interface ReactNativeIdMaskUniforms {
+  readonly [name: string]: number | readonly number[];
+  readonly uBorderEnabled: number;
+  readonly uFillPalette: readonly number[];
+  readonly uMaxStrokeWidth: number;
+  readonly uMediaRect: readonly number[];
+  readonly uOpacity: number;
+  readonly uStrokePalette: readonly number[];
+  readonly uStrokeWidths: readonly number[];
+  readonly uTextureSize: readonly number[];
 }
 
 export function resolveReactNativeFrameLayout(
@@ -179,6 +307,87 @@ export function resolveReactNativeLabelLayout(
       y: position.y + paddingY,
     },
   };
+}
+
+export function createReactNativeIdMaskFrame(
+  options: ReactNativeIdMaskFrameOptions,
+): ReactNativeIdMaskFrame | undefined {
+  const { detectionFrame, maskStyle } = options;
+  const mediaTime = options.mediaTime ?? detectionFrame.mediaTime;
+  const instructions: IdMaskInstruction[] = [];
+
+  detectionFrame.detections.forEach((detection, detectionIndex) => {
+    const instruction = maskStyle.resolve(detection, {
+      detectionIndex,
+      frame: detectionFrame,
+      mediaTime,
+    });
+
+    if (instruction) {
+      instructions.push({
+        ...instruction,
+        detectionIndex,
+      });
+    }
+  });
+
+  const frame = createIdMaskFrame(instructions);
+
+  if (!frame) {
+    return undefined;
+  }
+
+  return {
+    ...frame,
+    maskCount: instructions.length,
+    opacity: maskStyle.opacity ?? 1,
+  };
+}
+
+export function resolveReactNativeIdMaskUniforms(
+  options: ReactNativeIdMaskUniformOptions,
+): ReactNativeIdMaskUniforms {
+  const { artifact, layout } = options;
+
+  return {
+    uBorderEnabled: artifact.hasStroke ? 1 : 0,
+    uFillPalette: Array.from(artifact.fillPalette),
+    uMaxStrokeWidth: Math.min(
+      artifact.maxStrokeWidth,
+      MAX_ID_MASK_STROKE_WIDTH,
+    ),
+    uMediaRect: [
+      layout.mediaRect.x,
+      layout.mediaRect.y,
+      layout.mediaRect.width,
+      layout.mediaRect.height,
+    ],
+    uOpacity: artifact.opacity,
+    uStrokePalette: Array.from(artifact.strokePalette),
+    uStrokeWidths: Array.from(artifact.strokeWidths),
+    uTextureSize: [artifact.width, artifact.height],
+  };
+}
+
+function createShaderArrayLookup(options: {
+  readonly fallback: string;
+  readonly functionName: string;
+  readonly paletteName: string;
+  readonly returnType: string;
+}) {
+  const branches = Array.from(
+    { length: MAX_ID_MASK_PALETTE_ENTRIES - 1 },
+    (_, index) => {
+      const id = index + 1;
+
+      return `  if (maskId == ${id}) { return ${options.paletteName}[${id}]; }`;
+    },
+  ).join("\n");
+
+  return `${options.returnType} ${options.functionName}(int maskId) {
+${branches}
+  return ${options.fallback};
+}`;
 }
 
 export function resolveReactNativeFramePresentation<THandle = unknown>(

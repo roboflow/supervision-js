@@ -5,8 +5,13 @@ on a phone or emulator.
 
 This is intentionally a static-frame proof. It renders a bundled basketball
 frame and detections through React Native Skia using draw instructions resolved
-from `supervision-js-core` styles. Native video playback, camera frames, mask
-preparation, and mobile picking are future proofs.
+from `supervision-js-core` styles.
+
+The mask layer follows the same performance principle as the browser package:
+compressed RLE masks are prepared once into a single frame-level ID-mask
+artifact, uploaded as an `Alpha_8` Skia image, and colored with one runtime
+shader pass. Native video playback, camera frames, hot prepared windows, and
+worker/native-thread preparation are future proofs.
 
 ## Run
 
@@ -45,8 +50,9 @@ or:
 npm run android:build
 ```
 
-The demo should show a basketball frame, class-colored detection boxes, and a
-small toggle that updates the resolved box style live.
+The demo should show a basketball frame, class-colored masks/boxes, labels, a
+selection outline, and a compact prepared-ID-mask readout. If the readout says
+`Shader unavailable`, the GPU mask proof is not active.
 
 ## Boundaries
 

@@ -22,6 +22,13 @@ draw instructions.
 The package should remain non-Expo-coupled. Expo may be a consumer environment,
 but the library boundary should not require Expo APIs.
 
+Mask rendering should follow the same performance principle as web: prepare one
+frame-level ID-mask artifact from semantic detections, then let the native
+renderer upload that artifact and apply style palettes in a shader. The shared
+core concept is raw detection-indexed mask bytes plus palettes and metadata, not
+PNG. PNG is a browser upload optimization; React Native may upload the raw bytes
+directly through Skia or a future native GPU adapter.
+
 ## Media Direction
 
 Mediabunny is browser-focused and should stay in `packages/web`. React Native
@@ -52,9 +59,17 @@ space and delegates picking to core contracts. That proves the dependency
 direction, style contract, coordinate mapping, and interaction boundary without
 choosing a full mobile media pipeline.
 
+The package also exposes a static-frame ID-mask proof:
+
+- `supervision-js-core` prepares one raw ID-mask artifact per frame.
+- `supervision-js-react-native` resolves that artifact into Skia-compatible
+  shader uniforms and exports the SkSL shader source.
+- The Expo example uploads the artifact as an `Alpha_8` Skia image and renders
+  it in one shader pass before drawing boxes, labels, and selection.
+
 `examples/react-native` is an Expo convenience app for quick phone/emulator
 testing. It is allowed to depend on Expo and React Native Skia, but the reusable
 `packages/react-native` package should remain non-Expo-coupled.
 
-Native video playback, camera integration, and mask GPU preparation remain
-future proofs.
+Native video playback, camera integration, hot prepared windows, and worker or
+native-thread mask preparation remain future proofs.
