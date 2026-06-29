@@ -3,6 +3,8 @@ import {
   Image as SkiaImage,
   Rect,
   RoundedRect,
+  Text as SkiaText,
+  matchFont,
   useImage,
 } from "@shopify/react-native-skia";
 import { StatusBar } from "expo-status-bar";
@@ -26,6 +28,7 @@ import {
   pickReactNativeDetectionAtPoint,
   resolveReactNativeFrameLayout,
   resolveReactNativeFramePresentation,
+  resolveReactNativeLabelLayout,
 } from "supervision-js-react-native";
 
 import basketballFrame from "./assets/basketball-frame.jpg";
@@ -85,6 +88,34 @@ export default function App() {
         mediaWidth: presentation.mediaMetadata.width,
       }),
     [canvasHeight, canvasWidth, presentation.mediaMetadata],
+  );
+
+  const labelLayouts = useMemo(
+    () =>
+      presentation.labels.map((label, index) => {
+        const fontSize = label.textStyle?.fontSize ?? 13;
+        const font = matchFont({ fontSize });
+        const bounds = font.measureText(label.text);
+        const metrics = font.getMetrics();
+        const textHeight = metrics.descent - metrics.ascent;
+        const labelLayout = resolveReactNativeLabelLayout({
+          instruction: label,
+          layout,
+          textSize: {
+            height: textHeight,
+            width: bounds.width,
+          },
+        });
+
+        return {
+          baselineY: labelLayout.textPoint.y - metrics.ascent,
+          font,
+          index,
+          instruction: label,
+          layout: labelLayout,
+        };
+      }),
+    [layout, presentation.labels],
   );
 
   return (
@@ -196,6 +227,36 @@ export default function App() {
                 y={layout.mapRect(selectedPick.detection.rect).y}
               />
             ) : null}
+            {labelLayouts.map((label) => {
+              const background = label.instruction.background;
+              const textStyle = label.instruction.textStyle;
+              const key = `${label.instruction.text}:${label.index}`;
+
+              return (
+                <Fragment key={key}>
+                  {background ? (
+                    <RoundedRect
+                      color={toRgba(background.color, background.alpha)}
+                      height={label.layout.backgroundRect.height}
+                      r={label.layout.cornerRadius}
+                      width={label.layout.backgroundRect.width}
+                      x={label.layout.backgroundRect.x}
+                      y={label.layout.backgroundRect.y}
+                    />
+                  ) : null}
+                  <SkiaText
+                    color={toRgba(
+                      textStyle?.color ?? 0xffffff,
+                      textStyle?.alpha ?? 1,
+                    )}
+                    font={label.font}
+                    text={label.instruction.text}
+                    x={label.layout.textPoint.x}
+                    y={label.baselineY}
+                  />
+                </Fragment>
+              );
+            })}
           </Canvas>
         </View>
 

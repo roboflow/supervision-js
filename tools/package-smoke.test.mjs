@@ -94,6 +94,7 @@ const expectedReactNativeRuntimeExports = [
   "pickReactNativeDetectionAtPoint",
   "resolveReactNativeFrameLayout",
   "resolveReactNativeFramePresentation",
+  "resolveReactNativeLabelLayout",
 ];
 
 test("built core package imports without browser APIs", async () => {
@@ -142,6 +143,7 @@ test("built React Native package imports core without importing web", async () =
     "function",
   );
   assert.equal(typeof entrypoint.resolveReactNativeFrameLayout, "function");
+  assert.equal(typeof entrypoint.resolveReactNativeLabelLayout, "function");
   assert.equal(typeof entrypoint.pickReactNativeDetectionAtPoint, "function");
 });
 

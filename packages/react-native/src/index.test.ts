@@ -3,13 +3,15 @@ import {
   BaseLabelStyle,
   BaseMaskStyle,
   BoxShape,
-  DetectionPickTarget,
   DetectionMaskEncoding,
+  DetectionPickTarget,
+  LabelPlacement,
   type DetectionFrame,
 } from "supervision-js-core";
 import {
-  resolveReactNativeFrameLayout,
   pickReactNativeDetectionAtPoint,
+  resolveReactNativeFrameLayout,
+  resolveReactNativeLabelLayout,
   resolveReactNativeFramePresentation,
   type ReactNativeFramePresentation,
 } from "./index";
@@ -176,6 +178,77 @@ describe("pickReactNativeDetectionAtPoint", () => {
     expect(
       pickReactNativeDetectionAtPoint(frame, layout, { x: 20, y: 20 }),
     ).toBeNull();
+  });
+});
+
+describe("resolveReactNativeLabelLayout", () => {
+  it("positions a top label in canvas space while anchoring to media geometry", () => {
+    const layout = resolveReactNativeFrameLayout({
+      canvasHeight: 500,
+      canvasWidth: 1000,
+      mediaHeight: 500,
+      mediaWidth: 1000,
+    });
+
+    const label = resolveReactNativeLabelLayout({
+      instruction: {
+        background: {
+          alpha: 0.8,
+          color: 0x111827,
+          paddingX: 6,
+          paddingY: 3,
+        },
+        offsetY: 4,
+        placement: LabelPlacement.Top,
+        rect: { height: 100, width: 80, x: 100, y: 50 },
+        text: "horse 92%",
+      },
+      layout,
+      textSize: { height: 10, width: 40 },
+    });
+
+    expect(label.backgroundRect).toEqual({
+      height: 16,
+      width: 52,
+      x: 100,
+      y: 30,
+    });
+    expect(label.textPoint).toEqual({ x: 106, y: 33 });
+  });
+
+  it("maps media offsets through scale before placing a bottom label", () => {
+    const layout = resolveReactNativeFrameLayout({
+      canvasHeight: 250,
+      canvasWidth: 500,
+      mediaHeight: 500,
+      mediaWidth: 1000,
+    });
+
+    const label = resolveReactNativeLabelLayout({
+      instruction: {
+        background: {
+          alpha: 0.8,
+          color: 0x111827,
+          paddingX: 4,
+          paddingY: 2,
+        },
+        offsetX: 10,
+        offsetY: 8,
+        placement: LabelPlacement.Bottom,
+        rect: { height: 100, width: 80, x: 100, y: 50 },
+        text: "horse 92%",
+      },
+      layout,
+      textSize: { height: 10, width: 40 },
+    });
+
+    expect(label.backgroundRect).toEqual({
+      height: 14,
+      width: 48,
+      x: 55,
+      y: 79,
+    });
+    expect(label.textPoint).toEqual({ x: 59, y: 81 });
   });
 });
 

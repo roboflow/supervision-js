@@ -10,7 +10,7 @@ import type {
   PlatformMediaFrame,
   Rect,
 } from "supervision-js-core";
-import { pickDetectionAtPoint } from "supervision-js-core";
+import { LabelPlacement, pickDetectionAtPoint } from "supervision-js-core";
 
 /**
  * Externally supplied React Native media frame.
@@ -63,6 +63,23 @@ export interface ReactNativeFrameLayout {
   mapPoint(point: ReactNativePoint): ReactNativePoint;
   mapCanvasPoint(point: ReactNativePoint): ReactNativePoint | null;
   mapRect(rect: Rect): Rect;
+}
+
+export interface ReactNativeSize {
+  readonly height: number;
+  readonly width: number;
+}
+
+export interface ReactNativeLabelLayoutOptions {
+  readonly instruction: LabelDrawInstruction;
+  readonly layout: ReactNativeFrameLayout;
+  readonly textSize: ReactNativeSize;
+}
+
+export interface ReactNativeLabelLayout {
+  readonly backgroundRect: Rect;
+  readonly cornerRadius: number;
+  readonly textPoint: ReactNativePoint;
 }
 
 export function resolveReactNativeFrameLayout(
@@ -127,6 +144,43 @@ export function pickReactNativeDetectionAtPoint(
   return pickDetectionAtPoint(frame, mediaPoint, options);
 }
 
+export function resolveReactNativeLabelLayout(
+  options: ReactNativeLabelLayoutOptions,
+): ReactNativeLabelLayout {
+  const { instruction, layout, textSize } = options;
+  const anchor = layout.mapRect(instruction.rect);
+  const background = instruction.background;
+  const paddingX = background?.paddingX ?? 0;
+  const paddingY = background?.paddingY ?? 0;
+  const width = textSize.width + paddingX * 2;
+  const height = textSize.height + paddingY * 2;
+  const offsetX = (instruction.offsetX ?? 0) * layout.scale;
+  const offsetY = (instruction.offsetY ?? 0) * layout.scale;
+  const position = resolveReactNativeLabelPosition({
+    anchor,
+    height,
+    layout,
+    offsetX,
+    offsetY,
+    placement: instruction.placement,
+    width,
+  });
+
+  return {
+    backgroundRect: {
+      height,
+      width,
+      x: position.x,
+      y: position.y,
+    },
+    cornerRadius: background?.cornerRadius ?? 0,
+    textPoint: {
+      x: position.x + paddingX,
+      y: position.y + paddingY,
+    },
+  };
+}
+
 export function resolveReactNativeFramePresentation<THandle = unknown>(
   options: ReactNativeFramePresentationOptions<THandle> &
     ReactNativeFramePresentationStyleOptions,
@@ -168,4 +222,48 @@ export function resolveReactNativeFramePresentation<THandle = unknown>(
     mediaFrame,
     mediaMetadata: mediaFrame.metadata,
   };
+}
+
+function resolveReactNativeLabelPosition(options: {
+  readonly anchor: Rect;
+  readonly height: number;
+  readonly layout: ReactNativeFrameLayout;
+  readonly offsetX: number;
+  readonly offsetY: number;
+  readonly placement?: LabelPlacement;
+  readonly width: number;
+}) {
+  const { anchor, height, layout, offsetX, offsetY, placement, width } =
+    options;
+
+  switch (placement ?? LabelPlacement.Top) {
+    case LabelPlacement.Bottom:
+      return {
+        x: anchor.x + offsetX,
+        y: anchor.y + anchor.height + offsetY,
+      };
+    case LabelPlacement.Center:
+      return {
+        x: anchor.x + anchor.width / 2 - width / 2 + offsetX,
+        y: anchor.y + anchor.height / 2 - height / 2 + offsetY,
+      };
+    case LabelPlacement.InsideBottom:
+      return {
+        x: anchor.x + offsetX,
+        y: Math.max(
+          layout.mediaRect.y,
+          anchor.y + anchor.height - height - offsetY,
+        ),
+      };
+    case LabelPlacement.InsideTop:
+      return {
+        x: anchor.x + offsetX,
+        y: anchor.y + offsetY,
+      };
+    case LabelPlacement.Top:
+      return {
+        x: anchor.x + offsetX,
+        y: Math.max(layout.mediaRect.y, anchor.y - height - offsetY),
+      };
+  }
 }
