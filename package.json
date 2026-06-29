@@ -27,12 +27,16 @@
     "benchmark/initial",
     "benchmark/media-upload",
     "demo",
+    "examples/react-native",
     "examples/vanilla"
   ],
   "type": "module",
   "license": "Apache-2.0",
   "engines": {
     "node": ">=20.19"
+  },
+  "overrides": {
+    "react-native": "0.86.0"
   },
   "scripts": {
     "build": "npm run build -w supervision-js-core && npm run build -w supervision-js-react-native && npm run build -w supervision-js",
@@ -55,6 +59,13 @@
     "example:vanilla:dev": "npm run build && npm run dev -w examples/vanilla",
     "example:vanilla:build": "npm run build && npm run example:vanilla:build:app",
     "example:vanilla:build:app": "npm run build -w examples/vanilla",
+    "example:react-native:dev": "npm run build && npm run dev -w examples/react-native",
+    "example:react-native:dev-client": "npm run build && npm run dev:client -w examples/react-native",
+    "example:react-native:dev-client:ios": "npm run build && npm run dev:client:ios -w examples/react-native",
+    "example:react-native:dev-client:android": "npm run build && npm run dev:client:android -w examples/react-native",
+    "example:react-native:ios": "npm run build && npm run ios:build -w examples/react-native --",
+    "example:react-native:android": "npm run build && npm run android:build -w examples/react-native --",
+    "example:react-native:typecheck": "npm run typecheck -w examples/react-native",
     "benchmark:initial:dev": "npm run dev -w benchmark/initial",
     "benchmark:initial:build": "npm run build -w benchmark/initial",
     "benchmark:media-upload:dev": "vite --config benchmark/media-upload/vite.config.ts --host 127.0.0.1 --port 5178",
@@ -69,7 +80,7 @@
     "fixture:sam3:create": "node tools/sam3-fixture/create-fixture.mjs",
     "fixture:sam3:extract": "node tools/sam3-fixture/extract-frames.mjs",
     "fixture:sam3:run": "node tools/sam3-fixture/run-sam3.mjs",
-    "typecheck": "npm run typecheck -w supervision-js-core && npm run build -w supervision-js-core && npm run typecheck -w supervision-js-react-native && npm run build -w supervision-js-react-native && npm run typecheck -w supervision-js && npm run build -w supervision-js && tsc --noEmit -p demo/tsconfig.json && tsc --noEmit -p examples/vanilla/tsconfig.json",
+    "typecheck": "npm run typecheck -w supervision-js-core && npm run build -w supervision-js-core && npm run typecheck -w supervision-js-react-native && npm run build -w supervision-js-react-native && npm run typecheck -w supervision-js && npm run build -w supervision-js && tsc --noEmit -p demo/tsconfig.json && tsc --noEmit -p examples/vanilla/tsconfig.json && npm run example:react-native:typecheck",
     "boundary:check": "node --test tools/package-boundary.test.mjs",
     "test": "vitest run && npm run boundary:check && node --test tools/sam3-fixture/*.test.mjs",
     "package:smoke": "node --test tools/package-smoke.test.mjs",

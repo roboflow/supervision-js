@@ -91,6 +91,8 @@ const expectedCoreRuntimeExports = [
 ];
 
 const expectedReactNativeRuntimeExports = [
+  "pickReactNativeDetectionAtPoint",
+  "resolveReactNativeFrameLayout",
   "resolveReactNativeFramePresentation",
 ];
 
@@ -139,6 +141,8 @@ test("built React Native package imports core without importing web", async () =
     typeof entrypoint.resolveReactNativeFramePresentation,
     "function",
   );
+  assert.equal(typeof entrypoint.resolveReactNativeFrameLayout, "function");
+  assert.equal(typeof entrypoint.pickReactNativeDetectionAtPoint, "function");
 });
 
 test("built style classes can be constructed by package consumers", async () => {

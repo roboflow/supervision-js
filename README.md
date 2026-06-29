@@ -80,6 +80,7 @@ Useful commands:
 
 - `npm run demo:dev` runs the Vite demo.
 - `npm run example:vanilla:dev` runs the minimal vanilla example.
+- `npm run example:react-native:dev` runs the experimental Expo mobile proof.
 - `npm run docs:dev` builds and serves the generated docs.
 - `npm run docs:build` builds the TypeDoc site.
 - `npm run verify` runs the full local verification suite.

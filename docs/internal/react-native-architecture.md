@@ -45,7 +45,16 @@ should not depend on ExecuTorch to render detections.
 
 ## Current Proof
 
-The current private package only resolves one externally supplied media frame
-and one detection frame through core styles. That proves the dependency
-direction and style contract. Native video playback, camera integration,
-mask GPU preparation, and native picking remain future proofs.
+The current private package resolves one externally supplied media frame and one
+detection frame through core styles, then maps media-space geometry into a
+React Native canvas. It also maps React Native touch coordinates back into media
+space and delegates picking to core contracts. That proves the dependency
+direction, style contract, coordinate mapping, and interaction boundary without
+choosing a full mobile media pipeline.
+
+`examples/react-native` is an Expo convenience app for quick phone/emulator
+testing. It is allowed to depend on Expo and React Native Skia, but the reusable
+`packages/react-native` package should remain non-Expo-coupled.
+
+Native video playback, camera integration, and mask GPU preparation remain
+future proofs.

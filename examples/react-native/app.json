@@ -1,0 +1,17 @@
+{
+  "expo": {
+    "name": "supervision-js RN",
+    "slug": "supervision-js-react-native-example",
+    "version": "0.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "assetBundlePatterns": ["assets/*"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.joaomarcoscrs.supervision-js-react-native-example"
+    },
+    "android": {
+      "edgeToEdgeEnabled": true
+    }
+  }
+}

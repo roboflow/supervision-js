@@ -4,6 +4,11 @@ docs/site/
 demo/server-dist/
 coverage/
 .vite/
+.expo/
+
+examples/react-native/.expo/
+examples/react-native/ios/
+examples/react-native/android/
 
 *.tsbuildinfo
 .eslintcache
