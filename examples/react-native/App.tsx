@@ -23,6 +23,7 @@ import {
   Switch,
   Text,
   TouchableOpacity,
+  type ViewStyle,
   useWindowDimensions,
   View,
 } from "react-native";
@@ -70,6 +71,7 @@ import {
 } from "./src/debug-logging";
 
 type DemoMode = "static" | "live";
+type LiveSyncMode = "latest" | "synced";
 const LIVE_INFERENCE_INTERVAL_MS = Math.round(1000 / 15);
 const LIVE_MAX_INSTANCES = 6;
 const LIVE_MASK_ARTIFACT_MAX_WIDTH = 1280;
@@ -585,6 +587,7 @@ interface LiveFrameState {
   readonly segmentationMs: number;
   readonly serializationMs: number;
   readonly shaderActive: boolean;
+  readonly syncMode: LiveSyncMode;
   readonly timestamp: number;
   readonly width: number;
 }
@@ -633,9 +636,11 @@ function LiveCameraProof(props: {
   const [showLiveHud, setShowLiveHud] = useState(true);
   const [showLiveDebug, setShowLiveDebug] = useState(false);
   const [showMaskLayer, setShowMaskLayer] = useState(true);
+  const [liveSyncMode, setLiveSyncMode] = useState<LiveSyncMode>("synced");
   const frameRenderer = useFrameRenderer();
   const canvasWidth = window.width;
   const canvasHeight = window.height;
+  const strictSyncMode = liveSyncMode === "synced";
   const emptyLiveMaskUniforms = useMemo(
     () => createEmptyLiveMaskUniforms(),
     [],
@@ -649,6 +654,24 @@ function LiveCameraProof(props: {
         mediaWidth: liveFrame?.width ?? LIVE_FRAME_TARGET_RESOLUTION.width,
       }),
     [canvasHeight, canvasWidth, liveFrame?.height, liveFrame?.width],
+  );
+  const liveFrameRendererStyle = useMemo(
+    () =>
+      resolveLiveFrameRendererStyle({
+        canvasHeight,
+        canvasWidth,
+        orientation: strictSyncMode
+          ? (liveFrame?.frameOrientation ?? "left")
+          : "up",
+        syncMode: liveSyncMode,
+      }),
+    [
+      canvasHeight,
+      canvasWidth,
+      liveFrame?.frameOrientation,
+      liveSyncMode,
+      strictSyncMode,
+    ],
   );
   const liveMaskImage = useSharedValue<SkiaImageType | null>(null);
   const liveMaskUniforms = useSharedValue<ReactNativeIdMaskUniforms>(
@@ -671,24 +694,47 @@ function LiveCameraProof(props: {
   const lastSerializationDurationMs = useSharedValue(0);
   const lastShaderActive = useSharedValue(false);
   const runSegmentationOnFrame = props.segmentation.runOnFrame;
-  const liveLabelOverlays = useMemo(
-    () =>
-      liveDetections.map((detection, index) => {
-        const rect = liveLayout.mapRect({
-          height: detection.bbox.y2 - detection.bbox.y1,
-          width: detection.bbox.x2 - detection.bbox.x1,
-          x: detection.bbox.x1,
-          y: detection.bbox.y1,
-        });
+  const liveLabelOverlays = useMemo(() => {
+    const font = matchFont({ fontSize: 13 });
+    const metrics = font.getMetrics();
+    const textHeight = metrics.descent - metrics.ascent;
 
-        return {
-          detection,
-          index,
-          rect,
-        };
-      }),
-    [liveDetections, liveLayout],
-  );
+    return liveDetections.map((detection, index) => {
+      const rect = liveLayout.mapRect({
+        height: detection.bbox.y2 - detection.bbox.y1,
+        width: detection.bbox.x2 - detection.bbox.x1,
+        x: detection.bbox.x1,
+        y: detection.bbox.y1,
+      });
+      const text = `${detection.label || "object"} ${formatConfidence(
+        detection.score,
+      )}`;
+      const bounds = font.measureText(text);
+      const backgroundWidth = Math.ceil(bounds.width + 14);
+      const backgroundHeight = Math.ceil(textHeight + 7);
+      const backgroundX = Math.max(
+        6,
+        Math.min(canvasWidth - backgroundWidth - 6, rect.x),
+      );
+      const backgroundY = Math.max(6, rect.y - backgroundHeight - 5);
+
+      return {
+        background: {
+          height: backgroundHeight,
+          width: backgroundWidth,
+          x: backgroundX,
+          y: backgroundY,
+        },
+        baselineY: backgroundY + 3 - metrics.ascent,
+        detection,
+        font,
+        index,
+        rect,
+        text,
+        textX: backgroundX + 7,
+      };
+    });
+  }, [canvasWidth, liveDetections, liveLayout]);
 
   useEffect(() => {
     if (!hasPermission) {
@@ -769,7 +815,7 @@ function LiveCameraProof(props: {
   });
 
   const inferenceFrameOutput = useFrameOutput({
-    allowDeferredStart: true,
+    allowDeferredStart: !strictSyncMode,
     dropFramesWhileBusy: true,
     enablePhysicalBufferRotation: false,
     enablePreviewSizedOutputBuffers: false,
@@ -779,10 +825,11 @@ function LiveCameraProof(props: {
       let stage = "start";
 
       try {
+        const syncMode = strictSyncMode ? "synced" : "latest";
         const shouldRunInference =
           runSegmentationOnFrame &&
           Date.now() - lastInferenceStartedAt.value >=
-            LIVE_INFERENCE_INTERVAL_MS;
+            (strictSyncMode ? 0 : LIVE_INFERENCE_INTERVAL_MS);
 
         if (shouldRunInference) {
           const inferenceStartedAt = Date.now();
@@ -960,6 +1007,29 @@ function LiveCameraProof(props: {
             );
             lastShaderActive.value = false;
           }
+
+          if (strictSyncMode) {
+            stage = "render-synced-frame";
+            runWithWorkletDebugLogging(
+              {
+                args: {
+                  frameHeight: frame.height,
+                  framePixelFormat: frame.pixelFormat,
+                  frameTimestamp: frame.timestamp,
+                  frameWidth: frame.width,
+                  maskCount,
+                  stage,
+                },
+                description:
+                  "present camera frame only after matching mask packet is ready",
+                namespace: "rn-live",
+              },
+              () => {
+                frameRenderer.renderFrame(frame);
+                lastPresentedFrame.value = true;
+              },
+            );
+          }
         }
 
         if (Date.now() - lastReadoutReportAt.value > 250) {
@@ -980,6 +1050,7 @@ function LiveCameraProof(props: {
             segmentationMs: lastSegmentationDurationMs.value,
             serializationMs: lastSerializationDurationMs.value,
             shaderActive: lastShaderActive.value,
+            syncMode,
             timestamp: frame.timestamp,
             width: resolveLiveDetectionFrameSize(frame).width,
           });
@@ -1004,8 +1075,11 @@ function LiveCameraProof(props: {
   });
 
   const cameraOutputs = useMemo(
-    () => [renderFrameOutput, inferenceFrameOutput],
-    [inferenceFrameOutput, renderFrameOutput],
+    () =>
+      strictSyncMode
+        ? [inferenceFrameOutput]
+        : [renderFrameOutput, inferenceFrameOutput],
+    [inferenceFrameOutput, renderFrameOutput, strictSyncMode],
   );
 
   const liveMaskEffect = useMemo(
@@ -1033,11 +1107,7 @@ function LiveCameraProof(props: {
         ) : null}
         <NativeFrameRendererView
           renderer={frameRenderer}
-          style={[
-            styles.frameRendererSurface,
-            StyleSheet.absoluteFill,
-            { height: canvasHeight, width: canvasWidth },
-          ]}
+          style={[styles.frameRendererSurface, liveFrameRendererStyle]}
         />
         <Canvas
           style={[
@@ -1068,30 +1138,26 @@ function LiveCameraProof(props: {
               </Shader>
             </Rect>
           ) : null}
-        </Canvas>
-        <View pointerEvents="none" style={styles.liveLabelLayer}>
-          {liveLabelOverlays.map(({ detection, index, rect }) => (
-            <View
-              key={`${detection.label}:${index}`}
-              style={[
-                styles.liveLabel,
-                {
-                  backgroundColor: toRgba(
-                    liveColorForClass(detection.label),
-                    0.82,
-                  ),
-                  left: Math.max(4, rect.x),
-                  top: Math.max(4, rect.y - 20),
-                },
-              ]}
-            >
-              <Text style={styles.liveLabelText}>
-                {detection.label || "object"}{" "}
-                {formatConfidence(detection.score)}
-              </Text>
-            </View>
+          {liveLabelOverlays.map((label) => (
+            <Fragment key={`${label.detection.label}:${label.index}`}>
+              <RoundedRect
+                color={toRgba(liveColorForClass(label.detection.label), 0.84)}
+                height={label.background.height}
+                r={5}
+                width={label.background.width}
+                x={label.background.x}
+                y={label.background.y}
+              />
+              <SkiaText
+                color="rgba(255, 255, 255, 0.96)"
+                font={label.font}
+                text={label.text}
+                x={label.textX}
+                y={label.baselineY}
+              />
+            </Fragment>
           ))}
-        </View>
+        </Canvas>
         {!canRunCamera ? (
           <View style={styles.stageOverlay}>
             <Text style={styles.overlayTitle}>Live camera</Text>
@@ -1124,6 +1190,10 @@ function LiveCameraProof(props: {
                 value={canRunCamera ? "live" : "waiting"}
               />
               <StatusPill value={modelStatus} />
+              <StatusPill
+                tone={strictSyncMode ? "ready" : undefined}
+                value={strictSyncMode ? "strict sync" : "latest masks"}
+              />
               <StatusPill value={`${liveFrame?.maskCount ?? 0} masks`} />
             </View>
 
@@ -1142,6 +1212,26 @@ function LiveCameraProof(props: {
                   ]}
                 >
                   Masks
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() =>
+                  setLiveSyncMode((current) =>
+                    current === "synced" ? "latest" : "synced",
+                  )
+                }
+                style={[
+                  styles.floatingButton,
+                  strictSyncMode ? styles.floatingButtonActive : null,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.floatingButtonText,
+                    strictSyncMode ? styles.floatingButtonTextActive : null,
+                  ]}
+                >
+                  {strictSyncMode ? "Synced" : "Latest"}
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -1185,6 +1275,10 @@ function LiveCameraProof(props: {
                       ? `${liveFrame.frameOrientation}${liveFrame.frameIsMirrored ? " mirrored" : ""}`
                       : "-"
                   }
+                />
+                <LiveMetric
+                  label="Sync"
+                  value={liveFrame ? liveFrame.syncMode : liveSyncMode}
                 />
                 <LiveMetric
                   label="Seg"
@@ -1580,6 +1674,45 @@ function resolveLiveDetectionFrameSize(frame: {
   };
 }
 
+function resolveLiveFrameRendererStyle(options: {
+  readonly canvasHeight: number;
+  readonly canvasWidth: number;
+  readonly orientation: string;
+  readonly syncMode: LiveSyncMode;
+}): ViewStyle {
+  if (options.syncMode !== "synced") {
+    return {
+      bottom: 0,
+      left: 0,
+      position: "absolute",
+      right: 0,
+      top: 0,
+    };
+  }
+
+  if (options.orientation === "left" || options.orientation === "right") {
+    return {
+      height: options.canvasWidth,
+      left: (options.canvasWidth - options.canvasHeight) / 2,
+      position: "absolute",
+      top: (options.canvasHeight - options.canvasWidth) / 2,
+      transform: [
+        { rotate: options.orientation === "left" ? "90deg" : "-90deg" },
+      ],
+      width: options.canvasHeight,
+    };
+  }
+
+  return {
+    bottom: 0,
+    left: 0,
+    position: "absolute",
+    right: 0,
+    top: 0,
+    transform: options.orientation === "down" ? [{ rotate: "180deg" }] : [],
+  };
+}
+
 function createLiveFrameError(
   stage: string,
   error: unknown,
@@ -1816,27 +1949,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#8d7df3",
     left: 12,
     top: 18,
-  },
-  liveLabel: {
-    borderColor: "rgba(255, 255, 255, 0.36)",
-    borderRadius: 4,
-    borderWidth: 1,
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-    position: "absolute",
-  },
-  liveLabelLayer: {
-    bottom: 0,
-    left: 0,
-    position: "absolute",
-    right: 0,
-    top: 0,
-    zIndex: 3,
-  },
-  liveLabelText: {
-    color: "#f8fafc",
-    fontSize: 10,
-    fontWeight: "900",
   },
   liveActions: {
     bottom: 34,
