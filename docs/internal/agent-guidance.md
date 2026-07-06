@@ -14,6 +14,7 @@ Before making project-direction or architecture changes, read:
 - [`pixijs-guidance.md`](pixijs-guidance.md)
 - [`library-contract.md`](library-contract.md)
 - [`react-native-architecture.md`](react-native-architecture.md)
+- [`react-native-live-rendering.md`](react-native-live-rendering.md)
 - [`../public/guides/public-api.md`](../public/guides/public-api.md)
 
 Those docs define the current product intent: prove the browser rendering

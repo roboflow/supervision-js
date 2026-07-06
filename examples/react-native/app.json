@@ -8,10 +8,24 @@
     "assetBundlePatterns": ["assets/*"],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.joaomarcoscrs.supervision-js-react-native-example"
+      "bundleIdentifier": "com.joaomarcoscrs.supervision-js-react-native-example",
+      "infoPlist": {
+        "NSCameraUsageDescription": "The React Native proof uses the camera to render live frames with on-device detections."
+      }
     },
     "android": {
-      "edgeToEdgeEnabled": true
-    }
+      "edgeToEdgeEnabled": true,
+      "permissions": ["android.permission.CAMERA"]
+    },
+    "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "deploymentTarget": "17.0"
+          }
+        }
+      ]
+    ]
   }
 }

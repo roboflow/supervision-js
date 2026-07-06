@@ -36,7 +36,16 @@
     "node": ">=20.19"
   },
   "overrides": {
-    "react-native": "0.86.0"
+    "expo": "56.0.12",
+    "expo-asset": "56.0.17",
+    "expo-build-properties": "56.0.19",
+    "expo-file-system": "56.0.8",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-native": "0.85.3",
+    "react-native-nitro-image": "0.15.0",
+    "react-native-nitro-modules": "0.35.9",
+    "react-native-worklets": "0.8.3"
   },
   "scripts": {
     "build": "npm run build -w supervision-js-core && npm run build -w supervision-js-react-native && npm run build -w supervision-js",
@@ -63,6 +72,7 @@
     "example:react-native:dev-client": "npm run build && npm run dev:client -w examples/react-native",
     "example:react-native:dev-client:ios": "npm run build && npm run dev:client:ios -w examples/react-native",
     "example:react-native:dev-client:android": "npm run build && npm run dev:client:android -w examples/react-native",
+    "example:react-native:dev-client:tunnel": "npm run build && npm run dev:client:tunnel -w examples/react-native",
     "example:react-native:ios": "npm run build && npm run ios:build -w examples/react-native --",
     "example:react-native:android": "npm run build && npm run android:build -w examples/react-native --",
     "example:react-native:typecheck": "npm run typecheck -w examples/react-native",

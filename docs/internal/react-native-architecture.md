@@ -50,6 +50,10 @@ rendering dependencies. A host app may run a model with ExecuTorch and append
 detections into the same core-shaped pipeline, but `supervision-js-react-native`
 should not depend on ExecuTorch to render detections.
 
+The example app may use ExecuTorch to prove a realistic producer integration.
+That dependency must stay in `examples/react-native`, not in `packages/core` or
+`packages/react-native`.
+
 ## Current Proof
 
 The current private package resolves one externally supplied media frame and one
@@ -71,5 +75,24 @@ The package also exposes a static-frame ID-mask proof:
 testing. It is allowed to depend on Expo and React Native Skia, but the reusable
 `packages/react-native` package should remain non-Expo-coupled.
 
-Native video playback, camera integration, hot prepared windows, and worker or
-native-thread mask preparation remain future proofs.
+The example app also includes a live camera proof:
+
+- VisionCamera owns native camera frames and gives the example a frame output.
+- The frame worklet imports the native camera frame as a Skia image through
+  `Frame.getNativeBuffer()` and `Skia.Image.MakeImageFromNativeBuffer()`.
+- The same frame is passed to ExecuTorch RF-DETR Nano instance segmentation.
+- ExecuTorch binary masks are converted directly into one frame-level ID-mask
+  image in the worklet.
+- One Skia canvas draws the camera image and ID-mask shader. React receives
+  throttled diagnostics only.
+
+This is deliberately an example-level integration. The long-term package design
+should move hot-frame rendering, prepared-window management, and background or
+native-thread mask preparation into reusable RN adapters without making the
+renderer depend on a specific inference engine.
+
+Native video file playback, hot prepared windows, and worker or native-thread
+mask preparation remain future proofs.
+
+See [`react-native-live-rendering.md`](react-native-live-rendering.md) for the
+live rendering target and current V0 demo shape.

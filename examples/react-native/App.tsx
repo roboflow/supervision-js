@@ -12,18 +12,30 @@ import {
   Skia,
   Text as SkiaText,
   matchFont,
+  type SkImage as SkiaImageType,
   useImage,
 } from "@shopify/react-native-skia";
 import { StatusBar } from "expo-status-bar";
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import {
   SafeAreaView,
   StyleSheet,
   Switch,
   Text,
+  TouchableOpacity,
   useWindowDimensions,
   View,
 } from "react-native";
+import {
+  Camera,
+  NativeFrameRendererView,
+  useCameraDevice,
+  useCameraPermission,
+  useFrameOutput,
+  useFrameRenderer,
+} from "react-native-vision-camera";
+import { useSharedValue } from "react-native-reanimated";
+import { scheduleOnRN } from "react-native-worklets";
 import {
   BaseBoxStyle,
   BaseLabelStyle,
@@ -33,8 +45,11 @@ import {
   MaskRenderMode,
   type DetectionPickResult,
 } from "supervision-js-core";
+import { models, useInstanceSegmentation } from "react-native-executorch";
 import {
+  MAX_ID_MASK_PALETTE_ENTRIES,
   REACT_NATIVE_ID_MASK_SHADER_SOURCE,
+  type ReactNativeIdMaskUniforms,
   createReactNativeIdMaskFrame,
   pickReactNativeDetectionAtPoint,
   resolveReactNativeIdMaskUniforms,
@@ -49,8 +64,56 @@ import {
   basketballFrameMetadata,
   colorForClass,
 } from "./src/basketball-frame";
+import {
+  runWithWorkletDebugLogging,
+  serializeDebugError,
+} from "./src/debug-logging";
+
+type DemoMode = "static" | "live";
+const LIVE_INFERENCE_INTERVAL_MS = Math.round(1000 / 15);
+const LIVE_MAX_INSTANCES = 6;
+const LIVE_MASK_ARTIFACT_MAX_WIDTH = 1280;
+const LIVE_RETURN_MASKS_AT_ORIGINAL_RESOLUTION = true;
+const LIVE_FRAME_TARGET_RESOLUTION = { height: 1280, width: 720 };
+const LIVE_SEGMENTATION_MIRROR_FRAME = false;
+const liveSegmentationModel = models.instance_segmentation.rf_detr_nano();
+
+function useLiveSegmentation() {
+  return useInstanceSegmentation({
+    model: liveSegmentationModel,
+  });
+}
+
+type LiveSegmentation = ReturnType<typeof useLiveSegmentation>;
 
 export default function App() {
+  const [mode, setMode] = useState<DemoMode>("static");
+  const segmentation = useLiveSegmentation();
+
+  if (mode === "live") {
+    return (
+      <LiveCameraProof
+        mode={mode}
+        onModeChange={setMode}
+        segmentation={segmentation}
+      />
+    );
+  }
+
+  return (
+    <StaticFrameProof
+      mode={mode}
+      onModeChange={setMode}
+      segmentation={segmentation}
+    />
+  );
+}
+
+function StaticFrameProof(props: {
+  readonly mode: DemoMode;
+  readonly onModeChange: (mode: DemoMode) => void;
+  readonly segmentation: LiveSegmentation;
+}) {
   const image = useImage(basketballFrame);
   const window = useWindowDimensions();
   const [rounded, setRounded] = useState(true);
@@ -179,6 +242,7 @@ export default function App() {
     maskPreparation.artifact && maskImage && maskEffect && maskUniforms
       ? "active"
       : "unavailable";
+  const modelStatus = formatSegmentationStatus(props.segmentation);
 
   const labelLayouts = useMemo(
     () =>
@@ -220,10 +284,7 @@ export default function App() {
               <Text style={styles.subtitle}>React Native rendering proof</Text>
             </View>
           </View>
-          <StatusPill
-            tone={maskShaderStatus === "active" ? "ready" : "warning"}
-            value={maskShaderStatus === "active" ? "Skia shader" : "No shader"}
-          />
+          <ModeSwitch mode={props.mode} onModeChange={props.onModeChange} />
         </View>
 
         <View
@@ -382,6 +443,10 @@ export default function App() {
           <View style={styles.stageReadout}>
             <StatusPill tone="ready" value="media + detections" />
             <StatusPill
+              tone={props.segmentation.isReady ? "ready" : "warning"}
+              value={modelStatus}
+            />
+            <StatusPill
               value={`${maskPreparation.artifact?.maskCount ?? 0} masks`}
             />
             <StatusPill
@@ -492,6 +557,707 @@ export default function App() {
   );
 }
 
+interface LiveSerializedDetection {
+  readonly bbox: {
+    readonly x1: number;
+    readonly x2: number;
+    readonly y1: number;
+    readonly y2: number;
+  };
+  readonly label: string;
+  readonly mask: Uint8Array;
+  readonly maskHeight: number;
+  readonly maskWidth: number;
+  readonly score: number;
+}
+
+interface LiveFrameState {
+  readonly droppedFrames: number;
+  readonly frameIsMirrored: boolean;
+  readonly framePixelFormat: string;
+  readonly frameOrientation: string;
+  readonly hasPresentedFrame: boolean;
+  readonly height: number;
+  readonly inferenceTickMs: number;
+  readonly maskResolution: string;
+  readonly maskCount: number;
+  readonly maskPrepMs: number;
+  readonly segmentationMs: number;
+  readonly serializationMs: number;
+  readonly shaderActive: boolean;
+  readonly timestamp: number;
+  readonly width: number;
+}
+
+interface LiveOverlayDetection {
+  readonly bbox: LiveSerializedDetection["bbox"];
+  readonly label: string;
+  readonly score: number;
+}
+
+interface LiveFrameError {
+  readonly code: string;
+  readonly frameHeight: number;
+  readonly framePixelFormat: string;
+  readonly frameTimestamp: number;
+  readonly frameWidth: number;
+  readonly hasNativeBuffer: boolean;
+  readonly hasPixelBuffer: boolean;
+  readonly isPlanar: boolean;
+  readonly message: string;
+  readonly name: string;
+  readonly stage: string;
+}
+
+interface LiveMediaRect {
+  readonly height: number;
+  readonly width: number;
+  readonly x: number;
+  readonly y: number;
+}
+
+function LiveCameraProof(props: {
+  readonly mode: DemoMode;
+  readonly onModeChange: (mode: DemoMode) => void;
+  readonly segmentation: LiveSegmentation;
+}) {
+  const window = useWindowDimensions();
+  const device = useCameraDevice("back");
+  const { hasPermission, requestPermission } = useCameraPermission();
+  const [liveFrame, setLiveFrame] = useState<LiveFrameState | null>(null);
+  const [liveError, setLiveError] = useState<LiveFrameError | null>(null);
+  const [liveDetections, setLiveDetections] = useState<
+    readonly LiveOverlayDetection[]
+  >([]);
+  const [droppedFrames, setDroppedFrames] = useState(0);
+  const [showLiveHud, setShowLiveHud] = useState(true);
+  const [showLiveDebug, setShowLiveDebug] = useState(false);
+  const [showMaskLayer, setShowMaskLayer] = useState(true);
+  const frameRenderer = useFrameRenderer();
+  const canvasWidth = window.width;
+  const canvasHeight = window.height;
+  const emptyLiveMaskUniforms = useMemo(
+    () => createEmptyLiveMaskUniforms(),
+    [],
+  );
+  const liveLayout = useMemo(
+    () =>
+      resolveReactNativeFrameLayout({
+        canvasHeight,
+        canvasWidth,
+        mediaHeight: liveFrame?.height ?? LIVE_FRAME_TARGET_RESOLUTION.height,
+        mediaWidth: liveFrame?.width ?? LIVE_FRAME_TARGET_RESOLUTION.width,
+      }),
+    [canvasHeight, canvasWidth, liveFrame?.height, liveFrame?.width],
+  );
+  const liveMaskImage = useSharedValue<SkiaImageType | null>(null);
+  const liveMaskUniforms = useSharedValue<ReactNativeIdMaskUniforms>(
+    createEmptyLiveMaskUniforms(),
+  );
+  const liveMediaRect = useSharedValue<LiveMediaRect>({
+    height: liveLayout.mediaRect.height,
+    width: liveLayout.mediaRect.width,
+    x: liveLayout.mediaRect.x,
+    y: liveLayout.mediaRect.y,
+  });
+  const lastReadoutReportAt = useSharedValue(0);
+  const lastErrorReportAt = useSharedValue(0);
+  const lastInferenceStartedAt = useSharedValue(0);
+  const lastPresentedFrame = useSharedValue(false);
+  const lastInferenceTickDurationMs = useSharedValue(0);
+  const lastMaskCount = useSharedValue(0);
+  const lastMaskPrepDurationMs = useSharedValue(0);
+  const lastSegmentationDurationMs = useSharedValue(0);
+  const lastSerializationDurationMs = useSharedValue(0);
+  const lastShaderActive = useSharedValue(false);
+  const runSegmentationOnFrame = props.segmentation.runOnFrame;
+  const liveLabelOverlays = useMemo(
+    () =>
+      liveDetections.map((detection, index) => {
+        const rect = liveLayout.mapRect({
+          height: detection.bbox.y2 - detection.bbox.y1,
+          width: detection.bbox.x2 - detection.bbox.x1,
+          x: detection.bbox.x1,
+          y: detection.bbox.y1,
+        });
+
+        return {
+          detection,
+          index,
+          rect,
+        };
+      }),
+    [liveDetections, liveLayout],
+  );
+
+  useEffect(() => {
+    if (!hasPermission) {
+      void requestPermission();
+    }
+  }, [hasPermission, requestPermission]);
+  useEffect(() => {
+    liveMediaRect.value = {
+      height: liveLayout.mediaRect.height,
+      width: liveLayout.mediaRect.width,
+      x: liveLayout.mediaRect.x,
+      y: liveLayout.mediaRect.y,
+    };
+  }, [liveLayout.mediaRect, liveMediaRect]);
+
+  const reportLiveFrame = useCallback(
+    (frame: Omit<LiveFrameState, "droppedFrames">) => {
+      setLiveFrame({
+        ...frame,
+        droppedFrames,
+      });
+    },
+    [droppedFrames],
+  );
+  const reportDroppedFrame = useCallback(() => {
+    setDroppedFrames((current) => current + 1);
+  }, []);
+  const reportLiveError = useCallback((error: LiveFrameError) => {
+    console.error("[debug][rn-live]", error);
+    setLiveError(error);
+  }, []);
+  const reportLiveDetections = useCallback(
+    (detections: readonly LiveOverlayDetection[]) => {
+      setLiveDetections(detections);
+    },
+    [],
+  );
+
+  const renderFrameOutput = useFrameOutput({
+    allowDeferredStart: false,
+    dropFramesWhileBusy: true,
+    enablePhysicalBufferRotation: true,
+    enablePreviewSizedOutputBuffers: false,
+    onFrame(frame) {
+      "worklet";
+
+      const stage = "render-frame";
+
+      try {
+        runWithWorkletDebugLogging(
+          {
+            args: createLiveFrameDebugArgs(stage, frame),
+            description: "present camera frame through VisionCamera renderer",
+            namespace: "rn-live",
+          },
+          () => {
+            frameRenderer.renderFrame(frame);
+            lastPresentedFrame.value = true;
+          },
+        );
+      } catch (error) {
+        if (Date.now() - lastErrorReportAt.value > 250) {
+          lastErrorReportAt.value = Date.now();
+          scheduleOnRN(
+            reportLiveError,
+            createLiveFrameError(stage, error, frame),
+          );
+        }
+      } finally {
+        frame.dispose();
+      }
+    },
+    onFrameDropped() {
+      reportDroppedFrame();
+    },
+    pixelFormat: "native",
+    targetResolution: LIVE_FRAME_TARGET_RESOLUTION,
+  });
+
+  const inferenceFrameOutput = useFrameOutput({
+    allowDeferredStart: true,
+    dropFramesWhileBusy: true,
+    enablePhysicalBufferRotation: false,
+    enablePreviewSizedOutputBuffers: false,
+    onFrame(frame) {
+      "worklet";
+
+      let stage = "start";
+
+      try {
+        const shouldRunInference =
+          runSegmentationOnFrame &&
+          Date.now() - lastInferenceStartedAt.value >=
+            LIVE_INFERENCE_INTERVAL_MS;
+
+        if (shouldRunInference) {
+          const inferenceStartedAt = Date.now();
+
+          lastInferenceStartedAt.value = inferenceStartedAt;
+          stage = "segmentation-run";
+          const segmentationStartedAt = Date.now();
+          const rawDetections = runWithWorkletDebugLogging(
+            {
+              args: createLiveFrameDebugArgs(stage, frame),
+              description: "run RF-DETR segmentation on camera frame",
+              namespace: "rn-live",
+            },
+            () =>
+              runSegmentationOnFrame(frame, LIVE_SEGMENTATION_MIRROR_FRAME, {
+                confidenceThreshold: 0.45,
+                maxInstances: LIVE_MAX_INSTANCES,
+                returnMaskAtOriginalResolution:
+                  LIVE_RETURN_MASKS_AT_ORIGINAL_RESOLUTION,
+              }),
+          );
+          const segmentationMs = Date.now() - segmentationStartedAt;
+          stage = "mask-read-layout";
+          const mediaRect = liveMediaRect.value;
+          const detectionFrameSize = resolveLiveDetectionFrameSize(frame);
+          stage = "mask-serialize-detections";
+          const serializationStartedAt = Date.now();
+          const detections = runWithWorkletDebugLogging(
+            {
+              args: {
+                detectionCount: rawDetections.length,
+                frameHeight: frame.height,
+                framePixelFormat: frame.pixelFormat,
+                frameTimestamp: frame.timestamp,
+                frameWidth: frame.width,
+                stage,
+              },
+              description: "serialize RF-DETR detections for live mask prep",
+              namespace: "rn-live",
+            },
+            () => {
+              const serialized: LiveSerializedDetection[] = [];
+
+              for (let index = 0; index < rawDetections.length; index += 1) {
+                const detection = rawDetections[index]!;
+                const label =
+                  typeof detection.label === "string" ? detection.label : "";
+
+                serialized[index] = {
+                  bbox: detection.bbox,
+                  label,
+                  mask: detection.mask,
+                  maskHeight: detection.maskHeight,
+                  maskWidth: detection.maskWidth,
+                  score: detection.score,
+                };
+              }
+
+              return serialized;
+            },
+          );
+          const serializationMs = Date.now() - serializationStartedAt;
+          const overlayDetections: LiveOverlayDetection[] = [];
+
+          for (let index = 0; index < detections.length; index += 1) {
+            const detection = detections[index]!;
+
+            overlayDetections[index] = {
+              bbox: detection.bbox,
+              label: detection.label,
+              score: detection.score,
+            };
+          }
+
+          scheduleOnRN(reportLiveDetections, overlayDetections);
+
+          stage = "mask-prepare";
+          const maskStartedAt = Date.now();
+          const preparedMask = runWithWorkletDebugLogging(
+            {
+              args: {
+                detectionCount: detections.length,
+                frameHeight: frame.height,
+                framePixelFormat: frame.pixelFormat,
+                frameTimestamp: frame.timestamp,
+                frameWidth: frame.width,
+                mediaRectHeight: mediaRect.height,
+                mediaRectWidth: mediaRect.width,
+                mediaRectX: mediaRect.x,
+                mediaRectY: mediaRect.y,
+                stage,
+              },
+              description: "prepare live ID-mask Skia image",
+              namespace: "rn-live",
+            },
+            () =>
+              createLiveSkiaMaskFrame({
+                debugArgs: {
+                  detectionCount: detections.length,
+                  frameHeight: frame.height,
+                  framePixelFormat: frame.pixelFormat,
+                  frameTimestamp: frame.timestamp,
+                  frameWidth: frame.width,
+                  mediaRectHeight: mediaRect.height,
+                  mediaRectWidth: mediaRect.width,
+                  mediaRectX: mediaRect.x,
+                  mediaRectY: mediaRect.y,
+                },
+                detections,
+                frameHeight: detectionFrameSize.height,
+                frameWidth: detectionFrameSize.width,
+                mediaRect: {
+                  height: mediaRect.height,
+                  width: mediaRect.width,
+                  x: mediaRect.x,
+                  y: mediaRect.y,
+                },
+              }),
+          );
+
+          const maskPrepMs = Date.now() - maskStartedAt;
+          const maskCount = rawDetections.length;
+          lastInferenceTickDurationMs.value = Date.now() - inferenceStartedAt;
+          lastMaskCount.value = maskCount;
+          lastMaskPrepDurationMs.value = maskPrepMs;
+          lastSegmentationDurationMs.value = segmentationMs;
+          lastSerializationDurationMs.value = serializationMs;
+
+          if (preparedMask) {
+            stage = "mask-assign-prepared";
+            runWithWorkletDebugLogging(
+              {
+                args: {
+                  frameHeight: frame.height,
+                  framePixelFormat: frame.pixelFormat,
+                  frameTimestamp: frame.timestamp,
+                  frameWidth: frame.width,
+                  maskCount,
+                  stage,
+                },
+                description: "assign prepared live mask shared values",
+                namespace: "rn-live",
+              },
+              () => {
+                const previousMaskImage = liveMaskImage.value;
+
+                liveMaskImage.value = preparedMask.image;
+                liveMaskUniforms.value = preparedMask.uniforms;
+                disposeLiveSkiaImage(previousMaskImage);
+              },
+            );
+            lastShaderActive.value = true;
+          } else {
+            stage = "mask-assign-empty";
+            runWithWorkletDebugLogging(
+              {
+                args: {
+                  frameHeight: frame.height,
+                  framePixelFormat: frame.pixelFormat,
+                  frameTimestamp: frame.timestamp,
+                  frameWidth: frame.width,
+                  maskCount,
+                  stage,
+                },
+                description: "clear live mask shared values",
+                namespace: "rn-live",
+              },
+              () => {
+                const previousMaskImage = liveMaskImage.value;
+
+                liveMaskImage.value = null;
+                liveMaskUniforms.value = emptyLiveMaskUniforms;
+                disposeLiveSkiaImage(previousMaskImage);
+              },
+            );
+            lastShaderActive.value = false;
+          }
+        }
+
+        if (Date.now() - lastReadoutReportAt.value > 250) {
+          stage = "readout-report";
+          lastReadoutReportAt.value = Date.now();
+          scheduleOnRN(reportLiveFrame, {
+            framePixelFormat: frame.pixelFormat,
+            frameOrientation: frame.orientation,
+            frameIsMirrored: frame.isMirrored,
+            hasPresentedFrame: lastPresentedFrame.value,
+            height: resolveLiveDetectionFrameSize(frame).height,
+            inferenceTickMs: lastInferenceTickDurationMs.value,
+            maskResolution: LIVE_RETURN_MASKS_AT_ORIGINAL_RESOLUTION
+              ? "original"
+              : "model",
+            maskCount: lastMaskCount.value,
+            maskPrepMs: lastMaskPrepDurationMs.value,
+            segmentationMs: lastSegmentationDurationMs.value,
+            serializationMs: lastSerializationDurationMs.value,
+            shaderActive: lastShaderActive.value,
+            timestamp: frame.timestamp,
+            width: resolveLiveDetectionFrameSize(frame).width,
+          });
+        }
+      } catch (error) {
+        if (Date.now() - lastErrorReportAt.value > 250) {
+          lastErrorReportAt.value = Date.now();
+          scheduleOnRN(
+            reportLiveError,
+            createLiveFrameError(stage, error, frame),
+          );
+        }
+      } finally {
+        frame.dispose();
+      }
+    },
+    onFrameDropped() {
+      reportDroppedFrame();
+    },
+    pixelFormat: "rgb",
+    targetResolution: LIVE_FRAME_TARGET_RESOLUTION,
+  });
+
+  const cameraOutputs = useMemo(
+    () => [renderFrameOutput, inferenceFrameOutput],
+    [inferenceFrameOutput, renderFrameOutput],
+  );
+
+  const liveMaskEffect = useMemo(
+    () => Skia.RuntimeEffect.Make(REACT_NATIVE_ID_MASK_SHADER_SOURCE),
+    [],
+  );
+
+  const modelStatus = formatSegmentationStatus(props.segmentation);
+  const canRunCamera = hasPermission && device && props.segmentation.isReady;
+
+  return (
+    <View style={styles.liveScreen}>
+      <StatusBar hidden />
+      <View
+        style={[styles.liveStage, { height: canvasHeight, width: canvasWidth }]}
+      >
+        {device ? (
+          <Camera
+            device={device}
+            isActive={Boolean(canRunCamera)}
+            orientationSource="interface"
+            outputs={cameraOutputs}
+            style={styles.captureCamera}
+          />
+        ) : null}
+        <NativeFrameRendererView
+          renderer={frameRenderer}
+          style={[
+            styles.frameRendererSurface,
+            StyleSheet.absoluteFill,
+            { height: canvasHeight, width: canvasWidth },
+          ]}
+        />
+        <Canvas
+          style={[
+            styles.canvasSurface,
+            StyleSheet.absoluteFill,
+            { height: canvasHeight, width: canvasWidth },
+          ]}
+        >
+          {showMaskLayer && liveMaskEffect ? (
+            <Rect
+              height={liveLayout.mediaRect.height}
+              width={liveLayout.mediaRect.width}
+              x={liveLayout.mediaRect.x}
+              y={liveLayout.mediaRect.y}
+            >
+              <Shader source={liveMaskEffect} uniforms={liveMaskUniforms}>
+                <ImageShader
+                  fit="fill"
+                  image={liveMaskImage as never}
+                  rect={liveLayout.mediaRect}
+                  sampling={{
+                    filter: FilterMode.Nearest,
+                    mipmap: MipmapMode.None,
+                  }}
+                  tx="clamp"
+                  ty="clamp"
+                />
+              </Shader>
+            </Rect>
+          ) : null}
+        </Canvas>
+        <View pointerEvents="none" style={styles.liveLabelLayer}>
+          {liveLabelOverlays.map(({ detection, index, rect }) => (
+            <View
+              key={`${detection.label}:${index}`}
+              style={[
+                styles.liveLabel,
+                {
+                  backgroundColor: toRgba(
+                    liveColorForClass(detection.label),
+                    0.82,
+                  ),
+                  left: Math.max(4, rect.x),
+                  top: Math.max(4, rect.y - 20),
+                },
+              ]}
+            >
+              <Text style={styles.liveLabelText}>
+                {detection.label || "object"}{" "}
+                {formatConfidence(detection.score)}
+              </Text>
+            </View>
+          ))}
+        </View>
+        {!canRunCamera ? (
+          <View style={styles.stageOverlay}>
+            <Text style={styles.overlayTitle}>Live camera</Text>
+            <Text style={styles.overlayBody}>
+              {!hasPermission
+                ? "Waiting for camera permission"
+                : !device
+                  ? "No back camera available"
+                  : modelStatus}
+            </Text>
+          </View>
+        ) : null}
+
+        {showLiveHud ? (
+          <>
+            <View style={styles.liveTopBar}>
+              <View style={styles.liveBrand}>
+                <BrandMark />
+                <View style={styles.headerCopy}>
+                  <Text style={styles.title}>supervision-js</Text>
+                  <Text style={styles.subtitle}>Live RF-DETR camera</Text>
+                </View>
+              </View>
+              <ModeSwitch mode={props.mode} onModeChange={props.onModeChange} />
+            </View>
+
+            <View style={styles.liveStatusCluster}>
+              <StatusPill
+                tone={canRunCamera ? "ready" : "warning"}
+                value={canRunCamera ? "live" : "waiting"}
+              />
+              <StatusPill value={modelStatus} />
+              <StatusPill value={`${liveFrame?.maskCount ?? 0} masks`} />
+            </View>
+
+            <View style={styles.liveActions}>
+              <TouchableOpacity
+                onPress={() => setShowMaskLayer((value) => !value)}
+                style={[
+                  styles.floatingButton,
+                  showMaskLayer ? styles.floatingButtonActive : null,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.floatingButtonText,
+                    showMaskLayer ? styles.floatingButtonTextActive : null,
+                  ]}
+                >
+                  Masks
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setShowLiveDebug((value) => !value)}
+                style={[
+                  styles.floatingButton,
+                  showLiveDebug ? styles.floatingButtonActive : null,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.floatingButtonText,
+                    showLiveDebug ? styles.floatingButtonTextActive : null,
+                  ]}
+                >
+                  Debug
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setShowLiveHud(false)}
+                style={styles.floatingIconButton}
+              >
+                <Text style={styles.floatingButtonText}>Hide</Text>
+              </TouchableOpacity>
+            </View>
+
+            {showLiveDebug ? (
+              <View style={styles.liveDebugPanel}>
+                <LiveMetric
+                  label="Frame"
+                  value={
+                    liveFrame
+                      ? `${liveFrame.width}x${liveFrame.height}`
+                      : "waiting"
+                  }
+                />
+                <LiveMetric
+                  label="Transform"
+                  value={
+                    liveFrame
+                      ? `${liveFrame.frameOrientation}${liveFrame.frameIsMirrored ? " mirrored" : ""}`
+                      : "-"
+                  }
+                />
+                <LiveMetric
+                  label="Seg"
+                  value={liveFrame ? `${liveFrame.segmentationMs}ms` : "-"}
+                />
+                <LiveMetric
+                  label="Prep"
+                  value={liveFrame ? `${liveFrame.maskPrepMs}ms` : "-"}
+                />
+                <LiveMetric
+                  label="Tick"
+                  value={liveFrame ? `${liveFrame.inferenceTickMs}ms` : "-"}
+                />
+                <LiveMetric label="Dropped" value={String(droppedFrames)} />
+                <LiveMetric label="Error" value={liveError?.stage ?? "none"} />
+              </View>
+            ) : null}
+          </>
+        ) : (
+          <TouchableOpacity
+            onPress={() => setShowLiveHud(true)}
+            style={styles.liveShowHudButton}
+          >
+            <Text style={styles.floatingButtonText}>HUD</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    </View>
+  );
+}
+
+function ModeSwitch(props: {
+  readonly mode: DemoMode;
+  readonly onModeChange: (mode: DemoMode) => void;
+}) {
+  return (
+    <View style={styles.modeSwitch}>
+      <TouchableOpacity
+        onPress={() => props.onModeChange("static")}
+        style={[
+          styles.modeButton,
+          props.mode === "static" ? styles.modeButtonActive : null,
+        ]}
+      >
+        <Text
+          style={[
+            styles.modeButtonText,
+            props.mode === "static" ? styles.modeButtonTextActive : null,
+          ]}
+        >
+          Static
+        </Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        onPress={() => props.onModeChange("live")}
+        style={[
+          styles.modeButton,
+          props.mode === "live" ? styles.modeButtonActive : null,
+        ]}
+      >
+        <Text
+          style={[
+            styles.modeButtonText,
+            props.mode === "live" ? styles.modeButtonTextActive : null,
+          ]}
+        >
+          Live
+        </Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 function BrandMark() {
   return (
     <View style={styles.mark}>
@@ -526,11 +1292,32 @@ function StatusPill(props: {
   );
 }
 
+function formatSegmentationStatus(segmentation: LiveSegmentation) {
+  if (segmentation.error) {
+    return "model error";
+  }
+
+  if (segmentation.isReady) {
+    return "RF-DETR Seg ready";
+  }
+
+  return `preloading ${Math.round(segmentation.downloadProgress * 100)}%`;
+}
+
 function Metric(props: { readonly label: string; readonly value: string }) {
   return (
     <View style={styles.metric}>
       <Text style={styles.metricLabel}>{props.label}</Text>
       <Text style={styles.metricValue}>{props.value}</Text>
+    </View>
+  );
+}
+
+function LiveMetric(props: { readonly label: string; readonly value: string }) {
+  return (
+    <View style={styles.liveMetric}>
+      <Text style={styles.liveMetricLabel}>{props.label}</Text>
+      <Text style={styles.liveMetricValue}>{props.value}</Text>
     </View>
   );
 }
@@ -559,6 +1346,328 @@ function formatBytes(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+interface LiveSkiaMaskFrameOptions {
+  readonly debugArgs: {
+    readonly detectionCount: number;
+    readonly frameHeight: number;
+    readonly framePixelFormat: string;
+    readonly frameTimestamp: number;
+    readonly frameWidth: number;
+    readonly mediaRectHeight: number;
+    readonly mediaRectWidth: number;
+    readonly mediaRectX: number;
+    readonly mediaRectY: number;
+  };
+  readonly detections: readonly LiveSerializedDetection[];
+  readonly frameHeight: number;
+  readonly frameWidth: number;
+  readonly mediaRect: {
+    readonly height: number;
+    readonly width: number;
+    readonly x: number;
+    readonly y: number;
+  };
+}
+
+interface LiveSkiaMaskFrame {
+  readonly image: SkiaImageType;
+  readonly uniforms: ReactNativeIdMaskUniforms;
+}
+
+function createLiveSkiaMaskFrame(
+  options: LiveSkiaMaskFrameOptions,
+): LiveSkiaMaskFrame | null {
+  "worklet";
+
+  const maskLimit = MAX_ID_MASK_PALETTE_ENTRIES - 1;
+  const detectionCount =
+    options.detections.length < maskLimit
+      ? options.detections.length
+      : maskLimit;
+  const frameWidth = Math.max(1, Math.round(options.frameWidth));
+  const frameHeight = Math.max(1, Math.round(options.frameHeight));
+  const artifactScale =
+    frameWidth > LIVE_MASK_ARTIFACT_MAX_WIDTH
+      ? LIVE_MASK_ARTIFACT_MAX_WIDTH / frameWidth
+      : 1;
+  const width = Math.max(1, Math.round(frameWidth * artifactScale));
+  const height = Math.max(1, Math.round(frameHeight * artifactScale));
+
+  for (let index = 0; index < detectionCount; index += 1) {
+    const detection = options.detections[index]!;
+
+    if (detection.mask.length !== detection.maskWidth * detection.maskHeight) {
+      continue;
+    }
+  }
+
+  if (width <= 0 || height <= 0) {
+    return null;
+  }
+
+  const data = new Uint8Array(width * height);
+  const fillPalette: number[] = [];
+  const strokePalette: number[] = [];
+  const strokeWidths: number[] = [];
+
+  for (let index = 0; index < MAX_ID_MASK_PALETTE_ENTRIES * 4; index += 1) {
+    fillPalette[index] = 0;
+    strokePalette[index] = 0;
+  }
+
+  for (let index = 0; index < MAX_ID_MASK_PALETTE_ENTRIES; index += 1) {
+    strokeWidths[index] = 0;
+  }
+
+  for (let index = 0; index < detectionCount; index += 1) {
+    const detection = options.detections[index]!;
+
+    if (detection.mask.length !== detection.maskWidth * detection.maskHeight) {
+      continue;
+    }
+
+    const maskId = index + 1;
+    let color = 0x77e4f2;
+
+    if (detection.label === "person") {
+      color = 0x92f2b3;
+    } else if (detection.label === "horse") {
+      color = 0x77e4f2;
+    } else if (detection.label === "cow") {
+      color = 0xa78bfa;
+    } else if (detection.label === "sports ball") {
+      color = 0xf59e0b;
+    }
+
+    const paletteOffset = maskId * 4;
+    const red = ((color >> 16) & 0xff) / 255;
+    const green = ((color >> 8) & 0xff) / 255;
+    const blue = (color & 0xff) / 255;
+
+    fillPalette[paletteOffset] = red;
+    fillPalette[paletteOffset + 1] = green;
+    fillPalette[paletteOffset + 2] = blue;
+    fillPalette[paletteOffset + 3] = 0.28;
+    strokePalette[paletteOffset] = red;
+    strokePalette[paletteOffset + 1] = green;
+    strokePalette[paletteOffset + 2] = blue;
+    strokePalette[paletteOffset + 3] = 0.95;
+    strokeWidths[maskId] = 2;
+
+    const targetX0 = Math.max(0, Math.floor(detection.bbox.x1 * artifactScale));
+    const targetY0 = Math.max(0, Math.floor(detection.bbox.y1 * artifactScale));
+    const targetX1 = Math.min(
+      width,
+      Math.ceil(detection.bbox.x2 * artifactScale),
+    );
+    const targetY1 = Math.min(
+      height,
+      Math.ceil(detection.bbox.y2 * artifactScale),
+    );
+    const targetWidth = targetX1 - targetX0;
+    const targetHeight = targetY1 - targetY0;
+
+    if (targetWidth <= 0 || targetHeight <= 0) {
+      continue;
+    }
+
+    for (let y = 0; y < targetHeight; y += 1) {
+      const sourceY = Math.min(
+        detection.maskHeight - 1,
+        Math.floor((y / targetHeight) * detection.maskHeight),
+      );
+      const sourceRowOffset = sourceY * detection.maskWidth;
+      const targetRowOffset = (targetY0 + y) * width;
+
+      for (let x = 0; x < targetWidth; x += 1) {
+        const sourceX = Math.min(
+          detection.maskWidth - 1,
+          Math.floor((x / targetWidth) * detection.maskWidth),
+        );
+
+        if (detection.mask[sourceRowOffset + sourceX]) {
+          data[targetRowOffset + targetX0 + x] = maskId;
+        }
+      }
+    }
+  }
+
+  const imageData = runWithWorkletDebugLogging(
+    {
+      args: options.debugArgs,
+      description: "create Skia data from live ID-mask bytes",
+      namespace: "rn-live",
+    },
+    () => Skia.Data.fromBytes(data),
+  );
+  const image = runWithWorkletDebugLogging(
+    {
+      args: options.debugArgs,
+      description: "create Skia image from live ID-mask data",
+      namespace: "rn-live",
+    },
+    () =>
+      Skia.Image.MakeImage(
+        {
+          alphaType: AlphaType.Opaque,
+          colorType: ColorType.Alpha_8,
+          height,
+          width,
+        },
+        imageData,
+        width,
+      ),
+  );
+
+  if (!image) {
+    return null;
+  }
+
+  return {
+    image,
+    uniforms: {
+      uBorderEnabled: 1,
+      uFillPalette: fillPalette,
+      uMaxStrokeWidth: 2,
+      uMediaRect: [
+        options.mediaRect.x,
+        options.mediaRect.y,
+        options.mediaRect.width,
+        options.mediaRect.height,
+      ],
+      uOpacity: 1,
+      uStrokePalette: strokePalette,
+      uStrokeWidths: strokeWidths,
+      uTextureSize: [width, height],
+    },
+  };
+}
+
+function createEmptyLiveMaskUniforms(): ReactNativeIdMaskUniforms {
+  return {
+    uBorderEnabled: 0,
+    uFillPalette: createNumberArray(MAX_ID_MASK_PALETTE_ENTRIES * 4),
+    uMaxStrokeWidth: 0,
+    uMediaRect: [0, 0, 1, 1],
+    uOpacity: 0,
+    uStrokePalette: createNumberArray(MAX_ID_MASK_PALETTE_ENTRIES * 4),
+    uStrokeWidths: createNumberArray(MAX_ID_MASK_PALETTE_ENTRIES),
+    uTextureSize: [1, 1],
+  };
+}
+
+function createNumberArray(length: number) {
+  return new Array<number>(length).fill(0);
+}
+
+function resolveLiveDetectionFrameSize(frame: {
+  readonly height: number;
+  readonly orientation: string;
+  readonly width: number;
+}) {
+  "worklet";
+
+  if (frame.orientation === "left" || frame.orientation === "right") {
+    return {
+      height: frame.width,
+      width: frame.height,
+    };
+  }
+
+  return {
+    height: frame.height,
+    width: frame.width,
+  };
+}
+
+function createLiveFrameError(
+  stage: string,
+  error: unknown,
+  frame: {
+    readonly hasNativeBuffer: boolean;
+    readonly hasPixelBuffer: boolean;
+    readonly height: number;
+    readonly isPlanar: boolean;
+    readonly pixelFormat: string;
+    readonly timestamp: number;
+    readonly width: number;
+  },
+): LiveFrameError {
+  "worklet";
+
+  const serialized = serializeDebugError(error);
+
+  return {
+    code: serialized.code,
+    frameHeight: frame.height,
+    framePixelFormat: frame.pixelFormat,
+    frameTimestamp: frame.timestamp,
+    frameWidth: frame.width,
+    hasNativeBuffer: frame.hasNativeBuffer,
+    hasPixelBuffer: frame.hasPixelBuffer,
+    isPlanar: frame.isPlanar,
+    message: serialized.message,
+    name: serialized.name,
+    stage,
+  };
+}
+
+function createLiveFrameDebugArgs(
+  stage: string,
+  frame: {
+    readonly hasNativeBuffer: boolean;
+    readonly hasPixelBuffer: boolean;
+    readonly height: number;
+    readonly isPlanar: boolean;
+    readonly pixelFormat: string;
+    readonly timestamp: number;
+    readonly width: number;
+  },
+) {
+  "worklet";
+
+  return {
+    frameHeight: frame.height,
+    framePixelFormat: frame.pixelFormat,
+    frameTimestamp: frame.timestamp,
+    frameWidth: frame.width,
+    hasNativeBuffer: frame.hasNativeBuffer,
+    hasPixelBuffer: frame.hasPixelBuffer,
+    isPlanar: frame.isPlanar,
+    stage,
+  };
+}
+
+function disposeLiveSkiaImage(image: SkiaImageType | null) {
+  "worklet";
+
+  if (image && typeof image.dispose === "function") {
+    image.dispose();
+  }
+}
+
+function liveColorForClass(className: string | undefined) {
+  "worklet";
+
+  if (className === "person") {
+    return 0x92f2b3;
+  }
+
+  if (className === "horse") {
+    return 0x77e4f2;
+  }
+
+  if (className === "cow") {
+    return 0xa78bfa;
+  }
+
+  if (className === "sports ball") {
+    return 0xf59e0b;
+  }
+
+  return 0x77e4f2;
+}
+
 const styles = StyleSheet.create({
   body: {
     color: "#9aa4b2",
@@ -579,6 +1688,7 @@ const styles = StyleSheet.create({
   },
   canvasSurface: {
     borderRadius: 14,
+    zIndex: 2,
   },
   card: {
     backgroundColor: "#080b11",
@@ -620,6 +1730,46 @@ const styles = StyleSheet.create({
   },
   controlCopy: {
     flex: 1,
+  },
+  captureCamera: {
+    bottom: 0,
+    left: 0,
+    opacity: 0,
+    position: "absolute",
+    right: 0,
+    top: 0,
+  },
+  floatingButton: {
+    backgroundColor: "rgba(5, 7, 11, 0.72)",
+    borderColor: "rgba(216, 226, 240, 0.18)",
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+  },
+  floatingButtonActive: {
+    backgroundColor: "rgba(248, 250, 252, 0.94)",
+    borderColor: "rgba(248, 250, 252, 0.54)",
+  },
+  floatingButtonText: {
+    color: "#d7dde7",
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  floatingButtonTextActive: {
+    color: "#050608",
+  },
+  floatingIconButton: {
+    backgroundColor: "rgba(5, 7, 11, 0.72)",
+    borderColor: "rgba(216, 226, 240, 0.18)",
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  frameRendererSurface: {
+    overflow: "hidden",
+    zIndex: 1,
   },
   header: {
     alignItems: "center",
@@ -667,6 +1817,124 @@ const styles = StyleSheet.create({
     left: 12,
     top: 18,
   },
+  liveLabel: {
+    borderColor: "rgba(255, 255, 255, 0.36)",
+    borderRadius: 4,
+    borderWidth: 1,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    position: "absolute",
+  },
+  liveLabelLayer: {
+    bottom: 0,
+    left: 0,
+    position: "absolute",
+    right: 0,
+    top: 0,
+    zIndex: 3,
+  },
+  liveLabelText: {
+    color: "#f8fafc",
+    fontSize: 10,
+    fontWeight: "900",
+  },
+  liveActions: {
+    bottom: 34,
+    flexDirection: "row",
+    gap: 8,
+    position: "absolute",
+    right: 14,
+    zIndex: 6,
+  },
+  liveBrand: {
+    alignItems: "center",
+    backgroundColor: "rgba(5, 7, 11, 0.66)",
+    borderColor: "rgba(216, 226, 240, 0.14)",
+    borderRadius: 16,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  liveDebugPanel: {
+    backgroundColor: "rgba(5, 7, 11, 0.68)",
+    borderColor: "rgba(216, 226, 240, 0.16)",
+    borderRadius: 16,
+    borderWidth: 1,
+    bottom: 84,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 7,
+    left: 14,
+    padding: 8,
+    position: "absolute",
+    right: 14,
+    zIndex: 6,
+  },
+  liveMetric: {
+    backgroundColor: "rgba(14, 19, 29, 0.74)",
+    borderColor: "rgba(216, 226, 240, 0.1)",
+    borderRadius: 10,
+    borderWidth: 1,
+    minWidth: 70,
+    paddingHorizontal: 8,
+    paddingVertical: 7,
+  },
+  liveMetricLabel: {
+    color: "#8f99ab",
+    fontSize: 8,
+    fontWeight: "900",
+    letterSpacing: 0.8,
+    textTransform: "uppercase",
+  },
+  liveMetricValue: {
+    color: "#dfffe7",
+    fontSize: 13,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "900",
+    marginTop: 2,
+  },
+  liveScreen: {
+    backgroundColor: "#000000",
+    flex: 1,
+  },
+  liveShowHudButton: {
+    backgroundColor: "rgba(5, 7, 11, 0.74)",
+    borderColor: "rgba(216, 226, 240, 0.18)",
+    borderRadius: 999,
+    borderWidth: 1,
+    bottom: 34,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    position: "absolute",
+    right: 14,
+    zIndex: 6,
+  },
+  liveStage: {
+    backgroundColor: "#000000",
+    overflow: "hidden",
+  },
+  liveStatusCluster: {
+    flexDirection: "row",
+    gap: 6,
+    justifyContent: "center",
+    left: 24,
+    position: "absolute",
+    right: 24,
+    top: 142,
+    zIndex: 6,
+  },
+  liveTopBar: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    left: 14,
+    position: "absolute",
+    right: 14,
+    top: 58,
+    zIndex: 6,
+  },
   metric: {
     backgroundColor: "#070a10",
     borderColor: "#1a202b",
@@ -699,6 +1967,32 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 8,
   },
+  modeButton: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  modeButtonActive: {
+    backgroundColor: "#f5f7fb",
+  },
+  modeButtonText: {
+    color: "#9aa4b2",
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  modeButtonTextActive: {
+    color: "#050608",
+  },
+  modeSwitch: {
+    alignItems: "center",
+    backgroundColor: "#05070b",
+    borderColor: "#1a202b",
+    borderRadius: 999,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 2,
+    padding: 3,
+  },
   safeArea: {
     backgroundColor: "#050608",
     flex: 1,
@@ -719,6 +2013,33 @@ const styles = StyleSheet.create({
   },
   shaderUnavailable: {
     borderColor: "#5b2424",
+  },
+  stageOverlay: {
+    alignItems: "center",
+    backgroundColor: "rgba(8, 11, 17, 0.82)",
+    borderColor: "#28303e",
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 4,
+    left: 28,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    position: "absolute",
+    right: 28,
+    top: 28,
+  },
+  overlayBody: {
+    color: "#d7dde7",
+    fontSize: 12,
+    fontWeight: "800",
+    textAlign: "center",
+  },
+  overlayTitle: {
+    color: "#ffd976",
+    fontSize: 10,
+    fontWeight: "900",
+    letterSpacing: 1,
+    textTransform: "uppercase",
   },
   stageReadout: {
     bottom: 8,

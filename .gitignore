@@ -7,6 +7,7 @@ coverage/
 .expo/
 
 examples/react-native/.expo/
+examples/react-native/build/
 examples/react-native/ios/
 examples/react-native/android/
 
