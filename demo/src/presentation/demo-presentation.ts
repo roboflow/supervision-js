@@ -3,7 +3,9 @@ import {
   BoxShape,
   BaseFocusStyle,
   BaseInteractionStyle,
+  DEFAULT_DETECTION_CLASS_STYLES,
   DetectionInteractionState,
+  type DetectionClassColorStyle,
   FocusTargetMode,
   LabelPlacement,
   MaskRenderMode,
@@ -17,14 +19,10 @@ import {
   type MaskDrawInstruction,
   type MaskStyle,
   type MediaRendererPresentation,
+  resolveDetectionClassColorStyle,
 } from "supervision-js";
 
-export interface DemoClassStyle {
-  readonly fill: number;
-  readonly labelBackground: number;
-  readonly labelText: number;
-  readonly stroke: number;
-}
+export type DemoClassStyle = DetectionClassColorStyle;
 
 export interface DemoPresentationSettings {
   readonly boxesEnabled: boolean;
@@ -62,49 +60,12 @@ export interface DemoPresentationSettings {
 export const defaultDemoClassNames = ["person", "horse", "cow"];
 
 const defaultDemoClassStyles: Record<string, DemoClassStyle> = {
-  basketball: {
-    fill: 0xff7a1a,
-    labelBackground: 0x7c2d12,
-    labelText: 0xfff7ed,
-    stroke: 0xffa23a,
-  },
-  "white team player": {
-    fill: 0xf8fafc,
-    labelBackground: 0x334155,
-    labelText: 0xffffff,
-    stroke: 0xffffff,
-  },
-  "yellow team player": {
-    fill: 0xfacc15,
-    labelBackground: 0x713f12,
-    labelText: 0xfffbeb,
-    stroke: 0xfde047,
-  },
-  cow: {
-    fill: 0xa78bfa,
-    labelBackground: 0x4c1d95,
-    labelText: 0xf5f3ff,
-    stroke: 0xc4b5fd,
-  },
-  horse: {
-    fill: 0x38bdf8,
-    labelBackground: 0x164e63,
-    labelText: 0xecfeff,
-    stroke: 0x7dd3fc,
-  },
-  person: {
-    fill: 0x22c55e,
-    labelBackground: 0x14532d,
-    labelText: 0xf0fdf4,
-    stroke: 0x86efac,
-  },
-};
-
-const fallbackStyle: DemoClassStyle = {
-  fill: 0x38bdf8,
-  labelBackground: 0x164e63,
-  labelText: 0xecfeff,
-  stroke: 0x7dd3fc,
+  basketball: DEFAULT_DETECTION_CLASS_STYLES.basketball,
+  cow: DEFAULT_DETECTION_CLASS_STYLES.cow,
+  horse: DEFAULT_DETECTION_CLASS_STYLES.horse,
+  person: DEFAULT_DETECTION_CLASS_STYLES.person,
+  "white team player": DEFAULT_DETECTION_CLASS_STYLES["white team player"],
+  "yellow team player": DEFAULT_DETECTION_CLASS_STYLES["yellow team player"],
 };
 
 export const defaultDemoPresentationSettings: DemoPresentationSettings = {
@@ -421,7 +382,10 @@ export function resolveDemoClassStyle(
   settings: DemoPresentationSettings,
   className: string,
 ) {
-  return settings.classStyles[className] ?? fallbackStyle;
+  return (
+    settings.classStyles[className] ??
+    resolveDetectionClassColorStyle(className)
+  );
 }
 
 function resolveClassStyle(
@@ -430,7 +394,7 @@ function resolveClassStyle(
 ) {
   return detection.className
     ? resolveDemoClassStyle(settings, detection.className)
-    : fallbackStyle;
+    : resolveDetectionClassColorStyle(undefined);
 }
 
 function serializeMaskClassStyles(styles: Record<string, DemoClassStyle>) {

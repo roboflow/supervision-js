@@ -1,6 +1,7 @@
 import {
   DetectionMaskEncoding,
   type DetectionFrame,
+  resolveDetectionClassColorStyle,
 } from "supervision-js-core";
 
 export const basketballFrameMetadata = {
@@ -57,13 +58,5 @@ export const basketballDetectionFrame: DetectionFrame = {
 };
 
 export function colorForClass(className: string) {
-  if (className.includes("yellow")) {
-    return 0xfacc15;
-  }
-
-  if (className.includes("basketball")) {
-    return 0xf97316;
-  }
-
-  return 0xe0f2fe;
+  return resolveDetectionClassColorStyle(className).fill;
 }

@@ -47,6 +47,14 @@ export { BaseLabelStyle } from "supervision-js-core";
 export type { BaseLabelStyleOptions } from "supervision-js-core";
 export { BaseMaskStyle } from "supervision-js-core";
 export type { BaseMaskStyleOptions } from "supervision-js-core";
+export {
+  DEFAULT_DETECTION_CLASS_STYLES,
+  DEFAULT_DETECTION_COLOR_SEQUENCE,
+  SUPERVISION_ROBOFLOW_COLOR,
+  normalizeDetectionClassName,
+  resolveDetectionClassColorStyle,
+  type DetectionClassColorStyle,
+} from "supervision-js-core";
 export { BoxShape, BoxStrokeAlignment } from "supervision-js-core";
 export type {
   BoxDrawInstruction,

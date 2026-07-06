@@ -1521,17 +1521,7 @@ function createLiveSkiaMaskFrame(
     }
 
     const maskId = index + 1;
-    let color = 0x77e4f2;
-
-    if (detection.label === "person") {
-      color = 0x92f2b3;
-    } else if (detection.label === "horse") {
-      color = 0x77e4f2;
-    } else if (detection.label === "cow") {
-      color = 0xa78bfa;
-    } else if (detection.label === "sports ball") {
-      color = 0xf59e0b;
-    }
+    const color = resolveLiveColorForClass(detection.label);
 
     const paletteOffset = maskId * 4;
     const red = ((color >> 16) & 0xff) / 255;
@@ -1782,23 +1772,110 @@ function disposeLiveSkiaImage(image: SkiaImageType | null) {
 function liveColorForClass(className: string | undefined) {
   "worklet";
 
-  if (className === "person") {
-    return 0x92f2b3;
+  return resolveLiveColorForClass(className);
+}
+
+function resolveLiveColorForClass(className: string | undefined) {
+  "worklet";
+
+  const normalizedClassName = normalizeLiveClassName(className);
+
+  if (normalizedClassName === "horse") {
+    return 0x38bdf8;
   }
 
-  if (className === "horse") {
-    return 0x77e4f2;
+  if (normalizedClassName === "person" || normalizedClassName === "keyboard") {
+    return 0x22c55e;
   }
 
-  if (className === "cow") {
+  if (normalizedClassName === "cow" || normalizedClassName === "tv") {
     return 0xa78bfa;
   }
 
-  if (className === "sports ball") {
-    return 0xf59e0b;
+  if (
+    normalizedClassName === "basketball" ||
+    normalizedClassName === "bottle" ||
+    normalizedClassName === "sports ball"
+  ) {
+    return 0xf97316;
   }
 
-  return 0x77e4f2;
+  if (normalizedClassName === "yellow team player") {
+    return 0xfacc15;
+  }
+
+  if (normalizedClassName === "white team player") {
+    return 0xf8fafc;
+  }
+
+  if (normalizedClassName === "cup") {
+    return 0xfacc15;
+  }
+
+  if (normalizedClassName === "bed") {
+    return 0xf472b6;
+  }
+
+  if (normalizedClassName === "laptop") {
+    return 0x60a5fa;
+  }
+
+  if (normalizedClassName === "knife") {
+    return 0xfb7185;
+  }
+
+  if (
+    normalizedClassName === "cell phone" ||
+    normalizedClassName === "potted plant"
+  ) {
+    return 0x34d399;
+  }
+
+  return resolveLiveFallbackColor(normalizedClassName);
+}
+
+function normalizeLiveClassName(className: string | undefined) {
+  "worklet";
+
+  return (className ?? "")
+    .trim()
+    .toLowerCase()
+    .replaceAll("_", " ")
+    .replaceAll("-", " ")
+    .replace(/\s+/g, " ");
+}
+
+function resolveLiveFallbackColor(className: string) {
+  "worklet";
+
+  let hash = 0;
+
+  for (let index = 0; index < className.length; index += 1) {
+    hash = (hash * 31 + className.charCodeAt(index)) >>> 0;
+  }
+
+  switch (hash % 10) {
+    case 0:
+      return 0x38bdf8;
+    case 1:
+      return 0x22c55e;
+    case 2:
+      return 0xa78bfa;
+    case 3:
+      return 0xfacc15;
+    case 4:
+      return 0xf97316;
+    case 5:
+      return 0xf472b6;
+    case 6:
+      return 0x60a5fa;
+    case 7:
+      return 0xfb7185;
+    case 8:
+      return 0x34d399;
+    default:
+      return 0xe879f9;
+  }
 }
 
 const styles = StyleSheet.create({

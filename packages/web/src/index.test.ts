@@ -51,6 +51,8 @@ describe("package entrypoint", () => {
       "BaseMaskStyle",
       "BoxShape",
       "BoxStrokeAlignment",
+      "DEFAULT_DETECTION_CLASS_STYLES",
+      "DEFAULT_DETECTION_COLOR_SEQUENCE",
       "DetectionBufferStatus",
       "DetectionFrameRetentionMode",
       "DetectionFrameSelectionMode",
@@ -80,6 +82,7 @@ describe("package entrypoint", () => {
       "RenderPreparationExecutionMode",
       "RenderPreparationMode",
       "RenderPreparationWorkerStatus",
+      "SUPERVISION_ROBOFLOW_COLOR",
       "createArrayDetectionFrameSource",
       "createBrowserColdDetectionFrameStore",
       "createBufferedDetectionTimeline",
@@ -90,12 +93,14 @@ describe("package entrypoint", () => {
       "createMediaSession",
       "createMemoryColdDetectionFrameStore",
       "createWritableDetectionFrameSource",
+      "normalizeDetectionClassName",
       "normalizeMedia",
       "normalizeMediaProgressively",
       "pickDetectionAtPoint",
       "prepareMedia",
       "prepareMediaProgressively",
       "probeMedia",
+      "resolveDetectionClassColorStyle",
     ]);
     expect(entrypoint.createMediaRenderer).toEqual(expect.any(Function));
     expect(entrypoint.createMediaSession).toEqual(expect.any(Function));
@@ -1370,8 +1375,7 @@ describe("package entrypoint", () => {
       expect(
         (
           pixiMock.shaderFrom.mock.calls[0]?.[0] as
-            | { resources?: Record<string, unknown> }
-            | undefined
+            { resources?: Record<string, unknown> } | undefined
         )?.resources?.uTexture,
       ).not.toBe(Texture.EMPTY.source);
       await vi.waitFor(() => {

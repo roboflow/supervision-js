@@ -51,6 +51,14 @@ export {
   resolveMaskStyleOpacity,
 } from "#utils/mask-style";
 export {
+  DEFAULT_DETECTION_CLASS_STYLES,
+  DEFAULT_DETECTION_COLOR_SEQUENCE,
+  SUPERVISION_ROBOFLOW_COLOR,
+  normalizeDetectionClassName,
+  resolveDetectionClassColorStyle,
+  type DetectionClassColorStyle,
+} from "#utils/color-palette";
+export {
   MAX_ID_MASK_PALETTE_ENTRIES,
   MAX_ID_MASK_STROKE_WIDTH,
   createIdMaskFrame,
