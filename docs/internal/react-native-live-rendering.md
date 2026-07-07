@@ -47,6 +47,17 @@ ExecuTorch, then counter-rotates the native frame renderer view for
 presentation. This keeps media and annotations synchronized without changing the
 mask coordinate system. React receives throttled diagnostics only.
 
+The debug HUD reports rolling p50/p90 timings instead of only the last frame:
+segmentation, serialization, mask preparation, mask fill, Skia upload, total
+strict-sync tick, dropped frames, artifact dimensions, artifact bytes, and mask
+count. The rolling view is important because single-frame timings are noisy on
+mobile and can hide whether the bottleneck is the model, JS/worklet mask fill,
+Skia upload, or React diagnostics.
+
+On iOS, the demo explicitly requests the RF-DETR Nano segmentation CoreML INT8
+profile through ExecuTorch. ExecuTorch remains example-owned; it is a detection
+producer, not a renderer dependency.
+
 This is intentionally still a proof. It does not yet have a reusable
 `createReactNativeLiveSession()` API, native-thread prepared windows, interaction
 layers, recorded-video providers, or a fully custom Skia/native renderer that
@@ -68,4 +79,7 @@ Inference should remain outside the package. ExecuTorch is only one producer.
 If strict mode still spends too much time in ID-mask preparation after bounded
 artifacts and model-resolution masks, the next escalation path is a native/JSI
 ID-mask builder that keeps the same one-artifact-per-frame contract while moving
-the fill/upload work closer to the renderer.
+the fill/upload work closer to the renderer. `packages/react-native` now exposes
+the renderer-neutral live ID-mask artifact shape, sizing helper, palette helper,
+and JS fallback builder so a native implementation can replace the fill path
+without changing the higher-level packet contract.

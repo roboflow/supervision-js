@@ -23,6 +23,7 @@ import {
   Switch,
   Text,
   TouchableOpacity,
+  Platform,
   type ViewStyle,
   useWindowDimensions,
   View,
@@ -51,6 +52,7 @@ import {
   DEFAULT_REACT_NATIVE_ID_MASK_EDGE_SMOOTHING,
   MAX_ID_MASK_PALETTE_ENTRIES,
   REACT_NATIVE_ID_MASK_SHADER_SOURCE,
+  type ReactNativeLiveSerializedDetection,
   type ReactNativeIdMaskUniforms,
   createReactNativeIdMaskFrame,
   pickReactNativeDetectionAtPoint,
@@ -80,7 +82,16 @@ const LIVE_MASK_ARTIFACT_MAX_SIDE = 1280;
 const LIVE_RETURN_MASKS_AT_ORIGINAL_RESOLUTION = false;
 const LIVE_FRAME_TARGET_RESOLUTION = { height: 1280, width: 720 };
 const LIVE_SEGMENTATION_MIRROR_FRAME = false;
-const liveSegmentationModel = models.instance_segmentation.rf_detr_nano();
+const LIVE_PERFORMANCE_SAMPLE_LIMIT = 40;
+const LIVE_SEGMENTATION_PROFILE_LABEL =
+  Platform.OS === "ios" ? "RF-DETR Nano CoreML INT8" : "RF-DETR Nano";
+const liveSegmentationModel =
+  Platform.OS === "ios"
+    ? models.instance_segmentation.rf_detr_nano({
+        backend: "coreml",
+        quant: true,
+      })
+    : models.instance_segmentation.rf_detr_nano({ quant: true });
 
 function useLiveSegmentation() {
   return useInstanceSegmentation({
@@ -561,20 +572,7 @@ function StaticFrameProof(props: {
   );
 }
 
-interface LiveSerializedDetection {
-  readonly bbox: {
-    readonly x1: number;
-    readonly x2: number;
-    readonly y1: number;
-    readonly y2: number;
-  };
-  readonly color: number;
-  readonly label: string;
-  readonly mask: Uint8Array;
-  readonly maskHeight: number;
-  readonly maskWidth: number;
-  readonly score: number;
-}
+type LiveSerializedDetection = ReactNativeLiveSerializedDetection;
 
 interface LiveFrameState {
   readonly artifactBytes: number;
@@ -598,6 +596,26 @@ interface LiveFrameState {
   readonly syncMode: "synced";
   readonly timestamp: number;
   readonly width: number;
+}
+
+interface LivePerformanceMetric {
+  readonly p50: number;
+  readonly p90: number;
+}
+
+interface LivePerformanceSummary {
+  readonly artifactBytes: number;
+  readonly artifactHeight: number;
+  readonly artifactWidth: number;
+  readonly droppedFrames: number;
+  readonly fill: LivePerformanceMetric;
+  readonly maskCount: number;
+  readonly prep: LivePerformanceMetric;
+  readonly sampleCount: number;
+  readonly segmentation: LivePerformanceMetric;
+  readonly serialization: LivePerformanceMetric;
+  readonly tick: LivePerformanceMetric;
+  readonly upload: LivePerformanceMetric;
 }
 
 interface LiveOverlayDetection {
@@ -641,6 +659,9 @@ function LiveCameraProof(props: {
   const [liveDetections, setLiveDetections] = useState<
     readonly LiveOverlayDetection[]
   >([]);
+  const [livePerformanceSamples, setLivePerformanceSamples] = useState<
+    readonly LiveFrameState[]
+  >([]);
   const [showLiveHud, setShowLiveHud] = useState(true);
   const [showLiveDebug, setShowLiveDebug] = useState(false);
   const [showMaskLayer, setShowMaskLayer] = useState(true);
@@ -669,6 +690,10 @@ function LiveCameraProof(props: {
         orientation: liveFrame?.frameOrientation ?? "left",
       }),
     [canvasHeight, canvasWidth, liveFrame?.frameOrientation],
+  );
+  const livePerformance = useMemo(
+    () => summarizeLivePerformance(livePerformanceSamples),
+    [livePerformanceSamples],
   );
   const liveMaskImage = useSharedValue<SkiaImageType | null>(null);
   const liveMaskUniforms = useSharedValue<ReactNativeIdMaskUniforms>(
@@ -754,6 +779,9 @@ function LiveCameraProof(props: {
 
   const reportLiveFrame = useCallback((frame: LiveFrameState) => {
     setLiveFrame(frame);
+    setLivePerformanceSamples((samples) =>
+      appendLivePerformanceSample(samples, frame),
+    );
   }, []);
   const reportDroppedFrame = useCallback(() => {
     droppedFrameCount.value += 1;
@@ -829,92 +857,7 @@ function LiveCameraProof(props: {
                 const detection = rawDetections[index]!;
                 const label: string =
                   typeof detection.label === "string" ? detection.label : "";
-                const fallbackIndex = index % 10;
-                let color = 0x38bdf8;
-
-                if (fallbackIndex === 1) {
-                  color = 0x22c55e;
-                } else if (fallbackIndex === 2) {
-                  color = 0xa78bfa;
-                } else if (fallbackIndex === 3) {
-                  color = 0xfacc15;
-                } else if (fallbackIndex === 4) {
-                  color = 0xf97316;
-                } else if (fallbackIndex === 5) {
-                  color = 0xf472b6;
-                } else if (fallbackIndex === 6) {
-                  color = 0x60a5fa;
-                } else if (fallbackIndex === 7) {
-                  color = 0xfb7185;
-                } else if (fallbackIndex === 8) {
-                  color = 0x34d399;
-                } else if (fallbackIndex === 9) {
-                  color = 0xe879f9;
-                }
-
-                if (label === "horse" || label === "HORSE") {
-                  color = 0x38bdf8;
-                } else if (
-                  label === "person" ||
-                  label === "PERSON" ||
-                  label === "keyboard" ||
-                  label === "KEYBOARD"
-                ) {
-                  color = 0x22c55e;
-                } else if (
-                  label === "cow" ||
-                  label === "COW" ||
-                  label === "tv" ||
-                  label === "TV"
-                ) {
-                  color = 0xa78bfa;
-                } else if (
-                  label === "basketball" ||
-                  label === "BASKETBALL" ||
-                  label === "bottle" ||
-                  label === "BOTTLE" ||
-                  label === "sports ball" ||
-                  label === "SPORTS BALL" ||
-                  label === "sports_ball" ||
-                  label === "SPORTS_BALL"
-                ) {
-                  color = 0xf97316;
-                } else if (
-                  label === "yellow team player" ||
-                  label === "YELLOW TEAM PLAYER" ||
-                  label === "yellow_team_player" ||
-                  label === "YELLOW_TEAM_PLAYER" ||
-                  label === "cup" ||
-                  label === "CUP" ||
-                  label === "mouse" ||
-                  label === "MOUSE"
-                ) {
-                  color = 0xfacc15;
-                } else if (
-                  label === "white team player" ||
-                  label === "WHITE TEAM PLAYER" ||
-                  label === "white_team_player" ||
-                  label === "WHITE_TEAM_PLAYER"
-                ) {
-                  color = 0xf8fafc;
-                } else if (label === "bed" || label === "BED") {
-                  color = 0xf472b6;
-                } else if (label === "laptop" || label === "LAPTOP") {
-                  color = 0x60a5fa;
-                } else if (label === "knife" || label === "KNIFE") {
-                  color = 0xfb7185;
-                } else if (
-                  label === "cell phone" ||
-                  label === "CELL PHONE" ||
-                  label === "cell_phone" ||
-                  label === "CELL_PHONE" ||
-                  label === "potted plant" ||
-                  label === "POTTED PLANT" ||
-                  label === "potted_plant" ||
-                  label === "POTTED_PLANT"
-                ) {
-                  color = 0x34d399;
-                }
+                const color = resolveLiveColorForLabel(label, index % 10);
 
                 serialized[index] = {
                   bbox: detection.bbox,
@@ -939,8 +882,8 @@ function LiveCameraProof(props: {
             overlayDetections[index] = {
               bbox: detection.bbox,
               color: detection.color,
-              label: detection.label,
-              score: detection.score,
+              label: detection.label ?? "object",
+              score: detection.score ?? 0,
             };
           }
 
@@ -1299,42 +1242,58 @@ function LiveCameraProof(props: {
                 <LiveMetric
                   label="Artifact"
                   value={
-                    liveFrame?.artifactWidth
-                      ? `${liveFrame.artifactWidth}x${liveFrame.artifactHeight}`
+                    livePerformance?.artifactWidth
+                      ? `${livePerformance.artifactWidth}x${livePerformance.artifactHeight}`
                       : "-"
                   }
                 />
                 <LiveMetric
                   label="Bytes"
                   value={
-                    liveFrame?.artifactBytes
-                      ? formatBytes(liveFrame.artifactBytes)
+                    livePerformance?.artifactBytes
+                      ? formatBytes(livePerformance.artifactBytes)
                       : "-"
                   }
                 />
                 <LiveMetric
-                  label="Seg"
-                  value={liveFrame ? `${liveFrame.segmentationMs}ms` : "-"}
+                  label="Model"
+                  value={LIVE_SEGMENTATION_PROFILE_LABEL}
                 />
                 <LiveMetric
-                  label="Prep"
-                  value={liveFrame ? `${liveFrame.maskPrepMs}ms` : "-"}
+                  label="Seg p50/p90"
+                  value={formatLivePerformanceMetric(
+                    livePerformance?.segmentation,
+                  )}
                 />
                 <LiveMetric
-                  label="Fill"
-                  value={liveFrame ? `${liveFrame.maskFillMs}ms` : "-"}
+                  label="Ser p50/p90"
+                  value={formatLivePerformanceMetric(
+                    livePerformance?.serialization,
+                  )}
                 />
                 <LiveMetric
-                  label="Upload"
-                  value={liveFrame ? `${liveFrame.maskUploadMs}ms` : "-"}
+                  label="Prep p50/p90"
+                  value={formatLivePerformanceMetric(livePerformance?.prep)}
                 />
                 <LiveMetric
-                  label="Tick"
-                  value={liveFrame ? `${liveFrame.inferenceTickMs}ms` : "-"}
+                  label="Fill p50/p90"
+                  value={formatLivePerformanceMetric(livePerformance?.fill)}
+                />
+                <LiveMetric
+                  label="Upload p50/p90"
+                  value={formatLivePerformanceMetric(livePerformance?.upload)}
+                />
+                <LiveMetric
+                  label="Tick p50/p90"
+                  value={formatLivePerformanceMetric(livePerformance?.tick)}
+                />
+                <LiveMetric
+                  label="Samples"
+                  value={String(livePerformance?.sampleCount ?? 0)}
                 />
                 <LiveMetric
                   label="Dropped"
-                  value={String(liveFrame?.droppedFrames ?? 0)}
+                  value={String(livePerformance?.droppedFrames ?? 0)}
                 />
                 <LiveMetric label="Error" value={liveError?.stage ?? "none"} />
               </View>
@@ -1481,6 +1440,201 @@ function formatBytes(bytes: number) {
   }
 
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function appendLivePerformanceSample(
+  samples: readonly LiveFrameState[],
+  frame: LiveFrameState,
+): readonly LiveFrameState[] {
+  const next = [...samples, frame];
+
+  return next.slice(-LIVE_PERFORMANCE_SAMPLE_LIMIT);
+}
+
+function summarizeLivePerformance(
+  samples: readonly LiveFrameState[],
+): LivePerformanceSummary | null {
+  if (samples.length === 0) {
+    return null;
+  }
+
+  const latest = samples[samples.length - 1]!;
+
+  return {
+    artifactBytes: latest.artifactBytes,
+    artifactHeight: latest.artifactHeight,
+    artifactWidth: latest.artifactWidth,
+    droppedFrames: latest.droppedFrames,
+    fill: summarizeLivePerformanceMetric(
+      samples,
+      (sample) => sample.maskFillMs,
+    ),
+    maskCount: latest.maskCount,
+    prep: summarizeLivePerformanceMetric(
+      samples,
+      (sample) => sample.maskPrepMs,
+    ),
+    sampleCount: samples.length,
+    segmentation: summarizeLivePerformanceMetric(
+      samples,
+      (sample) => sample.segmentationMs,
+    ),
+    serialization: summarizeLivePerformanceMetric(
+      samples,
+      (sample) => sample.serializationMs,
+    ),
+    tick: summarizeLivePerformanceMetric(
+      samples,
+      (sample) => sample.inferenceTickMs,
+    ),
+    upload: summarizeLivePerformanceMetric(
+      samples,
+      (sample) => sample.maskUploadMs,
+    ),
+  };
+}
+
+function summarizeLivePerformanceMetric(
+  samples: readonly LiveFrameState[],
+  selectValue: (sample: LiveFrameState) => number,
+): LivePerformanceMetric {
+  const values = samples
+    .map(selectValue)
+    .filter((value) => Number.isFinite(value))
+    .sort((a, b) => a - b);
+
+  if (values.length === 0) {
+    return { p50: 0, p90: 0 };
+  }
+
+  return {
+    p50: resolveLivePercentile(values, 0.5),
+    p90: resolveLivePercentile(values, 0.9),
+  };
+}
+
+function resolveLivePercentile(values: readonly number[], percentile: number) {
+  const index = Math.min(
+    values.length - 1,
+    Math.max(0, Math.ceil(values.length * percentile) - 1),
+  );
+
+  return values[index] ?? 0;
+}
+
+function formatLivePerformanceMetric(
+  metric: LivePerformanceMetric | null | undefined,
+) {
+  if (!metric) {
+    return "-";
+  }
+
+  return `${Math.round(metric.p50)}/${Math.round(metric.p90)}ms`;
+}
+
+function resolveLiveColorForLabel(label: string, fallbackIndex: number) {
+  "worklet";
+
+  let color = 0x38bdf8;
+
+  if (fallbackIndex === 1) {
+    color = 0x22c55e;
+  } else if (fallbackIndex === 2) {
+    color = 0xa78bfa;
+  } else if (fallbackIndex === 3) {
+    color = 0xfacc15;
+  } else if (fallbackIndex === 4) {
+    color = 0xf97316;
+  } else if (fallbackIndex === 5) {
+    color = 0xf472b6;
+  } else if (fallbackIndex === 6) {
+    color = 0x60a5fa;
+  } else if (fallbackIndex === 7) {
+    color = 0xfb7185;
+  } else if (fallbackIndex === 8) {
+    color = 0x34d399;
+  } else if (fallbackIndex === 9) {
+    color = 0xe879f9;
+  }
+
+  if (label === "horse" || label === "HORSE") {
+    return 0x38bdf8;
+  }
+
+  if (
+    label === "person" ||
+    label === "PERSON" ||
+    label === "keyboard" ||
+    label === "KEYBOARD"
+  ) {
+    return 0x22c55e;
+  }
+
+  if (label === "cow" || label === "COW" || label === "tv" || label === "TV") {
+    return 0xa78bfa;
+  }
+
+  if (
+    label === "basketball" ||
+    label === "BASKETBALL" ||
+    label === "bottle" ||
+    label === "BOTTLE" ||
+    label === "sports ball" ||
+    label === "SPORTS BALL" ||
+    label === "sports_ball" ||
+    label === "SPORTS_BALL"
+  ) {
+    return 0xf97316;
+  }
+
+  if (
+    label === "yellow team player" ||
+    label === "YELLOW TEAM PLAYER" ||
+    label === "yellow_team_player" ||
+    label === "YELLOW_TEAM_PLAYER" ||
+    label === "cup" ||
+    label === "CUP" ||
+    label === "mouse" ||
+    label === "MOUSE"
+  ) {
+    return 0xfacc15;
+  }
+
+  if (
+    label === "white team player" ||
+    label === "WHITE TEAM PLAYER" ||
+    label === "white_team_player" ||
+    label === "WHITE_TEAM_PLAYER"
+  ) {
+    return 0xf8fafc;
+  }
+
+  if (label === "bed" || label === "BED") {
+    return 0xf472b6;
+  }
+
+  if (label === "laptop" || label === "LAPTOP") {
+    return 0x60a5fa;
+  }
+
+  if (label === "knife" || label === "KNIFE") {
+    return 0xfb7185;
+  }
+
+  if (
+    label === "cell phone" ||
+    label === "CELL PHONE" ||
+    label === "cell_phone" ||
+    label === "CELL_PHONE" ||
+    label === "potted plant" ||
+    label === "POTTED PLANT" ||
+    label === "potted_plant" ||
+    label === "POTTED_PLANT"
+  ) {
+    return 0x34d399;
+  }
+
+  return color;
 }
 
 interface LiveSkiaMaskFrameOptions {
@@ -1637,25 +1791,22 @@ function createLiveSkiaMaskFrame(
       }
 
       maskPrepStage = "mask-fill-artifact";
-      const sourceXByTargetX: number[] = [];
-
-      for (let x = 0; x < targetWidth; x += 1) {
-        sourceXByTargetX[x] = Math.min(
-          detection.maskWidth - 1,
-          Math.floor((x * detection.maskWidth) / targetWidth),
-        );
-      }
+      const sourceXStep = detection.maskWidth / targetWidth;
+      const sourceYStep = detection.maskHeight / targetHeight;
 
       for (let y = 0; y < targetHeight; y += 1) {
         const sourceY = Math.min(
           detection.maskHeight - 1,
-          Math.floor((y * detection.maskHeight) / targetHeight),
+          Math.floor(y * sourceYStep),
         );
         const sourceRowOffset = sourceY * detection.maskWidth;
         const targetRowOffset = (targetY0 + y) * width;
 
         for (let x = 0; x < targetWidth; x += 1) {
-          const sourceX = sourceXByTargetX[x]!;
+          const sourceX = Math.min(
+            detection.maskWidth - 1,
+            Math.floor(x * sourceXStep),
+          );
 
           if (detection.mask[sourceRowOffset + sourceX]) {
             data[targetRowOffset + targetX0 + x] = maskId;

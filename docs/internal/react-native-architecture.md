@@ -81,10 +81,17 @@ The example app also includes a live camera proof:
 - The frame worklet imports the native camera frame as a Skia image through
   `Frame.getNativeBuffer()` and `Skia.Image.MakeImageFromNativeBuffer()`.
 - The same frame is passed to ExecuTorch RF-DETR Nano instance segmentation.
-- ExecuTorch binary masks are converted directly into one frame-level ID-mask
-  image in the worklet.
-- One Skia canvas draws the camera image and ID-mask shader. React receives
-  throttled diagnostics only.
+- ExecuTorch binary masks are converted directly into one bounded frame-level
+  ID-mask artifact in the worklet.
+- The same callback assigns the mask shader packet and then presents the
+  matching camera frame through VisionCamera's native frame renderer. React
+  receives throttled diagnostics only.
+
+The reusable package now owns the live ID-mask artifact contract, artifact
+sizing helper, Roboflow-style palette helper, and JS fallback builder. The
+example still owns the hot VisionCamera and ExecuTorch worklet because those are
+producer choices. A future native/JSI builder should match the same package
+contract and replace only the expensive fill/upload path.
 
 This is deliberately an example-level integration. The long-term package design
 should move hot-frame rendering, prepared-window management, and background or

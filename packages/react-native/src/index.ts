@@ -290,6 +290,49 @@ export interface ReactNativeIdMaskUniforms {
   readonly uTextureSize: readonly number[];
 }
 
+export interface ReactNativeLiveSerializedDetection {
+  readonly bbox: {
+    readonly x1: number;
+    readonly x2: number;
+    readonly y1: number;
+    readonly y2: number;
+  };
+  readonly color: number;
+  readonly label?: string;
+  readonly mask: Uint8Array;
+  readonly maskHeight: number;
+  readonly maskWidth: number;
+  readonly score?: number;
+}
+
+export interface ReactNativeLiveIdMaskArtifactSizeOptions {
+  readonly frameHeight: number;
+  readonly frameWidth: number;
+  readonly maxPixels: number;
+  readonly maxSide: number;
+}
+
+export interface ReactNativeLiveIdMaskArtifactOptions extends ReactNativeLiveIdMaskArtifactSizeOptions {
+  readonly borderWidth?: number;
+  readonly detections: readonly ReactNativeLiveSerializedDetection[];
+  readonly fillOpacity?: number;
+}
+
+export interface ReactNativeLiveIdMaskArtifact extends ReactNativeIdMaskFrame {
+  readonly scale: number;
+}
+
+export interface ReactNativeLiveIdMaskBuilder {
+  build(
+    options: ReactNativeLiveIdMaskArtifactOptions,
+  ): ReactNativeLiveIdMaskArtifact | undefined;
+}
+
+export const REACT_NATIVE_ROBOFLOW_PALETTE = [
+  0x38bdf8, 0x22c55e, 0xa78bfa, 0xfacc15, 0xf97316, 0xf472b6, 0x60a5fa,
+  0xfb7185, 0x34d399, 0xe879f9,
+] as const;
+
 export function resolveReactNativeFrameLayout(
   options: ReactNativeFrameLayoutOptions,
 ): ReactNativeFrameLayout {
@@ -452,6 +495,171 @@ export function resolveReactNativeIdMaskUniforms(
   };
 }
 
+export function resolveReactNativeLiveColorForClass(
+  className: string | undefined,
+  fallbackIndex = 0,
+) {
+  const fallback =
+    REACT_NATIVE_ROBOFLOW_PALETTE[
+      Math.abs(fallbackIndex) % REACT_NATIVE_ROBOFLOW_PALETTE.length
+    ] ?? REACT_NATIVE_ROBOFLOW_PALETTE[0];
+  const normalized = (className ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+
+  switch (normalized) {
+    case "horse":
+      return 0x38bdf8;
+    case "person":
+    case "keyboard":
+      return 0x22c55e;
+    case "cow":
+    case "tv":
+      return 0xa78bfa;
+    case "basketball":
+    case "bottle":
+    case "sports_ball":
+      return 0xf97316;
+    case "yellow_team_player":
+    case "cup":
+    case "mouse":
+      return 0xfacc15;
+    case "white_team_player":
+      return 0xf8fafc;
+    case "bed":
+      return 0xf472b6;
+    case "laptop":
+      return 0x60a5fa;
+    case "knife":
+      return 0xfb7185;
+    case "cell_phone":
+    case "potted_plant":
+      return 0x34d399;
+    default:
+      return fallback;
+  }
+}
+
+export function resolveReactNativeLiveIdMaskArtifactSize(
+  options: ReactNativeLiveIdMaskArtifactSizeOptions,
+) {
+  const frameWidth = Math.max(1, Math.round(options.frameWidth));
+  const frameHeight = Math.max(1, Math.round(options.frameHeight));
+  const framePixels = frameWidth * frameHeight;
+  const areaScale =
+    framePixels > options.maxPixels
+      ? Math.sqrt(options.maxPixels / framePixels)
+      : 1;
+  const sideScale = Math.min(
+    1,
+    options.maxSide / frameWidth,
+    options.maxSide / frameHeight,
+  );
+  const scale = Math.min(areaScale, sideScale);
+
+  return {
+    height: Math.max(1, Math.round(frameHeight * scale)),
+    scale,
+    width: Math.max(1, Math.round(frameWidth * scale)),
+  };
+}
+
+export function createReactNativeLiveIdMaskArtifact(
+  options: ReactNativeLiveIdMaskArtifactOptions,
+): ReactNativeLiveIdMaskArtifact | undefined {
+  const detectionLimit = MAX_ID_MASK_PALETTE_ENTRIES - 1;
+  const detectionCount = Math.min(options.detections.length, detectionLimit);
+
+  if (detectionCount <= 0) {
+    return undefined;
+  }
+
+  const { height, scale, width } =
+    resolveReactNativeLiveIdMaskArtifactSize(options);
+  const data = new Uint8Array(new ArrayBuffer(width * height));
+  const fillPalette = new Float32Array(
+    new ArrayBuffer(MAX_ID_MASK_PALETTE_ENTRIES * 4 * 4),
+  );
+  const strokePalette = new Float32Array(
+    new ArrayBuffer(MAX_ID_MASK_PALETTE_ENTRIES * 4 * 4),
+  );
+  const strokeWidths = new Float32Array(
+    new ArrayBuffer(MAX_ID_MASK_PALETTE_ENTRIES * 4),
+  );
+  const strokeWidth = Math.min(
+    Math.max(0, options.borderWidth ?? 0),
+    MAX_ID_MASK_STROKE_WIDTH,
+  );
+  let maskCount = 0;
+
+  for (let index = 0; index < detectionCount; index += 1) {
+    const detection = options.detections[index]!;
+
+    if (detection.mask.length !== detection.maskWidth * detection.maskHeight) {
+      continue;
+    }
+
+    const maskId = index + 1;
+    const paletteOffset = maskId * 4;
+
+    writeReactNativeLivePaletteEntry(
+      fillPalette,
+      paletteOffset,
+      detection.color,
+      1,
+    );
+    writeReactNativeLivePaletteEntry(
+      strokePalette,
+      paletteOffset,
+      detection.color,
+      strokeWidth > 0 ? 0.95 : 0,
+    );
+    strokeWidths[maskId] = strokeWidth;
+
+    const targetX0 = Math.max(0, Math.floor(detection.bbox.x1 * scale));
+    const targetY0 = Math.max(0, Math.floor(detection.bbox.y1 * scale));
+    const targetX1 = Math.min(width, Math.ceil(detection.bbox.x2 * scale));
+    const targetY1 = Math.min(height, Math.ceil(detection.bbox.y2 * scale));
+    const targetWidth = targetX1 - targetX0;
+    const targetHeight = targetY1 - targetY0;
+
+    if (targetWidth <= 0 || targetHeight <= 0) {
+      continue;
+    }
+
+    maskCount += 1;
+    fillReactNativeLiveMask({
+      data,
+      detection,
+      maskId,
+      targetHeight,
+      targetWidth,
+      targetX0,
+      targetY0,
+      width,
+    });
+  }
+
+  if (maskCount === 0) {
+    return undefined;
+  }
+
+  return {
+    data,
+    fillPalette,
+    hasStroke: strokeWidth > 0,
+    height,
+    maskCount,
+    maxStrokeWidth: strokeWidth,
+    opacity: options.fillOpacity ?? 1,
+    scale,
+    strokePalette,
+    strokeWidths,
+    width,
+  };
+}
+
 function createShaderArrayLookup(options: {
   readonly fallback: string;
   readonly functionName: string;
@@ -558,4 +766,60 @@ function resolveReactNativeLabelPosition(options: {
         y: Math.max(layout.mediaRect.y, anchor.y - height - offsetY),
       };
   }
+}
+
+function fillReactNativeLiveMask(options: {
+  readonly data: Uint8Array;
+  readonly detection: ReactNativeLiveSerializedDetection;
+  readonly maskId: number;
+  readonly targetHeight: number;
+  readonly targetWidth: number;
+  readonly targetX0: number;
+  readonly targetY0: number;
+  readonly width: number;
+}) {
+  const {
+    data,
+    detection,
+    maskId,
+    targetHeight,
+    targetWidth,
+    targetX0,
+    targetY0,
+    width,
+  } = options;
+  const sourceXStep = detection.maskWidth / targetWidth;
+  const sourceYStep = detection.maskHeight / targetHeight;
+
+  for (let y = 0; y < targetHeight; y += 1) {
+    const sourceY = Math.min(
+      detection.maskHeight - 1,
+      Math.floor(y * sourceYStep),
+    );
+    const sourceRowOffset = sourceY * detection.maskWidth;
+    const targetRowOffset = (targetY0 + y) * width + targetX0;
+
+    for (let x = 0; x < targetWidth; x += 1) {
+      const sourceX = Math.min(
+        detection.maskWidth - 1,
+        Math.floor(x * sourceXStep),
+      );
+
+      if (detection.mask[sourceRowOffset + sourceX]) {
+        data[targetRowOffset + x] = maskId;
+      }
+    }
+  }
+}
+
+function writeReactNativeLivePaletteEntry(
+  palette: Float32Array,
+  offset: number,
+  color: number,
+  alpha: number,
+) {
+  palette[offset] = ((color >> 16) & 0xff) / 255;
+  palette[offset + 1] = ((color >> 8) & 0xff) / 255;
+  palette[offset + 2] = (color & 0xff) / 255;
+  palette[offset + 3] = Math.max(0, Math.min(alpha, 1));
 }

@@ -108,12 +108,16 @@ const expectedReactNativeRuntimeExports = [
   "MAX_ID_MASK_PALETTE_ENTRIES",
   "MAX_ID_MASK_STROKE_WIDTH",
   "REACT_NATIVE_ID_MASK_SHADER_SOURCE",
+  "REACT_NATIVE_ROBOFLOW_PALETTE",
   "createReactNativeIdMaskFrame",
+  "createReactNativeLiveIdMaskArtifact",
   "pickReactNativeDetectionAtPoint",
   "resolveReactNativeFrameLayout",
   "resolveReactNativeFramePresentation",
   "resolveReactNativeIdMaskUniforms",
   "resolveReactNativeLabelLayout",
+  "resolveReactNativeLiveColorForClass",
+  "resolveReactNativeLiveIdMaskArtifactSize",
 ];
 
 test("built core package imports without browser APIs", async () => {
@@ -167,7 +171,15 @@ test("built React Native package imports core without importing web", async () =
   assert.equal(typeof entrypoint.resolveReactNativeLabelLayout, "function");
   assert.equal(typeof entrypoint.pickReactNativeDetectionAtPoint, "function");
   assert.equal(typeof entrypoint.createReactNativeIdMaskFrame, "function");
+  assert.equal(
+    typeof entrypoint.createReactNativeLiveIdMaskArtifact,
+    "function",
+  );
   assert.equal(typeof entrypoint.resolveReactNativeIdMaskUniforms, "function");
+  assert.equal(
+    typeof entrypoint.resolveReactNativeLiveColorForClass,
+    "function",
+  );
   assert.equal(typeof entrypoint.REACT_NATIVE_ID_MASK_SHADER_SOURCE, "string");
 });
 

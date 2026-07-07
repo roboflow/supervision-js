@@ -10,10 +10,13 @@ import {
   type DetectionFrame,
 } from "supervision-js-core";
 import {
+  createReactNativeLiveIdMaskArtifact,
   createReactNativeIdMaskFrame,
   DEFAULT_REACT_NATIVE_ID_MASK_EDGE_SMOOTHING,
   pickReactNativeDetectionAtPoint,
   REACT_NATIVE_ID_MASK_SHADER_SOURCE,
+  resolveReactNativeLiveColorForClass,
+  resolveReactNativeLiveIdMaskArtifactSize,
   resolveReactNativeIdMaskUniforms,
   resolveReactNativeFrameLayout,
   resolveReactNativeLabelLayout,
@@ -254,6 +257,78 @@ describe("resolveReactNativeLabelLayout", () => {
       y: 79,
     });
     expect(label.textPoint).toEqual({ x: 59, y: 81 });
+  });
+});
+
+describe("React Native live ID-mask artifacts", () => {
+  it("bounds portrait camera frames by area and side caps", () => {
+    const size = resolveReactNativeLiveIdMaskArtifactSize({
+      frameHeight: 3840,
+      frameWidth: 2160,
+      maxPixels: 720 * 1280,
+      maxSide: 1280,
+    });
+
+    expect(size.width * size.height).toBeLessThanOrEqual(720 * 1280 + 1280);
+    expect(size.height).toBeLessThanOrEqual(1280);
+    expect(size.width).toBeLessThanOrEqual(1280);
+    expect(size.scale).toBeLessThan(1);
+  });
+
+  it("creates a bounded live artifact from raw model masks", () => {
+    const artifact = createReactNativeLiveIdMaskArtifact({
+      borderWidth: 2,
+      detections: [
+        {
+          bbox: { x1: 0, x2: 4, y1: 0, y2: 4 },
+          color: 0x60a5fa,
+          label: "laptop",
+          mask: new Uint8Array([
+            1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1,
+          ]),
+          maskHeight: 4,
+          maskWidth: 4,
+          score: 0.92,
+        },
+        {
+          bbox: { x1: 2, x2: 6, y1: 0, y2: 4 },
+          color: 0x22c55e,
+          label: "person",
+          mask: new Uint8Array([
+            1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          ]),
+          maskHeight: 4,
+          maskWidth: 4,
+          score: 0.84,
+        },
+      ],
+      fillOpacity: 0.5,
+      frameHeight: 4,
+      frameWidth: 6,
+      maxPixels: 24,
+      maxSide: 6,
+    });
+
+    expect(artifact).toBeDefined();
+    expect(artifact!.height).toBe(4);
+    expect(artifact!.width).toBe(6);
+    expect(artifact!.maskCount).toBe(2);
+    expect(artifact!.opacity).toBe(0.5);
+    expect(artifact!.hasStroke).toBe(true);
+    expect(artifact!.maxStrokeWidth).toBe(2);
+    expect(artifact!.strokeWidths[1]).toBe(2);
+    expect(artifact!.strokeWidths[2]).toBe(2);
+    expect(artifact!.data[0]).toBe(1);
+    expect(artifact!.data[2]).toBe(2);
+    expect(artifact!.fillPalette.slice(4, 8)).toEqual(
+      new Float32Array([0x60 / 255, 0xa5 / 255, 0xfa / 255, 1]),
+    );
+  });
+
+  it("resolves stable live colors from class names with palette fallback", () => {
+    expect(resolveReactNativeLiveColorForClass("keyboard")).toBe(0x22c55e);
+    expect(resolveReactNativeLiveColorForClass("potted plant")).toBe(0x34d399);
+    expect(resolveReactNativeLiveColorForClass("new class", 3)).toBe(0xfacc15);
   });
 });
 
