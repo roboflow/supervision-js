@@ -48,6 +48,7 @@ import {
 } from "supervision-js-core";
 import { models, useInstanceSegmentation } from "react-native-executorch";
 import {
+  DEFAULT_REACT_NATIVE_ID_MASK_EDGE_SMOOTHING,
   MAX_ID_MASK_PALETTE_ENTRIES,
   REACT_NATIVE_ID_MASK_SHADER_SOURCE,
   type ReactNativeIdMaskUniforms,
@@ -72,6 +73,7 @@ import {
 
 type DemoMode = "static" | "live";
 const LIVE_MAX_INSTANCES = 6;
+const LIVE_MASK_BORDER_WIDTH = 1;
 const LIVE_MASK_FILL_OPACITY = 0.5;
 const LIVE_MASK_ARTIFACT_MAX_PIXELS = 720 * 1280;
 const LIVE_MASK_ARTIFACT_MAX_SIDE = 1280;
@@ -1608,7 +1610,7 @@ function createLiveSkiaMaskFrame(
       strokePalette[paletteOffset + 1] = green;
       strokePalette[paletteOffset + 2] = blue;
       strokePalette[paletteOffset + 3] = 0.95;
-      strokeWidths[maskId] = 2;
+      strokeWidths[maskId] = LIVE_MASK_BORDER_WIDTH;
 
       maskPrepStage = "mask-compute-target";
       const targetX0 = Math.max(
@@ -1708,8 +1710,9 @@ function createLiveSkiaMaskFrame(
       uploadMs,
       uniforms: {
         uBorderEnabled: 1,
+        uEdgeSmoothing: DEFAULT_REACT_NATIVE_ID_MASK_EDGE_SMOOTHING,
         uFillPalette: fillPalette,
-        uMaxStrokeWidth: 2,
+        uMaxStrokeWidth: LIVE_MASK_BORDER_WIDTH,
         uMediaRect: [
           options.mediaRect.x,
           options.mediaRect.y,
@@ -1754,6 +1757,7 @@ function createLiveSkiaMaskFrame(
 function createEmptyLiveMaskUniforms(): ReactNativeIdMaskUniforms {
   return {
     uBorderEnabled: 0,
+    uEdgeSmoothing: 0,
     uFillPalette: createNumberArray(MAX_ID_MASK_PALETTE_ENTRIES * 4),
     uMaxStrokeWidth: 0,
     uMediaRect: [0, 0, 1, 1],

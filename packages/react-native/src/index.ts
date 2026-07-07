@@ -26,6 +26,8 @@ export {
   MAX_ID_MASK_STROKE_WIDTH,
 } from "supervision-js-core";
 
+export const DEFAULT_REACT_NATIVE_ID_MASK_EDGE_SMOOTHING = 0.85;
+
 const fillPaletteLookup = createShaderArrayLookup({
   fallback: "half4(0.0)",
   functionName: "resolveFillColor",
@@ -54,6 +56,7 @@ uniform float2 uTextureSize;
 uniform float4 uMediaRect;
 uniform float uOpacity;
 uniform float uBorderEnabled;
+uniform float uEdgeSmoothing;
 uniform float uMaxStrokeWidth;
 
 float sampleMaskId(float2 point) {
@@ -72,24 +75,97 @@ ${strokePaletteLookup}
 
 ${strokeWidthLookup}
 
+float2 resolveMaskTexel() {
+  return float2(
+    uMediaRect.z / max(uTextureSize.x, 1.0),
+    uMediaRect.w / max(uTextureSize.y, 1.0)
+  );
+}
+
+float resolveNeighborMaskId(float2 coord, float2 texel) {
+  float left = sampleMaskId(coord + texel * float2(-1.0, 0.0));
+
+  if (left > 0.0) {
+    return left;
+  }
+
+  float right = sampleMaskId(coord + texel * float2(1.0, 0.0));
+
+  if (right > 0.0) {
+    return right;
+  }
+
+  float up = sampleMaskId(coord + texel * float2(0.0, -1.0));
+
+  if (up > 0.0) {
+    return up;
+  }
+
+  float down = sampleMaskId(coord + texel * float2(0.0, 1.0));
+
+  if (down > 0.0) {
+    return down;
+  }
+
+  return 0.0;
+}
+
+float resolveSameNeighborRatio(float2 coord, float2 texel, float id) {
+  float matching = 0.0;
+
+  matching += sampleMaskId(coord + texel * float2(-1.0, 0.0)) == id ? 1.0 : 0.0;
+  matching += sampleMaskId(coord + texel * float2(1.0, 0.0)) == id ? 1.0 : 0.0;
+  matching += sampleMaskId(coord + texel * float2(0.0, -1.0)) == id ? 1.0 : 0.0;
+  matching += sampleMaskId(coord + texel * float2(0.0, 1.0)) == id ? 1.0 : 0.0;
+  matching += sampleMaskId(coord + texel * float2(-1.0, -1.0)) == id ? 1.0 : 0.0;
+  matching += sampleMaskId(coord + texel * float2(1.0, -1.0)) == id ? 1.0 : 0.0;
+  matching += sampleMaskId(coord + texel * float2(-1.0, 1.0)) == id ? 1.0 : 0.0;
+  matching += sampleMaskId(coord + texel * float2(1.0, 1.0)) == id ? 1.0 : 0.0;
+
+  return matching / 8.0;
+}
+
 half4 main(float2 coord) {
   float id = sampleMaskId(coord);
+  float2 texel = resolveMaskTexel();
+  float edgeSmoothing = clamp(uEdgeSmoothing, 0.0, 1.0);
 
   if (id <= 0.0) {
+    if (edgeSmoothing > 0.0) {
+      float neighborId = resolveNeighborMaskId(coord, texel);
+
+      if (neighborId > 0.0) {
+        int neighborMaskId = int(neighborId);
+        half4 neighborColor = resolveFillColor(neighborMaskId);
+        half featherAlpha =
+          neighborColor.a * half(uOpacity) * half(0.16 * edgeSmoothing);
+
+        return half4(neighborColor.rgb * featherAlpha, featherAlpha);
+      }
+    }
+
     return half4(0.0);
   }
 
   int maskId = int(id);
   half4 fillColor = resolveFillColor(maskId);
   half outputAlpha = fillColor.a * half(uOpacity);
+
+  if (edgeSmoothing > 0.0) {
+    float sameNeighborRatio = resolveSameNeighborRatio(coord, texel, id);
+    half edgeAlphaMultiplier = half(mix(
+      1.0,
+      0.58 + sameNeighborRatio * 0.42,
+      edgeSmoothing
+    ));
+
+    outputAlpha *= edgeAlphaMultiplier;
+  }
+
   half4 outputColor = half4(fillColor.rgb * outputAlpha, outputAlpha);
   float strokeWidth = resolveStrokeWidth(maskId);
 
   if (uBorderEnabled > 0.5 && strokeWidth > 0.0) {
-    float2 texel = float2(
-      uMediaRect.z / max(uTextureSize.x, 1.0),
-      uMediaRect.w / max(uTextureSize.y, 1.0)
-    );
     float radius = min(strokeWidth, uMaxStrokeWidth);
     bool onBorder = false;
 
@@ -105,7 +181,8 @@ half4 main(float2 coord) {
 
     if (onBorder) {
       half4 strokeColor = resolveStrokeColor(maskId);
-      outputColor = half4(strokeColor.rgb * strokeColor.a, strokeColor.a);
+      half strokeAlpha = strokeColor.a * half(mix(1.0, 0.88, edgeSmoothing));
+      outputColor = half4(strokeColor.rgb * strokeAlpha, strokeAlpha);
     }
   }
 
@@ -196,12 +273,14 @@ export interface ReactNativeIdMaskFrame extends IdMaskFrame {
 
 export interface ReactNativeIdMaskUniformOptions {
   readonly artifact: ReactNativeIdMaskFrame;
+  readonly edgeSmoothing?: number;
   readonly layout: ReactNativeFrameLayout;
 }
 
 export interface ReactNativeIdMaskUniforms {
   readonly [name: string]: number | readonly number[];
   readonly uBorderEnabled: number;
+  readonly uEdgeSmoothing: number;
   readonly uFillPalette: readonly number[];
   readonly uMaxStrokeWidth: number;
   readonly uMediaRect: readonly number[];
@@ -349,9 +428,12 @@ export function resolveReactNativeIdMaskUniforms(
   options: ReactNativeIdMaskUniformOptions,
 ): ReactNativeIdMaskUniforms {
   const { artifact, layout } = options;
+  const edgeSmoothing =
+    options.edgeSmoothing ?? DEFAULT_REACT_NATIVE_ID_MASK_EDGE_SMOOTHING;
 
   return {
     uBorderEnabled: artifact.hasStroke ? 1 : 0,
+    uEdgeSmoothing: Math.max(0, Math.min(edgeSmoothing, 1)),
     uFillPalette: Array.from(artifact.fillPalette),
     uMaxStrokeWidth: Math.min(
       artifact.maxStrokeWidth,

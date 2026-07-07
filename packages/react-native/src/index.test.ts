@@ -11,6 +11,7 @@ import {
 } from "supervision-js-core";
 import {
   createReactNativeIdMaskFrame,
+  DEFAULT_REACT_NATIVE_ID_MASK_EDGE_SMOOTHING,
   pickReactNativeDetectionAtPoint,
   REACT_NATIVE_ID_MASK_SHADER_SOURCE,
   resolveReactNativeIdMaskUniforms,
@@ -359,12 +360,47 @@ describe("React Native ID-mask artifacts", () => {
     });
 
     expect(uniforms.uOpacity).toBe(0.4);
+    expect(uniforms.uEdgeSmoothing).toBe(
+      DEFAULT_REACT_NATIVE_ID_MASK_EDGE_SMOOTHING,
+    );
     expect([...uniforms.uTextureSize]).toEqual([4, 8]);
     expect([...uniforms.uMediaRect]).toEqual([37.5, 0, 25, 50]);
     expect(uniforms.uBorderEnabled).toBe(0);
     expect(Array.isArray(uniforms.uFillPalette)).toBe(true);
     expect(uniforms.uFillPalette).toHaveLength(256);
     expect(uniforms.uFillPalette.slice(4, 8)).toEqual([1, 0, 0, 1]);
+  });
+
+  it("clamps configured edge smoothing for shader uniforms", () => {
+    const artifact = createReactNativeIdMaskFrame({
+      detectionFrame: {
+        detections: [
+          {
+            mask: {
+              counts: encodeCompressedRleCounts([0, 1]),
+              encoding: DetectionMaskEncoding.CompressedRle,
+              height: 1,
+              width: 1,
+            },
+          },
+        ],
+        mediaTime: 0,
+      },
+      maskStyle: new BaseMaskStyle({ color: 0xff0000 }),
+    });
+
+    const uniforms = resolveReactNativeIdMaskUniforms({
+      artifact: artifact!,
+      edgeSmoothing: 2,
+      layout: resolveReactNativeFrameLayout({
+        canvasHeight: 1,
+        canvasWidth: 1,
+        mediaHeight: 1,
+        mediaWidth: 1,
+      }),
+    });
+
+    expect(uniforms.uEdgeSmoothing).toBe(1);
   });
 
   it("uses constant palette lookups for SkSL shader compatibility", () => {
@@ -380,6 +416,7 @@ describe("React Native ID-mask artifacts", () => {
     expect(REACT_NATIVE_ID_MASK_SHADER_SOURCE).toContain(
       "return uFillPalette[1];",
     );
+    expect(REACT_NATIVE_ID_MASK_SHADER_SOURCE).toContain("uEdgeSmoothing");
   });
 });
 

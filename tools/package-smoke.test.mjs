@@ -104,6 +104,7 @@ const expectedCoreRuntimeExports = [
 ];
 
 const expectedReactNativeRuntimeExports = [
+  "DEFAULT_REACT_NATIVE_ID_MASK_EDGE_SMOOTHING",
   "MAX_ID_MASK_PALETTE_ENTRIES",
   "MAX_ID_MASK_STROKE_WIDTH",
   "REACT_NATIVE_ID_MASK_SHADER_SOURCE",
