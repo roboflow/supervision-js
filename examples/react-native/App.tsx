@@ -567,6 +567,7 @@ interface LiveSerializedDetection {
     readonly y1: number;
     readonly y2: number;
   };
+  readonly color: number;
   readonly label: string;
   readonly mask: Uint8Array;
   readonly maskHeight: number;
@@ -595,6 +596,7 @@ interface LiveFrameState {
 
 interface LiveOverlayDetection {
   readonly bbox: LiveSerializedDetection["bbox"];
+  readonly color: number;
   readonly label: string;
   readonly score: number;
 }
@@ -876,11 +878,98 @@ function LiveCameraProof(props: {
 
               for (let index = 0; index < rawDetections.length; index += 1) {
                 const detection = rawDetections[index]!;
-                const label =
+                const label: string =
                   typeof detection.label === "string" ? detection.label : "";
+                const fallbackIndex = index % 10;
+                let color = 0x38bdf8;
+
+                if (fallbackIndex === 1) {
+                  color = 0x22c55e;
+                } else if (fallbackIndex === 2) {
+                  color = 0xa78bfa;
+                } else if (fallbackIndex === 3) {
+                  color = 0xfacc15;
+                } else if (fallbackIndex === 4) {
+                  color = 0xf97316;
+                } else if (fallbackIndex === 5) {
+                  color = 0xf472b6;
+                } else if (fallbackIndex === 6) {
+                  color = 0x60a5fa;
+                } else if (fallbackIndex === 7) {
+                  color = 0xfb7185;
+                } else if (fallbackIndex === 8) {
+                  color = 0x34d399;
+                } else if (fallbackIndex === 9) {
+                  color = 0xe879f9;
+                }
+
+                if (label === "horse" || label === "HORSE") {
+                  color = 0x38bdf8;
+                } else if (
+                  label === "person" ||
+                  label === "PERSON" ||
+                  label === "keyboard" ||
+                  label === "KEYBOARD"
+                ) {
+                  color = 0x22c55e;
+                } else if (
+                  label === "cow" ||
+                  label === "COW" ||
+                  label === "tv" ||
+                  label === "TV"
+                ) {
+                  color = 0xa78bfa;
+                } else if (
+                  label === "basketball" ||
+                  label === "BASKETBALL" ||
+                  label === "bottle" ||
+                  label === "BOTTLE" ||
+                  label === "sports ball" ||
+                  label === "SPORTS BALL" ||
+                  label === "sports_ball" ||
+                  label === "SPORTS_BALL"
+                ) {
+                  color = 0xf97316;
+                } else if (
+                  label === "yellow team player" ||
+                  label === "YELLOW TEAM PLAYER" ||
+                  label === "yellow_team_player" ||
+                  label === "YELLOW_TEAM_PLAYER" ||
+                  label === "cup" ||
+                  label === "CUP" ||
+                  label === "mouse" ||
+                  label === "MOUSE"
+                ) {
+                  color = 0xfacc15;
+                } else if (
+                  label === "white team player" ||
+                  label === "WHITE TEAM PLAYER" ||
+                  label === "white_team_player" ||
+                  label === "WHITE_TEAM_PLAYER"
+                ) {
+                  color = 0xf8fafc;
+                } else if (label === "bed" || label === "BED") {
+                  color = 0xf472b6;
+                } else if (label === "laptop" || label === "LAPTOP") {
+                  color = 0x60a5fa;
+                } else if (label === "knife" || label === "KNIFE") {
+                  color = 0xfb7185;
+                } else if (
+                  label === "cell phone" ||
+                  label === "CELL PHONE" ||
+                  label === "cell_phone" ||
+                  label === "CELL_PHONE" ||
+                  label === "potted plant" ||
+                  label === "POTTED PLANT" ||
+                  label === "potted_plant" ||
+                  label === "POTTED_PLANT"
+                ) {
+                  color = 0x34d399;
+                }
 
                 serialized[index] = {
                   bbox: detection.bbox,
+                  color,
                   label,
                   mask: detection.mask,
                   maskHeight: detection.maskHeight,
@@ -900,6 +989,7 @@ function LiveCameraProof(props: {
 
             overlayDetections[index] = {
               bbox: detection.bbox,
+              color: detection.color,
               label: detection.label,
               score: detection.score,
             };
@@ -1135,10 +1225,7 @@ function LiveCameraProof(props: {
           {liveLabelOverlays.map((label) => (
             <Fragment key={`${label.detection.label}:${label.index}`}>
               <RoundedRect
-                color={toRgba(
-                  resolveLiveColorForClass(label.detection.label),
-                  0.84,
-                )}
+                color={toRgba(label.detection.color, 0.84)}
                 height={label.background.height}
                 r={5}
                 width={label.background.width}
@@ -1529,28 +1616,7 @@ function createLiveSkiaMaskFrame(
 
       const maskId = index + 1;
       maskPrepStage = "mask-resolve-color";
-      const fallbackIndex = index % 10;
-      let color = 0x38bdf8;
-
-      if (fallbackIndex === 1) {
-        color = 0x22c55e;
-      } else if (fallbackIndex === 2) {
-        color = 0xa78bfa;
-      } else if (fallbackIndex === 3) {
-        color = 0xfacc15;
-      } else if (fallbackIndex === 4) {
-        color = 0xf97316;
-      } else if (fallbackIndex === 5) {
-        color = 0xf472b6;
-      } else if (fallbackIndex === 6) {
-        color = 0x60a5fa;
-      } else if (fallbackIndex === 7) {
-        color = 0xfb7185;
-      } else if (fallbackIndex === 8) {
-        color = 0x34d399;
-      } else if (fallbackIndex === 9) {
-        color = 0xe879f9;
-      }
+      const color = detection.color;
 
       maskPrepStage = "mask-write-palette";
       const paletteOffset = maskId * 4;
@@ -1832,94 +1898,6 @@ function disposeLiveSkiaImage(image: SkiaImageType | null) {
 
   if (image && typeof image.dispose === "function") {
     image.dispose();
-  }
-}
-
-function resolveLiveColorForClass(className: string | undefined) {
-  const normalizedClassName = (className ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/[_-]/g, " ")
-    .replace(/\s+/g, " ");
-
-  if (normalizedClassName === "horse") {
-    return 0x38bdf8;
-  }
-
-  if (normalizedClassName === "person" || normalizedClassName === "keyboard") {
-    return 0x22c55e;
-  }
-
-  if (normalizedClassName === "cow" || normalizedClassName === "tv") {
-    return 0xa78bfa;
-  }
-
-  if (
-    normalizedClassName === "basketball" ||
-    normalizedClassName === "bottle" ||
-    normalizedClassName === "sports ball"
-  ) {
-    return 0xf97316;
-  }
-
-  if (normalizedClassName === "yellow team player") {
-    return 0xfacc15;
-  }
-
-  if (normalizedClassName === "white team player") {
-    return 0xf8fafc;
-  }
-
-  if (normalizedClassName === "cup") {
-    return 0xfacc15;
-  }
-
-  if (normalizedClassName === "bed") {
-    return 0xf472b6;
-  }
-
-  if (normalizedClassName === "laptop") {
-    return 0x60a5fa;
-  }
-
-  if (normalizedClassName === "knife") {
-    return 0xfb7185;
-  }
-
-  if (
-    normalizedClassName === "cell phone" ||
-    normalizedClassName === "potted plant"
-  ) {
-    return 0x34d399;
-  }
-
-  let hash = 0;
-
-  for (let index = 0; index < normalizedClassName.length; index += 1) {
-    hash = (hash * 31 + normalizedClassName.charCodeAt(index)) >>> 0;
-  }
-
-  switch (hash % 10) {
-    case 0:
-      return 0x38bdf8;
-    case 1:
-      return 0x22c55e;
-    case 2:
-      return 0xa78bfa;
-    case 3:
-      return 0xfacc15;
-    case 4:
-      return 0xf97316;
-    case 5:
-      return 0xf472b6;
-    case 6:
-      return 0x60a5fa;
-    case 7:
-      return 0xfb7185;
-    case 8:
-      return 0x34d399;
-    default:
-      return 0xe879f9;
   }
 }
 
