@@ -81,7 +81,8 @@ half4 main(float2 coord) {
 
   int maskId = int(id);
   half4 fillColor = resolveFillColor(maskId);
-  half4 outputColor = half4(fillColor.rgb, fillColor.a * half(uOpacity));
+  half outputAlpha = fillColor.a * half(uOpacity);
+  half4 outputColor = half4(fillColor.rgb * outputAlpha, outputAlpha);
   float strokeWidth = resolveStrokeWidth(maskId);
 
   if (uBorderEnabled > 0.5 && strokeWidth > 0.0) {
@@ -104,7 +105,7 @@ half4 main(float2 coord) {
 
     if (onBorder) {
       half4 strokeColor = resolveStrokeColor(maskId);
-      outputColor = half4(strokeColor.rgb, strokeColor.a);
+      outputColor = half4(strokeColor.rgb * strokeColor.a, strokeColor.a);
     }
   }
 

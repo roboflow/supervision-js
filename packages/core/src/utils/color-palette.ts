@@ -67,8 +67,7 @@ export function normalizeDetectionClassName(
   return (className ?? "")
     .trim()
     .toLowerCase()
-    .replaceAll("_", " ")
-    .replaceAll("-", " ")
+    .replace(/[_-]/g, " ")
     .replace(/\s+/g, " ");
 }
 

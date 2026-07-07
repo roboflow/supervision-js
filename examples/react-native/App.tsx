@@ -74,6 +74,7 @@ type DemoMode = "static" | "live";
 type LiveSyncMode = "latest" | "synced";
 const LIVE_INFERENCE_INTERVAL_MS = Math.round(1000 / 15);
 const LIVE_MAX_INSTANCES = 6;
+const LIVE_MASK_FILL_OPACITY = 0.5;
 const LIVE_MASK_ARTIFACT_MAX_WIDTH = 1280;
 const LIVE_RETURN_MASKS_AT_ORIGINAL_RESOLUTION = true;
 const LIVE_FRAME_TARGET_RESOLUTION = { height: 1280, width: 720 };
@@ -908,9 +909,11 @@ function LiveCameraProof(props: {
 
           stage = "mask-prepare";
           const maskStartedAt = Date.now();
-          const preparedMask = runWithWorkletDebugLogging(
-            {
-              args: {
+          let preparedMask: LiveSkiaMaskFrame | null = null;
+
+          try {
+            preparedMask = createLiveSkiaMaskFrame({
+              debugArgs: {
                 detectionCount: detections.length,
                 frameHeight: frame.height,
                 framePixelFormat: frame.pixelFormat,
@@ -920,35 +923,26 @@ function LiveCameraProof(props: {
                 mediaRectWidth: mediaRect.width,
                 mediaRectX: mediaRect.x,
                 mediaRectY: mediaRect.y,
-                stage,
               },
-              description: "prepare live ID-mask Skia image",
-              namespace: "rn-live",
-            },
-            () =>
-              createLiveSkiaMaskFrame({
-                debugArgs: {
-                  detectionCount: detections.length,
-                  frameHeight: frame.height,
-                  framePixelFormat: frame.pixelFormat,
-                  frameTimestamp: frame.timestamp,
-                  frameWidth: frame.width,
-                  mediaRectHeight: mediaRect.height,
-                  mediaRectWidth: mediaRect.width,
-                  mediaRectX: mediaRect.x,
-                  mediaRectY: mediaRect.y,
-                },
-                detections,
-                frameHeight: detectionFrameSize.height,
-                frameWidth: detectionFrameSize.width,
-                mediaRect: {
-                  height: mediaRect.height,
-                  width: mediaRect.width,
-                  x: mediaRect.x,
-                  y: mediaRect.y,
-                },
-              }),
-          );
+              detections,
+              frameHeight: detectionFrameSize.height,
+              frameWidth: detectionFrameSize.width,
+              mediaRect: {
+                height: mediaRect.height,
+                width: mediaRect.width,
+                x: mediaRect.x,
+                y: mediaRect.y,
+              },
+            });
+          } catch (error) {
+            if (Date.now() - lastErrorReportAt.value > 250) {
+              lastErrorReportAt.value = Date.now();
+              scheduleOnRN(
+                reportLiveError,
+                createLiveFrameError(stage, error, frame),
+              );
+            }
+          }
 
           const maskPrepMs = Date.now() - maskStartedAt;
           const maskCount = rawDetections.length;
@@ -1141,7 +1135,10 @@ function LiveCameraProof(props: {
           {liveLabelOverlays.map((label) => (
             <Fragment key={`${label.detection.label}:${label.index}`}>
               <RoundedRect
-                color={toRgba(liveColorForClass(label.detection.label), 0.84)}
+                color={toRgba(
+                  resolveLiveColorForClass(label.detection.label),
+                  0.84,
+                )}
                 height={label.background.height}
                 r={5}
                 width={label.background.width}
@@ -1473,158 +1470,227 @@ function createLiveSkiaMaskFrame(
 ): LiveSkiaMaskFrame | null {
   "worklet";
 
-  const maskLimit = MAX_ID_MASK_PALETTE_ENTRIES - 1;
-  const detectionCount =
-    options.detections.length < maskLimit
-      ? options.detections.length
-      : maskLimit;
-  const frameWidth = Math.max(1, Math.round(options.frameWidth));
-  const frameHeight = Math.max(1, Math.round(options.frameHeight));
-  const artifactScale =
-    frameWidth > LIVE_MASK_ARTIFACT_MAX_WIDTH
-      ? LIVE_MASK_ARTIFACT_MAX_WIDTH / frameWidth
-      : 1;
-  const width = Math.max(1, Math.round(frameWidth * artifactScale));
-  const height = Math.max(1, Math.round(frameHeight * artifactScale));
+  let maskPrepStage = "mask-init";
 
-  for (let index = 0; index < detectionCount; index += 1) {
-    const detection = options.detections[index]!;
+  try {
+    const maskLimit = MAX_ID_MASK_PALETTE_ENTRIES - 1;
+    const detectionCount =
+      options.detections.length < maskLimit
+        ? options.detections.length
+        : maskLimit;
+    const frameWidth = Math.max(1, Math.round(options.frameWidth));
+    const frameHeight = Math.max(1, Math.round(options.frameHeight));
+    const artifactScale =
+      frameWidth > LIVE_MASK_ARTIFACT_MAX_WIDTH
+        ? LIVE_MASK_ARTIFACT_MAX_WIDTH / frameWidth
+        : 1;
+    const width = Math.max(1, Math.round(frameWidth * artifactScale));
+    const height = Math.max(1, Math.round(frameHeight * artifactScale));
 
-    if (detection.mask.length !== detection.maskWidth * detection.maskHeight) {
-      continue;
-    }
-  }
+    for (let index = 0; index < detectionCount; index += 1) {
+      const detection = options.detections[index]!;
 
-  if (width <= 0 || height <= 0) {
-    return null;
-  }
-
-  const data = new Uint8Array(width * height);
-  const fillPalette: number[] = [];
-  const strokePalette: number[] = [];
-  const strokeWidths: number[] = [];
-
-  for (let index = 0; index < MAX_ID_MASK_PALETTE_ENTRIES * 4; index += 1) {
-    fillPalette[index] = 0;
-    strokePalette[index] = 0;
-  }
-
-  for (let index = 0; index < MAX_ID_MASK_PALETTE_ENTRIES; index += 1) {
-    strokeWidths[index] = 0;
-  }
-
-  for (let index = 0; index < detectionCount; index += 1) {
-    const detection = options.detections[index]!;
-
-    if (detection.mask.length !== detection.maskWidth * detection.maskHeight) {
-      continue;
+      if (
+        detection.mask.length !==
+        detection.maskWidth * detection.maskHeight
+      ) {
+        continue;
+      }
     }
 
-    const maskId = index + 1;
-    const color = resolveLiveColorForClass(detection.label);
-
-    const paletteOffset = maskId * 4;
-    const red = ((color >> 16) & 0xff) / 255;
-    const green = ((color >> 8) & 0xff) / 255;
-    const blue = (color & 0xff) / 255;
-
-    fillPalette[paletteOffset] = red;
-    fillPalette[paletteOffset + 1] = green;
-    fillPalette[paletteOffset + 2] = blue;
-    fillPalette[paletteOffset + 3] = 0.28;
-    strokePalette[paletteOffset] = red;
-    strokePalette[paletteOffset + 1] = green;
-    strokePalette[paletteOffset + 2] = blue;
-    strokePalette[paletteOffset + 3] = 0.95;
-    strokeWidths[maskId] = 2;
-
-    const targetX0 = Math.max(0, Math.floor(detection.bbox.x1 * artifactScale));
-    const targetY0 = Math.max(0, Math.floor(detection.bbox.y1 * artifactScale));
-    const targetX1 = Math.min(
-      width,
-      Math.ceil(detection.bbox.x2 * artifactScale),
-    );
-    const targetY1 = Math.min(
-      height,
-      Math.ceil(detection.bbox.y2 * artifactScale),
-    );
-    const targetWidth = targetX1 - targetX0;
-    const targetHeight = targetY1 - targetY0;
-
-    if (targetWidth <= 0 || targetHeight <= 0) {
-      continue;
+    if (width <= 0 || height <= 0) {
+      return null;
     }
 
-    for (let y = 0; y < targetHeight; y += 1) {
-      const sourceY = Math.min(
-        detection.maskHeight - 1,
-        Math.floor((y / targetHeight) * detection.maskHeight),
+    maskPrepStage = "mask-allocate-artifact";
+    const data = new Uint8Array(width * height);
+    const fillPalette: number[] = [];
+    const strokePalette: number[] = [];
+    const strokeWidths: number[] = [];
+
+    for (let index = 0; index < MAX_ID_MASK_PALETTE_ENTRIES * 4; index += 1) {
+      fillPalette[index] = 0;
+      strokePalette[index] = 0;
+    }
+
+    for (let index = 0; index < MAX_ID_MASK_PALETTE_ENTRIES; index += 1) {
+      strokeWidths[index] = 0;
+    }
+
+    for (let index = 0; index < detectionCount; index += 1) {
+      const detection = options.detections[index]!;
+
+      if (
+        detection.mask.length !==
+        detection.maskWidth * detection.maskHeight
+      ) {
+        continue;
+      }
+
+      const maskId = index + 1;
+      maskPrepStage = "mask-resolve-color";
+      const fallbackIndex = index % 10;
+      let color = 0x38bdf8;
+
+      if (fallbackIndex === 1) {
+        color = 0x22c55e;
+      } else if (fallbackIndex === 2) {
+        color = 0xa78bfa;
+      } else if (fallbackIndex === 3) {
+        color = 0xfacc15;
+      } else if (fallbackIndex === 4) {
+        color = 0xf97316;
+      } else if (fallbackIndex === 5) {
+        color = 0xf472b6;
+      } else if (fallbackIndex === 6) {
+        color = 0x60a5fa;
+      } else if (fallbackIndex === 7) {
+        color = 0xfb7185;
+      } else if (fallbackIndex === 8) {
+        color = 0x34d399;
+      } else if (fallbackIndex === 9) {
+        color = 0xe879f9;
+      }
+
+      maskPrepStage = "mask-write-palette";
+      const paletteOffset = maskId * 4;
+      const red = ((color >> 16) & 0xff) / 255;
+      const green = ((color >> 8) & 0xff) / 255;
+      const blue = (color & 0xff) / 255;
+
+      fillPalette[paletteOffset] = red;
+      fillPalette[paletteOffset + 1] = green;
+      fillPalette[paletteOffset + 2] = blue;
+      fillPalette[paletteOffset + 3] = 1;
+      strokePalette[paletteOffset] = red;
+      strokePalette[paletteOffset + 1] = green;
+      strokePalette[paletteOffset + 2] = blue;
+      strokePalette[paletteOffset + 3] = 0.95;
+      strokeWidths[maskId] = 2;
+
+      maskPrepStage = "mask-compute-target";
+      const targetX0 = Math.max(
+        0,
+        Math.floor(detection.bbox.x1 * artifactScale),
       );
-      const sourceRowOffset = sourceY * detection.maskWidth;
-      const targetRowOffset = (targetY0 + y) * width;
+      const targetY0 = Math.max(
+        0,
+        Math.floor(detection.bbox.y1 * artifactScale),
+      );
+      const targetX1 = Math.min(
+        width,
+        Math.ceil(detection.bbox.x2 * artifactScale),
+      );
+      const targetY1 = Math.min(
+        height,
+        Math.ceil(detection.bbox.y2 * artifactScale),
+      );
+      const targetWidth = targetX1 - targetX0;
+      const targetHeight = targetY1 - targetY0;
 
-      for (let x = 0; x < targetWidth; x += 1) {
-        const sourceX = Math.min(
-          detection.maskWidth - 1,
-          Math.floor((x / targetWidth) * detection.maskWidth),
+      if (targetWidth <= 0 || targetHeight <= 0) {
+        continue;
+      }
+
+      maskPrepStage = "mask-fill-artifact";
+      for (let y = 0; y < targetHeight; y += 1) {
+        const sourceY = Math.min(
+          detection.maskHeight - 1,
+          Math.floor((y / targetHeight) * detection.maskHeight),
         );
+        const sourceRowOffset = sourceY * detection.maskWidth;
+        const targetRowOffset = (targetY0 + y) * width;
 
-        if (detection.mask[sourceRowOffset + sourceX]) {
-          data[targetRowOffset + targetX0 + x] = maskId;
+        for (let x = 0; x < targetWidth; x += 1) {
+          const sourceX = Math.min(
+            detection.maskWidth - 1,
+            Math.floor((x / targetWidth) * detection.maskWidth),
+          );
+
+          if (detection.mask[sourceRowOffset + sourceX]) {
+            data[targetRowOffset + targetX0 + x] = maskId;
+          }
         }
       }
     }
-  }
 
-  const imageData = runWithWorkletDebugLogging(
-    {
-      args: options.debugArgs,
-      description: "create Skia data from live ID-mask bytes",
-      namespace: "rn-live",
-    },
-    () => Skia.Data.fromBytes(data),
-  );
-  const image = runWithWorkletDebugLogging(
-    {
-      args: options.debugArgs,
-      description: "create Skia image from live ID-mask data",
-      namespace: "rn-live",
-    },
-    () =>
-      Skia.Image.MakeImage(
-        {
-          alphaType: AlphaType.Opaque,
-          colorType: ColorType.Alpha_8,
-          height,
-          width,
-        },
-        imageData,
+    maskPrepStage = "mask-create-skia-data";
+    if (!Skia.Data || typeof Skia.Data.fromBytes !== "function") {
+      throw {
+        message: "Skia.Data.fromBytes is unavailable in the frame worklet",
+        name: "TypeError",
+      };
+    }
+
+    const imageData = Skia.Data.fromBytes(data);
+
+    maskPrepStage = "mask-create-skia-image";
+    if (!Skia.Image || typeof Skia.Image.MakeImage !== "function") {
+      throw {
+        message: "Skia.Image.MakeImage is unavailable in the frame worklet",
+        name: "TypeError",
+      };
+    }
+
+    const image = Skia.Image.MakeImage(
+      {
+        alphaType: AlphaType.Opaque,
+        colorType: ColorType.Alpha_8,
+        height,
         width,
-      ),
-  );
+      },
+      imageData,
+      width,
+    );
 
-  if (!image) {
-    return null;
+    if (!image) {
+      return null;
+    }
+
+    return {
+      image,
+      uniforms: {
+        uBorderEnabled: 1,
+        uFillPalette: fillPalette,
+        uMaxStrokeWidth: 2,
+        uMediaRect: [
+          options.mediaRect.x,
+          options.mediaRect.y,
+          options.mediaRect.width,
+          options.mediaRect.height,
+        ],
+        uOpacity: LIVE_MASK_FILL_OPACITY,
+        uStrokePalette: strokePalette,
+        uStrokeWidths: strokeWidths,
+        uTextureSize: [width, height],
+      },
+    };
+  } catch (error) {
+    let message = "unknown error";
+    let name = "Error";
+
+    if (typeof error === "string") {
+      message = error;
+    } else if (typeof error === "object" && error !== null) {
+      const record = error as {
+        readonly message?: unknown;
+        readonly name?: unknown;
+      };
+
+      if (typeof record.message === "string") {
+        message = record.message;
+      }
+
+      if (typeof record.name === "string") {
+        name = record.name;
+      }
+    }
+
+    throw {
+      message: `${maskPrepStage}: ${message}`,
+      name,
+    };
   }
-
-  return {
-    image,
-    uniforms: {
-      uBorderEnabled: 1,
-      uFillPalette: fillPalette,
-      uMaxStrokeWidth: 2,
-      uMediaRect: [
-        options.mediaRect.x,
-        options.mediaRect.y,
-        options.mediaRect.width,
-        options.mediaRect.height,
-      ],
-      uOpacity: 1,
-      uStrokePalette: strokePalette,
-      uStrokeWidths: strokeWidths,
-      uTextureSize: [width, height],
-    },
-  };
 }
 
 function createEmptyLiveMaskUniforms(): ReactNativeIdMaskUniforms {
@@ -1769,16 +1835,12 @@ function disposeLiveSkiaImage(image: SkiaImageType | null) {
   }
 }
 
-function liveColorForClass(className: string | undefined) {
-  "worklet";
-
-  return resolveLiveColorForClass(className);
-}
-
 function resolveLiveColorForClass(className: string | undefined) {
-  "worklet";
-
-  const normalizedClassName = normalizeLiveClassName(className);
+  const normalizedClassName = (className ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]/g, " ")
+    .replace(/\s+/g, " ");
 
   if (normalizedClassName === "horse") {
     return 0x38bdf8;
@@ -1831,27 +1893,10 @@ function resolveLiveColorForClass(className: string | undefined) {
     return 0x34d399;
   }
 
-  return resolveLiveFallbackColor(normalizedClassName);
-}
-
-function normalizeLiveClassName(className: string | undefined) {
-  "worklet";
-
-  return (className ?? "")
-    .trim()
-    .toLowerCase()
-    .replaceAll("_", " ")
-    .replaceAll("-", " ")
-    .replace(/\s+/g, " ");
-}
-
-function resolveLiveFallbackColor(className: string) {
-  "worklet";
-
   let hash = 0;
 
-  for (let index = 0; index < className.length; index += 1) {
-    hash = (hash * 31 + className.charCodeAt(index)) >>> 0;
+  for (let index = 0; index < normalizedClassName.length; index += 1) {
+    hash = (hash * 31 + normalizedClassName.charCodeAt(index)) >>> 0;
   }
 
   switch (hash % 10) {
