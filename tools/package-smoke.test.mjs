@@ -9,6 +9,8 @@ const expectedWebRuntimeExports = [
   "BaseMaskStyle",
   "BoxShape",
   "BoxStrokeAlignment",
+  "DEFAULT_DETECTION_CLASS_STYLES",
+  "DEFAULT_DETECTION_COLOR_SEQUENCE",
   "DetectionBufferStatus",
   "DetectionFrameRetentionMode",
   "DetectionFrameSelectionMode",
@@ -38,6 +40,7 @@ const expectedWebRuntimeExports = [
   "RenderPreparationExecutionMode",
   "RenderPreparationMode",
   "RenderPreparationWorkerStatus",
+  "SUPERVISION_ROBOFLOW_COLOR",
   "createArrayDetectionFrameSource",
   "createBrowserColdDetectionFrameStore",
   "createBufferedDetectionTimeline",
@@ -48,12 +51,14 @@ const expectedWebRuntimeExports = [
   "createMediaSession",
   "createMemoryColdDetectionFrameStore",
   "createWritableDetectionFrameSource",
+  "normalizeDetectionClassName",
   "normalizeMedia",
   "normalizeMediaProgressively",
   "pickDetectionAtPoint",
   "prepareMedia",
   "prepareMediaProgressively",
   "probeMedia",
+  "resolveDetectionClassColorStyle",
 ];
 
 const expectedCoreRuntimeExports = [
@@ -64,6 +69,8 @@ const expectedCoreRuntimeExports = [
   "BaseMaskStyle",
   "BoxShape",
   "BoxStrokeAlignment",
+  "DEFAULT_DETECTION_CLASS_STYLES",
+  "DEFAULT_DETECTION_COLOR_SEQUENCE",
   "DetectionBufferStatus",
   "DetectionFrameRetentionMode",
   "DetectionFrameSelectionMode",
@@ -81,6 +88,7 @@ const expectedCoreRuntimeExports = [
   "MediaSessionMode",
   "MediaSessionStatus",
   "MediaSourceStatus",
+  "SUPERVISION_ROBOFLOW_COLOR",
   "MAX_ID_MASK_PALETTE_ENTRIES",
   "MAX_ID_MASK_STROKE_WIDTH",
   "createArrayDetectionFrameSource",
@@ -90,7 +98,9 @@ const expectedCoreRuntimeExports = [
   "createIdMaskFrame",
   "createMemoryColdDetectionFrameStore",
   "createWritableDetectionFrameSource",
+  "normalizeDetectionClassName",
   "pickDetectionAtPoint",
+  "resolveDetectionClassColorStyle",
 ];
 
 const expectedReactNativeRuntimeExports = [

@@ -71,12 +71,11 @@ import {
 } from "./src/debug-logging";
 
 type DemoMode = "static" | "live";
-type LiveSyncMode = "latest" | "synced";
-const LIVE_INFERENCE_INTERVAL_MS = Math.round(1000 / 15);
 const LIVE_MAX_INSTANCES = 6;
 const LIVE_MASK_FILL_OPACITY = 0.5;
-const LIVE_MASK_ARTIFACT_MAX_WIDTH = 1280;
-const LIVE_RETURN_MASKS_AT_ORIGINAL_RESOLUTION = true;
+const LIVE_MASK_ARTIFACT_MAX_PIXELS = 720 * 1280;
+const LIVE_MASK_ARTIFACT_MAX_SIDE = 1280;
+const LIVE_RETURN_MASKS_AT_ORIGINAL_RESOLUTION = false;
 const LIVE_FRAME_TARGET_RESOLUTION = { height: 1280, width: 720 };
 const LIVE_SEGMENTATION_MIRROR_FRAME = false;
 const liveSegmentationModel = models.instance_segmentation.rf_detr_nano();
@@ -576,6 +575,9 @@ interface LiveSerializedDetection {
 }
 
 interface LiveFrameState {
+  readonly artifactBytes: number;
+  readonly artifactHeight: number;
+  readonly artifactWidth: number;
   readonly droppedFrames: number;
   readonly frameIsMirrored: boolean;
   readonly framePixelFormat: string;
@@ -585,11 +587,13 @@ interface LiveFrameState {
   readonly inferenceTickMs: number;
   readonly maskResolution: string;
   readonly maskCount: number;
+  readonly maskFillMs: number;
   readonly maskPrepMs: number;
+  readonly maskUploadMs: number;
   readonly segmentationMs: number;
   readonly serializationMs: number;
   readonly shaderActive: boolean;
-  readonly syncMode: LiveSyncMode;
+  readonly syncMode: "synced";
   readonly timestamp: number;
   readonly width: number;
 }
@@ -635,15 +639,12 @@ function LiveCameraProof(props: {
   const [liveDetections, setLiveDetections] = useState<
     readonly LiveOverlayDetection[]
   >([]);
-  const [droppedFrames, setDroppedFrames] = useState(0);
   const [showLiveHud, setShowLiveHud] = useState(true);
   const [showLiveDebug, setShowLiveDebug] = useState(false);
   const [showMaskLayer, setShowMaskLayer] = useState(true);
-  const [liveSyncMode, setLiveSyncMode] = useState<LiveSyncMode>("synced");
   const frameRenderer = useFrameRenderer();
   const canvasWidth = window.width;
   const canvasHeight = window.height;
-  const strictSyncMode = liveSyncMode === "synced";
   const emptyLiveMaskUniforms = useMemo(
     () => createEmptyLiveMaskUniforms(),
     [],
@@ -663,18 +664,9 @@ function LiveCameraProof(props: {
       resolveLiveFrameRendererStyle({
         canvasHeight,
         canvasWidth,
-        orientation: strictSyncMode
-          ? (liveFrame?.frameOrientation ?? "left")
-          : "up",
-        syncMode: liveSyncMode,
+        orientation: liveFrame?.frameOrientation ?? "left",
       }),
-    [
-      canvasHeight,
-      canvasWidth,
-      liveFrame?.frameOrientation,
-      liveSyncMode,
-      strictSyncMode,
-    ],
+    [canvasHeight, canvasWidth, liveFrame?.frameOrientation],
   );
   const liveMaskImage = useSharedValue<SkiaImageType | null>(null);
   const liveMaskUniforms = useSharedValue<ReactNativeIdMaskUniforms>(
@@ -688,11 +680,16 @@ function LiveCameraProof(props: {
   });
   const lastReadoutReportAt = useSharedValue(0);
   const lastErrorReportAt = useSharedValue(0);
-  const lastInferenceStartedAt = useSharedValue(0);
+  const droppedFrameCount = useSharedValue(0);
   const lastPresentedFrame = useSharedValue(false);
+  const lastArtifactBytes = useSharedValue(0);
+  const lastArtifactHeight = useSharedValue(0);
+  const lastArtifactWidth = useSharedValue(0);
   const lastInferenceTickDurationMs = useSharedValue(0);
   const lastMaskCount = useSharedValue(0);
+  const lastMaskFillDurationMs = useSharedValue(0);
   const lastMaskPrepDurationMs = useSharedValue(0);
+  const lastMaskUploadDurationMs = useSharedValue(0);
   const lastSegmentationDurationMs = useSharedValue(0);
   const lastSerializationDurationMs = useSharedValue(0);
   const lastShaderActive = useSharedValue(false);
@@ -753,18 +750,12 @@ function LiveCameraProof(props: {
     };
   }, [liveLayout.mediaRect, liveMediaRect]);
 
-  const reportLiveFrame = useCallback(
-    (frame: Omit<LiveFrameState, "droppedFrames">) => {
-      setLiveFrame({
-        ...frame,
-        droppedFrames,
-      });
-    },
-    [droppedFrames],
-  );
-  const reportDroppedFrame = useCallback(() => {
-    setDroppedFrames((current) => current + 1);
+  const reportLiveFrame = useCallback((frame: LiveFrameState) => {
+    setLiveFrame(frame);
   }, []);
+  const reportDroppedFrame = useCallback(() => {
+    droppedFrameCount.value += 1;
+  }, [droppedFrameCount]);
   const reportLiveError = useCallback((error: LiveFrameError) => {
     console.error("[debug][rn-live]", error);
     setLiveError(error);
@@ -776,68 +767,24 @@ function LiveCameraProof(props: {
     [],
   );
 
-  const renderFrameOutput = useFrameOutput({
+  const inferenceFrameOutput = useFrameOutput({
     allowDeferredStart: false,
     dropFramesWhileBusy: true,
-    enablePhysicalBufferRotation: true,
-    enablePreviewSizedOutputBuffers: false,
-    onFrame(frame) {
-      "worklet";
-
-      const stage = "render-frame";
-
-      try {
-        runWithWorkletDebugLogging(
-          {
-            args: createLiveFrameDebugArgs(stage, frame),
-            description: "present camera frame through VisionCamera renderer",
-            namespace: "rn-live",
-          },
-          () => {
-            frameRenderer.renderFrame(frame);
-            lastPresentedFrame.value = true;
-          },
-        );
-      } catch (error) {
-        if (Date.now() - lastErrorReportAt.value > 250) {
-          lastErrorReportAt.value = Date.now();
-          scheduleOnRN(
-            reportLiveError,
-            createLiveFrameError(stage, error, frame),
-          );
-        }
-      } finally {
-        frame.dispose();
-      }
-    },
-    onFrameDropped() {
-      reportDroppedFrame();
-    },
-    pixelFormat: "native",
-    targetResolution: LIVE_FRAME_TARGET_RESOLUTION,
-  });
-
-  const inferenceFrameOutput = useFrameOutput({
-    allowDeferredStart: !strictSyncMode,
-    dropFramesWhileBusy: true,
     enablePhysicalBufferRotation: false,
-    enablePreviewSizedOutputBuffers: false,
+    enablePreviewSizedOutputBuffers: true,
     onFrame(frame) {
       "worklet";
 
       let stage = "start";
 
       try {
-        const syncMode = strictSyncMode ? "synced" : "latest";
-        const shouldRunInference =
-          runSegmentationOnFrame &&
-          Date.now() - lastInferenceStartedAt.value >=
-            (strictSyncMode ? 0 : LIVE_INFERENCE_INTERVAL_MS);
+        const syncMode = "synced";
+        const segmentFrame = runSegmentationOnFrame;
+        const shouldRunInference = segmentFrame !== null;
 
         if (shouldRunInference) {
           const inferenceStartedAt = Date.now();
 
-          lastInferenceStartedAt.value = inferenceStartedAt;
           stage = "segmentation-run";
           const segmentationStartedAt = Date.now();
           const rawDetections = runWithWorkletDebugLogging(
@@ -847,7 +794,7 @@ function LiveCameraProof(props: {
               namespace: "rn-live",
             },
             () =>
-              runSegmentationOnFrame(frame, LIVE_SEGMENTATION_MIRROR_FRAME, {
+              segmentFrame(frame, LIVE_SEGMENTATION_MIRROR_FRAME, {
                 confidenceThreshold: 0.45,
                 maxInstances: LIVE_MAX_INSTANCES,
                 returnMaskAtOriginalResolution:
@@ -1037,8 +984,13 @@ function LiveCameraProof(props: {
           const maskPrepMs = Date.now() - maskStartedAt;
           const maskCount = rawDetections.length;
           lastInferenceTickDurationMs.value = Date.now() - inferenceStartedAt;
+          lastArtifactBytes.value = preparedMask?.byteLength ?? 0;
+          lastArtifactHeight.value = preparedMask?.height ?? 0;
+          lastArtifactWidth.value = preparedMask?.width ?? 0;
           lastMaskCount.value = maskCount;
+          lastMaskFillDurationMs.value = preparedMask?.fillMs ?? 0;
           lastMaskPrepDurationMs.value = maskPrepMs;
+          lastMaskUploadDurationMs.value = preparedMask?.uploadMs ?? 0;
           lastSegmentationDurationMs.value = segmentationMs;
           lastSerializationDurationMs.value = serializationMs;
 
@@ -1092,34 +1044,36 @@ function LiveCameraProof(props: {
             lastShaderActive.value = false;
           }
 
-          if (strictSyncMode) {
-            stage = "render-synced-frame";
-            runWithWorkletDebugLogging(
-              {
-                args: {
-                  frameHeight: frame.height,
-                  framePixelFormat: frame.pixelFormat,
-                  frameTimestamp: frame.timestamp,
-                  frameWidth: frame.width,
-                  maskCount,
-                  stage,
-                },
-                description:
-                  "present camera frame only after matching mask packet is ready",
-                namespace: "rn-live",
+          stage = "render-synced-frame";
+          runWithWorkletDebugLogging(
+            {
+              args: {
+                frameHeight: frame.height,
+                framePixelFormat: frame.pixelFormat,
+                frameTimestamp: frame.timestamp,
+                frameWidth: frame.width,
+                maskCount,
+                stage,
               },
-              () => {
-                frameRenderer.renderFrame(frame);
-                lastPresentedFrame.value = true;
-              },
-            );
-          }
+              description:
+                "present camera frame only after matching mask packet is ready",
+              namespace: "rn-live",
+            },
+            () => {
+              frameRenderer.renderFrame(frame);
+              lastPresentedFrame.value = true;
+            },
+          );
         }
 
         if (Date.now() - lastReadoutReportAt.value > 250) {
           stage = "readout-report";
           lastReadoutReportAt.value = Date.now();
           scheduleOnRN(reportLiveFrame, {
+            artifactBytes: lastArtifactBytes.value,
+            artifactHeight: lastArtifactHeight.value,
+            artifactWidth: lastArtifactWidth.value,
+            droppedFrames: droppedFrameCount.value,
             framePixelFormat: frame.pixelFormat,
             frameOrientation: frame.orientation,
             frameIsMirrored: frame.isMirrored,
@@ -1130,7 +1084,9 @@ function LiveCameraProof(props: {
               ? "original"
               : "model",
             maskCount: lastMaskCount.value,
+            maskFillMs: lastMaskFillDurationMs.value,
             maskPrepMs: lastMaskPrepDurationMs.value,
+            maskUploadMs: lastMaskUploadDurationMs.value,
             segmentationMs: lastSegmentationDurationMs.value,
             serializationMs: lastSerializationDurationMs.value,
             shaderActive: lastShaderActive.value,
@@ -1159,11 +1115,8 @@ function LiveCameraProof(props: {
   });
 
   const cameraOutputs = useMemo(
-    () =>
-      strictSyncMode
-        ? [inferenceFrameOutput]
-        : [renderFrameOutput, inferenceFrameOutput],
-    [inferenceFrameOutput, renderFrameOutput, strictSyncMode],
+    () => [inferenceFrameOutput],
+    [inferenceFrameOutput],
   );
 
   const liveMaskEffect = useMemo(
@@ -1274,10 +1227,7 @@ function LiveCameraProof(props: {
                 value={canRunCamera ? "live" : "waiting"}
               />
               <StatusPill value={modelStatus} />
-              <StatusPill
-                tone={strictSyncMode ? "ready" : undefined}
-                value={strictSyncMode ? "strict sync" : "latest masks"}
-              />
+              <StatusPill tone="ready" value="strict sync" />
               <StatusPill value={`${liveFrame?.maskCount ?? 0} masks`} />
             </View>
 
@@ -1296,26 +1246,6 @@ function LiveCameraProof(props: {
                   ]}
                 >
                   Masks
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() =>
-                  setLiveSyncMode((current) =>
-                    current === "synced" ? "latest" : "synced",
-                  )
-                }
-                style={[
-                  styles.floatingButton,
-                  strictSyncMode ? styles.floatingButtonActive : null,
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.floatingButtonText,
-                    strictSyncMode ? styles.floatingButtonTextActive : null,
-                  ]}
-                >
-                  {strictSyncMode ? "Synced" : "Latest"}
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -1362,7 +1292,23 @@ function LiveCameraProof(props: {
                 />
                 <LiveMetric
                   label="Sync"
-                  value={liveFrame ? liveFrame.syncMode : liveSyncMode}
+                  value={liveFrame ? liveFrame.syncMode : "synced"}
+                />
+                <LiveMetric
+                  label="Artifact"
+                  value={
+                    liveFrame?.artifactWidth
+                      ? `${liveFrame.artifactWidth}x${liveFrame.artifactHeight}`
+                      : "-"
+                  }
+                />
+                <LiveMetric
+                  label="Bytes"
+                  value={
+                    liveFrame?.artifactBytes
+                      ? formatBytes(liveFrame.artifactBytes)
+                      : "-"
+                  }
                 />
                 <LiveMetric
                   label="Seg"
@@ -1373,10 +1319,21 @@ function LiveCameraProof(props: {
                   value={liveFrame ? `${liveFrame.maskPrepMs}ms` : "-"}
                 />
                 <LiveMetric
+                  label="Fill"
+                  value={liveFrame ? `${liveFrame.maskFillMs}ms` : "-"}
+                />
+                <LiveMetric
+                  label="Upload"
+                  value={liveFrame ? `${liveFrame.maskUploadMs}ms` : "-"}
+                />
+                <LiveMetric
                   label="Tick"
                   value={liveFrame ? `${liveFrame.inferenceTickMs}ms` : "-"}
                 />
-                <LiveMetric label="Dropped" value={String(droppedFrames)} />
+                <LiveMetric
+                  label="Dropped"
+                  value={String(liveFrame?.droppedFrames ?? 0)}
+                />
                 <LiveMetric label="Error" value={liveError?.stage ?? "none"} />
               </View>
             ) : null}
@@ -1548,8 +1505,13 @@ interface LiveSkiaMaskFrameOptions {
 }
 
 interface LiveSkiaMaskFrame {
+  readonly byteLength: number;
+  readonly fillMs: number;
+  readonly height: number;
   readonly image: SkiaImageType;
+  readonly uploadMs: number;
   readonly uniforms: ReactNativeIdMaskUniforms;
+  readonly width: number;
 }
 
 function createLiveSkiaMaskFrame(
@@ -1565,12 +1527,24 @@ function createLiveSkiaMaskFrame(
       options.detections.length < maskLimit
         ? options.detections.length
         : maskLimit;
+
+    if (detectionCount <= 0) {
+      return null;
+    }
+
     const frameWidth = Math.max(1, Math.round(options.frameWidth));
     const frameHeight = Math.max(1, Math.round(options.frameHeight));
-    const artifactScale =
-      frameWidth > LIVE_MASK_ARTIFACT_MAX_WIDTH
-        ? LIVE_MASK_ARTIFACT_MAX_WIDTH / frameWidth
+    const framePixels = frameWidth * frameHeight;
+    const areaScale =
+      framePixels > LIVE_MASK_ARTIFACT_MAX_PIXELS
+        ? Math.sqrt(LIVE_MASK_ARTIFACT_MAX_PIXELS / framePixels)
         : 1;
+    const sideScale = Math.min(
+      1,
+      LIVE_MASK_ARTIFACT_MAX_SIDE / frameWidth,
+      LIVE_MASK_ARTIFACT_MAX_SIDE / frameHeight,
+    );
+    const artifactScale = Math.min(areaScale, sideScale);
     const width = Math.max(1, Math.round(frameWidth * artifactScale));
     const height = Math.max(1, Math.round(frameHeight * artifactScale));
 
@@ -1603,6 +1577,8 @@ function createLiveSkiaMaskFrame(
     for (let index = 0; index < MAX_ID_MASK_PALETTE_ENTRIES; index += 1) {
       strokeWidths[index] = 0;
     }
+
+    const fillStartedAt = Date.now();
 
     for (let index = 0; index < detectionCount; index += 1) {
       const detection = options.detections[index]!;
@@ -1659,19 +1635,25 @@ function createLiveSkiaMaskFrame(
       }
 
       maskPrepStage = "mask-fill-artifact";
+      const sourceXByTargetX: number[] = [];
+
+      for (let x = 0; x < targetWidth; x += 1) {
+        sourceXByTargetX[x] = Math.min(
+          detection.maskWidth - 1,
+          Math.floor((x * detection.maskWidth) / targetWidth),
+        );
+      }
+
       for (let y = 0; y < targetHeight; y += 1) {
         const sourceY = Math.min(
           detection.maskHeight - 1,
-          Math.floor((y / targetHeight) * detection.maskHeight),
+          Math.floor((y * detection.maskHeight) / targetHeight),
         );
         const sourceRowOffset = sourceY * detection.maskWidth;
         const targetRowOffset = (targetY0 + y) * width;
 
         for (let x = 0; x < targetWidth; x += 1) {
-          const sourceX = Math.min(
-            detection.maskWidth - 1,
-            Math.floor((x / targetWidth) * detection.maskWidth),
-          );
+          const sourceX = sourceXByTargetX[x]!;
 
           if (detection.mask[sourceRowOffset + sourceX]) {
             data[targetRowOffset + targetX0 + x] = maskId;
@@ -1679,6 +1661,9 @@ function createLiveSkiaMaskFrame(
         }
       }
     }
+
+    const fillMs = Date.now() - fillStartedAt;
+    const uploadStartedAt = Date.now();
 
     maskPrepStage = "mask-create-skia-data";
     if (!Skia.Data || typeof Skia.Data.fromBytes !== "function") {
@@ -1713,8 +1698,14 @@ function createLiveSkiaMaskFrame(
       return null;
     }
 
+    const uploadMs = Date.now() - uploadStartedAt;
+
     return {
+      byteLength: data.byteLength,
+      fillMs,
+      height,
       image,
+      uploadMs,
       uniforms: {
         uBorderEnabled: 1,
         uFillPalette: fillPalette,
@@ -1730,6 +1721,7 @@ function createLiveSkiaMaskFrame(
         uStrokeWidths: strokeWidths,
         uTextureSize: [width, height],
       },
+      width,
     };
   } catch (error) {
     let message = "unknown error";
@@ -1800,18 +1792,7 @@ function resolveLiveFrameRendererStyle(options: {
   readonly canvasHeight: number;
   readonly canvasWidth: number;
   readonly orientation: string;
-  readonly syncMode: LiveSyncMode;
 }): ViewStyle {
-  if (options.syncMode !== "synced") {
-    return {
-      bottom: 0,
-      left: 0,
-      position: "absolute",
-      right: 0,
-      top: 0,
-    };
-  }
-
   if (options.orientation === "left" || options.orientation === "right") {
     return {
       height: options.canvasWidth,
