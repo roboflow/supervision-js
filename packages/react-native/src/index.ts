@@ -579,6 +579,8 @@ export function resolveReactNativeLiveColorForClass(
   className: string | undefined,
   fallbackIndex = 0,
 ) {
+  "worklet";
+
   const fallback =
     REACT_NATIVE_ROBOFLOW_PALETTE[
       Math.abs(fallbackIndex) % REACT_NATIVE_ROBOFLOW_PALETTE.length

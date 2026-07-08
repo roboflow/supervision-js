@@ -48,12 +48,7 @@ import {
 import { useSharedValue } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
 import {
-  BaseBoxStyle,
-  BaseLabelStyle,
-  BaseMaskStyle,
   BoxShape,
-  LabelPlacement,
-  MaskRenderMode,
   type BoxDrawInstruction,
   type DetectionPickResult,
   type LabelDrawInstruction,
@@ -80,8 +75,17 @@ import basketballFrame from "./assets/basketball-frame.jpg";
 import {
   basketballDetectionFrame,
   basketballFrameMetadata,
-  colorForClass,
 } from "./src/basketball-frame";
+import {
+  DEMO_MASK_BORDER_WIDTH,
+  DEMO_MASK_FILL_OPACITY,
+  createDemoBoxStyle,
+  createDemoDetectionFrameFromLiveDetections,
+  createDemoLabelStyle,
+  createDemoMaskStyle,
+  resolveDemoClassColor,
+  resolveDemoDetectionColor,
+} from "./src/demo-presentation";
 import {
   runWithWorkletDebugLogging,
   serializeDebugError,
@@ -94,8 +98,6 @@ const LIVE_MAX_INSTANCES = 6;
 // No stroke in live mode: a crisp border retraces the low-res mask staircase
 // and defeats the feathered fill edges (it also skips the shader's expensive
 // border sampling loop).
-const LIVE_MASK_BORDER_WIDTH = 0;
-const LIVE_MASK_FILL_OPACITY = 0.5;
 const LIVE_MASK_ARTIFACT_MAX_PIXELS = 720 * 1280;
 const LIVE_MASK_ARTIFACT_MAX_SIDE = 1280;
 // Masks are drawn exactly as the model returns them, so edge quality comes
@@ -160,56 +162,14 @@ function StaticFrameProof(props: {
 
   const canvasWidth = Math.max(320, window.width - 24);
   const canvasHeight = Math.round(canvasWidth * 0.58);
-  const maskStyle = useMemo(
-    () =>
-      new BaseMaskStyle({
-        color: (detection) => colorForClass(detection.className ?? ""),
-        mode: MaskRenderMode.FillAndStroke,
-        opacity: 0.55,
-        stroke: (detection) => ({
-          alpha: 1,
-          color: colorForClass(detection.className ?? ""),
-          width: detection.className === "basketball" ? 3 : 2,
-        }),
-      }),
-    [],
-  );
+  const maskStyle = useMemo(() => createDemoMaskStyle(), []);
 
   const packetPreparation = useMemo(() => {
     const startedAt = Date.now();
     const packet = createReactNativePreparedFramePacket({
-      boxStyle: new BaseBoxStyle({
-        cornerRadius: rounded ? 12 : 0,
-        fill: (detection) => ({
-          alpha: detection.className === "basketball" ? 0.36 : 0.12,
-          color: colorForClass(detection.className ?? ""),
-        }),
-        shape: rounded ? BoxShape.RoundedRect : BoxShape.Rect,
-        stroke: (detection) => ({
-          alpha: 1,
-          color: colorForClass(detection.className ?? ""),
-          width: detection.className === "basketball" ? 3 : 2,
-        }),
-      }),
+      boxStyle: createDemoBoxStyle({ rounded }),
       detectionFrame: basketballDetectionFrame,
-      labelStyle: new BaseLabelStyle({
-        background: (detection) => ({
-          alpha: 0.82,
-          color: colorForClass(detection.className ?? ""),
-          cornerRadius: 4,
-          paddingX: 5,
-          paddingY: 2,
-        }),
-        includeConfidence: true,
-        offsetY: 4,
-        placement: LabelPlacement.InsideTop,
-        textStyle: {
-          alpha: 1,
-          color: 0xffffff,
-          fontSize: 10,
-          fontWeight: "800",
-        },
-      }),
+      labelStyle: createDemoLabelStyle(),
       maskStyle,
       mediaFrame: {
         metadata: {
@@ -291,7 +251,7 @@ function StaticFrameProof(props: {
           rect: layout.mapRect(selectedPick.detection.rect),
           radius: 14 * layout.scale,
           strokeColor: toRgba(
-            colorForClass(selectedPick.detection.className ?? ""),
+            resolveDemoDetectionColor(selectedPick.detection, 0),
             1,
           ),
           strokeWidth: 4,
@@ -786,64 +746,37 @@ function createSyncedLabelOverlays(
 }
 
 function createLiveSyncedOverlays(options: {
-  readonly canvasWidth: number;
   readonly detections: readonly LiveOverlayDetection[];
   readonly layout: ReactNativeFrameLayout;
+  readonly mediaHeight: number;
+  readonly mediaWidth: number;
 }) {
-  const font = matchFont({ fontSize: 13 });
-  const metrics = font.getMetrics();
-  const textHeight = metrics.descent - metrics.ascent;
-  const boxes: SyncedBoxOverlay[] = [];
-  const labels: SyncedLabelOverlay[] = [];
-
-  options.detections.forEach((detection, index) => {
-    const rect = options.layout.mapRect({
-      height: detection.bbox.y2 - detection.bbox.y1,
-      width: detection.bbox.x2 - detection.bbox.x1,
-      x: detection.bbox.x1,
-      y: detection.bbox.y1,
-    });
-    const text = `${detection.label || "object"} ${formatConfidence(
-      detection.score,
-    )}`;
-    const bounds = font.measureText(text);
-    const backgroundWidth = Math.ceil(bounds.width + 14);
-    const backgroundHeight = Math.ceil(textHeight + 7);
-    const backgroundX = Math.max(
-      6,
-      Math.min(options.canvasWidth - backgroundWidth - 6, rect.x),
-    );
-    const backgroundY = Math.max(6, rect.y - backgroundHeight - 5);
-    const key = `${detection.label}:${index}`;
-
-    boxes.push(
-      createSyncedBoxOverlay({
-        key: `box:${key}`,
-        radius: 8,
-        rect,
-        strokeColor: toRgba(detection.color, 0.98),
-        strokeWidth: 3,
-      }),
-    );
-    labels.push({
-      backgroundColor: toRgba(detection.color, 0.84),
-      backgroundRect: {
-        height: backgroundHeight,
-        width: backgroundWidth,
-        x: backgroundX,
-        y: backgroundY,
+  const detectionFrame = createDemoDetectionFrameFromLiveDetections({
+    detections: options.detections,
+  });
+  const packet = createReactNativePreparedFramePacket({
+    boxStyle: createDemoBoxStyle(),
+    detectionFrame,
+    labelStyle: createDemoLabelStyle(),
+    mediaFrame: {
+      metadata: {
+        duration: 1 / 30,
+        frameIndex: detectionFrame.frameIndex ?? 0,
+        height: options.mediaHeight,
+        mediaTime: detectionFrame.mediaTime,
+        width: options.mediaWidth,
       },
-      baselineY: backgroundY + 3 - metrics.ascent,
-      cornerRadius: 5,
-      font,
-      key,
-      text,
-      textColor: "rgba(255, 255, 255, 0.96)",
-      textX: backgroundX + 7,
-    });
+      payload: null,
+    },
   });
 
-  return { boxes, labels };
+  return {
+    boxes: createSyncedBoxOverlays(packet.presentation.boxes, options.layout),
+    labels: createSyncedLabelOverlays(
+      packet.presentation.labels,
+      options.layout,
+    ),
+  };
 }
 
 function LiveCameraProof(props: {
@@ -945,11 +878,12 @@ function LiveCameraProof(props: {
   const liveSyncedOverlays = useMemo(
     () =>
       createLiveSyncedOverlays({
-        canvasWidth,
         detections: liveDetections,
         layout: liveLayout,
+        mediaHeight: liveFrame?.height ?? LIVE_FRAME_TARGET_RESOLUTION.height,
+        mediaWidth: liveFrame?.width ?? LIVE_FRAME_TARGET_RESOLUTION.width,
       }),
-    [canvasWidth, liveDetections, liveLayout],
+    [liveDetections, liveFrame?.height, liveFrame?.width, liveLayout],
   );
 
   useEffect(() => {
@@ -1052,7 +986,7 @@ function LiveCameraProof(props: {
                 const detection = rawDetections[index]!;
                 const label: string =
                   typeof detection.label === "string" ? detection.label : "";
-                const color = resolveLiveColorForLabel(label, index % 10);
+                const color = resolveDemoClassColor(label, index % 10);
 
                 serialized[index] = {
                   bbox: detection.bbox,
@@ -1788,111 +1722,6 @@ function formatLiveFallbackReason(reason: string | undefined) {
   return reason.length > 28 ? `${reason.slice(0, 28)}…` : reason;
 }
 
-function resolveLiveColorForLabel(label: string, fallbackIndex: number) {
-  "worklet";
-
-  let color = 0x38bdf8;
-
-  if (fallbackIndex === 1) {
-    color = 0x22c55e;
-  } else if (fallbackIndex === 2) {
-    color = 0xa78bfa;
-  } else if (fallbackIndex === 3) {
-    color = 0xfacc15;
-  } else if (fallbackIndex === 4) {
-    color = 0xf97316;
-  } else if (fallbackIndex === 5) {
-    color = 0xf472b6;
-  } else if (fallbackIndex === 6) {
-    color = 0x60a5fa;
-  } else if (fallbackIndex === 7) {
-    color = 0xfb7185;
-  } else if (fallbackIndex === 8) {
-    color = 0x34d399;
-  } else if (fallbackIndex === 9) {
-    color = 0xe879f9;
-  }
-
-  if (label === "horse" || label === "HORSE") {
-    return 0x38bdf8;
-  }
-
-  if (
-    label === "person" ||
-    label === "PERSON" ||
-    label === "keyboard" ||
-    label === "KEYBOARD"
-  ) {
-    return 0x22c55e;
-  }
-
-  if (label === "cow" || label === "COW" || label === "tv" || label === "TV") {
-    return 0xa78bfa;
-  }
-
-  if (
-    label === "basketball" ||
-    label === "BASKETBALL" ||
-    label === "bottle" ||
-    label === "BOTTLE" ||
-    label === "sports ball" ||
-    label === "SPORTS BALL" ||
-    label === "sports_ball" ||
-    label === "SPORTS_BALL"
-  ) {
-    return 0xf97316;
-  }
-
-  if (
-    label === "yellow team player" ||
-    label === "YELLOW TEAM PLAYER" ||
-    label === "yellow_team_player" ||
-    label === "YELLOW_TEAM_PLAYER" ||
-    label === "cup" ||
-    label === "CUP" ||
-    label === "mouse" ||
-    label === "MOUSE"
-  ) {
-    return 0xfacc15;
-  }
-
-  if (
-    label === "white team player" ||
-    label === "WHITE TEAM PLAYER" ||
-    label === "white_team_player" ||
-    label === "WHITE_TEAM_PLAYER"
-  ) {
-    return 0xf8fafc;
-  }
-
-  if (label === "bed" || label === "BED") {
-    return 0xf472b6;
-  }
-
-  if (label === "laptop" || label === "LAPTOP") {
-    return 0x60a5fa;
-  }
-
-  if (label === "knife" || label === "KNIFE") {
-    return 0xfb7185;
-  }
-
-  if (
-    label === "cell phone" ||
-    label === "CELL PHONE" ||
-    label === "cell_phone" ||
-    label === "CELL_PHONE" ||
-    label === "potted plant" ||
-    label === "POTTED PLANT" ||
-    label === "potted_plant" ||
-    label === "POTTED_PLANT"
-  ) {
-    return 0x34d399;
-  }
-
-  return color;
-}
-
 interface LiveSkiaMaskFrameOptions {
   readonly artifactMaxPixels: number;
   readonly artifactMaxSide: number;
@@ -1930,9 +1759,9 @@ function createLiveSkiaMaskFrame(
   try {
     maskPrepStage = "mask-build-artifact";
     const build = createReactNativeLiveIdMaskArtifactAuto({
-      borderWidth: LIVE_MASK_BORDER_WIDTH,
+      borderWidth: DEMO_MASK_BORDER_WIDTH,
       detections: options.detections,
-      fillOpacity: LIVE_MASK_FILL_OPACITY,
+      fillOpacity: DEMO_MASK_FILL_OPACITY,
       frameHeight: options.frameHeight,
       frameWidth: options.frameWidth,
       maxPixels: options.artifactMaxPixels,
