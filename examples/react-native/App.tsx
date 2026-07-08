@@ -100,6 +100,11 @@ const LIVE_MAX_INSTANCES = 6;
 // border sampling loop).
 const LIVE_MASK_ARTIFACT_MAX_PIXELS = 720 * 1280;
 const LIVE_MASK_ARTIFACT_MAX_SIDE = 1280;
+const LIVE_PRIVACY_MOSAIC_CELL_PX = 14;
+// A 1x1 all-ones mask scales across the whole detection bbox in the fill
+// loop, so redacted objects are covered by their full bounding box instead of
+// their exact mask silhouette — conservative coverage for privacy.
+const PRIVACY_FULL_BBOX_MASK = new Uint8Array([1]);
 // Masks are drawn exactly as the model returns them, so edge quality comes
 // from the model output itself: request masks at original resolution now that
 // native prep created the performance headroom for it.
@@ -799,11 +804,17 @@ function LiveCameraProof(props: {
   const [showLiveDebug, setShowLiveDebug] = useState(false);
   const [detectionDisplayMode, setDetectionDisplayMode] =
     useState<LiveDetectionDisplayMode>("masks");
+  const [redactedClasses, setRedactedClasses] = useState<readonly string[]>([]);
+  const [tapMenuLabel, setTapMenuLabel] = useState<string | null>(null);
   const frameRenderer = useFrameRenderer();
   const canvasWidth = window.width;
   const canvasHeight = window.height;
   const showMaskLayer = detectionDisplayMode === "masks";
   const showBoxLayer = detectionDisplayMode === "boxes";
+  // The mask lane doubles as the redaction lane: when classes are redacted in
+  // boxes display mode, the mask artifact still runs and carries the opaque
+  // mosaic bbox fills.
+  const redactionActive = redactedClasses.length > 0;
   const emptyLiveMaskUniforms = useMemo(
     () => createEmptyLiveMaskUniforms(),
     [],
@@ -874,6 +885,7 @@ function LiveCameraProof(props: {
   // re-serialize and swap the camera frame callback on the live camera thread
   // several times per second.
   const showMaskLayerShared = useSharedValue(showMaskLayer);
+  const redactedClassesShared = useSharedValue<readonly string[]>([]);
   const runSegmentationOnFrame = props.segmentation.runOnFrame;
   const liveSyncedOverlays = useMemo(
     () =>
@@ -905,6 +917,9 @@ function LiveCameraProof(props: {
   useEffect(() => {
     showMaskLayerShared.value = showMaskLayer;
   }, [showMaskLayer, showMaskLayerShared]);
+  useEffect(() => {
+    redactedClassesShared.value = redactedClasses;
+  }, [redactedClasses, redactedClassesShared]);
 
   const reportLiveFrame = useCallback((frame: LiveFrameState) => {
     setLiveFrame(frame);
@@ -925,6 +940,45 @@ function LiveCameraProof(props: {
     },
     [],
   );
+  // Tapping a detection opens a small action menu for its class. Class-based
+  // actions need no tracker: the class name is the identity, and any new
+  // instance of a redacted class is covered the moment it is detected.
+  const handleLiveStageTap = useCallback(
+    (point: { readonly x: number; readonly y: number }) => {
+      let pickedLabel: string | null = null;
+      let pickedArea = Number.POSITIVE_INFINITY;
+
+      for (const detection of liveDetections) {
+        const rect = liveLayout.mapRect({
+          height: detection.bbox.y2 - detection.bbox.y1,
+          width: detection.bbox.x2 - detection.bbox.x1,
+          x: detection.bbox.x1,
+          y: detection.bbox.y1,
+        });
+        const inside =
+          point.x >= rect.x &&
+          point.x <= rect.x + rect.width &&
+          point.y >= rect.y &&
+          point.y <= rect.y + rect.height;
+        const area = rect.width * rect.height;
+
+        if (inside && area < pickedArea) {
+          pickedArea = area;
+          pickedLabel = detection.label;
+        }
+      }
+
+      setTapMenuLabel(pickedLabel);
+    },
+    [liveDetections, liveLayout],
+  );
+  const toggleRedactedClass = useCallback((label: string) => {
+    setRedactedClasses((classes) =>
+      classes.includes(label)
+        ? classes.filter((className) => className !== label)
+        : [...classes, label],
+    );
+  }, []);
 
   // Stable identity matters: useFrameOutput re-serializes and swaps the
   // camera frame callback whenever this function changes, so its dependencies
@@ -1018,16 +1072,63 @@ function LiveCameraProof(props: {
 
           scheduleOnRN(reportLiveDetections, overlayDetections);
 
+          stage = "redaction-filter";
+          const redactedList = redactedClassesShared.value;
+          const redactionEnabled = redactedList.length > 0;
+          const masksDisplayed = showMaskLayerShared.value;
+          let maskDetections = detections;
+          const mosaicMaskIds: number[] = [];
+
+          if (redactionEnabled) {
+            if (masksDisplayed) {
+              // Masks display: the artifact keeps every detection; redacted
+              // classes are flagged so the shader fills their mask silhouette
+              // with the opaque mosaic instead of the translucent color.
+              for (let index = 0; index < detections.length; index += 1) {
+                const detection = detections[index]!;
+
+                if (redactedList.indexOf(detection.label ?? "") !== -1) {
+                  mosaicMaskIds[mosaicMaskIds.length] = index + 1;
+                }
+              }
+            } else {
+              // Boxes display: the mask lane carries only redacted classes,
+              // each rewritten to a 1x1 all-ones mask so its whole bbox fills
+              // opaquely with the mosaic — conservative, never mask-shaped.
+              const selected: LiveSerializedDetection[] = [];
+
+              for (let index = 0; index < detections.length; index += 1) {
+                const detection = detections[index]!;
+
+                if (redactedList.indexOf(detection.label ?? "") !== -1) {
+                  mosaicMaskIds[selected.length] = selected.length + 1;
+                  selected[selected.length] = {
+                    bbox: detection.bbox,
+                    color: detection.color,
+                    label: detection.label,
+                    mask: PRIVACY_FULL_BBOX_MASK,
+                    maskHeight: 1,
+                    maskWidth: 1,
+                    score: detection.score,
+                  };
+                }
+              }
+
+              maskDetections = selected;
+            }
+          }
+
           stage = "mask-prepare";
           const maskStartedAt = Date.now();
           let preparedMask: LiveSkiaMaskFrame | null = null;
 
-          if (showMaskLayerShared.value) {
+          if (masksDisplayed || redactionEnabled) {
             try {
               preparedMask = createLiveSkiaMaskFrame({
                 artifactMaxPixels: LIVE_MASK_ARTIFACT_MAX_PIXELS,
                 artifactMaxSide: LIVE_MASK_ARTIFACT_MAX_SIDE,
-                detections,
+                detections: maskDetections,
+                edgeSmoothing: masksDisplayed ? undefined : 0,
                 frameHeight: detectionFrameSize.height,
                 frameWidth: detectionFrameSize.width,
                 mediaRect: {
@@ -1036,6 +1137,8 @@ function LiveCameraProof(props: {
                   x: mediaRect.x,
                   y: mediaRect.y,
                 },
+                mosaicCellPx: LIVE_PRIVACY_MOSAIC_CELL_PX,
+                mosaicMaskIds,
                 nativeBuilder: liveNativeMaskBuilder,
               });
             } catch (error) {
@@ -1217,6 +1320,7 @@ function LiveCameraProof(props: {
       liveMaskUniforms,
       liveMediaRect,
       liveNativeMaskBuilder,
+      redactedClassesShared,
       reportLiveDetections,
       reportLiveError,
       reportLiveFrame,
@@ -1265,6 +1369,7 @@ function LiveCameraProof(props: {
         maskEffect={liveMaskEffect}
         maskImage={liveMaskImage}
         maskUniforms={liveMaskUniforms}
+        onPress={handleLiveStageTap}
         mediaLayer={
           <>
             {device ? (
@@ -1283,7 +1388,7 @@ function LiveCameraProof(props: {
           </>
         }
         showBoxes={showBoxLayer}
-        showMasks={showMaskLayer}
+        showMasks={showMaskLayer || redactionActive}
         stageStyle={styles.liveStage}
       >
         {!canRunCamera ? (
@@ -1327,6 +1432,26 @@ function LiveCameraProof(props: {
                 value={`${liveFrame?.maskCount ?? 0} ${detectionDisplayMode}`}
               />
             </View>
+
+            {redactionActive ? (
+              <View style={styles.privacyChipRow}>
+                {redactedClasses.map((className) => (
+                  <TouchableOpacity
+                    key={className}
+                    onPress={() =>
+                      setRedactedClasses((classes) =>
+                        classes.filter((entry) => entry !== className),
+                      )
+                    }
+                  >
+                    <StatusPill
+                      tone="ready"
+                      value={`hidden: ${className || "object"} ✕`}
+                    />
+                  </TouchableOpacity>
+                ))}
+              </View>
+            ) : null}
 
             <View style={styles.liveActions}>
               <TouchableOpacity
@@ -1489,6 +1614,33 @@ function LiveCameraProof(props: {
             <Text style={styles.floatingButtonText}>HUD</Text>
           </TouchableOpacity>
         )}
+
+        {tapMenuLabel !== null ? (
+          <View style={styles.detectionMenu}>
+            <Text style={styles.detectionMenuTitle}>
+              {tapMenuLabel || "object"}
+            </Text>
+            <TouchableOpacity
+              onPress={() => {
+                toggleRedactedClass(tapMenuLabel);
+                setTapMenuLabel(null);
+              }}
+              style={styles.detectionMenuAction}
+            >
+              <Text style={styles.detectionMenuActionText}>
+                {redactedClasses.includes(tapMenuLabel)
+                  ? "Show (remove redaction)"
+                  : "Redact (privacy)"}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setTapMenuLabel(null)}
+              style={styles.detectionMenuCancel}
+            >
+              <Text style={styles.floatingButtonText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
       </SyncedFrameStage>
     </View>
   );
@@ -1726,6 +1878,7 @@ interface LiveSkiaMaskFrameOptions {
   readonly artifactMaxPixels: number;
   readonly artifactMaxSide: number;
   readonly detections: readonly LiveSerializedDetection[];
+  readonly edgeSmoothing?: number;
   readonly frameHeight: number;
   readonly frameWidth: number;
   readonly mediaRect: {
@@ -1734,6 +1887,8 @@ interface LiveSkiaMaskFrameOptions {
     readonly x: number;
     readonly y: number;
   };
+  readonly mosaicCellPx?: number;
+  readonly mosaicMaskIds?: readonly number[];
   readonly nativeBuilder: ReactNativeLiveIdMaskNativeBuilderHandle | null;
 }
 
@@ -1814,7 +1969,10 @@ function createLiveSkiaMaskFrame(
     maskPrepStage = "mask-resolve-uniforms";
     const uniforms = resolveReactNativeLiveIdMaskUniforms({
       artifact,
+      edgeSmoothing: options.edgeSmoothing,
       mediaRect: options.mediaRect,
+      mosaicCellPx: options.mosaicCellPx,
+      mosaicMaskIds: options.mosaicMaskIds,
     });
 
     return {
@@ -1864,6 +2022,8 @@ function createEmptyLiveMaskUniforms(): ReactNativeIdMaskUniforms {
     uFillPalette: createNumberArray(MAX_ID_MASK_PALETTE_ENTRIES * 4),
     uMaxStrokeWidth: 0,
     uMediaRect: [0, 0, 1, 1],
+    uMosaicCellPx: 0,
+    uMosaicFlags: createNumberArray(MAX_ID_MASK_PALETTE_ENTRIES),
     uOpacity: 0,
     uStrokePalette: createNumberArray(MAX_ID_MASK_PALETTE_ENTRIES * 4),
     uStrokeWidths: createNumberArray(MAX_ID_MASK_PALETTE_ENTRIES),
@@ -2228,6 +2388,56 @@ const styles = StyleSheet.create({
     right: 24,
     top: 142,
     zIndex: 6,
+  },
+  privacyChipRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    justifyContent: "center",
+    left: 24,
+    position: "absolute",
+    right: 24,
+    top: 178,
+    zIndex: 6,
+  },
+  detectionMenu: {
+    alignItems: "center",
+    backgroundColor: "rgba(5, 7, 11, 0.88)",
+    borderColor: "rgba(216, 226, 240, 0.2)",
+    borderRadius: 16,
+    borderWidth: 1,
+    bottom: 96,
+    gap: 8,
+    left: 42,
+    padding: 12,
+    position: "absolute",
+    right: 42,
+    zIndex: 7,
+  },
+  detectionMenuTitle: {
+    color: "#9aa4b2",
+    fontSize: 10,
+    fontWeight: "900",
+    letterSpacing: 1,
+    textTransform: "uppercase",
+  },
+  detectionMenuAction: {
+    alignItems: "center",
+    backgroundColor: "rgba(248, 250, 252, 0.94)",
+    borderRadius: 999,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    width: "100%",
+  },
+  detectionMenuActionText: {
+    color: "#050608",
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  detectionMenuCancel: {
+    alignItems: "center",
+    paddingHorizontal: 18,
+    paddingVertical: 6,
   },
   liveTopBar: {
     alignItems: "center",

@@ -535,6 +535,32 @@ describe("React Native live ID-mask artifacts", () => {
     expect(uniforms.uStrokeWidths[1]).toBe(2);
     // 2x2 mask over a 4x4 artifact: cells span 2 texels, feather is half.
     expect(uniforms.uFeatherTexels).toBe(1);
+    expect(new Set(uniforms.uMosaicFlags)).toEqual(new Set([0]));
+  });
+
+  it("flags mosaic mask ids in the shader uniforms", () => {
+    const artifact = createReactNativeLiveIdMaskArtifact({
+      detections: [
+        createFullCoverageLiveDetection({ color: 0x38bdf8 }),
+        createFullCoverageLiveDetection({ color: 0x22c55e }),
+      ],
+      frameHeight: 4,
+      frameWidth: 4,
+      maxPixels: 16,
+      maxSide: 4,
+    });
+
+    const uniforms = resolveReactNativeLiveIdMaskUniforms({
+      artifact: artifact!,
+      mediaRect: { height: 4, width: 4, x: 0, y: 0 },
+      mosaicCellPx: 14,
+      mosaicMaskIds: [2, 999],
+    });
+
+    expect(uniforms.uMosaicCellPx).toBe(14);
+    expect(uniforms.uMosaicFlags).toHaveLength(MAX_ID_MASK_PALETTE_ENTRIES);
+    expect(uniforms.uMosaicFlags[1]).toBe(0);
+    expect(uniforms.uMosaicFlags[2]).toBe(1);
   });
 
   it("scales and clamps the edge feather to the mask cell size", () => {
@@ -827,6 +853,10 @@ describe("React Native ID-mask artifacts", () => {
     );
     expect(REACT_NATIVE_ID_MASK_SHADER_SOURCE).toContain("uEdgeSmoothing");
     expect(REACT_NATIVE_ID_MASK_SHADER_SOURCE).toContain("uFeatherTexels");
+    expect(REACT_NATIVE_ID_MASK_SHADER_SOURCE).toContain("uMosaicCellPx");
+    expect(REACT_NATIVE_ID_MASK_SHADER_SOURCE).toContain(
+      "resolveMosaicFlag(maskId)",
+    );
   });
 });
 

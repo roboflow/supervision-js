@@ -64,12 +64,19 @@ const strokeWidthLookup = createShaderArrayLookup({
   paletteName: "uStrokeWidths",
   returnType: "float",
 });
+const mosaicFlagLookup = createShaderArrayLookup({
+  fallback: "0.0",
+  functionName: "resolveMosaicFlag",
+  paletteName: "uMosaicFlags",
+  returnType: "float",
+});
 
 export const REACT_NATIVE_ID_MASK_SHADER_SOURCE = `
 uniform shader uMask;
 uniform half4 uFillPalette[${MAX_ID_MASK_PALETTE_ENTRIES}];
 uniform half4 uStrokePalette[${MAX_ID_MASK_PALETTE_ENTRIES}];
 uniform float uStrokeWidths[${MAX_ID_MASK_PALETTE_ENTRIES}];
+uniform float uMosaicFlags[${MAX_ID_MASK_PALETTE_ENTRIES}];
 uniform float2 uTextureSize;
 uniform float4 uMediaRect;
 uniform float uOpacity;
@@ -77,6 +84,7 @@ uniform float uBorderEnabled;
 uniform float uEdgeSmoothing;
 uniform float uFeatherTexels;
 uniform float uMaxStrokeWidth;
+uniform float uMosaicCellPx;
 
 float sampleMaskId(float2 point) {
   half4 sampleColor = uMask.eval(point);
@@ -93,6 +101,8 @@ ${fillPaletteLookup}
 ${strokePaletteLookup}
 
 ${strokeWidthLookup}
+
+${mosaicFlagLookup}
 
 float2 resolveMaskTexel() {
   return float2(
@@ -171,6 +181,21 @@ half4 main(float2 coord) {
 
   int maskId = int(id);
   half4 fillColor = resolveFillColor(maskId);
+
+  if (resolveMosaicFlag(maskId) > 0.5) {
+    // Procedural censor mosaic: opaque cells tinted by the detection color,
+    // brightness varied by a per-cell hash. Never samples camera content, so
+    // nothing under the mask can leak through the fill.
+    float mosaicCell = max(uMosaicCellPx, 4.0);
+    float2 cell = floor(coord / mosaicCell);
+    float cellNoise = fract(sin(dot(cell, float2(127.1, 311.7))) * 43758.5453);
+    float cellShade = fract(sin(dot(cell, float2(269.5, 183.3))) * 28001.8384);
+    half3 cellColor = fillColor.rgb * half(0.30 + 0.55 * cellNoise) +
+      half(0.08 * cellShade);
+
+    return half4(cellColor, 1.0);
+  }
+
   half outputAlpha = fillColor.a * half(uOpacity);
 
   if (edgeSmoothing > 0.0) {
@@ -313,6 +338,17 @@ export interface ReactNativeIdMaskUniforms {
   readonly uFillPalette: readonly number[];
   readonly uMaxStrokeWidth: number;
   readonly uMediaRect: readonly number[];
+  /**
+   * Cell size (canvas px) of the procedural censor mosaic for detections
+   * flagged in `uMosaicFlags`.
+   */
+  readonly uMosaicCellPx: number;
+  /**
+   * Per-detection mosaic flags indexed by mask id: 1 renders that detection
+   * as an opaque procedural censor mosaic, 0 renders the normal translucent
+   * fill.
+   */
+  readonly uMosaicFlags: readonly number[];
   readonly uOpacity: number;
   readonly uStrokePalette: readonly number[];
   readonly uStrokeWidths: readonly number[];
@@ -388,6 +424,16 @@ export interface ReactNativeLiveIdMaskUniformOptions {
   readonly artifact: ReactNativeLiveIdMaskArtifact;
   readonly edgeSmoothing?: number;
   readonly mediaRect: Rect;
+  /**
+   * Cell size (canvas px) for the procedural censor mosaic fill applied to
+   * `mosaicMaskIds`. Defaults to 12.
+   */
+  readonly mosaicCellPx?: number;
+  /**
+   * Mask ids (detection index + 1 within the artifact) rendered as an opaque
+   * procedural censor mosaic instead of a translucent fill.
+   */
+  readonly mosaicMaskIds?: readonly number[];
 }
 
 export const REACT_NATIVE_ROBOFLOW_PALETTE = [
@@ -568,6 +614,8 @@ export function resolveReactNativeIdMaskUniforms(
       layout.mediaRect.width,
       layout.mediaRect.height,
     ],
+    uMosaicCellPx: 0,
+    uMosaicFlags: new Array<number>(MAX_ID_MASK_PALETTE_ENTRIES).fill(0),
     uOpacity: artifact.opacity,
     uStrokePalette: Array.from(artifact.strokePalette),
     uStrokeWidths: Array.from(artifact.strokeWidths),
@@ -916,6 +964,16 @@ export function resolveReactNativeLiveIdMaskUniforms(
   const { artifact, mediaRect } = options;
   const edgeSmoothing =
     options.edgeSmoothing ?? DEFAULT_REACT_NATIVE_ID_MASK_EDGE_SMOOTHING;
+  const mosaicFlags = new Array<number>(MAX_ID_MASK_PALETTE_ENTRIES).fill(0);
+  const mosaicMaskIds = options.mosaicMaskIds ?? [];
+
+  for (let index = 0; index < mosaicMaskIds.length; index += 1) {
+    const maskId = mosaicMaskIds[index]!;
+
+    if (maskId >= 1 && maskId < MAX_ID_MASK_PALETTE_ENTRIES) {
+      mosaicFlags[maskId] = 1;
+    }
+  }
 
   return {
     uBorderEnabled: artifact.hasStroke ? 1 : 0,
@@ -929,6 +987,8 @@ export function resolveReactNativeLiveIdMaskUniforms(
       MAX_ID_MASK_STROKE_WIDTH,
     ),
     uMediaRect: [mediaRect.x, mediaRect.y, mediaRect.width, mediaRect.height],
+    uMosaicCellPx: Math.max(0, options.mosaicCellPx ?? 12),
+    uMosaicFlags: mosaicFlags,
     uOpacity: artifact.opacity,
     uStrokePalette: Array.from(artifact.strokePalette),
     uStrokeWidths: Array.from(artifact.strokeWidths),
