@@ -16,7 +16,14 @@ import {
   useImage,
 } from "@shopify/react-native-skia";
 import { StatusBar } from "expo-status-bar";
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   SafeAreaView,
   StyleSheet,
@@ -24,6 +31,7 @@ import {
   Text,
   TouchableOpacity,
   Platform,
+  type StyleProp,
   type ViewStyle,
   useWindowDimensions,
   View,
@@ -46,23 +54,25 @@ import {
   BoxShape,
   LabelPlacement,
   MaskRenderMode,
+  type BoxDrawInstruction,
   type DetectionPickResult,
+  type LabelDrawInstruction,
 } from "supervision-js-core";
 import { models, useInstanceSegmentation } from "react-native-executorch";
 import {
   MAX_ID_MASK_PALETTE_ENTRIES,
   REACT_NATIVE_ID_MASK_SHADER_SOURCE,
+  createReactNativePreparedFramePacket,
   type ReactNativeLiveIdMaskNativeBuilderHandle,
   type ReactNativeLiveSerializedDetection,
+  type ReactNativeFrameLayout,
   type ReactNativeIdMaskUniforms,
-  createReactNativeIdMaskFrame,
   createReactNativeLiveIdMaskArtifactAuto,
   loadReactNativeLiveIdMaskNativeBuilder,
   pickReactNativeDetectionAtPoint,
   resolveReactNativeIdMaskUniforms,
   resolveReactNativeLiveIdMaskUniforms,
   resolveReactNativeFrameLayout,
-  resolveReactNativeFramePresentation,
   resolveReactNativeLabelLayout,
 } from "supervision-js-react-native";
 
@@ -165,52 +175,57 @@ function StaticFrameProof(props: {
     [],
   );
 
-  const presentation = useMemo(
-    () =>
-      resolveReactNativeFramePresentation({
-        boxStyle: new BaseBoxStyle({
-          cornerRadius: rounded ? 12 : 0,
-          fill: (detection) => ({
-            alpha: detection.className === "basketball" ? 0.36 : 0.12,
-            color: colorForClass(detection.className ?? ""),
-          }),
-          shape: rounded ? BoxShape.RoundedRect : BoxShape.Rect,
-          stroke: (detection) => ({
-            alpha: 1,
-            color: colorForClass(detection.className ?? ""),
-            width: detection.className === "basketball" ? 3 : 2,
-          }),
+  const packetPreparation = useMemo(() => {
+    const startedAt = Date.now();
+    const packet = createReactNativePreparedFramePacket({
+      boxStyle: new BaseBoxStyle({
+        cornerRadius: rounded ? 12 : 0,
+        fill: (detection) => ({
+          alpha: detection.className === "basketball" ? 0.36 : 0.12,
+          color: colorForClass(detection.className ?? ""),
         }),
-        detectionFrame: basketballDetectionFrame,
-        labelStyle: new BaseLabelStyle({
-          background: (detection) => ({
-            alpha: 0.82,
-            color: colorForClass(detection.className ?? ""),
-            cornerRadius: 4,
-            paddingX: 5,
-            paddingY: 2,
-          }),
-          includeConfidence: true,
-          offsetY: 4,
-          placement: LabelPlacement.InsideTop,
-          textStyle: {
-            alpha: 1,
-            color: 0xffffff,
-            fontSize: 10,
-            fontWeight: "800",
-          },
+        shape: rounded ? BoxShape.RoundedRect : BoxShape.Rect,
+        stroke: (detection) => ({
+          alpha: 1,
+          color: colorForClass(detection.className ?? ""),
+          width: detection.className === "basketball" ? 3 : 2,
         }),
-        maskStyle,
-        mediaFrame: {
-          metadata: {
-            duration: 1 / 30,
-            ...basketballFrameMetadata,
-          },
-          payload: basketballFrame,
+      }),
+      detectionFrame: basketballDetectionFrame,
+      labelStyle: new BaseLabelStyle({
+        background: (detection) => ({
+          alpha: 0.82,
+          color: colorForClass(detection.className ?? ""),
+          cornerRadius: 4,
+          paddingX: 5,
+          paddingY: 2,
+        }),
+        includeConfidence: true,
+        offsetY: 4,
+        placement: LabelPlacement.InsideTop,
+        textStyle: {
+          alpha: 1,
+          color: 0xffffff,
+          fontSize: 10,
+          fontWeight: "800",
         },
       }),
-    [maskStyle, rounded],
-  );
+      maskStyle,
+      mediaFrame: {
+        metadata: {
+          duration: 1 / 30,
+          ...basketballFrameMetadata,
+        },
+        payload: basketballFrame,
+      },
+    });
+
+    return {
+      packet,
+      prepMs: Date.now() - startedAt,
+    };
+  }, [maskStyle, rounded]);
+  const presentation = packetPreparation.packet.presentation;
 
   const layout = useMemo(
     () =>
@@ -223,18 +238,13 @@ function StaticFrameProof(props: {
     [canvasHeight, canvasWidth, presentation.mediaMetadata],
   );
 
-  const maskPreparation = useMemo(() => {
-    const startedAt = Date.now();
-    const artifact = createReactNativeIdMaskFrame({
-      detectionFrame: basketballDetectionFrame,
-      maskStyle,
-    });
-
-    return {
-      artifact,
-      prepMs: Date.now() - startedAt,
-    };
-  }, [maskStyle]);
+  const maskPreparation = useMemo(
+    () => ({
+      artifact: packetPreparation.packet.maskArtifact,
+      prepMs: packetPreparation.prepMs,
+    }),
+    [packetPreparation],
+  );
   const maskImage = useMemo(() => {
     if (!maskPreparation.artifact) {
       return null;
@@ -271,31 +281,28 @@ function StaticFrameProof(props: {
       : "unavailable";
   const modelStatus = formatSegmentationStatus(props.segmentation);
 
-  const labelLayouts = useMemo(
-    () =>
-      presentation.labels.map((label, index) => {
-        const fontSize = label.textStyle?.fontSize ?? 13;
-        const font = matchFont({ fontSize });
-        const bounds = font.measureText(label.text);
-        const metrics = font.getMetrics();
-        const textHeight = metrics.descent - metrics.ascent;
-        const labelLayout = resolveReactNativeLabelLayout({
-          instruction: label,
-          layout,
-          textSize: {
-            height: textHeight,
-            width: bounds.width,
-          },
-        });
+  const syncedBoxOverlays = useMemo(() => {
+    const overlays = createSyncedBoxOverlays(presentation.boxes, layout);
 
-        return {
-          baselineY: labelLayout.textPoint.y - metrics.ascent,
-          font,
-          index,
-          instruction: label,
-          layout: labelLayout,
-        };
-      }),
+    if (selectedPick?.detection.rect) {
+      overlays.push(
+        createSyncedBoxOverlay({
+          key: "selected",
+          rect: layout.mapRect(selectedPick.detection.rect),
+          radius: 14 * layout.scale,
+          strokeColor: toRgba(
+            colorForClass(selectedPick.detection.className ?? ""),
+            1,
+          ),
+          strokeWidth: 4,
+        }),
+      );
+    }
+
+    return overlays;
+  }, [layout, presentation.boxes, selectedPick]);
+  const syncedLabelOverlays = useMemo(
+    () => createSyncedLabelOverlays(presentation.labels, layout),
     [layout, presentation.labels],
   );
 
@@ -314,12 +321,18 @@ function StaticFrameProof(props: {
           <ModeSwitch mode={props.mode} onModeChange={props.onModeChange} />
         </View>
 
-        <View
-          onResponderRelease={(event) => {
-            const point = {
-              x: event.nativeEvent.locationX,
-              y: event.nativeEvent.locationY,
-            };
+        <SyncedFrameStage
+          backgroundColor="#030712"
+          boxes={syncedBoxOverlays}
+          canvasHeight={canvasHeight}
+          canvasWidth={canvasWidth}
+          labels={syncedLabelOverlays}
+          layout={layout}
+          maskEffect={maskEffect}
+          maskImage={maskImage}
+          maskUniforms={maskUniforms}
+          mediaImage={image}
+          onPress={(point) => {
             setSelectedPick(
               pickReactNativeDetectionAtPoint(
                 basketballDetectionFrame,
@@ -329,144 +342,8 @@ function StaticFrameProof(props: {
               ),
             );
           }}
-          onStartShouldSetResponder={() => true}
-          style={[
-            styles.canvasFrame,
-            { height: canvasHeight, width: canvasWidth },
-          ]}
+          stageStyle={styles.canvasFrame}
         >
-          <Canvas
-            style={[
-              styles.canvasSurface,
-              { height: canvasHeight, width: canvasWidth },
-            ]}
-          >
-            <Rect
-              color="#030712"
-              height={canvasHeight}
-              width={canvasWidth}
-              x={0}
-              y={0}
-            />
-            {image ? (
-              <SkiaImage
-                fit="fill"
-                height={layout.mediaRect.height}
-                image={image}
-                width={layout.mediaRect.width}
-                x={layout.mediaRect.x}
-                y={layout.mediaRect.y}
-              />
-            ) : null}
-            {maskEffect && maskImage && maskUniforms ? (
-              <Rect
-                height={layout.mediaRect.height}
-                width={layout.mediaRect.width}
-                x={layout.mediaRect.x}
-                y={layout.mediaRect.y}
-              >
-                <Shader source={maskEffect} uniforms={maskUniforms}>
-                  <ImageShader
-                    fit="fill"
-                    image={maskImage}
-                    rect={layout.mediaRect}
-                    sampling={{
-                      filter: FilterMode.Nearest,
-                      mipmap: MipmapMode.None,
-                    }}
-                    tx="clamp"
-                    ty="clamp"
-                  />
-                </Shader>
-              </Rect>
-            ) : null}
-            {presentation.boxes.map((box, index) => {
-              const rect = layout.mapRect(box.rect);
-              const radius =
-                box.shape === BoxShape.RoundedRect
-                  ? (box.cornerRadius ?? 0)
-                  : 0;
-              const key = `${box.rect.x}:${box.rect.y}:${index}`;
-              const fillColor = box.fill
-                ? toRgba(box.fill.color, box.fill.alpha)
-                : null;
-              const strokeColor = box.stroke
-                ? toRgba(box.stroke.color, box.stroke.alpha)
-                : null;
-
-              return (
-                <Fragment key={key}>
-                  {fillColor ? (
-                    <RoundedRect
-                      color={fillColor}
-                      height={rect.height}
-                      r={radius * layout.scale}
-                      width={rect.width}
-                      x={rect.x}
-                      y={rect.y}
-                    />
-                  ) : null}
-                  {strokeColor && box.stroke ? (
-                    <RoundedRect
-                      color={strokeColor}
-                      height={rect.height}
-                      r={radius * layout.scale}
-                      strokeWidth={box.stroke.width}
-                      style="stroke"
-                      width={rect.width}
-                      x={rect.x}
-                      y={rect.y}
-                    />
-                  ) : null}
-                </Fragment>
-              );
-            })}
-            {selectedPick?.detection.rect ? (
-              <RoundedRect
-                color={toRgba(
-                  colorForClass(selectedPick.detection.className ?? ""),
-                  1,
-                )}
-                height={layout.mapRect(selectedPick.detection.rect).height}
-                r={14 * layout.scale}
-                strokeWidth={4}
-                style="stroke"
-                width={layout.mapRect(selectedPick.detection.rect).width}
-                x={layout.mapRect(selectedPick.detection.rect).x}
-                y={layout.mapRect(selectedPick.detection.rect).y}
-              />
-            ) : null}
-            {labelLayouts.map((label) => {
-              const background = label.instruction.background;
-              const textStyle = label.instruction.textStyle;
-              const key = `${label.instruction.text}:${label.index}`;
-
-              return (
-                <Fragment key={key}>
-                  {background ? (
-                    <RoundedRect
-                      color={toRgba(background.color, background.alpha)}
-                      height={label.layout.backgroundRect.height}
-                      r={label.layout.cornerRadius}
-                      width={label.layout.backgroundRect.width}
-                      x={label.layout.backgroundRect.x}
-                      y={label.layout.backgroundRect.y}
-                    />
-                  ) : null}
-                  <SkiaText
-                    color={toRgba(
-                      textStyle?.color ?? 0xffffff,
-                      textStyle?.alpha ?? 1,
-                    )}
-                    font={label.font}
-                    text={label.instruction.text}
-                    x={label.layout.textPoint.x}
-                    y={label.baselineY}
-                  />
-                </Fragment>
-              );
-            })}
-          </Canvas>
           <View style={styles.stageReadout}>
             <StatusPill tone="ready" value="media + detections" />
             <StatusPill
@@ -482,7 +359,7 @@ function StaticFrameProof(props: {
               )} artifact`}
             />
           </View>
-        </View>
+        </SyncedFrameStage>
 
         <View style={styles.metricsGrid}>
           <Metric label="Frame" value="#0" />
@@ -661,6 +538,314 @@ interface LiveMediaRect {
   readonly y: number;
 }
 
+interface SyncedRect {
+  readonly height: number;
+  readonly width: number;
+  readonly x: number;
+  readonly y: number;
+}
+
+interface SyncedBoxOverlay {
+  readonly fillColor?: string;
+  readonly key: string;
+  readonly radius: number;
+  readonly rect: SyncedRect;
+  readonly strokeColor?: string;
+  readonly strokeWidth?: number;
+}
+
+interface SyncedLabelOverlay {
+  readonly backgroundColor?: string;
+  readonly backgroundRect: SyncedRect;
+  readonly baselineY: number;
+  readonly cornerRadius: number;
+  readonly font: ReturnType<typeof matchFont>;
+  readonly key: string;
+  readonly text: string;
+  readonly textColor: string;
+  readonly textX: number;
+}
+
+interface SyncedFrameStageProps {
+  readonly backgroundColor?: string;
+  readonly boxes: readonly SyncedBoxOverlay[];
+  readonly canvasHeight: number;
+  readonly canvasStyle?: StyleProp<ViewStyle>;
+  readonly canvasWidth: number;
+  readonly children?: ReactNode;
+  readonly labels: readonly SyncedLabelOverlay[];
+  readonly layout: ReactNativeFrameLayout;
+  readonly maskEffect: ReturnType<typeof Skia.RuntimeEffect.Make> | null;
+  readonly maskImage?: unknown;
+  readonly maskUniforms?: unknown;
+  readonly mediaImage?: SkiaImageType | null;
+  readonly mediaLayer?: ReactNode;
+  readonly onPress?: (point: {
+    readonly x: number;
+    readonly y: number;
+  }) => void;
+  readonly showBoxes?: boolean;
+  readonly showMasks?: boolean;
+  readonly stageStyle?: StyleProp<ViewStyle>;
+}
+
+function SyncedFrameStage(props: SyncedFrameStageProps) {
+  const showMasks = props.showMasks ?? true;
+  const showBoxes = props.showBoxes ?? true;
+
+  return (
+    <View
+      onResponderRelease={
+        props.onPress
+          ? (event) => {
+              props.onPress?.({
+                x: event.nativeEvent.locationX,
+                y: event.nativeEvent.locationY,
+              });
+            }
+          : undefined
+      }
+      onStartShouldSetResponder={props.onPress ? () => true : undefined}
+      style={[
+        styles.syncedFrameStage,
+        props.stageStyle,
+        { height: props.canvasHeight, width: props.canvasWidth },
+      ]}
+    >
+      {props.mediaLayer}
+      <Canvas
+        style={[
+          styles.canvasSurface,
+          props.canvasStyle,
+          { height: props.canvasHeight, width: props.canvasWidth },
+        ]}
+      >
+        {props.backgroundColor ? (
+          <Rect
+            color={props.backgroundColor}
+            height={props.canvasHeight}
+            width={props.canvasWidth}
+            x={0}
+            y={0}
+          />
+        ) : null}
+        {props.mediaImage ? (
+          <SkiaImage
+            fit="fill"
+            height={props.layout.mediaRect.height}
+            image={props.mediaImage}
+            width={props.layout.mediaRect.width}
+            x={props.layout.mediaRect.x}
+            y={props.layout.mediaRect.y}
+          />
+        ) : null}
+        {showMasks &&
+        props.maskEffect &&
+        props.maskImage &&
+        props.maskUniforms ? (
+          <Rect
+            height={props.layout.mediaRect.height}
+            width={props.layout.mediaRect.width}
+            x={props.layout.mediaRect.x}
+            y={props.layout.mediaRect.y}
+          >
+            <Shader
+              source={props.maskEffect}
+              uniforms={props.maskUniforms as never}
+            >
+              <ImageShader
+                fit="fill"
+                image={props.maskImage as never}
+                rect={props.layout.mediaRect}
+                sampling={{
+                  filter: FilterMode.Nearest,
+                  mipmap: MipmapMode.None,
+                }}
+                tx="clamp"
+                ty="clamp"
+              />
+            </Shader>
+          </Rect>
+        ) : null}
+        {showBoxes
+          ? props.boxes.map((box) => (
+              <Fragment key={box.key}>
+                {box.fillColor ? (
+                  <RoundedRect
+                    color={box.fillColor}
+                    height={box.rect.height}
+                    r={box.radius}
+                    width={box.rect.width}
+                    x={box.rect.x}
+                    y={box.rect.y}
+                  />
+                ) : null}
+                {box.strokeColor && box.strokeWidth ? (
+                  <RoundedRect
+                    color={box.strokeColor}
+                    height={box.rect.height}
+                    r={box.radius}
+                    strokeWidth={box.strokeWidth}
+                    style="stroke"
+                    width={box.rect.width}
+                    x={box.rect.x}
+                    y={box.rect.y}
+                  />
+                ) : null}
+              </Fragment>
+            ))
+          : null}
+        {props.labels.map((label) => (
+          <Fragment key={label.key}>
+            {label.backgroundColor ? (
+              <RoundedRect
+                color={label.backgroundColor}
+                height={label.backgroundRect.height}
+                r={label.cornerRadius}
+                width={label.backgroundRect.width}
+                x={label.backgroundRect.x}
+                y={label.backgroundRect.y}
+              />
+            ) : null}
+            <SkiaText
+              color={label.textColor}
+              font={label.font}
+              text={label.text}
+              x={label.textX}
+              y={label.baselineY}
+            />
+          </Fragment>
+        ))}
+      </Canvas>
+      {props.children}
+    </View>
+  );
+}
+
+function createSyncedBoxOverlays(
+  boxes: readonly BoxDrawInstruction[],
+  layout: ReactNativeFrameLayout,
+) {
+  return boxes.map((box, index) => {
+    const radius =
+      box.shape === BoxShape.RoundedRect ? (box.cornerRadius ?? 0) : 0;
+
+    return createSyncedBoxOverlay({
+      fillColor: box.fill ? toRgba(box.fill.color, box.fill.alpha) : undefined,
+      key: `${box.rect.x}:${box.rect.y}:${index}`,
+      radius: radius * layout.scale,
+      rect: layout.mapRect(box.rect),
+      strokeColor: box.stroke
+        ? toRgba(box.stroke.color, box.stroke.alpha)
+        : undefined,
+      strokeWidth: box.stroke?.width,
+    });
+  });
+}
+
+function createSyncedBoxOverlay(overlay: SyncedBoxOverlay): SyncedBoxOverlay {
+  return overlay;
+}
+
+function createSyncedLabelOverlays(
+  labels: readonly LabelDrawInstruction[],
+  layout: ReactNativeFrameLayout,
+) {
+  return labels.map((label, index) => {
+    const fontSize = label.textStyle?.fontSize ?? 13;
+    const font = matchFont({ fontSize });
+    const bounds = font.measureText(label.text);
+    const metrics = font.getMetrics();
+    const textHeight = metrics.descent - metrics.ascent;
+    const labelLayout = resolveReactNativeLabelLayout({
+      instruction: label,
+      layout,
+      textSize: {
+        height: textHeight,
+        width: bounds.width,
+      },
+    });
+
+    return {
+      backgroundColor: label.background
+        ? toRgba(label.background.color, label.background.alpha)
+        : undefined,
+      backgroundRect: labelLayout.backgroundRect,
+      baselineY: labelLayout.textPoint.y - metrics.ascent,
+      cornerRadius: labelLayout.cornerRadius,
+      font,
+      key: `${label.text}:${index}`,
+      text: label.text,
+      textColor: toRgba(
+        label.textStyle?.color ?? 0xffffff,
+        label.textStyle?.alpha ?? 1,
+      ),
+      textX: labelLayout.textPoint.x,
+    };
+  });
+}
+
+function createLiveSyncedOverlays(options: {
+  readonly canvasWidth: number;
+  readonly detections: readonly LiveOverlayDetection[];
+  readonly layout: ReactNativeFrameLayout;
+}) {
+  const font = matchFont({ fontSize: 13 });
+  const metrics = font.getMetrics();
+  const textHeight = metrics.descent - metrics.ascent;
+  const boxes: SyncedBoxOverlay[] = [];
+  const labels: SyncedLabelOverlay[] = [];
+
+  options.detections.forEach((detection, index) => {
+    const rect = options.layout.mapRect({
+      height: detection.bbox.y2 - detection.bbox.y1,
+      width: detection.bbox.x2 - detection.bbox.x1,
+      x: detection.bbox.x1,
+      y: detection.bbox.y1,
+    });
+    const text = `${detection.label || "object"} ${formatConfidence(
+      detection.score,
+    )}`;
+    const bounds = font.measureText(text);
+    const backgroundWidth = Math.ceil(bounds.width + 14);
+    const backgroundHeight = Math.ceil(textHeight + 7);
+    const backgroundX = Math.max(
+      6,
+      Math.min(options.canvasWidth - backgroundWidth - 6, rect.x),
+    );
+    const backgroundY = Math.max(6, rect.y - backgroundHeight - 5);
+    const key = `${detection.label}:${index}`;
+
+    boxes.push(
+      createSyncedBoxOverlay({
+        key: `box:${key}`,
+        radius: 8,
+        rect,
+        strokeColor: toRgba(detection.color, 0.98),
+        strokeWidth: 3,
+      }),
+    );
+    labels.push({
+      backgroundColor: toRgba(detection.color, 0.84),
+      backgroundRect: {
+        height: backgroundHeight,
+        width: backgroundWidth,
+        x: backgroundX,
+        y: backgroundY,
+      },
+      baselineY: backgroundY + 3 - metrics.ascent,
+      cornerRadius: 5,
+      font,
+      key,
+      text,
+      textColor: "rgba(255, 255, 255, 0.96)",
+      textX: backgroundX + 7,
+    });
+  });
+
+  return { boxes, labels };
+}
+
 function LiveCameraProof(props: {
   readonly mode: DemoMode;
   readonly onModeChange: (mode: DemoMode) => void;
@@ -757,47 +942,15 @@ function LiveCameraProof(props: {
   // several times per second.
   const showMaskLayerShared = useSharedValue(showMaskLayer);
   const runSegmentationOnFrame = props.segmentation.runOnFrame;
-  const liveLabelOverlays = useMemo(() => {
-    const font = matchFont({ fontSize: 13 });
-    const metrics = font.getMetrics();
-    const textHeight = metrics.descent - metrics.ascent;
-
-    return liveDetections.map((detection, index) => {
-      const rect = liveLayout.mapRect({
-        height: detection.bbox.y2 - detection.bbox.y1,
-        width: detection.bbox.x2 - detection.bbox.x1,
-        x: detection.bbox.x1,
-        y: detection.bbox.y1,
-      });
-      const text = `${detection.label || "object"} ${formatConfidence(
-        detection.score,
-      )}`;
-      const bounds = font.measureText(text);
-      const backgroundWidth = Math.ceil(bounds.width + 14);
-      const backgroundHeight = Math.ceil(textHeight + 7);
-      const backgroundX = Math.max(
-        6,
-        Math.min(canvasWidth - backgroundWidth - 6, rect.x),
-      );
-      const backgroundY = Math.max(6, rect.y - backgroundHeight - 5);
-
-      return {
-        background: {
-          height: backgroundHeight,
-          width: backgroundWidth,
-          x: backgroundX,
-          y: backgroundY,
-        },
-        baselineY: backgroundY + 3 - metrics.ascent,
-        detection,
-        font,
-        index,
-        rect,
-        text,
-        textX: backgroundX + 7,
-      };
-    });
-  }, [canvasWidth, liveDetections, liveLayout]);
+  const liveSyncedOverlays = useMemo(
+    () =>
+      createLiveSyncedOverlays({
+        canvasWidth,
+        detections: liveDetections,
+        layout: liveLayout,
+      }),
+    [canvasWidth, liveDetections, liveLayout],
+  );
 
   useEffect(() => {
     if (!hasPermission) {
@@ -1168,86 +1321,37 @@ function LiveCameraProof(props: {
   return (
     <View style={styles.liveScreen}>
       <StatusBar hidden />
-      <View
-        style={[styles.liveStage, { height: canvasHeight, width: canvasWidth }]}
+      <SyncedFrameStage
+        boxes={liveSyncedOverlays.boxes}
+        canvasHeight={canvasHeight}
+        canvasStyle={StyleSheet.absoluteFill}
+        canvasWidth={canvasWidth}
+        labels={liveSyncedOverlays.labels}
+        layout={liveLayout}
+        maskEffect={liveMaskEffect}
+        maskImage={liveMaskImage}
+        maskUniforms={liveMaskUniforms}
+        mediaLayer={
+          <>
+            {device ? (
+              <Camera
+                device={device}
+                isActive={Boolean(canRunCamera)}
+                orientationSource="interface"
+                outputs={cameraOutputs}
+                style={styles.captureCamera}
+              />
+            ) : null}
+            <NativeFrameRendererView
+              renderer={frameRenderer}
+              style={[styles.frameRendererSurface, liveFrameRendererStyle]}
+            />
+          </>
+        }
+        showBoxes={showBoxLayer}
+        showMasks={showMaskLayer}
+        stageStyle={styles.liveStage}
       >
-        {device ? (
-          <Camera
-            device={device}
-            isActive={Boolean(canRunCamera)}
-            orientationSource="interface"
-            outputs={cameraOutputs}
-            style={styles.captureCamera}
-          />
-        ) : null}
-        <NativeFrameRendererView
-          renderer={frameRenderer}
-          style={[styles.frameRendererSurface, liveFrameRendererStyle]}
-        />
-        <Canvas
-          style={[
-            styles.canvasSurface,
-            StyleSheet.absoluteFill,
-            { height: canvasHeight, width: canvasWidth },
-          ]}
-        >
-          {showMaskLayer && liveMaskEffect ? (
-            <Rect
-              height={liveLayout.mediaRect.height}
-              width={liveLayout.mediaRect.width}
-              x={liveLayout.mediaRect.x}
-              y={liveLayout.mediaRect.y}
-            >
-              <Shader source={liveMaskEffect} uniforms={liveMaskUniforms}>
-                <ImageShader
-                  fit="fill"
-                  image={liveMaskImage as never}
-                  rect={liveLayout.mediaRect}
-                  sampling={{
-                    filter: FilterMode.Nearest,
-                    mipmap: MipmapMode.None,
-                  }}
-                  tx="clamp"
-                  ty="clamp"
-                />
-              </Shader>
-            </Rect>
-          ) : null}
-          {showBoxLayer
-            ? liveLabelOverlays.map((label) => (
-                <RoundedRect
-                  color={toRgba(label.detection.color, 0.98)}
-                  height={label.rect.height}
-                  key={`box:${label.detection.label}:${label.index}`}
-                  r={8}
-                  strokeWidth={3}
-                  style="stroke"
-                  width={label.rect.width}
-                  x={label.rect.x}
-                  y={label.rect.y}
-                />
-              ))
-            : null}
-          {liveLabelOverlays.map((label) => (
-            <Fragment key={`${label.detection.label}:${label.index}`}>
-              <RoundedRect
-                color={toRgba(label.detection.color, 0.84)}
-                height={label.background.height}
-                r={5}
-                width={label.background.width}
-                x={label.background.x}
-                y={label.background.y}
-              />
-              <SkiaText
-                color="rgba(255, 255, 255, 0.96)"
-                font={label.font}
-                text={label.text}
-                x={label.textX}
-                y={label.baselineY}
-              />
-            </Fragment>
-          ))}
-        </Canvas>
         {!canRunCamera ? (
           <View style={styles.stageOverlay}>
             <Text style={styles.overlayTitle}>Live camera</Text>
@@ -1451,7 +1555,7 @@ function LiveCameraProof(props: {
             <Text style={styles.floatingButtonText}>HUD</Text>
           </TouchableOpacity>
         )}
-      </View>
+      </SyncedFrameStage>
     </View>
   );
 }
@@ -2077,6 +2181,10 @@ const styles = StyleSheet.create({
   canvasSurface: {
     borderRadius: 14,
     zIndex: 2,
+  },
+  syncedFrameStage: {
+    overflow: "hidden",
+    position: "relative",
   },
   card: {
     backgroundColor: "#080b11",

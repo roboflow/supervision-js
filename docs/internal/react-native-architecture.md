@@ -63,6 +63,13 @@ space and delegates picking to core contracts. That proves the dependency
 direction, style contract, coordinate mapping, and interaction boundary without
 choosing a full mobile media pipeline.
 
+Static and live examples now use the same render-owned presentation shape:
+prepare one frame packet, then draw media, masks, boxes, and labels through the
+same synchronized frame stage. Static mode supplies a Skia image as the media
+source; live mode supplies VisionCamera's native frame renderer as the media
+source. The annotation rendering lane stays shared so future static work does
+not drift into a second renderer implementation.
+
 The package also exposes a static-frame ID-mask proof:
 
 - `supervision-js-core` prepares one raw ID-mask artifact per frame.

@@ -10,6 +10,7 @@ import {
   type DetectionFrame,
 } from "supervision-js-core";
 import {
+  createReactNativePreparedFramePacket,
   createReactNativeLiveIdMaskArtifact,
   createReactNativeLiveIdMaskArtifactAuto,
   createReactNativeIdMaskFrame,
@@ -90,6 +91,54 @@ describe("resolveReactNativeFramePresentation", () => {
     expect(presentation.mediaFrame.payload).toEqual({
       nativeTextureId: "texture-7",
     });
+  });
+});
+
+describe("createReactNativePreparedFramePacket", () => {
+  it("resolves draw instructions and the prepared ID-mask artifact together", () => {
+    const detectionFrame: DetectionFrame = {
+      detections: [
+        {
+          className: "horse",
+          confidence: 0.92,
+          mask: {
+            counts: "eNpjYBgFo2AUjIJRMApGwSgYBQAAVAAU",
+            encoding: DetectionMaskEncoding.CompressedRle,
+            height: 10,
+            width: 10,
+          },
+          rect: { height: 80, width: 100, x: 12, y: 24 },
+        },
+      ],
+      frameIndex: 7,
+      mediaTime: 0.2333,
+    };
+    const maskStyle = new BaseMaskStyle({ alpha: 0.7, color: 0x38bdf8 });
+
+    const packet = createReactNativePreparedFramePacket({
+      boxStyle: new BaseBoxStyle({
+        shape: BoxShape.RoundedRect,
+        stroke: { color: 0x22c55e, width: 3 },
+      }),
+      detectionFrame,
+      labelStyle: new BaseLabelStyle({ includeConfidence: true }),
+      maskStyle,
+      mediaFrame: {
+        metadata: {
+          duration: 1 / 30,
+          frameIndex: 7,
+          height: 1080,
+          mediaTime: 0.2333,
+          width: 1920,
+        },
+        payload: { nativeTextureId: "texture-7" },
+      },
+    });
+
+    expect(packet.presentation.boxes).toHaveLength(1);
+    expect(packet.presentation.labels[0]?.text).toBe("horse 92%");
+    expect(packet.maskArtifact?.maskCount).toBe(1);
+    expect(packet.maskArtifact?.opacity).toBe(0.7);
   });
 });
 

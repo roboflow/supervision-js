@@ -114,6 +114,7 @@ const expectedReactNativeRuntimeExports = [
   "createReactNativeLiveIdMaskArtifact",
   "createReactNativeLiveIdMaskArtifactAuto",
   "createReactNativeLiveIdMaskArtifactWithNativeBuilder",
+  "createReactNativePreparedFramePacket",
   "isReactNativeLiveIdMaskNativeBuilderAvailable",
   "loadReactNativeLiveIdMaskNativeBuilder",
   "pickReactNativeDetectionAtPoint",
@@ -177,6 +178,10 @@ test("built React Native package imports core without importing web", async () =
   assert.equal(typeof entrypoint.resolveReactNativeLabelLayout, "function");
   assert.equal(typeof entrypoint.pickReactNativeDetectionAtPoint, "function");
   assert.equal(typeof entrypoint.createReactNativeIdMaskFrame, "function");
+  assert.equal(
+    typeof entrypoint.createReactNativePreparedFramePacket,
+    "function",
+  );
   assert.equal(
     typeof entrypoint.createReactNativeLiveIdMaskArtifact,
     "function",

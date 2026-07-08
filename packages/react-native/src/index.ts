@@ -246,6 +246,11 @@ export interface ReactNativeFramePresentation<THandle = unknown> {
   readonly maskOpacity: number | null;
 }
 
+export interface ReactNativePreparedFramePacket<THandle = unknown> {
+  readonly maskArtifact?: ReactNativeIdMaskFrame;
+  readonly presentation: ReactNativeFramePresentation<THandle>;
+}
+
 export interface ReactNativeFrameLayoutOptions {
   readonly canvasHeight: number;
   readonly canvasWidth: number;
@@ -521,6 +526,23 @@ export function createReactNativeIdMaskFrame(
     ...frame,
     maskCount: instructions.length,
     opacity: maskStyle.opacity ?? 1,
+  };
+}
+
+export function createReactNativePreparedFramePacket<THandle = unknown>(
+  options: ReactNativeFramePresentationOptions<THandle> &
+    ReactNativeFramePresentationStyleOptions,
+): ReactNativePreparedFramePacket<THandle> {
+  const presentation = resolveReactNativeFramePresentation(options);
+
+  return {
+    maskArtifact: options.maskStyle
+      ? createReactNativeIdMaskFrame({
+          detectionFrame: options.detectionFrame,
+          maskStyle: options.maskStyle,
+        })
+      : undefined,
+    presentation,
   };
 }
 
