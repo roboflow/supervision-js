@@ -26,6 +26,24 @@ export {
   MAX_ID_MASK_STROKE_WIDTH,
 } from "supervision-js-core";
 
+import {
+  createReactNativeLiveIdMaskArtifactWithNativeBuilder,
+  isReactNativeLiveIdMaskNativeBuilderAvailable,
+  type ReactNativeLiveIdMaskNativeBuilderHandle,
+} from "./native-id-mask-builder";
+
+export {
+  createReactNativeLiveIdMaskArtifactWithNativeBuilder,
+  isReactNativeLiveIdMaskNativeBuilderAvailable,
+  loadReactNativeLiveIdMaskNativeBuilder,
+  REACT_NATIVE_LIVE_ID_MASK_NATIVE_BUILDER_NAME,
+} from "./native-id-mask-builder";
+export type {
+  ReactNativeLiveIdMaskBoxedNativeBuilder,
+  ReactNativeLiveIdMaskNativeBuilder,
+  ReactNativeLiveIdMaskNativeBuilderHandle,
+} from "./native-id-mask-builder";
+
 export const DEFAULT_REACT_NATIVE_ID_MASK_EDGE_SMOOTHING = 0.85;
 
 const fillPaletteLookup = createShaderArrayLookup({
@@ -57,6 +75,7 @@ uniform float4 uMediaRect;
 uniform float uOpacity;
 uniform float uBorderEnabled;
 uniform float uEdgeSmoothing;
+uniform float uFeatherTexels;
 uniform float uMaxStrokeWidth;
 
 float sampleMaskId(float2 point) {
@@ -128,17 +147,20 @@ float resolveSameNeighborRatio(float2 coord, float2 texel, float id) {
 half4 main(float2 coord) {
   float id = sampleMaskId(coord);
   float2 texel = resolveMaskTexel();
+  float2 featherTexel = texel * max(uFeatherTexels, 1.0);
   float edgeSmoothing = clamp(uEdgeSmoothing, 0.0, 1.0);
 
   if (id <= 0.0) {
     if (edgeSmoothing > 0.0) {
-      float neighborId = resolveNeighborMaskId(coord, texel);
+      float neighborId = resolveNeighborMaskId(coord, featherTexel);
 
       if (neighborId > 0.0) {
+        float neighborRatio =
+          resolveSameNeighborRatio(coord, featherTexel, neighborId);
         int neighborMaskId = int(neighborId);
         half4 neighborColor = resolveFillColor(neighborMaskId);
-        half featherAlpha =
-          neighborColor.a * half(uOpacity) * half(0.16 * edgeSmoothing);
+        half featherAlpha = neighborColor.a * half(uOpacity) *
+          half(0.45 * edgeSmoothing * smoothstep(0.0, 1.0, neighborRatio));
 
         return half4(neighborColor.rgb * featherAlpha, featherAlpha);
       }
@@ -152,10 +174,11 @@ half4 main(float2 coord) {
   half outputAlpha = fillColor.a * half(uOpacity);
 
   if (edgeSmoothing > 0.0) {
-    float sameNeighborRatio = resolveSameNeighborRatio(coord, texel, id);
+    float sameNeighborRatio =
+      resolveSameNeighborRatio(coord, featherTexel, id);
     half edgeAlphaMultiplier = half(mix(
       1.0,
-      0.58 + sameNeighborRatio * 0.42,
+      smoothstep(0.0, 1.0, sameNeighborRatio),
       edgeSmoothing
     ));
 
@@ -281,6 +304,7 @@ export interface ReactNativeIdMaskUniforms {
   readonly [name: string]: number | readonly number[];
   readonly uBorderEnabled: number;
   readonly uEdgeSmoothing: number;
+  readonly uFeatherTexels: number;
   readonly uFillPalette: readonly number[];
   readonly uMaxStrokeWidth: number;
   readonly uMediaRect: readonly number[];
@@ -320,12 +344,45 @@ export interface ReactNativeLiveIdMaskArtifactOptions extends ReactNativeLiveIdM
 
 export interface ReactNativeLiveIdMaskArtifact extends ReactNativeIdMaskFrame {
   readonly scale: number;
+  /**
+   * Half of the largest model-mask cell size in artifact texels, clamped to
+   * [1, 12]. The shader feathers mask edges over this radius so low-resolution
+   * masks render with soft edges instead of hard staircases.
+   */
+  readonly edgeFeatherTexels: number;
+  /**
+   * Pure native fill-loop time when the native builder produced this
+   * artifact, excluding JSI argument/result conversion. Absent on JS builds.
+   */
+  readonly nativeFillMs?: number;
 }
 
 export interface ReactNativeLiveIdMaskBuilder {
   build(
     options: ReactNativeLiveIdMaskArtifactOptions,
   ): ReactNativeLiveIdMaskArtifact | undefined;
+}
+
+export interface ReactNativeLiveIdMaskBuildDiagnostics {
+  readonly builder: "native" | "js";
+  readonly fillMs: number;
+  readonly uploadMs?: number;
+  readonly fallbackReason?: string;
+}
+
+export interface ReactNativeLiveIdMaskBuildResult {
+  readonly artifact: ReactNativeLiveIdMaskArtifact;
+  readonly diagnostics: ReactNativeLiveIdMaskBuildDiagnostics;
+}
+
+export interface ReactNativeLiveIdMaskArtifactAutoOptions extends ReactNativeLiveIdMaskArtifactOptions {
+  readonly nativeBuilder?: ReactNativeLiveIdMaskNativeBuilderHandle | null;
+}
+
+export interface ReactNativeLiveIdMaskUniformOptions {
+  readonly artifact: ReactNativeLiveIdMaskArtifact;
+  readonly edgeSmoothing?: number;
+  readonly mediaRect: Rect;
 }
 
 export const REACT_NATIVE_ROBOFLOW_PALETTE = [
@@ -477,6 +534,7 @@ export function resolveReactNativeIdMaskUniforms(
   return {
     uBorderEnabled: artifact.hasStroke ? 1 : 0,
     uEdgeSmoothing: Math.max(0, Math.min(edgeSmoothing, 1)),
+    uFeatherTexels: 1,
     uFillPalette: Array.from(artifact.fillPalette),
     uMaxStrokeWidth: Math.min(
       artifact.maxStrokeWidth,
@@ -544,6 +602,8 @@ export function resolveReactNativeLiveColorForClass(
 export function resolveReactNativeLiveIdMaskArtifactSize(
   options: ReactNativeLiveIdMaskArtifactSizeOptions,
 ) {
+  "worklet";
+
   const frameWidth = Math.max(1, Math.round(options.frameWidth));
   const frameHeight = Math.max(1, Math.round(options.frameHeight));
   const framePixels = frameWidth * frameHeight;
@@ -565,9 +625,74 @@ export function resolveReactNativeLiveIdMaskArtifactSize(
   };
 }
 
+// The worklets Babel plugin turns "worklet"-marked function declarations into
+// non-hoisted variable assignments whose closures capture other module-level
+// worklets by value at module-init time. Every worklet below must therefore be
+// defined before any worklet that captures it, or the captured value is
+// undefined on the worklet runtime.
+function fillReactNativeLiveMask(options: {
+  readonly data: Uint8Array;
+  readonly detection: ReactNativeLiveSerializedDetection;
+  readonly maskId: number;
+  readonly targetHeight: number;
+  readonly targetWidth: number;
+  readonly targetX0: number;
+  readonly targetY0: number;
+  readonly width: number;
+}) {
+  "worklet";
+
+  const {
+    data,
+    detection,
+    maskId,
+    targetHeight,
+    targetWidth,
+    targetX0,
+    targetY0,
+    width,
+  } = options;
+  const { mask, maskHeight, maskWidth } = detection;
+  const sourceXStep = maskWidth / targetWidth;
+  const sourceYStep = maskHeight / targetHeight;
+
+  // Nearest sampling on purpose: the artifact draws exactly the mask shape
+  // the model produced. Ask the detection producer for higher-resolution
+  // masks when smoother boundaries are needed.
+  for (let y = 0; y < targetHeight; y += 1) {
+    const sourceY = Math.min(maskHeight - 1, Math.floor(y * sourceYStep));
+    const sourceRowOffset = sourceY * maskWidth;
+    const targetRowOffset = (targetY0 + y) * width + targetX0;
+
+    for (let x = 0; x < targetWidth; x += 1) {
+      const sourceX = Math.min(maskWidth - 1, Math.floor(x * sourceXStep));
+
+      if (mask[sourceRowOffset + sourceX]) {
+        data[targetRowOffset + x] = maskId;
+      }
+    }
+  }
+}
+
+function writeReactNativeLivePaletteEntry(
+  palette: Float32Array,
+  offset: number,
+  color: number,
+  alpha: number,
+) {
+  "worklet";
+
+  palette[offset] = ((color >> 16) & 0xff) / 255;
+  palette[offset + 1] = ((color >> 8) & 0xff) / 255;
+  palette[offset + 2] = (color & 0xff) / 255;
+  palette[offset + 3] = Math.max(0, Math.min(alpha, 1));
+}
+
 export function createReactNativeLiveIdMaskArtifact(
   options: ReactNativeLiveIdMaskArtifactOptions,
 ): ReactNativeLiveIdMaskArtifact | undefined {
+  "worklet";
+
   const detectionLimit = MAX_ID_MASK_PALETTE_ENTRIES - 1;
   const detectionCount = Math.min(options.detections.length, detectionLimit);
 
@@ -592,6 +717,7 @@ export function createReactNativeLiveIdMaskArtifact(
     MAX_ID_MASK_STROKE_WIDTH,
   );
   let maskCount = 0;
+  let maxCellTexels = 0;
 
   for (let index = 0; index < detectionCount; index += 1) {
     const detection = options.detections[index]!;
@@ -629,6 +755,15 @@ export function createReactNativeLiveIdMaskArtifact(
     }
 
     maskCount += 1;
+
+    if (detection.maskWidth > 0 && detection.maskHeight > 0) {
+      maxCellTexels = Math.max(
+        maxCellTexels,
+        targetWidth / detection.maskWidth,
+        targetHeight / detection.maskHeight,
+      );
+    }
+
     fillReactNativeLiveMask({
       data,
       detection,
@@ -647,6 +782,7 @@ export function createReactNativeLiveIdMaskArtifact(
 
   return {
     data,
+    edgeFeatherTexels: Math.min(12, Math.max(1, maxCellTexels / 2)),
     fillPalette,
     hasStroke: strokeWidth > 0,
     height,
@@ -657,6 +793,122 @@ export function createReactNativeLiveIdMaskArtifact(
     strokePalette,
     strokeWidths,
     width,
+  };
+}
+
+function resolveReactNativeLiveIdMaskErrorMessage(error: unknown) {
+  "worklet";
+
+  if (typeof error === "string") {
+    return error;
+  }
+
+  if (typeof error === "object" && error !== null) {
+    const record = error as { readonly message?: unknown };
+
+    if (typeof record.message === "string") {
+      return record.message;
+    }
+  }
+
+  return "native-id-mask-builder-error";
+}
+
+/**
+ * Builds one live ID-mask artifact with the native builder when available and
+ * falls back to the JS builder otherwise. Both paths produce byte-identical
+ * artifacts; diagnostics report which builder ran and why a fallback happened.
+ *
+ * Safe to call from a VisionCamera/worklet lane as long as the native builder
+ * handle produced by `loadReactNativeLiveIdMaskNativeBuilder()` is captured
+ * from the React side and passed through `options.nativeBuilder`.
+ */
+export function createReactNativeLiveIdMaskArtifactAuto(
+  options: ReactNativeLiveIdMaskArtifactAutoOptions,
+): ReactNativeLiveIdMaskBuildResult | undefined {
+  "worklet";
+
+  const nativeBuilder = options.nativeBuilder ?? null;
+  let fallbackReason = "native-id-mask-builder-not-loaded";
+
+  if (nativeBuilder) {
+    if (isReactNativeLiveIdMaskNativeBuilderAvailable(nativeBuilder)) {
+      const nativeStartedAt = Date.now();
+
+      try {
+        const artifact = createReactNativeLiveIdMaskArtifactWithNativeBuilder(
+          nativeBuilder,
+          options,
+        );
+
+        if (!artifact) {
+          return undefined;
+        }
+
+        return {
+          artifact,
+          diagnostics: {
+            builder: "native",
+            // Prefer the native-core loop time; the surrounding App-level
+            // prep metric already captures JSI and upload overhead.
+            fillMs: artifact.nativeFillMs ?? Date.now() - nativeStartedAt,
+          },
+        };
+      } catch (error) {
+        fallbackReason = resolveReactNativeLiveIdMaskErrorMessage(error);
+      }
+    } else {
+      fallbackReason =
+        nativeBuilder.fallbackReason ?? "native-id-mask-builder-unavailable";
+    }
+  }
+
+  const jsStartedAt = Date.now();
+  const artifact = createReactNativeLiveIdMaskArtifact(options);
+
+  if (!artifact) {
+    return undefined;
+  }
+
+  return {
+    artifact,
+    diagnostics: {
+      builder: "js",
+      fillMs: Date.now() - jsStartedAt,
+      fallbackReason,
+    },
+  };
+}
+
+/**
+ * Live variant of `resolveReactNativeIdMaskUniforms()` for worklet lanes where
+ * only the media rect is available instead of a full frame layout.
+ */
+export function resolveReactNativeLiveIdMaskUniforms(
+  options: ReactNativeLiveIdMaskUniformOptions,
+): ReactNativeIdMaskUniforms {
+  "worklet";
+
+  const { artifact, mediaRect } = options;
+  const edgeSmoothing =
+    options.edgeSmoothing ?? DEFAULT_REACT_NATIVE_ID_MASK_EDGE_SMOOTHING;
+
+  return {
+    uBorderEnabled: artifact.hasStroke ? 1 : 0,
+    uEdgeSmoothing: Math.max(0, Math.min(edgeSmoothing, 1)),
+    // Defensive default: an out-of-date native binary can return artifacts
+    // without this field, and Skia hard-errors on any missing uniform.
+    uFeatherTexels: artifact.edgeFeatherTexels ?? 1,
+    uFillPalette: Array.from(artifact.fillPalette),
+    uMaxStrokeWidth: Math.min(
+      artifact.maxStrokeWidth,
+      MAX_ID_MASK_STROKE_WIDTH,
+    ),
+    uMediaRect: [mediaRect.x, mediaRect.y, mediaRect.width, mediaRect.height],
+    uOpacity: artifact.opacity,
+    uStrokePalette: Array.from(artifact.strokePalette),
+    uStrokeWidths: Array.from(artifact.strokeWidths),
+    uTextureSize: [artifact.width, artifact.height],
   };
 }
 
@@ -766,60 +1018,4 @@ function resolveReactNativeLabelPosition(options: {
         y: Math.max(layout.mediaRect.y, anchor.y - height - offsetY),
       };
   }
-}
-
-function fillReactNativeLiveMask(options: {
-  readonly data: Uint8Array;
-  readonly detection: ReactNativeLiveSerializedDetection;
-  readonly maskId: number;
-  readonly targetHeight: number;
-  readonly targetWidth: number;
-  readonly targetX0: number;
-  readonly targetY0: number;
-  readonly width: number;
-}) {
-  const {
-    data,
-    detection,
-    maskId,
-    targetHeight,
-    targetWidth,
-    targetX0,
-    targetY0,
-    width,
-  } = options;
-  const sourceXStep = detection.maskWidth / targetWidth;
-  const sourceYStep = detection.maskHeight / targetHeight;
-
-  for (let y = 0; y < targetHeight; y += 1) {
-    const sourceY = Math.min(
-      detection.maskHeight - 1,
-      Math.floor(y * sourceYStep),
-    );
-    const sourceRowOffset = sourceY * detection.maskWidth;
-    const targetRowOffset = (targetY0 + y) * width + targetX0;
-
-    for (let x = 0; x < targetWidth; x += 1) {
-      const sourceX = Math.min(
-        detection.maskWidth - 1,
-        Math.floor(x * sourceXStep),
-      );
-
-      if (detection.mask[sourceRowOffset + sourceX]) {
-        data[targetRowOffset + x] = maskId;
-      }
-    }
-  }
-}
-
-function writeReactNativeLivePaletteEntry(
-  palette: Float32Array,
-  offset: number,
-  color: number,
-  alpha: number,
-) {
-  palette[offset] = ((color >> 16) & 0xff) / 255;
-  palette[offset + 1] = ((color >> 8) & 0xff) / 255;
-  palette[offset + 2] = (color & 0xff) / 255;
-  palette[offset + 3] = Math.max(0, Math.min(alpha, 1));
 }

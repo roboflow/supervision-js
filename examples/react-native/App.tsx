@@ -35,6 +35,7 @@ import {
   useCameraPermission,
   useFrameOutput,
   useFrameRenderer,
+  type Frame,
 } from "react-native-vision-camera";
 import { useSharedValue } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
@@ -49,14 +50,17 @@ import {
 } from "supervision-js-core";
 import { models, useInstanceSegmentation } from "react-native-executorch";
 import {
-  DEFAULT_REACT_NATIVE_ID_MASK_EDGE_SMOOTHING,
   MAX_ID_MASK_PALETTE_ENTRIES,
   REACT_NATIVE_ID_MASK_SHADER_SOURCE,
+  type ReactNativeLiveIdMaskNativeBuilderHandle,
   type ReactNativeLiveSerializedDetection,
   type ReactNativeIdMaskUniforms,
   createReactNativeIdMaskFrame,
+  createReactNativeLiveIdMaskArtifactAuto,
+  loadReactNativeLiveIdMaskNativeBuilder,
   pickReactNativeDetectionAtPoint,
   resolveReactNativeIdMaskUniforms,
+  resolveReactNativeLiveIdMaskUniforms,
   resolveReactNativeFrameLayout,
   resolveReactNativeFramePresentation,
   resolveReactNativeLabelLayout,
@@ -77,11 +81,17 @@ type DemoMode = "static" | "live";
 type LiveDetectionDisplayMode = "masks" | "boxes";
 
 const LIVE_MAX_INSTANCES = 6;
-const LIVE_MASK_BORDER_WIDTH = 1;
+// No stroke in live mode: a crisp border retraces the low-res mask staircase
+// and defeats the feathered fill edges (it also skips the shader's expensive
+// border sampling loop).
+const LIVE_MASK_BORDER_WIDTH = 0;
 const LIVE_MASK_FILL_OPACITY = 0.5;
 const LIVE_MASK_ARTIFACT_MAX_PIXELS = 720 * 1280;
 const LIVE_MASK_ARTIFACT_MAX_SIDE = 1280;
-const LIVE_RETURN_MASKS_AT_ORIGINAL_RESOLUTION = false;
+// Masks are drawn exactly as the model returns them, so edge quality comes
+// from the model output itself: request masks at original resolution now that
+// native prep created the performance headroom for it.
+const LIVE_RETURN_MASKS_AT_ORIGINAL_RESOLUTION = true;
 const LIVE_FRAME_TARGET_RESOLUTION = { height: 1280, width: 720 };
 const LIVE_SEGMENTATION_MIRROR_FRAME = false;
 const LIVE_PERFORMANCE_SAMPLE_LIMIT = 40;
@@ -587,6 +597,9 @@ interface LiveFrameState {
   readonly hasPresentedFrame: boolean;
   readonly height: number;
   readonly inferenceTickMs: number;
+  readonly maskBuilder: string;
+  readonly maskFallbackReason: string;
+  readonly maskJsFallbackCount: number;
   readonly maskResolution: string;
   readonly maskCount: number;
   readonly maskFillMs: number;
@@ -701,6 +714,11 @@ function LiveCameraProof(props: {
     [livePerformanceSamples],
   );
   const liveMaskImage = useSharedValue<SkiaImageType | null>(null);
+  // Holds the mask image that was on screen one packet ago. Disposing the
+  // previous image immediately after swapping races the UI thread, which can
+  // still be drawing it — an ImageShader over a disposed image paints the
+  // whole media rect black. Deferring disposal by one packet removes the race.
+  const retiredLiveMaskImage = useSharedValue<SkiaImageType | null>(null);
   const liveMaskUniforms = useSharedValue<ReactNativeIdMaskUniforms>(
     createEmptyLiveMaskUniforms(),
   );
@@ -725,6 +743,19 @@ function LiveCameraProof(props: {
   const lastSegmentationDurationMs = useSharedValue(0);
   const lastSerializationDurationMs = useSharedValue(0);
   const lastShaderActive = useSharedValue(false);
+  const lastMaskBuilderName = useSharedValue("none");
+  const lastMaskFallbackReason = useSharedValue("");
+  const lastMaskJsFallbackCount = useSharedValue(0);
+  const liveNativeMaskBuilder = useMemo(
+    () => loadReactNativeLiveIdMaskNativeBuilder(),
+    [],
+  );
+  // Mirrors the display-mode state into a shared value so the frame worklet
+  // does not capture React state. Capturing state (or any per-render value)
+  // changes the worklet identity every render, which makes useFrameOutput
+  // re-serialize and swap the camera frame callback on the live camera thread
+  // several times per second.
+  const showMaskLayerShared = useSharedValue(showMaskLayer);
   const runSegmentationOnFrame = props.segmentation.runOnFrame;
   const liveLabelOverlays = useMemo(() => {
     const font = matchFont({ fontSize: 13 });
@@ -784,6 +815,9 @@ function LiveCameraProof(props: {
   useEffect(() => {
     setLivePerformanceSamples([]);
   }, [detectionDisplayMode]);
+  useEffect(() => {
+    showMaskLayerShared.value = showMaskLayer;
+  }, [showMaskLayer, showMaskLayerShared]);
 
   const reportLiveFrame = useCallback((frame: LiveFrameState) => {
     setLiveFrame(frame);
@@ -805,12 +839,12 @@ function LiveCameraProof(props: {
     [],
   );
 
-  const inferenceFrameOutput = useFrameOutput({
-    allowDeferredStart: false,
-    dropFramesWhileBusy: true,
-    enablePhysicalBufferRotation: false,
-    enablePreviewSizedOutputBuffers: true,
-    onFrame(frame) {
+  // Stable identity matters: useFrameOutput re-serializes and swaps the
+  // camera frame callback whenever this function changes, so its dependencies
+  // must all be render-stable (shared values, useCallback reporters, memoized
+  // handles). Per-render data flows in through shared values instead.
+  const onLiveInferenceFrame = useCallback(
+    (frame: Frame) => {
       "worklet";
 
       let stage = "start";
@@ -901,22 +935,11 @@ function LiveCameraProof(props: {
           const maskStartedAt = Date.now();
           let preparedMask: LiveSkiaMaskFrame | null = null;
 
-          if (showMaskLayer) {
+          if (showMaskLayerShared.value) {
             try {
               preparedMask = createLiveSkiaMaskFrame({
                 artifactMaxPixels: LIVE_MASK_ARTIFACT_MAX_PIXELS,
                 artifactMaxSide: LIVE_MASK_ARTIFACT_MAX_SIDE,
-                debugArgs: {
-                  detectionCount: detections.length,
-                  frameHeight: frame.height,
-                  framePixelFormat: frame.pixelFormat,
-                  frameTimestamp: frame.timestamp,
-                  frameWidth: frame.width,
-                  mediaRectHeight: mediaRect.height,
-                  mediaRectWidth: mediaRect.width,
-                  mediaRectX: mediaRect.x,
-                  mediaRectY: mediaRect.y,
-                },
                 detections,
                 frameHeight: detectionFrameSize.height,
                 frameWidth: detectionFrameSize.width,
@@ -926,6 +949,7 @@ function LiveCameraProof(props: {
                   x: mediaRect.x,
                   y: mediaRect.y,
                 },
+                nativeBuilder: liveNativeMaskBuilder,
               });
             } catch (error) {
               if (Date.now() - lastErrorReportAt.value > 250) {
@@ -940,6 +964,16 @@ function LiveCameraProof(props: {
 
           const maskPrepMs = Date.now() - maskStartedAt;
           const maskCount = rawDetections.length;
+
+          if (preparedMask) {
+            lastMaskBuilderName.value = preparedMask.builder;
+            lastMaskFallbackReason.value = preparedMask.fallbackReason ?? "";
+
+            if (preparedMask.builder === "js") {
+              lastMaskJsFallbackCount.value += 1;
+            }
+          }
+
           lastInferenceTickDurationMs.value = Date.now() - inferenceStartedAt;
           lastArtifactBytes.value = preparedMask?.byteLength ?? 0;
           lastArtifactHeight.value = preparedMask?.height ?? 0;
@@ -968,10 +1002,12 @@ function LiveCameraProof(props: {
               },
               () => {
                 const previousMaskImage = liveMaskImage.value;
+                const retiredMaskImage = retiredLiveMaskImage.value;
 
-                liveMaskImage.value = preparedMask.image;
                 liveMaskUniforms.value = preparedMask.uniforms;
-                disposeLiveSkiaImage(previousMaskImage);
+                liveMaskImage.value = preparedMask.image;
+                retiredLiveMaskImage.value = previousMaskImage;
+                disposeLiveSkiaImage(retiredMaskImage);
               },
             );
             lastShaderActive.value = true;
@@ -992,10 +1028,12 @@ function LiveCameraProof(props: {
               },
               () => {
                 const previousMaskImage = liveMaskImage.value;
+                const retiredMaskImage = retiredLiveMaskImage.value;
 
-                liveMaskImage.value = null;
                 liveMaskUniforms.value = emptyLiveMaskUniforms;
-                disposeLiveSkiaImage(previousMaskImage);
+                liveMaskImage.value = null;
+                retiredLiveMaskImage.value = previousMaskImage;
+                disposeLiveSkiaImage(retiredMaskImage);
               },
             );
             lastShaderActive.value = false;
@@ -1037,6 +1075,9 @@ function LiveCameraProof(props: {
             hasPresentedFrame: lastPresentedFrame.value,
             height: resolveLiveDetectionFrameSize(frame).height,
             inferenceTickMs: lastInferenceTickDurationMs.value,
+            maskBuilder: lastMaskBuilderName.value,
+            maskFallbackReason: lastMaskFallbackReason.value,
+            maskJsFallbackCount: lastMaskJsFallbackCount.value,
             maskResolution: LIVE_RETURN_MASKS_AT_ORIGINAL_RESOLUTION
               ? "original"
               : "model",
@@ -1064,6 +1105,46 @@ function LiveCameraProof(props: {
         frame.dispose();
       }
     },
+    [
+      droppedFrameCount,
+      emptyLiveMaskUniforms,
+      frameRenderer,
+      lastArtifactBytes,
+      lastArtifactHeight,
+      lastArtifactWidth,
+      lastErrorReportAt,
+      lastInferenceTickDurationMs,
+      lastMaskBuilderName,
+      lastMaskCount,
+      lastMaskFallbackReason,
+      lastMaskFillDurationMs,
+      lastMaskJsFallbackCount,
+      lastMaskPrepDurationMs,
+      lastMaskUploadDurationMs,
+      lastPresentedFrame,
+      lastReadoutReportAt,
+      lastSegmentationDurationMs,
+      lastSerializationDurationMs,
+      lastShaderActive,
+      liveMaskImage,
+      liveMaskUniforms,
+      liveMediaRect,
+      liveNativeMaskBuilder,
+      reportLiveDetections,
+      reportLiveError,
+      reportLiveFrame,
+      retiredLiveMaskImage,
+      runSegmentationOnFrame,
+      showMaskLayerShared,
+    ],
+  );
+
+  const inferenceFrameOutput = useFrameOutput({
+    allowDeferredStart: false,
+    dropFramesWhileBusy: true,
+    enablePhysicalBufferRotation: false,
+    enablePreviewSizedOutputBuffers: true,
+    onFrame: onLiveInferenceFrame,
     onFrameDropped() {
       reportDroppedFrame();
     },
@@ -1201,6 +1282,10 @@ function LiveCameraProof(props: {
               <StatusPill value={modelStatus} />
               <StatusPill tone="ready" value="strict sync" />
               <StatusPill
+                tone={liveFrame?.maskBuilder === "native" ? "ready" : undefined}
+                value={`prep ${liveFrame?.maskBuilder ?? "-"}`}
+              />
+              <StatusPill
                 value={`${liveFrame?.maskCount ?? 0} ${detectionDisplayMode}`}
               />
             </View>
@@ -1323,6 +1408,20 @@ function LiveCameraProof(props: {
                 <LiveMetric
                   label="Fill p50/p90"
                   value={formatLivePerformanceMetric(livePerformance?.fill)}
+                />
+                <LiveMetric
+                  label="Builder"
+                  value={liveFrame?.maskBuilder ?? "-"}
+                />
+                <LiveMetric
+                  label="JS falls"
+                  value={String(liveFrame?.maskJsFallbackCount ?? 0)}
+                />
+                <LiveMetric
+                  label="Fallback"
+                  value={formatLiveFallbackReason(
+                    liveFrame?.maskFallbackReason,
+                  )}
                 />
                 <LiveMetric
                   label="Upload p50/p90"
@@ -1577,6 +1676,14 @@ function formatLivePerformanceMetric(
   return `${Math.round(metric.p50)}/${Math.round(metric.p90)}ms`;
 }
 
+function formatLiveFallbackReason(reason: string | undefined) {
+  if (!reason) {
+    return "none";
+  }
+
+  return reason.length > 28 ? `${reason.slice(0, 28)}…` : reason;
+}
+
 function resolveLiveColorForLabel(label: string, fallbackIndex: number) {
   "worklet";
 
@@ -1685,17 +1792,6 @@ function resolveLiveColorForLabel(label: string, fallbackIndex: number) {
 interface LiveSkiaMaskFrameOptions {
   readonly artifactMaxPixels: number;
   readonly artifactMaxSide: number;
-  readonly debugArgs: {
-    readonly detectionCount: number;
-    readonly frameHeight: number;
-    readonly framePixelFormat: string;
-    readonly frameTimestamp: number;
-    readonly frameWidth: number;
-    readonly mediaRectHeight: number;
-    readonly mediaRectWidth: number;
-    readonly mediaRectX: number;
-    readonly mediaRectY: number;
-  };
   readonly detections: readonly LiveSerializedDetection[];
   readonly frameHeight: number;
   readonly frameWidth: number;
@@ -1705,10 +1801,13 @@ interface LiveSkiaMaskFrameOptions {
     readonly x: number;
     readonly y: number;
   };
+  readonly nativeBuilder: ReactNativeLiveIdMaskNativeBuilderHandle | null;
 }
 
 interface LiveSkiaMaskFrame {
+  readonly builder: "native" | "js";
   readonly byteLength: number;
+  readonly fallbackReason?: string;
   readonly fillMs: number;
   readonly height: number;
   readonly image: SkiaImageType;
@@ -1725,146 +1824,23 @@ function createLiveSkiaMaskFrame(
   let maskPrepStage = "mask-init";
 
   try {
-    const maskLimit = MAX_ID_MASK_PALETTE_ENTRIES - 1;
-    const detectionCount =
-      options.detections.length < maskLimit
-        ? options.detections.length
-        : maskLimit;
+    maskPrepStage = "mask-build-artifact";
+    const build = createReactNativeLiveIdMaskArtifactAuto({
+      borderWidth: LIVE_MASK_BORDER_WIDTH,
+      detections: options.detections,
+      fillOpacity: LIVE_MASK_FILL_OPACITY,
+      frameHeight: options.frameHeight,
+      frameWidth: options.frameWidth,
+      maxPixels: options.artifactMaxPixels,
+      maxSide: options.artifactMaxSide,
+      nativeBuilder: options.nativeBuilder,
+    });
 
-    if (detectionCount <= 0) {
+    if (!build) {
       return null;
     }
 
-    const frameWidth = Math.max(1, Math.round(options.frameWidth));
-    const frameHeight = Math.max(1, Math.round(options.frameHeight));
-    const framePixels = frameWidth * frameHeight;
-    const artifactMaxPixels = Math.max(1, options.artifactMaxPixels);
-    const artifactMaxSide = Math.max(1, options.artifactMaxSide);
-    const areaScale =
-      framePixels > artifactMaxPixels
-        ? Math.sqrt(artifactMaxPixels / framePixels)
-        : 1;
-    const sideScale = Math.min(
-      1,
-      artifactMaxSide / frameWidth,
-      artifactMaxSide / frameHeight,
-    );
-    const artifactScale = Math.min(areaScale, sideScale);
-    const width = Math.max(1, Math.round(frameWidth * artifactScale));
-    const height = Math.max(1, Math.round(frameHeight * artifactScale));
-
-    for (let index = 0; index < detectionCount; index += 1) {
-      const detection = options.detections[index]!;
-
-      if (
-        detection.mask.length !==
-        detection.maskWidth * detection.maskHeight
-      ) {
-        continue;
-      }
-    }
-
-    if (width <= 0 || height <= 0) {
-      return null;
-    }
-
-    maskPrepStage = "mask-allocate-artifact";
-    const data = new Uint8Array(width * height);
-    const fillPalette: number[] = [];
-    const strokePalette: number[] = [];
-    const strokeWidths: number[] = [];
-
-    for (let index = 0; index < MAX_ID_MASK_PALETTE_ENTRIES * 4; index += 1) {
-      fillPalette[index] = 0;
-      strokePalette[index] = 0;
-    }
-
-    for (let index = 0; index < MAX_ID_MASK_PALETTE_ENTRIES; index += 1) {
-      strokeWidths[index] = 0;
-    }
-
-    const fillStartedAt = Date.now();
-
-    for (let index = 0; index < detectionCount; index += 1) {
-      const detection = options.detections[index]!;
-
-      if (
-        detection.mask.length !==
-        detection.maskWidth * detection.maskHeight
-      ) {
-        continue;
-      }
-
-      const maskId = index + 1;
-      maskPrepStage = "mask-resolve-color";
-      const color = detection.color;
-
-      maskPrepStage = "mask-write-palette";
-      const paletteOffset = maskId * 4;
-      const red = ((color >> 16) & 0xff) / 255;
-      const green = ((color >> 8) & 0xff) / 255;
-      const blue = (color & 0xff) / 255;
-
-      fillPalette[paletteOffset] = red;
-      fillPalette[paletteOffset + 1] = green;
-      fillPalette[paletteOffset + 2] = blue;
-      fillPalette[paletteOffset + 3] = 1;
-      strokePalette[paletteOffset] = red;
-      strokePalette[paletteOffset + 1] = green;
-      strokePalette[paletteOffset + 2] = blue;
-      strokePalette[paletteOffset + 3] = 0.95;
-      strokeWidths[maskId] = LIVE_MASK_BORDER_WIDTH;
-
-      maskPrepStage = "mask-compute-target";
-      const targetX0 = Math.max(
-        0,
-        Math.floor(detection.bbox.x1 * artifactScale),
-      );
-      const targetY0 = Math.max(
-        0,
-        Math.floor(detection.bbox.y1 * artifactScale),
-      );
-      const targetX1 = Math.min(
-        width,
-        Math.ceil(detection.bbox.x2 * artifactScale),
-      );
-      const targetY1 = Math.min(
-        height,
-        Math.ceil(detection.bbox.y2 * artifactScale),
-      );
-      const targetWidth = targetX1 - targetX0;
-      const targetHeight = targetY1 - targetY0;
-
-      if (targetWidth <= 0 || targetHeight <= 0) {
-        continue;
-      }
-
-      maskPrepStage = "mask-fill-artifact";
-      const sourceXStep = detection.maskWidth / targetWidth;
-      const sourceYStep = detection.maskHeight / targetHeight;
-
-      for (let y = 0; y < targetHeight; y += 1) {
-        const sourceY = Math.min(
-          detection.maskHeight - 1,
-          Math.floor(y * sourceYStep),
-        );
-        const sourceRowOffset = sourceY * detection.maskWidth;
-        const targetRowOffset = (targetY0 + y) * width;
-
-        for (let x = 0; x < targetWidth; x += 1) {
-          const sourceX = Math.min(
-            detection.maskWidth - 1,
-            Math.floor(x * sourceXStep),
-          );
-
-          if (detection.mask[sourceRowOffset + sourceX]) {
-            data[targetRowOffset + targetX0 + x] = maskId;
-          }
-        }
-      }
-    }
-
-    const fillMs = Date.now() - fillStartedAt;
+    const { artifact, diagnostics } = build;
     const uploadStartedAt = Date.now();
 
     maskPrepStage = "mask-create-skia-data";
@@ -1875,7 +1851,7 @@ function createLiveSkiaMaskFrame(
       };
     }
 
-    const imageData = Skia.Data.fromBytes(data);
+    const imageData = Skia.Data.fromBytes(artifact.data);
 
     maskPrepStage = "mask-create-skia-image";
     if (!Skia.Image || typeof Skia.Image.MakeImage !== "function") {
@@ -1889,11 +1865,11 @@ function createLiveSkiaMaskFrame(
       {
         alphaType: AlphaType.Opaque,
         colorType: ColorType.Alpha_8,
-        height,
-        width,
+        height: artifact.height,
+        width: artifact.width,
       },
       imageData,
-      width,
+      artifact.width,
     );
 
     if (!image) {
@@ -1902,29 +1878,22 @@ function createLiveSkiaMaskFrame(
 
     const uploadMs = Date.now() - uploadStartedAt;
 
+    maskPrepStage = "mask-resolve-uniforms";
+    const uniforms = resolveReactNativeLiveIdMaskUniforms({
+      artifact,
+      mediaRect: options.mediaRect,
+    });
+
     return {
-      byteLength: data.byteLength,
-      fillMs,
-      height,
+      builder: diagnostics.builder,
+      byteLength: artifact.data.byteLength,
+      fallbackReason: diagnostics.fallbackReason,
+      fillMs: diagnostics.fillMs,
+      height: artifact.height,
       image,
       uploadMs,
-      uniforms: {
-        uBorderEnabled: 1,
-        uEdgeSmoothing: DEFAULT_REACT_NATIVE_ID_MASK_EDGE_SMOOTHING,
-        uFillPalette: fillPalette,
-        uMaxStrokeWidth: LIVE_MASK_BORDER_WIDTH,
-        uMediaRect: [
-          options.mediaRect.x,
-          options.mediaRect.y,
-          options.mediaRect.width,
-          options.mediaRect.height,
-        ],
-        uOpacity: LIVE_MASK_FILL_OPACITY,
-        uStrokePalette: strokePalette,
-        uStrokeWidths: strokeWidths,
-        uTextureSize: [width, height],
-      },
-      width,
+      uniforms,
+      width: artifact.width,
     };
   } catch (error) {
     let message = "unknown error";
@@ -1958,6 +1927,7 @@ function createEmptyLiveMaskUniforms(): ReactNativeIdMaskUniforms {
   return {
     uBorderEnabled: 0,
     uEdgeSmoothing: 0,
+    uFeatherTexels: 1,
     uFillPalette: createNumberArray(MAX_ID_MASK_PALETTE_ENTRIES * 4),
     uMaxStrokeWidth: 0,
     uMediaRect: [0, 0, 1, 1],

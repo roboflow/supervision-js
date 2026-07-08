@@ -1,0 +1,20 @@
+{
+  "$schema": "https://nitro.margelo.com/nitro.schema.json",
+  "cxxNamespace": ["supervision"],
+  "ios": {
+    "iosModuleName": "SupervisionIdMask"
+  },
+  "android": {
+    "androidNamespace": ["supervision"],
+    "androidCxxLibName": "SupervisionIdMask"
+  },
+  "autolinking": {
+    "IdMaskBuilder": {
+      "ios": {
+        "language": "swift",
+        "implementationClassName": "HybridIdMaskBuilder"
+      }
+    }
+  },
+  "ignorePaths": ["**/node_modules", "dist"]
+}

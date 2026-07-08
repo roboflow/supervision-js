@@ -108,9 +108,14 @@ const expectedReactNativeRuntimeExports = [
   "MAX_ID_MASK_PALETTE_ENTRIES",
   "MAX_ID_MASK_STROKE_WIDTH",
   "REACT_NATIVE_ID_MASK_SHADER_SOURCE",
+  "REACT_NATIVE_LIVE_ID_MASK_NATIVE_BUILDER_NAME",
   "REACT_NATIVE_ROBOFLOW_PALETTE",
   "createReactNativeIdMaskFrame",
   "createReactNativeLiveIdMaskArtifact",
+  "createReactNativeLiveIdMaskArtifactAuto",
+  "createReactNativeLiveIdMaskArtifactWithNativeBuilder",
+  "isReactNativeLiveIdMaskNativeBuilderAvailable",
+  "loadReactNativeLiveIdMaskNativeBuilder",
   "pickReactNativeDetectionAtPoint",
   "resolveReactNativeFrameLayout",
   "resolveReactNativeFramePresentation",
@@ -118,6 +123,7 @@ const expectedReactNativeRuntimeExports = [
   "resolveReactNativeLabelLayout",
   "resolveReactNativeLiveColorForClass",
   "resolveReactNativeLiveIdMaskArtifactSize",
+  "resolveReactNativeLiveIdMaskUniforms",
 ];
 
 test("built core package imports without browser APIs", async () => {
@@ -181,6 +187,14 @@ test("built React Native package imports core without importing web", async () =
     "function",
   );
   assert.equal(typeof entrypoint.REACT_NATIVE_ID_MASK_SHADER_SOURCE, "string");
+
+  // Outside React Native the Nitro module is absent; loading must degrade to
+  // a JS-fallback handle instead of throwing.
+  const nativeBuilderHandle =
+    entrypoint.loadReactNativeLiveIdMaskNativeBuilder();
+
+  assert.equal(nativeBuilderHandle.boxed, null);
+  assert.equal(typeof nativeBuilderHandle.fallbackReason, "string");
 });
 
 test("built style classes can be constructed by package consumers", async () => {

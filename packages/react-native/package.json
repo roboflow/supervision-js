@@ -8,14 +8,21 @@
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "react-native": "./src/index.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
+      "react-native": "./src/index.ts",
       "import": "./dist/index.js"
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "src",
+    "ios",
+    "nitrogen",
+    "nitro.json",
+    "*.podspec"
   ],
   "sideEffects": false,
   "scripts": {
@@ -24,9 +31,22 @@
     "build:types": "tsc --emitDeclarationOnly -p tsconfig.json",
     "clean": "node -e \"fs.rmSync('dist', { recursive: true, force: true })\"",
     "dev": "rollup -c -w",
+    "specs": "nitrogen",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json"
   },
   "dependencies": {
     "supervision-js-core": "file:../core"
+  },
+  "devDependencies": {
+    "nitrogen": "^0.35.9",
+    "react-native-nitro-modules": "^0.35.9"
+  },
+  "peerDependencies": {
+    "react-native-nitro-modules": "*"
+  },
+  "peerDependenciesMeta": {
+    "react-native-nitro-modules": {
+      "optional": true
+    }
   }
 }

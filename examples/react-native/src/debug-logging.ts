@@ -10,38 +10,10 @@ export interface SerializedDebugError {
   readonly name: string;
 }
 
-export function runWithDebugLogging<T>(
-  options: DebugLoggingOptions,
-  fn: () => T,
-): T {
-  try {
-    return fn();
-  } catch (error) {
-    console.error(formatDebugPrefix(options), {
-      args: options.args,
-      error: serializeDebugError(error),
-    });
-    throw error;
-  }
-}
-
-export function runWithWorkletDebugLogging<T>(
-  options: DebugLoggingOptions,
-  fn: () => T,
-): T {
-  "worklet";
-
-  try {
-    return fn();
-  } catch (error) {
-    console.error(formatDebugPrefix(options), {
-      args: options.args,
-      error: serializeDebugError(error),
-    });
-    throw error;
-  }
-}
-
+// serializeDebugError and formatDebugPrefix are defined before the run*
+// helpers on purpose: the worklets Babel plugin turns worklet function
+// declarations into non-hoisted assignments, and module-level worklets capture
+// each other by value at module-init time.
 export function serializeDebugError(error: unknown): SerializedDebugError {
   "worklet";
 
@@ -82,4 +54,36 @@ function formatDebugPrefix(options: DebugLoggingOptions) {
   "worklet";
 
   return `[debug][${options.namespace}] ${options.description}`;
+}
+
+export function runWithDebugLogging<T>(
+  options: DebugLoggingOptions,
+  fn: () => T,
+): T {
+  try {
+    return fn();
+  } catch (error) {
+    console.error(formatDebugPrefix(options), {
+      args: options.args,
+      error: serializeDebugError(error),
+    });
+    throw error;
+  }
+}
+
+export function runWithWorkletDebugLogging<T>(
+  options: DebugLoggingOptions,
+  fn: () => T,
+): T {
+  "worklet";
+
+  try {
+    return fn();
+  } catch (error) {
+    console.error(formatDebugPrefix(options), {
+      args: options.args,
+      error: serializeDebugError(error),
+    });
+    throw error;
+  }
 }

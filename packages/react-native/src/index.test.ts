@@ -11,18 +11,27 @@ import {
 } from "supervision-js-core";
 import {
   createReactNativeLiveIdMaskArtifact,
+  createReactNativeLiveIdMaskArtifactAuto,
   createReactNativeIdMaskFrame,
   DEFAULT_REACT_NATIVE_ID_MASK_EDGE_SMOOTHING,
+  MAX_ID_MASK_PALETTE_ENTRIES,
   pickReactNativeDetectionAtPoint,
   REACT_NATIVE_ID_MASK_SHADER_SOURCE,
   resolveReactNativeLiveColorForClass,
   resolveReactNativeLiveIdMaskArtifactSize,
+  resolveReactNativeLiveIdMaskUniforms,
   resolveReactNativeIdMaskUniforms,
   resolveReactNativeFrameLayout,
   resolveReactNativeLabelLayout,
   resolveReactNativeFramePresentation,
   type ReactNativeFramePresentation,
+  type ReactNativeLiveIdMaskArtifactOptions,
+  type ReactNativeLiveIdMaskNativeBuilderHandle,
 } from "./index";
+import type {
+  IdMaskBuildArtifact,
+  IdMaskBuildOptions,
+} from "./specs/IdMaskBuilder.nitro";
 import { describe, expect, it } from "vitest";
 
 describe("resolveReactNativeFramePresentation", () => {
@@ -330,6 +339,282 @@ describe("React Native live ID-mask artifacts", () => {
     expect(resolveReactNativeLiveColorForClass("potted plant")).toBe(0x34d399);
     expect(resolveReactNativeLiveColorForClass("new class", 3)).toBe(0xfacc15);
   });
+
+  it("renders later detections on top of earlier overlapping detections", () => {
+    const artifact = createReactNativeLiveIdMaskArtifact({
+      detections: [
+        createFullCoverageLiveDetection({ color: 0x38bdf8 }),
+        createFullCoverageLiveDetection({ color: 0x22c55e }),
+      ],
+      frameHeight: 4,
+      frameWidth: 4,
+      maxPixels: 16,
+      maxSide: 4,
+    });
+
+    expect(artifact).toBeDefined();
+    expect(artifact!.maskCount).toBe(2);
+    expect(new Set(artifact!.data)).toEqual(new Set([2]));
+  });
+
+  it("skips masks whose byte length does not match their dimensions", () => {
+    const artifact = createReactNativeLiveIdMaskArtifact({
+      detections: [
+        {
+          ...createFullCoverageLiveDetection({ color: 0x38bdf8 }),
+          mask: new Uint8Array([1, 1, 1]),
+        },
+        createFullCoverageLiveDetection({ color: 0x22c55e }),
+      ],
+      frameHeight: 4,
+      frameWidth: 4,
+      maxPixels: 16,
+      maxSide: 4,
+    });
+
+    expect(artifact).toBeDefined();
+    expect(artifact!.maskCount).toBe(1);
+    expect(new Set(artifact!.data)).toEqual(new Set([2]));
+    expect([...artifact!.fillPalette.slice(4, 8)]).toEqual([0, 0, 0, 0]);
+    expect(artifact!.fillPalette[11]).toBe(1);
+  });
+
+  it("returns undefined when every mask is invalid or absent", () => {
+    expect(
+      createReactNativeLiveIdMaskArtifact({
+        detections: [
+          {
+            ...createFullCoverageLiveDetection({ color: 0x38bdf8 }),
+            mask: new Uint8Array([1, 1, 1]),
+          },
+        ],
+        frameHeight: 4,
+        frameWidth: 4,
+        maxPixels: 16,
+        maxSide: 4,
+      }),
+    ).toBeUndefined();
+    expect(
+      createReactNativeLiveIdMaskArtifact({
+        detections: [],
+        frameHeight: 4,
+        frameWidth: 4,
+        maxPixels: 16,
+        maxSide: 4,
+      }),
+    ).toBeUndefined();
+  });
+
+  it("clamps detections to the palette limit", () => {
+    const detections = Array.from({ length: 70 }, () =>
+      createFullCoverageLiveDetection({ color: 0x38bdf8 }),
+    );
+
+    const artifact = createReactNativeLiveIdMaskArtifact({
+      detections,
+      frameHeight: 4,
+      frameWidth: 4,
+      maxPixels: 16,
+      maxSide: 4,
+    });
+
+    expect(artifact).toBeDefined();
+    expect(artifact!.maskCount).toBe(MAX_ID_MASK_PALETTE_ENTRIES - 1);
+  });
+
+  it("draws the raw model mask footprint without reshaping it", () => {
+    // 2x2 mask with an empty bottom-right quadrant, upscaled to 8x8: the
+    // empty quadrant must stay an exact 4x4 block.
+    const artifact = createReactNativeLiveIdMaskArtifact({
+      detections: [
+        {
+          bbox: { x1: 0, x2: 8, y1: 0, y2: 8 },
+          color: 0x38bdf8,
+          label: "sink",
+          mask: new Uint8Array([1, 1, 1, 0]),
+          maskHeight: 2,
+          maskWidth: 2,
+          score: 0.9,
+        },
+      ],
+      frameHeight: 8,
+      frameWidth: 8,
+      maxPixels: 64,
+      maxSide: 8,
+    });
+
+    for (let y = 0; y < 8; y += 1) {
+      for (let x = 0; x < 8; x += 1) {
+        const expected = x >= 4 && y >= 4 ? 0 : 1;
+
+        expect(artifact!.data[y * 8 + x]).toBe(expected);
+      }
+    }
+  });
+
+  it("resolves live shader uniforms from a live artifact and media rect", () => {
+    const artifact = createReactNativeLiveIdMaskArtifact({
+      borderWidth: 2,
+      detections: [createFullCoverageLiveDetection({ color: 0x60a5fa })],
+      fillOpacity: 0.5,
+      frameHeight: 4,
+      frameWidth: 4,
+      maxPixels: 16,
+      maxSide: 4,
+    });
+
+    const uniforms = resolveReactNativeLiveIdMaskUniforms({
+      artifact: artifact!,
+      mediaRect: { height: 100, width: 50, x: 5, y: 10 },
+    });
+
+    expect(uniforms.uBorderEnabled).toBe(1);
+    expect(uniforms.uEdgeSmoothing).toBe(
+      DEFAULT_REACT_NATIVE_ID_MASK_EDGE_SMOOTHING,
+    );
+    expect(uniforms.uMaxStrokeWidth).toBe(2);
+    expect([...uniforms.uMediaRect]).toEqual([5, 10, 50, 100]);
+    expect(uniforms.uOpacity).toBe(0.5);
+    expect([...uniforms.uTextureSize]).toEqual([
+      artifact!.width,
+      artifact!.height,
+    ]);
+    expect(uniforms.uFillPalette).toHaveLength(MAX_ID_MASK_PALETTE_ENTRIES * 4);
+    expect(uniforms.uFillPalette.slice(4, 8)).toEqual(
+      [0x60 / 255, 0xa5 / 255, 0xfa / 255, 1].map(Math.fround),
+    );
+    expect(uniforms.uStrokeWidths[1]).toBe(2);
+    // 2x2 mask over a 4x4 artifact: cells span 2 texels, feather is half.
+    expect(uniforms.uFeatherTexels).toBe(1);
+  });
+
+  it("scales and clamps the edge feather to the mask cell size", () => {
+    const artifact = createReactNativeLiveIdMaskArtifact({
+      detections: [
+        {
+          bbox: { x1: 0, x2: 48, y1: 0, y2: 48 },
+          color: 0x38bdf8,
+          label: "sink",
+          mask: new Uint8Array([1, 1, 1, 1]),
+          maskHeight: 2,
+          maskWidth: 2,
+          score: 0.9,
+        },
+      ],
+      frameHeight: 48,
+      frameWidth: 48,
+      maxPixels: 48 * 48,
+      maxSide: 48,
+    });
+
+    // Cells span 24 texels; half is 12, which is also the clamp ceiling.
+    expect(artifact!.edgeFeatherTexels).toBe(12);
+    expect(
+      resolveReactNativeLiveIdMaskUniforms({
+        artifact: artifact!,
+        mediaRect: { height: 48, width: 48, x: 0, y: 0 },
+      }).uFeatherTexels,
+    ).toBe(12);
+  });
+});
+
+describe("React Native live ID-mask auto builder", () => {
+  const buildOptions: ReactNativeLiveIdMaskArtifactOptions = {
+    borderWidth: 1,
+    detections: [
+      createFullCoverageLiveDetection({ color: 0x60a5fa }),
+      {
+        bbox: { x1: 1, x2: 3, y1: 1, y2: 3 },
+        color: 0x22c55e,
+        label: "person",
+        mask: new Uint8Array([1, 0, 0, 1]),
+        maskHeight: 2,
+        maskWidth: 2,
+        score: 0.9,
+      },
+    ],
+    fillOpacity: 0.5,
+    frameHeight: 4,
+    frameWidth: 4,
+    maxPixels: 16,
+    maxSide: 4,
+  };
+
+  it("uses the JS builder with a reason when no native builder is loaded", () => {
+    const result = createReactNativeLiveIdMaskArtifactAuto(buildOptions);
+
+    expect(result).toBeDefined();
+    expect(result!.diagnostics.builder).toBe("js");
+    expect(result!.diagnostics.fallbackReason).toBe(
+      "native-id-mask-builder-not-loaded",
+    );
+    expect(result!.artifact).toEqual(
+      createReactNativeLiveIdMaskArtifact(buildOptions),
+    );
+  });
+
+  it("surfaces the load fallback reason when the native module is unavailable", () => {
+    const result = createReactNativeLiveIdMaskArtifactAuto({
+      ...buildOptions,
+      nativeBuilder: {
+        boxed: null,
+        fallbackReason: "pod-not-installed",
+      },
+    });
+
+    expect(result!.diagnostics.builder).toBe("js");
+    expect(result!.diagnostics.fallbackReason).toBe("pod-not-installed");
+  });
+
+  it("produces the same artifact through the native builder seam", () => {
+    const result = createReactNativeLiveIdMaskArtifactAuto({
+      ...buildOptions,
+      nativeBuilder: createNativeLikeIdMaskBuilderHandle(),
+    });
+    const reference = createReactNativeLiveIdMaskArtifact(buildOptions);
+
+    expect(result).toBeDefined();
+    expect(result!.diagnostics.builder).toBe("native");
+    expect(result!.diagnostics.fallbackReason).toBeUndefined();
+    expect(result!.artifact).toEqual({ ...reference, nativeFillMs: 0 });
+  });
+
+  it("returns undefined when the native builder produces no visible mask", () => {
+    const result = createReactNativeLiveIdMaskArtifactAuto({
+      ...buildOptions,
+      detections: [
+        {
+          ...createFullCoverageLiveDetection({ color: 0x38bdf8 }),
+          mask: new Uint8Array([1, 1, 1]),
+        },
+      ],
+      nativeBuilder: createNativeLikeIdMaskBuilderHandle(),
+    });
+
+    expect(result).toBeUndefined();
+  });
+
+  it("falls back to the JS builder when the native builder throws", () => {
+    const result = createReactNativeLiveIdMaskArtifactAuto({
+      ...buildOptions,
+      nativeBuilder: {
+        boxed: {
+          unbox: () => ({
+            createArtifact() {
+              throw new Error("native fill exploded");
+            },
+          }),
+        },
+      },
+    });
+
+    expect(result).toBeDefined();
+    expect(result!.diagnostics.builder).toBe("js");
+    expect(result!.diagnostics.fallbackReason).toBe("native fill exploded");
+    expect(result!.artifact).toEqual(
+      createReactNativeLiveIdMaskArtifact(buildOptions),
+    );
+  });
 });
 
 describe("React Native ID-mask artifacts", () => {
@@ -492,6 +777,7 @@ describe("React Native ID-mask artifacts", () => {
       "return uFillPalette[1];",
     );
     expect(REACT_NATIVE_ID_MASK_SHADER_SOURCE).toContain("uEdgeSmoothing");
+    expect(REACT_NATIVE_ID_MASK_SHADER_SOURCE).toContain("uFeatherTexels");
   });
 });
 
@@ -506,6 +792,85 @@ function expectPresentation(
     mediaTime: 0.2333,
     width: 1920,
   });
+}
+
+function createFullCoverageLiveDetection(options: { readonly color: number }) {
+  return {
+    bbox: { x1: 0, x2: 4, y1: 0, y2: 4 },
+    color: options.color,
+    label: "object",
+    mask: new Uint8Array([1, 1, 1, 1]),
+    maskHeight: 2,
+    maskWidth: 2,
+    score: 0.9,
+  };
+}
+
+/**
+ * Emulates the Swift Nitro builder: consumes the nitro option structs and
+ * returns the raw-ArrayBuffer artifact shape, computed with the JS reference
+ * fill so the wrapper's option/result mapping round-trips byte-for-byte.
+ */
+function createNativeLikeIdMaskBuilderHandle(): ReactNativeLiveIdMaskNativeBuilderHandle {
+  const createArtifact = (options: IdMaskBuildOptions): IdMaskBuildArtifact => {
+    const artifact = createReactNativeLiveIdMaskArtifact({
+      borderWidth: options.borderWidth,
+      detections: options.detections.map((detection) => ({
+        bbox: detection.bbox,
+        color: detection.color,
+        label: detection.className,
+        mask: new Uint8Array(detection.mask),
+        maskHeight: detection.maskHeight,
+        maskWidth: detection.maskWidth,
+        score: detection.confidence,
+      })),
+      fillOpacity: options.fillOpacity,
+      frameHeight: options.frameHeight,
+      frameWidth: options.frameWidth,
+      maxPixels: options.maxPixels,
+      maxSide: options.maxSide,
+    });
+
+    if (!artifact) {
+      return {
+        data: new ArrayBuffer(0),
+        edgeFeatherTexels: 1,
+        fillMs: 0,
+        fillPalette: new ArrayBuffer(options.maxPaletteEntries * 4 * 4),
+        hasStroke: false,
+        height: 1,
+        maskCount: 0,
+        maxStrokeWidth: 0,
+        opacity: options.fillOpacity,
+        scale: 1,
+        strokePalette: new ArrayBuffer(options.maxPaletteEntries * 4 * 4),
+        strokeWidths: new ArrayBuffer(options.maxPaletteEntries * 4),
+        width: 1,
+      };
+    }
+
+    return {
+      data: artifact.data.buffer,
+      edgeFeatherTexels: artifact.edgeFeatherTexels,
+      fillMs: 0,
+      fillPalette: artifact.fillPalette.buffer,
+      hasStroke: artifact.hasStroke,
+      height: artifact.height,
+      maskCount: artifact.maskCount,
+      maxStrokeWidth: artifact.maxStrokeWidth,
+      opacity: artifact.opacity,
+      scale: artifact.scale,
+      strokePalette: artifact.strokePalette.buffer,
+      strokeWidths: artifact.strokeWidths.buffer,
+      width: artifact.width,
+    };
+  };
+
+  return {
+    boxed: {
+      unbox: () => ({ createArtifact }),
+    },
+  };
 }
 
 function encodeCompressedRleCounts(counts: readonly number[]) {

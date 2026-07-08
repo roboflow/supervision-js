@@ -88,10 +88,20 @@ The example app also includes a live camera proof:
   receives throttled diagnostics only.
 
 The reusable package now owns the live ID-mask artifact contract, artifact
-sizing helper, Roboflow-style palette helper, and JS fallback builder. The
-example still owns the hot VisionCamera and ExecuTorch worklet because those are
-producer choices. A future native/JSI builder should match the same package
-contract and replace only the expensive fill/upload path.
+sizing helper, Roboflow-style palette helper, and the worklet-callable JS
+fallback builder. The example still owns the hot VisionCamera and ExecuTorch
+worklet because those are producer choices.
+
+The package also ships an experimental Nitro-based native builder
+(`IdMaskBuilder`, Swift/iOS, `SupervisionIdMask` pod) that runs the same
+Alpha_8 fill loop natively and returns raw artifact bytes plus palette buffers
+in the exact JS artifact shape. `createReactNativeLiveIdMaskArtifactAuto()`
+hides the platform split: it uses the boxed native hybrid object when the host
+loaded one via `loadReactNativeLiveIdMaskNativeBuilder()` and falls back to the
+JS builder otherwise, surfacing builder/fallback diagnostics. The package keeps
+`react-native-nitro-modules` as an optional peer dependency; package tests run
+without any native module. Android intentionally has no native implementation
+yet and always uses the JS fallback.
 
 This is deliberately an example-level integration. The long-term package design
 should move hot-frame rendering, prepared-window management, and background or

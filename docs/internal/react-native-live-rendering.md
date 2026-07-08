@@ -76,10 +76,79 @@ renderer contract:
 - diagnostics output: throttled state snapshots for host UI.
 
 Inference should remain outside the package. ExecuTorch is only one producer.
-If strict mode still spends too much time in ID-mask preparation after bounded
-artifacts and model-resolution masks, the next escalation path is a native/JSI
-ID-mask builder that keeps the same one-artifact-per-frame contract while moving
-the fill/upload work closer to the renderer. `packages/react-native` now exposes
-the renderer-neutral live ID-mask artifact shape, sizing helper, palette helper,
-and JS fallback builder so a native implementation can replace the fill path
-without changing the higher-level packet contract.
+
+## Native ID-Mask Preparation (Experimental)
+
+The native/JSI escalation path now exists. `packages/react-native` owns:
+
+- the renderer-neutral live ID-mask artifact shape, sizing helper, palette
+  helper, and JS fallback builder (`createReactNativeLiveIdMaskArtifact()`),
+  all worklet-callable — the example no longer duplicates the fill loop;
+- an experimental Nitro hybrid object (`IdMaskBuilder`, iOS/Swift only) that
+  runs the same Alpha_8 fill loop natively and returns raw artifact bytes plus
+  palette buffers, byte-identical to the JS builder;
+- `loadReactNativeLiveIdMaskNativeBuilder()`, which loads and boxes the hybrid
+  object on the React thread so worklets can capture the handle; and
+- `createReactNativeLiveIdMaskArtifactAuto()`, which tries the native builder
+  first and falls back to the JS builder, reporting
+  `{ builder: "native" | "js", fillMs, fallbackReason }` diagnostics.
+
+The native builder intentionally returns raw bytes instead of a Skia image
+handle: measured upload cost is ~0ms today, and raw bytes keep the package free
+of Skia runtime objects. If profiling later shows byte transfer or Skia image
+construction dominating, the next adapter should return a native image/texture
+handle instead.
+
+Masks are drawn exactly as the model produced them: both fill loops use
+nearest sampling and never reshape the mask geometry. Edge quality is the
+detection producer's job — the live demo requests RF-DETR masks at original
+resolution (`returnMaskAtOriginalResolution: true`) now that native prep
+created the headroom for it. (An earlier bilinear/tent-blur smoothing pass was
+removed on purpose: reshaping model output in the renderer hid what the model
+actually predicted.)
+
+The shader still smooths _alpha only_: the artifact carries
+`edgeFeatherTexels` (half the largest mask cell size in artifact texels,
+clamped to [1, 12]) and edge alpha feathers over that radius with a smoothstep
+ramp. High-resolution masks resolve to a 1-texel feather, which is plain
+anti-aliasing.
+
+The live demo also disables the mask stroke: a crisp border retraces the
+low-res staircase and defeats the feathering (and skips the shader's expensive
+border sampling loop). The native artifact additionally reports `fillMs` (pure
+fill-loop time measured in Swift) so the HUD's Fill metric excludes JSI
+argument/result conversion — the Prep-minus-Fill gap is bridging plus Skia
+upload cost.
+
+Two hard-won implementation constraints:
+
+- The worklets Babel plugin turns `"worklet"` function declarations into
+  non-hoisted assignments whose closures capture other module-level worklets
+  by value at module-init time. Every worklet must be defined before any
+  module-level worklet that captures it, or the captured value is `undefined`
+  on the worklet runtime (tests do not catch this because vitest does not run
+  the plugin).
+- Debug app builds compile pods with `-Onone`, which makes the native fill
+  loop 10-30x slower and can erase its advantage over the JS fallback. The
+  `SupervisionIdMask` podspec forces `SWIFT_OPTIMIZATION_LEVEL=-O` for all
+  configurations.
+
+The demo also defers Skia mask-image disposal by one packet (the UI thread may
+still be drawing the previous image when the worklet swaps in a new one —
+rendering a disposed image paints the media rect black) and keeps the camera
+frame callback identity render-stable (per-render state reaches the worklet
+through shared values) so `useFrameOutput` does not re-serialize and swap the
+callback on the live camera thread on every HUD readout.
+
+Android has no native implementation; the auto builder falls back to JS there
+with an explicit `fallbackReason`. The demo HUD shows which builder ran, the JS
+fallback count, and the fallback reason next to the rolling p50/p90 metrics.
+
+### Benchmark Status
+
+Baseline before native prep (iPhone debug build, RF-DETR Nano CoreML INT8,
+720x1280 artifact): segmentation ~46-58ms p50/p90, mask prep/fill ~18-33ms,
+upload/serialization ~0ms. Target for native prep: fill under ~8-12ms p90 so
+the strict-sync tick approaches model time. Post-native numbers are pending a
+manual device run; record them here and decide whether the next bottleneck is
+model inference, ArrayBuffer transfer, or Skia image construction.
