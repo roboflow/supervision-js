@@ -74,6 +74,8 @@ import {
 } from "./src/debug-logging";
 
 type DemoMode = "static" | "live";
+type LiveDetectionDisplayMode = "masks" | "boxes";
+
 const LIVE_MAX_INSTANCES = 6;
 const LIVE_MASK_BORDER_WIDTH = 1;
 const LIVE_MASK_FILL_OPACITY = 0.5;
@@ -664,10 +666,13 @@ function LiveCameraProof(props: {
   >([]);
   const [showLiveHud, setShowLiveHud] = useState(true);
   const [showLiveDebug, setShowLiveDebug] = useState(false);
-  const [showMaskLayer, setShowMaskLayer] = useState(true);
+  const [detectionDisplayMode, setDetectionDisplayMode] =
+    useState<LiveDetectionDisplayMode>("masks");
   const frameRenderer = useFrameRenderer();
   const canvasWidth = window.width;
   const canvasHeight = window.height;
+  const showMaskLayer = detectionDisplayMode === "masks";
+  const showBoxLayer = detectionDisplayMode === "boxes";
   const emptyLiveMaskUniforms = useMemo(
     () => createEmptyLiveMaskUniforms(),
     [],
@@ -776,6 +781,9 @@ function LiveCameraProof(props: {
       y: liveLayout.mediaRect.y,
     };
   }, [liveLayout.mediaRect, liveMediaRect]);
+  useEffect(() => {
+    setLivePerformanceSamples([]);
+  }, [detectionDisplayMode]);
 
   const reportLiveFrame = useCallback((frame: LiveFrameState) => {
     setLiveFrame(frame);
@@ -893,36 +901,40 @@ function LiveCameraProof(props: {
           const maskStartedAt = Date.now();
           let preparedMask: LiveSkiaMaskFrame | null = null;
 
-          try {
-            preparedMask = createLiveSkiaMaskFrame({
-              debugArgs: {
-                detectionCount: detections.length,
-                frameHeight: frame.height,
-                framePixelFormat: frame.pixelFormat,
-                frameTimestamp: frame.timestamp,
-                frameWidth: frame.width,
-                mediaRectHeight: mediaRect.height,
-                mediaRectWidth: mediaRect.width,
-                mediaRectX: mediaRect.x,
-                mediaRectY: mediaRect.y,
-              },
-              detections,
-              frameHeight: detectionFrameSize.height,
-              frameWidth: detectionFrameSize.width,
-              mediaRect: {
-                height: mediaRect.height,
-                width: mediaRect.width,
-                x: mediaRect.x,
-                y: mediaRect.y,
-              },
-            });
-          } catch (error) {
-            if (Date.now() - lastErrorReportAt.value > 250) {
-              lastErrorReportAt.value = Date.now();
-              scheduleOnRN(
-                reportLiveError,
-                createLiveFrameError(stage, error, frame),
-              );
+          if (showMaskLayer) {
+            try {
+              preparedMask = createLiveSkiaMaskFrame({
+                artifactMaxPixels: LIVE_MASK_ARTIFACT_MAX_PIXELS,
+                artifactMaxSide: LIVE_MASK_ARTIFACT_MAX_SIDE,
+                debugArgs: {
+                  detectionCount: detections.length,
+                  frameHeight: frame.height,
+                  framePixelFormat: frame.pixelFormat,
+                  frameTimestamp: frame.timestamp,
+                  frameWidth: frame.width,
+                  mediaRectHeight: mediaRect.height,
+                  mediaRectWidth: mediaRect.width,
+                  mediaRectX: mediaRect.x,
+                  mediaRectY: mediaRect.y,
+                },
+                detections,
+                frameHeight: detectionFrameSize.height,
+                frameWidth: detectionFrameSize.width,
+                mediaRect: {
+                  height: mediaRect.height,
+                  width: mediaRect.width,
+                  x: mediaRect.x,
+                  y: mediaRect.y,
+                },
+              });
+            } catch (error) {
+              if (Date.now() - lastErrorReportAt.value > 250) {
+                lastErrorReportAt.value = Date.now();
+                scheduleOnRN(
+                  reportLiveError,
+                  createLiveFrameError(stage, error, frame),
+                );
+              }
             }
           }
 
@@ -1120,6 +1132,21 @@ function LiveCameraProof(props: {
               </Shader>
             </Rect>
           ) : null}
+          {showBoxLayer
+            ? liveLabelOverlays.map((label) => (
+                <RoundedRect
+                  color={toRgba(label.detection.color, 0.98)}
+                  height={label.rect.height}
+                  key={`box:${label.detection.label}:${label.index}`}
+                  r={8}
+                  strokeWidth={3}
+                  style="stroke"
+                  width={label.rect.width}
+                  x={label.rect.x}
+                  y={label.rect.y}
+                />
+              ))
+            : null}
           {liveLabelOverlays.map((label) => (
             <Fragment key={`${label.detection.label}:${label.index}`}>
               <RoundedRect
@@ -1173,12 +1200,14 @@ function LiveCameraProof(props: {
               />
               <StatusPill value={modelStatus} />
               <StatusPill tone="ready" value="strict sync" />
-              <StatusPill value={`${liveFrame?.maskCount ?? 0} masks`} />
+              <StatusPill
+                value={`${liveFrame?.maskCount ?? 0} ${detectionDisplayMode}`}
+              />
             </View>
 
             <View style={styles.liveActions}>
               <TouchableOpacity
-                onPress={() => setShowMaskLayer((value) => !value)}
+                onPress={() => setDetectionDisplayMode("masks")}
                 style={[
                   styles.floatingButton,
                   showMaskLayer ? styles.floatingButtonActive : null,
@@ -1191,6 +1220,22 @@ function LiveCameraProof(props: {
                   ]}
                 >
                   Masks
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setDetectionDisplayMode("boxes")}
+                style={[
+                  styles.floatingButton,
+                  showBoxLayer ? styles.floatingButtonActive : null,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.floatingButtonText,
+                    showBoxLayer ? styles.floatingButtonTextActive : null,
+                  ]}
+                >
+                  Boxes
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -1638,6 +1683,8 @@ function resolveLiveColorForLabel(label: string, fallbackIndex: number) {
 }
 
 interface LiveSkiaMaskFrameOptions {
+  readonly artifactMaxPixels: number;
+  readonly artifactMaxSide: number;
   readonly debugArgs: {
     readonly detectionCount: number;
     readonly frameHeight: number;
@@ -1691,14 +1738,16 @@ function createLiveSkiaMaskFrame(
     const frameWidth = Math.max(1, Math.round(options.frameWidth));
     const frameHeight = Math.max(1, Math.round(options.frameHeight));
     const framePixels = frameWidth * frameHeight;
+    const artifactMaxPixels = Math.max(1, options.artifactMaxPixels);
+    const artifactMaxSide = Math.max(1, options.artifactMaxSide);
     const areaScale =
-      framePixels > LIVE_MASK_ARTIFACT_MAX_PIXELS
-        ? Math.sqrt(LIVE_MASK_ARTIFACT_MAX_PIXELS / framePixels)
+      framePixels > artifactMaxPixels
+        ? Math.sqrt(artifactMaxPixels / framePixels)
         : 1;
     const sideScale = Math.min(
       1,
-      LIVE_MASK_ARTIFACT_MAX_SIDE / frameWidth,
-      LIVE_MASK_ARTIFACT_MAX_SIDE / frameHeight,
+      artifactMaxSide / frameWidth,
+      artifactMaxSide / frameHeight,
     );
     const artifactScale = Math.min(areaScale, sideScale);
     const width = Math.max(1, Math.round(frameWidth * artifactScale));
