@@ -93,6 +93,17 @@ import {
 
 type DemoMode = "static" | "live";
 type LiveDetectionDisplayMode = "masks" | "boxes";
+type LiveClassEffect = "redact" | "spotlight" | "mute";
+type LiveClassEffects = Readonly<Record<string, LiveClassEffect>>;
+
+const LIVE_CLASS_EFFECT_OPTIONS: readonly {
+  readonly effect: LiveClassEffect;
+  readonly label: string;
+}[] = [
+  { effect: "redact", label: "Redact (privacy)" },
+  { effect: "spotlight", label: "Spotlight" },
+  { effect: "mute", label: "Mute annotations" },
+];
 
 const LIVE_MAX_INSTANCES = 6;
 // No stroke in live mode: a crisp border retraces the low-res mask staircase
@@ -804,17 +815,20 @@ function LiveCameraProof(props: {
   const [showLiveDebug, setShowLiveDebug] = useState(false);
   const [detectionDisplayMode, setDetectionDisplayMode] =
     useState<LiveDetectionDisplayMode>("masks");
-  const [redactedClasses, setRedactedClasses] = useState<readonly string[]>([]);
+  const [classEffects, setClassEffects] = useState<LiveClassEffects>({});
   const [tapMenuLabel, setTapMenuLabel] = useState<string | null>(null);
   const frameRenderer = useFrameRenderer();
   const canvasWidth = window.width;
   const canvasHeight = window.height;
   const showMaskLayer = detectionDisplayMode === "masks";
   const showBoxLayer = detectionDisplayMode === "boxes";
-  // The mask lane doubles as the redaction lane: when classes are redacted in
-  // boxes display mode, the mask artifact still runs and carries the opaque
-  // mosaic bbox fills.
-  const redactionActive = redactedClasses.length > 0;
+  // The mask lane doubles as the effect lane: even in boxes display mode the
+  // mask artifact runs whenever a class has a mask-rendered effect (redact,
+  // spotlight). Mute needs no mask lane.
+  const effectsActive = Object.keys(classEffects).length > 0;
+  const maskEffectsActive = Object.values(classEffects).some(
+    (effect) => effect !== "mute",
+  );
   const emptyLiveMaskUniforms = useMemo(
     () => createEmptyLiveMaskUniforms(),
     [],
@@ -885,7 +899,7 @@ function LiveCameraProof(props: {
   // re-serialize and swap the camera frame callback on the live camera thread
   // several times per second.
   const showMaskLayerShared = useSharedValue(showMaskLayer);
-  const redactedClassesShared = useSharedValue<readonly string[]>([]);
+  const classEffectsShared = useSharedValue<LiveClassEffects>({});
   const runSegmentationOnFrame = props.segmentation.runOnFrame;
   const liveSyncedOverlays = useMemo(
     () =>
@@ -918,8 +932,8 @@ function LiveCameraProof(props: {
     showMaskLayerShared.value = showMaskLayer;
   }, [showMaskLayer, showMaskLayerShared]);
   useEffect(() => {
-    redactedClassesShared.value = redactedClasses;
-  }, [redactedClasses, redactedClassesShared]);
+    classEffectsShared.value = classEffects;
+  }, [classEffects, classEffectsShared]);
 
   const reportLiveFrame = useCallback((frame: LiveFrameState) => {
     setLiveFrame(frame);
@@ -972,12 +986,30 @@ function LiveCameraProof(props: {
     },
     [liveDetections, liveLayout],
   );
-  const toggleRedactedClass = useCallback((label: string) => {
-    setRedactedClasses((classes) =>
-      classes.includes(label)
-        ? classes.filter((className) => className !== label)
-        : [...classes, label],
-    );
+  const toggleClassEffect = useCallback(
+    (label: string, effect: LiveClassEffect) => {
+      setClassEffects((effects) => {
+        const next: Record<string, LiveClassEffect> = { ...effects };
+
+        if (effects[label] === effect) {
+          delete next[label];
+        } else {
+          next[label] = effect;
+        }
+
+        return next;
+      });
+    },
+    [],
+  );
+  const clearClassEffect = useCallback((label: string) => {
+    setClassEffects((effects) => {
+      const next: Record<string, LiveClassEffect> = { ...effects };
+
+      delete next[label];
+
+      return next;
+    });
   }, []);
 
   // Stable identity matters: useFrameOutput re-serializes and swaps the
@@ -1057,12 +1089,19 @@ function LiveCameraProof(props: {
             },
           );
           const serializationMs = Date.now() - serializationStartedAt;
+          const classEffects = classEffectsShared.value;
           const overlayDetections: LiveOverlayDetection[] = [];
 
           for (let index = 0; index < detections.length; index += 1) {
             const detection = detections[index]!;
 
-            overlayDetections[index] = {
+            // Muted classes disappear from boxes and labels too; the chips
+            // row is the way back.
+            if (classEffects[detection.label ?? ""] === "mute") {
+              continue;
+            }
+
+            overlayDetections[overlayDetections.length] = {
               bbox: detection.bbox,
               color: detection.color,
               label: detection.label ?? "object",
@@ -1072,63 +1111,68 @@ function LiveCameraProof(props: {
 
           scheduleOnRN(reportLiveDetections, overlayDetections);
 
-          stage = "redaction-filter";
-          const redactedList = redactedClassesShared.value;
-          const redactionEnabled = redactedList.length > 0;
+          stage = "class-effects-filter";
           const masksDisplayed = showMaskLayerShared.value;
-          let maskDetections = detections;
+          const maskDetections: LiveSerializedDetection[] = [];
           const mosaicMaskIds: number[] = [];
+          const spotlightMaskIds: number[] = [];
 
-          if (redactionEnabled) {
-            if (masksDisplayed) {
-              // Masks display: the artifact keeps every detection; redacted
-              // classes are flagged so the shader fills their mask silhouette
-              // with the opaque mosaic instead of the translucent color.
-              for (let index = 0; index < detections.length; index += 1) {
-                const detection = detections[index]!;
+          for (let index = 0; index < detections.length; index += 1) {
+            const detection = detections[index]!;
+            const effect = classEffects[detection.label ?? ""];
 
-                if (redactedList.indexOf(detection.label ?? "") !== -1) {
-                  mosaicMaskIds[mosaicMaskIds.length] = index + 1;
-                }
-              }
-            } else {
-              // Boxes display: the mask lane carries only redacted classes,
-              // each rewritten to a 1x1 all-ones mask so its whole bbox fills
-              // opaquely with the mosaic — conservative, never mask-shaped.
-              const selected: LiveSerializedDetection[] = [];
+            if (effect === "mute") {
+              continue;
+            }
 
-              for (let index = 0; index < detections.length; index += 1) {
-                const detection = detections[index]!;
+            // In boxes display the mask lane carries only detections with a
+            // mask-rendered effect; in masks display it carries everything.
+            if (!masksDisplayed && effect === undefined) {
+              continue;
+            }
 
-                if (redactedList.indexOf(detection.label ?? "") !== -1) {
-                  mosaicMaskIds[selected.length] = selected.length + 1;
-                  selected[selected.length] = {
-                    bbox: detection.bbox,
-                    color: detection.color,
-                    label: detection.label,
-                    mask: PRIVACY_FULL_BBOX_MASK,
-                    maskHeight: 1,
-                    maskWidth: 1,
-                    score: detection.score,
-                  };
-                }
-              }
+            let maskDetection = detection;
 
-              maskDetections = selected;
+            if (effect === "redact" && !masksDisplayed) {
+              // Boxes display redaction covers the whole bbox: a 1x1
+              // all-ones mask scales across the target rect in the fill loop.
+              maskDetection = {
+                bbox: detection.bbox,
+                color: detection.color,
+                label: detection.label,
+                mask: PRIVACY_FULL_BBOX_MASK,
+                maskHeight: 1,
+                maskWidth: 1,
+                score: detection.score,
+              };
+            }
+
+            const maskId = maskDetections.length + 1;
+
+            maskDetections[maskDetections.length] = maskDetection;
+
+            if (effect === "redact") {
+              mosaicMaskIds[mosaicMaskIds.length] = maskId;
+            } else if (effect === "spotlight") {
+              spotlightMaskIds[spotlightMaskIds.length] = maskId;
             }
           }
+
+          const maskEffectsEnabled =
+            mosaicMaskIds.length > 0 || spotlightMaskIds.length > 0;
 
           stage = "mask-prepare";
           const maskStartedAt = Date.now();
           let preparedMask: LiveSkiaMaskFrame | null = null;
 
-          if (masksDisplayed || redactionEnabled) {
+          if (masksDisplayed || maskEffectsEnabled) {
             try {
               preparedMask = createLiveSkiaMaskFrame({
                 artifactMaxPixels: LIVE_MASK_ARTIFACT_MAX_PIXELS,
                 artifactMaxSide: LIVE_MASK_ARTIFACT_MAX_SIDE,
                 detections: maskDetections,
-                edgeSmoothing: masksDisplayed ? undefined : 0,
+                edgeSmoothing:
+                  masksDisplayed || spotlightMaskIds.length > 0 ? undefined : 0,
                 frameHeight: detectionFrameSize.height,
                 frameWidth: detectionFrameSize.width,
                 mediaRect: {
@@ -1140,6 +1184,7 @@ function LiveCameraProof(props: {
                 mosaicCellPx: LIVE_PRIVACY_MOSAIC_CELL_PX,
                 mosaicMaskIds,
                 nativeBuilder: liveNativeMaskBuilder,
+                spotlightMaskIds,
               });
             } catch (error) {
               if (Date.now() - lastErrorReportAt.value > 250) {
@@ -1320,7 +1365,7 @@ function LiveCameraProof(props: {
       liveMaskUniforms,
       liveMediaRect,
       liveNativeMaskBuilder,
-      redactedClassesShared,
+      classEffectsShared,
       reportLiveDetections,
       reportLiveError,
       reportLiveFrame,
@@ -1388,7 +1433,7 @@ function LiveCameraProof(props: {
           </>
         }
         showBoxes={showBoxLayer}
-        showMasks={showMaskLayer || redactionActive}
+        showMasks={showMaskLayer || maskEffectsActive}
         stageStyle={styles.liveStage}
       >
         {!canRunCamera ? (
@@ -1433,20 +1478,16 @@ function LiveCameraProof(props: {
               />
             </View>
 
-            {redactionActive ? (
+            {effectsActive ? (
               <View style={styles.privacyChipRow}>
-                {redactedClasses.map((className) => (
+                {Object.entries(classEffects).map(([className, effect]) => (
                   <TouchableOpacity
                     key={className}
-                    onPress={() =>
-                      setRedactedClasses((classes) =>
-                        classes.filter((entry) => entry !== className),
-                      )
-                    }
+                    onPress={() => clearClassEffect(className)}
                   >
                     <StatusPill
                       tone="ready"
-                      value={`hidden: ${className || "object"} ✕`}
+                      value={`${effect}: ${className || "object"} ✕`}
                     />
                   </TouchableOpacity>
                 ))}
@@ -1620,19 +1661,32 @@ function LiveCameraProof(props: {
             <Text style={styles.detectionMenuTitle}>
               {tapMenuLabel || "object"}
             </Text>
-            <TouchableOpacity
-              onPress={() => {
-                toggleRedactedClass(tapMenuLabel);
-                setTapMenuLabel(null);
-              }}
-              style={styles.detectionMenuAction}
-            >
-              <Text style={styles.detectionMenuActionText}>
-                {redactedClasses.includes(tapMenuLabel)
-                  ? "Show (remove redaction)"
-                  : "Redact (privacy)"}
-              </Text>
-            </TouchableOpacity>
+            {LIVE_CLASS_EFFECT_OPTIONS.map((option) => {
+              const active = classEffects[tapMenuLabel] === option.effect;
+
+              return (
+                <TouchableOpacity
+                  key={option.effect}
+                  onPress={() => {
+                    toggleClassEffect(tapMenuLabel, option.effect);
+                    setTapMenuLabel(null);
+                  }}
+                  style={[
+                    styles.detectionMenuAction,
+                    active ? styles.detectionMenuActionActive : null,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.detectionMenuActionText,
+                      active ? styles.detectionMenuActionTextActive : null,
+                    ]}
+                  >
+                    {active ? `${option.label} ✓` : option.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
             <TouchableOpacity
               onPress={() => setTapMenuLabel(null)}
               style={styles.detectionMenuCancel}
@@ -1890,6 +1944,7 @@ interface LiveSkiaMaskFrameOptions {
   readonly mosaicCellPx?: number;
   readonly mosaicMaskIds?: readonly number[];
   readonly nativeBuilder: ReactNativeLiveIdMaskNativeBuilderHandle | null;
+  readonly spotlightMaskIds?: readonly number[];
 }
 
 interface LiveSkiaMaskFrame {
@@ -1973,6 +2028,7 @@ function createLiveSkiaMaskFrame(
       mediaRect: options.mediaRect,
       mosaicCellPx: options.mosaicCellPx,
       mosaicMaskIds: options.mosaicMaskIds,
+      spotlightMaskIds: options.spotlightMaskIds,
     });
 
     return {
@@ -2025,6 +2081,8 @@ function createEmptyLiveMaskUniforms(): ReactNativeIdMaskUniforms {
     uMosaicCellPx: 0,
     uMosaicFlags: createNumberArray(MAX_ID_MASK_PALETTE_ENTRIES),
     uOpacity: 0,
+    uSpotlightEnabled: 0,
+    uSpotlightFlags: createNumberArray(MAX_ID_MASK_PALETTE_ENTRIES),
     uStrokePalette: createNumberArray(MAX_ID_MASK_PALETTE_ENTRIES * 4),
     uStrokeWidths: createNumberArray(MAX_ID_MASK_PALETTE_ENTRIES),
     uTextureSize: [1, 1],
@@ -2423,16 +2481,25 @@ const styles = StyleSheet.create({
   },
   detectionMenuAction: {
     alignItems: "center",
-    backgroundColor: "rgba(248, 250, 252, 0.94)",
+    backgroundColor: "rgba(20, 25, 35, 0.92)",
+    borderColor: "rgba(216, 226, 240, 0.14)",
     borderRadius: 999,
+    borderWidth: 1,
     paddingHorizontal: 18,
     paddingVertical: 10,
     width: "100%",
   },
+  detectionMenuActionActive: {
+    backgroundColor: "rgba(248, 250, 252, 0.94)",
+    borderColor: "rgba(248, 250, 252, 0.54)",
+  },
   detectionMenuActionText: {
-    color: "#050608",
+    color: "#d7dde7",
     fontSize: 12,
     fontWeight: "900",
+  },
+  detectionMenuActionTextActive: {
+    color: "#050608",
   },
   detectionMenuCancel: {
     alignItems: "center",

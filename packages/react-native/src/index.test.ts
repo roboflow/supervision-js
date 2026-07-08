@@ -563,6 +563,37 @@ describe("React Native live ID-mask artifacts", () => {
     expect(uniforms.uMosaicFlags[2]).toBe(1);
   });
 
+  it("enables the spotlight veil for spotlit mask ids", () => {
+    const artifact = createReactNativeLiveIdMaskArtifact({
+      detections: [
+        createFullCoverageLiveDetection({ color: 0x38bdf8 }),
+        createFullCoverageLiveDetection({ color: 0x22c55e }),
+      ],
+      frameHeight: 4,
+      frameWidth: 4,
+      maxPixels: 16,
+      maxSide: 4,
+    });
+
+    const plain = resolveReactNativeLiveIdMaskUniforms({
+      artifact: artifact!,
+      mediaRect: { height: 4, width: 4, x: 0, y: 0 },
+    });
+
+    expect(plain.uSpotlightEnabled).toBe(0);
+    expect(new Set(plain.uSpotlightFlags)).toEqual(new Set([0]));
+
+    const spotlit = resolveReactNativeLiveIdMaskUniforms({
+      artifact: artifact!,
+      mediaRect: { height: 4, width: 4, x: 0, y: 0 },
+      spotlightMaskIds: [1],
+    });
+
+    expect(spotlit.uSpotlightEnabled).toBe(1);
+    expect(spotlit.uSpotlightFlags[1]).toBe(1);
+    expect(spotlit.uSpotlightFlags[2]).toBe(0);
+  });
+
   it("scales and clamps the edge feather to the mask cell size", () => {
     const artifact = createReactNativeLiveIdMaskArtifact({
       detections: [
@@ -857,6 +888,10 @@ describe("React Native ID-mask artifacts", () => {
     expect(REACT_NATIVE_ID_MASK_SHADER_SOURCE).toContain(
       "resolveMosaicFlag(maskId)",
     );
+    expect(REACT_NATIVE_ID_MASK_SHADER_SOURCE).toContain(
+      "resolveSpotlightFlag(maskId)",
+    );
+    expect(REACT_NATIVE_ID_MASK_SHADER_SOURCE).toContain("uSpotlightEnabled");
   });
 });
 

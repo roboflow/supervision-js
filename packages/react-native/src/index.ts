@@ -70,6 +70,12 @@ const mosaicFlagLookup = createShaderArrayLookup({
   paletteName: "uMosaicFlags",
   returnType: "float",
 });
+const spotlightFlagLookup = createShaderArrayLookup({
+  fallback: "0.0",
+  functionName: "resolveSpotlightFlag",
+  paletteName: "uSpotlightFlags",
+  returnType: "float",
+});
 
 export const REACT_NATIVE_ID_MASK_SHADER_SOURCE = `
 uniform shader uMask;
@@ -77,6 +83,8 @@ uniform half4 uFillPalette[${MAX_ID_MASK_PALETTE_ENTRIES}];
 uniform half4 uStrokePalette[${MAX_ID_MASK_PALETTE_ENTRIES}];
 uniform float uStrokeWidths[${MAX_ID_MASK_PALETTE_ENTRIES}];
 uniform float uMosaicFlags[${MAX_ID_MASK_PALETTE_ENTRIES}];
+uniform float uSpotlightFlags[${MAX_ID_MASK_PALETTE_ENTRIES}];
+uniform float uSpotlightEnabled;
 uniform float2 uTextureSize;
 uniform float4 uMediaRect;
 uniform float uOpacity;
@@ -103,6 +111,8 @@ ${strokePaletteLookup}
 ${strokeWidthLookup}
 
 ${mosaicFlagLookup}
+
+${spotlightFlagLookup}
 
 float2 resolveMaskTexel() {
   return float2(
@@ -161,6 +171,10 @@ half4 main(float2 coord) {
   float edgeSmoothing = clamp(uEdgeSmoothing, 0.0, 1.0);
 
   if (id <= 0.0) {
+    if (uSpotlightEnabled > 0.5) {
+      return half4(0.0, 0.0, 0.0, 1.0);
+    }
+
     if (edgeSmoothing > 0.0) {
       float neighborId = resolveNeighborMaskId(coord, featherTexel);
 
@@ -194,6 +208,25 @@ half4 main(float2 coord) {
       half(0.08 * cellShade);
 
     return half4(cellColor, 1.0);
+  }
+
+  if (uSpotlightEnabled > 0.5) {
+    if (resolveSpotlightFlag(maskId) > 0.5) {
+      // Spotlit object: show the camera through cleanly, easing the veil in
+      // near the mask boundary so the cutout has a soft vignette edge.
+      if (edgeSmoothing > 0.0) {
+        float sameRatio = resolveSameNeighborRatio(coord, featherTexel, id);
+        half veilAlpha =
+          half(1.0 - smoothstep(0.0, 1.0, sameRatio)) * half(edgeSmoothing);
+
+        return half4(0.0, 0.0, 0.0, veilAlpha);
+      }
+
+      return half4(0.0);
+    }
+
+    // Everything that is not spotlit sits under the veil.
+    return half4(0.0, 0.0, 0.0, 1.0);
   }
 
   half outputAlpha = fillColor.a * half(uOpacity);
@@ -350,6 +383,15 @@ export interface ReactNativeIdMaskUniforms {
    */
   readonly uMosaicFlags: readonly number[];
   readonly uOpacity: number;
+  /**
+   * 1 while any detection is spotlit: unflagged pixels render as a dark veil
+   * and flagged detections punch a clean cutout through it.
+   */
+  readonly uSpotlightEnabled: number;
+  /**
+   * Per-detection spotlight flags indexed by mask id.
+   */
+  readonly uSpotlightFlags: readonly number[];
   readonly uStrokePalette: readonly number[];
   readonly uStrokeWidths: readonly number[];
   readonly uTextureSize: readonly number[];
@@ -434,6 +476,11 @@ export interface ReactNativeLiveIdMaskUniformOptions {
    * procedural censor mosaic instead of a translucent fill.
    */
   readonly mosaicMaskIds?: readonly number[];
+  /**
+   * Mask ids spotlit through a dark veil: the veil blacks out everything
+   * else and the flagged detections stay clean.
+   */
+  readonly spotlightMaskIds?: readonly number[];
 }
 
 export const REACT_NATIVE_ROBOFLOW_PALETTE = [
@@ -617,6 +664,8 @@ export function resolveReactNativeIdMaskUniforms(
     uMosaicCellPx: 0,
     uMosaicFlags: new Array<number>(MAX_ID_MASK_PALETTE_ENTRIES).fill(0),
     uOpacity: artifact.opacity,
+    uSpotlightEnabled: 0,
+    uSpotlightFlags: new Array<number>(MAX_ID_MASK_PALETTE_ENTRIES).fill(0),
     uStrokePalette: Array.from(artifact.strokePalette),
     uStrokeWidths: Array.from(artifact.strokeWidths),
     uTextureSize: [artifact.width, artifact.height],
@@ -975,6 +1024,19 @@ export function resolveReactNativeLiveIdMaskUniforms(
     }
   }
 
+  const spotlightFlags = new Array<number>(MAX_ID_MASK_PALETTE_ENTRIES).fill(0);
+  const spotlightMaskIds = options.spotlightMaskIds ?? [];
+  let spotlightEnabled = 0;
+
+  for (let index = 0; index < spotlightMaskIds.length; index += 1) {
+    const maskId = spotlightMaskIds[index]!;
+
+    if (maskId >= 1 && maskId < MAX_ID_MASK_PALETTE_ENTRIES) {
+      spotlightFlags[maskId] = 1;
+      spotlightEnabled = 1;
+    }
+  }
+
   return {
     uBorderEnabled: artifact.hasStroke ? 1 : 0,
     uEdgeSmoothing: Math.max(0, Math.min(edgeSmoothing, 1)),
@@ -990,6 +1052,8 @@ export function resolveReactNativeLiveIdMaskUniforms(
     uMosaicCellPx: Math.max(0, options.mosaicCellPx ?? 12),
     uMosaicFlags: mosaicFlags,
     uOpacity: artifact.opacity,
+    uSpotlightEnabled: spotlightEnabled,
+    uSpotlightFlags: spotlightFlags,
     uStrokePalette: Array.from(artifact.strokePalette),
     uStrokeWidths: Array.from(artifact.strokeWidths),
     uTextureSize: [artifact.width, artifact.height],
