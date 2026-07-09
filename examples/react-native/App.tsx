@@ -21,6 +21,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -102,7 +103,7 @@ import { unrotateExecutorchUpBbox } from "./src/executorch-orientation";
 
 type DemoMode = "static" | "live" | "video";
 type LiveDetectionDisplayMode = "masks" | "boxes";
-type LiveClassEffect = "redact" | "spotlight" | "mute";
+type LiveClassEffect = "redact" | "spotlight";
 type LiveClassEffects = Readonly<Record<string, LiveClassEffect>>;
 
 const LIVE_CLASS_EFFECT_OPTIONS: readonly {
@@ -111,7 +112,6 @@ const LIVE_CLASS_EFFECT_OPTIONS: readonly {
 }[] = [
   { effect: "redact", label: "Redact (privacy)" },
   { effect: "spotlight", label: "Spotlight" },
-  { effect: "mute", label: "Mute annotations" },
 ];
 
 const LIVE_MAX_INSTANCES = 6;
@@ -843,12 +843,8 @@ function LiveCameraProof(props: {
   const showMaskLayer = detectionDisplayMode === "masks";
   const showBoxLayer = detectionDisplayMode === "boxes";
   // The mask lane doubles as the effect lane: even in boxes display mode the
-  // mask artifact runs whenever a class has a mask-rendered effect (redact,
-  // spotlight). Mute needs no mask lane.
+  // mask artifact runs whenever a class has an effect (redact, spotlight).
   const effectsActive = Object.keys(classEffects).length > 0;
-  const maskEffectsActive = Object.values(classEffects).some(
-    (effect) => effect !== "mute",
-  );
   const emptyLiveMaskUniforms = useMemo(
     () => createEmptyLiveMaskUniforms(),
     [],
@@ -979,30 +975,9 @@ function LiveCameraProof(props: {
   // instance of a redacted class is covered the moment it is detected.
   const handleLiveStageTap = useCallback(
     (point: { readonly x: number; readonly y: number }) => {
-      let pickedLabel: string | null = null;
-      let pickedArea = Number.POSITIVE_INFINITY;
-
-      for (const detection of liveDetections) {
-        const rect = liveLayout.mapRect({
-          height: detection.bbox.y2 - detection.bbox.y1,
-          width: detection.bbox.x2 - detection.bbox.x1,
-          x: detection.bbox.x1,
-          y: detection.bbox.y1,
-        });
-        const inside =
-          point.x >= rect.x &&
-          point.x <= rect.x + rect.width &&
-          point.y >= rect.y &&
-          point.y <= rect.y + rect.height;
-        const area = rect.width * rect.height;
-
-        if (inside && area < pickedArea) {
-          pickedArea = area;
-          pickedLabel = detection.label;
-        }
-      }
-
-      setTapMenuLabel(pickedLabel);
+      setTapMenuLabel(
+        pickDetectionLabelAtPoint(point, liveDetections, liveLayout),
+      );
     },
     [liveDetections, liveLayout],
   );
@@ -1115,12 +1090,6 @@ function LiveCameraProof(props: {
           for (let index = 0; index < detections.length; index += 1) {
             const detection = detections[index]!;
 
-            // Muted classes disappear from boxes and labels too; the chips
-            // row is the way back.
-            if (classEffects[detection.label ?? ""] === "mute") {
-              continue;
-            }
-
             overlayDetections[overlayDetections.length] = {
               bbox: detection.bbox,
               color: detection.color,
@@ -1140,10 +1109,6 @@ function LiveCameraProof(props: {
           for (let index = 0; index < detections.length; index += 1) {
             const detection = detections[index]!;
             const effect = classEffects[detection.label ?? ""];
-
-            if (effect === "mute") {
-              continue;
-            }
 
             // In boxes display the mask lane carries only detections with a
             // mask-rendered effect; in masks display it carries everything.
@@ -1453,7 +1418,7 @@ function LiveCameraProof(props: {
           </>
         }
         showBoxes={showBoxLayer}
-        showMasks={showMaskLayer || maskEffectsActive}
+        showMasks={showMaskLayer || effectsActive}
         stageStyle={styles.liveStage}
       >
         {!canRunCamera ? (
@@ -1498,21 +1463,10 @@ function LiveCameraProof(props: {
               />
             </View>
 
-            {effectsActive ? (
-              <View style={styles.privacyChipRow}>
-                {Object.entries(classEffects).map(([className, effect]) => (
-                  <TouchableOpacity
-                    key={className}
-                    onPress={() => clearClassEffect(className)}
-                  >
-                    <StatusPill
-                      tone="ready"
-                      value={`${effect}: ${className || "object"} ✕`}
-                    />
-                  </TouchableOpacity>
-                ))}
-              </View>
-            ) : null}
+            <ClassEffectChips
+              classEffects={classEffects}
+              onClear={clearClassEffect}
+            />
 
             <View style={styles.liveActions}>
               <TouchableOpacity
@@ -1677,43 +1631,15 @@ function LiveCameraProof(props: {
         )}
 
         {tapMenuLabel !== null ? (
-          <View style={styles.detectionMenu}>
-            <Text style={styles.detectionMenuTitle}>
-              {tapMenuLabel || "object"}
-            </Text>
-            {LIVE_CLASS_EFFECT_OPTIONS.map((option) => {
-              const active = classEffects[tapMenuLabel] === option.effect;
-
-              return (
-                <TouchableOpacity
-                  key={option.effect}
-                  onPress={() => {
-                    toggleClassEffect(tapMenuLabel, option.effect);
-                    setTapMenuLabel(null);
-                  }}
-                  style={[
-                    styles.detectionMenuAction,
-                    active ? styles.detectionMenuActionActive : null,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.detectionMenuActionText,
-                      active ? styles.detectionMenuActionTextActive : null,
-                    ]}
-                  >
-                    {active ? `${option.label} ✓` : option.label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-            <TouchableOpacity
-              onPress={() => setTapMenuLabel(null)}
-              style={styles.detectionMenuCancel}
-            >
-              <Text style={styles.floatingButtonText}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
+          <ClassEffectMenu
+            classEffects={classEffects}
+            label={tapMenuLabel}
+            onCancel={() => setTapMenuLabel(null)}
+            onSelect={(label, effect) => {
+              toggleClassEffect(label, effect);
+              setTapMenuLabel(null);
+            }}
+          />
         ) : null}
       </SyncedFrameStage>
     </View>
@@ -1732,7 +1658,12 @@ interface VideoStats {
   readonly wallMs: number;
 }
 
-type VideoStatus = "idle" | "opening" | "processing" | "done" | "error";
+type VideoStatus =
+  "idle" | "opening" | "processing" | "paused" | "done" | "error";
+
+// Sentinel end reason distinguishing a pause (source stays open, resumable)
+// from stop/end-of-stream in the pump's exit path.
+const VIDEO_PAUSED_REASON = "__paused__";
 
 function VideoFileProof(props: {
   readonly mode: DemoMode;
@@ -1752,6 +1683,14 @@ function VideoFileProof(props: {
   const [videoDetections, setVideoDetections] = useState<
     readonly LiveOverlayDetection[]
   >([]);
+  const [classEffects, setClassEffects] = useState<LiveClassEffects>({});
+  const [tapMenuLabel, setTapMenuLabel] = useState<string | null>(null);
+  // The open session survives pause: resume schedules a new pump loop that
+  // keeps pulling from the same source position.
+  const videoSessionRef = useRef<{
+    readonly boxed: ReactNativeBoxedVideoFrameSource;
+    readonly durationMs: number;
+  } | null>(null);
 
   const emptyVideoMaskUniforms = useMemo(
     () => createEmptyLiveMaskUniforms(),
@@ -1782,10 +1721,12 @@ function VideoFileProof(props: {
     [],
   );
 
-  // Packet shared values. Frame image + frame handle + mask image + uniforms
-  // swap together per tick; the previous packet retires one tick late so the
-  // UI thread can never draw a disposed image or a released pixel buffer.
+  // Packet shared values. Frame image + mask image + uniforms swap together
+  // per tick; the previous packet retires one tick late so the UI thread can
+  // never draw a disposed image or a released pixel buffer.
   const videoPlayingShared = useSharedValue(false);
+  const videoPausedShared = useSharedValue(false);
+  const classEffectsShared = useSharedValue<LiveClassEffects>({});
   const videoFrameImageShared = useSharedValue<SkiaImageType | null>(null);
   const videoMaskImageShared = useSharedValue<SkiaImageType | null>(null);
   const videoMaskUniformsShared = useSharedValue<ReactNativeIdMaskUniforms>(
@@ -1826,6 +1767,9 @@ function VideoFileProof(props: {
       y: videoLayout.mediaRect.y,
     };
   }, [videoLayout.mediaRect, videoMediaRectShared]);
+  useEffect(() => {
+    classEffectsShared.value = classEffects;
+  }, [classEffects, classEffectsShared]);
 
   const reportVideoDetections = useCallback(
     (detections: readonly LiveOverlayDetection[]) => {
@@ -1837,11 +1781,50 @@ function VideoFileProof(props: {
     setVideoStats(stats);
   }, []);
   const reportVideoEnded = useCallback((reason: string) => {
+    if (reason === VIDEO_PAUSED_REASON) {
+      setVideoStatus("paused");
+
+      return;
+    }
+
     setVideoStatus(reason === "" ? "done" : "error");
 
     if (reason !== "") {
       setVideoError(reason);
     }
+  }, []);
+  const handleVideoStageTap = useCallback(
+    (point: { readonly x: number; readonly y: number }) => {
+      setTapMenuLabel(
+        pickDetectionLabelAtPoint(point, videoDetections, videoLayout),
+      );
+    },
+    [videoDetections, videoLayout],
+  );
+  const toggleClassEffect = useCallback(
+    (label: string, effect: LiveClassEffect) => {
+      setClassEffects((effects) => {
+        const next: Record<string, LiveClassEffect> = { ...effects };
+
+        if (effects[label] === effect) {
+          delete next[label];
+        } else {
+          next[label] = effect;
+        }
+
+        return next;
+      });
+    },
+    [],
+  );
+  const clearClassEffect = useCallback((label: string) => {
+    setClassEffects((effects) => {
+      const next: Record<string, LiveClassEffect> = { ...effects };
+
+      delete next[label];
+
+      return next;
+    });
   }, []);
 
   // Releases every packet resource. Runs on the pump runtime so it is
@@ -1964,6 +1947,23 @@ function VideoFileProof(props: {
 
           scheduleOnRN(reportVideoDetections, overlayDetections);
 
+          // Video always renders the mask lane, so effects flag mask ids
+          // directly: redacted classes fill as opaque mosaic, spotlit ones
+          // punch through the veil.
+          const classEffects = classEffectsShared.value;
+          const mosaicMaskIds: number[] = [];
+          const spotlightMaskIds: number[] = [];
+
+          for (let index = 0; index < detections.length; index += 1) {
+            const effect = classEffects[detections[index]!.label ?? ""];
+
+            if (effect === "redact") {
+              mosaicMaskIds[mosaicMaskIds.length] = index + 1;
+            } else if (effect === "spotlight") {
+              spotlightMaskIds[spotlightMaskIds.length] = index + 1;
+            }
+          }
+
           const mediaRect = videoMediaRectShared.value;
           let preparedMask: LiveSkiaMaskFrame | null = null;
 
@@ -1980,7 +1980,10 @@ function VideoFileProof(props: {
                 x: mediaRect.x,
                 y: mediaRect.y,
               },
+              mosaicCellPx: LIVE_PRIVACY_MOSAIC_CELL_PX,
+              mosaicMaskIds,
               nativeBuilder: liveNativeMaskBuilder,
+              spotlightMaskIds,
             });
           } catch {
             preparedMask = null;
@@ -2037,12 +2040,23 @@ function VideoFileProof(props: {
       } catch (error) {
         endReason = serializeDebugError(error).message;
       } finally {
-        source.close();
+        // A pause exits the loop but keeps the source open so resume can
+        // continue pulling from the same position.
+        const paused = videoPausedShared.value && endReason === "";
+
+        if (!paused) {
+          source.close();
+        }
+
         videoPlayingShared.value = false;
-        scheduleOnRN(reportVideoEnded, endReason);
+        scheduleOnRN(
+          reportVideoEnded,
+          paused ? VIDEO_PAUSED_REASON : endReason,
+        );
       }
     },
     [
+      classEffectsShared,
       emptyVideoMaskUniforms,
       lastVideoReportAtShared,
       liveNativeMaskBuilder,
@@ -2056,6 +2070,7 @@ function VideoFileProof(props: {
       videoMaskImageShared,
       videoMaskUniformsShared,
       videoMediaRectShared,
+      videoPausedShared,
       videoPlayingShared,
     ],
   );
@@ -2090,7 +2105,9 @@ function VideoFileProof(props: {
 
         const durationMs = source.durationMs;
 
+        videoSessionRef.current = { boxed, durationMs };
         setVideoStatus("processing");
+        videoPausedShared.value = false;
         videoPlayingShared.value = true;
         // Serialized on the pump runtime: cleanup of the previous run's
         // packets, then the new pump loop.
@@ -2107,7 +2124,13 @@ function VideoFileProof(props: {
         setVideoStatus("error");
       }
     },
-    [cleanupVideoPackets, runVideoPump, videoPlayingShared, videoRuntime],
+    [
+      cleanupVideoPackets,
+      runVideoPump,
+      videoPausedShared,
+      videoPlayingShared,
+      videoRuntime,
+    ],
   );
 
   const startSampleVideo = useCallback(async () => {
@@ -2150,21 +2173,61 @@ function VideoFileProof(props: {
     }
   }, [startVideo]);
 
-  const stopVideo = useCallback(() => {
+  const pauseVideo = useCallback(() => {
+    videoPausedShared.value = true;
     videoPlayingShared.value = false;
-  }, [videoPlayingShared]);
+  }, [videoPausedShared, videoPlayingShared]);
+
+  const resumeVideo = useCallback(() => {
+    const session = videoSessionRef.current;
+
+    if (!session) {
+      return;
+    }
+
+    setVideoStatus("processing");
+    videoPausedShared.value = false;
+    videoPlayingShared.value = true;
+    scheduleOnRuntime(videoRuntime, () => {
+      "worklet";
+
+      runVideoPump(session.boxed, session.durationMs);
+    });
+  }, [runVideoPump, videoPausedShared, videoPlayingShared, videoRuntime]);
+
+  const stopVideo = useCallback(() => {
+    const wasPaused = videoPausedShared.value;
+
+    videoPausedShared.value = false;
+    videoPlayingShared.value = false;
+
+    // While paused the pump loop is not running, so nothing will close the
+    // source or update status; do both directly.
+    if (wasPaused) {
+      videoSessionRef.current?.boxed.unbox().close();
+      setVideoStatus("done");
+    }
+  }, [videoPausedShared, videoPlayingShared]);
 
   useEffect(() => {
     return () => {
+      videoPausedShared.value = false;
       videoPlayingShared.value = false;
+      videoSessionRef.current?.boxed.unbox().close();
       scheduleOnRuntime(videoRuntime, cleanupVideoPackets);
     };
-  }, [cleanupVideoPackets, videoPlayingShared, videoRuntime]);
+  }, [
+    cleanupVideoPackets,
+    videoPausedShared,
+    videoPlayingShared,
+    videoRuntime,
+  ]);
 
   const modelStatus = formatSegmentationStatus(props.segmentation);
   const modelReady = props.segmentation.isReady;
   const isProcessing =
     videoStatus === "processing" || videoStatus === "opening";
+  const isPaused = videoStatus === "paused";
   const progress =
     videoStats && videoStats.durationMs > 0
       ? Math.min(1, videoStats.videoTimeMs / videoStats.durationMs)
@@ -2187,6 +2250,7 @@ function VideoFileProof(props: {
         maskImage={videoMaskImageShared}
         maskUniforms={videoMaskUniformsShared}
         mediaImage={videoFrameImageShared}
+        onPress={handleVideoStageTap}
         showBoxes
         showMasks
         stageStyle={styles.liveStage}
@@ -2214,6 +2278,11 @@ function VideoFileProof(props: {
             value={`prep ${videoStats?.builder ?? "-"}`}
           />
         </View>
+
+        <ClassEffectChips
+          classEffects={classEffects}
+          onClear={clearClassEffect}
+        />
 
         {videoStatus === "idle" ||
         videoStatus === "done" ||
@@ -2266,7 +2335,7 @@ function VideoFileProof(props: {
           </View>
         ) : null}
 
-        {isProcessing ? (
+        {isProcessing || isPaused ? (
           <View style={styles.videoHud}>
             <View style={styles.videoProgressTrack}>
               <View
@@ -2299,13 +2368,35 @@ function VideoFileProof(props: {
                 value={String(videoStats?.processedFrames ?? 0)}
               />
             </View>
-            <TouchableOpacity
-              onPress={stopVideo}
-              style={styles.detectionMenuAction}
-            >
-              <Text style={styles.detectionMenuActionText}>Stop</Text>
-            </TouchableOpacity>
+            <View style={styles.videoButtonRow}>
+              <TouchableOpacity
+                onPress={isPaused ? resumeVideo : pauseVideo}
+                style={[styles.detectionMenuAction, styles.videoButton]}
+              >
+                <Text style={styles.detectionMenuActionText}>
+                  {isPaused ? "Play" : "Pause"}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={stopVideo}
+                style={[styles.detectionMenuAction, styles.videoButton]}
+              >
+                <Text style={styles.detectionMenuActionText}>Stop</Text>
+              </TouchableOpacity>
+            </View>
           </View>
+        ) : null}
+
+        {tapMenuLabel !== null ? (
+          <ClassEffectMenu
+            classEffects={classEffects}
+            label={tapMenuLabel}
+            onCancel={() => setTapMenuLabel(null)}
+            onSelect={(label, effect) => {
+              toggleClassEffect(label, effect);
+              setTapMenuLabel(null);
+            }}
+          />
         ) : null}
       </SyncedFrameStage>
     </View>
@@ -2318,6 +2409,106 @@ function formatVideoTime(milliseconds: number) {
   const seconds = totalSeconds % 60;
 
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+function pickDetectionLabelAtPoint(
+  point: { readonly x: number; readonly y: number },
+  detections: readonly LiveOverlayDetection[],
+  layout: ReactNativeFrameLayout,
+): string | null {
+  let pickedLabel: string | null = null;
+  let pickedArea = Number.POSITIVE_INFINITY;
+
+  for (const detection of detections) {
+    const rect = layout.mapRect({
+      height: detection.bbox.y2 - detection.bbox.y1,
+      width: detection.bbox.x2 - detection.bbox.x1,
+      x: detection.bbox.x1,
+      y: detection.bbox.y1,
+    });
+    const inside =
+      point.x >= rect.x &&
+      point.x <= rect.x + rect.width &&
+      point.y >= rect.y &&
+      point.y <= rect.y + rect.height;
+    const area = rect.width * rect.height;
+
+    if (inside && area < pickedArea) {
+      pickedArea = area;
+      pickedLabel = detection.label;
+    }
+  }
+
+  return pickedLabel;
+}
+
+function ClassEffectChips(props: {
+  readonly classEffects: LiveClassEffects;
+  readonly onClear: (label: string) => void;
+}) {
+  const entries = Object.entries(props.classEffects);
+
+  if (entries.length === 0) {
+    return null;
+  }
+
+  return (
+    <View style={styles.privacyChipRow}>
+      {entries.map(([className, effect]) => (
+        <TouchableOpacity
+          key={className}
+          onPress={() => props.onClear(className)}
+        >
+          <StatusPill
+            tone="ready"
+            value={`${effect}: ${className || "object"} ✕`}
+          />
+        </TouchableOpacity>
+      ))}
+    </View>
+  );
+}
+
+function ClassEffectMenu(props: {
+  readonly classEffects: LiveClassEffects;
+  readonly label: string;
+  readonly onCancel: () => void;
+  readonly onSelect: (label: string, effect: LiveClassEffect) => void;
+}) {
+  return (
+    <View style={styles.detectionMenu}>
+      <Text style={styles.detectionMenuTitle}>{props.label || "object"}</Text>
+      {LIVE_CLASS_EFFECT_OPTIONS.map((option) => {
+        const active = props.classEffects[props.label] === option.effect;
+
+        return (
+          <TouchableOpacity
+            key={option.effect}
+            onPress={() => props.onSelect(props.label, option.effect)}
+            style={[
+              styles.detectionMenuAction,
+              active ? styles.detectionMenuActionActive : null,
+            ]}
+          >
+            <Text
+              style={[
+                styles.detectionMenuActionText,
+                active ? styles.detectionMenuActionTextActive : null,
+              ]}
+            >
+              {active ? `${option.label} ✓` : option.label}
+            </Text>
+          </TouchableOpacity>
+        );
+      })}
+      <TouchableOpacity
+        onPress={props.onCancel}
+        style={styles.detectionMenuCancel}
+      >
+        <Text style={styles.floatingButtonText}>Cancel</Text>
+      </TouchableOpacity>
+    </View>
+  );
 }
 
 function ModeSwitch(props: {
@@ -3187,6 +3378,15 @@ const styles = StyleSheet.create({
     backgroundColor: "#77e4f2",
     borderRadius: 999,
     height: 6,
+  },
+  videoButtonRow: {
+    flexDirection: "row",
+    gap: 8,
+    width: "100%",
+  },
+  videoButton: {
+    flex: 1,
+    width: "auto",
   },
   liveTopBar: {
     alignItems: "center",
