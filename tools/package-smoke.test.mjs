@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
+import { URL } from "node:url";
 import test from "node:test";
 
 const expectedWebRuntimeExports = [
@@ -122,6 +124,7 @@ const expectedReactNativeRuntimeExports = [
   "REACT_NATIVE_LIVE_ID_MASK_NATIVE_BUILDER_NAME",
   "REACT_NATIVE_VIDEO_FRAME_SOURCE_NAME",
   "SUPERVISION_ROBOFLOW_COLOR",
+  "createEmptyReactNativeLiveIdMaskUniforms",
   "createReactNativeIdMaskFrame",
   "createReactNativeLiveIdMaskArtifact",
   "createReactNativeLiveIdMaskArtifactAuto",
@@ -251,4 +254,23 @@ test("built style classes can be constructed by package consumers", async () => 
   assert.equal(typeof interactionStyle.resolve, "function");
   assert.equal(typeof maskStyle.resolve, "function");
   assert.equal(typeof labelStyle.resolve, "function");
+});
+
+test("built React Native subpath entries ship and resolve", async () => {
+  const adapters =
+    await import("../packages/react-native/dist/adapters/executorch.js");
+
+  assert.equal(typeof adapters.unrotateExecutorchUpBbox, "function");
+  assert.deepEqual(
+    adapters.unrotateExecutorchUpBbox({ x1: 1, y1: 2, x2: 3, y2: 4 }, 10),
+    { x1: 2, y1: 7, x2: 4, y2: 9 },
+  );
+
+  // The skia entry requires the optional @shopify/react-native-skia peer, so
+  // it cannot be imported under Node; assert the built artifact ships.
+  assert.ok(
+    existsSync(
+      new URL("../packages/react-native/dist/skia.js", import.meta.url),
+    ),
+  );
 });

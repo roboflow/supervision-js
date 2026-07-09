@@ -155,19 +155,28 @@ The Skia decision: the base entry stays Skia-free (artifact math only); a new
 `@shopify/react-native-skia`, which becomes an optional peer (same posture as
 `react-native-nitro-modules` today).
 
-- `createLiveSkiaMaskFrame` (demo) → `skia` subpath, renamed
-  (artifact build → `Skia.Data`/`MakeImage` upload → uniforms), returning the
-  existing diagnostics shape.
-- Packet lifecycle: a small owned object encapsulating present/retire/dispose
-  of frame+mask images with the one-tick retirement rule and a documented
-  single-writer contract (the direct fix for the historical black-flash /
-  disposed-image class of bugs).
-- The dedicated-runtime setup (`NativeThreadFactory` +
-  `createWorkletRuntimeForThread`) → a helper with a `destroy()`.
-- ExecuTorch orientation adapters (`unrotateExecutorchUpBbox`, the
-  `maskRotatedCw` contract docs) → an `adapters/executorch` subpath. Inference
-  itself stays outside the library boundary (per `public-api.md`); these are
-  coordinate-space adapters, not inference bindings.
+**Status 2026-07-09:** the first three items landed (subpaths resolve via
+package `exports` with a `react-native` condition mapping to `src`, which
+Metro ≥ RN 0.79 handles natively; needs one device pass). The packet
+lifecycle and runtime helper are deferred to Phase 3 — they are entangled
+with reanimated/worklets peer ownership and belong to the session design.
+
+- ✅ `createLiveSkiaMaskFrame` (demo) → `createReactNativeSkiaMaskFrame` on
+  the `skia` subpath (artifact build → `Skia.Data`/`MakeImage` upload →
+  uniforms, stage-tagged worklet-safe errors), plus
+  `disposeReactNativeSkiaImage`. Unit-tested against a mocked Skia module.
+- ✅ ExecuTorch orientation adapters (`unrotateExecutorchUpBbox`, the
+  `maskRotatedCw` contract docs) → `adapters/executorch` subpath with its
+  round-trip tests. Inference itself stays outside the library boundary (per
+  `public-api.md`); these are coordinate-space adapters, not inference
+  bindings.
+- ✅ `createEmptyReactNativeLiveIdMaskUniforms()` on the base entry, pinned
+  to the shader by a test that parses the uniform declarations — the
+  "Missing uniform value" class of bugs is now guarded in the package.
+- ⏭ Packet lifecycle object (present/retire/dispose, one-tick retirement,
+  single-writer contract) → Phase 3, as part of the session facade.
+- ⏭ Dedicated-runtime helper (`NativeThreadFactory` +
+  `createWorkletRuntimeForThread`, with `destroy()`) → Phase 3.
 
 ## Phase 3 — Session facade (web parity)
 

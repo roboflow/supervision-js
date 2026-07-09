@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  unrotateExecutorchUpBbox,
-  type ExecutorchBbox,
-} from "./executorch-orientation";
+import { unrotateExecutorchUpBbox, type ExecutorchBbox } from "./executorch";
 
 /**
  * ExecuTorch's forward mapping for `orientation: "up"` outputs, transcribed

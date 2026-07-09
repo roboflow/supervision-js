@@ -1042,6 +1042,33 @@ export function createReactNativeLiveIdMaskArtifactAuto(
 }
 
 /**
+ * Uniforms that draw nothing, with every shader uniform present. Use this
+ * for initial/cleared state instead of hand-building the object: a missing
+ * key throws "Missing uniform value" at render time, and the shader's
+ * uniform list grows over releases.
+ */
+export function createEmptyReactNativeLiveIdMaskUniforms(): ReactNativeIdMaskUniforms {
+  "worklet";
+
+  return {
+    uBorderEnabled: 0,
+    uEdgeSmoothing: 0,
+    uFeatherTexels: 1,
+    uFillPalette: new Array<number>(MAX_ID_MASK_PALETTE_ENTRIES * 4).fill(0),
+    uMaxStrokeWidth: 0,
+    uMediaRect: [0, 0, 1, 1],
+    uMosaicCellPx: 0,
+    uMosaicFlags: new Array<number>(MAX_ID_MASK_PALETTE_ENTRIES).fill(0),
+    uOpacity: 0,
+    uSpotlightEnabled: 0,
+    uSpotlightFlags: new Array<number>(MAX_ID_MASK_PALETTE_ENTRIES).fill(0),
+    uStrokePalette: new Array<number>(MAX_ID_MASK_PALETTE_ENTRIES * 4).fill(0),
+    uStrokeWidths: new Array<number>(MAX_ID_MASK_PALETTE_ENTRIES).fill(0),
+    uTextureSize: [1, 1],
+  };
+}
+
+/**
  * Live variant of `resolveReactNativeIdMaskUniforms()` for worklet lanes where
  * only the media rect is available instead of a full frame layout.
  */

@@ -59,24 +59,26 @@ import {
   type BoxDrawInstruction,
   type DetectionPickResult,
   type LabelDrawInstruction,
-  MAX_ID_MASK_PALETTE_ENTRIES,
   REACT_NATIVE_ID_MASK_SHADER_SOURCE,
   resolveDetectionClassColorStyle,
   createReactNativePreparedFramePacket,
-  type ReactNativeLiveIdMaskNativeBuilderHandle,
   type ReactNativeLiveSerializedDetection,
   type ReactNativeFrameLayout,
   type ReactNativeIdMaskUniforms,
-  createReactNativeLiveIdMaskArtifactAuto,
   createReactNativeVideoFrameSource,
   loadReactNativeLiveIdMaskNativeBuilder,
   pickReactNativeDetectionAtPoint,
   type ReactNativeBoxedVideoFrameSource,
   resolveReactNativeIdMaskUniforms,
-  resolveReactNativeLiveIdMaskUniforms,
   resolveReactNativeFrameLayout,
   resolveReactNativeLabelLayout,
+  createEmptyReactNativeLiveIdMaskUniforms,
 } from "supervision-js-react-native";
+import {
+  createReactNativeSkiaMaskFrame,
+  disposeReactNativeSkiaImage,
+  type ReactNativeSkiaMaskFrame,
+} from "supervision-js-react-native/skia";
 
 import basketballFrame from "./assets/basketball-frame.jpg";
 import basketballVideo from "../../demo/fixtures/basketball_sample/basketball_sample.mp4";
@@ -97,7 +99,7 @@ import {
   runWithWorkletDebugLogging,
   serializeDebugError,
 } from "./src/debug-logging";
-import { unrotateExecutorchUpBbox } from "./src/executorch-orientation";
+import { unrotateExecutorchUpBbox } from "supervision-js-react-native/adapters/executorch";
 
 type DemoMode = "static" | "live" | "video";
 type LiveDetectionDisplayMode = "masks" | "boxes";
@@ -842,7 +844,7 @@ function LiveCameraProof(props: {
   // mask artifact runs whenever a class has an effect (redact, spotlight).
   const effectsActive = Object.keys(classEffects).length > 0;
   const emptyLiveMaskUniforms = useMemo(
-    () => createEmptyLiveMaskUniforms(),
+    () => createEmptyReactNativeLiveIdMaskUniforms(),
     [],
   );
   const liveLayout = useMemo(
@@ -875,7 +877,7 @@ function LiveCameraProof(props: {
   // whole media rect black. Deferring disposal by one packet removes the race.
   const retiredLiveMaskImage = useSharedValue<SkiaImageType | null>(null);
   const liveMaskUniforms = useSharedValue<ReactNativeIdMaskUniforms>(
-    createEmptyLiveMaskUniforms(),
+    createEmptyReactNativeLiveIdMaskUniforms(),
   );
   const liveMediaRect = useSharedValue<LiveMediaRect>({
     height: liveLayout.mediaRect.height,
@@ -1144,12 +1146,14 @@ function LiveCameraProof(props: {
 
           stage = "mask-prepare";
           const maskStartedAt = Date.now();
-          let preparedMask: LiveSkiaMaskFrame | null = null;
+          let preparedMask: ReactNativeSkiaMaskFrame | null = null;
 
           if (masksDisplayed || maskEffectsEnabled) {
             try {
-              preparedMask = createLiveSkiaMaskFrame({
+              preparedMask = createReactNativeSkiaMaskFrame({
+                borderWidth: DEMO_MASK_BORDER_WIDTH,
                 detections: maskDetections,
+                fillOpacity: DEMO_MASK_FILL_OPACITY,
                 edgeSmoothing:
                   masksDisplayed || spotlightMaskIds.length > 0 ? undefined : 0,
                 frameHeight: detectionFrameSize.height,
@@ -1221,7 +1225,7 @@ function LiveCameraProof(props: {
                 liveMaskUniforms.value = preparedMask.uniforms;
                 liveMaskImage.value = preparedMask.image;
                 retiredLiveMaskImage.value = previousMaskImage;
-                disposeLiveSkiaImage(retiredMaskImage);
+                disposeReactNativeSkiaImage(retiredMaskImage);
               },
             );
             lastShaderActive.value = true;
@@ -1247,7 +1251,7 @@ function LiveCameraProof(props: {
                 liveMaskUniforms.value = emptyLiveMaskUniforms;
                 liveMaskImage.value = null;
                 retiredLiveMaskImage.value = previousMaskImage;
-                disposeLiveSkiaImage(retiredMaskImage);
+                disposeReactNativeSkiaImage(retiredMaskImage);
               },
             );
             lastShaderActive.value = false;
@@ -1695,7 +1699,7 @@ function VideoFileProof(props: {
   } | null>(null);
 
   const emptyVideoMaskUniforms = useMemo(
-    () => createEmptyLiveMaskUniforms(),
+    () => createEmptyReactNativeLiveIdMaskUniforms(),
     [],
   );
   const videoLayout = useMemo(
@@ -1732,7 +1736,7 @@ function VideoFileProof(props: {
   const videoFrameImageShared = useSharedValue<SkiaImageType | null>(null);
   const videoMaskImageShared = useSharedValue<SkiaImageType | null>(null);
   const videoMaskUniformsShared = useSharedValue<ReactNativeIdMaskUniforms>(
-    createEmptyLiveMaskUniforms(),
+    createEmptyReactNativeLiveIdMaskUniforms(),
   );
   const videoMediaRectShared = useSharedValue<LiveMediaRect>({
     height: videoLayout.mediaRect.height,
@@ -1845,10 +1849,10 @@ function VideoFileProof(props: {
     retiredFrameImageShared.value = null;
     retiredMaskImageShared.value = null;
 
-    disposeLiveSkiaImage(frameImage);
-    disposeLiveSkiaImage(maskImage);
-    disposeLiveSkiaImage(retiredImage);
-    disposeLiveSkiaImage(retiredMask);
+    disposeReactNativeSkiaImage(frameImage);
+    disposeReactNativeSkiaImage(maskImage);
+    disposeReactNativeSkiaImage(retiredImage);
+    disposeReactNativeSkiaImage(retiredMask);
   }, [
     emptyVideoMaskUniforms,
     retiredFrameImageShared,
@@ -1971,11 +1975,13 @@ function VideoFileProof(props: {
           }
 
           const mediaRect = videoMediaRectShared.value;
-          let preparedMask: LiveSkiaMaskFrame | null = null;
+          let preparedMask: ReactNativeSkiaMaskFrame | null = null;
 
           try {
-            preparedMask = createLiveSkiaMaskFrame({
+            preparedMask = createReactNativeSkiaMaskFrame({
+              borderWidth: DEMO_MASK_BORDER_WIDTH,
               detections,
+              fillOpacity: DEMO_MASK_FILL_OPACITY,
               frameHeight: handle.height,
               frameWidth: handle.width,
               mediaRect: {
@@ -2035,7 +2041,7 @@ function VideoFileProof(props: {
               const snapshot = surface.makeImageSnapshot();
 
               frameImage = snapshot.makeNonTextureImage();
-              disposeLiveSkiaImage(snapshot);
+              disposeReactNativeSkiaImage(snapshot);
               surface.dispose();
             }
           }
@@ -2044,7 +2050,7 @@ function VideoFileProof(props: {
             frameImage = textureImage.makeNonTextureImage();
           }
 
-          disposeLiveSkiaImage(textureImage);
+          disposeReactNativeSkiaImage(textureImage);
           handle.release();
 
           // Release the images from two ticks ago, retire the previous ones,
@@ -2062,8 +2068,8 @@ function VideoFileProof(props: {
           retiredFrameImageShared.value = previousFrameImage;
           retiredMaskImageShared.value = previousMaskImage;
 
-          disposeLiveSkiaImage(retiredImage);
-          disposeLiveSkiaImage(retiredMask);
+          disposeReactNativeSkiaImage(retiredImage);
+          disposeReactNativeSkiaImage(retiredMask);
 
           processedFrames += 1;
 
@@ -2800,167 +2806,6 @@ function formatLiveFallbackReason(reason: string | undefined) {
   return reason.length > 28 ? `${reason.slice(0, 28)}…` : reason;
 }
 
-interface LiveSkiaMaskFrameOptions {
-  readonly detections: readonly LiveSerializedDetection[];
-  readonly edgeSmoothing?: number;
-  readonly frameHeight: number;
-  readonly frameWidth: number;
-  readonly mediaRect: {
-    readonly height: number;
-    readonly width: number;
-    readonly x: number;
-    readonly y: number;
-  };
-  readonly mosaicCellPx?: number;
-  readonly mosaicMaskIds?: readonly number[];
-  readonly nativeBuilder: ReactNativeLiveIdMaskNativeBuilderHandle | null;
-  readonly spotlightMaskIds?: readonly number[];
-}
-
-interface LiveSkiaMaskFrame {
-  readonly builder: "native" | "js";
-  readonly byteLength: number;
-  readonly fallbackReason?: string;
-  readonly fillMs: number;
-  readonly height: number;
-  readonly image: SkiaImageType;
-  readonly uploadMs: number;
-  readonly uniforms: ReactNativeIdMaskUniforms;
-  readonly width: number;
-}
-
-function createLiveSkiaMaskFrame(
-  options: LiveSkiaMaskFrameOptions,
-): LiveSkiaMaskFrame | null {
-  "worklet";
-
-  let maskPrepStage = "mask-init";
-
-  try {
-    maskPrepStage = "mask-build-artifact";
-    const build = createReactNativeLiveIdMaskArtifactAuto({
-      borderWidth: DEMO_MASK_BORDER_WIDTH,
-      detections: options.detections,
-      fillOpacity: DEMO_MASK_FILL_OPACITY,
-      frameHeight: options.frameHeight,
-      frameWidth: options.frameWidth,
-      nativeBuilder: options.nativeBuilder,
-    });
-
-    if (!build) {
-      return null;
-    }
-
-    const { artifact, diagnostics } = build;
-    const uploadStartedAt = Date.now();
-
-    maskPrepStage = "mask-create-skia-data";
-    if (!Skia.Data || typeof Skia.Data.fromBytes !== "function") {
-      throw {
-        message: "Skia.Data.fromBytes is unavailable in the frame worklet",
-        name: "TypeError",
-      };
-    }
-
-    const imageData = Skia.Data.fromBytes(artifact.data);
-
-    maskPrepStage = "mask-create-skia-image";
-    if (!Skia.Image || typeof Skia.Image.MakeImage !== "function") {
-      throw {
-        message: "Skia.Image.MakeImage is unavailable in the frame worklet",
-        name: "TypeError",
-      };
-    }
-
-    const image = Skia.Image.MakeImage(
-      {
-        alphaType: AlphaType.Opaque,
-        colorType: ColorType.Alpha_8,
-        height: artifact.height,
-        width: artifact.width,
-      },
-      imageData,
-      artifact.width,
-    );
-
-    if (!image) {
-      return null;
-    }
-
-    const uploadMs = Date.now() - uploadStartedAt;
-
-    maskPrepStage = "mask-resolve-uniforms";
-    const uniforms = resolveReactNativeLiveIdMaskUniforms({
-      artifact,
-      edgeSmoothing: options.edgeSmoothing,
-      mediaRect: options.mediaRect,
-      mosaicCellPx: options.mosaicCellPx,
-      mosaicMaskIds: options.mosaicMaskIds,
-      spotlightMaskIds: options.spotlightMaskIds,
-    });
-
-    return {
-      builder: diagnostics.builder,
-      byteLength: artifact.data.byteLength,
-      fallbackReason: diagnostics.fallbackReason,
-      fillMs: diagnostics.fillMs,
-      height: artifact.height,
-      image,
-      uploadMs,
-      uniforms,
-      width: artifact.width,
-    };
-  } catch (error) {
-    let message = "unknown error";
-    let name = "Error";
-
-    if (typeof error === "string") {
-      message = error;
-    } else if (typeof error === "object" && error !== null) {
-      const record = error as {
-        readonly message?: unknown;
-        readonly name?: unknown;
-      };
-
-      if (typeof record.message === "string") {
-        message = record.message;
-      }
-
-      if (typeof record.name === "string") {
-        name = record.name;
-      }
-    }
-
-    throw {
-      message: `${maskPrepStage}: ${message}`,
-      name,
-    };
-  }
-}
-
-function createEmptyLiveMaskUniforms(): ReactNativeIdMaskUniforms {
-  return {
-    uBorderEnabled: 0,
-    uEdgeSmoothing: 0,
-    uFeatherTexels: 1,
-    uFillPalette: createNumberArray(MAX_ID_MASK_PALETTE_ENTRIES * 4),
-    uMaxStrokeWidth: 0,
-    uMediaRect: [0, 0, 1, 1],
-    uMosaicCellPx: 0,
-    uMosaicFlags: createNumberArray(MAX_ID_MASK_PALETTE_ENTRIES),
-    uOpacity: 0,
-    uSpotlightEnabled: 0,
-    uSpotlightFlags: createNumberArray(MAX_ID_MASK_PALETTE_ENTRIES),
-    uStrokePalette: createNumberArray(MAX_ID_MASK_PALETTE_ENTRIES * 4),
-    uStrokeWidths: createNumberArray(MAX_ID_MASK_PALETTE_ENTRIES),
-    uTextureSize: [1, 1],
-  };
-}
-
-function createNumberArray(length: number) {
-  return new Array<number>(length).fill(0);
-}
-
 function resolveLiveDetectionFrameSize(frame: {
   readonly height: number;
   readonly orientation: string;
@@ -3065,14 +2910,6 @@ function createLiveFrameDebugArgs(
     isPlanar: frame.isPlanar,
     stage,
   };
-}
-
-function disposeLiveSkiaImage(image: SkiaImageType | null) {
-  "worklet";
-
-  if (image && typeof image.dispose === "function") {
-    image.dispose();
-  }
 }
 
 const styles = StyleSheet.create({

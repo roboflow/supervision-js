@@ -14,6 +14,16 @@
       "types": "./dist/index.d.ts",
       "react-native": "./src/index.ts",
       "import": "./dist/index.js"
+    },
+    "./adapters/executorch": {
+      "types": "./dist/adapters/executorch.d.ts",
+      "react-native": "./src/adapters/executorch.ts",
+      "import": "./dist/adapters/executorch.js"
+    },
+    "./skia": {
+      "types": "./dist/skia.d.ts",
+      "react-native": "./src/skia.ts",
+      "import": "./dist/skia.js"
     }
   },
   "files": [
@@ -38,14 +48,19 @@
     "supervision-js-core": "file:../core"
   },
   "devDependencies": {
+    "@shopify/react-native-skia": "^2.6.2",
     "nitrogen": "^0.35.9",
     "react-native-nitro-modules": "^0.35.9"
   },
   "peerDependencies": {
+    "@shopify/react-native-skia": "*",
     "react-native-nitro-modules": "*"
   },
   "peerDependenciesMeta": {
     "react-native-nitro-modules": {
+      "optional": true
+    },
+    "@shopify/react-native-skia": {
       "optional": true
     }
   }

@@ -9,6 +9,7 @@ import {
   BaseLabelStyle,
   BaseMaskStyle,
   BoxShape,
+  createEmptyReactNativeLiveIdMaskUniforms,
   createReactNativePreparedFramePacket,
   createReactNativeLiveIdMaskArtifact,
   createReactNativeLiveIdMaskArtifactAuto,
@@ -395,6 +396,23 @@ describe("React Native live ID-mask artifacts", () => {
     expect(resolveDetectionClassColorStyle("yellow_team_player").fill).toBe(
       0xfacc15,
     );
+  });
+
+  it("covers every declared shader uniform with the empty uniforms", () => {
+    // A missing key throws "Missing uniform value" at render time; this
+    // pins the empty-state factory to the shader's declaration list.
+    const uniforms = createEmptyReactNativeLiveIdMaskUniforms();
+    const declared = [
+      ...REACT_NATIVE_ID_MASK_SHADER_SOURCE.matchAll(
+        /uniform\s+(?!shader)\S+\s+(\w+)/g,
+      ),
+    ].map((match) => match[1]!);
+
+    expect(declared.length).toBeGreaterThan(5);
+
+    for (const name of declared) {
+      expect(uniforms[name], name).toBeDefined();
+    }
   });
 
   it("applies the live artifact size defaults when bounds are omitted", () => {
