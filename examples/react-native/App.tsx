@@ -1664,6 +1664,14 @@ type VideoStatus =
 // Sentinel end reason distinguishing a pause (source stays open, resumable)
 // from stop/end-of-stream in the pump's exit path.
 const VIDEO_PAUSED_REASON = "__paused__";
+// Memory guards for high-resolution uploads (an iPhone records 4K):
+// original-resolution masks cost width*height bytes PER DETECTION per frame
+// (~8MB each at 4K, ~50MB/frame of allocation churn), and the presented CPU
+// raster costs width*height*4 bytes. Above these bounds, fall back to
+// model-resolution masks and downscale the presented image, or the app gets
+// jetsam-killed without a JS error in sight.
+const VIDEO_FULL_RES_MASK_MAX_PIXELS = 1920 * 1088;
+const VIDEO_MAX_PRESENTATION_SIDE = 1600;
 
 function VideoFileProof(props: {
   readonly mode: DemoMode;
@@ -1862,6 +1870,11 @@ function VideoFileProof(props: {
 
       const source = boxedSource.unbox();
       const startedAt = Date.now();
+      const framePixels = source.frameWidth * source.frameHeight;
+      const returnMasksAtOriginalResolution =
+        LIVE_RETURN_MASKS_AT_ORIGINAL_RESOLUTION &&
+        framePixels <= VIDEO_FULL_RES_MASK_MAX_PIXELS;
+      const scalePaint = Skia.Paint();
       let processedFrames = 0;
       let endReason = "";
 
@@ -1897,8 +1910,7 @@ function VideoFileProof(props: {
               {
                 confidenceThreshold: 0.45,
                 maxInstances: LIVE_MAX_INSTANCES,
-                returnMaskAtOriginalResolution:
-                  LIVE_RETURN_MASKS_AT_ORIGINAL_RESOLUTION,
+                returnMaskAtOriginalResolution: returnMasksAtOriginalResolution,
               },
             );
 
@@ -1992,12 +2004,53 @@ function VideoFileProof(props: {
           // Skia's Metal context is thread-local: a texture image created on
           // this pump thread cannot be drawn by the render thread's context.
           // Rasterize to a context-independent CPU image, then the pixel
-          // buffer can be released immediately.
+          // buffer can be released immediately. Large frames are downscaled
+          // on the GPU first so the per-frame CPU raster stays bounded.
           const frameTimestampMs = handle.timestampMs;
           const textureImage = Skia.Image.MakeImageFromNativeBuffer(
             handle.pointer,
           );
-          const frameImage = textureImage.makeNonTextureImage();
+          const presentationScale = Math.min(
+            1,
+            VIDEO_MAX_PRESENTATION_SIDE / Math.max(handle.width, handle.height),
+          );
+          let frameImage: SkiaImageType | null = null;
+
+          if (presentationScale < 1) {
+            const scaledWidth = Math.max(
+              1,
+              Math.round(handle.width * presentationScale),
+            );
+            const scaledHeight = Math.max(
+              1,
+              Math.round(handle.height * presentationScale),
+            );
+            const surface = Skia.Surface.MakeOffscreen(
+              scaledWidth,
+              scaledHeight,
+            );
+
+            if (surface) {
+              surface
+                .getCanvas()
+                .drawImageRect(
+                  textureImage,
+                  Skia.XYWHRect(0, 0, handle.width, handle.height),
+                  Skia.XYWHRect(0, 0, scaledWidth, scaledHeight),
+                  scalePaint,
+                );
+
+              const snapshot = surface.makeImageSnapshot();
+
+              frameImage = snapshot.makeNonTextureImage();
+              disposeLiveSkiaImage(snapshot);
+              surface.dispose();
+            }
+          }
+
+          if (!frameImage) {
+            frameImage = textureImage.makeNonTextureImage();
+          }
 
           disposeLiveSkiaImage(textureImage);
           handle.release();
