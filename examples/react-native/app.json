@@ -10,7 +10,9 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.joaomarcoscrs.supervision-js-react-native-example",
       "infoPlist": {
-        "NSCameraUsageDescription": "The React Native proof uses the camera to render live frames with on-device detections."
+        "NSCameraUsageDescription": "The React Native proof uses the camera to render live frames with on-device detections.",
+        "NSPhotoLibraryUsageDescription": "The React Native proof opens videos from your library to run on-device detections on them.",
+        "NSMicrophoneUsageDescription": "The React Native proof reads videos with audio tracks from your library."
       }
     },
     "android": {

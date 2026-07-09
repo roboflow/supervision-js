@@ -23,6 +23,12 @@ export interface IdMaskDetection {
   confidence?: number;
   mask: ArrayBuffer;
   maskHeight: number;
+  /**
+   * True when `mask` stores the logical mask rotated 90° clockwise;
+   * `maskWidth`/`maskHeight` describe the rotated buffer and the fill loop
+   * samples it with transposed indices.
+   */
+  maskRotatedCw: boolean;
   maskWidth: number;
 }
 

@@ -9,6 +9,8 @@
 
 // Include C++ implementation defined types
 #include "HybridIdMaskBuilderSpecSwift.hpp"
+#include "HybridVideoFrameHandleSpecSwift.hpp"
+#include "HybridVideoFrameSourceSpecSwift.hpp"
 #include "SupervisionIdMask-Swift-Cxx-Umbrella.hpp"
 #include <NitroModules/NitroDefines.hpp>
 
@@ -27,6 +29,38 @@ namespace margelo::nitro::supervision::bridge::swift {
     }
     #endif
     SupervisionIdMask::HybridIdMaskBuilderSpec_cxx& swiftPart = swiftWrapper->getSwiftPart();
+    return swiftPart.toUnsafe();
+  }
+  
+  // pragma MARK: std::shared_ptr<HybridVideoFrameHandleSpec>
+  std::shared_ptr<HybridVideoFrameHandleSpec> create_std__shared_ptr_HybridVideoFrameHandleSpec_(void* NON_NULL swiftUnsafePointer) noexcept {
+    SupervisionIdMask::HybridVideoFrameHandleSpec_cxx swiftPart = SupervisionIdMask::HybridVideoFrameHandleSpec_cxx::fromUnsafe(swiftUnsafePointer);
+    return std::make_shared<margelo::nitro::supervision::HybridVideoFrameHandleSpecSwift>(swiftPart);
+  }
+  void* NON_NULL get_std__shared_ptr_HybridVideoFrameHandleSpec_(std__shared_ptr_HybridVideoFrameHandleSpec_ cppType) {
+    std::shared_ptr<margelo::nitro::supervision::HybridVideoFrameHandleSpecSwift> swiftWrapper = std::dynamic_pointer_cast<margelo::nitro::supervision::HybridVideoFrameHandleSpecSwift>(cppType);
+    #ifdef NITRO_DEBUG
+    if (swiftWrapper == nullptr) [[unlikely]] {
+      throw std::runtime_error("Class \"HybridVideoFrameHandleSpec\" is not implemented in Swift!");
+    }
+    #endif
+    SupervisionIdMask::HybridVideoFrameHandleSpec_cxx& swiftPart = swiftWrapper->getSwiftPart();
+    return swiftPart.toUnsafe();
+  }
+  
+  // pragma MARK: std::shared_ptr<HybridVideoFrameSourceSpec>
+  std::shared_ptr<HybridVideoFrameSourceSpec> create_std__shared_ptr_HybridVideoFrameSourceSpec_(void* NON_NULL swiftUnsafePointer) noexcept {
+    SupervisionIdMask::HybridVideoFrameSourceSpec_cxx swiftPart = SupervisionIdMask::HybridVideoFrameSourceSpec_cxx::fromUnsafe(swiftUnsafePointer);
+    return std::make_shared<margelo::nitro::supervision::HybridVideoFrameSourceSpecSwift>(swiftPart);
+  }
+  void* NON_NULL get_std__shared_ptr_HybridVideoFrameSourceSpec_(std__shared_ptr_HybridVideoFrameSourceSpec_ cppType) {
+    std::shared_ptr<margelo::nitro::supervision::HybridVideoFrameSourceSpecSwift> swiftWrapper = std::dynamic_pointer_cast<margelo::nitro::supervision::HybridVideoFrameSourceSpecSwift>(cppType);
+    #ifdef NITRO_DEBUG
+    if (swiftWrapper == nullptr) [[unlikely]] {
+      throw std::runtime_error("Class \"HybridVideoFrameSourceSpec\" is not implemented in Swift!");
+    }
+    #endif
+    SupervisionIdMask::HybridVideoFrameSourceSpec_cxx& swiftPart = swiftWrapper->getSwiftPart();
     return swiftPart.toUnsafe();
   }
 

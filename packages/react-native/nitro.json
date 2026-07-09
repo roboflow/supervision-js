@@ -14,6 +14,12 @@
         "language": "swift",
         "implementationClassName": "HybridIdMaskBuilder"
       }
+    },
+    "VideoFrameSource": {
+      "ios": {
+        "language": "swift",
+        "implementationClassName": "HybridVideoFrameSource"
+      }
     }
   },
   "ignorePaths": ["**/node_modules", "dist"]

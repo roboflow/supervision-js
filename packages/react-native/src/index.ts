@@ -44,6 +44,17 @@ export type {
   ReactNativeLiveIdMaskNativeBuilderHandle,
 } from "./native-id-mask-builder";
 
+export {
+  createReactNativeVideoFrameSource,
+  REACT_NATIVE_VIDEO_FRAME_SOURCE_NAME,
+} from "./video-frame-source";
+export type {
+  ReactNativeBoxedVideoFrameSource,
+  ReactNativeVideoFrameHandle,
+  ReactNativeVideoFrameSource,
+  ReactNativeVideoFrameSourceHandle,
+} from "./video-frame-source";
+
 export const DEFAULT_REACT_NATIVE_ID_MASK_EDGE_SMOOTHING = 0.85;
 
 const fillPaletteLookup = createShaderArrayLookup({
@@ -409,6 +420,13 @@ export interface ReactNativeLiveSerializedDetection {
   readonly mask: Uint8Array;
   readonly maskHeight: number;
   readonly maskWidth: number;
+  /**
+   * Set when `mask` stores the logical mask rotated 90° clockwise (as
+   * ExecuTorch returns for `orientation: "up"` frames). `maskWidth` and
+   * `maskHeight` describe the rotated buffer; the fill loops sample it with
+   * transposed indices instead of copying it upright.
+   */
+  readonly maskRotatedCw?: boolean;
   readonly score?: number;
 }
 
@@ -773,7 +791,15 @@ function fillReactNativeLiveMask(options: {
     targetY0,
     width,
   } = options;
-  const { mask, maskHeight, maskWidth } = detection;
+  const { mask } = detection;
+  const rotatedCw = detection.maskRotatedCw === true;
+  // Logical (upright) mask dims. When the buffer stores the mask rotated 90°
+  // clockwise, the reported dims describe the rotated buffer, so the logical
+  // dims are swapped and reads are transposed:
+  // logical(x, y) = stored[x * storedRowWidth + (storedRowWidth - 1 - y)].
+  const maskWidth = rotatedCw ? detection.maskHeight : detection.maskWidth;
+  const maskHeight = rotatedCw ? detection.maskWidth : detection.maskHeight;
+  const storedRowWidth = detection.maskWidth;
   const sourceXStep = maskWidth / targetWidth;
   const sourceYStep = maskHeight / targetHeight;
 
@@ -782,14 +808,27 @@ function fillReactNativeLiveMask(options: {
   // masks when smoother boundaries are needed.
   for (let y = 0; y < targetHeight; y += 1) {
     const sourceY = Math.min(maskHeight - 1, Math.floor(y * sourceYStep));
-    const sourceRowOffset = sourceY * maskWidth;
     const targetRowOffset = (targetY0 + y) * width + targetX0;
 
-    for (let x = 0; x < targetWidth; x += 1) {
-      const sourceX = Math.min(maskWidth - 1, Math.floor(x * sourceXStep));
+    if (rotatedCw) {
+      const rotatedColumn = storedRowWidth - 1 - sourceY;
 
-      if (mask[sourceRowOffset + sourceX]) {
-        data[targetRowOffset + x] = maskId;
+      for (let x = 0; x < targetWidth; x += 1) {
+        const sourceX = Math.min(maskWidth - 1, Math.floor(x * sourceXStep));
+
+        if (mask[sourceX * storedRowWidth + rotatedColumn]) {
+          data[targetRowOffset + x] = maskId;
+        }
+      }
+    } else {
+      const sourceRowOffset = sourceY * maskWidth;
+
+      for (let x = 0; x < targetWidth; x += 1) {
+        const sourceX = Math.min(maskWidth - 1, Math.floor(x * sourceXStep));
+
+        if (mask[sourceRowOffset + sourceX]) {
+          data[targetRowOffset + x] = maskId;
+        }
       }
     }
   }
@@ -878,10 +917,17 @@ export function createReactNativeLiveIdMaskArtifact(
     maskCount += 1;
 
     if (detection.maskWidth > 0 && detection.maskHeight > 0) {
+      const logicalMaskWidth = detection.maskRotatedCw
+        ? detection.maskHeight
+        : detection.maskWidth;
+      const logicalMaskHeight = detection.maskRotatedCw
+        ? detection.maskWidth
+        : detection.maskHeight;
+
       maxCellTexels = Math.max(
         maxCellTexels,
-        targetWidth / detection.maskWidth,
-        targetHeight / detection.maskHeight,
+        targetWidth / logicalMaskWidth,
+        targetHeight / logicalMaskHeight,
       );
     }
 

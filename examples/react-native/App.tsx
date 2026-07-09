@@ -44,9 +44,14 @@ import {
   useFrameOutput,
   useFrameRenderer,
   type Frame,
+  type NativeThreadFactory,
 } from "react-native-vision-camera";
 import { useSharedValue } from "react-native-reanimated";
-import { scheduleOnRN } from "react-native-worklets";
+import { scheduleOnRN, scheduleOnRuntime } from "react-native-worklets";
+import { createWorkletRuntimeForThread } from "react-native-vision-camera-worklets";
+import { NitroModules } from "react-native-nitro-modules";
+import { Asset } from "expo-asset";
+import * as ImagePicker from "expo-image-picker";
 import {
   BoxShape,
   type BoxDrawInstruction,
@@ -63,8 +68,10 @@ import {
   type ReactNativeFrameLayout,
   type ReactNativeIdMaskUniforms,
   createReactNativeLiveIdMaskArtifactAuto,
+  createReactNativeVideoFrameSource,
   loadReactNativeLiveIdMaskNativeBuilder,
   pickReactNativeDetectionAtPoint,
+  type ReactNativeBoxedVideoFrameSource,
   resolveReactNativeIdMaskUniforms,
   resolveReactNativeLiveIdMaskUniforms,
   resolveReactNativeFrameLayout,
@@ -72,6 +79,7 @@ import {
 } from "supervision-js-react-native";
 
 import basketballFrame from "./assets/basketball-frame.jpg";
+import basketballVideo from "../../demo/fixtures/basketball_sample/basketball_sample.mp4";
 import {
   basketballDetectionFrame,
   basketballFrameMetadata,
@@ -90,8 +98,9 @@ import {
   runWithWorkletDebugLogging,
   serializeDebugError,
 } from "./src/debug-logging";
+import { unrotateExecutorchUpBbox } from "./src/executorch-orientation";
 
-type DemoMode = "static" | "live";
+type DemoMode = "static" | "live" | "video";
 type LiveDetectionDisplayMode = "masks" | "boxes";
 type LiveClassEffect = "redact" | "spotlight" | "mute";
 type LiveClassEffects = Readonly<Record<string, LiveClassEffect>>;
@@ -148,6 +157,16 @@ export default function App() {
   if (mode === "live") {
     return (
       <LiveCameraProof
+        mode={mode}
+        onModeChange={setMode}
+        segmentation={segmentation}
+      />
+    );
+  }
+
+  if (mode === "video") {
+    return (
+      <VideoFileProof
         mode={mode}
         onModeChange={setMode}
         segmentation={segmentation}
@@ -554,7 +573,8 @@ interface SyncedFrameStageProps {
   readonly maskEffect: ReturnType<typeof Skia.RuntimeEffect.Make> | null;
   readonly maskImage?: unknown;
   readonly maskUniforms?: unknown;
-  readonly mediaImage?: SkiaImageType | null;
+  /** Plain SkImage or a shared value holding one (video packets). */
+  readonly mediaImage?: unknown;
   readonly mediaLayer?: ReactNode;
   readonly onPress?: (point: {
     readonly x: number;
@@ -609,7 +629,7 @@ function SyncedFrameStage(props: SyncedFrameStageProps) {
           <SkiaImage
             fit="fill"
             height={props.layout.mediaRect.height}
-            image={props.mediaImage}
+            image={props.mediaImage as never}
             width={props.layout.mediaRect.width}
             x={props.layout.mediaRect.x}
             y={props.layout.mediaRect.y}
@@ -1700,6 +1720,606 @@ function LiveCameraProof(props: {
   );
 }
 
+interface VideoStats {
+  readonly builder: string;
+  readonly detectionCount: number;
+  readonly durationMs: number;
+  readonly fillMs: number;
+  readonly processedFrames: number;
+  readonly segmentationMs: number;
+  readonly tickMs: number;
+  readonly videoTimeMs: number;
+  readonly wallMs: number;
+}
+
+type VideoStatus = "idle" | "opening" | "processing" | "done" | "error";
+
+function VideoFileProof(props: {
+  readonly mode: DemoMode;
+  readonly onModeChange: (mode: DemoMode) => void;
+  readonly segmentation: LiveSegmentation;
+}) {
+  const window = useWindowDimensions();
+  const canvasWidth = window.width;
+  const canvasHeight = window.height;
+  const [videoStatus, setVideoStatus] = useState<VideoStatus>("idle");
+  const [videoError, setVideoError] = useState<string | null>(null);
+  const [videoStats, setVideoStats] = useState<VideoStats | null>(null);
+  const [videoDims, setVideoDims] = useState<{
+    readonly height: number;
+    readonly width: number;
+  } | null>(null);
+  const [videoDetections, setVideoDetections] = useState<
+    readonly LiveOverlayDetection[]
+  >([]);
+
+  const emptyVideoMaskUniforms = useMemo(
+    () => createEmptyLiveMaskUniforms(),
+    [],
+  );
+  const videoLayout = useMemo(
+    () =>
+      resolveReactNativeFrameLayout({
+        canvasHeight,
+        canvasWidth,
+        mediaHeight: videoDims?.height ?? LIVE_FRAME_TARGET_RESOLUTION.height,
+        mediaWidth: videoDims?.width ?? LIVE_FRAME_TARGET_RESOLUTION.width,
+      }),
+    [canvasHeight, canvasWidth, videoDims?.height, videoDims?.width],
+  );
+  const videoSyncedOverlays = useMemo(
+    () =>
+      createLiveSyncedOverlays({
+        detections: videoDetections,
+        layout: videoLayout,
+        mediaHeight: videoDims?.height ?? LIVE_FRAME_TARGET_RESOLUTION.height,
+        mediaWidth: videoDims?.width ?? LIVE_FRAME_TARGET_RESOLUTION.width,
+      }),
+    [videoDetections, videoDims?.height, videoDims?.width, videoLayout],
+  );
+  const videoMaskEffect = useMemo(
+    () => Skia.RuntimeEffect.Make(REACT_NATIVE_ID_MASK_SHADER_SOURCE),
+    [],
+  );
+
+  // Packet shared values. Frame image + frame handle + mask image + uniforms
+  // swap together per tick; the previous packet retires one tick late so the
+  // UI thread can never draw a disposed image or a released pixel buffer.
+  const videoPlayingShared = useSharedValue(false);
+  const videoFrameImageShared = useSharedValue<SkiaImageType | null>(null);
+  const videoMaskImageShared = useSharedValue<SkiaImageType | null>(null);
+  const videoMaskUniformsShared = useSharedValue<ReactNativeIdMaskUniforms>(
+    createEmptyLiveMaskUniforms(),
+  );
+  const videoMediaRectShared = useSharedValue<LiveMediaRect>({
+    height: videoLayout.mediaRect.height,
+    width: videoLayout.mediaRect.width,
+    x: videoLayout.mediaRect.x,
+    y: videoLayout.mediaRect.y,
+  });
+  const retiredFrameImageShared = useSharedValue<SkiaImageType | null>(null);
+  const retiredMaskImageShared = useSharedValue<SkiaImageType | null>(null);
+  const lastVideoReportAtShared = useSharedValue(0);
+
+  const liveNativeMaskBuilder = useMemo(
+    () => loadReactNativeLiveIdMaskNativeBuilder(),
+    [],
+  );
+  const runSegmentationOnFrame = props.segmentation.runOnFrame;
+  // A dedicated native thread + worklet runtime for the pump loop, exactly
+  // the setup react-native-vision-camera-worklets documents. Created lazily
+  // when Video mode mounts.
+  const videoRuntime = useMemo(() => {
+    const threadFactory = NitroModules.createHybridObject<NativeThreadFactory>(
+      "NativeThreadFactory",
+    );
+    const thread = threadFactory.createNativeThread("supervision-video-pump");
+
+    return createWorkletRuntimeForThread(thread);
+  }, []);
+
+  useEffect(() => {
+    videoMediaRectShared.value = {
+      height: videoLayout.mediaRect.height,
+      width: videoLayout.mediaRect.width,
+      x: videoLayout.mediaRect.x,
+      y: videoLayout.mediaRect.y,
+    };
+  }, [videoLayout.mediaRect, videoMediaRectShared]);
+
+  const reportVideoDetections = useCallback(
+    (detections: readonly LiveOverlayDetection[]) => {
+      setVideoDetections(detections);
+    },
+    [],
+  );
+  const reportVideoStats = useCallback((stats: VideoStats) => {
+    setVideoStats(stats);
+  }, []);
+  const reportVideoEnded = useCallback((reason: string) => {
+    setVideoStatus(reason === "" ? "done" : "error");
+
+    if (reason !== "") {
+      setVideoError(reason);
+    }
+  }, []);
+
+  // Releases every packet resource. Runs on the pump runtime so it is
+  // serialized after the pump loop exits.
+  const cleanupVideoPackets = useCallback(() => {
+    "worklet";
+
+    const frameImage = videoFrameImageShared.value;
+    const maskImage = videoMaskImageShared.value;
+    const retiredImage = retiredFrameImageShared.value;
+    const retiredMask = retiredMaskImageShared.value;
+
+    videoFrameImageShared.value = null;
+    videoMaskImageShared.value = null;
+    videoMaskUniformsShared.value = emptyVideoMaskUniforms;
+    retiredFrameImageShared.value = null;
+    retiredMaskImageShared.value = null;
+
+    disposeLiveSkiaImage(frameImage);
+    disposeLiveSkiaImage(maskImage);
+    disposeLiveSkiaImage(retiredImage);
+    disposeLiveSkiaImage(retiredMask);
+  }, [
+    emptyVideoMaskUniforms,
+    retiredFrameImageShared,
+    retiredMaskImageShared,
+    videoFrameImageShared,
+    videoMaskImageShared,
+    videoMaskUniformsShared,
+  ]);
+
+  const runVideoPump = useCallback(
+    (boxedSource: ReactNativeBoxedVideoFrameSource, durationMs: number) => {
+      "worklet";
+
+      const source = boxedSource.unbox();
+      const startedAt = Date.now();
+      let processedFrames = 0;
+      let endReason = "";
+
+      try {
+        while (videoPlayingShared.value) {
+          const handle = source.copyNextFrame();
+
+          if (!handle) {
+            break;
+          }
+
+          const tickStartedAt = Date.now();
+          const segmentFrame = runSegmentationOnFrame;
+          let segmentationMs = 0;
+          let detections: LiveSerializedDetection[] = [];
+          let detectionCount = 0;
+
+          if (segmentFrame !== null) {
+            // ExecuTorch's Frame type is structural: any object exposing a
+            // BGRA CVPixelBuffer pointer works. release() is a no-op because
+            // the packet lifecycle owns the buffer (it must stay alive for
+            // Skia to draw it after inference).
+            const rawDetections = segmentFrame(
+              {
+                getNativeBuffer: () => ({
+                  pointer: handle.pointer,
+                  release: () => {},
+                }),
+                isMirrored: false,
+                orientation: "up",
+              } as Parameters<typeof segmentFrame>[0],
+              false,
+              {
+                confidenceThreshold: 0.45,
+                maxInstances: LIVE_MAX_INSTANCES,
+                returnMaskAtOriginalResolution:
+                  LIVE_RETURN_MASKS_AT_ORIGINAL_RESOLUTION,
+              },
+            );
+
+            segmentationMs = Date.now() - tickStartedAt;
+            detectionCount = rawDetections.length;
+
+            const serialized: LiveSerializedDetection[] = [];
+
+            for (let index = 0; index < rawDetections.length; index += 1) {
+              const detection = rawDetections[index]!;
+              const label: string =
+                typeof detection.label === "string" ? detection.label : "";
+
+              // ExecuTorch maps "up"-frame outputs into portrait screen
+              // space and rotates masks 90° clockwise (see
+              // src/executorch-orientation.ts). Un-rotate the bbox back into
+              // the upright video's space and flag the mask so the fill
+              // loops sample it transposed instead of copying it upright.
+              serialized[index] = {
+                bbox: unrotateExecutorchUpBbox(detection.bbox, handle.height),
+                color: resolveDemoClassColor(label, index % 10),
+                label,
+                mask: detection.mask,
+                maskHeight: detection.maskHeight,
+                maskRotatedCw: true,
+                maskWidth: detection.maskWidth,
+                score: detection.score,
+              };
+            }
+
+            detections = serialized;
+          }
+
+          const overlayDetections: LiveOverlayDetection[] = [];
+
+          for (let index = 0; index < detections.length; index += 1) {
+            const detection = detections[index]!;
+
+            overlayDetections[index] = {
+              bbox: detection.bbox,
+              color: detection.color,
+              label: detection.label ?? "object",
+              score: detection.score ?? 0,
+            };
+          }
+
+          scheduleOnRN(reportVideoDetections, overlayDetections);
+
+          const mediaRect = videoMediaRectShared.value;
+          let preparedMask: LiveSkiaMaskFrame | null = null;
+
+          try {
+            preparedMask = createLiveSkiaMaskFrame({
+              artifactMaxPixels: LIVE_MASK_ARTIFACT_MAX_PIXELS,
+              artifactMaxSide: LIVE_MASK_ARTIFACT_MAX_SIDE,
+              detections,
+              frameHeight: handle.height,
+              frameWidth: handle.width,
+              mediaRect: {
+                height: mediaRect.height,
+                width: mediaRect.width,
+                x: mediaRect.x,
+                y: mediaRect.y,
+              },
+              nativeBuilder: liveNativeMaskBuilder,
+            });
+          } catch {
+            preparedMask = null;
+          }
+
+          // Skia's Metal context is thread-local: a texture image created on
+          // this pump thread cannot be drawn by the render thread's context.
+          // Rasterize to a context-independent CPU image, then the pixel
+          // buffer can be released immediately.
+          const frameTimestampMs = handle.timestampMs;
+          const textureImage = Skia.Image.MakeImageFromNativeBuffer(
+            handle.pointer,
+          );
+          const frameImage = textureImage.makeNonTextureImage();
+
+          disposeLiveSkiaImage(textureImage);
+          handle.release();
+
+          // Release the images from two ticks ago, retire the previous ones,
+          // and present the new packet.
+          const previousFrameImage = videoFrameImageShared.value;
+          const previousMaskImage = videoMaskImageShared.value;
+          const retiredImage = retiredFrameImageShared.value;
+          const retiredMask = retiredMaskImageShared.value;
+
+          videoMaskUniformsShared.value = preparedMask
+            ? preparedMask.uniforms
+            : emptyVideoMaskUniforms;
+          videoMaskImageShared.value = preparedMask ? preparedMask.image : null;
+          videoFrameImageShared.value = frameImage;
+          retiredFrameImageShared.value = previousFrameImage;
+          retiredMaskImageShared.value = previousMaskImage;
+
+          disposeLiveSkiaImage(retiredImage);
+          disposeLiveSkiaImage(retiredMask);
+
+          processedFrames += 1;
+
+          if (Date.now() - lastVideoReportAtShared.value > 250) {
+            lastVideoReportAtShared.value = Date.now();
+            scheduleOnRN(reportVideoStats, {
+              builder: preparedMask?.builder ?? "-",
+              detectionCount,
+              durationMs,
+              fillMs: preparedMask?.fillMs ?? 0,
+              processedFrames,
+              segmentationMs,
+              tickMs: Date.now() - tickStartedAt,
+              videoTimeMs: frameTimestampMs,
+              wallMs: Date.now() - startedAt,
+            });
+          }
+        }
+      } catch (error) {
+        endReason = serializeDebugError(error).message;
+      } finally {
+        source.close();
+        videoPlayingShared.value = false;
+        scheduleOnRN(reportVideoEnded, endReason);
+      }
+    },
+    [
+      emptyVideoMaskUniforms,
+      lastVideoReportAtShared,
+      liveNativeMaskBuilder,
+      reportVideoDetections,
+      reportVideoEnded,
+      reportVideoStats,
+      retiredFrameImageShared,
+      retiredMaskImageShared,
+      runSegmentationOnFrame,
+      videoFrameImageShared,
+      videoMaskImageShared,
+      videoMaskUniformsShared,
+      videoMediaRectShared,
+      videoPlayingShared,
+    ],
+  );
+
+  const startVideo = useCallback(
+    (fileUri: string) => {
+      setVideoError(null);
+      setVideoStats(null);
+      setVideoDetections([]);
+      setVideoStatus("opening");
+
+      const sourceHandle = createReactNativeVideoFrameSource();
+
+      if (!sourceHandle.boxed) {
+        setVideoError(
+          sourceHandle.fallbackReason ?? "video source unavailable",
+        );
+        setVideoStatus("error");
+
+        return;
+      }
+
+      try {
+        const boxed = sourceHandle.boxed;
+        const source = boxed.unbox();
+
+        source.open(fileUri);
+        setVideoDims({
+          height: source.frameHeight,
+          width: source.frameWidth,
+        });
+
+        const durationMs = source.durationMs;
+
+        setVideoStatus("processing");
+        videoPlayingShared.value = true;
+        // Serialized on the pump runtime: cleanup of the previous run's
+        // packets, then the new pump loop.
+        scheduleOnRuntime(videoRuntime, cleanupVideoPackets);
+        scheduleOnRuntime(videoRuntime, () => {
+          "worklet";
+
+          runVideoPump(boxed, durationMs);
+        });
+      } catch (error) {
+        setVideoError(
+          error instanceof Error ? error.message : "failed to open video",
+        );
+        setVideoStatus("error");
+      }
+    },
+    [cleanupVideoPackets, runVideoPump, videoPlayingShared, videoRuntime],
+  );
+
+  const startSampleVideo = useCallback(async () => {
+    try {
+      const asset = Asset.fromModule(basketballVideo);
+
+      await asset.downloadAsync();
+
+      if (!asset.localUri) {
+        throw new Error("sample video has no local uri");
+      }
+
+      startVideo(asset.localUri);
+    } catch (error) {
+      setVideoError(
+        error instanceof Error ? error.message : "failed to load sample",
+      );
+      setVideoStatus("error");
+    }
+  }, [startVideo]);
+
+  const pickVideoFromLibrary = useCallback(async () => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["videos"],
+        quality: 1,
+      });
+      const uri = result.assets?.[0]?.uri;
+
+      if (result.canceled || !uri) {
+        return;
+      }
+
+      startVideo(uri);
+    } catch (error) {
+      setVideoError(
+        error instanceof Error ? error.message : "failed to pick video",
+      );
+      setVideoStatus("error");
+    }
+  }, [startVideo]);
+
+  const stopVideo = useCallback(() => {
+    videoPlayingShared.value = false;
+  }, [videoPlayingShared]);
+
+  useEffect(() => {
+    return () => {
+      videoPlayingShared.value = false;
+      scheduleOnRuntime(videoRuntime, cleanupVideoPackets);
+    };
+  }, [cleanupVideoPackets, videoPlayingShared, videoRuntime]);
+
+  const modelStatus = formatSegmentationStatus(props.segmentation);
+  const modelReady = props.segmentation.isReady;
+  const isProcessing =
+    videoStatus === "processing" || videoStatus === "opening";
+  const progress =
+    videoStats && videoStats.durationMs > 0
+      ? Math.min(1, videoStats.videoTimeMs / videoStats.durationMs)
+      : 0;
+  const processedFps = videoStats
+    ? videoStats.processedFrames / Math.max(videoStats.wallMs / 1000, 0.001)
+    : 0;
+
+  return (
+    <View style={styles.liveScreen}>
+      <StatusBar hidden />
+      <SyncedFrameStage
+        boxes={videoSyncedOverlays.boxes}
+        canvasHeight={canvasHeight}
+        canvasStyle={StyleSheet.absoluteFill}
+        canvasWidth={canvasWidth}
+        labels={videoSyncedOverlays.labels}
+        layout={videoLayout}
+        maskEffect={videoMaskEffect}
+        maskImage={videoMaskImageShared}
+        maskUniforms={videoMaskUniformsShared}
+        mediaImage={videoFrameImageShared}
+        showBoxes
+        showMasks
+        stageStyle={styles.liveStage}
+      >
+        <View style={styles.liveTopBar}>
+          <View style={styles.liveBrand}>
+            <BrandMark />
+            <View style={styles.headerCopy}>
+              <Text style={styles.title}>supervision-js</Text>
+              <Text style={styles.subtitle}>Video RF-DETR analysis</Text>
+            </View>
+          </View>
+          <ModeSwitch mode={props.mode} onModeChange={props.onModeChange} />
+        </View>
+
+        <View style={styles.liveStatusCluster}>
+          <StatusPill
+            tone={modelReady ? "ready" : "warning"}
+            value={modelStatus}
+          />
+          <StatusPill tone="ready" value="strict sync" />
+          <StatusPill value={`${videoStats?.detectionCount ?? 0} masks`} />
+          <StatusPill
+            tone={videoStats?.builder === "native" ? "ready" : undefined}
+            value={`prep ${videoStats?.builder ?? "-"}`}
+          />
+        </View>
+
+        {videoStatus === "idle" ||
+        videoStatus === "done" ||
+        videoStatus === "error" ? (
+          <View style={[styles.stageOverlay, styles.videoOverlayCard]}>
+            <Text style={styles.overlayTitle}>
+              {videoStatus === "done"
+                ? "Video processed"
+                : videoStatus === "error"
+                  ? "Video error"
+                  : "Saved video"}
+            </Text>
+            <Text style={styles.overlayBody}>
+              {videoStatus === "error"
+                ? (videoError ?? "unknown error")
+                : modelReady
+                  ? "Run RF-DETR on every decoded frame, rendered in strict sync."
+                  : modelStatus}
+            </Text>
+            <View style={styles.videoActionsRow}>
+              <TouchableOpacity
+                disabled={!modelReady}
+                onPress={() => {
+                  void startSampleVideo();
+                }}
+                style={[
+                  styles.detectionMenuAction,
+                  !modelReady ? styles.videoActionDisabled : null,
+                ]}
+              >
+                <Text style={styles.detectionMenuActionText}>
+                  Basketball sample
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                disabled={!modelReady}
+                onPress={() => {
+                  void pickVideoFromLibrary();
+                }}
+                style={[
+                  styles.detectionMenuAction,
+                  !modelReady ? styles.videoActionDisabled : null,
+                ]}
+              >
+                <Text style={styles.detectionMenuActionText}>
+                  Choose from library
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : null}
+
+        {isProcessing ? (
+          <View style={styles.videoHud}>
+            <View style={styles.videoProgressTrack}>
+              <View
+                style={[
+                  styles.videoProgressFill,
+                  { width: `${Math.round(progress * 100)}%` },
+                ]}
+              />
+            </View>
+            <View style={styles.videoMetricsRow}>
+              <LiveMetric
+                label="Video"
+                value={`${formatVideoTime(videoStats?.videoTimeMs ?? 0)} / ${formatVideoTime(videoStats?.durationMs ?? 0)}`}
+              />
+              <LiveMetric
+                label="Seg"
+                value={`${Math.round(videoStats?.segmentationMs ?? 0)}ms`}
+              />
+              <LiveMetric
+                label="Fill"
+                value={`${Math.round(videoStats?.fillMs ?? 0)}ms`}
+              />
+              <LiveMetric
+                label="Tick"
+                value={`${Math.round(videoStats?.tickMs ?? 0)}ms`}
+              />
+              <LiveMetric label="FPS" value={processedFps.toFixed(1)} />
+              <LiveMetric
+                label="Frames"
+                value={String(videoStats?.processedFrames ?? 0)}
+              />
+            </View>
+            <TouchableOpacity
+              onPress={stopVideo}
+              style={styles.detectionMenuAction}
+            >
+              <Text style={styles.detectionMenuActionText}>Stop</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+      </SyncedFrameStage>
+    </View>
+  );
+}
+
+function formatVideoTime(milliseconds: number) {
+  const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
 function ModeSwitch(props: {
   readonly mode: DemoMode;
   readonly onModeChange: (mode: DemoMode) => void;
@@ -1736,6 +2356,22 @@ function ModeSwitch(props: {
           ]}
         >
           Live
+        </Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        onPress={() => props.onModeChange("video")}
+        style={[
+          styles.modeButton,
+          props.mode === "video" ? styles.modeButtonActive : null,
+        ]}
+      >
+        <Text
+          style={[
+            styles.modeButtonText,
+            props.mode === "video" ? styles.modeButtonTextActive : null,
+          ]}
+        >
+          Video
         </Text>
       </TouchableOpacity>
     </View>
@@ -2505,6 +3141,52 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: 18,
     paddingVertical: 6,
+  },
+  videoActionsRow: {
+    gap: 8,
+    marginTop: 10,
+    width: "100%",
+  },
+  // Sits above the Skia canvas (zIndex 2): keeps the card visible and its
+  // buttons tappable, since the canvas otherwise intercepts touches.
+  videoOverlayCard: {
+    top: 200,
+    zIndex: 6,
+  },
+  videoActionDisabled: {
+    opacity: 0.4,
+  },
+  videoHud: {
+    alignItems: "center",
+    backgroundColor: "rgba(5, 7, 11, 0.72)",
+    borderColor: "rgba(216, 226, 240, 0.16)",
+    borderRadius: 16,
+    borderWidth: 1,
+    bottom: 34,
+    gap: 8,
+    left: 14,
+    padding: 10,
+    position: "absolute",
+    right: 14,
+    zIndex: 6,
+  },
+  videoMetricsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 7,
+    justifyContent: "center",
+  },
+  videoProgressTrack: {
+    backgroundColor: "rgba(216, 226, 240, 0.14)",
+    borderRadius: 999,
+    height: 6,
+    overflow: "hidden",
+    width: "100%",
+  },
+  videoProgressFill: {
+    backgroundColor: "#77e4f2",
+    borderRadius: 999,
+    height: 6,
   },
   liveTopBar: {
     alignItems: "center",

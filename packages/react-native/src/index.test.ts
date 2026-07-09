@@ -29,6 +29,7 @@ import {
   type ReactNativeLiveIdMaskArtifactOptions,
   type ReactNativeLiveIdMaskNativeBuilderHandle,
 } from "./index";
+import { createReactNativeVideoFrameSource } from "./index";
 import type {
   IdMaskBuildArtifact,
   IdMaskBuildOptions,
@@ -471,6 +472,56 @@ describe("React Native live ID-mask artifacts", () => {
     expect(artifact!.maskCount).toBe(MAX_ID_MASK_PALETTE_ENTRIES - 1);
   });
 
+  it("samples clockwise-rotated masks identically to their upright originals", () => {
+    // Logical 3x2 mask (width 3, height 2): row0 = [1, 0, 1], row1 = [0, 1, 0].
+    const upright = new Uint8Array([1, 0, 1, 0, 1, 0]);
+    // The same mask rotated 90° clockwise is 2x3 (width 2, height 3):
+    // rotated(x, y) = upright(y', x') with x = H-1-y', y = x'.
+    const rotated = new Uint8Array([0, 1, 1, 0, 0, 1]);
+    const sizing = {
+      frameHeight: 4,
+      frameWidth: 6,
+      maxPixels: 24,
+      maxSide: 6,
+    };
+    const bbox = { x1: 0, x2: 6, y1: 0, y2: 4 };
+
+    const uprightArtifact = createReactNativeLiveIdMaskArtifact({
+      detections: [
+        {
+          bbox,
+          color: 0x38bdf8,
+          label: "object",
+          mask: upright,
+          maskHeight: 2,
+          maskWidth: 3,
+          score: 0.9,
+        },
+      ],
+      ...sizing,
+    });
+    const rotatedArtifact = createReactNativeLiveIdMaskArtifact({
+      detections: [
+        {
+          bbox,
+          color: 0x38bdf8,
+          label: "object",
+          mask: rotated,
+          maskHeight: 3,
+          maskRotatedCw: true,
+          maskWidth: 2,
+          score: 0.9,
+        },
+      ],
+      ...sizing,
+    });
+
+    expect(rotatedArtifact!.data).toEqual(uprightArtifact!.data);
+    expect(rotatedArtifact!.edgeFeatherTexels).toBe(
+      uprightArtifact!.edgeFeatherTexels,
+    );
+  });
+
   it("draws the raw model mask footprint without reshaping it", () => {
     // 2x2 mask with an empty bottom-right quadrant, upscaled to 8x8: the
     // empty quadrant must stay an exact 4x4 block.
@@ -908,6 +959,15 @@ function expectPresentation(
   });
 }
 
+describe("React Native video frame source", () => {
+  it("degrades to a null handle with a reason outside React Native", () => {
+    const handle = createReactNativeVideoFrameSource();
+
+    expect(handle.boxed).toBeNull();
+    expect(typeof handle.fallbackReason).toBe("string");
+  });
+});
+
 function createFullCoverageLiveDetection(options: { readonly color: number }) {
   return {
     bbox: { x1: 0, x2: 4, y1: 0, y2: 4 },
@@ -935,6 +995,7 @@ function createNativeLikeIdMaskBuilderHandle(): ReactNativeLiveIdMaskNativeBuild
         label: detection.className,
         mask: new Uint8Array(detection.mask),
         maskHeight: detection.maskHeight,
+        maskRotatedCw: detection.maskRotatedCw,
         maskWidth: detection.maskWidth,
         score: detection.confidence,
       })),

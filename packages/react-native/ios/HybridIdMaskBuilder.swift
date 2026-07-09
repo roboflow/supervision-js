@@ -123,17 +123,22 @@ class HybridIdMaskBuilder: HybridIdMaskBuilderSpec {
         continue
       }
 
+      // Logical (upright) mask dims: rotated buffers report rotated dims.
+      let logicalMaskWidth = detection.maskRotatedCw ? maskHeight : maskWidth
+      let logicalMaskHeight = detection.maskRotatedCw ? maskWidth : maskHeight
+
       maxCellTexels = max(
         maxCellTexels,
-        Double(targetWidth) / Double(maskWidth),
-        Double(targetHeight) / Double(maskHeight))
+        Double(targetWidth) / Double(logicalMaskWidth),
+        Double(targetHeight) / Double(logicalMaskHeight))
 
       let maskData = detection.mask.data
       let fillValue = UInt8(truncatingIfNeeded: maskId)
 
       fillDetectionNearest(
         data: data, maskData: maskData,
-        maskWidth: maskWidth, maskHeight: maskHeight,
+        maskWidth: logicalMaskWidth, maskHeight: logicalMaskHeight,
+        rotatedCw: detection.maskRotatedCw, storedRowWidth: maskWidth,
         targetX0: targetX0, targetY0: targetY0,
         targetWidth: targetWidth, targetHeight: targetHeight,
         artifactWidth: width, fillValue: fillValue)
@@ -162,6 +167,7 @@ class HybridIdMaskBuilder: HybridIdMaskBuilderSpec {
     data: UnsafeMutablePointer<UInt8>,
     maskData: UnsafeMutablePointer<UInt8>,
     maskWidth: Int, maskHeight: Int,
+    rotatedCw: Bool, storedRowWidth: Int,
     targetX0: Int, targetY0: Int,
     targetWidth: Int, targetHeight: Int,
     artifactWidth: Int, fillValue: UInt8
@@ -179,12 +185,25 @@ class HybridIdMaskBuilder: HybridIdMaskBuilderSpec {
     sourceXMap.withUnsafeBufferPointer { sourceX in
       for y in 0..<targetHeight {
         let sourceY = min(maskHeight - 1, Int((Double(y) * sourceYStep).rounded(.down)))
-        let sourceRowOffset = sourceY * maskWidth
         let targetRowOffset = (targetY0 + y) * artifactWidth + targetX0
 
-        for x in 0..<targetWidth {
-          if maskData[sourceRowOffset + sourceX[x]] != 0 {
-            data[targetRowOffset + x] = fillValue
+        if rotatedCw {
+          // Buffer stores the mask rotated 90° clockwise:
+          // logical(x, y) = stored[x * storedRowWidth + (storedRowWidth-1-y)]
+          let rotatedColumn = storedRowWidth - 1 - sourceY
+
+          for x in 0..<targetWidth {
+            if maskData[sourceX[x] * storedRowWidth + rotatedColumn] != 0 {
+              data[targetRowOffset + x] = fillValue
+            }
+          }
+        } else {
+          let sourceRowOffset = sourceY * maskWidth
+
+          for x in 0..<targetWidth {
+            if maskData[sourceRowOffset + sourceX[x]] != 0 {
+              data[targetRowOffset + x] = fillValue
+            }
           }
         }
       }

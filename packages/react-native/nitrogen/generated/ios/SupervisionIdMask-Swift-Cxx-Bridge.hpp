@@ -12,6 +12,10 @@
 namespace NitroModules { class ArrayBufferHolder; }
 // Forward declaration of `HybridIdMaskBuilderSpec` to properly resolve imports.
 namespace margelo::nitro::supervision { class HybridIdMaskBuilderSpec; }
+// Forward declaration of `HybridVideoFrameHandleSpec` to properly resolve imports.
+namespace margelo::nitro::supervision { class HybridVideoFrameHandleSpec; }
+// Forward declaration of `HybridVideoFrameSourceSpec` to properly resolve imports.
+namespace margelo::nitro::supervision { class HybridVideoFrameSourceSpec; }
 // Forward declaration of `IdMaskBuildArtifact` to properly resolve imports.
 namespace margelo::nitro::supervision { struct IdMaskBuildArtifact; }
 // Forward declaration of `IdMaskDetectionBBox` to properly resolve imports.
@@ -22,9 +26,15 @@ namespace margelo::nitro::supervision { struct IdMaskDetection; }
 // Forward declarations of Swift defined types
 // Forward declaration of `HybridIdMaskBuilderSpec_cxx` to properly resolve imports.
 namespace SupervisionIdMask { class HybridIdMaskBuilderSpec_cxx; }
+// Forward declaration of `HybridVideoFrameHandleSpec_cxx` to properly resolve imports.
+namespace SupervisionIdMask { class HybridVideoFrameHandleSpec_cxx; }
+// Forward declaration of `HybridVideoFrameSourceSpec_cxx` to properly resolve imports.
+namespace SupervisionIdMask { class HybridVideoFrameSourceSpec_cxx; }
 
 // Include C++ defined types
 #include "HybridIdMaskBuilderSpec.hpp"
+#include "HybridVideoFrameHandleSpec.hpp"
+#include "HybridVideoFrameSourceSpec.hpp"
 #include "IdMaskBuildArtifact.hpp"
 #include "IdMaskDetection.hpp"
 #include "IdMaskDetectionBBox.hpp"
@@ -103,6 +113,63 @@ namespace margelo::nitro::supervision::bridge::swift {
   }
   inline Result_IdMaskBuildArtifact_ create_Result_IdMaskBuildArtifact_(const std::exception_ptr& error) noexcept {
     return Result<IdMaskBuildArtifact>::withError(error);
+  }
+  
+  // pragma MARK: std::shared_ptr<HybridVideoFrameHandleSpec>
+  /**
+   * Specialized version of `std::shared_ptr<HybridVideoFrameHandleSpec>`.
+   */
+  using std__shared_ptr_HybridVideoFrameHandleSpec_ = std::shared_ptr<HybridVideoFrameHandleSpec>;
+  std::shared_ptr<HybridVideoFrameHandleSpec> create_std__shared_ptr_HybridVideoFrameHandleSpec_(void* NON_NULL swiftUnsafePointer) noexcept;
+  void* NON_NULL get_std__shared_ptr_HybridVideoFrameHandleSpec_(std__shared_ptr_HybridVideoFrameHandleSpec_ cppType);
+  
+  // pragma MARK: std::weak_ptr<HybridVideoFrameHandleSpec>
+  using std__weak_ptr_HybridVideoFrameHandleSpec_ = std::weak_ptr<HybridVideoFrameHandleSpec>;
+  inline std__weak_ptr_HybridVideoFrameHandleSpec_ weakify_std__shared_ptr_HybridVideoFrameHandleSpec_(const std::shared_ptr<HybridVideoFrameHandleSpec>& strong) noexcept { return strong; }
+  
+  // pragma MARK: Result<void>
+  using Result_void_ = Result<void>;
+  inline Result_void_ create_Result_void_() noexcept {
+    return Result<void>::withValue();
+  }
+  inline Result_void_ create_Result_void_(const std::exception_ptr& error) noexcept {
+    return Result<void>::withError(error);
+  }
+  
+  // pragma MARK: std::optional<std::shared_ptr<HybridVideoFrameHandleSpec>>
+  /**
+   * Specialized version of `std::optional<std::shared_ptr<HybridVideoFrameHandleSpec>>`.
+   */
+  using std__optional_std__shared_ptr_HybridVideoFrameHandleSpec__ = std::optional<std::shared_ptr<HybridVideoFrameHandleSpec>>;
+  inline std::optional<std::shared_ptr<HybridVideoFrameHandleSpec>> create_std__optional_std__shared_ptr_HybridVideoFrameHandleSpec__(const std::shared_ptr<HybridVideoFrameHandleSpec>& value) noexcept {
+    return std::optional<std::shared_ptr<HybridVideoFrameHandleSpec>>(value);
+  }
+  inline bool has_value_std__optional_std__shared_ptr_HybridVideoFrameHandleSpec__(const std::optional<std::shared_ptr<HybridVideoFrameHandleSpec>>& optional) noexcept {
+    return optional.has_value();
+  }
+  inline std::shared_ptr<HybridVideoFrameHandleSpec> get_std__optional_std__shared_ptr_HybridVideoFrameHandleSpec__(const std::optional<std::shared_ptr<HybridVideoFrameHandleSpec>>& optional) noexcept {
+    return optional.value();
+  }
+  
+  // pragma MARK: std::shared_ptr<HybridVideoFrameSourceSpec>
+  /**
+   * Specialized version of `std::shared_ptr<HybridVideoFrameSourceSpec>`.
+   */
+  using std__shared_ptr_HybridVideoFrameSourceSpec_ = std::shared_ptr<HybridVideoFrameSourceSpec>;
+  std::shared_ptr<HybridVideoFrameSourceSpec> create_std__shared_ptr_HybridVideoFrameSourceSpec_(void* NON_NULL swiftUnsafePointer) noexcept;
+  void* NON_NULL get_std__shared_ptr_HybridVideoFrameSourceSpec_(std__shared_ptr_HybridVideoFrameSourceSpec_ cppType);
+  
+  // pragma MARK: std::weak_ptr<HybridVideoFrameSourceSpec>
+  using std__weak_ptr_HybridVideoFrameSourceSpec_ = std::weak_ptr<HybridVideoFrameSourceSpec>;
+  inline std__weak_ptr_HybridVideoFrameSourceSpec_ weakify_std__shared_ptr_HybridVideoFrameSourceSpec_(const std::shared_ptr<HybridVideoFrameSourceSpec>& strong) noexcept { return strong; }
+  
+  // pragma MARK: Result<std::optional<std::shared_ptr<HybridVideoFrameHandleSpec>>>
+  using Result_std__optional_std__shared_ptr_HybridVideoFrameHandleSpec___ = Result<std::optional<std::shared_ptr<HybridVideoFrameHandleSpec>>>;
+  inline Result_std__optional_std__shared_ptr_HybridVideoFrameHandleSpec___ create_Result_std__optional_std__shared_ptr_HybridVideoFrameHandleSpec___(const std::optional<std::shared_ptr<HybridVideoFrameHandleSpec>>& value) noexcept {
+    return Result<std::optional<std::shared_ptr<HybridVideoFrameHandleSpec>>>::withValue(value);
+  }
+  inline Result_std__optional_std__shared_ptr_HybridVideoFrameHandleSpec___ create_Result_std__optional_std__shared_ptr_HybridVideoFrameHandleSpec___(const std::exception_ptr& error) noexcept {
+    return Result<std::optional<std::shared_ptr<HybridVideoFrameHandleSpec>>>::withError(error);
   }
 
 } // namespace margelo::nitro::supervision::bridge::swift

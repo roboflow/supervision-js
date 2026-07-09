@@ -18,7 +18,7 @@ public extension IdMaskDetection {
   /**
    * Create a new instance of `IdMaskDetection`.
    */
-  init(bbox: IdMaskDetectionBBox, className: String?, color: Double, confidence: Double?, mask: ArrayBuffer, maskHeight: Double, maskWidth: Double) {
+  init(bbox: IdMaskDetectionBBox, className: String?, color: Double, confidence: Double?, mask: ArrayBuffer, maskHeight: Double, maskRotatedCw: Bool, maskWidth: Double) {
     self.init(bbox, { () -> bridge.std__optional_std__string_ in
       if let __unwrappedValue = className {
         return bridge.create_std__optional_std__string_(std.string(__unwrappedValue))
@@ -31,7 +31,7 @@ public extension IdMaskDetection {
       } else {
         return .init()
       }
-    }(), mask.getArrayBuffer(), maskHeight, maskWidth)
+    }(), mask.getArrayBuffer(), maskHeight, maskRotatedCw, maskWidth)
   }
 
   @inline(__always)
@@ -76,6 +76,11 @@ public extension IdMaskDetection {
   @inline(__always)
   var maskHeight: Double {
     return self.__maskHeight
+  }
+  
+  @inline(__always)
+  var maskRotatedCw: Bool {
+    return self.__maskRotatedCw
   }
   
   @inline(__always)

@@ -10,6 +10,10 @@
 // Forward declarations of C++ defined types
 // Forward declaration of `HybridIdMaskBuilderSpec` to properly resolve imports.
 namespace margelo::nitro::supervision { class HybridIdMaskBuilderSpec; }
+// Forward declaration of `HybridVideoFrameHandleSpec` to properly resolve imports.
+namespace margelo::nitro::supervision { class HybridVideoFrameHandleSpec; }
+// Forward declaration of `HybridVideoFrameSourceSpec` to properly resolve imports.
+namespace margelo::nitro::supervision { class HybridVideoFrameSourceSpec; }
 // Forward declaration of `IdMaskBuildArtifact` to properly resolve imports.
 namespace margelo::nitro::supervision { struct IdMaskBuildArtifact; }
 // Forward declaration of `IdMaskBuildOptions` to properly resolve imports.
@@ -21,6 +25,8 @@ namespace margelo::nitro::supervision { struct IdMaskDetection; }
 
 // Include C++ defined types
 #include "HybridIdMaskBuilderSpec.hpp"
+#include "HybridVideoFrameHandleSpec.hpp"
+#include "HybridVideoFrameSourceSpec.hpp"
 #include "IdMaskBuildArtifact.hpp"
 #include "IdMaskBuildOptions.hpp"
 #include "IdMaskDetection.hpp"
@@ -45,6 +51,10 @@ namespace margelo::nitro::supervision { struct IdMaskDetection; }
 // Forward declarations of Swift defined types
 // Forward declaration of `HybridIdMaskBuilderSpec_cxx` to properly resolve imports.
 namespace SupervisionIdMask { class HybridIdMaskBuilderSpec_cxx; }
+// Forward declaration of `HybridVideoFrameHandleSpec_cxx` to properly resolve imports.
+namespace SupervisionIdMask { class HybridVideoFrameHandleSpec_cxx; }
+// Forward declaration of `HybridVideoFrameSourceSpec_cxx` to properly resolve imports.
+namespace SupervisionIdMask { class HybridVideoFrameSourceSpec_cxx; }
 
 // Include Swift defined types
 #if __has_include("SupervisionIdMask-Swift.h")

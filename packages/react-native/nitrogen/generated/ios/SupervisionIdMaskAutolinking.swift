@@ -23,4 +23,16 @@ public final class SupervisionIdMaskAutolinking {
   public static func isIdMaskBuilderRecyclable() -> Bool {
     return HybridIdMaskBuilder.self is any RecyclableView.Type
   }
+  
+  public static func createVideoFrameSource() -> bridge.std__shared_ptr_HybridVideoFrameSourceSpec_ {
+    let hybridObject = HybridVideoFrameSource()
+    return { () -> bridge.std__shared_ptr_HybridVideoFrameSourceSpec_ in
+      let __cxxWrapped = hybridObject.getCxxWrapper()
+      return __cxxWrapped.getCxxPart()
+    }()
+  }
+  
+  public static func isVideoFrameSourceRecyclable() -> Bool {
+    return HybridVideoFrameSource.self is any RecyclableView.Type
+  }
 }

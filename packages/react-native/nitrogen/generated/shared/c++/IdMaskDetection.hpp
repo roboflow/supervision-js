@@ -49,11 +49,12 @@ namespace margelo::nitro::supervision {
     std::optional<double> confidence     SWIFT_PRIVATE;
     std::shared_ptr<ArrayBuffer> mask     SWIFT_PRIVATE;
     double maskHeight     SWIFT_PRIVATE;
+    bool maskRotatedCw     SWIFT_PRIVATE;
     double maskWidth     SWIFT_PRIVATE;
 
   public:
     IdMaskDetection() = default;
-    explicit IdMaskDetection(IdMaskDetectionBBox bbox, std::optional<std::string> className, double color, std::optional<double> confidence, std::shared_ptr<ArrayBuffer> mask, double maskHeight, double maskWidth): bbox(bbox), className(className), color(color), confidence(confidence), mask(mask), maskHeight(maskHeight), maskWidth(maskWidth) {}
+    explicit IdMaskDetection(IdMaskDetectionBBox bbox, std::optional<std::string> className, double color, std::optional<double> confidence, std::shared_ptr<ArrayBuffer> mask, double maskHeight, bool maskRotatedCw, double maskWidth): bbox(bbox), className(className), color(color), confidence(confidence), mask(mask), maskHeight(maskHeight), maskRotatedCw(maskRotatedCw), maskWidth(maskWidth) {}
 
   public:
     friend bool operator==(const IdMaskDetection& lhs, const IdMaskDetection& rhs) = default;
@@ -75,6 +76,7 @@ namespace margelo::nitro {
         JSIConverter<std::optional<double>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "confidence"))),
         JSIConverter<std::shared_ptr<ArrayBuffer>>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "mask"))),
         JSIConverter<double>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "maskHeight"))),
+        JSIConverter<bool>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "maskRotatedCw"))),
         JSIConverter<double>::fromJSI(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "maskWidth")))
       );
     }
@@ -86,6 +88,7 @@ namespace margelo::nitro {
       obj.setProperty(runtime, PropNameIDCache::get(runtime, "confidence"), JSIConverter<std::optional<double>>::toJSI(runtime, arg.confidence));
       obj.setProperty(runtime, PropNameIDCache::get(runtime, "mask"), JSIConverter<std::shared_ptr<ArrayBuffer>>::toJSI(runtime, arg.mask));
       obj.setProperty(runtime, PropNameIDCache::get(runtime, "maskHeight"), JSIConverter<double>::toJSI(runtime, arg.maskHeight));
+      obj.setProperty(runtime, PropNameIDCache::get(runtime, "maskRotatedCw"), JSIConverter<bool>::toJSI(runtime, arg.maskRotatedCw));
       obj.setProperty(runtime, PropNameIDCache::get(runtime, "maskWidth"), JSIConverter<double>::toJSI(runtime, arg.maskWidth));
       return obj;
     }
@@ -103,6 +106,7 @@ namespace margelo::nitro {
       if (!JSIConverter<std::optional<double>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "confidence")))) return false;
       if (!JSIConverter<std::shared_ptr<ArrayBuffer>>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "mask")))) return false;
       if (!JSIConverter<double>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "maskHeight")))) return false;
+      if (!JSIConverter<bool>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "maskRotatedCw")))) return false;
       if (!JSIConverter<double>::canConvert(runtime, obj.getProperty(runtime, PropNameIDCache::get(runtime, "maskWidth")))) return false;
       return true;
     }

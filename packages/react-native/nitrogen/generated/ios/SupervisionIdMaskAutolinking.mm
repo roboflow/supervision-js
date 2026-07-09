@@ -11,6 +11,7 @@
 #import <type_traits>
 
 #include "HybridIdMaskBuilderSpecSwift.hpp"
+#include "HybridVideoFrameSourceSpecSwift.hpp"
 
 @interface SupervisionIdMaskAutolinking : NSObject
 @end
@@ -25,6 +26,13 @@
     "IdMaskBuilder",
     []() -> std::shared_ptr<HybridObject> {
       std::shared_ptr<HybridIdMaskBuilderSpec> hybridObject = SupervisionIdMask::SupervisionIdMaskAutolinking::createIdMaskBuilder();
+      return hybridObject;
+    }
+  );
+  HybridObjectRegistry::registerHybridObjectConstructor(
+    "VideoFrameSource",
+    []() -> std::shared_ptr<HybridObject> {
+      std::shared_ptr<HybridVideoFrameSourceSpec> hybridObject = SupervisionIdMask::SupervisionIdMaskAutolinking::createVideoFrameSource();
       return hybridObject;
     }
   );

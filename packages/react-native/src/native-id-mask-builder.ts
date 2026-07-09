@@ -136,6 +136,7 @@ export function createReactNativeLiveIdMaskArtifactWithNativeBuilder(
       confidence: detection.score,
       mask: resolveMaskArrayBuffer(detection.mask),
       maskHeight: detection.maskHeight,
+      maskRotatedCw: detection.maskRotatedCw === true,
       maskWidth: detection.maskWidth,
     };
   }
