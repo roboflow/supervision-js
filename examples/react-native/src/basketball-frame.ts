@@ -2,7 +2,7 @@ import {
   DetectionMaskEncoding,
   type DetectionFrame,
   resolveDetectionClassColorStyle,
-} from "supervision-js-core";
+} from "supervision-js-react-native";
 
 export const basketballFrameMetadata = {
   frameIndex: 0,

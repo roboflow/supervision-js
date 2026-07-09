@@ -1,24 +1,26 @@
 import {
+  DetectionPickTarget,
+  MaskRenderMode,
+  resolveDetectionClassColorStyle,
+  type DetectionFrame,
+} from "supervision-js-core";
+import {
   BaseBoxStyle,
   BaseLabelStyle,
   BaseMaskStyle,
   BoxShape,
-  DetectionMaskEncoding,
-  DetectionPickTarget,
-  LabelPlacement,
-  MaskRenderMode,
-  type DetectionFrame,
-} from "supervision-js-core";
-import {
   createReactNativePreparedFramePacket,
   createReactNativeLiveIdMaskArtifact,
   createReactNativeLiveIdMaskArtifactAuto,
   createReactNativeIdMaskFrame,
   DEFAULT_REACT_NATIVE_ID_MASK_EDGE_SMOOTHING,
+  DetectionMaskEncoding,
+  LabelPlacement,
   MAX_ID_MASK_PALETTE_ENTRIES,
   pickReactNativeDetectionAtPoint,
   REACT_NATIVE_ID_MASK_SHADER_SOURCE,
-  resolveReactNativeLiveColorForClass,
+  REACT_NATIVE_LIVE_ID_MASK_DEFAULTS,
+  resolveDetectionClassColorStyle as reactNativeResolveDetectionClassColorStyle,
   resolveReactNativeLiveIdMaskArtifactSize,
   resolveReactNativeLiveIdMaskUniforms,
   resolveReactNativeIdMaskUniforms,
@@ -384,10 +386,33 @@ describe("React Native live ID-mask artifacts", () => {
     );
   });
 
-  it("resolves stable live colors from class names with palette fallback", () => {
-    expect(resolveReactNativeLiveColorForClass("keyboard")).toBe(0x22c55e);
-    expect(resolveReactNativeLiveColorForClass("potted plant")).toBe(0x34d399);
-    expect(resolveReactNativeLiveColorForClass("new class", 3)).toBe(0xfacc15);
+  it("re-exports core's class color resolver as the same function", () => {
+    // One central color logic for web and React Native: the package barrel
+    // must hand out core's function itself, not a copy.
+    expect(reactNativeResolveDetectionClassColorStyle).toBe(
+      resolveDetectionClassColorStyle,
+    );
+    expect(resolveDetectionClassColorStyle("yellow_team_player").fill).toBe(
+      0xfacc15,
+    );
+  });
+
+  it("applies the live artifact size defaults when bounds are omitted", () => {
+    const bounded = resolveReactNativeLiveIdMaskArtifactSize({
+      frameHeight: 4000,
+      frameWidth: 3000,
+    });
+    const explicit = resolveReactNativeLiveIdMaskArtifactSize({
+      frameHeight: 4000,
+      frameWidth: 3000,
+      maxPixels: REACT_NATIVE_LIVE_ID_MASK_DEFAULTS.maxPixels,
+      maxSide: REACT_NATIVE_LIVE_ID_MASK_DEFAULTS.maxSide,
+    });
+
+    expect(bounded).toEqual(explicit);
+    expect(bounded.width * bounded.height).toBeLessThanOrEqual(
+      REACT_NATIVE_LIVE_ID_MASK_DEFAULTS.maxPixels,
+    );
   });
 
   it("renders later detections on top of earlier overlapping detections", () => {

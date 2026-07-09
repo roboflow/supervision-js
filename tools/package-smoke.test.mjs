@@ -104,27 +104,41 @@ const expectedCoreRuntimeExports = [
 ];
 
 const expectedReactNativeRuntimeExports = [
+  "BaseBoxStyle",
+  "BaseLabelStyle",
+  "BaseMaskStyle",
+  "BoxShape",
+  "BoxStrokeAlignment",
+  "DEFAULT_DETECTION_CLASS_STYLES",
+  "DEFAULT_DETECTION_COLOR_SEQUENCE",
   "DEFAULT_REACT_NATIVE_ID_MASK_EDGE_SMOOTHING",
+  "DetectionMaskEncoding",
+  "LabelPlacement",
   "MAX_ID_MASK_PALETTE_ENTRIES",
   "MAX_ID_MASK_STROKE_WIDTH",
+  "MaskRenderMode",
   "REACT_NATIVE_ID_MASK_SHADER_SOURCE",
+  "REACT_NATIVE_LIVE_ID_MASK_DEFAULTS",
   "REACT_NATIVE_LIVE_ID_MASK_NATIVE_BUILDER_NAME",
-  "REACT_NATIVE_ROBOFLOW_PALETTE",
   "REACT_NATIVE_VIDEO_FRAME_SOURCE_NAME",
+  "SUPERVISION_ROBOFLOW_COLOR",
   "createReactNativeIdMaskFrame",
   "createReactNativeLiveIdMaskArtifact",
   "createReactNativeLiveIdMaskArtifactAuto",
   "createReactNativeLiveIdMaskArtifactWithNativeBuilder",
   "createReactNativePreparedFramePacket",
   "createReactNativeVideoFrameSource",
+  "decodeCompressedRleMask",
   "isReactNativeLiveIdMaskNativeBuilderAvailable",
   "loadReactNativeLiveIdMaskNativeBuilder",
+  "normalizeDetectionClassName",
+  "pickDetectionAtPoint",
   "pickReactNativeDetectionAtPoint",
+  "resolveDetectionClassColorStyle",
   "resolveReactNativeFrameLayout",
   "resolveReactNativeFramePresentation",
   "resolveReactNativeIdMaskUniforms",
   "resolveReactNativeLabelLayout",
-  "resolveReactNativeLiveColorForClass",
   "resolveReactNativeLiveIdMaskArtifactSize",
   "resolveReactNativeLiveIdMaskUniforms",
 ];
@@ -189,11 +203,15 @@ test("built React Native package imports core without importing web", async () =
     "function",
   );
   assert.equal(typeof entrypoint.resolveReactNativeIdMaskUniforms, "function");
-  assert.equal(
-    typeof entrypoint.resolveReactNativeLiveColorForClass,
-    "function",
-  );
   assert.equal(typeof entrypoint.REACT_NATIVE_ID_MASK_SHADER_SOURCE, "string");
+
+  // One central color logic: the RN barrel re-exports core's resolver itself.
+  const core = await import("../packages/core/dist/index.js");
+
+  assert.equal(
+    entrypoint.resolveDetectionClassColorStyle,
+    core.resolveDetectionClassColorStyle,
+  );
 
   // Outside React Native the Nitro module is absent; loading must degrade to
   // a JS-fallback handle instead of throwing.

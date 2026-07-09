@@ -5,16 +5,13 @@ import {
   BoxShape,
   LabelPlacement,
   MaskRenderMode,
+  resolveDetectionClassColorStyle,
   type Detection,
   type DetectionFrame,
-} from "supervision-js-core";
+} from "supervision-js-react-native";
 
 export const DEMO_MASK_BORDER_WIDTH = 0;
 export const DEMO_MASK_FILL_OPACITY = 0.5;
-const DEMO_ROBOFLOW_PALETTE = [
-  0x38bdf8, 0x22c55e, 0xa78bfa, 0xfacc15, 0xf97316, 0xf472b6, 0x60a5fa,
-  0xfb7185, 0x34d399, 0xe879f9,
-] as const;
 
 export interface DemoLiveDetectionInput {
   readonly bbox: {
@@ -46,9 +43,9 @@ export function createDemoBoxStyle(
     cornerRadius: rounded ? 8 : 0,
     fill: null,
     shape: rounded ? BoxShape.RoundedRect : BoxShape.Rect,
-    stroke: (detection, context) => ({
+    stroke: (detection) => ({
       alpha: 0.98,
-      color: resolveDemoDetectionColor(detection, context.detectionIndex),
+      color: resolveDemoDetectionColor(detection),
       width: 3,
     }),
   });
@@ -56,8 +53,7 @@ export function createDemoBoxStyle(
 
 export function createDemoMaskStyle() {
   return new BaseMaskStyle({
-    color: (detection, context) =>
-      resolveDemoDetectionColor(detection, context.detectionIndex),
+    color: (detection) => resolveDemoDetectionColor(detection),
     mode: MaskRenderMode.FillOnly,
     opacity: DEMO_MASK_FILL_OPACITY,
   });
@@ -65,9 +61,9 @@ export function createDemoMaskStyle() {
 
 export function createDemoLabelStyle() {
   return new BaseLabelStyle({
-    background: (detection, context) => ({
+    background: (detection) => ({
       alpha: 0.84,
-      color: resolveDemoDetectionColor(detection, context.detectionIndex),
+      color: resolveDemoDetectionColor(detection),
       cornerRadius: 5,
       paddingX: 7,
       paddingY: 3,
@@ -90,7 +86,8 @@ export function createDemoDetectionFrameFromLiveDetections(
   return {
     detections: options.detections.map((detection, index) => {
       const className = detection.label || "object";
-      const color = detection.color ?? resolveDemoClassColor(className, index);
+      const color =
+        detection.color ?? resolveDetectionClassColorStyle(className).fill;
 
       return {
         className,
@@ -110,58 +107,7 @@ export function createDemoDetectionFrameFromLiveDetections(
   };
 }
 
-export function resolveDemoClassColor(
-  className: string | undefined,
-  fallbackIndex = 0,
-) {
-  "worklet";
-
-  const fallback =
-    DEMO_ROBOFLOW_PALETTE[
-      Math.abs(fallbackIndex) % DEMO_ROBOFLOW_PALETTE.length
-    ] ?? DEMO_ROBOFLOW_PALETTE[0];
-  const normalized = (className ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/[\s-]+/g, "_");
-
-  switch (normalized) {
-    case "horse":
-      return 0x38bdf8;
-    case "person":
-    case "keyboard":
-      return 0x22c55e;
-    case "cow":
-    case "tv":
-      return 0xa78bfa;
-    case "basketball":
-    case "bottle":
-    case "sports_ball":
-      return 0xf97316;
-    case "yellow_team_player":
-    case "cup":
-    case "mouse":
-      return 0xfacc15;
-    case "white_team_player":
-      return 0xf8fafc;
-    case "bed":
-      return 0xf472b6;
-    case "laptop":
-      return 0x60a5fa;
-    case "knife":
-      return 0xfb7185;
-    case "cell_phone":
-    case "potted_plant":
-      return 0x34d399;
-    default:
-      return fallback;
-  }
-}
-
-export function resolveDemoDetectionColor(
-  detection: Detection,
-  fallbackIndex = 0,
-) {
+export function resolveDemoDetectionColor(detection: Detection) {
   "worklet";
 
   const metadataColor = detection.metadata?.color;
@@ -170,5 +116,7 @@ export function resolveDemoDetectionColor(
     return metadataColor;
   }
 
-  return resolveDemoClassColor(detection.className, fallbackIndex);
+  // Core's own resolver (worklet-marked in core, inert on web): the same
+  // function picks this color in a browser session and on the phone.
+  return resolveDetectionClassColorStyle(detection.className).fill;
 }

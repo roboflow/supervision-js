@@ -13,6 +13,7 @@ import type {
   ReactNativeLiveIdMaskArtifact,
   ReactNativeLiveIdMaskArtifactOptions,
 } from "./index";
+import { REACT_NATIVE_LIVE_ID_MASK_DEFAULTS } from "./live-defaults";
 
 export const REACT_NATIVE_LIVE_ID_MASK_NATIVE_BUILDER_NAME = "IdMaskBuilder";
 
@@ -148,8 +149,9 @@ export function createReactNativeLiveIdMaskArtifactWithNativeBuilder(
     frameHeight: options.frameHeight,
     frameWidth: options.frameWidth,
     maxPaletteEntries: MAX_ID_MASK_PALETTE_ENTRIES,
-    maxPixels: options.maxPixels,
-    maxSide: options.maxSide,
+    maxPixels:
+      options.maxPixels ?? REACT_NATIVE_LIVE_ID_MASK_DEFAULTS.maxPixels,
+    maxSide: options.maxSide ?? REACT_NATIVE_LIVE_ID_MASK_DEFAULTS.maxSide,
     maxStrokeWidth: MAX_ID_MASK_STROKE_WIDTH,
   });
 

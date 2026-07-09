@@ -53,16 +53,15 @@ import { createWorkletRuntimeForThread } from "react-native-vision-camera-workle
 import { NitroModules } from "react-native-nitro-modules";
 import { Asset } from "expo-asset";
 import * as ImagePicker from "expo-image-picker";
+import { models, useInstanceSegmentation } from "react-native-executorch";
 import {
   BoxShape,
   type BoxDrawInstruction,
   type DetectionPickResult,
   type LabelDrawInstruction,
-} from "supervision-js-core";
-import { models, useInstanceSegmentation } from "react-native-executorch";
-import {
   MAX_ID_MASK_PALETTE_ENTRIES,
   REACT_NATIVE_ID_MASK_SHADER_SOURCE,
+  resolveDetectionClassColorStyle,
   createReactNativePreparedFramePacket,
   type ReactNativeLiveIdMaskNativeBuilderHandle,
   type ReactNativeLiveSerializedDetection,
@@ -92,7 +91,6 @@ import {
   createDemoDetectionFrameFromLiveDetections,
   createDemoLabelStyle,
   createDemoMaskStyle,
-  resolveDemoClassColor,
   resolveDemoDetectionColor,
 } from "./src/demo-presentation";
 import {
@@ -118,8 +116,6 @@ const LIVE_MAX_INSTANCES = 6;
 // No stroke in live mode: a crisp border retraces the low-res mask staircase
 // and defeats the feathered fill edges (it also skips the shader's expensive
 // border sampling loop).
-const LIVE_MASK_ARTIFACT_MAX_PIXELS = 720 * 1280;
-const LIVE_MASK_ARTIFACT_MAX_SIDE = 1280;
 const LIVE_PRIVACY_MOSAIC_CELL_PX = 14;
 // A 1x1 all-ones mask scales across the whole detection bbox in the fill
 // loop, so redacted objects are covered by their full bounding box instead of
@@ -286,7 +282,7 @@ function StaticFrameProof(props: {
           rect: layout.mapRect(selectedPick.detection.rect),
           radius: 14 * layout.scale,
           strokeColor: toRgba(
-            resolveDemoDetectionColor(selectedPick.detection, 0),
+            resolveDemoDetectionColor(selectedPick.detection),
             1,
           ),
           strokeWidth: 4,
@@ -1067,7 +1063,7 @@ function LiveCameraProof(props: {
                 const detection = rawDetections[index]!;
                 const label: string =
                   typeof detection.label === "string" ? detection.label : "";
-                const color = resolveDemoClassColor(label, index % 10);
+                const color = resolveDetectionClassColorStyle(label).fill;
 
                 serialized[index] = {
                   bbox: detection.bbox,
@@ -1153,8 +1149,6 @@ function LiveCameraProof(props: {
           if (masksDisplayed || maskEffectsEnabled) {
             try {
               preparedMask = createLiveSkiaMaskFrame({
-                artifactMaxPixels: LIVE_MASK_ARTIFACT_MAX_PIXELS,
-                artifactMaxSide: LIVE_MASK_ARTIFACT_MAX_SIDE,
                 detections: maskDetections,
                 edgeSmoothing:
                   masksDisplayed || spotlightMaskIds.length > 0 ? undefined : 0,
@@ -1931,7 +1925,7 @@ function VideoFileProof(props: {
               // loops sample it transposed instead of copying it upright.
               serialized[index] = {
                 bbox: unrotateExecutorchUpBbox(detection.bbox, handle.height),
-                color: resolveDemoClassColor(label, index % 10),
+                color: resolveDetectionClassColorStyle(label).fill,
                 label,
                 mask: detection.mask,
                 maskHeight: detection.maskHeight,
@@ -1981,8 +1975,6 @@ function VideoFileProof(props: {
 
           try {
             preparedMask = createLiveSkiaMaskFrame({
-              artifactMaxPixels: LIVE_MASK_ARTIFACT_MAX_PIXELS,
-              artifactMaxSide: LIVE_MASK_ARTIFACT_MAX_SIDE,
               detections,
               frameHeight: handle.height,
               frameWidth: handle.width,
@@ -2809,8 +2801,6 @@ function formatLiveFallbackReason(reason: string | undefined) {
 }
 
 interface LiveSkiaMaskFrameOptions {
-  readonly artifactMaxPixels: number;
-  readonly artifactMaxSide: number;
   readonly detections: readonly LiveSerializedDetection[];
   readonly edgeSmoothing?: number;
   readonly frameHeight: number;
@@ -2854,8 +2844,6 @@ function createLiveSkiaMaskFrame(
       fillOpacity: DEMO_MASK_FILL_OPACITY,
       frameHeight: options.frameHeight,
       frameWidth: options.frameWidth,
-      maxPixels: options.artifactMaxPixels,
-      maxSide: options.artifactMaxSide,
       nativeBuilder: options.nativeBuilder,
     });
 

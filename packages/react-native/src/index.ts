@@ -21,10 +21,58 @@ import {
   pickDetectionAtPoint,
 } from "supervision-js-core";
 
+import { REACT_NATIVE_LIVE_ID_MASK_DEFAULTS } from "./live-defaults";
+
+// Curated core re-exports, verbatim (mirroring the web package's barrel):
+// everything renderer-neutral keeps its core name so consumers import a
+// single package and concepts line up across web and React Native.
 export {
+  BaseBoxStyle,
+  BaseLabelStyle,
+  BaseMaskStyle,
+  BoxShape,
+  BoxStrokeAlignment,
+  DEFAULT_DETECTION_CLASS_STYLES,
+  DEFAULT_DETECTION_COLOR_SEQUENCE,
+  DetectionMaskEncoding,
+  decodeCompressedRleMask,
+  LabelPlacement,
+  MaskRenderMode,
   MAX_ID_MASK_PALETTE_ENTRIES,
   MAX_ID_MASK_STROKE_WIDTH,
+  normalizeDetectionClassName,
+  pickDetectionAtPoint,
+  resolveDetectionClassColorStyle,
+  SUPERVISION_ROBOFLOW_COLOR,
 } from "supervision-js-core";
+export type {
+  BaseBoxStyleOptions,
+  BaseLabelStyleOptions,
+  BaseMaskStyleOptions,
+  BoxDrawInstruction,
+  BoxStyle,
+  CompressedRleDetectionMask,
+  DecodedDetectionMask,
+  Detection,
+  DetectionClassColorStyle,
+  DetectionFrame,
+  DetectionMask,
+  DetectionPickOptions,
+  DetectionPickPoint,
+  DetectionPickResult,
+  IdMaskFrame,
+  IdMaskInstruction,
+  LabelDrawInstruction,
+  LabelStyle,
+  MaskDrawInstruction,
+  MaskStyle,
+  MediaFrameMetadata,
+  MediaRendererPresentation,
+  PlatformMediaFrame,
+  Rect,
+} from "supervision-js-core";
+
+export { REACT_NATIVE_LIVE_ID_MASK_DEFAULTS } from "./live-defaults";
 
 import {
   createReactNativeLiveIdMaskArtifactWithNativeBuilder,
@@ -433,8 +481,10 @@ export interface ReactNativeLiveSerializedDetection {
 export interface ReactNativeLiveIdMaskArtifactSizeOptions {
   readonly frameHeight: number;
   readonly frameWidth: number;
-  readonly maxPixels: number;
-  readonly maxSide: number;
+  /** Artifact pixel budget. Defaults to `REACT_NATIVE_LIVE_ID_MASK_DEFAULTS`. */
+  readonly maxPixels?: number;
+  /** Artifact side budget. Defaults to `REACT_NATIVE_LIVE_ID_MASK_DEFAULTS`. */
+  readonly maxSide?: number;
 }
 
 export interface ReactNativeLiveIdMaskArtifactOptions extends ReactNativeLiveIdMaskArtifactSizeOptions {
@@ -500,11 +550,6 @@ export interface ReactNativeLiveIdMaskUniformOptions {
    */
   readonly spotlightMaskIds?: readonly number[];
 }
-
-export const REACT_NATIVE_ROBOFLOW_PALETTE = [
-  0x38bdf8, 0x22c55e, 0xa78bfa, 0xfacc15, 0xf97316, 0xf472b6, 0x60a5fa,
-  0xfb7185, 0x34d399, 0xe879f9,
-] as const;
 
 export function resolveReactNativeFrameLayout(
   options: ReactNativeFrameLayoutOptions,
@@ -690,71 +735,20 @@ export function resolveReactNativeIdMaskUniforms(
   };
 }
 
-export function resolveReactNativeLiveColorForClass(
-  className: string | undefined,
-  fallbackIndex = 0,
-) {
-  "worklet";
-
-  const fallback =
-    REACT_NATIVE_ROBOFLOW_PALETTE[
-      Math.abs(fallbackIndex) % REACT_NATIVE_ROBOFLOW_PALETTE.length
-    ] ?? REACT_NATIVE_ROBOFLOW_PALETTE[0];
-  const normalized = (className ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/[\s-]+/g, "_");
-
-  switch (normalized) {
-    case "horse":
-      return 0x38bdf8;
-    case "person":
-    case "keyboard":
-      return 0x22c55e;
-    case "cow":
-    case "tv":
-      return 0xa78bfa;
-    case "basketball":
-    case "bottle":
-    case "sports_ball":
-      return 0xf97316;
-    case "yellow_team_player":
-    case "cup":
-    case "mouse":
-      return 0xfacc15;
-    case "white_team_player":
-      return 0xf8fafc;
-    case "bed":
-      return 0xf472b6;
-    case "laptop":
-      return 0x60a5fa;
-    case "knife":
-      return 0xfb7185;
-    case "cell_phone":
-    case "potted_plant":
-      return 0x34d399;
-    default:
-      return fallback;
-  }
-}
-
 export function resolveReactNativeLiveIdMaskArtifactSize(
   options: ReactNativeLiveIdMaskArtifactSizeOptions,
 ) {
   "worklet";
 
+  const maxPixels =
+    options.maxPixels ?? REACT_NATIVE_LIVE_ID_MASK_DEFAULTS.maxPixels;
+  const maxSide = options.maxSide ?? REACT_NATIVE_LIVE_ID_MASK_DEFAULTS.maxSide;
   const frameWidth = Math.max(1, Math.round(options.frameWidth));
   const frameHeight = Math.max(1, Math.round(options.frameHeight));
   const framePixels = frameWidth * frameHeight;
   const areaScale =
-    framePixels > options.maxPixels
-      ? Math.sqrt(options.maxPixels / framePixels)
-      : 1;
-  const sideScale = Math.min(
-    1,
-    options.maxSide / frameWidth,
-    options.maxSide / frameHeight,
-  );
+    framePixels > maxPixels ? Math.sqrt(maxPixels / framePixels) : 1;
+  const sideScale = Math.min(1, maxSide / frameWidth, maxSide / frameHeight);
   const scale = Math.min(areaScale, sideScale);
 
   return {

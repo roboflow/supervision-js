@@ -66,7 +66,7 @@ describe("React Native demo presentation", () => {
     const detection = frame.detections[0];
 
     expect(detection).toBeDefined();
-    expect(resolveDemoDetectionColor(detection!, 0)).toBe(0xa78bfa);
+    expect(resolveDemoDetectionColor(detection!)).toBe(0xa78bfa);
   });
 
   it("keeps static and live mask styling tied to the same constants", () => {

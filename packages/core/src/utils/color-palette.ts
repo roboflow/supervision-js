@@ -46,9 +46,43 @@ export const DEFAULT_DETECTION_CLASS_STYLES: Readonly<
   "yellow team player": DEFAULT_DETECTION_COLOR_SEQUENCE[3],
 };
 
+// The "worklet" directives below are inert everywhere except React Native:
+// browsers and Node see a no-op string, while React Native's worklets Babel
+// plugin makes these functions callable inside frame worklets, so every
+// platform resolves detection colors through this one implementation.
+// Worklet constraint on ordering: the plugin turns marked declarations into
+// non-hoisted assignments that capture each other at module-init time, so
+// helpers must be defined before the functions that call them.
+
+export function normalizeDetectionClassName(
+  className: string | undefined,
+): string {
+  "worklet";
+
+  return (className ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]/g, " ")
+    .replace(/\s+/g, " ");
+}
+
+function hashClassName(className: string) {
+  "worklet";
+
+  let hash = 0;
+
+  for (let index = 0; index < className.length; index += 1) {
+    hash = (hash * 31 + className.charCodeAt(index)) >>> 0;
+  }
+
+  return hash;
+}
+
 export function resolveDetectionClassColorStyle(
   className: string | undefined,
 ): DetectionClassColorStyle {
+  "worklet";
+
   const normalizedClassName = normalizeDetectionClassName(className);
   const knownStyle = DEFAULT_DETECTION_CLASS_STYLES[normalizedClassName];
 
@@ -59,16 +93,6 @@ export function resolveDetectionClassColorStyle(
   return DEFAULT_DETECTION_COLOR_SEQUENCE[
     hashClassName(normalizedClassName) % DEFAULT_DETECTION_COLOR_SEQUENCE.length
   ]!;
-}
-
-export function normalizeDetectionClassName(
-  className: string | undefined,
-): string {
-  return (className ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/[_-]/g, " ")
-    .replace(/\s+/g, " ");
 }
 
 function createClassColorStyle(
@@ -83,14 +107,4 @@ function createClassColorStyle(
     labelText,
     stroke,
   };
-}
-
-function hashClassName(className: string) {
-  let hash = 0;
-
-  for (let index = 0; index < className.length; index += 1) {
-    hash = (hash * 31 + className.charCodeAt(index)) >>> 0;
-  }
-
-  return hash;
 }
