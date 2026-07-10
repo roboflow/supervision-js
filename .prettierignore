@@ -5,3 +5,4 @@ tools/sam3-fixture/raw*.jsonl
 tools/sam3-fixture/extracted*.jsonl
 benchmark/masks/results/
 *.csv
+demo/fixtures/
