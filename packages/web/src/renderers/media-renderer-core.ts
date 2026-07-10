@@ -325,8 +325,7 @@ export async function createMediaRendererCore(
         readonly detectionEnabled: boolean;
         readonly renderPreparationEnabled: boolean;
         readonly renderPreparationOptions:
-          | RenderPreparationPlaybackGateOptions
-          | undefined;
+          RenderPreparationPlaybackGateOptions | undefined;
       },
     ) {
       if (waitOptions.detectionEnabled) {

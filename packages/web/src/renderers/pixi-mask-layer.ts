@@ -127,8 +127,7 @@ export function createPixiMaskLayer(options: {
   let mediaHeight = 0;
   let mediaWidth = 0;
   let idMaskRenderer:
-    | ReturnType<typeof createPixiIdMaskShaderRenderer>
-    | undefined;
+    ReturnType<typeof createPixiIdMaskShaderRenderer> | undefined;
   let maskSprite: PixiSprite | undefined;
   let activeFrameKey: string | null = null;
   let activeFrameMediaTime: number | null = null;

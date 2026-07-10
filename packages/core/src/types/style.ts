@@ -16,5 +16,4 @@ export type DetectionStylePredicate<TContext> = (
  * underlying detection data.
  */
 export type DetectionStyleValue<TValue, TContext> =
-  | TValue
-  | ((detection: Detection, context: TContext) => TValue);
+  TValue | ((detection: Detection, context: TContext) => TValue);

@@ -384,8 +384,7 @@ function createWriteSummary(options: {
 function createAppendSummary(options: {
   readonly existingDataset: DetectionFrameDatasetRecord;
   readonly existingChunkRecords: readonly (
-    | DetectionFrameChunkRecord
-    | undefined
+    DetectionFrameChunkRecord | undefined
   )[];
   readonly mergedChunkRecords: readonly DetectionFrameChunkRecord[];
   readonly appendedFrames: readonly DetectionFrame[];

@@ -268,8 +268,7 @@ export interface MediaSession {
    * with static frames, a source, or an appendable source.
    */
   readonly detectionSource?:
-    | DetectionFrameSource
-    | WritableDetectionFrameSource;
+    DetectionFrameSource | WritableDetectionFrameSource;
   readonly media: MediaSessionMediaState;
   readonly renderer: MediaRenderer;
   /**

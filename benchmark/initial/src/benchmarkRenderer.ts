@@ -22,25 +22,15 @@ import {
 export type BenchmarkFit = "contain" | "cover";
 
 export type BenchmarkUpdateStrategy =
-  | "static"
-  | "static-cached"
-  | "redraw-each-frame";
+  "static" | "static-cached" | "redraw-each-frame";
 
 export type BenchmarkRenderStrategy = "graphics" | "particle-edges";
 
 export type BenchmarkPlaybackState =
-  | "loading"
-  | "ready"
-  | "playing"
-  | "paused"
-  | "error"
-  | "destroyed";
+  "loading" | "ready" | "playing" | "paused" | "error" | "destroyed";
 
 export type BenchmarkSourceProbeStatus =
-  | "loading"
-  | "ready"
-  | "error"
-  | "destroyed";
+  "loading" | "ready" | "error" | "destroyed";
 
 export interface BenchmarkOptions {
   readonly enabled?: boolean;
@@ -392,8 +382,7 @@ export async function createInitialBenchmarkRenderer(
   let playbackOriginNow = 0;
   let animationFrameHandle: number | undefined;
   let activeSampleIterator:
-    | AsyncGenerator<DecodedVideoSample, void, unknown>
-    | undefined;
+    AsyncGenerator<DecodedVideoSample, void, unknown> | undefined;
   let mediaInput: DisposableMediaInput | undefined;
   let sampleSink: DecodedVideoSampleSink | undefined;
   let mediaScene: Container | undefined;

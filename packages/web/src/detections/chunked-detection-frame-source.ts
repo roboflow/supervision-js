@@ -142,8 +142,7 @@ async function fetchJsonDetectionFrameChunk(
   }
 
   const payload = (await response.json()) as
-    | DetectionFrameChunk
-    | readonly DetectionFrame[];
+    DetectionFrameChunk | readonly DetectionFrame[];
 
   if (Array.isArray(payload)) {
     return { frames: payload as readonly DetectionFrame[] };

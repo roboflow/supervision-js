@@ -20,8 +20,7 @@ import { resolveMediaSessionAppendableRetention } from "./media-session-defaults
 export interface PreparedSessionDetections {
   readonly detectionFrames?: MediaRendererOptions["detectionFrames"];
   readonly detectionSource?:
-    | DetectionFrameSource
-    | WritableDetectionFrameSource;
+    DetectionFrameSource | WritableDetectionFrameSource;
   readonly appendableSource?: WritableDetectionFrameSource;
   readonly appendableSources: ReadonlyMap<string, WritableDetectionFrameSource>;
   readonly sourcePresentations: readonly SourcePresentationEntry[];
