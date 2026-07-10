@@ -20,6 +20,11 @@
       "react-native": "./src/adapters/executorch.ts",
       "import": "./dist/adapters/executorch.js"
     },
+    "./sessions": {
+      "types": "./dist/sessions.d.ts",
+      "react-native": "./src/sessions.ts",
+      "import": "./dist/sessions.js"
+    },
     "./skia": {
       "types": "./dist/skia.d.ts",
       "react-native": "./src/skia.ts",
@@ -54,13 +59,25 @@
   },
   "peerDependencies": {
     "@shopify/react-native-skia": "*",
-    "react-native-nitro-modules": "*"
+    "react-native-nitro-modules": "*",
+    "react-native-reanimated": "*",
+    "react-native-worklets": "*",
+    "react-native-vision-camera-worklets": "*"
   },
   "peerDependenciesMeta": {
     "react-native-nitro-modules": {
       "optional": true
     },
     "@shopify/react-native-skia": {
+      "optional": true
+    },
+    "react-native-reanimated": {
+      "optional": true
+    },
+    "react-native-worklets": {
+      "optional": true
+    },
+    "react-native-vision-camera-worklets": {
       "optional": true
     }
   }

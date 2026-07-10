@@ -180,11 +180,21 @@ with reanimated/worklets peer ownership and belong to the session design.
 
 ## Phase 3 — Session facade (web parity)
 
-- `createLiveSession()` (camera push) and `createVideoSession()`
-  (`VideoFrameSource` pull) sharing the packet machinery; both instantiate
-  core's `MediaSessionLifecycleState` / activity / status contracts the way
-  web's `MediaSessionState` does; `*State` / `*Diagnostics` naming matches
-  web; idempotent cascading `destroy()`.
+**Status 2026-07-09:** the video half landed on a new
+`supervision-js-react-native/sessions` subpath (pending device pass).
+`createReactNativeVideoSession()` owns source open, the strict-sync pump,
+mask prep, the present→retire→dispose packet lanes (reanimated `makeMutable`
+internally), pause/resume/stop, and an idempotent callback-silencing
+`destroy()`; inference is an injected `serializeFrame` worklet and effects an
+injected `resolveMaskEffects` worklet. `createReactNativeWorkletRuntime()`
+ships alongside (vendor modules lazy-required, optional peers: reanimated,
+worklets, vision-camera-worklets). The demo's `VideoFileProof` now contains
+no pipeline code. Remaining below.
+
+- `createLiveSession()` (camera push) sharing the packet machinery with the
+  video session; both instantiate core's `MediaSessionLifecycleState` /
+  activity / status contracts the way web's `MediaSessionState` does;
+  `*State` / `*Diagnostics` naming matches web.
 - A thin `SyncedFrameStage`-style component (RN package may ship components —
   the "React stays out" rule in `public-api.md` is about the _web_ package).
 - **Naming pass:** drop the `ReactNative*` prefix where a web-parity concept

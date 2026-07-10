@@ -4,9 +4,16 @@ export default {
   input: {
     "adapters/executorch": "src/adapters/executorch.ts",
     index: "src/index.ts",
+    sessions: "src/sessions.ts",
     skia: "src/skia.ts",
   },
-  external: ["@shopify/react-native-skia", "supervision-js-core"],
+  external: [
+    "@shopify/react-native-skia",
+    "react-native-reanimated",
+    "react-native-vision-camera-worklets",
+    "react-native-worklets",
+    "supervision-js-core",
+  ],
   output: {
     dir: "dist",
     entryFileNames: "[name].js",

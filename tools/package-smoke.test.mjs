@@ -266,11 +266,16 @@ test("built React Native subpath entries ship and resolve", async () => {
     { x1: 2, y1: 7, x2: 4, y2: 9 },
   );
 
-  // The skia entry requires the optional @shopify/react-native-skia peer, so
-  // it cannot be imported under Node; assert the built artifact ships.
+  // The skia and sessions entries require optional native peers, so they
+  // cannot be imported under Node; assert the built artifacts ship.
   assert.ok(
     existsSync(
       new URL("../packages/react-native/dist/skia.js", import.meta.url),
+    ),
+  );
+  assert.ok(
+    existsSync(
+      new URL("../packages/react-native/dist/sessions.js", import.meta.url),
     ),
   );
 });
