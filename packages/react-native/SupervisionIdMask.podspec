@@ -6,12 +6,12 @@ Pod::Spec.new do |s|
   s.name         = "SupervisionIdMask"
   s.version      = package["version"]
   s.summary      = package["description"]
-  s.homepage     = "https://github.com/joaomarcoscrs/supervision-js"
+  s.homepage     = "https://github.com/roboflow/supervision-js"
   s.license      = package["license"]
   s.authors      = "supervision-js"
 
   s.platforms    = { :ios => min_ios_version_supported }
-  s.source       = { :git => "https://github.com/joaomarcoscrs/supervision-js.git", :tag => "#{s.version}" }
+  s.source       = { :git => "https://github.com/roboflow/supervision-js.git", :tag => "#{s.version}" }
 
   s.source_files = [
     # Implementation (Swift)

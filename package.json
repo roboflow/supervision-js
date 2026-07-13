@@ -5,11 +5,11 @@
   "private": true,
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/joaomarcoscrs/supervision-js.git"
+    "url": "git+https://github.com/roboflow/supervision-js.git"
   },
-  "homepage": "https://github.com/joaomarcoscrs/supervision-js#readme",
+  "homepage": "https://github.com/roboflow/supervision-js#readme",
   "bugs": {
-    "url": "https://github.com/joaomarcoscrs/supervision-js/issues"
+    "url": "https://github.com/roboflow/supervision-js/issues"
   },
   "keywords": [
     "computer-vision",
