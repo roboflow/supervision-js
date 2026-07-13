@@ -1,13 +1,21 @@
 import { spawn } from "node:child_process";
 import process from "node:process";
-import { access, cp, mkdir, readdir, rm, writeFile } from "node:fs/promises";
+import {
+  access,
+  cp,
+  mkdir,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const pagesDirectory = resolve(projectRoot, "dist/pages");
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
-const pagesBasePath = "/supervision-js/";
+const pagesBasePath = "/";
 
 await main();
 
@@ -20,7 +28,7 @@ async function main() {
     VITE_DEMO_BASE_PATH: pagesBasePath,
   });
   await runNpm(["run", "build", "-w", "examples/vanilla"], {
-    VITE_VANILLA_BASE_PATH: `${pagesBasePath}examples/vanilla/`,
+    VITE_VANILLA_BASE_PATH: "/examples/vanilla/",
   });
   await runNpm(["run", "docs:build:typedoc"]);
 
@@ -62,6 +70,18 @@ async function verifyPagesArtifact() {
   await Promise.all(
     requiredFiles.map((file) => access(join(pagesDirectory, file))),
   );
+
+  const generatedHtml = await Promise.all(
+    ["index.html", "examples/vanilla/index.html"].map((file) =>
+      readFile(join(pagesDirectory, file), "utf8"),
+    ),
+  );
+
+  if (generatedHtml.some((html) => html.includes("/supervision-js/"))) {
+    throw new Error(
+      "GitHub Pages artifact contains a /supervision-js/ asset prefix, but this deployment is served from the domain root.",
+    );
+  }
 }
 
 function runNpm(arguments_, environment = {}) {
