@@ -19,7 +19,8 @@ const docsUrl =
   (globalThis.location.hostname === "localhost" ||
   globalThis.location.hostname === "127.0.0.1"
     ? "http://127.0.0.1:5175"
-    : "/docs/");
+    : `${import.meta.env.BASE_URL}docs/`);
+const allowUpload = import.meta.env.VITE_DEMO_ALLOW_UPLOAD !== "false";
 
 export function App() {
   const demo = useDemoRenderer();
@@ -82,6 +83,7 @@ export function App() {
       sourceControls={
         <SourceControls
           apiKey={demo.uploadApiKey}
+          allowUpload={allowUpload}
           classNames={demo.uploadClassNames}
           disabled={demo.sourceControlsDisabled}
           mode={demo.sourceMode}

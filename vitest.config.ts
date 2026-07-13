@@ -82,7 +82,6 @@ export default defineConfig({
     environment: "node",
     include: [
       "packages/**/*.test.ts",
-      "demo/server/**/*.test.ts",
       "demo/src/**/*.test.ts",
       "examples/react-native/src/**/*.test.ts",
     ],

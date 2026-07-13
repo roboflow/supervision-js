@@ -7,6 +7,7 @@ import type { Sam3FixtureDefinition } from "../fixtures/sam3-fixtures";
 
 export const SourceControls = memo(function SourceControls({
   apiKey,
+  allowUpload,
   classNames,
   disabled,
   mode,
@@ -23,6 +24,7 @@ export const SourceControls = memo(function SourceControls({
   uploadState,
 }: {
   readonly apiKey: string;
+  readonly allowUpload: boolean;
   readonly classNames: string;
   readonly disabled: boolean;
   readonly mode: DemoSourceMode;
@@ -62,17 +64,19 @@ export const SourceControls = memo(function SourceControls({
             {fixture.displayName}
           </button>
         ))}
-        <button
-          aria-pressed={mode === DemoSourceMode.Upload}
-          disabled={disabled}
-          onClick={() => onModeChange(DemoSourceMode.Upload)}
-          type="button"
-        >
-          Upload media
-        </button>
+        {allowUpload ? (
+          <button
+            aria-pressed={mode === DemoSourceMode.Upload}
+            disabled={disabled}
+            onClick={() => onModeChange(DemoSourceMode.Upload)}
+            type="button"
+          >
+            Upload media
+          </button>
+        ) : null}
       </div>
 
-      {mode === DemoSourceMode.Upload ? (
+      {allowUpload && mode === DemoSourceMode.Upload ? (
         <div className="source-controls__upload">
           <label className="source-field source-field--file">
             <span>Media</span>
@@ -131,7 +135,7 @@ export const SourceControls = memo(function SourceControls({
         </div>
       ) : null}
 
-      {mode === DemoSourceMode.Upload ? (
+      {allowUpload && mode === DemoSourceMode.Upload ? (
         <div className="source-progress" role="status">
           <span>{uploadState.statusLabel}</span>
           <strong>

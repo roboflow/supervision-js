@@ -7,8 +7,8 @@ vision detections over browser media with high-performance, renderer-owned
 composition. It is intended to become the JavaScript ecosystem counterpart to
 Roboflow's Python `supervision` ecosystem.
 
-This repository is still private/prototype-stage. The public API is being shaped
-around the rendering foundation first, not a large final annotation hierarchy.
+This repository is prototype-stage. The public API is being shaped around the
+rendering foundation first, not a large final annotation hierarchy.
 
 ## Why This Exists
 
@@ -83,10 +83,21 @@ Useful commands:
 - `npm run example:react-native:dev` runs the experimental Expo mobile proof.
 - `npm run docs:dev` builds and serves the generated docs.
 - `npm run docs:build` builds the TypeDoc site.
+- `npm run pages:build` assembles the static GitHub Pages artifact.
 - `npm run verify` runs the full local verification suite.
 
-Maintainers can deploy the public demo through the image-backed Render flow in
-[Render image deployment](docs/internal/render-image-deployment.md).
+The public POC is deployed on [GitHub Pages](https://roboflow.github.io/supervision-js/):
+
+- the fixture demo is served at the project root;
+- generated docs are served at `/supervision-js/docs/`;
+- the vanilla example is served at `/supervision-js/examples/vanilla/`.
+
+GitHub Pages is static, so its demo intentionally offers fixture selection only.
+Upload media and SAM3 inference remain available locally through the Vite proxy:
+
+```sh
+npm run demo:dev
+```
 
 Start with:
 
@@ -103,8 +114,8 @@ Recipes:
 - [Progressive Upload Normalization](docs/public/recipes/progressive-upload-normalization.md)
 - [Session Lifecycle](docs/public/recipes/session-lifecycle.md)
 
-When deployed through the demo production server, the minimal vanilla example is
-served at `/examples/vanilla/`.
+The minimal vanilla example is served locally at `/examples/vanilla/` and on
+GitHub Pages at `/supervision-js/examples/vanilla/`.
 
 ## Current Status
 

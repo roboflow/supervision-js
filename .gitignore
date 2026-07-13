@@ -1,7 +1,6 @@
 node_modules/
 dist/
 docs/site/
-demo/server-dist/
 coverage/
 .vite/
 .expo/
