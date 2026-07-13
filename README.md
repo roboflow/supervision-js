@@ -85,6 +85,9 @@ Useful commands:
 - `npm run docs:build` builds the TypeDoc site.
 - `npm run verify` runs the full local verification suite.
 
+Maintainers can deploy the public demo through the image-backed Render flow in
+[Render image deployment](docs/internal/render-image-deployment.md).
+
 Start with:
 
 - [Media Sessions](docs/public/guides/media-sessions.md)
