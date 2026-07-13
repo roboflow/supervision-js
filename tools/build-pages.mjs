@@ -1,13 +1,6 @@
 import { spawn } from "node:child_process";
 import process from "node:process";
-import {
-  access,
-  cp,
-  mkdir,
-  readdir,
-  rm,
-  writeFile,
-} from "node:fs/promises";
+import { access, cp, mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -31,7 +24,10 @@ async function main() {
   });
   await runNpm(["run", "docs:build:typedoc"]);
 
-  await copyDirectoryContents(resolve(projectRoot, "demo/dist"), pagesDirectory);
+  await copyDirectoryContents(
+    resolve(projectRoot, "demo/dist"),
+    pagesDirectory,
+  );
   await copyDirectoryContents(
     resolve(projectRoot, "docs/site"),
     join(pagesDirectory, "docs"),
