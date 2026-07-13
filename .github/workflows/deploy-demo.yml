@@ -21,6 +21,8 @@ jobs:
   deploy:
     name: Publish Demo Image
     runs-on: ubuntu-latest
+    env:
+      RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
 
     steps:
       - name: Check out repository
@@ -51,16 +53,15 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Trigger Render image deployment
-        if: ${{ secrets.RENDER_DEPLOY_HOOK_URL != '' }}
+        if: ${{ env.RENDER_DEPLOY_HOOK_URL != '' }}
         env:
           IMAGE_URL: ${{ env.IMAGE_NAME }}:${{ github.sha }}
-          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
         run: |
           curl --fail --show-error --silent --retry 3 --get \
             --data-urlencode "imgURL=${IMAGE_URL}" \
             "$RENDER_DEPLOY_HOOK_URL"
 
       - name: Report skipped Render deployment
-        if: ${{ secrets.RENDER_DEPLOY_HOOK_URL == '' }}
+        if: ${{ env.RENDER_DEPLOY_HOOK_URL == '' }}
         run: |
           echo "::warning::Image published, but RENDER_DEPLOY_HOOK_URL is not configured. See docs/internal/render-image-deployment.md."
