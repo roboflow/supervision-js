@@ -18,7 +18,7 @@ import {
 import "./style.css";
 
 import basketballManifestUrl from "../../../demo/fixtures/basketball_sam3/detections.manifest.json?url";
-import basketballVideoUrl from "../../../demo/fixtures/basketball_sam3/basketball_sample.normalized.webm?url";
+import basketballVideoUrl from "../../../demo/fixtures/basketball_sample/basketball_sample.mp4?url";
 
 const chunkUrls = import.meta.glob(
   "../../../demo/fixtures/basketball_sam3/detections/*.json",
