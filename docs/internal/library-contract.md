@@ -64,9 +64,11 @@ The public data model should remain small and evidence-based:
 - `DetectionFrame`: a media-time or frame-index keyed unit of detections.
 - `Detection`: one model output with optional box, mask, class name,
   confidence, and metadata.
-- `Rect`: the current rectangle shape used for boxes.
+- `Rect`: center-based rectangle geometry used for boxes; top-left rectangles
+  are explicit renderer/layout boundaries only.
 - `DetectionMask`: currently compressed RLE for semantic cold storage.
-- style classes and style interfaces for boxes, masks, and labels.
+- style classes and style interfaces for boxes, masks, labels, polygons,
+  polylines, and keypoints.
 - `DetectionFrameSource`: the read contract for loading detections by time.
 - `WritableDetectionFrameSource`: the write contract for streaming detections
   into a session.
@@ -74,6 +76,19 @@ The public data model should remain small and evidence-based:
 Prepared render artifacts are not public annotation data. PNG ID masks, RGBA
 fallbacks, Pixi textures, palettes, and worker payloads are renderer-owned
 runtime representations.
+
+## Advanced Editing Contract
+
+The browser package exposes editing from `supervision-js/editing`, not its root
+entrypoint. It contains semantic editing engines, immutable editable-frame
+sessions, conversion utilities, and the browser mask brush. Hosts create the
+editing engine, commit detections to their chosen persistence/source, and own
+undo. `MediaSession` only receives the caller-owned engine to route gestures
+and render previews.
+
+`AnnotationOverlayStyle` remains a core renderer-neutral contract so browser
+and React Native hosts share editing vocabulary. Pixi display objects and other
+renderer implementation types must never appear in public declarations.
 
 ## Detection Pipeline
 

@@ -5,6 +5,12 @@ import type { FocusStyle } from "#types/focus-style";
 import type { InteractionStyle } from "#types/interaction-style";
 import type { LabelStyle } from "#types/label-style";
 import type { MaskStyle } from "#types/mask-style";
+import type { Point } from "#types/detections";
+import type { ViewportTransform } from "#types/viewport";
+import type { PolygonStyle } from "#types/polygon-style";
+import type { PolylineStyle } from "#types/polyline-style";
+import type { KeypointStyle } from "#types/keypoint-style";
+import type { AnnotationOverlayStyle } from "#types/editing";
 
 export enum MediaRendererFit {
   /**
@@ -126,11 +132,36 @@ export interface MediaRendererState {
  * Current presentation styles used by renderer layers.
  */
 export interface MediaRendererPresentation {
+  readonly annotationOverlayStyle?: AnnotationOverlayStyle | null;
   readonly boxStyle?: BoxStyle | null;
   readonly focusStyle?: FocusStyle | null;
   readonly interactionStyle?: InteractionStyle | null;
   readonly labelStyle?: LabelStyle | null;
   readonly maskStyle?: MaskStyle | null;
+  readonly polygonStyle?: PolygonStyle | null;
+  readonly polylineStyle?: PolylineStyle | null;
+  readonly keypointStyle?: KeypointStyle | null;
+  readonly visibility?: AnnotationVisibility;
+}
+
+export interface AnnotationVisibility {
+  readonly annotationsHidden?: boolean;
+  readonly labelsHidden?: boolean;
+  readonly hiddenClasses?: ReadonlySet<string> | readonly string[];
+  readonly hiddenDetectionIds?:
+    ReadonlySet<string | number> | readonly (string | number)[];
+  readonly loadingDetectionIds?:
+    ReadonlySet<string | number> | readonly (string | number)[];
+  readonly ephemeralDetectionIds?:
+    ReadonlySet<string | number> | readonly (string | number)[];
+  readonly creatingDetectionId?: string | number | null;
+}
+
+export interface MediaDisplayAdjustments {
+  /** Normalized contrast where 1 is unchanged. */
+  readonly contrast?: number;
+  /** Normalized brightness where 1 is unchanged. */
+  readonly brightness?: number;
 }
 
 /**
@@ -152,6 +183,17 @@ export interface MediaRendererQuality {
 export interface MediaRendererStateController {
   setPresentation(presentation: MediaRendererPresentation): void;
   setRenderQuality(quality: MediaRendererQuality): void;
+  setDisplayAdjustments?(adjustments: MediaDisplayAdjustments): void;
+  getViewportTransform?(): ViewportTransform;
+  setViewportTransform?(
+    transform: Partial<Omit<ViewportTransform, "locked">>,
+  ): void;
+  setViewportLocked?(locked: boolean): void;
+  screenToMedia?(point: Point): Point;
+  mediaToScreen?(point: Point): Point;
+  panViewportBy?(dx: number, dy: number): void;
+  zoomViewportAt?(point: Point, factor: number): void;
+  zoomViewportFromWheel?(point: Point, deltaY: number): void;
   getActiveDetectionFrame(): DetectionFrame | null;
   getState(): MediaRendererState;
 }

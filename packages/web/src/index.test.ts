@@ -47,8 +47,11 @@ describe("package entrypoint", () => {
       "BaseBoxStyle",
       "BaseFocusStyle",
       "BaseInteractionStyle",
+      "BaseKeypointStyle",
       "BaseLabelStyle",
       "BaseMaskStyle",
+      "BasePolygonStyle",
+      "BasePolylineStyle",
       "BoxShape",
       "BoxStrokeAlignment",
       "DEFAULT_DETECTION_CLASS_STYLES",
@@ -60,7 +63,10 @@ describe("package entrypoint", () => {
       "DetectionMaskEncoding",
       "DetectionPickTarget",
       "FocusTargetMode",
+      "KeypointMarkerShape",
+      "KeypointVisibility",
       "LabelPlacement",
+      "LabelVisibilityMode",
       "MaskRenderMode",
       "MediaInteractionMode",
       "MediaNormalizationAudioCodec",
@@ -89,9 +95,11 @@ describe("package entrypoint", () => {
       "createChunkedDetectionFrameSource",
       "createColdDetectionFrameSource",
       "createCompositeDetectionFrameSource",
+      "createImageUrlMediaSource",
       "createMediaRenderer",
       "createMediaSession",
       "createMemoryColdDetectionFrameStore",
+      "createStaticImageMediaSource",
       "createWritableDetectionFrameSource",
       "normalizeDetectionClassName",
       "normalizeMedia",
@@ -147,7 +155,12 @@ describe("package entrypoint", () => {
     });
     expect(entrypoint.DetectionPickTarget).toEqual({
       Box: "box",
+      Edge: "edge",
+      Keypoint: "keypoint",
+      Label: "label",
       Mask: "mask",
+      Polygon: "polygon",
+      Polyline: "polyline",
     });
     expect(entrypoint.MediaInteractionMode).toEqual({
       Always: "always",
@@ -159,6 +172,7 @@ describe("package entrypoint", () => {
       Selected: "selected",
     });
     expect(entrypoint.FocusTargetMode).toEqual({
+      Ambient: "ambient",
       Hovered: "hovered",
       HoveredAndSelected: "hoveredAndSelected",
       Selected: "selected",
@@ -265,6 +279,16 @@ describe("package entrypoint", () => {
     });
   });
 
+  it("exposes editing through the dedicated subpath", async () => {
+    const editing = await import("./editing");
+
+    expect(editing.createAnnotationEditingEngine).toEqual(expect.any(Function));
+    expect(editing.createEditableAnnotationFrameSession).toEqual(
+      expect.any(Function),
+    );
+    expect(editing.createMaskBrushEditor).toEqual(expect.any(Function));
+  });
+
   it("keeps renderer orchestration provider-agnostic behind default adapters", async () => {
     const fsModuleName = "node:fs/promises";
     const { readFile } = (await import(fsModuleName)) as {
@@ -334,6 +358,35 @@ describe("package entrypoint", () => {
     expect(mediaMock.videoSampleSinkConstructor).toHaveBeenCalledWith(
       mediaMock.primaryVideoTrack,
     );
+
+    renderer.destroy();
+  });
+
+  it("keeps plain viewer canvases out of the keyboard tab order", async () => {
+    resetMocks();
+
+    const renderer = await createRenderer(false, false);
+
+    expect(pixiMock.canvasInstances[0]?.tabIndex).toBeUndefined();
+    expect(pixiMock.canvasAddEventListener).not.toHaveBeenCalledWith(
+      "keydown",
+      expect.any(Function),
+    );
+
+    renderer.destroy();
+  });
+
+  it("does not clamp the base media fit for very large media", async () => {
+    resetMocks();
+    mediaMock.getDisplayWidth.mockResolvedValue(7680);
+    mediaMock.getDisplayHeight.mockResolvedValue(4320);
+
+    const renderer = await createRenderer(false, false);
+
+    expect(pixiMock.containerInstances[0]?.scale.set).toHaveBeenLastCalledWith(
+      640 / 7680,
+    );
+    expect(renderer.getViewportTransform().scale).toBeCloseTo(640 / 7680);
 
     renderer.destroy();
   });
@@ -481,12 +534,12 @@ describe("package entrypoint", () => {
     const renderer = await createRenderer(false, false, {
       detectionFrames: [
         {
-          detections: [{ rect: { height: 20, width: 10, x: 4, y: 5 } }],
+          detections: [{ rect: { height: 20, width: 10, x: 9, y: 15 } }],
           frameIndex: 0,
           mediaTime: 0,
         },
         {
-          detections: [{ rect: { height: 40, width: 30, x: 20, y: 10 } }],
+          detections: [{ rect: { height: 40, width: 30, x: 35, y: 30 } }],
           frameIndex: 2,
           mediaTime: 0.08,
         },
@@ -634,8 +687,8 @@ describe("package entrypoint", () => {
               rect: {
                 height: 40,
                 width: 30,
-                x: 20,
-                y: 10,
+                x: 35,
+                y: 30,
               },
             },
           ],
@@ -647,8 +700,8 @@ describe("package entrypoint", () => {
               rect: {
                 height: 20,
                 width: 10,
-                x: 4,
-                y: 5,
+                x: 9,
+                y: 15,
               },
             },
           ],
@@ -688,7 +741,7 @@ describe("package entrypoint", () => {
     expect(boxGraphics.stroke).toHaveBeenLastCalledWith({
       alpha: 0.5,
       color: 0x38bdf8,
-      width: 4,
+      width: 8,
     });
     expect(renderer.getState()).toMatchObject({
       activeDetectionCount: 1,
@@ -714,7 +767,7 @@ describe("package entrypoint", () => {
     expect(boxGraphics.stroke).toHaveBeenLastCalledWith({
       alpha: 0.5,
       color: 0x38bdf8,
-      width: 4,
+      width: 8,
     });
     expect(onFrame).toHaveBeenLastCalledWith(
       expect.objectContaining({
@@ -744,8 +797,8 @@ describe("package entrypoint", () => {
               rect: {
                 height: 20,
                 width: 10,
-                x: 4,
-                y: 5,
+                x: 9,
+                y: 15,
               },
             },
           ],
@@ -761,7 +814,7 @@ describe("package entrypoint", () => {
     expect(boxGraphics.stroke).toHaveBeenLastCalledWith({
       alpha: 1,
       color: 0x00ff66,
-      width: 2,
+      width: 4,
     });
     expect(renderer.getState()).toMatchObject({
       activeDetectionCount: 1,
@@ -795,8 +848,8 @@ describe("package entrypoint", () => {
               rect: {
                 height: 20,
                 width: 10,
-                x: 4,
-                y: 5,
+                x: 9,
+                y: 15,
               },
             },
           ],
@@ -815,7 +868,7 @@ describe("package entrypoint", () => {
     expect(boxGraphics.stroke).toHaveBeenLastCalledWith({
       alpha: 0.75,
       color: 0xabcdef,
-      width: 3,
+      width: 6,
     });
 
     renderer.destroy();
@@ -858,8 +911,8 @@ describe("package entrypoint", () => {
               rect: {
                 height: 20,
                 width: 10,
-                x: 4,
-                y: 20,
+                x: 9,
+                y: 30,
               },
             },
           ],
@@ -880,20 +933,20 @@ describe("package entrypoint", () => {
       style: expect.objectContaining({
         fill: 0xffffff,
         fontFamily: "Inter, sans-serif",
-        fontSize: 14,
+        fontSize: 28,
         fontWeight: "600",
       }),
       text: "player 84%",
       visible: true,
-      x: 10,
-      y: 3,
+      x: 16,
+      y: 6,
     });
     expect(pixiMock.graphicsInstances[1]?.roundRect).toHaveBeenLastCalledWith(
       0,
       0,
-      92,
-      22,
-      4,
+      104,
+      28,
+      8,
     );
     expect(pixiMock.graphicsInstances[1]).toMatchObject({
       x: 4,
@@ -924,8 +977,8 @@ describe("package entrypoint", () => {
               rect: {
                 height: 20,
                 width: 10,
-                x: 4,
-                y: 5,
+                x: 9,
+                y: 15,
               },
             },
           ],
@@ -1011,8 +1064,8 @@ describe("package entrypoint", () => {
               rect: {
                 height: 20,
                 width: 10,
-                x: 4,
-                y: 5,
+                x: 9,
+                y: 15,
               },
             },
           ],
@@ -1058,7 +1111,7 @@ describe("package entrypoint", () => {
     expect(boxGraphics.stroke).toHaveBeenLastCalledWith({
       alpha: 0.5,
       color: 0x38bdf8,
-      width: 4,
+      width: 8,
     });
 
     renderer.destroy();
@@ -1436,8 +1489,8 @@ describe("package entrypoint", () => {
               rect: {
                 height: 20,
                 width: 10,
-                x: 4,
-                y: 5,
+                x: 9,
+                y: 15,
               },
             },
           ],
@@ -1461,8 +1514,8 @@ describe("package entrypoint", () => {
     const resolve = vi.fn<BoxStyle["resolve"]>(() => undefined);
     const detectionFrame = {
       detections: [
-        { rect: { height: 20, width: 10, x: 4, y: 5 } },
-        { rect: { height: 40, width: 30, x: 20, y: 10 } },
+        { rect: { height: 20, width: 10, x: 9, y: 15 } },
+        { rect: { height: 40, width: 30, x: 35, y: 30 } },
       ],
       mediaTime: 0,
     };
@@ -1507,11 +1560,11 @@ describe("package entrypoint", () => {
     const renderer = await createRenderer(false, true, {
       detectionFrames: [
         {
-          detections: [{ rect: { height: 20, width: 10, x: 4, y: 5 } }],
+          detections: [{ rect: { height: 20, width: 10, x: 9, y: 15 } }],
           mediaTime: 0,
         },
         {
-          detections: [{ rect: { height: 40, width: 30, x: 20, y: 10 } }],
+          detections: [{ rect: { height: 40, width: 30, x: 35, y: 30 } }],
           mediaTime: 0.04,
         },
       ],
@@ -1560,11 +1613,11 @@ describe("package entrypoint", () => {
     const renderer = await createRenderer(false, false, {
       detectionFrames: [
         {
-          detections: [{ rect: { height: 20, width: 10, x: 4, y: 5 } }],
+          detections: [{ rect: { height: 20, width: 10, x: 9, y: 15 } }],
           mediaTime: 0,
         },
         {
-          detections: [{ rect: { height: 40, width: 30, x: 20, y: 10 } }],
+          detections: [{ rect: { height: 40, width: 30, x: 35, y: 30 } }],
           mediaTime: 0.04,
         },
       ],
@@ -1606,11 +1659,11 @@ describe("package entrypoint", () => {
     const renderer = await createRenderer(false, false, {
       detectionFrames: [
         {
-          detections: [{ rect: { height: 20, width: 10, x: 4, y: 5 } }],
+          detections: [{ rect: { height: 20, width: 10, x: 9, y: 15 } }],
           mediaTime: 0,
         },
         {
-          detections: [{ rect: { height: 40, width: 30, x: 20, y: 10 } }],
+          detections: [{ rect: { height: 40, width: 30, x: 35, y: 30 } }],
           mediaTime: 0.08,
         },
       ],
@@ -1685,7 +1738,7 @@ describe("package entrypoint", () => {
       }),
       detectionFrames: [
         {
-          detections: [{ rect: { height: 20, width: 10, x: 4, y: 5 } }],
+          detections: [{ rect: { height: 20, width: 10, x: 9, y: 15 } }],
           mediaTime: 0,
         },
       ],
@@ -1695,7 +1748,7 @@ describe("package entrypoint", () => {
     expect(boxGraphics.stroke).toHaveBeenLastCalledWith({
       alpha: 0.5,
       color: 0x38bdf8,
-      width: 4,
+      width: 8,
     });
 
     renderer.setPresentation({
@@ -1714,7 +1767,7 @@ describe("package entrypoint", () => {
     expect(boxGraphics.stroke).toHaveBeenLastCalledWith({
       alpha: 0.8,
       color: 0xff00ff,
-      width: 7,
+      width: 14,
     });
     expect(renderer.getState()).toMatchObject({
       activeDetectionCount: 1,
@@ -1734,7 +1787,7 @@ describe("package entrypoint", () => {
     expect(boxGraphics.stroke).toHaveBeenLastCalledWith({
       alpha: 0.8,
       color: 0xff00ff,
-      width: 7,
+      width: 14,
     });
     expect(renderer.getState()).toMatchObject({
       activeDetectionCount: 1,
@@ -1753,7 +1806,7 @@ describe("package entrypoint", () => {
     const renderer = await createRenderer(false, false, {
       detectionFrames: [
         {
-          detections: [{ rect: { height: 20, width: 10, x: 4, y: 5 } }],
+          detections: [{ rect: { height: 20, width: 10, x: 9, y: 15 } }],
           mediaTime: 0,
         },
       ],
@@ -1965,7 +2018,9 @@ describe("package entrypoint", () => {
     const boxGraphics = pixiMock.graphicsInstances[0];
 
     expect(pixiMock.spriteInstances).toHaveLength(1);
-    expect(scene?.children).toEqual([pixiMock.spriteInstances[0], boxGraphics]);
+    expect(scene?.children).toEqual(
+      expect.arrayContaining([pixiMock.spriteInstances[0], boxGraphics]),
+    );
 
     renderer.setPresentation({ maskStyle: new BaseMaskStyle() });
 
@@ -1974,9 +2029,13 @@ describe("package entrypoint", () => {
     );
 
     expect(pixiMock.spriteInstances).toHaveLength(2);
-    expect(scene?.children[0]).toBe(pixiMock.spriteInstances[0]);
-    expect(scene?.children[1]).toBe(maskContainer);
-    expect(scene?.children[2]).toBe(boxGraphics);
+    expect(scene?.children).toEqual(
+      expect.arrayContaining([
+        pixiMock.spriteInstances[0],
+        maskContainer,
+        boxGraphics,
+      ]),
+    );
     expect(maskContainer?.children).toEqual([
       pixiMock.spriteInstances[1],
       pixiMock.meshInstances[0],

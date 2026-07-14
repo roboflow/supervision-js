@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { URL } from "node:url";
 import test from "node:test";
 
@@ -7,8 +7,11 @@ const expectedWebRuntimeExports = [
   "BaseBoxStyle",
   "BaseFocusStyle",
   "BaseInteractionStyle",
+  "BaseKeypointStyle",
   "BaseLabelStyle",
   "BaseMaskStyle",
+  "BasePolygonStyle",
+  "BasePolylineStyle",
   "BoxShape",
   "BoxStrokeAlignment",
   "DEFAULT_DETECTION_CLASS_STYLES",
@@ -20,7 +23,10 @@ const expectedWebRuntimeExports = [
   "DetectionMaskEncoding",
   "DetectionPickTarget",
   "FocusTargetMode",
+  "KeypointMarkerShape",
+  "KeypointVisibility",
   "LabelPlacement",
+  "LabelVisibilityMode",
   "MaskRenderMode",
   "MediaInteractionMode",
   "MediaNormalizationAudioCodec",
@@ -49,9 +55,11 @@ const expectedWebRuntimeExports = [
   "createChunkedDetectionFrameSource",
   "createColdDetectionFrameSource",
   "createCompositeDetectionFrameSource",
+  "createImageUrlMediaSource",
   "createMediaRenderer",
   "createMediaSession",
   "createMemoryColdDetectionFrameStore",
+  "createStaticImageMediaSource",
   "createWritableDetectionFrameSource",
   "normalizeDetectionClassName",
   "normalizeMedia",
@@ -107,14 +115,18 @@ const expectedCoreRuntimeExports = [
 
 const expectedReactNativeRuntimeExports = [
   "BaseBoxStyle",
+  "BaseKeypointStyle",
   "BaseLabelStyle",
   "BaseMaskStyle",
+  "BasePolygonStyle",
+  "BasePolylineStyle",
   "BoxShape",
   "BoxStrokeAlignment",
   "DEFAULT_DETECTION_CLASS_STYLES",
   "DEFAULT_DETECTION_COLOR_SEQUENCE",
   "DEFAULT_REACT_NATIVE_ID_MASK_EDGE_SMOOTHING",
   "DetectionMaskEncoding",
+  "KeypointMarkerShape",
   "LabelPlacement",
   "MAX_ID_MASK_PALETTE_ENTRIES",
   "MAX_ID_MASK_STROKE_WIDTH",
@@ -125,6 +137,7 @@ const expectedReactNativeRuntimeExports = [
   "REACT_NATIVE_VIDEO_FRAME_SOURCE_NAME",
   "SUPERVISION_ROBOFLOW_COLOR",
   "createEmptyReactNativeLiveIdMaskUniforms",
+  "createReactNativeAnnotationGestureAdapter",
   "createReactNativeIdMaskFrame",
   "createReactNativeLiveIdMaskArtifact",
   "createReactNativeLiveIdMaskArtifactAuto",
@@ -180,6 +193,29 @@ test("built package entrypoint exposes the public runtime API", async () => {
   assert.equal(typeof entrypoint.BaseLabelStyle, "function");
   assert.equal(entrypoint.MediaSessionStatus.Ready, "ready");
   assert.equal(entrypoint.MediaRendererFit.Contain, "contain");
+});
+
+test("built editing entrypoint exposes advanced host-owned editing APIs", async () => {
+  const editing = await import("../packages/web/dist/editing.js");
+
+  assert.equal(typeof editing.createAnnotationEditingEngine, "function");
+  assert.equal(typeof editing.createEditableAnnotationFrameSession, "function");
+  assert.equal(typeof editing.createMaskBrushEditor, "function");
+});
+
+test("public browser declarations do not leak Pixi implementation types", () => {
+  for (const declaration of [
+    "../packages/web/dist/index.d.ts",
+    "../packages/web/dist/editing.d.ts",
+  ]) {
+    const contents = readFileSync(
+      new URL(declaration, import.meta.url),
+      "utf8",
+    );
+
+    assert.ok(!contents.includes("pixi.js"), `${declaration} imports Pixi`);
+    assert.ok(!contents.includes("Pixi"), `${declaration} exposes Pixi types`);
+  }
 });
 
 test("built React Native package imports core without importing web", async () => {

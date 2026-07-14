@@ -5,6 +5,12 @@ import path from "node:path";
 import process from "node:process";
 import { URL } from "node:url";
 import prettier from "prettier";
+import {
+  computeDetectionMaskRect,
+  DetectionMaskEncoding,
+  encodeCompressedRleCounts,
+  polygonToRect,
+} from "supervision-js-core";
 import { readJsonlArray, readJsonlRecords } from "./jsonl.mjs";
 
 const ENDPOINT = "https://serverless.roboflow.com/sam3/concept_segment";
@@ -90,6 +96,7 @@ async function main(runOptions, apiKeyValue) {
       sampleName: runOptions.sampleName,
       sourceFile: runOptions.sourceFile,
     });
+    validateMaskDerivedRects(detectionsFixture.frames);
 
     await mkdir(path.dirname(runOptions.detectionsOutput), { recursive: true });
     await writeFile(
@@ -541,7 +548,7 @@ function normalizeSam3Responses(rawRecords, context) {
       file: context.sourceFile,
       sampleName: context.sampleName,
     }),
-    version: 1,
+    version: 2,
     video: {
       duration: frames.length === 0 ? 0 : frames.at(-1).endTime,
       file: context.sourceFile ?? "source media",
@@ -568,6 +575,27 @@ function normalizeFrameDetections(response, context) {
       }),
     );
   });
+}
+
+function validateMaskDerivedRects(frames) {
+  for (const frame of frames) {
+    for (const [detectionIndex, detection] of frame.detections.entries()) {
+      if (!detection.mask || !detection.rect) continue;
+      const expectedRect = computeDetectionMaskRect(detection.mask);
+
+      if (
+        !expectedRect ||
+        detection.rect.x !== expectedRect.x ||
+        detection.rect.y !== expectedRect.y ||
+        detection.rect.width !== expectedRect.width ||
+        detection.rect.height !== expectedRect.height
+      ) {
+        throw new Error(
+          `SAM3 mask-derived rect mismatch at frame ${frame.frameIndex}, detection ${detectionIndex}.`,
+        );
+      }
+    }
+  }
 }
 
 function getPromptsForRawRecord(rawRecord, fallbackPrompts) {
@@ -632,25 +660,13 @@ function normalizePrediction(prediction, context) {
   const mask = extractMask(prediction);
   const polygonPoints = extractPolygonPoints(prediction, mask);
   const rle = extractRle(mask);
+  const normalizedMask = normalizeRleMask(rle);
   const rect =
     polygonPoints.length > 0
-      ? deriveRectFromPoints(polygonPoints)
-      : rle
-        ? deriveRectFromRle(rle)
+      ? polygonToRect({ points: polygonPoints })
+      : normalizedMask
+        ? computeDetectionMaskRect(normalizedMask)
         : undefined;
-  const normalizedMask =
-    rle && typeof rle.counts === "string"
-      ? {
-          counts: rle.counts,
-          encoding: "compressedRle",
-          height: rle.height,
-          width: rle.width,
-        }
-      : undefined;
-  const rawMaskNote =
-    rle && typeof rle.counts !== "string"
-      ? "SAM3 returned an uncompressed or non-COCO RLE shape. The runner derives a box when possible and preserves the raw mask metadata instead of pretending it is supervision-js compressedRle."
-      : undefined;
 
   return removeUndefinedProperties({
     className: getPredictionClassName(prediction, context),
@@ -658,10 +674,9 @@ function normalizePrediction(prediction, context) {
     id: getPredictionId(prediction, context),
     mask: normalizedMask,
     metadata: removeUndefinedProperties({
-      sam3MaskNote: rawMaskNote,
       sam3Prompt: context.promptText,
       sam3PromptIndex: context.promptIndex,
-      sam3RawMask: normalizedMask ? undefined : mask,
+      sam3RawMask: rle ? undefined : mask,
     }),
     rect,
   });
@@ -735,99 +750,17 @@ function extractRle(mask) {
   };
 }
 
-function deriveRectFromPoints(points) {
-  const xs = points.map((point) => point.x);
-  const ys = points.map((point) => point.y);
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const minY = Math.min(...ys);
-  const maxY = Math.max(...ys);
-
+function normalizeRleMask(rle) {
+  if (!rle) return undefined;
   return {
-    height: roundTo(maxY - minY, 3),
-    width: roundTo(maxX - minX, 3),
-    x: roundTo(minX, 3),
-    y: roundTo(minY, 3),
+    counts:
+      typeof rle.counts === "string"
+        ? rle.counts
+        : encodeCompressedRleCounts(rle.counts),
+    encoding: DetectionMaskEncoding.CompressedRle,
+    height: rle.height,
+    width: rle.width,
   };
-}
-
-function deriveRectFromRle(rle) {
-  const counts =
-    typeof rle.counts === "string"
-      ? decodeCompressedRleCounts(rle.counts)
-      : rle.counts;
-  let offset = 0;
-  let minX = rle.width;
-  let minY = rle.height;
-  let maxX = -1;
-  let maxY = -1;
-
-  for (let index = 0; index < counts.length; index += 1) {
-    const runLength = counts[index];
-    const isForeground = index % 2 === 1;
-
-    if (isForeground && runLength > 0) {
-      let remaining = runLength;
-      let runOffset = offset;
-
-      while (remaining > 0) {
-        const x = Math.floor(runOffset / rle.height);
-        const y = runOffset % rle.height;
-        const pixelsInColumn = Math.min(remaining, rle.height - y);
-
-        minX = Math.min(minX, x);
-        minY = Math.min(minY, y);
-        maxX = Math.max(maxX, x);
-        maxY = Math.max(maxY, y + pixelsInColumn - 1);
-
-        runOffset += pixelsInColumn;
-        remaining -= pixelsInColumn;
-      }
-    }
-
-    offset += runLength;
-  }
-
-  if (maxX < minX || maxY < minY) {
-    return undefined;
-  }
-
-  return {
-    height: roundTo(maxY - minY + 1, 3),
-    width: roundTo(maxX - minX + 1, 3),
-    x: roundTo(minX, 3),
-    y: roundTo(minY, 3),
-  };
-}
-
-function decodeCompressedRleCounts(counts) {
-  const decoded = [];
-  let index = 0;
-
-  while (index < counts.length) {
-    let value = 0;
-    let shift = 0;
-    let charCode;
-
-    do {
-      charCode = counts.charCodeAt(index) - 48;
-      index += 1;
-      value |= (charCode & 0x1f) << shift;
-      shift += 5;
-    } while (charCode & 0x20);
-
-    if (charCode & 0x10) {
-      value |= -1 << shift;
-    }
-
-    if (decoded.length > 2) {
-      value += decoded[decoded.length - 2];
-    }
-
-    decoded.push(value);
-  }
-
-  return decoded;
 }
 
 function getPredictionClassName(prediction, context) {
@@ -944,10 +877,6 @@ function removeUndefinedProperties(value) {
   return Object.fromEntries(
     Object.entries(value).filter(([, entryValue]) => entryValue !== undefined),
   );
-}
-
-function roundTo(value, decimals) {
-  return Number(value.toFixed(decimals));
 }
 
 function isNodeError(error) {

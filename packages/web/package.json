@@ -29,9 +29,17 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./editing": {
+      "types": "./dist/editing.d.ts",
+      "import": "./dist/editing.js"
     }
   },
   "imports": {
+    "#editing/*": {
+      "types": "./dist/editing/*.d.ts",
+      "import": "./dist/editing/*.js"
+    },
     "#constants/*": {
       "types": "./dist/constants/*.d.ts",
       "import": "./dist/constants/*.js"

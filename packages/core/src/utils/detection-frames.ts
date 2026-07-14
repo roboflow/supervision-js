@@ -28,8 +28,34 @@ export function copySortedDetectionFrames(
     .map((frame) => ({
       detections: frame.detections.map((detection) => ({
         ...detection,
+        attributes: detection.attributes
+          ? [...detection.attributes]
+          : undefined,
+        keypoints: detection.keypoints
+          ? {
+              edges: detection.keypoints.edges.map(
+                (edge) => [edge[0], edge[1]] as const,
+              ),
+              points: detection.keypoints.points.map((point) => ({ ...point })),
+              visibility: detection.keypoints.visibility
+                ? [...detection.keypoints.visibility]
+                : undefined,
+            }
+          : undefined,
         mask: detection.mask ? { ...detection.mask } : undefined,
-        metadata: detection.metadata ? { ...detection.metadata } : undefined,
+        metadata: detection.metadata
+          ? copyDetectionMetadata(detection.metadata)
+          : undefined,
+        polygon: detection.polygon
+          ? {
+              points: detection.polygon.points.map((point) => ({ ...point })),
+            }
+          : undefined,
+        polyline: detection.polyline
+          ? {
+              points: detection.polyline.points.map((point) => ({ ...point })),
+            }
+          : undefined,
         rect: detection.rect ? { ...detection.rect } : undefined,
       })),
       endTime: frame.endTime,
@@ -37,6 +63,39 @@ export function copySortedDetectionFrames(
       mediaTime: frame.mediaTime,
     }))
     .sort((left, right) => left.mediaTime - right.mediaTime);
+}
+
+function copyDetectionMetadata(
+  metadata: Record<string, unknown>,
+): Record<string, unknown> {
+  const clone = (
+    globalThis as {
+      readonly structuredClone?: <TValue>(value: TValue) => TValue;
+    }
+  ).structuredClone;
+
+  if (clone) {
+    return clone(metadata);
+  }
+
+  return copyMetadataValue(metadata) as Record<string, unknown>;
+}
+
+function copyMetadataValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(copyMetadataValue);
+  }
+
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, child]) => [
+        key,
+        copyMetadataValue(child),
+      ]),
+    );
+  }
+
+  return value;
 }
 
 export function validateDetectionFrames(
@@ -70,6 +129,10 @@ export function validateDetectionFrames(
         });
       }
 
+      if (detection.zIndex !== undefined) {
+        validateNumber(detection.zIndex, `${detectionPath}.zIndex`);
+      }
+
       if (
         detection.sourceId !== undefined &&
         typeof detection.sourceId !== "string"
@@ -98,6 +161,47 @@ export function validateDetectionFrames(
           exclusiveMin: 0,
         });
       }
+      validatePoints(detection.polygon?.points, `${detectionPath}.polygon`, 3);
+      validatePoints(
+        detection.polyline?.points,
+        `${detectionPath}.polyline`,
+        2,
+      );
+
+      if (detection.keypoints) {
+        validatePoints(
+          detection.keypoints.points,
+          `${detectionPath}.keypoints`,
+          1,
+        );
+
+        if (
+          detection.keypoints.visibility !== undefined &&
+          detection.keypoints.visibility.length !==
+            detection.keypoints.points.length
+        ) {
+          throw new Error(
+            `${detectionPath}.keypoints.visibility must match points length.`,
+          );
+        }
+
+        for (const [edgeOffset, edge] of detection.keypoints.edges.entries()) {
+          const edgePath = `${detectionPath}.keypoints.edges[${edgeOffset}]`;
+
+          for (const [endpointOffset, endpoint] of edge.entries()) {
+            validateNumber(endpoint, `${edgePath}[${endpointOffset}]`, {
+              integer: true,
+              min: 0,
+            });
+
+            if (endpoint >= detection.keypoints.points.length) {
+              throw new Error(
+                `${edgePath}[${endpointOffset}] is out of range.`,
+              );
+            }
+          }
+        }
+      }
 
       if (detection.mask) {
         validateNumber(detection.mask.width, `${detectionPath}.mask.width`, {
@@ -114,6 +218,27 @@ export function validateDetectionFrames(
         }
       }
     }
+  }
+}
+
+function validatePoints(
+  points: readonly { readonly x: number; readonly y: number }[] | undefined,
+  path: string,
+  minimumLength: number,
+) {
+  if (!points) {
+    return;
+  }
+
+  if (points.length < minimumLength) {
+    throw new Error(
+      `${path}.points must contain at least ${minimumLength} points.`,
+    );
+  }
+
+  for (const [pointOffset, point] of points.entries()) {
+    validateNumber(point.x, `${path}.points[${pointOffset}].x`);
+    validateNumber(point.y, `${path}.points[${pointOffset}].y`);
   }
 }
 
@@ -311,7 +436,7 @@ export function detectionFrameOverlapsRange(
   return frame.mediaTime <= endTime && frame.endTime > startTime;
 }
 
-function decodeCompressedRleCounts(counts: string) {
+export function decodeCompressedRleCounts(counts: string) {
   const decoded: number[] = [];
   let index = 0;
 
@@ -339,4 +464,32 @@ function decodeCompressedRleCounts(counts: string) {
   }
 
   return decoded;
+}
+
+export function encodeCompressedRleCounts(counts: readonly number[]) {
+  return counts
+    .map((count, index) => {
+      let value = index > 2 ? count - counts[index - 2]! : count;
+      let encoded = "";
+      let more = true;
+
+      while (more) {
+        let charCode = value & 0x1f;
+
+        value >>= 5;
+        more = !(
+          (value === 0 && (charCode & 0x10) === 0) ||
+          (value === -1 && (charCode & 0x10) !== 0)
+        );
+
+        if (more) {
+          charCode |= 0x20;
+        }
+
+        encoded += String.fromCharCode(charCode + 48);
+      }
+
+      return encoded;
+    })
+    .join("");
 }

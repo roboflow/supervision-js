@@ -1,5 +1,6 @@
 import {
   DetectionPickTarget,
+  encodeCompressedRleCounts,
   MaskRenderMode,
   resolveDetectionClassColorStyle,
   type DetectionFrame,
@@ -165,8 +166,8 @@ describe("resolveReactNativeFrameLayout", () => {
       {
         height: 56.25,
         width: 100,
-        x: 200,
-        y: 320,
+        x: 150,
+        y: 291.875,
       },
     );
     expect(layout.mapPoint({ x: 1920, y: 1080 })).toEqual({
@@ -270,7 +271,7 @@ describe("resolveReactNativeLabelLayout", () => {
         },
         offsetY: 4,
         placement: LabelPlacement.Top,
-        rect: { height: 100, width: 80, x: 100, y: 50 },
+        rect: { height: 100, width: 80, x: 140, y: 100 },
         text: "horse 92%",
       },
       layout,
@@ -305,7 +306,7 @@ describe("resolveReactNativeLabelLayout", () => {
         offsetX: 10,
         offsetY: 8,
         placement: LabelPlacement.Bottom,
-        rect: { height: 100, width: 80, x: 100, y: 50 },
+        rect: { height: 100, width: 80, x: 140, y: 100 },
         text: "horse 92%",
       },
       layout,
@@ -1089,32 +1090,4 @@ function createNativeLikeIdMaskBuilderHandle(): ReactNativeLiveIdMaskNativeBuild
       unbox: () => ({ createArtifact }),
     },
   };
-}
-
-function encodeCompressedRleCounts(counts: readonly number[]) {
-  return counts
-    .map((count, index) => {
-      let value = index > 2 ? count - counts[index - 2]! : count;
-      let encoded = "";
-      let more = true;
-
-      while (more) {
-        let charCode = value & 0x1f;
-
-        value >>= 5;
-        more = !(
-          (value === 0 && (charCode & 0x10) === 0) ||
-          (value === -1 && (charCode & 0x10) !== 0)
-        );
-
-        if (more) {
-          charCode |= 0x20;
-        }
-
-        encoded += String.fromCharCode(charCode + 48);
-      }
-
-      return encoded;
-    })
-    .join("");
 }

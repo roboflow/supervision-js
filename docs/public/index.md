@@ -73,12 +73,15 @@ await session.appendDetectionFrames([
         id: "person-1",
         className: "person",
         confidence: 0.92,
-        rect: { x: 120, y: 80, width: 240, height: 420 },
+        rect: { x: 240, y: 290, width: 240, height: 420 },
       },
     ],
   },
 ]);
 ```
+
+`rect.x` and `rect.y` are the box center in media pixels (not its top-left
+corner).
 
 ## What The Session Owns
 

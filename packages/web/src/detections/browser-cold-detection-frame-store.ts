@@ -12,7 +12,7 @@ import {
 
 const DEFAULT_DATABASE_NAME = "supervision-js-detection-frames";
 const DEFAULT_CHUNK_DURATION_SECONDS = 1;
-const DATABASE_VERSION = 1;
+const DATABASE_VERSION = 3;
 const CHUNK_STORE_NAME = "detectionFrameChunks";
 const DATASET_STORE_NAME = "detectionFrameDatasets";
 const DATASET_ID_INDEX_NAME = "datasetId";
@@ -528,9 +528,20 @@ function openDetectionFrameDatabase(databaseName: string) {
   return new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDb.open(databaseName, DATABASE_VERSION);
 
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (event) => {
       const upgradeDatabase = request.result;
       const transaction = request.transaction;
+      const oldVersion =
+        (event as IDBVersionChangeEvent | undefined)?.oldVersion ?? 0;
+
+      if (oldVersion > 0 && oldVersion < DATABASE_VERSION) {
+        if (upgradeDatabase.objectStoreNames.contains(CHUNK_STORE_NAME)) {
+          upgradeDatabase.deleteObjectStore(CHUNK_STORE_NAME);
+        }
+        if (upgradeDatabase.objectStoreNames.contains(DATASET_STORE_NAME)) {
+          upgradeDatabase.deleteObjectStore(DATASET_STORE_NAME);
+        }
+      }
 
       const chunkStore = upgradeDatabase.objectStoreNames.contains(
         CHUNK_STORE_NAME,

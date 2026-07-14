@@ -86,7 +86,12 @@ export type MediaSessionDetectionSyncOptions = DetectionFrameSelectionOptions;
 
 export type MediaSessionDetectionSourcePresentation = Pick<
   MediaRendererPresentation,
-  "boxStyle" | "labelStyle" | "maskStyle"
+  | "boxStyle"
+  | "keypointStyle"
+  | "labelStyle"
+  | "maskStyle"
+  | "polygonStyle"
+  | "polylineStyle"
 >;
 
 export interface MediaSessionDetectionSourceOptions {
@@ -111,7 +116,7 @@ export interface MediaSessionDetectionSourceOptions {
    */
   readonly order?: number;
   /**
-   * Optional box, mask, and label presentation overrides for this source.
+   * Optional geometry presentation overrides for this source.
    *
    * `undefined` falls back to the global presentation. `null` disables that
    * layer for this source.
@@ -182,6 +187,15 @@ export interface MediaSessionRendererOptions {
   readonly interaction?: MediaInteractionOptions;
   readonly renderPreparation?: MediaRendererOptions["renderPreparation"];
   readonly diagnostics?: MediaRendererOptions["diagnostics"];
+  /**
+   * Caller-owned editing engine. The host persists committed edits and owns
+   * undo; the session only routes renderer gestures and previews.
+   */
+  readonly editingEngine?: MediaRendererOptions["editingEngine"];
+  /** Optional browser mask-brush preview rendered with the editing engine. */
+  readonly maskBrush?: MediaRendererOptions["maskBrush"];
+  /** Optional host-owned external preview rendered above annotations. */
+  readonly previewOverlay?: MediaRendererOptions["previewOverlay"];
   readonly onFrame?: (diagnostics: MediaFrameDiagnostics) => void;
   readonly onSource?: (state: MediaSourceState) => void;
   readonly onState?: (state: MediaRendererState) => void;

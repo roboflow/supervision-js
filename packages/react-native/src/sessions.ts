@@ -20,7 +20,7 @@ import {
   type ReactNativeIdMaskUniforms,
   type ReactNativeLiveIdMaskNativeBuilderHandle,
   type ReactNativeLiveSerializedDetection,
-  type Rect,
+  type TopLeftRect,
 } from "./index";
 import {
   createReactNativeSkiaMaskFrame,
@@ -108,7 +108,7 @@ export interface ReactNativeVideoSessionPresentationOptions {
 export interface ReactNativeVideoSessionOptions {
   readonly fileUri: string;
   /** Canvas-space rect the video is drawn into; update via `setMediaRect`. */
-  readonly mediaRect: Rect;
+  readonly mediaRect: TopLeftRect;
   readonly nativeBuilder?: ReactNativeLiveIdMaskNativeBuilderHandle | null;
   readonly presentation?: ReactNativeVideoSessionPresentationOptions;
   /** Worklet runtime the pump runs on (owned by the caller, reusable). */
@@ -144,7 +144,7 @@ export interface ReactNativeVideoSession {
   readonly frameImage: ReactNativeSharedValue<SkImage | null>;
   readonly maskImage: ReactNativeSharedValue<SkImage | null>;
   readonly maskUniforms: ReactNativeSharedValue<ReactNativeIdMaskUniforms>;
-  setMediaRect(rect: Rect): void;
+  setMediaRect(rect: TopLeftRect): void;
   /** Halts the pump but keeps the decoder open at position. */
   pause(): void;
   resume(): void;
@@ -254,7 +254,9 @@ export function createReactNativeVideoSession(
   const retiredMaskImage = vendors.makeMutable<SkImage | null>(null);
   const playingShared = vendors.makeMutable(false);
   const pausedShared = vendors.makeMutable(false);
-  const mediaRectShared = vendors.makeMutable<Rect>({ ...options.mediaRect });
+  const mediaRectShared = vendors.makeMutable<TopLeftRect>({
+    ...options.mediaRect,
+  });
 
   const presentation = options.presentation ?? {};
   const fullResMaskMaxPixels =
@@ -559,7 +561,7 @@ export function createReactNativeVideoSession(
       playingShared.value = true;
       schedulePump();
     },
-    setMediaRect(rect: Rect) {
+    setMediaRect(rect: TopLeftRect) {
       mediaRectShared.value = { ...rect };
     },
     stop() {

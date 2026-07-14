@@ -44,7 +44,7 @@ describe("media session consumer workflows", () => {
               className: "player",
               confidence: 0.93,
               id: "player-1",
-              rect: { height: 40, width: 30, x: 10, y: 20 },
+              rect: { height: 40, width: 30, x: 25, y: 40 },
             },
           ],
           endTime: 0.5,
@@ -57,7 +57,7 @@ describe("media session consumer workflows", () => {
               className: "ball",
               confidence: 0.88,
               id: "ball-1",
-              rect: { height: 12, width: 12, x: 100, y: 120 },
+              rect: { height: 12, width: 12, x: 106, y: 126 },
             },
           ],
           endTime: 1,
@@ -98,7 +98,7 @@ describe("media session consumer workflows", () => {
     expect(boxGraphics.stroke).toHaveBeenLastCalledWith({
       alpha: 0.75,
       color: 0xff00ff,
-      width: 6,
+      width: 12,
     });
     expect(session.getDetectionSummary()).toMatchObject({
       datasetId: "consumer-session",
@@ -131,7 +131,7 @@ describe("media session consumer workflows", () => {
               {
                 className: "player",
                 id: "player-1",
-                rect: { height: 30, width: 20, x: 10, y: 15 },
+                rect: { height: 30, width: 20, x: 20, y: 30 },
               },
             ],
             frameIndex: 0,
@@ -225,7 +225,7 @@ describe("media session consumer workflows", () => {
           {
             className: "player",
             id: "first-player",
-            rect: { height: 30, width: 20, x: 10, y: 20 },
+            rect: { height: 30, width: 20, x: 20, y: 35 },
           },
         ],
         frameIndex: 1,
@@ -333,7 +333,7 @@ describe("media session consumer workflows", () => {
         detections: [
           {
             id: "active",
-            rect: { height: 20, width: 10, x: 5, y: 5 },
+            rect: { height: 20, width: 10, x: 10, y: 15 },
           },
         ],
         endTime: 1,
@@ -354,7 +354,7 @@ describe("media session consumer workflows", () => {
         detections: [
           {
             id: "late-future",
-            rect: { height: 20, width: 10, x: 50, y: 50 },
+            rect: { height: 20, width: 10, x: 55, y: 60 },
           },
         ],
         endTime: 11,

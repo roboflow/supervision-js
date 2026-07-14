@@ -4,19 +4,26 @@ export enum PixiSceneLayerKind {
   Media = "media",
   Mask = "mask",
   Box = "box",
+  Vector = "vector",
   Focus = "focus",
+  Preview = "preview",
+  Guide = "guide",
+  Handle = "handle",
   Interaction = "interaction",
   Label = "label",
 }
 
 export interface PixiSceneLayerSlot {
-  readonly kind: PixiSceneLayerKind;
+  /** Open identifier: hosts may register their own layer kinds. */
+  readonly kind: string;
+  readonly order: number;
   getDisplay(): PixiContainer | undefined;
   setDisplay(display: PixiContainer | undefined): void;
 }
 
 export function createPixiSceneLayerSlot(
-  kind: PixiSceneLayerKind,
+  kind: string,
+  order = defaultLayerOrder(kind),
 ): PixiSceneLayerSlot {
   let display: PixiContainer | undefined;
 
@@ -26,6 +33,7 @@ export function createPixiSceneLayerSlot(
     },
 
     kind,
+    order,
 
     setDisplay(nextDisplay) {
       display = nextDisplay;
@@ -41,7 +49,8 @@ export function syncPixiSceneLayerChildren(
     return;
   }
 
-  const displays = slots
+  const displays = [...slots]
+    .sort((left, right) => left.order - right.order)
     .map((slot) => slot.getDisplay())
     .filter((display): display is PixiContainer => display !== undefined);
 
@@ -52,6 +61,33 @@ export function syncPixiSceneLayerChildren(
   }
 
   scene.addChild(...displays);
+}
+
+function defaultLayerOrder(kind: string) {
+  switch (kind) {
+    case PixiSceneLayerKind.Media:
+      return 0;
+    case PixiSceneLayerKind.Mask:
+      return 100;
+    case PixiSceneLayerKind.Box:
+      return 200;
+    case PixiSceneLayerKind.Vector:
+      return 250;
+    case PixiSceneLayerKind.Focus:
+      return 300;
+    case PixiSceneLayerKind.Preview:
+      return 400;
+    case PixiSceneLayerKind.Guide:
+      return 500;
+    case PixiSceneLayerKind.Handle:
+      return 600;
+    case PixiSceneLayerKind.Interaction:
+      return 700;
+    case PixiSceneLayerKind.Label:
+      return 800;
+    default:
+      return 350;
+  }
 }
 
 function clearSceneChildren(scene: PixiContainer) {

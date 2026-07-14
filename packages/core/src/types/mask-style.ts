@@ -1,14 +1,7 @@
-import type {
-  Detection,
-  DetectionFrame,
-  DetectionMask,
-} from "#types/detections";
+import type { Detection, DetectionMask } from "#types/detections";
+import type { AnnotationStyleContext } from "#types/style";
 
-export interface MaskStyleContext {
-  readonly mediaTime: number;
-  readonly frame: DetectionFrame;
-  readonly detectionIndex: number;
-}
+export type MaskStyleContext = AnnotationStyleContext;
 
 export enum MaskRenderMode {
   FillAndStroke = "fillAndStroke",

@@ -71,6 +71,7 @@ export class BaseBoxStyle implements BoxStyle {
   ): BoxDrawInstruction | undefined {
     if (
       !detection.rect ||
+      context.hidden ||
       this.options.shouldRender?.(detection, context) === false
     ) {
       return undefined;
@@ -132,14 +133,17 @@ export class BaseBoxStyle implements BoxStyle {
       width: stroke?.width ?? DEFAULT_BOX_STROKE_WIDTH,
     };
 
-    if (stroke?.alignment !== undefined) {
-      return {
-        ...resolvedStroke,
-        alignment: stroke.alignment,
-      };
-    }
-
-    return resolvedStroke;
+    return {
+      ...resolvedStroke,
+      ...(stroke?.alignment === undefined
+        ? {}
+        : { alignment: stroke.alignment }),
+      ...(stroke?.dash === undefined
+        ? context.ephemeral
+          ? { dash: [6, 4] }
+          : {}
+        : { dash: stroke.dash }),
+    };
   }
 
   protected resolveFill(

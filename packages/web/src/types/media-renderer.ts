@@ -17,6 +17,11 @@ import type {
 } from "supervision-js-core";
 import type { DecodedMediaSource } from "#media/media-source";
 import type { RenderPreparationOptions } from "#types/render-preparation";
+import type {
+  AnnotationEditingEngine,
+  PreviewOverlayData,
+} from "supervision-js-core";
+import type { MaskBrushPreviewOptions } from "../editing";
 
 export {
   MediaRendererFit,
@@ -30,6 +35,7 @@ export type {
   MediaRendererPresentation,
   MediaRendererQuality,
   MediaRendererState,
+  MediaDisplayAdjustments,
   MediaSourceState,
 } from "supervision-js-core";
 
@@ -64,6 +70,9 @@ export interface MediaRendererOptions extends MediaRendererPresentation {
   readonly interaction?: MediaInteractionOptions;
   readonly renderPreparation?: RenderPreparationOptions;
   readonly diagnostics?: MediaRendererDiagnosticsOptions;
+  readonly editingEngine?: AnnotationEditingEngine;
+  readonly maskBrush?: MaskBrushPreviewOptions;
+  readonly previewOverlay?: () => PreviewOverlayData | null;
   readonly onFrame?: (diagnostics: MediaFrameDiagnostics) => void;
   readonly onSource?: (state: MediaSourceState) => void;
   readonly onState?: (state: MediaRendererState) => void;
@@ -93,4 +102,26 @@ export interface MediaRenderer extends MediaRendererStateController {
     selection: DetectionSelectionOptions | null,
   ): DetectionPickResult | null;
   destroy(): void;
+  getViewportTransform(): import("supervision-js-core").ViewportTransform;
+  setViewportTransform(
+    transform: Partial<
+      Omit<import("supervision-js-core").ViewportTransform, "locked">
+    >,
+  ): void;
+  setViewportLocked(locked: boolean): void;
+  screenToMedia(
+    point: import("supervision-js-core").Point,
+  ): import("supervision-js-core").Point;
+  mediaToScreen(
+    point: import("supervision-js-core").Point,
+  ): import("supervision-js-core").Point;
+  panViewportBy(dx: number, dy: number): void;
+  zoomViewportAt(
+    point: import("supervision-js-core").Point,
+    factor: number,
+  ): void;
+  zoomViewportFromWheel(
+    point: import("supervision-js-core").Point,
+    deltaY: number,
+  ): void;
 }

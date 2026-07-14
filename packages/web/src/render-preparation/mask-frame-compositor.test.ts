@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { DetectionMaskEncoding } from "supervision-js-core";
+import {
+  DetectionMaskEncoding,
+  encodeCompressedRleCounts,
+} from "supervision-js-core";
 
 import {
   compositeMaskFrame,
@@ -156,32 +159,4 @@ function readPixel(
   const offset = (y * canvasWidth + x) * 4;
 
   return [data[offset], data[offset + 1], data[offset + 2], data[offset + 3]];
-}
-
-function encodeCompressedRleCounts(counts: readonly number[]) {
-  return counts
-    .map((count, index) => {
-      let value = index > 2 ? count - counts[index - 2]! : count;
-      let encoded = "";
-      let more = true;
-
-      while (more) {
-        let charCode = value & 0x1f;
-
-        value >>= 5;
-        more = !(
-          (value === 0 && (charCode & 0x10) === 0) ||
-          (value === -1 && (charCode & 0x10) !== 0)
-        );
-
-        if (more) {
-          charCode |= 0x20;
-        }
-
-        encoded += String.fromCharCode(charCode + 48);
-      }
-
-      return encoded;
-    })
-    .join("");
 }

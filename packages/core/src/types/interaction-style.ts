@@ -1,11 +1,15 @@
 import type { BoxStyle } from "#types/box-style";
-import type { Detection, DetectionFrame } from "#types/detections";
+import type { Detection } from "#types/detections";
 import type {
   DetectionPickPoint,
   DetectionPickTarget,
 } from "#types/interaction";
 import type { LabelStyle } from "#types/label-style";
 import type { MaskStyle } from "#types/mask-style";
+import type { PolygonStyle } from "#types/polygon-style";
+import type { PolylineStyle } from "#types/polyline-style";
+import type { KeypointStyle } from "#types/keypoint-style";
+import type { AnnotationStyleContext } from "#types/style";
 
 export enum DetectionInteractionState {
   Hovered = "hovered",
@@ -16,10 +20,7 @@ export enum DetectionInteractionState {
  * Per-frame context passed to an interaction style while resolving hover and
  * selected highlight instructions.
  */
-export interface InteractionStyleContext {
-  readonly mediaTime: number;
-  readonly frame: DetectionFrame;
-  readonly detectionIndex: number;
+export interface InteractionStyleContext extends AnnotationStyleContext {
   readonly state: DetectionInteractionState;
   readonly target: DetectionPickTarget;
   readonly point: DetectionPickPoint;
@@ -36,6 +37,9 @@ export interface InteractionPresentation {
   readonly boxStyle?: BoxStyle | null;
   readonly labelStyle?: LabelStyle | null;
   readonly maskStyle?: MaskStyle | null;
+  readonly polygonStyle?: PolygonStyle | null;
+  readonly polylineStyle?: PolylineStyle | null;
+  readonly keypointStyle?: KeypointStyle | null;
 }
 
 /**

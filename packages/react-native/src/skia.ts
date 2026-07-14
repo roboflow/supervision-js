@@ -19,13 +19,13 @@ import {
   resolveReactNativeLiveIdMaskUniforms,
   type ReactNativeIdMaskUniforms,
   type ReactNativeLiveIdMaskArtifactAutoOptions,
-  type Rect,
+  type TopLeftRect,
 } from "./index";
 
 export interface ReactNativeSkiaMaskFrameOptions extends ReactNativeLiveIdMaskArtifactAutoOptions {
   readonly edgeSmoothing?: number;
   /** Canvas-space rect the media is drawn into. */
-  readonly mediaRect: Rect;
+  readonly mediaRect: TopLeftRect;
   /** Cell size (canvas px) of the censor mosaic for `mosaicMaskIds`. */
   readonly mosaicCellPx?: number;
   /** Mask ids (detection index + 1) rendered as an opaque censor mosaic. */

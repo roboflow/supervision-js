@@ -7,6 +7,7 @@ import { PreparedMaskFrameKind } from "#render-preparation/mask-frame-artifact";
 import type { PreparedPngIdMaskFrame } from "#render-preparation/mask-frame-artifact";
 import { createPixiBoxLayer } from "#renderers/pixi-box-layer";
 import { createPixiLabelLayer } from "#renderers/pixi-label-layer";
+import { createPixiVectorLayer } from "#renderers/pixi-vector-layer";
 import { BaseInteractionStyle } from "supervision-js-core";
 import type { BoxStyle } from "supervision-js-core";
 import {
@@ -23,6 +24,11 @@ import {
 } from "supervision-js-core";
 import type { LabelStyle } from "supervision-js-core";
 import type { MaskStyle } from "supervision-js-core";
+import type {
+  PolygonStyle,
+  PolylineStyle,
+  KeypointStyle,
+} from "supervision-js-core";
 import type {
   Container as PixiContainer,
   Graphics as PixiGraphics,
@@ -89,6 +95,8 @@ export interface PixiInteractionPresentationLayerFrameContext {
   readonly idMaskArtifact?: PixiInteractionMaskArtifact | null;
   readonly mediaTime: number;
   readonly selectedPick: DetectionPickResult | null;
+  readonly selectedPicks?: readonly DetectionPickResult[];
+  readonly viewportScale?: number;
 }
 
 export interface PixiInteractionPresentationLayer {
@@ -130,12 +138,16 @@ export function createPixiInteractionPresentationLayer(options: {
   let syntheticFrame: DetectionFrame | undefined;
   let activePicks: readonly ActiveInteractionPick[] = [];
   let currentMediaTime = 0;
+  let viewportScale = 1;
   let maskRenderer: InteractionMaskRenderer | undefined;
   let isDestroyed = false;
 
   const syntheticTimeline = createSyntheticTimeline(() => syntheticFrame);
   const boxStyle = createInteractionBoxStyle(() => activePicks);
   const labelStyle = createInteractionLabelStyle(() => activePicks);
+  const polygonStyle = createInteractionPolygonStyle(() => activePicks);
+  const polylineStyle = createInteractionPolylineStyle(() => activePicks);
+  const keypointStyle = createInteractionKeypointStyle(() => activePicks);
   const boxLayer = createPixiBoxLayer({
     boxStyle,
     detectionTimeline: syntheticTimeline,
@@ -147,6 +159,14 @@ export function createPixiInteractionPresentationLayer(options: {
     detectionTimeline: syntheticTimeline,
     labelStyle,
   });
+  const vectorLayer = createPixiVectorLayer({
+    Container: options.Container,
+    Graphics: options.Graphics,
+    detectionTimeline: syntheticTimeline,
+    polygonStyle,
+    polylineStyle,
+    keypointStyle,
+  });
 
   return {
     createDisplay({ width, height }) {
@@ -156,6 +176,7 @@ export function createPixiInteractionPresentationLayer(options: {
 
       const boxGraphics = new options.Graphics();
       const labels = labelLayer.createContainer();
+      const vectors = vectorLayer.createContainer();
 
       boxLayer.attachGraphics(boxGraphics);
       maskRenderer = createMaskRenderer();
@@ -164,7 +185,7 @@ export function createPixiInteractionPresentationLayer(options: {
         container.addChild(maskRenderer.mesh);
       }
 
-      container.addChild(boxGraphics, labels);
+      container.addChild(boxGraphics, vectors, labels);
 
       return container;
     },
@@ -179,10 +200,12 @@ export function createPixiInteractionPresentationLayer(options: {
       activePicks = [];
       maskRenderer?.destroy();
       labelLayer.destroy();
+      vectorLayer.destroy();
     },
 
     drawFrame(context) {
       currentMediaTime = context.mediaTime;
+      viewportScale = context.viewportScale ?? 1;
 
       if (isDestroyed || !interactionStyle || !context.frame) {
         clear();
@@ -204,9 +227,11 @@ export function createPixiInteractionPresentationLayer(options: {
 
       drawMasks(context.idMaskArtifact);
       boxLayer.setBoxStyle(boxStyle);
-      boxLayer.drawFrame(currentMediaTime);
+      boxLayer.drawFrame(currentMediaTime, viewportScale);
+      vectorLayer.setStyles({ polygonStyle, polylineStyle, keypointStyle });
+      vectorLayer.drawFrame(currentMediaTime, viewportScale);
       labelLayer.setLabelStyle(labelStyle);
-      labelLayer.drawFrame(currentMediaTime);
+      labelLayer.drawFrame(currentMediaTime, viewportScale);
     },
 
     setInteractionStyle(nextInteractionStyle) {
@@ -217,6 +242,7 @@ export function createPixiInteractionPresentationLayer(options: {
       interactionStyle = nextInteractionStyle;
       boxLayer.setBoxStyle(boxStyle);
       labelLayer.setLabelStyle(labelStyle);
+      vectorLayer.setStyles({ polygonStyle, polylineStyle, keypointStyle });
     },
   };
 
@@ -225,14 +251,23 @@ export function createPixiInteractionPresentationLayer(options: {
     hoveredPick,
     mediaTime,
     selectedPick,
+    selectedPicks,
   }: PixiInteractionPresentationLayerFrameContext) {
     if (!frame || !interactionStyle) {
       return [];
     }
 
     const picks = [
+      ...(selectedPicks ?? (selectedPick ? [selectedPick] : [])).map((pick) =>
+        createActivePick(
+          pick,
+          frame,
+          mediaTime,
+          DetectionInteractionState.Selected,
+        ),
+      ),
       createActivePick(
-        selectedPick,
+        selectedPicks ? null : selectedPick,
         frame,
         mediaTime,
         DetectionInteractionState.Selected,
@@ -280,6 +315,9 @@ export function createPixiInteractionPresentationLayer(options: {
       point: activePick.point,
       state,
       target: activePick.target,
+      viewportScale,
+      hovered: state === DetectionInteractionState.Hovered,
+      selected: state === DetectionInteractionState.Selected,
     };
     const presentation = resolvePresentation(activePick.detection, context);
 
@@ -307,9 +345,15 @@ export function createPixiInteractionPresentationLayer(options: {
     activePicks = [];
     maskRenderer?.hide();
     boxLayer.setBoxStyle(null);
-    boxLayer.drawFrame(currentMediaTime);
+    boxLayer.drawFrame(currentMediaTime, viewportScale);
     labelLayer.setLabelStyle(null);
-    labelLayer.drawFrame(currentMediaTime);
+    labelLayer.drawFrame(currentMediaTime, viewportScale);
+    vectorLayer.setStyles({
+      polygonStyle: null,
+      polylineStyle: null,
+      keypointStyle: null,
+    });
+    vectorLayer.drawFrame(currentMediaTime, viewportScale);
   }
 
   function drawMasks(artifact: PixiInteractionMaskArtifact | null | undefined) {
@@ -330,6 +374,9 @@ export function createPixiInteractionPresentationLayer(options: {
           detectionIndex: activePick.pick.detectionIndex,
           frame: activePick.pick.frame,
           mediaTime: activePick.context.mediaTime,
+          viewportScale: activePick.context.viewportScale,
+          hovered: activePick.context.hovered,
+          selected: activePick.context.selected,
         });
 
         if (!instruction) {
@@ -394,6 +441,9 @@ function createInteractionBoxStyle(
         detectionIndex: activePick.pick.detectionIndex,
         frame: activePick.pick.frame,
         mediaTime: activePick.context.mediaTime,
+        viewportScale: context.viewportScale,
+        hovered: activePick.context.hovered,
+        selected: activePick.context.selected,
       });
     },
   };
@@ -415,6 +465,9 @@ function createInteractionLabelStyle(
         detectionIndex: activePick.pick.detectionIndex,
         frame: activePick.pick.frame,
         mediaTime: activePick.context.mediaTime,
+        viewportScale: context.viewportScale,
+        hovered: activePick.context.hovered,
+        selected: activePick.context.selected,
       });
     },
   };
@@ -426,8 +479,62 @@ function hasRenderableInteractionPresentation(
   return Boolean(
     presentation?.boxStyle ||
     presentation?.labelStyle ||
-    presentation?.maskStyle,
+    presentation?.maskStyle ||
+    presentation?.polygonStyle ||
+    presentation?.polylineStyle ||
+    presentation?.keypointStyle,
   );
+}
+
+function createInteractionPolygonStyle(
+  getActivePicks: () => readonly ActiveInteractionPick[],
+): PolygonStyle {
+  return {
+    resolve(_detection, context) {
+      const active = getActivePicks()[context.detectionIndex];
+      return active?.presentation.polygonStyle?.resolve(active.detection, {
+        ...context,
+        detectionIndex: active.pick.detectionIndex,
+        frame: active.pick.frame,
+        hovered: active.context.hovered,
+        selected: active.context.selected,
+      });
+    },
+  };
+}
+
+function createInteractionPolylineStyle(
+  getActivePicks: () => readonly ActiveInteractionPick[],
+): PolylineStyle {
+  return {
+    resolve(_detection, context) {
+      const active = getActivePicks()[context.detectionIndex];
+      return active?.presentation.polylineStyle?.resolve(active.detection, {
+        ...context,
+        detectionIndex: active.pick.detectionIndex,
+        frame: active.pick.frame,
+        hovered: active.context.hovered,
+        selected: active.context.selected,
+      });
+    },
+  };
+}
+
+function createInteractionKeypointStyle(
+  getActivePicks: () => readonly ActiveInteractionPick[],
+): KeypointStyle {
+  return {
+    resolve(_detection, context) {
+      const active = getActivePicks()[context.detectionIndex];
+      return active?.presentation.keypointStyle?.resolve(active.detection, {
+        ...context,
+        detectionIndex: active.pick.detectionIndex,
+        frame: active.pick.frame,
+        hovered: active.context.hovered,
+        selected: active.context.selected,
+      });
+    },
+  };
 }
 
 function createSyntheticTimeline(

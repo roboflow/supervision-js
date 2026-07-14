@@ -13,6 +13,10 @@ export default defineConfig({
   resolve: {
     alias: [
       {
+        find: "supervision-js/editing",
+        replacement: path.resolve(rootDir, "packages/web/src/editing.ts"),
+      },
+      {
         find: "supervision-js",
         replacement: path.resolve(rootDir, "packages/web/src/index.ts"),
       },
@@ -21,7 +25,7 @@ export default defineConfig({
         replacement: path.resolve(rootDir, "packages/core/src/index.ts"),
       },
       {
-        find: /^#detections\/(array-detection-frame-source|buffered-detection-timeline|cold-detection-frame-source|composite-detection-frame-source|memory-cold-detection-frame-store|writable-detection-frame-source)$/,
+        find: /^#detections\/(array-detection-frame-source|buffered-detection-timeline|cold-detection-frame-source|composite-detection-frame-source|editable-annotation-frame-session|memory-cold-detection-frame-store|writable-detection-frame-source)$/,
         replacement: `${coreSource("detections")}/$1.ts`,
       },
       {
@@ -33,7 +37,7 @@ export default defineConfig({
         replacement: `${coreSource("styles")}/$1.ts`,
       },
       {
-        find: /^#types\/(box-style|detection-timeline|detections|focus-style|interaction|interaction-style|label-style|mask-style|media|media-rendering|session-lifecycle|style)$/,
+        find: /^#types\/(box-style|detection-timeline|detections|editing|focus-style|interaction|interaction-style|keypoint-style|label-style|mask-style|media|media-rendering|polygon-style|polyline-style|session-lifecycle|style|viewport)$/,
         replacement: `${coreSource("types")}/$1.ts`,
       },
       {
@@ -47,6 +51,10 @@ export default defineConfig({
       {
         find: /^#detections\/(.+)$/,
         replacement: `${webSource("detections")}/$1.ts`,
+      },
+      {
+        find: /^#editing\/(.+)$/,
+        replacement: `${webSource("editing")}/$1.ts`,
       },
       {
         find: /^#media\/(.+)$/,

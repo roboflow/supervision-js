@@ -64,7 +64,7 @@ const frame: DetectionFrame = {
       className: "person",
       confidence: 0.92,
       id: "person-1",
-      rect: { x: 120, y: 80, width: 240, height: 420 },
+      rect: { x: 240, y: 290, width: 240, height: 420 },
     },
   ],
   endTime: 1 / 30,

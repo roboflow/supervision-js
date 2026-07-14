@@ -9,6 +9,9 @@ import type {
   LabelTextStyle,
 } from "#types/label-style";
 import { LabelPlacement } from "#types/label-style";
+import { LabelVisibilityMode } from "#types/label-style";
+import { getDetectionRect } from "#utils/geometry";
+import { lightenColor, resolveContrastTextColor } from "#utils/color";
 import type {
   DetectionStylePredicate,
   DetectionStyleValue,
@@ -59,6 +62,7 @@ export interface BaseLabelStyleOptions {
    * Return false to skip rendering a detection in this label style.
    */
   readonly shouldRender?: DetectionStylePredicate<LabelStyleContext>;
+  readonly visibilityMode?: LabelVisibilityMode;
 }
 
 /**
@@ -83,7 +87,10 @@ export class BaseLabelStyle implements LabelStyle {
     context: LabelStyleContext,
   ): LabelDrawInstruction | undefined {
     if (
-      !detection.rect ||
+      !getDetectionRect(detection) ||
+      context.hidden ||
+      (this.options.visibilityMode === LabelVisibilityMode.HoveredOnly &&
+        !context.hovered) ||
       this.options.shouldRender?.(detection, context) === false
     ) {
       return undefined;
@@ -97,13 +104,15 @@ export class BaseLabelStyle implements LabelStyle {
       return undefined;
     }
 
+    const background = this.resolveBackground(detection, context);
+
     return {
-      background: this.resolveBackground(detection, context),
+      background,
       ...this.resolveOffset(detection, context),
       placement: this.resolvePlacement(detection, context),
-      rect: detection.rect,
+      rect: getDetectionRect(detection)!,
       text,
-      textStyle: this.resolveTextStyle(detection, context),
+      textStyle: this.resolveTextStyle(detection, context, background),
     };
   }
 
@@ -119,7 +128,9 @@ export class BaseLabelStyle implements LabelStyle {
 
     return {
       alpha: background?.alpha ?? 0.72,
-      color: background?.color ?? 0x111827,
+      color: context.hovered
+        ? lightenColor(background?.color ?? 0x111827)
+        : (background?.color ?? 0x111827),
       cornerRadius: background?.cornerRadius ?? 4,
       paddingX: background?.paddingX ?? 6,
       paddingY: background?.paddingY ?? 3,
@@ -129,6 +140,7 @@ export class BaseLabelStyle implements LabelStyle {
   private resolveTextStyle(
     detection: Detection,
     context: LabelStyleContext,
+    background: LabelBackgroundStyle,
   ): LabelTextStyle {
     const textStyle = resolveStyleValue(
       this.options.textStyle,
@@ -138,7 +150,7 @@ export class BaseLabelStyle implements LabelStyle {
 
     return {
       alpha: textStyle?.alpha ?? 1,
-      color: textStyle?.color ?? 0xffffff,
+      color: textStyle?.color ?? resolveContrastTextColor(background.color),
       fontFamily: textStyle?.fontFamily ?? "Inter, sans-serif",
       fontSize: textStyle?.fontSize ?? 13,
       fontWeight: textStyle?.fontWeight ?? "600",

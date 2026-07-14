@@ -9,6 +9,64 @@ import {
 } from "../../../test/media-renderer-harness";
 
 describe("media session integration", () => {
+  it("forwards the complete initial vector presentation and visibility", async () => {
+    resetMocks();
+    mediaMock.samples = [createMockSample(0, 0)];
+    const { createMediaSession } = await import("./index");
+    const polygonResolve = vi.fn(() => undefined);
+    const polylineResolve = vi.fn(() => undefined);
+    const keypointResolve = vi.fn(() => undefined);
+    const session = await createMediaSession({
+      container: createContainer(),
+      detections: {
+        frames: [
+          {
+            detections: [
+              {
+                id: "vector-1",
+                polygon: {
+                  points: [
+                    { x: 0, y: 0 },
+                    { x: 10, y: 0 },
+                    { x: 0, y: 10 },
+                  ],
+                },
+                polyline: {
+                  points: [
+                    { x: 0, y: 0 },
+                    { x: 10, y: 10 },
+                  ],
+                },
+                keypoints: {
+                  edges: [],
+                  points: [{ x: 5, y: 5 }],
+                },
+              },
+            ],
+            mediaTime: 0,
+          },
+        ],
+      },
+      media: "sample.mp4",
+      presentation: {
+        keypointStyle: { resolve: keypointResolve },
+        polygonStyle: { resolve: polygonResolve },
+        polylineStyle: { resolve: polylineResolve },
+        visibility: { annotationsHidden: true },
+      },
+      renderer: { autoPlay: false },
+    });
+
+    for (const resolve of [polygonResolve, polylineResolve, keypointResolve]) {
+      expect(resolve).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "vector-1" }),
+        expect.objectContaining({ hidden: true }),
+      );
+    }
+
+    session.destroy();
+  });
+
   it("preserves explicit null box presentation at session creation", async () => {
     resetMocks();
     mediaMock.samples = [createMockSample(0, 0)];
@@ -22,7 +80,7 @@ describe("media session integration", () => {
             detections: [
               {
                 className: "player",
-                rect: { height: 40, width: 20, x: 10, y: 15 },
+                rect: { height: 40, width: 20, x: 20, y: 35 },
               },
             ],
             mediaTime: 0,
@@ -44,6 +102,83 @@ describe("media session integration", () => {
       activeDetectionCount: 0,
       activeDetectionFrameTime: 0,
     });
+
+    session.destroy();
+  });
+
+  it("forwards host-owned editing, brush, and preview options through a session", async () => {
+    resetMocks();
+    mediaMock.samples = [createMockSample(0, 0)];
+    const { createMediaSession } = await import("./index");
+    const pointerDown = vi.fn();
+    const previewOverlay = vi.fn(() => ({}));
+    const editingEngine = {
+      cancel: vi.fn(),
+      deleteVertex: vi.fn(),
+      getState: vi.fn(() => ({
+        activeDetectionId: null,
+        activeHandleId: null,
+        kind: "idle",
+        pointerId: null,
+        preview: null,
+      })),
+      hasCreationTool: vi.fn(() => false),
+      keyDown: vi.fn(),
+      pointerDown,
+      pointerMove: vi.fn(),
+      pointerUp: vi.fn(),
+      setCreationTool: vi.fn(),
+      subscribe: vi.fn(() => () => undefined),
+      subscribeFastTranslate: vi.fn(() => () => undefined),
+    };
+    const brushEditor = {
+      canvas: { height: 2, width: 2 },
+      getCursor: () => ({ mode: "add", point: null, radius: 1 }),
+      subscribeTextureUpdates: () => () => undefined,
+    };
+
+    const session = await createMediaSession({
+      container: createContainer(),
+      detections: {
+        frames: [
+          {
+            detections: [
+              {
+                id: "editable",
+                rect: { height: 2, width: 2, x: 1, y: 1 },
+              },
+            ],
+            mediaTime: 0,
+          },
+        ],
+      },
+      media: "sample.mp4",
+      renderer: {
+        autoPlay: false,
+        editingEngine: editingEngine as never,
+        maskBrush: { editor: brushEditor as never },
+        previewOverlay,
+      },
+    });
+    const interactionContainer = pixiMock.containerInstances.find(
+      (container) => container.eventMode === "static",
+    );
+    const pointerDownHandler = interactionContainer?.on.mock.calls.find(
+      ([eventName]) => eventName === "pointerdown",
+    )?.[1] as ((event: unknown) => void) | undefined;
+
+    pointerDownHandler?.({
+      button: 0,
+      getLocalPosition: () => ({ x: 1, y: 1 }),
+      pointerId: 1,
+      timeStamp: 1,
+    });
+
+    expect(pointerDown).toHaveBeenCalledOnce();
+    expect(previewOverlay).toHaveBeenCalled();
+    expect(pixiMock.canvasSourceOptions).toContainEqual(
+      expect.objectContaining({ resource: brushEditor.canvas }),
+    );
 
     session.destroy();
   });
@@ -152,7 +287,7 @@ describe("media session integration", () => {
                 height: 2,
                 width: 2,
               },
-              rect: { height: 40, width: 20, x: 10, y: 15 },
+              rect: { height: 40, width: 20, x: 20, y: 35 },
             },
           ],
           endTime: 1,
@@ -190,7 +325,7 @@ describe("media session integration", () => {
       expect(pixiMock.graphicsInstances[0]?.stroke).toHaveBeenLastCalledWith({
         alpha: 0.9,
         color: 0xff00ff,
-        width: 3,
+        width: 6,
       });
       expect(pixiMock.textInstances[0]?.text).toBe("player 92%");
 
@@ -207,7 +342,7 @@ describe("media session integration", () => {
                 height: 2,
                 width: 2,
               },
-              rect: { height: 80, width: 40, x: 30, y: 40 },
+              rect: { height: 80, width: 40, x: 50, y: 80 },
             },
           ],
           endTime: 6,

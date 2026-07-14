@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createPixiInteractionLayer } from "#renderers/pixi-interaction-layer";
-import { DetectionPickTarget, MediaInteractionMode } from "supervision-js-core";
+import {
+  AnnotationGestureStateKind,
+  createAnnotationEditingEngine,
+  DetectionPickTarget,
+  MediaInteractionMode,
+} from "supervision-js-core";
 import type { BufferedDetectionTimeline } from "supervision-js-core";
 import type { DetectionFrame } from "supervision-js-core";
 
@@ -324,6 +329,55 @@ describe("pixi interaction layer", () => {
     expect(layer.getState().selectedPick).toBeNull();
     expect(onSelect).toHaveBeenLastCalledWith(null);
   });
+
+  it("selects a detection before beginning a primary editing gesture", () => {
+    const onSelect = vi.fn();
+    const editingEngine = createAnnotationEditingEngine();
+    const layer = createPixiInteractionLayer({
+      Container: FakeContainer as never,
+      Rectangle: FakeRectangle as never,
+      canInteract: () => true,
+      detectionTimeline: createTimeline(frame),
+      editingEngine,
+      interaction: {
+        mode: MediaInteractionMode.PausedOnly,
+        onSelect,
+      },
+    });
+    const display = layer.createDisplay({
+      height: 80,
+      width: 120,
+    }) as FakeContainer;
+
+    layer.drawFrame(0.1);
+    display.emit(
+      "pointerdown",
+      createPointerEvent(display, 15, 20, {
+        button: 0,
+        pointerId: 1,
+        timeStamp: 0,
+      }),
+    );
+
+    expect(layer.getState().selectedPick?.detection.id).toBe("player-1");
+    expect(editingEngine.getState().kind).toBe(
+      AnnotationGestureStateKind.Moving,
+    );
+    expect(onSelect).toHaveBeenCalledTimes(1);
+
+    display.emit(
+      "pointerup",
+      createPointerEvent(display, 15, 20, {
+        button: 0,
+        pointerId: 1,
+        timeStamp: 1,
+      }),
+    );
+    display.emit("pointertap", createPointerEvent(display, 15, 20));
+
+    expect(layer.getState().selectedPick?.detection.id).toBe("player-1");
+    expect(onSelect).toHaveBeenCalledTimes(1);
+  });
 });
 
 class FakeRectangle {
@@ -364,8 +418,14 @@ class FakeContainer {
   }
 }
 
-function createPointerEvent(display: FakeContainer, x: number, y: number) {
+function createPointerEvent(
+  display: FakeContainer,
+  x: number,
+  y: number,
+  options: Record<string, unknown> = {},
+) {
   return {
+    ...options,
     getLocalPosition(container: FakeContainer) {
       expect(container).toBe(display);
       return { x, y };

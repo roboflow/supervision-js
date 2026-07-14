@@ -33,6 +33,7 @@ function sourceAliasResolver() {
 
 export default {
   input: {
+    editing: "src/editing.ts",
     index: "src/index.ts",
     "mask-preparation.worker":
       "src/render-preparation/mask-preparation.worker.ts",

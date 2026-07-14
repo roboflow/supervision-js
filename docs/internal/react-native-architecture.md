@@ -67,6 +67,12 @@ space and delegates picking to core contracts. That proves the dependency
 direction, style contract, coordinate mapping, and interaction boundary without
 choosing a full mobile media pipeline.
 
+The React Native gesture adapter also delegates box creation, movement, handle
+resizing, vertex deletion, and scaled-mask picking to the shared core editing
+engine. The host retains selection, persistence, undo, and native drawing of
+`AnnotationOverlayStyle` affordances; a native overlay-renderer is intentionally
+not part of this proof.
+
 Static and live examples now use the same render-owned presentation shape:
 prepare one frame packet, then draw media, masks, boxes, and labels through the
 same synchronized frame stage. Static mode supplies a Skia image as the media

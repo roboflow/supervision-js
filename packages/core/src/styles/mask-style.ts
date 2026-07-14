@@ -72,6 +72,7 @@ export class BaseMaskStyle implements MaskStyle {
   ): MaskDrawInstruction | undefined {
     if (
       !detection.mask ||
+      context.hidden ||
       this.options.shouldRender?.(detection, context) === false
     ) {
       return undefined;

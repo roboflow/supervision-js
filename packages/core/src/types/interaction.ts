@@ -2,7 +2,12 @@ import type { Detection, DetectionFrame } from "#types/detections";
 
 export enum DetectionPickTarget {
   Box = "box",
+  Edge = "edge",
+  Keypoint = "keypoint",
+  Label = "label",
   Mask = "mask",
+  Polygon = "polygon",
+  Polyline = "polyline",
 }
 
 export enum MediaInteractionMode {
@@ -23,21 +28,55 @@ export interface DetectionPickResult {
   readonly mediaTime: number;
   readonly point: DetectionPickPoint;
   readonly target: DetectionPickTarget;
+  /** Index of the keypoint or edge when the target identifies a sub-geometry. */
+  readonly geometryIndex?: number;
 }
 
 export interface DetectionPickOptions {
   readonly padding?: number;
+  readonly polylinePadding?: number;
+  readonly keypointPadding?: number;
+  readonly edgePadding?: number;
+  /** Media dimensions used to map media-space points into mask raster space. */
+  readonly maskMediaDimensions?: {
+    readonly width: number;
+    readonly height: number;
+  };
+  readonly includeLocked?: boolean;
+  readonly includeMasks?: boolean;
+  readonly filter?: (detection: Detection, detectionIndex: number) => boolean;
 }
 
-export interface DetectionSelectionOptions {
-  readonly detectionIndex: number;
+interface DetectionSelectionOptionsBase {
   readonly mediaTime?: number;
   readonly point?: DetectionPickPoint;
   readonly target?: DetectionPickTarget;
 }
 
+export type DetectionSelectionOptions = DetectionSelectionOptionsBase &
+  (
+    | {
+        readonly detectionId: string | number;
+        readonly detectionIndex?: number;
+      }
+    | {
+        readonly detectionId?: string | number;
+        readonly detectionIndex: number;
+      }
+  );
+
 export interface MediaInteractionOptions extends DetectionPickOptions {
   readonly mode?: MediaInteractionMode;
   readonly onHover?: (pick: DetectionPickResult | null) => void;
   readonly onSelect?: (pick: DetectionPickResult | null) => void;
+  readonly multiSelect?: boolean;
+  readonly onSelectionChange?: (picks: readonly DetectionPickResult[]) => void;
+  readonly onMarqueeChange?: (
+    rect: {
+      readonly x: number;
+      readonly y: number;
+      readonly width: number;
+      readonly height: number;
+    } | null,
+  ) => void;
 }

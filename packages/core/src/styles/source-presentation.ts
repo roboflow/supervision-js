@@ -1,6 +1,9 @@
 import { BaseBoxStyle } from "#styles/box-style";
 import { BaseLabelStyle } from "#styles/label-style";
 import { BaseMaskStyle } from "#styles/mask-style";
+import { BaseKeypointStyle } from "#styles/keypoint-style";
+import { BasePolygonStyle } from "#styles/polygon-style";
+import { BasePolylineStyle } from "#styles/polyline-style";
 import type {
   BoxDrawInstruction,
   BoxStyle,
@@ -17,11 +20,29 @@ import type {
   MaskStyle,
   MaskStyleContext,
 } from "#types/mask-style";
+import type {
+  PolygonDrawInstruction,
+  PolygonStyle,
+  PolygonStyleContext,
+} from "#types/polygon-style";
+import type {
+  PolylineDrawInstruction,
+  PolylineStyle,
+  PolylineStyleContext,
+} from "#types/polyline-style";
+import type {
+  KeypointDrawInstruction,
+  KeypointStyle,
+  KeypointStyleContext,
+} from "#types/keypoint-style";
 
 export interface PresentationStyleSet {
   readonly boxStyle?: BoxStyle | null;
+  readonly keypointStyle?: KeypointStyle | null;
   readonly labelStyle?: LabelStyle | null;
   readonly maskStyle?: MaskStyle | null;
+  readonly polygonStyle?: PolygonStyle | null;
+  readonly polylineStyle?: PolylineStyle | null;
 }
 
 export type SourcePresentation = PresentationStyleSet;
@@ -73,6 +94,24 @@ export function createSourceAwarePresentation(
           sourcePresentations,
         )
       : globalPresentation.maskStyle,
+    polygonStyle: hasSourceStyle(sources, "polygonStyle")
+      ? new SourceAwarePolygonStyle(
+          normalizeGlobalPolygonStyle(globalPresentation.polygonStyle),
+          sourcePresentations,
+        )
+      : globalPresentation.polygonStyle,
+    polylineStyle: hasSourceStyle(sources, "polylineStyle")
+      ? new SourceAwarePolylineStyle(
+          normalizeGlobalPolylineStyle(globalPresentation.polylineStyle),
+          sourcePresentations,
+        )
+      : globalPresentation.polylineStyle,
+    keypointStyle: hasSourceStyle(sources, "keypointStyle")
+      ? new SourceAwareKeypointStyle(
+          normalizeGlobalKeypointStyle(globalPresentation.keypointStyle),
+          sourcePresentations,
+        )
+      : globalPresentation.keypointStyle,
   };
 }
 
@@ -153,6 +192,78 @@ class SourceAwareMaskStyle implements MaskStyle {
   }
 }
 
+class SourceAwarePolygonStyle implements PolygonStyle {
+  constructor(
+    private readonly globalStyle: PolygonStyle | null,
+    private readonly sourcePresentations: ReadonlyMap<
+      string,
+      SourcePresentation | undefined
+    >,
+  ) {}
+
+  resolve(
+    detection: Detection,
+    context: PolygonStyleContext,
+  ): PolygonDrawInstruction | undefined {
+    const style = resolveSourceStyle(
+      detection,
+      this.globalStyle,
+      this.sourcePresentations,
+      "polygonStyle",
+    );
+
+    return style?.resolve(detection, context);
+  }
+}
+
+class SourceAwarePolylineStyle implements PolylineStyle {
+  constructor(
+    private readonly globalStyle: PolylineStyle | null,
+    private readonly sourcePresentations: ReadonlyMap<
+      string,
+      SourcePresentation | undefined
+    >,
+  ) {}
+
+  resolve(
+    detection: Detection,
+    context: PolylineStyleContext,
+  ): PolylineDrawInstruction | undefined {
+    const style = resolveSourceStyle(
+      detection,
+      this.globalStyle,
+      this.sourcePresentations,
+      "polylineStyle",
+    );
+
+    return style?.resolve(detection, context);
+  }
+}
+
+class SourceAwareKeypointStyle implements KeypointStyle {
+  constructor(
+    private readonly globalStyle: KeypointStyle | null,
+    private readonly sourcePresentations: ReadonlyMap<
+      string,
+      SourcePresentation | undefined
+    >,
+  ) {}
+
+  resolve(
+    detection: Detection,
+    context: KeypointStyleContext,
+  ): KeypointDrawInstruction | undefined {
+    const style = resolveSourceStyle(
+      detection,
+      this.globalStyle,
+      this.sourcePresentations,
+      "keypointStyle",
+    );
+
+    return style?.resolve(detection, context);
+  }
+}
+
 function hasSourceStyle(
   sources: readonly SourcePresentationEntry[],
   key: keyof SourcePresentation,
@@ -187,4 +298,16 @@ function normalizeGlobalLabelStyle(style: LabelStyle | null | undefined) {
 
 function normalizeGlobalMaskStyle(style: MaskStyle | null | undefined) {
   return style === undefined ? new BaseMaskStyle() : style;
+}
+
+function normalizeGlobalPolygonStyle(style: PolygonStyle | null | undefined) {
+  return style === undefined ? new BasePolygonStyle() : style;
+}
+
+function normalizeGlobalPolylineStyle(style: PolylineStyle | null | undefined) {
+  return style === undefined ? new BasePolylineStyle() : style;
+}
+
+function normalizeGlobalKeypointStyle(style: KeypointStyle | null | undefined) {
+  return style === undefined ? new BaseKeypointStyle() : style;
 }

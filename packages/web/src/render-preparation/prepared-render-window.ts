@@ -981,10 +981,15 @@ function resolveMaskInstructions(options: {
 }) {
   const instructions: SerializableMaskInstruction[] = [];
 
-  for (const [
-    detectionIndex,
-    detection,
-  ] of options.frame.detections.entries()) {
+  const orderedDetections = options.frame.detections
+    .map((detection, detectionIndex) => ({ detection, detectionIndex }))
+    .sort(
+      (left, right) =>
+        (left.detection.zIndex ?? left.detectionIndex) -
+        (right.detection.zIndex ?? right.detectionIndex),
+    );
+
+  for (const { detectionIndex, detection } of orderedDetections) {
     const instruction = options.maskStyle.resolve(detection, {
       detectionIndex,
       frame: options.frame,

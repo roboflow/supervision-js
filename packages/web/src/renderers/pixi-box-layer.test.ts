@@ -120,7 +120,46 @@ describe("pixi box layer", () => {
     expect(graphics.rect).not.toHaveBeenCalled();
     expect(graphics.stroke).not.toHaveBeenCalled();
   });
+
+  it("retains boxes by id and translates one display without redrawing the frame", () => {
+    const retainedFrame: DetectionFrame = {
+      ...frame,
+      detections: frame.detections.map((detection, index) => ({
+        ...detection,
+        id: `box-${index}`,
+      })),
+    };
+    const layer = createPixiBoxLayer({
+      boxStyle: createBoxStyle(0xff0000),
+      Container: FakeContainer as never,
+      detectionTimeline: createTimeline(retainedFrame),
+      Graphics: FakeGraphics as never,
+    });
+    const container = layer.createContainer() as unknown as FakeContainer;
+
+    layer.drawFrame(0.1);
+    const display = container.children[0]!;
+    expect(layer.translateDetection("box-0", 7, -2)).toBe(true);
+    expect(display.position.set).toHaveBeenLastCalledWith(7, -2);
+
+    layer.drawFrame(0.1);
+    expect(display.clear).toHaveBeenCalledOnce();
+
+    layer.invalidateDetection("box-0");
+    layer.drawFrame(0.1);
+    expect(display.clear).toHaveBeenCalledTimes(2);
+    expect(display.position.set).toHaveBeenLastCalledWith(0, 0);
+  });
 });
+
+class FakeContainer {
+  readonly children: FakeGraphics[] = [];
+  sortableChildren = false;
+
+  addChild(...children: FakeGraphics[]) {
+    this.children.push(...children);
+  }
+}
 
 class FakeGraphics {
   readonly clear = vi.fn(() => this);
@@ -128,6 +167,9 @@ class FakeGraphics {
   readonly rect = vi.fn(() => this);
   readonly roundRect = vi.fn(() => this);
   readonly stroke = vi.fn(() => this);
+  readonly position = { set: vi.fn() };
+  visible = true;
+  zIndex = 0;
 }
 
 function createBoxStyle(color: number): BoxStyle {

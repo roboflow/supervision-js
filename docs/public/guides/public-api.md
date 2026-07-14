@@ -41,6 +41,9 @@ Start here for normal application code:
 - `BaseBoxStyle`
 - `BoxShape`
 - `BaseMaskStyle`
+- `BasePolygonStyle`
+- `BasePolylineStyle`
+- `BaseKeypointStyle`
 - `BaseLabelStyle`
 - `BaseInteractionStyle`
 - `BaseFocusStyle`
@@ -71,6 +74,28 @@ not the first thing most users should reach for:
 - media normalization functions and options;
 - interaction and picking options;
 - render-preparation diagnostics and worker options.
+
+## Editing API
+
+Annotation editing is a supported advanced API at the dedicated subpath:
+
+```ts
+import {
+  createAnnotationEditingEngine,
+  createEditableAnnotationFrameSession,
+  createMaskBrushEditor,
+} from "supervision-js/editing";
+```
+
+The host creates and owns the editing engine, commits semantic detections to
+its own source or persistence layer, and owns undo/redo. Pass the engine through
+`createMediaSession({ renderer: { editingEngine } })` so the session routes
+pointer gestures and renders previews. `maskBrush` and `previewOverlay` use the
+same session renderer options. The renderer never writes application data.
+
+`Rect` is center-based: `x` and `y` are the media-pixel center, while `width`
+and `height` are its extent. `TopLeftRect` is only for explicit canvas/layout
+boundaries. There is no legacy top-left rectangle mode.
 
 Advanced APIs should remain renderer-neutral. They may expose timing,
 diagnostics, and data-flow contracts, but they should not expose Pixi containers,
@@ -116,6 +141,11 @@ implementation details.
 Mobile apps may eventually feed detections from on-device inference engines, but
 inference is outside the rendering package boundary. The library should render
 and interact with detections regardless of how they were produced.
+
+React Native currently shares editing geometry, picking, and gesture semantics
+through `createReactNativeAnnotationGestureAdapter`. Native hosts own drawing
+editing affordances from `AnnotationOverlayStyle` until a native overlay
+renderer is introduced.
 
 ## Compatibility Posture
 

@@ -3,14 +3,15 @@
  *
  * This is semantic detection geometry, not a renderer shape. Presentation
  * details such as stroke, fill, corner radius, or opacity belong to box styles.
+ * `x` and `y` identify the rectangle center.
  */
 export interface Rect {
   /**
-   * Left coordinate in media pixels.
+   * Center X coordinate in media pixels.
    */
   readonly x: number;
   /**
-   * Top coordinate in media pixels.
+   * Center Y coordinate in media pixels.
    */
   readonly y: number;
   /**
@@ -22,6 +23,62 @@ export interface Rect {
    */
   readonly height: number;
 }
+
+/** A media-space point in pixels. */
+export interface Point {
+  readonly x: number;
+  readonly y: number;
+}
+
+/** Explicit top-left rectangle for renderer and canvas layout boundaries. */
+export interface TopLeftRect {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+export interface PolygonGeometry {
+  readonly points: readonly Point[];
+}
+
+export interface PolylineGeometry {
+  readonly points: readonly Point[];
+}
+
+/** COCO-compatible keypoint visibility values. */
+export enum KeypointVisibility {
+  NotLabeled = 0,
+  Occluded = 1,
+  Visible = 2,
+}
+
+export type KeypointEdge = readonly [fromIndex: number, toIndex: number];
+
+export interface KeypointGeometry {
+  readonly points: readonly Point[];
+  readonly edges: readonly KeypointEdge[];
+  readonly visibility?: readonly KeypointVisibility[];
+}
+
+export interface SkeletonVertexDefinition {
+  readonly id: number;
+  readonly name: string;
+  readonly color?: number;
+}
+
+export interface SkeletonEdgeDefinition {
+  readonly from: number;
+  readonly to: number;
+  readonly color?: number;
+}
+
+export interface SkeletonDefinition {
+  readonly vertices: readonly SkeletonVertexDefinition[];
+  readonly edges: readonly SkeletonEdgeDefinition[];
+}
+
+export type SkeletonDefinitions = Readonly<Record<string, SkeletonDefinition>>;
 
 export enum DetectionMaskEncoding {
   CompressedRle = "compressedRle",
@@ -87,10 +144,22 @@ export interface Detection {
    * Optional confidence score from 0 to 1.
    */
   readonly confidence?: number;
+  /** Optional host-owned annotation attributes. */
+  readonly attributes?: readonly string[];
+  /** Optional per-annotation render and pick order. Higher values are on top. */
+  readonly zIndex?: number;
+  /** Optional host editing lock. Renderers may still present locked records. */
+  readonly locked?: boolean;
   /**
    * Optional axis-aligned media-pixel rectangle.
    */
   readonly rect?: Rect;
+  /** Optional closed polygon in media-pixel coordinates. */
+  readonly polygon?: PolygonGeometry;
+  /** Optional open path in media-pixel coordinates. */
+  readonly polyline?: PolylineGeometry;
+  /** Optional keypoints and skeleton edges in media-pixel coordinates. */
+  readonly keypoints?: KeypointGeometry;
   /**
    * Optional binary mask in semantic cold-storage form.
    */

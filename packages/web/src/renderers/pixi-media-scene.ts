@@ -2,6 +2,11 @@ import { RENDER_ENGINE_PREFERENCE } from "#constants/media-renderer";
 import type { DetectionFrame } from "supervision-js-core";
 import type { LabelStyle } from "supervision-js-core";
 import type { MaskStyle } from "supervision-js-core";
+import {
+  createViewportController,
+  resolveAnnotationStyleState,
+} from "supervision-js-core";
+import type { AnnotationVisibility } from "supervision-js-core";
 import type {
   MediaRendererScene,
   MediaRendererSceneOptions,
@@ -14,6 +19,13 @@ import { createPixiInteractionLayer } from "./pixi-interaction-layer";
 import { createPixiInteractionPresentationLayer } from "./pixi-interaction-presentation-layer";
 import { createPixiLabelLayer } from "./pixi-label-layer";
 import { createPixiMaskLayer } from "./pixi-mask-layer";
+import { createPixiMaskBrushPreview } from "./pixi-mask-brush-preview";
+import { createPixiVectorLayer } from "./pixi-vector-layer";
+import { createPixiAnnotationOverlayLayer } from "./pixi-annotation-overlay-layer";
+import {
+  AnnotationGestureStateKind,
+  MediaInteractionMode,
+} from "supervision-js-core";
 import {
   createPixiSceneLayerSlot,
   PixiSceneLayerKind,
@@ -57,10 +69,49 @@ export async function createPixiMediaScene(
   const app: PixiApplication = new Application();
   let currentLabelStyle: LabelStyle | null = options.labelStyle ?? null;
   let currentMaskStyle: MaskStyle | null = options.maskStyle ?? null;
+  let currentVisibility: AnnotationVisibility | undefined = options.visibility;
+  let visibilityVersion = 0;
+  const resolveContextState = (
+    detection: DetectionFrame["detections"][number],
+  ) => resolveAnnotationStyleState(detection, currentVisibility);
+  const resolveLabelContextState = (
+    detection: DetectionFrame["detections"][number],
+  ) => ({
+    ...resolveContextState(detection),
+    hidden:
+      currentVisibility?.labelsHidden === true ||
+      resolveContextState(detection).hidden,
+  });
   const boxLayer = createPixiBoxLayer({
     boxStyle: options.boxStyle,
+    Container: options.editingEngine ? Container : undefined,
     detectionTimeline: options.detectionTimeline,
+    Graphics: options.editingEngine ? Graphics : undefined,
+    resolveContextState,
   });
+  const vectorLayer = createPixiVectorLayer({
+    Container,
+    Graphics,
+    detectionTimeline: options.detectionTimeline,
+    polygonStyle: options.polygonStyle,
+    polylineStyle: options.polylineStyle,
+    keypointStyle: options.keypointStyle,
+    resolveContextState,
+  });
+  const annotationOverlayLayer = createPixiAnnotationOverlayLayer(
+    options.editingEngine,
+    options.annotationOverlayStyle,
+  );
+  const maskBrushPreview = options.maskBrush
+    ? createPixiMaskBrushPreview({
+        CanvasSource,
+        Container,
+        Graphics,
+        Sprite,
+        Texture,
+        preview: options.maskBrush,
+      })
+    : undefined;
   let maskLayer = options.maskStyle
     ? createPixiMaskLayer({
         Container,
@@ -72,7 +123,7 @@ export async function createPixiMediaScene(
         Texture,
         UniformGroup,
         detectionTimeline: options.detectionTimeline,
-        maskStyle: options.maskStyle,
+        maskStyle: createVisibilityMaskStyle(options.maskStyle),
         renderPreparation: options.renderPreparation,
       })
     : undefined;
@@ -83,6 +134,7 @@ export async function createPixiMediaScene(
         Text,
         detectionTimeline: options.detectionTimeline,
         labelStyle: options.labelStyle,
+        resolveContextState: resolveLabelContextState,
       })
     : undefined;
 
@@ -114,35 +166,67 @@ export async function createPixiMediaScene(
   const mediaSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Media);
   const maskSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Mask);
   const boxSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Box);
+  const vectorSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Vector);
   const focusSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Focus);
+  const previewSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Preview);
   const interactionSlot = createPixiSceneLayerSlot(
     PixiSceneLayerKind.Interaction,
   );
+  const handleSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Handle);
   const labelSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Label);
   const layerSlots = [
     mediaSlot,
     maskSlot,
     boxSlot,
+    vectorSlot,
     focusSlot,
+    previewSlot,
+    handleSlot,
     interactionSlot,
     labelSlot,
   ];
   let currentMediaTime = 0;
-  const interactionLayer = options.interaction
-    ? createPixiInteractionLayer({
-        Container,
-        Rectangle,
-        canInteract: options.canInteract,
-        detectionTimeline: options.detectionTimeline,
-        interaction: options.interaction,
-        onStateChange: () => {
-          drawFocusLayer(currentMediaTime);
-          drawInteractionPresentationLayer(currentMediaTime);
-        },
-        pickMaskDetectionAtPoint: (point, mediaTime) =>
-          maskLayer?.pickDetectionAtPoint(point, mediaTime) ?? null,
-      })
-    : undefined;
+  let viewportScale = 1;
+  const viewport = createViewportController({ scale: 1 });
+  let hasPresentedSample = false;
+  let baseFit: ReturnType<typeof calculatePixiSceneFit>;
+  const interactionLayer =
+    options.interaction || options.editingEngine
+      ? createPixiInteractionLayer({
+          Container,
+          Rectangle,
+          canInteract: options.canInteract,
+          detectionTimeline: options.detectionTimeline,
+          interaction: options.interaction ?? {
+            mode: MediaInteractionMode.Always,
+          },
+          editingEngine: options.editingEngine,
+          capturePointer: (pointerId) => {
+            if (!rendererCanvas.hasPointerCapture?.(pointerId)) {
+              rendererCanvas.setPointerCapture?.(pointerId);
+            }
+          },
+          getViewportScale: () => viewportScale,
+          getMediaDimensions: () => ({
+            height: mediaHeight,
+            width: mediaWidth,
+          }),
+          onStateChange: () => {
+            drawFocusLayer(currentMediaTime);
+            drawInteractionPresentationLayer(currentMediaTime);
+            drawAnnotationOverlay();
+          },
+          pickMaskDetectionAtPoint: (point, mediaTime) =>
+            maskLayer?.pickDetectionAtPoint(point, mediaTime) ?? null,
+          pickLabelDetectionAtPoint: (point, mediaTime) =>
+            labelLayer?.pickDetectionAtPoint(point, mediaTime) ?? null,
+          releasePointer: (pointerId) => {
+            if (rendererCanvas.hasPointerCapture?.(pointerId)) {
+              rendererCanvas.releasePointerCapture?.(pointerId);
+            }
+          },
+        })
+      : undefined;
   const interactionPresentationLayer = options.interaction
     ? createPixiInteractionPresentationLayer({
         Container,
@@ -156,6 +240,54 @@ export async function createPixiMediaScene(
         interactionStyle: options.interactionStyle,
       })
     : undefined;
+  let fastTranslatedDetectionId: string | number | null = null;
+  const unsubscribeFastTranslate =
+    options.editingEngine?.subscribeFastTranslate((id, dx, dy) => {
+      fastTranslatedDetectionId = id;
+      boxLayer.translateDetection(id, dx, dy);
+      vectorLayer.translateDetection(id, dx, dy);
+      labelLayer?.translateDetection(id, dx, dy);
+    });
+  const unsubscribeEditingState = options.editingEngine?.subscribe((state) => {
+    if (
+      state.kind !== AnnotationGestureStateKind.Idle ||
+      fastTranslatedDetectionId === null
+    ) {
+      return;
+    }
+    const id = fastTranslatedDetectionId;
+    fastTranslatedDetectionId = null;
+    boxLayer.translateDetection(id, 0, 0);
+    vectorLayer.translateDetection(id, 0, 0);
+    labelLayer?.translateDetection(id, 0, 0);
+    boxLayer.invalidateDetection(id);
+    vectorLayer.invalidateDetection(id);
+    boxLayer.drawFrame(currentMediaTime, viewportScale);
+    vectorLayer.drawFrame(currentMediaTime, viewportScale);
+    labelLayer?.drawFrame(currentMediaTime, viewportScale);
+  });
+  const handleKeyDown = (event: KeyboardEvent) => {
+    if (event.key === "Tab" && interactionLayer) {
+      interactionLayer.cycleSelection(event.shiftKey ? -1 : 1);
+      event.preventDefault();
+      drawInteractionPresentationLayer(currentMediaTime);
+      drawAnnotationOverlay();
+      return;
+    }
+
+    options.editingEngine?.keyDown(event.key);
+    drawAnnotationOverlay();
+  };
+  const handleContextMenu = (event: Event) => {
+    if (options.editingEngine) event.preventDefault();
+  };
+  if (interactionLayer || options.editingEngine) {
+    rendererCanvas.tabIndex = 0;
+    rendererCanvas.addEventListener?.("keydown", handleKeyDown);
+  }
+  if (options.editingEngine) {
+    rendererCanvas.addEventListener?.("contextmenu", handleContextMenu);
+  }
   let focusLayer = options.focusStyle
     ? createPixiFocusLayer({
         Container,
@@ -197,11 +329,36 @@ export async function createPixiMediaScene(
       return;
     }
 
-    mediaScene.scale.set(fit.scale);
-    mediaScene.position.set(fit.x, fit.y);
+    const previousScale = viewportScale;
+    baseFit = fit;
+    applyViewportTransform();
+    if (hasPresentedSample && previousScale !== viewportScale) {
+      redrawViewportStyles();
+    }
+  };
+
+  const applyViewportTransform = () => {
+    if (!mediaScene || !baseFit) return;
+    const transform = viewport.getTransform();
+    viewportScale = baseFit.scale * transform.scale;
+    mediaScene.scale.set(viewportScale);
+    mediaScene.position.set(baseFit.x + transform.x, baseFit.y + transform.y);
+    maskBrushPreview?.setViewportScale(viewportScale);
+  };
+
+  const redrawViewportStyles = () => {
+    boxLayer.invalidate();
+    boxLayer.drawFrame(currentMediaTime, viewportScale);
+    vectorLayer.drawFrame(currentMediaTime, viewportScale);
+    labelLayer?.drawFrame(currentMediaTime, viewportScale);
+    drawFocusLayer(currentMediaTime);
+    drawInteractionPresentationLayer(currentMediaTime);
   };
 
   app.ticker.add(updateMediaSceneFit);
+  app.ticker.add(drawAnnotationOverlay);
+  const tickFocusLayer = () => focusLayer?.tick(now());
+  app.ticker.add(tickFocusLayer);
 
   return {
     rendererBackend: String(app.renderer.name ?? "unknown"),
@@ -225,13 +382,27 @@ export async function createPixiMediaScene(
       const scene: PixiContainer = new Container();
       mediaSprite = new Sprite({ texture });
       const boxes: PixiGraphics = new Graphics();
+      const retainedBoxes = boxLayer.createContainer();
       const interactionDisplay: PixiContainer = new Container();
+      const shouldCreateAnnotationOverlay = Boolean(
+        options.editingEngine ||
+        options.previewOverlay ||
+        currentVisibility?.loadingDetectionIds,
+      );
+      const annotationOverlay: PixiGraphics | undefined =
+        shouldCreateAnnotationOverlay ? new Graphics() : undefined;
 
       mediaSprite.width = mediaWidth;
       mediaSprite.height = mediaHeight;
-      boxLayer.attachGraphics(boxes);
+      if (!retainedBoxes) boxLayer.attachGraphics(boxes);
       mediaSlot.setDisplay(mediaSprite);
-      boxSlot.setDisplay(boxes);
+      boxSlot.setDisplay(retainedBoxes ?? boxes);
+      vectorSlot.setDisplay(vectorLayer.createContainer());
+      previewSlot.setDisplay(maskBrushPreview?.display);
+      if (annotationOverlay) {
+        annotationOverlayLayer.attachGraphics(annotationOverlay);
+        handleSlot.setDisplay(annotationOverlay);
+      }
       const interactionPresentationDisplay =
         interactionPresentationLayer?.createDisplay({
           height: mediaHeight,
@@ -278,17 +449,19 @@ export async function createPixiMediaScene(
 
       try {
         currentMediaTime = sample.timestamp;
+        hasPresentedSample = true;
 
         if (!collectFrameTimings) {
           sample.draw(stagingContext, 0, 0, mediaWidth, mediaHeight);
           stagingTextureSource?.update();
           stagingTexture?.update();
           maskLayer?.drawFrame(sample.timestamp);
-          const boxState = boxLayer.drawFrame(sample.timestamp);
+          const boxState = boxLayer.drawFrame(sample.timestamp, viewportScale);
+          vectorLayer.drawFrame(sample.timestamp, viewportScale);
           interactionLayer?.drawFrame(sample.timestamp);
           drawFocusLayer(sample.timestamp);
           drawInteractionPresentationLayer(sample.timestamp);
-          labelLayer?.drawFrame(sample.timestamp);
+          labelLayer?.drawFrame(sample.timestamp, viewportScale);
           updateMediaSceneFit();
 
           return createPresentedSampleState(sample.timestamp, boxState);
@@ -314,7 +487,8 @@ export async function createPixiMediaScene(
         let boxState: PixiBoxLayerState | undefined;
 
         boxMs = measure(() => {
-          boxState = boxLayer.drawFrame(sample.timestamp);
+          boxState = boxLayer.drawFrame(sample.timestamp, viewportScale);
+          vectorLayer.drawFrame(sample.timestamp, viewportScale);
         });
         interactionMs = measure(() => {
           interactionLayer?.drawFrame(sample.timestamp);
@@ -324,7 +498,7 @@ export async function createPixiMediaScene(
           drawFocusLayer(sample.timestamp);
         });
         labelMs = measure(() => {
-          labelLayer?.drawFrame(sample.timestamp);
+          labelLayer?.drawFrame(sample.timestamp, viewportScale);
         });
         fitMs = measure(updateMediaSceneFit);
 
@@ -368,9 +542,127 @@ export async function createPixiMediaScene(
       updateMediaSceneFit();
     },
 
+    setDisplayAdjustments(adjustments) {
+      void import("pixi.js").then(({ ColorMatrixFilter }) => {
+        const filter = new ColorMatrixFilter();
+        filter.brightness(adjustments.brightness ?? 1, false);
+        filter.contrast((adjustments.contrast ?? 1) - 1, true);
+        if (mediaSprite) mediaSprite.filters = [filter];
+      });
+    },
+
+    getViewportTransform() {
+      const transform = viewport.getTransform();
+      return {
+        locked: transform.locked,
+        scale: viewportScale,
+        x: (baseFit?.x ?? 0) + transform.x,
+        y: (baseFit?.y ?? 0) + transform.y,
+      };
+    },
+
+    setViewportTransform(transform) {
+      viewport.setTransform({
+        ...(transform.scale === undefined || !baseFit
+          ? {}
+          : { scale: transform.scale / baseFit.scale }),
+        ...(transform.x === undefined
+          ? {}
+          : { x: transform.x - (baseFit?.x ?? 0) }),
+        ...(transform.y === undefined
+          ? {}
+          : { y: transform.y - (baseFit?.y ?? 0) }),
+      });
+      applyViewportTransform();
+      redrawViewportStyles();
+    },
+
+    setViewportLocked(locked) {
+      viewport.setLocked(locked);
+    },
+
+    screenToMedia(point) {
+      const fit = baseFit ?? { scale: 1, x: 0, y: 0 };
+      const fitPoint = viewport.screenToMedia({
+        x: point.x - fit.x,
+        y: point.y - fit.y,
+      });
+      return {
+        x: fitPoint.x / fit.scale,
+        y: fitPoint.y / fit.scale,
+      };
+    },
+
+    mediaToScreen(point) {
+      const fit = baseFit ?? { scale: 1, x: 0, y: 0 };
+      const screenPoint = viewport.mediaToScreen({
+        x: point.x * fit.scale,
+        y: point.y * fit.scale,
+      });
+      return {
+        x: screenPoint.x + fit.x,
+        y: screenPoint.y + fit.y,
+      };
+    },
+
+    panViewportBy(dx, dy) {
+      const before = viewport.getTransform();
+      viewport.panBy(dx, dy);
+      const after = viewport.getTransform();
+      viewport.setTransform({ x: Math.round(after.x), y: Math.round(after.y) });
+      if (before === viewport.getTransform()) return;
+      applyViewportTransform();
+    },
+
+    zoomViewportAt(point, factor) {
+      if (!baseFit) return;
+      viewport.zoomAt(
+        { x: point.x - baseFit.x, y: point.y - baseFit.y },
+        factor,
+      );
+      const transform = viewport.getTransform();
+      viewport.setTransform({
+        x: Math.round(transform.x),
+        y: Math.round(transform.y),
+      });
+      applyViewportTransform();
+      redrawViewportStyles();
+    },
+
+    zoomViewportFromWheel(point, deltaY) {
+      if (!baseFit) return;
+      viewport.zoomFromWheel(
+        { x: point.x - baseFit.x, y: point.y - baseFit.y },
+        deltaY,
+      );
+      const transform = viewport.getTransform();
+      viewport.setTransform({
+        x: Math.round(transform.x),
+        y: Math.round(transform.y),
+      });
+      applyViewportTransform();
+      redrawViewportStyles();
+    },
+
     setPresentation(presentation, mediaTime) {
       currentMediaTime = mediaTime;
+      annotationOverlayLayer.setStyle(presentation.annotationOverlayStyle);
+      if (presentation.visibility !== undefined) {
+        currentVisibility = presentation.visibility;
+        visibilityVersion += 1;
+        boxLayer.invalidate();
+        vectorLayer.setStyles({});
+        labelLayer?.setLabelStyle(currentLabelStyle);
+        if (currentMaskStyle) {
+          maskLayer?.setMaskStyle(createVisibilityMaskStyle(currentMaskStyle));
+        }
+      }
       boxLayer.setBoxStyle(presentation.boxStyle);
+      vectorLayer.setStyles({
+        polygonStyle: presentation.polygonStyle,
+        polylineStyle: presentation.polylineStyle,
+        keypointStyle: presentation.keypointStyle,
+      });
 
       if (presentation.maskStyle !== undefined) {
         currentMaskStyle = presentation.maskStyle;
@@ -378,7 +670,11 @@ export async function createPixiMediaScene(
           ? ensureMaskLayer(presentation.maskStyle)
           : maskLayer;
 
-        nextMaskLayer?.setMaskStyle(presentation.maskStyle);
+        nextMaskLayer?.setMaskStyle(
+          presentation.maskStyle
+            ? createVisibilityMaskStyle(presentation.maskStyle)
+            : presentation.maskStyle,
+        );
 
         if (presentation.maskStyle) {
           attachMaskLayerDisplay();
@@ -422,11 +718,12 @@ export async function createPixiMediaScene(
       }
 
       maskLayer?.drawFrame(mediaTime);
-      const boxState = boxLayer.drawFrame(mediaTime);
+      const boxState = boxLayer.drawFrame(mediaTime, viewportScale);
+      vectorLayer.drawFrame(mediaTime, viewportScale);
       interactionLayer?.drawFrame(mediaTime);
       drawFocusLayer(mediaTime);
       drawInteractionPresentationLayer(mediaTime);
-      labelLayer?.drawFrame(mediaTime);
+      labelLayer?.drawFrame(mediaTime, viewportScale);
 
       return createPresentedSampleState(mediaTime, boxState);
     },
@@ -451,11 +748,23 @@ export async function createPixiMediaScene(
 
     destroy() {
       app.ticker.remove(updateMediaSceneFit);
+      app.ticker.remove(drawAnnotationOverlay);
+      app.ticker.remove(tickFocusLayer);
       interactionLayer?.destroy();
       interactionPresentationLayer?.destroy();
       focusLayer?.destroy();
       maskLayer?.destroy();
       labelLayer?.destroy();
+      vectorLayer.destroy();
+      maskBrushPreview?.destroy();
+      unsubscribeFastTranslate?.();
+      unsubscribeEditingState?.();
+      if (interactionLayer || options.editingEngine) {
+        rendererCanvas.removeEventListener?.("keydown", handleKeyDown);
+      }
+      if (options.editingEngine) {
+        rendererCanvas.removeEventListener?.("contextmenu", handleContextMenu);
+      }
       app.destroy(
         { removeView: true },
         {
@@ -507,11 +816,15 @@ export async function createPixiMediaScene(
           detectionIndex,
           frame,
           mediaTime,
+          viewportScale,
+          ...resolveContextState(detection),
         }) ||
         currentLabelStyle?.resolve(detection, {
           detectionIndex,
           frame,
           mediaTime,
+          viewportScale,
+          ...resolveLabelContextState(detection),
         })
       ) {
         visibleDetectionIndexes.add(detectionIndex);
@@ -533,7 +846,7 @@ export async function createPixiMediaScene(
         Texture,
         UniformGroup,
         detectionTimeline: options.detectionTimeline,
-        maskStyle,
+        maskStyle: createVisibilityMaskStyle(maskStyle),
         renderPreparation: options.renderPreparation,
       });
 
@@ -605,6 +918,19 @@ export async function createPixiMediaScene(
       return;
     }
 
+    if (
+      options.editingEngine &&
+      options.editingEngine.getState().kind !== AnnotationGestureStateKind.Idle
+    ) {
+      focusLayer.drawFrame({
+        frame: undefined,
+        hoveredPick: null,
+        mediaTime,
+        selectedPick: null,
+      });
+      return;
+    }
+
     const frame = options.detectionTimeline.selectFrame(mediaTime);
 
     const interactionState = interactionLayer?.getState();
@@ -615,6 +941,7 @@ export async function createPixiMediaScene(
       idMaskArtifact: maskLayer?.getActiveIdMaskFrameTexture() ?? null,
       mediaTime,
       selectedPick: interactionState?.selectedPick ?? null,
+      viewportScale,
     });
   }
 
@@ -632,6 +959,27 @@ export async function createPixiMediaScene(
       idMaskArtifact: maskLayer?.getActiveIdMaskFrameTexture() ?? null,
       mediaTime,
       selectedPick: interactionState?.selectedPick ?? null,
+      selectedPicks: interactionState?.selectedPicks,
+      viewportScale,
+    });
+  }
+
+  function drawAnnotationOverlay() {
+    const frame = options.detectionTimeline.selectFrame(currentMediaTime);
+    const interactionState = interactionLayer?.getState();
+    annotationOverlayLayer.draw({
+      frame,
+      marquee: interactionState?.marqueeRect ?? null,
+      mediaHeight,
+      mediaWidth,
+      now: now(),
+      pointer: interactionState?.pointerPoint ?? null,
+      previewOverlay: options.previewOverlay?.() ?? null,
+      selectedDetectionIds: (interactionState?.selectedPicks ?? []).flatMap(
+        ({ detection }) => (detection.id === undefined ? [] : [detection.id]),
+      ),
+      viewportScale,
+      visibility: currentVisibility,
     });
   }
 
@@ -645,6 +993,7 @@ export async function createPixiMediaScene(
         Text,
         detectionTimeline: options.detectionTimeline,
         labelStyle,
+        resolveContextState: resolveLabelContextState,
       });
     }
 
@@ -657,6 +1006,21 @@ export async function createPixiMediaScene(
     }
 
     labelSlot.setDisplay(labelLayer.createContainer());
+  }
+
+  function createVisibilityMaskStyle(style: MaskStyle): MaskStyle {
+    return {
+      artifactKey:
+        style.artifactKey === undefined
+          ? undefined
+          : `${style.artifactKey}:visibility:${visibilityVersion}`,
+      opacity: style.opacity,
+      resolve(detection, context) {
+        const state = resolveContextState(detection);
+        if (state.hidden) return undefined;
+        return style.resolve(detection, { ...context, ...state });
+      },
+    };
   }
 }
 

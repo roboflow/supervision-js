@@ -10,7 +10,7 @@ const frame: DetectionFrame = {
     {
       className: "player",
       id: "player-1",
-      rect: { height: 30, width: 20, x: 10, y: 15 },
+      rect: { height: 30, width: 20, x: 20, y: 30 },
     },
   ],
   frameIndex: 3,

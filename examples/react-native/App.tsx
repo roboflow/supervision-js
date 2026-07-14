@@ -2181,8 +2181,8 @@ function pickDetectionLabelAtPoint(
     const rect = layout.mapRect({
       height: detection.bbox.y2 - detection.bbox.y1,
       width: detection.bbox.x2 - detection.bbox.x1,
-      x: detection.bbox.x1,
-      y: detection.bbox.y1,
+      x: (detection.bbox.x1 + detection.bbox.x2) / 2,
+      y: (detection.bbox.y1 + detection.bbox.y2) / 2,
     });
     const inside =
       point.x >= rect.x &&

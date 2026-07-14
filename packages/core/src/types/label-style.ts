@@ -1,4 +1,5 @@
-import type { Detection, DetectionFrame, Rect } from "#types/detections";
+import type { Detection, Rect } from "#types/detections";
+import type { AnnotationStyleContext } from "#types/style";
 
 export enum LabelPlacement {
   Top = "top",
@@ -8,11 +9,12 @@ export enum LabelPlacement {
   Center = "center",
 }
 
-export interface LabelStyleContext {
-  readonly mediaTime: number;
-  readonly frame: DetectionFrame;
-  readonly detectionIndex: number;
+export enum LabelVisibilityMode {
+  Always = "always",
+  HoveredOnly = "hoveredOnly",
 }
+
+export type LabelStyleContext = AnnotationStyleContext;
 
 /**
  * Text styling for a rendered detection label.
@@ -34,6 +36,8 @@ export interface LabelBackgroundStyle {
   readonly cornerRadius?: number;
   readonly paddingX?: number;
   readonly paddingY?: number;
+  /** Round only the two top corners, matching editor label pills. */
+  readonly topCornersOnly?: boolean;
 }
 
 /**

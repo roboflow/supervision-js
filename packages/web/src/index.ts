@@ -31,6 +31,12 @@ export type {
   DecodedVideoSampleSink,
   DisposableMediaInput,
 } from "#media/media-source";
+export {
+  createImageUrlMediaSource,
+  createStaticImageMediaSource,
+  type HostFrameSource,
+  type StaticImageSource,
+} from "#media/static-image-media-source";
 
 // Renderer and session primitives.
 export { createMediaRenderer } from "#renderers/media-renderer";
@@ -47,6 +53,12 @@ export { BaseLabelStyle } from "supervision-js-core";
 export type { BaseLabelStyleOptions } from "supervision-js-core";
 export { BaseMaskStyle } from "supervision-js-core";
 export type { BaseMaskStyleOptions } from "supervision-js-core";
+export { BasePolygonStyle } from "supervision-js-core";
+export type { BasePolygonStyleOptions } from "supervision-js-core";
+export { BasePolylineStyle } from "supervision-js-core";
+export type { BasePolylineStyleOptions } from "supervision-js-core";
+export { BaseKeypointStyle, KeypointMarkerShape } from "supervision-js-core";
+export type { BaseKeypointStyleOptions } from "supervision-js-core";
 export {
   DEFAULT_DETECTION_CLASS_STYLES,
   DEFAULT_DETECTION_COLOR_SEQUENCE,
@@ -80,7 +92,7 @@ export type {
   LabelStyleContext,
   LabelTextStyle,
 } from "supervision-js-core";
-export { LabelPlacement } from "supervision-js-core";
+export { LabelPlacement, LabelVisibilityMode } from "supervision-js-core";
 export type {
   DetectionStylePredicate,
   DetectionStyleValue,
@@ -94,10 +106,31 @@ export type {
 } from "supervision-js-core";
 export { MaskRenderMode } from "supervision-js-core";
 export type {
+  PolygonDrawInstruction,
+  PolygonStyle,
+  PolygonStyleContext,
+  PolylineDrawInstruction,
+  PolylineStyle,
+  PolylineStyleContext,
+  KeypointDrawInstruction,
+  KeypointEdgeDrawInstruction,
+  KeypointMarkerDrawInstruction,
+  KeypointStyle,
+  KeypointStyleContext,
+} from "supervision-js-core";
+export type {
+  AnnotationOverlayStyle,
+  AnnotationVisibility,
+  MediaDisplayAdjustments,
+  PreviewOverlayData,
+  ViewportTransform,
+} from "supervision-js-core";
+export type {
   MediaPreparationOptions,
   PreparedMedia,
   ProgressivePreparedMedia,
 } from "#types/media-preparation";
+export type { MaskBrushPreviewOptions } from "./editing";
 export {
   DetectionBufferStatus,
   DetectionFrameRetentionMode,
@@ -127,11 +160,22 @@ export {
 } from "supervision-js-core";
 export {
   DetectionMaskEncoding,
+  KeypointVisibility,
   type CompressedRleDetectionMask,
   type Detection,
   type DetectionFrame,
   type DetectionMask,
+  type KeypointEdge,
+  type KeypointGeometry,
+  type Point,
+  type PolygonGeometry,
+  type PolylineGeometry,
   type Rect,
+  type SkeletonDefinition,
+  type SkeletonDefinitions,
+  type SkeletonEdgeDefinition,
+  type SkeletonVertexDefinition,
+  type TopLeftRect,
 } from "supervision-js-core";
 export type {
   MediaFrameMetadata,

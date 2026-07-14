@@ -41,6 +41,15 @@ const mockState = vi.hoisted(() => {
   const pixiMock = {
     appDestroy: vi.fn(),
     appInit: vi.fn(async () => undefined),
+    canvasAddEventListener: vi.fn(),
+    canvasInstances: [] as Array<{
+      style: Record<string, string>;
+      tabIndex?: number;
+      addEventListener: ReturnType<typeof vi.fn>;
+      removeEventListener: ReturnType<typeof vi.fn>;
+    }>,
+    canvasRemoveEventListener: vi.fn(),
+    canvasSourceDestroy: vi.fn(),
     canvasSourceOptions: [] as unknown[],
     canvasSourceUpdate: vi.fn(),
     containerAddChild: vi.fn(),
@@ -54,6 +63,7 @@ const mockState = vi.hoisted(() => {
       on: ReturnType<typeof vi.fn>;
     }>,
     graphicsInstances: [] as Array<{
+      circle: ReturnType<typeof vi.fn>;
       clear: ReturnType<typeof vi.fn>;
       fill: ReturnType<typeof vi.fn>;
       rect: ReturnType<typeof vi.fn>;
@@ -159,16 +169,25 @@ export const domMock = mockState.domMock;
 
 vi.mock("pixi.js", () => {
   class Application {
-    canvas = { style: {} };
+    canvas = {
+      addEventListener: pixiMock.canvasAddEventListener,
+      removeEventListener: pixiMock.canvasRemoveEventListener,
+      style: {},
+    };
     renderer = { name: "webgl", resize: pixiMock.rendererResize };
     screen = { height: 360, width: 640 };
     stage = { addChild: pixiMock.stageAddChild };
     ticker = { add: pixiMock.tickerAdd, remove: pixiMock.tickerRemove };
     destroy = pixiMock.appDestroy;
     init = pixiMock.appInit;
+
+    constructor() {
+      pixiMock.canvasInstances.push(this.canvas);
+    }
   }
 
   class CanvasSource {
+    destroy = pixiMock.canvasSourceDestroy;
     update = pixiMock.canvasSourceUpdate;
 
     constructor(options: unknown) {
@@ -241,6 +260,7 @@ vi.mock("pixi.js", () => {
   }
 
   class Graphics {
+    circle = vi.fn(() => this);
     clear = vi.fn(() => this);
     fill = vi.fn(() => this);
     rect = vi.fn(() => this);
@@ -490,7 +510,11 @@ export function resetMocks() {
   pixiMock.appDestroy.mockClear();
   pixiMock.appInit.mockClear();
   pixiMock.appInit.mockResolvedValue(undefined);
+  pixiMock.canvasAddEventListener.mockClear();
+  pixiMock.canvasInstances.length = 0;
+  pixiMock.canvasRemoveEventListener.mockClear();
   pixiMock.canvasSourceOptions.length = 0;
+  pixiMock.canvasSourceDestroy.mockClear();
   pixiMock.canvasSourceUpdate.mockClear();
   pixiMock.containerAddChild.mockClear();
   pixiMock.containerInstances.length = 0;

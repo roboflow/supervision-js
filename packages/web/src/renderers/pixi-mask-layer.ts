@@ -1,4 +1,7 @@
-import { pickDetectionByMaskId } from "supervision-js-core";
+import {
+  pickDetectionByMaskId,
+  pickDetectionAtPoint as pickDetectionAtPointCpu,
+} from "supervision-js-core";
 import {
   createPreparedRenderWindow,
   PreparedRenderFrameMaskStatus,
@@ -232,13 +235,18 @@ export function createPixiMaskLayer(options: {
       const preparedFrame = preparedRenderWindow.getFrame(mediaTime);
       const maskFrame = preparedFrame?.maskFrame;
 
-      if (
-        !preparedFrame ||
-        !maskFrame ||
-        maskFrame.kind !== PreparedMaskFrameKind.PngIdMask ||
-        mediaWidth <= 0 ||
-        mediaHeight <= 0
-      ) {
+      if (!preparedFrame || !maskFrame) {
+        return null;
+      }
+
+      if (maskFrame.kind !== PreparedMaskFrameKind.PngIdMask) {
+        return pickDetectionAtPointCpu(preparedFrame.detectionFrame, point, {
+          filter: (detection) => detection.mask !== undefined,
+          maskMediaDimensions: { height: mediaHeight, width: mediaWidth },
+        });
+      }
+
+      if (mediaWidth <= 0 || mediaHeight <= 0) {
         return null;
       }
 

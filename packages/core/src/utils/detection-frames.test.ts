@@ -5,6 +5,7 @@ import { DetectionMaskEncoding, type DetectionFrame } from "#types/detections";
 import {
   copySortedDetectionFrames,
   decodeCompressedRleMask,
+  encodeCompressedRleCounts,
   filterDetectionFramesForRange,
   selectDetectionFrame,
 } from "#utils/detection-frames";
@@ -382,34 +383,6 @@ describe("detection frame utilities", () => {
     });
   });
 });
-
-function encodeCompressedRleCounts(counts: readonly number[]) {
-  return counts
-    .map((count, index) => {
-      let value = index > 2 ? count - counts[index - 2]! : count;
-      let encoded = "";
-      let more = true;
-
-      while (more) {
-        let charCode = value & 0x1f;
-
-        value >>= 5;
-        more = !(
-          (value === 0 && (charCode & 0x10) === 0) ||
-          (value === -1 && (charCode & 0x10) !== 0)
-        );
-
-        if (more) {
-          charCode |= 0x20;
-        }
-
-        encoded += String.fromCharCode(charCode + 48);
-      }
-
-      return encoded;
-    })
-    .join("");
-}
 
 function deepFreezeDetectionFrames(frames: readonly DetectionFrame[]) {
   for (const frame of frames) {

@@ -4,6 +4,11 @@ import { BaseFocusStyle } from "supervision-js-core";
 import { BoxShape } from "supervision-js-core";
 import type { FocusDrawInstruction, FocusStyle } from "supervision-js-core";
 import type { DetectionPickResult } from "supervision-js-core";
+import {
+  centerRectToTopLeftRect,
+  decodeCompressedRleMask,
+  extractMaskRectRuns,
+} from "supervision-js-core";
 import type {
   Container as PixiContainer,
   ImageSource as PixiImageSource,
@@ -66,6 +71,7 @@ type PixiFocusGraphics = {
     height: number,
     radius: number,
   ): PixiFocusGraphics;
+  poly?(points: number[], close?: boolean): PixiFocusGraphics;
 };
 
 export interface PixiFocusMaskArtifact {
@@ -79,6 +85,7 @@ export interface PixiFocusLayerFrameContext {
   readonly idMaskArtifact?: PixiFocusMaskArtifact | null;
   readonly mediaTime: number;
   readonly selectedPick: DetectionPickResult | null;
+  readonly viewportScale?: number;
 }
 
 type FocusDrawFrame = Parameters<FocusStyle["resolve"]>[0]["frame"];
@@ -89,6 +96,7 @@ export interface PixiFocusLayer {
     readonly height: number;
   }): PixiContainer | PixiFocusGraphics;
   drawFrame(context: PixiFocusLayerFrameContext): void;
+  tick(timestamp: number): void;
   setFocusStyle(focusStyle: FocusStyle | null | undefined): void;
   destroy(): void;
 }
@@ -111,6 +119,13 @@ export function createPixiFocusLayer(options: {
       : (options.focusStyle ?? new BaseFocusStyle());
   let focusGraphics: PixiFocusGraphics | undefined;
   let idMaskRenderer: FocusIdMaskRenderer | undefined;
+  let focusDisplay:
+    | (PixiContainer & { alpha: number; visible: boolean })
+    | (PixiFocusGraphics & { alpha: number })
+    | undefined;
+  let currentAlpha = 0;
+  let targetAlpha = 0;
+  let lastTick: number | null = null;
   let isDestroyed = false;
 
   return {
@@ -122,12 +137,19 @@ export function createPixiFocusLayer(options: {
       idMaskRenderer = createIdMaskRenderer();
 
       if (!options.Container || !idMaskRenderer) {
+        focusDisplay = focusGraphics as PixiFocusGraphics & { alpha: number };
+        focusDisplay.alpha = 0;
         return focusGraphics;
       }
 
       const container = new options.Container();
 
       container.addChild(idMaskRenderer.mesh, focusGraphics as never);
+      focusDisplay = container as PixiContainer & {
+        alpha: number;
+        visible: boolean;
+      };
+      focusDisplay.alpha = 0;
 
       return container;
     },
@@ -160,12 +182,16 @@ export function createPixiFocusLayer(options: {
         hoveredPick: context.hoveredPick,
         mediaTime: context.mediaTime,
         selectedPick: context.selectedPick,
+        viewportScale: context.viewportScale,
       });
 
       if (!instruction || instruction.targets.length === 0) {
-        hide();
+        transitionToHidden();
         return;
       }
+
+      targetAlpha = 1;
+      if (focusDisplay) focusDisplay.visible = true;
 
       if (drawIdMaskFocus(context.idMaskArtifact, instruction)) {
         hideVectorFocus();
@@ -174,6 +200,23 @@ export function createPixiFocusLayer(options: {
 
       idMaskRenderer?.hide();
       drawVectorFocus(instruction);
+    },
+
+    tick(timestamp) {
+      if (!focusDisplay || currentAlpha === targetAlpha) {
+        lastTick = timestamp;
+        return;
+      }
+      const elapsed = Math.max(0, timestamp - (lastTick ?? timestamp));
+      lastTick = timestamp;
+      const progress = Math.min(1, elapsed / 120);
+      const eased = 1 - (1 - progress) ** 3;
+      currentAlpha += (targetAlpha - currentAlpha) * eased;
+      if (Math.abs(targetAlpha - currentAlpha) < 0.001) {
+        currentAlpha = targetAlpha;
+      }
+      focusDisplay.alpha = currentAlpha;
+      if (currentAlpha === 0 && targetAlpha === 0) hide();
     },
 
     setFocusStyle(nextFocusStyle) {
@@ -196,15 +239,21 @@ export function createPixiFocusLayer(options: {
       !artifact ||
       artifact.frame.kind !== PreparedMaskFrameKind.PngIdMask ||
       maskIds.length === 0 ||
-      maskIds.length !== instruction.targets.length
+      (!instruction.ambient && maskIds.length !== instruction.targets.length)
     ) {
       return false;
     }
 
-    idMaskRenderer.render(artifact.frame, artifact.texture, maskIds, {
-      alpha: instruction.fill.alpha,
-      color: instruction.fill.color,
-    });
+    idMaskRenderer.render(
+      artifact.frame,
+      artifact.texture,
+      maskIds,
+      {
+        alpha: instruction.fill.alpha,
+        color: instruction.fill.color,
+      },
+      instruction.ambient === true,
+    );
 
     return true;
   }
@@ -215,7 +264,10 @@ export function createPixiFocusLayer(options: {
     }
 
     const targetsWithRects = instruction.targets.filter(
-      (target) => target.detection.rect,
+      (target) =>
+        target.detection.rect ||
+        target.detection.polygon ||
+        target.detection.mask,
     );
 
     if (targetsWithRects.length === 0) {
@@ -237,23 +289,52 @@ export function createPixiFocusLayer(options: {
     target: DetectionPickResult,
     instruction: FocusDrawInstruction,
   ) {
-    if (!focusGraphics || !target.detection.rect) {
+    if (!focusGraphics) {
+      return;
+    }
+
+    if (target.detection.polygon?.points.length && focusGraphics.poly) {
+      focusGraphics.poly(
+        target.detection.polygon.points.flatMap(({ x, y }) => [x, y]),
+        true,
+      );
+      focusGraphics.cut();
+      return;
+    }
+
+    if (target.detection.mask) {
+      const decoded = decodeCompressedRleMask(target.detection.mask);
+
+      for (const run of extractMaskRectRuns(
+        decoded.data,
+        decoded.width,
+        decoded.height,
+      ) ?? []) {
+        focusGraphics.rect(run.x, run.y, run.width, run.height);
+        focusGraphics.cut();
+      }
+
+      return;
+    }
+
+    if (!target.detection.rect) {
       return;
     }
 
     const { rect } = target.detection;
     const fallback = instruction.fallback;
+    const { x: left, y: top } = centerRectToTopLeftRect(rect);
 
     if (fallback?.shape === BoxShape.RoundedRect) {
       focusGraphics.roundRect(
-        rect.x,
-        rect.y,
+        left,
+        top,
         rect.width,
         rect.height,
         fallback.cornerRadius ?? 0,
       );
     } else {
-      focusGraphics.rect(rect.x, rect.y, rect.width, rect.height);
+      focusGraphics.rect(left, top, rect.width, rect.height);
     }
 
     focusGraphics.cut();
@@ -262,6 +343,12 @@ export function createPixiFocusLayer(options: {
   function hide() {
     hideVectorFocus();
     idMaskRenderer?.hide();
+    if (focusDisplay) focusDisplay.visible = false;
+  }
+
+  function transitionToHidden() {
+    targetAlpha = 0;
+    if (currentAlpha === 0) hide();
   }
 
   function hideVectorFocus() {
@@ -313,6 +400,7 @@ interface FocusIdMaskRenderer {
     texture: PixiTexture,
     maskIds: readonly number[],
     fill: { readonly alpha: number; readonly color: number },
+    ambient: boolean,
   ): void;
   destroy(): void;
 }
@@ -338,6 +426,7 @@ function createFocusIdMaskRenderer(options: {
       type: "f32",
       value: selectedIds,
     },
+    uAmbient: { type: "f32", value: 0 },
   });
   const placeholderSource = new options.ImageSource({
     autoGenerateMipmaps: false,
@@ -382,7 +471,7 @@ function createFocusIdMaskRenderer(options: {
 
     mesh,
 
-    render(_frame, texture, maskIds, fill) {
+    render(_frame, texture, maskIds, fill, ambient) {
       bindTexture(texture.source);
       selectedIds.fill(0);
 
@@ -400,6 +489,7 @@ function createFocusIdMaskRenderer(options: {
       );
       uniforms.uniforms.uSelectedIds = selectedIds;
       uniforms.uniforms.uOverlayColor = createPremultipliedColor(fill);
+      uniforms.uniforms.uAmbient = ambient ? 1 : 0;
       uniforms.update();
       mesh.visible = true;
     },
@@ -501,6 +591,7 @@ in vec4 vColor;
 uniform sampler2D uTexture;
 uniform float uSelectedIds[${MAX_FOCUS_MASK_IDS}];
 uniform float uSelectedCount;
+uniform float uAmbient;
 uniform vec4 uOverlayColor;
 
 out vec4 finalColor;
@@ -512,6 +603,10 @@ float sampleMaskId(vec2 uv) {
 bool isFocusedMask(float maskId) {
   if (maskId < 0.5) {
     return false;
+  }
+
+  if (uAmbient > 0.5) {
+    return true;
   }
 
   for (int index = 0; index < ${MAX_FOCUS_MASK_IDS}; index += 1) {

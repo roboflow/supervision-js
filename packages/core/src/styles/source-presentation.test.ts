@@ -3,6 +3,9 @@ import { describe, expect, it } from "vitest";
 import { BaseBoxStyle } from "#styles/box-style";
 import { BaseLabelStyle } from "#styles/label-style";
 import { BaseMaskStyle } from "#styles/mask-style";
+import { BaseKeypointStyle } from "#styles/keypoint-style";
+import { BasePolygonStyle } from "#styles/polygon-style";
+import { BasePolylineStyle } from "#styles/polyline-style";
 import {
   createSourceAwarePresentation,
   type PresentationStyleSet,
@@ -113,6 +116,68 @@ describe("createSourceAwarePresentation", () => {
       undefined,
     );
     expect(presentation.maskStyle?.resolve(hiddenDetection, context)).toBe(
+      undefined,
+    );
+  });
+
+  it("applies vector source overrides and disables", () => {
+    const presentation = createSourceAwarePresentation(
+      {
+        keypointStyle: new BaseKeypointStyle({
+          markerFill: { color: 0xff0000 },
+        }),
+        polygonStyle: new BasePolygonStyle({
+          stroke: { color: 0xff0000, width: 1 },
+        }),
+        polylineStyle: new BasePolylineStyle({
+          stroke: { color: 0xff0000, width: 1 },
+        }),
+      },
+      [
+        {
+          id: "draft",
+          presentation: {
+            keypointStyle: new BaseKeypointStyle({
+              markerFill: { color: 0x00ff00 },
+            }),
+            polygonStyle: new BasePolygonStyle({
+              stroke: { color: 0x00ff00, width: 2 },
+            }),
+            polylineStyle: null,
+          },
+        },
+      ],
+    );
+    const context = { detectionIndex: 0, frame, mediaTime: 0 };
+    const detection = {
+      id: "draft",
+      keypoints: { edges: [], points: [{ x: 1, y: 1 }] },
+      polygon: {
+        points: [
+          { x: 0, y: 0 },
+          { x: 2, y: 0 },
+          { x: 0, y: 2 },
+        ],
+      },
+      polyline: {
+        points: [
+          { x: 0, y: 0 },
+          { x: 2, y: 2 },
+        ],
+      },
+      sourceId: "draft",
+    };
+
+    expect(
+      presentation.polygonStyle?.resolve(detection, context)?.stroke,
+    ).toMatchObject({
+      color: 0x00ff00,
+      width: 2,
+    });
+    expect(
+      presentation.keypointStyle?.resolve(detection, context)?.markers[0]?.fill,
+    ).toMatchObject({ color: 0x00ff00 });
+    expect(presentation.polylineStyle?.resolve(detection, context)).toBe(
       undefined,
     );
   });

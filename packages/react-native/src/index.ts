@@ -8,13 +8,18 @@ import type {
   LabelDrawInstruction,
   MaskDrawInstruction,
   MaskStyle,
+  PolygonDrawInstruction,
+  PolylineDrawInstruction,
+  KeypointDrawInstruction,
   MediaFrameMetadata,
   MediaRendererPresentation,
   PlatformMediaFrame,
   Rect,
+  TopLeftRect,
 } from "supervision-js-core";
 import {
   createIdMaskFrame,
+  centerRectToTopLeftRect,
   LabelPlacement,
   MAX_ID_MASK_PALETTE_ENTRIES,
   MAX_ID_MASK_STROKE_WIDTH,
@@ -30,6 +35,10 @@ export {
   BaseBoxStyle,
   BaseLabelStyle,
   BaseMaskStyle,
+  BasePolygonStyle,
+  BasePolylineStyle,
+  BaseKeypointStyle,
+  KeypointMarkerShape,
   BoxShape,
   BoxStrokeAlignment,
   DEFAULT_DETECTION_CLASS_STYLES,
@@ -49,6 +58,10 @@ export type {
   BaseBoxStyleOptions,
   BaseLabelStyleOptions,
   BaseMaskStyleOptions,
+  BasePolygonStyleOptions,
+  BasePolylineStyleOptions,
+  BaseKeypointStyleOptions,
+  AnnotationOverlayStyle,
   BoxDrawInstruction,
   BoxStyle,
   CompressedRleDetectionMask,
@@ -66,13 +79,25 @@ export type {
   LabelStyle,
   MaskDrawInstruction,
   MaskStyle,
+  PolygonDrawInstruction,
+  PolygonStyle,
+  PolylineDrawInstruction,
+  PolylineStyle,
+  KeypointDrawInstruction,
+  KeypointStyle,
   MediaFrameMetadata,
   MediaRendererPresentation,
   PlatformMediaFrame,
   Rect,
+  TopLeftRect,
 } from "supervision-js-core";
 
 export { REACT_NATIVE_LIVE_ID_MASK_DEFAULTS } from "./live-defaults";
+export {
+  createReactNativeAnnotationGestureAdapter,
+  type ReactNativeAnnotationGestureAdapter,
+  type ReactNativeAnnotationGestureInput,
+} from "./annotation-gesture-adapter";
 
 import {
   createReactNativeLiveIdMaskArtifactWithNativeBuilder,
@@ -360,6 +385,9 @@ export interface ReactNativeFramePresentation<THandle = unknown> {
   readonly boxes: readonly BoxDrawInstruction[];
   readonly labels: readonly LabelDrawInstruction[];
   readonly masks: readonly MaskDrawInstruction[];
+  readonly polygons: readonly PolygonDrawInstruction[];
+  readonly polylines: readonly PolylineDrawInstruction[];
+  readonly keypoints: readonly KeypointDrawInstruction[];
   readonly maskOpacity: number | null;
 }
 
@@ -381,11 +409,11 @@ export interface ReactNativePoint {
 }
 
 export interface ReactNativeFrameLayout {
-  readonly mediaRect: Rect;
+  readonly mediaRect: TopLeftRect;
   readonly scale: number;
   mapPoint(point: ReactNativePoint): ReactNativePoint;
   mapCanvasPoint(point: ReactNativePoint): ReactNativePoint | null;
-  mapRect(rect: Rect): Rect;
+  mapRect(rect: Rect): TopLeftRect;
 }
 
 export interface ReactNativeSize {
@@ -400,7 +428,7 @@ export interface ReactNativeLabelLayoutOptions {
 }
 
 export interface ReactNativeLabelLayout {
-  readonly backgroundRect: Rect;
+  readonly backgroundRect: TopLeftRect;
   readonly cornerRadius: number;
   readonly textPoint: ReactNativePoint;
 }
@@ -533,7 +561,7 @@ export interface ReactNativeLiveIdMaskArtifactAutoOptions extends ReactNativeLiv
 export interface ReactNativeLiveIdMaskUniformOptions {
   readonly artifact: ReactNativeLiveIdMaskArtifact;
   readonly edgeSmoothing?: number;
-  readonly mediaRect: Rect;
+  readonly mediaRect: TopLeftRect;
   /**
    * Cell size (canvas px) for the procedural censor mosaic fill applied to
    * `mosaicMaskIds`. Defaults to 12.
@@ -586,11 +614,12 @@ export function resolveReactNativeFrameLayout(
       };
     },
     mapRect(rect) {
+      const topLeft = centerRectToTopLeftRect(rect);
       return {
         height: rect.height * scale,
         width: rect.width * scale,
-        x: x + rect.x * scale,
-        y: y + rect.y * scale,
+        x: x + topLeft.x * scale,
+        y: y + topLeft.y * scale,
       };
     },
     mediaRect: { height, width, x, y },
@@ -610,7 +639,13 @@ export function pickReactNativeDetectionAtPoint(
     return null;
   }
 
-  return pickDetectionAtPoint(frame, mediaPoint, options);
+  return pickDetectionAtPoint(frame, mediaPoint, {
+    ...options,
+    maskMediaDimensions: options.maskMediaDimensions ?? {
+      height: layout.mediaRect.height / layout.scale,
+      width: layout.mediaRect.width / layout.scale,
+    },
+  });
 }
 
 export function resolveReactNativeLabelLayout(
@@ -1152,21 +1187,36 @@ export function resolveReactNativeFramePresentation<THandle = unknown>(
   options: ReactNativeFramePresentationOptions<THandle> &
     ReactNativeFramePresentationStyleOptions,
 ): ReactNativeFramePresentation<THandle> {
-  const { boxStyle, detectionFrame, labelStyle, maskStyle, mediaFrame } =
-    options;
+  const {
+    boxStyle,
+    detectionFrame,
+    keypointStyle,
+    labelStyle,
+    maskStyle,
+    mediaFrame,
+    polygonStyle,
+    polylineStyle,
+  } = options;
   const boxes: BoxDrawInstruction[] = [];
   const labels: LabelDrawInstruction[] = [];
   const masks: MaskDrawInstruction[] = [];
+  const polygons: PolygonDrawInstruction[] = [];
+  const polylines: PolylineDrawInstruction[] = [];
+  const keypoints: KeypointDrawInstruction[] = [];
 
   detectionFrame.detections.forEach((detection, detectionIndex) => {
     const baseContext = {
       detectionIndex,
       frame: detectionFrame,
       mediaTime: detectionFrame.mediaTime,
+      viewportScale: 1,
     };
     const box = boxStyle?.resolve(detection, baseContext);
     const label = labelStyle?.resolve(detection, baseContext);
     const mask = maskStyle?.resolve(detection, baseContext);
+    const polygon = polygonStyle?.resolve(detection, baseContext);
+    const polyline = polylineStyle?.resolve(detection, baseContext);
+    const keypoint = keypointStyle?.resolve(detection, baseContext);
 
     if (box) {
       boxes.push(box);
@@ -1179,6 +1229,9 @@ export function resolveReactNativeFramePresentation<THandle = unknown>(
     if (mask) {
       masks.push(mask);
     }
+    if (polygon) polygons.push(polygon);
+    if (polyline) polylines.push(polyline);
+    if (keypoint) keypoints.push(keypoint);
   });
 
   return {
@@ -1186,13 +1239,16 @@ export function resolveReactNativeFramePresentation<THandle = unknown>(
     labels,
     maskOpacity: maskStyle?.opacity ?? null,
     masks,
+    polygons,
+    polylines,
+    keypoints,
     mediaFrame,
     mediaMetadata: mediaFrame.metadata,
   };
 }
 
 function resolveReactNativeLabelPosition(options: {
-  readonly anchor: Rect;
+  readonly anchor: TopLeftRect;
   readonly height: number;
   readonly layout: ReactNativeFrameLayout;
   readonly offsetX: number;

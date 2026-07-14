@@ -44,8 +44,8 @@ describe("React Native demo presentation", () => {
     expect(packet.presentation.boxes[0]?.rect).toEqual({
       height: 200,
       width: 100,
-      x: 10,
-      y: 20,
+      x: 60,
+      y: 120,
     });
     expect(packet.presentation.boxes[0]?.stroke?.color).toBe(0x60a5fa);
     expect(packet.presentation.labels[0]?.background?.color).toBe(0x60a5fa);

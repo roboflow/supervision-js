@@ -1,4 +1,5 @@
-import type { Detection, DetectionFrame, Rect } from "#types/detections";
+import type { Detection, Rect } from "#types/detections";
+import type { AnnotationStyleContext } from "#types/style";
 
 export enum BoxShape {
   Rect = "rect",
@@ -21,6 +22,8 @@ export interface BoxStrokeStyle {
   readonly alpha: number;
   readonly width: number;
   readonly alignment?: BoxStrokeAlignment;
+  /** Alternating dash and gap lengths in screen pixels. */
+  readonly dash?: readonly number[];
 }
 
 /**
@@ -34,11 +37,7 @@ export interface BoxFillStyle {
 /**
  * Per-frame context passed to a box style while resolving draw instructions.
  */
-export interface BoxStyleContext {
-  readonly mediaTime: number;
-  readonly frame: DetectionFrame;
-  readonly detectionIndex: number;
-}
+export type BoxStyleContext = AnnotationStyleContext;
 
 /**
  * Renderer-neutral box drawing instruction.

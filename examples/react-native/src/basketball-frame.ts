@@ -24,7 +24,7 @@ export const basketballDetectionFrame: DetectionFrame = {
         height: 1080,
         width: 1920,
       },
-      rect: { height: 319, width: 127, x: 505, y: 158 },
+      rect: { height: 319, width: 127, x: 568.5, y: 317.5 },
     },
     {
       className: "yellow team player",
@@ -37,7 +37,7 @@ export const basketballDetectionFrame: DetectionFrame = {
         height: 1080,
         width: 1920,
       },
-      rect: { height: 291, width: 219, x: 230, y: 204 },
+      rect: { height: 291, width: 219, x: 339.5, y: 349.5 },
     },
     {
       className: "basketball",
@@ -50,7 +50,7 @@ export const basketballDetectionFrame: DetectionFrame = {
         height: 1080,
         width: 1920,
       },
-      rect: { height: 42, width: 50, x: 273, y: 384 },
+      rect: { height: 42, width: 50, x: 298, y: 405 },
     },
   ],
   frameIndex: basketballFrameMetadata.frameIndex,

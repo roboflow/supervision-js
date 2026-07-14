@@ -9,6 +9,7 @@ import type {
 } from "#types/focus-style";
 import { FocusTargetMode } from "#types/focus-style";
 import type { DetectionPickResult } from "#types/interaction";
+import { DetectionPickTarget } from "#types/interaction";
 
 const DEFAULT_FOCUS_FILL_COLOR = 0x020617;
 const DEFAULT_FOCUS_FILL_ALPHA = 0.45;
@@ -56,6 +57,10 @@ export class BaseFocusStyle implements FocusStyle {
 
     const targetMode = this.options.targetMode ?? FocusTargetMode.Selected;
     const targets = getFocusTargets(context, targetMode);
+    const ambient =
+      targetMode === FocusTargetMode.Ambient &&
+      !context.selectedPick &&
+      !context.hoveredPick;
     const fill = resolveFocusStyleValue(this.options.fill, context);
 
     if (targets.length === 0 || fill === null) {
@@ -70,6 +75,7 @@ export class BaseFocusStyle implements FocusStyle {
       },
       targetMode,
       targets,
+      ...(ambient ? { ambient: true } : {}),
     };
   }
 
@@ -99,6 +105,25 @@ function getFocusTargets(
   targetMode: FocusTargetMode,
 ) {
   const targets: DetectionPickResult[] = [];
+
+  if (targetMode === FocusTargetMode.Ambient) {
+    if (context.selectedPick) return [context.selectedPick];
+    if (context.hoveredPick) return [context.hoveredPick];
+    return context.frame.detections.map((detection, detectionIndex) => ({
+      detection,
+      detectionIndex,
+      frame: context.frame,
+      mediaTime: context.mediaTime,
+      point: detection.rect
+        ? { x: detection.rect.x, y: detection.rect.y }
+        : { x: 0, y: 0 },
+      target: detection.mask
+        ? DetectionPickTarget.Mask
+        : detection.polygon
+          ? DetectionPickTarget.Polygon
+          : DetectionPickTarget.Box,
+    }));
+  }
 
   if (
     (targetMode === FocusTargetMode.Selected ||

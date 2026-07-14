@@ -4,6 +4,7 @@ import { createPixiLabelLayer } from "#renderers/pixi-label-layer";
 import type { BufferedDetectionTimeline } from "supervision-js-core";
 import type { DetectionFrame } from "supervision-js-core";
 import { LabelPlacement } from "supervision-js-core";
+import { DetectionPickTarget } from "supervision-js-core";
 import type { LabelStyle } from "supervision-js-core";
 
 const firstFrame: DetectionFrame = {
@@ -11,7 +12,7 @@ const firstFrame: DetectionFrame = {
     {
       className: "player",
       confidence: 0.93,
-      rect: { height: 20, width: 10, x: 10, y: 30 },
+      rect: { height: 20, width: 10, x: 15, y: 40 },
     },
   ],
   frameIndex: 1,
@@ -23,7 +24,7 @@ const secondFrame: DetectionFrame = {
     {
       className: "player",
       confidence: 0.93,
-      rect: { height: 20, width: 10, x: 16, y: 34 },
+      rect: { height: 20, width: 10, x: 21, y: 44 },
     },
   ],
   frameIndex: 2,
@@ -97,6 +98,91 @@ describe("pixi label layer", () => {
     expect(background.y).toBe(53);
     expect(label.x).toBe(19);
     expect(label.y).toBe(57);
+  });
+
+  it("does not add an implicit top gutter when the scene supplies viewport scale", () => {
+    const timeline = createTimeline([firstFrame]);
+    const layer = createPixiLabelLayer({
+      Container: FakeContainer as never,
+      Graphics: FakeGraphics as never,
+      Text: FakeText as never,
+      detectionTimeline: timeline,
+      labelStyle: createStableLabelStyle(),
+    });
+    const container = layer.createContainer() as FakeContainer;
+
+    layer.drawFrame(1, 2);
+
+    const [background, label] = container.children as [FakeGraphics, FakeText];
+
+    expect(background.y).toBe(16);
+    expect(label.y).toBe(18);
+  });
+
+  it.each([LabelPlacement.Top, LabelPlacement.InsideBottom])(
+    "keeps %s labels inside the media at its top edge",
+    (placement) => {
+      const edgeFrame: DetectionFrame = {
+        detections: [
+          {
+            rect: { height: 10, width: 10, x: 10, y: 5 },
+          },
+        ],
+        mediaTime: 3,
+      };
+      const layer = createPixiLabelLayer({
+        Container: FakeContainer as never,
+        Graphics: FakeGraphics as never,
+        Text: FakeText as never,
+        detectionTimeline: createTimeline([edgeFrame]),
+        labelStyle: {
+          resolve(detection) {
+            if (!detection.rect) return undefined;
+            return {
+              background: {
+                alpha: 0.8,
+                color: 0x111111,
+                paddingX: 7,
+                paddingY: 4,
+              },
+              placement,
+              rect: detection.rect,
+              text: "edge",
+            };
+          },
+        },
+      });
+      const container = layer.createContainer() as FakeContainer;
+
+      layer.drawFrame(3);
+
+      const [background, label] = container.children as [
+        FakeGraphics,
+        FakeText,
+      ];
+      expect(background.y).toBe(0);
+      expect(label.y).toBe(4);
+    },
+  );
+
+  it("picks the visible label chip before underlying geometry", () => {
+    const timeline = createTimeline([firstFrame]);
+    const layer = createPixiLabelLayer({
+      Container: FakeContainer as never,
+      Graphics: FakeGraphics as never,
+      Text: FakeText as never,
+      detectionTimeline: timeline,
+      labelStyle: createStableLabelStyle(),
+    });
+
+    layer.createContainer();
+    layer.drawFrame(1);
+
+    const pick = layer.pickDetectionAtPoint({ x: 11, y: 13 }, 1);
+
+    expect(pick?.detectionIndex).toBe(0);
+    expect(pick?.target).toBe(DetectionPickTarget.Label);
+    expect(layer.pickDetectionAtPoint({ x: 100, y: 100 }, 1)).toBeNull();
   });
 });
 

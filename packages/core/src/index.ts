@@ -6,6 +6,15 @@ export {
 } from "#detections/buffered-detection-timeline";
 export { createColdDetectionFrameSource } from "#detections/cold-detection-frame-source";
 export { createCompositeDetectionFrameSource } from "#detections/composite-detection-frame-source";
+export {
+  AnnotationFrameMutationKind,
+  createEditableAnnotationFrameSession,
+  type AnnotationFrameMutation,
+  type AnnotationFrameMutationListener,
+  type DetectionId,
+  type EditableDetection,
+  type EditableAnnotationFrameSession,
+} from "#detections/editable-annotation-frame-session";
 export { createMemoryColdDetectionFrameStore } from "#detections/memory-cold-detection-frame-store";
 export { createWritableDetectionFrameSource } from "#detections/writable-detection-frame-source";
 
@@ -16,6 +25,20 @@ export {
   pickDetectionByMaskId,
   rebaseDetectionPickToFrame,
 } from "#interactions/detection-picker";
+export {
+  createViewportController,
+  mediaToScreen,
+  screenToMedia,
+} from "#interactions/viewport-controller";
+export { createAnnotationEditingEngine } from "#interactions/annotation-editing-engine";
+export {
+  applyAnnotationHandleDrag,
+  deleteAnnotationVertex,
+  findClosestAnnotationSegment,
+  getAnnotationHandles,
+  offsetDetection,
+  pickAnnotationHandle,
+} from "#interactions/annotation-handles";
 
 // Presentation styles.
 export { BaseBoxStyle } from "#styles/box-style";
@@ -28,6 +51,12 @@ export { BaseLabelStyle } from "#styles/label-style";
 export type { BaseLabelStyleOptions } from "#styles/label-style";
 export { BaseMaskStyle } from "#styles/mask-style";
 export type { BaseMaskStyleOptions } from "#styles/mask-style";
+export { BasePolygonStyle } from "#styles/polygon-style";
+export type { BasePolygonStyleOptions } from "#styles/polygon-style";
+export { BasePolylineStyle } from "#styles/polyline-style";
+export type { BasePolylineStyleOptions } from "#styles/polyline-style";
+export { BaseKeypointStyle } from "#styles/keypoint-style";
+export type { BaseKeypointStyleOptions } from "#styles/keypoint-style";
 export {
   createSourceAwarePresentation,
   type PresentationStyleSet,
@@ -40,12 +69,54 @@ export { resolveStyleValue } from "#styles/style-value";
 export {
   copySortedDetectionFrames,
   decodeCompressedRleMask,
+  decodeCompressedRleCounts,
   detectionFrameOverlapsRange,
+  encodeCompressedRleCounts,
   filterDetectionFramesForRange,
   selectDetectionFrame,
   validateDetectionFrames,
   type DecodedDetectionMask,
 } from "#utils/detection-frames";
+export {
+  convertDetectionBoxToMask,
+  convertDetectionBoxToPolygon,
+  convertDetectionMaskToBox,
+  convertDetectionMaskToPolygon,
+  convertDetectionPolygonToBox,
+  convertDetectionPolygonToMask,
+  mergeDetectionMasks,
+  mergeDetectionPolygonsByClass,
+  polygonToRect,
+  rasterizePolygonToMask,
+  rasterizeRectToMask,
+  rectToPolygon,
+  type MediaDimensions,
+} from "#utils/detection-conversions";
+export {
+  DetectionMaskPayloadFormat,
+  computeDetectionMaskRect,
+  computeMaskBounds,
+  decodeDetectionMaskPayload,
+  detectMaskBorders,
+  encodeBinaryMask,
+  encodeDetectionMaskPayload,
+  extractMaskContour,
+  extractMaskRectRuns,
+  isDeflatedBase64DetectionMaskPayload,
+  type DetectionMaskCompressionCodec,
+  type MaskRectRun,
+} from "#utils/detection-masks";
+export {
+  centerRectToTopLeftRect,
+  containsPoint,
+  distanceToSegment,
+  getDetectionRect,
+  getPointsRect,
+  pointInPolygon,
+  polygonArea,
+  rectArea,
+  topLeftRectToCenterRect,
+} from "#utils/geometry";
 export {
   canReuseMaskStyleArtifacts,
   resolveMaskStyleOpacity,
@@ -66,8 +137,25 @@ export {
   type IdMaskInstruction,
 } from "#utils/id-mask-frame";
 export { includeDefined } from "#utils/object";
+export { lightenColor, resolveContrastTextColor } from "#utils/color";
+export { resolveAnnotationStyleState } from "#utils/annotation-visibility";
 
 export { BoxShape, BoxStrokeAlignment } from "#types/box-style";
+export type { ViewportController, ViewportTransform } from "#types/viewport";
+export {
+  AnnotationGeometryKind,
+  AnnotationGestureStateKind,
+  AnnotationHandleKind,
+  type AnnotationCreationTool,
+  type AnnotationEditingEngine,
+  type AnnotationEditingEngineOptions,
+  type AnnotationEditingState,
+  type AnnotationHandleDefinition,
+  type AnnotationOverlayStyle,
+  type AnnotationPointerInput,
+  type PreviewOverlayData,
+  type PreviewOverlayPoint,
+} from "#types/editing";
 export type {
   BoxDrawInstruction,
   BoxFillStyle,
@@ -104,11 +192,22 @@ export {
 } from "#types/detection-timeline";
 export {
   DetectionMaskEncoding,
+  KeypointVisibility,
   type CompressedRleDetectionMask,
   type Detection,
   type DetectionFrame,
   type DetectionMask,
+  type KeypointEdge,
+  type KeypointGeometry,
+  type Point,
+  type PolygonGeometry,
+  type PolylineGeometry,
   type Rect,
+  type SkeletonDefinition,
+  type SkeletonDefinitions,
+  type SkeletonEdgeDefinition,
+  type SkeletonVertexDefinition,
+  type TopLeftRect,
 } from "#types/detections";
 export type {
   MediaFrameMetadata,
@@ -126,6 +225,8 @@ export type {
   MediaFrameRenderTimings,
   MediaRendererDiagnosticsOptions,
   MediaRendererPresentation,
+  AnnotationVisibility,
+  MediaDisplayAdjustments,
   MediaRendererQuality,
   MediaRendererState,
   MediaRendererStateController,
@@ -175,7 +276,7 @@ export type {
   LabelStyleContext,
   LabelTextStyle,
 } from "#types/label-style";
-export { LabelPlacement } from "#types/label-style";
+export { LabelPlacement, LabelVisibilityMode } from "#types/label-style";
 export type {
   MaskDrawInstruction,
   MaskStrokeStyle,
@@ -185,6 +286,25 @@ export type {
 } from "#types/mask-style";
 export { MaskRenderMode } from "#types/mask-style";
 export type {
+  PolygonDrawInstruction,
+  PolygonStyle,
+  PolygonStyleContext,
+} from "#types/polygon-style";
+export type {
+  PolylineDrawInstruction,
+  PolylineStyle,
+  PolylineStyleContext,
+} from "#types/polyline-style";
+export { KeypointMarkerShape } from "#types/keypoint-style";
+export type {
+  KeypointDrawInstruction,
+  KeypointEdgeDrawInstruction,
+  KeypointMarkerDrawInstruction,
+  KeypointStyle,
+  KeypointStyleContext,
+} from "#types/keypoint-style";
+export type {
+  AnnotationStyleContext,
   DetectionStylePredicate,
   DetectionStyleValue,
 } from "#types/style";

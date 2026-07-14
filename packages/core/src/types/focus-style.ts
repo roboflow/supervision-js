@@ -8,6 +8,7 @@ export enum FocusTargetMode {
   Hovered = "hovered",
   Selected = "selected",
   HoveredAndSelected = "hoveredAndSelected",
+  Ambient = "ambient",
 }
 
 export interface FocusFillStyle {
@@ -25,6 +26,7 @@ export interface FocusStyleContext {
   readonly frame: DetectionFrame;
   readonly hoveredPick: DetectionPickResult | null;
   readonly selectedPick: DetectionPickResult | null;
+  readonly viewportScale?: number;
 }
 
 export interface FocusDrawInstruction {
@@ -32,6 +34,7 @@ export interface FocusDrawInstruction {
   readonly targets: readonly DetectionPickResult[];
   readonly targetMode?: FocusTargetMode;
   readonly fallback?: FocusFallbackStyle;
+  readonly ambient?: boolean;
 }
 
 export interface FocusStyle {

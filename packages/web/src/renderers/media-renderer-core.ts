@@ -218,6 +218,44 @@ export async function createMediaRendererCore(
       mediaScene?.setRenderQuality(quality.maxDevicePixelRatio);
     },
 
+    setDisplayAdjustments(adjustments) {
+      if (!runtimeState.isDestroyed()) {
+        mediaScene?.setDisplayAdjustments?.(adjustments);
+      }
+    },
+
+    getViewportTransform() {
+      return (
+        mediaScene?.getViewportTransform?.() ?? {
+          locked: false,
+          scale: 1,
+          x: 0,
+          y: 0,
+        }
+      );
+    },
+    setViewportTransform(transform) {
+      mediaScene?.setViewportTransform?.(transform);
+    },
+    setViewportLocked(locked) {
+      mediaScene?.setViewportLocked?.(locked);
+    },
+    screenToMedia(point) {
+      return mediaScene?.screenToMedia?.(point) ?? point;
+    },
+    mediaToScreen(point) {
+      return mediaScene?.mediaToScreen?.(point) ?? point;
+    },
+    panViewportBy(dx, dy) {
+      mediaScene?.panViewportBy?.(dx, dy);
+    },
+    zoomViewportAt(point, factor) {
+      mediaScene?.zoomViewportAt?.(point, factor);
+    },
+    zoomViewportFromWheel(point, deltaY) {
+      mediaScene?.zoomViewportFromWheel?.(point, deltaY);
+    },
+
     destroy() {
       if (runtimeState.isDestroyed()) {
         return;
@@ -253,6 +291,7 @@ export async function createMediaRendererCore(
     });
     mediaScene = await providers.createScene({
       boxStyle: options.boxStyle,
+      annotationOverlayStyle: options.annotationOverlayStyle,
       focusStyle: options.focusStyle,
       container: options.container,
       detectionTimeline,
@@ -263,8 +302,15 @@ export async function createMediaRendererCore(
       interactionStyle: options.interactionStyle,
       labelStyle: options.labelStyle,
       maskStyle: options.maskStyle,
+      maskBrush: options.maskBrush,
+      polygonStyle: options.polygonStyle,
+      polylineStyle: options.polylineStyle,
+      keypointStyle: options.keypointStyle,
       renderPreparation: options.renderPreparation,
       diagnostics: options.diagnostics,
+      visibility: options.visibility,
+      editingEngine: options.editingEngine,
+      previewOverlay: options.previewOverlay,
     });
     runtimeState.setRendererBackend(mediaScene.rendererBackend);
 

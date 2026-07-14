@@ -1,12 +1,20 @@
 import type { BufferedDetectionTimeline } from "supervision-js-core";
 import type { DetectionFrame } from "supervision-js-core";
 import type {
+  AnnotationStyleContext,
+  Detection,
   LabelBackgroundStyle,
   LabelDrawInstruction,
   LabelStyle,
   LabelTextStyle,
+  DetectionPickPoint,
+  DetectionPickResult,
 } from "supervision-js-core";
-import { LabelPlacement } from "supervision-js-core";
+import {
+  centerRectToTopLeftRect,
+  DetectionPickTarget,
+  LabelPlacement,
+} from "supervision-js-core";
 import type {
   Container as PixiContainer,
   Graphics as PixiGraphics,
@@ -20,8 +28,20 @@ interface PixiLabelEntry {
   backgroundKey: string | null;
   backgroundWidth: number;
   labelAlpha: number | null;
+  backgroundBaseX: number;
+  backgroundBaseY: number;
+  labelBaseX: number;
+  labelBaseY: number;
   text: string | null;
   textStyleKey: string | null;
+}
+
+interface LabelHitRect {
+  readonly detectionIndex: number;
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
 }
 
 export interface PixiLabelLayerOptions {
@@ -30,12 +50,20 @@ export interface PixiLabelLayerOptions {
   readonly Text: new (options: { text?: string; style?: unknown }) => PixiText;
   readonly detectionTimeline: BufferedDetectionTimeline;
   readonly labelStyle: LabelStyle | undefined;
+  readonly resolveContextState?: (
+    detection: Detection,
+  ) => Partial<AnnotationStyleContext>;
 }
 
 export interface PixiLabelLayer {
   createContainer(): PixiContainer;
-  drawFrame(mediaTime: number): void;
+  drawFrame(mediaTime: number, viewportScale?: number): void;
   setLabelStyle(labelStyle: LabelStyle | null): void;
+  translateDetection(id: string | number, x: number, y: number): boolean;
+  pickDetectionAtPoint(
+    point: DetectionPickPoint,
+    mediaTime: number,
+  ): DetectionPickResult | null;
   destroy(): void;
 }
 
@@ -45,6 +73,7 @@ export function createPixiLabelLayer({
   Text,
   detectionTimeline,
   labelStyle,
+  resolveContextState,
 }: PixiLabelLayerOptions): PixiLabelLayer {
   const entries: PixiLabelEntry[] = [];
   let container: PixiContainer | undefined;
@@ -52,6 +81,9 @@ export function createPixiLabelLayer({
   let lastFrameKey: string | undefined;
   let styleVersion = 0;
   let drawnStyleVersion = -1;
+  let lastViewportScale = 0;
+  let hitRects: LabelHitRect[] = [];
+  const entriesByDetectionKey = new Map<string, PixiLabelEntry>();
 
   const hideEntriesFrom = (startIndex: number) => {
     for (let index = startIndex; index < entries.length; index += 1) {
@@ -68,9 +100,13 @@ export function createPixiLabelLayer({
         background: new Graphics(),
         backgroundHeight: 0,
         backgroundKey: null,
+        backgroundBaseX: 0,
+        backgroundBaseY: 0,
         backgroundWidth: 0,
         label: new Text({ text: "", style: {} }),
         labelAlpha: null,
+        labelBaseX: 0,
+        labelBaseY: 0,
         text: null,
         textStyleKey: null,
       };
@@ -81,31 +117,45 @@ export function createPixiLabelLayer({
     return entry;
   };
 
-  const redrawFrame = (frame: DetectionFrame, mediaTime: number) => {
+  const redrawFrame = (
+    frame: DetectionFrame,
+    mediaTime: number,
+    viewportScale: number,
+  ) => {
     let drawnCount = 0;
+    hitRects = [];
+    entriesByDetectionKey.clear();
 
     if (!currentLabelStyle) {
       hideEntriesFrom(0);
       return;
     }
 
-    for (
-      let detectionIndex = 0;
-      detectionIndex < frame.detections.length;
-      detectionIndex += 1
-    ) {
-      const detection = frame.detections[detectionIndex]!;
+    const orderedDetections = frame.detections
+      .map((detection, detectionIndex) => ({ detection, detectionIndex }))
+      .sort(
+        (left, right) =>
+          (left.detection.zIndex ?? left.detectionIndex) -
+          (right.detection.zIndex ?? right.detectionIndex),
+      );
+
+    for (const { detection, detectionIndex } of orderedDetections) {
       const instruction = currentLabelStyle.resolve(detection, {
         detectionIndex,
         frame,
         mediaTime,
+        viewportScale,
+        ...resolveContextState?.(detection),
       });
 
       if (!instruction) {
         continue;
       }
 
-      drawInstruction(ensureEntry(drawnCount), instruction);
+      const entry = ensureEntry(drawnCount);
+      const hitRect = drawInstruction(entry, instruction, viewportScale);
+      entriesByDetectionKey.set(detectionKey(detection, detectionIndex), entry);
+      hitRects.push({ ...hitRect, detectionIndex });
       drawnCount += 1;
     }
 
@@ -121,28 +171,70 @@ export function createPixiLabelLayer({
       return container;
     },
 
-    drawFrame(mediaTime) {
+    drawFrame(mediaTime, viewportScale) {
+      const resolvedViewportScale = viewportScale ?? 1;
       const frame = detectionTimeline.selectFrame(mediaTime);
       const frameKey = frame ? createFrameKey(frame) : undefined;
 
-      if (frameKey === lastFrameKey && drawnStyleVersion === styleVersion) {
+      if (
+        frameKey === lastFrameKey &&
+        drawnStyleVersion === styleVersion &&
+        resolvedViewportScale === lastViewportScale
+      ) {
         return;
       }
 
       lastFrameKey = frameKey;
       drawnStyleVersion = styleVersion;
+      lastViewportScale = resolvedViewportScale;
 
       if (!frame) {
         hideEntriesFrom(0);
         return;
       }
 
-      redrawFrame(frame, mediaTime);
+      redrawFrame(frame, mediaTime, resolvedViewportScale);
     },
 
     setLabelStyle(nextLabelStyle) {
       currentLabelStyle = nextLabelStyle ?? undefined;
       styleVersion += 1;
+    },
+
+    translateDetection(id, x, y) {
+      const entry = entriesByDetectionKey.get(`id:${String(id)}`);
+      if (!entry) return false;
+      entry.background.x = entry.backgroundBaseX + x;
+      entry.background.y = entry.backgroundBaseY + y;
+      entry.label.x = entry.labelBaseX + x;
+      entry.label.y = entry.labelBaseY + y;
+      return true;
+    },
+
+    pickDetectionAtPoint(point, mediaTime) {
+      const frame = detectionTimeline.selectFrame(mediaTime);
+      if (!frame) return null;
+      const hit = [...hitRects]
+        .reverse()
+        .find(
+          (rect) =>
+            point.x >= rect.x &&
+            point.x <= rect.x + rect.width &&
+            point.y >= rect.y &&
+            point.y <= rect.y + rect.height,
+        );
+      const detection =
+        hit === undefined ? undefined : frame.detections[hit.detectionIndex];
+      return hit && detection
+        ? {
+            detection,
+            detectionIndex: hit.detectionIndex,
+            frame,
+            mediaTime,
+            point,
+            target: DetectionPickTarget.Label,
+          }
+        : null;
     },
 
     destroy() {
@@ -156,8 +248,9 @@ export function createPixiLabelLayer({
 function drawInstruction(
   entry: PixiLabelEntry,
   instruction: LabelDrawInstruction,
+  viewportScale: number,
 ) {
-  const textStyle = resolveTextStyle(instruction.textStyle);
+  const textStyle = resolveTextStyle(instruction.textStyle, viewportScale);
   const textStyleKey = createTextStyleKey(textStyle);
   const textAlpha = instruction.textStyle?.alpha ?? 1;
 
@@ -179,22 +272,25 @@ function drawInstruction(
   }
 
   const background = instruction.background;
-  const paddingX = background?.paddingX ?? 0;
-  const paddingY = background?.paddingY ?? 0;
+  const paddingX = (background?.paddingX ?? 0) / viewportScale;
+  const paddingY = (background?.paddingY ?? 0) / viewportScale;
   const width = entry.label.width + paddingX * 2;
   const height = entry.label.height + paddingY * 2;
   const { x, y } = resolveLabelPosition(instruction, width, height);
 
   entry.label.x = x + paddingX;
   entry.label.y = y + paddingY;
+  entry.labelBaseX = entry.label.x;
+  entry.labelBaseY = entry.label.y;
 
   if (!background) {
     entry.background.visible = false;
     entry.backgroundKey = null;
-    return;
+    return { height, width, x, y };
   }
 
-  drawBackground(entry, background, x, y, width, height);
+  drawBackground(entry, background, x, y, width, height, viewportScale);
+  return { height, width, x, y };
 }
 
 function resolveLabelPosition(
@@ -205,32 +301,33 @@ function resolveLabelPosition(
   const { rect } = instruction;
   const offsetX = instruction.offsetX ?? 0;
   const offsetY = instruction.offsetY ?? 0;
+  const { x: left, y: top } = centerRectToTopLeftRect(rect);
 
   switch (instruction.placement ?? LabelPlacement.Top) {
     case LabelPlacement.Bottom:
       return {
-        x: rect.x + offsetX,
-        y: rect.y + rect.height + offsetY,
+        x: left + offsetX,
+        y: top + rect.height + offsetY,
       };
     case LabelPlacement.Center:
       return {
-        x: rect.x + rect.width / 2 - width / 2 + offsetX,
-        y: rect.y + rect.height / 2 - height / 2 + offsetY,
+        x: rect.x - width / 2 + offsetX,
+        y: rect.y - height / 2 + offsetY,
       };
     case LabelPlacement.InsideBottom:
       return {
-        x: rect.x + offsetX,
-        y: Math.max(0, rect.y + rect.height - height - offsetY),
+        x: left + offsetX,
+        y: Math.max(0, top + rect.height - height - offsetY),
       };
     case LabelPlacement.InsideTop:
       return {
-        x: rect.x + offsetX,
-        y: rect.y + offsetY,
+        x: left + offsetX,
+        y: top + offsetY,
       };
     case LabelPlacement.Top:
       return {
-        x: rect.x + offsetX,
-        y: Math.max(0, rect.y - height - offsetY),
+        x: left + offsetX,
+        y: Math.max(0, top - height - offsetY),
       };
   }
 }
@@ -242,6 +339,7 @@ function drawBackground(
   y: number,
   width: number,
   height: number,
+  viewportScale: number,
 ) {
   const graphics = entry.background;
   const backgroundKey = createBackgroundKey(background);
@@ -249,6 +347,8 @@ function drawBackground(
   graphics.visible = true;
   graphics.x = x;
   graphics.y = y;
+  entry.backgroundBaseX = x;
+  entry.backgroundBaseY = y;
 
   if (
     entry.backgroundKey === backgroundKey &&
@@ -262,20 +362,36 @@ function drawBackground(
   entry.backgroundWidth = width;
   entry.backgroundHeight = height;
 
-  graphics
-    .clear()
-    .roundRect(0, 0, width, height, background.cornerRadius ?? 0)
-    .fill({
-      alpha: background.alpha,
-      color: background.color,
-    });
+  graphics.clear();
+  const radius = (background.cornerRadius ?? 0) / viewportScale;
+
+  if (background.topCornersOnly && radius > 0) {
+    graphics
+      .moveTo(0, height)
+      .lineTo(0, radius)
+      .quadraticCurveTo(0, 0, radius, 0)
+      .lineTo(width - radius, 0)
+      .quadraticCurveTo(width, 0, width, radius)
+      .lineTo(width, height)
+      .closePath();
+  } else {
+    graphics.roundRect(0, 0, width, height, radius);
+  }
+
+  graphics.fill({
+    alpha: background.alpha,
+    color: background.color,
+  });
 }
 
-function resolveTextStyle(textStyle: LabelTextStyle | undefined) {
+function resolveTextStyle(
+  textStyle: LabelTextStyle | undefined,
+  viewportScale: number,
+) {
   return {
     fill: textStyle?.color ?? 0xffffff,
     fontFamily: textStyle?.fontFamily ?? "Inter, sans-serif",
-    fontSize: textStyle?.fontSize ?? 13,
+    fontSize: (textStyle?.fontSize ?? 13) / viewportScale,
     fontWeight: textStyle?.fontWeight ?? "600",
   };
 }
@@ -296,9 +412,16 @@ function createBackgroundKey(background: LabelBackgroundStyle) {
     background.cornerRadius ?? 0,
     background.paddingX ?? 0,
     background.paddingY ?? 0,
+    background.topCornersOnly ? 1 : 0,
   ].join(":");
 }
 
 function createFrameKey(frame: DetectionFrame) {
   return `${frame.frameIndex ?? "time"}:${frame.mediaTime}`;
+}
+
+function detectionKey(detection: Detection, detectionIndex: number) {
+  return detection.id === undefined
+    ? `index:${detectionIndex}`
+    : `id:${String(detection.id)}`;
 }
