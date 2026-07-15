@@ -74,9 +74,24 @@ describe("geometry showcase fixture", () => {
 
     for (const source of provenance.sources) {
       expect(source.inputSha256).toBe(
-        sha256(readFileSync(resolve(geometryFixturePath, source.input))),
+        sourceSha256(readFileSync(resolve(geometryFixturePath, source.input))),
       );
     }
+  });
+
+  it("verifies provenance from Git LFS pointers in lightweight checkouts", () => {
+    const oid =
+      "5fad854bfeab82de38b3551272aff8e62df5f702120109e1de5c93c33628cb06";
+    const pointer = Buffer.from(
+      [
+        "version https://git-lfs.github.com/spec/v1",
+        `oid sha256:${oid}`,
+        "size 3323362",
+        "",
+      ].join("\n"),
+    );
+
+    expect(sourceSha256(pointer)).toBe(oid);
   });
 
   it("keeps source masks next to their derived bounded polygons", () => {
@@ -210,6 +225,15 @@ function readJson<T>(path: string): T {
 
 function sha256(content: Buffer) {
   return createHash("sha256").update(content).digest("hex");
+}
+
+function sourceSha256(content: Buffer) {
+  const lfsPointer =
+    /^version https:\/\/git-lfs\.github\.com\/spec\/v1\r?\noid sha256:([a-f0-9]{64})\r?\nsize \d+\r?\n?$/.exec(
+      content.toString("utf8"),
+    );
+
+  return lfsPointer?.[1] ?? sha256(content);
 }
 
 function findFirstMaskedDetection(chunk: DetectionChunk) {
