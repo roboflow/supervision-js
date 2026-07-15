@@ -7,8 +7,11 @@ import {
   type Detection,
   type DetectionFrame,
   type AnnotationStyleContext,
+  type KeypointDrawInstruction,
   type KeypointStyle,
+  type PolygonDrawInstruction,
   type PolygonStyle,
+  type PolylineDrawInstruction,
   type PolylineStyle,
 } from "supervision-js-core";
 import type {
@@ -19,7 +22,15 @@ import { drawPixiPath, resolveScreenLength } from "./pixi-path";
 
 interface RetainedVectorEntry {
   readonly display: PixiGraphics;
-  key: string;
+  cleared: boolean;
+}
+
+interface ResolvedVectorDetection {
+  readonly key: string;
+  readonly zIndex: number;
+  readonly polygon?: PolygonDrawInstruction;
+  readonly polyline?: PolylineDrawInstruction;
+  readonly keypoints?: KeypointDrawInstruction;
 }
 
 export interface PixiVectorLayer {
@@ -63,6 +74,7 @@ export function createPixiVectorLayer(options: {
   let lastFrameKey = "";
   let lastViewportScale = 0;
   const entries = new Map<string, RetainedVectorEntry>();
+  const entryPool: RetainedVectorEntry[] = [];
   const invalidated = new Set<string>();
 
   return {
@@ -93,38 +105,46 @@ export function createPixiVectorLayer(options: {
       lastViewportScale = viewportScale;
 
       if (!frame) {
-        hideAll();
+        releaseInactiveEntries(new Set<string>());
+        invalidated.clear();
         return;
       }
 
-      const activeKeys = new Set<string>();
+      const resolvedDetections = frame.detections.flatMap(
+        (detection, detectionIndex) => {
+          if (
+            !detection.polygon &&
+            !detection.polyline &&
+            !detection.keypoints
+          ) {
+            return [];
+          }
 
-      frame.detections.forEach((detection, detectionIndex) => {
-        if (!detection.polygon && !detection.polyline && !detection.keypoints) {
-          return;
-        }
-        const key = detectionKey(detection, detectionIndex);
-        activeKeys.add(key);
-        const entry = ensureEntry(key);
+          const resolved = resolveDetection(
+            detection,
+            detectionIndex,
+            frame,
+            mediaTime,
+            viewportScale,
+          );
+
+          return resolved ? [resolved] : [];
+        },
+      );
+      const activeKeys = new Set<string>(
+        resolvedDetections.map((detection) => detection.key),
+      );
+      releaseInactiveEntries(activeKeys);
+
+      for (const detection of resolvedDetections) {
+        const entry = ensureEntry(detection.key);
         entry.display.visible = true;
-        entry.display.zIndex = detection.zIndex ?? detectionIndex;
+        entry.display.zIndex = detection.zIndex;
         entry.display.position?.set?.(0, 0);
-        drawDetection(
-          entry.display,
-          detection,
-          detectionIndex,
-          frame,
-          mediaTime,
-          viewportScale,
-        );
-        invalidated.delete(key);
-      });
-
-      for (const [key, entry] of entries) {
-        if (!activeKeys.has(key)) {
-          entry.display.visible = false;
-        }
+        drawDetection(entry, detection, viewportScale);
       }
+
+      invalidated.clear();
     },
 
     invalidateDetection(id) {
@@ -153,6 +173,7 @@ export function createPixiVectorLayer(options: {
 
     destroy() {
       entries.clear();
+      entryPool.length = 0;
       invalidated.clear();
       container = undefined;
     },
@@ -162,27 +183,39 @@ export function createPixiVectorLayer(options: {
     let entry = entries.get(key);
 
     if (!entry) {
-      entry = { display: new options.Graphics(), key };
+      entry = entryPool.pop();
+
+      if (!entry) {
+        entry = { cleared: false, display: new options.Graphics() };
+        container?.addChild(entry.display);
+      }
+
       entries.set(key, entry);
-      container?.addChild(entry.display);
     }
 
     return entry;
   }
 
-  function hideAll() {
-    for (const entry of entries.values()) entry.display.visible = false;
+  function releaseInactiveEntries(activeKeys: ReadonlySet<string>) {
+    for (const [key, entry] of entries) {
+      if (activeKeys.has(key)) continue;
+
+      entries.delete(key);
+      entry.display.clear();
+      entry.cleared = true;
+      entry.display.visible = false;
+      entry.display.position?.set?.(0, 0);
+      entryPool.push(entry);
+    }
   }
 
-  function drawDetection(
-    graphics: PixiGraphics,
+  function resolveDetection(
     detection: Detection,
     detectionIndex: number,
     frame: DetectionFrame,
     mediaTime: number,
     viewportScale: number,
-  ) {
-    graphics.clear();
+  ): ResolvedVectorDetection | undefined {
     const context = {
       detectionIndex,
       frame,
@@ -191,6 +224,29 @@ export function createPixiVectorLayer(options: {
       ...options.resolveContextState?.(detection),
     };
     const polygon = polygonStyle?.resolve(detection, context);
+    const polyline = polylineStyle?.resolve(detection, context);
+    const keypoints = keypointStyle?.resolve(detection, context);
+
+    if (!polygon && !polyline && !keypoints) return undefined;
+
+    return {
+      key: detectionKey(detection, detectionIndex),
+      keypoints,
+      polygon,
+      polyline,
+      zIndex: detection.zIndex ?? detectionIndex,
+    };
+  }
+
+  function drawDetection(
+    entry: RetainedVectorEntry,
+    detection: ResolvedVectorDetection,
+    viewportScale: number,
+  ) {
+    const graphics = entry.display;
+    if (!entry.cleared) graphics.clear();
+    entry.cleared = false;
+    const { keypoints, polygon, polyline } = detection;
 
     if (polygon) {
       graphics.poly(
@@ -208,7 +264,6 @@ export function createPixiVectorLayer(options: {
         );
     }
 
-    const polyline = polylineStyle?.resolve(detection, context);
     if (polyline)
       drawPixiPath(
         graphics,
@@ -218,7 +273,6 @@ export function createPixiVectorLayer(options: {
         viewportScale,
       );
 
-    const keypoints = keypointStyle?.resolve(detection, context);
     if (!keypoints) return;
 
     for (const edge of keypoints.edges) {
