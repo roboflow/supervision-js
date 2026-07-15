@@ -9,9 +9,9 @@ import {
   type RenderPreparationDiagnostics,
 } from "supervision-js";
 import type {
-  Sam3FixtureDetectionSourceSummary,
-  Sam3FixtureSummary,
-} from "../fixtures/sam3-fixtures";
+  DemoFixtureDetectionSourceSummary,
+  DemoFixtureSummary,
+} from "../fixtures/demo-fixtures";
 import {
   formatExactTime,
   formatInteger,
@@ -29,7 +29,7 @@ export interface StatusPanelMediaState {
 export interface StatusPanelDetectionSourceState {
   readonly datasetId: string | null;
   readonly errorMessage: string | null;
-  readonly sourceSummary: Sam3FixtureDetectionSourceSummary | null;
+  readonly sourceSummary: DemoFixtureDetectionSourceSummary | null;
   readonly status: string;
 }
 
@@ -48,7 +48,7 @@ export const StatusPanel = memo(function StatusPanel({
 }: {
   readonly detectionSourceState: StatusPanelDetectionSourceState;
   readonly errorMessage: string | null;
-  readonly fixtureSummary: Sam3FixtureSummary | null;
+  readonly fixtureSummary: DemoFixtureSummary | null;
   readonly hoveredDetectionPick: DetectionPickResult | null;
   readonly mediaState: StatusPanelMediaState;
   readonly playbackState: MediaRendererPlaybackState | null;
@@ -174,6 +174,10 @@ export const StatusPanel = memo(function StatusPanel({
                 )} detections`
               : "loading"
           }
+        />
+        <Readout
+          label="Geometry"
+          value={formatGeometrySummary(fixtureSummary)}
         />
         <Readout
           label="Missing"
@@ -325,15 +329,7 @@ export const StatusPanel = memo(function StatusPanel({
         <Readout label="Media" value={mediaState.status} />
         <Readout
           label="Inference"
-          value={
-            fixtureSummary
-              ? `${fixtureSummary.inferenceLabel} ${formatInteger(
-                  fixtureSummary.inferenceFrameRate,
-                )} fps | compressed RLE masks ${formatInteger(
-                  fixtureSummary.maskWidth,
-                )} x ${formatInteger(fixtureSummary.maskHeight)}`
-              : "-"
-          }
+          value={formatInferenceSummary(fixtureSummary)}
         />
         <Readout label="Audio" value="video-only source" />
       </StatusGroup>
@@ -447,9 +443,59 @@ function InteractionStatusGroup({
       />
       <Readout label="Point" value={formatPickPoint(activePick)} />
       <Readout label="Rect" value={formatPickRect(activePick)} />
-      <Readout label="Target" value={activePick?.target ?? "-"} />
+      <Readout label="Target" value={formatPickTarget(activePick)} />
     </StatusGroup>
   );
+}
+
+function formatGeometrySummary(fixtureSummary: DemoFixtureSummary | null) {
+  const geometry = fixtureSummary?.geometry;
+
+  if (!geometry) {
+    return fixtureSummary?.maskWidth ? "masks + boxes" : "-";
+  }
+
+  const parts = [
+    [geometry.boxDetectionCount, "boxes"],
+    [geometry.maskDetectionCount, "masks"],
+    [geometry.polygonDetectionCount, "polygons"],
+    [geometry.polylineDetectionCount, "polylines"],
+    [geometry.keypointDetectionCount, "keypoint detections"],
+  ] as const;
+
+  return (
+    parts
+      .filter(([count]) => count > 0)
+      .map(([count, label]) => `${formatInteger(count)} ${label}`)
+      .join(" | ") || "none"
+  );
+}
+
+function formatInferenceSummary(fixtureSummary: DemoFixtureSummary | null) {
+  if (!fixtureSummary) {
+    return "-";
+  }
+
+  const maskInfo =
+    fixtureSummary.maskWidth !== null && fixtureSummary.maskHeight !== null
+      ? ` | compressed RLE masks ${formatInteger(
+          fixtureSummary.maskWidth,
+        )} x ${formatInteger(fixtureSummary.maskHeight)}`
+      : "";
+
+  return `${fixtureSummary.inferenceLabel} ${formatInteger(
+    fixtureSummary.inferenceFrameRate,
+  )} fps${maskInfo}`;
+}
+
+function formatPickTarget(pick: DetectionPickResult | null) {
+  if (!pick) {
+    return "-";
+  }
+
+  return pick.geometryIndex === undefined
+    ? pick.target
+    : `${pick.target} #${formatInteger(pick.geometryIndex)}`;
 }
 
 function formatPickFrame(pick: DetectionPickResult | null) {

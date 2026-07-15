@@ -8,6 +8,7 @@ import {
   DetectionPickTarget,
   DetectionInteractionState,
   FocusTargetMode,
+  KeypointVisibility,
   LabelPlacement,
   MaskRenderMode,
 } from "supervision-js";
@@ -26,6 +27,32 @@ const detection: Detection = {
     width: 2,
   },
   rect: { height: 40, width: 20, x: 10, y: 12 },
+};
+
+const vectorDetection: Detection = {
+  className: "person",
+  confidence: 0.9,
+  keypoints: {
+    edges: [[0, 1]],
+    points: [
+      { x: 4, y: 4 },
+      { x: 8, y: 8 },
+      { x: 0, y: 0 },
+    ],
+    visibility: [
+      KeypointVisibility.Visible,
+      KeypointVisibility.Visible,
+      KeypointVisibility.NotLabeled,
+    ],
+  },
+  polygon: {
+    points: [
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+      { x: 10, y: 10 },
+    ],
+  },
+  rect: { height: 10, width: 10, x: 5, y: 5 },
 };
 
 describe("demo presentation", () => {
@@ -256,6 +283,123 @@ describe("demo presentation", () => {
     expect(selectedMask?.stroke?.width).toBeGreaterThan(
       hoverMask?.stroke?.width ?? 0,
     );
+  });
+
+  it("toggles each vector layer independently without touching the other styles", () => {
+    const allEnabled = createDemoPresentation(defaultDemoPresentationSettings);
+    const polygonsOnly = createDemoPresentation({
+      ...defaultDemoPresentationSettings,
+      keypointsEnabled: false,
+    });
+    const keypointsOnly = createDemoPresentation({
+      ...defaultDemoPresentationSettings,
+      polygonsEnabled: false,
+    });
+
+    expect(allEnabled.polygonStyle).toBeTruthy();
+    expect(allEnabled.keypointStyle).toBeTruthy();
+    expect(polygonsOnly.polygonStyle).toBeTruthy();
+    expect(polygonsOnly.keypointStyle).toBeNull();
+    expect(keypointsOnly.polygonStyle).toBeNull();
+    expect(keypointsOnly.keypointStyle).toBeTruthy();
+    expect(keypointsOnly.maskStyle).toBeTruthy();
+    expect(keypointsOnly.labelStyle).toBeTruthy();
+  });
+
+  it("maps polygon controls onto class-aware polygon draw instructions", () => {
+    const presentation = createDemoPresentation({
+      ...defaultDemoPresentationSettings,
+      polygonFillAlpha: 0.3,
+      polygonStrokeWidth: 6,
+    });
+    const context = {
+      detectionIndex: 0,
+      frame: { detections: [vectorDetection], mediaTime: 0 },
+      mediaTime: 0,
+    };
+
+    expect(
+      presentation.polygonStyle?.resolve(vectorDetection, context),
+    ).toMatchObject({
+      fill: { alpha: 0.3 },
+      points: vectorDetection.polygon!.points,
+      stroke: { width: 6 },
+    });
+  });
+
+  it("renders keypoint markers and edges while skipping not-labeled points", () => {
+    const presentation = createDemoPresentation({
+      ...defaultDemoPresentationSettings,
+      keypointEdgeWidth: 4,
+      keypointRadius: 7,
+    });
+    const context = {
+      detectionIndex: 0,
+      frame: { detections: [vectorDetection], mediaTime: 0 },
+      mediaTime: 0,
+    };
+    const instruction = presentation.keypointStyle?.resolve(
+      vectorDetection,
+      context,
+    );
+
+    expect(instruction?.markers).toHaveLength(2);
+    expect(instruction?.markers[0]).toMatchObject({ radius: 7 });
+    expect(instruction?.edges).toHaveLength(1);
+    expect(instruction?.edges[0]).toMatchObject({ stroke: { width: 4 } });
+  });
+
+  it("filters vector layers through the shared confidence threshold", () => {
+    const presentation = createDemoPresentation({
+      ...defaultDemoPresentationSettings,
+      confidenceThreshold: 0.95,
+    });
+    const context = {
+      detectionIndex: 0,
+      frame: { detections: [vectorDetection], mediaTime: 0 },
+      mediaTime: 0,
+    };
+
+    expect(
+      presentation.polygonStyle?.resolve(vectorDetection, context),
+    ).toBeUndefined();
+    expect(
+      presentation.keypointStyle?.resolve(vectorDetection, context),
+    ).toBeUndefined();
+  });
+
+  it("highlights picked polygon and keypoint targets through the interaction style", () => {
+    const presentation = createDemoPresentation(
+      defaultDemoPresentationSettings,
+    );
+    const frame = { detections: [vectorDetection], mediaTime: 0 };
+    const hoverPresentation = presentation.interactionStyle?.resolve(
+      vectorDetection,
+      {
+        detectionIndex: 0,
+        frame,
+        mediaTime: 0,
+        point: { x: 5, y: 5 },
+        state: DetectionInteractionState.Hovered,
+        target: DetectionPickTarget.Polygon,
+      },
+    );
+    const context = { detectionIndex: 0, frame, mediaTime: 0 };
+
+    expect(
+      hoverPresentation?.polygonStyle?.resolve(vectorDetection, context),
+    ).toMatchObject({
+      fill: {
+        alpha: defaultDemoPresentationSettings.interactionHoverFillAlpha,
+      },
+      stroke: {
+        width: defaultDemoPresentationSettings.interactionHoverStrokeWidth,
+      },
+    });
+    expect(
+      hoverPresentation?.keypointStyle?.resolve(vectorDetection, context)
+        ?.markers.length,
+    ).toBe(2);
   });
 
   it("creates a selected-or-hovered focus style for dimming the surrounding frame", () => {

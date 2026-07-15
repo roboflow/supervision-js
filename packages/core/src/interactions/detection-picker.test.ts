@@ -145,6 +145,44 @@ describe("detection picker", () => {
     );
   });
 
+  it("keeps skeleton edges pickable inside overlapping area geometry", () => {
+    const overlappingFrame: DetectionFrame = {
+      detections: [
+        {
+          id: "player-polygon",
+          polygon: {
+            points: [
+              { x: 98, y: 195 },
+              { x: 104, y: 195 },
+              { x: 104, y: 205 },
+              { x: 98, y: 205 },
+            ],
+          },
+          rect: { height: 10, width: 6, x: 101, y: 200 },
+        },
+        {
+          id: "player-pose",
+          keypoints: {
+            edges: [[0, 1]],
+            points: [
+              { x: 100, y: 100 },
+              { x: 100, y: 300 },
+            ],
+          },
+          rect: { height: 400, width: 200, x: 100, y: 200 },
+        },
+      ],
+      mediaTime: 0,
+    };
+
+    expect(
+      pickDetectionAtPoint(overlappingFrame, { x: 102, y: 200 }),
+    ).toMatchObject({
+      geometryIndex: 0,
+      target: DetectionPickTarget.Edge,
+    });
+  });
+
   it("maps media-space points into lower-resolution masks and caches decoding", () => {
     const encoded = encodeBinaryMask(Uint8Array.from([0, 0, 0, 1]), 2, 2);
     let countsReads = 0;

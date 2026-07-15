@@ -21,6 +21,11 @@ import type {
 import { DetectionPickTarget, MediaInteractionMode } from "supervision-js-core";
 
 const DEFAULT_PICK_PADDING = 4;
+const POINT_PRECISE_PICK_TARGETS = new Set([
+  DetectionPickTarget.Keypoint,
+  DetectionPickTarget.Edge,
+  DetectionPickTarget.Polyline,
+]);
 
 type ContainerConstructor = new () => PixiInteractionContainer;
 type RectangleConstructor = new (
@@ -385,6 +390,17 @@ export function createPixiInteractionLayer(options: {
     );
     if (activeLabelPick) return activeLabelPick;
 
+    const geometryPick = pickDetectionAtPoint(activeFrame, pickPoint, {
+      ...options.interaction,
+      includeMasks: options.pickMaskDetectionAtPoint === undefined,
+      maskMediaDimensions: options.getMediaDimensions?.(),
+      padding: pickPadding,
+    });
+
+    if (geometryPick && POINT_PRECISE_PICK_TARGETS.has(geometryPick.target)) {
+      return geometryPick;
+    }
+
     const maskPick = options.pickMaskDetectionAtPoint?.(
       pickPoint,
       currentMediaTime,
@@ -395,16 +411,7 @@ export function createPixiInteractionLayer(options: {
       activeFrame,
     );
 
-    if (activeMaskPick) {
-      return activeMaskPick;
-    }
-
-    return pickDetectionAtPoint(activeFrame, pickPoint, {
-      ...options.interaction,
-      includeMasks: options.pickMaskDetectionAtPoint === undefined,
-      maskMediaDimensions: options.getMediaDimensions?.(),
-      padding: pickPadding,
-    });
+    return activeMaskPick ?? geometryPick;
   }
 
   function createPickFromSelection(

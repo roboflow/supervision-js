@@ -7,12 +7,12 @@ import {
   createMediaSession,
   type MediaSession,
 } from "supervision-js";
-import type { Sam3FixtureDefinition } from "../fixtures/sam3-fixtures";
+import type { DemoFixtureDefinition } from "../fixtures/demo-fixtures";
 import {
-  createSam3FixtureDetectionSource,
-  loadSam3FixtureDetectionManifest,
-  loadSam3FixtureMedia,
-} from "../fixtures/sam3-fixtures";
+  createDemoFixtureDetectionSource,
+  loadDemoFixtureDetectionManifest,
+  loadDemoFixtureMedia,
+} from "../fixtures/demo-fixtures";
 import {
   NORMALIZED_UPLOAD_VIDEO_BITRATE,
   TARGET_UPLOAD_FRAME_RATE,
@@ -24,11 +24,11 @@ import type { DemoSessionCallbacks } from "./demo-session-types";
 export async function createFixtureSession(
   options: {
     readonly container: HTMLDivElement;
-    readonly definition: Sam3FixtureDefinition;
+    readonly definition: DemoFixtureDefinition;
   } & DemoSessionCallbacks,
 ): Promise<MediaSession> {
-  const manifest = await loadSam3FixtureDetectionManifest(options.definition);
-  const detectionSource = createSam3FixtureDetectionSource(
+  const manifest = await loadDemoFixtureDetectionManifest(options.definition);
+  const detectionSource = createDemoFixtureDetectionSource(
     manifest,
     options.definition,
   );
@@ -46,7 +46,7 @@ export async function createFixtureSession(
     status: detectionSource.status,
   });
 
-  const mediaSource = await loadSam3FixtureMedia(options.definition);
+  const mediaSource = await loadDemoFixtureMedia(options.definition);
 
   if (!options.isActive()) {
     detectionSource.destroy();
@@ -66,7 +66,7 @@ export async function createFixtureSession(
         source: detectionSource.detectionSource,
         sync: {
           frameIndexOriginTime: 0,
-          frameRate: manifest.inference.frameRate,
+          frameRate: manifest.inference?.frameRate ?? manifest.frameRate,
           selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
         },
       },

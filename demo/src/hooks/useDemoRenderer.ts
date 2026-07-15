@@ -15,12 +15,12 @@ import {
   type MediaSourceState,
   type RenderPreparationDiagnostics,
 } from "supervision-js";
-import type { Sam3FixtureSummary } from "../fixtures/sam3-fixtures";
+import type { DemoFixtureSummary } from "../fixtures/demo-fixtures";
 import {
-  sam3Fixtures,
-  defaultSam3Fixture,
-  type Sam3FixtureDefinition,
-} from "../fixtures/sam3-fixtures";
+  demoFixtures,
+  defaultDemoFixture,
+  type DemoFixtureDefinition,
+} from "../fixtures/demo-fixtures";
 import {
   createDemoPresentation,
   defaultDemoPresentationSettings,
@@ -53,7 +53,7 @@ export interface DemoRendererState {
   readonly containerRef: RefObject<HTMLDivElement | null>;
   readonly duration: number | null;
   readonly errorMessage: string | null;
-  readonly fixtureSummary: Sam3FixtureSummary | null;
+  readonly fixtureSummary: DemoFixtureSummary | null;
   readonly hoveredDetectionPick: DetectionPickResult | null;
   readonly mediaState: DemoMediaState;
   readonly playbackState: MediaRendererPlaybackState | null;
@@ -63,7 +63,7 @@ export interface DemoRendererState {
   readonly renderPreparationDiagnostics: RenderPreparationDiagnostics | null;
   readonly selectedDetectionPick: DetectionPickResult | null;
   readonly sampleFixtureId: string;
-  readonly sampleFixtures: readonly Sam3FixtureDefinition[];
+  readonly sampleFixtures: readonly DemoFixtureDefinition[];
   readonly sourceControlsDisabled: boolean;
   readonly sourceMode: DemoSourceMode;
   readonly sessionState: MediaSessionState | null;
@@ -132,7 +132,7 @@ export function useDemoRenderer(): DemoRendererState {
     null,
   );
   const [fixtureSummary, setFixtureSummary] =
-    useState<Sam3FixtureSummary | null>(null);
+    useState<DemoFixtureSummary | null>(null);
   const [hoveredDetectionPick, setHoveredDetectionPick] =
     useState<DetectionPickResult | null>(null);
   const [selectedDetectionPick, setSelectedDetectionPick] =
@@ -141,7 +141,7 @@ export function useDemoRenderer(): DemoRendererState {
     useState<DemoDetectionSourceState>(initialDetectionSourceState);
   const [mediaState, setMediaState] = useState<DemoMediaState>({
     errorMessage: null,
-    status: defaultSam3Fixture.mediaLoadingStatusLabel,
+    status: defaultDemoFixture.mediaLoadingStatusLabel,
   });
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [presentationSettings, setPresentationSettingsState] =
@@ -153,7 +153,7 @@ export function useDemoRenderer(): DemoRendererState {
     DemoSourceMode.Fixture,
   );
   const [sampleFixtureId, setSampleFixtureIdState] = useState(
-    defaultSam3Fixture.sampleName,
+    defaultDemoFixture.sampleName,
   );
   const [uploadApiKey, setUploadApiKey] = useState("");
   const [uploadClassNames, setUploadClassNames] = useState(
@@ -166,8 +166,8 @@ export function useDemoRenderer(): DemoRendererState {
     (UploadRunRequest & { readonly id: number }) | null
   >(null);
   const activeFixture =
-    sam3Fixtures.find((fixture) => fixture.sampleName === sampleFixtureId) ??
-    defaultSam3Fixture;
+    demoFixtures.find((fixture) => fixture.sampleName === sampleFixtureId) ??
+    defaultDemoFixture;
 
   const syncRendererState = useCallback((renderer: MediaRenderer) => {
     const state = renderer.getState();
@@ -636,7 +636,7 @@ export function useDemoRenderer(): DemoRendererState {
     renderQuality,
     rendererState,
     sampleFixtureId,
-    sampleFixtures: sam3Fixtures,
+    sampleFixtures: demoFixtures,
     selectedDetectionPick,
     setSampleFixtureId,
     setPresentationSettings,

@@ -3,7 +3,7 @@ import {
   DemoSourceMode,
   type UploadInferenceState,
 } from "../session/demo-session-types";
-import type { Sam3FixtureDefinition } from "../fixtures/sam3-fixtures";
+import type { DemoFixtureDefinition } from "../fixtures/demo-fixtures";
 
 export const SourceControls = memo(function SourceControls({
   apiKey,
@@ -36,7 +36,7 @@ export const SourceControls = memo(function SourceControls({
   readonly onSampleChange: (sampleName: string) => void;
   readonly onStartUploadInference: () => void;
   readonly sampleFixtureId: string;
-  readonly sampleFixtures: readonly Sam3FixtureDefinition[];
+  readonly sampleFixtures: readonly DemoFixtureDefinition[];
   readonly selectedFileName: string | null;
   readonly uploadState: UploadInferenceState;
 }) {

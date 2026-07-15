@@ -1,0 +1,298 @@
+#!/usr/bin/env node
+/**
+ * Builds the combined geometry showcase fixture from two offline inputs:
+ *
+ * 1. the committed SAM3 segmentation timeline
+ *    (`demo/fixtures/basketball_sam3/detections.json`), whose masks are
+ *    converted into bounded simplified polygons on the same detections; and
+ * 2. a raw pose JSONL produced once by `run-pose.py`, normalized here into
+ *    center-based rects, zero-based COCO skeleton edges, and an explicit
+ *    visibility policy.
+ *
+ * Both sources share the SAM3 fixture's frame records (frameIndex, mediaTime,
+ * endTime), so every geometry type stays on the same detection-frame timing
+ * reference. The script then chunks the combined timeline with the existing
+ * chunker. Requires `npm run build -w supervision-js-core` first; run through
+ * `npm run fixture:geometry:create`.
+ */
+import { createHash } from "node:crypto";
+import { spawn } from "node:child_process";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, relative, resolve } from "node:path";
+import process from "node:process";
+import { convertDetectionMaskToPolygon } from "supervision-js-core";
+import {
+  DEFAULT_KEYPOINT_VISIBLE_CONFIDENCE,
+  DEFAULT_MAX_POLYGON_POINTS,
+  DEFAULT_POLYGON_TOLERANCE,
+  normalizePoseDetection,
+  simplifyPolygonPoints,
+  summarizeFrameGeometry,
+} from "./geometry.mjs";
+
+const DETECTIONS_SCHEMA = "supervision-js.tools.geometry-fixture.detections";
+const SEGMENTATION_SOURCE_ID = "sam3";
+const POSE_SOURCE_ID = "yolo-pose";
+const POSE_Z_INDEX_BASE = 100;
+
+const options = parseArgs(process.argv.slice(2));
+
+if (options.help) {
+  printHelp();
+  process.exit(0);
+}
+
+const sam3InputPath = resolve(options.sam3Input);
+const poseInputPath = resolve(options.poseInput);
+const outputPath = resolve(options.output);
+const fixtureDir = resolve(options.fixtureDir);
+const sam3Raw = await readFile(sam3InputPath, "utf8");
+const poseRaw = await readFile(poseInputPath, "utf8");
+const sam3Fixture = JSON.parse(sam3Raw);
+const { poseMeta, poseFrames } = parseRawPose(poseRaw);
+const polygonOptions = {
+  maxPoints: options.maxPolygonPoints,
+  tolerance: options.polygonTolerance,
+};
+
+let droppedPoseFrameCount = 0;
+const knownFrameIndexes = new Set(
+  sam3Fixture.frames.map((frame) => frame.frameIndex),
+);
+
+for (const frameIndex of poseFrames.keys()) {
+  if (!knownFrameIndexes.has(frameIndex)) {
+    droppedPoseFrameCount += 1;
+  }
+}
+
+const frames = sam3Fixture.frames.map((frame) => ({
+  ...frame,
+  detections: [
+    ...frame.detections.map((detection) =>
+      deriveMaskPolygonDetection(detection, polygonOptions),
+    ),
+    ...normalizePoseFrame(poseFrames.get(frame.frameIndex) ?? [], frame),
+  ],
+}));
+const geometry = summarizeFrameGeometry(frames);
+const fixture = {
+  classNames: [...(sam3Fixture.inference?.prompts ?? []), "person"],
+  frames,
+  geometry,
+  inference: sam3Fixture.inference,
+  provenance: {
+    generationCommand: "npm run fixture:geometry:create",
+    polygon: {
+      derivedFrom:
+        "sam3 compressed RLE masks via convertDetectionMaskToPolygon",
+      maxPointsPerPolygon: options.maxPolygonPoints,
+      simplification: "ramer-douglas-peucker with uniform-decimation cap",
+      tolerance: options.polygonTolerance,
+    },
+    pose: {
+      ...poseMeta,
+      coordinateConversion:
+        "xyxy corner boxes to center-based rects; COCO one-based skeleton edges to zero-based indexes",
+      sourceFile: relative(fixtureDir, poseInputPath),
+      visibilityPolicy: `keypoint confidence >= ${options.visibleConfidence} maps to Visible(2), otherwise NotLabeled(0); Occluded(1) is never inferred`,
+      zIndexPolicy: `pose detections render above segmentation via zIndex ${POSE_Z_INDEX_BASE}+; point and line picks take precedence over area geometry`,
+    },
+    sources: [
+      {
+        id: SEGMENTATION_SOURCE_ID,
+        input: relative(fixtureDir, sam3InputPath),
+        inputSha256: sha256(sam3Raw),
+        kind: "segmentation",
+        modelId: sam3Fixture.inference?.modelId,
+      },
+      {
+        id: POSE_SOURCE_ID,
+        input: relative(fixtureDir, poseInputPath),
+        inputSha256: sha256(poseRaw),
+        kind: "pose",
+        modelId: poseMeta.model,
+      },
+    ],
+  },
+  schema: DETECTIONS_SCHEMA,
+  version: 1,
+  video: sam3Fixture.video,
+};
+
+await mkdir(dirname(outputPath), { recursive: true });
+await writeFile(outputPath, `${JSON.stringify(fixture)}\n`);
+console.log(
+  `Wrote combined timeline (${frames.length} frames, ${JSON.stringify(geometry)}) to ${outputPath}`,
+);
+
+if (droppedPoseFrameCount > 0) {
+  console.warn(
+    `Dropped pose output for ${droppedPoseFrameCount} frame indexes without a SAM3 frame record.`,
+  );
+}
+
+await runChunker(outputPath, fixtureDir, options.datasetId);
+
+function deriveMaskPolygonDetection(detection, polygonOptions) {
+  const withSource = { ...detection, sourceId: SEGMENTATION_SOURCE_ID };
+
+  if (!detection.mask) {
+    return withSource;
+  }
+
+  const rawPolygon = convertDetectionMaskToPolygon(detection).polygon;
+  const points = rawPolygon
+    ? simplifyPolygonPoints(rawPolygon.points, polygonOptions)
+    : undefined;
+
+  return points ? { ...withSource, polygon: { points } } : withSource;
+}
+
+function normalizePoseFrame(rawDetections, frame) {
+  return rawDetections.flatMap((rawDetection, personIndex) => {
+    const detection = normalizePoseDetection(rawDetection, {
+      frameIndex: frame.frameIndex,
+      personIndex,
+      sourceId: POSE_SOURCE_ID,
+      visibleConfidence: options.visibleConfidence,
+      zIndexBase: POSE_Z_INDEX_BASE,
+    });
+
+    return detection ? [detection] : [];
+  });
+}
+
+function parseRawPose(raw) {
+  const lines = raw.split("\n").filter(Boolean);
+  const poseMeta = JSON.parse(lines[0]);
+
+  if (poseMeta.schema !== "supervision-js.tools.geometry-fixture.raw-pose") {
+    throw new Error(
+      `Unexpected raw pose schema: ${poseMeta.schema ?? "missing"}`,
+    );
+  }
+
+  const poseFrames = new Map();
+
+  for (const line of lines.slice(1)) {
+    const record = JSON.parse(line);
+    poseFrames.set(record.frameIndex, record.detections);
+  }
+
+  return { poseMeta, poseFrames };
+}
+
+function runChunker(inputPath, fixtureDir, datasetId) {
+  return new Promise((resolvePromise, rejectPromise) => {
+    const chunker = spawn(
+      process.execPath,
+      [
+        resolve(import.meta.dirname, "../sam3-fixture/chunk-detections.mjs"),
+        "--input",
+        inputPath,
+        "--fixture-dir",
+        fixtureDir,
+        "--dataset-id",
+        datasetId,
+        "--compact",
+      ],
+      { stdio: "inherit" },
+    );
+
+    chunker.on("error", rejectPromise);
+    chunker.on("exit", (code) =>
+      code === 0
+        ? resolvePromise()
+        : rejectPromise(new Error(`chunk-detections.mjs exited with ${code}`)),
+    );
+  });
+}
+
+function sha256(content) {
+  return createHash("sha256").update(content).digest("hex");
+}
+
+function parseArgs(args) {
+  const parsed = {
+    datasetId: "basketball_geometry_v1",
+    fixtureDir: "demo/fixtures/basketball_geometry",
+    help: false,
+    maxPolygonPoints: DEFAULT_MAX_POLYGON_POINTS,
+    output: "tools/geometry-fixture/output/detections.json",
+    poseInput: "demo/fixtures/basketball_geometry/raw-pose.jsonl",
+    polygonTolerance: DEFAULT_POLYGON_TOLERANCE,
+    sam3Input: "demo/fixtures/basketball_sam3/detections.json",
+    visibleConfidence: DEFAULT_KEYPOINT_VISIBLE_CONFIDENCE,
+  };
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+
+    switch (arg) {
+      case "--help":
+      case "-h":
+        parsed.help = true;
+        break;
+      case "--dataset-id":
+        parsed.datasetId = readFlagValue(args, (index += 1), arg);
+        break;
+      case "--fixture-dir":
+        parsed.fixtureDir = readFlagValue(args, (index += 1), arg);
+        break;
+      case "--max-polygon-points":
+        parsed.maxPolygonPoints = Number(
+          readFlagValue(args, (index += 1), arg),
+        );
+        break;
+      case "--output":
+        parsed.output = readFlagValue(args, (index += 1), arg);
+        break;
+      case "--pose-input":
+        parsed.poseInput = readFlagValue(args, (index += 1), arg);
+        break;
+      case "--polygon-tolerance":
+        parsed.polygonTolerance = Number(
+          readFlagValue(args, (index += 1), arg),
+        );
+        break;
+      case "--sam3-input":
+        parsed.sam3Input = readFlagValue(args, (index += 1), arg);
+        break;
+      case "--visible-confidence":
+        parsed.visibleConfidence = Number(
+          readFlagValue(args, (index += 1), arg),
+        );
+        break;
+      default:
+        throw new Error(`Unknown argument: ${arg}`);
+    }
+  }
+
+  return parsed;
+}
+
+function readFlagValue(args, index, flag) {
+  const value = args[index];
+
+  if (!value || value.startsWith("--")) {
+    throw new Error(`${flag} requires a value.`);
+  }
+
+  return value;
+}
+
+function printHelp() {
+  console.log(`Usage:
+npm run fixture:geometry:create -- [options]
+
+Options:
+  --dataset-id <id>                default: basketball_geometry_v1
+  --fixture-dir <path>             default: demo/fixtures/basketball_geometry
+  --max-polygon-points <count>     default: ${DEFAULT_MAX_POLYGON_POINTS}
+  --output <path>                  default: tools/geometry-fixture/output/detections.json
+  --pose-input <path>              default: demo/fixtures/basketball_geometry/raw-pose.jsonl
+  --polygon-tolerance <pixels>     default: ${DEFAULT_POLYGON_TOLERANCE}
+  --sam3-input <path>              default: demo/fixtures/basketball_sam3/detections.json
+  --visible-confidence <value>     default: ${DEFAULT_KEYPOINT_VISIBLE_CONFIDENCE}`);
+}

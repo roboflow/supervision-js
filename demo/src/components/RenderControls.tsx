@@ -111,6 +111,16 @@ function GlobalRenderControls({
             onChange={(checked) => onChange("masksEnabled", checked)}
           />
           <ToggleControl
+            checked={settings.polygonsEnabled}
+            label="Polygons"
+            onChange={(checked) => onChange("polygonsEnabled", checked)}
+          />
+          <ToggleControl
+            checked={settings.keypointsEnabled}
+            label="Keypoints"
+            onChange={(checked) => onChange("keypointsEnabled", checked)}
+          />
+          <ToggleControl
             checked={settings.labelsEnabled}
             label="Labels"
             onChange={(checked) => onChange("labelsEnabled", checked)}
@@ -208,6 +218,52 @@ function GlobalRenderControls({
           step={0.01}
           value={settings.maskStrokeAlpha}
           valueLabel={formatPercent(settings.maskStrokeAlpha)}
+        />
+      </ControlSection>
+
+      <ControlSection title="Polygons">
+        <SliderControl
+          disabled={!settings.polygonsEnabled}
+          label="Stroke"
+          max={8}
+          min={1}
+          onChange={(value) => onChange("polygonStrokeWidth", value)}
+          step={1}
+          value={settings.polygonStrokeWidth}
+          valueLabel={`${settings.polygonStrokeWidth}px`}
+        />
+        <SliderControl
+          disabled={!settings.polygonsEnabled}
+          label="Fill"
+          max={0.5}
+          min={0}
+          onChange={(value) => onChange("polygonFillAlpha", value)}
+          step={0.01}
+          value={settings.polygonFillAlpha}
+          valueLabel={formatPercent(settings.polygonFillAlpha)}
+        />
+      </ControlSection>
+
+      <ControlSection title="Keypoints">
+        <SliderControl
+          disabled={!settings.keypointsEnabled}
+          label="Radius"
+          max={12}
+          min={2}
+          onChange={(value) => onChange("keypointRadius", value)}
+          step={1}
+          value={settings.keypointRadius}
+          valueLabel={`${settings.keypointRadius}px`}
+        />
+        <SliderControl
+          disabled={!settings.keypointsEnabled}
+          label="Edge Width"
+          max={8}
+          min={1}
+          onChange={(value) => onChange("keypointEdgeWidth", value)}
+          step={1}
+          value={settings.keypointEdgeWidth}
+          valueLabel={`${settings.keypointEdgeWidth}px`}
         />
       </ControlSection>
 

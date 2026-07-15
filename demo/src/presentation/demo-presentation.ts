@@ -3,6 +3,8 @@ import {
   BoxShape,
   BaseFocusStyle,
   BaseInteractionStyle,
+  BaseKeypointStyle,
+  BasePolygonStyle,
   DEFAULT_DETECTION_CLASS_STYLES,
   DetectionInteractionState,
   type DetectionClassColorStyle,
@@ -14,11 +16,13 @@ import {
   type Detection,
   type FocusStyle,
   type InteractionStyle,
+  type KeypointStyle,
   type LabelDrawInstruction,
   type LabelStyle,
   type MaskDrawInstruction,
   type MaskStyle,
   type MediaRendererPresentation,
+  type PolygonStyle,
   resolveDetectionClassColorStyle,
 } from "supervision-js";
 
@@ -27,8 +31,10 @@ export type DemoClassStyle = DetectionClassColorStyle;
 export interface DemoPresentationSettings {
   readonly boxesEnabled: boolean;
   readonly focusEnabled: boolean;
+  readonly keypointsEnabled: boolean;
   readonly labelsEnabled: boolean;
   readonly masksEnabled: boolean;
+  readonly polygonsEnabled: boolean;
   readonly boxCornerRadius: number;
   readonly boxStrokeWidth: number;
   readonly boxStrokeAlignment: BoxStrokeAlignment;
@@ -46,6 +52,10 @@ export interface DemoPresentationSettings {
   readonly maskOpacity: number;
   readonly maskStrokeAlpha: number;
   readonly maskStrokeWidth: number;
+  readonly polygonFillAlpha: number;
+  readonly polygonStrokeWidth: number;
+  readonly keypointRadius: number;
+  readonly keypointEdgeWidth: number;
   readonly confidenceThreshold: number;
   readonly interactionHoverFillAlpha: number;
   readonly interactionHoverStrokeWidth: number;
@@ -85,6 +95,9 @@ export const defaultDemoPresentationSettings: DemoPresentationSettings = {
   interactionHoverStrokeWidth: 5,
   interactionSelectedFillAlpha: 0.22,
   interactionSelectedStrokeWidth: 7,
+  keypointEdgeWidth: 3,
+  keypointRadius: 5,
+  keypointsEnabled: true,
   labelBackgroundAlpha: 0.78,
   labelCornerRadius: 5,
   labelFontSize: 14,
@@ -99,6 +112,9 @@ export const defaultDemoPresentationSettings: DemoPresentationSettings = {
   maskStrokeAlpha: 1,
   maskStrokeWidth: 5,
   masksEnabled: true,
+  polygonFillAlpha: 0.12,
+  polygonStrokeWidth: 3,
+  polygonsEnabled: true,
 };
 
 export function createDemoPresentation(
@@ -108,9 +124,50 @@ export function createDemoPresentation(
     boxStyle: settings.boxesEnabled ? createDemoBoxStyle(settings) : null,
     focusStyle: settings.focusEnabled ? createDemoFocusStyle(settings) : null,
     interactionStyle: createDemoInteractionStyle(settings),
+    keypointStyle: settings.keypointsEnabled
+      ? createDemoKeypointStyle(settings)
+      : null,
     labelStyle: settings.labelsEnabled ? createDemoLabelStyle(settings) : null,
     maskStyle: settings.masksEnabled ? createDemoMaskStyle(settings) : null,
+    polygonStyle: settings.polygonsEnabled
+      ? createDemoPolygonStyle(settings)
+      : null,
   };
+}
+
+function createDemoPolygonStyle(
+  settings: DemoPresentationSettings,
+): PolygonStyle {
+  return new BasePolygonStyle({
+    fill: (detection) => ({
+      alpha: settings.polygonFillAlpha,
+      color: resolveClassStyle(detection, settings).fill,
+    }),
+    shouldRender: (detection) => passesConfidenceThreshold(detection, settings),
+    stroke: (detection) => ({
+      alpha: 0.95,
+      color: resolveClassStyle(detection, settings).stroke,
+      width: settings.polygonStrokeWidth,
+    }),
+  });
+}
+
+function createDemoKeypointStyle(
+  settings: DemoPresentationSettings,
+): KeypointStyle {
+  return new BaseKeypointStyle({
+    edgeStroke: (detection) => ({
+      alpha: 0.95,
+      color: resolveClassStyle(detection, settings).stroke,
+      width: settings.keypointEdgeWidth,
+    }),
+    markerFill: (detection) => ({
+      alpha: 1,
+      color: resolveClassStyle(detection, settings).fill,
+    }),
+    radius: settings.keypointRadius,
+    shouldRender: (detection) => passesConfidenceThreshold(detection, settings),
+  });
 }
 
 function createDemoBoxStyle(settings: DemoPresentationSettings): BoxStyle {
@@ -268,37 +325,85 @@ function createDemoInteractionStyle(
   settings: DemoPresentationSettings,
 ): InteractionStyle {
   return new BaseInteractionStyle({
-    hovered: {
-      boxStyle: settings.boxesEnabled
-        ? createDemoInteractionBoxStyle(
-            settings,
-            DetectionInteractionState.Hovered,
-          )
-        : null,
-      maskStyle: settings.masksEnabled
-        ? createDemoInteractionMaskStyle(
-            settings,
-            DetectionInteractionState.Hovered,
-          )
-        : null,
-    },
-    selected: {
-      boxStyle: settings.boxesEnabled
-        ? createDemoInteractionBoxStyle(
-            settings,
-            DetectionInteractionState.Selected,
-          )
-        : null,
-      maskStyle: settings.masksEnabled
-        ? createDemoInteractionMaskStyle(
-            settings,
-            DetectionInteractionState.Selected,
-          )
-        : null,
-    },
+    hovered: createDemoInteractionPresentation(
+      settings,
+      DetectionInteractionState.Hovered,
+    ),
+    selected: createDemoInteractionPresentation(
+      settings,
+      DetectionInteractionState.Selected,
+    ),
     shouldRender: (detection) =>
       passesConfidenceThreshold(detection, settings) &&
-      (settings.boxesEnabled || settings.masksEnabled),
+      (settings.boxesEnabled ||
+        settings.masksEnabled ||
+        settings.polygonsEnabled ||
+        settings.keypointsEnabled),
+  });
+}
+
+function createDemoInteractionPresentation(
+  settings: DemoPresentationSettings,
+  state: DetectionInteractionState,
+) {
+  return {
+    boxStyle: settings.boxesEnabled
+      ? createDemoInteractionBoxStyle(settings, state)
+      : null,
+    keypointStyle: settings.keypointsEnabled
+      ? createDemoInteractionKeypointStyle(settings, state)
+      : null,
+    maskStyle: settings.masksEnabled
+      ? createDemoInteractionMaskStyle(settings, state)
+      : null,
+    polygonStyle: settings.polygonsEnabled
+      ? createDemoInteractionPolygonStyle(settings, state)
+      : null,
+  };
+}
+
+function createDemoInteractionPolygonStyle(
+  settings: DemoPresentationSettings,
+  state: DetectionInteractionState,
+): PolygonStyle {
+  const isSelected = state === DetectionInteractionState.Selected;
+
+  return new BasePolygonStyle({
+    fill: (detection) => ({
+      alpha: isSelected
+        ? settings.interactionSelectedFillAlpha
+        : settings.interactionHoverFillAlpha,
+      color: resolveClassStyle(detection, settings).fill,
+    }),
+    shouldRender: (detection) => passesConfidenceThreshold(detection, settings),
+    stroke: (detection) => ({
+      alpha: isSelected ? 1 : 0.9,
+      color: resolveClassStyle(detection, settings).stroke,
+      width: isSelected
+        ? settings.interactionSelectedStrokeWidth
+        : settings.interactionHoverStrokeWidth,
+    }),
+  });
+}
+
+function createDemoInteractionKeypointStyle(
+  settings: DemoPresentationSettings,
+  state: DetectionInteractionState,
+): KeypointStyle {
+  const isSelected = state === DetectionInteractionState.Selected;
+
+  return new BaseKeypointStyle({
+    edgeStroke: (detection) => ({
+      alpha: isSelected ? 1 : 0.9,
+      color: resolveClassStyle(detection, settings).stroke,
+      width: settings.keypointEdgeWidth + (isSelected ? 2 : 1),
+    }),
+    markerFill: (detection) => ({
+      alpha: 1,
+      color: resolveClassStyle(detection, settings).fill,
+    }),
+    radius: settings.keypointRadius + (isSelected ? 2 : 1),
+    shouldRender: (detection) => passesConfidenceThreshold(detection, settings),
   });
 }
 

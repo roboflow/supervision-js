@@ -1,5 +1,6 @@
 import { memo } from "react";
 import {
+  KeypointVisibility,
   MediaRendererPlaybackState,
   type DetectionPickResult,
 } from "supervision-js";
@@ -66,7 +67,7 @@ function SelectionDetails({
         <span>{formatConfidence(detection.confidence)}</span>
       </div>
       <dl className="selection-details__grid">
-        <SelectionDatum label="Target" value={activePick.target} />
+        <SelectionDatum label="Target" value={formatTarget(activePick)} />
         <SelectionDatum
           label="Frame"
           value={
@@ -97,6 +98,18 @@ function SelectionDetails({
           }
         />
         <SelectionDatum
+          label="Polygon"
+          value={
+            detection.polygon
+              ? `${formatInteger(detection.polygon.points.length)} points`
+              : "-"
+          }
+        />
+        <SelectionDatum
+          label="Keypoints"
+          value={formatKeypoints(detection.keypoints)}
+        />
+        <SelectionDatum
           label="ID"
           value={detection.id === undefined ? "-" : String(detection.id)}
         />
@@ -118,6 +131,29 @@ function SelectionDatum({
       <dd>{value}</dd>
     </div>
   );
+}
+
+function formatTarget(pick: DetectionPickResult) {
+  return pick.geometryIndex === undefined
+    ? pick.target
+    : `${pick.target} #${formatInteger(pick.geometryIndex)}`;
+}
+
+function formatKeypoints(
+  keypoints: DetectionPickResult["detection"]["keypoints"],
+) {
+  if (!keypoints) {
+    return "-";
+  }
+
+  const visibleCount = keypoints.points.filter(
+    (_, index) =>
+      keypoints.visibility?.[index] !== KeypointVisibility.NotLabeled,
+  ).length;
+
+  return `${formatInteger(visibleCount)} / ${formatInteger(
+    keypoints.points.length,
+  )} visible | ${formatInteger(keypoints.edges.length)} edges`;
 }
 
 function formatConfidence(confidence: number | undefined) {

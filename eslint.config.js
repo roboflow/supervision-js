@@ -8,6 +8,7 @@ export default [
       "**/coverage/**",
       "docs/site/**",
       "tools/sam3-fixture/output/**",
+      "tools/geometry-fixture/output/**",
     ],
   },
   {

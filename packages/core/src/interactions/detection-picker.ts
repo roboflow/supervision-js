@@ -22,6 +22,7 @@ import {
 
 interface CandidatePick {
   readonly area: number;
+  readonly priority: number;
   readonly zIndex: number;
   readonly result: DetectionPickResult;
 }
@@ -73,6 +74,7 @@ export function pickDetectionAtPoint(
     ) => {
       candidates.push({
         area,
+        priority: getPickTargetPriority(target),
         result: {
           detection,
           detectionIndex,
@@ -148,7 +150,15 @@ export function pickDetectionAtPoint(
         );
 
         if (edgeIndex !== -1) {
-          pushCandidate(DetectionPickTarget.Edge, detectionArea, edgeIndex);
+          const [fromIndex, toIndex] = detection.keypoints.edges[edgeIndex]!;
+          const from = detection.keypoints.points[fromIndex]!;
+          const to = detection.keypoints.points[toIndex]!;
+          const edgeArea = Math.max(
+            1,
+            Math.hypot(to.x - from.x, to.y - from.y) * edgePadding * 2,
+          );
+
+          pushCandidate(DetectionPickTarget.Edge, edgeArea, edgeIndex);
         }
       }
     }
@@ -183,6 +193,12 @@ export function pickDetectionAtPoint(
   }
 
   candidates.sort((left, right) => {
+    const priorityDifference = left.priority - right.priority;
+
+    if (priorityDifference !== 0) {
+      return priorityDifference;
+    }
+
     const areaDifference = left.area - right.area;
 
     if (areaDifference !== 0) {
@@ -197,6 +213,18 @@ export function pickDetectionAtPoint(
   });
 
   return candidates[0]?.result ?? null;
+}
+
+function getPickTargetPriority(target: DetectionPickTarget) {
+  switch (target) {
+    case DetectionPickTarget.Keypoint:
+      return 0;
+    case DetectionPickTarget.Edge:
+    case DetectionPickTarget.Polyline:
+      return 1;
+    default:
+      return 2;
+  }
 }
 
 function getDecodedMask(mask: DetectionMask): CachedDecodedMask {
