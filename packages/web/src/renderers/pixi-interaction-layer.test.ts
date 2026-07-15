@@ -132,6 +132,121 @@ describe("pixi interaction layer", () => {
     expect(onHover).toHaveBeenLastCalledWith(maskPick);
   });
 
+  it("lets keypoint picks outrank the prepared-mask fast path", () => {
+    const onHover = vi.fn();
+    const keypointFrame: DetectionFrame = {
+      detections: [
+        frame.detections[0]!,
+        {
+          className: "person",
+          id: "pose-1",
+          keypoints: {
+            edges: [[0, 1]],
+            points: [
+              { x: 15, y: 20 },
+              { x: 18, y: 40 },
+            ],
+          },
+          rect: { height: 30, width: 20, x: 15, y: 30 },
+        },
+      ],
+      frameIndex: 3,
+      mediaTime: 0.1,
+    };
+    const maskPick = {
+      detection: keypointFrame.detections[0],
+      detectionIndex: 0,
+      frame: keypointFrame,
+      mediaTime: keypointFrame.mediaTime,
+      point: { x: 15, y: 20 },
+      target: DetectionPickTarget.Mask,
+    };
+    const pickMaskDetectionAtPoint = vi.fn(() => maskPick);
+    const layer = createPixiInteractionLayer({
+      Container: FakeContainer as never,
+      Rectangle: FakeRectangle as never,
+      canInteract: () => true,
+      detectionTimeline: createTimeline(keypointFrame),
+      interaction: {
+        mode: MediaInteractionMode.PausedOnly,
+        onHover,
+      },
+      pickMaskDetectionAtPoint,
+    });
+    const display = layer.createDisplay({
+      height: 80,
+      width: 120,
+    }) as FakeContainer;
+
+    layer.drawFrame(0.1);
+    display.emit("pointermove", createPointerEvent(display, 15, 20));
+
+    expect(onHover).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        detection: keypointFrame.detections[1],
+        geometryIndex: 0,
+        target: DetectionPickTarget.Keypoint,
+      }),
+    );
+  });
+
+  it("lets skeleton edge picks outrank the prepared-mask fast path", () => {
+    const onHover = vi.fn();
+    const keypointFrame: DetectionFrame = {
+      detections: [
+        frame.detections[0]!,
+        {
+          className: "person",
+          id: "pose-1",
+          keypoints: {
+            edges: [[0, 1]],
+            points: [
+              { x: 15, y: 5 },
+              { x: 15, y: 55 },
+            ],
+          },
+          rect: { height: 50, width: 20, x: 15, y: 30 },
+        },
+      ],
+      frameIndex: 3,
+      mediaTime: 0.1,
+    };
+    const maskPick = {
+      detection: keypointFrame.detections[0],
+      detectionIndex: 0,
+      frame: keypointFrame,
+      mediaTime: keypointFrame.mediaTime,
+      point: { x: 15, y: 30 },
+      target: DetectionPickTarget.Mask,
+    };
+    const layer = createPixiInteractionLayer({
+      Container: FakeContainer as never,
+      Rectangle: FakeRectangle as never,
+      canInteract: () => true,
+      detectionTimeline: createTimeline(keypointFrame),
+      interaction: {
+        mode: MediaInteractionMode.PausedOnly,
+        onHover,
+      },
+      pickMaskDetectionAtPoint: vi.fn(() => maskPick),
+    });
+    const display = layer.createDisplay({
+      height: 80,
+      width: 120,
+    }) as FakeContainer;
+
+    layer.drawFrame(0.1);
+    display.emit("pointermove", createPointerEvent(display, 15, 30));
+
+    expect(onHover).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        detection: keypointFrame.detections[1],
+        geometryIndex: 0,
+        target: DetectionPickTarget.Edge,
+      }),
+    );
+  });
+
   it("notifies the host when hover or selected interaction state changes", () => {
     const onStateChange = vi.fn();
     const layer = createPixiInteractionLayer({

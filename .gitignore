@@ -13,6 +13,7 @@ examples/react-native/android/
 *.tsbuildinfo
 .eslintcache
 tools/sam3-fixture/output/
+tools/geometry-fixture/output/
 
 npm-debug.log*
 yarn-debug.log*

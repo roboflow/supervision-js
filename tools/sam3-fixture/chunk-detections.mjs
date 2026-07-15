@@ -73,6 +73,7 @@ for (const chunk of chunks) {
 }
 
 await writeJson(manifestPath, {
+  ...(fixture.classNames ? { classNames: fixture.classNames } : {}),
   chunkDurationSeconds: options.chunkDurationSeconds,
   chunks: manifestChunks,
   datasetId: options.datasetId ?? fixture.source?.sampleName ?? "sam3_fixture",
@@ -83,7 +84,9 @@ await writeJson(manifestPath, {
   duration,
   frameCount: frames.length,
   frameRate: fixture.inference?.frameRate ?? fixture.video?.frameRate,
+  ...(fixture.geometry ? { geometry: fixture.geometry } : {}),
   inference: fixture.inference,
+  ...(fixture.provenance ? { provenance: fixture.provenance } : {}),
   schema: "supervision-js.detection-frame-chunk-manifest",
   source: fixture.source,
   sourceFile: relative(dirname(manifestPath), inputPath),
@@ -97,6 +100,7 @@ function parseArgs(args) {
   const parsed = {
     chunkDurationSeconds: DEFAULT_CHUNK_DURATION_SECONDS,
     chunksDir: undefined,
+    compact: false,
     datasetId: undefined,
     fixtureDir: undefined,
     help: false,
@@ -111,6 +115,9 @@ function parseArgs(args) {
       case "--help":
       case "-h":
         parsed.help = true;
+        break;
+      case "--compact":
+        parsed.compact = true;
         break;
       case "--chunk-duration":
         parsed.chunkDurationSeconds = parsePositiveNumber(
@@ -151,6 +158,7 @@ node tools/sam3-fixture/chunk-detections.mjs \\
 Options:
   --chunk-duration <seconds>          default: ${DEFAULT_CHUNK_DURATION_SECONDS}
   --chunks-dir <path>
+  --compact                           write chunk JSON without indentation
   --dataset-id <id>
   --fixture-dir <path>
   --input <path>                      default: ${DEFAULT_INPUT}
@@ -199,5 +207,8 @@ function getFixtureDuration(detectionFrames) {
 }
 
 function writeJson(path, value) {
-  return writeFile(path, `${JSON.stringify(value, null, 2)}\n`);
+  return writeFile(
+    path,
+    `${JSON.stringify(value, null, options.compact ? undefined : 2)}\n`,
+  );
 }

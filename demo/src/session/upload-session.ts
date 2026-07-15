@@ -15,9 +15,9 @@ import {
   type WritableDetectionFrameSource,
 } from "supervision-js";
 import type {
-  Sam3FixtureDetectionSourceSummary,
-  Sam3FixtureSummary,
-} from "../fixtures/sam3-fixtures";
+  DemoFixtureDetectionSourceSummary,
+  DemoFixtureSummary,
+} from "../fixtures/demo-fixtures";
 import { inferSam3FrameBatchStream } from "../inference/roboflow-sam3";
 import {
   NORMALIZED_UPLOAD_VIDEO_BITRATE,
@@ -471,13 +471,14 @@ function createUploadSummary(
     readonly classNames: readonly string[];
     readonly detectionCount: number;
   },
-): Sam3FixtureSummary {
+): DemoFixtureSummary {
   return {
     classNames: options.classNames,
     detectionCount: options.detectionCount,
     duration: media.duration,
     fixtureName: `Uploaded ${media.kind}`,
     frameCount: media.frameCount,
+    geometry: null,
     inferenceFrameRate: media.frameRate,
     inferenceLabel: "SAM3",
     maskHeight: media.height,
@@ -498,7 +499,7 @@ function createNormalizationTimelineRanges(
 
 function getDetectionSourceSummary(
   source: WritableDetectionFrameSource,
-): Sam3FixtureDetectionSourceSummary | null {
+): DemoFixtureDetectionSourceSummary | null {
   const summary = source.getSummary();
 
   return summary ? convertWriteSummary(summary) : null;
@@ -506,7 +507,7 @@ function getDetectionSourceSummary(
 
 function convertWriteSummary(
   summary: ColdDetectionFrameStoreWriteSummary,
-): Sam3FixtureDetectionSourceSummary {
+): DemoFixtureDetectionSourceSummary {
   return {
     chunkCount: summary.chunkCount,
     chunkDurationSeconds: summary.chunkDurationSeconds,
