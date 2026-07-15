@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createArrayDetectionFrameSource } from "#detections/array-detection-frame-source";
-import { createBufferedDetectionTimeline } from "#detections/buffered-detection-timeline";
+import {
+  createBufferedDetectionTimeline,
+  getBufferedDetectionTimelineFrameSnapshot,
+} from "#detections/buffered-detection-timeline";
 import { createMemoryColdDetectionFrameStore } from "#detections/memory-cold-detection-frame-store";
 import { createWritableDetectionFrameSource } from "#detections/writable-detection-frame-source";
 import {
@@ -68,6 +71,64 @@ describe("buffered detection timeline", () => {
     expect(bufferedFrames[0]?.detections[0]?.rect).not.toBe(
       frames[0]?.detections[0]?.rect,
     );
+  });
+
+  it("reuses its internal rich-geometry snapshot until the hot buffer changes", async () => {
+    let version = 0;
+    const richFrames: DetectionFrame[] = [
+      {
+        detections: [
+          {
+            id: "pose",
+            keypoints: {
+              edges: [[0, 1]],
+              points: [
+                { x: 10, y: 20 },
+                { x: 30, y: 40 },
+              ],
+              visibility: [2, 2],
+            },
+            polygon: {
+              points: [
+                { x: 0, y: 0 },
+                { x: 10, y: 0 },
+                { x: 10, y: 10 },
+              ],
+            },
+          },
+        ],
+        mediaTime: 0,
+      },
+    ];
+    const source = {
+      getVersion: vi.fn(() => version),
+      loadFrames: vi.fn(async () => richFrames),
+    };
+    const timeline = createBufferedDetectionTimeline({ source });
+
+    await timeline.prepare(0);
+
+    const firstSnapshot = getBufferedDetectionTimelineFrameSnapshot(timeline);
+    const secondSnapshot = getBufferedDetectionTimelineFrameSnapshot(timeline);
+    const publicCopy = timeline.getBufferedFrames();
+
+    expect(secondSnapshot).toBe(firstSnapshot);
+    expect(secondSnapshot[0]?.detections[0]?.polygon?.points).toBe(
+      firstSnapshot[0]?.detections[0]?.polygon?.points,
+    );
+    expect(publicCopy).not.toBe(firstSnapshot);
+    expect(publicCopy[0]).not.toBe(firstSnapshot[0]);
+    expect(publicCopy[0]?.detections[0]?.keypoints?.points).not.toBe(
+      firstSnapshot[0]?.detections[0]?.keypoints?.points,
+    );
+
+    version += 1;
+    await timeline.prepare(0);
+
+    expect(getBufferedDetectionTimelineFrameSnapshot(timeline)).not.toBe(
+      firstSnapshot,
+    );
+    expect(source.loadFrames).toHaveBeenCalledTimes(2);
   });
 
   it("passes frame-indexed selection options to hot-buffer frame lookup", async () => {

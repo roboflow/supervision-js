@@ -23,6 +23,25 @@ interface DetectionBufferLoadPlan {
   readonly startTime: number;
 }
 
+const bufferedFrameSnapshots = new WeakMap<
+  BufferedDetectionTimeline,
+  () => readonly DetectionFrame[]
+>();
+
+/**
+ * Returns the timeline-owned hot-buffer snapshot without copying it.
+ *
+ * This is an internal platform-adapter fast path. Public callers should use
+ * `getBufferedFrames()`, which preserves the existing defensive-copy contract.
+ */
+export function getBufferedDetectionTimelineFrameSnapshot(
+  timeline: BufferedDetectionTimeline,
+): readonly DetectionFrame[] {
+  return (
+    bufferedFrameSnapshots.get(timeline)?.() ?? timeline.getBufferedFrames()
+  );
+}
+
 export function createBufferedDetectionTimeline(
   options: {
     readonly source: DetectionFrameSource;
@@ -193,7 +212,7 @@ export function createBufferedDetectionTimeline(
     );
   };
 
-  return {
+  const timeline: BufferedDetectionTimeline = {
     async prepare(mediaTime, prepareOptions) {
       if (destroyed) {
         return;
@@ -278,6 +297,10 @@ export function createBufferedDetectionTimeline(
       options.source.destroy?.();
     },
   };
+
+  bufferedFrameSnapshots.set(timeline, () => buffer);
+
+  return timeline;
 
   function shouldWaitForPlaybackGate(
     prepareOptions: DetectionBufferPrepareOptions | undefined,

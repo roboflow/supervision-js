@@ -134,6 +134,7 @@ export function createPixiMaskLayer(options: {
   let maskSprite: PixiSprite | undefined;
   let activeFrameKey: string | null = null;
   let activeFrameMediaTime: number | null = null;
+  let activeIdMaskFrame: PreparedPngIdMaskFrame | null = null;
   let maskOpacity = resolveMaskStyleOpacity(options.maskStyle);
   let maskPickCanvas: HTMLCanvasElement | undefined;
   let maskPickContext: CanvasRenderingContext2D | null | undefined;
@@ -199,6 +200,7 @@ export function createPixiMaskLayer(options: {
       if (!preparedFrame || !maskSprite) {
         activeFrameKey = preparedFrame?.key ?? null;
         activeFrameMediaTime = preparedFrame?.detectionFrame.mediaTime ?? null;
+        activeIdMaskFrame = null;
         hideSprite();
         return;
       }
@@ -218,9 +220,12 @@ export function createPixiMaskLayer(options: {
         preparedFrame.maskStatus === PreparedRenderFrameMaskStatus.Empty ||
         preparedFrame.maskStatus === PreparedRenderFrameMaskStatus.Disabled
       ) {
+        activeIdMaskFrame = null;
         hideSprite();
         return;
       }
+
+      activeIdMaskFrame = null;
 
       if (!canHoldVisibleMaskFor(preparedFrame.detectionFrame.mediaTime)) {
         hideSprite();
@@ -263,20 +268,13 @@ export function createPixiMaskLayer(options: {
     },
 
     getActiveIdMaskFrameTexture() {
-      if (activeFrameMediaTime === null) {
-        return null;
-      }
-
-      const preparedFrame = preparedRenderWindow.getFrame(activeFrameMediaTime);
-      const maskFrame = preparedFrame?.maskFrame;
-
-      if (!maskFrame || maskFrame.kind !== PreparedMaskFrameKind.PngIdMask) {
+      if (!activeIdMaskFrame) {
         return null;
       }
 
       return {
-        frame: maskFrame,
-        texture: getTexture(maskFrame),
+        frame: activeIdMaskFrame,
+        texture: getTexture(activeIdMaskFrame),
       };
     },
 
@@ -311,6 +309,8 @@ export function createPixiMaskLayer(options: {
     mediaTime: number | null,
   ) {
     visibleMaskMediaTime = mediaTime;
+    activeIdMaskFrame =
+      maskFrame.kind === PreparedMaskFrameKind.PngIdMask ? maskFrame : null;
 
     if (maskFrame.kind === PreparedMaskFrameKind.PngIdMask && idMaskRenderer) {
       showIdMaskFrame(maskFrame);
@@ -379,6 +379,7 @@ export function createPixiMaskLayer(options: {
 
   function hideSprite() {
     visibleMaskMediaTime = null;
+    activeIdMaskFrame = null;
 
     if (maskSprite) {
       maskSprite.visible = false;

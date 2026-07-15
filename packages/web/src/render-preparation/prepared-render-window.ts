@@ -8,7 +8,10 @@ import {
   createPreparedWindowTimeline,
   type PreparedRenderTimelineContext,
 } from "#render-preparation/prepared-window-timeline";
-import type { BufferedDetectionTimeline } from "supervision-js-core";
+import {
+  getBufferedDetectionTimelineFrameSnapshot,
+  type BufferedDetectionTimeline,
+} from "supervision-js-core";
 import type { DetectionFrame } from "supervision-js-core";
 import type { MaskStyle } from "supervision-js-core";
 import {
@@ -415,7 +418,9 @@ export function createPreparedRenderWindow(options: {
     lastPreparedWindowMediaTime = mediaTime;
 
     const anchorTime = detectionFrame?.mediaTime ?? mediaTime;
-    const bufferedFrames = options.detectionTimeline.getBufferedFrames();
+    const bufferedFrames = getBufferedDetectionTimelineFrameSnapshot(
+      options.detectionTimeline,
+    );
     timeline.rememberFrames(
       bufferedFrames,
       getKnownFrameRetentionKeys(bufferedFrames),

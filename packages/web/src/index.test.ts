@@ -1442,6 +1442,14 @@ describe("package entrypoint", () => {
       );
       expect(pixiMock.spriteInstances[0]?.visible).toBe(false);
 
+      const selectionCount = detectionTimeline.selectFrame.mock.calls.length;
+      const activeIdMaskFrameTexture = layer.getActiveIdMaskFrameTexture();
+
+      expect(activeIdMaskFrameTexture?.frame.key).toBe("time:0");
+      expect(detectionTimeline.selectFrame).toHaveBeenCalledTimes(
+        selectionCount,
+      );
+
       pixiMock.shaderInstances[0]!.resources =
         null as unknown as (typeof pixiMock.shaderInstances)[number]["resources"];
 

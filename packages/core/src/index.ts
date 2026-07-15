@@ -3,6 +3,7 @@ export { createArrayDetectionFrameSource } from "#detections/array-detection-fra
 export {
   createBufferedDetectionTimeline,
   createIdleDetectionBufferState,
+  getBufferedDetectionTimelineFrameSnapshot,
 } from "#detections/buffered-detection-timeline";
 export { createColdDetectionFrameSource } from "#detections/cold-detection-frame-source";
 export { createCompositeDetectionFrameSource } from "#detections/composite-detection-frame-source";
