@@ -134,6 +134,7 @@ import {
   getInstantCvZonePoints,
   pickInstantCvObjectAtPoint,
   pickInstantCvPoseAtPoint,
+  resolveInstantCvInferenceMode,
   type InstantCvNormalizedPoint,
   type InstantCvPoseDetection,
   type InstantCvRecipe,
@@ -1452,6 +1453,9 @@ function LiveCameraProof(props: {
   // several times per second.
   const showMaskLayerShared = useSharedValue(showMaskLayer);
   const classEffectsShared = useSharedValue<LiveClassEffects>({});
+  const inferenceModeShared = useSharedValue<LiveInferenceMode>(
+    props.inferenceMode,
+  );
   const instantRulesShared = useSharedValue<readonly InstantCvRule[]>([]);
   const instantRuntimeShared = useSharedValue<readonly InstantCvRuleRuntime[]>(
     [],
@@ -1491,6 +1495,7 @@ function LiveCameraProof(props: {
     setLivePerformanceSamples([]);
   }, [detectionDisplayMode, props.inferenceMode]);
   useEffect(() => {
+    inferenceModeShared.value = props.inferenceMode;
     setAwaitingSyncedFrame(true);
     setClassEffects({});
     setLiveDetections([]);
@@ -1516,6 +1521,7 @@ function LiveCameraProof(props: {
     emptyLiveMaskImage,
     emptyLiveMaskUniforms,
     emptyLiveVectorPicture,
+    inferenceModeShared,
     liveMaskImage,
     liveMaskImageIsEmpty,
     liveMaskUniforms,
@@ -1574,10 +1580,15 @@ function LiveCameraProof(props: {
       return;
     }
 
-    props.onInferenceModeChange(
-      instantRecipe === "golden-pose" ? "pose" : "segmentation",
-    );
-  }, [instantRecipe, isInstantCv, props.onInferenceModeChange]);
+    const inferenceMode = resolveInstantCvInferenceMode(instantRecipe);
+    inferenceModeShared.value = inferenceMode;
+    props.onInferenceModeChange(inferenceMode);
+  }, [
+    inferenceModeShared,
+    instantRecipe,
+    isInstantCv,
+    props.onInferenceModeChange,
+  ]);
   useEffect(
     () => () => {
       if (!liveMaskImageIsEmpty.value) {
@@ -1704,6 +1715,11 @@ function LiveCameraProof(props: {
   );
   const selectInstantRecipe = useCallback(
     (recipe: InstantCvRecipe) => {
+      const inferenceMode = resolveInstantCvInferenceMode(recipe);
+
+      inferenceModeShared.value = inferenceMode;
+      props.onInferenceModeChange(inferenceMode);
+      setAwaitingSyncedFrame(true);
       setInstantRecipe(recipe);
       setInstantRules([]);
       instantRulesShared.value = [];
@@ -1728,10 +1744,12 @@ function LiveCameraProof(props: {
       Vibration.vibrate(16);
     },
     [
+      inferenceModeShared,
       instantRuntimeShared,
       instantRulesShared,
       instantRuntimeSignatureShared,
       instantTouchRequestShared,
+      props.onInferenceModeChange,
     ],
   );
   const clearInstantRules = useCallback(() => {
@@ -2040,10 +2058,10 @@ function LiveCameraProof(props: {
         const syncMode = "synced";
         const segmentFrame = runSegmentationOnFrame;
         const poseFrame = runPoseOnFrame;
-        const shouldRunPose =
-          props.inferenceMode === "pose" && poseFrame !== null;
+        const inferenceMode = inferenceModeShared.value;
+        const shouldRunPose = inferenceMode === "pose" && poseFrame !== null;
         const shouldRunInference =
-          props.inferenceMode === "segmentation" && segmentFrame !== null;
+          inferenceMode === "segmentation" && segmentFrame !== null;
 
         if (shouldRunPose) {
           const inferenceStartedAt = Date.now();
@@ -2680,12 +2698,12 @@ function LiveCameraProof(props: {
       liveVectorPictureIsEmpty,
       classEffectsShared,
       instantCvActiveShared,
+      inferenceModeShared,
       instantRulesShared,
       instantRuntimeShared,
       instantRuntimeSignatureShared,
       instantTouchRequestShared,
       lastInstantTouchRequestId,
-      props.inferenceMode,
       reportInstantCvPick,
       reportInstantCvRuntime,
       reportLiveDetections,

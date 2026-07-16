@@ -1,5 +1,11 @@
 export type InstantCvRecipe = "golden-pose" | "safety-zone" | "clear-to-start";
 
+export function resolveInstantCvInferenceMode(
+  recipe: InstantCvRecipe,
+): "pose" | "segmentation" {
+  return recipe === "golden-pose" ? "pose" : "segmentation";
+}
+
 export type InstantCvRuleStatus = "unknown" | "evaluating" | "pass" | "fail";
 
 export interface InstantCvNormalizedPoint {

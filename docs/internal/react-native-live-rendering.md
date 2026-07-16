@@ -61,6 +61,9 @@ the packet against the matching segmentation or pose result, prepares the
 normal mask/vector presentation, and reports only status transitions back to
 React for rule cards and edge-triggered haptics. Touch feedback and static rule
 geometry render in the synchronized stage without making React the frame clock.
+Recipe changes also update a shared producer selector immediately, so the
+stable camera worklet switches models on its next frame without waiting for a
+React callback replacement.
 
 The first example-owned recipes are Golden Pose, Safety Zone, and Clear to
 Start. Golden Pose uses pose angles; both zone recipes use RF-DETR segmentation

@@ -9,6 +9,7 @@ import {
   normalizeInstantCvRect,
   pickInstantCvObjectAtPoint,
   pickInstantCvPoseAtPoint,
+  resolveInstantCvInferenceMode,
   type InstantCvPosePoint,
   type InstantCvRule,
 } from "./instant-cv";
@@ -49,6 +50,14 @@ function createPose(overrides: Partial<Record<number, [number, number]>> = {}) {
 }
 
 describe("Instant CV rule engine", () => {
+  it("routes only Golden Pose to the pose model", () => {
+    expect(resolveInstantCvInferenceMode("golden-pose")).toBe("pose");
+    expect(resolveInstantCvInferenceMode("safety-zone")).toBe("segmentation");
+    expect(resolveInstantCvInferenceMode("clear-to-start")).toBe(
+      "segmentation",
+    );
+  });
+
   it("normalizes a drawn zone regardless of drag direction", () => {
     expect(
       normalizeInstantCvRect({ x: 0.8, y: 0.7 }, { x: 0.2, y: 0.1 }),
