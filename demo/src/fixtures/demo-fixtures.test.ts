@@ -71,6 +71,10 @@ describe("geometry showcase fixture", () => {
       keypointsEnabled: false,
       polygonsEnabled: false,
     });
+    expect(fixture?.presentationAvailability).toEqual({
+      keypointsEnabled: false,
+      polygonsEnabled: false,
+    });
   });
 
   it("defaults the basketball keypoint sample to keypoints and labels", () => {

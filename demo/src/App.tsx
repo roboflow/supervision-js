@@ -136,6 +136,7 @@ export function App() {
       }
       renderControls={
         <RenderControls
+          availability={demo.presentationAvailability}
           classNames={styleClassNames}
           onChange={demo.setPresentationSettings}
           settings={demo.presentationSettings}

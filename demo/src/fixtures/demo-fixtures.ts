@@ -5,6 +5,7 @@ import {
   type DetectionFrameSource,
   type MediaSessionMedia,
 } from "supervision-js";
+import type { DemoPresentationAvailability } from "../presentation/demo-presentation";
 
 const fixtureMetaModules = import.meta.glob(
   "../../fixtures/*/fixture.meta.json",
@@ -70,6 +71,7 @@ interface DemoFixtureMeta {
     readonly readyStatusLabel: string;
   };
   readonly presentation?: DemoFixturePresentationDefaults;
+  readonly presentationAvailability?: DemoPresentationAvailability;
 }
 
 export interface DemoFixturePresentationDefaults {
@@ -90,6 +92,7 @@ export interface DemoFixtureDefinition {
   readonly mediaLoadingStatusLabel: string;
   readonly normalizeInBrowser: boolean;
   readonly presentationDefaults?: DemoFixturePresentationDefaults;
+  readonly presentationAvailability?: DemoPresentationAvailability;
   readonly sampleName: string;
   readonly mediaReadyStatusLabel: string;
   readonly videoSrc: string;
@@ -312,6 +315,7 @@ function createDemoFixtures(): readonly DemoFixtureDefinition[] {
           mediaReadyStatusLabel: meta.media.readyStatusLabel,
           normalizeInBrowser: meta.media.normalizeInBrowser,
           presentationDefaults: meta.presentation,
+          presentationAvailability: meta.presentationAvailability,
           sampleName: meta.sampleName,
           videoSrc,
         } satisfies DemoFixtureDefinition,

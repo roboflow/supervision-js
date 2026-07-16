@@ -22,8 +22,10 @@ import {
   type DemoFixtureDefinition,
 } from "../fixtures/demo-fixtures";
 import {
+  constrainDemoPresentationSettings,
   createDemoPresentation,
   defaultDemoPresentationSettings,
+  type DemoPresentationAvailability,
   type DemoPresentationSettings,
 } from "../presentation/demo-presentation";
 import { createFixtureSession } from "../session/fixture-session";
@@ -58,6 +60,7 @@ export interface DemoRendererState {
   readonly mediaState: DemoMediaState;
   readonly playbackState: MediaRendererPlaybackState | null;
   readonly presentationSettings: DemoPresentationSettings;
+  readonly presentationAvailability?: DemoPresentationAvailability;
   readonly renderQuality: DemoRenderQuality;
   readonly rendererState: MediaRendererState | null;
   readonly renderPreparationDiagnostics: RenderPreparationDiagnostics | null;
@@ -90,6 +93,13 @@ export interface DemoRendererState {
 }
 
 const RENDERER_READOUT_INTERVAL_MS = 250;
+const defaultFixturePresentationSettings = constrainDemoPresentationSettings(
+  {
+    ...defaultDemoPresentationSettings,
+    ...defaultDemoFixture.presentationDefaults,
+  },
+  defaultDemoFixture.presentationAvailability,
+);
 
 const initialDetectionSourceState: DemoDetectionSourceState = {
   datasetId: null,
@@ -120,7 +130,7 @@ export function useDemoRenderer(): DemoRendererState {
   const uploadAbortRef = useRef<AbortController | null>(null);
   const uploadFileRef = useRef<File | null>(null);
   const presentationSettingsRef = useRef<DemoPresentationSettings>(
-    defaultDemoPresentationSettings,
+    defaultFixturePresentationSettings,
   );
   const [rendererState, setRendererState] = useState<MediaRendererState | null>(
     null,
@@ -145,7 +155,7 @@ export function useDemoRenderer(): DemoRendererState {
   });
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [presentationSettings, setPresentationSettingsState] =
-    useState<DemoPresentationSettings>(defaultDemoPresentationSettings);
+    useState<DemoPresentationSettings>(defaultFixturePresentationSettings);
   const [renderQuality, setRenderQuality] = useState<DemoRenderQuality>(
     defaultDemoRenderQuality,
   );
@@ -462,18 +472,25 @@ export function useDemoRenderer(): DemoRendererState {
 
   const setPresentationSettings = useCallback(
     (settings: DemoPresentationSettings) => {
-      presentationSettingsRef.current = settings;
-      setPresentationSettingsState(settings);
+      const constrainedSettings = constrainDemoPresentationSettings(
+        settings,
+        sourceMode === DemoSourceMode.Fixture
+          ? activeFixture.presentationAvailability
+          : undefined,
+      );
+
+      presentationSettingsRef.current = constrainedSettings;
+      setPresentationSettingsState(constrainedSettings);
 
       const renderer = rendererRef.current;
       if (!renderer) {
         return;
       }
 
-      renderer.setPresentation(createDemoPresentation(settings));
+      renderer.setPresentation(createDemoPresentation(constrainedSettings));
       syncRendererState(renderer);
     },
-    [syncRendererState],
+    [activeFixture.presentationAvailability, sourceMode, syncRendererState],
   );
 
   const setRenderQualityLive = useCallback(
@@ -507,13 +524,16 @@ export function useDemoRenderer(): DemoRendererState {
     uploadAbortRef.current?.abort();
     setUploadRun(null);
     setUploadInferenceState(initialUploadInferenceState);
-    const fixture = demoFixtures.find(
-      (candidate) => candidate.sampleName === sampleName,
+    const fixture =
+      demoFixtures.find((candidate) => candidate.sampleName === sampleName) ??
+      defaultDemoFixture;
+    const nextPresentationSettings = constrainDemoPresentationSettings(
+      {
+        ...defaultDemoPresentationSettings,
+        ...fixture.presentationDefaults,
+      },
+      fixture.presentationAvailability,
     );
-    const nextPresentationSettings = {
-      ...defaultDemoPresentationSettings,
-      ...fixture?.presentationDefaults,
-    };
 
     presentationSettingsRef.current = nextPresentationSettings;
     setPresentationSettingsState(nextPresentationSettings);
@@ -642,6 +662,10 @@ export function useDemoRenderer(): DemoRendererState {
     onUploadFileChange,
     playbackState,
     presentationSettings,
+    presentationAvailability:
+      sourceMode === DemoSourceMode.Fixture
+        ? activeFixture.presentationAvailability
+        : undefined,
     renderPreparationDiagnostics,
     renderQuality,
     rendererState,

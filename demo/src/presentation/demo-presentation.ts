@@ -67,6 +67,42 @@ export interface DemoPresentationSettings {
   readonly focusTargetMode: FocusTargetMode;
 }
 
+export type DemoPresentationLayerSetting =
+  | "boxesEnabled"
+  | "focusEnabled"
+  | "keypointsEnabled"
+  | "labelsEnabled"
+  | "masksEnabled"
+  | "polygonsEnabled";
+
+export type DemoPresentationAvailability = Partial<
+  Record<DemoPresentationLayerSetting, boolean>
+>;
+
+const demoPresentationLayerSettings: readonly DemoPresentationLayerSetting[] = [
+  "boxesEnabled",
+  "focusEnabled",
+  "keypointsEnabled",
+  "labelsEnabled",
+  "masksEnabled",
+  "polygonsEnabled",
+];
+
+export function constrainDemoPresentationSettings(
+  settings: DemoPresentationSettings,
+  availability?: DemoPresentationAvailability,
+): DemoPresentationSettings {
+  if (!availability) return settings;
+
+  const constrained = { ...settings };
+
+  for (const key of demoPresentationLayerSettings) {
+    if (availability[key] === false) constrained[key] = false;
+  }
+
+  return constrained;
+}
+
 export const defaultDemoClassNames = ["person", "horse", "cow"];
 
 const defaultDemoClassStyles: Record<string, DemoClassStyle> = {

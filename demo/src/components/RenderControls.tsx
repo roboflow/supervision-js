@@ -8,6 +8,7 @@ import {
 import {
   resolveDemoClassStyle,
   type DemoClassStyle,
+  type DemoPresentationAvailability,
   type DemoPresentationSettings,
 } from "../presentation/demo-presentation";
 
@@ -17,10 +18,12 @@ enum RenderControlsTab {
 }
 
 export const RenderControls = memo(function RenderControls({
+  availability,
   classNames,
   onChange,
   settings,
 }: {
+  readonly availability?: DemoPresentationAvailability;
   readonly classNames: readonly string[];
   readonly onChange: (settings: DemoPresentationSettings) => void;
   readonly settings: DemoPresentationSettings;
@@ -74,7 +77,11 @@ export const RenderControls = memo(function RenderControls({
       </header>
 
       {activeTab === RenderControlsTab.Global ? (
-        <GlobalRenderControls onChange={updateSettings} settings={settings} />
+        <GlobalRenderControls
+          availability={availability}
+          onChange={updateSettings}
+          settings={settings}
+        />
       ) : (
         <ClassRenderControls
           classNames={classNames}
@@ -87,9 +94,11 @@ export const RenderControls = memo(function RenderControls({
 });
 
 function GlobalRenderControls({
+  availability,
   onChange,
   settings,
 }: {
+  readonly availability?: DemoPresentationAvailability;
   readonly onChange: <Key extends keyof DemoPresentationSettings>(
     key: Key,
     value: DemoPresentationSettings[Key],
@@ -102,31 +111,37 @@ function GlobalRenderControls({
         <div className="render-controls__toggles">
           <ToggleControl
             checked={settings.boxesEnabled}
+            disabled={availability?.boxesEnabled === false}
             label="Boxes"
             onChange={(checked) => onChange("boxesEnabled", checked)}
           />
           <ToggleControl
             checked={settings.masksEnabled}
+            disabled={availability?.masksEnabled === false}
             label="Masks"
             onChange={(checked) => onChange("masksEnabled", checked)}
           />
           <ToggleControl
             checked={settings.polygonsEnabled}
+            disabled={availability?.polygonsEnabled === false}
             label="Polygons"
             onChange={(checked) => onChange("polygonsEnabled", checked)}
           />
           <ToggleControl
             checked={settings.keypointsEnabled}
+            disabled={availability?.keypointsEnabled === false}
             label="Keypoints"
             onChange={(checked) => onChange("keypointsEnabled", checked)}
           />
           <ToggleControl
             checked={settings.labelsEnabled}
+            disabled={availability?.labelsEnabled === false}
             label="Labels"
             onChange={(checked) => onChange("labelsEnabled", checked)}
           />
           <ToggleControl
             checked={settings.focusEnabled}
+            disabled={availability?.focusEnabled === false}
             label="Focus"
             onChange={(checked) => onChange("focusEnabled", checked)}
           />
@@ -526,10 +541,12 @@ function ControlSection({
 
 function ToggleControl({
   checked,
+  disabled = false,
   label,
   onChange,
 }: {
   readonly checked: boolean;
+  readonly disabled?: boolean;
   readonly label: string;
   readonly onChange: (checked: boolean) => void;
 }) {
@@ -537,6 +554,7 @@ function ToggleControl({
     <label className="render-control render-control--toggle">
       <input
         checked={checked}
+        disabled={disabled}
         onChange={(event) => onChange(event.currentTarget.checked)}
         type="checkbox"
       />

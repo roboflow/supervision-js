@@ -13,6 +13,7 @@ import {
   MaskRenderMode,
 } from "supervision-js";
 import {
+  constrainDemoPresentationSettings,
   createDemoPresentation,
   defaultDemoPresentationSettings,
 } from "./demo-presentation";
@@ -56,6 +57,23 @@ const vectorDetection: Detection = {
 };
 
 describe("demo presentation", () => {
+  it("keeps unavailable fixture layers disabled", () => {
+    const constrained = constrainDemoPresentationSettings(
+      {
+        ...defaultDemoPresentationSettings,
+        keypointsEnabled: true,
+        polygonsEnabled: true,
+      },
+      { keypointsEnabled: false, polygonsEnabled: false },
+    );
+
+    expect(constrained.keypointsEnabled).toBe(false);
+    expect(constrained.polygonsEnabled).toBe(false);
+    expect(constrained.labelsEnabled).toBe(
+      defaultDemoPresentationSettings.labelsEnabled,
+    );
+  });
+
   it("uses the border radius slider as the only box shape control", () => {
     const rectPresentation = createDemoPresentation({
       ...defaultDemoPresentationSettings,

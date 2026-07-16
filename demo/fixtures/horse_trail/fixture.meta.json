@@ -12,6 +12,10 @@
     "keypointsEnabled": false,
     "polygonsEnabled": false
   },
+  "presentationAvailability": {
+    "keypointsEnabled": false,
+    "polygonsEnabled": false
+  },
   "sampleName": "horse_trail",
   "schema": "supervision-js.demo.sam3-fixture-meta",
   "version": 1
