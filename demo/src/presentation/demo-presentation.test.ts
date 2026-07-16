@@ -328,8 +328,18 @@ describe("demo presentation", () => {
   });
 
   it("renders keypoint markers and edges while skipping not-labeled points", () => {
+    const personStyle = {
+      fill: 0x123456,
+      labelBackground: 0x234567,
+      labelText: 0xffffff,
+      stroke: 0xfacc15,
+    };
     const presentation = createDemoPresentation({
       ...defaultDemoPresentationSettings,
+      classStyles: {
+        ...defaultDemoPresentationSettings.classStyles,
+        person: personStyle,
+      },
       keypointEdgeWidth: 4,
       keypointRadius: 7,
     });
@@ -344,9 +354,16 @@ describe("demo presentation", () => {
     );
 
     expect(instruction?.markers).toHaveLength(2);
-    expect(instruction?.markers[0]).toMatchObject({ radius: 7 });
+    expect(instruction?.markers[0]).toMatchObject({
+      fill: { color: personStyle.fill },
+      radius: 7,
+      stroke: { color: personStyle.stroke },
+    });
     expect(instruction?.edges).toHaveLength(1);
-    expect(instruction?.edges[0]).toMatchObject({ stroke: { width: 4 } });
+    expect(instruction?.edges[0]).toMatchObject({
+      stroke: { color: personStyle.stroke, width: 4 },
+    });
+    expect(instruction?.edges[0]?.shadowStroke).toBeUndefined();
   });
 
   it("filters vector layers through the shared confidence threshold", () => {
@@ -369,9 +386,19 @@ describe("demo presentation", () => {
   });
 
   it("highlights picked polygon and keypoint targets through the interaction style", () => {
-    const presentation = createDemoPresentation(
-      defaultDemoPresentationSettings,
-    );
+    const personStyle = {
+      fill: 0x123456,
+      labelBackground: 0x234567,
+      labelText: 0xffffff,
+      stroke: 0xfacc15,
+    };
+    const presentation = createDemoPresentation({
+      ...defaultDemoPresentationSettings,
+      classStyles: {
+        ...defaultDemoPresentationSettings.classStyles,
+        person: personStyle,
+      },
+    });
     const frame = { detections: [vectorDetection], mediaTime: 0 };
     const hoverPresentation = presentation.interactionStyle?.resolve(
       vectorDetection,
@@ -396,10 +423,20 @@ describe("demo presentation", () => {
         width: defaultDemoPresentationSettings.interactionHoverStrokeWidth,
       },
     });
-    expect(
-      hoverPresentation?.keypointStyle?.resolve(vectorDetection, context)
-        ?.markers.length,
-    ).toBe(2);
+    const keypointInstruction = hoverPresentation?.keypointStyle?.resolve(
+      vectorDetection,
+      context,
+    );
+
+    expect(keypointInstruction?.markers).toHaveLength(2);
+    expect(keypointInstruction?.markers[0]).toMatchObject({
+      fill: { color: personStyle.fill },
+      stroke: { color: personStyle.stroke },
+    });
+    expect(keypointInstruction?.edges[0]).toMatchObject({
+      stroke: { color: personStyle.stroke },
+    });
+    expect(keypointInstruction?.edges[0]?.shadowStroke).toBeUndefined();
   });
 
   it("creates a selected-or-hovered focus style for dimming the surrounding frame", () => {

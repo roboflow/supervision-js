@@ -156,6 +156,7 @@ function createDemoKeypointStyle(
   settings: DemoPresentationSettings,
 ): KeypointStyle {
   return new BaseKeypointStyle({
+    edgeShadowStroke: null,
     edgeStroke: (detection) => ({
       alpha: 0.95,
       color: resolveClassStyle(detection, settings).stroke,
@@ -164,6 +165,11 @@ function createDemoKeypointStyle(
     markerFill: (detection) => ({
       alpha: 1,
       color: resolveClassStyle(detection, settings).fill,
+    }),
+    markerStroke: (detection) => ({
+      alpha: 1,
+      color: resolveClassStyle(detection, settings).stroke,
+      width: 2,
     }),
     radius: settings.keypointRadius,
     shouldRender: (detection) => passesConfidenceThreshold(detection, settings),
@@ -393,6 +399,7 @@ function createDemoInteractionKeypointStyle(
   const isSelected = state === DetectionInteractionState.Selected;
 
   return new BaseKeypointStyle({
+    edgeShadowStroke: null,
     edgeStroke: (detection) => ({
       alpha: isSelected ? 1 : 0.9,
       color: resolveClassStyle(detection, settings).stroke,
@@ -401,6 +408,11 @@ function createDemoInteractionKeypointStyle(
     markerFill: (detection) => ({
       alpha: 1,
       color: resolveClassStyle(detection, settings).fill,
+    }),
+    markerStroke: (detection) => ({
+      alpha: 1,
+      color: resolveClassStyle(detection, settings).stroke,
+      width: 2,
     }),
     radius: settings.keypointRadius + (isSelected ? 2 : 1),
     shouldRender: (detection) => passesConfidenceThreshold(detection, settings),
