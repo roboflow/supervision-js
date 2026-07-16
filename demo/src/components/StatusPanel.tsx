@@ -1,7 +1,6 @@
 import { memo, type ReactNode } from "react";
 import {
   MediaRendererPlaybackState,
-  RenderPreparationArtifactKind,
   type DetectionPickResult,
   type MediaRendererState,
   type MediaSessionState,
@@ -19,6 +18,7 @@ import {
   formatTime,
   formatTimeRange,
 } from "../format";
+import { selectPreparedWindowArtifact } from "../render-preparation";
 import { Readout } from "./Readout";
 
 export interface StatusPanelMediaState {
@@ -70,8 +70,8 @@ export const StatusPanel = memo(function StatusPanel({
     Boolean(rendererErrorMessage) ||
     Boolean(mediaState.errorMessage) ||
     Boolean(detectionSourceState.errorMessage);
-  const maskFrameArtifact = renderPreparationDiagnostics?.artifacts.find(
-    (artifact) => artifact.kind === RenderPreparationArtifactKind.MaskFrame,
+  const preparedWindowArtifact = selectPreparedWindowArtifact(
+    renderPreparationDiagnostics,
   );
 
   return (
@@ -201,70 +201,70 @@ export const StatusPanel = memo(function StatusPanel({
           value={renderPreparationDiagnostics?.workerStatus ?? "-"}
         />
         <Readout
-          label="Prepared Masks"
+          label="Prepared Frames"
           value={
-            maskFrameArtifact
-              ? formatInteger(maskFrameArtifact.preparedCount)
+            preparedWindowArtifact
+              ? formatInteger(preparedWindowArtifact.preparedCount)
               : "-"
           }
         />
         <Readout
-          label="Pending Masks"
+          label="Pending Frames"
           value={
-            maskFrameArtifact
-              ? formatInteger(maskFrameArtifact.pendingCount)
+            preparedWindowArtifact
+              ? formatInteger(preparedWindowArtifact.pendingCount)
               : "-"
           }
         />
         <Readout
-          label="Ready Ahead"
+          label="Prepared Window"
           value={
-            maskFrameArtifact
+            preparedWindowArtifact
               ? `${formatInteger(
-                  maskFrameArtifact.preparedAheadFrameCount ?? 0,
+                  preparedWindowArtifact.preparedAheadFrameCount ?? 0,
                 )} frames | ${formatExactTime(
-                  maskFrameArtifact.preparedAheadSeconds ?? 0,
+                  preparedWindowArtifact.preparedAheadSeconds ?? 0,
                 )}`
               : "-"
           }
         />
         <Readout
-          label="Mask Window"
+          label="Window Limits"
           value={
-            maskFrameArtifact
-              ? `${formatInteger(maskFrameArtifact.prefetchCount ?? 0)} prefetch | ${formatInteger(
-                  maskFrameArtifact.refillThresholdCount ?? 0,
+            preparedWindowArtifact
+              ? `${formatInteger(preparedWindowArtifact.prefetchCount ?? 0)} prefetch | ${formatInteger(
+                  preparedWindowArtifact.refillThresholdCount ?? 0,
                 )} refill | ${formatInteger(
-                  maskFrameArtifact.maxPreparedCount ?? 0,
+                  preparedWindowArtifact.maxPreparedCount ?? 0,
                 )} cache`
               : "-"
           }
         />
         <Readout
-          label="Mask Queue"
+          label="Queue"
           value={
-            maskFrameArtifact
-              ? `${formatInteger(maskFrameArtifact.pendingCount)} / ${formatInteger(
-                  maskFrameArtifact.maxPendingCount ?? 0,
+            preparedWindowArtifact
+              ? `${formatInteger(preparedWindowArtifact.pendingCount)} / ${formatInteger(
+                  preparedWindowArtifact.maxPendingCount ?? 0,
                 )} pending | ${formatInteger(
-                  maskFrameArtifact.scheduleBatchSize ?? 0,
+                  preparedWindowArtifact.scheduleBatchSize ?? 0,
                 )} batch`
               : "-"
           }
         />
         <Readout
-          label="Mask Workers"
+          label="Workers"
           value={
-            maskFrameArtifact
-              ? `${formatInteger(maskFrameArtifact.inFlightCount ?? 0)} / ${formatInteger(
-                  maskFrameArtifact.maxInFlightCount ?? 0,
+            preparedWindowArtifact
+              ? `${formatInteger(preparedWindowArtifact.inFlightCount ?? 0)} / ${formatInteger(
+                  preparedWindowArtifact.maxInFlightCount ?? 0,
                 )} in flight`
               : "-"
           }
         />
         <Readout
-          label="Active Mask"
-          value={maskFrameArtifact?.activeFrame?.status ?? "-"}
+          label="Active Frame"
+          value={preparedWindowArtifact?.activeFrame?.status ?? "-"}
         />
         {renderPreparationDiagnostics?.message ? (
           <Readout

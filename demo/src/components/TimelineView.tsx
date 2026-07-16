@@ -22,8 +22,8 @@ export function TimelineView({
   playbackState,
   processedRanges = [],
   processingRanges = [],
-  readyAheadFrames,
-  readyAheadSeconds,
+  preparedAheadFrames,
+  preparedAheadSeconds,
 }: {
   readonly activeDetectionFrameTime: number | null;
   readonly currentTime: number;
@@ -35,8 +35,8 @@ export function TimelineView({
   readonly playbackState: MediaRendererPlaybackState | null;
   readonly processedRanges?: readonly TimelineRange[];
   readonly processingRanges?: readonly TimelineRange[];
-  readonly readyAheadFrames: number | null;
-  readonly readyAheadSeconds: number | null;
+  readonly preparedAheadFrames: number | null;
+  readonly preparedAheadSeconds: number | null;
 }) {
   const mediaDuration = duration !== null && duration > 0 ? duration : null;
   const timelineCurrentTime = useSmoothTimelineCurrentTime({
@@ -60,7 +60,7 @@ export function TimelineView({
       detectionBuffer?.bufferEndTime ?? 0,
       detectionBuffer?.requestedEndTime ?? 0,
       activeDetectionFrameTime ?? 0,
-      currentTime + (readyAheadSeconds ?? 0),
+      currentTime + (preparedAheadSeconds ?? 0),
       getMaxRangeEnd(normalizedRanges),
       getMaxRangeEnd(processedRanges),
       getMaxRangeEnd(processingRanges),
@@ -76,13 +76,13 @@ export function TimelineView({
     endTime: detectionBuffer?.bufferEndTime ?? null,
     startTime: detectionBuffer?.bufferStartTime ?? null,
   });
-  const readyAheadRange = createRangeStyle({
+  const preparedWindowRange = createRangeStyle({
     duration: visualDuration,
     endTime:
-      readyAheadSeconds === null
+      preparedAheadSeconds === null
         ? null
-        : currentTime + Math.max(0, readyAheadSeconds),
-    startTime: readyAheadSeconds === null ? null : currentTime,
+        : currentTime + Math.max(0, preparedAheadSeconds),
+    startTime: preparedAheadSeconds === null ? null : currentTime,
   });
   const processedRangeStyles = createSegmentStyles(
     processedRanges,
@@ -177,11 +177,11 @@ export function TimelineView({
         </span>
         <span className="timeline-view__chip timeline-view__chip--ready">
           <span className="timeline-view__chip-dot" />
-          Ready ahead{" "}
+          Prepared window{" "}
           <strong>
-            {readyAheadSeconds === null
+            {preparedAheadSeconds === null
               ? "-"
-              : `${readyAheadSeconds.toFixed(2)}s · ${readyAheadFrames ?? 0}f`}
+              : `${preparedAheadSeconds.toFixed(2)}s · ${preparedAheadFrames ?? 0}f`}
           </strong>
         </span>
         <span className="timeline-view__chip timeline-view__chip--requested">
@@ -236,10 +236,10 @@ export function TimelineView({
             ))}
           </div>
           <div className="timeline-view__lane timeline-view__lane--ready">
-            {readyAheadRange ? (
+            {preparedWindowRange ? (
               <span
                 className="timeline-view__segment timeline-view__segment--ready"
-                style={readyAheadRange}
+                style={preparedWindowRange}
               />
             ) : null}
           </div>

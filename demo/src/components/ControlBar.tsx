@@ -4,8 +4,8 @@ import type {
   MediaRendererPlaybackState,
   RenderPreparationDiagnostics,
 } from "supervision-js";
-import { RenderPreparationArtifactKind } from "supervision-js";
 import { formatExactTime, formatTime } from "../format";
+import { selectPreparedWindowArtifact } from "../render-preparation";
 import type { TimelineRange } from "../session/demo-session-types";
 import { PlaybackControls } from "./PlaybackControls";
 import { Readout } from "./Readout";
@@ -40,8 +40,8 @@ export const ControlBar = memo(function ControlBar({
   readonly processingRanges: readonly TimelineRange[];
   readonly renderPreparationDiagnostics: RenderPreparationDiagnostics | null;
 }) {
-  const maskFrameArtifact = renderPreparationDiagnostics?.artifacts.find(
-    (artifact) => artifact.kind === RenderPreparationArtifactKind.MaskFrame,
+  const preparedWindowArtifact = selectPreparedWindowArtifact(
+    renderPreparationDiagnostics,
   );
 
   return (
@@ -63,8 +63,12 @@ export const ControlBar = memo(function ControlBar({
         playbackState={playbackState}
         processedRanges={processedRanges}
         processingRanges={processingRanges}
-        readyAheadFrames={maskFrameArtifact?.preparedAheadFrameCount ?? null}
-        readyAheadSeconds={maskFrameArtifact?.preparedAheadSeconds ?? null}
+        preparedAheadFrames={
+          preparedWindowArtifact?.preparedAheadFrameCount ?? null
+        }
+        preparedAheadSeconds={
+          preparedWindowArtifact?.preparedAheadSeconds ?? null
+        }
       />
       <div className="control-bar__time">
         <Readout

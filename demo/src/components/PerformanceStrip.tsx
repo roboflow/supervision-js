@@ -1,10 +1,10 @@
 import { memo } from "react";
 import {
-  RenderPreparationArtifactKind,
   type MediaRendererState,
   type RenderPreparationDiagnostics,
 } from "supervision-js";
 import { formatExactTime, formatInteger, formatMilliseconds } from "../format";
+import { selectPreparedWindowArtifact } from "../render-preparation";
 
 export const PerformanceStrip = memo(function PerformanceStrip({
   renderPreparationDiagnostics,
@@ -13,18 +13,20 @@ export const PerformanceStrip = memo(function PerformanceStrip({
   readonly renderPreparationDiagnostics: RenderPreparationDiagnostics | null;
   readonly rendererState: MediaRendererState | null;
 }) {
-  const maskFrameArtifact = renderPreparationDiagnostics?.artifacts.find(
-    (artifact) => artifact.kind === RenderPreparationArtifactKind.MaskFrame,
+  const preparedWindowArtifact = selectPreparedWindowArtifact(
+    renderPreparationDiagnostics,
   );
   const frameTime = rendererState?.lastFrameRenderTimings?.totalMs ?? null;
-  const readyAheadSeconds = maskFrameArtifact?.preparedAheadSeconds ?? null;
-  const readyAheadFrames = maskFrameArtifact?.preparedAheadFrameCount ?? null;
+  const preparedAheadSeconds =
+    preparedWindowArtifact?.preparedAheadSeconds ?? null;
+  const preparedAheadFrames =
+    preparedWindowArtifact?.preparedAheadFrameCount ?? null;
   const workerLabel = renderPreparationDiagnostics
     ? `${renderPreparationDiagnostics.executionMode} · ${
-        maskFrameArtifact
+        preparedWindowArtifact
           ? `${formatInteger(
-              maskFrameArtifact.inFlightCount ?? 0,
-            )}/${formatInteger(maskFrameArtifact.maxInFlightCount ?? 0)}`
+              preparedWindowArtifact.inFlightCount ?? 0,
+            )}/${formatInteger(preparedWindowArtifact.maxInFlightCount ?? 0)}`
           : "-"
       }`
     : "-";
@@ -38,15 +40,17 @@ export const PerformanceStrip = memo(function PerformanceStrip({
       />
       <PerformanceMetric label="Workers" value={workerLabel} />
       <PerformanceMetric
-        label="Ready ahead"
+        label="Prepared window"
         tone={
-          readyAheadSeconds !== null && readyAheadSeconds < 2 ? "warn" : "good"
+          preparedAheadSeconds !== null && preparedAheadSeconds < 2
+            ? "warn"
+            : "good"
         }
         value={
-          readyAheadSeconds === null
+          preparedAheadSeconds === null
             ? "-"
-            : `${formatExactTime(readyAheadSeconds)} · ${formatInteger(
-                readyAheadFrames ?? 0,
+            : `${formatExactTime(preparedAheadSeconds)} · ${formatInteger(
+                preparedAheadFrames ?? 0,
               )} frames`
         }
       />
