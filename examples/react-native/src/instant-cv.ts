@@ -69,6 +69,7 @@ export interface InstantCvGoldenPoseRule extends InstantCvRuleBase {
 }
 
 export interface InstantCvSafetyZoneRule extends InstantCvRuleBase {
+  readonly prohibitedClassNames: readonly string[];
   readonly recipe: "safety-zone";
   readonly zone: InstantCvZone;
 }
@@ -588,11 +589,31 @@ function instantCvEvaluateSafetyZone(
 ) {
   "worklet";
 
+  if (
+    frameWidth <= 0 ||
+    frameHeight <= 0 ||
+    rule.prohibitedClassNames.length === 0
+  ) {
+    return { candidate: "unknown" as const };
+  }
+
   for (let index = 0; index < objects.length; index += 1) {
     const object = objects[index]!;
+    let isProhibited = false;
+
+    for (
+      let classIndex = 0;
+      classIndex < rule.prohibitedClassNames.length;
+      classIndex += 1
+    ) {
+      if (object.label === rule.prohibitedClassNames[classIndex]) {
+        isProhibited = true;
+        break;
+      }
+    }
 
     if (
-      object.label === "person" &&
+      isProhibited &&
       instantCvObjectOverlapsZone(object, rule.zone, frameWidth, frameHeight)
     ) {
       return { candidate: "fail" as const };

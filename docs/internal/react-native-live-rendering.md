@@ -68,9 +68,10 @@ React callback replacement.
 The first example-owned recipes are Golden Pose, Safety Zone, and Clear to
 Start. Golden Pose uses pose angles; both zone recipes use RF-DETR segmentation
 and bounded mask/zone overlap checks. Zones can be authored as rectangles or
-free-shape polygons, and Clear to Start uses mask-aware frame-local picking for
-the taught class. They do not promise re-identification, custom industrial
-classes, or saved/composited camera recording.
+free-shape polygons. Safety Zone uses mask-aware frame-local picking to build a
+removable list of prohibited classes, while Clear to Start uses the same picker
+for its single taught class. They do not promise re-identification, custom
+industrial classes, or saved/composited camera recording.
 
 On iOS, the demo explicitly requests the RF-DETR Nano segmentation CoreML INT8
 profile through ExecuTorch. ExecuTorch remains example-owned; it is a detection

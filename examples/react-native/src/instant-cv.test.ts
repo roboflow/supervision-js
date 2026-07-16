@@ -132,11 +132,12 @@ describe("Instant CV rule engine", () => {
     ).toBe("fail");
   });
 
-  it("uses segmented person geometry for a safety zone", () => {
+  it("uses segmented geometry for a prohibited safety-zone class", () => {
     const rules: InstantCvRule[] = [
       {
         dwellMs: 0,
         id: "zone",
+        prohibitedClassNames: ["person"],
         recipe: "safety-zone",
         zone: createInstantCvRectangleZone(
           { x: 0.3, y: 0.6 },
@@ -160,6 +161,84 @@ describe("Instant CV rule engine", () => {
         rules,
       })[0]?.status,
     ).toBe("fail");
+  });
+
+  it("ignores classes that were not taught to the safety zone", () => {
+    const zone = createInstantCvRectangleZone(
+      { x: 0.1, y: 0.1 },
+      { x: 0.9, y: 0.9 },
+    );
+    const detection = {
+      bbox: { x1: 20, x2: 40, y1: 20, y2: 40 },
+      label: "bottle",
+    };
+
+    expect(
+      evaluateInstantCvRules({
+        frameHeight: 100,
+        frameWidth: 100,
+        nowMs: 1_000,
+        objects: [detection],
+        previous: [],
+        rules: [
+          {
+            dwellMs: 0,
+            id: "zone",
+            prohibitedClassNames: ["person"],
+            recipe: "safety-zone",
+            zone,
+          },
+        ],
+      })[0]?.status,
+    ).toBe("pass");
+
+    expect(
+      evaluateInstantCvRules({
+        frameHeight: 100,
+        frameWidth: 100,
+        nowMs: 1_000,
+        objects: [detection],
+        previous: [],
+        rules: [
+          {
+            dwellMs: 0,
+            id: "zone",
+            prohibitedClassNames: ["person", "bottle"],
+            recipe: "safety-zone",
+            zone,
+          },
+        ],
+      })[0]?.status,
+    ).toBe("fail");
+  });
+
+  it("waits for a safety-zone class to be taught", () => {
+    expect(
+      evaluateInstantCvRules({
+        frameHeight: 100,
+        frameWidth: 100,
+        nowMs: 1_000,
+        objects: [
+          {
+            bbox: { x1: 20, x2: 40, y1: 20, y2: 40 },
+            label: "person",
+          },
+        ],
+        previous: [],
+        rules: [
+          {
+            dwellMs: 0,
+            id: "zone",
+            prohibitedClassNames: [],
+            recipe: "safety-zone",
+            zone: createInstantCvRectangleZone(
+              { x: 0.1, y: 0.1 },
+              { x: 0.9, y: 0.9 },
+            ),
+          },
+        ],
+      })[0]?.status,
+    ).toBe("unknown");
   });
 
   it("keeps clear-to-start blocked while the selected class is in the zone", () => {
@@ -260,6 +339,7 @@ describe("Instant CV rule engine", () => {
       {
         dwellMs: 0,
         id: "zone",
+        prohibitedClassNames: ["person"],
         recipe: "safety-zone",
         zone: createInstantCvRectangleZone(
           { x: 0.1, y: 0.2 },
@@ -317,6 +397,7 @@ describe("Instant CV rule engine", () => {
       {
         dwellMs: 0,
         id: "free-zone",
+        prohibitedClassNames: ["person"],
         recipe: "safety-zone",
         zone: zone!,
       },

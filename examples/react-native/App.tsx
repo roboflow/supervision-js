@@ -670,7 +670,8 @@ interface LiveOverlayDetection {
 
 interface InstantCvTouchRequest {
   readonly id: number;
-  readonly kind: "capture-pose" | "pick-object";
+  readonly kind:
+    "capture-pose" | "pick-clear-to-start-object" | "pick-safety-zone-object";
   readonly point: InstantCvNormalizedPoint;
 }
 
@@ -689,6 +690,7 @@ type InstantCvWorkletPickResult =
       readonly kind: "object";
       readonly label: string;
       readonly requestId: number;
+      readonly target: "clear-to-start" | "safety-zone";
       readonly usedMask: boolean;
     }
   | {
@@ -1176,6 +1178,7 @@ function InstantCvHud(props: {
   readonly onClear: () => void;
   readonly onModeChange: (mode: DemoMode) => void;
   readonly onRecipeChange: (recipe: InstantCvRecipe) => void;
+  readonly onRemoveSafetyClass: (label: string) => void;
   readonly onZoneShapeChange: (shape: InstantCvZoneShape) => void;
   readonly recipe: InstantCvRecipe;
   readonly rules: readonly InstantCvRule[];
@@ -1188,14 +1191,20 @@ function InstantCvHud(props: {
     : undefined;
   const status = activeRuntime?.status ?? "unknown";
   const statusColor = resolveInstantCvStatusColor(status);
+  const safetyClassNames =
+    activeRule?.recipe === "safety-zone" ? activeRule.prohibitedClassNames : [];
+  const isChoosingSafetyClasses =
+    activeRule?.recipe === "safety-zone" && safetyClassNames.length === 0;
   const statusLabel = activeRule
-    ? status === "pass"
-      ? "Ready"
-      : status === "fail"
-        ? "Action needed"
-        : status === "evaluating"
-          ? "Checking…"
-          : "Looking…"
+    ? isChoosingSafetyClasses
+      ? "Choose classes"
+      : status === "pass"
+        ? "Ready"
+        : status === "fail"
+          ? "Action needed"
+          : status === "evaluating"
+            ? "Checking…"
+            : "Looking…"
     : "Teach a rule";
 
   return (
@@ -1286,6 +1295,33 @@ function InstantCvHud(props: {
           </View>
         ) : null}
         <Text style={styles.instantStatusMessage}>{props.message}</Text>
+        {activeRule?.recipe === "safety-zone" ? (
+          <View style={styles.instantSafetyClasses}>
+            <Text style={styles.instantSafetyClassesTitle}>
+              Must not be in zone
+            </Text>
+            {safetyClassNames.length > 0 ? (
+              <View style={styles.instantSafetyClassList}>
+                {safetyClassNames.map((label) => (
+                  <TouchableOpacity
+                    accessibilityLabel={`Remove ${label} from prohibited classes`}
+                    key={label}
+                    onPress={() => props.onRemoveSafetyClass(label)}
+                    style={styles.instantSafetyClassChip}
+                  >
+                    <Text style={styles.instantSafetyClassChipText}>
+                      {label} ×
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            ) : (
+              <Text style={styles.instantSafetyClassesEmpty}>
+                Tap a visible object to add its class.
+              </Text>
+            )}
+          </View>
+        ) : null}
         {activeRuntime?.score !== undefined ? (
           <Text style={styles.instantScore}>
             Pose delta {Math.round(activeRuntime.score)}°
@@ -1678,6 +1714,48 @@ function LiveCameraProof(props: {
       }
 
       if (result.kind === "object") {
+        if (result.target === "safety-zone") {
+          const currentRules = instantRulesShared.value;
+          const safetyRule = currentRules.find(
+            (rule) => rule.recipe === "safety-zone",
+          );
+
+          if (!safetyRule) {
+            return;
+          }
+
+          if (safetyRule.prohibitedClassNames.includes(result.label)) {
+            setInstantMessage(
+              `${result.label} is already in the must-not-be-in-zone list.`,
+            );
+            Vibration.vibrate(12);
+            return;
+          }
+
+          const nextRules: readonly InstantCvRule[] = currentRules.map(
+            (rule) =>
+              rule.recipe === "safety-zone"
+                ? {
+                    ...rule,
+                    prohibitedClassNames: [
+                      ...rule.prohibitedClassNames,
+                      result.label,
+                    ],
+                  }
+                : rule,
+          );
+          setInstantRules(nextRules);
+          instantRulesShared.value = nextRules;
+          setInstantRuntime([]);
+          instantRuntimeRef.current = [];
+          instantRuntimeShared.value = [];
+          setInstantMessage(
+            `${result.label} added. Tap another object to prohibit its class too.`,
+          );
+          Vibration.vibrate(28);
+          return;
+        }
+
         const zone = instantPendingZoneRef.current;
 
         if (!zone) {
@@ -1738,7 +1816,7 @@ function LiveCameraProof(props: {
         recipe === "golden-pose"
           ? "Hold a person to teach the golden pose."
           : recipe === "safety-zone"
-            ? "Draw a keep-out zone. Person masks must stay outside it."
+            ? "Draw a keep-out zone, then tap objects that must stay outside it."
             : "Draw a work zone, then tap the object that must be absent.",
       );
       Vibration.vibrate(16);
@@ -1767,7 +1845,7 @@ function LiveCameraProof(props: {
       instantRecipe === "golden-pose"
         ? "Hold a person to teach the golden pose."
         : instantRecipe === "safety-zone"
-          ? "Draw a keep-out zone. Person masks must stay outside it."
+          ? "Draw a keep-out zone, then tap objects that must stay outside it."
           : "Draw a work zone, then tap the object that must be absent.",
     );
   }, [
@@ -1792,7 +1870,7 @@ function LiveCameraProof(props: {
       instantTouchRequestShared.value = null;
       setInstantMessage(
         instantRecipe === "safety-zone"
-          ? `Draw a ${shape === "rectangle" ? "rectangular" : "free-shape"} keep-out zone.`
+          ? `Draw a ${shape === "rectangle" ? "rectangular" : "free-shape"} keep-out zone, then tap prohibited objects.`
           : `Draw a ${shape === "rectangle" ? "rectangular" : "free-shape"} work zone, then tap the object that must be absent.`,
       );
       Vibration.vibrate(12);
@@ -1804,6 +1882,38 @@ function LiveCameraProof(props: {
       instantRuntimeSignatureShared,
       instantTouchRequestShared,
     ],
+  );
+  const removeInstantSafetyClass = useCallback(
+    (label: string) => {
+      const currentRules = instantRulesShared.value;
+      const nextRules: readonly InstantCvRule[] = currentRules.map((rule) =>
+        rule.recipe === "safety-zone"
+          ? {
+              ...rule,
+              prohibitedClassNames: rule.prohibitedClassNames.filter(
+                (className) => className !== label,
+              ),
+            }
+          : rule,
+      );
+      const safetyRule = nextRules.find(
+        (rule) => rule.recipe === "safety-zone",
+      );
+
+      setInstantRules(nextRules);
+      instantRulesShared.value = nextRules;
+      setInstantRuntime([]);
+      instantRuntimeRef.current = [];
+      instantRuntimeShared.value = [];
+      setInstantMessage(
+        safetyRule?.recipe === "safety-zone" &&
+          safetyRule.prohibitedClassNames.length > 0
+          ? `${label} removed. Tap another object to add its class.`
+          : "Tap a visible object to add the first prohibited class.",
+      );
+      Vibration.vibrate(12);
+    },
+    [instantRulesShared, instantRuntimeShared],
   );
   const mapInstantCvPoint = useCallback(
     (point: { readonly x: number; readonly y: number }) => {
@@ -1840,7 +1950,11 @@ function LiveCameraProof(props: {
       };
       setInstantTouchPoint(normalized);
 
-      if (instantRecipe !== "golden-pose") {
+      const hasSafetyZone =
+        instantRecipe === "safety-zone" &&
+        instantRules.some((rule) => rule.recipe === "safety-zone");
+
+      if (instantRecipe !== "golden-pose" && !hasSafetyZone) {
         setInstantDraftZone(
           instantZoneShape === "rectangle"
             ? createInstantCvRectangleZone(normalized, normalized)
@@ -1848,7 +1962,7 @@ function LiveCameraProof(props: {
         );
       }
     },
-    [instantRecipe, instantZoneShape, mapInstantCvPoint],
+    [instantRecipe, instantRules, instantZoneShape, mapInstantCvPoint],
   );
   const handleInstantGestureMove = useCallback(
     (point: SyncedStageGesturePoint) => {
@@ -1940,7 +2054,21 @@ function LiveCameraProof(props: {
       ) {
         instantTouchRequestShared.value = {
           id: ++instantRequestIdRef.current,
-          kind: "pick-object",
+          kind: "pick-clear-to-start-object",
+          point: normalized,
+        };
+        setInstantMessage("Reading the touched mask on the next frame…");
+        return;
+      }
+
+      const safetyRule = instantRules.find(
+        (rule) => rule.recipe === "safety-zone",
+      );
+
+      if (instantRecipe === "safety-zone" && safetyRule && distance < 12) {
+        instantTouchRequestShared.value = {
+          id: ++instantRequestIdRef.current,
+          kind: "pick-safety-zone-object",
           point: normalized,
         };
         setInstantMessage("Reading the touched mask on the next frame…");
@@ -1973,6 +2101,7 @@ function LiveCameraProof(props: {
           {
             dwellMs: 180,
             id: `safety-zone-${Date.now()}`,
+            prohibitedClassNames: safetyRule?.prohibitedClassNames ?? [],
             recipe: "safety-zone",
             zone,
           },
@@ -1983,7 +2112,9 @@ function LiveCameraProof(props: {
         instantRuntimeRef.current = [];
         instantRuntimeShared.value = [];
         setInstantMessage(
-          "Person masks must stay outside the zone. Step in to test it.",
+          safetyRule && safetyRule.prohibitedClassNames.length > 0
+            ? "Zone updated. Tap another object to add its class."
+            : "Zone set. Tap an object that must not enter it.",
         );
         Vibration.vibrate(24);
         return;
@@ -1995,6 +2126,7 @@ function LiveCameraProof(props: {
     },
     [
       instantRecipe,
+      instantRules,
       instantRulesShared,
       instantRuntimeShared,
       instantTouchRequestShared,
@@ -2370,7 +2502,8 @@ function LiveCameraProof(props: {
             const instantTouchRequest = instantTouchRequestShared.value;
 
             if (
-              instantTouchRequest?.kind === "pick-object" &&
+              (instantTouchRequest?.kind === "pick-clear-to-start-object" ||
+                instantTouchRequest?.kind === "pick-safety-zone-object") &&
               instantTouchRequest.id !== lastInstantTouchRequestId.value
             ) {
               lastInstantTouchRequestId.value = instantTouchRequest.id;
@@ -2389,6 +2522,10 @@ function LiveCameraProof(props: {
                       kind: "object",
                       label: pick.label,
                       requestId: instantTouchRequest.id,
+                      target:
+                        instantTouchRequest.kind === "pick-safety-zone-object"
+                          ? "safety-zone"
+                          : "clear-to-start",
                       usedMask: pick.usedMask,
                     }
                   : {
@@ -2831,6 +2968,7 @@ function LiveCameraProof(props: {
             onClear={clearInstantRules}
             onModeChange={props.onModeChange}
             onRecipeChange={selectInstantRecipe}
+            onRemoveSafetyClass={removeInstantSafetyClass}
             onZoneShapeChange={selectInstantZoneShape}
             recipe={instantRecipe}
             rules={instantRules}
@@ -4482,6 +4620,39 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontVariant: ["tabular-nums"],
     fontWeight: "900",
+  },
+  instantSafetyClasses: {
+    gap: 6,
+  },
+  instantSafetyClassesTitle: {
+    color: "#9aa4b2",
+    fontSize: 10,
+    fontWeight: "900",
+    letterSpacing: 0.8,
+    textTransform: "uppercase",
+  },
+  instantSafetyClassList: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  instantSafetyClassChip: {
+    backgroundColor: "rgba(255, 93, 115, 0.18)",
+    borderColor: "rgba(255, 93, 115, 0.5)",
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  instantSafetyClassChipText: {
+    color: "#ffd9df",
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  instantSafetyClassesEmpty: {
+    color: "#cbd3df",
+    fontSize: 12,
+    fontWeight: "700",
   },
   instantReset: {
     alignItems: "center",
