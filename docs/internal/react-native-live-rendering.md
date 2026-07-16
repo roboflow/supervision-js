@@ -70,8 +70,8 @@ Golden Pose uses pose angles. Safety Zone uses RF-DETR segmentation, bounded
 mask/zone overlap checks, rectangular or free-shape zones, and mask-aware
 frame-local picking to build a removable list of prohibited classes. Privacy
 uses the same picker to teach redacted classes, then reuses the live mask
-shader's inexpensive mosaic mode with conservative full-box coverage. These
-recipes do not promise re-identification, custom industrial classes, or
+shader's inexpensive mosaic mode inside each model-produced instance mask.
+These recipes do not promise re-identification, custom industrial classes, or
 saved/composited camera recording.
 
 On iOS, the demo explicitly requests the RF-DETR Nano segmentation CoreML INT8

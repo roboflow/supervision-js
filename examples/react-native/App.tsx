@@ -220,9 +220,9 @@ const LIVE_MAX_INSTANCES = 6;
 // and defeats the feathered fill edges (it also skips the shader's expensive
 // border sampling loop).
 const LIVE_PRIVACY_MOSAIC_CELL_PX = 14;
-// A 1x1 all-ones mask scales across the whole detection bbox in the fill
-// loop, so redacted objects are covered by their full bounding box instead of
-// their exact mask silhouette — conservative coverage for privacy.
+// Standard live mode's boxes-only privacy fallback uses a 1x1 all-ones mask
+// to cover the whole detection bbox. Instant CV Privacy deliberately keeps the
+// model's instance mask so its mosaic remains inside the detected silhouette.
 const PRIVACY_FULL_BBOX_MASK = new Uint8Array([1]);
 // Masks are drawn exactly as the model returns them, so edge quality comes
 // from the model output itself: request masks at original resolution now that
@@ -2590,9 +2590,13 @@ function LiveCameraProof(props: {
 
             let maskDetection = detection;
 
-            if (effect === "redact" && !masksDisplayed) {
-              // Boxes display redaction covers the whole bbox: a 1x1
-              // all-ones mask scales across the target rect in the fill loop.
+            if (
+              effect === "redact" &&
+              !masksDisplayed &&
+              !instantCvActiveShared.value
+            ) {
+              // Standard boxes display redaction covers the whole bbox. The
+              // Instant CV Privacy recipe keeps the original instance mask.
               maskDetection = {
                 bbox: detection.bbox,
                 color: detection.color,
