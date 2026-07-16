@@ -1246,6 +1246,39 @@ function InstantCvHud(props: {
         })}
       </View>
 
+      {props.recipe === "safety-zone" ? (
+        <View style={styles.instantSafetyClasses}>
+          <View style={styles.instantSafetyClassesHeader}>
+            <Text style={styles.instantSafetyClassesTitle}>
+              Must not be in zone
+            </Text>
+            <Text style={styles.instantSafetyClassesCount}>
+              {safetyClassNames.length}
+            </Text>
+          </View>
+          {safetyClassNames.length > 0 ? (
+            <View style={styles.instantSafetyClassList}>
+              {safetyClassNames.map((label) => (
+                <TouchableOpacity
+                  accessibilityLabel={`Remove ${label} from prohibited classes`}
+                  key={label}
+                  onPress={() => props.onRemoveSafetyClass(label)}
+                  style={styles.instantSafetyClassChip}
+                >
+                  <Text style={styles.instantSafetyClassChipText}>
+                    {label} ×
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          ) : (
+            <Text style={styles.instantSafetyClassesEmpty}>
+              None yet — draw a zone, then tap an object.
+            </Text>
+          )}
+        </View>
+      ) : null}
+
       <View style={styles.instantStatusCard}>
         <View style={styles.instantStatusHeader}>
           <View style={styles.instantStatusTitleRow}>
@@ -1295,33 +1328,6 @@ function InstantCvHud(props: {
           </View>
         ) : null}
         <Text style={styles.instantStatusMessage}>{props.message}</Text>
-        {activeRule?.recipe === "safety-zone" ? (
-          <View style={styles.instantSafetyClasses}>
-            <Text style={styles.instantSafetyClassesTitle}>
-              Must not be in zone
-            </Text>
-            {safetyClassNames.length > 0 ? (
-              <View style={styles.instantSafetyClassList}>
-                {safetyClassNames.map((label) => (
-                  <TouchableOpacity
-                    accessibilityLabel={`Remove ${label} from prohibited classes`}
-                    key={label}
-                    onPress={() => props.onRemoveSafetyClass(label)}
-                    style={styles.instantSafetyClassChip}
-                  >
-                    <Text style={styles.instantSafetyClassChipText}>
-                      {label} ×
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            ) : (
-              <Text style={styles.instantSafetyClassesEmpty}>
-                Tap a visible object to add its class.
-              </Text>
-            )}
-          </View>
-        ) : null}
         {activeRuntime?.score !== undefined ? (
           <Text style={styles.instantScore}>
             Pose delta {Math.round(activeRuntime.score)}°
@@ -4622,7 +4628,23 @@ const styles = StyleSheet.create({
     fontWeight: "900",
   },
   instantSafetyClasses: {
+    backgroundColor: "rgba(5, 7, 11, 0.84)",
+    borderColor: "rgba(255, 93, 115, 0.34)",
+    borderRadius: 14,
+    borderWidth: 1,
     gap: 6,
+    left: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    position: "absolute",
+    right: 14,
+    top: 176,
+    zIndex: 7,
+  },
+  instantSafetyClassesHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
   },
   instantSafetyClassesTitle: {
     color: "#9aa4b2",
@@ -4630,6 +4652,12 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     letterSpacing: 0.8,
     textTransform: "uppercase",
+  },
+  instantSafetyClassesCount: {
+    color: "#ffd9df",
+    fontSize: 11,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "900",
   },
   instantSafetyClassList: {
     flexDirection: "row",
