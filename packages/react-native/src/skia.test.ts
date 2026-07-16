@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { KeypointMarkerShape } from "./index";
 
 import {
+  createEmptyReactNativeSkiaPicture,
   createReactNativeSkiaMaskFrame,
   createReactNativeSkiaVectorFrame,
   disposeReactNativeSkiaImage,
@@ -225,6 +226,17 @@ describe("createReactNativeSkiaVectorFrame", () => {
         mediaRect: { height: 100, width: 200, x: 0, y: 0 },
       }),
     ).toBeNull();
+  });
+});
+
+describe("createEmptyReactNativeSkiaPicture", () => {
+  it("records a valid no-op picture for nullable animated lanes", () => {
+    const picture = createEmptyReactNativeSkiaPicture();
+
+    expect(picture).toBe(finishRecordingAsPicture.mock.results.at(-1)?.value);
+    expect(Skia.XYWHRect).toHaveBeenLastCalledWith(0, 0, 1, 1);
+    expect(finishRecordingAsPicture).toHaveBeenCalled();
+    expect(recorderDispose).toHaveBeenCalled();
   });
 });
 

@@ -53,6 +53,23 @@ export interface ReactNativeSkiaVectorFrame {
   readonly prepMs: number;
 }
 
+/**
+ * Creates a valid no-op picture for declarative Skia picture props.
+ *
+ * React Native Skia's picture prop does not accept `null`, including when the
+ * prop is animated through a Reanimated shared value. Keep this picture in the
+ * shared value whenever there is no vector geometry to present.
+ */
+export function createEmptyReactNativeSkiaPicture(): SkPicture {
+  "worklet";
+
+  const recorder = Skia.PictureRecorder();
+  recorder.beginRecording(Skia.XYWHRect(0, 0, 1, 1));
+  const picture = recorder.finishRecordingAsPicture();
+  recorder.dispose();
+  return picture;
+}
+
 /** Releases a recorded Skia vector picture. Null-safe and worklet-safe. */
 export function disposeReactNativeSkiaPicture(
   picture: SkPicture | null | undefined,

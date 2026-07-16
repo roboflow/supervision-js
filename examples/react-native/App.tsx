@@ -48,7 +48,7 @@ import {
   useFrameRenderer,
   type Frame,
 } from "react-native-vision-camera";
-import { useSharedValue } from "react-native-reanimated";
+import { useSharedValue, type SharedValue } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
 import { Asset } from "expo-asset";
 import * as ImagePicker from "expo-image-picker";
@@ -80,6 +80,7 @@ import {
   createEmptyReactNativeLiveIdMaskUniforms,
 } from "supervision-js-react-native";
 import {
+  createEmptyReactNativeSkiaPicture,
   createReactNativeSkiaMaskFrame,
   createReactNativeSkiaVectorFrame,
   disposeReactNativeSkiaImage,
@@ -119,6 +120,25 @@ import {
   createDetectionFrameFromExecutorchCocoPoses,
   unrotateExecutorchUpBbox,
 } from "supervision-js-react-native/adapters/executorch";
+
+function swapLiveVectorPicture(
+  livePicture: SharedValue<SkPicture>,
+  livePictureIsEmpty: SharedValue<boolean>,
+  retiredPicture: SharedValue<SkPicture | null>,
+  nextPicture: SkPicture | null,
+  emptyPicture: SkPicture,
+) {
+  "worklet";
+
+  const previousPicture = livePicture.value;
+  const previousPictureWasEmpty = livePictureIsEmpty.value;
+  const obsoletePicture = retiredPicture.value;
+
+  livePicture.value = nextPicture ?? emptyPicture;
+  livePictureIsEmpty.value = nextPicture === null;
+  retiredPicture.value = previousPictureWasEmpty ? null : previousPicture;
+  disposeReactNativeSkiaPicture(obsoletePicture);
+}
 
 type DemoMode = "static" | "live" | "video";
 type LiveInferenceMode = "segmentation" | "pose";
@@ -980,6 +1000,10 @@ function LiveCameraProof(props: {
     () => createEmptyReactNativeLiveIdMaskUniforms(),
     [],
   );
+  const emptyLiveVectorPicture = useMemo(
+    () => createEmptyReactNativeSkiaPicture(),
+    [],
+  );
   const liveLayout = useMemo(
     () =>
       resolveReactNativeFrameLayout({
@@ -1004,7 +1028,10 @@ function LiveCameraProof(props: {
     [livePerformanceSamples],
   );
   const liveMaskImage = useSharedValue<SkiaImageType | null>(null);
-  const liveVectorPicture = useSharedValue<SkPicture | null>(null);
+  // React Native Skia rejects null animated Picture props. The no-op picture
+  // keeps the shared value valid before the first pose and between pose frames.
+  const liveVectorPicture = useSharedValue<SkPicture>(emptyLiveVectorPicture);
+  const liveVectorPictureIsEmpty = useSharedValue(true);
   // Holds the mask image that was on screen one packet ago. Disposing the
   // previous image immediately after swapping races the UI thread, which can
   // still be drawing it — an ImageShader over a disposed image paints the
@@ -1091,16 +1118,20 @@ function LiveCameraProof(props: {
     retiredLiveMaskImage.value = previousMaskImage;
     disposeReactNativeSkiaImage(retiredMaskImage);
 
-    const previousVectorPicture = liveVectorPicture.value;
-    const retiredVectorPicture = retiredLiveVectorPicture.value;
-    liveVectorPicture.value = null;
-    retiredLiveVectorPicture.value = previousVectorPicture;
-    disposeReactNativeSkiaPicture(retiredVectorPicture);
+    swapLiveVectorPicture(
+      liveVectorPicture,
+      liveVectorPictureIsEmpty,
+      retiredLiveVectorPicture,
+      null,
+      emptyLiveVectorPicture,
+    );
   }, [
     emptyLiveMaskUniforms,
+    emptyLiveVectorPicture,
     liveMaskImage,
     liveMaskUniforms,
     liveVectorPicture,
+    liveVectorPictureIsEmpty,
     props.inferenceMode,
     retiredLiveMaskImage,
     retiredLiveVectorPicture,
@@ -1115,12 +1146,17 @@ function LiveCameraProof(props: {
     () => () => {
       disposeReactNativeSkiaImage(liveMaskImage.value);
       disposeReactNativeSkiaImage(retiredLiveMaskImage.value);
-      disposeReactNativeSkiaPicture(liveVectorPicture.value);
+      if (!liveVectorPictureIsEmpty.value) {
+        disposeReactNativeSkiaPicture(liveVectorPicture.value);
+      }
       disposeReactNativeSkiaPicture(retiredLiveVectorPicture.value);
+      disposeReactNativeSkiaPicture(emptyLiveVectorPicture);
     },
     [
+      emptyLiveVectorPicture,
       liveMaskImage,
       liveVectorPicture,
+      liveVectorPictureIsEmpty,
       retiredLiveMaskImage,
       retiredLiveVectorPicture,
     ],
@@ -1263,11 +1299,13 @@ function LiveCameraProof(props: {
           });
 
           stage = "pose-assign-prepared";
-          const previousVectorPicture = liveVectorPicture.value;
-          const retiredVectorPicture = retiredLiveVectorPicture.value;
-          liveVectorPicture.value = preparedVector?.picture ?? null;
-          retiredLiveVectorPicture.value = previousVectorPicture;
-          disposeReactNativeSkiaPicture(retiredVectorPicture);
+          swapLiveVectorPicture(
+            liveVectorPicture,
+            liveVectorPictureIsEmpty,
+            retiredLiveVectorPicture,
+            preparedVector?.picture ?? null,
+            emptyLiveVectorPicture,
+          );
 
           const previousMaskImage = liveMaskImage.value;
           const retiredMaskImage = retiredLiveMaskImage.value;
@@ -1531,11 +1569,13 @@ function LiveCameraProof(props: {
             lastShaderActive.value = false;
           }
 
-          const previousVectorPicture = liveVectorPicture.value;
-          const retiredVectorPicture = retiredLiveVectorPicture.value;
-          liveVectorPicture.value = null;
-          retiredLiveVectorPicture.value = previousVectorPicture;
-          disposeReactNativeSkiaPicture(retiredVectorPicture);
+          swapLiveVectorPicture(
+            liveVectorPicture,
+            liveVectorPictureIsEmpty,
+            retiredLiveVectorPicture,
+            null,
+            emptyLiveVectorPicture,
+          );
 
           stage = "render-synced-frame";
           runWithWorkletDebugLogging(
@@ -1607,6 +1647,7 @@ function LiveCameraProof(props: {
     [
       droppedFrameCount,
       emptyLiveMaskUniforms,
+      emptyLiveVectorPicture,
       frameRenderer,
       lastArtifactBytes,
       lastArtifactHeight,
@@ -1631,6 +1672,7 @@ function LiveCameraProof(props: {
       liveMediaRect,
       liveNativeMaskBuilder,
       liveVectorPicture,
+      liveVectorPictureIsEmpty,
       classEffectsShared,
       props.inferenceMode,
       reportLiveDetections,
