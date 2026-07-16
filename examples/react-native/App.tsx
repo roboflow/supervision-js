@@ -6,6 +6,7 @@ import {
   ImageShader,
   Image as SkiaImage,
   MipmapMode,
+  Picture,
   Rect,
   RoundedRect,
   Shader,
@@ -13,6 +14,7 @@ import {
   Text as SkiaText,
   matchFont,
   type SkImage as SkiaImageType,
+  type SkPicture,
   useImage,
 } from "@shopify/react-native-skia";
 import { StatusBar } from "expo-status-bar";
@@ -50,11 +52,18 @@ import { useSharedValue } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
 import { Asset } from "expo-asset";
 import * as ImagePicker from "expo-image-picker";
-import { models, useInstanceSegmentation } from "react-native-executorch";
+import {
+  models,
+  useInstanceSegmentation,
+  usePoseEstimation,
+} from "react-native-executorch";
 import {
   BoxShape,
+  KeypointMarkerShape,
   type BoxDrawInstruction,
+  type DetectionFrame,
   type DetectionPickResult,
+  type KeypointDrawInstruction,
   type LabelDrawInstruction,
   REACT_NATIVE_ID_MASK_SHADER_SOURCE,
   resolveDetectionClassColorStyle,
@@ -72,7 +81,9 @@ import {
 } from "supervision-js-react-native";
 import {
   createReactNativeSkiaMaskFrame,
+  createReactNativeSkiaVectorFrame,
   disposeReactNativeSkiaImage,
+  disposeReactNativeSkiaPicture,
   type ReactNativeSkiaMaskFrame,
 } from "supervision-js-react-native/skia";
 import {
@@ -95,16 +106,22 @@ import {
   createDemoBoxStyle,
   createDemoDetectionFrameFromLiveDetections,
   createDemoLabelStyle,
+  createDemoKeypointStyle,
   createDemoMaskStyle,
+  createDemoPolygonStyle,
   resolveDemoDetectionColor,
 } from "./src/demo-presentation";
 import {
   runWithWorkletDebugLogging,
   serializeDebugError,
 } from "./src/debug-logging";
-import { unrotateExecutorchUpBbox } from "supervision-js-react-native/adapters/executorch";
+import {
+  createDetectionFrameFromExecutorchCocoPoses,
+  unrotateExecutorchUpBbox,
+} from "supervision-js-react-native/adapters/executorch";
 
 type DemoMode = "static" | "live" | "video";
+type LiveInferenceMode = "segmentation" | "pose";
 type LiveDetectionDisplayMode = "masks" | "boxes";
 type LiveClassEffect = "redact" | "spotlight";
 type LiveClassEffects = Readonly<Record<string, LiveClassEffect>>;
@@ -142,24 +159,40 @@ const liveSegmentationModel =
         quant: true,
       })
     : models.instance_segmentation.rf_detr_nano({ quant: true });
+const livePoseModel = models.pose_estimation.yolo26n();
 
-function useLiveSegmentation() {
+function useLiveSegmentation(preventLoad: boolean) {
   return useInstanceSegmentation({
     model: liveSegmentationModel,
+    preventLoad,
   });
 }
 
+function useLivePose(preventLoad: boolean) {
+  return usePoseEstimation({ model: livePoseModel, preventLoad });
+}
+
 type LiveSegmentation = ReturnType<typeof useLiveSegmentation>;
+type LivePose = ReturnType<typeof useLivePose>;
 
 export default function App() {
   const [mode, setMode] = useState<DemoMode>("static");
-  const segmentation = useLiveSegmentation();
+  const [liveInferenceMode, setLiveInferenceMode] =
+    useState<LiveInferenceMode>("segmentation");
+  const segmentation = useLiveSegmentation(
+    mode === "static" ||
+      (mode === "live" && liveInferenceMode !== "segmentation"),
+  );
+  const pose = useLivePose(mode !== "live" || liveInferenceMode !== "pose");
 
   if (mode === "live") {
     return (
       <LiveCameraProof
+        inferenceMode={liveInferenceMode}
         mode={mode}
+        onInferenceModeChange={setLiveInferenceMode}
         onModeChange={setMode}
+        pose={pose}
         segmentation={segmentation}
       />
     );
@@ -175,23 +208,18 @@ export default function App() {
     );
   }
 
-  return (
-    <StaticFrameProof
-      mode={mode}
-      onModeChange={setMode}
-      segmentation={segmentation}
-    />
-  );
+  return <StaticFrameProof mode={mode} onModeChange={setMode} />;
 }
 
 function StaticFrameProof(props: {
   readonly mode: DemoMode;
   readonly onModeChange: (mode: DemoMode) => void;
-  readonly segmentation: LiveSegmentation;
 }) {
   const image = useImage(basketballFrame);
   const window = useWindowDimensions();
   const [rounded, setRounded] = useState(true);
+  const [showPolygons, setShowPolygons] = useState(true);
+  const [showKeypoints, setShowKeypoints] = useState(true);
   const [selectedPick, setSelectedPick] = useState<DetectionPickResult | null>(
     null,
   );
@@ -206,7 +234,9 @@ function StaticFrameProof(props: {
       boxStyle: createDemoBoxStyle({ rounded }),
       detectionFrame: basketballDetectionFrame,
       labelStyle: createDemoLabelStyle(),
+      keypointStyle: createDemoKeypointStyle(),
       maskStyle,
+      polygonStyle: createDemoPolygonStyle(),
       mediaFrame: {
         metadata: {
           duration: 1 / 30,
@@ -275,7 +305,6 @@ function StaticFrameProof(props: {
     maskPreparation.artifact && maskImage && maskEffect && maskUniforms
       ? "active"
       : "unavailable";
-  const modelStatus = formatSegmentationStatus(props.segmentation);
 
   const syncedBoxOverlays = useMemo(() => {
     const overlays = createSyncedBoxOverlays(presentation.boxes, layout);
@@ -300,6 +329,23 @@ function StaticFrameProof(props: {
   const syncedLabelOverlays = useMemo(
     () => createSyncedLabelOverlays(presentation.labels, layout),
     [layout, presentation.labels],
+  );
+  const vectorFrame = useMemo(
+    () =>
+      createReactNativeSkiaVectorFrame({
+        frameHeight: presentation.mediaMetadata.height,
+        frameWidth: presentation.mediaMetadata.width,
+        keypoints: showKeypoints ? presentation.keypoints : [],
+        mediaRect: layout.mediaRect,
+        polygons: showPolygons ? presentation.polygons : [],
+        polylines: presentation.polylines,
+      }),
+    [layout.mediaRect, presentation, showKeypoints, showPolygons],
+  );
+
+  useEffect(
+    () => () => disposeReactNativeSkiaPicture(vectorFrame?.picture),
+    [vectorFrame],
   );
 
   return (
@@ -328,6 +374,7 @@ function StaticFrameProof(props: {
           maskImage={maskImage}
           maskUniforms={maskUniforms}
           mediaImage={image}
+          vectorPicture={vectorFrame?.picture}
           onPress={(point) => {
             setSelectedPick(
               pickReactNativeDetectionAtPoint(
@@ -343,11 +390,10 @@ function StaticFrameProof(props: {
           <View style={styles.stageReadout}>
             <StatusPill tone="ready" value="media + detections" />
             <StatusPill
-              tone={props.segmentation.isReady ? "ready" : "warning"}
-              value={modelStatus}
+              value={`${maskPreparation.artifact?.maskCount ?? 0} masks`}
             />
             <StatusPill
-              value={`${maskPreparation.artifact?.maskCount ?? 0} masks`}
+              value={`${vectorFrame?.polygonCount ?? 0} polygons · ${vectorFrame?.keypointCount ?? 0} poses`}
             />
             <StatusPill
               value={`${formatBytes(
@@ -452,6 +498,31 @@ function StaticFrameProof(props: {
             />
           </View>
         </View>
+
+        <View style={styles.control}>
+          <View style={styles.controlCopy}>
+            <Text style={styles.cardTitle}>Geometry</Text>
+            <Text style={styles.body}>Prepared once as a Skia picture.</Text>
+          </View>
+          <View style={styles.toggleRow}>
+            <Text style={styles.body}>Polygons</Text>
+            <Switch
+              ios_backgroundColor="#1b2029"
+              onValueChange={setShowPolygons}
+              thumbColor={showPolygons ? "#f8fafc" : "#8b95a7"}
+              trackColor={{ false: "#242a35", true: "#77e4f2" }}
+              value={showPolygons}
+            />
+            <Text style={styles.body}>Keypoints</Text>
+            <Switch
+              ios_backgroundColor="#1b2029"
+              onValueChange={setShowKeypoints}
+              thumbColor={showKeypoints ? "#f8fafc" : "#8b95a7"}
+              trackColor={{ false: "#242a35", true: "#77e4f2" }}
+              value={showKeypoints}
+            />
+          </View>
+        </View>
       </View>
     </SafeAreaView>
   );
@@ -484,6 +555,7 @@ interface LiveFrameState {
   readonly syncMode: "synced";
   readonly timestamp: number;
   readonly width: number;
+  readonly visibleKeypointCount: number;
 }
 
 interface LivePerformanceMetric {
@@ -584,6 +656,8 @@ interface SyncedFrameStageProps {
   readonly showBoxes?: boolean;
   readonly showMasks?: boolean;
   readonly stageStyle?: StyleProp<ViewStyle>;
+  /** Plain SkPicture or a shared value holding one (live packets). */
+  readonly vectorPicture?: unknown;
 }
 
 function SyncedFrameStage(props: SyncedFrameStageProps) {
@@ -663,6 +737,9 @@ function SyncedFrameStage(props: SyncedFrameStageProps) {
               />
             </Shader>
           </Rect>
+        ) : null}
+        {props.vectorPicture ? (
+          <Picture picture={props.vectorPicture as never} />
         ) : null}
         {showBoxes
           ? props.boxes.map((box) => (
@@ -816,9 +893,58 @@ function createLiveSyncedOverlays(options: {
   };
 }
 
+function createLivePoseKeypointInstructions(
+  frame: DetectionFrame,
+): KeypointDrawInstruction[] {
+  "worklet";
+
+  const instructions: KeypointDrawInstruction[] = [];
+
+  for (
+    let detectionIndex = 0;
+    detectionIndex < frame.detections.length;
+    detectionIndex += 1
+  ) {
+    const detection = frame.detections[detectionIndex]!;
+    const geometry = detection.keypoints;
+
+    if (!geometry) {
+      continue;
+    }
+
+    const color = resolveDetectionClassColorStyle(detection.className).fill;
+    const edges = geometry.edges.map(([fromIndex, toIndex]) => ({
+      from: geometry.points[fromIndex]!,
+      stroke: { alpha: 0.98, color, width: 3 },
+      to: geometry.points[toIndex]!,
+    }));
+    const markers = geometry.points.flatMap((point, index) =>
+      geometry.visibility?.[index] === 0
+        ? []
+        : [
+            {
+              fill: { alpha: 1, color },
+              index,
+              point,
+              radius: 5,
+              shape: KeypointMarkerShape.Circle,
+              stroke: { alpha: 1, color, width: 2 },
+            },
+          ],
+    );
+
+    instructions[instructions.length] = { edges, markers };
+  }
+
+  return instructions;
+}
+
 function LiveCameraProof(props: {
+  readonly inferenceMode: LiveInferenceMode;
   readonly mode: DemoMode;
+  readonly onInferenceModeChange: (mode: LiveInferenceMode) => void;
   readonly onModeChange: (mode: DemoMode) => void;
+  readonly pose: LivePose;
   readonly segmentation: LiveSegmentation;
 }) {
   const window = useWindowDimensions();
@@ -841,11 +967,15 @@ function LiveCameraProof(props: {
   const frameRenderer = useFrameRenderer();
   const canvasWidth = window.width;
   const canvasHeight = window.height;
-  const showMaskLayer = detectionDisplayMode === "masks";
-  const showBoxLayer = detectionDisplayMode === "boxes";
+  const showMaskLayer =
+    props.inferenceMode === "segmentation" && detectionDisplayMode === "masks";
+  const showBoxLayer =
+    props.inferenceMode === "segmentation" && detectionDisplayMode === "boxes";
   // The mask lane doubles as the effect lane: even in boxes display mode the
   // mask artifact runs whenever a class has an effect (redact, spotlight).
-  const effectsActive = Object.keys(classEffects).length > 0;
+  const effectsActive =
+    props.inferenceMode === "segmentation" &&
+    Object.keys(classEffects).length > 0;
   const emptyLiveMaskUniforms = useMemo(
     () => createEmptyReactNativeLiveIdMaskUniforms(),
     [],
@@ -874,11 +1004,13 @@ function LiveCameraProof(props: {
     [livePerformanceSamples],
   );
   const liveMaskImage = useSharedValue<SkiaImageType | null>(null);
+  const liveVectorPicture = useSharedValue<SkPicture | null>(null);
   // Holds the mask image that was on screen one packet ago. Disposing the
   // previous image immediately after swapping races the UI thread, which can
   // still be drawing it — an ImageShader over a disposed image paints the
   // whole media rect black. Deferring disposal by one packet removes the race.
   const retiredLiveMaskImage = useSharedValue<SkiaImageType | null>(null);
+  const retiredLiveVectorPicture = useSharedValue<SkPicture | null>(null);
   const liveMaskUniforms = useSharedValue<ReactNativeIdMaskUniforms>(
     createEmptyReactNativeLiveIdMaskUniforms(),
   );
@@ -897,6 +1029,7 @@ function LiveCameraProof(props: {
   const lastArtifactWidth = useSharedValue(0);
   const lastInferenceTickDurationMs = useSharedValue(0);
   const lastMaskCount = useSharedValue(0);
+  const lastVisibleKeypointCount = useSharedValue(0);
   const lastMaskFillDurationMs = useSharedValue(0);
   const lastMaskPrepDurationMs = useSharedValue(0);
   const lastMaskUploadDurationMs = useSharedValue(0);
@@ -918,6 +1051,7 @@ function LiveCameraProof(props: {
   const showMaskLayerShared = useSharedValue(showMaskLayer);
   const classEffectsShared = useSharedValue<LiveClassEffects>({});
   const runSegmentationOnFrame = props.segmentation.runOnFrame;
+  const runPoseOnFrame = props.pose.runOnFrame;
   const liveSyncedOverlays = useMemo(
     () =>
       createLiveSyncedOverlays({
@@ -944,13 +1078,53 @@ function LiveCameraProof(props: {
   }, [liveLayout.mediaRect, liveMediaRect]);
   useEffect(() => {
     setLivePerformanceSamples([]);
-  }, [detectionDisplayMode]);
+  }, [detectionDisplayMode, props.inferenceMode]);
+  useEffect(() => {
+    setClassEffects({});
+    setLiveDetections([]);
+    setTapMenuLabel(null);
+
+    const previousMaskImage = liveMaskImage.value;
+    const retiredMaskImage = retiredLiveMaskImage.value;
+    liveMaskImage.value = null;
+    liveMaskUniforms.value = emptyLiveMaskUniforms;
+    retiredLiveMaskImage.value = previousMaskImage;
+    disposeReactNativeSkiaImage(retiredMaskImage);
+
+    const previousVectorPicture = liveVectorPicture.value;
+    const retiredVectorPicture = retiredLiveVectorPicture.value;
+    liveVectorPicture.value = null;
+    retiredLiveVectorPicture.value = previousVectorPicture;
+    disposeReactNativeSkiaPicture(retiredVectorPicture);
+  }, [
+    emptyLiveMaskUniforms,
+    liveMaskImage,
+    liveMaskUniforms,
+    liveVectorPicture,
+    props.inferenceMode,
+    retiredLiveMaskImage,
+    retiredLiveVectorPicture,
+  ]);
   useEffect(() => {
     showMaskLayerShared.value = showMaskLayer;
   }, [showMaskLayer, showMaskLayerShared]);
   useEffect(() => {
     classEffectsShared.value = classEffects;
   }, [classEffects, classEffectsShared]);
+  useEffect(
+    () => () => {
+      disposeReactNativeSkiaImage(liveMaskImage.value);
+      disposeReactNativeSkiaImage(retiredLiveMaskImage.value);
+      disposeReactNativeSkiaPicture(liveVectorPicture.value);
+      disposeReactNativeSkiaPicture(retiredLiveVectorPicture.value);
+    },
+    [
+      liveMaskImage,
+      liveVectorPicture,
+      retiredLiveMaskImage,
+      retiredLiveVectorPicture,
+    ],
+  );
 
   const reportLiveFrame = useCallback((frame: LiveFrameState) => {
     setLiveFrame(frame);
@@ -1021,9 +1195,105 @@ function LiveCameraProof(props: {
       try {
         const syncMode = "synced";
         const segmentFrame = runSegmentationOnFrame;
-        const shouldRunInference = segmentFrame !== null;
+        const poseFrame = runPoseOnFrame;
+        const shouldRunPose =
+          props.inferenceMode === "pose" && poseFrame !== null;
+        const shouldRunInference =
+          props.inferenceMode === "segmentation" && segmentFrame !== null;
 
-        if (shouldRunInference) {
+        if (shouldRunPose) {
+          const inferenceStartedAt = Date.now();
+          stage = "pose-run";
+          const poseStartedAt = Date.now();
+          const rawPoses = runWithWorkletDebugLogging(
+            {
+              args: createLiveFrameDebugArgs(stage, frame),
+              description: "run YOLO26N pose on camera frame",
+              namespace: "rn-live",
+            },
+            () =>
+              poseFrame(frame, false, {
+                detectionThreshold: 0.4,
+                inputSize: 384,
+                keypointThreshold: 0.35,
+              }),
+          );
+          const poseMs = Date.now() - poseStartedAt;
+          const detectionFrameSize = resolveLiveDetectionFrameSize(frame);
+          const mediaRect = liveMediaRect.value;
+          stage = "pose-adapt";
+          const serializationStartedAt = Date.now();
+          const detectionFrame = createDetectionFrameFromExecutorchCocoPoses({
+            frameIndex: Math.round(frame.timestamp),
+            mediaTime: frame.timestamp / 1_000_000_000,
+            poses: rawPoses,
+          });
+          const instructions =
+            createLivePoseKeypointInstructions(detectionFrame);
+          const overlayDetections: LiveOverlayDetection[] = [];
+
+          for (
+            let index = 0;
+            index < detectionFrame.detections.length;
+            index += 1
+          ) {
+            const detection = detectionFrame.detections[index]!;
+            const rect = detection.rect!;
+            overlayDetections[index] = {
+              bbox: {
+                x1: rect.x - rect.width / 2,
+                x2: rect.x + rect.width / 2,
+                y1: rect.y - rect.height / 2,
+                y2: rect.y + rect.height / 2,
+              },
+              color: resolveDetectionClassColorStyle(detection.className).fill,
+              label: detection.className ?? "person",
+              score: 1,
+            };
+          }
+
+          scheduleOnRN(reportLiveDetections, overlayDetections);
+          const serializationMs = Date.now() - serializationStartedAt;
+          stage = "pose-prepare-vector";
+          const preparedVector = createReactNativeSkiaVectorFrame({
+            frameHeight: detectionFrameSize.height,
+            frameWidth: detectionFrameSize.width,
+            keypoints: instructions,
+            mediaRect,
+          });
+
+          stage = "pose-assign-prepared";
+          const previousVectorPicture = liveVectorPicture.value;
+          const retiredVectorPicture = retiredLiveVectorPicture.value;
+          liveVectorPicture.value = preparedVector?.picture ?? null;
+          retiredLiveVectorPicture.value = previousVectorPicture;
+          disposeReactNativeSkiaPicture(retiredVectorPicture);
+
+          const previousMaskImage = liveMaskImage.value;
+          const retiredMaskImage = retiredLiveMaskImage.value;
+          liveMaskUniforms.value = emptyLiveMaskUniforms;
+          liveMaskImage.value = null;
+          retiredLiveMaskImage.value = previousMaskImage;
+          disposeReactNativeSkiaImage(retiredMaskImage);
+
+          lastInferenceTickDurationMs.value = Date.now() - inferenceStartedAt;
+          lastArtifactBytes.value = 0;
+          lastArtifactHeight.value = 0;
+          lastArtifactWidth.value = 0;
+          lastMaskBuilderName.value = "skia-vector";
+          lastMaskCount.value = detectionFrame.detections.length;
+          lastVisibleKeypointCount.value = preparedVector?.markerCount ?? 0;
+          lastMaskFillDurationMs.value = 0;
+          lastMaskPrepDurationMs.value = preparedVector?.prepMs ?? 0;
+          lastMaskUploadDurationMs.value = 0;
+          lastSegmentationDurationMs.value = poseMs;
+          lastSerializationDurationMs.value = serializationMs;
+          lastShaderActive.value = false;
+
+          stage = "render-synced-frame";
+          frameRenderer.renderFrame(frame);
+          lastPresentedFrame.value = true;
+        } else if (shouldRunInference) {
           const inferenceStartedAt = Date.now();
 
           stage = "segmentation-run";
@@ -1200,6 +1470,7 @@ function LiveCameraProof(props: {
           lastArtifactHeight.value = preparedMask?.height ?? 0;
           lastArtifactWidth.value = preparedMask?.width ?? 0;
           lastMaskCount.value = maskCount;
+          lastVisibleKeypointCount.value = 0;
           lastMaskFillDurationMs.value = preparedMask?.fillMs ?? 0;
           lastMaskPrepDurationMs.value = maskPrepMs;
           lastMaskUploadDurationMs.value = preparedMask?.uploadMs ?? 0;
@@ -1260,6 +1531,12 @@ function LiveCameraProof(props: {
             lastShaderActive.value = false;
           }
 
+          const previousVectorPicture = liveVectorPicture.value;
+          const retiredVectorPicture = retiredLiveVectorPicture.value;
+          liveVectorPicture.value = null;
+          retiredLiveVectorPicture.value = previousVectorPicture;
+          disposeReactNativeSkiaPicture(retiredVectorPicture);
+
           stage = "render-synced-frame";
           runWithWorkletDebugLogging(
             {
@@ -1312,6 +1589,7 @@ function LiveCameraProof(props: {
             syncMode,
             timestamp: frame.timestamp,
             width: resolveLiveDetectionFrameSize(frame).width,
+            visibleKeypointCount: lastVisibleKeypointCount.value,
           });
         }
       } catch (error) {
@@ -1342,6 +1620,7 @@ function LiveCameraProof(props: {
       lastMaskJsFallbackCount,
       lastMaskPrepDurationMs,
       lastMaskUploadDurationMs,
+      lastVisibleKeypointCount,
       lastPresentedFrame,
       lastReadoutReportAt,
       lastSegmentationDurationMs,
@@ -1351,11 +1630,15 @@ function LiveCameraProof(props: {
       liveMaskUniforms,
       liveMediaRect,
       liveNativeMaskBuilder,
+      liveVectorPicture,
       classEffectsShared,
+      props.inferenceMode,
       reportLiveDetections,
       reportLiveError,
       reportLiveFrame,
       retiredLiveMaskImage,
+      retiredLiveVectorPicture,
+      runPoseOnFrame,
       runSegmentationOnFrame,
       showMaskLayerShared,
     ],
@@ -1384,8 +1667,13 @@ function LiveCameraProof(props: {
     [],
   );
 
-  const modelStatus = formatSegmentationStatus(props.segmentation);
-  const canRunCamera = hasPermission && device && props.segmentation.isReady;
+  const activeModel =
+    props.inferenceMode === "pose" ? props.pose : props.segmentation;
+  const modelStatus = formatInferenceStatus(
+    activeModel,
+    props.inferenceMode === "pose" ? "YOLO26N Pose" : "RF-DETR Seg",
+  );
+  const canRunCamera = hasPermission && device && activeModel.isReady;
 
   return (
     <View style={styles.liveScreen}>
@@ -1400,7 +1688,11 @@ function LiveCameraProof(props: {
         maskEffect={liveMaskEffect}
         maskImage={liveMaskImage}
         maskUniforms={liveMaskUniforms}
-        onPress={handleLiveStageTap}
+        onPress={
+          props.inferenceMode === "segmentation"
+            ? handleLiveStageTap
+            : undefined
+        }
         mediaLayer={
           <>
             {device ? (
@@ -1421,6 +1713,7 @@ function LiveCameraProof(props: {
         showBoxes={showBoxLayer}
         showMasks={showMaskLayer || effectsActive}
         stageStyle={styles.liveStage}
+        vectorPicture={liveVectorPicture}
       >
         {!canRunCamera ? (
           <View style={styles.stageOverlay}>
@@ -1442,7 +1735,11 @@ function LiveCameraProof(props: {
                 <BrandMark />
                 <View style={styles.headerCopy}>
                   <Text style={styles.title}>supervision-js</Text>
-                  <Text style={styles.subtitle}>Live RF-DETR camera</Text>
+                  <Text style={styles.subtitle}>
+                    {props.inferenceMode === "pose"
+                      ? "Live YOLO pose camera"
+                      : "Live RF-DETR camera"}
+                  </Text>
                 </View>
               </View>
               <ModeSwitch mode={props.mode} onModeChange={props.onModeChange} />
@@ -1460,48 +1757,98 @@ function LiveCameraProof(props: {
                 value={`prep ${liveFrame?.maskBuilder ?? "-"}`}
               />
               <StatusPill
-                value={`${liveFrame?.maskCount ?? 0} ${detectionDisplayMode}`}
+                value={`${liveFrame?.maskCount ?? 0} ${
+                  props.inferenceMode === "pose"
+                    ? "poses"
+                    : detectionDisplayMode
+                }`}
               />
             </View>
 
-            <ClassEffectChips
-              classEffects={classEffects}
-              onClear={clearClassEffect}
-            />
+            {props.inferenceMode === "segmentation" ? (
+              <ClassEffectChips
+                classEffects={classEffects}
+                onClear={clearClassEffect}
+              />
+            ) : null}
 
             <View style={styles.liveActions}>
               <TouchableOpacity
-                onPress={() => setDetectionDisplayMode("masks")}
+                onPress={() => props.onInferenceModeChange("segmentation")}
                 style={[
                   styles.floatingButton,
-                  showMaskLayer ? styles.floatingButtonActive : null,
+                  props.inferenceMode === "segmentation"
+                    ? styles.floatingButtonActive
+                    : null,
                 ]}
               >
                 <Text
                   style={[
                     styles.floatingButtonText,
-                    showMaskLayer ? styles.floatingButtonTextActive : null,
+                    props.inferenceMode === "segmentation"
+                      ? styles.floatingButtonTextActive
+                      : null,
                   ]}
                 >
-                  Masks
+                  Segment
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
-                onPress={() => setDetectionDisplayMode("boxes")}
+                onPress={() => props.onInferenceModeChange("pose")}
                 style={[
                   styles.floatingButton,
-                  showBoxLayer ? styles.floatingButtonActive : null,
+                  props.inferenceMode === "pose"
+                    ? styles.floatingButtonActive
+                    : null,
                 ]}
               >
                 <Text
                   style={[
                     styles.floatingButtonText,
-                    showBoxLayer ? styles.floatingButtonTextActive : null,
+                    props.inferenceMode === "pose"
+                      ? styles.floatingButtonTextActive
+                      : null,
                   ]}
                 >
-                  Boxes
+                  Pose
                 </Text>
               </TouchableOpacity>
+              {props.inferenceMode === "segmentation" ? (
+                <>
+                  <TouchableOpacity
+                    onPress={() => setDetectionDisplayMode("masks")}
+                    style={[
+                      styles.floatingButton,
+                      showMaskLayer ? styles.floatingButtonActive : null,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.floatingButtonText,
+                        showMaskLayer ? styles.floatingButtonTextActive : null,
+                      ]}
+                    >
+                      Masks
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => setDetectionDisplayMode("boxes")}
+                    style={[
+                      styles.floatingButton,
+                      showBoxLayer ? styles.floatingButtonActive : null,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.floatingButtonText,
+                        showBoxLayer ? styles.floatingButtonTextActive : null,
+                      ]}
+                    >
+                      Boxes
+                    </Text>
+                  </TouchableOpacity>
+                </>
+              ) : null}
               <TouchableOpacity
                 onPress={() => setShowLiveDebug((value) => !value)}
                 style={[
@@ -1566,13 +1913,27 @@ function LiveCameraProof(props: {
                 />
                 <LiveMetric
                   label="Model"
-                  value={LIVE_SEGMENTATION_PROFILE_LABEL}
+                  value={
+                    props.inferenceMode === "pose"
+                      ? "YOLO26N Pose 384"
+                      : LIVE_SEGMENTATION_PROFILE_LABEL
+                  }
                 />
                 <LiveMetric
-                  label="Seg p50/p90"
+                  label={
+                    props.inferenceMode === "pose"
+                      ? "Pose p50/p90"
+                      : "Seg p50/p90"
+                  }
                   value={formatLivePerformanceMetric(
                     livePerformance?.segmentation,
                   )}
+                />
+                <LiveMetric
+                  label="People / points"
+                  value={`${liveFrame?.maskCount ?? 0} / ${
+                    liveFrame?.visibleKeypointCount ?? 0
+                  }`}
                 />
                 <LiveMetric
                   label="Ser p50/p90"
@@ -2362,15 +2723,26 @@ function StatusPill(props: {
 }
 
 function formatSegmentationStatus(segmentation: LiveSegmentation) {
-  if (segmentation.error) {
+  return formatInferenceStatus(segmentation, "RF-DETR Seg");
+}
+
+function formatInferenceStatus(
+  inference: {
+    readonly downloadProgress: number;
+    readonly error: unknown;
+    readonly isReady: boolean;
+  },
+  readyLabel: string,
+) {
+  if (inference.error) {
     return "model error";
   }
 
-  if (segmentation.isReady) {
-    return "RF-DETR Seg ready";
+  if (inference.isReady) {
+    return `${readyLabel} ready`;
   }
 
-  return `preloading ${Math.round(segmentation.downloadProgress * 100)}%`;
+  return `preloading ${Math.round(inference.downloadProgress * 100)}%`;
 }
 
 function Metric(props: { readonly label: string; readonly value: string }) {

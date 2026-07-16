@@ -1,3 +1,9 @@
+import {
+  KeypointVisibility,
+  type Detection,
+  type DetectionFrame,
+} from "supervision-js-core";
+
 /**
  * ExecuTorch's frame orientation API is camera-centric: there is no value
  * meaning "the buffer is already screen-upright, leave inputs and outputs
@@ -30,6 +36,162 @@ export interface ExecutorchBbox {
   readonly y1: number;
   readonly x2: number;
   readonly y2: number;
+}
+
+export interface ExecutorchPosePoint {
+  readonly x: number;
+  readonly y: number;
+}
+
+export type ExecutorchCocoPose = Readonly<
+  Record<string, ExecutorchPosePoint | undefined>
+>;
+
+export interface ExecutorchCocoPoseFrameOptions {
+  readonly className?: string;
+  readonly frameIndex?: number;
+  readonly mediaTime?: number;
+  readonly minimumVisibleKeypoints?: number;
+  readonly poses: readonly ExecutorchCocoPose[];
+}
+
+/** Key order emitted by react-native-executorch's YOLO26N-Pose model. */
+export const EXECUTORCH_COCO_KEYPOINT_NAMES = [
+  "NOSE",
+  "LEFT_EYE",
+  "RIGHT_EYE",
+  "LEFT_EAR",
+  "RIGHT_EAR",
+  "LEFT_SHOULDER",
+  "RIGHT_SHOULDER",
+  "LEFT_ELBOW",
+  "RIGHT_ELBOW",
+  "LEFT_WRIST",
+  "RIGHT_WRIST",
+  "LEFT_HIP",
+  "RIGHT_HIP",
+  "LEFT_KNEE",
+  "RIGHT_KNEE",
+  "LEFT_ANKLE",
+  "RIGHT_ANKLE",
+] as const;
+
+/** Standard COCO-17 skeleton, using zero-based indices into the list above. */
+export const EXECUTORCH_COCO_SKELETON_EDGES: readonly (readonly [
+  number,
+  number,
+])[] = [
+  [0, 1],
+  [0, 2],
+  [1, 3],
+  [2, 4],
+  [5, 6],
+  [5, 7],
+  [7, 9],
+  [6, 8],
+  [8, 10],
+  [5, 11],
+  [6, 12],
+  [11, 12],
+  [11, 13],
+  [13, 15],
+  [12, 14],
+  [14, 16],
+];
+
+/**
+ * Converts named COCO-17 poses into renderer-neutral detections. ExecuTorch
+ * represents suppressed keypoints as `(-1, -1)`; those points are marked
+ * `NotLabeled`, excluded from the bbox, and removed from skeleton edges.
+ */
+export function createDetectionFrameFromExecutorchCocoPoses(
+  options: ExecutorchCocoPoseFrameOptions,
+): DetectionFrame {
+  "worklet";
+
+  const detections: Detection[] = [];
+  const minimumVisibleKeypoints = options.minimumVisibleKeypoints ?? 3;
+
+  for (let poseIndex = 0; poseIndex < options.poses.length; poseIndex += 1) {
+    const pose = options.poses[poseIndex]!;
+    const points: { x: number; y: number }[] = [];
+    const visibility: KeypointVisibility[] = [];
+    const visible: boolean[] = [];
+    let minX = Number.POSITIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+    let visibleCount = 0;
+
+    for (
+      let keypointIndex = 0;
+      keypointIndex < EXECUTORCH_COCO_KEYPOINT_NAMES.length;
+      keypointIndex += 1
+    ) {
+      const name = EXECUTORCH_COCO_KEYPOINT_NAMES[keypointIndex]!;
+      const point = pose[name];
+      const isVisible =
+        point !== undefined &&
+        Number.isFinite(point.x) &&
+        Number.isFinite(point.y) &&
+        point.x >= 0 &&
+        point.y >= 0;
+
+      visible[keypointIndex] = isVisible;
+
+      if (isVisible && point) {
+        points[keypointIndex] = { x: point.x, y: point.y };
+        visibility[keypointIndex] = KeypointVisibility.Visible;
+        minX = Math.min(minX, point.x);
+        minY = Math.min(minY, point.y);
+        maxX = Math.max(maxX, point.x);
+        maxY = Math.max(maxY, point.y);
+        visibleCount += 1;
+      } else {
+        points[keypointIndex] = { x: 0, y: 0 };
+        visibility[keypointIndex] = KeypointVisibility.NotLabeled;
+      }
+    }
+
+    if (visibleCount < minimumVisibleKeypoints) {
+      continue;
+    }
+
+    const edges: [number, number][] = [];
+
+    for (
+      let edgeIndex = 0;
+      edgeIndex < EXECUTORCH_COCO_SKELETON_EDGES.length;
+      edgeIndex += 1
+    ) {
+      const edge = EXECUTORCH_COCO_SKELETON_EDGES[edgeIndex]!;
+
+      if (visible[edge[0]] && visible[edge[1]]) {
+        edges[edges.length] = [edge[0], edge[1]];
+      }
+    }
+
+    const width = Math.max(1, maxX - minX);
+    const height = Math.max(1, maxY - minY);
+
+    detections[detections.length] = {
+      className: options.className ?? "person",
+      id: `pose:${options.frameIndex ?? 0}:${poseIndex}`,
+      keypoints: { edges, points, visibility },
+      rect: {
+        height,
+        width,
+        x: minX + width / 2,
+        y: minY + height / 2,
+      },
+    };
+  }
+
+  return {
+    detections,
+    frameIndex: options.frameIndex,
+    mediaTime: options.mediaTime ?? 0,
+  };
 }
 
 /**

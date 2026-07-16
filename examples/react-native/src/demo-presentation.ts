@@ -1,7 +1,9 @@
 import {
   BaseBoxStyle,
   BaseLabelStyle,
+  BaseKeypointStyle,
   BaseMaskStyle,
+  BasePolygonStyle,
   BoxShape,
   LabelPlacement,
   MaskRenderMode,
@@ -56,6 +58,41 @@ export function createDemoMaskStyle() {
     color: (detection) => resolveDemoDetectionColor(detection),
     mode: MaskRenderMode.FillOnly,
     opacity: DEMO_MASK_FILL_OPACITY,
+  });
+}
+
+export function createDemoPolygonStyle() {
+  return new BasePolygonStyle({
+    fill: (detection) => ({
+      alpha: 0.22,
+      color: resolveDemoDetectionColor(detection),
+    }),
+    stroke: (detection) => ({
+      alpha: 0.98,
+      color: resolveDemoDetectionColor(detection),
+      width: 3,
+    }),
+  });
+}
+
+export function createDemoKeypointStyle() {
+  return new BaseKeypointStyle({
+    edgeShadowStroke: null,
+    edgeStroke: (detection) => ({
+      alpha: 0.98,
+      color: resolveDemoDetectionColor(detection),
+      width: 3,
+    }),
+    markerFill: (detection) => ({
+      alpha: 1,
+      color: resolveDemoDetectionColor(detection),
+    }),
+    markerStroke: (detection) => ({
+      alpha: 1,
+      color: resolveDemoDetectionColor(detection),
+      width: 2,
+    }),
+    radius: 5,
   });
 }
 

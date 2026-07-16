@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { unrotateExecutorchUpBbox, type ExecutorchBbox } from "./executorch";
+import { KeypointVisibility } from "supervision-js-core";
+
+import {
+  createDetectionFrameFromExecutorchCocoPoses,
+  EXECUTORCH_COCO_KEYPOINT_NAMES,
+  unrotateExecutorchUpBbox,
+  type ExecutorchBbox,
+  type ExecutorchCocoPose,
+} from "./executorch";
 
 /**
  * ExecuTorch's forward mapping for `orientation: "up"` outputs, transcribed
@@ -57,5 +65,58 @@ describe("unrotateExecutorchUpBbox", () => {
       expect(roundTripped.x1).toBeLessThanOrEqual(roundTripped.x2);
       expect(roundTripped.y1).toBeLessThanOrEqual(roundTripped.y2);
     }
+  });
+});
+
+describe("createDetectionFrameFromExecutorchCocoPoses", () => {
+  it("maps valid COCO points, filters missing edges, and derives a bbox", () => {
+    const pose = Object.fromEntries(
+      EXECUTORCH_COCO_KEYPOINT_NAMES.map((name, index) => [
+        name,
+        { x: 100 + index * 2, y: 200 + index * 3 },
+      ]),
+    ) as ExecutorchCocoPose;
+
+    const frame = createDetectionFrameFromExecutorchCocoPoses({
+      frameIndex: 7,
+      mediaTime: 0.25,
+      poses: [
+        {
+          ...pose,
+          LEFT_WRIST: { x: -1, y: -1 },
+        },
+      ],
+    });
+
+    expect(frame.frameIndex).toBe(7);
+    expect(frame.mediaTime).toBe(0.25);
+    expect(frame.detections).toHaveLength(1);
+    expect(frame.detections[0]).toMatchObject({
+      className: "person",
+      id: "pose:7:0",
+      rect: { height: 48, width: 32, x: 116, y: 224 },
+    });
+    expect(frame.detections[0]!.keypoints?.points).toHaveLength(17);
+    expect(frame.detections[0]!.keypoints?.visibility?.[9]).toBe(
+      KeypointVisibility.NotLabeled,
+    );
+    expect(
+      frame.detections[0]!.keypoints?.edges.some(
+        ([from, to]) => from === 7 && to === 9,
+      ),
+    ).toBe(false);
+  });
+
+  it("drops poses without enough visible points", () => {
+    const frame = createDetectionFrameFromExecutorchCocoPoses({
+      poses: [
+        {
+          LEFT_SHOULDER: { x: 10, y: 20 },
+          RIGHT_SHOULDER: { x: 20, y: 20 },
+        },
+      ],
+    });
+
+    expect(frame.detections).toEqual([]);
   });
 });
