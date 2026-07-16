@@ -14,7 +14,10 @@ const fixtureMetaModules = import.meta.glob(
   },
 ) as Record<string, DemoFixtureMeta>;
 const fixtureManifestUrls = import.meta.glob(
-  "../../fixtures/*/detections.manifest.json",
+  [
+    "../../fixtures/*/detections.manifest.json",
+    "!../../fixtures/basketball_sam3/detections.manifest.json",
+  ],
   {
     eager: true,
     import: "default",
@@ -33,7 +36,10 @@ const fixtureMediaUrls = import.meta.glob(
   },
 ) as Record<string, string>;
 const sampleDetectionChunkUrls = import.meta.glob(
-  "../../fixtures/*/detections/*.json",
+  [
+    "../../fixtures/*/detections/*.json",
+    "!../../fixtures/basketball_sam3/detections/*.json",
+  ],
   {
     eager: true,
     import: "default",
@@ -56,6 +62,7 @@ interface DemoFixtureMeta {
   readonly displayName: string;
   readonly inferenceLabel: string;
   readonly sampleName: string;
+  readonly showInDemo?: boolean;
   readonly media: {
     readonly file: string;
     readonly loadingStatusLabel: string;
@@ -274,6 +281,10 @@ function createDemoFixtures(): readonly DemoFixtureDefinition[] {
         console.warn(
           `Skipping fixture metadata with unknown schema at ${metaPath}.`,
         );
+        return [];
+      }
+
+      if (meta.showInDemo === false) {
         return [];
       }
 

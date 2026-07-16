@@ -47,6 +47,32 @@ describe("fixture geometry", () => {
 });
 
 describe("geometry showcase fixture", () => {
+  it("exposes only the horse trail and combined basketball samples", () => {
+    expect(
+      demoFixtures.map(({ displayName, sampleName }) => ({
+        displayName,
+        sampleName,
+      })),
+    ).toEqual([
+      { displayName: "70s horse trail", sampleName: "horse_trail" },
+      {
+        displayName: "Basketball with Keypoints",
+        sampleName: "basketball_geometry",
+      },
+    ]);
+  });
+
+  it("disables unavailable vector layers by default for the horse trail", () => {
+    const fixture = demoFixtures.find(
+      ({ sampleName }) => sampleName === "horse_trail",
+    );
+
+    expect(fixture?.presentationDefaults).toEqual({
+      keypointsEnabled: false,
+      polygonsEnabled: false,
+    });
+  });
+
   it("defaults the basketball keypoint sample to keypoints and labels", () => {
     const fixture = demoFixtures.find(
       ({ sampleName }) => sampleName === "basketball_geometry",

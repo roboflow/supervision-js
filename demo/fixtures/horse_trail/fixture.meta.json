@@ -8,6 +8,10 @@
     "normalizeInBrowser": true,
     "readyStatusLabel": "70s horse trail source media | browser-normalized WebM 30fps"
   },
+  "presentation": {
+    "keypointsEnabled": false,
+    "polygonsEnabled": false
+  },
   "sampleName": "horse_trail",
   "schema": "supervision-js.demo.sam3-fixture-meta",
   "version": 1

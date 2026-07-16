@@ -10,5 +10,6 @@
   },
   "sampleName": "basketball_sam3",
   "schema": "supervision-js.demo.sam3-fixture-meta",
+  "showInDemo": false,
   "version": 1
 }
