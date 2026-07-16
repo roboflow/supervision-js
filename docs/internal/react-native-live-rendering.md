@@ -54,14 +54,27 @@ count. The rolling view is important because single-frame timings are noisy on
 mobile and can hide whether the bottleneck is the model, JS/worklet mask fill,
 Skia upload, or React diagnostics.
 
+The example's **Instant CV** mode reuses this same strict-sync callback for
+teach-by-touch rules. React owns infrequent authoring state, then mirrors a
+bounded semantic rule packet into a shared value. The frame worklet evaluates
+the packet against the matching segmentation or pose result, prepares the
+normal mask/vector presentation, and reports only status transitions back to
+React for rule cards and edge-triggered haptics. Touch feedback and static rule
+geometry render in the synchronized stage without making React the frame clock.
+
+The first example-owned recipes are Golden Pose, Safety Zone, and Clear to
+Start. They deliberately use pose angles, body anchors, class presence, and
+mask-aware frame-local picking. They do not promise re-identification, custom
+industrial classes, or saved/composited camera recording.
+
 On iOS, the demo explicitly requests the RF-DETR Nano segmentation CoreML INT8
 profile through ExecuTorch. ExecuTorch remains example-owned; it is a detection
 producer, not a renderer dependency.
 
 This is intentionally still a proof. It does not yet have a reusable
-`createReactNativeLiveSession()` API, native-thread prepared windows, interaction
-layers, recorded-video providers, or a fully custom Skia/native renderer that
-imports and draws the camera frame directly.
+`createReactNativeLiveSession()` API, native-thread prepared windows, a reusable
+live interaction/rule layer, camera recording/export, or a fully custom
+Skia/native renderer that imports and draws the camera frame directly.
 
 ## Next Architecture Step
 

@@ -1,6 +1,7 @@
 import {
   AlphaType,
   Canvas,
+  Circle,
   ColorType,
   FilterMode,
   ImageShader,
@@ -37,6 +38,7 @@ import {
   type StyleProp,
   type ViewStyle,
   useWindowDimensions,
+  Vibration,
   View,
 } from "react-native";
 import {
@@ -65,6 +67,7 @@ import {
   type DetectionPickResult,
   type KeypointDrawInstruction,
   type LabelDrawInstruction,
+  type PolygonDrawInstruction,
   REACT_NATIVE_ID_MASK_SHADER_SOURCE,
   resolveDetectionClassColorStyle,
   createReactNativePreparedFramePacket,
@@ -120,6 +123,21 @@ import {
   createDetectionFrameFromExecutorchCocoPoses,
   unrotateExecutorchUpBbox,
 } from "supervision-js-react-native/adapters/executorch";
+import {
+  createInstantCvGoldenPoseBaseline,
+  createInstantCvRuleVectorInstructions,
+  createInstantCvRuntimeSignature,
+  evaluateInstantCvRules,
+  normalizeInstantCvRect,
+  pickInstantCvObjectAtPoint,
+  pickInstantCvPoseAtPoint,
+  type InstantCvNormalizedPoint,
+  type InstantCvNormalizedRect,
+  type InstantCvPoseDetection,
+  type InstantCvRecipe,
+  type InstantCvRule,
+  type InstantCvRuleRuntime,
+} from "./src/instant-cv";
 
 function swapLiveVectorPicture(
   livePicture: SharedValue<SkPicture>,
@@ -140,7 +158,7 @@ function swapLiveVectorPicture(
   disposeReactNativeSkiaPicture(obsoletePicture);
 }
 
-type DemoMode = "static" | "live" | "video";
+type DemoMode = "static" | "live" | "video" | "instant";
 type LiveInferenceMode = "segmentation" | "pose";
 type LiveDetectionDisplayMode = "masks" | "boxes";
 type LiveClassEffect = "redact" | "spotlight";
@@ -205,7 +223,7 @@ export default function App() {
   const segmentation = useLiveSegmentation();
   const pose = useLivePose();
 
-  if (mode === "live") {
+  if (mode === "live" || mode === "instant") {
     return (
       <LiveCameraProof
         inferenceMode={liveInferenceMode}
@@ -569,6 +587,7 @@ interface LiveFrameState {
   readonly maskFillMs: number;
   readonly maskPrepMs: number;
   readonly maskUploadMs: number;
+  readonly ruleEvalMs: number;
   readonly segmentationMs: number;
   readonly serializationMs: number;
   readonly shaderActive: boolean;
@@ -591,6 +610,7 @@ interface LivePerformanceSummary {
   readonly fill: LivePerformanceMetric;
   readonly maskCount: number;
   readonly prep: LivePerformanceMetric;
+  readonly ruleEval: LivePerformanceMetric;
   readonly sampleCount: number;
   readonly segmentation: LivePerformanceMetric;
   readonly serialization: LivePerformanceMetric;
@@ -603,6 +623,40 @@ interface LiveOverlayDetection {
   readonly color: number;
   readonly label: string;
   readonly score: number;
+}
+
+interface InstantCvTouchRequest {
+  readonly id: number;
+  readonly kind: "capture-pose" | "pick-object";
+  readonly point: InstantCvNormalizedPoint;
+}
+
+type InstantCvWorkletPickResult =
+  | {
+      readonly baselineAngles: readonly number[];
+      readonly baselinePoints: readonly {
+        readonly visible: boolean;
+        readonly x: number;
+        readonly y: number;
+      }[];
+      readonly kind: "pose";
+      readonly requestId: number;
+    }
+  | {
+      readonly kind: "object";
+      readonly label: string;
+      readonly requestId: number;
+      readonly usedMask: boolean;
+    }
+  | {
+      readonly kind: "miss";
+      readonly requestId: number;
+    };
+
+interface SyncedStageGesturePoint {
+  readonly timestamp: number;
+  readonly x: number;
+  readonly y: number;
 }
 
 interface LiveFrameError {
@@ -661,6 +715,7 @@ interface SyncedFrameStageProps {
   readonly canvasStyle?: StyleProp<ViewStyle>;
   readonly canvasWidth: number;
   readonly children?: ReactNode;
+  readonly interactionLayer?: ReactNode;
   readonly labels: readonly SyncedLabelOverlay[];
   readonly layout: ReactNativeFrameLayout;
   readonly maskEffect: ReturnType<typeof Skia.RuntimeEffect.Make> | null;
@@ -673,6 +728,10 @@ interface SyncedFrameStageProps {
     readonly x: number;
     readonly y: number;
   }) => void;
+  readonly onGestureCancel?: () => void;
+  readonly onGestureEnd?: (point: SyncedStageGesturePoint) => void;
+  readonly onGestureMove?: (point: SyncedStageGesturePoint) => void;
+  readonly onGestureStart?: (point: SyncedStageGesturePoint) => void;
   readonly showBoxes?: boolean;
   readonly showMasks?: boolean;
   readonly stageStyle?: StyleProp<ViewStyle>;
@@ -683,20 +742,49 @@ interface SyncedFrameStageProps {
 function SyncedFrameStage(props: SyncedFrameStageProps) {
   const showMasks = props.showMasks ?? true;
   const showBoxes = props.showBoxes ?? true;
+  const hasGestureHandler = props.onGestureStart !== undefined;
+  const createGesturePoint = (event: {
+    readonly nativeEvent: {
+      readonly locationX: number;
+      readonly locationY: number;
+    };
+  }) => ({
+    timestamp: Date.now(),
+    x: event.nativeEvent.locationX,
+    y: event.nativeEvent.locationY,
+  });
 
   return (
     <View
-      onResponderRelease={
-        props.onPress
-          ? (event) => {
-              props.onPress?.({
-                x: event.nativeEvent.locationX,
-                y: event.nativeEvent.locationY,
-              });
-            }
+      onMoveShouldSetResponder={hasGestureHandler ? () => true : undefined}
+      onResponderGrant={
+        hasGestureHandler
+          ? (event) => props.onGestureStart?.(createGesturePoint(event))
           : undefined
       }
-      onStartShouldSetResponder={props.onPress ? () => true : undefined}
+      onResponderMove={
+        hasGestureHandler
+          ? (event) => props.onGestureMove?.(createGesturePoint(event))
+          : undefined
+      }
+      onResponderRelease={
+        hasGestureHandler
+          ? (event) => props.onGestureEnd?.(createGesturePoint(event))
+          : props.onPress
+            ? (event) => {
+                props.onPress?.({
+                  x: event.nativeEvent.locationX,
+                  y: event.nativeEvent.locationY,
+                });
+              }
+            : undefined
+      }
+      onResponderTerminate={
+        hasGestureHandler ? props.onGestureCancel : undefined
+      }
+      onStartShouldSetResponder={
+        hasGestureHandler || props.onPress ? () => true : undefined
+      }
       style={[
         styles.syncedFrameStage,
         props.stageStyle,
@@ -761,6 +849,7 @@ function SyncedFrameStage(props: SyncedFrameStageProps) {
         {props.vectorPicture ? (
           <Picture picture={props.vectorPicture as never} />
         ) : null}
+        {props.interactionLayer}
         {showBoxes
           ? props.boxes.map((box) => (
               <Fragment key={box.key}>
@@ -959,6 +1048,187 @@ function createLivePoseKeypointInstructions(
   return instructions;
 }
 
+function resolveInstantCvStatusColor(status: InstantCvRuleRuntime["status"]) {
+  switch (status) {
+    case "pass":
+      return "#57f287";
+    case "fail":
+      return "#ff5d73";
+    case "evaluating":
+      return "#ffd166";
+    default:
+      return "#70e1f5";
+  }
+}
+
+function InstantCvCanvasOverlay(props: {
+  readonly draftZone: InstantCvNormalizedRect | null;
+  readonly layout: ReactNativeFrameLayout;
+  readonly pendingZone: InstantCvNormalizedRect | null;
+  readonly touchPoint: InstantCvNormalizedPoint | null;
+}) {
+  const mapPoint = (point: InstantCvNormalizedPoint) => ({
+    x: props.layout.mediaRect.x + point.x * props.layout.mediaRect.width,
+    y: props.layout.mediaRect.y + point.y * props.layout.mediaRect.height,
+  });
+  const mapZone = (zone: InstantCvNormalizedRect) => ({
+    height: zone.height * props.layout.mediaRect.height,
+    width: zone.width * props.layout.mediaRect.width,
+    x: props.layout.mediaRect.x + zone.x * props.layout.mediaRect.width,
+    y: props.layout.mediaRect.y + zone.y * props.layout.mediaRect.height,
+  });
+
+  return (
+    <>
+      {props.pendingZone ? (
+        <RoundedRect
+          color="#70e1f5"
+          height={mapZone(props.pendingZone).height}
+          opacity={0.9}
+          r={14}
+          strokeWidth={3}
+          style="stroke"
+          width={mapZone(props.pendingZone).width}
+          x={mapZone(props.pendingZone).x}
+          y={mapZone(props.pendingZone).y}
+        />
+      ) : null}
+      {props.draftZone ? (
+        <RoundedRect
+          color="#ffffff"
+          height={mapZone(props.draftZone).height}
+          opacity={0.9}
+          r={14}
+          strokeWidth={2}
+          style="stroke"
+          width={mapZone(props.draftZone).width}
+          x={mapZone(props.draftZone).x}
+          y={mapZone(props.draftZone).y}
+        />
+      ) : null}
+      {props.touchPoint ? (
+        <Circle
+          color="#ffffff"
+          cx={mapPoint(props.touchPoint).x}
+          cy={mapPoint(props.touchPoint).y}
+          opacity={0.88}
+          r={12}
+          strokeWidth={3}
+          style="stroke"
+        />
+      ) : null}
+    </>
+  );
+}
+
+const INSTANT_CV_RECIPE_OPTIONS: readonly {
+  readonly label: string;
+  readonly recipe: InstantCvRecipe;
+}[] = [
+  { label: "Golden Pose", recipe: "golden-pose" },
+  { label: "Safety Zone", recipe: "safety-zone" },
+  { label: "Clear to Start", recipe: "clear-to-start" },
+];
+
+function InstantCvHud(props: {
+  readonly canRunCamera: boolean;
+  readonly message: string;
+  readonly mode: DemoMode;
+  readonly modelStatus: string;
+  readonly onClear: () => void;
+  readonly onModeChange: (mode: DemoMode) => void;
+  readonly onRecipeChange: (recipe: InstantCvRecipe) => void;
+  readonly recipe: InstantCvRecipe;
+  readonly rules: readonly InstantCvRule[];
+  readonly runtime: readonly InstantCvRuleRuntime[];
+}) {
+  const activeRule = props.rules[0];
+  const activeRuntime = activeRule
+    ? props.runtime.find((entry) => entry.id === activeRule.id)
+    : undefined;
+  const status = activeRuntime?.status ?? "unknown";
+  const statusColor = resolveInstantCvStatusColor(status);
+  const statusLabel = activeRule
+    ? status === "pass"
+      ? "Ready"
+      : status === "fail"
+        ? "Action needed"
+        : status === "evaluating"
+          ? "Checking…"
+          : "Looking…"
+    : "Teach a rule";
+
+  return (
+    <>
+      <View style={styles.instantTopBar}>
+        <View style={styles.liveBrand}>
+          <BrandMark />
+          <View style={styles.headerCopy}>
+            <Text style={styles.title}>Instant CV</Text>
+            <Text style={styles.subtitle}>Teach the camera by touch</Text>
+          </View>
+        </View>
+        <ModeSwitch mode={props.mode} onModeChange={props.onModeChange} />
+      </View>
+
+      <View style={styles.instantRecipeDock}>
+        {INSTANT_CV_RECIPE_OPTIONS.map((option) => {
+          const active = option.recipe === props.recipe;
+
+          return (
+            <TouchableOpacity
+              key={option.recipe}
+              onPress={() => props.onRecipeChange(option.recipe)}
+              style={[
+                styles.instantRecipeButton,
+                active ? styles.instantRecipeButtonActive : null,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.instantRecipeLabel,
+                  active ? styles.instantRecipeLabelActive : null,
+                ]}
+              >
+                {option.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
+      <View style={styles.instantStatusCard}>
+        <View style={styles.instantStatusHeader}>
+          <View style={styles.instantStatusTitleRow}>
+            <View
+              style={[
+                styles.instantStatusDot,
+                { backgroundColor: statusColor },
+              ]}
+            />
+            <Text style={styles.instantStatusTitle}>{statusLabel}</Text>
+          </View>
+          <StatusPill
+            tone={props.canRunCamera ? "ready" : "warning"}
+            value={props.canRunCamera ? "on device" : props.modelStatus}
+          />
+        </View>
+        <Text style={styles.instantStatusMessage}>{props.message}</Text>
+        {activeRuntime?.score !== undefined ? (
+          <Text style={styles.instantScore}>
+            Pose delta {Math.round(activeRuntime.score)}°
+          </Text>
+        ) : null}
+        {props.rules.length > 0 ? (
+          <TouchableOpacity onPress={props.onClear} style={styles.instantReset}>
+            <Text style={styles.instantResetText}>Teach again</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+    </>
+  );
+}
+
 function LiveCameraProof(props: {
   readonly inferenceMode: LiveInferenceMode;
   readonly mode: DemoMode;
@@ -967,6 +1237,7 @@ function LiveCameraProof(props: {
   readonly pose: LivePose;
   readonly segmentation: LiveSegmentation;
 }) {
+  const isInstantCv = props.mode === "instant";
   const window = useWindowDimensions();
   const device = useCameraDevice("back");
   const { hasPermission, requestPermission } = useCameraPermission();
@@ -984,6 +1255,31 @@ function LiveCameraProof(props: {
     useState<LiveDetectionDisplayMode>("masks");
   const [classEffects, setClassEffects] = useState<LiveClassEffects>({});
   const [tapMenuLabel, setTapMenuLabel] = useState<string | null>(null);
+  const [instantRecipe, setInstantRecipe] =
+    useState<InstantCvRecipe>("golden-pose");
+  const [instantRules, setInstantRules] = useState<readonly InstantCvRule[]>(
+    [],
+  );
+  const [instantRuntime, setInstantRuntime] = useState<
+    readonly InstantCvRuleRuntime[]
+  >([]);
+  const instantRuntimeRef = useRef<readonly InstantCvRuleRuntime[]>([]);
+  const [instantDraftZone, setInstantDraftZone] =
+    useState<InstantCvNormalizedRect | null>(null);
+  const [instantPendingZone, setInstantPendingZone] =
+    useState<InstantCvNormalizedRect | null>(null);
+  const [instantTouchPoint, setInstantTouchPoint] =
+    useState<InstantCvNormalizedPoint | null>(null);
+  const [instantMessage, setInstantMessage] = useState(
+    "Hold a person to teach the golden pose.",
+  );
+  const instantPendingZoneRef = useRef<InstantCvNormalizedRect | null>(null);
+  const instantGestureRef = useRef<{
+    readonly canvasStart: { readonly x: number; readonly y: number };
+    readonly normalizedStart: InstantCvNormalizedPoint;
+    readonly timestamp: number;
+  } | null>(null);
+  const instantRequestIdRef = useRef(0);
   const frameRenderer = useFrameRenderer();
   const canvasWidth = window.width;
   const canvasHeight = window.height;
@@ -1060,6 +1356,7 @@ function LiveCameraProof(props: {
   const lastMaskFillDurationMs = useSharedValue(0);
   const lastMaskPrepDurationMs = useSharedValue(0);
   const lastMaskUploadDurationMs = useSharedValue(0);
+  const lastRuleEvalDurationMs = useSharedValue(0);
   const lastSegmentationDurationMs = useSharedValue(0);
   const lastSerializationDurationMs = useSharedValue(0);
   const lastShaderActive = useSharedValue(false);
@@ -1077,6 +1374,15 @@ function LiveCameraProof(props: {
   // several times per second.
   const showMaskLayerShared = useSharedValue(showMaskLayer);
   const classEffectsShared = useSharedValue<LiveClassEffects>({});
+  const instantRulesShared = useSharedValue<readonly InstantCvRule[]>([]);
+  const instantRuntimeShared = useSharedValue<readonly InstantCvRuleRuntime[]>(
+    [],
+  );
+  const instantRuntimeSignatureShared = useSharedValue("");
+  const instantCvActiveShared = useSharedValue(isInstantCv);
+  const instantTouchRequestShared =
+    useSharedValue<InstantCvTouchRequest | null>(null);
+  const lastInstantTouchRequestId = useSharedValue(0);
   const runSegmentationOnFrame = props.segmentation.runOnFrame;
   const runPoseOnFrame = props.pose.runOnFrame;
   const liveSyncedOverlays = useMemo(
@@ -1142,6 +1448,46 @@ function LiveCameraProof(props: {
   useEffect(() => {
     classEffectsShared.value = classEffects;
   }, [classEffects, classEffectsShared]);
+  useEffect(() => {
+    instantRulesShared.value = instantRules;
+  }, [instantRules, instantRulesShared]);
+  useEffect(() => {
+    instantCvActiveShared.value = isInstantCv;
+  }, [instantCvActiveShared, isInstantCv]);
+  useEffect(() => {
+    instantPendingZoneRef.current = instantPendingZone;
+  }, [instantPendingZone]);
+  useEffect(() => {
+    if (isInstantCv) {
+      return;
+    }
+
+    setInstantRules([]);
+    setInstantRuntime([]);
+    instantRuntimeRef.current = [];
+    setInstantDraftZone(null);
+    setInstantPendingZone(null);
+    instantPendingZoneRef.current = null;
+    instantRulesShared.value = [];
+    instantRuntimeShared.value = [];
+    instantRuntimeSignatureShared.value = "";
+    instantTouchRequestShared.value = null;
+  }, [
+    instantRulesShared,
+    instantRuntimeShared,
+    instantRuntimeSignatureShared,
+    instantTouchRequestShared,
+    isInstantCv,
+  ]);
+  useEffect(() => {
+    if (!isInstantCv) {
+      return;
+    }
+
+    props.onInferenceModeChange(
+      instantRecipe === "clear-to-start" ? "segmentation" : "pose",
+    );
+  }, [instantRecipe, isInstantCv, props.onInferenceModeChange]);
   useEffect(
     () => () => {
       disposeReactNativeSkiaImage(liveMaskImage.value);
@@ -1181,6 +1527,292 @@ function LiveCameraProof(props: {
     },
     [],
   );
+  const reportInstantCvRuntime = useCallback(
+    (next: readonly InstantCvRuleRuntime[]) => {
+      const previous = instantRuntimeRef.current;
+
+      for (const entry of next) {
+        const prior = previous.find((candidate) => candidate.id === entry.id);
+
+        if (
+          prior?.status !== entry.status &&
+          (entry.status === "pass" || entry.status === "fail")
+        ) {
+          Vibration.vibrate(entry.status === "pass" ? 24 : [0, 35, 45, 35]);
+        }
+      }
+
+      instantRuntimeRef.current = next;
+      setInstantRuntime(next);
+    },
+    [],
+  );
+  const reportInstantCvPick = useCallback(
+    (result: InstantCvWorkletPickResult) => {
+      if (result.kind === "pose") {
+        const nextRules: readonly InstantCvRule[] = [
+          {
+            baselineAngles: result.baselineAngles,
+            baselinePoints: result.baselinePoints,
+            dwellMs: 450,
+            id: `golden-pose-${result.requestId}`,
+            recipe: "golden-pose",
+            toleranceDegrees: 16,
+          },
+        ];
+        setInstantRules(nextRules);
+        instantRulesShared.value = nextRules;
+        setInstantRuntime([]);
+        instantRuntimeRef.current = [];
+        instantRuntimeShared.value = [];
+        setInstantMessage("Golden pose captured. Match the ghost skeleton.");
+        Vibration.vibrate(28);
+        return;
+      }
+
+      if (result.kind === "object") {
+        const zone = instantPendingZoneRef.current;
+
+        if (!zone) {
+          return;
+        }
+
+        const nextRules: readonly InstantCvRule[] = [
+          {
+            className: result.label,
+            dwellMs: 300,
+            id: `clear-to-start-${result.requestId}`,
+            recipe: "clear-to-start",
+            zone,
+          },
+        ];
+        setInstantRules(nextRules);
+        instantRulesShared.value = nextRules;
+        setInstantRuntime([]);
+        instantRuntimeRef.current = [];
+        instantRuntimeShared.value = [];
+        setInstantPendingZone(null);
+        instantPendingZoneRef.current = null;
+        setInstantMessage(
+          `${result.label} must be absent. Clear the zone to turn it green.`,
+        );
+        Vibration.vibrate(28);
+        return;
+      }
+
+      setInstantMessage(
+        "Nothing detected there. Try touching the visible shape.",
+      );
+    },
+    [instantRulesShared, instantRuntimeShared],
+  );
+  const selectInstantRecipe = useCallback(
+    (recipe: InstantCvRecipe) => {
+      setInstantRecipe(recipe);
+      setInstantRules([]);
+      instantRulesShared.value = [];
+      setInstantRuntime([]);
+      instantRuntimeRef.current = [];
+      setInstantDraftZone(null);
+      setInstantPendingZone(null);
+      if (recipe === "clear-to-start") {
+        setDetectionDisplayMode("masks");
+      }
+      instantPendingZoneRef.current = null;
+      instantRuntimeShared.value = [];
+      instantRuntimeSignatureShared.value = "";
+      instantTouchRequestShared.value = null;
+      setInstantMessage(
+        recipe === "golden-pose"
+          ? "Hold a person to teach the golden pose."
+          : recipe === "safety-zone"
+            ? "Draw a keep-out zone under the person."
+            : "Draw a work zone, then tap the object that must be absent.",
+      );
+      Vibration.vibrate(16);
+    },
+    [
+      instantRuntimeShared,
+      instantRulesShared,
+      instantRuntimeSignatureShared,
+      instantTouchRequestShared,
+    ],
+  );
+  const clearInstantRules = useCallback(() => {
+    setInstantRules([]);
+    instantRulesShared.value = [];
+    setInstantRuntime([]);
+    instantRuntimeRef.current = [];
+    setInstantDraftZone(null);
+    setInstantPendingZone(null);
+    instantPendingZoneRef.current = null;
+    instantRuntimeShared.value = [];
+    instantRuntimeSignatureShared.value = "";
+    instantTouchRequestShared.value = null;
+    setInstantMessage(
+      instantRecipe === "golden-pose"
+        ? "Hold a person to teach the golden pose."
+        : instantRecipe === "safety-zone"
+          ? "Draw a keep-out zone under the person."
+          : "Draw a work zone, then tap the object that must be absent.",
+    );
+  }, [
+    instantRecipe,
+    instantRuntimeShared,
+    instantRulesShared,
+    instantRuntimeSignatureShared,
+    instantTouchRequestShared,
+  ]);
+  const mapInstantCvPoint = useCallback(
+    (point: { readonly x: number; readonly y: number }) => {
+      const mediaPoint = liveLayout.mapCanvasPoint(point);
+      const frameWidth = liveFrame?.width ?? LIVE_FRAME_TARGET_RESOLUTION.width;
+      const frameHeight =
+        liveFrame?.height ?? LIVE_FRAME_TARGET_RESOLUTION.height;
+
+      if (!mediaPoint || frameWidth <= 0 || frameHeight <= 0) {
+        return null;
+      }
+
+      return {
+        x: Math.max(0, Math.min(1, mediaPoint.x / frameWidth)),
+        y: Math.max(0, Math.min(1, mediaPoint.y / frameHeight)),
+      };
+    },
+    [liveFrame?.height, liveFrame?.width, liveLayout],
+  );
+  const handleInstantGestureStart = useCallback(
+    (point: SyncedStageGesturePoint) => {
+      const normalized = mapInstantCvPoint(point);
+
+      if (!normalized) {
+        instantGestureRef.current = null;
+        return;
+      }
+
+      instantGestureRef.current = {
+        canvasStart: point,
+        normalizedStart: normalized,
+        timestamp: point.timestamp,
+      };
+      setInstantTouchPoint(normalized);
+
+      if (instantRecipe !== "golden-pose") {
+        setInstantDraftZone(normalizeInstantCvRect(normalized, normalized));
+      }
+    },
+    [instantRecipe, mapInstantCvPoint],
+  );
+  const handleInstantGestureMove = useCallback(
+    (point: SyncedStageGesturePoint) => {
+      const gesture = instantGestureRef.current;
+      const normalized = mapInstantCvPoint(point);
+
+      if (!gesture || !normalized || instantRecipe === "golden-pose") {
+        return;
+      }
+
+      setInstantDraftZone(
+        normalizeInstantCvRect(gesture.normalizedStart, normalized),
+      );
+    },
+    [instantRecipe, mapInstantCvPoint],
+  );
+  const handleInstantGestureEnd = useCallback(
+    (point: SyncedStageGesturePoint) => {
+      const gesture = instantGestureRef.current;
+      const normalized = mapInstantCvPoint(point);
+
+      instantGestureRef.current = null;
+      setInstantTouchPoint(null);
+
+      if (!gesture || !normalized) {
+        setInstantDraftZone(null);
+        return;
+      }
+
+      const distance = Math.hypot(
+        point.x - gesture.canvasStart.x,
+        point.y - gesture.canvasStart.y,
+      );
+      const duration = point.timestamp - gesture.timestamp;
+
+      if (instantRecipe === "golden-pose") {
+        if (duration < 420 || distance > 24) {
+          setInstantMessage(
+            "Hold still on a person until the teach ring completes.",
+          );
+          return;
+        }
+
+        const request = {
+          id: ++instantRequestIdRef.current,
+          kind: "capture-pose" as const,
+          point: normalized,
+        };
+        instantTouchRequestShared.value = request;
+        setInstantMessage("Capturing the next synchronized pose…");
+        return;
+      }
+
+      const zone = normalizeInstantCvRect(gesture.normalizedStart, normalized);
+      setInstantDraftZone(null);
+
+      if (
+        instantRecipe === "clear-to-start" &&
+        instantPendingZoneRef.current &&
+        distance < 12
+      ) {
+        instantTouchRequestShared.value = {
+          id: ++instantRequestIdRef.current,
+          kind: "pick-object",
+          point: normalized,
+        };
+        setInstantMessage("Reading the touched mask on the next frame…");
+        return;
+      }
+
+      if (zone.width < 0.035 || zone.height < 0.035) {
+        setInstantMessage("Draw a larger zone directly on the camera view.");
+        return;
+      }
+
+      if (instantRecipe === "safety-zone") {
+        const nextRules: readonly InstantCvRule[] = [
+          {
+            dwellMs: 180,
+            id: `safety-zone-${Date.now()}`,
+            recipe: "safety-zone",
+            zone,
+          },
+        ];
+        setInstantRules(nextRules);
+        instantRulesShared.value = nextRules;
+        setInstantRuntime([]);
+        instantRuntimeRef.current = [];
+        instantRuntimeShared.value = [];
+        setInstantMessage("Keep ankles outside the zone. Step in to test it.");
+        Vibration.vibrate(24);
+        return;
+      }
+
+      setInstantPendingZone(zone);
+      instantPendingZoneRef.current = zone;
+      setInstantMessage("Now tap the object class that must be absent.");
+    },
+    [
+      instantRecipe,
+      instantRulesShared,
+      instantRuntimeShared,
+      instantTouchRequestShared,
+      mapInstantCvPoint,
+    ],
+  );
+  const handleInstantGestureCancel = useCallback(() => {
+    instantGestureRef.current = null;
+    setInstantDraftZone(null);
+    setInstantTouchPoint(null);
+  }, []);
   // Tapping a detection opens a small action menu for its class. Class-based
   // actions need no tracker: the class name is the identity, and any new
   // instance of a redacted class is covered the moment it is detected.
@@ -1264,6 +1896,113 @@ function LiveCameraProof(props: {
             mediaTime: frame.timestamp / 1_000_000_000,
             poses: rawPoses,
           });
+          let instantRuleKeypoints: readonly KeypointDrawInstruction[] = [];
+          let instantRulePolygons: readonly PolygonDrawInstruction[] = [];
+          if (instantCvActiveShared.value) {
+            const instantPoses: InstantCvPoseDetection[] = [];
+
+            for (
+              let poseIndex = 0;
+              poseIndex < detectionFrame.detections.length;
+              poseIndex += 1
+            ) {
+              const geometry = detectionFrame.detections[poseIndex]?.keypoints;
+
+              if (!geometry) {
+                continue;
+              }
+
+              const points: {
+                visible: boolean;
+                x: number;
+                y: number;
+              }[] = [];
+
+              for (
+                let pointIndex = 0;
+                pointIndex < geometry.points.length;
+                pointIndex += 1
+              ) {
+                const point = geometry.points[pointIndex]!;
+                points[pointIndex] = {
+                  visible: geometry.visibility?.[pointIndex] !== 0,
+                  x: point.x,
+                  y: point.y,
+                };
+              }
+
+              instantPoses[instantPoses.length] = { points };
+            }
+
+            const instantRuleStartedAt = Date.now();
+            const nextInstantRuntime = evaluateInstantCvRules({
+              frameHeight: detectionFrameSize.height,
+              frameWidth: detectionFrameSize.width,
+              nowMs: Date.now(),
+              poses: instantPoses,
+              previous: instantRuntimeShared.value,
+              rules: instantRulesShared.value,
+            });
+            instantRuntimeShared.value = nextInstantRuntime;
+            lastRuleEvalDurationMs.value = Date.now() - instantRuleStartedAt;
+            const instantRuleVector = createInstantCvRuleVectorInstructions({
+              frameHeight: detectionFrameSize.height,
+              frameWidth: detectionFrameSize.width,
+              markerShape: KeypointMarkerShape.Circle,
+              rules: instantRulesShared.value,
+              runtime: nextInstantRuntime,
+            });
+            instantRuleKeypoints = instantRuleVector.keypoints;
+            instantRulePolygons = instantRuleVector.polygons;
+            const instantSignature =
+              createInstantCvRuntimeSignature(nextInstantRuntime);
+
+            if (instantSignature !== instantRuntimeSignatureShared.value) {
+              instantRuntimeSignatureShared.value = instantSignature;
+              scheduleOnRN(reportInstantCvRuntime, nextInstantRuntime);
+            }
+
+            const instantTouchRequest = instantTouchRequestShared.value;
+
+            if (
+              instantTouchRequest?.kind === "capture-pose" &&
+              instantTouchRequest.id !== lastInstantTouchRequestId.value
+            ) {
+              lastInstantTouchRequestId.value = instantTouchRequest.id;
+              instantTouchRequestShared.value = null;
+              const poseIndex = pickInstantCvPoseAtPoint({
+                frameHeight: detectionFrameSize.height,
+                frameWidth: detectionFrameSize.width,
+                point: instantTouchRequest.point,
+                poses: instantPoses,
+              });
+              const pose = poseIndex >= 0 ? instantPoses[poseIndex] : undefined;
+              const baselineAngles = pose
+                ? createInstantCvGoldenPoseBaseline(pose.points)
+                : null;
+
+              if (pose && baselineAngles) {
+                scheduleOnRN(reportInstantCvPick, {
+                  baselineAngles,
+                  baselinePoints: pose.points.map((point) => ({
+                    visible: point.visible,
+                    x: point.x / detectionFrameSize.width,
+                    y: point.y / detectionFrameSize.height,
+                  })),
+                  kind: "pose",
+                  requestId: instantTouchRequest.id,
+                });
+              } else {
+                scheduleOnRN(reportInstantCvPick, {
+                  kind: "miss",
+                  requestId: instantTouchRequest.id,
+                });
+              }
+            }
+          } else {
+            lastRuleEvalDurationMs.value = 0;
+          }
+
           const instructions =
             createLivePoseKeypointInstructions(detectionFrame);
           const overlayDetections: LiveOverlayDetection[] = [];
@@ -1294,8 +2033,9 @@ function LiveCameraProof(props: {
           const preparedVector = createReactNativeSkiaVectorFrame({
             frameHeight: detectionFrameSize.height,
             frameWidth: detectionFrameSize.width,
-            keypoints: instructions,
+            keypoints: [...instructions, ...instantRuleKeypoints],
             mediaRect,
+            polygons: instantRulePolygons,
           });
 
           stage = "pose-assign-prepared";
@@ -1393,6 +2133,78 @@ function LiveCameraProof(props: {
             },
           );
           const serializationMs = Date.now() - serializationStartedAt;
+          let instantRuleKeypoints: readonly KeypointDrawInstruction[] = [];
+          let instantRulePolygons: readonly PolygonDrawInstruction[] = [];
+          if (instantCvActiveShared.value) {
+            const instantObjects = detections.map((detection) => ({
+              bbox: detection.bbox,
+              label: detection.label ?? "object",
+              mask: detection.mask,
+              maskHeight: detection.maskHeight,
+              maskWidth: detection.maskWidth,
+            }));
+            const instantRuleStartedAt = Date.now();
+            const nextInstantRuntime = evaluateInstantCvRules({
+              frameHeight: detectionFrameSize.height,
+              frameWidth: detectionFrameSize.width,
+              nowMs: Date.now(),
+              objects: instantObjects,
+              previous: instantRuntimeShared.value,
+              rules: instantRulesShared.value,
+            });
+            instantRuntimeShared.value = nextInstantRuntime;
+            lastRuleEvalDurationMs.value = Date.now() - instantRuleStartedAt;
+            const instantRuleVector = createInstantCvRuleVectorInstructions({
+              frameHeight: detectionFrameSize.height,
+              frameWidth: detectionFrameSize.width,
+              markerShape: KeypointMarkerShape.Circle,
+              rules: instantRulesShared.value,
+              runtime: nextInstantRuntime,
+            });
+            instantRuleKeypoints = instantRuleVector.keypoints;
+            instantRulePolygons = instantRuleVector.polygons;
+            const instantSignature =
+              createInstantCvRuntimeSignature(nextInstantRuntime);
+
+            if (instantSignature !== instantRuntimeSignatureShared.value) {
+              instantRuntimeSignatureShared.value = instantSignature;
+              scheduleOnRN(reportInstantCvRuntime, nextInstantRuntime);
+            }
+
+            const instantTouchRequest = instantTouchRequestShared.value;
+
+            if (
+              instantTouchRequest?.kind === "pick-object" &&
+              instantTouchRequest.id !== lastInstantTouchRequestId.value
+            ) {
+              lastInstantTouchRequestId.value = instantTouchRequest.id;
+              instantTouchRequestShared.value = null;
+              const pick = pickInstantCvObjectAtPoint({
+                detections: instantObjects,
+                frameHeight: detectionFrameSize.height,
+                frameWidth: detectionFrameSize.width,
+                point: instantTouchRequest.point,
+              });
+
+              scheduleOnRN(
+                reportInstantCvPick,
+                pick
+                  ? {
+                      kind: "object",
+                      label: pick.label,
+                      requestId: instantTouchRequest.id,
+                      usedMask: pick.usedMask,
+                    }
+                  : {
+                      kind: "miss",
+                      requestId: instantTouchRequest.id,
+                    },
+              );
+            }
+          } else {
+            lastRuleEvalDurationMs.value = 0;
+          }
+
           const classEffects = classEffectsShared.value;
           const overlayDetections: LiveOverlayDetection[] = [];
 
@@ -1569,11 +2381,20 @@ function LiveCameraProof(props: {
             lastShaderActive.value = false;
           }
 
+          stage = "rule-prepare-vector";
+          const preparedRuleVector = createReactNativeSkiaVectorFrame({
+            frameHeight: detectionFrameSize.height,
+            frameWidth: detectionFrameSize.width,
+            keypoints: instantRuleKeypoints,
+            mediaRect,
+            polygons: instantRulePolygons,
+          });
+
           swapLiveVectorPicture(
             liveVectorPicture,
             liveVectorPictureIsEmpty,
             retiredLiveVectorPicture,
-            null,
+            preparedRuleVector?.picture ?? null,
             emptyLiveVectorPicture,
           );
 
@@ -1623,6 +2444,7 @@ function LiveCameraProof(props: {
             maskFillMs: lastMaskFillDurationMs.value,
             maskPrepMs: lastMaskPrepDurationMs.value,
             maskUploadMs: lastMaskUploadDurationMs.value,
+            ruleEvalMs: lastRuleEvalDurationMs.value,
             segmentationMs: lastSegmentationDurationMs.value,
             serializationMs: lastSerializationDurationMs.value,
             shaderActive: lastShaderActive.value,
@@ -1661,6 +2483,7 @@ function LiveCameraProof(props: {
       lastMaskJsFallbackCount,
       lastMaskPrepDurationMs,
       lastMaskUploadDurationMs,
+      lastRuleEvalDurationMs,
       lastVisibleKeypointCount,
       lastPresentedFrame,
       lastReadoutReportAt,
@@ -1674,7 +2497,15 @@ function LiveCameraProof(props: {
       liveVectorPicture,
       liveVectorPictureIsEmpty,
       classEffectsShared,
+      instantCvActiveShared,
+      instantRulesShared,
+      instantRuntimeShared,
+      instantRuntimeSignatureShared,
+      instantTouchRequestShared,
+      lastInstantTouchRequestId,
       props.inferenceMode,
+      reportInstantCvPick,
+      reportInstantCvRuntime,
       reportLiveDetections,
       reportLiveError,
       reportLiveFrame,
@@ -1727,14 +2558,28 @@ function LiveCameraProof(props: {
         canvasWidth={canvasWidth}
         labels={liveSyncedOverlays.labels}
         layout={liveLayout}
+        interactionLayer={
+          isInstantCv ? (
+            <InstantCvCanvasOverlay
+              draftZone={instantDraftZone}
+              layout={liveLayout}
+              pendingZone={instantPendingZone}
+              touchPoint={instantTouchPoint}
+            />
+          ) : undefined
+        }
         maskEffect={liveMaskEffect}
         maskImage={liveMaskImage}
         maskUniforms={liveMaskUniforms}
         onPress={
-          props.inferenceMode === "segmentation"
+          !isInstantCv && props.inferenceMode === "segmentation"
             ? handleLiveStageTap
             : undefined
         }
+        onGestureCancel={isInstantCv ? handleInstantGestureCancel : undefined}
+        onGestureEnd={isInstantCv ? handleInstantGestureEnd : undefined}
+        onGestureMove={isInstantCv ? handleInstantGestureMove : undefined}
+        onGestureStart={isInstantCv ? handleInstantGestureStart : undefined}
         mediaLayer={
           <>
             {device ? (
@@ -1770,7 +2615,20 @@ function LiveCameraProof(props: {
           </View>
         ) : null}
 
-        {showLiveHud ? (
+        {isInstantCv ? (
+          <InstantCvHud
+            canRunCamera={Boolean(canRunCamera)}
+            message={instantMessage}
+            mode={props.mode}
+            modelStatus={modelStatus}
+            onClear={clearInstantRules}
+            onModeChange={props.onModeChange}
+            onRecipeChange={selectInstantRecipe}
+            recipe={instantRecipe}
+            rules={instantRules}
+            runtime={instantRuntime}
+          />
+        ) : showLiveHud ? (
           <>
             <View style={styles.liveTopBar}>
               <View style={styles.liveBrand}>
@@ -1986,6 +2844,10 @@ function LiveCameraProof(props: {
                 <LiveMetric
                   label="Prep p50/p90"
                   value={formatLivePerformanceMetric(livePerformance?.prep)}
+                />
+                <LiveMetric
+                  label="Rules p50/p90"
+                  value={formatLivePerformanceMetric(livePerformance?.ruleEval)}
                 />
                 <LiveMetric
                   label="Fill p50/p90"
@@ -2726,6 +3588,22 @@ function ModeSwitch(props: {
           Video
         </Text>
       </TouchableOpacity>
+      <TouchableOpacity
+        onPress={() => props.onModeChange("instant")}
+        style={[
+          styles.modeButton,
+          props.mode === "instant" ? styles.modeButtonActive : null,
+        ]}
+      >
+        <Text
+          style={[
+            styles.modeButtonText,
+            props.mode === "instant" ? styles.modeButtonTextActive : null,
+          ]}
+        >
+          Instant CV
+        </Text>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -2860,6 +3738,10 @@ function summarizeLivePerformance(
     prep: summarizeLivePerformanceMetric(
       samples,
       (sample) => sample.maskPrepMs,
+    ),
+    ruleEval: summarizeLivePerformanceMetric(
+      samples,
+      (sample) => sample.ruleEvalMs,
     ),
     sampleCount: samples.length,
     segmentation: summarizeLivePerformanceMetric(
@@ -3273,6 +4155,107 @@ const styles = StyleSheet.create({
     top: 142,
     zIndex: 6,
   },
+  instantTopBar: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    left: 14,
+    position: "absolute",
+    right: 14,
+    top: 58,
+    zIndex: 7,
+  },
+  instantRecipeDock: {
+    backgroundColor: "rgba(5, 7, 11, 0.78)",
+    borderColor: "rgba(216, 226, 240, 0.16)",
+    borderRadius: 16,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 5,
+    left: 14,
+    padding: 5,
+    position: "absolute",
+    right: 14,
+    top: 118,
+    zIndex: 7,
+  },
+  instantRecipeButton: {
+    alignItems: "center",
+    borderRadius: 12,
+    flex: 1,
+    paddingHorizontal: 6,
+    paddingVertical: 10,
+  },
+  instantRecipeButtonActive: {
+    backgroundColor: "rgba(248, 250, 252, 0.96)",
+  },
+  instantRecipeLabel: {
+    color: "#aeb7c6",
+    fontSize: 10,
+    fontWeight: "900",
+    textAlign: "center",
+  },
+  instantRecipeLabelActive: {
+    color: "#050608",
+  },
+  instantStatusCard: {
+    backgroundColor: "rgba(5, 7, 11, 0.88)",
+    borderColor: "rgba(216, 226, 240, 0.18)",
+    borderRadius: 18,
+    borderWidth: 1,
+    bottom: 28,
+    gap: 8,
+    left: 14,
+    padding: 14,
+    position: "absolute",
+    right: 14,
+    zIndex: 7,
+  },
+  instantStatusHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  instantStatusTitleRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 8,
+  },
+  instantStatusDot: {
+    borderRadius: 6,
+    height: 12,
+    width: 12,
+  },
+  instantStatusTitle: {
+    color: "#f8fafc",
+    fontSize: 17,
+    fontWeight: "900",
+  },
+  instantStatusMessage: {
+    color: "#cbd3df",
+    fontSize: 13,
+    fontWeight: "700",
+    lineHeight: 18,
+  },
+  instantScore: {
+    color: "#ffd166",
+    fontSize: 12,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "900",
+  },
+  instantReset: {
+    alignItems: "center",
+    alignSelf: "flex-start",
+    backgroundColor: "rgba(248, 250, 252, 0.12)",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  instantResetText: {
+    color: "#f8fafc",
+    fontSize: 11,
+    fontWeight: "900",
+  },
   privacyChipRow: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -3431,7 +4414,7 @@ const styles = StyleSheet.create({
   },
   modeButton: {
     borderRadius: 999,
-    paddingHorizontal: 10,
+    paddingHorizontal: 7,
     paddingVertical: 6,
   },
   modeButtonActive: {
@@ -3439,7 +4422,7 @@ const styles = StyleSheet.create({
   },
   modeButtonText: {
     color: "#9aa4b2",
-    fontSize: 11,
+    fontSize: 9,
     fontWeight: "900",
   },
   modeButtonTextActive: {

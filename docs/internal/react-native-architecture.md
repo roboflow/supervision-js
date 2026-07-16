@@ -109,6 +109,14 @@ sizing helper, Roboflow-style palette helper, and the worklet-callable JS
 fallback builder. The example still owns the hot VisionCamera and ExecuTorch
 worklet because those are producer choices.
 
+The example also proves an Instant CV interaction layer without promoting a
+product-specific rule schema into the package. Touch-authored rules remain
+example state, are compiled into bounded worklet-safe packets, and are evaluated
+beside the matching live inference result. Core/package capabilities remain the
+coordinate mapping, semantic geometry, picking, styles, and prepared rendering
+lanes; recipe UI, haptics, ExecuTorch outputs, and rule semantics stay
+example-owned until another consumer validates a reusable boundary.
+
 The package also ships an experimental Nitro-based native builder
 (`IdMaskBuilder`, Swift/iOS, `SupervisionIdMask` pod) that runs the same
 Alpha_8 fill loop natively and returns raw artifact bytes plus palette buffers
