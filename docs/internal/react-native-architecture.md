@@ -117,8 +117,9 @@ coordinate mapping, semantic geometry, picking, styles, and prepared rendering
 lanes; recipe UI, haptics, ExecuTorch outputs, and rule semantics stay
 example-owned until another consumer validates a reusable boundary.
 
-Golden Pose consumes the pose producer. Safety Zone and Clear to Start consume
-segmentation masks and accept rectangular or free-shape polygon zones. The live
+Golden Pose consumes the pose producer. Safety Zone and Privacy consume
+segmentation masks. Safety Zone accepts rectangular or free-shape polygon zones;
+Privacy teaches class-wide GPU mosaic redaction through object taps. The live
 mask lane uses a transparent one-pixel sentinel while no mask packet exists, so
 an empty detection frame or model transition cannot feed a null image into the
 Skia shader and paint the camera stage black.

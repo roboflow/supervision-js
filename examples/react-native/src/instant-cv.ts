@@ -1,4 +1,4 @@
-export type InstantCvRecipe = "golden-pose" | "safety-zone" | "clear-to-start";
+export type InstantCvRecipe = "golden-pose" | "safety-zone" | "privacy";
 
 export function resolveInstantCvInferenceMode(
   recipe: InstantCvRecipe,
@@ -74,14 +74,7 @@ export interface InstantCvSafetyZoneRule extends InstantCvRuleBase {
   readonly zone: InstantCvZone;
 }
 
-export interface InstantCvClearToStartRule extends InstantCvRuleBase {
-  readonly className: string;
-  readonly recipe: "clear-to-start";
-  readonly zone: InstantCvZone;
-}
-
-export type InstantCvRule =
-  InstantCvGoldenPoseRule | InstantCvSafetyZoneRule | InstantCvClearToStartRule;
+export type InstantCvRule = InstantCvGoldenPoseRule | InstantCvSafetyZoneRule;
 
 export interface InstantCvRuleRuntime {
   readonly candidate: Exclude<InstantCvRuleStatus, "evaluating">;
@@ -623,35 +616,6 @@ function instantCvEvaluateSafetyZone(
   return { candidate: "pass" as const };
 }
 
-function instantCvEvaluateClearToStart(
-  rule: InstantCvClearToStartRule,
-  objects: readonly InstantCvObjectDetection[],
-  frameWidth: number,
-  frameHeight: number,
-) {
-  "worklet";
-
-  if (frameWidth <= 0 || frameHeight <= 0) {
-    return { candidate: "unknown" as const };
-  }
-
-  for (let index = 0; index < objects.length; index += 1) {
-    const object = objects[index]!;
-
-    if (object.label !== rule.className) {
-      continue;
-    }
-
-    if (
-      instantCvObjectOverlapsZone(object, rule.zone, frameWidth, frameHeight)
-    ) {
-      return { candidate: "fail" as const };
-    }
-  }
-
-  return { candidate: "pass" as const };
-}
-
 export function createInstantCvGoldenPoseBaseline(
   points: readonly InstantCvPosePoint[],
 ) {
@@ -676,19 +640,12 @@ export function evaluateInstantCvRules(
     const evaluation =
       rule.recipe === "golden-pose"
         ? instantCvEvaluateGoldenPose(rule, poses)
-        : rule.recipe === "safety-zone"
-          ? instantCvEvaluateSafetyZone(
-              rule,
-              objects,
-              options.frameWidth,
-              options.frameHeight,
-            )
-          : instantCvEvaluateClearToStart(
-              rule,
-              objects,
-              options.frameWidth,
-              options.frameHeight,
-            );
+        : instantCvEvaluateSafetyZone(
+            rule,
+            objects,
+            options.frameWidth,
+            options.frameHeight,
+          );
 
     next[index] = instantCvApplyDwell(
       rule,

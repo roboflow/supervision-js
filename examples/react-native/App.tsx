@@ -671,7 +671,7 @@ interface LiveOverlayDetection {
 interface InstantCvTouchRequest {
   readonly id: number;
   readonly kind:
-    "capture-pose" | "pick-clear-to-start-object" | "pick-safety-zone-object";
+    "capture-pose" | "pick-privacy-object" | "pick-safety-zone-object";
   readonly point: InstantCvNormalizedPoint;
 }
 
@@ -690,7 +690,7 @@ type InstantCvWorkletPickResult =
       readonly kind: "object";
       readonly label: string;
       readonly requestId: number;
-      readonly target: "clear-to-start" | "safety-zone";
+      readonly target: "privacy" | "safety-zone";
       readonly usedMask: boolean;
     }
   | {
@@ -1109,7 +1109,6 @@ function resolveInstantCvStatusColor(status: InstantCvRuleRuntime["status"]) {
 function InstantCvCanvasOverlay(props: {
   readonly draftZone: InstantCvZone | null;
   readonly layout: ReactNativeFrameLayout;
-  readonly pendingZone: InstantCvZone | null;
   readonly touchPoint: InstantCvNormalizedPoint | null;
 }) {
   const mapPoint = (point: InstantCvNormalizedPoint) => ({
@@ -1140,9 +1139,6 @@ function InstantCvCanvasOverlay(props: {
 
   return (
     <>
-      {props.pendingZone ? (
-        <>{renderZone(props.pendingZone, "#70e1f5", 3, "pending")}</>
-      ) : null}
       {props.draftZone ? (
         <>{renderZone(props.draftZone, "#ffffff", 2, "draft")}</>
       ) : null}
@@ -1167,7 +1163,7 @@ const INSTANT_CV_RECIPE_OPTIONS: readonly {
 }[] = [
   { label: "Golden Pose", recipe: "golden-pose" },
   { label: "Safety Zone", recipe: "safety-zone" },
-  { label: "Clear to Start", recipe: "clear-to-start" },
+  { label: "Privacy", recipe: "privacy" },
 ];
 
 function InstantCvHud(props: {
@@ -1177,9 +1173,11 @@ function InstantCvHud(props: {
   readonly modelStatus: string;
   readonly onClear: () => void;
   readonly onModeChange: (mode: DemoMode) => void;
+  readonly onRemovePrivacyClass: (label: string) => void;
   readonly onRecipeChange: (recipe: InstantCvRecipe) => void;
   readonly onRemoveSafetyClass: (label: string) => void;
   readonly onZoneShapeChange: (shape: InstantCvZoneShape) => void;
+  readonly privacyClassNames: readonly string[];
   readonly recipe: InstantCvRecipe;
   readonly rules: readonly InstantCvRule[];
   readonly runtime: readonly InstantCvRuleRuntime[];
@@ -1190,22 +1188,31 @@ function InstantCvHud(props: {
     ? props.runtime.find((entry) => entry.id === activeRule.id)
     : undefined;
   const status = activeRuntime?.status ?? "unknown";
-  const statusColor = resolveInstantCvStatusColor(status);
   const safetyClassNames =
     activeRule?.recipe === "safety-zone" ? activeRule.prohibitedClassNames : [];
+  const isPrivacy = props.recipe === "privacy";
+  const classListNames = isPrivacy ? props.privacyClassNames : safetyClassNames;
+  const showsClassList = props.recipe === "safety-zone" || isPrivacy;
   const isChoosingSafetyClasses =
     activeRule?.recipe === "safety-zone" && safetyClassNames.length === 0;
-  const statusLabel = activeRule
-    ? isChoosingSafetyClasses
-      ? "Choose classes"
-      : status === "pass"
-        ? "Ready"
-        : status === "fail"
-          ? "Action needed"
-          : status === "evaluating"
-            ? "Checking…"
-            : "Looking…"
-    : "Teach a rule";
+  const statusColor = resolveInstantCvStatusColor(
+    isPrivacy && props.privacyClassNames.length > 0 ? "pass" : status,
+  );
+  const statusLabel = isPrivacy
+    ? props.privacyClassNames.length > 0
+      ? "Privacy active"
+      : "Choose classes"
+    : activeRule
+      ? isChoosingSafetyClasses
+        ? "Choose classes"
+        : status === "pass"
+          ? "Ready"
+          : status === "fail"
+            ? "Action needed"
+            : status === "evaluating"
+              ? "Checking…"
+              : "Looking…"
+      : "Teach a rule";
 
   return (
     <>
@@ -1246,23 +1253,27 @@ function InstantCvHud(props: {
         })}
       </View>
 
-      {props.recipe === "safety-zone" ? (
+      {showsClassList ? (
         <View style={styles.instantSafetyClasses}>
           <View style={styles.instantSafetyClassesHeader}>
             <Text style={styles.instantSafetyClassesTitle}>
-              Must not be in zone
+              {isPrivacy ? "Pixelated classes" : "Must not be in zone"}
             </Text>
             <Text style={styles.instantSafetyClassesCount}>
-              {safetyClassNames.length}
+              {classListNames.length}
             </Text>
           </View>
-          {safetyClassNames.length > 0 ? (
+          {classListNames.length > 0 ? (
             <View style={styles.instantSafetyClassList}>
-              {safetyClassNames.map((label) => (
+              {classListNames.map((label) => (
                 <TouchableOpacity
-                  accessibilityLabel={`Remove ${label} from prohibited classes`}
+                  accessibilityLabel={`Remove ${label} from ${isPrivacy ? "pixelated" : "prohibited"} classes`}
                   key={label}
-                  onPress={() => props.onRemoveSafetyClass(label)}
+                  onPress={() =>
+                    isPrivacy
+                      ? props.onRemovePrivacyClass(label)
+                      : props.onRemoveSafetyClass(label)
+                  }
                   style={styles.instantSafetyClassChip}
                 >
                   <Text style={styles.instantSafetyClassChipText}>
@@ -1273,7 +1284,9 @@ function InstantCvHud(props: {
             </View>
           ) : (
             <Text style={styles.instantSafetyClassesEmpty}>
-              None yet — draw a zone, then tap an object.
+              {isPrivacy
+                ? "None yet — tap an object to pixelate its class."
+                : "None yet — draw a zone, then tap an object."}
             </Text>
           )}
         </View>
@@ -1295,7 +1308,7 @@ function InstantCvHud(props: {
             value={props.canRunCamera ? "on device" : props.modelStatus}
           />
         </View>
-        {props.recipe !== "golden-pose" ? (
+        {props.recipe === "safety-zone" ? (
           <View style={styles.instantShapeSwitch}>
             {(
               [
@@ -1333,7 +1346,7 @@ function InstantCvHud(props: {
             Pose delta {Math.round(activeRuntime.score)}°
           </Text>
         ) : null}
-        {props.rules.length > 0 ? (
+        {props.rules.length > 0 || props.privacyClassNames.length > 0 ? (
           <TouchableOpacity onPress={props.onClear} style={styles.instantReset}>
             <Text style={styles.instantResetText}>Teach again</Text>
           </TouchableOpacity>
@@ -1383,14 +1396,11 @@ function LiveCameraProof(props: {
   const instantRuntimeRef = useRef<readonly InstantCvRuleRuntime[]>([]);
   const [instantDraftZone, setInstantDraftZone] =
     useState<InstantCvZone | null>(null);
-  const [instantPendingZone, setInstantPendingZone] =
-    useState<InstantCvZone | null>(null);
   const [instantTouchPoint, setInstantTouchPoint] =
     useState<InstantCvNormalizedPoint | null>(null);
   const [instantMessage, setInstantMessage] = useState(
     "Hold a person to teach the golden pose.",
   );
-  const instantPendingZoneRef = useRef<InstantCvZone | null>(null);
   const instantGestureRef = useRef<{
     readonly canvasStart: { readonly x: number; readonly y: number };
     readonly freeShapePoints: InstantCvNormalizedPoint[];
@@ -1401,15 +1411,19 @@ function LiveCameraProof(props: {
   const frameRenderer = useFrameRenderer();
   const canvasWidth = window.width;
   const canvasHeight = window.height;
+  const isInstantPrivacy = isInstantCv && instantRecipe === "privacy";
   const showMaskLayer =
     props.inferenceMode === "segmentation" && detectionDisplayMode === "masks";
+  const showRawMaskLayer = showMaskLayer && !isInstantPrivacy;
   const showBoxLayer =
-    props.inferenceMode === "segmentation" && detectionDisplayMode === "boxes";
+    !isInstantPrivacy &&
+    props.inferenceMode === "segmentation" &&
+    detectionDisplayMode === "boxes";
   // The mask lane doubles as the effect lane: even in boxes display mode the
   // mask artifact runs whenever a class has an effect (redact, spotlight).
   const effectsActive =
-    !isInstantCv &&
     props.inferenceMode === "segmentation" &&
+    (!isInstantCv || isInstantPrivacy) &&
     Object.keys(classEffects).length > 0;
   const emptyLiveMaskUniforms = useMemo(
     () => createEmptyReactNativeLiveIdMaskUniforms(),
@@ -1493,7 +1507,7 @@ function LiveCameraProof(props: {
   // changes the worklet identity every render, which makes useFrameOutput
   // re-serialize and swap the camera frame callback on the live camera thread
   // several times per second.
-  const showMaskLayerShared = useSharedValue(showMaskLayer);
+  const showMaskLayerShared = useSharedValue(showRawMaskLayer);
   const classEffectsShared = useSharedValue<LiveClassEffects>({});
   const inferenceModeShared = useSharedValue<LiveInferenceMode>(
     props.inferenceMode,
@@ -1574,17 +1588,17 @@ function LiveCameraProof(props: {
     retiredLiveVectorPicture,
   ]);
   useEffect(() => {
-    showMaskLayerShared.value = showMaskLayer;
-  }, [showMaskLayer, showMaskLayerShared]);
+    showMaskLayerShared.value = showRawMaskLayer;
+  }, [showMaskLayerShared, showRawMaskLayer]);
   useEffect(() => {
-    classEffectsShared.value = isInstantCv ? {} : classEffects;
-  }, [classEffects, classEffectsShared, isInstantCv]);
+    classEffectsShared.value =
+      !isInstantCv || instantRecipe === "privacy" ? classEffects : {};
+  }, [classEffects, classEffectsShared, instantRecipe, isInstantCv]);
   useEffect(() => {
-    if (isInstantCv) {
-      setClassEffects({});
-      setTapMenuLabel(null);
-    }
-  }, [isInstantCv]);
+    setClassEffects({});
+    classEffectsShared.value = {};
+    setTapMenuLabel(null);
+  }, [classEffectsShared, isInstantCv]);
   useEffect(() => {
     instantRulesShared.value = instantRules;
   }, [instantRules, instantRulesShared]);
@@ -1592,9 +1606,6 @@ function LiveCameraProof(props: {
     instantCvActiveShared.value = isInstantCv;
     setAwaitingSyncedFrame(true);
   }, [instantCvActiveShared, isInstantCv]);
-  useEffect(() => {
-    instantPendingZoneRef.current = instantPendingZone;
-  }, [instantPendingZone]);
   useEffect(() => {
     if (isInstantCv) {
       return;
@@ -1604,8 +1615,6 @@ function LiveCameraProof(props: {
     setInstantRuntime([]);
     instantRuntimeRef.current = [];
     setInstantDraftZone(null);
-    setInstantPendingZone(null);
-    instantPendingZoneRef.current = null;
     instantRulesShared.value = [];
     instantRuntimeShared.value = [];
     instantRuntimeSignatureShared.value = "";
@@ -1762,30 +1771,22 @@ function LiveCameraProof(props: {
           return;
         }
 
-        const zone = instantPendingZoneRef.current;
+        const currentEffects = classEffectsShared.value;
 
-        if (!zone) {
+        if (currentEffects[result.label] === "redact") {
+          setInstantMessage(`${result.label} is already pixelated.`);
+          Vibration.vibrate(12);
           return;
         }
 
-        const nextRules: readonly InstantCvRule[] = [
-          {
-            className: result.label,
-            dwellMs: 300,
-            id: `clear-to-start-${result.requestId}`,
-            recipe: "clear-to-start",
-            zone,
-          },
-        ];
-        setInstantRules(nextRules);
-        instantRulesShared.value = nextRules;
-        setInstantRuntime([]);
-        instantRuntimeRef.current = [];
-        instantRuntimeShared.value = [];
-        setInstantPendingZone(null);
-        instantPendingZoneRef.current = null;
+        const nextEffects: LiveClassEffects = {
+          ...currentEffects,
+          [result.label]: "redact",
+        };
+        setClassEffects(nextEffects);
+        classEffectsShared.value = nextEffects;
         setInstantMessage(
-          `${result.label} must be absent. Clear the zone to turn it green.`,
+          `${result.label} is now pixelated. Tap another object to redact its class too.`,
         );
         Vibration.vibrate(28);
         return;
@@ -1795,7 +1796,7 @@ function LiveCameraProof(props: {
         "Nothing detected there. Try touching the visible shape.",
       );
     },
-    [instantRulesShared, instantRuntimeShared],
+    [classEffectsShared, instantRulesShared, instantRuntimeShared],
   );
   const selectInstantRecipe = useCallback(
     (recipe: InstantCvRecipe) => {
@@ -1810,11 +1811,11 @@ function LiveCameraProof(props: {
       setInstantRuntime([]);
       instantRuntimeRef.current = [];
       setInstantDraftZone(null);
-      setInstantPendingZone(null);
+      setClassEffects({});
+      classEffectsShared.value = {};
       if (recipe !== "golden-pose") {
         setDetectionDisplayMode("masks");
       }
-      instantPendingZoneRef.current = null;
       instantRuntimeShared.value = [];
       instantRuntimeSignatureShared.value = "";
       instantTouchRequestShared.value = null;
@@ -1823,12 +1824,13 @@ function LiveCameraProof(props: {
           ? "Hold a person to teach the golden pose."
           : recipe === "safety-zone"
             ? "Draw a keep-out zone, then tap objects that must stay outside it."
-            : "Draw a work zone, then tap the object that must be absent.",
+            : "Tap any object to pixelate every detection of that class.",
       );
       Vibration.vibrate(16);
     },
     [
       inferenceModeShared,
+      classEffectsShared,
       instantRuntimeShared,
       instantRulesShared,
       instantRuntimeSignatureShared,
@@ -1842,8 +1844,8 @@ function LiveCameraProof(props: {
     setInstantRuntime([]);
     instantRuntimeRef.current = [];
     setInstantDraftZone(null);
-    setInstantPendingZone(null);
-    instantPendingZoneRef.current = null;
+    setClassEffects({});
+    classEffectsShared.value = {};
     instantRuntimeShared.value = [];
     instantRuntimeSignatureShared.value = "";
     instantTouchRequestShared.value = null;
@@ -1852,9 +1854,10 @@ function LiveCameraProof(props: {
         ? "Hold a person to teach the golden pose."
         : instantRecipe === "safety-zone"
           ? "Draw a keep-out zone, then tap objects that must stay outside it."
-          : "Draw a work zone, then tap the object that must be absent.",
+          : "Tap any object to pixelate every detection of that class.",
     );
   }, [
+    classEffectsShared,
     instantRecipe,
     instantRuntimeShared,
     instantRulesShared,
@@ -1871,18 +1874,13 @@ function LiveCameraProof(props: {
       instantRuntimeShared.value = [];
       instantRuntimeSignatureShared.value = "";
       setInstantDraftZone(null);
-      setInstantPendingZone(null);
-      instantPendingZoneRef.current = null;
       instantTouchRequestShared.value = null;
       setInstantMessage(
-        instantRecipe === "safety-zone"
-          ? `Draw a ${shape === "rectangle" ? "rectangular" : "free-shape"} keep-out zone, then tap prohibited objects.`
-          : `Draw a ${shape === "rectangle" ? "rectangular" : "free-shape"} work zone, then tap the object that must be absent.`,
+        `Draw a ${shape === "rectangle" ? "rectangular" : "free-shape"} keep-out zone, then tap prohibited objects.`,
       );
       Vibration.vibrate(12);
     },
     [
-      instantRecipe,
       instantRulesShared,
       instantRuntimeShared,
       instantRuntimeSignatureShared,
@@ -1920,6 +1918,23 @@ function LiveCameraProof(props: {
       Vibration.vibrate(12);
     },
     [instantRulesShared, instantRuntimeShared],
+  );
+  const removeInstantPrivacyClass = useCallback(
+    (label: string) => {
+      const nextEffects: Record<string, LiveClassEffect> = {
+        ...classEffectsShared.value,
+      };
+      delete nextEffects[label];
+      setClassEffects(nextEffects);
+      classEffectsShared.value = nextEffects;
+      setInstantMessage(
+        Object.keys(nextEffects).length > 0
+          ? `${label} is visible again. Tap another object to pixelate its class.`
+          : "Tap any object to pixelate every detection of that class.",
+      );
+      Vibration.vibrate(12);
+    },
+    [classEffectsShared],
   );
   const mapInstantCvPoint = useCallback(
     (point: { readonly x: number; readonly y: number }) => {
@@ -1960,7 +1975,7 @@ function LiveCameraProof(props: {
         instantRecipe === "safety-zone" &&
         instantRules.some((rule) => rule.recipe === "safety-zone");
 
-      if (instantRecipe !== "golden-pose" && !hasSafetyZone) {
+      if (instantRecipe === "safety-zone" && !hasSafetyZone) {
         setInstantDraftZone(
           instantZoneShape === "rectangle"
             ? createInstantCvRectangleZone(normalized, normalized)
@@ -1975,7 +1990,7 @@ function LiveCameraProof(props: {
       const gesture = instantGestureRef.current;
       const normalized = mapInstantCvPoint(point);
 
-      if (!gesture || !normalized || instantRecipe === "golden-pose") {
+      if (!gesture || !normalized || instantRecipe !== "safety-zone") {
         return;
       }
 
@@ -2053,14 +2068,15 @@ function LiveCameraProof(props: {
 
       setInstantDraftZone(null);
 
-      if (
-        instantRecipe === "clear-to-start" &&
-        instantPendingZoneRef.current &&
-        distance < 12
-      ) {
+      if (instantRecipe === "privacy") {
+        if (distance >= 12) {
+          setInstantMessage("Tap a visible object to pixelate its class.");
+          return;
+        }
+
         instantTouchRequestShared.value = {
           id: ++instantRequestIdRef.current,
-          kind: "pick-clear-to-start-object",
+          kind: "pick-privacy-object",
           point: normalized,
         };
         setInstantMessage("Reading the touched mask on the next frame…");
@@ -2125,10 +2141,6 @@ function LiveCameraProof(props: {
         Vibration.vibrate(24);
         return;
       }
-
-      setInstantPendingZone(zone);
-      instantPendingZoneRef.current = zone;
-      setInstantMessage("Now tap the object class that must be absent.");
     },
     [
       instantRecipe,
@@ -2508,7 +2520,7 @@ function LiveCameraProof(props: {
             const instantTouchRequest = instantTouchRequestShared.value;
 
             if (
-              (instantTouchRequest?.kind === "pick-clear-to-start-object" ||
+              (instantTouchRequest?.kind === "pick-privacy-object" ||
                 instantTouchRequest?.kind === "pick-safety-zone-object") &&
               instantTouchRequest.id !== lastInstantTouchRequestId.value
             ) {
@@ -2531,7 +2543,7 @@ function LiveCameraProof(props: {
                       target:
                         instantTouchRequest.kind === "pick-safety-zone-object"
                           ? "safety-zone"
-                          : "clear-to-start",
+                          : "privacy",
                       usedMask: pick.usedMask,
                     }
                   : {
@@ -2906,7 +2918,6 @@ function LiveCameraProof(props: {
             <InstantCvCanvasOverlay
               draftZone={instantDraftZone}
               layout={liveLayout}
-              pendingZone={instantPendingZone}
               touchPoint={instantTouchPoint}
             />
           ) : undefined
@@ -2948,7 +2959,7 @@ function LiveCameraProof(props: {
           </>
         }
         showBoxes={showBoxLayer}
-        showMasks={showMaskLayer || effectsActive}
+        showMasks={showRawMaskLayer || effectsActive}
         stageStyle={styles.liveStage}
         vectorPicture={liveVectorPicture}
       >
@@ -2973,9 +2984,11 @@ function LiveCameraProof(props: {
             modelStatus={modelStatus}
             onClear={clearInstantRules}
             onModeChange={props.onModeChange}
+            onRemovePrivacyClass={removeInstantPrivacyClass}
             onRecipeChange={selectInstantRecipe}
             onRemoveSafetyClass={removeInstantSafetyClass}
             onZoneShapeChange={selectInstantZoneShape}
+            privacyClassNames={Object.keys(classEffects)}
             recipe={instantRecipe}
             rules={instantRules}
             runtime={instantRuntime}

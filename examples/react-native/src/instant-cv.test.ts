@@ -53,9 +53,7 @@ describe("Instant CV rule engine", () => {
   it("routes only Golden Pose to the pose model", () => {
     expect(resolveInstantCvInferenceMode("golden-pose")).toBe("pose");
     expect(resolveInstantCvInferenceMode("safety-zone")).toBe("segmentation");
-    expect(resolveInstantCvInferenceMode("clear-to-start")).toBe(
-      "segmentation",
-    );
+    expect(resolveInstantCvInferenceMode("privacy")).toBe("segmentation");
   });
 
   it("normalizes a drawn zone regardless of drag direction", () => {
@@ -239,42 +237,6 @@ describe("Instant CV rule engine", () => {
         ],
       })[0]?.status,
     ).toBe("unknown");
-  });
-
-  it("keeps clear-to-start blocked while the selected class is in the zone", () => {
-    const rules: InstantCvRule[] = [
-      {
-        className: "bottle",
-        dwellMs: 0,
-        id: "clear",
-        recipe: "clear-to-start",
-        zone: createInstantCvRectangleZone({ x: 0, y: 0 }, { x: 0.5, y: 0.5 }),
-      },
-    ];
-    const blocked = evaluateInstantCvRules({
-      frameHeight: 100,
-      frameWidth: 100,
-      nowMs: 1_000,
-      objects: [
-        {
-          bbox: { x1: 10, x2: 30, y1: 10, y2: 40 },
-          label: "bottle",
-        },
-      ],
-      previous: [],
-      rules,
-    });
-    const clear = evaluateInstantCvRules({
-      frameHeight: 100,
-      frameWidth: 100,
-      nowMs: 1_010,
-      objects: [],
-      previous: blocked,
-      rules,
-    });
-
-    expect(blocked[0]?.status).toBe("fail");
-    expect(clear[0]?.status).toBe("pass");
   });
 
   it("prefers a mask hit and falls back to the smallest containing box", () => {

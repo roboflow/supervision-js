@@ -65,13 +65,14 @@ Recipe changes also update a shared producer selector immediately, so the
 stable camera worklet switches models on its next frame without waiting for a
 React callback replacement.
 
-The first example-owned recipes are Golden Pose, Safety Zone, and Clear to
-Start. Golden Pose uses pose angles; both zone recipes use RF-DETR segmentation
-and bounded mask/zone overlap checks. Zones can be authored as rectangles or
-free-shape polygons. Safety Zone uses mask-aware frame-local picking to build a
-removable list of prohibited classes, while Clear to Start uses the same picker
-for its single taught class. They do not promise re-identification, custom
-industrial classes, or saved/composited camera recording.
+The first example-owned recipes are Golden Pose, Safety Zone, and Privacy.
+Golden Pose uses pose angles. Safety Zone uses RF-DETR segmentation, bounded
+mask/zone overlap checks, rectangular or free-shape zones, and mask-aware
+frame-local picking to build a removable list of prohibited classes. Privacy
+uses the same picker to teach redacted classes, then reuses the live mask
+shader's inexpensive mosaic mode with conservative full-box coverage. These
+recipes do not promise re-identification, custom industrial classes, or
+saved/composited camera recording.
 
 On iOS, the demo explicitly requests the RF-DETR Nano segmentation CoreML INT8
 profile through ExecuTorch. ExecuTorch remains example-owned; it is a detection
