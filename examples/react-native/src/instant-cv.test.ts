@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createInstantCvFreeShapeZone,
   createInstantCvGoldenPoseBaseline,
+  createInstantCvRectangleZone,
   createInstantCvRuleVectorInstructions,
   evaluateInstantCvRules,
   normalizeInstantCvRect,
@@ -121,13 +123,16 @@ describe("Instant CV rule engine", () => {
     ).toBe("fail");
   });
 
-  it("uses ankle position for a safety zone", () => {
+  it("uses segmented person geometry for a safety zone", () => {
     const rules: InstantCvRule[] = [
       {
         dwellMs: 0,
         id: "zone",
         recipe: "safety-zone",
-        zone: { height: 0.2, width: 0.4, x: 0.3, y: 0.8 },
+        zone: createInstantCvRectangleZone(
+          { x: 0.3, y: 0.6 },
+          { x: 0.7, y: 0.9 },
+        ),
       },
     ];
 
@@ -136,7 +141,12 @@ describe("Instant CV rule engine", () => {
         frameHeight: 120,
         frameWidth: 100,
         nowMs: 1_000,
-        poses: [createPose()],
+        objects: [
+          {
+            bbox: { x1: 40, x2: 60, y1: 70, y2: 110 },
+            label: "person",
+          },
+        ],
         previous: [],
         rules,
       })[0]?.status,
@@ -150,7 +160,7 @@ describe("Instant CV rule engine", () => {
         dwellMs: 0,
         id: "clear",
         recipe: "clear-to-start",
-        zone: { height: 0.5, width: 0.5, x: 0, y: 0 },
+        zone: createInstantCvRectangleZone({ x: 0, y: 0 }, { x: 0.5, y: 0.5 }),
       },
     ];
     const blocked = evaluateInstantCvRules({
@@ -242,7 +252,10 @@ describe("Instant CV rule engine", () => {
         dwellMs: 0,
         id: "zone",
         recipe: "safety-zone",
-        zone: { height: 0.25, width: 0.5, x: 0.1, y: 0.2 },
+        zone: createInstantCvRectangleZone(
+          { x: 0.1, y: 0.2 },
+          { x: 0.6, y: 0.45 },
+        ),
       },
     ];
     const instructions = createInstantCvRuleVectorInstructions({
@@ -279,5 +292,77 @@ describe("Instant CV rule engine", () => {
       ],
       stroke: { color: 0xff5d73 },
     });
+  });
+
+  it("creates and prepares a free-shape safety zone", () => {
+    const zone = createInstantCvFreeShapeZone([
+      { x: 0.1, y: 0.2 },
+      { x: 0.8, y: 0.2 },
+      { x: 0.6, y: 0.75 },
+      { x: 0.2, y: 0.8 },
+    ]);
+
+    expect(zone).not.toBeNull();
+
+    const rules: InstantCvRule[] = [
+      {
+        dwellMs: 0,
+        id: "free-zone",
+        recipe: "safety-zone",
+        zone: zone!,
+      },
+    ];
+    const instructions = createInstantCvRuleVectorInstructions({
+      frameHeight: 200,
+      frameWidth: 100,
+      markerShape: "circle",
+      rules,
+      runtime: [],
+    });
+
+    expect(instructions.polygons[0]?.points).toEqual([
+      { x: 10, y: 40 },
+      { x: 80, y: 40 },
+      { x: 60, y: 150 },
+      { x: 20, y: 160 },
+    ]);
+
+    const runtime = evaluateInstantCvRules({
+      frameHeight: 200,
+      frameWidth: 100,
+      nowMs: 1_000,
+      objects: [
+        {
+          bbox: { x1: 35, x2: 55, y1: 70, y2: 130 },
+          label: "person",
+          mask: Uint8Array.from([1, 1, 1, 1]),
+          maskHeight: 2,
+          maskWidth: 2,
+        },
+      ],
+      previous: [],
+      rules,
+    });
+
+    expect(runtime[0]?.status).toBe("fail");
+
+    expect(
+      evaluateInstantCvRules({
+        frameHeight: 200,
+        frameWidth: 100,
+        nowMs: 1_000,
+        objects: [
+          {
+            bbox: { x1: 74, x2: 79, y1: 145, y2: 155 },
+            label: "person",
+            mask: Uint8Array.from([1, 1, 1, 1]),
+            maskHeight: 2,
+            maskWidth: 2,
+          },
+        ],
+        previous: [],
+        rules,
+      })[0]?.status,
+    ).toBe("pass");
   });
 });

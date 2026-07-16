@@ -117,6 +117,12 @@ coordinate mapping, semantic geometry, picking, styles, and prepared rendering
 lanes; recipe UI, haptics, ExecuTorch outputs, and rule semantics stay
 example-owned until another consumer validates a reusable boundary.
 
+Golden Pose consumes the pose producer. Safety Zone and Clear to Start consume
+segmentation masks and accept rectangular or free-shape polygon zones. The live
+mask lane uses a transparent one-pixel sentinel while no mask packet exists, so
+an empty detection frame or model transition cannot feed a null image into the
+Skia shader and paint the camera stage black.
+
 The package also ships an experimental Nitro-based native builder
 (`IdMaskBuilder`, Swift/iOS, `SupervisionIdMask` pod) that runs the same
 Alpha_8 fill loop natively and returns raw artifact bytes plus palette buffers

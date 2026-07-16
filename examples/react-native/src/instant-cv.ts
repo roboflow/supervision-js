@@ -12,6 +12,20 @@ export interface InstantCvNormalizedRect extends InstantCvNormalizedPoint {
   readonly width: number;
 }
 
+export type InstantCvZoneShape = "rectangle" | "free-shape";
+
+export interface InstantCvRectangleZone {
+  readonly kind: "rectangle";
+  readonly rect: InstantCvNormalizedRect;
+}
+
+export interface InstantCvPolygonZone {
+  readonly kind: "polygon";
+  readonly points: readonly InstantCvNormalizedPoint[];
+}
+
+export type InstantCvZone = InstantCvRectangleZone | InstantCvPolygonZone;
+
 export interface InstantCvPosePoint {
   readonly visible: boolean;
   readonly x: number;
@@ -50,13 +64,13 @@ export interface InstantCvGoldenPoseRule extends InstantCvRuleBase {
 
 export interface InstantCvSafetyZoneRule extends InstantCvRuleBase {
   readonly recipe: "safety-zone";
-  readonly zone: InstantCvNormalizedRect;
+  readonly zone: InstantCvZone;
 }
 
 export interface InstantCvClearToStartRule extends InstantCvRuleBase {
   readonly className: string;
   readonly recipe: "clear-to-start";
-  readonly zone: InstantCvNormalizedRect;
+  readonly zone: InstantCvZone;
 }
 
 export type InstantCvRule =
@@ -250,39 +264,233 @@ function instantCvPointInRect(
   );
 }
 
-function instantCvPoseAnchor(
-  pose: InstantCvPoseDetection,
+function instantCvZonePoints(zone: InstantCvZone) {
+  "worklet";
+
+  if (zone.kind === "polygon") {
+    return zone.points;
+  }
+
+  const { rect } = zone;
+
+  return [
+    { x: rect.x, y: rect.y },
+    { x: rect.x + rect.width, y: rect.y },
+    { x: rect.x + rect.width, y: rect.y + rect.height },
+    { x: rect.x, y: rect.y + rect.height },
+  ];
+}
+
+function instantCvPointInZone(
+  point: InstantCvNormalizedPoint,
+  zone: InstantCvZone,
+) {
+  "worklet";
+
+  if (zone.kind === "rectangle") {
+    return instantCvPointInRect(point, zone.rect);
+  }
+
+  let inside = false;
+  const points = zone.points;
+
+  for (
+    let index = 0, previousIndex = points.length - 1;
+    index < points.length;
+    previousIndex = index, index += 1
+  ) {
+    const current = points[index]!;
+    const previous = points[previousIndex]!;
+    const crosses =
+      current.y > point.y !== previous.y > point.y &&
+      point.x <
+        ((previous.x - current.x) * (point.y - current.y)) /
+          (previous.y - current.y) +
+          current.x;
+
+    if (crosses) {
+      inside = !inside;
+    }
+  }
+
+  return inside;
+}
+
+function instantCvZoneBounds(zone: InstantCvZone): InstantCvNormalizedRect {
+  "worklet";
+
+  if (zone.kind === "rectangle") {
+    return zone.rect;
+  }
+
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+
+  for (let index = 0; index < zone.points.length; index += 1) {
+    const point = zone.points[index]!;
+    minX = Math.min(minX, point.x);
+    minY = Math.min(minY, point.y);
+    maxX = Math.max(maxX, point.x);
+    maxY = Math.max(maxY, point.y);
+  }
+
+  if (!Number.isFinite(minX)) {
+    return { height: 0, width: 0, x: 0, y: 0 };
+  }
+
+  return { height: maxY - minY, width: maxX - minX, x: minX, y: minY };
+}
+
+function instantCvMaskContainsFramePoint(
+  object: InstantCvObjectDetection,
+  framePoint: InstantCvNormalizedPoint,
   frameWidth: number,
   frameHeight: number,
 ) {
   "worklet";
 
-  const leftAnkle = pose.points[15];
-  const rightAnkle = pose.points[16];
-  const leftHip = pose.points[11];
-  const rightHip = pose.points[12];
-  const first =
-    instantCvPointIsVisible(leftAnkle) && instantCvPointIsVisible(rightAnkle)
-      ? leftAnkle
-      : leftHip;
-  const second =
-    instantCvPointIsVisible(leftAnkle) && instantCvPointIsVisible(rightAnkle)
-      ? rightAnkle
-      : rightHip;
+  const mask = object.mask;
+  const maskWidth = object.maskWidth ?? 0;
+  const maskHeight = object.maskHeight ?? 0;
+  const boxWidth = object.bbox.x2 - object.bbox.x1;
+  const boxHeight = object.bbox.y2 - object.bbox.y1;
+  const x = framePoint.x * frameWidth;
+  const y = framePoint.y * frameHeight;
 
   if (
-    !instantCvPointIsVisible(first) ||
-    !instantCvPointIsVisible(second) ||
-    frameWidth <= 0 ||
-    frameHeight <= 0
+    !mask ||
+    maskWidth <= 0 ||
+    maskHeight <= 0 ||
+    mask.length < maskWidth * maskHeight ||
+    boxWidth <= 0 ||
+    boxHeight <= 0 ||
+    x < object.bbox.x1 ||
+    x > object.bbox.x2 ||
+    y < object.bbox.y1 ||
+    y > object.bbox.y2
   ) {
-    return null;
+    return false;
   }
 
-  return {
-    x: (first.x + second.x) / 2 / frameWidth,
-    y: (first.y + second.y) / 2 / frameHeight,
-  };
+  const maskX = Math.min(
+    maskWidth - 1,
+    Math.max(0, Math.floor(((x - object.bbox.x1) / boxWidth) * maskWidth)),
+  );
+  const maskY = Math.min(
+    maskHeight - 1,
+    Math.max(0, Math.floor(((y - object.bbox.y1) / boxHeight) * maskHeight)),
+  );
+
+  return Boolean(mask[maskY * maskWidth + maskX]);
+}
+
+function instantCvObjectOverlapsZone(
+  object: InstantCvObjectDetection,
+  zone: InstantCvZone,
+  frameWidth: number,
+  frameHeight: number,
+) {
+  "worklet";
+
+  if (frameWidth <= 0 || frameHeight <= 0) {
+    return false;
+  }
+
+  const bounds = instantCvZoneBounds(zone);
+  const intersectionX1 = Math.max(object.bbox.x1, bounds.x * frameWidth);
+  const intersectionY1 = Math.max(object.bbox.y1, bounds.y * frameHeight);
+  const intersectionX2 = Math.min(
+    object.bbox.x2,
+    (bounds.x + bounds.width) * frameWidth,
+  );
+  const intersectionY2 = Math.min(
+    object.bbox.y2,
+    (bounds.y + bounds.height) * frameHeight,
+  );
+
+  if (intersectionX2 <= intersectionX1 || intersectionY2 <= intersectionY1) {
+    return false;
+  }
+
+  const mask = object.mask;
+  const maskWidth = object.maskWidth ?? 0;
+  const maskHeight = object.maskHeight ?? 0;
+  const boxWidth = object.bbox.x2 - object.bbox.x1;
+  const boxHeight = object.bbox.y2 - object.bbox.y1;
+  const validMask =
+    mask &&
+    maskWidth > 0 &&
+    maskHeight > 0 &&
+    mask.length >= maskWidth * maskHeight &&
+    boxWidth > 0 &&
+    boxHeight > 0;
+
+  // Missing masks fall back conservatively to bbox/bounds overlap. Both live
+  // Instant recipes normally receive RF-DETR masks, so this is only a safety
+  // net for producer errors or alternate segmentation producers.
+  if (!validMask) {
+    return true;
+  }
+
+  const zonePoints = instantCvZonePoints(zone);
+
+  for (let index = 0; index < zonePoints.length; index += 1) {
+    if (
+      instantCvMaskContainsFramePoint(
+        object,
+        zonePoints[index]!,
+        frameWidth,
+        frameHeight,
+      )
+    ) {
+      return true;
+    }
+  }
+
+  const maskX1 = Math.max(
+    0,
+    Math.floor(((intersectionX1 - object.bbox.x1) / boxWidth) * maskWidth),
+  );
+  const maskY1 = Math.max(
+    0,
+    Math.floor(((intersectionY1 - object.bbox.y1) / boxHeight) * maskHeight),
+  );
+  const maskX2 = Math.min(
+    maskWidth - 1,
+    Math.ceil(((intersectionX2 - object.bbox.x1) / boxWidth) * maskWidth),
+  );
+  const maskY2 = Math.min(
+    maskHeight - 1,
+    Math.ceil(((intersectionY2 - object.bbox.y1) / boxHeight) * maskHeight),
+  );
+  const regionArea =
+    Math.max(1, maskX2 - maskX1 + 1) * Math.max(1, maskY2 - maskY1 + 1);
+  const stride = Math.max(1, Math.ceil(Math.sqrt(regionArea / 576)));
+
+  for (let maskY = maskY1; maskY <= maskY2; maskY += stride) {
+    for (let maskX = maskX1; maskX <= maskX2; maskX += stride) {
+      if (!mask[maskY * maskWidth + maskX]) {
+        continue;
+      }
+
+      const point = {
+        x:
+          (object.bbox.x1 + ((maskX + 0.5) / maskWidth) * boxWidth) /
+          frameWidth,
+        y:
+          (object.bbox.y1 + ((maskY + 0.5) / maskHeight) * boxHeight) /
+          frameHeight,
+      };
+
+      if (instantCvPointInZone(point, zone)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 function instantCvFindPreviousRuntime(
@@ -368,16 +576,19 @@ function instantCvEvaluateGoldenPose(
 
 function instantCvEvaluateSafetyZone(
   rule: InstantCvSafetyZoneRule,
-  poses: readonly InstantCvPoseDetection[],
+  objects: readonly InstantCvObjectDetection[],
   frameWidth: number,
   frameHeight: number,
 ) {
   "worklet";
 
-  for (let index = 0; index < poses.length; index += 1) {
-    const anchor = instantCvPoseAnchor(poses[index]!, frameWidth, frameHeight);
+  for (let index = 0; index < objects.length; index += 1) {
+    const object = objects[index]!;
 
-    if (anchor && instantCvPointInRect(anchor, rule.zone)) {
+    if (
+      object.label === "person" &&
+      instantCvObjectOverlapsZone(object, rule.zone, frameWidth, frameHeight)
+    ) {
       return { candidate: "fail" as const };
     }
   }
@@ -404,12 +615,9 @@ function instantCvEvaluateClearToStart(
       continue;
     }
 
-    const center = {
-      x: (object.bbox.x1 + object.bbox.x2) / 2 / frameWidth,
-      y: (object.bbox.y1 + object.bbox.y2) / 2 / frameHeight,
-    };
-
-    if (instantCvPointInRect(center, rule.zone)) {
+    if (
+      instantCvObjectOverlapsZone(object, rule.zone, frameWidth, frameHeight)
+    ) {
       return { candidate: "fail" as const };
     }
   }
@@ -444,7 +652,7 @@ export function evaluateInstantCvRules(
         : rule.recipe === "safety-zone"
           ? instantCvEvaluateSafetyZone(
               rule,
-              poses,
+              objects,
               options.frameWidth,
               options.frameHeight,
             )
@@ -578,19 +786,24 @@ export function createInstantCvRuleVectorInstructions<
       continue;
     }
 
-    const x = rule.zone.x * options.frameWidth;
-    const y = rule.zone.y * options.frameHeight;
-    const width = rule.zone.width * options.frameWidth;
-    const height = rule.zone.height * options.frameHeight;
+    const normalizedZonePoints = instantCvZonePoints(rule.zone);
+    const zonePoints: InstantCvNormalizedPoint[] = [];
+
+    for (
+      let pointIndex = 0;
+      pointIndex < normalizedZonePoints.length;
+      pointIndex += 1
+    ) {
+      const point = normalizedZonePoints[pointIndex]!;
+      zonePoints[pointIndex] = {
+        x: point.x * options.frameWidth,
+        y: point.y * options.frameHeight,
+      };
+    }
 
     polygons[polygons.length] = {
       fill: { alpha: 0.12, color },
-      points: [
-        { x, y },
-        { x: x + width, y },
-        { x: x + width, y: y + height },
-        { x, y: y + height },
-      ],
+      points: zonePoints,
       stroke: { alpha: 0.98, color, width: 4 },
     };
   }
@@ -747,4 +960,63 @@ export function normalizeInstantCvRect(
     x,
     y,
   };
+}
+
+export function createInstantCvRectangleZone(
+  start: InstantCvNormalizedPoint,
+  end: InstantCvNormalizedPoint,
+): InstantCvRectangleZone {
+  return { kind: "rectangle", rect: normalizeInstantCvRect(start, end) };
+}
+
+export function createInstantCvFreeShapeZone(
+  inputPoints: readonly InstantCvNormalizedPoint[],
+): InstantCvPolygonZone | null {
+  const points: InstantCvNormalizedPoint[] = [];
+
+  for (let index = 0; index < inputPoints.length; index += 1) {
+    const input = inputPoints[index]!;
+    const point = {
+      x: Math.max(0, Math.min(1, input.x)),
+      y: Math.max(0, Math.min(1, input.y)),
+    };
+    const previous = points[points.length - 1];
+
+    if (
+      previous &&
+      Math.hypot(point.x - previous.x, point.y - previous.y) < 0.004
+    ) {
+      continue;
+    }
+
+    points[points.length] = point;
+
+    if (points.length >= 64) {
+      break;
+    }
+  }
+
+  if (points.length < 3) {
+    return null;
+  }
+
+  let twiceArea = 0;
+
+  for (let index = 0; index < points.length; index += 1) {
+    const point = points[index]!;
+    const next = points[(index + 1) % points.length]!;
+    twiceArea += point.x * next.y - next.x * point.y;
+  }
+
+  if (Math.abs(twiceArea) < 0.002) {
+    return null;
+  }
+
+  return { kind: "polygon", points };
+}
+
+export function getInstantCvZonePoints(zone: InstantCvZone) {
+  "worklet";
+
+  return instantCvZonePoints(zone);
 }

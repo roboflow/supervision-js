@@ -6,6 +6,7 @@ import {
   FilterMode,
   ImageShader,
   Image as SkiaImage,
+  Line,
   MipmapMode,
   Picture,
   Rect,
@@ -124,19 +125,22 @@ import {
   unrotateExecutorchUpBbox,
 } from "supervision-js-react-native/adapters/executorch";
 import {
+  createInstantCvFreeShapeZone,
   createInstantCvGoldenPoseBaseline,
+  createInstantCvRectangleZone,
   createInstantCvRuleVectorInstructions,
   createInstantCvRuntimeSignature,
   evaluateInstantCvRules,
-  normalizeInstantCvRect,
+  getInstantCvZonePoints,
   pickInstantCvObjectAtPoint,
   pickInstantCvPoseAtPoint,
   type InstantCvNormalizedPoint,
-  type InstantCvNormalizedRect,
   type InstantCvPoseDetection,
   type InstantCvRecipe,
   type InstantCvRule,
   type InstantCvRuleRuntime,
+  type InstantCvZone,
+  type InstantCvZoneShape,
 } from "./src/instant-cv";
 
 function swapLiveVectorPicture(
@@ -156,6 +160,44 @@ function swapLiveVectorPicture(
   livePictureIsEmpty.value = nextPicture === null;
   retiredPicture.value = previousPictureWasEmpty ? null : previousPicture;
   disposeReactNativeSkiaPicture(obsoletePicture);
+}
+
+function createEmptyLiveMaskImage() {
+  const image = Skia.Image.MakeImage(
+    {
+      alphaType: AlphaType.Opaque,
+      colorType: ColorType.Alpha_8,
+      height: 1,
+      width: 1,
+    },
+    Skia.Data.fromBytes(new Uint8Array([0])),
+    1,
+  );
+
+  if (!image) {
+    throw new Error("Unable to create the empty live-mask image");
+  }
+
+  return image;
+}
+
+function swapLiveMaskImage(
+  liveImage: SharedValue<SkiaImageType>,
+  liveImageIsEmpty: SharedValue<boolean>,
+  retiredImage: SharedValue<SkiaImageType | null>,
+  nextImage: SkiaImageType | null,
+  emptyImage: SkiaImageType,
+) {
+  "worklet";
+
+  const previousImage = liveImage.value;
+  const previousWasEmpty = liveImageIsEmpty.value;
+  const obsoleteImage = retiredImage.value;
+
+  liveImage.value = nextImage ?? emptyImage;
+  liveImageIsEmpty.value = nextImage === null;
+  retiredImage.value = previousWasEmpty ? null : previousImage;
+  disposeReactNativeSkiaImage(obsoleteImage);
 }
 
 type DemoMode = "static" | "live" | "video" | "instant";
@@ -1062,49 +1104,44 @@ function resolveInstantCvStatusColor(status: InstantCvRuleRuntime["status"]) {
 }
 
 function InstantCvCanvasOverlay(props: {
-  readonly draftZone: InstantCvNormalizedRect | null;
+  readonly draftZone: InstantCvZone | null;
   readonly layout: ReactNativeFrameLayout;
-  readonly pendingZone: InstantCvNormalizedRect | null;
+  readonly pendingZone: InstantCvZone | null;
   readonly touchPoint: InstantCvNormalizedPoint | null;
 }) {
   const mapPoint = (point: InstantCvNormalizedPoint) => ({
     x: props.layout.mediaRect.x + point.x * props.layout.mediaRect.width,
     y: props.layout.mediaRect.y + point.y * props.layout.mediaRect.height,
   });
-  const mapZone = (zone: InstantCvNormalizedRect) => ({
-    height: zone.height * props.layout.mediaRect.height,
-    width: zone.width * props.layout.mediaRect.width,
-    x: props.layout.mediaRect.x + zone.x * props.layout.mediaRect.width,
-    y: props.layout.mediaRect.y + zone.y * props.layout.mediaRect.height,
-  });
+  const renderZone = (
+    zone: InstantCvZone,
+    color: string,
+    strokeWidth: number,
+    keyPrefix: string,
+  ) => {
+    const points = getInstantCvZonePoints(zone).map(mapPoint);
+    const segmentCount =
+      points.length > 2 ? points.length : Math.max(0, points.length - 1);
+
+    return Array.from({ length: segmentCount }, (_, index) => (
+      <Line
+        key={`${keyPrefix}-${index}`}
+        color={color}
+        opacity={0.9}
+        p1={points[index]!}
+        p2={points[(index + 1) % points.length]!}
+        strokeWidth={strokeWidth}
+      />
+    ));
+  };
 
   return (
     <>
       {props.pendingZone ? (
-        <RoundedRect
-          color="#70e1f5"
-          height={mapZone(props.pendingZone).height}
-          opacity={0.9}
-          r={14}
-          strokeWidth={3}
-          style="stroke"
-          width={mapZone(props.pendingZone).width}
-          x={mapZone(props.pendingZone).x}
-          y={mapZone(props.pendingZone).y}
-        />
+        <>{renderZone(props.pendingZone, "#70e1f5", 3, "pending")}</>
       ) : null}
       {props.draftZone ? (
-        <RoundedRect
-          color="#ffffff"
-          height={mapZone(props.draftZone).height}
-          opacity={0.9}
-          r={14}
-          strokeWidth={2}
-          style="stroke"
-          width={mapZone(props.draftZone).width}
-          x={mapZone(props.draftZone).x}
-          y={mapZone(props.draftZone).y}
-        />
+        <>{renderZone(props.draftZone, "#ffffff", 2, "draft")}</>
       ) : null}
       {props.touchPoint ? (
         <Circle
@@ -1138,9 +1175,11 @@ function InstantCvHud(props: {
   readonly onClear: () => void;
   readonly onModeChange: (mode: DemoMode) => void;
   readonly onRecipeChange: (recipe: InstantCvRecipe) => void;
+  readonly onZoneShapeChange: (shape: InstantCvZoneShape) => void;
   readonly recipe: InstantCvRecipe;
   readonly rules: readonly InstantCvRule[];
   readonly runtime: readonly InstantCvRuleRuntime[];
+  readonly zoneShape: InstantCvZoneShape;
 }) {
   const activeRule = props.rules[0];
   const activeRuntime = activeRule
@@ -1213,6 +1252,38 @@ function InstantCvHud(props: {
             value={props.canRunCamera ? "on device" : props.modelStatus}
           />
         </View>
+        {props.recipe !== "golden-pose" ? (
+          <View style={styles.instantShapeSwitch}>
+            {(
+              [
+                ["rectangle", "Rectangle"],
+                ["free-shape", "Free shape"],
+              ] as const
+            ).map(([shape, label]) => {
+              const active = props.zoneShape === shape;
+
+              return (
+                <TouchableOpacity
+                  key={shape}
+                  onPress={() => props.onZoneShapeChange(shape)}
+                  style={[
+                    styles.instantShapeButton,
+                    active ? styles.instantShapeButtonActive : null,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.instantShapeLabel,
+                      active ? styles.instantShapeLabelActive : null,
+                    ]}
+                  >
+                    {label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        ) : null}
         <Text style={styles.instantStatusMessage}>{props.message}</Text>
         {activeRuntime?.score !== undefined ? (
           <Text style={styles.instantScore}>
@@ -1251,12 +1322,15 @@ function LiveCameraProof(props: {
   >([]);
   const [showLiveHud, setShowLiveHud] = useState(true);
   const [showLiveDebug, setShowLiveDebug] = useState(false);
+  const [awaitingSyncedFrame, setAwaitingSyncedFrame] = useState(true);
   const [detectionDisplayMode, setDetectionDisplayMode] =
     useState<LiveDetectionDisplayMode>("masks");
   const [classEffects, setClassEffects] = useState<LiveClassEffects>({});
   const [tapMenuLabel, setTapMenuLabel] = useState<string | null>(null);
   const [instantRecipe, setInstantRecipe] =
     useState<InstantCvRecipe>("golden-pose");
+  const [instantZoneShape, setInstantZoneShape] =
+    useState<InstantCvZoneShape>("rectangle");
   const [instantRules, setInstantRules] = useState<readonly InstantCvRule[]>(
     [],
   );
@@ -1265,17 +1339,18 @@ function LiveCameraProof(props: {
   >([]);
   const instantRuntimeRef = useRef<readonly InstantCvRuleRuntime[]>([]);
   const [instantDraftZone, setInstantDraftZone] =
-    useState<InstantCvNormalizedRect | null>(null);
+    useState<InstantCvZone | null>(null);
   const [instantPendingZone, setInstantPendingZone] =
-    useState<InstantCvNormalizedRect | null>(null);
+    useState<InstantCvZone | null>(null);
   const [instantTouchPoint, setInstantTouchPoint] =
     useState<InstantCvNormalizedPoint | null>(null);
   const [instantMessage, setInstantMessage] = useState(
     "Hold a person to teach the golden pose.",
   );
-  const instantPendingZoneRef = useRef<InstantCvNormalizedRect | null>(null);
+  const instantPendingZoneRef = useRef<InstantCvZone | null>(null);
   const instantGestureRef = useRef<{
     readonly canvasStart: { readonly x: number; readonly y: number };
+    readonly freeShapePoints: InstantCvNormalizedPoint[];
     readonly normalizedStart: InstantCvNormalizedPoint;
     readonly timestamp: number;
   } | null>(null);
@@ -1290,12 +1365,14 @@ function LiveCameraProof(props: {
   // The mask lane doubles as the effect lane: even in boxes display mode the
   // mask artifact runs whenever a class has an effect (redact, spotlight).
   const effectsActive =
+    !isInstantCv &&
     props.inferenceMode === "segmentation" &&
     Object.keys(classEffects).length > 0;
   const emptyLiveMaskUniforms = useMemo(
     () => createEmptyReactNativeLiveIdMaskUniforms(),
     [],
   );
+  const emptyLiveMaskImage = useMemo(() => createEmptyLiveMaskImage(), []);
   const emptyLiveVectorPicture = useMemo(
     () => createEmptyReactNativeSkiaPicture(),
     [],
@@ -1323,7 +1400,8 @@ function LiveCameraProof(props: {
     () => summarizeLivePerformance(livePerformanceSamples),
     [livePerformanceSamples],
   );
-  const liveMaskImage = useSharedValue<SkiaImageType | null>(null);
+  const liveMaskImage = useSharedValue<SkiaImageType>(emptyLiveMaskImage);
+  const liveMaskImageIsEmpty = useSharedValue(true);
   // React Native Skia rejects null animated Picture props. The no-op picture
   // keeps the shared value valid before the first pose and between pose frames.
   const liveVectorPicture = useSharedValue<SkPicture>(emptyLiveVectorPicture);
@@ -1413,16 +1491,19 @@ function LiveCameraProof(props: {
     setLivePerformanceSamples([]);
   }, [detectionDisplayMode, props.inferenceMode]);
   useEffect(() => {
+    setAwaitingSyncedFrame(true);
     setClassEffects({});
     setLiveDetections([]);
     setTapMenuLabel(null);
 
-    const previousMaskImage = liveMaskImage.value;
-    const retiredMaskImage = retiredLiveMaskImage.value;
-    liveMaskImage.value = null;
     liveMaskUniforms.value = emptyLiveMaskUniforms;
-    retiredLiveMaskImage.value = previousMaskImage;
-    disposeReactNativeSkiaImage(retiredMaskImage);
+    swapLiveMaskImage(
+      liveMaskImage,
+      liveMaskImageIsEmpty,
+      retiredLiveMaskImage,
+      null,
+      emptyLiveMaskImage,
+    );
 
     swapLiveVectorPicture(
       liveVectorPicture,
@@ -1432,9 +1513,11 @@ function LiveCameraProof(props: {
       emptyLiveVectorPicture,
     );
   }, [
+    emptyLiveMaskImage,
     emptyLiveMaskUniforms,
     emptyLiveVectorPicture,
     liveMaskImage,
+    liveMaskImageIsEmpty,
     liveMaskUniforms,
     liveVectorPicture,
     liveVectorPictureIsEmpty,
@@ -1446,13 +1529,20 @@ function LiveCameraProof(props: {
     showMaskLayerShared.value = showMaskLayer;
   }, [showMaskLayer, showMaskLayerShared]);
   useEffect(() => {
-    classEffectsShared.value = classEffects;
-  }, [classEffects, classEffectsShared]);
+    classEffectsShared.value = isInstantCv ? {} : classEffects;
+  }, [classEffects, classEffectsShared, isInstantCv]);
+  useEffect(() => {
+    if (isInstantCv) {
+      setClassEffects({});
+      setTapMenuLabel(null);
+    }
+  }, [isInstantCv]);
   useEffect(() => {
     instantRulesShared.value = instantRules;
   }, [instantRules, instantRulesShared]);
   useEffect(() => {
     instantCvActiveShared.value = isInstantCv;
+    setAwaitingSyncedFrame(true);
   }, [instantCvActiveShared, isInstantCv]);
   useEffect(() => {
     instantPendingZoneRef.current = instantPendingZone;
@@ -1485,13 +1575,16 @@ function LiveCameraProof(props: {
     }
 
     props.onInferenceModeChange(
-      instantRecipe === "clear-to-start" ? "segmentation" : "pose",
+      instantRecipe === "golden-pose" ? "pose" : "segmentation",
     );
   }, [instantRecipe, isInstantCv, props.onInferenceModeChange]);
   useEffect(
     () => () => {
-      disposeReactNativeSkiaImage(liveMaskImage.value);
+      if (!liveMaskImageIsEmpty.value) {
+        disposeReactNativeSkiaImage(liveMaskImage.value);
+      }
       disposeReactNativeSkiaImage(retiredLiveMaskImage.value);
+      disposeReactNativeSkiaImage(emptyLiveMaskImage);
       if (!liveVectorPictureIsEmpty.value) {
         disposeReactNativeSkiaPicture(liveVectorPicture.value);
       }
@@ -1499,8 +1592,10 @@ function LiveCameraProof(props: {
       disposeReactNativeSkiaPicture(emptyLiveVectorPicture);
     },
     [
+      emptyLiveMaskImage,
       emptyLiveVectorPicture,
       liveMaskImage,
+      liveMaskImageIsEmpty,
       liveVectorPicture,
       liveVectorPictureIsEmpty,
       retiredLiveMaskImage,
@@ -1510,6 +1605,7 @@ function LiveCameraProof(props: {
 
   const reportLiveFrame = useCallback((frame: LiveFrameState) => {
     setLiveFrame(frame);
+    setAwaitingSyncedFrame(false);
     setLivePerformanceSamples((samples) =>
       appendLivePerformanceSample(samples, frame),
     );
@@ -1615,7 +1711,7 @@ function LiveCameraProof(props: {
       instantRuntimeRef.current = [];
       setInstantDraftZone(null);
       setInstantPendingZone(null);
-      if (recipe === "clear-to-start") {
+      if (recipe !== "golden-pose") {
         setDetectionDisplayMode("masks");
       }
       instantPendingZoneRef.current = null;
@@ -1626,7 +1722,7 @@ function LiveCameraProof(props: {
         recipe === "golden-pose"
           ? "Hold a person to teach the golden pose."
           : recipe === "safety-zone"
-            ? "Draw a keep-out zone under the person."
+            ? "Draw a keep-out zone. Person masks must stay outside it."
             : "Draw a work zone, then tap the object that must be absent.",
       );
       Vibration.vibrate(16);
@@ -1653,7 +1749,7 @@ function LiveCameraProof(props: {
       instantRecipe === "golden-pose"
         ? "Hold a person to teach the golden pose."
         : instantRecipe === "safety-zone"
-          ? "Draw a keep-out zone under the person."
+          ? "Draw a keep-out zone. Person masks must stay outside it."
           : "Draw a work zone, then tap the object that must be absent.",
     );
   }, [
@@ -1663,6 +1759,34 @@ function LiveCameraProof(props: {
     instantRuntimeSignatureShared,
     instantTouchRequestShared,
   ]);
+  const selectInstantZoneShape = useCallback(
+    (shape: InstantCvZoneShape) => {
+      setInstantZoneShape(shape);
+      setInstantRules([]);
+      instantRulesShared.value = [];
+      setInstantRuntime([]);
+      instantRuntimeRef.current = [];
+      instantRuntimeShared.value = [];
+      instantRuntimeSignatureShared.value = "";
+      setInstantDraftZone(null);
+      setInstantPendingZone(null);
+      instantPendingZoneRef.current = null;
+      instantTouchRequestShared.value = null;
+      setInstantMessage(
+        instantRecipe === "safety-zone"
+          ? `Draw a ${shape === "rectangle" ? "rectangular" : "free-shape"} keep-out zone.`
+          : `Draw a ${shape === "rectangle" ? "rectangular" : "free-shape"} work zone, then tap the object that must be absent.`,
+      );
+      Vibration.vibrate(12);
+    },
+    [
+      instantRecipe,
+      instantRulesShared,
+      instantRuntimeShared,
+      instantRuntimeSignatureShared,
+      instantTouchRequestShared,
+    ],
+  );
   const mapInstantCvPoint = useCallback(
     (point: { readonly x: number; readonly y: number }) => {
       const mediaPoint = liveLayout.mapCanvasPoint(point);
@@ -1692,16 +1816,21 @@ function LiveCameraProof(props: {
 
       instantGestureRef.current = {
         canvasStart: point,
+        freeShapePoints: [normalized],
         normalizedStart: normalized,
         timestamp: point.timestamp,
       };
       setInstantTouchPoint(normalized);
 
       if (instantRecipe !== "golden-pose") {
-        setInstantDraftZone(normalizeInstantCvRect(normalized, normalized));
+        setInstantDraftZone(
+          instantZoneShape === "rectangle"
+            ? createInstantCvRectangleZone(normalized, normalized)
+            : { kind: "polygon", points: [normalized] },
+        );
       }
     },
-    [instantRecipe, mapInstantCvPoint],
+    [instantRecipe, instantZoneShape, mapInstantCvPoint],
   );
   const handleInstantGestureMove = useCallback(
     (point: SyncedStageGesturePoint) => {
@@ -1712,11 +1841,40 @@ function LiveCameraProof(props: {
         return;
       }
 
-      setInstantDraftZone(
-        normalizeInstantCvRect(gesture.normalizedStart, normalized),
-      );
+      if (instantZoneShape === "rectangle") {
+        setInstantDraftZone(
+          createInstantCvRectangleZone(gesture.normalizedStart, normalized),
+        );
+        return;
+      }
+
+      const previous =
+        gesture.freeShapePoints[gesture.freeShapePoints.length - 1];
+
+      if (
+        previous &&
+        Math.hypot(normalized.x - previous.x, normalized.y - previous.y) < 0.006
+      ) {
+        return;
+      }
+
+      if (gesture.freeShapePoints.length >= 64) {
+        const decimated = gesture.freeShapePoints.filter(
+          (_, index) => index % 2 === 0,
+        );
+        gesture.freeShapePoints.splice(
+          0,
+          gesture.freeShapePoints.length,
+          ...decimated,
+        );
+      }
+      gesture.freeShapePoints.push(normalized);
+      setInstantDraftZone({
+        kind: "polygon",
+        points: [...gesture.freeShapePoints],
+      });
     },
-    [instantRecipe, mapInstantCvPoint],
+    [instantRecipe, instantZoneShape, mapInstantCvPoint],
   );
   const handleInstantGestureEnd = useCallback(
     (point: SyncedStageGesturePoint) => {
@@ -1755,7 +1913,6 @@ function LiveCameraProof(props: {
         return;
       }
 
-      const zone = normalizeInstantCvRect(gesture.normalizedStart, normalized);
       setInstantDraftZone(null);
 
       if (
@@ -1772,7 +1929,23 @@ function LiveCameraProof(props: {
         return;
       }
 
-      if (zone.width < 0.035 || zone.height < 0.035) {
+      const rectangleZone = createInstantCvRectangleZone(
+        gesture.normalizedStart,
+        normalized,
+      );
+      const zone =
+        instantZoneShape === "rectangle"
+          ? rectangleZone
+          : createInstantCvFreeShapeZone([
+              ...gesture.freeShapePoints,
+              normalized,
+            ]);
+
+      if (
+        !zone ||
+        (zone.kind === "rectangle" &&
+          (zone.rect.width < 0.035 || zone.rect.height < 0.035))
+      ) {
         setInstantMessage("Draw a larger zone directly on the camera view.");
         return;
       }
@@ -1791,7 +1964,9 @@ function LiveCameraProof(props: {
         setInstantRuntime([]);
         instantRuntimeRef.current = [];
         instantRuntimeShared.value = [];
-        setInstantMessage("Keep ankles outside the zone. Step in to test it.");
+        setInstantMessage(
+          "Person masks must stay outside the zone. Step in to test it.",
+        );
         Vibration.vibrate(24);
         return;
       }
@@ -1805,6 +1980,7 @@ function LiveCameraProof(props: {
       instantRulesShared,
       instantRuntimeShared,
       instantTouchRequestShared,
+      instantZoneShape,
       mapInstantCvPoint,
     ],
   );
@@ -2047,12 +2223,14 @@ function LiveCameraProof(props: {
             emptyLiveVectorPicture,
           );
 
-          const previousMaskImage = liveMaskImage.value;
-          const retiredMaskImage = retiredLiveMaskImage.value;
           liveMaskUniforms.value = emptyLiveMaskUniforms;
-          liveMaskImage.value = null;
-          retiredLiveMaskImage.value = previousMaskImage;
-          disposeReactNativeSkiaImage(retiredMaskImage);
+          swapLiveMaskImage(
+            liveMaskImage,
+            liveMaskImageIsEmpty,
+            retiredLiveMaskImage,
+            null,
+            emptyLiveMaskImage,
+          );
 
           lastInferenceTickDurationMs.value = Date.now() - inferenceStartedAt;
           lastArtifactBytes.value = 0;
@@ -2343,13 +2521,14 @@ function LiveCameraProof(props: {
                 namespace: "rn-live",
               },
               () => {
-                const previousMaskImage = liveMaskImage.value;
-                const retiredMaskImage = retiredLiveMaskImage.value;
-
                 liveMaskUniforms.value = preparedMask.uniforms;
-                liveMaskImage.value = preparedMask.image;
-                retiredLiveMaskImage.value = previousMaskImage;
-                disposeReactNativeSkiaImage(retiredMaskImage);
+                swapLiveMaskImage(
+                  liveMaskImage,
+                  liveMaskImageIsEmpty,
+                  retiredLiveMaskImage,
+                  preparedMask.image,
+                  emptyLiveMaskImage,
+                );
               },
             );
             lastShaderActive.value = true;
@@ -2369,13 +2548,14 @@ function LiveCameraProof(props: {
                 namespace: "rn-live",
               },
               () => {
-                const previousMaskImage = liveMaskImage.value;
-                const retiredMaskImage = retiredLiveMaskImage.value;
-
                 liveMaskUniforms.value = emptyLiveMaskUniforms;
-                liveMaskImage.value = null;
-                retiredLiveMaskImage.value = previousMaskImage;
-                disposeReactNativeSkiaImage(retiredMaskImage);
+                swapLiveMaskImage(
+                  liveMaskImage,
+                  liveMaskImageIsEmpty,
+                  retiredLiveMaskImage,
+                  null,
+                  emptyLiveMaskImage,
+                );
               },
             );
             lastShaderActive.value = false;
@@ -2468,6 +2648,7 @@ function LiveCameraProof(props: {
     },
     [
       droppedFrameCount,
+      emptyLiveMaskImage,
       emptyLiveMaskUniforms,
       emptyLiveVectorPicture,
       frameRenderer,
@@ -2491,6 +2672,7 @@ function LiveCameraProof(props: {
       lastSerializationDurationMs,
       lastShaderActive,
       liveMaskImage,
+      liveMaskImageIsEmpty,
       liveMaskUniforms,
       liveMediaRect,
       liveNativeMaskBuilder,
@@ -2588,12 +2770,19 @@ function LiveCameraProof(props: {
                 isActive={Boolean(canRunCamera)}
                 orientationSource="interface"
                 outputs={cameraOutputs}
-                style={styles.captureCamera}
+                style={[
+                  styles.captureCamera,
+                  awaitingSyncedFrame ? styles.captureCameraVisible : null,
+                ]}
               />
             ) : null}
             <NativeFrameRendererView
               renderer={frameRenderer}
-              style={[styles.frameRendererSurface, liveFrameRendererStyle]}
+              style={[
+                styles.frameRendererSurface,
+                liveFrameRendererStyle,
+                awaitingSyncedFrame ? styles.frameRendererSurfaceHidden : null,
+              ]}
             />
           </>
         }
@@ -2624,9 +2813,11 @@ function LiveCameraProof(props: {
             onClear={clearInstantRules}
             onModeChange={props.onModeChange}
             onRecipeChange={selectInstantRecipe}
+            onZoneShapeChange={selectInstantZoneShape}
             recipe={instantRecipe}
             rules={instantRules}
             runtime={instantRuntime}
+            zoneShape={instantZoneShape}
           />
         ) : showLiveHud ? (
           <>
@@ -3990,6 +4181,9 @@ const styles = StyleSheet.create({
     right: 0,
     top: 0,
   },
+  captureCameraVisible: {
+    opacity: 1,
+  },
   floatingButton: {
     backgroundColor: "rgba(5, 7, 11, 0.72)",
     borderColor: "rgba(216, 226, 240, 0.18)",
@@ -4021,6 +4215,9 @@ const styles = StyleSheet.create({
   frameRendererSurface: {
     overflow: "hidden",
     zIndex: 1,
+  },
+  frameRendererSurfaceHidden: {
+    opacity: 0,
   },
   header: {
     alignItems: "center",
@@ -4236,6 +4433,31 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "700",
     lineHeight: 18,
+  },
+  instantShapeSwitch: {
+    backgroundColor: "rgba(248, 250, 252, 0.08)",
+    borderRadius: 12,
+    flexDirection: "row",
+    gap: 4,
+    padding: 4,
+  },
+  instantShapeButton: {
+    alignItems: "center",
+    borderRadius: 9,
+    flex: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 7,
+  },
+  instantShapeButtonActive: {
+    backgroundColor: "rgba(248, 250, 252, 0.94)",
+  },
+  instantShapeLabel: {
+    color: "#aeb7c6",
+    fontSize: 10,
+    fontWeight: "900",
+  },
+  instantShapeLabelActive: {
+    color: "#050608",
   },
   instantScore: {
     color: "#ffd166",
