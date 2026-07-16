@@ -74,6 +74,7 @@ export type { PreparedMaskFrame } from "./mask-frame-preparer";
 export type { PreparedRenderTimelineContext } from "./prepared-window-timeline";
 
 export function createPreparedRenderWindow(options: {
+  readonly artifactKind?: RenderPreparationArtifactKind;
   readonly detectionTimeline: BufferedDetectionTimeline;
   readonly maskStyle?: MaskStyle | null;
   readonly maxMaskFrameCacheSize?: number;
@@ -83,6 +84,11 @@ export function createPreparedRenderWindow(options: {
   readonly prefetchFrameCount?: number;
   readonly preparedWindowScanIntervalSeconds?: number;
   readonly renderPreparation?: RenderPreparationOptions;
+  readonly resolveInstructions?: (options: {
+    readonly frame: DetectionFrame;
+    readonly maskStyle: MaskStyle;
+    readonly mediaTime: number;
+  }) => readonly SerializableMaskInstruction[];
 }): PreparedRenderWindow {
   const maskFrameOptions = options.renderPreparation?.maskFrame;
   const maxMaskFrameCacheSize = Math.max(
@@ -250,7 +256,9 @@ export function createPreparedRenderWindow(options: {
         return;
       }
 
-      const instructions = resolveMaskInstructions({
+      const instructions = (
+        options.resolveInstructions ?? resolveMaskInstructions
+      )({
         frame: job.frame,
         maskStyle: job.maskStyle,
         mediaTime: job.mediaTime,
@@ -622,7 +630,7 @@ export function createPreparedRenderWindow(options: {
               }
             : null,
           inFlightCount: inFlightMaskFrameKeys.size,
-          kind: RenderPreparationArtifactKind.MaskFrame,
+          kind: options.artifactKind ?? RenderPreparationArtifactKind.MaskFrame,
           maxInFlightCount,
           maxPendingCount: maxPendingFrameCount,
           maxPreparedCount: maxMaskFrameCacheSize,

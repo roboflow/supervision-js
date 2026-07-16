@@ -62,6 +62,16 @@ interface DemoFixtureMeta {
     readonly normalizeInBrowser: boolean;
     readonly readyStatusLabel: string;
   };
+  readonly presentation?: DemoFixturePresentationDefaults;
+}
+
+export interface DemoFixturePresentationDefaults {
+  readonly boxesEnabled?: boolean;
+  readonly focusEnabled?: boolean;
+  readonly keypointsEnabled?: boolean;
+  readonly labelsEnabled?: boolean;
+  readonly masksEnabled?: boolean;
+  readonly polygonsEnabled?: boolean;
 }
 
 export interface DemoFixtureDefinition {
@@ -72,6 +82,7 @@ export interface DemoFixtureDefinition {
   readonly inferenceLabel: string;
   readonly mediaLoadingStatusLabel: string;
   readonly normalizeInBrowser: boolean;
+  readonly presentationDefaults?: DemoFixturePresentationDefaults;
   readonly sampleName: string;
   readonly mediaReadyStatusLabel: string;
   readonly videoSrc: string;
@@ -289,6 +300,7 @@ function createDemoFixtures(): readonly DemoFixtureDefinition[] {
           mediaLoadingStatusLabel: meta.media.loadingStatusLabel,
           mediaReadyStatusLabel: meta.media.readyStatusLabel,
           normalizeInBrowser: meta.media.normalizeInBrowser,
+          presentationDefaults: meta.presentation,
           sampleName: meta.sampleName,
           videoSrc,
         } satisfies DemoFixtureDefinition,

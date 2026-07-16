@@ -48,6 +48,27 @@ describe("detection geometry conversions", () => {
     ).toBeGreaterThanOrEqual(3);
   });
 
+  it("rasterizes polygons from their top-left bounds", () => {
+    const polygonMask = convertDetectionPolygonToMask(
+      {
+        id: "offset-polygon",
+        polygon: {
+          points: [
+            { x: 1, y: 1 },
+            { x: 4, y: 1 },
+            { x: 4, y: 4 },
+            { x: 1, y: 4 },
+          ],
+        },
+      },
+      { height: 6, width: 6 },
+    );
+    const pixels = decodeCompressedRleMask(polygonMask.mask!).data;
+
+    expect(pixels[2 * 6 + 2]).toBe(1);
+    expect(pixels[4 * 6 + 4]).toBe(0);
+  });
+
   it("merges same-class masks", () => {
     const first = convertDetectionBoxToMask(box, { height: 20, width: 20 });
     const second = convertDetectionBoxToMask(

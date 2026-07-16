@@ -38,7 +38,10 @@ export enum RenderPreparationWorkerStatus {
  * Prepared artifact family.
  */
 export enum RenderPreparationArtifactKind {
+  /** Frame-level ID-mask artifact prepared from semantic masks. */
   MaskFrame = "maskFrame",
+  /** Frame-level ID-mask artifact rasterized from semantic polygons. */
+  PolygonFrame = "polygonFrame",
 }
 
 /**
@@ -59,7 +62,9 @@ export interface RenderPreparationWorkerFactory {
 }
 
 /**
- * Options for preparing frame-level mask artifacts.
+ * Options for preparing frame-level raster artifacts. Polygon frames reuse
+ * this bounded worker/cache policy so both dense geometry paths stay ahead of
+ * playback without duplicating scheduling controls.
  */
 export interface RenderPreparationMaskFrameOptions {
   /**

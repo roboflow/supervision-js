@@ -276,6 +276,7 @@ describe("package entrypoint", () => {
     });
     expect(entrypoint.RenderPreparationArtifactKind).toEqual({
       MaskFrame: "maskFrame",
+      PolygonFrame: "polygonFrame",
     });
   });
 

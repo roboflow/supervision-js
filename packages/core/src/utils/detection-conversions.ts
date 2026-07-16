@@ -72,7 +72,7 @@ export function rasterizePolygonToMask(
     return data;
   }
 
-  const bounds = getPointsRect(points)!;
+  const bounds = centerRectToTopLeftRect(getPointsRect(points)!);
   const startY = Math.max(0, Math.floor(bounds.y));
   const endY = Math.min(
     dimensions.height - 1,

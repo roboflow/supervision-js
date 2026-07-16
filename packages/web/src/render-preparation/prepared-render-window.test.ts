@@ -108,6 +108,59 @@ describe("prepared render window", () => {
     }
   });
 
+  it("prepares polygon raster instructions through the shared worker window", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const onDiagnostics = vi.fn();
+      const renderWindow = createPreparedRenderWindow({
+        artifactKind: RenderPreparationArtifactKind.PolygonFrame,
+        detectionTimeline: createTimeline(frames),
+        maskStyle: new BaseMaskStyle(),
+        renderPreparation: { onDiagnostics },
+        resolveInstructions: () => [
+          {
+            alpha: 0.2,
+            color: 0xff0000,
+            detectionIndex: 0,
+            polygon: {
+              height: 4,
+              points: [
+                { x: 0, y: 0 },
+                { x: 3, y: 0 },
+                { x: 3, y: 3 },
+              ],
+              width: 4,
+            },
+          },
+        ],
+      });
+
+      renderWindow.getFrame(0);
+      await vi.runOnlyPendingTimersAsync();
+
+      expect(renderWindow.getFrame(0)?.maskFrame).toMatchObject({
+        height: 4,
+        key: "0:0",
+        width: 4,
+      });
+      expect(onDiagnostics).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          artifacts: [
+            expect.objectContaining({
+              kind: RenderPreparationArtifactKind.PolygonFrame,
+            }),
+          ],
+        }),
+      );
+
+      renderWindow.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("reports active mask frame status separately from background pending work", async () => {
     vi.useFakeTimers();
     resetMocks();

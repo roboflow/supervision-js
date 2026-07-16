@@ -1,4 +1,4 @@
-import type { DetectionMask } from "supervision-js-core";
+import type { DetectionMask, Point } from "supervision-js-core";
 import type { MaskStrokeStyle } from "supervision-js-core";
 import type { PreparedMaskFrameKind } from "./mask-frame-artifact";
 
@@ -9,13 +9,26 @@ export enum MaskPreparationWorkerMessageType {
   Prepare = "prepare",
 }
 
-export interface SerializableMaskInstruction {
+interface SerializableRasterInstructionBase {
   readonly alpha: number;
   readonly color: number;
   readonly detectionIndex: number;
-  readonly mask: DetectionMask;
   readonly stroke?: MaskStrokeStyle;
 }
+
+export type SerializableMaskInstruction =
+  | (SerializableRasterInstructionBase & {
+      readonly mask: DetectionMask;
+      readonly polygon?: never;
+    })
+  | (SerializableRasterInstructionBase & {
+      readonly mask?: never;
+      readonly polygon: {
+        readonly height: number;
+        readonly points: readonly Point[];
+        readonly width: number;
+      };
+    });
 
 export interface MaskFramePreparationJob {
   readonly instructions: readonly SerializableMaskInstruction[];

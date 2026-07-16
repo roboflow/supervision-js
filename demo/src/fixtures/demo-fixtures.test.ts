@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 
 import { KeypointVisibility, type DetectionFrame } from "supervision-js";
 import { computeDetectionMaskRect } from "supervision-js/editing";
+import { demoFixtures } from "./demo-fixtures";
 
 const MAX_POLYGON_POINTS = 48;
 const fixturesRoot = fileURLToPath(new URL("../../fixtures", import.meta.url));
@@ -46,6 +47,21 @@ describe("fixture geometry", () => {
 });
 
 describe("geometry showcase fixture", () => {
+  it("defaults the basketball keypoint sample to keypoints and labels", () => {
+    const fixture = demoFixtures.find(
+      ({ sampleName }) => sampleName === "basketball_geometry",
+    );
+
+    expect(fixture?.presentationDefaults).toEqual({
+      boxesEnabled: false,
+      focusEnabled: false,
+      keypointsEnabled: true,
+      labelsEnabled: true,
+      masksEnabled: false,
+      polygonsEnabled: false,
+    });
+  });
+
   it("publishes per-geometry detection counts in its manifest", () => {
     const geometry = geometryManifest.geometry as Record<string, number>;
 

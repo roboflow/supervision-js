@@ -1,5 +1,9 @@
 import { RENDER_ENGINE_PREFERENCE } from "#constants/media-renderer";
-import type { DetectionFrame } from "supervision-js-core";
+import {
+  BasePolygonStyle,
+  type DetectionFrame,
+  type PolygonStyle,
+} from "supervision-js-core";
 import type { LabelStyle } from "supervision-js-core";
 import type { MaskStyle } from "supervision-js-core";
 import {
@@ -20,6 +24,7 @@ import { createPixiInteractionPresentationLayer } from "./pixi-interaction-prese
 import { createPixiLabelLayer } from "./pixi-label-layer";
 import { createPixiMaskLayer } from "./pixi-mask-layer";
 import { createPixiMaskBrushPreview } from "./pixi-mask-brush-preview";
+import { createPixiPolygonLayer } from "./pixi-polygon-layer";
 import { createPixiVectorLayer } from "./pixi-vector-layer";
 import { createPixiAnnotationOverlayLayer } from "./pixi-annotation-overlay-layer";
 import {
@@ -69,6 +74,10 @@ export async function createPixiMediaScene(
   const app: PixiApplication = new Application();
   let currentLabelStyle: LabelStyle | null = options.labelStyle ?? null;
   let currentMaskStyle: MaskStyle | null = options.maskStyle ?? null;
+  let currentPolygonStyle: PolygonStyle | null =
+    options.polygonStyle === undefined
+      ? new BasePolygonStyle()
+      : options.polygonStyle;
   let currentVisibility: AnnotationVisibility | undefined = options.visibility;
   let visibilityVersion = 0;
   const resolveContextState = (
@@ -89,11 +98,30 @@ export async function createPixiMediaScene(
     Graphics: options.editingEngine ? Graphics : undefined,
     resolveContextState,
   });
+  let polygonLayer =
+    options.polygonStyle !== undefined &&
+    currentPolygonStyle &&
+    !options.editingEngine
+      ? createPixiPolygonLayer({
+          Container,
+          ImageSource,
+          Mesh,
+          MeshGeometry,
+          Shader,
+          Sprite,
+          Texture,
+          UniformGroup,
+          detectionTimeline: options.detectionTimeline,
+          polygonStyle: currentPolygonStyle,
+          renderPreparation: options.renderPreparation,
+          resolveContextState,
+        })
+      : undefined;
   const vectorLayer = createPixiVectorLayer({
     Container,
     Graphics,
     detectionTimeline: options.detectionTimeline,
-    polygonStyle: options.polygonStyle,
+    polygonStyle: polygonLayer?.getVectorFallbackStyle() ?? currentPolygonStyle,
     polylineStyle: options.polylineStyle,
     keypointStyle: options.keypointStyle,
     resolveContextState,
@@ -162,6 +190,8 @@ export async function createPixiMediaScene(
   let mediaHeight = 0;
   let mediaWidth = 0;
   let mediaScene: PixiContainer | undefined;
+  let vectorDisplay: PixiContainer | undefined;
+  let polygonDisplay: PixiContainer | undefined;
   let timelineContext: MediaRendererSceneTimelineContext | undefined;
   const mediaSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Media);
   const maskSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Mask);
@@ -349,6 +379,7 @@ export async function createPixiMediaScene(
   const redrawViewportStyles = () => {
     boxLayer.invalidate();
     boxLayer.drawFrame(currentMediaTime, viewportScale);
+    polygonLayer?.drawFrame(currentMediaTime, viewportScale);
     vectorLayer.drawFrame(currentMediaTime, viewportScale);
     labelLayer?.drawFrame(currentMediaTime, viewportScale);
     drawFocusLayer(currentMediaTime);
@@ -397,7 +428,10 @@ export async function createPixiMediaScene(
       if (!retainedBoxes) boxLayer.attachGraphics(boxes);
       mediaSlot.setDisplay(mediaSprite);
       boxSlot.setDisplay(retainedBoxes ?? boxes);
-      vectorSlot.setDisplay(vectorLayer.createContainer());
+      vectorDisplay = new Container();
+      attachPolygonLayerDisplay();
+      vectorDisplay.addChild(vectorLayer.createContainer());
+      vectorSlot.setDisplay(vectorDisplay);
       previewSlot.setDisplay(maskBrushPreview?.display);
       if (annotationOverlay) {
         annotationOverlayLayer.attachGraphics(annotationOverlay);
@@ -440,6 +474,7 @@ export async function createPixiMediaScene(
     setTimelineContext(context) {
       timelineContext = context;
       maskLayer?.setTimelineContext(context);
+      polygonLayer?.setTimelineContext(context);
     },
 
     presentSample(sample) {
@@ -457,6 +492,7 @@ export async function createPixiMediaScene(
           stagingTexture?.update();
           maskLayer?.drawFrame(sample.timestamp);
           const boxState = boxLayer.drawFrame(sample.timestamp, viewportScale);
+          polygonLayer?.drawFrame(sample.timestamp, viewportScale);
           vectorLayer.drawFrame(sample.timestamp, viewportScale);
           interactionLayer?.drawFrame(sample.timestamp);
           drawFocusLayer(sample.timestamp);
@@ -488,6 +524,7 @@ export async function createPixiMediaScene(
 
         boxMs = measure(() => {
           boxState = boxLayer.drawFrame(sample.timestamp, viewportScale);
+          polygonLayer?.drawFrame(sample.timestamp, viewportScale);
           vectorLayer.drawFrame(sample.timestamp, viewportScale);
         });
         interactionMs = measure(() => {
@@ -527,10 +564,10 @@ export async function createPixiMediaScene(
     },
 
     waitForRenderPreparation(mediaTime, gateOptions) {
-      return (
-        maskLayer?.waitForRenderPreparation(mediaTime, gateOptions) ??
-        Promise.resolve()
-      );
+      return Promise.all([
+        maskLayer?.waitForRenderPreparation(mediaTime, gateOptions),
+        polygonLayer?.waitForRenderPreparation(mediaTime, gateOptions),
+      ]).then(() => undefined);
     },
 
     setRenderQuality(maxDevicePixelRatio) {
@@ -653,13 +690,31 @@ export async function createPixiMediaScene(
         boxLayer.invalidate();
         vectorLayer.setStyles({});
         labelLayer?.setLabelStyle(currentLabelStyle);
+        polygonLayer?.setPolygonStyle(currentPolygonStyle);
         if (currentMaskStyle) {
           maskLayer?.setMaskStyle(createVisibilityMaskStyle(currentMaskStyle));
         }
       }
       boxLayer.setBoxStyle(presentation.boxStyle);
+      if (presentation.polygonStyle !== undefined) {
+        currentPolygonStyle = presentation.polygonStyle;
+        const nextPolygonLayer = presentation.polygonStyle
+          ? ensurePolygonLayer(presentation.polygonStyle)
+          : polygonLayer;
+
+        nextPolygonLayer?.setPolygonStyle(presentation.polygonStyle);
+        vectorLayer.setStyles({
+          polygonStyle:
+            nextPolygonLayer?.getVectorFallbackStyle() ??
+            presentation.polygonStyle,
+        });
+
+        if (presentation.polygonStyle && nextPolygonLayer) {
+          attachPolygonLayerDisplay();
+        }
+      }
+
       vectorLayer.setStyles({
-        polygonStyle: presentation.polygonStyle,
         polylineStyle: presentation.polylineStyle,
         keypointStyle: presentation.keypointStyle,
       });
@@ -719,6 +774,7 @@ export async function createPixiMediaScene(
 
       maskLayer?.drawFrame(mediaTime);
       const boxState = boxLayer.drawFrame(mediaTime, viewportScale);
+      polygonLayer?.drawFrame(mediaTime, viewportScale);
       vectorLayer.drawFrame(mediaTime, viewportScale);
       interactionLayer?.drawFrame(mediaTime);
       drawFocusLayer(mediaTime);
@@ -754,6 +810,7 @@ export async function createPixiMediaScene(
       interactionPresentationLayer?.destroy();
       focusLayer?.destroy();
       maskLayer?.destroy();
+      polygonLayer?.destroy();
       labelLayer?.destroy();
       vectorLayer.destroy();
       maskBrushPreview?.destroy();
@@ -856,6 +913,57 @@ export async function createPixiMediaScene(
     }
 
     return maskLayer;
+  }
+
+  function ensurePolygonLayer(polygonStyle: PolygonStyle) {
+    if (options.editingEngine) {
+      return undefined;
+    }
+
+    if (!polygonLayer) {
+      polygonLayer = createPixiPolygonLayer({
+        Container,
+        ImageSource,
+        Mesh,
+        MeshGeometry,
+        Shader,
+        Sprite,
+        Texture,
+        UniformGroup,
+        detectionTimeline: options.detectionTimeline,
+        polygonStyle,
+        renderPreparation: options.renderPreparation,
+        resolveContextState,
+      });
+
+      if (timelineContext) {
+        polygonLayer.setTimelineContext(timelineContext);
+      }
+    }
+
+    return polygonLayer;
+  }
+
+  function attachPolygonLayerDisplay() {
+    if (
+      !polygonLayer ||
+      polygonDisplay ||
+      !vectorDisplay ||
+      mediaWidth <= 0 ||
+      mediaHeight <= 0
+    ) {
+      return;
+    }
+
+    polygonDisplay = polygonLayer.createDisplay({
+      height: mediaHeight,
+      width: mediaWidth,
+    }) as PixiContainer;
+    if (typeof vectorDisplay.addChildAt === "function") {
+      vectorDisplay.addChildAt(polygonDisplay, 0);
+    } else {
+      vectorDisplay.addChild(polygonDisplay);
+    }
   }
 
   function attachMaskLayerDisplay() {

@@ -20,8 +20,10 @@ import type {
 import type { MaskStyle } from "supervision-js-core";
 import type {
   RenderPreparationOptions,
+  RenderPreparationArtifactKind,
   RenderPreparationPlaybackGateOptions,
 } from "#types/render-preparation";
+import type { SerializableMaskInstruction } from "#render-preparation/mask-preparation-worker-protocol";
 import { resolveMaskStyleOpacity } from "supervision-js-core";
 import { createPixiIdMaskShaderRenderer } from "./pixi-id-mask-shader";
 import type {
@@ -115,6 +117,7 @@ export interface PixiActiveIdMaskFrameTexture {
 }
 
 export function createPixiMaskLayer(options: {
+  readonly artifactKind?: RenderPreparationArtifactKind;
   readonly Container?: ContainerConstructor;
   readonly ImageSource: ImageSourceConstructor;
   readonly Mesh?: MeshConstructor;
@@ -126,6 +129,11 @@ export function createPixiMaskLayer(options: {
   readonly detectionTimeline: BufferedDetectionTimeline;
   readonly maskStyle: MaskStyle;
   readonly renderPreparation?: RenderPreparationOptions;
+  readonly resolveInstructions?: (options: {
+    readonly frame: import("supervision-js-core").DetectionFrame;
+    readonly maskStyle: MaskStyle;
+    readonly mediaTime: number;
+  }) => readonly SerializableMaskInstruction[];
 }): PixiMaskLayer {
   let mediaHeight = 0;
   let mediaWidth = 0;
@@ -143,6 +151,7 @@ export function createPixiMaskLayer(options: {
   let isDestroyed = false;
   const maskTextures = new Map<string, PixiTexture>();
   const preparedRenderWindow = createPreparedRenderWindow({
+    artifactKind: options.artifactKind,
     detectionTimeline: options.detectionTimeline,
     maskStyle: options.maskStyle,
     onMaskFrameEvicted(key) {
@@ -169,6 +178,7 @@ export function createPixiMaskLayer(options: {
       hideSprite();
     },
     renderPreparation: options.renderPreparation,
+    resolveInstructions: options.resolveInstructions,
   });
 
   return {

@@ -34,6 +34,39 @@ describe("mask frame compositor", () => {
     expect([...frame!.data]).toEqual([1, 0, 0, 0]);
   });
 
+  it("rasterizes polygons into worker-preparable ID-mask artifacts", async () => {
+    const frame = await createPngIdMaskFrame([
+      {
+        alpha: 0.25,
+        color: 0x00ff00,
+        detectionIndex: 2,
+        polygon: {
+          height: 6,
+          points: [
+            { x: 1, y: 1 },
+            { x: 4, y: 1 },
+            { x: 4, y: 4 },
+            { x: 1, y: 4 },
+          ],
+          width: 6,
+        },
+        stroke: {
+          alpha: 1,
+          color: 0xffffff,
+          width: 2,
+        },
+      },
+    ]);
+
+    expect(frame).toBeDefined();
+    expect(frame!.data[2 * 6 + 2]).toBe(3);
+    expect(frame!.data[4 * 6 + 4]).toBe(0);
+    expect(frame!.fillPalette.slice(12, 16)).toEqual(
+      Float32Array.from([0, 1, 0, 0.25]),
+    );
+    expect(frame!.strokeWidths[3]).toBe(2);
+  });
+
   it("builds detection-indexed ID mask artifacts for shader rendering and picking", () => {
     const frame = createIdMaskFrame([
       {

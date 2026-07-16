@@ -507,6 +507,16 @@ export function useDemoRenderer(): DemoRendererState {
     uploadAbortRef.current?.abort();
     setUploadRun(null);
     setUploadInferenceState(initialUploadInferenceState);
+    const fixture = demoFixtures.find(
+      (candidate) => candidate.sampleName === sampleName,
+    );
+    const nextPresentationSettings = {
+      ...defaultDemoPresentationSettings,
+      ...fixture?.presentationDefaults,
+    };
+
+    presentationSettingsRef.current = nextPresentationSettings;
+    setPresentationSettingsState(nextPresentationSettings);
     setSampleFixtureIdState(sampleName);
     setSourceModeState(DemoSourceMode.Fixture);
   }, []);

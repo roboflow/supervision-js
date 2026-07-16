@@ -3,6 +3,9 @@ import type { MaskStrokeStyle } from "supervision-js-core";
 import {
   createIdMaskFrame,
   decodeCompressedRleMask,
+  encodeBinaryMask,
+  rasterizePolygonToMask,
+  type IdMaskInstruction,
   type IdMaskFrame,
 } from "supervision-js-core";
 export {
@@ -42,15 +45,17 @@ export interface PngIdMaskFrame extends IdMaskFrame {
 export function compositeMaskFrame(
   instructions: readonly SerializableMaskInstruction[],
 ): CompositedMaskFrame | undefined {
-  if (instructions.length === 0) {
+  const maskInstructions = materializeMaskInstructions(instructions);
+
+  if (maskInstructions.length === 0) {
     return undefined;
   }
 
-  const width = Math.max(...instructions.map(({ mask }) => mask.width));
-  const height = Math.max(...instructions.map(({ mask }) => mask.height));
+  const width = Math.max(...maskInstructions.map(({ mask }) => mask.width));
+  const height = Math.max(...maskInstructions.map(({ mask }) => mask.height));
   const data = new Uint8ClampedArray(new ArrayBuffer(width * height * 4));
 
-  for (const instruction of instructions) {
+  for (const instruction of maskInstructions) {
     compositeInstruction(data, width, instruction);
   }
 
@@ -60,7 +65,7 @@ export function compositeMaskFrame(
 export async function createPngIdMaskFrame(
   instructions: readonly SerializableMaskInstruction[],
 ): Promise<PngIdMaskFrame | undefined> {
-  const frame = createIdMaskFrame(instructions);
+  const frame = createIdMaskFrame(materializeMaskInstructions(instructions));
 
   if (!frame) {
     return undefined;
@@ -79,7 +84,7 @@ export async function createPngIdMaskFrame(
 function compositeInstruction(
   rgba: Uint8ClampedArray,
   canvasWidth: number,
-  instruction: SerializableMaskInstruction,
+  instruction: IdMaskInstruction,
 ) {
   const decodedMask = decodeCompressedRleMask(instruction.mask);
   const fill = resolveRgbaColor(instruction.color, instruction.alpha);
@@ -89,6 +94,30 @@ function compositeInstruction(
   if (instruction.stroke) {
     compositeMaskStroke(rgba, canvasWidth, decodedMask, instruction.stroke);
   }
+}
+
+function materializeMaskInstructions(
+  instructions: readonly SerializableMaskInstruction[],
+): IdMaskInstruction[] {
+  return instructions.map((instruction) => {
+    if (instruction.mask) {
+      return instruction;
+    }
+
+    const { height, points, width } = instruction.polygon;
+
+    return {
+      alpha: instruction.alpha,
+      color: instruction.color,
+      detectionIndex: instruction.detectionIndex,
+      mask: encodeBinaryMask(
+        rasterizePolygonToMask(points, { height, width }),
+        width,
+        height,
+      ),
+      stroke: instruction.stroke,
+    };
+  });
 }
 
 function compositeMaskFill(
