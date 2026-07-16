@@ -120,6 +120,14 @@ import {
   createDetectionFrameFromExecutorchCocoPoses,
   unrotateExecutorchUpBbox,
 } from "supervision-js-react-native/adapters/executorch";
+import {
+  INITIAL_REQUESTED_INFERENCE_MODELS,
+  requestInferenceModelsForDemoState,
+  shouldPreventInferenceModelLoad,
+  type DemoMode,
+  type LiveInferenceMode,
+  type RequestedInferenceModels,
+} from "./src/live-model-lifecycle";
 
 function swapLiveVectorPicture(
   livePicture: SharedValue<SkPicture>,
@@ -140,8 +148,6 @@ function swapLiveVectorPicture(
   disposeReactNativeSkiaPicture(obsoletePicture);
 }
 
-type DemoMode = "static" | "live" | "video";
-type LiveInferenceMode = "segmentation" | "pose";
 type LiveDetectionDisplayMode = "masks" | "boxes";
 type LiveClassEffect = "redact" | "spotlight";
 type LiveClassEffects = Readonly<Record<string, LiveClassEffect>>;
@@ -199,11 +205,21 @@ export default function App() {
   const [mode, setMode] = useState<DemoMode>("static");
   const [liveInferenceMode, setLiveInferenceMode] =
     useState<LiveInferenceMode>("segmentation");
+  const [requestedInferenceModels, setRequestedInferenceModels] =
+    useState<RequestedInferenceModels>(INITIAL_REQUESTED_INFERENCE_MODELS);
+
+  useEffect(() => {
+    setRequestedInferenceModels((current) =>
+      requestInferenceModelsForDemoState(current, mode, liveInferenceMode),
+    );
+  }, [liveInferenceMode, mode]);
+
   const segmentation = useLiveSegmentation(
-    mode === "static" ||
-      (mode === "live" && liveInferenceMode !== "segmentation"),
+    shouldPreventInferenceModelLoad(requestedInferenceModels, "segmentation"),
   );
-  const pose = useLivePose(mode !== "live" || liveInferenceMode !== "pose");
+  const pose = useLivePose(
+    shouldPreventInferenceModelLoad(requestedInferenceModels, "pose"),
+  );
 
   if (mode === "live") {
     return (
