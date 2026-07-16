@@ -15,6 +15,7 @@
 export const DEFAULT_MAX_POLYGON_POINTS = 48;
 export const DEFAULT_POLYGON_TOLERANCE = 2;
 export const DEFAULT_KEYPOINT_VISIBLE_CONFIDENCE = 0.5;
+export const DEFAULT_POSE_MATCH_IOU = 0.3;
 
 export const KEYPOINT_VISIBILITY_NOT_LABELED = 0;
 export const KEYPOINT_VISIBILITY_VISIBLE = 2;
@@ -181,6 +182,92 @@ export function normalizePoseDetection(rawDetection, options) {
   };
 }
 
+/**
+ * Attaches pose geometry to class detections using deterministic one-to-one
+ * rectangle IoU matching. Standalone pose detections are intentionally not
+ * returned: the class detection remains authoritative for identity, label,
+ * confidence, box, mask, and polygon.
+ */
+export function attachPoseKeypointsToDetections(
+  detections,
+  poseDetections,
+  options,
+) {
+  const minimumIou = options.minimumIou ?? DEFAULT_POSE_MATCH_IOU;
+  const targetClassNames = new Set(options.targetClassNames);
+
+  if (!(minimumIou >= 0 && minimumIou <= 1)) {
+    throw new Error("minimumIou must be between 0 and 1.");
+  }
+
+  const targetIndexes = detections.flatMap((detection, detectionIndex) =>
+    detection.rect && targetClassNames.has(detection.className)
+      ? [detectionIndex]
+      : [],
+  );
+  const candidates = targetIndexes.flatMap((detectionIndex) =>
+    poseDetections.flatMap((poseDetection, poseIndex) => {
+      if (!poseDetection.rect || !poseDetection.keypoints) return [];
+
+      const score = rectIntersectionOverUnion(
+        detections[detectionIndex].rect,
+        poseDetection.rect,
+      );
+
+      return score >= minimumIou ? [{ detectionIndex, poseIndex, score }] : [];
+    }),
+  );
+
+  candidates.sort(
+    (left, right) =>
+      right.score - left.score ||
+      left.detectionIndex - right.detectionIndex ||
+      left.poseIndex - right.poseIndex,
+  );
+
+  const matches = new Map();
+  const matchedPoseIndexes = new Set();
+
+  for (const candidate of candidates) {
+    if (
+      matches.has(candidate.detectionIndex) ||
+      matchedPoseIndexes.has(candidate.poseIndex)
+    ) {
+      continue;
+    }
+
+    matches.set(candidate.detectionIndex, candidate);
+    matchedPoseIndexes.add(candidate.poseIndex);
+  }
+
+  return {
+    detections: detections.map((detection, detectionIndex) => {
+      const match = matches.get(detectionIndex);
+
+      if (!match) return detection;
+
+      const poseDetection = poseDetections[match.poseIndex];
+
+      return {
+        ...detection,
+        keypoints: poseDetection.keypoints,
+        metadata: {
+          ...detection.metadata,
+          poseDetection: {
+            confidence: poseDetection.confidence,
+            id: poseDetection.id,
+            matchIou: round(match.score, 4),
+            sourceId: poseDetection.sourceId,
+          },
+        },
+      };
+    }),
+    matchedPoseCount: matchedPoseIndexes.size,
+    unmatchedPoseCount: poseDetections.length - matchedPoseIndexes.size,
+    unmatchedTargetCount: targetIndexes.length - matches.size,
+  };
+}
+
 /** Counts detection geometry by type for fixture summaries. */
 export function summarizeFrameGeometry(frames) {
   const geometry = {
@@ -202,6 +289,30 @@ export function summarizeFrameGeometry(frames) {
   }
 
   return geometry;
+}
+
+function rectIntersectionOverUnion(left, right) {
+  const leftX1 = left.x - left.width / 2;
+  const leftY1 = left.y - left.height / 2;
+  const leftX2 = left.x + left.width / 2;
+  const leftY2 = left.y + left.height / 2;
+  const rightX1 = right.x - right.width / 2;
+  const rightY1 = right.y - right.height / 2;
+  const rightX2 = right.x + right.width / 2;
+  const rightY2 = right.y + right.height / 2;
+  const intersectionWidth = Math.max(
+    0,
+    Math.min(leftX2, rightX2) - Math.max(leftX1, rightX1),
+  );
+  const intersectionHeight = Math.max(
+    0,
+    Math.min(leftY2, rightY2) - Math.max(leftY1, rightY1),
+  );
+  const intersectionArea = intersectionWidth * intersectionHeight;
+  const unionArea =
+    left.width * left.height + right.width * right.height - intersectionArea;
+
+  return unionArea > 0 ? intersectionArea / unionArea : 0;
 }
 
 function simplifyClosedRing(points, tolerance) {

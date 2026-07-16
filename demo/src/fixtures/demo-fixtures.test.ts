@@ -83,6 +83,11 @@ describe("geometry showcase fixture", () => {
     };
 
     expect(provenance.pose.model).toBeDefined();
+    expect(provenance.pose.associationPolicy).toContain(
+      "standalone pose detections are omitted",
+    );
+    expect(provenance.pose.minimumMatchIou).toBe(0.3);
+    expect(provenance.pose.matchedPoseDetectionCount).toBeGreaterThan(0);
     expect(provenance.pose.weightsSha256).toMatch(/^[a-f0-9]{64}$/);
     expect(provenance.pose.visibilityPolicy).toContain("NotLabeled");
     expect(provenance.sources).toHaveLength(2);
@@ -138,19 +143,25 @@ describe("geometry showcase fixture", () => {
     expect(violations).toBe(0);
   });
 
-  it("ships keypoint detections with zero-based edges and explicit visibility", () => {
+  it("attaches keypoints to team detections with zero-based edges and explicit visibility", () => {
     let keypointDetections = 0;
     let violations = 0;
+    let personDetections = 0;
 
     for (const chunk of geometryChunks) {
       for (const frame of chunk.frames) {
         for (const detection of frame.detections) {
+          if (detection.className === "person") personDetections += 1;
           if (!detection.keypoints) continue;
 
           keypointDetections += 1;
           const { edges, points, visibility } = detection.keypoints;
           const validDetection =
-            /^pose:\d+:\d+$/.test(String(detection.id)) &&
+            (detection.className === "white team player" ||
+              detection.className === "yellow team player") &&
+            detection.sourceId === "sam3" &&
+            detection.mask !== undefined &&
+            detection.polygon !== undefined &&
             detection.rect !== undefined &&
             visibility !== undefined &&
             visibility.length === points.length &&
@@ -178,6 +189,8 @@ describe("geometry showcase fixture", () => {
 
     expect(keypointDetections).toBeGreaterThan(0);
     expect(violations).toBe(0);
+    expect(personDetections).toBe(0);
+    expect(geometryManifest.classNames).not.toContain("person");
   });
 
   it("keeps every detection frame on the shared 30fps detection-frame grid", () => {

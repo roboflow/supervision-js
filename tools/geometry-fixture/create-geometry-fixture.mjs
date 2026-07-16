@@ -24,7 +24,9 @@ import { convertDetectionMaskToPolygon } from "supervision-js-core";
 import {
   DEFAULT_KEYPOINT_VISIBLE_CONFIDENCE,
   DEFAULT_MAX_POLYGON_POINTS,
+  DEFAULT_POSE_MATCH_IOU,
   DEFAULT_POLYGON_TOLERANCE,
+  attachPoseKeypointsToDetections,
   normalizePoseDetection,
   simplifyPolygonPoints,
   summarizeFrameGeometry,
@@ -34,6 +36,7 @@ const DETECTIONS_SCHEMA = "supervision-js.tools.geometry-fixture.detections";
 const SEGMENTATION_SOURCE_ID = "sam3";
 const POSE_SOURCE_ID = "yolo-pose";
 const POSE_Z_INDEX_BASE = 100;
+const POSE_TARGET_CLASS_NAMES = ["white team player", "yellow team player"];
 
 const options = parseArgs(process.argv.slice(2));
 
@@ -66,18 +69,37 @@ for (const frameIndex of poseFrames.keys()) {
   }
 }
 
-const frames = sam3Fixture.frames.map((frame) => ({
-  ...frame,
-  detections: [
-    ...frame.detections.map((detection) =>
-      deriveMaskPolygonDetection(detection, polygonOptions),
-    ),
-    ...normalizePoseFrame(poseFrames.get(frame.frameIndex) ?? [], frame),
-  ],
-}));
+const poseAssociation = {
+  matchedPoseCount: 0,
+  unmatchedPoseCount: 0,
+  unmatchedTargetCount: 0,
+};
+const frames = sam3Fixture.frames.map((frame) => {
+  const segmentationDetections = frame.detections.map((detection) =>
+    deriveMaskPolygonDetection(detection, polygonOptions),
+  );
+  const poseDetections = normalizePoseFrame(
+    poseFrames.get(frame.frameIndex) ?? [],
+    frame,
+  );
+  const association = attachPoseKeypointsToDetections(
+    segmentationDetections,
+    poseDetections,
+    {
+      minimumIou: DEFAULT_POSE_MATCH_IOU,
+      targetClassNames: POSE_TARGET_CLASS_NAMES,
+    },
+  );
+
+  poseAssociation.matchedPoseCount += association.matchedPoseCount;
+  poseAssociation.unmatchedPoseCount += association.unmatchedPoseCount;
+  poseAssociation.unmatchedTargetCount += association.unmatchedTargetCount;
+
+  return { ...frame, detections: association.detections };
+});
 const geometry = summarizeFrameGeometry(frames);
 const fixture = {
-  classNames: [...(sam3Fixture.inference?.prompts ?? []), "person"],
+  classNames: [...(sam3Fixture.inference?.prompts ?? [])],
   frames,
   geometry,
   inference: sam3Fixture.inference,
@@ -92,11 +114,17 @@ const fixture = {
     },
     pose: {
       ...poseMeta,
+      associationPolicy:
+        "greedy one-to-one center-rect IoU; keypoints attach to the matched SAM3 class detection and standalone pose detections are omitted",
       coordinateConversion:
         "xyxy corner boxes to center-based rects; COCO one-based skeleton edges to zero-based indexes",
+      matchedPoseDetectionCount: poseAssociation.matchedPoseCount,
+      minimumMatchIou: DEFAULT_POSE_MATCH_IOU,
       sourceFile: relative(fixtureDir, poseInputPath),
+      targetClassNames: POSE_TARGET_CLASS_NAMES,
+      unmatchedPoseDetectionCount: poseAssociation.unmatchedPoseCount,
+      unmatchedTargetDetectionCount: poseAssociation.unmatchedTargetCount,
       visibilityPolicy: `keypoint confidence >= ${options.visibleConfidence} maps to Visible(2), otherwise NotLabeled(0); Occluded(1) is never inferred`,
-      zIndexPolicy: `pose detections render above segmentation via zIndex ${POSE_Z_INDEX_BASE}+; point and line picks take precedence over area geometry`,
     },
     sources: [
       {

@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   COCO_SKELETON_EDGES_ONE_BASED,
+  DEFAULT_POSE_MATCH_IOU,
   KEYPOINT_VISIBILITY_NOT_LABELED,
   KEYPOINT_VISIBILITY_VISIBLE,
+  attachPoseKeypointsToDetections,
   convertOneBasedEdges,
   normalizePoseDetection,
   simplifyPolygonPoints,
@@ -173,6 +175,115 @@ describe("normalizePoseDetection", () => {
     );
 
     assert.equal(detection, undefined);
+  });
+});
+
+describe("attachPoseKeypointsToDetections", () => {
+  const keypoints = {
+    edges: [[0, 1]],
+    points: [
+      { x: 90, y: 90 },
+      { x: 110, y: 110 },
+    ],
+    visibility: [2, 2],
+  };
+
+  it("merges each pose into one overlapping team detection", () => {
+    const teamDetection = {
+      className: "yellow team player",
+      confidence: 0.95,
+      id: "sam:yellow:0",
+      mask: { counts: "fixture" },
+      metadata: { sam3Prompt: "yellow team player" },
+      polygon: { points: [] },
+      rect: { height: 100, width: 80, x: 100, y: 100 },
+      sourceId: "sam3",
+    };
+    const result = attachPoseKeypointsToDetections(
+      [teamDetection],
+      [
+        {
+          className: "person",
+          confidence: 0.9,
+          id: "pose:0:0",
+          keypoints,
+          rect: { height: 100, width: 80, x: 102, y: 101 },
+          sourceId: "yolo-pose",
+        },
+      ],
+      {
+        minimumIou: DEFAULT_POSE_MATCH_IOU,
+        targetClassNames: ["white team player", "yellow team player"],
+      },
+    );
+
+    assert.equal(result.matchedPoseCount, 1);
+    assert.equal(result.unmatchedPoseCount, 0);
+    assert.equal(result.unmatchedTargetCount, 0);
+    assert.equal(result.detections.length, 1);
+    assert.equal(result.detections[0].className, "yellow team player");
+    assert.equal(result.detections[0].id, "sam:yellow:0");
+    assert.equal(result.detections[0].sourceId, "sam3");
+    assert.equal(result.detections[0].keypoints, keypoints);
+    assert.deepEqual(result.detections[0].metadata.poseDetection, {
+      confidence: 0.9,
+      id: "pose:0:0",
+      matchIou: 0.9328,
+      sourceId: "yolo-pose",
+    });
+  });
+
+  it("does not duplicate a pose or retain unmatched person detections", () => {
+    const result = attachPoseKeypointsToDetections(
+      [
+        {
+          className: "white team player",
+          id: "sam:white:0",
+          rect: { height: 100, width: 80, x: 100, y: 100 },
+        },
+        {
+          className: "yellow team player",
+          id: "sam:yellow:0",
+          rect: { height: 100, width: 80, x: 104, y: 100 },
+        },
+        {
+          className: "basketball",
+          id: "sam:ball:0",
+          rect: { height: 20, width: 20, x: 100, y: 100 },
+        },
+      ],
+      [
+        {
+          className: "person",
+          id: "pose:0:0",
+          keypoints,
+          rect: { height: 100, width: 80, x: 100, y: 100 },
+        },
+        {
+          className: "person",
+          id: "pose:0:1",
+          keypoints,
+          rect: { height: 40, width: 40, x: 500, y: 500 },
+        },
+      ],
+      {
+        minimumIou: DEFAULT_POSE_MATCH_IOU,
+        targetClassNames: ["white team player", "yellow team player"],
+      },
+    );
+
+    assert.equal(result.matchedPoseCount, 1);
+    assert.equal(result.unmatchedPoseCount, 1);
+    assert.equal(result.unmatchedTargetCount, 1);
+    assert.equal(result.detections.length, 3);
+    assert.equal(
+      result.detections.filter((detection) => detection.keypoints).length,
+      1,
+    );
+    assert.equal(
+      result.detections.some((detection) => detection.className === "person"),
+      false,
+    );
   });
 });
 

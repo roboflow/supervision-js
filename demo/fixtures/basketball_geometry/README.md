@@ -41,10 +41,12 @@ is dropped and reported by the generator.
   everything else to `NotLabeled(0)`. Pose output has no occlusion state, so
   `Occluded(1)` is never invented. Edges with a `NotLabeled` endpoint are
   dropped.
-- **Z order and picking**: pose detections carry `zIndex >= 100` so keypoints
-  render above segmentation geometry. Precise keypoint and edge hits take
-  precedence over overlapping area geometry; ids are stable
-  (`pose:<frameIndex>:<personIndex>`).
+- **Pose association** uses deterministic one-to-one center-rectangle IoU
+  matching (minimum `0.3`) against `white team player` and
+  `yellow team player` SAM3 detections. A match copies the pose keypoints onto
+  the SAM3 detection, which remains authoritative for id, class, confidence,
+  box, mask, polygon, and label. Unmatched YOLO poses are omitted, so the
+  fixture does not create duplicate generic `person` detections or labels.
 
 The exact values, input hashes, and policies are recorded in the `provenance`
 block of `detections.manifest.json`.
