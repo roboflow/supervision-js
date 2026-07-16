@@ -120,14 +120,6 @@ import {
   createDetectionFrameFromExecutorchCocoPoses,
   unrotateExecutorchUpBbox,
 } from "supervision-js-react-native/adapters/executorch";
-import {
-  INITIAL_REQUESTED_INFERENCE_MODELS,
-  requestInferenceModelsForDemoState,
-  shouldPreventInferenceModelLoad,
-  type DemoMode,
-  type LiveInferenceMode,
-  type RequestedInferenceModels,
-} from "./src/live-model-lifecycle";
 
 function swapLiveVectorPicture(
   livePicture: SharedValue<SkPicture>,
@@ -148,6 +140,8 @@ function swapLiveVectorPicture(
   disposeReactNativeSkiaPicture(obsoletePicture);
 }
 
+type DemoMode = "static" | "live" | "video";
+type LiveInferenceMode = "segmentation" | "pose";
 type LiveDetectionDisplayMode = "masks" | "boxes";
 type LiveClassEffect = "redact" | "spotlight";
 type LiveClassEffects = Readonly<Record<string, LiveClassEffect>>;
@@ -187,15 +181,15 @@ const liveSegmentationModel =
     : models.instance_segmentation.rf_detr_nano({ quant: true });
 const livePoseModel = models.pose_estimation.yolo26n();
 
-function useLiveSegmentation(preventLoad: boolean) {
+function useLiveSegmentation() {
   return useInstanceSegmentation({
     model: liveSegmentationModel,
-    preventLoad,
+    preventLoad: false,
   });
 }
 
-function useLivePose(preventLoad: boolean) {
-  return usePoseEstimation({ model: livePoseModel, preventLoad });
+function useLivePose() {
+  return usePoseEstimation({ model: livePoseModel, preventLoad: false });
 }
 
 type LiveSegmentation = ReturnType<typeof useLiveSegmentation>;
@@ -205,21 +199,11 @@ export default function App() {
   const [mode, setMode] = useState<DemoMode>("static");
   const [liveInferenceMode, setLiveInferenceMode] =
     useState<LiveInferenceMode>("segmentation");
-  const [requestedInferenceModels, setRequestedInferenceModels] =
-    useState<RequestedInferenceModels>(INITIAL_REQUESTED_INFERENCE_MODELS);
-
-  useEffect(() => {
-    setRequestedInferenceModels((current) =>
-      requestInferenceModelsForDemoState(current, mode, liveInferenceMode),
-    );
-  }, [liveInferenceMode, mode]);
-
-  const segmentation = useLiveSegmentation(
-    shouldPreventInferenceModelLoad(requestedInferenceModels, "segmentation"),
-  );
-  const pose = useLivePose(
-    shouldPreventInferenceModelLoad(requestedInferenceModels, "pose"),
-  );
+  // Preload both models when the app mounts and retain them for the app
+  // session. Besides removing mode-switch waits, this keeps captured camera
+  // worklets backed by a live native model.
+  const segmentation = useLiveSegmentation();
+  const pose = useLivePose();
 
   if (mode === "live") {
     return (
