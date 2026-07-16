@@ -72,9 +72,11 @@ frame-local picking to build a removable list of prohibited classes. Privacy
 uses the same picker to teach redacted classes, then reuses the live mask
 shader's inexpensive mosaic mode inside each model-produced instance mask. A
 narrow class-colored border from the same shader traces the mask silhouette in
-Privacy without extracting vector polygons on every frame. These recipes do not
-promise re-identification, custom industrial classes, or saved/composited camera
-recording.
+Privacy without extracting vector polygons on every frame. Before any class is
+selected, Privacy prepares zero-opacity masks for all detections so those
+contours preview the tappable objects; after selection it returns to rendering
+only the redacted classes. These recipes do not promise re-identification,
+custom industrial classes, or saved/composited camera recording.
 
 On iOS, the demo explicitly requests the RF-DETR Nano segmentation CoreML INT8
 profile through ExecuTorch. ExecuTorch remains example-owned; it is a detection

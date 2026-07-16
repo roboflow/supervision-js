@@ -1428,6 +1428,8 @@ function LiveCameraProof(props: {
     props.inferenceMode === "segmentation" &&
     (!isInstantCv || isInstantPrivacy) &&
     Object.keys(classEffects).length > 0;
+  const privacyPreviewActive =
+    isInstantPrivacy && Object.keys(classEffects).length === 0;
   const emptyLiveMaskUniforms = useMemo(
     () => createEmptyReactNativeLiveIdMaskUniforms(),
     [],
@@ -1521,6 +1523,8 @@ function LiveCameraProof(props: {
   );
   const instantRuntimeSignatureShared = useSharedValue("");
   const instantCvActiveShared = useSharedValue(isInstantCv);
+  const instantPrivacyActiveShared = useSharedValue(isInstantPrivacy);
+  const instantPrivacyHasClassesShared = useSharedValue(false);
   const instantTouchRequestShared =
     useSharedValue<InstantCvTouchRequest | null>(null);
   const lastInstantTouchRequestId = useSharedValue(0);
@@ -1609,6 +1613,17 @@ function LiveCameraProof(props: {
     instantCvActiveShared.value = isInstantCv;
     setAwaitingSyncedFrame(true);
   }, [instantCvActiveShared, isInstantCv]);
+  useEffect(() => {
+    instantPrivacyActiveShared.value = isInstantPrivacy;
+    instantPrivacyHasClassesShared.value =
+      isInstantPrivacy && Object.keys(classEffectsShared.value).length > 0;
+  }, [
+    classEffects,
+    classEffectsShared,
+    instantPrivacyActiveShared,
+    instantPrivacyHasClassesShared,
+    isInstantPrivacy,
+  ]);
   useEffect(() => {
     if (isInstantCv) {
       return;
@@ -1788,6 +1803,7 @@ function LiveCameraProof(props: {
         };
         setClassEffects(nextEffects);
         classEffectsShared.value = nextEffects;
+        instantPrivacyHasClassesShared.value = true;
         setInstantMessage(
           `${result.label} is now pixelated. Tap another object to redact its class too.`,
         );
@@ -1799,7 +1815,12 @@ function LiveCameraProof(props: {
         "Nothing detected there. Try touching the visible shape.",
       );
     },
-    [classEffectsShared, instantRulesShared, instantRuntimeShared],
+    [
+      classEffectsShared,
+      instantPrivacyHasClassesShared,
+      instantRulesShared,
+      instantRuntimeShared,
+    ],
   );
   const selectInstantRecipe = useCallback(
     (recipe: InstantCvRecipe) => {
@@ -1816,6 +1837,8 @@ function LiveCameraProof(props: {
       setInstantDraftZone(null);
       setClassEffects({});
       classEffectsShared.value = {};
+      instantPrivacyActiveShared.value = recipe === "privacy";
+      instantPrivacyHasClassesShared.value = false;
       if (recipe !== "golden-pose") {
         setDetectionDisplayMode("masks");
       }
@@ -1834,6 +1857,8 @@ function LiveCameraProof(props: {
     [
       inferenceModeShared,
       classEffectsShared,
+      instantPrivacyActiveShared,
+      instantPrivacyHasClassesShared,
       instantRuntimeShared,
       instantRulesShared,
       instantRuntimeSignatureShared,
@@ -1849,6 +1874,7 @@ function LiveCameraProof(props: {
     setInstantDraftZone(null);
     setClassEffects({});
     classEffectsShared.value = {};
+    instantPrivacyHasClassesShared.value = false;
     instantRuntimeShared.value = [];
     instantRuntimeSignatureShared.value = "";
     instantTouchRequestShared.value = null;
@@ -1862,6 +1888,7 @@ function LiveCameraProof(props: {
   }, [
     classEffectsShared,
     instantRecipe,
+    instantPrivacyHasClassesShared,
     instantRuntimeShared,
     instantRulesShared,
     instantRuntimeSignatureShared,
@@ -1930,6 +1957,8 @@ function LiveCameraProof(props: {
       delete nextEffects[label];
       setClassEffects(nextEffects);
       classEffectsShared.value = nextEffects;
+      instantPrivacyHasClassesShared.value =
+        Object.keys(nextEffects).length > 0;
       setInstantMessage(
         Object.keys(nextEffects).length > 0
           ? `${label} is visible again. Tap another object to pixelate its class.`
@@ -1937,7 +1966,7 @@ function LiveCameraProof(props: {
       );
       Vibration.vibrate(12);
     },
-    [classEffectsShared],
+    [classEffectsShared, instantPrivacyHasClassesShared],
   );
   const mapInstantCvPoint = useCallback(
     (point: { readonly x: number; readonly y: number }) => {
@@ -2577,6 +2606,9 @@ function LiveCameraProof(props: {
 
           stage = "class-effects-filter";
           const masksDisplayed = showMaskLayerShared.value;
+          const privacyPreviewEnabled =
+            instantPrivacyActiveShared.value &&
+            !instantPrivacyHasClassesShared.value;
           const maskDetections: LiveSerializedDetection[] = [];
           const mosaicMaskIds: number[] = [];
           const spotlightMaskIds: number[] = [];
@@ -2587,7 +2619,11 @@ function LiveCameraProof(props: {
 
             // In boxes display the mask lane carries only detections with a
             // mask-rendered effect; in masks display it carries everything.
-            if (!masksDisplayed && effect === undefined) {
+            if (
+              !masksDisplayed &&
+              effect === undefined &&
+              !privacyPreviewEnabled
+            ) {
               continue;
             }
 
@@ -2625,20 +2661,21 @@ function LiveCameraProof(props: {
           const maskEffectsEnabled =
             mosaicMaskIds.length > 0 || spotlightMaskIds.length > 0;
           const privacyContoursEnabled =
-            instantCvActiveShared.value && mosaicMaskIds.length > 0;
+            instantPrivacyActiveShared.value &&
+            (privacyPreviewEnabled || mosaicMaskIds.length > 0);
 
           stage = "mask-prepare";
           const maskStartedAt = Date.now();
           let preparedMask: ReactNativeSkiaMaskFrame | null = null;
 
-          if (masksDisplayed || maskEffectsEnabled) {
+          if (masksDisplayed || maskEffectsEnabled || privacyPreviewEnabled) {
             try {
               preparedMask = createReactNativeSkiaMaskFrame({
                 borderWidth: privacyContoursEnabled
                   ? LIVE_PRIVACY_CONTOUR_WIDTH
                   : DEMO_MASK_BORDER_WIDTH,
                 detections: maskDetections,
-                fillOpacity: DEMO_MASK_FILL_OPACITY,
+                fillOpacity: privacyPreviewEnabled ? 0 : DEMO_MASK_FILL_OPACITY,
                 edgeSmoothing:
                   masksDisplayed || spotlightMaskIds.length > 0 ? undefined : 0,
                 frameHeight: detectionFrameSize.height,
@@ -2864,6 +2901,8 @@ function LiveCameraProof(props: {
       liveVectorPictureIsEmpty,
       classEffectsShared,
       instantCvActiveShared,
+      instantPrivacyActiveShared,
+      instantPrivacyHasClassesShared,
       inferenceModeShared,
       instantRulesShared,
       instantRuntimeShared,
@@ -2970,7 +3009,7 @@ function LiveCameraProof(props: {
           </>
         }
         showBoxes={showBoxLayer}
-        showMasks={showRawMaskLayer || effectsActive}
+        showMasks={showRawMaskLayer || effectsActive || privacyPreviewActive}
         stageStyle={styles.liveStage}
         vectorPicture={liveVectorPicture}
       >
