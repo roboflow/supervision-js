@@ -248,6 +248,27 @@ float resolveSameNeighborRatio(float2 coord, float2 texel, float id) {
   return matching / 8.0;
 }
 
+bool resolveIsOnBorder(
+  float2 coord,
+  float2 texel,
+  float id,
+  float strokeWidth
+) {
+  float radius = min(strokeWidth, uMaxStrokeWidth);
+
+  for (int dy = -${MAX_ID_MASK_STROKE_WIDTH}; dy <= ${MAX_ID_MASK_STROKE_WIDTH}; dy++) {
+    for (int dx = -${MAX_ID_MASK_STROKE_WIDTH}; dx <= ${MAX_ID_MASK_STROKE_WIDTH}; dx++) {
+      float distance = length(float2(float(dx), float(dy)));
+
+      if (distance <= radius && sampleMaskId(coord + texel * float2(float(dx), float(dy))) != id) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 half4 main(float2 coord) {
   float id = sampleMaskId(coord);
   float2 texel = resolveMaskTexel();
@@ -279,6 +300,11 @@ half4 main(float2 coord) {
 
   int maskId = int(id);
   half4 fillColor = resolveFillColor(maskId);
+  float strokeWidth = resolveStrokeWidth(maskId);
+  bool onBorder =
+    uBorderEnabled > 0.5 &&
+    strokeWidth > 0.0 &&
+    resolveIsOnBorder(coord, texel, id, strokeWidth);
 
   if (resolveMosaicFlag(maskId) > 0.5) {
     // Procedural censor mosaic: opaque cells tinted by the detection color,
@@ -290,6 +316,13 @@ half4 main(float2 coord) {
     float cellShade = fract(sin(dot(cell, float2(269.5, 183.3))) * 28001.8384);
     half3 cellColor = fillColor.rgb * half(0.30 + 0.55 * cellNoise) +
       half(0.08 * cellShade);
+
+    if (onBorder) {
+      half4 strokeColor = resolveStrokeColor(maskId);
+      half strokeAlpha = strokeColor.a * half(mix(1.0, 0.88, edgeSmoothing));
+
+      return half4(strokeColor.rgb * strokeAlpha, strokeAlpha);
+    }
 
     return half4(cellColor, 1.0);
   }
@@ -328,27 +361,10 @@ half4 main(float2 coord) {
   }
 
   half4 outputColor = half4(fillColor.rgb * outputAlpha, outputAlpha);
-  float strokeWidth = resolveStrokeWidth(maskId);
-
-  if (uBorderEnabled > 0.5 && strokeWidth > 0.0) {
-    float radius = min(strokeWidth, uMaxStrokeWidth);
-    bool onBorder = false;
-
-    for (int dy = -${MAX_ID_MASK_STROKE_WIDTH}; dy <= ${MAX_ID_MASK_STROKE_WIDTH}; dy++) {
-      for (int dx = -${MAX_ID_MASK_STROKE_WIDTH}; dx <= ${MAX_ID_MASK_STROKE_WIDTH}; dx++) {
-        float distance = length(float2(float(dx), float(dy)));
-
-        if (distance <= radius && sampleMaskId(coord + texel * float2(float(dx), float(dy))) != id) {
-          onBorder = true;
-        }
-      }
-    }
-
-    if (onBorder) {
-      half4 strokeColor = resolveStrokeColor(maskId);
-      half strokeAlpha = strokeColor.a * half(mix(1.0, 0.88, edgeSmoothing));
-      outputColor = half4(strokeColor.rgb * strokeAlpha, strokeAlpha);
-    }
+  if (onBorder) {
+    half4 strokeColor = resolveStrokeColor(maskId);
+    half strokeAlpha = strokeColor.a * half(mix(1.0, 0.88, edgeSmoothing));
+    outputColor = half4(strokeColor.rgb * strokeAlpha, strokeAlpha);
   }
 
   return outputColor;

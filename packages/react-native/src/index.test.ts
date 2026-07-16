@@ -635,6 +635,7 @@ describe("React Native live ID-mask artifacts", () => {
 
   it("flags mosaic mask ids in the shader uniforms", () => {
     const artifact = createReactNativeLiveIdMaskArtifact({
+      borderWidth: 2,
       detections: [
         createFullCoverageLiveDetection({ color: 0x38bdf8 }),
         createFullCoverageLiveDetection({ color: 0x22c55e }),
@@ -656,6 +657,8 @@ describe("React Native live ID-mask artifacts", () => {
     expect(uniforms.uMosaicFlags).toHaveLength(MAX_ID_MASK_PALETTE_ENTRIES);
     expect(uniforms.uMosaicFlags[1]).toBe(0);
     expect(uniforms.uMosaicFlags[2]).toBe(1);
+    expect(uniforms.uBorderEnabled).toBe(1);
+    expect(uniforms.uStrokeWidths[2]).toBe(2);
   });
 
   it("enables the spotlight veil for spotlit mask ids", () => {
@@ -965,6 +968,17 @@ describe("React Native ID-mask artifacts", () => {
   });
 
   it("uses constant palette lookups for SkSL shader compatibility", () => {
+    const mosaicBranchStart = REACT_NATIVE_ID_MASK_SHADER_SOURCE.indexOf(
+      "if (resolveMosaicFlag(maskId) > 0.5)",
+    );
+    const mosaicBranch = REACT_NATIVE_ID_MASK_SHADER_SOURCE.slice(
+      mosaicBranchStart,
+      REACT_NATIVE_ID_MASK_SHADER_SOURCE.indexOf(
+        "if (uSpotlightEnabled > 0.5)",
+        mosaicBranchStart,
+      ),
+    );
+
     expect(REACT_NATIVE_ID_MASK_SHADER_SOURCE).not.toContain(
       "uFillPalette[maskId]",
     );
@@ -983,6 +997,7 @@ describe("React Native ID-mask artifacts", () => {
     expect(REACT_NATIVE_ID_MASK_SHADER_SOURCE).toContain(
       "resolveMosaicFlag(maskId)",
     );
+    expect(mosaicBranch).toContain("if (onBorder)");
     expect(REACT_NATIVE_ID_MASK_SHADER_SOURCE).toContain(
       "resolveSpotlightFlag(maskId)",
     );

@@ -220,6 +220,9 @@ const LIVE_MAX_INSTANCES = 6;
 // and defeats the feathered fill edges (it also skips the shader's expensive
 // border sampling loop).
 const LIVE_PRIVACY_MOSAIC_CELL_PX = 14;
+// Privacy outlines reuse the ID-mask border shader, so their contour follows
+// the segmentation silhouette without extracting vector polygons per frame.
+const LIVE_PRIVACY_CONTOUR_WIDTH = 2;
 // Standard live mode's boxes-only privacy fallback uses a 1x1 all-ones mask
 // to cover the whole detection bbox. Instant CV Privacy deliberately keeps the
 // model's instance mask so its mosaic remains inside the detected silhouette.
@@ -2621,6 +2624,8 @@ function LiveCameraProof(props: {
 
           const maskEffectsEnabled =
             mosaicMaskIds.length > 0 || spotlightMaskIds.length > 0;
+          const privacyContoursEnabled =
+            instantCvActiveShared.value && mosaicMaskIds.length > 0;
 
           stage = "mask-prepare";
           const maskStartedAt = Date.now();
@@ -2629,7 +2634,9 @@ function LiveCameraProof(props: {
           if (masksDisplayed || maskEffectsEnabled) {
             try {
               preparedMask = createReactNativeSkiaMaskFrame({
-                borderWidth: DEMO_MASK_BORDER_WIDTH,
+                borderWidth: privacyContoursEnabled
+                  ? LIVE_PRIVACY_CONTOUR_WIDTH
+                  : DEMO_MASK_BORDER_WIDTH,
                 detections: maskDetections,
                 fillOpacity: DEMO_MASK_FILL_OPACITY,
                 edgeSmoothing:
