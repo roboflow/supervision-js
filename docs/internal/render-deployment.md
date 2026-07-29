@@ -7,8 +7,27 @@ The public demo and documentation are served by the existing Render web service:
 - URL: <https://supervision-js-demo.onrender.com>
 - docs: <https://supervision-js-demo.onrender.com/docs/>
 
-The service deploys `main` from
-`https://github.com/roboflow/supervision-js`.
+The canonical source remains
+`https://github.com/roboflow/supervision-js`. Render deploys the same `main`
+commit from the private, deployment-only mirror at
+`https://github.com/joaomarcoscrs/supervision-js-render`.
+
+Render's GitHub App is installed for the Roboflow organization but does not
+have access to the private canonical repository. Only a Roboflow organization
+owner can add that repository to the installation. Do not develop in or merge
+changes into the mirror. Push the canonical `main` commit to it only after the
+canonical push succeeds:
+
+```sh
+git fetch origin main
+test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+git push git@github.com:joaomarcoscrs/supervision-js-render.git main:main
+```
+
+This preserves a single source of truth while allowing Render to clone the
+private code. If the Render GitHub App later receives access to
+`roboflow/supervision-js`, point the service back to the canonical repository
+and retire the mirror.
 
 ## Service Configuration
 
@@ -34,12 +53,12 @@ production server or image delivery path.
 
 ## Update With The Render CLI
 
-After authenticating with `render login`, the existing service can be reconciled
-without creating a replacement resource:
+After authenticating with `render login`, the existing service can be
+reconciled without creating a replacement resource:
 
 ```sh
 render services update srv-d8felq6gvqtc7398i2ng \
-  --repo https://github.com/roboflow/supervision-js \
+  --repo https://github.com/joaomarcoscrs/supervision-js-render \
   --branch main \
   --runtime node \
   --build-command "npm ci && npm run pages:build" \
@@ -71,6 +90,7 @@ curl --fail --location \
 ```
 
 The Application Integration page must describe tarball installation, and the
-Editing module must appear in the generated API reference. Those checks
-distinguish the current documentation from the stale personal-fork deployment
+Editing module must appear in the generated API reference. Also verify that the
+live Render deploy's commit matches both canonical `main` and mirror `main`.
+Those checks distinguish the current documentation from the stale deployment
 that preceded this configuration.
