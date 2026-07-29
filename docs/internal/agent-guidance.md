@@ -15,6 +15,7 @@ Before making project-direction or architecture changes, read:
 - [`library-contract.md`](library-contract.md)
 - [`react-native-architecture.md`](react-native-architecture.md)
 - [`react-native-live-rendering.md`](react-native-live-rendering.md)
+- [`tarball-packaging.md`](tarball-packaging.md)
 - [`../public/guides/public-api.md`](../public/guides/public-api.md)
 
 Those docs define the current product intent: prove the browser rendering
@@ -102,6 +103,14 @@ Run from the repository root:
 - `npm run benchmark:initial:build`
 - `npm run benchmark:media-upload:build`
 - `npm run benchmark:masks`
+- `npm run package:tarball`
+- `npm run package:tarball:smoke`
+
+`package:tarball` builds the core and browser packages and writes one portable
+`artifacts/supervision-js-<version>.tgz` with the private core bundled inside.
+`package:tarball:smoke` installs that archive in a temporary consumer outside
+the repository; it needs the registry and is not part of `npm run verify`. See
+[`tarball-packaging.md`](tarball-packaging.md).
 
 For focused iterative work, use separate terminals:
 

@@ -117,6 +117,28 @@ Recipes:
 The minimal vanilla example is served locally at `/examples/vanilla/` and on
 GitHub Pages at `/supervision-js/examples/vanilla/`.
 
+## Installable Tarball
+
+The repository is private, so consumers install a packed archive instead of a
+published package:
+
+```sh
+npm run package:tarball
+```
+
+That builds the core and browser packages and writes one
+`artifacts/supervision-js-<version>.tgz`. A website installs it by path:
+
+```sh
+npm install ./supervision-js-0.0.0.tgz
+```
+
+Both `supervision-js` and `supervision-js/editing` then resolve normally, and
+the private core package travels inside the archive. See
+[Tarball Packaging](docs/internal/tarball-packaging.md) for the mechanism and
+for `npm run package:tarball:smoke`, which verifies the artifact from a clean
+temporary consumer.
+
 ## Current Status
 
 Implemented foundation:

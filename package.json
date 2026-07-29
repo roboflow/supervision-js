@@ -94,6 +94,8 @@
     "boundary:check": "node --test tools/package-boundary.test.mjs",
     "test": "vitest run && npm run boundary:check && node --test tools/sam3-fixture/*.test.mjs tools/geometry-fixture/*.test.mjs",
     "package:smoke": "node --test tools/package-smoke.test.mjs",
+    "package:tarball": "node tools/pack-web-tarball.mjs",
+    "package:tarball:smoke": "node --test tools/tarball-smoke.test.mjs",
     "test:watch": "vitest",
     "lint": "eslint .",
     "format": "prettier --write .",
