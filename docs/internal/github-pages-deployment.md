@@ -3,6 +3,10 @@
 The public proof of concept is deployed as a static GitHub Pages site. A push
 to `main` runs `.github/workflows/deploy-pages.yml` with no repository secrets.
 
+The same `dist/pages` artifact is also served publicly by the existing Render
+resource. See [Render Deployment](render-deployment.md) for that service's
+source and runtime configuration.
+
 `npm run pages:build` assembles `dist/pages` with this layout:
 
 - `/` contains the fixture-only demo;

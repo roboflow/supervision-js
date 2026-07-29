@@ -86,14 +86,19 @@ Useful commands:
 - `npm run pages:build` assembles the static GitHub Pages artifact.
 - `npm run verify` runs the full local verification suite.
 
-The public POC is deployed on [GitHub Pages](https://roboflow.github.io/supervision-js/):
+The public POC is deployed on
+[Render](https://supervision-js-demo.onrender.com/):
 
 - the fixture demo is served at the project root;
-- generated docs are served at `/supervision-js/docs/`;
-- the vanilla example is served at `/supervision-js/examples/vanilla/`.
+- generated docs are served at
+  [`/docs/`](https://supervision-js-demo.onrender.com/docs/);
+- the vanilla example is served at
+  [`/examples/vanilla/`](https://supervision-js-demo.onrender.com/examples/vanilla/).
 
-GitHub Pages is static, so its demo intentionally offers fixture selection only.
-Upload media and SAM3 inference remain available locally through the Vite proxy:
+The same static artifact is deployed to the repository-authenticated
+[GitHub Pages mirror](https://roboflow.github.io/supervision-js/). Both hosted
+demos intentionally offer fixture selection only. Upload media and SAM3
+inference remain available locally through the Vite proxy:
 
 ```sh
 npm run demo:dev
@@ -101,6 +106,7 @@ npm run demo:dev
 
 Start with:
 
+- [Application Integration](docs/public/guides/application-integration.md)
 - [Media Sessions](docs/public/guides/media-sessions.md)
 - [Public API](docs/public/guides/public-api.md)
 - [Media Preparation](docs/public/guides/media-preparation.md)
@@ -109,13 +115,14 @@ Start with:
 
 Recipes:
 
+- [React Integration](docs/public/recipes/react-integration.md)
 - [Static Detections](docs/public/recipes/static-detections.md)
 - [Streaming Detections](docs/public/recipes/streaming-detections.md)
 - [Progressive Upload Normalization](docs/public/recipes/progressive-upload-normalization.md)
 - [Session Lifecycle](docs/public/recipes/session-lifecycle.md)
 
-The minimal vanilla example is served locally at `/examples/vanilla/` and on
-GitHub Pages at `/supervision-js/examples/vanilla/`.
+The minimal vanilla example is served locally and on both hosted artifacts at
+`/examples/vanilla/`.
 
 ## Installable Tarball
 
@@ -137,7 +144,8 @@ Both `supervision-js` and `supervision-js/editing` then resolve normally, and
 the private core package travels inside the archive. See
 [Tarball Packaging](docs/internal/tarball-packaging.md) for the mechanism and
 for `npm run package:tarball:smoke`, which verifies the artifact from a clean
-temporary consumer.
+temporary consumer. For consumer-side instructions and integration rules, use
+[Application Integration](docs/public/guides/application-integration.md).
 
 ## Current Status
 

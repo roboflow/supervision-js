@@ -5,6 +5,8 @@
  */
 
 export {
+  createImageUrlMediaSource,
+  createStaticImageMediaSource,
   MediaNormalizationAudioCodec,
   MediaNormalizationContainer,
   MediaNormalizationFit,
@@ -22,6 +24,7 @@ export {
   type DecodedVideoSample,
   type DecodedVideoSampleSink,
   type DisposableMediaInput,
+  type HostFrameSource,
   type MediaNormalizationAudioOptions,
   type MediaNormalizationInputMetadata,
   type MediaNormalizationOptions,
@@ -42,4 +45,5 @@ export {
   type PreparedMedia,
   type ProgressivePreparedMedia,
   type ProgressiveNormalizedMedia,
+  type StaticImageSource,
 } from "supervision-js";

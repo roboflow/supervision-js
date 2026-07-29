@@ -16,6 +16,8 @@ export {
   RenderPreparationWorkerStatus,
   type MediaFrameDiagnostics,
   type MediaFrameRenderTimings,
+  type AnnotationVisibility,
+  type MediaDisplayAdjustments,
   type MediaRenderer,
   type MediaRendererDiagnosticsOptions,
   type MediaRendererOptions,
@@ -32,4 +34,5 @@ export {
   type RenderPreparationOptions,
   type RenderPreparationPlaybackGateOptions,
   type RenderPreparationWorkerFactory,
+  type ViewportTransform,
 } from "supervision-js";

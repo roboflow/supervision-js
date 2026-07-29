@@ -18,7 +18,7 @@ Common examples:
 
 The library does not know those business meanings. It only composes sources,
 preserves source provenance, orders detections deterministically, and lets each
-source override box, mask, and label presentation.
+source override box, mask, polygon, polyline, keypoint, and label presentation.
 
 Do **not** use multiple sources when you only need per-class colors, confidence
 filtering, or a different label format. Those are normal style concerns and are
@@ -158,6 +158,9 @@ A source-level `presentation` can override:
 
 - `boxStyle`
 - `maskStyle`
+- `polygonStyle`
+- `polylineStyle`
+- `keypointStyle`
 - `labelStyle`
 
 For each layer:

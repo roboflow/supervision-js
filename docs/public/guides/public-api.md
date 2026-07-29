@@ -20,6 +20,11 @@ import from `supervision-js`:
 import { createMediaSession } from "supervision-js";
 ```
 
+The current private preview is installed from the portable
+`supervision-js-0.0.0.tgz` archive. It is not available from the npm registry.
+See [Application Integration](application-integration.md) for the supported
+consumer workflow.
+
 The split keeps detections, timelines, styles, retention policies, source
 composition, and picking contracts reusable without making Pixi, Mediabunny,
 workers, or browser storage part of those core concepts.
@@ -38,6 +43,9 @@ Start here for normal application code:
 - `Detection`
 - `Rect`
 - `DetectionMask`
+- `PolygonGeometry`
+- `PolylineGeometry`
+- `KeypointGeometry`
 - `BaseBoxStyle`
 - `BoxShape`
 - `BaseMaskStyle`
@@ -73,6 +81,8 @@ not the first thing most users should reach for:
 - chunked detection sources for large static detection datasets;
 - media normalization functions and options;
 - interaction and picking options;
+- polygons, polylines, keypoints, shared class-color helpers, and visibility
+  controls;
 - render-preparation diagnostics and worker options.
 
 ## Editing API
@@ -92,6 +102,8 @@ its own source or persistence layer, and owns undo/redo. Pass the engine through
 `createMediaSession({ renderer: { editingEngine } })` so the session routes
 pointer gestures and renders previews. `maskBrush` and `previewOverlay` use the
 same session renderer options. The renderer never writes application data.
+
+The generated API reference has a separate Editing module for this entrypoint.
 
 `Rect` is center-based: `x` and `y` are the media-pixel center, while `width`
 and `height` are its extent. `TopLeftRect` is only for explicit canvas/layout

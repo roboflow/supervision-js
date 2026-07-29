@@ -19,7 +19,8 @@ performance-sensitive drawing strategy.
 
 ## Start With Base Styles
 
-Use `BaseBoxStyle`, `BaseMaskStyle`, `BaseLabelStyle`,
+Use `BaseBoxStyle`, `BaseMaskStyle`, `BasePolygonStyle`,
+`BasePolylineStyle`, `BaseKeypointStyle`, `BaseLabelStyle`,
 `BaseInteractionStyle`, and `BaseFocusStyle` for the common path:
 
 ```ts
@@ -136,6 +137,77 @@ const labelStyle = new BaseLabelStyle({
 });
 ```
 
+Set labels to appear only for the active hover target when persistent labels
+would be too dense:
+
+```ts
+const labelStyle = new BaseLabelStyle({
+  includeConfidence: true,
+  visibilityMode: LabelVisibilityMode.HoveredOnly,
+});
+```
+
+## Polygons, Polylines, And Keypoints
+
+Vector geometry uses the same static-or-resolver style model:
+
+```ts
+const polygonStyle = new BasePolygonStyle({
+  fill: { alpha: 0.18, color: 0x22c55e },
+  stroke: { alpha: 1, color: 0x86efac, width: 3 },
+});
+
+const polylineStyle = new BasePolylineStyle({
+  stroke: { alpha: 1, color: 0x38bdf8, width: 4 },
+});
+
+const keypointStyle = new BaseKeypointStyle({
+  edgeShadowStroke: { alpha: 0.65, color: 0x000000, width: 4 },
+  edgeStroke: { alpha: 1, color: 0x22c55e, width: 2 },
+  markerFill: { alpha: 1, color: 0x22c55e },
+  markerStroke: { alpha: 1, color: 0xffffff, width: 2 },
+  radius: 6,
+});
+
+session.setPresentation({
+  keypointStyle,
+  polygonStyle,
+  polylineStyle,
+});
+```
+
+`BaseKeypointStyle` draws `NotLabeled` points as absent, `Occluded` points as
+crosses, and `Visible` points as circles. Pass `definitions` when class-specific
+skeleton vertices and edges need their own colors.
+
+## Consistent Class Colors
+
+Use the shared resolver when boxes, masks, labels, polygons, and keypoints
+should agree on class color:
+
+```ts
+const boxStyle = new BaseBoxStyle({
+  stroke: (detection) => ({
+    alpha: 1,
+    color: resolveDetectionClassColorStyle(detection.className).stroke,
+    width: 3,
+  }),
+});
+
+const labelStyle = new BaseLabelStyle({
+  background: (detection) => ({
+    alpha: 0.85,
+    color: resolveDetectionClassColorStyle(detection.className).labelBackground,
+  }),
+  textStyle: (detection) => ({
+    color: resolveDetectionClassColorStyle(detection.className).labelText,
+  }),
+});
+```
+
+Known classes use `DEFAULT_DETECTION_CLASS_STYLES`. Unknown names are normalized
+and deterministically assigned from `DEFAULT_DETECTION_COLOR_SEQUENCE`.
+
 ## Runtime Updates
 
 Presentation can change without rewriting detections:
@@ -143,8 +215,27 @@ Presentation can change without rewriting detections:
 ```ts
 session.setPresentation({
   boxStyle,
+  keypointStyle,
   labelStyle,
   maskStyle,
+  polygonStyle,
+  polylineStyle,
+});
+```
+
+Pass `null` for a layer to disable it. Omit a property to leave the current
+layer unchanged.
+
+Global annotation visibility can hide annotations, labels, classes, or specific
+detection IDs without mutating semantic frames:
+
+```ts
+session.setPresentation({
+  visibility: {
+    hiddenClasses: ["background"],
+    hiddenDetectionIds: ["suppressed-1"],
+    labelsHidden: false,
+  },
 });
 ```
 

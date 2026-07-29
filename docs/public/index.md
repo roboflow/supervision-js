@@ -11,6 +11,27 @@ built on a platform-neutral core package so detections, timelines, styles, and
 picking contracts can eventually support other renderers without changing the
 browser quickstart.
 
+## Install The Private Preview
+
+The package is currently distributed as a portable tarball, not through the npm
+registry. Build it in the library repository, copy it into a stable path in the
+consumer, and install that path:
+
+```sh
+# In the supervision-js repository:
+npm run package:tarball
+
+# In the consuming application:
+npm install ./vendor/supervision-js-0.0.0.tgz
+```
+
+The archive already bundles the private core package. Do not install
+`supervision-js-core` or the old `supervision-web` name.
+
+Read [Application Integration](guides/application-integration.md) before
+changing another app. It is the complete installation, runtime, data, lifecycle,
+and verification contract for humans and coding agents.
+
 ## Quickstart
 
 Render media inside a container with the default renderer, media preparation,
@@ -27,7 +48,7 @@ if (!container) {
 
 const session = await createMediaSession({
   container,
-  media: file,
+  media: fileOrUrl,
   renderer: {
     autoPlay: true,
     loop: true,
@@ -41,7 +62,7 @@ session.subscribe((state) => {
 
 That is enough to get a renderer-owned media scene. The session chooses the
 default browser media path, Pixi renderer, playback loop, and render-preparation
-settings.
+settings. The container must have a non-zero width and height.
 
 ## Add Detections Later
 
@@ -113,6 +134,8 @@ one timing source and avoids drift caused by separate composition layers.
 
 ## Where To Go Next
 
+- Start with [Application Integration](guides/application-integration.md) when
+  adding the package to another app.
 - Read [Media Sessions](guides/media-sessions.md) for the working session model.
 - Read [Public API](guides/public-api.md) for the intended package boundary
   between primary APIs, advanced APIs, and internals.
@@ -123,6 +146,7 @@ one timing source and avoids drift caused by separate composition layers.
 - Read [Presentation Styles](guides/presentation-styles.md) for the
   `supervision-js` equivalent of Python supervision annotators.
 - Use the recipes for common integrations:
+  [React Integration](recipes/react-integration.md),
   [Static Detections](recipes/static-detections.md),
   [Streaming Detections](recipes/streaming-detections.md),
   [Multiple Detection Sources](recipes/multiple-detection-sources.md),
@@ -131,5 +155,5 @@ one timing source and avoids drift caused by separate composition layers.
 - Read [Session Lifecycle](recipes/session-lifecycle.md) for replacing media,
   cleaning up viewers, and recovering after session errors.
 - Browse the generated API reference by domain. The Modules page groups exports
-  into Media Sessions, Detections, Rendering, Styles, Interactions, and Media
-  Preparation.
+  into Media Sessions, Detections, Rendering, Styles, Interactions, Media
+  Preparation, and Editing.

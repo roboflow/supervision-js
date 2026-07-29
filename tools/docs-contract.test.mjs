@@ -1,0 +1,222 @@
+import assert from "node:assert/strict";
+import { readdir, readFile, stat } from "node:fs/promises";
+import path from "node:path";
+import process from "node:process";
+import test from "node:test";
+import ts from "typescript";
+
+const rootDir = process.cwd();
+const publicDocsDir = path.join(rootDir, "docs/public");
+const publicApiDir = path.join(publicDocsDir, "api");
+
+test("public Markdown links resolve inside the repository", async () => {
+  const markdownFiles = [
+    path.join(rootDir, "README.md"),
+    ...(await listFiles(publicDocsDir, ".md")),
+  ];
+  const failures = [];
+
+  for (const file of markdownFiles) {
+    const source = await readFile(file, "utf8");
+
+    for (const target of findMarkdownLinks(source)) {
+      if (target.startsWith("#") || /^[a-z][a-z0-9+.-]*:/i.test(target)) {
+        continue;
+      }
+
+      const pathname = decodeURIComponent(target.split("#", 1)[0]);
+
+      if (!pathname) {
+        continue;
+      }
+
+      const resolved = path.resolve(path.dirname(file), pathname);
+
+      try {
+        await stat(resolved);
+      } catch {
+        failures.push(
+          `${path.relative(rootDir, file)} links to missing ${target}`,
+        );
+      }
+    }
+  }
+
+  assert.deepEqual(failures, []);
+});
+
+test("generated API facades cover every browser package export", async () => {
+  const packageExports = await readNamedExports(
+    path.join(rootDir, "packages/web/src/index.ts"),
+  );
+  const documentedExports = new Set(
+    (
+      await Promise.all(
+        (await listFiles(publicApiDir, ".ts")).map(readNamedExports),
+      )
+    ).flat(),
+  );
+
+  assert.deepEqual(
+    packageExports.filter((name) => !documentedExports.has(name)).sort(),
+    [],
+  );
+});
+
+test("Editing API facade covers every editing subpath export", async () => {
+  const editingExports = await readNamedExports(
+    path.join(rootDir, "packages/web/src/editing.ts"),
+  );
+  const documentedExports = new Set(
+    await readNamedExports(path.join(publicApiDir, "editing.ts")),
+  );
+
+  assert.deepEqual(
+    editingExports.filter((name) => !documentedExports.has(name)).sort(),
+    [],
+  );
+});
+
+test("TypeDoc includes every public API facade", async () => {
+  const config = JSON.parse(
+    await readFile(path.join(rootDir, "typedoc.json"), "utf8"),
+  );
+  const configured = new Set(
+    config.entryPoints.map((entryPoint) => path.resolve(rootDir, entryPoint)),
+  );
+  const apiFiles = await listFiles(publicApiDir, ".ts");
+
+  assert.deepEqual(
+    apiFiles
+      .filter((file) => !configured.has(file))
+      .map((file) => path.relative(rootDir, file))
+      .sort(),
+    [],
+  );
+});
+
+test("copyable integration examples typecheck", async () => {
+  const applicationGuide = await readFile(
+    path.join(publicDocsDir, "guides/application-integration.md"),
+    "utf8",
+  );
+  const reactRecipe = await readFile(
+    path.join(publicDocsDir, "recipes/react-integration.md"),
+    "utf8",
+  );
+  const browserExample = findCodeBlocks(applicationGuide, "ts").find((source) =>
+    source.includes("let session: MediaSession"),
+  );
+  const reactExample = findCodeBlocks(reactRecipe, "tsx")[0];
+
+  assert.ok(browserExample, "Missing minimal browser integration example.");
+  assert.ok(reactExample, "Missing React integration example.");
+  assertTypechecks(browserExample, ".docs-browser-integration.ts");
+  assertTypechecks(
+    reactExample,
+    ".docs-react-integration.tsx",
+    ts.JsxEmit.ReactJSX,
+  );
+});
+
+function findMarkdownLinks(source) {
+  return [...source.matchAll(/!?\[[^\]]*]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/g)]
+    .filter((match) => !match[0].startsWith("!"))
+    .map((match) => match[1]);
+}
+
+function findCodeBlocks(source, language) {
+  return [
+    ...source.matchAll(
+      new RegExp("```" + language + "\\n([\\s\\S]*?)\\n```", "g"),
+    ),
+  ].map((match) => match[1]);
+}
+
+async function listFiles(directory, extension) {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const files = await Promise.all(
+    entries.map((entry) => {
+      const entryPath = path.join(directory, entry.name);
+
+      if (entry.isDirectory()) {
+        return listFiles(entryPath, extension);
+      }
+
+      return entry.isFile() && entry.name.endsWith(extension)
+        ? [entryPath]
+        : [];
+    }),
+  );
+
+  return files.flat().sort();
+}
+
+async function readNamedExports(file) {
+  const source = ts.createSourceFile(
+    file,
+    await readFile(file, "utf8"),
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  const names = [];
+
+  source.forEachChild((node) => {
+    if (
+      !ts.isExportDeclaration(node) ||
+      !node.exportClause ||
+      !ts.isNamedExports(node.exportClause)
+    ) {
+      return;
+    }
+
+    for (const element of node.exportClause.elements) {
+      names.push(element.name.text);
+    }
+  });
+
+  return names;
+}
+
+function assertTypechecks(source, filename, jsx) {
+  const file = path.resolve(rootDir, filename);
+  const options = {
+    jsx,
+    lib: ["lib.es2022.d.ts", "lib.dom.d.ts"],
+    module: ts.ModuleKind.ESNext,
+    moduleResolution: ts.ModuleResolutionKind.Bundler,
+    noEmit: true,
+    skipLibCheck: true,
+    strict: true,
+    target: ts.ScriptTarget.ES2022,
+  };
+  const host = ts.createCompilerHost(options);
+  const fileExists = host.fileExists.bind(host);
+  const getSourceFile = host.getSourceFile.bind(host);
+  const readSourceFile = host.readFile.bind(host);
+
+  host.fileExists = (candidate) => candidate === file || fileExists(candidate);
+  host.readFile = (candidate) =>
+    candidate === file ? source : readSourceFile(candidate);
+  host.getSourceFile = (candidate, languageVersion, ...rest) =>
+    candidate === file
+      ? ts.createSourceFile(
+          candidate,
+          source,
+          languageVersion,
+          true,
+          jsx === undefined ? ts.ScriptKind.TS : ts.ScriptKind.TSX,
+        )
+      : getSourceFile(candidate, languageVersion, ...rest);
+
+  const diagnostics = ts.getPreEmitDiagnostics(
+    ts.createProgram([file], options, host),
+  );
+
+  assert.deepEqual(
+    diagnostics.map((diagnostic) =>
+      ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"),
+    ),
+    [],
+  );
+}

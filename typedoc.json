@@ -8,7 +8,8 @@
     "docs/public/api/rendering.ts",
     "docs/public/api/styles.ts",
     "docs/public/api/interactions.ts",
-    "docs/public/api/media-preparation.ts"
+    "docs/public/api/media-preparation.ts",
+    "docs/public/api/editing.ts"
   ],
   "excludeInternal": true,
   "excludePrivate": true,

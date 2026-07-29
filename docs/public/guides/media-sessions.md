@@ -51,6 +51,10 @@ That creates one renderer-owned composition for the media. Pixi draws the media
 frame and prediction layers in the same scene, so app code does not coordinate a
 DOM media element with a separate overlay.
 
+The container must already be attached and have a non-zero size. The renderer
+appends its own canvas and tracks container resizing. In SSR applications,
+create the session only on the client after mount.
+
 ## State
 
 Session state reports whether the media is loading, ready, playing, paused,
@@ -174,8 +178,9 @@ await session.appendDetectionFrames(drawingFrames, { sourceId: "drawing" });
 
 Source order is ascending by `order`, then declaration order. Later detections
 render on top. Source-level presentation can override `boxStyle`, `maskStyle`,
-and `labelStyle`; `undefined` falls back to the global presentation and `null`
-disables that layer for the source.
+`polygonStyle`, `polylineStyle`, `keypointStyle`, and `labelStyle`; `undefined`
+falls back to the global presentation and `null` disables that layer for the
+source.
 
 Do not combine `detections.sources` with legacy single-source inputs such as
 `frames`, `source`, or `appendable`.
@@ -204,3 +209,7 @@ This is the intended integration shape for apps: create one session per media
 item, feed it detections as they become available, update presentation styles
 without rewriting detections, and destroy the session when the media item leaves
 the UI.
+
+Framework users should follow the same ownership rule. See
+[React Integration](../recipes/react-integration.md) for an async-safe effect
+cleanup pattern.

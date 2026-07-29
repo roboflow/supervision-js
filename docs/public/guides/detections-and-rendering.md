@@ -30,7 +30,11 @@ Detection frames are app/model data:
 - `mediaTime` is seconds on the renderer media timeline;
 - `endTime` is exclusive when present;
 - `frameIndex` is optional and only used by frame-grid synchronization;
-- rectangles are media-pixel geometry;
+- rectangles, polygons, polylines, and keypoints are media-pixel geometry;
+- rectangle `x` and `y` identify its center, not its top-left corner;
+- polygon paths need at least three points and polylines need at least two;
+- keypoint visibility uses COCO-compatible `NotLabeled`, `Occluded`, and
+  `Visible` values;
 - masks are compressed RLE semantic masks;
 - confidence values are normalized from `0` to `1`;
 - styling belongs to styles, not detections.
@@ -111,3 +115,44 @@ session.setPresentation({ boxStyle });
 Use a custom style object when the base classes are not expressive enough. The
 contract stays the same: detections remain semantic data, and styles resolve how
 that data should be presented.
+
+## Geometry Shapes
+
+One detection may carry any supported semantic geometry:
+
+```ts
+import { KeypointVisibility, type Detection } from "supervision-js";
+
+const detection: Detection = {
+  id: "pose-1",
+  className: "person",
+  rect: { x: 320, y: 240, width: 180, height: 360 },
+  polygon: {
+    points: [
+      { x: 230, y: 60 },
+      { x: 410, y: 60 },
+      { x: 420, y: 420 },
+      { x: 220, y: 420 },
+    ],
+  },
+  keypoints: {
+    points: [
+      { x: 320, y: 100 },
+      { x: 280, y: 180 },
+      { x: 360, y: 180 },
+    ],
+    edges: [
+      [0, 1],
+      [0, 2],
+    ],
+    visibility: [
+      KeypointVisibility.Visible,
+      KeypointVisibility.Visible,
+      KeypointVisibility.Occluded,
+    ],
+  },
+};
+```
+
+The corresponding `boxStyle`, `polygonStyle`, and `keypointStyle` independently
+decide which layers render. Geometry remains reusable app/model data.
