@@ -60,7 +60,7 @@
     "demo:dev": "npm run build && npm run dev:demo",
     "demo:build": "npm run build && npm run build -w demo && npm run example:vanilla:build:app && npm run docs:build:typedoc",
     "pages:build": "node tools/build-pages.mjs",
-    "pages:serve": "vite preview --outDir dist/pages --host 0.0.0.0 --port ${PORT:-4173}",
+    "pages:serve": "__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=supervision-js-demo.onrender.com vite preview --outDir dist/pages --host 0.0.0.0 --port ${PORT:-4173}",
     "docs:build": "npm run build && npm run docs:build:typedoc",
     "docs:build:typedoc": "typedoc",
     "docs:check": "node --test tools/docs-contract.test.mjs",
