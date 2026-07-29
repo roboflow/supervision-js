@@ -27,5 +27,6 @@
   "searchInComments": true,
   "searchInDocuments": true,
   "sourceLinkExternal": true,
+  "sourceLinkTemplate": "https://github.com/roboflow/supervision-js/blob/{gitRevision}/{path}#L{line}",
   "tsconfig": "tsconfig.docs.json"
 }
