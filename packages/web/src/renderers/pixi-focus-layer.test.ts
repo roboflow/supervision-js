@@ -4,6 +4,7 @@ import { PreparedMaskFrameKind } from "#render-preparation/mask-frame-artifact";
 import { createPixiFocusLayer } from "#renderers/pixi-focus-layer";
 import { BaseFocusStyle } from "supervision-js-core";
 import { BoxShape } from "supervision-js-core";
+import { FocusTargetMode } from "supervision-js-core";
 import {
   DetectionMaskEncoding,
   type DetectionFrame,
@@ -81,6 +82,54 @@ describe("pixi focus layer", () => {
     });
     expect(display.roundRect).toHaveBeenCalledWith(10, 15, 20, 30, 6);
     expect(display.cut).toHaveBeenCalledOnce();
+  });
+
+  it("uses an inverse stencil mask for overlapping ambient vector cutouts", () => {
+    const overlappingFrame: DetectionFrame = {
+      detections: [
+        frame.detections[0]!,
+        {
+          className: "player",
+          id: "player-2",
+          rect: { height: 30, width: 20, x: 25, y: 35 },
+        },
+      ],
+      frameIndex: frame.frameIndex,
+      mediaTime: frame.mediaTime,
+    };
+    const layer = createPixiFocusLayer({
+      Container: FakeContainer as never,
+      Graphics: FakeGraphics as never,
+      focusStyle: new BaseFocusStyle({
+        cornerRadius: 6,
+        fill: { alpha: 0.5, color: 0x000000 },
+        shape: BoxShape.RoundedRect,
+        targetMode: FocusTargetMode.Ambient,
+      }),
+    });
+    const display = layer.createDisplay({
+      height: 80,
+      width: 120,
+    }) as FakeContainer;
+    const overlay = display.children[0] as FakeGraphics;
+    const mask = display.children[1] as FakeGraphics;
+
+    layer.drawFrame({
+      frame: overlappingFrame,
+      hoveredPick: null,
+      mediaTime: overlappingFrame.mediaTime,
+      selectedPick: null,
+    });
+
+    expect(overlay.setMask).toHaveBeenCalledWith({
+      inverse: true,
+      mask,
+    });
+    expect(mask.roundRect).toHaveBeenCalledTimes(2);
+    expect(mask.roundRect).toHaveBeenNthCalledWith(1, 10, 15, 20, 30, 6);
+    expect(mask.roundRect).toHaveBeenNthCalledWith(2, 15, 20, 20, 30, 6);
+    expect(mask.fill).toHaveBeenCalledTimes(2);
+    expect(overlay.cut).not.toHaveBeenCalled();
   });
 
   it("clears and stays hidden when there is no focus target", () => {
@@ -211,12 +260,15 @@ describe("pixi focus layer", () => {
 });
 
 class FakeGraphics {
+  alpha = 1;
   visible = true;
   readonly clear = vi.fn(() => this);
   readonly cut = vi.fn(() => this);
   readonly fill = vi.fn(() => this);
+  readonly poly = vi.fn(() => this);
   readonly rect = vi.fn(() => this);
   readonly roundRect = vi.fn(() => this);
+  readonly setMask = vi.fn(() => this);
 }
 
 class FakeContainer {

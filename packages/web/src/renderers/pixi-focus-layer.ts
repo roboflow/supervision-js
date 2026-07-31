@@ -59,6 +59,7 @@ type PixiFocusGraphics = {
   clear(): PixiFocusGraphics;
   cut(): unknown;
   fill(options: { readonly alpha: number; readonly color: number }): unknown;
+  setMask?: PixiContainer["setMask"];
   rect(x: number, y: number, width: number, height: number): PixiFocusGraphics;
   roundRect(
     x: number,
@@ -114,6 +115,7 @@ export function createPixiFocusLayer(options: {
       ? null
       : (options.focusStyle ?? new BaseFocusStyle());
   let focusGraphics: PixiFocusGraphics | undefined;
+  let focusMaskGraphics: PixiFocusGraphics | undefined;
   let idMaskRenderer: FocusIdMaskRenderer | undefined;
   let focusDisplay:
     | (PixiContainer & { alpha: number; visible: boolean })
@@ -132,15 +134,23 @@ export function createPixiFocusLayer(options: {
       focusGraphics.visible = false;
       idMaskRenderer = createIdMaskRenderer();
 
-      if (!options.Container || !idMaskRenderer) {
+      if (!options.Container || !focusGraphics.setMask) {
         focusDisplay = focusGraphics as PixiFocusGraphics & { alpha: number };
         focusDisplay.alpha = 0;
         return focusGraphics;
       }
 
       const container = new options.Container();
+      focusMaskGraphics = new options.Graphics();
+      focusGraphics.setMask({
+        inverse: true,
+        mask: focusMaskGraphics as unknown as PixiContainer,
+      });
 
-      container.addChild(idMaskRenderer.mesh, focusGraphics as never);
+      if (idMaskRenderer) {
+        container.addChild(idMaskRenderer.mesh);
+      }
+      container.addChild(focusGraphics as never, focusMaskGraphics as never);
       focusDisplay = container as PixiContainer & {
         alpha: number;
         visible: boolean;
@@ -273,25 +283,33 @@ export function createPixiFocusLayer(options: {
     focusGraphics.rect(0, 0, mediaWidth, mediaHeight);
     focusGraphics.fill(instruction.fill);
 
-    for (const target of targetsWithRects) {
-      drawCutout(target, instruction);
-    }
-  }
+    if (focusMaskGraphics) {
+      focusMaskGraphics.visible = true;
+      focusMaskGraphics.clear();
 
-  function drawCutout(
-    target: DetectionPickResult,
-    instruction: FocusDrawInstruction,
-  ) {
-    if (!focusGraphics) {
+      for (const target of targetsWithRects) {
+        drawCutoutShape(focusMaskGraphics, target, instruction);
+        focusMaskGraphics.fill({ alpha: 1, color: 0xffffff });
+      }
       return;
     }
 
-    if (target.detection.polygon?.points.length && focusGraphics.poly) {
-      focusGraphics.poly(
+    for (const target of targetsWithRects) {
+      drawCutoutShape(focusGraphics, target, instruction);
+      focusGraphics.cut();
+    }
+  }
+
+  function drawCutoutShape(
+    graphics: PixiFocusGraphics,
+    target: DetectionPickResult,
+    instruction: FocusDrawInstruction,
+  ) {
+    if (target.detection.polygon?.points.length && graphics.poly) {
+      graphics.poly(
         target.detection.polygon.points.flatMap(({ x, y }) => [x, y]),
         true,
       );
-      focusGraphics.cut();
       return;
     }
 
@@ -304,7 +322,7 @@ export function createPixiFocusLayer(options: {
     const { x: left, y: top } = centerRectToTopLeftRect(rect);
 
     if (fallback?.shape === BoxShape.RoundedRect) {
-      focusGraphics.roundRect(
+      graphics.roundRect(
         left,
         top,
         rect.width,
@@ -312,10 +330,8 @@ export function createPixiFocusLayer(options: {
         fallback.cornerRadius ?? 0,
       );
     } else {
-      focusGraphics.rect(left, top, rect.width, rect.height);
+      graphics.rect(left, top, rect.width, rect.height);
     }
-
-    focusGraphics.cut();
   }
 
   function hide() {
@@ -336,6 +352,8 @@ export function createPixiFocusLayer(options: {
 
     focusGraphics.clear();
     focusGraphics.visible = false;
+    focusMaskGraphics?.clear();
+    if (focusMaskGraphics) focusMaskGraphics.visible = false;
   }
 
   function createIdMaskRenderer() {
