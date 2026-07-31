@@ -169,7 +169,7 @@ export async function createPixiMediaScene(
 
   await app.init({
     autoDensity: true,
-    backgroundColor: 0x111111,
+    backgroundColor: options.backgroundColor ?? 0x111111,
     preference: RENDER_ENGINE_PREFERENCE,
     resizeTo: options.container,
     resolution: resolvePixiResolution(options.maxDevicePixelRatio),
@@ -684,6 +684,9 @@ export async function createPixiMediaScene(
 
     setPresentation(presentation, mediaTime) {
       currentMediaTime = mediaTime;
+      if (presentation.backgroundColor !== undefined) {
+        app.renderer.background.color = presentation.backgroundColor;
+      }
       annotationOverlayLayer.setStyle(presentation.annotationOverlayStyle);
       if (presentation.visibility !== undefined) {
         currentVisibility = presentation.visibility;
@@ -1028,9 +1031,10 @@ export async function createPixiMediaScene(
       return;
     }
 
+    const editingKind = options.editingEngine?.getState().kind;
     if (
-      options.editingEngine &&
-      options.editingEngine.getState().kind !== AnnotationGestureStateKind.Idle
+      editingKind === AnnotationGestureStateKind.Creating ||
+      editingKind === AnnotationGestureStateKind.DragSelecting
     ) {
       focusLayer.drawFrame({
         frame: undefined,

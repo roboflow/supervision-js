@@ -132,6 +132,12 @@ export interface MediaRendererState {
  * Current presentation styles used by renderer layers.
  */
 export interface MediaRendererPresentation {
+  /**
+   * Renderer canvas color shown around media that is letterboxed or not yet
+   * presented. Hosts can update this with their color theme without recreating
+   * the media session.
+   */
+  readonly backgroundColor?: number;
   readonly annotationOverlayStyle?: AnnotationOverlayStyle | null;
   readonly boxStyle?: BoxStyle | null;
   readonly focusStyle?: FocusStyle | null;

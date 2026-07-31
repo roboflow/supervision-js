@@ -116,6 +116,7 @@ export async function createMediaSession(
     const renderer = await createMediaRenderer({
       ...options.renderer,
       ...sessionMedia.rendererSourceOption,
+      backgroundColor: initialPresentation.backgroundColor,
       annotationOverlayStyle: initialPresentation.annotationOverlayStyle,
       boxStyle: initialPresentation.boxStyle,
       container: options.container,

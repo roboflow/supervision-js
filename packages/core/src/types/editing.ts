@@ -1,6 +1,7 @@
 import type { Detection, Point, Rect } from "#types/detections";
 import type { DetectionPickResult } from "#types/interaction";
 import type { BoxFillStyle, BoxStrokeStyle } from "#types/box-style";
+import type { AnnotationStyleContext, DetectionStyleValue } from "#types/style";
 
 export enum AnnotationGeometryKind {
   Box = "box",
@@ -124,8 +125,15 @@ export interface AnnotationOverlayStyle {
     readonly closeZoneStroke?: BoxStrokeStyle;
   };
   readonly selectionHandle?: {
-    readonly fill?: BoxFillStyle;
-    readonly stroke?: BoxStrokeStyle;
+    /**
+     * Static or annotation-aware handle fills. Resolver support keeps handles
+     * visually aligned with each selected annotation, including multi-select.
+     */
+    readonly fill?: DetectionStyleValue<BoxFillStyle, AnnotationStyleContext>;
+    readonly stroke?: DetectionStyleValue<
+      BoxStrokeStyle,
+      AnnotationStyleContext
+    >;
     readonly addVertexAlpha?: number;
   };
   readonly marquee?: {

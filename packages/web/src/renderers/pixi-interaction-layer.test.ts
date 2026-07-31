@@ -35,6 +35,27 @@ const nextFrame: DetectionFrame = {
 };
 
 describe("pixi interaction layer", () => {
+  it("uses the selected annotation handle cursor before the box cursor", () => {
+    const layer = createPixiInteractionLayer({
+      Container: FakeContainer as never,
+      Rectangle: FakeRectangle as never,
+      canInteract: () => true,
+      detectionTimeline: createTimeline(frame),
+      interaction: { mode: MediaInteractionMode.PausedOnly },
+    });
+    const display = layer.createDisplay({
+      height: 80,
+      width: 120,
+    }) as FakeContainer;
+
+    layer.drawFrame(0.1);
+    layer.setSelectedDetection({ detectionId: "player-1" });
+    // North-west box handle: it must take precedence over the box's pointer cursor.
+    display.emit("pointermove", createPointerEvent(display, 0, 0));
+
+    expect(display.cursor).toBe("nwse-resize");
+  });
+
   it("uses one media-sized hit surface and ignores picking while gated off", () => {
     const onHover = vi.fn();
     const onSelect = vi.fn();

@@ -39,6 +39,7 @@ import type { MaskBrushPreviewOptions } from "#editing/mask-brush-editor";
 
 export interface MediaRendererSceneOptions {
   readonly container: HTMLElement;
+  readonly backgroundColor: MediaRendererPresentation["backgroundColor"];
   readonly fit: MediaRendererFit;
   readonly maxDevicePixelRatio: number | undefined;
   readonly detectionTimeline: BufferedDetectionTimeline;

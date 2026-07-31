@@ -290,6 +290,7 @@ export async function createMediaRendererCore(
       ...options.detectionBuffer,
     });
     mediaScene = await providers.createScene({
+      backgroundColor: options.backgroundColor,
       boxStyle: options.boxStyle,
       annotationOverlayStyle: options.annotationOverlayStyle,
       focusStyle: options.focusStyle,

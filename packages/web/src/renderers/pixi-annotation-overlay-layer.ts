@@ -2,8 +2,10 @@ import {
   AnnotationGestureStateKind,
   getAnnotationHandles,
   getDetectionRect,
+  resolveStyleValue,
   type AnnotationEditingEngine,
   type AnnotationOverlayStyle,
+  type AnnotationStyleContext,
   type AnnotationVisibility,
   type BoxFillStyle,
   type BoxStrokeStyle,
@@ -133,23 +135,40 @@ function drawSelectionHandles(
   style: ResolvedAnnotationOverlayStyle,
 ) {
   const selected = new Set(context.selectedDetectionIds);
-  for (const detection of context.frame?.detections ?? []) {
+  for (const [detectionIndex, detection] of (
+    context.frame?.detections ?? []
+  ).entries()) {
     if (detection.id === undefined || !selected.has(detection.id)) continue;
+    const styleContext: AnnotationStyleContext = {
+      detectionIndex,
+      frame: context.frame!,
+      mediaTime: context.frame!.mediaTime,
+      selected: true,
+      viewportScale: context.viewportScale,
+    };
+    const fill = resolveStyleValue(
+      style.selectionHandle.fill,
+      detection,
+      styleContext,
+    ) ?? { alpha: 1, color: 0xffffff };
+    const stroke = resolveStyleValue(
+      style.selectionHandle.stroke,
+      detection,
+      styleContext,
+    ) ?? { alpha: 1, color: 0x2563eb, width: 2 };
     for (const handle of getAnnotationHandles(
       detection,
       context.viewportScale,
     )) {
       graphics.circle(handle.point.x, handle.point.y, handle.radius);
       graphics.fill({
-        ...style.selectionHandle.fill,
+        ...fill,
         alpha:
           handle.kind === "addVertex"
             ? style.selectionHandle.addVertexAlpha
-            : style.selectionHandle.fill.alpha,
+            : fill.alpha,
       });
-      graphics.stroke(
-        resolvePixiStroke(style.selectionHandle.stroke, context.viewportScale),
-      );
+      graphics.stroke(resolvePixiStroke(stroke, context.viewportScale));
     }
   }
 }
@@ -285,8 +304,12 @@ interface ResolvedAnnotationOverlayStyle {
     readonly closeZoneStroke: BoxStrokeStyle;
   };
   readonly selectionHandle: {
-    readonly fill: BoxFillStyle;
-    readonly stroke: BoxStrokeStyle;
+    readonly fill: NonNullable<
+      NonNullable<AnnotationOverlayStyle["selectionHandle"]>["fill"]
+    >;
+    readonly stroke: NonNullable<
+      NonNullable<AnnotationOverlayStyle["selectionHandle"]>["stroke"]
+    >;
     readonly addVertexAlpha: number;
   };
   readonly marquee: { readonly fill: BoxFillStyle };
