@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  AnnotationHandleKind,
   AnnotationGeometryKind,
   createAnnotationEditingEngine,
   deleteAnnotationVertex,
+  DetectionMaskEncoding,
   DetectionPickTarget,
   getAnnotationHandles,
 } from "../index";
@@ -57,6 +59,69 @@ describe("annotation editing engine", () => {
     expect(
       deleteAnnotationVertex(deleteAnnotationVertex(polygon, 3)!, 2),
     ).toBeNull();
+  });
+
+  it("treats rects as ancillary bounds for masks and native geometries", () => {
+    const rect = { height: 20, width: 10, x: 20, y: 30 };
+    const points = [
+      { x: 0, y: 0 },
+      { x: 4, y: 0 },
+      { x: 0, y: 4 },
+    ];
+
+    expect(
+      getAnnotationHandles({
+        mask: {
+          counts: "04",
+          encoding: DetectionMaskEncoding.CompressedRle,
+          height: 80,
+          width: 120,
+        },
+        rect,
+      }),
+    ).toEqual([]);
+    expect(
+      getAnnotationHandles({ polygon: { points }, rect })[0],
+    ).toMatchObject({
+      id: "vertex-0",
+      kind: AnnotationHandleKind.Vertex,
+    });
+    expect(
+      getAnnotationHandles({
+        keypoints: { edges: [[0, 1]], points: points.slice(0, 2) },
+        rect,
+      }),
+    ).toHaveLength(2);
+  });
+
+  it("does not move a mask by changing only its ancillary bounds", () => {
+    const onCommit = vi.fn();
+    const engine = createAnnotationEditingEngine({ onCommit });
+    const detection = {
+      id: "mask-1",
+      mask: {
+        counts: "04",
+        encoding: DetectionMaskEncoding.CompressedRle,
+        height: 80,
+        width: 120,
+      },
+      rect: { height: 20, width: 10, x: 20, y: 30 },
+    };
+    const pick = {
+      detection,
+      detectionIndex: 0,
+      frame: { detections: [detection], mediaTime: 0 },
+      mediaTime: 0,
+      point: { x: 20, y: 30 },
+      target: DetectionPickTarget.Mask,
+    };
+
+    engine.pointerDown({ point: pick.point, timestamp: 0 }, pick);
+    engine.pointerMove({ point: { x: 40, y: 50 }, timestamp: 16 });
+    engine.pointerUp({ point: { x: 40, y: 50 }, timestamp: 32 });
+
+    expect(engine.getState().kind).toBe("idle");
+    expect(onCommit).not.toHaveBeenCalled();
   });
 
   it("publishes renderer subscriptions without taking ownership of persistence", () => {

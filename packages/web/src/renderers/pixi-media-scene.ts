@@ -152,6 +152,7 @@ export async function createPixiMediaScene(
         UniformGroup,
         detectionTimeline: options.detectionTimeline,
         maskStyle: createVisibilityMaskStyle(options.maskStyle),
+        onActiveIdMaskFramePresented: handleActiveIdMaskFramePresented,
         renderPreparation: options.renderPreparation,
       })
     : undefined;
@@ -904,6 +905,7 @@ export async function createPixiMediaScene(
         UniformGroup,
         detectionTimeline: options.detectionTimeline,
         maskStyle: createVisibilityMaskStyle(maskStyle),
+        onActiveIdMaskFramePresented: handleActiveIdMaskFramePresented,
         renderPreparation: options.renderPreparation,
       });
 
@@ -1070,6 +1072,11 @@ export async function createPixiMediaScene(
       selectedPicks: interactionState?.selectedPicks,
       viewportScale,
     });
+  }
+
+  function handleActiveIdMaskFramePresented() {
+    drawFocusLayer(currentMediaTime);
+    drawInteractionPresentationLayer(currentMediaTime);
   }
 
   function drawAnnotationOverlay() {

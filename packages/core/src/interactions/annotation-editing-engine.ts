@@ -75,7 +75,7 @@ export function createAnnotationEditingEngine(
       if (input.button !== undefined && input.button !== 0) return;
       if (tool) {
         beginCreation(input);
-      } else if (pick && !pick.detection.locked) {
+      } else if (pick && !pick.detection.locked && !pick.detection.mask) {
         beginMove(pick, input);
       }
     },
@@ -200,7 +200,7 @@ export function createAnnotationEditingEngine(
       }
     },
     beginHandleDrag(detection, handle, input) {
-      if (detection.locked) return;
+      if (detection.locked || detection.mask) return;
       capture(input.pointerId);
       gesture = {
         current: input,

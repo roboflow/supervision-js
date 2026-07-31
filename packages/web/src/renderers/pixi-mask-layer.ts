@@ -128,6 +128,7 @@ export function createPixiMaskLayer(options: {
   readonly UniformGroup?: UniformGroupConstructor;
   readonly detectionTimeline: BufferedDetectionTimeline;
   readonly maskStyle: MaskStyle;
+  readonly onActiveIdMaskFramePresented?: () => void;
   readonly renderPreparation?: RenderPreparationOptions;
   readonly resolveInstructions?: (options: {
     readonly frame: import("supervision-js-core").DetectionFrame;
@@ -168,6 +169,12 @@ export function createPixiMaskLayer(options: {
     onMaskFramePrepared(maskFrame) {
       if (!isDestroyed && maskFrame.key === activeFrameKey) {
         showMaskFrame(maskFrame, activeFrameMediaTime);
+        if (
+          maskFrame.kind === PreparedMaskFrameKind.PngIdMask &&
+          activeFrameMediaTime !== null
+        ) {
+          options.onActiveIdMaskFramePresented?.();
+        }
       }
     },
     onMaskFramesCleared() {

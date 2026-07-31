@@ -13,11 +13,10 @@ export function getAnnotationHandles(
   detection: Detection,
   viewportScale = 1,
 ): readonly AnnotationHandleDefinition[] {
-  if (detection.locked) return [];
+  if (detection.locked || detection.mask) return [];
   const radius = HANDLE_RADIUS / viewportScale;
   const hitSize = HANDLE_HIT_SIZE / viewportScale;
 
-  if (detection.rect) return getBoxHandles(detection.rect, radius, hitSize);
   if (detection.polygon)
     return getPathHandles(detection.polygon.points, true, radius, hitSize);
   if (detection.polyline)
@@ -33,6 +32,7 @@ export function getAnnotationHandles(
       radius,
     }));
   }
+  if (detection.rect) return getBoxHandles(detection.rect, radius, hitSize);
   return [];
 }
 

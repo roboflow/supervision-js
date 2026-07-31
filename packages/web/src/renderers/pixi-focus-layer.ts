@@ -4,11 +4,7 @@ import { BaseFocusStyle } from "supervision-js-core";
 import { BoxShape } from "supervision-js-core";
 import type { FocusDrawInstruction, FocusStyle } from "supervision-js-core";
 import type { DetectionPickResult } from "supervision-js-core";
-import {
-  centerRectToTopLeftRect,
-  decodeCompressedRleMask,
-  extractMaskRectRuns,
-} from "supervision-js-core";
+import { centerRectToTopLeftRect } from "supervision-js-core";
 import type {
   Container as PixiContainer,
   ImageSource as PixiImageSource,
@@ -264,10 +260,7 @@ export function createPixiFocusLayer(options: {
     }
 
     const targetsWithRects = instruction.targets.filter(
-      (target) =>
-        target.detection.rect ||
-        target.detection.polygon ||
-        target.detection.mask,
+      (target) => target.detection.rect || target.detection.polygon,
     );
 
     if (targetsWithRects.length === 0) {
@@ -299,21 +292,6 @@ export function createPixiFocusLayer(options: {
         true,
       );
       focusGraphics.cut();
-      return;
-    }
-
-    if (target.detection.mask) {
-      const decoded = decodeCompressedRleMask(target.detection.mask);
-
-      for (const run of extractMaskRectRuns(
-        decoded.data,
-        decoded.width,
-        decoded.height,
-      ) ?? []) {
-        focusGraphics.rect(run.x, run.y, run.width, run.height);
-        focusGraphics.cut();
-      }
-
       return;
     }
 

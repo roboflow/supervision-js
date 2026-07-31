@@ -174,6 +174,40 @@ describe("pixi focus layer", () => {
     expect(graphics.visible).toBe(false);
     expect(graphics.fill).not.toHaveBeenCalled();
   });
+
+  it("uses one bounds cutout while a mask artifact is unavailable", () => {
+    const selectedPick = {
+      detection: maskFrame.detections[0]!,
+      detectionIndex: 0,
+      frame: maskFrame,
+      mediaTime: maskFrame.mediaTime,
+      point: { x: 15, y: 20 },
+      target: DetectionPickTarget.Mask,
+    };
+    const layer = createPixiFocusLayer({
+      Graphics: FakeGraphics as never,
+      focusStyle: new BaseFocusStyle({
+        cornerRadius: 6,
+        fill: { alpha: 0.5, color: 0x000000 },
+        shape: BoxShape.RoundedRect,
+      }),
+    });
+    const display = layer.createDisplay({
+      height: 80,
+      width: 120,
+    }) as FakeGraphics;
+
+    layer.drawFrame({
+      frame: maskFrame,
+      hoveredPick: null,
+      mediaTime: maskFrame.mediaTime,
+      selectedPick,
+    });
+
+    expect(display.roundRect).toHaveBeenCalledOnce();
+    expect(display.roundRect).toHaveBeenCalledWith(10, 15, 20, 30, 6);
+    expect(display.cut).toHaveBeenCalledOnce();
+  });
 });
 
 class FakeGraphics {
