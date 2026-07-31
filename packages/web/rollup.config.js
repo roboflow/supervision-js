@@ -31,6 +31,34 @@ function sourceAliasResolver() {
   };
 }
 
+/**
+ * Keep the worker entry option in the published ESM for webpack consumers.
+ * Rollup drops non-legal comments, while webpack reads this magic comment from
+ * the expression it parses in `node_modules`, not from supervision-js source.
+ */
+function preserveWebpackWorkerEntryOptions() {
+  const expression = 'new URL("./mask-preparation.worker.js", import.meta.url)';
+  const replacement = `new URL(
+        /* webpackEntryOptions: { publicPath: "/" } */
+        "./mask-preparation.worker.js",
+        import.meta.url
+      )`;
+
+  return {
+    name: "preserve-webpack-worker-entry-options",
+    renderChunk(code) {
+      if (!code.includes(expression)) {
+        return null;
+      }
+
+      return {
+        code: code.replace(expression, replacement),
+        map: null,
+      };
+    },
+  };
+}
+
 export default {
   input: {
     editing: "src/editing.ts",
@@ -52,6 +80,7 @@ export default {
       declaration: false,
       declarationMap: false,
     }),
+    preserveWebpackWorkerEntryOptions(),
   ],
   treeshake: {
     moduleSideEffects: false,

@@ -169,6 +169,12 @@ test("tarball ships the render-preparation worker and the chunks it imports", ()
   }
 });
 
+test("published worker entry preserves webpack's root chunk public path", () => {
+  const index = readFileSync(path.join(extractedDir, "dist/index.js"), "utf8");
+
+  assert.match(index, /webpackEntryOptions:\s*\{\s*publicPath:\s*"\/"\s*\}/);
+});
+
 test("tarball bundles the private core package only", () => {
   const manifest = JSON.parse(
     readFileSync(path.join(extractedDir, "package.json"), "utf8"),
