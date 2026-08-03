@@ -142,6 +142,9 @@ export function createPreparedRenderWindow(options: {
   const queuedMaskFrameKeys: string[] = [];
   const inFlightMaskFrames = new Set<PendingMaskFrame>();
   const emptyMaskFrameKeys = new Set<string>();
+  // Detection frames are immutable snapshots. A new object at an existing
+  // timeline key therefore represents a source revision for that artifact.
+  const observedMaskFrames = new Map<string, DetectionFrame>();
   const readinessWaiters = new Set<() => void>();
   let scheduledQueuePump: ScheduledPreparationTask | undefined;
 
@@ -157,12 +160,13 @@ export function createPreparedRenderWindow(options: {
     const isActiveFrame =
       scheduleOptions.priority === PreparedRenderSchedulePriority.Active;
 
-    if (
-      !maskStyle ||
-      preparedMaskFrames.has(key) ||
-      emptyMaskFrameKeys.has(key) ||
-      isDestroyed
-    ) {
+    if (!maskStyle || isDestroyed) {
+      return false;
+    }
+
+    observeMaskFrame(frame, key);
+
+    if (preparedMaskFrames.has(key) || emptyMaskFrameKeys.has(key)) {
       return false;
     }
 
@@ -413,6 +417,40 @@ export function createPreparedRenderWindow(options: {
     }
   }
 
+  function observeMaskFrame(frame: DetectionFrame, key: string) {
+    const previousFrame = observedMaskFrames.get(key);
+
+    if (previousFrame === frame) {
+      return;
+    }
+
+    observedMaskFrames.set(key, frame);
+
+    if (!previousFrame) {
+      return;
+    }
+
+    invalidateMaskFrame(key);
+  }
+
+  function invalidateMaskFrame(key: string) {
+    lastPreparedBufferSignature = null;
+    lastPreparedWindowMediaTime = null;
+    removeQueuedMaskFrameKey(key);
+    pendingMaskFrames.delete(key);
+    emptyMaskFrameKeys.delete(key);
+
+    const maskFrame = preparedMaskFrames.get(key);
+
+    if (!maskFrame) {
+      return;
+    }
+
+    preparedMaskFrames.delete(key);
+    options.onMaskFrameEvicted?.(key);
+    maskFrame.close();
+  }
+
   const schedulePreparedWindow = (
     detectionFrame: DetectionFrame | undefined,
     mediaTime: number,
@@ -447,10 +485,10 @@ export function createPreparedRenderWindow(options: {
     const bufferedFrames = getBufferedDetectionTimelineFrameSnapshot(
       options.detectionTimeline,
     );
-    timeline.rememberFrames(
-      bufferedFrames,
-      getKnownFrameRetentionKeys(bufferedFrames),
-    );
+    const retainedKeys = getKnownFrameRetentionKeys(bufferedFrames);
+
+    timeline.rememberFrames(bufferedFrames, retainedKeys);
+    pruneObservedMaskFrames(retainedKeys);
     lastPreparedWindowFrames = timeline.getWindowFrames(
       bufferedFrames,
       anchorTime,
@@ -689,6 +727,14 @@ export function createPreparedRenderWindow(options: {
     }
   }
 
+  function pruneObservedMaskFrames(retainedKeys: ReadonlySet<string>) {
+    for (const key of observedMaskFrames.keys()) {
+      if (!retainedKeys.has(key)) {
+        observedMaskFrames.delete(key);
+      }
+    }
+  }
+
   function findPreparedMaskFrameEvictionCandidate() {
     const targetKeys = new Set(lastPreparedTargetFrames.map(getFrameKey));
     const activeKey = activeMaskFrame?.key ?? null;
@@ -723,6 +769,7 @@ export function createPreparedRenderWindow(options: {
     pendingMaskFrames.clear();
     queuedMaskFrameKeys.length = 0;
     emptyMaskFrameKeys.clear();
+    observedMaskFrames.clear();
     timeline.clear();
 
     if (preparedMaskFrames.size > 0) {
