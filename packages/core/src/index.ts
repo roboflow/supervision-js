@@ -100,11 +100,13 @@ export {
   decodeDetectionMaskPayload,
   detectMaskBorders,
   encodeBinaryMask,
+  encodeBinaryMaskWithBounds,
   encodeDetectionMaskPayload,
   extractMaskContour,
   extractMaskRectRuns,
   isDeflatedBase64DetectionMaskPayload,
   type DetectionMaskCompressionCodec,
+  type EncodedBinaryMask,
   type MaskRectRun,
 } from "#utils/detection-masks";
 export {

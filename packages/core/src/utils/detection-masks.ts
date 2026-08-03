@@ -23,6 +23,11 @@ export interface DetectionMaskCompressionCodec {
 
 export type MaskRectRun = TopLeftRect;
 
+export interface EncodedBinaryMask {
+  readonly bounds: Rect | null;
+  readonly mask: DetectionMask;
+}
+
 export function encodeBinaryMask(
   data: Uint8Array,
   width: number,
@@ -55,6 +60,64 @@ export function encodeBinaryMask(
     encoding: DetectionMaskEncoding.CompressedRle,
     height,
     width,
+  };
+}
+
+/** Encodes a binary mask and derives its bounds in the same raster traversal. */
+export function encodeBinaryMaskWithBounds(
+  data: Uint8Array,
+  width: number,
+  height: number,
+): EncodedBinaryMask {
+  assertMaskDimensions(data, width, height);
+
+  const runs: number[] = [];
+  let currentValue = 0;
+  let runLength = 0;
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+
+  for (let x = 0; x < width; x += 1) {
+    for (let y = 0; y < height; y += 1) {
+      const value = data[y * width + x] ? 1 : 0;
+
+      if (value) {
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x);
+        maxY = Math.max(maxY, y);
+      }
+
+      if (value === currentValue) {
+        runLength += 1;
+      } else {
+        runs.push(runLength);
+        currentValue = value;
+        runLength = 1;
+      }
+    }
+  }
+
+  runs.push(runLength);
+
+  return {
+    bounds:
+      maxX < 0
+        ? null
+        : {
+            height: maxY - minY + 1,
+            width: maxX - minX + 1,
+            x: minX + (maxX - minX + 1) / 2,
+            y: minY + (maxY - minY + 1) / 2,
+          },
+    mask: {
+      counts: encodeCompressedRleCounts(runs),
+      encoding: DetectionMaskEncoding.CompressedRle,
+      height,
+      width,
+    },
   };
 }
 
