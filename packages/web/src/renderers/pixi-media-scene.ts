@@ -80,6 +80,11 @@ export async function createPixiMediaScene(
       : options.polygonStyle;
   let currentVisibility: AnnotationVisibility | undefined = options.visibility;
   let visibilityVersion = 0;
+  let visibilityMaskStyleCache: {
+    readonly source: MaskStyle;
+    readonly style: MaskStyle;
+    readonly version: number;
+  } | null = null;
   const resolveContextState = (
     detection: DetectionFrame["detections"][number],
   ) => resolveAnnotationStyleState(detection, currentVisibility);
@@ -689,13 +694,17 @@ export async function createPixiMediaScene(
       }
       annotationOverlayLayer.setStyle(presentation.annotationOverlayStyle);
       if (presentation.visibility !== undefined) {
+        const maskVisibilityChanged = !canReuseMaskVisibilityArtifacts(
+          currentVisibility,
+          presentation.visibility,
+        );
         currentVisibility = presentation.visibility;
-        visibilityVersion += 1;
         boxLayer.invalidate();
         vectorLayer.setStyles({});
         labelLayer?.setLabelStyle(currentLabelStyle);
         polygonLayer?.setPolygonStyle(currentPolygonStyle);
-        if (currentMaskStyle) {
+        if (maskVisibilityChanged && currentMaskStyle) {
+          visibilityVersion += 1;
           maskLayer?.setMaskStyle(createVisibilityMaskStyle(currentMaskStyle));
         }
       }
@@ -1128,7 +1137,14 @@ export async function createPixiMediaScene(
   }
 
   function createVisibilityMaskStyle(style: MaskStyle): MaskStyle {
-    return {
+    if (
+      visibilityMaskStyleCache?.source === style &&
+      visibilityMaskStyleCache.version === visibilityVersion
+    ) {
+      return visibilityMaskStyleCache.style;
+    }
+
+    const visibilityMaskStyle: MaskStyle = {
       artifactKey:
         style.artifactKey === undefined
           ? undefined
@@ -1140,7 +1156,56 @@ export async function createPixiMediaScene(
         return style.resolve(detection, { ...context, ...state });
       },
     };
+
+    visibilityMaskStyleCache = {
+      source: style,
+      style: visibilityMaskStyle,
+      version: visibilityVersion,
+    };
+
+    return visibilityMaskStyle;
   }
+}
+
+export function canReuseMaskVisibilityArtifacts(
+  previous: AnnotationVisibility | undefined,
+  next: AnnotationVisibility | undefined,
+) {
+  return (
+    (previous?.annotationsHidden === true) ===
+      (next?.annotationsHidden === true) &&
+    previous?.creatingDetectionId === next?.creatingDetectionId &&
+    haveEqualVisibilityValues(previous?.hiddenClasses, next?.hiddenClasses) &&
+    haveEqualVisibilityValues(
+      previous?.hiddenDetectionIds,
+      next?.hiddenDetectionIds,
+    ) &&
+    haveEqualVisibilityValues(
+      previous?.loadingDetectionIds,
+      next?.loadingDetectionIds,
+    ) &&
+    haveEqualVisibilityValues(
+      previous?.ephemeralDetectionIds,
+      next?.ephemeralDetectionIds,
+    )
+  );
+}
+
+function haveEqualVisibilityValues<T>(
+  previous: ReadonlySet<T> | readonly T[] | undefined,
+  next: ReadonlySet<T> | readonly T[] | undefined,
+) {
+  if (previous === next) {
+    return true;
+  }
+
+  const previousValues = new Set(previous ?? []);
+  const nextValues = new Set(next ?? []);
+
+  return (
+    previousValues.size === nextValues.size &&
+    Array.from(previousValues).every((value) => nextValues.has(value))
+  );
 }
 
 function measure(work: () => void) {
