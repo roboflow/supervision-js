@@ -1027,46 +1027,64 @@ describe("prepared render window", () => {
     }
   });
 
-  it("resets pending worker work when mask style invalidates artifacts", () => {
+  it("reuses the worker pool and prepares the replacement generation after style invalidation", async () => {
     vi.useFakeTimers();
     resetMocks();
 
     try {
-      const workers = [createFakeMaskPreparationWorker()];
+      const workers = [
+        createFakeMaskPreparationWorker({ autoComplete: false }),
+        createFakeMaskPreparationWorker({ autoComplete: false }),
+      ];
+      const createWorker = vi
+        .fn()
+        .mockImplementationOnce(() => workers[0]!.worker)
+        .mockImplementationOnce(() => workers[1]!.worker);
       const renderWindow = createPreparedRenderWindow({
         detectionTimeline: createTimeline(frames),
         maskStyle: createArtifactStableMaskStyle(0.2, "first"),
         renderPreparation: {
           maskFrame: {
-            workerCount: 1,
+            prefetchFrameCount: 1,
+            workerCount: 2,
           },
           mode: RenderPreparationMode.Worker,
           workerFactory: {
-            createWorker: () => {
-              const worker =
-                workers[workers.length - 1] ??
-                createFakeMaskPreparationWorker();
-
-              if (worker.terminated) {
-                const nextWorker = createFakeMaskPreparationWorker();
-                workers.push(nextWorker);
-                return nextWorker.worker;
-              }
-
-              return worker.worker;
-            },
+            createWorker,
           },
         },
       });
 
       renderWindow.getFrame(0);
+      await vi.runOnlyPendingTimersAsync();
+
       renderWindow.setMaskStyle(createArtifactStableMaskStyle(0.8, "second"));
       renderWindow.getFrame(0);
+      await vi.runOnlyPendingTimersAsync();
 
-      expect(workers[0]?.terminated).toBe(true);
-      expect(workers).toHaveLength(2);
+      expect(createWorker).toHaveBeenCalledTimes(2);
+      expect(workers.every((worker) => !worker.terminated)).toBe(true);
+      expect(workers[0]!.messages).toHaveLength(1);
+      expect(workers[1]!.messages).toHaveLength(1);
+
+      workers[0]!.completeNext();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(renderWindow.getFrame(0)?.maskFrame).toBeUndefined();
+
+      workers[1]!.completeNext();
+      await flushMaskPreparationTimers(4);
+
+      expect(renderWindow.getFrame(0)?.maskFrame).toMatchObject({
+        height: 2,
+        key: "0:0",
+        width: 2,
+      });
+      expect(createWorker).toHaveBeenCalledTimes(2);
 
       renderWindow.destroy();
+      expect(workers.every((worker) => worker.terminated)).toBe(true);
     } finally {
       vi.useRealTimers();
     }
@@ -1170,7 +1188,7 @@ describe("prepared render window", () => {
 
       renderWindow.setMaskStyle(createArtifactStableMaskStyle(0.8, "second"));
       workers[0]?.completeNext();
-      await Promise.resolve();
+      await flushMaskPreparationTimers(2);
 
       expect(staleImageBitmap.close).toHaveBeenCalledOnce();
 

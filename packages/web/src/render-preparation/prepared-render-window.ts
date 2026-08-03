@@ -124,7 +124,7 @@ export function createPreparedRenderWindow(options: {
   );
 
   let maskStyle = options.maskStyle ?? null;
-  let maskFramePreparer = createPreparer();
+  const maskFramePreparer = createPreparer();
   let lastPreparedBufferSignature: string | null = null;
   let lastPreparedWindowMediaTime: number | null = null;
   let lastPreparedWindowFrames: readonly DetectionFrame[] = [];
@@ -140,7 +140,7 @@ export function createPreparedRenderWindow(options: {
   const preparedMaskFrames = new Map<string, PreparedMaskFrame>();
   const pendingMaskFrames = new Map<string, PendingMaskFrame>();
   const queuedMaskFrameKeys: string[] = [];
-  const inFlightMaskFrameKeys = new Set<string>();
+  const inFlightMaskFrames = new Set<PendingMaskFrame>();
   const emptyMaskFrameKeys = new Set<string>();
   const readinessWaiters = new Set<() => void>();
   let scheduledQueuePump: ScheduledPreparationTask | undefined;
@@ -231,7 +231,7 @@ export function createPreparedRenderWindow(options: {
 
     while (
       queuedMaskFrameKeys.length > 0 &&
-      inFlightMaskFrameKeys.size < getMaxInFlightMaskFrameCount()
+      inFlightMaskFrames.size < getMaxInFlightMaskFrameCount()
     ) {
       const key = queuedMaskFrameKeys.shift();
 
@@ -247,11 +247,11 @@ export function createPreparedRenderWindow(options: {
         continue;
       }
 
-      inFlightMaskFrameKeys.add(key);
+      inFlightMaskFrames.add(job);
 
       if (isDestroyed || job.generation !== generation) {
         pendingMaskFrames.delete(key);
-        inFlightMaskFrameKeys.delete(key);
+        inFlightMaskFrames.delete(job);
         emitDiagnostics();
         return;
       }
@@ -267,7 +267,7 @@ export function createPreparedRenderWindow(options: {
       if (instructions.length === 0) {
         emptyMaskFrameKeys.add(key);
         pendingMaskFrames.delete(key);
-        inFlightMaskFrameKeys.delete(key);
+        inFlightMaskFrames.delete(job);
         schedulePreparedTargetBatch();
         emitDiagnostics();
         continue;
@@ -276,10 +276,12 @@ export function createPreparedRenderWindow(options: {
       void maskFramePreparer
         .prepare({ instructions, key })
         .then((maskFrame) => {
-          inFlightMaskFrameKeys.delete(key);
+          inFlightMaskFrames.delete(job);
           const pendingJob = pendingMaskFrames.get(key);
 
-          pendingMaskFrames.delete(key);
+          if (pendingJob === job) {
+            pendingMaskFrames.delete(key);
+          }
 
           if (
             isDestroyed ||
@@ -309,9 +311,25 @@ export function createPreparedRenderWindow(options: {
           pumpMaskFrameQueue();
         })
         .catch((error: unknown) => {
-          inFlightMaskFrameKeys.delete(key);
-          pendingMaskFrames.delete(key);
+          inFlightMaskFrames.delete(job);
+          const pendingJob = pendingMaskFrames.get(key);
+
+          if (pendingJob === job) {
+            pendingMaskFrames.delete(key);
+          }
+
           schedulePreparedTargetBatch();
+
+          if (
+            isDestroyed ||
+            job.generation !== generation ||
+            pendingJob !== job
+          ) {
+            emitDiagnostics();
+            pumpMaskFrameQueue();
+            return;
+          }
+
           emitDiagnostics(
             error instanceof Error
               ? error.message
@@ -327,7 +345,7 @@ export function createPreparedRenderWindow(options: {
   function promotePendingMaskFrame(key: string, mediaTime: number) {
     const job = pendingMaskFrames.get(key);
 
-    if (!job || inFlightMaskFrameKeys.has(key)) {
+    if (!job || inFlightMaskFrames.has(job)) {
       return;
     }
 
@@ -560,7 +578,7 @@ export function createPreparedRenderWindow(options: {
         return;
       }
 
-      clearPreparedMaskFrames({ resetPreparer: true });
+      clearPreparedMaskFrames();
     },
 
     destroy() {
@@ -629,7 +647,7 @@ export function createPreparedRenderWindow(options: {
                 ),
               }
             : null,
-          inFlightCount: inFlightMaskFrameKeys.size,
+          inFlightCount: inFlightMaskFrames.size,
           kind: options.artifactKind ?? RenderPreparationArtifactKind.MaskFrame,
           maxInFlightCount,
           maxPendingCount: maxPendingFrameCount,
@@ -690,9 +708,7 @@ export function createPreparedRenderWindow(options: {
     return undefined;
   }
 
-  function clearPreparedMaskFrames(
-    clearOptions: { readonly resetPreparer?: boolean } = {},
-  ) {
+  function clearPreparedMaskFrames() {
     generation += 1;
     lastPreparedBufferSignature = null;
     lastPreparedWindowMediaTime = null;
@@ -706,7 +722,6 @@ export function createPreparedRenderWindow(options: {
 
     pendingMaskFrames.clear();
     queuedMaskFrameKeys.length = 0;
-    inFlightMaskFrameKeys.clear();
     emptyMaskFrameKeys.clear();
     timeline.clear();
 
@@ -719,11 +734,6 @@ export function createPreparedRenderWindow(options: {
       for (const maskFrame of maskFrames) {
         maskFrame.close();
       }
-    }
-
-    if (clearOptions.resetPreparer && !isDestroyed) {
-      maskFramePreparer.destroy();
-      maskFramePreparer = createPreparer();
     }
 
     emitDiagnostics();
