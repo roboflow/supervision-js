@@ -135,6 +135,7 @@ describe("media session integration", () => {
       canvas: { height: 2, width: 2 },
       getCursor: () => ({ mode: "add", point: null, radius: 1 }),
       subscribeTextureUpdates: () => () => undefined,
+      subscribeCursorUpdates: () => () => undefined,
     };
 
     const session = await createMediaSession({

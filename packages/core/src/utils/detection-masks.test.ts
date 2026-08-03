@@ -7,6 +7,7 @@ import {
   decodeDetectionMaskPayload,
   detectMaskBorders,
   encodeBinaryMask,
+  encodeBinaryMaskWithBounds,
   encodeDetectionMaskPayload,
   extractMaskContour,
   extractMaskRectRuns,
@@ -19,6 +20,16 @@ describe("detection mask utilities", () => {
   it("round-trips row-major binary masks through COCO compressed RLE", () => {
     const mask = encodeBinaryMask(data, 4, 3);
     expect(decodeCompressedRleMask(mask).data).toEqual(data);
+  });
+
+  it("derives mask bounds while encoding the binary raster", () => {
+    const result = encodeBinaryMaskWithBounds(data, 4, 3);
+
+    expect(result.mask).toEqual(encodeBinaryMask(data, 4, 3));
+    expect(result.bounds).toEqual({ height: 2, width: 2, x: 2, y: 1 });
+    expect(
+      encodeBinaryMaskWithBounds(new Uint8Array(12), 4, 3).bounds,
+    ).toBeNull();
   });
 
   it("supports an injected transport compression codec", () => {

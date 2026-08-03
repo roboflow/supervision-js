@@ -50,12 +50,11 @@ export function createPixiMaskBrushPreview(options: {
   sprite.tint = options.preview.color ?? 0x22c55e;
   display.addChild(sprite, cursor);
 
-  const update = () => {
+  const updateTexture = () => {
     source.update();
-    texture.update();
-    drawCursor();
   };
-  const unsubscribe = editor.subscribeTextureUpdates(update);
+  const unsubscribeTexture = editor.subscribeTextureUpdates(updateTexture);
+  const unsubscribeCursor = editor.subscribeCursorUpdates(drawCursor);
   drawCursor();
 
   return {
@@ -65,7 +64,8 @@ export function createPixiMaskBrushPreview(options: {
       drawCursor();
     },
     destroy() {
-      unsubscribe();
+      unsubscribeCursor();
+      unsubscribeTexture();
       texture.destroy();
       source.destroy();
     },

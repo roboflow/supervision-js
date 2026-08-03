@@ -82,6 +82,128 @@ const manyFrames = Array.from({ length: 10 }, (_, frameIndex) => ({
 })) satisfies DetectionFrame[];
 
 describe("prepared render window", () => {
+  it("rebuilds the active mask artifact when semantic content changes at the same frame key", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const mutableFrames = [frames[0]!] as DetectionFrame[];
+      const renderWindow = createPreparedRenderWindow({
+        detectionTimeline: createTimeline(mutableFrames),
+        maskStyle: new BaseMaskStyle(),
+      });
+
+      renderWindow.getFrame(0);
+      await vi.runOnlyPendingTimersAsync();
+      const originalArtifact = renderWindow.getFrame(0)?.maskFrame;
+      const closeOriginalArtifact = vi.spyOn(originalArtifact!, "close");
+
+      expect(renderWindow.getFrame(0)?.maskFrame).toBe(originalArtifact);
+
+      const replacementFrame: DetectionFrame = {
+        ...frames[0]!,
+        detections: [
+          {
+            mask: {
+              counts: "13",
+              encoding: DetectionMaskEncoding.CompressedRle,
+              height: 2,
+              width: 2,
+            },
+          },
+        ],
+      };
+      mutableFrames[0] = replacementFrame;
+
+      const beforePreparation = renderWindow.getFrame(0);
+      await vi.runOnlyPendingTimersAsync();
+      const afterPreparation = renderWindow.getFrame(0);
+
+      expect(beforePreparation?.detectionFrame).toBe(replacementFrame);
+      expect(beforePreparation?.maskFrame).toBeUndefined();
+      expect(afterPreparation?.maskFrame).not.toBe(originalArtifact);
+      expect(closeOriginalArtifact).toHaveBeenCalledOnce();
+
+      renderWindow.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("discards a late mask artifact after the same frame key is replaced", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const staleImageBitmap = {
+        close: vi.fn(),
+        height: 2,
+        width: 2,
+      } as unknown as ImageBitmap;
+      const replacementImageBitmap = {
+        close: vi.fn(),
+        height: 2,
+        width: 2,
+      } as unknown as ImageBitmap;
+      const completedArtifacts = [staleImageBitmap, replacementImageBitmap];
+      const mutableFrames = [frames[0]!] as DetectionFrame[];
+      const fakeWorker = createFakeMaskPreparationWorker({
+        autoComplete: false,
+        createCompleteData: () => ({
+          imageBitmap: completedArtifacts.shift(),
+        }),
+      });
+      const renderWindow = createPreparedRenderWindow({
+        detectionTimeline: createTimeline(mutableFrames),
+        maskStyle: new BaseMaskStyle(),
+        prefetchFrameCount: 1,
+        renderPreparation: {
+          maskFrame: { workerCount: 1 },
+          mode: RenderPreparationMode.Worker,
+          workerFactory: { createWorker: () => fakeWorker.worker },
+        },
+      });
+
+      renderWindow.getFrame(0);
+      await vi.runOnlyPendingTimersAsync();
+
+      mutableFrames[0] = {
+        ...frames[0]!,
+        detections: [
+          {
+            mask: {
+              counts: "13",
+              encoding: DetectionMaskEncoding.CompressedRle,
+              height: 2,
+              width: 2,
+            },
+          },
+        ],
+      };
+      renderWindow.getFrame(0);
+
+      fakeWorker.completeNext();
+      await flushMaskPreparationTimers(4);
+
+      expect(staleImageBitmap.close).toHaveBeenCalledOnce();
+      expect(fakeWorker.messages).toHaveLength(2);
+      expect(renderWindow.getFrame(0)?.maskFrame).toBeUndefined();
+
+      fakeWorker.completeNext();
+      await flushMaskPreparationTimers(4);
+
+      expect(renderWindow.getFrame(0)?.maskFrame?.source).toBe(
+        replacementImageBitmap,
+      );
+      expect(replacementImageBitmap.close).not.toHaveBeenCalled();
+
+      renderWindow.destroy();
+      expect(replacementImageBitmap.close).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("prepares and returns a cached mask artifact for the active frame", async () => {
     vi.useFakeTimers();
     resetMocks();
