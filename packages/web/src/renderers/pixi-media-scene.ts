@@ -46,6 +46,20 @@ import type {
   Texture as PixiTexture,
 } from "pixi.js";
 
+export function observePixiContainerResize(
+  container: HTMLElement,
+  queueResize: () => void,
+): () => void {
+  const ResizeObserverConstructor = globalThis.ResizeObserver;
+  if (!ResizeObserverConstructor) {
+    return () => undefined;
+  }
+
+  const observer = new ResizeObserverConstructor(() => queueResize());
+  observer.observe(container);
+  return () => observer.disconnect();
+}
+
 type TextureUploadSource = {
   update(): void;
 };
@@ -404,6 +418,15 @@ export async function createPixiMediaScene(
     drawFocusLayer(currentMediaTime);
     drawInteractionPresentationLayer(currentMediaTime);
   };
+
+  // Pixi's ResizePlugin listens to the window resize event, which does not
+  // fire when an application drawer or split pane changes only this element's
+  // dimensions. Observe the actual host and use Pixi's queued resize so the
+  // renderer screen and the contain/cover fit are recalculated together.
+  const disconnectContainerResizeObserver = observePixiContainerResize(
+    options.container,
+    () => app.queueResize(),
+  );
 
   app.ticker.add(updateMediaSceneFit);
   app.ticker.add(drawAnnotationOverlay);
@@ -841,6 +864,8 @@ export async function createPixiMediaScene(
     },
 
     destroy() {
+      disconnectContainerResizeObserver();
+      app.cancelResize?.();
       app.ticker.remove(updateMediaSceneFit);
       app.ticker.remove(drawAnnotationOverlay);
       app.ticker.remove(tickFocusLayer);
