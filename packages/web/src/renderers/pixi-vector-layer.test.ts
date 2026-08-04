@@ -79,6 +79,30 @@ describe("pixi vector layer", () => {
     expect(display.clear).toHaveBeenCalledTimes(2);
     expect(display.position.set).toHaveBeenLastCalledWith(0, 0);
   });
+
+  it("redraws a replacement frame at the same timeline position", () => {
+    const frames = [createFrame(0, ["pose-0"])];
+    const layer = createLayer(frames);
+    const container = layer.createContainer() as unknown as FakeContainer;
+
+    layer.drawFrame(0);
+    const display = container.children[0]!;
+    expect(display.circle).toHaveBeenLastCalledWith(1, 2, 3);
+
+    frames[0] = {
+      ...frames[0]!,
+      detections: [
+        {
+          ...frames[0]!.detections[0]!,
+          keypoints: { edges: [], points: [{ x: 11, y: 12 }] },
+        },
+      ],
+    };
+    layer.drawFrame(0);
+
+    expect(display.clear).toHaveBeenCalledTimes(2);
+    expect(display.circle).toHaveBeenLastCalledWith(11, 12, 3);
+  });
 });
 
 class FakeContainer {

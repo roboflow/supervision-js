@@ -40,7 +40,10 @@ export function createPixiBoxLayer(options: {
   let boxStyle: BoxStyle | null =
     options.boxStyle === undefined ? new BaseBoxStyle() : options.boxStyle;
   let boxGraphics: PixiGraphics | undefined;
-  let lastDrawnDetectionFrameTime: number | null = null;
+  // Source revisions may replace semantic content at the same timeline key.
+  // The buffered timeline owns immutable frame snapshots, so object identity
+  // distinguishes a new revision without redrawing while one frame remains active.
+  let lastDrawnDetectionFrame: DetectionFrame | undefined;
   let lastDrawnState: PixiBoxLayerState | undefined;
   let hasDrawnDetectionFrame = false;
   let isDirty = true;
@@ -65,12 +68,11 @@ export function createPixiBoxLayer(options: {
 
     drawFrame(mediaTime, viewportScale = 1) {
       const detectionFrame = options.detectionTimeline.selectFrame(mediaTime);
-      const detectionFrameTime = detectionFrame?.mediaTime ?? null;
 
       if (
         !isDirty &&
         hasDrawnDetectionFrame &&
-        detectionFrameTime === lastDrawnDetectionFrameTime &&
+        detectionFrame === lastDrawnDetectionFrame &&
         viewportScale === lastViewportScale
       ) {
         return lastDrawnState ?? getBoxLayerState(detectionFrame, []);
@@ -78,7 +80,7 @@ export function createPixiBoxLayer(options: {
 
       isDirty = false;
       hasDrawnDetectionFrame = true;
-      lastDrawnDetectionFrameTime = detectionFrameTime;
+      lastDrawnDetectionFrame = detectionFrame;
       lastViewportScale = viewportScale;
       if (!usingRetainedEntries) boxGraphics?.clear();
 

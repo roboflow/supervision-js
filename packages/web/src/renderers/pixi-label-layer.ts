@@ -78,7 +78,9 @@ export function createPixiLabelLayer({
   const entries: PixiLabelEntry[] = [];
   let container: PixiContainer | undefined;
   let currentLabelStyle = labelStyle;
-  let lastFrameKey: string | undefined;
+  // A versioned source can replace a frame without changing its media time or
+  // frame index. Buffered frames are immutable snapshots, so retain by object.
+  let lastFrame: DetectionFrame | undefined;
   let styleVersion = 0;
   let drawnStyleVersion = -1;
   let lastViewportScale = 0;
@@ -174,17 +176,16 @@ export function createPixiLabelLayer({
     drawFrame(mediaTime, viewportScale) {
       const resolvedViewportScale = viewportScale ?? 1;
       const frame = detectionTimeline.selectFrame(mediaTime);
-      const frameKey = frame ? createFrameKey(frame) : undefined;
 
       if (
-        frameKey === lastFrameKey &&
+        frame === lastFrame &&
         drawnStyleVersion === styleVersion &&
         resolvedViewportScale === lastViewportScale
       ) {
         return;
       }
 
-      lastFrameKey = frameKey;
+      lastFrame = frame;
       drawnStyleVersion = styleVersion;
       lastViewportScale = resolvedViewportScale;
 
@@ -414,10 +415,6 @@ function createBackgroundKey(background: LabelBackgroundStyle) {
     background.paddingY ?? 0,
     background.topCornersOnly ? 1 : 0,
   ].join(":");
-}
-
-function createFrameKey(frame: DetectionFrame) {
-  return `${frame.frameIndex ?? "time"}:${frame.mediaTime}`;
 }
 
 function detectionKey(detection: Detection, detectionIndex: number) {

@@ -1737,6 +1737,39 @@ describe("package entrypoint", () => {
     renderer.destroy();
   });
 
+  it("redraws boxes when a versioned source replaces a frame at the same timeline position", async () => {
+    resetMocks();
+    mediaMock.samples = [createMockSample(0, 0)];
+    let version = 1;
+    let activeFrame = {
+      detections: [{ rect: { height: 20, width: 10, x: 9, y: 15 } }],
+      mediaTime: 0,
+    };
+    const detectionSource = {
+      getVersion: () => version,
+      loadFrames: vi.fn(async () => [activeFrame]),
+    };
+    const renderer = await createRenderer(false, false, { detectionSource });
+    const boxGraphics = pixiMock.graphicsInstances[0];
+
+    expect(boxGraphics.rect).toHaveBeenCalledOnce();
+    expect(boxGraphics.rect).toHaveBeenLastCalledWith(4, 5, 10, 20);
+
+    activeFrame = {
+      detections: [{ rect: { height: 40, width: 30, x: 35, y: 30 } }],
+      mediaTime: 0,
+    };
+    version += 1;
+    await renderer.seek(0);
+
+    expect(detectionSource.loadFrames).toHaveBeenCalledTimes(2);
+    expect(boxGraphics.clear).toHaveBeenCalledTimes(2);
+    expect(boxGraphics.rect).toHaveBeenCalledTimes(2);
+    expect(boxGraphics.rect).toHaveBeenLastCalledWith(20, 10, 30, 40);
+
+    renderer.destroy();
+  });
+
   it("updates box style at runtime and redraws the same active detection frame", async () => {
     resetMocks();
     mediaMock.samples = [createMockSample(0, 0), createMockSample(0.02, 0)];

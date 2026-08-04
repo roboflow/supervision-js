@@ -71,7 +71,10 @@ export function createPixiVectorLayer(options: {
       ? new BaseKeypointStyle()
       : options.keypointStyle;
   let styleVersion = 0;
-  let lastFrameKey = "";
+  let drawnStyleVersion = -1;
+  // A versioned source can replace a frame without changing its timeline key.
+  // Buffered frames are immutable snapshots, so retain by object identity.
+  let lastFrame: DetectionFrame | undefined;
   let lastViewportScale = 0;
   const entries = new Map<string, RetainedVectorEntry>();
   const entryPool: RetainedVectorEntry[] = [];
@@ -89,19 +92,18 @@ export function createPixiVectorLayer(options: {
 
     drawFrame(mediaTime, viewportScale = 1) {
       const frame = options.detectionTimeline.selectFrame(mediaTime);
-      const frameKey = frame
-        ? `${frame.frameIndex ?? "time"}:${frame.mediaTime}:${styleVersion}`
-        : "none";
 
       if (
-        frameKey === lastFrameKey &&
+        frame === lastFrame &&
+        drawnStyleVersion === styleVersion &&
         viewportScale === lastViewportScale &&
         invalidated.size === 0
       ) {
         return;
       }
 
-      lastFrameKey = frameKey;
+      lastFrame = frame;
+      drawnStyleVersion = styleVersion;
       lastViewportScale = viewportScale;
 
       if (!frame) {

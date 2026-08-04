@@ -58,6 +58,35 @@ describe("pixi label layer", () => {
     expect(background.y).toBe(16);
   });
 
+  it("redraws a replacement frame at the same timeline position", () => {
+    const frames = [firstFrame];
+    const layer = createPixiLabelLayer({
+      Container: FakeContainer as never,
+      Graphics: FakeGraphics as never,
+      Text: FakeText as never,
+      detectionTimeline: createTimeline(frames),
+      labelStyle: createStableLabelStyle(),
+    });
+    const container = layer.createContainer() as FakeContainer;
+
+    layer.drawFrame(1);
+    const [background] = container.children as [FakeGraphics, FakeText];
+    expect(background.x).toBe(10);
+
+    frames[0] = {
+      ...firstFrame,
+      detections: [
+        {
+          ...firstFrame.detections[0]!,
+          rect: { height: 20, width: 10, x: 45, y: 40 },
+        },
+      ],
+    };
+    layer.drawFrame(1);
+
+    expect(background.x).toBe(40);
+  });
+
   it("places labels relative to detection rectangles", () => {
     const timeline = createTimeline([firstFrame]);
     const layer = createPixiLabelLayer({
