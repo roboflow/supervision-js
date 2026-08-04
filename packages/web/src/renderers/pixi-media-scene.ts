@@ -11,6 +11,7 @@ import {
   resolveAnnotationStyleState,
 } from "supervision-js-core";
 import type { AnnotationVisibility } from "supervision-js-core";
+import type { Point } from "supervision-js-core";
 import type {
   MediaRendererScene,
   MediaRendererSceneOptions,
@@ -382,6 +383,18 @@ export async function createPixiMediaScene(
     maskBrushPreview?.setViewportScale(viewportScale);
   };
 
+  const mediaPointToScreen = (point: Point): Point => {
+    const fit = baseFit ?? { scale: 1, x: 0, y: 0 };
+    const screenPoint = viewport.mediaToScreen({
+      x: point.x * fit.scale,
+      y: point.y * fit.scale,
+    });
+    return {
+      x: screenPoint.x + fit.x,
+      y: screenPoint.y + fit.y,
+    };
+  };
+
   const redrawViewportStyles = () => {
     boxLayer.invalidate();
     boxLayer.drawFrame(currentMediaTime, viewportScale);
@@ -641,14 +654,22 @@ export async function createPixiMediaScene(
     },
 
     mediaToScreen(point) {
-      const fit = baseFit ?? { scale: 1, x: 0, y: 0 };
-      const screenPoint = viewport.mediaToScreen({
-        x: point.x * fit.scale,
-        y: point.y * fit.scale,
+      return mediaPointToScreen(point);
+    },
+
+    getDetectionLabelBounds(detectionId) {
+      const bounds = labelLayer?.getDetectionLabelBounds(detectionId);
+      if (!bounds) return null;
+      const topLeft = mediaPointToScreen({ x: bounds.x, y: bounds.y });
+      const bottomRight = mediaPointToScreen({
+        x: bounds.x + bounds.width,
+        y: bounds.y + bounds.height,
       });
       return {
-        x: screenPoint.x + fit.x,
-        y: screenPoint.y + fit.y,
+        height: bottomRight.y - topLeft.y,
+        width: bottomRight.x - topLeft.x,
+        x: topLeft.x,
+        y: topLeft.y,
       };
     },
 

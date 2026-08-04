@@ -5,6 +5,7 @@ import type {
   DetectionBufferState,
 } from "supervision-js-core";
 import type {
+  DetectionLabelBounds,
   MediaRendererDiagnosticsOptions,
   MediaFrameRenderTimings,
   MediaRendererFit,
@@ -90,6 +91,9 @@ export interface MediaRendererScene {
   setViewportLocked?(locked: boolean): void;
   screenToMedia?(point: Point): Point;
   mediaToScreen?(point: Point): Point;
+  getDetectionLabelBounds?(
+    detectionId: string | number,
+  ): DetectionLabelBounds | null;
   panViewportBy?(dx: number, dy: number): void;
   zoomViewportAt?(point: Point, factor: number): void;
   zoomViewportFromWheel?(point: Point, deltaY: number): void;

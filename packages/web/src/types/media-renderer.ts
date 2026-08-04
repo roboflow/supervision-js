@@ -94,6 +94,14 @@ export interface MediaRendererSource {
   open(): Promise<DecodedMediaSource>;
 }
 
+/** Screen-space bounds of a detection label after renderer layout. */
+export interface DetectionLabelBounds {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
 /**
  * Lower-level renderer controller.
  *
@@ -126,6 +134,15 @@ export interface MediaRenderer extends MediaRendererStateController {
   mediaToScreen(
     point: import("supervision-js-core").Point,
   ): import("supervision-js-core").Point;
+  /**
+   * Returns the label rectangle exactly as laid out by the renderer.
+   *
+   * Coordinates are relative to the renderer container and already include
+   * fit, pan, zoom, screen-stable label sizing, and media-edge clamping.
+   */
+  getDetectionLabelBounds(
+    detectionId: string | number,
+  ): DetectionLabelBounds | null;
   panViewportBy(dx: number, dy: number): void;
   zoomViewportAt(
     point: import("supervision-js-core").Point,

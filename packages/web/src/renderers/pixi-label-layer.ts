@@ -44,6 +44,15 @@ interface LabelHitRect {
   readonly height: number;
 }
 
+interface LabelLayoutRect {
+  readonly baseX: number;
+  readonly baseY: number;
+  readonly height: number;
+  readonly width: number;
+  readonly x: number;
+  readonly y: number;
+}
+
 export interface PixiLabelLayerOptions {
   readonly Container: new () => PixiContainer;
   readonly Graphics: new () => PixiGraphics;
@@ -60,6 +69,12 @@ export interface PixiLabelLayer {
   drawFrame(mediaTime: number, viewportScale?: number): void;
   setLabelStyle(labelStyle: LabelStyle | null): void;
   translateDetection(id: string | number, x: number, y: number): boolean;
+  getDetectionLabelBounds(id: string | number): {
+    readonly x: number;
+    readonly y: number;
+    readonly width: number;
+    readonly height: number;
+  } | null;
   pickDetectionAtPoint(
     point: DetectionPickPoint,
     mediaTime: number,
@@ -86,6 +101,13 @@ export function createPixiLabelLayer({
   let lastViewportScale = 0;
   let hitRects: LabelHitRect[] = [];
   const entriesByDetectionKey = new Map<string, PixiLabelEntry>();
+  const boundsByDetectionKey = new Map<string, LabelLayoutRect>();
+
+  const clearLayout = () => {
+    hitRects = [];
+    entriesByDetectionKey.clear();
+    boundsByDetectionKey.clear();
+  };
 
   const hideEntriesFrom = (startIndex: number) => {
     for (let index = startIndex; index < entries.length; index += 1) {
@@ -125,8 +147,7 @@ export function createPixiLabelLayer({
     viewportScale: number,
   ) => {
     let drawnCount = 0;
-    hitRects = [];
-    entriesByDetectionKey.clear();
+    clearLayout();
 
     if (!currentLabelStyle) {
       hideEntriesFrom(0);
@@ -156,7 +177,13 @@ export function createPixiLabelLayer({
 
       const entry = ensureEntry(drawnCount);
       const hitRect = drawInstruction(entry, instruction, viewportScale);
-      entriesByDetectionKey.set(detectionKey(detection, detectionIndex), entry);
+      const key = detectionKey(detection, detectionIndex);
+      entriesByDetectionKey.set(key, entry);
+      boundsByDetectionKey.set(key, {
+        baseX: hitRect.x,
+        baseY: hitRect.y,
+        ...hitRect,
+      });
       hitRects.push({ ...hitRect, detectionIndex });
       drawnCount += 1;
     }
@@ -190,6 +217,7 @@ export function createPixiLabelLayer({
       lastViewportScale = resolvedViewportScale;
 
       if (!frame) {
+        clearLayout();
         hideEntriesFrom(0);
         return;
       }
@@ -203,13 +231,33 @@ export function createPixiLabelLayer({
     },
 
     translateDetection(id, x, y) {
-      const entry = entriesByDetectionKey.get(`id:${String(id)}`);
+      const key = `id:${String(id)}`;
+      const entry = entriesByDetectionKey.get(key);
       if (!entry) return false;
       entry.background.x = entry.backgroundBaseX + x;
       entry.background.y = entry.backgroundBaseY + y;
       entry.label.x = entry.labelBaseX + x;
       entry.label.y = entry.labelBaseY + y;
+      const bounds = boundsByDetectionKey.get(key);
+      if (bounds) {
+        boundsByDetectionKey.set(key, {
+          ...bounds,
+          x: bounds.baseX + x,
+          y: bounds.baseY + y,
+        });
+      }
       return true;
+    },
+
+    getDetectionLabelBounds(id) {
+      const bounds = boundsByDetectionKey.get(`id:${String(id)}`);
+      if (!bounds) return null;
+      return {
+        height: bounds.height,
+        width: bounds.width,
+        x: bounds.x,
+        y: bounds.y,
+      };
     },
 
     pickDetectionAtPoint(point, mediaTime) {
@@ -241,6 +289,7 @@ export function createPixiLabelLayer({
     destroy() {
       hideEntriesFrom(0);
       entries.length = 0;
+      clearLayout();
       container = undefined;
     },
   };
