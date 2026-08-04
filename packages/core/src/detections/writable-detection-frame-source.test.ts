@@ -193,6 +193,65 @@ describe("writable detection frame source", () => {
     expect(source.getAvailableRanges()).toEqual([{ endTime: 2, startTime: 0 }]);
   });
 
+  it("keeps sparse out-of-order batch ranges unavailable and separately journaled", async () => {
+    const store = createStore();
+    const source = createWritableDetectionFrameSource({
+      datasetId: "dataset",
+      store,
+    });
+    let resolved = false;
+    const waitForRange = source
+      .waitForRange({ endTime: 2, startTime: 0 })
+      .then(() => {
+        resolved = true;
+      });
+
+    await source.appendFrames([
+      {
+        detections: [],
+        endTime: 3,
+        frameIndex: 2,
+        mediaTime: 2,
+      },
+      {
+        detections: [],
+        endTime: 1,
+        frameIndex: 0,
+        mediaTime: 0,
+      },
+    ]);
+    await Promise.resolve();
+
+    expect.soft(resolved).toBe(false);
+    expect(source.getVersion()).toBe(1);
+    expect(source.getVersion({ endTime: 1.75, startTime: 1.25 })).toBe(0);
+    expect(source.getAvailableRanges()).toEqual([
+      { endTime: 1, startTime: 0 },
+      { endTime: 3, startTime: 2 },
+    ]);
+    expect(source.getChangesSince!(0, [{ endTime: 3, startTime: 0 }])).toEqual({
+      ranges: [
+        { endTime: 1, startTime: 0 },
+        { endTime: 3, startTime: 2 },
+      ],
+      requiresReload: false,
+      version: 1,
+    });
+
+    await source.appendFrames([
+      {
+        detections: [],
+        endTime: 2,
+        frameIndex: 1,
+        mediaTime: 1,
+      },
+    ]);
+    await waitForRange;
+
+    expect(resolved).toBe(true);
+    expect(source.getAvailableRanges()).toEqual([{ endTime: 3, startTime: 0 }]);
+  });
+
   it("applies rolling retention after appending frames", async () => {
     const frameStore: DetectionFrame[] = [];
     const store = createMutableStore(frameStore);

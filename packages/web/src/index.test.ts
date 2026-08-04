@@ -528,6 +528,75 @@ describe("package entrypoint", () => {
     renderer.destroy();
   });
 
+  it("keeps prediction-gated playback inside exact appended coverage", async () => {
+    resetMocks();
+    mediaMock.samples = [
+      createMockSample(0, 0),
+      createMockSample(0.04, 0),
+      createMockSample(0.08, 0),
+    ];
+    const {
+      createMemoryColdDetectionFrameStore,
+      createWritableDetectionFrameSource,
+    } = await import("./index");
+    const detectionSource = createWritableDetectionFrameSource({
+      datasetId: "sparse-predictions",
+      store: createMemoryColdDetectionFrameStore(),
+    });
+
+    await detectionSource.appendFrames([
+      { detections: [], endTime: 0.04, frameIndex: 0, mediaTime: 0 },
+      { detections: [], endTime: 0.12, frameIndex: 2, mediaTime: 0.08 },
+    ]);
+
+    const renderer = await createRenderer(false, false, {
+      detectionBuffer: {
+        playbackGate: {
+          enabled: true,
+          requiredAheadSeconds: 0.08,
+        },
+      },
+      detectionSource,
+    });
+
+    mediaMock.getSample.mockClear();
+    mediaMock.samplesCallStarts.length = 0;
+    await renderer.play();
+    await vi.waitFor(() => {
+      expect(mediaMock.samplesCallStarts).toEqual([0]);
+      expect(mediaMock.sampleNextCalls.length).toBeGreaterThanOrEqual(3);
+    });
+
+    flushAnimationFrame(40);
+    await vi.waitFor(() => {
+      expect(renderer.getState().playbackState).toBe(
+        MediaRendererPlaybackState.Buffering,
+      );
+    });
+
+    expect(mediaMock.samples[1].draw).not.toHaveBeenCalled();
+
+    await detectionSource.appendFrames([
+      {
+        detections: [],
+        endTime: 0.08,
+        frameIndex: 1,
+        mediaTime: 0.04,
+      },
+    ]);
+    await vi.waitFor(() => {
+      expect(mediaMock.samples[1].draw).toHaveBeenCalledOnce();
+    });
+
+    expect(renderer.getState()).toMatchObject({
+      currentTime: 0.04,
+      playbackState: MediaRendererPlaybackState.Playing,
+    });
+
+    renderer.destroy();
+    detectionSource.destroy?.();
+  });
+
   it("seek uses random sample lookup and updates detections and buffer state", async () => {
     resetMocks();
     mediaMock.samples = [
