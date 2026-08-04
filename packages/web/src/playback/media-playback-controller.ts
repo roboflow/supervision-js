@@ -16,6 +16,7 @@ export interface MediaPlaybackController {
   play(): void;
   pause(): void;
   seek(mediaTime: number): void;
+  setPlaybackRate(playbackRate: number): void;
   destroy(): void;
 }
 
@@ -25,6 +26,7 @@ export function createMediaPlaybackController(options: {
   readonly duration: number | null;
   readonly loop: boolean;
   readonly initialMediaTime: number;
+  readonly playbackRate?: number;
   readonly presentSample: (sample: DecodedVideoSample) => void;
   readonly waitForSample?: (sample: DecodedVideoSample) => Promise<void>;
   readonly onCurrentTimeChange: (currentTime: number) => void;
@@ -39,6 +41,7 @@ export function createMediaPlaybackController(options: {
   let playbackOriginMediaTime = options.initialMediaTime;
   let playbackOriginNow = 0;
   let currentTime = options.initialMediaTime;
+  let playbackRate = options.playbackRate ?? 1;
   let animationFrameHandle: number | undefined;
   let sampleQueue: DecodedVideoSample[] = [];
   let activeSampleIterator: DecodedVideoSampleIterator | undefined;
@@ -291,7 +294,8 @@ export function createMediaPlaybackController(options: {
     }
 
     let requestedMediaTime =
-      playbackOriginMediaTime + (now - playbackOriginNow) / 1000;
+      playbackOriginMediaTime +
+      ((now - playbackOriginNow) / 1000) * playbackRate;
     const playableEnd =
       options.duration === null
         ? null
@@ -459,6 +463,24 @@ export function createMediaPlaybackController(options: {
       resetSampleIterator(mediaTime);
       startSamplePrefetch(playbackRunId);
       schedulePlaybackFrame(playbackRunId);
+    },
+
+    setPlaybackRate(nextPlaybackRate) {
+      if (destroyed) {
+        return;
+      }
+      if (!Number.isFinite(nextPlaybackRate) || nextPlaybackRate <= 0) {
+        throw new RangeError(
+          "playbackRate must be a finite number greater than zero.",
+        );
+      }
+      if (nextPlaybackRate === playbackRate) {
+        return;
+      }
+
+      playbackOriginMediaTime = currentTime;
+      playbackOriginNow = performance.now();
+      playbackRate = nextPlaybackRate;
     },
 
     destroy() {

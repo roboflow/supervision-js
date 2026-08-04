@@ -39,6 +39,8 @@ Start here for normal application code:
 - `MediaSessionState`
 - `MediaSessionStatus`
 - `MediaSessionActivity`
+- media controls on `MediaSession`: `play`, `pause`, `seek`, frame stepping,
+  playback rate, and current-presentation `refresh`;
 - `DetectionFrame`
 - `Detection`
 - `Rect`
@@ -138,8 +140,10 @@ React integration should be a separate thin adapter later. It should create and
 destroy vanilla `MediaSession` instances, subscribe to session state, and pass
 props into `session.setPresentation()` or session options.
 
-It should not own media timing, render loops, detection buffering, inference
-ingestion, worker orchestration, or Pixi composition.
+It should not own media decoding, media timing, frame stepping, render loops,
+detection buffering, inference ingestion, worker orchestration, or Pixi
+composition. Timeline UI should consume session state and `renderer.onFrame`,
+then call session navigation methods.
 
 The browser package remains vanilla TypeScript/JavaScript. React wrappers should
 wrap `MediaSession`; they should not shape media timing, rendering, buffering,

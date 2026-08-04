@@ -11,18 +11,16 @@ export interface MediabunnyMediaSourceInput {
 }
 
 export async function openMediabunnyMediaSource(
-  sourceInput: string | MediabunnyMediaSourceInput,
+  sourceInput: string | URL | Request | MediabunnyMediaSourceInput,
 ): Promise<DecodedMediaSource> {
   const { Input, MATROSKA, MP4, QTFF, UrlSource, VideoSampleSink, WEBM } =
     await import("mediabunny");
-  const source =
-    typeof sourceInput === "string"
-      ? new UrlSource(sourceInput)
-      : sourceInput.source;
-  const formats =
-    typeof sourceInput === "string"
-      ? [MP4, QTFF, WEBM, MATROSKA]
-      : [...(sourceInput.formats ?? [MP4, QTFF, WEBM, MATROSKA])];
+  const source = isUrlSourceInput(sourceInput)
+    ? new UrlSource(sourceInput)
+    : sourceInput.source;
+  const formats = isUrlSourceInput(sourceInput)
+    ? [MP4, QTFF, WEBM, MATROSKA]
+    : [...(sourceInput.formats ?? [MP4, QTFF, WEBM, MATROSKA])];
   const input = new Input({
     formats,
     source,
@@ -62,10 +60,9 @@ export async function openMediabunnyMediaSource(
       primaryVideoTrack.getFirstTimestamp(),
     ]);
 
-    const duration =
-      typeof sourceInput === "string"
-        ? metadataDuration
-        : (sourceInput.metadata?.duration ?? metadataDuration);
+    const duration = isUrlSourceInput(sourceInput)
+      ? metadataDuration
+      : (sourceInput.metadata?.duration ?? metadataDuration);
 
     return {
       input,
@@ -88,6 +85,16 @@ export async function openMediabunnyMediaSource(
     input.dispose();
     throw error;
   }
+}
+
+function isUrlSourceInput(
+  input: string | URL | Request | MediabunnyMediaSourceInput,
+): input is string | URL | Request {
+  return (
+    typeof input === "string" ||
+    (typeof URL === "function" && input instanceof URL) ||
+    (typeof Request === "function" && input instanceof Request)
+  );
 }
 
 export function createMediabunnyMediaRendererSource(

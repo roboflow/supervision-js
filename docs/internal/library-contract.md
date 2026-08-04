@@ -45,6 +45,7 @@ A session owns:
 - media preparation and optional normalization;
 - renderer lifecycle;
 - playback control;
+- media seeking, frame stepping, and playback-rate control;
 - detection source wiring;
 - cold detection storage and hot detection buffering;
 - prepared render-window orchestration;
@@ -53,9 +54,11 @@ A session owns:
 - aggregate loading, processing, and error state.
 
 The host application owns application UI, API calls, and business workflows. It
-can append detections, update presentation, seek, play, pause, subscribe to
-state, and destroy the session. It should not need to know how detection chunks,
-prepared mask artifacts, Pixi textures, or worker queues are internally wired.
+can append detections, update presentation, navigate media, subscribe to state,
+invalidate changed semantic data, and destroy the session. It must not run a
+parallel decoder, media clock, decoded-canvas handoff, or redraw loop. It should
+not need to know how detection chunks, prepared mask artifacts, Pixi textures,
+or worker queues are internally wired.
 
 ## Public Data Model
 
@@ -138,8 +141,10 @@ Mediabunny is the first media engine. It should remain the default adapter for
 reading, decoding, and normalizing media, but the session contract should not be
 shaped around Mediabunny types.
 
-The session should expose normalized media status and playback state, not
-Mediabunny internals.
+The session should expose normalized media status, playback state, canonical
+frame timing, seek/step/rate controls, and current-frame refresh, not Mediabunny
+internals. Navigation is latest-request-wins, and refresh reuses the retained
+media presentation instead of decoding or uploading the frame again.
 
 Browser media, renderer, worker, and storage adapters belong in
 `packages/web`. Core should only model semantic contracts that are not tied to a

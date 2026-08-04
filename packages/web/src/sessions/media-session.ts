@@ -221,6 +221,22 @@ export async function createMediaSession(
         return renderer.seek(mediaTime);
       },
 
+      stepForward() {
+        return renderer.stepForward();
+      },
+
+      stepBackward() {
+        return renderer.stepBackward();
+      },
+
+      setPlaybackRate(playbackRate) {
+        renderer.setPlaybackRate(playbackRate);
+      },
+
+      refresh() {
+        return renderer.refresh();
+      },
+
       setPresentation(presentation: MediaRendererPresentation) {
         currentPresentation = presentation;
         renderer.setPresentation(resolvePresentation(currentPresentation));

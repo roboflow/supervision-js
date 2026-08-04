@@ -64,6 +64,7 @@ export interface MediaRendererSceneOptions {
 
 export interface PresentedMediaSample {
   readonly mediaTime: number;
+  readonly duration?: number;
   readonly activeDetectionFrameTime: number | null;
   readonly activeDetectionFrameIndex: number | null;
   readonly activeDetectionCount: number;

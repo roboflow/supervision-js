@@ -213,6 +213,186 @@ describe("media renderer core", () => {
     renderer.destroy();
   });
 
+  it("keeps the latest seek when an older decode resolves afterward", async () => {
+    resetMocks();
+
+    const firstSeek = createDeferred<DecodedVideoSample | null>();
+    const secondSeek = createDeferred<DecodedVideoSample | null>();
+    const initialSample = createMockSample(
+      0,
+      0.5,
+    ) as unknown as DecodedVideoSample;
+    const source: MediaRendererOptions["source"] = {
+      open: vi.fn(async () => ({
+        input: { dispose: vi.fn() },
+        metadata: {
+          audioTrackCount: 0,
+          canRead: true,
+          duration: 2,
+          firstTimestamp: 0,
+          formatMimeType: "video/mp4",
+          formatName: "MP4",
+          mimeType: "video/mp4",
+          primaryVideoHeight: 360,
+          primaryVideoWidth: 640,
+          trackCount: 1,
+          videoTrackCount: 1,
+        },
+        sampleSink: {
+          getSample: vi.fn((timestamp: number) =>
+            timestamp < 1 ? firstSeek.promise : secondSeek.promise,
+          ),
+          async *samples() {
+            yield initialSample;
+          },
+        },
+      })),
+    };
+    const scene = createScene();
+    const renderer = await createMediaRendererCore(
+      {
+        autoPlay: false,
+        container: {} as HTMLElement,
+        loop: false,
+        source,
+      } satisfies MediaRendererOptions,
+      {
+        createScene: vi.fn(async () => scene),
+        openMediaSource: vi.fn(),
+      },
+    );
+
+    const olderRequest = renderer.seek(0.5);
+    const latestRequest = renderer.seek(1.5);
+    secondSeek.resolve(
+      createMockSample(1.5, 0.5) as unknown as DecodedVideoSample,
+    );
+    await latestRequest;
+    firstSeek.resolve(
+      createMockSample(0.5, 0.5) as unknown as DecodedVideoSample,
+    );
+    await olderRequest;
+
+    expect(renderer.getState().currentTime).toBe(1.5);
+    expect(scene.presentSample).toHaveBeenLastCalledWith(
+      expect.objectContaining({ timestamp: 1.5 }),
+    );
+
+    renderer.destroy();
+  });
+
+  it("steps through decoded samples without a host-owned decoder", async () => {
+    resetMocks();
+
+    const samples = [
+      createMockSample(0, 0.04),
+      createMockSample(0.04, 0.04),
+      createMockSample(0.08, 0.04),
+    ] as unknown as DecodedVideoSample[];
+    const renderer = await createMediaRendererCore(
+      {
+        autoPlay: false,
+        container: {} as HTMLElement,
+        loop: false,
+        source: createSource(samples),
+      } satisfies MediaRendererOptions,
+      {
+        createScene: vi.fn(async () => createScene()),
+        openMediaSource: vi.fn(),
+      },
+    );
+
+    await renderer.stepForward();
+    expect(renderer.getState().currentTime).toBe(0.04);
+
+    await renderer.stepBackward();
+    expect(renderer.getState().currentTime).toBe(0);
+
+    renderer.destroy();
+  });
+
+  it("re-presents the retained sample when semantic data is invalidated", async () => {
+    resetMocks();
+
+    let version = 0;
+    const detectionSource = {
+      getVersion: () => version,
+      loadFrames: vi.fn(async () => []),
+    };
+    const scene = createScene();
+    const sample = createMockSample(0, 0.04);
+    const renderer = await createMediaRendererCore(
+      {
+        autoPlay: false,
+        container: {} as HTMLElement,
+        detectionSource,
+        source: createSource([sample as unknown as DecodedVideoSample]),
+      } satisfies MediaRendererOptions,
+      {
+        createScene: vi.fn(async () => scene),
+        openMediaSource: vi.fn(),
+      },
+    );
+
+    vi.mocked(scene.presentSample).mockClear();
+    vi.mocked(scene.setPresentation).mockClear();
+    detectionSource.loadFrames.mockClear();
+    version += 1;
+
+    await renderer.refresh();
+
+    expect(detectionSource.loadFrames).toHaveBeenCalled();
+    expect(scene.presentSample).not.toHaveBeenCalled();
+    expect(scene.setPresentation).toHaveBeenCalledWith(expect.any(Object), 0);
+
+    renderer.destroy();
+  });
+
+  it("publishes source-relative frame timing and media dimensions", async () => {
+    resetMocks();
+
+    const onFrame = vi.fn();
+    const createMaskBrush = vi.fn(() => ({}) as never);
+    const renderer = await createMediaRendererCore(
+      {
+        autoPlay: false,
+        container: {} as HTMLElement,
+        createMaskBrush,
+        onFrame,
+        source: createSource(
+          [createMockSample(4.75, 0.05) as unknown as DecodedVideoSample],
+          {
+            duration: 2,
+            firstTimestamp: 4.75,
+            primaryVideoHeight: 360,
+            primaryVideoWidth: 640,
+          },
+        ),
+      } satisfies MediaRendererOptions,
+      {
+        createScene: vi.fn(async () => createScene()),
+        openMediaSource: vi.fn(),
+      },
+    );
+
+    expect(createMaskBrush).toHaveBeenCalledWith({ height: 360, width: 640 });
+    expect(onFrame).toHaveBeenCalledWith(
+      expect.objectContaining({
+        firstTimestamp: 4.75,
+        frameDuration: 0.05,
+        mediaHeight: 360,
+        mediaTime: 4.75,
+        mediaWidth: 640,
+      }),
+    );
+    expect(renderer.getState()).toMatchObject({
+      playbackRate: 1,
+      source: { firstTimestamp: 4.75 },
+    });
+
+    renderer.destroy();
+  });
+
   it("records frame render timings in state and frame diagnostics", async () => {
     resetMocks();
 
@@ -346,6 +526,7 @@ function createScene(
         activeDetectionFrameIndex: null,
         activeDetectionFrameTime: null,
         detectionBuffer: createIdleDetectionBufferState(),
+        duration: sample.duration,
         mediaTime: sample.timestamp,
       };
     }),

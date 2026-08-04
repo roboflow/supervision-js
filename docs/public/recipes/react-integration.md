@@ -92,6 +92,21 @@ export function SupervisionViewer({ media, frames }: SupervisionViewerProps) {
 }
 ```
 
+For video controls, keep only the session in the component and delegate media
+navigation to it:
+
+```ts
+await sessionRef.current?.seek(requestedTimestamp);
+await sessionRef.current?.stepForward();
+sessionRef.current?.setPlaybackRate(1.25);
+```
+
+Provide `renderer.onFrame` when the host needs the canonical presented timestamp
+or decoded dimensions. Do not decode video in a React hook and pass canvases
+back into the renderer. If a mutable detection source changes for the current
+frame, call `session.refresh()`; that is semantic invalidation, while the
+session remains responsible for media retention and redraw ordering.
+
 Keep `frames` referentially stable when its contents have not changed; otherwise
 the effect correctly treats it as a new input and rebuilds the session. For
 streaming inference, create the session with `detections.appendable` and append

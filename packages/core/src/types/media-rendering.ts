@@ -69,6 +69,10 @@ export interface MediaFrameRenderTimings {
 export interface MediaFrameDiagnostics {
   readonly rendererBackend: string | null;
   readonly mediaTime: number;
+  /** Duration reported by the decoded sample currently on screen. */
+  readonly frameDuration: number;
+  /** First playable presentation timestamp of the opened media source. */
+  readonly firstTimestamp: number;
   readonly presentedFrames: number;
   readonly currentTime: number;
   readonly duration: number | null;
@@ -100,6 +104,8 @@ export interface MediaSourceState {
   readonly formatMimeType: string | null;
   readonly mimeType: string | null;
   readonly duration: number | null;
+  /** First playable presentation timestamp, when the source is ready. */
+  readonly firstTimestamp: number | null;
   readonly trackCount: number | null;
   readonly videoTrackCount: number | null;
   readonly audioTrackCount: number | null;
@@ -116,6 +122,7 @@ export interface MediaRendererState {
   readonly playbackState: MediaRendererPlaybackState;
   readonly fit: MediaRendererFit;
   readonly currentTime: number;
+  readonly playbackRate: number;
   readonly duration: number | null;
   readonly mediaWidth: number;
   readonly mediaHeight: number;

@@ -12,6 +12,39 @@ import {
 import { createMediaPlaybackController } from "./media-playback-controller";
 
 describe("media playback controller", () => {
+  it("advances the media clock at the configured playback rate", async () => {
+    resetMocks();
+    mediaMock.samples = [
+      createMockSample(0, 0.04),
+      createMockSample(0.04, 0.04),
+    ];
+    const presentedTimestamps: number[] = [];
+    const controller = createMediaPlaybackController({
+      duration: 0.08,
+      firstTimestamp: 0,
+      initialMediaTime: 0,
+      loop: false,
+      playbackRate: 2,
+      onCurrentTimeChange: vi.fn(),
+      onEnded: vi.fn(),
+      onError: vi.fn(),
+      presentSample: (sample) => {
+        presentedTimestamps.push(sample.timestamp);
+        sample.close();
+      },
+      sampleSink: mediaMockSampleSink(),
+    });
+
+    controller.play();
+    flushAnimationFrame(20);
+
+    await vi.waitFor(() => {
+      expect(presentedTimestamps).toEqual([0.04]);
+    });
+
+    controller.destroy();
+  });
+
   it("does not present synthetic frames when decoded samples have a gap", async () => {
     resetMocks();
     mediaMock.samples = [

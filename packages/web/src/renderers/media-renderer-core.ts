@@ -22,6 +22,7 @@ import {
   MediaRendererFit,
   type MediaRenderer,
   type MediaRendererOptions,
+  type MediaRendererPresentation,
 } from "#types/media-renderer";
 import { MediaInteractionMode } from "supervision-js-core";
 import type { RenderPreparationPlaybackGateOptions } from "#types/render-preparation";
@@ -32,7 +33,7 @@ import type {
 } from "./media-renderer-scene";
 
 export interface MediaRendererCoreProviders {
-  openMediaSource(src: string): Promise<DecodedMediaSource>;
+  openMediaSource(src: string | URL | Request): Promise<DecodedMediaSource>;
   createScene(options: MediaRendererSceneOptions): Promise<MediaRendererScene>;
 }
 
@@ -41,10 +42,30 @@ export async function createMediaRendererCore(
   providers: MediaRendererCoreProviders,
 ): Promise<MediaRenderer> {
   const fit = options.fit ?? MediaRendererFit.Contain;
+  const initialPlaybackRate = options.playbackRate ?? 1;
+  if (!Number.isFinite(initialPlaybackRate) || initialPlaybackRate <= 0) {
+    throw new RangeError(
+      "playbackRate must be a finite number greater than zero.",
+    );
+  }
+  let currentPresentation: MediaRendererPresentation = {
+    annotationOverlayStyle: options.annotationOverlayStyle,
+    backgroundColor: options.backgroundColor,
+    boxStyle: options.boxStyle,
+    focusStyle: options.focusStyle,
+    interactionStyle: options.interactionStyle,
+    keypointStyle: options.keypointStyle,
+    labelStyle: options.labelStyle,
+    maskStyle: options.maskStyle,
+    polygonStyle: options.polygonStyle,
+    polylineStyle: options.polylineStyle,
+    visibility: options.visibility,
+  };
   let detectionTimeline: BufferedDetectionTimeline | undefined;
   let mediaScene: MediaRendererScene | undefined;
   const runtimeState = createMediaRendererRuntimeState({
     fit,
+    playbackRate: initialPlaybackRate,
     getDetectionBufferState: () =>
       detectionTimeline?.getState() ?? createIdleDetectionBufferState(),
     onFrame: options.onFrame,
@@ -56,6 +77,7 @@ export async function createMediaRendererCore(
   let playbackController: MediaPlaybackController | undefined;
   let sampleSink: DecodedVideoSampleSink | undefined;
   let firstTimestamp = 0;
+  let navigationVersion = 0;
 
   const presentSample = (sample: DecodedVideoSample) => {
     if (!mediaScene) {
@@ -144,6 +166,7 @@ export async function createMediaRendererCore(
       }
 
       const wasPlaying = runtimeState.isPlaying();
+      const requestVersion = ++navigationVersion;
       const targetTime = clampSeekTime({
         duration: runtimeState.duration(),
         firstTimestamp,
@@ -160,6 +183,13 @@ export async function createMediaRendererCore(
         if (!sample) {
           throw new Error("No decoded video sample was found for seek.");
         }
+        if (
+          requestVersion !== navigationVersion ||
+          runtimeState.isDestroyed()
+        ) {
+          sample.close();
+          return;
+        }
 
         await prepareAndPresentSample(sample);
         playbackController.seek(runtimeState.currentTime());
@@ -169,8 +199,62 @@ export async function createMediaRendererCore(
           playbackController.play();
         }
       } catch (error) {
+        if (
+          requestVersion !== navigationVersion ||
+          runtimeState.isDestroyed()
+        ) {
+          return;
+        }
         runtimeState.setRenderError(error);
         throw error;
+      }
+    },
+
+    async stepForward() {
+      await stepToAdjacentSample("forward");
+    },
+
+    async stepBackward() {
+      await stepToAdjacentSample("backward");
+    },
+
+    setPlaybackRate(playbackRate) {
+      if (runtimeState.isDestroyed()) {
+        return;
+      }
+      if (!Number.isFinite(playbackRate) || playbackRate <= 0) {
+        throw new RangeError(
+          "playbackRate must be a finite number greater than zero.",
+        );
+      }
+
+      playbackController?.setPlaybackRate(playbackRate);
+      runtimeState.setPlaybackRate(playbackRate);
+    },
+
+    async refresh() {
+      if (runtimeState.isDestroyed()) {
+        return;
+      }
+      if (!mediaScene) {
+        throw new Error("Media renderer is not ready.");
+      }
+
+      const mediaTime = runtimeState.currentTime();
+      const requestVersion = navigationVersion;
+      await detectionTimeline?.prepare(mediaTime, {
+        duration: runtimeState.duration(),
+        firstTimestamp,
+      });
+      if (requestVersion !== navigationVersion || runtimeState.isDestroyed()) {
+        return;
+      }
+      const presentedSample = mediaScene.setPresentation(
+        currentPresentation,
+        mediaTime,
+      );
+      if (presentedSample) {
+        runtimeState.recordPresentationUpdate(presentedSample);
       }
     },
 
@@ -200,8 +284,9 @@ export async function createMediaRendererCore(
         return;
       }
 
+      currentPresentation = presentation;
       const presentedSample = mediaScene?.setPresentation(
-        presentation,
+        currentPresentation,
         runtimeState.currentTime(),
       );
 
@@ -289,32 +374,6 @@ export async function createMediaRendererCore(
         createArrayDetectionFrameSource(options.detectionFrames),
       ...options.detectionBuffer,
     });
-    mediaScene = await providers.createScene({
-      backgroundColor: options.backgroundColor,
-      boxStyle: options.boxStyle,
-      annotationOverlayStyle: options.annotationOverlayStyle,
-      focusStyle: options.focusStyle,
-      container: options.container,
-      detectionTimeline,
-      fit,
-      maxDevicePixelRatio: options.maxDevicePixelRatio,
-      canInteract: () => canInteract(options, runtimeState.isPlaybackActive()),
-      interaction: options.interaction,
-      interactionStyle: options.interactionStyle,
-      labelStyle: options.labelStyle,
-      maskStyle: options.maskStyle,
-      maskBrush: options.maskBrush,
-      polygonStyle: options.polygonStyle,
-      polylineStyle: options.polylineStyle,
-      keypointStyle: options.keypointStyle,
-      renderPreparation: options.renderPreparation,
-      diagnostics: options.diagnostics,
-      visibility: options.visibility,
-      editingEngine: options.editingEngine,
-      previewOverlay: options.previewOverlay,
-    });
-    runtimeState.setRendererBackend(mediaScene.rendererBackend);
-
     const mediaSource = await openRendererMediaSource(options, providers);
     mediaInput = mediaSource.input;
     sampleSink = mediaSource.sampleSink;
@@ -328,6 +387,32 @@ export async function createMediaRendererCore(
 
     firstTimestamp = metadata.firstTimestamp;
     const mediaDimensions = runtimeState.recordMediaMetadata(metadata);
+    mediaScene = await providers.createScene({
+      annotationOverlayStyle: options.annotationOverlayStyle,
+      backgroundColor: options.backgroundColor,
+      boxStyle: options.boxStyle,
+      canInteract: () => canInteract(options, runtimeState.isPlaybackActive()),
+      container: options.container,
+      detectionTimeline,
+      diagnostics: options.diagnostics,
+      editingEngine: options.editingEngine,
+      fit,
+      focusStyle: options.focusStyle,
+      interaction: options.interaction,
+      interactionStyle: options.interactionStyle,
+      keypointStyle: options.keypointStyle,
+      labelStyle: options.labelStyle,
+      maskBrush:
+        options.createMaskBrush?.(mediaDimensions) ?? options.maskBrush,
+      maskStyle: options.maskStyle,
+      maxDevicePixelRatio: options.maxDevicePixelRatio,
+      polygonStyle: options.polygonStyle,
+      polylineStyle: options.polylineStyle,
+      previewOverlay: options.previewOverlay,
+      renderPreparation: options.renderPreparation,
+      visibility: options.visibility,
+    });
+    runtimeState.setRendererBackend(mediaScene.rendererBackend);
     detectionTimeline.setTimelineContext?.({
       duration: metadata.duration,
       loop: options.loop !== false,
@@ -396,6 +481,7 @@ export async function createMediaRendererCore(
       firstTimestamp: metadata.firstTimestamp,
       initialMediaTime: runtimeState.currentTime(),
       loop: options.loop !== false,
+      playbackRate: initialPlaybackRate,
       onCurrentTimeChange(nextCurrentTime) {
         runtimeState.setCurrentTime(nextCurrentTime);
       },
@@ -428,6 +514,67 @@ export async function createMediaRendererCore(
   }
 
   return renderer;
+
+  async function stepToAdjacentSample(direction: "forward" | "backward") {
+    if (runtimeState.isDestroyed()) {
+      throw new Error("Media renderer has been destroyed.");
+    }
+    if (runtimeState.isError()) {
+      throw new Error(
+        runtimeState.errorMessage() ?? "Media renderer is in error state.",
+      );
+    }
+    if (!playbackController || !sampleSink) {
+      throw new Error("Media renderer is not ready.");
+    }
+
+    const requestVersion = ++navigationVersion;
+    playbackController.pause();
+    runtimeState.setPaused();
+    const currentTime = runtimeState.currentTime();
+    const epsilon = 1e-6;
+    let sample: DecodedVideoSample | null = null;
+
+    try {
+      if (direction === "backward") {
+        sample = await sampleSink.getSample(
+          Math.max(firstTimestamp, currentTime - epsilon),
+          { skipLiveWait: true },
+        );
+      } else {
+        const iterator = sampleSink.samples(currentTime + epsilon, undefined, {
+          skipLiveWait: true,
+        });
+        try {
+          const result = await iterator.next();
+          sample = result.done ? null : result.value;
+        } finally {
+          await iterator.return?.();
+        }
+      }
+
+      if (!sample) {
+        return;
+      }
+      if (requestVersion !== navigationVersion || runtimeState.isDestroyed()) {
+        sample.close();
+        sample = null;
+        return;
+      }
+
+      const sampleToPresent = sample;
+      sample = null;
+      await prepareAndPresentSample(sampleToPresent);
+      playbackController.seek(runtimeState.currentTime());
+    } catch (error) {
+      sample?.close();
+      if (requestVersion !== navigationVersion || runtimeState.isDestroyed()) {
+        return;
+      }
+      runtimeState.setRenderError(error);
+      throw error;
+    }
+  }
 }
 
 async function openRendererMediaSource(

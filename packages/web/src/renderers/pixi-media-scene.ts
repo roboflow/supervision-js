@@ -506,7 +506,10 @@ export async function createPixiMediaScene(
           labelLayer?.drawFrame(sample.timestamp, viewportScale);
           updateMediaSceneFit();
 
-          return createPresentedSampleState(sample.timestamp, boxState);
+          return {
+            ...createPresentedSampleState(sample.timestamp, boxState),
+            duration: sample.duration,
+          };
         }
 
         const totalStart = now();
@@ -562,6 +565,7 @@ export async function createPixiMediaScene(
 
         return {
           ...createPresentedSampleState(sample.timestamp, boxState),
+          duration: sample.duration,
           renderTimings,
         };
       } finally {
