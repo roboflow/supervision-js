@@ -46,7 +46,12 @@ retries retryable per-frame failures, and streams completed frame results back
 as they arrive. Each completed frame appends into cold storage. The writable
 source records the time range touched by each append. The hot buffer checks the
 version for its current window, so detections ingested elsewhere in the video do
-not invalidate the visible buffered window.
+not invalidate the visible buffered window. Writable sources also expose a
+bounded change journal. When appended frames overlap the current hot window, the
+timeline reloads and merges only those changed ranges instead of rebuilding the
+complete window. If replacement, clearing, retention, or journal compaction
+makes that incremental history incomplete, the timeline falls back to a full
+window reload.
 
 Cancellation is handled by aborting the active browser request. The demo server
 observes the closed response and aborts in-flight Roboflow requests. A future

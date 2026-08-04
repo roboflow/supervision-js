@@ -9,6 +9,7 @@ import { DetectionFrameRetentionMode as RetentionMode } from "#types/detection-t
 import type { DetectionFrame } from "#types/detections";
 
 const RANGE_EPSILON_SECONDS = 1e-6;
+const MAX_CHANGED_RANGE_JOURNAL_LENGTH = 512;
 
 interface VersionedRange extends DetectionFrameSourceVersionRange {
   readonly version: number;
@@ -34,6 +35,7 @@ export function createWritableDetectionFrameSource(options: {
   let summary: ColdDetectionFrameStoreWriteSummary | null = null;
   let version = 0;
   let allRangeVersion = 0;
+  let journalFloorVersion = 0;
   let destroyed = false;
   const changedRanges: VersionedRange[] = [];
   const availableRanges: AvailableRange[] = [];
@@ -52,6 +54,7 @@ export function createWritableDetectionFrameSource(options: {
     summary = nextSummary;
     version += 1;
     changedRanges.push({ ...changedRange, version });
+    compactChangedRangeJournal();
     recordAvailableRange(changedRange, availableRanges);
     resolveCoveredWaiters();
 
@@ -64,6 +67,7 @@ export function createWritableDetectionFrameSource(options: {
     summary = nextSummary;
     version += 1;
     allRangeVersion = version;
+    journalFloorVersion = version;
     changedRanges.length = 0;
     availableRanges.length = 0;
 
@@ -128,6 +132,7 @@ export function createWritableDetectionFrameSource(options: {
       summary = null;
       version += 1;
       allRangeVersion = version;
+      journalFloorVersion = version;
       changedRanges.length = 0;
       availableRanges.length = 0;
     },
@@ -177,8 +182,58 @@ export function createWritableDetectionFrameSource(options: {
           rangesOverlap(range, changedRange)
             ? Math.max(rangeVersion, changedRange.version)
             : rangeVersion,
-        allRangeVersion,
+        Math.max(allRangeVersion, journalFloorVersion),
       );
+    },
+
+    getChangesSince(previousVersion, ranges) {
+      const relevantVersion = ranges.reduce(
+        (rangeVersion, range) =>
+          Math.max(
+            rangeVersion,
+            changedRanges.reduce(
+              (changedVersion, changedRange) =>
+                rangesOverlap(range, changedRange)
+                  ? Math.max(changedVersion, changedRange.version)
+                  : changedVersion,
+              Math.max(allRangeVersion, journalFloorVersion),
+            ),
+          ),
+        Math.max(allRangeVersion, journalFloorVersion),
+      );
+
+      if (relevantVersion <= previousVersion) {
+        return {
+          ranges: [],
+          requiresReload: false,
+          version: relevantVersion,
+        };
+      }
+
+      if (
+        previousVersion < allRangeVersion ||
+        previousVersion < journalFloorVersion
+      ) {
+        return {
+          ranges: [],
+          requiresReload: true,
+          version: relevantVersion,
+        };
+      }
+
+      const changedSourceRanges = changedRanges
+        .filter(
+          (changedRange) =>
+            changedRange.version > previousVersion &&
+            ranges.some((range) => rangesOverlap(range, changedRange)),
+        )
+        .map(({ endTime, startTime }) => ({ endTime, startTime }));
+
+      return {
+        ranges: mergeRanges(changedSourceRanges),
+        requiresReload: false,
+        version: relevantVersion,
+      };
     },
 
     destroy() {
@@ -259,6 +314,20 @@ export function createWritableDetectionFrameSource(options: {
       waiter.resolve();
     }
   }
+
+  function compactChangedRangeJournal() {
+    const overflow = changedRanges.length - MAX_CHANGED_RANGE_JOURNAL_LENGTH;
+
+    if (overflow <= 0) {
+      return;
+    }
+
+    const removedRanges = changedRanges.splice(0, overflow);
+    journalFloorVersion = Math.max(
+      journalFloorVersion,
+      removedRanges.at(-1)?.version ?? 0,
+    );
+  }
 }
 
 function createDestroyedError() {
@@ -298,6 +367,31 @@ function rangesOverlap(
   right: DetectionFrameSourceVersionRange,
 ) {
   return left.startTime <= right.endTime && right.startTime <= left.endTime;
+}
+
+function mergeRanges(
+  ranges: readonly DetectionFrameSourceVersionRange[],
+): readonly DetectionFrameSourceVersionRange[] {
+  const sortedRanges = ranges
+    .map((range) => ({ ...range }))
+    .sort((left, right) => left.startTime - right.startTime);
+  const mergedRanges: Array<{ endTime: number; startTime: number }> = [];
+
+  for (const range of sortedRanges) {
+    const previousRange = mergedRanges.at(-1);
+
+    if (
+      previousRange &&
+      range.startTime <= previousRange.endTime + RANGE_EPSILON_SECONDS
+    ) {
+      previousRange.endTime = Math.max(previousRange.endTime, range.endTime);
+      continue;
+    }
+
+    mergedRanges.push({ ...range });
+  }
+
+  return mergedRanges;
 }
 
 function recordAvailableRange(

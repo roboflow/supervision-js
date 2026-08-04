@@ -11,7 +11,7 @@ import {
   DetectionBufferStatus,
   DetectionFrameSelectionMode,
 } from "#types/detection-timeline";
-import type { DetectionFrame } from "#types/detections";
+import { DetectionMaskEncoding, type DetectionFrame } from "#types/detections";
 
 const frames: DetectionFrame[] = [
   {
@@ -545,7 +545,131 @@ describe("buffered detection timeline", () => {
     await timeline.prepare(0.5);
 
     expect(loadFrames).toHaveBeenCalledTimes(2);
+    expect(loadFrames).toHaveBeenNthCalledWith(2, 0, 1);
     expect(timeline.selectFrame(0.5)?.detections[0]?.id).toBe("replacement");
+  });
+
+  it("patches progressive appends without repeatedly loading the growing hot window", async () => {
+    const writableSource = createWritableDetectionFrameSource({
+      datasetId: "progressive",
+      store: createMemoryColdDetectionFrameStore(),
+    });
+    let loadedFrameRecords = 0;
+    const source = {
+      ...writableSource,
+      async loadFrames(startTime: number, endTime: number) {
+        const loadedFrames = await writableSource.loadFrames(
+          startTime,
+          endTime,
+        );
+
+        loadedFrameRecords += loadedFrames.length;
+        return loadedFrames;
+      },
+    };
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 5,
+      bufferBehindSeconds: 0,
+      source,
+    });
+
+    for (let frameIndex = 0; frameIndex < 150; frameIndex += 1) {
+      await writableSource.appendFrames([
+        {
+          detections: [
+            {
+              id: `mask-${frameIndex}`,
+              mask: {
+                counts: "1234567890".repeat(100),
+                encoding: DetectionMaskEncoding.CompressedRle,
+                height: 10,
+                width: 10,
+              },
+            },
+          ],
+          endTime: (frameIndex + 1) / 30,
+          frameIndex,
+          mediaTime: frameIndex / 30,
+        },
+      ]);
+      await timeline.prepare(0);
+    }
+
+    expect(timeline.getState()).toMatchObject({
+      detectionCount: 150,
+      frameCount: 150,
+    });
+    expect(loadedFrameRecords).toBeLessThanOrEqual(300);
+    expect(timeline.selectFrame(149 / 30)?.frameIndex).toBe(149);
+  });
+
+  it("falls back to a full hot-window reload after replacement", async () => {
+    const source = createWritableDetectionFrameSource({
+      datasetId: "replace",
+      store: createMemoryColdDetectionFrameStore(),
+    });
+    const loadFrames = vi.spyOn(source, "loadFrames");
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 5,
+      bufferBehindSeconds: 0,
+      source,
+    });
+
+    await source.appendFrames([
+      { detections: [{ id: "old" }], endTime: 1, mediaTime: 0 },
+    ]);
+    await timeline.prepare(0);
+    await source.replaceFrames([
+      { detections: [{ id: "new" }], endTime: 1, mediaTime: 0 },
+    ]);
+    await timeline.prepare(0);
+
+    expect(loadFrames).toHaveBeenNthCalledWith(2, 0, 5);
+    expect(timeline.selectFrame(0.5)?.detections[0]?.id).toBe("new");
+  });
+
+  it("does not let a delayed incremental patch overwrite a newer rolling window", async () => {
+    const source = createWritableDetectionFrameSource({
+      datasetId: "concurrent-refresh",
+      store: createMemoryColdDetectionFrameStore(),
+    });
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 5,
+      bufferBehindSeconds: 0,
+      refreshIntervalSeconds: 0.5,
+      source,
+    });
+
+    await source.appendFrames([
+      { detections: [{ id: "old" }], endTime: 1, mediaTime: 0 },
+    ]);
+    await timeline.prepare(0);
+
+    const originalLoadFrames = source.loadFrames.bind(source);
+    const delayedIncrementalFrames =
+      createDeferred<readonly DetectionFrame[]>();
+    const loadFrames = vi
+      .spyOn(source, "loadFrames")
+      .mockImplementationOnce(() => delayedIncrementalFrames.promise)
+      .mockImplementation(originalLoadFrames);
+
+    await source.appendFrames([
+      { detections: [{ id: "new" }], endTime: 1, mediaTime: 0 },
+    ]);
+    const incrementalRefresh = timeline.prepare(0);
+
+    await vi.waitFor(() => expect(loadFrames).toHaveBeenCalledOnce());
+    timeline.prefetch(0.5);
+    await vi.waitFor(() => expect(loadFrames).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(timeline.getState().bufferEndTime).toBe(5.5));
+
+    delayedIncrementalFrames.resolve([
+      { detections: [{ id: "stale" }], endTime: 1, mediaTime: 0 },
+    ]);
+    await incrementalRefresh;
+
+    expect(loadFrames).toHaveBeenCalledTimes(3);
+    expect(timeline.selectFrame(0.5)?.detections[0]?.id).toBe("new");
   });
 });
 

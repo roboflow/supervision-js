@@ -188,6 +188,7 @@ export {
   type DetectionFrameRetentionOptions,
   type DetectionFrameSelectionOptions,
   type DetectionFrameSource,
+  type DetectionFrameSourceChanges,
   type DetectionFrameSourceVersionRange,
   type DetectionPlaybackGateOptions,
   type DetectionTimelineContext,

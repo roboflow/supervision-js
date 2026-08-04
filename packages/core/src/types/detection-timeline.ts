@@ -53,6 +53,19 @@ export interface DetectionFrameSourceVersionRange {
   readonly endTime: number;
 }
 
+/**
+ * Incremental source changes since a previously observed source version.
+ *
+ * `requiresReload` is true when the source can no longer describe every
+ * intervening change (for example after replacement, clearing, or journal
+ * compaction). Buffered timelines then reload their complete hot window.
+ */
+export interface DetectionFrameSourceChanges {
+  readonly version: number;
+  readonly ranges: readonly DetectionFrameSourceVersionRange[];
+  readonly requiresReload: boolean;
+}
+
 export interface DetectionBufferOptions extends DetectionFrameSelectionOptions {
   /**
    * Seconds of detections to keep loaded ahead of playback.
@@ -162,6 +175,16 @@ export interface DetectionFrameSource {
    * this to refresh only when the current range changed.
    */
   getVersion?(range?: DetectionFrameSourceVersionRange): number;
+  /**
+   * Optionally describe changes after `version` that overlap `ranges`.
+   *
+   * This allows a hot timeline to patch a small progressive-inference append
+   * without reloading and copying its complete buffered window.
+   */
+  getChangesSince?(
+    version: number,
+    ranges: readonly DetectionFrameSourceVersionRange[],
+  ): DetectionFrameSourceChanges;
   destroy?(): void;
 }
 

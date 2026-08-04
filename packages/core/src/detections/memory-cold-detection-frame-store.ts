@@ -12,9 +12,18 @@ import {
 
 const DEFAULT_CHUNK_DURATION_SECONDS = 1;
 
+interface StoredDetectionFrame {
+  readonly chunkIndexes: readonly number[];
+  readonly frame: DetectionFrame;
+}
+
 interface MemoryDetectionDataset {
   readonly chunkDurationSeconds: number;
-  readonly frames: readonly DetectionFrame[];
+  readonly frameKeysByChunk: Map<number, Set<string>>;
+  readonly framesByKey: Map<string, StoredDetectionFrame>;
+  detectionCount: number;
+  endTime: number | null;
+  startTime: number | null;
 }
 
 export function createMemoryColdDetectionFrameStore(): ColdDetectionFrameStore {
@@ -25,19 +34,12 @@ export function createMemoryColdDetectionFrameStore(): ColdDetectionFrameStore {
     async putFrames(options) {
       assertActive();
 
-      const chunkDurationSeconds = resolveChunkDurationSeconds(options);
-      const frames = copySortedDetectionFrames(options.frames);
+      const dataset = createDataset(resolveChunkDurationSeconds(options));
 
-      datasets.set(options.datasetId, {
-        chunkDurationSeconds,
-        frames,
-      });
+      upsertFrames(dataset, copySortedDetectionFrames(options.frames));
+      datasets.set(options.datasetId, dataset);
 
-      return createWriteSummary({
-        chunkDurationSeconds,
-        datasetId: options.datasetId,
-        frames,
-      });
+      return createWriteSummary(options.datasetId, dataset);
     },
 
     async appendFrames(options) {
@@ -48,21 +50,12 @@ export function createMemoryColdDetectionFrameStore(): ColdDetectionFrameStore {
         options,
         existingDataset,
       );
-      const frames = copySortedDetectionFrames(options.frames);
-      const mergedFrames = copySortedDetectionFrames(
-        dedupeDetectionFrames([...(existingDataset?.frames ?? []), ...frames]),
-      );
+      const dataset = existingDataset ?? createDataset(chunkDurationSeconds);
 
-      datasets.set(options.datasetId, {
-        chunkDurationSeconds,
-        frames: mergedFrames,
-      });
+      upsertFrames(dataset, copySortedDetectionFrames(options.frames));
+      datasets.set(options.datasetId, dataset);
 
-      return createWriteSummary({
-        chunkDurationSeconds,
-        datasetId: options.datasetId,
-        frames: mergedFrames,
-      });
+      return createWriteSummary(options.datasetId, dataset);
     },
 
     async loadFrames(options: ColdDetectionFrameStoreLoadOptions) {
@@ -76,12 +69,35 @@ export function createMemoryColdDetectionFrameStore(): ColdDetectionFrameStore {
 
       const startTime = Math.max(0, options.startTime);
       const endTime = Math.max(startTime, options.endTime);
-
-      return copySortedDetectionFrames(
-        dataset.frames.filter((frame) =>
-          detectionFrameOverlapsRange(frame, startTime, endTime),
-        ),
+      const frameKeys = new Set<string>();
+      const startChunkIndex = getChunkIndex(
+        startTime,
+        dataset.chunkDurationSeconds,
       );
+      const endChunkIndex = getChunkIndex(
+        endTime,
+        dataset.chunkDurationSeconds,
+      );
+
+      for (
+        let chunkIndex = startChunkIndex;
+        chunkIndex <= endChunkIndex;
+        chunkIndex += 1
+      ) {
+        for (const frameKey of dataset.frameKeysByChunk.get(chunkIndex) ?? []) {
+          frameKeys.add(frameKey);
+        }
+      }
+
+      const frames = Array.from(frameKeys)
+        .map((frameKey) => dataset.framesByKey.get(frameKey)?.frame)
+        .filter(
+          (frame): frame is DetectionFrame =>
+            frame !== undefined &&
+            detectionFrameOverlapsRange(frame, startTime, endTime),
+        );
+
+      return copySortedDetectionFrames(frames);
     },
 
     async clearDataset(datasetId) {
@@ -100,6 +116,113 @@ export function createMemoryColdDetectionFrameStore(): ColdDetectionFrameStore {
       throw new Error("Memory cold detection frame store has been destroyed.");
     }
   }
+}
+
+function createDataset(chunkDurationSeconds: number): MemoryDetectionDataset {
+  return {
+    chunkDurationSeconds,
+    detectionCount: 0,
+    endTime: null,
+    frameKeysByChunk: new Map(),
+    framesByKey: new Map(),
+    startTime: null,
+  };
+}
+
+function upsertFrames(
+  dataset: MemoryDetectionDataset,
+  frames: readonly DetectionFrame[],
+) {
+  let shouldRecalculateBounds = false;
+
+  for (const frame of frames) {
+    const frameKey = getDetectionFrameDedupeKey(frame);
+    const existingFrame = dataset.framesByKey.get(frameKey);
+
+    if (existingFrame) {
+      removeStoredFrame(dataset, frameKey, existingFrame);
+      shouldRecalculateBounds ||= replacementCanShrinkBounds(
+        dataset,
+        existingFrame.frame,
+        frame,
+      );
+    }
+
+    const chunkIndexes = getFrameChunkIndexes(
+      frame,
+      dataset.chunkDurationSeconds,
+    );
+
+    dataset.framesByKey.set(frameKey, { chunkIndexes, frame });
+    dataset.detectionCount += frame.detections.length;
+    dataset.startTime = Math.min(
+      dataset.startTime ?? frame.mediaTime,
+      frame.mediaTime,
+    );
+    dataset.endTime = Math.max(
+      dataset.endTime ?? getFrameEndTime(frame),
+      getFrameEndTime(frame),
+    );
+
+    for (const chunkIndex of chunkIndexes) {
+      const frameKeys = dataset.frameKeysByChunk.get(chunkIndex) ?? new Set();
+
+      frameKeys.add(frameKey);
+      dataset.frameKeysByChunk.set(chunkIndex, frameKeys);
+    }
+  }
+
+  if (shouldRecalculateBounds) {
+    recalculateBounds(dataset);
+  }
+}
+
+function removeStoredFrame(
+  dataset: MemoryDetectionDataset,
+  frameKey: string,
+  storedFrame: StoredDetectionFrame,
+) {
+  dataset.framesByKey.delete(frameKey);
+  dataset.detectionCount -= storedFrame.frame.detections.length;
+
+  for (const chunkIndex of storedFrame.chunkIndexes) {
+    const frameKeys = dataset.frameKeysByChunk.get(chunkIndex);
+
+    frameKeys?.delete(frameKey);
+
+    if (frameKeys?.size === 0) {
+      dataset.frameKeysByChunk.delete(chunkIndex);
+    }
+  }
+}
+
+function replacementCanShrinkBounds(
+  dataset: MemoryDetectionDataset,
+  previousFrame: DetectionFrame,
+  nextFrame: DetectionFrame,
+) {
+  return (
+    (dataset.startTime === previousFrame.mediaTime &&
+      nextFrame.mediaTime > previousFrame.mediaTime) ||
+    (dataset.endTime === getFrameEndTime(previousFrame) &&
+      getFrameEndTime(nextFrame) < getFrameEndTime(previousFrame))
+  );
+}
+
+function recalculateBounds(dataset: MemoryDetectionDataset) {
+  let startTime: number | null = null;
+  let endTime: number | null = null;
+
+  for (const { frame } of dataset.framesByKey.values()) {
+    startTime = Math.min(startTime ?? frame.mediaTime, frame.mediaTime);
+    endTime = Math.max(
+      endTime ?? getFrameEndTime(frame),
+      getFrameEndTime(frame),
+    );
+  }
+
+  dataset.startTime = startTime;
+  dataset.endTime = endTime;
 }
 
 function resolveChunkDurationSeconds(
@@ -128,64 +251,43 @@ function resolveChunkDurationSeconds(
   return chunkDurationSeconds;
 }
 
-function createWriteSummary(options: {
-  readonly datasetId: string;
-  readonly frames: readonly DetectionFrame[];
-  readonly chunkDurationSeconds: number;
-}): ColdDetectionFrameStoreWriteSummary {
-  const firstFrame = options.frames[0];
-  const lastFrame = options.frames.at(-1);
-
+function createWriteSummary(
+  datasetId: string,
+  dataset: MemoryDetectionDataset,
+): ColdDetectionFrameStoreWriteSummary {
   return {
-    chunkCount: countChunks(options.frames, options.chunkDurationSeconds),
-    chunkDurationSeconds: options.chunkDurationSeconds,
-    datasetId: options.datasetId,
-    detectionCount: options.frames.reduce(
-      (total, frame) => total + frame.detections.length,
-      0,
-    ),
-    endTime: lastFrame ? (lastFrame.endTime ?? lastFrame.mediaTime) : null,
-    frameCount: options.frames.length,
-    startTime: firstFrame?.mediaTime ?? null,
+    chunkCount: dataset.frameKeysByChunk.size,
+    chunkDurationSeconds: dataset.chunkDurationSeconds,
+    datasetId,
+    detectionCount: dataset.detectionCount,
+    endTime: dataset.endTime,
+    frameCount: dataset.framesByKey.size,
+    startTime: dataset.startTime,
   };
 }
 
-function countChunks(
-  frames: readonly DetectionFrame[],
+function getFrameChunkIndexes(
+  frame: DetectionFrame,
   chunkDurationSeconds: number,
 ) {
-  const chunkIndexes = new Set<number>();
+  const startIndex = getChunkIndex(frame.mediaTime, chunkDurationSeconds);
+  const endIndex = Math.max(
+    startIndex,
+    Math.ceil(getFrameEndTime(frame) / chunkDurationSeconds) - 1,
+  );
 
-  for (const frame of frames) {
-    const startIndex = getChunkIndex(frame.mediaTime, chunkDurationSeconds);
-    const endIndex =
-      frame.endTime === undefined
-        ? startIndex
-        : Math.max(
-            startIndex,
-            Math.ceil(frame.endTime / chunkDurationSeconds) - 1,
-          );
+  return Array.from(
+    { length: endIndex - startIndex + 1 },
+    (_, offset) => startIndex + offset,
+  );
+}
 
-    for (let index = startIndex; index <= endIndex; index += 1) {
-      chunkIndexes.add(index);
-    }
-  }
-
-  return chunkIndexes.size;
+function getFrameEndTime(frame: DetectionFrame) {
+  return frame.endTime ?? frame.mediaTime;
 }
 
 function getChunkIndex(mediaTime: number, chunkDurationSeconds: number) {
   return Math.floor(mediaTime / chunkDurationSeconds);
-}
-
-function dedupeDetectionFrames(frames: readonly DetectionFrame[]) {
-  const dedupedFrames = new Map<string, DetectionFrame>();
-
-  for (const frame of frames) {
-    dedupedFrames.set(getDetectionFrameDedupeKey(frame), frame);
-  }
-
-  return Array.from(dedupedFrames.values());
 }
 
 function getDetectionFrameDedupeKey(frame: DetectionFrame) {

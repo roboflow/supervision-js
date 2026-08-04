@@ -11,6 +11,7 @@ import {
 import type { DetectionFrame } from "#types/detections";
 import {
   copySortedDetectionFrames,
+  detectionFrameOverlapsRange,
   selectDetectionFrame,
 } from "#utils/detection-frames";
 
@@ -79,6 +80,7 @@ export function createBufferedDetectionTimeline(
         readonly promise: Promise<void>;
       }
     | undefined;
+  let incrementalRefresh: Promise<void> | undefined;
 
   const getSourceVersion = (
     ranges?: readonly DetectionFrameSourceVersionRange[],
@@ -193,6 +195,46 @@ export function createBufferedDetectionTimeline(
     );
   };
 
+  const isInsideBufferedRange = (mediaTime: number) => {
+    const comparableMediaTime = getComparableMediaTime(mediaTime);
+
+    return (
+      bufferedVersionRange !== null &&
+      state.bufferStartTime !== null &&
+      state.bufferEndTime !== null &&
+      comparableMediaTime >= state.bufferStartTime &&
+      comparableMediaTime <= state.bufferEndTime
+    );
+  };
+
+  const refreshBuffer = async (mediaTime: number) => {
+    if (isBuffered(mediaTime)) {
+      return;
+    }
+
+    if (
+      isInsideBufferedRange(mediaTime) &&
+      bufferedSourceVersion !== null &&
+      options.source.getChangesSince
+    ) {
+      if (!incrementalRefresh) {
+        incrementalRefresh = applyIncrementalChanges().finally(() => {
+          incrementalRefresh = undefined;
+        });
+      }
+
+      await incrementalRefresh;
+
+      if (isBuffered(mediaTime)) {
+        return;
+      }
+
+      return refreshBuffer(mediaTime);
+    }
+
+    await loadWindow(mediaTime);
+  };
+
   const shouldPrefetch = (mediaTime: number) => {
     if (!isBuffered(mediaTime)) {
       return true;
@@ -226,15 +268,16 @@ export function createBufferedDetectionTimeline(
         }
       }
 
-      if (isBuffered(mediaTime)) {
-        return;
-      }
-
-      await loadWindow(mediaTime);
+      await refreshBuffer(mediaTime);
     },
 
     prefetch(mediaTime) {
       if (destroyed || !shouldPrefetch(mediaTime)) {
+        return;
+      }
+
+      if (shouldRefreshRollingWindow(mediaTime)) {
+        void loadWindow(mediaTime).catch(() => undefined);
         return;
       }
 
@@ -248,7 +291,7 @@ export function createBufferedDetectionTimeline(
         return;
       }
 
-      void loadWindow(mediaTime).catch(() => undefined);
+      void refreshBuffer(mediaTime).catch(() => undefined);
     },
 
     selectFrame(mediaTime) {
@@ -301,6 +344,81 @@ export function createBufferedDetectionTimeline(
   bufferedFrameSnapshots.set(timeline, () => buffer);
 
   return timeline;
+
+  async function applyIncrementalChanges() {
+    if (
+      destroyed ||
+      bufferedSourceVersion === null ||
+      !options.source.getChangesSince
+    ) {
+      return;
+    }
+
+    const sourceRanges = getBufferedSourceRanges();
+    const incrementalLoadId = loadId;
+    const incrementalVersionRange = bufferedVersionRange;
+    const changes = options.source.getChangesSince(
+      bufferedSourceVersion,
+      sourceRanges,
+    );
+
+    if (changes.requiresReload) {
+      bufferedSourceVersion = null;
+      return;
+    }
+
+    if (changes.ranges.length === 0) {
+      bufferedSourceVersion = changes.version;
+      return;
+    }
+
+    const changedRanges = getOverlappingRanges(changes.ranges, sourceRanges);
+
+    if (changedRanges.length === 0) {
+      bufferedSourceVersion = changes.version;
+      return;
+    }
+
+    try {
+      const changedFrameRanges = await Promise.all(
+        changedRanges.map((range) =>
+          options.source.loadFrames(range.startTime, range.endTime),
+        ),
+      );
+
+      if (
+        destroyed ||
+        loadId !== incrementalLoadId ||
+        bufferedVersionRange !== incrementalVersionRange
+      ) {
+        return;
+      }
+
+      buffer = mergeIncrementalFrames(
+        buffer,
+        changedFrameRanges.flat(),
+        changedRanges,
+      );
+      bufferedSourceVersion = changes.version;
+      state = {
+        ...state,
+        detectionCount: countDetections(buffer),
+        errorMessage: null,
+        frameCount: buffer.length,
+        status: DetectionBufferStatus.Ready,
+      };
+    } catch (error) {
+      if (!destroyed) {
+        state = {
+          ...state,
+          errorMessage: getErrorMessage(error),
+          status: DetectionBufferStatus.Error,
+        };
+      }
+
+      throw error;
+    }
+  }
 
   function shouldWaitForPlaybackGate(
     prepareOptions: DetectionBufferPrepareOptions | undefined,
@@ -558,4 +676,67 @@ function getLoopingSourceRanges(
 
 function modulo(value: number, modulus: number) {
   return ((value % modulus) + modulus) % modulus;
+}
+
+function getOverlappingRanges(
+  changedRanges: readonly DetectionFrameSourceVersionRange[],
+  bufferedRanges: readonly DetectionFrameSourceVersionRange[],
+) {
+  const intersections: DetectionFrameSourceVersionRange[] = [];
+
+  for (const changedRange of changedRanges) {
+    for (const bufferedRange of bufferedRanges) {
+      const startTime = Math.max(
+        changedRange.startTime,
+        bufferedRange.startTime,
+      );
+      const endTime = Math.min(changedRange.endTime, bufferedRange.endTime);
+
+      if (startTime <= endTime) {
+        intersections.push({ endTime, startTime });
+      }
+    }
+  }
+
+  return intersections;
+}
+
+function mergeIncrementalFrames(
+  currentFrames: readonly DetectionFrame[],
+  changedFrames: readonly DetectionFrame[],
+  changedRanges: readonly DetectionFrameSourceVersionRange[],
+) {
+  const framesByIdentity = new Map<string, DetectionFrame>();
+
+  for (const frame of currentFrames) {
+    if (
+      changedRanges.some((range) =>
+        detectionFrameOverlapsRange(frame, range.startTime, range.endTime),
+      )
+    ) {
+      continue;
+    }
+
+    framesByIdentity.set(getDetectionFrameIdentity(frame), frame);
+  }
+
+  for (const frame of changedFrames) {
+    framesByIdentity.set(getDetectionFrameIdentity(frame), frame);
+  }
+
+  return Array.from(framesByIdentity.values()).sort(compareDetectionFrames);
+}
+
+function getDetectionFrameIdentity(frame: DetectionFrame) {
+  return frame.frameIndex === undefined
+    ? `time:${frame.mediaTime}`
+    : `index:${frame.frameIndex}`;
+}
+
+function compareDetectionFrames(left: DetectionFrame, right: DetectionFrame) {
+  if (left.mediaTime !== right.mediaTime) {
+    return left.mediaTime - right.mediaTime;
+  }
+
+  return (left.frameIndex ?? 0) - (right.frameIndex ?? 0);
 }

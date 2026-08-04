@@ -95,6 +95,64 @@ describe("writable detection frame source", () => {
     expect(source.getVersion()).toBe(1);
   });
 
+  it("reports and coalesces incremental changes after a source version", async () => {
+    const store = createStore();
+    const source = createWritableDetectionFrameSource({
+      datasetId: "dataset",
+      store,
+    });
+
+    await source.appendFrames([
+      { detections: [], endTime: 1, frameIndex: 0, mediaTime: 0 },
+    ]);
+    await source.appendFrames([
+      { detections: [], endTime: 2, frameIndex: 1, mediaTime: 1 },
+    ]);
+    await source.appendFrames([
+      { detections: [], endTime: 11, frameIndex: 10, mediaTime: 10 },
+    ]);
+
+    expect(source.getChangesSince!(0, [{ endTime: 3, startTime: 0 }])).toEqual({
+      ranges: [{ endTime: 2, startTime: 0 }],
+      requiresReload: false,
+      version: 2,
+    });
+    expect(source.getChangesSince!(2, [{ endTime: 3, startTime: 0 }])).toEqual({
+      ranges: [],
+      requiresReload: false,
+      version: 2,
+    });
+  });
+
+  it("requires a full reload after replacement and journal compaction", async () => {
+    const store = createStore();
+    const source = createWritableDetectionFrameSource({
+      datasetId: "dataset",
+      store,
+    });
+
+    await source.replaceFrames(frames);
+
+    expect(
+      source.getChangesSince!(0, [{ endTime: 1, startTime: 0 }]),
+    ).toMatchObject({ requiresReload: true, version: 1 });
+
+    for (let frameIndex = 0; frameIndex < 513; frameIndex += 1) {
+      await source.appendFrames([
+        {
+          detections: [],
+          endTime: frameIndex + 2,
+          frameIndex,
+          mediaTime: frameIndex + 1,
+        },
+      ]);
+    }
+
+    expect(
+      source.getChangesSince!(1, [{ endTime: 600, startTime: 0 }]),
+    ).toMatchObject({ requiresReload: true, version: 514 });
+  });
+
   it("waits until appended frames cover a requested range", async () => {
     const store = createStore();
     const source = createWritableDetectionFrameSource({

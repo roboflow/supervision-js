@@ -64,4 +64,76 @@ describe("memory cold detection frame store", () => {
       store.loadFrames({ datasetId: "memory", startTime: 0, endTime: 2 }),
     ).resolves.toEqual([]);
   });
+
+  it("loads only indexed chunks while preserving out-of-order replacements", async () => {
+    const store = createMemoryColdDetectionFrameStore();
+    const generatedFrames = Array.from({ length: 300 }, (_, frameIndex) => ({
+      detections: [{ id: `frame-${frameIndex}` }],
+      endTime: (frameIndex + 1) / 30,
+      frameIndex,
+      mediaTime: frameIndex / 30,
+    }));
+
+    for (let offset = generatedFrames.length; offset > 0; offset -= 30) {
+      await store.appendFrames({
+        chunkDurationSeconds: 1,
+        datasetId: "chunked",
+        frames: generatedFrames.slice(Math.max(0, offset - 30), offset),
+      });
+    }
+
+    const replacement = {
+      ...generatedFrames[151]!,
+      detections: [{ id: "replacement" }],
+    };
+    const summary = await store.appendFrames({
+      datasetId: "chunked",
+      frames: [replacement],
+    });
+    const loadedFrames = await store.loadFrames({
+      datasetId: "chunked",
+      endTime: 5.2,
+      startTime: 5,
+    });
+
+    expect(summary).toMatchObject({
+      chunkCount: 10,
+      detectionCount: 300,
+      endTime: 10,
+      frameCount: 300,
+      startTime: 0,
+    });
+    expect(loadedFrames.map((frame) => frame.frameIndex)).toEqual([
+      150, 151, 152, 153, 154, 155, 156,
+    ]);
+    expect(loadedFrames.find((frame) => frame.frameIndex === 151)).toEqual(
+      replacement,
+    );
+  });
+
+  it("updates summary bounds when a boundary frame moves", async () => {
+    const store = createMemoryColdDetectionFrameStore();
+
+    await store.putFrames({
+      datasetId: "bounds",
+      frames: [frame0, frame1],
+    });
+
+    await expect(
+      store.appendFrames({
+        datasetId: "bounds",
+        frames: [
+          {
+            ...frame1,
+            endTime: 1.75,
+            mediaTime: 1.5,
+          },
+        ],
+      }),
+    ).resolves.toMatchObject({
+      endTime: 1.75,
+      frameCount: 2,
+      startTime: 0,
+    });
+  });
 });
