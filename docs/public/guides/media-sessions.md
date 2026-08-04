@@ -130,6 +130,7 @@ import {
 const mediaStream = await navigator.mediaDevices.getUserMedia({ video: true });
 const media = createMediaStreamRendererSource(mediaStream, {
   maxBufferedFrames: 8,
+  timestampOrigin: "first-frame",
 });
 
 const session = await createMediaSession({
@@ -156,6 +157,11 @@ The adapter uses an internal video element as a browser decode clock, snapshots
 presented frames into a bounded queue, and gives the renderer each frame's media
 presentation timestamp. Pixi remains the only visible composition surface, so
 media and detections share one rendering clock.
+
+By default, timestamps preserve the browser's MediaStream clock. Use
+`timestampOrigin: "first-frame"` when detections arrive over a separate channel
+whose PTS values are also rebased to their first result. Both timelines then
+start at zero while preserving the real gaps between later frames.
 
 The host owns the supplied `MediaStream` and its transport lifecycle by default.
 Destroying the session releases snapshots and the internal decoder but does not

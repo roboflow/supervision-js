@@ -183,6 +183,29 @@ describe("createMediaStreamRendererSource", () => {
     decoded.input.dispose();
   });
 
+  it("can normalize the live timeline to the first presented frame", async () => {
+    const track = new FakeTrack();
+    const stream = new FakeStream(track);
+    const opening = createMediaStreamRendererSource(
+      stream as unknown as MediaStream,
+      { timestampOrigin: "first-frame" },
+    ).open();
+
+    await fakeVideo.present(8.5);
+    const decoded = await opening;
+    expect(decoded.metadata.firstTimestamp).toBe(0);
+    const first = await decoded.sampleSink.getSample(0);
+
+    await fakeVideo.present(8.54);
+    const second = await decoded.sampleSink.getSample(0.04);
+    expect(first?.timestamp).toBe(0);
+    expect(second?.timestamp).toBeCloseTo(0.04);
+
+    first?.close();
+    second?.close();
+    decoded.input.dispose();
+  });
+
   it("ends a live iterator when the video track ends", async () => {
     const track = new FakeTrack();
     const stream = new FakeStream(track);

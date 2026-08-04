@@ -13,6 +13,13 @@ export type MediaStreamRendererSourceOptions = {
   /** Maximum decoded snapshots retained while the renderer is catching up. */
   readonly maxBufferedFrames?: number;
   /**
+   * Timestamp origin exposed to the renderer. `"media"` preserves the browser
+   * MediaStream clock. `"first-frame"` starts the visible timeline at zero so
+   * an independently transported detection stream can apply the same origin.
+   * Defaults to `"media"`.
+   */
+  readonly timestampOrigin?: "first-frame" | "media";
+  /**
    * Stop the caller-supplied MediaStream tracks when the session is destroyed.
    * Defaults to false because WebRTC connection ownership normally stays with
    * the host application.
@@ -83,6 +90,7 @@ async function openMediaStreamMediaSource(
   let callbackHandle: number | undefined;
   let callbackKind: "animation" | "video" | undefined;
   let lastCapturedTimestamp = Number.NEGATIVE_INFINITY;
+  let firstMediaTimestamp: number | undefined;
 
   const notifyWaiters = () => {
     for (const waiter of waiters) waiter.resolve();
@@ -168,9 +176,14 @@ async function openMediaStreamMediaSource(
 
     try {
       const image = await createImageBitmap(video);
-      const timestamp = Number.isFinite(mediaTime)
+      const mediaTimestamp = Number.isFinite(mediaTime)
         ? mediaTime
         : video.currentTime;
+      firstMediaTimestamp ??= mediaTimestamp;
+      const timestamp =
+        options.timestampOrigin === "first-frame"
+          ? Math.max(0, mediaTimestamp - firstMediaTimestamp)
+          : mediaTimestamp;
       enqueueFrame({
         duration: fallbackFrameDuration,
         image,
