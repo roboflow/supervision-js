@@ -12,6 +12,7 @@ const firstFrame: DetectionFrame = {
     {
       className: "player",
       confidence: 0.93,
+      id: "player-1",
       rect: { height: 20, width: 10, x: 15, y: 40 },
     },
   ],
@@ -212,6 +213,38 @@ describe("pixi label layer", () => {
     expect(pick?.detectionIndex).toBe(0);
     expect(pick?.target).toBe(DetectionPickTarget.Label);
     expect(layer.pickDetectionAtPoint({ x: 100, y: 100 }, 1)).toBeNull();
+  });
+
+  it("reports the exact laid-out label bounds by detection id", () => {
+    const layer = createPixiLabelLayer({
+      Container: FakeContainer as never,
+      Graphics: FakeGraphics as never,
+      Text: FakeText as never,
+      detectionTimeline: createTimeline([firstFrame]),
+      labelStyle: createStableLabelStyle(),
+    });
+
+    layer.createContainer();
+    layer.drawFrame(1);
+
+    expect(layer.getDetectionLabelBounds("player-1")).toEqual({
+      height: 18,
+      width: 34,
+      x: 10,
+      y: 12,
+    });
+
+    layer.translateDetection("player-1", 3, 4);
+
+    expect(layer.getDetectionLabelBounds("player-1")).toEqual({
+      height: 18,
+      width: 34,
+      x: 13,
+      y: 16,
+    });
+
+    layer.drawFrame(99);
+    expect(layer.getDetectionLabelBounds("player-1")).toBeNull();
   });
 });
 

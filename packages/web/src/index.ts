@@ -252,6 +252,7 @@ export {
   MediaRendererPlaybackState,
   MediaSourceStatus,
   type MediaRendererDiagnosticsOptions,
+  type DetectionLabelBounds,
   type MediaFrameDiagnostics,
   type MediaFrameRenderTimings,
   type MediaRenderer,

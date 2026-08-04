@@ -331,6 +331,9 @@ export async function createMediaRendererCore(
     mediaToScreen(point) {
       return mediaScene?.mediaToScreen?.(point) ?? point;
     },
+    getDetectionLabelBounds(detectionId) {
+      return mediaScene?.getDetectionLabelBounds?.(detectionId) ?? null;
+    },
     panViewportBy(dx, dy) {
       mediaScene?.panViewportBy?.(dx, dy);
     },

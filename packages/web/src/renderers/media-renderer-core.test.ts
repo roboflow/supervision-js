@@ -510,6 +510,33 @@ describe("media renderer core", () => {
 
     renderer.destroy();
   });
+
+  it("exposes renderer-resolved detection label bounds", async () => {
+    resetMocks();
+
+    const labelBounds = { height: 18, width: 42, x: 12, y: 8 };
+    const scene = createScene({
+      getDetectionLabelBounds: vi.fn(() => labelBounds),
+    });
+    const renderer = await createMediaRendererCore(
+      {
+        autoPlay: false,
+        container: {} as HTMLElement,
+        source: createSource([
+          createMockSample(0, 0) as unknown as DecodedVideoSample,
+        ]),
+      } satisfies MediaRendererOptions,
+      {
+        createScene: vi.fn(async () => scene),
+        openMediaSource: vi.fn(),
+      },
+    );
+
+    expect(renderer.getDetectionLabelBounds("player-1")).toEqual(labelBounds);
+    expect(scene.getDetectionLabelBounds).toHaveBeenCalledWith("player-1");
+
+    renderer.destroy();
+  });
 });
 
 function createScene(
