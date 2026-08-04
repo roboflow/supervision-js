@@ -47,10 +47,11 @@ export type {
  */
 export interface MediaRendererOptions extends MediaRendererPresentation {
   readonly container: HTMLElement;
-  readonly src?: string;
+  readonly src?: string | URL | Request;
   readonly source?: MediaRendererSource;
   readonly autoPlay?: boolean;
   readonly loop?: boolean;
+  readonly playbackRate?: number;
   /**
    * No-op in the current video-only renderer. Audio playback is deferred.
    */
@@ -72,6 +73,11 @@ export interface MediaRendererOptions extends MediaRendererPresentation {
   readonly diagnostics?: MediaRendererDiagnosticsOptions;
   readonly editingEngine?: AnnotationEditingEngine;
   readonly maskBrush?: MaskBrushPreviewOptions;
+  /** Creates a media-sized brush preview after the source metadata is known. */
+  readonly createMaskBrush?: (dimensions: {
+    readonly width: number;
+    readonly height: number;
+  }) => MaskBrushPreviewOptions;
   readonly previewOverlay?: () => PreviewOverlayData | null;
   readonly onFrame?: (diagnostics: MediaFrameDiagnostics) => void;
   readonly onSource?: (state: MediaSourceState) => void;
@@ -98,6 +104,11 @@ export interface MediaRenderer extends MediaRendererStateController {
   play(): Promise<void>;
   pause(): void;
   seek(mediaTime: number): Promise<void>;
+  stepForward(): Promise<void>;
+  stepBackward(): Promise<void>;
+  setPlaybackRate(playbackRate: number): void;
+  /** Re-read detections and redraw the currently presented media frame. */
+  refresh(): Promise<void>;
   setSelectedDetection(
     selection: DetectionSelectionOptions | null,
   ): DetectionPickResult | null;

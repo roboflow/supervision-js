@@ -17,6 +17,7 @@ import type { PresentedMediaSample } from "./media-renderer-scene";
 
 interface MediaRendererRuntimeStateOptions {
   readonly fit: MediaRendererFit;
+  readonly playbackRate: number;
   readonly getDetectionBufferState: () => DetectionBufferState;
   readonly onFrame?: (diagnostics: MediaFrameDiagnostics) => void;
   readonly onSource?: (state: MediaSourceState) => void;
@@ -39,6 +40,7 @@ export interface MediaRendererRuntimeState {
   };
   setSourceReady(metadata: DecodedMediaSourceMetadata): void;
   setCurrentTime(currentTime: number): void;
+  setPlaybackRate(playbackRate: number): void;
   setRendererBackend(rendererBackend: string | null): void;
   recordPresentedSample(sample: PresentedMediaSample): void;
   recordPresentationUpdate(sample: PresentedMediaSample): void;
@@ -59,6 +61,8 @@ export function createMediaRendererRuntimeState(
     MediaRendererPlaybackState.Loading;
   let sourceState = createLoadingMediaSourceState();
   let currentTime = 0;
+  let playbackRate = options.playbackRate;
+  let firstTimestamp = 0;
   let duration: number | null = null;
   let mediaHeight = 0;
   let mediaWidth = 0;
@@ -68,6 +72,7 @@ export function createMediaRendererRuntimeState(
   let activeDetectionFrameIndex: number | null = null;
   let activeDetectionCount = 0;
   let lastFrameRenderTimings: MediaFrameRenderTimings | null = null;
+  let currentFrameDuration = 0;
   let destroyed = false;
 
   const emitSourceState = () => {
@@ -87,6 +92,7 @@ export function createMediaRendererRuntimeState(
     activeDetectionFrameIndex,
     activeDetectionFrameTime,
     currentTime,
+    playbackRate,
     detectionBuffer: options.getDetectionBufferState(),
     duration,
     fit: options.fit,
@@ -106,6 +112,8 @@ export function createMediaRendererRuntimeState(
     activeDetectionFrameIndex,
     activeDetectionFrameTime,
     currentTime,
+    firstTimestamp,
+    frameDuration: sample.duration ?? currentFrameDuration,
     detectionBuffer: sample.detectionBuffer,
     duration,
     expectedDisplayTime: null,
@@ -163,6 +171,7 @@ export function createMediaRendererRuntimeState(
       mediaWidth = metadata.primaryVideoWidth;
       mediaHeight = metadata.primaryVideoHeight;
       duration = metadata.duration;
+      firstTimestamp = metadata.firstTimestamp;
 
       return { height: mediaHeight, width: mediaWidth };
     },
@@ -176,12 +185,18 @@ export function createMediaRendererRuntimeState(
       currentTime = nextCurrentTime;
     },
 
+    setPlaybackRate(nextPlaybackRate) {
+      playbackRate = nextPlaybackRate;
+      emitState();
+    },
+
     setRendererBackend(nextRendererBackend) {
       rendererBackend = nextRendererBackend;
     },
 
     recordPresentedSample(sample) {
       currentTime = sample.mediaTime;
+      currentFrameDuration = sample.duration ?? currentFrameDuration;
       presentedFrames += 1;
       activeDetectionFrameIndex = sample.activeDetectionFrameIndex;
       activeDetectionFrameTime = sample.activeDetectionFrameTime;

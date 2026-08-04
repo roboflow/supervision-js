@@ -17,6 +17,8 @@ const session = await createMediaSession({ container, media });
 await session.play();
 session.pause();
 await session.seek(12.5);
+await session.stepForward();
+session.setPlaybackRate(0.5);
 session.setPresentation({ maskStyle, boxStyle, labelStyle });
 const state = session.getState();
 session.destroy();
@@ -250,6 +252,9 @@ After creation, the same session remains the consumer API:
 ```ts
 await session.appendDetectionFrames(frames);
 await session.seek(4.2);
+await session.stepForward();
+await session.stepBackward();
+session.setPlaybackRate(1.5);
 
 session.setPresentation({
   boxStyle,
@@ -260,10 +265,20 @@ session.setPresentation({
 session.destroy();
 ```
 
+For an editor backed by a caller-owned `DetectionFrameSource`, update that
+source and call `session.refresh()`. The session re-reads semantic data and
+re-presents its retained media sample; the app must not decode the frame again,
+copy pixels into a canvas, or fake a seek to trigger a redraw.
+
+Video times are absolute presentation timestamps. `renderer.onFrame` reports
+the canonical `mediaTime`, `frameDuration`, `firstTimestamp`, and decoded media
+dimensions after each newly presented sample. Use those values for timeline
+and frame-key UI rather than maintaining a second decoder clock in the app.
+
 This is the intended integration shape for apps: create one session per media
-item, feed it detections as they become available, update presentation styles
-without rewriting detections, and destroy the session when the media item leaves
-the UI.
+item, feed it detections as they become available, navigate through the session,
+update presentation styles without rewriting detections, and destroy the
+session when the media item leaves the UI.
 
 Framework users should follow the same ownership rule. See
 [React Integration](../recipes/react-integration.md) for an async-safe effect

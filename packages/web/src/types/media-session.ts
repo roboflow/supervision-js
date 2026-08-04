@@ -51,7 +51,8 @@ export type {
  * Use a `Blob` for uploaded files, a URL string for already hosted media, or a
  * custom renderer source when integrating a lower-level media adapter.
  */
-export type MediaSessionMedia = string | Blob | MediaRendererSource;
+export type MediaSessionMedia =
+  string | URL | Request | Blob | MediaRendererSource;
 
 export interface MediaSessionNormalizationOptions extends MediaNormalizationOptions {
   /**
@@ -181,6 +182,7 @@ export interface MediaSessionDetectionOptions {
 export interface MediaSessionRendererOptions {
   readonly autoPlay?: boolean;
   readonly loop?: boolean;
+  readonly playbackRate?: number;
   readonly muted?: boolean;
   readonly fit?: MediaRendererFit;
   readonly maxDevicePixelRatio?: MediaRendererOptions["maxDevicePixelRatio"];
@@ -194,6 +196,7 @@ export interface MediaSessionRendererOptions {
   readonly editingEngine?: MediaRendererOptions["editingEngine"];
   /** Optional browser mask-brush preview rendered with the editing engine. */
   readonly maskBrush?: MediaRendererOptions["maskBrush"];
+  readonly createMaskBrush?: MediaRendererOptions["createMaskBrush"];
   /** Optional host-owned external preview rendered above annotations. */
   readonly previewOverlay?: MediaRendererOptions["previewOverlay"];
   readonly onFrame?: (diagnostics: MediaFrameDiagnostics) => void;
@@ -308,6 +311,11 @@ export interface MediaSession {
   play(): Promise<void>;
   pause(): void;
   seek(mediaTime: number): Promise<void>;
+  stepForward(): Promise<void>;
+  stepBackward(): Promise<void>;
+  setPlaybackRate(playbackRate: number): void;
+  /** Re-read semantic detections and redraw the current presentation. */
+  refresh(): Promise<void>;
   setPresentation(presentation: MediaRendererPresentation): void;
   setRenderQuality(quality: MediaRendererQuality): void;
   subscribe(listener: MediaSessionStateListener): MediaSessionStateUnsubscribe;

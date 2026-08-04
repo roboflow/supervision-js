@@ -32,7 +32,7 @@ export async function prepareSessionMedia(
   normalize: false | MediaSessionNormalizationOptions | undefined,
   callbacks: PrepareSessionMediaCallbacks,
 ): Promise<PreparedSessionMedia> {
-  if (typeof media === "string") {
+  if (typeof media === "string" || isUrl(media) || isRequest(media)) {
     return {
       destroy() {
         // URL sources are owned by the caller.
@@ -132,7 +132,15 @@ export function createEmptyMediaState(): MediaSessionMediaState {
 }
 
 function isRendererSource(
-  media: Exclude<MediaSessionMedia, string>,
+  media: Exclude<MediaSessionMedia, string | URL | Request>,
 ): media is MediaRendererSource {
   return typeof (media as MediaRendererSource).open === "function";
+}
+
+function isRequest(media: MediaSessionMedia): media is Request {
+  return typeof Request === "function" && media instanceof Request;
+}
+
+function isUrl(media: MediaSessionMedia): media is URL {
+  return typeof URL === "function" && media instanceof URL;
 }

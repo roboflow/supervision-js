@@ -37,6 +37,29 @@ const summary: ColdDetectionFrameStoreWriteSummary = {
 };
 
 describe("media session", () => {
+  it("owns video navigation, playback rate, and current-frame refresh", async () => {
+    resetMocks();
+    const { createMediaSession } = await import("../index");
+
+    const session = await createMediaSession({
+      container: createContainer(),
+      media: "sample.mp4",
+      renderer: { autoPlay: false },
+    });
+
+    session.setPlaybackRate(1.5);
+    expect(session.getState().renderer).toMatchObject({ playbackRate: 1.5 });
+
+    await session.stepForward();
+    expect(session.getState().renderer).toMatchObject({ currentTime: 0.04 });
+
+    await session.stepBackward();
+    expect(session.getState().renderer).toMatchObject({ currentTime: 0 });
+
+    await expect(session.refresh()).resolves.toBeUndefined();
+    session.destroy();
+  });
+
   it("continues to support the writable detection source alias", async () => {
     resetMocks();
     const { createMediaSession } = await import("../index");

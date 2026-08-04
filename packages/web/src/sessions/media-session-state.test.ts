@@ -395,6 +395,7 @@ function createRendererState(options: {
     activeDetectionFrameIndex: null,
     activeDetectionFrameTime: null,
     currentTime: 0,
+    playbackRate: 1,
     detectionBuffer: {
       bufferEndTime: null,
       bufferStartTime: null,
@@ -418,6 +419,7 @@ function createRendererState(options: {
       canRead: null,
       duration: null,
       errorMessage: options.sourceErrorMessage ?? null,
+      firstTimestamp: null,
       formatMimeType: null,
       formatName: null,
       mimeType: null,
