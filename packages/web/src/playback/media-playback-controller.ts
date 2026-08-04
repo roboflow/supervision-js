@@ -47,6 +47,12 @@ export function createMediaPlaybackController(options: {
     | { readonly iteratorId: number; readonly promise: Promise<void> }
     | undefined;
   let activeSampleIteratorExhausted = false;
+  const queuedSampleWaiters = new Set<() => void>();
+
+  const notifyQueuedSampleWaiters = () => {
+    for (const resolve of queuedSampleWaiters) resolve();
+    queuedSampleWaiters.clear();
+  };
 
   const cancelScheduledFrame = () => {
     if (animationFrameHandle !== undefined) {
@@ -101,6 +107,7 @@ export function createMediaPlaybackController(options: {
     activeSampleIteratorExhausted = true;
     activeSampleIteratorId += 1;
     returnSampleIterator(iterator);
+    notifyQueuedSampleWaiters();
   };
 
   const resetSampleIterator = (startTimestamp: number) => {
@@ -159,10 +166,12 @@ export function createMediaPlaybackController(options: {
 
         if (result.done) {
           activeSampleIteratorExhausted = true;
+          notifyQueuedSampleWaiters();
           return;
         }
 
         sampleQueue.push(result.value);
+        notifyQueuedSampleWaiters();
       }
     } catch (error) {
       if (
@@ -209,7 +218,27 @@ export function createMediaPlaybackController(options: {
       return;
     }
 
-    await startSamplePrefetch(runId);
+    let resolveWait: (() => void) | undefined;
+    const waitForQueuedSample = new Promise<void>((resolve) => {
+      resolveWait = resolve;
+      queuedSampleWaiters.add(resolve);
+    });
+
+    startSamplePrefetch(runId);
+
+    if (
+      !isPlaybackRunActive(runId) ||
+      sampleQueue.length > 0 ||
+      activeSampleIteratorExhausted
+    ) {
+      if (resolveWait) queuedSampleWaiters.delete(resolveWait);
+      return;
+    }
+
+    await waitForQueuedSample;
+    // Let an iterator publish immediately available adjacent samples without
+    // making live playback wait for the next network frame.
+    await Promise.resolve();
   };
 
   const shouldPresentSample = (
@@ -291,6 +320,14 @@ export function createMediaPlaybackController(options: {
     await waitForFirstQueuedSample(runId);
 
     if (!isPlaybackRunActive(runId)) {
+      return;
+    }
+
+    if (activeSampleIteratorExhausted && sampleQueue.length === 0) {
+      playing = false;
+      playbackRunId += 1;
+      stopActiveSampleIterator();
+      options.onEnded();
       return;
     }
 

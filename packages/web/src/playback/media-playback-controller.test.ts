@@ -127,6 +127,67 @@ describe("media playback controller", () => {
 
     controller.destroy();
   });
+
+  it("ends live playback when its sample iterator is exhausted", async () => {
+    resetMocks();
+    mediaMock.samples = [];
+    const onEnded = vi.fn();
+    const controller = createMediaPlaybackController({
+      duration: null,
+      firstTimestamp: 0,
+      initialMediaTime: 0,
+      loop: false,
+      onCurrentTimeChange: vi.fn(),
+      onEnded,
+      onError: vi.fn(),
+      presentSample: vi.fn(),
+      sampleSink: mediaMockSampleSink(),
+    });
+
+    controller.play();
+    flushAnimationFrame(0);
+
+    await vi.waitFor(() => expect(onEnded).toHaveBeenCalledOnce());
+    controller.destroy();
+  });
+
+  it("presents a live sample without waiting for the next sample", async () => {
+    resetMocks();
+    const sample = createMockSample(0, 1 / 30);
+    let releaseIterator: (() => void) | undefined;
+    const nextSample = new Promise<void>((resolve) => {
+      releaseIterator = resolve;
+    });
+    const presentedTimestamps: number[] = [];
+    const controller = createMediaPlaybackController({
+      duration: null,
+      firstTimestamp: 0,
+      initialMediaTime: -1 / 30,
+      loop: false,
+      onCurrentTimeChange: vi.fn(),
+      onEnded: vi.fn(),
+      onError: vi.fn(),
+      presentSample: (presentedSample) => {
+        presentedTimestamps.push(presentedSample.timestamp);
+        presentedSample.close();
+      },
+      sampleSink: {
+        getSample: mediaMock.getSample,
+        async *samples() {
+          yield sample as unknown as DecodedVideoSample;
+          await nextSample;
+        },
+      },
+    });
+
+    controller.play();
+    flushAnimationFrame(1_000 / 30);
+
+    await vi.waitFor(() => expect(presentedTimestamps).toEqual([0]));
+
+    controller.destroy();
+    releaseIterator?.();
+  });
 });
 
 function mediaMockSampleSink() {

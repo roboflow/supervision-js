@@ -58,6 +58,7 @@ const expectedWebRuntimeExports = [
   "createImageUrlMediaSource",
   "createMediaRenderer",
   "createMediaSession",
+  "createMediaStreamRendererSource",
   "createMemoryColdDetectionFrameStore",
   "createStaticImageMediaSource",
   "createWritableDetectionFrameSource",
@@ -183,6 +184,7 @@ test("built package entrypoint exposes the public runtime API", async () => {
   assert.deepEqual(Object.keys(entrypoint).sort(), expectedWebRuntimeExports);
   assert.equal(typeof entrypoint.createMediaSession, "function");
   assert.equal(typeof entrypoint.createMediaRenderer, "function");
+  assert.equal(typeof entrypoint.createMediaStreamRendererSource, "function");
   assert.equal(typeof entrypoint.probeMedia, "function");
   assert.equal(typeof entrypoint.prepareMedia, "function");
   assert.equal(typeof entrypoint.prepareMediaProgressively, "function");

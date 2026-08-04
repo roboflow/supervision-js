@@ -6,6 +6,7 @@
 
 export {
   createMediaRenderer,
+  createMediaStreamRendererSource,
   MediaRendererFit,
   MediaRendererPlaybackState,
   MediaSourceStatus,
@@ -24,6 +25,7 @@ export {
   type MediaRendererPresentation,
   type MediaRendererQuality,
   type MediaRendererSource,
+  type MediaStreamRendererSourceOptions,
   type MediaRendererState,
   type MediaSourceState,
   type RenderPreparationActiveFrameDiagnostics,

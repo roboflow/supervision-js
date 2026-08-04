@@ -68,6 +68,8 @@ These exports are public because serious integrations need them, but they are
 not the first thing most users should reach for:
 
 - `createMediaRenderer()` for lower-level renderer ownership;
+- `createMediaStreamRendererSource()` for adapting a browser `MediaStream`
+  without adding a second visible video layer;
 - `DetectionFrameSource` for caller-owned range loading;
 - `WritableDetectionFrameSource` and `createWritableDetectionFrameSource()` for
   streaming inference ingestion;

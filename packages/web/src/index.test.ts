@@ -98,6 +98,7 @@ describe("package entrypoint", () => {
       "createImageUrlMediaSource",
       "createMediaRenderer",
       "createMediaSession",
+      "createMediaStreamRendererSource",
       "createMemoryColdDetectionFrameStore",
       "createStaticImageMediaSource",
       "createWritableDetectionFrameSource",
@@ -111,6 +112,9 @@ describe("package entrypoint", () => {
       "resolveDetectionClassColorStyle",
     ]);
     expect(entrypoint.createMediaRenderer).toEqual(expect.any(Function));
+    expect(entrypoint.createMediaStreamRendererSource).toEqual(
+      expect.any(Function),
+    );
     expect(entrypoint.createMediaSession).toEqual(expect.any(Function));
     expect(entrypoint.createWritableDetectionFrameSource).toEqual(
       expect.any(Function),

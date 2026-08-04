@@ -37,6 +37,10 @@ export {
   type HostFrameSource,
   type StaticImageSource,
 } from "#media/static-image-media-source";
+export {
+  createMediaStreamRendererSource,
+  type MediaStreamRendererSourceOptions,
+} from "#media/media-stream-media-source";
 
 // Renderer and session primitives.
 export { createMediaRenderer } from "#renderers/media-renderer";

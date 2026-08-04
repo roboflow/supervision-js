@@ -114,6 +114,55 @@ Detection input has three preferred shapes:
 
 Use only one of those shapes per session.
 
+## Live Browser MediaStreams
+
+Use `createMediaStreamRendererSource()` when a host already receives live media
+from `getUserMedia()`, WebRTC, or another browser `MediaStream` producer:
+
+```ts
+import {
+  createMediaSession,
+  createMediaStreamRendererSource,
+  DetectionFrameRetentionMode,
+  MediaSessionMode,
+} from "supervision-js";
+
+const mediaStream = await navigator.mediaDevices.getUserMedia({ video: true });
+const media = createMediaStreamRendererSource(mediaStream, {
+  maxBufferedFrames: 8,
+});
+
+const session = await createMediaSession({
+  container,
+  media,
+  mode: MediaSessionMode.Stream,
+  detections: {
+    appendable: {
+      datasetId: "camera-1",
+      retention: {
+        mode: DetectionFrameRetentionMode.MemoryOnly,
+        windowSeconds: 60,
+      },
+    },
+  },
+  renderer: {
+    autoPlay: true,
+    loop: false,
+  },
+});
+```
+
+The adapter uses an internal video element as a browser decode clock, snapshots
+presented frames into a bounded queue, and gives the renderer each frame's media
+presentation timestamp. Pixi remains the only visible composition surface, so
+media and detections share one rendering clock.
+
+The host owns the supplied `MediaStream` and its transport lifecycle by default.
+Destroying the session releases snapshots and the internal decoder but does not
+stop the stream tracks. Set `stopTracksOnDispose: true` only when the session
+should own those tracks. A live source cannot seek or loop; ending every video
+track ends playback.
+
 ## Renderer Quality
 
 By default the renderer uses the browser's device pixel ratio. Apps that need
