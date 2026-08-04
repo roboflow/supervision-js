@@ -324,11 +324,28 @@ export function createMediaPlaybackController(options: {
     }
 
     if (activeSampleIteratorExhausted && sampleQueue.length === 0) {
-      playing = false;
-      playbackRunId += 1;
-      stopActiveSampleIterator();
-      options.onEnded();
-      return;
+      if (options.loop && options.duration !== null) {
+        setCurrentTime(options.firstTimestamp);
+        playbackOriginMediaTime = options.firstTimestamp;
+        playbackOriginNow = now;
+        requestedMediaTime = options.firstTimestamp;
+        shouldPresentLoopStartSample = true;
+        resetSampleIterator(options.firstTimestamp);
+        startSamplePrefetch(runId);
+        await waitForFirstQueuedSample(runId);
+
+        if (!isPlaybackRunActive(runId)) {
+          return;
+        }
+      }
+
+      if (activeSampleIteratorExhausted && sampleQueue.length === 0) {
+        playing = false;
+        playbackRunId += 1;
+        stopActiveSampleIterator();
+        options.onEnded();
+        return;
+      }
     }
 
     const sample = takeDueSample(

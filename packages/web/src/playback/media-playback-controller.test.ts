@@ -128,6 +128,47 @@ describe("media playback controller", () => {
     controller.destroy();
   });
 
+  it("loops when decoded samples end before the declared media duration", async () => {
+    resetMocks();
+    mediaMock.samples = [
+      createMockSample(0, 1 / 30),
+      createMockSample(1 / 30, 1 / 30),
+    ];
+    const presentedTimestamps: number[] = [];
+    const onEnded = vi.fn();
+    const controller = createMediaPlaybackController({
+      duration: 1,
+      firstTimestamp: 0,
+      initialMediaTime: 0,
+      loop: true,
+      onCurrentTimeChange: vi.fn(),
+      onEnded,
+      onError: vi.fn(),
+      presentSample: (sample) => {
+        presentedTimestamps.push(sample.timestamp);
+        sample.close();
+      },
+      sampleSink: mediaMockSampleSink(),
+    });
+
+    controller.play();
+    flushAnimationFrame(1_000 / 30);
+
+    await vi.waitFor(() => {
+      expect(presentedTimestamps).toEqual([1 / 30]);
+    });
+
+    flushAnimationFrame(2_000 / 30);
+
+    await vi.waitFor(() => {
+      expect(presentedTimestamps).toEqual([1 / 30, 0]);
+    });
+    expect(onEnded).not.toHaveBeenCalled();
+    expect(mediaMock.samplesCallStarts).toEqual([0, 0]);
+
+    controller.destroy();
+  });
+
   it("ends live playback when its sample iterator is exhausted", async () => {
     resetMocks();
     mediaMock.samples = [];
