@@ -27,11 +27,40 @@ import {
   disposeReactNativeSkiaImage,
   type ReactNativeSkiaMaskFrame,
 } from "./skia";
+import { PreparedFrameStore } from "./renderers/prepared-frame-store";
 import {
   createReactNativeVideoFrameSource,
   type ReactNativeBoxedVideoFrameSource,
   type ReactNativeVideoFrameHandle,
 } from "./video-frame-source";
+
+export { createMediaSession } from "./sessions/media-session-core";
+export {
+  MediaSessionError,
+  type MediaSession,
+  type MediaSessionErrorCode,
+  type MediaSessionMediaState,
+  type MediaSessionOptions,
+  type MediaSessionState,
+  type MediaSessionStateListener,
+  type MediaSessionStateUnsubscribe,
+} from "./types/media-session";
+export type {
+  MediaFrameProcessor,
+  MediaFrameProcessorResult,
+} from "./types/frame-processor";
+export type {
+  MediaFrameSource,
+  MediaFrameSourceConsumer,
+  MediaSessionCapabilities,
+} from "./types/frame-source";
+export type {
+  MediaRendererAdapter,
+  MediaRendererPrepareOptions,
+  MediaSessionRendererState,
+  MediaSessionRenderPreparationState,
+  PreparedMediaFramePacket,
+} from "./types/renderer";
 
 /**
  * Minimal structural view of a reanimated shared value. UI components read
@@ -154,6 +183,21 @@ export interface ReactNativeVideoSession {
   destroy(): void;
 }
 
+/** Renderer-private saved-video packet; never part of the public session API. */
+interface ReactNativeVideoPreparedFramePacket {
+  readonly detections: readonly ReactNativeVideoSessionDetection[];
+  readonly frameImage: SkImage;
+  readonly maskImage: SkImage | null;
+  readonly maskUniforms: ReactNativeIdMaskUniforms;
+  readonly packetId: number;
+  readonly timestampMs: number;
+}
+
+interface ReactNativeVideoPreparedFrameStoreState {
+  readonly active: ReactNativeVideoPreparedFramePacket | null;
+  readonly retired: ReactNativeVideoPreparedFramePacket | null;
+}
+
 interface WorkletVendorModules {
   makeMutable<TValue>(value: TValue): ReactNativeSharedValue<TValue>;
   scheduleOnRN(fn: (...args: never[]) => void, ...args: unknown[]): void;
@@ -250,8 +294,12 @@ export function createReactNativeVideoSession(
   const frameImage = vendors.makeMutable<SkImage | null>(null);
   const maskImage = vendors.makeMutable<SkImage | null>(null);
   const maskUniforms = vendors.makeMutable(emptyUniforms);
-  const retiredFrameImage = vendors.makeMutable<SkImage | null>(null);
-  const retiredMaskImage = vendors.makeMutable<SkImage | null>(null);
+  const preparedFrameStoreState =
+    vendors.makeMutable<ReactNativeVideoPreparedFrameStoreState>({
+      active: null,
+      retired: null,
+    });
+  const nextPacketId = vendors.makeMutable(0);
   const playingShared = vendors.makeMutable(false);
   const pausedShared = vendors.makeMutable(false);
   const mediaRectShared = vendors.makeMutable<TopLeftRect>({
@@ -272,6 +320,18 @@ export function createReactNativeVideoSession(
   const scheduleOnRN = vendors.scheduleOnRN;
 
   let destroyed = false;
+  const createPreparedFrameStore = () => {
+    "worklet";
+
+    const store = new PreparedFrameStore<ReactNativeVideoPreparedFramePacket>(
+      (packet) => {
+        disposeReactNativeSkiaImage(packet.frameImage);
+        disposeReactNativeSkiaImage(packet.maskImage);
+      },
+    );
+    store.restore(preparedFrameStoreState.value);
+    return store;
+  };
 
   const reportDetections = (
     detections: readonly ReactNativeVideoSessionDetection[],
@@ -295,6 +355,7 @@ export function createReactNativeVideoSession(
     "worklet";
 
     const pumpSource = boxedSource.unbox();
+    const preparedFrameStore = createPreparedFrameStore();
     const startedAt = Date.now();
     const framePixels = pumpSource.frameWidth * pumpSource.frameHeight;
     const returnMasksAtOriginalResolution = framePixels <= fullResMaskMaxPixels;
@@ -419,23 +480,26 @@ export function createReactNativeVideoSession(
           continue;
         }
 
-        // Release the images from two ticks ago, retire the previous ones,
-        // and present the new packet.
-        const previousFrameImage = frameImage.value;
-        const previousMaskImage = maskImage.value;
-        const retiredImage = retiredFrameImage.value;
-        const retiredMask = retiredMaskImage.value;
+        // Promote one coherent packet. The store retires the old packet for
+        // one further presentation before it disposes either Skia image.
+        const packet: ReactNativeVideoPreparedFramePacket = {
+          detections: overlayDetections,
+          frameImage: presentedImage,
+          maskImage: preparedMask ? preparedMask.image : null,
+          maskUniforms: preparedMask ? preparedMask.uniforms : emptyUniforms,
+          packetId: nextPacketId.value,
+          timestampMs: frameTimestampMs,
+        };
 
-        maskUniforms.value = preparedMask
-          ? preparedMask.uniforms
-          : emptyUniforms;
-        maskImage.value = preparedMask ? preparedMask.image : null;
-        frameImage.value = presentedImage;
-        retiredFrameImage.value = previousFrameImage;
-        retiredMaskImage.value = previousMaskImage;
-
-        disposeReactNativeSkiaImage(retiredImage);
-        disposeReactNativeSkiaImage(retiredMask);
+        nextPacketId.value += 1;
+        maskUniforms.value = packet.maskUniforms;
+        maskImage.value = packet.maskImage;
+        frameImage.value = packet.frameImage;
+        try {
+          preparedFrameStore.presentNow(packet);
+        } finally {
+          preparedFrameStoreState.value = preparedFrameStore.snapshot();
+        }
 
         processedFrames += 1;
 
@@ -488,21 +552,13 @@ export function createReactNativeVideoSession(
   const cleanupPackets = () => {
     "worklet";
 
-    const packetFrame = frameImage.value;
-    const packetMask = maskImage.value;
-    const retiredFrame = retiredFrameImage.value;
-    const retiredMask = retiredMaskImage.value;
-
     frameImage.value = null;
     maskImage.value = null;
     maskUniforms.value = emptyUniforms;
-    retiredFrameImage.value = null;
-    retiredMaskImage.value = null;
+    const preparedFrameStore = createPreparedFrameStore();
 
-    disposeReactNativeSkiaImage(packetFrame);
-    disposeReactNativeSkiaImage(packetMask);
-    disposeReactNativeSkiaImage(retiredFrame);
-    disposeReactNativeSkiaImage(retiredMask);
+    preparedFrameStoreState.value = { active: null, retired: null };
+    preparedFrameStore.disposeNow();
   };
 
   const schedulePump = () => {

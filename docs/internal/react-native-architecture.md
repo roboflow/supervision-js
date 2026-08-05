@@ -4,8 +4,8 @@ This note defines the current direction for a future React Native package. It is
 not a public API promise.
 
 The package is being hardened toward release using the web API as the
-blueprint; see the phased plan and its status in
-[`../superpowers/plans/2026-07-09-rn-api-hardening.md`](../superpowers/plans/2026-07-09-rn-api-hardening.md).
+blueprint; see the current phased extraction and API plan in
+[`../superpowers/plans/2026-08-05-rn-thin-wrapper-hardening.md`](../superpowers/plans/2026-08-05-rn-thin-wrapper-hardening.md).
 
 ## Package Boundary
 
