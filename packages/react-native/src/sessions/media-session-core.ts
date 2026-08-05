@@ -51,6 +51,7 @@ export async function createMediaSession<TPayload, TPacket extends object>(
   let frameQueue: Promise<void> = Promise.resolve();
   let sourceOperationQueue: Promise<void> = Promise.resolve();
   let sourceStart: Promise<void> = Promise.resolve();
+  let sourceStartupSettled = true;
   let sourceDestroyAttempted = false;
   const teardownErrors: unknown[] = [];
   let lastDiagnostics: MediaSessionRenderPreparationState["lastDiagnostics"] =
@@ -292,12 +293,16 @@ export async function createMediaSession<TPayload, TPacket extends object>(
     playing = true;
     started = true;
     emit();
+    sourceStartupSettled = false;
     sourceStart = Promise.resolve()
       .then(() =>
         destroyed || error ? undefined : options.source.start(consumer),
       )
       .catch((cause) => {
         reportError("source-failed", cause);
+      })
+      .finally(() => {
+        sourceStartupSettled = true;
       });
   } catch (cause) {
     reportError("source-open-failed", cause);
@@ -328,7 +333,9 @@ export async function createMediaSession<TPayload, TPacket extends object>(
       destroyed = true;
       playing = false;
       processing = false;
-      destroyPromise = releaseSource()
+      destroyPromise = (
+        sourceStartupSettled ? Promise.resolve() : releaseSource()
+      )
         .then(() => drainLifecycle())
         .then(() => destroyResources())
         .finally(() => {

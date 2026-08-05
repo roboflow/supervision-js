@@ -398,7 +398,7 @@ describe("createMediaSession", () => {
       throw new Error("source cleanup failed");
     };
 
-    await expect(session.destroy()).rejects.toThrow("source cleanup failed");
+    await expect(session.destroy()).rejects.toThrow("packet cleanup failed");
     expect(renderer.disposedPacketIds).toEqual([0]);
     expect(source.destroyed).toBe(true);
     expect(renderer.destroyed).toBe(true);
