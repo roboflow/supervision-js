@@ -5,6 +5,7 @@ import {
   lightenColor,
   resolveStyleValue,
   type AnnotationEditingEngine,
+  type AnnotationEditingPreviewStyleContext,
   type AnnotationOverlayStyle,
   type AnnotationStyleContext,
   type AnnotationVisibility,
@@ -79,7 +80,30 @@ function drawEditingPreview(
   const state = engine?.getState();
   const detection = state?.preview;
   if (!detection) return;
-  const stroke = style.editingPreview.stroke;
+  const styleContext: AnnotationEditingPreviewStyleContext = {
+    gestureKind: state.kind,
+    viewportScale,
+  };
+  const stroke = resolveStyleValue(
+    style.editingPreview.stroke,
+    detection,
+    styleContext,
+  )!;
+  const boxFill = resolveStyleValue(
+    style.editingPreview.boxFill,
+    detection,
+    styleContext,
+  )!;
+  const polygonFill = resolveStyleValue(
+    style.editingPreview.polygonFill,
+    detection,
+    styleContext,
+  )!;
+  const closeZoneStroke = resolveStyleValue(
+    style.editingPreview.closeZoneStroke,
+    detection,
+    styleContext,
+  )!;
   if (
     detection.rect &&
     !detection.mask &&
@@ -96,7 +120,7 @@ function drawEditingPreview(
           height,
           resolveScreenLength(1, viewportScale),
         )
-        .fill(style.editingPreview.boxFill);
+        .fill(boxFill);
     }
     drawPixiPath(
       graphics,
@@ -117,7 +141,8 @@ function drawEditingPreview(
         graphics,
         detection.polygon.points,
         viewportScale,
-        style,
+        stroke,
+        closeZoneStroke,
       );
       return;
     }
@@ -126,7 +151,7 @@ function drawEditingPreview(
         detection.polygon.points.flatMap(({ x, y }) => [x, y]),
         true,
       )
-      .fill(style.editingPreview.polygonFill);
+      .fill(polygonFill);
     drawPixiPath(
       graphics,
       detection.polygon.points,
@@ -160,11 +185,11 @@ function drawCreatingPolygon(
   graphics: PixiGraphics,
   points: readonly Point[],
   viewportScale: number,
-  style: ResolvedAnnotationOverlayStyle,
+  stroke: BoxStrokeStyle,
+  closeZoneStroke: BoxStrokeStyle,
 ) {
   if (points.length < 2) return;
 
-  const stroke = style.editingPreview.stroke;
   const placed = points.slice(0, -1);
   const cursor = points.at(-1)!;
   const first = placed[0]!;
@@ -182,11 +207,8 @@ function drawCreatingPolygon(
       [last, first],
       false,
       {
-        ...style.editingPreview.closeZoneStroke,
-        color: resolveCloseHighlightColor(
-          stroke.color,
-          style.editingPreview.closeZoneStroke.color,
-        ),
+        ...closeZoneStroke,
+        color: resolveCloseHighlightColor(stroke.color, closeZoneStroke.color),
         width: stroke.width * 1.5,
       },
       viewportScale,
@@ -253,7 +275,7 @@ function drawCreatingPolygon(
 
   const highlightColor = resolveCloseHighlightColor(
     stroke.color,
-    style.editingPreview.closeZoneStroke.color,
+    closeZoneStroke.color,
   );
   graphics
     .circle(first.x, first.y, closeRadius)
@@ -261,7 +283,7 @@ function drawCreatingPolygon(
     .stroke(
       resolvePixiStroke(
         {
-          ...style.editingPreview.closeZoneStroke,
+          ...closeZoneStroke,
           color: highlightColor,
           width: stroke.width,
         },
@@ -461,10 +483,18 @@ function drawLoading(
 
 interface ResolvedAnnotationOverlayStyle {
   readonly editingPreview: {
-    readonly stroke: BoxStrokeStyle;
-    readonly boxFill: BoxFillStyle;
-    readonly polygonFill: BoxFillStyle;
-    readonly closeZoneStroke: BoxStrokeStyle;
+    readonly stroke: NonNullable<
+      NonNullable<AnnotationOverlayStyle["editingPreview"]>["stroke"]
+    >;
+    readonly boxFill: NonNullable<
+      NonNullable<AnnotationOverlayStyle["editingPreview"]>["boxFill"]
+    >;
+    readonly polygonFill: NonNullable<
+      NonNullable<AnnotationOverlayStyle["editingPreview"]>["polygonFill"]
+    >;
+    readonly closeZoneStroke: NonNullable<
+      NonNullable<AnnotationOverlayStyle["editingPreview"]>["closeZoneStroke"]
+    >;
   };
   readonly selectionHandle: {
     readonly fill: NonNullable<

@@ -91,7 +91,11 @@ and render previews.
 
 `AnnotationOverlayStyle` remains a core renderer-neutral contract so browser
 and React Native hosts share editing vocabulary. Pixi display objects and other
-renderer implementation types must never appear in public declarations.
+renderer implementation types must never appear in public declarations. Live
+editing preview values may resolve from the preview detection and
+`AnnotationEditingPreviewStyleContext`, allowing move and resize presentation
+to retain the edited annotation's class styling independently of host tool
+state.
 
 ## Detection Pipeline
 

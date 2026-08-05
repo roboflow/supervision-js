@@ -76,6 +76,55 @@ describe("Pixi annotation overlay presentation", () => {
     });
   });
 
+  it("resolves resize previews from the annotation being edited", () => {
+    const graphics = createGraphicsMock();
+    const preview = {
+      className: "person",
+      id: "person-1",
+      rect: { height: 20, width: 30, x: 40, y: 50 },
+    };
+    const engine = {
+      getState: () => ({
+        activeDetectionId: "person-1",
+        activeHandleId: "resize-right",
+        kind: AnnotationGestureStateKind.Resizing,
+        pointerId: 1,
+        preview,
+      }),
+      hasCreationTool: () => false,
+    };
+    const resolveStroke = vi.fn((detection) => ({
+      alpha: 1,
+      color: detection.className === "person" ? 0xb6ff00 : 0x8b2cff,
+      width: 2,
+    }));
+    const layer = createPixiAnnotationOverlayLayer(engine as never, {
+      editingPreview: { stroke: resolveStroke },
+    });
+
+    layer.attachGraphics(graphics as never);
+    layer.draw({
+      frame: undefined,
+      marquee: null,
+      mediaHeight: 100,
+      mediaWidth: 100,
+      now: 0,
+      pointer: null,
+      selectedDetectionIds: [],
+      viewportScale: 2,
+    });
+
+    expect(resolveStroke).toHaveBeenCalledWith(preview, {
+      gestureKind: AnnotationGestureStateKind.Resizing,
+      viewportScale: 2,
+    });
+    expect(graphics.stroke).toHaveBeenCalledWith({
+      alpha: 1,
+      color: 0xb6ff00,
+      width: 1,
+    });
+  });
+
   it("renders polygon creation as an open path without ancillary bounds", () => {
     const graphics = createGraphicsMock();
     const preview = {

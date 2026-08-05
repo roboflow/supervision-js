@@ -1148,6 +1148,14 @@ export async function createPixiMediaScene(
   function drawAnnotationOverlay() {
     const frame = options.detectionTimeline.selectFrame(currentMediaTime);
     const interactionState = interactionLayer?.getState();
+    const editingState = options.editingEngine?.getState();
+    labelLayer?.drawCreationPreview(
+      editingState?.kind === AnnotationGestureStateKind.Creating
+        ? editingState.preview
+        : null,
+      currentMediaTime,
+      viewportScale,
+    );
     annotationOverlayLayer.draw({
       frame,
       marquee: interactionState?.marqueeRect ?? null,

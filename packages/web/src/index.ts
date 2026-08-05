@@ -123,6 +123,7 @@ export type {
   KeypointStyleContext,
 } from "supervision-js-core";
 export type {
+  AnnotationEditingPreviewStyleContext,
   AnnotationOverlayStyle,
   AnnotationVisibility,
   MediaDisplayAdjustments,

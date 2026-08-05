@@ -117,14 +117,37 @@ export interface PreviewOverlayData {
   readonly points?: readonly PreviewOverlayPoint[];
 }
 
+/** Presentation context for a live annotation editing preview. */
+export interface AnnotationEditingPreviewStyleContext {
+  readonly gestureKind: AnnotationGestureStateKind;
+  /** Media-to-screen scale. Screen-space style values are divided by this. */
+  readonly viewportScale: number;
+}
+
 /** Renderer-neutral presentation for editing affordances and previews. */
 export interface AnnotationOverlayStyle {
   readonly editingPreview?: {
-    readonly stroke?: BoxStrokeStyle;
+    /**
+     * Static or annotation-aware preview styling. Resolver support keeps
+     * creation, move, and resize previews aligned with the annotation class.
+     */
+    readonly stroke?: DetectionStyleValue<
+      BoxStrokeStyle,
+      AnnotationEditingPreviewStyleContext
+    >;
     /** Fill for box creation previews. */
-    readonly boxFill?: BoxFillStyle;
-    readonly polygonFill?: BoxFillStyle;
-    readonly closeZoneStroke?: BoxStrokeStyle;
+    readonly boxFill?: DetectionStyleValue<
+      BoxFillStyle,
+      AnnotationEditingPreviewStyleContext
+    >;
+    readonly polygonFill?: DetectionStyleValue<
+      BoxFillStyle,
+      AnnotationEditingPreviewStyleContext
+    >;
+    readonly closeZoneStroke?: DetectionStyleValue<
+      BoxStrokeStyle,
+      AnnotationEditingPreviewStyleContext
+    >;
   };
   readonly selectionHandle?: {
     /**

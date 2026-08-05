@@ -130,6 +130,48 @@ describe("pixi label layer", () => {
     expect(label.y).toBe(57);
   });
 
+  it("renders creation labels with the committed label style", () => {
+    const resolve = vi.fn(createStableLabelStyle().resolve.bind(null));
+    const layer = createPixiLabelLayer({
+      Container: FakeContainer as never,
+      Graphics: FakeGraphics as never,
+      Text: FakeText as never,
+      detectionTimeline: createTimeline([firstFrame]),
+      labelStyle: { resolve },
+    });
+    const container = layer.createContainer() as FakeContainer;
+    const preview = {
+      className: "player",
+      id: "draft-player",
+      rect: { height: 20, width: 10, x: 45, y: 40 },
+    };
+
+    layer.drawFrame(1);
+    layer.drawCreationPreview(preview, 1, 2);
+
+    const [, , previewBackground, previewLabel] = container.children as [
+      FakeGraphics,
+      FakeText,
+      FakeGraphics,
+      FakeText,
+    ];
+    expect(resolve).toHaveBeenLastCalledWith(
+      preview,
+      expect.objectContaining({
+        ephemeral: false,
+        isCreating: true,
+        mediaTime: 1,
+        viewportScale: 2,
+      }),
+    );
+    expect(previewBackground.x).toBe(40);
+    expect(previewLabel.visible).toBe(true);
+
+    layer.drawCreationPreview(null, 1, 2);
+    expect(previewBackground.visible).toBe(false);
+    expect(previewLabel.visible).toBe(false);
+  });
+
   it("does not add an implicit top gutter when the scene supplies viewport scale", () => {
     const timeline = createTimeline([firstFrame]);
     const layer = createPixiLabelLayer({

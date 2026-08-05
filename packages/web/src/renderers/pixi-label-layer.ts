@@ -67,6 +67,12 @@ export interface PixiLabelLayerOptions {
 export interface PixiLabelLayer {
   createContainer(): PixiContainer;
   drawFrame(mediaTime: number, viewportScale?: number): void;
+  /** Draw a transient creation label with the same style as committed data. */
+  drawCreationPreview(
+    detection: Detection | null,
+    mediaTime: number,
+    viewportScale?: number,
+  ): void;
   setLabelStyle(labelStyle: LabelStyle | null): void;
   translateDetection(id: string | number, x: number, y: number): boolean;
   getDetectionLabelBounds(id: string | number): {
@@ -100,6 +106,7 @@ export function createPixiLabelLayer({
   let drawnStyleVersion = -1;
   let lastViewportScale = 0;
   let hitRects: LabelHitRect[] = [];
+  let previewEntry: PixiLabelEntry | undefined;
   const entriesByDetectionKey = new Map<string, PixiLabelEntry>();
   const boundsByDetectionKey = new Map<string, LabelLayoutRect>();
 
@@ -116,29 +123,40 @@ export function createPixiLabelLayer({
     }
   };
 
+  const createEntry = () => {
+    const entry: PixiLabelEntry = {
+      background: new Graphics(),
+      backgroundHeight: 0,
+      backgroundKey: null,
+      backgroundBaseX: 0,
+      backgroundBaseY: 0,
+      backgroundWidth: 0,
+      label: new Text({ text: "", style: {} }),
+      labelAlpha: null,
+      labelBaseX: 0,
+      labelBaseY: 0,
+      text: null,
+      textStyleKey: null,
+    };
+    container?.addChild(entry.background, entry.label);
+    return entry;
+  };
+
   const ensureEntry = (index: number) => {
     let entry = entries[index];
 
     if (!entry) {
-      entry = {
-        background: new Graphics(),
-        backgroundHeight: 0,
-        backgroundKey: null,
-        backgroundBaseX: 0,
-        backgroundBaseY: 0,
-        backgroundWidth: 0,
-        label: new Text({ text: "", style: {} }),
-        labelAlpha: null,
-        labelBaseX: 0,
-        labelBaseY: 0,
-        text: null,
-        textStyleKey: null,
-      };
+      entry = createEntry();
       entries[index] = entry;
-      container?.addChild(entry.background, entry.label);
     }
 
     return entry;
+  };
+
+  const hideCreationPreview = () => {
+    if (!previewEntry) return;
+    previewEntry.background.visible = false;
+    previewEntry.label.visible = false;
   };
 
   const redrawFrame = (
@@ -225,6 +243,33 @@ export function createPixiLabelLayer({
       redrawFrame(frame, mediaTime, resolvedViewportScale);
     },
 
+    drawCreationPreview(detection, mediaTime, viewportScale) {
+      if (!detection || !currentLabelStyle) {
+        hideCreationPreview();
+        return;
+      }
+
+      const resolvedViewportScale = viewportScale ?? 1;
+      const frame: DetectionFrame = { detections: [detection], mediaTime };
+      const instruction = currentLabelStyle.resolve(detection, {
+        detectionIndex: 0,
+        ...resolveContextState?.(detection),
+        ephemeral: false,
+        frame,
+        isCreating: true,
+        mediaTime,
+        viewportScale: resolvedViewportScale,
+      });
+
+      if (!instruction) {
+        hideCreationPreview();
+        return;
+      }
+
+      previewEntry ??= createEntry();
+      drawInstruction(previewEntry, instruction, resolvedViewportScale);
+    },
+
     setLabelStyle(nextLabelStyle) {
       currentLabelStyle = nextLabelStyle ?? undefined;
       styleVersion += 1;
@@ -288,7 +333,9 @@ export function createPixiLabelLayer({
 
     destroy() {
       hideEntriesFrom(0);
+      hideCreationPreview();
       entries.length = 0;
+      previewEntry = undefined;
       clearLayout();
       container = undefined;
     },

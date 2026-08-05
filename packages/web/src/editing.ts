@@ -47,6 +47,7 @@ export type {
   AnnotationCreationTool,
   AnnotationEditingEngine,
   AnnotationEditingEngineOptions,
+  AnnotationEditingPreviewStyleContext,
   AnnotationEditingState,
   AnnotationFrameMutation,
   AnnotationFrameMutationListener,

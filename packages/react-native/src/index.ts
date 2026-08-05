@@ -61,6 +61,7 @@ export type {
   BasePolygonStyleOptions,
   BasePolylineStyleOptions,
   BaseKeypointStyleOptions,
+  AnnotationEditingPreviewStyleContext,
   AnnotationOverlayStyle,
   BoxDrawInstruction,
   BoxStyle,
