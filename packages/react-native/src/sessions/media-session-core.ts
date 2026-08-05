@@ -92,10 +92,10 @@ export async function createMediaSession<TPayload, TPacket extends object>(
       });
     }
 
-    const status = error
-      ? MediaSessionStatus.Error
-      : destroyed
-        ? MediaSessionStatus.Destroyed
+    const status = destroyed
+      ? MediaSessionStatus.Destroyed
+      : error
+        ? MediaSessionStatus.Error
         : !opened
           ? MediaSessionStatus.Loading
           : processing

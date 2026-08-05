@@ -345,6 +345,7 @@ describe("createMediaSession", () => {
     expect(session.getState().status).toBe(MediaSessionStatus.Error);
 
     await session.destroy();
+    expect(session.getState().status).toBe(MediaSessionStatus.Destroyed);
 
     const seekSource = new FakeMediaFrameSource<FakeFrame>();
     const seekSession = await createMediaSession({
