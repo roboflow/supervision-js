@@ -308,7 +308,23 @@ function createDemoFocusStyle(settings: DemoPresentationSettings): FocusStyle {
 
   return {
     resolve(context) {
-      const instruction = baseStyle.resolve(context);
+      const contextWithVisiblePicks =
+        settings.focusTargetMode === FocusTargetMode.Ambient
+          ? {
+              ...context,
+              hoveredPick:
+                context.hoveredPick &&
+                passesConfidenceThreshold(context.hoveredPick.detection, settings)
+                  ? context.hoveredPick
+                  : null,
+              selectedPick:
+                context.selectedPick &&
+                passesConfidenceThreshold(context.selectedPick.detection, settings)
+                  ? context.selectedPick
+                  : null,
+            }
+          : context;
+      const instruction = baseStyle.resolve(contextWithVisiblePicks);
 
       if (!instruction) {
         return undefined;

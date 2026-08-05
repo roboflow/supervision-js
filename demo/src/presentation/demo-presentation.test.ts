@@ -583,6 +583,25 @@ describe("demo presentation", () => {
       targets: [expect.objectContaining({ detection: visibleDetection })],
     });
 
+    expect(
+      presentation.focusStyle?.resolve({
+        frame,
+        hoveredPick: null,
+        mediaTime: 0,
+        selectedPick: {
+          detection: filteredDetection,
+          detectionIndex: 1,
+          frame,
+          mediaTime: 0,
+          point: { x: 50, y: 50 },
+          target: DetectionPickTarget.Box,
+        },
+      }),
+    ).toMatchObject({
+      ambient: true,
+      targets: [expect.objectContaining({ detection: visibleDetection })],
+    });
+
     const hiddenPresentation = createDemoPresentation({
       ...defaultDemoPresentationSettings,
       confidenceThreshold: 1,
