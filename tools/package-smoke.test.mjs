@@ -168,6 +168,20 @@ const expectedReactNativeRuntimeExports = [
   "resolveReactNativeLiveIdMaskUniforms",
 ];
 
+test("browser package manifest is ready for public npm publishing", () => {
+  const manifest = JSON.parse(
+    readFileSync(
+      new URL("../packages/web/package.json", import.meta.url),
+      "utf8",
+    ),
+  );
+
+  assert.equal(manifest.name, "supervision-js");
+  assert.match(manifest.version, /^(?!0\.0\.0$)\d+\.\d+\.\d+(?:-.+)?$/);
+  assert.notEqual(manifest.private, true);
+  assert.equal(manifest.publishConfig?.access, "public");
+});
+
 test("built core package imports without browser APIs", async () => {
   const entrypoint = await import("../packages/core/dist/index.js");
 

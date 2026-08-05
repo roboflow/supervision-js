@@ -11,6 +11,7 @@
  */
 import { spawnSync } from "node:child_process";
 import {
+  copyFileSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -170,6 +171,10 @@ function clearPreviousArchives(outDir) {
   }
 }
 
+function copyPackageLicense(packageDir) {
+  copyFileSync(path.join(rootDir, "LICENSE"), path.join(packageDir, "LICENSE"));
+}
+
 function main() {
   const options = parseArgs(process.argv.slice(2));
 
@@ -198,6 +203,7 @@ function main() {
       path.join(packageDir, "node_modules", corePackageName),
       1,
     );
+    copyPackageLicense(packageDir);
 
     const coreManifest = readManifest(
       path.join(packageDir, "node_modules", corePackageName, "package.json"),

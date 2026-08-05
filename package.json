@@ -99,6 +99,7 @@
     "package:smoke": "node --test tools/package-smoke.test.mjs",
     "package:tarball": "node tools/pack-web-tarball.mjs",
     "package:tarball:smoke": "node --test tools/tarball-smoke.test.mjs",
+    "package:publish:dry-run": "npm run package:tarball && npm publish ./artifacts/supervision-js-*.tgz --access public --tag next --dry-run",
     "test:watch": "vitest",
     "lint": "eslint .",
     "format": "prettier --write .",

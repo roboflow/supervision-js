@@ -21,7 +21,7 @@ import { createMediaSession } from "supervision-js";
 ```
 
 The first npm release is still being prepared. Until then, install the portable
-`supervision-js-0.0.0.tgz` archive built from this repository. See
+`supervision-js-0.1.0.tgz` archive built from this repository. See
 [Application Integration](application-integration.md) for the supported
 consumer workflow.
 

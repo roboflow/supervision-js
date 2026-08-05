@@ -16,6 +16,8 @@ Before making project-direction or architecture changes, read:
 - [`react-native-architecture.md`](react-native-architecture.md)
 - [`react-native-live-rendering.md`](react-native-live-rendering.md)
 - [`tarball-packaging.md`](tarball-packaging.md)
+- [`npm-release.md`](npm-release.md) when changing package publication or
+  release automation
 - [`../public/guides/public-api.md`](../public/guides/public-api.md)
 
 Those docs define the current product intent: maintain a focused, session-first
@@ -105,12 +107,17 @@ Run from the repository root:
 - `npm run benchmark:masks`
 - `npm run package:tarball`
 - `npm run package:tarball:smoke`
+- `npm run package:publish:dry-run`
 
 `package:tarball` builds the core and browser packages and writes one portable
 `artifacts/supervision-js-<version>.tgz` with the internal core bundled inside.
 `package:tarball:smoke` installs that archive in a temporary consumer outside
 the repository; it needs the registry and is not part of `npm run verify`. See
 [`tarball-packaging.md`](tarball-packaging.md).
+
+The manual npm workflow publishes that generated tarball after environment
+approval; it never publishes `packages/web` directly. See
+[`npm-release.md`](npm-release.md) before running or modifying it.
 
 For focused iterative work, use separate terminals:
 
