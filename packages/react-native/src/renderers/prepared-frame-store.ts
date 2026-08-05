@@ -7,6 +7,7 @@
  * disposed while its UI render still references the previous shared value.
  */
 export class PreparedFrameStore<TPacket extends object> {
+  __workletClass = true;
   private activePacket: TPacket | null = null;
   private retiredPacket: TPacket | null = null;
   private readonly releasedPackets = new WeakSet<object>();
