@@ -58,9 +58,11 @@ export async function openMediabunnyMediaSource(
 
     const packetStatsPromise =
       typeof primaryVideoTrack.computePacketStats === "function"
-        ? primaryVideoTrack.computePacketStats(FRAME_RATE_SAMPLE_PACKET_COUNT, {
-            skipLiveWait: true,
-          })
+        ? primaryVideoTrack
+            .computePacketStats(FRAME_RATE_SAMPLE_PACKET_COUNT, {
+              skipLiveWait: true,
+            })
+            .catch(() => null)
         : Promise.resolve(null);
     const [displayWidth, displayHeight, firstTimestamp, packetStats] =
       await Promise.all([

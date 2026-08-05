@@ -442,6 +442,21 @@ describe("normalizeMedia", () => {
     source.input.dispose();
   });
 
+  it("keeps media usable when optional packet statistics cannot be read", async () => {
+    const normalized = await normalizeMediaProgressively(
+      new Blob(["source"], { type: "video/mp4" }),
+    );
+    normalizationMock.primaryVideoTrack.computePacketStats.mockRejectedValueOnce(
+      new Error("packet statistics unavailable"),
+    );
+
+    const source = await normalized.rendererSource.open();
+
+    expect(source.metadata.estimatedFrameCount).toBeNull();
+    expect(source.metadata.estimatedFrameRate).toBeNull();
+    source.input.dispose();
+  });
+
   it("rejects already-aborted signals before conversion starts", async () => {
     const controller = new AbortController();
     controller.abort();
