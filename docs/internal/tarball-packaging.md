@@ -13,7 +13,7 @@ That command builds `supervision-js-core` and `supervision-js`, then writes a
 single archive to the ignored `artifacts/` directory:
 
 ```
-artifacts/supervision-js-0.0.0.tgz
+artifacts/supervision-js-0.1.0.tgz
 ```
 
 `artifacts/` is cleared of previous `supervision-js-*.tgz` archives on every
@@ -29,7 +29,7 @@ node tools/pack-web-tarball.mjs --skip-build --out-dir=/tmp/supervision-js
 Copy the archive next to the consuming project and install it by path:
 
 ```sh
-npm install ./supervision-js-0.0.0.tgz
+npm install ./supervision-js-0.1.0.tgz
 ```
 
 Both supported entrypoints then resolve normally:
@@ -85,3 +85,14 @@ the OS temp directory — outside this repository — to check that:
 a Vite build, so it is deliberately kept out of `npm run verify`. Run it when
 changing packaging, dependencies, or package entrypoints. Point it at another
 archive with `SUPERVISION_JS_TARBALL=<path>`.
+
+## npm Publishing
+
+The portable archive is the only artifact that may be published. Do not run
+`npm publish` from `packages/web`: its workspace manifest intentionally points
+at the private core package through `file:../core`.
+
+See [npm-release.md](npm-release.md) for the one-time npm ownership bootstrap,
+trusted-publisher configuration, and the protected manual release workflow.
+Use `npm run package:publish:dry-run` to recreate the artifact and validate the
+exact local archive argument that npm will receive, without publishing it.

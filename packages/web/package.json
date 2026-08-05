@@ -1,8 +1,7 @@
 {
   "name": "supervision-js",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Browser-native computer vision media rendering and annotation engine.",
-  "private": true,
   "repository": {
     "type": "git",
     "url": "git+https://github.com/roboflow/supervision-js.git"
@@ -22,6 +21,9 @@
   ],
   "type": "module",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",

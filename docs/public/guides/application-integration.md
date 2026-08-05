@@ -25,7 +25,7 @@ npm run package:tarball
 The archive is written to:
 
 ```text
-artifacts/supervision-js-0.0.0.tgz
+artifacts/supervision-js-0.1.0.tgz
 ```
 
 Copy that archive into a stable path in the consuming application, then install
@@ -35,11 +35,11 @@ it from there:
 my-app/
 ├── package.json
 └── vendor/
-    └── supervision-js-0.0.0.tgz
+    └── supervision-js-0.1.0.tgz
 ```
 
 ```sh
-npm install ./vendor/supervision-js-0.0.0.tgz
+npm install ./vendor/supervision-js-0.1.0.tgz
 ```
 
 Keeping the archive at a stable project-relative path is important:

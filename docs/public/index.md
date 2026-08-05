@@ -21,7 +21,7 @@ npm install
 npm run package:tarball
 
 # In the consuming application
-npm install ./vendor/supervision-js-0.0.0.tgz
+npm install ./vendor/supervision-js-0.1.0.tgz
 ```
 
 The archive includes the internal core dependency. Consumers should import the
