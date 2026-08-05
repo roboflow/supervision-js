@@ -1,4 +1,7 @@
-import { createArrayDetectionFrameSource } from "supervision-js-core";
+import {
+  createArrayDetectionFrameSource,
+  createDefaultAnnotationPresentation,
+} from "supervision-js-core";
 import {
   createBufferedDetectionTimeline,
   createIdleDetectionBufferState,
@@ -50,7 +53,14 @@ export async function createMediaRendererCore(
       "playbackRate must be a finite number greater than zero.",
     );
   }
-  let currentPresentation: MediaRendererPresentation = {
+  const defaultPresentation = createDefaultAnnotationPresentation();
+  const resolvePresentation = (
+    presentation: MediaRendererPresentation,
+  ): MediaRendererPresentation => ({
+    ...defaultPresentation,
+    ...presentation,
+  });
+  let currentPresentation = resolvePresentation({
     annotationOverlayStyle: options.annotationOverlayStyle,
     backgroundColor: options.backgroundColor,
     boxStyle: options.boxStyle,
@@ -62,7 +72,7 @@ export async function createMediaRendererCore(
     polygonStyle: options.polygonStyle,
     polylineStyle: options.polylineStyle,
     visibility: options.visibility,
-  };
+  });
   let detectionTimeline: BufferedDetectionTimeline | undefined;
   let mediaScene: MediaRendererScene | undefined;
   const runtimeState = createMediaRendererRuntimeState({
@@ -286,7 +296,7 @@ export async function createMediaRendererCore(
         return;
       }
 
-      currentPresentation = presentation;
+      currentPresentation = resolvePresentation(presentation);
       const presentedSample = mediaScene?.setPresentation(
         currentPresentation,
         runtimeState.currentTime(),
@@ -410,29 +420,29 @@ export async function createMediaRendererCore(
     });
     const mediaDimensions = runtimeState.recordMediaMetadata(metadata);
     mediaScene = await providers.createScene({
-      annotationOverlayStyle: options.annotationOverlayStyle,
-      backgroundColor: options.backgroundColor,
-      boxStyle: options.boxStyle,
+      annotationOverlayStyle: currentPresentation.annotationOverlayStyle,
+      backgroundColor: currentPresentation.backgroundColor,
+      boxStyle: currentPresentation.boxStyle,
       canInteract: () => canInteract(options, runtimeState.isPlaybackActive()),
       container: options.container,
       detectionTimeline,
       diagnostics: options.diagnostics,
       editingEngine: options.editingEngine,
       fit,
-      focusStyle: options.focusStyle,
+      focusStyle: currentPresentation.focusStyle,
       interaction: options.interaction,
-      interactionStyle: options.interactionStyle,
-      keypointStyle: options.keypointStyle,
-      labelStyle: options.labelStyle,
+      interactionStyle: currentPresentation.interactionStyle,
+      keypointStyle: currentPresentation.keypointStyle,
+      labelStyle: currentPresentation.labelStyle,
       maskBrush:
         options.createMaskBrush?.(mediaDimensions) ?? options.maskBrush,
-      maskStyle: options.maskStyle,
+      maskStyle: currentPresentation.maskStyle,
       maxDevicePixelRatio: options.maxDevicePixelRatio,
-      polygonStyle: options.polygonStyle,
-      polylineStyle: options.polylineStyle,
+      polygonStyle: currentPresentation.polygonStyle,
+      polylineStyle: currentPresentation.polylineStyle,
       previewOverlay: options.previewOverlay,
       renderPreparation: options.renderPreparation,
-      visibility: options.visibility,
+      visibility: currentPresentation.visibility,
     });
     runtimeState.setRendererBackend(mediaScene.rendererBackend);
     detectionTimeline.setTimelineContext?.({

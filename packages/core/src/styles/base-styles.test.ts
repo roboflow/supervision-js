@@ -99,7 +99,7 @@ describe("base presentation styles", () => {
     };
 
     expect(staticStyle.artifactKey).toBe(
-      "base:65382:fillAndStroke:16777215:1:1",
+      "base:65382:1:fillAndStroke:16777215:1:1",
     );
     expect(staticStyle.opacity).toBe(0.7);
     expect(dynamicStyle.artifactKey).toBeUndefined();
@@ -141,6 +141,30 @@ describe("base presentation styles", () => {
     expect(style.opacity).toBe(0.25);
   });
 
+  it("keeps mask fill alpha independent from its outline", () => {
+    const style = new BaseMaskStyle({
+      color: 0x22c55e,
+      fillAlpha: 0.45,
+      opacity: 1,
+      stroke: { alpha: 1, width: 2 },
+    });
+    const mask = {
+      counts: "04",
+      encoding: DetectionMaskEncoding.CompressedRle,
+      height: 2,
+      width: 2,
+    } as const;
+
+    expect(
+      style.resolve({ mask }, { detectionIndex: 0, frame, mediaTime: 0.25 }),
+    ).toEqual({
+      alpha: 0.45,
+      color: 0x22c55e,
+      mask,
+      stroke: { alpha: 1, color: 0x22c55e, width: 2 },
+    });
+  });
+
   it("defaults stroke-only masks to a visible same-color outline", () => {
     const style = new BaseMaskStyle({
       color: 0x38bdf8,
@@ -153,7 +177,7 @@ describe("base presentation styles", () => {
       width: 2,
     } as const;
 
-    expect(style.artifactKey).toBe("base:3718648:strokeOnly:3718648:1:1");
+    expect(style.artifactKey).toBe("base:3718648:1:strokeOnly:3718648:1:1");
     expect(
       style.resolve({ mask }, { detectionIndex: 0, frame, mediaTime: 0.25 }),
     ).toEqual({
@@ -227,6 +251,21 @@ describe("base presentation styles", () => {
       offsetY: 4,
       text: "person",
     });
+  });
+
+  it("preserves top-only label corner configuration", () => {
+    const style = new BaseLabelStyle({
+      background: { color: 0x312e81, topCornersOnly: true },
+    });
+    const detection = {
+      className: "person",
+      rect: { height: 40, width: 20, x: 10, y: 12 },
+    };
+
+    expect(
+      style.resolve(detection, { detectionIndex: 0, frame, mediaTime: 0.25 })
+        ?.background,
+    ).toMatchObject({ topCornersOnly: true });
   });
 
   it("keeps simple static box styles terse", () => {
