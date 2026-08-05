@@ -18,8 +18,8 @@ Before making project-direction or architecture changes, read:
 - [`tarball-packaging.md`](tarball-packaging.md)
 - [`../public/guides/public-api.md`](../public/guides/public-api.md)
 
-Those docs define the current product intent: prove the browser rendering
-foundation before designing a broad annotation framework.
+Those docs define the current product intent: maintain a focused, session-first
+browser API without promising a broad Python-parity annotation framework.
 
 ## Project Direction
 
@@ -28,8 +28,8 @@ foundation before designing a broad annotation framework.
   future wrapper packages.
 - Keep media and overlays visually composed inside the renderer-owned scene.
 - Treat PixiJS as the first 2D backend implementation, not as the public architecture.
-- Avoid final public APIs, primitive hierarchies, or annotation schemas until
-  renderer milestones create real constraints.
+- Keep the documented public API deliberate. Add primitives or schemas only when
+  renderer constraints and real consumer use cases justify them.
 
 ## Repo Shape
 
@@ -107,7 +107,7 @@ Run from the repository root:
 - `npm run package:tarball:smoke`
 
 `package:tarball` builds the core and browser packages and writes one portable
-`artifacts/supervision-js-<version>.tgz` with the private core bundled inside.
+`artifacts/supervision-js-<version>.tgz` with the internal core bundled inside.
 `package:tarball:smoke` installs that archive in a temporary consumer outside
 the repository; it needs the registry and is not part of `npm run verify`. See
 [`tarball-packaging.md`](tarball-packaging.md).

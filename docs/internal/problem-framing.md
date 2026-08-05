@@ -1,10 +1,9 @@
 # Problem Framing
 
-`supervision-js` is intended to become the browser and TypeScript-first
-counterpart to Roboflow's Python `supervision` ecosystem. The immediate goal is
-not to recreate the full Python library in JavaScript. The immediate goal is to
-prove that a browser-native rendering foundation can handle serious computer
-vision media workloads.
+`supervision-js` is the browser and TypeScript-first subset of Roboflow's
+Python `supervision` ecosystem. It does not recreate the full Python library in
+JavaScript. Its job is to provide the browser-native rendering foundation needed
+for serious computer vision media workloads.
 
 ## The Real Problem
 
@@ -36,9 +35,9 @@ The first credible uses should be small but real:
 - future open-source workflows where users need a reliable, framework-agnostic
   rendering library.
 
-The project should feel production-minded from the beginning, even while it is a
-private stealth prototype. That means careful boundaries, measured performance,
-and plain JavaScript usability alongside TypeScript-first authoring.
+The project should feel production-minded from the beginning: careful
+boundaries, measured performance, and plain JavaScript usability alongside
+TypeScript-first authoring.
 
 ## Non-Goals For The First Phase
 
@@ -51,9 +50,9 @@ The first phase should not design the whole product surface. In particular:
 - do not route the rendering hot path through React state;
 - do not visually compose media as a DOM element underneath a separate
   annotation renderer;
-- do not settle final npm package naming or ownership;
-- do not assume the repo will remain under a personal account or move to
-  Roboflow until the prototype earns that decision.
+- do not promise full Python Supervision API parity;
+- do not make experimental React Native work part of the browser package
+  compatibility promise.
 
 The safe first bet is to prove the rendering engine, then let the annotation
 model emerge from measured needs.

@@ -9,10 +9,11 @@ summary: The installation, runtime, data, and lifecycle contract for integrating
 Use this page as the integration contract for humans and coding agents adding
 `supervision-js` to another web application.
 
-## Current Distribution
+## Installation Before The First npm Release
 
-`supervision-js` is a private preview package. It is not published to the npm
-registry, and there is no CDN, UMD, or `<script>` build.
+`supervision-js` is not published to the npm registry yet, and there is no CDN,
+UMD, or `<script>` build. Build a portable archive from this public repository
+until the first npm release is available.
 
 Build the portable archive from the `supervision-js` repository:
 
@@ -47,7 +48,7 @@ must be able to read it. Commit the archive when the consuming repository allows
 vendored dependencies; otherwise store it in the team's artifact system and
 make retrieval part of the build.
 
-The archive contains the private `supervision-js-core` package. Consumers must
+The archive contains the internal `supervision-js-core` package. Consumers must
 not install `supervision-js-core` separately.
 
 ## Supported Consumer
@@ -63,7 +64,7 @@ The renderer requires browser APIs. In an SSR application, create sessions only
 on the client after the container element exists. The package can be imported by
 build tooling, but `createMediaSession()` must not run during server rendering.
 
-Do not import Pixi, Mediabunny, worker files, or private core modules. Import the
+Do not import Pixi, Mediabunny, worker files, or internal core modules. Import the
 supported entrypoints:
 
 ```ts

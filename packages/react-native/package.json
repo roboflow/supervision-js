@@ -4,7 +4,7 @@
   "description": "Experimental React Native rendering adapter for supervision-js core primitives.",
   "private": true,
   "type": "module",
-  "license": "Apache-2.0",
+  "license": "MIT",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",

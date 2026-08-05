@@ -1,41 +1,41 @@
 # supervision-js
 
-`supervision-js` is a browser-native computer vision media rendering library.
-It owns media playback and annotation rendering in one Pixi-powered scene so
-detections are selected from the same timing reference as the displayed frame.
+`supervision-js` is a browser-native TypeScript library for interactive
+computer vision media applications. It is the browser-focused subset of
+[Roboflow Supervision](https://github.com/roboflow/supervision): focused on
+media sessions, detection rendering, styles, interaction, and editing rather
+than Python API parity.
 
-The main API is `createMediaSession()`. Start there.
+The main API is `createMediaSession()`. It renders media and annotations in one
+renderer-owned scene, so the visible media frame and its detections share the
+same timing reference.
 
-The current `supervision-js` package is the browser package. Internally, it is
-built on a platform-neutral core package so detections, timelines, styles, and
-picking contracts can eventually support other renderers without changing the
-browser quickstart.
+## Installation
 
-## Install The Private Preview
-
-The package is currently distributed as a portable tarball, not through the npm
-registry. Build it in the library repository, copy it into a stable path in the
-consumer, and install that path:
+The first npm release is still being prepared. Build the portable archive from
+this repository and install it in a browser application:
 
 ```sh
-# In the supervision-js repository:
+# In this repository
+npm install
 npm run package:tarball
 
-# In the consuming application:
+# In the consuming application
 npm install ./vendor/supervision-js-0.0.0.tgz
 ```
 
-The archive already bundles the private core package. Do not install
-`supervision-js-core` or the old `supervision-web` name.
+The archive includes the internal core dependency. Consumers should import the
+public browser package only:
 
-Read [Application Integration](guides/application-integration.md) before
-changing another app. It is the complete installation, runtime, data, lifecycle,
-and verification contract for humans and coding agents.
+```ts
+import { createMediaSession } from "supervision-js";
+import { createMaskBrushEditor } from "supervision-js/editing";
+```
 
-## Quickstart
+Read [Application Integration](guides/application-integration.md) for the
+complete browser, lifecycle, and verification contract.
 
-Render media inside a container with the default renderer, media preparation,
-playback state, and render-preparation behavior:
+## Quick Start
 
 ```ts
 import { createMediaSession } from "supervision-js";
@@ -49,10 +49,7 @@ if (!container) {
 const session = await createMediaSession({
   container,
   media: fileOrUrl,
-  renderer: {
-    autoPlay: true,
-    loop: true,
-  },
+  renderer: { autoPlay: true, loop: true },
 });
 
 session.subscribe((state) => {
@@ -60,100 +57,25 @@ session.subscribe((state) => {
 });
 ```
 
-That is enough to get a renderer-owned media scene. The session chooses the
-default browser media path, Pixi renderer, playback loop, and render-preparation
-settings. The container must have a non-zero width and height.
+## Capabilities
 
-## Add Detections Later
+The supported browser surface covers images, video, and browser media streams;
+static and streaming detections; boxes, masks, polygons, polylines, keypoints,
+and labels; presentation styles; picking; and advanced annotation editing.
 
-For model outputs that arrive after the media session starts, create an
-appendable detection source. The session stores detections in a cold source,
-hydrates a hot window near playback, prepares renderer-friendly artifacts, and
-presents only the active frame.
+React Native is experimental and separately versioned. It is not a dependency
+of the browser package or a compatibility promise.
 
-```ts
-const session = await createMediaSession({
-  container,
-  media: file,
-  detections: {
-    appendable: {
-      datasetId: "upload-session-1",
-    },
-  },
-  renderer: {
-    autoPlay: true,
-  },
-});
+## Learn More
 
-await session.appendDetectionFrames([
-  {
-    frameIndex: 0,
-    mediaTime: 0,
-    detections: [
-      {
-        id: "person-1",
-        className: "person",
-        confidence: 0.92,
-        rect: { x: 240, y: 290, width: 240, height: 420 },
-      },
-    ],
-  },
-]);
-```
-
-`rect.x` and `rect.y` are the box center in media pixels (not its top-left
-corner).
-
-## What The Session Owns
-
-- media preparation and optional normalization;
-- Pixi scene lifecycle;
-- playback, seek, pause, and loop behavior;
-- cold detection storage;
-- hot detection buffering around the current time;
-- prepared render artifacts such as PNG ID-mask frames;
-- presentation style updates;
-- interaction and picking;
-- loading, processing, buffering, and error state.
-
-## What The Host App Owns
-
-- user interface;
-- file upload;
-- model and API calls;
-- authentication and API keys;
-- business workflows;
-- deciding when detections should be appended.
-
-## Why Renderer-Owned Composition Matters
-
-The media frame and detections are not split between a DOM `<video>` and a
-separate overlay canvas. `supervision-js` presents media and annotations in the
-same renderer-owned visual system. That keeps playback and detections tied to
-one timing source and avoids drift caused by separate composition layers.
-
-## Where To Go Next
-
-- Start with [Application Integration](guides/application-integration.md) when
-  adding the package to another app.
-- Read [Media Sessions](guides/media-sessions.md) for the working session model.
-- Read [Public API](guides/public-api.md) for the intended package boundary
-  between primary APIs, advanced APIs, and internals.
-- Read [Media Preparation](guides/media-preparation.md) for probe,
-  normalization, and progressive upload handling.
-- Read [Detections And Rendering](guides/detections-and-rendering.md) for the
-  cold, hot, prepared, and active render pipeline.
-- Read [Presentation Styles](guides/presentation-styles.md) for the
-  `supervision-js` equivalent of Python supervision annotators.
-- Use the recipes for common integrations:
-  [React Integration](recipes/react-integration.md),
-  [Static Detections](recipes/static-detections.md),
-  [Streaming Detections](recipes/streaming-detections.md),
-  [Multiple Detection Sources](recipes/multiple-detection-sources.md),
-  [Interactive Picking](recipes/interactive-picking.md), and
-  [Progressive Upload Normalization](recipes/progressive-upload-normalization.md).
-- Read [Session Lifecycle](recipes/session-lifecycle.md) for replacing media,
-  cleaning up viewers, and recovering after session errors.
-- Browse the generated API reference by domain. The Modules page groups exports
-  into Media Sessions, Detections, Rendering, Styles, Interactions, Media
-  Preparation, and Editing.
+- [Application Integration](guides/application-integration.md)
+- [Media Sessions](guides/media-sessions.md)
+- [Public API](guides/public-api.md)
+- [Media Preparation](guides/media-preparation.md)
+- [Detections And Rendering](guides/detections-and-rendering.md)
+- [Presentation Styles](guides/presentation-styles.md)
+- [React Integration](recipes/react-integration.md)
+- [Static Detections](recipes/static-detections.md)
+- [Streaming Detections](recipes/streaming-detections.md)
+- [Interactive Picking](recipes/interactive-picking.md)
+- [Session Lifecycle](recipes/session-lifecycle.md)

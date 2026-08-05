@@ -1,7 +1,7 @@
 ---
 title: Public API
 group: Guides
-summary: What the package surface is intended to promise at this prototype stage.
+summary: The supported browser package surface and its advanced boundaries.
 ---
 
 # Public API
@@ -20,9 +20,9 @@ import from `supervision-js`:
 import { createMediaSession } from "supervision-js";
 ```
 
-The current private preview is installed from the portable
-`supervision-js-0.0.0.tgz` archive. It is not available from the npm registry.
-See [Application Integration](application-integration.md) for the supported
+The first npm release is still being prepared. Until then, install the portable
+`supervision-js-0.0.0.tgz` archive built from this repository. See
+[Application Integration](application-integration.md) for the supported
 consumer workflow.
 
 The split keeps detections, timelines, styles, retention policies, source
@@ -167,7 +167,7 @@ renderer is introduced.
 
 ## Compatibility Posture
 
-This is still a prototype. The strongest compatibility promise is around the
+The package is pre-1.0. The strongest compatibility promise is around the
 session-first model:
 
 1. one media item maps to one session;
