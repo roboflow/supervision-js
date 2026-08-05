@@ -1,4 +1,4 @@
-/* global Element, MutationObserver */
+/* global Element, MutationObserver, URL, localStorage */
 
 (function () {
   const kindIconMap = {
@@ -64,6 +64,9 @@
   }
 
   function boot() {
+    document.documentElement.dataset.theme = "light";
+    localStorage.setItem("tsd-theme", "light");
+    brandToolbar();
     upgradeIcons(document);
 
     const observer = new MutationObserver((mutations) => {
@@ -80,6 +83,39 @@
       childList: true,
       subtree: true,
     });
+  }
+
+  function brandToolbar() {
+    const toolbar = document.querySelector(".tsd-toolbar-contents");
+    const title = toolbar?.querySelector("a.title");
+    const links = document.querySelector("#tsd-toolbar-links");
+
+    if (!toolbar || !title || !links) {
+      return;
+    }
+
+    const base = document.documentElement.dataset.base ?? "./";
+    const docsHome = new URL(`${base}index.html`, window.location.href).href;
+    const logo = new URL(
+      `${base}assets/brand/roboflow-logomark.svg`,
+      window.location.href,
+    ).href;
+    const version = document.title.match(/v[^-]+$/)?.[0] ?? "pre-1.0";
+
+    title.innerHTML = `
+      <img class="supervision-docs__mark" src="${logo}" alt="Roboflow" />
+      <span class="supervision-docs__brand-copy">
+        <span>Supervision</span>
+        <span class="supervision-docs__product">JS</span>
+        <span class="supervision-docs__version">${version}</span>
+      </span>
+    `;
+
+    links.innerHTML = `
+      <a class="supervision-docs__nav-link" href="https://supervision-js-demo.onrender.com/">Demo</a>
+      <a class="supervision-docs__nav-link supervision-docs__nav-link--active" href="${docsHome}">Docs</a>
+      <a class="supervision-docs__nav-link supervision-docs__github" href="https://github.com/roboflow/supervision-js">GitHub</a>
+    `;
   }
 
   if (document.readyState === "loading") {
