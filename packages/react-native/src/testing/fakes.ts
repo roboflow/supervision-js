@@ -117,7 +117,9 @@ export class FakeMediaRenderer<TPayload> implements MediaRendererAdapter<
   presentation: MediaRendererPresentation | null = null;
   pickResult: DetectionPickResult | null = null;
 
-  prepare(options: MediaRendererPrepareOptions<TPayload>) {
+  prepare(
+    options: MediaRendererPrepareOptions<TPayload>,
+  ): FakePreparedPacket | Promise<FakePreparedPacket> {
     this.prepared.push(options);
     return { id: options.packetId };
   }

@@ -306,15 +306,18 @@ test("built style classes can be constructed by package consumers", async () => 
 test("built React Native subpath entries ship and resolve", async () => {
   const adapters =
     await import("../packages/react-native/dist/adapters/executorch.js");
+  const mediaSession =
+    await import("../packages/react-native/dist/media-session.js");
 
   assert.equal(typeof adapters.unrotateExecutorchUpBbox, "function");
   assert.deepEqual(
     adapters.unrotateExecutorchUpBbox({ x1: 1, y1: 2, x2: 3, y2: 4 }, 10),
     { x1: 2, y1: 7, x2: 4, y2: 9 },
   );
+  assert.equal(typeof mediaSession.createMediaSession, "function");
 
-  // The skia and sessions entries require optional native peers, so they
-  // cannot be imported under Node; assert the built artifacts ship.
+  // The legacy Skia and sessions entries require optional native peers, so
+  // they cannot be imported under Node; assert the built artifacts ship.
   assert.ok(
     existsSync(
       new URL("../packages/react-native/dist/skia.js", import.meta.url),

@@ -193,6 +193,7 @@ against fake adapters so native dependencies do not dictate the session shape.
 - Add: `packages/react-native/src/types/frame-processor.ts`
 - Add: `packages/react-native/src/types/renderer.ts`
 - Add: `packages/react-native/src/sessions/media-session-core.ts`
+- Add: `packages/react-native/src/media-session.ts`
 - Add: `packages/react-native/src/testing/fakes.ts`
 - Add: `packages/react-native/src/media-session.consumer.test.ts`
 - Modify: `packages/react-native/src/index.ts`
@@ -219,8 +220,9 @@ against fake adapters so native dependencies do not dictate the session shape.
 - [x] Add compile-only consumer fixtures for static, saved-video, live, custom
       processor, presentation updates, picking, and destroy.
 - [x] Decide the final primary import location (`/react` for the React
-      convenience layer, `/sessions` for the non-React factory) and record it in
-      package exports. Do not rename existing runtime APIs yet.
+      convenience layer, `/media-session` for the peer-free non-React factory)
+      and record it in package exports. Keep the existing `/sessions` legacy
+      runtime API intact.
 - [x] Add exact-export tests for every touched subpath.
 
 **Acceptance:** contract tests compile and a fully fake session can be created,

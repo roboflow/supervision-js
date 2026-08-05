@@ -1,7 +1,7 @@
 import { MediaSessionMode } from "supervision-js-core";
 import { describe, expect, it } from "vitest";
 
-import { createMediaSession } from "./sessions/media-session-core";
+import { createMediaSession } from "./media-session";
 import type { MediaFrameProcessor } from "./types/frame-processor";
 import type { MediaFrameSource } from "./types/frame-source";
 import type {

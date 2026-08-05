@@ -158,7 +158,7 @@ export async function createMediaSession<TPayload, TPacket extends object>(
   };
 
   const onFrame = async (frame: PlatformMediaFrame<TPayload>) => {
-    if (destroyed || stopped || error) {
+    if (shouldAbandonFrame()) {
       return;
     }
 
@@ -170,6 +170,11 @@ export async function createMediaSession<TPayload, TPacket extends object>(
 
     try {
       const result = await options.processor.process(frame);
+
+      if (shouldAbandonFrame()) {
+        return;
+      }
+
       const packetId = nextPacketId;
 
       nextPacketId += 1;
@@ -180,7 +185,19 @@ export async function createMediaSession<TPayload, TPacket extends object>(
         presentation,
         result,
       });
+
+      if (shouldAbandonFrame()) {
+        await disposeNextPacket();
+        return;
+      }
+
       await options.renderer.present(nextPacket);
+
+      if (shouldAbandonFrame()) {
+        await disposeNextPacket();
+        return;
+      }
+
       const previousPacket = activePacket;
 
       activePacket = nextPacket;
@@ -192,7 +209,11 @@ export async function createMediaSession<TPayload, TPacket extends object>(
       nextPacket = null;
       await disposePacket(previousPacket);
     } catch (cause) {
-      await disposePacket(nextPacket);
+      try {
+        await disposeNextPacket();
+      } catch {
+        // Preserve the primary processor/renderer failure as the session error.
+      }
       reportError(
         stage === "processor" ? "processor-failed" : "renderer-failed",
         cause,
@@ -200,6 +221,13 @@ export async function createMediaSession<TPayload, TPacket extends object>(
     } finally {
       processing = false;
       emit();
+    }
+
+    async function disposeNextPacket() {
+      const packet = nextPacket;
+
+      nextPacket = null;
+      await disposePacket(packet);
     }
   };
 
@@ -216,7 +244,14 @@ export async function createMediaSession<TPayload, TPacket extends object>(
       reportError("source-failed", cause);
     },
     onFrame(frame) {
-      frameQueue = frameQueue.then(() => onFrame(frame));
+      if (shouldAbandonFrame()) {
+        return;
+      }
+
+      frameQueue = frameQueue.then(
+        () => onFrame(frame),
+        () => onFrame(frame),
+      );
       return frameQueue;
     },
   };
@@ -240,7 +275,12 @@ export async function createMediaSession<TPayload, TPacket extends object>(
       });
   } catch (cause) {
     reportError("source-open-failed", cause);
-    await destroyResources();
+    try {
+      await destroyResources();
+    } catch {
+      // The source-open error is the useful public failure; cleanup still ran
+      // every release attempt before it was ignored here.
+    }
     throw (
       error ??
       new MediaSessionError(
@@ -262,10 +302,13 @@ export async function createMediaSession<TPayload, TPacket extends object>(
       destroyed = true;
       playing = false;
       processing = false;
-      destroyPromise = destroyResources().finally(() => {
-        emit();
-        listeners.clear();
-      });
+      destroyPromise = frameQueue
+        .catch(() => undefined)
+        .then(() => destroyResources())
+        .finally(() => {
+          emit();
+          listeners.clear();
+        });
       return destroyPromise;
     },
     getState: state,
@@ -327,13 +370,31 @@ export async function createMediaSession<TPayload, TPacket extends object>(
 
   async function destroyResources() {
     const packet = activePacket;
+    const errors: unknown[] = [];
 
     activePacket = null;
     activePacketId = null;
     activeDetectionFrame = null;
-    await disposePacket(packet);
-    await options.source.destroy?.();
-    await options.renderer.destroy?.();
+
+    await runCleanup(() => disposePacket(packet));
+    await runCleanup(() => options.source.destroy?.());
+    await runCleanup(() => options.renderer.destroy?.());
+
+    if (errors.length > 0) {
+      throw errors[0];
+    }
+
+    async function runCleanup(cleanup: () => void | Promise<void>) {
+      try {
+        await cleanup();
+      } catch (cause) {
+        errors.push(cause);
+      }
+    }
+  }
+
+  function shouldAbandonFrame() {
+    return destroyed || stopped || error !== null;
   }
 
   function assertActive(operation: string) {
