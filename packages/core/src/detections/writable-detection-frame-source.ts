@@ -49,13 +49,17 @@ export function createWritableDetectionFrameSource(options: {
 
   const recordRangeWrite = (
     nextSummary: ColdDetectionFrameStoreWriteSummary,
-    changedRange: DetectionFrameSourceVersionRange,
+    changedSourceRanges: readonly DetectionFrameSourceVersionRange[],
   ) => {
     summary = nextSummary;
     version += 1;
-    changedRanges.push({ ...changedRange, version });
+
+    for (const changedRange of changedSourceRanges) {
+      changedRanges.push({ ...changedRange, version });
+      recordAvailableRange(changedRange, availableRanges);
+    }
+
     compactChangedRangeJournal();
-    recordAvailableRange(changedRange, availableRanges);
     resolveCoveredWaiters();
 
     return nextSummary;
@@ -97,7 +101,7 @@ export function createWritableDetectionFrameSource(options: {
       );
       assertActive();
 
-      const changedRange = getDetectionFramesRange(frames);
+      const changedSourceRanges = getDetectionFrameRanges(frames);
       const retainedSummary = await applyRetention(nextSummary);
       assertActive();
 
@@ -105,12 +109,12 @@ export function createWritableDetectionFrameSource(options: {
         return recordAllRangesWrite(retainedSummary);
       }
 
-      if (!changedRange) {
+      if (changedSourceRanges.length === 0) {
         summary = nextSummary;
         return nextSummary;
       }
 
-      return recordRangeWrite(nextSummary, changedRange);
+      return recordRangeWrite(nextSummary, changedSourceRanges);
     },
 
     async replaceFrames(frames) {
@@ -343,22 +347,14 @@ function shouldApplyWindowRetention(
   );
 }
 
-function getDetectionFramesRange(
+function getDetectionFrameRanges(
   frames: readonly DetectionFrame[],
-): DetectionFrameSourceVersionRange | null {
-  if (frames.length === 0) {
-    return null;
-  }
-
-  return frames.reduce(
-    (range, frame) => ({
-      endTime: Math.max(range.endTime, frame.endTime ?? frame.mediaTime),
-      startTime: Math.min(range.startTime, frame.mediaTime),
-    }),
-    {
-      endTime: Number.NEGATIVE_INFINITY,
-      startTime: Number.POSITIVE_INFINITY,
-    },
+): readonly DetectionFrameSourceVersionRange[] {
+  return mergeRanges(
+    frames.map((frame) => ({
+      endTime: frame.endTime ?? frame.mediaTime,
+      startTime: frame.mediaTime,
+    })),
   );
 }
 

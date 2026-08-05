@@ -39,6 +39,14 @@ export type {
   MediaSourceState,
 } from "supervision-js-core";
 
+/** Clock used by semantic detection frames supplied to a media renderer. */
+export enum DetectionTimelineOrigin {
+  /** Detection times already use the decoded media source's native timeline. */
+  MediaTimeline = "mediaTimeline",
+  /** Detection time zero corresponds to the first decoded media sample. */
+  MediaStart = "mediaStart",
+}
+
 /**
  * Lower-level renderer options.
  *
@@ -68,6 +76,11 @@ export interface MediaRendererOptions extends MediaRendererPresentation {
   readonly detectionFrames?: readonly DetectionFrame[];
   readonly detectionSource?: DetectionFrameSource;
   readonly detectionBuffer?: DetectionBufferOptions;
+  /**
+   * Aligns detection timestamps with media whose first presentation timestamp
+   * is not zero. Defaults to `MediaTimeline` for backward compatibility.
+   */
+  readonly detectionTimelineOrigin?: DetectionTimelineOrigin;
   readonly interaction?: MediaInteractionOptions;
   readonly renderPreparation?: RenderPreparationOptions;
   readonly diagnostics?: MediaRendererDiagnosticsOptions;

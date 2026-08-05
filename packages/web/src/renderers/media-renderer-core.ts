@@ -19,6 +19,7 @@ import {
   type MediaPlaybackController,
 } from "#playback/media-playback-controller";
 import {
+  DetectionTimelineOrigin,
   MediaRendererFit,
   type MediaRenderer,
   type MediaRendererOptions,
@@ -26,6 +27,7 @@ import {
 } from "#types/media-renderer";
 import { MediaInteractionMode } from "supervision-js-core";
 import type { RenderPreparationPlaybackGateOptions } from "#types/render-preparation";
+import { createOffsetDetectionFrameSource } from "#detections/offset-detection-frame-source";
 import { createMediaRendererRuntimeState } from "./media-renderer-state";
 import type {
   MediaRendererScene,
@@ -371,12 +373,6 @@ export async function createMediaRendererCore(
       );
     }
 
-    detectionTimeline = createBufferedDetectionTimeline({
-      source:
-        options.detectionSource ??
-        createArrayDetectionFrameSource(options.detectionFrames),
-      ...options.detectionBuffer,
-    });
     const mediaSource = await openRendererMediaSource(options, providers);
     mediaInput = mediaSource.input;
     sampleSink = mediaSource.sampleSink;
@@ -389,6 +385,29 @@ export async function createMediaRendererCore(
     const { metadata } = mediaSource;
 
     firstTimestamp = metadata.firstTimestamp;
+    const detectionSource =
+      options.detectionSource ??
+      createArrayDetectionFrameSource(options.detectionFrames);
+    detectionTimeline = createBufferedDetectionTimeline({
+      source:
+        options.detectionTimelineOrigin ===
+          DetectionTimelineOrigin.MediaStart && metadata.firstTimestamp !== 0
+          ? createOffsetDetectionFrameSource(
+              detectionSource,
+              metadata.firstTimestamp,
+            )
+          : detectionSource,
+      ...options.detectionBuffer,
+      ...(options.detectionTimelineOrigin ===
+        DetectionTimelineOrigin.MediaStart &&
+      options.detectionBuffer?.frameIndexOriginTime !== undefined
+        ? {
+            frameIndexOriginTime:
+              options.detectionBuffer.frameIndexOriginTime +
+              metadata.firstTimestamp,
+          }
+        : {}),
+    });
     const mediaDimensions = runtimeState.recordMediaMetadata(metadata);
     mediaScene = await providers.createScene({
       annotationOverlayStyle: options.annotationOverlayStyle,

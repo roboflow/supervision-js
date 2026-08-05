@@ -7,6 +7,7 @@ import type {
   DecodedVideoSample,
 } from "#media/media-source";
 import {
+  DetectionTimelineOrigin,
   MediaRendererPlaybackState,
   type MediaRendererOptions,
 } from "#types/media-renderer";
@@ -165,6 +166,75 @@ describe("media renderer core", () => {
     expect(detectionSource.loadFrames).toHaveBeenCalledTimes(2);
     expect(detectionSource.loadFrames).toHaveBeenNthCalledWith(1, 4.25, 5);
     expect(detectionSource.loadFrames).toHaveBeenNthCalledWith(2, 0, 1.75);
+
+    renderer.destroy();
+  });
+
+  it("aligns zero-based detections to a non-zero media start timestamp", async () => {
+    resetMocks();
+
+    const samples = [
+      createMockSample(0.6, 1 / 30),
+    ] as unknown as DecodedVideoSample[];
+    const detectionSource = {
+      loadFrames: vi.fn(async () => [
+        {
+          detections: [{ id: "mask-0" }],
+          endTime: 1 / 30,
+          frameIndex: 0,
+          mediaTime: 0,
+        },
+      ]),
+    };
+    const renderer = await createMediaRendererCore(
+      {
+        autoPlay: false,
+        container: {} as HTMLElement,
+        detectionBuffer: {
+          bufferAheadSeconds: 0,
+          bufferBehindSeconds: 0,
+          frameIndexOriginTime: 0,
+          frameRate: 30,
+          selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
+        },
+        detectionSource,
+        detectionTimelineOrigin: DetectionTimelineOrigin.MediaStart,
+        loop: false,
+        source: createSource(samples, {
+          duration: 1,
+          firstTimestamp: 0.6,
+        }),
+      } satisfies MediaRendererOptions,
+      {
+        createScene: vi.fn(async (options) =>
+          createScene({
+            presentSample: vi.fn((sample) => {
+              const activeFrame = options.detectionTimeline.selectFrame(
+                sample.timestamp,
+              );
+              sample.close();
+              return {
+                activeDetectionCount: activeFrame?.detections.length ?? 0,
+                activeDetectionFrameIndex: activeFrame?.frameIndex ?? null,
+                activeDetectionFrameTime: activeFrame?.mediaTime ?? null,
+                detectionBuffer: createIdleDetectionBufferState(),
+                duration: sample.duration,
+                mediaTime: sample.timestamp,
+              };
+            }),
+          }),
+        ),
+        openMediaSource: vi.fn(),
+      },
+    );
+
+    expect(detectionSource.loadFrames).toHaveBeenCalledWith(0, 0);
+    expect(renderer.getState()).toMatchObject({
+      activeDetectionCount: 1,
+      activeDetectionFrameIndex: 0,
+      activeDetectionFrameTime: 0.6,
+      currentTime: 0.6,
+    });
 
     renderer.destroy();
   });
