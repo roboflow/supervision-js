@@ -36,7 +36,7 @@ export function DemoShell({
       <header className="demo-shell__header">
         <div className="demo-shell__brand">
           <div className="demo-shell__mark" aria-hidden="true">
-            <span />
+            <img alt="" src="/roboflow-logomark.svg" />
           </div>
           <div className="demo-shell__title">
             <strong>supervision-js</strong>
