@@ -1,20 +1,20 @@
 :root {
-  --surface: rgba(11, 13, 18, 0.9);
-  --surface-strong: rgba(13, 16, 22, 0.96);
-  --surface-soft: rgba(255, 255, 255, 0.035);
-  --line: rgba(143, 157, 178, 0.16);
-  --line-strong: rgba(175, 190, 214, 0.28);
-  --text: #eef2f7;
-  --muted: #8d99aa;
-  --muted-strong: #c0c8d4;
-  --cyan: #70d8ed;
-  --green: #7ee18f;
-  --amber: #e8c96f;
-  --violet: #9d8df1;
-  --danger: #ff8a8a;
-  --glass: rgba(9, 11, 15, 0.82);
-  --glass-strong: rgba(11, 14, 19, 0.94);
-  --highlight: rgba(242, 245, 248, 0.96);
+  --surface: #ffffff;
+  --surface-strong: #ffffff;
+  --surface-soft: #f5f3ff;
+  --line: #e4e4e7;
+  --line-strong: #c4b5fd;
+  --text: #111827;
+  --muted: #6b7280;
+  --muted-strong: #4b5563;
+  --cyan: #2563eb;
+  --green: #16a34a;
+  --amber: #b45309;
+  --violet: #7c3aed;
+  --danger: #dc2626;
+  --glass: rgba(255, 255, 255, 0.9);
+  --glass-strong: rgba(255, 255, 255, 0.97);
+  --highlight: #7c3aed;
   --radius-lg: 8px;
   --radius-md: 7px;
   --shadow-high: 0 18px 50px rgba(0, 0, 0, 0.32);
@@ -26,7 +26,7 @@
     "SFMono-Regular", "SF Mono", ui-monospace, "Cascadia Mono", "Roboto Mono",
     Menlo, Consolas, monospace;
   color: var(--text);
-  color-scheme: dark;
+  color-scheme: light;
   font-family: var(--font-sans);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -44,9 +44,7 @@ body,
 }
 
 body {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 20%),
-    linear-gradient(180deg, #090b10 0%, #05070a 58%, #030405 100%), #050608;
+  background: #f5f3ff;
   margin: 0;
   min-width: 320px;
   overflow: hidden;
@@ -69,8 +67,12 @@ fieldset {
 
 .demo-shell {
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.018), transparent 30%),
-    #050608;
+    radial-gradient(
+      circle at 80% 0%,
+      rgba(196, 181, 253, 0.44),
+      transparent 28%
+    ),
+    linear-gradient(180deg, #faf9ff 0%, #f5f3ff 64%, #ede9fe 100%);
   color: var(--text);
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
@@ -89,13 +91,13 @@ fieldset {
 
 .demo-shell::before {
   background-image:
-    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+    linear-gradient(rgba(124, 58, 237, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(124, 58, 237, 0.07) 1px, transparent 1px);
   background-size: 48px 48px;
   content: "";
   inset: 0;
   mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.55), transparent 58%);
-  opacity: 0.08;
+  opacity: 0.55;
   pointer-events: none;
   position: absolute;
 }
@@ -103,7 +105,7 @@ fieldset {
 .demo-shell__header {
   align-items: center;
   backdrop-filter: blur(18px) saturate(1.04);
-  background: rgba(8, 10, 14, 0.72);
+  background: rgba(255, 255, 255, 0.88);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   display: grid;
@@ -124,7 +126,7 @@ fieldset {
 
 .demo-shell__mark {
   align-items: center;
-  background: rgba(255, 255, 255, 0.055);
+  background: #f5f3ff;
   border: 1px solid var(--line);
   border-radius: 8px;
   box-shadow: none;
@@ -137,43 +139,10 @@ fieldset {
   width: 32px;
 }
 
-.demo-shell__mark::before,
-.demo-shell__mark::after,
-.demo-shell__mark span {
-  border-radius: 4px;
-  content: "";
+.demo-shell__mark img {
   display: block;
-  position: absolute;
-}
-
-.demo-shell__mark::before {
-  background: var(--cyan);
-  box-shadow: none;
-  height: 18px;
-  left: 8px;
-  top: 7px;
-  transform: skewY(-12deg);
-  width: 6px;
-}
-
-.demo-shell__mark::after {
-  background: var(--green);
-  box-shadow: none;
-  height: 10px;
-  right: 7px;
-  top: 7px;
-  transform: skewY(-12deg);
-  width: 8px;
-}
-
-.demo-shell__mark span {
-  background: var(--violet);
-  bottom: 7px;
-  box-shadow: none;
-  height: 6px;
-  right: 8px;
-  transform: skewY(-12deg);
-  width: 13px;
+  height: 24px;
+  width: 24px;
 }
 
 .demo-shell__title {
@@ -183,7 +152,7 @@ fieldset {
 }
 
 .demo-shell__title strong {
-  color: #ffffff;
+  color: var(--text);
   font-size: 15px;
   font-weight: 740;
   letter-spacing: 0;
@@ -209,7 +178,7 @@ fieldset {
 .demo-shell__mode a,
 .demo-shell__mode button {
   align-items: center;
-  background: rgba(255, 255, 255, 0.035);
+  background: #ffffff;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   color: var(--muted-strong);
@@ -232,14 +201,14 @@ fieldset {
   background: var(--highlight);
   border-color: transparent;
   box-shadow: none;
-  color: #07080a;
+  color: #ffffff;
 }
 
 .demo-shell__mode a:hover,
 .demo-shell__mode button:hover:not([aria-pressed="true"]) {
-  background: rgba(255, 255, 255, 0.075);
+  background: #f5f3ff;
   border-color: var(--line-strong);
-  color: #ffffff;
+  color: var(--violet);
 }
 
 .demo-shell__workspace {
@@ -254,7 +223,7 @@ fieldset {
 .demo-shell__inspector {
   align-content: start;
   backdrop-filter: blur(18px) saturate(1.04);
-  background: rgba(8, 10, 14, 0.72);
+  background: rgba(255, 255, 255, 0.88);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   display: grid;
@@ -262,7 +231,7 @@ fieldset {
   min-height: 0;
   overflow: auto;
   padding: 10px;
-  scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
+  scrollbar-color: #c4b5fd transparent;
   scrollbar-width: thin;
 }
 
@@ -271,7 +240,7 @@ fieldset {
 }
 
 .demo-shell__inspector::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.22);
+  background: #c4b5fd;
   border-radius: 999px;
 }
 
@@ -303,7 +272,7 @@ fieldset {
 }
 
 .demo-shell__benchmarks {
-  scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
+  scrollbar-color: #c4b5fd transparent;
   scrollbar-width: thin;
 }
 
@@ -312,7 +281,7 @@ fieldset {
 }
 
 .demo-shell__benchmarks::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.22);
+  background: #c4b5fd;
   border-radius: 999px;
 }
 
@@ -1983,4 +1952,188 @@ fieldset {
   .render-controls {
     border-radius: 14px;
   }
+}
+
+/* The workbench keeps the rendered media dark for accurate image review.
+ * Everything around it follows the public Roboflow light surface system. */
+.source-controls,
+.quality-controls,
+.selection-panel,
+.render-controls,
+.status-panel,
+.benchmark-card,
+.benchmark-metric-card,
+.benchmark-comparison-card,
+.control-bar {
+  background: rgba(255, 255, 255, 0.92);
+  border-color: var(--line);
+  box-shadow: 0 10px 28px rgba(76, 29, 149, 0.06);
+}
+
+.source-controls__mode button,
+.source-actions button,
+.selection-panel .inspector-card__header button,
+.playback-controls__step,
+.timeline-view__chip,
+.render-controls__tabs button,
+.render-control,
+.render-control--toggle,
+.render-control--segmented,
+.render-control__segments button,
+.class-style-card,
+.readout,
+.performance-metric {
+  background: #ffffff;
+  border-color: var(--line);
+  color: var(--muted-strong);
+}
+
+.source-controls__mode button[aria-pressed="true"],
+.source-actions__primary,
+.render-controls__tabs button[aria-pressed="true"],
+.render-control__segments button[aria-pressed="true"],
+.playback-controls__toggle {
+  background: var(--violet);
+  border-color: var(--violet);
+  color: #ffffff;
+  box-shadow: 0 8px 16px rgba(124, 58, 237, 0.2);
+}
+
+.source-controls__mode button:hover:not(:disabled, [aria-pressed="true"]),
+.source-actions button:hover:not(:disabled),
+.selection-panel .inspector-card__header button:hover,
+.playback-controls__step:hover:not(:disabled),
+.render-controls__tabs button:hover:not([aria-pressed="true"]),
+.render-control__segments button:hover:not(:disabled, [aria-pressed="true"]) {
+  background: #f5f3ff;
+  border-color: #a78bfa;
+  color: var(--violet);
+}
+
+.source-field input,
+.source-field textarea,
+.quality-controls__input-row input[type="number"],
+.quality-controls__toggle,
+.selection-details,
+.source-progress,
+.source-field--file,
+.timeline-view__strip,
+.timeline-view__lane,
+.timeline-view__input {
+  background: #fafafa;
+  border-color: var(--line);
+  color: var(--text);
+}
+
+.source-field--file,
+.selection-details,
+.source-progress,
+.timeline-view__chip,
+.class-style-card,
+.readout {
+  background: #fafafa;
+}
+
+.source-controls__mode button:disabled,
+.source-actions button:disabled,
+.playback-controls__step:disabled,
+.playback-controls__toggle:disabled,
+.render-control__segments button:disabled {
+  background: #f4f4f5;
+  color: #9ca3af;
+}
+
+.source-field--file strong,
+.selection-details--empty strong,
+.selection-details__title strong,
+.selection-details__grid dd,
+.source-progress strong,
+.timeline-view__chip strong,
+.benchmark-comparison-card__side strong,
+.benchmark-metric-card strong,
+.benchmark-card h2,
+.class-style-card strong,
+.performance-metric strong,
+.readout__value {
+  color: var(--text);
+}
+
+.source-field span,
+.selection-panel__hint,
+.selection-details--empty span,
+.selection-details__title span,
+.selection-details__grid dt,
+.quality-controls .inspector-card__header span,
+.quality-controls__input-row label,
+.benchmark-comparison-card__side span,
+.benchmark-metric-card span,
+.benchmark-comparison-card small,
+.benchmark-metric-card small,
+.readout__label,
+.performance-metric span {
+  color: var(--muted);
+}
+
+.renderer-viewport {
+  box-shadow: 0 16px 36px rgba(76, 29, 149, 0.16);
+}
+
+.renderer-viewport__overlay-card strong {
+  color: #f9fafb;
+}
+
+.renderer-viewport__overlay-card span {
+  color: #d1d5db;
+}
+
+.renderer-viewport__overlay-kicker {
+  color: #93c5fd;
+}
+
+.renderer-viewport__overlay--waiting .renderer-viewport__overlay-kicker {
+  color: #fcd34d;
+}
+
+.renderer-viewport__overlay--error .renderer-viewport__overlay-kicker {
+  color: #fecaca;
+}
+
+.playback-controls__play {
+  border-left-color: #ffffff;
+}
+
+.playback-controls__pause::before,
+.playback-controls__pause::after {
+  background: #ffffff;
+}
+
+.timeline-view__chip--requested .timeline-view__chip-dot {
+  background: #9ca3af;
+}
+
+.timeline-view__segment--normalized,
+.timeline-view__marker--playhead,
+.timeline-view__knob {
+  background: var(--violet);
+}
+
+.benchmark-table {
+  background: #ffffff;
+}
+
+.benchmark-table th,
+.benchmark-table td,
+.benchmark-table thead th {
+  border-color: var(--line);
+  color: var(--muted-strong);
+}
+
+.benchmark-table tbody th,
+.benchmark-table__row--selected th,
+.benchmark-table__row--selected td {
+  color: var(--text);
+}
+
+.benchmark-table__row--selected {
+  background: #f5f3ff;
 }
