@@ -128,6 +128,12 @@ function GlobalRenderControls({
             onChange={(checked) => onChange("polygonsEnabled", checked)}
           />
           <ToggleControl
+            checked={settings.polylinesEnabled}
+            disabled={availability?.polylinesEnabled === false}
+            label="Polylines"
+            onChange={(checked) => onChange("polylinesEnabled", checked)}
+          />
+          <ToggleControl
             checked={settings.keypointsEnabled}
             disabled={availability?.keypointsEnabled === false}
             label="Keypoints"
@@ -206,6 +212,16 @@ function GlobalRenderControls({
         />
         <SliderControl
           disabled={!settings.masksEnabled}
+          label="Fill"
+          max={1}
+          min={0}
+          onChange={(value) => onChange("maskFillAlpha", value)}
+          step={0.01}
+          value={settings.maskFillAlpha}
+          valueLabel={formatPercent(settings.maskFillAlpha)}
+        />
+        <SliderControl
+          disabled={!settings.masksEnabled}
           label="Opacity"
           max={1}
           min={0}
@@ -259,14 +275,27 @@ function GlobalRenderControls({
         />
       </ControlSection>
 
+      <ControlSection title="Polylines">
+        <SliderControl
+          disabled={!settings.polylinesEnabled}
+          label="Stroke"
+          max={8}
+          min={1}
+          onChange={(value) => onChange("polylineStrokeWidth", value)}
+          step={1}
+          value={settings.polylineStrokeWidth}
+          valueLabel={`${settings.polylineStrokeWidth}px`}
+        />
+      </ControlSection>
+
       <ControlSection title="Keypoints">
         <SliderControl
           disabled={!settings.keypointsEnabled}
           label="Radius"
           max={12}
-          min={2}
+          min={1}
           onChange={(value) => onChange("keypointRadius", value)}
-          step={1}
+          step={0.5}
           value={settings.keypointRadius}
           valueLabel={`${settings.keypointRadius}px`}
         />
@@ -276,13 +305,19 @@ function GlobalRenderControls({
           max={8}
           min={1}
           onChange={(value) => onChange("keypointEdgeWidth", value)}
-          step={1}
+          step={0.5}
           value={settings.keypointEdgeWidth}
           valueLabel={`${settings.keypointEdgeWidth}px`}
         />
       </ControlSection>
 
       <ControlSection title="Labels">
+        <ToggleControl
+          checked={settings.labelIncludeConfidence}
+          disabled={!settings.labelsEnabled}
+          label="Confidence"
+          onChange={(checked) => onChange("labelIncludeConfidence", checked)}
+        />
         <SegmentedControl
           disabled={!settings.labelsEnabled}
           label="Placement"
@@ -393,9 +428,9 @@ function GlobalRenderControls({
         <SliderControl
           label="Hover Stroke"
           max={12}
-          min={1}
+          min={0.5}
           onChange={(value) => onChange("interactionHoverStrokeWidth", value)}
-          step={1}
+          step={0.5}
           value={settings.interactionHoverStrokeWidth}
           valueLabel={`${settings.interactionHoverStrokeWidth}px`}
         />
@@ -411,11 +446,11 @@ function GlobalRenderControls({
         <SliderControl
           label="Selected Stroke"
           max={16}
-          min={1}
+          min={0.5}
           onChange={(value) =>
             onChange("interactionSelectedStrokeWidth", value)
           }
-          step={1}
+          step={0.5}
           value={settings.interactionSelectedStrokeWidth}
           valueLabel={`${settings.interactionSelectedStrokeWidth}px`}
         />
@@ -427,6 +462,7 @@ function GlobalRenderControls({
           label="Target"
           onChange={(value) => onChange("focusTargetMode", value)}
           options={[
+            { label: "Ambient", value: FocusTargetMode.Ambient },
             { label: "Selected", value: FocusTargetMode.Selected },
             { label: "Hover", value: FocusTargetMode.Hovered },
             { label: "Both", value: FocusTargetMode.HoveredAndSelected },

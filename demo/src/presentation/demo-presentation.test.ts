@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   BoxShape,
   BoxStrokeAlignment,
+  createDefaultAnnotationPresentation,
   DetectionMaskEncoding,
   type Detection,
   DetectionPickTarget,
@@ -27,6 +28,12 @@ const detection: Detection = {
     height: 2,
     width: 2,
   },
+  rect: { height: 40, width: 20, x: 10, y: 12 },
+};
+
+const rectangleDetection: Detection = {
+  className: "horse",
+  confidence: 0.9,
   rect: { height: 40, width: 20, x: 10, y: 12 },
 };
 
@@ -87,18 +94,18 @@ describe("demo presentation", () => {
     });
 
     expect(
-      rectPresentation.boxStyle?.resolve(detection, {
+      rectPresentation.boxStyle?.resolve(rectangleDetection, {
         detectionIndex: 0,
-        frame: { detections: [detection], mediaTime: 0 },
+        frame: { detections: [rectangleDetection], mediaTime: 0 },
         mediaTime: 0,
       }),
     ).toMatchObject({
       shape: BoxShape.Rect,
     });
     expect(
-      roundedPresentation.boxStyle?.resolve(detection, {
+      roundedPresentation.boxStyle?.resolve(rectangleDetection, {
         detectionIndex: 0,
-        frame: { detections: [detection], mediaTime: 0 },
+        frame: { detections: [rectangleDetection], mediaTime: 0 },
         mediaTime: 0,
       }),
     ).toMatchObject({
@@ -130,8 +137,49 @@ describe("demo presentation", () => {
     expect(
       lowOpacityPresentation.maskStyle?.resolve(detection, context),
     ).toMatchObject({
-      alpha: 1,
+      alpha: defaultDemoPresentationSettings.maskFillAlpha,
     });
+  });
+
+  it("matches the Core annotation presentation before demo controls override it", () => {
+    const demo = createDemoPresentation(defaultDemoPresentationSettings);
+    const canonical = createDefaultAnnotationPresentation();
+    const frame = { detections: [detection, vectorDetection], mediaTime: 0 };
+    const context = { detectionIndex: 0, frame, mediaTime: 0 };
+    const rectangle = {
+      className: "person",
+      confidence: 0.9,
+      rect: { height: 40, width: 20, x: 10, y: 12 },
+    };
+    const polyline = {
+      className: "person",
+      polyline: {
+        points: [
+          { x: 0, y: 0 },
+          { x: 4, y: 4 },
+        ],
+      },
+    };
+
+    expect(demo.backgroundColor).toBe(0xf3f4f6);
+    expect(demo.boxStyle?.resolve(rectangle, context)).toEqual(
+      canonical.boxStyle?.resolve(rectangle, context),
+    );
+    expect(demo.maskStyle?.resolve(detection, context)).toEqual(
+      canonical.maskStyle?.resolve(detection, context),
+    );
+    expect(demo.labelStyle?.resolve(detection, context)).toEqual(
+      canonical.labelStyle?.resolve(detection, context),
+    );
+    expect(demo.polygonStyle?.resolve(vectorDetection, context)).toEqual(
+      canonical.polygonStyle?.resolve(vectorDetection, context),
+    );
+    expect(demo.polylineStyle?.resolve(polyline, context)).toEqual(
+      canonical.polylineStyle?.resolve(polyline, context),
+    );
+    expect(demo.keypointStyle?.resolve(vectorDetection, context)).toEqual(
+      canonical.keypointStyle?.resolve(vectorDetection, context),
+    );
   });
 
   it("maps demo style controls to renderer-neutral draw instructions", () => {
@@ -153,13 +201,11 @@ describe("demo presentation", () => {
       mediaTime: 0,
     };
 
-    expect(presentation.backgroundColor).toBe(0xfafafa);
+    expect(presentation.backgroundColor).toBe(0xf3f4f6);
 
-    expect(presentation.boxStyle?.resolve(detection, context)).toMatchObject({
-      stroke: {
-        alignment: BoxStrokeAlignment.Inside,
-      },
-    });
+    expect(
+      presentation.boxStyle?.resolve(rectangleDetection, context),
+    ).toMatchObject({ stroke: { alignment: BoxStrokeAlignment.Inside } });
     expect(presentation.labelStyle?.resolve(detection, context)).toMatchObject({
       background: {
         cornerRadius: 9,
@@ -195,7 +241,13 @@ describe("demo presentation", () => {
       },
     );
 
-    expect(hoverPresentation?.boxStyle).toBeNull();
+    expect(
+      hoverPresentation?.boxStyle?.resolve(detection, {
+        detectionIndex: 0,
+        frame,
+        mediaTime: 0,
+      }),
+    ).toBeUndefined();
     expect(
       hoverPresentation?.maskStyle?.resolve(detection, {
         detectionIndex: 0,
@@ -239,16 +291,19 @@ describe("demo presentation", () => {
       },
     );
 
-    const hoverBox = hoverPresentation?.boxStyle?.resolve(detection, {
+    const hoverBox = hoverPresentation?.boxStyle?.resolve(rectangleDetection, {
       detectionIndex: 0,
       frame,
       mediaTime: 0,
     });
-    const selectedBox = selectedPresentation?.boxStyle?.resolve(detection, {
-      detectionIndex: 0,
-      frame,
-      mediaTime: 0,
-    });
+    const selectedBox = selectedPresentation?.boxStyle?.resolve(
+      rectangleDetection,
+      {
+        detectionIndex: 0,
+        frame,
+        mediaTime: 0,
+      },
+    );
     const hoverMask = hoverPresentation?.maskStyle?.resolve(detection, {
       detectionIndex: 0,
       frame,
@@ -262,39 +317,37 @@ describe("demo presentation", () => {
 
     expect(hoverBox).toMatchObject({
       fill: {
-        alpha: 0.12,
+        alpha: defaultDemoPresentationSettings.interactionHoverFillAlpha,
         color: 0x38bdf8,
       },
       stroke: {
-        alignment: BoxStrokeAlignment.Outside,
-        alpha: 0.88,
-        color: 0x7dd3fc,
+        alpha: 1,
+        color: 0x38bdf8,
       },
     });
     expect(selectedBox).toMatchObject({
       fill: {
-        alpha: 0.22,
+        alpha: defaultDemoPresentationSettings.interactionSelectedFillAlpha,
         color: 0x38bdf8,
       },
       stroke: {
-        alignment: BoxStrokeAlignment.Outside,
         alpha: 1,
-        color: 0x7dd3fc,
+        color: 0x38bdf8,
       },
     });
     expect(hoverMask).toMatchObject({
-      alpha: 0.12,
+      alpha: defaultDemoPresentationSettings.interactionHoverFillAlpha,
       color: 0x38bdf8,
       stroke: {
-        color: 0x7dd3fc,
+        color: 0x38bdf8,
       },
     });
     expect(selectedMask).toMatchObject({
-      alpha: 0.22,
+      alpha: defaultDemoPresentationSettings.interactionSelectedFillAlpha,
       color: 0x38bdf8,
       stroke: {
         alpha: 1,
-        color: 0x7dd3fc,
+        color: 0x38bdf8,
       },
     });
     expect(selectedBox?.stroke?.width).toBeGreaterThan(
@@ -377,13 +430,17 @@ describe("demo presentation", () => {
     expect(instruction?.markers[0]).toMatchObject({
       fill: { color: personStyle.fill },
       radius: 7,
-      stroke: { color: personStyle.stroke },
+      stroke: { color: 0xffffff },
     });
     expect(instruction?.edges).toHaveLength(1);
     expect(instruction?.edges[0]).toMatchObject({
       stroke: { color: personStyle.stroke, width: 4 },
     });
-    expect(instruction?.edges[0]?.shadowStroke).toBeUndefined();
+    expect(instruction?.edges[0]?.shadowStroke).toMatchObject({
+      alpha: 0.25,
+      color: 0x000000,
+      width: 3,
+    });
   });
 
   it("filters vector layers through the shared confidence threshold", () => {
@@ -451,12 +508,16 @@ describe("demo presentation", () => {
     expect(keypointInstruction?.markers).toHaveLength(2);
     expect(keypointInstruction?.markers[0]).toMatchObject({
       fill: { color: personStyle.fill },
-      stroke: { color: personStyle.stroke },
+      stroke: { color: 0xffffff },
     });
     expect(keypointInstruction?.edges[0]).toMatchObject({
       stroke: { color: personStyle.stroke },
     });
-    expect(keypointInstruction?.edges[0]?.shadowStroke).toBeUndefined();
+    expect(keypointInstruction?.edges[0]?.shadowStroke).toMatchObject({
+      alpha: 0.25,
+      color: 0x000000,
+      width: 3,
+    });
   });
 
   it("creates a selected-or-hovered focus style for dimming the surrounding frame", () => {
@@ -485,9 +546,75 @@ describe("demo presentation", () => {
         alpha: defaultDemoPresentationSettings.focusDimAlpha,
         color: defaultDemoPresentationSettings.focusDimColor,
       },
-      targetMode: FocusTargetMode.HoveredAndSelected,
+      targetMode: FocusTargetMode.Ambient,
       targets: [selectedPick],
     });
+  });
+
+  it("keeps ambient focus targets aligned with the confidence filter", () => {
+    const visibleDetection = {
+      className: "horse",
+      confidence: 0.9,
+      rect: { height: 20, width: 20, x: 20, y: 20 },
+    };
+    const filteredDetection = {
+      className: "horse",
+      confidence: 0.4,
+      rect: { height: 20, width: 20, x: 50, y: 50 },
+    };
+    const frame = {
+      detections: [visibleDetection, filteredDetection],
+      mediaTime: 0,
+    };
+    const presentation = createDemoPresentation({
+      ...defaultDemoPresentationSettings,
+      confidenceThreshold: 0.5,
+    });
+
+    expect(
+      presentation.focusStyle?.resolve({
+        frame,
+        hoveredPick: null,
+        mediaTime: 0,
+        selectedPick: null,
+      }),
+    ).toMatchObject({
+      ambient: true,
+      targets: [expect.objectContaining({ detection: visibleDetection })],
+    });
+
+    expect(
+      presentation.focusStyle?.resolve({
+        frame,
+        hoveredPick: null,
+        mediaTime: 0,
+        selectedPick: {
+          detection: filteredDetection,
+          detectionIndex: 1,
+          frame,
+          mediaTime: 0,
+          point: { x: 50, y: 50 },
+          target: DetectionPickTarget.Box,
+        },
+      }),
+    ).toMatchObject({
+      ambient: true,
+      targets: [expect.objectContaining({ detection: visibleDetection })],
+    });
+
+    const hiddenPresentation = createDemoPresentation({
+      ...defaultDemoPresentationSettings,
+      confidenceThreshold: 1,
+    });
+
+    expect(
+      hiddenPresentation.focusStyle?.resolve({
+        frame,
+        hoveredPick: null,
+        mediaTime: 0,
+        selectedPick: null,
+      }),
+    ).toBeUndefined();
   });
 
   it("maps demo focus controls to target mode, tone, and fallback geometry", () => {
