@@ -41,6 +41,8 @@ Start here for normal application code:
 - `MediaSessionActivity`
 - media controls on `MediaSession`: `play`, `pause`, `seek`, frame stepping,
   playback rate, and current-presentation `refresh`;
+- renderer source/frame readouts for timeline UI, including estimated frame
+  rate, count, and current index while media timestamps remain canonical;
 - `DetectionFrame`
 - `Detection`
 - `Rect`

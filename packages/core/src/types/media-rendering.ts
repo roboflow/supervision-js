@@ -69,6 +69,11 @@ export interface MediaFrameRenderTimings {
 export interface MediaFrameDiagnostics {
   readonly rendererBackend: string | null;
   readonly mediaTime: number;
+  /**
+   * Zero-based display estimate derived from the opened source's packet rate.
+   * Canonical frame identity remains `mediaTime`, especially for VFR media.
+   */
+  readonly estimatedFrameIndex: number | null;
   /** Duration reported by the decoded sample currently on screen. */
   readonly frameDuration: number;
   /** First playable presentation timestamp of the opened media source. */
@@ -106,6 +111,10 @@ export interface MediaSourceState {
   readonly duration: number | null;
   /** First playable presentation timestamp, when the source is ready. */
   readonly firstTimestamp: number | null;
+  /** Average video packet rate sampled while opening finite media. */
+  readonly estimatedFrameRate: number | null;
+  /** Display estimate derived from duration and `estimatedFrameRate`. */
+  readonly estimatedFrameCount: number | null;
   readonly trackCount: number | null;
   readonly videoTrackCount: number | null;
   readonly audioTrackCount: number | null;

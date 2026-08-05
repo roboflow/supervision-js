@@ -63,6 +63,8 @@ export function createMediaRendererRuntimeState(
   let currentTime = 0;
   let playbackRate = options.playbackRate;
   let firstTimestamp = 0;
+  let estimatedFrameCount: number | null = null;
+  let estimatedFrameRate: number | null = null;
   let duration: number | null = null;
   let mediaHeight = 0;
   let mediaWidth = 0;
@@ -112,6 +114,12 @@ export function createMediaRendererRuntimeState(
     activeDetectionFrameIndex,
     activeDetectionFrameTime,
     currentTime,
+    estimatedFrameIndex: estimateFrameIndex(
+      sample.mediaTime,
+      firstTimestamp,
+      estimatedFrameRate,
+      estimatedFrameCount,
+    ),
     firstTimestamp,
     frameDuration: sample.duration ?? currentFrameDuration,
     detectionBuffer: sample.detectionBuffer,
@@ -172,6 +180,8 @@ export function createMediaRendererRuntimeState(
       mediaHeight = metadata.primaryVideoHeight;
       duration = metadata.duration;
       firstTimestamp = metadata.firstTimestamp;
+      estimatedFrameCount = metadata.estimatedFrameCount ?? null;
+      estimatedFrameRate = metadata.estimatedFrameRate ?? null;
 
       return { height: mediaHeight, width: mediaWidth };
     },
@@ -257,6 +267,23 @@ export function createMediaRendererRuntimeState(
       return createStateSnapshot();
     },
   };
+}
+
+function estimateFrameIndex(
+  mediaTime: number,
+  firstTimestamp: number,
+  estimatedFrameRate: number | null,
+  estimatedFrameCount: number | null,
+): number | null {
+  if (estimatedFrameRate === null || estimatedFrameRate <= 0) return null;
+
+  const index = Math.max(
+    0,
+    Math.round(Math.max(0, mediaTime - firstTimestamp) * estimatedFrameRate),
+  );
+  return estimatedFrameCount === null
+    ? index
+    : Math.min(index, Math.max(0, estimatedFrameCount - 1));
 }
 
 function createMediaRenderErrorSourcePatch(

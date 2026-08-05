@@ -419,6 +419,8 @@ function createRendererState(options: {
       canRead: null,
       duration: null,
       errorMessage: options.sourceErrorMessage ?? null,
+      estimatedFrameCount: null,
+      estimatedFrameRate: null,
       firstTimestamp: null,
       formatMimeType: null,
       formatName: null,

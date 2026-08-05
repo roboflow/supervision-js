@@ -120,6 +120,7 @@ const mockState = vi.hoisted(() => {
   const mediaMock = {
     audioTracks: [{ type: "audio" }],
     canRead: vi.fn(async () => true),
+    computePacketStats: vi.fn(async () => ({ averagePacketRate: 25 })),
     dispose: vi.fn(),
     format: { mimeType: "video/mp4", name: "MP4" },
     getAudioTracks: vi.fn(async () => mediaMock.audioTracks),
@@ -540,6 +541,8 @@ export function resetMocks() {
   mediaMock.audioTracks = [{ type: "audio" }];
   mediaMock.canRead.mockClear();
   mediaMock.canRead.mockResolvedValue(true);
+  mediaMock.computePacketStats.mockClear();
+  mediaMock.computePacketStats.mockResolvedValue({ averagePacketRate: 25 });
   mediaMock.dispose.mockClear();
   mediaMock.format = { mimeType: "video/mp4", name: "MP4" };
   mediaMock.getAudioTracks.mockClear();
@@ -565,6 +568,7 @@ export function resetMocks() {
     );
   });
   mediaMock.primaryVideoTrack = {
+    computePacketStats: mediaMock.computePacketStats,
     getDisplayHeight: mediaMock.getDisplayHeight,
     getDisplayWidth: mediaMock.getDisplayWidth,
     getFirstTimestamp: mediaMock.getFirstTimestamp,

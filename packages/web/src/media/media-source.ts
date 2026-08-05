@@ -39,6 +39,8 @@ export interface DecodedMediaSourceMetadata {
   readonly primaryVideoWidth: number;
   readonly primaryVideoHeight: number;
   readonly firstTimestamp: number;
+  readonly estimatedFrameRate?: number | null;
+  readonly estimatedFrameCount?: number | null;
 }
 
 export interface DecodedMediaSource {

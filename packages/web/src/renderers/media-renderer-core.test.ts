@@ -433,6 +433,8 @@ describe("media renderer core", () => {
           [createMockSample(4.75, 0.05) as unknown as DecodedVideoSample],
           {
             duration: 2,
+            estimatedFrameCount: 60,
+            estimatedFrameRate: 30,
             firstTimestamp: 4.75,
             primaryVideoHeight: 360,
             primaryVideoWidth: 640,
@@ -449,6 +451,7 @@ describe("media renderer core", () => {
     expect(onFrame).toHaveBeenCalledWith(
       expect.objectContaining({
         firstTimestamp: 4.75,
+        estimatedFrameIndex: 0,
         frameDuration: 0.05,
         mediaHeight: 360,
         mediaTime: 4.75,
@@ -457,7 +460,11 @@ describe("media renderer core", () => {
     );
     expect(renderer.getState()).toMatchObject({
       playbackRate: 1,
-      source: { firstTimestamp: 4.75 },
+      source: {
+        estimatedFrameCount: 60,
+        estimatedFrameRate: 30,
+        firstTimestamp: 4.75,
+      },
     });
 
     renderer.destroy();

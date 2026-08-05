@@ -10,6 +10,8 @@ export interface MediabunnyMediaSourceInput {
   readonly source: Source;
 }
 
+const FRAME_RATE_SAMPLE_PACKET_COUNT = 120;
+
 export async function openMediabunnyMediaSource(
   sourceInput: string | URL | Request | MediabunnyMediaSourceInput,
 ): Promise<DecodedMediaSource> {
@@ -54,15 +56,33 @@ export async function openMediabunnyMediaSource(
       throw new Error("No video track found in media source.");
     }
 
-    const [displayWidth, displayHeight, firstTimestamp] = await Promise.all([
-      primaryVideoTrack.getDisplayWidth(),
-      primaryVideoTrack.getDisplayHeight(),
-      primaryVideoTrack.getFirstTimestamp(),
-    ]);
+    const packetStatsPromise =
+      typeof primaryVideoTrack.computePacketStats === "function"
+        ? primaryVideoTrack.computePacketStats(FRAME_RATE_SAMPLE_PACKET_COUNT, {
+            skipLiveWait: true,
+          })
+        : Promise.resolve(null);
+    const [displayWidth, displayHeight, firstTimestamp, packetStats] =
+      await Promise.all([
+        primaryVideoTrack.getDisplayWidth(),
+        primaryVideoTrack.getDisplayHeight(),
+        primaryVideoTrack.getFirstTimestamp(),
+        packetStatsPromise,
+      ]);
 
     const duration = isUrlSourceInput(sourceInput)
       ? metadataDuration
       : (sourceInput.metadata?.duration ?? metadataDuration);
+    const estimatedFrameRate =
+      packetStats !== null &&
+      Number.isFinite(packetStats.averagePacketRate) &&
+      packetStats.averagePacketRate > 0
+        ? packetStats.averagePacketRate
+        : null;
+    const estimatedFrameCount =
+      duration !== null && estimatedFrameRate !== null
+        ? Math.max(1, Math.round(duration * estimatedFrameRate))
+        : null;
 
     return {
       input,
@@ -70,6 +90,8 @@ export async function openMediabunnyMediaSource(
         audioTrackCount: audioTracks.length,
         canRead,
         duration,
+        estimatedFrameCount,
+        estimatedFrameRate,
         firstTimestamp,
         formatMimeType: format.mimeType,
         formatName: format.name,

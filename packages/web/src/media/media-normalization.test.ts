@@ -48,6 +48,7 @@ const mockState = vi.hoisted(() => {
     readableStreamSourceConstructor: vi.fn(),
     primaryVideoTrack: {
       canDecode: vi.fn(async () => true),
+      computePacketStats: vi.fn(async () => ({ averagePacketRate: 24 })),
       getCodec: vi.fn(async () => "avc"),
       getDisplayHeight: vi.fn(async () => 720),
       getDisplayWidth: vi.fn(async () => 1280),
@@ -226,6 +227,10 @@ describe("normalizeMedia", () => {
     normalizationMock.readableStreamSourceConstructor.mockClear();
     normalizationMock.primaryVideoTrack.canDecode.mockClear();
     normalizationMock.primaryVideoTrack.canDecode.mockResolvedValue(true);
+    normalizationMock.primaryVideoTrack.computePacketStats.mockClear();
+    normalizationMock.primaryVideoTrack.computePacketStats.mockResolvedValue({
+      averagePacketRate: 24,
+    });
     normalizationMock.primaryVideoTrack.getCodec.mockClear();
     normalizationMock.primaryVideoTrack.getCodec.mockResolvedValue("avc");
     normalizationMock.primaryVideoTrack.getDisplayHeight.mockClear();
@@ -425,6 +430,11 @@ describe("normalizeMedia", () => {
     const source = await normalized.rendererSource.open();
 
     expect(source.metadata.duration).toBe(1.25);
+    expect(source.metadata.estimatedFrameCount).toBe(30);
+    expect(source.metadata.estimatedFrameRate).toBe(24);
+    expect(
+      normalizationMock.primaryVideoTrack.computePacketStats,
+    ).toHaveBeenCalledWith(120, { skipLiveWait: true });
     expect(normalizationMock.videoSampleSinkConstructor).toHaveBeenCalledWith(
       normalizationMock.primaryVideoTrack,
     );
