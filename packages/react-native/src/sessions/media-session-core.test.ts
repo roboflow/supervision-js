@@ -65,7 +65,7 @@ describe("createMediaSession", () => {
 
     expect(renderer.prepared.map((entry) => entry.packetId)).toEqual([0, 1]);
     expect(renderer.presentedPacketIds).toEqual([0, 1]);
-    expect(renderer.disposedPacketIds).toEqual([0]);
+    expect(renderer.disposedPacketIds).toEqual([]);
     expect(session.getState()).toMatchObject({
       renderPreparation: { activePacketId: 1, preparedFrames: 2 },
       renderer: {
@@ -92,7 +92,7 @@ describe("createMediaSession", () => {
     expect(session.getState().status).toBe(MediaSessionStatus.Ready);
 
     await session.destroy();
-    expect(renderer.disposedPacketIds).toEqual([0, 1]);
+    expect(renderer.disposedPacketIds).toEqual([1, 0]);
     expect(renderer.destroyed).toBe(true);
     expect(source.destroyed).toBe(true);
     expect(session.getState().status).toBe(MediaSessionStatus.Destroyed);

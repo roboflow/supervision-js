@@ -9,6 +9,11 @@ import {
 
 import type { MediaFrameSourceConsumer } from "../types/frame-source";
 import {
+  createPreparedFramePacket,
+  type PreparedFramePacket,
+} from "../renderers/prepared-frame-packet";
+import { PreparedFrameStore } from "../renderers/prepared-frame-store";
+import {
   MediaSessionError,
   type MediaSession,
   type MediaSessionOptions,
@@ -33,14 +38,13 @@ export async function createMediaSession<TPayload, TPacket extends object>(
   let destroyed = false;
   let opened = false;
   let started = false;
-  let activePacket: TPacket | null = null;
   let activeDetectionFrame: MediaSessionRendererState["activeDetectionFrame"] =
     null;
   let activePacketId: number | null = null;
   let error: MediaSessionError | null = null;
   let presentation = options.presentation ?? {};
   let presentedFrames = 0;
-  let preparedFrames = 0;
+  let preparedFrameCount = 0;
   let nextPacketId = 0;
   let processing = false;
   let playing = false;
@@ -54,6 +58,9 @@ export async function createMediaSession<TPayload, TPacket extends object>(
   const teardownErrors: unknown[] = [];
   let lastDiagnostics: MediaSessionRenderPreparationState["lastDiagnostics"] =
     null;
+  const preparedFrameStore = new PreparedFrameStore<
+    PreparedFramePacket<TPayload, TPacket>
+  >(async (packet) => options.renderer.disposePacket?.(packet.rendererPacket));
 
   const state = (): MediaSessionState => {
     const activities = [];
@@ -76,7 +83,7 @@ export async function createMediaSession<TPayload, TPacket extends object>(
         kind: MediaSessionActivityKind.RenderPreparing,
         label: "Preparing frame",
         pendingCount: 1,
-        preparedCount: preparedFrames,
+        preparedCount: preparedFrameCount,
         status: MediaSessionActivityStatus.Running,
       });
     }
@@ -124,7 +131,7 @@ export async function createMediaSession<TPayload, TPacket extends object>(
       renderPreparation: {
         activePacketId,
         lastDiagnostics,
-        preparedFrames,
+        preparedFrames: preparedFrameCount,
       },
       renderer: {
         activeDetectionFrame,
@@ -158,12 +165,6 @@ export async function createMediaSession<TPayload, TPacket extends object>(
     emit();
   };
 
-  const disposePacket = async (packet: TPacket | null) => {
-    if (packet) {
-      await options.renderer.disposePacket?.(packet);
-    }
-  };
-
   const onFrame = async (frame: PlatformMediaFrame<TPayload>) => {
     if (shouldAbandonFrame()) {
       return;
@@ -172,7 +173,7 @@ export async function createMediaSession<TPayload, TPacket extends object>(
     processing = true;
     emit();
 
-    let nextPacket: TPacket | null = null;
+    let nextPacket: PreparedFramePacket<TPayload, TPacket> | null = null;
     let stage: "processor" | "renderer" = "processor";
 
     try {
@@ -186,35 +187,38 @@ export async function createMediaSession<TPayload, TPacket extends object>(
 
       nextPacketId += 1;
       stage = "renderer";
-      nextPacket = await options.renderer.prepare({
+      const rendererPacket = await options.renderer.prepare({
         frame,
         packetId,
         presentation,
         result,
       });
+      nextPacket = createPreparedFramePacket(
+        packetId,
+        frame,
+        result,
+        rendererPacket,
+      );
 
       if (shouldAbandonFrame()) {
         await disposeNextPacket();
         return;
       }
 
-      await options.renderer.present(nextPacket);
+      await options.renderer.present(nextPacket.rendererPacket);
 
       if (shouldAbandonFrame()) {
         await disposeNextPacket();
         return;
       }
 
-      const previousPacket = activePacket;
-
-      activePacket = nextPacket;
       activePacketId = packetId;
       activeDetectionFrame = result.detectionFrame;
       lastDiagnostics = result.diagnostics ?? null;
-      preparedFrames += 1;
+      preparedFrameCount += 1;
       presentedFrames += 1;
+      await preparedFrameStore.present(nextPacket);
       nextPacket = null;
-      await disposePacket(previousPacket);
     } catch (cause) {
       try {
         await disposeNextPacket();
@@ -240,7 +244,9 @@ export async function createMediaSession<TPayload, TPacket extends object>(
 
       nextPacket = null;
       try {
-        await disposePacket(packet);
+        if (packet) {
+          await preparedFrameStore.discard(packet);
+        }
       } catch (cause) {
         if (destroyed) {
           teardownErrors.push(cause);
@@ -344,8 +350,12 @@ export async function createMediaSession<TPayload, TPacket extends object>(
     pick(point, pickOptions) {
       assertActive("pick");
 
-      return activePacket && options.renderer.pick
-        ? options.renderer.pick(activePacket, point, pickOptions)
+      return preparedFrameStore.active && options.renderer.pick
+        ? options.renderer.pick(
+            preparedFrameStore.active.rendererPacket,
+            point,
+            pickOptions,
+          )
         : null;
     },
     async play() {
@@ -403,13 +413,10 @@ export async function createMediaSession<TPayload, TPacket extends object>(
   };
 
   async function destroyResources() {
-    const packet = activePacket;
-
-    activePacket = null;
     activePacketId = null;
     activeDetectionFrame = null;
 
-    await runCleanup(() => disposePacket(packet));
+    await runCleanup(() => preparedFrameStore.dispose());
     await releaseSource();
     await runCleanup(() => options.renderer.destroy?.());
 
