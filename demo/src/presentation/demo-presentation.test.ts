@@ -551,6 +551,53 @@ describe("demo presentation", () => {
     });
   });
 
+  it("keeps ambient focus targets aligned with the confidence filter", () => {
+    const visibleDetection = {
+      className: "horse",
+      confidence: 0.9,
+      rect: { height: 20, width: 20, x: 20, y: 20 },
+    };
+    const filteredDetection = {
+      className: "horse",
+      confidence: 0.4,
+      rect: { height: 20, width: 20, x: 50, y: 50 },
+    };
+    const frame = {
+      detections: [visibleDetection, filteredDetection],
+      mediaTime: 0,
+    };
+    const presentation = createDemoPresentation({
+      ...defaultDemoPresentationSettings,
+      confidenceThreshold: 0.5,
+    });
+
+    expect(
+      presentation.focusStyle?.resolve({
+        frame,
+        hoveredPick: null,
+        mediaTime: 0,
+        selectedPick: null,
+      }),
+    ).toMatchObject({
+      ambient: true,
+      targets: [expect.objectContaining({ detection: visibleDetection })],
+    });
+
+    const hiddenPresentation = createDemoPresentation({
+      ...defaultDemoPresentationSettings,
+      confidenceThreshold: 1,
+    });
+
+    expect(
+      hiddenPresentation.focusStyle?.resolve({
+        frame,
+        hoveredPick: null,
+        mediaTime: 0,
+        selectedPick: null,
+      }),
+    ).toBeUndefined();
+  });
+
   it("maps demo focus controls to target mode, tone, and fallback geometry", () => {
     const presentation = createDemoPresentation({
       ...defaultDemoPresentationSettings,

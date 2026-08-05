@@ -293,7 +293,7 @@ function createDemoBoxStyle(settings: DemoPresentationSettings): BoxStyle {
 }
 
 function createDemoFocusStyle(settings: DemoPresentationSettings): FocusStyle {
-  return new BaseFocusStyle({
+  const baseStyle = new BaseFocusStyle({
     cornerRadius: settings.focusCornerRadius,
     fill: {
       alpha: settings.focusDimAlpha,
@@ -305,6 +305,22 @@ function createDemoFocusStyle(settings: DemoPresentationSettings): FocusStyle {
       hasRenderableFocusTarget(context, settings),
     targetMode: settings.focusTargetMode,
   });
+
+  return {
+    resolve(context) {
+      const instruction = baseStyle.resolve(context);
+
+      if (!instruction) {
+        return undefined;
+      }
+
+      const targets = instruction.targets.filter((target) =>
+        passesConfidenceThreshold(target.detection, settings),
+      );
+
+      return targets.length === 0 ? undefined : { ...instruction, targets };
+    },
+  };
 }
 
 function hasRenderableFocusTarget(
