@@ -3,7 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createReactNativeVideoSession,
   createReactNativeWorkletRuntime,
+  MediaSessionError,
 } from "./sessions";
+import * as sessionsEntrypoint from "./sessions";
 
 vi.mock("@shopify/react-native-skia", () => ({
   AlphaType: { Opaque: 2 },
@@ -29,5 +31,24 @@ describe("createReactNativeVideoSession", () => {
 describe("createReactNativeWorkletRuntime", () => {
   it("throws a diagnosable error outside a device runtime", () => {
     expect(() => createReactNativeWorkletRuntime("test-runtime")).toThrow();
+  });
+});
+
+describe("sessions entrypoint", () => {
+  it("exposes the session-first contract alongside the legacy video factory", () => {
+    expect(
+      Object.keys(
+        // The Skia module is mocked above, so this verifies the actual
+        // entrypoint rather than a hand-maintained declaration list.
+        sessionsEntrypoint,
+      ).sort(),
+    ).toEqual([
+      "MediaSessionError",
+      "REACT_NATIVE_VIDEO_SESSION_DEFAULTS",
+      "createMediaSession",
+      "createReactNativeVideoSession",
+      "createReactNativeWorkletRuntime",
+    ]);
+    expect(MediaSessionError.name).toBe("MediaSessionError");
   });
 });

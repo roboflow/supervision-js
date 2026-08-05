@@ -33,6 +33,34 @@ import {
   type ReactNativeVideoFrameHandle,
 } from "./video-frame-source";
 
+export { createMediaSession } from "./sessions/media-session-core";
+export {
+  MediaSessionError,
+  type MediaSession,
+  type MediaSessionErrorCode,
+  type MediaSessionMediaState,
+  type MediaSessionOptions,
+  type MediaSessionState,
+  type MediaSessionStateListener,
+  type MediaSessionStateUnsubscribe,
+} from "./types/media-session";
+export type {
+  MediaFrameProcessor,
+  MediaFrameProcessorResult,
+} from "./types/frame-processor";
+export type {
+  MediaFrameSource,
+  MediaFrameSourceConsumer,
+  MediaSessionCapabilities,
+} from "./types/frame-source";
+export type {
+  MediaRendererAdapter,
+  MediaRendererPrepareOptions,
+  MediaSessionRendererState,
+  MediaSessionRenderPreparationState,
+  PreparedMediaFramePacket,
+} from "./types/renderer";
+
 /**
  * Minimal structural view of a reanimated shared value. UI components read
  * these; the session's pump thread writes them. Reanimated's own

@@ -1,5 +1,11 @@
 # RN API Hardening Plan — toward releasing core + web + react-native
 
+> **Status 2026-08-05:** historical plan. Its completed work remains valid,
+> but the remaining extraction and hardening work is superseded by
+> [`2026-08-05-rn-thin-wrapper-hardening.md`](2026-08-05-rn-thin-wrapper-hardening.md),
+> which is based on the current static, live camera, saved-video, and Instant CV
+> implementation.
+
 > **For agentic workers:** implement checkpoint-by-checkpoint. Phase 1 is safe
 > to land in one session (pure refactor, demo stays green). Phases 2–4 each
 > deserve their own session and manual iPhone verification.

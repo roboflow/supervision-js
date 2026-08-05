@@ -87,13 +87,48 @@ export type {
   KeypointDrawInstruction,
   KeypointStyle,
   MediaFrameMetadata,
+  MediaSessionActivity,
+  MediaSessionLifecycleState,
+  MediaSessionStateUnsubscribe,
   MediaRendererPresentation,
   PlatformMediaFrame,
   Rect,
   TopLeftRect,
 } from "supervision-js-core";
 
+export {
+  MediaSessionActivityKind,
+  MediaSessionActivityStatus,
+  MediaSessionMode,
+  MediaSessionStatus,
+} from "supervision-js-core";
+
 export { REACT_NATIVE_LIVE_ID_MASK_DEFAULTS } from "./live-defaults";
+export { MediaSessionError } from "./types/media-session";
+export type {
+  MediaSession,
+  MediaSessionErrorCode,
+  MediaSessionMediaState,
+  MediaSessionOptions,
+  MediaSessionState,
+  MediaSessionStateListener,
+} from "./types/media-session";
+export type {
+  MediaFrameProcessor,
+  MediaFrameProcessorResult,
+} from "./types/frame-processor";
+export type {
+  MediaFrameSource,
+  MediaFrameSourceConsumer,
+  MediaSessionCapabilities,
+} from "./types/frame-source";
+export type {
+  MediaRendererAdapter,
+  MediaRendererPrepareOptions,
+  MediaSessionRendererState,
+  MediaSessionRenderPreparationState,
+  PreparedMediaFramePacket,
+} from "./types/renderer";
 export {
   createReactNativeAnnotationGestureAdapter,
   type ReactNativeAnnotationGestureAdapter,
