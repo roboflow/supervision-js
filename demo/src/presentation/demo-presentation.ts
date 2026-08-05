@@ -4,7 +4,9 @@ import {
   BaseFocusStyle,
   BaseInteractionStyle,
   BaseKeypointStyle,
+  BaseLabelStyle,
   BasePolygonStyle,
+  BasePolylineStyle,
   DEFAULT_DETECTION_CLASS_STYLES,
   DetectionInteractionState,
   type DetectionClassColorStyle,
@@ -17,12 +19,12 @@ import {
   type FocusStyle,
   type InteractionStyle,
   type KeypointStyle,
-  type LabelDrawInstruction,
   type LabelStyle,
   type MaskDrawInstruction,
   type MaskStyle,
   type MediaRendererPresentation,
   type PolygonStyle,
+  type PolylineStyle,
   resolveDetectionClassColorStyle,
 } from "supervision-js";
 
@@ -35,6 +37,7 @@ export interface DemoPresentationSettings {
   readonly labelsEnabled: boolean;
   readonly masksEnabled: boolean;
   readonly polygonsEnabled: boolean;
+  readonly polylinesEnabled: boolean;
   readonly boxCornerRadius: number;
   readonly boxStrokeWidth: number;
   readonly boxStrokeAlignment: BoxStrokeAlignment;
@@ -43,17 +46,20 @@ export interface DemoPresentationSettings {
   readonly labelBackgroundAlpha: number;
   readonly labelCornerRadius: number;
   readonly labelFontSize: number;
+  readonly labelIncludeConfidence: boolean;
   readonly labelOffsetX: number;
   readonly labelOffsetY: number;
   readonly labelPaddingX: number;
   readonly labelPaddingY: number;
   readonly labelPlacement: LabelPlacement;
   readonly maskMode: MaskRenderMode;
+  readonly maskFillAlpha: number;
   readonly maskOpacity: number;
   readonly maskStrokeAlpha: number;
   readonly maskStrokeWidth: number;
   readonly polygonFillAlpha: number;
   readonly polygonStrokeWidth: number;
+  readonly polylineStrokeWidth: number;
   readonly keypointRadius: number;
   readonly keypointEdgeWidth: number;
   readonly confidenceThreshold: number;
@@ -73,7 +79,8 @@ export type DemoPresentationLayerSetting =
   | "keypointsEnabled"
   | "labelsEnabled"
   | "masksEnabled"
-  | "polygonsEnabled";
+  | "polygonsEnabled"
+  | "polylinesEnabled";
 
 export type DemoPresentationAvailability = Partial<
   Record<DemoPresentationLayerSetting, boolean>
@@ -86,6 +93,7 @@ const demoPresentationLayerSettings: readonly DemoPresentationLayerSetting[] = [
   "labelsEnabled",
   "masksEnabled",
   "polygonsEnabled",
+  "polylinesEnabled",
 ];
 
 export function constrainDemoPresentationSettings(
@@ -106,51 +114,61 @@ export function constrainDemoPresentationSettings(
 export const defaultDemoClassNames = ["person", "horse", "cow"];
 
 const defaultDemoClassStyles: Record<string, DemoClassStyle> = {
-  basketball: DEFAULT_DETECTION_CLASS_STYLES.basketball,
-  cow: DEFAULT_DETECTION_CLASS_STYLES.cow,
-  horse: DEFAULT_DETECTION_CLASS_STYLES.horse,
-  person: DEFAULT_DETECTION_CLASS_STYLES.person,
-  "white team player": DEFAULT_DETECTION_CLASS_STYLES["white team player"],
-  "yellow team player": DEFAULT_DETECTION_CLASS_STYLES["yellow team player"],
+  basketball: createCanonicalDemoClassStyle(
+    DEFAULT_DETECTION_CLASS_STYLES.basketball,
+  ),
+  cow: createCanonicalDemoClassStyle(DEFAULT_DETECTION_CLASS_STYLES.cow),
+  horse: createCanonicalDemoClassStyle(DEFAULT_DETECTION_CLASS_STYLES.horse),
+  person: createCanonicalDemoClassStyle(DEFAULT_DETECTION_CLASS_STYLES.person),
+  "white team player": createCanonicalDemoClassStyle(
+    DEFAULT_DETECTION_CLASS_STYLES["white team player"],
+  ),
+  "yellow team player": createCanonicalDemoClassStyle(
+    DEFAULT_DETECTION_CLASS_STYLES["yellow team player"],
+  ),
 };
 
 export const defaultDemoPresentationSettings: DemoPresentationSettings = {
-  boxesEnabled: false,
-  boxCornerRadius: 8,
-  boxFillAlpha: 0.1,
+  boxesEnabled: true,
+  boxCornerRadius: 1,
+  boxFillAlpha: 0.08,
   boxStrokeAlignment: BoxStrokeAlignment.Center,
-  boxStrokeWidth: 4,
+  boxStrokeWidth: 2,
   classStyles: defaultDemoClassStyles,
-  confidenceThreshold: 0.5,
-  focusCornerRadius: 10,
-  focusDimAlpha: 0.45,
-  focusDimColor: 0x020617,
+  confidenceThreshold: 0,
+  focusCornerRadius: 1,
+  focusDimAlpha: 0.4,
+  focusDimColor: 0x000000,
   focusEnabled: true,
-  focusTargetMode: FocusTargetMode.HoveredAndSelected,
-  interactionHoverFillAlpha: 0.12,
-  interactionHoverStrokeWidth: 5,
+  focusTargetMode: FocusTargetMode.Ambient,
+  interactionHoverFillAlpha: 0.08,
+  interactionHoverStrokeWidth: 2,
   interactionSelectedFillAlpha: 0.22,
-  interactionSelectedStrokeWidth: 7,
-  keypointEdgeWidth: 3,
-  keypointRadius: 5,
+  interactionSelectedStrokeWidth: 3.5,
+  keypointEdgeWidth: 1.5,
+  keypointRadius: 3.5,
   keypointsEnabled: true,
-  labelBackgroundAlpha: 0.78,
-  labelCornerRadius: 5,
-  labelFontSize: 14,
+  labelBackgroundAlpha: 1,
+  labelCornerRadius: 4,
+  labelFontSize: 12,
+  labelIncludeConfidence: false,
   labelOffsetX: 0,
   labelOffsetY: 0,
-  labelPaddingX: 7,
-  labelPaddingY: 4,
+  labelPaddingX: 6,
+  labelPaddingY: 3,
   labelPlacement: LabelPlacement.Top,
   labelsEnabled: true,
   maskMode: MaskRenderMode.FillAndStroke,
-  maskOpacity: 0.7,
+  maskFillAlpha: 0.45,
+  maskOpacity: 1,
   maskStrokeAlpha: 1,
-  maskStrokeWidth: 5,
+  maskStrokeWidth: 2,
   masksEnabled: true,
-  polygonFillAlpha: 0.12,
-  polygonStrokeWidth: 3,
+  polygonFillAlpha: 0.08,
+  polygonStrokeWidth: 2,
   polygonsEnabled: true,
+  polylineStrokeWidth: 2,
+  polylinesEnabled: true,
 };
 
 export function createDemoPresentation(
@@ -159,7 +177,7 @@ export function createDemoPresentation(
   return {
     // The demo uses contain-fit media, so this colour is visible in the
     // letterbox around non-matching aspect ratios.
-    backgroundColor: 0xfafafa,
+    backgroundColor: 0xf3f4f6,
     boxStyle: settings.boxesEnabled ? createDemoBoxStyle(settings) : null,
     focusStyle: settings.focusEnabled ? createDemoFocusStyle(settings) : null,
     interactionStyle: createDemoInteractionStyle(settings),
@@ -170,6 +188,9 @@ export function createDemoPresentation(
     maskStyle: settings.masksEnabled ? createDemoMaskStyle(settings) : null,
     polygonStyle: settings.polygonsEnabled
       ? createDemoPolygonStyle(settings)
+      : null,
+    polylineStyle: settings.polylinesEnabled
+      ? createDemoPolylineStyle(settings)
       : null,
   };
 }
@@ -184,9 +205,22 @@ function createDemoPolygonStyle(
     }),
     shouldRender: (detection) => passesConfidenceThreshold(detection, settings),
     stroke: (detection) => ({
-      alpha: 0.95,
+      alpha: 1,
       color: resolveClassStyle(detection, settings).stroke,
       width: settings.polygonStrokeWidth,
+    }),
+  });
+}
+
+function createDemoPolylineStyle(
+  settings: DemoPresentationSettings,
+): PolylineStyle {
+  return new BasePolylineStyle({
+    shouldRender: (detection) => passesConfidenceThreshold(detection, settings),
+    stroke: (detection) => ({
+      alpha: 1,
+      color: resolveClassStyle(detection, settings).stroke,
+      width: settings.polylineStrokeWidth,
     }),
   });
 }
@@ -195,9 +229,13 @@ function createDemoKeypointStyle(
   settings: DemoPresentationSettings,
 ): KeypointStyle {
   return new BaseKeypointStyle({
-    edgeShadowStroke: null,
+    edgeShadowStroke: {
+      alpha: 0.25,
+      color: 0x000000,
+      width: 3,
+    },
     edgeStroke: (detection) => ({
-      alpha: 0.95,
+      alpha: 1,
       color: resolveClassStyle(detection, settings).stroke,
       width: settings.keypointEdgeWidth,
     }),
@@ -205,10 +243,10 @@ function createDemoKeypointStyle(
       alpha: 1,
       color: resolveClassStyle(detection, settings).fill,
     }),
-    markerStroke: (detection) => ({
+    markerStroke: () => ({
       alpha: 1,
-      color: resolveClassStyle(detection, settings).stroke,
-      width: 2,
+      color: 0xffffff,
+      width: 1,
     }),
     radius: settings.keypointRadius,
     shouldRender: (detection) => passesConfidenceThreshold(detection, settings),
@@ -218,7 +256,14 @@ function createDemoKeypointStyle(
 function createDemoBoxStyle(settings: DemoPresentationSettings): BoxStyle {
   return {
     resolve(detection: Detection): BoxDrawInstruction | undefined {
-      if (!detection.rect || !passesConfidenceThreshold(detection, settings)) {
+      if (
+        !detection.rect ||
+        detection.mask ||
+        detection.polygon ||
+        detection.polyline ||
+        detection.keypoints ||
+        !passesConfidenceThreshold(detection, settings)
+      ) {
         return undefined;
       }
 
@@ -235,8 +280,10 @@ function createDemoBoxStyle(settings: DemoPresentationSettings): BoxStyle {
         rect: detection.rect,
         shape,
         stroke: {
-          alignment: settings.boxStrokeAlignment,
-          alpha: 0.95,
+          ...(settings.boxStrokeAlignment === BoxStrokeAlignment.Center
+            ? {}
+            : { alignment: settings.boxStrokeAlignment }),
+          alpha: 1,
           color: style.stroke,
           width: settings.boxStrokeWidth,
         },
@@ -246,16 +293,56 @@ function createDemoBoxStyle(settings: DemoPresentationSettings): BoxStyle {
 }
 
 function createDemoFocusStyle(settings: DemoPresentationSettings): FocusStyle {
-  return new BaseFocusStyle({
+  const baseStyle = new BaseFocusStyle({
     cornerRadius: settings.focusCornerRadius,
     fill: {
       alpha: settings.focusDimAlpha,
       color: settings.focusDimColor,
     },
     shape: resolveBoxShape(settings.focusCornerRadius),
-    shouldRender: (context) => hasRenderableFocusTarget(context, settings),
+    shouldRender: (context) =>
+      settings.focusTargetMode === FocusTargetMode.Ambient ||
+      hasRenderableFocusTarget(context, settings),
     targetMode: settings.focusTargetMode,
   });
+
+  return {
+    resolve(context) {
+      const contextWithVisiblePicks =
+        settings.focusTargetMode === FocusTargetMode.Ambient
+          ? {
+              ...context,
+              hoveredPick:
+                context.hoveredPick &&
+                passesConfidenceThreshold(
+                  context.hoveredPick.detection,
+                  settings,
+                )
+                  ? context.hoveredPick
+                  : null,
+              selectedPick:
+                context.selectedPick &&
+                passesConfidenceThreshold(
+                  context.selectedPick.detection,
+                  settings,
+                )
+                  ? context.selectedPick
+                  : null,
+            }
+          : context;
+      const instruction = baseStyle.resolve(contextWithVisiblePicks);
+
+      if (!instruction) {
+        return undefined;
+      }
+
+      const targets = instruction.targets.filter((target) =>
+        passesConfidenceThreshold(target.detection, settings),
+      );
+
+      return targets.length === 0 ? undefined : { ...instruction, targets };
+    },
+  };
 }
 
 function hasRenderableFocusTarget(
@@ -295,6 +382,7 @@ function createDemoMaskStyle(settings: DemoPresentationSettings): MaskStyle {
       "demo-mask",
       settings.confidenceThreshold,
       settings.maskMode,
+      settings.maskFillAlpha,
       settings.maskStrokeAlpha,
       settings.maskStrokeWidth,
       serializeMaskClassStyles(settings.classStyles),
@@ -309,7 +397,10 @@ function createDemoMaskStyle(settings: DemoPresentationSettings): MaskStyle {
       const style = resolveClassStyle(detection, settings);
 
       return {
-        alpha: settings.maskMode === MaskRenderMode.StrokeOnly ? 0 : 1,
+        alpha:
+          settings.maskMode === MaskRenderMode.StrokeOnly
+            ? 0
+            : settings.maskFillAlpha,
         color: style.fill,
         mask: detection.mask,
         stroke:
@@ -328,42 +419,30 @@ function createDemoMaskStyle(settings: DemoPresentationSettings): MaskStyle {
 }
 
 function createDemoLabelStyle(settings: DemoPresentationSettings): LabelStyle {
-  return {
-    resolve(detection: Detection): LabelDrawInstruction | undefined {
-      if (!detection.rect || !passesConfidenceThreshold(detection, settings)) {
-        return undefined;
-      }
-
-      const className = detection.className ?? "detection";
-      const style = resolveClassStyle(detection, settings);
-      const confidence =
-        detection.confidence === undefined
-          ? ""
-          : ` ${Math.round(detection.confidence * 100)}%`;
-
-      return {
-        background: {
-          alpha: settings.labelBackgroundAlpha,
-          color: style.labelBackground,
-          cornerRadius: settings.labelCornerRadius,
-          paddingX: settings.labelPaddingX,
-          paddingY: settings.labelPaddingY,
-        },
-        offsetX: settings.labelOffsetX,
-        offsetY: settings.labelOffsetY,
-        placement: settings.labelPlacement,
-        rect: detection.rect,
-        text: `${className}${confidence}`,
-        textStyle: {
-          alpha: 1,
-          color: style.labelText,
-          fontFamily: "Inter, sans-serif",
-          fontSize: settings.labelFontSize,
-          fontWeight: "750",
-        },
-      };
+  return new BaseLabelStyle({
+    background: (detection) => ({
+      alpha: settings.labelBackgroundAlpha,
+      color: resolveClassStyle(detection, settings).labelBackground,
+      cornerRadius: settings.labelCornerRadius,
+      paddingX: settings.labelPaddingX,
+      paddingY: settings.labelPaddingY,
+      topCornersOnly: true,
+    }),
+    includeConfidence: settings.labelIncludeConfidence,
+    offset: {
+      ...(settings.labelOffsetX === 0 ? {} : { x: settings.labelOffsetX }),
+      y: settings.labelOffsetY,
     },
-  };
+    placement: settings.labelPlacement,
+    shouldRender: (detection) => passesConfidenceThreshold(detection, settings),
+    textStyle: (detection) => ({
+      color: resolveClassStyle(detection, settings).labelText,
+      fontFamily:
+        "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
+      fontSize: settings.labelFontSize,
+      fontWeight: "600",
+    }),
+  });
 }
 
 function createDemoInteractionStyle(
@@ -383,6 +462,7 @@ function createDemoInteractionStyle(
       (settings.boxesEnabled ||
         settings.masksEnabled ||
         settings.polygonsEnabled ||
+        settings.polylinesEnabled ||
         settings.keypointsEnabled),
   });
 }
@@ -404,6 +484,9 @@ function createDemoInteractionPresentation(
     polygonStyle: settings.polygonsEnabled
       ? createDemoInteractionPolygonStyle(settings, state)
       : null,
+    polylineStyle: settings.polylinesEnabled
+      ? createDemoInteractionPolylineStyle(settings, state)
+      : null,
   };
 }
 
@@ -422,7 +505,25 @@ function createDemoInteractionPolygonStyle(
     }),
     shouldRender: (detection) => passesConfidenceThreshold(detection, settings),
     stroke: (detection) => ({
-      alpha: isSelected ? 1 : 0.9,
+      alpha: 1,
+      color: resolveClassStyle(detection, settings).stroke,
+      width: isSelected
+        ? settings.interactionSelectedStrokeWidth
+        : settings.interactionHoverStrokeWidth,
+    }),
+  });
+}
+
+function createDemoInteractionPolylineStyle(
+  settings: DemoPresentationSettings,
+  state: DetectionInteractionState,
+): PolylineStyle {
+  const isSelected = state === DetectionInteractionState.Selected;
+
+  return new BasePolylineStyle({
+    shouldRender: (detection) => passesConfidenceThreshold(detection, settings),
+    stroke: (detection) => ({
+      alpha: 1,
       color: resolveClassStyle(detection, settings).stroke,
       width: isSelected
         ? settings.interactionSelectedStrokeWidth
@@ -438,22 +539,28 @@ function createDemoInteractionKeypointStyle(
   const isSelected = state === DetectionInteractionState.Selected;
 
   return new BaseKeypointStyle({
-    edgeShadowStroke: null,
+    edgeShadowStroke: {
+      alpha: 0.25,
+      color: 0x000000,
+      width: 3,
+    },
     edgeStroke: (detection) => ({
-      alpha: isSelected ? 1 : 0.9,
+      alpha: 1,
       color: resolveClassStyle(detection, settings).stroke,
-      width: settings.keypointEdgeWidth + (isSelected ? 2 : 1),
+      width: isSelected
+        ? settings.interactionSelectedStrokeWidth
+        : settings.interactionHoverStrokeWidth,
     }),
     markerFill: (detection) => ({
       alpha: 1,
       color: resolveClassStyle(detection, settings).fill,
     }),
-    markerStroke: (detection) => ({
+    markerStroke: () => ({
       alpha: 1,
-      color: resolveClassStyle(detection, settings).stroke,
-      width: 2,
+      color: 0xffffff,
+      width: 1,
     }),
-    radius: settings.keypointRadius + (isSelected ? 2 : 1),
+    radius: settings.keypointRadius,
     shouldRender: (detection) => passesConfidenceThreshold(detection, settings),
   });
 }
@@ -464,7 +571,14 @@ function createDemoInteractionBoxStyle(
 ): BoxStyle {
   return {
     resolve(detection: Detection): BoxDrawInstruction | undefined {
-      if (!detection.rect || !passesConfidenceThreshold(detection, settings)) {
+      if (
+        !detection.rect ||
+        detection.mask ||
+        detection.polygon ||
+        detection.polyline ||
+        detection.keypoints ||
+        !passesConfidenceThreshold(detection, settings)
+      ) {
         return undefined;
       }
 
@@ -484,8 +598,7 @@ function createDemoInteractionBoxStyle(
         rect: detection.rect,
         shape,
         stroke: {
-          alignment: BoxStrokeAlignment.Outside,
-          alpha: isSelected ? 1 : 0.88,
+          alpha: 1,
           color: style.stroke,
           width: isSelected
             ? settings.interactionSelectedStrokeWidth
@@ -516,7 +629,7 @@ function createDemoInteractionMaskStyle(
         color: style.fill,
         mask: detection.mask,
         stroke: {
-          alpha: isSelected ? 1 : 0.9,
+          alpha: 1,
           color: style.stroke,
           width: isSelected
             ? settings.interactionSelectedStrokeWidth
@@ -540,7 +653,7 @@ export function resolveDemoClassStyle(
 ) {
   return (
     settings.classStyles[className] ??
-    resolveDetectionClassColorStyle(className)
+    createCanonicalDemoClassStyle(resolveDetectionClassColorStyle(className))
   );
 }
 
@@ -550,7 +663,27 @@ function resolveClassStyle(
 ) {
   return detection.className
     ? resolveDemoClassStyle(settings, detection.className)
-    : resolveDetectionClassColorStyle(undefined);
+    : createCanonicalDemoClassStyle(resolveDetectionClassColorStyle(undefined));
+}
+
+function createCanonicalDemoClassStyle(
+  style: DetectionClassColorStyle,
+): DemoClassStyle {
+  return {
+    fill: style.fill,
+    labelBackground: style.fill,
+    labelText: resolveDemoLabelTextColor(style.fill),
+    stroke: style.fill,
+  };
+}
+
+function resolveDemoLabelTextColor(color: number) {
+  const red = (color >> 16) & 0xff;
+  const green = (color >> 8) & 0xff;
+  const blue = color & 0xff;
+  const luminance = (red * 299 + green * 587 + blue * 114) / 1000;
+
+  return luminance >= 150 ? 0x111111 : 0xffffff;
 }
 
 function serializeMaskClassStyles(styles: Record<string, DemoClassStyle>) {
