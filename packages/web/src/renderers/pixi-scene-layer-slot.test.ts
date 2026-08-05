@@ -15,13 +15,22 @@ describe("pixi scene layer slots", () => {
     const interactionSlot = createPixiSceneLayerSlot(
       PixiSceneLayerKind.Interaction,
     );
+    const handleSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Handle);
     const labelSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Label);
     const media = new FakeDisplay("media");
     const mask = new FakeDisplay("mask");
     const box = new FakeDisplay("box");
     const interaction = new FakeDisplay("interaction");
+    const handle = new FakeDisplay("handle");
     const label = new FakeDisplay("label");
-    const slots = [mediaSlot, maskSlot, boxSlot, interactionSlot, labelSlot];
+    const slots = [
+      mediaSlot,
+      maskSlot,
+      boxSlot,
+      handleSlot,
+      interactionSlot,
+      labelSlot,
+    ];
 
     labelSlot.setDisplay(label as never);
     boxSlot.setDisplay(box as never);
@@ -36,6 +45,7 @@ describe("pixi scene layer slots", () => {
 
     maskSlot.setDisplay(mask as never);
     interactionSlot.setDisplay(interaction as never);
+    handleSlot.setDisplay(handle as never);
     syncPixiSceneLayerChildren(scene as never, slots);
 
     expect(scene.children.map((child) => child.name)).toEqual([
@@ -43,6 +53,7 @@ describe("pixi scene layer slots", () => {
       "mask",
       "box",
       "interaction",
+      "handle",
       "label",
     ]);
 
@@ -53,6 +64,7 @@ describe("pixi scene layer slots", () => {
       "media",
       "box",
       "interaction",
+      "handle",
       "label",
     ]);
   });

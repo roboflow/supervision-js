@@ -80,7 +80,7 @@ function defaultLayerOrder(kind: string) {
     case PixiSceneLayerKind.Guide:
       return 500;
     case PixiSceneLayerKind.Handle:
-      return 600;
+      return 750;
     case PixiSceneLayerKind.Interaction:
       return 700;
     case PixiSceneLayerKind.Label:
