@@ -51,6 +51,8 @@ export async function createMediaSession<TPayload, TPacket extends object>(
   let frameQueue: Promise<void> = Promise.resolve();
   let sourceOperationQueue: Promise<void> = Promise.resolve();
   let sourceStart: Promise<void> = Promise.resolve();
+  let sourceDestroyAttempted = false;
+  const teardownErrors: unknown[] = [];
   let lastDiagnostics: MediaSessionRenderPreparationState["lastDiagnostics"] =
     null;
 
@@ -220,6 +222,11 @@ export async function createMediaSession<TPayload, TPacket extends object>(
       } catch {
         // Preserve the primary processor/renderer failure as the session error.
       }
+
+      if (destroyed) {
+        return;
+      }
+
       reportError(
         stage === "processor" ? "processor-failed" : "renderer-failed",
         cause,
@@ -233,7 +240,16 @@ export async function createMediaSession<TPayload, TPacket extends object>(
       const packet = nextPacket;
 
       nextPacket = null;
-      await disposePacket(packet);
+      try {
+        await disposePacket(packet);
+      } catch (cause) {
+        if (destroyed) {
+          teardownErrors.push(cause);
+          return;
+        }
+
+        throw cause;
+      }
     }
   };
 
@@ -312,7 +328,8 @@ export async function createMediaSession<TPayload, TPacket extends object>(
       destroyed = true;
       playing = false;
       processing = false;
-      destroyPromise = drainLifecycle()
+      destroyPromise = releaseSource()
+        .then(() => drainLifecycle())
         .then(() => destroyResources())
         .finally(() => {
           emit();
@@ -394,26 +411,39 @@ export async function createMediaSession<TPayload, TPacket extends object>(
 
   async function destroyResources() {
     const packet = activePacket;
-    const errors: unknown[] = [];
 
     activePacket = null;
     activePacketId = null;
     activeDetectionFrame = null;
 
     await runCleanup(() => disposePacket(packet));
-    await runCleanup(() => options.source.destroy?.());
+    await releaseSource();
     await runCleanup(() => options.renderer.destroy?.());
 
-    if (errors.length > 0) {
-      throw errors[0];
+    if (teardownErrors.length > 0) {
+      throw teardownErrors[0];
     }
 
     async function runCleanup(cleanup: () => void | Promise<void>) {
       try {
         await cleanup();
       } catch (cause) {
-        errors.push(cause);
+        teardownErrors.push(cause);
       }
+    }
+  }
+
+  async function releaseSource() {
+    if (sourceDestroyAttempted) {
+      return;
+    }
+
+    sourceDestroyAttempted = true;
+
+    try {
+      await options.source.destroy?.();
+    } catch (cause) {
+      teardownErrors.push(cause);
     }
   }
 
@@ -473,7 +503,7 @@ export async function createMediaSession<TPayload, TPacket extends object>(
   }
 
   function shouldAbandonFrame() {
-    return destroyed || stopped || error !== null;
+    return destroyed || !playing || stopped || error !== null;
   }
 
   function assertActive(operation: string) {

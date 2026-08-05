@@ -171,6 +171,37 @@ describe("createMediaSession", () => {
     expect(source.destroyed).toBe(true);
   });
 
+  it("abandons an in-flight frame after pause", async () => {
+    const source = new FakeMediaFrameSource<FakeFrame>();
+    const renderer = new FakeMediaRenderer<FakeFrame>();
+    const processingStarted = deferred<void>();
+    const processingResult = deferred<MediaFrameProcessorResult>();
+    const session = await createMediaSession({
+      processor: {
+        process() {
+          processingStarted.resolve();
+          return processingResult.promise;
+        },
+      },
+      renderer,
+      source,
+    });
+    const emitted = source.emit(frame("paused"));
+
+    await processingStarted.promise;
+    session.pause();
+    processingResult.resolve({
+      detectionFrame: { detections: [], mediaTime: 0 },
+    });
+    await emitted;
+    await session.seek(0);
+
+    expect(renderer.prepared).toEqual([]);
+    expect(renderer.presentedPacketIds).toEqual([]);
+    expect(session.getState().status).toBe(MediaSessionStatus.Paused);
+    await session.destroy();
+  });
+
   it("releases a prepared packet when teardown starts before presentation", async () => {
     const source = new FakeMediaFrameSource<FakeFrame>();
     const renderer = new FakeMediaRenderer<FakeFrame>();
@@ -196,6 +227,32 @@ describe("createMediaSession", () => {
     expect(renderer.destroyed).toBe(true);
   });
 
+  it("reports a prepared-packet cleanup failure during teardown", async () => {
+    const source = new FakeMediaFrameSource<FakeFrame>();
+    const renderer = new FakeMediaRenderer<FakeFrame>();
+    const preparationStarted = deferred<void>();
+    const preparedPacket = deferred<FakePreparedPacket>();
+
+    renderer.prepare = () => {
+      preparationStarted.resolve();
+      return preparedPacket.promise;
+    };
+    renderer.disposePacket = () => {
+      throw new Error("prepared packet cleanup failed");
+    };
+    const session = await createMediaSession({ processor, renderer, source });
+    const emitted = source.emit(frame("prepared-failure"));
+
+    await preparationStarted.promise;
+    const destroying = session.destroy();
+
+    preparedPacket.resolve({ id: 7 });
+    await emitted;
+    await expect(destroying).rejects.toThrow("prepared packet cleanup failed");
+    expect(source.destroyed).toBe(true);
+    expect(renderer.destroyed).toBe(true);
+  });
+
   it("waits for asynchronous source startup before teardown", async () => {
     const source = new FakeMediaFrameSource<FakeFrame>();
     const renderer = new FakeMediaRenderer<FakeFrame>();
@@ -206,13 +263,16 @@ describe("createMediaSession", () => {
       startEntered.resolve();
       return startFinished.promise;
     };
+    source.destroy = () => {
+      source.destroyed = true;
+      startFinished.resolve();
+    };
     const session = await createMediaSession({ processor, renderer, source });
 
     await startEntered.promise;
     const destroying = session.destroy();
 
     expect(renderer.destroyed).toBe(false);
-    startFinished.resolve();
     await destroying;
 
     expect(source.destroyed).toBe(true);
@@ -338,7 +398,7 @@ describe("createMediaSession", () => {
       throw new Error("source cleanup failed");
     };
 
-    await expect(session.destroy()).rejects.toThrow("packet cleanup failed");
+    await expect(session.destroy()).rejects.toThrow("source cleanup failed");
     expect(renderer.disposedPacketIds).toEqual([0]);
     expect(source.destroyed).toBe(true);
     expect(renderer.destroyed).toBe(true);

@@ -32,6 +32,11 @@ export interface MediaFrameSource<TPayload> {
   readonly mode: MediaSessionMode;
   readonly timeline: MediaTimelineMetadata;
   open?(): void | Promise<void>;
+  /**
+   * Registers delivery and resolves after startup succeeds, or after
+   * `destroy()` cancels startup. Do not use this promise as the media pump's
+   * lifetime signal: use `consumer.onEnd()` for completion instead.
+   */
   start(consumer: MediaFrameSourceConsumer<TPayload>): void | Promise<void>;
   pause?(): void;
   resume?(): void | Promise<void>;
