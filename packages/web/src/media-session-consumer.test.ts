@@ -175,14 +175,14 @@ describe("media session consumer workflows", () => {
       expect.objectContaining({
         detection: expect.objectContaining({ id: "player-1" }),
         detectionIndex: 0,
-        target: DetectionPickTarget.Box,
+        target: DetectionPickTarget.Label,
       }),
     );
     expect(onSelect).toHaveBeenLastCalledWith(
       expect.objectContaining({
         detection: expect.objectContaining({ id: "player-1" }),
         detectionIndex: 0,
-        target: DetectionPickTarget.Box,
+        target: DetectionPickTarget.Label,
       }),
     );
 

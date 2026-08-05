@@ -1,5 +1,8 @@
 import { createMediaRenderer } from "#renderers/media-renderer";
-import { createSourceAwarePresentation } from "supervision-js-core";
+import {
+  createDefaultAnnotationPresentation,
+  createSourceAwarePresentation,
+} from "supervision-js-core";
 import type {
   MediaSession,
   MediaSessionDetectionWriteOptions,
@@ -103,12 +106,13 @@ export async function createMediaSession(
       mode: options.mode,
     });
     const sessionDetections = preparedDetections;
+    const defaultPresentation = createDefaultAnnotationPresentation();
     let currentPresentation = options.presentation;
     const resolvePresentation = (
       presentation: MediaRendererPresentation | undefined,
     ) =>
       createSourceAwarePresentation<MediaRendererPresentation>(
-        presentation ?? {},
+        { ...defaultPresentation, ...presentation },
         sessionDetections.sourcePresentations,
       );
     const initialPresentation = resolvePresentation(currentPresentation);

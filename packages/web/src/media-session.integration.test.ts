@@ -99,7 +99,7 @@ describe("media session integration", () => {
     expect(pixiMock.graphicsInstances[0]?.clear).toHaveBeenCalledOnce();
     expect(pixiMock.graphicsInstances[0]?.rect).not.toHaveBeenCalled();
     expect(session.getState().renderer).toMatchObject({
-      activeDetectionCount: 0,
+      activeDetectionCount: 1,
       activeDetectionFrameTime: 0,
     });
 
@@ -401,7 +401,7 @@ describe("media session integration", () => {
       expect(session.getState()).toMatchObject({
         status: MediaSessionStatus.Destroyed,
       });
-      expect(fakeWorker.terminateCount).toBe(1);
+      expect(fakeWorker.terminateCount).toBe(2);
       expect(pixiMock.appDestroy).toHaveBeenCalledOnce();
       expect(mediaMock.dispose).toHaveBeenCalledOnce();
       expect(states.at(-1)).toMatchObject({

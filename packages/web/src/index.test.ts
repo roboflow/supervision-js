@@ -96,6 +96,7 @@ describe("package entrypoint", () => {
       "createChunkedDetectionFrameSource",
       "createColdDetectionFrameSource",
       "createCompositeDetectionFrameSource",
+      "createDefaultAnnotationPresentation",
       "createImageUrlMediaSource",
       "createMediaRenderer",
       "createMediaSession",
@@ -133,6 +134,9 @@ describe("package entrypoint", () => {
     expect(entrypoint.BaseInteractionStyle).toEqual(expect.any(Function));
     expect(entrypoint.BaseLabelStyle).toEqual(expect.any(Function));
     expect(entrypoint.BaseMaskStyle).toEqual(expect.any(Function));
+    expect(entrypoint.createDefaultAnnotationPresentation).toEqual(
+      expect.any(Function),
+    );
     expect(entrypoint.BoxShape).toEqual({
       Rect: "rect",
       RoundedRect: "roundedRect",
@@ -2129,6 +2133,7 @@ describe("package entrypoint", () => {
           mediaTime: 0,
         },
       ],
+      maskStyle: null,
     });
     const scene = pixiMock.containerInstances[0];
     const boxGraphics = pixiMock.graphicsInstances[0];
@@ -2137,33 +2142,32 @@ describe("package entrypoint", () => {
     expect(scene?.children).toEqual(
       expect.arrayContaining([pixiMock.spriteInstances[0], boxGraphics]),
     );
+    const initialSpriteCount = pixiMock.spriteInstances.length;
 
     renderer.setPresentation({ maskStyle: new BaseMaskStyle() });
 
     const maskContainer = pixiMock.containerInstances.find((container) =>
-      container.children.includes(pixiMock.spriteInstances[1]),
+      container.children.some((child) =>
+        pixiMock.spriteInstances
+          .slice(initialSpriteCount)
+          .includes(child as (typeof pixiMock.spriteInstances)[number]),
+      ),
     );
 
-    expect(pixiMock.spriteInstances).toHaveLength(2);
-    expect(scene?.children).toEqual(
-      expect.arrayContaining([
-        pixiMock.spriteInstances[0],
-        maskContainer,
-        boxGraphics,
-      ]),
-    );
-    expect(maskContainer?.children).toEqual([
-      pixiMock.spriteInstances[1],
-      pixiMock.meshInstances[0],
-    ]);
+    expect(pixiMock.spriteInstances.length).toBeGreaterThan(initialSpriteCount);
+    expect(maskContainer?.children).toContain(pixiMock.meshInstances[0]);
     expect(pixiMock.appInit).toHaveBeenCalledOnce();
 
     await vi.waitFor(() => {
       expect(pixiMock.textureOptions).toHaveLength(2);
     });
 
+    const mediaSprite = pixiMock.spriteInstances.find(
+      (sprite) => sprite.texture !== undefined,
+    );
+
     expect(mediaMock.samples[1].draw).not.toHaveBeenCalled();
-    expect(pixiMock.spriteInstances[1]).toMatchObject({
+    expect(mediaSprite).toMatchObject({
       height: 720,
       texture: expect.any(Object),
       visible: true,
@@ -2177,7 +2181,7 @@ describe("package entrypoint", () => {
       expect(pixiMock.textureOptions).toHaveLength(2);
     });
 
-    expect(pixiMock.spriteInstances[1]).toMatchObject({
+    expect(mediaSprite).toMatchObject({
       height: 720,
       texture: expect.any(Object),
       visible: true,

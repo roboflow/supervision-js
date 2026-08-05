@@ -59,6 +59,10 @@ export type { BasePolylineStyleOptions } from "#styles/polyline-style";
 export { BaseKeypointStyle } from "#styles/keypoint-style";
 export type { BaseKeypointStyleOptions } from "#styles/keypoint-style";
 export {
+  createDefaultAnnotationPresentation,
+  type DefaultAnnotationPresentationOptions,
+} from "#styles/default-annotation-presentation";
+export {
   createSourceAwarePresentation,
   type PresentationStyleSet,
   type SourcePresentation,

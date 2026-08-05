@@ -31,6 +31,12 @@ export interface BaseMaskStyleOptions {
    */
   readonly alpha?: number;
   /**
+   * Opacity baked into the prepared mask fill. Unlike `opacity`, this does not
+   * attenuate a mask outline, so callers can use translucent fills with opaque
+   * borders.
+   */
+  readonly fillAlpha?: DetectionStyleValue<number, MaskStyleContext>;
+  /**
    * Whether to render mask fill, stroke, or both.
    */
   readonly mode?: DetectionStyleValue<MaskRenderMode, MaskStyleContext>;
@@ -91,7 +97,13 @@ export class BaseMaskStyle implements MaskStyle {
     );
 
     return {
-      alpha: mode === MaskRenderMode.StrokeOnly ? 0 : 1,
+      alpha:
+        mode === MaskRenderMode.StrokeOnly
+          ? 0
+          : clampOpacity(
+              resolveStyleValue(this.options.fillAlpha, detection, context) ??
+                1,
+            ),
       color,
       mask: detection.mask,
       stroke: mode === MaskRenderMode.FillOnly ? undefined : stroke,
@@ -149,6 +161,7 @@ function resolveStroke(
 function createArtifactKey(options: BaseMaskStyleOptions) {
   if (
     typeof options.color === "function" ||
+    typeof options.fillAlpha === "function" ||
     typeof options.mode === "function" ||
     typeof options.stroke === "function"
   ) {
@@ -156,7 +169,8 @@ function createArtifactKey(options: BaseMaskStyleOptions) {
   }
 
   const color = options.color ?? DEFAULT_MASK_COLOR;
+  const fillAlpha = options.fillAlpha ?? 1;
   const mode = options.mode ?? MaskRenderMode.FillAndStroke;
 
-  return `base:${color}:${mode}:${serializeStroke(resolveStroke(options.stroke, color, mode))}`;
+  return `base:${color}:${fillAlpha}:${mode}:${serializeStroke(resolveStroke(options.stroke, color, mode))}`;
 }

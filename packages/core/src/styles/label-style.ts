@@ -134,6 +134,9 @@ export class BaseLabelStyle implements LabelStyle {
       cornerRadius: background?.cornerRadius ?? 4,
       paddingX: background?.paddingX ?? 6,
       paddingY: background?.paddingY ?? 3,
+      ...(background?.topCornersOnly === undefined
+        ? {}
+        : { topCornersOnly: background.topCornersOnly }),
     };
   }
 

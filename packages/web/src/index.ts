@@ -64,6 +64,10 @@ export type { BasePolylineStyleOptions } from "supervision-js-core";
 export { BaseKeypointStyle, KeypointMarkerShape } from "supervision-js-core";
 export type { BaseKeypointStyleOptions } from "supervision-js-core";
 export {
+  createDefaultAnnotationPresentation,
+  type DefaultAnnotationPresentationOptions,
+} from "supervision-js-core";
+export {
   DEFAULT_DETECTION_CLASS_STYLES,
   DEFAULT_DETECTION_COLOR_SEQUENCE,
   SUPERVISION_ROBOFLOW_COLOR,
