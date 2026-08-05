@@ -4,6 +4,22 @@
  * This contract only needs a host-provided source, processor, and renderer, so
  * it must stay loadable without Skia, worklets, or other optional native peers.
  */
+export {
+  MediaSessionActivityKind,
+  MediaSessionActivityStatus,
+  MediaSessionMode,
+  MediaSessionStatus,
+} from "supervision-js-core";
+export type {
+  DetectionFrame,
+  DetectionPickOptions,
+  DetectionPickResult,
+  MediaRendererPresentation,
+  MediaSessionActivity,
+  MediaSessionLifecycleState,
+  MediaTimelineMetadata,
+  PlatformMediaFrame,
+} from "supervision-js-core";
 export { createMediaSession } from "./sessions/media-session-core";
 export {
   MediaSessionError,

@@ -44,7 +44,9 @@ export async function createMediaSession<TPayload, TPacket extends object>(
   let nextPacketId = 0;
   let processing = false;
   let playing = false;
+  let ended = false;
   let stopped = false;
+  let playbackIntent = 0;
   let destroyPromise: Promise<void> | null = null;
   let frameQueue: Promise<void> = Promise.resolve();
   let sourceOperationQueue: Promise<void> = Promise.resolve();
@@ -99,9 +101,11 @@ export async function createMediaSession<TPayload, TPacket extends object>(
             ? MediaSessionStatus.Processing
             : playing
               ? MediaSessionStatus.Playing
-              : started && options.source.capabilities.pausable
-                ? MediaSessionStatus.Paused
-                : MediaSessionStatus.Ready;
+              : stopped || ended
+                ? MediaSessionStatus.Ready
+                : started && options.source.capabilities.pausable
+                  ? MediaSessionStatus.Paused
+                  : MediaSessionStatus.Ready;
 
     return {
       activities,
@@ -239,6 +243,8 @@ export async function createMediaSession<TPayload, TPacket extends object>(
         return;
       }
 
+      playbackIntent += 1;
+      ended = true;
       playing = false;
       emit();
     },
@@ -318,7 +324,10 @@ export async function createMediaSession<TPayload, TPacket extends object>(
     pause() {
       assertActive("pause");
       assertCapability("pause", options.source.capabilities.pausable);
-      options.source.pause?.();
+      playbackIntent += 1;
+      void runSourceOperation(() => options.source.pause?.()).catch(
+        () => undefined,
+      );
       playing = false;
       emit();
     },
@@ -332,12 +341,16 @@ export async function createMediaSession<TPayload, TPacket extends object>(
     async play() {
       assertActive("play");
       assertCapability("play", options.source.capabilities.pausable);
-      await enqueueSourceOperation(() => options.source.resume?.());
+      const intent = playbackIntent + 1;
 
-      if (destroyed) {
+      playbackIntent = intent;
+      await runSourceOperation(() => options.source.resume?.());
+
+      if (destroyed || error || intent !== playbackIntent) {
         return;
       }
 
+      ended = false;
       stopped = false;
       playing = true;
       emit();
@@ -345,7 +358,7 @@ export async function createMediaSession<TPayload, TPacket extends object>(
     async seek(mediaTime) {
       assertActive("seek");
       assertCapability("seek", options.source.capabilities.seekable);
-      await enqueueSourceOperation(() => options.source.seek?.(mediaTime));
+      await runSourceOperation(() => options.source.seek?.(mediaTime));
     },
     setPresentation(nextPresentation: MediaRendererPresentation) {
       assertActive("setPresentation");
@@ -356,9 +369,12 @@ export async function createMediaSession<TPayload, TPacket extends object>(
     stop() {
       assertActive("stop");
       assertCapability("stop", options.source.capabilities.stoppable);
+      playbackIntent += 1;
       stopped = true;
       playing = false;
-      options.source.stop?.();
+      void runSourceOperation(() => options.source.stop?.()).catch(
+        () => undefined,
+      );
       emit();
     },
     subscribe(listener): MediaSessionStateUnsubscribe {
@@ -410,13 +426,50 @@ export async function createMediaSession<TPayload, TPacket extends object>(
   function enqueueSourceOperation<TValue>(
     operation: () => TValue | Promise<TValue>,
   ) {
-    const queuedOperation = sourceOperationQueue.then(operation, operation);
+    const queuedOperation = sourceOperationQueue
+      .then(() => sourceStart)
+      .then(() => {
+        if (destroyed) {
+          throw new MediaSessionError(
+            "destroyed",
+            "Cannot control media: media session has been destroyed.",
+          );
+        }
+
+        if (error) {
+          throw error;
+        }
+
+        return operation();
+      });
 
     sourceOperationQueue = queuedOperation.then(
       () => undefined,
       () => undefined,
     );
     return queuedOperation;
+  }
+
+  async function runSourceOperation<TValue>(
+    operation: () => TValue | Promise<TValue>,
+  ) {
+    try {
+      return await enqueueSourceOperation(operation);
+    } catch (cause) {
+      if (cause instanceof MediaSessionError) {
+        throw cause;
+      }
+
+      reportError("source-failed", cause);
+      throw (
+        error ??
+        new MediaSessionError(
+          "source-failed",
+          getErrorMessage(cause, "Media source operation failed."),
+          { cause },
+        )
+      );
+    }
   }
 
   function shouldAbandonFrame() {

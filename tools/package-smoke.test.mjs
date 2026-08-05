@@ -315,6 +315,14 @@ test("built React Native subpath entries ship and resolve", async () => {
     { x1: 2, y1: 7, x2: 4, y2: 9 },
   );
   assert.equal(typeof mediaSession.createMediaSession, "function");
+  assert.deepEqual(Object.keys(mediaSession).sort(), [
+    "MediaSessionActivityKind",
+    "MediaSessionActivityStatus",
+    "MediaSessionError",
+    "MediaSessionMode",
+    "MediaSessionStatus",
+    "createMediaSession",
+  ]);
 
   // The legacy Skia and sessions entries require optional native peers, so
   // they cannot be imported under Node; assert the built artifacts ship.

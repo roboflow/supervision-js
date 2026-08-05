@@ -78,6 +78,7 @@ describe("createMediaSession", () => {
     expect(states).toContain(MediaSessionStatus.Playing);
 
     session.pause();
+    await session.seek(0.5);
     expect(source.paused).toBe(true);
     expect(session.getState().status).toBe(MediaSessionStatus.Paused);
 
@@ -86,7 +87,9 @@ describe("createMediaSession", () => {
     await session.seek(0.5);
     expect(source.lastSeek).toBe(0.5);
     session.stop();
+    await session.seek(0.5);
     expect(source.stopped).toBe(true);
+    expect(session.getState().status).toBe(MediaSessionStatus.Ready);
 
     await session.destroy();
     expect(renderer.disposedPacketIds).toEqual([0, 1]);
@@ -219,11 +222,17 @@ describe("createMediaSession", () => {
   it("waits for asynchronous source resume before teardown", async () => {
     const source = new FakeMediaFrameSource<FakeFrame>();
     const renderer = new FakeMediaRenderer<FakeFrame>();
+    const resumeStarted = deferred<void>();
     const resumeFinished = deferred<void>();
 
-    source.resume = () => resumeFinished.promise;
+    source.resume = () => {
+      resumeStarted.resolve();
+      return resumeFinished.promise;
+    };
     const session = await createMediaSession({ processor, renderer, source });
     const playing = session.play();
+
+    await resumeStarted.promise;
     const destroying = session.destroy();
 
     expect(renderer.destroyed).toBe(false);
@@ -233,6 +242,85 @@ describe("createMediaSession", () => {
     expect(source.destroyed).toBe(true);
     expect(renderer.destroyed).toBe(true);
     expect(session.getState().status).toBe(MediaSessionStatus.Destroyed);
+  });
+
+  it("honors a later pause or stop while source resume is pending", async () => {
+    const source = new FakeMediaFrameSource<FakeFrame>();
+    const renderer = new FakeMediaRenderer<FakeFrame>();
+    const resumeFinished = deferred<void>();
+
+    source.resume = () => resumeFinished.promise;
+    const session = await createMediaSession({ processor, renderer, source });
+    const playing = session.play();
+
+    session.pause();
+    resumeFinished.resolve();
+    await playing;
+    await session.seek(0);
+
+    expect(source.paused).toBe(true);
+    expect(session.getState().status).toBe(MediaSessionStatus.Paused);
+
+    const resumeAgainFinished = deferred<void>();
+
+    source.resume = () => resumeAgainFinished.promise;
+    const playingAgain = session.play();
+    session.stop();
+    resumeAgainFinished.resolve();
+    await playingAgain;
+    await session.seek(0);
+
+    expect(source.stopped).toBe(true);
+    expect(session.getState().status).toBe(MediaSessionStatus.Ready);
+    await session.destroy();
+  });
+
+  it("normalizes source control failures and records ended state", async () => {
+    const source = new FakeMediaFrameSource<FakeFrame>();
+    const session = await createMediaSession({
+      processor,
+      renderer: new FakeMediaRenderer<FakeFrame>(),
+      source,
+    });
+
+    source.resume = () => {
+      throw new Error("native resume failed");
+    };
+    await expect(session.play()).rejects.toMatchObject({
+      code: "source-failed",
+      message: "native resume failed",
+    });
+    expect(session.getState().status).toBe(MediaSessionStatus.Error);
+
+    await session.destroy();
+
+    const seekSource = new FakeMediaFrameSource<FakeFrame>();
+    const seekSession = await createMediaSession({
+      processor,
+      renderer: new FakeMediaRenderer<FakeFrame>(),
+      source: seekSource,
+    });
+
+    seekSource.seek = () => {
+      throw new Error("native seek failed");
+    };
+    await expect(seekSession.seek(0.5)).rejects.toMatchObject({
+      code: "source-failed",
+      message: "native seek failed",
+    });
+    expect(seekSession.getState().status).toBe(MediaSessionStatus.Error);
+    await seekSession.destroy();
+
+    const endedSource = new FakeMediaFrameSource<FakeFrame>();
+    const endedSession = await createMediaSession({
+      processor,
+      renderer: new FakeMediaRenderer<FakeFrame>(),
+      source: endedSource,
+    });
+
+    endedSource.end();
+    expect(endedSession.getState().status).toBe(MediaSessionStatus.Ready);
+    await endedSession.destroy();
   });
 
   it("attempts every cleanup step when one of them fails", async () => {
