@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+title: supervision-js
+message: >-
+  If you use this software, please cite it using the metadata from this file.
+type: software
+authors:
+  - given-names: Roboflow
+    email: support@roboflow.com
+repository-code: https://github.com/roboflow/supervision-js
+url: https://supervision-js-demo.onrender.com/
+abstract: >-
+  supervision-js provides browser-native media rendering, annotation styling,
+  interaction, and editing primitives for computer vision applications.
+keywords:
+  - computer vision
+  - browser
+  - video processing
+  - annotation rendering
+license: MIT

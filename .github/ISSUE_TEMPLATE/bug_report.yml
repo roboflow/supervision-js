@@ -1,0 +1,35 @@
+name: Bug report
+description: Report a reproducible problem in supervision-js.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please include a small, reproducible browser example. Do not include API keys or other secrets.
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Include the media type, detection input, and integration steps.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: supervision-js version or commit
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Browser and operating system
+    validations:
+      required: true

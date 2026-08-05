@@ -1,8 +1,7 @@
 # Tarball Packaging
 
-This repository is private, so websites cannot install `supervision-js` from a
-registry or from a Git URL. The supported distribution for now is one portable
-npm tarball.
+The first npm release has not been published yet. The supported distribution
+until then is one portable npm tarball built from this repository.
 
 ## Build The Tarball
 
