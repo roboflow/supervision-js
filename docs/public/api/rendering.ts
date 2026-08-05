@@ -7,6 +7,7 @@
 export {
   createMediaRenderer,
   createMediaStreamRendererSource,
+  DetectionTimelineOrigin,
   MediaRendererFit,
   MediaRendererPlaybackState,
   MediaSourceStatus,

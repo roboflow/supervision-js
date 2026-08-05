@@ -62,6 +62,7 @@ describe("package entrypoint", () => {
       "DetectionInteractionState",
       "DetectionMaskEncoding",
       "DetectionPickTarget",
+      "DetectionTimelineOrigin",
       "FocusTargetMode",
       "KeypointMarkerShape",
       "KeypointVisibility",

@@ -22,6 +22,7 @@ import type {
   ProgressiveNormalizedMedia,
 } from "#types/media-normalization";
 import type {
+  DetectionTimelineOrigin,
   MediaFrameDiagnostics,
   MediaRenderer,
   MediaRendererFit,
@@ -177,6 +178,12 @@ export interface MediaSessionDetectionOptions {
    * readiness.
    */
   readonly playbackGate?: DetectionPlaybackGateOptions;
+
+  /**
+   * Clock used by supplied detection frames. Use `MediaStart` when inference
+   * timestamps begin at zero independently of the file's encoded PTS.
+   */
+  readonly timelineOrigin?: DetectionTimelineOrigin;
 }
 
 export interface MediaSessionRendererOptions {

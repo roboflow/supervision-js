@@ -248,6 +248,7 @@ export {
   type MediaSessionWritableDetectionOptions,
 } from "#types/media-session";
 export {
+  DetectionTimelineOrigin,
   MediaRendererFit,
   MediaRendererPlaybackState,
   MediaSourceStatus,

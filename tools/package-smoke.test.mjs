@@ -22,6 +22,7 @@ const expectedWebRuntimeExports = [
   "DetectionInteractionState",
   "DetectionMaskEncoding",
   "DetectionPickTarget",
+  "DetectionTimelineOrigin",
   "FocusTargetMode",
   "KeypointMarkerShape",
   "KeypointVisibility",
@@ -195,6 +196,7 @@ test("built package entrypoint exposes the public runtime API", async () => {
   assert.equal(typeof entrypoint.BaseLabelStyle, "function");
   assert.equal(entrypoint.MediaSessionStatus.Ready, "ready");
   assert.equal(entrypoint.MediaRendererFit.Contain, "contain");
+  assert.equal(entrypoint.DetectionTimelineOrigin.MediaStart, "mediaStart");
 });
 
 test("built editing entrypoint exposes advanced host-owned editing APIs", async () => {

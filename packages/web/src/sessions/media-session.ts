@@ -123,6 +123,7 @@ export async function createMediaSession(
       detectionBuffer: sessionDefaults.detectionBuffer,
       detectionFrames: sessionDetections.detectionFrames,
       detectionSource: sessionDetections.detectionSource,
+      detectionTimelineOrigin: options.detections?.timelineOrigin,
       focusStyle: initialPresentation.focusStyle,
       interactionStyle: initialPresentation.interactionStyle,
       labelStyle: initialPresentation.labelStyle,

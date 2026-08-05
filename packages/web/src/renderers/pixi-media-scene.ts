@@ -48,14 +48,14 @@ import type {
 
 export function observePixiContainerResize(
   container: HTMLElement,
-  queueResize: () => void,
+  resize: () => void,
 ): () => void {
   const ResizeObserverConstructor = globalThis.ResizeObserver;
   if (!ResizeObserverConstructor) {
     return () => undefined;
   }
 
-  const observer = new ResizeObserverConstructor(() => queueResize());
+  const observer = new ResizeObserverConstructor(() => resize());
   observer.observe(container);
   return () => observer.disconnect();
 }
@@ -421,11 +421,14 @@ export async function createPixiMediaScene(
 
   // Pixi's ResizePlugin listens to the window resize event, which does not
   // fire when an application drawer or split pane changes only this element's
-  // dimensions. Observe the actual host and use Pixi's queued resize so the
-  // renderer screen and the contain/cover fit are recalculated together.
+  // dimensions. Resize Pixi and recompute the contain/cover transform in the
+  // same observer callback so CSS cannot stretch an old canvas between frames.
   const disconnectContainerResizeObserver = observePixiContainerResize(
     options.container,
-    () => app.queueResize(),
+    () => {
+      app.resize();
+      updateMediaSceneFit();
+    },
   );
 
   app.ticker.add(updateMediaSceneFit);

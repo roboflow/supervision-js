@@ -10,7 +10,7 @@ afterEach(() => {
 });
 
 describe("Pixi media scene container resizing", () => {
-  it("queues a Pixi resize when the host element changes size", () => {
+  it("synchronously resizes Pixi when the host element changes size", () => {
     const observe = vi.fn();
     const disconnect = vi.fn();
     let notify: ResizeObserverCallback = () => undefined;
@@ -27,13 +27,13 @@ describe("Pixi media scene container resizing", () => {
 
     vi.stubGlobal("ResizeObserver", TestResizeObserver);
     const container = {} as HTMLElement;
-    const queueResize = vi.fn();
+    const resize = vi.fn();
 
-    const stopObserving = observePixiContainerResize(container, queueResize);
+    const stopObserving = observePixiContainerResize(container, resize);
 
     expect(observe).toHaveBeenCalledWith(container);
     notify([], {} as ResizeObserver);
-    expect(queueResize).toHaveBeenCalledTimes(1);
+    expect(resize).toHaveBeenCalledTimes(1);
 
     stopObserving();
     expect(disconnect).toHaveBeenCalledTimes(1);
@@ -41,15 +41,12 @@ describe("Pixi media scene container resizing", () => {
 
   it("is a no-op where ResizeObserver is unavailable", () => {
     vi.stubGlobal("ResizeObserver", undefined);
-    const queueResize = vi.fn();
+    const resize = vi.fn();
 
-    const stopObserving = observePixiContainerResize(
-      {} as HTMLElement,
-      queueResize,
-    );
+    const stopObserving = observePixiContainerResize({} as HTMLElement, resize);
 
     expect(() => stopObserving()).not.toThrow();
-    expect(queueResize).not.toHaveBeenCalled();
+    expect(resize).not.toHaveBeenCalled();
   });
 });
 
