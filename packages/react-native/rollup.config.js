@@ -4,6 +4,7 @@ export default {
   input: {
     "adapters/executorch": "src/adapters/executorch.ts",
     index: "src/index.ts",
+    "media-session": "src/media-session.ts",
     sessions: "src/sessions.ts",
     skia: "src/skia.ts",
   },
