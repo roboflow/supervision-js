@@ -153,6 +153,8 @@ describe("demo presentation", () => {
       mediaTime: 0,
     };
 
+    expect(presentation.backgroundColor).toBe(0xfafafa);
+
     expect(presentation.boxStyle?.resolve(detection, context)).toMatchObject({
       stroke: {
         alignment: BoxStrokeAlignment.Inside,

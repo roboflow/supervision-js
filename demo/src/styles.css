@@ -1954,8 +1954,8 @@ fieldset {
   }
 }
 
-/* The workbench keeps the rendered media dark for accurate image review.
- * Everything around it follows the public Roboflow light surface system. */
+/* The workbench uses the public Roboflow light surface system throughout,
+ * including the contain-fit area around the rendered media. */
 .source-controls,
 .quality-controls,
 .selection-panel,
@@ -2075,27 +2075,53 @@ fieldset {
 }
 
 .renderer-viewport {
+  background:
+    linear-gradient(135deg, rgba(237, 233, 254, 0.8), transparent 52%), #fafafa;
+  border: 1px solid var(--line);
   box-shadow: 0 16px 36px rgba(76, 29, 149, 0.16);
 }
 
+.renderer-viewport::after {
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.1),
+    transparent 18%
+  );
+  border-color: rgba(124, 58, 237, 0.12);
+}
+
+.renderer-viewport__overlay-card {
+  background: rgba(255, 255, 255, 0.94);
+  border-color: rgba(124, 58, 237, 0.2);
+  box-shadow: 0 10px 28px rgba(76, 29, 149, 0.18);
+}
+
 .renderer-viewport__overlay-card strong {
-  color: #f9fafb;
+  color: var(--text);
 }
 
 .renderer-viewport__overlay-card span {
-  color: #d1d5db;
+  color: var(--muted);
 }
 
 .renderer-viewport__overlay-kicker {
-  color: #93c5fd;
+  color: var(--violet);
 }
 
 .renderer-viewport__overlay--waiting .renderer-viewport__overlay-kicker {
-  color: #fcd34d;
+  color: var(--amber);
 }
 
 .renderer-viewport__overlay--error .renderer-viewport__overlay-kicker {
-  color: #fecaca;
+  color: var(--danger);
+}
+
+.renderer-viewport__overlay-progress {
+  background: #ede9fe;
+}
+
+.renderer-viewport__overlay-progress span {
+  background: linear-gradient(90deg, #a78bfa, var(--violet));
 }
 
 .playback-controls__play {
@@ -2107,8 +2133,46 @@ fieldset {
   background: #ffffff;
 }
 
+.playback-controls__toggle:hover:not(:disabled) {
+  background: #6d28d9;
+  border-color: #6d28d9;
+  box-shadow: 0 10px 20px rgba(109, 40, 217, 0.3);
+}
+
+.render-control--slider input::-webkit-slider-runnable-track {
+  background: linear-gradient(
+    90deg,
+    var(--violet) 0 var(--control-progress),
+    #ddd6fe var(--control-progress) 100%
+  );
+}
+
+.render-control--slider input::-moz-range-track {
+  background: #ddd6fe;
+}
+
+.render-control--slider input::-moz-range-progress {
+  background: var(--violet);
+}
+
+.render-control--slider input::-webkit-slider-thumb,
+.render-control--slider input::-moz-range-thumb {
+  background: var(--violet);
+  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.16);
+}
+
 .timeline-view__chip--requested .timeline-view__chip-dot {
   background: #9ca3af;
+}
+
+.timeline-view__chip--buffer .timeline-view__chip-dot,
+.timeline-view__chip--ready .timeline-view__chip-dot,
+.timeline-view__range--buffer {
+  background: #15803d;
+}
+
+.timeline-view__segment--ready {
+  background: linear-gradient(90deg, #15803d, #22c55e);
 }
 
 .timeline-view__segment--normalized,
