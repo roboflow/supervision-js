@@ -157,6 +157,9 @@ export function createDemoPresentation(
   settings: DemoPresentationSettings,
 ): MediaRendererPresentation {
   return {
+    // The demo uses contain-fit media, so this colour is visible in the
+    // letterbox around non-matching aspect ratios.
+    backgroundColor: 0xfafafa,
     boxStyle: settings.boxesEnabled ? createDemoBoxStyle(settings) : null,
     focusStyle: settings.focusEnabled ? createDemoFocusStyle(settings) : null,
     interactionStyle: createDemoInteractionStyle(settings),
