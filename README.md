@@ -50,13 +50,19 @@ session.setPresentation({ boxStyle, maskStyle, labelStyle });
 
 ## Installation
 
-Install the browser package from npm:
+The first npm version has not been published yet. Until it is, build a portable
+release archive from a checkout and install it in a browser application:
 
 ```sh
-npm install supervision-js
+# In this repository
+npm install
+npm run package:tarball
+
+# In the consuming application
+npm install ./vendor/supervision-js-0.1.0.tgz
 ```
 
-The package includes the internal core dependency. Consumers import only the
+The archive includes the internal core dependency. Consumers import only the
 public browser entrypoints:
 
 ```ts

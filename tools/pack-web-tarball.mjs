@@ -171,10 +171,8 @@ function clearPreviousArchives(outDir) {
   }
 }
 
-function copyPackageDocuments(packageDir) {
-  for (const filename of ["LICENSE", "README.md"]) {
-    copyFileSync(path.join(rootDir, filename), path.join(packageDir, filename));
-  }
+function copyPackageLicense(packageDir) {
+  copyFileSync(path.join(rootDir, "LICENSE"), path.join(packageDir, "LICENSE"));
 }
 
 function main() {
@@ -205,7 +203,7 @@ function main() {
       path.join(packageDir, "node_modules", corePackageName),
       1,
     );
-    copyPackageDocuments(packageDir);
+    copyPackageLicense(packageDir);
 
     const coreManifest = readManifest(
       path.join(packageDir, "node_modules", corePackageName, "package.json"),
