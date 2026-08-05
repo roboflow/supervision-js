@@ -138,6 +138,17 @@ test("tarball ships both entrypoints with declarations and source maps", () => {
   assert.equal(manifest.exports["./editing"].import, "./dist/editing.js");
 });
 
+test("tarball ships the project license and package README", () => {
+  const license = readFileSync(path.join(extractedDir, "LICENSE"), "utf8");
+
+  assert.match(license, /MIT License/);
+  assert.equal(license, readFileSync(path.join(rootDir, "LICENSE"), "utf8"));
+  assert.ok(
+    existsSync(path.join(extractedDir, "README.md")),
+    "Expected README.md in the tarball",
+  );
+});
+
 test("tarball ships the render-preparation worker and the chunks it imports", () => {
   const workerPath = path.join(extractedDir, "dist/mask-preparation.worker.js");
 
