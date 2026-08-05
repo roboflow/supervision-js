@@ -121,6 +121,8 @@ export interface PreviewOverlayData {
 export interface AnnotationOverlayStyle {
   readonly editingPreview?: {
     readonly stroke?: BoxStrokeStyle;
+    /** Fill for box creation previews. */
+    readonly boxFill?: BoxFillStyle;
     readonly polygonFill?: BoxFillStyle;
     readonly closeZoneStroke?: BoxStrokeStyle;
   };

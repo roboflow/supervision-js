@@ -2,6 +2,7 @@ import {
   AnnotationGestureStateKind,
   getAnnotationHandles,
   getDetectionRect,
+  lightenColor,
   resolveStyleValue,
   type AnnotationEditingEngine,
   type AnnotationOverlayStyle,
@@ -75,11 +76,28 @@ function drawEditingPreview(
   viewportScale: number,
   style: ResolvedAnnotationOverlayStyle,
 ) {
-  const detection = engine?.getState().preview;
+  const state = engine?.getState();
+  const detection = state?.preview;
   if (!detection) return;
   const stroke = style.editingPreview.stroke;
-  if (detection.rect) {
+  if (
+    detection.rect &&
+    !detection.mask &&
+    !detection.polygon &&
+    !detection.polyline
+  ) {
     const { x, y, width, height } = detection.rect;
+    if (state.kind === AnnotationGestureStateKind.Creating) {
+      graphics
+        .roundRect(
+          x - width / 2,
+          y - height / 2,
+          width,
+          height,
+          resolveScreenLength(1, viewportScale),
+        )
+        .fill(style.editingPreview.boxFill);
+    }
     drawPixiPath(
       graphics,
       [
@@ -94,6 +112,15 @@ function drawEditingPreview(
     );
   }
   if (detection.polygon) {
+    if (state.kind === AnnotationGestureStateKind.Creating) {
+      drawCreatingPolygon(
+        graphics,
+        detection.polygon.points,
+        viewportScale,
+        style,
+      );
+      return;
+    }
     graphics
       .poly(
         detection.polygon.points.flatMap(({ x, y }) => [x, y]),
@@ -107,17 +134,6 @@ function drawEditingPreview(
       stroke,
       viewportScale,
     );
-    const state = engine?.getState();
-    if (
-      state?.kind === AnnotationGestureStateKind.Creating &&
-      detection.polygon.points.length >= 4
-    ) {
-      const first = detection.polygon.points[0]!;
-      graphics.circle(first.x, first.y, resolveScreenLength(12, viewportScale));
-      graphics.stroke(
-        resolvePixiStroke(style.editingPreview.closeZoneStroke, viewportScale),
-      );
-    }
   }
   if (detection.polyline)
     drawPixiPath(
@@ -127,6 +143,152 @@ function drawEditingPreview(
       stroke,
       viewportScale,
     );
+}
+
+const CREATION_VERTEX_RADIUS = 6;
+const CREATION_VERTEX_STROKE_WIDTH = 1.5;
+const CREATION_CLOSE_ZONE_RADIUS = 8;
+const CREATION_CLOSE_DOT_RADIUS = 6;
+const CREATION_CLOSE_COLOR_MIN_DISTANCE = 100;
+
+/**
+ * Render a multi-click polygon as an open, progressive gesture. The editing
+ * engine stores the live cursor as the final point, while every preceding
+ * point is a committed vertex in the current gesture.
+ */
+function drawCreatingPolygon(
+  graphics: PixiGraphics,
+  points: readonly Point[],
+  viewportScale: number,
+  style: ResolvedAnnotationOverlayStyle,
+) {
+  if (points.length < 2) return;
+
+  const stroke = style.editingPreview.stroke;
+  const placed = points.slice(0, -1);
+  const cursor = points.at(-1)!;
+  const first = placed[0]!;
+  const last = placed.at(-1)!;
+  const nearClose =
+    placed.length >= 3 &&
+    Math.hypot(cursor.x - first.x, cursor.y - first.y) * viewportScale <=
+      CREATION_CLOSE_ZONE_RADIUS;
+
+  drawPixiPath(graphics, placed, false, stroke, viewportScale);
+
+  if (nearClose) {
+    drawPixiPath(
+      graphics,
+      [last, first],
+      false,
+      {
+        ...style.editingPreview.closeZoneStroke,
+        color: resolveCloseHighlightColor(
+          stroke.color,
+          style.editingPreview.closeZoneStroke.color,
+        ),
+        width: stroke.width * 1.5,
+      },
+      viewportScale,
+    );
+  } else {
+    const ghostStroke: BoxStrokeStyle = {
+      ...stroke,
+      alpha: stroke.alpha * 0.6,
+      dash: [6, 4],
+      width: stroke.width * 0.8,
+    };
+    drawPixiPath(graphics, [last, cursor], false, ghostStroke, viewportScale);
+    if (placed.length >= 3) {
+      drawPixiPath(
+        graphics,
+        [cursor, first],
+        false,
+        ghostStroke,
+        viewportScale,
+      );
+    }
+  }
+
+  const vertexFill = {
+    alpha: stroke.alpha,
+    color: lightenColor(stroke.color, 0.5),
+  };
+  const vertexStroke = resolvePixiStroke(
+    {
+      alpha: stroke.alpha,
+      color: stroke.color,
+      width: CREATION_VERTEX_STROKE_WIDTH,
+    },
+    viewportScale,
+  );
+  for (const [index, point] of placed.entries()) {
+    if (nearClose && index === 0) continue;
+    graphics
+      .circle(
+        point.x,
+        point.y,
+        resolveScreenLength(CREATION_VERTEX_RADIUS, viewportScale),
+      )
+      .fill(vertexFill)
+      .stroke(vertexStroke);
+  }
+
+  if (placed.length < 3) return;
+  const closeRadius = resolveScreenLength(
+    CREATION_CLOSE_ZONE_RADIUS,
+    viewportScale,
+  );
+  if (!nearClose) {
+    graphics
+      .circle(first.x, first.y, closeRadius)
+      .stroke(
+        resolvePixiStroke(
+          { ...stroke, alpha: stroke.alpha * 0.5, width: stroke.width * 0.5 },
+          viewportScale,
+        ),
+      );
+    return;
+  }
+
+  const highlightColor = resolveCloseHighlightColor(
+    stroke.color,
+    style.editingPreview.closeZoneStroke.color,
+  );
+  graphics
+    .circle(first.x, first.y, closeRadius)
+    .fill({ alpha: 0.2, color: highlightColor })
+    .stroke(
+      resolvePixiStroke(
+        {
+          ...style.editingPreview.closeZoneStroke,
+          color: highlightColor,
+          width: stroke.width,
+        },
+        viewportScale,
+      ),
+    );
+  graphics
+    .circle(
+      first.x,
+      first.y,
+      resolveScreenLength(CREATION_CLOSE_DOT_RADIUS, viewportScale),
+    )
+    .fill({ alpha: 1, color: highlightColor });
+}
+
+function resolveCloseHighlightColor(
+  creationColor: number,
+  preferredHighlight: number,
+) {
+  const red =
+    ((creationColor >> 16) & 0xff) - ((preferredHighlight >> 16) & 0xff);
+  const green =
+    ((creationColor >> 8) & 0xff) - ((preferredHighlight >> 8) & 0xff);
+  const blue = (creationColor & 0xff) - (preferredHighlight & 0xff);
+  return Math.hypot(red, green, blue) >= CREATION_CLOSE_COLOR_MIN_DISTANCE
+    ? preferredHighlight
+    : 0xffffff;
 }
 
 function drawSelectionHandles(
@@ -300,6 +462,7 @@ function drawLoading(
 interface ResolvedAnnotationOverlayStyle {
   readonly editingPreview: {
     readonly stroke: BoxStrokeStyle;
+    readonly boxFill: BoxFillStyle;
     readonly polygonFill: BoxFillStyle;
     readonly closeZoneStroke: BoxStrokeStyle;
   };
@@ -332,6 +495,7 @@ interface ResolvedAnnotationOverlayStyle {
 const DEFAULT_ANNOTATION_OVERLAY_STYLE: ResolvedAnnotationOverlayStyle = {
   editingPreview: {
     stroke: { alpha: 1, color: 0x00ff66, width: 2 },
+    boxFill: { alpha: 0.08, color: 0x00ff66 },
     polygonFill: { alpha: 0.16, color: 0x22c55e },
     closeZoneStroke: { alpha: 1, color: 0x22c55e, width: 2 },
   },
