@@ -50,8 +50,6 @@ export async function createMediaSession<TPayload, TPacket extends object>(
   let destroyPromise: Promise<void> | null = null;
   let frameQueue: Promise<void> = Promise.resolve();
   let sourceOperationQueue: Promise<void> = Promise.resolve();
-  let sourceStart: Promise<void> = Promise.resolve();
-  let sourceStartupSettled = true;
   let sourceDestroyAttempted = false;
   const teardownErrors: unknown[] = [];
   let lastDiagnostics: MediaSessionRenderPreparationState["lastDiagnostics"] =
@@ -293,19 +291,9 @@ export async function createMediaSession<TPayload, TPacket extends object>(
     playing = true;
     started = true;
     emit();
-    sourceStartupSettled = false;
-    sourceStart = Promise.resolve()
-      .then(() =>
-        destroyed || error ? undefined : options.source.start(consumer),
-      )
-      .catch((cause) => {
-        reportError("source-failed", cause);
-      })
-      .finally(() => {
-        sourceStartupSettled = true;
-      });
+    await options.source.start(consumer);
   } catch (cause) {
-    reportError("source-open-failed", cause);
+    reportError(opened ? "source-failed" : "source-open-failed", cause);
     try {
       await destroyResources();
     } catch {
@@ -333,9 +321,7 @@ export async function createMediaSession<TPayload, TPacket extends object>(
       destroyed = true;
       playing = false;
       processing = false;
-      destroyPromise = (
-        sourceStartupSettled ? Promise.resolve() : releaseSource()
-      )
+      destroyPromise = releaseSource()
         .then(() => drainLifecycle())
         .then(() => destroyResources())
         .finally(() => {
@@ -455,7 +441,6 @@ export async function createMediaSession<TPayload, TPacket extends object>(
   }
 
   async function drainLifecycle() {
-    await sourceStart;
     await sourceOperationQueue;
     await frameQueue.catch(() => undefined);
   }
@@ -463,22 +448,20 @@ export async function createMediaSession<TPayload, TPacket extends object>(
   function enqueueSourceOperation<TValue>(
     operation: () => TValue | Promise<TValue>,
   ) {
-    const queuedOperation = sourceOperationQueue
-      .then(() => sourceStart)
-      .then(() => {
-        if (destroyed) {
-          throw new MediaSessionError(
-            "destroyed",
-            "Cannot control media: media session has been destroyed.",
-          );
-        }
+    const queuedOperation = sourceOperationQueue.then(() => {
+      if (destroyed) {
+        throw new MediaSessionError(
+          "destroyed",
+          "Cannot control media: media session has been destroyed.",
+        );
+      }
 
-        if (error) {
-          throw error;
-        }
+      if (error) {
+        throw error;
+      }
 
-        return operation();
-      });
+      return operation();
+    });
 
     sourceOperationQueue = queuedOperation.then(
       () => undefined,

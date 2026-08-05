@@ -253,28 +253,20 @@ describe("createMediaSession", () => {
     expect(renderer.destroyed).toBe(true);
   });
 
-  it("waits for asynchronous source startup before teardown", async () => {
+  it("rolls back acquired resources when source startup fails", async () => {
     const source = new FakeMediaFrameSource<FakeFrame>();
     const renderer = new FakeMediaRenderer<FakeFrame>();
-    const startEntered = deferred<void>();
-    const startFinished = deferred<void>();
 
     source.start = () => {
-      startEntered.resolve();
-      return startFinished.promise;
+      throw new Error("source cannot start");
     };
-    source.destroy = () => {
-      source.destroyed = true;
-      startFinished.resolve();
-    };
-    const session = await createMediaSession({ processor, renderer, source });
 
-    await startEntered.promise;
-    const destroying = session.destroy();
-
-    expect(renderer.destroyed).toBe(false);
-    await destroying;
-
+    await expect(
+      createMediaSession({ processor, renderer, source }),
+    ).rejects.toMatchObject({
+      code: "source-failed",
+      message: "source cannot start",
+    });
     expect(source.destroyed).toBe(true);
     expect(renderer.destroyed).toBe(true);
   });
@@ -398,7 +390,7 @@ describe("createMediaSession", () => {
       throw new Error("source cleanup failed");
     };
 
-    await expect(session.destroy()).rejects.toThrow("packet cleanup failed");
+    await expect(session.destroy()).rejects.toThrow("source cleanup failed");
     expect(renderer.disposedPacketIds).toEqual([0]);
     expect(source.destroyed).toBe(true);
     expect(renderer.destroyed).toBe(true);
