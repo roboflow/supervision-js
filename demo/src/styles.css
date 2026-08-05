@@ -2078,6 +2078,26 @@ fieldset {
   box-shadow: 0 16px 36px rgba(76, 29, 149, 0.16);
 }
 
+.renderer-viewport__overlay-card strong {
+  color: #f9fafb;
+}
+
+.renderer-viewport__overlay-card span {
+  color: #d1d5db;
+}
+
+.renderer-viewport__overlay-kicker {
+  color: #93c5fd;
+}
+
+.renderer-viewport__overlay--waiting .renderer-viewport__overlay-kicker {
+  color: #fcd34d;
+}
+
+.renderer-viewport__overlay--error .renderer-viewport__overlay-kicker {
+  color: #fecaca;
+}
+
 .playback-controls__play {
   border-left-color: #ffffff;
 }
