@@ -276,13 +276,15 @@ async function openMediaStreamMediaSource(
       return frame ? createDecodedSample(frame) : null;
     },
     async *samples(startTimestamp) {
-      let preferLatest = true;
-
       while (!disposed) {
-        const frame = await nextFrame(startTimestamp, preferLatest);
+        // MediaStream is a live source, not a replayable queue. Rendering every
+        // captured snapshot after a slow frame would permanently move playback
+        // behind the live edge. Always discard superseded snapshots before the
+        // next presentation so latency stays bounded by current work rather
+        // than by historical decoder backlog.
+        const frame = await nextFrame(startTimestamp, true);
         if (!frame) return;
 
-        preferLatest = false;
         startTimestamp = frame.timestamp + TIMESTAMP_EPSILON_SECONDS;
         yield createDecodedSample(frame);
       }
