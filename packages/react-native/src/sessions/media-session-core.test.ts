@@ -193,6 +193,48 @@ describe("createMediaSession", () => {
     expect(renderer.destroyed).toBe(true);
   });
 
+  it("waits for asynchronous source startup before teardown", async () => {
+    const source = new FakeMediaFrameSource<FakeFrame>();
+    const renderer = new FakeMediaRenderer<FakeFrame>();
+    const startEntered = deferred<void>();
+    const startFinished = deferred<void>();
+
+    source.start = () => {
+      startEntered.resolve();
+      return startFinished.promise;
+    };
+    const session = await createMediaSession({ processor, renderer, source });
+
+    await startEntered.promise;
+    const destroying = session.destroy();
+
+    expect(renderer.destroyed).toBe(false);
+    startFinished.resolve();
+    await destroying;
+
+    expect(source.destroyed).toBe(true);
+    expect(renderer.destroyed).toBe(true);
+  });
+
+  it("waits for asynchronous source resume before teardown", async () => {
+    const source = new FakeMediaFrameSource<FakeFrame>();
+    const renderer = new FakeMediaRenderer<FakeFrame>();
+    const resumeFinished = deferred<void>();
+
+    source.resume = () => resumeFinished.promise;
+    const session = await createMediaSession({ processor, renderer, source });
+    const playing = session.play();
+    const destroying = session.destroy();
+
+    expect(renderer.destroyed).toBe(false);
+    resumeFinished.resolve();
+    await Promise.all([playing, destroying]);
+
+    expect(source.destroyed).toBe(true);
+    expect(renderer.destroyed).toBe(true);
+    expect(session.getState().status).toBe(MediaSessionStatus.Destroyed);
+  });
+
   it("attempts every cleanup step when one of them fails", async () => {
     const source = new FakeMediaFrameSource<FakeFrame>();
     const renderer = new FakeMediaRenderer<FakeFrame>();

@@ -47,6 +47,8 @@ export async function createMediaSession<TPayload, TPacket extends object>(
   let stopped = false;
   let destroyPromise: Promise<void> | null = null;
   let frameQueue: Promise<void> = Promise.resolve();
+  let sourceOperationQueue: Promise<void> = Promise.resolve();
+  let sourceStart: Promise<void> = Promise.resolve();
   let lastDiagnostics: MediaSessionRenderPreparationState["lastDiagnostics"] =
     null;
 
@@ -268,8 +270,10 @@ export async function createMediaSession<TPayload, TPacket extends object>(
     playing = true;
     started = true;
     emit();
-    void Promise.resolve()
-      .then(() => options.source.start(consumer))
+    sourceStart = Promise.resolve()
+      .then(() =>
+        destroyed || error ? undefined : options.source.start(consumer),
+      )
       .catch((cause) => {
         reportError("source-failed", cause);
       });
@@ -302,8 +306,7 @@ export async function createMediaSession<TPayload, TPacket extends object>(
       destroyed = true;
       playing = false;
       processing = false;
-      destroyPromise = frameQueue
-        .catch(() => undefined)
+      destroyPromise = drainLifecycle()
         .then(() => destroyResources())
         .finally(() => {
           emit();
@@ -329,7 +332,12 @@ export async function createMediaSession<TPayload, TPacket extends object>(
     async play() {
       assertActive("play");
       assertCapability("play", options.source.capabilities.pausable);
-      await options.source.resume?.();
+      await enqueueSourceOperation(() => options.source.resume?.());
+
+      if (destroyed) {
+        return;
+      }
+
       stopped = false;
       playing = true;
       emit();
@@ -337,7 +345,7 @@ export async function createMediaSession<TPayload, TPacket extends object>(
     async seek(mediaTime) {
       assertActive("seek");
       assertCapability("seek", options.source.capabilities.seekable);
-      await options.source.seek?.(mediaTime);
+      await enqueueSourceOperation(() => options.source.seek?.(mediaTime));
     },
     setPresentation(nextPresentation: MediaRendererPresentation) {
       assertActive("setPresentation");
@@ -391,6 +399,24 @@ export async function createMediaSession<TPayload, TPacket extends object>(
         errors.push(cause);
       }
     }
+  }
+
+  async function drainLifecycle() {
+    await sourceStart;
+    await sourceOperationQueue;
+    await frameQueue.catch(() => undefined);
+  }
+
+  function enqueueSourceOperation<TValue>(
+    operation: () => TValue | Promise<TValue>,
+  ) {
+    const queuedOperation = sourceOperationQueue.then(operation, operation);
+
+    sourceOperationQueue = queuedOperation.then(
+      () => undefined,
+      () => undefined,
+    );
+    return queuedOperation;
   }
 
   function shouldAbandonFrame() {
