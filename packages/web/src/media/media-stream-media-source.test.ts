@@ -183,6 +183,35 @@ describe("createMediaStreamRendererSource", () => {
     decoded.input.dispose();
   });
 
+  it("returns to the live edge after an active consumer falls behind", async () => {
+    const track = new FakeTrack();
+    const stream = new FakeStream(track);
+    const opening = createMediaStreamRendererSource(
+      stream as unknown as MediaStream,
+      { maxBufferedFrames: 4 },
+    ).open();
+
+    await fakeVideo.present(0);
+    const decoded = await opening;
+    const iterator = decoded.sampleSink.samples(0);
+    const first = await iterator.next();
+    expect(first.value?.timestamp).toBe(0);
+    first.value?.close();
+
+    await fakeVideo.present(0.1);
+    await fakeVideo.present(0.2);
+    await fakeVideo.present(0.3);
+
+    const resumed = await iterator.next();
+    expect(resumed.value?.timestamp).toBe(0.3);
+    expect(bitmaps[1]?.close).toHaveBeenCalledOnce();
+    expect(bitmaps[2]?.close).toHaveBeenCalledOnce();
+
+    resumed.value?.close();
+    await iterator.return();
+    decoded.input.dispose();
+  });
+
   it("can normalize the live timeline to the first presented frame", async () => {
     const track = new FakeTrack();
     const stream = new FakeStream(track);

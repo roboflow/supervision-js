@@ -73,7 +73,9 @@ not the first thing most users should reach for:
 
 - `createMediaRenderer()` for lower-level renderer ownership;
 - `createMediaStreamRendererSource()` for adapting a browser `MediaStream`
-  without adding a second visible video layer;
+  without adding a second visible video layer; its bounded snapshot queue is
+  latest-frame-wins, so a temporarily slow renderer resumes at the live edge
+  instead of replaying stale frames;
 - `DetectionFrameSource` for caller-owned range loading;
 - `WritableDetectionFrameSource` and `createWritableDetectionFrameSource()` for
   streaming inference ingestion;
