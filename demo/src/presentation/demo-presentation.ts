@@ -314,12 +314,18 @@ function createDemoFocusStyle(settings: DemoPresentationSettings): FocusStyle {
               ...context,
               hoveredPick:
                 context.hoveredPick &&
-                passesConfidenceThreshold(context.hoveredPick.detection, settings)
+                passesConfidenceThreshold(
+                  context.hoveredPick.detection,
+                  settings,
+                )
                   ? context.hoveredPick
                   : null,
               selectedPick:
                 context.selectedPick &&
-                passesConfidenceThreshold(context.selectedPick.detection, settings)
+                passesConfidenceThreshold(
+                  context.selectedPick.detection,
+                  settings,
+                )
                   ? context.selectedPick
                   : null,
             }
