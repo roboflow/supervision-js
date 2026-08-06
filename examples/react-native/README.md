@@ -3,15 +3,21 @@
 Experimental Expo app for validating the `supervision-js-react-native` package
 on a phone or emulator.
 
-It has two modes:
+It has four modes:
 
-- Static: renders a bundled basketball frame and detections through React Native
-  Skia using draw instructions resolved from `supervision-js-core` styles.
+- Static: renders a bundled basketball frame and detections through the
+  package-owned `MediaSessionView` and static session binding.
 - Live: uses VisionCamera plus ExecuTorch RF-DETR Nano instance segmentation as
   an example inference producer. The frame worklet prepares one bounded ID-mask
   artifact from model-resolution masks, updates Skia presentation state, and
   only presents the same camera frame after the matching annotation packet is
   ready.
+- Video: exercises the package-owned iOS saved-video source and compatibility
+  session. Playback is analysis-paced, supports pause/resume/stop, and does not
+  claim seek support.
+- Instant CV: reuses the live strict-sync lane for example-owned Golden Pose,
+  Safety Zone, and Privacy recipes without promoting those product rules into
+  the package API.
 
 The mask layer follows the same performance principle as the browser package:
 compressed RLE masks are prepared once into a single frame-level ID-mask
@@ -19,8 +25,9 @@ artifact, uploaded as an `Alpha_8` Skia image, and colored with one runtime
 shader pass. The live mode prepares ExecuTorch binary masks directly into the
 ID-mask artifact so the hot path does not round-trip through React state. The
 live proof is strict-sync only: it does not display a newer camera frame with an
-older mask artifact. Native video playback, hot prepared windows, and
-worker/native-thread preparation are future proofs.
+older mask artifact. Saved-video decoding and native mask preparation are
+package-owned on iOS; the remaining work is to migrate that compatibility
+session onto the generic session core and add an Android saved-video source.
 
 ## Run
 
@@ -70,10 +77,11 @@ npm run example:react-native:android
 The demo should show a basketball frame, class-colored masks/boxes, labels, a
 selection outline, and a compact prepared-ID-mask readout. Switch to `Live` to
 test strict-synced camera-frame rendering with RF-DETR Nano instance
-segmentation. The live debug HUD reports delivered frame size, prepared artifact
-size, segmentation time, mask fill/upload time, total tick time, and dropped
-frames. If the readout says `Shader unavailable`, the GPU mask proof is not
-active.
+segmentation, `Video` to exercise analysis-paced saved-video processing, or
+`Instant CV` to exercise the example recipes. The live debug HUD reports
+delivered frame size, prepared artifact size, segmentation time, mask
+fill/upload time, total tick time, and dropped frames. If the readout says
+`Shader unavailable`, the GPU mask proof is not active.
 
 The live camera proof uses native dependencies and camera permissions. After
 changing native dependencies, Babel plugins, or `app.json`, rebuild the
@@ -95,5 +103,6 @@ npm run example:react-native:dev-client:ios
 - The demo may use ExecuTorch and VisionCamera as inference/media producers.
 - `packages/react-native` must not depend on Expo, Pixi, Mediabunny, DOM APIs,
   browser workers, IndexedDB, ExecuTorch, VisionCamera, or `packages/web`.
-- Media frames are externally supplied. The package only resolves core semantic
-  detections/styles into mobile-friendly drawing data.
+- The package owns generic media-session contracts, the static React/Skia view,
+  the iOS saved-video source, and reusable preparation worklets. Hosts still own
+  inference, live camera producers, persistence, and product UI.

@@ -161,7 +161,7 @@ export interface ReactNativeVideoSessionPresentationOptions {
   readonly maxPixels?: number;
   readonly maxSide?: number;
   readonly mosaicCellPx?: number;
-  /** Memory-guard overrides; default to `REACT_NATIVE_VIDEO_SESSION_DEFAULTS`. */
+  /** Memory-guard overrides; default to `REACT_NATIVE_FILE_SESSION_DEFAULTS`. */
   readonly fullResMaskMaxPixels?: number;
   readonly maxPresentationSide?: number;
 }

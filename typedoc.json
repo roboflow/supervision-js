@@ -16,7 +16,7 @@
   "excludeProtected": true,
   "githubPages": true,
   "hideGenerator": true,
-  "includeVersion": true,
+  "includeVersion": false,
   "lightHighlightTheme": "github-light",
   "darkHighlightTheme": "github-dark",
   "name": "supervision-js",

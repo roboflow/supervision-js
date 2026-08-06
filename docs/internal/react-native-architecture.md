@@ -1,7 +1,7 @@
 # React Native Architecture
 
-This note defines the current direction for a future React Native package. It is
-not a public API promise.
+This note defines the current direction for the private experimental React
+Native package. It is not a public API promise.
 
 The package is being hardened toward release using the web API as the
 blueprint; see the current phased extraction and API plan in
@@ -18,10 +18,12 @@ browser package entrypoint.
 
 ## Rendering Direction
 
-React Native rendering should use native-friendly technology such as Skia or a
-native GPU surface. The first proof should accept externally supplied media
-frames or native frame handles and resolve core presentation styles into
-draw instructions.
+React Native rendering uses platform adapters around a renderer-neutral session
+core. The current `./react` and `./skia` entrypoints provide a package-owned
+static `MediaSessionView`, synchronized frame packets, and Skia drawing helpers.
+Live camera frames still enter through example-owned native frame handles; the
+next reusable live adapter should implement the same source/processor/renderer
+contracts rather than introduce a second session abstraction.
 
 The package should remain non-Expo-coupled. Expo may be a consumer environment,
 but the library boundary should not require Expo APIs.
@@ -35,10 +37,12 @@ directly through Skia or a future native GPU adapter.
 
 ## Media Direction
 
-Mediabunny is browser-focused and should stay in `packages/web`. React Native
-will need platform media providers for files, camera streams, and native video
-frames. Those providers should conform to core media-frame metadata contracts
-without making core know about native texture handles or camera APIs.
+Mediabunny is browser-focused and stays in `packages/web`. React Native models
+platform media through `MediaFrameSource`, `MediaFrameProcessor`, and
+`MediaRendererAdapter`. The current iOS saved-video adapter wraps the optional
+Nitro `VideoFrameSource`; live VisionCamera production remains example-owned.
+Native handles stay outside core, and Android saved-video decoding is not yet
+implemented.
 
 ## Storage Direction
 
@@ -50,22 +54,23 @@ storage engine belongs to the React Native package or the host app.
 ## Inference Boundary
 
 ExecuTorch and other on-device inference engines are detection producers, not
-rendering dependencies. A host app may run a model with ExecuTorch and append
+rendering dependencies. A host app may run a model with ExecuTorch and feed
 detections into the same core-shaped pipeline, but `supervision-js-react-native`
-should not depend on ExecuTorch to render detections.
+does not import the ExecuTorch runtime to render detections.
 
-The example app may use ExecuTorch to prove a realistic producer integration.
-That dependency must stay in `examples/react-native`, not in `packages/core` or
-`packages/react-native`.
+The package's optional `./adapters/executorch` subpath accepts structural runner
+and result shapes, owns worklet-safe serialization and coordinate repair, and
+keeps model ownership with the host. The example app owns the actual ExecuTorch
+models and hooks; neither core nor the React Native package takes a runtime
+dependency on that producer.
 
 ## Current Proof
 
-The current private package resolves one externally supplied media frame and one
-detection frame through core styles, then maps media-space geometry into a
-React Native canvas. It also maps React Native touch coordinates back into media
-space and delegates picking to core contracts. That proves the dependency
-direction, style contract, coordinate mapping, and interaction boundary without
-choosing a full mobile media pipeline.
+The current private package owns a generic `createMediaSession()` lifecycle,
+source/processor/renderer contracts, stable state snapshots, prepared-frame
+ownership, package defaults, and a React lifecycle adapter. Its static binding
+and `MediaSessionView` map media-space geometry into a React Native Skia scene,
+map touch coordinates back into media space, and delegate picking to core.
 
 The React Native gesture adapter also delegates box creation, movement, handle
 resizing, vertex deletion, and scaled-mask picking to the shared core editing
@@ -73,12 +78,12 @@ engine. The host retains selection, persistence, undo, and native drawing of
 `AnnotationOverlayStyle` affordances; a native overlay-renderer is intentionally
 not part of this proof.
 
-Static and live examples now use the same render-owned presentation shape:
-prepare one frame packet, then draw media, masks, boxes, and labels through the
-same synchronized frame stage. Static mode supplies a Skia image as the media
-source; live mode supplies VisionCamera's native frame renderer as the media
-source. The annotation rendering lane stays shared so future static work does
-not drift into a second renderer implementation.
+Static and live examples use the same render-owned presentation shape: prepare
+one frame packet, then draw media, masks, boxes, and labels through the same
+synchronized frame stage. Static mode uses the package-owned React/Skia view;
+live mode supplies VisionCamera's native frame renderer as the media source.
+The annotation rendering lane stays shared rather than drifting into a second
+renderer implementation.
 
 The package also exposes a static-frame ID-mask proof:
 
@@ -105,9 +110,10 @@ The example app also includes a live camera proof:
   receives throttled diagnostics only.
 
 The reusable package now owns the live ID-mask artifact contract, artifact
-sizing helper, Roboflow-style palette helper, and the worklet-callable JS
-fallback builder. The example still owns the hot VisionCamera and ExecuTorch
-worklet because those are producer choices.
+sizing helper, Roboflow-style palette helper, worklet-callable JS fallback
+builder, saved-video serializer, and pose conversion helpers. The example still
+owns the hot VisionCamera/live-inference worklet because those are producer
+choices.
 
 The example also proves an Instant CV interaction layer without promoting a
 product-specific rule schema into the package. Touch-authored rules remain
@@ -135,13 +141,18 @@ JS builder otherwise, surfacing builder/fallback diagnostics. The package keeps
 without any native module. Android intentionally has no native implementation
 yet and always uses the JS fallback.
 
-This is deliberately an example-level integration. The long-term package design
-should move hot-frame rendering, prepared-window management, and background or
-native-thread mask preparation into reusable RN adapters without making the
-renderer depend on a specific inference engine.
+The package also owns the iOS saved-video source, reusable ExecuTorch
+serialization/preparation worklets, shared file/live defaults, and the existing
+analysis-paced `createReactNativeVideoSession()` compatibility factory. The
+factory supports pause/resume/stop and intentionally reports seeking as
+unsupported. New code should use `REACT_NATIVE_FILE_SESSION_DEFAULTS`; the old
+video-defaults name is retained only as a deprecated alias.
 
-Native video file playback, hot prepared windows, and worker or native-thread
-mask preparation remain future proofs.
+The remaining package work is to migrate that saved-video compatibility path
+onto the generic session core, move the live example lane behind reusable
+adapters, add Android saved-video decoding, and introduce bounded prepared
+windows where measurement justifies them. Inference engines remain injected
+producers rather than renderer dependencies.
 
 See [`react-native-live-rendering.md`](react-native-live-rendering.md) for the
 live rendering target and current V0 demo shape.
