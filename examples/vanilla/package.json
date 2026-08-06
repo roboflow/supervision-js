@@ -12,6 +12,6 @@
     "supervision": "file:../../packages/web"
   },
   "devDependencies": {
-    "vite": "^8.0.10"
+    "vite": "^8.2.1"
   }
 }

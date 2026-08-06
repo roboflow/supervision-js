@@ -33,7 +33,7 @@ export async function probeMedia(
   source: Blob,
   options: MediaProbeOptions = {},
 ): Promise<MediaProbeResult> {
-  const { ALL_FORMATS, BlobSource, Input, canEncodeVideo } =
+  const { ALL_FORMATS, BlobSource, Input, Quality, canEncodeVideo } =
     await import("mediabunny");
   const input = new Input({
     formats: ALL_FORMATS,
@@ -100,6 +100,7 @@ export async function probeMedia(
     const target = await selectMediaProbeTarget({
       canEncodeVideo,
       primaryVideo,
+      Quality,
       targets: options.targets ?? DEFAULT_MEDIA_PROBE_TARGETS,
     });
 
@@ -148,12 +149,13 @@ async function selectMediaProbeTarget(options: {
   readonly canEncodeVideo: (
     codec: VideoCodec,
     options: {
-      readonly bitrate?: number;
       readonly height?: number;
+      readonly quality?: import("mediabunny").Quality;
       readonly width?: number;
     },
   ) => Promise<boolean>;
   readonly primaryVideo: MediaProbeVideoTrack;
+  readonly Quality: typeof import("mediabunny").Quality;
   readonly targets: readonly MediaProbeTargetProfile[];
 }) {
   for (const target of options.targets) {
@@ -161,8 +163,11 @@ async function selectMediaProbeTarget(options: {
       target.videoCodec as VideoCodec,
       {
         ...includeDefined({
-          bitrate: target.bitrate,
           height: target.height ?? options.primaryVideo.height,
+          quality:
+            target.bitrate === undefined
+              ? undefined
+              : new options.Quality({ bitrate: target.bitrate }),
           width: target.width ?? options.primaryVideo.width,
         }),
       },

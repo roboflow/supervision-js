@@ -8,11 +8,11 @@
     "build": "tsc --noEmit -p tsconfig.json && vite build"
   },
   "dependencies": {
-    "mediabunny": "^1.43.1",
-    "pixi.js": "^8.18.1"
+    "mediabunny": "^1.52.3",
+    "pixi.js": "^8.19.0"
   },
   "devDependencies": {
     "typescript": "^6.0.3",
-    "vite": "^8.0.16"
+    "vite": "^8.2.1"
   }
 }
