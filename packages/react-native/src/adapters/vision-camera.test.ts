@@ -3,8 +3,10 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createVisionCameraLiveSource,
   presentVisionCameraFrame,
+  useVisionCameraDevice,
   useVisionCameraFrameRenderer,
   useVisionCameraFrameOutput,
+  useVisionCameraPermission,
 } from "./vision-camera";
 
 function createFrame(timestamp: number) {
@@ -77,6 +79,17 @@ describe("useVisionCameraFrameOutput", () => {
 describe("useVisionCameraFrameRenderer", () => {
   it("fails clearly outside a VisionCamera runtime", () => {
     expect(() => useVisionCameraFrameRenderer()).toThrow(
+      /VisionCamera is unavailable/,
+    );
+  });
+});
+
+describe("VisionCamera hook adapters", () => {
+  it("fails clearly outside a VisionCamera runtime", () => {
+    expect(() => useVisionCameraDevice("back")).toThrow(
+      /VisionCamera is unavailable/,
+    );
+    expect(() => useVisionCameraPermission()).toThrow(
       /VisionCamera is unavailable/,
     );
   });

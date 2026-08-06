@@ -5,6 +5,7 @@ import {
 } from "supervision-js-core";
 import {
   createElement,
+  Fragment,
   useCallback,
   type ComponentType,
   type ReactElement,
@@ -12,6 +13,7 @@ import {
 import type { StyleProp, ViewStyle } from "react-native";
 import type {
   CameraFrameOutput,
+  CameraDevice,
   Frame,
   FrameRenderer,
 } from "react-native-vision-camera";
@@ -73,9 +75,27 @@ export interface VisionCameraFrameRendererViewProps {
   readonly style?: StyleProp<ViewStyle>;
 }
 
+export interface VisionCameraLiveViewProps {
+  readonly cameraStyle?: StyleProp<ViewStyle>;
+  readonly device: CameraDevice;
+  readonly frameRenderer: FrameRenderer;
+  readonly frameRendererStyle?: StyleProp<ViewStyle>;
+  readonly isActive: boolean;
+  readonly outputs: CameraFrameOutput[];
+  readonly orientationSource?: "interface";
+}
+
 export interface VisionCameraFrameOutputBinding {
   readonly frameOutput: CameraFrameOutput;
   readonly frameRenderer: FrameRenderer;
+}
+
+/** Optional-peer alias for a native frame passed to a host inference producer. */
+export type VisionCameraOutputFrame = Frame;
+
+export interface VisionCameraPermissionState {
+  readonly hasPermission: boolean;
+  requestPermission(): Promise<boolean>;
 }
 
 /**
@@ -240,6 +260,22 @@ export function useVisionCameraFrameRenderer(): FrameRenderer {
   return visionCamera.useFrameRenderer();
 }
 
+/** Returns the optional VisionCamera device hook through the package boundary. */
+export function useVisionCameraDevice(
+  position: "back" | "front" | "external" | "unspecified",
+): CameraDevice | undefined {
+  const visionCamera = loadVisionCamera();
+
+  return visionCamera.useCameraDevice(position);
+}
+
+/** Returns the optional VisionCamera permission hook through the package boundary. */
+export function useVisionCameraPermission(): VisionCameraPermissionState {
+  const visionCamera = loadVisionCamera();
+
+  return visionCamera.useCameraPermission();
+}
+
 /** Package-owned view binding for a VisionCamera native frame renderer. */
 export function VisionCameraFrameRendererView(
   props: VisionCameraFrameRendererViewProps,
@@ -249,7 +285,35 @@ export function VisionCameraFrameRendererView(
   return createElement(visionCamera.NativeFrameRendererView, props);
 }
 
+/**
+ * Package-owned VisionCamera scene binding for the live preview and its
+ * strict-sync rendered surface. Hosts supply session/producer state only;
+ * the optional adapter owns the vendor component composition.
+ */
+export function VisionCameraLiveView(
+  props: VisionCameraLiveViewProps,
+): ReactElement {
+  const visionCamera = loadVisionCamera();
+
+  return createElement(
+    Fragment,
+    null,
+    createElement(visionCamera.Camera, {
+      device: props.device,
+      isActive: props.isActive,
+      orientationSource: props.orientationSource,
+      outputs: props.outputs,
+      style: props.cameraStyle,
+    }),
+    createElement(visionCamera.NativeFrameRendererView, {
+      renderer: props.frameRenderer,
+      style: props.frameRendererStyle,
+    }),
+  );
+}
+
 interface VisionCameraModule {
+  Camera: ComponentType<VisionCameraCameraProps>;
   NativeFrameRendererView: ComponentType<VisionCameraFrameRendererViewProps>;
   useFrameOutput(config: {
     allowDeferredStart: boolean;
@@ -261,7 +325,19 @@ interface VisionCameraModule {
     pixelFormat: "rgb";
     targetResolution: VisionCameraFrameOutputOptions<Frame>["targetResolution"];
   }): CameraFrameOutput;
+  useCameraDevice(
+    position: "back" | "front" | "external" | "unspecified",
+  ): CameraDevice | undefined;
+  useCameraPermission(): VisionCameraPermissionState;
   useFrameRenderer(): FrameRenderer;
+}
+
+interface VisionCameraCameraProps {
+  readonly device: CameraDevice;
+  readonly isActive: boolean;
+  readonly orientationSource?: "interface";
+  readonly outputs?: CameraFrameOutput[];
+  readonly style?: StyleProp<ViewStyle>;
 }
 
 function loadVisionCamera(): VisionCameraModule {

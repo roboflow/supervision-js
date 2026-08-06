@@ -39,12 +39,6 @@ import {
   Vibration,
   View,
 } from "react-native";
-import {
-  Camera,
-  useCameraDevice,
-  useCameraPermission,
-  type Frame,
-} from "react-native-vision-camera";
 import { useSharedValue } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
 import { Asset } from "expo-asset";
@@ -77,7 +71,10 @@ import {
 } from "supervision-js-react-native";
 import {
   useVisionCameraFrameOutput,
-  VisionCameraFrameRendererView,
+  useVisionCameraDevice,
+  useVisionCameraPermission,
+  VisionCameraLiveView,
+  type VisionCameraOutputFrame,
 } from "supervision-js-react-native/adapters/vision-camera";
 import {
   createReactNativeStaticMediaSessionBinding,
@@ -1174,8 +1171,8 @@ function LiveCameraProof(props: {
 }) {
   const isInstantCv = props.mode === "instant";
   const window = useWindowDimensions();
-  const device = useCameraDevice("back");
-  const { hasPermission, requestPermission } = useCameraPermission();
+  const device = useVisionCameraDevice("back");
+  const { hasPermission, requestPermission } = useVisionCameraPermission();
   const [liveFrame, setLiveFrame] = useState<LiveFrameState | null>(null);
   const [liveError, setLiveError] = useState<LiveFrameError | null>(null);
   const [liveDetections, setLiveDetections] = useState<
@@ -2038,7 +2035,7 @@ function LiveCameraProof(props: {
   // must all be render-stable (shared values, useCallback reporters, memoized
   // handles). Per-render data flows in through shared values instead.
   const onLiveInferenceFrame = useCallback(
-    (frame: Frame) => {
+    (frame: VisionCameraOutputFrame) => {
       "worklet";
 
       let stage = "start";
@@ -2791,25 +2788,25 @@ function LiveCameraProof(props: {
         mediaLayer={
           <>
             {device ? (
-              <Camera
-                device={device}
-                isActive={Boolean(canRunCamera)}
-                orientationSource="interface"
-                outputs={cameraOutputs}
-                style={[
+              <VisionCameraLiveView
+                cameraStyle={[
                   styles.captureCamera,
                   awaitingSyncedFrame ? styles.captureCameraVisible : null,
                 ]}
+                device={device}
+                frameRenderer={frameRenderer}
+                frameRendererStyle={[
+                  styles.frameRendererSurface,
+                  liveFrameRendererStyle,
+                  awaitingSyncedFrame
+                    ? styles.frameRendererSurfaceHidden
+                    : null,
+                ]}
+                isActive={Boolean(canRunCamera)}
+                orientationSource="interface"
+                outputs={cameraOutputs}
               />
             ) : null}
-            <VisionCameraFrameRendererView
-              renderer={frameRenderer}
-              style={[
-                styles.frameRendererSurface,
-                liveFrameRendererStyle,
-                awaitingSyncedFrame ? styles.frameRendererSurfaceHidden : null,
-              ]}
-            />
           </>
         }
         showBoxes={showBoxLayer}
