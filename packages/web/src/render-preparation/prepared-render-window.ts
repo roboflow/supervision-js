@@ -18,6 +18,7 @@ import {
   RenderPreparationExecutionMode,
   RenderPreparationArtifactFrameStatus,
   RenderPreparationArtifactKind,
+  RenderPreparationWorkerStatus,
   type RenderPreparationOptions,
   type RenderPreparationPlaybackGateOptions,
 } from "#types/render-preparation";
@@ -147,6 +148,7 @@ export function createPreparedRenderWindow(options: {
   const observedMaskFrames = new Map<string, DetectionFrame>();
   const readinessWaiters = new Set<() => void>();
   let scheduledQueuePump: ScheduledPreparationTask | undefined;
+  let terminalPreparationError: Error | null = null;
 
   const scheduleMaskFrame = (
     frame: DetectionFrame,
@@ -160,7 +162,7 @@ export function createPreparedRenderWindow(options: {
     const isActiveFrame =
       scheduleOptions.priority === PreparedRenderSchedulePriority.Active;
 
-    if (!maskStyle || isDestroyed) {
+    if (!maskStyle || isDestroyed || terminalPreparationError) {
       return false;
     }
 
@@ -218,7 +220,7 @@ export function createPreparedRenderWindow(options: {
   };
 
   function pumpMaskFrameQueue() {
-    if (scheduledQueuePump || isDestroyed) {
+    if (scheduledQueuePump || isDestroyed || terminalPreparationError) {
       return;
     }
 
@@ -229,7 +231,7 @@ export function createPreparedRenderWindow(options: {
   }
 
   function startQueuedMaskFrameJobs() {
-    if (isDestroyed) {
+    if (isDestroyed || terminalPreparationError) {
       return;
     }
 
@@ -322,6 +324,18 @@ export function createPreparedRenderWindow(options: {
             pendingMaskFrames.delete(key);
           }
 
+          const preparationError = getPreparationError(error);
+          const status = maskFramePreparer.getStatus();
+
+          if (
+            status.executionMode === RenderPreparationExecutionMode.Worker &&
+            status.workerStatus === RenderPreparationWorkerStatus.Error
+          ) {
+            setTerminalPreparationError(preparationError);
+            emitDiagnostics(terminalPreparationError?.message);
+            return;
+          }
+
           schedulePreparedTargetBatch();
 
           if (
@@ -334,11 +348,7 @@ export function createPreparedRenderWindow(options: {
             return;
           }
 
-          emitDiagnostics(
-            error instanceof Error
-              ? error.message
-              : "Unable to prepare mask frame.",
-          );
+          emitDiagnostics(preparationError.message);
           pumpMaskFrameQueue();
         });
 
@@ -535,7 +545,7 @@ export function createPreparedRenderWindow(options: {
   }
 
   function schedulePreparedTargetBatch() {
-    if (isDestroyed) {
+    if (isDestroyed || terminalPreparationError) {
       return;
     }
 
@@ -568,7 +578,15 @@ export function createPreparedRenderWindow(options: {
         return Promise.resolve();
       }
 
+      if (terminalPreparationError) {
+        return Promise.reject(terminalPreparationError);
+      }
+
       getFrame(mediaTime, { forcePreparedWindow: true });
+
+      if (terminalPreparationError) {
+        return Promise.reject(terminalPreparationError);
+      }
 
       if (
         isReadyForPresentation(mediaTime, getMinimumAheadSeconds(waitOptions))
@@ -576,8 +594,14 @@ export function createPreparedRenderWindow(options: {
         return Promise.resolve();
       }
 
-      return new Promise((resolve) => {
+      return new Promise((resolve, reject) => {
         const checkReady = () => {
+          if (terminalPreparationError) {
+            readinessWaiters.delete(checkReady);
+            reject(terminalPreparationError);
+            return;
+          }
+
           if (
             !isDestroyed &&
             !isReadyForPresentation(
@@ -784,6 +808,22 @@ export function createPreparedRenderWindow(options: {
     }
 
     emitDiagnostics();
+  }
+
+  function setTerminalPreparationError(error: Error) {
+    if (terminalPreparationError) {
+      return;
+    }
+
+    terminalPreparationError = error;
+
+    if (scheduledQueuePump) {
+      cancelScheduledPreparationTask(scheduledQueuePump);
+      scheduledQueuePump = undefined;
+    }
+
+    pendingMaskFrames.clear();
+    queuedMaskFrameKeys.length = 0;
   }
 
   function getMaskStatus(key: string) {
@@ -1079,6 +1119,12 @@ function resolveMaskInstructions(options: {
 
 function getFrameKey(frame: DetectionFrame) {
   return `${frame.frameIndex ?? "time"}:${frame.mediaTime}`;
+}
+
+function getPreparationError(error: unknown) {
+  return error instanceof Error
+    ? error
+    : new Error("Unable to prepare mask frame.");
 }
 
 function getPreparedWindowRefillThresholdFrameCount(

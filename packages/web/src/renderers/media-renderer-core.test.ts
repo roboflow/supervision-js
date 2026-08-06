@@ -11,6 +11,11 @@ import {
   MediaRendererPlaybackState,
   type MediaRendererOptions,
 } from "#types/media-renderer";
+import {
+  RenderPreparationExecutionMode,
+  RenderPreparationMode,
+  RenderPreparationWorkerStatus,
+} from "#types/render-preparation";
 
 import {
   createDeferred,
@@ -19,7 +24,10 @@ import {
   resetMocks,
 } from "../../../../test/media-renderer-harness";
 import { createMediaRendererCore } from "./media-renderer-core";
-import type { MediaRendererScene } from "./media-renderer-scene";
+import type {
+  MediaRendererScene,
+  MediaRendererSceneOptions,
+} from "./media-renderer-scene";
 
 describe("media renderer core", () => {
   it("does not enter buffering when render preparation is already ready", async () => {
@@ -129,6 +137,55 @@ describe("media renderer core", () => {
       currentTime: 0.04,
       playbackState: MediaRendererPlaybackState.Playing,
     });
+
+    renderer.destroy();
+  });
+
+  it("surfaces strict worker failures when playback gating is disabled", async () => {
+    resetMocks();
+
+    let sceneOptions: MediaRendererSceneOptions | undefined;
+    const onDiagnostics = vi.fn();
+    const renderer = await createMediaRendererCore(
+      {
+        autoPlay: false,
+        container: {} as HTMLElement,
+        renderPreparation: {
+          mode: RenderPreparationMode.Worker,
+          onDiagnostics,
+          playbackGate: { enabled: false },
+        },
+        source: createSource([
+          createMockSample(0, 0.04) as unknown as DecodedVideoSample,
+        ]),
+      } satisfies MediaRendererOptions,
+      {
+        createScene: vi.fn(async (options) => {
+          sceneOptions = options;
+          return createScene();
+        }),
+        openMediaSource: vi.fn(),
+      },
+    );
+
+    await renderer.play();
+    expect(renderer.getState().playbackState).toBe(
+      MediaRendererPlaybackState.Playing,
+    );
+
+    sceneOptions?.renderPreparation?.onDiagnostics?.({
+      artifacts: [],
+      executionMode: RenderPreparationExecutionMode.Worker,
+      message: "worker crashed",
+      workerStatus: RenderPreparationWorkerStatus.Error,
+    });
+
+    expect(onDiagnostics).toHaveBeenCalledOnce();
+    expect(renderer.getState()).toMatchObject({
+      playbackState: MediaRendererPlaybackState.Error,
+      source: { errorMessage: "worker crashed" },
+    });
+    await expect(renderer.play()).rejects.toThrow("worker crashed");
 
     renderer.destroy();
   });

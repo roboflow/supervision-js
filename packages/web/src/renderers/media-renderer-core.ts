@@ -29,7 +29,12 @@ import {
   type MediaRendererPresentation,
 } from "#types/media-renderer";
 import { MediaInteractionMode } from "supervision-js-core";
-import type { RenderPreparationPlaybackGateOptions } from "#types/render-preparation";
+import {
+  RenderPreparationMode,
+  RenderPreparationWorkerStatus,
+  type RenderPreparationDiagnostics,
+  type RenderPreparationPlaybackGateOptions,
+} from "#types/render-preparation";
 import { createOffsetDetectionFrameSource } from "#detections/offset-detection-frame-source";
 import { createMediaRendererRuntimeState } from "./media-renderer-state";
 import type {
@@ -90,6 +95,24 @@ export async function createMediaRendererCore(
   let sampleSink: DecodedVideoSampleSink | undefined;
   let firstTimestamp = 0;
   let navigationVersion = 0;
+
+  const handleRenderPreparationDiagnostics = (
+    diagnostics: RenderPreparationDiagnostics,
+  ) => {
+    if (
+      options.renderPreparation?.mode === RenderPreparationMode.Worker &&
+      diagnostics.workerStatus === RenderPreparationWorkerStatus.Error &&
+      !runtimeState.isDestroyed() &&
+      !runtimeState.isError()
+    ) {
+      playbackController?.pause();
+      runtimeState.setRenderError(
+        new Error(diagnostics.message ?? "Render preparation worker failed."),
+      );
+    }
+
+    options.renderPreparation?.onDiagnostics?.(diagnostics);
+  };
 
   const presentSample = (sample: DecodedVideoSample) => {
     if (!mediaScene) {
@@ -441,7 +464,12 @@ export async function createMediaRendererCore(
       polygonStyle: currentPresentation.polygonStyle,
       polylineStyle: currentPresentation.polylineStyle,
       previewOverlay: options.previewOverlay,
-      renderPreparation: options.renderPreparation,
+      renderPreparation: options.renderPreparation
+        ? {
+            ...options.renderPreparation,
+            onDiagnostics: handleRenderPreparationDiagnostics,
+          }
+        : undefined,
       visibility: currentPresentation.visibility,
     });
     runtimeState.setRendererBackend(mediaScene.rendererBackend);

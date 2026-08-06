@@ -3,6 +3,7 @@ import {
   MediaNormalizationContainer,
   MediaNormalizationVideoCodec,
   MediaInteractionMode,
+  RenderPreparationMode,
   MediaRendererFit,
   createMediaSession,
   type MediaSession,
@@ -100,6 +101,7 @@ export async function createFixtureSession(
         onFrame: options.onFrame,
         onState: options.onRendererState,
         renderPreparation: {
+          mode: RenderPreparationMode.Worker,
           onDiagnostics: options.onRenderPreparationDiagnostics,
         },
         onSource: options.onSourceState,

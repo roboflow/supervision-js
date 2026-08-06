@@ -5,6 +5,7 @@ import {
   MediaInteractionMode,
   MediaRendererFit,
   MediaRendererPlaybackState,
+  RenderPreparationMode,
   createBrowserColdDetectionFrameStore,
   createMediaSession,
   type ColdDetectionFrameStoreWriteSummary,
@@ -142,6 +143,7 @@ export async function createUploadSession(
         onFrame: options.onFrame,
         onState: options.onRendererState,
         renderPreparation: {
+          mode: RenderPreparationMode.Worker,
           onDiagnostics: options.onRenderPreparationDiagnostics,
         },
         onSource: options.onSourceState,

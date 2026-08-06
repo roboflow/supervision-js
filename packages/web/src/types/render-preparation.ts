@@ -11,7 +11,8 @@ export enum RenderPreparationMode {
    */
   MainThread = "mainThread",
   /**
-   * Prepare artifacts through the configured/default worker factory.
+   * Require preparation through the configured/default worker factory.
+   * Worker creation and runtime failures reject instead of falling back.
    */
   Worker = "worker",
 }
@@ -55,7 +56,7 @@ export enum RenderPreparationArtifactFrameStatus {
 }
 
 /**
- * Worker creation hook for hosts that need custom bundler or CSP handling.
+ * Worker creation hook for hosts that need custom CSP or deployment handling.
  */
 export interface RenderPreparationWorkerFactory {
   createWorker(): Worker;

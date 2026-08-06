@@ -136,6 +136,10 @@ test("tarball ships both entrypoints with declarations and source maps", () => {
   assert.equal(manifest.name, "supervision-js");
   assert.equal(manifest.exports["."].import, "./dist/index.js");
   assert.equal(manifest.exports["./editing"].import, "./dist/editing.js");
+  assert.equal(
+    manifest.exports["./render-preparation-worker"],
+    "./dist/mask-preparation.worker.js",
+  );
 });
 
 test("tarball ships the project license and package README", () => {
@@ -152,7 +156,7 @@ test("tarball ships the project license and package README", () => {
   assert.doesNotMatch(readme, /has not been published yet/);
 });
 
-test("tarball ships the render-preparation worker and the chunks it imports", () => {
+test("tarball ships a self-contained render-preparation worker", () => {
   const workerPath = path.join(extractedDir, "dist/mask-preparation.worker.js");
 
   assert.ok(existsSync(workerPath), "Expected the worker entry in the tarball");
@@ -161,32 +165,39 @@ test("tarball ships the render-preparation worker and the chunks it imports", ()
     "Expected the worker source map in the tarball",
   );
 
-  // Chunk filenames are content hashed, so follow the worker's own relative
-  // imports instead of asserting a fixed hash.
   const workerSource = readFileSync(workerPath, "utf8");
   const relativeImports = [
     ...workerSource.matchAll(/(?:from|import)\s*["'](\.[^"']+)["']/g),
   ].map((match) => match[1]);
 
-  assert.ok(
-    relativeImports.length > 0,
-    "Expected the worker to import at least one emitted chunk",
+  assert.deepEqual(
+    relativeImports,
+    [],
+    "The standalone worker must not depend on sibling chunks",
   );
-
-  for (const specifier of relativeImports) {
-    const chunkPath = path.resolve(path.dirname(workerPath), specifier);
-
-    assert.ok(
-      existsSync(chunkPath),
-      `Expected worker chunk ${specifier} in the tarball`,
-    );
-  }
+  assert.match(workerSource, /addEventListener\(["']message["']/);
 });
 
-test("published worker entry preserves webpack's root chunk public path", () => {
+test("published browser entry embeds its default worker source", () => {
   const index = readFileSync(path.join(extractedDir, "dist/index.js"), "utf8");
+  const workerSource = readFileSync(
+    path.join(extractedDir, "dist/mask-preparation.worker.js"),
+    "utf8",
+  )
+    .trimEnd()
+    .replace(/\n\/\/# sourceMappingURL=[^\n]+$/, "");
 
-  assert.match(index, /webpackEntryOptions:\s*\{\s*publicPath:\s*"\/"\s*\}/);
+  assert.match(index, /URL\.createObjectURL/);
+  assert.match(index, /new Blob/);
+  assert.ok(
+    index.includes(JSON.stringify(workerSource)),
+    "Expected the browser entry to contain the exact standalone worker source",
+  );
+  assert.doesNotMatch(index, /mask-preparation\.worker\.js/);
+  assert.doesNotMatch(
+    index,
+    /__SUPERVISION_JS_EMBEDDED_MASK_PREPARATION_WORKER_SOURCE__/,
+  );
 });
 
 test("tarball bundles the private core package only", () => {
@@ -280,7 +291,7 @@ test("clean consumer installs the tarball without the repository", () => {
   }
 });
 
-test("clean consumer resolves both package entrypoints", () => {
+test("clean consumer resolves package entrypoints and the standalone worker", () => {
   const output = run(
     process.execPath,
     [
@@ -289,13 +300,14 @@ test("clean consumer resolves both package entrypoints", () => {
       [
         'import { createMediaSession, MediaSessionStatus } from "supervision-js";',
         'import { createAnnotationEditingEngine } from "supervision-js/editing";',
-        "console.log(typeof createMediaSession, MediaSessionStatus.Ready, typeof createAnnotationEditingEngine);",
+        'const workerUrl = import.meta.resolve("supervision-js/render-preparation-worker");',
+        "console.log(typeof createMediaSession, MediaSessionStatus.Ready, typeof createAnnotationEditingEngine, workerUrl.endsWith('/mask-preparation.worker.js'));",
       ].join("\n"),
     ],
     consumerDir,
   );
 
-  assert.equal(output.trim(), "function ready function");
+  assert.equal(output.trim(), "function ready function true");
 });
 
 test("clean consumer builds a browser bundle that imports createMediaSession", () => {
