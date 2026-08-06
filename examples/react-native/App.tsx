@@ -78,7 +78,7 @@ import {
 import {
   runWithWorkletDebugLogging,
   serializeDebugError,
-} from "./src/debug-logging";
+} from "supervision-js-react-native/worklet-debug";
 import {
   createExecutorchPoseKeypointInstructions,
   createDetectionFrameFromExecutorchCocoPoses,
@@ -102,7 +102,7 @@ import {
   type InstantCvRuleRuntime,
   type InstantCvZone,
   type InstantCvZoneShape,
-} from "./src/instant-cv";
+} from "supervision-js-react-native/adapters/instant-cv";
 
 const useSharedValue = useReactNativeSharedValue;
 

@@ -3,6 +3,7 @@ import typescript from "@rollup/plugin-typescript";
 export default {
   input: {
     "adapters/executorch": "src/adapters/executorch.ts",
+    "adapters/instant-cv": "src/adapters/instant-cv.ts",
     "adapters/vision-camera": "src/adapters/vision-camera.ts",
     "adapters/video-file": "src/adapters/video-file.ts",
     index: "src/index.ts",
@@ -10,6 +11,7 @@ export default {
     react: "src/react/index.ts",
     sessions: "src/sessions.ts",
     skia: "src/skia.ts",
+    "worklet-debug": "src/worklet-debug.ts",
   },
   external: [
     "@shopify/react-native-skia",
