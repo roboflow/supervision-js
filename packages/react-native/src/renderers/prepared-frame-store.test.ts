@@ -79,6 +79,46 @@ describe("PreparedFrameStore", () => {
     expect(dispose.mock.calls.map(([id]) => id)).toEqual([2, 1]);
   });
 
+  it("shares concurrent teardown and releases a packet that arrives afterward", async () => {
+    const dispose = vi.fn();
+    const store = new PreparedFrameStore((next: Packet) =>
+      dispose(next.packetId),
+    );
+
+    await store.present(packet(1));
+    await store.present(packet(2));
+
+    const firstDispose = store.dispose();
+    const secondDispose = store.dispose();
+    expect(secondDispose).toBe(firstDispose);
+    await Promise.all([firstDispose, secondDispose]);
+
+    await store.present(packet(3));
+
+    expect(store.active).toBeNull();
+    expect(dispose.mock.calls.map(([id]) => id)).toEqual([2, 1, 3]);
+  });
+
+  it("releases every packet exactly once across a long presentation run", async () => {
+    const dispose = vi.fn();
+    const store = new PreparedFrameStore((next: Packet) =>
+      dispose(next.packetId),
+    );
+    const packetCount = 1_000;
+
+    for (let packetId = 0; packetId < packetCount; packetId += 1) {
+      await store.present(packet(packetId));
+    }
+    await store.dispose();
+
+    const releasedIds = dispose.mock.calls
+      .map(([id]) => id)
+      .sort((a, b) => a - b);
+    expect(releasedIds).toEqual(
+      Array.from({ length: packetCount }, (_, packetId) => packetId),
+    );
+  });
+
   it("continues cleanup after one packet fails to release", async () => {
     const dispose = vi.fn((next: Packet) => {
       if (next.packetId === 2) {
