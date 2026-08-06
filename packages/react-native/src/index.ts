@@ -104,6 +104,10 @@ export {
 } from "supervision-js-core";
 
 export { REACT_NATIVE_LIVE_ID_MASK_DEFAULTS } from "./live-defaults";
+export {
+  REACT_NATIVE_FILE_SESSION_DEFAULTS,
+  REACT_NATIVE_LIVE_SESSION_DEFAULTS,
+} from "./sessions/media-session-defaults";
 export { MediaSessionError } from "./types/media-session";
 export type {
   MediaSession,

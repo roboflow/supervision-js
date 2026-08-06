@@ -5,7 +5,12 @@ import {
   createReactNativeVideoSession,
   createReactNativeWorkletRuntime,
   MediaSessionError,
+  REACT_NATIVE_VIDEO_SESSION_DEFAULTS,
 } from "./sessions";
+import {
+  REACT_NATIVE_FILE_SESSION_DEFAULTS,
+  REACT_NATIVE_LIVE_SESSION_DEFAULTS,
+} from "./sessions/media-session-defaults";
 import * as sessionsEntrypoint from "./sessions";
 
 vi.mock("@shopify/react-native-skia", () => ({
@@ -26,6 +31,18 @@ describe("createReactNativeVideoSession", () => {
         serializeFrame: () => [],
       }),
     ).toThrow(/unavailable|Cannot find module/);
+  });
+});
+
+describe("React Native media session defaults", () => {
+  it("keeps the legacy video name aligned with file-session defaults", () => {
+    expect(REACT_NATIVE_VIDEO_SESSION_DEFAULTS).toBe(
+      REACT_NATIVE_FILE_SESSION_DEFAULTS,
+    );
+    expect(REACT_NATIVE_LIVE_SESSION_DEFAULTS).toEqual({
+      maxInstances: 6,
+      targetResolution: { height: 1280, width: 720 },
+    });
   });
 });
 

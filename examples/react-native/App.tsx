@@ -69,6 +69,7 @@ import {
   type LabelDrawInstruction,
   type PolygonDrawInstruction,
   REACT_NATIVE_ID_MASK_SHADER_SOURCE,
+  REACT_NATIVE_LIVE_SESSION_DEFAULTS,
   resolveDetectionClassColorStyle,
   createReactNativePreparedFramePacket,
   type ReactNativeLiveSerializedDetection,
@@ -216,7 +217,7 @@ const LIVE_CLASS_EFFECT_OPTIONS: readonly {
   { effect: "spotlight", label: "Spotlight" },
 ];
 
-const LIVE_MAX_INSTANCES = 6;
+const LIVE_MAX_INSTANCES = REACT_NATIVE_LIVE_SESSION_DEFAULTS.maxInstances;
 // No stroke in live mode: a crisp border retraces the low-res mask staircase
 // and defeats the feathered fill edges (it also skips the shader's expensive
 // border sampling loop).
@@ -232,7 +233,8 @@ const PRIVACY_FULL_BBOX_MASK = new Uint8Array([1]);
 // from the model output itself: request masks at original resolution now that
 // native prep created the performance headroom for it.
 const LIVE_RETURN_MASKS_AT_ORIGINAL_RESOLUTION = true;
-const LIVE_FRAME_TARGET_RESOLUTION = { height: 1280, width: 720 };
+const LIVE_FRAME_TARGET_RESOLUTION =
+  REACT_NATIVE_LIVE_SESSION_DEFAULTS.targetResolution;
 const LIVE_SEGMENTATION_MIRROR_FRAME = false;
 const LIVE_PERFORMANCE_SAMPLE_LIMIT = 40;
 const LIVE_SEGMENTATION_PROFILE_LABEL =
