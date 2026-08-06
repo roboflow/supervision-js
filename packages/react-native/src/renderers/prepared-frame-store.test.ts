@@ -133,7 +133,7 @@ describe("PreparedFrameStore", () => {
     expect(dispose.mock.calls.map(([next]) => next.packetId)).toEqual([2, 1]);
   });
 
-  it("restores worklet-owned packets and disposes them synchronously", () => {
+  it("transfers worklet-owned packets and disposes them synchronously", () => {
     const dispose = vi.fn();
     const initial = new PreparedFrameStore((next: Packet) =>
       dispose(next.packetId),
@@ -145,10 +145,27 @@ describe("PreparedFrameStore", () => {
       dispose(next.packetId),
     );
 
-    resumed.restore(initial.snapshot());
+    const snapshot = initial.snapshot();
+    expect(initial.active).toBeNull();
+    initial.disposeNow();
+    expect(dispose).not.toHaveBeenCalled();
+
+    resumed.restore(snapshot);
     resumed.presentNow(packet(3));
     resumed.disposeNow();
 
     expect(dispose.mock.calls.map(([id]) => id)).toEqual([1, 3, 2]);
+  });
+
+  it("rejects restore into a store that already owns packets", async () => {
+    const store = new PreparedFrameStore(() => undefined);
+    const source = new PreparedFrameStore(() => undefined);
+
+    await store.present(packet(1));
+    const snapshot = source.snapshot();
+
+    expect(() => store.restore(snapshot)).toThrow(
+      "Cannot restore over owned PreparedFrameStore packets.",
+    );
   });
 });
