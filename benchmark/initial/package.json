@@ -9,16 +9,16 @@
     "preview": "vite preview --host 127.0.0.1 --port 5174"
   },
   "dependencies": {
-    "mediabunny": "^1.43.1",
-    "pixi.js": "^8.18.1",
-    "react": "^19.2.5",
-    "react-dom": "^19.2.5"
+    "mediabunny": "^1.52.3",
+    "pixi.js": "^8.19.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
   },
   "devDependencies": {
-    "@types/react": "^19.2.14",
-    "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^6.0.1",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.0.5",
     "typescript": "^6.0.3",
-    "vite": "^8.0.10"
+    "vite": "^8.2.1"
   }
 }

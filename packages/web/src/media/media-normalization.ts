@@ -67,6 +67,7 @@ export async function normalizeMedia(
     Input,
     Mp4OutputFormat,
     Output,
+    Quality,
     WebMOutputFormat,
   } = await import("mediabunny");
 
@@ -91,12 +92,12 @@ export async function normalizeMedia(
     throwIfAborted(options.signal);
 
     conversion = await Conversion.init({
-      audio: buildAudioOptions(options.audio),
+      audio: buildAudioOptions(Quality, options.audio),
       input,
       output,
       showWarnings: false,
       tracks: "primary",
-      video: buildVideoOptions(container, options.video),
+      video: buildVideoOptions(Quality, container, options.video),
     });
 
     if (options.signal) {
@@ -168,6 +169,7 @@ export async function normalizeMediaProgressively(
     Conversion,
     Input,
     Output,
+    Quality,
     ReadableStreamSource,
     WEBM,
     WebMOutputFormat,
@@ -219,12 +221,12 @@ export async function normalizeMediaProgressively(
     });
 
     conversion = await Conversion.init({
-      audio: buildAudioOptions(options.audio),
+      audio: buildAudioOptions(Quality, options.audio),
       input,
       output,
       showWarnings: false,
       tracks: "primary",
-      video: buildVideoOptions(container, options.video),
+      video: buildVideoOptions(Quality, container, options.video),
     });
 
     if (!conversion.isValid) {
@@ -373,14 +375,18 @@ function isConversionAbortError(
 }
 
 function buildVideoOptions(
+  Quality: typeof import("mediabunny").Quality,
   container: MediaNormalizationContainer,
   options: MediaNormalizationVideoOptions = {},
 ): ConversionVideoOptions {
   return {
     ...includeDefined({
-      bitrate: options.bitrate,
       fit: options.fit,
       height: options.height,
+      quality:
+        options.bitrate === undefined
+          ? undefined
+          : new Quality({ bitrate: options.bitrate }),
       width: options.width,
     }),
     codec: (options.codec ??
@@ -394,13 +400,17 @@ function buildVideoOptions(
 }
 
 function buildAudioOptions(
+  Quality: typeof import("mediabunny").Quality,
   options: MediaNormalizationAudioOptions = {},
 ): ConversionAudioOptions {
   return {
     ...includeDefined({
-      bitrate: options.bitrate,
       codec: options.codec as AudioCodec | undefined,
       numberOfChannels: options.numberOfChannels,
+      quality:
+        options.bitrate === undefined
+          ? undefined
+          : new Quality({ bitrate: options.bitrate }),
       sampleRate: options.sampleRate,
     }),
     discard: options.discard ?? true,

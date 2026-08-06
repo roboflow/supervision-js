@@ -93,8 +93,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json"
   },
   "dependencies": {
-    "mediabunny": "^1.43.1",
-    "pixi.js": "^8.18.1",
+    "mediabunny": "^1.52.3",
+    "pixi.js": "^8.19.0",
     "supervision-js-core": "file:../core"
   }
 }

@@ -123,6 +123,14 @@ vi.mock("mediabunny", () => {
     }
   }
 
+  class Quality {
+    readonly options: { bitrate: number };
+
+    constructor(options: { bitrate: number }) {
+      this.options = options;
+    }
+  }
+
   class WebMOutputFormat {
     constructor(options?: unknown) {
       normalizationMock.outputFormatInstances.push("webm");
@@ -178,6 +186,7 @@ vi.mock("mediabunny", () => {
     MP4: { name: "MP4" },
     Mp4OutputFormat,
     Output,
+    Quality,
     QTFF: { name: "QuickTime" },
     ReadableStreamSource,
     UrlSource,
@@ -615,12 +624,14 @@ describe("normalizeMedia", () => {
     expect(normalizationMock.conversionInit).toHaveBeenCalledWith(
       expect.objectContaining({
         video: {
-          bitrate: 1_000_000,
           codec: "vp8",
           forceTranscode: false,
           frameRate: 24,
           height: 720,
           keyFrameInterval: 2,
+          quality: expect.objectContaining({
+            options: { bitrate: 1_000_000 },
+          }),
           width: 1280,
         },
       }),
