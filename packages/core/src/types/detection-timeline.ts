@@ -172,7 +172,9 @@ export interface DetectionFrameSource {
   getAvailableRanges?(): readonly DetectionFrameSourceVersionRange[];
   /**
    * Optional monotonically increasing source version. Buffered timelines use
-   * this to refresh only when the current range changed.
+   * this to refresh only when the current range changed. Sources that can
+   * revise an existing frame must implement this hook; without it, overlapping
+   * frame identities are treated as immutable across rolling window loads.
    */
   getVersion?(range?: DetectionFrameSourceVersionRange): number;
   /**

@@ -1,8 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { BaseMaskStyle } from "supervision-js-core";
+import {
+  BaseMaskStyle,
+  createBufferedDetectionTimeline,
+} from "supervision-js-core";
 import {
   DetectionBufferStatus,
+  DetectionFrameSelectionMode,
   type BufferedDetectionTimeline,
 } from "supervision-js-core";
 import {
@@ -82,6 +86,63 @@ const manyFrames = Array.from({ length: 10 }, (_, frameIndex) => ({
 })) satisfies DetectionFrame[];
 
 describe("prepared render window", () => {
+  it("keeps prepared overlap across an immutable rolling buffer refresh", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const source = {
+        loadFrames: vi.fn(async (startTime: number, endTime: number) =>
+          denseFrames.filter(
+            (frame) =>
+              frame.mediaTime >= startTime && frame.mediaTime < endTime,
+          ),
+        ),
+      };
+      const timeline = createBufferedDetectionTimeline({
+        bufferAheadSeconds: 0.12,
+        bufferBehindSeconds: 0,
+        frameIndexOriginTime: 0,
+        frameRate: 25,
+        refreshIntervalSeconds: 0.04,
+        selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
+        source,
+      });
+
+      await timeline.prepare(0);
+
+      const renderWindow = createPreparedRenderWindow({
+        detectionTimeline: timeline,
+        maskStyle: new BaseMaskStyle(),
+        prefetchFrameCount: 3,
+        preparedWindowScanIntervalSeconds: 0,
+      });
+
+      renderWindow.getFrame(0);
+      await flushMaskPreparationTimers(6);
+      const preparedOverlap = renderWindow.getFrame(0.08)?.maskFrame;
+
+      expect(preparedOverlap).toBeDefined();
+
+      timeline.prefetch(0.04);
+      await vi.waitFor(() =>
+        expect(source.loadFrames).toHaveBeenCalledTimes(2),
+      );
+      await vi.waitFor(() =>
+        expect(timeline.getState().bufferEndTime).toBeCloseTo(0.16),
+      );
+
+      renderWindow.getFrame(0.04);
+
+      expect(renderWindow.getFrame(0.08)?.maskFrame).toBe(preparedOverlap);
+
+      renderWindow.destroy();
+      timeline.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("rebuilds the active mask artifact when semantic content changes at the same frame key", async () => {
     vi.useFakeTimers();
     resetMocks();
