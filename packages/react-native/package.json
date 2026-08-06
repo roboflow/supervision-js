@@ -83,6 +83,7 @@
     "react-native": "*",
     "react-native-nitro-modules": "*",
     "react-native-reanimated": "*",
+    "react-native-vision-camera": "*",
     "react-native-worklets": "*",
     "react-native-vision-camera-worklets": "*"
   },
@@ -100,6 +101,9 @@
       "optional": true
     },
     "react-native-reanimated": {
+      "optional": true
+    },
+    "react-native-vision-camera": {
       "optional": true
     },
     "react-native-worklets": {

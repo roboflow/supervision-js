@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createVisionCameraLiveSource } from "./vision-camera";
+import {
+  createVisionCameraLiveSource,
+  useVisionCameraFrameOutput,
+} from "./vision-camera";
 
 function createFrame(timestamp: number) {
   return {
@@ -55,5 +58,16 @@ describe("createVisionCameraLiveSource", () => {
     expect(source.offerFrame(destroyed)).toBe(false);
     expect(stopped.dispose).toHaveBeenCalledOnce();
     expect(destroyed.dispose).toHaveBeenCalledOnce();
+  });
+});
+
+describe("useVisionCameraFrameOutput", () => {
+  it("fails clearly outside a VisionCamera runtime", () => {
+    expect(() =>
+      useVisionCameraFrameOutput({
+        onFrame: vi.fn(),
+        targetResolution: { height: 720, width: 1280 },
+      }),
+    ).toThrow(/VisionCamera frame output is unavailable/);
   });
 });

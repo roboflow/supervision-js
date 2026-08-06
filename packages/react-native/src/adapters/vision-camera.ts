@@ -40,6 +40,17 @@ export interface VisionCameraLiveSource<
   offerFrame(frame: TFrame): boolean;
 }
 
+export interface VisionCameraFrameOutputOptions<
+  TFrame extends VisionCameraFrame,
+> {
+  readonly onFrame: (frame: TFrame) => void;
+  readonly onFrameDropped?: () => void;
+  readonly targetResolution: {
+    readonly height: number;
+    readonly width: number;
+  };
+}
+
 const LIVE_CAPABILITIES: MediaSessionCapabilities = {
   live: true,
   pausable: false,
@@ -123,4 +134,57 @@ export function createVisionCameraLiveSource<TFrame extends VisionCameraFrame>(
       return true;
     },
   };
+}
+
+/**
+ * Package-owned VisionCamera configuration for strict-sync live processing.
+ * The injected callback remains a host worklet producer; the package owns the
+ * vendor hook and the non-negotiable queue policy.
+ */
+export function useVisionCameraFrameOutput<TFrame extends VisionCameraFrame>(
+  options: VisionCameraFrameOutputOptions<TFrame>,
+): unknown {
+  if (typeof require !== "function") {
+    throw new Error(
+      "VisionCamera frame output is unavailable in this runtime.",
+    );
+  }
+
+  type VisionCameraModule = {
+    useFrameOutput(config: {
+      allowDeferredStart: boolean;
+      dropFramesWhileBusy: boolean;
+      enablePhysicalBufferRotation: boolean;
+      enablePreviewSizedOutputBuffers: boolean;
+      onFrame(frame: TFrame): void;
+      onFrameDropped?: () => void;
+      pixelFormat: "rgb";
+      targetResolution: VisionCameraFrameOutputOptions<TFrame>["targetResolution"];
+    }): unknown;
+  };
+  let visionCamera: VisionCameraModule;
+
+  try {
+    // Lazy require keeps this optional peer out of the base and Node test paths.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    visionCamera = require("react-native-vision-camera") as VisionCameraModule;
+  } catch (cause) {
+    throw new Error(
+      "VisionCamera frame output is unavailable in this runtime.",
+      {
+        cause,
+      },
+    );
+  }
+
+  return visionCamera.useFrameOutput({
+    allowDeferredStart: false,
+    dropFramesWhileBusy: true,
+    enablePhysicalBufferRotation: false,
+    enablePreviewSizedOutputBuffers: true,
+    onFrame: options.onFrame,
+    onFrameDropped: options.onFrameDropped,
+    pixelFormat: "rgb",
+    targetResolution: options.targetResolution,
+  });
 }
