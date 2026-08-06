@@ -85,8 +85,9 @@ producer, not a renderer dependency.
 
 This is intentionally still a proof. The package now has a generic
 `createMediaSession()` core, package-owned VisionCamera presentation, a shared
-live/video stage, a package-owned `useReactNativeLiveInference()` controller,
-and a live-inference extension for serializable recipe rules. It still lacks
+live/video stage, and a package-owned `useReactNativeLiveInference()` controller
+from the optional `react/live-inference` entrypoint, plus a live-inference
+extension for serializable recipe rules. It still lacks
 native-thread prepared windows, camera recording/export, Android saved-video
 decoding, and a fully custom Skia/native renderer that imports and draws the
 camera frame directly.

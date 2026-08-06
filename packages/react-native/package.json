@@ -55,6 +55,11 @@
       "react-native": "./src/react/index.ts",
       "import": "./dist/react.js"
     },
+    "./react/live-inference": {
+      "types": "./dist/react/live-inference.d.ts",
+      "react-native": "./src/react/live-inference.ts",
+      "import": "./dist/react/live-inference.js"
+    },
     "./skia": {
       "types": "./dist/skia.d.ts",
       "react-native": "./src/skia.ts",

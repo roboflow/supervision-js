@@ -39,10 +39,8 @@ import {
   useReactNativeLiveSkiaPresentation,
   type ReactNativeLiveSkiaPresentation,
 } from "./live-frame-stage";
-import {
-  scheduleReactNativeOnJs,
-  useReactNativeSharedValue,
-} from "./worklet-bridge";
+import { useReactNativeSharedValue } from "./worklet-bridge";
+import { scheduleReactNativeOnJs } from "./worklet-scheduler";
 
 export type ReactNativeLiveInferenceMode = "segmentation" | "pose";
 export type ReactNativeLiveClassEffect = "redact" | "spotlight";
@@ -656,8 +654,9 @@ export function useReactNativeLiveInference(
   }, [mediaRect, options.mediaRect]);
   useEffect(() => {
     inferenceMode.value = options.inferenceMode;
+    interaction.value = null;
     presentation.clear();
-  }, [inferenceMode, options.inferenceMode, presentation]);
+  }, [inferenceMode, interaction, options.inferenceMode, presentation]);
   useEffect(() => {
     classEffects.value = options.classEffects;
   }, [classEffects, options.classEffects]);
@@ -666,7 +665,8 @@ export function useReactNativeLiveInference(
   }, [options.showMasks, showMasks]);
   useEffect(() => {
     extension.value = options.extension ?? EMPTY_EXTENSION;
-  }, [extension, options.extension]);
+    interaction.value = null;
+  }, [extension, interaction, options.extension]);
 
   const reportFrame = useLatestReporter(options.onReadout);
   const reportDetections = useLatestReporter(options.onDetections);
@@ -687,6 +687,10 @@ export function useReactNativeLiveInference(
       let stage = "start";
 
       try {
+        if (!presentation.isReady) {
+          return false;
+        }
+
         const frameSize = resolveVisionCameraFrameSize(frame);
         const activeExtension = extension.value;
         const startedAt = Date.now();

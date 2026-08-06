@@ -9,6 +9,7 @@ export default {
     index: "src/index.ts",
     "media-session": "src/media-session.ts",
     react: "src/react/index.ts",
+    "react/live-inference": "src/react/live-inference.ts",
     sessions: "src/sessions.ts",
     skia: "src/skia.ts",
     "worklet-debug": "src/worklet-debug.ts",

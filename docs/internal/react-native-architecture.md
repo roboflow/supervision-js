@@ -109,7 +109,9 @@ The example app also includes a live camera proof:
 
 - The package-owned VisionCamera adapter owns frame output, frame disposal, the
   stable strict-sync callback, and native frame rendering.
-- `useReactNativeLiveInference()` owns the worklet and one-frame packet handoff;
+- the optional `supervision-js-react-native/react/live-inference` entry owns
+  `useReactNativeLiveInference()` and its Worklets dependency; it performs the
+  one-frame packet handoff;
   it presents a camera frame only after the matching annotation packet is ready.
 - ExecuTorch remains an injected structural model runner. The optional
   `adapters/executorch` factories serialize its segmentation/pose result into

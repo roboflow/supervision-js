@@ -328,6 +328,14 @@ test("built React Native subpath entries ship and resolve", async () => {
     await import("../packages/react-native/dist/adapters/video-file.js");
   const mediaSession =
     await import("../packages/react-native/dist/media-session.js");
+  const reactEntry = readFileSync(
+    new URL("../packages/react-native/dist/react.js", import.meta.url),
+    "utf8",
+  );
+  const liveInferenceReactEntry = new URL(
+    "../packages/react-native/dist/react/live-inference.js",
+    import.meta.url,
+  );
 
   assert.equal(typeof adapters.unrotateExecutorchUpBbox, "function");
   assert.deepEqual(Object.keys(adapters).sort(), [
@@ -346,6 +354,11 @@ test("built React Native subpath entries ship and resolve", async () => {
   );
   assert.equal(typeof liveInference.evaluateInstantCvRules, "function");
   assert.equal(typeof mediaSession.createMediaSession, "function");
+  assert.ok(existsSync(liveInferenceReactEntry));
+  assert.ok(
+    !reactEntry.includes("react-native-worklets"),
+    "the generic React entry must not require the optional live-worklet peer",
+  );
   assert.equal(typeof videoFile.createReactNativeVideoFileSource, "function");
   assert.deepEqual(Object.keys(mediaSession).sort(), [
     "MediaSessionActivityKind",

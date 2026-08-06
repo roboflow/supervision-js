@@ -39,11 +39,13 @@ import {
   ReactNativeLiveInteractionOverlay,
   ReactNativeVideoFrameStage,
   useReactNativeClassMaskEffects,
+} from "supervision-js-react-native/react";
+import {
   useReactNativeLiveInference,
   type ReactNativeLiveInferenceDetection,
   type ReactNativeLiveInferenceError,
   type ReactNativeLiveInferenceReadout,
-} from "supervision-js-react-native/react";
+} from "supervision-js-react-native/react/live-inference";
 import {
   createReactNativeVideoSession,
   createReactNativeWorkletRuntime,
