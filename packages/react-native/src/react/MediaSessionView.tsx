@@ -78,6 +78,64 @@ interface SceneLabel {
   readonly textX: number;
 }
 
+function disposeReactNativeSkiaRuntimeEffect(
+  effect: ReturnType<typeof Skia.RuntimeEffect.Make> | null,
+) {
+  effect?.dispose();
+}
+
+/**
+ * Keeps a native drawing resource alive for the presentation that replaced it.
+ *
+ * React Native Skia can still draw the prior scene after React has committed a
+ * replacement. Deferred unmount disposal also makes the ownership resilient to
+ * React Strict Mode's development effect replay.
+ */
+function useRetainedSkiaResource<T>(
+  resource: T | null,
+  dispose: (resource: T | null) => void,
+) {
+  const ownership = useRef<{ current: T | null; retired: T | null }>({
+    current: null,
+    retired: null,
+  });
+  const unmountDisposal = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (unmountDisposal.current) {
+      clearTimeout(unmountDisposal.current);
+      unmountDisposal.current = null;
+    }
+
+    const currentOwnership = ownership.current;
+
+    if (currentOwnership.current === resource) {
+      return;
+    }
+
+    dispose(currentOwnership.retired);
+    currentOwnership.retired = currentOwnership.current;
+    currentOwnership.current = resource;
+  }, [dispose, resource]);
+
+  useEffect(
+    () => () => {
+      const currentOwnership = ownership.current;
+      const current = currentOwnership.current;
+      const retired = currentOwnership.retired;
+
+      currentOwnership.current = null;
+      currentOwnership.retired = null;
+      unmountDisposal.current = setTimeout(() => {
+        unmountDisposal.current = null;
+        dispose(current);
+        dispose(retired);
+      }, 0);
+    },
+    [dispose],
+  );
+}
+
 export interface MediaSessionViewProps {
   readonly backgroundColor?: string;
   readonly binding: ReactNativeMediaSessionViewBinding;
@@ -109,10 +167,6 @@ export function MediaSessionView(props: MediaSessionViewProps) {
   } | null>(null);
   const selectedPick =
     selection?.binding === props.binding ? selection.pick : null;
-  const maskImageOwnership = useRef<{
-    current: ReturnType<typeof Skia.Image.MakeImage> | null;
-    retired: ReturnType<typeof Skia.Image.MakeImage> | null;
-  }>({ current: null, retired: null });
 
   useEffect(() => {
     if (selection && selection.binding !== props.binding) {
@@ -208,35 +262,11 @@ export function MediaSessionView(props: MediaSessionViewProps) {
     [layout.mediaRect, presentation, props.showKeypoints, props.showPolygons],
   );
 
-  useEffect(() => {
-    const ownership = maskImageOwnership.current;
-
-    if (ownership.current === maskImage) {
-      return;
-    }
-
-    disposeReactNativeSkiaImage(ownership.retired);
-    ownership.retired = ownership.current;
-    ownership.current = maskImage;
-  }, [maskImage]);
-  useEffect(
-    () => () => {
-      const ownership = maskImageOwnership.current;
-
-      disposeReactNativeSkiaImage(ownership.current);
-      disposeReactNativeSkiaImage(ownership.retired);
-    },
-    [],
-  );
-  useEffect(
-    () => () => {
-      maskEffect?.dispose();
-    },
-    [maskEffect],
-  );
-  useEffect(
-    () => () => disposeReactNativeSkiaPicture(vectorFrame?.picture),
-    [vectorFrame],
+  useRetainedSkiaResource(maskImage, disposeReactNativeSkiaImage);
+  useRetainedSkiaResource(maskEffect, disposeReactNativeSkiaRuntimeEffect);
+  useRetainedSkiaResource(
+    vectorFrame?.picture ?? null,
+    disposeReactNativeSkiaPicture,
   );
 
   const selectAt = (point: { readonly x: number; readonly y: number }) => {
