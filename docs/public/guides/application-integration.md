@@ -13,10 +13,10 @@ another web application.
 ## Installation
 
 The browser package is published as `supervision`. There is no CDN, UMD, or
-`<script>` build. Install the current stable release with npm:
+`<script>` build. Install the current browser release with npm:
 
 ```sh
-npm install supervision
+npm install supervision@next
 ```
 
 The published package includes the internal `supervision-js-core` dependency.

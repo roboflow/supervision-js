@@ -66,9 +66,12 @@ change the published browser package version.
 
 1. Update `packages/web/package.json`, `package-lock.json`, and the checked docs
    toolbar version together. `npm run docs:check` verifies the toolbar mirror.
-2. Update public docs and README installation guidance to use
-   `npm install supervision`. Do not document path installs of release tarballs
-   for consumers.
+2. Keep the public repository README and hosted docs on the currently live npm
+   channel until the stable publish has completed. Before the first browser
+   package owns `latest`, that is `npm install supervision@next`; do not
+   document path installs of release tarballs for consumers. The package README
+   published in this release may use `npm install supervision`, because it only
+   becomes visible after that stable publication.
 3. Run the normal validation plus the clean-consumer artifact smoke test:
 
    ```sh
@@ -94,13 +97,16 @@ change the published browser package version.
    ```
 
 7. Confirm that the GitHub Release `v<version>` points at the same `main`
-   commit the workflow published.
+   commit the workflow published. Then merge a docs-only follow-up that changes
+   the public repository README and hosted docs from
+   `npm install supervision@next` to `npm install supervision` and verify the
+   documentation deployment.
 
 ## Clear A Previous `next` Tag
 
 Publishing `0.1.1` with `latest` does not remove `next`; npm dist-tags are
-independent. After the stable publish is verified, remove a stale preview tag
-only when no release process still relies on it:
+independent. After the stable publish and docs-only follow-up are verified,
+remove a stale preview tag only when no release process still relies on it:
 
 ```sh
 npm dist-tag ls supervision
