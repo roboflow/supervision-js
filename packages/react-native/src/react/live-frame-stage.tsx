@@ -202,9 +202,16 @@ export function ReactNativeLiveFrameStage(
   const showBoxes = props.showBoxes ?? true;
   const hasGestureHandler = props.onGestureStart !== undefined;
   const presentation = props.presentation;
-  const maskImage = presentation?.maskImage ?? props.maskImage ?? null;
-  const maskUniforms = presentation?.maskUniforms ?? props.maskUniforms ?? null;
-  const vectorPicture = presentation?.vectorPicture ?? props.vectorPicture;
+  const presentationIsReady = presentation?.isReady ?? true;
+  const maskImage = presentationIsReady
+    ? (presentation?.maskImage ?? props.maskImage ?? null)
+    : null;
+  const maskUniforms = presentationIsReady
+    ? (presentation?.maskUniforms ?? props.maskUniforms ?? null)
+    : null;
+  const vectorPicture = presentationIsReady
+    ? (presentation?.vectorPicture ?? props.vectorPicture)
+    : null;
   const createGesturePoint = (event: {
     readonly nativeEvent: {
       readonly locationX: number;
@@ -405,6 +412,7 @@ export function useReactNativeLiveSkiaPresentation(): ReactNativeLiveSkiaPresent
   const vectorPicture = reanimated.useSharedValue<unknown>(null);
   const vectorPictureIsEmpty = reanimated.useSharedValue(true);
   const retiredVectorPicture = reanimated.useSharedValue<unknown>(null);
+  const [hasSeededSentinels, setHasSeededSentinels] = useState(false);
   const emptyMaskUniforms = useMemo(
     () => createEmptyReactNativeLiveIdMaskUniforms(),
     [],
@@ -427,10 +435,10 @@ export function useReactNativeLiveSkiaPresentation(): ReactNativeLiveSkiaPresent
     [nativeMaskBuilder],
   );
 
-  const isReady = emptyMaskImage !== null && emptyVectorPicture !== null;
+  const resourcesReady = emptyMaskImage !== null && emptyVectorPicture !== null;
 
   useLayoutEffect(() => {
-    if (!isReady) {
+    if (!resourcesReady) {
       return;
     }
 
@@ -439,17 +447,20 @@ export function useReactNativeLiveSkiaPresentation(): ReactNativeLiveSkiaPresent
     maskUniforms.value = emptyMaskUniforms;
     vectorPicture.value = emptyVectorPicture;
     vectorPictureIsEmpty.value = true;
+    setHasSeededSentinels(true);
   }, [
     emptyMaskImage,
     emptyMaskUniforms,
     emptyVectorPicture,
-    isReady,
+    resourcesReady,
     maskImage,
     maskImageIsEmpty,
     maskUniforms,
     vectorPicture,
     vectorPictureIsEmpty,
   ]);
+
+  const isReady = resourcesReady && hasSeededSentinels;
 
   const clear = useMemo(
     () => () => {
