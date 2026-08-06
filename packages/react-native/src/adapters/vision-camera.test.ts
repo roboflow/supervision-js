@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   createVisionCameraLiveSource,
+  presentVisionCameraFrame,
   useVisionCameraFrameRenderer,
   useVisionCameraFrameOutput,
 } from "./vision-camera";
@@ -66,7 +67,7 @@ describe("useVisionCameraFrameOutput", () => {
   it("fails clearly outside a VisionCamera runtime", () => {
     expect(() =>
       useVisionCameraFrameOutput({
-        onFrame: vi.fn(),
+        onFrame: vi.fn(() => false),
         targetResolution: { height: 720, width: 1280 },
       }),
     ).toThrow(/VisionCamera frame output is unavailable/);
@@ -78,5 +79,32 @@ describe("useVisionCameraFrameRenderer", () => {
     expect(() => useVisionCameraFrameRenderer()).toThrow(
       /VisionCamera is unavailable/,
     );
+  });
+});
+
+describe("presentVisionCameraFrame", () => {
+  it("renders only completed packets and always disposes the native frame", () => {
+    const rendered = createFrame(0);
+    const dropped = createFrame(1);
+    const frameRenderer = { renderFrame: vi.fn() };
+
+    presentVisionCameraFrame(rendered, frameRenderer, () => true);
+    presentVisionCameraFrame(dropped, frameRenderer, () => false);
+
+    expect(frameRenderer.renderFrame).toHaveBeenCalledOnce();
+    expect(frameRenderer.renderFrame).toHaveBeenCalledWith(rendered);
+    expect(rendered.dispose).toHaveBeenCalledOnce();
+    expect(dropped.dispose).toHaveBeenCalledOnce();
+  });
+
+  it("releases the frame when host processing throws", () => {
+    const frame = createFrame(0);
+
+    expect(() =>
+      presentVisionCameraFrame(frame, { renderFrame: vi.fn() }, () => {
+        throw new Error("inference failed");
+      }),
+    ).toThrow(/inference failed/);
+    expect(frame.dispose).toHaveBeenCalledOnce();
   });
 });

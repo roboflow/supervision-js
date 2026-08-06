@@ -3,10 +3,18 @@ import {
   type MediaTimelineMetadata,
   type PlatformMediaFrame,
 } from "supervision-js-core";
-import { createElement, type ComponentType, type ReactElement } from "react";
+import {
+  createElement,
+  useCallback,
+  type ComponentType,
+  type ReactElement,
+} from "react";
 import type { StyleProp, ViewStyle } from "react-native";
-import type { CameraFrameOutput } from "react-native-vision-camera";
-import type { FrameRenderer } from "react-native-vision-camera";
+import type {
+  CameraFrameOutput,
+  Frame,
+  FrameRenderer,
+} from "react-native-vision-camera";
 
 import type {
   MediaFrameSource,
@@ -47,7 +55,12 @@ export interface VisionCameraLiveSource<
 export interface VisionCameraFrameOutputOptions<
   TFrame extends VisionCameraFrame,
 > {
-  readonly onFrame: (frame: TFrame) => void;
+  /**
+   * Processes one frame and returns whether its completed packet should be
+   * presented. The adapter owns rendering and disposal after this callback
+   * settles, so host worklets cannot dispose a frame before native rendering.
+   */
+  readonly onFrame: (frame: TFrame) => boolean;
   readonly onFrameDropped?: () => void;
   readonly targetResolution: {
     readonly height: number;
@@ -58,6 +71,33 @@ export interface VisionCameraFrameOutputOptions<
 export interface VisionCameraFrameRendererViewProps {
   readonly renderer: FrameRenderer;
   readonly style?: StyleProp<ViewStyle>;
+}
+
+export interface VisionCameraFrameOutputBinding {
+  readonly frameOutput: CameraFrameOutput;
+  readonly frameRenderer: FrameRenderer;
+}
+
+/**
+ * Presents a completed frame and always releases its native buffer afterwards.
+ *
+ * This is exported for advanced custom VisionCamera bindings; normal React
+ * consumers get the same lifecycle through `useVisionCameraFrameOutput()`.
+ */
+export function presentVisionCameraFrame<TFrame extends VisionCameraFrame>(
+  frame: TFrame,
+  frameRenderer: Pick<FrameRenderer, "renderFrame">,
+  processFrame: (frame: TFrame) => boolean,
+): void {
+  "worklet";
+
+  try {
+    if (processFrame(frame)) {
+      frameRenderer.renderFrame(frame as unknown as Frame);
+    }
+  } finally {
+    frame.dispose();
+  }
 }
 
 const LIVE_CAPABILITIES: MediaSessionCapabilities = {
@@ -152,7 +192,7 @@ export function createVisionCameraLiveSource<TFrame extends VisionCameraFrame>(
  */
 export function useVisionCameraFrameOutput<TFrame extends VisionCameraFrame>(
   options: VisionCameraFrameOutputOptions<TFrame>,
-): CameraFrameOutput {
+): VisionCameraFrameOutputBinding {
   let visionCamera: VisionCameraModule;
 
   try {
@@ -166,16 +206,31 @@ export function useVisionCameraFrameOutput<TFrame extends VisionCameraFrame>(
     );
   }
 
-  return visionCamera.useFrameOutput({
-    allowDeferredStart: false,
-    dropFramesWhileBusy: true,
-    enablePhysicalBufferRotation: false,
-    enablePreviewSizedOutputBuffers: true,
-    onFrame: options.onFrame,
-    onFrameDropped: options.onFrameDropped,
-    pixelFormat: "rgb",
-    targetResolution: options.targetResolution,
-  });
+  const frameRenderer = useVisionCameraFrameRenderer();
+  const onFrame = useCallback(
+    (frame: Frame) => {
+      "worklet";
+
+      presentVisionCameraFrame(frame, frameRenderer, (nextFrame) =>
+        options.onFrame(nextFrame as unknown as TFrame),
+      );
+    },
+    [frameRenderer, options.onFrame],
+  );
+
+  return {
+    frameOutput: visionCamera.useFrameOutput({
+      allowDeferredStart: false,
+      dropFramesWhileBusy: true,
+      enablePhysicalBufferRotation: false,
+      enablePreviewSizedOutputBuffers: true,
+      onFrame,
+      onFrameDropped: options.onFrameDropped,
+      pixelFormat: "rgb",
+      targetResolution: options.targetResolution,
+    }),
+    frameRenderer,
+  };
 }
 
 /** Returns the optional VisionCamera native frame renderer with a stable error. */
@@ -196,15 +251,15 @@ export function VisionCameraFrameRendererView(
 
 interface VisionCameraModule {
   NativeFrameRendererView: ComponentType<VisionCameraFrameRendererViewProps>;
-  useFrameOutput<TFrame extends VisionCameraFrame>(config: {
+  useFrameOutput(config: {
     allowDeferredStart: boolean;
     dropFramesWhileBusy: boolean;
     enablePhysicalBufferRotation: boolean;
     enablePreviewSizedOutputBuffers: boolean;
-    onFrame(frame: TFrame): void;
+    onFrame(frame: Frame): void;
     onFrameDropped?: () => void;
     pixelFormat: "rgb";
-    targetResolution: VisionCameraFrameOutputOptions<TFrame>["targetResolution"];
+    targetResolution: VisionCameraFrameOutputOptions<Frame>["targetResolution"];
   }): CameraFrameOutput;
   useFrameRenderer(): FrameRenderer;
 }
