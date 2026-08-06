@@ -1,8 +1,4 @@
 import {
-  MediaSessionActivityKind,
-  MediaSessionActivityStatus,
-  MediaSessionMode,
-  MediaSessionStatus,
   type MediaRendererPresentation,
   type PlatformMediaFrame,
 } from "supervision-js-core";
@@ -13,6 +9,7 @@ import {
   type PreparedFramePacket,
 } from "../renderers/prepared-frame-packet";
 import { PreparedFrameStore } from "../renderers/prepared-frame-store";
+import { createMediaSessionStateSnapshot } from "./media-session-state";
 import {
   MediaSessionError,
   type MediaSession,
@@ -63,83 +60,25 @@ export async function createMediaSession<TPayload, TPacket extends object>(
   >(async (packet) => options.renderer.disposePacket?.(packet.rendererPacket));
 
   const state = (): MediaSessionState => {
-    const activities = [];
-
-    if (!opened) {
-      activities.push({
-        blockingPlayback: true,
-        blockingPresentation: true,
-        kind: MediaSessionActivityKind.MediaOpening,
-        label: "Opening media",
-        status: MediaSessionActivityStatus.Running,
-      });
-    }
-
-    if (processing) {
-      activities.push({
-        artifactKind: "mobile-frame",
-        blockingPlayback: options.source.mode !== MediaSessionMode.Stream,
-        blockingPresentation: true,
-        kind: MediaSessionActivityKind.RenderPreparing,
-        label: "Preparing frame",
-        pendingCount: 1,
-        preparedCount: preparedFrameCount,
-        status: MediaSessionActivityStatus.Running,
-      });
-    }
-
-    if (error) {
-      activities.push({
-        blockingPlayback: true,
-        blockingPresentation: true,
-        errorMessage: error.message,
-        kind: MediaSessionActivityKind.Error,
-        label: "Media session error",
-        status: MediaSessionActivityStatus.Error,
-      });
-    }
-
-    const status = destroyed
-      ? MediaSessionStatus.Destroyed
-      : error
-        ? MediaSessionStatus.Error
-        : !opened
-          ? MediaSessionStatus.Loading
-          : processing
-            ? MediaSessionStatus.Processing
-            : playing
-              ? MediaSessionStatus.Playing
-              : stopped || ended
-                ? MediaSessionStatus.Ready
-                : started && options.source.capabilities.pausable
-                  ? MediaSessionStatus.Paused
-                  : MediaSessionStatus.Ready;
-
-    return {
-      activities,
-      errorMessage: error?.message ?? null,
-      media: {
-        capabilities: options.source.capabilities,
-        opened,
-        timeline: options.source.timeline,
-      },
-      normalization: null,
-      playbackBlocked: activities.some((activity) => activity.blockingPlayback),
-      presentationBlocked: activities.some(
-        (activity) => activity.blockingPresentation,
-      ),
-      renderPreparation: {
-        activePacketId,
-        lastDiagnostics,
-        preparedFrames: preparedFrameCount,
-      },
-      renderer: {
-        activeDetectionFrame,
-        backend: options.renderer.backend,
-        presentedFrames,
-      },
-      status,
-    };
+    return createMediaSessionStateSnapshot({
+      activeDetectionFrame,
+      activePacketId,
+      capabilities: options.source.capabilities,
+      destroyed,
+      ended,
+      error,
+      lastDiagnostics,
+      mode: options.source.mode,
+      opened,
+      playing,
+      presentedFrames,
+      preparedFrames: preparedFrameCount,
+      processing,
+      rendererBackend: options.renderer.backend,
+      started,
+      stopped,
+      timeline: options.source.timeline,
+    });
   };
 
   const emit = () => {
