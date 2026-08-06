@@ -47,6 +47,11 @@ Auto-deploy: On commit
 the Render and GitHub Pages output identical and avoids maintaining a second
 production server or image delivery path.
 
+The start command passes Render's exact `RENDER_EXTERNAL_HOSTNAME` to Vite's
+additional-host allowlist. This supports branch preview services without
+trusting arbitrary hosts; local runs fall back to the canonical production
+hostname.
+
 ## Update With The Render CLI
 
 After authenticating with `render login`, the existing service can be

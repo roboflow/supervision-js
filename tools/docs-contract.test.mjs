@@ -103,6 +103,19 @@ test("TypeDoc does not publish the private workspace version", async () => {
   assert.equal(config.includeVersion, false);
 });
 
+test("Render preview trusts only its assigned hostname", async () => {
+  const packageJson = JSON.parse(
+    await readFile(path.join(rootDir, "package.json"), "utf8"),
+  );
+  const serveCommand = packageJson.scripts["pages:serve"];
+
+  assert.match(
+    serveCommand,
+    /__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=\$\{RENDER_EXTERNAL_HOSTNAME:-supervision-js-demo\.onrender\.com\}/,
+  );
+  assert.doesNotMatch(serveCommand, /allowedHosts=(?:true|\*)/);
+});
+
 test("copyable integration examples typecheck", async () => {
   const applicationGuide = await readFile(
     path.join(publicDocsDir, "guides/application-integration.md"),
