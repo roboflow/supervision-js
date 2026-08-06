@@ -81,6 +81,9 @@ export function createBufferedDetectionTimeline(
       }
     | undefined;
   let incrementalRefresh: Promise<void> | undefined;
+  let pendingPrefetch:
+    { readonly loadId: number; readonly mediaTime: number } | undefined;
+  let prefetchPump: Promise<void> | undefined;
 
   const getSourceVersion = (
     ranges?: readonly DetectionFrameSourceVersionRange[],
@@ -141,9 +144,16 @@ export function createBufferedDetectionTimeline(
           return;
         }
 
-        buffer = copySortedDetectionFrames(frameRanges.flat());
+        const committedSourceVersion = getSourceVersion(sourceRanges);
+        const loadedBuffer = copySortedDetectionFrames(frameRanges.flat());
+
+        buffer =
+          bufferedSourceVersion !== null &&
+          bufferedSourceVersion === committedSourceVersion
+            ? reuseBufferedFrameSnapshots(buffer, loadedBuffer)
+            : loadedBuffer;
         bufferedVersionRange = versionRange;
-        bufferedSourceVersion = getSourceVersion(sourceRanges);
+        bufferedSourceVersion = committedSourceVersion;
         state = {
           bufferEndTime: endTime,
           bufferStartTime: startTime,
@@ -276,22 +286,8 @@ export function createBufferedDetectionTimeline(
         return;
       }
 
-      if (shouldRefreshRollingWindow(mediaTime)) {
-        void loadWindow(mediaTime).catch(() => undefined);
-        return;
-      }
-
-      const comparableMediaTime = getComparableMediaTime(mediaTime);
-
-      if (
-        inFlight &&
-        comparableMediaTime >= inFlight.startTime &&
-        comparableMediaTime <= inFlight.endTime
-      ) {
-        return;
-      }
-
-      void refreshBuffer(mediaTime).catch(() => undefined);
+      pendingPrefetch = { loadId, mediaTime };
+      pumpPrefetchQueue();
     },
 
     selectFrame(mediaTime) {
@@ -326,6 +322,7 @@ export function createBufferedDetectionTimeline(
       }
 
       destroyed = true;
+      pendingPrefetch = undefined;
       buffer = [];
       bufferedSourceVersion = null;
       bufferedVersionRange = null;
@@ -344,6 +341,49 @@ export function createBufferedDetectionTimeline(
   bufferedFrameSnapshots.set(timeline, () => buffer);
 
   return timeline;
+
+  function pumpPrefetchQueue() {
+    if (destroyed || prefetchPump) {
+      return;
+    }
+
+    prefetchPump = drainPrefetchQueue().finally(() => {
+      prefetchPump = undefined;
+
+      if (!destroyed && pendingPrefetch) {
+        pumpPrefetchQueue();
+      }
+    });
+  }
+
+  async function drainPrefetchQueue() {
+    while (!destroyed && pendingPrefetch) {
+      if (inFlight) {
+        await inFlight.promise.catch(() => undefined);
+        continue;
+      }
+
+      const request = pendingPrefetch;
+
+      pendingPrefetch = undefined;
+
+      if (request.loadId !== loadId) {
+        continue;
+      }
+
+      const { mediaTime } = request;
+
+      if (!shouldPrefetch(mediaTime)) {
+        continue;
+      }
+
+      await (
+        shouldRefreshRollingWindow(mediaTime)
+          ? loadWindow(mediaTime)
+          : refreshBuffer(mediaTime)
+      ).catch(() => undefined);
+    }
+  }
 
   async function applyIncrementalChanges() {
     if (
@@ -725,6 +765,20 @@ function mergeIncrementalFrames(
   }
 
   return Array.from(framesByIdentity.values()).sort(compareDetectionFrames);
+}
+
+function reuseBufferedFrameSnapshots(
+  currentFrames: readonly DetectionFrame[],
+  loadedFrames: readonly DetectionFrame[],
+) {
+  const currentFramesByIdentity = new Map(
+    currentFrames.map((frame) => [getDetectionFrameIdentity(frame), frame]),
+  );
+
+  return loadedFrames.map(
+    (frame) =>
+      currentFramesByIdentity.get(getDetectionFrameIdentity(frame)) ?? frame,
+  );
 }
 
 function getDetectionFrameIdentity(frame: DetectionFrame) {
