@@ -95,6 +95,14 @@ test("TypeDoc includes every public API facade", async () => {
   );
 });
 
+test("TypeDoc does not publish the private workspace version", async () => {
+  const config = JSON.parse(
+    await readFile(path.join(rootDir, "typedoc.json"), "utf8"),
+  );
+
+  assert.equal(config.includeVersion, false);
+});
+
 test("copyable integration examples typecheck", async () => {
   const applicationGuide = await readFile(
     path.join(publicDocsDir, "guides/application-integration.md"),

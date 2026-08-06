@@ -82,19 +82,22 @@ On iOS, the demo explicitly requests the RF-DETR Nano segmentation CoreML INT8
 profile through ExecuTorch. ExecuTorch remains example-owned; it is a detection
 producer, not a renderer dependency.
 
-This is intentionally still a proof. It does not yet have a reusable
-`createReactNativeLiveSession()` API, native-thread prepared windows, a reusable
-live interaction/rule layer, camera recording/export, or a fully custom
-Skia/native renderer that imports and draws the camera frame directly.
+This is intentionally still a proof. The package now has a generic
+`createMediaSession()` core, but live mode does not yet use package-owned
+source/processor/renderer adapters. It also lacks native-thread prepared
+windows, a reusable live interaction/rule layer, camera recording/export, and a
+fully custom Skia/native renderer that imports and draws the camera frame
+directly.
 
 ## Next Architecture Step
 
-Move the live lane from example code into `packages/react-native` behind a small
-renderer contract:
+Move the live lane from example code into `packages/react-native` behind the
+existing generic session contracts:
 
-- frame input: native frame handle plus metadata;
-- artifact input: prepared ID-mask image/uniforms or raw binary masks;
-- presentation output: one render scene with media and annotations;
+- `MediaFrameSource`: native frame handle plus metadata;
+- `MediaFrameProcessor`: inference-produced detections and prepared semantic
+  input;
+- `MediaRendererAdapter`: one render scene with media and annotations;
 - timing policy: strict packet presentation first; any future low-latency mode
   must be explicit about the weaker synchronization guarantee;
 - diagnostics output: throttled state snapshots for host UI.

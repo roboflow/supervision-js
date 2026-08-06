@@ -142,7 +142,8 @@ These are implementation details, even when they are important to performance:
 - shader palette formats;
 - prepared render-window cache internals;
 - demo-only Roboflow or SAM3 request code;
-- React components or hooks.
+- React components or hooks in the browser package. The private experimental
+  React Native package has a separate `./react` entrypoint.
 
 Prepared artifacts are runtime representations. Detections remain semantic data.
 Apps should feed detections and styles into a session, not construct renderer
@@ -165,19 +166,38 @@ or prepared artifact internals.
 
 ## React Native Boundary
 
-React Native support is experimental and private. The future mobile package
-should depend on the platform-neutral core concepts, not on the browser package.
+React Native support is experimental and private. The current mobile package
+depends on the platform-neutral core concepts, not on the browser package.
 Pixi, Mediabunny, DOM APIs, browser workers, and IndexedDB remain browser
 implementation details.
 
-Mobile apps may eventually feed detections from on-device inference engines, but
-inference is outside the rendering package boundary. The library should render
-and interact with detections regardless of how they were produced.
+The private package now has a generic `createMediaSession()` core, a
+package-owned `MediaSessionView` and `useMediaSession()` hook at
+`supervision-js-react-native/react`, and platform adapter subpaths. These are
+mobile experiments, not exports from `supervision-js` and not part of the
+stable browser-package promise.
+
+Mobile apps can feed detections from on-device inference engines, but inference
+is outside the rendering package boundary. The library renders and interacts
+with detections regardless of how they were produced.
+
+The experimental iOS saved-video path is analysis-paced: it processes each
+decoded frame as quickly as inference permits rather than trying to match wall
+clock playback. It reports explicit capabilities; pause, resume, and stop are
+available, while seeking is intentionally unsupported until native decoding can
+reposition accurately. New package code should use
+`REACT_NATIVE_FILE_SESSION_DEFAULTS`; `REACT_NATIVE_VIDEO_SESSION_DEFAULTS`
+remains only as a deprecated compatibility alias.
 
 React Native currently shares editing geometry, picking, and gesture semantics
 through `createReactNativeAnnotationGestureAdapter`. Native hosts own drawing
 editing affordances from `AnnotationOverlayStyle` until a native overlay
 renderer is introduced.
+
+The remaining mobile work is integration, not a second session abstraction:
+move the saved-video compatibility factory and the example-owned live lane onto
+the generic source/processor/renderer contracts, and add an Android saved-video
+source before claiming cross-platform file support.
 
 ## Compatibility Posture
 
