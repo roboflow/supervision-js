@@ -27,7 +27,6 @@ import {
   type PolygonDrawInstruction,
   REACT_NATIVE_LIVE_SESSION_DEFAULTS,
   resolveDetectionClassColorStyle,
-  createReactNativePreparedFramePacket,
   type ReactNativeLiveSerializedDetection,
   type ReactNativeFrameLayout,
   resolveReactNativeFrameLayout,
@@ -43,7 +42,7 @@ import {
 } from "supervision-js-react-native/adapters/vision-camera";
 import {
   createReactNativeStaticMediaSessionBinding,
-  createReactNativeLiveStageOverlays,
+  createReactNativeLiveDetectionStageOverlays,
   getReactNativeMediaSessionViewReadout,
   MediaSessionView,
   ReactNativeLiveFrameStage,
@@ -499,25 +498,13 @@ function createLiveSyncedOverlays(options: {
   const detectionFrame = createDemoDetectionFrameFromLiveDetections({
     detections: options.detections,
   });
-  const packet = createReactNativePreparedFramePacket({
+  return createReactNativeLiveDetectionStageOverlays({
     boxStyle: createDemoBoxStyle(),
     detectionFrame,
     labelStyle: createDemoLabelStyle(),
-    mediaFrame: {
-      metadata: {
-        duration: 1 / 30,
-        frameIndex: detectionFrame.frameIndex ?? 0,
-        height: options.mediaHeight,
-        mediaTime: detectionFrame.mediaTime,
-        width: options.mediaWidth,
-      },
-      payload: null,
-    },
-  });
-
-  return createReactNativeLiveStageOverlays({
     layout: options.layout,
-    presentation: packet.presentation,
+    mediaHeight: options.mediaHeight,
+    mediaWidth: options.mediaWidth,
   });
 }
 

@@ -16,6 +16,7 @@ export {
 } from "./use-media-session";
 export {
   createReactNativeLiveStageOverlays,
+  createReactNativeLiveDetectionStageOverlays,
   ReactNativeLiveFrameStage,
   ReactNativeLiveInteractionOverlay,
   ReactNativeVideoFrameStage,

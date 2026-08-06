@@ -33,10 +33,12 @@ import {
 import {
   REACT_NATIVE_ID_MASK_SHADER_SOURCE,
   createEmptyReactNativeLiveIdMaskUniforms,
+  createReactNativePreparedFramePacket,
   loadReactNativeLiveIdMaskNativeBuilder,
   resolveReactNativeLabelLayout,
   type ReactNativeFrameLayout,
   type ReactNativeFramePresentation,
+  type ReactNativeFramePresentationStyleOptions,
 } from "../index";
 import {
   createEmptyReactNativeSkiaMaskImage,
@@ -601,6 +603,39 @@ export function createReactNativeLiveStageOverlays(options: {
     boxes: createBoxes(options.presentation.boxes, options.layout),
     labels: createLabels(options.presentation.labels, options.layout),
   };
+}
+
+/** Resolves a semantic live detection frame into package-owned stage overlays. */
+export function createReactNativeLiveDetectionStageOverlays(
+  options: {
+    readonly detectionFrame: Parameters<
+      typeof createReactNativePreparedFramePacket
+    >[0]["detectionFrame"];
+    readonly layout: ReactNativeFrameLayout;
+    readonly mediaHeight: number;
+    readonly mediaWidth: number;
+  } & Pick<ReactNativeFramePresentationStyleOptions, "boxStyle" | "labelStyle">,
+) {
+  const packet = createReactNativePreparedFramePacket({
+    boxStyle: options.boxStyle,
+    detectionFrame: options.detectionFrame,
+    labelStyle: options.labelStyle,
+    mediaFrame: {
+      metadata: {
+        duration: 1 / 30,
+        frameIndex: options.detectionFrame.frameIndex ?? 0,
+        height: options.mediaHeight,
+        mediaTime: options.detectionFrame.mediaTime,
+        width: options.mediaWidth,
+      },
+      payload: null,
+    },
+  });
+
+  return createReactNativeLiveStageOverlays({
+    layout: options.layout,
+    presentation: packet.presentation,
+  });
 }
 
 export interface ReactNativeNormalizedInteractionPath {
