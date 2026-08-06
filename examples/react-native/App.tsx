@@ -32,7 +32,6 @@ import {
   resolveReactNativeFrameLayout,
 } from "supervision-js-react-native";
 import {
-  useVisionCameraFrameOutput,
   useVisionCameraDevice,
   useVisionCameraPermission,
   VisionCameraLiveView,
@@ -49,6 +48,7 @@ import {
   ReactNativeLiveInteractionOverlay,
   ReactNativeVideoFrameStage,
   useReactNativeLiveSkiaPresentation,
+  useReactNativeLiveCameraBinding,
 } from "supervision-js-react-native/react";
 import {
   createReactNativeClassMaskEffectsResolver,
@@ -2183,7 +2183,7 @@ function LiveCameraProof(props: {
   );
 
   const { frameOutput: inferenceFrameOutput, frameRenderer } =
-    useVisionCameraFrameOutput({
+    useReactNativeLiveCameraBinding({
       onFrame: onLiveInferenceFrame,
       onFrameDropped() {
         reportDroppedFrame();

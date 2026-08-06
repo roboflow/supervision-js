@@ -14,6 +14,7 @@ export {
   useMediaSession,
   type UseMediaSessionResult,
 } from "./use-media-session";
+export { useReactNativeLiveCameraBinding } from "./use-live-camera-binding";
 export {
   createReactNativeLiveStageOverlays,
   createReactNativeLiveDetectionStageOverlays,
