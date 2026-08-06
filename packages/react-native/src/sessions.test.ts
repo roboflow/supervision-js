@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  createReactNativeClassMaskEffectsResolver,
   createReactNativeVideoSession,
   createReactNativeWorkletRuntime,
   MediaSessionError,
@@ -34,6 +35,35 @@ describe("createReactNativeWorkletRuntime", () => {
   });
 });
 
+describe("createReactNativeClassMaskEffectsResolver", () => {
+  it("maps class effects to the matching one-based mask IDs", () => {
+    const resolveEffects = createReactNativeClassMaskEffectsResolver({
+      value: { person: "redact", ball: "spotlight" },
+    });
+
+    expect(
+      resolveEffects([
+        {
+          bbox: { x1: 0, x2: 1, y1: 0, y2: 1 },
+          color: 0,
+          label: "person",
+          mask: new Uint8Array([1]),
+          maskHeight: 1,
+          maskWidth: 1,
+        },
+        {
+          bbox: { x1: 0, x2: 1, y1: 0, y2: 1 },
+          color: 0,
+          label: "ball",
+          mask: new Uint8Array([1]),
+          maskHeight: 1,
+          maskWidth: 1,
+        },
+      ]),
+    ).toEqual({ mosaicMaskIds: [1], spotlightMaskIds: [2] });
+  });
+});
+
 describe("sessions entrypoint", () => {
   it("exposes the session-first contract alongside the legacy video factory", () => {
     expect(
@@ -46,6 +76,7 @@ describe("sessions entrypoint", () => {
       "MediaSessionError",
       "REACT_NATIVE_VIDEO_SESSION_DEFAULTS",
       "createMediaSession",
+      "createReactNativeClassMaskEffectsResolver",
       "createReactNativeVideoSession",
       "createReactNativeWorkletRuntime",
     ]);

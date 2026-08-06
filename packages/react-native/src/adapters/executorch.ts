@@ -1,8 +1,116 @@
 import {
   KeypointVisibility,
+  resolveDetectionClassColorStyle,
   type Detection,
   type DetectionFrame,
 } from "supervision-js-core";
+import type { ReactNativeLiveSerializedDetection } from "../index";
+import type { ReactNativeVideoFrameHandle } from "../video-frame-source";
+
+/**
+ * Worklet-safe structural runner shape. It deliberately does not import
+ * `react-native-executorch`: hosts keep model ownership and pass their
+ * hook-provided runner into this adapter.
+ */
+interface ExecutorchInstanceSegmentationRunner {
+  (
+    frame: {
+      getNativeBuffer(): { pointer: bigint; release(): void };
+      isMirrored: boolean;
+      orientation: "up";
+    },
+    mirrorFrame: boolean,
+    options: {
+      confidenceThreshold: number;
+      maxInstances: number;
+      returnMaskAtOriginalResolution: boolean;
+    },
+  ): readonly {
+    bbox: ExecutorchBbox;
+    label?: string;
+    mask: Uint8Array;
+    maskHeight: number;
+    maskWidth: number;
+    score?: number;
+  }[];
+}
+
+export interface ExecutorchVideoFrameSerializerOptions<TRunOnFrame = unknown> {
+  readonly confidenceThreshold?: number;
+  readonly maxInstances?: number;
+  readonly returnMasksAtOriginalResolution?: boolean;
+  readonly runOnFrame: TRunOnFrame | null;
+}
+
+/** Package-owned worklet passed to the saved-video session. */
+export type ExecutorchVideoFrameSerializer = (
+  handle: ReactNativeVideoFrameHandle,
+  returnMaskAtOriginalResolution: boolean,
+) => ReactNativeLiveSerializedDetection[];
+
+/**
+ * Converts the host's ExecuTorch segmentation runner into the saved-video
+ * session processor. Native-buffer wrapping, upright-frame coordinate repair,
+ * color resolution, and serialized mask ownership stay in the package so a
+ * consuming demo does not define worklets for video inference.
+ */
+export function createExecutorchVideoFrameSerializer<TRunOnFrame>(
+  options: ExecutorchVideoFrameSerializerOptions<TRunOnFrame>,
+): ExecutorchVideoFrameSerializer {
+  const runOnFrame =
+    options.runOnFrame as ExecutorchInstanceSegmentationRunner | null;
+  const confidenceThreshold = options.confidenceThreshold ?? 0.45;
+  const maxInstances = options.maxInstances ?? 6;
+  const returnMasksAtOriginalResolution =
+    options.returnMasksAtOriginalResolution ?? true;
+
+  return (handle, allowOriginalResolution) => {
+    "worklet";
+
+    if (runOnFrame === null) {
+      return [];
+    }
+
+    const rawDetections = runOnFrame(
+      {
+        getNativeBuffer: () => ({
+          pointer: handle.pointer,
+          // The session owns the decoded handle until Skia finishes its
+          // presentation copy; ExecuTorch must not release it.
+          release: () => {},
+        }),
+        isMirrored: false,
+        orientation: "up",
+      },
+      false,
+      {
+        confidenceThreshold,
+        maxInstances,
+        returnMaskAtOriginalResolution:
+          returnMasksAtOriginalResolution && allowOriginalResolution,
+      },
+    );
+    const serialized: ReactNativeLiveSerializedDetection[] = [];
+
+    for (let index = 0; index < rawDetections.length; index += 1) {
+      const detection = rawDetections[index]!;
+      const label = typeof detection.label === "string" ? detection.label : "";
+
+      serialized[index] = {
+        bbox: unrotateExecutorchUpBbox(detection.bbox, handle.height),
+        color: resolveDetectionClassColorStyle(label).fill,
+        label,
+        mask: detection.mask,
+        maskHeight: detection.maskHeight,
+        maskRotatedCw: true,
+        maskWidth: detection.maskWidth,
+        score: detection.score,
+      };
+    }
+
+    return serialized;
+  };
+}
 
 /**
  * ExecuTorch's frame orientation API is camera-centric: there is no value

@@ -75,7 +75,6 @@ import {
   type ReactNativeFrameLayout,
   type ReactNativeIdMaskUniforms,
   loadReactNativeLiveIdMaskNativeBuilder,
-  type ReactNativeVideoFrameHandle,
   resolveReactNativeFrameLayout,
   resolveReactNativeLabelLayout,
   createEmptyReactNativeLiveIdMaskUniforms,
@@ -94,6 +93,7 @@ import {
   type ReactNativeSkiaMaskFrame,
 } from "supervision-js-react-native/skia";
 import {
+  createReactNativeClassMaskEffectsResolver,
   createReactNativeVideoSession,
   createReactNativeWorkletRuntime,
   type ReactNativeVideoSession,
@@ -123,7 +123,7 @@ import {
 } from "./src/debug-logging";
 import {
   createDetectionFrameFromExecutorchCocoPoses,
-  unrotateExecutorchUpBbox,
+  createExecutorchVideoFrameSerializer,
 } from "supervision-js-react-native/adapters/executorch";
 import {
   createInstantCvFreeShapeZone,
@@ -3269,89 +3269,18 @@ function VideoFileProof(props: {
     classEffectsShared.value = classEffects;
   }, [classEffects, classEffectsShared]);
 
-  // Inference, injected into the session as a worklet: ExecuTorch RF-DETR on
-  // the decoded frame, outputs un-rotated back into the upright video's
-  // coordinate space (see supervision-js-react-native/adapters/executorch).
-  const serializeVideoFrame = useCallback(
-    (
-      handle: ReactNativeVideoFrameHandle,
-      returnMaskAtOriginalResolution: boolean,
-    ) => {
-      "worklet";
-
-      const segmentFrame = runSegmentationOnFrame;
-
-      if (segmentFrame === null) {
-        return [];
-      }
-
-      // ExecuTorch's Frame type is structural: any object exposing a BGRA
-      // CVPixelBuffer pointer works. release() is a no-op because the packet
-      // lifecycle owns the buffer (it must stay alive for Skia to draw it
-      // after inference).
-      const rawDetections = segmentFrame(
-        {
-          getNativeBuffer: () => ({
-            pointer: handle.pointer,
-            release: () => {},
-          }),
-          isMirrored: false,
-          orientation: "up",
-        } as Parameters<typeof segmentFrame>[0],
-        false,
-        {
-          confidenceThreshold: 0.45,
-          maxInstances: LIVE_MAX_INSTANCES,
-          returnMaskAtOriginalResolution:
-            LIVE_RETURN_MASKS_AT_ORIGINAL_RESOLUTION &&
-            returnMaskAtOriginalResolution,
-        },
-      );
-      const serialized: LiveSerializedDetection[] = [];
-
-      for (let index = 0; index < rawDetections.length; index += 1) {
-        const detection = rawDetections[index]!;
-        const label: string =
-          typeof detection.label === "string" ? detection.label : "";
-
-        serialized[index] = {
-          bbox: unrotateExecutorchUpBbox(detection.bbox, handle.height),
-          color: resolveDetectionClassColorStyle(label).fill,
-          label,
-          mask: detection.mask,
-          maskHeight: detection.maskHeight,
-          maskRotatedCw: true,
-          maskWidth: detection.maskWidth,
-          score: detection.score,
-        };
-      }
-
-      return serialized;
-    },
+  const serializeVideoFrame = useMemo(
+    () =>
+      createExecutorchVideoFrameSerializer({
+        maxInstances: LIVE_MAX_INSTANCES,
+        returnMasksAtOriginalResolution:
+          LIVE_RETURN_MASKS_AT_ORIGINAL_RESOLUTION,
+        runOnFrame: runSegmentationOnFrame,
+      }),
     [runSegmentationOnFrame],
   );
-  // Redacted classes fill as opaque mosaic, spotlit ones punch through the
-  // veil; the session flags mask ids from this per-tick mapping.
-  const resolveVideoMaskEffects = useCallback(
-    (detections: readonly LiveSerializedDetection[]) => {
-      "worklet";
-
-      const effects = classEffectsShared.value;
-      const mosaicMaskIds: number[] = [];
-      const spotlightMaskIds: number[] = [];
-
-      for (let index = 0; index < detections.length; index += 1) {
-        const effect = effects[detections[index]!.label ?? ""];
-
-        if (effect === "redact") {
-          mosaicMaskIds[mosaicMaskIds.length] = index + 1;
-        } else if (effect === "spotlight") {
-          spotlightMaskIds[spotlightMaskIds.length] = index + 1;
-        }
-      }
-
-      return { mosaicMaskIds, spotlightMaskIds };
-    },
+  const resolveVideoMaskEffects = useMemo(
+    () => createReactNativeClassMaskEffectsResolver(classEffectsShared),
     [classEffectsShared],
   );
   const handleVideoEnded = useCallback(
