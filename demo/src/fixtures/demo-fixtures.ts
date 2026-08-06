@@ -76,6 +76,7 @@ interface DemoFixtureMeta {
 
 export interface DemoFixturePresentationDefaults {
   readonly boxesEnabled?: boolean;
+  readonly confidenceThreshold?: number;
   readonly focusEnabled?: boolean;
   readonly keypointsEnabled?: boolean;
   readonly labelsEnabled?: boolean;

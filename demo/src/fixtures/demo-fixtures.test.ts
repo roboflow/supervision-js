@@ -62,12 +62,13 @@ describe("geometry showcase fixture", () => {
     ]);
   });
 
-  it("disables unavailable vector layers by default for the horse trail", () => {
+  it("keeps the dense horse trail sample above its smooth-playback threshold", () => {
     const fixture = demoFixtures.find(
       ({ sampleName }) => sampleName === "horse_trail",
     );
 
     expect(fixture?.presentationDefaults).toEqual({
+      confidenceThreshold: 0.5,
       keypointsEnabled: false,
       polygonsEnabled: false,
     });
