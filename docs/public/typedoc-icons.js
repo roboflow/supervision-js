@@ -67,6 +67,7 @@
     document.documentElement.dataset.theme = "light";
     localStorage.setItem("tsd-theme", "light");
     brandToolbar();
+    decorateHomePage();
     upgradeIcons(document);
 
     const observer = new MutationObserver((mutations) => {
@@ -83,6 +84,25 @@
       childList: true,
       subtree: true,
     });
+  }
+
+  function decorateHomePage() {
+    const home = document.querySelector(".supervision-home");
+
+    if (!home) {
+      return;
+    }
+
+    home.closest(".tsd-typography")?.classList.add("supervision-docs--home");
+    home
+      .closest(".container-main")
+      ?.classList.add("supervision-docs--home-layout");
+    for (const link of home.querySelectorAll("[data-supervision-docs-link]")) {
+      link.href = new URL(
+        link.dataset.supervisionDocsLink,
+        window.location.href,
+      ).href;
+    }
   }
 
   function brandToolbar() {

@@ -23,6 +23,19 @@ Before making project-direction or architecture changes, read:
 Those docs define the current product intent: maintain a focused, session-first
 browser API without promising a broad Python-parity annotation framework.
 
+## Public Docs Home
+
+[`../public/index.md`](../public/index.md) is the source of the public docs
+homepage. Update it in the same change when the public package name or install
+path, the session-first API, supported browser capabilities, public/private
+package boundary, or documentation entrypoints materially change.
+
+Keep it consumer-facing and current: explain the architecture enough to orient
+an integrator, but do not promote Pixi, Mediabunny, workers, prepared artifacts,
+or the private React Native experiment into public contracts. Do not edit
+generated `docs/site/` output; rebuild the docs with `npm run demo:build` and
+run `npm run docs:check` after changing the homepage.
+
 ## Project Direction
 
 - Keep the core library vanilla browser TypeScript/JavaScript.
