@@ -68,6 +68,7 @@ describe("geometry showcase fixture", () => {
     );
 
     expect(fixture?.presentationDefaults).toEqual({
+      boxesEnabled: false,
       confidenceThreshold: 0.5,
       keypointsEnabled: false,
       polygonsEnabled: false,

@@ -114,6 +114,34 @@ describe("demo presentation", () => {
     });
   });
 
+  it("renders enabled boxes for detections with other geometry", () => {
+    const presentation = createDemoPresentation({
+      ...defaultDemoPresentationSettings,
+      boxesEnabled: true,
+    });
+
+    for (const combinedDetection of [detection, vectorDetection]) {
+      const context = {
+        detectionIndex: 0,
+        frame: { detections: [combinedDetection], mediaTime: 0 },
+        mediaTime: 0,
+      };
+
+      expect(
+        presentation.boxStyle?.resolve(combinedDetection, context),
+      ).toMatchObject({ rect: combinedDetection.rect });
+    }
+  });
+
+  it("removes the box style when boxes are disabled", () => {
+    const presentation = createDemoPresentation({
+      ...defaultDemoPresentationSettings,
+      boxesEnabled: false,
+    });
+
+    expect(presentation.boxStyle).toBeNull();
+  });
+
   it("treats mask opacity as a cheap presentation knob", () => {
     const lowOpacityPresentation = createDemoPresentation({
       ...defaultDemoPresentationSettings,
@@ -224,10 +252,11 @@ describe("demo presentation", () => {
     });
   });
 
-  it("keeps default mask-only interaction picking free of box highlights", () => {
-    const presentation = createDemoPresentation(
-      defaultDemoPresentationSettings,
-    );
+  it("keeps mask-only interaction picking free of box highlights", () => {
+    const presentation = createDemoPresentation({
+      ...defaultDemoPresentationSettings,
+      boxesEnabled: false,
+    });
     const frame = { detections: [detection], mediaTime: 0 };
     const hoverPresentation = presentation.interactionStyle?.resolve(
       detection,
@@ -291,19 +320,16 @@ describe("demo presentation", () => {
       },
     );
 
-    const hoverBox = hoverPresentation?.boxStyle?.resolve(rectangleDetection, {
+    const hoverBox = hoverPresentation?.boxStyle?.resolve(detection, {
       detectionIndex: 0,
       frame,
       mediaTime: 0,
     });
-    const selectedBox = selectedPresentation?.boxStyle?.resolve(
-      rectangleDetection,
-      {
-        detectionIndex: 0,
-        frame,
-        mediaTime: 0,
-      },
-    );
+    const selectedBox = selectedPresentation?.boxStyle?.resolve(detection, {
+      detectionIndex: 0,
+      frame,
+      mediaTime: 0,
+    });
     const hoverMask = hoverPresentation?.maskStyle?.resolve(detection, {
       detectionIndex: 0,
       frame,
