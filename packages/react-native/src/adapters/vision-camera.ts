@@ -7,6 +7,7 @@ import {
   createElement,
   Fragment,
   useCallback,
+  useMemo,
   type ComponentType,
   type ReactElement,
 } from "react";
@@ -286,6 +287,13 @@ export function useVisionCameraFrameOutput<TFrame extends VisionCameraFrame>(
   }
 
   const frameRenderer = useVisionCameraFrameRenderer();
+  const targetResolution = useMemo(
+    () => ({
+      height: options.targetResolution.height,
+      width: options.targetResolution.width,
+    }),
+    [options.targetResolution.height, options.targetResolution.width],
+  );
   const onFrame = useCallback(
     (frame: Frame) => {
       "worklet";
@@ -306,7 +314,7 @@ export function useVisionCameraFrameOutput<TFrame extends VisionCameraFrame>(
       onFrame,
       onFrameDropped: options.onFrameDropped,
       pixelFormat: "rgb",
-      targetResolution: options.targetResolution,
+      targetResolution,
     }),
     frameRenderer,
   };
