@@ -29,10 +29,10 @@ import {
 } from "./skia";
 import { PreparedFrameStore } from "./renderers/prepared-frame-store";
 import {
-  createReactNativeVideoFrameSource,
   type ReactNativeBoxedVideoFrameSource,
   type ReactNativeVideoFrameHandle,
 } from "./video-frame-source";
+import { createReactNativeVideoFileSource } from "./adapters/video-file";
 
 export { createMediaSession } from "./sessions/media-session-core";
 export {
@@ -274,23 +274,16 @@ export function createReactNativeVideoSession(
   options: ReactNativeVideoSessionOptions,
 ): ReactNativeVideoSession {
   const vendors = resolveWorkletVendorModules();
-  const sourceHandle = createReactNativeVideoFrameSource();
+  const source = createReactNativeVideoFileSource({ fileUri: options.fileUri });
 
-  if (!sourceHandle.boxed) {
-    throw new Error(
-      `video session unavailable: ${sourceHandle.fallbackReason ?? "no native video frame source"}`,
-    );
-  }
+  source.open();
 
-  const boxedSource: ReactNativeBoxedVideoFrameSource = sourceHandle.boxed;
-  const source = boxedSource.unbox();
-
-  source.open(options.fileUri);
-
-  const durationMs = source.durationMs;
-  const frameWidth = source.frameWidth;
-  const frameHeight = source.frameHeight;
-  const nominalFrameRate = source.nominalFrameRate;
+  const boxedSource: ReactNativeBoxedVideoFrameSource = source.boxedSource;
+  const timeline = source.timeline;
+  const durationMs = (timeline.duration ?? 0) * 1000;
+  const frameWidth = timeline.width;
+  const frameHeight = timeline.height;
+  const nominalFrameRate = timeline.frameRate ?? 0;
 
   const emptyUniforms = createEmptyReactNativeLiveIdMaskUniforms();
   const frameImage = vendors.makeMutable<SkImage | null>(null);

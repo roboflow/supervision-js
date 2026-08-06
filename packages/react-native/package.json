@@ -20,6 +20,11 @@
       "react-native": "./src/adapters/executorch.ts",
       "import": "./dist/adapters/executorch.js"
     },
+    "./adapters/video-file": {
+      "types": "./dist/adapters/video-file.d.ts",
+      "react-native": "./src/adapters/video-file.ts",
+      "import": "./dist/adapters/video-file.js"
+    },
     "./media-session": {
       "types": "./dist/media-session.d.ts",
       "react-native": "./src/media-session.ts",
