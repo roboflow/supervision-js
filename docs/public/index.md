@@ -7,7 +7,7 @@
         <code>supervision</code> is a browser-native TypeScript library for interactive computer vision media. A media session keeps the visible frame, detections, styles, interaction, and playback on one timing reference.
       </p>
       <div class="supervision-home__actions">
-        <a class="supervision-home__button supervision-home__button--primary" data-supervision-docs-link="documents/Application_Integration.html">Get started</a>
+        <a class="supervision-home__button supervision-home__button--primary" href="documents/Application_Integration.html">Get started</a>
         <a class="supervision-home__button supervision-home__button--secondary" href="https://supervision-js-demo.onrender.com/">Open the demo</a>
       </div>
     </div>
@@ -33,18 +33,24 @@
         <p>
           Give a session a container and media. It prepares the renderer, exposes state for your UI, and provides playback and detection controls without asking React or your app to run another frame loop.
         </p>
-        <a data-supervision-docs-link="documents/Media_Sessions.html">Learn how media sessions work <span aria-hidden="true">→</span></a>
+        <a href="documents/Media_Sessions.html">Learn how media sessions work <span aria-hidden="true">→</span></a>
       </div>
       <pre><code class="language-ts">import { createMediaSession } from "supervision";
+const container = document.querySelector&lt;HTMLElement&gt;("#viewer");
+
+if (!container) {
+throw new Error("Missing #viewer container.");
+}
+
 const session = await createMediaSession({
-  container: document.querySelector("#viewer"),
-  media: fileOrUrl,
-  renderer: { autoPlay: true, loop: true },
+container,
+media: "/media/example.mp4",
+renderer: { autoPlay: true, loop: true },
 });
 session.subscribe((state) =&gt; {
-  console.log(state.status, state.activities);
+console.log(state.status, state.activities);
 });</code></pre>
-    </div>
+</div>
   </section>
   <section class="supervision-home__section" aria-labelledby="capabilities-title">
     <div class="supervision-home__section-heading">
@@ -59,19 +65,19 @@ session.subscribe((state) =&gt; {
         <span class="supervision-home__capability-number">01</span>
         <h3>Media and playback</h3>
         <p>Images, video, and browser media streams with preparation, normalization, seeking, stepping, rate control, and current-frame refresh.</p>
-        <a data-supervision-docs-link="documents/Media_Preparation.html">Media preparation</a>
+        <a href="documents/Media_Preparation.html">Media preparation</a>
       </article>
       <article class="supervision-home__capability-card">
         <span class="supervision-home__capability-number">02</span>
         <h3>Detection rendering</h3>
         <p>Boxes, masks, polygons, polylines, keypoints, labels, class colors, and presentation styles selected from canonical media timing.</p>
-        <a data-supervision-docs-link="documents/Detections_And_Rendering.html">Detections and rendering</a>
+        <a href="documents/Detections_And_Rendering.html">Detections and rendering</a>
       </article>
       <article class="supervision-home__capability-card">
         <span class="supervision-home__capability-number">03</span>
         <h3>Interaction and editing</h3>
         <p>Renderer-synchronized picking plus host-owned editing engines, persistence, undo/redo policy, and annotation commits.</p>
-        <a data-supervision-docs-link="documents/Interactive_Picking.html">Interactive picking</a>
+        <a href="documents/Interactive_Picking.html">Interactive picking</a>
       </article>
     </div>
   </section>
@@ -125,7 +131,7 @@ session.subscribe((state) =&gt; {
       <p>
         The public API is deliberately smaller than the implementation. It gives applications the media, detections, styles, interaction, state, and lifecycle primitives they need without coupling them to a scene graph, decoder, worker protocol, or prepared-artifact format.
       </p>
-      <a class="supervision-home__text-link" data-supervision-docs-link="documents/Public_API.html">Explore the public API <span aria-hidden="true">→</span></a>
+      <a class="supervision-home__text-link" href="documents/Public_API.html">Explore the public API <span aria-hidden="true">→</span></a>
     </div>
     <div class="supervision-home__boundary-card">
       <div>
@@ -142,10 +148,10 @@ session.subscribe((state) =&gt; {
     <p class="supervision-home__eyebrow">Keep learning</p>
     <h2 id="next-title">Choose the path that matches your integration.</h2>
     <nav class="supervision-home__next-grid" aria-label="Documentation paths">
-      <a data-supervision-docs-link="documents/Application_Integration.html"><strong>Application integration</strong><span>Install, mount, own the lifecycle.</span></a>
-      <a data-supervision-docs-link="documents/Static_Detections.html"><strong>Static detections</strong><span>Render a known sequence of prediction frames.</span></a>
-      <a data-supervision-docs-link="documents/Streaming_Detections.html"><strong>Streaming detections</strong><span>Ingest model output while media plays.</span></a>
-      <a data-supervision-docs-link="documents/React_Integration.html"><strong>React integration</strong><span>Wrap a vanilla session without moving its hot path into React.</span></a>
+      <a href="documents/Application_Integration.html"><strong>Application integration</strong><span>Install, mount, own the lifecycle.</span></a>
+      <a href="documents/Static_Detections.html"><strong>Static detections</strong><span>Render a known sequence of prediction frames.</span></a>
+      <a href="documents/Streaming_Detections.html"><strong>Streaming detections</strong><span>Ingest model output while media plays.</span></a>
+      <a href="documents/React_Integration.html"><strong>React integration</strong><span>Wrap a vanilla session without moving its hot path into React.</span></a>
     </nav>
   </section>
 </div>

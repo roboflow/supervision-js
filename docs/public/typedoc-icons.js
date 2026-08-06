@@ -94,15 +94,10 @@
     }
 
     home.closest(".tsd-typography")?.classList.add("supervision-docs--home");
+    document.documentElement.classList.add("supervision-docs--home");
     home
       .closest(".container-main")
       ?.classList.add("supervision-docs--home-layout");
-    for (const link of home.querySelectorAll("[data-supervision-docs-link]")) {
-      link.href = new URL(
-        link.dataset.supervisionDocsLink,
-        window.location.href,
-      ).href;
-    }
   }
 
   function brandToolbar() {
