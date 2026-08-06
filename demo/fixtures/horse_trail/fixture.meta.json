@@ -9,6 +9,7 @@
     "readyStatusLabel": "70s horse trail source media | browser-normalized WebM 30fps"
   },
   "presentation": {
+    "confidenceThreshold": 0.5,
     "keypointsEnabled": false,
     "polygonsEnabled": false
   },
