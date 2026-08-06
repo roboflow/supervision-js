@@ -17,7 +17,6 @@ import {
   matchFont,
   type SkImage as SkiaImageType,
   type SkPicture,
-  useImage,
 } from "@shopify/react-native-skia";
 import { StatusBar } from "expo-status-bar";
 import {
@@ -76,13 +75,16 @@ import {
   type ReactNativeFrameLayout,
   type ReactNativeIdMaskUniforms,
   loadReactNativeLiveIdMaskNativeBuilder,
-  pickReactNativeDetectionAtPoint,
   type ReactNativeVideoFrameHandle,
-  resolveReactNativeIdMaskUniforms,
   resolveReactNativeFrameLayout,
   resolveReactNativeLabelLayout,
   createEmptyReactNativeLiveIdMaskUniforms,
 } from "supervision-js-react-native";
+import {
+  createReactNativeStaticMediaSessionBinding,
+  getReactNativeMediaSessionViewReadout,
+  MediaSessionView,
+} from "supervision-js-react-native/react";
 import {
   createEmptyReactNativeSkiaPicture,
   createReactNativeSkiaMaskFrame,
@@ -114,7 +116,6 @@ import {
   createDemoKeypointStyle,
   createDemoMaskStyle,
   createDemoPolygonStyle,
-  resolveDemoDetectionColor,
 } from "./src/demo-presentation";
 import {
   runWithWorkletDebugLogging,
@@ -299,7 +300,6 @@ function StaticFrameProof(props: {
   readonly mode: DemoMode;
   readonly onModeChange: (mode: DemoMode) => void;
 }) {
-  const image = useImage(basketballFrame);
   const window = useWindowDimensions();
   const [rounded, setRounded] = useState(true);
   const [showPolygons, setShowPolygons] = useState(true);
@@ -310,127 +310,24 @@ function StaticFrameProof(props: {
 
   const canvasWidth = Math.max(320, window.width - 24);
   const canvasHeight = Math.round(canvasWidth * 0.58);
-  const maskStyle = useMemo(() => createDemoMaskStyle(), []);
-
-  const packetPreparation = useMemo(() => {
-    const startedAt = Date.now();
-    const packet = createReactNativePreparedFramePacket({
-      boxStyle: createDemoBoxStyle({ rounded }),
-      detectionFrame: basketballDetectionFrame,
-      labelStyle: createDemoLabelStyle(),
-      keypointStyle: createDemoKeypointStyle(),
-      maskStyle,
-      polygonStyle: createDemoPolygonStyle(),
-      mediaFrame: {
-        metadata: {
+  const binding = useMemo(
+    () =>
+      createReactNativeStaticMediaSessionBinding({
+        boxStyle: createDemoBoxStyle({ rounded }),
+        detectionFrame: basketballDetectionFrame,
+        imageSource: basketballFrame,
+        labelStyle: createDemoLabelStyle(),
+        keypointStyle: createDemoKeypointStyle(),
+        maskStyle: createDemoMaskStyle(),
+        mediaMetadata: {
           duration: 1 / 30,
           ...basketballFrameMetadata,
         },
-        payload: basketballFrame,
-      },
-    });
-
-    return {
-      packet,
-      prepMs: Date.now() - startedAt,
-    };
-  }, [maskStyle, rounded]);
-  const presentation = packetPreparation.packet.presentation;
-
-  const layout = useMemo(
-    () =>
-      resolveReactNativeFrameLayout({
-        canvasHeight,
-        canvasWidth,
-        mediaHeight: presentation.mediaMetadata.height,
-        mediaWidth: presentation.mediaMetadata.width,
+        polygonStyle: createDemoPolygonStyle(),
       }),
-    [canvasHeight, canvasWidth, presentation.mediaMetadata],
+    [rounded],
   );
-
-  const maskPreparation = useMemo(
-    () => ({
-      artifact: packetPreparation.packet.maskArtifact,
-      prepMs: packetPreparation.prepMs,
-    }),
-    [packetPreparation],
-  );
-  const maskImage = useMemo(() => {
-    if (!maskPreparation.artifact) {
-      return null;
-    }
-
-    return Skia.Image.MakeImage(
-      {
-        alphaType: AlphaType.Opaque,
-        colorType: ColorType.Alpha_8,
-        height: maskPreparation.artifact.height,
-        width: maskPreparation.artifact.width,
-      },
-      Skia.Data.fromBytes(maskPreparation.artifact.data),
-      maskPreparation.artifact.width,
-    );
-  }, [maskPreparation.artifact]);
-  const maskEffect = useMemo(
-    () => Skia.RuntimeEffect.Make(REACT_NATIVE_ID_MASK_SHADER_SOURCE),
-    [],
-  );
-  const maskUniforms = useMemo(
-    () =>
-      maskPreparation.artifact
-        ? resolveReactNativeIdMaskUniforms({
-            artifact: maskPreparation.artifact,
-            layout,
-          })
-        : null,
-    [layout, maskPreparation.artifact],
-  );
-  const maskShaderStatus =
-    maskPreparation.artifact && maskImage && maskEffect && maskUniforms
-      ? "active"
-      : "unavailable";
-
-  const syncedBoxOverlays = useMemo(() => {
-    const overlays = createSyncedBoxOverlays(presentation.boxes, layout);
-
-    if (selectedPick?.detection.rect) {
-      overlays.push(
-        createSyncedBoxOverlay({
-          key: "selected",
-          rect: layout.mapRect(selectedPick.detection.rect),
-          radius: 14 * layout.scale,
-          strokeColor: toRgba(
-            resolveDemoDetectionColor(selectedPick.detection),
-            1,
-          ),
-          strokeWidth: 4,
-        }),
-      );
-    }
-
-    return overlays;
-  }, [layout, presentation.boxes, selectedPick]);
-  const syncedLabelOverlays = useMemo(
-    () => createSyncedLabelOverlays(presentation.labels, layout),
-    [layout, presentation.labels],
-  );
-  const vectorFrame = useMemo(
-    () =>
-      createReactNativeSkiaVectorFrame({
-        frameHeight: presentation.mediaMetadata.height,
-        frameWidth: presentation.mediaMetadata.width,
-        keypoints: showKeypoints ? presentation.keypoints : [],
-        mediaRect: layout.mediaRect,
-        polygons: showPolygons ? presentation.polygons : [],
-        polylines: presentation.polylines,
-      }),
-    [layout.mediaRect, presentation, showKeypoints, showPolygons],
-  );
-
-  useEffect(
-    () => () => disposeReactNativeSkiaPicture(vectorFrame?.picture),
-    [vectorFrame],
-  );
+  const rendererReadout = getReactNativeMediaSessionViewReadout(binding);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -447,90 +344,51 @@ function StaticFrameProof(props: {
           <ModeSwitch mode={props.mode} onModeChange={props.onModeChange} />
         </View>
 
-        <SyncedFrameStage
+        <MediaSessionView
           backgroundColor="#030712"
-          boxes={syncedBoxOverlays}
-          canvasHeight={canvasHeight}
-          canvasWidth={canvasWidth}
-          labels={syncedLabelOverlays}
-          layout={layout}
-          maskEffect={maskEffect}
-          maskImage={maskImage}
-          maskUniforms={maskUniforms}
-          mediaImage={image}
-          vectorPicture={vectorFrame?.picture}
-          onPress={(point) => {
-            setSelectedPick(
-              pickReactNativeDetectionAtPoint(
-                basketballDetectionFrame,
-                layout,
-                point,
-                { padding: 8 },
-              ),
-            );
-          }}
-          stageStyle={styles.canvasFrame}
+          binding={binding}
+          height={canvasHeight}
+          onPick={setSelectedPick}
+          pickOptions={{ padding: 8 }}
+          showKeypoints={showKeypoints}
+          showPolygons={showPolygons}
+          style={styles.canvasFrame}
+          width={canvasWidth}
         >
           <View style={styles.stageReadout}>
             <StatusPill tone="ready" value="media + detections" />
+            <StatusPill value={`${rendererReadout.maskCount} masks`} />
             <StatusPill
-              value={`${maskPreparation.artifact?.maskCount ?? 0} masks`}
+              value={`${rendererReadout.polygonCount} polygons · ${rendererReadout.keypointCount} poses`}
             />
-            <StatusPill
-              value={`${vectorFrame?.polygonCount ?? 0} polygons · ${vectorFrame?.keypointCount ?? 0} poses`}
-            />
-            <StatusPill
-              value={`${formatBytes(
-                maskPreparation.artifact?.data.byteLength ?? 0,
-              )} artifact`}
-            />
+            <StatusPill value="package renderer" />
           </View>
-        </SyncedFrameStage>
+        </MediaSessionView>
 
         <View style={styles.metricsGrid}>
           <Metric label="Frame" value="#0" />
           <Metric
             label="Detections"
-            value={String(presentation.boxes.length)}
+            value={String(rendererReadout.detectionCount)}
           />
-          <Metric label="Scale" value={`${layout.scale.toFixed(3)}x`} />
+          <Metric label="Renderer" value="Skia" />
           <Metric label="Selected" value={formatSelected(selectedPick)} />
         </View>
 
-        <View
-          style={[
-            styles.card,
-            maskShaderStatus === "active"
-              ? styles.shaderReady
-              : styles.shaderUnavailable,
-          ]}
-        >
+        <View style={[styles.card, styles.shaderReady]}>
           <View style={styles.cardHeader}>
             <View>
               <Text style={styles.cardTitle}>Prepared ID mask</Text>
               <Text style={styles.cardValue}>
-                {maskShaderStatus === "active"
-                  ? "One frame artifact, one shader pass"
-                  : "Shader unavailable"}
+                One frame artifact, one shader pass
               </Text>
             </View>
-            <StatusPill
-              tone={maskShaderStatus === "active" ? "ready" : "warning"}
-              value={maskShaderStatus === "active" ? "gpu path" : "fallback"}
-            />
+            <StatusPill tone="ready" value="gpu path" />
           </View>
           <View style={styles.metricRow}>
-            <Metric
-              label="Masks"
-              value={String(maskPreparation.artifact?.maskCount ?? 0)}
-            />
-            <Metric
-              label="Artifact"
-              value={formatBytes(
-                maskPreparation.artifact?.data.byteLength ?? 0,
-              )}
-            />
-            <Metric label="Prep" value={`${maskPreparation.prepMs}ms`} />
+            <Metric label="Masks" value={String(rendererReadout.maskCount)} />
+            <Metric label="Binding" value="opaque" />
+            <Metric label="Scene" value="owned" />
           </View>
         </View>
 
