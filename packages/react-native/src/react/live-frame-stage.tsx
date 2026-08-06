@@ -14,7 +14,15 @@ import {
   Text as SkiaText,
   matchFont,
 } from "@shopify/react-native-skia";
-import { Fragment, useEffect, useMemo, type ReactNode } from "react";
+import {
+  Fragment,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { type StyleProp, type ViewStyle, View } from "react-native";
 import {
   BoxShape,
@@ -46,6 +54,52 @@ import {
   type ReactNativeSkiaVectorFrameOptions,
 } from "../skia";
 import type { ReactNativeVideoSession } from "../sessions";
+
+/**
+ * Allocates a disposable native resource only after React commits. The deferred
+ * unmount cleanup lets Strict Mode's immediate effect replay retain it.
+ */
+function useCommittedSkiaResource<T>(
+  create: () => T | null,
+  dispose: (resource: T | null) => void,
+) {
+  const [resource, setResource] = useState<T | null>(null);
+  const createRef = useRef(create);
+  const disposeRef = useRef(dispose);
+  const ownedResource = useRef<T | null>(null);
+  const unmountDisposal = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  createRef.current = create;
+  disposeRef.current = dispose;
+
+  useLayoutEffect(() => {
+    if (unmountDisposal.current) {
+      clearTimeout(unmountDisposal.current);
+      unmountDisposal.current = null;
+    }
+
+    if (ownedResource.current === null) {
+      const next = createRef.current();
+      ownedResource.current = next;
+      setResource(next);
+    }
+
+    return () => {
+      const disposal = setTimeout(() => {
+        if (unmountDisposal.current !== disposal) {
+          return;
+        }
+
+        unmountDisposal.current = null;
+        disposeRef.current(ownedResource.current);
+        ownedResource.current = null;
+      }, 0);
+      unmountDisposal.current = disposal;
+    };
+  }, []);
+
+  return resource;
+}
 
 export interface ReactNativeLiveStagePoint {
   readonly timestamp: number;
@@ -87,6 +141,7 @@ export interface ReactNativeLiveStageOverlays {
 }
 
 export interface ReactNativeLiveSkiaPresentation {
+  readonly isReady: boolean;
   readonly maskImage: ReactNativeSkiaSharedValue<unknown>;
   readonly maskUniforms: ReactNativeSkiaSharedValue<unknown>;
   readonly vectorPicture: ReactNativeSkiaSharedValue<unknown>;
@@ -138,16 +193,9 @@ export interface ReactNativeLiveFrameStageProps {
 export function ReactNativeLiveFrameStage(
   props: ReactNativeLiveFrameStageProps,
 ) {
-  const effect = useMemo(
+  const effect = useCommittedSkiaResource(
     () => Skia.RuntimeEffect.Make(REACT_NATIVE_ID_MASK_SHADER_SOURCE),
-    [],
-  );
-
-  useEffect(
-    () => () => {
-      effect?.dispose();
-    },
-    [effect],
+    (resource) => resource?.dispose(),
   );
 
   const showMasks = props.showMasks ?? true;
@@ -338,23 +386,23 @@ export function ReactNativeVideoFrameStage(
  * worklet-safe and enforce one-presentation retirement before disposal.
  */
 export function useReactNativeLiveSkiaPresentation(): ReactNativeLiveSkiaPresentation {
-  // These sentinels are deliberately created once per mounted live scene.
-  const emptyMaskImage = useMemo(
+  // Sentinels are native objects, so create them only after this scene commits.
+  const emptyMaskImage = useCommittedSkiaResource(
     () => createEmptyReactNativeSkiaMaskImage(),
-    [],
+    disposeReactNativeSkiaImage,
   );
-  const emptyVectorPicture = useMemo(
+  const emptyVectorPicture = useCommittedSkiaResource(
     () => createEmptyReactNativeSkiaPicture(),
-    [],
+    disposeReactNativeSkiaPicture,
   );
   const reanimated = loadReanimated();
-  const maskImage = reanimated.useSharedValue<unknown>(emptyMaskImage);
+  const maskImage = reanimated.useSharedValue<unknown>(null);
   const maskImageIsEmpty = reanimated.useSharedValue(true);
   const retiredMaskImage = reanimated.useSharedValue<unknown>(null);
   const maskUniforms = reanimated.useSharedValue<unknown>(
     createEmptyReactNativeLiveIdMaskUniforms(),
   );
-  const vectorPicture = reanimated.useSharedValue<unknown>(emptyVectorPicture);
+  const vectorPicture = reanimated.useSharedValue<unknown>(null);
   const vectorPictureIsEmpty = reanimated.useSharedValue(true);
   const retiredVectorPicture = reanimated.useSharedValue<unknown>(null);
   const emptyMaskUniforms = useMemo(
@@ -370,15 +418,46 @@ export function useReactNativeLiveSkiaPresentation(): ReactNativeLiveSkiaPresent
       "worklet";
       return createReactNativeSkiaMaskFrame({
         ...options,
-        nativeBuilder: options.nativeBuilder ?? nativeMaskBuilder,
+        nativeBuilder:
+          options.nativeBuilder === undefined
+            ? nativeMaskBuilder
+            : options.nativeBuilder,
       });
     },
     [nativeMaskBuilder],
   );
 
+  const isReady = emptyMaskImage !== null && emptyVectorPicture !== null;
+
+  useLayoutEffect(() => {
+    if (!isReady) {
+      return;
+    }
+
+    maskImage.value = emptyMaskImage;
+    maskImageIsEmpty.value = true;
+    maskUniforms.value = emptyMaskUniforms;
+    vectorPicture.value = emptyVectorPicture;
+    vectorPictureIsEmpty.value = true;
+  }, [
+    emptyMaskImage,
+    emptyMaskUniforms,
+    emptyVectorPicture,
+    isReady,
+    maskImage,
+    maskImageIsEmpty,
+    maskUniforms,
+    vectorPicture,
+    vectorPictureIsEmpty,
+  ]);
+
   const clear = useMemo(
     () => () => {
       "worklet";
+      if (!emptyMaskImage || !emptyVectorPicture) {
+        return;
+      }
+
       maskUniforms.value = emptyMaskUniforms;
       swapReactNativeSkiaMaskImage(
         maskImage as never,
@@ -411,6 +490,10 @@ export function useReactNativeLiveSkiaPresentation(): ReactNativeLiveSkiaPresent
   const presentMask = useMemo(
     () => (frame: ReactNativeSkiaMaskFrame | null) => {
       "worklet";
+      if (!emptyMaskImage) {
+        return;
+      }
+
       maskUniforms.value = frame?.uniforms ?? emptyMaskUniforms;
       swapReactNativeSkiaMaskImage(
         maskImage as never,
@@ -432,6 +515,10 @@ export function useReactNativeLiveSkiaPresentation(): ReactNativeLiveSkiaPresent
   const presentVector = useMemo(
     () => (frame: ReactNativeSkiaVectorFrame | null) => {
       "worklet";
+      if (!emptyVectorPicture) {
+        return;
+      }
+
       swapReactNativeSkiaPicture(
         vectorPicture as never,
         vectorPictureIsEmpty,
@@ -454,16 +541,12 @@ export function useReactNativeLiveSkiaPresentation(): ReactNativeLiveSkiaPresent
         disposeReactNativeSkiaImage(maskImage.value as never);
       }
       disposeReactNativeSkiaImage(retiredMaskImage.value as never);
-      disposeReactNativeSkiaImage(emptyMaskImage);
       if (!vectorPictureIsEmpty.value) {
         disposeReactNativeSkiaPicture(vectorPicture.value as never);
       }
       disposeReactNativeSkiaPicture(retiredVectorPicture.value as never);
-      disposeReactNativeSkiaPicture(emptyVectorPicture);
     },
     [
-      emptyMaskImage,
-      emptyVectorPicture,
       maskImage,
       maskImageIsEmpty,
       retiredMaskImage,
@@ -476,6 +559,7 @@ export function useReactNativeLiveSkiaPresentation(): ReactNativeLiveSkiaPresent
   return useMemo(
     () => ({
       clear,
+      isReady,
       maskImage,
       maskUniforms,
       prepareMask,
@@ -486,6 +570,7 @@ export function useReactNativeLiveSkiaPresentation(): ReactNativeLiveSkiaPresent
     }),
     [
       clear,
+      isReady,
       maskImage,
       maskUniforms,
       prepareMask,

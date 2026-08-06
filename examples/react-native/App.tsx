@@ -2261,7 +2261,8 @@ function LiveCameraProof(props: {
     activeModel,
     props.inferenceMode === "pose" ? "YOLO26N Pose" : "RF-DETR Seg",
   );
-  const canRunCamera = hasPermission && device && activeModel.isReady;
+  const canRunCamera =
+    hasPermission && device && activeModel.isReady && livePresentation.isReady;
 
   return (
     <View style={styles.liveScreen}>

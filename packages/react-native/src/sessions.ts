@@ -358,7 +358,9 @@ export function createReactNativeVideoSession(
     REACT_NATIVE_FILE_SESSION_DEFAULTS.maxPresentationSide;
   const statsIntervalMs = REACT_NATIVE_FILE_SESSION_DEFAULTS.statsIntervalMs;
   const nativeBuilder =
-    options.nativeBuilder ?? loadReactNativeLiveIdMaskNativeBuilder();
+    options.nativeBuilder === undefined
+      ? loadReactNativeLiveIdMaskNativeBuilder()
+      : options.nativeBuilder;
   const serializeFrame = options.serializeFrame;
   const resolveMaskEffects = options.resolveMaskEffects;
   const scheduleOnRN = vendors.scheduleOnRN;
