@@ -125,9 +125,10 @@ describe("buffered detection timeline", () => {
     version += 1;
     await timeline.prepare(0);
 
-    expect(getBufferedDetectionTimelineFrameSnapshot(timeline)).not.toBe(
-      firstSnapshot,
-    );
+    const revisedSnapshot = getBufferedDetectionTimelineFrameSnapshot(timeline);
+
+    expect(revisedSnapshot).not.toBe(firstSnapshot);
+    expect(revisedSnapshot[0]).not.toBe(firstSnapshot[0]);
     expect(source.loadFrames).toHaveBeenCalledTimes(2);
   });
 
@@ -288,6 +289,106 @@ describe("buffered detection timeline", () => {
     });
     expect(source.loadFrames).toHaveBeenNthCalledWith(1, 0, 5);
     expect(source.loadFrames).toHaveBeenNthCalledWith(2, 0, 5.5);
+  });
+
+  it("coalesces rolling prefetch while allowing the active load to commit", async () => {
+    const firstRefresh = createDeferred<DetectionFrame[]>();
+    const latestRefresh = createDeferred<DetectionFrame[]>();
+    const source = {
+      loadFrames: vi
+        .fn()
+        .mockResolvedValueOnce(frames)
+        .mockImplementationOnce(() => firstRefresh.promise)
+        .mockImplementationOnce(() => latestRefresh.promise),
+    };
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 5,
+      bufferBehindSeconds: 0.5,
+      refreshIntervalSeconds: 0.5,
+      source,
+    });
+
+    await timeline.prepare(0);
+    timeline.prefetch(0.5);
+    await vi.waitFor(() => expect(source.loadFrames).toHaveBeenCalledTimes(2));
+
+    for (let frameIndex = 18; frameIndex <= 36; frameIndex += 1) {
+      timeline.prefetch(frameIndex / 30);
+    }
+
+    expect(source.loadFrames).toHaveBeenCalledTimes(2);
+
+    firstRefresh.resolve(frames);
+    await vi.waitFor(() => expect(timeline.getState().bufferEndTime).toBe(5.5));
+    await vi.waitFor(() => expect(source.loadFrames).toHaveBeenCalledTimes(3));
+    expect(source.loadFrames).toHaveBeenLastCalledWith(0.7, 6.2);
+
+    latestRefresh.resolve(frames);
+    await vi.waitFor(() => expect(timeline.getState().bufferEndTime).toBe(6.2));
+    expect(source.loadFrames).toHaveBeenCalledTimes(3);
+  });
+
+  it("drops queued rolling work after a newer navigation load starts", async () => {
+    const rollingRefresh = createDeferred<DetectionFrame[]>();
+    const navigationLoad = createDeferred<DetectionFrame[]>();
+    const source = {
+      loadFrames: vi
+        .fn()
+        .mockResolvedValueOnce(frames)
+        .mockImplementationOnce(() => rollingRefresh.promise)
+        .mockImplementationOnce(() => navigationLoad.promise),
+    };
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 5,
+      bufferBehindSeconds: 0.5,
+      refreshIntervalSeconds: 0.5,
+      source,
+    });
+
+    await timeline.prepare(0);
+    timeline.prefetch(0.5);
+    await vi.waitFor(() => expect(source.loadFrames).toHaveBeenCalledTimes(2));
+    timeline.prefetch(1.2);
+
+    const navigation = timeline.prepare(10);
+
+    await vi.waitFor(() => expect(source.loadFrames).toHaveBeenCalledTimes(3));
+    expect(source.loadFrames).toHaveBeenLastCalledWith(9.5, 15);
+
+    navigationLoad.resolve(frames);
+    await navigation;
+    rollingRefresh.resolve(frames);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(timeline.getState().bufferStartTime).toBe(9.5);
+    expect(timeline.getState().bufferEndTime).toBe(15);
+    expect(source.loadFrames).toHaveBeenCalledTimes(3);
+  });
+
+  it("retains unchanged internal frames across an immutable rolling window", async () => {
+    const source = { loadFrames: vi.fn(async () => frames) };
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 5,
+      bufferBehindSeconds: 0.5,
+      refreshIntervalSeconds: 0.5,
+      source,
+    });
+
+    await timeline.prepare(0);
+    const initialSnapshot = getBufferedDetectionTimelineFrameSnapshot(timeline);
+    const initialPublicFrame = timeline.getBufferedFrames()[0];
+
+    timeline.prefetch(0.5);
+    await vi.waitFor(() => expect(source.loadFrames).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(timeline.getState().bufferEndTime).toBe(5.5));
+    const refreshedSnapshot =
+      getBufferedDetectionTimelineFrameSnapshot(timeline);
+
+    expect(refreshedSnapshot).not.toBe(initialSnapshot);
+    expect(refreshedSnapshot[0]).toBe(initialSnapshot[0]);
+    expect(timeline.getBufferedFrames()[0]).not.toBe(initialPublicFrame);
+    expect(timeline.getBufferedFrames()[0]).not.toBe(refreshedSnapshot[0]);
   });
 
   it("hydrates loop-crossing hot buffers from tail and head source ranges", async () => {
