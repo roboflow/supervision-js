@@ -102,6 +102,14 @@ export function MediaSessionView(props: MediaSessionViewProps) {
   } | null>(null);
   const selectedPick =
     selection?.binding === props.binding ? selection.pick : null;
+
+  useEffect(() => {
+    if (selection && selection.binding !== props.binding) {
+      setSelection(null);
+      props.onPick?.(null);
+    }
+  }, [props.binding, props.onPick, selection]);
+
   const presentation = state.packet.presentation;
   const layout = useMemo(
     () =>
