@@ -53,6 +53,75 @@ export interface ReactNativeSkiaVectorFrame {
   readonly prepMs: number;
 }
 
+/** Structural subset shared by Reanimated and worklet runtime values. */
+export interface ReactNativeSkiaSharedValue<TValue> {
+  value: TValue;
+}
+
+/** Creates the transparent sentinel required by animated Skia image props. */
+export function createEmptyReactNativeSkiaMaskImage(): SkImage {
+  "worklet";
+
+  const image = Skia.Image.MakeImage(
+    {
+      alphaType: AlphaType.Opaque,
+      colorType: ColorType.Alpha_8,
+      height: 1,
+      width: 1,
+    },
+    Skia.Data.fromBytes(new Uint8Array([0])),
+    1,
+  );
+
+  if (!image) {
+    throw new Error("Unable to create the empty React Native Skia mask image.");
+  }
+
+  return image;
+}
+
+/**
+ * Promotes an image while keeping its predecessor alive for one presentation.
+ * React Native Skia may still draw the prior image on the UI thread; disposing
+ * it immediately can paint the complete media rect black.
+ */
+export function swapReactNativeSkiaMaskImage(
+  active: ReactNativeSkiaSharedValue<SkImage>,
+  activeIsEmpty: ReactNativeSkiaSharedValue<boolean>,
+  retired: ReactNativeSkiaSharedValue<SkImage | null>,
+  next: SkImage | null,
+  empty: SkImage,
+) {
+  "worklet";
+
+  const previous = active.value;
+  const obsolete = retired.value;
+
+  active.value = next ?? empty;
+  retired.value = activeIsEmpty.value ? null : previous;
+  activeIsEmpty.value = next === null;
+  disposeReactNativeSkiaImage(obsolete);
+}
+
+/** Same one-presentation retirement rule for recorded vector pictures. */
+export function swapReactNativeSkiaPicture(
+  active: ReactNativeSkiaSharedValue<SkPicture>,
+  activeIsEmpty: ReactNativeSkiaSharedValue<boolean>,
+  retired: ReactNativeSkiaSharedValue<SkPicture | null>,
+  next: SkPicture | null,
+  empty: SkPicture,
+) {
+  "worklet";
+
+  const previous = active.value;
+  const obsolete = retired.value;
+
+  active.value = next ?? empty;
+  retired.value = activeIsEmpty.value ? null : previous;
+  activeIsEmpty.value = next === null;
+  disposeReactNativeSkiaPicture(obsolete);
+}
+
 /**
  * Creates a valid no-op picture for declarative Skia picture props.
  *

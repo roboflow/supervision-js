@@ -1,8 +1,6 @@
 import {
-  AlphaType,
   Canvas,
   Circle,
-  ColorType,
   FilterMode,
   ImageShader,
   Image as SkiaImage,
@@ -49,7 +47,7 @@ import {
   useFrameRenderer,
   type Frame,
 } from "react-native-vision-camera";
-import { useSharedValue, type SharedValue } from "react-native-reanimated";
+import { useSharedValue } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
 import { Asset } from "expo-asset";
 import * as ImagePicker from "expo-image-picker";
@@ -86,11 +84,14 @@ import {
   MediaSessionView,
 } from "supervision-js-react-native/react";
 import {
+  createEmptyReactNativeSkiaMaskImage,
   createEmptyReactNativeSkiaPicture,
   createReactNativeSkiaMaskFrame,
   createReactNativeSkiaVectorFrame,
   disposeReactNativeSkiaImage,
   disposeReactNativeSkiaPicture,
+  swapReactNativeSkiaMaskImage,
+  swapReactNativeSkiaPicture,
   type ReactNativeSkiaMaskFrame,
 } from "supervision-js-react-native/skia";
 import {
@@ -145,63 +146,6 @@ import {
   type InstantCvZone,
   type InstantCvZoneShape,
 } from "./src/instant-cv";
-
-function swapLiveVectorPicture(
-  livePicture: SharedValue<SkPicture>,
-  livePictureIsEmpty: SharedValue<boolean>,
-  retiredPicture: SharedValue<SkPicture | null>,
-  nextPicture: SkPicture | null,
-  emptyPicture: SkPicture,
-) {
-  "worklet";
-
-  const previousPicture = livePicture.value;
-  const previousPictureWasEmpty = livePictureIsEmpty.value;
-  const obsoletePicture = retiredPicture.value;
-
-  livePicture.value = nextPicture ?? emptyPicture;
-  livePictureIsEmpty.value = nextPicture === null;
-  retiredPicture.value = previousPictureWasEmpty ? null : previousPicture;
-  disposeReactNativeSkiaPicture(obsoletePicture);
-}
-
-function createEmptyLiveMaskImage() {
-  const image = Skia.Image.MakeImage(
-    {
-      alphaType: AlphaType.Opaque,
-      colorType: ColorType.Alpha_8,
-      height: 1,
-      width: 1,
-    },
-    Skia.Data.fromBytes(new Uint8Array([0])),
-    1,
-  );
-
-  if (!image) {
-    throw new Error("Unable to create the empty live-mask image");
-  }
-
-  return image;
-}
-
-function swapLiveMaskImage(
-  liveImage: SharedValue<SkiaImageType>,
-  liveImageIsEmpty: SharedValue<boolean>,
-  retiredImage: SharedValue<SkiaImageType | null>,
-  nextImage: SkiaImageType | null,
-  emptyImage: SkiaImageType,
-) {
-  "worklet";
-
-  const previousImage = liveImage.value;
-  const previousWasEmpty = liveImageIsEmpty.value;
-  const obsoleteImage = retiredImage.value;
-
-  liveImage.value = nextImage ?? emptyImage;
-  liveImageIsEmpty.value = nextImage === null;
-  retiredImage.value = previousWasEmpty ? null : previousImage;
-  disposeReactNativeSkiaImage(obsoleteImage);
-}
 
 type DemoMode = "static" | "live" | "video" | "instant";
 type LiveInferenceMode = "segmentation" | "pose";
@@ -1294,7 +1238,10 @@ function LiveCameraProof(props: {
     () => createEmptyReactNativeLiveIdMaskUniforms(),
     [],
   );
-  const emptyLiveMaskImage = useMemo(() => createEmptyLiveMaskImage(), []);
+  const emptyLiveMaskImage = useMemo(
+    () => createEmptyReactNativeSkiaMaskImage(),
+    [],
+  );
   const emptyLiveVectorPicture = useMemo(
     () => createEmptyReactNativeSkiaPicture(),
     [],
@@ -1425,7 +1372,7 @@ function LiveCameraProof(props: {
     setTapMenuLabel(null);
 
     liveMaskUniforms.value = emptyLiveMaskUniforms;
-    swapLiveMaskImage(
+    swapReactNativeSkiaMaskImage(
       liveMaskImage,
       liveMaskImageIsEmpty,
       retiredLiveMaskImage,
@@ -1433,7 +1380,7 @@ function LiveCameraProof(props: {
       emptyLiveMaskImage,
     );
 
-    swapLiveVectorPicture(
+    swapReactNativeSkiaPicture(
       liveVectorPicture,
       liveVectorPictureIsEmpty,
       retiredLiveVectorPicture,
@@ -2275,7 +2222,7 @@ function LiveCameraProof(props: {
           });
 
           stage = "pose-assign-prepared";
-          swapLiveVectorPicture(
+          swapReactNativeSkiaPicture(
             liveVectorPicture,
             liveVectorPictureIsEmpty,
             retiredLiveVectorPicture,
@@ -2284,7 +2231,7 @@ function LiveCameraProof(props: {
           );
 
           liveMaskUniforms.value = emptyLiveMaskUniforms;
-          swapLiveMaskImage(
+          swapReactNativeSkiaMaskImage(
             liveMaskImage,
             liveMaskImageIsEmpty,
             retiredLiveMaskImage,
@@ -2603,7 +2550,7 @@ function LiveCameraProof(props: {
               },
               () => {
                 liveMaskUniforms.value = preparedMask.uniforms;
-                swapLiveMaskImage(
+                swapReactNativeSkiaMaskImage(
                   liveMaskImage,
                   liveMaskImageIsEmpty,
                   retiredLiveMaskImage,
@@ -2630,7 +2577,7 @@ function LiveCameraProof(props: {
               },
               () => {
                 liveMaskUniforms.value = emptyLiveMaskUniforms;
-                swapLiveMaskImage(
+                swapReactNativeSkiaMaskImage(
                   liveMaskImage,
                   liveMaskImageIsEmpty,
                   retiredLiveMaskImage,
@@ -2651,7 +2598,7 @@ function LiveCameraProof(props: {
             polygons: instantRulePolygons,
           });
 
-          swapLiveVectorPicture(
+          swapReactNativeSkiaPicture(
             liveVectorPicture,
             liveVectorPictureIsEmpty,
             retiredLiveVectorPicture,
