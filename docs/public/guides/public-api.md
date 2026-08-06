@@ -189,6 +189,12 @@ reposition accurately. New package code should use
 `REACT_NATIVE_FILE_SESSION_DEFAULTS`; `REACT_NATIVE_VIDEO_SESSION_DEFAULTS`
 remains only as a deprecated compatibility alias.
 
+The experimental saved-video session is analysis-paced: it processes each
+decoded frame as quickly as inference permits rather than trying to match wall
+clock playback. It reports explicit capabilities; pause, resume, and stop are
+available, while seeking is intentionally unsupported until native decoding can
+reposition accurately.
+
 React Native currently shares editing geometry, picking, and gesture semantics
 through `createReactNativeAnnotationGestureAdapter`. Native hosts own drawing
 editing affordances from `AnnotationOverlayStyle` until a native overlay
