@@ -8,10 +8,10 @@ It has four modes:
 - Static: renders a bundled basketball frame and detections through the
   package-owned `MediaSessionView` and static session binding.
 - Live: uses VisionCamera plus ExecuTorch RF-DETR Nano instance segmentation as
-  an example inference producer. The frame worklet prepares one bounded ID-mask
-  artifact from model-resolution masks, updates Skia presentation state, and
-  only presents the same camera frame after the matching annotation packet is
-  ready.
+  an example inference producer. The producer prepares one bounded ID-mask
+  artifact from model-resolution masks; package-owned live presentation updates
+  the Skia state and only presents the same camera frame after the matching
+  annotation packet is ready.
 - Video: exercises the package-owned iOS saved-video source and compatibility
   session. Playback is analysis-paced, supports pause/resume/stop, and does not
   claim seek support.
@@ -99,10 +99,12 @@ npm run example:react-native:dev-client:ios
 
 ## Boundaries
 
-- The demo may use Expo and React Native Skia.
+- The demo may use Expo, but presentation must use the package `./react`
+  entrypoint rather than direct React Native Skia imports or resource factories.
 - The demo may use ExecuTorch and VisionCamera as inference/media producers.
 - `packages/react-native` must not depend on Expo, Pixi, Mediabunny, DOM APIs,
   browser workers, IndexedDB, ExecuTorch, VisionCamera, or `packages/web`.
-- The package owns generic media-session contracts, the static React/Skia view,
-  the iOS saved-video source, and reusable preparation worklets. Hosts still own
-  inference, live camera producers, persistence, and product UI.
+- The package owns generic media-session contracts, static/live/video React
+  presentation, Skia resource retirement/disposal, the VisionCamera adapter,
+  the iOS saved-video source, and reusable preparation worklets. Hosts still
+  own inference, product rules, persistence, and product UI.

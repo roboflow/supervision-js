@@ -37,15 +37,17 @@ that a host can feed live frames and detections into one render scene.
   have a "latest mask" mode because that mode can show an artifact from an older
   frame over a newer camera frame.
 
-The current implementation uses VisionCamera's native `FrameRenderer` for the
-camera frame and a Skia canvas for mask and label presentation. In strict-sync
-mode, both are driven by the same frame callback: the worklet runs ExecuTorch,
-builds one bounded `Alpha_8` ID-mask image from model-resolution masks, updates
-Skia uniforms, then enqueues that same frame for display. Strict sync keeps the
-inference buffer in the metadata-oriented coordinate contract expected by
-ExecuTorch, then counter-rotates the native frame renderer view for
-presentation. This keeps media and annotations synchronized without changing the
-mask coordinate system. React receives throttled diagnostics only.
+The package-owned VisionCamera adapter renders the camera frame and the
+package-owned `ReactNativeLiveFrameStage` composes masks, vectors, boxes, and
+labels. In strict-sync mode, the injected inference producer builds one bounded
+`Alpha_8` ID-mask packet from model-resolution masks, hands it to
+`useReactNativeLiveSkiaPresentation()`, then enqueues that same frame for
+display. The presentation hook owns the shader, sentinel resources, one-frame
+retirement, and disposal. Strict sync keeps the inference buffer in the
+metadata-oriented coordinate contract expected by ExecuTorch, then
+counter-rotates the native frame renderer view for presentation. This keeps
+media and annotations synchronized without changing the mask coordinate system.
+React receives throttled diagnostics only.
 
 The debug HUD reports rolling p50/p90 timings instead of only the last frame:
 segmentation, serialization, mask preparation, mask fill, Skia upload, total
@@ -83,9 +85,11 @@ profile through ExecuTorch. ExecuTorch remains example-owned; it is a detection
 producer, not a renderer dependency.
 
 This is intentionally still a proof. The package now has a generic
-`createMediaSession()` core, but live mode does not yet use package-owned
-source/processor/renderer adapters. It also lacks native-thread prepared
-windows, a reusable live interaction/rule layer, camera recording/export, and a
+`createMediaSession()` core, package-owned VisionCamera presentation, a shared
+live/video stage, and a generic interaction layer. The remaining live boundary
+is a generic session controller that owns host worklet plumbing while accepting
+injected inference and product-rule producers. It also lacks native-thread
+prepared windows, camera recording/export, Android saved-video decoding, and a
 fully custom Skia/native renderer that imports and draws the camera frame
 directly.
 

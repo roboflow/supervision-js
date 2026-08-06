@@ -8,6 +8,10 @@ const rootDir = process.cwd();
 const coreSourceDir = path.join(rootDir, "packages/core/src");
 const webSourceDir = path.join(rootDir, "packages/web/src");
 const reactNativeSourceDir = path.join(rootDir, "packages/react-native/src");
+const reactNativeExampleApp = path.join(
+  rootDir,
+  "examples/react-native/App.tsx",
+);
 
 const forbiddenPatterns = [
   {
@@ -144,6 +148,33 @@ test("React Native source stays independent from browser package code", async ()
       }
     }
   }
+
+  assert.deepEqual(failures, []);
+});
+
+test("React Native example delegates Skia presentation to the package", async () => {
+  const source = stripComments(await readFile(reactNativeExampleApp, "utf8"));
+  const forbiddenExamplePatterns = [
+    {
+      label: "React Native Skia import",
+      pattern: /from\s+["']@shopify\/react-native-skia["']/,
+    },
+    {
+      label: "package Skia subpath import",
+      pattern: /from\s+["']supervision-js-react-native\/skia["']/,
+    },
+    {
+      label: "low-level Skia frame factory",
+      pattern: /\bcreateReactNativeSkia(?:Mask|Vector)Frame\b/,
+    },
+    {
+      label: "native ID-mask builder handle",
+      pattern: /\bloadReactNativeLiveIdMaskNativeBuilder\b/,
+    },
+  ];
+  const failures = forbiddenExamplePatterns
+    .filter(({ pattern }) => pattern.test(source))
+    .map(({ label }) => `examples/react-native/App.tsx uses ${label}`);
 
   assert.deepEqual(failures, []);
 });

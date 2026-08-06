@@ -19,11 +19,18 @@ browser package entrypoint.
 ## Rendering Direction
 
 React Native rendering uses platform adapters around a renderer-neutral session
-core. The current `./react` and `./skia` entrypoints provide a package-owned
-static `MediaSessionView`, synchronized frame packets, and Skia drawing helpers.
-Live camera frames still enter through example-owned native frame handles; the
-next reusable live adapter should implement the same source/processor/renderer
-contracts rather than introduce a second session abstraction.
+core. The `./react` entrypoint owns the static `MediaSessionView`, synchronized
+frame packets, the live/video Skia stage, live resource presentation, and
+generic interaction geometry. `./skia` remains an advanced lower-level entry
+point, but the example must not import it: hosts pass semantic presentation
+instructions and package-owned sessions to `ReactNativeLiveFrameStage` or
+`ReactNativeVideoFrameStage` instead.
+
+`useReactNativeLiveSkiaPresentation()` owns transparent sentinels, mask/vector
+swap retirement, shader lifetime, and unmount disposal. It also prepares Skia
+mask/vector packets with the native ID-mask builder when available and the JS
+fallback otherwise. This keeps disposable GPU objects and native-builder
+handles out of the product demo while retaining strict frame presentation.
 
 The package should remain non-Expo-coupled. Expo may be a consumer environment,
 but the library boundary should not require Expo APIs.
@@ -40,9 +47,10 @@ directly through Skia or a future native GPU adapter.
 Mediabunny is browser-focused and stays in `packages/web`. React Native models
 platform media through `MediaFrameSource`, `MediaFrameProcessor`, and
 `MediaRendererAdapter`. The current iOS saved-video adapter wraps the optional
-Nitro `VideoFrameSource`; live VisionCamera production remains example-owned.
-Native handles stay outside core, and Android saved-video decoding is not yet
-implemented.
+Nitro `VideoFrameSource`. The VisionCamera adapter owns the camera/device/
+permission view, frame output, native frame renderer, and orientation
+presentation. Native handles stay outside core, and Android saved-video
+decoding is not yet implemented.
 
 ## Storage Direction
 

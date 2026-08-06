@@ -1,31 +1,5 @@
-import {
-  Canvas,
-  Circle,
-  FilterMode,
-  ImageShader,
-  Image as SkiaImage,
-  Line,
-  MipmapMode,
-  Picture,
-  Rect,
-  RoundedRect,
-  Shader,
-  Skia,
-  Text as SkiaText,
-  matchFont,
-  type SkImage as SkiaImageType,
-  type SkPicture,
-} from "@shopify/react-native-skia";
 import { StatusBar } from "expo-status-bar";
-import {
-  Fragment,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   SafeAreaView,
   StyleSheet,
@@ -33,8 +7,6 @@ import {
   Text,
   TouchableOpacity,
   Platform,
-  type StyleProp,
-  type ViewStyle,
   useWindowDimensions,
   Vibration,
   View,
@@ -49,25 +21,17 @@ import {
   usePoseEstimation,
 } from "react-native-executorch";
 import {
-  BoxShape,
   KeypointMarkerShape,
-  type BoxDrawInstruction,
   type DetectionFrame,
   type DetectionPickResult,
   type KeypointDrawInstruction,
-  type LabelDrawInstruction,
   type PolygonDrawInstruction,
-  REACT_NATIVE_ID_MASK_SHADER_SOURCE,
   REACT_NATIVE_LIVE_SESSION_DEFAULTS,
   resolveDetectionClassColorStyle,
   createReactNativePreparedFramePacket,
   type ReactNativeLiveSerializedDetection,
   type ReactNativeFrameLayout,
-  type ReactNativeIdMaskUniforms,
-  loadReactNativeLiveIdMaskNativeBuilder,
   resolveReactNativeFrameLayout,
-  resolveReactNativeLabelLayout,
-  createEmptyReactNativeLiveIdMaskUniforms,
 } from "supervision-js-react-native";
 import {
   useVisionCameraFrameOutput,
@@ -80,20 +44,14 @@ import {
 } from "supervision-js-react-native/adapters/vision-camera";
 import {
   createReactNativeStaticMediaSessionBinding,
+  createReactNativeLiveStageOverlays,
   getReactNativeMediaSessionViewReadout,
   MediaSessionView,
+  ReactNativeLiveFrameStage,
+  ReactNativeLiveInteractionOverlay,
+  ReactNativeVideoFrameStage,
+  useReactNativeLiveSkiaPresentation,
 } from "supervision-js-react-native/react";
-import {
-  createEmptyReactNativeSkiaMaskImage,
-  createEmptyReactNativeSkiaPicture,
-  createReactNativeSkiaMaskFrame,
-  createReactNativeSkiaVectorFrame,
-  disposeReactNativeSkiaImage,
-  disposeReactNativeSkiaPicture,
-  swapReactNativeSkiaMaskImage,
-  swapReactNativeSkiaPicture,
-  type ReactNativeSkiaMaskFrame,
-} from "supervision-js-react-native/skia";
 import {
   createReactNativeClassMaskEffectsResolver,
   createReactNativeVideoSession,
@@ -505,12 +463,6 @@ type InstantCvWorkletPickResult =
       readonly requestId: number;
     };
 
-interface SyncedStageGesturePoint {
-  readonly timestamp: number;
-  readonly x: number;
-  readonly y: number;
-}
-
 interface LiveFrameError {
   readonly code: string;
   readonly frameHeight: number;
@@ -532,292 +484,10 @@ interface LiveMediaRect {
   readonly y: number;
 }
 
-interface SyncedRect {
-  readonly height: number;
-  readonly width: number;
+interface SyncedStageGesturePoint {
+  readonly timestamp: number;
   readonly x: number;
   readonly y: number;
-}
-
-interface SyncedBoxOverlay {
-  readonly fillColor?: string;
-  readonly key: string;
-  readonly radius: number;
-  readonly rect: SyncedRect;
-  readonly strokeColor?: string;
-  readonly strokeWidth?: number;
-}
-
-interface SyncedLabelOverlay {
-  readonly backgroundColor?: string;
-  readonly backgroundRect: SyncedRect;
-  readonly baselineY: number;
-  readonly cornerRadius: number;
-  readonly font: ReturnType<typeof matchFont>;
-  readonly key: string;
-  readonly text: string;
-  readonly textColor: string;
-  readonly textX: number;
-}
-
-interface SyncedFrameStageProps {
-  readonly backgroundColor?: string;
-  readonly boxes: readonly SyncedBoxOverlay[];
-  readonly canvasHeight: number;
-  readonly canvasStyle?: StyleProp<ViewStyle>;
-  readonly canvasWidth: number;
-  readonly children?: ReactNode;
-  readonly interactionLayer?: ReactNode;
-  readonly labels: readonly SyncedLabelOverlay[];
-  readonly layout: ReactNativeFrameLayout;
-  readonly maskEffect: ReturnType<typeof Skia.RuntimeEffect.Make> | null;
-  readonly maskImage?: unknown;
-  readonly maskUniforms?: unknown;
-  /** Plain SkImage or a shared value holding one (video packets). */
-  readonly mediaImage?: unknown;
-  readonly mediaLayer?: ReactNode;
-  readonly onPress?: (point: {
-    readonly x: number;
-    readonly y: number;
-  }) => void;
-  readonly onGestureCancel?: () => void;
-  readonly onGestureEnd?: (point: SyncedStageGesturePoint) => void;
-  readonly onGestureMove?: (point: SyncedStageGesturePoint) => void;
-  readonly onGestureStart?: (point: SyncedStageGesturePoint) => void;
-  readonly showBoxes?: boolean;
-  readonly showMasks?: boolean;
-  readonly stageStyle?: StyleProp<ViewStyle>;
-  /** Plain SkPicture or a shared value holding one (live packets). */
-  readonly vectorPicture?: unknown;
-}
-
-function SyncedFrameStage(props: SyncedFrameStageProps) {
-  const showMasks = props.showMasks ?? true;
-  const showBoxes = props.showBoxes ?? true;
-  const hasGestureHandler = props.onGestureStart !== undefined;
-  const createGesturePoint = (event: {
-    readonly nativeEvent: {
-      readonly locationX: number;
-      readonly locationY: number;
-    };
-  }) => ({
-    timestamp: Date.now(),
-    x: event.nativeEvent.locationX,
-    y: event.nativeEvent.locationY,
-  });
-
-  return (
-    <View
-      onMoveShouldSetResponder={hasGestureHandler ? () => true : undefined}
-      onResponderGrant={
-        hasGestureHandler
-          ? (event) => props.onGestureStart?.(createGesturePoint(event))
-          : undefined
-      }
-      onResponderMove={
-        hasGestureHandler
-          ? (event) => props.onGestureMove?.(createGesturePoint(event))
-          : undefined
-      }
-      onResponderRelease={
-        hasGestureHandler
-          ? (event) => props.onGestureEnd?.(createGesturePoint(event))
-          : props.onPress
-            ? (event) => {
-                props.onPress?.({
-                  x: event.nativeEvent.locationX,
-                  y: event.nativeEvent.locationY,
-                });
-              }
-            : undefined
-      }
-      onResponderTerminate={
-        hasGestureHandler ? props.onGestureCancel : undefined
-      }
-      onStartShouldSetResponder={
-        hasGestureHandler || props.onPress ? () => true : undefined
-      }
-      style={[
-        styles.syncedFrameStage,
-        props.stageStyle,
-        { height: props.canvasHeight, width: props.canvasWidth },
-      ]}
-    >
-      {props.mediaLayer}
-      <Canvas
-        style={[
-          styles.canvasSurface,
-          props.canvasStyle,
-          { height: props.canvasHeight, width: props.canvasWidth },
-        ]}
-      >
-        {props.backgroundColor ? (
-          <Rect
-            color={props.backgroundColor}
-            height={props.canvasHeight}
-            width={props.canvasWidth}
-            x={0}
-            y={0}
-          />
-        ) : null}
-        {props.mediaImage ? (
-          <SkiaImage
-            fit="fill"
-            height={props.layout.mediaRect.height}
-            image={props.mediaImage as never}
-            width={props.layout.mediaRect.width}
-            x={props.layout.mediaRect.x}
-            y={props.layout.mediaRect.y}
-          />
-        ) : null}
-        {showMasks &&
-        props.maskEffect &&
-        props.maskImage &&
-        props.maskUniforms ? (
-          <Rect
-            height={props.layout.mediaRect.height}
-            width={props.layout.mediaRect.width}
-            x={props.layout.mediaRect.x}
-            y={props.layout.mediaRect.y}
-          >
-            <Shader
-              source={props.maskEffect}
-              uniforms={props.maskUniforms as never}
-            >
-              <ImageShader
-                fit="fill"
-                image={props.maskImage as never}
-                rect={props.layout.mediaRect}
-                sampling={{
-                  filter: FilterMode.Nearest,
-                  mipmap: MipmapMode.None,
-                }}
-                tx="clamp"
-                ty="clamp"
-              />
-            </Shader>
-          </Rect>
-        ) : null}
-        {props.vectorPicture ? (
-          <Picture picture={props.vectorPicture as never} />
-        ) : null}
-        {props.interactionLayer}
-        {showBoxes
-          ? props.boxes.map((box) => (
-              <Fragment key={box.key}>
-                {box.fillColor ? (
-                  <RoundedRect
-                    color={box.fillColor}
-                    height={box.rect.height}
-                    r={box.radius}
-                    width={box.rect.width}
-                    x={box.rect.x}
-                    y={box.rect.y}
-                  />
-                ) : null}
-                {box.strokeColor && box.strokeWidth ? (
-                  <RoundedRect
-                    color={box.strokeColor}
-                    height={box.rect.height}
-                    r={box.radius}
-                    strokeWidth={box.strokeWidth}
-                    style="stroke"
-                    width={box.rect.width}
-                    x={box.rect.x}
-                    y={box.rect.y}
-                  />
-                ) : null}
-              </Fragment>
-            ))
-          : null}
-        {props.labels.map((label) => (
-          <Fragment key={label.key}>
-            {label.backgroundColor ? (
-              <RoundedRect
-                color={label.backgroundColor}
-                height={label.backgroundRect.height}
-                r={label.cornerRadius}
-                width={label.backgroundRect.width}
-                x={label.backgroundRect.x}
-                y={label.backgroundRect.y}
-              />
-            ) : null}
-            <SkiaText
-              color={label.textColor}
-              font={label.font}
-              text={label.text}
-              x={label.textX}
-              y={label.baselineY}
-            />
-          </Fragment>
-        ))}
-      </Canvas>
-      {props.children}
-    </View>
-  );
-}
-
-function createSyncedBoxOverlays(
-  boxes: readonly BoxDrawInstruction[],
-  layout: ReactNativeFrameLayout,
-) {
-  return boxes.map((box, index) => {
-    const radius =
-      box.shape === BoxShape.RoundedRect ? (box.cornerRadius ?? 0) : 0;
-
-    return createSyncedBoxOverlay({
-      fillColor: box.fill ? toRgba(box.fill.color, box.fill.alpha) : undefined,
-      key: `${box.rect.x}:${box.rect.y}:${index}`,
-      radius: radius * layout.scale,
-      rect: layout.mapRect(box.rect),
-      strokeColor: box.stroke
-        ? toRgba(box.stroke.color, box.stroke.alpha)
-        : undefined,
-      strokeWidth: box.stroke?.width,
-    });
-  });
-}
-
-function createSyncedBoxOverlay(overlay: SyncedBoxOverlay): SyncedBoxOverlay {
-  return overlay;
-}
-
-function createSyncedLabelOverlays(
-  labels: readonly LabelDrawInstruction[],
-  layout: ReactNativeFrameLayout,
-) {
-  return labels.map((label, index) => {
-    const fontSize = label.textStyle?.fontSize ?? 13;
-    const font = matchFont({ fontSize });
-    const bounds = font.measureText(label.text);
-    const metrics = font.getMetrics();
-    const textHeight = metrics.descent - metrics.ascent;
-    const labelLayout = resolveReactNativeLabelLayout({
-      instruction: label,
-      layout,
-      textSize: {
-        height: textHeight,
-        width: bounds.width,
-      },
-    });
-
-    return {
-      backgroundColor: label.background
-        ? toRgba(label.background.color, label.background.alpha)
-        : undefined,
-      backgroundRect: labelLayout.backgroundRect,
-      baselineY: labelLayout.textPoint.y - metrics.ascent,
-      cornerRadius: labelLayout.cornerRadius,
-      font,
-      key: `${label.text}:${index}`,
-      text: label.text,
-      textColor: toRgba(
-        label.textStyle?.color ?? 0xffffff,
-        label.textStyle?.alpha ?? 1,
-      ),
-      textX: labelLayout.textPoint.x,
-    };
-  });
 }
 
 function createLiveSyncedOverlays(options: {
@@ -845,13 +515,10 @@ function createLiveSyncedOverlays(options: {
     },
   });
 
-  return {
-    boxes: createSyncedBoxOverlays(packet.presentation.boxes, options.layout),
-    labels: createSyncedLabelOverlays(
-      packet.presentation.labels,
-      options.layout,
-    ),
-  };
+  return createReactNativeLiveStageOverlays({
+    layout: options.layout,
+    presentation: packet.presentation,
+  });
 }
 
 function createLivePoseKeypointInstructions(
@@ -918,49 +585,21 @@ function InstantCvCanvasOverlay(props: {
   readonly layout: ReactNativeFrameLayout;
   readonly touchPoint: InstantCvNormalizedPoint | null;
 }) {
-  const mapPoint = (point: InstantCvNormalizedPoint) => ({
-    x: props.layout.mediaRect.x + point.x * props.layout.mediaRect.width,
-    y: props.layout.mediaRect.y + point.y * props.layout.mediaRect.height,
-  });
-  const renderZone = (
-    zone: InstantCvZone,
-    color: string,
-    strokeWidth: number,
-    keyPrefix: string,
-  ) => {
-    const points = getInstantCvZonePoints(zone).map(mapPoint);
-    const segmentCount =
-      points.length > 2 ? points.length : Math.max(0, points.length - 1);
-
-    return Array.from({ length: segmentCount }, (_, index) => (
-      <Line
-        key={`${keyPrefix}-${index}`}
-        color={color}
-        opacity={0.9}
-        p1={points[index]!}
-        p2={points[(index + 1) % points.length]!}
-        strokeWidth={strokeWidth}
-      />
-    ));
-  };
-
   return (
-    <>
-      {props.draftZone ? (
-        <>{renderZone(props.draftZone, "#ffffff", 2, "draft")}</>
-      ) : null}
-      {props.touchPoint ? (
-        <Circle
-          color="#ffffff"
-          cx={mapPoint(props.touchPoint).x}
-          cy={mapPoint(props.touchPoint).y}
-          opacity={0.88}
-          r={12}
-          strokeWidth={3}
-          style="stroke"
-        />
-      ) : null}
-    </>
+    <ReactNativeLiveInteractionOverlay
+      marker={props.touchPoint}
+      mediaRect={props.layout.mediaRect}
+      paths={
+        props.draftZone
+          ? [
+              {
+                key: "draft",
+                points: getInstantCvZonePoints(props.draftZone),
+              },
+            ]
+          : []
+      }
+    />
   );
 }
 
@@ -1233,18 +872,6 @@ function LiveCameraProof(props: {
     Object.keys(classEffects).length > 0;
   const privacyPreviewActive =
     isInstantPrivacy && Object.keys(classEffects).length === 0;
-  const emptyLiveMaskUniforms = useMemo(
-    () => createEmptyReactNativeLiveIdMaskUniforms(),
-    [],
-  );
-  const emptyLiveMaskImage = useMemo(
-    () => createEmptyReactNativeSkiaMaskImage(),
-    [],
-  );
-  const emptyLiveVectorPicture = useMemo(
-    () => createEmptyReactNativeSkiaPicture(),
-    [],
-  );
   const liveLayout = useMemo(
     () =>
       resolveReactNativeFrameLayout({
@@ -1268,21 +895,7 @@ function LiveCameraProof(props: {
     () => summarizeLivePerformance(livePerformanceSamples),
     [livePerformanceSamples],
   );
-  const liveMaskImage = useSharedValue<SkiaImageType>(emptyLiveMaskImage);
-  const liveMaskImageIsEmpty = useSharedValue(true);
-  // React Native Skia rejects null animated Picture props. The no-op picture
-  // keeps the shared value valid before the first pose and between pose frames.
-  const liveVectorPicture = useSharedValue<SkPicture>(emptyLiveVectorPicture);
-  const liveVectorPictureIsEmpty = useSharedValue(true);
-  // Holds the mask image that was on screen one packet ago. Disposing the
-  // previous image immediately after swapping races the UI thread, which can
-  // still be drawing it — an ImageShader over a disposed image paints the
-  // whole media rect black. Deferring disposal by one packet removes the race.
-  const retiredLiveMaskImage = useSharedValue<SkiaImageType | null>(null);
-  const retiredLiveVectorPicture = useSharedValue<SkPicture | null>(null);
-  const liveMaskUniforms = useSharedValue<ReactNativeIdMaskUniforms>(
-    createEmptyReactNativeLiveIdMaskUniforms(),
-  );
+  const livePresentation = useReactNativeLiveSkiaPresentation();
   const liveMediaRect = useSharedValue<LiveMediaRect>({
     height: liveLayout.mediaRect.height,
     width: liveLayout.mediaRect.width,
@@ -1309,10 +922,6 @@ function LiveCameraProof(props: {
   const lastMaskBuilderName = useSharedValue("none");
   const lastMaskFallbackReason = useSharedValue("");
   const lastMaskJsFallbackCount = useSharedValue(0);
-  const liveNativeMaskBuilder = useMemo(
-    () => loadReactNativeLiveIdMaskNativeBuilder(),
-    [],
-  );
   // Mirrors the display-mode state into a shared value so the frame worklet
   // does not capture React state. Capturing state (or any per-render value)
   // changes the worklet identity every render, which makes useFrameOutput
@@ -1370,36 +979,8 @@ function LiveCameraProof(props: {
     setLiveDetections([]);
     setTapMenuLabel(null);
 
-    liveMaskUniforms.value = emptyLiveMaskUniforms;
-    swapReactNativeSkiaMaskImage(
-      liveMaskImage,
-      liveMaskImageIsEmpty,
-      retiredLiveMaskImage,
-      null,
-      emptyLiveMaskImage,
-    );
-
-    swapReactNativeSkiaPicture(
-      liveVectorPicture,
-      liveVectorPictureIsEmpty,
-      retiredLiveVectorPicture,
-      null,
-      emptyLiveVectorPicture,
-    );
-  }, [
-    emptyLiveMaskImage,
-    emptyLiveMaskUniforms,
-    emptyLiveVectorPicture,
-    inferenceModeShared,
-    liveMaskImage,
-    liveMaskImageIsEmpty,
-    liveMaskUniforms,
-    liveVectorPicture,
-    liveVectorPictureIsEmpty,
-    props.inferenceMode,
-    retiredLiveMaskImage,
-    retiredLiveVectorPicture,
-  ]);
+    livePresentation.clear();
+  }, [inferenceModeShared, livePresentation, props.inferenceMode]);
   useEffect(() => {
     showMaskLayerShared.value = showRawMaskLayer;
   }, [showMaskLayerShared, showRawMaskLayer]);
@@ -1464,31 +1045,6 @@ function LiveCameraProof(props: {
     isInstantCv,
     props.onInferenceModeChange,
   ]);
-  useEffect(
-    () => () => {
-      if (!liveMaskImageIsEmpty.value) {
-        disposeReactNativeSkiaImage(liveMaskImage.value);
-      }
-      disposeReactNativeSkiaImage(retiredLiveMaskImage.value);
-      disposeReactNativeSkiaImage(emptyLiveMaskImage);
-      if (!liveVectorPictureIsEmpty.value) {
-        disposeReactNativeSkiaPicture(liveVectorPicture.value);
-      }
-      disposeReactNativeSkiaPicture(retiredLiveVectorPicture.value);
-      disposeReactNativeSkiaPicture(emptyLiveVectorPicture);
-    },
-    [
-      emptyLiveMaskImage,
-      emptyLiveVectorPicture,
-      liveMaskImage,
-      liveMaskImageIsEmpty,
-      liveVectorPicture,
-      liveVectorPictureIsEmpty,
-      retiredLiveMaskImage,
-      retiredLiveVectorPicture,
-    ],
-  );
-
   const reportLiveFrame = useCallback((frame: LiveFrameState) => {
     setLiveFrame(frame);
     setAwaitingSyncedFrame(false);
@@ -2213,7 +1769,7 @@ function LiveCameraProof(props: {
           scheduleOnRN(reportLiveDetections, overlayDetections);
           const serializationMs = Date.now() - serializationStartedAt;
           stage = "pose-prepare-vector";
-          const preparedVector = createReactNativeSkiaVectorFrame({
+          const preparedVector = livePresentation.prepareVector({
             frameHeight: detectionFrameSize.height,
             frameWidth: detectionFrameSize.width,
             keypoints: [...instructions, ...instantRuleKeypoints],
@@ -2222,22 +1778,8 @@ function LiveCameraProof(props: {
           });
 
           stage = "pose-assign-prepared";
-          swapReactNativeSkiaPicture(
-            liveVectorPicture,
-            liveVectorPictureIsEmpty,
-            retiredLiveVectorPicture,
-            preparedVector?.picture ?? null,
-            emptyLiveVectorPicture,
-          );
-
-          liveMaskUniforms.value = emptyLiveMaskUniforms;
-          swapReactNativeSkiaMaskImage(
-            liveMaskImage,
-            liveMaskImageIsEmpty,
-            retiredLiveMaskImage,
-            null,
-            emptyLiveMaskImage,
-          );
+          livePresentation.presentVector(preparedVector);
+          livePresentation.presentMask(null);
 
           lastInferenceTickDurationMs.value = Date.now() - inferenceStartedAt;
           lastArtifactBytes.value = 0;
@@ -2473,11 +2015,12 @@ function LiveCameraProof(props: {
 
           stage = "mask-prepare";
           const maskStartedAt = Date.now();
-          let preparedMask: ReactNativeSkiaMaskFrame | null = null;
+          let preparedMask: ReturnType<typeof livePresentation.prepareMask> =
+            null;
 
           if (masksDisplayed || maskEffectsEnabled || privacyPreviewEnabled) {
             try {
-              preparedMask = createReactNativeSkiaMaskFrame({
+              preparedMask = livePresentation.prepareMask({
                 borderWidth: privacyContoursEnabled
                   ? LIVE_PRIVACY_CONTOUR_WIDTH
                   : DEMO_MASK_BORDER_WIDTH,
@@ -2495,7 +2038,6 @@ function LiveCameraProof(props: {
                 },
                 mosaicCellPx: LIVE_PRIVACY_MOSAIC_CELL_PX,
                 mosaicMaskIds,
-                nativeBuilder: liveNativeMaskBuilder,
                 spotlightMaskIds,
               });
             } catch (error) {
@@ -2549,14 +2091,7 @@ function LiveCameraProof(props: {
                 namespace: "rn-live",
               },
               () => {
-                liveMaskUniforms.value = preparedMask.uniforms;
-                swapReactNativeSkiaMaskImage(
-                  liveMaskImage,
-                  liveMaskImageIsEmpty,
-                  retiredLiveMaskImage,
-                  preparedMask.image,
-                  emptyLiveMaskImage,
-                );
+                livePresentation.presentMask(preparedMask);
               },
             );
             lastShaderActive.value = true;
@@ -2576,21 +2111,14 @@ function LiveCameraProof(props: {
                 namespace: "rn-live",
               },
               () => {
-                liveMaskUniforms.value = emptyLiveMaskUniforms;
-                swapReactNativeSkiaMaskImage(
-                  liveMaskImage,
-                  liveMaskImageIsEmpty,
-                  retiredLiveMaskImage,
-                  null,
-                  emptyLiveMaskImage,
-                );
+                livePresentation.presentMask(null);
               },
             );
             lastShaderActive.value = false;
           }
 
           stage = "rule-prepare-vector";
-          const preparedRuleVector = createReactNativeSkiaVectorFrame({
+          const preparedRuleVector = livePresentation.prepareVector({
             frameHeight: detectionFrameSize.height,
             frameWidth: detectionFrameSize.width,
             keypoints: instantRuleKeypoints,
@@ -2598,13 +2126,7 @@ function LiveCameraProof(props: {
             polygons: instantRulePolygons,
           });
 
-          swapReactNativeSkiaPicture(
-            liveVectorPicture,
-            liveVectorPictureIsEmpty,
-            retiredLiveVectorPicture,
-            preparedRuleVector?.picture ?? null,
-            emptyLiveVectorPicture,
-          );
+          livePresentation.presentVector(preparedRuleVector);
 
           stage = "render-synced-frame";
           runWithWorkletDebugLogging(
@@ -2677,9 +2199,6 @@ function LiveCameraProof(props: {
     },
     [
       droppedFrameCount,
-      emptyLiveMaskImage,
-      emptyLiveMaskUniforms,
-      emptyLiveVectorPicture,
       lastArtifactBytes,
       lastArtifactHeight,
       lastArtifactWidth,
@@ -2699,13 +2218,8 @@ function LiveCameraProof(props: {
       lastSegmentationDurationMs,
       lastSerializationDurationMs,
       lastShaderActive,
-      liveMaskImage,
-      liveMaskImageIsEmpty,
-      liveMaskUniforms,
       liveMediaRect,
-      liveNativeMaskBuilder,
-      liveVectorPicture,
-      liveVectorPictureIsEmpty,
+      livePresentation,
       classEffectsShared,
       instantCvActiveShared,
       instantPrivacyActiveShared,
@@ -2721,8 +2235,6 @@ function LiveCameraProof(props: {
       reportLiveDetections,
       reportLiveError,
       reportLiveFrame,
-      retiredLiveMaskImage,
-      retiredLiveVectorPicture,
       runPoseOnFrame,
       runSegmentationOnFrame,
       showMaskLayerShared,
@@ -2743,11 +2255,6 @@ function LiveCameraProof(props: {
     [inferenceFrameOutput],
   );
 
-  const liveMaskEffect = useMemo(
-    () => Skia.RuntimeEffect.Make(REACT_NATIVE_ID_MASK_SHADER_SOURCE),
-    [],
-  );
-
   const activeModel =
     props.inferenceMode === "pose" ? props.pose : props.segmentation;
   const modelStatus = formatInferenceStatus(
@@ -2759,7 +2266,7 @@ function LiveCameraProof(props: {
   return (
     <View style={styles.liveScreen}>
       <StatusBar hidden />
-      <SyncedFrameStage
+      <ReactNativeLiveFrameStage
         boxes={liveSyncedOverlays.boxes}
         canvasHeight={canvasHeight}
         canvasStyle={StyleSheet.absoluteFill}
@@ -2775,9 +2282,6 @@ function LiveCameraProof(props: {
             />
           ) : undefined
         }
-        maskEffect={liveMaskEffect}
-        maskImage={liveMaskImage}
-        maskUniforms={liveMaskUniforms}
         onPress={
           !isInstantCv && props.inferenceMode === "segmentation"
             ? handleLiveStageTap
@@ -2814,7 +2318,7 @@ function LiveCameraProof(props: {
         showBoxes={showBoxLayer}
         showMasks={showRawMaskLayer || effectsActive || privacyPreviewActive}
         stageStyle={styles.liveStage}
-        vectorPicture={liveVectorPicture}
+        presentation={livePresentation}
       >
         {!canRunCamera ? (
           <View style={styles.stageOverlay}>
@@ -3126,7 +2630,7 @@ function LiveCameraProof(props: {
             }}
           />
         ) : null}
-      </SyncedFrameStage>
+      </ReactNativeLiveFrameStage>
     </View>
   );
 }
@@ -3183,23 +2687,7 @@ function VideoFileProof(props: {
       }),
     [videoDetections, videoDims?.height, videoDims?.width, videoLayout],
   );
-  const videoMaskEffect = useMemo(
-    () => Skia.RuntimeEffect.Make(REACT_NATIVE_ID_MASK_SHADER_SOURCE),
-    [],
-  );
-
   const classEffectsShared = useSharedValue<LiveClassEffects>({});
-  // Idle presentation lanes, shown before the first session exists.
-  const idleFrameImageShared = useSharedValue<SkiaImageType | null>(null);
-  const idleMaskImageShared = useSharedValue<SkiaImageType | null>(null);
-  const idleMaskUniformsShared = useSharedValue<ReactNativeIdMaskUniforms>(
-    createEmptyReactNativeLiveIdMaskUniforms(),
-  );
-
-  const liveNativeMaskBuilder = useMemo(
-    () => loadReactNativeLiveIdMaskNativeBuilder(),
-    [],
-  );
   const runSegmentationOnFrame = props.segmentation.runOnFrame;
   // One dedicated pump runtime per screen mount, shared by every session.
   const videoRuntime = useMemo(
@@ -3288,7 +2776,6 @@ function VideoFileProof(props: {
         const session = createReactNativeVideoSession({
           fileUri,
           mediaRect: videoLayout.mediaRect,
-          nativeBuilder: liveNativeMaskBuilder,
           onDetections: setVideoDetections,
           onEnded: handleVideoEnded,
           onStats: setVideoStats,
@@ -3318,7 +2805,6 @@ function VideoFileProof(props: {
     },
     [
       handleVideoEnded,
-      liveNativeMaskBuilder,
       resolveVideoMaskEffects,
       serializeVideoFrame,
       videoLayout.mediaRect,
@@ -3406,25 +2892,18 @@ function VideoFileProof(props: {
   return (
     <View style={styles.liveScreen}>
       <StatusBar hidden />
-      <SyncedFrameStage
+      <ReactNativeVideoFrameStage
         boxes={videoSyncedOverlays.boxes}
         canvasHeight={canvasHeight}
         canvasStyle={StyleSheet.absoluteFill}
         canvasWidth={canvasWidth}
         labels={videoSyncedOverlays.labels}
         layout={videoLayout}
-        maskEffect={videoMaskEffect}
-        maskImage={videoSession ? videoSession.maskImage : idleMaskImageShared}
-        maskUniforms={
-          videoSession ? videoSession.maskUniforms : idleMaskUniformsShared
-        }
-        mediaImage={
-          videoSession ? videoSession.frameImage : idleFrameImageShared
-        }
         onPress={handleVideoStageTap}
         showBoxes
         showMasks
         stageStyle={styles.liveStage}
+        session={videoSession}
       >
         <View style={styles.liveTopBar}>
           <View style={styles.liveBrand}>
@@ -3569,7 +3048,7 @@ function VideoFileProof(props: {
             }}
           />
         ) : null}
-      </SyncedFrameStage>
+      </ReactNativeVideoFrameStage>
     </View>
   );
 }
@@ -3831,14 +3310,6 @@ function LiveMetric(props: { readonly label: string; readonly value: string }) {
   );
 }
 
-function toRgba(color: number, alpha: number) {
-  const red = (color >> 16) & 255;
-  const green = (color >> 8) & 255;
-  const blue = color & 255;
-
-  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
-}
-
 function formatConfidence(confidence: number | undefined) {
   return confidence == null ? "-" : `${Math.round(confidence * 100)}%`;
 }
@@ -4032,14 +3503,6 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     borderWidth: 1,
     overflow: "hidden",
-  },
-  canvasSurface: {
-    borderRadius: 14,
-    zIndex: 2,
-  },
-  syncedFrameStage: {
-    overflow: "hidden",
-    position: "relative",
   },
   card: {
     backgroundColor: "#080b11",

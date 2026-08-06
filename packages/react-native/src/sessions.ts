@@ -27,6 +27,7 @@ import {
   disposeReactNativeSkiaImage,
   type ReactNativeSkiaMaskFrame,
 } from "./skia";
+import { loadReactNativeLiveIdMaskNativeBuilder } from "./native-id-mask-builder";
 import { PreparedFrameStore } from "./renderers/prepared-frame-store";
 import { REACT_NATIVE_FILE_SESSION_DEFAULTS } from "./sessions/media-session-defaults";
 import type { MediaSessionCapabilities } from "./types/frame-source";
@@ -356,7 +357,8 @@ export function createReactNativeVideoSession(
     presentation.maxPresentationSide ??
     REACT_NATIVE_FILE_SESSION_DEFAULTS.maxPresentationSide;
   const statsIntervalMs = REACT_NATIVE_FILE_SESSION_DEFAULTS.statsIntervalMs;
-  const nativeBuilder = options.nativeBuilder ?? null;
+  const nativeBuilder =
+    options.nativeBuilder ?? loadReactNativeLiveIdMaskNativeBuilder();
   const serializeFrame = options.serializeFrame;
   const resolveMaskEffects = options.resolveMaskEffects;
   const scheduleOnRN = vendors.scheduleOnRN;
