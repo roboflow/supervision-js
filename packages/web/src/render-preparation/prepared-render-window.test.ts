@@ -950,6 +950,66 @@ describe("prepared render window", () => {
     }
   });
 
+  it("stops scheduling and rejects readiness after a strict worker failure", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const fakeWorker = createFakeMaskPreparationWorker({
+        errorMessage: "worker crashed",
+      });
+      const onDiagnostics = vi.fn();
+      const renderWindow = createPreparedRenderWindow({
+        detectionTimeline: createTimeline(manyFrames),
+        maskStyle: new BaseMaskStyle(),
+        renderPreparation: {
+          maskFrame: {
+            maxPendingFrameCount: 1,
+            prefetchFrameCount: 1,
+            scanIntervalSeconds: 0,
+            scheduleBatchSize: 1,
+            workerCount: 1,
+          },
+          mode: RenderPreparationMode.Worker,
+          onDiagnostics,
+          workerFactory: {
+            createWorker: () => fakeWorker.worker,
+          },
+        },
+      });
+      const readiness = renderWindow.waitForReady(0, {
+        requiredAheadSeconds: 0,
+      });
+      const rejection = expect(readiness).rejects.toThrow("worker crashed");
+
+      await flushMaskPreparationTimers(2);
+      await rejection;
+
+      const messageCount = fakeWorker.messages.length;
+
+      expect(messageCount).toBe(1);
+      expect(onDiagnostics).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          executionMode: RenderPreparationExecutionMode.Worker,
+          message: "worker crashed",
+          workerStatus: RenderPreparationWorkerStatus.Error,
+        }),
+      );
+
+      renderWindow.getFrame(0);
+      await flushMaskPreparationTimers(2);
+
+      expect(fakeWorker.messages).toHaveLength(messageCount);
+      await expect(
+        renderWindow.waitForReady(0, { requiredAheadSeconds: 0 }),
+      ).rejects.toThrow("worker crashed");
+
+      renderWindow.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("does not wait when prepared lookahead remains above the low watermark", async () => {
     vi.useFakeTimers();
     resetMocks();
@@ -1331,6 +1391,7 @@ function createFakeMaskPreparationWorker(
       readonly imageBitmap: ImageBitmap;
       readonly imageData: ImageData;
     }>;
+    readonly errorMessage?: string;
   } = {},
 ) {
   const autoComplete = options.autoComplete ?? true;
@@ -1343,6 +1404,18 @@ function createFakeMaskPreparationWorker(
     readonly requestId: number;
   }) => {
     for (const listener of listeners) {
+      if (options.errorMessage) {
+        listener({
+          data: {
+            error: options.errorMessage,
+            key: message.job.key,
+            requestId: message.requestId,
+            type: MaskPreparationWorkerMessageType.Error,
+          },
+        } as MessageEvent<unknown>);
+        continue;
+      }
+
       const completeData = options.createCompleteData?.(message) ?? {
         imageData: new ImageData(new Uint8ClampedArray(2 * 2 * 4), 2, 2),
       };
