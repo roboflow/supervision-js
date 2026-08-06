@@ -20,6 +20,11 @@
       "react-native": "./src/adapters/executorch.ts",
       "import": "./dist/adapters/executorch.js"
     },
+    "./adapters/vision-camera": {
+      "types": "./dist/adapters/vision-camera.d.ts",
+      "react-native": "./src/adapters/vision-camera.ts",
+      "import": "./dist/adapters/vision-camera.js"
+    },
     "./adapters/video-file": {
       "types": "./dist/adapters/video-file.d.ts",
       "react-native": "./src/adapters/video-file.ts",
