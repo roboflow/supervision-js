@@ -3,10 +3,20 @@ import {
   type MediaTimelineMetadata,
   type PlatformMediaFrame,
 } from "supervision-js-core";
-import { createElement, type ComponentType, type ReactElement } from "react";
+import {
+  createElement,
+  Fragment,
+  useCallback,
+  type ComponentType,
+  type ReactElement,
+} from "react";
 import type { StyleProp, ViewStyle } from "react-native";
-import type { CameraFrameOutput } from "react-native-vision-camera";
-import type { FrameRenderer } from "react-native-vision-camera";
+import type {
+  CameraFrameOutput,
+  CameraDevice,
+  Frame,
+  FrameRenderer,
+} from "react-native-vision-camera";
 
 import type {
   MediaFrameSource,
@@ -47,7 +57,12 @@ export interface VisionCameraLiveSource<
 export interface VisionCameraFrameOutputOptions<
   TFrame extends VisionCameraFrame,
 > {
-  readonly onFrame: (frame: TFrame) => void;
+  /**
+   * Processes one frame and returns whether its completed packet should be
+   * presented. The adapter owns rendering and disposal after this callback
+   * settles, so host worklets cannot dispose a frame before native rendering.
+   */
+  readonly onFrame: (frame: TFrame) => boolean;
   readonly onFrameDropped?: () => void;
   readonly targetResolution: {
     readonly height: number;
@@ -58,6 +73,110 @@ export interface VisionCameraFrameOutputOptions<
 export interface VisionCameraFrameRendererViewProps {
   readonly renderer: FrameRenderer;
   readonly style?: StyleProp<ViewStyle>;
+}
+
+export interface VisionCameraLiveViewProps {
+  readonly cameraStyle?: StyleProp<ViewStyle>;
+  readonly device: CameraDevice;
+  readonly frameRenderer: FrameRenderer;
+  readonly frameRendererStyle?: StyleProp<ViewStyle>;
+  readonly isActive: boolean;
+  readonly outputs: CameraFrameOutput[];
+  readonly orientationSource?: "interface";
+}
+
+export interface VisionCameraFrameOutputBinding {
+  readonly frameOutput: CameraFrameOutput;
+  readonly frameRenderer: FrameRenderer;
+}
+
+/** Optional-peer alias for a native frame passed to a host inference producer. */
+export type VisionCameraOutputFrame = Frame;
+
+export interface VisionCameraPermissionState {
+  readonly hasPermission: boolean;
+  requestPermission(): Promise<boolean>;
+}
+
+export interface VisionCameraFrameSize {
+  readonly height: number;
+  readonly width: number;
+}
+
+/**
+ * Presents a completed frame and always releases its native buffer afterwards.
+ *
+ * This is exported for advanced custom VisionCamera bindings; normal React
+ * consumers get the same lifecycle through `useVisionCameraFrameOutput()`.
+ */
+export function presentVisionCameraFrame<TFrame extends VisionCameraFrame>(
+  frame: TFrame,
+  frameRenderer: Pick<FrameRenderer, "renderFrame">,
+  processFrame: (frame: TFrame) => boolean,
+): void {
+  "worklet";
+
+  try {
+    if (processFrame(frame)) {
+      frameRenderer.renderFrame(frame as unknown as Frame);
+    }
+  } finally {
+    frame.dispose();
+  }
+}
+
+/**
+ * Resolves the upright detection coordinate space for VisionCamera's reported
+ * frame orientation. The camera buffer remains native-oriented; only semantic
+ * detection coordinates are normalized here.
+ */
+export function resolveVisionCameraFrameSize(frame: {
+  readonly height: number;
+  readonly orientation: string;
+  readonly width: number;
+}): VisionCameraFrameSize {
+  "worklet";
+
+  if (frame.orientation === "left" || frame.orientation === "right") {
+    return {
+      height: frame.width,
+      width: frame.height,
+    };
+  }
+
+  return {
+    height: frame.height,
+    width: frame.width,
+  };
+}
+
+/** Builds the native presentation transform that matches the camera orientation. */
+export function resolveVisionCameraFrameRendererStyle(options: {
+  readonly canvasHeight: number;
+  readonly canvasWidth: number;
+  readonly orientation: string;
+}): ViewStyle {
+  if (options.orientation === "left" || options.orientation === "right") {
+    return {
+      height: options.canvasWidth,
+      left: (options.canvasWidth - options.canvasHeight) / 2,
+      position: "absolute",
+      top: (options.canvasHeight - options.canvasWidth) / 2,
+      transform: [
+        { rotate: options.orientation === "left" ? "90deg" : "-90deg" },
+      ],
+      width: options.canvasHeight,
+    };
+  }
+
+  return {
+    bottom: 0,
+    left: 0,
+    position: "absolute",
+    right: 0,
+    top: 0,
+    transform: options.orientation === "down" ? [{ rotate: "180deg" }] : [],
+  };
 }
 
 const LIVE_CAPABILITIES: MediaSessionCapabilities = {
@@ -152,7 +271,7 @@ export function createVisionCameraLiveSource<TFrame extends VisionCameraFrame>(
  */
 export function useVisionCameraFrameOutput<TFrame extends VisionCameraFrame>(
   options: VisionCameraFrameOutputOptions<TFrame>,
-): CameraFrameOutput {
+): VisionCameraFrameOutputBinding {
   let visionCamera: VisionCameraModule;
 
   try {
@@ -166,16 +285,31 @@ export function useVisionCameraFrameOutput<TFrame extends VisionCameraFrame>(
     );
   }
 
-  return visionCamera.useFrameOutput({
-    allowDeferredStart: false,
-    dropFramesWhileBusy: true,
-    enablePhysicalBufferRotation: false,
-    enablePreviewSizedOutputBuffers: true,
-    onFrame: options.onFrame,
-    onFrameDropped: options.onFrameDropped,
-    pixelFormat: "rgb",
-    targetResolution: options.targetResolution,
-  });
+  const frameRenderer = useVisionCameraFrameRenderer();
+  const onFrame = useCallback(
+    (frame: Frame) => {
+      "worklet";
+
+      presentVisionCameraFrame(frame, frameRenderer, (nextFrame) =>
+        options.onFrame(nextFrame as unknown as TFrame),
+      );
+    },
+    [frameRenderer, options.onFrame],
+  );
+
+  return {
+    frameOutput: visionCamera.useFrameOutput({
+      allowDeferredStart: false,
+      dropFramesWhileBusy: true,
+      enablePhysicalBufferRotation: false,
+      enablePreviewSizedOutputBuffers: true,
+      onFrame,
+      onFrameDropped: options.onFrameDropped,
+      pixelFormat: "rgb",
+      targetResolution: options.targetResolution,
+    }),
+    frameRenderer,
+  };
 }
 
 /** Returns the optional VisionCamera native frame renderer with a stable error. */
@@ -183,6 +317,22 @@ export function useVisionCameraFrameRenderer(): FrameRenderer {
   const visionCamera = loadVisionCamera();
 
   return visionCamera.useFrameRenderer();
+}
+
+/** Returns the optional VisionCamera device hook through the package boundary. */
+export function useVisionCameraDevice(
+  position: "back" | "front" | "external" | "unspecified",
+): CameraDevice | undefined {
+  const visionCamera = loadVisionCamera();
+
+  return visionCamera.useCameraDevice(position);
+}
+
+/** Returns the optional VisionCamera permission hook through the package boundary. */
+export function useVisionCameraPermission(): VisionCameraPermissionState {
+  const visionCamera = loadVisionCamera();
+
+  return visionCamera.useCameraPermission();
 }
 
 /** Package-owned view binding for a VisionCamera native frame renderer. */
@@ -194,19 +344,59 @@ export function VisionCameraFrameRendererView(
   return createElement(visionCamera.NativeFrameRendererView, props);
 }
 
+/**
+ * Package-owned VisionCamera scene binding for the live preview and its
+ * strict-sync rendered surface. Hosts supply session/producer state only;
+ * the optional adapter owns the vendor component composition.
+ */
+export function VisionCameraLiveView(
+  props: VisionCameraLiveViewProps,
+): ReactElement {
+  const visionCamera = loadVisionCamera();
+
+  return createElement(
+    Fragment,
+    null,
+    createElement(visionCamera.Camera, {
+      device: props.device,
+      isActive: props.isActive,
+      orientationSource: props.orientationSource,
+      outputs: props.outputs,
+      style: props.cameraStyle,
+    }),
+    createElement(visionCamera.NativeFrameRendererView, {
+      renderer: props.frameRenderer,
+      style: props.frameRendererStyle,
+    }),
+  );
+}
+
 interface VisionCameraModule {
+  Camera: ComponentType<VisionCameraCameraProps>;
   NativeFrameRendererView: ComponentType<VisionCameraFrameRendererViewProps>;
-  useFrameOutput<TFrame extends VisionCameraFrame>(config: {
+  useFrameOutput(config: {
     allowDeferredStart: boolean;
     dropFramesWhileBusy: boolean;
     enablePhysicalBufferRotation: boolean;
     enablePreviewSizedOutputBuffers: boolean;
-    onFrame(frame: TFrame): void;
+    onFrame(frame: Frame): void;
     onFrameDropped?: () => void;
     pixelFormat: "rgb";
-    targetResolution: VisionCameraFrameOutputOptions<TFrame>["targetResolution"];
+    targetResolution: VisionCameraFrameOutputOptions<Frame>["targetResolution"];
   }): CameraFrameOutput;
+  useCameraDevice(
+    position: "back" | "front" | "external" | "unspecified",
+  ): CameraDevice | undefined;
+  useCameraPermission(): VisionCameraPermissionState;
   useFrameRenderer(): FrameRenderer;
+}
+
+interface VisionCameraCameraProps {
+  readonly device: CameraDevice;
+  readonly isActive: boolean;
+  readonly orientationSource?: "interface";
+  readonly outputs?: CameraFrameOutput[];
+  readonly style?: StyleProp<ViewStyle>;
 }
 
 function loadVisionCamera(): VisionCameraModule {
