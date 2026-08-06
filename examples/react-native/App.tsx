@@ -1845,12 +1845,12 @@ function VideoFileProof(props: {
   }, []);
 
   const startVideo = useCallback(
-    (fileUri: string) => {
+    async (fileUri: string) => {
       setVideoError(null);
       setVideoStats(null);
       setVideoDetections([]);
       setVideoStatus("opening");
-      videoSessionRef.current?.destroy();
+      await videoSessionRef.current?.destroy();
       videoSessionRef.current = null;
 
       try {
@@ -1901,7 +1901,7 @@ function VideoFileProof(props: {
         throw new Error("sample video has no local uri");
       }
 
-      startVideo(asset.localUri);
+      await startVideo(asset.localUri);
     } catch (error) {
       setVideoError(
         error instanceof Error ? error.message : "failed to load sample",
@@ -1922,7 +1922,7 @@ function VideoFileProof(props: {
         return;
       }
 
-      startVideo(uri);
+      await startVideo(uri);
     } catch (error) {
       setVideoError(
         error instanceof Error ? error.message : "failed to pick video",

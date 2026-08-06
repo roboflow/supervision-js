@@ -40,6 +40,7 @@ import { REACT_NATIVE_FILE_SESSION_DEFAULTS } from "./sessions/media-session-def
 import { createMediaSessionStateSnapshot } from "./sessions/media-session-state";
 import {
   MediaSessionError,
+  type MediaSessionErrorStage,
   type MediaSession,
   type MediaSessionState,
   type MediaSessionStateListener,
@@ -143,6 +144,11 @@ export interface ReactNativeVideoSessionEndEvent {
   readonly error?: string;
   /** True when the pump exited for a pause; `resume()` continues. */
   readonly paused: boolean;
+}
+
+/** Internal failure detail used to preserve generic session error stages. */
+interface ReactNativeVideoSessionPumpEndEvent extends ReactNativeVideoSessionEndEvent {
+  readonly stage?: MediaSessionErrorStage;
 }
 
 export interface ReactNativeVideoSessionMaskEffects {
@@ -294,19 +300,19 @@ function createReactNativeWorkletRuntime(
   return cameraWorklets.createWorkletRuntimeForThread(thread);
 }
 
-let defaultVideoFileWorkletRuntime: ReactNativeWorkletRuntimeHandle | null =
-  null;
+const idleVideoFileWorkletRuntimes: ReactNativeWorkletRuntimeHandle[] = [];
 
-function getDefaultVideoFileWorkletRuntime() {
-  if (!defaultVideoFileWorkletRuntime) {
-    // A native thread cannot be reclaimed before process exit. Keep one
-    // package-owned runtime rather than asking every screen to allocate one.
-    defaultVideoFileWorkletRuntime = createReactNativeWorkletRuntime(
-      "supervision-video-file-pump",
-    );
-  }
+function acquireVideoFileWorkletRuntime() {
+  return (
+    idleVideoFileWorkletRuntimes.pop() ??
+    createReactNativeWorkletRuntime("supervision-video-file-pump")
+  );
+}
 
-  return defaultVideoFileWorkletRuntime;
+function releaseVideoFileWorkletRuntime(
+  runtime: ReactNativeWorkletRuntimeHandle,
+) {
+  idleVideoFileWorkletRuntimes.push(runtime);
 }
 
 function resolveWorkletVendorModules(): WorkletVendorModules {
@@ -352,7 +358,7 @@ export function createReactNativeVideoFileSession(
 
   try {
     vendors = resolveWorkletVendorModules();
-    runtime = getDefaultVideoFileWorkletRuntime();
+    runtime = acquireVideoFileWorkletRuntime();
   } catch (error) {
     source.close();
     throw error;
@@ -408,6 +414,9 @@ export function createReactNativeVideoFileSession(
   let playing = true;
   let processing = true;
   let activePacketId: number | null = null;
+  let destroyPromise: Promise<void> | null = null;
+  let resolveDestroy: (() => void) | null = null;
+  let runtimeReleased = false;
   const getState = (): MediaSessionState =>
     createMediaSessionStateSnapshot({
       activeDetectionFrame: null,
@@ -435,13 +444,21 @@ export function createReactNativeVideoFileSession(
       listener(snapshot);
     }
   };
-  const reportFailure = (cause: string) => {
+  const releaseRuntime = () => {
+    if (runtimeReleased) {
+      return;
+    }
+
+    runtimeReleased = true;
+    releaseVideoFileWorkletRuntime(runtime);
+  };
+  const reportFailure = (cause: string, stage: MediaSessionErrorStage) => {
     if (destroyed) {
       return;
     }
 
-    error = new MediaSessionError("source-failed", cause, {
-      stage: "source",
+    error = new MediaSessionError(resolveErrorCode(stage), cause, {
+      stage,
     });
     playing = false;
     processing = false;
@@ -476,13 +493,13 @@ export function createReactNativeVideoFileSession(
       options.onStats?.(stats);
     }
   };
-  const reportEnded = (event: ReactNativeVideoSessionEndEvent) => {
+  const reportEnded = (event: ReactNativeVideoSessionPumpEndEvent) => {
     if (destroyed) {
       return;
     }
 
     if (event.error !== undefined) {
-      reportFailure(event.error);
+      reportFailure(event.error, event.stage ?? "source");
     } else {
       playing = false;
       processing = false;
@@ -490,7 +507,16 @@ export function createReactNativeVideoFileSession(
       emit();
     }
 
+    if (!event.paused) {
+      releaseRuntime();
+    }
+
     options.onEnded?.(event);
+  };
+  const reportCleanupComplete = () => {
+    releaseRuntime();
+    resolveDestroy?.();
+    resolveDestroy = null;
   };
 
   const runPump = () => {
@@ -505,9 +531,11 @@ export function createReactNativeVideoFileSession(
     let lastStatsAt = 0;
     let processedFrames = 0;
     let endReason = "";
+    let failureStage: MediaSessionErrorStage = "source";
 
     try {
       while (playingShared.value) {
+        failureStage = "source";
         const handle = pumpSource.copyNextFrame();
 
         if (!handle) {
@@ -515,6 +543,7 @@ export function createReactNativeVideoFileSession(
         }
 
         const tickStartedAt = Date.now();
+        failureStage = "processor";
         const detections = serializeFrame(
           handle,
           returnMasksAtOriginalResolution,
@@ -541,6 +570,8 @@ export function createReactNativeVideoFileSession(
           : undefined;
         const mediaRect = mediaRectShared.value;
         let preparedMask: ReactNativeSkiaMaskFrame | null = null;
+
+        failureStage = "renderer";
 
         try {
           preparedMask = createReactNativeSkiaMaskFrame({
@@ -687,6 +718,7 @@ export function createReactNativeVideoFileSession(
       scheduleOnRN(reportEnded, {
         error: endReason === "" ? undefined : endReason,
         paused,
+        stage: endReason === "" ? undefined : failureStage,
       });
     }
   };
@@ -695,13 +727,17 @@ export function createReactNativeVideoFileSession(
   const cleanupPackets = () => {
     "worklet";
 
-    frameImage.value = null;
-    maskImage.value = null;
-    maskUniforms.value = emptyUniforms;
-    const preparedFrameStore = createPreparedFrameStore();
+    try {
+      frameImage.value = null;
+      maskImage.value = null;
+      maskUniforms.value = emptyUniforms;
+      const preparedFrameStore = createPreparedFrameStore();
 
-    preparedFrameStoreState.value = { active: null, retired: null };
-    preparedFrameStore.disposeNow();
+      preparedFrameStoreState.value = { active: null, retired: null };
+      preparedFrameStore.disposeNow();
+    } finally {
+      scheduleOnRN(reportCleanupComplete);
+    }
   };
 
   const schedulePump = () => {
@@ -752,17 +788,20 @@ export function createReactNativeVideoFileSession(
     timeline,
     destroy() {
       if (destroyed) {
-        return Promise.resolve();
+        return destroyPromise ?? Promise.resolve();
       }
 
       haltPump(false);
       destroyed = true;
       playing = false;
       processing = false;
+      destroyPromise = new Promise((resolve) => {
+        resolveDestroy = resolve;
+      });
       vendors.scheduleOnRuntime(runtime as never, cleanupPackets);
       emit();
       listeners.clear();
-      return Promise.resolve();
+      return destroyPromise;
     },
     getState,
     pause() {
@@ -874,3 +913,15 @@ export function createReactNativeVideoFileSession(
  * alias remains until consumers migrate to the common MediaSession surface.
  */
 export const createReactNativeVideoSession = createReactNativeVideoFileSession;
+
+function resolveErrorCode(stage: MediaSessionErrorStage) {
+  if (stage === "processor") {
+    return "processor-failed" as const;
+  }
+
+  if (stage === "renderer") {
+    return "renderer-failed" as const;
+  }
+
+  return "source-failed" as const;
+}
