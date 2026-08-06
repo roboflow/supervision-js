@@ -77,7 +77,6 @@ import {
 } from "supervision-js-react-native";
 import {
   useVisionCameraFrameOutput,
-  useVisionCameraFrameRenderer,
   VisionCameraFrameRendererView,
 } from "supervision-js-react-native/adapters/vision-camera";
 import {
@@ -1217,7 +1216,6 @@ function LiveCameraProof(props: {
     readonly timestamp: number;
   } | null>(null);
   const instantRequestIdRef = useRef(0);
-  const frameRenderer = useVisionCameraFrameRenderer();
   const canvasWidth = window.width;
   const canvasHeight = window.height;
   const isInstantPrivacy = isInstantCv && instantRecipe === "privacy";
@@ -2044,6 +2042,7 @@ function LiveCameraProof(props: {
       "worklet";
 
       let stage = "start";
+      let shouldPresent = false;
 
       try {
         const syncMode = "synced";
@@ -2256,8 +2255,8 @@ function LiveCameraProof(props: {
           lastShaderActive.value = false;
 
           stage = "render-synced-frame";
-          frameRenderer.renderFrame(frame);
           lastPresentedFrame.value = true;
+          shouldPresent = true;
         } else if (shouldRunInference) {
           const inferenceStartedAt = Date.now();
 
@@ -2624,8 +2623,8 @@ function LiveCameraProof(props: {
               namespace: "rn-live",
             },
             () => {
-              frameRenderer.renderFrame(frame);
               lastPresentedFrame.value = true;
+              shouldPresent = true;
             },
           );
         }
@@ -2664,6 +2663,8 @@ function LiveCameraProof(props: {
             visibleKeypointCount: lastVisibleKeypointCount.value,
           });
         }
+
+        return shouldPresent;
       } catch (error) {
         if (Date.now() - lastErrorReportAt.value > 250) {
           lastErrorReportAt.value = Date.now();
@@ -2672,8 +2673,7 @@ function LiveCameraProof(props: {
             createLiveFrameError(stage, error, frame),
           );
         }
-      } finally {
-        frame.dispose();
+        return false;
       }
     },
     [
@@ -2681,7 +2681,6 @@ function LiveCameraProof(props: {
       emptyLiveMaskImage,
       emptyLiveMaskUniforms,
       emptyLiveVectorPicture,
-      frameRenderer,
       lastArtifactBytes,
       lastArtifactHeight,
       lastArtifactWidth,
@@ -2731,13 +2730,14 @@ function LiveCameraProof(props: {
     ],
   );
 
-  const inferenceFrameOutput = useVisionCameraFrameOutput({
-    onFrame: onLiveInferenceFrame,
-    onFrameDropped() {
-      reportDroppedFrame();
-    },
-    targetResolution: LIVE_FRAME_TARGET_RESOLUTION,
-  });
+  const { frameOutput: inferenceFrameOutput, frameRenderer } =
+    useVisionCameraFrameOutput({
+      onFrame: onLiveInferenceFrame,
+      onFrameDropped() {
+        reportDroppedFrame();
+      },
+      targetResolution: LIVE_FRAME_TARGET_RESOLUTION,
+    });
 
   const cameraOutputs = useMemo(
     () => [inferenceFrameOutput],
