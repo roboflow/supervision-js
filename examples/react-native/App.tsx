@@ -76,6 +76,7 @@ import {
   createDemoPolygonStyle,
 } from "./src/demo-presentation";
 import {
+  createReactNativeWorkletFrameDebugArgs,
   runWithWorkletDebugLogging,
   serializeDebugError,
 } from "supervision-js-react-native/worklet-debug";
@@ -1557,7 +1558,7 @@ function LiveCameraProof(props: {
           const poseStartedAt = Date.now();
           const rawPoses = runWithWorkletDebugLogging(
             {
-              args: createLiveFrameDebugArgs(stage, frame),
+              args: createReactNativeWorkletFrameDebugArgs(stage, frame),
               description: "run YOLO26N pose on camera frame",
               namespace: "rn-live",
             },
@@ -1751,7 +1752,7 @@ function LiveCameraProof(props: {
           const segmentationStartedAt = Date.now();
           const rawDetections = runWithWorkletDebugLogging(
             {
-              args: createLiveFrameDebugArgs(stage, frame),
+              args: createReactNativeWorkletFrameDebugArgs(stage, frame),
               description: "run RF-DETR segmentation on camera frame",
               namespace: "rn-live",
             },
@@ -3406,32 +3407,6 @@ function createLiveFrameError(
     isPlanar: frame.isPlanar,
     message: serialized.message,
     name: serialized.name,
-    stage,
-  };
-}
-
-function createLiveFrameDebugArgs(
-  stage: string,
-  frame: {
-    readonly hasNativeBuffer: boolean;
-    readonly hasPixelBuffer: boolean;
-    readonly height: number;
-    readonly isPlanar: boolean;
-    readonly pixelFormat: string;
-    readonly timestamp: number;
-    readonly width: number;
-  },
-) {
-  "worklet";
-
-  return {
-    frameHeight: frame.height,
-    framePixelFormat: frame.pixelFormat,
-    frameTimestamp: frame.timestamp,
-    frameWidth: frame.width,
-    hasNativeBuffer: frame.hasNativeBuffer,
-    hasPixelBuffer: frame.hasPixelBuffer,
-    isPlanar: frame.isPlanar,
     stage,
   };
 }
