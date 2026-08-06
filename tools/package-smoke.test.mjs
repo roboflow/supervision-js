@@ -326,6 +326,13 @@ test("built React Native subpath entries ship and resolve", async () => {
     await import("../packages/react-native/dist/media-session.js");
 
   assert.equal(typeof adapters.unrotateExecutorchUpBbox, "function");
+  assert.deepEqual(Object.keys(adapters).sort(), [
+    "EXECUTORCH_COCO_KEYPOINT_NAMES",
+    "EXECUTORCH_COCO_SKELETON_EDGES",
+    "createDetectionFrameFromExecutorchCocoPoses",
+    "createExecutorchVideoFrameSerializer",
+    "unrotateExecutorchUpBbox",
+  ]);
   assert.deepEqual(
     adapters.unrotateExecutorchUpBbox({ x1: 1, y1: 2, x2: 3, y2: 4 }, 10),
     { x1: 2, y1: 7, x2: 4, y2: 9 },

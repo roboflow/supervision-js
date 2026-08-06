@@ -123,6 +123,41 @@ export interface ReactNativeVideoSessionMaskEffects {
   readonly spotlightMaskIds: readonly number[];
 }
 
+export type ReactNativeClassMaskEffect = "redact" | "spotlight";
+export type ReactNativeClassMaskEffects = Readonly<
+  Record<string, ReactNativeClassMaskEffect>
+>;
+
+/**
+ * Creates the package-owned worklet that maps host-selected class effects to
+ * the mask IDs for one presented video frame.
+ */
+export function createReactNativeClassMaskEffectsResolver(
+  classEffects: ReactNativeSharedValue<ReactNativeClassMaskEffects>,
+): (
+  detections: readonly ReactNativeLiveSerializedDetection[],
+) => ReactNativeVideoSessionMaskEffects {
+  return (detections) => {
+    "worklet";
+
+    const effects = classEffects.value;
+    const mosaicMaskIds: number[] = [];
+    const spotlightMaskIds: number[] = [];
+
+    for (let index = 0; index < detections.length; index += 1) {
+      const effect = effects[detections[index]!.label ?? ""];
+
+      if (effect === "redact") {
+        mosaicMaskIds[mosaicMaskIds.length] = index + 1;
+      } else if (effect === "spotlight") {
+        spotlightMaskIds[spotlightMaskIds.length] = index + 1;
+      }
+    }
+
+    return { mosaicMaskIds, spotlightMaskIds };
+  };
+}
+
 export interface ReactNativeVideoSessionPresentationOptions {
   readonly borderWidth?: number;
   readonly edgeSmoothing?: number;

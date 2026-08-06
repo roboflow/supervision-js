@@ -4,6 +4,7 @@ import { KeypointVisibility } from "supervision-js-core";
 
 import {
   createDetectionFrameFromExecutorchCocoPoses,
+  createExecutorchVideoFrameSerializer,
   EXECUTORCH_COCO_KEYPOINT_NAMES,
   unrotateExecutorchUpBbox,
   type ExecutorchBbox,
@@ -118,5 +119,81 @@ describe("createDetectionFrameFromExecutorchCocoPoses", () => {
     });
 
     expect(frame.detections).toEqual([]);
+  });
+});
+
+describe("createExecutorchVideoFrameSerializer", () => {
+  it("keeps decoded video handles alive while restoring upright detections", () => {
+    const runOnFrame = (
+      frame: { getNativeBuffer(): { pointer: bigint; release(): void } },
+      mirrorFrame: boolean,
+      options: {
+        confidenceThreshold: number;
+        maxInstances: number;
+        returnMaskAtOriginalResolution: boolean;
+      },
+    ) => {
+      expect(frame.getNativeBuffer().pointer).toBe(42n);
+      expect(mirrorFrame).toBe(false);
+      expect(options).toEqual({
+        confidenceThreshold: 0.45,
+        maxInstances: 4,
+        returnMaskAtOriginalResolution: false,
+      });
+
+      return [
+        {
+          bbox: { x1: 100, y1: 20, x2: 300, y2: 80 },
+          label: "person",
+          mask: new Uint8Array([1]),
+          maskHeight: 1,
+          maskWidth: 1,
+          score: 0.9,
+        },
+      ];
+    };
+    const serialize = createExecutorchVideoFrameSerializer({
+      maxInstances: 4,
+      runOnFrame,
+    });
+
+    expect(
+      serialize(
+        {
+          height: 200,
+          pointer: 42n,
+          release: () => {},
+          timestampMs: 0,
+          width: 100,
+        },
+        false,
+      ),
+    ).toMatchObject([
+      {
+        bbox: { x1: 20, x2: 80, y1: -100, y2: 100 },
+        label: "person",
+        maskRotatedCw: true,
+        score: 0.9,
+      },
+    ]);
+  });
+
+  it("returns no detections while the host model is unavailable", () => {
+    const serialize = createExecutorchVideoFrameSerializer({
+      runOnFrame: null,
+    });
+
+    expect(
+      serialize(
+        {
+          height: 100,
+          pointer: 0n,
+          release: () => {},
+          timestampMs: 0,
+          width: 100,
+        },
+        true,
+      ),
+    ).toEqual([]);
   });
 });
