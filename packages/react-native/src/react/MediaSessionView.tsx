@@ -41,6 +41,7 @@ import {
   getStaticBindingState,
   type ReactNativeMediaSessionViewBinding,
 } from "./static-media-session-binding";
+import { resolveReactNativeSkiaLabelFontStyle } from "./label-font";
 
 interface SceneRect {
   readonly height: number;
@@ -335,8 +336,9 @@ function createSceneLabels(
   layout: ReturnType<typeof resolveReactNativeFrameLayout>,
 ): readonly SceneLabel[] {
   return labels.map((label, index) => {
-    const fontSize = label.textStyle?.fontSize ?? 13;
-    const font = matchFont({ fontSize });
+    const font = matchFont(
+      resolveReactNativeSkiaLabelFontStyle(label.textStyle),
+    );
     const bounds = font.measureText(label.text);
     const metrics = font.getMetrics();
     const labelLayout = resolveReactNativeLabelLayout({
