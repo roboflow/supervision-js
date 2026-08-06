@@ -256,14 +256,7 @@ function createDemoKeypointStyle(
 function createDemoBoxStyle(settings: DemoPresentationSettings): BoxStyle {
   return {
     resolve(detection: Detection): BoxDrawInstruction | undefined {
-      if (
-        !detection.rect ||
-        detection.mask ||
-        detection.polygon ||
-        detection.polyline ||
-        detection.keypoints ||
-        !passesConfidenceThreshold(detection, settings)
-      ) {
+      if (!detection.rect || !passesConfidenceThreshold(detection, settings)) {
         return undefined;
       }
 
@@ -571,14 +564,7 @@ function createDemoInteractionBoxStyle(
 ): BoxStyle {
   return {
     resolve(detection: Detection): BoxDrawInstruction | undefined {
-      if (
-        !detection.rect ||
-        detection.mask ||
-        detection.polygon ||
-        detection.polyline ||
-        detection.keypoints ||
-        !passesConfidenceThreshold(detection, settings)
-      ) {
+      if (!detection.rect || !passesConfidenceThreshold(detection, settings)) {
         return undefined;
       }
 
