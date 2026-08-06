@@ -18,6 +18,7 @@ import {
 import {
   Fragment,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -116,7 +117,7 @@ function useCommittedSkiaResource<T>(
   });
   const unmountDisposal = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (unmountDisposal.current) {
       clearTimeout(unmountDisposal.current);
       unmountDisposal.current = null;
@@ -136,7 +137,7 @@ function useCommittedSkiaResource<T>(
     setRenderedResource({ key, resource: next });
   }, [dispose, key]);
 
-  useEffect(
+  useLayoutEffect(
     () => () => {
       const currentOwnership = ownership.current;
       const disposal = setTimeout(() => {
