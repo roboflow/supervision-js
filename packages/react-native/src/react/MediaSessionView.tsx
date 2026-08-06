@@ -190,6 +190,12 @@ export function MediaSessionView(props: MediaSessionViewProps) {
 
   useEffect(() => () => disposeReactNativeSkiaImage(maskImage), [maskImage]);
   useEffect(
+    () => () => {
+      maskEffect?.dispose();
+    },
+    [maskEffect],
+  );
+  useEffect(
     () => () => disposeReactNativeSkiaPicture(vectorFrame?.picture),
     [vectorFrame],
   );
