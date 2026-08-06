@@ -84,19 +84,34 @@ function disposeReactNativeSkiaRuntimeEffect(
   effect?.dispose();
 }
 
+const UNINITIALIZED_RESOURCE_KEY = Symbol("uninitialized-resource-key");
+
 /**
- * Keeps a native drawing resource alive for the presentation that replaced it.
+ * Creates and owns a native drawing resource after React commits.
  *
- * React Native Skia can still draw the prior scene after React has committed a
- * replacement. Deferred unmount disposal also makes the ownership resilient to
- * React Strict Mode's development effect replay.
+ * React can discard render-time `useMemo` values in Strict Mode or concurrent
+ * rendering, so allocating disposable Skia resources during render leaks them.
+ * The owner retains a replaced resource for one presentation and defers final
+ * unmount disposal so React Strict Mode's immediate effect replay can cancel it.
  */
-function useRetainedSkiaResource<T>(
-  resource: T | null,
+function useCommittedSkiaResource<T>(
+  key: unknown,
+  create: () => T | null,
   dispose: (resource: T | null) => void,
 ) {
-  const ownership = useRef<{ current: T | null; retired: T | null }>({
+  const [renderedResource, setRenderedResource] = useState<{
+    key: unknown;
+    resource: T | null;
+  }>({ key: UNINITIALIZED_RESOURCE_KEY, resource: null });
+  const createRef = useRef(create);
+  createRef.current = create;
+  const ownership = useRef<{
+    current: T | null;
+    key: unknown;
+    retired: T | null;
+  }>({
     current: null,
+    key: UNINITIALIZED_RESOURCE_KEY,
     retired: null,
   });
   const unmountDisposal = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -109,31 +124,39 @@ function useRetainedSkiaResource<T>(
 
     const currentOwnership = ownership.current;
 
-    if (currentOwnership.current === resource) {
+    if (currentOwnership.key === key) {
       return;
     }
 
+    const next = createRef.current();
     dispose(currentOwnership.retired);
     currentOwnership.retired = currentOwnership.current;
-    currentOwnership.current = resource;
-  }, [dispose, resource]);
+    currentOwnership.current = next;
+    currentOwnership.key = key;
+    setRenderedResource({ key, resource: next });
+  }, [dispose, key]);
 
   useEffect(
     () => () => {
       const currentOwnership = ownership.current;
-      const current = currentOwnership.current;
-      const retired = currentOwnership.retired;
+      const disposal = setTimeout(() => {
+        if (unmountDisposal.current !== disposal) {
+          return;
+        }
 
-      currentOwnership.current = null;
-      currentOwnership.retired = null;
-      unmountDisposal.current = setTimeout(() => {
         unmountDisposal.current = null;
-        dispose(current);
-        dispose(retired);
+        dispose(currentOwnership.current);
+        dispose(currentOwnership.retired);
+        currentOwnership.current = null;
+        currentOwnership.key = UNINITIALIZED_RESOURCE_KEY;
+        currentOwnership.retired = null;
       }, 0);
+      unmountDisposal.current = disposal;
     },
     [dispose],
   );
+
+  return renderedResource.key === key ? renderedResource.resource : null;
 }
 
 export interface MediaSessionViewProps {
@@ -186,27 +209,30 @@ export function MediaSessionView(props: MediaSessionViewProps) {
       }),
     [presentation.mediaMetadata, props.height, props.width],
   );
-  const maskImage = useMemo(() => {
-    const artifact = state.packet.maskArtifact;
+  const maskImage = useCommittedSkiaResource(
+    state.packet.maskArtifact,
+    () => {
+      const artifact = state.packet.maskArtifact;
 
-    if (!artifact) {
-      return null;
-    }
-
-    return Skia.Image.MakeImage(
-      {
-        alphaType: AlphaType.Opaque,
-        colorType: ColorType.Alpha_8,
-        height: artifact.height,
-        width: artifact.width,
-      },
-      Skia.Data.fromBytes(artifact.data),
-      artifact.width,
-    );
-  }, [state.packet.maskArtifact]);
-  const maskEffect = useMemo(
+      return artifact
+        ? Skia.Image.MakeImage(
+            {
+              alphaType: AlphaType.Opaque,
+              colorType: ColorType.Alpha_8,
+              height: artifact.height,
+              width: artifact.width,
+            },
+            Skia.Data.fromBytes(artifact.data),
+            artifact.width,
+          )
+        : null;
+    },
+    disposeReactNativeSkiaImage,
+  );
+  const maskEffect = useCommittedSkiaResource(
+    REACT_NATIVE_ID_MASK_SHADER_SOURCE,
     () => Skia.RuntimeEffect.Make(REACT_NATIVE_ID_MASK_SHADER_SOURCE),
-    [],
+    disposeReactNativeSkiaRuntimeEffect,
   );
   const maskUniforms = useMemo(() => {
     const artifact = state.packet.maskArtifact;
@@ -249,7 +275,18 @@ export function MediaSessionView(props: MediaSessionViewProps) {
     () => createSceneLabels(presentation.labels, layout),
     [layout, presentation.labels],
   );
-  const vectorFrame = useMemo(
+  const vectorFrameKey = useMemo(
+    () =>
+      ({
+        layout: layout.mediaRect,
+        presentation,
+        showKeypoints: props.showKeypoints,
+        showPolygons: props.showPolygons,
+      }) as const,
+    [layout.mediaRect, presentation, props.showKeypoints, props.showPolygons],
+  );
+  const vectorFrame = useCommittedSkiaResource(
+    vectorFrameKey,
     () =>
       createReactNativeSkiaVectorFrame({
         frameHeight: presentation.mediaMetadata.height,
@@ -258,14 +295,7 @@ export function MediaSessionView(props: MediaSessionViewProps) {
         mediaRect: layout.mediaRect,
         polygons: props.showPolygons === false ? [] : presentation.polygons,
         polylines: presentation.polylines,
-      }),
-    [layout.mediaRect, presentation, props.showKeypoints, props.showPolygons],
-  );
-
-  useRetainedSkiaResource(maskImage, disposeReactNativeSkiaImage);
-  useRetainedSkiaResource(maskEffect, disposeReactNativeSkiaRuntimeEffect);
-  useRetainedSkiaResource(
-    vectorFrame?.picture ?? null,
+      })?.picture ?? null,
     disposeReactNativeSkiaPicture,
   );
 
@@ -337,7 +367,7 @@ export function MediaSessionView(props: MediaSessionViewProps) {
             </Shader>
           </Rect>
         ) : null}
-        {vectorFrame ? <Picture picture={vectorFrame.picture} /> : null}
+        {vectorFrame ? <Picture picture={vectorFrame} /> : null}
         {props.showBoxes !== false
           ? boxes.map((box) => <SceneBox key={box.key} box={box} />)
           : null}
