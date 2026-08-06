@@ -6,6 +6,7 @@ import type {
   MediaSessionStateListener as CoreMediaSessionStateListener,
   MediaSessionStateUnsubscribe as CoreMediaSessionStateUnsubscribe,
   MediaTimelineMetadata,
+  MediaSourceStatus,
 } from "supervision-js-core";
 
 import type { MediaFrameProcessor } from "./frame-processor";
@@ -27,6 +28,16 @@ export type MediaSessionErrorCode =
   | "source-open-failed"
   | "unsupported-operation";
 
+export type MediaSessionErrorStage =
+  "control" | "processor" | "renderer" | "source" | "source-open";
+
+/** Stable failure detail included in state snapshots without native causes. */
+export interface MediaSessionErrorState {
+  readonly code: MediaSessionErrorCode;
+  readonly message: string;
+  readonly stage: MediaSessionErrorStage;
+}
+
 /** Stable error shape for host UI, logs, and tests. */
 export class MediaSessionError extends Error {
   readonly code: MediaSessionErrorCode;
@@ -34,17 +45,25 @@ export class MediaSessionError extends Error {
   constructor(
     code: MediaSessionErrorCode,
     message: string,
-    options?: { readonly cause?: unknown },
+    options?: {
+      readonly cause?: unknown;
+      readonly stage?: MediaSessionErrorStage;
+    },
   ) {
     super(message, options);
     this.name = "MediaSessionError";
     this.code = code;
+    this.stage = options?.stage ?? resolveErrorStage(code);
   }
+
+  readonly stage: MediaSessionErrorStage;
 }
 
 export interface MediaSessionMediaState {
   readonly capabilities: MediaSessionCapabilities;
+  readonly error: MediaSessionErrorState | null;
   readonly opened: boolean;
+  readonly sourceStatus: MediaSourceStatus;
   readonly timeline: MediaTimelineMetadata;
 }
 
@@ -65,6 +84,28 @@ export interface MediaSessionOptions<TPayload, TPacket extends object> {
   readonly processor: MediaFrameProcessor<TPayload>;
   readonly renderer: MediaRendererAdapter<TPayload, TPacket>;
   readonly source: MediaFrameSource<TPayload>;
+}
+
+function resolveErrorStage(
+  code: MediaSessionErrorCode,
+): MediaSessionErrorStage {
+  if (code === "processor-failed") {
+    return "processor";
+  }
+
+  if (code === "renderer-failed") {
+    return "renderer";
+  }
+
+  if (code === "source-open-failed") {
+    return "source-open";
+  }
+
+  if (code === "source-failed") {
+    return "source";
+  }
+
+  return "control";
 }
 
 /**

@@ -39,6 +39,8 @@ export {
   MediaSessionError,
   type MediaSession,
   type MediaSessionErrorCode,
+  type MediaSessionErrorStage,
+  type MediaSessionErrorState,
   type MediaSessionMediaState,
   type MediaSessionOptions,
   type MediaSessionState,

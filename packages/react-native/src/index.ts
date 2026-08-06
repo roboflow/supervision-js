@@ -108,6 +108,8 @@ export { MediaSessionError } from "./types/media-session";
 export type {
   MediaSession,
   MediaSessionErrorCode,
+  MediaSessionErrorStage,
+  MediaSessionErrorState,
   MediaSessionMediaState,
   MediaSessionOptions,
   MediaSessionState,
