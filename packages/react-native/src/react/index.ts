@@ -15,6 +15,7 @@ export {
   type UseMediaSessionResult,
 } from "./use-media-session";
 export { useReactNativeLiveCameraBinding } from "./use-live-camera-binding";
+export { scheduleReactNativeOnJs } from "./worklet-bridge";
 export {
   createReactNativeLiveStageOverlays,
   createReactNativeLiveDetectionStageOverlays,

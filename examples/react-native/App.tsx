@@ -12,7 +12,6 @@ import {
   View,
 } from "react-native";
 import { useSharedValue } from "react-native-reanimated";
-import { scheduleOnRN } from "react-native-worklets";
 import { Asset } from "expo-asset";
 import * as ImagePicker from "expo-image-picker";
 import {
@@ -49,6 +48,7 @@ import {
   ReactNativeVideoFrameStage,
   useReactNativeLiveSkiaPresentation,
   useReactNativeLiveCameraBinding,
+  scheduleReactNativeOnJs,
 } from "supervision-js-react-native/react";
 import {
   createReactNativeClassMaskEffectsResolver,
@@ -1639,7 +1639,10 @@ function LiveCameraProof(props: {
 
             if (instantSignature !== instantRuntimeSignatureShared.value) {
               instantRuntimeSignatureShared.value = instantSignature;
-              scheduleOnRN(reportInstantCvRuntime, nextInstantRuntime);
+              scheduleReactNativeOnJs(
+                reportInstantCvRuntime,
+                nextInstantRuntime,
+              );
             }
 
             const instantTouchRequest = instantTouchRequestShared.value;
@@ -1662,7 +1665,7 @@ function LiveCameraProof(props: {
                 : null;
 
               if (pose && baselineAngles) {
-                scheduleOnRN(reportInstantCvPick, {
+                scheduleReactNativeOnJs(reportInstantCvPick, {
                   baselineAngles,
                   baselinePoints: pose.points.map((point) => ({
                     visible: point.visible,
@@ -1673,7 +1676,7 @@ function LiveCameraProof(props: {
                   requestId: instantTouchRequest.id,
                 });
               } else {
-                scheduleOnRN(reportInstantCvPick, {
+                scheduleReactNativeOnJs(reportInstantCvPick, {
                   kind: "miss",
                   requestId: instantTouchRequest.id,
                 });
@@ -1707,7 +1710,7 @@ function LiveCameraProof(props: {
             };
           }
 
-          scheduleOnRN(reportLiveDetections, overlayDetections);
+          scheduleReactNativeOnJs(reportLiveDetections, overlayDetections);
           const serializationMs = Date.now() - serializationStartedAt;
           stage = "pose-prepare-vector";
           const preparedVector = livePresentation.prepareVector({
@@ -1836,7 +1839,10 @@ function LiveCameraProof(props: {
 
             if (instantSignature !== instantRuntimeSignatureShared.value) {
               instantRuntimeSignatureShared.value = instantSignature;
-              scheduleOnRN(reportInstantCvRuntime, nextInstantRuntime);
+              scheduleReactNativeOnJs(
+                reportInstantCvRuntime,
+                nextInstantRuntime,
+              );
             }
 
             const instantTouchRequest = instantTouchRequestShared.value;
@@ -1855,7 +1861,7 @@ function LiveCameraProof(props: {
                 point: instantTouchRequest.point,
               });
 
-              scheduleOnRN(
+              scheduleReactNativeOnJs(
                 reportInstantCvPick,
                 pick
                   ? {
@@ -1892,7 +1898,7 @@ function LiveCameraProof(props: {
             };
           }
 
-          scheduleOnRN(reportLiveDetections, overlayDetections);
+          scheduleReactNativeOnJs(reportLiveDetections, overlayDetections);
 
           stage = "class-effects-filter";
           const masksDisplayed = showMaskLayerShared.value;
@@ -1984,7 +1990,7 @@ function LiveCameraProof(props: {
             } catch (error) {
               if (Date.now() - lastErrorReportAt.value > 250) {
                 lastErrorReportAt.value = Date.now();
-                scheduleOnRN(
+                scheduleReactNativeOnJs(
                   reportLiveError,
                   createLiveFrameError(stage, error, frame),
                 );
@@ -2094,7 +2100,7 @@ function LiveCameraProof(props: {
         if (Date.now() - lastReadoutReportAt.value > 250) {
           stage = "readout-report";
           lastReadoutReportAt.value = Date.now();
-          scheduleOnRN(reportLiveFrame, {
+          scheduleReactNativeOnJs(reportLiveFrame, {
             artifactBytes: lastArtifactBytes.value,
             artifactHeight: lastArtifactHeight.value,
             artifactWidth: lastArtifactWidth.value,
@@ -2130,7 +2136,7 @@ function LiveCameraProof(props: {
       } catch (error) {
         if (Date.now() - lastErrorReportAt.value > 250) {
           lastErrorReportAt.value = Date.now();
-          scheduleOnRN(
+          scheduleReactNativeOnJs(
             reportLiveError,
             createLiveFrameError(stage, error, frame),
           );
