@@ -133,7 +133,7 @@ describe("PreparedFrameStore", () => {
     expect(dispose.mock.calls.map(([next]) => next.packetId)).toEqual([2, 1]);
   });
 
-  it("transfers worklet-owned packets and disposes them synchronously", () => {
+  it("transfers worklet-owned packets across successive pump ticks", () => {
     const dispose = vi.fn();
     const initial = new PreparedFrameStore((next: Packet) =>
       dispose(next.packetId),
@@ -141,7 +141,7 @@ describe("PreparedFrameStore", () => {
 
     initial.presentNow(packet(1));
     initial.presentNow(packet(2));
-    const resumed = new PreparedFrameStore((next: Packet) =>
+    const secondTick = new PreparedFrameStore((next: Packet) =>
       dispose(next.packetId),
     );
 
@@ -150,9 +150,15 @@ describe("PreparedFrameStore", () => {
     initial.disposeNow();
     expect(dispose).not.toHaveBeenCalled();
 
-    resumed.restore(snapshot);
-    resumed.presentNow(packet(3));
-    resumed.disposeNow();
+    secondTick.restore(snapshot);
+    secondTick.presentNow(packet(3));
+    const secondSnapshot = secondTick.snapshot();
+    const finalTick = new PreparedFrameStore((next: Packet) =>
+      dispose(next.packetId),
+    );
+
+    finalTick.restore(secondSnapshot);
+    finalTick.disposeNow();
 
     expect(dispose.mock.calls.map(([id]) => id)).toEqual([1, 3, 2]);
   });
