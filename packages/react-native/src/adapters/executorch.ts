@@ -51,6 +51,133 @@ export type ExecutorchVideoFrameSerializer = (
 ) => ReactNativeLiveSerializedDetection[];
 
 /**
+ * Package-owned live segmentation producer. The host owns model loading and
+ * supplies only ExecuTorch's structural runner; the live session owns the
+ * frame-worklet invocation and renderer handoff.
+ */
+export interface ExecutorchLiveSegmentationProcessorOptions<
+  TRunOnFrame = unknown,
+> {
+  readonly confidenceThreshold?: number;
+  readonly maxInstances?: number;
+  readonly mirrorFrame?: boolean;
+  readonly returnMasksAtOriginalResolution?: boolean;
+  readonly runOnFrame: TRunOnFrame | null;
+}
+
+export interface ExecutorchLiveSegmentationProcessor {
+  process(frame: unknown): ReactNativeLiveSerializedDetection[];
+}
+
+/** Creates a worklet-safe segmentation processor for a live camera session. */
+export function createExecutorchLiveSegmentationProcessor<TRunOnFrame>(
+  options: ExecutorchLiveSegmentationProcessorOptions<TRunOnFrame>,
+): ExecutorchLiveSegmentationProcessor {
+  const runOnFrame =
+    options.runOnFrame as ExecutorchInstanceSegmentationRunner | null;
+  const confidenceThreshold = options.confidenceThreshold ?? 0.45;
+  const maxInstances = options.maxInstances ?? 6;
+  const mirrorFrame = options.mirrorFrame ?? false;
+  const returnMasksAtOriginalResolution =
+    options.returnMasksAtOriginalResolution ?? true;
+
+  return {
+    process(frame) {
+      "worklet";
+
+      if (runOnFrame === null) {
+        return [];
+      }
+
+      const rawDetections = runOnFrame(
+        frame as Parameters<ExecutorchInstanceSegmentationRunner>[0],
+        mirrorFrame,
+        {
+          confidenceThreshold,
+          maxInstances,
+          returnMaskAtOriginalResolution: returnMasksAtOriginalResolution,
+        },
+      );
+      const serialized: ReactNativeLiveSerializedDetection[] = [];
+
+      for (let index = 0; index < rawDetections.length; index += 1) {
+        const detection = rawDetections[index]!;
+        const label =
+          typeof detection.label === "string" ? detection.label : "";
+
+        serialized[index] = {
+          bbox: detection.bbox,
+          color: resolveDetectionClassColorStyle(label).fill,
+          label,
+          mask: detection.mask,
+          maskHeight: detection.maskHeight,
+          maskWidth: detection.maskWidth,
+          score: detection.score,
+        };
+      }
+
+      return serialized;
+    },
+  };
+}
+
+export interface ExecutorchLivePoseProcessorOptions<TRunOnFrame = unknown> {
+  readonly className?: string;
+  readonly detectionThreshold?: number;
+  readonly inputSize?: number;
+  readonly keypointThreshold?: number;
+  readonly minimumVisibleKeypoints?: number;
+  readonly runOnFrame: TRunOnFrame | null;
+}
+
+export interface ExecutorchLivePoseProcessor {
+  process(frame: { readonly timestamp: number }): DetectionFrame;
+}
+
+/** Creates a worklet-safe COCO pose processor for a live camera session. */
+export function createExecutorchLivePoseProcessor<TRunOnFrame>(
+  options: ExecutorchLivePoseProcessorOptions<TRunOnFrame>,
+): ExecutorchLivePoseProcessor {
+  const runOnFrame = options.runOnFrame as
+    | ((
+        frame: unknown,
+        mirrorFrame: boolean,
+        options: {
+          detectionThreshold: number;
+          inputSize: number;
+          keypointThreshold: number;
+        },
+      ) => readonly ExecutorchCocoPose[])
+    | null;
+  const className = options.className;
+  const detectionThreshold = options.detectionThreshold ?? 0.4;
+  const inputSize = options.inputSize ?? 384;
+  const keypointThreshold = options.keypointThreshold ?? 0.35;
+  const minimumVisibleKeypoints = options.minimumVisibleKeypoints;
+
+  return {
+    process(frame) {
+      "worklet";
+
+      const poses =
+        runOnFrame?.(frame, false, {
+          detectionThreshold,
+          inputSize,
+          keypointThreshold,
+        }) ?? [];
+
+      return createDetectionFrameFromExecutorchCocoPoses({
+        className,
+        frameIndex: Math.round(frame.timestamp),
+        mediaTime: frame.timestamp / 1_000_000_000,
+        minimumVisibleKeypoints,
+        poses,
+      });
+    },
+  };
+}
+
+/**
  * Converts the host's ExecuTorch segmentation runner into the saved-video
  * session processor. Native-buffer wrapping, upright-frame coordinate repair,
  * color resolution, and serialized mask ownership stay in the package so a

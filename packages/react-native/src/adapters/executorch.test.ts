@@ -4,6 +4,8 @@ import { KeypointVisibility } from "supervision-js-core";
 
 import {
   createDetectionFrameFromExecutorchCocoPoses,
+  createExecutorchLivePoseProcessor,
+  createExecutorchLiveSegmentationProcessor,
   createExecutorchVideoFrameSerializer,
   EXECUTORCH_COCO_KEYPOINT_NAMES,
   unrotateExecutorchUpBbox,
@@ -195,5 +197,65 @@ describe("createExecutorchVideoFrameSerializer", () => {
         true,
       ),
     ).toEqual([]);
+  });
+});
+
+describe("live ExecuTorch processors", () => {
+  it("serializes live segmentation through a package-owned processor", () => {
+    const processor = createExecutorchLiveSegmentationProcessor({
+      confidenceThreshold: 0.7,
+      maxInstances: 2,
+      runOnFrame: (
+        _frame: unknown,
+        mirror: boolean,
+        options: {
+          confidenceThreshold: number;
+          maxInstances: number;
+          returnMaskAtOriginalResolution: boolean;
+        },
+      ) => {
+        expect(mirror).toBe(false);
+        expect(options).toEqual({
+          confidenceThreshold: 0.7,
+          maxInstances: 2,
+          returnMaskAtOriginalResolution: true,
+        });
+        return [
+          {
+            bbox: { x1: 1, y1: 2, x2: 3, y2: 4 },
+            label: "person",
+            mask: new Uint8Array([1]),
+            maskHeight: 1,
+            maskWidth: 1,
+            score: 0.8,
+          },
+        ];
+      },
+    });
+
+    expect(processor.process({})).toMatchObject([
+      {
+        bbox: { x1: 1, y1: 2, x2: 3, y2: 4 },
+        label: "person",
+        score: 0.8,
+      },
+    ]);
+  });
+
+  it("normalizes live pose output into a core detection frame", () => {
+    const processor = createExecutorchLivePoseProcessor({
+      runOnFrame: () => [
+        {
+          LEFT_SHOULDER: { x: 10, y: 20 },
+          RIGHT_SHOULDER: { x: 30, y: 20 },
+          LEFT_HIP: { x: 12, y: 50 },
+        },
+      ],
+    });
+
+    expect(processor.process({ timestamp: 2_000_000_000 })).toMatchObject({
+      frameIndex: 2_000_000_000,
+      mediaTime: 2,
+    });
   });
 });

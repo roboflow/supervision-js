@@ -12,7 +12,7 @@ import {
   resolveInstantCvInferenceMode,
   type InstantCvPosePoint,
   type InstantCvRule,
-} from "./instant-cv";
+} from "./live-inference";
 
 function createPose(overrides: Partial<Record<number, [number, number]>> = {}) {
   const defaults: Record<number, [number, number]> = {

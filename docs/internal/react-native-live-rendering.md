@@ -21,7 +21,8 @@ that a host can feed live frames and detections into one render scene.
 - An inference producer, currently example-owned ExecuTorch RF-DETR Nano
   instance segmentation.
 - A hot prepared artifact path that does not round-trip through React state:
-  segmentation masks become one frame-level ID-mask image in the frame worklet.
+  the package-owned live-inference worklet turns segmentation masks into one
+  frame-level ID-mask image.
 - A Skia scene that draws:
   media frame image -> ID-mask shader artifact -> future interaction/debug layers.
 - Throttled readouts only. React may display diagnostics, but it must not own
@@ -56,16 +57,14 @@ count. The rolling view is important because single-frame timings are noisy on
 mobile and can hide whether the bottleneck is the model, JS/worklet mask fill,
 Skia upload, or React diagnostics.
 
-The example's **Instant CV** mode reuses this same strict-sync callback for
-teach-by-touch rules. React owns infrequent authoring state, then mirrors a
-bounded semantic rule packet into a shared value. The frame worklet evaluates
-the packet against the matching segmentation or pose result, prepares the
-normal mask/vector presentation, and reports only status transitions back to
-React for rule cards and edge-triggered haptics. Touch feedback and static rule
-geometry render in the synchronized stage without making React the frame clock.
-Recipe changes also update a shared producer selector immediately, so the
-stable camera worklet switches models on its next frame without waiting for a
-React callback replacement.
+The example's **Live inference** recipes reuse this strict-sync lane for
+teach-by-touch rules. React owns infrequent serializable authoring state; the
+package mirrors it into its worklet, evaluates it against the matching
+segmentation or pose result, prepares the normal mask/vector presentation, and
+reports only status transitions back to React for rule cards and edge-triggered
+haptics. Touch feedback and static rule geometry render in the synchronized
+stage without making React the frame clock. Recipe changes update the package
+controller without replacing the VisionCamera callback.
 
 The first example-owned recipes are Golden Pose, Safety Zone, and Privacy.
 Golden Pose uses pose angles. Safety Zone uses RF-DETR segmentation, bounded
@@ -86,12 +85,11 @@ producer, not a renderer dependency.
 
 This is intentionally still a proof. The package now has a generic
 `createMediaSession()` core, package-owned VisionCamera presentation, a shared
-live/video stage, and a generic interaction layer. The remaining live boundary
-is a generic session controller that owns host worklet plumbing while accepting
-injected inference and product-rule producers. It also lacks native-thread
-prepared windows, camera recording/export, Android saved-video decoding, and a
-fully custom Skia/native renderer that imports and draws the camera frame
-directly.
+live/video stage, a package-owned `useReactNativeLiveInference()` controller,
+and a live-inference extension for serializable recipe rules. It still lacks
+native-thread prepared windows, camera recording/export, Android saved-video
+decoding, and a fully custom Skia/native renderer that imports and draws the
+camera frame directly.
 
 ## Next Architecture Step
 
@@ -164,12 +162,13 @@ Two hard-won implementation constraints:
   `SupervisionIdMask` podspec forces `SWIFT_OPTIMIZATION_LEVEL=-O` for all
   configurations.
 
-The demo also defers Skia mask-image disposal by one packet (the UI thread may
+The package defers Skia mask-image disposal by one packet (the UI thread may
 still be drawing the previous image when the worklet swaps in a new one —
 rendering a disposed image paints the media rect black) and keeps the camera
-frame callback identity render-stable (per-render state reaches the worklet
-through shared values) so `useFrameOutput` does not re-serialize and swap the
-callback on the live camera thread on every HUD readout.
+frame callback identity render-stable. Per-render configuration reaches the
+package worklet through package-owned shared values, so `useFrameOutput` does
+not re-serialize and swap the callback on the live camera thread on every HUD
+readout.
 
 Android has no native implementation; the auto builder falls back to JS there
 with an explicit `fallbackReason`. The demo HUD shows which builder ran, the JS

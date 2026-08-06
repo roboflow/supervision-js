@@ -15,9 +15,10 @@ It has four modes:
 - Video: exercises the package-owned iOS saved-video source and compatibility
   session. Playback is analysis-paced, supports pause/resume/stop, and does not
   claim seek support.
-- Instant CV: reuses the live strict-sync lane for example-owned Golden Pose,
-  Safety Zone, and Privacy recipes without promoting those product rules into
-  the package API.
+- Live inference recipes: configure Golden Pose, Safety Zone, and Privacy with
+  serializable example rules. The package-owned `adapters/live-inference` lane
+  evaluates them beside the matching model result and returns throttled semantic
+  events for the UI and haptics.
 
 The mask layer follows the same performance principle as the browser package:
 compressed RLE masks are prepared once into a single frame-level ID-mask
@@ -78,7 +79,7 @@ The demo should show a basketball frame, class-colored masks/boxes, labels, a
 selection outline, and a compact prepared-ID-mask readout. Switch to `Live` to
 test strict-synced camera-frame rendering with RF-DETR Nano instance
 segmentation, `Video` to exercise analysis-paced saved-video processing, or
-`Instant CV` to exercise the example recipes. The live debug HUD reports
+`Instant CV` to exercise the live-inference recipes. The live debug HUD reports
 delivered frame size, prepared artifact size, segmentation time, mask
 fill/upload time, total tick time, and dropped frames. If the readout says
 `Shader unavailable`, the GPU mask proof is not active.
@@ -106,5 +107,6 @@ npm run example:react-native:dev-client:ios
   browser workers, IndexedDB, ExecuTorch, VisionCamera, or `packages/web`.
 - The package owns generic media-session contracts, static/live/video React
   presentation, Skia resource retirement/disposal, the VisionCamera adapter,
-  the iOS saved-video source, and reusable preparation worklets. Hosts still
-  own inference, product rules, persistence, and product UI.
+  the iOS saved-video source, the live-inference worklet, and reusable
+  preparation worklets. Hosts still own model instances, serializable rules,
+  persistence, haptics, and product UI; the demo contains no frame worklet.

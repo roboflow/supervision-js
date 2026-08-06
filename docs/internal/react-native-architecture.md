@@ -107,28 +107,28 @@ testing. It is allowed to depend on Expo and React Native Skia, but the reusable
 
 The example app also includes a live camera proof:
 
-- VisionCamera owns native camera frames and gives the example a frame output.
-- The frame worklet imports the native camera frame as a Skia image through
-  `Frame.getNativeBuffer()` and `Skia.Image.MakeImageFromNativeBuffer()`.
-- The same frame is passed to ExecuTorch RF-DETR Nano instance segmentation.
-- ExecuTorch binary masks are converted directly into one bounded frame-level
-  ID-mask artifact in the worklet.
-- The same callback assigns the mask shader packet and then presents the
-  matching camera frame through VisionCamera's native frame renderer. React
-  receives throttled diagnostics only.
+- The package-owned VisionCamera adapter owns frame output, frame disposal, the
+  stable strict-sync callback, and native frame rendering.
+- `useReactNativeLiveInference()` owns the worklet and one-frame packet handoff;
+  it presents a camera frame only after the matching annotation packet is ready.
+- ExecuTorch remains an injected structural model runner. The optional
+  `adapters/executorch` factories serialize its segmentation/pose result into
+  package-owned semantic frame data.
+- React receives throttled diagnostics and semantic detections only.
 
-The reusable package now owns the live ID-mask artifact contract, artifact
-sizing helper, Roboflow-style palette helper, worklet-callable JS fallback
-builder, saved-video serializer, and pose conversion helpers. The example still
-owns the hot VisionCamera/live-inference worklet because those are producer
-choices.
+The reusable package owns the live ID-mask artifact contract, artifact sizing
+helper, Roboflow-style palette helper, worklet-callable JS fallback builder,
+saved-video serializer, pose conversion helpers, and the strict-sync
+live-inference controller. The example owns actual ExecuTorch model hooks and
+serializable configuration, not a camera worklet.
 
-The example also proves an Instant CV interaction layer without promoting a
-product-specific rule schema into the package. Touch-authored rules remain
-example state, are compiled into bounded worklet-safe packets, and are evaluated
-beside the matching live inference result. Core/package capabilities remain the
-coordinate mapping, semantic geometry, picking, styles, and prepared rendering
-lanes; recipe UI, haptics, ExecuTorch outputs, and rule semantics stay
+The example also proves a live-inference interaction extension without
+promoting its recipe UI into the primary session API. Touch-authored rules remain
+serializable example state and are mirrored into the package-owned worklet. The
+controller evaluates them beside the matching live inference result and returns
+semantic runtime/pick events. Core/package capabilities remain coordinate
+mapping, semantic geometry, picking, styles, prepared rendering, and the hot
+lane; recipe UI, haptics, ExecuTorch model ownership, and persistence stay
 example-owned until another consumer validates a reusable boundary.
 
 Golden Pose consumes the pose producer. Safety Zone and Privacy consume

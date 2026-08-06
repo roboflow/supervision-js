@@ -19,13 +19,8 @@ import {
   usePoseEstimation,
 } from "react-native-executorch";
 import {
-  KeypointMarkerShape,
   type DetectionPickResult,
-  type KeypointDrawInstruction,
-  type PolygonDrawInstruction,
   REACT_NATIVE_LIVE_SESSION_DEFAULTS,
-  resolveDetectionClassColorStyle,
-  type ReactNativeLiveSerializedDetection,
   type ReactNativeFrameLayout,
   resolveReactNativeFrameLayout,
 } from "supervision-js-react-native";
@@ -34,8 +29,6 @@ import {
   useVisionCameraPermission,
   VisionCameraLiveView,
   resolveVisionCameraFrameRendererStyle,
-  resolveVisionCameraFrameSize,
-  type VisionCameraOutputFrame,
 } from "supervision-js-react-native/adapters/vision-camera";
 import {
   createReactNativeStaticMediaSessionBinding,
@@ -45,13 +38,13 @@ import {
   ReactNativeLiveFrameStage,
   ReactNativeLiveInteractionOverlay,
   ReactNativeVideoFrameStage,
-  useReactNativeLiveSkiaPresentation,
-  useReactNativeLiveCameraBinding,
-  scheduleReactNativeOnJs,
-  useReactNativeSharedValue,
+  useReactNativeClassMaskEffects,
+  useReactNativeLiveInference,
+  type ReactNativeLiveInferenceDetection,
+  type ReactNativeLiveInferenceError,
+  type ReactNativeLiveInferenceReadout,
 } from "supervision-js-react-native/react";
 import {
-  createReactNativeClassMaskEffectsResolver,
   createReactNativeVideoSession,
   createReactNativeWorkletRuntime,
   type ReactNativeVideoSession,
@@ -76,36 +69,22 @@ import {
   createDemoPolygonStyle,
 } from "./src/demo-presentation";
 import {
-  createReactNativeWorkletFrameDebugArgs,
-  runWithWorkletDebugLogging,
-  serializeDebugError,
-} from "supervision-js-react-native/worklet-debug";
-import {
-  createExecutorchPoseKeypointInstructions,
-  createDetectionFrameFromExecutorchCocoPoses,
+  createExecutorchLivePoseProcessor,
+  createExecutorchLiveSegmentationProcessor,
   createExecutorchVideoFrameSerializer,
 } from "supervision-js-react-native/adapters/executorch";
 import {
   createInstantCvFreeShapeZone,
-  createInstantCvGoldenPoseBaseline,
   createInstantCvRectangleZone,
-  createInstantCvRuleVectorInstructions,
-  createInstantCvRuntimeSignature,
-  evaluateInstantCvRules,
   getInstantCvZonePoints,
-  pickInstantCvObjectAtPoint,
-  pickInstantCvPoseAtPoint,
   resolveInstantCvInferenceMode,
   type InstantCvNormalizedPoint,
-  type InstantCvPoseDetection,
   type InstantCvRecipe,
   type InstantCvRule,
   type InstantCvRuleRuntime,
   type InstantCvZone,
   type InstantCvZoneShape,
-} from "supervision-js-react-native/adapters/instant-cv";
-
-const useSharedValue = useReactNativeSharedValue;
+} from "supervision-js-react-native/adapters/live-inference";
 
 type DemoMode = "static" | "live" | "video" | "instant";
 type LiveInferenceMode = "segmentation" | "pose";
@@ -132,14 +111,12 @@ const LIVE_PRIVACY_CONTOUR_WIDTH = 2;
 // Standard live mode's boxes-only privacy fallback uses a 1x1 all-ones mask
 // to cover the whole detection bbox. Instant CV Privacy deliberately keeps the
 // model's instance mask so its mosaic remains inside the detected silhouette.
-const PRIVACY_FULL_BBOX_MASK = new Uint8Array([1]);
 // Masks are drawn exactly as the model returns them, so edge quality comes
 // from the model output itself: request masks at original resolution now that
 // native prep created the performance headroom for it.
 const LIVE_RETURN_MASKS_AT_ORIGINAL_RESOLUTION = true;
 const LIVE_FRAME_TARGET_RESOLUTION =
   REACT_NATIVE_LIVE_SESSION_DEFAULTS.targetResolution;
-const LIVE_SEGMENTATION_MIRROR_FRAME = false;
 const LIVE_PERFORMANCE_SAMPLE_LIMIT = 40;
 const LIVE_SEGMENTATION_PROFILE_LABEL =
   Platform.OS === "ios" ? "RF-DETR Nano CoreML INT8" : "RF-DETR Nano";
@@ -376,36 +353,7 @@ function StaticFrameProof(props: {
   );
 }
 
-type LiveSerializedDetection = ReactNativeLiveSerializedDetection;
-
-interface LiveFrameState {
-  readonly artifactBytes: number;
-  readonly artifactHeight: number;
-  readonly artifactWidth: number;
-  readonly droppedFrames: number;
-  readonly frameIsMirrored: boolean;
-  readonly framePixelFormat: string;
-  readonly frameOrientation: string;
-  readonly hasPresentedFrame: boolean;
-  readonly height: number;
-  readonly inferenceTickMs: number;
-  readonly maskBuilder: string;
-  readonly maskFallbackReason: string;
-  readonly maskJsFallbackCount: number;
-  readonly maskResolution: string;
-  readonly maskCount: number;
-  readonly maskFillMs: number;
-  readonly maskPrepMs: number;
-  readonly maskUploadMs: number;
-  readonly ruleEvalMs: number;
-  readonly segmentationMs: number;
-  readonly serializationMs: number;
-  readonly shaderActive: boolean;
-  readonly syncMode: "synced";
-  readonly timestamp: number;
-  readonly width: number;
-  readonly visibleKeypointCount: number;
-}
+type LiveFrameState = ReactNativeLiveInferenceReadout;
 
 interface LivePerformanceMetric {
   readonly p50: number;
@@ -428,12 +376,7 @@ interface LivePerformanceSummary {
   readonly upload: LivePerformanceMetric;
 }
 
-interface LiveOverlayDetection {
-  readonly bbox: LiveSerializedDetection["bbox"];
-  readonly color: number;
-  readonly label: string;
-  readonly score: number;
-}
+type LiveOverlayDetection = ReactNativeLiveInferenceDetection;
 
 interface InstantCvTouchRequest {
   readonly id: number;
@@ -465,26 +408,7 @@ type InstantCvWorkletPickResult =
       readonly requestId: number;
     };
 
-interface LiveFrameError {
-  readonly code: string;
-  readonly frameHeight: number;
-  readonly framePixelFormat: string;
-  readonly frameTimestamp: number;
-  readonly frameWidth: number;
-  readonly hasNativeBuffer: boolean;
-  readonly hasPixelBuffer: boolean;
-  readonly isPlanar: boolean;
-  readonly message: string;
-  readonly name: string;
-  readonly stage: string;
-}
-
-interface LiveMediaRect {
-  readonly height: number;
-  readonly width: number;
-  readonly x: number;
-  readonly y: number;
-}
+type LiveFrameError = ReactNativeLiveInferenceError;
 
 interface SyncedStageGesturePoint {
   readonly timestamp: number;
@@ -798,6 +722,9 @@ function LiveCameraProof(props: {
     readonly timestamp: number;
   } | null>(null);
   const instantRequestIdRef = useRef(0);
+  const requestInstantInteractionRef = useRef<
+    (request: InstantCvTouchRequest | null) => void
+  >(() => {});
   const canvasWidth = window.width;
   const canvasHeight = window.height;
   const isInstantPrivacy = isInstantCv && instantRecipe === "privacy";
@@ -839,56 +766,6 @@ function LiveCameraProof(props: {
     () => summarizeLivePerformance(livePerformanceSamples),
     [livePerformanceSamples],
   );
-  const livePresentation = useReactNativeLiveSkiaPresentation();
-  const liveMediaRect = useReactNativeSharedValue<LiveMediaRect>({
-    height: liveLayout.mediaRect.height,
-    width: liveLayout.mediaRect.width,
-    x: liveLayout.mediaRect.x,
-    y: liveLayout.mediaRect.y,
-  });
-  const lastReadoutReportAt = useReactNativeSharedValue(0);
-  const lastErrorReportAt = useSharedValue(0);
-  const droppedFrameCount = useSharedValue(0);
-  const lastPresentedFrame = useSharedValue(false);
-  const lastArtifactBytes = useSharedValue(0);
-  const lastArtifactHeight = useSharedValue(0);
-  const lastArtifactWidth = useSharedValue(0);
-  const lastInferenceTickDurationMs = useSharedValue(0);
-  const lastMaskCount = useSharedValue(0);
-  const lastVisibleKeypointCount = useSharedValue(0);
-  const lastMaskFillDurationMs = useSharedValue(0);
-  const lastMaskPrepDurationMs = useSharedValue(0);
-  const lastMaskUploadDurationMs = useSharedValue(0);
-  const lastRuleEvalDurationMs = useSharedValue(0);
-  const lastSegmentationDurationMs = useSharedValue(0);
-  const lastSerializationDurationMs = useSharedValue(0);
-  const lastShaderActive = useSharedValue(false);
-  const lastMaskBuilderName = useSharedValue("none");
-  const lastMaskFallbackReason = useSharedValue("");
-  const lastMaskJsFallbackCount = useSharedValue(0);
-  // Mirrors the display-mode state into a shared value so the frame worklet
-  // does not capture React state. Capturing state (or any per-render value)
-  // changes the worklet identity every render, which makes useFrameOutput
-  // re-serialize and swap the camera frame callback on the live camera thread
-  // several times per second.
-  const showMaskLayerShared = useSharedValue(showRawMaskLayer);
-  const classEffectsShared = useSharedValue<LiveClassEffects>({});
-  const inferenceModeShared = useSharedValue<LiveInferenceMode>(
-    props.inferenceMode,
-  );
-  const instantRulesShared = useSharedValue<readonly InstantCvRule[]>([]);
-  const instantRuntimeShared = useSharedValue<readonly InstantCvRuleRuntime[]>(
-    [],
-  );
-  const instantRuntimeSignatureShared = useSharedValue("");
-  const instantCvActiveShared = useSharedValue(isInstantCv);
-  const instantPrivacyActiveShared = useSharedValue(isInstantPrivacy);
-  const instantPrivacyHasClassesShared = useSharedValue(false);
-  const instantTouchRequestShared =
-    useSharedValue<InstantCvTouchRequest | null>(null);
-  const lastInstantTouchRequestId = useSharedValue(0);
-  const runSegmentationOnFrame = props.segmentation.runOnFrame;
-  const runPoseOnFrame = props.pose.runOnFrame;
   const liveSyncedOverlays = useMemo(
     () =>
       createLiveSyncedOverlays({
@@ -906,55 +783,17 @@ function LiveCameraProof(props: {
     }
   }, [hasPermission, requestPermission]);
   useEffect(() => {
-    liveMediaRect.value = {
-      height: liveLayout.mediaRect.height,
-      width: liveLayout.mediaRect.width,
-      x: liveLayout.mediaRect.x,
-      y: liveLayout.mediaRect.y,
-    };
-  }, [liveLayout.mediaRect, liveMediaRect]);
-  useEffect(() => {
     setLivePerformanceSamples([]);
   }, [detectionDisplayMode, props.inferenceMode]);
   useEffect(() => {
-    inferenceModeShared.value = props.inferenceMode;
     setAwaitingSyncedFrame(true);
     setClassEffects({});
     setLiveDetections([]);
     setTapMenuLabel(null);
-
-    livePresentation.clear();
-  }, [inferenceModeShared, livePresentation, props.inferenceMode]);
+  }, [props.inferenceMode]);
   useEffect(() => {
-    showMaskLayerShared.value = showRawMaskLayer;
-  }, [showMaskLayerShared, showRawMaskLayer]);
-  useEffect(() => {
-    classEffectsShared.value =
-      !isInstantCv || instantRecipe === "privacy" ? classEffects : {};
-  }, [classEffects, classEffectsShared, instantRecipe, isInstantCv]);
-  useEffect(() => {
-    setClassEffects({});
-    classEffectsShared.value = {};
-    setTapMenuLabel(null);
-  }, [classEffectsShared, isInstantCv]);
-  useEffect(() => {
-    instantRulesShared.value = instantRules;
-  }, [instantRules, instantRulesShared]);
-  useEffect(() => {
-    instantCvActiveShared.value = isInstantCv;
     setAwaitingSyncedFrame(true);
-  }, [instantCvActiveShared, isInstantCv]);
-  useEffect(() => {
-    instantPrivacyActiveShared.value = isInstantPrivacy;
-    instantPrivacyHasClassesShared.value =
-      isInstantPrivacy && Object.keys(classEffectsShared.value).length > 0;
-  }, [
-    classEffects,
-    classEffectsShared,
-    instantPrivacyActiveShared,
-    instantPrivacyHasClassesShared,
-    isInstantPrivacy,
-  ]);
+  }, [isInstantCv]);
   useEffect(() => {
     if (isInstantCv) {
       return;
@@ -964,31 +803,15 @@ function LiveCameraProof(props: {
     setInstantRuntime([]);
     instantRuntimeRef.current = [];
     setInstantDraftZone(null);
-    instantRulesShared.value = [];
-    instantRuntimeShared.value = [];
-    instantRuntimeSignatureShared.value = "";
-    instantTouchRequestShared.value = null;
-  }, [
-    instantRulesShared,
-    instantRuntimeShared,
-    instantRuntimeSignatureShared,
-    instantTouchRequestShared,
-    isInstantCv,
-  ]);
+  }, [isInstantCv]);
   useEffect(() => {
     if (!isInstantCv) {
       return;
     }
 
     const inferenceMode = resolveInstantCvInferenceMode(instantRecipe);
-    inferenceModeShared.value = inferenceMode;
     props.onInferenceModeChange(inferenceMode);
-  }, [
-    inferenceModeShared,
-    instantRecipe,
-    isInstantCv,
-    props.onInferenceModeChange,
-  ]);
+  }, [instantRecipe, isInstantCv, props.onInferenceModeChange]);
   const reportLiveFrame = useCallback((frame: LiveFrameState) => {
     setLiveFrame(frame);
     setAwaitingSyncedFrame(false);
@@ -996,9 +819,6 @@ function LiveCameraProof(props: {
       appendLivePerformanceSample(samples, frame),
     );
   }, []);
-  const reportDroppedFrame = useCallback(() => {
-    droppedFrameCount.value += 1;
-  }, [droppedFrameCount]);
   const reportLiveError = useCallback((error: LiveFrameError) => {
     console.error("[debug][rn-live]", error);
     setLiveError(error);
@@ -1043,10 +863,8 @@ function LiveCameraProof(props: {
           },
         ];
         setInstantRules(nextRules);
-        instantRulesShared.value = nextRules;
         setInstantRuntime([]);
         instantRuntimeRef.current = [];
-        instantRuntimeShared.value = [];
         setInstantMessage("Golden pose captured. Match the ghost skeleton.");
         Vibration.vibrate(28);
         return;
@@ -1054,7 +872,7 @@ function LiveCameraProof(props: {
 
       if (result.kind === "object") {
         if (result.target === "safety-zone") {
-          const currentRules = instantRulesShared.value;
+          const currentRules = instantRules;
           const safetyRule = currentRules.find(
             (rule) => rule.recipe === "safety-zone",
           );
@@ -1084,10 +902,8 @@ function LiveCameraProof(props: {
                 : rule,
           );
           setInstantRules(nextRules);
-          instantRulesShared.value = nextRules;
           setInstantRuntime([]);
           instantRuntimeRef.current = [];
-          instantRuntimeShared.value = [];
           setInstantMessage(
             `${result.label} added. Tap another object to prohibit its class too.`,
           );
@@ -1095,7 +911,7 @@ function LiveCameraProof(props: {
           return;
         }
 
-        const currentEffects = classEffectsShared.value;
+        const currentEffects = classEffects;
 
         if (currentEffects[result.label] === "redact") {
           setInstantMessage(`${result.label} is already pixelated.`);
@@ -1108,8 +924,6 @@ function LiveCameraProof(props: {
           [result.label]: "redact",
         };
         setClassEffects(nextEffects);
-        classEffectsShared.value = nextEffects;
-        instantPrivacyHasClassesShared.value = true;
         setInstantMessage(
           `${result.label} is now pixelated. Tap another object to redact its class too.`,
         );
@@ -1121,36 +935,23 @@ function LiveCameraProof(props: {
         "Nothing detected there. Try touching the visible shape.",
       );
     },
-    [
-      classEffectsShared,
-      instantPrivacyHasClassesShared,
-      instantRulesShared,
-      instantRuntimeShared,
-    ],
+    [classEffects, instantRules],
   );
   const selectInstantRecipe = useCallback(
     (recipe: InstantCvRecipe) => {
       const inferenceMode = resolveInstantCvInferenceMode(recipe);
 
-      inferenceModeShared.value = inferenceMode;
       props.onInferenceModeChange(inferenceMode);
       setAwaitingSyncedFrame(true);
       setInstantRecipe(recipe);
       setInstantRules([]);
-      instantRulesShared.value = [];
       setInstantRuntime([]);
       instantRuntimeRef.current = [];
       setInstantDraftZone(null);
       setClassEffects({});
-      classEffectsShared.value = {};
-      instantPrivacyActiveShared.value = recipe === "privacy";
-      instantPrivacyHasClassesShared.value = false;
       if (recipe !== "golden-pose") {
         setDetectionDisplayMode("masks");
       }
-      instantRuntimeShared.value = [];
-      instantRuntimeSignatureShared.value = "";
-      instantTouchRequestShared.value = null;
       setInstantMessage(
         recipe === "golden-pose"
           ? "Hold a person to teach the golden pose."
@@ -1160,30 +961,14 @@ function LiveCameraProof(props: {
       );
       Vibration.vibrate(16);
     },
-    [
-      inferenceModeShared,
-      classEffectsShared,
-      instantPrivacyActiveShared,
-      instantPrivacyHasClassesShared,
-      instantRuntimeShared,
-      instantRulesShared,
-      instantRuntimeSignatureShared,
-      instantTouchRequestShared,
-      props.onInferenceModeChange,
-    ],
+    [props.onInferenceModeChange],
   );
   const clearInstantRules = useCallback(() => {
     setInstantRules([]);
-    instantRulesShared.value = [];
     setInstantRuntime([]);
     instantRuntimeRef.current = [];
     setInstantDraftZone(null);
     setClassEffects({});
-    classEffectsShared.value = {};
-    instantPrivacyHasClassesShared.value = false;
-    instantRuntimeShared.value = [];
-    instantRuntimeSignatureShared.value = "";
-    instantTouchRequestShared.value = null;
     setInstantMessage(
       instantRecipe === "golden-pose"
         ? "Hold a person to teach the golden pose."
@@ -1191,41 +976,21 @@ function LiveCameraProof(props: {
           ? "Draw a keep-out zone, then tap objects that must stay outside it."
           : "Tap any object to pixelate every detection of that class.",
     );
-  }, [
-    classEffectsShared,
-    instantRecipe,
-    instantPrivacyHasClassesShared,
-    instantRuntimeShared,
-    instantRulesShared,
-    instantRuntimeSignatureShared,
-    instantTouchRequestShared,
-  ]);
-  const selectInstantZoneShape = useCallback(
-    (shape: InstantCvZoneShape) => {
-      setInstantZoneShape(shape);
-      setInstantRules([]);
-      instantRulesShared.value = [];
-      setInstantRuntime([]);
-      instantRuntimeRef.current = [];
-      instantRuntimeShared.value = [];
-      instantRuntimeSignatureShared.value = "";
-      setInstantDraftZone(null);
-      instantTouchRequestShared.value = null;
-      setInstantMessage(
-        `Draw a ${shape === "rectangle" ? "rectangular" : "free-shape"} keep-out zone, then tap prohibited objects.`,
-      );
-      Vibration.vibrate(12);
-    },
-    [
-      instantRulesShared,
-      instantRuntimeShared,
-      instantRuntimeSignatureShared,
-      instantTouchRequestShared,
-    ],
-  );
+  }, [instantRecipe]);
+  const selectInstantZoneShape = useCallback((shape: InstantCvZoneShape) => {
+    setInstantZoneShape(shape);
+    setInstantRules([]);
+    setInstantRuntime([]);
+    instantRuntimeRef.current = [];
+    setInstantDraftZone(null);
+    setInstantMessage(
+      `Draw a ${shape === "rectangle" ? "rectangular" : "free-shape"} keep-out zone, then tap prohibited objects.`,
+    );
+    Vibration.vibrate(12);
+  }, []);
   const removeInstantSafetyClass = useCallback(
     (label: string) => {
-      const currentRules = instantRulesShared.value;
+      const currentRules = instantRules;
       const nextRules: readonly InstantCvRule[] = currentRules.map((rule) =>
         rule.recipe === "safety-zone"
           ? {
@@ -1241,10 +1006,8 @@ function LiveCameraProof(props: {
       );
 
       setInstantRules(nextRules);
-      instantRulesShared.value = nextRules;
       setInstantRuntime([]);
       instantRuntimeRef.current = [];
-      instantRuntimeShared.value = [];
       setInstantMessage(
         safetyRule?.recipe === "safety-zone" &&
           safetyRule.prohibitedClassNames.length > 0
@@ -1253,18 +1016,15 @@ function LiveCameraProof(props: {
       );
       Vibration.vibrate(12);
     },
-    [instantRulesShared, instantRuntimeShared],
+    [instantRules],
   );
   const removeInstantPrivacyClass = useCallback(
     (label: string) => {
       const nextEffects: Record<string, LiveClassEffect> = {
-        ...classEffectsShared.value,
+        ...classEffects,
       };
       delete nextEffects[label];
       setClassEffects(nextEffects);
-      classEffectsShared.value = nextEffects;
-      instantPrivacyHasClassesShared.value =
-        Object.keys(nextEffects).length > 0;
       setInstantMessage(
         Object.keys(nextEffects).length > 0
           ? `${label} is visible again. Tap another object to pixelate its class.`
@@ -1272,7 +1032,7 @@ function LiveCameraProof(props: {
       );
       Vibration.vibrate(12);
     },
-    [classEffectsShared, instantPrivacyHasClassesShared],
+    [classEffects],
   );
   const mapInstantCvPoint = useCallback(
     (point: { readonly x: number; readonly y: number }) => {
@@ -1399,7 +1159,7 @@ function LiveCameraProof(props: {
           kind: "capture-pose" as const,
           point: normalized,
         };
-        instantTouchRequestShared.value = request;
+        requestInstantInteractionRef.current(request);
         setInstantMessage("Capturing the next synchronized pose…");
         return;
       }
@@ -1412,11 +1172,11 @@ function LiveCameraProof(props: {
           return;
         }
 
-        instantTouchRequestShared.value = {
+        requestInstantInteractionRef.current({
           id: ++instantRequestIdRef.current,
           kind: "pick-privacy-object",
           point: normalized,
-        };
+        });
         setInstantMessage("Reading the touched mask on the next frame…");
         return;
       }
@@ -1426,11 +1186,11 @@ function LiveCameraProof(props: {
       );
 
       if (instantRecipe === "safety-zone" && safetyRule && distance < 12) {
-        instantTouchRequestShared.value = {
+        requestInstantInteractionRef.current({
           id: ++instantRequestIdRef.current,
           kind: "pick-safety-zone-object",
           point: normalized,
-        };
+        });
         setInstantMessage("Reading the touched mask on the next frame…");
         return;
       }
@@ -1467,10 +1227,8 @@ function LiveCameraProof(props: {
           },
         ];
         setInstantRules(nextRules);
-        instantRulesShared.value = nextRules;
         setInstantRuntime([]);
         instantRuntimeRef.current = [];
-        instantRuntimeShared.value = [];
         setInstantMessage(
           safetyRule && safetyRule.prohibitedClassNames.length > 0
             ? "Zone updated. Tap another object to add its class."
@@ -1483,11 +1241,9 @@ function LiveCameraProof(props: {
     [
       instantRecipe,
       instantRules,
-      instantRulesShared,
-      instantRuntimeShared,
-      instantTouchRequestShared,
       instantZoneShape,
       mapInstantCvPoint,
+      requestInstantInteractionRef,
     ],
   );
   const handleInstantGestureCancel = useCallback(() => {
@@ -1532,677 +1288,61 @@ function LiveCameraProof(props: {
     });
   }, []);
 
-  // Stable identity matters: useFrameOutput re-serializes and swaps the
-  // camera frame callback whenever this function changes, so its dependencies
-  // must all be render-stable (shared values, useCallback reporters, memoized
-  // handles). Per-render data flows in through shared values instead.
-  const onLiveInferenceFrame = useCallback(
-    (frame: VisionCameraOutputFrame) => {
-      "worklet";
-
-      let stage = "start";
-      let shouldPresent = false;
-
-      try {
-        const syncMode = "synced";
-        const segmentFrame = runSegmentationOnFrame;
-        const poseFrame = runPoseOnFrame;
-        const inferenceMode = inferenceModeShared.value;
-        const shouldRunPose = inferenceMode === "pose" && poseFrame !== null;
-        const shouldRunInference =
-          inferenceMode === "segmentation" && segmentFrame !== null;
-
-        if (shouldRunPose) {
-          const inferenceStartedAt = Date.now();
-          stage = "pose-run";
-          const poseStartedAt = Date.now();
-          const rawPoses = runWithWorkletDebugLogging(
-            {
-              args: createReactNativeWorkletFrameDebugArgs(stage, frame),
-              description: "run YOLO26N pose on camera frame",
-              namespace: "rn-live",
-            },
-            () =>
-              poseFrame(frame, false, {
-                detectionThreshold: 0.4,
-                inputSize: 384,
-                keypointThreshold: 0.35,
-              }),
-          );
-          const poseMs = Date.now() - poseStartedAt;
-          const detectionFrameSize = resolveVisionCameraFrameSize(frame);
-          const mediaRect = liveMediaRect.value;
-          stage = "pose-adapt";
-          const serializationStartedAt = Date.now();
-          const detectionFrame = createDetectionFrameFromExecutorchCocoPoses({
-            frameIndex: Math.round(frame.timestamp),
-            mediaTime: frame.timestamp / 1_000_000_000,
-            poses: rawPoses,
-          });
-          let instantRuleKeypoints: readonly KeypointDrawInstruction[] = [];
-          let instantRulePolygons: readonly PolygonDrawInstruction[] = [];
-          if (instantCvActiveShared.value) {
-            const instantPoses: InstantCvPoseDetection[] = [];
-
-            for (
-              let poseIndex = 0;
-              poseIndex < detectionFrame.detections.length;
-              poseIndex += 1
-            ) {
-              const geometry = detectionFrame.detections[poseIndex]?.keypoints;
-
-              if (!geometry) {
-                continue;
-              }
-
-              const points: {
-                visible: boolean;
-                x: number;
-                y: number;
-              }[] = [];
-
-              for (
-                let pointIndex = 0;
-                pointIndex < geometry.points.length;
-                pointIndex += 1
-              ) {
-                const point = geometry.points[pointIndex]!;
-                points[pointIndex] = {
-                  visible: geometry.visibility?.[pointIndex] !== 0,
-                  x: point.x,
-                  y: point.y,
-                };
-              }
-
-              instantPoses[instantPoses.length] = { points };
-            }
-
-            const instantRuleStartedAt = Date.now();
-            const nextInstantRuntime = evaluateInstantCvRules({
-              frameHeight: detectionFrameSize.height,
-              frameWidth: detectionFrameSize.width,
-              nowMs: Date.now(),
-              poses: instantPoses,
-              previous: instantRuntimeShared.value,
-              rules: instantRulesShared.value,
-            });
-            instantRuntimeShared.value = nextInstantRuntime;
-            lastRuleEvalDurationMs.value = Date.now() - instantRuleStartedAt;
-            const instantRuleVector = createInstantCvRuleVectorInstructions({
-              frameHeight: detectionFrameSize.height,
-              frameWidth: detectionFrameSize.width,
-              markerShape: KeypointMarkerShape.Circle,
-              rules: instantRulesShared.value,
-              runtime: nextInstantRuntime,
-            });
-            instantRuleKeypoints = instantRuleVector.keypoints;
-            instantRulePolygons = instantRuleVector.polygons;
-            const instantSignature =
-              createInstantCvRuntimeSignature(nextInstantRuntime);
-
-            if (instantSignature !== instantRuntimeSignatureShared.value) {
-              instantRuntimeSignatureShared.value = instantSignature;
-              scheduleReactNativeOnJs(
-                reportInstantCvRuntime,
-                nextInstantRuntime,
-              );
-            }
-
-            const instantTouchRequest = instantTouchRequestShared.value;
-
-            if (
-              instantTouchRequest?.kind === "capture-pose" &&
-              instantTouchRequest.id !== lastInstantTouchRequestId.value
-            ) {
-              lastInstantTouchRequestId.value = instantTouchRequest.id;
-              instantTouchRequestShared.value = null;
-              const poseIndex = pickInstantCvPoseAtPoint({
-                frameHeight: detectionFrameSize.height,
-                frameWidth: detectionFrameSize.width,
-                point: instantTouchRequest.point,
-                poses: instantPoses,
-              });
-              const pose = poseIndex >= 0 ? instantPoses[poseIndex] : undefined;
-              const baselineAngles = pose
-                ? createInstantCvGoldenPoseBaseline(pose.points)
-                : null;
-
-              if (pose && baselineAngles) {
-                scheduleReactNativeOnJs(reportInstantCvPick, {
-                  baselineAngles,
-                  baselinePoints: pose.points.map((point) => ({
-                    visible: point.visible,
-                    x: point.x / detectionFrameSize.width,
-                    y: point.y / detectionFrameSize.height,
-                  })),
-                  kind: "pose",
-                  requestId: instantTouchRequest.id,
-                });
-              } else {
-                scheduleReactNativeOnJs(reportInstantCvPick, {
-                  kind: "miss",
-                  requestId: instantTouchRequest.id,
-                });
-              }
-            }
-          } else {
-            lastRuleEvalDurationMs.value = 0;
-          }
-
-          const instructions =
-            createExecutorchPoseKeypointInstructions(detectionFrame);
-          const overlayDetections: LiveOverlayDetection[] = [];
-
-          for (
-            let index = 0;
-            index < detectionFrame.detections.length;
-            index += 1
-          ) {
-            const detection = detectionFrame.detections[index]!;
-            const rect = detection.rect!;
-            overlayDetections[index] = {
-              bbox: {
-                x1: rect.x - rect.width / 2,
-                x2: rect.x + rect.width / 2,
-                y1: rect.y - rect.height / 2,
-                y2: rect.y + rect.height / 2,
-              },
-              color: resolveDetectionClassColorStyle(detection.className).fill,
-              label: detection.className ?? "person",
-              score: 1,
-            };
-          }
-
-          scheduleReactNativeOnJs(reportLiveDetections, overlayDetections);
-          const serializationMs = Date.now() - serializationStartedAt;
-          stage = "pose-prepare-vector";
-          const preparedVector = livePresentation.prepareVector({
-            frameHeight: detectionFrameSize.height,
-            frameWidth: detectionFrameSize.width,
-            keypoints: [...instructions, ...instantRuleKeypoints],
-            mediaRect,
-            polygons: instantRulePolygons,
-          });
-
-          stage = "pose-assign-prepared";
-          livePresentation.presentVector(preparedVector);
-          livePresentation.presentMask(null);
-
-          lastInferenceTickDurationMs.value = Date.now() - inferenceStartedAt;
-          lastArtifactBytes.value = 0;
-          lastArtifactHeight.value = 0;
-          lastArtifactWidth.value = 0;
-          lastMaskBuilderName.value = "skia-vector";
-          lastMaskCount.value = detectionFrame.detections.length;
-          lastVisibleKeypointCount.value = preparedVector?.markerCount ?? 0;
-          lastMaskFillDurationMs.value = 0;
-          lastMaskPrepDurationMs.value = preparedVector?.prepMs ?? 0;
-          lastMaskUploadDurationMs.value = 0;
-          lastSegmentationDurationMs.value = poseMs;
-          lastSerializationDurationMs.value = serializationMs;
-          lastShaderActive.value = false;
-
-          stage = "render-synced-frame";
-          lastPresentedFrame.value = true;
-          shouldPresent = true;
-        } else if (shouldRunInference) {
-          const inferenceStartedAt = Date.now();
-
-          stage = "segmentation-run";
-          const segmentationStartedAt = Date.now();
-          const rawDetections = runWithWorkletDebugLogging(
-            {
-              args: createReactNativeWorkletFrameDebugArgs(stage, frame),
-              description: "run RF-DETR segmentation on camera frame",
-              namespace: "rn-live",
-            },
-            () =>
-              segmentFrame(frame, LIVE_SEGMENTATION_MIRROR_FRAME, {
-                confidenceThreshold: 0.45,
-                maxInstances: LIVE_MAX_INSTANCES,
-                returnMaskAtOriginalResolution:
-                  LIVE_RETURN_MASKS_AT_ORIGINAL_RESOLUTION,
-              }),
-          );
-          const segmentationMs = Date.now() - segmentationStartedAt;
-          stage = "mask-read-layout";
-          const mediaRect = liveMediaRect.value;
-          const detectionFrameSize = resolveVisionCameraFrameSize(frame);
-          stage = "mask-serialize-detections";
-          const serializationStartedAt = Date.now();
-          const detections = runWithWorkletDebugLogging(
-            {
-              args: {
-                detectionCount: rawDetections.length,
-                frameHeight: frame.height,
-                framePixelFormat: frame.pixelFormat,
-                frameTimestamp: frame.timestamp,
-                frameWidth: frame.width,
-                stage,
-              },
-              description: "serialize RF-DETR detections for live mask prep",
-              namespace: "rn-live",
-            },
-            () => {
-              const serialized: LiveSerializedDetection[] = [];
-
-              for (let index = 0; index < rawDetections.length; index += 1) {
-                const detection = rawDetections[index]!;
-                const label: string =
-                  typeof detection.label === "string" ? detection.label : "";
-                const color = resolveDetectionClassColorStyle(label).fill;
-
-                serialized[index] = {
-                  bbox: detection.bbox,
-                  color,
-                  label,
-                  mask: detection.mask,
-                  maskHeight: detection.maskHeight,
-                  maskWidth: detection.maskWidth,
-                  score: detection.score,
-                };
-              }
-
-              return serialized;
-            },
-          );
-          const serializationMs = Date.now() - serializationStartedAt;
-          let instantRuleKeypoints: readonly KeypointDrawInstruction[] = [];
-          let instantRulePolygons: readonly PolygonDrawInstruction[] = [];
-          if (instantCvActiveShared.value) {
-            const instantObjects = detections.map((detection) => ({
-              bbox: detection.bbox,
-              label: detection.label ?? "object",
-              mask: detection.mask,
-              maskHeight: detection.maskHeight,
-              maskWidth: detection.maskWidth,
-            }));
-            const instantRuleStartedAt = Date.now();
-            const nextInstantRuntime = evaluateInstantCvRules({
-              frameHeight: detectionFrameSize.height,
-              frameWidth: detectionFrameSize.width,
-              nowMs: Date.now(),
-              objects: instantObjects,
-              previous: instantRuntimeShared.value,
-              rules: instantRulesShared.value,
-            });
-            instantRuntimeShared.value = nextInstantRuntime;
-            lastRuleEvalDurationMs.value = Date.now() - instantRuleStartedAt;
-            const instantRuleVector = createInstantCvRuleVectorInstructions({
-              frameHeight: detectionFrameSize.height,
-              frameWidth: detectionFrameSize.width,
-              markerShape: KeypointMarkerShape.Circle,
-              rules: instantRulesShared.value,
-              runtime: nextInstantRuntime,
-            });
-            instantRuleKeypoints = instantRuleVector.keypoints;
-            instantRulePolygons = instantRuleVector.polygons;
-            const instantSignature =
-              createInstantCvRuntimeSignature(nextInstantRuntime);
-
-            if (instantSignature !== instantRuntimeSignatureShared.value) {
-              instantRuntimeSignatureShared.value = instantSignature;
-              scheduleReactNativeOnJs(
-                reportInstantCvRuntime,
-                nextInstantRuntime,
-              );
-            }
-
-            const instantTouchRequest = instantTouchRequestShared.value;
-
-            if (
-              (instantTouchRequest?.kind === "pick-privacy-object" ||
-                instantTouchRequest?.kind === "pick-safety-zone-object") &&
-              instantTouchRequest.id !== lastInstantTouchRequestId.value
-            ) {
-              lastInstantTouchRequestId.value = instantTouchRequest.id;
-              instantTouchRequestShared.value = null;
-              const pick = pickInstantCvObjectAtPoint({
-                detections: instantObjects,
-                frameHeight: detectionFrameSize.height,
-                frameWidth: detectionFrameSize.width,
-                point: instantTouchRequest.point,
-              });
-
-              scheduleReactNativeOnJs(
-                reportInstantCvPick,
-                pick
-                  ? {
-                      kind: "object",
-                      label: pick.label,
-                      requestId: instantTouchRequest.id,
-                      target:
-                        instantTouchRequest.kind === "pick-safety-zone-object"
-                          ? "safety-zone"
-                          : "privacy",
-                      usedMask: pick.usedMask,
-                    }
-                  : {
-                      kind: "miss",
-                      requestId: instantTouchRequest.id,
-                    },
-              );
-            }
-          } else {
-            lastRuleEvalDurationMs.value = 0;
-          }
-
-          const classEffects = classEffectsShared.value;
-          const overlayDetections: LiveOverlayDetection[] = [];
-
-          for (let index = 0; index < detections.length; index += 1) {
-            const detection = detections[index]!;
-
-            overlayDetections[overlayDetections.length] = {
-              bbox: detection.bbox,
-              color: detection.color,
-              label: detection.label ?? "object",
-              score: detection.score ?? 0,
-            };
-          }
-
-          scheduleReactNativeOnJs(reportLiveDetections, overlayDetections);
-
-          stage = "class-effects-filter";
-          const masksDisplayed = showMaskLayerShared.value;
-          const privacyPreviewEnabled =
-            instantPrivacyActiveShared.value &&
-            !instantPrivacyHasClassesShared.value;
-          const maskDetections: LiveSerializedDetection[] = [];
-          const mosaicMaskIds: number[] = [];
-          const spotlightMaskIds: number[] = [];
-
-          for (let index = 0; index < detections.length; index += 1) {
-            const detection = detections[index]!;
-            const effect = classEffects[detection.label ?? ""];
-
-            // In boxes display the mask lane carries only detections with a
-            // mask-rendered effect; in masks display it carries everything.
-            if (
-              !masksDisplayed &&
-              effect === undefined &&
-              !privacyPreviewEnabled
-            ) {
-              continue;
-            }
-
-            let maskDetection = detection;
-
-            if (
-              effect === "redact" &&
-              !masksDisplayed &&
-              !instantCvActiveShared.value
-            ) {
-              // Standard boxes display redaction covers the whole bbox. The
-              // Instant CV Privacy recipe keeps the original instance mask.
-              maskDetection = {
-                bbox: detection.bbox,
-                color: detection.color,
-                label: detection.label,
-                mask: PRIVACY_FULL_BBOX_MASK,
-                maskHeight: 1,
-                maskWidth: 1,
-                score: detection.score,
-              };
-            }
-
-            const maskId = maskDetections.length + 1;
-
-            maskDetections[maskDetections.length] = maskDetection;
-
-            if (effect === "redact") {
-              mosaicMaskIds[mosaicMaskIds.length] = maskId;
-            } else if (effect === "spotlight") {
-              spotlightMaskIds[spotlightMaskIds.length] = maskId;
-            }
-          }
-
-          const maskEffectsEnabled =
-            mosaicMaskIds.length > 0 || spotlightMaskIds.length > 0;
-          const privacyContoursEnabled =
-            instantPrivacyActiveShared.value &&
-            (privacyPreviewEnabled || mosaicMaskIds.length > 0);
-
-          stage = "mask-prepare";
-          const maskStartedAt = Date.now();
-          let preparedMask: ReturnType<typeof livePresentation.prepareMask> =
-            null;
-
-          if (masksDisplayed || maskEffectsEnabled || privacyPreviewEnabled) {
-            try {
-              preparedMask = livePresentation.prepareMask({
-                borderWidth: privacyContoursEnabled
-                  ? LIVE_PRIVACY_CONTOUR_WIDTH
-                  : DEMO_MASK_BORDER_WIDTH,
-                detections: maskDetections,
-                fillOpacity: privacyPreviewEnabled ? 0 : DEMO_MASK_FILL_OPACITY,
-                edgeSmoothing:
-                  masksDisplayed || spotlightMaskIds.length > 0 ? undefined : 0,
-                frameHeight: detectionFrameSize.height,
-                frameWidth: detectionFrameSize.width,
-                mediaRect: {
-                  height: mediaRect.height,
-                  width: mediaRect.width,
-                  x: mediaRect.x,
-                  y: mediaRect.y,
-                },
-                mosaicCellPx: LIVE_PRIVACY_MOSAIC_CELL_PX,
-                mosaicMaskIds,
-                spotlightMaskIds,
-              });
-            } catch (error) {
-              if (Date.now() - lastErrorReportAt.value > 250) {
-                lastErrorReportAt.value = Date.now();
-                scheduleReactNativeOnJs(
-                  reportLiveError,
-                  createLiveFrameError(stage, error, frame),
-                );
-              }
-            }
-          }
-
-          const maskPrepMs = Date.now() - maskStartedAt;
-          const maskCount = rawDetections.length;
-
-          if (preparedMask) {
-            lastMaskBuilderName.value = preparedMask.builder;
-            lastMaskFallbackReason.value = preparedMask.fallbackReason ?? "";
-
-            if (preparedMask.builder === "js") {
-              lastMaskJsFallbackCount.value += 1;
-            }
-          }
-
-          lastInferenceTickDurationMs.value = Date.now() - inferenceStartedAt;
-          lastArtifactBytes.value = preparedMask?.byteLength ?? 0;
-          lastArtifactHeight.value = preparedMask?.height ?? 0;
-          lastArtifactWidth.value = preparedMask?.width ?? 0;
-          lastMaskCount.value = maskCount;
-          lastVisibleKeypointCount.value = 0;
-          lastMaskFillDurationMs.value = preparedMask?.fillMs ?? 0;
-          lastMaskPrepDurationMs.value = maskPrepMs;
-          lastMaskUploadDurationMs.value = preparedMask?.uploadMs ?? 0;
-          lastSegmentationDurationMs.value = segmentationMs;
-          lastSerializationDurationMs.value = serializationMs;
-
-          if (preparedMask) {
-            stage = "mask-assign-prepared";
-            runWithWorkletDebugLogging(
-              {
-                args: {
-                  frameHeight: frame.height,
-                  framePixelFormat: frame.pixelFormat,
-                  frameTimestamp: frame.timestamp,
-                  frameWidth: frame.width,
-                  maskCount,
-                  stage,
-                },
-                description: "assign prepared live mask shared values",
-                namespace: "rn-live",
-              },
-              () => {
-                livePresentation.presentMask(preparedMask);
-              },
-            );
-            lastShaderActive.value = true;
-          } else {
-            stage = "mask-assign-empty";
-            runWithWorkletDebugLogging(
-              {
-                args: {
-                  frameHeight: frame.height,
-                  framePixelFormat: frame.pixelFormat,
-                  frameTimestamp: frame.timestamp,
-                  frameWidth: frame.width,
-                  maskCount,
-                  stage,
-                },
-                description: "clear live mask shared values",
-                namespace: "rn-live",
-              },
-              () => {
-                livePresentation.presentMask(null);
-              },
-            );
-            lastShaderActive.value = false;
-          }
-
-          stage = "rule-prepare-vector";
-          const preparedRuleVector = livePresentation.prepareVector({
-            frameHeight: detectionFrameSize.height,
-            frameWidth: detectionFrameSize.width,
-            keypoints: instantRuleKeypoints,
-            mediaRect,
-            polygons: instantRulePolygons,
-          });
-
-          livePresentation.presentVector(preparedRuleVector);
-
-          stage = "render-synced-frame";
-          runWithWorkletDebugLogging(
-            {
-              args: {
-                frameHeight: frame.height,
-                framePixelFormat: frame.pixelFormat,
-                frameTimestamp: frame.timestamp,
-                frameWidth: frame.width,
-                maskCount,
-                stage,
-              },
-              description:
-                "present camera frame only after matching mask packet is ready",
-              namespace: "rn-live",
-            },
-            () => {
-              lastPresentedFrame.value = true;
-              shouldPresent = true;
-            },
-          );
-        }
-
-        if (Date.now() - lastReadoutReportAt.value > 250) {
-          stage = "readout-report";
-          lastReadoutReportAt.value = Date.now();
-          scheduleReactNativeOnJs(reportLiveFrame, {
-            artifactBytes: lastArtifactBytes.value,
-            artifactHeight: lastArtifactHeight.value,
-            artifactWidth: lastArtifactWidth.value,
-            droppedFrames: droppedFrameCount.value,
-            framePixelFormat: frame.pixelFormat,
-            frameOrientation: frame.orientation,
-            frameIsMirrored: frame.isMirrored,
-            hasPresentedFrame: lastPresentedFrame.value,
-            height: resolveVisionCameraFrameSize(frame).height,
-            inferenceTickMs: lastInferenceTickDurationMs.value,
-            maskBuilder: lastMaskBuilderName.value,
-            maskFallbackReason: lastMaskFallbackReason.value,
-            maskJsFallbackCount: lastMaskJsFallbackCount.value,
-            maskResolution: LIVE_RETURN_MASKS_AT_ORIGINAL_RESOLUTION
-              ? "original"
-              : "model",
-            maskCount: lastMaskCount.value,
-            maskFillMs: lastMaskFillDurationMs.value,
-            maskPrepMs: lastMaskPrepDurationMs.value,
-            maskUploadMs: lastMaskUploadDurationMs.value,
-            ruleEvalMs: lastRuleEvalDurationMs.value,
-            segmentationMs: lastSegmentationDurationMs.value,
-            serializationMs: lastSerializationDurationMs.value,
-            shaderActive: lastShaderActive.value,
-            syncMode,
-            timestamp: frame.timestamp,
-            width: resolveVisionCameraFrameSize(frame).width,
-            visibleKeypointCount: lastVisibleKeypointCount.value,
-          });
-        }
-
-        return shouldPresent;
-      } catch (error) {
-        if (Date.now() - lastErrorReportAt.value > 250) {
-          lastErrorReportAt.value = Date.now();
-          scheduleReactNativeOnJs(
-            reportLiveError,
-            createLiveFrameError(stage, error, frame),
-          );
-        }
-        return false;
-      }
-    },
-    [
-      droppedFrameCount,
-      lastArtifactBytes,
-      lastArtifactHeight,
-      lastArtifactWidth,
-      lastErrorReportAt,
-      lastInferenceTickDurationMs,
-      lastMaskBuilderName,
-      lastMaskCount,
-      lastMaskFallbackReason,
-      lastMaskFillDurationMs,
-      lastMaskJsFallbackCount,
-      lastMaskPrepDurationMs,
-      lastMaskUploadDurationMs,
-      lastRuleEvalDurationMs,
-      lastVisibleKeypointCount,
-      lastPresentedFrame,
-      lastReadoutReportAt,
-      lastSegmentationDurationMs,
-      lastSerializationDurationMs,
-      lastShaderActive,
-      liveMediaRect,
-      livePresentation,
-      classEffectsShared,
-      instantCvActiveShared,
-      instantPrivacyActiveShared,
-      instantPrivacyHasClassesShared,
-      inferenceModeShared,
-      instantRulesShared,
-      instantRuntimeShared,
-      instantRuntimeSignatureShared,
-      instantTouchRequestShared,
-      lastInstantTouchRequestId,
-      reportInstantCvPick,
-      reportInstantCvRuntime,
-      reportLiveDetections,
-      reportLiveError,
-      reportLiveFrame,
-      runPoseOnFrame,
-      runSegmentationOnFrame,
-      showMaskLayerShared,
-    ],
+  const segmentationProcessor = useMemo(
+    () =>
+      createExecutorchLiveSegmentationProcessor({
+        maxInstances: LIVE_MAX_INSTANCES,
+        returnMasksAtOriginalResolution:
+          LIVE_RETURN_MASKS_AT_ORIGINAL_RESOLUTION,
+        runOnFrame: props.segmentation.runOnFrame,
+      }),
+    [props.segmentation.runOnFrame],
   );
-
-  const { frameOutput: inferenceFrameOutput, frameRenderer } =
-    useReactNativeLiveCameraBinding({
-      onFrame: onLiveInferenceFrame,
-      onFrameDropped() {
-        reportDroppedFrame();
-      },
-      targetResolution: LIVE_FRAME_TARGET_RESOLUTION,
-    });
+  const poseProcessor = useMemo(
+    () =>
+      createExecutorchLivePoseProcessor({
+        runOnFrame: props.pose.runOnFrame,
+      }),
+    [props.pose.runOnFrame],
+  );
+  const liveExtension = useMemo(
+    () => ({
+      active: isInstantCv,
+      privacyActive: isInstantPrivacy,
+      privacyHasClasses: Object.keys(classEffects).length > 0,
+      rules: instantRules,
+    }),
+    [classEffects, instantRules, isInstantCv, isInstantPrivacy],
+  );
+  const liveInference = useReactNativeLiveInference({
+    classEffects:
+      !isInstantCv || instantRecipe === "privacy" ? classEffects : {},
+    extension: liveExtension,
+    inferenceMode: props.inferenceMode,
+    mediaRect: liveLayout.mediaRect,
+    onDetections: reportLiveDetections,
+    onError: reportLiveError,
+    onInteraction: reportInstantCvPick,
+    onReadout: reportLiveFrame,
+    onRuleRuntime: reportInstantCvRuntime,
+    poseProcessor,
+    presentation: {
+      fillOpacity: DEMO_MASK_FILL_OPACITY,
+      maskBorderWidth: DEMO_MASK_BORDER_WIDTH,
+      mosaicCellPx: LIVE_PRIVACY_MOSAIC_CELL_PX,
+      privacyContourWidth: LIVE_PRIVACY_CONTOUR_WIDTH,
+    },
+    segmentationProcessor,
+    showMasks: showRawMaskLayer,
+    targetResolution: LIVE_FRAME_TARGET_RESOLUTION,
+  });
+  useEffect(() => {
+    requestInstantInteractionRef.current = liveInference.requestInteraction;
+  }, [liveInference.requestInteraction]);
 
   const cameraOutputs = useMemo(
-    () => [inferenceFrameOutput],
-    [inferenceFrameOutput],
+    () => [liveInference.camera.frameOutput],
+    [liveInference.camera.frameOutput],
   );
 
   const activeModel =
@@ -2212,7 +1352,10 @@ function LiveCameraProof(props: {
     props.inferenceMode === "pose" ? "YOLO26N Pose" : "RF-DETR Seg",
   );
   const canRunCamera =
-    hasPermission && device && activeModel.isReady && livePresentation.isReady;
+    hasPermission &&
+    device &&
+    activeModel.isReady &&
+    liveInference.presentation.isReady;
 
   return (
     <View style={styles.liveScreen}>
@@ -2251,7 +1394,7 @@ function LiveCameraProof(props: {
                   awaitingSyncedFrame ? styles.captureCameraVisible : null,
                 ]}
                 device={device}
-                frameRenderer={frameRenderer}
+                frameRenderer={liveInference.camera.frameRenderer}
                 frameRendererStyle={[
                   styles.frameRendererSurface,
                   liveFrameRendererStyle,
@@ -2269,7 +1412,7 @@ function LiveCameraProof(props: {
         showBoxes={showBoxLayer}
         showMasks={showRawMaskLayer || effectsActive || privacyPreviewActive}
         stageStyle={styles.liveStage}
-        presentation={livePresentation}
+        presentation={liveInference.presentation}
       >
         {!canRunCamera ? (
           <View style={styles.stageOverlay}>
@@ -2638,7 +1781,6 @@ function VideoFileProof(props: {
       }),
     [videoDetections, videoDims?.height, videoDims?.width, videoLayout],
   );
-  const classEffectsShared = useSharedValue<LiveClassEffects>({});
   const runSegmentationOnFrame = props.segmentation.runOnFrame;
   // One dedicated pump runtime per screen mount, shared by every session.
   const videoRuntime = useMemo(
@@ -2649,10 +1791,6 @@ function VideoFileProof(props: {
   useEffect(() => {
     videoSessionRef.current?.setMediaRect(videoLayout.mediaRect);
   }, [videoLayout.mediaRect, videoSession]);
-  useEffect(() => {
-    classEffectsShared.value = classEffects;
-  }, [classEffects, classEffectsShared]);
-
   const serializeVideoFrame = useMemo(
     () =>
       createExecutorchVideoFrameSerializer({
@@ -2663,10 +1801,7 @@ function VideoFileProof(props: {
       }),
     [runSegmentationOnFrame],
   );
-  const resolveVideoMaskEffects = useMemo(
-    () => createReactNativeClassMaskEffectsResolver(classEffectsShared),
-    [classEffectsShared],
-  );
+  const resolveVideoMaskEffects = useReactNativeClassMaskEffects(classEffects);
   const handleVideoEnded = useCallback(
     (event: ReactNativeVideoSessionEndEvent) => {
       if (event.paused) {
@@ -3377,38 +2512,6 @@ function formatLiveFallbackReason(reason: string | undefined) {
   }
 
   return reason.length > 28 ? `${reason.slice(0, 28)}…` : reason;
-}
-
-function createLiveFrameError(
-  stage: string,
-  error: unknown,
-  frame: {
-    readonly hasNativeBuffer: boolean;
-    readonly hasPixelBuffer: boolean;
-    readonly height: number;
-    readonly isPlanar: boolean;
-    readonly pixelFormat: string;
-    readonly timestamp: number;
-    readonly width: number;
-  },
-): LiveFrameError {
-  "worklet";
-
-  const serialized = serializeDebugError(error);
-
-  return {
-    code: serialized.code,
-    frameHeight: frame.height,
-    framePixelFormat: frame.pixelFormat,
-    frameTimestamp: frame.timestamp,
-    frameWidth: frame.width,
-    hasNativeBuffer: frame.hasNativeBuffer,
-    hasPixelBuffer: frame.hasPixelBuffer,
-    isPlanar: frame.isPlanar,
-    message: serialized.message,
-    name: serialized.name,
-    stage,
-  };
 }
 
 const styles = StyleSheet.create({

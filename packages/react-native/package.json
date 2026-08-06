@@ -20,10 +20,10 @@
       "react-native": "./src/adapters/executorch.ts",
       "import": "./dist/adapters/executorch.js"
     },
-    "./adapters/instant-cv": {
-      "types": "./dist/adapters/instant-cv.d.ts",
-      "react-native": "./src/adapters/instant-cv.ts",
-      "import": "./dist/adapters/instant-cv.js"
+    "./adapters/live-inference": {
+      "types": "./dist/adapters/live-inference.d.ts",
+      "react-native": "./src/adapters/live-inference.ts",
+      "import": "./dist/adapters/live-inference.js"
     },
     "./adapters/vision-camera": {
       "types": "./dist/adapters/vision-camera.d.ts",

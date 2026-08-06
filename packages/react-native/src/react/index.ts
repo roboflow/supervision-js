@@ -15,6 +15,21 @@ export {
   type UseMediaSessionResult,
 } from "./use-media-session";
 export { useReactNativeLiveCameraBinding } from "./use-live-camera-binding";
+export { useReactNativeClassMaskEffects } from "./use-class-mask-effects";
+export {
+  useReactNativeLiveInference,
+  type ReactNativeLiveClassEffect,
+  type ReactNativeLiveClassEffects,
+  type ReactNativeLiveInferenceBinding,
+  type ReactNativeLiveInferenceDetection,
+  type ReactNativeLiveInferenceError,
+  type ReactNativeLiveInferenceExtensionOptions,
+  type ReactNativeLiveInferenceInteractionRequest,
+  type ReactNativeLiveInferenceInteractionResult,
+  type ReactNativeLiveInferenceMode,
+  type ReactNativeLiveInferenceReadout,
+  type UseReactNativeLiveInferenceOptions,
+} from "./use-live-inference";
 export {
   scheduleReactNativeOnJs,
   useReactNativeSharedValue,

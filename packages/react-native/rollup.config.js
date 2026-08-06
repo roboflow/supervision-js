@@ -3,7 +3,7 @@ import typescript from "@rollup/plugin-typescript";
 export default {
   input: {
     "adapters/executorch": "src/adapters/executorch.ts",
-    "adapters/instant-cv": "src/adapters/instant-cv.ts",
+    "adapters/live-inference": "src/adapters/live-inference.ts",
     "adapters/vision-camera": "src/adapters/vision-camera.ts",
     "adapters/video-file": "src/adapters/video-file.ts",
     index: "src/index.ts",
