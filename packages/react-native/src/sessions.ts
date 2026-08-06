@@ -89,13 +89,12 @@ export const REACT_NATIVE_VIDEO_SESSION_PLAYBACK_MODE = "analysis-paced";
  * The current native file source supports start, pause/resume, and stop. It
  * does not expose seeking until its decoder can reposition accurately.
  */
-export const REACT_NATIVE_VIDEO_SESSION_CAPABILITIES: MediaSessionCapabilities =
-  {
-    live: false,
-    pausable: true,
-    seekable: false,
-    stoppable: true,
-  };
+export const REACT_NATIVE_VIDEO_SESSION_CAPABILITIES = Object.freeze({
+  live: false,
+  pausable: true,
+  seekable: false,
+  stoppable: true,
+} satisfies MediaSessionCapabilities);
 
 /** Slim per-frame detection summary delivered to the JS thread. */
 export interface ReactNativeVideoSessionDetection {

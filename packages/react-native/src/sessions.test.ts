@@ -58,6 +58,14 @@ describe("saved-video session capabilities", () => {
       stoppable: true,
     });
   });
+
+  it("keeps the exported capability contract immutable at runtime", () => {
+    expect(Object.isFrozen(REACT_NATIVE_VIDEO_SESSION_CAPABILITIES)).toBe(true);
+    expect(
+      Reflect.set(REACT_NATIVE_VIDEO_SESSION_CAPABILITIES, "seekable", true),
+    ).toBe(false);
+    expect(REACT_NATIVE_VIDEO_SESSION_CAPABILITIES.seekable).toBe(false);
+  });
 });
 
 describe("createReactNativeWorkletRuntime", () => {
