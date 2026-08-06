@@ -3,8 +3,12 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createVisionCameraLiveSource,
   presentVisionCameraFrame,
+  resolveVisionCameraFrameRendererStyle,
+  resolveVisionCameraFrameSize,
+  useVisionCameraDevice,
   useVisionCameraFrameRenderer,
   useVisionCameraFrameOutput,
+  useVisionCameraPermission,
 } from "./vision-camera";
 
 function createFrame(timestamp: number) {
@@ -82,6 +86,17 @@ describe("useVisionCameraFrameRenderer", () => {
   });
 });
 
+describe("VisionCamera hook adapters", () => {
+  it("fails clearly outside a VisionCamera runtime", () => {
+    expect(() => useVisionCameraDevice("back")).toThrow(
+      /VisionCamera is unavailable/,
+    );
+    expect(() => useVisionCameraPermission()).toThrow(
+      /VisionCamera is unavailable/,
+    );
+  });
+});
+
 describe("presentVisionCameraFrame", () => {
   it("renders only completed packets and always disposes the native frame", () => {
     const rendered = createFrame(0);
@@ -106,5 +121,43 @@ describe("presentVisionCameraFrame", () => {
       }),
     ).toThrow(/inference failed/);
     expect(frame.dispose).toHaveBeenCalledOnce();
+  });
+});
+
+describe("VisionCamera orientation", () => {
+  it.each([
+    ["up", { height: 720, width: 1280 }],
+    ["down", { height: 720, width: 1280 }],
+    ["left", { height: 1280, width: 720 }],
+    ["right", { height: 1280, width: 720 }],
+  ])("normalizes %s detection dimensions", (orientation, expected) => {
+    expect(
+      resolveVisionCameraFrameSize({
+        height: 720,
+        orientation,
+        width: 1280,
+      }),
+    ).toEqual(expected);
+  });
+
+  it("uses the matching native renderer transform", () => {
+    expect(
+      resolveVisionCameraFrameRendererStyle({
+        canvasHeight: 800,
+        canvasWidth: 400,
+        orientation: "left",
+      }),
+    ).toMatchObject({
+      height: 400,
+      transform: [{ rotate: "90deg" }],
+      width: 800,
+    });
+    expect(
+      resolveVisionCameraFrameRendererStyle({
+        canvasHeight: 800,
+        canvasWidth: 400,
+        orientation: "down",
+      }),
+    ).toMatchObject({ transform: [{ rotate: "180deg" }] });
   });
 });
