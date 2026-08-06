@@ -184,27 +184,30 @@ with detections regardless of how they were produced.
 
 The experimental iOS saved-video path is analysis-paced: it processes each
 decoded frame as quickly as inference permits rather than trying to match wall
-clock playback. It reports explicit capabilities; pause, resume, and stop are
-available, while seeking is intentionally unsupported until native decoding can
-reposition accurately. New package code should use
-`REACT_NATIVE_FILE_SESSION_DEFAULTS`; `REACT_NATIVE_VIDEO_SESSION_DEFAULTS`
-remains only as a deprecated compatibility alias.
+clock playback. `createReactNativeVideoFileSession()` presents the same
+`MediaSession` controls and state surface as the generic path, while keeping
+its native decoder, worklet runtime, and Skia resources private to the package.
+Pause, play/resume, and stop are available; seeking is intentionally
+unsupported until native decoding can reposition accurately. The older
+`createReactNativeVideoSession()` name remains a deprecated forwarding alias.
 
-The experimental saved-video session is analysis-paced: it processes each
-decoded frame as quickly as inference permits rather than trying to match wall
-clock playback. It reports explicit capabilities; pause, resume, and stop are
-available, while seeking is intentionally unsupported until native decoding can
-reposition accurately.
+Saved-video decoding on Android is **not implemented yet**. On Android the
+file source fails with the stable
+`android-video-file-source-not-implemented-yet` reason rather than attempting a
+missing native module. The future implementation is a Nitro/C++ source backed
+by `AMediaExtractor` and `AMediaCodec`, delivering an API-26+
+`AHardwareBuffer` to the existing ExecuTorch and Skia consumers with explicit
+timestamp, orientation, and release ownership. Until that lands, do not claim
+cross-platform file support.
 
 React Native currently shares editing geometry, picking, and gesture semantics
 through `createReactNativeAnnotationGestureAdapter`. Native hosts own drawing
 editing affordances from `AnnotationOverlayStyle` until a native overlay
 renderer is introduced.
 
-The remaining mobile work is integration, not a second session abstraction:
-migrate the saved-video compatibility factory onto the generic
-source/processor/renderer contracts and add an Android saved-video source before
-claiming cross-platform file support. The experimental
+The remaining mobile work is platform implementation and measurement, not a
+second session abstraction: add the Android saved-video source and measure
+whether native-thread prepared windows are needed before introducing them. The experimental
 `./react/live-inference` entrypoint owns the live VisionCamera worklet through
 `useReactNativeLiveInference()`; applications provide model runners and
 serializable configuration, not frame callbacks. This keeps the generic

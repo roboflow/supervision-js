@@ -52,6 +52,24 @@ export interface ReactNativeVideoFrameSourceHandle {
 }
 
 /**
+ * Saved-video decoding is currently implemented by the iOS AVFoundation
+ * hybrid only. Android deliberately reports this capability as unavailable
+ * until its MediaCodec/AHardwareBuffer implementation lands.
+ */
+export function getReactNativeVideoFilePlatformAvailability(
+  platform: string | undefined,
+) {
+  if (platform === "android") {
+    return {
+      available: false,
+      reason: "android-video-file-source-not-implemented-yet",
+    } as const;
+  }
+
+  return { available: true } as const;
+}
+
+/**
  * Creates and boxes a fresh native video frame source.
  *
  * Must run on the normal React/JS thread (module lookup cannot happen inside
@@ -64,6 +82,14 @@ export function createReactNativeVideoFrameSource(): ReactNativeVideoFrameSource
       boxed: null,
       fallbackReason: "nitro-runtime-require-unavailable",
     };
+  }
+
+  const availability = getReactNativeVideoFilePlatformAvailability(
+    resolveReactNativePlatform(),
+  );
+
+  if (!availability.available) {
+    return { boxed: null, fallbackReason: availability.reason };
   }
 
   try {
@@ -82,6 +108,22 @@ export function createReactNativeVideoFrameSource(): ReactNativeVideoFrameSource
       boxed: null,
       fallbackReason: resolveCreateErrorMessage(error),
     };
+  }
+}
+
+function resolveReactNativePlatform() {
+  try {
+    // Keep React Native optional for Node consumers and package tests.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const reactNative = require("react-native") as {
+      readonly Platform?: { readonly OS?: unknown };
+    };
+
+    return typeof reactNative.Platform?.OS === "string"
+      ? reactNative.Platform.OS
+      : undefined;
+  } catch {
+    return undefined;
   }
 }
 

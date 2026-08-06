@@ -13,6 +13,13 @@
  * keeps this subpath device-only like `./skia`.
  */
 
+import {
+  MediaSessionMode,
+  type DetectionPickOptions,
+  type DetectionPickResult,
+  type MediaRendererPresentation,
+  type MediaTimelineMetadata,
+} from "supervision-js-core";
 import { Skia, type SkImage } from "@shopify/react-native-skia";
 
 import {
@@ -30,12 +37,21 @@ import {
 import { loadReactNativeLiveIdMaskNativeBuilder } from "./native-id-mask-builder";
 import { PreparedFrameStore } from "./renderers/prepared-frame-store";
 import { REACT_NATIVE_FILE_SESSION_DEFAULTS } from "./sessions/media-session-defaults";
+import { createMediaSessionStateSnapshot } from "./sessions/media-session-state";
+import {
+  MediaSessionError,
+  type MediaSession,
+  type MediaSessionState,
+  type MediaSessionStateListener,
+  type MediaSessionStateUnsubscribe,
+} from "./types/media-session";
 import type { MediaSessionCapabilities } from "./types/frame-source";
 import {
   type ReactNativeBoxedVideoFrameSource,
   type ReactNativeVideoFrameHandle,
 } from "./video-frame-source";
 import { createReactNativeVideoFileSource } from "./adapters/video-file";
+import { bindReactNativeVideoSessionPresentation } from "./sessions/react-native-video-presentation";
 
 export { createMediaSession } from "./sessions/media-session-core";
 export {
@@ -76,8 +92,8 @@ export interface ReactNativeSharedValue<TValue> {
   value: TValue;
 }
 
-/** Opaque worklet runtime handle produced by `createReactNativeWorkletRuntime`. */
-export type ReactNativeWorkletRuntimeHandle = object;
+/** Opaque runtime held entirely inside the saved-video adapter. */
+type ReactNativeWorkletRuntimeHandle = object;
 
 /** @deprecated Prefer `REACT_NATIVE_FILE_SESSION_DEFAULTS`. */
 export const REACT_NATIVE_VIDEO_SESSION_DEFAULTS =
@@ -188,8 +204,6 @@ export interface ReactNativeVideoSessionOptions {
   readonly mediaRect: TopLeftRect;
   readonly nativeBuilder?: ReactNativeLiveIdMaskNativeBuilderHandle | null;
   readonly presentation?: ReactNativeVideoSessionPresentationOptions;
-  /** Worklet runtime the pump runs on (owned by the caller, reusable). */
-  readonly runtime: ReactNativeWorkletRuntimeHandle;
   /**
    * Inference, injected as a worklet: turn one decoded frame into serialized
    * detections in the upright video's coordinate space.
@@ -212,25 +226,22 @@ export interface ReactNativeVideoSessionOptions {
   readonly onStats?: (stats: ReactNativeVideoSessionStats) => void;
 }
 
-export interface ReactNativeVideoSession {
+/**
+ * Saved-video MediaSession facade. The decoder, worklet runtime, and Skia
+ * presentation lanes remain implementation details of the React Native
+ * adapter; bind this object with `ReactNativeVideoFrameStage` instead.
+ */
+export interface ReactNativeVideoSession extends MediaSession {
   readonly capabilities: MediaSessionCapabilities;
   readonly durationMs: number;
   readonly frameHeight: number;
   readonly frameWidth: number;
   readonly nominalFrameRate: number;
   readonly playbackMode: typeof REACT_NATIVE_VIDEO_SESSION_PLAYBACK_MODE;
-  /** Presentation lanes for the UI: media frame, mask, and its uniforms. */
-  readonly frameImage: ReactNativeSharedValue<SkImage | null>;
-  readonly maskImage: ReactNativeSharedValue<SkImage | null>;
-  readonly maskUniforms: ReactNativeSharedValue<ReactNativeIdMaskUniforms>;
+  /** Updates dynamic canvas-space geometry used by the private Skia stage. */
   setMediaRect(rect: TopLeftRect): void;
-  /** Halts the pump but keeps the decoder open at position. */
-  pause(): void;
+  /** @deprecated Use the common `play()` control. */
   resume(): void;
-  /** Halts and closes the decoder; the last presented frame stays visible. */
-  stop(): void;
-  /** Stops, releases every packet resource, and silences callbacks. Idempotent. */
-  destroy(): void;
 }
 
 /** Renderer-private saved-video packet; never part of the public session API. */
@@ -254,12 +265,8 @@ interface WorkletVendorModules {
   scheduleOnRuntime(runtime: never, worklet: () => void): void;
 }
 
-/**
- * Creates a dedicated native thread + worklet runtime for session pumps.
- * Create one per screen and reuse it across sessions; threads are not
- * reclaimed until the app exits.
- */
-export function createReactNativeWorkletRuntime(
+/** Creates a dedicated native thread + worklet runtime for saved-video pumps. */
+function createReactNativeWorkletRuntime(
   name: string,
 ): ReactNativeWorkletRuntimeHandle {
   if (typeof require !== "function") {
@@ -285,6 +292,21 @@ export function createReactNativeWorkletRuntime(
   };
 
   return cameraWorklets.createWorkletRuntimeForThread(thread);
+}
+
+let defaultVideoFileWorkletRuntime: ReactNativeWorkletRuntimeHandle | null =
+  null;
+
+function getDefaultVideoFileWorkletRuntime() {
+  if (!defaultVideoFileWorkletRuntime) {
+    // A native thread cannot be reclaimed before process exit. Keep one
+    // package-owned runtime rather than asking every screen to allocate one.
+    defaultVideoFileWorkletRuntime = createReactNativeWorkletRuntime(
+      "supervision-video-file-pump",
+    );
+  }
+
+  return defaultVideoFileWorkletRuntime;
 }
 
 function resolveWorkletVendorModules(): WorkletVendorModules {
@@ -318,16 +340,26 @@ function resolveWorkletVendorModules(): WorkletVendorModules {
  * Throws with a descriptive message when the file cannot be opened or a
  * native dependency is missing (this factory is device-only).
  */
-export function createReactNativeVideoSession(
+export function createReactNativeVideoFileSession(
   options: ReactNativeVideoSessionOptions,
 ): ReactNativeVideoSession {
-  const vendors = resolveWorkletVendorModules();
   const source = createReactNativeVideoFileSource({ fileUri: options.fileUri });
 
   source.open();
 
+  let vendors: WorkletVendorModules;
+  let runtime: ReactNativeWorkletRuntimeHandle;
+
+  try {
+    vendors = resolveWorkletVendorModules();
+    runtime = getDefaultVideoFileWorkletRuntime();
+  } catch (error) {
+    source.close();
+    throw error;
+  }
+
   const boxedSource: ReactNativeBoxedVideoFrameSource = source.boxedSource;
-  const timeline = source.timeline;
+  const timeline: MediaTimelineMetadata = source.timeline;
   const durationMs = (timeline.duration ?? 0) * 1000;
   const frameWidth = timeline.width;
   const frameHeight = timeline.height;
@@ -365,7 +397,56 @@ export function createReactNativeVideoSession(
   const resolveMaskEffects = options.resolveMaskEffects;
   const scheduleOnRN = vendors.scheduleOnRN;
 
+  const listeners = new Set<MediaSessionStateListener>();
   let destroyed = false;
+  let ended = false;
+  let error: MediaSessionError | null = null;
+  let presentationCount = 0;
+  let presentedFrames = 0;
+  const started = true;
+  let stopped = false;
+  let playing = true;
+  let processing = true;
+  let activePacketId: number | null = null;
+  const getState = (): MediaSessionState =>
+    createMediaSessionStateSnapshot({
+      activeDetectionFrame: null,
+      activePacketId,
+      capabilities: REACT_NATIVE_VIDEO_SESSION_CAPABILITIES,
+      destroyed,
+      ended,
+      error,
+      lastDiagnostics: null,
+      mode: MediaSessionMode.File,
+      opened: true,
+      playing,
+      presentedFrames,
+      preparedFrames: presentationCount,
+      processing,
+      rendererBackend: "react-native-video-file",
+      started,
+      stopped,
+      timeline,
+    });
+  const emit = () => {
+    const snapshot = getState();
+
+    for (const listener of listeners) {
+      listener(snapshot);
+    }
+  };
+  const reportFailure = (cause: string) => {
+    if (destroyed) {
+      return;
+    }
+
+    error = new MediaSessionError("source-failed", cause, {
+      stage: "source",
+    });
+    playing = false;
+    processing = false;
+    emit();
+  };
   const createPreparedFrameStore = () => {
     "worklet";
 
@@ -388,13 +469,28 @@ export function createReactNativeVideoSession(
   };
   const reportStats = (stats: ReactNativeVideoSessionStats) => {
     if (!destroyed) {
+      presentationCount = stats.processedFrames;
+      presentedFrames = stats.processedFrames;
+      activePacketId = Math.max(0, stats.processedFrames - 1);
+      emit();
       options.onStats?.(stats);
     }
   };
   const reportEnded = (event: ReactNativeVideoSessionEndEvent) => {
-    if (!destroyed) {
-      options.onEnded?.(event);
+    if (destroyed) {
+      return;
     }
+
+    if (event.error !== undefined) {
+      reportFailure(event.error);
+    } else {
+      playing = false;
+      processing = false;
+      ended = !event.paused && !stopped;
+      emit();
+    }
+
+    options.onEnded?.(event);
   };
 
   const runPump = () => {
@@ -609,7 +705,7 @@ export function createReactNativeVideoSession(
   };
 
   const schedulePump = () => {
-    vendors.scheduleOnRuntime(options.runtime as never, runPump);
+    vendors.scheduleOnRuntime(runtime as never, runPump);
   };
 
   const haltPump = (keepSourceOpen: boolean) => {
@@ -631,43 +727,107 @@ export function createReactNativeVideoSession(
   playingShared.value = true;
   schedulePump();
 
-  return {
+  const resume = () => {
+    if (destroyed || playingShared.value || !pausedShared.value) {
+      return;
+    }
+
+    pausedShared.value = false;
+    playingShared.value = true;
+    ended = false;
+    stopped = false;
+    playing = true;
+    processing = true;
+    emit();
+    schedulePump();
+  };
+
+  const session: ReactNativeVideoSession = {
     capabilities: REACT_NATIVE_VIDEO_SESSION_CAPABILITIES,
     durationMs,
     frameHeight,
-    frameImage,
     frameWidth,
-    maskImage,
-    maskUniforms,
     nominalFrameRate,
     playbackMode: REACT_NATIVE_VIDEO_SESSION_PLAYBACK_MODE,
+    timeline,
     destroy() {
       if (destroyed) {
-        return;
+        return Promise.resolve();
       }
 
       haltPump(false);
       destroyed = true;
-      vendors.scheduleOnRuntime(options.runtime as never, cleanupPackets);
+      playing = false;
+      processing = false;
+      vendors.scheduleOnRuntime(runtime as never, cleanupPackets);
+      emit();
+      listeners.clear();
+      return Promise.resolve();
     },
+    getState,
     pause() {
       if (destroyed || !playingShared.value) {
         return;
       }
 
       haltPump(true);
+      playing = false;
+      processing = false;
+      emit();
     },
-    resume() {
-      if (destroyed || playingShared.value || !pausedShared.value) {
+    pick(
+      point: { readonly x: number; readonly y: number },
+      pickOptions?: DetectionPickOptions,
+    ): DetectionPickResult | null {
+      void point;
+      void pickOptions;
+
+      // The serializer produces display-only detections. Do not fabricate a
+      // core DetectionFrame merely to claim selection support.
+      return null;
+    },
+    async play() {
+      if (destroyed) {
+        throw new MediaSessionError(
+          "destroyed",
+          "Cannot play: media session has been destroyed.",
+        );
+      }
+
+      if (playingShared.value || !pausedShared.value) {
         return;
       }
 
-      pausedShared.value = false;
-      playingShared.value = true;
-      schedulePump();
+      resume();
+    },
+    resume,
+    async seek(mediaTime: number) {
+      void mediaTime;
+
+      throw new MediaSessionError(
+        "unsupported-operation",
+        "Cannot seek: this media source does not support it.",
+      );
     },
     setMediaRect(rect: TopLeftRect) {
       mediaRectShared.value = { ...rect };
+    },
+    setPresentation(nextPresentation: MediaRendererPresentation) {
+      void nextPresentation;
+
+      if (destroyed) {
+        throw new MediaSessionError(
+          "destroyed",
+          "Cannot update presentation: media session has been destroyed.",
+        );
+      }
+
+      // The injected worklet owns saved-video frame styling. Explicitly reject
+      // generic style mutations instead of accepting a no-op update.
+      throw new MediaSessionError(
+        "unsupported-operation",
+        "Cannot update presentation: this video adapter does not support generic renderer styles yet.",
+      );
     },
     stop() {
       if (destroyed) {
@@ -675,11 +835,42 @@ export function createReactNativeVideoSession(
       }
 
       const { wasPaused } = haltPump(false);
+      stopped = true;
+      playing = false;
+      processing = false;
+      emit();
 
       // The pump was not running to report the end; report it here.
       if (wasPaused) {
         reportEnded({ paused: false });
       }
     },
+    subscribe(listener): MediaSessionStateUnsubscribe {
+      listener(getState());
+
+      if (destroyed) {
+        return () => undefined;
+      }
+
+      listeners.add(listener);
+
+      return () => {
+        listeners.delete(listener);
+      };
+    },
   };
+
+  bindReactNativeVideoSessionPresentation(session, {
+    frameImage,
+    maskImage,
+    maskUniforms,
+  });
+
+  return session;
 }
+
+/**
+ * @deprecated Use `createReactNativeVideoFileSession`. The compatibility
+ * alias remains until consumers migrate to the common MediaSession surface.
+ */
+export const createReactNativeVideoSession = createReactNativeVideoFileSession;

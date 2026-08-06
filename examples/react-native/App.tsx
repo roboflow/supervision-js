@@ -47,8 +47,7 @@ import {
   type ReactNativeLiveInferenceReadout,
 } from "supervision-js-react-native/react/live-inference";
 import {
-  createReactNativeVideoSession,
-  createReactNativeWorkletRuntime,
+  createReactNativeVideoFileSession,
   type ReactNativeVideoSession,
   type ReactNativeVideoSessionEndEvent,
   type ReactNativeVideoSessionStats,
@@ -1784,12 +1783,6 @@ function VideoFileProof(props: {
     [videoDetections, videoDims?.height, videoDims?.width, videoLayout],
   );
   const runSegmentationOnFrame = props.segmentation.runOnFrame;
-  // One dedicated pump runtime per screen mount, shared by every session.
-  const videoRuntime = useMemo(
-    () => createReactNativeWorkletRuntime("supervision-video-pump"),
-    [],
-  );
-
   useEffect(() => {
     videoSessionRef.current?.setMediaRect(videoLayout.mediaRect);
   }, [videoLayout.mediaRect, videoSession]);
@@ -1861,7 +1854,7 @@ function VideoFileProof(props: {
       videoSessionRef.current = null;
 
       try {
-        const session = createReactNativeVideoSession({
+        const session = createReactNativeVideoFileSession({
           fileUri,
           mediaRect: videoLayout.mediaRect,
           onDetections: setVideoDetections,
@@ -1873,7 +1866,6 @@ function VideoFileProof(props: {
             mosaicCellPx: LIVE_PRIVACY_MOSAIC_CELL_PX,
           },
           resolveMaskEffects: resolveVideoMaskEffects,
-          runtime: videoRuntime,
           serializeFrame: serializeVideoFrame,
         });
 
@@ -1896,7 +1888,6 @@ function VideoFileProof(props: {
       resolveVideoMaskEffects,
       serializeVideoFrame,
       videoLayout.mediaRect,
-      videoRuntime,
     ],
   );
 
@@ -1950,7 +1941,7 @@ function VideoFileProof(props: {
     }
 
     setVideoStatus("processing");
-    videoSessionRef.current.resume();
+    void videoSessionRef.current.play();
   }, []);
 
   const stopVideo = useCallback(() => {

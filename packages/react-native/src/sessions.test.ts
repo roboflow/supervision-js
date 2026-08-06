@@ -2,8 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   createReactNativeClassMaskEffectsResolver,
+  createReactNativeVideoFileSession,
   createReactNativeVideoSession,
-  createReactNativeWorkletRuntime,
   MediaSessionError,
   REACT_NATIVE_VIDEO_SESSION_DEFAULTS,
   REACT_NATIVE_VIDEO_SESSION_CAPABILITIES,
@@ -21,15 +21,14 @@ vi.mock("@shopify/react-native-skia", () => ({
   Skia: {},
 }));
 
-describe("createReactNativeVideoSession", () => {
+describe("createReactNativeVideoFileSession", () => {
   it("throws a diagnosable error outside a device runtime", () => {
     // Off-device (Node/Vitest) the vendor worklet runtimes or the native
     // frame source are absent; the factory must fail loudly, not hang.
     expect(() =>
-      createReactNativeVideoSession({
+      createReactNativeVideoFileSession({
         fileUri: "file:///missing.mp4",
         mediaRect: { height: 1, width: 1, x: 0, y: 0 },
-        runtime: {},
         serializeFrame: () => [],
       }),
     ).toThrow(/unavailable|Cannot find module/);
@@ -68,9 +67,11 @@ describe("saved-video session capabilities", () => {
   });
 });
 
-describe("createReactNativeWorkletRuntime", () => {
-  it("throws a diagnosable error outside a device runtime", () => {
-    expect(() => createReactNativeWorkletRuntime("test-runtime")).toThrow();
+describe("saved-video compatibility factory", () => {
+  it("keeps the old name as a forwarding alias while consumers migrate", () => {
+    expect(createReactNativeVideoSession).toBe(
+      createReactNativeVideoFileSession,
+    );
   });
 });
 
@@ -104,7 +105,7 @@ describe("createReactNativeClassMaskEffectsResolver", () => {
 });
 
 describe("sessions entrypoint", () => {
-  it("exposes the session-first contract alongside the legacy video factory", () => {
+  it("exposes the session-first contract without leaking runtime setup", () => {
     expect(
       Object.keys(
         // The Skia module is mocked above, so this verifies the actual
@@ -118,8 +119,8 @@ describe("sessions entrypoint", () => {
       "REACT_NATIVE_VIDEO_SESSION_PLAYBACK_MODE",
       "createMediaSession",
       "createReactNativeClassMaskEffectsResolver",
+      "createReactNativeVideoFileSession",
       "createReactNativeVideoSession",
-      "createReactNativeWorkletRuntime",
     ]);
     expect(MediaSessionError.name).toBe("MediaSessionError");
   });

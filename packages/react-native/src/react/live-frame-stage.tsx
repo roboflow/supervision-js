@@ -56,6 +56,7 @@ import {
   type ReactNativeSkiaVectorFrameOptions,
 } from "../skia";
 import type { ReactNativeVideoSession } from "../sessions";
+import { getReactNativeVideoSessionPresentation } from "../sessions/react-native-video-presentation";
 
 /**
  * Allocates a disposable native resource only after React commits. The deferred
@@ -374,18 +375,17 @@ export function ReactNativeVideoFrameStage(
     ReactNativeLiveFrameStageProps,
     "maskImage" | "maskUniforms" | "mediaImage"
   > & {
-    readonly session: Pick<
-      ReactNativeVideoSession,
-      "frameImage" | "maskImage" | "maskUniforms"
-    > | null;
+    readonly session: ReactNativeVideoSession | null;
   },
 ) {
+  const presentation = getReactNativeVideoSessionPresentation(props.session);
+
   return (
     <ReactNativeLiveFrameStage
       {...props}
-      maskImage={props.session?.maskImage}
-      maskUniforms={props.session?.maskUniforms}
-      mediaImage={props.session?.frameImage}
+      maskImage={presentation?.maskImage}
+      maskUniforms={presentation?.maskUniforms}
+      mediaImage={presentation?.frameImage}
     />
   );
 }

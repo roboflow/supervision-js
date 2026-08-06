@@ -161,6 +161,7 @@ export type {
 
 export {
   createReactNativeVideoFrameSource,
+  getReactNativeVideoFilePlatformAvailability,
   REACT_NATIVE_VIDEO_FRAME_SOURCE_NAME,
 } from "./video-frame-source";
 export type {
