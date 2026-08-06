@@ -46,7 +46,6 @@ import {
   NativeFrameRendererView,
   useCameraDevice,
   useCameraPermission,
-  useFrameOutput,
   useFrameRenderer,
   type Frame,
 } from "react-native-vision-camera";
@@ -80,6 +79,7 @@ import {
   resolveReactNativeLabelLayout,
   createEmptyReactNativeLiveIdMaskUniforms,
 } from "supervision-js-react-native";
+import { useVisionCameraFrameOutput } from "supervision-js-react-native/adapters/vision-camera";
 import {
   createReactNativeStaticMediaSessionBinding,
   getReactNativeMediaSessionViewReadout,
@@ -2782,16 +2782,11 @@ function LiveCameraProof(props: {
     ],
   );
 
-  const inferenceFrameOutput = useFrameOutput({
-    allowDeferredStart: false,
-    dropFramesWhileBusy: true,
-    enablePhysicalBufferRotation: false,
-    enablePreviewSizedOutputBuffers: true,
+  const inferenceFrameOutput = useVisionCameraFrameOutput({
     onFrame: onLiveInferenceFrame,
     onFrameDropped() {
       reportDroppedFrame();
     },
-    pixelFormat: "rgb",
     targetResolution: LIVE_FRAME_TARGET_RESOLUTION,
   });
 

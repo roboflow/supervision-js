@@ -3,6 +3,7 @@ import {
   type MediaTimelineMetadata,
   type PlatformMediaFrame,
 } from "supervision-js-core";
+import type { CameraFrameOutput } from "react-native-vision-camera";
 
 import type {
   MediaFrameSource,
@@ -143,7 +144,7 @@ export function createVisionCameraLiveSource<TFrame extends VisionCameraFrame>(
  */
 export function useVisionCameraFrameOutput<TFrame extends VisionCameraFrame>(
   options: VisionCameraFrameOutputOptions<TFrame>,
-): unknown {
+): CameraFrameOutput {
   if (typeof require !== "function") {
     throw new Error(
       "VisionCamera frame output is unavailable in this runtime.",
@@ -160,7 +161,7 @@ export function useVisionCameraFrameOutput<TFrame extends VisionCameraFrame>(
       onFrameDropped?: () => void;
       pixelFormat: "rgb";
       targetResolution: VisionCameraFrameOutputOptions<TFrame>["targetResolution"];
-    }): unknown;
+    }): CameraFrameOutput;
   };
   let visionCamera: VisionCameraModule;
 
