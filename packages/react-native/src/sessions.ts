@@ -300,6 +300,7 @@ function createReactNativeWorkletRuntime(
   return cameraWorklets.createWorkletRuntimeForThread(thread);
 }
 
+const MAX_IDLE_VIDEO_FILE_WORKLET_RUNTIMES = 1;
 const idleVideoFileWorkletRuntimes: ReactNativeWorkletRuntimeHandle[] = [];
 
 function acquireVideoFileWorkletRuntime() {
@@ -312,6 +313,12 @@ function acquireVideoFileWorkletRuntime() {
 function releaseVideoFileWorkletRuntime(
   runtime: ReactNativeWorkletRuntimeHandle,
 ) {
+  if (
+    idleVideoFileWorkletRuntimes.length >= MAX_IDLE_VIDEO_FILE_WORKLET_RUNTIMES
+  ) {
+    return;
+  }
+
   idleVideoFileWorkletRuntimes.push(runtime);
 }
 
