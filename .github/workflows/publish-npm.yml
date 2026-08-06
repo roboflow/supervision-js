@@ -11,6 +11,10 @@ on:
         options:
           - next
           - latest
+      release_sha:
+        description: "Recovery only: full SHA that produced an already-published immutable version."
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -31,6 +35,29 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+        with:
+          # A recovery must rebuild the exact commit that produced the immutable
+          # npm artifact, rather than whatever main happens to contain later.
+          ref: ${{ inputs.release_sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Verify selected release commit
+        shell: bash
+        env:
+          RELEASE_SHA_INPUT: ${{ inputs.release_sha }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${RELEASE_SHA_INPUT}" ]]; then
+            exit 0
+          fi
+
+          if ! [[ "${RELEASE_SHA_INPUT}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "release_sha must be a full 40-character Git commit SHA." >&2
+            exit 1
+          fi
+
+          test "$(git rev-parse HEAD)" = "${RELEASE_SHA_INPUT}"
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -55,6 +82,7 @@ jobs:
         shell: bash
         env:
           DIST_TAG: ${{ inputs.dist_tag }}
+          RELEASE_SHA_INPUT: ${{ inputs.release_sha }}
         run: |
           set -euo pipefail
           version="$(node -p "require('./packages/web/package.json').version")"
@@ -75,7 +103,12 @@ jobs:
               exit 1
             fi
 
-            echo "supervision@${version} is already published; continuing release verification."
+            if [[ -z "${RELEASE_SHA_INPUT}" ]]; then
+              echo "supervision@${version} is already published. To recover its GitHub Release, dispatch this workflow from main with release_sha set to the full commit SHA that produced the published artifact." >&2
+              exit 1
+            fi
+
+            echo "supervision@${version} is already published; continuing the explicit SHA recovery."
             exit 0
           fi
 
@@ -97,6 +130,31 @@ jobs:
           published_version="$(npm view "supervision@${DIST_TAG}" version)"
           test "${published_version}" = "${version}"
 
+      - name: Create or verify release tag
+        if: inputs.dist_tag == 'latest'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./packages/web/package.json').version")"
+          tag="v${version}"
+          release_sha="$(git rev-parse HEAD)"
+
+          git fetch --tags --force
+
+          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            tag_sha="$(git rev-list -n 1 "${tag}")"
+            if [[ "${tag_sha}" != "${release_sha}" ]]; then
+              echo "Existing ${tag} points to ${tag_sha}, not ${release_sha}." >&2
+              exit 1
+            fi
+
+            echo "Git tag ${tag} already points to the release commit."
+            exit 0
+          fi
+
+          git tag --annotate "${tag}" "${release_sha}" --message "supervision ${tag}"
+          git push origin "refs/tags/${tag}"
+
       - name: Create GitHub Release
         if: inputs.dist_tag == 'latest'
         shell: bash
@@ -113,6 +171,5 @@ jobs:
           fi
 
           gh release create "${tag}" \
-            --target "${GITHUB_SHA}" \
             --title "supervision ${tag}" \
             --generate-notes

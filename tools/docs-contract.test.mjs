@@ -103,7 +103,7 @@ test("TypeDoc does not publish the private workspace version", async () => {
   assert.equal(config.includeVersion, false);
 });
 
-test("documentation toolbar mirrors the published browser package version", async () => {
+test("documentation toolbar mirrors the browser package manifest version", async () => {
   const packageJson = JSON.parse(
     await readFile(path.join(rootDir, "packages/web/package.json"), "utf8"),
   );

@@ -3,6 +3,7 @@
 (function () {
   const packageName = "supervision";
   const packageVersion = "0.1.1";
+  const packageReleaseStatus = "pending release";
   const kindIconMap = {
     Accessor: "A",
     Class: "C",
@@ -117,7 +118,9 @@
       `${base}assets/brand/roboflow-logomark.svg`,
       window.location.href,
     ).href;
-    const version = `v${packageVersion}`;
+    const version = packageReleaseStatus
+      ? `v${packageVersion} (${packageReleaseStatus})`
+      : `v${packageVersion}`;
 
     title.innerHTML = `
       <img class="supervision-docs__mark" src="${logo}" alt="Roboflow" />

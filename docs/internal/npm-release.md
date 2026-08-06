@@ -66,6 +66,8 @@ change the published browser package version.
 
 1. Update `packages/web/package.json`, `package-lock.json`, and the checked docs
    toolbar version together. `npm run docs:check` verifies the toolbar mirror.
+   Before the npm publication, the toolbar must label that version as pending;
+   the post-publication docs-only follow-up removes that label.
 2. Keep the public repository README and hosted docs on the currently live npm
    channel until the stable publish has completed. Before the first browser
    package owns `latest`, that is `npm install supervision@next`; do not
@@ -99,8 +101,8 @@ change the published browser package version.
 7. Confirm that the GitHub Release `v<version>` points at the same `main`
    commit the workflow published. Then merge a docs-only follow-up that changes
    the public repository README and hosted docs from
-   `npm install supervision@next` to `npm install supervision` and verify the
-   documentation deployment.
+   `npm install supervision@next` to `npm install supervision`, removes the
+   toolbar's pending-release label, and verifies the documentation deployment.
 
 ## Clear A Previous `next` Tag
 
@@ -124,6 +126,10 @@ If publishing fails before uploading the package, fix the failure in a pull
 request and rerun the workflow from `main`. npm versions are immutable once
 published: never try to overwrite one. Publish a new patch version instead.
 
-If package publishing succeeds but GitHub Release creation fails, rerun the
-workflow for the same `main` commit. The release step is idempotent and will
-leave an existing matching GitHub Release intact.
+If package publishing succeeds but GitHub Release creation fails, do not start
+a new default dispatch from a later `main` commit: that would build a different
+source tree for an immutable version. Start **Publish npm package** from `main`
+with `release_sha` set to the full SHA of the failed run's `head_sha`. The
+workflow checks out that SHA, verifies or creates the matching `v<version>`
+tag, and then creates the GitHub Release. It rejects an already-published
+version without that explicit recovery SHA.
