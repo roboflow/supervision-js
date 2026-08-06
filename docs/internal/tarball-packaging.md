@@ -40,7 +40,9 @@ import { createMaskBrushEditor } from "supervision-js/editing";
 ```
 
 The consumer needs an npm-compatible bundler such as Vite, webpack, Parcel, or
-esbuild. There is no CDN, UMD, or `<script>` distribution.
+esbuild. The default render-preparation worker is embedded in the browser entry
+and created from a Blob URL, so the bundler does not need worker-specific asset
+handling. There is no CDN, UMD, or `<script>` distribution.
 
 ## How The Private Core Is Made Portable
 
@@ -74,8 +76,11 @@ npm run package:tarball:smoke
 The smoke suite inspects the archive and then builds a throwaway npm project in
 the OS temp directory — outside this repository — to check that:
 
-- both entrypoints, their declarations, source maps, and the render-preparation
-  worker plus the content-hashed chunks it imports are present;
+- both JavaScript entrypoints, their declarations and source maps are present;
+- the standalone render-preparation worker is present, has no sibling chunk
+  imports, and is exported as `supervision-js/render-preparation-worker`;
+- the main browser entry embeds the worker source instead of referencing a
+  runtime-relative worker URL;
 - `supervision-js-core` is bundled while `pixi.js` and `mediabunny` are not;
 - a clean `npm install <tarball>` produces a lockfile with no `file:` path;
 - `supervision-js` and `supervision-js/editing` import under Node;

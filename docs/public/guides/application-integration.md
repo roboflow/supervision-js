@@ -60,12 +60,16 @@ Use:
 - an npm-compatible package manager;
 - an ESM-aware bundler such as Vite, webpack, Parcel, or esbuild.
 
+The default render-preparation worker is embedded in the package and runs from
+a Blob URL. Consumers do not need to copy a worker file or configure a
+bundler-specific worker loader.
+
 The renderer requires browser APIs. In an SSR application, create sessions only
 on the client after the container element exists. The package can be imported by
 build tooling, but `createMediaSession()` must not run during server rendering.
 
-Do not import Pixi, Mediabunny, worker files, or internal core modules. Import the
-supported entrypoints:
+Do not import Pixi, Mediabunny, worker protocols, or internal core modules.
+Import the supported JavaScript entrypoints:
 
 ```ts
 import { createMediaSession } from "supervision-js";
@@ -252,13 +256,45 @@ Do not combine `detections.sources` with the three single-source inputs.
 See [React Integration](../recipes/react-integration.md) for a complete
 component pattern.
 
+## Strict CSP Worker Hosting
+
+The zero-configuration default requires `worker-src blob:`. If the application's
+Content Security Policy disallows Blob workers, copy the standalone script
+exported at `supervision-js/render-preparation-worker` into the application's
+public assets during its build, then provide a worker factory:
+
+```ts
+import { RenderPreparationMode, createMediaSession } from "supervision-js";
+
+const session = await createMediaSession({
+  container,
+  media,
+  renderer: {
+    renderPreparation: {
+      mode: RenderPreparationMode.Worker,
+      workerFactory: {
+        createWorker: () =>
+          new Worker("/assets/supervision-js-mask-preparation.worker.js", {
+            name: "supervision-js-render-preparation",
+          }),
+      },
+    },
+  },
+});
+```
+
+Serve that asset from an origin allowed by `worker-src`. The standalone file is
+self-contained, so it does not need adjacent JavaScript chunks. Its message
+protocol is internal; applications should only use it through
+`workerFactory`.
+
 ## Verification Checklist
 
 Before considering an integration complete:
 
 1. `npm ci` succeeds in a fresh checkout of the consuming application.
-2. The production bundler resolves both `supervision-js` and the packaged
-   render-preparation worker.
+2. Render-preparation diagnostics report `worker` / `ready` in the production
+   build when workers are enabled.
 3. The viewer element has a non-zero width and height.
 4. Media renders from the same URL/File type used in production.
 5. At least one known detection appears at the expected media coordinate.
@@ -276,4 +312,5 @@ Before considering an integration complete:
 - Treating rectangle `x` and `y` as top-left coordinates.
 - Storing colors or canvas objects in detections instead of using styles.
 - Creating a second session without destroying the first.
-- Importing internal worker, Pixi, Mediabunny, or prepared-artifact modules.
+- Importing internal worker protocols, Pixi, Mediabunny, or prepared-artifact
+  modules.

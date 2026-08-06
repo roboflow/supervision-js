@@ -1,30 +1,26 @@
+import { EMBEDDED_MASK_PREPARATION_WORKER_SOURCE } from "#render-preparation/embedded-mask-preparation-worker";
 import type { RenderPreparationWorkerFactory } from "#types/render-preparation";
 
 const DEFAULT_WORKER_NAME = "supervision-js-render-preparation";
+let defaultWorkerUrl: string | undefined;
 
 /**
- * The worker has a split protocol dependency. Webpack consumers that emit
- * worker entries under `/_app/` need this entry option in the published ESM so
- * that its follow-up chunks resolve from `/_app/`, rather than relatively from
- * `/_app/<worker>.js` as `/_app/_app/<chunk>.js`.
- *
- * Rollup removes ordinary comments, so the package build restores this webpack
- * magic comment at the exact `new URL` expression in its output.
+ * Creates workers from the self-contained source embedded in the browser
+ * package. The shared object URL is intentionally retained for the lifetime of
+ * the module so every session and every member of a worker pool can reuse it.
  */
 export function createDefaultRenderPreparationWorkerFactory(): RenderPreparationWorkerFactory {
   return {
     createWorker() {
-      return new Worker(
-        new URL(
-          /* webpackEntryOptions: { publicPath: "/" } */
-          "./mask-preparation.worker.js",
-          import.meta.url,
-        ),
-        {
-          name: DEFAULT_WORKER_NAME,
-          type: "module",
-        },
+      defaultWorkerUrl ??= URL.createObjectURL(
+        new Blob([EMBEDDED_MASK_PREPARATION_WORKER_SOURCE], {
+          type: "text/javascript",
+        }),
       );
+
+      return new Worker(defaultWorkerUrl, {
+        name: DEFAULT_WORKER_NAME,
+      });
     },
   };
 }

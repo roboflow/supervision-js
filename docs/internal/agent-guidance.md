@@ -79,9 +79,10 @@ browser API without promising a broad Python-parity annotation framework.
 - `test/` holds reusable Vitest harness helpers that should not be emitted as
   package source.
 - Rollup builds package JavaScript. The root build runs core first, then web.
-- Rollup emits the default render-preparation worker beside `dist/index.js`;
-  keep worker entrypoints package-internal unless a public API explicitly needs
-  them.
+- Rollup emits a self-contained render-preparation worker, then embeds that
+  source in `dist/index.js` for a bundler-agnostic Blob-worker default. The
+  `supervision-js/render-preparation-worker` subpath exposes the same standalone
+  script only as a CSP/deployment asset; its message protocol remains internal.
 - TypeScript emits declarations and performs typechecking.
 - Vitest tests the library source. Rollup is verified by the build step rather
   than used as a test runner.

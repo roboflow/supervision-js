@@ -35,7 +35,8 @@
     "./editing": {
       "types": "./dist/editing.d.ts",
       "import": "./dist/editing.js"
-    }
+    },
+    "./render-preparation-worker": "./dist/mask-preparation.worker.js"
   },
   "imports": {
     "#editing/*": {

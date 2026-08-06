@@ -57,6 +57,7 @@ export function createMaskFramePreparer(
     renderPreparation: options.renderPreparation,
   });
   let isDestroyed = false;
+  let strictWorkerFailureMessage: string | null = null;
 
   if (!workerPreparer) {
     return createMainThreadMaskFramePreparer(
@@ -78,6 +79,14 @@ export function createMaskFramePreparer(
     },
 
     getStatus() {
+      if (strictWorkerFailureMessage) {
+        return {
+          executionMode: RenderPreparationExecutionMode.Worker,
+          message: strictWorkerFailureMessage,
+          workerStatus: RenderPreparationWorkerStatus.Error,
+        };
+      }
+
       return workerPreparer?.getStatus() ?? mainThreadPreparer.getStatus();
     },
 
@@ -89,6 +98,10 @@ export function createMaskFramePreparer(
       const activeWorkerPreparer = workerPreparer;
 
       if (!activeWorkerPreparer) {
+        if (strictWorkerFailureMessage) {
+          throw new Error(strictWorkerFailureMessage);
+        }
+
         return mainThreadPreparer.prepare(job);
       }
 
@@ -102,6 +115,21 @@ export function createMaskFramePreparer(
         if (workerPreparer === activeWorkerPreparer) {
           activeWorkerPreparer.destroy();
           workerPreparer = undefined;
+        }
+
+        if (mode === RenderPreparationMode.Worker) {
+          const isFirstStrictFailure = strictWorkerFailureMessage === null;
+
+          strictWorkerFailureMessage ??= getErrorMessage(
+            error,
+            "Mask preparation worker failed.",
+          );
+
+          if (isFirstStrictFailure) {
+            options.onStatusChange?.();
+          }
+
+          throw error;
         }
 
         mainThreadPreparer.setFallbackMessage(
@@ -126,6 +154,10 @@ function createWorkerPreparerIfAvailable(options: {
     !options.renderPreparation?.workerFactory &&
     typeof Worker === "undefined"
   ) {
+    if (options.mode === RenderPreparationMode.Worker) {
+      throw new Error("Mask preparation worker is unavailable.");
+    }
+
     return undefined;
   }
 

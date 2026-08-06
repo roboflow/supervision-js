@@ -93,6 +93,16 @@ not the first thing most users should reach for:
   controls;
 - render-preparation diagnostics and worker options.
 
+`RenderPreparationMode.Auto` uses the package's embedded Blob worker when the
+browser supports it and falls back to main-thread preparation after a worker
+failure. `RenderPreparationMode.Worker` is strict: worker creation or runtime
+failures reject instead of silently changing execution modes.
+
+Hosts whose Content Security Policy blocks Blob workers may supply a
+`RenderPreparationWorkerFactory` and host the self-contained script exported at
+`supervision-js/render-preparation-worker`. That subpath is a deployment asset,
+not a JavaScript API; its message protocol is intentionally internal.
+
 ## Editing API
 
 Annotation editing is a supported advanced API at the dedicated subpath:

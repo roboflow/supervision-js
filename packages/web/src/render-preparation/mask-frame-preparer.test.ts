@@ -35,6 +35,24 @@ const maskPreparationJob: MaskFramePreparationJob = {
 };
 
 describe("mask frame preparer", () => {
+  it("rejects unavailable workers in strict worker mode", () => {
+    const originalWorker = globalThis.Worker;
+
+    try {
+      globalThis.Worker = undefined as unknown as typeof Worker;
+
+      expect(() =>
+        createMaskFramePreparer({
+          renderPreparation: {
+            mode: RenderPreparationMode.Worker,
+          },
+        }),
+      ).toThrow("Mask preparation worker is unavailable.");
+    } finally {
+      globalThis.Worker = originalWorker;
+    }
+  });
+
   it("uses PNG ID-mask artifacts on the main thread when browser support exists", async () => {
     resetMocks();
 
@@ -154,7 +172,7 @@ describe("mask frame preparer", () => {
           maskFrame: {
             workerCount: 1,
           },
-          mode: RenderPreparationMode.Worker,
+          mode: RenderPreparationMode.Auto,
           workerFactory: {
             createWorker: () => fakeWorker.worker,
           },
@@ -202,7 +220,7 @@ describe("mask frame preparer", () => {
           maskFrame: {
             workerCount: 1,
           },
-          mode: RenderPreparationMode.Worker,
+          mode: RenderPreparationMode.Auto,
           workerFactory: {
             createWorker: () => fakeWorker.worker,
           },
@@ -220,6 +238,55 @@ describe("mask frame preparer", () => {
         message: "Mask preparation worker returned no image artifact.",
         workerStatus: RenderPreparationWorkerStatus.Disabled,
       });
+
+      preparer.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rejects runtime failures without falling back in worker mode", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const fakeWorker = createFakeMaskPreparationWorker((message) => ({
+        error: "worker execution failed",
+        key: message.job.key,
+        requestId: message.requestId,
+        type: MaskPreparationWorkerMessageType.Error,
+      }));
+      const onStatusChange = vi.fn();
+      const preparer = createMaskFramePreparer({
+        onStatusChange,
+        renderPreparation: {
+          maskFrame: {
+            workerCount: 1,
+          },
+          mode: RenderPreparationMode.Worker,
+          workerFactory: {
+            createWorker: () => fakeWorker.worker,
+          },
+        },
+      });
+      const framePromise = preparer.prepare(maskPreparationJob);
+      const rejection = expect(framePromise).rejects.toThrow(
+        "worker execution failed",
+      );
+
+      await vi.runOnlyPendingTimersAsync();
+
+      await rejection;
+      expect(preparer.getStatus()).toEqual({
+        executionMode: RenderPreparationExecutionMode.Worker,
+        message: "worker execution failed",
+        workerStatus: RenderPreparationWorkerStatus.Error,
+      });
+      await expect(preparer.prepare(maskPreparationJob)).rejects.toThrow(
+        "worker execution failed",
+      );
+      expect(onStatusChange).toHaveBeenCalledTimes(1);
+      expect(fakeWorker.terminateCount).toBe(1);
 
       preparer.destroy();
     } finally {

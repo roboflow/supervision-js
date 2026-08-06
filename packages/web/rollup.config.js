@@ -1,9 +1,16 @@
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import typescript from "@rollup/plugin-typescript";
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
+const embeddedWorkerSentinel =
+  "__SUPERVISION_JS_EMBEDDED_MASK_PREPARATION_WORKER_SOURCE__";
+const maskPreparationWorkerPath = path.resolve(
+  rootDir,
+  "dist/mask-preparation.worker.js",
+);
 const sourceAliasRoots = new Set([
   "constants",
   "detections",
@@ -31,40 +38,89 @@ function sourceAliasResolver() {
   };
 }
 
-/**
- * Keep the worker entry option in the published ESM for webpack consumers.
- * Rollup drops non-legal comments, while webpack reads this magic comment from
- * the expression it parses in `node_modules`, not from supervision-js source.
- */
-function preserveWebpackWorkerEntryOptions() {
-  const expression = 'new URL("./mask-preparation.worker.js", import.meta.url)';
-  const replacement = `new URL(
-        /* webpackEntryOptions: { publicPath: "/" } */
-        "./mask-preparation.worker.js",
-        import.meta.url
-      )`;
-
+function privateCoreResolver() {
   return {
-    name: "preserve-webpack-worker-entry-options",
-    renderChunk(code) {
-      if (!code.includes(expression)) {
+    name: "private-core-resolver",
+    resolveId(source) {
+      if (source !== "supervision-js-core") {
         return null;
       }
 
-      return {
-        code: code.replace(expression, replacement),
-        map: null,
-      };
+      return path.resolve(rootDir, "../core/dist/index.js");
     },
   };
 }
 
-export default {
+function typescriptPlugin() {
+  return typescript({
+    tsconfig: "./tsconfig.json",
+    declaration: false,
+    declarationMap: false,
+  });
+}
+
+function embedMaskPreparationWorker() {
+  let didEmbedWorker = false;
+
+  return {
+    name: "embed-mask-preparation-worker",
+    buildStart() {
+      this.addWatchFile(maskPreparationWorkerPath);
+    },
+    renderChunk(code) {
+      if (!code.includes(embeddedWorkerSentinel)) {
+        return null;
+      }
+
+      const workerSource = readFileSync(maskPreparationWorkerPath, "utf8")
+        .trimEnd()
+        .replace(/\n\/\/# sourceMappingURL=[^\n]+$/, "");
+      const embeddedCode = code.replace(
+        JSON.stringify(embeddedWorkerSentinel),
+        JSON.stringify(workerSource),
+      );
+
+      if (embeddedCode === code) {
+        throw new Error(
+          "Unable to replace the render-preparation worker source sentinel.",
+        );
+      }
+
+      didEmbedWorker = true;
+
+      return {
+        code: embeddedCode,
+        map: null,
+      };
+    },
+    generateBundle() {
+      if (!didEmbedWorker) {
+        throw new Error(
+          "The browser package did not embed the render-preparation worker.",
+        );
+      }
+    },
+  };
+}
+
+const workerConfig = {
+  input: "src/render-preparation/mask-preparation.worker.ts",
+  output: {
+    file: "dist/mask-preparation.worker.js",
+    format: "iife",
+    name: "SupervisionMaskPreparationWorker",
+    sourcemap: true,
+  },
+  plugins: [sourceAliasResolver(), privateCoreResolver(), typescriptPlugin()],
+  treeshake: {
+    moduleSideEffects: false,
+  },
+};
+
+const packageConfig = {
   input: {
     editing: "src/editing.ts",
     index: "src/index.ts",
-    "mask-preparation.worker":
-      "src/render-preparation/mask-preparation.worker.ts",
   },
   external: ["mediabunny", "pixi.js", "supervision-js-core"],
   output: {
@@ -75,14 +131,12 @@ export default {
   },
   plugins: [
     sourceAliasResolver(),
-    typescript({
-      tsconfig: "./tsconfig.json",
-      declaration: false,
-      declarationMap: false,
-    }),
-    preserveWebpackWorkerEntryOptions(),
+    typescriptPlugin(),
+    embedMaskPreparationWorker(),
   ],
   treeshake: {
     moduleSideEffects: false,
   },
 };
+
+export default [workerConfig, packageConfig];
