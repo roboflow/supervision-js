@@ -1,6 +1,6 @@
 /**
  * Advanced annotation editing, geometry conversion, and browser mask-brush
- * APIs available from the `supervision-js/editing` entrypoint.
+ * APIs available from the `supervision/editing` entrypoint.
  *
  * Hosts own persistence and undo/redo. The session routes gestures and renders
  * previews but never writes application data.
@@ -70,4 +70,4 @@ export {
   type MediaDimensions,
   type PreviewOverlayData,
   type PreviewOverlayPoint,
-} from "supervision-js/editing";
+} from "supervision/editing";

@@ -13,11 +13,11 @@ export default defineConfig({
   resolve: {
     alias: [
       {
-        find: "supervision-js/editing",
+        find: "supervision/editing",
         replacement: path.resolve(rootDir, "packages/web/src/editing.ts"),
       },
       {
-        find: "supervision-js",
+        find: "supervision",
         replacement: path.resolve(rootDir, "packages/web/src/index.ts"),
       },
       {

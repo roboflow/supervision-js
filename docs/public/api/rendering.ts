@@ -39,4 +39,4 @@ export {
   type RenderPreparationPlaybackGateOptions,
   type RenderPreparationWorkerFactory,
   type ViewportTransform,
-} from "supervision-js";
+} from "supervision";

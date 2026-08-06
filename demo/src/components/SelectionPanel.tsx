@@ -3,7 +3,7 @@ import {
   KeypointVisibility,
   MediaRendererPlaybackState,
   type DetectionPickResult,
-} from "supervision-js";
+} from "supervision";
 import { formatExactTime, formatInteger, formatTime } from "../format";
 
 export const SelectionPanel = memo(function SelectionPanel({

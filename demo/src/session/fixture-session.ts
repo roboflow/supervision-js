@@ -7,7 +7,7 @@ import {
   MediaRendererFit,
   createMediaSession,
   type MediaSession,
-} from "supervision-js";
+} from "supervision";
 import type { DemoFixtureDefinition } from "../fixtures/demo-fixtures";
 import {
   createDemoFixtureDetectionSource,

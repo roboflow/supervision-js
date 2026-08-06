@@ -6,7 +6,7 @@ import {
   type MediaSessionState,
   type MediaSourceState,
   type RenderPreparationDiagnostics,
-} from "supervision-js";
+} from "supervision";
 import type {
   DemoFixtureDetectionSourceSummary,
   DemoFixtureSummary,

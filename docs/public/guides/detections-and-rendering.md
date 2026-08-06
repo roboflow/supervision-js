@@ -121,7 +121,7 @@ that data should be presented.
 One detection may carry any supported semantic geometry:
 
 ```ts
-import { KeypointVisibility, type Detection } from "supervision-js";
+import { KeypointVisibility, type Detection } from "supervision";
 
 const detection: Detection = {
   id: "pose-1",

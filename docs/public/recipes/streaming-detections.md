@@ -15,7 +15,7 @@ import {
   createMediaSession,
   DetectionFrameRetentionMode,
   type DetectionFrame,
-} from "supervision-js";
+} from "supervision";
 
 const session = await createMediaSession({
   container,

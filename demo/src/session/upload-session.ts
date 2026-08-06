@@ -14,7 +14,7 @@ import {
   type MediaNormalizationProgress,
   type MediaRenderer,
   type WritableDetectionFrameSource,
-} from "supervision-js";
+} from "supervision";
 import type {
   DemoFixtureDetectionSourceSummary,
   DemoFixtureSummary,

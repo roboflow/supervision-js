@@ -21,7 +21,7 @@ import {
   BoxShape,
   createMediaSession,
   type DetectionFrame,
-} from "supervision-js";
+} from "supervision";
 
 const frames: DetectionFrame[] = await fetch("/detections.json").then(
   (response) => response.json(),

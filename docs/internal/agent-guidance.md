@@ -41,17 +41,17 @@ browser API without promising a broad Python-parity annotation framework.
   retention policies, source composition, picking contracts, style contracts,
   session lifecycle contracts, media-rendering state/readout contracts, base
   style classes, and pure utilities.
-- `packages/web/` is the browser package named `supervision-js`. It owns
+- `packages/web/` is the browser package published as `supervision`. It owns
   `createMediaSession()`, `createMediaRenderer()`, Pixi rendering, Mediabunny
   media adapters, browser normalization/preparation, playback, IndexedDB cold
   detection storage, workers, and browser render-preparation artifacts.
 - `packages/react-native/` is a private experimental package named
-  `supervision-js-react-native`. It depends on `supervision-js-core`, must not
-  depend on `supervision-js`, and must not import Pixi, Mediabunny, DOM APIs, or
-  browser storage.
+  `supervision-js-react-native`. It depends on `supervision-js-core`, must
+  not depend on the browser package `supervision`, and must not import Pixi,
+  Mediabunny, DOM APIs, or browser storage.
 - `packages/web/src/index.ts` is the browser package entrypoint. It re-exports
   the supported core API plus web-only APIs so consumers still import from
-  `supervision-js`.
+  `supervision`.
 - `packages/core/src/index.ts` is the core package entrypoint. Keep it free of
   DOM/WebWorker APIs and browser/vendor dependencies.
 - Keep renderer orchestration provider-agnostic. The public/default renderer
@@ -74,14 +74,14 @@ browser API without promising a broad Python-parity annotation framework.
 - `benchmark/initial/` is the isolated Milestone 3 dense-shape benchmark.
   Benchmark renderer code belongs there, not in the package entrypoint or the
   normal demo.
-- The demo should consume `supervision-js` through the package boundary, not by
+- The demo should consume `supervision` through the package boundary, not by
   importing source files directly.
 - `test/` holds reusable Vitest harness helpers that should not be emitted as
   package source.
 - Rollup builds package JavaScript. The root build runs core first, then web.
 - Rollup emits a self-contained render-preparation worker, then embeds that
   source in `dist/index.js` for a bundler-agnostic Blob-worker default. The
-  `supervision-js/render-preparation-worker` subpath exposes the same standalone
+  `supervision/render-preparation-worker` subpath exposes the same standalone
   script only as a CSP/deployment asset; its message protocol remains internal.
 - TypeScript emits declarations and performs typechecking.
 - Vitest tests the library source. Rollup is verified by the build step rather
@@ -111,7 +111,7 @@ Run from the repository root:
 - `npm run package:publish:dry-run`
 
 `package:tarball` builds the core and browser packages and writes one portable
-`artifacts/supervision-js-<version>.tgz` with the internal core bundled inside.
+`artifacts/supervision-<version>.tgz` with the internal core bundled inside.
 `package:tarball:smoke` installs that archive in a temporary consumer outside
 the repository; it needs the registry and is not part of `npm run verify`. See
 [`tarball-packaging.md`](tarball-packaging.md).

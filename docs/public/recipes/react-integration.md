@@ -19,7 +19,7 @@ import {
   type DetectionFrame,
   type MediaSession,
   type MediaSessionState,
-} from "supervision-js";
+} from "supervision";
 
 interface SupervisionViewerProps {
   readonly media: File | string;

@@ -14,7 +14,7 @@ import {
   type MediaSessionState,
   type MediaSourceState,
   type RenderPreparationDiagnostics,
-} from "supervision-js";
+} from "supervision";
 import type { DemoFixtureSummary } from "../fixtures/demo-fixtures";
 import {
   demoFixtures,

@@ -1,5 +1,5 @@
 /**
- * Builds one portable `supervision-js-<version>.tgz` for consumers that cannot
+ * Builds one portable `supervision-<version>.tgz` for consumers that cannot
  * access this private repository.
  *
  * The browser package depends on the private `supervision-js-core` workspace
@@ -29,7 +29,7 @@ const rootDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
 );
-const webPackageName = "supervision-js";
+const webPackageName = "supervision";
 const corePackageName = "supervision-js-core";
 
 function parseArgs(argv) {
@@ -165,7 +165,7 @@ function clearPreviousArchives(outDir) {
   mkdirSync(outDir, { recursive: true });
 
   for (const entry of readdirSync(outDir)) {
-    if (/^supervision-js-.*\.tgz$/.test(entry)) {
+    if (/^supervision-.*\.tgz$/.test(entry)) {
       rmSync(path.join(outDir, entry));
     }
   }

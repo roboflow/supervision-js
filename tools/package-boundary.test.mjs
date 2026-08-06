@@ -25,7 +25,7 @@ const forbiddenPatterns = [
   },
   {
     label: "browser package import",
-    pattern: /from\s+["']supervision-js["']/,
+    pattern: /from\s+["']supervision["']/,
   },
   { label: "document global", pattern: /\bdocument\s*[.([]/ },
   { label: "window global", pattern: /\bwindow\s*[.([]/ },
@@ -113,7 +113,7 @@ test("React Native source stays independent from browser package code", async ()
   const forbiddenReactNativePatterns = [
     {
       label: "browser package import",
-      pattern: /from\s+["']supervision-js["']/,
+      pattern: /from\s+["']supervision["']/,
     },
     {
       label: "web source path",

@@ -2,7 +2,7 @@ import { memo } from "react";
 import {
   type MediaRendererState,
   type RenderPreparationDiagnostics,
-} from "supervision-js";
+} from "supervision";
 import { formatExactTime, formatInteger, formatMilliseconds } from "../format";
 import { selectPreparedWindowArtifact } from "../render-preparation";
 

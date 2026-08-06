@@ -46,4 +46,4 @@ export {
   type ProgressivePreparedMedia,
   type ProgressiveNormalizedMedia,
   type StaticImageSource,
-} from "supervision-js";
+} from "supervision";

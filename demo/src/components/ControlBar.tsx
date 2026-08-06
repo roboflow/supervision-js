@@ -3,7 +3,7 @@ import type {
   DetectionBufferState,
   MediaRendererPlaybackState,
   RenderPreparationDiagnostics,
-} from "supervision-js";
+} from "supervision";
 import { formatExactTime, formatTime } from "../format";
 import { selectPreparedWindowArtifact } from "../render-preparation";
 import type { TimelineRange } from "../session/demo-session-types";

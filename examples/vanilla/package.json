@@ -9,7 +9,7 @@
     "preview": "vite preview --host 127.0.0.1 --port 4178"
   },
   "dependencies": {
-    "supervision-js": "file:../../packages/web"
+    "supervision": "file:../../packages/web"
   },
   "devDependencies": {
     "vite": "^8.0.10"

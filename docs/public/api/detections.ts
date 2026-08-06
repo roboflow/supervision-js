@@ -55,4 +55,4 @@ export {
   type SkeletonVertexDefinition,
   type TopLeftRect,
   type WritableDetectionFrameSource,
-} from "supervision-js";
+} from "supervision";

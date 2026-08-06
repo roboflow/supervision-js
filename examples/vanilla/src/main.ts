@@ -13,7 +13,7 @@ import {
   type DetectionFrameChunkManifest,
   type MediaSession,
   type MediaSessionState,
-} from "supervision-js";
+} from "supervision";
 
 import "./style.css";
 

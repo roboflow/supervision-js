@@ -58,7 +58,7 @@ import {
   BaseMaskStyle,
   BoxShape,
   createMediaSession,
-} from "supervision-js";
+} from "supervision";
 
 const PREDICTIONS_SOURCE_ID = "predictions";
 const DRAFT_SOURCE_ID = "draft";
@@ -183,7 +183,7 @@ Most apps should use `createMediaSession({ detections: { sources } })`. Use
 lower-level renderer or need to test composition outside a media session.
 
 ```ts
-import { createCompositeDetectionFrameSource } from "supervision-js";
+import { createCompositeDetectionFrameSource } from "supervision";
 
 const source = createCompositeDetectionFrameSource({
   sources: [

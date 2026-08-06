@@ -4,7 +4,7 @@ import {
   normalizeMedia,
   type MediaNormalizationProgress,
   type NormalizedMedia,
-} from "supervision-js";
+} from "supervision";
 import { BlobSource, CanvasSink, Input, WEBM } from "mediabunny";
 
 import "./style.css";

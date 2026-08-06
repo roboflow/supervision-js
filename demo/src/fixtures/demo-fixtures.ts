@@ -4,7 +4,7 @@ import {
   type DetectionFrameChunkManifest,
   type DetectionFrameSource,
   type MediaSessionMedia,
-} from "supervision-js";
+} from "supervision";
 import type { DemoPresentationAvailability } from "../presentation/demo-presentation";
 
 const fixtureMetaModules = import.meta.glob(

@@ -6,24 +6,25 @@ summary: The supported browser package surface and its advanced boundaries.
 
 # Public API
 
-`supervision-js` is session-first. The public API should make the common path
+The `supervision` browser package is session-first. The public API should make the common path
 easy while keeping renderer internals replaceable.
 
 This guide describes the current package boundary. It is intentionally smaller
 than the implementation.
 
-Today, `supervision-js` is the browser package. It is built on a
+Today, `supervision` is the browser package. It is built on a
 platform-neutral internal core package, but browser users should continue to
-import from `supervision-js`:
+import from `supervision`:
 
 ```ts
-import { createMediaSession } from "supervision-js";
+import { createMediaSession } from "supervision";
 ```
 
-The first npm release is still being prepared. Until then, install the portable
-`supervision-js-0.1.0.tgz` archive built from this repository. See
-[Application Integration](application-integration.md) for the supported
-consumer workflow.
+Until the first browser release is available on npm's `next` tag, install the
+portable `supervision-0.1.0.tgz` archive built from this repository. Once it is
+available, use `npm install supervision@next`; after it is promoted to npm's
+`latest` tag, use `npm install supervision`. See [Application
+Integration](application-integration.md) for the supported consumer workflow.
 
 The split keeps detections, timelines, styles, retention policies, source
 composition, and picking contracts reusable without making Pixi, Mediabunny,
@@ -100,7 +101,7 @@ failures reject instead of silently changing execution modes.
 
 Hosts whose Content Security Policy blocks Blob workers may supply a
 `RenderPreparationWorkerFactory` and host the self-contained script exported at
-`supervision-js/render-preparation-worker`. That subpath is a deployment asset,
+`supervision/render-preparation-worker`. That subpath is a deployment asset,
 not a JavaScript API; its message protocol is intentionally internal.
 
 ## Editing API
@@ -112,7 +113,7 @@ import {
   createAnnotationEditingEngine,
   createEditableAnnotationFrameSession,
   createMaskBrushEditor,
-} from "supervision-js/editing";
+} from "supervision/editing";
 ```
 
 The host creates and owns the editing engine, commits semantic detections to

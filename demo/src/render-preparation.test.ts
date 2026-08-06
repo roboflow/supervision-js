@@ -5,7 +5,7 @@ import {
   RenderPreparationExecutionMode,
   RenderPreparationWorkerStatus,
   type RenderPreparationDiagnostics,
-} from "supervision-js";
+} from "supervision";
 import { selectPreparedWindowArtifact } from "./render-preparation";
 
 describe("render preparation diagnostics", () => {

@@ -2,12 +2,12 @@ import {
   DetectionMaskEncoding,
   type Detection,
   type DetectionMask,
-} from "supervision-js";
+} from "supervision";
 import {
   computeDetectionMaskRect,
   encodeCompressedRleCounts,
   polygonToRect,
-} from "supervision-js/editing";
+} from "supervision/editing";
 
 export function normalizeSam3Detections(
   response: unknown,

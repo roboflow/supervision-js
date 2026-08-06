@@ -1,6 +1,6 @@
 # npm Release Operations
 
-This repository publishes one public package: `supervision-js`. The root
+This repository publishes one public package: `supervision`. The root
 workspace, `supervision-js-core`, and `supervision-js-react-native` remain
 private. The npm registry artifact is the portable tarball assembled by
 `tools/pack-web-tarball.mjs`; it embeds the private core package without
@@ -12,7 +12,7 @@ Never publish from `packages/web` directly. A release must publish exactly one
 generated file matching:
 
 ```text
-artifacts/supervision-js-<version>.tgz
+artifacts/supervision-<version>.tgz
 ```
 
 The manual GitHub Actions workflow at
@@ -25,29 +25,28 @@ only after the release owner explicitly makes that decision.
 
 ## One-Time Bootstrap
 
-The package name is `supervision-js`, not `supervision`. The separately owned
-`supervision` npm package does not block this package's release.
+The package name is `supervision`; the repository remains `supervision-js`.
+The existing `supervision@0.0.9000` placeholder is an earlier Roboflow
+publication, and the first browser release must publish a newer immutable
+version.
 
-Before the first automated release, an npm administrator must:
+Before the first browser release, an npm administrator must:
 
-1. Confirm that `supervision-js` is available or arrange a transfer if its
-   ownership changes.
+1. Confirm that the Roboflow owner can publish the existing `supervision`
+   package.
 2. Create or use the Roboflow npm owner that will own the first public release,
    with two-factor authentication enabled.
-3. Publish the reviewed generated tarball once using that administrator's
-   interactive npm authentication. This claims the package; it is the only
-   bootstrap exception to the trusted-publisher flow.
-4. Add at least two active Roboflow maintainers to the npm package.
-5. Open the package's npm **Settings → Trusted publisher** and configure:
+3. Add at least two active Roboflow maintainers to the npm package.
+4. Open the package's npm **Settings → Trusted publisher** and configure:
    - provider: **GitHub Actions**;
    - organization: `roboflow`;
    - repository: `supervision-js`;
    - workflow filename: `publish-npm.yml`;
    - environment name: `npm-publish`;
    - allowed action: **npm publish**.
-6. In GitHub, create the `npm-publish` environment and require approval from
+5. In GitHub, create the `npm-publish` environment and require approval from
    the release owners. Do not store an npm write token in GitHub secrets.
-7. After one successful OIDC publish, set npm **Publishing access** to require
+6. After one successful OIDC publish, set npm **Publishing access** to require
    two-factor authentication and disallow tokens, then remove any obsolete
    automation tokens.
 
@@ -74,8 +73,17 @@ and environment name exactly. Each npm package supports one trusted publisher.
    packs, smoke-tests, and then publishes the generated archive through npm
    trusted publishing (OIDC). It has no long-lived npm credential.
 6. Verify the published package metadata, provenance, tarball contents, and a
-   clean installation in a separate consumer. Then update public installation
-   docs from the local-tarball instructions to `npm install supervision-js`.
+   clean installation in a separate consumer. While the browser package remains
+   on `next`, public installation instructions must use
+   `npm install supervision@next`.
+7. Promote the verified release only when the release owner approves it:
+
+   ```sh
+   npm dist-tag add supervision@<version> latest
+   ```
+
+   Confirm that `latest` resolves to that version, then update public
+   installation instructions to `npm install supervision`.
 
 ## Recovery
 

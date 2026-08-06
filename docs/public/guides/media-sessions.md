@@ -127,7 +127,7 @@ import {
   createMediaStreamRendererSource,
   DetectionFrameRetentionMode,
   MediaSessionMode,
-} from "supervision-js";
+} from "supervision";
 
 const mediaStream = await navigator.mediaDevices.getUserMedia({ video: true });
 const media = createMediaStreamRendererSource(mediaStream, {

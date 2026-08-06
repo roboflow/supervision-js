@@ -1,7 +1,7 @@
 import type {
   RenderPreparationArtifactDiagnostics,
   RenderPreparationDiagnostics,
-} from "supervision-js";
+} from "supervision";
 
 export function selectPreparedWindowArtifact(
   diagnostics: RenderPreparationDiagnostics | null,

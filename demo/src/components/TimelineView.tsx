@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   MediaRendererPlaybackState,
   type DetectionBufferState,
-} from "supervision-js";
+} from "supervision";
 import { formatTimeRange } from "../format";
 import type { TimelineRange } from "../session/demo-session-types";
 
