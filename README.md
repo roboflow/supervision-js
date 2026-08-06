@@ -23,7 +23,7 @@ package focuses on the browser runtime needed to build rich CV media UIs.
 The primary primitive is one `MediaSession` per media item:
 
 ```ts
-import { createMediaSession } from "supervision-js";
+import { createMediaSession } from "supervision";
 
 const session = await createMediaSession({
   container: document.querySelector("#viewer")!,
@@ -59,15 +59,15 @@ npm install
 npm run package:tarball
 
 # In the consuming application
-npm install ./vendor/supervision-js-0.1.0.tgz
+npm install ./vendor/supervision-0.1.0.tgz
 ```
 
 The archive includes the internal core dependency. Consumers import only the
 public browser entrypoints:
 
 ```ts
-import { createMediaSession } from "supervision-js";
-import { createMaskBrushEditor } from "supervision-js/editing";
+import { createMediaSession } from "supervision";
+import { createMaskBrushEditor } from "supervision/editing";
 ```
 
 ## Documentation And Demo

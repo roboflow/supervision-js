@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { encodeBinaryMask } from "supervision-js/editing";
+import { encodeBinaryMask } from "supervision/editing";
 
 import { normalizeSam3Detections } from "./sam3-response-normalizer";
 

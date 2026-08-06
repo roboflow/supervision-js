@@ -19,7 +19,7 @@ import {
   createMediaSession,
   MediaSessionStatus,
   type MediaSession,
-} from "supervision-js";
+} from "supervision";
 
 let session: MediaSession | null = null;
 

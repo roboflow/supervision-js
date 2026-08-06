@@ -1,4 +1,4 @@
-import type { DetectionFrame } from "supervision-js";
+import type { DetectionFrame } from "supervision";
 import type { TimelineRange } from "./demo-session-types";
 
 export function createBatchTimelineRange(

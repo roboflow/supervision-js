@@ -1,6 +1,6 @@
 # supervision-js
 
-`supervision-js` is a browser-native TypeScript library for interactive
+The `supervision` npm package is a browser-native TypeScript library for interactive
 computer vision media applications. It is the browser-focused subset of
 [Roboflow Supervision](https://github.com/roboflow/supervision): focused on
 media sessions, detection rendering, styles, interaction, and editing rather
@@ -21,15 +21,15 @@ npm install
 npm run package:tarball
 
 # In the consuming application
-npm install ./vendor/supervision-js-0.1.0.tgz
+npm install ./vendor/supervision-0.1.0.tgz
 ```
 
 The archive includes the internal core dependency. Consumers should import the
 public browser package only:
 
 ```ts
-import { createMediaSession } from "supervision-js";
-import { createMaskBrushEditor } from "supervision-js/editing";
+import { createMediaSession } from "supervision";
+import { createMaskBrushEditor } from "supervision/editing";
 ```
 
 Read [Application Integration](guides/application-integration.md) for the
@@ -38,7 +38,7 @@ complete browser, lifecycle, and verification contract.
 ## Quick Start
 
 ```ts
-import { createMediaSession } from "supervision-js";
+import { createMediaSession } from "supervision";
 
 const container = document.querySelector("#viewer");
 

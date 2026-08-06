@@ -23,7 +23,7 @@ concurrency:
 jobs:
   publish:
     if: github.ref == 'refs/heads/main'
-    name: Verify and publish supervision-js
+    name: Verify and publish supervision
     runs-on: ubuntu-latest
     environment:
       name: npm-publish
@@ -56,9 +56,9 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          archives=(artifacts/supervision-js-*.tgz)
+          archives=(artifacts/supervision-*.tgz)
           if [ "${#archives[@]}" -ne 1 ]; then
-            echo "Expected exactly one generated supervision-js tarball." >&2
+            echo "Expected exactly one generated supervision tarball." >&2
             exit 1
           fi
           npm publish "./${archives[0]}" --access public --tag "${{ inputs.dist_tag }}"

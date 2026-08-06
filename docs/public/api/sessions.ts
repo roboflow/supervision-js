@@ -28,4 +28,4 @@ export {
   type MediaSessionStateListener,
   type MediaSessionStateUnsubscribe,
   type MediaSessionWritableDetectionOptions,
-} from "supervision-js";
+} from "supervision";

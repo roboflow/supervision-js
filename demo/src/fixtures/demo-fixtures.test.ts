@@ -7,8 +7,8 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { KeypointVisibility, type DetectionFrame } from "supervision-js";
-import { computeDetectionMaskRect } from "supervision-js/editing";
+import { KeypointVisibility, type DetectionFrame } from "supervision";
+import { computeDetectionMaskRect } from "supervision/editing";
 import { demoFixtures } from "./demo-fixtures";
 
 const MAX_POLYGON_POINTS = 48;

@@ -1,5 +1,5 @@
 import { memo } from "react";
-import { MediaRendererPlaybackState } from "supervision-js";
+import { MediaRendererPlaybackState } from "supervision";
 
 export const PlaybackControls = memo(function PlaybackControls({
   playbackState,

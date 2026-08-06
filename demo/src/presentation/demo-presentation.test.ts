@@ -12,7 +12,7 @@ import {
   KeypointVisibility,
   LabelPlacement,
   MaskRenderMode,
-} from "supervision-js";
+} from "supervision";
 import {
   constrainDemoPresentationSettings,
   createDemoPresentation,

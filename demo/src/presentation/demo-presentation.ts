@@ -26,7 +26,7 @@ import {
   type PolygonStyle,
   type PolylineStyle,
   resolveDetectionClassColorStyle,
-} from "supervision-js";
+} from "supervision";
 
 export type DemoClassStyle = DetectionClassColorStyle;
 

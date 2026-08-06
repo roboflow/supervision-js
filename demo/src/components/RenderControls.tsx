@@ -4,7 +4,7 @@ import {
   FocusTargetMode,
   LabelPlacement,
   MaskRenderMode,
-} from "supervision-js";
+} from "supervision";
 import {
   resolveDemoClassStyle,
   type DemoClassStyle,

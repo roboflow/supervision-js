@@ -1,4 +1,4 @@
-import type { DetectionFrame } from "supervision-js";
+import type { DetectionFrame } from "supervision";
 import { readNdjsonStream } from "./ndjson-stream";
 import { normalizeSam3Detections } from "./sam3-response-normalizer";
 

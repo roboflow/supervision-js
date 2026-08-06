@@ -178,7 +178,7 @@ test("browser package manifest is ready for public npm publishing", () => {
     ),
   );
 
-  assert.equal(manifest.name, "supervision-js");
+  assert.equal(manifest.name, "supervision");
   assert.match(manifest.version, /^(?!0\.0\.0$)\d+\.\d+\.\d+(?:-.+)?$/);
   assert.notEqual(manifest.private, true);
   assert.equal(manifest.publishConfig?.access, "public");

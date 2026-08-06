@@ -7,13 +7,15 @@ summary: The installation, runtime, data, and lifecycle contract for integrating
 # Application Integration
 
 Use this page as the integration contract for humans and coding agents adding
-`supervision-js` to another web application.
+the browser package `supervision` from the `supervision-js` repository to
+another web application.
 
 ## Installation Before The First npm Release
 
-`supervision-js` is not published to the npm registry yet, and there is no CDN,
-UMD, or `<script>` build. Build a portable archive from this public repository
-until the first npm release is available.
+The browser package will be published as `supervision`; until the first browser
+release is available, install the portable archive. There is no CDN, UMD, or
+`<script>` build. Build a portable archive from this public repository until the
+first npm release is available.
 
 Build the portable archive from the `supervision-js` repository:
 
@@ -25,7 +27,7 @@ npm run package:tarball
 The archive is written to:
 
 ```text
-artifacts/supervision-js-0.1.0.tgz
+artifacts/supervision-0.1.0.tgz
 ```
 
 Copy that archive into a stable path in the consuming application, then install
@@ -35,11 +37,11 @@ it from there:
 my-app/
 ├── package.json
 └── vendor/
-    └── supervision-js-0.1.0.tgz
+    └── supervision-0.1.0.tgz
 ```
 
 ```sh
-npm install ./vendor/supervision-js-0.1.0.tgz
+npm install ./vendor/supervision-0.1.0.tgz
 ```
 
 Keeping the archive at a stable project-relative path is important:
@@ -72,8 +74,8 @@ Do not import Pixi, Mediabunny, worker protocols, or internal core modules.
 Import the supported JavaScript entrypoints:
 
 ```ts
-import { createMediaSession } from "supervision-js";
-import { createMaskBrushEditor } from "supervision-js/editing";
+import { createMediaSession } from "supervision";
+import { createMaskBrushEditor } from "supervision/editing";
 ```
 
 ## Minimal Browser Integration
@@ -106,7 +108,7 @@ import {
   BaseLabelStyle,
   createMediaSession,
   type MediaSession,
-} from "supervision-js";
+} from "supervision";
 
 const container = document.querySelector<HTMLElement>("#viewer");
 
@@ -147,7 +149,7 @@ session = null;
 Pass semantic detection frames at session creation:
 
 ```ts
-import type { DetectionFrame } from "supervision-js";
+import type { DetectionFrame } from "supervision";
 
 const frames: DetectionFrame[] = [
   {
@@ -221,7 +223,7 @@ The host application owns:
 - converting model output into `DetectionFrame` values;
 - calling `destroy()` when a viewer is removed.
 
-`supervision-js` owns:
+The `supervision` package owns:
 
 - media probing, optional normalization, and playback;
 - the renderer canvas and Pixi scene;
@@ -260,11 +262,11 @@ component pattern.
 
 The zero-configuration default requires `worker-src blob:`. If the application's
 Content Security Policy disallows Blob workers, copy the standalone script
-exported at `supervision-js/render-preparation-worker` into the application's
+exported at `supervision/render-preparation-worker` into the application's
 public assets during its build, then provide a worker factory:
 
 ```ts
-import { RenderPreparationMode, createMediaSession } from "supervision-js";
+import { RenderPreparationMode, createMediaSession } from "supervision";
 
 const session = await createMediaSession({
   container,
@@ -274,8 +276,8 @@ const session = await createMediaSession({
       mode: RenderPreparationMode.Worker,
       workerFactory: {
         createWorker: () =>
-          new Worker("/assets/supervision-js-mask-preparation.worker.js", {
-            name: "supervision-js-render-preparation",
+          new Worker("/assets/supervision-mask-preparation.worker.js", {
+            name: "supervision-render-preparation",
           }),
       },
     },
@@ -304,7 +306,7 @@ Before considering an integration complete:
 
 ## Common Integration Mistakes
 
-- Installing `supervision-web` instead of `supervision-js`.
+- Installing `supervision-web` instead of `supervision`.
 - Installing `supervision-js-core` separately.
 - Deleting or moving the tarball after committing a local `file:` dependency.
 - Running `createMediaSession()` during SSR.

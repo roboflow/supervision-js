@@ -11,7 +11,7 @@ or inference friendly. The session can normalize the file with Mediabunny and
 expose renderer-readable output as bytes become available.
 
 ```ts
-import { createMediaSession } from "supervision-js";
+import { createMediaSession } from "supervision";
 
 const session = await createMediaSession({
   container,
@@ -37,7 +37,7 @@ Use `session.subscribe()` to track normalization, playback gates, and render
 preparation:
 
 ```ts
-import { MediaSessionActivityKind } from "supervision-js";
+import { MediaSessionActivityKind } from "supervision";
 
 session.subscribe((state) => {
   const normalizing = state.activities.find(
@@ -60,7 +60,7 @@ Use `prepareMediaProgressively()` when the app wants preparation as a separate
 step:
 
 ```ts
-import { prepareMediaProgressively } from "supervision-js";
+import { prepareMediaProgressively } from "supervision";
 
 const prepared = await prepareMediaProgressively(uploadedFile, {
   normalization: {

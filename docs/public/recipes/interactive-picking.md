@@ -18,7 +18,7 @@ import {
   FocusTargetMode,
   MediaInteractionMode,
   createMediaSession,
-} from "supervision-js";
+} from "supervision";
 
 const session = await createMediaSession({
   container,

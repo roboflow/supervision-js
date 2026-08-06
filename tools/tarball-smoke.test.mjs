@@ -51,20 +51,20 @@ function run(command, args, cwd) {
 }
 
 function resolveTarballPath() {
-  if (process.env.SUPERVISION_JS_TARBALL) {
-    return path.resolve(rootDir, process.env.SUPERVISION_JS_TARBALL);
+  if (process.env.SUPERVISION_TARBALL) {
+    return path.resolve(rootDir, process.env.SUPERVISION_TARBALL);
   }
 
   const archives = existsSync(artifactsDir)
     ? readdirSync(artifactsDir).filter((entry) =>
-        /^supervision-js-.*\.tgz$/.test(entry),
+        /^supervision-.*\.tgz$/.test(entry),
       )
     : [];
 
   assert.equal(
     archives.length,
     1,
-    `Expected exactly one supervision-js tarball in ${artifactsDir}; run "npm run package:tarball" first`,
+    `Expected exactly one supervision tarball in ${artifactsDir}; run "npm run package:tarball" first`,
   );
 
   return path.join(artifactsDir, archives[0]);
@@ -91,7 +91,7 @@ before(() => {
     path.join(consumerDir, "package.json"),
     `${JSON.stringify(
       {
-        name: "supervision-js-tarball-consumer",
+        name: "supervision-tarball-consumer",
         version: "0.0.0",
         private: true,
         type: "module",
@@ -133,7 +133,7 @@ test("tarball ships both entrypoints with declarations and source maps", () => {
     readFileSync(path.join(extractedDir, "package.json"), "utf8"),
   );
 
-  assert.equal(manifest.name, "supervision-js");
+  assert.equal(manifest.name, "supervision");
   assert.equal(manifest.exports["."].import, "./dist/index.js");
   assert.equal(manifest.exports["./editing"].import, "./dist/editing.js");
   assert.equal(
@@ -150,7 +150,7 @@ test("tarball ships the project license and package README", () => {
   assert.equal(license, readFileSync(path.join(rootDir, "LICENSE"), "utf8"));
   assert.match(
     readme,
-    /npm install supervision-js/,
+    /npm install supervision/,
     "Expected the tarball README to document npm installation",
   );
   assert.doesNotMatch(readme, /has not been published yet/);
@@ -247,7 +247,7 @@ test("clean consumer installs the tarball without the repository", () => {
 
     assert.equal(
       location,
-      "node_modules/supervision-js",
+      "node_modules/supervision",
       `Unexpected on-disk dependency ${location} resolved from ${resolved}`,
     );
     assert.ok(
@@ -262,7 +262,7 @@ test("clean consumer installs the tarball without the repository", () => {
   );
   assert.equal(
     lockfile.packages[
-      "node_modules/supervision-js/node_modules/supervision-js-core"
+      "node_modules/supervision/node_modules/supervision-js-core"
     ]?.inBundle,
     true,
     "Expected supervision-js-core to install from the tarball bundle",
@@ -271,10 +271,10 @@ test("clean consumer installs the tarball without the repository", () => {
     existsSync(
       path.join(
         consumerDir,
-        "node_modules/supervision-js/node_modules/supervision-js-core/dist/index.js",
+        "node_modules/supervision/node_modules/supervision-js-core/dist/index.js",
       ),
     ),
-    "Expected the bundled core runtime to be installed with supervision-js",
+    "Expected the bundled core runtime to be installed with supervision",
   );
 
   for (const dependency of ["pixi.js", "mediabunny"]) {
@@ -298,9 +298,9 @@ test("clean consumer resolves package entrypoints and the standalone worker", ()
       "--input-type=module",
       "-e",
       [
-        'import { createMediaSession, MediaSessionStatus } from "supervision-js";',
-        'import { createAnnotationEditingEngine } from "supervision-js/editing";',
-        'const workerUrl = import.meta.resolve("supervision-js/render-preparation-worker");',
+        'import { createMediaSession, MediaSessionStatus } from "supervision";',
+        'import { createAnnotationEditingEngine } from "supervision/editing";',
+        'const workerUrl = import.meta.resolve("supervision/render-preparation-worker");',
         "console.log(typeof createMediaSession, MediaSessionStatus.Ready, typeof createAnnotationEditingEngine, workerUrl.endsWith('/mask-preparation.worker.js'));",
       ].join("\n"),
     ],
@@ -330,8 +330,8 @@ test("clean consumer builds a browser bundle that imports createMediaSession", (
   writeFileSync(
     path.join(consumerDir, "src/main.js"),
     [
-      'import { createMediaSession } from "supervision-js";',
-      'import { createMaskBrushEditor } from "supervision-js/editing";',
+      'import { createMediaSession } from "supervision";',
+      'import { createMaskBrushEditor } from "supervision/editing";',
       "",
       "globalThis.supervisionEntrypoints = [",
       "  createMediaSession,",

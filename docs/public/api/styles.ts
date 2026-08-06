@@ -75,4 +75,4 @@ export {
   type PolylineDrawInstruction,
   type PolylineStyle,
   type PolylineStyleContext,
-} from "supervision-js";
+} from "supervision";

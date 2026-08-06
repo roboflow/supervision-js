@@ -1,4 +1,4 @@
-import { type MediaSessionMediaState } from "supervision-js";
+import { type MediaSessionMediaState } from "supervision";
 import type { WrappedCanvas } from "mediabunny";
 
 export const TARGET_UPLOAD_FRAME_RATE = 30;

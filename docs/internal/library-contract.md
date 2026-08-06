@@ -12,7 +12,7 @@ The repository is split into a private workspace core and the browser package:
 - `supervision-js-core` in `packages/core` is platform-neutral. It must not
   depend on DOM, WebWorker, Pixi, Mediabunny, IndexedDB, fetch, or browser media
   APIs.
-- `supervision-js` in `packages/web` is the browser package. It depends on core
+- `supervision` in `packages/web` is the published browser package. It depends on core
   and provides the current public import surface for browser users.
 - `supervision-js-react-native` in `packages/react-native` is experimental and
   private. It depends on core, must not depend on the web package, and exists to
@@ -21,7 +21,7 @@ The repository is split into a private workspace core and the browser package:
 Public examples and docs should keep using:
 
 ```ts
-import { createMediaSession } from "supervision-js";
+import { createMediaSession } from "supervision";
 ```
 
 Core exists so future renderers can share detections, timelines, styles,
@@ -82,7 +82,7 @@ runtime representations.
 
 ## Advanced Editing Contract
 
-The browser package exposes editing from `supervision-js/editing`, not its root
+The browser package exposes editing from `supervision/editing`, not its root
 entrypoint. It contains semantic editing engines, immutable editable-frame
 sessions, conversion utilities, and the browser mask brush. Hosts create the
 editing engine, commit detections to their chosen persistence/source, and own

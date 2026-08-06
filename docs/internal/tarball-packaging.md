@@ -9,19 +9,19 @@ until then is one portable npm tarball built from this repository.
 npm run package:tarball
 ```
 
-That command builds `supervision-js-core` and `supervision-js`, then writes a
+That command builds `supervision-js-core` and the published `supervision` package, then writes a
 single archive to the ignored `artifacts/` directory:
 
 ```
-artifacts/supervision-js-0.1.0.tgz
+artifacts/supervision-0.1.0.tgz
 ```
 
-`artifacts/` is cleared of previous `supervision-js-*.tgz` archives on every
+`artifacts/` is cleared of previous `supervision-*.tgz` archives on every
 run, so exactly one artifact exists at a time. Pass `--skip-build` to repack
 existing `dist/` output, or `--out-dir=<path>` to write elsewhere:
 
 ```sh
-node tools/pack-web-tarball.mjs --skip-build --out-dir=/tmp/supervision-js
+node tools/pack-web-tarball.mjs --skip-build --out-dir=/tmp/supervision
 ```
 
 ## Install In A Website
@@ -29,14 +29,14 @@ node tools/pack-web-tarball.mjs --skip-build --out-dir=/tmp/supervision-js
 Copy the archive next to the consuming project and install it by path:
 
 ```sh
-npm install ./supervision-js-0.1.0.tgz
+npm install ./supervision-0.1.0.tgz
 ```
 
 Both supported entrypoints then resolve normally:
 
 ```ts
-import { createMediaSession } from "supervision-js";
-import { createMaskBrushEditor } from "supervision-js/editing";
+import { createMediaSession } from "supervision";
+import { createMaskBrushEditor } from "supervision/editing";
 ```
 
 The consumer needs an npm-compatible bundler such as Vite, webpack, Parcel, or
@@ -78,18 +78,18 @@ the OS temp directory — outside this repository — to check that:
 
 - both JavaScript entrypoints, their declarations and source maps are present;
 - the standalone render-preparation worker is present, has no sibling chunk
-  imports, and is exported as `supervision-js/render-preparation-worker`;
+  imports, and is exported as `supervision/render-preparation-worker`;
 - the main browser entry embeds the worker source instead of referencing a
   runtime-relative worker URL;
 - `supervision-js-core` is bundled while `pixi.js` and `mediabunny` are not;
 - a clean `npm install <tarball>` produces a lockfile with no `file:` path;
-- `supervision-js` and `supervision-js/editing` import under Node;
+- `supervision` and `supervision/editing` import under Node;
 - a minimal Vite production build that imports `createMediaSession` succeeds.
 
 `package:tarball:smoke` installs public dependencies from the registry and runs
 a Vite build, so it is deliberately kept out of `npm run verify`. Run it when
 changing packaging, dependencies, or package entrypoints. Point it at another
-archive with `SUPERVISION_JS_TARBALL=<path>`.
+archive with `SUPERVISION_TARBALL=<path>`.
 
 ## npm Publishing
 

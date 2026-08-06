@@ -5,7 +5,7 @@ import {
   MediaSessionStatus,
   type MediaSessionActivity,
   type MediaSessionState,
-} from "supervision-js";
+} from "supervision";
 import type {
   DemoMediaState,
   UploadInferenceState,
