@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   createVisionCameraLiveSource,
+  useVisionCameraFrameRenderer,
   useVisionCameraFrameOutput,
 } from "./vision-camera";
 
@@ -69,5 +70,13 @@ describe("useVisionCameraFrameOutput", () => {
         targetResolution: { height: 720, width: 1280 },
       }),
     ).toThrow(/VisionCamera frame output is unavailable/);
+  });
+});
+
+describe("useVisionCameraFrameRenderer", () => {
+  it("fails clearly outside a VisionCamera runtime", () => {
+    expect(() => useVisionCameraFrameRenderer()).toThrow(
+      /VisionCamera is unavailable/,
+    );
   });
 });
