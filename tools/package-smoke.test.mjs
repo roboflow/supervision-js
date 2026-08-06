@@ -320,6 +320,8 @@ test("built style classes can be constructed by package consumers", async () => 
 test("built React Native subpath entries ship and resolve", async () => {
   const adapters =
     await import("../packages/react-native/dist/adapters/executorch.js");
+  const videoFile =
+    await import("../packages/react-native/dist/adapters/video-file.js");
   const mediaSession =
     await import("../packages/react-native/dist/media-session.js");
 
@@ -329,6 +331,7 @@ test("built React Native subpath entries ship and resolve", async () => {
     { x1: 2, y1: 7, x2: 4, y2: 9 },
   );
   assert.equal(typeof mediaSession.createMediaSession, "function");
+  assert.equal(typeof videoFile.createReactNativeVideoFileSource, "function");
   assert.deepEqual(Object.keys(mediaSession).sort(), [
     "MediaSessionActivityKind",
     "MediaSessionActivityStatus",
