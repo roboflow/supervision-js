@@ -28,6 +28,7 @@ import {
   type ReactNativeSkiaMaskFrame,
 } from "./skia";
 import { PreparedFrameStore } from "./renderers/prepared-frame-store";
+import { REACT_NATIVE_FILE_SESSION_DEFAULTS } from "./sessions/media-session-defaults";
 import {
   type ReactNativeBoxedVideoFrameSource,
   type ReactNativeVideoFrameHandle,
@@ -76,15 +77,9 @@ export interface ReactNativeSharedValue<TValue> {
 /** Opaque worklet runtime handle produced by `createReactNativeWorkletRuntime`. */
 export type ReactNativeWorkletRuntimeHandle = object;
 
-export const REACT_NATIVE_VIDEO_SESSION_DEFAULTS = {
-  // Memory guards for high-resolution uploads (phones record 4K): above
-  // these bounds masks fall back to model resolution and the presented CPU
-  // raster is GPU-downscaled first, or the app gets jetsam-killed without a
-  // JS error in sight.
-  fullResMaskMaxPixels: 1920 * 1088,
-  maxPresentationSide: 1600,
-  statsIntervalMs: 250,
-} as const;
+/** @deprecated Prefer `REACT_NATIVE_FILE_SESSION_DEFAULTS`. */
+export const REACT_NATIVE_VIDEO_SESSION_DEFAULTS =
+  REACT_NATIVE_FILE_SESSION_DEFAULTS;
 
 /** Slim per-frame detection summary delivered to the JS thread. */
 export interface ReactNativeVideoSessionDetection {
@@ -339,11 +334,11 @@ export function createReactNativeVideoSession(
   const presentation = options.presentation ?? {};
   const fullResMaskMaxPixels =
     presentation.fullResMaskMaxPixels ??
-    REACT_NATIVE_VIDEO_SESSION_DEFAULTS.fullResMaskMaxPixels;
+    REACT_NATIVE_FILE_SESSION_DEFAULTS.fullResMaskMaxPixels;
   const maxPresentationSide =
     presentation.maxPresentationSide ??
-    REACT_NATIVE_VIDEO_SESSION_DEFAULTS.maxPresentationSide;
-  const statsIntervalMs = REACT_NATIVE_VIDEO_SESSION_DEFAULTS.statsIntervalMs;
+    REACT_NATIVE_FILE_SESSION_DEFAULTS.maxPresentationSide;
+  const statsIntervalMs = REACT_NATIVE_FILE_SESSION_DEFAULTS.statsIntervalMs;
   const nativeBuilder = options.nativeBuilder ?? null;
   const serializeFrame = options.serializeFrame;
   const resolveMaskEffects = options.resolveMaskEffects;
