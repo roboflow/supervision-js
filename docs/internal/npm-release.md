@@ -129,7 +129,9 @@ published: never try to overwrite one. Publish a new patch version instead.
 If package publishing succeeds but GitHub Release creation fails, do not start
 a new default dispatch from a later `main` commit: that would build a different
 source tree for an immutable version. Start **Publish npm package** from `main`
-with `release_sha` set to the full SHA of the failed run's `head_sha`. The
-workflow checks out that SHA, verifies or creates the matching `v<version>`
-tag, and then creates the GitHub Release. It rejects an already-published
-version without that explicit recovery SHA.
+with `recovery_run_id` set to the failed run's numeric GitHub Actions ID. The
+workflow reads that run's `head_sha`, confirms it was a failed main dispatch of
+this workflow, checks out that commit, and then verifies or creates the matching
+`v<version>` tag before creating the GitHub Release. It rejects an
+already-published version without that verified recovery run, and it refuses to
+publish a missing version during recovery.
