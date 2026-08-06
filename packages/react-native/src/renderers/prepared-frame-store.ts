@@ -25,11 +25,24 @@ export class PreparedFrameStore<TPacket extends object> {
     return this.activePacket;
   }
 
-  /** Captures store ownership so a paused worklet can resume safely. */
+  /**
+   * Transfers packet ownership to a fresh store, such as the next worklet
+   * invocation. The source store is sealed without disposing those packets:
+   * the returned snapshot is now their sole owner until `restore()` claims it.
+   */
   snapshot() {
     "worklet";
 
-    return { active: this.activePacket, retired: this.retiredPacket };
+    const snapshot = {
+      active: this.activePacket,
+      retired: this.retiredPacket,
+    };
+
+    this.activePacket = null;
+    this.retiredPacket = null;
+    this.disposed = true;
+
+    return snapshot;
   }
 
   /** Restores a snapshot into a newly created single-writer worklet store. */
@@ -41,6 +54,9 @@ export class PreparedFrameStore<TPacket extends object> {
 
     if (this.disposed) {
       throw new Error("Cannot restore a disposed PreparedFrameStore.");
+    }
+    if (this.activePacket || this.retiredPacket) {
+      throw new Error("Cannot restore over owned PreparedFrameStore packets.");
     }
 
     this.activePacket = snapshot.active;
