@@ -11,7 +11,6 @@ import {
   Vibration,
   View,
 } from "react-native";
-import { useSharedValue } from "react-native-reanimated";
 import { Asset } from "expo-asset";
 import * as ImagePicker from "expo-image-picker";
 import {
@@ -49,6 +48,7 @@ import {
   useReactNativeLiveSkiaPresentation,
   useReactNativeLiveCameraBinding,
   scheduleReactNativeOnJs,
+  useReactNativeSharedValue,
 } from "supervision-js-react-native/react";
 import {
   createReactNativeClassMaskEffectsResolver,
@@ -103,6 +103,8 @@ import {
   type InstantCvZone,
   type InstantCvZoneShape,
 } from "./src/instant-cv";
+
+const useSharedValue = useReactNativeSharedValue;
 
 type DemoMode = "static" | "live" | "video" | "instant";
 type LiveInferenceMode = "segmentation" | "pose";
@@ -837,13 +839,13 @@ function LiveCameraProof(props: {
     [livePerformanceSamples],
   );
   const livePresentation = useReactNativeLiveSkiaPresentation();
-  const liveMediaRect = useSharedValue<LiveMediaRect>({
+  const liveMediaRect = useReactNativeSharedValue<LiveMediaRect>({
     height: liveLayout.mediaRect.height,
     width: liveLayout.mediaRect.width,
     x: liveLayout.mediaRect.x,
     y: liveLayout.mediaRect.y,
   });
-  const lastReadoutReportAt = useSharedValue(0);
+  const lastReadoutReportAt = useReactNativeSharedValue(0);
   const lastErrorReportAt = useSharedValue(0);
   const droppedFrameCount = useSharedValue(0);
   const lastPresentedFrame = useSharedValue(false);
