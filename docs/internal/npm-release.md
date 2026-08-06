@@ -2,13 +2,13 @@
 
 This repository publishes one public package: `supervision`. The root
 workspace, `supervision-js-core`, and `supervision-js-react-native` remain
-private. The npm registry artifact is the portable tarball assembled by
+private. The registry artifact is the portable tarball assembled by
 `tools/pack-web-tarball.mjs`; it embeds the private core package without
 exposing the workspace-relative `file:../core` dependency.
 
 ## Release Boundary
 
-Never publish from `packages/web` directly. A release must publish exactly one
+Never publish from `packages/web` directly. A release publishes exactly one
 generated file matching:
 
 ```text
@@ -17,47 +17,59 @@ artifacts/supervision-<version>.tgz
 
 The manual GitHub Actions workflow at
 `.github/workflows/publish-npm.yml` recreates and independently validates that
-artifact before publishing it. It accepts only the `next` and `latest` tags,
-runs only from `main`, and is gated by the `npm-publish` GitHub environment.
+artifact before publishing it. It runs only from `main` and is gated by the
+`npm-publish` GitHub environment.
 
-`next` is the safe default for the first release. Promote a version to `latest`
-only after the release owner explicitly makes that decision.
+`latest` is the default tag for a reviewed, general-availability release.
+`next` is reserved for an explicit prerelease or canary. Do not use `next` as a
+holding area for a stable release: a stable publish with `latest` updates the
+default version that `npm install supervision` resolves.
 
-## One-Time Bootstrap
+The `packages/web/package.json` version is the source of truth. The stable
+release workflow creates the matching GitHub Release and `v<version>` tag from
+the `main` commit that npm published. That release page is the canonical GitHub
+record; npm is the canonical installation source.
+
+## Publication Access
 
 The package name is `supervision`; the repository remains `supervision-js`.
-The existing `supervision@0.0.9000` placeholder is an earlier Roboflow
-publication, and the first browser release must publish a newer immutable
-version.
+Keep this ownership and security posture in place:
 
-Before the first browser release, an npm administrator must:
+1. At least two active Roboflow maintainers have npm package access and two-factor
+   authentication.
+2. npm **Trusted publisher** points exactly to GitHub Actions organization
+   `roboflow`, repository `supervision-js`, workflow `publish-npm.yml`, and
+   environment `npm-publish` for the **npm publish** action.
+3. GitHub's `npm-publish` environment requires release-owner approval.
+4. No long-lived npm write token is stored in GitHub. Publishing uses OIDC.
 
-1. Confirm that the Roboflow owner can publish the existing `supervision`
-   package.
-2. Create or use the Roboflow npm owner that will own the first public release,
-   with two-factor authentication enabled.
-3. Add at least two active Roboflow maintainers to the npm package.
-4. Open the package's npm **Settings → Trusted publisher** and configure:
-   - provider: **GitHub Actions**;
-   - organization: `roboflow`;
-   - repository: `supervision-js`;
-   - workflow filename: `publish-npm.yml`;
-   - environment name: `npm-publish`;
-   - allowed action: **npm publish**.
-5. In GitHub, create the `npm-publish` environment and require approval from
-   the release owners. Do not store an npm write token in GitHub secrets.
-6. After one successful OIDC publish, set npm **Publishing access** to require
-   two-factor authentication and disallow tokens, then remove any obsolete
-   automation tokens.
+If publishing access breaks, compare the trusted-publisher fields with the
+workflow before changing credentials. Each npm package supports one trusted
+publisher.
 
-The trusted publisher must match the organization, repository, workflow file,
-and environment name exactly. Each npm package supports one trusted publisher.
+## Choose The Version And Tag
+
+Use SemVer against the published browser surface only:
+
+| Change                                                                      | Example next version from `0.1.0` | Tag      |
+| --------------------------------------------------------------------------- | --------------------------------- | -------- |
+| Backward-compatible fix, docs, dependency maintenance, or internal refactor | `0.1.1`                           | `latest` |
+| Backward-compatible public browser API addition                             | `0.2.0`                           | `latest` |
+| Breaking browser API or behavior change before 1.0                          | `0.2.0`                           | `latest` |
+| Preview of a future release                                                 | `0.1.2-rc.0`                      | `next`   |
+
+For pre-1.0 versions, a new minor version communicates a breaking public
+change. Changes limited to private React Native experiments do not by themselves
+change the published browser package version.
 
 ## Release Procedure
 
-1. Update the public package version in `packages/web/package.json` and refresh
-   `package-lock.json`.
-2. Run the normal validation plus the clean-consumer artifact smoke test:
+1. Update `packages/web/package.json`, `package-lock.json`, and the checked docs
+   toolbar version together. `npm run docs:check` verifies the toolbar mirror.
+2. Update public docs and README installation guidance to use
+   `npm install supervision`. Do not document path installs of release tarballs
+   for consumers.
+3. Run the normal validation plus the clean-consumer artifact smoke test:
 
    ```sh
    npm run verify
@@ -66,31 +78,46 @@ and environment name exactly. Each npm package supports one trusted publisher.
    npm run package:publish:dry-run
    ```
 
-3. Merge the reviewed release-preparation pull request to `main`.
-4. In GitHub Actions, run **Publish npm package** from `main`. Select `next`
-   unless the release owner has explicitly approved `latest`.
-5. Approve the `npm-publish` environment deployment. The workflow verifies,
-   packs, smoke-tests, and then publishes the generated archive through npm
-   trusted publishing (OIDC). It has no long-lived npm credential.
-6. Verify the published package metadata, provenance, tarball contents, and a
-   clean installation in a separate consumer. While the browser package remains
-   on `next`, public installation instructions must use
-   `npm install supervision@next`.
-7. Promote the verified release only when the release owner approves it:
+4. Merge the reviewed release-preparation pull request to `main`.
+5. In GitHub Actions, run **Publish npm package** from `main` and select
+   `latest` for a stable release. Approve the `npm-publish` environment
+   deployment. The workflow verifies, packs, smoke-tests, publishes the
+   generated archive through npm trusted publishing, verifies the selected npm
+   tag, and creates the matching GitHub Release.
+6. Verify npm metadata, provenance, tarball contents, and a clean installation
+   in a separate consumer:
 
    ```sh
-   npm dist-tag add supervision@<version> latest
+   npm view supervision dist-tags --json
+   npm view supervision@<version> version
+   npm pack supervision@<version>
    ```
 
-   Confirm that `latest` resolves to that version, then update public
-   installation instructions to `npm install supervision`.
+7. Confirm that the GitHub Release `v<version>` points at the same `main`
+   commit the workflow published.
+
+## Clear A Previous `next` Tag
+
+Publishing `0.1.1` with `latest` does not remove `next`; npm dist-tags are
+independent. After the stable publish is verified, remove a stale preview tag
+only when no release process still relies on it:
+
+```sh
+npm dist-tag ls supervision
+npm dist-tag rm supervision next
+npm dist-tag ls supervision
+```
+
+This does not unpublish `0.1.0`; it only removes the `next` alias. For the next
+preview cycle, publish a new prerelease version such as `0.1.2-rc.0` with the
+`next` tag.
 
 ## Recovery
 
-If a publish fails before uploading the package, fix the failure in a pull
+If publishing fails before uploading the package, fix the failure in a pull
 request and rerun the workflow from `main`. npm versions are immutable once
 published: never try to overwrite one. Publish a new patch version instead.
 
-If OIDC authentication fails, compare the npm trusted-publisher configuration
-with the workflow's organization, repository, filename, and environment. Do
-not work around the issue by adding a long-lived npm write token to GitHub.
+If package publishing succeeds but GitHub Release creation fails, rerun the
+workflow for the same `main` commit. The release step is idempotent and will
+leave an existing matching GitHub Release intact.

@@ -13,57 +13,14 @@ another web application.
 ## Installation
 
 The browser package is published as `supervision`. There is no CDN, UMD, or
-`<script>` build. Until the first browser release is available on npm's `next`
-tag, build and install a portable archive from this public repository:
-
-Build the portable archive from the `supervision-js` repository:
-
-```sh
-npm install
-npm run package:tarball
-```
-
-The archive is written to:
-
-```text
-artifacts/supervision-0.1.0.tgz
-```
-
-Copy that archive into a stable path in the consuming application, then install
-it from there:
-
-```text
-my-app/
-├── package.json
-└── vendor/
-    └── supervision-0.1.0.tgz
-```
-
-```sh
-npm install ./vendor/supervision-0.1.0.tgz
-```
-
-Keeping the archive at a stable project-relative path is important:
-`package-lock.json` records the local package location, and later `npm ci` runs
-must be able to read it. Commit the archive when the consuming repository allows
-vendored dependencies; otherwise store it in the team's artifact system and
-make retrieval part of the build.
-
-The archive contains the internal `supervision-js-core` package. Consumers must
-not install `supervision-js-core` separately.
-
-Once the first browser release is available on npm's `next` tag:
-
-```sh
-npm install supervision@next
-```
-
-After that release is promoted to npm's `latest` tag, install it without the
-tag:
+`<script>` build. Install the current stable release with npm:
 
 ```sh
 npm install supervision
 ```
+
+The published package includes the internal `supervision-js-core` dependency.
+Consumers must not install `supervision-js-core` separately.
 
 ## Supported Consumer
 
@@ -320,7 +277,6 @@ Before considering an integration complete:
 
 - Installing `supervision-web` instead of `supervision`.
 - Installing `supervision-js-core` separately.
-- Deleting or moving the tarball after committing a local `file:` dependency.
 - Running `createMediaSession()` during SSR.
 - Mounting into a zero-height container.
 - Treating rectangle `x` and `y` as top-left coordinates.

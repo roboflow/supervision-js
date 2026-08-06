@@ -4,16 +4,16 @@ on:
   workflow_dispatch:
     inputs:
       dist_tag:
-        description: npm dist-tag for this release
+        description: Select latest for a stable release; use next only for an explicit prerelease or canary.
         required: true
-        default: next
+        default: latest
         type: choice
         options:
           - next
           - latest
 
 permissions:
-  contents: read
+  contents: write
   id-token: write
 
 concurrency:
@@ -53,12 +53,66 @@ jobs:
 
       - name: Publish generated tarball
         shell: bash
+        env:
+          DIST_TAG: ${{ inputs.dist_tag }}
         run: |
           set -euo pipefail
+          version="$(node -p "require('./packages/web/package.json').version")"
+
+          if [[ "${DIST_TAG}" == "latest" && "${version}" == *-* ]]; then
+            echo "Prerelease version ${version} must use the next tag." >&2
+            exit 1
+          fi
+
+          if [[ "${DIST_TAG}" == "next" && "${version}" != *-* ]]; then
+            echo "Stable version ${version} must use the latest tag." >&2
+            exit 1
+          fi
+
+          if published_version="$(npm view "supervision@${version}" version 2>/dev/null)"; then
+            if [[ "${published_version}" != "${version}" ]]; then
+              echo "Unexpected published version for supervision@${version}: ${published_version}" >&2
+              exit 1
+            fi
+
+            echo "supervision@${version} is already published; continuing release verification."
+            exit 0
+          fi
+
           shopt -s nullglob
           archives=(artifacts/supervision-*.tgz)
           if [ "${#archives[@]}" -ne 1 ]; then
             echo "Expected exactly one generated supervision tarball." >&2
             exit 1
           fi
-          npm publish "./${archives[0]}" --access public --tag "${{ inputs.dist_tag }}"
+          npm publish "./${archives[0]}" --access public --tag "${DIST_TAG}"
+
+      - name: Verify published npm dist-tag
+        shell: bash
+        env:
+          DIST_TAG: ${{ inputs.dist_tag }}
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./packages/web/package.json').version")"
+          published_version="$(npm view "supervision@${DIST_TAG}" version)"
+          test "${published_version}" = "${version}"
+
+      - name: Create GitHub Release
+        if: inputs.dist_tag == 'latest'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./packages/web/package.json').version")"
+          tag="v${version}"
+
+          if gh release view "${tag}" >/dev/null 2>&1; then
+            echo "GitHub Release ${tag} already exists."
+            exit 0
+          fi
+
+          gh release create "${tag}" \
+            --target "${GITHUB_SHA}" \
+            --title "supervision ${tag}" \
+            --generate-notes

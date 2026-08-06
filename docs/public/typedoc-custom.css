@@ -602,6 +602,22 @@ html.supervision-docs--home #tsd-toolbar-menu-trigger {
   max-width: 45rem;
 }
 
+.supervision-home__install {
+  color: var(--rf-gray-700);
+  font-size: 0.95rem;
+  margin-bottom: 1.6rem !important;
+}
+
+.supervision-home__install code {
+  background: var(--rf-violet-50);
+  border: 1px solid var(--rf-violet-100);
+  border-radius: 8px;
+  color: var(--rf-violet-700);
+  display: inline-block;
+  font-weight: 720;
+  padding: 0.45rem 0.62rem;
+}
+
 .supervision-home__actions {
   display: flex;
   flex-wrap: wrap;

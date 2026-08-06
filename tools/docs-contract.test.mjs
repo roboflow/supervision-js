@@ -103,6 +103,25 @@ test("TypeDoc does not publish the private workspace version", async () => {
   assert.equal(config.includeVersion, false);
 });
 
+test("documentation toolbar mirrors the published browser package version", async () => {
+  const packageJson = JSON.parse(
+    await readFile(path.join(rootDir, "packages/web/package.json"), "utf8"),
+  );
+  const toolbarScript = await readFile(
+    path.join(publicDocsDir, "typedoc-icons.js"),
+    "utf8",
+  );
+  const packageName = toolbarScript.match(
+    /const packageName = "([^"]+)";/,
+  )?.[1];
+  const packageVersion = toolbarScript.match(
+    /const packageVersion = "([^"]+)";/,
+  )?.[1];
+
+  assert.equal(packageName, packageJson.name);
+  assert.equal(packageVersion, packageJson.version);
+});
+
 test("Render preview trusts only its assigned hostname", async () => {
   const packageJson = JSON.parse(
     await readFile(path.join(rootDir, "package.json"), "utf8"),

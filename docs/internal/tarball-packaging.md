@@ -1,7 +1,9 @@
 # Tarball Packaging
 
-The first npm release has not been published yet. The supported distribution
-until then is one portable npm tarball built from this repository.
+The portable tarball is the artifact published to npm. It is not a public
+consumer installation channel: consumers install the stable package with
+`npm install supervision`. This document exists for maintainers who validate
+or change the packaging path.
 
 ## Build The Tarball
 
@@ -9,40 +11,24 @@ until then is one portable npm tarball built from this repository.
 npm run package:tarball
 ```
 
-That command builds `supervision-js-core` and the published `supervision` package, then writes a
-single archive to the ignored `artifacts/` directory:
+That command builds `supervision-js-core` and the published `supervision`
+package, then writes a single archive to the ignored `artifacts/` directory:
 
-```
-artifacts/supervision-0.1.0.tgz
+```text
+artifacts/supervision-<version>.tgz
 ```
 
-`artifacts/` is cleared of previous `supervision-*.tgz` archives on every
-run, so exactly one artifact exists at a time. Pass `--skip-build` to repack
-existing `dist/` output, or `--out-dir=<path>` to write elsewhere:
+`artifacts/` is cleared of previous `supervision-*.tgz` archives on every run,
+so exactly one artifact exists at a time. Pass `--skip-build` to repack existing
+`dist/` output, or `--out-dir=<path>` to write elsewhere:
 
 ```sh
 node tools/pack-web-tarball.mjs --skip-build --out-dir=/tmp/supervision
 ```
 
-## Install In A Website
-
-Copy the archive next to the consuming project and install it by path:
-
-```sh
-npm install ./supervision-0.1.0.tgz
-```
-
-Both supported entrypoints then resolve normally:
-
-```ts
-import { createMediaSession } from "supervision";
-import { createMaskBrushEditor } from "supervision/editing";
-```
-
-The consumer needs an npm-compatible bundler such as Vite, webpack, Parcel, or
-esbuild. The default render-preparation worker is embedded in the browser entry
-and created from a Blob URL, so the bundler does not need worker-specific asset
-handling. There is no CDN, UMD, or `<script>` distribution.
+The archive is deliberately installed by path only inside the smoke test. That
+test proves the archive is portable before npm receives it; it is not consumer
+documentation.
 
 ## How The Private Core Is Made Portable
 
@@ -58,13 +44,13 @@ resolves it at pack time:
 2. Extract the web archive into a staging directory.
 3. Extract the core archive into `node_modules/supervision-js-core` inside that
    staging directory.
-4. Rewrite the staged manifest: pin `supervision-js-core` to its version instead
-   of `file:../core`, and list it in `bundleDependencies`.
+4. Rewrite the staged manifest: pin `supervision-js-core` to its version
+   instead of `file:../core`, and list it in `bundleDependencies`.
 5. `npm pack` the staging directory into the output archive.
 
-The source tree, the package boundary checks, and the Rollup externals are all
-unchanged. `pixi.js` and `mediabunny` stay ordinary dependencies and are
-installed from the registry by the consumer.
+The source tree, package boundary checks, and Rollup externals are unchanged.
+`pixi.js` and `mediabunny` stay ordinary dependencies and are installed from the
+registry by the consumer.
 
 ## Verify The Artifact
 
@@ -82,7 +68,7 @@ the OS temp directory — outside this repository — to check that:
 - the main browser entry embeds the worker source instead of referencing a
   runtime-relative worker URL;
 - `supervision-js-core` is bundled while `pixi.js` and `mediabunny` are not;
-- a clean `npm install <tarball>` produces a lockfile with no `file:` path;
+- a clean archive installation produces a lockfile with no `file:` path;
 - `supervision` and `supervision/editing` import under Node;
 - a minimal Vite production build that imports `createMediaSession` succeeds.
 
@@ -97,7 +83,7 @@ The portable archive is the only artifact that may be published. Do not run
 `npm publish` from `packages/web`: its workspace manifest intentionally points
 at the private core package through `file:../core`.
 
-See [npm-release.md](npm-release.md) for the one-time npm ownership bootstrap,
-trusted-publisher configuration, and the protected manual release workflow.
-Use `npm run package:publish:dry-run` to recreate the artifact and validate the
+See [npm-release.md](npm-release.md) for release ownership, trusted-publisher
+configuration, stable and preview tags, and the protected manual workflow. Use
+`npm run package:publish:dry-run` to recreate the artifact and validate the
 exact local archive argument that npm will receive, without publishing it.

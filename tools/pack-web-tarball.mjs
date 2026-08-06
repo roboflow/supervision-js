@@ -1,6 +1,5 @@
 /**
- * Builds one portable `supervision-<version>.tgz` for consumers that cannot
- * access this private repository.
+ * Builds the portable `supervision-<version>.tgz` artifact published to npm.
  *
  * The browser package depends on the private `supervision-js-core` workspace
  * through `file:../core`, which does not exist for an external consumer. Rather

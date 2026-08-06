@@ -6,6 +6,7 @@
       <p class="supervision-home__lede">
         <code>supervision</code> is a browser-native TypeScript library for interactive computer vision media. A media session keeps the visible frame, detections, styles, interaction, and playback on one timing reference.
       </p>
+      <p class="supervision-home__install"><code>npm install supervision</code></p>
       <div class="supervision-home__actions">
         <a class="supervision-home__button supervision-home__button--primary" href="documents/Application_Integration.html">Get started</a>
         <a class="supervision-home__button supervision-home__button--secondary" href="https://supervision-js-demo.onrender.com/">Open the demo</a>
