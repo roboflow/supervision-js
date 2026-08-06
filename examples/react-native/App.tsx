@@ -74,6 +74,8 @@ import {
   useVisionCameraDevice,
   useVisionCameraPermission,
   VisionCameraLiveView,
+  resolveVisionCameraFrameRendererStyle,
+  resolveVisionCameraFrameSize,
   type VisionCameraOutputFrame,
 } from "supervision-js-react-native/adapters/vision-camera";
 import {
@@ -1255,7 +1257,7 @@ function LiveCameraProof(props: {
   );
   const liveFrameRendererStyle = useMemo(
     () =>
-      resolveLiveFrameRendererStyle({
+      resolveVisionCameraFrameRendererStyle({
         canvasHeight,
         canvasWidth,
         orientation: liveFrame?.frameOrientation ?? "left",
@@ -2068,7 +2070,7 @@ function LiveCameraProof(props: {
               }),
           );
           const poseMs = Date.now() - poseStartedAt;
-          const detectionFrameSize = resolveLiveDetectionFrameSize(frame);
+          const detectionFrameSize = resolveVisionCameraFrameSize(frame);
           const mediaRect = liveMediaRect.value;
           stage = "pose-adapt";
           const serializationStartedAt = Date.now();
@@ -2276,7 +2278,7 @@ function LiveCameraProof(props: {
           const segmentationMs = Date.now() - segmentationStartedAt;
           stage = "mask-read-layout";
           const mediaRect = liveMediaRect.value;
-          const detectionFrameSize = resolveLiveDetectionFrameSize(frame);
+          const detectionFrameSize = resolveVisionCameraFrameSize(frame);
           stage = "mask-serialize-detections";
           const serializationStartedAt = Date.now();
           const detections = runWithWorkletDebugLogging(
@@ -2638,7 +2640,7 @@ function LiveCameraProof(props: {
             frameOrientation: frame.orientation,
             frameIsMirrored: frame.isMirrored,
             hasPresentedFrame: lastPresentedFrame.value,
-            height: resolveLiveDetectionFrameSize(frame).height,
+            height: resolveVisionCameraFrameSize(frame).height,
             inferenceTickMs: lastInferenceTickDurationMs.value,
             maskBuilder: lastMaskBuilderName.value,
             maskFallbackReason: lastMaskFallbackReason.value,
@@ -2656,7 +2658,7 @@ function LiveCameraProof(props: {
             shaderActive: lastShaderActive.value,
             syncMode,
             timestamp: frame.timestamp,
-            width: resolveLiveDetectionFrameSize(frame).width,
+            width: resolveVisionCameraFrameSize(frame).width,
             visibleKeypointCount: lastVisibleKeypointCount.value,
           });
         }
@@ -3953,54 +3955,6 @@ function formatLiveFallbackReason(reason: string | undefined) {
   }
 
   return reason.length > 28 ? `${reason.slice(0, 28)}…` : reason;
-}
-
-function resolveLiveDetectionFrameSize(frame: {
-  readonly height: number;
-  readonly orientation: string;
-  readonly width: number;
-}) {
-  "worklet";
-
-  if (frame.orientation === "left" || frame.orientation === "right") {
-    return {
-      height: frame.width,
-      width: frame.height,
-    };
-  }
-
-  return {
-    height: frame.height,
-    width: frame.width,
-  };
-}
-
-function resolveLiveFrameRendererStyle(options: {
-  readonly canvasHeight: number;
-  readonly canvasWidth: number;
-  readonly orientation: string;
-}): ViewStyle {
-  if (options.orientation === "left" || options.orientation === "right") {
-    return {
-      height: options.canvasWidth,
-      left: (options.canvasWidth - options.canvasHeight) / 2,
-      position: "absolute",
-      top: (options.canvasHeight - options.canvasWidth) / 2,
-      transform: [
-        { rotate: options.orientation === "left" ? "90deg" : "-90deg" },
-      ],
-      width: options.canvasHeight,
-    };
-  }
-
-  return {
-    bottom: 0,
-    left: 0,
-    position: "absolute",
-    right: 0,
-    top: 0,
-    transform: options.orientation === "down" ? [{ rotate: "180deg" }] : [],
-  };
 }
 
 function createLiveFrameError(

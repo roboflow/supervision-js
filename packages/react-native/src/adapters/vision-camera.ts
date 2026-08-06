@@ -98,6 +98,11 @@ export interface VisionCameraPermissionState {
   requestPermission(): Promise<boolean>;
 }
 
+export interface VisionCameraFrameSize {
+  readonly height: number;
+  readonly width: number;
+}
+
 /**
  * Presents a completed frame and always releases its native buffer afterwards.
  *
@@ -118,6 +123,60 @@ export function presentVisionCameraFrame<TFrame extends VisionCameraFrame>(
   } finally {
     frame.dispose();
   }
+}
+
+/**
+ * Resolves the upright detection coordinate space for VisionCamera's reported
+ * frame orientation. The camera buffer remains native-oriented; only semantic
+ * detection coordinates are normalized here.
+ */
+export function resolveVisionCameraFrameSize(frame: {
+  readonly height: number;
+  readonly orientation: string;
+  readonly width: number;
+}): VisionCameraFrameSize {
+  "worklet";
+
+  if (frame.orientation === "left" || frame.orientation === "right") {
+    return {
+      height: frame.width,
+      width: frame.height,
+    };
+  }
+
+  return {
+    height: frame.height,
+    width: frame.width,
+  };
+}
+
+/** Builds the native presentation transform that matches the camera orientation. */
+export function resolveVisionCameraFrameRendererStyle(options: {
+  readonly canvasHeight: number;
+  readonly canvasWidth: number;
+  readonly orientation: string;
+}): ViewStyle {
+  if (options.orientation === "left" || options.orientation === "right") {
+    return {
+      height: options.canvasWidth,
+      left: (options.canvasWidth - options.canvasHeight) / 2,
+      position: "absolute",
+      top: (options.canvasHeight - options.canvasWidth) / 2,
+      transform: [
+        { rotate: options.orientation === "left" ? "90deg" : "-90deg" },
+      ],
+      width: options.canvasHeight,
+    };
+  }
+
+  return {
+    bottom: 0,
+    left: 0,
+    position: "absolute",
+    right: 0,
+    top: 0,
+    transform: options.orientation === "down" ? [{ rotate: "180deg" }] : [],
+  };
 }
 
 const LIVE_CAPABILITIES: MediaSessionCapabilities = {
