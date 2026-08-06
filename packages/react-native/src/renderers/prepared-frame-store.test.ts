@@ -79,6 +79,46 @@ describe("PreparedFrameStore", () => {
     expect(dispose.mock.calls.map(([id]) => id)).toEqual([2, 1]);
   });
 
+  it("shares concurrent teardown and releases a packet that arrives afterward", async () => {
+    const dispose = vi.fn();
+    const store = new PreparedFrameStore((next: Packet) =>
+      dispose(next.packetId),
+    );
+
+    await store.present(packet(1));
+    await store.present(packet(2));
+
+    const firstDispose = store.dispose();
+    const secondDispose = store.dispose();
+    expect(secondDispose).toBe(firstDispose);
+    await Promise.all([firstDispose, secondDispose]);
+
+    await store.present(packet(3));
+
+    expect(store.active).toBeNull();
+    expect(dispose.mock.calls.map(([id]) => id)).toEqual([2, 1, 3]);
+  });
+
+  it("releases every packet exactly once across a long presentation run", async () => {
+    const dispose = vi.fn();
+    const store = new PreparedFrameStore((next: Packet) =>
+      dispose(next.packetId),
+    );
+    const packetCount = 1_000;
+
+    for (let packetId = 0; packetId < packetCount; packetId += 1) {
+      await store.present(packet(packetId));
+    }
+    await store.dispose();
+
+    const releasedIds = dispose.mock.calls
+      .map(([id]) => id)
+      .sort((a, b) => a - b);
+    expect(releasedIds).toEqual(
+      Array.from({ length: packetCount }, (_, packetId) => packetId),
+    );
+  });
+
   it("continues cleanup after one packet fails to release", async () => {
     const dispose = vi.fn((next: Packet) => {
       if (next.packetId === 2) {
@@ -93,7 +133,7 @@ describe("PreparedFrameStore", () => {
     expect(dispose.mock.calls.map(([next]) => next.packetId)).toEqual([2, 1]);
   });
 
-  it("restores worklet-owned packets and disposes them synchronously", () => {
+  it("transfers worklet-owned packets across successive pump ticks", () => {
     const dispose = vi.fn();
     const initial = new PreparedFrameStore((next: Packet) =>
       dispose(next.packetId),
@@ -101,14 +141,37 @@ describe("PreparedFrameStore", () => {
 
     initial.presentNow(packet(1));
     initial.presentNow(packet(2));
-    const resumed = new PreparedFrameStore((next: Packet) =>
+    const secondTick = new PreparedFrameStore((next: Packet) =>
       dispose(next.packetId),
     );
 
-    resumed.restore(initial.snapshot());
-    resumed.presentNow(packet(3));
-    resumed.disposeNow();
+    const snapshot = initial.snapshot();
+    expect(initial.active).toBeNull();
+    initial.disposeNow();
+    expect(dispose).not.toHaveBeenCalled();
+
+    secondTick.restore(snapshot);
+    secondTick.presentNow(packet(3));
+    const secondSnapshot = secondTick.snapshot();
+    const finalTick = new PreparedFrameStore((next: Packet) =>
+      dispose(next.packetId),
+    );
+
+    finalTick.restore(secondSnapshot);
+    finalTick.disposeNow();
 
     expect(dispose.mock.calls.map(([id]) => id)).toEqual([1, 3, 2]);
+  });
+
+  it("rejects restore into a store that already owns packets", async () => {
+    const store = new PreparedFrameStore(() => undefined);
+    const source = new PreparedFrameStore(() => undefined);
+
+    await store.present(packet(1));
+    const snapshot = source.snapshot();
+
+    expect(() => store.restore(snapshot)).toThrow(
+      "Cannot restore over owned PreparedFrameStore packets.",
+    );
   });
 });
