@@ -20,8 +20,10 @@ import from `supervision`:
 import { createMediaSession } from "supervision";
 ```
 
-The first npm release is still being prepared. Until then, install the portable
-`supervision-0.1.0.tgz` archive built from this repository. See
+The first browser release is staged on npm's `next` tag. Install it with
+`npm install supervision@next`; after it is promoted to npm's `latest` tag, use
+`npm install supervision`. Before the staged release is available, install the
+portable `supervision-0.1.0.tgz` archive built from this repository. See
 [Application Integration](application-integration.md) for the supported
 consumer workflow.
 

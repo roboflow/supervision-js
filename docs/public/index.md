@@ -12,8 +12,21 @@ same timing reference.
 
 ## Installation
 
-The first npm release is still being prepared. Build the portable archive from
-this repository and install it in a browser application:
+The first browser release is staged on npm's `next` tag:
+
+```sh
+npm install supervision@next
+```
+
+After that release is promoted to npm's `latest` tag, install it without the
+tag:
+
+```sh
+npm install supervision
+```
+
+Before the staged release is available, build the portable archive from this
+repository and install it in a browser application:
 
 ```sh
 # In this repository

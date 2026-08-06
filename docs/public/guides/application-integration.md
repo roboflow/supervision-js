@@ -10,12 +10,24 @@ Use this page as the integration contract for humans and coding agents adding
 the browser package `supervision` from the `supervision-js` repository to
 another web application.
 
-## Installation Before The First npm Release
+## Installation
 
-The browser package will be published as `supervision`; until the first browser
-release is available, install the portable archive. There is no CDN, UMD, or
-`<script>` build. Build a portable archive from this public repository until the
-first npm release is available.
+The browser package is published as `supervision`. The first browser release is
+staged on npm's `next` tag:
+
+```sh
+npm install supervision@next
+```
+
+After that release is promoted to npm's `latest` tag, install it without the
+tag:
+
+```sh
+npm install supervision
+```
+
+There is no CDN, UMD, or `<script>` build. Before the staged release is
+available, build and install a portable archive from this public repository:
 
 Build the portable archive from the `supervision-js` repository:
 

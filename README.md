@@ -50,8 +50,21 @@ session.setPresentation({ boxStyle, maskStyle, labelStyle });
 
 ## Installation
 
-The first npm version has not been published yet. Until it is, build a portable
-release archive from a checkout and install it in a browser application:
+The first browser release is staged on npm's `next` tag:
+
+```sh
+npm install supervision@next
+```
+
+After that release is promoted to npm's `latest` tag, install it without the
+tag:
+
+```sh
+npm install supervision
+```
+
+Before the staged release is available, build a portable release archive from a
+checkout and install it in a browser application:
 
 ```sh
 # In this repository
