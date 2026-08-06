@@ -15,7 +15,14 @@ import {
   matchFont,
   useImage,
 } from "@shopify/react-native-skia";
-import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  Fragment,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { type StyleProp, type ViewStyle, View } from "react-native";
 import {
   BoxShape,
@@ -102,6 +109,10 @@ export function MediaSessionView(props: MediaSessionViewProps) {
   } | null>(null);
   const selectedPick =
     selection?.binding === props.binding ? selection.pick : null;
+  const maskImageOwnership = useRef<{
+    current: ReturnType<typeof Skia.Image.MakeImage> | null;
+    retired: ReturnType<typeof Skia.Image.MakeImage> | null;
+  }>({ current: null, retired: null });
 
   useEffect(() => {
     if (selection && selection.binding !== props.binding) {
@@ -197,7 +208,26 @@ export function MediaSessionView(props: MediaSessionViewProps) {
     [layout.mediaRect, presentation, props.showKeypoints, props.showPolygons],
   );
 
-  useEffect(() => () => disposeReactNativeSkiaImage(maskImage), [maskImage]);
+  useEffect(() => {
+    const ownership = maskImageOwnership.current;
+
+    if (ownership.current === maskImage) {
+      return;
+    }
+
+    disposeReactNativeSkiaImage(ownership.retired);
+    ownership.retired = ownership.current;
+    ownership.current = maskImage;
+  }, [maskImage]);
+  useEffect(
+    () => () => {
+      const ownership = maskImageOwnership.current;
+
+      disposeReactNativeSkiaImage(ownership.current);
+      disposeReactNativeSkiaImage(ownership.retired);
+    },
+    [],
+  );
   useEffect(
     () => () => {
       maskEffect?.dispose();
