@@ -30,26 +30,23 @@ The existing `supervision@0.0.9000` placeholder is an earlier Roboflow
 publication, and the first browser release must publish a newer immutable
 version.
 
-Before the first automated release, an npm administrator must:
+Before the first browser release, an npm administrator must:
 
 1. Confirm that the Roboflow owner can publish the existing `supervision`
    package.
 2. Create or use the Roboflow npm owner that will own the first public release,
    with two-factor authentication enabled.
-3. Publish the reviewed generated tarball once using that administrator's
-   interactive npm authentication. This establishes the browser package release;
-   it is the only bootstrap exception to the trusted-publisher flow.
-4. Add at least two active Roboflow maintainers to the npm package.
-5. Open the package's npm **Settings → Trusted publisher** and configure:
+3. Add at least two active Roboflow maintainers to the npm package.
+4. Open the package's npm **Settings → Trusted publisher** and configure:
    - provider: **GitHub Actions**;
    - organization: `roboflow`;
    - repository: `supervision-js`;
    - workflow filename: `publish-npm.yml`;
    - environment name: `npm-publish`;
    - allowed action: **npm publish**.
-6. In GitHub, create the `npm-publish` environment and require approval from
+5. In GitHub, create the `npm-publish` environment and require approval from
    the release owners. Do not store an npm write token in GitHub secrets.
-7. After one successful OIDC publish, set npm **Publishing access** to require
+6. After one successful OIDC publish, set npm **Publishing access** to require
    two-factor authentication and disallow tokens, then remove any obsolete
    automation tokens.
 
@@ -76,8 +73,17 @@ and environment name exactly. Each npm package supports one trusted publisher.
    packs, smoke-tests, and then publishes the generated archive through npm
    trusted publishing (OIDC). It has no long-lived npm credential.
 6. Verify the published package metadata, provenance, tarball contents, and a
-   clean installation in a separate consumer. Then update public installation
-   docs from the local-tarball instructions to `npm install supervision`.
+   clean installation in a separate consumer. While the browser package remains
+   on `next`, public installation instructions must use
+   `npm install supervision@next`.
+7. Promote the verified release only when the release owner approves it:
+
+   ```sh
+   npm dist-tag add supervision@<version> latest
+   ```
+
+   Confirm that `latest` resolves to that version, then update public
+   installation instructions to `npm install supervision`.
 
 ## Recovery
 
