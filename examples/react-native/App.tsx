@@ -41,10 +41,8 @@ import {
 } from "react-native";
 import {
   Camera,
-  NativeFrameRendererView,
   useCameraDevice,
   useCameraPermission,
-  useFrameRenderer,
   type Frame,
 } from "react-native-vision-camera";
 import { useSharedValue } from "react-native-reanimated";
@@ -77,7 +75,11 @@ import {
   resolveReactNativeLabelLayout,
   createEmptyReactNativeLiveIdMaskUniforms,
 } from "supervision-js-react-native";
-import { useVisionCameraFrameOutput } from "supervision-js-react-native/adapters/vision-camera";
+import {
+  useVisionCameraFrameOutput,
+  useVisionCameraFrameRenderer,
+  VisionCameraFrameRendererView,
+} from "supervision-js-react-native/adapters/vision-camera";
 import {
   createReactNativeStaticMediaSessionBinding,
   getReactNativeMediaSessionViewReadout,
@@ -1215,7 +1217,7 @@ function LiveCameraProof(props: {
     readonly timestamp: number;
   } | null>(null);
   const instantRequestIdRef = useRef(0);
-  const frameRenderer = useFrameRenderer();
+  const frameRenderer = useVisionCameraFrameRenderer();
   const canvasWidth = window.width;
   const canvasHeight = window.height;
   const isInstantPrivacy = isInstantCv && instantRecipe === "privacy";
@@ -2800,7 +2802,7 @@ function LiveCameraProof(props: {
                 ]}
               />
             ) : null}
-            <NativeFrameRendererView
+            <VisionCameraFrameRendererView
               renderer={frameRenderer}
               style={[
                 styles.frameRendererSurface,

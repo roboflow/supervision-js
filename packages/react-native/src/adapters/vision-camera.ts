@@ -3,7 +3,10 @@ import {
   type MediaTimelineMetadata,
   type PlatformMediaFrame,
 } from "supervision-js-core";
+import { createElement, type ComponentType, type ReactElement } from "react";
+import type { StyleProp, ViewStyle } from "react-native";
 import type { CameraFrameOutput } from "react-native-vision-camera";
+import type { FrameRenderer } from "react-native-vision-camera";
 
 import type {
   MediaFrameSource,
@@ -50,6 +53,11 @@ export interface VisionCameraFrameOutputOptions<
     readonly height: number;
     readonly width: number;
   };
+}
+
+export interface VisionCameraFrameRendererViewProps {
+  readonly renderer: FrameRenderer;
+  readonly style?: StyleProp<ViewStyle>;
 }
 
 const LIVE_CAPABILITIES: MediaSessionCapabilities = {
@@ -145,30 +153,10 @@ export function createVisionCameraLiveSource<TFrame extends VisionCameraFrame>(
 export function useVisionCameraFrameOutput<TFrame extends VisionCameraFrame>(
   options: VisionCameraFrameOutputOptions<TFrame>,
 ): CameraFrameOutput {
-  if (typeof require !== "function") {
-    throw new Error(
-      "VisionCamera frame output is unavailable in this runtime.",
-    );
-  }
-
-  type VisionCameraModule = {
-    useFrameOutput(config: {
-      allowDeferredStart: boolean;
-      dropFramesWhileBusy: boolean;
-      enablePhysicalBufferRotation: boolean;
-      enablePreviewSizedOutputBuffers: boolean;
-      onFrame(frame: TFrame): void;
-      onFrameDropped?: () => void;
-      pixelFormat: "rgb";
-      targetResolution: VisionCameraFrameOutputOptions<TFrame>["targetResolution"];
-    }): CameraFrameOutput;
-  };
   let visionCamera: VisionCameraModule;
 
   try {
-    // Lazy require keeps this optional peer out of the base and Node test paths.
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    visionCamera = require("react-native-vision-camera") as VisionCameraModule;
+    visionCamera = loadVisionCamera();
   } catch (cause) {
     throw new Error(
       "VisionCamera frame output is unavailable in this runtime.",
@@ -188,4 +176,49 @@ export function useVisionCameraFrameOutput<TFrame extends VisionCameraFrame>(
     pixelFormat: "rgb",
     targetResolution: options.targetResolution,
   });
+}
+
+/** Returns the optional VisionCamera native frame renderer with a stable error. */
+export function useVisionCameraFrameRenderer(): FrameRenderer {
+  const visionCamera = loadVisionCamera();
+
+  return visionCamera.useFrameRenderer();
+}
+
+/** Package-owned view binding for a VisionCamera native frame renderer. */
+export function VisionCameraFrameRendererView(
+  props: VisionCameraFrameRendererViewProps,
+): ReactElement {
+  const visionCamera = loadVisionCamera();
+
+  return createElement(visionCamera.NativeFrameRendererView, props);
+}
+
+interface VisionCameraModule {
+  NativeFrameRendererView: ComponentType<VisionCameraFrameRendererViewProps>;
+  useFrameOutput<TFrame extends VisionCameraFrame>(config: {
+    allowDeferredStart: boolean;
+    dropFramesWhileBusy: boolean;
+    enablePhysicalBufferRotation: boolean;
+    enablePreviewSizedOutputBuffers: boolean;
+    onFrame(frame: TFrame): void;
+    onFrameDropped?: () => void;
+    pixelFormat: "rgb";
+    targetResolution: VisionCameraFrameOutputOptions<TFrame>["targetResolution"];
+  }): CameraFrameOutput;
+  useFrameRenderer(): FrameRenderer;
+}
+
+function loadVisionCamera(): VisionCameraModule {
+  if (typeof require !== "function") {
+    throw new Error("VisionCamera is unavailable in this runtime.");
+  }
+
+  try {
+    // Lazy require keeps this optional peer out of the base and Node test paths.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require("react-native-vision-camera") as VisionCameraModule;
+  } catch (cause) {
+    throw new Error("VisionCamera is unavailable in this runtime.", { cause });
+  }
 }
