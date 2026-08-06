@@ -1759,6 +1759,7 @@ function VideoFileProof(props: {
   // decoder open at position. The ref drives controls, the state rebinds the
   // stage to the session's presentation lanes.
   const videoSessionRef = useRef<ReactNativeVideoSession | null>(null);
+  const videoRequestId = useRef(0);
   const [videoSession, setVideoSession] =
     useState<ReactNativeVideoSession | null>(null);
 
@@ -1846,11 +1847,19 @@ function VideoFileProof(props: {
 
   const startVideo = useCallback(
     async (fileUri: string) => {
+      const requestId = videoRequestId.current + 1;
+
+      videoRequestId.current = requestId;
       setVideoError(null);
       setVideoStats(null);
       setVideoDetections([]);
       setVideoStatus("opening");
       await videoSessionRef.current?.destroy();
+
+      if (requestId !== videoRequestId.current) {
+        return;
+      }
+
       videoSessionRef.current = null;
 
       try {
@@ -1869,6 +1878,11 @@ function VideoFileProof(props: {
           serializeFrame: serializeVideoFrame,
         });
 
+        if (requestId !== videoRequestId.current) {
+          await session.destroy();
+          return;
+        }
+
         videoSessionRef.current = session;
         setVideoSession(session);
         setVideoDims({
@@ -1877,6 +1891,10 @@ function VideoFileProof(props: {
         });
         setVideoStatus("processing");
       } catch (error) {
+        if (requestId !== videoRequestId.current) {
+          return;
+        }
+
         setVideoError(
           error instanceof Error ? error.message : "failed to open video",
         );
@@ -1950,7 +1968,8 @@ function VideoFileProof(props: {
 
   useEffect(() => {
     return () => {
-      videoSessionRef.current?.destroy();
+      videoRequestId.current += 1;
+      void videoSessionRef.current?.destroy();
       videoSessionRef.current = null;
     };
   }, []);

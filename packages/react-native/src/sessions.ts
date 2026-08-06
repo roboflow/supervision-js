@@ -507,10 +507,6 @@ export function createReactNativeVideoFileSession(
       emit();
     }
 
-    if (!event.paused) {
-      releaseRuntime();
-    }
-
     options.onEnded?.(event);
   };
   const reportCleanupComplete = () => {
