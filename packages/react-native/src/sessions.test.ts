@@ -6,6 +6,8 @@ import {
   createReactNativeWorkletRuntime,
   MediaSessionError,
   REACT_NATIVE_VIDEO_SESSION_DEFAULTS,
+  REACT_NATIVE_VIDEO_SESSION_CAPABILITIES,
+  REACT_NATIVE_VIDEO_SESSION_PLAYBACK_MODE,
 } from "./sessions";
 import {
   REACT_NATIVE_FILE_SESSION_DEFAULTS,
@@ -42,6 +44,18 @@ describe("React Native media session defaults", () => {
     expect(REACT_NATIVE_LIVE_SESSION_DEFAULTS).toEqual({
       maxInstances: 6,
       targetResolution: { height: 1280, width: 720 },
+    });
+  });
+});
+
+describe("saved-video session capabilities", () => {
+  it("declares analysis pacing and the absence of seek support", () => {
+    expect(REACT_NATIVE_VIDEO_SESSION_PLAYBACK_MODE).toBe("analysis-paced");
+    expect(REACT_NATIVE_VIDEO_SESSION_CAPABILITIES).toEqual({
+      live: false,
+      pausable: true,
+      seekable: false,
+      stoppable: true,
     });
   });
 });
@@ -91,7 +105,9 @@ describe("sessions entrypoint", () => {
       ).sort(),
     ).toEqual([
       "MediaSessionError",
+      "REACT_NATIVE_VIDEO_SESSION_CAPABILITIES",
       "REACT_NATIVE_VIDEO_SESSION_DEFAULTS",
+      "REACT_NATIVE_VIDEO_SESSION_PLAYBACK_MODE",
       "createMediaSession",
       "createReactNativeClassMaskEffectsResolver",
       "createReactNativeVideoSession",

@@ -174,6 +174,12 @@ Mobile apps may eventually feed detections from on-device inference engines, but
 inference is outside the rendering package boundary. The library should render
 and interact with detections regardless of how they were produced.
 
+The experimental saved-video session is analysis-paced: it processes each
+decoded frame as quickly as inference permits rather than trying to match wall
+clock playback. It reports explicit capabilities; pause, resume, and stop are
+available, while seeking is intentionally unsupported until native decoding can
+reposition accurately.
+
 React Native currently shares editing geometry, picking, and gesture semantics
 through `createReactNativeAnnotationGestureAdapter`. Native hosts own drawing
 editing affordances from `AnnotationOverlayStyle` until a native overlay

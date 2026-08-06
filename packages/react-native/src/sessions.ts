@@ -29,6 +29,7 @@ import {
 } from "./skia";
 import { PreparedFrameStore } from "./renderers/prepared-frame-store";
 import { REACT_NATIVE_FILE_SESSION_DEFAULTS } from "./sessions/media-session-defaults";
+import type { MediaSessionCapabilities } from "./types/frame-source";
 import {
   type ReactNativeBoxedVideoFrameSource,
   type ReactNativeVideoFrameHandle,
@@ -80,6 +81,21 @@ export type ReactNativeWorkletRuntimeHandle = object;
 /** @deprecated Prefer `REACT_NATIVE_FILE_SESSION_DEFAULTS`. */
 export const REACT_NATIVE_VIDEO_SESSION_DEFAULTS =
   REACT_NATIVE_FILE_SESSION_DEFAULTS;
+
+/** Saved-video playback processes every decoded frame as quickly as inference allows. */
+export const REACT_NATIVE_VIDEO_SESSION_PLAYBACK_MODE = "analysis-paced";
+
+/**
+ * The current native file source supports start, pause/resume, and stop. It
+ * does not expose seeking until its decoder can reposition accurately.
+ */
+export const REACT_NATIVE_VIDEO_SESSION_CAPABILITIES: MediaSessionCapabilities =
+  {
+    live: false,
+    pausable: true,
+    seekable: false,
+    stoppable: true,
+  };
 
 /** Slim per-frame detection summary delivered to the JS thread. */
 export interface ReactNativeVideoSessionDetection {
@@ -197,10 +213,12 @@ export interface ReactNativeVideoSessionOptions {
 }
 
 export interface ReactNativeVideoSession {
+  readonly capabilities: MediaSessionCapabilities;
   readonly durationMs: number;
   readonly frameHeight: number;
   readonly frameWidth: number;
   readonly nominalFrameRate: number;
+  readonly playbackMode: typeof REACT_NATIVE_VIDEO_SESSION_PLAYBACK_MODE;
   /** Presentation lanes for the UI: media frame, mask, and its uniforms. */
   readonly frameImage: ReactNativeSharedValue<SkImage | null>;
   readonly maskImage: ReactNativeSharedValue<SkImage | null>;
@@ -610,6 +628,7 @@ export function createReactNativeVideoSession(
   schedulePump();
 
   return {
+    capabilities: REACT_NATIVE_VIDEO_SESSION_CAPABILITIES,
     durationMs,
     frameHeight,
     frameImage,
@@ -617,6 +636,7 @@ export function createReactNativeVideoSession(
     maskImage,
     maskUniforms,
     nominalFrameRate,
+    playbackMode: REACT_NATIVE_VIDEO_SESSION_PLAYBACK_MODE,
     destroy() {
       if (destroyed) {
         return;
