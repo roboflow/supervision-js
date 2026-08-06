@@ -30,6 +30,11 @@
       "react-native": "./src/sessions.ts",
       "import": "./dist/sessions.js"
     },
+    "./react": {
+      "types": "./dist/react/index.d.ts",
+      "react-native": "./src/react/index.ts",
+      "import": "./dist/react.js"
+    },
     "./skia": {
       "types": "./dist/skia.d.ts",
       "react-native": "./src/skia.ts",
@@ -64,6 +69,8 @@
   },
   "peerDependencies": {
     "@shopify/react-native-skia": "*",
+    "react": "*",
+    "react-native": "*",
     "react-native-nitro-modules": "*",
     "react-native-reanimated": "*",
     "react-native-worklets": "*",
@@ -74,6 +81,12 @@
       "optional": true
     },
     "@shopify/react-native-skia": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    },
+    "react-native": {
       "optional": true
     },
     "react-native-reanimated": {
