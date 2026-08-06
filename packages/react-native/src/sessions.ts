@@ -380,7 +380,7 @@ export function createReactNativeVideoSession(
     "worklet";
 
     const pumpSource = boxedSource.unbox();
-    const preparedFrameStore = createPreparedFrameStore();
+    let preparedFrameStore = createPreparedFrameStore();
     const startedAt = Date.now();
     const framePixels = pumpSource.frameWidth * pumpSource.frameHeight;
     const returnMasksAtOriginalResolution = framePixels <= fullResMaskMaxPixels;
@@ -524,6 +524,7 @@ export function createReactNativeVideoSession(
           preparedFrameStore.presentNow(packet);
         } finally {
           preparedFrameStoreState.value = preparedFrameStore.snapshot();
+          preparedFrameStore = createPreparedFrameStore();
         }
 
         processedFrames += 1;

@@ -10,6 +10,8 @@ export class PreparedFrameStore<TPacket extends object> {
   __workletClass = true;
   private activePacket: TPacket | null = null;
   private retiredPacket: TPacket | null = null;
+  private disposed = false;
+  private disposePromise: Promise<void> | null = null;
   private readonly releasedPackets = new WeakSet<object>();
 
   constructor(
@@ -23,11 +25,24 @@ export class PreparedFrameStore<TPacket extends object> {
     return this.activePacket;
   }
 
-  /** Captures store ownership so a paused worklet can resume safely. */
+  /**
+   * Transfers packet ownership to a fresh store, such as the next worklet
+   * invocation. The source store is sealed without disposing those packets:
+   * the returned snapshot is now their sole owner until `restore()` claims it.
+   */
   snapshot() {
     "worklet";
 
-    return { active: this.activePacket, retired: this.retiredPacket };
+    const snapshot = {
+      active: this.activePacket,
+      retired: this.retiredPacket,
+    };
+
+    this.activePacket = null;
+    this.retiredPacket = null;
+    this.disposed = true;
+
+    return snapshot;
   }
 
   /** Restores a snapshot into a newly created single-writer worklet store. */
@@ -36,6 +51,13 @@ export class PreparedFrameStore<TPacket extends object> {
     readonly retired: TPacket | null;
   }) {
     "worklet";
+
+    if (this.disposed) {
+      throw new Error("Cannot restore a disposed PreparedFrameStore.");
+    }
+    if (this.activePacket || this.retiredPacket) {
+      throw new Error("Cannot restore over owned PreparedFrameStore packets.");
+    }
 
     this.activePacket = snapshot.active;
     this.retiredPacket = snapshot.retired;
@@ -47,12 +69,22 @@ export class PreparedFrameStore<TPacket extends object> {
    * dispose packets once they pass them here.
    */
   async present(packet: TPacket) {
+    if (this.disposed) {
+      await this.release(packet);
+      return;
+    }
+
     await this.release(this.promote(packet));
   }
 
   /** Synchronous worklet variant for native render-handle disposal. */
   presentNow(packet: TPacket) {
     "worklet";
+
+    if (this.disposed) {
+      this.releaseNow(packet);
+      return;
+    }
 
     this.releaseNow(this.promote(packet));
   }
@@ -76,32 +108,46 @@ export class PreparedFrameStore<TPacket extends object> {
   }
 
   /** Idempotently releases every packet still owned by the store. */
-  async dispose() {
+  dispose() {
+    if (this.disposePromise) {
+      return this.disposePromise;
+    }
+
+    this.disposed = true;
     const activePacket = this.activePacket;
     const retiredPacket = this.retiredPacket;
 
     this.activePacket = null;
     this.retiredPacket = null;
 
-    const errors: unknown[] = [];
+    this.disposePromise = (async () => {
+      const errors: unknown[] = [];
 
-    for (const packet of [activePacket, retiredPacket]) {
-      try {
-        await this.release(packet);
-      } catch (error) {
-        errors.push(error);
+      for (const packet of [activePacket, retiredPacket]) {
+        try {
+          await this.release(packet);
+        } catch (error) {
+          errors.push(error);
+        }
       }
-    }
 
-    if (errors.length > 0) {
-      throw errors[0];
-    }
+      if (errors.length > 0) {
+        throw errors[0];
+      }
+    })();
+
+    return this.disposePromise;
   }
 
   /** Synchronously releases all packets owned by a worklet store. */
   disposeNow() {
     "worklet";
 
+    if (this.disposed) {
+      return;
+    }
+
+    this.disposed = true;
     const activePacket = this.activePacket;
     const retiredPacket = this.retiredPacket;
 
