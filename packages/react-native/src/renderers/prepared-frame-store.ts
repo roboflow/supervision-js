@@ -13,11 +13,12 @@ export class PreparedFrameStore<TPacket extends object> {
   private disposed = false;
   private disposePromise: Promise<void> | null = null;
   private readonly releasedPackets = new WeakSet<object>();
+  private readonly disposePacket: (packet: TPacket) => void | Promise<void>;
 
-  constructor(
-    private readonly disposePacket: (packet: TPacket) => void | Promise<void>,
-  ) {
+  constructor(disposePacket: (packet: TPacket) => void | Promise<void>) {
     "worklet";
+
+    this.disposePacket = disposePacket;
   }
 
   get active() {

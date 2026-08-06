@@ -202,9 +202,13 @@ editing affordances from `AnnotationOverlayStyle` until a native overlay
 renderer is introduced.
 
 The remaining mobile work is integration, not a second session abstraction:
-move the saved-video compatibility factory and the example-owned live lane onto
-the generic source/processor/renderer contracts, and add an Android saved-video
-source before claiming cross-platform file support.
+migrate the saved-video compatibility factory onto the generic
+source/processor/renderer contracts and add an Android saved-video source before
+claiming cross-platform file support. The experimental
+`./react/live-inference` entrypoint owns the live VisionCamera worklet through
+`useReactNativeLiveInference()`; applications provide model runners and
+serializable configuration, not frame callbacks. This keeps the generic
+`./react` entry usable without the optional Worklets peer.
 
 ## Compatibility Posture
 

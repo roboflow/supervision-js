@@ -20,6 +20,11 @@
       "react-native": "./src/adapters/executorch.ts",
       "import": "./dist/adapters/executorch.js"
     },
+    "./adapters/live-inference": {
+      "types": "./dist/adapters/live-inference.d.ts",
+      "react-native": "./src/adapters/live-inference.ts",
+      "import": "./dist/adapters/live-inference.js"
+    },
     "./adapters/vision-camera": {
       "types": "./dist/adapters/vision-camera.d.ts",
       "react-native": "./src/adapters/vision-camera.ts",
@@ -29,6 +34,11 @@
       "types": "./dist/adapters/video-file.d.ts",
       "react-native": "./src/adapters/video-file.ts",
       "import": "./dist/adapters/video-file.js"
+    },
+    "./worklet-debug": {
+      "types": "./dist/worklet-debug.d.ts",
+      "react-native": "./src/worklet-debug.ts",
+      "import": "./dist/worklet-debug.js"
     },
     "./media-session": {
       "types": "./dist/media-session.d.ts",
@@ -44,6 +54,11 @@
       "types": "./dist/react/index.d.ts",
       "react-native": "./src/react/index.ts",
       "import": "./dist/react.js"
+    },
+    "./react/live-inference": {
+      "types": "./dist/react/live-inference.d.ts",
+      "react-native": "./src/react/live-inference.ts",
+      "import": "./dist/react/live-inference.js"
     },
     "./skia": {
       "types": "./dist/skia.d.ts",

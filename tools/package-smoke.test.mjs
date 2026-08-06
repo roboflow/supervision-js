@@ -322,16 +322,29 @@ test("built style classes can be constructed by package consumers", async () => 
 test("built React Native subpath entries ship and resolve", async () => {
   const adapters =
     await import("../packages/react-native/dist/adapters/executorch.js");
+  const liveInference =
+    await import("../packages/react-native/dist/adapters/live-inference.js");
   const videoFile =
     await import("../packages/react-native/dist/adapters/video-file.js");
   const mediaSession =
     await import("../packages/react-native/dist/media-session.js");
+  const reactEntry = readFileSync(
+    new URL("../packages/react-native/dist/react.js", import.meta.url),
+    "utf8",
+  );
+  const liveInferenceReactEntry = new URL(
+    "../packages/react-native/dist/react/live-inference.js",
+    import.meta.url,
+  );
 
   assert.equal(typeof adapters.unrotateExecutorchUpBbox, "function");
   assert.deepEqual(Object.keys(adapters).sort(), [
     "EXECUTORCH_COCO_KEYPOINT_NAMES",
     "EXECUTORCH_COCO_SKELETON_EDGES",
     "createDetectionFrameFromExecutorchCocoPoses",
+    "createExecutorchLivePoseProcessor",
+    "createExecutorchLiveSegmentationProcessor",
+    "createExecutorchPoseKeypointInstructions",
     "createExecutorchVideoFrameSerializer",
     "unrotateExecutorchUpBbox",
   ]);
@@ -339,7 +352,13 @@ test("built React Native subpath entries ship and resolve", async () => {
     adapters.unrotateExecutorchUpBbox({ x1: 1, y1: 2, x2: 3, y2: 4 }, 10),
     { x1: 2, y1: 7, x2: 4, y2: 9 },
   );
+  assert.equal(typeof liveInference.evaluateInstantCvRules, "function");
   assert.equal(typeof mediaSession.createMediaSession, "function");
+  assert.ok(existsSync(liveInferenceReactEntry));
+  assert.ok(
+    !reactEntry.includes("react-native-worklets"),
+    "the generic React entry must not require the optional live-worklet peer",
+  );
   assert.equal(typeof videoFile.createReactNativeVideoFileSource, "function");
   assert.deepEqual(Object.keys(mediaSession).sort(), [
     "MediaSessionActivityKind",

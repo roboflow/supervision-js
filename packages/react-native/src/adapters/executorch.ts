@@ -1,8 +1,10 @@
 import {
+  KeypointMarkerShape,
   KeypointVisibility,
   resolveDetectionClassColorStyle,
   type Detection,
   type DetectionFrame,
+  type KeypointDrawInstruction,
 } from "supervision-js-core";
 import type { ReactNativeLiveSerializedDetection } from "../index";
 import type { ReactNativeVideoFrameHandle } from "../video-frame-source";
@@ -47,6 +49,133 @@ export type ExecutorchVideoFrameSerializer = (
   handle: ReactNativeVideoFrameHandle,
   returnMaskAtOriginalResolution: boolean,
 ) => ReactNativeLiveSerializedDetection[];
+
+/**
+ * Package-owned live segmentation producer. The host owns model loading and
+ * supplies only ExecuTorch's structural runner; the live session owns the
+ * frame-worklet invocation and renderer handoff.
+ */
+export interface ExecutorchLiveSegmentationProcessorOptions<
+  TRunOnFrame = unknown,
+> {
+  readonly confidenceThreshold?: number;
+  readonly maxInstances?: number;
+  readonly mirrorFrame?: boolean;
+  readonly returnMasksAtOriginalResolution?: boolean;
+  readonly runOnFrame: TRunOnFrame | null;
+}
+
+export interface ExecutorchLiveSegmentationProcessor {
+  process(frame: unknown): ReactNativeLiveSerializedDetection[];
+}
+
+/** Creates a worklet-safe segmentation processor for a live camera session. */
+export function createExecutorchLiveSegmentationProcessor<TRunOnFrame>(
+  options: ExecutorchLiveSegmentationProcessorOptions<TRunOnFrame>,
+): ExecutorchLiveSegmentationProcessor {
+  const runOnFrame =
+    options.runOnFrame as ExecutorchInstanceSegmentationRunner | null;
+  const confidenceThreshold = options.confidenceThreshold ?? 0.45;
+  const maxInstances = options.maxInstances ?? 6;
+  const mirrorFrame = options.mirrorFrame ?? false;
+  const returnMasksAtOriginalResolution =
+    options.returnMasksAtOriginalResolution ?? true;
+
+  return {
+    process(frame) {
+      "worklet";
+
+      if (runOnFrame === null) {
+        return [];
+      }
+
+      const rawDetections = runOnFrame(
+        frame as Parameters<ExecutorchInstanceSegmentationRunner>[0],
+        mirrorFrame,
+        {
+          confidenceThreshold,
+          maxInstances,
+          returnMaskAtOriginalResolution: returnMasksAtOriginalResolution,
+        },
+      );
+      const serialized: ReactNativeLiveSerializedDetection[] = [];
+
+      for (let index = 0; index < rawDetections.length; index += 1) {
+        const detection = rawDetections[index]!;
+        const label =
+          typeof detection.label === "string" ? detection.label : "";
+
+        serialized[index] = {
+          bbox: detection.bbox,
+          color: resolveDetectionClassColorStyle(label).fill,
+          label,
+          mask: detection.mask,
+          maskHeight: detection.maskHeight,
+          maskWidth: detection.maskWidth,
+          score: detection.score,
+        };
+      }
+
+      return serialized;
+    },
+  };
+}
+
+export interface ExecutorchLivePoseProcessorOptions<TRunOnFrame = unknown> {
+  readonly className?: string;
+  readonly detectionThreshold?: number;
+  readonly inputSize?: number;
+  readonly keypointThreshold?: number;
+  readonly minimumVisibleKeypoints?: number;
+  readonly runOnFrame: TRunOnFrame | null;
+}
+
+export interface ExecutorchLivePoseProcessor {
+  process(frame: { readonly timestamp: number }): DetectionFrame;
+}
+
+/** Creates a worklet-safe COCO pose processor for a live camera session. */
+export function createExecutorchLivePoseProcessor<TRunOnFrame>(
+  options: ExecutorchLivePoseProcessorOptions<TRunOnFrame>,
+): ExecutorchLivePoseProcessor {
+  const runOnFrame = options.runOnFrame as
+    | ((
+        frame: unknown,
+        mirrorFrame: boolean,
+        options: {
+          detectionThreshold: number;
+          inputSize: number;
+          keypointThreshold: number;
+        },
+      ) => readonly ExecutorchCocoPose[])
+    | null;
+  const className = options.className;
+  const detectionThreshold = options.detectionThreshold ?? 0.4;
+  const inputSize = options.inputSize ?? 384;
+  const keypointThreshold = options.keypointThreshold ?? 0.35;
+  const minimumVisibleKeypoints = options.minimumVisibleKeypoints;
+
+  return {
+    process(frame) {
+      "worklet";
+
+      const poses =
+        runOnFrame?.(frame, false, {
+          detectionThreshold,
+          inputSize,
+          keypointThreshold,
+        }) ?? [];
+
+      return createDetectionFrameFromExecutorchCocoPoses({
+        className,
+        frameIndex: Math.round(frame.timestamp),
+        mediaTime: frame.timestamp / 1_000_000_000,
+        minimumVisibleKeypoints,
+        poses,
+      });
+    },
+  };
+}
 
 /**
  * Converts the host's ExecuTorch segmentation runner into the saved-video
@@ -300,6 +429,57 @@ export function createDetectionFrameFromExecutorchCocoPoses(
     frameIndex: options.frameIndex,
     mediaTime: options.mediaTime ?? 0,
   };
+}
+
+/**
+ * Resolves pose detections into renderer-neutral keypoint draw instructions.
+ * This is worklet-safe so live producers never need to recreate Skia-oriented
+ * pose geometry in an application callback.
+ */
+export function createExecutorchPoseKeypointInstructions(
+  frame: DetectionFrame,
+): KeypointDrawInstruction[] {
+  "worklet";
+
+  const instructions: KeypointDrawInstruction[] = [];
+
+  for (
+    let detectionIndex = 0;
+    detectionIndex < frame.detections.length;
+    detectionIndex += 1
+  ) {
+    const detection = frame.detections[detectionIndex]!;
+    const geometry = detection.keypoints;
+
+    if (!geometry) {
+      continue;
+    }
+
+    const color = resolveDetectionClassColorStyle(detection.className).fill;
+    const edges = geometry.edges.map(([fromIndex, toIndex]) => ({
+      from: geometry.points[fromIndex]!,
+      stroke: { alpha: 0.98, color, width: 3 },
+      to: geometry.points[toIndex]!,
+    }));
+    const markers = geometry.points.flatMap((point, index) =>
+      geometry.visibility?.[index] === KeypointVisibility.NotLabeled
+        ? []
+        : [
+            {
+              fill: { alpha: 1, color },
+              index,
+              point,
+              radius: 5,
+              shape: KeypointMarkerShape.Circle,
+              stroke: { alpha: 1, color, width: 2 },
+            },
+          ],
+    );
+
+    instructions[instructions.length] = { edges, markers };
+  }
+
+  return instructions;
 }
 
 /**

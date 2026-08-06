@@ -3,13 +3,16 @@ import typescript from "@rollup/plugin-typescript";
 export default {
   input: {
     "adapters/executorch": "src/adapters/executorch.ts",
+    "adapters/live-inference": "src/adapters/live-inference.ts",
     "adapters/vision-camera": "src/adapters/vision-camera.ts",
     "adapters/video-file": "src/adapters/video-file.ts",
     index: "src/index.ts",
     "media-session": "src/media-session.ts",
     react: "src/react/index.ts",
+    "react/live-inference": "src/react/live-inference.ts",
     sessions: "src/sessions.ts",
     skia: "src/skia.ts",
+    "worklet-debug": "src/worklet-debug.ts",
   },
   external: [
     "@shopify/react-native-skia",

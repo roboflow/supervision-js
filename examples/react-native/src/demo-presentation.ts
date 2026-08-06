@@ -145,8 +145,6 @@ export function createDemoDetectionFrameFromLiveDetections(
 }
 
 export function resolveDemoDetectionColor(detection: Detection) {
-  "worklet";
-
   const metadataColor = detection.metadata?.color;
 
   if (typeof metadataColor === "number") {

@@ -19,11 +19,18 @@ browser package entrypoint.
 ## Rendering Direction
 
 React Native rendering uses platform adapters around a renderer-neutral session
-core. The current `./react` and `./skia` entrypoints provide a package-owned
-static `MediaSessionView`, synchronized frame packets, and Skia drawing helpers.
-Live camera frames still enter through example-owned native frame handles; the
-next reusable live adapter should implement the same source/processor/renderer
-contracts rather than introduce a second session abstraction.
+core. The `./react` entrypoint owns the static `MediaSessionView`, synchronized
+frame packets, the live/video Skia stage, live resource presentation, and
+generic interaction geometry. `./skia` remains an advanced lower-level entry
+point, but the example must not import it: hosts pass semantic presentation
+instructions and package-owned sessions to `ReactNativeLiveFrameStage` or
+`ReactNativeVideoFrameStage` instead.
+
+`useReactNativeLiveSkiaPresentation()` owns transparent sentinels, mask/vector
+swap retirement, shader lifetime, and unmount disposal. It also prepares Skia
+mask/vector packets with the native ID-mask builder when available and the JS
+fallback otherwise. This keeps disposable GPU objects and native-builder
+handles out of the product demo while retaining strict frame presentation.
 
 The package should remain non-Expo-coupled. Expo may be a consumer environment,
 but the library boundary should not require Expo APIs.
@@ -40,9 +47,10 @@ directly through Skia or a future native GPU adapter.
 Mediabunny is browser-focused and stays in `packages/web`. React Native models
 platform media through `MediaFrameSource`, `MediaFrameProcessor`, and
 `MediaRendererAdapter`. The current iOS saved-video adapter wraps the optional
-Nitro `VideoFrameSource`; live VisionCamera production remains example-owned.
-Native handles stay outside core, and Android saved-video decoding is not yet
-implemented.
+Nitro `VideoFrameSource`. The VisionCamera adapter owns the camera/device/
+permission view, frame output, native frame renderer, and orientation
+presentation. Native handles stay outside core, and Android saved-video
+decoding is not yet implemented.
 
 ## Storage Direction
 
@@ -99,28 +107,30 @@ testing. It is allowed to depend on Expo and React Native Skia, but the reusable
 
 The example app also includes a live camera proof:
 
-- VisionCamera owns native camera frames and gives the example a frame output.
-- The frame worklet imports the native camera frame as a Skia image through
-  `Frame.getNativeBuffer()` and `Skia.Image.MakeImageFromNativeBuffer()`.
-- The same frame is passed to ExecuTorch RF-DETR Nano instance segmentation.
-- ExecuTorch binary masks are converted directly into one bounded frame-level
-  ID-mask artifact in the worklet.
-- The same callback assigns the mask shader packet and then presents the
-  matching camera frame through VisionCamera's native frame renderer. React
-  receives throttled diagnostics only.
+- The package-owned VisionCamera adapter owns frame output, frame disposal, the
+  stable strict-sync callback, and native frame rendering.
+- the optional `supervision-js-react-native/react/live-inference` entry owns
+  `useReactNativeLiveInference()` and its Worklets dependency; it performs the
+  one-frame packet handoff;
+  it presents a camera frame only after the matching annotation packet is ready.
+- ExecuTorch remains an injected structural model runner. The optional
+  `adapters/executorch` factories serialize its segmentation/pose result into
+  package-owned semantic frame data.
+- React receives throttled diagnostics and semantic detections only.
 
-The reusable package now owns the live ID-mask artifact contract, artifact
-sizing helper, Roboflow-style palette helper, worklet-callable JS fallback
-builder, saved-video serializer, and pose conversion helpers. The example still
-owns the hot VisionCamera/live-inference worklet because those are producer
-choices.
+The reusable package owns the live ID-mask artifact contract, artifact sizing
+helper, Roboflow-style palette helper, worklet-callable JS fallback builder,
+saved-video serializer, pose conversion helpers, and the strict-sync
+live-inference controller. The example owns actual ExecuTorch model hooks and
+serializable configuration, not a camera worklet.
 
-The example also proves an Instant CV interaction layer without promoting a
-product-specific rule schema into the package. Touch-authored rules remain
-example state, are compiled into bounded worklet-safe packets, and are evaluated
-beside the matching live inference result. Core/package capabilities remain the
-coordinate mapping, semantic geometry, picking, styles, and prepared rendering
-lanes; recipe UI, haptics, ExecuTorch outputs, and rule semantics stay
+The example also proves a live-inference interaction extension without
+promoting its recipe UI into the primary session API. Touch-authored rules remain
+serializable example state and are mirrored into the package-owned worklet. The
+controller evaluates them beside the matching live inference result and returns
+semantic runtime/pick events. Core/package capabilities remain coordinate
+mapping, semantic geometry, picking, styles, prepared rendering, and the hot
+lane; recipe UI, haptics, ExecuTorch model ownership, and persistence stay
 example-owned until another consumer validates a reusable boundary.
 
 Golden Pose consumes the pose producer. Safety Zone and Privacy consume

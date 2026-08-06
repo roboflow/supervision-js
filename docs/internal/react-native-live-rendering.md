@@ -21,7 +21,8 @@ that a host can feed live frames and detections into one render scene.
 - An inference producer, currently example-owned ExecuTorch RF-DETR Nano
   instance segmentation.
 - A hot prepared artifact path that does not round-trip through React state:
-  segmentation masks become one frame-level ID-mask image in the frame worklet.
+  the package-owned live-inference worklet turns segmentation masks into one
+  frame-level ID-mask image.
 - A Skia scene that draws:
   media frame image -> ID-mask shader artifact -> future interaction/debug layers.
 - Throttled readouts only. React may display diagnostics, but it must not own
@@ -37,15 +38,17 @@ that a host can feed live frames and detections into one render scene.
   have a "latest mask" mode because that mode can show an artifact from an older
   frame over a newer camera frame.
 
-The current implementation uses VisionCamera's native `FrameRenderer` for the
-camera frame and a Skia canvas for mask and label presentation. In strict-sync
-mode, both are driven by the same frame callback: the worklet runs ExecuTorch,
-builds one bounded `Alpha_8` ID-mask image from model-resolution masks, updates
-Skia uniforms, then enqueues that same frame for display. Strict sync keeps the
-inference buffer in the metadata-oriented coordinate contract expected by
-ExecuTorch, then counter-rotates the native frame renderer view for
-presentation. This keeps media and annotations synchronized without changing the
-mask coordinate system. React receives throttled diagnostics only.
+The package-owned VisionCamera adapter renders the camera frame and the
+package-owned `ReactNativeLiveFrameStage` composes masks, vectors, boxes, and
+labels. In strict-sync mode, the injected inference producer builds one bounded
+`Alpha_8` ID-mask packet from model-resolution masks, hands it to
+`useReactNativeLiveSkiaPresentation()`, then enqueues that same frame for
+display. The presentation hook owns the shader, sentinel resources, one-frame
+retirement, and disposal. Strict sync keeps the inference buffer in the
+metadata-oriented coordinate contract expected by ExecuTorch, then
+counter-rotates the native frame renderer view for presentation. This keeps
+media and annotations synchronized without changing the mask coordinate system.
+React receives throttled diagnostics only.
 
 The debug HUD reports rolling p50/p90 timings instead of only the last frame:
 segmentation, serialization, mask preparation, mask fill, Skia upload, total
@@ -54,16 +57,14 @@ count. The rolling view is important because single-frame timings are noisy on
 mobile and can hide whether the bottleneck is the model, JS/worklet mask fill,
 Skia upload, or React diagnostics.
 
-The example's **Instant CV** mode reuses this same strict-sync callback for
-teach-by-touch rules. React owns infrequent authoring state, then mirrors a
-bounded semantic rule packet into a shared value. The frame worklet evaluates
-the packet against the matching segmentation or pose result, prepares the
-normal mask/vector presentation, and reports only status transitions back to
-React for rule cards and edge-triggered haptics. Touch feedback and static rule
-geometry render in the synchronized stage without making React the frame clock.
-Recipe changes also update a shared producer selector immediately, so the
-stable camera worklet switches models on its next frame without waiting for a
-React callback replacement.
+The example's **Live inference** recipes reuse this strict-sync lane for
+teach-by-touch rules. React owns infrequent serializable authoring state; the
+package mirrors it into its worklet, evaluates it against the matching
+segmentation or pose result, prepares the normal mask/vector presentation, and
+reports only status transitions back to React for rule cards and edge-triggered
+haptics. Touch feedback and static rule geometry render in the synchronized
+stage without making React the frame clock. Recipe changes update the package
+controller without replacing the VisionCamera callback.
 
 The first example-owned recipes are Golden Pose, Safety Zone, and Privacy.
 Golden Pose uses pose angles. Safety Zone uses RF-DETR segmentation, bounded
@@ -83,11 +84,13 @@ profile through ExecuTorch. ExecuTorch remains example-owned; it is a detection
 producer, not a renderer dependency.
 
 This is intentionally still a proof. The package now has a generic
-`createMediaSession()` core, but live mode does not yet use package-owned
-source/processor/renderer adapters. It also lacks native-thread prepared
-windows, a reusable live interaction/rule layer, camera recording/export, and a
-fully custom Skia/native renderer that imports and draws the camera frame
-directly.
+`createMediaSession()` core, package-owned VisionCamera presentation, a shared
+live/video stage, and a package-owned `useReactNativeLiveInference()` controller
+from the optional `react/live-inference` entrypoint, plus a live-inference
+extension for serializable recipe rules. It still lacks
+native-thread prepared windows, camera recording/export, Android saved-video
+decoding, and a fully custom Skia/native renderer that imports and draws the
+camera frame directly.
 
 ## Next Architecture Step
 
@@ -160,12 +163,13 @@ Two hard-won implementation constraints:
   `SupervisionIdMask` podspec forces `SWIFT_OPTIMIZATION_LEVEL=-O` for all
   configurations.
 
-The demo also defers Skia mask-image disposal by one packet (the UI thread may
+The package defers Skia mask-image disposal by one packet (the UI thread may
 still be drawing the previous image when the worklet swaps in a new one —
 rendering a disposed image paints the media rect black) and keeps the camera
-frame callback identity render-stable (per-render state reaches the worklet
-through shared values) so `useFrameOutput` does not re-serialize and swap the
-callback on the live camera thread on every HUD readout.
+frame callback identity render-stable. Per-render configuration reaches the
+package worklet through package-owned shared values, so `useFrameOutput` does
+not re-serialize and swap the callback on the live camera thread on every HUD
+readout.
 
 Android has no native implementation; the auto builder falls back to JS there
 with an explicit `fallbackReason`. The demo HUD shows which builder ran, the JS

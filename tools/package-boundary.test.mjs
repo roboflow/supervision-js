@@ -8,6 +8,14 @@ const rootDir = process.cwd();
 const coreSourceDir = path.join(rootDir, "packages/core/src");
 const webSourceDir = path.join(rootDir, "packages/web/src");
 const reactNativeSourceDir = path.join(rootDir, "packages/react-native/src");
+const reactNativeExampleApp = path.join(
+  rootDir,
+  "examples/react-native/App.tsx",
+);
+const reactNativeExampleSourceDir = path.join(
+  rootDir,
+  "examples/react-native/src",
+);
 
 const forbiddenPatterns = [
   {
@@ -148,6 +156,84 @@ test("React Native source stays independent from browser package code", async ()
   assert.deepEqual(failures, []);
 });
 
+test("React Native example delegates Skia presentation to the package", async () => {
+  const source = stripComments(await readFile(reactNativeExampleApp, "utf8"));
+  const forbiddenExamplePatterns = [
+    {
+      label: "React Native Skia import",
+      pattern: /from\s+["']@shopify\/react-native-skia["']/,
+    },
+    {
+      label: "package Skia subpath import",
+      pattern: /from\s+["']supervision-js-react-native\/skia["']/,
+    },
+    {
+      label: "low-level Skia frame factory",
+      pattern: /\bcreateReactNativeSkia(?:Mask|Vector)Frame\b/,
+    },
+    {
+      label: "native ID-mask builder handle",
+      pattern: /\bloadReactNativeLiveIdMaskNativeBuilder\b/,
+    },
+  ];
+  const failures = forbiddenExamplePatterns
+    .filter(({ pattern }) => pattern.test(source))
+    .map(({ label }) => `examples/react-native/App.tsx uses ${label}`);
+
+  assert.deepEqual(failures, []);
+});
+
+test("React Native example keeps frame worklets and renderer ownership in the package", async () => {
+  const files = [
+    reactNativeExampleApp,
+    ...(await listExampleSourceFiles(reactNativeExampleSourceDir)),
+  ];
+  const forbiddenExamplePatterns = [
+    {
+      label: "React Native Skia import",
+      pattern: /from\s+["']@shopify\/react-native-skia["']/,
+    },
+    {
+      label: "Reanimated import",
+      pattern: /from\s+["']react-native-reanimated["']/,
+    },
+    {
+      label: "Worklets import",
+      pattern: /from\s+["']react-native-worklets["']/,
+    },
+    {
+      label: "VisionCamera import",
+      pattern: /from\s+["']react-native-vision-camera["']/,
+    },
+    { label: "worklet directive", pattern: /["']worklet["']\s*;/ },
+    { label: "VisionCamera frame-output hook", pattern: /\buseFrameOutput\b/ },
+    {
+      label: "VisionCamera frame-renderer hook",
+      pattern: /\buseFrameRenderer\b/,
+    },
+    { label: "RN worklet scheduler", pattern: /\bscheduleOnRN\b/ },
+    { label: "Reanimated mutable factory", pattern: /\bmakeMutable\b/ },
+    {
+      label: "Skia native-buffer import",
+      pattern: /\bSkia\.Image\.MakeImageFromNativeBuffer\b/,
+    },
+    { label: "direct renderer resource disposal", pattern: /\.dispose\(\)/ },
+  ];
+  const failures = [];
+
+  for (const file of files) {
+    const source = stripComments(await readFile(file, "utf8"));
+
+    for (const { label, pattern } of forbiddenExamplePatterns) {
+      if (pattern.test(source)) {
+        failures.push(`${path.relative(rootDir, file)} uses ${label}`);
+      }
+    }
+  }
+
+  assert.deepEqual(failures, []);
+});
+
 async function listSourceFiles(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
   const files = await Promise.all(
@@ -159,6 +245,25 @@ async function listSourceFiles(directory) {
       }
 
       return entry.isFile() && entry.name.endsWith(".ts") ? [entryPath] : [];
+    }),
+  );
+
+  return files.flat();
+}
+
+async function listExampleSourceFiles(directory) {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const files = await Promise.all(
+    entries.map((entry) => {
+      const entryPath = path.join(directory, entry.name);
+
+      if (entry.isDirectory()) {
+        return listExampleSourceFiles(entryPath);
+      }
+
+      return entry.isFile() && /(?<!\.test)\.(?:ts|tsx)$/.test(entry.name)
+        ? [entryPath]
+        : [];
     }),
   );
 

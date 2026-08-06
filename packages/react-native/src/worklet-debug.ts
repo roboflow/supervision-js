@@ -10,6 +10,33 @@ export interface SerializedDebugError {
   readonly name: string;
 }
 
+export interface ReactNativeWorkletFrameDebugInfo {
+  readonly hasNativeBuffer: boolean;
+  readonly hasPixelBuffer: boolean;
+  readonly height: number;
+  readonly isPlanar: boolean;
+  readonly pixelFormat: string;
+  readonly timestamp: number;
+  readonly width: number;
+}
+
+export function createReactNativeWorkletFrameDebugArgs(
+  stage: string,
+  frame: ReactNativeWorkletFrameDebugInfo,
+) {
+  "worklet";
+  return {
+    frameHeight: frame.height,
+    framePixelFormat: frame.pixelFormat,
+    frameTimestamp: frame.timestamp,
+    frameWidth: frame.width,
+    hasNativeBuffer: frame.hasNativeBuffer,
+    hasPixelBuffer: frame.hasPixelBuffer,
+    isPlanar: frame.isPlanar,
+    stage,
+  };
+}
+
 // serializeDebugError and formatDebugPrefix are defined before the run*
 // helpers on purpose: the worklets Babel plugin turns worklet function
 // declarations into non-hoisted assignments, and module-level worklets capture
