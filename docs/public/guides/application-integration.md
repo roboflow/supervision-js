@@ -12,22 +12,9 @@ another web application.
 
 ## Installation
 
-The browser package is published as `supervision`. The first browser release is
-staged on npm's `next` tag:
-
-```sh
-npm install supervision@next
-```
-
-After that release is promoted to npm's `latest` tag, install it without the
-tag:
-
-```sh
-npm install supervision
-```
-
-There is no CDN, UMD, or `<script>` build. Before the staged release is
-available, build and install a portable archive from this public repository:
+The browser package is published as `supervision`. There is no CDN, UMD, or
+`<script>` build. Until the first browser release is available on npm's `next`
+tag, build and install a portable archive from this public repository:
 
 Build the portable archive from the `supervision-js` repository:
 
@@ -64,6 +51,19 @@ make retrieval part of the build.
 
 The archive contains the internal `supervision-js-core` package. Consumers must
 not install `supervision-js-core` separately.
+
+Once the first browser release is available on npm's `next` tag:
+
+```sh
+npm install supervision@next
+```
+
+After that release is promoted to npm's `latest` tag, install it without the
+tag:
+
+```sh
+npm install supervision
+```
 
 ## Supported Consumer
 

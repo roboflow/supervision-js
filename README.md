@@ -50,7 +50,20 @@ session.setPresentation({ boxStyle, maskStyle, labelStyle });
 
 ## Installation
 
-The first browser release is staged on npm's `next` tag:
+Until the first browser release is available on npm's `next` tag, build a
+portable release archive from a checkout and install it in a browser
+application:
+
+```sh
+# In this repository
+npm install
+npm run package:tarball
+
+# In the consuming application
+npm install ./vendor/supervision-0.1.0.tgz
+```
+
+Once the first browser release is available on npm's `next` tag:
 
 ```sh
 npm install supervision@next
@@ -61,18 +74,6 @@ tag:
 
 ```sh
 npm install supervision
-```
-
-Before the staged release is available, build a portable release archive from a
-checkout and install it in a browser application:
-
-```sh
-# In this repository
-npm install
-npm run package:tarball
-
-# In the consuming application
-npm install ./vendor/supervision-0.1.0.tgz
 ```
 
 The archive includes the internal core dependency. Consumers import only the
