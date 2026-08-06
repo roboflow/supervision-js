@@ -1,8 +1,10 @@
 import {
+  KeypointMarkerShape,
   KeypointVisibility,
   resolveDetectionClassColorStyle,
   type Detection,
   type DetectionFrame,
+  type KeypointDrawInstruction,
 } from "supervision-js-core";
 import type { ReactNativeLiveSerializedDetection } from "../index";
 import type { ReactNativeVideoFrameHandle } from "../video-frame-source";
@@ -300,6 +302,57 @@ export function createDetectionFrameFromExecutorchCocoPoses(
     frameIndex: options.frameIndex,
     mediaTime: options.mediaTime ?? 0,
   };
+}
+
+/**
+ * Resolves pose detections into renderer-neutral keypoint draw instructions.
+ * This is worklet-safe so live producers never need to recreate Skia-oriented
+ * pose geometry in an application callback.
+ */
+export function createExecutorchPoseKeypointInstructions(
+  frame: DetectionFrame,
+): KeypointDrawInstruction[] {
+  "worklet";
+
+  const instructions: KeypointDrawInstruction[] = [];
+
+  for (
+    let detectionIndex = 0;
+    detectionIndex < frame.detections.length;
+    detectionIndex += 1
+  ) {
+    const detection = frame.detections[detectionIndex]!;
+    const geometry = detection.keypoints;
+
+    if (!geometry) {
+      continue;
+    }
+
+    const color = resolveDetectionClassColorStyle(detection.className).fill;
+    const edges = geometry.edges.map(([fromIndex, toIndex]) => ({
+      from: geometry.points[fromIndex]!,
+      stroke: { alpha: 0.98, color, width: 3 },
+      to: geometry.points[toIndex]!,
+    }));
+    const markers = geometry.points.flatMap((point, index) =>
+      geometry.visibility?.[index] === KeypointVisibility.NotLabeled
+        ? []
+        : [
+            {
+              fill: { alpha: 1, color },
+              index,
+              point,
+              radius: 5,
+              shape: KeypointMarkerShape.Circle,
+              stroke: { alpha: 1, color, width: 2 },
+            },
+          ],
+    );
+
+    instructions[instructions.length] = { edges, markers };
+  }
+
+  return instructions;
 }
 
 /**

@@ -22,7 +22,6 @@ import {
 } from "react-native-executorch";
 import {
   KeypointMarkerShape,
-  type DetectionFrame,
   type DetectionPickResult,
   type KeypointDrawInstruction,
   type PolygonDrawInstruction,
@@ -82,6 +81,7 @@ import {
   serializeDebugError,
 } from "./src/debug-logging";
 import {
+  createExecutorchPoseKeypointInstructions,
   createDetectionFrameFromExecutorchCocoPoses,
   createExecutorchVideoFrameSerializer,
 } from "supervision-js-react-native/adapters/executorch";
@@ -519,52 +519,6 @@ function createLiveSyncedOverlays(options: {
     layout: options.layout,
     presentation: packet.presentation,
   });
-}
-
-function createLivePoseKeypointInstructions(
-  frame: DetectionFrame,
-): KeypointDrawInstruction[] {
-  "worklet";
-
-  const instructions: KeypointDrawInstruction[] = [];
-
-  for (
-    let detectionIndex = 0;
-    detectionIndex < frame.detections.length;
-    detectionIndex += 1
-  ) {
-    const detection = frame.detections[detectionIndex]!;
-    const geometry = detection.keypoints;
-
-    if (!geometry) {
-      continue;
-    }
-
-    const color = resolveDetectionClassColorStyle(detection.className).fill;
-    const edges = geometry.edges.map(([fromIndex, toIndex]) => ({
-      from: geometry.points[fromIndex]!,
-      stroke: { alpha: 0.98, color, width: 3 },
-      to: geometry.points[toIndex]!,
-    }));
-    const markers = geometry.points.flatMap((point, index) =>
-      geometry.visibility?.[index] === 0
-        ? []
-        : [
-            {
-              fill: { alpha: 1, color },
-              index,
-              point,
-              radius: 5,
-              shape: KeypointMarkerShape.Circle,
-              stroke: { alpha: 1, color, width: 2 },
-            },
-          ],
-    );
-
-    instructions[instructions.length] = { edges, markers };
-  }
-
-  return instructions;
 }
 
 function resolveInstantCvStatusColor(status: InstantCvRuleRuntime["status"]) {
@@ -1743,7 +1697,7 @@ function LiveCameraProof(props: {
           }
 
           const instructions =
-            createLivePoseKeypointInstructions(detectionFrame);
+            createExecutorchPoseKeypointInstructions(detectionFrame);
           const overlayDetections: LiveOverlayDetection[] = [];
 
           for (
