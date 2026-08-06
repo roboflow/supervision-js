@@ -32,9 +32,9 @@ export function useMediaSession(
     setResult({ error: null, session: null, state: null });
 
     void create().then(
-      async (created) => {
+      (created) => {
         if (!active) {
-          await created.destroy();
+          void destroySession(created, () => undefined);
           return;
         }
 
@@ -60,9 +60,20 @@ export function useMediaSession(
     return () => {
       active = false;
       unsubscribe?.();
-      void session?.destroy();
+      if (session) {
+        void destroySession(session, () => undefined);
+      }
     };
   }, dependencies);
 
   return result;
+}
+
+function destroySession(
+  session: MediaSession,
+  onError: (error: unknown) => void,
+) {
+  return session.destroy().catch((error: unknown) => {
+    onError(error);
+  });
 }

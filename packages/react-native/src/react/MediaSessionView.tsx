@@ -95,9 +95,12 @@ export interface MediaSessionViewProps {
 export function MediaSessionView(props: MediaSessionViewProps) {
   const state = getStaticBindingState(props.binding);
   const image = useImage(state.imageSource);
-  const [selectedPick, setSelectedPick] = useState<DetectionPickResult | null>(
-    null,
-  );
+  const [selection, setSelection] = useState<{
+    readonly binding: ReactNativeMediaSessionViewBinding;
+    readonly pick: DetectionPickResult | null;
+  } | null>(null);
+  const selectedPick =
+    selection?.binding === props.binding ? selection.pick : null;
   const presentation = state.packet.presentation;
   const layout = useMemo(
     () =>
@@ -199,7 +202,7 @@ export function MediaSessionView(props: MediaSessionViewProps) {
       props.pickOptions,
     );
 
-    setSelectedPick(pick);
+    setSelection({ binding: props.binding, pick });
     props.onPick?.(pick);
   };
 

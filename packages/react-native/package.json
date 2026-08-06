@@ -33,7 +33,7 @@
     "./react": {
       "types": "./dist/react/index.d.ts",
       "react-native": "./src/react/index.ts",
-      "import": "./dist/react/index.js"
+      "import": "./dist/react.js"
     },
     "./skia": {
       "types": "./dist/skia.d.ts",
