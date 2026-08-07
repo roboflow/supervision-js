@@ -50,34 +50,13 @@ session.setPresentation({ boxStyle, maskStyle, labelStyle });
 
 ## Installation
 
-Until the first browser release is available on npm's `next` tag, build a
-portable release archive from a checkout and install it in a browser
-application:
-
-```sh
-# In this repository
-npm install
-npm run package:tarball
-
-# In the consuming application
-npm install ./vendor/supervision-0.1.0.tgz
-```
-
-Once the first browser release is available on npm's `next` tag:
-
 ```sh
 npm install supervision@next
 ```
 
-After that release is promoted to npm's `latest` tag, install it without the
-tag:
-
-```sh
-npm install supervision
-```
-
-The archive includes the internal core dependency. Consumers import only the
-public browser entrypoints:
+The current browser release is published on npm's `next` tag. Its published
+package includes the private core dependency. Consumers import only the public
+browser entrypoints:
 
 ```ts
 import { createMediaSession } from "supervision";

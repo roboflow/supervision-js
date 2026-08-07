@@ -4,16 +4,21 @@ on:
   workflow_dispatch:
     inputs:
       dist_tag:
-        description: npm dist-tag for this release
+        description: Select latest for a stable release; use next only for an explicit prerelease or canary.
         required: true
-        default: next
+        default: latest
         type: choice
         options:
           - next
           - latest
+      recovery_run_id:
+        description: "Recovery only: failed Publish npm package run ID after npm upload succeeded."
+        required: false
+        type: string
 
 permissions:
-  contents: read
+  actions: read
+  contents: write
   id-token: write
 
 concurrency:
@@ -31,6 +36,51 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Resolve release source
+        id: release_source
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RECOVERY_RUN_ID: ${{ inputs.recovery_run_id }}
+        run: |
+          set -euo pipefail
+          release_sha="${GITHUB_SHA}"
+
+          if [[ -n "${RECOVERY_RUN_ID}" ]]; then
+            if ! [[ "${RECOVERY_RUN_ID}" =~ ^[0-9]+$ ]]; then
+              echo "recovery_run_id must be a GitHub Actions run ID." >&2
+              exit 1
+            fi
+
+            run="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RECOVERY_RUN_ID}")"
+            workflow_name="$(jq --raw-output '.name' <<<"${run}")"
+            event="$(jq --raw-output '.event' <<<"${run}")"
+            head_branch="$(jq --raw-output '.head_branch' <<<"${run}")"
+            conclusion="$(jq --raw-output '.conclusion' <<<"${run}")"
+            release_sha="$(jq --raw-output '.head_sha' <<<"${run}")"
+
+            if [[ "${workflow_name}" != "Publish npm package" \
+              || "${event}" != "workflow_dispatch" \
+              || "${head_branch}" != "main" \
+              || "${conclusion}" != "failure" \
+              || ! "${release_sha}" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "recovery_run_id must identify a failed Publish npm package dispatch from main." >&2
+              exit 1
+            fi
+
+            if ! git merge-base --is-ancestor "${release_sha}" origin/main; then
+              echo "Recovery run head ${release_sha} is not reachable from main." >&2
+              exit 1
+            fi
+
+            git checkout --detach "${release_sha}"
+          fi
+
+          echo "sha=$(git rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
+          echo "recovery=$([[ -n "${RECOVERY_RUN_ID}" ]] && echo true || echo false)" >> "${GITHUB_OUTPUT}"
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -53,12 +103,101 @@ jobs:
 
       - name: Publish generated tarball
         shell: bash
+        env:
+          DIST_TAG: ${{ inputs.dist_tag }}
+          RECOVERY: ${{ steps.release_source.outputs.recovery }}
         run: |
           set -euo pipefail
+          version="$(node -p "require('./packages/web/package.json').version")"
+
+          if [[ "${DIST_TAG}" == "latest" && "${version}" == *-* ]]; then
+            echo "Prerelease version ${version} must use the next tag." >&2
+            exit 1
+          fi
+
+          if [[ "${DIST_TAG}" == "next" && "${version}" != *-* ]]; then
+            echo "Stable version ${version} must use the latest tag." >&2
+            exit 1
+          fi
+
+          if published_version="$(npm view "supervision@${version}" version 2>/dev/null)"; then
+            if [[ "${published_version}" != "${version}" ]]; then
+              echo "Unexpected published version for supervision@${version}: ${published_version}" >&2
+              exit 1
+            fi
+
+            if [[ "${RECOVERY}" != "true" ]]; then
+              echo "supervision@${version} is already published. To recover its GitHub Release, dispatch this workflow from main with recovery_run_id set to the failed Publish npm package run ID." >&2
+              exit 1
+            fi
+
+            echo "supervision@${version} is already published; continuing the verified run recovery."
+            exit 0
+          fi
+
+          if [[ "${RECOVERY}" == "true" ]]; then
+            echo "Recovery run's supervision@${version} is not published; refusing to publish a recovery source." >&2
+            exit 1
+          fi
+
           shopt -s nullglob
           archives=(artifacts/supervision-*.tgz)
           if [ "${#archives[@]}" -ne 1 ]; then
             echo "Expected exactly one generated supervision tarball." >&2
             exit 1
           fi
-          npm publish "./${archives[0]}" --access public --tag "${{ inputs.dist_tag }}"
+          npm publish "./${archives[0]}" --access public --tag "${DIST_TAG}"
+
+      - name: Verify published npm dist-tag
+        shell: bash
+        env:
+          DIST_TAG: ${{ inputs.dist_tag }}
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./packages/web/package.json').version")"
+          published_version="$(npm view "supervision@${DIST_TAG}" version)"
+          test "${published_version}" = "${version}"
+
+      - name: Create or verify release tag
+        if: inputs.dist_tag == 'latest'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./packages/web/package.json').version")"
+          tag="v${version}"
+          release_sha="$(git rev-parse HEAD)"
+
+          git fetch --tags --force
+
+          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            tag_sha="$(git rev-list -n 1 "${tag}")"
+            if [[ "${tag_sha}" != "${release_sha}" ]]; then
+              echo "Existing ${tag} points to ${tag_sha}, not ${release_sha}." >&2
+              exit 1
+            fi
+
+            echo "Git tag ${tag} already points to the release commit."
+            exit 0
+          fi
+
+          git tag --annotate "${tag}" "${release_sha}" --message "supervision ${tag}"
+          git push origin "refs/tags/${tag}"
+
+      - name: Create GitHub Release
+        if: inputs.dist_tag == 'latest'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./packages/web/package.json').version")"
+          tag="v${version}"
+
+          if gh release view "${tag}" >/dev/null 2>&1; then
+            echo "GitHub Release ${tag} already exists."
+            exit 0
+          fi
+
+          gh release create "${tag}" \
+            --title "supervision ${tag}" \
+            --generate-notes

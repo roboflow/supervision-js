@@ -103,6 +103,25 @@ test("TypeDoc does not publish the private workspace version", async () => {
   assert.equal(config.includeVersion, false);
 });
 
+test("documentation toolbar mirrors the browser package manifest version", async () => {
+  const packageJson = JSON.parse(
+    await readFile(path.join(rootDir, "packages/web/package.json"), "utf8"),
+  );
+  const toolbarScript = await readFile(
+    path.join(publicDocsDir, "typedoc-icons.js"),
+    "utf8",
+  );
+  const packageName = toolbarScript.match(
+    /const packageName = "([^"]+)";/,
+  )?.[1];
+  const packageVersion = toolbarScript.match(
+    /const packageVersion = "([^"]+)";/,
+  )?.[1];
+
+  assert.equal(packageName, packageJson.name);
+  assert.equal(packageVersion, packageJson.version);
+});
+
 test("Render preview trusts only its assigned hostname", async () => {
   const packageJson = JSON.parse(
     await readFile(path.join(rootDir, "package.json"), "utf8"),
@@ -117,6 +136,7 @@ test("Render preview trusts only its assigned hostname", async () => {
 });
 
 test("copyable integration examples typecheck", async () => {
+  const homepage = await readFile(path.join(publicDocsDir, "index.md"), "utf8");
   const applicationGuide = await readFile(
     path.join(publicDocsDir, "guides/application-integration.md"),
     "utf8",
@@ -129,9 +149,12 @@ test("copyable integration examples typecheck", async () => {
     source.includes("let session: MediaSession"),
   );
   const reactExample = findCodeBlocks(reactRecipe, "tsx")[0];
+  const homepageExample = findHtmlCodeBlock(homepage, "language-ts");
 
   assert.ok(browserExample, "Missing minimal browser integration example.");
   assert.ok(reactExample, "Missing React integration example.");
+  assert.ok(homepageExample, "Missing homepage quick-start example.");
+  assertTypechecks(homepageExample, ".docs-homepage-integration.ts");
   assertTypechecks(browserExample, ".docs-browser-integration.ts");
   assertTypechecks(
     reactExample,
@@ -144,6 +167,17 @@ function findMarkdownLinks(source) {
   return [...source.matchAll(/!?\[[^\]]*]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/g)]
     .filter((match) => !match[0].startsWith("!"))
     .map((match) => match[1]);
+}
+
+function findHtmlCodeBlock(source, className) {
+  const match = source.match(
+    new RegExp(`<pre><code class="${className}">([\\s\\S]*?)<\\/code><\\/pre>`),
+  );
+
+  return match?.[1]
+    .replaceAll("&gt;", ">")
+    .replaceAll("&lt;", "<")
+    .replaceAll("&amp;", "&");
 }
 
 function findCodeBlocks(source, language) {

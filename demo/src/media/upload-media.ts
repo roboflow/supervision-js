@@ -191,7 +191,7 @@ async function encodeCanvasAsWebM(
   signal: AbortSignal | undefined,
 ) {
   throwIfAborted(signal);
-  const { BufferTarget, CanvasSource, Output, WebMOutputFormat } =
+  const { BufferTarget, CanvasSource, Output, Quality, WebMOutputFormat } =
     await import("mediabunny");
   const target = new BufferTarget();
   const output = new Output({
@@ -199,9 +199,9 @@ async function encodeCanvasAsWebM(
     target,
   });
   const source = new CanvasSource(canvas, {
-    bitrate: IMAGE_MEDIA_BITRATE,
     codec: "vp9",
     keyFrameInterval: 1,
+    quality: new Quality({ bitrate: IMAGE_MEDIA_BITRATE }),
   });
 
   output.addVideoTrack(source);

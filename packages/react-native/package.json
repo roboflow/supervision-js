@@ -89,8 +89,8 @@
   },
   "devDependencies": {
     "@shopify/react-native-skia": "^2.6.2",
-    "nitrogen": "^0.35.9",
-    "react-native-nitro-modules": "^0.35.9"
+    "nitrogen": "^0.36.5",
+    "react-native-nitro-modules": "^0.36.5"
   },
   "peerDependencies": {
     "@shopify/react-native-skia": "*",

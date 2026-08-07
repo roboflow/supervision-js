@@ -23,6 +23,27 @@ Before making project-direction or architecture changes, read:
 Those docs define the current product intent: maintain a focused, session-first
 browser API without promising a broad Python-parity annotation framework.
 
+## Public Docs Home
+
+[`../public/index.md`](../public/index.md) is the source of the public docs
+homepage. Update it in the same change when the public package name or install
+path, the session-first API, supported browser capabilities, public/private
+package boundary, or documentation entrypoints materially change.
+
+Keep it consumer-facing and current: explain the architecture enough to orient
+an integrator, but do not promote Pixi, Mediabunny, workers, prepared artifacts,
+or the private React Native experiment into public contracts. Do not edit
+generated `docs/site/` output; rebuild the docs with `npm run demo:build` and
+run `npm run docs:check` after changing the homepage.
+
+The documentation toolbar displays the browser package version from
+`docs/public/typedoc-icons.js`. Update that value with
+`packages/web/package.json` in every browser package release; `npm run
+docs:check` rejects a mismatch. Before publishing the version to npm, keep its
+toolbar label as pending; remove that label in the verified docs-only follow-up
+after the stable release. The package manifest is canonical, while the toolbar
+value is a checked presentation mirror.
+
 ## Project Direction
 
 - Keep the core library vanilla browser TypeScript/JavaScript.
