@@ -40,7 +40,12 @@ Keep this ownership and security posture in place:
    `roboflow`, repository `supervision-js`, workflow `publish-npm.yml`, and
    environment `npm-publish` for the **npm publish** action.
 3. GitHub's `npm-publish` environment requires release-owner approval.
-4. No long-lived npm write token is stored in GitHub. Publishing uses OIDC.
+4. The `npm-publish` environment holds a `RELEASE_GITHUB_TOKEN` environment
+   secret scoped only to `supervision-js`, with **Contents: write** and
+   **Workflows: write**. It is used only after verification to create the
+   stable tag and GitHub Release; do not expose it to checkout, install, build,
+   or npm-publish steps.
+5. No long-lived npm write token is stored in GitHub. Publishing uses OIDC.
 
 If publishing access breaks, compare the trusted-publisher fields with the
 workflow before changing credentials. Each npm package supports one trusted

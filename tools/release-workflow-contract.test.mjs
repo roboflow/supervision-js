@@ -25,3 +25,17 @@ test("npm publish waits for the selected dist-tag to propagate", async () => {
     /git config user\.email "41898282\+github-actions\[bot\]@users\.noreply\.github\.com"/,
   );
 });
+
+test("release tagging uses the protected workflow-capable token only at the release boundary", async () => {
+  const workflow = await readFile(workflowPath, "utf8");
+
+  assert.match(workflow, /contents: read/);
+  assert.match(
+    workflow,
+    /name: Create or verify release tag[\s\S]*?RELEASE_GITHUB_TOKEN: \$\{\{ secrets\.RELEASE_GITHUB_TOKEN \}\}[\s\S]*?git push "https:\/\/x-access-token:\$\{RELEASE_GITHUB_TOKEN\}@github\.com\/\$\{GITHUB_REPOSITORY\}\.git"/,
+  );
+  assert.match(
+    workflow,
+    /name: Create GitHub Release[\s\S]*?GH_TOKEN: \$\{\{ secrets\.RELEASE_GITHUB_TOKEN \}\}/,
+  );
+});
