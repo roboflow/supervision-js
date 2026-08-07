@@ -188,7 +188,6 @@ export function resolveVisionCameraFrameRendererStyle(options: {
   /** Dimensions after normalizing the frame to the requested output orientation. */
   readonly mediaHeight: number;
   readonly mediaWidth: number;
-  readonly orientation: string;
 }): ViewStyle {
   const scale = Math.max(
     options.canvasWidth / options.mediaWidth,
@@ -197,28 +196,13 @@ export function resolveVisionCameraFrameRendererStyle(options: {
   const renderedWidth = options.mediaWidth * scale;
   const renderedHeight = options.mediaHeight * scale;
 
-  if (options.orientation === "left" || options.orientation === "right") {
-    return {
-      // AVSampleBufferDisplayLayer is aspect-fit. Size its unrotated surface
-      // to the raw frame aspect ratio, then rotate it; this produces a true
-      // cover presentation once the parent clips the cropped edges.
-      height: renderedWidth,
-      left: (options.canvasWidth - renderedHeight) / 2,
-      position: "absolute",
-      top: (options.canvasHeight - renderedWidth) / 2,
-      transform: [
-        { rotate: options.orientation === "left" ? "90deg" : "-90deg" },
-      ],
-      width: renderedHeight,
-    };
-  }
-
+  // The camera output already carries its configured orientation. Rotating
+  // here a second time inverted some iOS front-camera frames.
   return {
     height: renderedHeight,
     left: (options.canvasWidth - renderedWidth) / 2,
     position: "absolute",
     top: (options.canvasHeight - renderedHeight) / 2,
-    transform: options.orientation === "down" ? [{ rotate: "180deg" }] : [],
     width: renderedWidth,
   };
 }

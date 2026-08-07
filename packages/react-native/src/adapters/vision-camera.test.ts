@@ -141,29 +141,18 @@ describe("VisionCamera orientation", () => {
     ).toEqual(expected);
   });
 
-  it("uses the matching native renderer transform", () => {
+  it("sizes the native renderer to cover without a second orientation transform", () => {
     expect(
       resolveVisionCameraFrameRendererStyle({
         canvasHeight: 800,
         canvasWidth: 400,
         mediaHeight: 1280,
         mediaWidth: 720,
-        orientation: "left",
       }),
     ).toMatchObject({
-      height: 450,
-      transform: [{ rotate: "90deg" }],
-      width: 800,
+      height: 800,
+      width: 450,
     });
-    expect(
-      resolveVisionCameraFrameRendererStyle({
-        canvasHeight: 800,
-        canvasWidth: 400,
-        mediaHeight: 1280,
-        mediaWidth: 720,
-        orientation: "down",
-      }),
-    ).toMatchObject({ transform: [{ rotate: "180deg" }] });
   });
 });
 
