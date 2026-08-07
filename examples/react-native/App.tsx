@@ -87,7 +87,7 @@ import {
   type InstantCvZoneShape,
 } from "supervision-js-react-native/adapters/live-inference";
 
-type DemoMode = "static" | "live" | "video" | "instant";
+type DemoMode = "home" | "static" | "live" | "video" | "instant";
 type LiveInferenceMode = "segmentation" | "pose";
 type LiveDetectionDisplayMode = "masks" | "boxes";
 type LiveClassEffect = "redact" | "spotlight";
@@ -145,22 +145,50 @@ type LiveSegmentation = ReturnType<typeof useLiveSegmentation>;
 type LivePose = ReturnType<typeof useLivePose>;
 
 export default function App() {
-  const [mode, setMode] = useState<DemoMode>("static");
+  const [mode, setMode] = useState<DemoMode>("home");
   const [liveInferenceMode, setLiveInferenceMode] =
     useState<LiveInferenceMode>("segmentation");
+  const [instantRecipe, setInstantRecipe] =
+    useState<InstantCvRecipe>("golden-pose");
   // Preload both models when the app mounts and retain them for the app
   // session. Besides removing mode-switch waits, this keeps captured camera
   // worklets backed by a live native model.
   const segmentation = useLiveSegmentation();
   const pose = useLivePose();
+  const selectMode = useCallback(
+    (nextMode: DemoMode) => {
+      if (nextMode === "instant") {
+        setLiveInferenceMode(resolveInstantCvInferenceMode(instantRecipe));
+      }
+
+      setMode(nextMode);
+    },
+    [instantRecipe],
+  );
+  const openInstantRecipe = useCallback((recipe: InstantCvRecipe) => {
+    setInstantRecipe(recipe);
+    setLiveInferenceMode(resolveInstantCvInferenceMode(recipe));
+    setMode("instant");
+  }, []);
+
+  if (mode === "home") {
+    return (
+      <InstantCvHome
+        onModeChange={selectMode}
+        onOpenRecipe={openInstantRecipe}
+      />
+    );
+  }
 
   if (mode === "live" || mode === "instant") {
     return (
       <LiveCameraProof
         inferenceMode={liveInferenceMode}
+        instantRecipe={instantRecipe}
         mode={mode}
         onInferenceModeChange={setLiveInferenceMode}
-        onModeChange={setMode}
+        onInstantRecipeChange={setInstantRecipe}
+        onModeChange={selectMode}
         pose={pose}
         segmentation={segmentation}
       />
@@ -171,13 +199,79 @@ export default function App() {
     return (
       <VideoFileProof
         mode={mode}
-        onModeChange={setMode}
+        onModeChange={selectMode}
         segmentation={segmentation}
       />
     );
   }
 
-  return <StaticFrameProof mode={mode} onModeChange={setMode} />;
+  return <StaticFrameProof mode={mode} onModeChange={selectMode} />;
+}
+
+function InstantCvHome(props: {
+  readonly onModeChange: (mode: DemoMode) => void;
+  readonly onOpenRecipe: (recipe: InstantCvRecipe) => void;
+}) {
+  const window = useWindowDimensions();
+  const compact = window.width < 560;
+
+  return (
+    <SafeAreaView style={styles.safeArea}>
+      <StatusBar style="dark" />
+      <View style={styles.homeScreen}>
+        <View style={styles.homeHeader}>
+          <View style={styles.brand}>
+            <BrandMark />
+            <View style={styles.headerCopy}>
+              <Text style={styles.title}>supervision-js</Text>
+              <Text style={styles.subtitle}>React Native demo</Text>
+            </View>
+          </View>
+          <ModeSwitch mode="home" onModeChange={props.onModeChange} />
+        </View>
+
+        <View style={styles.homeHero}>
+          <Text style={styles.homeEyebrow}>INSTANT CV</Text>
+          <Text style={styles.homeTitle}>Teach a live camera by touch.</Text>
+          <Text style={styles.homeDescription}>
+            Start with a small recipe, then make it yours on a real camera
+            frame. No configuration screen required.
+          </Text>
+        </View>
+
+        <View
+          style={[
+            styles.homeRecipeGrid,
+            compact ? styles.homeRecipeGridCompact : null,
+          ]}
+        >
+          {INSTANT_CV_RECIPE_OPTIONS.map((option, index) => (
+            <TouchableOpacity
+              key={option.recipe}
+              onPress={() => props.onOpenRecipe(option.recipe)}
+              style={styles.homeRecipeCard}
+            >
+              <View style={styles.homeRecipeNumber}>
+                <Text style={styles.homeRecipeNumberText}>
+                  {String(index + 1).padStart(2, "0")}
+                </Text>
+              </View>
+              <Text style={styles.homeRecipeTitle}>{option.label}</Text>
+              <Text style={styles.homeRecipeDescription}>
+                {option.description}
+              </Text>
+              <Text style={styles.homeRecipeAction}>Try it →</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        <Text style={styles.homeFootnote}>
+          Camera inference stays inside the React Native package; this screen is
+          only a consumer of its recipes.
+        </Text>
+      </View>
+    </SafeAreaView>
+  );
 }
 
 function StaticFrameProof(props: {
@@ -473,12 +567,25 @@ function InstantCvCanvasOverlay(props: {
 }
 
 const INSTANT_CV_RECIPE_OPTIONS: readonly {
+  readonly description: string;
   readonly label: string;
   readonly recipe: InstantCvRecipe;
 }[] = [
-  { label: "Golden Pose", recipe: "golden-pose" },
-  { label: "Safety Zone", recipe: "safety-zone" },
-  { label: "Privacy", recipe: "privacy" },
+  {
+    description: "Hold a person still to teach a reference pose.",
+    label: "Golden Pose",
+    recipe: "golden-pose",
+  },
+  {
+    description: "Draw a keep-out zone, then choose which classes belong out.",
+    label: "Safety Zone",
+    recipe: "safety-zone",
+  },
+  {
+    description: "Tap an object to pixelate every detection of that class.",
+    label: "Privacy",
+    recipe: "privacy",
+  },
 ];
 
 function InstantCvHud(props: {
@@ -673,8 +780,10 @@ function InstantCvHud(props: {
 
 function LiveCameraProof(props: {
   readonly inferenceMode: LiveInferenceMode;
+  readonly instantRecipe: InstantCvRecipe;
   readonly mode: DemoMode;
   readonly onInferenceModeChange: (mode: LiveInferenceMode) => void;
+  readonly onInstantRecipeChange: (recipe: InstantCvRecipe) => void;
   readonly onModeChange: (mode: DemoMode) => void;
   readonly pose: LivePose;
   readonly segmentation: LiveSegmentation;
@@ -698,8 +807,7 @@ function LiveCameraProof(props: {
     useState<LiveDetectionDisplayMode>("masks");
   const [classEffects, setClassEffects] = useState<LiveClassEffects>({});
   const [tapMenuLabel, setTapMenuLabel] = useState<string | null>(null);
-  const [instantRecipe, setInstantRecipe] =
-    useState<InstantCvRecipe>("golden-pose");
+  const instantRecipe = props.instantRecipe;
   const [instantZoneShape, setInstantZoneShape] =
     useState<InstantCvZoneShape>("rectangle");
   const [instantRules, setInstantRules] = useState<readonly InstantCvRule[]>(
@@ -947,7 +1055,7 @@ function LiveCameraProof(props: {
 
       props.onInferenceModeChange(inferenceMode);
       setAwaitingSyncedFrame(true);
-      setInstantRecipe(recipe);
+      props.onInstantRecipeChange(recipe);
       setInstantRules([]);
       setInstantRuntime([]);
       instantRuntimeRef.current = [];
@@ -965,7 +1073,7 @@ function LiveCameraProof(props: {
       );
       Vibration.vibrate(16);
     },
-    [props.onInferenceModeChange],
+    [props.onInferenceModeChange, props.onInstantRecipeChange],
   );
   const clearInstantRules = useCallback(() => {
     setInstantRules([]);
@@ -2268,76 +2376,66 @@ function ClassEffectMenu(props: {
   );
 }
 
+const DEMO_MODE_OPTIONS: readonly {
+  readonly label: string;
+  readonly mode: DemoMode;
+}[] = [
+  { label: "Explore", mode: "home" },
+  { label: "Static", mode: "static" },
+  { label: "Live", mode: "live" },
+  { label: "Video", mode: "video" },
+  { label: "Instant CV", mode: "instant" },
+];
+
 function ModeSwitch(props: {
   readonly mode: DemoMode;
   readonly onModeChange: (mode: DemoMode) => void;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const active =
+    DEMO_MODE_OPTIONS.find((option) => option.mode === props.mode) ??
+    DEMO_MODE_OPTIONS[0]!;
+
   return (
-    <View style={styles.modeSwitch}>
+    <View style={styles.modeMenu}>
       <TouchableOpacity
-        onPress={() => props.onModeChange("static")}
-        style={[
-          styles.modeButton,
-          props.mode === "static" ? styles.modeButtonActive : null,
-        ]}
+        accessibilityLabel="Choose demo mode"
+        onPress={() => setExpanded((current) => !current)}
+        style={styles.modeSwitch}
       >
-        <Text
-          style={[
-            styles.modeButtonText,
-            props.mode === "static" ? styles.modeButtonTextActive : null,
-          ]}
-        >
-          Static
-        </Text>
+        <Text style={styles.modeSwitchValue}>{active.label}</Text>
+        <Text style={styles.modeSwitchChevron}>{expanded ? "⌃" : "⌄"}</Text>
       </TouchableOpacity>
-      <TouchableOpacity
-        onPress={() => props.onModeChange("live")}
-        style={[
-          styles.modeButton,
-          props.mode === "live" ? styles.modeButtonActive : null,
-        ]}
-      >
-        <Text
-          style={[
-            styles.modeButtonText,
-            props.mode === "live" ? styles.modeButtonTextActive : null,
-          ]}
-        >
-          Live
-        </Text>
-      </TouchableOpacity>
-      <TouchableOpacity
-        onPress={() => props.onModeChange("video")}
-        style={[
-          styles.modeButton,
-          props.mode === "video" ? styles.modeButtonActive : null,
-        ]}
-      >
-        <Text
-          style={[
-            styles.modeButtonText,
-            props.mode === "video" ? styles.modeButtonTextActive : null,
-          ]}
-        >
-          Video
-        </Text>
-      </TouchableOpacity>
-      <TouchableOpacity
-        onPress={() => props.onModeChange("instant")}
-        style={[
-          styles.modeButton,
-          props.mode === "instant" ? styles.modeButtonActive : null,
-        ]}
-      >
-        <Text
-          style={[
-            styles.modeButtonText,
-            props.mode === "instant" ? styles.modeButtonTextActive : null,
-          ]}
-        >
-          Instant CV
-        </Text>
-      </TouchableOpacity>
+      {expanded ? (
+        <View style={styles.modeMenuOptions}>
+          {DEMO_MODE_OPTIONS.map((option) => {
+            const selected = option.mode === props.mode;
+
+            return (
+              <TouchableOpacity
+                key={option.mode}
+                onPress={() => {
+                  setExpanded(false);
+                  props.onModeChange(option.mode);
+                }}
+                style={[
+                  styles.modeButton,
+                  selected ? styles.modeButtonActive : null,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.modeButtonText,
+                    selected ? styles.modeButtonTextActive : null,
+                  ]}
+                >
+                  {option.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -2669,6 +2767,95 @@ const styles = StyleSheet.create({
   headerCopy: {
     gap: 1,
   },
+  homeDescription: {
+    color: DEMO_COLORS.mutedStrong,
+    fontSize: 14,
+    fontWeight: "600",
+    lineHeight: 21,
+    maxWidth: 560,
+  },
+  homeEyebrow: {
+    color: DEMO_COLORS.primary,
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 1.8,
+  },
+  homeFootnote: {
+    color: DEMO_COLORS.muted,
+    fontSize: 11,
+    fontWeight: "600",
+    lineHeight: 17,
+    maxWidth: 640,
+  },
+  homeHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  homeHero: {
+    gap: 10,
+    marginTop: 24,
+  },
+  homeRecipeAction: {
+    color: DEMO_COLORS.primary,
+    fontSize: 12,
+    fontWeight: "900",
+    marginTop: "auto",
+  },
+  homeRecipeCard: {
+    backgroundColor: DEMO_COLORS.surface,
+    borderColor: DEMO_COLORS.border,
+    borderRadius: 18,
+    borderWidth: 1,
+    flex: 1,
+    gap: 8,
+    minHeight: 178,
+    padding: 16,
+  },
+  homeRecipeDescription: {
+    color: DEMO_COLORS.mutedStrong,
+    fontSize: 12,
+    fontWeight: "600",
+    lineHeight: 17,
+  },
+  homeRecipeGrid: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 28,
+  },
+  homeRecipeGridCompact: {
+    flexDirection: "column",
+  },
+  homeRecipeNumber: {
+    alignItems: "center",
+    backgroundColor: DEMO_COLORS.primarySoft,
+    borderRadius: 999,
+    height: 30,
+    justifyContent: "center",
+    width: 30,
+  },
+  homeRecipeNumberText: {
+    color: DEMO_COLORS.primary,
+    fontSize: 10,
+    fontWeight: "900",
+  },
+  homeRecipeTitle: {
+    color: DEMO_COLORS.text,
+    fontSize: 18,
+    fontWeight: "900",
+  },
+  homeScreen: {
+    backgroundColor: DEMO_COLORS.canvas,
+    flex: 1,
+    padding: 18,
+  },
+  homeTitle: {
+    color: DEMO_COLORS.text,
+    fontSize: 32,
+    fontWeight: "900",
+    letterSpacing: -0.8,
+    maxWidth: 620,
+  },
   mark: {
     backgroundColor: DEMO_COLORS.primarySoft,
     borderColor: DEMO_COLORS.borderStrong,
@@ -2928,7 +3115,7 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
   instantSafetyClassesCount: {
-    color: "#ffd9df",
+    color: "#be123c",
     fontSize: 11,
     fontVariant: ["tabular-nums"],
     fontWeight: "900",
@@ -2939,15 +3126,15 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   instantSafetyClassChip: {
-    backgroundColor: "rgba(255, 93, 115, 0.18)",
-    borderColor: "rgba(255, 93, 115, 0.5)",
+    backgroundColor: "#fff1f2",
+    borderColor: "#fda4af",
     borderRadius: 999,
     borderWidth: 1,
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
   instantSafetyClassChipText: {
-    color: "#ffd9df",
+    color: "#9f1239",
     fontSize: 11,
     fontWeight: "900",
   },
@@ -3126,30 +3313,62 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   modeButton: {
-    borderRadius: 999,
-    paddingHorizontal: 7,
-    paddingVertical: 6,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
   },
   modeButtonActive: {
     backgroundColor: DEMO_COLORS.primary,
   },
   modeButtonText: {
     color: DEMO_COLORS.mutedStrong,
-    fontSize: 9,
+    fontSize: 11,
     fontWeight: "900",
   },
   modeButtonTextActive: {
     color: "#ffffff",
   },
+  modeMenu: {
+    alignSelf: "flex-start",
+    position: "relative",
+    zIndex: 20,
+  },
+  modeMenuOptions: {
+    backgroundColor: "rgba(255, 255, 255, 0.98)",
+    borderColor: DEMO_COLORS.borderStrong,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 2,
+    padding: 4,
+    position: "absolute",
+    right: 0,
+    shadowColor: "#312e81",
+    shadowOpacity: 0.14,
+    shadowRadius: 16,
+    top: 42,
+    width: 116,
+    zIndex: 20,
+  },
   modeSwitch: {
     alignItems: "center",
-    backgroundColor: DEMO_COLORS.primarySoft,
+    backgroundColor: "rgba(255, 255, 255, 0.96)",
     borderColor: DEMO_COLORS.border,
     borderRadius: 999,
     borderWidth: 1,
     flexDirection: "row",
-    gap: 2,
-    padding: 3,
+    gap: 6,
+    paddingHorizontal: 11,
+    paddingVertical: 8,
+  },
+  modeSwitchChevron: {
+    color: DEMO_COLORS.primary,
+    fontSize: 14,
+    fontWeight: "900",
+  },
+  modeSwitchValue: {
+    color: DEMO_COLORS.primaryPressed,
+    fontSize: 11,
+    fontWeight: "900",
   },
   safeArea: {
     backgroundColor: DEMO_COLORS.canvas,
