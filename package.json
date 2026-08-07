@@ -95,7 +95,7 @@
     "fixture:geometry:create": "npm run build -w supervision-js-core && node tools/geometry-fixture/create-geometry-fixture.mjs",
     "typecheck": "npm run typecheck -w supervision-js-core && npm run build -w supervision-js-core && npm run typecheck -w supervision-js-react-native && npm run build -w supervision-js-react-native && npm run typecheck -w supervision && npm run build -w supervision && tsc --noEmit -p demo/tsconfig.json && tsc --noEmit -p examples/vanilla/tsconfig.json && npm run example:react-native:typecheck",
     "boundary:check": "node --test tools/package-boundary.test.mjs",
-    "test": "vitest run && npm run boundary:check && npm run docs:check && node --test tools/react-runtime-contract.test.mjs tools/sam3-fixture/*.test.mjs tools/geometry-fixture/*.test.mjs",
+    "test": "vitest run && npm run boundary:check && npm run docs:check && node --test tools/react-runtime-contract.test.mjs tools/release-workflow-contract.test.mjs tools/sam3-fixture/*.test.mjs tools/geometry-fixture/*.test.mjs",
     "package:smoke": "node --test tools/package-smoke.test.mjs",
     "package:tarball": "node tools/pack-web-tarball.mjs",
     "package:tarball:smoke": "node --test tools/tarball-smoke.test.mjs",
