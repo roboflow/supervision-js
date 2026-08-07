@@ -32,6 +32,10 @@ test("release tagging uses the protected workflow-capable token only at the rele
   assert.match(workflow, /contents: read/);
   assert.match(
     workflow,
+    /name: Check out repository[\s\S]*?fetch-depth: 0[\s\S]*?persist-credentials: false/,
+  );
+  assert.match(
+    workflow,
     /name: Create or verify release tag[\s\S]*?RELEASE_GITHUB_TOKEN: \$\{\{ secrets\.RELEASE_GITHUB_TOKEN \}\}[\s\S]*?git push "https:\/\/x-access-token:\$\{RELEASE_GITHUB_TOKEN\}@github\.com\/\$\{GITHUB_REPOSITORY\}\.git"/,
   );
   assert.match(

@@ -44,7 +44,9 @@ Keep this ownership and security posture in place:
    secret scoped only to `supervision-js`, with **Contents: write** and
    **Workflows: write**. It is used only after verification to create the
    stable tag and GitHub Release; do not expose it to checkout, install, build,
-   or npm-publish steps.
+   or npm-publish steps. Checkout must use `persist-credentials: false` so its
+   short-lived `GITHUB_TOKEN` cannot override the dedicated token during the
+   tag push.
 5. No long-lived npm write token is stored in GitHub. Publishing uses OIDC.
 
 If publishing access breaks, compare the trusted-publisher fields with the
