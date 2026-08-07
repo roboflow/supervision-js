@@ -35,8 +35,8 @@
     <div class="supervision-home__playground-frame">
       <iframe
         allow="autoplay"
+        data-supervision-playground-src="../?embed=docs-playground"
         loading="lazy"
-        src="../?embed=docs-playground"
         title="Interactive basketball detection playground"
       ></iframe>
     </div>
