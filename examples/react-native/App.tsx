@@ -1425,6 +1425,10 @@ function LiveCameraProof(props: {
   const segmentationProcessor = useMemo(
     () =>
       createExecutorchLiveSegmentationProcessor({
+        // useVisionCameraFrameOutput physically rotates this buffer. Normalize
+        // ExecuTorch's camera-centric `orientation: "up"` result back into
+        // that same upright pixel space before the renderer sees it.
+        framePixelsAreUpright: true,
         maxInstances: LIVE_MAX_INSTANCES,
         returnMasksAtOriginalResolution:
           LIVE_RETURN_MASKS_AT_ORIGINAL_RESOLUTION,
@@ -1435,10 +1439,14 @@ function LiveCameraProof(props: {
   const poseProcessor = useMemo(
     () =>
       createExecutorchLivePoseProcessor({
-        mirrorFrame: cameraPosition === "front",
+        // The output buffer has already been physically oriented by the
+        // VisionCamera adapter; supplying a second front-camera mirror would
+        // make pose geometry diverge from the rendered pixels.
+        framePixelsAreUpright: true,
+        mirrorFrame: false,
         runOnFrame: stablePoseRunner,
       }),
-    [cameraPosition, stablePoseRunner],
+    [stablePoseRunner],
   );
   const liveExtension = useMemo(
     () => ({

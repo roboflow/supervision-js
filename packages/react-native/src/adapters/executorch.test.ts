@@ -242,6 +242,46 @@ describe("live ExecuTorch processors", () => {
     ]);
   });
 
+  it("restores physically upright camera predictions after ExecuTorch's up mapping", () => {
+    const original = { x1: 10, y1: 30, x2: 40, y2: 80 };
+    const getNativeBuffer = vi.fn(() => ({ pointer: 42n, release: vi.fn() }));
+    const processor = createExecutorchLiveSegmentationProcessor({
+      framePixelsAreUpright: true,
+      runOnFrame: (frame: {
+        getNativeBuffer(): { pointer: bigint; release(): void };
+        isMirrored: boolean;
+        orientation: string;
+      }) => {
+        expect(frame.orientation).toBe("up");
+        expect(frame.isMirrored).toBe(false);
+        expect(frame.getNativeBuffer().pointer).toBe(42n);
+        return [
+          {
+            bbox: executorchUpForwardMapping(original, 100),
+            label: "person",
+            mask: new Uint8Array([1, 2, 3, 4, 5, 6]),
+            maskHeight: 2,
+            maskWidth: 3,
+          },
+        ];
+      },
+    });
+
+    expect(
+      processor.process({
+        getNativeBuffer,
+        height: 100,
+        orientation: "left",
+        width: 50,
+      }),
+    ).toMatchObject([
+      {
+        bbox: original,
+        maskRotatedCw: true,
+      },
+    ]);
+  });
+
   it("normalizes live pose output into a core detection frame", () => {
     const runOnFrame = vi.fn(() => [
       {
@@ -280,5 +320,39 @@ describe("live ExecuTorch processors", () => {
       frameIndex: 2_000_000_000,
       mediaTime: 2,
     });
+  });
+
+  it("restores pose points after ExecuTorch's upright-frame output mapping", () => {
+    const processor = createExecutorchLivePoseProcessor({
+      framePixelsAreUpright: true,
+      runOnFrame: (
+        frame: { readonly orientation: string },
+        mirrorFrame: boolean,
+      ) => {
+        expect(frame.orientation).toBe("up");
+        expect(mirrorFrame).toBe(false);
+        return [
+          {
+            LEFT_SHOULDER: { x: 80, y: 10 },
+            LEFT_HIP: { x: 50, y: 12 },
+            RIGHT_SHOULDER: { x: 80, y: 30 },
+          },
+        ];
+      },
+    });
+
+    const frame = processor.process({
+      getNativeBuffer: () => ({ pointer: 42n, release: () => {} }),
+      height: 100,
+      orientation: "left",
+      timestamp: 2_000_000_000,
+      width: 50,
+    });
+
+    const points = frame.detections[0]!.keypoints?.points;
+
+    expect(points?.[5]).toEqual({ x: 10, y: 20 });
+    expect(points?.[6]).toEqual({ x: 30, y: 20 });
+    expect(points?.[11]).toEqual({ x: 12, y: 50 });
   });
 });
