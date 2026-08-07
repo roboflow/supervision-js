@@ -1,16 +1,16 @@
-# Render Deployment
+# Render Preview Deployment
 
-The public demo and documentation are served by the existing Render web service:
+GitHub Pages is the public static deployment for this repository. The existing
+Render web service is reserved for explicitly requested pull request previews:
 
 - service: `supervision-js-demo`
 - resource ID: `srv-d8felq6gvqtc7398i2ng`
-- URL: <https://supervision-js-demo.onrender.com>
-- docs: <https://supervision-js-demo.onrender.com/>
-- demo: <https://supervision-js-demo.onrender.com/demo/>
+- base service URL: <https://supervision-js-demo.onrender.com>
+- repository: <https://github.com/roboflow/supervision-js>
+- branch: `main`
 
-Render deploys the canonical repository directly:
-`https://github.com/roboflow/supervision-js` on `main`. Do not introduce a
-deployment mirror; the canonical repository is the only source of truth.
+The canonical repository is the only source of truth. Do not introduce or push
+to a deployment mirror.
 
 ## Service Configuration
 
@@ -21,67 +21,48 @@ Branch: main
 Runtime: Node
 Build command: npm ci && npm run pages:build
 Start command: npm run pages:serve
-Auto-deploy: On commit
+Auto-deploy: Off
+Pull request previews: Manual
 ```
 
-`npm run pages:build` creates one static artifact in `dist/pages`:
+`Auto-deploy: Off` is intentional: merging to `main` must not deploy the
+Render base service. Leave it disabled when reconciling service settings.
 
-- `/` contains the TypeDoc site and its interactive playground;
+With pull request previews set to `Manual`, applying the `render-preview`
+label to a PR creates a separate temporary Render instance for that PR. Render
+adds the preview as a GitHub deployment with its own `onrender.com` URL. It
+updates that preview when the PR receives new commits and removes it when the
+PR is merged or closed.
+
+`npm run pages:build` produces the static artifact used by both GitHub Pages
+and a requested Render preview:
+
+- `/` contains the TypeDoc site and interactive playground;
 - `/demo/` contains the fixture demo workbench;
 - `/examples/vanilla/` contains the vanilla integration example.
 
-`npm run pages:serve` serves that same artifact on Render's `PORT`. This keeps
-the Render and GitHub Pages output identical and avoids maintaining a second
-production server or image delivery path.
+The static applications use relative asset URLs, so the same artifact works at
+the root of a Render preview or under GitHub Pages' project URL.
 
-The static applications emit relative asset URLs, so this layout remains valid
-when served at Render's domain root or from a GitHub Pages project URL before a
-custom domain is attached.
+## Request a Preview
 
-The start command passes Render's exact `RENDER_EXTERNAL_HOSTNAME` to Vite's
-additional-host allowlist. This supports branch preview services without
-trusting arbitrary hosts; local runs fall back to the canonical production
-hostname.
+1. Open or update a PR against `main`.
+2. Add the `render-preview` label.
+3. Wait for Render to add the GitHub deployment, then open its preview URL.
 
-## Update With The Render CLI
+Remove the label to deprovision a preview that is no longer needed. Do not use
+the base service's manual deploy controls for PR validation: they deploy the
+shared base service rather than an isolated PR preview.
 
-After authenticating with `render login`, the existing service can be
-reconciled without creating a replacement resource:
+## Verify a Preview
 
-```sh
-render services update srv-d8felq6gvqtc7398i2ng \
-  --repo https://github.com/roboflow/supervision-js \
-  --branch main \
-  --runtime node \
-  --build-command "npm ci && npm run pages:build" \
-  --start-command "npm run pages:serve" \
-  --auto-deploy \
-  --confirm \
-  --output json
-```
-
-Then trigger a deploy if the configuration update does not start one:
+After Render reports the preview as live, check its GitHub deployment URL:
 
 ```sh
-render deploys create srv-d8felq6gvqtc7398i2ng --confirm
+curl --fail --location "<render-preview-url>/"
+curl --fail --location "<render-preview-url>/demo/"
+curl --fail --location "<render-preview-url>/examples/vanilla/"
 ```
 
-## Verify
-
-Check the deployed routes after Render reports the deploy as live:
-
-```sh
-curl --fail --location https://supervision-js-demo.onrender.com/
-curl --fail --location https://supervision-js-demo.onrender.com/demo/
-curl --fail --location \
-  https://supervision-js-demo.onrender.com/documents/Application_Integration.html
-curl --fail --location \
-  https://supervision-js-demo.onrender.com/modules/Editing.html
-curl --fail --location \
-  https://supervision-js-demo.onrender.com/examples/vanilla/
-```
-
-The Application Integration page must install the browser package with
-`npm install supervision`. The Editing module must appear in the generated API
-reference. Verify that the live Render deploy's commit matches canonical
-`main`.
+The root must show the docs homepage, the demo route must load the fixture
+workbench, and the vanilla route must load the integration example.
