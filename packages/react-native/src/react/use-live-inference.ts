@@ -284,7 +284,10 @@ function prepareLiveInferenceMask(options: {
         detections: masks,
         edgeSmoothing:
           options.showMasks || spotlightMaskIds.length > 0 ? undefined : 0,
-        fillOpacity: privacyPreview ? 0 : options.fillOpacity,
+        // Privacy's unconfigured preview is an active segmentation state, not
+        // a wireframe affordance. Keep the same readable mask fill as Safety
+        // Zone so people can see exactly what a later redaction will cover.
+        fillOpacity: options.fillOpacity,
         frameHeight: options.frameHeight,
         frameWidth: options.frameWidth,
         mediaRect: options.mediaRect,

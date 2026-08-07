@@ -154,6 +154,10 @@ export function createExecutorchLivePoseProcessor<TRunOnFrame>(
   const inputSize = options.inputSize ?? 384;
   const keypointThreshold = options.keypointThreshold ?? 0.35;
   const minimumVisibleKeypoints = options.minimumVisibleKeypoints;
+  // Capture the initialized worklet function here. Referencing the module
+  // binding from the nested frame worklet can capture `undefined` because the
+  // worklets Babel transform lowers declarations to assignments.
+  const createDetectionFrame = createDetectionFrameFromExecutorchCocoPoses;
 
   return {
     process(frame) {
@@ -166,7 +170,7 @@ export function createExecutorchLivePoseProcessor<TRunOnFrame>(
           keypointThreshold,
         }) ?? [];
 
-      return createDetectionFrameFromExecutorchCocoPoses({
+      return createDetectionFrame({
         className,
         frameIndex: Math.round(frame.timestamp),
         mediaTime: frame.timestamp / 1_000_000_000,
