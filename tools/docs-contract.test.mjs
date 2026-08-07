@@ -195,11 +195,11 @@ test("deployed site presents docs at the root and the workbench at /demo/", asyn
   assert.match(pagesBuild, /const demoBasePath = "\/demo\/";/);
   assert.match(
     pagesBuild,
-    /resolve\(projectRoot, "docs\/site"\),\n    pagesDirectory/,
+    /resolve\(projectRoot, "docs\/site"\),\n {4}pagesDirectory/,
   );
   assert.match(
     pagesBuild,
-    /resolve\(projectRoot, "demo\/dist"\),\n    join\(pagesDirectory, "demo"\)/,
+    /resolve\(projectRoot, "demo\/dist"\),\n {4}join\(pagesDirectory, "demo"\)/,
   );
   assert.match(pagesBuild, /"demo\/index\.html"/);
   assert.doesNotMatch(pagesBuild, /"docs\/index\.html"/);
