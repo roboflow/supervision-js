@@ -42,6 +42,7 @@ export function DemoShell({
             />
           </div>
           <div className="demo-shell__title">
+            <span className="demo-shell__eyebrow">Roboflow / supervision</span>
             <strong>supervision-js</strong>
             <span>CV media rendering workbench</span>
           </div>
