@@ -176,6 +176,26 @@ describe("resolveReactNativeFrameLayout", () => {
     });
   });
 
+  it("covers the canvas by cropping media edges when requested", () => {
+    const layout = resolveReactNativeFrameLayout({
+      canvasHeight: 640,
+      canvasWidth: 400,
+      fit: "cover",
+      mediaHeight: 1080,
+      mediaWidth: 1920,
+    });
+
+    expect(layout.mediaRect).toEqual({
+      height: 640,
+      width: 1137.7777777777778,
+      x: -368.8888888888889,
+      y: 0,
+    });
+    const mapped = layout.mapCanvasPoint({ x: 0, y: 320 });
+    expect(mapped?.x).toBeCloseTo(622.5);
+    expect(mapped?.y).toBe(540);
+  });
+
   it("maps React Native canvas points back into media space", () => {
     const layout = resolveReactNativeFrameLayout({
       canvasHeight: 640,

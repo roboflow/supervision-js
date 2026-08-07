@@ -458,6 +458,8 @@ export interface ReactNativePreparedFramePacket<THandle = unknown> {
 export interface ReactNativeFrameLayoutOptions {
   readonly canvasHeight: number;
   readonly canvasWidth: number;
+  /** `contain` preserves every media pixel; `cover` fills the canvas by cropping edges. */
+  readonly fit?: "contain" | "cover";
   readonly mediaHeight: number;
   readonly mediaWidth: number;
 }
@@ -641,10 +643,12 @@ export interface ReactNativeLiveIdMaskUniformOptions {
 export function resolveReactNativeFrameLayout(
   options: ReactNativeFrameLayoutOptions,
 ): ReactNativeFrameLayout {
-  const scale = Math.min(
-    options.canvasWidth / options.mediaWidth,
-    options.canvasHeight / options.mediaHeight,
-  );
+  const horizontalScale = options.canvasWidth / options.mediaWidth;
+  const verticalScale = options.canvasHeight / options.mediaHeight;
+  const scale =
+    options.fit === "cover"
+      ? Math.max(horizontalScale, verticalScale)
+      : Math.min(horizontalScale, verticalScale);
   const width = options.mediaWidth * scale;
   const height = options.mediaHeight * scale;
   const x = (options.canvasWidth - width) / 2;

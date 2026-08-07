@@ -833,6 +833,7 @@ function LiveCameraProof(props: {
       resolveReactNativeFrameLayout({
         canvasHeight,
         canvasWidth,
+        fit: "cover",
         mediaHeight: liveFrame?.height ?? LIVE_FRAME_TARGET_RESOLUTION.height,
         mediaWidth: liveFrame?.width ?? LIVE_FRAME_TARGET_RESOLUTION.width,
       }),
@@ -843,9 +844,17 @@ function LiveCameraProof(props: {
       resolveVisionCameraFrameRendererStyle({
         canvasHeight,
         canvasWidth,
+        mediaHeight: liveFrame?.height ?? LIVE_FRAME_TARGET_RESOLUTION.height,
+        mediaWidth: liveFrame?.width ?? LIVE_FRAME_TARGET_RESOLUTION.width,
         orientation: liveFrame?.frameOrientation ?? "left",
       }),
-    [canvasHeight, canvasWidth, liveFrame?.frameOrientation],
+    [
+      canvasHeight,
+      canvasWidth,
+      liveFrame?.frameOrientation,
+      liveFrame?.height,
+      liveFrame?.width,
+    ],
   );
   const livePerformance = useMemo(
     () => summarizeLivePerformance(livePerformanceSamples),
@@ -1483,7 +1492,7 @@ function LiveCameraProof(props: {
                     : null,
                 ]}
                 isActive={Boolean(canRunCamera)}
-                orientationSource="interface"
+                orientationSource="device"
                 outputs={cameraOutputs}
                 zoom={cameraZoom}
               />

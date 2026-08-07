@@ -87,7 +87,7 @@ export interface VisionCameraLiveViewProps {
   readonly frameRendererStyle?: StyleProp<ViewStyle>;
   readonly isActive: boolean;
   readonly outputs: CameraFrameOutput[];
-  readonly orientationSource?: "interface";
+  readonly orientationSource?: "device" | "interface";
   /** Desired optical zoom, clamped by the caller to this device's range. */
   readonly zoom?: number;
 }
@@ -185,28 +185,41 @@ export function resolveVisionCameraFrameSize(frame: {
 export function resolveVisionCameraFrameRendererStyle(options: {
   readonly canvasHeight: number;
   readonly canvasWidth: number;
+  /** Dimensions after normalizing the frame to the requested output orientation. */
+  readonly mediaHeight: number;
+  readonly mediaWidth: number;
   readonly orientation: string;
 }): ViewStyle {
+  const scale = Math.max(
+    options.canvasWidth / options.mediaWidth,
+    options.canvasHeight / options.mediaHeight,
+  );
+  const renderedWidth = options.mediaWidth * scale;
+  const renderedHeight = options.mediaHeight * scale;
+
   if (options.orientation === "left" || options.orientation === "right") {
     return {
-      height: options.canvasWidth,
-      left: (options.canvasWidth - options.canvasHeight) / 2,
+      // AVSampleBufferDisplayLayer is aspect-fit. Size its unrotated surface
+      // to the raw frame aspect ratio, then rotate it; this produces a true
+      // cover presentation once the parent clips the cropped edges.
+      height: renderedWidth,
+      left: (options.canvasWidth - renderedHeight) / 2,
       position: "absolute",
-      top: (options.canvasHeight - options.canvasWidth) / 2,
+      top: (options.canvasHeight - renderedWidth) / 2,
       transform: [
         { rotate: options.orientation === "left" ? "90deg" : "-90deg" },
       ],
-      width: options.canvasHeight,
+      width: renderedHeight,
     };
   }
 
   return {
-    bottom: 0,
-    left: 0,
+    height: renderedHeight,
+    left: (options.canvasWidth - renderedWidth) / 2,
     position: "absolute",
-    right: 0,
-    top: 0,
+    top: (options.canvasHeight - renderedHeight) / 2,
     transform: options.orientation === "down" ? [{ rotate: "180deg" }] : [],
+    width: renderedWidth,
   };
 }
 
@@ -435,7 +448,7 @@ interface VisionCameraModule {
 interface VisionCameraCameraProps {
   readonly device: CameraDevice;
   readonly isActive: boolean;
-  readonly orientationSource?: "interface";
+  readonly orientationSource?: "device" | "interface";
   readonly outputs?: CameraFrameOutput[];
   readonly style?: StyleProp<ViewStyle>;
   readonly zoom?: number;

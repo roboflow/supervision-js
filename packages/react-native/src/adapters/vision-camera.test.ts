@@ -146,10 +146,12 @@ describe("VisionCamera orientation", () => {
       resolveVisionCameraFrameRendererStyle({
         canvasHeight: 800,
         canvasWidth: 400,
+        mediaHeight: 1280,
+        mediaWidth: 720,
         orientation: "left",
       }),
     ).toMatchObject({
-      height: 400,
+      height: 450,
       transform: [{ rotate: "90deg" }],
       width: 800,
     });
@@ -157,6 +159,8 @@ describe("VisionCamera orientation", () => {
       resolveVisionCameraFrameRendererStyle({
         canvasHeight: 800,
         canvasWidth: 400,
+        mediaHeight: 1280,
+        mediaWidth: 720,
         orientation: "down",
       }),
     ).toMatchObject({ transform: [{ rotate: "180deg" }] });
