@@ -51,12 +51,12 @@ session.setPresentation({ boxStyle, maskStyle, labelStyle });
 ## Installation
 
 ```sh
-npm install supervision@next
+npm install supervision
 ```
 
-The current browser release is published on npm's `next` tag. Its published
-package includes the private core dependency. Consumers import only the public
-browser entrypoints:
+The current browser release is `0.1.1`, published as npm's default `latest`
+release. Its package includes the private core dependency. Consumers import
+only the public browser entrypoints:
 
 ```ts
 import { createMediaSession } from "supervision";

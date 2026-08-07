@@ -183,6 +183,10 @@ test("browser package manifest is ready for public npm publishing", () => {
   assert.match(manifest.version, /^(?!0\.0\.0$)\d+\.\d+\.\d+(?:-.+)?$/);
   assert.notEqual(manifest.private, true);
   assert.equal(manifest.publishConfig?.access, "public");
+  assert.equal(manifest.dependencies?.react, undefined);
+  assert.equal(manifest.dependencies?.["react-dom"], undefined);
+  assert.equal(manifest.peerDependencies?.react, undefined);
+  assert.equal(manifest.peerDependencies?.["react-dom"], undefined);
 });
 
 test("built core package imports without browser APIs", async () => {
