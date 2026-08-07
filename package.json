@@ -105,7 +105,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "verify": "npm run format:check && npm run lint && npm run typecheck && npm run test && npm run build && npm run package:smoke && npm run demo:build && npm run benchmark:initial:build && npm run benchmark:media-upload:build && npm run benchmark:masks:gpu:build",
-    "prepare": "node -e \"process.exit(process.env.CI || process.env.NODE_ENV === 'production' ? 0 : 1)\" || husky"
+    "prepare": "node -e \"process.exit(process.env.CI || process.env.NODE_ENV === 'production' ? 0 : 1)\" || husky",
+    "postinstall": "patch-package"
   },
   "lint-staged": {
     "*.{js,jsx,ts,tsx}": [
@@ -122,6 +123,7 @@
     "eslint": "^10.8.0",
     "husky": "^9.1.7",
     "lint-staged": "^17.3.0",
+    "patch-package": "8.0.1",
     "prettier": "^3.9.6",
     "rollup": "^4.62.4",
     "tslib": "^2.8.1",

@@ -1,0 +1,77 @@
+diff --git a/node_modules/react-native-executorch/src/modules/computer_vision/PoseEstimationModule.ts b/node_modules/react-native-executorch/src/modules/computer_vision/PoseEstimationModule.ts
+index 34ddf45..52e9c4c 100644
+--- a/node_modules/react-native-executorch/src/modules/computer_vision/PoseEstimationModule.ts
++++ b/node_modules/react-native-executorch/src/modules/computer_vision/PoseEstimationModule.ts
+@@ -233,11 +233,24 @@ export class PoseEstimationModule<
+         options?.keypointThreshold ?? defaultKeypointThreshold;
+       const inputSize = options?.inputSize ?? defaultInputSize;
+ 
++      // Do not use Array.prototype.includes() here. This function executes in
++      // VisionCamera's worklet runtime, whose serialized Array prototype is
++      // intentionally smaller than the main JS runtime on some iOS builds.
++      let supportsInputSize = false;
++      if (availableInputSizes && inputSize !== undefined) {
++        for (let index = 0; index < availableInputSizes.length; index += 1) {
++          if (availableInputSizes[index] === inputSize) {
++            supportsInputSize = true;
++            break;
++          }
++        }
++      }
++
+       // Validate inputSize
+       if (
+         availableInputSizes &&
+         inputSize !== undefined &&
+-        !availableInputSizes.includes(inputSize)
++        !supportsInputSize
+       ) {
+         throw new Error(
+           `Invalid inputSize: ${inputSize}. Available sizes: ${availableInputSizes.join(', ')}`
+@@ -255,17 +268,41 @@ export class PoseEstimationModule<
+           orientation: frame.orientation,
+           isMirrored: isFrontCamera,
+         };
++        if (typeof nativeGenerateFromFrame !== 'function') {
++          throw new Error(
++            'Pose frame inference is unavailable in the installed native ExecuTorch runtime.'
++          );
++        }
+         const raw: Keypoint[][] = nativeGenerateFromFrame(
+           frameData,
+           detectionThreshold,
+           keypointThreshold,
+           methodName
+         );
+-        return mapPersonKeypoints<ResolveKeypoints<T>>(
+-          raw,
+-          keypointEntries,
+-          maxKeypointIndex
+-        );
++        if (raw.length > 0 && raw[0]!.length <= maxKeypointIndex) {
++          throw new Error(
++            `Keypoint map references index ${maxKeypointIndex} but model returned ${raw[0]!.length} keypoints per person — keypointMap is incompatible with this model.`
++          );
++        }
++
++        // Keep the result conversion in this one worklet closure. Calling the
++        // module-level mapPersonKeypoints() worklet from a VisionCamera
++        // worklet leaves that helper undefined on affected iOS runtimes.
++        const poses: PersonKeypoints<ResolveKeypoints<T>>[] = [];
++        for (let personIndex = 0; personIndex < raw.length; personIndex += 1) {
++          const person = raw[personIndex]!;
++          const named: Record<string, Keypoint> = {};
++          for (
++            let keypointIndex = 0;
++            keypointIndex < keypointEntries.length;
++            keypointIndex += 1
++          ) {
++            const entry = keypointEntries[keypointIndex]!;
++            named[entry[0]] = person[entry[1]]!;
++          }
++          poses.push(named as PersonKeypoints<ResolveKeypoints<T>>);
++        }
++        return poses;
+       } finally {
+         if (nativeBuffer?.release) {
+           nativeBuffer.release();
