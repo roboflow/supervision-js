@@ -815,13 +815,16 @@ function LiveCameraProof(props: {
   }, [instantRecipe, isInstantCv, props.onInferenceModeChange]);
   const reportLiveFrame = useCallback((frame: LiveFrameState) => {
     setLiveFrame(frame);
+    setLiveError(null);
     setAwaitingSyncedFrame(false);
     setLivePerformanceSamples((samples) =>
       appendLivePerformanceSample(samples, frame),
     );
   }, []);
   const reportLiveError = useCallback((error: LiveFrameError) => {
-    console.error("[debug][rn-live]", error);
+    // The camera worklet already throttles this diagnostic. Keep it in the
+    // on-screen HUD rather than forwarding a recoverable frame error to Metro
+    // as a red console error during a demo.
     setLiveError(error);
   }, []);
   const reportLiveDetections = useCallback(

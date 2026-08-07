@@ -258,4 +258,16 @@ describe("live ExecuTorch processors", () => {
       mediaTime: 2,
     });
   });
+
+  it("keeps the camera lane inert while a pose runner is unavailable", () => {
+    const processor = createExecutorchLivePoseProcessor({
+      runOnFrame: undefined as unknown as null,
+    });
+
+    expect(processor.process({ timestamp: 2_000_000_000 })).toMatchObject({
+      detections: [],
+      frameIndex: 2_000_000_000,
+      mediaTime: 2,
+    });
+  });
 });

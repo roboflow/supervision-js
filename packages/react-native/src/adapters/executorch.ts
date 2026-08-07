@@ -138,7 +138,7 @@ export interface ExecutorchLivePoseProcessor {
 export function createExecutorchLivePoseProcessor<TRunOnFrame>(
   options: ExecutorchLivePoseProcessorOptions<TRunOnFrame>,
 ): ExecutorchLivePoseProcessor {
-  const runOnFrame = options.runOnFrame as
+  const configuredRunOnFrame = options.runOnFrame as
     | ((
         frame: unknown,
         mirrorFrame: boolean,
@@ -149,6 +149,11 @@ export function createExecutorchLivePoseProcessor<TRunOnFrame>(
         },
       ) => readonly ExecutorchCocoPose[])
     | null;
+  // A model hook can report ready one render before its worklet runner crosses
+  // into the camera runtime. Keep that short transition inert rather than
+  // trying to invoke an absent runner on every camera frame.
+  const runOnFrame =
+    typeof configuredRunOnFrame === "function" ? configuredRunOnFrame : null;
   const className = options.className;
   const detectionThreshold = options.detectionThreshold ?? 0.4;
   const inputSize = options.inputSize ?? 384;
@@ -164,11 +169,13 @@ export function createExecutorchLivePoseProcessor<TRunOnFrame>(
       "worklet";
 
       const poses =
-        runOnFrame?.(frame, false, {
-          detectionThreshold,
-          inputSize,
-          keypointThreshold,
-        }) ?? [];
+        runOnFrame === null
+          ? []
+          : runOnFrame(frame, false, {
+              detectionThreshold,
+              inputSize,
+              keypointThreshold,
+            });
 
       return createDetectionFrame({
         className,
