@@ -13,6 +13,11 @@ source and runtime configuration.
 - `/demo/` contains the fixture-only demo workbench;
 - `/examples/vanilla/` contains the minimal vanilla example.
 
+The fixture demo and vanilla example use relative asset URLs. The artifact
+therefore works both at the root of a custom domain and at GitHub Pages'
+project URL (`https://roboflow.github.io/supervision-js/`) before a custom
+domain is configured.
+
 The workflow checks out Git LFS assets before building, then uses the standard
 GitHub Pages artifact and deployment actions. GitHub Pages must be configured
 once in repository settings with **Source: GitHub Actions**.

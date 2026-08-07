@@ -34,6 +34,10 @@ Auto-deploy: On commit
 the Render and GitHub Pages output identical and avoids maintaining a second
 production server or image delivery path.
 
+The static applications emit relative asset URLs, so this layout remains valid
+when served at Render's domain root or from a GitHub Pages project URL before a
+custom domain is attached.
+
 The start command passes Render's exact `RENDER_EXTERNAL_HOSTNAME` to Vite's
 additional-host allowlist. This supports branch preview services without
 trusting arbitrary hosts; local runs fall back to the canonical production
