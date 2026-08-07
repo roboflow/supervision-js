@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const pagesDirectory = resolve(projectRoot, "dist/pages");
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
-const pagesBasePath = "/";
+const demoBasePath = "/demo/";
 
 await main();
 
@@ -25,7 +25,7 @@ async function main() {
   await runNpm(["run", "build"]);
   await runNpm(["run", "build", "-w", "demo"], {
     VITE_DEMO_ALLOW_UPLOAD: "false",
-    VITE_DEMO_BASE_PATH: pagesBasePath,
+    VITE_DEMO_BASE_PATH: demoBasePath,
   });
   await runNpm(["run", "build", "-w", "examples/vanilla"], {
     VITE_VANILLA_BASE_PATH: "/examples/vanilla/",
@@ -33,12 +33,12 @@ async function main() {
   await runNpm(["run", "docs:build:typedoc"]);
 
   await copyDirectoryContents(
-    resolve(projectRoot, "demo/dist"),
+    resolve(projectRoot, "docs/site"),
     pagesDirectory,
   );
   await copyDirectoryContents(
-    resolve(projectRoot, "docs/site"),
-    join(pagesDirectory, "docs"),
+    resolve(projectRoot, "demo/dist"),
+    join(pagesDirectory, "demo"),
   );
   await copyDirectoryContents(
     resolve(projectRoot, "examples/vanilla/dist"),
@@ -63,7 +63,7 @@ async function copyDirectoryContents(source, destination) {
 async function verifyPagesArtifact() {
   const requiredFiles = [
     "index.html",
-    "docs/index.html",
+    "demo/index.html",
     "examples/vanilla/index.html",
   ];
 
@@ -72,7 +72,7 @@ async function verifyPagesArtifact() {
   );
 
   const generatedHtml = await Promise.all(
-    ["index.html", "examples/vanilla/index.html"].map((file) =>
+    ["demo/index.html", "examples/vanilla/index.html"].map((file) =>
       readFile(join(pagesDirectory, file), "utf8"),
     ),
   );

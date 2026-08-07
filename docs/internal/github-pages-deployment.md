@@ -9,8 +9,8 @@ source and runtime configuration.
 
 `npm run pages:build` assembles `dist/pages` with this layout:
 
-- `/` contains the fixture-only demo;
-- `/docs/` contains the TypeDoc site;
+- `/` contains the TypeDoc site and its interactive playground;
+- `/demo/` contains the fixture-only demo workbench;
 - `/examples/vanilla/` contains the minimal vanilla example.
 
 The workflow checks out Git LFS assets before building, then uses the standard

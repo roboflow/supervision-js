@@ -5,7 +5,8 @@ The public demo and documentation are served by the existing Render web service:
 - service: `supervision-js-demo`
 - resource ID: `srv-d8felq6gvqtc7398i2ng`
 - URL: <https://supervision-js-demo.onrender.com>
-- docs: <https://supervision-js-demo.onrender.com/docs/>
+- docs: <https://supervision-js-demo.onrender.com/>
+- demo: <https://supervision-js-demo.onrender.com/demo/>
 
 Render deploys the canonical repository directly:
 `https://github.com/roboflow/supervision-js` on `main`. Do not introduce a
@@ -25,8 +26,8 @@ Auto-deploy: On commit
 
 `npm run pages:build` creates one static artifact in `dist/pages`:
 
-- `/` contains the fixture demo;
-- `/docs/` contains the TypeDoc site;
+- `/` contains the TypeDoc site and its interactive playground;
+- `/demo/` contains the fixture demo workbench;
 - `/examples/vanilla/` contains the vanilla integration example.
 
 `npm run pages:serve` serves that same artifact on Render's `PORT`. This keeps
@@ -67,11 +68,11 @@ Check the deployed routes after Render reports the deploy as live:
 
 ```sh
 curl --fail --location https://supervision-js-demo.onrender.com/
-curl --fail --location https://supervision-js-demo.onrender.com/docs/
+curl --fail --location https://supervision-js-demo.onrender.com/demo/
 curl --fail --location \
-  https://supervision-js-demo.onrender.com/docs/documents/Application_Integration.html
+  https://supervision-js-demo.onrender.com/documents/Application_Integration.html
 curl --fail --location \
-  https://supervision-js-demo.onrender.com/docs/modules/Editing.html
+  https://supervision-js-demo.onrender.com/modules/Editing.html
 curl --fail --location \
   https://supervision-js-demo.onrender.com/examples/vanilla/
 ```
