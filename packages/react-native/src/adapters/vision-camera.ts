@@ -352,7 +352,10 @@ export function useVisionCameraFrameOutput<TFrame extends VisionCameraFrame>(
     frameOutput: visionCamera.useFrameOutput({
       allowDeferredStart: false,
       dropFramesWhileBusy: true,
-      enablePhysicalBufferRotation: false,
+      // NativeFrameRendererView presents frame pixels directly and does not
+      // apply Frame.orientation metadata. Rotate here so the rendered camera,
+      // inference input, and Skia overlays share one upright portrait buffer.
+      enablePhysicalBufferRotation: true,
       enablePreviewSizedOutputBuffers: true,
       onFrame,
       onFrameDropped: options.onFrameDropped,
