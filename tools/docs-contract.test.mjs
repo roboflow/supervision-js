@@ -196,7 +196,9 @@ test("deployed site presents docs at the root and the workbench at /demo/", asyn
     "utf8",
   );
 
-  assert.match(pagesBuild, /const demoBasePath = "\/demo\/";/);
+  assert.match(pagesBuild, /const staticAppBasePath = "\.\/";/);
+  assert.match(pagesBuild, /VITE_DEMO_BASE_PATH: staticAppBasePath/);
+  assert.match(pagesBuild, /VITE_VANILLA_BASE_PATH: staticAppBasePath/);
   assert.match(
     pagesBuild,
     /resolve\(projectRoot, "docs\/site"\),\n {4}pagesDirectory/,
