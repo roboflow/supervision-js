@@ -39,6 +39,9 @@ export function DocsBasketballPlayground() {
       keypointsEnabled: true,
       labelsEnabled: true,
       masksEnabled: true,
+      // In this compact playground, the visible slider is the single opacity
+      // control. Keep the prepared fill fully opaque so 100% means 100%.
+      maskFillAlpha: 1,
       maskOpacity: 0.78,
       polygonsEnabled: false,
     },
@@ -117,7 +120,7 @@ export function DocsBasketballPlayground() {
           <RangeControl
             label="Mask opacity"
             max={1}
-            min={0.15}
+            min={0}
             onChange={(maskOpacity) => updatePresentation({ maskOpacity })}
             step={0.05}
             value={demo.presentationSettings.maskOpacity}
