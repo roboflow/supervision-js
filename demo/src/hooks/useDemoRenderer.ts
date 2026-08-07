@@ -92,14 +92,17 @@ export interface DemoRendererState {
   readonly setUploadClassNames: (classNames: string) => void;
 }
 
+export interface UseDemoRendererOptions {
+  /**
+   * Lets focused demo experiences start on a known fixture without first
+   * constructing another media session.
+   */
+  readonly initialFixtureId?: string;
+  /** Presentation values applied over that fixture's documented defaults. */
+  readonly initialPresentationSettings?: Partial<DemoPresentationSettings>;
+}
+
 const RENDERER_READOUT_INTERVAL_MS = 250;
-const defaultFixturePresentationSettings = constrainDemoPresentationSettings(
-  {
-    ...defaultDemoPresentationSettings,
-    ...defaultDemoFixture.presentationDefaults,
-  },
-  defaultDemoFixture.presentationAvailability,
-);
 
 const initialDetectionSourceState: DemoDetectionSourceState = {
   datasetId: null,
@@ -121,7 +124,25 @@ const initialUploadInferenceState: UploadInferenceState = {
   totalFrames: 0,
 };
 
-export function useDemoRenderer(): DemoRendererState {
+export function useDemoRenderer(
+  options: UseDemoRendererOptions = {},
+): DemoRendererState {
+  const [initialFixture] = useState(
+    () =>
+      demoFixtures.find(
+        (fixture) => fixture.sampleName === options.initialFixtureId,
+      ) ?? defaultDemoFixture,
+  );
+  const [initialPresentationSettings] = useState(() =>
+    constrainDemoPresentationSettings(
+      {
+        ...defaultDemoPresentationSettings,
+        ...initialFixture.presentationDefaults,
+        ...options.initialPresentationSettings,
+      },
+      initialFixture.presentationAvailability,
+    ),
+  );
   const containerRef = useRef<HTMLDivElement | null>(null);
   const effectRunRef = useRef(0);
   const rendererRef = useRef<MediaRenderer | null>(null);
@@ -130,7 +151,7 @@ export function useDemoRenderer(): DemoRendererState {
   const uploadAbortRef = useRef<AbortController | null>(null);
   const uploadFileRef = useRef<File | null>(null);
   const presentationSettingsRef = useRef<DemoPresentationSettings>(
-    defaultFixturePresentationSettings,
+    initialPresentationSettings,
   );
   const [rendererState, setRendererState] = useState<MediaRendererState | null>(
     null,
@@ -155,7 +176,7 @@ export function useDemoRenderer(): DemoRendererState {
   });
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [presentationSettings, setPresentationSettingsState] =
-    useState<DemoPresentationSettings>(defaultFixturePresentationSettings);
+    useState<DemoPresentationSettings>(initialPresentationSettings);
   const [renderQuality, setRenderQuality] = useState<DemoRenderQuality>(
     defaultDemoRenderQuality,
   );
@@ -163,7 +184,7 @@ export function useDemoRenderer(): DemoRendererState {
     DemoSourceMode.Fixture,
   );
   const [sampleFixtureId, setSampleFixtureIdState] = useState(
-    defaultDemoFixture.sampleName,
+    initialFixture.sampleName,
   );
   const [uploadApiKey, setUploadApiKey] = useState("");
   const [uploadClassNames, setUploadClassNames] = useState(

@@ -24,6 +24,27 @@
       </p>
     </aside>
   </section>
+  <section class="supervision-home__section supervision-home__playground" aria-labelledby="playground-title">
+    <div class="supervision-home__section-heading">
+      <p class="supervision-home__eyebrow">Interactive playground</p>
+      <h2 id="playground-title">See detections move with the media—not above it.</h2>
+      <p>
+        This looping basketball fixture combines segmentation masks, detection boxes, labels, and pose skeletons. Toggle layers and tune the presentation while the same browser media session keeps every annotation in sync.
+      </p>
+    </div>
+    <div class="supervision-home__playground-frame">
+      <iframe
+        allow="autoplay"
+        loading="lazy"
+        src="../?embed=docs-playground"
+        title="Interactive basketball detection playground"
+      ></iframe>
+    </div>
+    <p class="supervision-home__playground-note">
+      The playground is a small consumer of <code>supervision</code>, using the same session, detection, and style contracts available to your application.
+      <a href="documents/Detections_And_Rendering.html">Learn about detection rendering <span aria-hidden="true">→</span></a>
+    </p>
+  </section>
   <section class="supervision-home__section" aria-labelledby="quick-start-title">
     <div class="supervision-home__section-heading">
       <p class="supervision-home__eyebrow">Quick start</p>

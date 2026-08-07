@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { BenchmarksPanel } from "./components/BenchmarksPanel";
 import { ControlBar } from "./components/ControlBar";
 import { DemoShell } from "./components/DemoShell";
+import { DocsBasketballPlayground } from "./components/DocsBasketballPlayground";
 import { PerformanceStrip } from "./components/PerformanceStrip";
 import { QualityControls } from "./components/QualityControls";
 import { RenderControls } from "./components/RenderControls";
@@ -23,6 +24,17 @@ const docsUrl =
 const allowUpload = import.meta.env.VITE_DEMO_ALLOW_UPLOAD !== "false";
 
 export function App() {
+  if (
+    new URLSearchParams(globalThis.location.search).get("embed") ===
+    "docs-playground"
+  ) {
+    return <DocsBasketballPlayground />;
+  }
+
+  return <DemoApp />;
+}
+
+function DemoApp() {
   const demo = useDemoRenderer();
   const [viewMode, setViewMode] = useState(DemoViewMode.Demo);
   const processedRanges = useMemo(

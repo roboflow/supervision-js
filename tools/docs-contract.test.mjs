@@ -142,6 +142,13 @@ test("public installation guidance uses the stable browser package", async () =>
   }
 });
 
+test("the docs home embeds the local basketball playground", async () => {
+  const homepage = await readFile(path.join(publicDocsDir, "index.md"), "utf8");
+
+  assert.match(homepage, /src="\.\.\/\?embed=docs-playground"/);
+  assert.match(homepage, /title="Interactive basketball detection playground"/);
+});
+
 test("Render preview trusts only its assigned hostname", async () => {
   const packageJson = JSON.parse(
     await readFile(path.join(rootDir, "package.json"), "utf8"),
