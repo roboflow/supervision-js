@@ -80,8 +80,9 @@ change the published browser package version.
 5. In GitHub Actions, run **Publish npm package** from `main` and select
    `latest` for a stable release. Approve the `npm-publish` environment
    deployment. The workflow verifies, packs, smoke-tests, publishes the
-   generated archive through npm trusted publishing, verifies the selected npm
-   tag, and creates the matching GitHub Release.
+   generated archive through npm trusted publishing, waits briefly for the
+   selected npm tag to propagate, creates the matching annotated Git tag, and
+   creates the matching GitHub Release.
 6. Verify npm metadata, provenance, tarball contents, and a clean installation
    in a separate consumer:
 
