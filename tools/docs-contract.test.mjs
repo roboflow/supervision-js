@@ -117,9 +117,29 @@ test("documentation toolbar mirrors the browser package manifest version", async
   const packageVersion = toolbarScript.match(
     /const packageVersion = "([^"]+)";/,
   )?.[1];
+  const packageReleaseStatus = toolbarScript.match(
+    /const packageReleaseStatus = "([^"]*)";/,
+  )?.[1];
 
   assert.equal(packageName, packageJson.name);
   assert.equal(packageVersion, packageJson.version);
+  assert.equal(packageReleaseStatus, "");
+});
+
+test("public installation guidance uses the stable browser package", async () => {
+  const consumerDocs = [
+    path.join(rootDir, "README.md"),
+    path.join(publicDocsDir, "index.md"),
+    path.join(publicDocsDir, "guides/application-integration.md"),
+    path.join(publicDocsDir, "guides/public-api.md"),
+  ];
+
+  for (const file of consumerDocs) {
+    const source = await readFile(file, "utf8");
+
+    assert.match(source, /npm install supervision(?:\n|`|<)/);
+    assert.doesNotMatch(source, /npm install supervision@/);
+  }
 });
 
 test("Render preview trusts only its assigned hostname", async () => {

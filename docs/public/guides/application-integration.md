@@ -16,7 +16,7 @@ The browser package is published as `supervision`. There is no CDN, UMD, or
 `<script>` build. Install the current browser release with npm:
 
 ```sh
-npm install supervision@next
+npm install supervision
 ```
 
 The published package includes the internal `supervision-js-core` dependency.

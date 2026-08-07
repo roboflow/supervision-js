@@ -20,7 +20,7 @@ import from `supervision`:
 import { createMediaSession } from "supervision";
 ```
 
-Install the current browser release with `npm install supervision@next`. See
+Install the current browser release with `npm install supervision`. See
 [Application Integration](application-integration.md) for the supported
 consumer workflow.
 

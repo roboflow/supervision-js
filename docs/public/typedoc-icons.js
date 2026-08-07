@@ -3,7 +3,7 @@
 (function () {
   const packageName = "supervision";
   const packageVersion = "0.1.1";
-  const packageReleaseStatus = "pending release";
+  const packageReleaseStatus = "";
   const kindIconMap = {
     Accessor: "A",
     Class: "C",
