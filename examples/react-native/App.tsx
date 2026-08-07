@@ -1836,12 +1836,12 @@ function LiveCameraProof(props: {
               current === "back" ? "front" : "back",
             )
           }
-          style={styles.liveCameraSwitch}
+          style={[
+            styles.liveCameraSwitch,
+            isInstantCv ? styles.liveCameraSwitchAboveInstantCard : null,
+          ]}
         >
           <Text style={styles.liveCameraSwitchIcon}>↻</Text>
-          <Text style={styles.liveCameraSwitchText}>
-            {cameraPosition === "back" ? "Front" : "Back"}
-          </Text>
         </TouchableOpacity>
 
         {tapMenuLabel !== null ? (
@@ -2773,16 +2773,16 @@ const styles = StyleSheet.create({
     opacity: 1,
   },
   floatingButton: {
-    backgroundColor: "rgba(255, 255, 255, 0.94)",
-    borderColor: DEMO_COLORS.borderStrong,
+    backgroundColor: "rgba(255, 255, 255, 0.74)",
+    borderColor: "rgba(255, 255, 255, 0.78)",
     borderRadius: 999,
     borderWidth: 1,
     paddingHorizontal: 14,
     paddingVertical: 9,
   },
   floatingButtonActive: {
-    backgroundColor: DEMO_COLORS.primary,
-    borderColor: DEMO_COLORS.primary,
+    backgroundColor: "rgba(124, 58, 237, 0.82)",
+    borderColor: "rgba(196, 181, 253, 0.9)",
   },
   floatingButtonText: {
     color: DEMO_COLORS.primaryPressed,
@@ -2793,8 +2793,8 @@ const styles = StyleSheet.create({
     color: "#ffffff",
   },
   floatingIconButton: {
-    backgroundColor: "rgba(255, 255, 255, 0.94)",
-    borderColor: DEMO_COLORS.borderStrong,
+    backgroundColor: "rgba(255, 255, 255, 0.74)",
+    borderColor: "rgba(255, 255, 255, 0.78)",
     borderRadius: 999,
     borderWidth: 1,
     paddingHorizontal: 12,
@@ -2952,33 +2952,30 @@ const styles = StyleSheet.create({
   },
   liveCameraSwitch: {
     alignItems: "center",
-    backgroundColor: "rgba(255, 255, 255, 0.96)",
-    borderColor: DEMO_COLORS.borderStrong,
+    backgroundColor: "rgba(255, 255, 255, 0.58)",
+    borderColor: "rgba(255, 255, 255, 0.78)",
     borderRadius: 999,
     borderWidth: 1,
     bottom: 34,
-    flexDirection: "row",
-    gap: 6,
+    height: 42,
+    justifyContent: "center",
     left: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
     position: "absolute",
+    width: 42,
     zIndex: 8,
+  },
+  liveCameraSwitchAboveInstantCard: {
+    bottom: 174,
   },
   liveCameraSwitchIcon: {
     color: DEMO_COLORS.primary,
     fontSize: 16,
     fontWeight: "900",
   },
-  liveCameraSwitchText: {
-    color: DEMO_COLORS.primaryPressed,
-    fontSize: 11,
-    fontWeight: "900",
-  },
   liveBrand: {
     alignItems: "center",
-    backgroundColor: "rgba(255, 255, 255, 0.93)",
-    borderColor: DEMO_COLORS.borderStrong,
+    backgroundColor: "rgba(255, 255, 255, 0.76)",
+    borderColor: "rgba(255, 255, 255, 0.78)",
     borderRadius: 16,
     borderWidth: 1,
     flexDirection: "row",
@@ -2987,8 +2984,8 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   liveDebugPanel: {
-    backgroundColor: "rgba(255, 255, 255, 0.94)",
-    borderColor: DEMO_COLORS.borderStrong,
+    backgroundColor: "rgba(255, 255, 255, 0.72)",
+    borderColor: "rgba(255, 255, 255, 0.78)",
     borderRadius: 16,
     borderWidth: 1,
     bottom: 84,
@@ -3002,8 +2999,8 @@ const styles = StyleSheet.create({
     zIndex: 6,
   },
   liveMetric: {
-    backgroundColor: DEMO_COLORS.primarySoft,
-    borderColor: DEMO_COLORS.border,
+    backgroundColor: "rgba(237, 233, 254, 0.72)",
+    borderColor: "rgba(255, 255, 255, 0.68)",
     borderRadius: 10,
     borderWidth: 1,
     minWidth: 70,
@@ -3029,8 +3026,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   liveShowHudButton: {
-    backgroundColor: "rgba(255, 255, 255, 0.94)",
-    borderColor: DEMO_COLORS.borderStrong,
+    backgroundColor: "rgba(255, 255, 255, 0.74)",
+    borderColor: "rgba(255, 255, 255, 0.78)",
     borderRadius: 999,
     borderWidth: 1,
     bottom: 34,
@@ -3065,8 +3062,8 @@ const styles = StyleSheet.create({
     zIndex: 7,
   },
   instantStatusCard: {
-    backgroundColor: "rgba(255, 255, 255, 0.96)",
-    borderColor: DEMO_COLORS.borderStrong,
+    backgroundColor: "rgba(255, 255, 255, 0.76)",
+    borderColor: "rgba(255, 255, 255, 0.78)",
     borderRadius: 18,
     borderWidth: 1,
     bottom: 28,
@@ -3110,7 +3107,7 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   instantShapeSwitch: {
-    backgroundColor: DEMO_COLORS.primarySoft,
+    backgroundColor: "rgba(237, 233, 254, 0.72)",
     borderRadius: 12,
     flexDirection: "row",
     gap: 4,
@@ -3124,7 +3121,7 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
   },
   instantShapeButtonActive: {
-    backgroundColor: DEMO_COLORS.primary,
+    backgroundColor: "rgba(124, 58, 237, 0.82)",
   },
   instantShapeLabel: {
     color: DEMO_COLORS.mutedStrong,
@@ -3151,8 +3148,8 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   instantSafetyClassChip: {
-    backgroundColor: "#fff1f2",
-    borderColor: "#fda4af",
+    backgroundColor: "rgba(255, 241, 242, 0.74)",
+    borderColor: "rgba(253, 164, 175, 0.8)",
     borderRadius: 999,
     borderWidth: 1,
     paddingHorizontal: 10,
@@ -3166,7 +3163,7 @@ const styles = StyleSheet.create({
   instantReset: {
     alignItems: "center",
     alignSelf: "flex-start",
-    backgroundColor: DEMO_COLORS.primary,
+    backgroundColor: "rgba(124, 58, 237, 0.82)",
     borderRadius: 999,
     paddingHorizontal: 12,
     paddingVertical: 7,
@@ -3189,8 +3186,8 @@ const styles = StyleSheet.create({
   },
   detectionMenu: {
     alignItems: "center",
-    backgroundColor: "rgba(255, 255, 255, 0.96)",
-    borderColor: DEMO_COLORS.borderStrong,
+    backgroundColor: "rgba(255, 255, 255, 0.78)",
+    borderColor: "rgba(255, 255, 255, 0.82)",
     borderRadius: 16,
     borderWidth: 1,
     bottom: 96,
@@ -3210,8 +3207,8 @@ const styles = StyleSheet.create({
   },
   detectionMenuAction: {
     alignItems: "center",
-    backgroundColor: DEMO_COLORS.primarySoft,
-    borderColor: DEMO_COLORS.border,
+    backgroundColor: "rgba(237, 233, 254, 0.74)",
+    borderColor: "rgba(255, 255, 255, 0.7)",
     borderRadius: 999,
     borderWidth: 1,
     paddingHorizontal: 18,
@@ -3219,8 +3216,8 @@ const styles = StyleSheet.create({
     width: "100%",
   },
   detectionMenuActionActive: {
-    backgroundColor: DEMO_COLORS.primary,
-    borderColor: DEMO_COLORS.primary,
+    backgroundColor: "rgba(124, 58, 237, 0.82)",
+    borderColor: "rgba(196, 181, 253, 0.9)",
   },
   detectionMenuActionText: {
     color: DEMO_COLORS.primaryPressed,
@@ -3251,8 +3248,8 @@ const styles = StyleSheet.create({
   },
   videoHud: {
     alignItems: "center",
-    backgroundColor: "rgba(255, 255, 255, 0.94)",
-    borderColor: DEMO_COLORS.borderStrong,
+    backgroundColor: "rgba(255, 255, 255, 0.76)",
+    borderColor: "rgba(255, 255, 255, 0.78)",
     borderRadius: 16,
     borderWidth: 1,
     bottom: 34,
@@ -3354,8 +3351,8 @@ const styles = StyleSheet.create({
     zIndex: 20,
   },
   modeMenuOptions: {
-    backgroundColor: "rgba(255, 255, 255, 0.98)",
-    borderColor: DEMO_COLORS.borderStrong,
+    backgroundColor: "rgba(255, 255, 255, 0.84)",
+    borderColor: "rgba(255, 255, 255, 0.86)",
     borderRadius: 12,
     borderWidth: 1,
     gap: 2,
@@ -3380,8 +3377,8 @@ const styles = StyleSheet.create({
   },
   modeSwitch: {
     alignItems: "center",
-    backgroundColor: "rgba(255, 255, 255, 0.96)",
-    borderColor: DEMO_COLORS.border,
+    backgroundColor: "rgba(255, 255, 255, 0.76)",
+    borderColor: "rgba(255, 255, 255, 0.78)",
     borderRadius: 999,
     borderWidth: 1,
     flexDirection: "row",
@@ -3422,8 +3419,8 @@ const styles = StyleSheet.create({
   },
   stageOverlay: {
     alignItems: "center",
-    backgroundColor: "rgba(255, 255, 255, 0.94)",
-    borderColor: DEMO_COLORS.borderStrong,
+    backgroundColor: "rgba(255, 255, 255, 0.78)",
+    borderColor: "rgba(255, 255, 255, 0.82)",
     borderRadius: 16,
     borderWidth: 1,
     gap: 4,
@@ -3469,8 +3466,8 @@ const styles = StyleSheet.create({
   },
   statusPill: {
     alignItems: "center",
-    backgroundColor: "rgba(255, 255, 255, 0.94)",
-    borderColor: DEMO_COLORS.border,
+    backgroundColor: "rgba(255, 255, 255, 0.72)",
+    borderColor: "rgba(255, 255, 255, 0.76)",
     borderRadius: 999,
     borderWidth: 1,
     flexDirection: "row",
