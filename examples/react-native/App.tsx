@@ -1352,10 +1352,16 @@ function LiveCameraProof(props: {
     activeModel,
     props.inferenceMode === "pose" ? "YOLO26N Pose" : "RF-DETR Seg",
   );
+  // ExecuTorch reports `isReady` immediately before React receives the
+  // serializable `runOnFrame` worklet. Do not let VisionCamera process that
+  // short intermediate state: the UI runtime would invoke an unavailable
+  // native runner and report a misleading inference failure.
+  const hasActiveFrameRunner = typeof activeModel.runOnFrame === "function";
   const canRunCamera =
     hasPermission &&
     device &&
     activeModel.isReady &&
+    hasActiveFrameRunner &&
     liveInference.presentation.isReady;
 
   return (
