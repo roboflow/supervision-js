@@ -188,6 +188,7 @@ export function resolveVisionCameraFrameRendererStyle(options: {
   /** Dimensions after normalizing the frame to the requested output orientation. */
   readonly mediaHeight: number;
   readonly mediaWidth: number;
+  readonly orientation: string;
 }): ViewStyle {
   const scale = Math.max(
     options.canvasWidth / options.mediaWidth,
@@ -196,8 +197,23 @@ export function resolveVisionCameraFrameRendererStyle(options: {
   const renderedWidth = options.mediaWidth * scale;
   const renderedHeight = options.mediaHeight * scale;
 
-  // The camera output already carries its configured orientation. Rotating
-  // here a second time inverted some iOS front-camera frames.
+  // The native display layer presents the raw buffer. Portrait VisionCamera
+  // frames report left/right orientation, so rotate those buffers into the
+  // same normalized space used by inference. Do not rotate `down`: on the
+  // iOS front camera that would apply a second 180° turn.
+  if (options.orientation === "left" || options.orientation === "right") {
+    return {
+      height: renderedWidth,
+      left: (options.canvasWidth - renderedHeight) / 2,
+      position: "absolute",
+      top: (options.canvasHeight - renderedWidth) / 2,
+      transform: [
+        { rotate: options.orientation === "left" ? "90deg" : "-90deg" },
+      ],
+      width: renderedHeight,
+    };
+  }
+
   return {
     height: renderedHeight,
     left: (options.canvasWidth - renderedWidth) / 2,

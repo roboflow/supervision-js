@@ -860,8 +860,15 @@ function LiveCameraProof(props: {
         canvasWidth,
         mediaHeight: liveFrame?.height ?? LIVE_FRAME_TARGET_RESOLUTION.height,
         mediaWidth: liveFrame?.width ?? LIVE_FRAME_TARGET_RESOLUTION.width,
+        orientation: liveFrame?.frameOrientation ?? "left",
       }),
-    [canvasHeight, canvasWidth, liveFrame?.height, liveFrame?.width],
+    [
+      canvasHeight,
+      canvasWidth,
+      liveFrame?.frameOrientation,
+      liveFrame?.height,
+      liveFrame?.width,
+    ],
   );
   const livePerformance = useMemo(
     () => summarizeLivePerformance(livePerformanceSamples),

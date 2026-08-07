@@ -141,18 +141,29 @@ describe("VisionCamera orientation", () => {
     ).toEqual(expected);
   });
 
-  it("sizes the native renderer to cover without a second orientation transform", () => {
+  it("rotates portrait frames without a second 180-degree front-camera turn", () => {
     expect(
       resolveVisionCameraFrameRendererStyle({
         canvasHeight: 800,
         canvasWidth: 400,
         mediaHeight: 1280,
         mediaWidth: 720,
+        orientation: "left",
       }),
     ).toMatchObject({
-      height: 800,
-      width: 450,
+      height: 450,
+      transform: [{ rotate: "90deg" }],
+      width: 800,
     });
+    expect(
+      resolveVisionCameraFrameRendererStyle({
+        canvasHeight: 800,
+        canvasWidth: 400,
+        mediaHeight: 1280,
+        mediaWidth: 720,
+        orientation: "down",
+      }),
+    ).not.toHaveProperty("transform");
   });
 });
 
