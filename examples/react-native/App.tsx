@@ -154,6 +154,24 @@ function useLivePose() {
 type LiveSegmentation = ReturnType<typeof useLiveSegmentation>;
 type LivePose = ReturnType<typeof useLivePose>;
 
+/**
+ * Keeps a vendor frame worklet in React state without React interpreting the
+ * worklet itself as a state updater. ExecuTorch documents this handoff because
+ * a worklet captured directly from a render can arrive on VisionCamera's
+ * runtime before its JSI closure is fully available.
+ */
+function useStableFrameRunner<TRunner extends (...args: never[]) => unknown>(
+  runner: TRunner | null,
+): TRunner | null {
+  const [stableRunner, setStableRunner] = useState<TRunner | null>(null);
+
+  useEffect(() => {
+    setStableRunner(() => runner);
+  }, [runner]);
+
+  return stableRunner;
+}
+
 export default function App() {
   const [mode, setMode] = useState<DemoMode>("home");
   const [liveInferenceMode, setLiveInferenceMode] =
@@ -796,6 +814,10 @@ function LiveCameraProof(props: {
     useState<LiveDetectionDisplayMode>("masks");
   const [classEffects, setClassEffects] = useState<LiveClassEffects>({});
   const [tapMenuLabel, setTapMenuLabel] = useState<string | null>(null);
+  const stableSegmentationRunner = useStableFrameRunner(
+    props.segmentation.runOnFrame,
+  );
+  const stablePoseRunner = useStableFrameRunner(props.pose.runOnFrame);
   const instantRecipe = props.instantRecipe;
   const [instantZoneShape, setInstantZoneShape] =
     useState<InstantCvZoneShape>("rectangle");
@@ -813,7 +835,6 @@ function LiveCameraProof(props: {
   const [instantMessage, setInstantMessage] = useState(
     "Hold a person to teach the golden pose.",
   );
-  const lastPoseDebugAtRef = useRef(0);
   const instantGestureRef = useRef<{
     readonly canvasStart: { readonly x: number; readonly y: number };
     readonly freeShapePoints: InstantCvNormalizedPoint[];
@@ -920,54 +941,20 @@ function LiveCameraProof(props: {
     const inferenceMode = resolveInstantCvInferenceMode(instantRecipe);
     props.onInferenceModeChange(inferenceMode);
   }, [instantRecipe, isInstantCv, props.onInferenceModeChange]);
-  useEffect(() => {
-    if (!isInstantCv || instantRecipe !== "golden-pose") {
-      return;
-    }
-
-    console.log("[debug][rn-live][pose-model]", {
-      modelReady: props.pose.isReady,
-      runnerReady: typeof props.pose.runOnFrame === "function",
-    });
-  }, [instantRecipe, isInstantCv, props.pose.isReady, props.pose.runOnFrame]);
-  const reportLiveFrame = useCallback(
-    (frame: LiveFrameState) => {
-      setLiveFrame(frame);
-      setLiveError(null);
-      setAwaitingSyncedFrame(false);
-      setLivePerformanceSamples((samples) =>
-        appendLivePerformanceSample(samples, frame),
-      );
-
-      if (
-        props.inferenceMode === "pose" &&
-        Date.now() - lastPoseDebugAtRef.current >= 1_000
-      ) {
-        lastPoseDebugAtRef.current = Date.now();
-        console.log("[debug][rn-live][pose]", {
-          detections: frame.maskCount,
-          keypoints: frame.visibleKeypointCount,
-          modelReady: props.pose.isReady,
-          orientation: frame.frameOrientation,
-          poseMs: Math.round(frame.segmentationMs),
-          runnerReady: typeof props.pose.runOnFrame === "function",
-        });
-      }
-    },
-    [props.inferenceMode, props.pose.isReady, props.pose.runOnFrame],
-  );
-  const reportLiveError = useCallback(
-    (error: LiveFrameError) => {
-      // The camera worklet already throttles this diagnostic. Keep it in the
-      // on-screen HUD rather than forwarding a recoverable frame error to Metro
-      // as a red console error during a demo.
-      setLiveError(error);
-      if (props.inferenceMode === "pose") {
-        console.log("[debug][rn-live][pose-error]", error);
-      }
-    },
-    [props.inferenceMode],
-  );
+  const reportLiveFrame = useCallback((frame: LiveFrameState) => {
+    setLiveFrame(frame);
+    setLiveError(null);
+    setAwaitingSyncedFrame(false);
+    setLivePerformanceSamples((samples) =>
+      appendLivePerformanceSample(samples, frame),
+    );
+  }, []);
+  const reportLiveError = useCallback((error: LiveFrameError) => {
+    // The camera worklet already throttles this diagnostic. Keep it in the
+    // on-screen HUD rather than forwarding a recoverable frame error to Metro
+    // as a red console error during a demo.
+    setLiveError(error);
+  }, []);
   const reportLiveDetections = useCallback(
     (detections: readonly LiveOverlayDetection[]) => {
       setLiveDetections(detections);
@@ -1441,17 +1428,17 @@ function LiveCameraProof(props: {
         maxInstances: LIVE_MAX_INSTANCES,
         returnMasksAtOriginalResolution:
           LIVE_RETURN_MASKS_AT_ORIGINAL_RESOLUTION,
-        runOnFrame: props.segmentation.runOnFrame,
+        runOnFrame: stableSegmentationRunner,
       }),
-    [props.segmentation.runOnFrame],
+    [stableSegmentationRunner],
   );
   const poseProcessor = useMemo(
     () =>
       createExecutorchLivePoseProcessor({
         mirrorFrame: cameraPosition === "front",
-        runOnFrame: props.pose.runOnFrame,
+        runOnFrame: stablePoseRunner,
       }),
-    [cameraPosition, props.pose.runOnFrame],
+    [cameraPosition, stablePoseRunner],
   );
   const liveExtension = useMemo(
     () => ({
@@ -1507,7 +1494,11 @@ function LiveCameraProof(props: {
   // serializable `runOnFrame` worklet. Do not let VisionCamera process that
   // short intermediate state: the UI runtime would invoke an unavailable
   // native runner and report a misleading inference failure.
-  const hasActiveFrameRunner = typeof activeModel.runOnFrame === "function";
+  const activeFrameRunner =
+    props.inferenceMode === "pose"
+      ? stablePoseRunner
+      : stableSegmentationRunner;
+  const hasActiveFrameRunner = typeof activeFrameRunner === "function";
   const canRunCamera =
     hasPermission &&
     device &&
