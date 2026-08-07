@@ -1552,7 +1552,10 @@ function LiveCameraProof(props: {
                     : null,
                 ]}
                 isActive={Boolean(canRunCamera)}
-                orientationSource="device"
+                // The demo is portrait-only. Binding output orientation to the
+                // physical device can emit an upside-down front-camera buffer
+                // even while the interface remains portrait.
+                orientationSource="interface"
                 outputs={cameraOutputs}
                 zoom={cameraZoom}
               />
