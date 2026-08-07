@@ -27,6 +27,7 @@ import {
 import {
   useVisionCameraDevice,
   useVisionCameraPermission,
+  type VisionCameraDeviceFilter,
   VisionCameraLiveView,
   resolveVisionCameraPreferredZoom,
   resolveVisionCameraFrameRendererStyle,
@@ -94,6 +95,13 @@ type LiveDetectionDisplayMode = "masks" | "boxes";
 type LiveClassEffect = "redact" | "spotlight";
 type LiveClassEffects = Readonly<Record<string, LiveClassEffect>>;
 type LiveCameraPosition = "back" | "front";
+
+// Ask VisionCamera for a logical camera that contains the ultra-wide lens.
+// Without this filter its default camera selection can choose only the 1x
+// wide-angle device, making a valid 0.5x zoom request impossible to honor.
+const LIVE_CAMERA_DEVICE_FILTER: VisionCameraDeviceFilter = {
+  physicalDevices: ["ultra-wide-angle", "wide-angle"],
+};
 
 const LIVE_CLASS_EFFECT_OPTIONS: readonly {
   readonly effect: LiveClassEffect;
@@ -755,7 +763,10 @@ function LiveCameraProof(props: {
   const window = useWindowDimensions();
   const [cameraPosition, setCameraPosition] =
     useState<LiveCameraPosition>("back");
-  const device = useVisionCameraDevice(cameraPosition);
+  const device = useVisionCameraDevice(
+    cameraPosition,
+    LIVE_CAMERA_DEVICE_FILTER,
+  );
   const { hasPermission, requestPermission } = useVisionCameraPermission();
   const [liveFrame, setLiveFrame] = useState<LiveFrameState | null>(null);
   const [liveError, setLiveError] = useState<LiveFrameError | null>(null);

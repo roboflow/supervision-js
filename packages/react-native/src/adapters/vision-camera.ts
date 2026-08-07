@@ -15,6 +15,7 @@ import type { StyleProp, ViewStyle } from "react-native";
 import type {
   CameraFrameOutput,
   CameraDevice,
+  DeviceFilter,
   Frame,
   FrameRenderer,
 } from "react-native-vision-camera";
@@ -24,6 +25,9 @@ import type {
   MediaFrameSourceConsumer,
   MediaSessionCapabilities,
 } from "../types/frame-source";
+
+/** VisionCamera device-ranking options accepted by `useVisionCameraDevice()`. */
+export type VisionCameraDeviceFilter = DeviceFilter;
 
 /**
  * Structural subset of a VisionCamera frame used by the source adapter.
@@ -356,10 +360,11 @@ export function useVisionCameraFrameRenderer(): FrameRenderer {
 /** Returns the optional VisionCamera device hook through the package boundary. */
 export function useVisionCameraDevice(
   position: "back" | "front" | "external" | "unspecified",
+  filter?: DeviceFilter,
 ): CameraDevice | undefined {
   const visionCamera = loadVisionCamera();
 
-  return visionCamera.useCameraDevice(position);
+  return visionCamera.useCameraDevice(position, filter);
 }
 
 /** Returns the optional VisionCamera permission hook through the package boundary. */
@@ -421,6 +426,7 @@ interface VisionCameraModule {
   }): CameraFrameOutput;
   useCameraDevice(
     position: "back" | "front" | "external" | "unspecified",
+    filter?: DeviceFilter,
   ): CameraDevice | undefined;
   useCameraPermission(): VisionCameraPermissionState;
   useFrameRenderer(): FrameRenderer;
