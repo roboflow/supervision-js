@@ -126,6 +126,8 @@ export interface ExecutorchLivePoseProcessorOptions<TRunOnFrame = unknown> {
   readonly detectionThreshold?: number;
   readonly inputSize?: number;
   readonly keypointThreshold?: number;
+  /** Mirrors model coordinates to match a front-facing camera preview. */
+  readonly mirrorFrame?: boolean;
   readonly minimumVisibleKeypoints?: number;
   readonly runOnFrame: TRunOnFrame | null;
 }
@@ -158,6 +160,7 @@ export function createExecutorchLivePoseProcessor<TRunOnFrame>(
   const detectionThreshold = options.detectionThreshold ?? 0.4;
   const inputSize = options.inputSize ?? 384;
   const keypointThreshold = options.keypointThreshold ?? 0.35;
+  const mirrorFrame = options.mirrorFrame ?? false;
   const minimumVisibleKeypoints = options.minimumVisibleKeypoints;
   // Capture the initialized worklet function here. Referencing the module
   // binding from the nested frame worklet can capture `undefined` because the
@@ -171,7 +174,7 @@ export function createExecutorchLivePoseProcessor<TRunOnFrame>(
       const poses =
         runOnFrame === null
           ? []
-          : runOnFrame(frame, false, {
+          : runOnFrame(frame, mirrorFrame, {
               detectionThreshold,
               inputSize,
               keypointThreshold,

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { KeypointVisibility } from "supervision-js-core";
 
@@ -243,20 +243,31 @@ describe("live ExecuTorch processors", () => {
   });
 
   it("normalizes live pose output into a core detection frame", () => {
+    const runOnFrame = vi.fn(() => [
+      {
+        LEFT_SHOULDER: { x: 10, y: 20 },
+        RIGHT_SHOULDER: { x: 30, y: 20 },
+        LEFT_HIP: { x: 12, y: 50 },
+      },
+    ]);
     const processor = createExecutorchLivePoseProcessor({
-      runOnFrame: () => [
-        {
-          LEFT_SHOULDER: { x: 10, y: 20 },
-          RIGHT_SHOULDER: { x: 30, y: 20 },
-          LEFT_HIP: { x: 12, y: 50 },
-        },
-      ],
+      mirrorFrame: true,
+      runOnFrame,
     });
 
     expect(processor.process({ timestamp: 2_000_000_000 })).toMatchObject({
       frameIndex: 2_000_000_000,
       mediaTime: 2,
     });
+    expect(runOnFrame).toHaveBeenCalledWith(
+      { timestamp: 2_000_000_000 },
+      true,
+      expect.objectContaining({
+        detectionThreshold: 0.4,
+        inputSize: 384,
+        keypointThreshold: 0.35,
+      }),
+    );
   });
 
   it("keeps the camera lane inert while a pose runner is unavailable", () => {

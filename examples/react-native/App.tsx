@@ -189,7 +189,6 @@ export default function App() {
         instantRecipe={instantRecipe}
         mode={mode}
         onInferenceModeChange={setLiveInferenceMode}
-        onInstantRecipeChange={setInstantRecipe}
         onModeChange={selectMode}
         pose={pose}
         segmentation={segmentation}
@@ -593,12 +592,9 @@ const INSTANT_CV_RECIPE_OPTIONS: readonly {
 function InstantCvHud(props: {
   readonly canRunCamera: boolean;
   readonly message: string;
-  readonly mode: DemoMode;
   readonly modelStatus: string;
   readonly onClear: () => void;
-  readonly onModeChange: (mode: DemoMode) => void;
   readonly onRemovePrivacyClass: (label: string) => void;
-  readonly onRecipeChange: (recipe: InstantCvRecipe) => void;
   readonly onRemoveSafetyClass: (label: string) => void;
   readonly onZoneShapeChange: (shape: InstantCvZoneShape) => void;
   readonly privacyClassNames: readonly string[];
@@ -647,22 +643,6 @@ function InstantCvHud(props: {
 
   return (
     <>
-      <View style={styles.instantTopBar}>
-        <View style={styles.liveBrand}>
-          <BrandMark />
-          <View style={styles.headerCopy}>
-            <Text style={styles.title}>Instant CV</Text>
-            <Text style={styles.subtitle}>Teach the camera by touch</Text>
-          </View>
-        </View>
-        <ModeSwitch
-          instantRecipe={props.recipe}
-          mode={props.mode}
-          onInstantRecipeChange={props.onRecipeChange}
-          onModeChange={props.onModeChange}
-        />
-      </View>
-
       <View style={styles.instantStatusCard}>
         <View style={styles.instantStatusHeader}>
           <View style={styles.instantStatusTitleRow}>
@@ -767,7 +747,6 @@ function LiveCameraProof(props: {
   readonly instantRecipe: InstantCvRecipe;
   readonly mode: DemoMode;
   readonly onInferenceModeChange: (mode: LiveInferenceMode) => void;
-  readonly onInstantRecipeChange: (recipe: InstantCvRecipe) => void;
   readonly onModeChange: (mode: DemoMode) => void;
   readonly pose: LivePose;
   readonly segmentation: LiveSegmentation;
@@ -1041,32 +1020,6 @@ function LiveCameraProof(props: {
       );
     },
     [classEffects, instantRules],
-  );
-  const selectInstantRecipe = useCallback(
-    (recipe: InstantCvRecipe) => {
-      const inferenceMode = resolveInstantCvInferenceMode(recipe);
-
-      props.onInferenceModeChange(inferenceMode);
-      setAwaitingSyncedFrame(true);
-      props.onInstantRecipeChange(recipe);
-      setInstantRules([]);
-      setInstantRuntime([]);
-      instantRuntimeRef.current = [];
-      setInstantDraftZone(null);
-      setClassEffects({});
-      if (recipe !== "golden-pose") {
-        setDetectionDisplayMode("masks");
-      }
-      setInstantMessage(
-        recipe === "golden-pose"
-          ? "Hold a person to teach the golden pose."
-          : recipe === "safety-zone"
-            ? "Draw a keep-out zone, then tap objects that must stay outside it."
-            : "Tap any object to pixelate every detection of that class.",
-      );
-      Vibration.vibrate(16);
-    },
-    [props.onInferenceModeChange, props.onInstantRecipeChange],
   );
   const clearInstantRules = useCallback(() => {
     setInstantRules([]);
@@ -1406,9 +1359,10 @@ function LiveCameraProof(props: {
   const poseProcessor = useMemo(
     () =>
       createExecutorchLivePoseProcessor({
+        mirrorFrame: cameraPosition === "front",
         runOnFrame: props.pose.runOnFrame,
       }),
-    [props.pose.runOnFrame],
+    [cameraPosition, props.pose.runOnFrame],
   );
   const liveExtension = useMemo(
     () => ({
@@ -1547,12 +1501,9 @@ function LiveCameraProof(props: {
           <InstantCvHud
             canRunCamera={Boolean(canRunCamera)}
             message={instantMessage}
-            mode={props.mode}
             modelStatus={modelStatus}
             onClear={clearInstantRules}
-            onModeChange={props.onModeChange}
             onRemovePrivacyClass={removeInstantPrivacyClass}
-            onRecipeChange={selectInstantRecipe}
             onRemoveSafetyClass={removeInstantSafetyClass}
             onZoneShapeChange={selectInstantZoneShape}
             privacyClassNames={Object.keys(classEffects)}
@@ -1838,7 +1789,7 @@ function LiveCameraProof(props: {
           }
           style={[
             styles.liveCameraSwitch,
-            isInstantCv ? styles.liveCameraSwitchAboveInstantCard : null,
+            isInstantCv ? styles.liveCameraSwitchAtInstantTop : null,
           ]}
         >
           <Text style={styles.liveCameraSwitchIcon}>↻</Text>
@@ -2401,23 +2352,13 @@ const DEMO_MODE_OPTIONS: readonly {
 ];
 
 function ModeSwitch(props: {
-  readonly instantRecipe?: InstantCvRecipe;
   readonly mode: DemoMode;
-  readonly onInstantRecipeChange?: (recipe: InstantCvRecipe) => void;
   readonly onModeChange: (mode: DemoMode) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const active =
     DEMO_MODE_OPTIONS.find((option) => option.mode === props.mode) ??
     DEMO_MODE_OPTIONS[0]!;
-  const activeRecipe = INSTANT_CV_RECIPE_OPTIONS.find(
-    (option) => option.recipe === props.instantRecipe,
-  );
-  const triggerLabel =
-    props.mode === "instant" && activeRecipe
-      ? activeRecipe.label
-      : active.label;
-
   return (
     <View style={styles.modeMenu}>
       <TouchableOpacity
@@ -2425,7 +2366,7 @@ function ModeSwitch(props: {
         onPress={() => setExpanded((current) => !current)}
         style={styles.modeSwitch}
       >
-        <Text style={styles.modeSwitchValue}>{triggerLabel}</Text>
+        <Text style={styles.modeSwitchValue}>{active.label}</Text>
         <Text style={styles.modeSwitchChevron}>{expanded ? "⌃" : "⌄"}</Text>
       </TouchableOpacity>
       {expanded ? (
@@ -2457,37 +2398,6 @@ function ModeSwitch(props: {
               </TouchableOpacity>
             );
           })}
-          {props.mode === "instant" && props.onInstantRecipeChange ? (
-            <>
-              <Text style={styles.modeMenuSectionLabel}>Instant CV</Text>
-              {INSTANT_CV_RECIPE_OPTIONS.map((option) => {
-                const selected = option.recipe === props.instantRecipe;
-
-                return (
-                  <TouchableOpacity
-                    key={option.recipe}
-                    onPress={() => {
-                      setExpanded(false);
-                      props.onInstantRecipeChange?.(option.recipe);
-                    }}
-                    style={[
-                      styles.modeButton,
-                      selected ? styles.modeButtonActive : null,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.modeButtonText,
-                        selected ? styles.modeButtonTextActive : null,
-                      ]}
-                    >
-                      {option.label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </>
-          ) : null}
         </View>
       ) : null}
     </View>
@@ -2964,8 +2874,9 @@ const styles = StyleSheet.create({
     width: 42,
     zIndex: 8,
   },
-  liveCameraSwitchAboveInstantCard: {
-    bottom: 174,
+  liveCameraSwitchAtInstantTop: {
+    bottom: undefined,
+    top: 58,
   },
   liveCameraSwitchIcon: {
     color: DEMO_COLORS.primary,
@@ -3050,16 +2961,6 @@ const styles = StyleSheet.create({
     right: 24,
     top: 142,
     zIndex: 6,
-  },
-  instantTopBar: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    left: 14,
-    position: "absolute",
-    right: 14,
-    top: 58,
-    zIndex: 7,
   },
   instantStatusCard: {
     backgroundColor: "rgba(255, 255, 255, 0.76)",
@@ -3365,15 +3266,6 @@ const styles = StyleSheet.create({
     top: 42,
     width: 148,
     zIndex: 20,
-  },
-  modeMenuSectionLabel: {
-    color: DEMO_COLORS.muted,
-    fontSize: 9,
-    fontWeight: "900",
-    letterSpacing: 0.8,
-    paddingHorizontal: 8,
-    paddingTop: 8,
-    textTransform: "uppercase",
   },
   modeSwitch: {
     alignItems: "center",
