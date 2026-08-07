@@ -653,33 +653,12 @@ function InstantCvHud(props: {
             <Text style={styles.subtitle}>Teach the camera by touch</Text>
           </View>
         </View>
-        <ModeSwitch mode={props.mode} onModeChange={props.onModeChange} />
-      </View>
-
-      <View style={styles.instantRecipeDock}>
-        {INSTANT_CV_RECIPE_OPTIONS.map((option) => {
-          const active = option.recipe === props.recipe;
-
-          return (
-            <TouchableOpacity
-              key={option.recipe}
-              onPress={() => props.onRecipeChange(option.recipe)}
-              style={[
-                styles.instantRecipeButton,
-                active ? styles.instantRecipeButtonActive : null,
-              ]}
-            >
-              <Text
-                style={[
-                  styles.instantRecipeLabel,
-                  active ? styles.instantRecipeLabelActive : null,
-                ]}
-              >
-                {option.label}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
+        <ModeSwitch
+          instantRecipe={props.recipe}
+          mode={props.mode}
+          onInstantRecipeChange={props.onRecipeChange}
+          onModeChange={props.onModeChange}
+        />
       </View>
 
       <View style={styles.instantStatusCard}>
@@ -2398,13 +2377,22 @@ const DEMO_MODE_OPTIONS: readonly {
 ];
 
 function ModeSwitch(props: {
+  readonly instantRecipe?: InstantCvRecipe;
   readonly mode: DemoMode;
+  readonly onInstantRecipeChange?: (recipe: InstantCvRecipe) => void;
   readonly onModeChange: (mode: DemoMode) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const active =
     DEMO_MODE_OPTIONS.find((option) => option.mode === props.mode) ??
     DEMO_MODE_OPTIONS[0]!;
+  const activeRecipe = INSTANT_CV_RECIPE_OPTIONS.find(
+    (option) => option.recipe === props.instantRecipe,
+  );
+  const triggerLabel =
+    props.mode === "instant" && activeRecipe
+      ? activeRecipe.label
+      : active.label;
 
   return (
     <View style={styles.modeMenu}>
@@ -2413,13 +2401,14 @@ function ModeSwitch(props: {
         onPress={() => setExpanded((current) => !current)}
         style={styles.modeSwitch}
       >
-        <Text style={styles.modeSwitchValue}>{active.label}</Text>
+        <Text style={styles.modeSwitchValue}>{triggerLabel}</Text>
         <Text style={styles.modeSwitchChevron}>{expanded ? "⌃" : "⌄"}</Text>
       </TouchableOpacity>
       {expanded ? (
         <View style={styles.modeMenuOptions}>
           {DEMO_MODE_OPTIONS.map((option) => {
-            const selected = option.mode === props.mode;
+            const selected =
+              option.mode === props.mode && props.mode !== "instant";
 
             return (
               <TouchableOpacity
@@ -2444,6 +2433,37 @@ function ModeSwitch(props: {
               </TouchableOpacity>
             );
           })}
+          {props.mode === "instant" && props.onInstantRecipeChange ? (
+            <>
+              <Text style={styles.modeMenuSectionLabel}>Instant CV</Text>
+              {INSTANT_CV_RECIPE_OPTIONS.map((option) => {
+                const selected = option.recipe === props.instantRecipe;
+
+                return (
+                  <TouchableOpacity
+                    key={option.recipe}
+                    onPress={() => {
+                      setExpanded(false);
+                      props.onInstantRecipeChange?.(option.recipe);
+                    }}
+                    style={[
+                      styles.modeButton,
+                      selected ? styles.modeButtonActive : null,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.modeButtonText,
+                        selected ? styles.modeButtonTextActive : null,
+                      ]}
+                    >
+                      {option.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </>
+          ) : null}
         </View>
       ) : null}
     </View>
@@ -2995,39 +3015,6 @@ const styles = StyleSheet.create({
     top: 58,
     zIndex: 7,
   },
-  instantRecipeDock: {
-    backgroundColor: "rgba(255, 255, 255, 0.95)",
-    borderColor: DEMO_COLORS.borderStrong,
-    borderRadius: 16,
-    borderWidth: 1,
-    flexDirection: "row",
-    gap: 5,
-    left: 14,
-    padding: 5,
-    position: "absolute",
-    right: 14,
-    top: 118,
-    zIndex: 7,
-  },
-  instantRecipeButton: {
-    alignItems: "center",
-    borderRadius: 12,
-    flex: 1,
-    paddingHorizontal: 6,
-    paddingVertical: 10,
-  },
-  instantRecipeButtonActive: {
-    backgroundColor: DEMO_COLORS.primary,
-  },
-  instantRecipeLabel: {
-    color: DEMO_COLORS.mutedStrong,
-    fontSize: 10,
-    fontWeight: "900",
-    textAlign: "center",
-  },
-  instantRecipeLabelActive: {
-    color: "#ffffff",
-  },
   instantStatusCard: {
     backgroundColor: "rgba(255, 255, 255, 0.96)",
     borderColor: DEMO_COLORS.borderStrong,
@@ -3330,8 +3317,17 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.14,
     shadowRadius: 16,
     top: 42,
-    width: 116,
+    width: 148,
     zIndex: 20,
+  },
+  modeMenuSectionLabel: {
+    color: DEMO_COLORS.muted,
+    fontSize: 9,
+    fontWeight: "900",
+    letterSpacing: 0.8,
+    paddingHorizontal: 8,
+    paddingTop: 8,
+    textTransform: "uppercase",
   },
   modeSwitch: {
     alignItems: "center",
