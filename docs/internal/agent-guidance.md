@@ -36,6 +36,14 @@ or the private React Native experiment into public contracts. Do not edit
 generated `docs/site/` output; rebuild the docs with `npm run demo:build` and
 run `npm run docs:check` after changing the homepage.
 
+The documentation toolbar displays the browser package version from
+`docs/public/typedoc-icons.js`. Update that value with
+`packages/web/package.json` in every browser package release; `npm run
+docs:check` rejects a mismatch. Before publishing the version to npm, keep its
+toolbar label as pending; remove that label in the verified docs-only follow-up
+after the stable release. The package manifest is canonical, while the toolbar
+value is a checked presentation mirror.
+
 ## Project Direction
 
 - Keep the core library vanilla browser TypeScript/JavaScript.

@@ -1,6 +1,9 @@
 /* global Element, MutationObserver, URL, localStorage */
 
 (function () {
+  const packageName = "supervision";
+  const packageVersion = "0.1.1";
+  const packageReleaseStatus = "pending release";
   const kindIconMap = {
     Accessor: "A",
     Class: "C",
@@ -115,12 +118,14 @@
       `${base}assets/brand/roboflow-logomark.svg`,
       window.location.href,
     ).href;
-    const version = document.title.match(/v[^-]+$/)?.[0] ?? "pre-1.0";
+    const version = packageReleaseStatus
+      ? `v${packageVersion} (${packageReleaseStatus})`
+      : `v${packageVersion}`;
 
     title.innerHTML = `
       <img class="supervision-docs__mark" src="${logo}" alt="Roboflow" />
       <span class="supervision-docs__brand-copy">
-        <span>Supervision</span>
+        <span>${packageName}</span>
         <span class="supervision-docs__product">JS</span>
         <span class="supervision-docs__version">${version}</span>
       </span>

@@ -90,8 +90,10 @@ curl --fail --location \
   https://supervision-js-demo.onrender.com/examples/vanilla/
 ```
 
-The Application Integration page must describe tarball installation, and the
-Editing module must appear in the generated API reference. Also verify that the
-live Render deploy's commit matches both canonical `main` and mirror `main`.
-Those checks distinguish the current documentation from the stale deployment
-that preceded this configuration.
+The Application Integration page must describe the browser package's current
+npm channel: `npm install supervision@next` before a stable release owns
+`latest`, then `npm install supervision` after the verified post-release docs
+follow-up. The Editing module must appear in the generated API reference. Also
+verify that the live Render deploy's commit matches both canonical `main` and
+mirror `main`. Those checks distinguish the current documentation from the
+stale deployment that preceded this configuration.

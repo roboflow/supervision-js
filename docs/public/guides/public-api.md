@@ -20,11 +20,9 @@ import from `supervision`:
 import { createMediaSession } from "supervision";
 ```
 
-Until the first browser release is available on npm's `next` tag, install the
-portable `supervision-0.1.0.tgz` archive built from this repository. Once it is
-available, use `npm install supervision@next`; after it is promoted to npm's
-`latest` tag, use `npm install supervision`. See [Application
-Integration](application-integration.md) for the supported consumer workflow.
+Install the current browser release with `npm install supervision@next`. See
+[Application Integration](application-integration.md) for the supported
+consumer workflow.
 
 The split keeps detections, timelines, styles, retention policies, source
 composition, and picking contracts reusable without making Pixi, Mediabunny,
