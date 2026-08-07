@@ -28,6 +28,7 @@ import {
   useVisionCameraDevice,
   useVisionCameraPermission,
   VisionCameraLiveView,
+  resolveVisionCameraPreferredZoom,
   resolveVisionCameraFrameRendererStyle,
 } from "supervision-js-react-native/adapters/vision-camera";
 import {
@@ -92,6 +93,7 @@ type LiveInferenceMode = "segmentation" | "pose";
 type LiveDetectionDisplayMode = "masks" | "boxes";
 type LiveClassEffect = "redact" | "spotlight";
 type LiveClassEffects = Readonly<Record<string, LiveClassEffect>>;
+type LiveCameraPosition = "back" | "front";
 
 const LIVE_CLASS_EFFECT_OPTIONS: readonly {
   readonly effect: LiveClassEffect;
@@ -772,7 +774,9 @@ function LiveCameraProof(props: {
 }) {
   const isInstantCv = props.mode === "instant";
   const window = useWindowDimensions();
-  const device = useVisionCameraDevice("back");
+  const [cameraPosition, setCameraPosition] =
+    useState<LiveCameraPosition>("back");
+  const device = useVisionCameraDevice(cameraPosition);
   const { hasPermission, requestPermission } = useVisionCameraPermission();
   const [liveFrame, setLiveFrame] = useState<LiveFrameState | null>(null);
   const [liveError, setLiveError] = useState<LiveFrameError | null>(null);
@@ -1445,6 +1449,10 @@ function LiveCameraProof(props: {
     () => [liveInference.camera.frameOutput],
     [liveInference.camera.frameOutput],
   );
+  const cameraZoom = useMemo(
+    () => resolveVisionCameraPreferredZoom(device, 0.5),
+    [device],
+  );
 
   const activeModel =
     props.inferenceMode === "pose" ? props.pose : props.segmentation;
@@ -1512,6 +1520,7 @@ function LiveCameraProof(props: {
                 isActive={Boolean(canRunCamera)}
                 orientationSource="interface"
                 outputs={cameraOutputs}
+                zoom={cameraZoom}
               />
             ) : null}
           </>
@@ -1528,7 +1537,7 @@ function LiveCameraProof(props: {
               {!hasPermission
                 ? "Waiting for camera permission"
                 : !device
-                  ? "No back camera available"
+                  ? `No ${cameraPosition} camera available`
                   : modelStatus}
             </Text>
           </View>
@@ -1819,6 +1828,21 @@ function LiveCameraProof(props: {
             <Text style={styles.floatingButtonText}>HUD</Text>
           </TouchableOpacity>
         )}
+
+        <TouchableOpacity
+          accessibilityLabel={`Switch to ${cameraPosition === "back" ? "front" : "back"} camera`}
+          onPress={() =>
+            setCameraPosition((current) =>
+              current === "back" ? "front" : "back",
+            )
+          }
+          style={styles.liveCameraSwitch}
+        >
+          <Text style={styles.liveCameraSwitchIcon}>↻</Text>
+          <Text style={styles.liveCameraSwitchText}>
+            {cameraPosition === "back" ? "Front" : "Back"}
+          </Text>
+        </TouchableOpacity>
 
         {tapMenuLabel !== null ? (
           <ClassEffectMenu
@@ -2925,6 +2949,31 @@ const styles = StyleSheet.create({
     position: "absolute",
     right: 14,
     zIndex: 6,
+  },
+  liveCameraSwitch: {
+    alignItems: "center",
+    backgroundColor: "rgba(255, 255, 255, 0.96)",
+    borderColor: DEMO_COLORS.borderStrong,
+    borderRadius: 999,
+    borderWidth: 1,
+    bottom: 34,
+    flexDirection: "row",
+    gap: 6,
+    left: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    position: "absolute",
+    zIndex: 8,
+  },
+  liveCameraSwitchIcon: {
+    color: DEMO_COLORS.primary,
+    fontSize: 16,
+    fontWeight: "900",
+  },
+  liveCameraSwitchText: {
+    color: DEMO_COLORS.primaryPressed,
+    fontSize: 11,
+    fontWeight: "900",
   },
   liveBrand: {
     alignItems: "center",

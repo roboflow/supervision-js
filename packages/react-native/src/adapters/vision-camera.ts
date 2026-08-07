@@ -84,6 +84,8 @@ export interface VisionCameraLiveViewProps {
   readonly isActive: boolean;
   readonly outputs: CameraFrameOutput[];
   readonly orientationSource?: "interface";
+  /** Desired optical zoom, clamped by the caller to this device's range. */
+  readonly zoom?: number;
 }
 
 export interface VisionCameraFrameOutputBinding {
@@ -102,6 +104,30 @@ export interface VisionCameraPermissionState {
 export interface VisionCameraFrameSize {
   readonly height: number;
   readonly width: number;
+}
+
+/**
+ * Resolves a requested zoom to the nearest zoom the selected device supports.
+ * This lets a host prefer iPhone's 0.5x ultra-wide lens while still working on
+ * single-lens rear cameras and front cameras that begin at 1x.
+ */
+export function resolveVisionCameraPreferredZoom(
+  device: Pick<CameraDevice, "maxZoom" | "minZoom"> | undefined,
+  requestedZoom = 0.5,
+): number | undefined {
+  if (
+    !device ||
+    !Number.isFinite(device.minZoom) ||
+    !Number.isFinite(device.maxZoom) ||
+    !Number.isFinite(requestedZoom)
+  ) {
+    return undefined;
+  }
+
+  const minimum = Math.min(device.minZoom, device.maxZoom);
+  const maximum = Math.max(device.minZoom, device.maxZoom);
+
+  return Math.max(minimum, Math.min(maximum, requestedZoom));
 }
 
 /**
@@ -371,6 +397,7 @@ export function VisionCameraLiveView(
       orientationSource: props.orientationSource,
       outputs: props.outputs,
       style: props.cameraStyle,
+      zoom: props.zoom,
     }),
     createElement(visionCamera.NativeFrameRendererView, {
       renderer: props.frameRenderer,
@@ -405,6 +432,7 @@ interface VisionCameraCameraProps {
   readonly orientationSource?: "interface";
   readonly outputs?: CameraFrameOutput[];
   readonly style?: StyleProp<ViewStyle>;
+  readonly zoom?: number;
 }
 
 function loadVisionCamera(): VisionCameraModule {

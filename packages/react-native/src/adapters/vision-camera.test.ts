@@ -5,6 +5,7 @@ import {
   presentVisionCameraFrame,
   resolveVisionCameraFrameRendererStyle,
   resolveVisionCameraFrameSize,
+  resolveVisionCameraPreferredZoom,
   useVisionCameraDevice,
   useVisionCameraFrameRenderer,
   useVisionCameraFrameOutput,
@@ -159,5 +160,19 @@ describe("VisionCamera orientation", () => {
         orientation: "down",
       }),
     ).toMatchObject({ transform: [{ rotate: "180deg" }] });
+  });
+});
+
+describe("VisionCamera preferred zoom", () => {
+  it("uses 0.5x when the selected camera supports the ultra-wide zoom", () => {
+    expect(resolveVisionCameraPreferredZoom({ maxZoom: 8, minZoom: 0.5 })).toBe(
+      0.5,
+    );
+  });
+
+  it("falls back to the nearest zoom on cameras without an ultra-wide lens", () => {
+    expect(resolveVisionCameraPreferredZoom({ maxZoom: 4, minZoom: 1 })).toBe(
+      1,
+    );
   });
 });
