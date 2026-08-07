@@ -142,6 +142,28 @@ test("public installation guidance uses the stable browser package", async () =>
   }
 });
 
+test("the docs home embeds the local basketball playground", async () => {
+  const homepage = await readFile(path.join(publicDocsDir, "index.md"), "utf8");
+  const toolbarScript = await readFile(
+    path.join(publicDocsDir, "typedoc-icons.js"),
+    "utf8",
+  );
+  const packageJson = JSON.parse(
+    await readFile(path.join(rootDir, "package.json"), "utf8"),
+  );
+
+  assert.match(
+    homepage,
+    /data-supervision-playground-src="\.\.\/\?embed=docs-playground"/,
+  );
+  assert.match(homepage, /title="Interactive basketball detection playground"/);
+  assert.match(
+    toolbarScript,
+    /window\.location\.port === "5175"[\s\S]*?http:\/\/127\.0\.0\.1:5173\/\?embed=docs-playground/,
+  );
+  assert.equal(packageJson.scripts["docs:dev"], "npm run dev:demo-docs");
+});
+
 test("Render preview trusts only its assigned hostname", async () => {
   const packageJson = JSON.parse(
     await readFile(path.join(rootDir, "package.json"), "utf8"),

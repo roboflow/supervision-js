@@ -64,7 +64,7 @@
     "docs:build": "npm run build && npm run docs:build:typedoc",
     "docs:build:typedoc": "typedoc && node tools/copy-doc-assets.mjs",
     "docs:check": "node --test tools/docs-contract.test.mjs",
-    "docs:dev": "npm run docs:build && vite docs/site --host 127.0.0.1 --port 5175",
+    "docs:dev": "npm run dev:demo-docs",
     "docs:dev:server": "npm run docs:build:typedoc && vite docs/site --host 127.0.0.1 --port 5175",
     "docs:serve": "npm run docs:build && vite docs/site --host 127.0.0.1 --port 5175",
     "example:vanilla:dev": "npm run build && npm run dev -w examples/vanilla",

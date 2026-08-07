@@ -101,6 +101,30 @@
     home
       .closest(".container-main")
       ?.classList.add("supervision-docs--home-layout");
+    configureHomePlayground(home);
+  }
+
+  function configureHomePlayground(home) {
+    const playground = home.querySelector(
+      "iframe[data-supervision-playground-src]",
+    );
+    const deployedSource = playground?.dataset.supervisionPlaygroundSrc;
+
+    if (!playground || !deployedSource) {
+      return;
+    }
+
+    // TypeDoc's standalone local server mounts docs at its origin root, while
+    // the assembled Render/Pages site mounts them under /docs/. Point only the
+    // standalone preview at the separately-running Vite demo.
+    const isStandaloneLocalDocs =
+      (window.location.hostname === "localhost" ||
+        window.location.hostname === "127.0.0.1") &&
+      window.location.port === "5175";
+
+    playground.src = isStandaloneLocalDocs
+      ? "http://127.0.0.1:5173/?embed=docs-playground"
+      : deployedSource;
   }
 
   function brandToolbar() {
