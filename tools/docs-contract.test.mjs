@@ -148,6 +148,9 @@ test("the docs home embeds the local basketball playground", async () => {
     path.join(publicDocsDir, "typedoc-icons.js"),
     "utf8",
   );
+  const packageJson = JSON.parse(
+    await readFile(path.join(rootDir, "package.json"), "utf8"),
+  );
 
   assert.match(
     homepage,
@@ -158,6 +161,7 @@ test("the docs home embeds the local basketball playground", async () => {
     toolbarScript,
     /window\.location\.port === "5175"[\s\S]*?http:\/\/127\.0\.0\.1:5173\/\?embed=docs-playground/,
   );
+  assert.equal(packageJson.scripts["docs:dev"], "npm run dev:demo-docs");
 });
 
 test("Render preview trusts only its assigned hostname", async () => {
