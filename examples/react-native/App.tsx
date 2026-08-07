@@ -615,6 +615,13 @@ function InstantCvHud(props: {
   const isPrivacy = props.recipe === "privacy";
   const classListNames = isPrivacy ? props.privacyClassNames : safetyClassNames;
   const showsClassList = props.recipe === "safety-zone" || isPrivacy;
+  const classListTitle = isPrivacy
+    ? classListNames.length > 0
+      ? "Pixelated classes"
+      : "Choose classes"
+    : classListNames.length > 0
+      ? "Classes outside zone"
+      : "Choose classes";
   const isChoosingSafetyClasses =
     activeRule?.recipe === "safety-zone" && safetyClassNames.length === 0;
   const statusColor = resolveInstantCvStatusColor(
@@ -675,18 +682,32 @@ function InstantCvHud(props: {
         })}
       </View>
 
-      {showsClassList ? (
-        <View style={styles.instantSafetyClasses}>
-          <View style={styles.instantSafetyClassesHeader}>
-            <Text style={styles.instantSafetyClassesTitle}>
-              {isPrivacy ? "Pixelated classes" : "Must not be in zone"}
+      <View style={styles.instantStatusCard}>
+        <View style={styles.instantStatusHeader}>
+          <View style={styles.instantStatusTitleRow}>
+            <View
+              style={[
+                styles.instantStatusDot,
+                { backgroundColor: statusColor },
+              ]}
+            />
+            <Text style={styles.instantStatusTitle}>
+              {showsClassList ? classListTitle : statusLabel}
             </Text>
-            <Text style={styles.instantSafetyClassesCount}>
-              {classListNames.length}
-            </Text>
+            {showsClassList ? (
+              <Text style={styles.instantStatusCount}>
+                {classListNames.length}
+              </Text>
+            ) : null}
           </View>
-          {classListNames.length > 0 ? (
-            <View style={styles.instantSafetyClassList}>
+          <StatusPill
+            tone={props.canRunCamera ? "ready" : "warning"}
+            value={props.canRunCamera ? "on device" : props.modelStatus}
+          />
+        </View>
+        {showsClassList ? (
+          classListNames.length > 0 ? (
+            <View style={styles.instantClassList}>
               {classListNames.map((label) => (
                 <TouchableOpacity
                   accessibilityLabel={`Remove ${label} from ${isPrivacy ? "pixelated" : "prohibited"} classes`}
@@ -705,31 +726,13 @@ function InstantCvHud(props: {
               ))}
             </View>
           ) : (
-            <Text style={styles.instantSafetyClassesEmpty}>
+            <Text style={styles.instantClassHint}>
               {isPrivacy
-                ? "None yet — tap an object to pixelate its class."
-                : "None yet — draw a zone, then tap an object."}
+                ? "Tap an object to pixelate its class."
+                : "Draw a zone, then tap an object."}
             </Text>
-          )}
-        </View>
-      ) : null}
-
-      <View style={styles.instantStatusCard}>
-        <View style={styles.instantStatusHeader}>
-          <View style={styles.instantStatusTitleRow}>
-            <View
-              style={[
-                styles.instantStatusDot,
-                { backgroundColor: statusColor },
-              ]}
-            />
-            <Text style={styles.instantStatusTitle}>{statusLabel}</Text>
-          </View>
-          <StatusPill
-            tone={props.canRunCamera ? "ready" : "warning"}
-            value={props.canRunCamera ? "on device" : props.modelStatus}
-          />
-        </View>
+          )
+        ) : null}
         {props.recipe === "safety-zone" ? (
           <View style={styles.instantShapeSwitch}>
             {(
@@ -1026,7 +1029,14 @@ function LiveCameraProof(props: {
         const currentEffects = classEffects;
 
         if (currentEffects[result.label] === "redact") {
-          setInstantMessage(`${result.label} is already pixelated.`);
+          const nextEffects: Record<string, LiveClassEffect> = {
+            ...currentEffects,
+          };
+          delete nextEffects[result.label];
+          setClassEffects(nextEffects);
+          setInstantMessage(
+            `${result.label} is visible again. Tap it again to pixelate its class.`,
+          );
           Vibration.vibrate(12);
           return;
         }
@@ -3048,7 +3058,13 @@ const styles = StyleSheet.create({
   },
   instantStatusTitle: {
     color: DEMO_COLORS.text,
-    fontSize: 17,
+    fontSize: 14,
+    fontWeight: "900",
+  },
+  instantStatusCount: {
+    color: DEMO_COLORS.primary,
+    fontSize: 12,
+    fontVariant: ["tabular-nums"],
     fontWeight: "900",
   },
   instantStatusMessage: {
@@ -3088,39 +3104,12 @@ const styles = StyleSheet.create({
     fontVariant: ["tabular-nums"],
     fontWeight: "900",
   },
-  instantSafetyClasses: {
-    backgroundColor: "rgba(255, 255, 255, 0.95)",
-    borderColor: "rgba(255, 93, 115, 0.34)",
-    borderRadius: 14,
-    borderWidth: 1,
-    gap: 6,
-    left: 14,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    position: "absolute",
-    right: 14,
-    top: 176,
-    zIndex: 7,
-  },
-  instantSafetyClassesHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  instantSafetyClassesTitle: {
+  instantClassHint: {
     color: DEMO_COLORS.mutedStrong,
-    fontSize: 10,
-    fontWeight: "900",
-    letterSpacing: 0.8,
-    textTransform: "uppercase",
+    fontSize: 12,
+    fontWeight: "700",
   },
-  instantSafetyClassesCount: {
-    color: "#be123c",
-    fontSize: 11,
-    fontVariant: ["tabular-nums"],
-    fontWeight: "900",
-  },
-  instantSafetyClassList: {
+  instantClassList: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 6,
@@ -3137,11 +3126,6 @@ const styles = StyleSheet.create({
     color: "#9f1239",
     fontSize: 11,
     fontWeight: "900",
-  },
-  instantSafetyClassesEmpty: {
-    color: DEMO_COLORS.mutedStrong,
-    fontSize: 12,
-    fontWeight: "700",
   },
   instantReset: {
     alignItems: "center",
