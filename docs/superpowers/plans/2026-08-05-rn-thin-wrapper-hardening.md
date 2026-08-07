@@ -39,24 +39,25 @@ keeps its worklet ordering constraints and the decision not to introduce a
   preparation, live ID-mask preparation, shader contracts, and the optional
   iOS native mask builder.
 - `./skia` owns mask/vector preparation and image/picture disposal helpers.
-- `./sessions` owns a saved-video strict-sync pump, pause/resume/stop,
-  packet retirement, a dedicated worklet runtime, and teardown. It still
-  exposes renderer implementation lanes (`SkImage`, shared values, mask
-  uniforms) to consumers.
+- `./sessions` owns a saved-video strict-sync pump, pause/play/stop,
+  packet retirement, a package-owned worklet runtime, and teardown through a
+  `MediaSession`-shaped file-session facade. Renderer implementation lanes
+  (`SkImage`, shared values, mask uniforms) are private to the package stage.
 - The Expo app has four modes: static, live camera, saved video, and Instant
   CV. `App.tsx` is about 5,000 lines.
 - The live camera path, `SyncedFrameStage`, packet swapping, shader creation,
   vector-picture swapping, class-effect filtering, active-frame picking,
   error shaping, rolling diagnostics, and most defaults still live in the
   example.
-- The saved-video mode consumes `createReactNativeVideoSession`, but still
-  assembles the Skia stage, layout, overlays, shared values, producer adapter,
-  effects, status, and picking itself.
+- The saved-video mode consumes `createReactNativeVideoFileSession`; the
+  package owns the worklet runtime and private Skia binding, while the demo
+  retains its product overlays, effects, controls, and semantic readouts.
 - The package tests verify pure helpers, JS/Swift mask parity, Skia helpers,
   exports, and off-device error behavior. They do not yet exercise a complete
   session with fake source/processor/renderer adapters.
 - iOS has native mask preparation and saved-video frame decode. Android uses
-  the JS mask fallback and does not have the native saved-video source.
+  the JS mask fallback; saved-video decode is explicitly **not implemented
+  yet** and reports a stable availability reason.
 - Post-native physical-device benchmark numbers and a current full device
   matrix are not recorded.
 

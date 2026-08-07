@@ -12,9 +12,10 @@ It has four modes:
   artifact from model-resolution masks; package-owned live presentation updates
   the Skia state and only presents the same camera frame after the matching
   annotation packet is ready.
-- Video: exercises the package-owned iOS saved-video source and compatibility
-  session. Playback is analysis-paced, supports pause/resume/stop, and does not
-  claim seek support.
+- Video: exercises the package-owned iOS saved-video source through the common
+  `MediaSession`-shaped file session. Playback is analysis-paced, supports
+  pause/play/stop, and does not claim seek support. Android saved-video decode
+  is **not implemented yet**.
 - Live inference recipes: configure Golden Pose, Safety Zone, and Privacy with
   serializable example rules. The package-owned `adapters/live-inference` lane
   evaluates them beside the matching model result and returns throttled semantic
@@ -27,8 +28,9 @@ shader pass. The live mode prepares ExecuTorch binary masks directly into the
 ID-mask artifact so the hot path does not round-trip through React state. The
 live proof is strict-sync only: it does not display a newer camera frame with an
 older mask artifact. Saved-video decoding and native mask preparation are
-package-owned on iOS; the remaining work is to migrate that compatibility
-session onto the generic session core and add an Android saved-video source.
+package-owned on iOS. The file session keeps its worklet runtime and Skia
+resources inside the package; Android saved-video decode is not implemented
+yet and fails with a stable availability reason.
 
 ## Run
 

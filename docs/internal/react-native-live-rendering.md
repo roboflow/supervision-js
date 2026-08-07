@@ -90,7 +90,9 @@ from the optional `react/live-inference` entrypoint, plus a live-inference
 extension for serializable recipe rules. It still lacks
 native-thread prepared windows, camera recording/export, Android saved-video
 decoding, and a fully custom Skia/native renderer that imports and draws the
-camera frame directly.
+camera frame directly. Android saved-video decoding is intentionally **not
+implemented yet**; see `react-native-architecture.md` for the
+MediaCodec/AHardwareBuffer implementation path.
 
 ## Next Architecture Step
 

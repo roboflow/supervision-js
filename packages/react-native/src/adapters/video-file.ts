@@ -11,9 +11,10 @@ import {
  * File-backed native decoder boundary for the React Native media session.
  *
  * This adapter owns creation, opening, metadata lookup, and closing of the
- * optional Nitro `VideoFrameSource`. The worklet pump remains in the legacy
- * session for now, so the boxed source is exposed only to that package-owned
- * implementation — application code never needs to unbox a hybrid object.
+ * optional Nitro `VideoFrameSource`. The strict-sync worklet pump is owned by
+ * the package file-session adapter, so the boxed source is exposed only to
+ * that implementation — application code never needs to unbox a hybrid
+ * object.
  */
 export interface ReactNativeVideoFileSource {
   /** Video metadata becomes available after `open()` succeeds. */

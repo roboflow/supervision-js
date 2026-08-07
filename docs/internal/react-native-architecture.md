@@ -152,17 +152,26 @@ without any native module. Android intentionally has no native implementation
 yet and always uses the JS fallback.
 
 The package also owns the iOS saved-video source, reusable ExecuTorch
-serialization/preparation worklets, shared file/live defaults, and the existing
-analysis-paced `createReactNativeVideoSession()` compatibility factory. The
-factory supports pause/resume/stop and intentionally reports seeking as
-unsupported. New code should use `REACT_NATIVE_FILE_SESSION_DEFAULTS`; the old
-video-defaults name is retained only as a deprecated alias.
+serialization/preparation worklets, and shared file/live defaults.
+`createReactNativeVideoFileSession()` exposes the common `MediaSession`
+controls, state subscription, and capability surface while its strict-sync
+native-pointer pump and Skia presentation lanes remain package-private.
+`createReactNativeVideoSession()` is retained only as a deprecated forwarding
+alias. File sessions are analysis-paced, support pause/play/stop, and report
+seeking as unsupported.
 
-The remaining package work is to migrate that saved-video compatibility path
-onto the generic session core, move the live example lane behind reusable
-adapters, add Android saved-video decoding, and introduce bounded prepared
-windows where measurement justifies them. Inference engines remain injected
-producers rather than renderer dependencies.
+Android saved-video decoding is **not implemented yet**. The source reports
+`android-video-file-source-not-implemented-yet` before attempting Nitro lookup.
+Its implementation path is a Nitro C++ `VideoFrameSource` using
+`AMediaExtractor` + `AMediaCodec` and an API-26+ `AImageReader`/
+`AHardwareBuffer` output. It must preserve presentation timestamps and display
+orientation, expose exactly-once buffer release, register CMake/Gradle
+autolinking, and be validated with the same buffer in ExecuTorch and Skia on a
+physical device.
+
+The remaining package work is Android saved-video decoding and measurement for
+bounded prepared windows. Inference engines remain injected producers rather
+than renderer dependencies.
 
 See [`react-native-live-rendering.md`](react-native-live-rendering.md) for the
 live rendering target and current V0 demo shape.

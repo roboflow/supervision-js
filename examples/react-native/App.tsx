@@ -47,8 +47,7 @@ import {
   type ReactNativeLiveInferenceReadout,
 } from "supervision-js-react-native/react/live-inference";
 import {
-  createReactNativeVideoSession,
-  createReactNativeWorkletRuntime,
+  createReactNativeVideoFileSession,
   type ReactNativeVideoSession,
   type ReactNativeVideoSessionEndEvent,
   type ReactNativeVideoSessionStats,
@@ -1760,6 +1759,7 @@ function VideoFileProof(props: {
   // decoder open at position. The ref drives controls, the state rebinds the
   // stage to the session's presentation lanes.
   const videoSessionRef = useRef<ReactNativeVideoSession | null>(null);
+  const videoRequestId = useRef(0);
   const [videoSession, setVideoSession] =
     useState<ReactNativeVideoSession | null>(null);
 
@@ -1784,12 +1784,6 @@ function VideoFileProof(props: {
     [videoDetections, videoDims?.height, videoDims?.width, videoLayout],
   );
   const runSegmentationOnFrame = props.segmentation.runOnFrame;
-  // One dedicated pump runtime per screen mount, shared by every session.
-  const videoRuntime = useMemo(
-    () => createReactNativeWorkletRuntime("supervision-video-pump"),
-    [],
-  );
-
   useEffect(() => {
     videoSessionRef.current?.setMediaRect(videoLayout.mediaRect);
   }, [videoLayout.mediaRect, videoSession]);
@@ -1852,16 +1846,24 @@ function VideoFileProof(props: {
   }, []);
 
   const startVideo = useCallback(
-    (fileUri: string) => {
+    async (fileUri: string) => {
+      const requestId = videoRequestId.current + 1;
+
+      videoRequestId.current = requestId;
       setVideoError(null);
       setVideoStats(null);
       setVideoDetections([]);
       setVideoStatus("opening");
-      videoSessionRef.current?.destroy();
+      await videoSessionRef.current?.destroy();
+
+      if (requestId !== videoRequestId.current) {
+        return;
+      }
+
       videoSessionRef.current = null;
 
       try {
-        const session = createReactNativeVideoSession({
+        const session = createReactNativeVideoFileSession({
           fileUri,
           mediaRect: videoLayout.mediaRect,
           onDetections: setVideoDetections,
@@ -1873,9 +1875,13 @@ function VideoFileProof(props: {
             mosaicCellPx: LIVE_PRIVACY_MOSAIC_CELL_PX,
           },
           resolveMaskEffects: resolveVideoMaskEffects,
-          runtime: videoRuntime,
           serializeFrame: serializeVideoFrame,
         });
+
+        if (requestId !== videoRequestId.current) {
+          await session.destroy();
+          return;
+        }
 
         videoSessionRef.current = session;
         setVideoSession(session);
@@ -1885,6 +1891,10 @@ function VideoFileProof(props: {
         });
         setVideoStatus("processing");
       } catch (error) {
+        if (requestId !== videoRequestId.current) {
+          return;
+        }
+
         setVideoError(
           error instanceof Error ? error.message : "failed to open video",
         );
@@ -1896,7 +1906,6 @@ function VideoFileProof(props: {
       resolveVideoMaskEffects,
       serializeVideoFrame,
       videoLayout.mediaRect,
-      videoRuntime,
     ],
   );
 
@@ -1910,7 +1919,7 @@ function VideoFileProof(props: {
         throw new Error("sample video has no local uri");
       }
 
-      startVideo(asset.localUri);
+      await startVideo(asset.localUri);
     } catch (error) {
       setVideoError(
         error instanceof Error ? error.message : "failed to load sample",
@@ -1931,7 +1940,7 @@ function VideoFileProof(props: {
         return;
       }
 
-      startVideo(uri);
+      await startVideo(uri);
     } catch (error) {
       setVideoError(
         error instanceof Error ? error.message : "failed to pick video",
@@ -1950,7 +1959,7 @@ function VideoFileProof(props: {
     }
 
     setVideoStatus("processing");
-    videoSessionRef.current.resume();
+    void videoSessionRef.current.play();
   }, []);
 
   const stopVideo = useCallback(() => {
@@ -1959,7 +1968,8 @@ function VideoFileProof(props: {
 
   useEffect(() => {
     return () => {
-      videoSessionRef.current?.destroy();
+      videoRequestId.current += 1;
+      void videoSessionRef.current?.destroy();
       videoSessionRef.current = null;
     };
   }, []);
