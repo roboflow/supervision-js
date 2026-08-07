@@ -9,7 +9,7 @@
       <p class="supervision-home__install"><code>npm install supervision</code></p>
       <div class="supervision-home__actions">
         <a class="supervision-home__button supervision-home__button--primary" href="documents/Application_Integration.html">Get started</a>
-        <a class="supervision-home__button supervision-home__button--secondary" href="https://supervision-js-demo.onrender.com/">Open the demo</a>
+        <a class="supervision-home__button supervision-home__button--secondary" data-supervision-demo-link href="demo/">Open the demo</a>
       </div>
     </div>
     <aside class="supervision-home__scene-card" aria-label="Media session composition">
@@ -35,7 +35,7 @@
     <div class="supervision-home__playground-frame">
       <iframe
         allow="autoplay"
-        data-supervision-playground-src="../?embed=docs-playground"
+        data-supervision-playground-src="demo/?embed=docs-playground"
         loading="lazy"
         title="Interactive basketball detection playground"
       ></iframe>

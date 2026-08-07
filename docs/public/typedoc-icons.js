@@ -114,17 +114,26 @@
       return;
     }
 
+    playground.src = resolveDemoUrl(deployedSource);
+
+    const demoLink = home.querySelector("[data-supervision-demo-link]");
+    if (demoLink) {
+      demoLink.href = resolveDemoUrl(demoLink.getAttribute("href") ?? "demo/");
+    }
+  }
+
+  function resolveDemoUrl(deployedPath) {
     // TypeDoc's standalone local server mounts docs at its origin root, while
-    // the assembled Render/Pages site mounts them under /docs/. Point only the
-    // standalone preview at the separately-running Vite demo.
+    // the assembled site mounts docs at the domain root and the demo at /demo/.
+    // Point only the standalone preview at the separately-running Vite demo.
     const isStandaloneLocalDocs =
       (window.location.hostname === "localhost" ||
         window.location.hostname === "127.0.0.1") &&
       window.location.port === "5175";
 
-    playground.src = isStandaloneLocalDocs
-      ? "http://127.0.0.1:5173/?embed=docs-playground"
-      : deployedSource;
+    return isStandaloneLocalDocs
+      ? `http://127.0.0.1:5173/${deployedPath.includes("?") ? deployedPath.slice(deployedPath.indexOf("?")) : ""}`
+      : new URL(deployedPath, window.location.href).href;
   }
 
   function brandToolbar() {
@@ -142,6 +151,7 @@
       `${base}assets/brand/roboflow-logomark.svg`,
       window.location.href,
     ).href;
+    const demoUrl = resolveDemoUrl(`${base}demo/`);
     const version = packageReleaseStatus
       ? `v${packageVersion} (${packageReleaseStatus})`
       : `v${packageVersion}`;
@@ -156,7 +166,7 @@
     `;
 
     links.innerHTML = `
-      <a class="supervision-docs__nav-link" href="https://supervision-js-demo.onrender.com/">Demo</a>
+      <a class="supervision-docs__nav-link" href="${demoUrl}">Demo</a>
       <a class="supervision-docs__nav-link supervision-docs__nav-link--active" href="${docsHome}">Docs</a>
       <a class="supervision-docs__nav-link supervision-docs__github" href="https://github.com/roboflow/supervision-js">GitHub</a>
     `;

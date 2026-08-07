@@ -67,8 +67,8 @@ import { createMaskBrushEditor } from "supervision/editing";
 
 The public demo and generated API reference are hosted on Render:
 
-- [Demo](https://supervision-js-demo.onrender.com/)
-- [Documentation](https://supervision-js-demo.onrender.com/docs/)
+- [Documentation](https://supervision-js-demo.onrender.com/)
+- [Demo](https://supervision-js-demo.onrender.com/demo/)
 - [Vanilla example](https://supervision-js-demo.onrender.com/examples/vanilla/)
 
 Hosted surfaces deliberately use public fixtures only. Media upload and SAM3

@@ -20,7 +20,7 @@ const docsUrl =
   (globalThis.location.hostname === "localhost" ||
   globalThis.location.hostname === "127.0.0.1"
     ? "http://127.0.0.1:5175"
-    : `${import.meta.env.BASE_URL}docs/`);
+    : new URL("../", globalThis.location.href).href);
 const allowUpload = import.meta.env.VITE_DEMO_ALLOW_UPLOAD !== "false";
 
 export function App() {
