@@ -10,17 +10,16 @@ import { RendererViewport } from "./components/RendererViewport";
 import { SelectionPanel } from "./components/SelectionPanel";
 import { SourceControls } from "./components/SourceControls";
 import { StatusPanel } from "./components/StatusPanel";
+import { resolveDemoDocsUrl } from "./docs-url";
 import { DemoSourceMode, useDemoRenderer } from "./hooks/useDemoRenderer";
 import { defaultDemoClassNames } from "./presentation/demo-presentation";
 import { DemoViewMode } from "./session/demo-view-mode";
 import type { TimelineRange } from "./session/demo-session-types";
 
-const docsUrl =
-  import.meta.env.VITE_SUPERVISION_DOCS_URL ??
-  (globalThis.location.hostname === "localhost" ||
-  globalThis.location.hostname === "127.0.0.1"
-    ? "http://127.0.0.1:5175"
-    : new URL("../", globalThis.location.href).href);
+const docsUrl = resolveDemoDocsUrl(
+  import.meta.env.VITE_SUPERVISION_DOCS_URL,
+  globalThis.location,
+);
 const allowUpload = import.meta.env.VITE_DEMO_ALLOW_UPLOAD !== "false";
 
 export function App() {

@@ -186,6 +186,10 @@ test("deployed site presents docs at the root and the workbench at /demo/", asyn
     path.join(rootDir, "demo/src/App.tsx"),
     "utf8",
   );
+  const docsUrl = await readFile(
+    path.join(rootDir, "demo/src/docs-url.ts"),
+    "utf8",
+  );
   const homepage = await readFile(path.join(publicDocsDir, "index.md"), "utf8");
   const toolbar = await readFile(
     path.join(publicDocsDir, "typedoc-icons.js"),
@@ -203,7 +207,8 @@ test("deployed site presents docs at the root and the workbench at /demo/", asyn
   );
   assert.match(pagesBuild, /"demo\/index\.html"/);
   assert.doesNotMatch(pagesBuild, /"docs\/index\.html"/);
-  assert.match(demoApp, /new URL\("\.\.\/", globalThis\.location\.href\)/);
+  assert.match(demoApp, /resolveDemoDocsUrl\(/);
+  assert.match(docsUrl, /return new URL\("\.\.\/", location\.href\)\.href/);
   assert.match(homepage, /data-supervision-demo-link href="demo\/"/);
   assert.match(
     homepage,

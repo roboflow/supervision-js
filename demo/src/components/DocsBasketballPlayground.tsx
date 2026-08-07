@@ -1,5 +1,6 @@
 import { useCallback, useMemo } from "react";
 import { MediaRendererPlaybackState } from "supervision";
+import { resolveDemoDocsUrl } from "../docs-url";
 import {
   type DemoPresentationSettings,
   type DemoPresentationLayerSetting,
@@ -7,12 +8,10 @@ import {
 import { useDemoRenderer } from "../hooks/useDemoRenderer";
 import { RendererViewport } from "./RendererViewport";
 
-const docsUrl =
-  import.meta.env.VITE_SUPERVISION_DOCS_URL ??
-  (globalThis.location.hostname === "localhost" ||
-  globalThis.location.hostname === "127.0.0.1"
-    ? "http://127.0.0.1:5175"
-    : `${import.meta.env.BASE_URL}docs/`);
+const docsUrl = resolveDemoDocsUrl(
+  import.meta.env.VITE_SUPERVISION_DOCS_URL,
+  globalThis.location,
+);
 
 const annotationLayers: readonly {
   readonly key: DemoPresentationLayerSetting;
