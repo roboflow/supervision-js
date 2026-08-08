@@ -15,7 +15,10 @@ import {
   type MediaSourceState,
   type RenderPreparationDiagnostics,
 } from "supervision";
-import type { DemoFixtureSummary } from "../fixtures/demo-fixtures";
+import type {
+  DemoFixtureFrameTransform,
+  DemoFixtureSummary,
+} from "../fixtures/demo-fixtures";
 import {
   demoFixtures,
   defaultDemoFixture,
@@ -93,6 +96,8 @@ export interface DemoRendererState {
 }
 
 export interface UseDemoRendererOptions {
+  /** Optional docs/demo-only transformation over loaded fixture frames. */
+  readonly fixtureFrameTransform?: DemoFixtureFrameTransform;
   /**
    * Lets focused demo experiences start on a known fixture without first
    * constructing another media session.
@@ -133,6 +138,7 @@ export function useDemoRenderer(
         (fixture) => fixture.sampleName === options.initialFixtureId,
       ) ?? defaultDemoFixture,
   );
+  const [fixtureFrameTransform] = useState(() => options.fixtureFrameTransform);
   const [initialPresentationSettings] = useState(() =>
     constrainDemoPresentationSettings(
       {
@@ -300,6 +306,7 @@ export function useDemoRenderer(
           const session = await createFixtureSession({
             container,
             definition: activeFixture,
+            fixtureFrameTransform,
             isActive,
             onDetectionHover: setHoveredDetectionPick,
             onDetectionSelect: setSelectedDetectionPick,
@@ -380,7 +387,13 @@ export function useDemoRenderer(
         renderer?.destroy();
       }
     };
-  }, [activeFixture, sourceMode, syncRendererState, uploadRun]);
+  }, [
+    activeFixture,
+    fixtureFrameTransform,
+    sourceMode,
+    syncRendererState,
+    uploadRun,
+  ]);
 
   const playbackState = rendererState?.playbackState ?? null;
   const duration = rendererState?.duration ?? fixtureSummary?.duration ?? null;

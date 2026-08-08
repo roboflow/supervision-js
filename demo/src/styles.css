@@ -323,6 +323,235 @@ body {
   }
 }
 
+.docs-layer-playground {
+  background:
+    radial-gradient(
+      circle at 100% 0,
+      rgba(196, 181, 253, 0.42),
+      transparent 34%
+    ),
+    #ffffff;
+  color: var(--text);
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(15.5rem, 1fr);
+  height: auto;
+  min-height: 46rem;
+  overflow: visible;
+}
+
+.docs-layer-playground__stage {
+  background: #f3f4f6;
+  min-height: 0;
+  position: relative;
+}
+
+.docs-layer-playground__stage .renderer-viewport {
+  background: #f3f4f6;
+  height: 100%;
+}
+
+.docs-layer-playground__stage .renderer-viewport::after {
+  display: none;
+}
+
+.docs-layer-playground__header p,
+.docs-layer-playground__code > div > span {
+  color: var(--violet);
+  font-size: 0.64rem;
+  font-weight: 780;
+  letter-spacing: 0.09em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.docs-layer-playground__panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  min-height: 0;
+  overflow: visible;
+  padding: clamp(1rem, 2.5vw, 1.5rem);
+}
+
+.docs-layer-playground__header {
+  align-items: start;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+}
+
+.docs-layer-playground__header h1 {
+  font-size: clamp(1.55rem, 3vw, 2.15rem);
+  letter-spacing: -0.045em;
+  line-height: 1;
+  margin: 0.28rem 0 0.38rem;
+}
+
+.docs-layer-playground__header > div > span {
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.docs-layer-playground__header button {
+  align-items: center;
+  background: var(--violet);
+  border: 0;
+  border-radius: 9px;
+  color: #ffffff;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 0.75rem;
+  font-weight: 720;
+  gap: 0.35rem;
+  min-height: 2.15rem;
+  padding: 0.45rem 0.7rem;
+}
+
+.docs-layer-playground__header button:hover:not(:disabled) {
+  background: #6d28d9;
+}
+
+.docs-layer-playground__header button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.docs-layer-playground__controls {
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid #e4e4e7;
+  border-radius: 12px;
+  display: grid;
+  gap: 0.72rem;
+  padding: 0.85rem;
+  flex-shrink: 0;
+}
+
+.docs-layer-playground__range {
+  display: grid;
+  gap: 0.38rem;
+}
+
+.docs-layer-playground__range > span,
+.docs-layer-playground__toggle {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.docs-layer-playground__range strong,
+.docs-layer-playground__toggle strong {
+  color: var(--muted-strong);
+  font-size: 0.73rem;
+  font-weight: 690;
+}
+
+.docs-layer-playground__range output {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.docs-layer-playground__range input {
+  accent-color: var(--violet);
+  cursor: pointer;
+  inline-size: 100%;
+}
+
+.docs-layer-playground__toggle {
+  border-top: 1px solid #ede9fe;
+  cursor: pointer;
+  padding-top: 0.7rem;
+}
+
+.docs-layer-playground__toggle > span {
+  display: grid;
+  gap: 0.08rem;
+}
+
+.docs-layer-playground__toggle small {
+  color: var(--muted);
+  font-size: 0.65rem;
+}
+
+.docs-layer-playground__toggle input {
+  accent-color: var(--violet);
+  block-size: 1rem;
+  inline-size: 1rem;
+}
+
+.docs-layer-playground__code {
+  background: #171224;
+  border: 1px solid #2e2444;
+  border-radius: 12px;
+  color: #f5f3ff;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.docs-layer-playground__code > div {
+  align-items: center;
+  border-bottom: 1px solid #34284d;
+  display: flex;
+  justify-content: space-between;
+  padding: 0.58rem 0.75rem;
+}
+
+.docs-layer-playground__code > div > span {
+  color: #c4b5fd;
+}
+
+.docs-layer-playground__code small {
+  color: #a1a1aa;
+  font-size: 0.62rem;
+}
+
+.docs-layer-playground__code pre {
+  margin: 0;
+  overflow: auto;
+  padding: 0.72rem 0.8rem;
+}
+
+.docs-layer-playground__code code {
+  color: #ede9fe;
+  font-family: var(--font-mono);
+  font-size: clamp(0.62rem, 1.3vw, 0.71rem);
+  line-height: 1.5;
+}
+
+.docs-layer-playground__progress {
+  background: #ddd6fe;
+  block-size: 0.3rem;
+  border-radius: 999px;
+  margin-top: auto;
+  overflow: hidden;
+}
+
+.docs-layer-playground__progress span {
+  background: linear-gradient(90deg, #7c3aed, #a78bfa);
+  block-size: 100%;
+  border-radius: inherit;
+  display: block;
+  transition: width 180ms linear;
+}
+
+@media (max-width: 720px) {
+  .docs-layer-playground {
+    grid-template-columns: 1fr;
+    grid-template-rows: 18rem auto;
+    overflow: visible;
+  }
+
+  .docs-layer-playground__stage {
+    border-bottom: 1px solid #ddd6fe;
+    min-height: 18rem;
+  }
+
+  .docs-layer-playground__panel {
+    overflow: visible;
+  }
+}
+
 button,
 input {
   font: inherit;
