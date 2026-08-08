@@ -244,10 +244,13 @@ which frames the user happened to watch.
 Heat maps should expose explicit accumulation semantics:
 
 - `trailing-window`: accumulate over the previous duration;
-- `full-timeline`: precompute over a finite enumerable source.
+- `full-timeline`: precompute only when the implementation can establish a
+  finite, complete source range.
 
 An implicit “frames watched during this session” mode should not be the
-default.
+default. The source capability that proves a complete range is intentionally
+provisional and must be resolved by the temporal-foundation PR before this mode
+becomes public.
 
 ### Media Effects
 
@@ -334,14 +337,22 @@ replace working fixture provenance.
 ### Local Inference Authoring
 
 Use a local [Roboflow Inference](https://github.com/roboflow/inference) server
-only to author fixtures. The official development flow is:
+only to author fixtures. Self-hosted Inference does not require authentication
+by default, so fixture authoring must bind it to loopback or use equivalent
+network isolation. Follow the official
+[self-hosting security guidance](https://inference.roboflow.com/install/security/)
+and run a hardware-appropriate image by immutable digest, conceptually:
 
 ```bash
-pip install inference-cli
-inference server start --dev
+INFERENCE_IMAGE="roboflow/roboflow-inference-server-cpu@sha256:REPLACE_WITH_DIGEST"
+docker run --rm \
+  -p 127.0.0.1:9001:9001 \
+  "$INFERENCE_IMAGE"
 ```
 
-The default local endpoint is `http://localhost:9001`. Submit frames through
+Do not publish the Inference port to an untrusted network, and do not enable the
+development port when fixture generation does not need it. Submit frames to
+`http://127.0.0.1:9001` through
 the
 [`InferenceHTTPClient`](https://inference.roboflow.com/inference_helpers/inference_sdk/)
 using a documented
@@ -349,19 +360,22 @@ using a documented
 
 A reproducible authoring run must:
 
-1. pin the Inference server container tag and digest, SDK, Python, Python
-   Supervision, FFmpeg, and generator commit;
+1. pin the Inference server image digest, SDK, Python, Python Supervision,
+   FFmpeg, and generator commit;
 2. verify source media and any deterministic derived-media hash;
 3. decode exact presentation timestamps and durations rather than deriving time
    as `frameIndex / fps`;
-4. record the model alias, confidence, IoU, resize, class-filter, and batching
-   parameters;
-5. preserve every raw response in JSONL before normalization;
-6. normalize stable ids, classes, confidence, rectangles, keypoints, compressed
+4. record the model alias, resolved model artifact or version, downloaded
+   weight checksum, model-family license, confidence, IoU, resize, class-filter,
+   and batching parameters;
+5. fail provenance validation when the resolved model artifact cannot be
+   identified and hashed;
+6. preserve every raw response in JSONL before normalization;
+7. normalize stable ids, classes, confidence, rectangles, keypoints, compressed
    RLE, and media times;
-7. apply only named and versioned deterministic post-processing;
-8. create and validate the existing one-second chunk manifest;
-9. run Python and JavaScript references with network access disabled.
+8. apply only named and versioned deterministic post-processing;
+9. create and validate the existing one-second chunk manifest;
+10. run Python and JavaScript references with network access disabled.
 
 Conceptually:
 
@@ -461,20 +475,27 @@ sibling source import or `npm pack --dry-run` is not sufficient evidence.
 
 ## Delivery Sequence
 
+### Existing Foundation
+
+`npm run package:tarball:smoke` already builds the portable package, installs it
+in a temporary external consumer, imports the public entrypoints, and produces
+a minimal Vite build. This clean-consumer baseline is complete; do not create a
+duplicate compatibility-harness PR. Extend the smoke coverage only when a
+roadmap change introduces a concrete consumer behavior that it does not already
+exercise.
+
 ### Foundation PRs: No New Annotators
 
 1. **Inference fixture authoring.** Generic local-server generator, provenance
    schema, fixture validation, and `people_walking_detection_v1`.
-2. **External-consumer compatibility harness.** Reproducible tarball install and
-   focused integration checks without sibling-repository imports.
-3. **Recipe composition contract.** Stable identity, phases, coordinate spaces,
+2. **Recipe composition contract.** Stable identity, phases, coordinate spaces,
    picking, backend capabilities, and diagnostics while compiling existing
    presentation unchanged.
-4. **Generic vector primitives.** Path, ellipse, marker, text-anchor, and
+3. **Generic vector primitives.** Path, ellipse, marker, text-anchor, and
    quadrilateral instructions justified by the first facades.
-5. **Prepared media-effect primitives.** Bounded filters, mask reuse, worker
+4. **Prepared media-effect primitives.** Bounded filters, mask reuse, worker
    ownership, invalidation, and fallback capability reporting.
-6. **Temporal and HUD primitives.** Media-time windows, seek/loop behavior,
+5. **Temporal and HUD primitives.** Media-time windows, seek/loop behavior,
    cache bounds, viewport anchoring, and deterministic counters.
 
 ### Tier 1: Foundational Geometry Facades
@@ -519,9 +540,11 @@ should not move ahead of the primitives and lifecycle rules they require.
 
 Review every roadmap PR against these questions:
 
-- Does the change add exactly one annotator facade?
+- Is the PR kind explicit? A foundation/infrastructure PR adds zero annotator
+  facades; an annotator PR adds exactly one.
 - Could the facade lower to existing primitives instead of adding a new
-  renderer path?
+  renderer path? For a foundation PR, does the primitive have a documented
+  near-term facade that justifies it?
 - Does it preserve existing session, presentation, style, interaction, and
   editing contracts?
 - Are picking and layer order explicit?
@@ -544,7 +567,8 @@ Review every roadmap PR against these questions:
 3. Does simultaneous segmentation-polygon and oriented-box data justify an
    `orientedBox` field, or should adapters continue lowering it to polygons?
 4. Which recipes should the experimental React Native backend support first?
-5. Should full-timeline heat maps require a finite enumerable source?
+5. Which source capability should prove a finite, complete range for
+   full-timeline heat maps?
 6. Should pure zone counters live in core before a second non-renderer consumer
    needs them?
 7. What browser matrix and image-diff tolerance define visual parity?
