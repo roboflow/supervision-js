@@ -70,6 +70,8 @@
     document.documentElement.dataset.theme = "light";
     localStorage.setItem("tsd-theme", "light");
     brandToolbar();
+    configureEmbeddedPlaygrounds(document);
+    customizeSidebar();
     decorateHomePage();
     upgradeIcons(document);
 
@@ -78,6 +80,8 @@
         for (const node of mutation.addedNodes) {
           if (node instanceof Element) {
             upgradeIcons(node);
+            configureEmbeddedPlaygrounds(node);
+            customizeSidebar();
           }
         }
       }
@@ -101,25 +105,114 @@
     home
       .closest(".container-main")
       ?.classList.add("supervision-docs--home-layout");
-    configureHomePlayground(home);
+    configureHomeDemoLink(home);
   }
 
-  function configureHomePlayground(home) {
-    const playground = home.querySelector(
-      "iframe[data-supervision-playground-src]",
-    );
-    const deployedSource = playground?.dataset.supervisionPlaygroundSrc;
+  function configureEmbeddedPlaygrounds(root) {
+    const playgrounds =
+      root instanceof Element &&
+      root.matches("iframe[data-supervision-playground-src]")
+        ? [root]
+        : root.querySelectorAll?.("iframe[data-supervision-playground-src]");
 
-    if (!playground || !deployedSource) {
+    if (!playgrounds) {
       return;
     }
 
-    playground.src = resolveDemoUrl(deployedSource);
+    for (const playground of playgrounds) {
+      const deployedSource = playground.dataset.supervisionPlaygroundSrc;
 
+      if (
+        deployedSource &&
+        playground.dataset.supervisionPlaygroundReady !== "true"
+      ) {
+        playground.src = resolveDemoUrl(deployedSource);
+        playground.dataset.supervisionPlaygroundReady = "true";
+      }
+    }
+  }
+
+  window.addEventListener("message", (event) => {
+    const payload = event.data;
+
+    if (
+      !payload ||
+      payload.type !== "supervision-js:playground-height" ||
+      !Number.isFinite(payload.height)
+    ) {
+      return;
+    }
+
+    const playground = Array.from(
+      document.querySelectorAll("iframe[data-supervision-playground-src]"),
+    ).find((iframe) => iframe.contentWindow === event.source);
+
+    if (!playground) {
+      return;
+    }
+
+    const expectedOrigin = new URL(playground.src, window.location.href).origin;
+
+    if (event.origin !== expectedOrigin) {
+      return;
+    }
+
+    playground.style.height = `${Math.ceil(payload.height)}px`;
+  });
+
+  function configureHomeDemoLink(home) {
     const demoLink = home.querySelector("[data-supervision-demo-link]");
     if (demoLink) {
       demoLink.href = resolveDemoUrl(demoLink.getAttribute("href") ?? "demo/");
     }
+  }
+
+  function customizeSidebar() {
+    const navigation = document.querySelector(".site-menu .tsd-navigation");
+    const rootLink = navigation?.querySelector(":scope > a");
+
+    if (!navigation || !rootLink) {
+      return;
+    }
+
+    const base = document.documentElement.dataset.base ?? "./";
+    rootLink.href = new URL(`${base}index.html`, window.location.href).href;
+    rootLink.textContent = "Home";
+    rootLink.classList.add("supervision-docs__sidebar-home");
+
+    const navList = navigation.querySelector(":scope > ul");
+    if (!navList || navList.dataset.supervisionStructured === "true") {
+      return;
+    }
+
+    const moduleItems = Array.from(navList.children).filter((item) =>
+      item.querySelector?.('.tsd-kind-icon[aria-label="Module"]'),
+    );
+
+    if (moduleItems.length === 0) {
+      return;
+    }
+
+    const apiItem = document.createElement("li");
+    apiItem.className = "supervision-docs__api-reference";
+    const details = document.createElement("details");
+    const summary = document.createElement("summary");
+    const label = document.createElement("span");
+    const count = document.createElement("small");
+    const apiList = document.createElement("ul");
+
+    label.textContent = "API Reference";
+    count.textContent = String(moduleItems.length);
+    summary.append(label, count);
+    details.append(summary, apiList);
+    apiItem.append(details);
+
+    for (const moduleItem of moduleItems) {
+      apiList.append(moduleItem);
+    }
+
+    navList.append(apiItem);
+    navList.dataset.supervisionStructured = "true";
   }
 
   function resolveDemoUrl(deployedPath) {
@@ -131,9 +224,12 @@
         window.location.hostname === "127.0.0.1") &&
       window.location.port === "5175";
 
-    return isStandaloneLocalDocs
-      ? `http://127.0.0.1:5173/${deployedPath.includes("?") ? deployedPath.slice(deployedPath.indexOf("?")) : ""}`
-      : new URL(deployedPath, window.location.href).href;
+    if (isStandaloneLocalDocs) {
+      return `http://127.0.0.1:5173/${deployedPath.includes("?") ? deployedPath.slice(deployedPath.indexOf("?")) : ""}`;
+    }
+
+    const base = document.documentElement.dataset.base ?? "./";
+    return new URL(`${base}${deployedPath}`, window.location.href).href;
   }
 
   function brandToolbar() {

@@ -116,6 +116,10 @@ Use a custom style object when the base classes are not expressive enough. The
 contract stays the same: detections remain semantic data, and styles resolve how
 that data should be presented.
 
+Continue to [Visualization Layers](../visualization-layers.md) for focused box,
+mask, label, polygon, polyline, and keypoint examples backed by the frozen
+basketball fixture.
+
 ## Geometry Shapes
 
 One detection may carry any supported semantic geometry:

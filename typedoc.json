@@ -20,13 +20,36 @@
   "lightHighlightTheme": "github-light",
   "darkHighlightTheme": "github-dark",
   "name": "supervision-js",
+  "navigation": {
+    "compactFolders": true,
+    "excludeReferences": true,
+    "includeCategories": false,
+    "includeFolders": false,
+    "includeGroups": false
+  },
+  "navigationLeaves": [
+    "Detections",
+    "Editing",
+    "Interactions",
+    "Media Preparation",
+    "Media Sessions",
+    "Rendering",
+    "Styles"
+  ],
   "out": "docs/site",
   "plugin": ["typedoc-rhineai-theme"],
-  "projectDocuments": ["docs/public/guides/*.md", "docs/public/recipes/*.md"],
+  "projectDocuments": [
+    "docs/public/getting-started.md",
+    "docs/public/concepts.md",
+    "docs/public/visualization-layers.md",
+    "docs/public/recipes.md"
+  ],
   "readme": "docs/public/index.md",
   "searchInComments": true,
   "searchInDocuments": true,
   "sourceLinkExternal": true,
   "sourceLinkTemplate": "https://github.com/roboflow/supervision-js/blob/{gitRevision}/{path}#L{line}",
+  "sort": ["documents-first", "source-order"],
+  "sortEntryPoints": false,
   "tsconfig": "tsconfig.docs.json"
 }

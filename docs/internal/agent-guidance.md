@@ -40,6 +40,21 @@ or the private React Native experiment into public contracts. Do not edit
 generated `docs/site/` output; rebuild the docs with `npm run demo:build` and
 run `npm run docs:check` after changing the homepage.
 
+Public rendering guidance lives under
+[`../public/visualization-layers.md`](../public/visualization-layers.md). Treat a
+**visualization layer** as the consumer-facing unit: semantic detections provide
+the data, presentation styles control appearance, and the session composes the
+enabled layers. When a public layer is added or materially changed, update its
+focused page and the `Visualization Layers` navigation children in the same
+change. Add the reusable docs playground only when a committed frozen fixture
+contains the layer's real semantic input; each such playground should show that
+fixture, focused controls, and a minimal live `session.setPresentation()`
+snippet whose values stay synchronized with those controls. Do not fabricate
+docs-only detections to simulate a missing fixture. Record any unsupported
+playground in `annotator-use-case-roadmap.md` with the next fixture or primitive
+required. Keep renderer objects and docs-only fixture augmentation out of the
+published package API.
+
 The documentation toolbar displays the browser package version from
 `docs/public/typedoc-icons.js`. Update that value with
 `packages/web/package.json` in every browser package release; `npm run
