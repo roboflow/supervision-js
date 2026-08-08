@@ -156,12 +156,120 @@ test("the docs home embeds the local basketball playground", async () => {
     homepage,
     /data-supervision-playground-src="demo\/\?embed=docs-playground"/,
   );
+  assert.match(
+    homepage,
+    /href="documents\/Visualization_Layers\.html">Visualization layers</,
+  );
+  assert.match(homepage, /aria-label="Documentation entry points"/);
   assert.match(homepage, /title="Interactive basketball detection playground"/);
   assert.match(
     toolbarScript,
     /window\.location\.port === "5175"[\s\S]*?http:\/\/127\.0\.0\.1:5173\//,
   );
   assert.equal(packageJson.scripts["docs:dev"], "npm run dev:demo-docs");
+});
+
+test("TypeDoc presents public guidance as four navigable sections", async () => {
+  const config = JSON.parse(
+    await readFile(path.join(rootDir, "typedoc.json"), "utf8"),
+  );
+
+  assert.deepEqual(config.projectDocuments, [
+    "docs/public/getting-started.md",
+    "docs/public/concepts.md",
+    "docs/public/visualization-layers.md",
+    "docs/public/recipes.md",
+  ]);
+  assert.deepEqual(config.sort, ["documents-first", "source-order"]);
+  assert.equal(config.sortEntryPoints, false);
+  assert.deepEqual(config.navigationLeaves, [
+    "Detections",
+    "Editing",
+    "Interactions",
+    "Media Preparation",
+    "Media Sessions",
+    "Rendering",
+    "Styles",
+  ]);
+});
+
+test("every fixture-backed visualization layer has a focused live playground", async () => {
+  const layers = ["boxes", "masks", "labels", "polygons", "keypoints"];
+  const pages = {
+    boxes: "boxes.md",
+    keypoints: "keypoints-and-skeletons.md",
+    labels: "labels.md",
+    masks: "masks.md",
+    polygons: "polygons.md",
+  };
+  const visualizationIndex = await readFile(
+    path.join(publicDocsDir, "visualization-layers.md"),
+    "utf8",
+  );
+  const toolbarScript = await readFile(
+    path.join(publicDocsDir, "typedoc-icons.js"),
+    "utf8",
+  );
+  const docsCss = await readFile(
+    path.join(publicDocsDir, "typedoc-custom.css"),
+    "utf8",
+  );
+
+  for (const layer of layers) {
+    const page = await readFile(
+      path.join(publicDocsDir, "visualization-layers", pages[layer]),
+      "utf8",
+    );
+
+    assert.match(
+      page,
+      new RegExp(
+        `data-supervision-playground-src="demo/\\?embed=visualization-layer&amp;layer=${layer}"`,
+      ),
+    );
+    assert.match(page, /session\.setPresentation\(\{/);
+    assert.match(visualizationIndex, new RegExp(pages[layer]));
+  }
+
+  assert.match(toolbarScript, /iframe\[data-supervision-playground-src\]/);
+  assert.match(
+    toolbarScript,
+    /const base = document\.documentElement\.dataset\.base \?\? "\.\/";[\s\S]*?new URL\(`\$\{base\}\$\{deployedPath\}`/,
+  );
+  assert.match(toolbarScript, /supervision-js:playground-height/);
+  assert.match(toolbarScript, /api-reference/);
+  assert.match(
+    toolbarScript,
+    /const details = document\.createElement\("details"\)/,
+  );
+  assert.match(toolbarScript, /label\.textContent = "API Reference"/);
+  assert.match(
+    docsCss,
+    /supervision-docs--home-layout \{[\s\S]*?min-height: 0 !important;[\s\S]*?position: static !important;[\s\S]*?transform: none !important;/,
+  );
+  assert.match(
+    docsCss,
+    /supervision-docs--home-layout > \.col-sidebar \{[\s\S]*?align-self: start;[\s\S]*?min-height: 0 !important;/,
+  );
+  assert.match(
+    docsCss,
+    /container-main:not\(\.supervision-docs--home-layout\) \{[\s\S]*?grid-template-areas: "sidebar content" !important;[\s\S]*?grid-template-columns: minmax\(13rem, 15rem\) minmax\(0, 1fr\) !important;/,
+  );
+  assert.match(
+    docsCss,
+    /container-main:not\(\.supervision-docs--home-layout\) \.page-menu \{[\s\S]*?display: none !important;/,
+  );
+  assert.match(
+    docsCss,
+    /\.tsd-typography:has\(\.supervision-layer-playground\) \{[\s\S]*?max-width: 72rem;/,
+  );
+
+  const polylinePage = await readFile(
+    path.join(publicDocsDir, "visualization-layers", "polylines.md"),
+    "utf8",
+  );
+  assert.doesNotMatch(polylinePage, /data-supervision-playground-src/);
+  assert.match(polylinePage, /Fixture status:/);
 });
 
 test("Render preview trusts only its assigned hostname", async () => {

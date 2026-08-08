@@ -3,6 +3,7 @@ import {
   type DetectionFrameChunkFetch,
   type DetectionFrameChunkManifest,
   type DetectionFrameSource,
+  type DetectionFrame,
   type MediaSessionMedia,
 } from "supervision";
 import type { DemoPresentationAvailability } from "../presentation/demo-presentation";
@@ -173,6 +174,10 @@ export interface DemoFixtureDetectionSource {
   destroy(): void;
 }
 
+export type DemoFixtureFrameTransform = (
+  frames: readonly DetectionFrame[],
+) => readonly DetectionFrame[];
+
 export interface DemoFixtureMediaSource {
   readonly error: Error | null;
   readonly media: MediaSessionMedia;
@@ -225,10 +230,17 @@ export async function loadDemoFixtureMedia(
 export function createDemoFixtureDetectionSource(
   manifest: DemoFixtureDetectionManifest,
   definition: DemoFixtureDefinition = defaultDemoFixture,
+  frameTransform?: DemoFixtureFrameTransform,
 ): DemoFixtureDetectionSource {
   const detectionSource = createChunkedDetectionFrameSource({
     baseUrl: definition.detectionsManifestSrc,
-    fetchChunk: (chunk) => fetchDemoFixtureDetectionChunk(chunk, definition),
+    fetchChunk: async (chunk) => {
+      const loaded = await fetchDemoFixtureDetectionChunk(chunk, definition);
+
+      return frameTransform
+        ? { frames: frameTransform(loaded.frames) }
+        : loaded;
+    },
     manifest,
   });
   let destroyed = false;

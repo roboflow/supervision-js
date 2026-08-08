@@ -1,8 +1,9 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { BenchmarksPanel } from "./components/BenchmarksPanel";
 import { ControlBar } from "./components/ControlBar";
 import { DemoShell } from "./components/DemoShell";
 import { DocsBasketballPlayground } from "./components/DocsBasketballPlayground";
+import { DocsVisualizationLayerPlayground } from "./components/DocsVisualizationLayerPlayground";
 import { PerformanceStrip } from "./components/PerformanceStrip";
 import { QualityControls } from "./components/QualityControls";
 import { RenderControls } from "./components/RenderControls";
@@ -11,6 +12,7 @@ import { SelectionPanel } from "./components/SelectionPanel";
 import { SourceControls } from "./components/SourceControls";
 import { StatusPanel } from "./components/StatusPanel";
 import { resolveDemoDocsUrl } from "./docs-url";
+import { parseDocsVisualizationLayer } from "./docs-visualization-layer";
 import { DemoSourceMode, useDemoRenderer } from "./hooks/useDemoRenderer";
 import { defaultDemoClassNames } from "./presentation/demo-presentation";
 import { DemoViewMode } from "./session/demo-view-mode";
@@ -23,14 +25,78 @@ const docsUrl = resolveDemoDocsUrl(
 const allowUpload = import.meta.env.VITE_DEMO_ALLOW_UPLOAD !== "false";
 
 export function App() {
-  if (
-    new URLSearchParams(globalThis.location.search).get("embed") ===
-    "docs-playground"
-  ) {
-    return <DocsBasketballPlayground />;
+  const searchParams = new URLSearchParams(globalThis.location.search);
+  const embeddedView = searchParams.get("embed");
+
+  if (embeddedView === "docs-playground") {
+    return (
+      <EmbeddedPlaygroundFrame>
+        <DocsBasketballPlayground />
+      </EmbeddedPlaygroundFrame>
+    );
+  }
+
+  if (embeddedView === "visualization-layer") {
+    return (
+      <EmbeddedPlaygroundFrame>
+        <DocsVisualizationLayerPlayground
+          layer={parseDocsVisualizationLayer(searchParams.get("layer"))}
+        />
+      </EmbeddedPlaygroundFrame>
+    );
   }
 
   return <DemoApp />;
+}
+
+function EmbeddedPlaygroundFrame({
+  children,
+}: {
+  readonly children: ReactNode;
+}) {
+  useEffect(() => {
+    const root = document.getElementById("root");
+    const previous = {
+      bodyHeight: document.body.style.height,
+      bodyOverflow: document.body.style.overflow,
+      htmlHeight: document.documentElement.style.height,
+      rootHeight: root?.style.height ?? "",
+    };
+
+    document.documentElement.style.height = "auto";
+    document.body.style.height = "auto";
+    document.body.style.overflow = "visible";
+    root?.style.setProperty("height", "auto");
+
+    const publishHeight = () => {
+      const height = Math.max(
+        document.documentElement.scrollHeight,
+        document.body.scrollHeight,
+        root?.scrollHeight ?? 0,
+      );
+      window.parent.postMessage(
+        { height, type: "supervision-js:playground-height" },
+        "*",
+      );
+    };
+
+    const observer = new ResizeObserver(publishHeight);
+    observer.observe(document.documentElement);
+    if (root) {
+      observer.observe(root);
+    }
+    publishHeight();
+
+    return () => {
+      observer.disconnect();
+      document.documentElement.style.height = previous.htmlHeight;
+      document.body.style.height = previous.bodyHeight;
+      document.body.style.overflow = previous.bodyOverflow;
+      root?.style.setProperty("height", previous.rootHeight);
+    };
+  }, []);
+
+  return children;
 }
 
 function DemoApp() {

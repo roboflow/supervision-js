@@ -8,7 +8,10 @@ import {
   createMediaSession,
   type MediaSession,
 } from "supervision";
-import type { DemoFixtureDefinition } from "../fixtures/demo-fixtures";
+import type {
+  DemoFixtureDefinition,
+  DemoFixtureFrameTransform,
+} from "../fixtures/demo-fixtures";
 import {
   createDemoFixtureDetectionSource,
   loadDemoFixtureDetectionManifest,
@@ -26,12 +29,14 @@ export async function createFixtureSession(
   options: {
     readonly container: HTMLDivElement;
     readonly definition: DemoFixtureDefinition;
+    readonly fixtureFrameTransform?: DemoFixtureFrameTransform;
   } & DemoSessionCallbacks,
 ): Promise<MediaSession> {
   const manifest = await loadDemoFixtureDetectionManifest(options.definition);
   const detectionSource = createDemoFixtureDetectionSource(
     manifest,
     options.definition,
+    options.fixtureFrameTransform,
   );
 
   if (!options.isActive()) {

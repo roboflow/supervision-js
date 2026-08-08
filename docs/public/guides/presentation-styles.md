@@ -17,6 +17,10 @@ In `supervision-js`, the equivalent concept is split into two parts:
 This keeps detections as semantic model output while the renderer owns the
 performance-sensitive drawing strategy.
 
+For focused, live examples, open [Visualization Layers](../visualization-layers.md).
+Each existing layer has a basketball fixture playground whose controls update
+both the renderer and a minimal `setPresentation()` snippet.
+
 ## Start With Base Styles
 
 Use `BaseBoxStyle`, `BaseMaskStyle`, `BasePolygonStyle`,

@@ -254,6 +254,17 @@ body {
   padding: 0 clamp(1rem, 2.4vw, 2.25rem) !important;
 }
 
+@media (min-width: 770px) {
+  .container-main:not(.supervision-docs--home-layout) {
+    grid-template-areas: "sidebar content" !important;
+    grid-template-columns: minmax(13rem, 15rem) minmax(0, 1fr) !important;
+  }
+
+  .container-main:not(.supervision-docs--home-layout) .page-menu {
+    display: none !important;
+  }
+}
+
 .col-content {
   padding: clamp(2rem, 5vw, 4rem) 0 !important;
   scroll-padding-top: 6.5rem;
@@ -397,6 +408,43 @@ pre > button {
   padding-right: 1.1rem !important;
 }
 
+.supervision-docs__sidebar-home {
+  align-items: center;
+  color: var(--rf-gray-900) !important;
+  display: flex !important;
+  font-size: 0.94rem !important;
+  font-weight: 760 !important;
+  margin-bottom: 0.8rem;
+  min-height: 2.2rem;
+  padding: 0.45rem 0.65rem !important;
+}
+
+.supervision-docs__nav-section-title {
+  color: var(--rf-gray-400);
+  font-size: 0.66rem;
+  font-weight: 780;
+  letter-spacing: 0.1em;
+  margin: 1.1rem 0 0.35rem;
+  padding-inline: 0.65rem;
+  text-transform: uppercase;
+}
+
+.site-menu .tsd-navigation > ul > li > details > summary {
+  border-radius: 8px;
+  min-height: 2.25rem;
+  padding-block: 0.25rem;
+}
+
+.site-menu .tsd-navigation > ul > li > details > ul {
+  border-left: 1px solid var(--rf-violet-100);
+  margin: 0.2rem 0 0.65rem 0.72rem;
+  padding-left: 0.55rem;
+}
+
+.site-menu .tsd-navigation > ul > li > details > ul .tsd-kind-icon {
+  display: none;
+}
+
 .page-menu {
   border-left: 1px solid var(--rf-gray-100);
   padding-left: 1.1rem !important;
@@ -521,29 +569,73 @@ pre > button {
 }
 
 /* The generated reference pages use TypeDoc's three-column, scrollable pane.
- * The home page is an editorial landing page, so it intentionally gets one
- * document-flow column without altering reference-page navigation. */
+ * The home keeps the useful left navigation, drops the redundant right outline,
+ * and lets its editorial content flow normally beside the compact tree. */
 .container-main.supervision-docs--home-layout {
-  display: block !important;
+  align-items: start;
+  bottom: auto !important;
+  display: grid !important;
+  grid-template-columns: minmax(13rem, 15rem) minmax(0, 1fr);
   height: auto !important;
+  inset: auto !important;
   max-width: 1580px !important;
+  min-height: 0 !important;
   overflow: visible !important;
+  position: static !important;
+  transform: none !important;
 }
 
-.container-main.supervision-docs--home-layout > :not(.col-content) {
+.container-main.supervision-docs--home-layout > .col-menu {
   display: none !important;
+}
+
+.container-main.supervision-docs--home-layout > .col-sidebar {
+  align-self: start;
+  display: block !important;
+  height: auto !important;
+  max-height: calc(100vh - 4.5rem);
+  min-height: 0 !important;
+  overflow-y: auto;
+  position: sticky;
+  top: 4.5rem;
+}
+
+.container-main.supervision-docs--home-layout .site-menu {
+  padding-top: clamp(1.15rem, 2.5vw, 1.65rem) !important;
 }
 
 .container-main.supervision-docs--home-layout > .col-content {
   height: auto !important;
-  margin: 0 auto !important;
+  margin: 0 !important;
   max-width: 72rem !important;
   overflow: visible !important;
   width: 100% !important;
 }
 
-html.supervision-docs--home #tsd-toolbar-menu-trigger {
-  display: none;
+.supervision-docs__api-reference > details > summary {
+  align-items: center;
+  color: var(--rf-gray-700);
+  display: flex;
+  font-size: 0.76rem;
+  font-weight: 760;
+  justify-content: space-between;
+  letter-spacing: 0.07em;
+  padding: 0.72rem 0.65rem;
+  text-transform: uppercase;
+}
+
+.supervision-docs__api-reference > details > summary small {
+  align-items: center;
+  background: var(--rf-violet-50);
+  border: 1px solid var(--rf-violet-100);
+  border-radius: 999px;
+  color: var(--rf-violet-700);
+  display: inline-flex;
+  font-size: 0.64rem;
+  justify-content: center;
+  letter-spacing: 0;
+  min-width: 1.25rem;
+  padding: 0.08rem 0.28rem;
 }
 
 .supervision-home {
@@ -606,6 +698,35 @@ html.supervision-docs--home #tsd-toolbar-menu-trigger {
   color: var(--rf-gray-700);
   font-size: 0.95rem;
   margin-bottom: 1.6rem !important;
+}
+
+.supervision-home__entrypoints {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.7rem;
+  margin: 1.35rem 0 1.1rem;
+}
+
+.supervision-home__entrypoints > span {
+  color: var(--rf-gray-500);
+  font-size: 0.72rem;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.supervision-home__entrypoints a {
+  color: var(--rf-violet-700) !important;
+  font-size: 0.83rem;
+  font-weight: 690;
+  text-decoration: none !important;
+}
+
+.supervision-home__entrypoints a:hover {
+  color: var(--rf-violet-900) !important;
+  text-decoration: underline !important;
+  text-underline-offset: 0.18em;
 }
 
 .supervision-home__install code {
@@ -700,19 +821,16 @@ html.supervision-docs--home #tsd-toolbar-menu-trigger {
 .supervision-home__scene-layer--media {
   background: #25213a;
   color: #ffffff;
-  transform: translateX(0.45rem);
 }
 
 .supervision-home__scene-layer--masks {
   background: #e9dfff;
   border-color: #c9adff;
-  transform: translateX(-0.2rem);
 }
 
 .supervision-home__scene-layer--labels {
   background: #ffffff;
   border-color: var(--rf-gray-300);
-  transform: translateX(0.2rem);
 }
 
 .supervision-home__section {
@@ -761,6 +879,30 @@ html.supervision-docs--home #tsd-toolbar-menu-trigger {
   font-weight: 720;
   margin-left: 0.3rem;
   text-decoration: none !important;
+}
+
+.supervision-layer-playground {
+  background: linear-gradient(135deg, #fcfbff, var(--rf-violet-50));
+  border: 1px solid #dccdff;
+  border-radius: 16px;
+  box-shadow: 0 14px 36px rgba(75, 34, 142, 0.1);
+  margin: 1.6rem 0 2rem;
+  overflow: hidden;
+}
+
+.tsd-typography:has(.supervision-layer-playground) {
+  max-width: 72rem;
+}
+
+.tsd-typography:has(.supervision-layer-playground) > p {
+  max-width: 55rem;
+}
+
+.supervision-layer-playground iframe {
+  border: 0;
+  display: block;
+  height: clamp(45rem, 66vw, 49rem);
+  width: 100%;
 }
 
 .supervision-home__quick-start {
@@ -1004,6 +1146,14 @@ html.supervision-docs--home #tsd-toolbar-menu-trigger {
     padding-inline: 1rem !important;
   }
 
+  .container-main.supervision-docs--home-layout {
+    display: block !important;
+  }
+
+  .container-main.supervision-docs--home-layout > .col-sidebar {
+    display: none !important;
+  }
+
   .col-content {
     padding-block: 2rem !important;
   }
@@ -1030,6 +1180,10 @@ html.supervision-docs--home #tsd-toolbar-menu-trigger {
 
   .supervision-home__playground-frame iframe {
     height: 57rem;
+  }
+
+  .supervision-layer-playground iframe {
+    height: 55rem;
   }
 }
 
