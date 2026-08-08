@@ -190,7 +190,25 @@ export function createExecutorchLiveSegmentationProcessor<TRunOnFrame>(
   };
 }
 
-export interface ExecutorchLivePoseProcessorOptions<TRunOnFrame = unknown> {
+export interface ExecutorchLivePoseRunnerOptions {
+  readonly detectionThreshold: number;
+  readonly inputSize: number;
+  readonly keypointThreshold: number;
+}
+
+/** Structural live-pose runner supplied by an inference-engine owner. */
+export type ExecutorchLivePoseRunner = (
+  frame: unknown,
+  mirrorFrame: boolean,
+  options: ExecutorchLivePoseRunnerOptions,
+) => readonly ExecutorchCocoPose[];
+
+/**
+ * Declarative pose-producer configuration. The live inference hook consumes
+ * this shape directly so its VisionCamera worklet captures the JSI runner at
+ * exactly one runtime boundary.
+ */
+export interface ExecutorchLivePoseConfiguration<TRunOnFrame = unknown> {
   readonly className?: string;
   readonly detectionThreshold?: number;
   /** See {@link ExecutorchLiveSegmentationProcessorOptions.framePixelsAreUpright}. */
@@ -202,6 +220,10 @@ export interface ExecutorchLivePoseProcessorOptions<TRunOnFrame = unknown> {
   readonly minimumVisibleKeypoints?: number;
   readonly runOnFrame: TRunOnFrame | null;
 }
+
+/** @deprecated Prefer passing ExecutorchLivePoseConfiguration to the live hook. */
+export type ExecutorchLivePoseProcessorOptions<TRunOnFrame = unknown> =
+  ExecutorchLivePoseConfiguration<TRunOnFrame>;
 
 export interface ExecutorchLivePoseProcessor {
   process(frame: {
@@ -217,17 +239,8 @@ export interface ExecutorchLivePoseProcessor {
 export function createExecutorchLivePoseProcessor<TRunOnFrame>(
   options: ExecutorchLivePoseProcessorOptions<TRunOnFrame>,
 ): ExecutorchLivePoseProcessor {
-  const configuredRunOnFrame = options.runOnFrame as
-    | ((
-        frame: unknown,
-        mirrorFrame: boolean,
-        options: {
-          detectionThreshold: number;
-          inputSize: number;
-          keypointThreshold: number;
-        },
-      ) => readonly ExecutorchCocoPose[])
-    | null;
+  const configuredRunOnFrame =
+    options.runOnFrame as ExecutorchLivePoseRunner | null;
   // A model hook can report ready one render before its worklet runner crosses
   // into the camera runtime. Keep that short transition inert rather than
   // trying to invoke an absent runner on every camera frame.
@@ -244,21 +257,21 @@ export function createExecutorchLivePoseProcessor<TRunOnFrame>(
   // binding from the nested frame worklet can capture `undefined` because the
   // worklets Babel transform lowers declarations to assignments.
   const createDetectionFrame = createDetectionFrameFromExecutorchCocoPoses;
+  const getUprightFrameHeight = readExecutorchFrameHeight;
+  const toUprightFrame = createExecutorchUprightFrame;
 
   return {
     process(frame) {
       "worklet";
 
       const uprightFrameHeight = framePixelsAreUpright
-        ? readExecutorchFrameHeight(frame)
+        ? getUprightFrameHeight(frame)
         : null;
       const poses =
         runOnFrame === null
           ? []
           : runOnFrame(
-              framePixelsAreUpright
-                ? createExecutorchUprightFrame(frame)
-                : frame,
+              framePixelsAreUpright ? toUprightFrame(frame) : frame,
               mirrorFrame,
               {
                 detectionThreshold,
@@ -377,21 +390,9 @@ export interface ExecutorchPosePoint {
   readonly y: number;
 }
 
-export type ExecutorchCocoPose = Readonly<
-  Record<string, ExecutorchPosePoint | undefined>
->;
-
-function unrotateExecutorchUpPoint(
-  point: ExecutorchPosePoint,
-  frameHeight: number,
-): ExecutorchPosePoint {
-  "worklet";
-
-  return {
-    x: point.y,
-    y: frameHeight - point.x,
-  };
-}
+export type ExecutorchCocoPose =
+  | Readonly<Record<string, ExecutorchPosePoint | undefined>>
+  | readonly (ExecutorchPosePoint | undefined)[];
 
 export interface ExecutorchCocoPoseFrameOptions {
   readonly className?: string;
@@ -459,6 +460,10 @@ export function createDetectionFrameFromExecutorchCocoPoses(
 
   const detections: Detection[] = [];
   const minimumVisibleKeypoints = options.minimumVisibleKeypoints ?? 3;
+  // Keep this hot conversion independent from imported runtime enum objects.
+  // Numeric values are the stable COCO visibility contract from core.
+  const notLabeledVisibility = 0 as KeypointVisibility;
+  const visibleVisibility = 2 as KeypointVisibility;
 
   for (let poseIndex = 0; poseIndex < options.poses.length; poseIndex += 1) {
     const pose = options.poses[poseIndex]!;
@@ -477,32 +482,54 @@ export function createDetectionFrameFromExecutorchCocoPoses(
       keypointIndex += 1
     ) {
       const name = EXECUTORCH_COCO_KEYPOINT_NAMES[keypointIndex]!;
-      const point = pose[name];
+      // PoseEstimationModule can yield named keypoints, while its minimal
+      // VisionCamera runner deliberately yields the native COCO-17 array.
+      // Both shapes stay supported at this boundary without asking a demo to
+      // define a worklet-side mapper.
+      const namedPose = pose as Readonly<
+        Record<string, ExecutorchPosePoint | undefined>
+      >;
+      const indexedPose = pose as readonly (ExecutorchPosePoint | undefined)[];
+      const namedPoint = namedPose[name];
+      const indexedPoint = indexedPose[keypointIndex];
+      const point = namedPoint ?? indexedPoint;
       const isVisible =
         point !== undefined &&
-        Number.isFinite(point.x) &&
-        Number.isFinite(point.y) &&
+        typeof point.x === "number" &&
+        point.x === point.x &&
+        point.x !== Number.POSITIVE_INFINITY &&
+        point.x !== Number.NEGATIVE_INFINITY &&
+        typeof point.y === "number" &&
+        point.y === point.y &&
+        point.y !== Number.POSITIVE_INFINITY &&
+        point.y !== Number.NEGATIVE_INFINITY &&
         point.x >= 0 &&
         point.y >= 0;
 
       visible[keypointIndex] = isVisible;
 
       if (isVisible && point) {
+        // Inline ExecuTorch's inverse `orientation: "up"` mapping. Calling a
+        // second worklet helper from this serialized function can surface as
+        // `undefined is not a function` in VisionCamera's isolated runtime.
         points[keypointIndex] =
           options.uprightFrameHeight === undefined ||
           options.uprightFrameHeight === null
             ? { x: point.x, y: point.y }
-            : unrotateExecutorchUpPoint(point, options.uprightFrameHeight);
-        visibility[keypointIndex] = KeypointVisibility.Visible;
+            : {
+                x: point.y,
+                y: options.uprightFrameHeight - point.x,
+              };
+        visibility[keypointIndex] = visibleVisibility;
         const correctedPoint = points[keypointIndex]!;
-        minX = Math.min(minX, correctedPoint.x);
-        minY = Math.min(minY, correctedPoint.y);
-        maxX = Math.max(maxX, correctedPoint.x);
-        maxY = Math.max(maxY, correctedPoint.y);
+        minX = correctedPoint.x < minX ? correctedPoint.x : minX;
+        minY = correctedPoint.y < minY ? correctedPoint.y : minY;
+        maxX = correctedPoint.x > maxX ? correctedPoint.x : maxX;
+        maxY = correctedPoint.y > maxY ? correctedPoint.y : maxY;
         visibleCount += 1;
       } else {
         points[keypointIndex] = { x: 0, y: 0 };
-        visibility[keypointIndex] = KeypointVisibility.NotLabeled;
+        visibility[keypointIndex] = notLabeledVisibility;
       }
     }
 
@@ -524,8 +551,10 @@ export function createDetectionFrameFromExecutorchCocoPoses(
       }
     }
 
-    const width = Math.max(1, maxX - minX);
-    const height = Math.max(1, maxY - minY);
+    const rawWidth = maxX - minX;
+    const rawHeight = maxY - minY;
+    const width = rawWidth > 1 ? rawWidth : 1;
+    const height = rawHeight > 1 ? rawHeight : 1;
 
     detections[detections.length] = {
       className: options.className ?? "person",
@@ -554,10 +583,12 @@ export function createDetectionFrameFromExecutorchCocoPoses(
  */
 export function createExecutorchPoseKeypointInstructions(
   frame: DetectionFrame,
+  color = 0x22c55e,
 ): KeypointDrawInstruction[] {
   "worklet";
 
   const instructions: KeypointDrawInstruction[] = [];
+  const notLabeledVisibility = 0 as KeypointVisibility;
 
   for (
     let detectionIndex = 0;
@@ -571,26 +602,38 @@ export function createExecutorchPoseKeypointInstructions(
       continue;
     }
 
-    const color = resolveDetectionClassColorStyle(detection.className).fill;
-    const edges = geometry.edges.map(([fromIndex, toIndex]) => ({
-      from: geometry.points[fromIndex]!,
-      stroke: { alpha: 0.98, color, width: 3 },
-      to: geometry.points[toIndex]!,
-    }));
-    const markers = geometry.points.flatMap((point, index) =>
-      geometry.visibility?.[index] === KeypointVisibility.NotLabeled
-        ? []
-        : [
-            {
-              fill: { alpha: 1, color },
-              index,
-              point,
-              radius: 5,
-              shape: KeypointMarkerShape.Circle,
-              stroke: { alpha: 1, color, width: 2 },
-            },
-          ],
-    );
+    const edges: Array<KeypointDrawInstruction["edges"][number]> = [];
+    const markers: Array<KeypointDrawInstruction["markers"][number]> = [];
+
+    for (let edgeIndex = 0; edgeIndex < geometry.edges.length; edgeIndex += 1) {
+      const edge = geometry.edges[edgeIndex]!;
+      edges[edges.length] = {
+        from: geometry.points[edge[0]]!,
+        stroke: { alpha: 0.98, color, width: 3 },
+        to: geometry.points[edge[1]]!,
+      };
+    }
+
+    for (
+      let pointIndex = 0;
+      pointIndex < geometry.points.length;
+      pointIndex += 1
+    ) {
+      if (geometry.visibility?.[pointIndex] === notLabeledVisibility) {
+        continue;
+      }
+
+      markers[markers.length] = {
+        fill: { alpha: 1, color },
+        index: pointIndex,
+        point: geometry.points[pointIndex]!,
+        radius: 5,
+        // Avoid capturing an imported enum object in VisionCamera's isolated
+        // runtime. The literal is the stable renderer-neutral contract value.
+        shape: "circle" as KeypointMarkerShape,
+        stroke: { alpha: 1, color, width: 2 },
+      };
+    }
 
     instructions[instructions.length] = { edges, markers };
   }

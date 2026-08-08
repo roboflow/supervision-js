@@ -72,7 +72,6 @@ import {
   createDemoPolygonStyle,
 } from "./src/demo-presentation";
 import {
-  createExecutorchLivePoseProcessor,
   createExecutorchLiveSegmentationProcessor,
   createExecutorchVideoFrameSerializer,
 } from "supervision-js-react-native/adapters/executorch";
@@ -1436,18 +1435,6 @@ function LiveCameraProof(props: {
       }),
     [stableSegmentationRunner],
   );
-  const poseProcessor = useMemo(
-    () =>
-      createExecutorchLivePoseProcessor({
-        // The output buffer has already been physically oriented by the
-        // VisionCamera adapter; supplying a second front-camera mirror would
-        // make pose geometry diverge from the rendered pixels.
-        framePixelsAreUpright: true,
-        mirrorFrame: false,
-        runOnFrame: stablePoseRunner,
-      }),
-    [stablePoseRunner],
-  );
   const liveExtension = useMemo(
     () => ({
       active: isInstantCv,
@@ -1468,7 +1455,14 @@ function LiveCameraProof(props: {
     onInteraction: reportInstantCvPick,
     onReadout: reportLiveFrame,
     onRuleRuntime: reportInstantCvRuntime,
-    poseProcessor,
+    pose: {
+      // The output buffer has already been physically oriented by the
+      // VisionCamera adapter; supplying a second front-camera mirror would
+      // make pose geometry diverge from the rendered pixels.
+      framePixelsAreUpright: true,
+      mirrorFrame: false,
+      runOnFrame: stablePoseRunner,
+    },
     presentation: {
       fillOpacity: DEMO_MASK_FILL_OPACITY,
       maskBorderWidth: DEMO_MASK_BORDER_WIDTH,

@@ -1,14 +1,14 @@
 diff --git a/node_modules/react-native-executorch/src/modules/computer_vision/PoseEstimationModule.ts b/node_modules/react-native-executorch/src/modules/computer_vision/PoseEstimationModule.ts
-index 34ddf45..52e9c4c 100644
+index 34ddf45..2acd61b 100644
 --- a/node_modules/react-native-executorch/src/modules/computer_vision/PoseEstimationModule.ts
 +++ b/node_modules/react-native-executorch/src/modules/computer_vision/PoseEstimationModule.ts
-@@ -233,11 +233,24 @@ export class PoseEstimationModule<
+@@ -233,11 +233,22 @@ export class PoseEstimationModule<
          options?.keypointThreshold ?? defaultKeypointThreshold;
        const inputSize = options?.inputSize ?? defaultInputSize;
  
-+      // Do not use Array.prototype.includes() here. This function executes in
-+      // VisionCamera's worklet runtime, whose serialized Array prototype is
-+      // intentionally smaller than the main JS runtime on some iOS builds.
+-      // Validate inputSize
++      // The VisionCamera worklet runtime does not guarantee every Array
++      // prototype helper. Validate with a plain loop instead of includes().
 +      let supportsInputSize = false;
 +      if (availableInputSizes && inputSize !== undefined) {
 +        for (let index = 0; index < availableInputSizes.length; index += 1) {
@@ -19,7 +19,6 @@ index 34ddf45..52e9c4c 100644
 +        }
 +      }
 +
-       // Validate inputSize
        if (
          availableInputSizes &&
          inputSize !== undefined &&
@@ -28,7 +27,7 @@ index 34ddf45..52e9c4c 100644
        ) {
          throw new Error(
            `Invalid inputSize: ${inputSize}. Available sizes: ${availableInputSizes.join(', ')}`
-@@ -255,17 +268,41 @@ export class PoseEstimationModule<
+@@ -255,17 +266,40 @@ export class PoseEstimationModule<
            orientation: frame.orientation,
            isMirrored: isFrontCamera,
          };
@@ -54,9 +53,8 @@ index 34ddf45..52e9c4c 100644
 +          );
 +        }
 +
-+        // Keep the result conversion in this one worklet closure. Calling the
-+        // module-level mapPersonKeypoints() worklet from a VisionCamera
-+        // worklet leaves that helper undefined on affected iOS runtimes.
++        // Keep mapping in this same closure. A module-level helper would add a
++        // second worklet serialization boundary around runtime pose data.
 +        const poses: PersonKeypoints<ResolveKeypoints<T>>[] = [];
 +        for (let personIndex = 0; personIndex < raw.length; personIndex += 1) {
 +          const person = raw[personIndex]!;
