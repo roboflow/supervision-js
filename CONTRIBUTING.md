@@ -16,6 +16,11 @@ code contributions.
 For project boundaries and commands, read
 [docs/internal/agent-guidance.md](docs/internal/agent-guidance.md).
 
+Contributions that add visualization recipes or annotator-style facades should
+also follow the
+[annotator use-case roadmap](docs/internal/annotator-use-case-roadmap.md),
+including its one-annotator-per-PR and frozen-fixture requirements.
+
 ## Local Development
 
 Use Node.js 20.19 or newer.

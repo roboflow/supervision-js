@@ -11,6 +11,8 @@ Before making project-direction or architecture changes, read:
 - [`problem-framing.md`](problem-framing.md)
 - [`architecture-principles.md`](architecture-principles.md)
 - [`renderer-first-roadmap.md`](renderer-first-roadmap.md)
+- [`annotator-use-case-roadmap.md`](annotator-use-case-roadmap.md) when adding
+  visualization recipes, fixtures, or annotator facades
 - [`pixijs-guidance.md`](pixijs-guidance.md)
 - [`library-contract.md`](library-contract.md)
 - [`react-native-architecture.md`](react-native-architecture.md)
@@ -21,7 +23,9 @@ Before making project-direction or architecture changes, read:
 - [`../public/guides/public-api.md`](../public/guides/public-api.md)
 
 Those docs define the current product intent: maintain a focused, session-first
-browser API without promising a broad Python-parity annotation framework.
+browser API without promising a one-to-one Python annotation framework. Python
+Supervision may inform use-case facades when they preserve the renderer-first
+and composable architecture.
 
 ## Public Docs Home
 
