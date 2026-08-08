@@ -20,10 +20,9 @@ The manual GitHub Actions workflow at
 artifact before publishing it. It runs only from `main` and is gated by the
 `npm-publish` GitHub environment.
 
-`latest` is the default tag for a reviewed, general-availability release.
-`next` is reserved for an explicit prerelease or canary. Do not use `next` as a
-holding area for a stable release: a stable publish with `latest` updates the
-default version that `npm install supervision` resolves.
+`latest` is the default tag for a reviewed, general-availability release. A
+stable publish updates the default version that `npm install supervision`
+resolves.
 
 The `packages/web/package.json` version is the source of truth. The stable
 release workflow creates the matching GitHub Release and `v<version>` tag from
@@ -41,7 +40,14 @@ Keep this ownership and security posture in place:
    `roboflow`, repository `supervision-js`, workflow `publish-npm.yml`, and
    environment `npm-publish` for the **npm publish** action.
 3. GitHub's `npm-publish` environment requires release-owner approval.
-4. No long-lived npm write token is stored in GitHub. Publishing uses OIDC.
+4. The `npm-publish` environment holds a `RELEASE_GITHUB_TOKEN` environment
+   secret scoped only to `supervision-js`, with **Contents: write** and
+   **Workflows: write**. It is used only after verification to create the
+   stable tag and GitHub Release; do not expose it to checkout, install, build,
+   or npm-publish steps. Checkout must use `persist-credentials: false` so its
+   short-lived `GITHUB_TOKEN` cannot override the dedicated token during the
+   tag push.
+5. No long-lived npm write token is stored in GitHub. Publishing uses OIDC.
 
 If publishing access breaks, compare the trusted-publisher fields with the
 workflow before changing credentials. Each npm package supports one trusted
@@ -51,12 +57,11 @@ publisher.
 
 Use SemVer against the published browser surface only:
 
-| Change                                                                      | Example next version from `0.1.0` | Tag      |
-| --------------------------------------------------------------------------- | --------------------------------- | -------- |
-| Backward-compatible fix, docs, dependency maintenance, or internal refactor | `0.1.1`                           | `latest` |
-| Backward-compatible public browser API addition                             | `0.2.0`                           | `latest` |
-| Breaking browser API or behavior change before 1.0                          | `0.2.0`                           | `latest` |
-| Preview of a future release                                                 | `0.1.2-rc.0`                      | `next`   |
+| Change                                                                      | Example version from `0.1.0` | Tag      |
+| --------------------------------------------------------------------------- | ---------------------------- | -------- |
+| Backward-compatible fix, docs, dependency maintenance, or internal refactor | `0.1.1`                      | `latest` |
+| Backward-compatible public browser API addition                             | `0.2.0`                      | `latest` |
+| Breaking browser API or behavior change before 1.0                          | `0.2.0`                      | `latest` |
 
 For pre-1.0 versions, a new minor version communicates a breaking public
 change. Changes limited to private React Native experiments do not by themselves
@@ -66,14 +71,9 @@ change the published browser package version.
 
 1. Update `packages/web/package.json`, `package-lock.json`, and the checked docs
    toolbar version together. `npm run docs:check` verifies the toolbar mirror.
-   Before the npm publication, the toolbar must label that version as pending;
-   the post-publication docs-only follow-up removes that label.
-2. Keep the public repository README and hosted docs on the currently live npm
-   channel until the stable publish has completed. Before the first browser
-   package owns `latest`, that is `npm install supervision@next`; do not
-   document path installs of release tarballs for consumers. The package README
-   published in this release may use `npm install supervision`, because it only
-   becomes visible after that stable publication.
+2. Keep the public repository README and hosted docs aligned with the currently
+   published stable release. Consumer installation guidance is always
+   `npm install supervision`; do not document local archive paths for consumers.
 3. Run the normal validation plus the clean-consumer artifact smoke test:
 
    ```sh
@@ -87,8 +87,9 @@ change the published browser package version.
 5. In GitHub Actions, run **Publish npm package** from `main` and select
    `latest` for a stable release. Approve the `npm-publish` environment
    deployment. The workflow verifies, packs, smoke-tests, publishes the
-   generated archive through npm trusted publishing, verifies the selected npm
-   tag, and creates the matching GitHub Release.
+   generated archive through npm trusted publishing, waits briefly for the
+   selected npm tag to propagate, creates the matching annotated Git tag, and
+   creates the matching GitHub Release.
 6. Verify npm metadata, provenance, tarball contents, and a clean installation
    in a separate consumer:
 
@@ -99,26 +100,9 @@ change the published browser package version.
    ```
 
 7. Confirm that the GitHub Release `v<version>` points at the same `main`
-   commit the workflow published. Then merge a docs-only follow-up that changes
-   the public repository README and hosted docs from
-   `npm install supervision@next` to `npm install supervision`, removes the
-   toolbar's pending-release label, and verifies the documentation deployment.
-
-## Clear A Previous `next` Tag
-
-Publishing `0.1.1` with `latest` does not remove `next`; npm dist-tags are
-independent. After the stable publish and docs-only follow-up are verified,
-remove a stale preview tag only when no release process still relies on it:
-
-```sh
-npm dist-tag ls supervision
-npm dist-tag rm supervision next
-npm dist-tag ls supervision
-```
-
-This does not unpublish `0.1.0`; it only removes the `next` alias. For the next
-preview cycle, publish a new prerelease version such as `0.1.2-rc.0` with the
-`next` tag.
+   commit the workflow published. Then verify that public installation guidance,
+   the toolbar version, and the documentation deployment match the stable
+   release.
 
 ## Recovery
 

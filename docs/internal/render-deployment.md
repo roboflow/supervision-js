@@ -5,25 +5,12 @@ The public demo and documentation are served by the existing Render web service:
 - service: `supervision-js-demo`
 - resource ID: `srv-d8felq6gvqtc7398i2ng`
 - URL: <https://supervision-js-demo.onrender.com>
-- docs: <https://supervision-js-demo.onrender.com/docs/>
+- docs: <https://supervision-js-demo.onrender.com/>
+- demo: <https://supervision-js-demo.onrender.com/demo/>
 
-The canonical source remains
-`https://github.com/roboflow/supervision-js`. Render currently deploys the same
-`main` commit from the deployment mirror at
-`https://github.com/joaomarcoscrs/supervision-js-render`.
-
-Do not develop in or merge changes into the mirror. Push the canonical `main`
-commit to it only after the canonical push succeeds:
-
-```sh
-git fetch origin main
-test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
-git push git@github.com:joaomarcoscrs/supervision-js-render.git main:main
-```
-
-This preserves a single source of truth. When Infra gives Render access to
-`roboflow/supervision-js`, point the service back to the canonical repository
-and retire the mirror.
+Render deploys the canonical repository directly:
+`https://github.com/roboflow/supervision-js` on `main`. Do not introduce a
+deployment mirror; the canonical repository is the only source of truth.
 
 ## Service Configuration
 
@@ -39,13 +26,17 @@ Auto-deploy: On commit
 
 `npm run pages:build` creates one static artifact in `dist/pages`:
 
-- `/` contains the fixture demo;
-- `/docs/` contains the TypeDoc site;
+- `/` contains the TypeDoc site and its interactive playground;
+- `/demo/` contains the fixture demo workbench;
 - `/examples/vanilla/` contains the vanilla integration example.
 
 `npm run pages:serve` serves that same artifact on Render's `PORT`. This keeps
 the Render and GitHub Pages output identical and avoids maintaining a second
 production server or image delivery path.
+
+The static applications emit relative asset URLs, so this layout remains valid
+when served at Render's domain root or from a GitHub Pages project URL before a
+custom domain is attached.
 
 The start command passes Render's exact `RENDER_EXTERNAL_HOSTNAME` to Vite's
 additional-host allowlist. This supports branch preview services without
@@ -59,7 +50,7 @@ reconciled without creating a replacement resource:
 
 ```sh
 render services update srv-d8felq6gvqtc7398i2ng \
-  --repo https://github.com/joaomarcoscrs/supervision-js-render \
+  --repo https://github.com/roboflow/supervision-js \
   --branch main \
   --runtime node \
   --build-command "npm ci && npm run pages:build" \
@@ -81,19 +72,16 @@ Check the deployed routes after Render reports the deploy as live:
 
 ```sh
 curl --fail --location https://supervision-js-demo.onrender.com/
-curl --fail --location https://supervision-js-demo.onrender.com/docs/
+curl --fail --location https://supervision-js-demo.onrender.com/demo/
 curl --fail --location \
-  https://supervision-js-demo.onrender.com/docs/documents/Application_Integration.html
+  https://supervision-js-demo.onrender.com/documents/Application_Integration.html
 curl --fail --location \
-  https://supervision-js-demo.onrender.com/docs/modules/Editing.html
+  https://supervision-js-demo.onrender.com/modules/Editing.html
 curl --fail --location \
   https://supervision-js-demo.onrender.com/examples/vanilla/
 ```
 
-The Application Integration page must describe the browser package's current
-npm channel: `npm install supervision@next` before a stable release owns
-`latest`, then `npm install supervision` after the verified post-release docs
-follow-up. The Editing module must appear in the generated API reference. Also
-verify that the live Render deploy's commit matches both canonical `main` and
-mirror `main`. Those checks distinguish the current documentation from the
-stale deployment that preceded this configuration.
+The Application Integration page must install the browser package with
+`npm install supervision`. The Editing module must appear in the generated API
+reference. Verify that the live Render deploy's commit matches canonical
+`main`.

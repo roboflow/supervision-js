@@ -6,10 +6,10 @@
       <p class="supervision-home__lede">
         <code>supervision</code> is a browser-native TypeScript library for interactive computer vision media. A media session keeps the visible frame, detections, styles, interaction, and playback on one timing reference.
       </p>
-      <p class="supervision-home__install"><code>npm install supervision@next</code></p>
+      <p class="supervision-home__install"><code>npm install supervision</code></p>
       <div class="supervision-home__actions">
         <a class="supervision-home__button supervision-home__button--primary" href="documents/Application_Integration.html">Get started</a>
-        <a class="supervision-home__button supervision-home__button--secondary" href="https://supervision-js-demo.onrender.com/">Open the demo</a>
+        <a class="supervision-home__button supervision-home__button--secondary" data-supervision-demo-link href="demo/">Open the demo</a>
       </div>
     </div>
     <aside class="supervision-home__scene-card" aria-label="Media session composition">
@@ -23,6 +23,27 @@
         The session owns composition and timing. Your application owns the surrounding UI, model calls, product workflow, and data persistence.
       </p>
     </aside>
+  </section>
+  <section class="supervision-home__section supervision-home__playground" aria-labelledby="playground-title">
+    <div class="supervision-home__section-heading">
+      <p class="supervision-home__eyebrow">Interactive playground</p>
+      <h2 id="playground-title">See detections move with the media—not above it.</h2>
+      <p>
+        This looping basketball fixture combines segmentation masks, detection boxes, labels, and pose skeletons. Toggle layers and tune the presentation while the same browser media session keeps every annotation in sync.
+      </p>
+    </div>
+    <div class="supervision-home__playground-frame">
+      <iframe
+        allow="autoplay"
+        data-supervision-playground-src="demo/?embed=docs-playground"
+        loading="lazy"
+        title="Interactive basketball detection playground"
+      ></iframe>
+    </div>
+    <p class="supervision-home__playground-note">
+      The playground is a small consumer of <code>supervision</code>, using the same session, detection, and style contracts available to your application.
+      <a href="documents/Detections_And_Rendering.html">Learn about detection rendering <span aria-hidden="true">→</span></a>
+    </p>
   </section>
   <section class="supervision-home__section" aria-labelledby="quick-start-title">
     <div class="supervision-home__section-heading">

@@ -169,6 +169,24 @@ describe("demo presentation", () => {
     });
   });
 
+  it("can render a fully opaque mask when the fill and layer opacity are both 100%", () => {
+    const presentation = createDemoPresentation({
+      ...defaultDemoPresentationSettings,
+      maskFillAlpha: 1,
+      maskOpacity: 1,
+    });
+    const context = {
+      detectionIndex: 0,
+      frame: { detections: [detection], mediaTime: 0 },
+      mediaTime: 0,
+    };
+
+    expect(presentation.maskStyle?.opacity).toBe(1);
+    expect(presentation.maskStyle?.resolve(detection, context)).toMatchObject({
+      alpha: 1,
+    });
+  });
+
   it("matches the Core annotation presentation before demo controls override it", () => {
     const demo = createDemoPresentation(defaultDemoPresentationSettings);
     const canonical = createDefaultAnnotationPresentation();

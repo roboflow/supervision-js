@@ -18,7 +18,7 @@ on:
 
 permissions:
   actions: read
-  contents: write
+  contents: read
   id-token: write
 
 concurrency:
@@ -38,6 +38,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Resolve release source
         id: release_source
@@ -155,18 +156,38 @@ jobs:
         run: |
           set -euo pipefail
           version="$(node -p "require('./packages/web/package.json').version")"
-          published_version="$(npm view "supervision@${DIST_TAG}" version)"
-          test "${published_version}" = "${version}"
+
+          # The upload API can acknowledge a publish before npm's dist-tag
+          # read endpoint reflects it. Poll briefly so a successful publish
+          # cannot strand its immutable version without a GitHub release.
+          for attempt in {1..12}; do
+            published_version="$(npm view "supervision@${DIST_TAG}" version 2>/dev/null || true)"
+            if [[ "${published_version}" == "${version}" ]]; then
+              exit 0
+            fi
+
+            if [[ "${attempt}" -lt 12 ]]; then
+              echo "Waiting for supervision@${DIST_TAG} to resolve to ${version} (attempt ${attempt}/12)."
+              sleep 5
+            fi
+          done
+
+          echo "supervision@${DIST_TAG} did not resolve to ${version} after 60 seconds; saw ${published_version:-nothing}." >&2
+          exit 1
 
       - name: Create or verify release tag
         if: inputs.dist_tag == 'latest'
         shell: bash
+        env:
+          RELEASE_GITHUB_TOKEN: ${{ secrets.RELEASE_GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           version="$(node -p "require('./packages/web/package.json').version")"
           tag="v${version}"
           release_sha="$(git rev-parse HEAD)"
 
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch --tags --force
 
           if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
@@ -181,13 +202,13 @@ jobs:
           fi
 
           git tag --annotate "${tag}" "${release_sha}" --message "supervision ${tag}"
-          git push origin "refs/tags/${tag}"
+          git push "https://x-access-token:${RELEASE_GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "refs/tags/${tag}"
 
       - name: Create GitHub Release
         if: inputs.dist_tag == 'latest'
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.RELEASE_GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           version="$(node -p "require('./packages/web/package.json').version")"

@@ -51,12 +51,12 @@ session.setPresentation({ boxStyle, maskStyle, labelStyle });
 ## Installation
 
 ```sh
-npm install supervision@next
+npm install supervision
 ```
 
-The current browser release is published on npm's `next` tag. Its published
-package includes the private core dependency. Consumers import only the public
-browser entrypoints:
+The current browser release is `0.1.1`, published as npm's default `latest`
+release. Its package includes the private core dependency. Consumers import
+only the public browser entrypoints:
 
 ```ts
 import { createMediaSession } from "supervision";
@@ -67,8 +67,8 @@ import { createMaskBrushEditor } from "supervision/editing";
 
 The public demo and generated API reference are hosted on Render:
 
-- [Demo](https://supervision-js-demo.onrender.com/)
-- [Documentation](https://supervision-js-demo.onrender.com/docs/)
+- [Documentation](https://supervision-js-demo.onrender.com/)
+- [Demo](https://supervision-js-demo.onrender.com/demo/)
 - [Vanilla example](https://supervision-js-demo.onrender.com/examples/vanilla/)
 
 Hosted surfaces deliberately use public fixtures only. Media upload and SAM3
@@ -86,7 +86,7 @@ Useful commands:
 
 - `npm run demo:dev` runs the browser demo.
 - `npm run example:vanilla:dev` runs the minimal vanilla integration.
-- `npm run docs:dev` builds and serves the generated docs.
+- `npm run docs:dev` runs the generated docs and the embedded demo playground.
 - `npm run pages:build` assembles the deployable site.
 - `npm run verify` runs the full repository validation suite.
 

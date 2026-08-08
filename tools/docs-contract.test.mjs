@@ -117,9 +117,51 @@ test("documentation toolbar mirrors the browser package manifest version", async
   const packageVersion = toolbarScript.match(
     /const packageVersion = "([^"]+)";/,
   )?.[1];
+  const packageReleaseStatus = toolbarScript.match(
+    /const packageReleaseStatus = "([^"]*)";/,
+  )?.[1];
 
   assert.equal(packageName, packageJson.name);
   assert.equal(packageVersion, packageJson.version);
+  assert.equal(packageReleaseStatus, "");
+});
+
+test("public installation guidance uses the stable browser package", async () => {
+  const consumerDocs = [
+    path.join(rootDir, "README.md"),
+    path.join(publicDocsDir, "index.md"),
+    path.join(publicDocsDir, "guides/application-integration.md"),
+    path.join(publicDocsDir, "guides/public-api.md"),
+  ];
+
+  for (const file of consumerDocs) {
+    const source = await readFile(file, "utf8");
+
+    assert.match(source, /npm install supervision(?:\n|`|<)/);
+    assert.doesNotMatch(source, /npm install supervision@/);
+  }
+});
+
+test("the docs home embeds the local basketball playground", async () => {
+  const homepage = await readFile(path.join(publicDocsDir, "index.md"), "utf8");
+  const toolbarScript = await readFile(
+    path.join(publicDocsDir, "typedoc-icons.js"),
+    "utf8",
+  );
+  const packageJson = JSON.parse(
+    await readFile(path.join(rootDir, "package.json"), "utf8"),
+  );
+
+  assert.match(
+    homepage,
+    /data-supervision-playground-src="demo\/\?embed=docs-playground"/,
+  );
+  assert.match(homepage, /title="Interactive basketball detection playground"/);
+  assert.match(
+    toolbarScript,
+    /window\.location\.port === "5175"[\s\S]*?http:\/\/127\.0\.0\.1:5173\//,
+  );
+  assert.equal(packageJson.scripts["docs:dev"], "npm run dev:demo-docs");
 });
 
 test("Render preview trusts only its assigned hostname", async () => {
@@ -133,6 +175,48 @@ test("Render preview trusts only its assigned hostname", async () => {
     /__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=\$\{RENDER_EXTERNAL_HOSTNAME:-supervision-js-demo\.onrender\.com\}/,
   );
   assert.doesNotMatch(serveCommand, /allowedHosts=(?:true|\*)/);
+});
+
+test("deployed site presents docs at the root and the workbench at /demo/", async () => {
+  const pagesBuild = await readFile(
+    path.join(rootDir, "tools/build-pages.mjs"),
+    "utf8",
+  );
+  const demoApp = await readFile(
+    path.join(rootDir, "demo/src/App.tsx"),
+    "utf8",
+  );
+  const docsUrl = await readFile(
+    path.join(rootDir, "demo/src/docs-url.ts"),
+    "utf8",
+  );
+  const homepage = await readFile(path.join(publicDocsDir, "index.md"), "utf8");
+  const toolbar = await readFile(
+    path.join(publicDocsDir, "typedoc-icons.js"),
+    "utf8",
+  );
+
+  assert.match(pagesBuild, /const staticAppBasePath = "\.\/";/);
+  assert.match(pagesBuild, /VITE_DEMO_BASE_PATH: staticAppBasePath/);
+  assert.match(pagesBuild, /VITE_VANILLA_BASE_PATH: staticAppBasePath/);
+  assert.match(
+    pagesBuild,
+    /resolve\(projectRoot, "docs\/site"\),\n {4}pagesDirectory/,
+  );
+  assert.match(
+    pagesBuild,
+    /resolve\(projectRoot, "demo\/dist"\),\n {4}join\(pagesDirectory, "demo"\)/,
+  );
+  assert.match(pagesBuild, /"demo\/index\.html"/);
+  assert.doesNotMatch(pagesBuild, /"docs\/index\.html"/);
+  assert.match(demoApp, /resolveDemoDocsUrl\(/);
+  assert.match(docsUrl, /return new URL\("\.\.\/", location\.href\)\.href/);
+  assert.match(homepage, /data-supervision-demo-link href="demo\/"/);
+  assert.match(
+    homepage,
+    /data-supervision-playground-src="demo\/\?embed=docs-playground"/,
+  );
+  assert.match(toolbar, /function resolveDemoUrl\(deployedPath\)/);
 });
 
 test("copyable integration examples typecheck", async () => {

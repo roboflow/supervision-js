@@ -15,7 +15,9 @@ import { fileURLToPath } from "node:url";
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const pagesDirectory = resolve(projectRoot, "dist/pages");
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
-const pagesBasePath = "/";
+// Relative asset URLs let the same static artifact work at the root of a
+// custom domain (Render) and below a project prefix (GitHub Pages).
+const staticAppBasePath = "./";
 
 await main();
 
@@ -25,20 +27,20 @@ async function main() {
   await runNpm(["run", "build"]);
   await runNpm(["run", "build", "-w", "demo"], {
     VITE_DEMO_ALLOW_UPLOAD: "false",
-    VITE_DEMO_BASE_PATH: pagesBasePath,
+    VITE_DEMO_BASE_PATH: staticAppBasePath,
   });
   await runNpm(["run", "build", "-w", "examples/vanilla"], {
-    VITE_VANILLA_BASE_PATH: "/examples/vanilla/",
+    VITE_VANILLA_BASE_PATH: staticAppBasePath,
   });
   await runNpm(["run", "docs:build:typedoc"]);
 
   await copyDirectoryContents(
-    resolve(projectRoot, "demo/dist"),
+    resolve(projectRoot, "docs/site"),
     pagesDirectory,
   );
   await copyDirectoryContents(
-    resolve(projectRoot, "docs/site"),
-    join(pagesDirectory, "docs"),
+    resolve(projectRoot, "demo/dist"),
+    join(pagesDirectory, "demo"),
   );
   await copyDirectoryContents(
     resolve(projectRoot, "examples/vanilla/dist"),
@@ -63,7 +65,7 @@ async function copyDirectoryContents(source, destination) {
 async function verifyPagesArtifact() {
   const requiredFiles = [
     "index.html",
-    "docs/index.html",
+    "demo/index.html",
     "examples/vanilla/index.html",
   ];
 
@@ -72,7 +74,7 @@ async function verifyPagesArtifact() {
   );
 
   const generatedHtml = await Promise.all(
-    ["index.html", "examples/vanilla/index.html"].map((file) =>
+    ["demo/index.html", "examples/vanilla/index.html"].map((file) =>
       readFile(join(pagesDirectory, file), "utf8"),
     ),
   );
@@ -80,6 +82,16 @@ async function verifyPagesArtifact() {
   if (generatedHtml.some((html) => html.includes("/supervision-js/"))) {
     throw new Error(
       "GitHub Pages artifact contains a /supervision-js/ asset prefix, but this deployment is served from the domain root.",
+    );
+  }
+
+  if (
+    generatedHtml.some((html) =>
+      /(?:src|href)="\/(?:demo|examples)\//.test(html),
+    )
+  ) {
+    throw new Error(
+      "Static application assets must use relative URLs so the artifact works under a project URL prefix.",
     );
   }
 }
