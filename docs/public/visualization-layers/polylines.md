@@ -9,10 +9,18 @@ Polylines are open paths with at least two media-pixel points. Use
 `BasePolylineStyle` for guides, trajectories, and other paths that must not
 close back to their first point.
 
-> **Fixture status:** the browser renderer supports polylines, but the
-> committed basketball fixture has no semantic open-path data. This page does
-> not fabricate an overlay solely for the docs. A focused playground will ship
-> with a frozen, reproducible fixture that contains real polyline input.
+<div class="supervision-layer-playground">
+  <iframe
+    data-supervision-playground-src="demo/?embed=visualization-layer&amp;layer=polylines"
+    loading="lazy"
+    title="Interactive polyline visualization playground"
+  ></iframe>
+</div>
+
+The playground uses a frozen CC0 pedestrian video. Its paths are an explicit
+`ByteTrack`-derived center trace, not a claim that an object detector emitted
+polylines directly. The fixture README records the source, model, tracker, and
+derivation policy.
 
 ## Add a polyline layer
 

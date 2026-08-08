@@ -194,13 +194,21 @@ test("TypeDoc presents public guidance as four navigable sections", async () => 
 });
 
 test("every fixture-backed visualization layer has a focused live playground", async () => {
-  const layers = ["boxes", "masks", "labels", "polygons", "keypoints"];
+  const layers = [
+    "boxes",
+    "masks",
+    "labels",
+    "polygons",
+    "polylines",
+    "keypoints",
+  ];
   const pages = {
     boxes: "boxes.md",
     keypoints: "keypoints-and-skeletons.md",
     labels: "labels.md",
     masks: "masks.md",
     polygons: "polygons.md",
+    polylines: "polylines.md",
   };
   const visualizationIndex = await readFile(
     path.join(publicDocsDir, "visualization-layers.md"),
@@ -263,13 +271,6 @@ test("every fixture-backed visualization layer has a focused live playground", a
     docsCss,
     /\.tsd-typography:has\(\.supervision-layer-playground\) \{[\s\S]*?max-width: 72rem;/,
   );
-
-  const polylinePage = await readFile(
-    path.join(publicDocsDir, "visualization-layers", "polylines.md"),
-    "utf8",
-  );
-  assert.doesNotMatch(polylinePage, /data-supervision-playground-src/);
-  assert.match(polylinePage, /Fixture status:/);
 });
 
 test("Render preview trusts only its assigned hostname", async () => {

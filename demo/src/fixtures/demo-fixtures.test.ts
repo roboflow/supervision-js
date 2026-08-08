@@ -30,6 +30,13 @@ const geometryManifest = readJson<Record<string, unknown>>(
 const geometryChunks = listDetectionChunkPaths(geometryFixturePath).map(
   (path) => readJson<DetectionChunk>(path),
 );
+const peopleFixturePath = join(fixturesRoot, "people_walking_detection_v1");
+const peopleManifest = readJson<Record<string, unknown>>(
+  join(peopleFixturePath, "detections.manifest.json"),
+);
+const peopleChunks = listDetectionChunkPaths(peopleFixturePath).map((path) =>
+  readJson<DetectionChunk>(path),
+);
 
 describe("fixture geometry", () => {
   it("uses center-based rects for deterministic fixture mask samples", () => {
@@ -47,7 +54,7 @@ describe("fixture geometry", () => {
 });
 
 describe("geometry showcase fixture", () => {
-  it("exposes only the horse trail and combined basketball samples", () => {
+  it("exposes the demo samples with their documented geometry", () => {
     expect(
       demoFixtures.map(({ displayName, sampleName }) => ({
         displayName,
@@ -58,6 +65,10 @@ describe("geometry showcase fixture", () => {
       {
         displayName: "Basketball with Keypoints",
         sampleName: "basketball_geometry",
+      },
+      {
+        displayName: "Pedestrian paths",
+        sampleName: "people_walking_detection_v1",
       },
     ]);
   });
@@ -243,6 +254,98 @@ describe("geometry showcase fixture", () => {
 
     expect(geometryChunks.length).toBeGreaterThan(0);
     expect(violations).toBe(0);
+  });
+});
+
+describe("pedestrian paths fixture", () => {
+  it("records model, source, and tracker provenance without credentials", () => {
+    const provenance = peopleManifest.provenance as {
+      readonly authoring: { readonly gitCommit: string };
+      readonly model: { readonly weightsSha256: string };
+      readonly rawOutput: { readonly sha256: string };
+      readonly source: { readonly sha256: string };
+      readonly tracking: {
+        readonly algorithm: string;
+        readonly derivedGeometry: { readonly algorithm: string };
+        readonly sha256: string;
+        readonly trackersVersion: string;
+      };
+    };
+
+    expect(provenance.source.sha256).toBe(
+      sourceSha256(
+        readFileSync(join(peopleFixturePath, "people-walking.webm")),
+      ),
+    );
+    expect(provenance.authoring.gitCommit).toMatch(/^[a-f0-9]{40}$/);
+    expect(provenance.model.weightsSha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(provenance.rawOutput.sha256).toBe(
+      sourceSha256(
+        readFileSync(join(peopleFixturePath, "raw-yolov8n-640.jsonl")),
+      ),
+    );
+    expect(provenance.tracking.algorithm).toBe(
+      "roboflow-trackers-byte-track-v1",
+    );
+    expect(provenance.tracking.derivedGeometry.algorithm).toBe(
+      "byte-track-center-trace-v1",
+    );
+    expect(provenance.tracking.trackersVersion).toBe("2.4.0");
+    expect(provenance.tracking.sha256).toBe(
+      sourceSha256(
+        readFileSync(join(peopleFixturePath, "bytetrack-associations.jsonl")),
+      ),
+    );
+    expect(JSON.stringify(provenance)).not.toMatch(/api[_-]?key/i);
+  });
+
+  it("keeps time-bounded semantic polylines attached to confirmed person tracks", () => {
+    let polylineCount = 0;
+    let violations = 0;
+    const seenFrameIndexes = new Set<number>();
+    let previousMediaTime = Number.NEGATIVE_INFINITY;
+
+    for (const chunk of peopleChunks) {
+      for (const frame of chunk.frames) {
+        if (seenFrameIndexes.has(frame.frameIndex ?? -1)) continue;
+        seenFrameIndexes.add(frame.frameIndex ?? -1);
+        if (
+          !Number.isInteger(frame.frameIndex) ||
+          frame.frameIndex! < 0 ||
+          frame.mediaTime <= previousMediaTime ||
+          (frame.endTime ?? Number.NEGATIVE_INFINITY) <= frame.mediaTime
+        ) {
+          violations += 1;
+        }
+        previousMediaTime = frame.mediaTime;
+        for (const detection of frame.detections) {
+          if (!detection.polyline) continue;
+          polylineCount += 1;
+          const { points } = detection.polyline;
+          if (
+            detection.className !== "person" ||
+            !detection.rect ||
+            typeof detection.id !== "string" ||
+            !detection.id.startsWith("person-track:") ||
+            points.length < 2 ||
+            points.length > 50 ||
+            points.some(
+              (point) => !Number.isFinite(point.x) || !Number.isFinite(point.y),
+            )
+          ) {
+            violations += 1;
+          }
+        }
+      }
+    }
+
+    expect(polylineCount).toBeGreaterThan(0);
+    expect(violations).toBe(0);
+    expect(seenFrameIndexes.size).toBe(peopleManifest.frameCount);
+    expect(
+      (peopleManifest.geometry as { polylineDetectionCount: number })
+        .polylineDetectionCount,
+    ).toBe(polylineCount);
   });
 });
 

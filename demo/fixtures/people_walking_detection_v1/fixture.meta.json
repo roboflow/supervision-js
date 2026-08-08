@@ -1,0 +1,28 @@
+{
+  "datasetId": "people_walking_detection_v1",
+  "displayName": "Pedestrian paths",
+  "inferenceLabel": "YOLOv8n + ByteTrack",
+  "media": {
+    "file": "people-walking.webm",
+    "loadingStatusLabel": "loading 15s CC0 pedestrian source",
+    "normalizeInBrowser": false,
+    "readyStatusLabel": "15s CC0 pedestrian source | frozen YOLOv8n detections + ByteTrack paths"
+  },
+  "presentation": {
+    "boxesEnabled": false,
+    "focusEnabled": false,
+    "keypointsEnabled": false,
+    "labelsEnabled": false,
+    "masksEnabled": false,
+    "polygonsEnabled": false,
+    "polylinesEnabled": true
+  },
+  "presentationAvailability": {
+    "keypointsEnabled": false,
+    "masksEnabled": false,
+    "polygonsEnabled": false
+  },
+  "sampleName": "people_walking_detection_v1",
+  "schema": "supervision-js.demo.fixture-meta",
+  "version": 1
+}

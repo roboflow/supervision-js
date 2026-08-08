@@ -18,8 +18,13 @@ export function DocsVisualizationLayerPlayground({
   readonly layer: DocsVisualizationLayerId;
 }) {
   const definition = docsVisualizationLayers[layer];
+  const fixtureName =
+    layer === "polylines" ? "pedestrian paths fixture" : "basketball fixture";
   const demo = useDemoRenderer({
-    initialFixtureId: "basketball_geometry",
+    initialFixtureId:
+      layer === "polylines"
+        ? "people_walking_detection_v1"
+        : "basketball_geometry",
     initialPresentationSettings:
       createDocsVisualizationLayerPresentation(layer),
   });
@@ -83,7 +88,7 @@ export function DocsVisualizationLayerPlayground({
           </div>
           <button
             aria-label={
-              isPlaying ? "Pause basketball fixture" : "Play basketball fixture"
+              isPlaying ? `Pause ${fixtureName}` : `Play ${fixtureName}`
             }
             disabled={!demo.canUseRenderer}
             onClick={demo.onTogglePlayback}

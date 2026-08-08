@@ -41,5 +41,11 @@ describe("docs visualization layers", () => {
         boxStrokeWidth: 6,
       }),
     ).toContain("stroke: { width: 6 }");
+    expect(
+      createDocsVisualizationLayerSnippet("polylines", {
+        ...defaultDemoPresentationSettings,
+        polylineStrokeWidth: 7,
+      }),
+    ).toContain("stroke: { width: 7 }");
   });
 });

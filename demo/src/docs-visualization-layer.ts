@@ -5,6 +5,7 @@ export const docsVisualizationLayerIds = [
   "masks",
   "labels",
   "polygons",
+  "polylines",
   "keypoints",
 ] as const;
 
@@ -147,6 +148,20 @@ export const docsVisualizationLayers: Readonly<
     description: "Closed media-space paths",
     title: "Polygons",
   },
+  polylines: {
+    controls: [
+      {
+        key: "polylineStrokeWidth",
+        label: "Stroke width",
+        max: 10,
+        min: 1,
+        step: 1,
+        unit: "pixels",
+      },
+    ],
+    description: "Tracked center-point paths",
+    title: "Polylines",
+  },
   keypoints: {
     controls: [
       {
@@ -189,7 +204,7 @@ export function createDocsVisualizationLayerPresentation(
     labelsEnabled: layer === "labels",
     masksEnabled: layer === "masks",
     polygonsEnabled: layer === "polygons",
-    polylinesEnabled: false,
+    polylinesEnabled: layer === "polylines",
     maskFillAlpha: 1,
     maskOpacity: 0.72,
   };
@@ -232,6 +247,12 @@ export function createDocsVisualizationLayerSnippet(
   polygonStyle: new BasePolygonStyle({
     fill: { alpha: ${formatNumber(settings.polygonFillAlpha)} },
     stroke: { width: ${formatNumber(settings.polygonStrokeWidth)} },
+  }),
+});`;
+    case "polylines":
+      return `session.setPresentation({
+  polylineStyle: new BasePolylineStyle({
+    stroke: { width: ${formatNumber(settings.polylineStrokeWidth)} },
   }),
 });`;
     case "keypoints":
