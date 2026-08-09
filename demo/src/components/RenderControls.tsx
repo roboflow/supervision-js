@@ -53,6 +53,20 @@ export const RenderControls = memo(function RenderControls({
       },
     });
   };
+  const updateClassVisibility = (className: string, visible: boolean) => {
+    onChange({
+      ...settings,
+      hiddenClasses: visible
+        ? settings.hiddenClasses.filter((name) => name !== className)
+        : [...settings.hiddenClasses, className],
+    });
+  };
+  const updateAllClassVisibility = (visible: boolean) => {
+    onChange({
+      ...settings,
+      hiddenClasses: visible ? [] : [...classNames],
+    });
+  };
 
   return (
     <section className="render-controls" aria-label="Render controls">
@@ -86,6 +100,8 @@ export const RenderControls = memo(function RenderControls({
         <ClassRenderControls
           classNames={classNames}
           onChange={updateClassStyle}
+          onChangeAllVisibility={updateAllClassVisibility}
+          onChangeVisibility={updateClassVisibility}
           settings={settings}
         />
       )}
@@ -503,6 +519,8 @@ function GlobalRenderControls({
 function ClassRenderControls({
   classNames,
   onChange,
+  onChangeAllVisibility,
+  onChangeVisibility,
   settings,
 }: {
   readonly classNames: readonly string[];
@@ -511,15 +529,50 @@ function ClassRenderControls({
     key: keyof DemoClassStyle,
     value: number,
   ) => void;
+  readonly onChangeAllVisibility: (visible: boolean) => void;
+  readonly onChangeVisibility: (className: string, visible: boolean) => void;
   readonly settings: DemoPresentationSettings;
 }) {
+  const hiddenCount = classNames.filter((className) =>
+    settings.hiddenClasses.includes(className),
+  ).length;
+
   return (
     <div className="render-controls__panel render-controls__panel--classes">
+      <div className="class-visibility-toolbar">
+        <span className="render-control__label">
+          <span>Visibility</span>
+        </span>
+        <div className="class-visibility-toolbar__actions">
+          <button
+            disabled={hiddenCount === 0}
+            onClick={() => onChangeAllVisibility(true)}
+            type="button"
+          >
+            Show all
+          </button>
+          <button
+            disabled={hiddenCount === classNames.length}
+            onClick={() => onChangeAllVisibility(false)}
+            type="button"
+          >
+            Hide all
+          </button>
+        </div>
+      </div>
       {classNames.map((className) => {
         const style = resolveDemoClassStyle(settings, className);
+        const visible = !settings.hiddenClasses.includes(className);
 
         return (
-          <article className="class-style-card" key={className}>
+          <article
+            className={
+              visible
+                ? "class-style-card"
+                : "class-style-card class-style-card--hidden"
+            }
+            key={className}
+          >
             <header>
               <span
                 className="class-style-card__swatch"
@@ -528,6 +581,17 @@ function ClassRenderControls({
                 }
               />
               <strong>{className}</strong>
+              <label className="class-style-card__visibility">
+                <input
+                  aria-label={`Show ${className} detections`}
+                  checked={visible}
+                  onChange={(event) =>
+                    onChangeVisibility(className, event.currentTarget.checked)
+                  }
+                  type="checkbox"
+                />
+                <span>Show</span>
+              </label>
             </header>
             <div className="class-style-card__controls">
               <ColorControl

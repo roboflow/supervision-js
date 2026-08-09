@@ -506,6 +506,79 @@ describe("demo presentation", () => {
     ).toBeUndefined();
   });
 
+  it("hides detections whose class is excluded from visibility", () => {
+    const presentation = createDemoPresentation({
+      ...defaultDemoPresentationSettings,
+      hiddenClasses: ["person"],
+    });
+    const hiddenContext = {
+      detectionIndex: 0,
+      frame: { detections: [vectorDetection], mediaTime: 0 },
+      mediaTime: 0,
+    };
+    const visibleContext = {
+      detectionIndex: 0,
+      frame: { detections: [detection], mediaTime: 0 },
+      mediaTime: 0,
+    };
+
+    expect(
+      presentation.boxStyle?.resolve(vectorDetection, hiddenContext),
+    ).toBeUndefined();
+    expect(
+      presentation.polygonStyle?.resolve(vectorDetection, hiddenContext),
+    ).toBeUndefined();
+    expect(
+      presentation.keypointStyle?.resolve(vectorDetection, hiddenContext),
+    ).toBeUndefined();
+    expect(
+      presentation.labelStyle?.resolve(vectorDetection, hiddenContext),
+    ).toBeUndefined();
+
+    expect(
+      presentation.boxStyle?.resolve(detection, visibleContext),
+    ).toBeDefined();
+    expect(
+      presentation.maskStyle?.resolve(detection, visibleContext),
+    ).toBeDefined();
+    expect(
+      presentation.labelStyle?.resolve(detection, visibleContext),
+    ).toBeDefined();
+  });
+
+  it("keeps detections without a class name visible when classes are hidden", () => {
+    const unnamedDetection: Detection = {
+      confidence: 0.9,
+      rect: { height: 40, width: 20, x: 10, y: 12 },
+    };
+    const presentation = createDemoPresentation({
+      ...defaultDemoPresentationSettings,
+      hiddenClasses: ["person", "horse", "cow"],
+    });
+
+    expect(
+      presentation.boxStyle?.resolve(unnamedDetection, {
+        detectionIndex: 0,
+        frame: { detections: [unnamedDetection], mediaTime: 0 },
+        mediaTime: 0,
+      }),
+    ).toBeDefined();
+  });
+
+  it("invalidates the mask artifact key when hidden classes change", () => {
+    const basePresentation = createDemoPresentation(
+      defaultDemoPresentationSettings,
+    );
+    const filteredPresentation = createDemoPresentation({
+      ...defaultDemoPresentationSettings,
+      hiddenClasses: ["horse"],
+    });
+
+    expect(filteredPresentation.maskStyle?.artifactKey).not.toBe(
+      basePresentation.maskStyle?.artifactKey,
+    );
+  });
+
   it("highlights picked polygon and keypoint targets through the interaction style", () => {
     const personStyle = {
       fill: 0x123456,
