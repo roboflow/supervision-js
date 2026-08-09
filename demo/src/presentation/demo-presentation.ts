@@ -43,6 +43,7 @@ export enum DemoBoxAnnotator {
   RoundBox = "roundBox",
   BoxCorner = "boxCorner",
   Circle = "circle",
+  Ellipse = "ellipse",
   Dot = "dot",
   Color = "color",
 }
@@ -391,6 +392,26 @@ function resolveDemoBoxInstruction(
         rect: { height: side, width: side, x: rect.x, y: rect.y },
         shape: BoxShape.RoundedRect,
         stroke,
+      };
+    }
+    case DemoBoxAnnotator.Ellipse: {
+      // Ground-marker approximation of Python's EllipseAnnotator: a stroked
+      // capsule anchored at the box's bottom center with the same bounding
+      // dimensions the Python annotator uses (width, 0.35 * width). A true
+      // elliptical arc needs the ellipse primitive from the annotator
+      // use-case roadmap.
+      const markerHeight = Math.max(rect.width * 0.35, 4);
+
+      return {
+        cornerRadius: markerHeight / 2,
+        rect: {
+          height: markerHeight,
+          width: rect.width,
+          x: rect.x,
+          y: rect.y + rect.height / 2,
+        },
+        shape: BoxShape.RoundedRect,
+        stroke: { alpha: 1, color: style.stroke, width: strokeWidth },
       };
     }
     case DemoBoxAnnotator.Dot: {

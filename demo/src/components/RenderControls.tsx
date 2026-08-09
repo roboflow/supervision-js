@@ -172,7 +172,12 @@ function GlobalRenderControls({
         </div>
       </ControlSection>
 
-      <ControlSection title="Boxes">
+      <ControlSection
+        enabled={settings.boxesEnabled}
+        onToggleEnabled={(checked) => onChange("boxesEnabled", checked)}
+        title="Boxes"
+        toggleDisabled={availability?.boxesEnabled === false}
+      >
         <SegmentedControl
           disabled={!settings.boxesEnabled}
           label="Annotator"
@@ -182,6 +187,7 @@ function GlobalRenderControls({
             { label: "Round Box", value: DemoBoxAnnotator.RoundBox },
             { label: "Box Corner", value: DemoBoxAnnotator.BoxCorner },
             { label: "Circle", value: DemoBoxAnnotator.Circle },
+            { label: "Ellipse", value: DemoBoxAnnotator.Ellipse },
             { label: "Dot", value: DemoBoxAnnotator.Dot },
             { label: "Color", value: DemoBoxAnnotator.Color },
           ]}
@@ -278,7 +284,12 @@ function GlobalRenderControls({
         )}
       </ControlSection>
 
-      <ControlSection title="Masks">
+      <ControlSection
+        enabled={settings.masksEnabled}
+        onToggleEnabled={(checked) => onChange("masksEnabled", checked)}
+        title="Masks"
+        toggleDisabled={availability?.masksEnabled === false}
+      >
         <SegmentedControl
           disabled={!settings.masksEnabled}
           label="Mode"
@@ -332,7 +343,12 @@ function GlobalRenderControls({
         />
       </ControlSection>
 
-      <ControlSection title="Polygons">
+      <ControlSection
+        enabled={settings.polygonsEnabled}
+        onToggleEnabled={(checked) => onChange("polygonsEnabled", checked)}
+        title="Polygons"
+        toggleDisabled={availability?.polygonsEnabled === false}
+      >
         <SliderControl
           disabled={!settings.polygonsEnabled}
           label="Stroke"
@@ -355,7 +371,12 @@ function GlobalRenderControls({
         />
       </ControlSection>
 
-      <ControlSection title="Polylines">
+      <ControlSection
+        enabled={settings.polylinesEnabled}
+        onToggleEnabled={(checked) => onChange("polylinesEnabled", checked)}
+        title="Polylines"
+        toggleDisabled={availability?.polylinesEnabled === false}
+      >
         <SliderControl
           disabled={!settings.polylinesEnabled}
           label="Stroke"
@@ -368,7 +389,12 @@ function GlobalRenderControls({
         />
       </ControlSection>
 
-      <ControlSection title="Keypoints">
+      <ControlSection
+        enabled={settings.keypointsEnabled}
+        onToggleEnabled={(checked) => onChange("keypointsEnabled", checked)}
+        title="Keypoints"
+        toggleDisabled={availability?.keypointsEnabled === false}
+      >
         <SegmentedControl
           disabled={!settings.keypointsEnabled}
           label="Annotator"
@@ -409,7 +435,12 @@ function GlobalRenderControls({
         )}
       </ControlSection>
 
-      <ControlSection title="Labels">
+      <ControlSection
+        enabled={settings.labelsEnabled}
+        onToggleEnabled={(checked) => onChange("labelsEnabled", checked)}
+        title="Labels"
+        toggleDisabled={availability?.labelsEnabled === false}
+      >
         <ToggleControl
           checked={settings.labelIncludeConfidence}
           disabled={!settings.labelsEnabled}
@@ -513,48 +544,12 @@ function GlobalRenderControls({
         />
       </ControlSection>
 
-      <ControlSection title="Interaction">
-        <SliderControl
-          label="Hover Fill"
-          max={0.5}
-          min={0}
-          onChange={(value) => onChange("interactionHoverFillAlpha", value)}
-          step={0.01}
-          value={settings.interactionHoverFillAlpha}
-          valueLabel={formatPercent(settings.interactionHoverFillAlpha)}
-        />
-        <SliderControl
-          label="Hover Stroke"
-          max={12}
-          min={0.5}
-          onChange={(value) => onChange("interactionHoverStrokeWidth", value)}
-          step={0.5}
-          value={settings.interactionHoverStrokeWidth}
-          valueLabel={`${settings.interactionHoverStrokeWidth}px`}
-        />
-        <SliderControl
-          label="Selected Fill"
-          max={0.65}
-          min={0}
-          onChange={(value) => onChange("interactionSelectedFillAlpha", value)}
-          step={0.01}
-          value={settings.interactionSelectedFillAlpha}
-          valueLabel={formatPercent(settings.interactionSelectedFillAlpha)}
-        />
-        <SliderControl
-          label="Selected Stroke"
-          max={16}
-          min={0.5}
-          onChange={(value) =>
-            onChange("interactionSelectedStrokeWidth", value)
-          }
-          step={0.5}
-          value={settings.interactionSelectedStrokeWidth}
-          valueLabel={`${settings.interactionSelectedStrokeWidth}px`}
-        />
-      </ControlSection>
-
-      <ControlSection title="Focus">
+      <ControlSection
+        enabled={settings.focusEnabled}
+        onToggleEnabled={(checked) => onChange("focusEnabled", checked)}
+        title="Focus"
+        toggleDisabled={availability?.focusEnabled === false}
+      >
         <SegmentedControl
           disabled={!settings.focusEnabled}
           label="Target"
@@ -592,6 +587,45 @@ function GlobalRenderControls({
           step={1}
           value={settings.focusCornerRadius}
           valueLabel={`${settings.focusCornerRadius}px`}
+        />
+        <h4 className="render-control-section__subheading">Interaction</h4>
+        <SliderControl
+          label="Hover Fill"
+          max={0.5}
+          min={0}
+          onChange={(value) => onChange("interactionHoverFillAlpha", value)}
+          step={0.01}
+          value={settings.interactionHoverFillAlpha}
+          valueLabel={formatPercent(settings.interactionHoverFillAlpha)}
+        />
+        <SliderControl
+          label="Hover Stroke"
+          max={12}
+          min={0.5}
+          onChange={(value) => onChange("interactionHoverStrokeWidth", value)}
+          step={0.5}
+          value={settings.interactionHoverStrokeWidth}
+          valueLabel={`${settings.interactionHoverStrokeWidth}px`}
+        />
+        <SliderControl
+          label="Selected Fill"
+          max={0.65}
+          min={0}
+          onChange={(value) => onChange("interactionSelectedFillAlpha", value)}
+          step={0.01}
+          value={settings.interactionSelectedFillAlpha}
+          valueLabel={formatPercent(settings.interactionSelectedFillAlpha)}
+        />
+        <SliderControl
+          label="Selected Stroke"
+          max={16}
+          min={0.5}
+          onChange={(value) =>
+            onChange("interactionSelectedStrokeWidth", value)
+          }
+          step={0.5}
+          value={settings.interactionSelectedStrokeWidth}
+          valueLabel={`${settings.interactionSelectedStrokeWidth}px`}
         />
       </ControlSection>
     </div>
@@ -708,24 +742,46 @@ function ClassRenderControls({
 
 function ControlSection({
   children,
+  enabled,
+  onToggleEnabled,
   title,
+  toggleDisabled = false,
 }: {
   readonly children: ReactNode;
+  readonly enabled?: boolean;
+  readonly onToggleEnabled?: (enabled: boolean) => void;
   readonly title: string;
+  readonly toggleDisabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
 
   return (
     <section className="render-control-section">
-      <button
-        aria-expanded={open}
-        className="render-control-section__toggle"
-        onClick={() => setOpen((current) => !current)}
-        type="button"
-      >
-        <h3>{title}</h3>
-        <span aria-hidden="true" className="render-control-section__chevron" />
-      </button>
+      <div className="render-control-section__header">
+        <button
+          aria-expanded={open}
+          className="render-control-section__toggle"
+          onClick={() => setOpen((current) => !current)}
+          type="button"
+        >
+          <h3>{title}</h3>
+          <span
+            aria-hidden="true"
+            className="render-control-section__chevron"
+          />
+        </button>
+        {onToggleEnabled ? (
+          <label className="render-control-section__enable">
+            <input
+              aria-label={`Enable ${title.toLowerCase()} layer`}
+              checked={enabled}
+              disabled={toggleDisabled}
+              onChange={(event) => onToggleEnabled(event.currentTarget.checked)}
+              type="checkbox"
+            />
+          </label>
+        ) : null}
+      </div>
       {open ? (
         <div className="render-control-section__body">{children}</div>
       ) : null}

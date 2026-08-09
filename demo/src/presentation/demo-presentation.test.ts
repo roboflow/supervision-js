@@ -155,6 +155,29 @@ describe("demo presentation", () => {
     expect(instruction?.cornerRadius).toBeCloseTo(side / 2);
   });
 
+  it("lowers the ellipse annotator to a stroked ground marker at the box bottom", () => {
+    const presentation = createDemoPresentation({
+      ...defaultDemoPresentationSettings,
+      boxAnnotator: DemoBoxAnnotator.Ellipse,
+    });
+    const instruction = presentation.boxStyle?.resolve(rectangleDetection, {
+      detectionIndex: 0,
+      frame: { detections: [rectangleDetection], mediaTime: 0 },
+      mediaTime: 0,
+    });
+    const markerHeight = 20 * 0.35;
+
+    expect(instruction?.shape).toBe(BoxShape.RoundedRect);
+    expect(instruction?.rect).toMatchObject({
+      height: markerHeight,
+      width: 20,
+      x: rectangleDetection.rect!.x,
+      y: rectangleDetection.rect!.y + 20,
+    });
+    expect(instruction?.cornerRadius).toBeCloseTo(markerHeight / 2);
+    expect(instruction?.fill).toBeUndefined();
+  });
+
   it("lowers the dot annotator to a screen-sized filled circle at the box center", () => {
     const presentation = createDemoPresentation({
       ...defaultDemoPresentationSettings,
