@@ -3,6 +3,9 @@ import {
   BasePolygonStyle,
   BasePolylineStyle,
   KeypointMarkerShape,
+  ShapeInstructionKind,
+  resolveMarkerGeometry,
+  sampleEllipseArc,
   type BufferedDetectionTimeline,
   type Detection,
   type DetectionFrame,
@@ -13,6 +16,8 @@ import {
   type PolygonStyle,
   type PolylineDrawInstruction,
   type PolylineStyle,
+  type ShapeDrawInstruction,
+  type ShapeStyle,
 } from "supervision-js-core";
 import type {
   Container as PixiContainer,
@@ -31,6 +36,7 @@ interface ResolvedVectorDetection {
   readonly polygon?: PolygonDrawInstruction;
   readonly polyline?: PolylineDrawInstruction;
   readonly keypoints?: KeypointDrawInstruction;
+  readonly shapes?: readonly ShapeDrawInstruction[];
 }
 
 export interface PixiVectorLayer {
@@ -42,6 +48,7 @@ export interface PixiVectorLayer {
     polygonStyle?: PolygonStyle | null;
     polylineStyle?: PolylineStyle | null;
     keypointStyle?: KeypointStyle | null;
+    shapeStyle?: ShapeStyle | null;
   }): void;
   destroy(): void;
 }
@@ -53,6 +60,7 @@ export function createPixiVectorLayer(options: {
   readonly polygonStyle?: PolygonStyle | null;
   readonly polylineStyle?: PolylineStyle | null;
   readonly keypointStyle?: KeypointStyle | null;
+  readonly shapeStyle?: ShapeStyle | null;
   readonly resolveContextState?: (
     detection: Detection,
   ) => Partial<AnnotationStyleContext>;
@@ -70,6 +78,9 @@ export function createPixiVectorLayer(options: {
     options.keypointStyle === undefined
       ? new BaseKeypointStyle()
       : options.keypointStyle;
+  // Shape decorations are opt-in; no default style exists so configuring
+  // nothing keeps the semantic-geometry skip untouched.
+  let shapeStyle = options.shapeStyle ?? null;
   let styleVersion = 0;
   let drawnStyleVersion = -1;
   // A versioned source can replace a frame without changing its timeline key.
@@ -117,7 +128,8 @@ export function createPixiVectorLayer(options: {
           if (
             !detection.polygon &&
             !detection.polyline &&
-            !detection.keypoints
+            !detection.keypoints &&
+            !shapeStyle
           ) {
             return [];
           }
@@ -170,6 +182,7 @@ export function createPixiVectorLayer(options: {
         polylineStyle = styles.polylineStyle;
       if (styles.keypointStyle !== undefined)
         keypointStyle = styles.keypointStyle;
+      if (styles.shapeStyle !== undefined) shapeStyle = styles.shapeStyle;
       styleVersion += 1;
     },
 
@@ -228,14 +241,18 @@ export function createPixiVectorLayer(options: {
     const polygon = polygonStyle?.resolve(detection, context);
     const polyline = polylineStyle?.resolve(detection, context);
     const keypoints = keypointStyle?.resolve(detection, context);
+    const shapes = shapeStyle?.resolve(detection, context);
 
-    if (!polygon && !polyline && !keypoints) return undefined;
+    if (!polygon && !polyline && !keypoints && !shapes?.length) {
+      return undefined;
+    }
 
     return {
       key: detectionKey(detection, detectionIndex),
       keypoints,
       polygon,
       polyline,
+      shapes,
       zIndex: detection.zIndex ?? detectionIndex,
     };
   }
@@ -248,7 +265,11 @@ export function createPixiVectorLayer(options: {
     const graphics = entry.display;
     if (!entry.cleared) graphics.clear();
     entry.cleared = false;
-    const { keypoints, polygon, polyline } = detection;
+    const { keypoints, polygon, polyline, shapes } = detection;
+
+    for (const shape of shapes ?? []) {
+      drawShapeInstruction(graphics, shape, viewportScale);
+    }
 
     if (polygon) {
       graphics.poly(
@@ -329,6 +350,86 @@ export function createPixiVectorLayer(options: {
           });
       }
     }
+  }
+}
+
+function drawShapeInstruction(
+  graphics: PixiGraphics,
+  instruction: ShapeDrawInstruction,
+  viewportScale: number,
+) {
+  if (instruction.kind === ShapeInstructionKind.Ellipse) {
+    const { closed, points } = sampleEllipseArc(instruction);
+
+    if (closed && instruction.fill) {
+      graphics.poly(
+        points.flatMap(({ x, y }) => [x, y]),
+        true,
+      );
+      graphics.fill(instruction.fill);
+    }
+
+    if (instruction.stroke) {
+      drawPixiPath(graphics, points, closed, instruction.stroke, viewportScale);
+    }
+
+    return;
+  }
+
+  if (instruction.kind === ShapeInstructionKind.Marker) {
+    const geometry = resolveMarkerGeometry(instruction, viewportScale);
+
+    if (geometry.kind === "circle") {
+      graphics.circle(geometry.center.x, geometry.center.y, geometry.radius);
+      if (instruction.fill) graphics.fill(instruction.fill);
+      if (instruction.stroke)
+        graphics.stroke({
+          alpha: instruction.stroke.alpha,
+          color: instruction.stroke.color,
+          width: resolveScreenLength(instruction.stroke.width, viewportScale),
+        });
+      return;
+    }
+
+    for (const subpath of geometry.subpaths) {
+      if (geometry.closed && instruction.fill) {
+        graphics.poly(
+          subpath.flatMap(({ x, y }) => [x, y]),
+          true,
+        );
+        graphics.fill(instruction.fill);
+      }
+
+      if (instruction.stroke) {
+        drawPixiPath(
+          graphics,
+          subpath,
+          geometry.closed,
+          instruction.stroke,
+          viewportScale,
+        );
+      }
+    }
+
+    return;
+  }
+
+  for (const segment of instruction.segments) {
+    if (instruction.closed && instruction.fill) {
+      graphics.poly(
+        segment.flatMap(({ x, y }) => [x, y]),
+        true,
+      );
+      graphics.fill(instruction.fill);
+    }
+
+    drawPixiPath(
+      graphics,
+      segment,
+      instruction.closed,
+      instruction.stroke,
+      viewportScale,
+    );
   }
 }
 

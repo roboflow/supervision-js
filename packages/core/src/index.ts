@@ -143,6 +143,8 @@ export {
   type IdMaskFrame,
   type IdMaskInstruction,
 } from "#utils/id-mask-frame";
+export { resolveMarkerGeometry, sampleEllipseArc } from "#utils/shape-geometry";
+export type { MarkerGeometry, SampledShapePath } from "#utils/shape-geometry";
 export { includeDefined } from "#utils/object";
 export { lightenColor, resolveContrastTextColor } from "#utils/color";
 export { resolveAnnotationStyleState } from "#utils/annotation-visibility";
@@ -304,6 +306,19 @@ export type {
   PolylineStyle,
   PolylineStyleContext,
 } from "#types/polyline-style";
+export {
+  MarkerShape,
+  MarkerSizeSpace,
+  ShapeInstructionKind,
+} from "#types/shape-style";
+export type {
+  EllipseShapeInstruction,
+  MarkerShapeInstruction,
+  PathShapeInstruction,
+  ShapeDrawInstruction,
+  ShapeStyle,
+  ShapeStyleContext,
+} from "#types/shape-style";
 export { KeypointMarkerShape } from "#types/keypoint-style";
 export type {
   KeypointDrawInstruction,

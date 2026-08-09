@@ -68,6 +68,8 @@ describe("package entrypoint", () => {
       "KeypointVisibility",
       "LabelPlacement",
       "LabelVisibilityMode",
+      "MarkerShape",
+      "MarkerSizeSpace",
       "MaskRenderMode",
       "MediaInteractionMode",
       "MediaNormalizationAudioCodec",
@@ -90,6 +92,7 @@ describe("package entrypoint", () => {
       "RenderPreparationMode",
       "RenderPreparationWorkerStatus",
       "SUPERVISION_ROBOFLOW_COLOR",
+      "ShapeInstructionKind",
       "createArrayDetectionFrameSource",
       "createBrowserColdDetectionFrameStore",
       "createBufferedDetectionTimeline",
@@ -112,6 +115,8 @@ describe("package entrypoint", () => {
       "prepareMediaProgressively",
       "probeMedia",
       "resolveDetectionClassColorStyle",
+      "resolveMarkerGeometry",
+      "sampleEllipseArc",
     ]);
     expect(entrypoint.createMediaRenderer).toEqual(expect.any(Function));
     expect(entrypoint.createMediaStreamRendererSource).toEqual(

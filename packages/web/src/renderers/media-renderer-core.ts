@@ -76,6 +76,7 @@ export async function createMediaRendererCore(
     maskStyle: options.maskStyle,
     polygonStyle: options.polygonStyle,
     polylineStyle: options.polylineStyle,
+    shapeStyle: options.shapeStyle,
     visibility: options.visibility,
   });
   let detectionTimeline: BufferedDetectionTimeline | undefined;
@@ -463,6 +464,7 @@ export async function createMediaRendererCore(
       maxDevicePixelRatio: options.maxDevicePixelRatio,
       polygonStyle: currentPresentation.polygonStyle,
       polylineStyle: currentPresentation.polylineStyle,
+      shapeStyle: currentPresentation.shapeStyle,
       previewOverlay: options.previewOverlay,
       renderPreparation: options.renderPreparation
         ? {

@@ -9,6 +9,7 @@ import type { Point } from "#types/detections";
 import type { ViewportTransform } from "#types/viewport";
 import type { PolygonStyle } from "#types/polygon-style";
 import type { PolylineStyle } from "#types/polyline-style";
+import type { ShapeStyle } from "#types/shape-style";
 import type { KeypointStyle } from "#types/keypoint-style";
 import type { AnnotationOverlayStyle } from "#types/editing";
 
@@ -163,6 +164,11 @@ export interface MediaRendererPresentation {
   readonly polygonStyle?: PolygonStyle | null;
   readonly polylineStyle?: PolylineStyle | null;
   readonly keypointStyle?: KeypointStyle | null;
+  /**
+   * Optional shape decorations (ellipses, markers, paths) derived from
+   * detections. Presentation only: never pickable or editable.
+   */
+  readonly shapeStyle?: ShapeStyle | null;
   readonly visibility?: AnnotationVisibility;
 }
 

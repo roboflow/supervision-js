@@ -144,6 +144,7 @@ export async function createPixiMediaScene(
     polygonStyle: polygonLayer?.getVectorFallbackStyle() ?? currentPolygonStyle,
     polylineStyle: options.polylineStyle,
     keypointStyle: options.keypointStyle,
+    shapeStyle: options.shapeStyle,
     resolveContextState,
   });
   const annotationOverlayLayer = createPixiAnnotationOverlayLayer(
@@ -781,6 +782,7 @@ export async function createPixiMediaScene(
       vectorLayer.setStyles({
         polylineStyle: presentation.polylineStyle,
         keypointStyle: presentation.keypointStyle,
+        shapeStyle: presentation.shapeStyle,
       });
 
       if (presentation.maskStyle !== undefined) {

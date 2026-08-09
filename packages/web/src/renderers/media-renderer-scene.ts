@@ -23,6 +23,7 @@ import type { MaskStyle } from "supervision-js-core";
 import type {
   PolygonStyle,
   PolylineStyle,
+  ShapeStyle,
   KeypointStyle,
 } from "supervision-js-core";
 import type { MediaDisplayAdjustments } from "supervision-js-core";
@@ -50,6 +51,7 @@ export interface MediaRendererSceneOptions {
   readonly maskStyle: MaskStyle | null | undefined;
   readonly polygonStyle: PolygonStyle | null | undefined;
   readonly polylineStyle: PolylineStyle | null | undefined;
+  readonly shapeStyle: ShapeStyle | null | undefined;
   readonly keypointStyle: KeypointStyle | null | undefined;
   readonly interaction: MediaInteractionOptions | undefined;
   readonly interactionStyle: InteractionStyle | null | undefined;
