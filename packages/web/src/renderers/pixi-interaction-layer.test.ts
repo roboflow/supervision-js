@@ -110,10 +110,18 @@ describe("pixi interaction layer", () => {
 
     expect(layer.getState()).toEqual({
       hoveredPick: null,
-      selectedPick: null,
+      selectedPick: expect.objectContaining({
+        detection: frame.detections[0],
+        detectionIndex: 0,
+      }),
     });
     expect(onHover).toHaveBeenLastCalledWith(null);
-    expect(onSelect).toHaveBeenLastCalledWith(null);
+    expect(onSelect).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        detection: frame.detections[0],
+        detectionIndex: 0,
+      }),
+    );
   });
 
   it("prefers exact mask picks before falling back to box picks", () => {
@@ -388,6 +396,113 @@ describe("pixi interaction layer", () => {
     expect(layer.getState().selectedPick?.frame).toBe(selectedFrame);
     expect(onHover).not.toHaveBeenLastCalledWith(null);
     expect(onSelect).not.toHaveBeenLastCalledWith(null);
+  });
+
+  it("follows the selected detection id onto later frames while hover stays per-frame", () => {
+    const onHover = vi.fn();
+    const onSelect = vi.fn();
+    const followedFrame: DetectionFrame = {
+      detections: [
+        {
+          className: "player",
+          id: "player-2",
+          rect: { height: 30, width: 20, x: 50, y: 15 },
+        },
+        {
+          className: "player",
+          id: "player-1",
+          rect: { height: 30, width: 20, x: 40, y: 45 },
+        },
+      ],
+      frameIndex: 4,
+      mediaTime: 0.2,
+    };
+    let activeFrame = frame;
+    const layer = createPixiInteractionLayer({
+      Container: FakeContainer as never,
+      Rectangle: FakeRectangle as never,
+      canInteract: () => true,
+      detectionTimeline: createTimeline(() => activeFrame),
+      interaction: {
+        mode: MediaInteractionMode.PausedOnly,
+        onHover,
+        onSelect,
+      },
+    });
+    const display = layer.createDisplay({
+      height: 80,
+      width: 120,
+    }) as FakeContainer;
+
+    layer.drawFrame(0.1);
+    display.emit("pointermove", createPointerEvent(display, 15, 20));
+    display.emit("pointertap", createPointerEvent(display, 15, 20));
+
+    activeFrame = followedFrame;
+    layer.drawFrame(0.2);
+
+    expect(layer.getState().selectedPick).toMatchObject({
+      detection: followedFrame.detections[1],
+      detectionIndex: 1,
+      frame: followedFrame,
+      mediaTime: 0.2,
+    });
+    expect(onSelect).toHaveBeenLastCalledWith(
+      expect.objectContaining({ detection: followedFrame.detections[1] }),
+    );
+    expect(layer.getState().hoveredPick).toBeNull();
+    expect(onHover).toHaveBeenLastCalledWith(null);
+  });
+
+  it("keeps the selection following its detection during paused-only playback", () => {
+    const onSelect = vi.fn();
+    const followedFrame: DetectionFrame = {
+      detections: [
+        {
+          className: "player",
+          id: "player-1",
+          rect: { height: 30, width: 20, x: 40, y: 45 },
+        },
+      ],
+      frameIndex: 4,
+      mediaTime: 0.2,
+    };
+    let activeFrame = frame;
+    let paused = true;
+    const layer = createPixiInteractionLayer({
+      Container: FakeContainer as never,
+      Rectangle: FakeRectangle as never,
+      canInteract: () => paused,
+      detectionTimeline: createTimeline(() => activeFrame),
+      interaction: {
+        mode: MediaInteractionMode.PausedOnly,
+        onSelect,
+      },
+    });
+    const display = layer.createDisplay({
+      height: 80,
+      width: 120,
+    }) as FakeContainer;
+
+    layer.drawFrame(0.1);
+    display.emit("pointermove", createPointerEvent(display, 15, 20));
+    display.emit("pointertap", createPointerEvent(display, 15, 20));
+
+    paused = false;
+    activeFrame = followedFrame;
+    layer.drawFrame(0.2);
+
+    expect(layer.getState().selectedPick).toMatchObject({
+      detection: followedFrame.detections[0],
+      detectionIndex: 0,
+      frame: followedFrame,
+    });
+
+    activeFrame = nextFrame;
+    layer.drawFrame(0.3);
+
+    expect(layer.getState().selectedPick).toBeNull();
+    expect(onSelect).toHaveBeenLastCalledWith(null);
   });
 
   it("ignores stale mask picks and falls back to boxes on the active frame", () => {

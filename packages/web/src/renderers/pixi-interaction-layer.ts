@@ -1,5 +1,6 @@
 import {
   createDetectionPickKey,
+  followDetectionPickAcrossFrames,
   pickDetectionAtPoint,
   rebaseDetectionPickToFrame,
   getDetectionRect,
@@ -151,14 +152,24 @@ export function createPixiInteractionLayer(options: {
       currentMediaTime = mediaTime;
       activeFrame = options.detectionTimeline.selectFrame(mediaTime);
 
-      if (!canHandleInteraction()) {
-        pointerPoint = null;
-        marqueeRect = null;
-        setHoveredPick(null);
-        setSelectedPick(null);
-      } else {
+      if (canHandleInteraction()) {
         clearStalePicks(activeFrame);
+        return;
       }
+
+      pointerPoint = null;
+      marqueeRect = null;
+      setHoveredPick(null);
+
+      if (isDestroyed || mode === MediaInteractionMode.Disabled) {
+        setSelectedPick(null);
+        return;
+      }
+
+      // Paused-only interaction gates new picks during playback, but an
+      // existing selection keeps following its detection so selection-driven
+      // presentation such as focus survives frame advances.
+      followSelectedPicks(activeFrame);
     },
 
     setSelectedDetection(selection) {
@@ -449,8 +460,8 @@ export function createPixiInteractionLayer(options: {
   }
 
   function clearStalePicks(frame: DetectionFrame | undefined) {
+    // Hover stays bound to the pointer, so it keeps a per-frame lifetime.
     const nextHoveredPick = rebaseDetectionPickToFrame(hoveredPick, frame);
-    const nextSelectedPick = rebaseDetectionPickToFrame(selectedPick, frame);
 
     if (hoveredPick && !nextHoveredPick) {
       setHoveredPick(null);
@@ -458,11 +469,32 @@ export function createPixiInteractionLayer(options: {
       setHoveredPick(nextHoveredPick);
     }
 
-    if (selectedPick && !nextSelectedPick) {
-      setSelectedPick(null);
-    } else if (nextSelectedPick && nextSelectedPick !== selectedPick) {
-      setSelectedPick(nextSelectedPick);
+    followSelectedPicks(frame);
+  }
+
+  function followSelectedPicks(frame: DetectionFrame | undefined) {
+    if (selectedPicks.length === 0) {
+      return;
     }
+
+    const nextSelectedPicks = selectedPicks.flatMap((pick) => {
+      const nextPick = followDetectionPickAcrossFrames(pick, frame);
+      return nextPick ? [nextPick] : [];
+    });
+    const currentKeys = selectedPicks.map(createDetectionPickKey).join("|");
+    const nextKeys = nextSelectedPicks.map(createDetectionPickKey).join("|");
+
+    selectedPicks = nextSelectedPicks;
+    selectedPick = nextSelectedPicks.at(-1) ?? null;
+
+    if (nextKeys === currentKeys) {
+      return;
+    }
+
+    selectedPickKey = createDetectionPickKey(selectedPick);
+    options.interaction.onSelect?.(selectedPick);
+    options.interaction.onSelectionChange?.(selectedPicks);
+    notifyStateChange();
   }
 
   function setHoveredPick(nextPick: DetectionPickResult | null) {
