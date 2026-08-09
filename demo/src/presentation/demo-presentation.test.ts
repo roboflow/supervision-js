@@ -17,6 +17,8 @@ import {
   constrainDemoPresentationSettings,
   createDemoPresentation,
   defaultDemoPresentationSettings,
+  DemoBoxAnnotator,
+  DemoKeypointAnnotator,
 } from "./demo-presentation";
 
 const detection: Detection = {
@@ -112,6 +114,157 @@ describe("demo presentation", () => {
       cornerRadius: 8,
       shape: BoxShape.RoundedRect,
     });
+  });
+
+  it("lowers the round box annotator to a rounded rectangle", () => {
+    const presentation = createDemoPresentation({
+      ...defaultDemoPresentationSettings,
+      boxAnnotator: DemoBoxAnnotator.RoundBox,
+      boxCornerRadius: 12,
+    });
+
+    expect(
+      presentation.boxStyle?.resolve(rectangleDetection, {
+        detectionIndex: 0,
+        frame: { detections: [rectangleDetection], mediaTime: 0 },
+        mediaTime: 0,
+      }),
+    ).toMatchObject({
+      cornerRadius: 12,
+      shape: BoxShape.RoundedRect,
+    });
+  });
+
+  it("lowers the circle annotator to a fully rounded square over the box diagonal", () => {
+    const presentation = createDemoPresentation({
+      ...defaultDemoPresentationSettings,
+      boxAnnotator: DemoBoxAnnotator.Circle,
+    });
+    const instruction = presentation.boxStyle?.resolve(rectangleDetection, {
+      detectionIndex: 0,
+      frame: { detections: [rectangleDetection], mediaTime: 0 },
+      mediaTime: 0,
+    });
+    const side = Math.hypot(20, 40);
+
+    expect(instruction?.shape).toBe(BoxShape.RoundedRect);
+    expect(instruction?.rect.x).toBe(rectangleDetection.rect!.x);
+    expect(instruction?.rect.y).toBe(rectangleDetection.rect!.y);
+    expect(instruction?.rect.width).toBeCloseTo(side);
+    expect(instruction?.rect.height).toBeCloseTo(side);
+    expect(instruction?.cornerRadius).toBeCloseTo(side / 2);
+  });
+
+  it("lowers the dot annotator to a screen-sized filled circle at the box center", () => {
+    const presentation = createDemoPresentation({
+      ...defaultDemoPresentationSettings,
+      boxAnnotator: DemoBoxAnnotator.Dot,
+      boxDotRadius: 5,
+    });
+    const instruction = presentation.boxStyle?.resolve(rectangleDetection, {
+      detectionIndex: 0,
+      frame: { detections: [rectangleDetection], mediaTime: 0 },
+      mediaTime: 0,
+      viewportScale: 2,
+    });
+
+    expect(instruction?.shape).toBe(BoxShape.RoundedRect);
+    expect(instruction?.rect).toMatchObject({
+      height: 5,
+      width: 5,
+      x: rectangleDetection.rect!.x,
+      y: rectangleDetection.rect!.y,
+    });
+    expect(instruction?.fill).toMatchObject({ alpha: 1 });
+  });
+
+  it("lowers the color annotator to a fill-only rectangle", () => {
+    const presentation = createDemoPresentation({
+      ...defaultDemoPresentationSettings,
+      boxAnnotator: DemoBoxAnnotator.Color,
+      boxColorFillAlpha: 0.6,
+    });
+    const instruction = presentation.boxStyle?.resolve(rectangleDetection, {
+      detectionIndex: 0,
+      frame: { detections: [rectangleDetection], mediaTime: 0 },
+      mediaTime: 0,
+    });
+
+    expect(instruction).toMatchObject({
+      fill: { alpha: 0.6 },
+      rect: rectangleDetection.rect,
+      shape: BoxShape.Rect,
+    });
+    expect(instruction?.stroke).toBeUndefined();
+  });
+
+  it("lowers the box corner annotator to a per-detection dashed stroke", () => {
+    const wideDetection: Detection = {
+      className: "horse",
+      confidence: 0.9,
+      rect: { height: 60, width: 100, x: 50, y: 30 },
+    };
+    const presentation = createDemoPresentation({
+      ...defaultDemoPresentationSettings,
+      boxAnnotator: DemoBoxAnnotator.BoxCorner,
+      boxCornerLength: 15,
+    });
+    const instruction = presentation.boxStyle?.resolve(wideDetection, {
+      detectionIndex: 0,
+      frame: { detections: [wideDetection], mediaTime: 0 },
+      mediaTime: 0,
+      viewportScale: 1,
+    });
+
+    // Clockwise from the top-left vertex: half corner, gap, then full
+    // corners across each remaining vertex.
+    expect(instruction?.stroke?.dash).toEqual([
+      15, 70, 30, 30, 30, 70, 30, 30, 15,
+    ]);
+    expect(instruction?.fill).toBeUndefined();
+  });
+
+  it("falls back to a solid border when box corner arms would overlap", () => {
+    const presentation = createDemoPresentation({
+      ...defaultDemoPresentationSettings,
+      boxAnnotator: DemoBoxAnnotator.BoxCorner,
+      boxCornerLength: 15,
+    });
+    const instruction = presentation.boxStyle?.resolve(rectangleDetection, {
+      detectionIndex: 0,
+      frame: { detections: [rectangleDetection], mediaTime: 0 },
+      mediaTime: 0,
+      viewportScale: 1,
+    });
+
+    expect(instruction?.stroke?.dash).toBeUndefined();
+    expect(instruction?.stroke).toBeDefined();
+  });
+
+  it("restricts keypoint annotator variants to vertices or edges", () => {
+    const context = {
+      detectionIndex: 0,
+      frame: { detections: [vectorDetection], mediaTime: 0 },
+      mediaTime: 0,
+    };
+    const verticesInstruction = createDemoPresentation({
+      ...defaultDemoPresentationSettings,
+      keypointAnnotator: DemoKeypointAnnotator.Vertices,
+    }).keypointStyle?.resolve(vectorDetection, context);
+    const edgesInstruction = createDemoPresentation({
+      ...defaultDemoPresentationSettings,
+      keypointAnnotator: DemoKeypointAnnotator.Edges,
+    }).keypointStyle?.resolve(vectorDetection, context);
+    const combinedInstruction = createDemoPresentation(
+      defaultDemoPresentationSettings,
+    ).keypointStyle?.resolve(vectorDetection, context);
+
+    expect(verticesInstruction?.markers.length).toBeGreaterThan(0);
+    expect(verticesInstruction?.edges).toEqual([]);
+    expect(edgesInstruction?.edges.length).toBeGreaterThan(0);
+    expect(edgesInstruction?.markers).toEqual([]);
+    expect(combinedInstruction?.markers.length).toBeGreaterThan(0);
+    expect(combinedInstruction?.edges.length).toBeGreaterThan(0);
   });
 
   it("renders enabled boxes for detections with other geometry", () => {

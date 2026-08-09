@@ -1584,6 +1584,40 @@ fieldset {
   min-width: 0;
 }
 
+.render-control-section__toggle {
+  align-items: center;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  display: flex;
+  gap: 6px;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+  width: 100%;
+}
+
+.render-control-section .render-control-section__toggle h3 {
+  margin: 0;
+}
+
+.render-control-section__chevron {
+  border-bottom: 2px solid var(--muted);
+  border-right: 2px solid var(--muted);
+  flex: 0 0 auto;
+  height: 7px;
+  margin-right: 2px;
+  transform: rotate(-45deg);
+  transition: transform 120ms ease;
+  width: 7px;
+}
+
+.render-control-section__toggle[aria-expanded="true"]
+  .render-control-section__chevron {
+  transform: rotate(45deg);
+}
+
 .benchmarks-panel {
   background: rgba(10, 12, 17, 0.88);
   border: 1px solid var(--line);
