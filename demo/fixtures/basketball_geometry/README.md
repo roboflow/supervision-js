@@ -1,7 +1,7 @@
 # Geometry Showcase Fixture (9s Basketball)
 
 This fixture demonstrates every vector geometry supervision-js renders today —
-boxes, masks, mask-derived polygons, and pose keypoints with skeleton edges —
+boxes, masks, mask-derived polygons, a basketball trajectory polyline, and pose keypoints with skeleton edges —
 on the existing 9 second basketball media. It is a deterministic, offline
 composition of two model outputs; the demo loads it through the same
 chunk-manifest path as the other samples, with no API key and no runtime
@@ -47,6 +47,11 @@ is dropped and reported by the generator.
   the SAM3 detection, which remains authoritative for id, class, confidence,
   box, mask, polygon, and label. Unmatched YOLO poses are omitted, so the
   fixture does not create duplicate generic `person` detections or labels.
+- **Basketball trajectory** is a deterministic, bounded center trace for the
+  original SAM3 `basketball` detection `2:0`. It retains up to 60 points from
+  the last two seconds, resets after a gap longer than 0.25 seconds, and is
+  stored as the same detection's `polyline`. It is not a separate model output
+  or an inferred tracking claim.
 
 The exact values, input hashes, and policies are recorded in the `provenance`
 block of `detections.manifest.json`.

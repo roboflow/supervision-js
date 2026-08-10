@@ -17,10 +17,11 @@ close back to their first point.
   ></iframe>
 </div>
 
-The playground uses a frozen CC0 pedestrian video. Its paths are an explicit
-`ByteTrack`-derived center trace, not a claim that an object detector emitted
-polylines directly. The fixture README records the source, model, tracker, and
-derivation policy.
+The playground isolates one basketball from the frozen basketball fixture. Its
+mask and center-point trajectory share the basketball class color, so the
+visible path stays tied to the object it describes. The path is a deterministic
+derived field (`basketball-center-trace-v1`) on the committed fixture, not a
+claim that a segmentation model emitted polylines directly.
 
 ## Add a polyline layer
 

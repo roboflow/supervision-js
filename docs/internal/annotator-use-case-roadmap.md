@@ -2,7 +2,7 @@
 
 Status: active contribution and sequencing guide
 
-Last reviewed: August 8, 2026
+Last reviewed: August 10, 2026
 
 Scope: browser visualization capabilities; this is not an API commitment
 
@@ -309,29 +309,30 @@ claim a live playground. A renderer primitive alone is not enough: the
 playground must consume a committed fixture containing the matching semantic
 field. Do not inject docs-only detections to simulate coverage.
 
-| Visualization capability | Browser renderer and style        | Frozen fixture evidence                                                            | Public docs state | Next required work                                        |
-| ------------------------ | --------------------------------- | ---------------------------------------------------------------------------------- | ----------------- | --------------------------------------------------------- |
-| Boxes                    | Implemented                       | `basketball_geometry.rect`                                                         | Live playground   | Maintain regression coverage with the basketball fixture  |
-| Masks                    | Implemented                       | `basketball_geometry.mask` (compressed RLE)                                        | Live playground   | Maintain mask-preparation and visual coverage             |
-| Labels                   | Implemented                       | `basketball_geometry.className` and `confidence`                                   | Live playground   | Maintain label layout and contrast coverage               |
-| Polygons                 | Implemented                       | `basketball_geometry.polygon`                                                      | Live playground   | Maintain contour and fill/stroke coverage                 |
-| Keypoints and skeletons  | Implemented                       | `basketball_geometry.keypoints` including edges and visibility                     | Live playground   | Maintain pose association and visibility coverage         |
-| Polylines                | Implemented (`BasePolylineStyle`) | `people_walking_detection_v1.polyline` (versioned ByteTrack-derived center traces) | Live playground   | Maintain path, timing, and provenance regression coverage |
+| Visualization capability | Browser renderer and style        | Frozen fixture evidence                                                                        | Public docs state | Next required work                                                                     |
+| ------------------------ | --------------------------------- | ---------------------------------------------------------------------------------------------- | ----------------- | -------------------------------------------------------------------------------------- |
+| Boxes                    | Implemented                       | `basketball_geometry.rect`                                                                     | Live playground   | Maintain regression coverage with the basketball fixture                               |
+| Masks                    | Implemented                       | `basketball_geometry.mask` (compressed RLE)                                                    | Live playground   | Maintain mask-preparation and visual coverage                                          |
+| Labels                   | Implemented                       | `basketball_geometry.className` and `confidence`                                               | Live playground   | Maintain label layout and contrast coverage                                            |
+| Polygons                 | Implemented                       | `basketball_geometry.polygon`                                                                  | Live playground   | Maintain contour and fill/stroke coverage                                              |
+| Keypoints and skeletons  | Implemented                       | `basketball_geometry.keypoints` including edges and visibility                                 | Live playground   | Maintain pose association and visibility coverage                                      |
+| Polylines                | Implemented (`BasePolylineStyle`) | `basketball_geometry.basketball[id "2:0"].polyline` plus mask (versioned bounded center trace) | Live playground   | Maintain source-identity, path, timing, mask-color, and provenance regression coverage |
 
-The basketball fixture is therefore the current visual baseline for five
-layers: boxes, masks, labels, polygons, and keypoints/skeletons.
-`people_walking_detection_v1` is the distinct polyline baseline. Its derived
-paths are explicitly documented as tracker output, not detector output.
+The basketball fixture is therefore the current visual baseline for six
+layers: boxes, masks, labels, polygons, polylines, and keypoints/skeletons.
+Its polyline example is a transparent derived center trace on one frozen
+segmentation identity, while `people_walking_detection_v1` remains the
+separate ByteTrack-backed person-track fixture for temporal and analytic work.
 
 ### Gaps Before New Facades
 
-| Gap                                               | Status                                       | Earliest prerequisite                                                                                  |
-| ------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| Open-path fixture for the existing polyline layer | Completed with `people_walking_detection_v1` | Maintain frozen ByteTrack association output, bounded trace derivation, and visual regression evidence |
-| Oriented quadrilateral layer                      | No first-class public visualization layer    | Generic quadrilateral primitive plus a mask-derived or explicitly annotated fixture                    |
-| Markers and ellipses                              | No first-class public visualization layer    | Generic marker/ellipse primitives plus `people_walking_detection_v1` or a pose fixture                 |
-| Mask/media effects                                | No public visualization layer                | Prepared media-effect primitive plus `people_walking_segmentation_v1`                                  |
-| Temporal and analytic overlays                    | No public visualization layer                | Temporal/HUD primitives plus `vehicles_zone_v1` with frozen tracks, zone coordinates, and events       |
+| Gap                                               | Status                                                                 | Earliest prerequisite                                                                            |
+| ------------------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Open-path fixture for the existing polyline layer | Completed with `basketball_geometry` and `people_walking_detection_v1` | Maintain frozen trace derivation, source identity, and visual regression evidence                |
+| Oriented quadrilateral layer                      | No first-class public visualization layer                              | Generic quadrilateral primitive plus a mask-derived or explicitly annotated fixture              |
+| Markers and ellipses                              | No first-class public visualization layer                              | Generic marker/ellipse primitives plus `people_walking_detection_v1` or a pose fixture           |
+| Mask/media effects                                | No public visualization layer                                          | Prepared media-effect primitive plus `people_walking_segmentation_v1`                            |
+| Temporal and analytic overlays                    | No public visualization layer                                          | Temporal/HUD primitives plus `vehicles_zone_v1` with frozen tracks, zone coordinates, and events |
 
 No annotator facade may be added ahead of the matching row's primitive and
 fixture evidence. Each facade remains one pull request after those prerequisites
@@ -359,13 +360,13 @@ normalized asset.
 
 ### Canonical Fixture Matrix
 
-| Fixture                          | Media                                                                | Authoring model and deterministic processing                                                                                                                           | Primary coverage                                                                                        |
-| -------------------------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| Existing `basketball_geometry`   | Keep the committed normalized basketball media                       | Regeneration target: `yolov8m-pose-640`; retain existing SAM3 masks, pose-to-mask association, and compressed RLE. Derive explicitly marked covariance when needed.    | Existing shapes, masks, polygons, keypoints, skeletons, oriented boxes, covariance, and media effects   |
-| `people_walking_detection_v1`    | Committed CC0 pedestrian-area source, 15.125 s at 1920x1080 / 25 fps | `yolov8n-640`, person only, confidence >= 0.25, IoU 0.3; pinned ByteTrack at 25 fps; explicit two-second center trace (`byte-track-center-trace-v1`).                  | Existing polyline layer, foundational geometry facades, labels, bars, traces, heat maps, and comparison |
-| `people_walking_segmentation_v1` | Deterministic representative 3 s interval                            | `yolov8s-seg-640`, `person` only, confidence >= 0.25; compressed RLE; polygons simplified to at most 48 points; versioned minimum-area rectangle derivation.           | Oriented boxes, halo, blur, pixelate, background overlay, and crop                                      |
-| `vehicles_zone_v1`               | Candidate 10.0-22.0 s interval, finalized after a tracking preview   | `yolov8s-640`; car, truck, bus, and motorcycle; confidence >= 0.25; pinned ByteTrack at 30000/1001 fps; frozen line/polygon coordinates, open-path guides, and events. | Polylines, traces, line zones, polygon zones, counts, and multiclass HUD                                |
-| Optional `skiing_pose_stress_v1` | Full source or deterministic high-motion interval                    | `yolov8m-pose-640`; preserve missing and low-confidence joints                                                                                                         | Seek, motion, and occlusion stress for pose and trace rendering                                         |
+| Fixture                          | Media                                                                | Authoring model and deterministic processing                                                                                                                                                                                          | Primary coverage                                                                                                 |
+| -------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Existing `basketball_geometry`   | Keep the committed normalized basketball media                       | Regeneration target: `yolov8m-pose-640`; retain existing SAM3 masks, pose-to-mask association, compressed RLE, and the explicitly derived bounded center trace for basketball `2:0`. Derive explicitly marked covariance when needed. | Existing shapes, masks, polygons, polylines, keypoints, skeletons, oriented boxes, covariance, and media effects |
+| `people_walking_detection_v1`    | Committed CC0 pedestrian-area source, 15.125 s at 1920x1080 / 25 fps | `yolov8n-640`, person only, confidence >= 0.25, IoU 0.3; pinned ByteTrack at 25 fps; explicit two-second center trace (`byte-track-center-trace-v1`).                                                                                 | Existing polyline layer, foundational geometry facades, labels, bars, traces, heat maps, and comparison          |
+| `people_walking_segmentation_v1` | Deterministic representative 3 s interval                            | `yolov8s-seg-640`, `person` only, confidence >= 0.25; compressed RLE; polygons simplified to at most 48 points; versioned minimum-area rectangle derivation.                                                                          | Oriented boxes, halo, blur, pixelate, background overlay, and crop                                               |
+| `vehicles_zone_v1`               | Candidate 10.0-22.0 s interval, finalized after a tracking preview   | `yolov8s-640`; car, truck, bus, and motorcycle; confidence >= 0.25; pinned ByteTrack at 30000/1001 fps; frozen line/polygon coordinates, open-path guides, and events.                                                                | Polylines, traces, line zones, polygon zones, counts, and multiclass HUD                                         |
+| Optional `skiing_pose_stress_v1` | Full source or deterministic high-motion interval                    | `yolov8m-pose-640`; preserve missing and low-confidence joints                                                                                                                                                                        | Seek, motion, and occlusion stress for pose and trace rendering                                                  |
 
 The existing basketball fixture is the primary mask/keypoint reference.
 `basketball-1.mp4` is a fallback or additional stress source, not a reason to

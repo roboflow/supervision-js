@@ -1,4 +1,8 @@
+import type { DetectionFrame } from "supervision";
 import type { DemoPresentationSettings } from "./presentation/demo-presentation";
+
+const BASKETBALL_TRACE_CLASS_NAME = "basketball";
+const BASKETBALL_TRACE_DETECTION_ID = "2:0";
 
 export const docsVisualizationLayerIds = [
   "boxes",
@@ -159,7 +163,7 @@ export const docsVisualizationLayers: Readonly<
         unit: "pixels",
       },
     ],
-    description: "Tracked center-point paths",
+    description: "Basketball mask with its center-point trajectory",
     title: "Polylines",
   },
   keypoints: {
@@ -202,12 +206,33 @@ export function createDocsVisualizationLayerPresentation(
     focusEnabled: false,
     keypointsEnabled: layer === "keypoints",
     labelsEnabled: layer === "labels",
-    masksEnabled: layer === "masks",
+    masksEnabled: layer === "masks" || layer === "polylines",
     polygonsEnabled: layer === "polygons",
     polylinesEnabled: layer === "polylines",
     maskFillAlpha: 1,
     maskOpacity: 0.72,
   };
+}
+
+/**
+ * The polyline page scopes the committed basketball fixture to its one
+ * explicitly derived trace. This only selects frozen semantic detections; it
+ * never adds or synthesizes geometry in the docs runtime.
+ */
+export function filterDocsVisualizationLayerFrames(
+  layer: DocsVisualizationLayerId,
+  frames: readonly DetectionFrame[],
+): readonly DetectionFrame[] {
+  if (layer !== "polylines") return frames;
+
+  return frames.map((frame) => ({
+    ...frame,
+    detections: frame.detections.filter(
+      (detection) =>
+        detection.className === BASKETBALL_TRACE_CLASS_NAME &&
+        detection.id === BASKETBALL_TRACE_DETECTION_ID,
+    ),
+  }));
 }
 
 export function createDocsVisualizationLayerSnippet(

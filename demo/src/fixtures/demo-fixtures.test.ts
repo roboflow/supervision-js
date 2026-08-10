@@ -102,6 +102,7 @@ describe("geometry showcase fixture", () => {
       labelsEnabled: true,
       masksEnabled: false,
       polygonsEnabled: false,
+      polylinesEnabled: false,
     });
   });
 
@@ -111,6 +112,7 @@ describe("geometry showcase fixture", () => {
     expect(geometry.maskDetectionCount).toBeGreaterThan(0);
     expect(geometry.polygonDetectionCount).toBeGreaterThan(0);
     expect(geometry.keypointDetectionCount).toBeGreaterThan(0);
+    expect(geometry.polylineDetectionCount).toBeGreaterThan(0);
     expect(geometry.boxDetectionCount).toBe(
       geometryManifest.detectionCount as number,
     );
@@ -254,6 +256,60 @@ describe("geometry showcase fixture", () => {
 
     expect(geometryChunks.length).toBeGreaterThan(0);
     expect(violations).toBe(0);
+  });
+
+  it("stores the basketball trace on one masked frozen identity", () => {
+    const provenance = geometryManifest.provenance as {
+      readonly polyline: {
+        readonly algorithm: string;
+        readonly maxGapSeconds: number;
+        readonly maxPoints: number;
+        readonly selectedDetection: {
+          readonly className: string;
+          readonly id: string;
+        };
+        readonly windowSeconds: number;
+      };
+    };
+    let polylineCount = 0;
+    let violations = 0;
+
+    for (const chunk of geometryChunks) {
+      for (const frame of chunk.frames) {
+        for (const detection of frame.detections) {
+          if (!detection.polyline) continue;
+          polylineCount += 1;
+
+          if (
+            detection.className !== "basketball" ||
+            detection.id !== "2:0" ||
+            !detection.mask ||
+            !detection.rect ||
+            detection.polyline.points.length < 2 ||
+            detection.polyline.points.length > provenance.polyline.maxPoints ||
+            detection.polyline.points.at(-1)?.x !== detection.rect.x ||
+            detection.polyline.points.at(-1)?.y !== detection.rect.y
+          ) {
+            violations += 1;
+          }
+        }
+      }
+    }
+
+    expect(provenance.polyline).toMatchObject({
+      algorithm: "basketball-center-trace-v1",
+      derivedFrom:
+        "center points of the selected SAM3 basketball detection on the shared frame grid",
+      maxGapSeconds: 0.25,
+      maxPoints: 60,
+      selectedDetection: { className: "basketball", id: "2:0" },
+      windowSeconds: 2,
+    });
+    expect(polylineCount).toBeGreaterThan(0);
+    expect(violations).toBe(0);
+    expect(geometryManifest.geometry).toMatchObject({
+      polylineDetectionCount: polylineCount,
+    });
   });
 });
 

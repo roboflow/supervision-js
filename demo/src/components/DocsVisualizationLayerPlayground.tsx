@@ -4,6 +4,7 @@ import {
   createDocsVisualizationLayerPresentation,
   createDocsVisualizationLayerSnippet,
   docsVisualizationLayers,
+  filterDocsVisualizationLayerFrames,
   type DocsVisualizationLayerControl,
   type DocsVisualizationLayerId,
   type NumericPresentationSetting,
@@ -18,13 +19,11 @@ export function DocsVisualizationLayerPlayground({
   readonly layer: DocsVisualizationLayerId;
 }) {
   const definition = docsVisualizationLayers[layer];
-  const fixtureName =
-    layer === "polylines" ? "pedestrian paths fixture" : "basketball fixture";
+  const fixtureName = "basketball fixture";
   const demo = useDemoRenderer({
-    initialFixtureId:
-      layer === "polylines"
-        ? "people_walking_detection_v1"
-        : "basketball_geometry",
+    fixtureFrameTransform: (frames) =>
+      filterDocsVisualizationLayerFrames(layer, frames),
+    initialFixtureId: "basketball_geometry",
     initialPresentationSettings:
       createDocsVisualizationLayerPresentation(layer),
   });
