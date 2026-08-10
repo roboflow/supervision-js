@@ -4,7 +4,7 @@ import type { DemoPresentationSettings } from "./presentation/demo-presentation"
 const BASKETBALL_TRACE_CLASS_NAME = "basketball";
 const BASKETBALL_TRACE_TRACK_ID = "basketball-track:0";
 
-export const docsVisualizationLayerIds = [
+export const docsAnnotationRendererIds = [
   "boxes",
   "masks",
   "labels",
@@ -13,10 +13,10 @@ export const docsVisualizationLayerIds = [
   "keypoints",
 ] as const;
 
-export type DocsVisualizationLayerId =
-  (typeof docsVisualizationLayerIds)[number];
+export type DocsAnnotationRendererId =
+  (typeof docsAnnotationRendererIds)[number];
 
-export interface DocsVisualizationLayerControl {
+export interface DocsAnnotationRendererControl {
   readonly key: NumericPresentationSetting;
   readonly label: string;
   readonly max: number;
@@ -25,8 +25,8 @@ export interface DocsVisualizationLayerControl {
   readonly unit: "percent" | "pixels";
 }
 
-export interface DocsVisualizationLayerDefinition {
-  readonly controls: readonly DocsVisualizationLayerControl[];
+export interface DocsAnnotationRendererDefinition {
+  readonly controls: readonly DocsAnnotationRendererControl[];
   readonly description: string;
   readonly title: string;
 }
@@ -37,8 +37,8 @@ export type NumericPresentationSetting = {
   ]: DemoPresentationSettings[Key] extends number ? Key : never;
 }[keyof DemoPresentationSettings];
 
-export const docsVisualizationLayers: Readonly<
-  Record<DocsVisualizationLayerId, DocsVisualizationLayerDefinition>
+export const docsAnnotationRenderers: Readonly<
+  Record<DocsAnnotationRendererId, DocsAnnotationRendererDefinition>
 > = {
   boxes: {
     controls: [
@@ -190,25 +190,25 @@ export const docsVisualizationLayers: Readonly<
   },
 };
 
-export function parseDocsVisualizationLayer(
+export function parseDocsAnnotationRenderer(
   value: string | null,
-): DocsVisualizationLayerId {
-  return docsVisualizationLayerIds.includes(value as DocsVisualizationLayerId)
-    ? (value as DocsVisualizationLayerId)
+): DocsAnnotationRendererId {
+  return docsAnnotationRendererIds.includes(value as DocsAnnotationRendererId)
+    ? (value as DocsAnnotationRendererId)
     : "boxes";
 }
 
-export function createDocsVisualizationLayerPresentation(
-  layer: DocsVisualizationLayerId,
+export function createDocsAnnotationRendererPresentation(
+  renderer: DocsAnnotationRendererId,
 ): Partial<DemoPresentationSettings> {
   return {
-    boxesEnabled: layer === "boxes",
+    boxesEnabled: renderer === "boxes",
     focusEnabled: false,
-    keypointsEnabled: layer === "keypoints",
-    labelsEnabled: layer === "labels",
-    masksEnabled: layer === "masks" || layer === "polylines",
-    polygonsEnabled: layer === "polygons",
-    polylinesEnabled: layer === "polylines",
+    keypointsEnabled: renderer === "keypoints",
+    labelsEnabled: renderer === "labels",
+    masksEnabled: renderer === "masks" || renderer === "polylines",
+    polygonsEnabled: renderer === "polygons",
+    polylinesEnabled: renderer === "polylines",
     maskFillAlpha: 1,
     maskOpacity: 0.72,
   };
@@ -219,11 +219,11 @@ export function createDocsVisualizationLayerPresentation(
  * explicitly derived trace. This only selects frozen semantic detections; it
  * never adds or synthesizes geometry in the docs runtime.
  */
-export function filterDocsVisualizationLayerFrames(
-  layer: DocsVisualizationLayerId,
+export function filterDocsAnnotationRendererFrames(
+  renderer: DocsAnnotationRendererId,
   frames: readonly DetectionFrame[],
 ): readonly DetectionFrame[] {
-  if (layer !== "polylines") return frames;
+  if (renderer !== "polylines") return frames;
 
   return frames.map((frame) => ({
     ...frame,
@@ -235,58 +235,82 @@ export function filterDocsVisualizationLayerFrames(
   }));
 }
 
-export function createDocsVisualizationLayerSnippet(
-  layer: DocsVisualizationLayerId,
+export function createDocsAnnotationRendererSnippet(
+  renderer: DocsAnnotationRendererId,
   settings: DemoPresentationSettings,
 ) {
-  switch (layer) {
+  switch (renderer) {
     case "boxes":
       return `session.setPresentation({
-  boxStyle: new BaseBoxStyle({
-    cornerRadius: ${formatNumber(settings.boxCornerRadius)},
-    fill: { alpha: ${formatNumber(settings.boxFillAlpha)} },
-    stroke: { width: ${formatNumber(settings.boxStrokeWidth)} },
-  }),
+  renderers: [
+    annotationRenderers.box({
+      style: new BaseBoxStyle({
+        cornerRadius: ${formatNumber(settings.boxCornerRadius)},
+        fill: { alpha: ${formatNumber(settings.boxFillAlpha)} },
+        stroke: { width: ${formatNumber(settings.boxStrokeWidth)} },
+      }),
+    }),
+  ],
 });`;
     case "masks":
       return `session.setPresentation({
-  maskStyle: new BaseMaskStyle({
-    fillAlpha: ${formatNumber(settings.maskFillAlpha)},
-    opacity: ${formatNumber(settings.maskOpacity)},
-    stroke: { alpha: 1, width: ${formatNumber(settings.maskStrokeWidth)} },
-  }),
+  renderers: [
+    annotationRenderers.mask({
+      style: new BaseMaskStyle({
+        fillAlpha: ${formatNumber(settings.maskFillAlpha)},
+        opacity: ${formatNumber(settings.maskOpacity)},
+        stroke: { alpha: 1, width: ${formatNumber(settings.maskStrokeWidth)} },
+      }),
+    }),
+  ],
 });`;
     case "labels":
       return `session.setPresentation({
-  labelStyle: new BaseLabelStyle({
-    background: {
-      alpha: ${formatNumber(settings.labelBackgroundAlpha)},
-      cornerRadius: ${formatNumber(settings.labelCornerRadius)},
-    },
-    includeConfidence: ${settings.labelIncludeConfidence},
-    textStyle: { fontSize: ${formatNumber(settings.labelFontSize)} },
-  }),
+  renderers: [
+    annotationRenderers.label({
+      style: new BaseLabelStyle({
+        background: {
+          alpha: ${formatNumber(settings.labelBackgroundAlpha)},
+          cornerRadius: ${formatNumber(settings.labelCornerRadius)},
+        },
+        includeConfidence: ${settings.labelIncludeConfidence},
+        textStyle: { fontSize: ${formatNumber(settings.labelFontSize)} },
+      }),
+    }),
+  ],
 });`;
     case "polygons":
       return `session.setPresentation({
-  polygonStyle: new BasePolygonStyle({
-    fill: { alpha: ${formatNumber(settings.polygonFillAlpha)} },
-    stroke: { width: ${formatNumber(settings.polygonStrokeWidth)} },
-  }),
+  renderers: [
+    annotationRenderers.polygon({
+      style: new BasePolygonStyle({
+        fill: { alpha: ${formatNumber(settings.polygonFillAlpha)} },
+        stroke: { width: ${formatNumber(settings.polygonStrokeWidth)} },
+      }),
+    }),
+  ],
 });`;
     case "polylines":
       return `session.setPresentation({
-  polylineStyle: new BasePolylineStyle({
-    stroke: { width: ${formatNumber(settings.polylineStrokeWidth)} },
-  }),
+  renderers: [
+    annotationRenderers.polyline({
+      style: new BasePolylineStyle({
+        stroke: { width: ${formatNumber(settings.polylineStrokeWidth)} },
+      }),
+    }),
+  ],
 });`;
     case "keypoints":
       return `session.setPresentation({
-  keypointStyle: new BaseKeypointStyle({
-    edgeStroke: { width: ${formatNumber(settings.keypointEdgeWidth)} },
-    markerFill: { alpha: 1 },
-    radius: ${formatNumber(settings.keypointRadius)},
-  }),
+  renderers: [
+    annotationRenderers.keypoints({
+      style: new BaseKeypointStyle({
+        edgeStroke: { width: ${formatNumber(settings.keypointEdgeWidth)} },
+        markerFill: { alpha: 1 },
+        radius: ${formatNumber(settings.keypointRadius)},
+      }),
+    }),
+  ],
 });`;
   }
 }

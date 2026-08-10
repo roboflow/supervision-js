@@ -5,13 +5,13 @@ summary: Draw open paths in media coordinates.
 
 # Polylines
 
-Polylines are open paths with at least two media-pixel points. Use
-`BasePolylineStyle` for guides, trajectories, and other paths that must not
-close back to their first point.
+The polyline annotation renderer draws open paths with at least two media-pixel
+points. Use `BasePolylineStyle` for guides, trajectories, and other paths that
+must not close back to their first point.
 
 <div class="supervision-layer-playground">
   <iframe
-    data-supervision-playground-src="demo/?embed=visualization-layer&amp;layer=polylines"
+    data-supervision-playground-src="demo/?embed=annotation-renderer&amp;renderer=polylines"
     loading="lazy"
     title="Interactive polyline visualization playground"
   ></iframe>
@@ -25,13 +25,17 @@ fixture: an untrackable observation breaks the path instead of creating a false
 long segment. It is not a claim that a segmentation model emitted polylines
 directly.
 
-## Add a polyline layer
+## Add the polyline renderer
 
 ```ts
 session.setPresentation({
-  polylineStyle: new BasePolylineStyle({
-    stroke: { width: 4 },
-  }),
+  renderers: [
+    annotationRenderers.polyline({
+      style: new BasePolylineStyle({
+        stroke: { width: 4 },
+      }),
+    }),
+  ],
 });
 ```
 

@@ -41,7 +41,7 @@
   "projectDocuments": [
     "docs/public/getting-started.md",
     "docs/public/concepts.md",
-    "docs/public/visualization-layers.md",
+    "docs/public/annotation-renderers.md",
     "docs/public/recipes.md"
   ],
   "readme": "docs/public/index.md",

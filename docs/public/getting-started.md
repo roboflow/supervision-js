@@ -20,5 +20,5 @@ the static or streaming source recipe that matches your application.
   while media plays.
 
 Once a session is running, continue to
-[Visualization Layers](./visualization-layers.md) to style boxes, masks,
-labels, paths, and pose geometry with live examples.
+[Annotation Renderers](./annotation-renderers.md) to select and style boxes,
+masks, labels, paths, and pose geometry with live examples.

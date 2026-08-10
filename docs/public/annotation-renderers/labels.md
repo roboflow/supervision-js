@@ -5,27 +5,31 @@ summary: Resolve class, confidence, and custom text next to detections.
 
 # Labels
 
-Labels derive display text from semantic detections. `BaseLabelStyle` can use a
-class name, caller metadata, or a custom resolver and can include confidence
-without storing presentation strings in model output.
+The label annotation renderer derives display text from semantic detections.
+`BaseLabelStyle` can use a class name, caller metadata, or a custom resolver and
+can include confidence without storing presentation strings in model output.
 
 <div class="supervision-layer-playground">
   <iframe
-    data-supervision-playground-src="demo/?embed=visualization-layer&amp;layer=labels"
+    data-supervision-playground-src="demo/?embed=annotation-renderer&amp;renderer=labels"
     loading="lazy"
     title="Interactive label visualization playground"
   ></iframe>
 </div>
 
-## Add a label layer
+## Add the label renderer
 
 ```ts
 session.setPresentation({
-  labelStyle: new BaseLabelStyle({
-    background: { alpha: 0.9 },
-    includeConfidence: true,
-    textStyle: { fontSize: 14 },
-  }),
+  renderers: [
+    annotationRenderers.label({
+      style: new BaseLabelStyle({
+        background: { alpha: 0.9 },
+        includeConfidence: true,
+        textStyle: { fontSize: 14 },
+      }),
+    }),
+  ],
 });
 ```
 

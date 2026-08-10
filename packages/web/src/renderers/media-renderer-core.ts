@@ -1,6 +1,7 @@
 import {
   createArrayDetectionFrameSource,
   createDefaultAnnotationPresentation,
+  resolveAnnotationRendererPresentation,
 } from "supervision-js-core";
 import {
   createBufferedDetectionTimeline,
@@ -61,10 +62,11 @@ export async function createMediaRendererCore(
   const defaultPresentation = createDefaultAnnotationPresentation();
   const resolvePresentation = (
     presentation: MediaRendererPresentation,
-  ): MediaRendererPresentation => ({
-    ...defaultPresentation,
-    ...presentation,
-  });
+  ): MediaRendererPresentation =>
+    resolveAnnotationRendererPresentation({
+      ...defaultPresentation,
+      ...presentation,
+    });
   let currentPresentation = resolvePresentation({
     annotationOverlayStyle: options.annotationOverlayStyle,
     backgroundColor: options.backgroundColor,
@@ -76,6 +78,7 @@ export async function createMediaRendererCore(
     maskStyle: options.maskStyle,
     polygonStyle: options.polygonStyle,
     polylineStyle: options.polylineStyle,
+    renderers: options.renderers,
     visibility: options.visibility,
   });
   let detectionTimeline: BufferedDetectionTimeline | undefined;

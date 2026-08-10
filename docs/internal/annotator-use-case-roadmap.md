@@ -79,7 +79,11 @@ The current package already separates the important responsibilities:
 - host applications own controlled product state, persistence, undo/redo, and
   domain analytics.
 
-The missing capability is ordered composition. A consumer should eventually be
+The presentation now has a built-in renderer list. A consumer can
+configure the existing annotation renderers through one public surface while
+the browser backend continues to use the established specialized box, mask,
+label, polygon, polyline, and keypoint paths. The next missing capability is
+renderer kinds that compose assets or media regions. A consumer should eventually be
 able to request a presentation such as:
 
 ```text
@@ -326,10 +330,10 @@ segmentation identity.
 | Gap                                               | Status                                    | Earliest prerequisite                                                                            |
 | ------------------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------ |
 | Open-path fixture for the existing polyline layer | Completed with `basketball_geometry`      | Maintain frozen trace derivation, source identity, and visual regression evidence                |
-| Oriented quadrilateral layer                      | No first-class public visualization layer | Generic quadrilateral primitive plus a mask-derived or explicitly annotated fixture              |
-| Markers and ellipses                              | No first-class public visualization layer | Generic marker/ellipse primitives plus a future pose fixture                                     |
-| Mask/media effects                                | No public visualization layer             | Prepared media-effect primitive plus `people_walking_segmentation_v1`                            |
-| Temporal and analytic overlays                    | No public visualization layer             | Temporal/HUD primitives plus `vehicles_zone_v1` with frozen tracks, zone coordinates, and events |
+| Oriented quadrilateral renderer                   | No first-class public annotation renderer | Generic quadrilateral primitive plus a mask-derived or explicitly annotated fixture              |
+| Markers and ellipses                              | No first-class public annotation renderer | Generic marker/ellipse primitives plus a future pose fixture                                     |
+| Mask/media effects                                | No public annotation renderer             | Prepared media-effect primitive plus `people_walking_segmentation_v1`                            |
+| Temporal and analytic overlays                    | No public annotation renderer             | Temporal/HUD primitives plus `vehicles_zone_v1` with frozen tracks, zone coordinates, and events |
 
 No annotator facade may be added ahead of the matching row's primitive and
 fixture evidence. Each facade remains one pull request after those prerequisites

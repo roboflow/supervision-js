@@ -4,6 +4,11 @@ import { BaseMaskStyle } from "#styles/mask-style";
 import { BaseKeypointStyle } from "#styles/keypoint-style";
 import { BasePolygonStyle } from "#styles/polygon-style";
 import { BasePolylineStyle } from "#styles/polyline-style";
+import {
+  resolveAnnotationRendererStyleFields,
+  type AnnotationRendererStyleField,
+} from "#styles/annotation-renderer-registry";
+import type { AnnotationRendererKind } from "#types/annotation-renderer";
 import type {
   BoxDrawInstruction,
   BoxStyle,
@@ -52,19 +57,30 @@ export interface SourcePresentationEntry {
   readonly presentation?: SourcePresentation;
 }
 
+/**
+ * Limits source-level overrides when the host explicitly selects annotation
+ * renderers. Omit this option to retain legacy source-override behaviour.
+ */
+export interface SourceAwarePresentationOptions {
+  readonly enabledRendererKinds?: readonly AnnotationRendererKind[];
+}
+
 export function createSourceAwarePresentation<
   TPresentation extends PresentationStyleSet,
 >(
   globalPresentation: TPresentation,
   sources: readonly SourcePresentationEntry[],
+  options?: SourceAwarePresentationOptions,
 ): TPresentation;
 export function createSourceAwarePresentation(
   globalPresentation: PresentationStyleSet | undefined,
   sources: readonly SourcePresentationEntry[],
+  options?: SourceAwarePresentationOptions,
 ): PresentationStyleSet;
 export function createSourceAwarePresentation(
   globalPresentation: PresentationStyleSet = {},
   sources: readonly SourcePresentationEntry[],
+  options: SourceAwarePresentationOptions = {},
 ): PresentationStyleSet {
   if (!sources.some((source) => source.presentation !== undefined)) {
     return globalPresentation;
@@ -73,40 +89,49 @@ export function createSourceAwarePresentation(
   const sourcePresentations = new Map(
     sources.map((source) => [source.id, source.presentation] as const),
   );
+  const enabledStyleFields =
+    options.enabledRendererKinds === undefined
+      ? undefined
+      : new Set(
+          resolveAnnotationRendererStyleFields(options.enabledRendererKinds),
+        );
+  const shouldApplySourceStyle = (style: AnnotationRendererStyleField) =>
+    hasSourceStyle(sources, style) &&
+    (enabledStyleFields === undefined || enabledStyleFields.has(style));
 
   return {
     ...globalPresentation,
-    boxStyle: hasSourceStyle(sources, "boxStyle")
+    boxStyle: shouldApplySourceStyle("boxStyle")
       ? new SourceAwareBoxStyle(
           normalizeGlobalBoxStyle(globalPresentation.boxStyle),
           sourcePresentations,
         )
       : globalPresentation.boxStyle,
-    labelStyle: hasSourceStyle(sources, "labelStyle")
+    labelStyle: shouldApplySourceStyle("labelStyle")
       ? new SourceAwareLabelStyle(
           normalizeGlobalLabelStyle(globalPresentation.labelStyle),
           sourcePresentations,
         )
       : globalPresentation.labelStyle,
-    maskStyle: hasSourceStyle(sources, "maskStyle")
+    maskStyle: shouldApplySourceStyle("maskStyle")
       ? new SourceAwareMaskStyle(
           normalizeGlobalMaskStyle(globalPresentation.maskStyle),
           sourcePresentations,
         )
       : globalPresentation.maskStyle,
-    polygonStyle: hasSourceStyle(sources, "polygonStyle")
+    polygonStyle: shouldApplySourceStyle("polygonStyle")
       ? new SourceAwarePolygonStyle(
           normalizeGlobalPolygonStyle(globalPresentation.polygonStyle),
           sourcePresentations,
         )
       : globalPresentation.polygonStyle,
-    polylineStyle: hasSourceStyle(sources, "polylineStyle")
+    polylineStyle: shouldApplySourceStyle("polylineStyle")
       ? new SourceAwarePolylineStyle(
           normalizeGlobalPolylineStyle(globalPresentation.polylineStyle),
           sourcePresentations,
         )
       : globalPresentation.polylineStyle,
-    keypointStyle: hasSourceStyle(sources, "keypointStyle")
+    keypointStyle: shouldApplySourceStyle("keypointStyle")
       ? new SourceAwareKeypointStyle(
           normalizeGlobalKeypointStyle(globalPresentation.keypointStyle),
           sourcePresentations,

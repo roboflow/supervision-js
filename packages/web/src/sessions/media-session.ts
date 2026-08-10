@@ -1,6 +1,7 @@
 import { createMediaRenderer } from "#renderers/media-renderer";
 import {
   createDefaultAnnotationPresentation,
+  resolveAnnotationRendererPresentation,
   createSourceAwarePresentation,
 } from "supervision-js-core";
 import type {
@@ -110,12 +111,29 @@ export async function createMediaSession(
     let currentPresentation = options.presentation;
     const resolvePresentation = (
       presentation: MediaRendererPresentation | undefined,
-    ) =>
-      createSourceAwarePresentation<MediaRendererPresentation>(
-        { ...defaultPresentation, ...presentation },
+    ) => {
+      const renderers = presentation?.renderers;
+      const resolvedPresentation = resolveAnnotationRendererPresentation({
+        ...defaultPresentation,
+        ...presentation,
+      });
+
+      return createSourceAwarePresentation<MediaRendererPresentation>(
+        resolvedPresentation,
         sessionDetections.sourcePresentations,
+        renderers === undefined
+          ? undefined
+          : { enabledRendererKinds: renderers.map(({ kind }) => kind) },
       );
-    const initialPresentation = resolvePresentation(currentPresentation);
+    };
+    const resolveRendererPresentation = (
+      presentation: MediaRendererPresentation | undefined,
+    ): MediaRendererPresentation => ({
+      ...resolvePresentation(presentation),
+      renderers: undefined,
+    });
+    const initialPresentation =
+      resolveRendererPresentation(currentPresentation);
 
     const renderer = await createMediaRenderer({
       ...options.renderer,
@@ -252,7 +270,9 @@ export async function createMediaSession(
 
       setPresentation(presentation: MediaRendererPresentation) {
         currentPresentation = presentation;
-        renderer.setPresentation(resolvePresentation(currentPresentation));
+        renderer.setPresentation(
+          resolveRendererPresentation(currentPresentation),
+        );
       },
 
       setRenderQuality(quality) {
