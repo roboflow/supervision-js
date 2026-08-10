@@ -1,10 +1,8 @@
-import {
+import type {
+  DetectionFrame,
+  KeypointDrawInstruction,
   KeypointMarkerShape,
-  type DetectionFrame,
-  type KeypointDrawInstruction,
 } from "supervision-js-core";
-
-import type { InstantCvNormalizedPoint } from "../adapters/live-inference";
 
 /**
  * A small, renderer-neutral temporal layer for a single-athlete pose demo.
@@ -243,7 +241,8 @@ function toInstruction(
         index,
         point,
         radius: 4,
-        shape: KeypointMarkerShape.Circle,
+        // Worklets capture the string rather than a runtime enum object.
+        shape: "circle" as KeypointMarkerShape,
         stroke: { alpha, color, width: 1 },
       };
   }
@@ -394,11 +393,4 @@ export function evaluateReactNativeGhostCoach(options: {
             : "ready",
     },
   };
-}
-
-export function createReactNativeGhostCoachSubjectRequest(
-  id: number,
-  point: InstantCvNormalizedPoint,
-) {
-  return { id, kind: "select-ghost-coach-subject" as const, point };
 }

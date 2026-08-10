@@ -242,12 +242,15 @@ const EMPTY_GHOST_COACH: ReactNativeGhostCoachOptions = {
 function reportGhostCoachRuntimeIfChanged(
   runtime: ReactNativeGhostCoachRuntime,
   signature: SharedValue<string>,
+  lastReportAt: SharedValue<number>,
   reportRuntime: ((runtime: ReactNativeGhostCoachRuntime) => void) | undefined,
 ) {
   "worklet";
-  const nextSignature = `${runtime.status}:${runtime.repCount}:${runtime.match}:${Math.round(runtime.phase * 20)}:${runtime.cue}`;
-  if (signature.value !== nextSignature) {
+  const nextSignature = `${runtime.status}:${runtime.repCount}:${Math.round(runtime.match / 4)}:${Math.round(runtime.phase * 10)}:${runtime.cue}`;
+  const nowMs = Date.now();
+  if (signature.value !== nextSignature && nowMs - lastReportAt.value > 250) {
     signature.value = nextSignature;
+    lastReportAt.value = nowMs;
     scheduleReactNativeOnJs(
       reportRuntime ?? NOOP_GHOST_COACH_REPORTER,
       runtime,
@@ -738,6 +741,7 @@ export function useReactNativeLiveInference<TPoseRunOnFrame>(
   const lastInteractionId = useReactNativeSharedValue(0);
   const lastRuntimeSignature = useReactNativeSharedValue("");
   const lastGhostCoachRuntimeSignature = useReactNativeSharedValue("");
+  const lastGhostCoachReportAt = useReactNativeSharedValue(0);
   const lastReportAt = useReactNativeSharedValue(0);
   const lastErrorAt = useReactNativeSharedValue(0);
   const droppedFrames = useReactNativeSharedValue(0);
@@ -883,6 +887,7 @@ export function useReactNativeLiveInference<TPoseRunOnFrame>(
           reportGhostCoachRuntimeIfChanged(
             ghostCoachResult.runtime,
             lastGhostCoachRuntimeSignature,
+            lastGhostCoachReportAt,
             reportGhostCoachRuntime,
           );
           stage = "pose-extension-complete";
@@ -1027,6 +1032,7 @@ export function useReactNativeLiveInference<TPoseRunOnFrame>(
       inferenceMode,
       interaction,
       lastErrorAt,
+      lastGhostCoachReportAt,
       lastGhostCoachRuntimeSignature,
       lastInteractionId,
       lastReportAt,
