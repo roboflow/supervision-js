@@ -8,5 +8,3 @@ demo/fixtures/**/*.webm filter=lfs diff=lfs merge=lfs -text
 demo/fixtures/**/*.WEBM filter=lfs diff=lfs merge=lfs -text
 demo/fixtures/**/detections.json filter=lfs diff=lfs merge=lfs -text
 demo/fixtures/**/raw-sam3.jsonl filter=lfs diff=lfs merge=lfs -text
-demo/fixtures/people_walking_detection_v1/raw-yolov8n-640.jsonl filter=lfs diff=lfs merge=lfs -text
-demo/fixtures/**/bytetrack-associations.jsonl filter=lfs diff=lfs merge=lfs -text
