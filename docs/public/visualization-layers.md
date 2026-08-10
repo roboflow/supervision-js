@@ -59,4 +59,7 @@ session.setPresentation({
 The older `maskStyle`, `boxStyle`, and related fields remain compatible. They
 are especially useful for source-specific presentation overrides; a renderer
 with an explicit style supplies the global style and a matching source override
-still wins for that source.
+still wins for that source. When a `renderers` list is present, it selects the
+enabled built-ins: omitted layers are disabled, including when the list is
+empty. A listed renderer without an explicit `style` uses its matching legacy
+style field.

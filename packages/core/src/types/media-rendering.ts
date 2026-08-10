@@ -158,8 +158,10 @@ export interface MediaRendererPresentation {
   readonly annotationOverlayStyle?: AnnotationOverlayStyle | null;
   /**
    * Built-in renderers that contribute semantic annotations to the
-   * renderer-owned scene. Existing style fields remain supported for
-   * compatibility and source-specific presentation overrides.
+   * renderer-owned scene. When present, this list selects the enabled
+   * built-in layers; the matching style field supplies the default for a
+   * descriptor without an explicit style. Existing style fields remain
+   * supported for compatibility and source-specific presentation overrides.
    */
   readonly renderers?: readonly AnnotationRenderer[];
   readonly boxStyle?: BoxStyle | null;

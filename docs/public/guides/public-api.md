@@ -96,8 +96,12 @@ session.setPresentation({
 ```
 
 The current built-ins are `box`, `mask`, `polygon`, `polyline`, `keypoints`,
-and `label`. The existing `boxStyle`, `maskStyle`, and related presentation
-fields remain supported for compatibility and source-specific style overrides.
+and `label`. When supplied, the list is authoritative: omitted built-ins are
+disabled, and `renderers: []` disables every built-in layer. For a listed
+renderer, an explicit `style` wins; otherwise its matching legacy style field
+provides the default. The existing `boxStyle`, `maskStyle`, and related
+presentation fields remain supported for compatibility and source-specific
+style overrides.
 Do not pass Pixi display objects or custom drawing callbacks: the public API
 describes semantic renderer configuration while the browser backend owns
 composition and resource lifetime.

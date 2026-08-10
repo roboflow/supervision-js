@@ -1,5 +1,6 @@
 import type { AnnotationRenderer } from "#types/annotation-renderer";
 import type { MediaRendererPresentation } from "#types/media-rendering";
+import { createDefaultAnnotationPresentation } from "#styles/default-annotation-presentation";
 
 /**
  * Resolves built-in renderer descriptors into the existing specialized style
@@ -12,19 +13,21 @@ export function resolveAnnotationRendererPresentation(
 ): MediaRendererPresentation {
   const renderers = presentation.renderers;
 
-  if (!renderers || renderers.length === 0) {
+  if (renderers === undefined) {
     return presentation;
   }
 
-  const resolved = {
-    boxStyle: presentation.boxStyle,
-    keypointStyle: presentation.keypointStyle,
-    labelStyle: presentation.labelStyle,
-    maskStyle: presentation.maskStyle,
-    polygonStyle: presentation.polygonStyle,
-    polylineStyle: presentation.polylineStyle,
+  const resolved: ResolvedAnnotationRendererStyles = {
+    boxStyle: null,
+    keypointStyle: null,
+    labelStyle: null,
+    maskStyle: null,
+    polygonStyle: null,
+    polylineStyle: null,
   };
+  const defaultPresentation = createDefaultAnnotationPresentation();
   const rendererIds = new Set<string>();
+  const rendererKinds = new Set<AnnotationRenderer["kind"]>();
 
   for (const renderer of renderers) {
     if (rendererIds.has(renderer.id)) {
@@ -33,7 +36,13 @@ export function resolveAnnotationRendererPresentation(
       );
     }
     rendererIds.add(renderer.id);
-    applyRendererStyle(resolved, renderer);
+    if (rendererKinds.has(renderer.kind)) {
+      throw new RangeError(
+        `MediaRendererPresentation.renderers contains duplicate renderer kind "${renderer.kind}".`,
+      );
+    }
+    rendererKinds.add(renderer.kind);
+    applyRendererStyle(resolved, presentation, defaultPresentation, renderer);
   }
 
   return {
@@ -44,33 +53,58 @@ export function resolveAnnotationRendererPresentation(
 
 function applyRendererStyle(
   presentation: ResolvedAnnotationRendererStyles,
+  presentationDefaults: MediaRendererPresentation,
+  canonicalDefaults: MediaRendererPresentation,
   renderer: AnnotationRenderer,
 ) {
   switch (renderer.kind) {
     case "box":
-      if (renderer.style !== undefined) presentation.boxStyle = renderer.style;
+      presentation.boxStyle =
+        renderer.style === undefined
+          ? (presentationDefaults.boxStyle ??
+            canonicalDefaults.boxStyle ??
+            null)
+          : renderer.style;
       break;
     case "keypoints":
-      if (renderer.style !== undefined) {
-        presentation.keypointStyle = renderer.style;
-      }
+      presentation.keypointStyle =
+        renderer.style === undefined
+          ? (presentationDefaults.keypointStyle ??
+            canonicalDefaults.keypointStyle ??
+            null)
+          : renderer.style;
       break;
     case "label":
-      if (renderer.style !== undefined)
-        presentation.labelStyle = renderer.style;
+      presentation.labelStyle =
+        renderer.style === undefined
+          ? (presentationDefaults.labelStyle ??
+            canonicalDefaults.labelStyle ??
+            null)
+          : renderer.style;
       break;
     case "mask":
-      if (renderer.style !== undefined) presentation.maskStyle = renderer.style;
+      presentation.maskStyle =
+        renderer.style === undefined
+          ? (presentationDefaults.maskStyle ??
+            canonicalDefaults.maskStyle ??
+            null)
+          : renderer.style;
       break;
     case "polygon":
-      if (renderer.style !== undefined) {
-        presentation.polygonStyle = renderer.style;
-      }
+      presentation.polygonStyle =
+        renderer.style === undefined
+          ? (presentationDefaults.polygonStyle ??
+            canonicalDefaults.polygonStyle ??
+            null)
+          : renderer.style;
       break;
     case "polyline":
-      if (renderer.style !== undefined) {
-        presentation.polylineStyle = renderer.style;
-      }
+      presentation.polylineStyle =
+        renderer.style === undefined
+          ? (presentationDefaults.polylineStyle ??
+            canonicalDefaults.polylineStyle ??
+            null)
+          : renderer.style;
       break;
   }
 }

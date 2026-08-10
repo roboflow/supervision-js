@@ -24,6 +24,7 @@ import {
   MAX_ID_MASK_PALETTE_ENTRIES,
   MAX_ID_MASK_STROKE_WIDTH,
   pickDetectionAtPoint,
+  resolveAnnotationRendererPresentation,
 } from "supervision-js-core";
 
 import { REACT_NATIVE_LIVE_ID_MASK_DEFAULTS } from "./live-defaults";
@@ -53,6 +54,7 @@ export {
   pickDetectionAtPoint,
   resolveDetectionClassColorStyle,
   SUPERVISION_ROBOFLOW_COLOR,
+  annotationRenderers,
 } from "supervision-js-core";
 export type {
   BaseBoxStyleOptions,
@@ -62,7 +64,10 @@ export type {
   BasePolylineStyleOptions,
   BaseKeypointStyleOptions,
   AnnotationEditingPreviewStyleContext,
+  AnnotationRenderer,
+  AnnotationRendererFactory,
   AnnotationOverlayStyle,
+  BoxAnnotationRenderer,
   BoxDrawInstruction,
   BoxStyle,
   CompressedRleDetectionMask,
@@ -80,12 +85,17 @@ export type {
   LabelStyle,
   MaskDrawInstruction,
   MaskStyle,
+  MaskAnnotationRenderer,
   PolygonDrawInstruction,
   PolygonStyle,
+  PolygonAnnotationRenderer,
   PolylineDrawInstruction,
   PolylineStyle,
+  PolylineAnnotationRenderer,
   KeypointDrawInstruction,
   KeypointStyle,
+  KeypointAnnotationRenderer,
+  LabelAnnotationRenderer,
   MediaFrameMetadata,
   MediaSessionActivity,
   MediaSessionLifecycleState,
@@ -95,6 +105,8 @@ export type {
   Rect,
   TopLeftRect,
 } from "supervision-js-core";
+
+export { resolveAnnotationRendererPresentation } from "supervision-js-core";
 
 export {
   MediaSessionActivityKind,
@@ -787,13 +799,17 @@ export function createReactNativePreparedFramePacket<THandle = unknown>(
   options: ReactNativeFramePresentationOptions<THandle> &
     ReactNativeFramePresentationStyleOptions,
 ): ReactNativePreparedFramePacket<THandle> {
-  const presentation = resolveReactNativeFramePresentation(options);
+  const resolvedPresentation = resolveAnnotationRendererPresentation(options);
+  const presentation = resolveReactNativeFramePresentationWithStyles(
+    options,
+    resolvedPresentation,
+  );
 
   return {
-    maskArtifact: options.maskStyle
+    maskArtifact: resolvedPresentation.maskStyle
       ? createReactNativeIdMaskFrame({
           detectionFrame: options.detectionFrame,
-          maskStyle: options.maskStyle,
+          maskStyle: resolvedPresentation.maskStyle,
         })
       : undefined,
     presentation,
@@ -1250,16 +1266,26 @@ export function resolveReactNativeFramePresentation<THandle = unknown>(
   options: ReactNativeFramePresentationOptions<THandle> &
     ReactNativeFramePresentationStyleOptions,
 ): ReactNativeFramePresentation<THandle> {
+  return resolveReactNativeFramePresentationWithStyles(
+    options,
+    resolveAnnotationRendererPresentation(options),
+  );
+}
+
+function resolveReactNativeFramePresentationWithStyles<THandle>(
+  options: ReactNativeFramePresentationOptions<THandle> &
+    ReactNativeFramePresentationStyleOptions,
+  styles: MediaRendererPresentation,
+): ReactNativeFramePresentation<THandle> {
+  const { detectionFrame, mediaFrame } = options;
   const {
     boxStyle,
-    detectionFrame,
     keypointStyle,
     labelStyle,
     maskStyle,
-    mediaFrame,
     polygonStyle,
     polylineStyle,
-  } = options;
+  } = styles;
   const boxes: BoxDrawInstruction[] = [];
   const labels: LabelDrawInstruction[] = [];
   const masks: MaskDrawInstruction[] = [];

@@ -19,7 +19,7 @@ describe("annotation renderer presentation", () => {
     );
   });
 
-  it("uses renderer styles without replacing other established styles", () => {
+  it("uses a renderer list as the authoritative built-in layer selection", () => {
     const legacyLabelStyle = new BaseLabelStyle({ text: "legacy label" });
     const rendererBoxStyle = new BaseBoxStyle({
       stroke: { color: 0x8b5cf6, width: 3 },
@@ -32,7 +32,7 @@ describe("annotation renderer presentation", () => {
     });
 
     expect(presentation.boxStyle).toBe(rendererBoxStyle);
-    expect(presentation.labelStyle).toBe(legacyLabelStyle);
+    expect(presentation.labelStyle).toBeNull();
   });
 
   it("allows a renderer to disable its established layer", () => {
@@ -52,6 +52,35 @@ describe("annotation renderer presentation", () => {
     ).toThrow('duplicate renderer id "box"');
   });
 
+  it("rejects duplicate renderer kinds with distinct identities", () => {
+    expect(() =>
+      resolveAnnotationRendererPresentation({
+        renderers: [
+          { id: "first-box", kind: "box" },
+          { id: "second-box", kind: "box" },
+        ],
+      }),
+    ).toThrow('duplicate renderer kind "box"');
+  });
+
+  it("disables every built-in layer when the renderer list is empty", () => {
+    const presentation = resolveAnnotationRendererPresentation({
+      boxStyle: new BaseBoxStyle(),
+      labelStyle: new BaseLabelStyle(),
+      maskStyle: new BaseMaskStyle(),
+      renderers: [],
+    });
+
+    expect(presentation).toMatchObject({
+      boxStyle: null,
+      keypointStyle: null,
+      labelStyle: null,
+      maskStyle: null,
+      polygonStyle: null,
+      polylineStyle: null,
+    });
+  });
+
   it("keeps the legacy/default style when a renderer has no explicit style", () => {
     const boxStyle = new BaseBoxStyle();
 
@@ -61,6 +90,14 @@ describe("annotation renderer presentation", () => {
     });
 
     expect(presentation.boxStyle).toBe(boxStyle);
+  });
+
+  it("uses the canonical style when a listed renderer has no configured style", () => {
+    const presentation = resolveAnnotationRendererPresentation({
+      renderers: [annotationRenderers.box()],
+    });
+
+    expect(presentation.boxStyle).toBeInstanceOf(BaseBoxStyle);
   });
 
   it("keeps source-specific style overrides after renderer normalization", () => {
