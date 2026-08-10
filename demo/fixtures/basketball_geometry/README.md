@@ -50,8 +50,8 @@ is dropped and reported by the generator.
 - **Basketball trajectory** is a deterministic motion-gated association across
   SAM3 `basketball` detections. SAM3 source ids can swap between frames, so the
   fixture selects the nearest physically reachable center (up to 2700 px/s,
-  with a 12 px tolerance), regardless of source id. It retains up to 60 points
-  from the last two seconds and breaks the trace after 0.1 seconds without a
+with a 12 px tolerance), regardless of source id. It retains up to 60 points
+from the last second and breaks the trace after 0.1 seconds without a
 reachable observation, rather than drawing a false long segment. The selected
 detection carries `metadata.trajectoryTrackId: "basketball-track:0"`; its
 mask and polyline therefore always describe the same frozen detection. This

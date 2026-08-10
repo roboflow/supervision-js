@@ -312,7 +312,7 @@ describe("geometry showcase fixture", () => {
       maxSpeedPixelsPerSecond: 2700,
       positionTolerancePixels: 12,
       trackId: "basketball-track:0",
-      windowSeconds: 2,
+      windowSeconds: 1,
     });
     expect(polylineCount).toBeGreaterThan(0);
     expect(violations).toBe(0);
