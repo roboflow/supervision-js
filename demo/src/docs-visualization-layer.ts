@@ -2,7 +2,7 @@ import type { DetectionFrame } from "supervision";
 import type { DemoPresentationSettings } from "./presentation/demo-presentation";
 
 const BASKETBALL_TRACE_CLASS_NAME = "basketball";
-const BASKETBALL_TRACE_DETECTION_ID = "2:0";
+const BASKETBALL_TRACE_TRACK_ID = "basketball-track:0";
 
 export const docsVisualizationLayerIds = [
   "boxes",
@@ -230,7 +230,7 @@ export function filterDocsVisualizationLayerFrames(
     detections: frame.detections.filter(
       (detection) =>
         detection.className === BASKETBALL_TRACE_CLASS_NAME &&
-        detection.id === BASKETBALL_TRACE_DETECTION_ID,
+        detection.metadata?.trajectoryTrackId === BASKETBALL_TRACE_TRACK_ID,
     ),
   }));
 }

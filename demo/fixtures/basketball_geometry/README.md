@@ -47,11 +47,15 @@ is dropped and reported by the generator.
   the SAM3 detection, which remains authoritative for id, class, confidence,
   box, mask, polygon, and label. Unmatched YOLO poses are omitted, so the
   fixture does not create duplicate generic `person` detections or labels.
-- **Basketball trajectory** is a deterministic, bounded center trace for the
-  original SAM3 `basketball` detection `2:0`. It retains up to 60 points from
-  the last two seconds, resets after a gap longer than 0.25 seconds, and is
-  stored as the same detection's `polyline`. It is not a separate model output
-  or an inferred tracking claim.
+- **Basketball trajectory** is a deterministic motion-gated association across
+  SAM3 `basketball` detections. SAM3 source ids can swap between frames, so the
+  fixture selects the nearest physically reachable center (up to 2700 px/s,
+  with a 12 px tolerance), regardless of source id. It retains up to 60 points
+  from the last two seconds and breaks the trace after 0.1 seconds without a
+reachable observation, rather than drawing a false long segment. The selected
+detection carries `metadata.trajectoryTrackId: "basketball-track:0"`; its
+mask and polyline therefore always describe the same frozen detection. This
+is a versioned derived field with no interpolation, not separate model output.
 
 The exact values, input hashes, and policies are recorded in the `provenance`
 block of `detections.manifest.json`.

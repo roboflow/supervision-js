@@ -16,6 +16,8 @@ export const DEFAULT_MAX_POLYGON_POINTS = 48;
 export const DEFAULT_POLYGON_TOLERANCE = 2;
 export const DEFAULT_KEYPOINT_VISIBLE_CONFIDENCE = 0.5;
 export const DEFAULT_POSE_MATCH_IOU = 0.3;
+export const DEFAULT_TRAJECTORY_MAX_SPEED_PIXELS_PER_SECOND = 2_700;
+export const DEFAULT_TRAJECTORY_POSITION_TOLERANCE_PIXELS = 12;
 
 export const KEYPOINT_VISIBILITY_NOT_LABELED = 0;
 export const KEYPOINT_VISIBILITY_VISIBLE = 2;
@@ -266,6 +268,66 @@ export function attachPoseKeypointsToDetections(
     unmatchedPoseCount: poseDetections.length - matchedPoseIndexes.size,
     unmatchedTargetCount: targetIndexes.length - matches.size,
   };
+}
+
+/**
+ * Selects a deterministic continuation for a single-object trajectory.
+ *
+ * Semantic model ids are not assumed to persist between frames. A candidate
+ * must be reachable from the previous accepted center under the configured
+ * speed bound; otherwise it is rejected instead of creating a misleading
+ * long segment. Ties prefer the nearest center, then higher confidence, then
+ * source order.
+ */
+export function selectMotionGatedDetection(
+  detections,
+  previousObservation,
+  mediaTime,
+  options = {},
+) {
+  const maxSpeedPixelsPerSecond =
+    options.maxSpeedPixelsPerSecond ??
+    DEFAULT_TRAJECTORY_MAX_SPEED_PIXELS_PER_SECOND;
+  const positionTolerancePixels =
+    options.positionTolerancePixels ??
+    DEFAULT_TRAJECTORY_POSITION_TOLERANCE_PIXELS;
+  const candidates = detections.flatMap((detection, index) =>
+    detection.rect ? [{ detection, index }] : [],
+  );
+
+  if (candidates.length === 0) return undefined;
+
+  if (!previousObservation) {
+    return [...candidates].sort(
+      (left, right) =>
+        right.detection.confidence - left.detection.confidence ||
+        left.index - right.index,
+    )[0]?.detection;
+  }
+
+  const elapsedSeconds = mediaTime - previousObservation.mediaTime;
+
+  if (!(elapsedSeconds > 0)) return undefined;
+
+  const maximumDistance =
+    maxSpeedPixelsPerSecond * elapsedSeconds + positionTolerancePixels;
+
+  return candidates
+    .map(({ detection, index }) => ({
+      detection,
+      distance: Math.hypot(
+        detection.rect.x - previousObservation.x,
+        detection.rect.y - previousObservation.y,
+      ),
+      index,
+    }))
+    .filter(({ distance }) => distance <= maximumDistance)
+    .sort(
+      (left, right) =>
+        left.distance - right.distance ||
+        right.detection.confidence - left.detection.confidence ||
+        left.index - right.index,
+    )[0]?.detection;
 }
 
 /** Counts detection geometry by type for fixture summaries. */

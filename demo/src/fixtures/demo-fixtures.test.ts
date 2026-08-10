@@ -251,27 +251,44 @@ describe("geometry showcase fixture", () => {
     const provenance = geometryManifest.provenance as {
       readonly polyline: {
         readonly algorithm: string;
-        readonly maxGapSeconds: number;
+        readonly interpolation: string;
+        readonly maxAssociationGapSeconds: number;
         readonly maxPoints: number;
-        readonly selectedDetection: {
-          readonly className: string;
-          readonly id: string;
-        };
+        readonly maxSpeedPixelsPerSecond: number;
+        readonly positionTolerancePixels: number;
+        readonly trackId: string;
         readonly windowSeconds: number;
       };
     };
     let polylineCount = 0;
+    let maximumSegmentLength = 0;
     let violations = 0;
+    const trackedSourceIds = new Set<string>();
 
     for (const chunk of geometryChunks) {
       for (const frame of chunk.frames) {
         for (const detection of frame.detections) {
           if (!detection.polyline) continue;
           polylineCount += 1;
+          trackedSourceIds.add(detection.id ?? "");
+
+          const previousPoint = detection.polyline.points.at(-2);
+          const currentPoint = detection.polyline.points.at(-1);
+
+          if (previousPoint && currentPoint) {
+            maximumSegmentLength = Math.max(
+              maximumSegmentLength,
+              Math.hypot(
+                currentPoint.x - previousPoint.x,
+                currentPoint.y - previousPoint.y,
+              ),
+            );
+          }
 
           if (
             detection.className !== "basketball" ||
-            detection.id !== "2:0" ||
+            detection.metadata?.trajectoryTrackId !==
+              provenance.polyline.trackId ||
             !detection.mask ||
             !detection.rect ||
             detection.polyline.points.length < 2 ||
@@ -286,16 +303,25 @@ describe("geometry showcase fixture", () => {
     }
 
     expect(provenance.polyline).toMatchObject({
-      algorithm: "basketball-center-trace-v1",
+      algorithm: "basketball-motion-track-v1",
       derivedFrom:
-        "center points of the selected SAM3 basketball detection on the shared frame grid",
-      maxGapSeconds: 0.25,
+        "motion-gated nearest-neighbor association across SAM3 basketball detections on the shared frame grid",
+      interpolation: "none",
+      maxAssociationGapSeconds: 0.1,
       maxPoints: 60,
-      selectedDetection: { className: "basketball", id: "2:0" },
+      maxSpeedPixelsPerSecond: 2700,
+      positionTolerancePixels: 12,
+      trackId: "basketball-track:0",
       windowSeconds: 2,
     });
     expect(polylineCount).toBeGreaterThan(0);
     expect(violations).toBe(0);
+    expect(trackedSourceIds).toContain("2:1");
+    expect(maximumSegmentLength).toBeLessThanOrEqual(
+      provenance.polyline.maxSpeedPixelsPerSecond *
+        provenance.polyline.maxAssociationGapSeconds +
+        provenance.polyline.positionTolerancePixels,
+    );
     expect(geometryManifest.geometry).toMatchObject({
       polylineDetectionCount: polylineCount,
     });

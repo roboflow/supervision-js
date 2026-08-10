@@ -20,8 +20,10 @@ close back to their first point.
 The playground isolates one basketball from the frozen basketball fixture. Its
 mask and center-point trajectory share the basketball class color, so the
 visible path stays tied to the object it describes. The path is a deterministic
-derived field (`basketball-center-trace-v1`) on the committed fixture, not a
-claim that a segmentation model emitted polylines directly.
+motion-gated derived field (`basketball-motion-track-v1`) on the committed
+fixture: an untrackable observation breaks the path instead of creating a false
+long segment. It is not a claim that a segmentation model emitted polylines
+directly.
 
 ## Add a polyline layer
 

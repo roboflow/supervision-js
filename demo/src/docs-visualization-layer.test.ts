@@ -63,14 +63,22 @@ describe("docs visualization layers", () => {
         {
           detections: [
             { className: "basketball", id: "2:0", polyline: { points: [] } },
-            { className: "basketball", id: "2:1" },
+            {
+              className: "basketball",
+              id: "2:1",
+              metadata: { trajectoryTrackId: "basketball-track:0" },
+            },
             { className: "yellow team player", id: "1:0" },
           ],
           mediaTime: 0,
         },
       ])[0]?.detections,
     ).toEqual([
-      { className: "basketball", id: "2:0", polyline: { points: [] } },
+      {
+        className: "basketball",
+        id: "2:1",
+        metadata: { trajectoryTrackId: "basketball-track:0" },
+      },
     ]);
   });
 
