@@ -1,10 +1,15 @@
+import type { DetectionFrame } from "supervision";
 import type { DemoPresentationSettings } from "./presentation/demo-presentation";
+
+const BASKETBALL_TRACE_CLASS_NAME = "basketball";
+const BASKETBALL_TRACE_TRACK_ID = "basketball-track:0";
 
 export const docsVisualizationLayerIds = [
   "boxes",
   "masks",
   "labels",
   "polygons",
+  "polylines",
   "keypoints",
 ] as const;
 
@@ -147,6 +152,20 @@ export const docsVisualizationLayers: Readonly<
     description: "Closed media-space paths",
     title: "Polygons",
   },
+  polylines: {
+    controls: [
+      {
+        key: "polylineStrokeWidth",
+        label: "Stroke width",
+        max: 10,
+        min: 1,
+        step: 1,
+        unit: "pixels",
+      },
+    ],
+    description: "Basketball mask with its center-point trajectory",
+    title: "Polylines",
+  },
   keypoints: {
     controls: [
       {
@@ -187,12 +206,33 @@ export function createDocsVisualizationLayerPresentation(
     focusEnabled: false,
     keypointsEnabled: layer === "keypoints",
     labelsEnabled: layer === "labels",
-    masksEnabled: layer === "masks",
+    masksEnabled: layer === "masks" || layer === "polylines",
     polygonsEnabled: layer === "polygons",
-    polylinesEnabled: false,
+    polylinesEnabled: layer === "polylines",
     maskFillAlpha: 1,
     maskOpacity: 0.72,
   };
+}
+
+/**
+ * The polyline page scopes the committed basketball fixture to its one
+ * explicitly derived trace. This only selects frozen semantic detections; it
+ * never adds or synthesizes geometry in the docs runtime.
+ */
+export function filterDocsVisualizationLayerFrames(
+  layer: DocsVisualizationLayerId,
+  frames: readonly DetectionFrame[],
+): readonly DetectionFrame[] {
+  if (layer !== "polylines") return frames;
+
+  return frames.map((frame) => ({
+    ...frame,
+    detections: frame.detections.filter(
+      (detection) =>
+        detection.className === BASKETBALL_TRACE_CLASS_NAME &&
+        detection.metadata?.trajectoryTrackId === BASKETBALL_TRACE_TRACK_ID,
+    ),
+  }));
 }
 
 export function createDocsVisualizationLayerSnippet(
@@ -232,6 +272,12 @@ export function createDocsVisualizationLayerSnippet(
   polygonStyle: new BasePolygonStyle({
     fill: { alpha: ${formatNumber(settings.polygonFillAlpha)} },
     stroke: { width: ${formatNumber(settings.polygonStrokeWidth)} },
+  }),
+});`;
+    case "polylines":
+      return `session.setPresentation({
+  polylineStyle: new BasePolylineStyle({
+    stroke: { width: ${formatNumber(settings.polylineStrokeWidth)} },
   }),
 });`;
     case "keypoints":
