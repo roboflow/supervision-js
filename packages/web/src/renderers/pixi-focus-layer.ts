@@ -367,7 +367,7 @@ export function createPixiFocusLayer(options: {
     const mask = target.detection.mask;
 
     if (!mask) {
-      return false;
+      return undefined;
     }
 
     let runs: MaskCutoutCacheEntry;
