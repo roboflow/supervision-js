@@ -17,6 +17,8 @@ export {
   RenderPreparationMode,
   RenderPreparationWorkerStatus,
   type DetectionLabelBounds,
+  type MediaFrameCapture,
+  type MediaFrameCaptureOptions,
   type MediaFrameDiagnostics,
   type MediaFrameRenderTimings,
   type AnnotationVisibility,

@@ -293,6 +293,18 @@ export async function createMediaRendererCore(
       }
     },
 
+    async captureFrame(captureOptions) {
+      if (runtimeState.isDestroyed()) {
+        throw new Error("Media renderer has been destroyed.");
+      }
+
+      if (!mediaScene?.captureFrame) {
+        throw new Error("Media renderer is not ready.");
+      }
+
+      return mediaScene.captureFrame(captureOptions);
+    },
+
     getState() {
       return runtimeState.snapshot();
     },
