@@ -5,6 +5,11 @@ import { BoxShape } from "supervision-js-core";
 import type { FocusDrawInstruction, FocusStyle } from "supervision-js-core";
 import type { DetectionPickResult } from "supervision-js-core";
 import { centerRectToTopLeftRect } from "supervision-js-core";
+import {
+  decodeCompressedRleMask,
+  extractMaskRectRuns,
+} from "supervision-js-core";
+import type { MaskRectRun } from "supervision-js-core";
 import type {
   Container as PixiContainer,
   ImageSource as PixiImageSource,
@@ -125,6 +130,10 @@ export function createPixiFocusLayer(options: {
   let targetAlpha = 0;
   let lastTick: number | null = null;
   let isDestroyed = false;
+  // A frame can fall back to a composited RGBA texture when its colored ID-mask
+  // palette is exhausted. Keep decoded row runs by the immutable mask payload so
+  // that fallback focus still cuts out the actual mask, not its bounding rect.
+  const maskCutoutRuns = new WeakMap<object, readonly MaskRectRun[]>();
 
   return {
     createDisplay({ width, height }) {
@@ -269,11 +278,14 @@ export function createPixiFocusLayer(options: {
       return;
     }
 
-    const targetsWithRects = instruction.targets.filter(
-      (target) => target.detection.rect || target.detection.polygon,
+    const targetsWithGeometry = instruction.targets.filter(
+      (target) =>
+        target.detection.mask ||
+        target.detection.rect ||
+        target.detection.polygon,
     );
 
-    if (targetsWithRects.length === 0) {
+    if (targetsWithGeometry.length === 0) {
       hideVectorFocus();
       return;
     }
@@ -287,14 +299,14 @@ export function createPixiFocusLayer(options: {
       focusMaskGraphics.visible = true;
       focusMaskGraphics.clear();
 
-      for (const target of targetsWithRects) {
+      for (const target of targetsWithGeometry) {
         drawCutoutShape(focusMaskGraphics, target, instruction);
         focusMaskGraphics.fill({ alpha: 1, color: 0xffffff });
       }
       return;
     }
 
-    for (const target of targetsWithRects) {
+    for (const target of targetsWithGeometry) {
       drawCutoutShape(focusGraphics, target, instruction);
       focusGraphics.cut();
     }
@@ -305,6 +317,10 @@ export function createPixiFocusLayer(options: {
     target: DetectionPickResult,
     instruction: FocusDrawInstruction,
   ) {
+    if (drawMaskCutout(graphics, target)) {
+      return;
+    }
+
     if (target.detection.polygon?.points.length && graphics.poly) {
       graphics.poly(
         target.detection.polygon.points.flatMap(({ x, y }) => [x, y]),
@@ -332,6 +348,45 @@ export function createPixiFocusLayer(options: {
     } else {
       graphics.rect(left, top, rect.width, rect.height);
     }
+  }
+
+  function drawMaskCutout(
+    graphics: PixiFocusGraphics,
+    target: DetectionPickResult,
+  ) {
+    const mask = target.detection.mask;
+
+    if (!mask) {
+      return false;
+    }
+
+    let runs = maskCutoutRuns.get(mask);
+
+    if (runs === undefined) {
+      try {
+        const decoded = decodeCompressedRleMask(mask);
+        runs =
+          extractMaskRectRuns(decoded.data, decoded.width, decoded.height) ??
+          [];
+      } catch {
+        // Preserve the documented rectangle fallback for malformed masks. A
+        // valid mask must never lose its shape merely because ID-mask rendering
+        // is unavailable, but an unreadable payload still has only bounds.
+        runs = [];
+      }
+
+      maskCutoutRuns.set(mask, runs);
+    }
+
+    if (runs.length === 0) {
+      return false;
+    }
+
+    for (const run of runs) {
+      graphics.rect(run.x, run.y, run.width, run.height);
+    }
+
+    return true;
   }
 
   function hide() {
