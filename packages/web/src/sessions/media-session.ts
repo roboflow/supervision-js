@@ -119,7 +119,14 @@ export async function createMediaSession(
         }),
         sessionDetections.sourcePresentations,
       );
-    const initialPresentation = resolvePresentation(currentPresentation);
+    const resolveRendererPresentation = (
+      presentation: MediaRendererPresentation | undefined,
+    ): MediaRendererPresentation => ({
+      ...resolvePresentation(presentation),
+      renderers: undefined,
+    });
+    const initialPresentation =
+      resolveRendererPresentation(currentPresentation);
 
     const renderer = await createMediaRenderer({
       ...options.renderer,
@@ -138,7 +145,6 @@ export async function createMediaSession(
       maskStyle: initialPresentation.maskStyle,
       polygonStyle: initialPresentation.polygonStyle,
       polylineStyle: initialPresentation.polylineStyle,
-      renderers: initialPresentation.renderers,
       keypointStyle: initialPresentation.keypointStyle,
       visibility: initialPresentation.visibility,
       onState(state) {
@@ -257,7 +263,9 @@ export async function createMediaSession(
 
       setPresentation(presentation: MediaRendererPresentation) {
         currentPresentation = presentation;
-        renderer.setPresentation(resolvePresentation(currentPresentation));
+        renderer.setPresentation(
+          resolveRendererPresentation(currentPresentation),
+        );
       },
 
       setRenderQuality(quality) {
