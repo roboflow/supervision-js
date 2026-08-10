@@ -535,11 +535,11 @@ export async function createPixiMediaScene(
 
       try {
         currentMediaTime = sample.timestamp;
-        presentedSampleTimestamp = sample.timestamp;
         hasPresentedSample = true;
 
         if (!collectFrameTimings) {
           sample.draw(stagingContext, 0, 0, mediaWidth, mediaHeight);
+          presentedSampleTimestamp = sample.timestamp;
           stagingTextureSource?.update();
           stagingTexture?.update();
           maskLayer?.drawFrame(sample.timestamp);
@@ -569,6 +569,7 @@ export async function createPixiMediaScene(
 
         mediaUploadMs = measure(() => {
           sample.draw(stagingContext, 0, 0, mediaWidth, mediaHeight);
+          presentedSampleTimestamp = sample.timestamp;
           stagingTextureSource?.update();
           stagingTexture?.update();
         });
