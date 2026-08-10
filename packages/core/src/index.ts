@@ -63,9 +63,11 @@ export {
   type DefaultAnnotationPresentationOptions,
 } from "#styles/default-annotation-presentation";
 export {
+  annotationRendererKinds,
   annotationRenderers,
   type AnnotationRenderer,
   type AnnotationRendererFactory,
+  type AnnotationRendererKind,
   type BoxAnnotationRenderer,
   type KeypointAnnotationRenderer,
   type LabelAnnotationRenderer,

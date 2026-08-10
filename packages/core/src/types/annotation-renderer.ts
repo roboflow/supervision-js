@@ -6,6 +6,24 @@ import type { PolygonStyle } from "#types/polygon-style";
 import type { PolylineStyle } from "#types/polyline-style";
 
 /**
+ * The built-in annotation renderer vocabulary.
+ *
+ * These stay plain string literals so `{ kind: "box" }` remains assignable to
+ * the public descriptor union from JavaScript and TypeScript alike.
+ */
+export const annotationRendererKinds = [
+  "box",
+  "keypoints",
+  "label",
+  "mask",
+  "polygon",
+  "polyline",
+] as const;
+
+/** One supported built-in annotation renderer kind. */
+export type AnnotationRendererKind = (typeof annotationRendererKinds)[number];
+
+/**
  * A renderer configured in a media presentation.
  *
  * Renderers are the public unit of annotation visualization. Every renderer
@@ -19,6 +37,16 @@ export type AnnotationRenderer =
   | MaskAnnotationRenderer
   | PolygonAnnotationRenderer
   | PolylineAnnotationRenderer;
+
+/**
+ * The descriptor of one renderer kind.
+ *
+ * This resolves to `never` for a kind that has no descriptor, which makes an
+ * incomplete addition to {@link annotationRendererKinds} fail to compile where
+ * the kind's metadata or factory is declared.
+ */
+export type AnnotationRendererOfKind<TKind extends AnnotationRendererKind> =
+  Extract<AnnotationRenderer, { kind: TKind }>;
 
 interface BaseAnnotationRenderer {
   /** Stable identity within one presentation. */
@@ -55,31 +83,15 @@ export interface PolylineAnnotationRenderer extends BaseAnnotationRenderer {
   readonly style?: PolylineStyle | null;
 }
 
-export interface AnnotationRendererFactory {
-  box(
-    options?: RendererStyleOptions<BoxAnnotationRenderer>,
-  ): BoxAnnotationRenderer;
-  keypoints(
-    options?: RendererStyleOptions<KeypointAnnotationRenderer>,
-  ): KeypointAnnotationRenderer;
-  label(
-    options?: RendererStyleOptions<LabelAnnotationRenderer>,
-  ): LabelAnnotationRenderer;
-  mask(
-    options?: RendererStyleOptions<MaskAnnotationRenderer>,
-  ): MaskAnnotationRenderer;
-  polygon(
-    options?: RendererStyleOptions<PolygonAnnotationRenderer>,
-  ): PolygonAnnotationRenderer;
-  polyline(
-    options?: RendererStyleOptions<PolylineAnnotationRenderer>,
-  ): PolylineAnnotationRenderer;
-}
+/** Creates the descriptor for every supported renderer kind. */
+export type AnnotationRendererFactory = {
+  readonly [TKind in AnnotationRendererKind]: (
+    options?: AnnotationRendererStyleOptions<TKind>,
+  ) => AnnotationRendererOfKind<TKind>;
+};
 
-type RendererStyleOptions<TRenderer extends AnnotationRenderer> = Pick<
-  TRenderer,
-  "style"
->;
+type AnnotationRendererStyleOptions<TKind extends AnnotationRendererKind> =
+  Pick<AnnotationRendererOfKind<TKind>, "style">;
 
 /**
  * Creates built-in annotation renderer descriptors for
@@ -90,22 +102,20 @@ type RendererStyleOptions<TRenderer extends AnnotationRenderer> = Pick<
  * composition capability without changing that ordering for existing scenes.
  */
 export const annotationRenderers: AnnotationRendererFactory = {
-  box: (options = {}) => ({ id: "box", kind: "box", ...options }),
-  keypoints: (options = {}) => ({
-    id: "keypoints",
-    kind: "keypoints",
-    ...options,
-  }),
-  label: (options = {}) => ({ id: "label", kind: "label", ...options }),
-  mask: (options = {}) => ({ id: "mask", kind: "mask", ...options }),
-  polygon: (options = {}) => ({
-    id: "polygon",
-    kind: "polygon",
-    ...options,
-  }),
-  polyline: (options = {}) => ({
-    id: "polyline",
-    kind: "polyline",
-    ...options,
-  }),
+  box: (options) => createAnnotationRenderer("box", options),
+  keypoints: (options) => createAnnotationRenderer("keypoints", options),
+  label: (options) => createAnnotationRenderer("label", options),
+  mask: (options) => createAnnotationRenderer("mask", options),
+  polygon: (options) => createAnnotationRenderer("polygon", options),
+  polyline: (options) => createAnnotationRenderer("polyline", options),
 };
+
+function createAnnotationRenderer<TKind extends AnnotationRendererKind>(
+  kind: TKind,
+  options: AnnotationRendererStyleOptions<TKind> | undefined,
+): AnnotationRendererOfKind<TKind> {
+  // Every built-in renderer keeps its kind as its stable id. TypeScript cannot
+  // narrow the descriptor union through the generic kind parameter, so the
+  // descriptor shape is asserted here and covered by a focused test.
+  return { id: kind, kind, ...options } as AnnotationRendererOfKind<TKind>;
+}

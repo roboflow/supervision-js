@@ -63,7 +63,9 @@ Start here for normal application code:
 - `BaseInteractionStyle`
 - `BaseFocusStyle`
 - `annotationRenderers`
+- `annotationRendererKinds`
 - `AnnotationRenderer`
+- `AnnotationRendererKind`
 - `prepareMedia()`
 - `prepareMediaProgressively()`
 - `probeMedia()`
@@ -96,7 +98,9 @@ session.setPresentation({
 ```
 
 The current built-ins are `box`, `mask`, `polygon`, `polyline`, `keypoints`,
-and `label`. When supplied, the list is authoritative: omitted built-ins are
+and `label`; `annotationRendererKinds` enumerates that vocabulary and
+`AnnotationRendererKind` names it in application code. When supplied, the list
+is authoritative: omitted built-ins are
 disabled, and `renderers: []` disables every built-in layer. For a listed
 renderer, an explicit `style` wins; otherwise its matching legacy style field
 provides the default. A source-specific override can refine a selected layer,

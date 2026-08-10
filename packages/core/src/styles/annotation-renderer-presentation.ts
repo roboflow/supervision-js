@@ -1,6 +1,12 @@
-import type { AnnotationRenderer } from "#types/annotation-renderer";
+import {
+  annotationRendererRegistry,
+  type AnnotationRendererStyleField,
+} from "#styles/annotation-renderer-registry";
+import type {
+  AnnotationRenderer,
+  AnnotationRendererKind,
+} from "#types/annotation-renderer";
 import type { MediaRendererPresentation } from "#types/media-rendering";
-import { createDefaultAnnotationPresentation } from "#styles/default-annotation-presentation";
 
 /**
  * Resolves built-in renderer descriptors into the existing specialized style
@@ -25,9 +31,8 @@ export function resolveAnnotationRendererPresentation(
     polygonStyle: null,
     polylineStyle: null,
   };
-  const defaultPresentation = createDefaultAnnotationPresentation();
   const rendererIds = new Set<string>();
-  const rendererKinds = new Set<AnnotationRenderer["kind"]>();
+  const rendererKinds = new Set<AnnotationRendererKind>();
 
   for (const renderer of renderers) {
     if (rendererIds.has(renderer.id)) {
@@ -42,7 +47,7 @@ export function resolveAnnotationRendererPresentation(
       );
     }
     rendererKinds.add(renderer.kind);
-    applyRendererStyle(resolved, presentation, defaultPresentation, renderer);
+    applyRendererStyle(resolved, presentation, renderer);
   }
 
   return {
@@ -52,68 +57,28 @@ export function resolveAnnotationRendererPresentation(
 }
 
 function applyRendererStyle(
-  presentation: ResolvedAnnotationRendererStyles,
-  presentationDefaults: MediaRendererPresentation,
-  canonicalDefaults: MediaRendererPresentation,
+  resolved: ResolvedAnnotationRendererStyles,
+  configured: MediaRendererPresentation,
   renderer: AnnotationRenderer,
 ) {
-  switch (renderer.kind) {
-    case "box":
-      presentation.boxStyle =
-        renderer.style === undefined
-          ? presentationDefaults.boxStyle === undefined
-            ? (canonicalDefaults.boxStyle ?? null)
-            : presentationDefaults.boxStyle
-          : renderer.style;
-      break;
-    case "keypoints":
-      presentation.keypointStyle =
-        renderer.style === undefined
-          ? presentationDefaults.keypointStyle === undefined
-            ? (canonicalDefaults.keypointStyle ?? null)
-            : presentationDefaults.keypointStyle
-          : renderer.style;
-      break;
-    case "label":
-      presentation.labelStyle =
-        renderer.style === undefined
-          ? presentationDefaults.labelStyle === undefined
-            ? (canonicalDefaults.labelStyle ?? null)
-            : presentationDefaults.labelStyle
-          : renderer.style;
-      break;
-    case "mask":
-      presentation.maskStyle =
-        renderer.style === undefined
-          ? presentationDefaults.maskStyle === undefined
-            ? (canonicalDefaults.maskStyle ?? null)
-            : presentationDefaults.maskStyle
-          : renderer.style;
-      break;
-    case "polygon":
-      presentation.polygonStyle =
-        renderer.style === undefined
-          ? presentationDefaults.polygonStyle === undefined
-            ? (canonicalDefaults.polygonStyle ?? null)
-            : presentationDefaults.polygonStyle
-          : renderer.style;
-      break;
-    case "polyline":
-      presentation.polylineStyle =
-        renderer.style === undefined
-          ? presentationDefaults.polylineStyle === undefined
-            ? (canonicalDefaults.polylineStyle ?? null)
-            : presentationDefaults.polylineStyle
-          : renderer.style;
-      break;
-  }
+  const { createCanonicalStyle, styleField } =
+    annotationRendererRegistry[renderer.kind];
+  const configuredStyle = configured[styleField];
+  const style =
+    renderer.style !== undefined
+      ? renderer.style
+      : configuredStyle !== undefined
+        ? configuredStyle
+        : createCanonicalStyle();
+
+  // The registry pairs each kind with the presentation field holding the same
+  // style contract, but TypeScript cannot correlate that pairing across a
+  // lookup on a union, so the write is asserted once here.
+  resolved[styleField] = style as never;
 }
 
-interface ResolvedAnnotationRendererStyles {
-  boxStyle: MediaRendererPresentation["boxStyle"];
-  keypointStyle: MediaRendererPresentation["keypointStyle"];
-  labelStyle: MediaRendererPresentation["labelStyle"];
-  maskStyle: MediaRendererPresentation["maskStyle"];
-  polygonStyle: MediaRendererPresentation["polygonStyle"];
-  polylineStyle: MediaRendererPresentation["polylineStyle"];
-}
+type ResolvedAnnotationRendererStyles = {
+  -readonly [
+    TField in AnnotationRendererStyleField
+  ]-?: MediaRendererPresentation[TField];
+};

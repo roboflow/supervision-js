@@ -68,9 +68,11 @@ export type { BasePolylineStyleOptions } from "supervision-js-core";
 export { BaseKeypointStyle, KeypointMarkerShape } from "supervision-js-core";
 export type { BaseKeypointStyleOptions } from "supervision-js-core";
 export {
+  annotationRendererKinds,
   annotationRenderers,
   type AnnotationRenderer,
   type AnnotationRendererFactory,
+  type AnnotationRendererKind,
   type BoxAnnotationRenderer,
   type KeypointAnnotationRenderer,
   type LabelAnnotationRenderer,

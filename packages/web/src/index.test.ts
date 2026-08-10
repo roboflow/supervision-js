@@ -90,6 +90,7 @@ describe("package entrypoint", () => {
       "RenderPreparationMode",
       "RenderPreparationWorkerStatus",
       "SUPERVISION_ROBOFLOW_COLOR",
+      "annotationRendererKinds",
       "annotationRenderers",
       "createArrayDetectionFrameSource",
       "createBrowserColdDetectionFrameStore",

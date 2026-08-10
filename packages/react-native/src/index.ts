@@ -54,6 +54,7 @@ export {
   pickDetectionAtPoint,
   resolveDetectionClassColorStyle,
   SUPERVISION_ROBOFLOW_COLOR,
+  annotationRendererKinds,
   annotationRenderers,
 } from "supervision-js-core";
 export type {
@@ -66,6 +67,7 @@ export type {
   AnnotationEditingPreviewStyleContext,
   AnnotationRenderer,
   AnnotationRendererFactory,
+  AnnotationRendererKind,
   AnnotationOverlayStyle,
   BoxAnnotationRenderer,
   BoxDrawInstruction,

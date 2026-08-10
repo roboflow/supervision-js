@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { annotationRenderers } from "#types/annotation-renderer";
+import {
+  annotationRendererKinds,
+  annotationRenderers,
+} from "#types/annotation-renderer";
+import { annotationRendererRegistry } from "#styles/annotation-renderer-registry";
 import { BaseBoxStyle } from "#styles/box-style";
 import { BaseLabelStyle } from "#styles/label-style";
 import { BaseMaskStyle } from "#styles/mask-style";
@@ -107,6 +111,24 @@ describe("annotation renderer presentation", () => {
     });
 
     expect(presentation.boxStyle).toBeNull();
+  });
+
+  it("resolves only the listed renderer's style field for every kind", () => {
+    for (const kind of annotationRendererKinds) {
+      const { styleField } = annotationRendererRegistry[kind];
+      const presentation = resolveAnnotationRendererPresentation({
+        renderers: [annotationRenderers[kind]()],
+      });
+
+      expect(presentation[styleField]).not.toBeNull();
+      for (const otherKind of annotationRendererKinds) {
+        if (otherKind !== kind) {
+          expect(
+            presentation[annotationRendererRegistry[otherKind].styleField],
+          ).toBeNull();
+        }
+      }
+    }
   });
 
   it("keeps source-specific style overrides after renderer normalization", () => {
