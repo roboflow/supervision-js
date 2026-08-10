@@ -270,7 +270,7 @@ describe("geometry showcase fixture", () => {
         for (const detection of frame.detections) {
           if (!detection.polyline) continue;
           polylineCount += 1;
-          trackedSourceIds.add(detection.id ?? "");
+          trackedSourceIds.add(String(detection.id ?? ""));
 
           const previousPoint = detection.polyline.points.at(-2);
           const currentPoint = detection.polyline.points.at(-1);
