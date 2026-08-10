@@ -19,8 +19,8 @@ This name is intentional:
 
 - **detections** own geometry, identity, class, confidence, and masks;
 - **styles** describe how one supported layer should look;
-- **visualization layers** are the user-visible capabilities enabled through
-  `MediaRendererPresentation`;
+- **annotation renderers** are the user-visible capabilities enabled through
+  `MediaRendererPresentation.renderers`;
 - **annotator facades** may later compose these layers into higher-level use
   cases;
 - PixiJS containers, shaders, textures, and prepared artifacts remain private
@@ -38,3 +38,25 @@ frozen fixture contains semantic open-path data.
 - [Polygons](./visualization-layers/polygons.md)
 - [Polylines](./visualization-layers/polylines.md)
 - [Keypoints and skeletons](./visualization-layers/keypoints-and-skeletons.md)
+
+## Renderer Configuration
+
+Use `annotationRenderers` to describe a scene through a single renderer list. The
+current renderers preserve the established backend ordering for masks,
+polygons, vectors, and labels, so adopting the list does not change the
+composition behavior of existing layers.
+
+```ts
+session.setPresentation({
+  renderers: [
+    annotationRenderers.mask({ style: maskStyle }),
+    annotationRenderers.box({ style: boxStyle }),
+    annotationRenderers.label({ style: labelStyle }),
+  ],
+});
+```
+
+The older `maskStyle`, `boxStyle`, and related fields remain compatible. They
+are especially useful for source-specific presentation overrides; a renderer
+with an explicit style supplies the global style and a matching source override
+still wins for that source.

@@ -90,6 +90,7 @@ describe("package entrypoint", () => {
       "RenderPreparationMode",
       "RenderPreparationWorkerStatus",
       "SUPERVISION_ROBOFLOW_COLOR",
+      "annotationRenderers",
       "createArrayDetectionFrameSource",
       "createBrowserColdDetectionFrameStore",
       "createBufferedDetectionTimeline",
@@ -114,6 +115,14 @@ describe("package entrypoint", () => {
       "resolveDetectionClassColorStyle",
     ]);
     expect(entrypoint.createMediaRenderer).toEqual(expect.any(Function));
+    expect(entrypoint.annotationRenderers).toEqual({
+      box: expect.any(Function),
+      keypoints: expect.any(Function),
+      label: expect.any(Function),
+      mask: expect.any(Function),
+      polygon: expect.any(Function),
+      polyline: expect.any(Function),
+    });
     expect(entrypoint.createMediaStreamRendererSource).toEqual(
       expect.any(Function),
     );
@@ -2029,7 +2038,13 @@ describe("package entrypoint", () => {
       expect(pixiMock.textureOptions).toHaveLength(2);
     });
 
-    renderer.setPresentation({ maskStyle: { resolve: secondResolve } });
+    const { annotationRenderers } = await import("./index");
+
+    renderer.setPresentation({
+      renderers: [
+        annotationRenderers.mask({ style: { resolve: secondResolve } }),
+      ],
+    });
 
     expect(pixiMock.textureDestroy).toHaveBeenCalledWith(true);
     await vi.waitFor(() => {

@@ -1,6 +1,7 @@
 import { createMediaRenderer } from "#renderers/media-renderer";
 import {
   createDefaultAnnotationPresentation,
+  resolveAnnotationRendererPresentation,
   createSourceAwarePresentation,
 } from "supervision-js-core";
 import type {
@@ -112,7 +113,10 @@ export async function createMediaSession(
       presentation: MediaRendererPresentation | undefined,
     ) =>
       createSourceAwarePresentation<MediaRendererPresentation>(
-        { ...defaultPresentation, ...presentation },
+        resolveAnnotationRendererPresentation({
+          ...defaultPresentation,
+          ...presentation,
+        }),
         sessionDetections.sourcePresentations,
       );
     const initialPresentation = resolvePresentation(currentPresentation);
@@ -134,6 +138,7 @@ export async function createMediaSession(
       maskStyle: initialPresentation.maskStyle,
       polygonStyle: initialPresentation.polygonStyle,
       polylineStyle: initialPresentation.polylineStyle,
+      renderers: initialPresentation.renderers,
       keypointStyle: initialPresentation.keypointStyle,
       visibility: initialPresentation.visibility,
       onState(state) {

@@ -62,12 +62,45 @@ Start here for normal application code:
 - `BaseLabelStyle`
 - `BaseInteractionStyle`
 - `BaseFocusStyle`
+- `annotationRenderers`
+- `AnnotationRenderer`
 - `prepareMedia()`
 - `prepareMediaProgressively()`
 - `probeMedia()`
 
 These are the concepts a user should be able to understand without knowing how
 Pixi, Mediabunny, workers, or prepared mask artifacts are wired internally.
+
+## Annotation Renderers
+
+`MediaRendererPresentation.renderers` is the unified presentation surface for
+the supported visualization layers. A renderer consumes semantic detections and
+contributes to the renderer-owned scene. The built-ins retain the established
+draw order and backend paths for masks, boxes, vectors, and labels.
+
+```ts
+import { annotationRenderers, BaseBoxStyle, BaseLabelStyle } from "supervision";
+
+session.setPresentation({
+  renderers: [
+    annotationRenderers.box({
+      style: new BaseBoxStyle({
+        stroke: { color: 0x8b5cf6, width: 2 },
+      }),
+    }),
+    annotationRenderers.label({
+      style: new BaseLabelStyle(),
+    }),
+  ],
+});
+```
+
+The current built-ins are `box`, `mask`, `polygon`, `polyline`, `keypoints`,
+and `label`. The existing `boxStyle`, `maskStyle`, and related presentation
+fields remain supported for compatibility and source-specific style overrides.
+Do not pass Pixi display objects or custom drawing callbacks: the public API
+describes semantic renderer configuration while the browser backend owns
+composition and resource lifetime.
 
 ## Advanced Public API
 

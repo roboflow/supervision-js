@@ -50,6 +50,7 @@ const expectedWebRuntimeExports = [
   "RenderPreparationMode",
   "RenderPreparationWorkerStatus",
   "SUPERVISION_ROBOFLOW_COLOR",
+  "annotationRenderers",
   "createArrayDetectionFrameSource",
   "createBrowserColdDetectionFrameStore",
   "createBufferedDetectionTimeline",
@@ -102,6 +103,7 @@ const expectedCoreRuntimeExports = [
   "MediaSessionStatus",
   "MediaSourceStatus",
   "SUPERVISION_ROBOFLOW_COLOR",
+  "annotationRenderers",
   "MAX_ID_MASK_PALETTE_ENTRIES",
   "MAX_ID_MASK_STROKE_WIDTH",
   "createArrayDetectionFrameSource",
@@ -201,6 +203,7 @@ test("built core package imports without browser APIs", async () => {
     "function",
   );
   assert.equal(typeof entrypoint.BaseBoxStyle, "function");
+  assert.equal(typeof entrypoint.annotationRenderers.box, "function");
   assert.equal(typeof entrypoint.createIdMaskFrame, "function");
   assert.equal(entrypoint.MAX_ID_MASK_PALETTE_ENTRIES, 64);
   assert.equal(entrypoint.DetectionMaskEncoding.CompressedRle, "compressedRle");
@@ -222,6 +225,7 @@ test("built package entrypoint exposes the public runtime API", async () => {
   assert.equal(typeof entrypoint.BaseInteractionStyle, "function");
   assert.equal(typeof entrypoint.BaseMaskStyle, "function");
   assert.equal(typeof entrypoint.BaseLabelStyle, "function");
+  assert.equal(typeof entrypoint.annotationRenderers.mask, "function");
   assert.equal(entrypoint.MediaSessionStatus.Ready, "ready");
   assert.equal(entrypoint.MediaRendererFit.Contain, "contain");
   assert.equal(entrypoint.DetectionTimelineOrigin.MediaStart, "mediaStart");

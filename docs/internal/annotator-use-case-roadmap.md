@@ -79,7 +79,11 @@ The current package already separates the important responsibilities:
 - host applications own controlled product state, persistence, undo/redo, and
   domain analytics.
 
-The missing capability is ordered composition. A consumer should eventually be
+The presentation now has a built-in renderer list. A consumer can
+configure the existing visualization layers through one public surface while
+the browser backend continues to use the established specialized box, mask,
+label, polygon, polyline, and keypoint paths. The next missing capability is
+renderer kinds that compose assets or media regions. A consumer should eventually be
 able to request a presentation such as:
 
 ```text

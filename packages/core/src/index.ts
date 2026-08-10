@@ -63,6 +63,18 @@ export {
   type DefaultAnnotationPresentationOptions,
 } from "#styles/default-annotation-presentation";
 export {
+  annotationRenderers,
+  type AnnotationRenderer,
+  type AnnotationRendererFactory,
+  type BoxAnnotationRenderer,
+  type KeypointAnnotationRenderer,
+  type LabelAnnotationRenderer,
+  type MaskAnnotationRenderer,
+  type PolygonAnnotationRenderer,
+  type PolylineAnnotationRenderer,
+} from "#types/annotation-renderer";
+export { resolveAnnotationRendererPresentation } from "#styles/annotation-renderer-presentation";
+export {
   createSourceAwarePresentation,
   type PresentationStyleSet,
   type SourcePresentation,
