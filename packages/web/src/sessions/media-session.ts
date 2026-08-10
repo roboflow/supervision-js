@@ -111,14 +111,21 @@ export async function createMediaSession(
     let currentPresentation = options.presentation;
     const resolvePresentation = (
       presentation: MediaRendererPresentation | undefined,
-    ) =>
-      createSourceAwarePresentation<MediaRendererPresentation>(
-        resolveAnnotationRendererPresentation({
-          ...defaultPresentation,
-          ...presentation,
-        }),
+    ) => {
+      const renderers = presentation?.renderers;
+      const resolvedPresentation = resolveAnnotationRendererPresentation({
+        ...defaultPresentation,
+        ...presentation,
+      });
+
+      return createSourceAwarePresentation<MediaRendererPresentation>(
+        resolvedPresentation,
         sessionDetections.sourcePresentations,
+        renderers === undefined
+          ? undefined
+          : { enabledRendererKinds: renderers.map(({ kind }) => kind) },
       );
+    };
     const resolveRendererPresentation = (
       presentation: MediaRendererPresentation | undefined,
     ): MediaRendererPresentation => ({

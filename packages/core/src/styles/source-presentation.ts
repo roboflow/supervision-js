@@ -4,6 +4,7 @@ import { BaseMaskStyle } from "#styles/mask-style";
 import { BaseKeypointStyle } from "#styles/keypoint-style";
 import { BasePolygonStyle } from "#styles/polygon-style";
 import { BasePolylineStyle } from "#styles/polyline-style";
+import type { AnnotationRenderer } from "#types/annotation-renderer";
 import type {
   BoxDrawInstruction,
   BoxStyle,
@@ -52,19 +53,30 @@ export interface SourcePresentationEntry {
   readonly presentation?: SourcePresentation;
 }
 
+/**
+ * Limits source-level overrides when the host explicitly selects annotation
+ * renderers. Omit this option to retain legacy source-override behaviour.
+ */
+export interface SourceAwarePresentationOptions {
+  readonly enabledRendererKinds?: readonly AnnotationRenderer["kind"][];
+}
+
 export function createSourceAwarePresentation<
   TPresentation extends PresentationStyleSet,
 >(
   globalPresentation: TPresentation,
   sources: readonly SourcePresentationEntry[],
+  options?: SourceAwarePresentationOptions,
 ): TPresentation;
 export function createSourceAwarePresentation(
   globalPresentation: PresentationStyleSet | undefined,
   sources: readonly SourcePresentationEntry[],
+  options?: SourceAwarePresentationOptions,
 ): PresentationStyleSet;
 export function createSourceAwarePresentation(
   globalPresentation: PresentationStyleSet = {},
   sources: readonly SourcePresentationEntry[],
+  options: SourceAwarePresentationOptions = {},
 ): PresentationStyleSet {
   if (!sources.some((source) => source.presentation !== undefined)) {
     return globalPresentation;
@@ -76,37 +88,37 @@ export function createSourceAwarePresentation(
 
   return {
     ...globalPresentation,
-    boxStyle: hasSourceStyle(sources, "boxStyle")
+    boxStyle: shouldApplySourceStyle(sources, "boxStyle", options)
       ? new SourceAwareBoxStyle(
           normalizeGlobalBoxStyle(globalPresentation.boxStyle),
           sourcePresentations,
         )
       : globalPresentation.boxStyle,
-    labelStyle: hasSourceStyle(sources, "labelStyle")
+    labelStyle: shouldApplySourceStyle(sources, "labelStyle", options)
       ? new SourceAwareLabelStyle(
           normalizeGlobalLabelStyle(globalPresentation.labelStyle),
           sourcePresentations,
         )
       : globalPresentation.labelStyle,
-    maskStyle: hasSourceStyle(sources, "maskStyle")
+    maskStyle: shouldApplySourceStyle(sources, "maskStyle", options)
       ? new SourceAwareMaskStyle(
           normalizeGlobalMaskStyle(globalPresentation.maskStyle),
           sourcePresentations,
         )
       : globalPresentation.maskStyle,
-    polygonStyle: hasSourceStyle(sources, "polygonStyle")
+    polygonStyle: shouldApplySourceStyle(sources, "polygonStyle", options)
       ? new SourceAwarePolygonStyle(
           normalizeGlobalPolygonStyle(globalPresentation.polygonStyle),
           sourcePresentations,
         )
       : globalPresentation.polygonStyle,
-    polylineStyle: hasSourceStyle(sources, "polylineStyle")
+    polylineStyle: shouldApplySourceStyle(sources, "polylineStyle", options)
       ? new SourceAwarePolylineStyle(
           normalizeGlobalPolylineStyle(globalPresentation.polylineStyle),
           sourcePresentations,
         )
       : globalPresentation.polylineStyle,
-    keypointStyle: hasSourceStyle(sources, "keypointStyle")
+    keypointStyle: shouldApplySourceStyle(sources, "keypointStyle", options)
       ? new SourceAwareKeypointStyle(
           normalizeGlobalKeypointStyle(globalPresentation.keypointStyle),
           sourcePresentations,
@@ -114,6 +126,35 @@ export function createSourceAwarePresentation(
       : globalPresentation.keypointStyle,
   };
 }
+
+function shouldApplySourceStyle(
+  sources: readonly SourcePresentationEntry[],
+  style: keyof PresentationStyleSet,
+  options: SourceAwarePresentationOptions,
+): boolean {
+  if (!hasSourceStyle(sources, style)) {
+    return false;
+  }
+
+  const rendererKind = rendererKindByStyle[style];
+
+  return (
+    rendererKind === undefined ||
+    options.enabledRendererKinds === undefined ||
+    options.enabledRendererKinds.includes(rendererKind)
+  );
+}
+
+const rendererKindByStyle: Readonly<
+  Partial<Record<keyof PresentationStyleSet, AnnotationRenderer["kind"]>>
+> = {
+  boxStyle: "box",
+  keypointStyle: "keypoints",
+  labelStyle: "label",
+  maskStyle: "mask",
+  polygonStyle: "polygon",
+  polylineStyle: "polyline",
+};
 
 class SourceAwareBoxStyle implements BoxStyle {
   constructor(

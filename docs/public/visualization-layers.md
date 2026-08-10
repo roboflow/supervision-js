@@ -62,4 +62,5 @@ with an explicit style supplies the global style and a matching source override
 still wins for that source. When a `renderers` list is present, it selects the
 enabled built-ins: omitted layers are disabled, including when the list is
 empty. A listed renderer without an explicit `style` uses its matching legacy
-style field.
+style field. Source-specific overrides refine selected layers but cannot
+re-enable an omitted renderer.

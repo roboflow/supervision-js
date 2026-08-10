@@ -77,6 +77,7 @@ export { resolveAnnotationRendererPresentation } from "#styles/annotation-render
 export {
   createSourceAwarePresentation,
   type PresentationStyleSet,
+  type SourceAwarePresentationOptions,
   type SourcePresentation,
   type SourcePresentationEntry,
 } from "#styles/source-presentation";

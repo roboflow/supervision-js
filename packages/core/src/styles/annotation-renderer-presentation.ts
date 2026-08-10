@@ -61,49 +61,49 @@ function applyRendererStyle(
     case "box":
       presentation.boxStyle =
         renderer.style === undefined
-          ? (presentationDefaults.boxStyle ??
-            canonicalDefaults.boxStyle ??
-            null)
+          ? presentationDefaults.boxStyle === undefined
+            ? (canonicalDefaults.boxStyle ?? null)
+            : presentationDefaults.boxStyle
           : renderer.style;
       break;
     case "keypoints":
       presentation.keypointStyle =
         renderer.style === undefined
-          ? (presentationDefaults.keypointStyle ??
-            canonicalDefaults.keypointStyle ??
-            null)
+          ? presentationDefaults.keypointStyle === undefined
+            ? (canonicalDefaults.keypointStyle ?? null)
+            : presentationDefaults.keypointStyle
           : renderer.style;
       break;
     case "label":
       presentation.labelStyle =
         renderer.style === undefined
-          ? (presentationDefaults.labelStyle ??
-            canonicalDefaults.labelStyle ??
-            null)
+          ? presentationDefaults.labelStyle === undefined
+            ? (canonicalDefaults.labelStyle ?? null)
+            : presentationDefaults.labelStyle
           : renderer.style;
       break;
     case "mask":
       presentation.maskStyle =
         renderer.style === undefined
-          ? (presentationDefaults.maskStyle ??
-            canonicalDefaults.maskStyle ??
-            null)
+          ? presentationDefaults.maskStyle === undefined
+            ? (canonicalDefaults.maskStyle ?? null)
+            : presentationDefaults.maskStyle
           : renderer.style;
       break;
     case "polygon":
       presentation.polygonStyle =
         renderer.style === undefined
-          ? (presentationDefaults.polygonStyle ??
-            canonicalDefaults.polygonStyle ??
-            null)
+          ? presentationDefaults.polygonStyle === undefined
+            ? (canonicalDefaults.polygonStyle ?? null)
+            : presentationDefaults.polygonStyle
           : renderer.style;
       break;
     case "polyline":
       presentation.polylineStyle =
         renderer.style === undefined
-          ? (presentationDefaults.polylineStyle ??
-            canonicalDefaults.polylineStyle ??
-            null)
+          ? presentationDefaults.polylineStyle === undefined
+            ? (canonicalDefaults.polylineStyle ?? null)
+            : presentationDefaults.polylineStyle
           : renderer.style;
       break;
   }

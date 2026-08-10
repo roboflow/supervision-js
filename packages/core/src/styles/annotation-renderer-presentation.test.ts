@@ -100,6 +100,15 @@ describe("annotation renderer presentation", () => {
     expect(presentation.boxStyle).toBeInstanceOf(BaseBoxStyle);
   });
 
+  it("honors an explicit legacy null for a listed renderer without a style", () => {
+    const presentation = resolveAnnotationRendererPresentation({
+      boxStyle: null,
+      renderers: [annotationRenderers.box()],
+    });
+
+    expect(presentation.boxStyle).toBeNull();
+  });
+
   it("keeps source-specific style overrides after renderer normalization", () => {
     const globalBoxStyle = new BaseBoxStyle({
       stroke: { color: 0x8b5cf6, width: 2 },
