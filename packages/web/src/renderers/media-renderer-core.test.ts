@@ -30,6 +30,42 @@ import type {
 } from "./media-renderer-scene";
 
 describe("media renderer core", () => {
+  it("captures the raw frame from the scene at its presented timestamp", async () => {
+    resetMocks();
+
+    const capture = {
+      blob: new Blob(["frame"], { type: "image/jpeg" }),
+      height: 360,
+      mediaTime: 1.25,
+      type: "image/jpeg",
+      width: 640,
+    };
+    const scene = createScene({
+      captureFrame: vi.fn(async () => capture),
+    });
+    const renderer = await createMediaRendererCore(
+      {
+        autoPlay: false,
+        container: {} as HTMLElement,
+        source: createSource([
+          createMockSample(1.25, 0) as unknown as DecodedVideoSample,
+        ]),
+      } satisfies MediaRendererOptions,
+      {
+        createScene: vi.fn(async () => scene),
+        openMediaSource: vi.fn(),
+      },
+    );
+
+    await expect(renderer.captureFrame()).resolves.toEqual(capture);
+    expect(scene.captureFrame).toHaveBeenCalledWith(undefined);
+
+    renderer.destroy();
+    await expect(renderer.captureFrame()).rejects.toThrow(
+      "Media renderer has been destroyed.",
+    );
+  });
+
   it("does not enter buffering when render preparation is already ready", async () => {
     resetMocks();
 

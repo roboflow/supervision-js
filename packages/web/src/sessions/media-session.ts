@@ -242,6 +242,14 @@ export async function createMediaSession(
         return renderer.refresh();
       },
 
+      captureFrame(captureOptions) {
+        if (destroyed) {
+          throw new Error("Media session has been destroyed.");
+        }
+
+        return renderer.captureFrame(captureOptions);
+      },
+
       setPresentation(presentation: MediaRendererPresentation) {
         currentPresentation = presentation;
         renderer.setPresentation(resolvePresentation(currentPresentation));

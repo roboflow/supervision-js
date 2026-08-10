@@ -18,6 +18,7 @@ import type {
   MediaRendererSceneTimelineContext,
   PresentedMediaSample,
 } from "./media-renderer-scene";
+import { captureCanvasMediaFrame } from "./media-frame-capture";
 import { createPixiBoxLayer, type PixiBoxLayerState } from "./pixi-box-layer";
 import { createPixiFocusLayer } from "./pixi-focus-layer";
 import { createPixiInteractionLayer } from "./pixi-interaction-layer";
@@ -240,6 +241,11 @@ export async function createPixiMediaScene(
   let viewportScale = 1;
   const viewport = createViewportController({ scale: 1 });
   let hasPresentedSample = false;
+  /**
+   * Timestamp of the sample whose pixels are on the staging canvas. Unlike
+   * `currentMediaTime`, presentation and selection updates never move it.
+   */
+  let presentedSampleTimestamp: number | null = null;
   let baseFit: ReturnType<typeof calculatePixiSceneFit>;
   const interactionLayer =
     options.interaction || options.editingEngine
@@ -529,6 +535,7 @@ export async function createPixiMediaScene(
 
       try {
         currentMediaTime = sample.timestamp;
+        presentedSampleTimestamp = sample.timestamp;
         hasPresentedSample = true;
 
         if (!collectFrameTimings) {
@@ -610,6 +617,21 @@ export async function createPixiMediaScene(
       } finally {
         sample.close();
       }
+    },
+
+    captureFrame(captureOptions) {
+      if (presentedSampleTimestamp === null) {
+        return Promise.reject(
+          new Error("No media frame has been presented yet."),
+        );
+      }
+
+      return captureCanvasMediaFrame({
+        capture: captureOptions,
+        createCanvas: () => document.createElement("canvas"),
+        mediaTime: presentedSampleTimestamp,
+        source: stagingCanvas,
+      });
     },
 
     waitForRenderPreparation(mediaTime, gateOptions) {

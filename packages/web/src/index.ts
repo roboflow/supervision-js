@@ -45,6 +45,10 @@ export {
 // Renderer and session primitives.
 export { createMediaRenderer } from "#renderers/media-renderer";
 export { createMediaSession } from "#sessions/media-session";
+export type {
+  MediaFrameCapture,
+  MediaFrameCaptureOptions,
+} from "#types/media-renderer";
 
 // Presentation styles.
 export { BaseBoxStyle } from "supervision-js-core";
