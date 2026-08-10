@@ -324,6 +324,58 @@ describe("pixi focus layer", () => {
     expect(display.rect).toHaveBeenCalledWith(2, 2, 1, 1);
     expect(display.cut).toHaveBeenCalledOnce();
   });
+
+  it("does not fall back to bounds for a readable empty mask", () => {
+    const emptyMaskFrame: DetectionFrame = {
+      detections: [
+        {
+          className: "player",
+          id: "player-1",
+          mask: {
+            counts: encodeCompressedRleCounts([16]),
+            encoding: DetectionMaskEncoding.CompressedRle,
+            height: 4,
+            width: 4,
+          },
+          rect: { height: 30, width: 20, x: 20, y: 30 },
+        },
+      ],
+      frameIndex: 3,
+      mediaTime: 0.1,
+    };
+    const selectedPick = {
+      detection: emptyMaskFrame.detections[0]!,
+      detectionIndex: 0,
+      frame: emptyMaskFrame,
+      mediaTime: emptyMaskFrame.mediaTime,
+      point: { x: 15, y: 20 },
+      target: DetectionPickTarget.Mask,
+    };
+    const layer = createPixiFocusLayer({
+      Graphics: FakeGraphics as never,
+      focusStyle: new BaseFocusStyle({
+        cornerRadius: 6,
+        fill: { alpha: 0.5, color: 0x000000 },
+        shape: BoxShape.RoundedRect,
+      }),
+    });
+    const display = layer.createDisplay({
+      height: 80,
+      width: 120,
+    }) as FakeGraphics;
+
+    layer.drawFrame({
+      frame: emptyMaskFrame,
+      hoveredPick: null,
+      mediaTime: emptyMaskFrame.mediaTime,
+      selectedPick,
+    });
+
+    expect(display.roundRect).not.toHaveBeenCalled();
+    expect(display.rect).toHaveBeenCalledOnce();
+    expect(display.rect).toHaveBeenCalledWith(0, 0, 120, 80);
+    expect(display.cut).not.toHaveBeenCalled();
+  });
 });
 
 class FakeGraphics {
