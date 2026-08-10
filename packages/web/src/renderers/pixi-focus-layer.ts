@@ -24,7 +24,11 @@ const MAX_FOCUS_MASK_IDS = 16;
 
 type PixiFocusMesh = PixiMesh<PixiMeshGeometry, PixiShader>;
 type CutoutShapeResult = "drawn" | "empty";
-type MaskCutoutCacheEntry = readonly MaskRectRun[] | null;
+type MaskCutoutCacheEntry = {
+  readonly height: number;
+  readonly runs: readonly MaskRectRun[];
+  readonly width: number;
+} | null;
 
 type GraphicsConstructor = new () => PixiFocusGraphics;
 type ContainerConstructor = new () => PixiContainer;
@@ -375,9 +379,13 @@ export function createPixiFocusLayer(options: {
     if (!maskCutoutRuns.has(mask)) {
       try {
         const decoded = decodeCompressedRleMask(mask);
-        runs =
-          extractMaskRectRuns(decoded.data, decoded.width, decoded.height) ??
-          [];
+        runs = {
+          height: decoded.height,
+          runs:
+            extractMaskRectRuns(decoded.data, decoded.width, decoded.height) ??
+            [],
+          width: decoded.width,
+        };
       } catch {
         // Preserve the documented rectangle fallback for malformed masks. A
         // valid mask must never lose its shape merely because ID-mask rendering
@@ -394,11 +402,19 @@ export function createPixiFocusLayer(options: {
       return undefined;
     }
 
-    for (const run of runs) {
-      graphics.rect(run.x, run.y, run.width, run.height);
+    const horizontalScale = mediaWidth / runs.width;
+    const verticalScale = mediaHeight / runs.height;
+
+    for (const run of runs.runs) {
+      graphics.rect(
+        run.x * horizontalScale,
+        run.y * verticalScale,
+        run.width * horizontalScale,
+        run.height * verticalScale,
+      );
     }
 
-    return runs.length === 0 ? "empty" : "drawn";
+    return runs.runs.length === 0 ? "empty" : "drawn";
   }
 
   function hide() {

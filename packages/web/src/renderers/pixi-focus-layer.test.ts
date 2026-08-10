@@ -319,9 +319,9 @@ describe("pixi focus layer", () => {
 
     expect(display.roundRect).not.toHaveBeenCalled();
     expect(display.rect).toHaveBeenNthCalledWith(1, 0, 0, 120, 80);
-    expect(display.rect).toHaveBeenCalledWith(1, 0, 1, 1);
-    expect(display.rect).toHaveBeenCalledWith(1, 1, 2, 1);
-    expect(display.rect).toHaveBeenCalledWith(2, 2, 1, 1);
+    expect(display.rect).toHaveBeenCalledWith(30, 0, 30, 20);
+    expect(display.rect).toHaveBeenCalledWith(30, 20, 60, 20);
+    expect(display.rect).toHaveBeenCalledWith(60, 40, 30, 20);
     expect(display.cut).toHaveBeenCalledOnce();
   });
 
