@@ -83,6 +83,7 @@ export interface DemoFixturePresentationDefaults {
   readonly labelsEnabled?: boolean;
   readonly masksEnabled?: boolean;
   readonly polygonsEnabled?: boolean;
+  readonly polylinesEnabled?: boolean;
 }
 
 export interface DemoFixtureDefinition {

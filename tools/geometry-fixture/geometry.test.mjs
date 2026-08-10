@@ -8,6 +8,7 @@ import {
   attachPoseKeypointsToDetections,
   convertOneBasedEdges,
   normalizePoseDetection,
+  selectMotionGatedDetection,
   simplifyPolygonPoints,
   summarizeFrameGeometry,
   xyxyToCenterRect,
@@ -26,6 +27,68 @@ describe("xyxyToCenterRect", () => {
   it("rejects empty and inverted boxes", () => {
     assert.equal(xyxyToCenterRect([100, 200, 100, 500]), undefined);
     assert.equal(xyxyToCenterRect([300, 200, 100, 500]), undefined);
+  });
+});
+
+describe("selectMotionGatedDetection", () => {
+  const previousObservation = { mediaTime: 1, x: 100, y: 100 };
+
+  it("keeps the spatially continuous candidate when source ids swap", () => {
+    const selected = selectMotionGatedDetection(
+      [
+        {
+          confidence: 0.5,
+          id: "sam:ball:0",
+          rect: { height: 20, width: 20, x: 1000, y: 700 },
+        },
+        {
+          confidence: 0.8,
+          id: "sam:ball:1",
+          rect: { height: 20, width: 20, x: 130, y: 110 },
+        },
+      ],
+      previousObservation,
+      1 + 1 / 30,
+    );
+
+    assert.equal(selected?.id, "sam:ball:1");
+  });
+
+  it("rejects a teleport instead of producing a false segment", () => {
+    const selected = selectMotionGatedDetection(
+      [
+        {
+          confidence: 0.9,
+          id: "sam:ball:0",
+          rect: { height: 20, width: 20, x: 600, y: 600 },
+        },
+      ],
+      previousObservation,
+      1 + 1 / 30,
+    );
+
+    assert.equal(selected, undefined);
+  });
+
+  it("uses confidence and source order only when starting a new trace", () => {
+    const selected = selectMotionGatedDetection(
+      [
+        {
+          confidence: 0.7,
+          id: "sam:ball:0",
+          rect: { height: 20, width: 20, x: 400, y: 400 },
+        },
+        {
+          confidence: 0.9,
+          id: "sam:ball:1",
+          rect: { height: 20, width: 20, x: 900, y: 900 },
+        },
+      ],
+      undefined,
+      1,
+    );
+
+    assert.equal(selected?.id, "sam:ball:1");
   });
 });
 
