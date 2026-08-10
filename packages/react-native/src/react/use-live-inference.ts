@@ -8,8 +8,10 @@ import {
 } from "supervision-js-core";
 
 import {
+  createDetectionFrameFromExecutorchCocoPoses,
   createExecutorchPoseKeypointInstructions,
-  type ExecutorchLivePoseProcessor,
+  type ExecutorchLivePoseConfiguration,
+  type ExecutorchLivePoseRunner,
   type ExecutorchLiveSegmentationProcessor,
 } from "../adapters/executorch";
 import {
@@ -21,6 +23,7 @@ import {
   pickInstantCvPoseAtPoint,
   type InstantCvNormalizedPoint,
   type InstantCvPoseDetection,
+  type InstantCvPosePoint,
   type InstantCvRule,
   type InstantCvRuleRuntime,
 } from "../adapters/live-inference";
@@ -137,7 +140,7 @@ export interface ReactNativeLiveInferenceExtensionOptions {
   readonly rules: readonly InstantCvRule[];
 }
 
-export interface UseReactNativeLiveInferenceOptions {
+export interface UseReactNativeLiveInferenceOptions<TPoseRunOnFrame = unknown> {
   readonly classEffects: ReactNativeLiveClassEffects;
   readonly extension?: ReactNativeLiveInferenceExtensionOptions;
   readonly inferenceMode: ReactNativeLiveInferenceMode;
@@ -156,7 +159,12 @@ export interface UseReactNativeLiveInferenceOptions {
   ) => void;
   readonly onReadout?: (readout: ReactNativeLiveInferenceReadout) => void;
   readonly onRuleRuntime?: (runtime: readonly InstantCvRuleRuntime[]) => void;
-  readonly poseProcessor: ExecutorchLivePoseProcessor | null;
+  /**
+   * The package-owned VisionCamera worklet captures this structural runner
+   * directly. Do not wrap it in another worklet function: JSI HostFunctions
+   * are not recursively serializable across isolated worklet closures.
+   */
+  readonly pose: ExecutorchLivePoseConfiguration<TPoseRunOnFrame> | null;
   readonly presentation?: {
     readonly fillOpacity?: number;
     readonly maskBorderWidth?: number;
@@ -284,7 +292,10 @@ function prepareLiveInferenceMask(options: {
         detections: masks,
         edgeSmoothing:
           options.showMasks || spotlightMaskIds.length > 0 ? undefined : 0,
-        fillOpacity: privacyPreview ? 0 : options.fillOpacity,
+        // Privacy's unconfigured preview is an active segmentation state, not
+        // a wireframe affordance. Keep the same readable mask fill as Safety
+        // Zone so people can see exactly what a later redaction will cover.
+        fillOpacity: options.fillOpacity,
         frameHeight: options.frameHeight,
         frameWidth: options.frameWidth,
         mediaRect: options.mediaRect,
@@ -392,6 +403,39 @@ function evaluateLiveInferenceObjectExtension(options: {
   };
 }
 
+// Worklet declaration order is runtime-significant: the Babel plugin lowers
+// marked function declarations to non-hoisted assignments. Keep this converter
+// before evaluateLiveInferencePoseExtension so that worklet captures a function
+// instead of the module-init value `undefined`.
+function toInstantCvPoses(frame: DetectionFrame): InstantCvPoseDetection[] {
+  "worklet";
+  const poses: InstantCvPoseDetection[] = [];
+  for (
+    let detectionIndex = 0;
+    detectionIndex < frame.detections.length;
+    detectionIndex += 1
+  ) {
+    const detection = frame.detections[detectionIndex]!;
+    const geometry = detection.keypoints;
+    if (!geometry) continue;
+    const points: InstantCvPosePoint[] = [];
+    for (
+      let pointIndex = 0;
+      pointIndex < geometry.points.length;
+      pointIndex += 1
+    ) {
+      const point = geometry.points[pointIndex]!;
+      points[points.length] = {
+        visible: geometry.visibility?.[pointIndex] !== 0,
+        x: point.x,
+        y: point.y,
+      };
+    }
+    poses[poses.length] = { points };
+  }
+  return poses;
+}
+
 function evaluateLiveInferencePoseExtension(
   options: Omit<
     Parameters<typeof evaluateLiveInferenceObjectExtension>[0],
@@ -402,19 +446,24 @@ function evaluateLiveInferencePoseExtension(
   "worklet";
   const startedAt = Date.now();
   const poses = toInstantCvPoses(detectionFrame);
-  const runtime = evaluateInstantCvRules({
-    frameHeight: options.frameHeight,
-    frameWidth: options.frameWidth,
-    nowMs: Date.now(),
-    poses,
-    previous: options.previousRuntime,
-    rules: options.extension.rules,
-  });
-  reportRuntimeIfChanged(
-    runtime,
-    options.runtimeSignature,
-    options.reportRuntime,
-  );
+  const runtime =
+    options.extension.rules.length === 0
+      ? []
+      : evaluateInstantCvRules({
+          frameHeight: options.frameHeight,
+          frameWidth: options.frameWidth,
+          nowMs: Date.now(),
+          poses,
+          previous: options.previousRuntime,
+          rules: options.extension.rules,
+        });
+  if (runtime.length > 0 || options.previousRuntime.length > 0) {
+    reportRuntimeIfChanged(
+      runtime,
+      options.runtimeSignature,
+      options.reportRuntime,
+    );
+  }
   const request = options.interaction;
   if (
     request?.kind === "capture-pose" &&
@@ -431,52 +480,49 @@ function evaluateLiveInferencePoseExtension(
     const baselineAngles = pose
       ? createInstantCvGoldenPoseBaseline(pose.points)
       : null;
+    const baselinePoints: InstantCvPosePoint[] = [];
+    if (pose) {
+      for (
+        let pointIndex = 0;
+        pointIndex < pose.points.length;
+        pointIndex += 1
+      ) {
+        const point = pose.points[pointIndex]!;
+        baselinePoints[baselinePoints.length] = {
+          visible: point.visible,
+          x: point.x / options.frameWidth,
+          y: point.y / options.frameHeight,
+        };
+      }
+    }
     scheduleReactNativeOnJs(
       options.reportInteraction ?? NOOP_INTERACTION_REPORTER,
       pose && baselineAngles
         ? {
             baselineAngles,
-            baselinePoints: pose.points.map((point) => ({
-              visible: point.visible,
-              x: point.x / options.frameWidth,
-              y: point.y / options.frameHeight,
-            })),
+            baselinePoints,
             kind: "pose",
             requestId: request.id,
           }
         : { kind: "miss", requestId: request.id },
     );
   }
-  const vectors = createInstantCvRuleVectorInstructions({
-    frameHeight: options.frameHeight,
-    frameWidth: options.frameWidth,
-    markerShape: KeypointMarkerShape.Circle,
-    rules: options.extension.rules,
-    runtime,
-  });
+  const vectors =
+    options.extension.rules.length === 0
+      ? EMPTY_EXTENSION_RESULT
+      : createInstantCvRuleVectorInstructions({
+          frameHeight: options.frameHeight,
+          frameWidth: options.frameWidth,
+          markerShape: "circle" as KeypointMarkerShape,
+          rules: options.extension.rules,
+          runtime,
+        });
   return {
     keypoints: vectors.keypoints,
     polygons: vectors.polygons,
     ruleEvalMs: Date.now() - startedAt,
     runtime,
   };
-}
-
-function toInstantCvPoses(frame: DetectionFrame): InstantCvPoseDetection[] {
-  "worklet";
-  const poses: InstantCvPoseDetection[] = [];
-  for (const detection of frame.detections) {
-    const geometry = detection.keypoints;
-    if (!geometry) continue;
-    poses[poses.length] = {
-      points: geometry.points.map((point, index) => ({
-        visible: geometry.visibility?.[index] !== 0,
-        x: point.x,
-        y: point.y,
-      })),
-    };
-  }
-  return poses;
 }
 
 function toOverlayDetections(
@@ -495,23 +541,28 @@ function poseDetections(
   frame: DetectionFrame,
 ): ReactNativeLiveInferenceDetection[] {
   "worklet";
-  return frame.detections.flatMap((detection) => {
-    if (!detection.rect) return [];
+  const detections: ReactNativeLiveInferenceDetection[] = [];
+  for (
+    let detectionIndex = 0;
+    detectionIndex < frame.detections.length;
+    detectionIndex += 1
+  ) {
+    const detection = frame.detections[detectionIndex]!;
+    if (!detection.rect) continue;
     const rect = detection.rect;
-    return [
-      {
-        bbox: {
-          x1: rect.x - rect.width / 2,
-          x2: rect.x + rect.width / 2,
-          y1: rect.y - rect.height / 2,
-          y2: rect.y + rect.height / 2,
-        },
-        color: resolveDetectionClassColorStyle(detection.className).fill,
-        label: detection.className ?? "person",
-        score: 1,
+    detections[detections.length] = {
+      bbox: {
+        x1: rect.x - rect.width / 2,
+        x2: rect.x + rect.width / 2,
+        y1: rect.y - rect.height / 2,
+        y2: rect.y + rect.height / 2,
       },
-    ];
-  });
+      color: 0x22c55e,
+      label: detection.className ?? "person",
+      score: 1,
+    };
+  }
+  return detections;
 }
 
 function updatePoseMetrics(
@@ -626,8 +677,8 @@ function reportLiveInference(
  * mutable state. Consumers provide serializable configuration and receive
  * throttled semantic readouts only; they never define a camera worklet.
  */
-export function useReactNativeLiveInference(
-  options: UseReactNativeLiveInferenceOptions,
+export function useReactNativeLiveInference<TPoseRunOnFrame>(
+  options: UseReactNativeLiveInferenceOptions<TPoseRunOnFrame>,
 ): ReactNativeLiveInferenceBinding {
   const presentation = useReactNativeLiveSkiaPresentation();
   const mediaRect = useReactNativeSharedValue(options.mediaRect);
@@ -674,7 +725,25 @@ export function useReactNativeLiveInference(
   const reportRuntime = useLatestReporter(options.onRuleRuntime);
   const reportInteraction = useLatestReporter(options.onInteraction);
   const segmentationProcessor = options.segmentationProcessor;
-  const poseProcessor = options.poseProcessor;
+  const configuredPoseRunner = options.pose?.runOnFrame as
+    ExecutorchLivePoseRunner | null | undefined;
+  const poseRunner =
+    typeof configuredPoseRunner === "function" ? configuredPoseRunner : null;
+  const poseClassName = options.pose?.className;
+  const poseDetectionThreshold = options.pose?.detectionThreshold ?? 0.4;
+  const poseFramePixelsAreUpright =
+    options.pose?.framePixelsAreUpright ?? false;
+  const poseInputSize = options.pose?.inputSize ?? 384;
+  const poseKeypointThreshold = options.pose?.keypointThreshold ?? 0.35;
+  const poseMirrorFrame = options.pose?.mirrorFrame ?? false;
+  const poseMinimumVisibleKeypoints = options.pose?.minimumVisibleKeypoints;
+  const poseInstructionColor = resolveDetectionClassColorStyle(
+    poseClassName ?? "person",
+  ).fill;
+  // Capture an initialized worklet function before the callback is serialized.
+  // Worklets' Babel transform does not preserve normal function hoisting.
+  const createPoseDetectionFrame = createDetectionFrameFromExecutorchCocoPoses;
+  const createPoseInstructions = createExecutorchPoseKeypointInstructions;
   const maskBorderWidth = options.presentation?.maskBorderWidth ?? 0;
   const fillOpacity = options.presentation?.fillOpacity ?? 0.5;
   const mosaicCellPx = options.presentation?.mosaicCellPx ?? 14;
@@ -695,11 +764,51 @@ export function useReactNativeLiveInference(
         const activeExtension = extension.value;
         const startedAt = Date.now();
 
-        if (inferenceMode.value === "pose" && poseProcessor !== null) {
-          stage = "pose-run";
+        if (inferenceMode.value === "pose") {
+          stage = "pose-runner-check";
+          if (typeof poseRunner !== "function") {
+            throw new Error(
+              `Pose runner is unavailable in the frame runtime (${typeof poseRunner}).`,
+            );
+          }
+
+          stage = "pose-runner-call";
           const poseStartedAt = Date.now();
-          const detectionFrame = poseProcessor.process(frame);
+          const uprightFrameHeight = poseFramePixelsAreUpright
+            ? frame.height
+            : null;
+          const poses = poseRunner(
+            poseFramePixelsAreUpright
+              ? {
+                  getNativeBuffer: () => frame.getNativeBuffer(),
+                  isMirrored: false,
+                  orientation: "up",
+                }
+              : frame,
+            poseMirrorFrame,
+            {
+              detectionThreshold: poseDetectionThreshold,
+              inputSize: poseInputSize,
+              keypointThreshold: poseKeypointThreshold,
+            },
+          );
+          stage = "pose-result-converter-check";
+          if (typeof createPoseDetectionFrame !== "function") {
+            throw new Error(
+              `Pose result converter is unavailable in the frame runtime (${typeof createPoseDetectionFrame}).`,
+            );
+          }
+          stage = "pose-result-conversion";
+          const detectionFrame = createPoseDetectionFrame({
+            className: poseClassName,
+            frameIndex: frame.timestamp,
+            mediaTime: frame.timestamp / 1_000_000_000,
+            minimumVisibleKeypoints: poseMinimumVisibleKeypoints,
+            poses,
+            uprightFrameHeight,
+          });
           const poseMs = Date.now() - poseStartedAt;
+          stage = "pose-extension-evaluation";
           const extensionResult = activeExtension.active
             ? evaluateLiveInferencePoseExtension(
                 {
@@ -716,17 +825,26 @@ export function useReactNativeLiveInference(
                 detectionFrame,
               )
             : EMPTY_EXTENSION_RESULT;
+          stage = "pose-extension-complete";
           metrics.runtime.value = extensionResult.runtime;
           metrics.ruleEvalMs.value = extensionResult.ruleEvalMs;
 
+          stage = "pose-instruction-converter-check";
+          if (typeof createPoseInstructions !== "function") {
+            throw new Error(
+              `Pose instruction converter is unavailable in the frame runtime (${typeof createPoseInstructions}).`,
+            );
+          }
+          stage = "pose-instruction-conversion";
+          const poseInstructions = createPoseInstructions(
+            detectionFrame,
+            poseInstructionColor,
+          );
           stage = "pose-prepare-vector";
           const vector = presentation.prepareVector({
             frameHeight: frameSize.height,
             frameWidth: frameSize.width,
-            keypoints: [
-              ...createExecutorchPoseKeypointInstructions(detectionFrame),
-              ...extensionResult.keypoints,
-            ],
+            keypoints: [...poseInstructions, ...extensionResult.keypoints],
             mediaRect: mediaRect.value,
             polygons: extensionResult.polygons,
           });
@@ -850,7 +968,15 @@ export function useReactNativeLiveInference(
       mediaRect,
       metrics,
       mosaicCellPx,
-      poseProcessor,
+      poseClassName,
+      poseDetectionThreshold,
+      poseFramePixelsAreUpright,
+      poseInputSize,
+      poseInstructionColor,
+      poseKeypointThreshold,
+      poseMinimumVisibleKeypoints,
+      poseMirrorFrame,
+      poseRunner,
       presentation,
       privacyContourWidth,
       reportDetections,

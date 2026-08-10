@@ -9,6 +9,8 @@ import {
   createReactNativeSkiaVectorFrame,
   disposeReactNativeSkiaImage,
   disposeReactNativeSkiaPicture,
+  swapReactNativeSkiaMaskImage,
+  swapReactNativeSkiaPicture,
 } from "./skia";
 import type { ReactNativeLiveSerializedDetection } from "./index";
 
@@ -135,6 +137,48 @@ describe("disposeReactNativeSkiaImage", () => {
     disposeReactNativeSkiaImage(undefined);
 
     expect(dispose).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Skia resource swap worklets", () => {
+  it("disposes the retired mask inline without an imported worklet helper", () => {
+    const dispose = vi.fn();
+    const active = { value: { dispose: vi.fn() } };
+    const retired = { value: { dispose } };
+    const activeIsEmpty = { value: false };
+    const next = { dispose: vi.fn() };
+    const empty = { dispose: vi.fn() };
+
+    swapReactNativeSkiaMaskImage(
+      active as never,
+      activeIsEmpty,
+      retired as never,
+      next as never,
+      empty as never,
+    );
+
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(active.value).toBe(next);
+  });
+
+  it("disposes the retired vector picture inline", () => {
+    const dispose = vi.fn();
+    const active = { value: { dispose: vi.fn() } };
+    const retired = { value: { dispose } };
+    const activeIsEmpty = { value: false };
+    const next = { dispose: vi.fn() };
+    const empty = { dispose: vi.fn() };
+
+    swapReactNativeSkiaPicture(
+      active as never,
+      activeIsEmpty,
+      retired as never,
+      next as never,
+      empty as never,
+    );
+
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(active.value).toBe(next);
   });
 });
 

@@ -100,7 +100,11 @@ export function swapReactNativeSkiaMaskImage(
   active.value = next ?? empty;
   retired.value = activeIsEmpty.value ? null : previous;
   activeIsEmpty.value = next === null;
-  disposeReactNativeSkiaImage(obsolete);
+  // Keep disposal inline: imported helper references are not reliably captured
+  // when this function is serialized onto the UI worklet runtime.
+  if (obsolete && typeof obsolete.dispose === "function") {
+    obsolete.dispose();
+  }
 }
 
 /** Same one-presentation retirement rule for recorded vector pictures. */
@@ -119,7 +123,10 @@ export function swapReactNativeSkiaPicture(
   active.value = next ?? empty;
   retired.value = activeIsEmpty.value ? null : previous;
   activeIsEmpty.value = next === null;
-  disposeReactNativeSkiaPicture(obsolete);
+  // Keep disposal inline for the same UI-worklet serialization boundary.
+  if (obsolete && typeof obsolete.dispose === "function") {
+    obsolete.dispose();
+  }
 }
 
 /**
