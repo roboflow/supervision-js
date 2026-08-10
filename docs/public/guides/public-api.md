@@ -76,9 +76,9 @@ Pixi, Mediabunny, workers, or prepared mask artifacts are wired internally.
 ## Annotation Renderers
 
 `MediaRendererPresentation.renderers` is the unified presentation surface for
-the supported visualization layers. A renderer consumes semantic detections and
-contributes to the renderer-owned scene. The built-ins retain the established
-draw order and backend paths for masks, boxes, vectors, and labels.
+annotation visualization. An annotation renderer consumes semantic detections
+and contributes to the renderer-owned scene. The built-ins retain the
+established draw order and backend paths for masks, boxes, vectors, and labels.
 
 ```ts
 import { annotationRenderers, BaseBoxStyle, BaseLabelStyle } from "supervision";
@@ -106,7 +106,8 @@ renderer, an explicit `style` wins; otherwise its matching legacy style field
 provides the default. A source-specific override can refine a selected layer,
 but cannot re-enable an omitted layer. The existing `boxStyle`, `maskStyle`,
 and related presentation fields remain supported for compatibility and
-source-specific style overrides.
+source-specific style overrides. New global presentation code should prefer
+the renderer list.
 Do not pass Pixi display objects or custom drawing callbacks: the public API
 describes semantic renderer configuration while the browser backend owns
 composition and resource lifetime.

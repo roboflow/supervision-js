@@ -146,7 +146,7 @@ export interface MediaRendererState {
 }
 
 /**
- * Current presentation styles used by renderer layers.
+ * Current annotation renderer, interaction, visibility, and scene presentation.
  */
 export interface MediaRendererPresentation {
   /**

@@ -1,5 +1,6 @@
 /**
- * Box, mask, label, interaction, and focus style APIs used by renderer layers.
+ * Annotation renderer descriptors plus box, mask, label, interaction, and
+ * focus style APIs.
  *
  * @module Styles
  */

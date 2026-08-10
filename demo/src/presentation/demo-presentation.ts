@@ -13,6 +13,7 @@ import {
   FocusTargetMode,
   LabelPlacement,
   MaskRenderMode,
+  annotationRenderers,
   type BoxDrawInstruction,
   type BoxStyle,
   type Detection,
@@ -174,24 +175,49 @@ export const defaultDemoPresentationSettings: DemoPresentationSettings = {
 export function createDemoPresentation(
   settings: DemoPresentationSettings,
 ): MediaRendererPresentation {
+  const boxStyle = settings.boxesEnabled ? createDemoBoxStyle(settings) : null;
+  const keypointStyle = settings.keypointsEnabled
+    ? createDemoKeypointStyle(settings)
+    : null;
+  const labelStyle = settings.labelsEnabled
+    ? createDemoLabelStyle(settings)
+    : null;
+  const maskStyle = settings.masksEnabled
+    ? createDemoMaskStyle(settings)
+    : null;
+  const polygonStyle = settings.polygonsEnabled
+    ? createDemoPolygonStyle(settings)
+    : null;
+  const polylineStyle = settings.polylinesEnabled
+    ? createDemoPolylineStyle(settings)
+    : null;
+
   return {
     // The demo uses contain-fit media, so this colour is visible in the
     // letterbox around non-matching aspect ratios.
     backgroundColor: 0xf3f4f6,
-    boxStyle: settings.boxesEnabled ? createDemoBoxStyle(settings) : null,
+    boxStyle,
     focusStyle: settings.focusEnabled ? createDemoFocusStyle(settings) : null,
     interactionStyle: createDemoInteractionStyle(settings),
-    keypointStyle: settings.keypointsEnabled
-      ? createDemoKeypointStyle(settings)
-      : null,
-    labelStyle: settings.labelsEnabled ? createDemoLabelStyle(settings) : null,
-    maskStyle: settings.masksEnabled ? createDemoMaskStyle(settings) : null,
-    polygonStyle: settings.polygonsEnabled
-      ? createDemoPolygonStyle(settings)
-      : null,
-    polylineStyle: settings.polylinesEnabled
-      ? createDemoPolylineStyle(settings)
-      : null,
+    keypointStyle,
+    labelStyle,
+    maskStyle,
+    polygonStyle,
+    polylineStyle,
+    renderers: [
+      ...(boxStyle ? [annotationRenderers.box({ style: boxStyle })] : []),
+      ...(maskStyle ? [annotationRenderers.mask({ style: maskStyle })] : []),
+      ...(polygonStyle
+        ? [annotationRenderers.polygon({ style: polygonStyle })]
+        : []),
+      ...(polylineStyle
+        ? [annotationRenderers.polyline({ style: polylineStyle })]
+        : []),
+      ...(keypointStyle
+        ? [annotationRenderers.keypoints({ style: keypointStyle })]
+        : []),
+      ...(labelStyle ? [annotationRenderers.label({ style: labelStyle })] : []),
+    ],
   };
 }
 

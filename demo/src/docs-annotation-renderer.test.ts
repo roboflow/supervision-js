@@ -1,65 +1,75 @@
 import { describe, expect, it } from "vitest";
 import { defaultDemoPresentationSettings } from "./presentation/demo-presentation";
 import {
-  createDocsVisualizationLayerPresentation,
-  createDocsVisualizationLayerSnippet,
-  docsVisualizationLayerIds,
-  docsVisualizationLayers,
-  filterDocsVisualizationLayerFrames,
-  parseDocsVisualizationLayer,
-} from "./docs-visualization-layer";
+  createDocsAnnotationRendererPresentation,
+  createDocsAnnotationRendererSnippet,
+  docsAnnotationRendererIds,
+  docsAnnotationRenderers,
+  filterDocsAnnotationRendererFrames,
+  parseDocsAnnotationRenderer,
+} from "./docs-annotation-renderer";
 
-describe("docs visualization layers", () => {
-  it("isolates each requested presentation layer", () => {
-    for (const layer of docsVisualizationLayerIds) {
-      const presentation = createDocsVisualizationLayerPresentation(layer);
+describe("docs annotation renderers", () => {
+  it("isolates each requested annotation renderer", () => {
+    for (const renderer of docsAnnotationRendererIds) {
+      const presentation = createDocsAnnotationRendererPresentation(renderer);
       const enabled = Object.entries(presentation)
         .filter(([key, value]) => key.endsWith("Enabled") && value)
         .map(([key]) => key);
 
       expect(enabled).toEqual(
-        layer === "polylines"
+        renderer === "polylines"
           ? ["masksEnabled", "polylinesEnabled"]
-          : [layer === "keypoints" ? "keypointsEnabled" : `${layer}Enabled`],
+          : [
+              renderer === "keypoints"
+                ? "keypointsEnabled"
+                : `${renderer}Enabled`,
+            ],
       );
     }
   });
 
-  it("falls back to boxes for unknown layer ids", () => {
-    expect(parseDocsVisualizationLayer("masks")).toBe("masks");
-    expect(parseDocsVisualizationLayer("unknown")).toBe("boxes");
+  it("falls back to boxes for unknown renderer ids", () => {
+    expect(parseDocsAnnotationRenderer("masks")).toBe("masks");
+    expect(parseDocsAnnotationRenderer("unknown")).toBe("boxes");
   });
 
   it("keeps live values in the focused snippet", () => {
     expect(
-      createDocsVisualizationLayerSnippet("boxes", {
+      createDocsAnnotationRendererSnippet("boxes", {
         ...defaultDemoPresentationSettings,
         boxFillAlpha: 0.27,
         boxStrokeWidth: 6,
       }),
     ).toContain("fill: { alpha: 0.27 }");
     expect(
-      createDocsVisualizationLayerSnippet("boxes", {
+      createDocsAnnotationRendererSnippet("boxes", {
         ...defaultDemoPresentationSettings,
         boxFillAlpha: 0.27,
         boxStrokeWidth: 6,
       }),
     ).toContain("stroke: { width: 6 }");
     expect(
-      createDocsVisualizationLayerSnippet("polylines", {
+      createDocsAnnotationRendererSnippet("polylines", {
         ...defaultDemoPresentationSettings,
         polylineStrokeWidth: 7,
       }),
     ).toContain("stroke: { width: 7 }");
+    expect(
+      createDocsAnnotationRendererSnippet(
+        "masks",
+        defaultDemoPresentationSettings,
+      ),
+    ).toContain("annotationRenderers.mask({");
   });
 
   it("keeps the polyline playground focused on one committed basketball trace", () => {
-    expect(docsVisualizationLayers.polylines.controls).toHaveLength(1);
-    expect(docsVisualizationLayers.polylines.controls[0]?.key).toBe(
+    expect(docsAnnotationRenderers.polylines.controls).toHaveLength(1);
+    expect(docsAnnotationRenderers.polylines.controls[0]?.key).toBe(
       "polylineStrokeWidth",
     );
     expect(
-      filterDocsVisualizationLayerFrames("polylines", [
+      filterDocsAnnotationRendererFrames("polylines", [
         {
           detections: [
             { className: "basketball", id: "2:0", polyline: { points: [] } },

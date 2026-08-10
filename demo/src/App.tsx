@@ -3,7 +3,7 @@ import { BenchmarksPanel } from "./components/BenchmarksPanel";
 import { ControlBar } from "./components/ControlBar";
 import { DemoShell } from "./components/DemoShell";
 import { DocsBasketballPlayground } from "./components/DocsBasketballPlayground";
-import { DocsVisualizationLayerPlayground } from "./components/DocsVisualizationLayerPlayground";
+import { DocsAnnotationRendererPlayground } from "./components/DocsAnnotationRendererPlayground";
 import { PerformanceStrip } from "./components/PerformanceStrip";
 import { QualityControls } from "./components/QualityControls";
 import { RenderControls } from "./components/RenderControls";
@@ -12,7 +12,7 @@ import { SelectionPanel } from "./components/SelectionPanel";
 import { SourceControls } from "./components/SourceControls";
 import { StatusPanel } from "./components/StatusPanel";
 import { resolveDemoDocsUrl } from "./docs-url";
-import { parseDocsVisualizationLayer } from "./docs-visualization-layer";
+import { parseDocsAnnotationRenderer } from "./docs-annotation-renderer";
 import { DemoSourceMode, useDemoRenderer } from "./hooks/useDemoRenderer";
 import { defaultDemoClassNames } from "./presentation/demo-presentation";
 import { DemoViewMode } from "./session/demo-view-mode";
@@ -36,11 +36,11 @@ export function App() {
     );
   }
 
-  if (embeddedView === "visualization-layer") {
+  if (embeddedView === "annotation-renderer") {
     return (
       <EmbeddedPlaygroundFrame>
-        <DocsVisualizationLayerPlayground
-          layer={parseDocsVisualizationLayer(searchParams.get("layer"))}
+        <DocsAnnotationRendererPlayground
+          renderer={parseDocsAnnotationRenderer(searchParams.get("renderer"))}
         />
       </EmbeddedPlaygroundFrame>
     );
