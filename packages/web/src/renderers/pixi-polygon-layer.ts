@@ -141,6 +141,9 @@ export function canPreparePolygonInstruction(
     instruction.points.length >= 3 &&
     Boolean(instruction.fill || stroke) &&
     !stroke?.dash?.length &&
+    stroke?.cap === undefined &&
+    stroke?.join === undefined &&
+    stroke?.miterLimit === undefined &&
     (stroke?.alignment === undefined ||
       stroke.alignment === BoxStrokeAlignment.Center)
   );

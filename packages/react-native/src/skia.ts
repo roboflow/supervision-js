@@ -12,9 +12,13 @@ import {
   ColorType,
   PaintStyle,
   Skia,
+  StrokeCap as SkiaStrokeCap,
+  StrokeJoin as SkiaStrokeJoin,
   type SkImage,
   type SkPicture,
 } from "@shopify/react-native-skia";
+
+import type { BoxStrokeStyle } from "supervision-js-core";
 
 import {
   createReactNativeLiveIdMaskArtifactAuto,
@@ -203,18 +207,58 @@ export function createReactNativeSkiaVectorFrame(
   let edgeCount = 0;
   let markerCount = 0;
 
+  const configureStrokePaint = (
+    paint: ReturnType<typeof Skia.Paint>,
+    stroke: BoxStrokeStyle,
+  ) => {
+    "worklet";
+
+    paint.setAntiAlias(true);
+    paint.setColor(Skia.Color(stroke.color));
+    paint.setAlphaf(stroke.alpha);
+    paint.setStrokeWidth(stroke.width);
+    paint.setStyle(PaintStyle.Stroke);
+
+    if (stroke.cap === "round") {
+      paint.setStrokeCap(SkiaStrokeCap.Round);
+    } else if (stroke.cap === "square") {
+      paint.setStrokeCap(SkiaStrokeCap.Square);
+    } else if (stroke.cap === "butt") {
+      paint.setStrokeCap(SkiaStrokeCap.Butt);
+    }
+
+    if (stroke.join === "round") {
+      paint.setStrokeJoin(SkiaStrokeJoin.Round);
+    } else if (stroke.join === "bevel") {
+      paint.setStrokeJoin(SkiaStrokeJoin.Bevel);
+    } else if (stroke.join === "miter") {
+      paint.setStrokeJoin(SkiaStrokeJoin.Miter);
+    }
+
+    if (stroke.miterLimit !== undefined) {
+      paint.setStrokeMiter(stroke.miterLimit);
+    }
+
+    const dash = stroke.dash?.filter((interval) => interval > 0);
+    const dashIntervals =
+      dash && dash.length % 2 === 1 ? [...dash, ...dash] : dash;
+    const pathEffect =
+      dashIntervals && dashIntervals.length >= 2
+        ? Skia.PathEffect.MakeDash([...dashIntervals], 0)
+        : null;
+
+    if (pathEffect) {
+      paint.setPathEffect(pathEffect);
+    }
+
+    return pathEffect;
+  };
+
   const drawPath = (
     points: readonly { readonly x: number; readonly y: number }[],
     closed: boolean,
     fill: { readonly alpha: number; readonly color: number } | undefined,
-    stroke:
-      | {
-          readonly alpha: number;
-          readonly color: number;
-          readonly dash?: readonly number[];
-          readonly width: number;
-        }
-      | undefined,
+    stroke: BoxStrokeStyle | undefined,
   ) => {
     "worklet";
 
@@ -247,23 +291,7 @@ export function createReactNativeSkiaVectorFrame(
 
     if (stroke && stroke.width > 0) {
       const paint = Skia.Paint();
-      paint.setAntiAlias(true);
-      paint.setColor(Skia.Color(stroke.color));
-      paint.setAlphaf(stroke.alpha);
-      paint.setStrokeWidth(stroke.width);
-      paint.setStyle(PaintStyle.Stroke);
-
-      const dash = stroke.dash?.filter((interval) => interval > 0);
-      const dashIntervals =
-        dash && dash.length % 2 === 1 ? [...dash, ...dash] : dash;
-      const pathEffect =
-        dashIntervals && dashIntervals.length >= 2
-          ? Skia.PathEffect.MakeDash([...dashIntervals], 0)
-          : null;
-
-      if (pathEffect) {
-        paint.setPathEffect(pathEffect);
-      }
+      const pathEffect = configureStrokePaint(paint, stroke);
 
       canvas.drawPath(path, paint);
       paint.dispose();
@@ -276,11 +304,7 @@ export function createReactNativeSkiaVectorFrame(
   const drawLine = (
     from: { readonly x: number; readonly y: number },
     to: { readonly x: number; readonly y: number },
-    stroke: {
-      readonly alpha: number;
-      readonly color: number;
-      readonly width: number;
-    },
+    stroke: BoxStrokeStyle,
   ) => {
     "worklet";
 
@@ -291,13 +315,10 @@ export function createReactNativeSkiaVectorFrame(
     const mappedFrom = mapPoint(from);
     const mappedTo = mapPoint(to);
     const paint = Skia.Paint();
-    paint.setAntiAlias(true);
-    paint.setColor(Skia.Color(stroke.color));
-    paint.setAlphaf(stroke.alpha);
-    paint.setStrokeWidth(stroke.width);
-    paint.setStyle(PaintStyle.Stroke);
+    const pathEffect = configureStrokePaint(paint, stroke);
     canvas.drawLine(mappedFrom.x, mappedFrom.y, mappedTo.x, mappedTo.y, paint);
     paint.dispose();
+    pathEffect?.dispose();
   };
 
   for (const polygon of polygons) {
@@ -327,11 +348,7 @@ export function createReactNativeSkiaVectorFrame(
           width: 2,
         };
         const paint = Skia.Paint();
-        paint.setAntiAlias(true);
-        paint.setColor(Skia.Color(stroke.color));
-        paint.setAlphaf(stroke.alpha);
-        paint.setStrokeWidth(stroke.width);
-        paint.setStyle(PaintStyle.Stroke);
+        const pathEffect = configureStrokePaint(paint, stroke);
         canvas.drawLine(
           point.x - marker.radius,
           point.y - marker.radius,
@@ -347,6 +364,7 @@ export function createReactNativeSkiaVectorFrame(
           paint,
         );
         paint.dispose();
+        pathEffect?.dispose();
       } else {
         if (marker.fill) {
           const paint = Skia.Paint();
@@ -360,13 +378,10 @@ export function createReactNativeSkiaVectorFrame(
 
         if (marker.stroke) {
           const paint = Skia.Paint();
-          paint.setAntiAlias(true);
-          paint.setColor(Skia.Color(marker.stroke.color));
-          paint.setAlphaf(marker.stroke.alpha);
-          paint.setStrokeWidth(marker.stroke.width);
-          paint.setStyle(PaintStyle.Stroke);
+          const pathEffect = configureStrokePaint(paint, marker.stroke);
           canvas.drawCircle(point.x, point.y, marker.radius, paint);
           paint.dispose();
+          pathEffect?.dispose();
         }
       }
 
