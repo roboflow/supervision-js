@@ -29,6 +29,9 @@ interface RegionSpriteEntry {
   readonly rendererId: string;
   readonly src: string;
   active: boolean;
+  baseX: number;
+  baseY: number;
+  detectionId: string | number | undefined;
 }
 
 interface RegionAssetLease {
@@ -51,6 +54,7 @@ export interface PixiRegionLayer {
   createContainer(): PixiContainer;
   drawFrame(mediaTime: number, viewportScale?: number): PixiRegionLayerState;
   setRenderers(renderers: readonly RegionAnnotationRenderer[]): void;
+  translateDetection(id: string | number, x: number, y: number): boolean;
   destroy(): void;
 }
 
@@ -144,8 +148,22 @@ export function createPixiRegionLayer(options: {
               detection,
               detectionIndex,
             );
-            const entry = ensureEntry(key, renderer.id, asset.src, asset.asset);
-            positionSprite(entry.display, renderer, region, asset.asset);
+            const entry = ensureEntry(
+              key,
+              renderer.id,
+              asset.src,
+              asset.asset,
+              detection.id,
+            );
+            const position = positionSprite(
+              entry.display,
+              renderer,
+              region,
+              asset.asset,
+            );
+            entry.baseX = position.x;
+            entry.baseY = position.y;
+            entry.detectionId = detection.id;
             entry.display.zIndex =
               (renderer.compose?.zIndex ?? 0) * 1_000_000 +
               rendererIndex * 10_000 +
@@ -176,6 +194,16 @@ export function createPixiRegionLayer(options: {
       renderers = [...nextRenderers];
       syncAssets();
       this.drawFrame(currentMediaTime, currentViewportScale);
+    },
+
+    translateDetection(id, x, y) {
+      let translated = false;
+      for (const entry of entries.values()) {
+        if (!entry.active || entry.detectionId !== id) continue;
+        entry.display.position.set(entry.baseX + x, entry.baseY + y);
+        translated = true;
+      }
+      return translated;
     },
 
     destroy() {
@@ -228,6 +256,7 @@ export function createPixiRegionLayer(options: {
     rendererId: string,
     src: string,
     asset: RegionAsset,
+    detectionId: string | number | undefined,
   ) {
     let entry = entries.get(key);
     if (entry) return entry;
@@ -237,6 +266,7 @@ export function createPixiRegionLayer(options: {
     entry = pool?.pop();
     if (pool?.length === 0) pools.delete(poolKey);
     if (entry) {
+      entry.detectionId = detectionId;
       resumeAnimatedDisplay(entry.display);
     } else {
       const display = isGifSource(asset)
@@ -244,7 +274,15 @@ export function createPixiRegionLayer(options: {
         : new options.Sprite({ texture: asset });
       display.anchor.set(0.5);
       container?.addChild(display);
-      entry = { active: false, display, rendererId, src };
+      entry = {
+        active: false,
+        baseX: 0,
+        baseY: 0,
+        detectionId,
+        display,
+        rendererId,
+        src,
+      };
     }
     entries.set(key, entry);
     return entry;
@@ -383,11 +421,13 @@ function positionSprite(
   sprite.alpha = opacity;
   sprite.width = sourceWidth * containScale * scale;
   sprite.height = sourceHeight * containScale * scale;
-  sprite.position.set(
-    region.x + finiteOr(offset?.x, 0) * region.width,
-    region.y + finiteOr(offset?.y, 0) * region.height,
-  );
+  const position = {
+    x: region.x + finiteOr(offset?.x, 0) * region.width,
+    y: region.y + finiteOr(offset?.y, 0) * region.height,
+  };
+  sprite.position.set(position.x, position.y);
   sprite.rotation = finiteOr(renderer.transform?.rotation, 0);
+  return position;
 }
 
 function isGifSource(asset: RegionAsset): asset is PixiGifSource {

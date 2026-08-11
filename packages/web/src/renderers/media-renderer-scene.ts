@@ -65,6 +65,8 @@ export interface MediaRendererSceneOptions {
   readonly annotationOverlayStyle: AnnotationOverlayStyle | null | undefined;
   readonly maskBrush: MaskBrushPreviewOptions | undefined;
   readonly previewOverlay: (() => PreviewOverlayData | null) | undefined;
+  /** Propagates renderer-owned asynchronous visual changes into runtime state. */
+  readonly onPresentationUpdate?: (sample: PresentedMediaSample) => void;
 }
 
 export interface PresentedMediaSample {

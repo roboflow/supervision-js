@@ -103,6 +103,9 @@ export async function createPixiMediaScene(
   let currentVisibility: AnnotationVisibility | undefined = options.visibility;
   let currentMediaTime = 0;
   let viewportScale = 1;
+  let hasPresentedSample = false;
+  let mediaHeight = 0;
+  let mediaWidth = 0;
   let visibilityVersion = 0;
   let visibilityMaskStyleCache: {
     readonly source: MaskStyle;
@@ -162,7 +165,15 @@ export async function createPixiMediaScene(
     Sprite,
     detectionTimeline: options.detectionTimeline,
     onInvalidate: () => {
-      regionLayer.drawFrame(currentMediaTime, viewportScale);
+      if (!hasPresentedSample || mediaWidth <= 0 || mediaHeight <= 0) return;
+      const boxState = boxLayer.drawFrame(currentMediaTime, viewportScale);
+      const regionState = regionLayer.drawFrame(
+        currentMediaTime,
+        viewportScale,
+      );
+      options.onPresentationUpdate?.(
+        createPresentedSampleState(currentMediaTime, boxState, regionState),
+      );
     },
     onAssetError: options.diagnostics?.onAssetError,
     regionRenderers: options.regionRenderers,
@@ -230,8 +241,6 @@ export async function createPixiMediaScene(
     throw new Error("Unable to create staging canvas context.");
   }
 
-  let mediaHeight = 0;
-  let mediaWidth = 0;
   let mediaScene: PixiContainer | undefined;
   let vectorDisplay: PixiContainer | undefined;
   let polygonDisplay: PixiContainer | undefined;
@@ -261,7 +270,6 @@ export async function createPixiMediaScene(
     labelSlot,
   ];
   const viewport = createViewportController({ scale: 1 });
-  let hasPresentedSample = false;
   /**
    * Timestamp of the sample whose pixels are on the staging canvas. Unlike
    * `currentMediaTime`, presentation and selection updates never move it.
@@ -324,6 +332,7 @@ export async function createPixiMediaScene(
       fastTranslatedDetectionId = id;
       boxLayer.translateDetection(id, dx, dy);
       vectorLayer.translateDetection(id, dx, dy);
+      regionLayer.translateDetection(id, dx, dy);
       labelLayer?.translateDetection(id, dx, dy);
     });
   const unsubscribeEditingState = options.editingEngine?.subscribe((state) => {
@@ -337,6 +346,7 @@ export async function createPixiMediaScene(
     fastTranslatedDetectionId = null;
     boxLayer.translateDetection(id, 0, 0);
     vectorLayer.translateDetection(id, 0, 0);
+    regionLayer.translateDetection(id, 0, 0);
     labelLayer?.translateDetection(id, 0, 0);
     boxLayer.invalidateDetection(id);
     vectorLayer.invalidateDetection(id);

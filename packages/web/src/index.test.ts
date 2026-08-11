@@ -1,6 +1,13 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
-import { BoxShape, type BoxStyle } from "supervision-js-core";
+import {
+  AnnotationGestureStateKind,
+  BoxShape,
+  annotationRenderers,
+  type AnnotationEditingEngine,
+  type AnnotationEditingState,
+  type BoxStyle,
+} from "supervision-js-core";
 import type { BufferedDetectionTimeline } from "supervision-js-core";
 import type { Detection } from "supervision-js-core";
 import type { MaskStyle } from "supervision-js-core";
@@ -913,6 +920,108 @@ describe("package entrypoint", () => {
       activeDetectionCount: 1,
       activeDetectionFrameTime: 0,
     });
+
+    renderer.destroy();
+  });
+
+  it("updates paused renderer state when a deferred region asset becomes visible", async () => {
+    resetMocks();
+    const asset = { height: 16, width: 16 };
+    const deferred = createDeferred<typeof asset>();
+    pixiMock.assetLoad.mockReturnValue(deferred.promise);
+    const onState = vi.fn();
+    const renderer = await createRenderer(false, false, {
+      detectionFrames: [
+        {
+          detections: [
+            {
+              className: "player",
+              id: "player-7",
+              rect: { height: 100, width: 50, x: 100, y: 90 },
+            },
+          ],
+          frameIndex: 0,
+          mediaTime: 0,
+        },
+      ],
+      onState,
+      renderers: [
+        annotationRenderers.region({
+          id: "deferred-badge",
+          region: { kind: "bounds" },
+          source: { asset: { src: "/deferred-badge.png" }, kind: "asset" },
+          target: { id: "player-7" },
+        }),
+      ],
+    });
+
+    expect(renderer.getState()).toMatchObject({
+      activeDetectionCount: 0,
+      presentedFrames: 1,
+    });
+
+    deferred.resolve(asset);
+    await vi.waitFor(() => {
+      expect(renderer.getState()).toMatchObject({
+        activeDetectionCount: 1,
+        activeDetectionFrameIndex: 0,
+        activeDetectionFrameTime: 0,
+        presentedFrames: 1,
+      });
+    });
+    expect(onState).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        activeDetectionCount: 1,
+        presentedFrames: 1,
+      }),
+    );
+
+    renderer.destroy();
+  });
+
+  it("keeps region displays synchronized with fast editing translation", async () => {
+    resetMocks();
+    const asset = { height: 16, width: 16 };
+    pixiMock.assetLoad.mockResolvedValue(asset);
+    const editing = createEditingEngineHarness();
+    const renderer = await createRenderer(false, false, {
+      detectionFrames: [
+        {
+          detections: [
+            {
+              className: "player",
+              id: "player-7",
+              rect: { height: 100, width: 50, x: 100, y: 90 },
+            },
+          ],
+          frameIndex: 0,
+          mediaTime: 0,
+        },
+      ],
+      editingEngine: editing.engine,
+      renderers: [
+        annotationRenderers.region({
+          id: "editable-badge",
+          region: { kind: "bounds" },
+          source: { asset: { src: "/editable-badge.png" }, kind: "asset" },
+          target: { id: "player-7" },
+        }),
+      ],
+    });
+
+    await vi.waitFor(() => {
+      expect(renderer.getState().activeDetectionCount).toBe(1);
+    });
+    const display = pixiMock.spriteInstances.find(
+      (sprite) => (sprite.options as { texture?: unknown }).texture === asset,
+    );
+    expect(display).toBeDefined();
+
+    editing.fastTranslate?.("player-7", 7, -3);
+    expect(display?.position.set).toHaveBeenLastCalledWith(107, 87);
+
+    editing.emitState(createIdleEditingState());
+    expect(display?.position.set).toHaveBeenLastCalledWith(100, 90);
 
     renderer.destroy();
   });
@@ -2445,6 +2554,52 @@ describe("package entrypoint", () => {
     renderer.destroy();
   });
 });
+
+function createIdleEditingState(): AnnotationEditingState {
+  return {
+    activeDetectionId: null,
+    activeHandleId: null,
+    kind: AnnotationGestureStateKind.Idle,
+    pointerId: null,
+    preview: null,
+  };
+}
+
+function createEditingEngineHarness() {
+  let fastTranslate:
+    ((id: string | number, dx: number, dy: number) => void) | undefined;
+  let stateListener: ((state: AnnotationEditingState) => void) | undefined;
+  const engine: AnnotationEditingEngine = {
+    beginHandleDrag: vi.fn(),
+    cancel: vi.fn(),
+    deleteVertex: vi.fn(() => null),
+    getState: createIdleEditingState,
+    hasCreationTool: vi.fn(() => false),
+    keyDown: vi.fn(),
+    pointerDown: vi.fn(),
+    pointerMove: vi.fn(),
+    pointerUp: vi.fn(),
+    setCreationTool: vi.fn(),
+    subscribe: vi.fn((listener) => {
+      stateListener = listener;
+      return () => undefined;
+    }),
+    subscribeFastTranslate: vi.fn((listener) => {
+      fastTranslate = listener;
+      return () => undefined;
+    }),
+  };
+
+  return {
+    emitState(state: AnnotationEditingState) {
+      stateListener?.(state);
+    },
+    engine,
+    get fastTranslate() {
+      return fastTranslate;
+    },
+  };
+}
 
 function createArtifactStableMaskStyle(
   opacity: number,

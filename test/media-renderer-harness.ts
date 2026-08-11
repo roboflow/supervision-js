@@ -98,6 +98,7 @@ const mockState = vi.hoisted(() => {
     spriteInstances: [] as Array<{
       height: number;
       options: unknown;
+      position: { set: ReturnType<typeof vi.fn> };
       texture: unknown;
       visible: boolean;
       width: number;

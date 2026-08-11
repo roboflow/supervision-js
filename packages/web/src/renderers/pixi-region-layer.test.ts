@@ -139,6 +139,46 @@ describe("pixi region layer", () => {
     expect(container.children).toHaveLength(1);
   });
 
+  it("fast-translates every active region display for a detection", async () => {
+    const layer = createPixiRegionLayer({
+      Assets: {
+        load: vi.fn(async () => ({ height: 10, width: 10 })),
+        unload: vi.fn(async () => undefined),
+      } as never,
+      Container: FakeContainer as never,
+      GifSprite: FakeGifSprite as never,
+      Sprite: FakeSprite as never,
+      detectionTimeline: createTimeline(frame),
+      regionRenderers: [
+        annotationRenderers.region({
+          id: "player-badge",
+          region: { kind: "bounds" },
+          source: { asset: { src: "/badge.png" }, kind: "asset" },
+          target: { id: "player-7" },
+        }),
+        annotationRenderers.region({
+          id: "player-badge-2",
+          region: { kind: "bounds" },
+          source: { asset: { src: "/badge.png" }, kind: "asset" },
+          target: { id: "player-7" },
+        }),
+      ],
+    });
+    const container = layer.createContainer() as unknown as FakeContainer;
+    await Promise.resolve();
+    layer.drawFrame(1);
+
+    expect(layer.translateDetection("player-7", 7, -3)).toBe(true);
+    for (const display of container.children) {
+      expect(display.position.set).toHaveBeenLastCalledWith(107, 87);
+    }
+    expect(layer.translateDetection("missing", 1, 1)).toBe(false);
+    expect(layer.translateDetection("player-7", 0, 0)).toBe(true);
+    for (const display of container.children) {
+      expect(display.position.set).toHaveBeenLastCalledWith(100, 90);
+    }
+  });
+
   it("renders every matching detection when stable ids are duplicated", async () => {
     const duplicateIdFrame: DetectionFrame = {
       ...frame,
