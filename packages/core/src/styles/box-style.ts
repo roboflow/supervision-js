@@ -1,4 +1,5 @@
 import { resolveStyleValue } from "#styles/style-value";
+import { resolveStrokeStyle } from "#styles/stroke-style";
 import type { Detection } from "#types/detections";
 import {
   BoxShape,
@@ -127,23 +128,12 @@ export class BaseBoxStyle implements BoxStyle {
       return undefined;
     }
 
-    const resolvedStroke: BoxStrokeStyle = {
-      alpha: stroke?.alpha ?? DEFAULT_BOX_STROKE_ALPHA,
-      color: stroke?.color ?? DEFAULT_BOX_STROKE_COLOR,
-      width: stroke?.width ?? DEFAULT_BOX_STROKE_WIDTH,
-    };
-
-    return {
-      ...resolvedStroke,
-      ...(stroke?.alignment === undefined
-        ? {}
-        : { alignment: stroke.alignment }),
-      ...(stroke?.dash === undefined
-        ? context.ephemeral
-          ? { dash: [6, 4] }
-          : {}
-        : { dash: stroke.dash }),
-    };
+    return resolveStrokeStyle(stroke, {
+      alpha: DEFAULT_BOX_STROKE_ALPHA,
+      color: DEFAULT_BOX_STROKE_COLOR,
+      ...(context.ephemeral ? { dash: [6, 4] } : {}),
+      width: DEFAULT_BOX_STROKE_WIDTH,
+    });
   }
 
   protected resolveFill(

@@ -24,7 +24,7 @@
       <p class="supervision-home__card-label">One renderer-owned scene</p>
       <div class="supervision-home__scene-stack" aria-hidden="true">
         <span class="supervision-home__scene-layer supervision-home__scene-layer--media">Media frame</span>
-        <span class="supervision-home__scene-layer supervision-home__scene-layer--masks">Masks &amp; geometry</span>
+        <span class="supervision-home__scene-layer supervision-home__scene-layer--masks">Masks, geometry &amp; assets</span>
         <span class="supervision-home__scene-layer supervision-home__scene-layer--labels">Labels &amp; interaction</span>
       </div>
       <p>
@@ -100,7 +100,7 @@ console.log(state.status, state.activities);
       <article class="supervision-home__capability-card">
         <span class="supervision-home__capability-number">02</span>
         <h3>Detection rendering</h3>
-        <p>Annotation renderers for boxes, masks, polygons, polylines, keypoints, and labels, with styles selected from canonical media timing.</p>
+        <p>Annotation renderers for boxes, masks, polygons, polylines, keypoints, labels, and multi-instance asset regions, selected from canonical media timing.</p>
         <a href="documents/Core_Concepts.Detections_And_Rendering.html">Detections and rendering</a>
       </article>
       <article class="supervision-home__capability-card">
@@ -179,7 +179,7 @@ console.log(state.status, state.activities);
     <h2 id="next-title">Choose the path that matches your integration.</h2>
     <nav class="supervision-home__next-grid" aria-label="Documentation paths">
       <a href="documents/Quickstart.html"><strong>Quickstart</strong><span>Install, mount, and render your first detections.</span></a>
-      <a href="documents/Annotation_Renderers.html"><strong>Annotation renderers</strong><span>Select and style boxes, masks, labels, polygons, and pose in live playgrounds.</span></a>
+      <a href="documents/Annotation_Renderers.html"><strong>Annotation renderers</strong><span>Select and style boxes, masks, labels, polygons, pose, and asset regions in live playgrounds.</span></a>
       <a href="documents/Core_Concepts.html"><strong>Core concepts</strong><span>Understand sessions, semantic detections, styles, and preparation.</span></a>
       <a href="documents/Recipes.html"><strong>Recipes</strong><span>Apply focused patterns for sources, picking, lifecycle, and React.</span></a>
     </nav>

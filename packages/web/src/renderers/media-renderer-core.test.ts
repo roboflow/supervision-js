@@ -511,6 +511,58 @@ describe("media renderer core", () => {
     renderer.destroy();
   });
 
+  it("records asynchronous scene visibility updates without presenting another frame", async () => {
+    resetMocks();
+
+    let sceneOptions: MediaRendererSceneOptions | undefined;
+    const onState = vi.fn();
+    const renderer = await createMediaRendererCore(
+      {
+        autoPlay: false,
+        container: {} as HTMLElement,
+        onState,
+        source: createSource([
+          createMockSample(0, 0.04) as unknown as DecodedVideoSample,
+        ]),
+      } satisfies MediaRendererOptions,
+      {
+        createScene: vi.fn(async (options) => {
+          sceneOptions = options;
+          return createScene();
+        }),
+        openMediaSource: vi.fn(),
+      },
+    );
+
+    expect(renderer.getState()).toMatchObject({
+      activeDetectionCount: 0,
+      presentedFrames: 1,
+    });
+
+    sceneOptions?.onPresentationUpdate?.({
+      activeDetectionCount: 1,
+      activeDetectionFrameIndex: 0,
+      activeDetectionFrameTime: 0,
+      detectionBuffer: createIdleDetectionBufferState(),
+      mediaTime: 0,
+    });
+
+    expect(renderer.getState()).toMatchObject({
+      activeDetectionCount: 1,
+      activeDetectionFrameIndex: 0,
+      activeDetectionFrameTime: 0,
+      presentedFrames: 1,
+    });
+    expect(onState).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        activeDetectionCount: 1,
+        presentedFrames: 1,
+      }),
+    );
+
+    renderer.destroy();
+  });
+
   it("publishes source-relative frame timing and media dimensions", async () => {
     resetMocks();
 

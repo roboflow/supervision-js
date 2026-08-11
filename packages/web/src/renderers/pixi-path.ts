@@ -1,7 +1,7 @@
 import {
-  BoxStrokeAlignment,
-  type BoxStrokeStyle,
+  StrokeAlignment,
   type Point,
+  type StrokeStyle,
 } from "supervision-js-core";
 import type { Graphics as PixiGraphics } from "pixi.js";
 
@@ -13,16 +13,18 @@ export function drawPixiPath(
   graphics: PixiGraphics,
   points: readonly Point[],
   closed: boolean,
-  stroke: BoxStrokeStyle,
+  stroke: StrokeStyle,
   viewportScale: number,
 ) {
   if (points.length < 2) {
     return;
   }
 
-  if (stroke.dash?.length) {
-    appendDashedPath(graphics, points, closed, stroke.dash, viewportScale);
-  } else {
+  const appendedDash = stroke.dash?.length
+    ? appendDashedPath(graphics, points, closed, stroke.dash, viewportScale)
+    : false;
+
+  if (!appendedDash) {
     graphics.moveTo(points[0]!.x, points[0]!.y);
 
     for (let index = 1; index < points.length; index += 1) {
@@ -37,13 +39,15 @@ export function drawPixiPath(
   graphics.stroke(resolvePixiStroke(stroke, viewportScale));
 }
 
-export function resolvePixiStroke(
-  stroke: BoxStrokeStyle,
-  viewportScale: number,
-) {
+export function resolvePixiStroke(stroke: StrokeStyle, viewportScale: number) {
   const pixiStroke = {
     alpha: stroke.alpha,
+    ...(stroke.cap === undefined ? {} : { cap: stroke.cap }),
     color: stroke.color,
+    ...(stroke.join === undefined ? {} : { join: stroke.join }),
+    ...(stroke.miterLimit === undefined
+      ? {}
+      : { miterLimit: stroke.miterLimit }),
     width: resolveScreenLength(stroke.width, viewportScale),
   };
 
@@ -52,9 +56,9 @@ export function resolvePixiStroke(
   return {
     ...pixiStroke,
     alignment:
-      stroke.alignment === BoxStrokeAlignment.Inside
+      stroke.alignment === StrokeAlignment.Inside
         ? 1
-        : stroke.alignment === BoxStrokeAlignment.Outside
+        : stroke.alignment === StrokeAlignment.Outside
           ? 0
           : 0.5,
   };
@@ -66,13 +70,13 @@ function appendDashedPath(
   closed: boolean,
   dashPattern: readonly number[],
   viewportScale: number,
-) {
+): boolean {
   const pattern = dashPattern
     .filter((value) => Number.isFinite(value) && value > 0)
     .map((value) => resolveScreenLength(value, viewportScale));
 
   if (pattern.length === 0) {
-    return;
+    return false;
   }
 
   if (pattern.length % 2 === 1) {
@@ -82,6 +86,7 @@ function appendDashedPath(
   let patternIndex = 0;
   let patternRemaining = pattern[0]!;
   let drawing = true;
+  let penDown = false;
   const segmentCount = closed ? points.length : points.length - 1;
 
   for (let segmentIndex = 0; segmentIndex < segmentCount; segmentIndex += 1) {
@@ -107,8 +112,13 @@ function appendDashedPath(
       const y2 = start.y + dy * endRatio;
 
       if (drawing) {
-        graphics.moveTo(x1, y1);
+        if (!penDown) {
+          graphics.moveTo(x1, y1);
+        }
         graphics.lineTo(x2, y2);
+        penDown = true;
+      } else {
+        penDown = false;
       }
 
       offset += step;
@@ -118,7 +128,12 @@ function appendDashedPath(
         patternIndex = (patternIndex + 1) % pattern.length;
         patternRemaining = pattern[patternIndex]!;
         drawing = !drawing;
+        if (!drawing) {
+          penDown = false;
+        }
       }
     }
   }
+
+  return true;
 }
