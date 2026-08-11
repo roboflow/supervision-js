@@ -6,6 +6,8 @@ import type {
 } from "supervision-js-core";
 import type {
   DetectionLabelBounds,
+  MediaFrameCapture,
+  MediaFrameCaptureOptions,
   MediaRendererDiagnosticsOptions,
   MediaFrameRenderTimings,
   MediaRendererFit,
@@ -80,6 +82,13 @@ export interface MediaRendererScene {
   initializeMedia(dimensions: { width: number; height: number }): void;
   setTimelineContext?(context: MediaRendererSceneTimelineContext): void;
   presentSample(sample: DecodedVideoSample): PresentedMediaSample;
+  /**
+   * Encodes the media pixels presented by the most recent sample, paired with
+   * that sample's presentation timestamp.
+   */
+  captureFrame?(
+    options: MediaFrameCaptureOptions | undefined,
+  ): Promise<MediaFrameCapture>;
   waitForRenderPreparation?(
     mediaTime: number,
     options: RenderPreparationPlaybackGateOptions,

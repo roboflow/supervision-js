@@ -1,6 +1,7 @@
 import {
   createArrayDetectionFrameSource,
   createDefaultAnnotationPresentation,
+  resolveAnnotationRendererPresentation,
 } from "supervision-js-core";
 import {
   createBufferedDetectionTimeline,
@@ -61,10 +62,11 @@ export async function createMediaRendererCore(
   const defaultPresentation = createDefaultAnnotationPresentation();
   const resolvePresentation = (
     presentation: MediaRendererPresentation,
-  ): MediaRendererPresentation => ({
-    ...defaultPresentation,
-    ...presentation,
-  });
+  ): MediaRendererPresentation =>
+    resolveAnnotationRendererPresentation({
+      ...defaultPresentation,
+      ...presentation,
+    });
   let currentPresentation = resolvePresentation({
     annotationOverlayStyle: options.annotationOverlayStyle,
     backgroundColor: options.backgroundColor,
@@ -76,7 +78,7 @@ export async function createMediaRendererCore(
     maskStyle: options.maskStyle,
     polygonStyle: options.polygonStyle,
     polylineStyle: options.polylineStyle,
-    shapeStyle: options.shapeStyle,
+    renderers: options.renderers,
     visibility: options.visibility,
   });
   let detectionTimeline: BufferedDetectionTimeline | undefined;
@@ -294,6 +296,18 @@ export async function createMediaRendererCore(
       }
     },
 
+    async captureFrame(captureOptions) {
+      if (runtimeState.isDestroyed()) {
+        throw new Error("Media renderer has been destroyed.");
+      }
+
+      if (!mediaScene?.captureFrame) {
+        throw new Error("Media renderer is not ready.");
+      }
+
+      return mediaScene.captureFrame(captureOptions);
+    },
+
     getState() {
       return runtimeState.snapshot();
     },
@@ -464,7 +478,6 @@ export async function createMediaRendererCore(
       maxDevicePixelRatio: options.maxDevicePixelRatio,
       polygonStyle: currentPresentation.polygonStyle,
       polylineStyle: currentPresentation.polylineStyle,
-      shapeStyle: currentPresentation.shapeStyle,
       previewOverlay: options.previewOverlay,
       renderPreparation: options.renderPreparation
         ? {

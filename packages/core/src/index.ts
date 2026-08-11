@@ -63,8 +63,23 @@ export {
   type DefaultAnnotationPresentationOptions,
 } from "#styles/default-annotation-presentation";
 export {
+  annotationRendererKinds,
+  annotationRenderers,
+  type AnnotationRenderer,
+  type AnnotationRendererFactory,
+  type AnnotationRendererKind,
+  type BoxAnnotationRenderer,
+  type KeypointAnnotationRenderer,
+  type LabelAnnotationRenderer,
+  type MaskAnnotationRenderer,
+  type PolygonAnnotationRenderer,
+  type PolylineAnnotationRenderer,
+} from "#types/annotation-renderer";
+export { resolveAnnotationRendererPresentation } from "#styles/annotation-renderer-presentation";
+export {
   createSourceAwarePresentation,
   type PresentationStyleSet,
+  type SourceAwarePresentationOptions,
   type SourcePresentation,
   type SourcePresentationEntry,
 } from "#styles/source-presentation";

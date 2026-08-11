@@ -57,6 +57,7 @@ import {
   BaseLabelStyle,
   BaseMaskStyle,
   BoxShape,
+  annotationRenderers,
   createMediaSession,
 } from "supervision";
 
@@ -107,9 +108,15 @@ const session = await createMediaSession({
     ],
   },
   presentation: {
-    boxStyle: new BaseBoxStyle(),
-    labelStyle: new BaseLabelStyle({ includeConfidence: true }),
-    maskStyle: new BaseMaskStyle({ opacity: 0.65 }),
+    renderers: [
+      annotationRenderers.box({ style: new BaseBoxStyle() }),
+      annotationRenderers.label({
+        style: new BaseLabelStyle({ includeConfidence: true }),
+      }),
+      annotationRenderers.mask({
+        style: new BaseMaskStyle({ opacity: 0.65 }),
+      }),
+    ],
   },
 });
 
@@ -152,7 +159,8 @@ session composes them again when the hot window refreshes.
 
 ## Source-Level Presentation
 
-The top-level `presentation` remains the global default.
+The top-level `presentation.renderers` list selects the global annotation
+renderers and supplies their styles.
 
 A source-level `presentation` can override:
 
@@ -163,7 +171,7 @@ A source-level `presentation` can override:
 - `keypointStyle`
 - `labelStyle`
 
-For each layer:
+For each selected renderer:
 
 - `undefined` falls back to the global style;
 - `null` disables that layer for detections from that source;

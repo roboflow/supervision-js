@@ -8,6 +8,7 @@ import {
   DetectionFrameSelectionMode,
   MediaRendererFit,
   MediaRendererPlaybackState,
+  annotationRenderers,
   type DetectionFrameChunk,
   type DetectionFrameChunkDescriptor,
   type DetectionFrameChunkManifest,
@@ -65,31 +66,39 @@ async function startExample() {
     media: basketballVideoUrl,
     onState: renderSessionState,
     presentation: {
-      boxStyle: new BaseBoxStyle({
-        cornerRadius: 8,
-        shape: BoxShape.RoundedRect,
-        stroke: (detection) => ({
-          alpha: 1,
-          color: resolveClassColor(detection.className),
-          width: 3,
+      renderers: [
+        annotationRenderers.box({
+          style: new BaseBoxStyle({
+            cornerRadius: 8,
+            shape: BoxShape.RoundedRect,
+            stroke: (detection) => ({
+              alpha: 1,
+              color: resolveClassColor(detection.className),
+              width: 3,
+            }),
+          }),
         }),
-      }),
-      labelStyle: new BaseLabelStyle({
-        background: (detection) => ({
-          alpha: 0.78,
-          color: resolveClassColor(detection.className),
+        annotationRenderers.label({
+          style: new BaseLabelStyle({
+            background: (detection) => ({
+              alpha: 0.78,
+              color: resolveClassColor(detection.className),
+            }),
+            includeConfidence: true,
+          }),
         }),
-        includeConfidence: true,
-      }),
-      maskStyle: new BaseMaskStyle({
-        color: (detection) => resolveClassColor(detection.className),
-        opacity: 0.45,
-        stroke: (detection) => ({
-          alpha: 1,
-          color: resolveClassColor(detection.className),
-          width: 3,
+        annotationRenderers.mask({
+          style: new BaseMaskStyle({
+            color: (detection) => resolveClassColor(detection.className),
+            opacity: 0.45,
+            stroke: (detection) => ({
+              alpha: 1,
+              color: resolveClassColor(detection.className),
+              width: 3,
+            }),
+          }),
         }),
-      }),
+      ],
     },
     renderer: {
       autoPlay: false,

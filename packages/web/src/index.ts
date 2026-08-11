@@ -45,6 +45,10 @@ export {
 // Renderer and session primitives.
 export { createMediaRenderer } from "#renderers/media-renderer";
 export { createMediaSession } from "#sessions/media-session";
+export type {
+  MediaFrameCapture,
+  MediaFrameCaptureOptions,
+} from "#types/media-renderer";
 
 // Presentation styles.
 export { BaseBoxStyle } from "supervision-js-core";
@@ -70,6 +74,19 @@ export {
   sampleEllipseArc,
 } from "supervision-js-core";
 export type { BaseKeypointStyleOptions } from "supervision-js-core";
+export {
+  annotationRendererKinds,
+  annotationRenderers,
+  type AnnotationRenderer,
+  type AnnotationRendererFactory,
+  type AnnotationRendererKind,
+  type BoxAnnotationRenderer,
+  type KeypointAnnotationRenderer,
+  type LabelAnnotationRenderer,
+  type MaskAnnotationRenderer,
+  type PolygonAnnotationRenderer,
+  type PolylineAnnotationRenderer,
+} from "supervision-js-core";
 export {
   createDefaultAnnotationPresentation,
   type DefaultAnnotationPresentationOptions,

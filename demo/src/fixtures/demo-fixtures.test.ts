@@ -47,7 +47,7 @@ describe("fixture geometry", () => {
 });
 
 describe("geometry showcase fixture", () => {
-  it("exposes only the horse trail and combined basketball samples", () => {
+  it("exposes the demo samples with their documented geometry", () => {
     expect(
       demoFixtures.map(({ displayName, sampleName }) => ({
         displayName,
@@ -91,6 +91,7 @@ describe("geometry showcase fixture", () => {
       labelsEnabled: true,
       masksEnabled: false,
       polygonsEnabled: false,
+      polylinesEnabled: false,
     });
   });
 
@@ -100,6 +101,7 @@ describe("geometry showcase fixture", () => {
     expect(geometry.maskDetectionCount).toBeGreaterThan(0);
     expect(geometry.polygonDetectionCount).toBeGreaterThan(0);
     expect(geometry.keypointDetectionCount).toBeGreaterThan(0);
+    expect(geometry.polylineDetectionCount).toBeGreaterThan(0);
     expect(geometry.boxDetectionCount).toBe(
       geometryManifest.detectionCount as number,
     );
@@ -243,6 +245,86 @@ describe("geometry showcase fixture", () => {
 
     expect(geometryChunks.length).toBeGreaterThan(0);
     expect(violations).toBe(0);
+  });
+
+  it("stores the basketball trace on one masked frozen identity", () => {
+    const provenance = geometryManifest.provenance as {
+      readonly polyline: {
+        readonly algorithm: string;
+        readonly interpolation: string;
+        readonly maxAssociationGapSeconds: number;
+        readonly maxPoints: number;
+        readonly maxSpeedPixelsPerSecond: number;
+        readonly positionTolerancePixels: number;
+        readonly trackId: string;
+        readonly windowSeconds: number;
+      };
+    };
+    let polylineCount = 0;
+    let maximumSegmentLength = 0;
+    let violations = 0;
+    const trackedSourceIds = new Set<string>();
+
+    for (const chunk of geometryChunks) {
+      for (const frame of chunk.frames) {
+        for (const detection of frame.detections) {
+          if (!detection.polyline) continue;
+          polylineCount += 1;
+          trackedSourceIds.add(String(detection.id ?? ""));
+
+          const previousPoint = detection.polyline.points.at(-2);
+          const currentPoint = detection.polyline.points.at(-1);
+
+          if (previousPoint && currentPoint) {
+            maximumSegmentLength = Math.max(
+              maximumSegmentLength,
+              Math.hypot(
+                currentPoint.x - previousPoint.x,
+                currentPoint.y - previousPoint.y,
+              ),
+            );
+          }
+
+          if (
+            detection.className !== "basketball" ||
+            detection.metadata?.trajectoryTrackId !==
+              provenance.polyline.trackId ||
+            !detection.mask ||
+            !detection.rect ||
+            detection.polyline.points.length < 2 ||
+            detection.polyline.points.length > provenance.polyline.maxPoints ||
+            detection.polyline.points.at(-1)?.x !== detection.rect.x ||
+            detection.polyline.points.at(-1)?.y !== detection.rect.y
+          ) {
+            violations += 1;
+          }
+        }
+      }
+    }
+
+    expect(provenance.polyline).toMatchObject({
+      algorithm: "basketball-motion-track-v1",
+      derivedFrom:
+        "motion-gated nearest-neighbor association across SAM3 basketball detections on the shared frame grid",
+      interpolation: "none",
+      maxAssociationGapSeconds: 0.1,
+      maxPoints: 60,
+      maxSpeedPixelsPerSecond: 2700,
+      positionTolerancePixels: 12,
+      trackId: "basketball-track:0",
+      windowSeconds: 1,
+    });
+    expect(polylineCount).toBeGreaterThan(0);
+    expect(violations).toBe(0);
+    expect(trackedSourceIds).toContain("2:1");
+    expect(maximumSegmentLength).toBeLessThanOrEqual(
+      provenance.polyline.maxSpeedPixelsPerSecond *
+        provenance.polyline.maxAssociationGapSeconds +
+        provenance.polyline.positionTolerancePixels,
+    );
+    expect(geometryManifest.geometry).toMatchObject({
+      polylineDetectionCount: polylineCount,
+    });
   });
 });
 
