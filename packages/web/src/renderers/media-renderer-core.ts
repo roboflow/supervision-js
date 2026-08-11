@@ -478,6 +478,7 @@ export async function createMediaRendererCore(
       maxDevicePixelRatio: options.maxDevicePixelRatio,
       polygonStyle: currentPresentation.polygonStyle,
       polylineStyle: currentPresentation.polylineStyle,
+      regionRenderers: resolveRegionRenderers(currentPresentation),
       previewOverlay: options.previewOverlay,
       renderPreparation: options.renderPreparation
         ? {
@@ -650,6 +651,13 @@ export async function createMediaRendererCore(
       throw error;
     }
   }
+}
+
+function resolveRegionRenderers(presentation: MediaRendererPresentation) {
+  return (
+    presentation.renderers?.filter((renderer) => renderer.kind === "region") ??
+    []
+  );
 }
 
 async function openRendererMediaSource(

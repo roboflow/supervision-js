@@ -84,6 +84,9 @@ describe("package entrypoint", () => {
       "MediaSessionMode",
       "MediaSessionStatus",
       "MediaSourceStatus",
+      "RegionRendererComposeMode",
+      "RegionRendererRegionKind",
+      "RegionRendererSourceKind",
       "RenderPreparationArtifactFrameStatus",
       "RenderPreparationArtifactKind",
       "RenderPreparationExecutionMode",
@@ -123,6 +126,7 @@ describe("package entrypoint", () => {
       mask: expect.any(Function),
       polygon: expect.any(Function),
       polyline: expect.any(Function),
+      region: expect.any(Function),
     });
     expect(entrypoint.createMediaStreamRendererSource).toEqual(
       expect.any(Function),

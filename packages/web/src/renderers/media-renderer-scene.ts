@@ -23,6 +23,7 @@ import type { InteractionStyle } from "supervision-js-core";
 import type { LabelStyle } from "supervision-js-core";
 import type { MaskStyle } from "supervision-js-core";
 import type {
+  RegionAnnotationRenderer,
   PolygonStyle,
   PolylineStyle,
   KeypointStyle,
@@ -53,6 +54,7 @@ export interface MediaRendererSceneOptions {
   readonly polygonStyle: PolygonStyle | null | undefined;
   readonly polylineStyle: PolylineStyle | null | undefined;
   readonly keypointStyle: KeypointStyle | null | undefined;
+  readonly regionRenderers: readonly RegionAnnotationRenderer[];
   readonly interaction: MediaInteractionOptions | undefined;
   readonly interactionStyle: InteractionStyle | null | undefined;
   readonly canInteract: () => boolean;

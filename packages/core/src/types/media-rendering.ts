@@ -98,6 +98,14 @@ export interface MediaRendererDiagnosticsOptions {
    * it permanently in latency-sensitive apps unless needed.
    */
   readonly frameTimings?: boolean;
+  /** Receives browser asset failures without failing media playback. */
+  readonly onAssetError?: (error: MediaRendererAssetError) => void;
+}
+
+export interface MediaRendererAssetError {
+  readonly rendererId: string;
+  readonly src: string;
+  readonly error: unknown;
 }
 
 /**
@@ -159,8 +167,9 @@ export interface MediaRendererPresentation {
   /**
    * Built-in renderers that contribute semantic annotations to the
    * renderer-owned scene. When present, this list selects the enabled
-   * built-in layers; the matching style field supplies the default for a
-   * descriptor without an explicit style. Existing style fields remain
+   * built-in layers. Style-backed descriptors resolve into their established
+   * presentation fields, while direct descriptors such as `region` retain
+   * their semantic configuration for the backend. Existing style fields remain
    * supported for compatibility and source-specific presentation overrides.
    */
   readonly renderers?: readonly AnnotationRenderer[];

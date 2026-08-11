@@ -13,8 +13,21 @@ import type {
 import type { MediaRendererPresentation } from "#types/media-rendering";
 
 /** The style contract configured by one renderer kind. */
-export type AnnotationRendererStyle<TKind extends AnnotationRendererKind> =
-  NonNullable<AnnotationRendererOfKind<TKind>["style"]>;
+export const styledAnnotationRendererKinds = [
+  "box",
+  "keypoints",
+  "label",
+  "mask",
+  "polygon",
+  "polyline",
+] as const;
+
+export type StyledAnnotationRendererKind =
+  (typeof styledAnnotationRendererKinds)[number];
+
+export type AnnotationRendererStyle<
+  TKind extends StyledAnnotationRendererKind,
+> = NonNullable<AnnotationRendererOfKind<TKind>["style"]>;
 
 /**
  * The presentation field that carries a renderer kind's style.
@@ -23,7 +36,7 @@ export type AnnotationRendererStyle<TKind extends AnnotationRendererKind> =
  * entry that points a kind at the wrong presentation field does not compile.
  */
 export type AnnotationRendererStyleFieldFor<
-  TKind extends AnnotationRendererKind,
+  TKind extends StyledAnnotationRendererKind,
 > = {
   [
     TField in keyof MediaRendererPresentation
@@ -40,12 +53,15 @@ export type AnnotationRendererStyleFieldFor<
 
 /** Every presentation field owned by a built-in renderer kind. */
 export type AnnotationRendererStyleField = {
-  [TKind in AnnotationRendererKind]: AnnotationRendererStyleFieldFor<TKind>;
-}[AnnotationRendererKind];
+  [
+    TKind in StyledAnnotationRendererKind
+  ]: AnnotationRendererStyleFieldFor<TKind>;
+}[StyledAnnotationRendererKind];
 
 export interface AnnotationRendererKindMetadata<
-  TKind extends AnnotationRendererKind,
+  TKind extends StyledAnnotationRendererKind,
 > {
+  readonly cardinality: "singleton";
   /** Presentation field this kind reads its configured style from. */
   readonly styleField: AnnotationRendererStyleFieldFor<TKind>;
   /**
@@ -53,6 +69,10 @@ export interface AnnotationRendererKindMetadata<
    * listed renderer never constructs the styles of the other kinds.
    */
   readonly createCanonicalStyle: () => AnnotationRendererStyle<TKind>;
+}
+
+export interface DirectAnnotationRendererKindMetadata {
+  readonly cardinality: "multiple";
 }
 
 /**
@@ -65,36 +85,57 @@ export interface AnnotationRendererKindMetadata<
 export type AnnotationRendererRegistry = {
   readonly [
     TKind in AnnotationRendererKind
-  ]: AnnotationRendererKindMetadata<TKind>;
+  ]: TKind extends StyledAnnotationRendererKind
+    ? AnnotationRendererKindMetadata<TKind>
+    : DirectAnnotationRendererKindMetadata;
 };
 
 export const annotationRendererRegistry: AnnotationRendererRegistry = {
-  box: { createCanonicalStyle: createDefaultBoxStyle, styleField: "boxStyle" },
+  box: {
+    cardinality: "singleton",
+    createCanonicalStyle: createDefaultBoxStyle,
+    styleField: "boxStyle",
+  },
   keypoints: {
+    cardinality: "singleton",
     createCanonicalStyle: createDefaultKeypointStyle,
     styleField: "keypointStyle",
   },
   label: {
+    cardinality: "singleton",
     createCanonicalStyle: createDefaultLabelStyle,
     styleField: "labelStyle",
   },
   mask: {
+    cardinality: "singleton",
     createCanonicalStyle: createDefaultMaskStyle,
     styleField: "maskStyle",
   },
   polygon: {
+    cardinality: "singleton",
     createCanonicalStyle: createDefaultPolygonStyle,
     styleField: "polygonStyle",
   },
   polyline: {
+    cardinality: "singleton",
     createCanonicalStyle: createDefaultPolylineStyle,
     styleField: "polylineStyle",
   },
+  region: { cardinality: "multiple" },
 };
+
+export function isStyleBackedAnnotationRendererKind(
+  kind: AnnotationRendererKind,
+): kind is StyledAnnotationRendererKind {
+  return annotationRendererRegistry[kind].cardinality === "singleton";
+}
 
 /** Presentation fields owned by the given renderer kinds, in the same order. */
 export function resolveAnnotationRendererStyleFields(
   kinds: readonly AnnotationRendererKind[],
 ): readonly AnnotationRendererStyleField[] {
-  return kinds.map((kind) => annotationRendererRegistry[kind].styleField);
+  return kinds.flatMap((kind) => {
+    const metadata = annotationRendererRegistry[kind];
+    return "styleField" in metadata ? [metadata.styleField] : [];
+  });
 }
