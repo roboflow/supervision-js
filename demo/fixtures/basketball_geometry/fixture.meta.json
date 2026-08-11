@@ -14,7 +14,8 @@
     "keypointsEnabled": true,
     "labelsEnabled": true,
     "masksEnabled": false,
-    "polygonsEnabled": false
+    "polygonsEnabled": false,
+    "polylinesEnabled": false
   },
   "sampleName": "basketball_geometry",
   "schema": "supervision-js.demo.fixture-meta",

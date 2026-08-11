@@ -160,6 +160,12 @@ Two hard-won implementation constraints:
   module-level worklet that captures it, or the captured value is `undefined`
   on the worklet runtime (tests do not catch this because vitest does not run
   the plugin).
+- JSI-backed inference runners must be captured directly by the actual
+  VisionCamera `onFrame` worklet. Do not hide a runner inside a second processor
+  worklet and then capture that processor: the outer function can serialize
+  successfully while its recursively captured HostFunction becomes
+  non-callable in the isolated runtime. The host still supplies only a runner
+  and serializable configuration; the package-owned hook owns the direct call.
 - Debug app builds compile pods with `-Onone`, which makes the native fill
   loop 10-30x slower and can erase its advantage over the JS fallback. The
   `SupervisionIdMask` podspec forces `SWIFT_OPTIMIZATION_LEVEL=-O` for all

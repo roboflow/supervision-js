@@ -1,5 +1,6 @@
 /**
- * Box, mask, label, interaction, and focus style APIs used by renderer layers.
+ * Annotation renderer descriptors plus box, mask, label, interaction, and
+ * focus style APIs.
  *
  * @module Styles
  */
@@ -22,6 +23,8 @@ export {
   KeypointMarkerShape,
   LabelVisibilityMode,
   SUPERVISION_ROBOFLOW_COLOR,
+  annotationRendererKinds,
+  annotationRenderers,
   createDefaultAnnotationPresentation,
   normalizeDetectionClassName,
   resolveDetectionClassColorStyle,
@@ -33,6 +36,10 @@ export {
   type BaseMaskStyleOptions,
   type BasePolygonStyleOptions,
   type BasePolylineStyleOptions,
+  type AnnotationRenderer,
+  type AnnotationRendererFactory,
+  type AnnotationRendererKind,
+  type BoxAnnotationRenderer,
   type DefaultAnnotationPresentationOptions,
   type BoxDrawInstruction,
   type BoxFillStyle,
@@ -52,11 +59,13 @@ export {
   type InteractionStyle,
   type InteractionStyleContext,
   type KeypointDrawInstruction,
+  type KeypointAnnotationRenderer,
   type KeypointEdgeDrawInstruction,
   type KeypointMarkerDrawInstruction,
   type KeypointStyle,
   type KeypointStyleContext,
   type LabelBackgroundStyle,
+  type LabelAnnotationRenderer,
   type LabelDrawInstruction,
   type LabelOffsetStyle,
   LabelPlacement,
@@ -64,15 +73,18 @@ export {
   type LabelStyleContext,
   type LabelTextStyle,
   type MaskDrawInstruction,
+  type MaskAnnotationRenderer,
   MaskRenderMode,
   type MaskStrokeStyle,
   type MaskStrokeStyleOptions,
   type MaskStyle,
   type MaskStyleContext,
   type PolygonDrawInstruction,
+  type PolygonAnnotationRenderer,
   type PolygonStyle,
   type PolygonStyleContext,
   type PolylineDrawInstruction,
+  type PolylineAnnotationRenderer,
   type PolylineStyle,
   type PolylineStyleContext,
 } from "supervision";

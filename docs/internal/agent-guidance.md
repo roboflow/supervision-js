@@ -11,6 +11,8 @@ Before making project-direction or architecture changes, read:
 - [`problem-framing.md`](problem-framing.md)
 - [`architecture-principles.md`](architecture-principles.md)
 - [`renderer-first-roadmap.md`](renderer-first-roadmap.md)
+- [`annotator-use-case-roadmap.md`](annotator-use-case-roadmap.md) when adding
+  visualization recipes, fixtures, or annotator facades
 - [`pixijs-guidance.md`](pixijs-guidance.md)
 - [`library-contract.md`](library-contract.md)
 - [`react-native-architecture.md`](react-native-architecture.md)
@@ -21,7 +23,9 @@ Before making project-direction or architecture changes, read:
 - [`../public/guides/public-api.md`](../public/guides/public-api.md)
 
 Those docs define the current product intent: maintain a focused, session-first
-browser API without promising a broad Python-parity annotation framework.
+browser API without promising a one-to-one Python annotation framework. Python
+Supervision may inform use-case facades when they preserve the renderer-first
+and composable architecture.
 
 ## Public Docs Home
 
@@ -35,6 +39,23 @@ an integrator, but do not promote Pixi, Mediabunny, workers, prepared artifacts,
 or the private React Native experiment into public contracts. Do not edit
 generated `docs/site/` output; rebuild the docs with `npm run demo:build` and
 run `npm run docs:check` after changing the homepage.
+
+Public rendering guidance lives under
+[`../public/annotation-renderers.md`](../public/annotation-renderers.md). Treat
+an **annotation renderer descriptor** as the consumer-facing unit: semantic
+detections provide the data, presentation styles control appearance, and the
+session composes the enabled renderers. When a public renderer is added or
+materially changed, update its focused page and the `Annotation Renderers`
+navigation children in the same change. Add the reusable docs playground only
+when a committed frozen fixture contains the renderer's real semantic input;
+each such playground should show that fixture, focused controls, and a minimal
+live `session.setPresentation({ renderers: [...] })` snippet whose values stay
+synchronized with those controls. Do not fabricate docs-only detections to
+simulate a missing fixture. Record any unsupported playground in
+`annotator-use-case-roadmap.md` with the next fixture or primitive required.
+Keep Pixi display objects, backend resources, drawing callbacks, and docs-only
+fixture augmentation out of the published package API; public
+`AnnotationRenderer` descriptors remain semantic configuration.
 
 The documentation toolbar displays the browser package version from
 `docs/public/typedoc-icons.js`. Update that value with

@@ -1,5 +1,11 @@
 # Renderer-First Roadmap
 
+> This document records the project's foundational sequence. Several
+> capabilities originally deferred here have since landed. New visualization
+> recipes and annotator facades are sequenced by the
+> [annotator use-case roadmap](annotator-use-case-roadmap.md), while the
+> renderer-first constraints below remain authoritative.
+
 The first milestones should prove rendering capability before committing to a
 large annotation API. Each milestone should leave the project with something
 observable, measurable, and demoable.

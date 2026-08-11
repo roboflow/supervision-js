@@ -83,7 +83,8 @@ In Python `supervision`, visual behavior is usually expressed through
 annotators. In `supervision-js`, the equivalent shape is:
 
 - **styles** define how detections should look;
-- **renderer layers** draw boxes, masks, labels, and interactions efficiently;
+- **annotation renderers** select boxes, masks, labels, paths, and keypoints;
+- the browser backend draws those renderers efficiently;
 - prepared artifacts stay internal to the renderer.
 
 This keeps detection data clean and keeps rendering performance decisions inside
@@ -109,12 +110,18 @@ const boxStyle = new BaseBoxStyle({
   }),
 });
 
-session.setPresentation({ boxStyle });
+session.setPresentation({
+  renderers: [annotationRenderers.box({ style: boxStyle })],
+});
 ```
 
 Use a custom style object when the base classes are not expressive enough. The
 contract stays the same: detections remain semantic data, and styles resolve how
 that data should be presented.
+
+Continue to [Annotation Renderers](../annotation-renderers.md) for focused box,
+mask, label, polygon, polyline, and keypoint examples backed by the frozen
+basketball fixture.
 
 ## Geometry Shapes
 

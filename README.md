@@ -23,7 +23,7 @@ package focuses on the browser runtime needed to build rich CV media UIs.
 The primary primitive is one `MediaSession` per media item:
 
 ```ts
-import { createMediaSession } from "supervision";
+import { annotationRenderers, createMediaSession } from "supervision";
 
 const session = await createMediaSession({
   container: document.querySelector("#viewer")!,
@@ -45,7 +45,13 @@ const session = await createMediaSession({
 
 await session.appendDetectionFrames(frames);
 
-session.setPresentation({ boxStyle, maskStyle, labelStyle });
+session.setPresentation({
+  renderers: [
+    annotationRenderers.box({ style: boxStyle }),
+    annotationRenderers.mask({ style: maskStyle }),
+    annotationRenderers.label({ style: labelStyle }),
+  ],
+});
 ```
 
 ## Installation
