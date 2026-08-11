@@ -5,6 +5,7 @@ export enum PixiSceneLayerKind {
   Mask = "mask",
   Box = "box",
   Vector = "vector",
+  Region = "region",
   Focus = "focus",
   Preview = "preview",
   Guide = "guide",
@@ -73,6 +74,8 @@ function defaultLayerOrder(kind: string) {
       return 200;
     case PixiSceneLayerKind.Vector:
       return 250;
+    case PixiSceneLayerKind.Region:
+      return 275;
     case PixiSceneLayerKind.Focus:
       return 300;
     case PixiSceneLayerKind.Preview:

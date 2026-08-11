@@ -1,15 +1,12 @@
 import type { Detection, Rect } from "#types/detections";
+import type { FillStyle, StrokeStyle } from "#types/paint-style";
 import type { AnnotationStyleContext } from "#types/style";
+
+export { StrokeAlignment as BoxStrokeAlignment } from "#types/paint-style";
 
 export enum BoxShape {
   Rect = "rect",
   RoundedRect = "roundedRect",
-}
-
-export enum BoxStrokeAlignment {
-  Inside = "inside",
-  Center = "center",
-  Outside = "outside",
 }
 
 /**
@@ -17,22 +14,12 @@ export enum BoxStrokeAlignment {
  *
  * This belongs to presentation styling, not to the underlying detection data.
  */
-export interface BoxStrokeStyle {
-  readonly color: number;
-  readonly alpha: number;
-  readonly width: number;
-  readonly alignment?: BoxStrokeAlignment;
-  /** Alternating dash and gap lengths in screen pixels. */
-  readonly dash?: readonly number[];
-}
+export type BoxStrokeStyle = StrokeStyle;
 
 /**
  * Fill applied behind or inside a rendered detection rectangle.
  */
-export interface BoxFillStyle {
-  readonly color: number;
-  readonly alpha: number;
-}
+export type BoxFillStyle = FillStyle;
 
 /**
  * Per-frame context passed to a box style while resolving draw instructions.

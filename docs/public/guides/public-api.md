@@ -66,6 +66,7 @@ Start here for normal application code:
 - `annotationRendererKinds`
 - `AnnotationRenderer`
 - `AnnotationRendererKind`
+- `RegionAnnotationRenderer`
 - `prepareMedia()`
 - `prepareMediaProgressively()`
 - `probeMedia()`
@@ -98,7 +99,8 @@ session.setPresentation({
 ```
 
 The current built-ins are `box`, `mask`, `polygon`, `polyline`, `keypoints`,
-and `label`; `annotationRendererKinds` enumerates that vocabulary and
+`label`, and the multi-instance `region` asset renderer;
+`annotationRendererKinds` enumerates that vocabulary and
 `AnnotationRendererKind` names it in application code. When supplied, the list
 is authoritative: omitted built-ins are
 disabled, and `renderers: []` disables every built-in layer. For a listed
@@ -108,6 +110,9 @@ but cannot re-enable an omitted layer. The existing `boxStyle`, `maskStyle`,
 and related presentation fields remain supported for compatibility and
 source-specific style overrides. New global presentation code should prefer
 the renderer list.
+`region` carries its target, asset source, anchor, transform, and composition
+configuration directly because it does not lower into one of the legacy style
+fields. Multiple region descriptors may coexist when each has a unique `id`.
 Do not pass Pixi display objects or custom drawing callbacks: the public API
 describes semantic renderer configuration while the browser backend owns
 composition and resource lifetime.

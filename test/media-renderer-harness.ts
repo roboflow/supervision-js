@@ -39,6 +39,8 @@ type MockSamplesImplementation = (
 
 const mockState = vi.hoisted(() => {
   const pixiMock = {
+    assetLoad: vi.fn(async () => ({ height: 16, width: 16 })),
+    assetUnload: vi.fn(async () => undefined),
     appDestroy: vi.fn(),
     appInit: vi.fn(async () => undefined),
     canvasAddEventListener: vi.fn(),
@@ -96,6 +98,7 @@ const mockState = vi.hoisted(() => {
     spriteInstances: [] as Array<{
       height: number;
       options: unknown;
+      position: { set: ReturnType<typeof vi.fn> };
       texture: unknown;
       visible: boolean;
       width: number;
@@ -173,6 +176,10 @@ export const mediaMock = mockState.mediaMock;
 export const domMock = mockState.domMock;
 
 vi.mock("pixi.js", () => {
+  const Assets = {
+    load: pixiMock.assetLoad,
+    unload: pixiMock.assetUnload,
+  };
   class Application {
     canvas = {
       addEventListener: pixiMock.canvasAddEventListener,
@@ -304,11 +311,16 @@ vi.mock("pixi.js", () => {
 
   class Sprite {
     anchor = { set: vi.fn() };
+    alpha = 1;
+    destroy = vi.fn();
     height = 0;
     position = { set: vi.fn() };
+    removeFromParent = vi.fn();
+    rotation = 0;
     texture: unknown;
     visible = true;
     width = 0;
+    zIndex = 0;
 
     constructor(public readonly options: { texture?: unknown } = {}) {
       this.texture = options.texture;
@@ -392,6 +404,7 @@ vi.mock("pixi.js", () => {
 
   return {
     Application,
+    Assets,
     CanvasSource,
     Container,
     Graphics,
@@ -516,6 +529,9 @@ vi.stubGlobal(
 );
 
 export function resetMocks() {
+  pixiMock.assetLoad.mockClear();
+  pixiMock.assetLoad.mockResolvedValue({ height: 16, width: 16 });
+  pixiMock.assetUnload.mockClear();
   pixiMock.appDestroy.mockClear();
   pixiMock.appInit.mockClear();
   pixiMock.appInit.mockResolvedValue(undefined);
