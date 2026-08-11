@@ -1,237 +1,136 @@
-# Generic Vector Primitives Proposal
+# Vector Shape Renderer Kinds Proposal
 
-Status: proposal for the annotator roadmap's third foundation PR; nothing in
-this document is implemented
+Status: proposal for the annotator roadmap's vector-primitives foundation and
+its first renderer kinds; revised for the unified annotation renderer
+presentation
 
-Last reviewed: August 9, 2026
+Last reviewed: August 11, 2026
 
-Scope: renderer-neutral shape instruction contracts and their browser renderer
-support; no annotator facades, no public API commitment until reviewed
+Scope: internal shape instruction contracts, their browser lowering, and the
+delivery contract for the annotation renderer kinds built on them
 
 ## Purpose
 
 The [annotator use-case roadmap](annotator-use-case-roadmap.md) sequences a
-"generic vector primitives" foundation PR before the Tier 1 geometry facades.
-This document proposes the concrete instruction contracts, renderer plan, and
-compatibility rules for that PR so the work can be reviewed against real
-consumers before any code lands.
+"generic vector primitives" foundation before the Tier 1 geometry facades.
+`MediaRendererPresentation.renderers` is now the single authoritative
+rendering surface, so this document proposes:
 
-## Evidence From The Demo Workbench
+- the internal shape instruction contracts and their vector-layer lowering;
+- how each visible capability enters as a registered `AnnotationRenderer`
+  kind; and
+- the delivery bundle every renderer-kind PR must ship.
 
-The demo's annotator picker (PR #59) pushed the existing primitives as far as
-they go. Every shipped variant lowers to `BoxDrawInstruction`:
+## Architecture
 
-- Box corners reuse the dashed stroke with a per-detection dash pattern.
-- Circles and dots reuse `BoxShape.RoundedRect` with a full corner radius.
-- The ellipse ground marker is a capsule approximation of Python's
-  `EllipseAnnotator` arc, documented as such in the demo source.
+### Renderer kinds are the public unit
 
-The remaining Tier 1 use cases cannot be expressed honestly:
+Each new capability is one entry in the established registry pattern:
 
-- True elliptical arcs (`EllipseAnnotator` start/end angles, covariance
-  ellipses for `VertexEllipse*`) have no instruction type.
-- Anchored polygon markers (`TriangleAnnotator`) have no instruction type.
-- `packages/web/src/renderers/pixi-vector-layer.ts` skips any detection with
-  no semantic polygon, polyline, or keypoints before calling style resolvers,
-  so resolver-synthesized geometry cannot render for box-only detections.
-  That gate is correct today (it avoids resolving styles that cannot draw)
-  and must stay for purely semantic styles.
+- a kind literal added to `annotationRendererKinds`;
+- a typed descriptor (`{ id, kind, style? }`) in the descriptor union;
+- a factory on `annotationRenderers`;
+- a registry entry pairing the kind with its presentation style field and
+  canonical default style.
 
-## Design Principles
-
-Restating the roadmap constraints this PR must satisfy:
-
-- Instruction contracts live in `packages/core` and stay renderer-neutral: no
-  Pixi, DOM, worker, or vendor types.
-- New capabilities are additive. A presentation that configures none of them
-  renders byte-for-byte as today, including the vector layer's early skip.
-- Decorations do not become editable annotations and do not pick by default.
-- Coordinate space is explicit per instruction, not implied.
-- Backends declare a supported subset; unsupported recipes fail validation
-  rather than silently dropping.
-- Temporal behavior is out of scope; these primitives are stateless per frame.
-
-## Proposed Instruction Contracts
-
-Naming and field details are open; the shapes below are the proposal.
-
-### Ellipse
-
-```ts
-export interface EllipseDrawInstruction {
-  readonly center: Point;
-  readonly radiusX: number;
-  readonly radiusY: number;
-  /** Rotation in radians around the center. */
-  readonly rotation?: number;
-  /** Arc range in radians; omitted means a closed ellipse. */
-  readonly startAngle?: number;
-  readonly endAngle?: number;
-  readonly fill?: BoxFillStyle;
-  readonly stroke?: BoxStrokeStyle;
-}
-```
-
-Covers: `CircleAnnotator` (equal radii), `EllipseAnnotator` (arc range),
-`VertexEllipseArea/Outline` (rotation plus covariance-derived radii). The
-existing dashed-stroke contract applies by sampling the arc into a polyline
-with a deterministic segment count.
-
-### Marker
-
-```ts
-export enum MarkerShape {
-  Circle = "circle",
-  Cross = "cross",
-  Square = "square",
-  Triangle = "triangle",
-}
-
-export enum MarkerSizeSpace {
-  Media = "media",
-  Screen = "screen",
-}
-
-export interface MarkerDrawInstruction {
-  readonly point: Point;
-  readonly shape: MarkerShape;
-  /** Marker diameter in the declared size space. */
-  readonly size: number;
-  readonly sizeSpace: MarkerSizeSpace;
-  readonly rotation?: number;
-  readonly fill?: BoxFillStyle;
-  readonly stroke?: BoxStrokeStyle;
-}
-```
-
-Covers: `DotAnnotator`, `TriangleAnnotator`, and future icon anchoring.
-Screen-space sizing follows the existing convention that stroke widths are
-screen pixels divided by the viewport scale. Keypoint markers
-(`KeypointMarkerShape`) could eventually lower to this instruction, but that
-unification is explicitly not part of the foundation PR.
-
-### Path
-
-```ts
-export interface PathDrawInstruction {
-  /** Disconnected subpaths sharing one style. */
-  readonly segments: readonly (readonly Point[])[];
-  readonly closed: boolean;
-  readonly fill?: BoxFillStyle;
-  readonly stroke: BoxStrokeStyle;
-}
-```
-
-Covers: `BoxCornerAnnotator` as four true open subpaths (replacing the demo's
-dash workaround), oriented quadrilaterals lowered from
-`mask-min-area-rect-v1`, and later media-space zone guides. Reuses the
-existing dashed-path renderer.
-
-### Explicitly Deferred
-
-- Text anchors: needed by `VertexLabelAnnotator` and `PercentageBarAnnotator`
-  text, but they belong with the label layer and should be designed with the
-  first facade that needs them.
-- Solid bars: `PercentageBarAnnotator` composes two filled paths plus text;
-  blocked on text anchors, not on these primitives.
-- Media effects, temporal fields, and HUD elements: separate foundation PRs
-  per the roadmap.
-
-## Exposure Through The Composition Contract
-
-The roadmap forbids new singleton `MediaRendererPresentation` properties per
-feature. These primitives should surface through the recipe composition
-contract (foundation PR 2), conceptually:
+The renderer list keeps full authority: `renderers: []` disables the
+capability, listed order and identity semantics apply unchanged, and source
+overrides refine a listed renderer without re-enabling an omitted one.
 
 ```ts
 session.setPresentation({
-  boxStyle,
-  layers: [
-    annotationLayers.markers({
-      anchor: "bottom-center",
-      shape: MarkerShape.Triangle,
-      size: 12,
-    }),
+  renderers: [
+    annotationRenderers.box(),
+    annotationRenderers.ellipse(),
+    annotationRenderers.triangleMarker({ style: triangleStyle }),
   ],
 });
 ```
 
-A shape recipe declares stable identity, phase and ordering, coordinate
-space, pick behavior (none by default), and a resolver from detection and
-style context to zero or more instructions.
+### Shape instructions are internal lowering
 
-Recommended sequencing: land the composition contract first, then this
-primitives PR against it. The contracts above are written so both PRs can be
-reviewed together; if the composition contract slips, an interim internal-only
-consumer (for example lowering keypoint markers) could exercise the renderer
-without any public exposure, at the cost of throwaway wiring.
+Kind styles resolve semantic detections into renderer-neutral shape
+instructions; backends translate those into drawing commands. The instruction
+contracts live in `packages/core` behind the internal package boundary and do
+not appear in the public `supervision` entrypoint:
 
-## Renderer Plan (packages/web)
+- `EllipseShapeInstruction` — center, independent radii, rotation, optional
+  arc range. Lowers `CircleAnnotator` (equal radii), `EllipseAnnotator`
+  (open arc), and later `VertexEllipse*` (covariance-derived radii).
+- `MarkerShapeInstruction` — anchored circle/cross/square/triangle with an
+  explicit media-or-screen size space. Lowers `DotAnnotator`,
+  `TriangleAnnotator`, and later icon anchoring.
+- `PathShapeInstruction` — disconnected subpaths sharing one style, reusing
+  the dashed-stroke contract. Lowers `BoxCornerAnnotator`, oriented
+  quadrilaterals, and later zone guides.
 
-- A pooled shape layer mirrors the vector layer's retained-entry model:
-  per-detection display objects, cleared and redrawn only when the frame,
-  style version, or viewport scale changes.
-- The semantic-geometry skip stays for semantic styles. Detections are
-  offered to shape recipes based on the recipe's declared anchor requirement
-  (for example `rect`), so a frame with no active shape recipes takes exactly
-  today's path.
-- Batching per primitive kind, not per facade, per the roadmap's performance
-  requirements; no per-frame create/destroy churn.
-- Ellipse rendering uses the backend's native ellipse/arc path; dashed arcs
-  sample deterministically so both rasterizers agree structurally.
-- Picking: shape instructions are not pickable. A facade that needs picking
-  must map to an existing semantic pick target explicitly; extending
-  `DetectionPickTarget` is out of scope here.
+The browser vector layer consumes them through an internal hook and keeps its
+semantic-geometry skip byte-identical whenever no shape-backed kind is
+configured. This half is implemented internally by the shape foundation PR
+and stays without public surface until the first kind lands.
 
-## Capability Reporting
+## Delivery Contract
 
-`supervision-js-react-native` declares which instruction kinds its Skia
-mapping supports. Configuring an unsupported recipe on a backend produces a
-validation error listing the unsupported kinds. No silent omission.
+Every renderer-kind PR ships, in the same PR:
 
-## Facades Unblocked
+1. the kind, descriptor, factory, and registry entry;
+2. the scene wiring from the registry to the internal shape hook;
+3. a focused public docs page and navigation entry under
+   `docs/public/annotation-renderers/`;
+4. a playground backed by committed real fixture data with focused controls
+   (no docs-only detections);
+5. a synchronized minimal `session.setPresentation({ renderers: [...] })`
+   snippet;
+6. pure resolution tests, browser lowering tests, and visual evidence;
+7. package-smoke and docs-contract updates for the new public names.
 
-Each remains exactly one PR after this foundation lands, with frozen fixture
-evidence per the delivery ledger:
+Exactly one renderer kind per PR. A checklist item without its consumer proof
+does not count as complete.
 
-| Facade                          | Lowering                                  |
-| ------------------------------- | ----------------------------------------- |
-| `TriangleAnnotator`             | one triangle marker at a box anchor       |
-| `DotAnnotator`                  | one circle marker at a box anchor         |
-| `CircleAnnotator`               | ellipse with equal radii                  |
-| `EllipseAnnotator`              | ellipse arc (replaces demo capsule)       |
-| `BoxCornerAnnotator`            | four open subpaths (replaces demo dashes) |
-| `OrientedBoxAnnotator`          | closed path from derived quadrilateral    |
-| `VertexEllipseAreaAnnotator`    | covariance utility plus filled ellipse    |
-| `VertexEllipseOutlineAnnotator` | covariance utility plus stroked ellipse   |
+## Proposed Renderer Kind Sequence
 
-The demo workbench migrates its approximations to the true primitives in the
-same PRs, keeping its picker UI unchanged.
+| Kind (working name) | Lowers to                                        | Fixture evidence              |
+| ------------------- | ------------------------------------------------ | ----------------------------- |
+| `ellipse`           | ellipse arc at the box base                      | basketball / horse rects      |
+| `dotMarker`         | circle marker at the box center                  | basketball / horse rects      |
+| `triangleMarker`    | triangle marker above the box                    | basketball / horse rects      |
+| `boxCorner`         | four open subpaths                               | basketball / horse rects      |
+| `circle`            | ellipse with equal radii                         | basketball / horse rects      |
+| `percentageBar`     | track and value closed paths                     | basketball rects + confidence |
+| `icon`              | image icon instruction (separate primitive PR)   | basketball / horse classes    |
+| `maskHalo`          | blurred prepared id mask (separate primitive PR) | basketball / horse masks      |
+| `vertexEllipse*`    | covariance utility plus ellipse                  | basketball keypoints (later)  |
 
-## Fixture And Validation Plan
+Naming is open; kinds stay camelCase alongside the existing vocabulary.
 
-- `basketball_geometry` already provides rects, masks, and keypoints for
-  marker and ellipse coverage; `people_walking_detection_v1` (foundation
-  PR 1) is the roadmap's dense-marker target and should precede or accompany
-  the first marker facade.
-- Pure resolution tests in core; browser renderer tests in web; tolerant
-  visual comparisons per the roadmap's reference-validation section.
-- The dense-shape benchmark gains marker and ellipse layers; the PR must show
-  unchanged numbers when no shape recipes are configured.
-- Presentation semantics change, so tarball validation in an external
-  consumer (`package:tarball:smoke`) is required.
+## Sizing, Determinism, And Capability Rules
+
+- Marker sizing declares its space explicitly; screen-space sizes divide by
+  the viewport scale exactly like stroke widths.
+- Ellipse arcs sample into a deterministic segment count so every backend
+  rasterizes the same structural geometry, including dashed strokes.
+- Shape decorations are presentation only: never pickable, never editable,
+  no caching or media-time semantics.
+- `supervision-js-react-native` declares its supported kinds; configuring an
+  unsupported kind fails validation instead of silently dropping.
 
 ## Open Questions
 
-1. Land after the composition contract (recommended above), or first with an
-   internal-only consumer?
-2. One generic shape layer or per-primitive layers, given batching goals?
-3. Should keypoint markers eventually lower to `MarkerDrawInstruction`, and
-   if so, in which PR?
-4. Is `MarkerSizeSpace` the right sizing model, or should markers follow the
-   stroke-width convention of always being screen pixels?
-5. Do the first facades justify `rotation` on markers, or should it wait for
-   the icon/atlas work?
-6. Which anchor vocabulary should recipes use (`bottom-center`, keypoint
-   index, polygon centroid), and does it belong to the composition contract
-   instead of this PR?
+1. Should keypoint markers eventually lower to `MarkerShapeInstruction`, and
+   in which PR?
+2. Do the first kinds justify marker `rotation`, or does it wait for the
+   icon/atlas work?
+3. Registry style fields: one presentation field per kind (matching the
+   existing pattern) — confirm the naming convention for shape-backed kinds.
+4. Which kinds should the React Native backend support first?
+
+## Decision
+
+Land the internal shape foundation first (no public surface), then one
+renderer kind per PR through the registry with the full delivery bundle. The
+central invariant is unchanged:
+
+> A new renderer kind may compile to internal shape instructions, but it must
+> not change the meaning, lifecycle, identity, editability, or cache behavior
+> of existing detections and renderers, and `renderers` remains the single
+> authoritative surface.
