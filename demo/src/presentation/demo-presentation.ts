@@ -423,7 +423,13 @@ function resolveDemoBoxInstruction(
         fill: { alpha: 1, color: style.fill },
         rect: { height: side, width: side, x: rect.x, y: rect.y },
         shape: BoxShape.RoundedRect,
-        stroke: { alpha: 1, color: 0xffffff, width: 1 },
+        // The emphasis stroke width is what distinguishes hovered and
+        // selected dots, so the interaction sliders stay effective.
+        stroke: {
+          alpha: 1,
+          color: 0xffffff,
+          width: emphasis?.strokeWidth ?? 1,
+        },
       };
     }
     case DemoBoxAnnotator.BoxCorner: {

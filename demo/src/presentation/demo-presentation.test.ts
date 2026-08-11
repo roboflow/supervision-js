@@ -201,6 +201,32 @@ describe("demo presentation", () => {
     expect(instruction?.fill).toMatchObject({ alpha: 1 });
   });
 
+  it("emphasizes hovered and selected dots through the interaction style", () => {
+    const presentation = createDemoPresentation({
+      ...defaultDemoPresentationSettings,
+      boxAnnotator: DemoBoxAnnotator.Dot,
+      interactionSelectedStrokeWidth: 5,
+    });
+    const context = {
+      detectionIndex: 0,
+      frame: { detections: [rectangleDetection], mediaTime: 0 },
+      mediaTime: 0,
+      point: { x: 10, y: 12 },
+      state: DetectionInteractionState.Selected,
+      target: DetectionPickTarget.Box,
+    };
+    const base = presentation.boxStyle?.resolve(rectangleDetection, context);
+    const selected = presentation.interactionStyle?.resolve(
+      rectangleDetection,
+      context,
+    );
+
+    expect(base?.stroke?.width).toBe(1);
+    expect(
+      selected?.boxStyle?.resolve(rectangleDetection, context)?.stroke?.width,
+    ).toBe(5);
+  });
+
   it("lowers the color annotator to a fill-only rectangle", () => {
     const presentation = createDemoPresentation({
       ...defaultDemoPresentationSettings,
