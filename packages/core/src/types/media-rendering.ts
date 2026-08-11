@@ -11,6 +11,7 @@ import type { PolygonStyle } from "#types/polygon-style";
 import type { PolylineStyle } from "#types/polyline-style";
 import type { KeypointStyle } from "#types/keypoint-style";
 import type { AnnotationOverlayStyle } from "#types/editing";
+import type { AnnotationRenderer } from "#types/annotation-renderer";
 
 export enum MediaRendererFit {
   /**
@@ -145,7 +146,7 @@ export interface MediaRendererState {
 }
 
 /**
- * Current presentation styles used by renderer layers.
+ * Current annotation renderer, interaction, visibility, and scene presentation.
  */
 export interface MediaRendererPresentation {
   /**
@@ -155,6 +156,14 @@ export interface MediaRendererPresentation {
    */
   readonly backgroundColor?: number;
   readonly annotationOverlayStyle?: AnnotationOverlayStyle | null;
+  /**
+   * Built-in renderers that contribute semantic annotations to the
+   * renderer-owned scene. When present, this list selects the enabled
+   * built-in layers; the matching style field supplies the default for a
+   * descriptor without an explicit style. Existing style fields remain
+   * supported for compatibility and source-specific presentation overrides.
+   */
+  readonly renderers?: readonly AnnotationRenderer[];
   readonly boxStyle?: BoxStyle | null;
   readonly focusStyle?: FocusStyle | null;
   readonly interactionStyle?: InteractionStyle | null;

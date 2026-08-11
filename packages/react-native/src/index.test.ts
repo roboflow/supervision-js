@@ -10,6 +10,7 @@ import {
   BaseLabelStyle,
   BaseMaskStyle,
   BoxShape,
+  annotationRenderers,
   createEmptyReactNativeLiveIdMaskUniforms,
   createReactNativePreparedFramePacket,
   createReactNativeLiveIdMaskArtifact,
@@ -41,6 +42,36 @@ import type {
 import { describe, expect, it } from "vitest";
 
 describe("resolveReactNativeFramePresentation", () => {
+  it("uses renderer descriptors to select native frame layers", () => {
+    const presentation = resolveReactNativeFramePresentation({
+      detectionFrame: {
+        detections: [
+          { id: "player", rect: { height: 30, width: 20, x: 10, y: 20 } },
+        ],
+        mediaTime: 0,
+      },
+      labelStyle: new BaseLabelStyle(),
+      mediaFrame: {
+        metadata: {
+          duration: 1 / 30,
+          frameIndex: 0,
+          height: 1080,
+          mediaTime: 0,
+          width: 1920,
+        },
+        payload: { nativeTextureId: "texture-renderers" },
+      },
+      renderers: [
+        annotationRenderers.box({
+          style: new BaseBoxStyle({ stroke: { color: 0x8b5cf6, width: 2 } }),
+        }),
+      ],
+    });
+
+    expect(presentation.boxes).toHaveLength(1);
+    expect(presentation.labels).toHaveLength(0);
+  });
+
   it("resolves core styles for an externally supplied native frame", () => {
     const detectionFrame: DetectionFrame = {
       detections: [
@@ -174,6 +205,26 @@ describe("resolveReactNativeFrameLayout", () => {
       x: 400,
       y: 432.5,
     });
+  });
+
+  it("covers the canvas by cropping media edges when requested", () => {
+    const layout = resolveReactNativeFrameLayout({
+      canvasHeight: 640,
+      canvasWidth: 400,
+      fit: "cover",
+      mediaHeight: 1080,
+      mediaWidth: 1920,
+    });
+
+    expect(layout.mediaRect).toEqual({
+      height: 640,
+      width: 1137.7777777777778,
+      x: -368.8888888888889,
+      y: 0,
+    });
+    const mapped = layout.mapCanvasPoint({ x: 0, y: 320 });
+    expect(mapped?.x).toBeCloseTo(622.5);
+    expect(mapped?.y).toBe(540);
   });
 
   it("maps React Native canvas points back into media space", () => {

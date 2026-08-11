@@ -28,6 +28,7 @@ import {
   DEFAULT_POLYGON_TOLERANCE,
   attachPoseKeypointsToDetections,
   normalizePoseDetection,
+  selectMotionGatedDetection,
   simplifyPolygonPoints,
   summarizeFrameGeometry,
 } from "./geometry.mjs";
@@ -37,6 +38,14 @@ const SEGMENTATION_SOURCE_ID = "sam3";
 const POSE_SOURCE_ID = "yolo-pose";
 const POSE_Z_INDEX_BASE = 100;
 const POSE_TARGET_CLASS_NAMES = ["white team player", "yellow team player"];
+const BASKETBALL_TRACE_ALGORITHM = "basketball-motion-track-v1";
+const BASKETBALL_TRACE_CLASS_NAME = "basketball";
+const BASKETBALL_TRACE_MAX_ASSOCIATION_GAP_SECONDS = 0.1;
+const BASKETBALL_TRACE_MAX_POINTS = 60;
+const BASKETBALL_TRACE_POSITION_TOLERANCE_PIXELS = 12;
+const BASKETBALL_TRACE_TRACK_ID = "basketball-track:0";
+const BASKETBALL_TRACE_MAX_SPEED_PIXELS_PER_SECOND = 2_700;
+const BASKETBALL_TRACE_WINDOW_SECONDS = 1;
 
 const options = parseArgs(process.argv.slice(2));
 
@@ -74,6 +83,8 @@ const poseAssociation = {
   unmatchedPoseCount: 0,
   unmatchedTargetCount: 0,
 };
+const basketballTrace = [];
+let previousBasketballTraceObservation;
 const frames = sam3Fixture.frames.map((frame) => {
   const segmentationDetections = frame.detections.map((detection) =>
     deriveMaskPolygonDetection(detection, polygonOptions),
@@ -95,7 +106,15 @@ const frames = sam3Fixture.frames.map((frame) => {
   poseAssociation.unmatchedPoseCount += association.unmatchedPoseCount;
   poseAssociation.unmatchedTargetCount += association.unmatchedTargetCount;
 
-  return { ...frame, detections: association.detections };
+  const traceResult = attachBasketballCenterTrace(
+    association.detections,
+    frame.mediaTime,
+    basketballTrace,
+    previousBasketballTraceObservation,
+  );
+  previousBasketballTraceObservation = traceResult.previousObservation;
+
+  return { ...frame, detections: traceResult.detections };
 });
 const geometry = summarizeFrameGeometry(frames);
 const fixture = {
@@ -125,6 +144,20 @@ const fixture = {
       unmatchedPoseDetectionCount: poseAssociation.unmatchedPoseCount,
       unmatchedTargetDetectionCount: poseAssociation.unmatchedTargetCount,
       visibilityPolicy: `keypoint confidence >= ${options.visibleConfidence} maps to Visible(2), otherwise NotLabeled(0); Occluded(1) is never inferred`,
+    },
+    polyline: {
+      algorithm: BASKETBALL_TRACE_ALGORITHM,
+      derivedFrom:
+        "motion-gated nearest-neighbor association across SAM3 basketball detections on the shared frame grid",
+      interpolation: "none",
+      maxAssociationGapSeconds: BASKETBALL_TRACE_MAX_ASSOCIATION_GAP_SECONDS,
+      maxPoints: BASKETBALL_TRACE_MAX_POINTS,
+      maxSpeedPixelsPerSecond: BASKETBALL_TRACE_MAX_SPEED_PIXELS_PER_SECOND,
+      positionTolerancePixels: BASKETBALL_TRACE_POSITION_TOLERANCE_PIXELS,
+      selectionPolicy:
+        "nearest reachable center; higher confidence then source order break ties; a rejected or stale observation starts a new trace segment",
+      trackId: BASKETBALL_TRACE_TRACK_ID,
+      windowSeconds: BASKETBALL_TRACE_WINDOW_SECONDS,
     },
     sources: [
       {
@@ -175,6 +208,80 @@ function deriveMaskPolygonDetection(detection, polygonOptions) {
     : undefined;
 
   return points ? { ...withSource, polygon: { points } } : withSource;
+}
+
+function attachBasketballCenterTrace(
+  detections,
+  mediaTime,
+  trace,
+  previousObservation,
+) {
+  const basketballCandidates = detections.filter(
+    (detection) => detection.className === BASKETBALL_TRACE_CLASS_NAME,
+  );
+
+  const observationIsStale =
+    previousObservation &&
+    mediaTime - previousObservation.mediaTime >
+      BASKETBALL_TRACE_MAX_ASSOCIATION_GAP_SECONDS;
+  const associationPreviousObservation = observationIsStale
+    ? undefined
+    : previousObservation;
+
+  if (observationIsStale) {
+    trace.length = 0;
+  }
+
+  const basketball = selectMotionGatedDetection(
+    basketballCandidates,
+    associationPreviousObservation,
+    mediaTime,
+    {
+      maxSpeedPixelsPerSecond: BASKETBALL_TRACE_MAX_SPEED_PIXELS_PER_SECOND,
+      positionTolerancePixels: BASKETBALL_TRACE_POSITION_TOLERANCE_PIXELS,
+    },
+  );
+
+  if (!basketball) {
+    return { detections, previousObservation };
+  }
+
+  const observation = {
+    mediaTime,
+    x: basketball.rect.x,
+    y: basketball.rect.y,
+  };
+  trace.push(observation);
+
+  const earliestMediaTime = mediaTime - BASKETBALL_TRACE_WINDOW_SECONDS;
+
+  while (
+    trace.length > BASKETBALL_TRACE_MAX_POINTS ||
+    trace[0]?.mediaTime < earliestMediaTime
+  ) {
+    trace.shift();
+  }
+
+  const polyline =
+    trace.length >= 2
+      ? { points: trace.map(({ x, y }) => ({ x, y })) }
+      : undefined;
+
+  return {
+    detections: detections.map((detection) =>
+      detection === basketball
+        ? {
+            ...detection,
+            ...(polyline ? { polyline } : {}),
+            metadata: {
+              ...detection.metadata,
+              trajectoryTrackId: BASKETBALL_TRACE_TRACK_ID,
+            },
+          }
+        : detection,
+    ),
+    previousObservation: observation,
+  };
 }
 
 function normalizePoseFrame(rawDetections, frame) {

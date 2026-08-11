@@ -75,6 +75,7 @@ Create one session for one media item:
 import {
   BaseBoxStyle,
   BaseLabelStyle,
+  annotationRenderers,
   createMediaSession,
   type MediaSession,
 } from "supervision";
@@ -89,8 +90,12 @@ let session: MediaSession | null = await createMediaSession({
   container,
   media: "/media/example.mp4",
   presentation: {
-    boxStyle: new BaseBoxStyle(),
-    labelStyle: new BaseLabelStyle({ includeConfidence: true }),
+    renderers: [
+      annotationRenderers.box({ style: new BaseBoxStyle() }),
+      annotationRenderers.label({
+        style: new BaseLabelStyle({ includeConfidence: true }),
+      }),
+    ],
   },
   renderer: {
     autoPlay: false,

@@ -5,6 +5,7 @@ import {
   presentVisionCameraFrame,
   resolveVisionCameraFrameRendererStyle,
   resolveVisionCameraFrameSize,
+  resolveVisionCameraPreferredZoom,
   useVisionCameraDevice,
   useVisionCameraFrameRenderer,
   useVisionCameraFrameOutput,
@@ -140,15 +141,17 @@ describe("VisionCamera orientation", () => {
     ).toEqual(expected);
   });
 
-  it("uses the matching native renderer transform", () => {
+  it("rotates portrait frames without a second 180-degree front-camera turn", () => {
     expect(
       resolveVisionCameraFrameRendererStyle({
         canvasHeight: 800,
         canvasWidth: 400,
+        mediaHeight: 1280,
+        mediaWidth: 720,
         orientation: "left",
       }),
     ).toMatchObject({
-      height: 400,
+      height: 450,
       transform: [{ rotate: "90deg" }],
       width: 800,
     });
@@ -156,8 +159,24 @@ describe("VisionCamera orientation", () => {
       resolveVisionCameraFrameRendererStyle({
         canvasHeight: 800,
         canvasWidth: 400,
+        mediaHeight: 1280,
+        mediaWidth: 720,
         orientation: "down",
       }),
-    ).toMatchObject({ transform: [{ rotate: "180deg" }] });
+    ).not.toHaveProperty("transform");
+  });
+});
+
+describe("VisionCamera preferred zoom", () => {
+  it("uses 0.5x when the selected camera supports the ultra-wide zoom", () => {
+    expect(resolveVisionCameraPreferredZoom({ maxZoom: 8, minZoom: 0.5 })).toBe(
+      0.5,
+    );
+  });
+
+  it("falls back to the nearest zoom on cameras without an ultra-wide lens", () => {
+    expect(resolveVisionCameraPreferredZoom({ maxZoom: 4, minZoom: 1 })).toBe(
+      1,
+    );
   });
 });

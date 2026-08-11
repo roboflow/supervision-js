@@ -106,6 +106,111 @@ describe("media session integration", () => {
     session.destroy();
   });
 
+  it("preserves source box overrides when renderer descriptors set global styles", async () => {
+    resetMocks();
+    mediaMock.samples = [createMockSample(0, 0)];
+    const { annotationRenderers, BaseBoxStyle, createMediaSession } =
+      await import("./index");
+    const sourceBoxStyle = new BaseBoxStyle({
+      stroke: { alpha: 0.9, color: 0x22c55e, width: 3 },
+    });
+    const session = await createMediaSession({
+      container: createContainer(),
+      detections: {
+        sources: [
+          {
+            frames: [
+              {
+                detections: [
+                  {
+                    id: "model-player",
+                    rect: { height: 40, width: 20, x: 20, y: 35 },
+                  },
+                ],
+                mediaTime: 0,
+              },
+            ],
+            id: "model",
+            presentation: { boxStyle: sourceBoxStyle },
+          },
+          { frames: [], id: "draft" },
+        ],
+      },
+      media: "sample.mp4",
+      presentation: {
+        renderers: [
+          annotationRenderers.box({
+            style: new BaseBoxStyle({
+              stroke: { alpha: 0.9, color: 0xff00ff, width: 5 },
+            }),
+          }),
+        ],
+      },
+      renderer: { autoPlay: false },
+    });
+
+    const boxGraphics = pixiMock.graphicsInstances[0];
+    expect(boxGraphics.stroke).toHaveBeenLastCalledWith(
+      expect.objectContaining({ color: 0x22c55e }),
+    );
+
+    session.setPresentation({
+      renderers: [
+        annotationRenderers.box({
+          style: new BaseBoxStyle({
+            stroke: { alpha: 0.9, color: 0xf97316, width: 7 },
+          }),
+        }),
+      ],
+    });
+
+    expect(boxGraphics.stroke).toHaveBeenLastCalledWith(
+      expect.objectContaining({ color: 0x22c55e }),
+    );
+    session.destroy();
+  });
+
+  it("does not let source presentation re-enable a renderer omitted from the list", async () => {
+    resetMocks();
+    mediaMock.samples = [createMockSample(0, 0)];
+    const { annotationRenderers, BaseBoxStyle, createMediaSession } =
+      await import("./index");
+    const session = await createMediaSession({
+      container: createContainer(),
+      detections: {
+        sources: [
+          {
+            frames: [
+              {
+                detections: [
+                  {
+                    id: "model-player",
+                    rect: { height: 40, width: 20, x: 20, y: 35 },
+                  },
+                ],
+                mediaTime: 0,
+              },
+            ],
+            id: "model",
+            presentation: { boxStyle: new BaseBoxStyle() },
+          },
+        ],
+      },
+      media: "sample.mp4",
+      presentation: { renderers: [] },
+      renderer: { autoPlay: false },
+    });
+
+    expect(pixiMock.graphicsInstances[0]?.rect).not.toHaveBeenCalled();
+
+    session.setPresentation({
+      renderers: [annotationRenderers.label()],
+    });
+
+    expect(pixiMock.graphicsInstances[0]?.rect).not.toHaveBeenCalled();
+    session.destroy();
+  });
+
   it("forwards host-owned editing, brush, and preview options through a session", async () => {
     resetMocks();
     mediaMock.samples = [createMockSample(0, 0)];

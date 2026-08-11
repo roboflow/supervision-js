@@ -37,6 +37,58 @@ interface ExecutorchInstanceSegmentationRunner {
   }[];
 }
 
+export interface ExecutorchBbox {
+  readonly x1: number;
+  readonly y1: number;
+  readonly x2: number;
+  readonly y2: number;
+}
+
+/**
+ * Inverts ExecuTorch's `orientation: "up"` output mapping, converting a bbox
+ * from its "portrait screen space" back into the upright frame's coordinate
+ * space. `frameHeight` is the upright frame's height (the `h` in the forward
+ * mapping `(x, y) -> (h - y, x)`), for frames of any dimensions.
+ */
+export function unrotateExecutorchUpBbox(
+  bbox: ExecutorchBbox,
+  frameHeight: number,
+): ExecutorchBbox {
+  "worklet";
+
+  return {
+    x1: bbox.y1,
+    y1: frameHeight - bbox.x2,
+    x2: bbox.y2,
+    y2: frameHeight - bbox.x1,
+  };
+}
+
+function readExecutorchFrameHeight(frame: unknown): number | null {
+  "worklet";
+
+  const height = (frame as { readonly height?: unknown }).height;
+  return typeof height === "number" && Number.isFinite(height) ? height : null;
+}
+
+function createExecutorchUprightFrame(frame: unknown): {
+  getNativeBuffer(): { pointer: bigint; release(): void };
+  isMirrored: false;
+  orientation: "up";
+} {
+  "worklet";
+
+  const source = frame as {
+    getNativeBuffer(): { pointer: bigint; release(): void };
+  };
+
+  return {
+    getNativeBuffer: () => source.getNativeBuffer(),
+    isMirrored: false,
+    orientation: "up",
+  };
+}
+
 export interface ExecutorchVideoFrameSerializerOptions<TRunOnFrame = unknown> {
   readonly confidenceThreshold?: number;
   readonly maxInstances?: number;
@@ -59,6 +111,13 @@ export interface ExecutorchLiveSegmentationProcessorOptions<
   TRunOnFrame = unknown,
 > {
   readonly confidenceThreshold?: number;
+  /**
+   * The frame-output provider has already physically rotated its pixels into
+   * portrait. ExecuTorch still applies its camera-orientation output mapping
+   * for `orientation: "up"`, so the adapter must invert that mapping before
+   * handing detections to the renderer.
+   */
+  readonly framePixelsAreUpright?: boolean;
   readonly maxInstances?: number;
   readonly mirrorFrame?: boolean;
   readonly returnMasksAtOriginalResolution?: boolean;
@@ -76,6 +135,7 @@ export function createExecutorchLiveSegmentationProcessor<TRunOnFrame>(
   const runOnFrame =
     options.runOnFrame as ExecutorchInstanceSegmentationRunner | null;
   const confidenceThreshold = options.confidenceThreshold ?? 0.45;
+  const framePixelsAreUpright = options.framePixelsAreUpright ?? false;
   const maxInstances = options.maxInstances ?? 6;
   const mirrorFrame = options.mirrorFrame ?? false;
   const returnMasksAtOriginalResolution =
@@ -89,8 +149,13 @@ export function createExecutorchLiveSegmentationProcessor<TRunOnFrame>(
         return [];
       }
 
+      const uprightFrameHeight = framePixelsAreUpright
+        ? readExecutorchFrameHeight(frame)
+        : null;
       const rawDetections = runOnFrame(
-        frame as Parameters<ExecutorchInstanceSegmentationRunner>[0],
+        framePixelsAreUpright
+          ? createExecutorchUprightFrame(frame)
+          : (frame as Parameters<ExecutorchInstanceSegmentationRunner>[0]),
         mirrorFrame,
         {
           confidenceThreshold,
@@ -106,11 +171,15 @@ export function createExecutorchLiveSegmentationProcessor<TRunOnFrame>(
           typeof detection.label === "string" ? detection.label : "";
 
         serialized[index] = {
-          bbox: detection.bbox,
+          bbox:
+            uprightFrameHeight === null
+              ? detection.bbox
+              : unrotateExecutorchUpBbox(detection.bbox, uprightFrameHeight),
           color: resolveDetectionClassColorStyle(label).fill,
           label,
           mask: detection.mask,
           maskHeight: detection.maskHeight,
+          maskRotatedCw: uprightFrameHeight !== null,
           maskWidth: detection.maskWidth,
           score: detection.score,
         };
@@ -121,57 +190,103 @@ export function createExecutorchLiveSegmentationProcessor<TRunOnFrame>(
   };
 }
 
-export interface ExecutorchLivePoseProcessorOptions<TRunOnFrame = unknown> {
+export interface ExecutorchLivePoseRunnerOptions {
+  readonly detectionThreshold: number;
+  readonly inputSize: number;
+  readonly keypointThreshold: number;
+}
+
+/** Structural live-pose runner supplied by an inference-engine owner. */
+export type ExecutorchLivePoseRunner = (
+  frame: unknown,
+  mirrorFrame: boolean,
+  options: ExecutorchLivePoseRunnerOptions,
+) => readonly ExecutorchCocoPose[];
+
+/**
+ * Declarative pose-producer configuration. The live inference hook consumes
+ * this shape directly so its VisionCamera worklet captures the JSI runner at
+ * exactly one runtime boundary.
+ */
+export interface ExecutorchLivePoseConfiguration<TRunOnFrame = unknown> {
   readonly className?: string;
   readonly detectionThreshold?: number;
+  /** See {@link ExecutorchLiveSegmentationProcessorOptions.framePixelsAreUpright}. */
+  readonly framePixelsAreUpright?: boolean;
   readonly inputSize?: number;
   readonly keypointThreshold?: number;
+  /** Mirrors model coordinates to match a front-facing camera preview. */
+  readonly mirrorFrame?: boolean;
   readonly minimumVisibleKeypoints?: number;
   readonly runOnFrame: TRunOnFrame | null;
 }
 
+/** @deprecated Prefer passing ExecutorchLivePoseConfiguration to the live hook. */
+export type ExecutorchLivePoseProcessorOptions<TRunOnFrame = unknown> =
+  ExecutorchLivePoseConfiguration<TRunOnFrame>;
+
 export interface ExecutorchLivePoseProcessor {
-  process(frame: { readonly timestamp: number }): DetectionFrame;
+  process(frame: {
+    readonly height?: number;
+    getNativeBuffer?(): { pointer: bigint; release(): void };
+    readonly orientation?: string;
+    readonly timestamp: number;
+    readonly width?: number;
+  }): DetectionFrame;
 }
 
 /** Creates a worklet-safe COCO pose processor for a live camera session. */
 export function createExecutorchLivePoseProcessor<TRunOnFrame>(
   options: ExecutorchLivePoseProcessorOptions<TRunOnFrame>,
 ): ExecutorchLivePoseProcessor {
-  const runOnFrame = options.runOnFrame as
-    | ((
-        frame: unknown,
-        mirrorFrame: boolean,
-        options: {
-          detectionThreshold: number;
-          inputSize: number;
-          keypointThreshold: number;
-        },
-      ) => readonly ExecutorchCocoPose[])
-    | null;
+  const configuredRunOnFrame =
+    options.runOnFrame as ExecutorchLivePoseRunner | null;
+  // A model hook can report ready one render before its worklet runner crosses
+  // into the camera runtime. Keep that short transition inert rather than
+  // trying to invoke an absent runner on every camera frame.
+  const runOnFrame =
+    typeof configuredRunOnFrame === "function" ? configuredRunOnFrame : null;
   const className = options.className;
   const detectionThreshold = options.detectionThreshold ?? 0.4;
+  const framePixelsAreUpright = options.framePixelsAreUpright ?? false;
   const inputSize = options.inputSize ?? 384;
   const keypointThreshold = options.keypointThreshold ?? 0.35;
+  const mirrorFrame = options.mirrorFrame ?? false;
   const minimumVisibleKeypoints = options.minimumVisibleKeypoints;
+  // Capture the initialized worklet function here. Referencing the module
+  // binding from the nested frame worklet can capture `undefined` because the
+  // worklets Babel transform lowers declarations to assignments.
+  const createDetectionFrame = createDetectionFrameFromExecutorchCocoPoses;
+  const getUprightFrameHeight = readExecutorchFrameHeight;
+  const toUprightFrame = createExecutorchUprightFrame;
 
   return {
     process(frame) {
       "worklet";
 
+      const uprightFrameHeight = framePixelsAreUpright
+        ? getUprightFrameHeight(frame)
+        : null;
       const poses =
-        runOnFrame?.(frame, false, {
-          detectionThreshold,
-          inputSize,
-          keypointThreshold,
-        }) ?? [];
+        runOnFrame === null
+          ? []
+          : runOnFrame(
+              framePixelsAreUpright ? toUprightFrame(frame) : frame,
+              mirrorFrame,
+              {
+                detectionThreshold,
+                inputSize,
+                keypointThreshold,
+              },
+            );
 
-      return createDetectionFrameFromExecutorchCocoPoses({
+      return createDetectionFrame({
         className,
         frameIndex: Math.round(frame.timestamp),
         mediaTime: frame.timestamp / 1_000_000_000,
         minimumVisibleKeypoints,
         poses,
+        uprightFrameHeight,
       });
     },
   };
@@ -264,25 +379,20 @@ export function createExecutorchVideoFrameSerializer<TRunOnFrame>(
  *   `maskRotatedCw: true` and the ID-mask fill loops (JS and Swift) sample
  *   the rotated buffer with transposed indices.
  *
- * The live camera path is unaffected: portrait camera frames report
- * `orientation: "left"`, whose output mapping is the identity.
+ * A camera path with native-oriented buffers can keep passing its reported
+ * `orientation: "left"`, whose output mapping is the identity. A camera path
+ * that physically rotates its output instead sets `framePixelsAreUpright`,
+ * passing an `up` frame to ExecuTorch and applying this same repair live.
  */
-
-export interface ExecutorchBbox {
-  readonly x1: number;
-  readonly y1: number;
-  readonly x2: number;
-  readonly y2: number;
-}
 
 export interface ExecutorchPosePoint {
   readonly x: number;
   readonly y: number;
 }
 
-export type ExecutorchCocoPose = Readonly<
-  Record<string, ExecutorchPosePoint | undefined>
->;
+export type ExecutorchCocoPose =
+  | Readonly<Record<string, ExecutorchPosePoint | undefined>>
+  | readonly (ExecutorchPosePoint | undefined)[];
 
 export interface ExecutorchCocoPoseFrameOptions {
   readonly className?: string;
@@ -290,6 +400,8 @@ export interface ExecutorchCocoPoseFrameOptions {
   readonly mediaTime?: number;
   readonly minimumVisibleKeypoints?: number;
   readonly poses: readonly ExecutorchCocoPose[];
+  /** Inverts ExecuTorch's `orientation: "up"` point mapping when set. */
+  readonly uprightFrameHeight?: number | null;
 }
 
 /** Key order emitted by react-native-executorch's YOLO26N-Pose model. */
@@ -348,6 +460,10 @@ export function createDetectionFrameFromExecutorchCocoPoses(
 
   const detections: Detection[] = [];
   const minimumVisibleKeypoints = options.minimumVisibleKeypoints ?? 3;
+  // Keep this hot conversion independent from imported runtime enum objects.
+  // Numeric values are the stable COCO visibility contract from core.
+  const notLabeledVisibility = 0 as KeypointVisibility;
+  const visibleVisibility = 2 as KeypointVisibility;
 
   for (let poseIndex = 0; poseIndex < options.poses.length; poseIndex += 1) {
     const pose = options.poses[poseIndex]!;
@@ -366,27 +482,54 @@ export function createDetectionFrameFromExecutorchCocoPoses(
       keypointIndex += 1
     ) {
       const name = EXECUTORCH_COCO_KEYPOINT_NAMES[keypointIndex]!;
-      const point = pose[name];
+      // PoseEstimationModule can yield named keypoints, while its minimal
+      // VisionCamera runner deliberately yields the native COCO-17 array.
+      // Both shapes stay supported at this boundary without asking a demo to
+      // define a worklet-side mapper.
+      const namedPose = pose as Readonly<
+        Record<string, ExecutorchPosePoint | undefined>
+      >;
+      const indexedPose = pose as readonly (ExecutorchPosePoint | undefined)[];
+      const namedPoint = namedPose[name];
+      const indexedPoint = indexedPose[keypointIndex];
+      const point = namedPoint ?? indexedPoint;
       const isVisible =
         point !== undefined &&
-        Number.isFinite(point.x) &&
-        Number.isFinite(point.y) &&
+        typeof point.x === "number" &&
+        point.x === point.x &&
+        point.x !== Number.POSITIVE_INFINITY &&
+        point.x !== Number.NEGATIVE_INFINITY &&
+        typeof point.y === "number" &&
+        point.y === point.y &&
+        point.y !== Number.POSITIVE_INFINITY &&
+        point.y !== Number.NEGATIVE_INFINITY &&
         point.x >= 0 &&
         point.y >= 0;
 
       visible[keypointIndex] = isVisible;
 
       if (isVisible && point) {
-        points[keypointIndex] = { x: point.x, y: point.y };
-        visibility[keypointIndex] = KeypointVisibility.Visible;
-        minX = Math.min(minX, point.x);
-        minY = Math.min(minY, point.y);
-        maxX = Math.max(maxX, point.x);
-        maxY = Math.max(maxY, point.y);
+        // Inline ExecuTorch's inverse `orientation: "up"` mapping. Calling a
+        // second worklet helper from this serialized function can surface as
+        // `undefined is not a function` in VisionCamera's isolated runtime.
+        points[keypointIndex] =
+          options.uprightFrameHeight === undefined ||
+          options.uprightFrameHeight === null
+            ? { x: point.x, y: point.y }
+            : {
+                x: point.y,
+                y: options.uprightFrameHeight - point.x,
+              };
+        visibility[keypointIndex] = visibleVisibility;
+        const correctedPoint = points[keypointIndex]!;
+        minX = correctedPoint.x < minX ? correctedPoint.x : minX;
+        minY = correctedPoint.y < minY ? correctedPoint.y : minY;
+        maxX = correctedPoint.x > maxX ? correctedPoint.x : maxX;
+        maxY = correctedPoint.y > maxY ? correctedPoint.y : maxY;
         visibleCount += 1;
       } else {
         points[keypointIndex] = { x: 0, y: 0 };
-        visibility[keypointIndex] = KeypointVisibility.NotLabeled;
+        visibility[keypointIndex] = notLabeledVisibility;
       }
     }
 
@@ -408,8 +551,10 @@ export function createDetectionFrameFromExecutorchCocoPoses(
       }
     }
 
-    const width = Math.max(1, maxX - minX);
-    const height = Math.max(1, maxY - minY);
+    const rawWidth = maxX - minX;
+    const rawHeight = maxY - minY;
+    const width = rawWidth > 1 ? rawWidth : 1;
+    const height = rawHeight > 1 ? rawHeight : 1;
 
     detections[detections.length] = {
       className: options.className ?? "person",
@@ -438,10 +583,12 @@ export function createDetectionFrameFromExecutorchCocoPoses(
  */
 export function createExecutorchPoseKeypointInstructions(
   frame: DetectionFrame,
+  color = 0x22c55e,
 ): KeypointDrawInstruction[] {
   "worklet";
 
   const instructions: KeypointDrawInstruction[] = [];
+  const notLabeledVisibility = 0 as KeypointVisibility;
 
   for (
     let detectionIndex = 0;
@@ -455,49 +602,41 @@ export function createExecutorchPoseKeypointInstructions(
       continue;
     }
 
-    const color = resolveDetectionClassColorStyle(detection.className).fill;
-    const edges = geometry.edges.map(([fromIndex, toIndex]) => ({
-      from: geometry.points[fromIndex]!,
-      stroke: { alpha: 0.98, color, width: 3 },
-      to: geometry.points[toIndex]!,
-    }));
-    const markers = geometry.points.flatMap((point, index) =>
-      geometry.visibility?.[index] === KeypointVisibility.NotLabeled
-        ? []
-        : [
-            {
-              fill: { alpha: 1, color },
-              index,
-              point,
-              radius: 5,
-              shape: KeypointMarkerShape.Circle,
-              stroke: { alpha: 1, color, width: 2 },
-            },
-          ],
-    );
+    const edges: Array<KeypointDrawInstruction["edges"][number]> = [];
+    const markers: Array<KeypointDrawInstruction["markers"][number]> = [];
+
+    for (let edgeIndex = 0; edgeIndex < geometry.edges.length; edgeIndex += 1) {
+      const edge = geometry.edges[edgeIndex]!;
+      edges[edges.length] = {
+        from: geometry.points[edge[0]]!,
+        stroke: { alpha: 0.98, color, width: 3 },
+        to: geometry.points[edge[1]]!,
+      };
+    }
+
+    for (
+      let pointIndex = 0;
+      pointIndex < geometry.points.length;
+      pointIndex += 1
+    ) {
+      if (geometry.visibility?.[pointIndex] === notLabeledVisibility) {
+        continue;
+      }
+
+      markers[markers.length] = {
+        fill: { alpha: 1, color },
+        index: pointIndex,
+        point: geometry.points[pointIndex]!,
+        radius: 5,
+        // Avoid capturing an imported enum object in VisionCamera's isolated
+        // runtime. The literal is the stable renderer-neutral contract value.
+        shape: "circle" as KeypointMarkerShape,
+        stroke: { alpha: 1, color, width: 2 },
+      };
+    }
 
     instructions[instructions.length] = { edges, markers };
   }
 
   return instructions;
-}
-
-/**
- * Inverts ExecuTorch's `orientation: "up"` output mapping, converting a bbox
- * from its "portrait screen space" back into the upright frame's coordinate
- * space. `frameHeight` is the upright frame's height (the `h` in the forward
- * mapping `(x, y) -> (h - y, x)`), for frames of any dimensions.
- */
-export function unrotateExecutorchUpBbox(
-  bbox: ExecutorchBbox,
-  frameHeight: number,
-): ExecutorchBbox {
-  "worklet";
-
-  return {
-    x1: bbox.y1,
-    y1: frameHeight - bbox.x2,
-    x2: bbox.y2,
-    y2: frameHeight - bbox.x1,
-  };
 }

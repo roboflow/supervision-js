@@ -40,6 +40,10 @@ Start here for normal application code:
 - `MediaSessionActivity`
 - media controls on `MediaSession`: `play`, `pause`, `seek`, frame stepping,
   playback rate, and current-presentation `refresh`;
+- `session.captureFrame()` when a host needs an encoded JPEG `Blob` for the
+  raw media frame currently presented by the renderer. The result includes that
+  frame's media timestamp and dimensions; it never exposes a renderer canvas
+  or composited annotations;
 - renderer source/frame readouts for timeline UI, including estimated frame
   rate, count, and current index while media timestamps remain canonical;
 - `DetectionFrame`
@@ -58,12 +62,55 @@ Start here for normal application code:
 - `BaseLabelStyle`
 - `BaseInteractionStyle`
 - `BaseFocusStyle`
+- `annotationRenderers`
+- `annotationRendererKinds`
+- `AnnotationRenderer`
+- `AnnotationRendererKind`
 - `prepareMedia()`
 - `prepareMediaProgressively()`
 - `probeMedia()`
 
 These are the concepts a user should be able to understand without knowing how
 Pixi, Mediabunny, workers, or prepared mask artifacts are wired internally.
+
+## Annotation Renderers
+
+`MediaRendererPresentation.renderers` is the unified presentation surface for
+annotation visualization. An annotation renderer consumes semantic detections
+and contributes to the renderer-owned scene. The built-ins retain the
+established draw order and backend paths for masks, boxes, vectors, and labels.
+
+```ts
+import { annotationRenderers, BaseBoxStyle, BaseLabelStyle } from "supervision";
+
+session.setPresentation({
+  renderers: [
+    annotationRenderers.box({
+      style: new BaseBoxStyle({
+        stroke: { color: 0x8b5cf6, width: 2 },
+      }),
+    }),
+    annotationRenderers.label({
+      style: new BaseLabelStyle(),
+    }),
+  ],
+});
+```
+
+The current built-ins are `box`, `mask`, `polygon`, `polyline`, `keypoints`,
+and `label`; `annotationRendererKinds` enumerates that vocabulary and
+`AnnotationRendererKind` names it in application code. When supplied, the list
+is authoritative: omitted built-ins are
+disabled, and `renderers: []` disables every built-in layer. For a listed
+renderer, an explicit `style` wins; otherwise its matching legacy style field
+provides the default. A source-specific override can refine a selected layer,
+but cannot re-enable an omitted layer. The existing `boxStyle`, `maskStyle`,
+and related presentation fields remain supported for compatibility and
+source-specific style overrides. New global presentation code should prefer
+the renderer list.
+Do not pass Pixi display objects or custom drawing callbacks: the public API
+describes semantic renderer configuration while the browser backend owns
+composition and resource lifetime.
 
 ## Advanced Public API
 
