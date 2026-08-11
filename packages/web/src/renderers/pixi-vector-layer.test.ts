@@ -159,7 +159,7 @@ describe("pixi vector layer", () => {
         {
           fill: { alpha: 1, color: 0xff0000 },
           kind: ShapeInstructionKind.Marker,
-          point: { x: 30, y: 20 },
+          center: { x: 30, y: 20 },
           shape: MarkerShape.Triangle,
           size: 12,
           sizeSpace: MarkerSizeSpace.Screen,
@@ -167,7 +167,7 @@ describe("pixi vector layer", () => {
         {
           fill: { alpha: 1, color: 0x00ff00 },
           kind: ShapeInstructionKind.Marker,
-          point: { x: 30, y: 40 },
+          center: { x: 30, y: 40 },
           shape: MarkerShape.Circle,
           size: 10,
           sizeSpace: MarkerSizeSpace.Screen,
@@ -226,7 +226,7 @@ describe("pixi vector layer", () => {
       resolve: () => [
         {
           kind: ShapeInstructionKind.Marker,
-          point: { x: 30, y: 40 },
+          center: { x: 30, y: 40 },
           shape: MarkerShape.Circle,
           size: 10,
           sizeSpace: MarkerSizeSpace.Media,
