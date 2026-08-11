@@ -51,6 +51,19 @@ describe("pixi polygon layer", () => {
         },
       }),
     ).toBe(false);
+    expect(
+      canPreparePolygonInstruction({
+        points,
+        stroke: {
+          alpha: 1,
+          cap: "round",
+          color: 0xffffff,
+          join: "bevel",
+          miterLimit: 7,
+          width: 3,
+        },
+      }),
+    ).toBe(false);
   });
 
   it("resolves ordered worker instructions with screen-space stroke widths", () => {

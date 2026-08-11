@@ -21,18 +21,33 @@ describe("vector presentation styles", () => {
       { x: 3, y: 6 },
     ];
     expect(
-      new BasePolygonStyle().resolve({ polygon: { points } }, context),
+      new BasePolygonStyle({
+        stroke: { cap: "round", join: "bevel", miterLimit: 7 },
+      }).resolve({ polygon: { points } }, context),
     ).toMatchObject({
       points,
       fill: { alpha: 0.16 },
-      stroke: { width: 2 },
+      stroke: { cap: "round", join: "bevel", miterLimit: 7, width: 2 },
     });
     expect(
-      new BasePolylineStyle({ stroke: { dash: [6, 4], width: 3 } }).resolve(
-        { polyline: { points } },
-        context,
-      ),
-    ).toMatchObject({ stroke: { dash: [6, 4], width: 3 } });
+      new BasePolylineStyle({
+        stroke: {
+          cap: "square",
+          dash: [6, 4],
+          join: "round",
+          miterLimit: 5,
+          width: 3,
+        },
+      }).resolve({ polyline: { points } }, context),
+    ).toMatchObject({
+      stroke: {
+        cap: "square",
+        dash: [6, 4],
+        join: "round",
+        miterLimit: 5,
+        width: 3,
+      },
+    });
   });
 
   it("uses schema colors, shadows, and occluded cross markers", () => {
@@ -46,6 +61,13 @@ describe("vector presentation styles", () => {
           ],
         },
       },
+      edgeShadowStroke: {
+        cap: "square",
+        join: "bevel",
+        miterLimit: 8,
+      },
+      edgeStroke: { cap: "round", join: "round", miterLimit: 6 },
+      markerStroke: { cap: "butt", join: "miter", miterLimit: 4 },
     }).resolve(
       {
         className: "person",
@@ -64,10 +86,21 @@ describe("vector presentation styles", () => {
     expect(instruction?.markers[0]).toMatchObject({
       fill: { color: 0xabcdef },
       shape: KeypointMarkerShape.Cross,
+      stroke: { cap: "butt", join: "miter", miterLimit: 4 },
     });
     expect(instruction?.edges[0]).toMatchObject({
-      shadowStroke: { color: 0x000000 },
-      stroke: { color: 0x123456 },
+      shadowStroke: {
+        cap: "square",
+        color: 0x000000,
+        join: "bevel",
+        miterLimit: 8,
+      },
+      stroke: {
+        cap: "round",
+        color: 0x123456,
+        join: "round",
+        miterLimit: 6,
+      },
     });
   });
 });

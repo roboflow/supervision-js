@@ -31,7 +31,10 @@ describe("base presentation styles", () => {
       shouldRender: (detection) => (detection.confidence ?? 0) >= 0.5,
       stroke: (detection) => ({
         alignment: BoxStrokeAlignment.Inside,
+        cap: "round",
         color: detection.className === "person" ? 0x22c55e : 0xa855f7,
+        join: "bevel",
+        miterLimit: 7,
         width: 3,
       }),
     });
@@ -56,7 +59,10 @@ describe("base presentation styles", () => {
       stroke: {
         alignment: BoxStrokeAlignment.Inside,
         alpha: 1,
+        cap: "round",
         color: 0x22c55e,
+        join: "bevel",
+        miterLimit: 7,
         width: 3,
       },
     });
@@ -294,7 +300,10 @@ describe("base presentation styles", () => {
           : null,
       stroke: (detection, context) => ({
         alpha: context.state === DetectionInteractionState.Selected ? 1 : 0.85,
+        cap: "square",
         color: detection.className === "person" ? 0x22c55e : 0x38bdf8,
+        join: "round",
+        miterLimit: 5,
         width: context.state === DetectionInteractionState.Selected ? 5 : 3,
       }),
     });
@@ -332,7 +341,10 @@ describe("base presentation styles", () => {
       shape: BoxShape.Rect,
       stroke: {
         alpha: 0.85,
+        cap: "square",
         color: 0x22c55e,
+        join: "round",
+        miterLimit: 5,
         width: 3,
       },
     });

@@ -1,4 +1,5 @@
 import { resolveStyleValue } from "#styles/style-value";
+import { resolveStrokeStyle } from "#styles/stroke-style";
 import type { BoxFillStyle, BoxStrokeStyle } from "#types/box-style";
 import {
   KeypointVisibility,
@@ -83,20 +84,24 @@ export class BaseKeypointStyle implements KeypointStyle {
     const edges = geometry.edges.map(([fromIndex, toIndex], edgeIndex) => ({
       from: geometry.points[fromIndex]!,
       to: geometry.points[toIndex]!,
-      stroke: {
-        alpha: edgeStroke?.alpha ?? 1,
-        color:
-          definition?.edges[edgeIndex]?.color ?? edgeStroke?.color ?? 0x00ff66,
-        width: edgeStroke?.width ?? 2,
-      },
+      stroke: resolveStrokeStyle(
+        definition?.edges[edgeIndex]?.color === undefined
+          ? edgeStroke
+          : { ...edgeStroke, color: definition.edges[edgeIndex].color },
+        {
+          alpha: 1,
+          color: 0x00ff66,
+          width: 2,
+        },
+      ),
       ...(shadowStroke === null
         ? {}
         : {
-            shadowStroke: {
-              alpha: shadowStroke?.alpha ?? 0.65,
-              color: shadowStroke?.color ?? 0x000000,
-              width: shadowStroke?.width ?? 4,
-            },
+            shadowStroke: resolveStrokeStyle(shadowStroke, {
+              alpha: 0.65,
+              color: 0x000000,
+              width: 4,
+            }),
           }),
     }));
     const markers = geometry.points.flatMap((point, index) => {
@@ -123,11 +128,11 @@ export class BaseKeypointStyle implements KeypointStyle {
             visibility === KeypointVisibility.Occluded
               ? KeypointMarkerShape.Cross
               : KeypointMarkerShape.Circle,
-          stroke: {
-            alpha: markerStroke?.alpha ?? 1,
-            color: markerStroke?.color ?? 0xffffff,
-            width: markerStroke?.width ?? 2,
-          },
+          stroke: resolveStrokeStyle(markerStroke, {
+            alpha: 1,
+            color: 0xffffff,
+            width: 2,
+          }),
         },
       ];
     });

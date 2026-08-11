@@ -32,6 +32,7 @@ export type {
   MediaFrameDiagnostics,
   MediaFrameRenderTimings,
   MediaRendererDiagnosticsOptions,
+  MediaRendererAssetError,
   MediaRendererPresentation,
   MediaRendererQuality,
   MediaRendererState,
