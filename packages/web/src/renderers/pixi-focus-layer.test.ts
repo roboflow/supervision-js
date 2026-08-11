@@ -4,6 +4,7 @@ import { PreparedMaskFrameKind } from "#render-preparation/mask-frame-artifact";
 import { createPixiFocusLayer } from "#renderers/pixi-focus-layer";
 import { BaseFocusStyle } from "supervision-js-core";
 import { BoxShape } from "supervision-js-core";
+import { encodeCompressedRleCounts } from "supervision-js-core";
 import { FocusTargetMode } from "supervision-js-core";
 import {
   DetectionMaskEncoding,
@@ -224,12 +225,24 @@ describe("pixi focus layer", () => {
     expect(graphics.fill).not.toHaveBeenCalled();
   });
 
-  it("uses one bounds cutout while a mask artifact is unavailable", () => {
+  it("uses a bounds cutout for an unreadable mask when an ID-mask artifact is unavailable", () => {
+    const unreadableMaskFrame: DetectionFrame = {
+      ...maskFrame,
+      detections: [
+        {
+          ...maskFrame.detections[0]!,
+          mask: {
+            ...maskFrame.detections[0]!.mask!,
+            width: 0,
+          },
+        },
+      ],
+    };
     const selectedPick = {
-      detection: maskFrame.detections[0]!,
+      detection: unreadableMaskFrame.detections[0]!,
       detectionIndex: 0,
-      frame: maskFrame,
-      mediaTime: maskFrame.mediaTime,
+      frame: unreadableMaskFrame,
+      mediaTime: unreadableMaskFrame.mediaTime,
       point: { x: 15, y: 20 },
       target: DetectionPickTarget.Mask,
     };
@@ -247,15 +260,121 @@ describe("pixi focus layer", () => {
     }) as FakeGraphics;
 
     layer.drawFrame({
-      frame: maskFrame,
+      frame: unreadableMaskFrame,
       hoveredPick: null,
-      mediaTime: maskFrame.mediaTime,
+      mediaTime: unreadableMaskFrame.mediaTime,
       selectedPick,
     });
 
     expect(display.roundRect).toHaveBeenCalledOnce();
     expect(display.roundRect).toHaveBeenCalledWith(10, 15, 20, 30, 6);
     expect(display.cut).toHaveBeenCalledOnce();
+  });
+
+  it("uses the semantic mask shape when an ID-mask artifact is unavailable", () => {
+    const semanticMaskFrame: DetectionFrame = {
+      detections: [
+        {
+          className: "player",
+          id: "player-1",
+          mask: {
+            counts: encodeCompressedRleCounts([4, 2, 3, 2, 5]),
+            encoding: DetectionMaskEncoding.CompressedRle,
+            height: 4,
+            width: 4,
+          },
+          rect: { height: 30, width: 20, x: 20, y: 30 },
+        },
+      ],
+      frameIndex: 3,
+      mediaTime: 0.1,
+    };
+    const selectedPick = {
+      detection: semanticMaskFrame.detections[0]!,
+      detectionIndex: 0,
+      frame: semanticMaskFrame,
+      mediaTime: semanticMaskFrame.mediaTime,
+      point: { x: 15, y: 20 },
+      target: DetectionPickTarget.Mask,
+    };
+    const layer = createPixiFocusLayer({
+      Graphics: FakeGraphics as never,
+      focusStyle: new BaseFocusStyle({
+        cornerRadius: 6,
+        fill: { alpha: 0.5, color: 0x000000 },
+        shape: BoxShape.RoundedRect,
+      }),
+    });
+    const display = layer.createDisplay({
+      height: 80,
+      width: 120,
+    }) as FakeGraphics;
+
+    layer.drawFrame({
+      frame: semanticMaskFrame,
+      hoveredPick: null,
+      mediaTime: semanticMaskFrame.mediaTime,
+      selectedPick,
+    });
+
+    expect(display.roundRect).not.toHaveBeenCalled();
+    expect(display.rect).toHaveBeenNthCalledWith(1, 0, 0, 120, 80);
+    expect(display.rect).toHaveBeenCalledWith(30, 0, 30, 20);
+    expect(display.rect).toHaveBeenCalledWith(30, 20, 60, 20);
+    expect(display.rect).toHaveBeenCalledWith(60, 40, 30, 20);
+    expect(display.cut).toHaveBeenCalledOnce();
+  });
+
+  it("does not fall back to bounds for a readable empty mask", () => {
+    const emptyMaskFrame: DetectionFrame = {
+      detections: [
+        {
+          className: "player",
+          id: "player-1",
+          mask: {
+            counts: encodeCompressedRleCounts([16]),
+            encoding: DetectionMaskEncoding.CompressedRle,
+            height: 4,
+            width: 4,
+          },
+          rect: { height: 30, width: 20, x: 20, y: 30 },
+        },
+      ],
+      frameIndex: 3,
+      mediaTime: 0.1,
+    };
+    const selectedPick = {
+      detection: emptyMaskFrame.detections[0]!,
+      detectionIndex: 0,
+      frame: emptyMaskFrame,
+      mediaTime: emptyMaskFrame.mediaTime,
+      point: { x: 15, y: 20 },
+      target: DetectionPickTarget.Mask,
+    };
+    const layer = createPixiFocusLayer({
+      Graphics: FakeGraphics as never,
+      focusStyle: new BaseFocusStyle({
+        cornerRadius: 6,
+        fill: { alpha: 0.5, color: 0x000000 },
+        shape: BoxShape.RoundedRect,
+      }),
+    });
+    const display = layer.createDisplay({
+      height: 80,
+      width: 120,
+    }) as FakeGraphics;
+
+    layer.drawFrame({
+      frame: emptyMaskFrame,
+      hoveredPick: null,
+      mediaTime: emptyMaskFrame.mediaTime,
+      selectedPick,
+    });
+
+    expect(display.roundRect).not.toHaveBeenCalled();
+    expect(display.rect).toHaveBeenCalledOnce();
+    expect(display.rect).toHaveBeenCalledWith(0, 0, 120, 80);
+    expect(display.cut).not.toHaveBeenCalled();
   });
 });
 
