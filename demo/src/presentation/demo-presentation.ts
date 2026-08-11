@@ -16,6 +16,7 @@ import {
   annotationRenderers,
   type BoxDrawInstruction,
   type BoxStyle,
+  type BoxStyleContext,
   type Detection,
   type FocusStyle,
   type InteractionStyle,
@@ -199,6 +200,9 @@ export function createDemoPresentation(
     // letterbox around non-matching aspect ratios.
     backgroundColor: 0xf3f4f6,
     boxStyle,
+    // Class visibility rides the renderer-owned visibility contract so every
+    // layer and the prepared-mask cache invalidate consistently.
+    visibility: { hiddenClasses: settings.hiddenClasses },
     focusStyle: settings.focusEnabled ? createDemoFocusStyle(settings) : null,
     interactionStyle: createDemoInteractionStyle(settings),
     keypointStyle,
@@ -231,7 +235,7 @@ function createDemoPolygonStyle(
       alpha: settings.polygonFillAlpha,
       color: resolveClassStyle(detection, settings).fill,
     }),
-    shouldRender: (detection) => passesDetectionFilters(detection, settings),
+    shouldRender: (detection) => passesConfidenceThreshold(detection, settings),
     stroke: (detection) => ({
       alpha: 1,
       color: resolveClassStyle(detection, settings).stroke,
@@ -244,7 +248,7 @@ function createDemoPolylineStyle(
   settings: DemoPresentationSettings,
 ): PolylineStyle {
   return new BasePolylineStyle({
-    shouldRender: (detection) => passesDetectionFilters(detection, settings),
+    shouldRender: (detection) => passesConfidenceThreshold(detection, settings),
     stroke: (detection) => ({
       alpha: 1,
       color: resolveClassStyle(detection, settings).stroke,
@@ -277,14 +281,21 @@ function createDemoKeypointStyle(
       width: 1,
     }),
     radius: settings.keypointRadius,
-    shouldRender: (detection) => passesDetectionFilters(detection, settings),
+    shouldRender: (detection) => passesConfidenceThreshold(detection, settings),
   });
 }
 
 function createDemoBoxStyle(settings: DemoPresentationSettings): BoxStyle {
   return {
-    resolve(detection: Detection): BoxDrawInstruction | undefined {
-      if (!detection.rect || !passesDetectionFilters(detection, settings)) {
+    resolve(
+      detection: Detection,
+      context: BoxStyleContext,
+    ): BoxDrawInstruction | undefined {
+      if (
+        !detection.rect ||
+        context.hidden ||
+        !passesConfidenceThreshold(detection, settings)
+      ) {
         return undefined;
       }
 
@@ -335,12 +346,18 @@ function createDemoFocusStyle(settings: DemoPresentationSettings): FocusStyle {
               ...context,
               hoveredPick:
                 context.hoveredPick &&
-                passesDetectionFilters(context.hoveredPick.detection, settings)
+                passesConfidenceThreshold(
+                  context.hoveredPick.detection,
+                  settings,
+                )
                   ? context.hoveredPick
                   : null,
               selectedPick:
                 context.selectedPick &&
-                passesDetectionFilters(context.selectedPick.detection, settings)
+                passesConfidenceThreshold(
+                  context.selectedPick.detection,
+                  settings,
+                )
                   ? context.selectedPick
                   : null,
             }
@@ -352,7 +369,7 @@ function createDemoFocusStyle(settings: DemoPresentationSettings): FocusStyle {
       }
 
       const targets = instruction.targets.filter((target) =>
-        passesDetectionFilters(target.detection, settings),
+        passesConfidenceThreshold(target.detection, settings),
       );
 
       return targets.length === 0 ? undefined : { ...instruction, targets };
@@ -382,7 +399,9 @@ function hasRenderableFocusTarget(
     picks.push(context.hoveredPick);
   }
 
-  return picks.some((pick) => passesDetectionFilters(pick.detection, settings));
+  return picks.some((pick) =>
+    passesConfidenceThreshold(pick.detection, settings),
+  );
 }
 
 function resolveBoxShape(cornerRadius: number): BoxShape {
@@ -394,7 +413,6 @@ function createDemoMaskStyle(settings: DemoPresentationSettings): MaskStyle {
     artifactKey: [
       "demo-mask",
       settings.confidenceThreshold,
-      serializeHiddenClasses(settings.hiddenClasses),
       settings.maskMode,
       settings.maskFillAlpha,
       settings.maskStrokeAlpha,
@@ -404,7 +422,7 @@ function createDemoMaskStyle(settings: DemoPresentationSettings): MaskStyle {
     opacity: settings.maskOpacity,
 
     resolve(detection: Detection): MaskDrawInstruction | undefined {
-      if (!detection.mask || !passesDetectionFilters(detection, settings)) {
+      if (!detection.mask || !passesConfidenceThreshold(detection, settings)) {
         return undefined;
       }
 
@@ -448,7 +466,7 @@ function createDemoLabelStyle(settings: DemoPresentationSettings): LabelStyle {
       y: settings.labelOffsetY,
     },
     placement: settings.labelPlacement,
-    shouldRender: (detection) => passesDetectionFilters(detection, settings),
+    shouldRender: (detection) => passesConfidenceThreshold(detection, settings),
     textStyle: (detection) => ({
       color: resolveClassStyle(detection, settings).labelText,
       fontFamily:
@@ -472,7 +490,7 @@ function createDemoInteractionStyle(
       DetectionInteractionState.Selected,
     ),
     shouldRender: (detection) =>
-      passesDetectionFilters(detection, settings) &&
+      passesConfidenceThreshold(detection, settings) &&
       (settings.boxesEnabled ||
         settings.masksEnabled ||
         settings.polygonsEnabled ||
@@ -517,7 +535,7 @@ function createDemoInteractionPolygonStyle(
         : settings.interactionHoverFillAlpha,
       color: resolveClassStyle(detection, settings).fill,
     }),
-    shouldRender: (detection) => passesDetectionFilters(detection, settings),
+    shouldRender: (detection) => passesConfidenceThreshold(detection, settings),
     stroke: (detection) => ({
       alpha: 1,
       color: resolveClassStyle(detection, settings).stroke,
@@ -535,7 +553,7 @@ function createDemoInteractionPolylineStyle(
   const isSelected = state === DetectionInteractionState.Selected;
 
   return new BasePolylineStyle({
-    shouldRender: (detection) => passesDetectionFilters(detection, settings),
+    shouldRender: (detection) => passesConfidenceThreshold(detection, settings),
     stroke: (detection) => ({
       alpha: 1,
       color: resolveClassStyle(detection, settings).stroke,
@@ -575,7 +593,7 @@ function createDemoInteractionKeypointStyle(
       width: 1,
     }),
     radius: settings.keypointRadius,
-    shouldRender: (detection) => passesDetectionFilters(detection, settings),
+    shouldRender: (detection) => passesConfidenceThreshold(detection, settings),
   });
 }
 
@@ -584,8 +602,15 @@ function createDemoInteractionBoxStyle(
   state: DetectionInteractionState,
 ): BoxStyle {
   return {
-    resolve(detection: Detection): BoxDrawInstruction | undefined {
-      if (!detection.rect || !passesDetectionFilters(detection, settings)) {
+    resolve(
+      detection: Detection,
+      context: BoxStyleContext,
+    ): BoxDrawInstruction | undefined {
+      if (
+        !detection.rect ||
+        context.hidden ||
+        !passesConfidenceThreshold(detection, settings)
+      ) {
         return undefined;
       }
 
@@ -622,7 +647,7 @@ function createDemoInteractionMaskStyle(
 ): MaskStyle {
   return {
     resolve(detection: Detection): MaskDrawInstruction | undefined {
-      if (!detection.mask || !passesDetectionFilters(detection, settings)) {
+      if (!detection.mask || !passesConfidenceThreshold(detection, settings)) {
         return undefined;
       }
 
@@ -647,15 +672,11 @@ function createDemoInteractionMaskStyle(
   };
 }
 
-function passesDetectionFilters(
+function passesConfidenceThreshold(
   detection: Detection,
   settings: DemoPresentationSettings,
 ) {
-  return (
-    (detection.confidence ?? 1) >= settings.confidenceThreshold &&
-    (!detection.className ||
-      !settings.hiddenClasses.includes(detection.className))
-  );
+  return (detection.confidence ?? 1) >= settings.confidenceThreshold;
 }
 
 export function resolveDemoClassStyle(
@@ -695,10 +716,6 @@ function resolveDemoLabelTextColor(color: number) {
   const luminance = (red * 299 + green * 587 + blue * 114) / 1000;
 
   return luminance >= 150 ? 0x111111 : 0xffffff;
-}
-
-function serializeHiddenClasses(hiddenClasses: readonly string[]) {
-  return [...hiddenClasses].sort().join(",");
 }
 
 function serializeMaskClassStyles(styles: Record<string, DemoClassStyle>) {
