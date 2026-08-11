@@ -11,24 +11,33 @@ import type {
   Sprite as PixiSprite,
   Texture as PixiTexture,
 } from "pixi.js";
+import type {
+  GifSource as PixiGifSource,
+  GifSprite as PixiGifSprite,
+} from "pixi.js/gif";
+
+type RegionAsset = PixiTexture | PixiGifSource;
+type RegionDisplay = PixiSprite | PixiGifSprite;
 
 interface RegionAssetLoader {
-  load<T = PixiTexture>(src: string): Promise<T>;
+  load<T = RegionAsset>(src: string): Promise<T>;
   unload(src: string): Promise<void>;
 }
 
 interface RegionSpriteEntry {
-  readonly display: PixiSprite;
+  readonly display: RegionDisplay;
+  readonly rendererId: string;
+  readonly src: string;
   active: boolean;
 }
 
 interface RegionAssetLease {
-  readonly texture: Promise<PixiTexture>;
+  readonly asset: Promise<RegionAsset>;
   release(): void;
 }
 
 interface SharedAssetEntry {
-  readonly texture: Promise<PixiTexture>;
+  readonly asset: Promise<RegionAsset>;
   references: number;
 }
 
@@ -49,6 +58,11 @@ export interface PixiRegionLayer {
 export function createPixiRegionLayer(options: {
   readonly Assets: RegionAssetLoader;
   readonly Container: new () => PixiContainer;
+  readonly GifSprite: new (options: {
+    readonly autoPlay?: boolean;
+    readonly loop?: boolean;
+    readonly source: PixiGifSource;
+  }) => PixiGifSprite;
   readonly Sprite: new (options: { texture: PixiTexture }) => PixiSprite;
   readonly detectionTimeline: BufferedDetectionTimeline;
   readonly onInvalidate?: () => void;
@@ -73,11 +87,11 @@ export function createPixiRegionLayer(options: {
     {
       readonly src: string;
       readonly lease: RegionAssetLease;
-      texture?: PixiTexture;
+      asset?: RegionAsset;
     }
   >();
   const entries = new Map<string, RegionSpriteEntry>();
-  const pool: RegionSpriteEntry[] = [];
+  const pools = new Map<string, RegionSpriteEntry[]>();
 
   syncAssets();
 
@@ -102,7 +116,7 @@ export function createPixiRegionLayer(options: {
       if (currentFrame) {
         for (const [rendererIndex, renderer] of renderers.entries()) {
           const asset = assets.get(renderer.id);
-          if (!asset?.texture) continue;
+          if (!asset?.asset) continue;
 
           for (const [
             detectionIndex,
@@ -130,8 +144,8 @@ export function createPixiRegionLayer(options: {
               detection,
               detectionIndex,
             );
-            const entry = ensureEntry(key, asset.texture);
-            positionSprite(entry.display, renderer, region, asset.texture);
+            const entry = ensureEntry(key, renderer.id, asset.src, asset.asset);
+            positionSprite(entry.display, renderer, region, asset.asset);
             entry.display.zIndex =
               (renderer.compose?.zIndex ?? 0) * 1_000_000 +
               rendererIndex * 10_000 +
@@ -147,8 +161,12 @@ export function createPixiRegionLayer(options: {
       for (const [key, entry] of entries) {
         if (activeKeys.has(key)) continue;
         entry.display.visible = false;
+        pauseAnimatedDisplay(entry.display);
         entries.delete(key);
+        const poolKey = resolvePoolKey(entry.rendererId, entry.src);
+        const pool = pools.get(poolKey) ?? [];
         pool.push(entry);
+        pools.set(poolKey, pool);
       }
 
       return { activeDetectionIndexes: [...activeDetectionIndexes] };
@@ -162,14 +180,9 @@ export function createPixiRegionLayer(options: {
 
     destroy() {
       destroyed = true;
+      destroyAllDisplays();
       for (const asset of assets.values()) asset.lease.release();
       assets.clear();
-      for (const entry of [...entries.values(), ...pool]) {
-        entry.display.removeFromParent?.();
-        entry.display.destroy();
-      }
-      entries.clear();
-      pool.length = 0;
       container = undefined;
       currentFrame = undefined;
     },
@@ -182,6 +195,7 @@ export function createPixiRegionLayer(options: {
 
     for (const [id, asset] of assets) {
       if (desired.get(id) === asset.src) continue;
+      destroyRendererDisplays(id);
       asset.lease.release();
       assets.delete(id);
     }
@@ -192,13 +206,13 @@ export function createPixiRegionLayer(options: {
       const asset: {
         readonly src: string;
         readonly lease: RegionAssetLease;
-        texture?: PixiTexture;
+        asset?: RegionAsset;
       } = { lease, src };
       assets.set(id, asset);
-      void lease.texture.then(
-        (texture) => {
+      void lease.asset.then(
+        (loadedAsset) => {
           if (destroyed || assets.get(id) !== asset) return;
-          asset.texture = texture;
+          asset.asset = loadedAsset;
           options.onInvalidate?.();
         },
         (error) => {
@@ -209,22 +223,72 @@ export function createPixiRegionLayer(options: {
     }
   }
 
-  function ensureEntry(key: string, texture: PixiTexture) {
+  function ensureEntry(
+    key: string,
+    rendererId: string,
+    src: string,
+    asset: RegionAsset,
+  ) {
     let entry = entries.get(key);
     if (entry) return entry;
 
-    entry = pool.pop();
+    const poolKey = resolvePoolKey(rendererId, src);
+    const pool = pools.get(poolKey);
+    entry = pool?.pop();
+    if (pool?.length === 0) pools.delete(poolKey);
     if (entry) {
-      entry.display.texture = texture;
+      resumeAnimatedDisplay(entry.display);
     } else {
-      const display = new options.Sprite({ texture });
+      const display = isGifSource(asset)
+        ? new options.GifSprite({ autoPlay: true, loop: true, source: asset })
+        : new options.Sprite({ texture: asset });
       display.anchor.set(0.5);
       container?.addChild(display);
-      entry = { active: false, display };
+      entry = { active: false, display, rendererId, src };
     }
     entries.set(key, entry);
     return entry;
   }
+
+  function destroyRendererDisplays(rendererId: string) {
+    for (const [key, entry] of entries) {
+      if (entry.rendererId !== rendererId) continue;
+      destroyDisplay(entry.display);
+      entries.delete(key);
+    }
+    for (const [key, pool] of pools) {
+      const retained = pool.filter((entry) => {
+        if (entry.rendererId !== rendererId) return true;
+        destroyDisplay(entry.display);
+        return false;
+      });
+      if (retained.length > 0) pools.set(key, retained);
+      else pools.delete(key);
+    }
+  }
+
+  function destroyAllDisplays() {
+    for (const entry of entries.values()) destroyDisplay(entry.display);
+    for (const pool of pools.values()) {
+      for (const entry of pool) destroyDisplay(entry.display);
+    }
+    entries.clear();
+    pools.clear();
+  }
+}
+
+function destroyDisplay(display: RegionDisplay) {
+  display.removeFromParent?.();
+  // GifSprite sources are shared and released through Assets.unload().
+  display.destroy();
+}
+
+function pauseAnimatedDisplay(display: RegionDisplay) {
+  if ("stop" in display && typeof display.stop === "function") display.stop();
+}
+
+function resumeAnimatedDisplay(display: RegionDisplay) {
+  if ("play" in display && typeof display.play === "function") display.play();
 }
 
 function matchesTarget(
@@ -298,18 +362,18 @@ function resolveRegion(
 }
 
 function positionSprite(
-  sprite: PixiSprite,
+  sprite: RegionDisplay,
   renderer: RegionAnnotationRenderer,
   region: Rect,
-  texture: PixiTexture,
+  asset: RegionAsset,
 ) {
   const scale = finiteOr(renderer.transform?.scale, 1);
   const opacity = Math.min(
     1,
     Math.max(0, finiteOr(renderer.transform?.opacity, 1)),
   );
-  const sourceWidth = Math.max(1, texture.width);
-  const sourceHeight = Math.max(1, texture.height);
+  const sourceWidth = Math.max(1, asset.width);
+  const sourceHeight = Math.max(1, asset.height);
   const containScale = Math.min(
     region.width / sourceWidth,
     region.height / sourceHeight,
@@ -324,6 +388,16 @@ function positionSprite(
     region.y + finiteOr(offset?.y, 0) * region.height,
   );
   sprite.rotation = finiteOr(renderer.transform?.rotation, 0);
+}
+
+function isGifSource(asset: RegionAsset): asset is PixiGifSource {
+  return (
+    "totalFrames" in asset && "frames" in asset && Array.isArray(asset.frames)
+  );
+}
+
+function resolvePoolKey(rendererId: string, src: string) {
+  return JSON.stringify([rendererId, src]);
 }
 
 function resolveSpriteKey(
@@ -349,7 +423,7 @@ function acquireAsset(
   }
   let entry = cache.get(src);
   if (!entry) {
-    entry = { references: 0, texture: loader.load<PixiTexture>(src) };
+    entry = { asset: loader.load<RegionAsset>(src), references: 0 };
     cache.set(src, entry);
   }
   entry.references += 1;
@@ -362,11 +436,11 @@ function acquireAsset(
       entry!.references -= 1;
       if (entry!.references > 0) return;
       cache!.delete(src);
-      void entry!.texture.then(
+      void entry!.asset.then(
         () => loader.unload(src),
         () => undefined,
       );
     },
-    texture: entry.texture,
+    asset: entry.asset,
   };
 }

@@ -6,9 +6,9 @@ summary: Place image assets over detection bounds or keypoint anchors.
 # Asset Regions
 
 The region annotation renderer places a browser-loadable image over a region
-owned by a semantic detection. It is useful for hats, badges, logos, and other
-assets that should follow objects across playback without exposing a Pixi
-texture or display object to application code.
+owned by a semantic detection. It is useful for animated GIFs, badges, logos,
+and other assets that should follow objects across playback without exposing a
+Pixi texture, animation source, or display object to application code.
 
 <div class="supervision-layer-playground">
   <iframe
@@ -19,22 +19,23 @@ texture or display object to application code.
 </div>
 
 The playground uses the frozen basketball fixture's real COCO pose keypoints.
-Its hat is an original repository asset, loaded by the browser renderer and
-anchored to the visible face keypoints of each player.
+Its looping fire GIF is an original repository asset, loaded and animated by
+the browser renderer, then anchored to the visible face keypoints of each
+player.
 
 ## Add an asset region renderer
 
 ```ts
-const hatUrl = new URL("./hat.png", import.meta.url).href;
+const fireGifUrl = new URL("./fire.gif", import.meta.url).href;
 
 session.setPresentation({
   renderers: [
     annotationRenderers.region({
-      id: "player-hat",
+      id: "player-fire",
       target: {
         className: ["white team player", "yellow team player"],
       },
-      source: { kind: "asset", asset: { src: hatUrl } },
+      source: { kind: "asset", asset: { src: fireGifUrl } },
       region: { kind: "keypoint-anchor", anchor: "head" },
       transform: {
         scale: 1.35,
@@ -56,7 +57,8 @@ the detection rectangle.
 `scale` is uniform. Offsets are relative to the resolved region, rotation is in
 radians, and `compose.zIndex` orders multiple region renderer instances. The
 asset must be fetchable by the browser under the host application's normal URL
-and CORS policy.
+and CORS policy. Static browser image formats render as sprites. GIF files loop
+automatically while preserving the same URL-based public API.
 Asset failures omit that renderer instance without stopping playback and are
 reported through `renderer.diagnostics.onAssetError` when configured. Replacing
 the descriptor with a new asset source retries loading.

@@ -319,7 +319,7 @@ field. Do not inject docs-only detections to simulate coverage.
 | Polygons                 | Implemented                       | `basketball_geometry.polygon`                                                                  | Live playground   | Maintain contour and fill/stroke coverage                                              |
 | Keypoints and skeletons  | Implemented                       | `basketball_geometry.keypoints` including edges and visibility                                 | Live playground   | Maintain pose association and visibility coverage                                      |
 | Polylines                | Implemented (`BasePolylineStyle`) | `basketball_geometry` motion-gated basketball track plus mask (versioned bounded center trace) | Live playground   | Maintain source-identity, path, timing, mask-color, and provenance regression coverage |
-| Asset regions            | Implemented (`region`)            | `basketball_geometry.keypoints` plus original `player-hat.svg` asset                           | Live playground   | Add media-frame sources and replacement coverage in their separately reviewed phases   |
+| Asset regions            | Implemented (`region`)            | `basketball_geometry.keypoints` plus original animated `player-fire.gif` asset                 | Live playground   | Add media-frame sources and replacement coverage in their separately reviewed phases   |
 
 The basketball fixture is therefore the current visual baseline for seven
 renderers: boxes, masks, labels, polygons, polylines, keypoints/skeletons, and

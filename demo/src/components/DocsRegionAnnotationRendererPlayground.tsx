@@ -4,7 +4,7 @@ import {
   annotationRenderers,
   type MediaRendererPresentation,
 } from "supervision";
-import playerHatUrl from "../assets/player-hat.svg?url";
+import playerFireUrl from "../assets/player-fire.gif?url";
 import { useDemoRenderer } from "../hooks/useDemoRenderer";
 import { RendererViewport } from "./RendererViewport";
 
@@ -26,7 +26,7 @@ export function DocsRegionAnnotationRendererPlayground() {
   const presentationTransform = useCallback(
     (presentation: MediaRendererPresentation): MediaRendererPresentation => ({
       ...presentation,
-      renderers: [createHatRenderer(settingsRef.current)],
+      renderers: [createFireRenderer(settingsRef.current)],
     }),
     [],
   );
@@ -82,8 +82,8 @@ export function DocsRegionAnnotationRendererPlayground() {
         <header className="docs-layer-playground__header">
           <div>
             <p>Annotation renderer</p>
-            <h1>Asset Regions</h1>
-            <span>Hat assets anchored to player keypoints</span>
+            <h1>Animated Asset Regions</h1>
+            <span>Looping fire GIFs anchored to player keypoints</span>
           </div>
           <button
             aria-label={
@@ -190,12 +190,12 @@ function RegionRangeControl({
   );
 }
 
-function createHatRenderer(settings: RegionPlaygroundSettings) {
+function createFireRenderer(settings: RegionPlaygroundSettings) {
   return annotationRenderers.region({
     compose: { mode: "over" },
-    id: "player-hat",
+    id: "player-fire",
     region: { anchor: "head", kind: "keypoint-anchor" },
-    source: { asset: { src: playerHatUrl }, kind: "asset" },
+    source: { asset: { src: playerFireUrl }, kind: "asset" },
     target: {
       className: ["white team player", "yellow team player"],
     },
@@ -211,9 +211,9 @@ function createSnippet(settings: RegionPlaygroundSettings) {
   return `session.setPresentation({
   renderers: [
     annotationRenderers.region({
-      id: "player-hat",
+      id: "player-fire",
       target: { className: ["white team player", "yellow team player"] },
-      source: { kind: "asset", asset: { src: hatUrl } },
+      source: { kind: "asset", asset: { src: fireGifUrl } },
       region: { kind: "keypoint-anchor", anchor: "head" },
       transform: {
         scale: ${settings.scale.toFixed(2)},

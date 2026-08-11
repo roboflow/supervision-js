@@ -322,9 +322,9 @@ export function createDocsAnnotationRendererSnippet(
       return `session.setPresentation({
   renderers: [
     annotationRenderers.region({
-      id: "player-hat",
+      id: "player-fire",
       target: { className: ["white team player", "yellow team player"] },
-      source: { kind: "asset", asset: { src: hatUrl } },
+      source: { kind: "asset", asset: { src: fireGifUrl } },
       region: { kind: "keypoint-anchor", anchor: "head" },
       compose: { mode: "over" },
     }),

@@ -92,6 +92,7 @@ export async function createPixiMediaScene(
     Texture,
     UniformGroup,
   } = await import("pixi.js");
+  const { GifSprite } = await import("pixi.js/gif");
   const app: PixiApplication = new Application();
   let currentLabelStyle: LabelStyle | null = options.labelStyle ?? null;
   let currentMaskStyle: MaskStyle | null = options.maskStyle ?? null;
@@ -157,6 +158,7 @@ export async function createPixiMediaScene(
   const regionLayer = createPixiRegionLayer({
     Assets,
     Container,
+    GifSprite,
     Sprite,
     detectionTimeline: options.detectionTimeline,
     onInvalidate: () => {

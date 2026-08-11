@@ -44,6 +44,7 @@ describe("pixi region layer", () => {
     const layer = createPixiRegionLayer({
       Assets: { load, unload: vi.fn(async () => undefined) } as never,
       Container: FakeContainer as never,
+      GifSprite: FakeGifSprite as never,
       Sprite: FakeSprite as never,
       detectionTimeline: createTimeline(frame),
       onInvalidate,
@@ -85,7 +86,7 @@ describe("pixi region layer", () => {
     expect(y).toBeCloseTo(18.8);
   });
 
-  it("supports multiple identified region renderers and reuses pooled sprites", async () => {
+  it("supports multiple identified region renderers and replaces released displays", async () => {
     const unload = vi.fn(async () => undefined);
     const layer = createPixiRegionLayer({
       Assets: {
@@ -96,6 +97,7 @@ describe("pixi region layer", () => {
         unload,
       } as never,
       Container: FakeContainer as never,
+      GifSprite: FakeGifSprite as never,
       Sprite: FakeSprite as never,
       detectionTimeline: createTimeline(frame),
       regionRenderers: [
@@ -134,7 +136,7 @@ describe("pixi region layer", () => {
     ]);
     await Promise.resolve();
     layer.drawFrame(1);
-    expect(container.children).toHaveLength(2);
+    expect(container.children).toHaveLength(1);
   });
 
   it("renders every matching detection when stable ids are duplicated", async () => {
@@ -151,6 +153,7 @@ describe("pixi region layer", () => {
         unload: vi.fn(async () => undefined),
       } as never,
       Container: FakeContainer as never,
+      GifSprite: FakeGifSprite as never,
       Sprite: FakeSprite as never,
       detectionTimeline: createTimeline(duplicateIdFrame),
       regionRenderers: [
@@ -181,6 +184,7 @@ describe("pixi region layer", () => {
     const layer = createPixiRegionLayer({
       Assets: { load: () => texture, unload } as never,
       Container: FakeContainer as never,
+      GifSprite: FakeGifSprite as never,
       Sprite: FakeSprite as never,
       detectionTimeline: createTimeline(frame),
       onInvalidate,
@@ -212,6 +216,7 @@ describe("pixi region layer", () => {
         unload: vi.fn(async () => undefined),
       } as never,
       Container: FakeContainer as never,
+      GifSprite: FakeGifSprite as never,
       Sprite: FakeSprite as never,
       detectionTimeline: createTimeline(frame),
       onAssetError,
@@ -235,6 +240,60 @@ describe("pixi region layer", () => {
     expect(layer.drawFrame(1).activeDetectionIndexes).toEqual([]);
     layer.destroy();
   });
+
+  it("creates a looping GifSprite and releases its shared source", async () => {
+    const gifSource = {
+      duration: 1_000,
+      frames: [{ end: 1_000, start: 0, texture: {} }],
+      height: 160,
+      textures: [{}],
+      totalFrames: 1,
+      width: 160,
+    };
+    const unload = vi.fn(async () => undefined);
+    const renderer = annotationRenderers.region({
+      id: "player-fire",
+      region: { anchor: "head", kind: "keypoint-anchor" },
+      source: { asset: { src: "/fire.gif" }, kind: "asset" },
+      target: { className: "player" },
+    });
+    const layer = createPixiRegionLayer({
+      Assets: {
+        load: vi.fn(async () => gifSource),
+        unload,
+      } as never,
+      Container: FakeContainer as never,
+      GifSprite: FakeGifSprite as never,
+      Sprite: FakeSprite as never,
+      detectionTimeline: createTimeline(frame),
+      regionRenderers: [renderer],
+    });
+    const container = layer.createContainer() as unknown as FakeContainer;
+    await Promise.resolve();
+
+    layer.drawFrame(1);
+    expect(container.children).toHaveLength(1);
+    expect(container.children[0]).toBeInstanceOf(FakeGifSprite);
+    expect((container.children[0] as FakeGifSprite).options).toMatchObject({
+      autoPlay: true,
+      loop: true,
+      source: gifSource,
+    });
+    const display = container.children[0]!;
+
+    layer.setRenderers([
+      { ...renderer, target: { className: "missing-player" } },
+    ]);
+    expect((display as FakeGifSprite).stop).toHaveBeenCalledOnce();
+    layer.setRenderers([renderer]);
+    expect((display as FakeGifSprite).play).toHaveBeenCalledOnce();
+
+    layer.setRenderers([]);
+    await Promise.resolve();
+    expect(display.destroy).toHaveBeenCalledOnce();
+    expect(container.children).toHaveLength(0);
+    expect(unload).toHaveBeenCalledWith("/fire.gif");
+  });
 });
 
 class FakeContainer {
@@ -243,6 +302,13 @@ class FakeContainer {
 
   addChild(...children: FakeSprite[]) {
     this.children.push(...children);
+    for (const child of children) child.parent = this;
+  }
+
+  removeChild(child: FakeSprite) {
+    const index = this.children.indexOf(child);
+    if (index >= 0) this.children.splice(index, 1);
+    child.parent = undefined;
   }
 }
 
@@ -250,7 +316,7 @@ class FakeSprite {
   readonly anchor = { set: vi.fn() };
   readonly destroy = vi.fn();
   readonly position = { set: vi.fn() };
-  readonly removeFromParent = vi.fn();
+  readonly removeFromParent = vi.fn(() => this.parent?.removeChild(this));
   alpha = 1;
   height = 0;
   rotation = 0;
@@ -258,9 +324,29 @@ class FakeSprite {
   visible = true;
   width = 0;
   zIndex = 0;
+  parent: FakeContainer | undefined;
 
   constructor(options: { texture: { height: number; width: number } }) {
     this.texture = options.texture;
+  }
+}
+
+class FakeGifSprite extends FakeSprite {
+  readonly options: {
+    readonly autoPlay?: boolean;
+    readonly loop?: boolean;
+    readonly source: { height: number; width: number };
+  };
+  readonly play = vi.fn();
+  readonly stop = vi.fn();
+
+  constructor(options: {
+    readonly autoPlay?: boolean;
+    readonly loop?: boolean;
+    readonly source: { height: number; width: number };
+  }) {
+    super({ texture: options.source });
+    this.options = options;
   }
 }
 

@@ -128,7 +128,7 @@ export interface RegionRendererTarget {
   ) => boolean;
 }
 
-/** A browser-loadable image reference. Backend texture types stay private. */
+/** A browser-loadable image or animated GIF. Backend asset types stay private. */
 export interface RegionRendererAssetReference {
   readonly src: string;
 }
