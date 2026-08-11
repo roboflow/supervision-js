@@ -2572,7 +2572,6 @@ function GhostCoachHud(props: {
     </>
   );
 }
-
 const DEMO_MODE_OPTIONS: readonly {
   readonly label: string;
   readonly mode: DemoMode;

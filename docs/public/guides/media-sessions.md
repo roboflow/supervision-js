@@ -19,7 +19,13 @@ session.pause();
 await session.seek(12.5);
 await session.stepForward();
 session.setPlaybackRate(0.5);
-session.setPresentation({ maskStyle, boxStyle, labelStyle });
+session.setPresentation({
+  renderers: [
+    annotationRenderers.mask({ style: maskStyle }),
+    annotationRenderers.box({ style: boxStyle }),
+    annotationRenderers.label({ style: labelStyle }),
+  ],
+});
 const state = session.getState();
 session.destroy();
 ```
@@ -257,9 +263,11 @@ await session.stepBackward();
 session.setPlaybackRate(1.5);
 
 session.setPresentation({
-  boxStyle,
-  maskStyle,
-  labelStyle,
+  renderers: [
+    annotationRenderers.box({ style: boxStyle }),
+    annotationRenderers.mask({ style: maskStyle }),
+    annotationRenderers.label({ style: labelStyle }),
+  ],
 });
 
 session.destroy();

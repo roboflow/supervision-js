@@ -2,7 +2,8 @@
 
 Offline tooling that builds the demo's `basketball_geometry` fixture: one
 combined `DetectionFrame` timeline that carries SAM3 masks, mask-derived
-polygons, and YOLO pose keypoints on the shared 30fps basketball frame grid.
+polygons, a bounded basketball center trace, and YOLO pose keypoints on the
+shared 30fps basketball frame grid.
 Nothing here runs in the browser; the demo only consumes the committed chunks.
 
 ## Pieces
@@ -19,7 +20,8 @@ Nothing here runs in the browser; the demo only consumes the committed chunks.
 - `create-geometry-fixture.mjs` — reads the committed SAM3 timeline and the
   cached raw pose output, derives polygons from masks via
   `convertDetectionMaskToPolygon()` (requires the built `supervision-js-core`
-  package), merges pose detections into the same frame records, then chunks
+  package), attaches a bounded center trace to the selected frozen basketball
+  detection, merges pose detections into the same frame records, then chunks
   the result with `tools/sam3-fixture/chunk-detections.mjs --compact`.
 
 ## Usage

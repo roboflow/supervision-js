@@ -18,5 +18,5 @@ Focused integration patterns built on the session-first public API.
 - [Progressive upload normalization](./recipes/progressive-upload-normalization.md)
 - [React integration](./recipes/react-integration.md)
 
-For visual styling, use the focused playgrounds under
-[Visualization Layers](./visualization-layers.md).
+For visual composition and styling, use the focused playgrounds under
+[Annotation Renderers](./annotation-renderers.md).

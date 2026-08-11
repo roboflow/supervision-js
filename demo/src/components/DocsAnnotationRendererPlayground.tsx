@@ -1,27 +1,31 @@
 import { useCallback, useMemo } from "react";
 import { MediaRendererPlaybackState } from "supervision";
 import {
-  createDocsVisualizationLayerPresentation,
-  createDocsVisualizationLayerSnippet,
-  docsVisualizationLayers,
-  type DocsVisualizationLayerControl,
-  type DocsVisualizationLayerId,
+  createDocsAnnotationRendererPresentation,
+  createDocsAnnotationRendererSnippet,
+  docsAnnotationRenderers,
+  filterDocsAnnotationRendererFrames,
+  type DocsAnnotationRendererControl,
+  type DocsAnnotationRendererId,
   type NumericPresentationSetting,
-} from "../docs-visualization-layer";
+} from "../docs-annotation-renderer";
 import { useDemoRenderer } from "../hooks/useDemoRenderer";
 import type { DemoPresentationSettings } from "../presentation/demo-presentation";
 import { RendererViewport } from "./RendererViewport";
 
-export function DocsVisualizationLayerPlayground({
-  layer,
+export function DocsAnnotationRendererPlayground({
+  renderer,
 }: {
-  readonly layer: DocsVisualizationLayerId;
+  readonly renderer: DocsAnnotationRendererId;
 }) {
-  const definition = docsVisualizationLayers[layer];
+  const definition = docsAnnotationRenderers[renderer];
+  const fixtureName = "basketball fixture";
   const demo = useDemoRenderer({
+    fixtureFrameTransform: (frames) =>
+      filterDocsAnnotationRendererFrames(renderer, frames),
     initialFixtureId: "basketball_geometry",
     initialPresentationSettings:
-      createDocsVisualizationLayerPresentation(layer),
+      createDocsAnnotationRendererPresentation(renderer),
   });
   const isPlaying =
     demo.playbackState === MediaRendererPlaybackState.Playing ||
@@ -35,8 +39,9 @@ export function DocsVisualizationLayerPlayground({
     [currentTime, demo.duration],
   );
   const snippet = useMemo(
-    () => createDocsVisualizationLayerSnippet(layer, demo.presentationSettings),
-    [demo.presentationSettings, layer],
+    () =>
+      createDocsAnnotationRendererSnippet(renderer, demo.presentationSettings),
+    [demo.presentationSettings, renderer],
   );
   const updatePresentation = useCallback(
     <Key extends keyof DemoPresentationSettings>(
@@ -63,7 +68,7 @@ export function DocsVisualizationLayerPlayground({
   return (
     <main
       className="docs-layer-playground"
-      aria-label={`${definition.title} visualization playground`}
+      aria-label={`${definition.title} annotation renderer playground`}
     >
       <section className="docs-layer-playground__stage">
         <RendererViewport
@@ -77,13 +82,13 @@ export function DocsVisualizationLayerPlayground({
       <section className="docs-layer-playground__panel">
         <header className="docs-layer-playground__header">
           <div>
-            <p>Visualization layer</p>
+            <p>Annotation renderer</p>
             <h1>{definition.title}</h1>
             <span>{definition.description}</span>
           </div>
           <button
             aria-label={
-              isPlaying ? "Pause basketball fixture" : "Play basketball fixture"
+              isPlaying ? `Pause ${fixtureName}` : `Play ${fixtureName}`
             }
             disabled={!demo.canUseRenderer}
             onClick={demo.onTogglePlayback}
@@ -96,7 +101,7 @@ export function DocsVisualizationLayerPlayground({
 
         <div className="docs-layer-playground__controls">
           {definition.controls.map((control) => (
-            <LayerRangeControl
+            <RendererRangeControl
               control={control}
               key={control.key}
               onChange={(value) =>
@@ -105,7 +110,7 @@ export function DocsVisualizationLayerPlayground({
               value={demo.presentationSettings[control.key]}
             />
           ))}
-          {layer === "labels" ? (
+          {renderer === "labels" ? (
             <label className="docs-layer-playground__toggle">
               <span>
                 <strong>Confidence</strong>
@@ -146,12 +151,12 @@ export function DocsVisualizationLayerPlayground({
   );
 }
 
-function LayerRangeControl({
+function RendererRangeControl({
   control,
   onChange,
   value,
 }: {
-  readonly control: DocsVisualizationLayerControl;
+  readonly control: DocsAnnotationRendererControl;
   readonly onChange: (value: number) => void;
   readonly value: number;
 }) {

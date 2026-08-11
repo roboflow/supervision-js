@@ -48,99 +48,157 @@ export interface DefaultAnnotationPresentationOptions {
 export function createDefaultAnnotationPresentation(
   options: DefaultAnnotationPresentationOptions = {},
 ): MediaRendererPresentation {
-  const getClassColor = (detection: Detection) =>
-    resolveDefaultClassColor(detection, options.getClassColor);
-  const shouldRenderBox = (detection: Detection) =>
-    !(
-      detection.mask ||
-      detection.polygon ||
-      detection.polyline ||
-      detection.keypoints
-    );
-
   return {
-    boxStyle: new BaseBoxStyle({
-      cornerRadius: DEFAULT_BOX_CORNER_RADIUS,
-      fill: (detection) => ({
-        alpha: DEFAULT_FILL_ALPHA,
-        color: getClassColor(detection),
-      }),
-      shape: BoxShape.RoundedRect,
-      shouldRender: shouldRenderBox,
-      stroke: (detection) => ({
-        alpha: 1,
-        color: getClassColor(detection),
-        width: DEFAULT_OUTLINE_WIDTH,
-      }),
-    }),
-    keypointStyle: new BaseKeypointStyle({
-      ...(options.skeletonDefinitions === undefined
-        ? {}
-        : { definitions: options.skeletonDefinitions }),
-      edgeShadowStroke: {
-        alpha: DEFAULT_KEYPOINT_SHADOW_ALPHA,
-        color: 0x000000,
-        width: DEFAULT_KEYPOINT_SHADOW_WIDTH,
-      },
-      edgeStroke: (detection) => ({
-        alpha: 1,
-        color: getClassColor(detection),
-        width: DEFAULT_KEYPOINT_EDGE_WIDTH,
-      }),
-      markerFill: (detection) => ({
-        alpha: 1,
-        color: getClassColor(detection),
-      }),
-      markerStroke: { alpha: 1, color: 0xffffff, width: 1 },
-      radius: DEFAULT_KEYPOINT_RADIUS,
-    }),
-    labelStyle: new BaseLabelStyle({
-      background: (detection) => ({
-        alpha: 1,
-        color: getClassColor(detection),
-        cornerRadius: DEFAULT_LABEL_CORNER_RADIUS,
-        paddingX: DEFAULT_LABEL_PADDING_X,
-        paddingY: DEFAULT_LABEL_PADDING_Y,
-        topCornersOnly: true,
-      }),
-      includeConfidence: options.includeConfidence,
-      placement: LabelPlacement.Top,
-      textStyle: {
-        fontFamily: DEFAULT_LABEL_FONT_FAMILY,
-        fontSize: DEFAULT_LABEL_FONT_SIZE,
-        fontWeight: "600",
-      },
-    }),
-    maskStyle: new BaseMaskStyle({
-      color: (detection) => getClassColor(detection),
-      fillAlpha: DEFAULT_MASK_FILL_ALPHA,
-      mode: MaskRenderMode.FillAndStroke,
-      opacity: 1,
-      stroke: (detection) => ({
-        alpha: 1,
-        color: getClassColor(detection),
-        width: DEFAULT_OUTLINE_WIDTH,
-      }),
-    }),
-    polygonStyle: new BasePolygonStyle({
-      fill: (detection) => ({
-        alpha: DEFAULT_FILL_ALPHA,
-        color: getClassColor(detection),
-      }),
-      stroke: (detection) => ({
-        alpha: 1,
-        color: getClassColor(detection),
-        width: DEFAULT_OUTLINE_WIDTH,
-      }),
-    }),
-    polylineStyle: new BasePolylineStyle({
-      stroke: (detection) => ({
-        alpha: 1,
-        color: getClassColor(detection),
-        width: DEFAULT_OUTLINE_WIDTH,
-      }),
-    }),
+    boxStyle: createDefaultBoxStyle(options),
+    keypointStyle: createDefaultKeypointStyle(options),
+    labelStyle: createDefaultLabelStyle(options),
+    maskStyle: createDefaultMaskStyle(options),
+    polygonStyle: createDefaultPolygonStyle(options),
+    polylineStyle: createDefaultPolylineStyle(options),
   };
+}
+
+/**
+ * The canonical default style of one built-in layer.
+ *
+ * These exist so a renderer kind can build only the style it needs instead of
+ * the whole default presentation. Keep them equivalent to the matching field of
+ * {@link createDefaultAnnotationPresentation}.
+ */
+export function createDefaultBoxStyle(
+  options: DefaultAnnotationPresentationOptions = {},
+): BaseBoxStyle {
+  const getClassColor = createClassColorResolver(options);
+
+  return new BaseBoxStyle({
+    cornerRadius: DEFAULT_BOX_CORNER_RADIUS,
+    fill: (detection) => ({
+      alpha: DEFAULT_FILL_ALPHA,
+      color: getClassColor(detection),
+    }),
+    shape: BoxShape.RoundedRect,
+    shouldRender: (detection) =>
+      !(
+        detection.mask ||
+        detection.polygon ||
+        detection.polyline ||
+        detection.keypoints
+      ),
+    stroke: (detection) => ({
+      alpha: 1,
+      color: getClassColor(detection),
+      width: DEFAULT_OUTLINE_WIDTH,
+    }),
+  });
+}
+
+export function createDefaultKeypointStyle(
+  options: DefaultAnnotationPresentationOptions = {},
+): BaseKeypointStyle {
+  const getClassColor = createClassColorResolver(options);
+
+  return new BaseKeypointStyle({
+    ...(options.skeletonDefinitions === undefined
+      ? {}
+      : { definitions: options.skeletonDefinitions }),
+    edgeShadowStroke: {
+      alpha: DEFAULT_KEYPOINT_SHADOW_ALPHA,
+      color: 0x000000,
+      width: DEFAULT_KEYPOINT_SHADOW_WIDTH,
+    },
+    edgeStroke: (detection) => ({
+      alpha: 1,
+      color: getClassColor(detection),
+      width: DEFAULT_KEYPOINT_EDGE_WIDTH,
+    }),
+    markerFill: (detection) => ({
+      alpha: 1,
+      color: getClassColor(detection),
+    }),
+    markerStroke: { alpha: 1, color: 0xffffff, width: 1 },
+    radius: DEFAULT_KEYPOINT_RADIUS,
+  });
+}
+
+export function createDefaultLabelStyle(
+  options: DefaultAnnotationPresentationOptions = {},
+): BaseLabelStyle {
+  const getClassColor = createClassColorResolver(options);
+
+  return new BaseLabelStyle({
+    background: (detection) => ({
+      alpha: 1,
+      color: getClassColor(detection),
+      cornerRadius: DEFAULT_LABEL_CORNER_RADIUS,
+      paddingX: DEFAULT_LABEL_PADDING_X,
+      paddingY: DEFAULT_LABEL_PADDING_Y,
+      topCornersOnly: true,
+    }),
+    includeConfidence: options.includeConfidence,
+    placement: LabelPlacement.Top,
+    textStyle: {
+      fontFamily: DEFAULT_LABEL_FONT_FAMILY,
+      fontSize: DEFAULT_LABEL_FONT_SIZE,
+      fontWeight: "600",
+    },
+  });
+}
+
+export function createDefaultMaskStyle(
+  options: DefaultAnnotationPresentationOptions = {},
+): BaseMaskStyle {
+  const getClassColor = createClassColorResolver(options);
+
+  return new BaseMaskStyle({
+    color: (detection) => getClassColor(detection),
+    fillAlpha: DEFAULT_MASK_FILL_ALPHA,
+    mode: MaskRenderMode.FillAndStroke,
+    opacity: 1,
+    stroke: (detection) => ({
+      alpha: 1,
+      color: getClassColor(detection),
+      width: DEFAULT_OUTLINE_WIDTH,
+    }),
+  });
+}
+
+export function createDefaultPolygonStyle(
+  options: DefaultAnnotationPresentationOptions = {},
+): BasePolygonStyle {
+  const getClassColor = createClassColorResolver(options);
+
+  return new BasePolygonStyle({
+    fill: (detection) => ({
+      alpha: DEFAULT_FILL_ALPHA,
+      color: getClassColor(detection),
+    }),
+    stroke: (detection) => ({
+      alpha: 1,
+      color: getClassColor(detection),
+      width: DEFAULT_OUTLINE_WIDTH,
+    }),
+  });
+}
+
+export function createDefaultPolylineStyle(
+  options: DefaultAnnotationPresentationOptions = {},
+): BasePolylineStyle {
+  const getClassColor = createClassColorResolver(options);
+
+  return new BasePolylineStyle({
+    stroke: (detection) => ({
+      alpha: 1,
+      color: getClassColor(detection),
+      width: DEFAULT_OUTLINE_WIDTH,
+    }),
+  });
+}
+
+function createClassColorResolver(
+  options: DefaultAnnotationPresentationOptions,
+) {
+  return (detection: Detection) =>
+    resolveDefaultClassColor(detection, options.getClassColor);
 }
 
 function resolveDefaultClassColor(

@@ -17,6 +17,7 @@ import {
   BaseMaskStyle,
   FocusTargetMode,
   MediaInteractionMode,
+  annotationRenderers,
   createMediaSession,
 } from "supervision";
 
@@ -27,7 +28,6 @@ const session = await createMediaSession({
   },
   media: file,
   presentation: {
-    boxStyle: new BaseBoxStyle(),
     focusStyle: new BaseFocusStyle({
       fill: {
         alpha: 0.5,
@@ -51,6 +51,7 @@ const session = await createMediaSession({
         }),
       },
     }),
+    renderers: [annotationRenderers.box({ style: new BaseBoxStyle() })],
   },
   renderer: {
     interaction: {
