@@ -483,6 +483,9 @@ export function createPixiInteractionLayer(options: {
     });
     const currentKeys = selectedPicks.map(createDetectionPickKey).join("|");
     const nextKeys = nextSelectedPicks.map(createDetectionPickKey).join("|");
+    const identityChanged =
+      selectionIdentityKey(selectedPicks) !==
+      selectionIdentityKey(nextSelectedPicks);
 
     selectedPicks = nextSelectedPicks;
     selectedPick = nextSelectedPicks.at(-1) ?? null;
@@ -492,9 +495,30 @@ export function createPixiInteractionLayer(options: {
     }
 
     selectedPickKey = createDetectionPickKey(selectedPick);
-    options.interaction.onSelect?.(selectedPick);
-    options.interaction.onSelectionChange?.(selectedPicks);
+    // A followed pick re-bases onto every new frame, so its full pick key
+    // changes at playback rate. That per-frame refresh stays internal via
+    // onStateChange; the public selection callbacks only report identity or
+    // membership changes.
+    if (identityChanged) {
+      options.interaction.onSelect?.(selectedPick);
+      options.interaction.onSelectionChange?.(selectedPicks);
+    }
+
     notifyStateChange();
+  }
+
+  /**
+   * Frame-independent identity of a selection: which detections are selected,
+   * regardless of which frame snapshot currently backs their picks.
+   */
+  function selectionIdentityKey(picks: readonly DetectionPickResult[]) {
+    return picks
+      .map((pick) =>
+        pick.detection.id === undefined
+          ? `index:${pick.detectionIndex}`
+          : `id:${String(pick.detection.id)}`,
+      )
+      .join("|");
   }
 
   function setHoveredPick(nextPick: DetectionPickResult | null) {

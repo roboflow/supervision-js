@@ -447,11 +447,88 @@ describe("pixi interaction layer", () => {
       frame: followedFrame,
       mediaTime: 0.2,
     });
+    // Following the same identity onto a new frame is an internal refresh,
+    // not a public selection change.
+    expect(onSelect).toHaveBeenCalledOnce();
     expect(onSelect).toHaveBeenLastCalledWith(
-      expect.objectContaining({ detection: followedFrame.detections[1] }),
+      expect.objectContaining({ detection: frame.detections[0] }),
     );
     expect(layer.getState().hoveredPick).toBeNull();
     expect(onHover).toHaveBeenLastCalledWith(null);
+  });
+
+  it("keeps public selection callbacks at identity-change frequency", () => {
+    const onSelect = vi.fn();
+    const onSelectionChange = vi.fn();
+    const onStateChange = vi.fn();
+    const frames = [0.1, 0.2, 0.3, 0.4].map((mediaTime, frameIndex) => ({
+      detections: [
+        {
+          className: "player",
+          id: "player-1",
+          rect: { height: 30, width: 20, x: 10 + frameIndex, y: 15 },
+        },
+      ],
+      frameIndex: frameIndex + 3,
+      mediaTime,
+    }));
+    let activeFrame = frames[0]!;
+    const layer = createPixiInteractionLayer({
+      Container: FakeContainer as never,
+      Rectangle: FakeRectangle as never,
+      canInteract: () => true,
+      detectionTimeline: createTimeline(() => activeFrame),
+      interaction: {
+        mode: MediaInteractionMode.PausedOnly,
+        onSelect,
+        onSelectionChange,
+      },
+      onStateChange,
+    });
+    const display = layer.createDisplay({
+      height: 80,
+      width: 120,
+    }) as FakeContainer;
+
+    layer.drawFrame(0.1);
+    display.emit("pointermove", createPointerEvent(display, 15, 20));
+    display.emit("pointertap", createPointerEvent(display, 15, 20));
+
+    const selectCallsAfterTap = onSelect.mock.calls.length;
+    const stateCallsAfterTap = onStateChange.mock.calls.length;
+
+    for (const [index, nextFrame] of frames.entries()) {
+      if (index === 0) continue;
+      activeFrame = nextFrame;
+      layer.drawFrame(nextFrame.mediaTime);
+    }
+
+    // The internal state refreshes every frame; the public selection
+    // callbacks do not fire again while the identity is unchanged.
+    expect(onSelect.mock.calls.length).toBe(selectCallsAfterTap);
+    expect(onSelectionChange.mock.calls.length).toBe(selectCallsAfterTap);
+    expect(onStateChange.mock.calls.length).toBeGreaterThan(stateCallsAfterTap);
+    expect(layer.getState().selectedPick?.frame).toBe(frames.at(-1));
+
+    activeFrame = nextFrameWithoutPlayer();
+    layer.drawFrame(0.5);
+
+    expect(onSelect).toHaveBeenLastCalledWith(null);
+    expect(onSelect.mock.calls.length).toBe(selectCallsAfterTap + 1);
+
+    function nextFrameWithoutPlayer(): DetectionFrame {
+      return {
+        detections: [
+          {
+            className: "player",
+            id: "player-9",
+            rect: { height: 30, width: 20, x: 60, y: 15 },
+          },
+        ],
+        frameIndex: 9,
+        mediaTime: 0.5,
+      };
+    }
   });
 
   it("keeps the selection following its detection during paused-only playback", () => {
