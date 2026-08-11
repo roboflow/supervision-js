@@ -128,10 +128,22 @@ export async function createMediaSession(
     };
     const resolveRendererPresentation = (
       presentation: MediaRendererPresentation | undefined,
-    ): MediaRendererPresentation => ({
-      ...resolvePresentation(presentation),
-      renderers: undefined,
-    });
+    ): MediaRendererPresentation => {
+      const resolved = resolvePresentation(presentation);
+      const directRenderers = resolved.renderers?.filter(
+        (renderer) => renderer.kind === "region",
+      );
+      return {
+        ...resolved,
+        // Style-backed renderers have already been lowered into their existing
+        // specialized fields. Direct renderers retain their descriptors for
+        // the browser scene implementation.
+        renderers:
+          directRenderers && directRenderers.length > 0
+            ? directRenderers
+            : undefined,
+      };
+    };
     const initialPresentation =
       resolveRendererPresentation(currentPresentation);
 
@@ -152,6 +164,7 @@ export async function createMediaSession(
       maskStyle: initialPresentation.maskStyle,
       polygonStyle: initialPresentation.polygonStyle,
       polylineStyle: initialPresentation.polylineStyle,
+      renderers: initialPresentation.renderers,
       keypointStyle: initialPresentation.keypointStyle,
       visibility: initialPresentation.visibility,
       onState(state) {

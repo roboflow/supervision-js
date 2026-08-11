@@ -23,6 +23,7 @@ export {
   type MediaFrameRenderTimings,
   type AnnotationVisibility,
   type MediaDisplayAdjustments,
+  type MediaRendererAssetError,
   type MediaRenderer,
   type MediaRendererDiagnosticsOptions,
   type MediaRendererOptions,

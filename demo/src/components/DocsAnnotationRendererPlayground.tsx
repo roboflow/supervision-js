@@ -12,11 +12,24 @@ import {
 import { useDemoRenderer } from "../hooks/useDemoRenderer";
 import type { DemoPresentationSettings } from "../presentation/demo-presentation";
 import { RendererViewport } from "./RendererViewport";
+import { DocsRegionAnnotationRendererPlayground } from "./DocsRegionAnnotationRendererPlayground";
 
 export function DocsAnnotationRendererPlayground({
   renderer,
 }: {
   readonly renderer: DocsAnnotationRendererId;
+}) {
+  if (renderer === "regions") {
+    return <DocsRegionAnnotationRendererPlayground />;
+  }
+
+  return <DocsStyleAnnotationRendererPlayground renderer={renderer} />;
+}
+
+function DocsStyleAnnotationRendererPlayground({
+  renderer,
+}: {
+  readonly renderer: Exclude<DocsAnnotationRendererId, "regions">;
 }) {
   const definition = docsAnnotationRenderers[renderer];
   const fixtureName = "basketball fixture";

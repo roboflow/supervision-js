@@ -12,6 +12,7 @@ import {
   type MediaRenderer,
   type MediaRendererState,
   type MediaSessionState,
+  type MediaRendererPresentation,
   type MediaSourceState,
   type RenderPreparationDiagnostics,
 } from "supervision";
@@ -88,6 +89,7 @@ export interface DemoRendererState {
   readonly setPresentationSettings: (
     settings: DemoPresentationSettings,
   ) => void;
+  readonly refreshPresentation: () => void;
   readonly setRenderQuality: (quality: DemoRenderQuality) => void;
   readonly setSampleFixtureId: (sampleName: string) => void;
   readonly setSourceMode: (mode: DemoSourceMode) => void;
@@ -105,6 +107,10 @@ export interface UseDemoRendererOptions {
   readonly initialFixtureId?: string;
   /** Presentation values applied over that fixture's documented defaults. */
   readonly initialPresentationSettings?: Partial<DemoPresentationSettings>;
+  /** Adds focused renderers without widening the general demo settings model. */
+  readonly presentationTransform?: (
+    presentation: MediaRendererPresentation,
+  ) => MediaRendererPresentation;
 }
 
 const RENDERER_READOUT_INTERVAL_MS = 250;
@@ -139,6 +145,7 @@ export function useDemoRenderer(
       ) ?? defaultDemoFixture,
   );
   const [fixtureFrameTransform] = useState(() => options.fixtureFrameTransform);
+  const [presentationTransform] = useState(() => options.presentationTransform);
   const [initialPresentationSettings] = useState(() =>
     constrainDemoPresentationSettings(
       {
@@ -319,6 +326,7 @@ export function useDemoRenderer(
             onSessionState: sessionStatePublisher.publish,
             onSourceState: setSourceState,
             presentationSettings: presentationSettingsRef.current,
+            presentationTransform,
             renderQuality,
           });
 
@@ -390,6 +398,7 @@ export function useDemoRenderer(
   }, [
     activeFixture,
     fixtureFrameTransform,
+    presentationTransform,
     sourceMode,
     syncRendererState,
     uploadRun,
@@ -521,11 +530,31 @@ export function useDemoRenderer(
         return;
       }
 
-      renderer.setPresentation(createDemoPresentation(constrainedSettings));
+      const presentation = createDemoPresentation(constrainedSettings);
+      renderer.setPresentation(
+        presentationTransform?.(presentation) ?? presentation,
+      );
       syncRendererState(renderer);
     },
-    [activeFixture.presentationAvailability, sourceMode, syncRendererState],
+    [
+      activeFixture.presentationAvailability,
+      presentationTransform,
+      sourceMode,
+      syncRendererState,
+    ],
   );
+
+  const refreshPresentation = useCallback(() => {
+    const renderer = rendererRef.current;
+    if (!renderer) return;
+    const presentation = createDemoPresentation(
+      presentationSettingsRef.current,
+    );
+    renderer.setPresentation(
+      presentationTransform?.(presentation) ?? presentation,
+    );
+    syncRendererState(renderer);
+  }, [presentationTransform, syncRendererState]);
 
   const setRenderQualityLive = useCallback(
     (quality: DemoRenderQuality) => {
@@ -696,6 +725,7 @@ export function useDemoRenderer(
     onUploadFileChange,
     playbackState,
     presentationSettings,
+    refreshPresentation,
     presentationAvailability:
       sourceMode === DemoSourceMode.Fixture
         ? activeFixture.presentationAvailability
