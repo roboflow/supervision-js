@@ -15,6 +15,7 @@ import type { StyleProp, ViewStyle } from "react-native";
 import type {
   CameraFrameOutput,
   CameraDevice,
+  DeviceFilter,
   Frame,
   FrameRenderer,
 } from "react-native-vision-camera";
@@ -24,6 +25,9 @@ import type {
   MediaFrameSourceConsumer,
   MediaSessionCapabilities,
 } from "../types/frame-source";
+
+/** VisionCamera device-ranking options accepted by `useVisionCameraDevice()`. */
+export type VisionCameraDeviceFilter = DeviceFilter;
 
 /**
  * Structural subset of a VisionCamera frame used by the source adapter.
@@ -83,7 +87,9 @@ export interface VisionCameraLiveViewProps {
   readonly frameRendererStyle?: StyleProp<ViewStyle>;
   readonly isActive: boolean;
   readonly outputs: CameraFrameOutput[];
-  readonly orientationSource?: "interface";
+  readonly orientationSource?: "device" | "interface";
+  /** Desired optical zoom, clamped by the caller to this device's range. */
+  readonly zoom?: number;
 }
 
 export interface VisionCameraFrameOutputBinding {
@@ -102,6 +108,30 @@ export interface VisionCameraPermissionState {
 export interface VisionCameraFrameSize {
   readonly height: number;
   readonly width: number;
+}
+
+/**
+ * Resolves a requested zoom to the nearest zoom the selected device supports.
+ * This lets a host prefer iPhone's 0.5x ultra-wide lens while still working on
+ * single-lens rear cameras and front cameras that begin at 1x.
+ */
+export function resolveVisionCameraPreferredZoom(
+  device: Pick<CameraDevice, "maxZoom" | "minZoom"> | undefined,
+  requestedZoom = 0.5,
+): number | undefined {
+  if (
+    !device ||
+    !Number.isFinite(device.minZoom) ||
+    !Number.isFinite(device.maxZoom) ||
+    !Number.isFinite(requestedZoom)
+  ) {
+    return undefined;
+  }
+
+  const minimum = Math.min(device.minZoom, device.maxZoom);
+  const maximum = Math.max(device.minZoom, device.maxZoom);
+
+  return Math.max(minimum, Math.min(maximum, requestedZoom));
 }
 
 /**
@@ -155,28 +185,41 @@ export function resolveVisionCameraFrameSize(frame: {
 export function resolveVisionCameraFrameRendererStyle(options: {
   readonly canvasHeight: number;
   readonly canvasWidth: number;
+  /** Dimensions after normalizing the frame to the requested output orientation. */
+  readonly mediaHeight: number;
+  readonly mediaWidth: number;
   readonly orientation: string;
 }): ViewStyle {
+  const scale = Math.max(
+    options.canvasWidth / options.mediaWidth,
+    options.canvasHeight / options.mediaHeight,
+  );
+  const renderedWidth = options.mediaWidth * scale;
+  const renderedHeight = options.mediaHeight * scale;
+
+  // The native display layer presents the raw buffer. Portrait VisionCamera
+  // frames report left/right orientation, so rotate those buffers into the
+  // same normalized space used by inference. Do not rotate `down`: on the
+  // iOS front camera that would apply a second 180° turn.
   if (options.orientation === "left" || options.orientation === "right") {
     return {
-      height: options.canvasWidth,
-      left: (options.canvasWidth - options.canvasHeight) / 2,
+      height: renderedWidth,
+      left: (options.canvasWidth - renderedHeight) / 2,
       position: "absolute",
-      top: (options.canvasHeight - options.canvasWidth) / 2,
+      top: (options.canvasHeight - renderedWidth) / 2,
       transform: [
         { rotate: options.orientation === "left" ? "90deg" : "-90deg" },
       ],
-      width: options.canvasHeight,
+      width: renderedHeight,
     };
   }
 
   return {
-    bottom: 0,
-    left: 0,
+    height: renderedHeight,
+    left: (options.canvasWidth - renderedWidth) / 2,
     position: "absolute",
-    right: 0,
-    top: 0,
-    transform: options.orientation === "down" ? [{ rotate: "180deg" }] : [],
+    top: (options.canvasHeight - renderedHeight) / 2,
+    width: renderedWidth,
   };
 }
 
@@ -309,7 +352,10 @@ export function useVisionCameraFrameOutput<TFrame extends VisionCameraFrame>(
     frameOutput: visionCamera.useFrameOutput({
       allowDeferredStart: false,
       dropFramesWhileBusy: true,
-      enablePhysicalBufferRotation: false,
+      // NativeFrameRendererView presents frame pixels directly and does not
+      // apply Frame.orientation metadata. Rotate here so the rendered camera,
+      // inference input, and Skia overlays share one upright portrait buffer.
+      enablePhysicalBufferRotation: true,
       enablePreviewSizedOutputBuffers: true,
       onFrame,
       onFrameDropped: options.onFrameDropped,
@@ -330,10 +376,11 @@ export function useVisionCameraFrameRenderer(): FrameRenderer {
 /** Returns the optional VisionCamera device hook through the package boundary. */
 export function useVisionCameraDevice(
   position: "back" | "front" | "external" | "unspecified",
+  filter?: DeviceFilter,
 ): CameraDevice | undefined {
   const visionCamera = loadVisionCamera();
 
-  return visionCamera.useCameraDevice(position);
+  return visionCamera.useCameraDevice(position, filter);
 }
 
 /** Returns the optional VisionCamera permission hook through the package boundary. */
@@ -371,6 +418,7 @@ export function VisionCameraLiveView(
       orientationSource: props.orientationSource,
       outputs: props.outputs,
       style: props.cameraStyle,
+      zoom: props.zoom,
     }),
     createElement(visionCamera.NativeFrameRendererView, {
       renderer: props.frameRenderer,
@@ -394,6 +442,7 @@ interface VisionCameraModule {
   }): CameraFrameOutput;
   useCameraDevice(
     position: "back" | "front" | "external" | "unspecified",
+    filter?: DeviceFilter,
   ): CameraDevice | undefined;
   useCameraPermission(): VisionCameraPermissionState;
   useFrameRenderer(): FrameRenderer;
@@ -402,9 +451,10 @@ interface VisionCameraModule {
 interface VisionCameraCameraProps {
   readonly device: CameraDevice;
   readonly isActive: boolean;
-  readonly orientationSource?: "interface";
+  readonly orientationSource?: "device" | "interface";
   readonly outputs?: CameraFrameOutput[];
   readonly style?: StyleProp<ViewStyle>;
+  readonly zoom?: number;
 }
 
 function loadVisionCamera(): VisionCameraModule {

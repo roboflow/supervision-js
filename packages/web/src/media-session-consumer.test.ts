@@ -13,6 +13,7 @@ describe("media session consumer workflows", () => {
     resetMocks();
     mediaMock.samples = [createMockSample(0, 0), createMockSample(0.5, 0)];
     const {
+      annotationRenderers,
       BaseBoxStyle,
       createMediaSession,
       DetectionFrameSelectionMode,
@@ -83,13 +84,17 @@ describe("media session consumer workflows", () => {
     });
 
     session.setPresentation({
-      boxStyle: new BaseBoxStyle({
-        stroke: {
-          alpha: 0.75,
-          color: 0xff00ff,
-          width: 6,
-        },
-      }),
+      renderers: [
+        annotationRenderers.box({
+          style: new BaseBoxStyle({
+            stroke: {
+              alpha: 0.75,
+              color: 0xff00ff,
+              width: 6,
+            },
+          }),
+        }),
+      ],
     });
 
     const boxGraphics = pixiMock.graphicsInstances[0];

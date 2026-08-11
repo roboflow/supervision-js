@@ -5,27 +5,31 @@ summary: Style pose markers and the edges that connect them.
 
 # Keypoints and Skeletons
 
-Keypoints and skeleton edges share one semantic geometry and one
-`BaseKeypointStyle`. Marker radius, marker fill, edge stroke, and edge shadow
-can change independently without rewriting pose predictions.
+The keypoint annotation renderer draws pose markers and skeleton edges from one
+semantic geometry and one `BaseKeypointStyle`. Marker radius, marker fill, edge
+stroke, and edge shadow can change independently without rewriting predictions.
 
 <div class="supervision-layer-playground">
   <iframe
-    data-supervision-playground-src="demo/?embed=visualization-layer&amp;layer=keypoints"
+    data-supervision-playground-src="demo/?embed=annotation-renderer&amp;renderer=keypoints"
     loading="lazy"
     title="Interactive keypoint and skeleton visualization playground"
   ></iframe>
 </div>
 
-## Add a keypoint layer
+## Add the keypoint renderer
 
 ```ts
 session.setPresentation({
-  keypointStyle: new BaseKeypointStyle({
-    edgeStroke: { width: 2 },
-    markerFill: { alpha: 1 },
-    radius: 5,
-  }),
+  renderers: [
+    annotationRenderers.keypoints({
+      style: new BaseKeypointStyle({
+        edgeStroke: { width: 2 },
+        markerFill: { alpha: 1 },
+        radius: 5,
+      }),
+    }),
+  ],
 });
 ```
 

@@ -19,6 +19,7 @@ import {
   BaseMaskStyle,
   BaseBoxStyle,
   BoxShape,
+  annotationRenderers,
   createMediaSession,
   type DetectionFrame,
 } from "supervision";
@@ -34,17 +35,25 @@ const session = await createMediaSession({
     frames,
   },
   presentation: {
-    boxStyle: new BaseBoxStyle({
-      cornerRadius: 8,
-      shape: BoxShape.RoundedRect,
-      stroke: { alpha: 1, color: 0x38bdf8, width: 3 },
-    }),
-    labelStyle: new BaseLabelStyle({ includeConfidence: true }),
-    maskStyle: new BaseMaskStyle({
-      color: 0x38bdf8,
-      opacity: 0.6,
-      stroke: { alpha: 1, color: 0xe0f2fe, width: 3 },
-    }),
+    renderers: [
+      annotationRenderers.box({
+        style: new BaseBoxStyle({
+          cornerRadius: 8,
+          shape: BoxShape.RoundedRect,
+          stroke: { alpha: 1, color: 0x38bdf8, width: 3 },
+        }),
+      }),
+      annotationRenderers.label({
+        style: new BaseLabelStyle({ includeConfidence: true }),
+      }),
+      annotationRenderers.mask({
+        style: new BaseMaskStyle({
+          color: 0x38bdf8,
+          opacity: 0.6,
+          stroke: { alpha: 1, color: 0xe0f2fe, width: 3 },
+        }),
+      }),
+    ],
   },
   renderer: {
     autoPlay: true,

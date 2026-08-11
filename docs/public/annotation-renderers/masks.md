@@ -5,27 +5,31 @@ summary: Render compressed RLE masks with independent fill and outline styling.
 
 # Masks
 
-Masks stay semantic as compressed RLE in detection frames. `BaseMaskStyle`
-controls the visible fill, global opacity, outline, and render mode while the
-browser package privately prepares efficient render artifacts.
+The mask annotation renderer keeps compressed RLE masks semantic in detection
+frames. `BaseMaskStyle` controls the visible fill, global opacity, outline, and
+render mode while the browser package privately prepares efficient artifacts.
 
 <div class="supervision-layer-playground">
   <iframe
-    data-supervision-playground-src="demo/?embed=visualization-layer&amp;layer=masks"
+    data-supervision-playground-src="demo/?embed=annotation-renderer&amp;renderer=masks"
     loading="lazy"
     title="Interactive mask visualization playground"
   ></iframe>
 </div>
 
-## Add a mask layer
+## Add the mask renderer
 
 ```ts
 session.setPresentation({
-  maskStyle: new BaseMaskStyle({
-    fillAlpha: 1,
-    opacity: 0.72,
-    stroke: { alpha: 1, width: 2 },
-  }),
+  renderers: [
+    annotationRenderers.mask({
+      style: new BaseMaskStyle({
+        fillAlpha: 1,
+        opacity: 0.72,
+        stroke: { alpha: 1, width: 2 },
+      }),
+    }),
+  ],
 });
 ```
 

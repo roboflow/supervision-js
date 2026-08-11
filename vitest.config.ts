@@ -37,7 +37,7 @@ export default defineConfig({
         replacement: `${coreSource("styles")}/$1.ts`,
       },
       {
-        find: /^#types\/(box-style|detection-timeline|detections|editing|focus-style|interaction|interaction-style|keypoint-style|label-style|mask-style|media|media-rendering|polygon-style|polyline-style|session-lifecycle|style|viewport)$/,
+        find: /^#types\/(annotation-renderer|box-style|detection-timeline|detections|editing|focus-style|interaction|interaction-style|keypoint-style|label-style|mask-style|media|media-rendering|polygon-style|polyline-style|session-lifecycle|style|viewport)$/,
         replacement: `${coreSource("types")}/$1.ts`,
       },
       {

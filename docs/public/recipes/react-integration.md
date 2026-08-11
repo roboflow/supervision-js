@@ -15,6 +15,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   BaseBoxStyle,
   BaseLabelStyle,
+  annotationRenderers,
   createMediaSession,
   type DetectionFrame,
   type MediaSession,
@@ -48,8 +49,12 @@ export function SupervisionViewer({ media, frames }: SupervisionViewerProps) {
       media,
       detections: { frames },
       presentation: {
-        boxStyle: new BaseBoxStyle(),
-        labelStyle: new BaseLabelStyle({ includeConfidence: true }),
+        renderers: [
+          annotationRenderers.box({ style: new BaseBoxStyle() }),
+          annotationRenderers.label({
+            style: new BaseLabelStyle({ includeConfidence: true }),
+          }),
+        ],
       },
     })
       .then((session) => {
