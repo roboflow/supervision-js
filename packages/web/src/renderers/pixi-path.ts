@@ -1,7 +1,7 @@
 import {
-  BoxStrokeAlignment,
-  type BoxStrokeStyle,
+  StrokeAlignment,
   type Point,
+  type StrokeStyle,
 } from "supervision-js-core";
 import type { Graphics as PixiGraphics } from "pixi.js";
 
@@ -13,7 +13,7 @@ export function drawPixiPath(
   graphics: PixiGraphics,
   points: readonly Point[],
   closed: boolean,
-  stroke: BoxStrokeStyle,
+  stroke: StrokeStyle,
   viewportScale: number,
 ) {
   if (points.length < 2) {
@@ -37,10 +37,7 @@ export function drawPixiPath(
   graphics.stroke(resolvePixiStroke(stroke, viewportScale));
 }
 
-export function resolvePixiStroke(
-  stroke: BoxStrokeStyle,
-  viewportScale: number,
-) {
+export function resolvePixiStroke(stroke: StrokeStyle, viewportScale: number) {
   const pixiStroke = {
     alpha: stroke.alpha,
     color: stroke.color,
@@ -52,9 +49,9 @@ export function resolvePixiStroke(
   return {
     ...pixiStroke,
     alignment:
-      stroke.alignment === BoxStrokeAlignment.Inside
+      stroke.alignment === StrokeAlignment.Inside
         ? 1
-        : stroke.alignment === BoxStrokeAlignment.Outside
+        : stroke.alignment === StrokeAlignment.Outside
           ? 0
           : 0.5,
   };

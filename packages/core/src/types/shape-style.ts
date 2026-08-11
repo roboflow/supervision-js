@@ -1,5 +1,5 @@
-import type { BoxFillStyle, BoxStrokeStyle } from "#types/box-style";
 import type { Detection, Point } from "#types/detections";
+import type { FillStyle, StrokeStyle } from "#types/paint-style";
 import type { AnnotationStyleContext } from "#types/style";
 
 /**
@@ -42,8 +42,8 @@ export interface EllipseShapeInstruction {
   readonly rotation?: number;
   readonly startAngle?: number;
   readonly endAngle?: number;
-  readonly fill?: BoxFillStyle;
-  readonly stroke?: BoxStrokeStyle;
+  readonly fill?: FillStyle;
+  readonly stroke?: StrokeStyle;
 }
 
 /**
@@ -61,8 +61,8 @@ export interface MarkerShapeInstruction {
   readonly sizeSpace: MarkerSizeSpace;
   /** Rotation in radians around the anchor point. */
   readonly rotation?: number;
-  readonly fill?: BoxFillStyle;
-  readonly stroke?: BoxStrokeStyle;
+  readonly fill?: FillStyle;
+  readonly stroke?: StrokeStyle;
 }
 
 /**
@@ -72,8 +72,8 @@ export interface PathShapeInstruction {
   readonly kind: ShapeInstructionKind.Path;
   readonly segments: readonly (readonly Point[])[];
   readonly closed: boolean;
-  readonly fill?: BoxFillStyle;
-  readonly stroke: BoxStrokeStyle;
+  readonly fill?: FillStyle;
+  readonly stroke: StrokeStyle;
 }
 
 export type ShapeDrawInstruction =

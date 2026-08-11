@@ -23,7 +23,11 @@ import type {
   Container as PixiContainer,
   Graphics as PixiGraphics,
 } from "pixi.js";
-import { drawPixiPath, resolveScreenLength } from "./pixi-path";
+import {
+  drawPixiPath,
+  resolvePixiStroke,
+  resolveScreenLength,
+} from "./pixi-path";
 
 interface RetainedVectorEntry {
   readonly display: PixiGraphics;
@@ -380,14 +384,31 @@ function drawShapeInstruction(
     const geometry = resolveMarkerGeometry(instruction, viewportScale);
 
     if (geometry.kind === "circle") {
-      graphics.circle(geometry.center.x, geometry.center.y, geometry.radius);
-      if (instruction.fill) graphics.fill(instruction.fill);
-      if (instruction.stroke)
-        graphics.stroke({
-          alpha: instruction.stroke.alpha,
-          color: instruction.stroke.color,
-          width: resolveScreenLength(instruction.stroke.width, viewportScale),
-        });
+      const dashed = Boolean(instruction.stroke?.dash?.length);
+
+      if (instruction.fill || !dashed) {
+        graphics.circle(geometry.center.x, geometry.center.y, geometry.radius);
+        if (instruction.fill) graphics.fill(instruction.fill);
+      }
+
+      if (instruction.stroke) {
+        if (dashed) {
+          const { points } = sampleEllipseArc({
+            center: geometry.center,
+            radiusX: geometry.radius,
+            radiusY: geometry.radius,
+          });
+          drawPixiPath(
+            graphics,
+            points,
+            true,
+            instruction.stroke,
+            viewportScale,
+          );
+        } else {
+          graphics.stroke(resolvePixiStroke(instruction.stroke, viewportScale));
+        }
+      }
       return;
     }
 

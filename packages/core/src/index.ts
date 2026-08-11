@@ -179,6 +179,7 @@ export { lightenColor, resolveContrastTextColor } from "#utils/color";
 export { resolveAnnotationStyleState } from "#utils/annotation-visibility";
 
 export { BoxShape, BoxStrokeAlignment } from "#types/box-style";
+export { StrokeAlignment } from "#types/paint-style";
 export type { ViewportController, ViewportTransform } from "#types/viewport";
 export {
   AnnotationGeometryKind,
@@ -202,6 +203,7 @@ export type {
   BoxStyle,
   BoxStyleContext,
 } from "#types/box-style";
+export type { FillStyle, StrokeStyle } from "#types/paint-style";
 export {
   DetectionBufferStatus,
   DetectionFrameRetentionMode,
