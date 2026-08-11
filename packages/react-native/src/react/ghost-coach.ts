@@ -10,14 +10,15 @@ import type {
  * the native inference lane and the replay remains a semantic vector replay.
  */
 export type ReactNativeGhostCoachIntent =
-  "idle" | "capture" | "coach" | "replay";
+  "idle" | "recording" | "finish-recording" | "coach" | "replay";
 
 export interface ReactNativeGhostCoachReference {
   readonly samples: readonly ReactNativeGhostCoachSample[];
 }
 
 export interface ReactNativeGhostCoachSample {
-  readonly phase: number;
+  /** Position in the user-recorded sequence, from 0 to 1. */
+  readonly position: number;
   readonly points: readonly ReactNativeGhostCoachPoint[];
 }
 
@@ -29,20 +30,24 @@ export interface ReactNativeGhostCoachPoint {
 
 export interface ReactNativeGhostCoachOptions {
   readonly active: boolean;
-  readonly captureDurationMs?: number;
   readonly intent: ReactNativeGhostCoachIntent;
   readonly reference: ReactNativeGhostCoachReference | null;
-  /** A normalized phase (0 standing, 1 deepest) used by the vector-only lab. */
-  readonly replayPhase?: number;
+  /** A normalized sequence position used by the vector-only Rep Lab. */
+  readonly replayPosition?: number;
 }
 
 export interface ReactNativeGhostCoachRuntime {
   readonly cue: string;
   readonly match: number;
-  readonly phase: number;
-  readonly repCount: number;
+  readonly progress: number;
+  readonly sampleCount: number;
   readonly status:
-    "finding-athlete" | "ready" | "capturing" | "coaching" | "replay";
+    | "finding-athlete"
+    | "ready"
+    | "recording"
+    | "needs-more-poses"
+    | "coaching"
+    | "replay";
 }
 
 export interface ReactNativeGhostCoachResult {
@@ -52,56 +57,35 @@ export interface ReactNativeGhostCoachResult {
 }
 
 export interface ReactNativeGhostCoachState {
-  captureStartedAt: number;
   captureSamples: ReactNativeGhostCoachSample[];
   lastIntent: ReactNativeGhostCoachIntent;
-  lastPhase: number;
-  lastRepWasDeep: boolean;
+  lastRecordedAt: number;
+  recordingIntervalMs: number;
   reference: ReactNativeGhostCoachReference | null;
-  repCount: number;
 }
 
 const EMPTY_RUNTIME: ReactNativeGhostCoachRuntime = {
   cue: "Step into frame",
   match: 0,
-  phase: 0,
-  repCount: 0,
+  progress: 0,
+  sampleCount: 0,
   status: "finding-athlete",
 };
 
 export function createReactNativeGhostCoachState(): ReactNativeGhostCoachState {
   "worklet";
   return {
-    captureStartedAt: 0,
     captureSamples: [],
     lastIntent: "idle",
-    lastPhase: 0,
-    lastRepWasDeep: false,
+    lastRecordedAt: 0,
+    recordingIntervalMs: 55,
     reference: null,
-    repCount: 0,
   };
 }
 
 function clamp(value: number, minimum: number, maximum: number) {
   "worklet";
   return Math.max(minimum, Math.min(maximum, value));
-}
-
-function angle(
-  a: ReactNativeGhostCoachPoint,
-  b: ReactNativeGhostCoachPoint,
-  c: ReactNativeGhostCoachPoint,
-) {
-  "worklet";
-  const abX = a.x - b.x;
-  const abY = a.y - b.y;
-  const cbX = c.x - b.x;
-  const cbY = c.y - b.y;
-  const denominator =
-    Math.sqrt(abX * abX + abY * abY) * Math.sqrt(cbX * cbX + cbY * cbY);
-  if (denominator < 0.001) return 180;
-  const cosine = clamp((abX * cbX + abY * cbY) / denominator, -1, 1);
-  return (Math.acos(cosine) * 180) / Math.PI;
 }
 
 function poseFromFrame(
@@ -121,25 +105,6 @@ function poseFromFrame(
     };
   }
   return points;
-}
-
-function posePhase(points: readonly ReactNativeGhostCoachPoint[]) {
-  "worklet";
-  const left =
-    points[11]?.visible && points[13]?.visible && points[15]?.visible
-      ? angle(points[11]!, points[13]!, points[15]!)
-      : null;
-  const right =
-    points[12]?.visible && points[14]?.visible && points[16]?.visible
-      ? angle(points[12]!, points[14]!, points[16]!)
-      : null;
-  const degrees =
-    left !== null && right !== null
-      ? (left + right) / 2
-      : (left ?? right ?? 180);
-  // A deliberately forgiving squat signal. This demo is a self-comparison,
-  // not a medical or universal form judgement.
-  return clamp((178 - degrees) / 92, 0, 1);
 }
 
 function normalizePose(points: readonly ReactNativeGhostCoachPoint[]) {
@@ -166,19 +131,40 @@ function normalizePose(points: readonly ReactNativeGhostCoachPoint[]) {
   return normalized;
 }
 
-function findSample(reference: ReactNativeGhostCoachReference, phase: number) {
+function sampleDistance(
+  sample: ReactNativeGhostCoachSample,
+  normalized: readonly ReactNativeGhostCoachPoint[],
+) {
   "worklet";
-  let closest = reference.samples[0]!;
-  let distance = Math.abs(closest.phase - phase);
+  let count = 0;
+  let distance = 0;
+  for (let index = 0; index < normalized.length; index += 1) {
+    const expected = sample.points[index];
+    const observed = normalized[index];
+    if (!expected?.visible || !observed?.visible) continue;
+    const x = expected.x - observed.x;
+    const y = expected.y - observed.y;
+    distance += Math.sqrt(x * x + y * y);
+    count += 1;
+  }
+  return count === 0 ? Number.POSITIVE_INFINITY : distance / count;
+}
+
+function findClosestSampleIndex(
+  reference: ReactNativeGhostCoachReference,
+  normalized: readonly ReactNativeGhostCoachPoint[],
+) {
+  "worklet";
+  let closestIndex = 0;
+  let closestDistance = sampleDistance(reference.samples[0]!, normalized);
   for (let index = 1; index < reference.samples.length; index += 1) {
-    const candidate = reference.samples[index]!;
-    const nextDistance = Math.abs(candidate.phase - phase);
-    if (nextDistance < distance) {
-      closest = candidate;
-      distance = nextDistance;
+    const distance = sampleDistance(reference.samples[index]!, normalized);
+    if (distance < closestDistance) {
+      closestIndex = index;
+      closestDistance = distance;
     }
   }
-  return closest;
+  return closestIndex;
 }
 
 function toInstruction(
@@ -188,7 +174,6 @@ function toInstruction(
   alpha: number,
 ): KeypointDrawInstruction {
   "worklet";
-  const currentNormalized = normalizePose(current);
   const leftHip = current[11];
   const rightHip = current[12];
   const anchorX = ((leftHip?.x ?? 0) + (rightHip?.x ?? 0)) / 2;
@@ -246,9 +231,6 @@ function toInstruction(
         stroke: { alpha, color, width: 1 },
       };
   }
-  // Kept to make the intent explicit to worklet compilers and avoid losing
-  // the normalization calculation when this code gets optimized differently.
-  void currentNormalized;
   return { edges, markers };
 }
 
@@ -258,20 +240,10 @@ function matchScore(
 ) {
   "worklet";
   const normalized = normalizePose(current);
-  let count = 0;
-  let distance = 0;
-  for (let index = 0; index < normalized.length; index += 1) {
-    const expected = reference.points[index];
-    const observed = normalized[index];
-    if (!expected?.visible || !observed?.visible) continue;
-    const dx = expected.x - observed.x;
-    const dy = expected.y - observed.y;
-    distance += Math.sqrt(dx * dx + dy * dy);
-    count += 1;
-  }
-  return count === 0
-    ? 0
-    : Math.round(clamp(100 - (distance / count) * 90, 0, 100));
+  const distance = sampleDistance(reference, normalized);
+  return Number.isFinite(distance)
+    ? Math.round(clamp(100 - distance * 90, 0, 100))
+    : 0;
 }
 
 export function evaluateReactNativeGhostCoach(options: {
@@ -288,66 +260,109 @@ export function evaluateReactNativeGhostCoach(options: {
       reference: options.config.reference,
       runtime: EMPTY_RUNTIME,
     };
-  const phase = posePhase(current);
   const state = options.state;
   let reference = options.config.reference ?? state.reference;
 
-  if (options.config.intent === "capture" && state.lastIntent !== "capture") {
-    state.captureStartedAt = options.nowMs;
+  if (
+    options.config.intent === "recording" &&
+    state.lastIntent !== "recording"
+  ) {
     state.captureSamples = [];
+    state.lastRecordedAt = 0;
+    state.recordingIntervalMs = 55;
   }
-  if (options.config.intent === "capture") {
+  if (options.config.intent === "recording") {
+    if (state.captureSamples.length >= 80) {
+      // Keep the whole user-bounded take without allowing unbounded worklet memory.
+      const samples: ReactNativeGhostCoachSample[] = [];
+      for (let index = 0; index < state.captureSamples.length; index += 2) {
+        samples[samples.length] = state.captureSamples[index]!;
+      }
+      state.captureSamples = samples;
+      state.recordingIntervalMs *= 2;
+    }
     if (
-      state.captureSamples.length < 40 &&
-      (state.captureSamples.length === 0 ||
-        options.nowMs - state.captureStartedAt >
-          state.captureSamples.length * 55)
+      state.lastRecordedAt === 0 ||
+      options.nowMs - state.lastRecordedAt >= state.recordingIntervalMs
     ) {
       state.captureSamples[state.captureSamples.length] = {
-        phase,
+        position: 0,
         points: normalizePose(current),
       };
-    }
-    const complete =
-      options.nowMs - state.captureStartedAt >=
-        (options.config.captureDurationMs ?? 2200) &&
-      state.captureSamples.length >= 8;
-    if (complete) {
-      reference = { samples: state.captureSamples };
-      state.reference = reference;
+      state.lastRecordedAt = options.nowMs;
     }
     state.lastIntent = options.config.intent;
     return {
       keypoints: [],
       reference,
       runtime: {
-        cue: complete
-          ? "Ghost learned. Start your set."
-          : "Teaching your movement…",
+        cue: "Recording your movement — finish whenever you are ready.",
         match: 0,
-        phase,
-        repCount: state.repCount,
-        status: complete ? "ready" : "capturing",
+        progress: 0,
+        sampleCount: state.captureSamples.length,
+        status: "recording",
+      },
+    };
+  }
+
+  if (options.config.intent === "finish-recording") {
+    if (state.captureSamples.length >= 8) {
+      const samples: ReactNativeGhostCoachSample[] = [];
+      const lastIndex = Math.max(1, state.captureSamples.length - 1);
+      for (let index = 0; index < state.captureSamples.length; index += 1) {
+        const sample = state.captureSamples[index]!;
+        samples[index] = {
+          position: index / lastIndex,
+          points: sample.points,
+        };
+      }
+      reference = { samples };
+      state.reference = reference;
+      state.lastIntent = options.config.intent;
+      return {
+        keypoints: [],
+        reference,
+        runtime: {
+          cue: "Reference ready. Compare live when you are ready.",
+          match: 0,
+          progress: 0,
+          sampleCount: samples.length,
+          status: "ready",
+        },
+      };
+    }
+    state.lastIntent = options.config.intent;
+    return {
+      keypoints: [],
+      reference,
+      runtime: {
+        cue: "Keep recording a little longer so the ghost has enough poses.",
+        match: 0,
+        progress: 0,
+        sampleCount: state.captureSamples.length,
+        status: "needs-more-poses",
       },
     };
   }
 
   if (!reference || reference.samples.length === 0) {
     state.lastIntent = options.config.intent;
-    return { keypoints: [], reference, runtime: { ...EMPTY_RUNTIME, phase } };
+    return { keypoints: [], reference, runtime: EMPTY_RUNTIME };
   }
-  const requestedPhase =
+  const normalized = normalizePose(current);
+  const targetIndex =
     options.config.intent === "replay"
-      ? (options.config.replayPhase ?? phase)
-      : phase;
-  const target = findSample(reference, requestedPhase);
+      ? Math.round(
+          clamp(options.config.replayPosition ?? 0, 0, 1) *
+            (reference.samples.length - 1),
+        )
+      : findClosestSampleIndex(reference, normalized);
+  const target = reference.samples[targetIndex]!;
   const vectors: KeypointDrawInstruction[] = [];
-  // The translucent echoes are prior phase samples, never buffered imagery.
+  // The translucent echoes are prior recorded poses, never buffered imagery.
   for (let offset = 0; offset < 2; offset += 1) {
-    const echo = findSample(
-      reference,
-      clamp(requestedPhase - (offset + 1) * 0.16, 0, 1),
-    );
+    const echo =
+      reference.samples[Math.max(0, targetIndex - (offset + 1) * 3)]!;
     vectors[vectors.length] = toInstruction(
       echo.points,
       current,
@@ -362,29 +377,17 @@ export function evaluateReactNativeGhostCoach(options: {
     0.8,
   );
   const match = matchScore(target, current);
-  if (options.config.intent === "coach") {
-    if (phase > 0.68) state.lastRepWasDeep = true;
-    if (state.lastRepWasDeep && phase < 0.22 && state.lastPhase >= 0.22) {
-      state.repCount += 1;
-      state.lastRepWasDeep = false;
-    }
-  }
-  state.lastPhase = phase;
   state.lastIntent = options.config.intent;
   const cue =
-    match >= 82
-      ? "Locked in — keep that rhythm"
-      : phase > 0.65
-        ? "Drive through the floor"
-        : "Match the mint ghost";
+    match >= 82 ? "Locked in — keep that shape" : "Match the mint ghost";
   return {
     keypoints: vectors,
     reference,
     runtime: {
       cue,
       match,
-      phase,
-      repCount: state.repCount,
+      progress: target.position,
+      sampleCount: reference.samples.length,
       status:
         options.config.intent === "replay"
           ? "replay"

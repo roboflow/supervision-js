@@ -246,7 +246,7 @@ function reportGhostCoachRuntimeIfChanged(
   reportRuntime: ((runtime: ReactNativeGhostCoachRuntime) => void) | undefined,
 ) {
   "worklet";
-  const nextSignature = `${runtime.status}:${runtime.repCount}:${Math.round(runtime.match / 4)}:${Math.round(runtime.phase * 10)}:${runtime.cue}`;
+  const nextSignature = `${runtime.status}:${runtime.sampleCount}:${Math.round(runtime.match / 4)}:${Math.round(runtime.progress * 10)}:${runtime.cue}`;
   const nowMs = Date.now();
   if (signature.value !== nextSignature && nowMs - lastReportAt.value > 250) {
     signature.value = nextSignature;

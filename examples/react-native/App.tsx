@@ -854,11 +854,11 @@ function LiveCameraProof(props: {
     useState<ReactNativeGhostCoachRuntime>({
       cue: "Step into frame to begin",
       match: 0,
-      phase: 0,
-      repCount: 0,
+      progress: 0,
+      sampleCount: 0,
       status: "finding-athlete",
     });
-  const [ghostReplayPhase, setGhostReplayPhase] = useState(0.5);
+  const [ghostReplayPosition, setGhostReplayPosition] = useState(0.5);
   const instantGestureRef = useRef<{
     readonly canvasStart: { readonly x: number; readonly y: number };
     readonly freeShapePoints: InstantCvNormalizedPoint[];
@@ -1480,7 +1480,7 @@ function LiveCameraProof(props: {
       active: isSports,
       intent: ghostCoachIntent,
       reference: null,
-      replayPhase: ghostReplayPhase,
+      replayPosition: ghostReplayPosition,
     },
     inferenceMode: props.inferenceMode,
     mediaRect: liveLayout.mediaRect,
@@ -1622,8 +1622,8 @@ function LiveCameraProof(props: {
             intent={ghostCoachIntent}
             onIntentChange={setGhostCoachIntent}
             onModeChange={props.onModeChange}
-            onReplayPhaseChange={setGhostReplayPhase}
-            replayPhase={ghostReplayPhase}
+            onReplayPositionChange={setGhostReplayPosition}
+            replayPosition={ghostReplayPosition}
             runtime={ghostCoachRuntime}
           />
         ) : isInstantCv ? (
@@ -2476,20 +2476,21 @@ function GhostCoachHud(props: {
   readonly intent: ReactNativeGhostCoachIntent;
   readonly onIntentChange: (intent: ReactNativeGhostCoachIntent) => void;
   readonly onModeChange: (mode: DemoMode) => void;
-  readonly onReplayPhaseChange: (phase: number) => void;
-  readonly replayPhase: number;
+  readonly onReplayPositionChange: (position: number) => void;
+  readonly replayPosition: number;
   readonly runtime: ReactNativeGhostCoachRuntime;
 }) {
   const coaching = props.intent === "coach";
   const replay = props.intent === "replay";
-  const canCoach = props.runtime.status === "ready" || coaching || replay;
+  const recording = props.intent === "recording";
+  const referenceReady = props.runtime.status === "ready";
 
   return (
     <>
       <View style={styles.ghostTopBar}>
         <View>
           <Text style={styles.ghostEyebrow}>SPORTS / GHOST COACH</Text>
-          <Text style={styles.ghostTitle}>Your best rep, live.</Text>
+          <Text style={styles.ghostTitle}>Your movement, live.</Text>
         </View>
         <TouchableOpacity
           onPress={() => props.onModeChange("home")}
@@ -2501,10 +2502,12 @@ function GhostCoachHud(props: {
       <View style={styles.ghostCueCard}>
         <Text style={styles.ghostCue}>{props.runtime.cue}</Text>
         <View style={styles.ghostMetricRow}>
-          <Text style={styles.ghostMetric}>{props.runtime.repCount} reps</Text>
+          <Text style={styles.ghostMetric}>
+            {props.runtime.sampleCount} poses
+          </Text>
           <Text style={styles.ghostMetric}>{props.runtime.match}% match</Text>
           <Text style={styles.ghostMetric}>
-            {Math.round(props.runtime.phase * 100)}% depth
+            {Math.round(props.runtime.progress * 100)}% sequence
           </Text>
         </View>
       </View>
@@ -2512,49 +2515,72 @@ function GhostCoachHud(props: {
         {props.intent === "idle" ||
         props.runtime.status === "finding-athlete" ? (
           <TouchableOpacity
-            onPress={() => props.onIntentChange("capture")}
+            onPress={() => props.onIntentChange("recording")}
             style={styles.ghostPrimaryButton}
           >
-            <Text style={styles.ghostPrimaryButtonText}>Teach ghost</Text>
+            <Text style={styles.ghostPrimaryButtonText}>Start recording</Text>
           </TouchableOpacity>
         ) : null}
-        {props.intent === "capture" ? (
-          <Text style={styles.ghostCaptureText}>
-            Capturing one smooth squat…
-          </Text>
+        {recording ? (
+          <TouchableOpacity
+            onPress={() => props.onIntentChange("finish-recording")}
+            style={styles.ghostPrimaryButton}
+          >
+            <Text style={styles.ghostPrimaryButtonText}>Finish recording</Text>
+          </TouchableOpacity>
         ) : null}
-        {canCoach && !coaching && !replay ? (
+        {props.runtime.status === "needs-more-poses" ? (
+          <TouchableOpacity
+            onPress={() => props.onIntentChange("recording")}
+            style={styles.ghostPrimaryButton}
+          >
+            <Text style={styles.ghostPrimaryButtonText}>Keep recording</Text>
+          </TouchableOpacity>
+        ) : null}
+        {referenceReady && !coaching && !replay ? (
           <TouchableOpacity
             onPress={() => props.onIntentChange("coach")}
             style={styles.ghostPrimaryButton}
           >
-            <Text style={styles.ghostPrimaryButtonText}>Start set</Text>
+            <Text style={styles.ghostPrimaryButtonText}>Compare live</Text>
           </TouchableOpacity>
         ) : null}
         {coaching ? (
-          <TouchableOpacity
-            onPress={() => props.onIntentChange("replay")}
-            style={styles.ghostPrimaryButton}
-          >
-            <Text style={styles.ghostPrimaryButtonText}>Open Rep Lab</Text>
-          </TouchableOpacity>
+          <>
+            <TouchableOpacity
+              onPress={() => props.onIntentChange("replay")}
+              style={styles.ghostPrimaryButton}
+            >
+              <Text style={styles.ghostPrimaryButtonText}>Open Rep Lab</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => props.onIntentChange("recording")}
+              style={styles.ghostPrimaryButton}
+            >
+              <Text style={styles.ghostPrimaryButtonText}>Record again</Text>
+            </TouchableOpacity>
+          </>
         ) : null}
         {replay ? (
           <View style={styles.ghostLabRow}>
             <TouchableOpacity
               onPress={() =>
-                props.onReplayPhaseChange(Math.max(0, props.replayPhase - 0.1))
+                props.onReplayPositionChange(
+                  Math.max(0, props.replayPosition - 0.1),
+                )
               }
               style={styles.ghostLabButton}
             >
               <Text style={styles.ghostLabButtonText}>‹</Text>
             </TouchableOpacity>
             <Text style={styles.ghostLabLabel}>
-              REP LAB · {Math.round(props.replayPhase * 100)}% phase
+              REP LAB · {Math.round(props.replayPosition * 100)}% sequence
             </Text>
             <TouchableOpacity
               onPress={() =>
-                props.onReplayPhaseChange(Math.min(1, props.replayPhase + 0.1))
+                props.onReplayPositionChange(
+                  Math.min(1, props.replayPosition + 0.1),
+                )
               }
               style={styles.ghostLabButton}
             >
@@ -3501,11 +3527,6 @@ const styles = StyleSheet.create({
     position: "absolute",
     right: 18,
     zIndex: 8,
-  },
-  ghostCaptureText: {
-    color: "#e9d5ff",
-    fontSize: 12,
-    fontWeight: "900",
   },
   ghostClassicButton: {
     backgroundColor: "rgba(15, 23, 42, 0.78)",
