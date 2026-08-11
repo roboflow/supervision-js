@@ -5,26 +5,30 @@ summary: Draw closed media-space geometry with independent fill and stroke.
 
 # Polygons
 
-Polygons are closed paths with at least three media-pixel points.
-`BasePolygonStyle` controls their fill, stroke, and visibility independently
-from boxes or masks on the same detection.
+The polygon annotation renderer draws closed paths with at least three
+media-pixel points. `BasePolygonStyle` controls their fill, stroke, and
+visibility independently from boxes or masks on the same detection.
 
 <div class="supervision-layer-playground">
   <iframe
-    data-supervision-playground-src="demo/?embed=visualization-layer&amp;layer=polygons"
+    data-supervision-playground-src="demo/?embed=annotation-renderer&amp;renderer=polygons"
     loading="lazy"
     title="Interactive polygon visualization playground"
   ></iframe>
 </div>
 
-## Add a polygon layer
+## Add the polygon renderer
 
 ```ts
 session.setPresentation({
-  polygonStyle: new BasePolygonStyle({
-    fill: { alpha: 0.16 },
-    stroke: { width: 3 },
-  }),
+  renderers: [
+    annotationRenderers.polygon({
+      style: new BasePolygonStyle({
+        fill: { alpha: 0.16 },
+        stroke: { width: 3 },
+      }),
+    }),
+  ],
 });
 ```
 

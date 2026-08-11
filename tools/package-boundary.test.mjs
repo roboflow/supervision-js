@@ -211,6 +211,10 @@ test("React Native example keeps frame worklets and renderer ownership in the pa
       label: "VisionCamera frame-renderer hook",
       pattern: /\buseFrameRenderer\b/,
     },
+    {
+      label: "nested ExecuTorch live-pose processor",
+      pattern: /\bcreateExecutorchLivePoseProcessor\b/,
+    },
     { label: "RN worklet scheduler", pattern: /\bscheduleOnRN\b/ },
     { label: "Reanimated mutable factory", pattern: /\bmakeMutable\b/ },
     {

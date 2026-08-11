@@ -23,6 +23,8 @@ import type {
 } from "#types/media-normalization";
 import type {
   DetectionTimelineOrigin,
+  MediaFrameCapture,
+  MediaFrameCaptureOptions,
   MediaFrameDiagnostics,
   MediaRenderer,
   MediaRendererFit,
@@ -323,6 +325,14 @@ export interface MediaSession {
   setPlaybackRate(playbackRate: number): void;
   /** Re-read semantic detections and redraw the current presentation. */
   refresh(): Promise<void>;
+  /**
+   * Encodes the media frame the session is currently presenting.
+   *
+   * The session keeps decode and render ownership; hosts receive an encoded
+   * image of the raw media pixels plus the presentation timestamp of that exact
+   * frame. Defaults to JPEG.
+   */
+  captureFrame(options?: MediaFrameCaptureOptions): Promise<MediaFrameCapture>;
   setPresentation(presentation: MediaRendererPresentation): void;
   setRenderQuality(quality: MediaRendererQuality): void;
   subscribe(listener: MediaSessionStateListener): MediaSessionStateUnsubscribe;

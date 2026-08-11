@@ -208,6 +208,14 @@ describe("demo presentation", () => {
     };
 
     expect(demo.backgroundColor).toBe(0xf3f4f6);
+    expect(demo.renderers?.map((renderer) => renderer.kind)).toEqual([
+      "box",
+      "mask",
+      "polygon",
+      "polyline",
+      "keypoints",
+      "label",
+    ]);
     expect(demo.boxStyle?.resolve(rectangle, context)).toEqual(
       canonical.boxStyle?.resolve(rectangle, context),
     );
@@ -421,6 +429,12 @@ describe("demo presentation", () => {
     expect(keypointsOnly.keypointStyle).toBeTruthy();
     expect(keypointsOnly.maskStyle).toBeTruthy();
     expect(keypointsOnly.labelStyle).toBeTruthy();
+    expect(
+      polygonsOnly.renderers?.map((renderer) => renderer.kind),
+    ).not.toContain("keypoints");
+    expect(
+      keypointsOnly.renderers?.map((renderer) => renderer.kind),
+    ).not.toContain("polygon");
   });
 
   it("maps polygon controls onto class-aware polygon draw instructions", () => {

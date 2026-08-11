@@ -9,17 +9,19 @@ summary: Style boxes, masks, and labels without mutating detection data.
 Python `supervision` uses annotators such as `BoxAnnotator`,
 `MaskAnnotator`, and `LabelAnnotator` to decide how detections are drawn.
 
-In `supervision-js`, the equivalent concept is split into two parts:
+In `supervision-js`, the equivalent concept is split into two public parts:
 
 - **styles** resolve how detections should look;
-- **renderer layers** draw those resolved instructions efficiently.
+- **annotation renderers** select which visualization capabilities contribute
+  to the scene and carry their styles.
 
 This keeps detections as semantic model output while the renderer owns the
 performance-sensitive drawing strategy.
 
-For focused, live examples, open [Visualization Layers](../visualization-layers.md).
-Each existing layer has a basketball fixture playground whose controls update
-both the renderer and a minimal `setPresentation()` snippet.
+For focused, live examples, open
+[Annotation Renderers](../annotation-renderers.md). Each built-in renderer has a
+basketball fixture playground whose controls update both the scene and a
+minimal `setPresentation()` snippet.
 
 ## Start With Base Styles
 
@@ -32,11 +34,17 @@ const session = await createMediaSession({
   container,
   media,
   presentation: {
-    boxStyle: new BaseBoxStyle(),
     focusStyle: new BaseFocusStyle(),
     interactionStyle: new BaseInteractionStyle(),
-    maskStyle: new BaseMaskStyle({ opacity: 0.5 }),
-    labelStyle: new BaseLabelStyle({ includeConfidence: true }),
+    renderers: [
+      annotationRenderers.box({ style: new BaseBoxStyle() }),
+      annotationRenderers.mask({
+        style: new BaseMaskStyle({ opacity: 0.5 }),
+      }),
+      annotationRenderers.label({
+        style: new BaseLabelStyle({ includeConfidence: true }),
+      }),
+    ],
   },
 });
 ```
@@ -46,15 +54,19 @@ rounded rectangles are the desired box treatment:
 
 ```ts
 session.setPresentation({
-  boxStyle: new BaseBoxStyle({
-    cornerRadius: 8,
-    shape: BoxShape.RoundedRect,
-    stroke: {
-      alignment: BoxStrokeAlignment.Inside,
-      color: 0x38bdf8,
-      width: 3,
-    },
-  }),
+  renderers: [
+    annotationRenderers.box({
+      style: new BaseBoxStyle({
+        cornerRadius: 8,
+        shape: BoxShape.RoundedRect,
+        stroke: {
+          alignment: BoxStrokeAlignment.Inside,
+          color: 0x38bdf8,
+          width: 3,
+        },
+      }),
+    }),
+  ],
 });
 ```
 
@@ -174,9 +186,11 @@ const keypointStyle = new BaseKeypointStyle({
 });
 
 session.setPresentation({
-  keypointStyle,
-  polygonStyle,
-  polylineStyle,
+  renderers: [
+    annotationRenderers.keypoints({ style: keypointStyle }),
+    annotationRenderers.polygon({ style: polygonStyle }),
+    annotationRenderers.polyline({ style: polylineStyle }),
+  ],
 });
 ```
 
@@ -218,17 +232,22 @@ Presentation can change without rewriting detections:
 
 ```ts
 session.setPresentation({
-  boxStyle,
-  keypointStyle,
-  labelStyle,
-  maskStyle,
-  polygonStyle,
-  polylineStyle,
+  renderers: [
+    annotationRenderers.box({ style: boxStyle }),
+    annotationRenderers.keypoints({ style: keypointStyle }),
+    annotationRenderers.label({ style: labelStyle }),
+    annotationRenderers.mask({ style: maskStyle }),
+    annotationRenderers.polygon({ style: polygonStyle }),
+    annotationRenderers.polyline({ style: polylineStyle }),
+  ],
 });
 ```
 
-Pass `null` for a layer to disable it. Omit a property to leave the current
-layer unchanged.
+The renderer list is authoritative: omit a renderer to disable it, and use an
+empty list to disable every built-in annotation renderer. The direct
+`boxStyle`, `maskStyle`, and related presentation fields remain supported for
+compatibility and source-specific overrides, but new global presentation code
+should prefer `renderers`.
 
 Global annotation visibility can hide annotations, labels, classes, or specific
 detection IDs without mutating semantic frames:

@@ -107,6 +107,44 @@ export interface MediaRendererSource {
   open(): Promise<DecodedMediaSource>;
 }
 
+/**
+ * Encoder options for capturing the currently presented media frame.
+ */
+export interface MediaFrameCaptureOptions {
+  /**
+   * Encoded image MIME type. Defaults to `image/jpeg`.
+   *
+   * Browsers are only required to support `image/png`; unsupported types fall
+   * back to the browser's default encoding, which the capture reports back in
+   * `MediaFrameCapture.type`.
+   */
+  readonly type?: string;
+  /**
+   * Lossy encoder quality between `0` and `1`. Defaults to `0.92`. Ignored by
+   * lossless encoders such as `image/png`.
+   */
+  readonly quality?: number;
+}
+
+/**
+ * Encoded image of the media frame the renderer is currently presenting.
+ *
+ * The image holds raw media pixels without annotation layers, paired with the
+ * presentation timestamp of that exact frame.
+ */
+export interface MediaFrameCapture {
+  /** Encoded image bytes for the captured media frame. */
+  readonly blob: Blob;
+  /** Presentation timestamp of the captured frame on the media timeline. */
+  readonly mediaTime: number;
+  /** Encoded image MIME type produced by the browser. */
+  readonly type: string;
+  /** Captured image width in media pixels. */
+  readonly width: number;
+  /** Captured image height in media pixels. */
+  readonly height: number;
+}
+
 /** Screen-space bounds of a detection label after renderer layout. */
 export interface DetectionLabelBounds {
   readonly x: number;
@@ -130,6 +168,14 @@ export interface MediaRenderer extends MediaRendererStateController {
   setPlaybackRate(playbackRate: number): void;
   /** Re-read detections and redraw the currently presented media frame. */
   refresh(): Promise<void>;
+  /**
+   * Encodes the media frame that is currently presented.
+   *
+   * The renderer keeps decode and render ownership: the returned image is a
+   * copy of the presented media pixels taken before encoding starts, so a frame
+   * presented while the encoder runs cannot change the result.
+   */
+  captureFrame(options?: MediaFrameCaptureOptions): Promise<MediaFrameCapture>;
   setSelectedDetection(
     selection: DetectionSelectionOptions | null,
   ): DetectionPickResult | null;

@@ -57,15 +57,18 @@ publisher.
 
 Use SemVer against the published browser surface only:
 
-| Change                                                                      | Example version from `0.1.0` | Tag      |
-| --------------------------------------------------------------------------- | ---------------------------- | -------- |
-| Backward-compatible fix, docs, dependency maintenance, or internal refactor | `0.1.1`                      | `latest` |
-| Backward-compatible public browser API addition                             | `0.2.0`                      | `latest` |
-| Breaking browser API or behavior change before 1.0                          | `0.2.0`                      | `latest` |
+| Change                                                                                                   | Example version from `0.1.1` | Tag      |
+| -------------------------------------------------------------------------------------------------------- | ---------------------------- | -------- |
+| Backward-compatible fix, docs, dependency maintenance, internal refactor, or public browser API addition | `0.1.2`                      | `latest` |
+| Breaking browser API or behavior change before 1.0                                                       | `0.2.0`                      | `latest` |
 
-For pre-1.0 versions, a new minor version communicates a breaking public
-change. Changes limited to private React Native experiments do not by themselves
-change the published browser package version.
+While the browser package remains in the experimental `0.1.x` line,
+backward-compatible public API additions release as patches alongside fixes.
+A new minor version communicates an intentional compatibility break or reset
+before `1.0`. This is the repository's release policy for the prototype phase;
+SemVer itself treats `0.y.z` as initial development. Changes limited to private
+React Native experiments do not by themselves change the published browser
+package version.
 
 ## Release Procedure
 

@@ -158,7 +158,7 @@ test("the docs home embeds the local basketball playground", async () => {
   );
   assert.match(
     homepage,
-    /href="documents\/Visualization_Layers\.html">Visualization layers</,
+    /href="documents\/Annotation_Renderers\.html">Annotation renderers</,
   );
   assert.match(homepage, /aria-label="Documentation entry points"/);
   assert.match(homepage, /title="Interactive basketball detection playground"/);
@@ -177,7 +177,7 @@ test("TypeDoc presents public guidance as four navigable sections", async () => 
   assert.deepEqual(config.projectDocuments, [
     "docs/public/getting-started.md",
     "docs/public/concepts.md",
-    "docs/public/visualization-layers.md",
+    "docs/public/annotation-renderers.md",
     "docs/public/recipes.md",
   ]);
   assert.deepEqual(config.sort, ["documents-first", "source-order"]);
@@ -193,17 +193,33 @@ test("TypeDoc presents public guidance as four navigable sections", async () => 
   ]);
 });
 
-test("every fixture-backed visualization layer has a focused live playground", async () => {
-  const layers = ["boxes", "masks", "labels", "polygons", "keypoints"];
+test("every fixture-backed annotation renderer has a focused live playground", async () => {
+  const renderers = [
+    "boxes",
+    "masks",
+    "labels",
+    "polygons",
+    "polylines",
+    "keypoints",
+  ];
   const pages = {
     boxes: "boxes.md",
     keypoints: "keypoints-and-skeletons.md",
     labels: "labels.md",
     masks: "masks.md",
     polygons: "polygons.md",
+    polylines: "polylines.md",
   };
-  const visualizationIndex = await readFile(
-    path.join(publicDocsDir, "visualization-layers.md"),
+  const factories = {
+    boxes: "box",
+    keypoints: "keypoints",
+    labels: "label",
+    masks: "mask",
+    polygons: "polygon",
+    polylines: "polyline",
+  };
+  const annotationRendererIndex = await readFile(
+    path.join(publicDocsDir, "annotation-renderers.md"),
     "utf8",
   );
   const toolbarScript = await readFile(
@@ -215,20 +231,24 @@ test("every fixture-backed visualization layer has a focused live playground", a
     "utf8",
   );
 
-  for (const layer of layers) {
+  for (const renderer of renderers) {
     const page = await readFile(
-      path.join(publicDocsDir, "visualization-layers", pages[layer]),
+      path.join(publicDocsDir, "annotation-renderers", pages[renderer]),
       "utf8",
     );
 
     assert.match(
       page,
       new RegExp(
-        `data-supervision-playground-src="demo/\\?embed=visualization-layer&amp;layer=${layer}"`,
+        `data-supervision-playground-src="demo/\\?embed=annotation-renderer&amp;renderer=${renderer}"`,
       ),
     );
     assert.match(page, /session\.setPresentation\(\{/);
-    assert.match(visualizationIndex, new RegExp(pages[layer]));
+    assert.match(
+      page,
+      new RegExp(`annotationRenderers\\.${factories[renderer]}\\(`),
+    );
+    assert.match(annotationRendererIndex, new RegExp(pages[renderer]));
   }
 
   assert.match(toolbarScript, /iframe\[data-supervision-playground-src\]/);
@@ -263,13 +283,6 @@ test("every fixture-backed visualization layer has a focused live playground", a
     docsCss,
     /\.tsd-typography:has\(\.supervision-layer-playground\) \{[\s\S]*?max-width: 72rem;/,
   );
-
-  const polylinePage = await readFile(
-    path.join(publicDocsDir, "visualization-layers", "polylines.md"),
-    "utf8",
-  );
-  assert.doesNotMatch(polylinePage, /data-supervision-playground-src/);
-  assert.match(polylinePage, /Fixture status:/);
 });
 
 test("Render preview trusts only its assigned hostname", async () => {
