@@ -25,11 +25,16 @@ const finishRecordingAsPicture = vi.fn(() => ({
 const pathClose = vi.fn();
 const pathDispose = vi.fn();
 const paintDispose = vi.fn();
+const setStrokeCap = vi.fn();
+const setStrokeJoin = vi.fn();
+const setStrokeMiter = vi.fn();
 
 vi.mock("@shopify/react-native-skia", () => ({
   AlphaType: { Opaque: 2 },
   ColorType: { Alpha_8: 1 },
   PaintStyle: { Fill: 0, Stroke: 1 },
+  StrokeCap: { Butt: 0, Round: 1, Square: 2 },
+  StrokeJoin: { Bevel: 2, Miter: 0, Round: 1 },
   Skia: {
     Color: vi.fn((color: number) => color),
     Data: {
@@ -44,6 +49,9 @@ vi.mock("@shopify/react-native-skia", () => ({
       setAntiAlias: vi.fn(),
       setColor: vi.fn(),
       setPathEffect: vi.fn(),
+      setStrokeCap,
+      setStrokeJoin,
+      setStrokeMiter,
       setStrokeWidth: vi.fn(),
       setStyle: vi.fn(),
     })),
@@ -235,8 +243,11 @@ describe("createReactNativeSkiaVectorFrame", () => {
           ],
           stroke: {
             alpha: 1,
+            cap: "round",
             color: 0xffffff,
             dash: [4, 2],
+            join: "bevel",
+            miterLimit: 7,
             width: 1,
           },
         },
@@ -256,6 +267,9 @@ describe("createReactNativeSkiaVectorFrame", () => {
     expect(drawCircle).toHaveBeenCalledWith(110, 70, 5, expect.anything());
     expect(pathClose).toHaveBeenCalledTimes(1);
     expect(Skia.PathEffect.MakeDash).toHaveBeenCalledWith([4, 2], 0);
+    expect(setStrokeCap).toHaveBeenCalledWith(1);
+    expect(setStrokeJoin).toHaveBeenCalledWith(2);
+    expect(setStrokeMiter).toHaveBeenCalledWith(7);
     expect(finishRecordingAsPicture).toHaveBeenCalled();
     expect(recorderDispose).toHaveBeenCalled();
     expect(pathDispose).toHaveBeenCalled();

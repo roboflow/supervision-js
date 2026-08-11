@@ -156,6 +156,7 @@ export async function createPixiMediaScene(
     polygonStyle: polygonLayer?.getVectorFallbackStyle() ?? currentPolygonStyle,
     polylineStyle: options.polylineStyle,
     keypointStyle: options.keypointStyle,
+    shapeStyle: options.shapeStyle,
     resolveContextState,
   });
   const regionLayer = createPixiRegionLayer({

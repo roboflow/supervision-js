@@ -172,11 +172,23 @@ export {
   type IdMaskFrame,
   type IdMaskInstruction,
 } from "#utils/id-mask-frame";
+export {
+  resolveEllipseSegmentCount,
+  resolveMarkerGeometry,
+  sampleEllipseArc,
+} from "#utils/shape-geometry";
+export type {
+  EllipseGeometry,
+  MarkerGeometry,
+  MarkerGeometryInput,
+  SampledShapePath,
+} from "#utils/shape-geometry";
 export { includeDefined } from "#utils/object";
 export { lightenColor, resolveContrastTextColor } from "#utils/color";
 export { resolveAnnotationStyleState } from "#utils/annotation-visibility";
 
 export { BoxShape, BoxStrokeAlignment } from "#types/box-style";
+export { StrokeAlignment } from "#types/paint-style";
 export type { ViewportController, ViewportTransform } from "#types/viewport";
 export {
   AnnotationGeometryKind,
@@ -200,6 +212,13 @@ export type {
   BoxStyle,
   BoxStyleContext,
 } from "#types/box-style";
+export type {
+  FillStyle,
+  OpenStrokeStyle,
+  StrokeCap,
+  StrokeJoin,
+  StrokeStyle,
+} from "#types/paint-style";
 export {
   DetectionBufferStatus,
   DetectionFrameRetentionMode,
@@ -334,6 +353,25 @@ export type {
   PolylineStyle,
   PolylineStyleContext,
 } from "#types/polyline-style";
+export {
+  MarkerShape,
+  MarkerSizeSpace,
+  ShapeInstructionKind,
+} from "#types/shape-style";
+export type {
+  ClosedEllipseShapeInstruction,
+  ClosedMarkerShapeInstruction,
+  ClosedPathShapeInstruction,
+  CrossMarkerShapeInstruction,
+  EllipseArcShapeInstruction,
+  EllipseShapeInstruction,
+  MarkerShapeInstruction,
+  OpenPathShapeInstruction,
+  PathShapeInstruction,
+  ShapeDrawInstruction,
+  ShapeStyle,
+  ShapeStyleContext,
+} from "#types/shape-style";
 export { KeypointMarkerShape } from "#types/keypoint-style";
 export type {
   KeypointDrawInstruction,

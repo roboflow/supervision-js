@@ -1,11 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createPixiVectorLayer } from "#renderers/pixi-vector-layer";
-import { KeypointMarkerShape } from "supervision-js-core";
+import {
+  KeypointMarkerShape,
+  MarkerShape,
+  MarkerSizeSpace,
+  ShapeInstructionKind,
+  StrokeAlignment,
+} from "supervision-js-core";
 import type {
   BufferedDetectionTimeline,
   DetectionFrame,
   KeypointStyle,
+  ShapeStyle,
 } from "supervision-js-core";
 
 describe("pixi vector layer", () => {
@@ -80,6 +87,229 @@ describe("pixi vector layer", () => {
     expect(display.position.set).toHaveBeenLastCalledWith(0, 0);
   });
 
+  it("renders shape decorations for detections without semantic vector geometry", () => {
+    const boxOnlyFrame: DetectionFrame = {
+      detections: [
+        { id: "box-0", rect: { height: 40, width: 20, x: 30, y: 40 } },
+      ],
+      frameIndex: 0,
+      mediaTime: 0,
+    };
+    const shapeStyle: ShapeStyle = {
+      resolve(detection) {
+        if (!detection.rect) return undefined;
+
+        return [
+          {
+            center: { x: detection.rect.x, y: detection.rect.y },
+            kind: ShapeInstructionKind.Ellipse,
+            radiusX: detection.rect.width / 2,
+            radiusY: 4,
+            stroke: { alpha: 1, color: 0xffffff, width: 2 },
+          },
+        ];
+      },
+    };
+    const layer = createPixiVectorLayer({
+      Container: FakeContainer as never,
+      detectionTimeline: createTimeline([boxOnlyFrame]),
+      Graphics: FakeGraphics as never,
+      keypointStyle: null,
+      polygonStyle: null,
+      polylineStyle: null,
+      shapeStyle,
+    });
+    const container = layer.createContainer() as unknown as FakeContainer;
+
+    layer.drawFrame(0);
+
+    expect(container.children).toHaveLength(1);
+    const display = container.children[0]!;
+    expect(display.moveTo).toHaveBeenCalled();
+    expect(display.stroke).toHaveBeenCalled();
+    expect(display.fill).not.toHaveBeenCalled();
+  });
+
+  it("keeps skipping geometry-free detections when no shape style is set", () => {
+    const boxOnlyFrame: DetectionFrame = {
+      detections: [
+        { id: "box-0", rect: { height: 40, width: 20, x: 30, y: 40 } },
+      ],
+      frameIndex: 0,
+      mediaTime: 0,
+    };
+    const layer = createLayer([boxOnlyFrame]);
+    const container = layer.createContainer() as unknown as FakeContainer;
+
+    layer.drawFrame(0);
+
+    expect(container.children).toHaveLength(0);
+  });
+
+  it("draws filled closed markers and screen-scaled circle markers", () => {
+    const boxOnlyFrame: DetectionFrame = {
+      detections: [
+        { id: "box-0", rect: { height: 40, width: 20, x: 30, y: 40 } },
+      ],
+      frameIndex: 0,
+      mediaTime: 0,
+    };
+    const shapeStyle: ShapeStyle = {
+      resolve: () => [
+        {
+          fill: { alpha: 1, color: 0xff0000 },
+          kind: ShapeInstructionKind.Marker,
+          center: { x: 30, y: 20 },
+          shape: MarkerShape.Triangle,
+          size: 12,
+          sizeSpace: MarkerSizeSpace.Screen,
+        },
+        {
+          fill: { alpha: 1, color: 0x00ff00 },
+          kind: ShapeInstructionKind.Marker,
+          center: { x: 30, y: 40 },
+          shape: MarkerShape.Circle,
+          size: 10,
+          sizeSpace: MarkerSizeSpace.Screen,
+          stroke: {
+            alignment: StrokeAlignment.Outside,
+            alpha: 1,
+            color: 0xffffff,
+            width: 2,
+          },
+        },
+      ],
+    };
+    const layer = createPixiVectorLayer({
+      Container: FakeContainer as never,
+      detectionTimeline: createTimeline([boxOnlyFrame]),
+      Graphics: FakeGraphics as never,
+      keypointStyle: null,
+      polygonStyle: null,
+      polylineStyle: null,
+      shapeStyle,
+    });
+    const container = layer.createContainer() as unknown as FakeContainer;
+
+    layer.drawFrame(0, 2);
+
+    const display = container.children[0]!;
+    // Triangle: closed filled polygon inscribed in a 12px/scale-2 circle.
+    expect(display.poly).toHaveBeenCalledTimes(1);
+    const polyCalls = display.poly.mock.calls as unknown as [
+      number[],
+      boolean,
+    ][];
+    const trianglePoints = polyCalls[0]![0];
+    expect(trianglePoints).toHaveLength(6);
+    expect(trianglePoints[0]).toBeCloseTo(30);
+    expect(trianglePoints[1]).toBeCloseTo(23);
+    // Circle: native circle with the screen size divided by the scale.
+    expect(display.circle).toHaveBeenCalledWith(30, 40, 2.5);
+    expect(display.stroke).toHaveBeenCalledWith({
+      alignment: 0,
+      alpha: 1,
+      color: 0xffffff,
+      width: 1,
+    });
+  });
+
+  it("draws dashed circle marker strokes through the shared path lowering", () => {
+    const boxOnlyFrame: DetectionFrame = {
+      detections: [
+        { id: "box-0", rect: { height: 40, width: 20, x: 30, y: 40 } },
+      ],
+      frameIndex: 0,
+      mediaTime: 0,
+    };
+    const shapeStyle: ShapeStyle = {
+      resolve: () => [
+        {
+          kind: ShapeInstructionKind.Marker,
+          center: { x: 30, y: 40 },
+          shape: MarkerShape.Circle,
+          size: 10,
+          sizeSpace: MarkerSizeSpace.Media,
+          stroke: {
+            alpha: 1,
+            color: 0xffffff,
+            dash: [4, 2],
+            width: 2,
+          },
+        },
+      ],
+    };
+    const layer = createPixiVectorLayer({
+      Container: FakeContainer as never,
+      detectionTimeline: createTimeline([boxOnlyFrame]),
+      Graphics: FakeGraphics as never,
+      keypointStyle: null,
+      polygonStyle: null,
+      polylineStyle: null,
+      shapeStyle,
+    });
+    const container = layer.createContainer() as unknown as FakeContainer;
+
+    layer.drawFrame(0);
+
+    const display = container.children[0]!;
+    expect(display.circle).not.toHaveBeenCalled();
+    expect(display.moveTo).toHaveBeenCalled();
+    expect(display.lineTo).toHaveBeenCalled();
+    expect(display.stroke).toHaveBeenCalledWith({
+      alpha: 1,
+      color: 0xffffff,
+      width: 2,
+    });
+  });
+
+  it("draws every subpath of a path instruction", () => {
+    const boxOnlyFrame: DetectionFrame = {
+      detections: [
+        { id: "box-0", rect: { height: 40, width: 20, x: 30, y: 40 } },
+      ],
+      frameIndex: 0,
+      mediaTime: 0,
+    };
+    const shapeStyle: ShapeStyle = {
+      resolve: () => [
+        {
+          closed: false,
+          kind: ShapeInstructionKind.Path,
+          segments: [
+            [
+              { x: 0, y: 0 },
+              { x: 5, y: 0 },
+            ],
+            [
+              { x: 0, y: 10 },
+              { x: 5, y: 10 },
+            ],
+          ],
+          stroke: { alpha: 1, color: 0xffffff, width: 2 },
+        },
+      ],
+    };
+    const layer = createPixiVectorLayer({
+      Container: FakeContainer as never,
+      detectionTimeline: createTimeline([boxOnlyFrame]),
+      Graphics: FakeGraphics as never,
+      keypointStyle: null,
+      polygonStyle: null,
+      polylineStyle: null,
+      shapeStyle,
+    });
+    const container = layer.createContainer() as unknown as FakeContainer;
+
+    layer.drawFrame(0);
+
+    const display = container.children[0]!;
+    expect(display.moveTo).toHaveBeenCalledTimes(2);
+    expect(display.moveTo).toHaveBeenNthCalledWith(1, 0, 0);
+    expect(display.moveTo).toHaveBeenNthCalledWith(2, 0, 10);
+    expect(display.stroke).toHaveBeenCalledTimes(2);
+  });
+
   it("redraws a replacement frame at the same timeline position", () => {
     const frames = [createFrame(0, ["pose-0"])];
     const layer = createLayer(frames);
@@ -117,6 +347,7 @@ class FakeContainer {
 class FakeGraphics {
   readonly circle = vi.fn(() => this);
   readonly clear = vi.fn(() => this);
+  readonly closePath = vi.fn(() => this);
   readonly fill = vi.fn(() => this);
   readonly lineTo = vi.fn(() => this);
   readonly moveTo = vi.fn(() => this);
