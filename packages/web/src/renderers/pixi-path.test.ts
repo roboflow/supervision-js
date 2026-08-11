@@ -34,4 +34,27 @@ describe("Pixi path stroke translation", () => {
       ),
     ).toMatchObject({ alignment: 0 });
   });
+
+  it("forwards portable cap and join controls", () => {
+    expect(
+      resolvePixiStroke(
+        {
+          alpha: 1,
+          cap: "round",
+          color: 0x123456,
+          join: "miter",
+          miterLimit: 6,
+          width: 4,
+        },
+        2,
+      ),
+    ).toEqual({
+      alpha: 1,
+      cap: "round",
+      color: 0x123456,
+      join: "miter",
+      miterLimit: 6,
+      width: 2,
+    });
+  });
 });

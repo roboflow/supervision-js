@@ -1,4 +1,5 @@
 import { resolveStyleValue } from "#styles/style-value";
+import { resolveStrokeStyle } from "#styles/stroke-style";
 import {
   BoxShape,
   type BoxDrawInstruction,
@@ -181,20 +182,11 @@ export class BaseInteractionStyle implements InteractionStyle {
     }
 
     const defaults = getStateDefaults(context.state);
-    const resolvedStroke: BoxStrokeStyle = {
-      alpha: stroke?.alpha ?? defaults.strokeAlpha,
-      color: stroke?.color ?? defaults.strokeColor,
-      width: stroke?.width ?? defaults.strokeWidth,
-    };
-
-    if (stroke?.alignment !== undefined) {
-      return {
-        ...resolvedStroke,
-        alignment: stroke.alignment,
-      };
-    }
-
-    return resolvedStroke;
+    return resolveStrokeStyle(stroke, {
+      alpha: defaults.strokeAlpha,
+      color: defaults.strokeColor,
+      width: defaults.strokeWidth,
+    });
   }
 
   protected resolveFill(

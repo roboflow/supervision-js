@@ -11,6 +11,7 @@ export const docsAnnotationRendererIds = [
   "polygons",
   "polylines",
   "keypoints",
+  "regions",
 ] as const;
 
 export type DocsAnnotationRendererId =
@@ -188,6 +189,11 @@ export const docsAnnotationRenderers: Readonly<
     description: "Pose markers and skeleton edges",
     title: "Keypoints & Skeletons",
   },
+  regions: {
+    controls: [],
+    description: "Asset overlays anchored to detection geometry",
+    title: "Asset Regions",
+  },
 };
 
 export function parseDocsAnnotationRenderer(
@@ -309,6 +315,18 @@ export function createDocsAnnotationRendererSnippet(
         markerFill: { alpha: 1 },
         radius: ${formatNumber(settings.keypointRadius)},
       }),
+    }),
+  ],
+});`;
+    case "regions":
+      return `session.setPresentation({
+  renderers: [
+    annotationRenderers.region({
+      id: "player-fire",
+      target: { className: ["white team player", "yellow team player"] },
+      source: { kind: "asset", asset: { src: fireGifUrl } },
+      region: { kind: "keypoint-anchor", anchor: "head" },
+      compose: { mode: "over" },
     }),
   ],
 });`;

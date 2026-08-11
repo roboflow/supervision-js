@@ -1,4 +1,5 @@
 import { resolveStyleValue } from "#styles/style-value";
+import { resolveStrokeStyle } from "#styles/stroke-style";
 import type { BoxStrokeStyle } from "#types/box-style";
 import type { Detection } from "#types/detections";
 import type {
@@ -43,15 +44,11 @@ export class BasePolylineStyle implements PolylineStyle {
 
     return {
       points: detection.polyline.points,
-      stroke: {
-        alpha: stroke?.alpha ?? 1,
-        color: stroke?.color ?? 0x00ff66,
-        width: stroke?.width ?? 2,
-        ...(stroke?.alignment === undefined
-          ? {}
-          : { alignment: stroke.alignment }),
-        ...(stroke?.dash === undefined ? {} : { dash: stroke.dash }),
-      },
+      stroke: resolveStrokeStyle(stroke, {
+        alpha: 1,
+        color: 0x00ff66,
+        width: 2,
+      }),
     };
   }
 }

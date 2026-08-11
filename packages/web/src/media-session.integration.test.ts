@@ -211,6 +211,54 @@ describe("media session integration", () => {
     session.destroy();
   });
 
+  it("keeps direct region renderers through MediaSession presentation updates", async () => {
+    resetMocks();
+    mediaMock.samples = [createMockSample(0, 0)];
+    const { annotationRenderers, createMediaSession } = await import("./index");
+    const createRegion = (scale: number) =>
+      annotationRenderers.region({
+        id: "player-badge",
+        region: { kind: "bounds" },
+        source: { asset: { src: "/badge.png" }, kind: "asset" },
+        target: { className: "player" },
+        transform: { scale },
+      });
+    const session = await createMediaSession({
+      container: createContainer(),
+      detections: {
+        frames: [
+          {
+            detections: [
+              {
+                className: "player",
+                id: "player-1",
+                rect: { height: 40, width: 20, x: 20, y: 35 },
+              },
+            ],
+            mediaTime: 0,
+          },
+        ],
+      },
+      media: "sample.mp4",
+      presentation: { renderers: [createRegion(1)] },
+      renderer: { autoPlay: false },
+    });
+
+    await vi.waitFor(() =>
+      expect(pixiMock.assetLoad).toHaveBeenCalledWith("/badge.png"),
+    );
+    await vi.waitFor(() => expect(pixiMock.spriteInstances).toHaveLength(2));
+    const regionSprite = pixiMock.spriteInstances[1]!;
+    expect(regionSprite).toMatchObject({ height: 20, width: 20 });
+
+    session.setPresentation({ renderers: [createRegion(2)] });
+    expect(regionSprite).toMatchObject({ height: 40, width: 40 });
+    session.destroy();
+    await vi.waitFor(() =>
+      expect(pixiMock.assetUnload).toHaveBeenCalledWith("/badge.png"),
+    );
+  });
+
   it("forwards host-owned editing, brush, and preview options through a session", async () => {
     resetMocks();
     mediaMock.samples = [createMockSample(0, 0)];

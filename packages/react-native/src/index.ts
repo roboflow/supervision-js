@@ -94,6 +94,17 @@ export type {
   PolylineDrawInstruction,
   PolylineStyle,
   PolylineAnnotationRenderer,
+  RegionAnnotationRenderer,
+  RegionRendererAssetReference,
+  RegionRendererAssetSource,
+  RegionRendererBoundsRegion,
+  RegionRendererCompose,
+  RegionRendererKeypointAnchorRegion,
+  RegionRendererRegion,
+  RegionRendererTarget,
+  RegionRendererTargetContext,
+  RegionRendererTargetValue,
+  RegionRendererTransform,
   KeypointDrawInstruction,
   KeypointStyle,
   KeypointAnnotationRenderer,
@@ -109,6 +120,11 @@ export type {
 } from "supervision-js-core";
 
 export { resolveAnnotationRendererPresentation } from "supervision-js-core";
+export {
+  RegionRendererComposeMode,
+  RegionRendererRegionKind,
+  RegionRendererSourceKind,
+} from "supervision-js-core";
 
 export {
   MediaSessionActivityKind,
@@ -801,6 +817,7 @@ export function createReactNativePreparedFramePacket<THandle = unknown>(
   options: ReactNativeFramePresentationOptions<THandle> &
     ReactNativeFramePresentationStyleOptions,
 ): ReactNativePreparedFramePacket<THandle> {
+  assertSupportedReactNativeAnnotationRenderers(options);
   const resolvedPresentation = resolveAnnotationRendererPresentation(options);
   const presentation = resolveReactNativeFramePresentationWithStyles(
     options,
@@ -1268,9 +1285,23 @@ export function resolveReactNativeFramePresentation<THandle = unknown>(
   options: ReactNativeFramePresentationOptions<THandle> &
     ReactNativeFramePresentationStyleOptions,
 ): ReactNativeFramePresentation<THandle> {
+  assertSupportedReactNativeAnnotationRenderers(options);
   return resolveReactNativeFramePresentationWithStyles(
     options,
     resolveAnnotationRendererPresentation(options),
+  );
+}
+
+function assertSupportedReactNativeAnnotationRenderers(
+  presentation: MediaRendererPresentation,
+) {
+  const unsupportedRenderer = presentation.renderers?.find(
+    (renderer) => renderer.kind === "region",
+  );
+  if (!unsupportedRenderer) return;
+
+  throw new RangeError(
+    `React Native frame presentation does not support annotation renderer kind "${unsupportedRenderer.kind}".`,
   );
 }
 

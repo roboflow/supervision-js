@@ -72,6 +72,34 @@ describe("resolveReactNativeFramePresentation", () => {
     expect(presentation.labels).toHaveLength(0);
   });
 
+  it("reports asset regions as unsupported instead of omitting them", () => {
+    expect(() =>
+      resolveReactNativeFramePresentation({
+        detectionFrame: { detections: [], mediaTime: 0 },
+        mediaFrame: {
+          metadata: {
+            duration: 1 / 30,
+            frameIndex: 0,
+            height: 1080,
+            mediaTime: 0,
+            width: 1920,
+          },
+          payload: { nativeTextureId: "texture-regions" },
+        },
+        renderers: [
+          annotationRenderers.region({
+            id: "badge",
+            region: { kind: "bounds" },
+            source: { asset: { src: "/badge.png" }, kind: "asset" },
+            target: {},
+          }),
+        ],
+      }),
+    ).toThrowError(
+      'React Native frame presentation does not support annotation renderer kind "region".',
+    );
+  });
+
   it("resolves core styles for an externally supplied native frame", () => {
     const detectionFrame: DetectionFrame = {
       detections: [
