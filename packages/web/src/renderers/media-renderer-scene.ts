@@ -53,7 +53,11 @@ export interface MediaRendererSceneOptions {
   readonly maskStyle: MaskStyle | null | undefined;
   readonly polygonStyle: PolygonStyle | null | undefined;
   readonly polylineStyle: PolylineStyle | null | undefined;
-  readonly shapeStyle: ShapeStyle | null | undefined;
+  /**
+   * Internal shape decoration hook. Renderer kinds that lower to shape
+   * instructions will feed this; it has no public presentation field.
+   */
+  readonly shapeStyle?: ShapeStyle | null;
   readonly keypointStyle: KeypointStyle | null | undefined;
   readonly interaction: MediaInteractionOptions | undefined;
   readonly interactionStyle: InteractionStyle | null | undefined;

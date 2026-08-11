@@ -805,7 +805,6 @@ export async function createPixiMediaScene(
       vectorLayer.setStyles({
         polylineStyle: presentation.polylineStyle,
         keypointStyle: presentation.keypointStyle,
-        shapeStyle: presentation.shapeStyle,
       });
 
       if (presentation.maskStyle !== undefined) {
