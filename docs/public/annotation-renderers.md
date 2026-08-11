@@ -7,6 +7,7 @@ children:
   - ./annotation-renderers/polygons.md
   - ./annotation-renderers/polylines.md
   - ./annotation-renderers/keypoints-and-skeletons.md
+  - ./annotation-renderers/asset-regions.md
 ---
 
 # Annotation Renderers
@@ -39,6 +40,7 @@ motion-gated basketball trajectory rather than inventing geometry at runtime.
 - [Polygons](./annotation-renderers/polygons.md)
 - [Polylines](./annotation-renderers/polylines.md)
 - [Keypoints and skeletons](./annotation-renderers/keypoints-and-skeletons.md)
+- [Asset regions](./annotation-renderers/asset-regions.md)
 
 ## Renderer Configuration
 
@@ -65,3 +67,8 @@ that source. When a `renderers` list is present, omitted renderers are disabled,
 including when the list is empty. A listed renderer without an explicit
 `style` uses its matching compatibility field. Source-specific overrides refine
 selected renderers but cannot re-enable an omitted renderer.
+
+Most established renderers are singleton style-backed layers. Asset-region
+renderers are intentionally multi-instance: each descriptor has its own `id`,
+target, source, anchor, transform, and composition order, so an application can
+place independent assets without creating a parallel layer API.

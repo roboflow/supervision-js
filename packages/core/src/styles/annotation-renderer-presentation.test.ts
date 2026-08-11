@@ -1,10 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  annotationRendererKinds,
-  annotationRenderers,
-} from "#types/annotation-renderer";
+import { annotationRenderers } from "#types/annotation-renderer";
 import { annotationRendererRegistry } from "#styles/annotation-renderer-registry";
+import { styledAnnotationRendererKinds } from "#styles/annotation-renderer-registry";
 import { BaseBoxStyle } from "#styles/box-style";
 import { BaseLabelStyle } from "#styles/label-style";
 import { BaseMaskStyle } from "#styles/mask-style";
@@ -114,14 +112,14 @@ describe("annotation renderer presentation", () => {
   });
 
   it("resolves only the listed renderer's style field for every kind", () => {
-    for (const kind of annotationRendererKinds) {
+    for (const kind of styledAnnotationRendererKinds) {
       const { styleField } = annotationRendererRegistry[kind];
       const presentation = resolveAnnotationRendererPresentation({
         renderers: [annotationRenderers[kind]()],
       });
 
       expect(presentation[styleField]).not.toBeNull();
-      for (const otherKind of annotationRendererKinds) {
+      for (const otherKind of styledAnnotationRendererKinds) {
         if (otherKind !== kind) {
           expect(
             presentation[annotationRendererRegistry[otherKind].styleField],
@@ -129,6 +127,28 @@ describe("annotation renderer presentation", () => {
         }
       }
     }
+  });
+
+  it("keeps multiple uniquely identified region renderers", () => {
+    const first = annotationRenderers.region({
+      id: "first",
+      region: { kind: "bounds" },
+      source: { asset: { src: "/first.png" }, kind: "asset" },
+      target: { className: "person" },
+    });
+    const second = annotationRenderers.region({
+      id: "second",
+      region: { kind: "bounds" },
+      source: { asset: { src: "/second.png" }, kind: "asset" },
+      target: { className: "basketball" },
+    });
+
+    const presentation = resolveAnnotationRendererPresentation({
+      renderers: [first, second],
+    });
+
+    expect(presentation.renderers).toEqual([first, second]);
+    expect(presentation.boxStyle).toBeNull();
   });
 
   it("keeps source-specific style overrides after renderer normalization", () => {

@@ -74,6 +74,20 @@ export {
   type MaskAnnotationRenderer,
   type PolygonAnnotationRenderer,
   type PolylineAnnotationRenderer,
+  RegionRendererComposeMode,
+  RegionRendererRegionKind,
+  RegionRendererSourceKind,
+  type RegionAnnotationRenderer,
+  type RegionRendererAssetReference,
+  type RegionRendererAssetSource,
+  type RegionRendererBoundsRegion,
+  type RegionRendererCompose,
+  type RegionRendererKeypointAnchorRegion,
+  type RegionRendererRegion,
+  type RegionRendererTarget,
+  type RegionRendererTargetContext,
+  type RegionRendererTargetValue,
+  type RegionRendererTransform,
 } from "#types/annotation-renderer";
 export { resolveAnnotationRendererPresentation } from "#styles/annotation-renderer-presentation";
 export {
@@ -250,6 +264,7 @@ export type {
   MediaFrameDiagnostics,
   MediaFrameRenderTimings,
   MediaRendererDiagnosticsOptions,
+  MediaRendererAssetError,
   MediaRendererPresentation,
   AnnotationVisibility,
   MediaDisplayAdjustments,

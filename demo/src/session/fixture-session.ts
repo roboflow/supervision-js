@@ -7,6 +7,7 @@ import {
   MediaRendererFit,
   createMediaSession,
   type MediaSession,
+  type MediaRendererPresentation,
 } from "supervision";
 import type {
   DemoFixtureDefinition,
@@ -30,6 +31,9 @@ export async function createFixtureSession(
     readonly container: HTMLDivElement;
     readonly definition: DemoFixtureDefinition;
     readonly fixtureFrameTransform?: DemoFixtureFrameTransform;
+    readonly presentationTransform?: (
+      presentation: MediaRendererPresentation,
+    ) => MediaRendererPresentation;
   } & DemoSessionCallbacks,
 ): Promise<MediaSession> {
   const manifest = await loadDemoFixtureDetectionManifest(options.definition);
@@ -64,7 +68,9 @@ export async function createFixtureSession(
     status: mediaSource.statusLabel,
   });
 
-  const presentation = createDemoPresentation(options.presentationSettings);
+  const basePresentation = createDemoPresentation(options.presentationSettings);
+  const presentation =
+    options.presentationTransform?.(basePresentation) ?? basePresentation;
   try {
     const session = await createMediaSession({
       container: options.container,

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   annotationRendererRegistry,
   resolveAnnotationRendererStyleFields,
+  styledAnnotationRendererKinds,
   type AnnotationRendererStyleField,
   type AnnotationRendererStyleFieldFor,
 } from "#styles/annotation-renderer-registry";
@@ -16,7 +17,6 @@ import { BasePolylineStyle } from "#styles/polyline-style";
 import {
   annotationRendererKinds,
   annotationRenderers,
-  type AnnotationRendererKind,
 } from "#types/annotation-renderer";
 
 type IsExact<TLeft, TRight> = [TLeft] extends [TRight]
@@ -33,7 +33,7 @@ const expectedStyleFields = {
   polygon: "polygonStyle",
   polyline: "polylineStyle",
 } as const satisfies Record<
-  AnnotationRendererKind,
+  (typeof styledAnnotationRendererKinds)[number],
   AnnotationRendererStyleField
 >;
 
@@ -42,7 +42,7 @@ const expectedStyleFields = {
  * only while each kind still owns its documented presentation field.
  */
 const styleFieldPairingIsExact: {
-  [TKind in AnnotationRendererKind]: IsExact<
+  [TKind in (typeof styledAnnotationRendererKinds)[number]]: IsExact<
     AnnotationRendererStyleFieldFor<TKind>,
     (typeof expectedStyleFields)[TKind]
   >;
@@ -62,7 +62,10 @@ const expectedCanonicalStyles = {
   mask: BaseMaskStyle,
   polygon: BasePolygonStyle,
   polyline: BasePolylineStyle,
-} as const satisfies Record<AnnotationRendererKind, unknown>;
+} as const satisfies Record<
+  (typeof styledAnnotationRendererKinds)[number],
+  unknown
+>;
 
 describe("annotation renderer registry", () => {
   it("owns presentation metadata for every renderer kind", () => {
@@ -71,7 +74,7 @@ describe("annotation renderer registry", () => {
     );
     expect(styleFieldPairingIsExact).toBeTruthy();
 
-    for (const kind of annotationRendererKinds) {
+    for (const kind of styledAnnotationRendererKinds) {
       expect(annotationRendererRegistry[kind].styleField).toBe(
         expectedStyleFields[kind],
       );
@@ -81,7 +84,7 @@ describe("annotation renderer registry", () => {
   it("creates each canonical default style on demand", () => {
     const defaultPresentation = createDefaultAnnotationPresentation();
 
-    for (const kind of annotationRendererKinds) {
+    for (const kind of styledAnnotationRendererKinds) {
       const { createCanonicalStyle, styleField } =
         annotationRendererRegistry[kind];
       const style = createCanonicalStyle();
@@ -97,16 +100,34 @@ describe("annotation renderer registry", () => {
   it("resolves the presentation fields of the requested kinds", () => {
     expect(
       resolveAnnotationRendererStyleFields([...annotationRendererKinds]),
-    ).toEqual(annotationRendererKinds.map((kind) => expectedStyleFields[kind]));
-    expect(resolveAnnotationRendererStyleFields(["mask", "box"])).toEqual([
-      "maskStyle",
-      "boxStyle",
-    ]);
+    ).toEqual(
+      styledAnnotationRendererKinds.map((kind) => expectedStyleFields[kind]),
+    );
+    expect(
+      resolveAnnotationRendererStyleFields(["mask", "region", "box"]),
+    ).toEqual(["maskStyle", "boxStyle"]);
   });
 
   it("builds a descriptor whose id and kind match the vocabulary", () => {
-    for (const kind of annotationRendererKinds) {
+    for (const kind of styledAnnotationRendererKinds) {
       expect(annotationRenderers[kind]()).toEqual({ id: kind, kind });
     }
+  });
+
+  it("builds independently identified region renderers", () => {
+    expect(
+      annotationRenderers.region({
+        id: "player-hat",
+        region: { anchor: "head", kind: "keypoint-anchor" },
+        source: { asset: { src: "/hat.png" }, kind: "asset" },
+        target: { className: "person" },
+      }),
+    ).toEqual({
+      id: "player-hat",
+      kind: "region",
+      region: { anchor: "head", kind: "keypoint-anchor" },
+      source: { asset: { src: "/hat.png" }, kind: "asset" },
+      target: { className: "person" },
+    });
   });
 });

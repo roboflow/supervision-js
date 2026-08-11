@@ -1,5 +1,6 @@
 import {
   annotationRendererRegistry,
+  isStyleBackedAnnotationRendererKind,
   type AnnotationRendererStyleField,
 } from "#styles/annotation-renderer-registry";
 import type {
@@ -41,13 +42,18 @@ export function resolveAnnotationRendererPresentation(
       );
     }
     rendererIds.add(renderer.id);
-    if (rendererKinds.has(renderer.kind)) {
+    if (
+      annotationRendererRegistry[renderer.kind].cardinality === "singleton" &&
+      rendererKinds.has(renderer.kind)
+    ) {
       throw new RangeError(
         `MediaRendererPresentation.renderers contains duplicate renderer kind "${renderer.kind}".`,
       );
     }
     rendererKinds.add(renderer.kind);
-    applyRendererStyle(resolved, presentation, renderer);
+    if (isStyleBackedAnnotationRenderer(renderer)) {
+      applyRendererStyle(resolved, presentation, renderer);
+    }
   }
 
   return {
@@ -56,10 +62,16 @@ export function resolveAnnotationRendererPresentation(
   };
 }
 
+function isStyleBackedAnnotationRenderer(
+  renderer: AnnotationRenderer,
+): renderer is Extract<AnnotationRenderer, { style?: unknown }> {
+  return isStyleBackedAnnotationRendererKind(renderer.kind);
+}
+
 function applyRendererStyle(
   resolved: ResolvedAnnotationRendererStyles,
   configured: MediaRendererPresentation,
-  renderer: AnnotationRenderer,
+  renderer: Extract<AnnotationRenderer, { style?: unknown }>,
 ) {
   const { createCanonicalStyle, styleField } =
     annotationRendererRegistry[renderer.kind];

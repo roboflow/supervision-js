@@ -476,8 +476,14 @@ export async function createMediaRendererCore(
         options.createMaskBrush?.(mediaDimensions) ?? options.maskBrush,
       maskStyle: currentPresentation.maskStyle,
       maxDevicePixelRatio: options.maxDevicePixelRatio,
+      onPresentationUpdate(presentedSample) {
+        if (!runtimeState.isDestroyed()) {
+          runtimeState.recordPresentationUpdate(presentedSample);
+        }
+      },
       polygonStyle: currentPresentation.polygonStyle,
       polylineStyle: currentPresentation.polylineStyle,
+      regionRenderers: resolveRegionRenderers(currentPresentation),
       previewOverlay: options.previewOverlay,
       renderPreparation: options.renderPreparation
         ? {
@@ -650,6 +656,13 @@ export async function createMediaRendererCore(
       throw error;
     }
   }
+}
+
+function resolveRegionRenderers(presentation: MediaRendererPresentation) {
+  return (
+    presentation.renderers?.filter((renderer) => renderer.kind === "region") ??
+    []
+  );
 }
 
 async function openRendererMediaSource(

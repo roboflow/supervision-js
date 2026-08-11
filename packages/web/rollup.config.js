@@ -122,7 +122,14 @@ const packageConfig = {
     editing: "src/editing.ts",
     index: "src/index.ts",
   },
-  external: ["mediabunny", "pixi.js", "supervision-js-core"],
+  external(source) {
+    return (
+      source === "mediabunny" ||
+      source === "pixi.js" ||
+      source.startsWith("pixi.js/") ||
+      source === "supervision-js-core"
+    );
+  },
   output: {
     dir: "dist",
     entryFileNames: "[name].js",
