@@ -215,6 +215,9 @@ export function createDemoPresentation(
     // letterbox around non-matching aspect ratios.
     backgroundColor: 0xf3f4f6,
     boxStyle,
+    // Class visibility rides the renderer-owned visibility contract so every
+    // layer and the prepared-mask cache invalidate consistently.
+    visibility: { hiddenClasses: settings.hiddenClasses },
     ellipseStyle,
     focusStyle: settings.focusEnabled ? createDemoFocusStyle(settings) : null,
     interactionStyle: createDemoInteractionStyle(settings),

@@ -18,15 +18,17 @@ describe("docs annotation renderers", () => {
         .map(([key]) => key);
 
       expect(enabled).toEqual(
-        renderer === "polylines"
-          ? ["masksEnabled", "polylinesEnabled"]
-          : [
-              renderer === "keypoints"
-                ? "keypointsEnabled"
-                : renderer === "ellipse"
-                  ? "ellipsesEnabled"
-                  : `${renderer}Enabled`,
-            ],
+        renderer === "regions"
+          ? []
+          : renderer === "polylines"
+            ? ["masksEnabled", "polylinesEnabled"]
+            : [
+                renderer === "keypoints"
+                  ? "keypointsEnabled"
+                  : renderer === "ellipse"
+                    ? "ellipsesEnabled"
+                    : `${renderer}Enabled`,
+              ],
       );
     }
   });
