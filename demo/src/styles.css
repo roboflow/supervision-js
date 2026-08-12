@@ -1874,6 +1874,48 @@ fieldset {
   transform: rotate(45deg);
 }
 
+.render-control-section__subheading-row {
+  align-items: center;
+  border-top: 1px solid var(--line);
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  min-width: 0;
+  padding-top: 8px;
+}
+
+.render-control-section__subheading-row .render-control-section__subheading {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.class-visibility-row {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.class-style-card__visibility {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.class-visibility-row__name {
+  color: var(--text);
+  flex: 1 1 auto;
+  font-size: 12px;
+  font-weight: 620;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .benchmarks-panel {
   background: rgba(10, 12, 17, 0.88);
   border: 1px solid var(--line);
@@ -2153,7 +2195,9 @@ fieldset {
   border-radius: var(--radius-md);
   display: grid;
   gap: 2px;
-  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  /* Wrap onto extra rows instead of squeezing every option into one row,
+   * so segment labels stay readable. */
+  grid-template-columns: repeat(auto-fit, minmax(76px, 1fr));
   min-width: 0;
   padding: 2px;
 }
@@ -2203,14 +2247,6 @@ fieldset {
   font-weight: 620;
 }
 
-.class-visibility-toolbar {
-  align-items: center;
-  display: flex;
-  gap: 6px;
-  justify-content: space-between;
-  min-width: 0;
-}
-
 .class-visibility-toolbar__actions {
   display: flex;
   flex-wrap: wrap;
@@ -2255,18 +2291,6 @@ fieldset {
 .class-style-card--hidden strong,
 .class-style-card--hidden .class-style-card__controls {
   opacity: 0.45;
-}
-
-.class-style-card__visibility {
-  align-items: center;
-  color: var(--muted);
-  cursor: pointer;
-  display: flex;
-  flex: 0 0 auto;
-  font-size: 11px;
-  font-weight: 610;
-  gap: 4px;
-  margin-left: auto;
 }
 
 .class-style-card header {
