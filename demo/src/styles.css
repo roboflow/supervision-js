@@ -2203,6 +2203,43 @@ fieldset {
   font-weight: 620;
 }
 
+.class-visibility-toolbar {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.class-visibility-toolbar__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.class-visibility-toolbar__actions button {
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  color: var(--muted-strong);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 650;
+  min-height: 26px;
+  padding: 4px 8px;
+}
+
+.class-visibility-toolbar__actions button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.075);
+  border-color: var(--line-strong);
+  color: #ffffff;
+}
+
+.class-visibility-toolbar__actions button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
 .class-style-card {
   background: rgba(255, 255, 255, 0.025);
   border: 1px solid var(--line);
@@ -2212,6 +2249,24 @@ fieldset {
   gap: 7px;
   min-width: 0;
   padding: 8px;
+}
+
+.class-style-card--hidden .class-style-card__swatch,
+.class-style-card--hidden strong,
+.class-style-card--hidden .class-style-card__controls {
+  opacity: 0.45;
+}
+
+.class-style-card__visibility {
+  align-items: center;
+  color: var(--muted);
+  cursor: pointer;
+  display: flex;
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 610;
+  gap: 4px;
+  margin-left: auto;
 }
 
 .class-style-card header {
@@ -2543,6 +2598,7 @@ fieldset {
 .render-control--toggle,
 .render-control--segmented,
 .render-control__segments button,
+.class-visibility-toolbar__actions button,
 .class-style-card,
 .readout,
 .performance-metric {
@@ -2567,7 +2623,8 @@ fieldset {
 .selection-panel .inspector-card__header button:hover,
 .playback-controls__step:hover:not(:disabled),
 .render-controls__tabs button:hover:not([aria-pressed="true"]),
-.render-control__segments button:hover:not(:disabled, [aria-pressed="true"]) {
+.render-control__segments button:hover:not(:disabled, [aria-pressed="true"]),
+.class-visibility-toolbar__actions button:hover:not(:disabled) {
   background: #f5f3ff;
   border-color: #a78bfa;
   color: var(--violet);
@@ -2601,7 +2658,8 @@ fieldset {
 .source-actions button:disabled,
 .playback-controls__step:disabled,
 .playback-controls__toggle:disabled,
-.render-control__segments button:disabled {
+.render-control__segments button:disabled,
+.class-visibility-toolbar__actions button:disabled {
   background: #f4f4f5;
   color: #9ca3af;
 }

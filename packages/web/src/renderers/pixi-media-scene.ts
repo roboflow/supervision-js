@@ -1,6 +1,7 @@
 import { RENDER_ENGINE_PREFERENCE } from "#constants/media-renderer";
 import {
   BasePolygonStyle,
+  type Detection,
   type DetectionFrame,
   type PolygonStyle,
 } from "supervision-js-core";
@@ -287,6 +288,8 @@ export async function createPixiMediaScene(
           interaction: options.interaction ?? {
             mode: MediaInteractionMode.Always,
           },
+          canPickDetection: (detection) =>
+            !resolveAnnotationStyleState(detection, currentVisibility).hidden,
           editingEngine: options.editingEngine,
           capturePointer: (pointerId) => {
             if (!rendererCanvas.hasPointerCapture?.(pointerId)) {
@@ -325,6 +328,8 @@ export async function createPixiMediaScene(
         Text,
         UniformGroup,
         interactionStyle: options.interactionStyle,
+        isDetectionVisible: (detection) =>
+          !resolveAnnotationStyleState(detection, currentVisibility).hidden,
       })
     : undefined;
   let fastTranslatedDetectionId: string | number | null = null;
@@ -388,6 +393,8 @@ export async function createPixiMediaScene(
         Shader,
         UniformGroup,
         focusStyle: options.focusStyle,
+        isDetectionVisible: (detection) =>
+          !resolveAnnotationStyleState(detection, currentVisibility).hidden,
       })
     : undefined;
   let mediaSprite: InstanceType<typeof Sprite> | undefined;
@@ -829,6 +836,7 @@ export async function createPixiMediaScene(
           visibilityVersion += 1;
           maskLayer?.setMaskStyle(createVisibilityMaskStyle(currentMaskStyle));
         }
+        interactionLayer?.drawFrame(mediaTime);
       }
       boxLayer.setBoxStyle(presentation.boxStyle);
       if (presentation.polygonStyle !== undefined) {
@@ -1148,6 +1156,8 @@ export async function createPixiMediaScene(
         Shader,
         UniformGroup,
         focusStyle,
+        isDetectionVisible: (detection) =>
+          !resolveAnnotationStyleState(detection, currentVisibility).hidden,
       });
     }
 
@@ -1197,10 +1207,10 @@ export async function createPixiMediaScene(
 
     focusLayer.drawFrame({
       frame,
-      hoveredPick: interactionState?.hoveredPick ?? null,
+      hoveredPick: filterVisiblePick(interactionState?.hoveredPick ?? null),
       idMaskArtifact: maskLayer?.getActiveIdMaskFrameTexture() ?? null,
       mediaTime,
-      selectedPick: interactionState?.selectedPick ?? null,
+      selectedPick: filterVisiblePick(interactionState?.selectedPick ?? null),
       viewportScale,
     });
   }
@@ -1215,11 +1225,14 @@ export async function createPixiMediaScene(
 
     interactionPresentationLayer.drawFrame({
       frame,
-      hoveredPick: interactionState?.hoveredPick ?? null,
+      hoveredPick: filterVisiblePick(interactionState?.hoveredPick ?? null),
       idMaskArtifact: maskLayer?.getActiveIdMaskFrameTexture() ?? null,
       mediaTime,
-      selectedPick: interactionState?.selectedPick ?? null,
-      selectedPicks: interactionState?.selectedPicks,
+      selectedPick: filterVisiblePick(interactionState?.selectedPick ?? null),
+      selectedPicks: interactionState?.selectedPicks.filter(
+        ({ detection }) =>
+          !resolveAnnotationStyleState(detection, currentVisibility).hidden,
+      ),
       viewportScale,
     });
   }
@@ -1309,6 +1322,15 @@ export async function createPixiMediaScene(
     };
 
     return visibilityMaskStyle;
+  }
+
+  function filterVisiblePick<T extends { readonly detection: Detection }>(
+    pick: T | null,
+  ): T | null {
+    return pick &&
+      !resolveAnnotationStyleState(pick.detection, currentVisibility).hidden
+      ? pick
+      : null;
   }
 }
 

@@ -16,6 +16,7 @@ import {
   annotationRenderers,
   type BoxDrawInstruction,
   type BoxStyle,
+  type BoxStyleContext,
   type Detection,
   type FocusStyle,
   type InteractionStyle,
@@ -64,6 +65,7 @@ export interface DemoPresentationSettings {
   readonly keypointRadius: number;
   readonly keypointEdgeWidth: number;
   readonly confidenceThreshold: number;
+  readonly hiddenClasses: readonly string[];
   readonly interactionHoverFillAlpha: number;
   readonly interactionHoverStrokeWidth: number;
   readonly interactionSelectedFillAlpha: number;
@@ -142,6 +144,7 @@ export const defaultDemoPresentationSettings: DemoPresentationSettings = {
   focusDimColor: 0x000000,
   focusEnabled: true,
   focusTargetMode: FocusTargetMode.Ambient,
+  hiddenClasses: [],
   interactionHoverFillAlpha: 0.08,
   interactionHoverStrokeWidth: 2,
   interactionSelectedFillAlpha: 0.22,
@@ -197,6 +200,9 @@ export function createDemoPresentation(
     // letterbox around non-matching aspect ratios.
     backgroundColor: 0xf3f4f6,
     boxStyle,
+    // Class visibility rides the renderer-owned visibility contract so every
+    // layer and the prepared-mask cache invalidate consistently.
+    visibility: { hiddenClasses: settings.hiddenClasses },
     focusStyle: settings.focusEnabled ? createDemoFocusStyle(settings) : null,
     interactionStyle: createDemoInteractionStyle(settings),
     keypointStyle,
@@ -281,8 +287,15 @@ function createDemoKeypointStyle(
 
 function createDemoBoxStyle(settings: DemoPresentationSettings): BoxStyle {
   return {
-    resolve(detection: Detection): BoxDrawInstruction | undefined {
-      if (!detection.rect || !passesConfidenceThreshold(detection, settings)) {
+    resolve(
+      detection: Detection,
+      context: BoxStyleContext,
+    ): BoxDrawInstruction | undefined {
+      if (
+        !detection.rect ||
+        context.hidden ||
+        !passesConfidenceThreshold(detection, settings)
+      ) {
         return undefined;
       }
 
@@ -589,8 +602,15 @@ function createDemoInteractionBoxStyle(
   state: DetectionInteractionState,
 ): BoxStyle {
   return {
-    resolve(detection: Detection): BoxDrawInstruction | undefined {
-      if (!detection.rect || !passesConfidenceThreshold(detection, settings)) {
+    resolve(
+      detection: Detection,
+      context: BoxStyleContext,
+    ): BoxDrawInstruction | undefined {
+      if (
+        !detection.rect ||
+        context.hidden ||
+        !passesConfidenceThreshold(detection, settings)
+      ) {
         return undefined;
       }
 

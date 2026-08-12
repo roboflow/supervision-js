@@ -520,6 +520,47 @@ describe("demo presentation", () => {
     ).toBeUndefined();
   });
 
+  it("routes class visibility through the renderer-owned contract", () => {
+    const presentation = createDemoPresentation({
+      ...defaultDemoPresentationSettings,
+      hiddenClasses: ["person", "cow"],
+    });
+
+    expect(presentation.visibility).toEqual({
+      hiddenClasses: ["person", "cow"],
+    });
+    // Styles keep confidence as their only local predicate; the mask
+    // artifact key never encodes class visibility, so the backend owns
+    // hidden-class invalidation.
+    expect(
+      presentation.maskStyle && "artifactKey" in presentation.maskStyle
+        ? presentation.maskStyle.artifactKey
+        : "",
+    ).toBe(
+      createDemoPresentation(defaultDemoPresentationSettings).maskStyle
+        ?.artifactKey,
+    );
+  });
+
+  it("hides detections in demo-owned styles when the context marks them hidden", () => {
+    const presentation = createDemoPresentation(
+      defaultDemoPresentationSettings,
+    );
+    const context = {
+      detectionIndex: 0,
+      frame: { detections: [rectangleDetection], mediaTime: 0 },
+      hidden: true,
+      mediaTime: 0,
+    };
+
+    expect(
+      presentation.boxStyle?.resolve(rectangleDetection, context),
+    ).toBeUndefined();
+    expect(
+      presentation.labelStyle?.resolve(rectangleDetection, context),
+    ).toBeUndefined();
+  });
+
   it("highlights picked polygon and keypoint targets through the interaction style", () => {
     const personStyle = {
       fill: 0x123456,
