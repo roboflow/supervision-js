@@ -466,7 +466,10 @@ export function createPixiInteractionLayer(options: {
     if (hoveredPick && !nextHoveredPick) {
       setHoveredPick(null);
     } else if (nextHoveredPick && nextHoveredPick !== hoveredPick) {
-      setHoveredPick(nextHoveredPick);
+      // Hover remains pointer-owned. Refresh its frame snapshot without
+      // emitting a second event-driven redraw from the normal frame path.
+      hoveredPick = nextHoveredPick;
+      hoveredPickKey = createDetectionPickKey(nextHoveredPick);
     }
 
     followSelectedPicks(frame);
@@ -496,15 +499,14 @@ export function createPixiInteractionLayer(options: {
 
     selectedPickKey = createDetectionPickKey(selectedPick);
     // A followed pick re-bases onto every new frame, so its full pick key
-    // changes at playback rate. That per-frame refresh stays internal via
-    // onStateChange; the public selection callbacks only report identity or
-    // membership changes.
+    // changes at playback rate. The scene's normal frame path consumes this
+    // refreshed state immediately; emitting onStateChange here would redraw
+    // focus and interaction a second time. Public callbacks only report
+    // identity or membership changes.
     if (identityChanged) {
       options.interaction.onSelect?.(selectedPick);
       options.interaction.onSelectionChange?.(selectedPicks);
     }
-
-    notifyStateChange();
   }
 
   /**

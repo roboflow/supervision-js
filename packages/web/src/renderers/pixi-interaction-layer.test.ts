@@ -461,18 +461,20 @@ describe("pixi interaction layer", () => {
     const onSelect = vi.fn();
     const onSelectionChange = vi.fn();
     const onStateChange = vi.fn();
-    const frames = [0.1, 0.2, 0.3, 0.4].map((mediaTime, frameIndex) => ({
-      detections: [
-        {
-          className: "player",
-          id: "player-1",
-          rect: { height: 30, width: 20, x: 10 + frameIndex, y: 15 },
-        },
-      ],
-      frameIndex: frameIndex + 3,
-      mediaTime,
-    }));
-    let activeFrame = frames[0]!;
+    const frames: DetectionFrame[] = [0.1, 0.2, 0.3, 0.4].map(
+      (mediaTime, frameIndex) => ({
+        detections: [
+          {
+            className: "player",
+            id: "player-1",
+            rect: { height: 30, width: 20, x: 10 + frameIndex, y: 15 },
+          },
+        ],
+        frameIndex: frameIndex + 3,
+        mediaTime,
+      }),
+    );
+    let activeFrame: DetectionFrame = frames[0]!;
     const layer = createPixiInteractionLayer({
       Container: FakeContainer as never,
       Rectangle: FakeRectangle as never,
@@ -495,19 +497,21 @@ describe("pixi interaction layer", () => {
     display.emit("pointertap", createPointerEvent(display, 15, 20));
 
     const selectCallsAfterTap = onSelect.mock.calls.length;
-    const stateCallsAfterTap = onStateChange.mock.calls.length;
+    display.emit("pointerout", createPointerEvent(display, 15, 20));
 
     for (const [index, nextFrame] of frames.entries()) {
       if (index === 0) continue;
+      const stateCallsBeforeFrame = onStateChange.mock.calls.length;
       activeFrame = nextFrame;
       layer.drawFrame(nextFrame.mediaTime);
+      expect(onStateChange.mock.calls.length).toBe(stateCallsBeforeFrame);
     }
 
-    // The internal state refreshes every frame; the public selection
-    // callbacks do not fire again while the identity is unchanged.
+    // The normal scene frame path consumes the refreshed internal state. No
+    // event-driven redraw or public selection callback fires while identity
+    // is unchanged.
     expect(onSelect.mock.calls.length).toBe(selectCallsAfterTap);
     expect(onSelectionChange.mock.calls.length).toBe(selectCallsAfterTap);
-    expect(onStateChange.mock.calls.length).toBeGreaterThan(stateCallsAfterTap);
     expect(layer.getState().selectedPick?.frame).toBe(frames.at(-1));
 
     activeFrame = nextFrameWithoutPlayer();
