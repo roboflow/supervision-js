@@ -1,5 +1,7 @@
 import {
   createDetectionPickKey,
+  followDetectionPickAcrossFrames,
+  haveSameDetectionPickIdentities,
   pickDetectionAtPoint,
   rebaseDetectionPickToFrame,
   getDetectionRect,
@@ -153,14 +155,24 @@ export function createPixiInteractionLayer(options: {
       currentMediaTime = mediaTime;
       activeFrame = options.detectionTimeline.selectFrame(mediaTime);
 
-      if (!canHandleInteraction()) {
-        pointerPoint = null;
-        marqueeRect = null;
-        setHoveredPick(null);
-        setSelectedPick(null);
-      } else {
+      if (canHandleInteraction()) {
         clearStalePicks(activeFrame);
+        return;
       }
+
+      pointerPoint = null;
+      marqueeRect = null;
+      setHoveredPick(null);
+
+      if (isDestroyed || mode === MediaInteractionMode.Disabled) {
+        setSelectedPick(null);
+        return;
+      }
+
+      // Paused-only interaction gates new picks during playback, but an
+      // existing selection keeps following its detection so selection-driven
+      // presentation such as focus survives frame advances.
+      followSelectedPicks(activeFrame);
     },
 
     setSelectedDetection(selection) {
@@ -470,35 +482,55 @@ export function createPixiInteractionLayer(options: {
   }
 
   function clearStalePicks(frame: DetectionFrame | undefined) {
+    // Hover stays bound to the pointer, so it keeps a per-frame lifetime.
     const nextHoveredPick = filterPick(
       rebaseDetectionPickToFrame(hoveredPick, frame),
     );
-    const nextSelectedPicks = selectedPicks.flatMap((pick) => {
-      const nextPick = filterPick(rebaseDetectionPickToFrame(pick, frame));
-      return nextPick ? [nextPick] : [];
-    });
-    const currentSelectionKeys = selectedPicks.map(createDetectionPickKey);
-    const nextSelectionKeys = nextSelectedPicks.map(createDetectionPickKey);
-    const selectionChanged =
-      currentSelectionKeys.length !== nextSelectionKeys.length ||
-      currentSelectionKeys.some(
-        (key, index) => key !== nextSelectionKeys[index],
-      );
 
     if (hoveredPick && !nextHoveredPick) {
       setHoveredPick(null);
     } else if (nextHoveredPick && nextHoveredPick !== hoveredPick) {
-      setHoveredPick(nextHoveredPick);
+      // Hover remains pointer-owned. Refresh its frame snapshot without
+      // emitting a second event-driven redraw from the normal frame path.
+      hoveredPick = nextHoveredPick;
+      hoveredPickKey = createDetectionPickKey(nextHoveredPick);
     }
+
+    followSelectedPicks(frame);
+  }
+
+  function followSelectedPicks(frame: DetectionFrame | undefined) {
+    if (selectedPicks.length === 0) {
+      return;
+    }
+
+    const nextSelectedPicks = selectedPicks.flatMap((pick) => {
+      const nextPick = filterPick(followDetectionPickAcrossFrames(pick, frame));
+      return nextPick ? [nextPick] : [];
+    });
+    const currentKeys = selectedPicks.map(createDetectionPickKey).join("|");
+    const nextKeys = nextSelectedPicks.map(createDetectionPickKey).join("|");
+    const identityChanged = !haveSameDetectionPickIdentities(
+      selectedPicks,
+      nextSelectedPicks,
+    );
 
     selectedPicks = nextSelectedPicks;
     selectedPick = nextSelectedPicks.at(-1) ?? null;
-    selectedPickKey = createDetectionPickKey(selectedPick);
 
-    if (selectionChanged) {
+    if (nextKeys === currentKeys) {
+      return;
+    }
+
+    selectedPickKey = createDetectionPickKey(selectedPick);
+    // A followed pick re-bases onto every new frame, so its full pick key
+    // changes at playback rate. The scene's normal frame path consumes this
+    // refreshed state immediately; emitting onStateChange here would redraw
+    // focus and interaction a second time. Public callbacks only report
+    // identity or membership changes.
+    if (identityChanged) {
       options.interaction.onSelect?.(selectedPick);
       options.interaction.onSelectionChange?.(selectedPicks);
-      notifyStateChange();
     }
   }
 

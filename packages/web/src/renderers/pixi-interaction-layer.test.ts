@@ -110,10 +110,18 @@ describe("pixi interaction layer", () => {
 
     expect(layer.getState()).toEqual({
       hoveredPick: null,
-      selectedPick: null,
+      selectedPick: expect.objectContaining({
+        detection: frame.detections[0],
+        detectionIndex: 0,
+      }),
     });
     expect(onHover).toHaveBeenLastCalledWith(null);
-    expect(onSelect).toHaveBeenLastCalledWith(null);
+    expect(onSelect).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        detection: frame.detections[0],
+        detectionIndex: 0,
+      }),
+    );
   });
 
   it("does not pick, select, or cycle through detections rejected by visibility", () => {
@@ -486,6 +494,248 @@ describe("pixi interaction layer", () => {
     expect(layer.getState().selectedPick?.frame).toBe(selectedFrame);
     expect(onHover).not.toHaveBeenLastCalledWith(null);
     expect(onSelect).not.toHaveBeenLastCalledWith(null);
+  });
+
+  it("follows the selected detection id onto later frames while hover stays per-frame", () => {
+    const onHover = vi.fn();
+    const onSelect = vi.fn();
+    const followedFrame: DetectionFrame = {
+      detections: [
+        {
+          className: "player",
+          id: "player-2",
+          rect: { height: 30, width: 20, x: 50, y: 15 },
+        },
+        {
+          className: "player",
+          id: "player-1",
+          rect: { height: 30, width: 20, x: 40, y: 45 },
+        },
+      ],
+      frameIndex: 4,
+      mediaTime: 0.2,
+    };
+    let activeFrame = frame;
+    const layer = createPixiInteractionLayer({
+      Container: FakeContainer as never,
+      Rectangle: FakeRectangle as never,
+      canInteract: () => true,
+      detectionTimeline: createTimeline(() => activeFrame),
+      interaction: {
+        mode: MediaInteractionMode.PausedOnly,
+        onHover,
+        onSelect,
+      },
+    });
+    const display = layer.createDisplay({
+      height: 80,
+      width: 120,
+    }) as FakeContainer;
+
+    layer.drawFrame(0.1);
+    display.emit("pointermove", createPointerEvent(display, 15, 20));
+    display.emit("pointertap", createPointerEvent(display, 15, 20));
+
+    activeFrame = followedFrame;
+    layer.drawFrame(0.2);
+
+    expect(layer.getState().selectedPick).toMatchObject({
+      detection: followedFrame.detections[1],
+      detectionIndex: 1,
+      frame: followedFrame,
+      mediaTime: 0.2,
+    });
+    // Following the same identity onto a new frame is an internal refresh,
+    // not a public selection change.
+    expect(onSelect).toHaveBeenCalledOnce();
+    expect(onSelect).toHaveBeenLastCalledWith(
+      expect.objectContaining({ detection: frame.detections[0] }),
+    );
+    expect(layer.getState().hoveredPick).toBeNull();
+    expect(onHover).toHaveBeenLastCalledWith(null);
+  });
+
+  it("keeps public selection callbacks at identity-change frequency", () => {
+    const onSelect = vi.fn();
+    const onSelectionChange = vi.fn();
+    const onStateChange = vi.fn();
+    const frames: DetectionFrame[] = [0.1, 0.2, 0.3, 0.4].map(
+      (mediaTime, frameIndex) => ({
+        detections: [
+          {
+            className: "player",
+            id: "player-1",
+            rect: { height: 30, width: 20, x: 10 + frameIndex, y: 15 },
+          },
+        ],
+        frameIndex: frameIndex + 3,
+        mediaTime,
+      }),
+    );
+    let activeFrame: DetectionFrame = frames[0]!;
+    const layer = createPixiInteractionLayer({
+      Container: FakeContainer as never,
+      Rectangle: FakeRectangle as never,
+      canInteract: () => true,
+      detectionTimeline: createTimeline(() => activeFrame),
+      interaction: {
+        mode: MediaInteractionMode.PausedOnly,
+        onSelect,
+        onSelectionChange,
+      },
+      onStateChange,
+    });
+    const display = layer.createDisplay({
+      height: 80,
+      width: 120,
+    }) as FakeContainer;
+
+    layer.drawFrame(0.1);
+    display.emit("pointermove", createPointerEvent(display, 15, 20));
+    display.emit("pointertap", createPointerEvent(display, 15, 20));
+
+    const selectCallsAfterTap = onSelect.mock.calls.length;
+    display.emit("pointerout", createPointerEvent(display, 15, 20));
+
+    for (const [index, nextFrame] of frames.entries()) {
+      if (index === 0) continue;
+      const stateCallsBeforeFrame = onStateChange.mock.calls.length;
+      activeFrame = nextFrame;
+      layer.drawFrame(nextFrame.mediaTime);
+      expect(onStateChange.mock.calls.length).toBe(stateCallsBeforeFrame);
+    }
+
+    // The normal scene frame path consumes the refreshed internal state. No
+    // event-driven redraw or public selection callback fires while identity
+    // is unchanged.
+    expect(onSelect.mock.calls.length).toBe(selectCallsAfterTap);
+    expect(onSelectionChange.mock.calls.length).toBe(selectCallsAfterTap);
+    expect(layer.getState().selectedPick?.frame).toBe(frames.at(-1));
+
+    activeFrame = nextFrameWithoutPlayer();
+    layer.drawFrame(0.5);
+
+    expect(onSelect).toHaveBeenLastCalledWith(null);
+    expect(onSelect.mock.calls.length).toBe(selectCallsAfterTap + 1);
+
+    function nextFrameWithoutPlayer(): DetectionFrame {
+      return {
+        detections: [
+          {
+            className: "player",
+            id: "player-9",
+            rect: { height: 30, width: 20, x: 60, y: 15 },
+          },
+        ],
+        frameIndex: 9,
+        mediaTime: 0.5,
+      };
+    }
+  });
+
+  it("reports removal when a numeric id is replaced by its string form", () => {
+    const onSelect = vi.fn();
+    const onSelectionChange = vi.fn();
+    const numericFrame = {
+      detections: [
+        {
+          className: "player",
+          id: 1,
+          rect: { height: 30, width: 20, x: 10, y: 15 },
+        },
+      ],
+      frameIndex: 3,
+      mediaTime: 0.1,
+    } satisfies DetectionFrame;
+    const stringFrame = {
+      detections: [
+        {
+          className: "player",
+          id: "1",
+          rect: { height: 30, width: 20, x: 10, y: 15 },
+        },
+      ],
+      frameIndex: 4,
+      mediaTime: 0.2,
+    } satisfies DetectionFrame;
+    let activeFrame: DetectionFrame = numericFrame;
+    const layer = createPixiInteractionLayer({
+      Container: FakeContainer as never,
+      Rectangle: FakeRectangle as never,
+      canInteract: () => true,
+      detectionTimeline: createTimeline(() => activeFrame),
+      interaction: {
+        mode: MediaInteractionMode.PausedOnly,
+        onSelect,
+        onSelectionChange,
+      },
+    });
+    const display = layer.createDisplay({
+      height: 80,
+      width: 120,
+    }) as FakeContainer;
+
+    layer.drawFrame(0.1);
+    display.emit("pointermove", createPointerEvent(display, 15, 20));
+    display.emit("pointertap", createPointerEvent(display, 15, 20));
+
+    activeFrame = stringFrame;
+    layer.drawFrame(0.2);
+
+    expect(layer.getState().selectedPick).toBeNull();
+    expect(onSelect).toHaveBeenLastCalledWith(null);
+    expect(onSelectionChange).toHaveBeenLastCalledWith([]);
+  });
+
+  it("keeps the selection following its detection during paused-only playback", () => {
+    const onSelect = vi.fn();
+    const followedFrame: DetectionFrame = {
+      detections: [
+        {
+          className: "player",
+          id: "player-1",
+          rect: { height: 30, width: 20, x: 40, y: 45 },
+        },
+      ],
+      frameIndex: 4,
+      mediaTime: 0.2,
+    };
+    let activeFrame = frame;
+    let paused = true;
+    const layer = createPixiInteractionLayer({
+      Container: FakeContainer as never,
+      Rectangle: FakeRectangle as never,
+      canInteract: () => paused,
+      detectionTimeline: createTimeline(() => activeFrame),
+      interaction: {
+        mode: MediaInteractionMode.PausedOnly,
+        onSelect,
+      },
+    });
+    const display = layer.createDisplay({
+      height: 80,
+      width: 120,
+    }) as FakeContainer;
+
+    layer.drawFrame(0.1);
+    display.emit("pointermove", createPointerEvent(display, 15, 20));
+    display.emit("pointertap", createPointerEvent(display, 15, 20));
+
+    paused = false;
+    activeFrame = followedFrame;
+    layer.drawFrame(0.2);
+
+    expect(layer.getState().selectedPick).toMatchObject({
+      detection: followedFrame.detections[0],
+      detectionIndex: 0,
+      frame: followedFrame,
+    });
+
+    activeFrame = nextFrame;
+    layer.drawFrame(0.3);
+
+    expect(layer.getState().selectedPick).toBeNull();
+    expect(onSelect).toHaveBeenLastCalledWith(null);
   });
 
   it("ignores stale mask picks and falls back to boxes on the active frame", () => {

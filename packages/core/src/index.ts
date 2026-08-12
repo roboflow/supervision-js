@@ -22,6 +22,8 @@ export { createWritableDetectionFrameSource } from "#detections/writable-detecti
 // Interaction and picking.
 export {
   createDetectionPickKey,
+  followDetectionPickAcrossFrames,
+  haveSameDetectionPickIdentities,
   pickDetectionAtPoint,
   pickDetectionByMaskId,
   rebaseDetectionPickToFrame,

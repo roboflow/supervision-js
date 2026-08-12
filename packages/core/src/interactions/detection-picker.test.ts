@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   createDetectionPickKey,
+  followDetectionPickAcrossFrames,
+  haveSameDetectionPickIdentities,
   pickDetectionByMaskId,
   pickDetectionAtPoint,
   rebaseDetectionPickToFrame,
@@ -51,7 +53,7 @@ describe("detection picker", () => {
 
     expect(pick?.detection.id).toBe("small");
     expect(pick ? createDetectionPickKey(pick) : null).toBe(
-      "12:0.4:id:small:box:geometry",
+      "12:0.4:id:string:small:box:geometry",
     );
   });
 
@@ -289,6 +291,147 @@ describe("detection picker", () => {
     ).toBe("last");
   });
 
+  it("follows a unique detection id onto a later frame", () => {
+    const originalPick = pickDetectionAtPoint(frame, { x: 50, y: 50 })!;
+    const laterFrame: DetectionFrame = {
+      detections: [
+        {
+          className: "person",
+          id: "large",
+          rect: { height: 100, width: 100, x: 70, y: 60 },
+        },
+        {
+          className: "ball",
+          id: "small",
+          rect: { height: 10, width: 10, x: 90, y: 40 },
+        },
+      ],
+      frameIndex: 13,
+      mediaTime: 0.433,
+    };
+
+    expect(rebaseDetectionPickToFrame(originalPick, laterFrame)).toBeNull();
+
+    const followed = followDetectionPickAcrossFrames(originalPick, laterFrame);
+
+    expect(followed).toMatchObject({
+      detection: laterFrame.detections[1],
+      detectionIndex: 1,
+      frame: laterFrame,
+      mediaTime: 0.433,
+      target: originalPick.target,
+    });
+  });
+
+  it("follows ids across frames even when the detection order changes", () => {
+    const originalPick = pickDetectionAtPoint(frame, { x: 50, y: 50 })!;
+    const reorderedLaterFrame: DetectionFrame = {
+      detections: [
+        {
+          className: "ball",
+          id: "small",
+          rect: { height: 10, width: 10, x: 90, y: 40 },
+        },
+        {
+          className: "person",
+          id: "large",
+          rect: { height: 100, width: 100, x: 70, y: 60 },
+        },
+      ],
+      frameIndex: 13,
+      mediaTime: 0.433,
+    };
+
+    expect(
+      followDetectionPickAcrossFrames(originalPick, reorderedLaterFrame),
+    ).toMatchObject({
+      detection: reorderedLaterFrame.detections[0],
+      detectionIndex: 0,
+    });
+  });
+
+  it("keeps a per-frame lifetime for picks without a followable identity", () => {
+    const anonymousFrame: DetectionFrame = {
+      detections: [{ rect: { height: 10, width: 10, x: 10, y: 10 } }],
+      frameIndex: 0,
+      mediaTime: 0,
+    };
+    const anonymousPick = pickDetectionAtPoint(anonymousFrame, {
+      x: 10,
+      y: 10,
+    })!;
+    const anonymousLaterFrame: DetectionFrame = {
+      detections: [{ rect: { height: 10, width: 10, x: 10, y: 10 } }],
+      frameIndex: 1,
+      mediaTime: 0.033,
+    };
+
+    expect(
+      followDetectionPickAcrossFrames(anonymousPick, anonymousLaterFrame),
+    ).toBeNull();
+
+    const duplicateIdFrame: DetectionFrame = {
+      detections: [
+        { id: "duplicate", rect: { height: 10, width: 10, x: 10, y: 10 } },
+        { id: "duplicate", rect: { height: 10, width: 10, x: 30, y: 10 } },
+      ],
+      frameIndex: 0,
+      mediaTime: 0,
+    };
+    const duplicatePick = pickDetectionAtPoint(duplicateIdFrame, {
+      x: 10,
+      y: 10,
+    })!;
+    const duplicateLaterFrame: DetectionFrame = {
+      ...duplicateIdFrame,
+      frameIndex: 1,
+      mediaTime: 0.033,
+    };
+
+    expect(
+      followDetectionPickAcrossFrames(duplicatePick, duplicateLaterFrame),
+    ).toBeNull();
+  });
+
+  it("drops a followed pick when its detection leaves the timeline", () => {
+    const originalPick = pickDetectionAtPoint(frame, { x: 50, y: 50 })!;
+    const withoutBallFrame: DetectionFrame = {
+      detections: [
+        {
+          className: "person",
+          id: "large",
+          rect: { height: 100, width: 100, x: 70, y: 60 },
+        },
+      ],
+      frameIndex: 13,
+      mediaTime: 0.433,
+    };
+
+    expect(
+      followDetectionPickAcrossFrames(originalPick, withoutBallFrame),
+    ).toBeNull();
+  });
+
+  it("still rebases same-frame reloads through the follow helper", () => {
+    const originalPick = pickDetectionAtPoint(frame, { x: 50, y: 50 })!;
+    const reloadedFrame: DetectionFrame = {
+      ...frame,
+      detections: frame.detections.map((detection) => ({ ...detection })),
+    };
+    const followed = followDetectionPickAcrossFrames(
+      originalPick,
+      reloadedFrame,
+    );
+
+    expect(followed).toMatchObject({
+      detection: reloadedFrame.detections[1],
+      detectionIndex: 1,
+    });
+    expect(createDetectionPickKey(followed)).toBe(
+      createDetectionPickKey(originalPick),
+    );
+  });
+
   it("uses the frame index for duplicate ids so interaction state does not collide", () => {
     const duplicateIds = {
       detections: [
@@ -313,5 +456,27 @@ describe("detection picker", () => {
       detectionIndex: 1,
       detection: cloned.detections[1],
     });
+  });
+
+  it("keeps numeric and string ids as distinct selection identities", () => {
+    const numericFrame = {
+      detections: [{ id: 1, rect: { height: 10, width: 10, x: 10, y: 10 } }],
+      frameIndex: 1,
+      mediaTime: 0,
+    } satisfies DetectionFrame;
+    const stringFrame = {
+      detections: [{ id: "1", rect: { height: 10, width: 10, x: 10, y: 10 } }],
+      frameIndex: 2,
+      mediaTime: 0.033,
+    } satisfies DetectionFrame;
+    const numericPick = pickDetectionAtPoint(numericFrame, { x: 10, y: 10 })!;
+    const stringPick = pickDetectionAtPoint(stringFrame, { x: 10, y: 10 })!;
+
+    expect(haveSameDetectionPickIdentities([numericPick], [numericPick])).toBe(
+      true,
+    );
+    expect(haveSameDetectionPickIdentities([numericPick], [stringPick])).toBe(
+      false,
+    );
   });
 });

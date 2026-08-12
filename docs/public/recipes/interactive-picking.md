@@ -75,6 +75,17 @@ active selected target has a prepared PNG ID-mask, focus rendering uses that
 artifact for a shape-accurate cutout; otherwise it falls back to the detection
 rectangle.
 
+Selections with an id that is unique in both the current and next detection
+frames follow that detection across frames, including while `PausedOnly`
+interaction is gated during playback. Anonymous or duplicate ids remain
+frame-local, and hover always remains bound to the current pointer frame.
+
+`onSelect` and `onSelectionChange` report selection identity or membership
+changes; they do not run at playback frame rate while the same id follows.
+Their `DetectionPickResult` values are immutable event snapshots. When an
+inspector needs current geometry, retain the selected detection id and look it
+up in `session.renderer.getActiveDetectionFrame()`.
+
 Inspector UIs can also select the active detection frame programmatically:
 
 ```ts
