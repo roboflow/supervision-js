@@ -245,6 +245,7 @@ export function createDocsAnnotationRendererPresentation(
     masksEnabled: renderer === "masks" || renderer === "polylines",
     polygonsEnabled: renderer === "polygons",
     polylinesEnabled: renderer === "polylines",
+    regionsEnabled: renderer === "regions",
     maskFillAlpha: 1,
     maskOpacity: 0.72,
   };

@@ -79,6 +79,7 @@ export async function createPixiMediaScene(
 ): Promise<MediaRendererScene> {
   const {
     Application,
+    Assets,
     BlurFilter,
     CanvasSource,
     Container,

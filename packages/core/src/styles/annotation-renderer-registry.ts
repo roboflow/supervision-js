@@ -19,6 +19,7 @@ export const styledAnnotationRendererKinds = [
   "keypoints",
   "label",
   "mask",
+  "maskHalo",
   "polygon",
   "polyline",
 ] as const;
@@ -113,6 +114,7 @@ export const annotationRendererRegistry: AnnotationRendererRegistry = {
     styleField: "maskStyle",
   },
   maskHalo: {
+    cardinality: "singleton",
     createCanonicalStyle: () => createDefaultMaskHaloStyle(),
     styleField: "maskHaloStyle",
   },

@@ -416,6 +416,7 @@ vi.mock("pixi.js", () => {
 
   return {
     Application,
+    Assets,
     BlurFilter,
     CanvasSource,
     Container,
