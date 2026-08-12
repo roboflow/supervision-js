@@ -50,6 +50,39 @@ describe("pixi interaction presentation layer", () => {
     expect(graphics.rect).toHaveBeenCalledWith(10, 15, 20, 30);
     expect(graphics.stroke).toHaveBeenCalled();
   });
+
+  it("omits interaction presentation for hidden detections", () => {
+    const selectedPick = {
+      detection: frame.detections[0]!,
+      detectionIndex: 0,
+      frame,
+      mediaTime: frame.mediaTime,
+      point: { x: 15, y: 20 },
+      target: DetectionPickTarget.Box,
+    };
+    const layer = createPixiInteractionPresentationLayer({
+      Container: FakeContainer as never,
+      Graphics: FakeGraphics as never,
+      Text: FakeText as never,
+      interactionStyle: new BaseInteractionStyle(),
+      isDetectionVisible: () => false,
+    });
+    const display = layer.createDisplay({
+      height: 80,
+      width: 120,
+    }) as FakeContainer;
+    const graphics = display.children[0] as FakeGraphics;
+
+    layer.drawFrame({
+      frame,
+      hoveredPick: null,
+      mediaTime: frame.mediaTime,
+      selectedPick,
+    });
+
+    expect(graphics.rect).not.toHaveBeenCalled();
+    expect(graphics.stroke).not.toHaveBeenCalled();
+  });
 });
 
 class FakeContainer {

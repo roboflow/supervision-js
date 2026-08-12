@@ -6,6 +6,7 @@ import { createPixiAnnotationOverlayLayer } from "./pixi-annotation-overlay-laye
 
 function createGraphicsMock() {
   const graphics = {
+    arc: vi.fn(),
     circle: vi.fn(),
     clear: vi.fn(),
     closePath: vi.fn(),
@@ -18,6 +19,7 @@ function createGraphicsMock() {
   };
   for (const method of [
     graphics.circle,
+    graphics.arc,
     graphics.fill,
     graphics.poly,
     graphics.roundRect,
@@ -29,6 +31,38 @@ function createGraphicsMock() {
 }
 
 describe("Pixi annotation overlay presentation", () => {
+  it("does not draw loading overlays for hidden detections", () => {
+    const graphics = createGraphicsMock();
+    const layer = createPixiAnnotationOverlayLayer();
+    layer.attachGraphics(graphics as never);
+
+    layer.draw({
+      frame: {
+        detections: [
+          {
+            className: "player",
+            id: "player-1",
+            rect: { height: 20, width: 30, x: 40, y: 50 },
+          },
+        ],
+        mediaTime: 0,
+      },
+      marquee: null,
+      mediaHeight: 100,
+      mediaWidth: 100,
+      now: 0,
+      pointer: null,
+      selectedDetectionIds: [],
+      viewportScale: 1,
+      visibility: {
+        hiddenClasses: ["player"],
+        loadingDetectionIds: ["player-1"],
+      },
+    });
+
+    expect(graphics.arc).not.toHaveBeenCalled();
+  });
+
   it("fills box creation previews with the configured class treatment", () => {
     const graphics = createGraphicsMock();
     const preview = {

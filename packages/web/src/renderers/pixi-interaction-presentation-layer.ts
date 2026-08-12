@@ -128,6 +128,7 @@ export function createPixiInteractionPresentationLayer(options: {
   readonly Text: TextConstructor;
   readonly UniformGroup?: UniformGroupConstructor;
   readonly interactionStyle?: InteractionStyle | null;
+  readonly isDetectionVisible?: (detection: Detection) => boolean;
 }): PixiInteractionPresentationLayer {
   let interactionStyle: InteractionStyle | null =
     options.interactionStyle === undefined
@@ -304,7 +305,10 @@ export function createPixiInteractionPresentationLayer(options: {
   ): ActiveInteractionPick | null {
     const activePick = rebaseDetectionPickToFrame(pick, frame);
 
-    if (!activePick) {
+    if (
+      !activePick ||
+      options.isDetectionVisible?.(activePick.detection) === false
+    ) {
       return null;
     }
 
