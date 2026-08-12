@@ -366,6 +366,7 @@ function drawShapeInstruction(
       instruction,
       resolveEllipseSegmentCount(instruction, viewportScale),
     );
+
     if (closed && instruction.fill) {
       graphics.poly(
         points.flatMap(({ x, y }) => [x, y]),
