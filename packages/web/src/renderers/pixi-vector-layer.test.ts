@@ -6,7 +6,6 @@ import {
   MarkerShape,
   MarkerSizeSpace,
   ShapeInstructionKind,
-  StrokeAlignment,
 } from "supervision-js-core";
 import type {
   BufferedDetectionTimeline,
@@ -159,7 +158,7 @@ describe("pixi vector layer", () => {
         {
           fill: { alpha: 1, color: 0xff0000 },
           kind: ShapeInstructionKind.Marker,
-          center: { x: 30, y: 20 },
+          point: { x: 30, y: 20 },
           shape: MarkerShape.Triangle,
           size: 12,
           sizeSpace: MarkerSizeSpace.Screen,
@@ -167,16 +166,10 @@ describe("pixi vector layer", () => {
         {
           fill: { alpha: 1, color: 0x00ff00 },
           kind: ShapeInstructionKind.Marker,
-          center: { x: 30, y: 40 },
+          point: { x: 30, y: 40 },
           shape: MarkerShape.Circle,
           size: 10,
           sizeSpace: MarkerSizeSpace.Screen,
-          stroke: {
-            alignment: StrokeAlignment.Outside,
-            alpha: 1,
-            color: 0xffffff,
-            width: 2,
-          },
         },
       ],
     };
@@ -206,15 +199,9 @@ describe("pixi vector layer", () => {
     expect(trianglePoints[1]).toBeCloseTo(23);
     // Circle: native circle with the screen size divided by the scale.
     expect(display.circle).toHaveBeenCalledWith(30, 40, 2.5);
-    expect(display.stroke).toHaveBeenCalledWith({
-      alignment: 0,
-      alpha: 1,
-      color: 0xffffff,
-      width: 1,
-    });
   });
 
-  it("draws dashed circle marker strokes through the shared path lowering", () => {
+  it("draws icons once their texture resolves and skips them before", async () => {
     const boxOnlyFrame: DetectionFrame = {
       detections: [
         { id: "box-0", rect: { height: 40, width: 20, x: 30, y: 40 } },
@@ -222,20 +209,22 @@ describe("pixi vector layer", () => {
       frameIndex: 0,
       mediaTime: 0,
     };
+    const fakeTexture = { id: "texture" };
+    let resolveTexture: (texture: unknown) => void = () => {};
+    const loadIconTexture = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          resolveTexture = resolve;
+        }),
+    );
     const shapeStyle: ShapeStyle = {
       resolve: () => [
         {
-          kind: ShapeInstructionKind.Marker,
-          center: { x: 30, y: 40 },
-          shape: MarkerShape.Circle,
-          size: 10,
-          sizeSpace: MarkerSizeSpace.Media,
-          stroke: {
-            alpha: 1,
-            color: 0xffffff,
-            dash: [4, 2],
-            width: 2,
-          },
+          href: "data:image/svg+xml,icon",
+          kind: ShapeInstructionKind.Icon,
+          point: { x: 30, y: 20 },
+          size: 24,
+          sizeSpace: MarkerSizeSpace.Screen,
         },
       ],
     };
@@ -244,6 +233,160 @@ describe("pixi vector layer", () => {
       detectionTimeline: createTimeline([boxOnlyFrame]),
       Graphics: FakeGraphics as never,
       keypointStyle: null,
+      loadIconTexture: loadIconTexture as never,
+      polygonStyle: null,
+      polylineStyle: null,
+      shapeStyle,
+    });
+    const container = layer.createContainer() as unknown as FakeContainer;
+
+    layer.drawFrame(0, 2);
+    const display = container.children[0]!;
+    expect(loadIconTexture).toHaveBeenCalledOnce();
+    expect(display.texture).not.toHaveBeenCalled();
+
+    resolveTexture(fakeTexture);
+    await Promise.resolve();
+    layer.drawFrame(0, 2);
+
+    expect(loadIconTexture).toHaveBeenCalledOnce();
+    expect(display.texture).toHaveBeenCalledWith(
+      fakeTexture,
+      0xffffff,
+      24,
+      14,
+      12,
+      12,
+    );
+  });
+
+  it("notifies the host when an icon texture resolves after its frame", async () => {
+    const boxOnlyFrame: DetectionFrame = {
+      detections: [
+        { id: "box-0", rect: { height: 40, width: 20, x: 30, y: 40 } },
+      ],
+      frameIndex: 0,
+      mediaTime: 0,
+    };
+    const onAssetLoaded = vi.fn();
+    let resolveTexture: (texture: unknown) => void = () => {};
+    const layer = createPixiVectorLayer({
+      Container: FakeContainer as never,
+      detectionTimeline: createTimeline([boxOnlyFrame]),
+      Graphics: FakeGraphics as never,
+      keypointStyle: null,
+      loadIconTexture: (() =>
+        new Promise((resolve) => {
+          resolveTexture = resolve;
+        })) as never,
+      onAssetLoaded,
+      polygonStyle: null,
+      polylineStyle: null,
+      shapeStyle: iconShapeStyle,
+    });
+
+    layer.createContainer();
+    layer.drawFrame(0);
+    expect(onAssetLoaded).not.toHaveBeenCalled();
+
+    resolveTexture({ destroy: vi.fn() });
+    await Promise.resolve();
+
+    expect(onAssetLoaded).toHaveBeenCalledOnce();
+  });
+
+  it("destroys loaded icon textures on teardown", async () => {
+    const boxOnlyFrame: DetectionFrame = {
+      detections: [
+        { id: "box-0", rect: { height: 40, width: 20, x: 30, y: 40 } },
+      ],
+      frameIndex: 0,
+      mediaTime: 0,
+    };
+    const texture = { destroy: vi.fn(), source: { style: {} } };
+    const layer = createPixiVectorLayer({
+      Container: FakeContainer as never,
+      detectionTimeline: createTimeline([boxOnlyFrame]),
+      Graphics: FakeGraphics as never,
+      keypointStyle: null,
+      loadIconTexture: (() => Promise.resolve(texture)) as never,
+      polygonStyle: null,
+      polylineStyle: null,
+      shapeStyle: iconShapeStyle,
+    });
+
+    layer.createContainer();
+    layer.drawFrame(0);
+    await Promise.resolve();
+
+    layer.destroy();
+
+    expect(texture.destroy).toHaveBeenCalledWith(true);
+  });
+
+  it("disposes icon textures that resolve after teardown", async () => {
+    const boxOnlyFrame: DetectionFrame = {
+      detections: [
+        { id: "box-0", rect: { height: 40, width: 20, x: 30, y: 40 } },
+      ],
+      frameIndex: 0,
+      mediaTime: 0,
+    };
+    const onAssetLoaded = vi.fn();
+    const texture = { destroy: vi.fn(), source: { style: {} } };
+    let resolveTexture: (value: unknown) => void = () => {};
+    const layer = createPixiVectorLayer({
+      Container: FakeContainer as never,
+      detectionTimeline: createTimeline([boxOnlyFrame]),
+      Graphics: FakeGraphics as never,
+      keypointStyle: null,
+      loadIconTexture: (() =>
+        new Promise((resolve) => {
+          resolveTexture = resolve;
+        })) as never,
+      onAssetLoaded,
+      polygonStyle: null,
+      polylineStyle: null,
+      shapeStyle: iconShapeStyle,
+    });
+
+    layer.createContainer();
+    layer.drawFrame(0);
+    layer.destroy();
+
+    resolveTexture(texture);
+    await Promise.resolve();
+
+    expect(texture.destroy).toHaveBeenCalledWith(true);
+    expect(onAssetLoaded).not.toHaveBeenCalled();
+  });
+
+  it("marks failed icon loads and does not retry them", async () => {
+    const boxOnlyFrame: DetectionFrame = {
+      detections: [
+        { id: "box-0", rect: { height: 40, width: 20, x: 30, y: 40 } },
+      ],
+      frameIndex: 0,
+      mediaTime: 0,
+    };
+    const loadIconTexture = vi.fn(() => Promise.reject(new Error("nope")));
+    const shapeStyle: ShapeStyle = {
+      resolve: () => [
+        {
+          href: "data:image/svg+xml,broken",
+          kind: ShapeInstructionKind.Icon,
+          point: { x: 30, y: 20 },
+          size: 24,
+          sizeSpace: MarkerSizeSpace.Screen,
+        },
+      ],
+    };
+    const layer = createPixiVectorLayer({
+      Container: FakeContainer as never,
+      detectionTimeline: createTimeline([boxOnlyFrame]),
+      Graphics: FakeGraphics as never,
+      keypointStyle: null,
+      loadIconTexture: loadIconTexture as never,
       polygonStyle: null,
       polylineStyle: null,
       shapeStyle,
@@ -251,16 +394,12 @@ describe("pixi vector layer", () => {
     const container = layer.createContainer() as unknown as FakeContainer;
 
     layer.drawFrame(0);
+    await Promise.resolve();
+    layer.invalidateDetection("box-0");
+    layer.drawFrame(0);
 
-    const display = container.children[0]!;
-    expect(display.circle).not.toHaveBeenCalled();
-    expect(display.moveTo).toHaveBeenCalled();
-    expect(display.lineTo).toHaveBeenCalled();
-    expect(display.stroke).toHaveBeenCalledWith({
-      alpha: 1,
-      color: 0xffffff,
-      width: 2,
-    });
+    expect(loadIconTexture).toHaveBeenCalledOnce();
+    expect(container.children[0]!.texture).not.toHaveBeenCalled();
   });
 
   it("draws every subpath of a path instruction", () => {
@@ -335,6 +474,18 @@ describe("pixi vector layer", () => {
   });
 });
 
+const iconShapeStyle: ShapeStyle = {
+  resolve: () => [
+    {
+      href: "data:image/svg+xml,icon",
+      kind: ShapeInstructionKind.Icon,
+      point: { x: 30, y: 20 },
+      size: 24,
+      sizeSpace: MarkerSizeSpace.Screen,
+    },
+  ],
+};
+
 class FakeContainer {
   readonly children: FakeGraphics[] = [];
   sortableChildren = false;
@@ -348,6 +499,7 @@ class FakeGraphics {
   readonly circle = vi.fn(() => this);
   readonly clear = vi.fn(() => this);
   readonly closePath = vi.fn(() => this);
+  readonly texture = vi.fn(() => this);
   readonly fill = vi.fn(() => this);
   readonly lineTo = vi.fn(() => this);
   readonly moveTo = vi.fn(() => this);

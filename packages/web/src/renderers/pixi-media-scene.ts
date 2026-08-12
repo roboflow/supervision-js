@@ -158,27 +158,36 @@ export async function createPixiMediaScene(
     polylineStyle: options.polylineStyle,
     keypointStyle: options.keypointStyle,
     shapeStyle: options.shapeStyle,
-    resolveContextState,
-  });
-  const regionLayer = createPixiRegionLayer({
-    Assets,
-    Container,
-    GifSprite,
-    Sprite,
-    detectionTimeline: options.detectionTimeline,
-    onInvalidate: () => {
-      if (!hasPresentedSample || mediaWidth <= 0 || mediaHeight <= 0) return;
-      const boxState = boxLayer.drawFrame(currentMediaTime, viewportScale);
-      const regionState = regionLayer.drawFrame(
-        currentMediaTime,
-        viewportScale,
-      );
-      options.onPresentationUpdate?.(
-        createPresentedSampleState(currentMediaTime, boxState, regionState),
-      );
+    // Icon textures resolve asynchronously; paused or static media gets an
+    // immediate redraw instead of waiting for the next media sample.
+    onAssetLoaded: () => {
+      vectorLayer.drawFrame(currentMediaTime, viewportScale);
     },
-    onAssetError: options.diagnostics?.onAssetError,
-    regionRenderers: options.regionRenderers,
+    loadIconTexture: async (href) => {
+      const image = new Image();
+
+      image.decoding = "async";
+      image.crossOrigin = "anonymous";
+      image.src = href;
+      await image.decode();
+
+      // Rasterize through a canvas so every image type uploads uniformly.
+      const size = 64;
+      const canvas = document.createElement("canvas");
+
+      canvas.width = size;
+      canvas.height = size;
+      canvas.getContext("2d")?.drawImage(image, 0, 0, size, size);
+
+      return new Texture({
+        source: new CanvasSource({
+          dynamic: false,
+          height: size,
+          resource: canvas,
+          width: size,
+        }),
+      });
+    },
     resolveContextState,
   });
   const annotationOverlayLayer = createPixiAnnotationOverlayLayer(
