@@ -2153,7 +2153,9 @@ fieldset {
   border-radius: var(--radius-md);
   display: grid;
   gap: 2px;
-  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  /* Wrap onto extra rows instead of squeezing every option into one row,
+   * so segment labels stay readable. */
+  grid-template-columns: repeat(auto-fit, minmax(76px, 1fr));
   min-width: 0;
   padding: 2px;
 }

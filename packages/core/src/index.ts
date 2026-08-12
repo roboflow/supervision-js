@@ -174,17 +174,8 @@ export {
   type IdMaskFrame,
   type IdMaskInstruction,
 } from "#utils/id-mask-frame";
-export {
-  resolveEllipseSegmentCount,
-  resolveMarkerGeometry,
-  sampleEllipseArc,
-} from "#utils/shape-geometry";
-export type {
-  EllipseGeometry,
-  MarkerGeometry,
-  MarkerGeometryInput,
-  SampledShapePath,
-} from "#utils/shape-geometry";
+export { resolveMarkerGeometry, sampleEllipseArc } from "#utils/shape-geometry";
+export type { MarkerGeometry, SampledShapePath } from "#utils/shape-geometry";
 export { includeDefined } from "#utils/object";
 export { lightenColor, resolveContrastTextColor } from "#utils/color";
 export { resolveAnnotationStyleState } from "#utils/annotation-visibility";
@@ -361,14 +352,8 @@ export {
   ShapeInstructionKind,
 } from "#types/shape-style";
 export type {
-  ClosedEllipseShapeInstruction,
-  ClosedMarkerShapeInstruction,
-  ClosedPathShapeInstruction,
-  CrossMarkerShapeInstruction,
-  EllipseArcShapeInstruction,
   EllipseShapeInstruction,
   MarkerShapeInstruction,
-  OpenPathShapeInstruction,
   PathShapeInstruction,
   ShapeDrawInstruction,
   ShapeStyle,

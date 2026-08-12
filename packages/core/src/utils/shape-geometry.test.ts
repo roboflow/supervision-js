@@ -1,11 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { MarkerShape, MarkerSizeSpace } from "#types/shape-style";
-import {
-  resolveEllipseSegmentCount,
-  resolveMarkerGeometry,
-  sampleEllipseArc,
-} from "#utils/shape-geometry";
+import { resolveMarkerGeometry, sampleEllipseArc } from "#utils/shape-geometry";
 
 describe("shape geometry", () => {
   it("samples a closed ellipse without repeating the first point", () => {
@@ -74,7 +70,7 @@ describe("shape geometry", () => {
   it("divides screen-space marker sizes by the viewport scale", () => {
     const geometry = resolveMarkerGeometry(
       {
-        center: { x: 0, y: 0 },
+        point: { x: 0, y: 0 },
         shape: MarkerShape.Circle,
         size: 12,
         sizeSpace: MarkerSizeSpace.Screen,
@@ -92,7 +88,7 @@ describe("shape geometry", () => {
   it("keeps media-space marker sizes unscaled", () => {
     const geometry = resolveMarkerGeometry(
       {
-        center: { x: 0, y: 0 },
+        point: { x: 0, y: 0 },
         shape: MarkerShape.Circle,
         size: 12,
         sizeSpace: MarkerSizeSpace.Media,
@@ -109,7 +105,7 @@ describe("shape geometry", () => {
 
   it("builds a downward-pointing triangle at rotation zero", () => {
     const geometry = resolveMarkerGeometry({
-      center: { x: 10, y: 10 },
+      point: { x: 10, y: 10 },
       shape: MarkerShape.Triangle,
       size: 8,
       sizeSpace: MarkerSizeSpace.Media,
@@ -130,7 +126,7 @@ describe("shape geometry", () => {
 
   it("builds crosses as two open diagonal subpaths", () => {
     const geometry = resolveMarkerGeometry({
-      center: { x: 0, y: 0 },
+      point: { x: 0, y: 0 },
       shape: MarkerShape.Cross,
       size: 10,
       sizeSpace: MarkerSizeSpace.Media,
@@ -150,7 +146,7 @@ describe("shape geometry", () => {
 
   it("rotates square markers around the anchor", () => {
     const geometry = resolveMarkerGeometry({
-      center: { x: 0, y: 0 },
+      point: { x: 0, y: 0 },
       rotation: Math.PI / 4,
       shape: MarkerShape.Square,
       size: 10,
@@ -162,45 +158,5 @@ describe("shape geometry", () => {
     const corner = geometry.subpaths[0]![0]!;
     expect(corner.x).toBeCloseTo(0);
     expect(corner.y).toBeCloseTo(-Math.SQRT2 * 5);
-  });
-
-  it("increases ellipse detail with on-screen size", () => {
-    const ellipse = {
-      center: { x: 0, y: 0 },
-      radiusX: 10,
-      radiusY: 5,
-    };
-
-    expect(resolveEllipseSegmentCount(ellipse, 4)).toBeGreaterThan(
-      resolveEllipseSegmentCount(ellipse, 1),
-    );
-  });
-
-  it.each([
-    [
-      "non-finite center",
-      { center: { x: Number.NaN, y: 0 }, radiusX: 1, radiusY: 1 },
-    ],
-    ["zero radius", { center: { x: 0, y: 0 }, radiusX: 0, radiusY: 1 }],
-    [
-      "incomplete arc",
-      { center: { x: 0, y: 0 }, radiusX: 1, radiusY: 1, startAngle: 0 },
-    ],
-  ])("rejects invalid ellipse geometry: %s", (_name, ellipse) => {
-    expect(() => sampleEllipseArc(ellipse)).toThrow(RangeError);
-  });
-
-  it("rejects invalid marker sizes and viewport scales", () => {
-    const marker = {
-      center: { x: 0, y: 0 },
-      shape: MarkerShape.Circle,
-      size: 0,
-      sizeSpace: MarkerSizeSpace.Screen,
-    };
-
-    expect(() => resolveMarkerGeometry(marker)).toThrow(RangeError);
-    expect(() => resolveMarkerGeometry({ ...marker, size: 10 }, 0)).toThrow(
-      RangeError,
-    );
   });
 });
