@@ -1,4 +1,8 @@
-import type { FillStyle, OpenStrokeStyle, StrokeStyle } from "#types/paint-style";
+import type {
+  FillStyle,
+  OpenStrokeStyle,
+  StrokeStyle,
+} from "#types/paint-style";
 import type { Detection, Point } from "#types/detections";
 import type { AnnotationStyleContext } from "#types/style";
 
@@ -18,8 +22,7 @@ interface EllipseDrawInstructionBase {
   readonly rotation?: number;
 }
 
-export interface ClosedEllipseDrawInstruction
-  extends EllipseDrawInstructionBase {
+export interface ClosedEllipseDrawInstruction extends EllipseDrawInstructionBase {
   readonly startAngle?: never;
   readonly endAngle?: never;
   readonly fill?: FillStyle;
@@ -34,8 +37,7 @@ export interface EllipseArcDrawInstruction extends EllipseDrawInstructionBase {
 }
 
 export type EllipseDrawInstruction =
-  | ClosedEllipseDrawInstruction
-  | EllipseArcDrawInstruction;
+  ClosedEllipseDrawInstruction | EllipseArcDrawInstruction;
 
 /**
  * Style contract of the `ellipse` annotation renderer.

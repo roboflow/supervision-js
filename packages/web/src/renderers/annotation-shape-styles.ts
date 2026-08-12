@@ -48,17 +48,13 @@ export function resolveAnnotationShapeStyle(styles: {
             ...base,
             endAngle: ellipse.endAngle,
             startAngle: ellipse.startAngle,
-            ...(ellipse.stroke === undefined
-              ? {}
-              : { stroke: ellipse.stroke }),
+            ...(ellipse.stroke === undefined ? {} : { stroke: ellipse.stroke }),
           });
         } else {
           instructions.push({
             ...base,
             ...(ellipse.fill === undefined ? {} : { fill: ellipse.fill }),
-            ...(ellipse.stroke === undefined
-              ? {}
-              : { stroke: ellipse.stroke }),
+            ...(ellipse.stroke === undefined ? {} : { stroke: ellipse.stroke }),
           });
         }
       }

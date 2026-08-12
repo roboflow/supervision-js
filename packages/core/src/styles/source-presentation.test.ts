@@ -188,9 +188,9 @@ describe("createSourceAwarePresentation", () => {
         void detection;
         void context;
         return {
-        center: { x: 4, y: 4 },
-        radiusX: 2,
-        radiusY: 1,
+          center: { x: 4, y: 4 },
+          radiusX: 2,
+          radiusY: 1,
         };
       },
     };
@@ -199,9 +199,9 @@ describe("createSourceAwarePresentation", () => {
         void detection;
         void context;
         return {
-        center: { x: 8, y: 8 },
-        radiusX: 3,
-        radiusY: 1,
+          center: { x: 8, y: 8 },
+          radiusX: 3,
+          radiusY: 1,
         };
       },
     };
