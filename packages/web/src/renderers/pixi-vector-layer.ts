@@ -3,10 +3,8 @@ import {
   BasePolygonStyle,
   BasePolylineStyle,
   KeypointMarkerShape,
-  MarkerShape,
   MarkerSizeSpace,
   ShapeInstructionKind,
-  resolveEllipseSegmentCount,
   resolveMarkerGeometry,
   sampleEllipseArc,
   type BufferedDetectionTimeline,
@@ -21,12 +19,14 @@ import {
   type PolygonStyle,
   type PolylineDrawInstruction,
   type PolylineStyle,
+  type IconShapeInstruction,
   type ShapeDrawInstruction,
   type ShapeStyle,
 } from "supervision-js-core";
 import type {
   Container as PixiContainer,
   Graphics as PixiGraphics,
+  Texture as PixiTexture,
 } from "pixi.js";
 import { drawPixiPath, resolvePixiStroke } from "./pixi-path";
 
@@ -66,6 +66,11 @@ export function createPixiVectorLayer(options: {
   readonly polylineStyle?: PolylineStyle | null;
   readonly keypointStyle?: KeypointStyle | null;
   readonly shapeStyle?: ShapeStyle | null;
+  /**
+   * Loads and decodes an icon image reference into a texture. Required for
+   * icon shape instructions; icons are skipped when absent.
+   */
+  readonly loadIconTexture?: (href: string) => Promise<PixiTexture>;
   readonly resolveContextState?: (
     detection: Detection,
   ) => Partial<AnnotationStyleContext>;
@@ -86,6 +91,11 @@ export function createPixiVectorLayer(options: {
   // Shape decorations are opt-in; no default style exists so configuring
   // nothing keeps the semantic-geometry skip untouched.
   let shapeStyle = options.shapeStyle ?? null;
+  // Icon textures resolve asynchronously; a bumped version forces the next
+  // drawFrame to redraw so freshly loaded icons appear.
+  const iconTextures = new Map<string, PixiTexture | "loading" | "failed">();
+  let assetVersion = 0;
+  let drawnAssetVersion = -1;
   let styleVersion = 0;
   let drawnStyleVersion = -1;
   // A versioned source can replace a frame without changing its timeline key.
@@ -112,6 +122,7 @@ export function createPixiVectorLayer(options: {
       if (
         frame === lastFrame &&
         drawnStyleVersion === styleVersion &&
+        drawnAssetVersion === assetVersion &&
         viewportScale === lastViewportScale &&
         invalidated.size === 0
       ) {
@@ -120,6 +131,7 @@ export function createPixiVectorLayer(options: {
 
       lastFrame = frame;
       drawnStyleVersion = styleVersion;
+      drawnAssetVersion = assetVersion;
       lastViewportScale = viewportScale;
 
       if (!frame) {
@@ -195,6 +207,7 @@ export function createPixiVectorLayer(options: {
       entries.clear();
       entryPool.length = 0;
       invalidated.clear();
+      iconTextures.clear();
       container = undefined;
     },
   };
@@ -273,7 +286,11 @@ export function createPixiVectorLayer(options: {
     const { keypoints, polygon, polyline, shapes } = detection;
 
     for (const shape of shapes ?? []) {
-      drawShapeInstruction(graphics, shape, viewportScale);
+      if (shape.kind === ShapeInstructionKind.Icon) {
+        drawIconInstruction(graphics, shape, viewportScale);
+      } else {
+        drawShapeInstruction(graphics, shape, viewportScale);
+      }
     }
 
     if (polygon) {
@@ -353,6 +370,143 @@ export function createPixiVectorLayer(options: {
         );
       }
     }
+  }
+  function drawIconInstruction(
+    graphics: PixiGraphics,
+    instruction: IconShapeInstruction,
+    viewportScale: number,
+  ) {
+    const texture = resolveIconTexture(instruction.href);
+
+    if (!texture) {
+      return;
+    }
+
+    const size =
+      instruction.sizeSpace === MarkerSizeSpace.Screen
+        ? instruction.size / Math.max(viewportScale, Number.EPSILON)
+        : instruction.size;
+
+    graphics.texture(
+      texture,
+      0xffffff,
+      instruction.point.x - size / 2,
+      instruction.point.y - size / 2,
+      size,
+      size,
+    );
+  }
+
+  function resolveIconTexture(href: string): PixiTexture | undefined {
+    const cached = iconTextures.get(href);
+
+    if (cached === "loading" || cached === "failed") {
+      return undefined;
+    }
+
+    if (cached) {
+      return cached;
+    }
+
+    const loadIconTexture = options.loadIconTexture;
+
+    if (!loadIconTexture) {
+      iconTextures.set(href, "failed");
+      return undefined;
+    }
+
+    iconTextures.set(href, "loading");
+    loadIconTexture(href).then(
+      (texture) => {
+        iconTextures.set(href, texture);
+        assetVersion += 1;
+      },
+      () => {
+        iconTextures.set(href, "failed");
+      },
+    );
+
+    return undefined;
+  }
+}
+
+function drawShapeInstruction(
+  graphics: PixiGraphics,
+  instruction: Exclude<ShapeDrawInstruction, IconShapeInstruction>,
+  viewportScale: number,
+) {
+  if (instruction.kind === ShapeInstructionKind.Ellipse) {
+    const { closed, points } = sampleEllipseArc(instruction);
+
+    if (closed && instruction.fill) {
+      graphics.poly(
+        points.flatMap(({ x, y }) => [x, y]),
+        true,
+      );
+      graphics.fill(instruction.fill);
+    }
+
+    if (instruction.stroke) {
+      drawPixiPath(graphics, points, closed, instruction.stroke, viewportScale);
+    }
+
+    return;
+  }
+
+  if (instruction.kind === ShapeInstructionKind.Marker) {
+    const geometry = resolveMarkerGeometry(instruction, viewportScale);
+
+    if (geometry.kind === "circle") {
+      graphics.circle(geometry.center.x, geometry.center.y, geometry.radius);
+      if (instruction.fill) graphics.fill(instruction.fill);
+      if (instruction.stroke)
+        graphics.stroke({
+          alpha: instruction.stroke.alpha,
+          color: instruction.stroke.color,
+          width: resolveScreenLength(instruction.stroke.width, viewportScale),
+        });
+      return;
+    }
+
+    for (const subpath of geometry.subpaths) {
+      if (geometry.closed && instruction.fill) {
+        graphics.poly(
+          subpath.flatMap(({ x, y }) => [x, y]),
+          true,
+        );
+        graphics.fill(instruction.fill);
+      }
+
+      if (instruction.stroke) {
+        drawPixiPath(
+          graphics,
+          subpath,
+          geometry.closed,
+          instruction.stroke,
+          viewportScale,
+        );
+      }
+    }
+
+    return;
+  }
+
+  for (const segment of instruction.segments) {
+    if (instruction.closed && instruction.fill) {
+      graphics.poly(
+        segment.flatMap(({ x, y }) => [x, y]),
+        true,
+      );
+      graphics.fill(instruction.fill);
+    }
+
+    drawPixiPath(
+      graphics,
+      segment,
+      instruction.closed,
+      instruction.stroke,
+      viewportScale,
+    );
   }
 }
 

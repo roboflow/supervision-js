@@ -75,6 +75,8 @@ describe("package entrypoint", () => {
       "KeypointVisibility",
       "LabelPlacement",
       "LabelVisibilityMode",
+      "MarkerShape",
+      "MarkerSizeSpace",
       "MaskRenderMode",
       "MediaInteractionMode",
       "MediaNormalizationAudioCodec",
@@ -100,8 +102,7 @@ describe("package entrypoint", () => {
       "RenderPreparationMode",
       "RenderPreparationWorkerStatus",
       "SUPERVISION_ROBOFLOW_COLOR",
-      "annotationRendererKinds",
-      "annotationRenderers",
+      "ShapeInstructionKind",
       "createArrayDetectionFrameSource",
       "createBrowserColdDetectionFrameStore",
       "createBufferedDetectionTimeline",
@@ -124,6 +125,8 @@ describe("package entrypoint", () => {
       "prepareMediaProgressively",
       "probeMedia",
       "resolveDetectionClassColorStyle",
+      "resolveMarkerGeometry",
+      "sampleEllipseArc",
     ]);
     expect(entrypoint.createMediaRenderer).toEqual(expect.any(Function));
     expect(entrypoint.annotationRenderers).toEqual({
@@ -1281,7 +1284,8 @@ describe("package entrypoint", () => {
 
     await vi.waitFor(() => {
       expect(pixiMock.canvasSourceOptions).toHaveLength(1);
-      expect(pixiMock.imageSourceOptions).toHaveLength(2);
+      // Prepared mask, id-mask placeholder, and the halo placeholder source.
+      expect(pixiMock.imageSourceOptions).toHaveLength(3);
       expect(pixiMock.textureOptions).toHaveLength(2);
     });
 
@@ -1299,7 +1303,9 @@ describe("package entrypoint", () => {
     expect(scene?.children[0]).toBe(pixiMock.spriteInstances[0]);
     expect(scene?.children[1]).toBe(maskContainer);
     expect(scene?.children[2]).toBe(boxGraphics);
+    // Halo mesh first so the glow draws beneath the mask sprite and id mesh.
     expect(maskContainer?.children).toEqual([
+      pixiMock.meshInstances[1],
       pixiMock.spriteInstances[1],
       pixiMock.meshInstances[0],
     ]);

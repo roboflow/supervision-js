@@ -26,6 +26,11 @@ import type {
 import type { SerializableMaskInstruction } from "#render-preparation/mask-preparation-worker-protocol";
 import { resolveMaskStyleOpacity } from "supervision-js-core";
 import { createPixiIdMaskShaderRenderer } from "./pixi-id-mask-shader";
+import {
+  buildMaskHaloPalette,
+  createPixiMaskHaloRenderer,
+} from "./pixi-mask-halo";
+import type { PixiMaskHaloRenderer } from "./pixi-mask-halo";
 import type {
   Container as PixiContainer,
   ImageSource as PixiImageSource,
@@ -126,6 +131,10 @@ export function createPixiMaskLayer(options: {
   readonly Sprite: SpriteConstructor;
   readonly Texture: TextureConstructorWithEmpty;
   readonly UniformGroup?: UniformGroupConstructor;
+  readonly BlurFilter?: new (options: {
+    strength: number;
+    quality?: number;
+  }) => { strength: number };
   readonly detectionTimeline: BufferedDetectionTimeline;
   readonly maskStyle: MaskStyle;
   readonly onActiveIdMaskFramePresented?: () => void;
@@ -140,6 +149,8 @@ export function createPixiMaskLayer(options: {
   let mediaWidth = 0;
   let idMaskRenderer:
     ReturnType<typeof createPixiIdMaskShaderRenderer> | undefined;
+  let haloRenderer: PixiMaskHaloRenderer | undefined;
+  let currentMaskStyle: MaskStyle = options.maskStyle;
   let maskSprite: PixiSprite | undefined;
   let activeFrameKey: string | null = null;
   let activeFrameMediaTime: number | null = null;
@@ -200,12 +211,21 @@ export function createPixiMaskLayer(options: {
 
       idMaskRenderer = createIdMaskRenderer();
       idMaskRenderer?.setOpacity(maskOpacity);
+      haloRenderer = createHaloRenderer();
+      haloRenderer?.setOpacity(maskOpacity);
 
       if (!idMaskRenderer || !options.Container) {
         return maskSprite;
       }
 
       const maskContainer = new options.Container();
+
+      // The halo draws beneath the mask so the glow bleeds outward from the
+      // silhouette while fills and borders stay crisp on top.
+      if (haloRenderer) {
+        maskContainer.addChild(haloRenderer.mesh);
+      }
+
       maskContainer.addChild(maskSprite, idMaskRenderer.mesh);
 
       return maskContainer;
@@ -301,11 +321,13 @@ export function createPixiMaskLayer(options: {
 
     setMaskStyle(nextMaskStyle) {
       if (nextMaskStyle !== undefined) {
+        currentMaskStyle = nextMaskStyle ?? currentMaskStyle;
         maskOpacity = resolveMaskStyleOpacity(nextMaskStyle);
         applyMaskOpacity();
       }
 
       preparedRenderWindow.setMaskStyle(nextMaskStyle);
+      refreshHalo();
     },
 
     destroy() {
@@ -318,6 +340,7 @@ export function createPixiMaskLayer(options: {
       destroyTextures();
       resetMaskPickCanvas();
       idMaskRenderer?.destroy();
+      haloRenderer?.destroy();
     },
   };
 
@@ -378,6 +401,7 @@ export function createPixiMaskLayer(options: {
     maskSprite.height = mediaHeight;
     maskSprite.visible = true;
     idMaskRenderer?.hide();
+    haloRenderer?.hide();
   }
 
   function showIdMaskFrame(
@@ -392,6 +416,86 @@ export function createPixiMaskLayer(options: {
 
     maskSprite.visible = false;
     idMaskRenderer.render(maskFrame, getTexture(maskFrame));
+    renderHalo(maskFrame);
+  }
+
+  function renderHalo(
+    maskFrame: Extract<
+      PreparedMaskFrame,
+      { readonly kind: PreparedMaskFrameKind.PngIdMask }
+    >,
+  ) {
+    if (!haloRenderer) {
+      return;
+    }
+
+    const resolved = resolveFrameHalos();
+
+    if (!resolved) {
+      haloRenderer.hide();
+      return;
+    }
+
+    haloRenderer.render(
+      maskFrame,
+      getTexture(maskFrame),
+      resolved.palette,
+      resolved.spread,
+    );
+  }
+
+  function refreshHalo() {
+    if (activeIdMaskFrame) {
+      renderHalo(activeIdMaskFrame);
+    }
+  }
+
+  /**
+   * Halo colors are resolved per frame from the live mask style rather than
+   * baked into the prepared artifact, so halo edits never invalidate prepared
+   * mask pixels.
+   */
+  function resolveFrameHalos() {
+    if (visibleMaskMediaTime === null) {
+      return null;
+    }
+
+    const frame = options.detectionTimeline.selectFrame(visibleMaskMediaTime);
+
+    if (!frame) {
+      return null;
+    }
+
+    const halos = new Map<
+      number,
+      { readonly alpha: number; readonly color: number }
+    >();
+    let spread = 0;
+
+    for (const [detectionIndex, detection] of frame.detections.entries()) {
+      if (!detection.mask) {
+        continue;
+      }
+
+      const halo = currentMaskStyle.resolve(detection, {
+        detectionIndex,
+        frame,
+        mediaTime: visibleMaskMediaTime,
+      })?.halo;
+
+      if (!halo || halo.alpha <= 0 || halo.spread <= 0) {
+        continue;
+      }
+
+      halos.set(detectionIndex + 1, { alpha: halo.alpha, color: halo.color });
+      spread = Math.max(spread, halo.spread);
+    }
+
+    if (halos.size === 0) {
+      return null;
+    }
+
+    return { palette: buildMaskHaloPalette(halos), spread };
   }
 
   function hideSprite() {
@@ -403,6 +507,7 @@ export function createPixiMaskLayer(options: {
     }
 
     idMaskRenderer?.hide();
+    haloRenderer?.hide();
   }
 
   function canHoldVisibleMaskFor(mediaTime: number) {
@@ -416,6 +521,8 @@ export function createPixiMaskLayer(options: {
   function applyMaskOpacity() {
     if (maskSprite) {
       maskSprite.alpha = maskOpacity;
+
+      haloRenderer?.setOpacity(maskOpacity);
     }
 
     idMaskRenderer?.setOpacity(maskOpacity);
@@ -453,6 +560,31 @@ export function createPixiMaskLayer(options: {
     if (!key || activeFrameKey === key) {
       idMaskRenderer?.clearTexture();
     }
+  }
+
+  function createHaloRenderer() {
+    if (
+      !options.BlurFilter ||
+      !options.Mesh ||
+      !options.MeshGeometry ||
+      !options.Shader ||
+      !options.UniformGroup ||
+      mediaWidth <= 0 ||
+      mediaHeight <= 0
+    ) {
+      return undefined;
+    }
+
+    return createPixiMaskHaloRenderer({
+      BlurFilter: options.BlurFilter,
+      ImageSource: options.ImageSource,
+      Mesh: options.Mesh,
+      MeshGeometry: options.MeshGeometry,
+      Shader: options.Shader,
+      UniformGroup: options.UniformGroup,
+      mediaHeight,
+      mediaWidth,
+    });
   }
 
   function createIdMaskRenderer() {

@@ -66,6 +66,13 @@ export type { BasePolygonStyleOptions } from "supervision-js-core";
 export { BasePolylineStyle } from "supervision-js-core";
 export type { BasePolylineStyleOptions } from "supervision-js-core";
 export { BaseKeypointStyle, KeypointMarkerShape } from "supervision-js-core";
+export {
+  MarkerShape,
+  MarkerSizeSpace,
+  ShapeInstructionKind,
+  resolveMarkerGeometry,
+  sampleEllipseArc,
+} from "supervision-js-core";
 export type { BaseKeypointStyleOptions } from "supervision-js-core";
 export {
   annotationRendererKinds,
@@ -138,6 +145,7 @@ export type {
 } from "supervision-js-core";
 export type {
   MaskDrawInstruction,
+  MaskHaloStyle,
   MaskStrokeStyle,
   MaskStrokeStyleOptions,
   MaskStyle,
@@ -150,6 +158,13 @@ export type {
   PolygonStyleContext,
   PolylineDrawInstruction,
   PolylineStyle,
+  EllipseShapeInstruction,
+  IconShapeInstruction,
+  MarkerShapeInstruction,
+  PathShapeInstruction,
+  ShapeDrawInstruction,
+  ShapeStyle,
+  ShapeStyleContext,
   PolylineStyleContext,
   KeypointDrawInstruction,
   KeypointEdgeDrawInstruction,

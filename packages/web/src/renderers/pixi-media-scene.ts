@@ -79,7 +79,7 @@ export async function createPixiMediaScene(
 ): Promise<MediaRendererScene> {
   const {
     Application,
-    Assets,
+    BlurFilter,
     CanvasSource,
     Container,
     Graphics,
@@ -158,27 +158,31 @@ export async function createPixiMediaScene(
     polylineStyle: options.polylineStyle,
     keypointStyle: options.keypointStyle,
     shapeStyle: options.shapeStyle,
-    resolveContextState,
-  });
-  const regionLayer = createPixiRegionLayer({
-    Assets,
-    Container,
-    GifSprite,
-    Sprite,
-    detectionTimeline: options.detectionTimeline,
-    onInvalidate: () => {
-      if (!hasPresentedSample || mediaWidth <= 0 || mediaHeight <= 0) return;
-      const boxState = boxLayer.drawFrame(currentMediaTime, viewportScale);
-      const regionState = regionLayer.drawFrame(
-        currentMediaTime,
-        viewportScale,
-      );
-      options.onPresentationUpdate?.(
-        createPresentedSampleState(currentMediaTime, boxState, regionState),
-      );
+    loadIconTexture: async (href) => {
+      const image = new Image();
+
+      image.decoding = "async";
+      image.crossOrigin = "anonymous";
+      image.src = href;
+      await image.decode();
+
+      // Rasterize through a canvas so every image type uploads uniformly.
+      const size = 64;
+      const canvas = document.createElement("canvas");
+
+      canvas.width = size;
+      canvas.height = size;
+      canvas.getContext("2d")?.drawImage(image, 0, 0, size, size);
+
+      return new Texture({
+        source: new CanvasSource({
+          dynamic: false,
+          height: size,
+          resource: canvas,
+          width: size,
+        }),
+      });
     },
-    onAssetError: options.diagnostics?.onAssetError,
-    regionRenderers: options.regionRenderers,
     resolveContextState,
   });
   const annotationOverlayLayer = createPixiAnnotationOverlayLayer(
@@ -197,6 +201,7 @@ export async function createPixiMediaScene(
     : undefined;
   let maskLayer = options.maskStyle
     ? createPixiMaskLayer({
+        BlurFilter,
         Container,
         ImageSource,
         Mesh,
@@ -860,6 +865,7 @@ export async function createPixiMediaScene(
       vectorLayer.setStyles({
         polylineStyle: presentation.polylineStyle,
         keypointStyle: presentation.keypointStyle,
+        shapeStyle: presentation.shapeStyle,
       });
       regionLayer.setRenderers(
         presentation.renderers?.filter(
@@ -1052,6 +1058,7 @@ export async function createPixiMediaScene(
   function ensureMaskLayer(maskStyle: NonNullable<typeof options.maskStyle>) {
     if (!maskLayer) {
       maskLayer = createPixiMaskLayer({
+        BlurFilter,
         Container,
         ImageSource,
         Mesh,

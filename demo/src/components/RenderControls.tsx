@@ -6,6 +6,9 @@ import {
   MaskRenderMode,
 } from "supervision";
 import {
+  DemoBoxAnnotator,
+  DemoKeypointAnnotator,
+  DemoMarkerAnnotator,
   resolveDemoClassStyle,
   type DemoClassStyle,
   type DemoPresentationAvailability,
@@ -67,6 +70,9 @@ export const RenderControls = memo(function RenderControls({
       hiddenClasses: visible ? [] : [...classNames],
     });
   };
+  const patchSettings = (patch: Partial<DemoPresentationSettings>) => {
+    onChange({ ...settings, ...patch });
+  };
 
   return (
     <section className="render-controls" aria-label="Render controls">
@@ -93,14 +99,17 @@ export const RenderControls = memo(function RenderControls({
       {activeTab === RenderControlsTab.Global ? (
         <GlobalRenderControls
           availability={availability}
+          classNames={classNames}
           onChange={updateSettings}
+          onChangeAllVisibility={updateAllClassVisibility}
+          onChangeVisibility={updateClassVisibility}
+          onPatch={patchSettings}
           settings={settings}
         />
       ) : (
         <ClassRenderControls
           classNames={classNames}
           onChange={updateClassStyle}
-          onChangeAllVisibility={updateAllClassVisibility}
           onChangeVisibility={updateClassVisibility}
           settings={settings}
         />
@@ -111,63 +120,92 @@ export const RenderControls = memo(function RenderControls({
 
 function GlobalRenderControls({
   availability,
+  classNames,
   onChange,
+  onChangeAllVisibility,
+  onChangeVisibility,
+  onPatch,
   settings,
 }: {
   readonly availability?: DemoPresentationAvailability;
+  readonly classNames: readonly string[];
   readonly onChange: <Key extends keyof DemoPresentationSettings>(
     key: Key,
     value: DemoPresentationSettings[Key],
   ) => void;
+  readonly onChangeAllVisibility: (visible: boolean) => void;
+  readonly onChangeVisibility: (className: string, visible: boolean) => void;
+  readonly onPatch: (patch: Partial<DemoPresentationSettings>) => void;
   readonly settings: DemoPresentationSettings;
 }) {
+  const segmentationEnabled =
+    settings.masksEnabled ||
+    settings.polygonsEnabled ||
+    settings.polylinesEnabled ||
+    settings.haloEnabled;
+  const segmentationUnavailable =
+    availability?.masksEnabled === false &&
+    availability?.polygonsEnabled === false &&
+    availability?.polylinesEnabled === false;
+  const hiddenCount = classNames.filter((className) =>
+    settings.hiddenClasses.includes(className),
+  ).length;
+
   return (
     <div className="render-controls__panel render-controls__panel--global">
-      <ControlSection title="Layers">
-        <div className="render-controls__toggles">
-          <ToggleControl
-            checked={settings.boxesEnabled}
-            disabled={availability?.boxesEnabled === false}
-            label="Boxes"
-            onChange={(checked) => onChange("boxesEnabled", checked)}
-          />
-          <ToggleControl
-            checked={settings.masksEnabled}
-            disabled={availability?.masksEnabled === false}
-            label="Masks"
-            onChange={(checked) => onChange("masksEnabled", checked)}
-          />
-          <ToggleControl
-            checked={settings.polygonsEnabled}
-            disabled={availability?.polygonsEnabled === false}
-            label="Polygons"
-            onChange={(checked) => onChange("polygonsEnabled", checked)}
-          />
-          <ToggleControl
-            checked={settings.polylinesEnabled}
-            disabled={availability?.polylinesEnabled === false}
-            label="Polylines"
-            onChange={(checked) => onChange("polylinesEnabled", checked)}
-          />
-          <ToggleControl
-            checked={settings.keypointsEnabled}
-            disabled={availability?.keypointsEnabled === false}
-            label="Keypoints"
-            onChange={(checked) => onChange("keypointsEnabled", checked)}
-          />
-          <ToggleControl
-            checked={settings.labelsEnabled}
-            disabled={availability?.labelsEnabled === false}
-            label="Labels"
-            onChange={(checked) => onChange("labelsEnabled", checked)}
-          />
-          <ToggleControl
-            checked={settings.focusEnabled}
-            disabled={availability?.focusEnabled === false}
-            label="Focus"
-            onChange={(checked) => onChange("focusEnabled", checked)}
-          />
+      <ControlSection title="Filters">
+        <SliderControl
+          label="Confidence"
+          max={1}
+          min={0}
+          onChange={(value) => onChange("confidenceThreshold", value)}
+          step={0.01}
+          value={settings.confidenceThreshold}
+          valueLabel={`${Math.round(settings.confidenceThreshold * 100)}%`}
+        />
+        <div className="render-control-section__subheading-row">
+          <h4 className="render-control-section__subheading">Classes</h4>
+          <div className="class-visibility-toolbar__actions">
+            <button
+              disabled={hiddenCount === 0}
+              onClick={() => onChangeAllVisibility(true)}
+              type="button"
+            >
+              Show all
+            </button>
+            <button
+              disabled={hiddenCount === classNames.length}
+              onClick={() => onChangeAllVisibility(false)}
+              type="button"
+            >
+              Hide all
+            </button>
+          </div>
         </div>
+        {classNames.map((className) => {
+          const style = resolveDemoClassStyle(settings, className);
+          const visible = !settings.hiddenClasses.includes(className);
+
+          return (
+            <label className="class-visibility-row" key={className}>
+              <span
+                className="class-style-card__swatch"
+                style={
+                  { "--class-color": toHexColor(style.fill) } as ClassColorStyle
+                }
+              />
+              <span className="class-visibility-row__name">{className}</span>
+              <input
+                aria-label={`Show ${className} detections`}
+                checked={visible}
+                onChange={(event) =>
+                  onChangeVisibility(className, event.currentTarget.checked)
+                }
+                type="checkbox"
+              />
+            </label>
+          );
+        })}
       </ControlSection>
 
       <ControlSection
@@ -178,53 +216,128 @@ function GlobalRenderControls({
       >
         <SegmentedControl
           disabled={!settings.boxesEnabled}
-          label="Stroke Align"
-          onChange={(value) => onChange("boxStrokeAlignment", value)}
+          label="Annotator"
+          onChange={(value) => onChange("boxAnnotator", value)}
           options={[
-            { label: "Inside", value: BoxStrokeAlignment.Inside },
-            { label: "Center", value: BoxStrokeAlignment.Center },
-            { label: "Outside", value: BoxStrokeAlignment.Outside },
+            { label: "Box", value: DemoBoxAnnotator.Box },
+            { label: "Round Box", value: DemoBoxAnnotator.RoundBox },
+            { label: "Box Corner", value: DemoBoxAnnotator.BoxCorner },
+            { label: "Circle", value: DemoBoxAnnotator.Circle },
+            { label: "Halo", value: DemoBoxAnnotator.Halo },
+            { label: "Color", value: DemoBoxAnnotator.Color },
           ]}
-          value={settings.boxStrokeAlignment}
+          value={settings.boxAnnotator}
         />
-        <SliderControl
-          disabled={!settings.boxesEnabled}
-          label="Radius"
-          max={24}
-          min={0}
-          onChange={(value) => onChange("boxCornerRadius", value)}
-          step={1}
-          value={settings.boxCornerRadius}
-          valueLabel={`${settings.boxCornerRadius}px`}
-        />
-        <SliderControl
-          disabled={!settings.boxesEnabled}
-          label="Stroke"
-          max={8}
-          min={1}
-          onChange={(value) => onChange("boxStrokeWidth", value)}
-          step={1}
-          value={settings.boxStrokeWidth}
-          valueLabel={`${settings.boxStrokeWidth}px`}
-        />
-        <SliderControl
-          disabled={!settings.boxesEnabled}
-          label="Fill"
-          max={0.35}
-          min={0}
-          onChange={(value) => onChange("boxFillAlpha", value)}
-          step={0.01}
-          value={settings.boxFillAlpha}
-          valueLabel={formatPercent(settings.boxFillAlpha)}
-        />
+        {(settings.boxAnnotator === DemoBoxAnnotator.Box ||
+          settings.boxAnnotator === DemoBoxAnnotator.RoundBox) && (
+          <SegmentedControl
+            disabled={!settings.boxesEnabled}
+            label="Stroke Align"
+            onChange={(value) => onChange("boxStrokeAlignment", value)}
+            options={[
+              { label: "Inside", value: BoxStrokeAlignment.Inside },
+              { label: "Center", value: BoxStrokeAlignment.Center },
+              { label: "Outside", value: BoxStrokeAlignment.Outside },
+            ]}
+            value={settings.boxStrokeAlignment}
+          />
+        )}
+        {settings.boxAnnotator === DemoBoxAnnotator.RoundBox && (
+          <SliderControl
+            disabled={!settings.boxesEnabled}
+            label="Radius"
+            max={24}
+            min={0}
+            onChange={(value) => onChange("boxCornerRadius", value)}
+            step={1}
+            value={settings.boxCornerRadius}
+            valueLabel={`${settings.boxCornerRadius}px`}
+          />
+        )}
+        {settings.boxAnnotator === DemoBoxAnnotator.BoxCorner && (
+          <SliderControl
+            disabled={!settings.boxesEnabled}
+            label="Corner Length"
+            max={48}
+            min={4}
+            onChange={(value) => onChange("boxCornerLength", value)}
+            step={1}
+            value={settings.boxCornerLength}
+            valueLabel={`${settings.boxCornerLength}px`}
+          />
+        )}
+        {settings.boxAnnotator === DemoBoxAnnotator.Halo && (
+          <SliderControl
+            disabled={!settings.boxesEnabled}
+            label="Spread"
+            max={32}
+            min={4}
+            onChange={(value) => onChange("boxHaloSpread", value)}
+            step={1}
+            value={settings.boxHaloSpread}
+            valueLabel={`${settings.boxHaloSpread}px`}
+          />
+        )}
+        {settings.boxAnnotator !== DemoBoxAnnotator.Color && (
+          <SliderControl
+            disabled={!settings.boxesEnabled}
+            label="Stroke"
+            max={8}
+            min={1}
+            onChange={(value) => onChange("boxStrokeWidth", value)}
+            step={1}
+            value={settings.boxStrokeWidth}
+            valueLabel={`${settings.boxStrokeWidth}px`}
+          />
+        )}
+        {(settings.boxAnnotator === DemoBoxAnnotator.Box ||
+          settings.boxAnnotator === DemoBoxAnnotator.RoundBox ||
+          settings.boxAnnotator === DemoBoxAnnotator.Circle) && (
+          <SliderControl
+            disabled={!settings.boxesEnabled}
+            label="Fill"
+            max={0.35}
+            min={0}
+            onChange={(value) => onChange("boxFillAlpha", value)}
+            step={0.01}
+            value={settings.boxFillAlpha}
+            valueLabel={formatPercent(settings.boxFillAlpha)}
+          />
+        )}
+        {settings.boxAnnotator === DemoBoxAnnotator.Color && (
+          <SliderControl
+            disabled={!settings.boxesEnabled}
+            label="Opacity"
+            max={1}
+            min={0}
+            onChange={(value) => onChange("boxColorFillAlpha", value)}
+            step={0.01}
+            value={settings.boxColorFillAlpha}
+            valueLabel={formatPercent(settings.boxColorFillAlpha)}
+          />
+        )}
       </ControlSection>
 
       <ControlSection
-        enabled={settings.masksEnabled}
-        onToggleEnabled={(checked) => onChange("masksEnabled", checked)}
-        title="Masks"
-        toggleDisabled={availability?.masksEnabled === false}
+        enabled={segmentationEnabled}
+        onToggleEnabled={(checked) =>
+          onPatch({
+            haloEnabled: checked,
+            masksEnabled: checked && availability?.masksEnabled !== false,
+            polygonsEnabled: checked && availability?.polygonsEnabled !== false,
+            polylinesEnabled:
+              checked && availability?.polylinesEnabled !== false,
+          })
+        }
+        title="Segmentation"
+        toggleDisabled={segmentationUnavailable}
       >
+        <SubLayerHeading
+          checked={settings.masksEnabled}
+          disabled={availability?.masksEnabled === false}
+          label="Masks"
+          onChange={(checked) => onChange("masksEnabled", checked)}
+        />
         <SegmentedControl
           disabled={!settings.masksEnabled}
           label="Mode"
@@ -276,14 +389,12 @@ function GlobalRenderControls({
           value={settings.maskStrokeAlpha}
           valueLabel={formatPercent(settings.maskStrokeAlpha)}
         />
-      </ControlSection>
-
-      <ControlSection
-        enabled={settings.polygonsEnabled}
-        onToggleEnabled={(checked) => onChange("polygonsEnabled", checked)}
-        title="Polygons"
-        toggleDisabled={availability?.polygonsEnabled === false}
-      >
+        <SubLayerHeading
+          checked={settings.polygonsEnabled}
+          disabled={availability?.polygonsEnabled === false}
+          label="Polygons"
+          onChange={(checked) => onChange("polygonsEnabled", checked)}
+        />
         <SliderControl
           disabled={!settings.polygonsEnabled}
           label="Stroke"
@@ -304,14 +415,12 @@ function GlobalRenderControls({
           value={settings.polygonFillAlpha}
           valueLabel={formatPercent(settings.polygonFillAlpha)}
         />
-      </ControlSection>
-
-      <ControlSection
-        enabled={settings.polylinesEnabled}
-        onToggleEnabled={(checked) => onChange("polylinesEnabled", checked)}
-        title="Polylines"
-        toggleDisabled={availability?.polylinesEnabled === false}
-      >
+        <SubLayerHeading
+          checked={settings.polylinesEnabled}
+          disabled={availability?.polylinesEnabled === false}
+          label="Polylines"
+          onChange={(checked) => onChange("polylinesEnabled", checked)}
+        />
         <SliderControl
           disabled={!settings.polylinesEnabled}
           label="Stroke"
@@ -322,6 +431,21 @@ function GlobalRenderControls({
           value={settings.polylineStrokeWidth}
           valueLabel={`${settings.polylineStrokeWidth}px`}
         />
+        <SubLayerHeading
+          checked={settings.haloEnabled}
+          label="Halo"
+          onChange={(checked) => onChange("haloEnabled", checked)}
+        />
+        <SliderControl
+          disabled={!settings.haloEnabled}
+          label="Spread"
+          max={32}
+          min={4}
+          onChange={(value) => onChange("haloSpread", value)}
+          step={1}
+          value={settings.haloSpread}
+          valueLabel={`${settings.haloSpread}px`}
+        />
       </ControlSection>
 
       <ControlSection
@@ -330,26 +454,128 @@ function GlobalRenderControls({
         title="Keypoints"
         toggleDisabled={availability?.keypointsEnabled === false}
       >
-        <SliderControl
+        <SegmentedControl
           disabled={!settings.keypointsEnabled}
-          label="Radius"
-          max={12}
-          min={1}
-          onChange={(value) => onChange("keypointRadius", value)}
-          step={0.5}
-          value={settings.keypointRadius}
-          valueLabel={`${settings.keypointRadius}px`}
+          label="Annotator"
+          onChange={(value) => onChange("keypointAnnotator", value)}
+          options={[
+            {
+              label: "Vertex + Edge",
+              value: DemoKeypointAnnotator.VerticesAndEdges,
+            },
+            { label: "Vertex", value: DemoKeypointAnnotator.Vertices },
+            { label: "Edge", value: DemoKeypointAnnotator.Edges },
+          ]}
+          value={settings.keypointAnnotator}
         />
-        <SliderControl
-          disabled={!settings.keypointsEnabled}
-          label="Edge Width"
-          max={8}
-          min={1}
-          onChange={(value) => onChange("keypointEdgeWidth", value)}
-          step={0.5}
-          value={settings.keypointEdgeWidth}
-          valueLabel={`${settings.keypointEdgeWidth}px`}
+        {settings.keypointAnnotator !== DemoKeypointAnnotator.Edges && (
+          <SliderControl
+            disabled={!settings.keypointsEnabled}
+            label="Radius"
+            max={12}
+            min={1}
+            onChange={(value) => onChange("keypointRadius", value)}
+            step={0.5}
+            value={settings.keypointRadius}
+            valueLabel={`${settings.keypointRadius}px`}
+          />
+        )}
+        {settings.keypointAnnotator !== DemoKeypointAnnotator.Vertices && (
+          <SliderControl
+            disabled={!settings.keypointsEnabled}
+            label="Edge Width"
+            max={8}
+            min={1}
+            onChange={(value) => onChange("keypointEdgeWidth", value)}
+            step={0.5}
+            value={settings.keypointEdgeWidth}
+            valueLabel={`${settings.keypointEdgeWidth}px`}
+          />
+        )}
+      </ControlSection>
+
+      <ControlSection
+        enabled={settings.markersEnabled}
+        onToggleEnabled={(checked) => onChange("markersEnabled", checked)}
+        title="Markers"
+        toggleDisabled={availability?.boxesEnabled === false}
+      >
+        <SegmentedControl
+          disabled={!settings.markersEnabled}
+          label="Annotator"
+          onChange={(value) => onChange("markerAnnotator", value)}
+          options={[
+            { label: "Dot", value: DemoMarkerAnnotator.Dot },
+            { label: "Triangle", value: DemoMarkerAnnotator.Triangle },
+            { label: "Ellipse", value: DemoMarkerAnnotator.Ellipse },
+            {
+              label: "Percentage",
+              value: DemoMarkerAnnotator.PercentageBar,
+            },
+            { label: "Icon", value: DemoMarkerAnnotator.Icon },
+          ]}
+          value={settings.markerAnnotator}
         />
+        {settings.markerAnnotator === DemoMarkerAnnotator.Dot && (
+          <SliderControl
+            disabled={!settings.markersEnabled}
+            label="Dot Radius"
+            max={16}
+            min={2}
+            onChange={(value) => onChange("markerDotRadius", value)}
+            step={0.5}
+            value={settings.markerDotRadius}
+            valueLabel={`${settings.markerDotRadius}px`}
+          />
+        )}
+        {settings.markerAnnotator === DemoMarkerAnnotator.Triangle && (
+          <SliderControl
+            disabled={!settings.markersEnabled}
+            label="Size"
+            max={32}
+            min={6}
+            onChange={(value) => onChange("markerTriangleSize", value)}
+            step={1}
+            value={settings.markerTriangleSize}
+            valueLabel={`${settings.markerTriangleSize}px`}
+          />
+        )}
+        {settings.markerAnnotator === DemoMarkerAnnotator.Ellipse && (
+          <SliderControl
+            disabled={!settings.markersEnabled}
+            label="Stroke"
+            max={8}
+            min={1}
+            onChange={(value) => onChange("markerStrokeWidth", value)}
+            step={1}
+            value={settings.markerStrokeWidth}
+            valueLabel={`${settings.markerStrokeWidth}px`}
+          />
+        )}
+        {settings.markerAnnotator === DemoMarkerAnnotator.Icon && (
+          <SliderControl
+            disabled={!settings.markersEnabled}
+            label="Icon Size"
+            max={48}
+            min={12}
+            onChange={(value) => onChange("markerIconSize", value)}
+            step={1}
+            value={settings.markerIconSize}
+            valueLabel={`${settings.markerIconSize}px`}
+          />
+        )}
+        {settings.markerAnnotator === DemoMarkerAnnotator.PercentageBar && (
+          <SliderControl
+            disabled={!settings.markersEnabled}
+            label="Bar Height"
+            max={16}
+            min={4}
+            onChange={(value) => onChange("markerBarHeight", value)}
+            step={1}
+            value={settings.markerBarHeight}
+            valueLabel={`${settings.markerBarHeight}px`}
+          />
+        )}
       </ControlSection>
 
       <ControlSection
@@ -358,12 +584,26 @@ function GlobalRenderControls({
         title="Labels"
         toggleDisabled={availability?.labelsEnabled === false}
       >
-        <ToggleControl
-          checked={settings.labelIncludeConfidence}
-          disabled={!settings.labelsEnabled}
-          label="Confidence"
-          onChange={(checked) => onChange("labelIncludeConfidence", checked)}
-        />
+        <div className="render-controls__toggles">
+          <ToggleControl
+            checked={settings.labelShowClass}
+            disabled={!settings.labelsEnabled}
+            label="Class"
+            onChange={(checked) => onChange("labelShowClass", checked)}
+          />
+          <ToggleControl
+            checked={settings.labelIncludeConfidence}
+            disabled={!settings.labelsEnabled}
+            label="Confidence"
+            onChange={(checked) => onChange("labelIncludeConfidence", checked)}
+          />
+          <ToggleControl
+            checked={settings.labelShowId}
+            disabled={!settings.labelsEnabled}
+            label="ID"
+            onChange={(checked) => onChange("labelShowId", checked)}
+          />
+        </div>
         <SegmentedControl
           disabled={!settings.labelsEnabled}
           label="Placement"
@@ -446,18 +686,6 @@ function GlobalRenderControls({
           step={1}
           value={settings.labelOffsetY}
           valueLabel={`${settings.labelOffsetY}px`}
-        />
-      </ControlSection>
-
-      <ControlSection title="Filter">
-        <SliderControl
-          label="Confidence"
-          max={1}
-          min={0}
-          onChange={(value) => onChange("confidenceThreshold", value)}
-          step={0.01}
-          value={settings.confidenceThreshold}
-          valueLabel={`${Math.round(settings.confidenceThreshold * 100)}%`}
         />
       </ControlSection>
 
@@ -552,7 +780,6 @@ function GlobalRenderControls({
 function ClassRenderControls({
   classNames,
   onChange,
-  onChangeAllVisibility,
   onChangeVisibility,
   settings,
 }: {
@@ -562,7 +789,6 @@ function ClassRenderControls({
     key: keyof DemoClassStyle,
     value: number,
   ) => void;
-  readonly onChangeAllVisibility: (visible: boolean) => void;
   readonly onChangeVisibility: (className: string, visible: boolean) => void;
   readonly settings: DemoPresentationSettings;
 }) {
@@ -623,7 +849,6 @@ function ClassRenderControls({
                   }
                   type="checkbox"
                 />
-                <span>Show</span>
               </label>
             </header>
             <div className="class-style-card__controls">
@@ -653,6 +878,35 @@ function ClassRenderControls({
           </article>
         );
       })}
+    </div>
+  );
+}
+
+function SubLayerHeading({
+  checked,
+  disabled = false,
+  label,
+  onChange,
+}: {
+  readonly checked: boolean;
+  readonly disabled?: boolean;
+  readonly label: string;
+  readonly onChange: (checked: boolean) => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="render-control-section__subheading-row">
+      <h4 className="render-control-section__subheading">{label}</h4>
+      <label className="render-control-section__enable">
+        <input
+          aria-label={`Enable ${label.toLowerCase()} layer`}
+          checked={checked}
+          disabled={disabled}
+          onChange={(event) => onChange(event.currentTarget.checked)}
+          type="checkbox"
+        />
+      </label>
     </div>
   );
 }

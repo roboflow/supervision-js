@@ -402,9 +402,19 @@ vi.mock("pixi.js", () => {
     }
   }
 
+  class BlurFilter {
+    quality: number;
+    strength: number;
+
+    constructor(options: { quality?: number; strength: number }) {
+      this.quality = options.quality ?? 4;
+      this.strength = options.strength;
+    }
+  }
+
   return {
     Application,
-    Assets,
+    BlurFilter,
     CanvasSource,
     Container,
     Graphics,

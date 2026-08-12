@@ -36,11 +36,27 @@ export interface MaskStrokeStyleOptions {
  * The `mask` remains semantic detection data. Renderer backends may prepare it
  * into ID-mask artifacts, textures, or other backend-specific resources.
  */
+/**
+ * Soft glow rendered around the mask silhouette.
+ *
+ * The renderer blurs the mask coverage on the GPU, so the glow follows the
+ * exact mask outline at any spread. Halos are presentation only and reuse the
+ * prepared mask artifact; they add no per-frame CPU work.
+ */
+export interface MaskHaloStyle {
+  /** Peak glow alpha at the silhouette. */
+  readonly alpha: number;
+  readonly color: number;
+  /** Blur radius in screen pixels. */
+  readonly spread: number;
+}
+
 export interface MaskDrawInstruction {
   readonly mask: DetectionMask;
   readonly color: number;
   readonly alpha: number;
   readonly stroke?: MaskStrokeStyle;
+  readonly halo?: MaskHaloStyle;
 }
 
 /**
