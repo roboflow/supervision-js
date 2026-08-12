@@ -17,7 +17,7 @@ import type {
   DetectionPickPoint,
   DetectionPickResult,
 } from "supervision-js-core";
-import type { MaskStyle } from "supervision-js-core";
+import type { MaskHaloStyle, MaskStyle } from "supervision-js-core";
 import type {
   RenderPreparationOptions,
   RenderPreparationArtifactKind,
@@ -26,6 +26,11 @@ import type {
 import type { SerializableMaskInstruction } from "#render-preparation/mask-preparation-worker-protocol";
 import { resolveMaskStyleOpacity } from "supervision-js-core";
 import { createPixiIdMaskShaderRenderer } from "./pixi-id-mask-shader";
+import {
+  buildMaskHaloPalette,
+  createPixiMaskHaloRenderer,
+} from "./pixi-mask-halo";
+import type { MaskHaloPassGroup, PixiMaskHaloRenderer } from "./pixi-mask-halo";
 import type {
   Container as PixiContainer,
   ImageSource as PixiImageSource,
@@ -108,6 +113,7 @@ export interface PixiMaskLayer {
   getActiveIdMaskFrameTexture(): PixiActiveIdMaskFrameTexture | null;
   setTimelineContext(context: PreparedRenderTimelineContext): void;
   setMaskStyle(maskStyle: MaskStyle | null | undefined): void;
+  setMaskHaloStyle(maskHaloStyle: MaskHaloStyle | null | undefined): void;
   destroy(): void;
 }
 
@@ -126,7 +132,18 @@ export function createPixiMaskLayer(options: {
   readonly Sprite: SpriteConstructor;
   readonly Texture: TextureConstructorWithEmpty;
   readonly UniformGroup?: UniformGroupConstructor;
+  readonly Rectangle?: new (
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+  ) => unknown;
+  readonly BlurFilter?: new (options: {
+    strength: number;
+    quality?: number;
+  }) => { strength: number };
   readonly detectionTimeline: BufferedDetectionTimeline;
+  readonly maskHaloStyle?: MaskHaloStyle | null;
   readonly maskStyle: MaskStyle;
   readonly onActiveIdMaskFramePresented?: () => void;
   readonly renderPreparation?: RenderPreparationOptions;
@@ -140,6 +157,10 @@ export function createPixiMaskLayer(options: {
   let mediaWidth = 0;
   let idMaskRenderer:
     ReturnType<typeof createPixiIdMaskShaderRenderer> | undefined;
+  let haloRenderer: PixiMaskHaloRenderer | undefined;
+  let currentMaskHaloStyle: MaskHaloStyle | null =
+    options.maskHaloStyle ?? null;
+  let currentMaskStyle: MaskStyle = options.maskStyle;
   let maskSprite: PixiSprite | undefined;
   let activeFrameKey: string | null = null;
   let activeFrameMediaTime: number | null = null;
@@ -200,12 +221,21 @@ export function createPixiMaskLayer(options: {
 
       idMaskRenderer = createIdMaskRenderer();
       idMaskRenderer?.setOpacity(maskOpacity);
+      haloRenderer = createHaloRenderer();
+      haloRenderer?.setOpacity(maskOpacity);
 
       if (!idMaskRenderer || !options.Container) {
         return maskSprite;
       }
 
       const maskContainer = new options.Container();
+
+      // The halo draws beneath the mask so the glow bleeds outward from the
+      // silhouette while fills and borders stay crisp on top.
+      if (haloRenderer) {
+        maskContainer.addChild(haloRenderer.display);
+      }
+
       maskContainer.addChild(maskSprite, idMaskRenderer.mesh);
 
       return maskContainer;
@@ -301,11 +331,22 @@ export function createPixiMaskLayer(options: {
 
     setMaskStyle(nextMaskStyle) {
       if (nextMaskStyle !== undefined) {
+        currentMaskStyle = nextMaskStyle ?? currentMaskStyle;
         maskOpacity = resolveMaskStyleOpacity(nextMaskStyle);
         applyMaskOpacity();
       }
 
       preparedRenderWindow.setMaskStyle(nextMaskStyle);
+      refreshHalo();
+    },
+
+    setMaskHaloStyle(nextMaskHaloStyle) {
+      if (nextMaskHaloStyle === undefined) {
+        return;
+      }
+
+      currentMaskHaloStyle = nextMaskHaloStyle;
+      refreshHalo();
     },
 
     destroy() {
@@ -318,6 +359,7 @@ export function createPixiMaskLayer(options: {
       destroyTextures();
       resetMaskPickCanvas();
       idMaskRenderer?.destroy();
+      haloRenderer?.destroy();
     },
   };
 
@@ -378,6 +420,7 @@ export function createPixiMaskLayer(options: {
     maskSprite.height = mediaHeight;
     maskSprite.visible = true;
     idMaskRenderer?.hide();
+    haloRenderer?.hide();
   }
 
   function showIdMaskFrame(
@@ -392,6 +435,89 @@ export function createPixiMaskLayer(options: {
 
     maskSprite.visible = false;
     idMaskRenderer.render(maskFrame, getTexture(maskFrame));
+    renderHalo(maskFrame);
+  }
+
+  function renderHalo(
+    maskFrame: Extract<
+      PreparedMaskFrame,
+      { readonly kind: PreparedMaskFrameKind.PngIdMask }
+    >,
+  ) {
+    if (!haloRenderer) {
+      return;
+    }
+
+    const groups = resolveFrameHaloGroups();
+
+    if (groups.length === 0) {
+      haloRenderer.hide();
+      return;
+    }
+
+    haloRenderer.render(maskFrame, getTexture(maskFrame), groups);
+  }
+
+  function refreshHalo() {
+    if (activeIdMaskFrame) {
+      renderHalo(activeIdMaskFrame);
+    }
+  }
+
+  /**
+   * Halo instructions resolve per frame from the live halo style rather than
+   * being baked into the prepared artifact, so halo edits never invalidate
+   * prepared mask pixels. Detections are grouped by their requested spread
+   * and every group renders in its own blur pass, preserving each
+   * detection's public spread contract.
+   */
+  function resolveFrameHaloGroups(): readonly MaskHaloPassGroup[] {
+    if (visibleMaskMediaTime === null || !currentMaskHaloStyle) {
+      return [];
+    }
+
+    const frame = options.detectionTimeline.selectFrame(visibleMaskMediaTime);
+
+    if (!frame) {
+      return [];
+    }
+
+    const bySpread = new Map<
+      number,
+      Map<number, { readonly alpha: number; readonly color: number }>
+    >();
+
+    for (const [detectionIndex, detection] of frame.detections.entries()) {
+      if (!detection.mask) {
+        continue;
+      }
+
+      const halo = currentMaskHaloStyle.resolve(detection, {
+        detectionIndex,
+        frame,
+        mediaTime: visibleMaskMediaTime,
+      });
+
+      if (!halo || halo.alpha <= 0 || halo.spread <= 0) {
+        continue;
+      }
+
+      let group = bySpread.get(halo.spread);
+
+      if (!group) {
+        group = new Map();
+        bySpread.set(halo.spread, group);
+      }
+
+      group.set(detectionIndex + 1, { alpha: halo.alpha, color: halo.color });
+    }
+
+    return [...bySpread.entries()]
+      .sort(([left], [right]) => left - right)
+      .map(([spread, halos]) => ({
+        palette: buildMaskHaloPalette(halos),
+        spread,
+      }));
   }
 
   function hideSprite() {
@@ -403,6 +529,7 @@ export function createPixiMaskLayer(options: {
     }
 
     idMaskRenderer?.hide();
+    haloRenderer?.hide();
   }
 
   function canHoldVisibleMaskFor(mediaTime: number) {
@@ -416,6 +543,8 @@ export function createPixiMaskLayer(options: {
   function applyMaskOpacity() {
     if (maskSprite) {
       maskSprite.alpha = maskOpacity;
+
+      haloRenderer?.setOpacity(maskOpacity);
     }
 
     idMaskRenderer?.setOpacity(maskOpacity);
@@ -453,6 +582,35 @@ export function createPixiMaskLayer(options: {
     if (!key || activeFrameKey === key) {
       idMaskRenderer?.clearTexture();
     }
+  }
+
+  function createHaloRenderer() {
+    if (
+      !options.BlurFilter ||
+      !options.Container ||
+      !options.Rectangle ||
+      !options.Mesh ||
+      !options.MeshGeometry ||
+      !options.Shader ||
+      !options.UniformGroup ||
+      mediaWidth <= 0 ||
+      mediaHeight <= 0
+    ) {
+      return undefined;
+    }
+
+    return createPixiMaskHaloRenderer({
+      BlurFilter: options.BlurFilter,
+      Container: options.Container,
+      Rectangle: options.Rectangle,
+      ImageSource: options.ImageSource,
+      Mesh: options.Mesh,
+      MeshGeometry: options.MeshGeometry,
+      Shader: options.Shader,
+      UniformGroup: options.UniformGroup,
+      mediaHeight,
+      mediaWidth,
+    });
   }
 
   function createIdMaskRenderer() {

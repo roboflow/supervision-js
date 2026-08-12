@@ -85,6 +85,7 @@ const mockState = vi.hoisted(() => {
     meshGeometryOptions: [] as unknown[],
     meshInstances: [] as Array<{
       destroy: ReturnType<typeof vi.fn>;
+      filters?: unknown;
       visible: boolean;
     }>,
     shaderDestroy: vi.fn(),
@@ -234,6 +235,7 @@ vi.mock("pixi.js", () => {
   class Container {
     children: unknown[] = [];
     cursor?: string;
+    destroy = vi.fn();
     eventMode?: string;
     hitArea?: unknown;
     on = vi.fn();
@@ -402,9 +404,19 @@ vi.mock("pixi.js", () => {
     }
   }
 
+  class BlurFilter {
+    quality: number;
+    strength: number;
+
+    constructor(options: { quality?: number; strength: number }) {
+      this.quality = options.quality ?? 4;
+      this.strength = options.strength;
+    }
+  }
+
   return {
     Application,
-    Assets,
+    BlurFilter,
     CanvasSource,
     Container,
     Graphics,

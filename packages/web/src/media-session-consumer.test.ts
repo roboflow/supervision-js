@@ -120,6 +120,73 @@ describe("media session consumer workflows", () => {
     expect(mediaMock.dispose).toHaveBeenCalledOnce();
   });
 
+  it("forwards the mask halo renderer style from session presentation", async () => {
+    resetMocks();
+    mediaMock.samples = [createMockSample(0, 0)];
+    // Node lacks createImageBitmap; stubbing it lets the prepared pipeline
+    // take the PngIdMask path the halo depends on.
+    vi.stubGlobal(
+      "createImageBitmap",
+      vi.fn(async () => ({ close: vi.fn(), height: 2, width: 2 })),
+    );
+
+    const { annotationRenderers, createMediaSession, DetectionMaskEncoding } =
+      await import("./index");
+    const haloResolve = vi.fn(() => ({
+      alpha: 0.6,
+      color: 0x8b5cf6,
+      spread: 12,
+    }));
+    const session = await createMediaSession({
+      container: createContainer(),
+      detections: {
+        frames: [
+          {
+            detections: [
+              {
+                className: "player",
+                mask: {
+                  counts: "021",
+                  encoding: DetectionMaskEncoding.CompressedRle,
+                  height: 2,
+                  width: 2,
+                },
+                rect: { height: 30, width: 20, x: 20, y: 30 },
+              },
+            ],
+            frameIndex: 0,
+            mediaTime: 0,
+          },
+        ],
+      },
+      media: "sample.mp4",
+      presentation: {
+        renderers: [
+          annotationRenderers.maskHalo({ style: { resolve: haloResolve } }),
+        ],
+      },
+    });
+
+    // The session must forward the resolved halo style into the renderer;
+    // dropping it silently disabled the halo for every session consumer.
+    await vi.waitFor(() => {
+      expect(haloResolve).toHaveBeenCalled();
+    });
+
+    await vi.waitFor(() => {
+      const haloMesh = pixiMock.meshInstances.find(
+        (mesh) =>
+          mesh.visible && (mesh as { filters?: unknown }).filters !== undefined,
+      );
+
+      expect(haloMesh).toBeDefined();
+    });
+
+    session.destroy();
+    // Restore the node default so later tests take the RGBA fallback again.
+    vi.stubGlobal("createImageBitmap", undefined);
+  });
+
   it("delivers detection picks through session interaction callbacks", async () => {
     resetMocks();
     mediaMock.samples = [createMockSample(0, 0)];

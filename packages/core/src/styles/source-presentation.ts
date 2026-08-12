@@ -25,6 +25,7 @@ import type {
   MaskStyle,
   MaskStyleContext,
 } from "#types/mask-style";
+import type { MaskHaloStyle } from "#types/mask-halo-style";
 import type {
   PolygonDrawInstruction,
   PolygonStyle,
@@ -45,6 +46,7 @@ export interface PresentationStyleSet {
   readonly boxStyle?: BoxStyle | null;
   readonly keypointStyle?: KeypointStyle | null;
   readonly labelStyle?: LabelStyle | null;
+  readonly maskHaloStyle?: MaskHaloStyle | null;
   readonly maskStyle?: MaskStyle | null;
   readonly polygonStyle?: PolygonStyle | null;
   readonly polylineStyle?: PolylineStyle | null;

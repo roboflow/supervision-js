@@ -23,6 +23,7 @@ import {
   type KeypointStyle,
   type LabelStyle,
   type MaskDrawInstruction,
+  type MaskHaloStyle,
   type MaskStyle,
   type MediaRendererPresentation,
   type PolygonStyle,
@@ -49,6 +50,11 @@ export interface DemoPresentationSettings {
   readonly labelCornerRadius: number;
   readonly labelFontSize: number;
   readonly labelIncludeConfidence: boolean;
+  readonly maskHaloAlpha: number;
+  /** Fixed glow color; null follows each detection's class color. */
+  readonly maskHaloColor: number | null;
+  readonly maskHaloEnabled: boolean;
+  readonly maskHaloSpread: number;
   readonly labelOffsetX: number;
   readonly labelOffsetY: number;
   readonly labelPaddingX: number;
@@ -156,6 +162,10 @@ export const defaultDemoPresentationSettings: DemoPresentationSettings = {
   labelCornerRadius: 4,
   labelFontSize: 12,
   labelIncludeConfidence: false,
+  maskHaloAlpha: 0.6,
+  maskHaloColor: null,
+  maskHaloEnabled: false,
+  maskHaloSpread: 12,
   labelOffsetX: 0,
   labelOffsetY: 0,
   labelPaddingX: 6,
@@ -188,6 +198,9 @@ export function createDemoPresentation(
   const maskStyle = settings.masksEnabled
     ? createDemoMaskStyle(settings)
     : null;
+  const maskHaloStyle = settings.maskHaloEnabled
+    ? createDemoMaskHaloStyle(settings)
+    : null;
   const polygonStyle = settings.polygonsEnabled
     ? createDemoPolygonStyle(settings)
     : null;
@@ -210,9 +223,13 @@ export function createDemoPresentation(
     maskStyle,
     polygonStyle,
     polylineStyle,
+    maskHaloStyle,
     renderers: [
       ...(boxStyle ? [annotationRenderers.box({ style: boxStyle })] : []),
       ...(maskStyle ? [annotationRenderers.mask({ style: maskStyle })] : []),
+      ...(maskHaloStyle
+        ? [annotationRenderers.maskHalo({ style: maskHaloStyle })]
+        : []),
       ...(polygonStyle
         ? [annotationRenderers.polygon({ style: polygonStyle })]
         : []),
@@ -445,6 +462,29 @@ function createDemoMaskStyle(settings: DemoPresentationSettings): MaskStyle {
                 width: settings.maskStrokeWidth,
               }
             : undefined,
+      };
+    },
+  };
+}
+
+function createDemoMaskHaloStyle(
+  settings: DemoPresentationSettings,
+): MaskHaloStyle {
+  return {
+    resolve(detection, context) {
+      if (
+        !detection.mask ||
+        context.hidden ||
+        !passesConfidenceThreshold(detection, settings)
+      ) {
+        return undefined;
+      }
+
+      return {
+        alpha: settings.maskHaloAlpha,
+        color:
+          settings.maskHaloColor ?? resolveClassStyle(detection, settings).fill,
+        spread: settings.maskHaloSpread,
       };
     },
   };
