@@ -24,7 +24,9 @@ describe("docs annotation renderers", () => {
             ? ["keypointsEnabled"]
             : renderer === "mask-halo"
               ? ["maskHaloEnabled"]
-              : [`${renderer}Enabled`];
+              : renderer === "regions"
+                ? []
+                : [`${renderer}Enabled`];
 
       expect(enabled).toEqual(expectedEnabled);
     }
