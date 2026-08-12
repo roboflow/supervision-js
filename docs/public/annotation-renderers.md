@@ -2,6 +2,7 @@
 title: Annotation Renderers
 children:
   - ./annotation-renderers/boxes.md
+  - ./annotation-renderers/ellipse.md
   - ./annotation-renderers/masks.md
   - ./annotation-renderers/labels.md
   - ./annotation-renderers/polygons.md
@@ -35,6 +36,7 @@ minimal code snippet. The polyline playground uses the fixture's committed,
 motion-gated basketball trajectory rather than inventing geometry at runtime.
 
 - [Boxes](./annotation-renderers/boxes.md)
+- [Ellipse](./annotation-renderers/ellipse.md)
 - [Masks](./annotation-renderers/masks.md)
 - [Labels](./annotation-renderers/labels.md)
 - [Polygons](./annotation-renderers/polygons.md)

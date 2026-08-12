@@ -18,6 +18,7 @@ import {
   type BoxStyle,
   type BoxStyleContext,
   type Detection,
+  type EllipseStyle,
   type FocusStyle,
   type InteractionStyle,
   type KeypointStyle,
@@ -34,6 +35,7 @@ export type DemoClassStyle = DetectionClassColorStyle;
 
 export interface DemoPresentationSettings {
   readonly boxesEnabled: boolean;
+  readonly ellipsesEnabled: boolean;
   readonly focusEnabled: boolean;
   readonly keypointsEnabled: boolean;
   readonly labelsEnabled: boolean;
@@ -62,6 +64,10 @@ export interface DemoPresentationSettings {
   readonly polygonFillAlpha: number;
   readonly polygonStrokeWidth: number;
   readonly polylineStrokeWidth: number;
+  readonly ellipseAxisRatio: number;
+  /** Fixed arc color; null follows each detection's class color. */
+  readonly ellipseColor: number | null;
+  readonly ellipseStrokeWidth: number;
   readonly keypointRadius: number;
   readonly keypointEdgeWidth: number;
   readonly confidenceThreshold: number;
@@ -78,6 +84,7 @@ export interface DemoPresentationSettings {
 
 export type DemoPresentationLayerSetting =
   | "boxesEnabled"
+  | "ellipsesEnabled"
   | "focusEnabled"
   | "keypointsEnabled"
   | "labelsEnabled"
@@ -91,6 +98,7 @@ export type DemoPresentationAvailability = Partial<
 
 const demoPresentationLayerSettings: readonly DemoPresentationLayerSetting[] = [
   "boxesEnabled",
+  "ellipsesEnabled",
   "focusEnabled",
   "keypointsEnabled",
   "labelsEnabled",
@@ -139,6 +147,10 @@ export const defaultDemoPresentationSettings: DemoPresentationSettings = {
   boxStrokeWidth: 2,
   classStyles: defaultDemoClassStyles,
   confidenceThreshold: 0,
+  ellipseAxisRatio: 0.35,
+  ellipseColor: null,
+  ellipseStrokeWidth: 2,
+  ellipsesEnabled: false,
   focusCornerRadius: 1,
   focusDimAlpha: 0.4,
   focusDimColor: 0x000000,
@@ -179,6 +191,9 @@ export function createDemoPresentation(
   settings: DemoPresentationSettings,
 ): MediaRendererPresentation {
   const boxStyle = settings.boxesEnabled ? createDemoBoxStyle(settings) : null;
+  const ellipseStyle = settings.ellipsesEnabled
+    ? createDemoEllipseStyle(settings)
+    : null;
   const keypointStyle = settings.keypointsEnabled
     ? createDemoKeypointStyle(settings)
     : null;
@@ -200,9 +215,7 @@ export function createDemoPresentation(
     // letterbox around non-matching aspect ratios.
     backgroundColor: 0xf3f4f6,
     boxStyle,
-    // Class visibility rides the renderer-owned visibility contract so every
-    // layer and the prepared-mask cache invalidate consistently.
-    visibility: { hiddenClasses: settings.hiddenClasses },
+    ellipseStyle,
     focusStyle: settings.focusEnabled ? createDemoFocusStyle(settings) : null,
     interactionStyle: createDemoInteractionStyle(settings),
     keypointStyle,
@@ -212,6 +225,9 @@ export function createDemoPresentation(
     polylineStyle,
     renderers: [
       ...(boxStyle ? [annotationRenderers.box({ style: boxStyle })] : []),
+      ...(ellipseStyle
+        ? [annotationRenderers.ellipse({ style: ellipseStyle })]
+        : []),
       ...(maskStyle ? [annotationRenderers.mask({ style: maskStyle })] : []),
       ...(polygonStyle
         ? [annotationRenderers.polygon({ style: polygonStyle })]
@@ -224,6 +240,49 @@ export function createDemoPresentation(
         : []),
       ...(labelStyle ? [annotationRenderers.label({ style: labelStyle })] : []),
     ],
+  };
+}
+
+/**
+ * The Python Supervision EllipseAnnotator look: an elliptical footprint arc
+ * swept from -45deg to 235deg under the detection box.
+ */
+function createDemoEllipseStyle(
+  settings: DemoPresentationSettings,
+): EllipseStyle {
+  return {
+    resolve(detection, context) {
+      if (
+        !detection.rect ||
+        context.hidden ||
+        !passesConfidenceThreshold(detection, settings)
+      ) {
+        return undefined;
+      }
+
+      const radiusX = detection.rect.width / 2;
+      const radiusY = radiusX * settings.ellipseAxisRatio;
+
+      return {
+        center: {
+          x: detection.rect.x + radiusX,
+          // Bottom-tangent so the arc hugs the detection instead of dipping
+          // below its feet.
+          y: detection.rect.y + detection.rect.height - radiusY,
+        },
+        endAngle: (235 * Math.PI) / 180,
+        radiusX,
+        radiusY,
+        startAngle: (-45 * Math.PI) / 180,
+        stroke: {
+          alpha: 1,
+          color:
+            settings.ellipseColor ??
+            resolveClassStyle(detection, settings).stroke,
+          width: settings.ellipseStrokeWidth,
+        },
+      };
+    },
   };
 }
 

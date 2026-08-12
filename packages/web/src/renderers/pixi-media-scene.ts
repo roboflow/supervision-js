@@ -12,6 +12,7 @@ import {
   resolveAnnotationStyleState,
 } from "supervision-js-core";
 import type { AnnotationVisibility } from "supervision-js-core";
+import type { EllipseStyle, ShapeStyle } from "supervision-js-core";
 import type { Point } from "supervision-js-core";
 import type {
   MediaRendererScene,
@@ -29,10 +30,7 @@ import { createPixiMaskLayer } from "./pixi-mask-layer";
 import { createPixiMaskBrushPreview } from "./pixi-mask-brush-preview";
 import { createPixiPolygonLayer } from "./pixi-polygon-layer";
 import { createPixiVectorLayer } from "./pixi-vector-layer";
-import {
-  createPixiRegionLayer,
-  type PixiRegionLayerState,
-} from "./pixi-region-layer";
+import { resolveAnnotationShapeStyle } from "./annotation-shape-styles";
 import { createPixiAnnotationOverlayLayer } from "./pixi-annotation-overlay-layer";
 import {
   AnnotationGestureStateKind,
@@ -95,6 +93,7 @@ export async function createPixiMediaScene(
   } = await import("pixi.js");
   const { GifSprite } = await import("pixi.js/gif");
   const app: PixiApplication = new Application();
+  let currentEllipseStyle: EllipseStyle | null = options.ellipseStyle ?? null;
   let currentLabelStyle: LabelStyle | null = options.labelStyle ?? null;
   let currentMaskStyle: MaskStyle | null = options.maskStyle ?? null;
   let currentPolygonStyle: PolygonStyle | null =
@@ -124,6 +123,30 @@ export async function createPixiMediaScene(
       currentVisibility?.labelsHidden === true ||
       resolveContextState(detection).hidden,
   });
+  // The vector layer consumes one shape style; renderer kinds that lower to
+  // shape instructions compose with the internal hook here.
+  function resolveVectorShapeStyle(): ShapeStyle | null {
+    const kindShapeStyle = resolveAnnotationShapeStyle({
+      ellipseStyle: currentEllipseStyle,
+    });
+    const baseShapeStyle = options.shapeStyle ?? null;
+
+    if (!kindShapeStyle || !baseShapeStyle) {
+      return kindShapeStyle ?? baseShapeStyle;
+    }
+
+    return {
+      resolve(detection, context) {
+        const combined = [
+          ...(baseShapeStyle.resolve(detection, context) ?? []),
+          ...(kindShapeStyle.resolve(detection, context) ?? []),
+        ];
+
+        return combined.length > 0 ? combined : undefined;
+      },
+    };
+  }
+
   const boxLayer = createPixiBoxLayer({
     boxStyle: options.boxStyle,
     Container: options.editingEngine ? Container : undefined,
@@ -157,28 +180,7 @@ export async function createPixiMediaScene(
     polygonStyle: polygonLayer?.getVectorFallbackStyle() ?? currentPolygonStyle,
     polylineStyle: options.polylineStyle,
     keypointStyle: options.keypointStyle,
-    shapeStyle: options.shapeStyle,
-    resolveContextState,
-  });
-  const regionLayer = createPixiRegionLayer({
-    Assets,
-    Container,
-    GifSprite,
-    Sprite,
-    detectionTimeline: options.detectionTimeline,
-    onInvalidate: () => {
-      if (!hasPresentedSample || mediaWidth <= 0 || mediaHeight <= 0) return;
-      const boxState = boxLayer.drawFrame(currentMediaTime, viewportScale);
-      const regionState = regionLayer.drawFrame(
-        currentMediaTime,
-        viewportScale,
-      );
-      options.onPresentationUpdate?.(
-        createPresentedSampleState(currentMediaTime, boxState, regionState),
-      );
-    },
-    onAssetError: options.diagnostics?.onAssetError,
-    regionRenderers: options.regionRenderers,
+    shapeStyle: resolveVectorShapeStyle(),
     resolveContextState,
   });
   const annotationOverlayLayer = createPixiAnnotationOverlayLayer(
@@ -866,6 +868,11 @@ export async function createPixiMediaScene(
           (renderer) => renderer.kind === "region",
         ) ?? [],
       );
+
+      if (presentation.ellipseStyle !== undefined) {
+        currentEllipseStyle = presentation.ellipseStyle;
+        vectorLayer.setStyles({ shapeStyle: resolveVectorShapeStyle() });
+      }
 
       if (presentation.maskStyle !== undefined) {
         currentMaskStyle = presentation.maskStyle;

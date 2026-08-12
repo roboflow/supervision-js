@@ -1,5 +1,6 @@
 import {
   createDefaultBoxStyle,
+  createDefaultEllipseStyle,
   createDefaultKeypointStyle,
   createDefaultLabelStyle,
   createDefaultMaskStyle,
@@ -91,10 +92,10 @@ export type AnnotationRendererRegistry = {
 };
 
 export const annotationRendererRegistry: AnnotationRendererRegistry = {
-  box: {
-    cardinality: "singleton",
-    createCanonicalStyle: createDefaultBoxStyle,
-    styleField: "boxStyle",
+  box: { createCanonicalStyle: createDefaultBoxStyle, styleField: "boxStyle" },
+  ellipse: {
+    createCanonicalStyle: createDefaultEllipseStyle,
+    styleField: "ellipseStyle",
   },
   keypoints: {
     cardinality: "singleton",

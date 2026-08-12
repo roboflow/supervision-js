@@ -3,10 +3,7 @@ import {
   BasePolygonStyle,
   BasePolylineStyle,
   KeypointMarkerShape,
-  MarkerShape,
-  MarkerSizeSpace,
   ShapeInstructionKind,
-  resolveEllipseSegmentCount,
   resolveMarkerGeometry,
   sampleEllipseArc,
   type BufferedDetectionTimeline,
@@ -362,10 +359,7 @@ function drawShapeInstruction(
   viewportScale: number,
 ) {
   if (instruction.kind === ShapeInstructionKind.Ellipse) {
-    const { closed, points } = sampleEllipseArc(
-      instruction,
-      resolveEllipseSegmentCount(instruction, viewportScale),
-    );
+    const { closed, points } = sampleEllipseArc(instruction);
 
     if (closed && instruction.fill) {
       graphics.poly(
@@ -383,7 +377,40 @@ function drawShapeInstruction(
   }
 
   if (instruction.kind === ShapeInstructionKind.Marker) {
-    drawMarkerInstruction(graphics, instruction, viewportScale);
+    const geometry = resolveMarkerGeometry(instruction, viewportScale);
+
+    if (geometry.kind === "circle") {
+      graphics.circle(geometry.center.x, geometry.center.y, geometry.radius);
+      if (instruction.fill) graphics.fill(instruction.fill);
+      if (instruction.stroke)
+        graphics.stroke({
+          alpha: instruction.stroke.alpha,
+          color: instruction.stroke.color,
+          width: resolveScreenLength(instruction.stroke.width, viewportScale),
+        });
+      return;
+    }
+
+    for (const subpath of geometry.subpaths) {
+      if (geometry.closed && instruction.fill) {
+        graphics.poly(
+          subpath.flatMap(({ x, y }) => [x, y]),
+          true,
+        );
+        graphics.fill(instruction.fill);
+      }
+
+      if (instruction.stroke) {
+        drawPixiPath(
+          graphics,
+          subpath,
+          geometry.closed,
+          instruction.stroke,
+          viewportScale,
+        );
+      }
+    }
+
     return;
   }
 
@@ -404,76 +431,6 @@ function drawShapeInstruction(
       viewportScale,
     );
   }
-}
-
-function drawMarkerInstruction(
-  graphics: PixiGraphics,
-  instruction: MarkerShapeInstruction,
-  viewportScale: number,
-) {
-  const geometry = resolveMarkerGeometry(instruction, viewportScale);
-
-  if (geometry.kind === "circle") {
-    const dashed = Boolean(instruction.stroke?.dash?.length);
-
-    if (instruction.fill || !dashed) {
-      graphics.circle(geometry.center.x, geometry.center.y, geometry.radius);
-      if (instruction.fill) graphics.fill(instruction.fill);
-    }
-
-    if (instruction.stroke) {
-      if (dashed) {
-        const ellipse = {
-          center: geometry.center,
-          radiusX: geometry.radius,
-          radiusY: geometry.radius,
-        };
-        const { points } = sampleEllipseArc(
-          ellipse,
-          resolveEllipseSegmentCount(ellipse, viewportScale),
-        );
-        drawPixiPath(graphics, points, true, instruction.stroke, viewportScale);
-      } else {
-        graphics.stroke(resolvePixiStroke(instruction.stroke, viewportScale));
-      }
-    }
-    return;
-  }
-
-  for (const subpath of geometry.subpaths) {
-    if (geometry.closed && instruction.fill) {
-      graphics.poly(
-        subpath.flatMap(({ x, y }) => [x, y]),
-        true,
-      );
-      graphics.fill(instruction.fill);
-    }
-
-    if (instruction.stroke) {
-      drawPixiPath(
-        graphics,
-        subpath,
-        geometry.closed,
-        instruction.stroke,
-        viewportScale,
-      );
-    }
-  }
-}
-
-function asOpenStroke(
-  stroke: MarkerShapeInstruction["stroke"],
-): OpenStrokeStyle | undefined {
-  if (!stroke) return undefined;
-  return {
-    alpha: stroke.alpha,
-    cap: stroke.cap,
-    color: stroke.color,
-    dash: stroke.dash,
-    join: stroke.join,
-    miterLimit: stroke.miterLimit,
-    width: stroke.width,
-  };
 }
 
 function detectionKey(detection: Detection, detectionIndex: number) {

@@ -1,11 +1,14 @@
 import type { DetectionFrame } from "supervision";
 import type { DemoPresentationSettings } from "./presentation/demo-presentation";
 
+const DOCS_ELLIPSE_COLOR = 0x8b5cf6;
+
 const BASKETBALL_TRACE_CLASS_NAME = "basketball";
 const BASKETBALL_TRACE_TRACK_ID = "basketball-track:0";
 
 export const docsAnnotationRendererIds = [
   "boxes",
+  "ellipse",
   "masks",
   "labels",
   "polygons",
@@ -70,6 +73,28 @@ export const docsAnnotationRenderers: Readonly<
     ],
     description: "Axis-aligned detection bounds",
     title: "Boxes",
+  },
+  ellipse: {
+    controls: [
+      {
+        key: "ellipseStrokeWidth",
+        label: "Stroke width",
+        max: 8,
+        min: 1,
+        step: 1,
+        unit: "pixels",
+      },
+      {
+        key: "ellipseAxisRatio",
+        label: "Axis ratio",
+        max: 0.6,
+        min: 0.15,
+        step: 0.01,
+        unit: "percent",
+      },
+    ],
+    description: "Elliptical footprint arc under each detection",
+    title: "Ellipse",
   },
   masks: {
     controls: [
@@ -209,6 +234,9 @@ export function createDocsAnnotationRendererPresentation(
 ): Partial<DemoPresentationSettings> {
   return {
     boxesEnabled: renderer === "boxes",
+    // Pinned so the live snippet's fixed color is exactly what renders.
+    ellipseColor: DOCS_ELLIPSE_COLOR,
+    ellipsesEnabled: renderer === "ellipse",
     focusEnabled: false,
     keypointsEnabled: renderer === "keypoints",
     labelsEnabled: renderer === "labels",
@@ -255,6 +283,34 @@ export function createDocsAnnotationRendererSnippet(
         fill: { alpha: ${formatNumber(settings.boxFillAlpha)} },
         stroke: { width: ${formatNumber(settings.boxStrokeWidth)} },
       }),
+    }),
+  ],
+});`;
+    case "ellipse":
+      return `session.setPresentation({
+  renderers: [
+    annotationRenderers.ellipse({
+      style: {
+        resolve: (detection) => {
+          if (!detection.rect) return undefined;
+          const radiusX = detection.rect.width / 2;
+          const radiusY = radiusX * ${formatNumber(settings.ellipseAxisRatio)};
+          return {
+            center: {
+              x: detection.rect.x + radiusX,
+              y: detection.rect.y + detection.rect.height - radiusY,
+            },
+            endAngle: (235 * Math.PI) / 180,
+            radiusX,
+            radiusY,
+            startAngle: (-45 * Math.PI) / 180,
+            stroke: {
+              color: ${formatColor(DOCS_ELLIPSE_COLOR)},
+              width: ${formatNumber(settings.ellipseStrokeWidth)},
+            },
+          };
+        },
+      },
     }),
   ],
 });`;
@@ -335,4 +391,8 @@ export function createDocsAnnotationRendererSnippet(
 
 function formatNumber(value: number) {
   return Number(value.toFixed(2)).toString();
+}
+
+function formatColor(color: number) {
+  return `0x${color.toString(16).padStart(6, "0")}`;
 }

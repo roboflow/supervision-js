@@ -120,6 +120,64 @@ describe("media session consumer workflows", () => {
     expect(mediaMock.dispose).toHaveBeenCalledOnce();
   });
 
+  it("forwards the ellipse renderer style from session presentation", async () => {
+    resetMocks();
+    mediaMock.samples = [createMockSample(0, 0)];
+    const { annotationRenderers, createMediaSession } = await import("./index");
+    const ellipseResolve = vi.fn(() => ({
+      center: { x: 30, y: 70 },
+      endAngle: (235 * Math.PI) / 180,
+      radiusX: 10,
+      radiusY: 3.5,
+      startAngle: (-45 * Math.PI) / 180,
+      stroke: { alpha: 1, color: 0x8b5cf6, width: 2 },
+    }));
+    const session = await createMediaSession({
+      container: createContainer(),
+      detections: {
+        frames: [
+          {
+            detections: [
+              {
+                className: "player",
+                rect: { height: 40, width: 20, x: 20, y: 30 },
+              },
+            ],
+            frameIndex: 0,
+            mediaTime: 0,
+          },
+        ],
+      },
+      media: "sample.mp4",
+      presentation: {
+        renderers: [
+          annotationRenderers.ellipse({ style: { resolve: ellipseResolve } }),
+        ],
+      },
+    });
+
+    // The session must forward the resolved ellipse style into the renderer;
+    // dropping it from the hand-enumerated forward silently disables the
+    // kind for every session consumer.
+    await vi.waitFor(() => {
+      expect(ellipseResolve).toHaveBeenCalled();
+    });
+
+    await vi.waitFor(() => {
+      const arcGraphics = pixiMock.graphicsInstances.find(
+        (graphics) =>
+          graphics.moveTo.mock.calls.length > 0 &&
+          graphics.stroke.mock.calls.some(
+            ([stroke]) => (stroke as { color?: number })?.color === 0x8b5cf6,
+          ),
+      );
+
+      expect(arcGraphics).toBeDefined();
+    });
+
+    session.destroy();
+  });
+
   it("delivers detection picks through session interaction callbacks", async () => {
     resetMocks();
     mediaMock.samples = [createMockSample(0, 0)];

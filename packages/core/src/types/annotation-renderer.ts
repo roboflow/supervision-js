@@ -1,4 +1,5 @@
 import type { BoxStyle } from "#types/box-style";
+import type { EllipseStyle } from "#types/ellipse-style";
 import type { KeypointStyle } from "#types/keypoint-style";
 import type { LabelStyle } from "#types/label-style";
 import type { MaskStyle } from "#types/mask-style";
@@ -15,6 +16,7 @@ import type { Detection } from "#types/detections";
  */
 export const annotationRendererKinds = [
   "box",
+  "ellipse",
   "keypoints",
   "label",
   "mask",
@@ -35,6 +37,7 @@ export type AnnotationRendererKind = (typeof annotationRendererKinds)[number];
  */
 export type AnnotationRenderer =
   | BoxAnnotationRenderer
+  | EllipseAnnotationRenderer
   | KeypointAnnotationRenderer
   | LabelAnnotationRenderer
   | MaskAnnotationRenderer
@@ -60,6 +63,11 @@ interface BaseAnnotationRenderer {
 export interface BoxAnnotationRenderer extends BaseAnnotationRenderer {
   readonly kind: "box";
   readonly style?: BoxStyle | null;
+}
+
+export interface EllipseAnnotationRenderer extends BaseAnnotationRenderer {
+  readonly kind: "ellipse";
+  readonly style?: EllipseStyle | null;
 }
 
 export interface KeypointAnnotationRenderer extends BaseAnnotationRenderer {
@@ -215,6 +223,7 @@ type AnnotationRendererStyleOptions<
  */
 export const annotationRenderers: AnnotationRendererFactory = {
   box: (options) => createAnnotationRenderer("box", options),
+  ellipse: (options) => createAnnotationRenderer("ellipse", options),
   keypoints: (options) => createAnnotationRenderer("keypoints", options),
   label: (options) => createAnnotationRenderer("label", options),
   mask: (options) => createAnnotationRenderer("mask", options),

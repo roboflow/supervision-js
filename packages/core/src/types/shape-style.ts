@@ -1,9 +1,5 @@
+import type { BoxFillStyle, BoxStrokeStyle } from "#types/box-style";
 import type { Detection, Point } from "#types/detections";
-import type {
-  FillStyle,
-  OpenStrokeStyle,
-  StrokeStyle,
-} from "#types/paint-style";
 import type { AnnotationStyleContext } from "#types/style";
 
 /**
@@ -37,87 +33,48 @@ export enum MarkerSizeSpace {
  * Omitting both angles draws a closed ellipse. Angles are radians measured
  * from the positive x axis before `rotation` is applied.
  */
-interface EllipseShapeInstructionBase {
+export interface EllipseShapeInstruction {
   readonly kind: ShapeInstructionKind.Ellipse;
   readonly center: Point;
   readonly radiusX: number;
   readonly radiusY: number;
   /** Rotation in radians around the center. */
   readonly rotation?: number;
+  readonly startAngle?: number;
+  readonly endAngle?: number;
+  readonly fill?: BoxFillStyle;
+  readonly stroke?: BoxStrokeStyle;
 }
-
-export interface ClosedEllipseShapeInstruction extends EllipseShapeInstructionBase {
-  readonly startAngle?: never;
-  readonly endAngle?: never;
-  readonly fill?: FillStyle;
-  readonly stroke?: StrokeStyle;
-}
-
-export interface EllipseArcShapeInstruction extends EllipseShapeInstructionBase {
-  readonly startAngle: number;
-  readonly endAngle: number;
-  readonly fill?: never;
-  readonly stroke?: OpenStrokeStyle;
-}
-
-export type EllipseShapeInstruction =
-  ClosedEllipseShapeInstruction | EllipseArcShapeInstruction;
 
 /**
  * Anchored marker at a media-space point.
  *
- * At rotation `0` a triangle points toward positive y (down in media space).
- * `center` is always the geometric center; semantic anchoring belongs to the
- * renderer that creates this lower-level instruction.
+ * At rotation `0` a triangle points toward positive y (down in media space),
+ * matching the annotator convention of marking the object beneath the tip.
  */
-interface MarkerShapeInstructionBase {
+export interface MarkerShapeInstruction {
   readonly kind: ShapeInstructionKind.Marker;
-  readonly center: Point;
+  readonly point: Point;
+  readonly shape: MarkerShape;
   /** Marker diameter in the declared size space. */
   readonly size: number;
   readonly sizeSpace: MarkerSizeSpace;
-  /** Rotation in radians around the center. */
+  /** Rotation in radians around the anchor point. */
   readonly rotation?: number;
+  readonly fill?: BoxFillStyle;
+  readonly stroke?: BoxStrokeStyle;
 }
-
-export interface ClosedMarkerShapeInstruction extends MarkerShapeInstructionBase {
-  readonly shape:
-    MarkerShape.Circle | MarkerShape.Square | MarkerShape.Triangle;
-  readonly fill?: FillStyle;
-  readonly stroke?: StrokeStyle;
-}
-
-export interface CrossMarkerShapeInstruction extends MarkerShapeInstructionBase {
-  readonly shape: MarkerShape.Cross;
-  readonly fill?: never;
-  readonly stroke?: OpenStrokeStyle;
-}
-
-export type MarkerShapeInstruction =
-  ClosedMarkerShapeInstruction | CrossMarkerShapeInstruction;
 
 /**
  * One or more disconnected subpaths sharing a single style.
  */
-interface PathShapeInstructionBase {
+export interface PathShapeInstruction {
   readonly kind: ShapeInstructionKind.Path;
   readonly segments: readonly (readonly Point[])[];
+  readonly closed: boolean;
+  readonly fill?: BoxFillStyle;
+  readonly stroke: BoxStrokeStyle;
 }
-
-export interface ClosedPathShapeInstruction extends PathShapeInstructionBase {
-  readonly closed: true;
-  readonly fill?: FillStyle;
-  readonly stroke: StrokeStyle;
-}
-
-export interface OpenPathShapeInstruction extends PathShapeInstructionBase {
-  readonly closed: false;
-  readonly fill?: never;
-  readonly stroke: OpenStrokeStyle;
-}
-
-export type PathShapeInstruction =
-  ClosedPathShapeInstruction | OpenPathShapeInstruction;
 
 export type ShapeDrawInstruction =
   EllipseShapeInstruction | MarkerShapeInstruction | PathShapeInstruction;

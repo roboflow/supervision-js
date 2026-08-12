@@ -74,6 +74,7 @@ export {
   type AnnotationRendererFactory,
   type AnnotationRendererKind,
   type BoxAnnotationRenderer,
+  type EllipseAnnotationRenderer,
   type KeypointAnnotationRenderer,
   type LabelAnnotationRenderer,
   type MaskAnnotationRenderer,
@@ -113,6 +114,11 @@ export type {
   BoxStrokeStyle,
   BoxStyle,
   BoxStyleContext,
+} from "supervision-js-core";
+export type {
+  EllipseDrawInstruction,
+  EllipseStyle,
+  EllipseStyleContext,
 } from "supervision-js-core";
 export type {
   FocusDrawInstruction,

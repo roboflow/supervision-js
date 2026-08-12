@@ -9,6 +9,7 @@ import type { Point } from "#types/detections";
 import type { ViewportTransform } from "#types/viewport";
 import type { PolygonStyle } from "#types/polygon-style";
 import type { PolylineStyle } from "#types/polyline-style";
+import type { EllipseStyle } from "#types/ellipse-style";
 import type { KeypointStyle } from "#types/keypoint-style";
 import type { AnnotationOverlayStyle } from "#types/editing";
 import type { AnnotationRenderer } from "#types/annotation-renderer";
@@ -180,6 +181,7 @@ export interface MediaRendererPresentation {
   readonly maskStyle?: MaskStyle | null;
   readonly polygonStyle?: PolygonStyle | null;
   readonly polylineStyle?: PolylineStyle | null;
+  readonly ellipseStyle?: EllipseStyle | null;
   readonly keypointStyle?: KeypointStyle | null;
   readonly visibility?: AnnotationVisibility;
 }

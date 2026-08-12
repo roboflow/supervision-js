@@ -15,6 +15,7 @@ import type {
   BoxStyleContext,
 } from "#types/box-style";
 import type { Detection } from "#types/detections";
+import type { EllipseStyle } from "#types/ellipse-style";
 import type {
   LabelDrawInstruction,
   LabelStyle,
@@ -43,6 +44,7 @@ import type {
 
 export interface PresentationStyleSet {
   readonly boxStyle?: BoxStyle | null;
+  readonly ellipseStyle?: EllipseStyle | null;
   readonly keypointStyle?: KeypointStyle | null;
   readonly labelStyle?: LabelStyle | null;
   readonly maskStyle?: MaskStyle | null;
