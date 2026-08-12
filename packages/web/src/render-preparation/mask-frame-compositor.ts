@@ -62,10 +62,16 @@ export function compositeMaskFrame(
   return { data, height, width };
 }
 
+export function createMaskIdFrame(
+  instructions: readonly SerializableMaskInstruction[],
+) {
+  return createIdMaskFrame(materializeMaskInstructions(instructions));
+}
+
 export async function createPngIdMaskFrame(
   instructions: readonly SerializableMaskInstruction[],
 ): Promise<PngIdMaskFrame | undefined> {
-  const frame = createIdMaskFrame(materializeMaskInstructions(instructions));
+  const frame = createMaskIdFrame(instructions);
 
   if (!frame) {
     return undefined;

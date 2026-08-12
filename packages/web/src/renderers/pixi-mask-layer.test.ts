@@ -194,6 +194,92 @@ describe("pixi mask layer", () => {
     // halo renderer remains visible at its instruction alpha.
     expect(display.children[0]?.alpha).toBe(1);
   });
+
+  it("keeps the halo visible when mask preparation falls back to RGBA", () => {
+    vi.stubGlobal("document", {
+      createElement: vi.fn(() => ({
+        getContext: () => ({
+          createImageData: (width: number, height: number) => ({
+            data: new Uint8ClampedArray(width * height * 4),
+          }),
+          putImageData: vi.fn(),
+        }),
+        height: 0,
+        width: 0,
+      })),
+    });
+    const uniformGroups: FakeUniformGroup[] = [];
+    const layer = createPixiMaskLayer({
+      BlurFilter: class {
+        strength: number;
+
+        constructor(options: { strength: number }) {
+          this.strength = options.strength;
+        }
+      },
+      Container: FakeContainer as never,
+      ImageSource: FakeImageSource as never,
+      Mesh: FakeMesh as never,
+      MeshGeometry: FakeMeshGeometry as never,
+      Rectangle: class {
+        constructor(
+          readonly x: number,
+          readonly y: number,
+          readonly width: number,
+          readonly height: number,
+        ) {}
+      },
+      Shader: { from: () => ({ destroy() {}, resources: {} }) } as never,
+      Sprite: FakeSprite as never,
+      Texture: FakeTexture as never,
+      UniformGroup: class extends FakeUniformGroup {
+        constructor(options: unknown) {
+          super(options);
+          uniformGroups.push(this);
+        }
+      } as never,
+      detectionTimeline: {
+        selectFrame: () => ({
+          detections: [
+            {
+              mask: {
+                counts: "04",
+                encoding: "compressedRle",
+                height: 2,
+                width: 2,
+              },
+            },
+          ],
+          mediaTime: 0.1,
+        }),
+      } as never,
+      maskHaloStyle: {
+        resolve: () => ({ alpha: 0.6, color: 0x123456, spread: 8 }),
+      },
+      maskStyle: new BaseMaskStyle(),
+    });
+
+    layer.createSprite({ height: 2, width: 2 });
+    preparedWindow.frame = {
+      detectionFrame: { detections: [], mediaTime: 0.1 },
+      key: "rgba-mask-frame",
+      maskStatus: "pending",
+    };
+    layer.drawFrame(0.1);
+    preparedWindow.options?.onMaskFramePrepared?.({
+      close: vi.fn(),
+      height: 2,
+      idMaskData: new Uint8Array([1, 0, 0, 0]),
+      key: "rgba-mask-frame",
+      kind: PreparedMaskFrameKind.RgbaImage,
+      source: {} as never,
+      width: 2,
+    });
+
+    expect(
+      uniformGroups.some((group) => group.uniforms.uHaloPalette !== undefined),
+    ).toBe(true);
+  });
 });
 
 class FakeContainer {

@@ -11,6 +11,7 @@ import {
 import {
   PreparedMaskFrameKind,
   type PreparedPngIdMaskFrame,
+  type PreparedRgbaMaskFrame,
 } from "#render-preparation/mask-frame-artifact";
 import type { BufferedDetectionTimeline } from "supervision-js-core";
 import type {
@@ -165,6 +166,7 @@ export function createPixiMaskLayer(options: {
   let activeFrameKey: string | null = null;
   let activeFrameMediaTime: number | null = null;
   let activeIdMaskFrame: PreparedPngIdMaskFrame | null = null;
+  let activeRgbaMaskFrame: PreparedRgbaMaskFrame | null = null;
   let maskOpacity = resolveMaskStyleOpacity(options.maskStyle);
   let maskPickCanvas: HTMLCanvasElement | undefined;
   let maskPickContext: CanvasRenderingContext2D | null | undefined;
@@ -172,6 +174,7 @@ export function createPixiMaskLayer(options: {
   let visibleMaskMediaTime: number | null = null;
   let isDestroyed = false;
   const maskTextures = new Map<string, PixiTexture>();
+  const haloTextures = new Map<string, PixiTexture>();
   const preparedRenderWindow = createPreparedRenderWindow({
     artifactKind: options.artifactKind,
     detectionTimeline: options.detectionTimeline,
@@ -250,6 +253,7 @@ export function createPixiMaskLayer(options: {
         activeFrameKey = preparedFrame?.key ?? null;
         activeFrameMediaTime = preparedFrame?.detectionFrame.mediaTime ?? null;
         activeIdMaskFrame = null;
+        activeRgbaMaskFrame = null;
         hideSprite();
         return;
       }
@@ -270,6 +274,7 @@ export function createPixiMaskLayer(options: {
         preparedFrame.maskStatus === PreparedRenderFrameMaskStatus.Disabled
       ) {
         activeIdMaskFrame = null;
+        activeRgbaMaskFrame = null;
         hideSprite();
         return;
       }
@@ -372,13 +377,17 @@ export function createPixiMaskLayer(options: {
     visibleMaskMediaTime = mediaTime;
     activeIdMaskFrame =
       maskFrame.kind === PreparedMaskFrameKind.PngIdMask ? maskFrame : null;
+    activeRgbaMaskFrame =
+      maskFrame.kind === PreparedMaskFrameKind.RgbaImage ? maskFrame : null;
 
     if (maskFrame.kind === PreparedMaskFrameKind.PngIdMask && idMaskRenderer) {
       showIdMaskFrame(maskFrame);
       return;
     }
 
-    showRgbaMaskFrame(maskFrame);
+    if (maskFrame.kind === PreparedMaskFrameKind.RgbaImage) {
+      showRgbaMaskFrame(maskFrame);
+    }
   }
 
   function getTexture(maskFrame: PreparedMaskFrame) {
@@ -409,7 +418,54 @@ export function createPixiMaskLayer(options: {
     return texture;
   }
 
-  function showRgbaMaskFrame(maskFrame: PreparedMaskFrame) {
+  function getHaloTexture(maskFrame: PreparedRgbaMaskFrame) {
+    const existingTexture = haloTextures.get(maskFrame.key);
+
+    if (existingTexture) {
+      return existingTexture;
+    }
+
+    if (!maskFrame.idMaskData || typeof document === "undefined") {
+      return undefined;
+    }
+
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
+
+    if (!context) {
+      return undefined;
+    }
+
+    canvas.width = maskFrame.width;
+    canvas.height = maskFrame.height;
+    const imageData = context.createImageData(
+      maskFrame.width,
+      maskFrame.height,
+    );
+
+    for (let index = 0; index < maskFrame.idMaskData.length; index += 1) {
+      const offset = index * 4;
+      imageData.data[offset] = maskFrame.idMaskData[index]!;
+      imageData.data[offset + 3] = 255;
+    }
+
+    context.putImageData(imageData, 0, 0);
+    const source = new options.ImageSource({
+      autoGenerateMipmaps: false,
+      dynamic: false,
+      height: maskFrame.height,
+      resource: canvas,
+      scaleMode: "nearest",
+      width: maskFrame.width,
+    });
+    const texture = new options.Texture({ dynamic: false, source });
+
+    haloTextures.set(maskFrame.key, texture);
+
+    return texture;
+  }
+
+  function showRgbaMaskFrame(maskFrame: PreparedRgbaMaskFrame) {
     if (!maskSprite) {
       return;
     }
@@ -422,7 +478,13 @@ export function createPixiMaskLayer(options: {
     maskSprite.height = mediaHeight;
     maskSprite.visible = true;
     idMaskRenderer?.hide();
-    haloRenderer?.hide();
+    const haloTexture = getHaloTexture(maskFrame);
+
+    if (haloTexture) {
+      renderHalo(maskFrame, haloTexture);
+    } else {
+      haloRenderer?.hide();
+    }
   }
 
   function showIdMaskFrame(
@@ -437,14 +499,12 @@ export function createPixiMaskLayer(options: {
 
     maskSprite.visible = false;
     idMaskRenderer.render(maskFrame, getTexture(maskFrame));
-    renderHalo(maskFrame);
+    renderHalo(maskFrame, getTexture(maskFrame));
   }
 
   function renderHalo(
-    maskFrame: Extract<
-      PreparedMaskFrame,
-      { readonly kind: PreparedMaskFrameKind.PngIdMask }
-    >,
+    maskFrame: { readonly height: number; readonly width: number },
+    texture: PixiTexture,
   ) {
     if (!haloRenderer) {
       return;
@@ -457,12 +517,21 @@ export function createPixiMaskLayer(options: {
       return;
     }
 
-    haloRenderer.render(maskFrame, getTexture(maskFrame), groups);
+    haloRenderer.render(maskFrame, texture, groups);
   }
 
   function refreshHalo() {
     if (activeIdMaskFrame) {
-      renderHalo(activeIdMaskFrame);
+      renderHalo(activeIdMaskFrame, getTexture(activeIdMaskFrame));
+      return;
+    }
+
+    if (activeRgbaMaskFrame) {
+      const texture = getHaloTexture(activeRgbaMaskFrame);
+
+      if (texture) {
+        renderHalo(activeRgbaMaskFrame, texture);
+      }
     }
   }
 
@@ -525,6 +594,7 @@ export function createPixiMaskLayer(options: {
   function hideSprite() {
     visibleMaskMediaTime = null;
     activeIdMaskFrame = null;
+    activeRgbaMaskFrame = null;
 
     if (maskSprite) {
       maskSprite.visible = false;
@@ -554,11 +624,24 @@ export function createPixiMaskLayer(options: {
     const texture = maskTextures.get(key);
 
     if (!texture) {
+      destroyHaloTexture(key);
       return;
     }
 
     releaseTextureBindings(key, texture);
     maskTextures.delete(key);
+    texture.destroy(true);
+    destroyHaloTexture(key);
+  }
+
+  function destroyHaloTexture(key: string) {
+    const texture = haloTextures.get(key);
+
+    if (!texture) {
+      return;
+    }
+
+    haloTextures.delete(key);
     texture.destroy(true);
   }
 
@@ -570,6 +653,12 @@ export function createPixiMaskLayer(options: {
     }
 
     maskTextures.clear();
+
+    for (const texture of haloTextures.values()) {
+      texture.destroy(true);
+    }
+
+    haloTextures.clear();
   }
 
   function releaseTextureBindings(key?: string, texture?: PixiTexture) {

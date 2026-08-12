@@ -1,5 +1,6 @@
 import {
   compositeMaskFrame,
+  createMaskIdFrame,
   createPngIdMaskFrame,
 } from "#render-preparation/mask-frame-compositor";
 import { createDefaultRenderPreparationWorkerFactory } from "#render-preparation/default-render-preparation-worker";
@@ -243,6 +244,7 @@ function createMainThreadMaskFramePreparer(
           canvas.height = 0;
         },
         height: compositedFrame.height,
+        idMaskData: createMaskIdFrame(job.instructions)?.data,
         key: job.key,
         kind: PreparedMaskFrameKind.RgbaImage,
         source: canvas,
@@ -494,6 +496,7 @@ function createPreparedFrameFromWorkerResponse(
         message.imageBitmap?.close();
       },
       height: message.imageBitmap.height,
+      idMaskData: message.idMaskData,
       key: message.key,
       kind: PreparedMaskFrameKind.RgbaImage,
       source: message.imageBitmap,
@@ -522,6 +525,7 @@ function createPreparedFrameFromWorkerResponse(
       canvas.height = 0;
     },
     height: message.imageData.height,
+    idMaskData: message.idMaskData,
     key: message.key,
     kind: PreparedMaskFrameKind.RgbaImage,
     source: canvas,

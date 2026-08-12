@@ -1,5 +1,4 @@
 import { MAX_ID_MASK_PALETTE_ENTRIES } from "#render-preparation/mask-frame-compositor";
-import type { PreparedPngIdMaskFrame } from "#render-preparation/mask-frame-artifact";
 import type {
   Container as PixiContainer,
   ImageSource as PixiImageSource,
@@ -80,7 +79,7 @@ export interface PixiMaskHaloRenderer {
   readonly display: PixiContainer;
   hide(): void;
   render(
-    frame: PreparedPngIdMaskFrame,
+    frame: { readonly height: number; readonly width: number },
     texture: PixiTexture,
     groups: readonly MaskHaloPassGroup[],
   ): void;

@@ -45,6 +45,7 @@ export interface MaskPreparationWorkerCompleteMessage {
   readonly artifactKind?: PreparedMaskFrameKind;
   readonly fillPalette?: Float32Array<ArrayBuffer>;
   readonly hasStroke?: boolean;
+  readonly idMaskData?: Uint8Array<ArrayBuffer>;
   readonly imageBitmap?: ImageBitmap;
   readonly imageData?: ImageData;
   readonly key: string;
