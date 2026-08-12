@@ -154,6 +154,66 @@ describe("pixi interaction layer", () => {
     );
   });
 
+  it("removes only hidden detections from a multi-selection", () => {
+    const multiFrame: DetectionFrame = {
+      detections: [
+        frame.detections[0]!,
+        {
+          className: "ball",
+          id: "ball-1",
+          rect: { height: 10, width: 10, x: 80, y: 20 },
+        },
+      ],
+      frameIndex: frame.frameIndex,
+      mediaTime: frame.mediaTime,
+    };
+    const hiddenClasses = new Set<string>();
+    const onSelectionChange = vi.fn();
+    const layer = createPixiInteractionLayer({
+      Container: FakeContainer as never,
+      Rectangle: FakeRectangle as never,
+      canInteract: () => true,
+      canPickDetection: (detection) =>
+        !hiddenClasses.has(detection.className ?? ""),
+      detectionTimeline: createTimeline(multiFrame),
+      interaction: {
+        mode: MediaInteractionMode.Always,
+        multiSelect: true,
+        onSelectionChange,
+      },
+    });
+    const display = layer.createDisplay({
+      height: 80,
+      width: 120,
+    }) as FakeContainer;
+
+    layer.drawFrame(multiFrame.mediaTime);
+    display.emit(
+      "pointertap",
+      createPointerEvent(display, 10, 15, { shiftKey: true }),
+    );
+    display.emit(
+      "pointertap",
+      createPointerEvent(display, 80, 20, { shiftKey: true }),
+    );
+    expect(
+      layer.getState().selectedPicks.map(({ detection }) => detection.id),
+    ).toEqual(["player-1", "ball-1"]);
+
+    hiddenClasses.add("player");
+    layer.drawFrame(multiFrame.mediaTime);
+
+    expect(
+      layer.getState().selectedPicks.map(({ detection }) => detection.id),
+    ).toEqual(["ball-1"]);
+    expect(layer.getState().selectedPick?.detection.id).toBe("ball-1");
+    expect(onSelectionChange).toHaveBeenLastCalledWith([
+      expect.objectContaining({
+        detection: expect.objectContaining({ id: "ball-1" }),
+      }),
+    ]);
+  });
+
   it("prefers exact mask picks before falling back to box picks", () => {
     const onHover = vi.fn();
     const maskPick = {

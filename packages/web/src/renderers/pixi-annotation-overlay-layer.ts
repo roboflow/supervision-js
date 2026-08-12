@@ -3,6 +3,7 @@ import {
   getAnnotationHandles,
   getDetectionRect,
   lightenColor,
+  resolveAnnotationStyleState,
   resolveStyleValue,
   type AnnotationEditingEngine,
   type AnnotationEditingPreviewStyleContext,
@@ -460,7 +461,13 @@ function drawLoading(
   const loading = values instanceof Set ? values : new Set(values);
   const angle = (context.now / 500) % (Math.PI * 2);
   for (const detection of context.frame?.detections ?? []) {
-    if (detection.id === undefined || !loading.has(detection.id)) continue;
+    if (
+      detection.id === undefined ||
+      !loading.has(detection.id) ||
+      resolveAnnotationStyleState(detection, context.visibility).hidden
+    ) {
+      continue;
+    }
     const rect = getDetectionRect(detection);
     if (!rect) continue;
     graphics.arc(

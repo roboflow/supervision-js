@@ -473,9 +473,17 @@ export function createPixiInteractionLayer(options: {
     const nextHoveredPick = filterPick(
       rebaseDetectionPickToFrame(hoveredPick, frame),
     );
-    const nextSelectedPick = filterPick(
-      rebaseDetectionPickToFrame(selectedPick, frame),
-    );
+    const nextSelectedPicks = selectedPicks.flatMap((pick) => {
+      const nextPick = filterPick(rebaseDetectionPickToFrame(pick, frame));
+      return nextPick ? [nextPick] : [];
+    });
+    const currentSelectionKeys = selectedPicks.map(createDetectionPickKey);
+    const nextSelectionKeys = nextSelectedPicks.map(createDetectionPickKey);
+    const selectionChanged =
+      currentSelectionKeys.length !== nextSelectionKeys.length ||
+      currentSelectionKeys.some(
+        (key, index) => key !== nextSelectionKeys[index],
+      );
 
     if (hoveredPick && !nextHoveredPick) {
       setHoveredPick(null);
@@ -483,10 +491,14 @@ export function createPixiInteractionLayer(options: {
       setHoveredPick(nextHoveredPick);
     }
 
-    if (selectedPick && !nextSelectedPick) {
-      setSelectedPick(null);
-    } else if (nextSelectedPick && nextSelectedPick !== selectedPick) {
-      setSelectedPick(nextSelectedPick);
+    selectedPicks = nextSelectedPicks;
+    selectedPick = nextSelectedPicks.at(-1) ?? null;
+    selectedPickKey = createDetectionPickKey(selectedPick);
+
+    if (selectionChanged) {
+      options.interaction.onSelect?.(selectedPick);
+      options.interaction.onSelectionChange?.(selectedPicks);
+      notifyStateChange();
     }
   }
 
