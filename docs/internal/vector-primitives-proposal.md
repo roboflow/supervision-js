@@ -28,7 +28,10 @@ session.setPresentation({
     annotationRenderers.region({
       id: "player-badge",
       target: { className: "person" },
-      source: { kind: "asset", asset: { src: badgeUrl } },
+      source: {
+        kind: "asset",
+        asset: { src: new URL("./badge.png", import.meta.url).href },
+      },
       region: { kind: "bounds" },
       compose: { mode: "over", zIndex: 1 },
     }),
