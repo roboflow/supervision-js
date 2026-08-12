@@ -6,8 +6,6 @@ import {
   MaskRenderMode,
 } from "supervision";
 import {
-  DemoBoxAnnotator,
-  DemoKeypointAnnotator,
   resolveDemoClassStyle,
   type DemoClassStyle,
   type DemoPresentationAvailability,
@@ -55,20 +53,6 @@ export const RenderControls = memo(function RenderControls({
       },
     });
   };
-  const updateClassVisibility = (className: string, visible: boolean) => {
-    onChange({
-      ...settings,
-      hiddenClasses: visible
-        ? settings.hiddenClasses.filter((name) => name !== className)
-        : [...settings.hiddenClasses, className],
-    });
-  };
-  const updateAllClassVisibility = (visible: boolean) => {
-    onChange({
-      ...settings,
-      hiddenClasses: visible ? [] : [...classNames],
-    });
-  };
 
   return (
     <section className="render-controls" aria-label="Render controls">
@@ -102,8 +86,6 @@ export const RenderControls = memo(function RenderControls({
         <ClassRenderControls
           classNames={classNames}
           onChange={updateClassStyle}
-          onChangeAllVisibility={updateAllClassVisibility}
-          onChangeVisibility={updateClassVisibility}
           settings={settings}
         />
       )}
@@ -180,108 +162,45 @@ function GlobalRenderControls({
       >
         <SegmentedControl
           disabled={!settings.boxesEnabled}
-          label="Annotator"
-          onChange={(value) => onChange("boxAnnotator", value)}
+          label="Stroke Align"
+          onChange={(value) => onChange("boxStrokeAlignment", value)}
           options={[
-            { label: "Box", value: DemoBoxAnnotator.Box },
-            { label: "Round Box", value: DemoBoxAnnotator.RoundBox },
-            { label: "Box Corner", value: DemoBoxAnnotator.BoxCorner },
-            { label: "Circle", value: DemoBoxAnnotator.Circle },
-            { label: "Ellipse", value: DemoBoxAnnotator.Ellipse },
-            { label: "Dot", value: DemoBoxAnnotator.Dot },
-            { label: "Color", value: DemoBoxAnnotator.Color },
+            { label: "Inside", value: BoxStrokeAlignment.Inside },
+            { label: "Center", value: BoxStrokeAlignment.Center },
+            { label: "Outside", value: BoxStrokeAlignment.Outside },
           ]}
-          value={settings.boxAnnotator}
+          value={settings.boxStrokeAlignment}
         />
-        {(settings.boxAnnotator === DemoBoxAnnotator.Box ||
-          settings.boxAnnotator === DemoBoxAnnotator.RoundBox) && (
-          <SegmentedControl
-            disabled={!settings.boxesEnabled}
-            label="Stroke Align"
-            onChange={(value) => onChange("boxStrokeAlignment", value)}
-            options={[
-              { label: "Inside", value: BoxStrokeAlignment.Inside },
-              { label: "Center", value: BoxStrokeAlignment.Center },
-              { label: "Outside", value: BoxStrokeAlignment.Outside },
-            ]}
-            value={settings.boxStrokeAlignment}
-          />
-        )}
-        {settings.boxAnnotator === DemoBoxAnnotator.RoundBox && (
-          <SliderControl
-            disabled={!settings.boxesEnabled}
-            label="Radius"
-            max={24}
-            min={0}
-            onChange={(value) => onChange("boxCornerRadius", value)}
-            step={1}
-            value={settings.boxCornerRadius}
-            valueLabel={`${settings.boxCornerRadius}px`}
-          />
-        )}
-        {settings.boxAnnotator === DemoBoxAnnotator.BoxCorner && (
-          <SliderControl
-            disabled={!settings.boxesEnabled}
-            label="Corner Length"
-            max={48}
-            min={4}
-            onChange={(value) => onChange("boxCornerLength", value)}
-            step={1}
-            value={settings.boxCornerLength}
-            valueLabel={`${settings.boxCornerLength}px`}
-          />
-        )}
-        {settings.boxAnnotator === DemoBoxAnnotator.Dot && (
-          <SliderControl
-            disabled={!settings.boxesEnabled}
-            label="Dot Radius"
-            max={16}
-            min={2}
-            onChange={(value) => onChange("boxDotRadius", value)}
-            step={0.5}
-            value={settings.boxDotRadius}
-            valueLabel={`${settings.boxDotRadius}px`}
-          />
-        )}
-        {settings.boxAnnotator !== DemoBoxAnnotator.Color &&
-          settings.boxAnnotator !== DemoBoxAnnotator.Dot && (
-            <SliderControl
-              disabled={!settings.boxesEnabled}
-              label="Stroke"
-              max={8}
-              min={1}
-              onChange={(value) => onChange("boxStrokeWidth", value)}
-              step={1}
-              value={settings.boxStrokeWidth}
-              valueLabel={`${settings.boxStrokeWidth}px`}
-            />
-          )}
-        {(settings.boxAnnotator === DemoBoxAnnotator.Box ||
-          settings.boxAnnotator === DemoBoxAnnotator.RoundBox ||
-          settings.boxAnnotator === DemoBoxAnnotator.Circle) && (
-          <SliderControl
-            disabled={!settings.boxesEnabled}
-            label="Fill"
-            max={0.35}
-            min={0}
-            onChange={(value) => onChange("boxFillAlpha", value)}
-            step={0.01}
-            value={settings.boxFillAlpha}
-            valueLabel={formatPercent(settings.boxFillAlpha)}
-          />
-        )}
-        {settings.boxAnnotator === DemoBoxAnnotator.Color && (
-          <SliderControl
-            disabled={!settings.boxesEnabled}
-            label="Opacity"
-            max={1}
-            min={0}
-            onChange={(value) => onChange("boxColorFillAlpha", value)}
-            step={0.01}
-            value={settings.boxColorFillAlpha}
-            valueLabel={formatPercent(settings.boxColorFillAlpha)}
-          />
-        )}
+        <SliderControl
+          disabled={!settings.boxesEnabled}
+          label="Radius"
+          max={24}
+          min={0}
+          onChange={(value) => onChange("boxCornerRadius", value)}
+          step={1}
+          value={settings.boxCornerRadius}
+          valueLabel={`${settings.boxCornerRadius}px`}
+        />
+        <SliderControl
+          disabled={!settings.boxesEnabled}
+          label="Stroke"
+          max={8}
+          min={1}
+          onChange={(value) => onChange("boxStrokeWidth", value)}
+          step={1}
+          value={settings.boxStrokeWidth}
+          valueLabel={`${settings.boxStrokeWidth}px`}
+        />
+        <SliderControl
+          disabled={!settings.boxesEnabled}
+          label="Fill"
+          max={0.35}
+          min={0}
+          onChange={(value) => onChange("boxFillAlpha", value)}
+          step={0.01}
+          value={settings.boxFillAlpha}
+          valueLabel={formatPercent(settings.boxFillAlpha)}
+        />
       </ControlSection>
 
       <ControlSection
@@ -395,44 +314,26 @@ function GlobalRenderControls({
         title="Keypoints"
         toggleDisabled={availability?.keypointsEnabled === false}
       >
-        <SegmentedControl
+        <SliderControl
           disabled={!settings.keypointsEnabled}
-          label="Annotator"
-          onChange={(value) => onChange("keypointAnnotator", value)}
-          options={[
-            {
-              label: "Vertex + Edge",
-              value: DemoKeypointAnnotator.VerticesAndEdges,
-            },
-            { label: "Vertex", value: DemoKeypointAnnotator.Vertices },
-            { label: "Edge", value: DemoKeypointAnnotator.Edges },
-          ]}
-          value={settings.keypointAnnotator}
+          label="Radius"
+          max={12}
+          min={1}
+          onChange={(value) => onChange("keypointRadius", value)}
+          step={0.5}
+          value={settings.keypointRadius}
+          valueLabel={`${settings.keypointRadius}px`}
         />
-        {settings.keypointAnnotator !== DemoKeypointAnnotator.Edges && (
-          <SliderControl
-            disabled={!settings.keypointsEnabled}
-            label="Radius"
-            max={12}
-            min={1}
-            onChange={(value) => onChange("keypointRadius", value)}
-            step={0.5}
-            value={settings.keypointRadius}
-            valueLabel={`${settings.keypointRadius}px`}
-          />
-        )}
-        {settings.keypointAnnotator !== DemoKeypointAnnotator.Vertices && (
-          <SliderControl
-            disabled={!settings.keypointsEnabled}
-            label="Edge Width"
-            max={8}
-            min={1}
-            onChange={(value) => onChange("keypointEdgeWidth", value)}
-            step={0.5}
-            value={settings.keypointEdgeWidth}
-            valueLabel={`${settings.keypointEdgeWidth}px`}
-          />
-        )}
+        <SliderControl
+          disabled={!settings.keypointsEnabled}
+          label="Edge Width"
+          max={8}
+          min={1}
+          onChange={(value) => onChange("keypointEdgeWidth", value)}
+          step={0.5}
+          value={settings.keypointEdgeWidth}
+          valueLabel={`${settings.keypointEdgeWidth}px`}
+        />
       </ControlSection>
 
       <ControlSection
@@ -635,8 +536,6 @@ function GlobalRenderControls({
 function ClassRenderControls({
   classNames,
   onChange,
-  onChangeAllVisibility,
-  onChangeVisibility,
   settings,
 }: {
   readonly classNames: readonly string[];
@@ -645,50 +544,15 @@ function ClassRenderControls({
     key: keyof DemoClassStyle,
     value: number,
   ) => void;
-  readonly onChangeAllVisibility: (visible: boolean) => void;
-  readonly onChangeVisibility: (className: string, visible: boolean) => void;
   readonly settings: DemoPresentationSettings;
 }) {
-  const hiddenCount = classNames.filter((className) =>
-    settings.hiddenClasses.includes(className),
-  ).length;
-
   return (
     <div className="render-controls__panel render-controls__panel--classes">
-      <div className="class-visibility-toolbar">
-        <span className="render-control__label">
-          <span>Visibility</span>
-        </span>
-        <div className="class-visibility-toolbar__actions">
-          <button
-            disabled={hiddenCount === 0}
-            onClick={() => onChangeAllVisibility(true)}
-            type="button"
-          >
-            Show all
-          </button>
-          <button
-            disabled={hiddenCount === classNames.length}
-            onClick={() => onChangeAllVisibility(false)}
-            type="button"
-          >
-            Hide all
-          </button>
-        </div>
-      </div>
       {classNames.map((className) => {
         const style = resolveDemoClassStyle(settings, className);
-        const visible = !settings.hiddenClasses.includes(className);
 
         return (
-          <article
-            className={
-              visible
-                ? "class-style-card"
-                : "class-style-card class-style-card--hidden"
-            }
-            key={className}
-          >
+          <article className="class-style-card" key={className}>
             <header>
               <span
                 className="class-style-card__swatch"
@@ -697,17 +561,6 @@ function ClassRenderControls({
                 }
               />
               <strong>{className}</strong>
-              <label className="class-style-card__visibility">
-                <input
-                  aria-label={`Show ${className} detections`}
-                  checked={visible}
-                  onChange={(event) =>
-                    onChangeVisibility(className, event.currentTarget.checked)
-                  }
-                  type="checkbox"
-                />
-                <span>Show</span>
-              </label>
             </header>
             <div className="class-style-card__controls">
               <ColorControl
