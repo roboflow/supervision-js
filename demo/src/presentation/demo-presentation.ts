@@ -21,16 +21,43 @@ import {
   type FocusStyle,
   type InteractionStyle,
   type KeypointStyle,
+  type KeypointStyleContext,
   type LabelStyle,
   type MaskDrawInstruction,
   type MaskStyle,
   type MediaRendererPresentation,
   type PolygonStyle,
   type PolylineStyle,
+  type Rect,
   resolveDetectionClassColorStyle,
 } from "supervision";
 
 export type DemoClassStyle = DetectionClassColorStyle;
+
+/**
+ * Box-layer annotator variants mirroring the Python Supervision catalog.
+ * Every variant lowers to the existing renderer-neutral `BoxDrawInstruction`;
+ * no new renderer primitives are involved.
+ */
+export enum DemoBoxAnnotator {
+  Box = "box",
+  RoundBox = "roundBox",
+  BoxCorner = "boxCorner",
+  Circle = "circle",
+  Ellipse = "ellipse",
+  Dot = "dot",
+  Color = "color",
+}
+
+/**
+ * Keypoint-layer annotator variants mirroring the Python Supervision
+ * vertex/edge annotators.
+ */
+export enum DemoKeypointAnnotator {
+  VerticesAndEdges = "verticesAndEdges",
+  Vertices = "vertices",
+  Edges = "edges",
+}
 
 export interface DemoPresentationSettings {
   readonly boxesEnabled: boolean;
@@ -40,7 +67,11 @@ export interface DemoPresentationSettings {
   readonly masksEnabled: boolean;
   readonly polygonsEnabled: boolean;
   readonly polylinesEnabled: boolean;
+  readonly boxAnnotator: DemoBoxAnnotator;
+  readonly boxColorFillAlpha: number;
+  readonly boxCornerLength: number;
   readonly boxCornerRadius: number;
+  readonly boxDotRadius: number;
   readonly boxStrokeWidth: number;
   readonly boxStrokeAlignment: BoxStrokeAlignment;
   readonly boxFillAlpha: number;
@@ -62,6 +93,7 @@ export interface DemoPresentationSettings {
   readonly polygonFillAlpha: number;
   readonly polygonStrokeWidth: number;
   readonly polylineStrokeWidth: number;
+  readonly keypointAnnotator: DemoKeypointAnnotator;
   readonly keypointRadius: number;
   readonly keypointEdgeWidth: number;
   readonly confidenceThreshold: number;
@@ -132,8 +164,12 @@ const defaultDemoClassStyles: Record<string, DemoClassStyle> = {
 };
 
 export const defaultDemoPresentationSettings: DemoPresentationSettings = {
-  boxesEnabled: true,
+  boxAnnotator: DemoBoxAnnotator.Box,
+  boxColorFillAlpha: 0.5,
+  boxCornerLength: 15,
   boxCornerRadius: 1,
+  boxDotRadius: 5,
+  boxesEnabled: true,
   boxFillAlpha: 0.08,
   boxStrokeAlignment: BoxStrokeAlignment.Center,
   boxStrokeWidth: 2,
@@ -149,6 +185,7 @@ export const defaultDemoPresentationSettings: DemoPresentationSettings = {
   interactionHoverStrokeWidth: 2,
   interactionSelectedFillAlpha: 0.22,
   interactionSelectedStrokeWidth: 3.5,
+  keypointAnnotator: DemoKeypointAnnotator.VerticesAndEdges,
   keypointEdgeWidth: 1.5,
   keypointRadius: 3.5,
   keypointsEnabled: true,
@@ -235,7 +272,7 @@ function createDemoPolygonStyle(
       alpha: settings.polygonFillAlpha,
       color: resolveClassStyle(detection, settings).fill,
     }),
-    shouldRender: (detection) => passesConfidenceThreshold(detection, settings),
+    shouldRender: (detection) => passesDetectionFilters(detection, settings),
     stroke: (detection) => ({
       alpha: 1,
       color: resolveClassStyle(detection, settings).stroke,
@@ -248,7 +285,7 @@ function createDemoPolylineStyle(
   settings: DemoPresentationSettings,
 ): PolylineStyle {
   return new BasePolylineStyle({
-    shouldRender: (detection) => passesConfidenceThreshold(detection, settings),
+    shouldRender: (detection) => passesDetectionFilters(detection, settings),
     stroke: (detection) => ({
       alpha: 1,
       color: resolveClassStyle(detection, settings).stroke,
@@ -260,29 +297,60 @@ function createDemoPolylineStyle(
 function createDemoKeypointStyle(
   settings: DemoPresentationSettings,
 ): KeypointStyle {
-  return new BaseKeypointStyle({
-    edgeShadowStroke: {
-      alpha: 0.25,
-      color: 0x000000,
-      width: 3,
+  return applyDemoKeypointAnnotator(
+    new BaseKeypointStyle({
+      edgeShadowStroke: {
+        alpha: 0.25,
+        color: 0x000000,
+        width: 3,
+      },
+      edgeStroke: (detection) => ({
+        alpha: 1,
+        color: resolveClassStyle(detection, settings).stroke,
+        width: settings.keypointEdgeWidth,
+      }),
+      markerFill: (detection) => ({
+        alpha: 1,
+        color: resolveClassStyle(detection, settings).fill,
+      }),
+      markerStroke: () => ({
+        alpha: 1,
+        color: 0xffffff,
+        width: 1,
+      }),
+      radius: settings.keypointRadius,
+      shouldRender: (detection) => passesDetectionFilters(detection, settings),
+    }),
+    settings,
+  );
+}
+
+/**
+ * Restricts a keypoint style to the selected annotator variant by stripping
+ * markers or edges from the resolved instruction, mirroring the Python
+ * vertex/edge annotator split without new renderer work.
+ */
+function applyDemoKeypointAnnotator(
+  style: KeypointStyle,
+  settings: DemoPresentationSettings,
+): KeypointStyle {
+  if (settings.keypointAnnotator === DemoKeypointAnnotator.VerticesAndEdges) {
+    return style;
+  }
+
+  return {
+    resolve(detection: Detection, context: KeypointStyleContext) {
+      const instruction = style.resolve(detection, context);
+
+      if (!instruction) {
+        return undefined;
+      }
+
+      return settings.keypointAnnotator === DemoKeypointAnnotator.Vertices
+        ? { ...instruction, edges: [] }
+        : { ...instruction, markers: [] };
     },
-    edgeStroke: (detection) => ({
-      alpha: 1,
-      color: resolveClassStyle(detection, settings).stroke,
-      width: settings.keypointEdgeWidth,
-    }),
-    markerFill: (detection) => ({
-      alpha: 1,
-      color: resolveClassStyle(detection, settings).fill,
-    }),
-    markerStroke: () => ({
-      alpha: 1,
-      color: 0xffffff,
-      width: 1,
-    }),
-    radius: settings.keypointRadius,
-    shouldRender: (detection) => passesConfidenceThreshold(detection, settings),
-  });
+  };
 }
 
 function createDemoBoxStyle(settings: DemoPresentationSettings): BoxStyle {
@@ -291,37 +359,176 @@ function createDemoBoxStyle(settings: DemoPresentationSettings): BoxStyle {
       detection: Detection,
       context: BoxStyleContext,
     ): BoxDrawInstruction | undefined {
-      if (
-        !detection.rect ||
-        context.hidden ||
-        !passesConfidenceThreshold(detection, settings)
-      ) {
+      if (!detection.rect || !passesDetectionFilters(detection, settings)) {
         return undefined;
       }
 
-      const style = resolveClassStyle(detection, settings);
+      return resolveDemoBoxInstruction(
+        detection.rect,
+        settings,
+        resolveClassStyle(detection, settings),
+        context,
+      );
+    },
+  };
+}
+
+interface DemoBoxEmphasis {
+  readonly fillAlpha: number;
+  readonly strokeWidth: number;
+}
+
+/**
+ * Lowers the selected box annotator variant to a renderer-neutral
+ * `BoxDrawInstruction`. Circle and dot reuse the rounded-rectangle shape with
+ * a full corner radius; box corners reuse the dashed stroke with a
+ * per-detection pattern, so every variant stays on existing primitives.
+ */
+function resolveDemoBoxInstruction(
+  rect: Rect,
+  settings: DemoPresentationSettings,
+  style: DemoClassStyle,
+  context: BoxStyleContext,
+  emphasis?: DemoBoxEmphasis,
+): BoxDrawInstruction {
+  const fillAlpha = emphasis?.fillAlpha ?? settings.boxFillAlpha;
+  const strokeWidth = emphasis?.strokeWidth ?? settings.boxStrokeWidth;
+  const stroke = {
+    ...(settings.boxStrokeAlignment === BoxStrokeAlignment.Center
+      ? {}
+      : { alignment: settings.boxStrokeAlignment }),
+    alpha: 1,
+    color: style.stroke,
+    width: strokeWidth,
+  };
+
+  switch (settings.boxAnnotator) {
+    case DemoBoxAnnotator.Color:
+      return {
+        fill: {
+          alpha: emphasis?.fillAlpha ?? settings.boxColorFillAlpha,
+          color: style.fill,
+        },
+        rect,
+        shape: BoxShape.Rect,
+      };
+    case DemoBoxAnnotator.Circle: {
+      const side = Math.hypot(rect.width, rect.height);
+
+      return {
+        cornerRadius: side / 2,
+        fill: { alpha: fillAlpha, color: style.fill },
+        rect: { height: side, width: side, x: rect.x, y: rect.y },
+        shape: BoxShape.RoundedRect,
+        stroke,
+      };
+    }
+    case DemoBoxAnnotator.Ellipse: {
+      // Ground-marker approximation of Python's EllipseAnnotator: a stroked
+      // capsule anchored at the box's bottom center with the same bounding
+      // dimensions the Python annotator uses (width, 0.35 * width). A true
+      // elliptical arc needs the ellipse primitive from the annotator
+      // use-case roadmap.
+      const markerHeight = Math.max(rect.width * 0.35, 4);
+
+      return {
+        cornerRadius: markerHeight / 2,
+        rect: {
+          height: markerHeight,
+          width: rect.width,
+          x: rect.x,
+          y: rect.y + rect.height / 2,
+        },
+        shape: BoxShape.RoundedRect,
+        stroke: { alpha: 1, color: style.stroke, width: strokeWidth },
+      };
+    }
+    case DemoBoxAnnotator.Dot: {
+      const scale = Math.max(context.viewportScale ?? 1, Number.EPSILON);
+      const side = (settings.boxDotRadius * 2) / scale;
+
+      return {
+        cornerRadius: side / 2,
+        fill: { alpha: 1, color: style.fill },
+        rect: { height: side, width: side, x: rect.x, y: rect.y },
+        shape: BoxShape.RoundedRect,
+        // The emphasis stroke width is what distinguishes hovered and
+        // selected dots, so the interaction sliders stay effective.
+        stroke: {
+          alpha: 1,
+          color: 0xffffff,
+          width: emphasis?.strokeWidth ?? 1,
+        },
+      };
+    }
+    case DemoBoxAnnotator.BoxCorner: {
+      const scale = Math.max(context.viewportScale ?? 1, Number.EPSILON);
+      const screenWidth = rect.width * scale;
+      const screenHeight = rect.height * scale;
+      const arm = Math.min(
+        settings.boxCornerLength,
+        screenWidth / 2,
+        screenHeight / 2,
+      );
+      const horizontalGap = screenWidth - 2 * arm;
+      const verticalGap = screenHeight - 2 * arm;
+      const cornerStroke = {
+        alpha: 1,
+        color: style.stroke,
+        width: strokeWidth,
+      };
+
+      // Arms meet in the middle of an edge: a solid border is the honest
+      // rendering for boxes this small on screen.
+      if (horizontalGap <= 1 || verticalGap <= 1) {
+        return { rect, shape: BoxShape.Rect, stroke: cornerStroke };
+      }
+
+      // Dash pattern in screen pixels, clockwise from the top-left vertex:
+      // half of the first corner, an edge gap, then two arms across each
+      // remaining vertex, closing with the first corner's other half.
+      return {
+        rect,
+        shape: BoxShape.Rect,
+        stroke: {
+          ...cornerStroke,
+          dash: [
+            arm,
+            horizontalGap,
+            2 * arm,
+            verticalGap,
+            2 * arm,
+            horizontalGap,
+            2 * arm,
+            verticalGap,
+            arm,
+          ],
+        },
+      };
+    }
+    case DemoBoxAnnotator.RoundBox:
+      return {
+        cornerRadius: settings.boxCornerRadius,
+        fill: { alpha: fillAlpha, color: style.fill },
+        rect,
+        shape: BoxShape.RoundedRect,
+        stroke,
+      };
+    default: {
+      // The plain box keeps the canonical radius-driven shape so the default
+      // demo presentation stays identical to the Core annotation presentation.
       const shape = resolveBoxShape(settings.boxCornerRadius);
 
       return {
         cornerRadius:
           shape === BoxShape.RoundedRect ? settings.boxCornerRadius : undefined,
-        fill: {
-          alpha: settings.boxFillAlpha,
-          color: style.fill,
-        },
-        rect: detection.rect,
+        fill: { alpha: fillAlpha, color: style.fill },
+        rect,
         shape,
-        stroke: {
-          ...(settings.boxStrokeAlignment === BoxStrokeAlignment.Center
-            ? {}
-            : { alignment: settings.boxStrokeAlignment }),
-          alpha: 1,
-          color: style.stroke,
-          width: settings.boxStrokeWidth,
-        },
+        stroke,
       };
-    },
-  };
+    }
+  }
 }
 
 function createDemoFocusStyle(settings: DemoPresentationSettings): FocusStyle {
@@ -346,18 +553,12 @@ function createDemoFocusStyle(settings: DemoPresentationSettings): FocusStyle {
               ...context,
               hoveredPick:
                 context.hoveredPick &&
-                passesConfidenceThreshold(
-                  context.hoveredPick.detection,
-                  settings,
-                )
+                passesDetectionFilters(context.hoveredPick.detection, settings)
                   ? context.hoveredPick
                   : null,
               selectedPick:
                 context.selectedPick &&
-                passesConfidenceThreshold(
-                  context.selectedPick.detection,
-                  settings,
-                )
+                passesDetectionFilters(context.selectedPick.detection, settings)
                   ? context.selectedPick
                   : null,
             }
@@ -369,7 +570,7 @@ function createDemoFocusStyle(settings: DemoPresentationSettings): FocusStyle {
       }
 
       const targets = instruction.targets.filter((target) =>
-        passesConfidenceThreshold(target.detection, settings),
+        passesDetectionFilters(target.detection, settings),
       );
 
       return targets.length === 0 ? undefined : { ...instruction, targets };
@@ -399,9 +600,7 @@ function hasRenderableFocusTarget(
     picks.push(context.hoveredPick);
   }
 
-  return picks.some((pick) =>
-    passesConfidenceThreshold(pick.detection, settings),
-  );
+  return picks.some((pick) => passesDetectionFilters(pick.detection, settings));
 }
 
 function resolveBoxShape(cornerRadius: number): BoxShape {
@@ -413,6 +612,7 @@ function createDemoMaskStyle(settings: DemoPresentationSettings): MaskStyle {
     artifactKey: [
       "demo-mask",
       settings.confidenceThreshold,
+      serializeHiddenClasses(settings.hiddenClasses),
       settings.maskMode,
       settings.maskFillAlpha,
       settings.maskStrokeAlpha,
@@ -422,7 +622,7 @@ function createDemoMaskStyle(settings: DemoPresentationSettings): MaskStyle {
     opacity: settings.maskOpacity,
 
     resolve(detection: Detection): MaskDrawInstruction | undefined {
-      if (!detection.mask || !passesConfidenceThreshold(detection, settings)) {
+      if (!detection.mask || !passesDetectionFilters(detection, settings)) {
         return undefined;
       }
 
@@ -466,7 +666,7 @@ function createDemoLabelStyle(settings: DemoPresentationSettings): LabelStyle {
       y: settings.labelOffsetY,
     },
     placement: settings.labelPlacement,
-    shouldRender: (detection) => passesConfidenceThreshold(detection, settings),
+    shouldRender: (detection) => passesDetectionFilters(detection, settings),
     textStyle: (detection) => ({
       color: resolveClassStyle(detection, settings).labelText,
       fontFamily:
@@ -490,7 +690,7 @@ function createDemoInteractionStyle(
       DetectionInteractionState.Selected,
     ),
     shouldRender: (detection) =>
-      passesConfidenceThreshold(detection, settings) &&
+      passesDetectionFilters(detection, settings) &&
       (settings.boxesEnabled ||
         settings.masksEnabled ||
         settings.polygonsEnabled ||
@@ -535,7 +735,7 @@ function createDemoInteractionPolygonStyle(
         : settings.interactionHoverFillAlpha,
       color: resolveClassStyle(detection, settings).fill,
     }),
-    shouldRender: (detection) => passesConfidenceThreshold(detection, settings),
+    shouldRender: (detection) => passesDetectionFilters(detection, settings),
     stroke: (detection) => ({
       alpha: 1,
       color: resolveClassStyle(detection, settings).stroke,
@@ -553,7 +753,7 @@ function createDemoInteractionPolylineStyle(
   const isSelected = state === DetectionInteractionState.Selected;
 
   return new BasePolylineStyle({
-    shouldRender: (detection) => passesConfidenceThreshold(detection, settings),
+    shouldRender: (detection) => passesDetectionFilters(detection, settings),
     stroke: (detection) => ({
       alpha: 1,
       color: resolveClassStyle(detection, settings).stroke,
@@ -570,73 +770,65 @@ function createDemoInteractionKeypointStyle(
 ): KeypointStyle {
   const isSelected = state === DetectionInteractionState.Selected;
 
-  return new BaseKeypointStyle({
-    edgeShadowStroke: {
-      alpha: 0.25,
-      color: 0x000000,
-      width: 3,
-    },
-    edgeStroke: (detection) => ({
-      alpha: 1,
-      color: resolveClassStyle(detection, settings).stroke,
-      width: isSelected
-        ? settings.interactionSelectedStrokeWidth
-        : settings.interactionHoverStrokeWidth,
+  return applyDemoKeypointAnnotator(
+    new BaseKeypointStyle({
+      edgeShadowStroke: {
+        alpha: 0.25,
+        color: 0x000000,
+        width: 3,
+      },
+      edgeStroke: (detection) => ({
+        alpha: 1,
+        color: resolveClassStyle(detection, settings).stroke,
+        width: isSelected
+          ? settings.interactionSelectedStrokeWidth
+          : settings.interactionHoverStrokeWidth,
+      }),
+      markerFill: (detection) => ({
+        alpha: 1,
+        color: resolveClassStyle(detection, settings).fill,
+      }),
+      markerStroke: () => ({
+        alpha: 1,
+        color: 0xffffff,
+        width: 1,
+      }),
+      radius: settings.keypointRadius,
+      shouldRender: (detection) => passesDetectionFilters(detection, settings),
     }),
-    markerFill: (detection) => ({
-      alpha: 1,
-      color: resolveClassStyle(detection, settings).fill,
-    }),
-    markerStroke: () => ({
-      alpha: 1,
-      color: 0xffffff,
-      width: 1,
-    }),
-    radius: settings.keypointRadius,
-    shouldRender: (detection) => passesConfidenceThreshold(detection, settings),
-  });
+    settings,
+  );
 }
 
 function createDemoInteractionBoxStyle(
   settings: DemoPresentationSettings,
   state: DetectionInteractionState,
 ): BoxStyle {
+  const isSelected = state === DetectionInteractionState.Selected;
+
   return {
     resolve(
       detection: Detection,
       context: BoxStyleContext,
     ): BoxDrawInstruction | undefined {
-      if (
-        !detection.rect ||
-        context.hidden ||
-        !passesConfidenceThreshold(detection, settings)
-      ) {
+      if (!detection.rect || !passesDetectionFilters(detection, settings)) {
         return undefined;
       }
 
-      const style = resolveClassStyle(detection, settings);
-      const isSelected = state === DetectionInteractionState.Selected;
-      const shape = resolveBoxShape(settings.boxCornerRadius);
-
-      return {
-        cornerRadius:
-          shape === BoxShape.RoundedRect ? settings.boxCornerRadius : undefined,
-        fill: {
-          alpha: isSelected
+      return resolveDemoBoxInstruction(
+        detection.rect,
+        settings,
+        resolveClassStyle(detection, settings),
+        context,
+        {
+          fillAlpha: isSelected
             ? settings.interactionSelectedFillAlpha
             : settings.interactionHoverFillAlpha,
-          color: style.fill,
-        },
-        rect: detection.rect,
-        shape,
-        stroke: {
-          alpha: 1,
-          color: style.stroke,
-          width: isSelected
+          strokeWidth: isSelected
             ? settings.interactionSelectedStrokeWidth
             : settings.interactionHoverStrokeWidth,
         },
-      };
+      );
     },
   };
 }
@@ -647,7 +839,7 @@ function createDemoInteractionMaskStyle(
 ): MaskStyle {
   return {
     resolve(detection: Detection): MaskDrawInstruction | undefined {
-      if (!detection.mask || !passesConfidenceThreshold(detection, settings)) {
+      if (!detection.mask || !passesDetectionFilters(detection, settings)) {
         return undefined;
       }
 
@@ -672,11 +864,15 @@ function createDemoInteractionMaskStyle(
   };
 }
 
-function passesConfidenceThreshold(
+function passesDetectionFilters(
   detection: Detection,
   settings: DemoPresentationSettings,
 ) {
-  return (detection.confidence ?? 1) >= settings.confidenceThreshold;
+  return (
+    (detection.confidence ?? 1) >= settings.confidenceThreshold &&
+    (!detection.className ||
+      !settings.hiddenClasses.includes(detection.className))
+  );
 }
 
 export function resolveDemoClassStyle(
@@ -716,6 +912,10 @@ function resolveDemoLabelTextColor(color: number) {
   const luminance = (red * 299 + green * 587 + blue * 114) / 1000;
 
   return luminance >= 150 ? 0x111111 : 0xffffff;
+}
+
+function serializeHiddenClasses(hiddenClasses: readonly string[]) {
+  return [...hiddenClasses].sort().join(",");
 }
 
 function serializeMaskClassStyles(styles: Record<string, DemoClassStyle>) {
