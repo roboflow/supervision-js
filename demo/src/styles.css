@@ -1813,6 +1813,67 @@ fieldset {
   min-width: 0;
 }
 
+.render-control-section__header {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.render-control-section__toggle {
+  align-items: center;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  display: flex;
+  flex: 1 1 auto;
+  gap: 6px;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+}
+
+.render-control-section__enable {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  flex: 0 0 auto;
+}
+
+.render-control-section__subheading {
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1.1;
+  margin: 0;
+  padding-top: 8px;
+  text-transform: uppercase;
+}
+
+.render-control-section .render-control-section__toggle h3 {
+  margin: 0;
+}
+
+.render-control-section__chevron {
+  border-bottom: 2px solid var(--muted);
+  border-right: 2px solid var(--muted);
+  flex: 0 0 auto;
+  height: 7px;
+  margin-right: 2px;
+  transform: rotate(-45deg);
+  transition: transform 120ms ease;
+  width: 7px;
+}
+
+.render-control-section__toggle[aria-expanded="true"]
+  .render-control-section__chevron {
+  transform: rotate(45deg);
+}
+
 .benchmarks-panel {
   background: rgba(10, 12, 17, 0.88);
   border: 1px solid var(--line);
