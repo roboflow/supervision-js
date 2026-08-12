@@ -17,8 +17,6 @@ import {
   constrainDemoPresentationSettings,
   createDemoPresentation,
   defaultDemoPresentationSettings,
-  DemoBoxAnnotator,
-  DemoKeypointAnnotator,
 } from "./demo-presentation";
 
 const detection: Detection = {
@@ -114,206 +112,6 @@ describe("demo presentation", () => {
       cornerRadius: 8,
       shape: BoxShape.RoundedRect,
     });
-  });
-
-  it("lowers the round box annotator to a rounded rectangle", () => {
-    const presentation = createDemoPresentation({
-      ...defaultDemoPresentationSettings,
-      boxAnnotator: DemoBoxAnnotator.RoundBox,
-      boxCornerRadius: 12,
-    });
-
-    expect(
-      presentation.boxStyle?.resolve(rectangleDetection, {
-        detectionIndex: 0,
-        frame: { detections: [rectangleDetection], mediaTime: 0 },
-        mediaTime: 0,
-      }),
-    ).toMatchObject({
-      cornerRadius: 12,
-      shape: BoxShape.RoundedRect,
-    });
-  });
-
-  it("lowers the circle annotator to a fully rounded square over the box diagonal", () => {
-    const presentation = createDemoPresentation({
-      ...defaultDemoPresentationSettings,
-      boxAnnotator: DemoBoxAnnotator.Circle,
-    });
-    const instruction = presentation.boxStyle?.resolve(rectangleDetection, {
-      detectionIndex: 0,
-      frame: { detections: [rectangleDetection], mediaTime: 0 },
-      mediaTime: 0,
-    });
-    const side = Math.hypot(20, 40);
-
-    expect(instruction?.shape).toBe(BoxShape.RoundedRect);
-    expect(instruction?.rect.x).toBe(rectangleDetection.rect!.x);
-    expect(instruction?.rect.y).toBe(rectangleDetection.rect!.y);
-    expect(instruction?.rect.width).toBeCloseTo(side);
-    expect(instruction?.rect.height).toBeCloseTo(side);
-    expect(instruction?.cornerRadius).toBeCloseTo(side / 2);
-  });
-
-  it("lowers the ellipse annotator to a stroked ground marker at the box bottom", () => {
-    const presentation = createDemoPresentation({
-      ...defaultDemoPresentationSettings,
-      boxAnnotator: DemoBoxAnnotator.Ellipse,
-    });
-    const instruction = presentation.boxStyle?.resolve(rectangleDetection, {
-      detectionIndex: 0,
-      frame: { detections: [rectangleDetection], mediaTime: 0 },
-      mediaTime: 0,
-    });
-    const markerHeight = 20 * 0.35;
-
-    expect(instruction?.shape).toBe(BoxShape.RoundedRect);
-    expect(instruction?.rect).toMatchObject({
-      height: markerHeight,
-      width: 20,
-      x: rectangleDetection.rect!.x,
-      y: rectangleDetection.rect!.y + 20,
-    });
-    expect(instruction?.cornerRadius).toBeCloseTo(markerHeight / 2);
-    expect(instruction?.fill).toBeUndefined();
-  });
-
-  it("lowers the dot annotator to a screen-sized filled circle at the box center", () => {
-    const presentation = createDemoPresentation({
-      ...defaultDemoPresentationSettings,
-      boxAnnotator: DemoBoxAnnotator.Dot,
-      boxDotRadius: 5,
-    });
-    const instruction = presentation.boxStyle?.resolve(rectangleDetection, {
-      detectionIndex: 0,
-      frame: { detections: [rectangleDetection], mediaTime: 0 },
-      mediaTime: 0,
-      viewportScale: 2,
-    });
-
-    expect(instruction?.shape).toBe(BoxShape.RoundedRect);
-    expect(instruction?.rect).toMatchObject({
-      height: 5,
-      width: 5,
-      x: rectangleDetection.rect!.x,
-      y: rectangleDetection.rect!.y,
-    });
-    expect(instruction?.fill).toMatchObject({ alpha: 1 });
-  });
-
-  it("emphasizes hovered and selected dots through the interaction style", () => {
-    const presentation = createDemoPresentation({
-      ...defaultDemoPresentationSettings,
-      boxAnnotator: DemoBoxAnnotator.Dot,
-      interactionSelectedStrokeWidth: 5,
-    });
-    const context = {
-      detectionIndex: 0,
-      frame: { detections: [rectangleDetection], mediaTime: 0 },
-      mediaTime: 0,
-      point: { x: 10, y: 12 },
-      state: DetectionInteractionState.Selected,
-      target: DetectionPickTarget.Box,
-    };
-    const base = presentation.boxStyle?.resolve(rectangleDetection, context);
-    const selected = presentation.interactionStyle?.resolve(
-      rectangleDetection,
-      context,
-    );
-
-    expect(base?.stroke?.width).toBe(1);
-    expect(
-      selected?.boxStyle?.resolve(rectangleDetection, context)?.stroke?.width,
-    ).toBe(5);
-  });
-
-  it("lowers the color annotator to a fill-only rectangle", () => {
-    const presentation = createDemoPresentation({
-      ...defaultDemoPresentationSettings,
-      boxAnnotator: DemoBoxAnnotator.Color,
-      boxColorFillAlpha: 0.6,
-    });
-    const instruction = presentation.boxStyle?.resolve(rectangleDetection, {
-      detectionIndex: 0,
-      frame: { detections: [rectangleDetection], mediaTime: 0 },
-      mediaTime: 0,
-    });
-
-    expect(instruction).toMatchObject({
-      fill: { alpha: 0.6 },
-      rect: rectangleDetection.rect,
-      shape: BoxShape.Rect,
-    });
-    expect(instruction?.stroke).toBeUndefined();
-  });
-
-  it("lowers the box corner annotator to a per-detection dashed stroke", () => {
-    const wideDetection: Detection = {
-      className: "horse",
-      confidence: 0.9,
-      rect: { height: 60, width: 100, x: 50, y: 30 },
-    };
-    const presentation = createDemoPresentation({
-      ...defaultDemoPresentationSettings,
-      boxAnnotator: DemoBoxAnnotator.BoxCorner,
-      boxCornerLength: 15,
-    });
-    const instruction = presentation.boxStyle?.resolve(wideDetection, {
-      detectionIndex: 0,
-      frame: { detections: [wideDetection], mediaTime: 0 },
-      mediaTime: 0,
-      viewportScale: 1,
-    });
-
-    // Clockwise from the top-left vertex: half corner, gap, then full
-    // corners across each remaining vertex.
-    expect(instruction?.stroke?.dash).toEqual([
-      15, 70, 30, 30, 30, 70, 30, 30, 15,
-    ]);
-    expect(instruction?.fill).toBeUndefined();
-  });
-
-  it("falls back to a solid border when box corner arms would overlap", () => {
-    const presentation = createDemoPresentation({
-      ...defaultDemoPresentationSettings,
-      boxAnnotator: DemoBoxAnnotator.BoxCorner,
-      boxCornerLength: 15,
-    });
-    const instruction = presentation.boxStyle?.resolve(rectangleDetection, {
-      detectionIndex: 0,
-      frame: { detections: [rectangleDetection], mediaTime: 0 },
-      mediaTime: 0,
-      viewportScale: 1,
-    });
-
-    expect(instruction?.stroke?.dash).toBeUndefined();
-    expect(instruction?.stroke).toBeDefined();
-  });
-
-  it("restricts keypoint annotator variants to vertices or edges", () => {
-    const context = {
-      detectionIndex: 0,
-      frame: { detections: [vectorDetection], mediaTime: 0 },
-      mediaTime: 0,
-    };
-    const verticesInstruction = createDemoPresentation({
-      ...defaultDemoPresentationSettings,
-      keypointAnnotator: DemoKeypointAnnotator.Vertices,
-    }).keypointStyle?.resolve(vectorDetection, context);
-    const edgesInstruction = createDemoPresentation({
-      ...defaultDemoPresentationSettings,
-      keypointAnnotator: DemoKeypointAnnotator.Edges,
-    }).keypointStyle?.resolve(vectorDetection, context);
-    const combinedInstruction = createDemoPresentation(
-      defaultDemoPresentationSettings,
-    ).keypointStyle?.resolve(vectorDetection, context);
-
-    expect(verticesInstruction?.markers.length).toBeGreaterThan(0);
-    expect(verticesInstruction?.edges).toEqual([]);
-    expect(edgesInstruction?.edges.length).toBeGreaterThan(0);
-    expect(edgesInstruction?.markers).toEqual([]);
-    expect(combinedInstruction?.markers.length).toBeGreaterThan(0);
-    expect(combinedInstruction?.edges.length).toBeGreaterThan(0);
   });
 
   it("renders enabled boxes for detections with other geometry", () => {
@@ -722,77 +520,45 @@ describe("demo presentation", () => {
     ).toBeUndefined();
   });
 
-  it("hides detections whose class is excluded from visibility", () => {
+  it("routes class visibility through the renderer-owned contract", () => {
     const presentation = createDemoPresentation({
       ...defaultDemoPresentationSettings,
-      hiddenClasses: ["person"],
-    });
-    const hiddenContext = {
-      detectionIndex: 0,
-      frame: { detections: [vectorDetection], mediaTime: 0 },
-      mediaTime: 0,
-    };
-    const visibleContext = {
-      detectionIndex: 0,
-      frame: { detections: [detection], mediaTime: 0 },
-      mediaTime: 0,
-    };
-
-    expect(
-      presentation.boxStyle?.resolve(vectorDetection, hiddenContext),
-    ).toBeUndefined();
-    expect(
-      presentation.polygonStyle?.resolve(vectorDetection, hiddenContext),
-    ).toBeUndefined();
-    expect(
-      presentation.keypointStyle?.resolve(vectorDetection, hiddenContext),
-    ).toBeUndefined();
-    expect(
-      presentation.labelStyle?.resolve(vectorDetection, hiddenContext),
-    ).toBeUndefined();
-
-    expect(
-      presentation.boxStyle?.resolve(detection, visibleContext),
-    ).toBeDefined();
-    expect(
-      presentation.maskStyle?.resolve(detection, visibleContext),
-    ).toBeDefined();
-    expect(
-      presentation.labelStyle?.resolve(detection, visibleContext),
-    ).toBeDefined();
-  });
-
-  it("keeps detections without a class name visible when classes are hidden", () => {
-    const unnamedDetection: Detection = {
-      confidence: 0.9,
-      rect: { height: 40, width: 20, x: 10, y: 12 },
-    };
-    const presentation = createDemoPresentation({
-      ...defaultDemoPresentationSettings,
-      hiddenClasses: ["person", "horse", "cow"],
+      hiddenClasses: ["person", "cow"],
     });
 
+    expect(presentation.visibility).toEqual({
+      hiddenClasses: ["person", "cow"],
+    });
+    // Styles keep confidence as their only local predicate; the mask
+    // artifact key never encodes class visibility, so the backend owns
+    // hidden-class invalidation.
     expect(
-      presentation.boxStyle?.resolve(unnamedDetection, {
-        detectionIndex: 0,
-        frame: { detections: [unnamedDetection], mediaTime: 0 },
-        mediaTime: 0,
-      }),
-    ).toBeDefined();
+      presentation.maskStyle && "artifactKey" in presentation.maskStyle
+        ? presentation.maskStyle.artifactKey
+        : "",
+    ).toBe(
+      createDemoPresentation(defaultDemoPresentationSettings).maskStyle
+        ?.artifactKey,
+    );
   });
 
-  it("invalidates the mask artifact key when hidden classes change", () => {
-    const basePresentation = createDemoPresentation(
+  it("hides detections in demo-owned styles when the context marks them hidden", () => {
+    const presentation = createDemoPresentation(
       defaultDemoPresentationSettings,
     );
-    const filteredPresentation = createDemoPresentation({
-      ...defaultDemoPresentationSettings,
-      hiddenClasses: ["horse"],
-    });
+    const context = {
+      detectionIndex: 0,
+      frame: { detections: [rectangleDetection], mediaTime: 0 },
+      hidden: true,
+      mediaTime: 0,
+    };
 
-    expect(filteredPresentation.maskStyle?.artifactKey).not.toBe(
-      basePresentation.maskStyle?.artifactKey,
-    );
+    expect(
+      presentation.boxStyle?.resolve(rectangleDetection, context),
+    ).toBeUndefined();
+    expect(
+      presentation.labelStyle?.resolve(rectangleDetection, context),
+    ).toBeUndefined();
   });
 
   it("highlights picked polygon and keypoint targets through the interaction style", () => {
