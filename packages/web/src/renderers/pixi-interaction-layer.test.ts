@@ -116,6 +116,44 @@ describe("pixi interaction layer", () => {
     expect(onSelect).toHaveBeenLastCalledWith(null);
   });
 
+  it("does not pick, select, or cycle through detections rejected by visibility", () => {
+    const onSelect = vi.fn();
+    const layer = createPixiInteractionLayer({
+      Container: FakeContainer as never,
+      Rectangle: FakeRectangle as never,
+      canInteract: () => true,
+      canPickDetection: (detection) => detection.className !== "player",
+      detectionTimeline: createTimeline({
+        ...frame,
+        detections: [
+          frame.detections[0]!,
+          {
+            className: "ball",
+            id: "ball-1",
+            rect: { height: 10, width: 10, x: 80, y: 20 },
+          },
+        ],
+      }),
+      interaction: { mode: MediaInteractionMode.Always, onSelect },
+    });
+    const display = layer.createDisplay({
+      height: 80,
+      width: 120,
+    }) as FakeContainer;
+
+    layer.drawFrame(frame.mediaTime);
+    display.emit("pointertap", createPointerEvent(display, 10, 15));
+    expect(layer.getState().selectedPick).toBeNull();
+
+    expect(layer.setSelectedDetection({ detectionId: "player-1" })).toBeNull();
+    expect(layer.cycleSelection()?.detection.id).toBe("ball-1");
+    expect(onSelect).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        detection: expect.objectContaining({ id: "ball-1" }),
+      }),
+    );
+  });
+
   it("prefers exact mask picks before falling back to box picks", () => {
     const onHover = vi.fn();
     const maskPick = {

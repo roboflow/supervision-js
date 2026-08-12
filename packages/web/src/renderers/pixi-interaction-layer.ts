@@ -11,6 +11,7 @@ import {
 } from "supervision-js-core";
 import type { BufferedDetectionTimeline } from "supervision-js-core";
 import type { DetectionFrame } from "supervision-js-core";
+import type { Detection } from "supervision-js-core";
 import type {
   DetectionPickPoint,
   DetectionPickResult,
@@ -96,6 +97,7 @@ export function createPixiInteractionLayer(options: {
   readonly canInteract: () => boolean;
   readonly detectionTimeline: BufferedDetectionTimeline;
   readonly interaction: MediaInteractionOptions;
+  readonly canPickDetection?: (detection: Detection) => boolean;
   readonly onStateChange?: (state: PixiInteractionLayerState) => void;
   readonly pickMaskDetectionAtPoint?: (
     point: DetectionPickPoint,
@@ -184,15 +186,21 @@ export function createPixiInteractionLayer(options: {
     },
 
     cycleSelection(direction = 1) {
-      if (!activeFrame?.detections.length) return null;
-      const currentIndex =
-        selectedPick?.detectionIndex ?? (direction > 0 ? -1 : 0);
-      const nextIndex =
-        (currentIndex + direction + activeFrame.detections.length) %
-        activeFrame.detections.length;
-      const detection = activeFrame.detections[nextIndex]!;
+      const visibleDetections = activeFrame?.detections.flatMap(
+        (detection, detectionIndex) =>
+          canPickDetection(detection) ? [{ detection, detectionIndex }] : [],
+      );
+      if (!activeFrame || !visibleDetections?.length) return null;
+      const currentVisibleIndex = visibleDetections.findIndex(
+        ({ detectionIndex }) => detectionIndex === selectedPick?.detectionIndex,
+      );
+      const nextVisibleIndex =
+        (currentVisibleIndex + direction + visibleDetections.length) %
+        visibleDetections.length;
+      const { detection, detectionIndex } =
+        visibleDetections[nextVisibleIndex]!;
       const next = createPickFromSelection({
-        detectionIndex: nextIndex,
+        detectionIndex,
         point: getDetectionCenter(detection),
       });
       setSelectedPick(next);
@@ -343,6 +351,7 @@ export function createPixiInteractionLayer(options: {
     if (didDragMarquee && marqueeRect && activeFrame) {
       selectedPicks = activeFrame.detections.flatMap(
         (detection, detectionIndex) => {
+          if (!canPickDetection(detection)) return [];
           const rect = getDetectionRect(detection);
           if (!rect || !intersects(rect, marqueeRect!)) return [];
           return [
@@ -388,10 +397,15 @@ export function createPixiInteractionLayer(options: {
       labelPick ?? null,
       activeFrame,
     );
-    if (activeLabelPick) return activeLabelPick;
+    if (activeLabelPick && canPickDetection(activeLabelPick.detection)) {
+      return activeLabelPick;
+    }
 
     const geometryPick = pickDetectionAtPoint(activeFrame, pickPoint, {
       ...options.interaction,
+      filter: (detection, detectionIndex) =>
+        canPickDetection(detection) &&
+        (options.interaction.filter?.(detection, detectionIndex) ?? true),
       includeMasks: options.pickMaskDetectionAtPoint === undefined,
       maskMediaDimensions: options.getMediaDimensions?.(),
       padding: pickPadding,
@@ -411,7 +425,9 @@ export function createPixiInteractionLayer(options: {
       activeFrame,
     );
 
-    return activeMaskPick ?? geometryPick;
+    return activeMaskPick && canPickDetection(activeMaskPick.detection)
+      ? activeMaskPick
+      : geometryPick;
   }
 
   function createPickFromSelection(
@@ -432,7 +448,12 @@ export function createPixiInteractionLayer(options: {
         ? undefined
         : frame?.detections[detectionIndex];
 
-    if (!frame || detectionIndex === undefined || !detection) {
+    if (
+      !frame ||
+      detectionIndex === undefined ||
+      !detection ||
+      !canPickDetection(detection)
+    ) {
       return null;
     }
 
@@ -449,8 +470,12 @@ export function createPixiInteractionLayer(options: {
   }
 
   function clearStalePicks(frame: DetectionFrame | undefined) {
-    const nextHoveredPick = rebaseDetectionPickToFrame(hoveredPick, frame);
-    const nextSelectedPick = rebaseDetectionPickToFrame(selectedPick, frame);
+    const nextHoveredPick = filterPick(
+      rebaseDetectionPickToFrame(hoveredPick, frame),
+    );
+    const nextSelectedPick = filterPick(
+      rebaseDetectionPickToFrame(selectedPick, frame),
+    );
 
     if (hoveredPick && !nextHoveredPick) {
       setHoveredPick(null);
@@ -593,6 +618,14 @@ export function createPixiInteractionLayer(options: {
     }
 
     return options.canInteract();
+  }
+
+  function canPickDetection(detection: Detection) {
+    return options.canPickDetection?.(detection) ?? true;
+  }
+
+  function filterPick(pick: DetectionPickResult | null) {
+    return pick && canPickDetection(pick.detection) ? pick : null;
   }
 }
 
