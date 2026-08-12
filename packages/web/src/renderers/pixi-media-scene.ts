@@ -328,6 +328,8 @@ export async function createPixiMediaScene(
         Text,
         UniformGroup,
         interactionStyle: options.interactionStyle,
+        isDetectionVisible: (detection) =>
+          !resolveAnnotationStyleState(detection, currentVisibility).hidden,
       })
     : undefined;
   let fastTranslatedDetectionId: string | number | null = null;
@@ -391,6 +393,8 @@ export async function createPixiMediaScene(
         Shader,
         UniformGroup,
         focusStyle: options.focusStyle,
+        isDetectionVisible: (detection) =>
+          !resolveAnnotationStyleState(detection, currentVisibility).hidden,
       })
     : undefined;
   let mediaSprite: InstanceType<typeof Sprite> | undefined;
@@ -1152,6 +1156,8 @@ export async function createPixiMediaScene(
         Shader,
         UniformGroup,
         focusStyle,
+        isDetectionVisible: (detection) =>
+          !resolveAnnotationStyleState(detection, currentVisibility).hidden,
       });
     }
 
@@ -1195,9 +1201,7 @@ export async function createPixiMediaScene(
       return;
     }
 
-    const frame = filterVisibleFrame(
-      options.detectionTimeline.selectFrame(mediaTime),
-    );
+    const frame = options.detectionTimeline.selectFrame(mediaTime);
 
     const interactionState = interactionLayer?.getState();
 
@@ -1216,9 +1220,7 @@ export async function createPixiMediaScene(
       return;
     }
 
-    const frame = filterVisibleFrame(
-      options.detectionTimeline.selectFrame(mediaTime),
-    );
+    const frame = options.detectionTimeline.selectFrame(mediaTime);
     const interactionState = interactionLayer?.getState();
 
     interactionPresentationLayer.drawFrame({
@@ -1329,17 +1331,6 @@ export async function createPixiMediaScene(
       !resolveAnnotationStyleState(pick.detection, currentVisibility).hidden
       ? pick
       : null;
-  }
-
-  function filterVisibleFrame(frame: DetectionFrame | undefined) {
-    if (!frame || !currentVisibility) return frame;
-    const detections = frame.detections.filter(
-      (detection) =>
-        !resolveAnnotationStyleState(detection, currentVisibility).hidden,
-    );
-    return detections.length === frame.detections.length
-      ? frame
-      : { ...frame, detections };
   }
 }
 

@@ -133,6 +133,48 @@ describe("pixi focus layer", () => {
     expect(overlay.cut).not.toHaveBeenCalled();
   });
 
+  it("preserves original detection indices while omitting hidden ambient targets", () => {
+    const ambientFrame: DetectionFrame = {
+      detections: [
+        frame.detections[0]!,
+        {
+          className: "official",
+          id: "official-1",
+          rect: { height: 10, width: 10, x: 80, y: 40 },
+        },
+      ],
+      frameIndex: frame.frameIndex,
+      mediaTime: frame.mediaTime,
+    };
+    const resolve = vi.fn(
+      new BaseFocusStyle({ targetMode: FocusTargetMode.Ambient }).resolve.bind(
+        new BaseFocusStyle({ targetMode: FocusTargetMode.Ambient }),
+      ),
+    );
+    const layer = createPixiFocusLayer({
+      Graphics: FakeGraphics as never,
+      focusStyle: { resolve },
+      isDetectionVisible: (detection) => detection.className !== "player",
+    });
+    const display = layer.createDisplay({
+      height: 80,
+      width: 120,
+    }) as FakeGraphics;
+
+    layer.drawFrame({
+      frame: ambientFrame,
+      hoveredPick: null,
+      mediaTime: ambientFrame.mediaTime,
+      selectedPick: null,
+    });
+
+    expect(resolve).toHaveBeenCalledWith(
+      expect.objectContaining({ frame: ambientFrame }),
+    );
+    expect(display.roundRect).toHaveBeenCalledWith(75, 35, 10, 10, 8);
+    expect(display.roundRect).not.toHaveBeenCalledWith(10, 15, 20, 30, 8);
+  });
+
   it("clears and stays hidden when there is no focus target", () => {
     const layer = createPixiFocusLayer({
       Graphics: FakeGraphics as never,
