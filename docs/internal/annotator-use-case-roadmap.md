@@ -174,21 +174,21 @@ PolygonZone   -> polygon path + count label
 LineZone      -> line path + endpoint markers + count labels
 ```
 
-An illustrative public shape could be:
+The renderer-first public shape is:
 
 ```ts
 session.setPresentation({
-  boxStyle,
-  maskStyle,
-  labelStyle,
-  layers: [
-    annotationLayers.boxCorners({
+  renderers: [
+    annotationRenderers.box({ style: boxStyle }),
+    annotationRenderers.mask({ style: maskStyle }),
+    annotationRenderers.label({ style: labelStyle }),
+    annotationRenderers.boxCorners({
       stroke: detectionClassStroke,
     }),
-    annotationLayers.percentageBar({
+    annotationRenderers.percentageBar({
       value: (detection) => detection.confidence ?? 0,
     }),
-    annotationLayers.trace({
+    annotationRenderers.trace({
       anchor: "bottom-center",
       identity: (detection) => detection.id,
       windowSeconds: 1.5,
@@ -197,15 +197,15 @@ session.setPresentation({
 });
 ```
 
-This is a design direction, not final naming. The first composition PR must
-justify the exact API with tests and a real facade.
+The renderer names beyond the currently implemented set remain illustrative.
+Each addition must justify its exact semantic API with tests and a real facade.
 
 ### Recipe Contract Requirements
 
 The platform-neutral core should own only renderer-neutral recipe fields:
 
-- stable layer identity;
-- semantic phase and ordering;
+- stable renderer identity;
+- explicit ordering only where the renderer contract supports it;
 - media or viewport coordinate space;
 - explicit pick behavior;
 - static values or detection/style-context resolvers;
