@@ -37,8 +37,8 @@ session.setPresentation({
           const radiusY = radiusX * 0.35;
           return {
             center: {
-              x: detection.rect.x + radiusX,
-              y: detection.rect.y + detection.rect.height - radiusY,
+              x: detection.rect.x,
+              y: detection.rect.y + detection.rect.height / 2 - radiusY,
             },
             endAngle: (235 * Math.PI) / 180,
             radiusX,

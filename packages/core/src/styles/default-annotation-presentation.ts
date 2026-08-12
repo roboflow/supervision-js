@@ -117,10 +117,10 @@ export function createDefaultEllipseStyle(
 
       return {
         center: {
-          x: detection.rect.x + radiusX,
+          x: detection.rect.x,
           // Bottom-tangent so the arc hugs the detection instead of dipping
           // below its feet.
-          y: detection.rect.y + detection.rect.height - radiusY,
+          y: detection.rect.y + detection.rect.height / 2 - radiusY,
         },
         endAngle: DEFAULT_ELLIPSE_END_ANGLE,
         radiusX,
