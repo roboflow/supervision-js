@@ -6,6 +6,7 @@ import {
   MarkerShape,
   MarkerSizeSpace,
   ShapeInstructionKind,
+  StrokeAlignment,
 } from "supervision-js-core";
 import type {
   BufferedDetectionTimeline,
@@ -158,7 +159,7 @@ describe("pixi vector layer", () => {
         {
           fill: { alpha: 1, color: 0xff0000 },
           kind: ShapeInstructionKind.Marker,
-          point: { x: 30, y: 20 },
+          center: { x: 30, y: 20 },
           shape: MarkerShape.Triangle,
           size: 12,
           sizeSpace: MarkerSizeSpace.Screen,
@@ -166,10 +167,16 @@ describe("pixi vector layer", () => {
         {
           fill: { alpha: 1, color: 0x00ff00 },
           kind: ShapeInstructionKind.Marker,
-          point: { x: 30, y: 40 },
+          center: { x: 30, y: 40 },
           shape: MarkerShape.Circle,
           size: 10,
           sizeSpace: MarkerSizeSpace.Screen,
+          stroke: {
+            alignment: StrokeAlignment.Outside,
+            alpha: 1,
+            color: 0xffffff,
+            width: 2,
+          },
         },
       ],
     };
@@ -199,6 +206,61 @@ describe("pixi vector layer", () => {
     expect(trianglePoints[1]).toBeCloseTo(23);
     // Circle: native circle with the screen size divided by the scale.
     expect(display.circle).toHaveBeenCalledWith(30, 40, 2.5);
+    expect(display.stroke).toHaveBeenCalledWith({
+      alignment: 0,
+      alpha: 1,
+      color: 0xffffff,
+      width: 1,
+    });
+  });
+
+  it("draws dashed circle marker strokes through the shared path lowering", () => {
+    const boxOnlyFrame: DetectionFrame = {
+      detections: [
+        { id: "box-0", rect: { height: 40, width: 20, x: 30, y: 40 } },
+      ],
+      frameIndex: 0,
+      mediaTime: 0,
+    };
+    const shapeStyle: ShapeStyle = {
+      resolve: () => [
+        {
+          kind: ShapeInstructionKind.Marker,
+          center: { x: 30, y: 40 },
+          shape: MarkerShape.Circle,
+          size: 10,
+          sizeSpace: MarkerSizeSpace.Media,
+          stroke: {
+            alpha: 1,
+            color: 0xffffff,
+            dash: [4, 2],
+            width: 2,
+          },
+        },
+      ],
+    };
+    const layer = createPixiVectorLayer({
+      Container: FakeContainer as never,
+      detectionTimeline: createTimeline([boxOnlyFrame]),
+      Graphics: FakeGraphics as never,
+      keypointStyle: null,
+      polygonStyle: null,
+      polylineStyle: null,
+      shapeStyle,
+    });
+    const container = layer.createContainer() as unknown as FakeContainer;
+
+    layer.drawFrame(0);
+
+    const display = container.children[0]!;
+    expect(display.circle).not.toHaveBeenCalled();
+    expect(display.moveTo).toHaveBeenCalled();
+    expect(display.lineTo).toHaveBeenCalled();
+    expect(display.stroke).toHaveBeenCalledWith({
+      alpha: 1,
+      color: 0xffffff,
+      width: 2,
+    });
   });
 
   it("draws every subpath of a path instruction", () => {

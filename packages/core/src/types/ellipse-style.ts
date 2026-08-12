@@ -27,8 +27,8 @@ export interface ClosedEllipseDrawInstruction
 }
 
 export interface EllipseArcDrawInstruction extends EllipseDrawInstructionBase {
-  readonly startAngle?: number;
-  readonly endAngle?: number;
+  readonly startAngle: number;
+  readonly endAngle: number;
   readonly fill?: never;
   readonly stroke?: OpenStrokeStyle;
 }
