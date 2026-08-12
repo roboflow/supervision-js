@@ -432,7 +432,7 @@ export function createPixiMaskLayer(options: {
     const canvas = document.createElement("canvas");
     const context = canvas.getContext("2d");
 
-    if (!context) {
+    if (!context || typeof context.createImageData !== "function") {
       return undefined;
     }
 
