@@ -143,15 +143,15 @@ describe("pixi mask layer", () => {
           spread: detection.className === "horse" ? 4 : 24,
         }),
       },
-      maskStyle: {
-        resolve: (resolved: { mask?: unknown }) =>
-          resolved.mask
-            ? { alpha: 0.4, color: 0x123456, mask: resolved.mask }
-            : undefined,
-      } as never,
+      maskStyle: new BaseMaskStyle({ alpha: 0 }),
     });
 
-    layer.createSprite({ height: 80, width: 120 });
+    const display = layer.createSprite({
+      height: 80,
+      width: 120,
+    }) as unknown as {
+      children: Array<{ alpha?: number }>;
+    };
     preparedWindow.frame = {
       detectionFrame: detectionFrame as never,
       key: "mask-frame",
@@ -190,10 +190,14 @@ describe("pixi mask layer", () => {
     expect(narrowPalette[11]).toBe(0);
     expect(widePalette[7]).toBe(0);
     expect(widePalette[11]).toBeCloseTo(0.6);
+    // The mask renderer can be transparent while the independently selected
+    // halo renderer remains visible at its instruction alpha.
+    expect(display.children[0]?.alpha).toBe(1);
   });
 });
 
 class FakeContainer {
+  alpha = 1;
   readonly children: unknown[] = [];
 
   addChild(...children: unknown[]) {

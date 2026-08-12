@@ -222,7 +222,9 @@ export function createPixiMaskLayer(options: {
       idMaskRenderer = createIdMaskRenderer();
       idMaskRenderer?.setOpacity(maskOpacity);
       haloRenderer = createHaloRenderer();
-      haloRenderer?.setOpacity(maskOpacity);
+      // Halo alpha is resolved from MaskHaloStyle per detection. It must not
+      // inherit the independent mask renderer's global opacity.
+      haloRenderer?.setOpacity(1);
 
       if (!idMaskRenderer || !options.Container) {
         return maskSprite;
@@ -543,8 +545,6 @@ export function createPixiMaskLayer(options: {
   function applyMaskOpacity() {
     if (maskSprite) {
       maskSprite.alpha = maskOpacity;
-
-      haloRenderer?.setOpacity(maskOpacity);
     }
 
     idMaskRenderer?.setOpacity(maskOpacity);
