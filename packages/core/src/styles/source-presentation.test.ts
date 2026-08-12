@@ -182,6 +182,43 @@ describe("createSourceAwarePresentation", () => {
     );
   });
 
+  it("applies source overrides to ellipse renderer styles", () => {
+    const globalStyle = {
+      resolve(detection: unknown, context: unknown) {
+        void detection;
+        void context;
+        return {
+        center: { x: 4, y: 4 },
+        radiusX: 2,
+        radiusY: 1,
+        };
+      },
+    };
+    const sourceStyle = {
+      resolve(detection: unknown, context: unknown) {
+        void detection;
+        void context;
+        return {
+        center: { x: 8, y: 8 },
+        radiusX: 3,
+        radiusY: 1,
+        };
+      },
+    };
+    const presentation = createSourceAwarePresentation(
+      { ellipseStyle: globalStyle },
+      [{ id: "draft", presentation: { ellipseStyle: sourceStyle } }],
+    );
+    const context = { detectionIndex: 0, frame, mediaTime: 0 };
+
+    expect(
+      presentation.ellipseStyle?.resolve(createDetection("base"), context),
+    ).toMatchObject({ center: { x: 4, y: 4 } });
+    expect(
+      presentation.ellipseStyle?.resolve(createDetection("draft"), context),
+    ).toMatchObject({ center: { x: 8, y: 8 } });
+  });
+
   it("keeps global interaction and focus styles source-aware without wrapping them", () => {
     const globalPresentation: TestRendererPresentation = {
       focusStyle: {

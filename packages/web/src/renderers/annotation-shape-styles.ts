@@ -30,7 +30,7 @@ export function resolveAnnotationShapeStyle(styles: {
       const ellipse = ellipseStyle.resolve(detection, context);
 
       if (ellipse) {
-        instructions.push({
+        const base = {
           center: ellipse.center,
           kind: ShapeInstructionKind.Ellipse,
           radiusX: ellipse.radiusX,
@@ -38,15 +38,29 @@ export function resolveAnnotationShapeStyle(styles: {
           ...(ellipse.rotation === undefined
             ? {}
             : { rotation: ellipse.rotation }),
-          ...(ellipse.startAngle === undefined
-            ? {}
-            : { startAngle: ellipse.startAngle }),
-          ...(ellipse.endAngle === undefined
-            ? {}
-            : { endAngle: ellipse.endAngle }),
-          ...(ellipse.fill === undefined ? {} : { fill: ellipse.fill }),
-          ...(ellipse.stroke === undefined ? {} : { stroke: ellipse.stroke }),
-        });
+        } as const;
+
+        if (
+          ellipse.startAngle !== undefined &&
+          ellipse.endAngle !== undefined
+        ) {
+          instructions.push({
+            ...base,
+            endAngle: ellipse.endAngle,
+            startAngle: ellipse.startAngle,
+            ...(ellipse.stroke === undefined
+              ? {}
+              : { stroke: ellipse.stroke }),
+          });
+        } else {
+          instructions.push({
+            ...base,
+            ...(ellipse.fill === undefined ? {} : { fill: ellipse.fill }),
+            ...(ellipse.stroke === undefined
+              ? {}
+              : { stroke: ellipse.stroke }),
+          });
+        }
       }
 
       return instructions.length > 0 ? instructions : undefined;

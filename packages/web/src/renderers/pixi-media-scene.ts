@@ -30,6 +30,10 @@ import { createPixiMaskLayer } from "./pixi-mask-layer";
 import { createPixiMaskBrushPreview } from "./pixi-mask-brush-preview";
 import { createPixiPolygonLayer } from "./pixi-polygon-layer";
 import { createPixiVectorLayer } from "./pixi-vector-layer";
+import {
+  createPixiRegionLayer,
+  type PixiRegionLayerState,
+} from "./pixi-region-layer";
 import { resolveAnnotationShapeStyle } from "./annotation-shape-styles";
 import { createPixiAnnotationOverlayLayer } from "./pixi-annotation-overlay-layer";
 import {
@@ -181,6 +185,27 @@ export async function createPixiMediaScene(
     polylineStyle: options.polylineStyle,
     keypointStyle: options.keypointStyle,
     shapeStyle: resolveVectorShapeStyle(),
+    resolveContextState,
+  });
+  const regionLayer = createPixiRegionLayer({
+    Assets,
+    Container,
+    GifSprite,
+    Sprite,
+    detectionTimeline: options.detectionTimeline,
+    onInvalidate: () => {
+      if (!hasPresentedSample || mediaWidth <= 0 || mediaHeight <= 0) return;
+      const boxState = boxLayer.drawFrame(currentMediaTime, viewportScale);
+      const regionState = regionLayer.drawFrame(
+        currentMediaTime,
+        viewportScale,
+      );
+      options.onPresentationUpdate?.(
+        createPresentedSampleState(currentMediaTime, boxState, regionState),
+      );
+    },
+    onAssetError: options.diagnostics?.onAssetError,
+    regionRenderers: options.regionRenderers,
     resolveContextState,
   });
   const annotationOverlayLayer = createPixiAnnotationOverlayLayer(

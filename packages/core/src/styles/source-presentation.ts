@@ -15,7 +15,11 @@ import type {
   BoxStyleContext,
 } from "#types/box-style";
 import type { Detection } from "#types/detections";
-import type { EllipseStyle } from "#types/ellipse-style";
+import type {
+  EllipseDrawInstruction,
+  EllipseStyle,
+  EllipseStyleContext,
+} from "#types/ellipse-style";
 import type {
   LabelDrawInstruction,
   LabelStyle,
@@ -109,6 +113,12 @@ export function createSourceAwarePresentation(
           sourcePresentations,
         )
       : globalPresentation.boxStyle,
+    ellipseStyle: shouldApplySourceStyle("ellipseStyle")
+      ? new SourceAwareEllipseStyle(
+          globalPresentation.ellipseStyle ?? null,
+          sourcePresentations,
+        )
+      : globalPresentation.ellipseStyle,
     labelStyle: shouldApplySourceStyle("labelStyle")
       ? new SourceAwareLabelStyle(
           normalizeGlobalLabelStyle(globalPresentation.labelStyle),
@@ -160,6 +170,30 @@ class SourceAwareBoxStyle implements BoxStyle {
       this.globalStyle,
       this.sourcePresentations,
       "boxStyle",
+    );
+
+    return style?.resolve(detection, context);
+  }
+}
+
+class SourceAwareEllipseStyle implements EllipseStyle {
+  constructor(
+    private readonly globalStyle: EllipseStyle | null,
+    private readonly sourcePresentations: ReadonlyMap<
+      string,
+      SourcePresentation | undefined
+    >,
+  ) {}
+
+  resolve(
+    detection: Detection,
+    context: EllipseStyleContext,
+  ): EllipseDrawInstruction | undefined {
+    const style = resolveSourceStyle(
+      detection,
+      this.globalStyle,
+      this.sourcePresentations,
+      "ellipseStyle",
     );
 
     return style?.resolve(detection, context);

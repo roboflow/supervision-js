@@ -1,4 +1,4 @@
-import type { BoxFillStyle, BoxStrokeStyle } from "#types/box-style";
+import type { FillStyle, OpenStrokeStyle, StrokeStyle } from "#types/paint-style";
 import type { Detection, Point } from "#types/detections";
 import type { AnnotationStyleContext } from "#types/style";
 
@@ -10,17 +10,32 @@ export type EllipseStyleContext = AnnotationStyleContext;
  * Omitting both angles draws a closed ellipse. Angles are radians measured
  * from the positive x axis before `rotation` is applied.
  */
-export interface EllipseDrawInstruction {
+interface EllipseDrawInstructionBase {
   readonly center: Point;
   readonly radiusX: number;
   readonly radiusY: number;
   /** Rotation in radians around the center. */
   readonly rotation?: number;
+}
+
+export interface ClosedEllipseDrawInstruction
+  extends EllipseDrawInstructionBase {
+  readonly startAngle?: never;
+  readonly endAngle?: never;
+  readonly fill?: FillStyle;
+  readonly stroke?: StrokeStyle;
+}
+
+export interface EllipseArcDrawInstruction extends EllipseDrawInstructionBase {
   readonly startAngle?: number;
   readonly endAngle?: number;
-  readonly fill?: BoxFillStyle;
-  readonly stroke?: BoxStrokeStyle;
+  readonly fill?: never;
+  readonly stroke?: OpenStrokeStyle;
 }
+
+export type EllipseDrawInstruction =
+  | ClosedEllipseDrawInstruction
+  | EllipseArcDrawInstruction;
 
 /**
  * Style contract of the `ellipse` annotation renderer.
