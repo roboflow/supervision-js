@@ -275,6 +275,36 @@ export function createDetectionPickKey(pick: DetectionPickResult | null) {
   ].join(":");
 }
 
+/**
+ * Compares the frame-independent membership of two ordered selections.
+ *
+ * Detection ids retain their runtime type, so numeric `1` and string `"1"`
+ * remain distinct identities. Anonymous detections keep their frame-local
+ * index identity.
+ */
+export function haveSameDetectionPickIdentities(
+  current: readonly DetectionPickResult[],
+  next: readonly DetectionPickResult[],
+) {
+  if (current.length !== next.length) {
+    return false;
+  }
+
+  return current.every((pick, index) => {
+    const nextPick = next[index];
+    if (!nextPick) {
+      return false;
+    }
+
+    const id = pick.detection.id;
+    const nextId = nextPick.detection.id;
+
+    return id === undefined || nextId === undefined
+      ? id === nextId && pick.detectionIndex === nextPick.detectionIndex
+      : typeof id === typeof nextId && id === nextId;
+  });
+}
+
 export function rebaseDetectionPickToFrame(
   pick: DetectionPickResult | null,
   frame: DetectionFrame | undefined,
@@ -365,9 +395,17 @@ function detectionPickKey(pick: DetectionPickResult) {
     return ["anonymous", pick.detectionIndex];
   }
 
+  const idType = typeof pick.detection.id;
+
   return hasUniqueDetectionId(pick.frame, pick.detection.id)
-    ? ["id", String(pick.detection.id)]
-    : ["duplicate-id", String(pick.detection.id), "index", pick.detectionIndex];
+    ? ["id", idType, String(pick.detection.id)]
+    : [
+        "duplicate-id",
+        idType,
+        String(pick.detection.id),
+        "index",
+        pick.detectionIndex,
+      ];
 }
 
 function hasUniqueDetectionId(frame: DetectionFrame, id: string | number) {

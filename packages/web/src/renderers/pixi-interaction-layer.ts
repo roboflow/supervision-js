@@ -1,6 +1,7 @@
 import {
   createDetectionPickKey,
   followDetectionPickAcrossFrames,
+  haveSameDetectionPickIdentities,
   pickDetectionAtPoint,
   rebaseDetectionPickToFrame,
   getDetectionRect,
@@ -486,9 +487,10 @@ export function createPixiInteractionLayer(options: {
     });
     const currentKeys = selectedPicks.map(createDetectionPickKey).join("|");
     const nextKeys = nextSelectedPicks.map(createDetectionPickKey).join("|");
-    const identityChanged =
-      selectionIdentityKey(selectedPicks) !==
-      selectionIdentityKey(nextSelectedPicks);
+    const identityChanged = !haveSameDetectionPickIdentities(
+      selectedPicks,
+      nextSelectedPicks,
+    );
 
     selectedPicks = nextSelectedPicks;
     selectedPick = nextSelectedPicks.at(-1) ?? null;
@@ -507,20 +509,6 @@ export function createPixiInteractionLayer(options: {
       options.interaction.onSelect?.(selectedPick);
       options.interaction.onSelectionChange?.(selectedPicks);
     }
-  }
-
-  /**
-   * Frame-independent identity of a selection: which detections are selected,
-   * regardless of which frame snapshot currently backs their picks.
-   */
-  function selectionIdentityKey(picks: readonly DetectionPickResult[]) {
-    return picks
-      .map((pick) =>
-        pick.detection.id === undefined
-          ? `index:${pick.detectionIndex}`
-          : `id:${String(pick.detection.id)}`,
-      )
-      .join("|");
   }
 
   function setHoveredPick(nextPick: DetectionPickResult | null) {

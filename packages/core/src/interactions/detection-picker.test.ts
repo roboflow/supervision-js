@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   createDetectionPickKey,
   followDetectionPickAcrossFrames,
+  haveSameDetectionPickIdentities,
   pickDetectionByMaskId,
   pickDetectionAtPoint,
   rebaseDetectionPickToFrame,
@@ -52,7 +53,7 @@ describe("detection picker", () => {
 
     expect(pick?.detection.id).toBe("small");
     expect(pick ? createDetectionPickKey(pick) : null).toBe(
-      "12:0.4:id:small:box:geometry",
+      "12:0.4:id:string:small:box:geometry",
     );
   });
 
@@ -455,5 +456,27 @@ describe("detection picker", () => {
       detectionIndex: 1,
       detection: cloned.detections[1],
     });
+  });
+
+  it("keeps numeric and string ids as distinct selection identities", () => {
+    const numericFrame = {
+      detections: [{ id: 1, rect: { height: 10, width: 10, x: 10, y: 10 } }],
+      frameIndex: 1,
+      mediaTime: 0,
+    } satisfies DetectionFrame;
+    const stringFrame = {
+      detections: [{ id: "1", rect: { height: 10, width: 10, x: 10, y: 10 } }],
+      frameIndex: 2,
+      mediaTime: 0.033,
+    } satisfies DetectionFrame;
+    const numericPick = pickDetectionAtPoint(numericFrame, { x: 10, y: 10 })!;
+    const stringPick = pickDetectionAtPoint(stringFrame, { x: 10, y: 10 })!;
+
+    expect(haveSameDetectionPickIdentities([numericPick], [numericPick])).toBe(
+      true,
+    );
+    expect(haveSameDetectionPickIdentities([numericPick], [stringPick])).toBe(
+      false,
+    );
   });
 });

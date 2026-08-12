@@ -535,6 +535,60 @@ describe("pixi interaction layer", () => {
     }
   });
 
+  it("reports removal when a numeric id is replaced by its string form", () => {
+    const onSelect = vi.fn();
+    const onSelectionChange = vi.fn();
+    const numericFrame = {
+      detections: [
+        {
+          className: "player",
+          id: 1,
+          rect: { height: 30, width: 20, x: 10, y: 15 },
+        },
+      ],
+      frameIndex: 3,
+      mediaTime: 0.1,
+    } satisfies DetectionFrame;
+    const stringFrame = {
+      detections: [
+        {
+          className: "player",
+          id: "1",
+          rect: { height: 30, width: 20, x: 10, y: 15 },
+        },
+      ],
+      frameIndex: 4,
+      mediaTime: 0.2,
+    } satisfies DetectionFrame;
+    let activeFrame: DetectionFrame = numericFrame;
+    const layer = createPixiInteractionLayer({
+      Container: FakeContainer as never,
+      Rectangle: FakeRectangle as never,
+      canInteract: () => true,
+      detectionTimeline: createTimeline(() => activeFrame),
+      interaction: {
+        mode: MediaInteractionMode.PausedOnly,
+        onSelect,
+        onSelectionChange,
+      },
+    });
+    const display = layer.createDisplay({
+      height: 80,
+      width: 120,
+    }) as FakeContainer;
+
+    layer.drawFrame(0.1);
+    display.emit("pointermove", createPointerEvent(display, 15, 20));
+    display.emit("pointertap", createPointerEvent(display, 15, 20));
+
+    activeFrame = stringFrame;
+    layer.drawFrame(0.2);
+
+    expect(layer.getState().selectedPick).toBeNull();
+    expect(onSelect).toHaveBeenLastCalledWith(null);
+    expect(onSelectionChange).toHaveBeenLastCalledWith([]);
+  });
+
   it("keeps the selection following its detection during paused-only playback", () => {
     const onSelect = vi.fn();
     const followedFrame: DetectionFrame = {
