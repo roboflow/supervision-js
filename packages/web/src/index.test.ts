@@ -57,6 +57,7 @@ describe("package entrypoint", () => {
       "BaseInteractionStyle",
       "BaseKeypointStyle",
       "BaseLabelStyle",
+      "BaseMarkerStyle",
       "BaseMaskStyle",
       "BasePolygonStyle",
       "BasePolylineStyle",
@@ -76,6 +77,8 @@ describe("package entrypoint", () => {
       "KeypointVisibility",
       "LabelPlacement",
       "LabelVisibilityMode",
+      "MarkerShape",
+      "MarkerSizeSpace",
       "MaskRenderMode",
       "MediaInteractionMode",
       "MediaNormalizationAudioCodec",
@@ -135,6 +138,7 @@ describe("package entrypoint", () => {
       label: expect.any(Function),
       mask: expect.any(Function),
       maskHalo: expect.any(Function),
+      marker: expect.any(Function),
       polygon: expect.any(Function),
       polyline: expect.any(Function),
       region: expect.any(Function),
@@ -160,6 +164,7 @@ describe("package entrypoint", () => {
     expect(entrypoint.BaseInteractionStyle).toEqual(expect.any(Function));
     expect(entrypoint.BaseLabelStyle).toEqual(expect.any(Function));
     expect(entrypoint.BaseMaskStyle).toEqual(expect.any(Function));
+    expect(entrypoint.BaseMarkerStyle).toEqual(expect.any(Function));
     expect(entrypoint.createDefaultAnnotationPresentation).toEqual(
       expect.any(Function),
     );

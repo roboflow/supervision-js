@@ -166,6 +166,7 @@ export async function createMediaSession(
       labelStyle: initialPresentation.labelStyle,
       maskHaloStyle: initialPresentation.maskHaloStyle,
       maskStyle: initialPresentation.maskStyle,
+      markerStyle: initialPresentation.markerStyle,
       polygonStyle: initialPresentation.polygonStyle,
       polylineStyle: initialPresentation.polylineStyle,
       renderers: initialPresentation.renderers,

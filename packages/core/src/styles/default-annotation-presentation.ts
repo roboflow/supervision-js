@@ -3,6 +3,7 @@ import { BaseBoxStyle } from "#styles/box-style";
 import { BaseKeypointStyle } from "#styles/keypoint-style";
 import { BaseLabelStyle } from "#styles/label-style";
 import { BaseMaskStyle } from "#styles/mask-style";
+import { BaseMarkerStyle } from "#styles/marker-style";
 import type { MaskHaloStyle } from "#types/mask-halo-style";
 import { BasePolygonStyle } from "#styles/polygon-style";
 import { BasePolylineStyle } from "#styles/polyline-style";
@@ -217,6 +218,11 @@ export function createDefaultMaskStyle(
       width: DEFAULT_OUTLINE_WIDTH,
     }),
   });
+}
+
+/** Canonical opt-in marker presentation. */
+export function createDefaultMarkerStyle(): BaseMarkerStyle {
+  return new BaseMarkerStyle();
 }
 
 const DEFAULT_MASK_HALO_ALPHA = 0.6;

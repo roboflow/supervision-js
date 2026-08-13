@@ -33,6 +33,7 @@ const expectedStyleFields = {
   label: "labelStyle",
   mask: "maskStyle",
   maskHalo: "maskHaloStyle",
+  marker: "markerStyle",
   polygon: "polygonStyle",
   polyline: "polylineStyle",
 } as const satisfies Record<
@@ -57,6 +58,7 @@ const styleFieldPairingIsExact: {
   label: true,
   mask: true,
   maskHalo: true,
+  marker: true,
   polygon: true,
   polyline: true,
 };
@@ -75,6 +77,7 @@ const expectedCanonicalStyles = {
   // The mask halo's canonical style is a plain resolver object and the
   // capability is opt-in, so it never appears in the default presentation.
   maskHalo: null,
+  marker: null,
   polygon: BasePolygonStyle,
   polyline: BasePolylineStyle,
 } as const satisfies Record<
@@ -148,6 +151,14 @@ describe("annotation renderer registry", () => {
       kind: "label",
     });
     expect(annotationRenderers.mask()).toEqual({ id: "mask", kind: "mask" });
+    expect(annotationRenderers.maskHalo()).toEqual({
+      id: "maskHalo",
+      kind: "maskHalo",
+    });
+    expect(annotationRenderers.marker()).toEqual({
+      id: "marker",
+      kind: "marker",
+    });
     expect(annotationRenderers.polygon()).toEqual({
       id: "polygon",
       kind: "polygon",

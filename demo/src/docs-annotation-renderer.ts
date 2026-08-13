@@ -13,6 +13,7 @@ export const docsAnnotationRendererIds = [
   "ellipse",
   "masks",
   "mask-halo",
+  "markers",
   "labels",
   "polygons",
   "polylines",
@@ -173,6 +174,28 @@ export const docsAnnotationRenderers: Readonly<
     description: "GPU glow following the exact mask silhouette",
     title: "Mask Halo",
   },
+  markers: {
+    controls: [
+      {
+        key: "markerSize",
+        label: "Marker size",
+        max: 32,
+        min: 4,
+        step: 1,
+        unit: "pixels",
+      },
+      {
+        key: "markerStrokeWidth",
+        label: "Stroke width",
+        max: 8,
+        min: 1,
+        step: 1,
+        unit: "pixels",
+      },
+    ],
+    description: "Anchored marker at each detection center",
+    title: "Markers",
+  },
   labels: {
     controls: [
       {
@@ -294,6 +317,7 @@ export function createDocsAnnotationRendererPresentation(
     maskHaloColor: DOCS_MASK_HALO_COLOR,
     maskHaloEnabled: renderer === "mask-halo",
     masksEnabled: renderer === "masks" || renderer === "polylines",
+    markersEnabled: renderer === "markers",
     polygonsEnabled: renderer === "polygons",
     polylinesEnabled: renderer === "polylines",
     maskFillAlpha: 1,
@@ -405,6 +429,17 @@ export function createDocsAnnotationRendererSnippet(
               }
             : undefined,
       },
+    }),
+  ],
+});`;
+    case "markers":
+      return `session.setPresentation({
+  renderers: [
+    annotationRenderers.marker({
+      style: new BaseMarkerStyle({
+        size: ${formatNumber(settings.markerSize)},
+        stroke: { width: ${formatNumber(settings.markerStrokeWidth)} },
+      }),
     }),
   ],
 });`;

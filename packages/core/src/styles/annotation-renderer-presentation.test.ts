@@ -120,6 +120,7 @@ describe("annotation renderer presentation", () => {
       label: annotationRenderers.label,
       mask: annotationRenderers.mask,
       maskHalo: annotationRenderers.maskHalo,
+      marker: annotationRenderers.marker,
       polygon: annotationRenderers.polygon,
       polyline: annotationRenderers.polyline,
     } as const;

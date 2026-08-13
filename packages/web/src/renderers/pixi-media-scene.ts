@@ -15,6 +15,7 @@ import type { AnnotationVisibility } from "supervision-js-core";
 import type {
   BoxCornerStyle,
   EllipseStyle,
+  MarkerStyle,
   ShapeStyle,
 } from "supervision-js-core";
 import type { Point } from "supervision-js-core";
@@ -107,6 +108,7 @@ export async function createPixiMediaScene(
     options.boxCornerStyle ?? null;
   let currentLabelStyle: LabelStyle | null = options.labelStyle ?? null;
   let currentMaskStyle: MaskStyle | null = options.maskStyle ?? null;
+  let currentMarkerStyle: MarkerStyle | null = options.markerStyle ?? null;
   let currentMaskHaloStyle: MaskHaloStyle | null =
     options.maskHaloStyle ?? null;
   // Halo-only presentations still need prepared id-mask artifacts; this
@@ -166,6 +168,7 @@ export async function createPixiMediaScene(
     const kindShapeStyle = resolveAnnotationShapeStyle({
       boxCornerStyle: currentBoxCornerStyle,
       ellipseStyle: currentEllipseStyle,
+      markerStyle: currentMarkerStyle,
     });
     const baseShapeStyle = options.shapeStyle ?? null;
 
@@ -935,13 +938,17 @@ export async function createPixiMediaScene(
 
       if (
         presentation.boxCornerStyle !== undefined ||
-        presentation.ellipseStyle !== undefined
+        presentation.ellipseStyle !== undefined ||
+        presentation.markerStyle !== undefined
       ) {
         if (presentation.boxCornerStyle !== undefined) {
           currentBoxCornerStyle = presentation.boxCornerStyle;
         }
         if (presentation.ellipseStyle !== undefined) {
           currentEllipseStyle = presentation.ellipseStyle;
+        }
+        if (presentation.markerStyle !== undefined) {
+          currentMarkerStyle = presentation.markerStyle;
         }
         vectorLayer.setStyles({ shapeStyle: resolveVectorShapeStyle() });
       }

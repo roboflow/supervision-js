@@ -4,6 +4,7 @@ import type {
   EllipseDrawInstruction,
   EllipseShapeInstruction,
   EllipseStyle,
+  MarkerStyle,
   ShapeDrawInstruction,
   ShapeStyle,
 } from "supervision-js-core";
@@ -21,11 +22,13 @@ import type {
 export function resolveAnnotationShapeStyle(styles: {
   readonly boxCornerStyle?: BoxCornerStyle | null;
   readonly ellipseStyle?: EllipseStyle | null;
+  readonly markerStyle?: MarkerStyle | null;
 }): ShapeStyle | null {
   const boxCornerStyle = styles.boxCornerStyle ?? null;
   const ellipseStyle = styles.ellipseStyle ?? null;
+  const markerStyle = styles.markerStyle ?? null;
 
-  if (!boxCornerStyle && !ellipseStyle) {
+  if (!boxCornerStyle && !ellipseStyle && !markerStyle) {
     return null;
   }
 
@@ -41,6 +44,11 @@ export function resolveAnnotationShapeStyle(styles: {
           segments: boxCorners.segments,
           stroke: boxCorners.stroke,
         });
+      }
+      const marker = markerStyle?.resolve(detection, context);
+
+      if (marker) {
+        instructions.push({ kind: ShapeInstructionKind.Marker, ...marker });
       }
       const ellipse = ellipseStyle?.resolve(detection, context);
 

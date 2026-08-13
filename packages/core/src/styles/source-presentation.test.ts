@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { BaseBoxStyle } from "#styles/box-style";
 import { BaseLabelStyle } from "#styles/label-style";
 import { BaseMaskStyle } from "#styles/mask-style";
+import { BaseMarkerStyle } from "#styles/marker-style";
 import { createDefaultMaskHaloStyle } from "#styles/default-annotation-presentation";
 import { BaseKeypointStyle } from "#styles/keypoint-style";
 import { BasePolygonStyle } from "#styles/polygon-style";
@@ -286,6 +287,36 @@ describe("createSourceAwarePresentation", () => {
     expect(
       presentation.boxCornerStyle?.resolve(createDetection("draft"), context)
         ?.stroke.color,
+    ).toBe(0xabcdef);
+  });
+
+  it("applies source overrides to marker renderer styles", () => {
+    const presentation = createSourceAwarePresentation(
+      {
+        markerStyle: new BaseMarkerStyle({
+          fill: { color: 0x123456 },
+        }),
+      },
+      [
+        {
+          id: "draft",
+          presentation: {
+            markerStyle: new BaseMarkerStyle({
+              fill: { color: 0xabcdef },
+            }),
+          },
+        },
+      ],
+    );
+    const context = { detectionIndex: 0, frame, mediaTime: 0 };
+
+    expect(
+      presentation.markerStyle?.resolve(createDetection("base"), context)?.fill
+        ?.color,
+    ).toBe(0x123456);
+    expect(
+      presentation.markerStyle?.resolve(createDetection("draft"), context)?.fill
+        ?.color,
     ).toBe(0xabcdef);
   });
 
