@@ -8,7 +8,6 @@ import {
   type AnnotationRendererStyleFieldFor,
 } from "#styles/annotation-renderer-registry";
 import { BaseBoxStyle } from "#styles/box-style";
-import { BaseBoxCornerStyle } from "#styles/box-corner-style";
 import { createDefaultAnnotationPresentation } from "#styles/default-annotation-presentation";
 import { BaseKeypointStyle } from "#styles/keypoint-style";
 import { BaseLabelStyle } from "#styles/label-style";

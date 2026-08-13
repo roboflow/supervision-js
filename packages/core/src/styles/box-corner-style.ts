@@ -64,10 +64,16 @@ export class BaseBoxCornerStyle implements BoxCornerStyle {
     const top = y - height / 2;
     const bottom = y + height / 2;
 
-    const { alignment: _alignment, ...openStroke } = resolveStrokeStyle(
-      stroke,
-      DEFAULT_CORNER_STROKE,
-    );
+    const resolvedStroke = resolveStrokeStyle(stroke, DEFAULT_CORNER_STROKE);
+    const openStroke = {
+      alpha: resolvedStroke.alpha,
+      cap: resolvedStroke.cap,
+      color: resolvedStroke.color,
+      dash: resolvedStroke.dash,
+      join: resolvedStroke.join,
+      miterLimit: resolvedStroke.miterLimit,
+      width: resolvedStroke.width,
+    };
 
     return {
       segments: [

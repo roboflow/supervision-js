@@ -27,7 +27,6 @@ import {
 type PackageEntrypoint = typeof import("./index");
 
 let BaseBoxStyle: PackageEntrypoint["BaseBoxStyle"];
-let BaseBoxCornerStyle: PackageEntrypoint["BaseBoxCornerStyle"];
 let BaseMaskStyle: PackageEntrypoint["BaseMaskStyle"];
 let DetectionBufferStatus: PackageEntrypoint["DetectionBufferStatus"];
 let DetectionFrameSelectionMode: PackageEntrypoint["DetectionFrameSelectionMode"];
@@ -40,7 +39,6 @@ describe("package entrypoint", () => {
     const entrypoint = await import("./index");
 
     BaseBoxStyle = entrypoint.BaseBoxStyle;
-    BaseBoxCornerStyle = entrypoint.BaseBoxCornerStyle;
     BaseMaskStyle = entrypoint.BaseMaskStyle;
     DetectionBufferStatus = entrypoint.DetectionBufferStatus;
     DetectionFrameSelectionMode = entrypoint.DetectionFrameSelectionMode;
