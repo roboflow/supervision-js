@@ -252,6 +252,39 @@ describe("createSourceAwarePresentation", () => {
     ).toBeUndefined();
   });
 
+  it("applies source overrides to box-corner renderer styles", () => {
+    const globalStyle = {
+      resolve() {
+        return {
+          segments: [],
+          stroke: { alpha: 1, color: 0x123456, width: 2 },
+        };
+      },
+    };
+    const sourceStyle = {
+      resolve() {
+        return {
+          segments: [],
+          stroke: { alpha: 1, color: 0xabcdef, width: 3 },
+        };
+      },
+    };
+    const presentation = createSourceAwarePresentation(
+      { boxCornerStyle: globalStyle },
+      [{ id: "draft", presentation: { boxCornerStyle: sourceStyle } }],
+    );
+    const context = { detectionIndex: 0, frame, mediaTime: 0 };
+
+    expect(
+      presentation.boxCornerStyle?.resolve(createDetection("base"), context)
+        ?.stroke.color,
+    ).toBe(0x123456);
+    expect(
+      presentation.boxCornerStyle?.resolve(createDetection("draft"), context)
+        ?.stroke.color,
+    ).toBe(0xabcdef);
+  });
+
   it("keeps global interaction and focus styles source-aware without wrapping them", () => {
     const globalPresentation: TestRendererPresentation = {
       focusStyle: {
