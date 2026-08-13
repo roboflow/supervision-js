@@ -1,4 +1,5 @@
 import type { BoxStyle } from "#types/box-style";
+import type { BoxCornerStyle } from "#types/box-corner-style";
 import type { EllipseStyle } from "#types/ellipse-style";
 import type { KeypointStyle } from "#types/keypoint-style";
 import type { LabelStyle } from "#types/label-style";
@@ -17,6 +18,7 @@ import type { Detection } from "#types/detections";
  */
 export const annotationRendererKinds = [
   "box",
+  "box-corners",
   "ellipse",
   "keypoints",
   "label",
@@ -39,6 +41,7 @@ export type AnnotationRendererKind = (typeof annotationRendererKinds)[number];
  */
 export type AnnotationRenderer =
   | BoxAnnotationRenderer
+  | BoxCornerAnnotationRenderer
   | EllipseAnnotationRenderer
   | KeypointAnnotationRenderer
   | LabelAnnotationRenderer
@@ -66,6 +69,11 @@ interface BaseAnnotationRenderer {
 export interface BoxAnnotationRenderer extends BaseAnnotationRenderer {
   readonly kind: "box";
   readonly style?: BoxStyle | null;
+}
+
+export interface BoxCornerAnnotationRenderer extends BaseAnnotationRenderer {
+  readonly kind: "box-corners";
+  readonly style?: BoxCornerStyle | null;
 }
 
 export interface EllipseAnnotationRenderer extends BaseAnnotationRenderer {
@@ -215,10 +223,30 @@ export interface RegionAnnotationRenderer extends BaseAnnotationRenderer {
 
 /** Creates the descriptor for every supported renderer kind. */
 export type AnnotationRendererFactory = {
-  readonly [TKind in Exclude<AnnotationRendererKind, "region">]: (
-    options?: AnnotationRendererStyleOptions<TKind>,
-  ) => AnnotationRendererOfKind<TKind>;
-} & {
+  readonly box: (
+    options?: AnnotationRendererStyleOptions<"box">,
+  ) => BoxAnnotationRenderer;
+  readonly boxCorners: (
+    options?: AnnotationRendererStyleOptions<"box-corners">,
+  ) => BoxCornerAnnotationRenderer;
+  readonly ellipse: (
+    options?: AnnotationRendererStyleOptions<"ellipse">,
+  ) => EllipseAnnotationRenderer;
+  readonly keypoints: (
+    options?: AnnotationRendererStyleOptions<"keypoints">,
+  ) => KeypointAnnotationRenderer;
+  readonly label: (
+    options?: AnnotationRendererStyleOptions<"label">,
+  ) => LabelAnnotationRenderer;
+  readonly mask: (
+    options?: AnnotationRendererStyleOptions<"mask">,
+  ) => MaskAnnotationRenderer;
+  readonly polygon: (
+    options?: AnnotationRendererStyleOptions<"polygon">,
+  ) => PolygonAnnotationRenderer;
+  readonly polyline: (
+    options?: AnnotationRendererStyleOptions<"polyline">,
+  ) => PolylineAnnotationRenderer;
   readonly region: (
     options: Omit<RegionAnnotationRenderer, "kind">,
   ) => RegionAnnotationRenderer;
@@ -238,6 +266,7 @@ type AnnotationRendererStyleOptions<
  */
 export const annotationRenderers: AnnotationRendererFactory = {
   box: (options) => createAnnotationRenderer("box", options),
+  boxCorners: (options) => createAnnotationRenderer("box-corners", options),
   ellipse: (options) => createAnnotationRenderer("ellipse", options),
   keypoints: (options) => createAnnotationRenderer("keypoints", options),
   label: (options) => createAnnotationRenderer("label", options),

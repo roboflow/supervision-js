@@ -1,3 +1,4 @@
+import { BaseBoxCornerStyle } from "#styles/box-corner-style";
 import { BaseBoxStyle } from "#styles/box-style";
 import { BaseKeypointStyle } from "#styles/keypoint-style";
 import { BaseLabelStyle } from "#styles/label-style";
@@ -94,6 +95,17 @@ export function createDefaultBoxStyle(
       color: getClassColor(detection),
       width: DEFAULT_OUTLINE_WIDTH,
     }),
+  });
+}
+
+/** Canonical opt-in BoxCornerAnnotator-style presentation. */
+export function createDefaultBoxCornerStyle(
+  options: DefaultAnnotationPresentationOptions = {},
+): BaseBoxCornerStyle {
+  const getClassColor = createClassColorResolver(options);
+
+  return new BaseBoxCornerStyle({
+    stroke: (detection) => ({ color: getClassColor(detection) }),
   });
 }
 

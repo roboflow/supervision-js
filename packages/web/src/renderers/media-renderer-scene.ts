@@ -1,5 +1,6 @@
 import type { DecodedVideoSample } from "#media/media-source";
 import type { BoxStyle } from "supervision-js-core";
+import type { BoxCornerStyle } from "supervision-js-core";
 import type { EllipseStyle } from "supervision-js-core";
 import type {
   BufferedDetectionTimeline,
@@ -50,6 +51,7 @@ export interface MediaRendererSceneOptions {
   readonly maxDevicePixelRatio: number | undefined;
   readonly detectionTimeline: BufferedDetectionTimeline;
   readonly boxStyle: BoxStyle | null | undefined;
+  readonly boxCornerStyle: BoxCornerStyle | null | undefined;
   readonly ellipseStyle: EllipseStyle | null | undefined;
   readonly focusStyle: FocusStyle | null | undefined;
   readonly labelStyle: LabelStyle | null | undefined;

@@ -8,6 +8,7 @@ import {
   type AnnotationRendererStyleFieldFor,
 } from "#styles/annotation-renderer-registry";
 import { BaseBoxStyle } from "#styles/box-style";
+import { BaseBoxCornerStyle } from "#styles/box-corner-style";
 import { createDefaultAnnotationPresentation } from "#styles/default-annotation-presentation";
 import { BaseKeypointStyle } from "#styles/keypoint-style";
 import { BaseLabelStyle } from "#styles/label-style";
@@ -27,6 +28,7 @@ type IsExact<TLeft, TRight> = [TLeft] extends [TRight]
 
 const expectedStyleFields = {
   box: "boxStyle",
+  "box-corners": "boxCornerStyle",
   ellipse: "ellipseStyle",
   keypoints: "keypointStyle",
   label: "labelStyle",
@@ -50,6 +52,7 @@ const styleFieldPairingIsExact: {
   >;
 } = {
   box: true,
+  "box-corners": true,
   ellipse: true,
   keypoints: true,
   label: true,
@@ -61,6 +64,9 @@ const styleFieldPairingIsExact: {
 
 const expectedCanonicalStyles = {
   box: BaseBoxStyle,
+  // Box corners are opt-in, like ellipses, and therefore do not appear in
+  // the legacy default presentation.
+  "box-corners": null,
   // The ellipse's canonical style is a plain resolver object and the
   // capability is opt-in, so it never appears in the default presentation.
   ellipse: null,
@@ -125,9 +131,32 @@ describe("annotation renderer registry", () => {
   });
 
   it("builds a descriptor whose id and kind match the vocabulary", () => {
-    for (const kind of styledAnnotationRendererKinds) {
-      expect(annotationRenderers[kind]()).toEqual({ id: kind, kind });
-    }
+    expect(annotationRenderers.box()).toEqual({ id: "box", kind: "box" });
+    expect(annotationRenderers.boxCorners()).toEqual({
+      id: "box-corners",
+      kind: "box-corners",
+    });
+    expect(annotationRenderers.ellipse()).toEqual({
+      id: "ellipse",
+      kind: "ellipse",
+    });
+    expect(annotationRenderers.keypoints()).toEqual({
+      id: "keypoints",
+      kind: "keypoints",
+    });
+    expect(annotationRenderers.label()).toEqual({
+      id: "label",
+      kind: "label",
+    });
+    expect(annotationRenderers.mask()).toEqual({ id: "mask", kind: "mask" });
+    expect(annotationRenderers.polygon()).toEqual({
+      id: "polygon",
+      kind: "polygon",
+    });
+    expect(annotationRenderers.polyline()).toEqual({
+      id: "polyline",
+      kind: "polyline",
+    });
   });
 
   it("builds independently identified region renderers", () => {

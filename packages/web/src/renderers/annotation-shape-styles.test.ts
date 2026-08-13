@@ -2,7 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ShapeInstructionKind } from "supervision-js-core";
 import { resolveAnnotationShapeStyle } from "#renderers/annotation-shape-styles";
-import type { Detection, EllipseStyleContext } from "supervision-js-core";
+import type {
+  BoxCornerStyleContext,
+  Detection,
+  EllipseStyleContext,
+} from "supervision-js-core";
 
 const detection: Detection = {
   className: "player",
@@ -13,6 +17,7 @@ const context: EllipseStyleContext = {
   frame: { detections: [detection], mediaTime: 0 },
   mediaTime: 0,
 };
+const boxCornerContext: BoxCornerStyleContext = context;
 
 describe("annotation shape styles", () => {
   it("returns no shape style when no shape-backed kind is configured", () => {
@@ -42,6 +47,38 @@ describe("annotation shape styles", () => {
         radiusX: 15,
         radiusY: 5,
         startAngle: -1,
+        stroke: { alpha: 1, color: 0x123456, width: 2 },
+      },
+    ]);
+  });
+
+  it("lowers box-corner segments into one open path instruction", () => {
+    const style = resolveAnnotationShapeStyle({
+      boxCornerStyle: {
+        resolve: () => ({
+          segments: [
+            [
+              { x: 10, y: 20 },
+              { x: 5, y: 20 },
+              { x: 5, y: 25 },
+            ],
+          ],
+          stroke: { alpha: 1, color: 0x123456, width: 2 },
+        }),
+      },
+    });
+
+    expect(style?.resolve(detection, boxCornerContext)).toEqual([
+      {
+        closed: false,
+        kind: ShapeInstructionKind.Path,
+        segments: [
+          [
+            { x: 10, y: 20 },
+            { x: 5, y: 20 },
+            { x: 5, y: 25 },
+          ],
+        ],
         stroke: { alpha: 1, color: 0x123456, width: 2 },
       },
     ]);

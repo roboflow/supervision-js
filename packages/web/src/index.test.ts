@@ -27,6 +27,7 @@ import {
 type PackageEntrypoint = typeof import("./index");
 
 let BaseBoxStyle: PackageEntrypoint["BaseBoxStyle"];
+let BaseBoxCornerStyle: PackageEntrypoint["BaseBoxCornerStyle"];
 let BaseMaskStyle: PackageEntrypoint["BaseMaskStyle"];
 let DetectionBufferStatus: PackageEntrypoint["DetectionBufferStatus"];
 let DetectionFrameSelectionMode: PackageEntrypoint["DetectionFrameSelectionMode"];
@@ -39,6 +40,7 @@ describe("package entrypoint", () => {
     const entrypoint = await import("./index");
 
     BaseBoxStyle = entrypoint.BaseBoxStyle;
+    BaseBoxCornerStyle = entrypoint.BaseBoxCornerStyle;
     BaseMaskStyle = entrypoint.BaseMaskStyle;
     DetectionBufferStatus = entrypoint.DetectionBufferStatus;
     DetectionFrameSelectionMode = entrypoint.DetectionFrameSelectionMode;
@@ -51,6 +53,7 @@ describe("package entrypoint", () => {
     const entrypoint = await import("./index");
 
     expect(Object.keys(entrypoint).sort()).toEqual([
+      "BaseBoxCornerStyle",
       "BaseBoxStyle",
       "BaseFocusStyle",
       "BaseInteractionStyle",
@@ -128,6 +131,7 @@ describe("package entrypoint", () => {
     expect(entrypoint.createMediaRenderer).toEqual(expect.any(Function));
     expect(entrypoint.annotationRenderers).toEqual({
       box: expect.any(Function),
+      boxCorners: expect.any(Function),
       ellipse: expect.any(Function),
       keypoints: expect.any(Function),
       label: expect.any(Function),
@@ -153,6 +157,7 @@ describe("package entrypoint", () => {
     expect(entrypoint.MediaPreparationError).toEqual(expect.any(Function));
     expect(entrypoint.probeMedia).toEqual(expect.any(Function));
     expect(entrypoint.BaseBoxStyle).toEqual(expect.any(Function));
+    expect(entrypoint.BaseBoxCornerStyle).toEqual(expect.any(Function));
     expect(entrypoint.BaseFocusStyle).toEqual(expect.any(Function));
     expect(entrypoint.BaseInteractionStyle).toEqual(expect.any(Function));
     expect(entrypoint.BaseLabelStyle).toEqual(expect.any(Function));

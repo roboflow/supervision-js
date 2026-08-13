@@ -9,6 +9,7 @@ const BASKETBALL_TRACE_TRACK_ID = "basketball-track:0";
 
 export const docsAnnotationRendererIds = [
   "boxes",
+  "box-corners",
   "ellipse",
   "masks",
   "mask-halo",
@@ -75,6 +76,28 @@ export const docsAnnotationRenderers: Readonly<
     ],
     description: "Axis-aligned detection bounds",
     title: "Boxes",
+  },
+  "box-corners": {
+    controls: [
+      {
+        key: "boxCornerLength",
+        label: "Corner length",
+        max: 48,
+        min: 4,
+        step: 1,
+        unit: "pixels",
+      },
+      {
+        key: "boxCornerStrokeWidth",
+        label: "Stroke width",
+        max: 8,
+        min: 1,
+        step: 1,
+        unit: "pixels",
+      },
+    ],
+    description: "Four open corner segments derived from detection bounds",
+    title: "Box Corners",
   },
   ellipse: {
     controls: [
@@ -258,6 +281,7 @@ export function createDocsAnnotationRendererPresentation(
 ): Partial<DemoPresentationSettings> {
   return {
     boxesEnabled: renderer === "boxes",
+    boxCornersEnabled: renderer === "box-corners",
     // Pinned so the live snippet's fixed color is exactly what renders.
     ellipseColor: DOCS_ELLIPSE_COLOR,
     ellipsesEnabled: renderer === "ellipse",
@@ -341,6 +365,17 @@ export function createDocsAnnotationRendererSnippet(
           };
         },
       },
+    }),
+  ],
+});`;
+    case "box-corners":
+      return `session.setPresentation({
+  renderers: [
+    annotationRenderers.boxCorners({
+      style: new BaseBoxCornerStyle({
+        length: ${formatNumber(settings.boxCornerLength)},
+        stroke: { width: ${formatNumber(settings.boxCornerStrokeWidth)} },
+      }),
     }),
   ],
 });`;

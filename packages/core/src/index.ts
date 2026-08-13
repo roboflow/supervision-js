@@ -46,6 +46,8 @@ export {
 // Presentation styles.
 export { BaseBoxStyle } from "#styles/box-style";
 export type { BaseBoxStyleOptions } from "#styles/box-style";
+export { BaseBoxCornerStyle } from "#styles/box-corner-style";
+export type { BaseBoxCornerStyleOptions } from "#types/box-corner-style";
 export { BaseFocusStyle } from "#styles/focus-style";
 export type { BaseFocusStyleOptions } from "#styles/focus-style";
 export { BaseInteractionStyle } from "#styles/interaction-style";
@@ -71,6 +73,7 @@ export {
   type AnnotationRendererFactory,
   type AnnotationRendererKind,
   type BoxAnnotationRenderer,
+  type BoxCornerAnnotationRenderer,
   type EllipseAnnotationRenderer,
   type KeypointAnnotationRenderer,
   type LabelAnnotationRenderer,
@@ -181,6 +184,11 @@ export {
   resolveMarkerGeometry,
   sampleEllipseArc,
 } from "#utils/shape-geometry";
+export type {
+  BoxCornerDrawInstruction,
+  BoxCornerStyle,
+  BoxCornerStyleContext,
+} from "#types/box-corner-style";
 export type {
   EllipseGeometry,
   MarkerGeometry,
