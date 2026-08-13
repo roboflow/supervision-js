@@ -2,6 +2,7 @@ import {
   BoxStrokeAlignment,
   BoxShape,
   BaseFocusStyle,
+  BaseBoxCornerStyle,
   BaseInteractionStyle,
   BaseKeypointStyle,
   BaseLabelStyle,
@@ -15,6 +16,7 @@ import {
   MaskRenderMode,
   annotationRenderers,
   type BoxDrawInstruction,
+  type BoxCornerStyle,
   type BoxStyle,
   type BoxStyleContext,
   type Detection,
@@ -36,6 +38,7 @@ export type DemoClassStyle = DetectionClassColorStyle;
 
 export interface DemoPresentationSettings {
   readonly boxesEnabled: boolean;
+  readonly boxCornersEnabled: boolean;
   readonly ellipsesEnabled: boolean;
   readonly focusEnabled: boolean;
   readonly keypointsEnabled: boolean;
@@ -44,6 +47,8 @@ export interface DemoPresentationSettings {
   readonly polygonsEnabled: boolean;
   readonly polylinesEnabled: boolean;
   readonly boxCornerRadius: number;
+  readonly boxCornerLength: number;
+  readonly boxCornerStrokeWidth: number;
   readonly boxStrokeWidth: number;
   readonly boxStrokeAlignment: BoxStrokeAlignment;
   readonly boxFillAlpha: number;
@@ -90,6 +95,7 @@ export interface DemoPresentationSettings {
 
 export type DemoPresentationLayerSetting =
   | "boxesEnabled"
+  | "boxCornersEnabled"
   | "ellipsesEnabled"
   | "focusEnabled"
   | "keypointsEnabled"
@@ -104,6 +110,7 @@ export type DemoPresentationAvailability = Partial<
 
 const demoPresentationLayerSettings: readonly DemoPresentationLayerSetting[] = [
   "boxesEnabled",
+  "boxCornersEnabled",
   "ellipsesEnabled",
   "focusEnabled",
   "keypointsEnabled",
@@ -147,6 +154,9 @@ const defaultDemoClassStyles: Record<string, DemoClassStyle> = {
 
 export const defaultDemoPresentationSettings: DemoPresentationSettings = {
   boxesEnabled: true,
+  boxCornersEnabled: false,
+  boxCornerLength: 20,
+  boxCornerStrokeWidth: 2,
   boxCornerRadius: 1,
   boxFillAlpha: 0.08,
   boxStrokeAlignment: BoxStrokeAlignment.Center,
@@ -201,6 +211,9 @@ export function createDemoPresentation(
   settings: DemoPresentationSettings,
 ): MediaRendererPresentation {
   const boxStyle = settings.boxesEnabled ? createDemoBoxStyle(settings) : null;
+  const boxCornerStyle = settings.boxCornersEnabled
+    ? createDemoBoxCornerStyle(settings)
+    : null;
   const ellipseStyle = settings.ellipsesEnabled
     ? createDemoEllipseStyle(settings)
     : null;
@@ -228,6 +241,7 @@ export function createDemoPresentation(
     // letterbox around non-matching aspect ratios.
     backgroundColor: 0xf3f4f6,
     boxStyle,
+    boxCornerStyle,
     // Class visibility rides the renderer-owned visibility contract so every
     // layer and the prepared-mask cache invalidate consistently.
     visibility: { hiddenClasses: settings.hiddenClasses },
@@ -242,6 +256,9 @@ export function createDemoPresentation(
     maskHaloStyle,
     renderers: [
       ...(boxStyle ? [annotationRenderers.box({ style: boxStyle })] : []),
+      ...(boxCornerStyle
+        ? [annotationRenderers.boxCorners({ style: boxCornerStyle })]
+        : []),
       ...(ellipseStyle
         ? [annotationRenderers.ellipse({ style: ellipseStyle })]
         : []),
@@ -261,6 +278,19 @@ export function createDemoPresentation(
       ...(labelStyle ? [annotationRenderers.label({ style: labelStyle })] : []),
     ],
   };
+}
+
+function createDemoBoxCornerStyle(
+  settings: DemoPresentationSettings,
+): BoxCornerStyle {
+  return new BaseBoxCornerStyle({
+    length: settings.boxCornerLength,
+    shouldRender: (detection) => passesConfidenceThreshold(detection, settings),
+    stroke: (detection) => ({
+      color: resolveClassStyle(detection, settings).stroke,
+      width: settings.boxCornerStrokeWidth,
+    }),
+  });
 }
 
 /**

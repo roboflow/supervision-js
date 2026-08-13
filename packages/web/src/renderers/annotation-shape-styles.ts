@@ -1,8 +1,10 @@
 import { ShapeInstructionKind } from "supervision-js-core";
 import type {
+  BoxCornerStyle,
   EllipseDrawInstruction,
   EllipseShapeInstruction,
   EllipseStyle,
+  ShapeDrawInstruction,
   ShapeStyle,
 } from "supervision-js-core";
 
@@ -17,19 +19,36 @@ import type {
  * resolves nothing for a detection simply contributes no instructions.
  */
 export function resolveAnnotationShapeStyle(styles: {
+  readonly boxCornerStyle?: BoxCornerStyle | null;
   readonly ellipseStyle?: EllipseStyle | null;
 }): ShapeStyle | null {
+  const boxCornerStyle = styles.boxCornerStyle ?? null;
   const ellipseStyle = styles.ellipseStyle ?? null;
 
-  if (!ellipseStyle) {
+  if (!boxCornerStyle && !ellipseStyle) {
     return null;
   }
 
   return {
     resolve(detection, context) {
-      const ellipse = ellipseStyle.resolve(detection, context);
+      const instructions: ShapeDrawInstruction[] = [];
+      const boxCorners = boxCornerStyle?.resolve(detection, context);
 
-      return ellipse ? [lowerEllipseInstruction(ellipse)] : undefined;
+      if (boxCorners) {
+        instructions.push({
+          closed: false,
+          kind: ShapeInstructionKind.Path,
+          segments: boxCorners.segments,
+          stroke: boxCorners.stroke,
+        });
+      }
+      const ellipse = ellipseStyle?.resolve(detection, context);
+
+      if (ellipse) {
+        instructions.push(lowerEllipseInstruction(ellipse));
+      }
+
+      return instructions.length > 0 ? instructions : undefined;
     },
   };
 }

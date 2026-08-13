@@ -22,13 +22,15 @@ describe("docs annotation renderers", () => {
           ? ["masksEnabled", "polylinesEnabled"]
           : renderer === "keypoints"
             ? ["keypointsEnabled"]
-            : renderer === "ellipse"
-              ? ["ellipsesEnabled"]
-              : renderer === "mask-halo"
-                ? ["maskHaloEnabled"]
-                : renderer === "regions"
-                  ? []
-                  : [`${renderer}Enabled`];
+            : renderer === "box-corners"
+              ? ["boxCornersEnabled"]
+              : renderer === "ellipse"
+                ? ["ellipsesEnabled"]
+                : renderer === "mask-halo"
+                  ? ["maskHaloEnabled"]
+                  : renderer === "regions"
+                    ? []
+                    : [`${renderer}Enabled`];
 
       expect(enabled).toEqual(expectedEnabled);
     }
@@ -60,6 +62,13 @@ describe("docs annotation renderers", () => {
         polylineStrokeWidth: 7,
       }),
     ).toContain("stroke: { width: 7 }");
+    expect(
+      createDocsAnnotationRendererSnippet("box-corners", {
+        ...defaultDemoPresentationSettings,
+        boxCornerLength: 31,
+        boxCornerStrokeWidth: 4,
+      }),
+    ).toContain("length: 31");
     expect(
       createDocsAnnotationRendererSnippet(
         "masks",

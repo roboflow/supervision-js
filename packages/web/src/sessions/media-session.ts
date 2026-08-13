@@ -154,6 +154,7 @@ export async function createMediaSession(
       backgroundColor: initialPresentation.backgroundColor,
       annotationOverlayStyle: initialPresentation.annotationOverlayStyle,
       boxStyle: initialPresentation.boxStyle,
+      boxCornerStyle: initialPresentation.boxCornerStyle,
       ellipseStyle: initialPresentation.ellipseStyle,
       container: options.container,
       detectionBuffer: sessionDefaults.detectionBuffer,

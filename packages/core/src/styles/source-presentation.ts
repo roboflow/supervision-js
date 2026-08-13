@@ -1,4 +1,9 @@
 import { BaseBoxStyle } from "#styles/box-style";
+import type {
+  BoxCornerDrawInstruction,
+  BoxCornerStyle,
+  BoxCornerStyleContext,
+} from "#types/box-corner-style";
 import { BaseLabelStyle } from "#styles/label-style";
 import { BaseMaskStyle } from "#styles/mask-style";
 import { BaseKeypointStyle } from "#styles/keypoint-style";
@@ -54,6 +59,7 @@ import type {
 
 export interface PresentationStyleSet {
   readonly boxStyle?: BoxStyle | null;
+  readonly boxCornerStyle?: BoxCornerStyle | null;
   readonly ellipseStyle?: EllipseStyle | null;
   readonly keypointStyle?: KeypointStyle | null;
   readonly labelStyle?: LabelStyle | null;
@@ -120,6 +126,12 @@ export function createSourceAwarePresentation(
           sourcePresentations,
         )
       : globalPresentation.boxStyle,
+    boxCornerStyle: shouldApplySourceStyle("boxCornerStyle")
+      ? new SourceAwareBoxCornerStyle(
+          globalPresentation.boxCornerStyle ?? null,
+          sourcePresentations,
+        )
+      : globalPresentation.boxCornerStyle,
     ellipseStyle: shouldApplySourceStyle("ellipseStyle")
       ? new SourceAwareEllipseStyle(
           globalPresentation.ellipseStyle ?? null,
@@ -163,6 +175,28 @@ export function createSourceAwarePresentation(
         )
       : globalPresentation.keypointStyle,
   };
+}
+
+class SourceAwareBoxCornerStyle implements BoxCornerStyle {
+  constructor(
+    private readonly globalStyle: BoxCornerStyle | null,
+    private readonly sourcePresentations: ReadonlyMap<
+      string,
+      SourcePresentation | undefined
+    >,
+  ) {}
+
+  resolve(
+    detection: Detection,
+    context: BoxCornerStyleContext,
+  ): BoxCornerDrawInstruction | undefined {
+    return resolveSourceStyle(
+      detection,
+      this.globalStyle,
+      this.sourcePresentations,
+      "boxCornerStyle",
+    )?.resolve(detection, context);
+  }
 }
 
 class SourceAwareBoxStyle implements BoxStyle {

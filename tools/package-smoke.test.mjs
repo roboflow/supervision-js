@@ -4,6 +4,7 @@ import { URL } from "node:url";
 import test from "node:test";
 
 const expectedWebRuntimeExports = [
+  "BaseBoxCornerStyle",
   "BaseBoxStyle",
   "BaseFocusStyle",
   "BaseInteractionStyle",
@@ -81,6 +82,7 @@ const expectedWebRuntimeExports = [
 
 const expectedCoreRuntimeExports = [
   "BaseBoxStyle",
+  "BaseBoxCornerStyle",
   "BaseFocusStyle",
   "BaseInteractionStyle",
   "BaseLabelStyle",

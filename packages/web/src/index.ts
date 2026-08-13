@@ -53,6 +53,8 @@ export type {
 // Presentation styles.
 export { BaseBoxStyle } from "supervision-js-core";
 export type { BaseBoxStyleOptions } from "supervision-js-core";
+export { BaseBoxCornerStyle } from "supervision-js-core";
+export type { BaseBoxCornerStyleOptions } from "supervision-js-core";
 export { BaseFocusStyle } from "supervision-js-core";
 export type { BaseFocusStyleOptions } from "supervision-js-core";
 export { BaseInteractionStyle } from "supervision-js-core";
@@ -74,6 +76,7 @@ export {
   type AnnotationRendererFactory,
   type AnnotationRendererKind,
   type BoxAnnotationRenderer,
+  type BoxCornerAnnotationRenderer,
   type EllipseAnnotationRenderer,
   type KeypointAnnotationRenderer,
   type LabelAnnotationRenderer,
@@ -109,6 +112,11 @@ export {
   type DetectionClassColorStyle,
 } from "supervision-js-core";
 export { BoxShape, BoxStrokeAlignment } from "supervision-js-core";
+export type {
+  BoxCornerDrawInstruction,
+  BoxCornerStyle,
+  BoxCornerStyleContext,
+} from "supervision-js-core";
 export type {
   BoxDrawInstruction,
   BoxFillStyle,

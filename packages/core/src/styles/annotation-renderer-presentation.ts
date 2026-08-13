@@ -26,6 +26,7 @@ export function resolveAnnotationRendererPresentation(
 
   const resolved: ResolvedAnnotationRendererStyles = {
     boxStyle: null,
+    boxCornerStyle: null,
     ellipseStyle: null,
     keypointStyle: null,
     labelStyle: null,

@@ -12,7 +12,11 @@ import {
   resolveAnnotationStyleState,
 } from "supervision-js-core";
 import type { AnnotationVisibility } from "supervision-js-core";
-import type { EllipseStyle, ShapeStyle } from "supervision-js-core";
+import type {
+  BoxCornerStyle,
+  EllipseStyle,
+  ShapeStyle,
+} from "supervision-js-core";
 import type { Point } from "supervision-js-core";
 import type {
   MediaRendererScene,
@@ -99,6 +103,8 @@ export async function createPixiMediaScene(
   const { GifSprite } = await import("pixi.js/gif");
   const app: PixiApplication = new Application();
   let currentEllipseStyle: EllipseStyle | null = options.ellipseStyle ?? null;
+  let currentBoxCornerStyle: BoxCornerStyle | null =
+    options.boxCornerStyle ?? null;
   let currentLabelStyle: LabelStyle | null = options.labelStyle ?? null;
   let currentMaskStyle: MaskStyle | null = options.maskStyle ?? null;
   let currentMaskHaloStyle: MaskHaloStyle | null =
@@ -158,6 +164,7 @@ export async function createPixiMediaScene(
   // shape instructions compose with the internal hook here.
   function resolveVectorShapeStyle(): ShapeStyle | null {
     const kindShapeStyle = resolveAnnotationShapeStyle({
+      boxCornerStyle: currentBoxCornerStyle,
       ellipseStyle: currentEllipseStyle,
     });
     const baseShapeStyle = options.shapeStyle ?? null;
@@ -926,8 +933,16 @@ export async function createPixiMediaScene(
         ) ?? [],
       );
 
-      if (presentation.ellipseStyle !== undefined) {
-        currentEllipseStyle = presentation.ellipseStyle;
+      if (
+        presentation.boxCornerStyle !== undefined ||
+        presentation.ellipseStyle !== undefined
+      ) {
+        if (presentation.boxCornerStyle !== undefined) {
+          currentBoxCornerStyle = presentation.boxCornerStyle;
+        }
+        if (presentation.ellipseStyle !== undefined) {
+          currentEllipseStyle = presentation.ellipseStyle;
+        }
         vectorLayer.setStyles({ shapeStyle: resolveVectorShapeStyle() });
       }
 

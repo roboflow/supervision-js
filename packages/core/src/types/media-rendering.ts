@@ -1,6 +1,7 @@
 import type { DetectionBufferState } from "#types/detection-timeline";
 import type { DetectionFrame } from "#types/detections";
 import type { BoxStyle } from "#types/box-style";
+import type { BoxCornerStyle } from "#types/box-corner-style";
 import type { FocusStyle } from "#types/focus-style";
 import type { InteractionStyle } from "#types/interaction-style";
 import type { LabelStyle } from "#types/label-style";
@@ -176,6 +177,7 @@ export interface MediaRendererPresentation {
    */
   readonly renderers?: readonly AnnotationRenderer[];
   readonly boxStyle?: BoxStyle | null;
+  readonly boxCornerStyle?: BoxCornerStyle | null;
   readonly focusStyle?: FocusStyle | null;
   readonly interactionStyle?: InteractionStyle | null;
   readonly labelStyle?: LabelStyle | null;

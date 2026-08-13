@@ -7,6 +7,7 @@
 
 export {
   BaseBoxStyle,
+  BaseBoxCornerStyle,
   BaseFocusStyle,
   BaseInteractionStyle,
   BaseKeypointStyle,
@@ -32,6 +33,7 @@ export {
   normalizeDetectionClassName,
   resolveDetectionClassColorStyle,
   type BaseBoxStyleOptions,
+  type BaseBoxCornerStyleOptions,
   type BaseFocusStyleOptions,
   type BaseInteractionStyleOptions,
   type BaseKeypointStyleOptions,
@@ -43,6 +45,10 @@ export {
   type AnnotationRendererFactory,
   type AnnotationRendererKind,
   type BoxAnnotationRenderer,
+  type BoxCornerAnnotationRenderer,
+  type BoxCornerDrawInstruction,
+  type BoxCornerStyle,
+  type BoxCornerStyleContext,
   type EllipseAnnotationRenderer,
   type EllipseDrawInstruction,
   type EllipseStyle,
