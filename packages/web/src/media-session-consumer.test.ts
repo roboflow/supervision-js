@@ -120,7 +120,7 @@ describe("media session consumer workflows", () => {
     expect(mediaMock.dispose).toHaveBeenCalledOnce();
   });
 
-  it("forwards the ellipse renderer style from session presentation", async () => {
+  it("composes the ellipse renderer style with a direct region renderer", async () => {
     resetMocks();
     mediaMock.samples = [createMockSample(0, 0)];
     const { annotationRenderers, createMediaSession } = await import("./index");
@@ -152,13 +152,19 @@ describe("media session consumer workflows", () => {
       presentation: {
         renderers: [
           annotationRenderers.ellipse({ style: { resolve: ellipseResolve } }),
+          annotationRenderers.region({
+            id: "player-badge",
+            region: { kind: "bounds" },
+            source: { asset: { src: "/badge.png" }, kind: "asset" },
+            target: { className: "player" },
+          }),
         ],
       },
     });
 
-    // The session must forward the resolved ellipse style into the renderer;
-    // dropping it from the hand-enumerated forward silently disables the
-    // kind for every session consumer.
+    // The session lowers the ellipse into its resolved style field while the
+    // region keeps its direct descriptor. The renderer core must preserve both
+    // when it normalizes the authoritative renderer list again.
     await vi.waitFor(() => {
       expect(ellipseResolve).toHaveBeenCalled();
     });
