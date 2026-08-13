@@ -119,6 +119,7 @@ describe("annotation renderer presentation", () => {
       keypoints: annotationRenderers.keypoints,
       label: annotationRenderers.label,
       mask: annotationRenderers.mask,
+      maskHalo: annotationRenderers.maskHalo,
       polygon: annotationRenderers.polygon,
       polyline: annotationRenderers.polyline,
     } as const;
