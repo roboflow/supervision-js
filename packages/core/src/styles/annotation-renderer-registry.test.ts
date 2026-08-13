@@ -30,6 +30,7 @@ const expectedStyleFields = {
   keypoints: "keypointStyle",
   label: "labelStyle",
   mask: "maskStyle",
+  maskHalo: "maskHaloStyle",
   polygon: "polygonStyle",
   polyline: "polylineStyle",
 } as const satisfies Record<
@@ -51,6 +52,7 @@ const styleFieldPairingIsExact: {
   keypoints: true,
   label: true,
   mask: true,
+  maskHalo: true,
   polygon: true,
   polyline: true,
 };
@@ -60,6 +62,9 @@ const expectedCanonicalStyles = {
   keypoints: BaseKeypointStyle,
   label: BaseLabelStyle,
   mask: BaseMaskStyle,
+  // The mask halo's canonical style is a plain resolver object and the
+  // capability is opt-in, so it never appears in the default presentation.
+  maskHalo: null,
   polygon: BasePolygonStyle,
   polyline: BasePolylineStyle,
 } as const satisfies Record<
@@ -88,12 +93,18 @@ describe("annotation renderer registry", () => {
       const { createCanonicalStyle, styleField } =
         annotationRendererRegistry[kind];
       const style = createCanonicalStyle();
+      const expectedStyle = expectedCanonicalStyles[kind];
 
-      expect(style).toBeInstanceOf(expectedCanonicalStyles[kind]);
       expect(style).not.toBe(createCanonicalStyle());
-      expect(defaultPresentation[styleField]).toBeInstanceOf(
-        expectedCanonicalStyles[kind],
-      );
+
+      if (expectedStyle === null) {
+        expect(style).toHaveProperty("resolve");
+        expect(defaultPresentation[styleField]).toBeUndefined();
+        continue;
+      }
+
+      expect(style).toBeInstanceOf(expectedStyle);
+      expect(defaultPresentation[styleField]).toBeInstanceOf(expectedStyle);
     }
   });
 

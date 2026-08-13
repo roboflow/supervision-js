@@ -1,12 +1,15 @@
 import type { DetectionFrame } from "supervision";
 import type { DemoPresentationSettings } from "./presentation/demo-presentation";
 
+const DOCS_MASK_HALO_COLOR = 0x8b5cf6;
+
 const BASKETBALL_TRACE_CLASS_NAME = "basketball";
 const BASKETBALL_TRACE_TRACK_ID = "basketball-track:0";
 
 export const docsAnnotationRendererIds = [
   "boxes",
   "masks",
+  "mask-halo",
   "labels",
   "polygons",
   "polylines",
@@ -100,6 +103,28 @@ export const docsAnnotationRenderers: Readonly<
     ],
     description: "Compressed RLE segmentation",
     title: "Masks",
+  },
+  "mask-halo": {
+    controls: [
+      {
+        key: "maskHaloSpread",
+        label: "Spread",
+        max: 32,
+        min: 4,
+        step: 1,
+        unit: "pixels",
+      },
+      {
+        key: "maskHaloAlpha",
+        label: "Glow opacity",
+        max: 1,
+        min: 0,
+        step: 0.01,
+        unit: "percent",
+      },
+    ],
+    description: "GPU glow following the exact mask silhouette",
+    title: "Mask Halo",
   },
   labels: {
     controls: [
@@ -212,6 +237,11 @@ export function createDocsAnnotationRendererPresentation(
     focusEnabled: false,
     keypointsEnabled: renderer === "keypoints",
     labelsEnabled: renderer === "labels",
+    // The halo page renders the glow alone so the silhouette-following
+    // effect is unmistakable; the scene prepares mask coverage internally.
+    // Pinned so the live snippet's fixed color is exactly what renders.
+    maskHaloColor: DOCS_MASK_HALO_COLOR,
+    maskHaloEnabled: renderer === "mask-halo",
     masksEnabled: renderer === "masks" || renderer === "polylines",
     polygonsEnabled: renderer === "polygons",
     polylinesEnabled: renderer === "polylines",
@@ -267,6 +297,23 @@ export function createDocsAnnotationRendererSnippet(
         opacity: ${formatNumber(settings.maskOpacity)},
         stroke: { alpha: 1, width: ${formatNumber(settings.maskStrokeWidth)} },
       }),
+    }),
+  ],
+});`;
+    case "mask-halo":
+      return `session.setPresentation({
+  renderers: [
+    annotationRenderers.maskHalo({
+      style: {
+        resolve: (detection) =>
+          detection.mask
+            ? {
+                alpha: ${formatNumber(settings.maskHaloAlpha)},
+                color: ${formatColor(DOCS_MASK_HALO_COLOR)},
+                spread: ${formatNumber(settings.maskHaloSpread)},
+              }
+            : undefined,
+      },
     }),
   ],
 });`;
@@ -335,4 +382,8 @@ export function createDocsAnnotationRendererSnippet(
 
 function formatNumber(value: number) {
   return Number(value.toFixed(2)).toString();
+}
+
+function formatColor(color: number) {
+  return `0x${color.toString(16).padStart(6, "0")}`;
 }

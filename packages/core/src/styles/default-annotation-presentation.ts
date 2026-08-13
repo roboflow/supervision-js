@@ -2,6 +2,7 @@ import { BaseBoxStyle } from "#styles/box-style";
 import { BaseKeypointStyle } from "#styles/keypoint-style";
 import { BaseLabelStyle } from "#styles/label-style";
 import { BaseMaskStyle } from "#styles/mask-style";
+import type { MaskHaloStyle } from "#types/mask-halo-style";
 import { BasePolygonStyle } from "#styles/polygon-style";
 import { BasePolylineStyle } from "#styles/polyline-style";
 import { BoxShape } from "#types/box-style";
@@ -160,6 +161,33 @@ export function createDefaultMaskStyle(
       width: DEFAULT_OUTLINE_WIDTH,
     }),
   });
+}
+
+const DEFAULT_MASK_HALO_ALPHA = 0.6;
+const DEFAULT_MASK_HALO_SPREAD = 12;
+
+/**
+ * Canonical mask halo: a class-colored glow that follows the mask silhouette.
+ * Used when the `maskHalo` renderer is listed without an explicit style.
+ */
+export function createDefaultMaskHaloStyle(
+  options: DefaultAnnotationPresentationOptions = {},
+): MaskHaloStyle {
+  const getClassColor = createClassColorResolver(options);
+
+  return {
+    resolve(detection, context) {
+      if (!detection.mask || context.hidden) {
+        return undefined;
+      }
+
+      return {
+        alpha: DEFAULT_MASK_HALO_ALPHA,
+        color: getClassColor(detection),
+        spread: DEFAULT_MASK_HALO_SPREAD,
+      };
+    },
+  };
 }
 
 export function createDefaultPolygonStyle(

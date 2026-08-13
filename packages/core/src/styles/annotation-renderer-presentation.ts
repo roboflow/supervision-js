@@ -28,6 +28,7 @@ export function resolveAnnotationRendererPresentation(
     boxStyle: null,
     keypointStyle: null,
     labelStyle: null,
+    maskHaloStyle: null,
     maskStyle: null,
     polygonStyle: null,
     polylineStyle: null,

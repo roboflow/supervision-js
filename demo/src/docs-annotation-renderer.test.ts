@@ -17,17 +17,18 @@ describe("docs annotation renderers", () => {
         .filter(([key, value]) => key.endsWith("Enabled") && value)
         .map(([key]) => key);
 
-      expect(enabled).toEqual(
-        renderer === "regions"
-          ? []
-          : renderer === "polylines"
-            ? ["masksEnabled", "polylinesEnabled"]
-            : [
-                renderer === "keypoints"
-                  ? "keypointsEnabled"
-                  : `${renderer}Enabled`,
-              ],
-      );
+      const expectedEnabled =
+        renderer === "polylines"
+          ? ["masksEnabled", "polylinesEnabled"]
+          : renderer === "keypoints"
+            ? ["keypointsEnabled"]
+            : renderer === "mask-halo"
+              ? ["maskHaloEnabled"]
+              : renderer === "regions"
+                ? []
+                : [`${renderer}Enabled`];
+
+      expect(enabled).toEqual(expectedEnabled);
     }
   });
 

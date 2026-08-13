@@ -4,6 +4,7 @@ import type { BoxStyle } from "#types/box-style";
 import type { FocusStyle } from "#types/focus-style";
 import type { InteractionStyle } from "#types/interaction-style";
 import type { LabelStyle } from "#types/label-style";
+import type { MaskHaloStyle } from "#types/mask-halo-style";
 import type { MaskStyle } from "#types/mask-style";
 import type { Point } from "#types/detections";
 import type { ViewportTransform } from "#types/viewport";
@@ -177,6 +178,7 @@ export interface MediaRendererPresentation {
   readonly focusStyle?: FocusStyle | null;
   readonly interactionStyle?: InteractionStyle | null;
   readonly labelStyle?: LabelStyle | null;
+  readonly maskHaloStyle?: MaskHaloStyle | null;
   readonly maskStyle?: MaskStyle | null;
   readonly polygonStyle?: PolygonStyle | null;
   readonly polylineStyle?: PolylineStyle | null;
