@@ -44,7 +44,7 @@ session.setPresentation({
             radiusX,
             radiusY,
             startAngle: (-45 * Math.PI) / 180,
-            stroke: { color: 0x8b5cf6, width: 2 },
+            stroke: { alpha: 1, color: 0x8b5cf6, width: 2 },
           };
         },
       },
@@ -57,4 +57,4 @@ session.setPresentation({
 `EllipseDrawInstruction` to draw for it, or `undefined` to skip the
 detection. Omitting both `startAngle` and `endAngle` draws a closed ellipse;
 `rotation` spins the ellipse around its center. `fill` and `stroke` reuse the
-box fill and stroke contracts, including per-detection functions.
+renderer-neutral paint contracts of the shared ellipse shape primitive.

@@ -326,14 +326,15 @@ export function createDocsAnnotationRendererSnippet(
           const radiusY = radiusX * ${formatNumber(settings.ellipseAxisRatio)};
           return {
             center: {
-              x: detection.rect.x + radiusX,
-              y: detection.rect.y + detection.rect.height - radiusY,
+              x: detection.rect.x,
+              y: detection.rect.y + detection.rect.height / 2 - radiusY,
             },
             endAngle: (235 * Math.PI) / 180,
             radiusX,
             radiusY,
             startAngle: (-45 * Math.PI) / 180,
             stroke: {
+              alpha: 1,
               color: ${formatColor(DOCS_ELLIPSE_COLOR)},
               width: ${formatNumber(settings.ellipseStrokeWidth)},
             },

@@ -54,4 +54,31 @@ describe("annotation shape styles", () => {
     expect(style?.resolve(detection, context)).toBeUndefined();
     expect(resolve).toHaveBeenCalledWith(detection, context);
   });
+
+  it("preserves the shared closed-ellipse primitive contract", () => {
+    const style = resolveAnnotationShapeStyle({
+      ellipseStyle: {
+        resolve: () => ({
+          center: { x: 25, y: 60 },
+          fill: { alpha: 0.2, color: 0x123456 },
+          radiusX: 15,
+          radiusY: 5,
+          rotation: 0.25,
+          stroke: { alpha: 1, color: 0xffffff, width: 2 },
+        }),
+      },
+    });
+
+    expect(style?.resolve(detection, context)).toEqual([
+      {
+        center: { x: 25, y: 60 },
+        fill: { alpha: 0.2, color: 0x123456 },
+        kind: ShapeInstructionKind.Ellipse,
+        radiusX: 15,
+        radiusY: 5,
+        rotation: 0.25,
+        stroke: { alpha: 1, color: 0xffffff, width: 2 },
+      },
+    ]);
+  });
 });

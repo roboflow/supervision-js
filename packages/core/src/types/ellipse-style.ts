@@ -1,40 +1,33 @@
+import type { Detection } from "#types/detections";
 import type {
-  FillStyle,
-  OpenStrokeStyle,
-  StrokeStyle,
-} from "#types/paint-style";
-import type { Detection, Point } from "#types/detections";
+  ClosedEllipseShapeInstruction,
+  EllipseArcShapeInstruction,
+} from "#types/shape-style";
 import type { AnnotationStyleContext } from "#types/style";
 
 export type EllipseStyleContext = AnnotationStyleContext;
 
 /**
- * One ellipse or elliptical arc drawn for a detection, in media coordinates.
+ * One closed ellipse drawn for a detection, in media coordinates.
  *
- * Omitting both angles draws a closed ellipse. Angles are radians measured
- * from the positive x axis before `rotation` is applied.
+ * The annotation renderer omits only the internal shape discriminator; all
+ * geometry and paint constraints come from the shared ellipse primitive.
  */
-interface EllipseDrawInstructionBase {
-  readonly center: Point;
-  readonly radiusX: number;
-  readonly radiusY: number;
-  /** Rotation in radians around the center. */
-  readonly rotation?: number;
-}
+export type ClosedEllipseDrawInstruction = Omit<
+  ClosedEllipseShapeInstruction,
+  "kind"
+>;
 
-export interface ClosedEllipseDrawInstruction extends EllipseDrawInstructionBase {
-  readonly startAngle?: never;
-  readonly endAngle?: never;
-  readonly fill?: FillStyle;
-  readonly stroke?: StrokeStyle;
-}
-
-export interface EllipseArcDrawInstruction extends EllipseDrawInstructionBase {
-  readonly startAngle: number;
-  readonly endAngle: number;
-  readonly fill?: never;
-  readonly stroke?: OpenStrokeStyle;
-}
+/**
+ * One elliptical arc drawn for a detection, in media coordinates.
+ *
+ * Angles are radians measured from the positive x axis before `rotation` is
+ * applied.
+ */
+export type EllipseArcDrawInstruction = Omit<
+  EllipseArcShapeInstruction,
+  "kind"
+>;
 
 export type EllipseDrawInstruction =
   ClosedEllipseDrawInstruction | EllipseArcDrawInstruction;
