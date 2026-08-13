@@ -61,6 +61,9 @@ export const RenderControls = memo(function RenderControls({
         : [...settings.hiddenClasses, className],
     });
   };
+  const patchSettings = (patch: Partial<DemoPresentationSettings>) => {
+    onChange({ ...settings, ...patch });
+  };
   const updateAllClassVisibility = (visible: boolean) => {
     onChange({
       ...settings,
@@ -94,6 +97,7 @@ export const RenderControls = memo(function RenderControls({
         <GlobalRenderControls
           availability={availability}
           onChange={updateSettings}
+          onPatch={patchSettings}
           settings={settings}
         />
       ) : (
@@ -112,6 +116,7 @@ export const RenderControls = memo(function RenderControls({
 function GlobalRenderControls({
   availability,
   onChange,
+  onPatch,
   settings,
 }: {
   readonly availability?: DemoPresentationAvailability;
@@ -119,8 +124,14 @@ function GlobalRenderControls({
     key: Key,
     value: DemoPresentationSettings[Key],
   ) => void;
+  readonly onPatch: (patch: Partial<DemoPresentationSettings>) => void;
   readonly settings: DemoPresentationSettings;
 }) {
+  const segmentationEnabled = settings.masksEnabled || settings.polygonsEnabled;
+  const segmentationUnavailable =
+    availability?.masksEnabled === false &&
+    availability?.polygonsEnabled === false;
+
   return (
     <div className="render-controls__panel render-controls__panel--global">
       <ControlSection title="Layers">
@@ -220,11 +231,22 @@ function GlobalRenderControls({
       </ControlSection>
 
       <ControlSection
-        enabled={settings.masksEnabled}
-        onToggleEnabled={(checked) => onChange("masksEnabled", checked)}
-        title="Masks"
-        toggleDisabled={availability?.masksEnabled === false}
+        enabled={segmentationEnabled}
+        onToggleEnabled={(checked) =>
+          onPatch({
+            masksEnabled: checked && availability?.masksEnabled !== false,
+            polygonsEnabled: checked && availability?.polygonsEnabled !== false,
+          })
+        }
+        title="Segmentation"
+        toggleDisabled={segmentationUnavailable}
       >
+        <SubLayerHeading
+          checked={settings.masksEnabled}
+          disabled={availability?.masksEnabled === false}
+          label="Masks"
+          onChange={(checked) => onChange("masksEnabled", checked)}
+        />
         <SegmentedControl
           disabled={!settings.masksEnabled}
           label="Mode"
@@ -276,14 +298,12 @@ function GlobalRenderControls({
           value={settings.maskStrokeAlpha}
           valueLabel={formatPercent(settings.maskStrokeAlpha)}
         />
-      </ControlSection>
-
-      <ControlSection
-        enabled={settings.polygonsEnabled}
-        onToggleEnabled={(checked) => onChange("polygonsEnabled", checked)}
-        title="Polygons"
-        toggleDisabled={availability?.polygonsEnabled === false}
-      >
+        <SubLayerHeading
+          checked={settings.polygonsEnabled}
+          disabled={availability?.polygonsEnabled === false}
+          label="Polygons"
+          onChange={(checked) => onChange("polygonsEnabled", checked)}
+        />
         <SliderControl
           disabled={!settings.polygonsEnabled}
           label="Stroke"
@@ -703,6 +723,33 @@ function ControlSection({
         <div className="render-control-section__body">{children}</div>
       ) : null}
     </section>
+  );
+}
+
+function SubLayerHeading({
+  checked,
+  disabled = false,
+  label,
+  onChange,
+}: {
+  readonly checked: boolean;
+  readonly disabled?: boolean;
+  readonly label: string;
+  readonly onChange: (checked: boolean) => void;
+}) {
+  return (
+    <div className="render-control-section__subheading-row">
+      <h4 className="render-control-section__subheading">{label}</h4>
+      <label className="render-control-section__enable">
+        <input
+          aria-label={`Enable ${label.toLowerCase()} layer`}
+          checked={checked}
+          disabled={disabled}
+          onChange={(event) => onChange(event.currentTarget.checked)}
+          type="checkbox"
+        />
+      </label>
+    </div>
   );
 }
 
