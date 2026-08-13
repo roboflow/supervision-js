@@ -11,6 +11,7 @@ import {
   FocusTargetMode,
   KeypointVisibility,
   LabelPlacement,
+  MarkerShape,
   MaskRenderMode,
 } from "supervision";
 import {
@@ -454,6 +455,26 @@ describe("demo presentation", () => {
     expect(
       keypointsOnly.renderers?.map((renderer) => renderer.kind),
     ).not.toContain("polygon");
+  });
+
+  it("maps marker shape and bounding-box position onto the marker style", () => {
+    const presentation = createDemoPresentation({
+      ...defaultDemoPresentationSettings,
+      markerPosition: "top-left",
+      markerShape: MarkerShape.Triangle,
+      markersEnabled: true,
+    });
+
+    expect(
+      presentation.markerStyle?.resolve(rectangleDetection, {
+        detectionIndex: 0,
+        frame: { detections: [rectangleDetection], mediaTime: 0 },
+        mediaTime: 0,
+      }),
+    ).toMatchObject({
+      center: { x: 0, y: -8 },
+      shape: MarkerShape.Triangle,
+    });
   });
 
   it("maps polygon controls onto class-aware polygon draw instructions", () => {

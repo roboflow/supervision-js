@@ -20,8 +20,9 @@ the same renderer rather than separate rendering systems.
 </div>
 
 The playground uses the frozen basketball fixture's existing detection bounds.
-Markers are presentation only and do not replace the detection geometry used by
-picking or editing.
+Change the shape, choose any of the nine bounding-box anchors, and tune the
+size and stroke width while the code sample updates. Markers are presentation
+only and do not replace the detection geometry used by picking or editing.
 
 ## Add a marker renderer
 
@@ -30,6 +31,11 @@ session.setPresentation({
   renderers: [
     annotationRenderers.marker({
       style: new BaseMarkerStyle({
+        center: (detection) => {
+          const rect = detection.rect;
+          if (!rect) return undefined;
+          return { x: rect.x, y: rect.y + rect.height / 2 };
+        },
         shape: MarkerShape.Triangle,
         size: 14,
         stroke: { color: 0x8b5cf6, width: 2 },

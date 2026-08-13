@@ -1,5 +1,9 @@
-import type { DetectionFrame } from "supervision";
-import type { DemoPresentationSettings } from "./presentation/demo-presentation";
+import { MarkerShape, type DetectionFrame } from "supervision";
+import {
+  demoMarkerPositionOffsets,
+  type DemoMarkerPosition,
+  type DemoPresentationSettings,
+} from "./presentation/demo-presentation";
 
 const DOCS_ELLIPSE_COLOR = 0x8b5cf6;
 const DOCS_MASK_HALO_COLOR = 0x8b5cf6;
@@ -33,9 +37,22 @@ export interface DocsAnnotationRendererControl {
   readonly unit: "percent" | "pixels";
 }
 
+export type DocsAnnotationRendererSelectSetting =
+  "markerPosition" | "markerShape";
+
+export interface DocsAnnotationRendererSelectControl {
+  readonly key: DocsAnnotationRendererSelectSetting;
+  readonly label: string;
+  readonly options: readonly {
+    readonly label: string;
+    readonly value: DemoPresentationSettings[DocsAnnotationRendererSelectSetting];
+  }[];
+}
+
 export interface DocsAnnotationRendererDefinition {
   readonly controls: readonly DocsAnnotationRendererControl[];
   readonly description: string;
+  readonly selects?: readonly DocsAnnotationRendererSelectControl[];
   readonly title: string;
 }
 
@@ -193,7 +210,34 @@ export const docsAnnotationRenderers: Readonly<
         unit: "pixels",
       },
     ],
-    description: "Anchored marker at each detection center",
+    description: "Geometric markers anchored to detection bounds",
+    selects: [
+      {
+        key: "markerShape",
+        label: "Shape",
+        options: [
+          { label: "Circle", value: MarkerShape.Circle },
+          { label: "Square", value: MarkerShape.Square },
+          { label: "Triangle", value: MarkerShape.Triangle },
+          { label: "Cross", value: MarkerShape.Cross },
+        ],
+      },
+      {
+        key: "markerPosition",
+        label: "Position",
+        options: [
+          { label: "Top left", value: "top-left" },
+          { label: "Top center", value: "top-center" },
+          { label: "Top right", value: "top-right" },
+          { label: "Center left", value: "center-left" },
+          { label: "Center", value: "center" },
+          { label: "Center right", value: "center-right" },
+          { label: "Bottom left", value: "bottom-left" },
+          { label: "Bottom center", value: "bottom-center" },
+          { label: "Bottom right", value: "bottom-right" },
+        ],
+      },
+    ],
     title: "Markers",
   },
   labels: {
@@ -318,6 +362,12 @@ export function createDocsAnnotationRendererPresentation(
     maskHaloEnabled: renderer === "mask-halo",
     masksEnabled: renderer === "masks" || renderer === "polylines",
     markersEnabled: renderer === "markers",
+    ...(renderer === "markers"
+      ? {
+          markerPosition: "bottom-center" as const,
+          markerShape: MarkerShape.Triangle,
+        }
+      : {}),
     polygonsEnabled: renderer === "polygons",
     polylinesEnabled: renderer === "polylines",
     maskFillAlpha: 1,
@@ -437,6 +487,15 @@ export function createDocsAnnotationRendererSnippet(
   renderers: [
     annotationRenderers.marker({
       style: new BaseMarkerStyle({
+        center: (detection) => {
+          const rect = detection.rect;
+          if (!rect) return undefined;
+          return {
+            x: ${formatMarkerCoordinate("x", settings.markerPosition)},
+            y: ${formatMarkerCoordinate("y", settings.markerPosition)},
+          };
+        },
+        shape: MarkerShape.${markerShapeMemberNames[settings.markerShape]},
         size: ${formatNumber(settings.markerSize)},
         stroke: { width: ${formatNumber(settings.markerStrokeWidth)} },
       }),
@@ -512,4 +571,20 @@ function formatNumber(value: number) {
 
 function formatColor(color: number) {
   return `0x${color.toString(16).padStart(6, "0")}`;
+}
+
+const markerShapeMemberNames: Readonly<Record<MarkerShape, string>> = {
+  [MarkerShape.Circle]: "Circle",
+  [MarkerShape.Cross]: "Cross",
+  [MarkerShape.Square]: "Square",
+  [MarkerShape.Triangle]: "Triangle",
+};
+
+function formatMarkerCoordinate(axis: "x" | "y", position: DemoMarkerPosition) {
+  const offset = demoMarkerPositionOffsets[position][axis];
+  const dimension = axis === "x" ? "width" : "height";
+
+  if (offset === 0) return `rect.${axis}`;
+
+  return `rect.${axis} ${offset < 0 ? "-" : "+"} rect.${dimension} / 2`;
 }
