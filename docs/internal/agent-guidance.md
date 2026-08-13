@@ -181,6 +181,16 @@ files and applies ESLint fixes to staged JavaScript and TypeScript files.
 Run `npm run verify` before handing off a larger change. It is the same command
 used by GitHub Actions.
 
+## Pull Request Descriptions
+
+Use [`.github/PULL_REQUEST_TEMPLATE.md`](../../.github/PULL_REQUEST_TEMPLATE.md)
+for this repository. Do not add generic `Deployment considerations`, `hosting`,
+or `Infrastructure impact` sections: `supervision-js` is a library and static
+documentation/demo workspace, and those application-deployment prompts are not
+part of its pull request contract. Describe release, compatibility, migration,
+or performance implications under `Notes For Reviewers` only when they are
+actually relevant.
+
 ## Dependency Freshness
 
 This repo intentionally keeps packages fresh. The repo-local `.npmrc` overrides
