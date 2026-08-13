@@ -5,6 +5,7 @@ import type { KeypointStyle } from "#types/keypoint-style";
 import type { LabelStyle } from "#types/label-style";
 import type { MaskHaloStyle } from "#types/mask-halo-style";
 import type { MaskStyle } from "#types/mask-style";
+import type { MarkerStyle } from "#types/marker-style";
 import type { PolygonStyle } from "#types/polygon-style";
 import type { PolylineStyle } from "#types/polyline-style";
 import type { AnnotationStyleContext } from "#types/style";
@@ -24,6 +25,7 @@ export const annotationRendererKinds = [
   "label",
   "mask",
   "maskHalo",
+  "marker",
   "polygon",
   "polyline",
   "region",
@@ -47,6 +49,7 @@ export type AnnotationRenderer =
   | LabelAnnotationRenderer
   | MaskAnnotationRenderer
   | MaskHaloAnnotationRenderer
+  | MarkerAnnotationRenderer
   | PolygonAnnotationRenderer
   | PolylineAnnotationRenderer
   | RegionAnnotationRenderer;
@@ -106,6 +109,11 @@ export interface MaskAnnotationRenderer extends BaseAnnotationRenderer {
 export interface MaskHaloAnnotationRenderer extends BaseAnnotationRenderer {
   readonly kind: "maskHalo";
   readonly style?: MaskHaloStyle | null;
+}
+
+export interface MarkerAnnotationRenderer extends BaseAnnotationRenderer {
+  readonly kind: "marker";
+  readonly style?: MarkerStyle | null;
 }
 
 export interface PolygonAnnotationRenderer extends BaseAnnotationRenderer {
@@ -244,6 +252,9 @@ export type AnnotationRendererFactory = {
   readonly maskHalo: (
     options?: AnnotationRendererStyleOptions<"maskHalo">,
   ) => MaskHaloAnnotationRenderer;
+  readonly marker: (
+    options?: AnnotationRendererStyleOptions<"marker">,
+  ) => MarkerAnnotationRenderer;
   readonly polygon: (
     options?: AnnotationRendererStyleOptions<"polygon">,
   ) => PolygonAnnotationRenderer;
@@ -275,6 +286,7 @@ export const annotationRenderers: AnnotationRendererFactory = {
   label: (options) => createAnnotationRenderer("label", options),
   mask: (options) => createAnnotationRenderer("mask", options),
   maskHalo: (options) => createAnnotationRenderer("maskHalo", options),
+  marker: (options) => createAnnotationRenderer("marker", options),
   polygon: (options) => createAnnotationRenderer("polygon", options),
   polyline: (options) => createAnnotationRenderer("polyline", options),
   region: (options) => ({ kind: "region", ...options }),

@@ -1,6 +1,7 @@
 import {
   BoxStrokeAlignment,
   BoxShape,
+  BaseMarkerStyle,
   BaseFocusStyle,
   BaseBoxCornerStyle,
   BaseInteractionStyle,
@@ -28,6 +29,7 @@ import {
   type MaskDrawInstruction,
   type MaskHaloStyle,
   type MaskStyle,
+  type MarkerStyle,
   type MediaRendererPresentation,
   type PolygonStyle,
   type PolylineStyle,
@@ -44,6 +46,7 @@ export interface DemoPresentationSettings {
   readonly keypointsEnabled: boolean;
   readonly labelsEnabled: boolean;
   readonly masksEnabled: boolean;
+  readonly markersEnabled: boolean;
   readonly polygonsEnabled: boolean;
   readonly polylinesEnabled: boolean;
   readonly boxCornerRadius: number;
@@ -72,6 +75,8 @@ export interface DemoPresentationSettings {
   readonly maskOpacity: number;
   readonly maskStrokeAlpha: number;
   readonly maskStrokeWidth: number;
+  readonly markerSize: number;
+  readonly markerStrokeWidth: number;
   readonly polygonFillAlpha: number;
   readonly polygonStrokeWidth: number;
   readonly polylineStrokeWidth: number;
@@ -101,6 +106,7 @@ export type DemoPresentationLayerSetting =
   | "keypointsEnabled"
   | "labelsEnabled"
   | "masksEnabled"
+  | "markersEnabled"
   | "polygonsEnabled"
   | "polylinesEnabled";
 
@@ -116,6 +122,7 @@ const demoPresentationLayerSettings: readonly DemoPresentationLayerSetting[] = [
   "keypointsEnabled",
   "labelsEnabled",
   "masksEnabled",
+  "markersEnabled",
   "polygonsEnabled",
   "polylinesEnabled",
 ];
@@ -200,6 +207,9 @@ export const defaultDemoPresentationSettings: DemoPresentationSettings = {
   maskStrokeAlpha: 1,
   maskStrokeWidth: 2,
   masksEnabled: true,
+  markerSize: 14,
+  markerStrokeWidth: 2,
+  markersEnabled: false,
   polygonFillAlpha: 0.08,
   polygonStrokeWidth: 2,
   polygonsEnabled: true,
@@ -229,6 +239,9 @@ export function createDemoPresentation(
   const maskHaloStyle = settings.maskHaloEnabled
     ? createDemoMaskHaloStyle(settings)
     : null;
+  const markerStyle = settings.markersEnabled
+    ? createDemoMarkerStyle(settings)
+    : null;
   const polygonStyle = settings.polygonsEnabled
     ? createDemoPolygonStyle(settings)
     : null;
@@ -251,6 +264,7 @@ export function createDemoPresentation(
     keypointStyle,
     labelStyle,
     maskStyle,
+    markerStyle,
     polygonStyle,
     polylineStyle,
     maskHaloStyle,
@@ -266,6 +280,9 @@ export function createDemoPresentation(
       ...(maskHaloStyle
         ? [annotationRenderers.maskHalo({ style: maskHaloStyle })]
         : []),
+      ...(markerStyle
+        ? [annotationRenderers.marker({ style: markerStyle })]
+        : []),
       ...(polygonStyle
         ? [annotationRenderers.polygon({ style: polygonStyle })]
         : []),
@@ -278,6 +295,22 @@ export function createDemoPresentation(
       ...(labelStyle ? [annotationRenderers.label({ style: labelStyle })] : []),
     ],
   };
+}
+
+function createDemoMarkerStyle(
+  settings: DemoPresentationSettings,
+): MarkerStyle {
+  return new BaseMarkerStyle({
+    fill: (detection) => ({
+      color: resolveClassStyle(detection, settings).fill,
+    }),
+    shouldRender: (detection) => passesConfidenceThreshold(detection, settings),
+    size: settings.markerSize,
+    stroke: (detection) => ({
+      color: resolveClassStyle(detection, settings).stroke,
+      width: settings.markerStrokeWidth,
+    }),
+  });
 }
 
 function createDemoBoxCornerStyle(

@@ -6,6 +6,7 @@ import type {
 } from "#types/box-corner-style";
 import { BaseLabelStyle } from "#styles/label-style";
 import { BaseMaskStyle } from "#styles/mask-style";
+import { BaseMarkerStyle } from "#styles/marker-style";
 import { BaseKeypointStyle } from "#styles/keypoint-style";
 import { BasePolygonStyle } from "#styles/polygon-style";
 import { BasePolylineStyle } from "#styles/polyline-style";
@@ -42,6 +43,11 @@ import type {
   MaskHaloStyleContext,
 } from "#types/mask-halo-style";
 import type {
+  MarkerDrawInstruction,
+  MarkerStyle,
+  MarkerStyleContext,
+} from "#types/marker-style";
+import type {
   PolygonDrawInstruction,
   PolygonStyle,
   PolygonStyleContext,
@@ -65,6 +71,7 @@ export interface PresentationStyleSet {
   readonly labelStyle?: LabelStyle | null;
   readonly maskHaloStyle?: MaskHaloStyle | null;
   readonly maskStyle?: MaskStyle | null;
+  readonly markerStyle?: MarkerStyle | null;
   readonly polygonStyle?: PolygonStyle | null;
   readonly polylineStyle?: PolylineStyle | null;
 }
@@ -150,6 +157,12 @@ export function createSourceAwarePresentation(
           sourcePresentations,
         )
       : globalPresentation.maskStyle,
+    markerStyle: shouldApplySourceStyle("markerStyle")
+      ? new SourceAwareMarkerStyle(
+          normalizeGlobalMarkerStyle(globalPresentation.markerStyle),
+          sourcePresentations,
+        )
+      : globalPresentation.markerStyle,
     maskHaloStyle: shouldApplySourceStyle("maskHaloStyle")
       ? new SourceAwareMaskHaloStyle(
           normalizeGlobalMaskHaloStyle(globalPresentation.maskHaloStyle),
@@ -324,6 +337,30 @@ class SourceAwareMaskHaloStyle implements MaskHaloStyle {
   }
 }
 
+class SourceAwareMarkerStyle implements MarkerStyle {
+  constructor(
+    private readonly globalStyle: MarkerStyle | null,
+    private readonly sourcePresentations: ReadonlyMap<
+      string,
+      SourcePresentation | undefined
+    >,
+  ) {}
+
+  resolve(
+    detection: Detection,
+    context: MarkerStyleContext,
+  ): MarkerDrawInstruction | undefined {
+    const style = resolveSourceStyle(
+      detection,
+      this.globalStyle,
+      this.sourcePresentations,
+      "markerStyle",
+    );
+
+    return style?.resolve(detection, context);
+  }
+}
+
 class SourceAwarePolygonStyle implements PolygonStyle {
   constructor(
     private readonly globalStyle: PolygonStyle | null,
@@ -434,6 +471,10 @@ function normalizeGlobalMaskStyle(style: MaskStyle | null | undefined) {
 
 function normalizeGlobalMaskHaloStyle(style: MaskHaloStyle | null | undefined) {
   return style === undefined ? createDefaultMaskHaloStyle() : style;
+}
+
+function normalizeGlobalMarkerStyle(style: MarkerStyle | null | undefined) {
+  return style === undefined ? new BaseMarkerStyle() : style;
 }
 
 function normalizeGlobalPolygonStyle(style: PolygonStyle | null | undefined) {

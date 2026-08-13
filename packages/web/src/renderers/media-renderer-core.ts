@@ -79,6 +79,7 @@ export async function createMediaRendererCore(
     labelStyle: options.labelStyle,
     maskHaloStyle: options.maskHaloStyle,
     maskStyle: options.maskStyle,
+    markerStyle: options.markerStyle,
     polygonStyle: options.polygonStyle,
     polylineStyle: options.polylineStyle,
     renderers: options.renderers,
@@ -481,6 +482,7 @@ export async function createMediaRendererCore(
         options.createMaskBrush?.(mediaDimensions) ?? options.maskBrush,
       maskHaloStyle: currentPresentation.maskHaloStyle,
       maskStyle: currentPresentation.maskStyle,
+      markerStyle: currentPresentation.markerStyle,
       maxDevicePixelRatio: options.maxDevicePixelRatio,
       onPresentationUpdate(presentedSample) {
         if (!runtimeState.isDestroyed()) {

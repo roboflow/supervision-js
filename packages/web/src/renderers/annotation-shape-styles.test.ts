@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { ShapeInstructionKind } from "supervision-js-core";
+import {
+  MarkerShape,
+  MarkerSizeSpace,
+  ShapeInstructionKind,
+} from "supervision-js-core";
 import { resolveAnnotationShapeStyle } from "#renderers/annotation-shape-styles";
 import type {
   BoxCornerStyleContext,
@@ -80,6 +84,31 @@ describe("annotation shape styles", () => {
           ],
         ],
         stroke: { alpha: 1, color: 0x123456, width: 2 },
+      },
+    ]);
+  });
+
+  it("lowers semantic markers into shared marker instructions", () => {
+    const style = resolveAnnotationShapeStyle({
+      markerStyle: {
+        resolve: () => ({
+          center: { x: 20, y: 30 },
+          fill: { alpha: 1, color: 0x123456 },
+          shape: MarkerShape.Triangle,
+          size: 16,
+          sizeSpace: MarkerSizeSpace.Screen,
+        }),
+      },
+    });
+
+    expect(style?.resolve(detection, context)).toEqual([
+      {
+        center: { x: 20, y: 30 },
+        fill: { alpha: 1, color: 0x123456 },
+        kind: ShapeInstructionKind.Marker,
+        shape: MarkerShape.Triangle,
+        size: 16,
+        sizeSpace: MarkerSizeSpace.Screen,
       },
     ]);
   });

@@ -63,6 +63,8 @@ export { BaseLabelStyle } from "supervision-js-core";
 export type { BaseLabelStyleOptions } from "supervision-js-core";
 export { BaseMaskStyle } from "supervision-js-core";
 export type { BaseMaskStyleOptions } from "supervision-js-core";
+export { BaseMarkerStyle } from "supervision-js-core";
+export type { BaseMarkerStyleOptions } from "supervision-js-core";
 export { BasePolygonStyle } from "supervision-js-core";
 export type { BasePolygonStyleOptions } from "supervision-js-core";
 export { BasePolylineStyle } from "supervision-js-core";
@@ -82,6 +84,7 @@ export {
   type LabelAnnotationRenderer,
   type MaskAnnotationRenderer,
   type MaskHaloAnnotationRenderer,
+  type MarkerAnnotationRenderer,
   type PolygonAnnotationRenderer,
   type PolylineAnnotationRenderer,
   RegionRendererComposeMode,
@@ -162,6 +165,14 @@ export type {
   MaskStyleContext,
 } from "supervision-js-core";
 export { MaskRenderMode } from "supervision-js-core";
+export { MarkerShape, MarkerSizeSpace } from "supervision-js-core";
+export type {
+  ClosedMarkerDrawInstruction,
+  CrossMarkerDrawInstruction,
+  MarkerDrawInstruction,
+  MarkerStyle,
+  MarkerStyleContext,
+} from "supervision-js-core";
 export type {
   PolygonDrawInstruction,
   PolygonStyle,

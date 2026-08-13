@@ -1,4 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
+import type {
+  BoxCornerDrawInstruction,
+  ClosedMarkerDrawInstruction,
+} from "supervision-js-core";
 
 import {
   createContainer,
@@ -255,7 +259,7 @@ describe("media session consumer workflows", () => {
     resetMocks();
     mediaMock.samples = [createMockSample(0, 0)];
     const { annotationRenderers, createMediaSession } = await import("./index");
-    const resolve = vi.fn(() => ({
+    const resolve = vi.fn<() => BoxCornerDrawInstruction>(() => ({
       segments: [
         [
           { x: 10, y: 10 },
@@ -300,6 +304,51 @@ describe("media session consumer workflows", () => {
       ).toBe(true);
     });
 
+    session.destroy();
+  });
+
+  it("forwards the marker renderer style from session presentation", async () => {
+    resetMocks();
+    mediaMock.samples = [createMockSample(0, 0)];
+    const {
+      annotationRenderers,
+      createMediaSession,
+      MarkerShape,
+      MarkerSizeSpace,
+    } = await import("./index");
+    const resolve = vi.fn<() => ClosedMarkerDrawInstruction>(() => ({
+      center: { x: 30, y: 70 },
+      fill: { alpha: 1, color: 0xff8800 },
+      shape: MarkerShape.Circle,
+      size: 18,
+      sizeSpace: MarkerSizeSpace.Media,
+      stroke: { alpha: 1, color: 0x8b5cf6, width: 2 },
+    }));
+    const session = await createMediaSession({
+      container: createContainer(),
+      detections: {
+        frames: [
+          {
+            detections: [
+              {
+                className: "player",
+                rect: { height: 40, width: 20, x: 20, y: 30 },
+              },
+            ],
+            frameIndex: 0,
+            mediaTime: 0,
+          },
+        ],
+      },
+      media: "sample.mp4",
+      presentation: {
+        renderers: [annotationRenderers.marker({ style: { resolve } })],
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(resolve).toHaveBeenCalled();
+    });
     session.destroy();
   });
 

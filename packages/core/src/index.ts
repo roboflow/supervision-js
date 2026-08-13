@@ -56,6 +56,8 @@ export { BaseLabelStyle } from "#styles/label-style";
 export type { BaseLabelStyleOptions } from "#styles/label-style";
 export { BaseMaskStyle } from "#styles/mask-style";
 export type { BaseMaskStyleOptions } from "#styles/mask-style";
+export { BaseMarkerStyle } from "#styles/marker-style";
+export type { BaseMarkerStyleOptions } from "#types/marker-style";
 export { BasePolygonStyle } from "#styles/polygon-style";
 export type { BasePolygonStyleOptions } from "#styles/polygon-style";
 export { BasePolylineStyle } from "#styles/polyline-style";
@@ -79,6 +81,7 @@ export {
   type LabelAnnotationRenderer,
   type MaskAnnotationRenderer,
   type MaskHaloAnnotationRenderer,
+  type MarkerAnnotationRenderer,
   type PolygonAnnotationRenderer,
   type PolylineAnnotationRenderer,
   RegionRendererComposeMode,
@@ -96,6 +99,13 @@ export {
   type RegionRendererTargetValue,
   type RegionRendererTransform,
 } from "#types/annotation-renderer";
+export {
+  type ClosedMarkerDrawInstruction,
+  type CrossMarkerDrawInstruction,
+  type MarkerDrawInstruction,
+  type MarkerStyle,
+  type MarkerStyleContext,
+} from "#types/marker-style";
 export { resolveAnnotationRendererPresentation } from "#styles/annotation-renderer-presentation";
 export {
   createSourceAwarePresentation,
