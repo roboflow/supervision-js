@@ -254,7 +254,7 @@ describe("createSourceAwarePresentation", () => {
 
   it("applies source overrides to box-corner renderer styles", () => {
     const globalStyle = {
-      resolve() {
+      resolve(_detection: unknown, _context: unknown) {
         return {
           segments: [],
           stroke: { alpha: 1, color: 0x123456, width: 2 },
@@ -262,7 +262,7 @@ describe("createSourceAwarePresentation", () => {
       },
     };
     const sourceStyle = {
-      resolve() {
+      resolve(_detection: unknown, _context: unknown) {
         return {
           segments: [],
           stroke: { alpha: 1, color: 0xabcdef, width: 3 },
