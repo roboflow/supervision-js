@@ -241,6 +241,9 @@ export type AnnotationRendererFactory = {
   readonly mask: (
     options?: AnnotationRendererStyleOptions<"mask">,
   ) => MaskAnnotationRenderer;
+  readonly maskHalo: (
+    options?: AnnotationRendererStyleOptions<"maskHalo">,
+  ) => MaskHaloAnnotationRenderer;
   readonly polygon: (
     options?: AnnotationRendererStyleOptions<"polygon">,
   ) => PolygonAnnotationRenderer;
