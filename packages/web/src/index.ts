@@ -78,6 +78,7 @@ export {
   type KeypointAnnotationRenderer,
   type LabelAnnotationRenderer,
   type MaskAnnotationRenderer,
+  type MaskHaloAnnotationRenderer,
   type PolygonAnnotationRenderer,
   type PolylineAnnotationRenderer,
   RegionRendererComposeMode,
@@ -144,6 +145,9 @@ export type {
 } from "supervision-js-core";
 export type {
   MaskDrawInstruction,
+  MaskHaloDrawInstruction,
+  MaskHaloStyle,
+  MaskHaloStyleContext,
   MaskStrokeStyle,
   MaskStrokeStyleOptions,
   MaskStyle,

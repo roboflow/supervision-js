@@ -76,6 +76,7 @@ export async function createMediaRendererCore(
     interactionStyle: options.interactionStyle,
     keypointStyle: options.keypointStyle,
     labelStyle: options.labelStyle,
+    maskHaloStyle: options.maskHaloStyle,
     maskStyle: options.maskStyle,
     polygonStyle: options.polygonStyle,
     polylineStyle: options.polylineStyle,
@@ -476,6 +477,7 @@ export async function createMediaRendererCore(
       labelStyle: currentPresentation.labelStyle,
       maskBrush:
         options.createMaskBrush?.(mediaDimensions) ?? options.maskBrush,
+      maskHaloStyle: currentPresentation.maskHaloStyle,
       maskStyle: currentPresentation.maskStyle,
       maxDevicePixelRatio: options.maxDevicePixelRatio,
       onPresentationUpdate(presentedSample) {

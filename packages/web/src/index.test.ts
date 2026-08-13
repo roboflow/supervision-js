@@ -132,6 +132,7 @@ describe("package entrypoint", () => {
       keypoints: expect.any(Function),
       label: expect.any(Function),
       mask: expect.any(Function),
+      maskHalo: expect.any(Function),
       polygon: expect.any(Function),
       polyline: expect.any(Function),
       region: expect.any(Function),
@@ -1234,6 +1235,64 @@ describe("package entrypoint", () => {
     }
   });
 
+  it("renders halo passes for a halo-only renderer list", async () => {
+    resetMocks();
+
+    const { annotationRenderers } = await import("./index");
+    // Node lacks createImageBitmap; stubbing it lets the prepared pipeline
+    // take the PngIdMask path the halo depends on.
+    vi.stubGlobal(
+      "createImageBitmap",
+      vi.fn(async () => ({ close: vi.fn(), height: 2, width: 2 })),
+    );
+    const haloResolve = vi.fn(() => ({
+      alpha: 0.6,
+      color: 0x8b5cf6,
+      spread: 12,
+    }));
+    const renderer = await createRenderer(false, false, {
+      detectionFrames: [
+        {
+          detections: [
+            {
+              className: "player",
+              mask: {
+                counts: "021",
+                encoding: DetectionMaskEncoding.CompressedRle,
+                height: 2,
+                width: 2,
+              },
+              rect: { height: 20, width: 10, x: 9, y: 15 },
+            },
+          ],
+          mediaTime: 0,
+        },
+      ],
+      renderers: [
+        annotationRenderers.maskHalo({ style: { resolve: haloResolve } }),
+      ],
+    });
+
+    // The halo style resolves per detection even though no mask renderer is
+    // listed, because the session forwards the resolved halo style and the
+    // scene prepares mask coverage internally.
+    await vi.waitFor(() => {
+      expect(haloResolve).toHaveBeenCalled();
+    });
+
+    await vi.waitFor(() => {
+      const haloMesh = pixiMock.meshInstances.find(
+        (mesh) => mesh.visible && mesh.filters !== undefined,
+      );
+
+      expect(haloMesh).toBeDefined();
+    });
+
+    renderer.destroy();
+    // Restore the node default so later tests take the RGBA fallback again.
+    vi.stubGlobal("createImageBitmap", undefined);
+  });
+
   it("prepares a composited mask texture without breaking box drawing", async () => {
     resetMocks();
 
@@ -1282,7 +1341,8 @@ describe("package entrypoint", () => {
 
     await vi.waitFor(() => {
       expect(pixiMock.canvasSourceOptions).toHaveLength(1);
-      expect(pixiMock.imageSourceOptions).toHaveLength(2);
+      // Prepared mask, id-mask placeholder, and the halo placeholder source.
+      expect(pixiMock.imageSourceOptions).toHaveLength(3);
       expect(pixiMock.textureOptions).toHaveLength(2);
     });
 
@@ -1300,10 +1360,12 @@ describe("package entrypoint", () => {
     expect(scene?.children[0]).toBe(pixiMock.spriteInstances[0]);
     expect(scene?.children[1]).toBe(maskContainer);
     expect(scene?.children[2]).toBe(boxGraphics);
-    expect(maskContainer?.children).toEqual([
-      pixiMock.spriteInstances[1],
-      pixiMock.meshInstances[0],
-    ]);
+    // Halo pass container first so the glow draws beneath the mask sprite
+    // and id mesh; passes are created lazily only when halos render.
+    expect(maskContainer?.children).toHaveLength(3);
+    expect(pixiMock.containerInstances).toContain(maskContainer?.children[0]);
+    expect(maskContainer?.children[1]).toBe(pixiMock.spriteInstances[1]);
+    expect(maskContainer?.children[2]).toBe(pixiMock.meshInstances[0]);
     expect(pixiMock.spriteInstances[1]).toMatchObject({
       height: 720,
       texture: expect.any(Object),

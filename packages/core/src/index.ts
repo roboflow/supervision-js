@@ -75,6 +75,7 @@ export {
   type KeypointAnnotationRenderer,
   type LabelAnnotationRenderer,
   type MaskAnnotationRenderer,
+  type MaskHaloAnnotationRenderer,
   type PolygonAnnotationRenderer,
   type PolylineAnnotationRenderer,
   RegionRendererComposeMode,
@@ -345,6 +346,11 @@ export type {
   MaskStyle,
   MaskStyleContext,
 } from "#types/mask-style";
+export type {
+  MaskHaloDrawInstruction,
+  MaskHaloStyle,
+  MaskHaloStyleContext,
+} from "#types/mask-halo-style";
 export { MaskRenderMode } from "#types/mask-style";
 export type {
   PolygonDrawInstruction,

@@ -31,6 +31,7 @@ const expectedStyleFields = {
   keypoints: "keypointStyle",
   label: "labelStyle",
   mask: "maskStyle",
+  maskHalo: "maskHaloStyle",
   polygon: "polygonStyle",
   polyline: "polylineStyle",
 } as const satisfies Record<
@@ -53,6 +54,7 @@ const styleFieldPairingIsExact: {
   keypoints: true,
   label: true,
   mask: true,
+  maskHalo: true,
   polygon: true,
   polyline: true,
 };
@@ -65,6 +67,9 @@ const expectedCanonicalStyles = {
   keypoints: BaseKeypointStyle,
   label: BaseLabelStyle,
   mask: BaseMaskStyle,
+  // The mask halo's canonical style is a plain resolver object and the
+  // capability is opt-in, so it never appears in the default presentation.
+  maskHalo: null,
   polygon: BasePolygonStyle,
   polyline: BasePolylineStyle,
 } as const satisfies Record<

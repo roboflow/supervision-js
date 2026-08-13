@@ -1,5 +1,6 @@
 import {
   compositeMaskFrame,
+  createMaskIdFrame,
   createPngIdMaskFrame,
 } from "#render-preparation/mask-frame-compositor";
 import { PreparedMaskFrameKind } from "#render-preparation/mask-frame-artifact";
@@ -65,28 +66,31 @@ async function prepareMaskFrame(message: MaskPreparationWorkerRequest) {
       compositedFrame.height,
     );
     const imageBitmap = createImageBitmapFromImageData(imageData);
+    const idMaskData = createMaskIdFrame(message.job.instructions)?.data;
 
     if (imageBitmap) {
       workerScope.postMessage(
         {
           imageBitmap,
+          idMaskData,
           key: message.job.key,
           requestId: message.requestId,
           type: MaskPreparationWorkerMessageType.Complete,
         },
-        [imageBitmap],
+        [...(idMaskData ? [idMaskData.buffer] : []), imageBitmap],
       );
       return;
     }
 
     workerScope.postMessage(
       {
+        idMaskData,
         imageData,
         key: message.job.key,
         requestId: message.requestId,
         type: MaskPreparationWorkerMessageType.Complete,
       },
-      [imageData.data.buffer],
+      [...(idMaskData ? [idMaskData.buffer] : []), imageData.data.buffer],
     );
   } catch (error) {
     workerScope.postMessage({

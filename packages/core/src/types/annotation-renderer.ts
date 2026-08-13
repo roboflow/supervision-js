@@ -2,6 +2,7 @@ import type { BoxStyle } from "#types/box-style";
 import type { EllipseStyle } from "#types/ellipse-style";
 import type { KeypointStyle } from "#types/keypoint-style";
 import type { LabelStyle } from "#types/label-style";
+import type { MaskHaloStyle } from "#types/mask-halo-style";
 import type { MaskStyle } from "#types/mask-style";
 import type { PolygonStyle } from "#types/polygon-style";
 import type { PolylineStyle } from "#types/polyline-style";
@@ -20,6 +21,7 @@ export const annotationRendererKinds = [
   "keypoints",
   "label",
   "mask",
+  "maskHalo",
   "polygon",
   "polyline",
   "region",
@@ -41,6 +43,7 @@ export type AnnotationRenderer =
   | KeypointAnnotationRenderer
   | LabelAnnotationRenderer
   | MaskAnnotationRenderer
+  | MaskHaloAnnotationRenderer
   | PolygonAnnotationRenderer
   | PolylineAnnotationRenderer
   | RegionAnnotationRenderer;
@@ -83,6 +86,18 @@ export interface LabelAnnotationRenderer extends BaseAnnotationRenderer {
 export interface MaskAnnotationRenderer extends BaseAnnotationRenderer {
   readonly kind: "mask";
   readonly style?: MaskStyle | null;
+}
+
+/**
+ * Soft glow that follows the exact mask silhouette.
+ *
+ * The backend blurs the prepared mask coverage on the GPU and reuses the
+ * mask renderer's prepared artifacts; listing this kind without the mask
+ * renderer still prepares the required mask coverage internally.
+ */
+export interface MaskHaloAnnotationRenderer extends BaseAnnotationRenderer {
+  readonly kind: "maskHalo";
+  readonly style?: MaskHaloStyle | null;
 }
 
 export interface PolygonAnnotationRenderer extends BaseAnnotationRenderer {
@@ -227,6 +242,7 @@ export const annotationRenderers: AnnotationRendererFactory = {
   keypoints: (options) => createAnnotationRenderer("keypoints", options),
   label: (options) => createAnnotationRenderer("label", options),
   mask: (options) => createAnnotationRenderer("mask", options),
+  maskHalo: (options) => createAnnotationRenderer("maskHalo", options),
   polygon: (options) => createAnnotationRenderer("polygon", options),
   polyline: (options) => createAnnotationRenderer("polyline", options),
   region: (options) => ({ kind: "region", ...options }),

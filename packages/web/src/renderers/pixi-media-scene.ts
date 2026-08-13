@@ -6,7 +6,7 @@ import {
   type PolygonStyle,
 } from "supervision-js-core";
 import type { LabelStyle } from "supervision-js-core";
-import type { MaskStyle } from "supervision-js-core";
+import type { MaskHaloStyle, MaskStyle } from "supervision-js-core";
 import {
   createViewportController,
   resolveAnnotationStyleState,
@@ -82,6 +82,7 @@ export async function createPixiMediaScene(
   const {
     Application,
     Assets,
+    BlurFilter,
     CanvasSource,
     Container,
     Graphics,
@@ -100,6 +101,32 @@ export async function createPixiMediaScene(
   let currentEllipseStyle: EllipseStyle | null = options.ellipseStyle ?? null;
   let currentLabelStyle: LabelStyle | null = options.labelStyle ?? null;
   let currentMaskStyle: MaskStyle | null = options.maskStyle ?? null;
+  let currentMaskHaloStyle: MaskHaloStyle | null =
+    options.maskHaloStyle ?? null;
+  // Halo-only presentations still need prepared id-mask artifacts; this
+  // invisible style drives preparation without drawing any fill or border.
+  const haloOnlyMaskStyle: MaskStyle = {
+    artifactKey: "mask-halo-only:v1",
+    resolve: (detection) =>
+      detection.mask
+        ? { alpha: 0, color: 0x000000, mask: detection.mask }
+        : undefined,
+  };
+  const createVisibilityMaskHaloStyle = (
+    style: MaskHaloStyle,
+  ): MaskHaloStyle => ({
+    resolve(detection, context) {
+      const state = resolveContextState(detection);
+
+      if (state.hidden) {
+        return undefined;
+      }
+
+      return style.resolve(detection, { ...context, ...state });
+    },
+  });
+  const resolveArtifactMaskStyle = () =>
+    currentMaskStyle ?? (currentMaskHaloStyle ? haloOnlyMaskStyle : null);
   let currentPolygonStyle: PolygonStyle | null =
     options.polygonStyle === undefined
       ? new BasePolygonStyle()
@@ -222,9 +249,11 @@ export async function createPixiMediaScene(
         preview: options.maskBrush,
       })
     : undefined;
-  let maskLayer = options.maskStyle
+  let maskLayer = resolveArtifactMaskStyle()
     ? createPixiMaskLayer({
+        BlurFilter,
         Container,
+        Rectangle,
         ImageSource,
         Mesh,
         MeshGeometry,
@@ -233,7 +262,10 @@ export async function createPixiMediaScene(
         Texture,
         UniformGroup,
         detectionTimeline: options.detectionTimeline,
-        maskStyle: createVisibilityMaskStyle(options.maskStyle),
+        maskHaloStyle: currentMaskHaloStyle
+          ? createVisibilityMaskHaloStyle(currentMaskHaloStyle)
+          : null,
+        maskStyle: createVisibilityMaskStyle(resolveArtifactMaskStyle()!),
         onActiveIdMaskFramePresented: handleActiveIdMaskFramePresented,
         renderPreparation: options.renderPreparation,
       })
@@ -899,19 +931,33 @@ export async function createPixiMediaScene(
         vectorLayer.setStyles({ shapeStyle: resolveVectorShapeStyle() });
       }
 
-      if (presentation.maskStyle !== undefined) {
-        currentMaskStyle = presentation.maskStyle;
-        const nextMaskLayer = presentation.maskStyle
-          ? ensureMaskLayer(presentation.maskStyle)
+      if (
+        presentation.maskStyle !== undefined ||
+        presentation.maskHaloStyle !== undefined
+      ) {
+        if (presentation.maskStyle !== undefined) {
+          currentMaskStyle = presentation.maskStyle;
+        }
+
+        if (presentation.maskHaloStyle !== undefined) {
+          currentMaskHaloStyle = presentation.maskHaloStyle;
+        }
+
+        const artifactStyle = resolveArtifactMaskStyle();
+        const nextMaskLayer = artifactStyle
+          ? ensureMaskLayer(artifactStyle)
           : maskLayer;
 
         nextMaskLayer?.setMaskStyle(
-          presentation.maskStyle
-            ? createVisibilityMaskStyle(presentation.maskStyle)
-            : presentation.maskStyle,
+          artifactStyle ? createVisibilityMaskStyle(artifactStyle) : null,
+        );
+        nextMaskLayer?.setMaskHaloStyle(
+          currentMaskHaloStyle
+            ? createVisibilityMaskHaloStyle(currentMaskHaloStyle)
+            : null,
         );
 
-        if (presentation.maskStyle) {
+        if (artifactStyle) {
           attachMaskLayerDisplay();
           syncSceneChildren();
         }
@@ -1084,7 +1130,9 @@ export async function createPixiMediaScene(
   function ensureMaskLayer(maskStyle: NonNullable<typeof options.maskStyle>) {
     if (!maskLayer) {
       maskLayer = createPixiMaskLayer({
+        BlurFilter,
         Container,
+        Rectangle,
         ImageSource,
         Mesh,
         MeshGeometry,
@@ -1093,6 +1141,9 @@ export async function createPixiMediaScene(
         Texture,
         UniformGroup,
         detectionTimeline: options.detectionTimeline,
+        maskHaloStyle: currentMaskHaloStyle
+          ? createVisibilityMaskHaloStyle(currentMaskHaloStyle)
+          : null,
         maskStyle: createVisibilityMaskStyle(maskStyle),
         onActiveIdMaskFramePresented: handleActiveIdMaskFramePresented,
         renderPreparation: options.renderPreparation,

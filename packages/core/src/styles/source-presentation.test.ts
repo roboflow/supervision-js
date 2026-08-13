@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { BaseBoxStyle } from "#styles/box-style";
 import { BaseLabelStyle } from "#styles/label-style";
 import { BaseMaskStyle } from "#styles/mask-style";
+import { createDefaultMaskHaloStyle } from "#styles/default-annotation-presentation";
 import { BaseKeypointStyle } from "#styles/keypoint-style";
 import { BasePolygonStyle } from "#styles/polygon-style";
 import { BasePolylineStyle } from "#styles/polyline-style";
@@ -217,6 +218,38 @@ describe("createSourceAwarePresentation", () => {
     expect(
       presentation.ellipseStyle?.resolve(createDetection("draft"), context),
     ).toMatchObject({ center: { x: 8, y: 8 } });
+  });
+
+  it("applies mask halo source overrides and disables", () => {
+    const presentation = createSourceAwarePresentation(
+      {
+        maskHaloStyle: createDefaultMaskHaloStyle(),
+      },
+      [
+        {
+          id: "draft",
+          presentation: {
+            maskHaloStyle: {
+              resolve() {
+                return { alpha: 0.25, color: 0x00ff00, spread: 4 };
+              },
+            },
+          },
+        },
+        {
+          id: "hidden",
+          presentation: { maskHaloStyle: null },
+        },
+      ],
+    );
+    const context = { detectionIndex: 0, frame, hidden: false, mediaTime: 0 };
+
+    expect(
+      presentation.maskHaloStyle?.resolve(createDetection("draft"), context),
+    ).toEqual({ alpha: 0.25, color: 0x00ff00, spread: 4 });
+    expect(
+      presentation.maskHaloStyle?.resolve(createDetection("hidden"), context),
+    ).toBeUndefined();
   });
 
   it("keeps global interaction and focus styles source-aware without wrapping them", () => {
