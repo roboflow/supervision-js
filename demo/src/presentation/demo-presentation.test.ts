@@ -133,6 +133,25 @@ describe("demo presentation", () => {
     }
   });
 
+  it("places the ellipse footprint below a center-based detection rect", () => {
+    const presentation = createDemoPresentation({
+      ...defaultDemoPresentationSettings,
+      ellipsesEnabled: true,
+    });
+
+    expect(
+      presentation.ellipseStyle?.resolve(rectangleDetection, {
+        detectionIndex: 0,
+        frame: { detections: [rectangleDetection], mediaTime: 0 },
+        mediaTime: 0,
+      }),
+    ).toMatchObject({
+      center: { x: 10, y: 28.5 },
+      radiusX: 10,
+      radiusY: 3.5,
+    });
+  });
+
   it("removes the box style when boxes are disabled", () => {
     const presentation = createDemoPresentation({
       ...defaultDemoPresentationSettings,

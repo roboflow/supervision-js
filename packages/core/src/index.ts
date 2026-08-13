@@ -71,6 +71,7 @@ export {
   type AnnotationRendererFactory,
   type AnnotationRendererKind,
   type BoxAnnotationRenderer,
+  type EllipseAnnotationRenderer,
   type KeypointAnnotationRenderer,
   type LabelAnnotationRenderer,
   type MaskAnnotationRenderer,
@@ -380,6 +381,13 @@ export type {
   ShapeStyle,
   ShapeStyleContext,
 } from "#types/shape-style";
+export type {
+  ClosedEllipseDrawInstruction,
+  EllipseDrawInstruction,
+  EllipseArcDrawInstruction,
+  EllipseStyle,
+  EllipseStyleContext,
+} from "#types/ellipse-style";
 export { KeypointMarkerShape } from "#types/keypoint-style";
 export type {
   KeypointDrawInstruction,

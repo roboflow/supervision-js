@@ -130,18 +130,19 @@ export async function createMediaSession(
       presentation: MediaRendererPresentation | undefined,
     ): MediaRendererPresentation => {
       const resolved = resolvePresentation(presentation);
-      const directRenderers = resolved.renderers?.filter(
-        (renderer) => renderer.kind === "region",
-      );
+
       return {
         ...resolved,
-        // Style-backed renderers have already been lowered into their existing
-        // specialized fields. Direct renderers retain their descriptors for
-        // the browser scene implementation.
-        renderers:
-          directRenderers && directRenderers.length > 0
-            ? directRenderers
-            : undefined,
+        // Style-backed renderers have already been lowered into their
+        // specialized fields, including source overrides. Keep their kinds in
+        // the authoritative list so the renderer core does not clear those
+        // fields when direct renderers are also present, but let the resolved
+        // fields win over the descriptors' original global styles.
+        renderers: resolved.renderers?.map((renderer) =>
+          renderer.kind === "region"
+            ? renderer
+            : { ...renderer, style: undefined },
+        ),
       };
     };
     const initialPresentation =
@@ -153,6 +154,7 @@ export async function createMediaSession(
       backgroundColor: initialPresentation.backgroundColor,
       annotationOverlayStyle: initialPresentation.annotationOverlayStyle,
       boxStyle: initialPresentation.boxStyle,
+      ellipseStyle: initialPresentation.ellipseStyle,
       container: options.container,
       detectionBuffer: sessionDefaults.detectionBuffer,
       detectionFrames: sessionDetections.detectionFrames,

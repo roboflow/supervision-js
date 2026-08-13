@@ -120,6 +120,70 @@ describe("media session consumer workflows", () => {
     expect(mediaMock.dispose).toHaveBeenCalledOnce();
   });
 
+  it("composes the ellipse renderer style with a direct region renderer", async () => {
+    resetMocks();
+    mediaMock.samples = [createMockSample(0, 0)];
+    const { annotationRenderers, createMediaSession } = await import("./index");
+    const ellipseResolve = vi.fn(() => ({
+      center: { x: 30, y: 70 },
+      endAngle: (235 * Math.PI) / 180,
+      radiusX: 10,
+      radiusY: 3.5,
+      startAngle: (-45 * Math.PI) / 180,
+      stroke: { alpha: 1, color: 0x8b5cf6, width: 2 },
+    }));
+    const session = await createMediaSession({
+      container: createContainer(),
+      detections: {
+        frames: [
+          {
+            detections: [
+              {
+                className: "player",
+                rect: { height: 40, width: 20, x: 20, y: 30 },
+              },
+            ],
+            frameIndex: 0,
+            mediaTime: 0,
+          },
+        ],
+      },
+      media: "sample.mp4",
+      presentation: {
+        renderers: [
+          annotationRenderers.ellipse({ style: { resolve: ellipseResolve } }),
+          annotationRenderers.region({
+            id: "player-badge",
+            region: { kind: "bounds" },
+            source: { asset: { src: "/badge.png" }, kind: "asset" },
+            target: { className: "player" },
+          }),
+        ],
+      },
+    });
+
+    // The session lowers the ellipse into its resolved style field while the
+    // region keeps its direct descriptor. The renderer core must preserve both
+    // when it normalizes the authoritative renderer list again.
+    await vi.waitFor(() => {
+      expect(ellipseResolve).toHaveBeenCalled();
+    });
+
+    await vi.waitFor(() => {
+      const arcGraphics = pixiMock.graphicsInstances.find(
+        (graphics) =>
+          graphics.moveTo.mock.calls.length > 0 &&
+          graphics.stroke.mock.calls.some(
+            ([stroke]) => (stroke as { color?: number })?.color === 0x8b5cf6,
+          ),
+      );
+
+      expect(arcGraphics).toBeDefined();
+    });
+
+    session.destroy();
+  });
+
   it("forwards the mask halo renderer style from session presentation", async () => {
     resetMocks();
     mediaMock.samples = [createMockSample(0, 0)];

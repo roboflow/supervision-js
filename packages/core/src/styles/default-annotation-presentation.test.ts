@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { createDefaultAnnotationPresentation } from "#styles/default-annotation-presentation";
+import {
+  createDefaultAnnotationPresentation,
+  createDefaultEllipseStyle,
+} from "#styles/default-annotation-presentation";
 import { createSourceAwarePresentation } from "#styles/source-presentation";
 import { BoxShape } from "#types/box-style";
 import { DetectionMaskEncoding, type DetectionFrame } from "#types/detections";
@@ -28,6 +31,16 @@ describe("createDefaultAnnotationPresentation", () => {
       rect,
       shape: BoxShape.RoundedRect,
       stroke: { alpha: 1, color, width: 2 },
+    });
+    expect(
+      createDefaultEllipseStyle().resolve(
+        { className: "person", rect },
+        context,
+      ),
+    ).toMatchObject({
+      center: { x: 5, y: 15.25 },
+      radiusX: 5,
+      radiusY: 1.75,
     });
     expect(
       presentation.maskStyle?.resolve({ className: "person", mask }, context),

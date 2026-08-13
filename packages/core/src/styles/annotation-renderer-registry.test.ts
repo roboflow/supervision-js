@@ -27,6 +27,7 @@ type IsExact<TLeft, TRight> = [TLeft] extends [TRight]
 
 const expectedStyleFields = {
   box: "boxStyle",
+  ellipse: "ellipseStyle",
   keypoints: "keypointStyle",
   label: "labelStyle",
   mask: "maskStyle",
@@ -49,6 +50,7 @@ const styleFieldPairingIsExact: {
   >;
 } = {
   box: true,
+  ellipse: true,
   keypoints: true,
   label: true,
   mask: true,
@@ -59,6 +61,9 @@ const styleFieldPairingIsExact: {
 
 const expectedCanonicalStyles = {
   box: BaseBoxStyle,
+  // The ellipse's canonical style is a plain resolver object and the
+  // capability is opt-in, so it never appears in the default presentation.
+  ellipse: null,
   keypoints: BaseKeypointStyle,
   label: BaseLabelStyle,
   mask: BaseMaskStyle,

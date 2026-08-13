@@ -196,6 +196,7 @@ test("TypeDoc presents public guidance as four navigable sections", async () => 
 test("every fixture-backed annotation renderer has a focused live playground", async () => {
   const renderers = [
     "boxes",
+    "ellipse",
     "masks",
     "labels",
     "mask-halo",
@@ -206,6 +207,7 @@ test("every fixture-backed annotation renderer has a focused live playground", a
   ];
   const pages = {
     boxes: "boxes.md",
+    ellipse: "ellipse.md",
     keypoints: "keypoints-and-skeletons.md",
     labels: "labels.md",
     "mask-halo": "mask-halo.md",
@@ -216,6 +218,7 @@ test("every fixture-backed annotation renderer has a focused live playground", a
   };
   const factories = {
     boxes: "box",
+    ellipse: "ellipse",
     keypoints: "keypoints",
     labels: "label",
     "mask-halo": "maskHalo",

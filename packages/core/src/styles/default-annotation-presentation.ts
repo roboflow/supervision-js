@@ -6,6 +6,7 @@ import type { MaskHaloStyle } from "#types/mask-halo-style";
 import { BasePolygonStyle } from "#styles/polygon-style";
 import { BasePolylineStyle } from "#styles/polyline-style";
 import { BoxShape } from "#types/box-style";
+import type { EllipseStyle } from "#types/ellipse-style";
 import type { Detection, SkeletonDefinitions } from "#types/detections";
 import { LabelPlacement } from "#types/label-style";
 import { MaskRenderMode } from "#types/mask-style";
@@ -13,6 +14,9 @@ import type { MediaRendererPresentation } from "#types/media-rendering";
 import { resolveDetectionClassColorStyle } from "#utils/color-palette";
 
 const DEFAULT_BOX_CORNER_RADIUS = 1;
+const DEFAULT_ELLIPSE_AXIS_RATIO = 0.35;
+const DEFAULT_ELLIPSE_START_ANGLE = (-45 * Math.PI) / 180;
+const DEFAULT_ELLIPSE_END_ANGLE = (235 * Math.PI) / 180;
 const DEFAULT_OUTLINE_WIDTH = 2;
 const DEFAULT_FILL_ALPHA = 0.08;
 const DEFAULT_MASK_FILL_ALPHA = 0.45;
@@ -91,6 +95,46 @@ export function createDefaultBoxStyle(
       width: DEFAULT_OUTLINE_WIDTH,
     }),
   });
+}
+
+/**
+ * Matches the Python Supervision EllipseAnnotator: an elliptical footprint
+ * arc under the detection box, swept from -45deg to 235deg, in the class
+ * color.
+ */
+export function createDefaultEllipseStyle(
+  options: DefaultAnnotationPresentationOptions = {},
+): EllipseStyle {
+  const getClassColor = createClassColorResolver(options);
+
+  return {
+    resolve(detection, context) {
+      if (!detection.rect || context.hidden) {
+        return undefined;
+      }
+
+      const radiusX = detection.rect.width / 2;
+      const radiusY = radiusX * DEFAULT_ELLIPSE_AXIS_RATIO;
+
+      return {
+        center: {
+          x: detection.rect.x,
+          // Bottom-tangent so the arc hugs the detection instead of dipping
+          // below its feet.
+          y: detection.rect.y + detection.rect.height / 2 - radiusY,
+        },
+        endAngle: DEFAULT_ELLIPSE_END_ANGLE,
+        radiusX,
+        radiusY,
+        startAngle: DEFAULT_ELLIPSE_START_ANGLE,
+        stroke: {
+          alpha: 1,
+          color: getClassColor(detection),
+          width: DEFAULT_OUTLINE_WIDTH,
+        },
+      };
+    },
+  };
 }
 
 export function createDefaultKeypointStyle(

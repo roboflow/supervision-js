@@ -98,8 +98,9 @@ session.setPresentation({
 });
 ```
 
-The current built-ins are `box`, `mask`, `polygon`, `polyline`, `keypoints`,
-`label`, and the multi-instance `region` asset renderer;
+The current built-ins are `box`, `ellipse`, `mask`, `maskHalo`, `polygon`,
+`polyline`, `keypoints`, `label`, and the multi-instance `region` asset
+renderer;
 `annotationRendererKinds` enumerates that vocabulary and
 `AnnotationRendererKind` names it in application code. When supplied, the list
 is authoritative: omitted built-ins are

@@ -1,5 +1,6 @@
 import {
   createDefaultBoxStyle,
+  createDefaultEllipseStyle,
   createDefaultMaskHaloStyle,
   createDefaultKeypointStyle,
   createDefaultLabelStyle,
@@ -16,6 +17,7 @@ import type { MediaRendererPresentation } from "#types/media-rendering";
 /** The style contract configured by one renderer kind. */
 export const styledAnnotationRendererKinds = [
   "box",
+  "ellipse",
   "keypoints",
   "label",
   "mask",
@@ -97,6 +99,11 @@ export const annotationRendererRegistry: AnnotationRendererRegistry = {
     cardinality: "singleton",
     createCanonicalStyle: createDefaultBoxStyle,
     styleField: "boxStyle",
+  },
+  ellipse: {
+    cardinality: "singleton",
+    createCanonicalStyle: createDefaultEllipseStyle,
+    styleField: "ellipseStyle",
   },
   keypoints: {
     cardinality: "singleton",

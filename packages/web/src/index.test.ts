@@ -128,6 +128,7 @@ describe("package entrypoint", () => {
     expect(entrypoint.createMediaRenderer).toEqual(expect.any(Function));
     expect(entrypoint.annotationRenderers).toEqual({
       box: expect.any(Function),
+      ellipse: expect.any(Function),
       keypoints: expect.any(Function),
       label: expect.any(Function),
       mask: expect.any(Function),

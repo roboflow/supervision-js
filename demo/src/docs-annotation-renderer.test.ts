@@ -22,11 +22,13 @@ describe("docs annotation renderers", () => {
           ? ["masksEnabled", "polylinesEnabled"]
           : renderer === "keypoints"
             ? ["keypointsEnabled"]
-            : renderer === "mask-halo"
-              ? ["maskHaloEnabled"]
-              : renderer === "regions"
-                ? []
-                : [`${renderer}Enabled`];
+            : renderer === "ellipse"
+              ? ["ellipsesEnabled"]
+              : renderer === "mask-halo"
+                ? ["maskHaloEnabled"]
+                : renderer === "regions"
+                  ? []
+                  : [`${renderer}Enabled`];
 
       expect(enabled).toEqual(expectedEnabled);
     }
@@ -64,6 +66,15 @@ describe("docs annotation renderers", () => {
         defaultDemoPresentationSettings,
       ),
     ).toContain("annotationRenderers.mask({");
+    const ellipseSnippet = createDocsAnnotationRendererSnippet(
+      "ellipse",
+      defaultDemoPresentationSettings,
+    );
+    expect(ellipseSnippet).toContain("x: detection.rect.x,");
+    expect(ellipseSnippet).toContain(
+      "y: detection.rect.y + detection.rect.height / 2 - radiusY,",
+    );
+    expect(ellipseSnippet).toContain("alpha: 1,");
   });
 
   it("keeps the polyline playground focused on one committed basketball trace", () => {
