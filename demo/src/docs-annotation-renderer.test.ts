@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { MarkerShape } from "supervision";
 import { defaultDemoPresentationSettings } from "./presentation/demo-presentation";
 import {
   createDocsAnnotationRendererPresentation,
@@ -67,10 +68,20 @@ describe("docs annotation renderers", () => {
     expect(
       createDocsAnnotationRendererSnippet("markers", {
         ...defaultDemoPresentationSettings,
+        markerPosition: "bottom-right",
+        markerShape: MarkerShape.Triangle,
         markerSize: 20,
         markerStrokeWidth: 3,
       }),
     ).toContain("size: 20");
+    const markerSnippet = createDocsAnnotationRendererSnippet("markers", {
+      ...defaultDemoPresentationSettings,
+      markerPosition: "bottom-right",
+      markerShape: MarkerShape.Triangle,
+    });
+    expect(markerSnippet).toContain("shape: MarkerShape.Triangle");
+    expect(markerSnippet).toContain("x: rect.x + rect.width / 2");
+    expect(markerSnippet).toContain("y: rect.y + rect.height / 2");
     expect(
       createDocsAnnotationRendererSnippet("box-corners", {
         ...defaultDemoPresentationSettings,
@@ -93,6 +104,20 @@ describe("docs annotation renderers", () => {
       "y: detection.rect.y + detection.rect.height / 2 - radiusY,",
     );
     expect(ellipseSnippet).toContain("alpha: 1,");
+  });
+
+  it("exposes marker shape and bounding-box position controls", () => {
+    expect(createDocsAnnotationRendererPresentation("markers")).toMatchObject({
+      markerPosition: "bottom-center",
+      markerShape: MarkerShape.Triangle,
+    });
+    expect(docsAnnotationRenderers.markers.selects).toMatchObject([
+      { key: "markerShape" },
+      { key: "markerPosition" },
+    ]);
+    expect(docsAnnotationRenderers.markers.selects?.[1]?.options).toHaveLength(
+      9,
+    );
   });
 
   it("keeps the polyline playground focused on one committed basketball trace", () => {

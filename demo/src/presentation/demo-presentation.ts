@@ -14,6 +14,7 @@ import {
   type DetectionClassColorStyle,
   FocusTargetMode,
   LabelPlacement,
+  MarkerShape,
   MaskRenderMode,
   annotationRenderers,
   type BoxDrawInstruction,
@@ -37,6 +38,20 @@ import {
 } from "supervision";
 
 export type DemoClassStyle = DetectionClassColorStyle;
+
+export const demoMarkerPositionOffsets = {
+  "top-left": { x: -0.5, y: -0.5 },
+  "top-center": { x: 0, y: -0.5 },
+  "top-right": { x: 0.5, y: -0.5 },
+  "center-left": { x: -0.5, y: 0 },
+  center: { x: 0, y: 0 },
+  "center-right": { x: 0.5, y: 0 },
+  "bottom-left": { x: -0.5, y: 0.5 },
+  "bottom-center": { x: 0, y: 0.5 },
+  "bottom-right": { x: 0.5, y: 0.5 },
+} as const;
+
+export type DemoMarkerPosition = keyof typeof demoMarkerPositionOffsets;
 
 export interface DemoPresentationSettings {
   readonly boxesEnabled: boolean;
@@ -75,6 +90,8 @@ export interface DemoPresentationSettings {
   readonly maskOpacity: number;
   readonly maskStrokeAlpha: number;
   readonly maskStrokeWidth: number;
+  readonly markerPosition: DemoMarkerPosition;
+  readonly markerShape: MarkerShape;
   readonly markerSize: number;
   readonly markerStrokeWidth: number;
   readonly polygonFillAlpha: number;
@@ -207,6 +224,8 @@ export const defaultDemoPresentationSettings: DemoPresentationSettings = {
   maskStrokeAlpha: 1,
   maskStrokeWidth: 2,
   masksEnabled: true,
+  markerPosition: "center",
+  markerShape: MarkerShape.Circle,
   markerSize: 14,
   markerStrokeWidth: 2,
   markersEnabled: false,
@@ -300,10 +319,20 @@ export function createDemoPresentation(
 function createDemoMarkerStyle(
   settings: DemoPresentationSettings,
 ): MarkerStyle {
+  const positionOffset = demoMarkerPositionOffsets[settings.markerPosition];
+
   return new BaseMarkerStyle({
+    center: (detection) =>
+      detection.rect
+        ? {
+            x: detection.rect.x + detection.rect.width * positionOffset.x,
+            y: detection.rect.y + detection.rect.height * positionOffset.y,
+          }
+        : undefined,
     fill: (detection) => ({
       color: resolveClassStyle(detection, settings).fill,
     }),
+    shape: settings.markerShape,
     shouldRender: (detection) => passesConfidenceThreshold(detection, settings),
     size: settings.markerSize,
     stroke: (detection) => ({
