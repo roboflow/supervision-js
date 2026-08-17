@@ -8,6 +8,7 @@ import {
   createDocsTrackingController,
   createDocsTrackingPresentation,
   createDocsTrackingSnippet,
+  type DocsTrackingPresentationMode,
 } from "../docs-tracking";
 import { useDemoRenderer } from "../hooks/useDemoRenderer";
 import { RendererViewport } from "./RendererViewport";
@@ -29,6 +30,7 @@ export function DocsTrackingPostProcessorPlayground() {
   const [controller] = useState(createDocsTrackingController);
   const [geometry, setGeometry] = useState(TrackingGeometry.Box);
   const geometryRef = useRef(geometry);
+  const presentationModeRef = useRef<DocsTrackingPresentationMode>("raw");
   geometryRef.current = geometry;
   const [iouThreshold, setIouThreshold] = useState(0.3);
   const [maxAge, setMaxAge] = useState(30);
@@ -49,7 +51,11 @@ export function DocsTrackingPostProcessorPlayground() {
     [controller],
   );
   const [presentationTransform] = useState(
-    () => () => createDocsTrackingPresentation(geometryRef.current),
+    () => () =>
+      createDocsTrackingPresentation(
+        geometryRef.current,
+        presentationModeRef.current,
+      ),
   );
   const demo = useDemoRenderer({
     fixtureDetectionSourceTransform: sourceTransform,
@@ -75,6 +81,9 @@ export function DocsTrackingPostProcessorPlayground() {
     () => createDocsTrackingSnippet(geometry, iouThreshold, maxAge),
     [geometry, iouThreshold, maxAge],
   );
+  const isPlaying =
+    demo.playbackState === MediaRendererPlaybackState.Playing ||
+    demo.playbackState === MediaRendererPlaybackState.Buffering;
 
   useEffect(() => () => controller.destroy?.(), [controller]);
 
@@ -87,13 +96,8 @@ export function DocsTrackingPostProcessorPlayground() {
     setErrorMessage(null);
     setProcessedChunks(0);
     setDiagnostics(emptyDiagnostics);
-    const isPlaying =
-      demo.playbackState === MediaRendererPlaybackState.Playing ||
-      demo.playbackState === MediaRendererPlaybackState.Buffering;
-
     if (isPlaying) demo.onTogglePlayback();
     demo.onSeek(0);
-    demo.refreshPresentation();
 
     try {
       await controller.run({
@@ -101,7 +105,9 @@ export function DocsTrackingPostProcessorPlayground() {
         iouThreshold,
         maxAge,
         onChunk(chunkIndex) {
+          presentationModeRef.current = "tracked";
           setProcessedChunks(chunkIndex + 1);
+          demo.refreshPresentation();
           demo.refreshDetections();
         },
         onDiagnostics: setDiagnostics,
@@ -110,19 +116,23 @@ export function DocsTrackingPostProcessorPlayground() {
       demo.onSeek(0);
       setStatus("tracked");
     } catch (error) {
+      presentationModeRef.current = "tracked";
+      demo.refreshPresentation();
       setErrorMessage(
         error instanceof Error ? error.message : "Unable to apply tracking.",
       );
       setStatus("error");
     }
-  }, [controller, demo, geometry, iouThreshold, maxAge]);
+  }, [controller, demo, geometry, iouThreshold, isPlaying, maxAge]);
 
   const showRaw = useCallback(() => {
+    presentationModeRef.current = "raw";
     controller.showRaw();
     setStatus("raw");
     setErrorMessage(null);
     setProcessedChunks(0);
     setDiagnostics(emptyDiagnostics);
+    demo.refreshPresentation();
     demo.refreshDetections();
     demo.onSeek(0);
   }, [controller, demo]);
@@ -152,13 +162,28 @@ export function DocsTrackingPostProcessorPlayground() {
             <h1>Tracking</h1>
             <span>Ordered SORT in a browser worker</span>
           </div>
-          <button
-            disabled={!demo.canUseRenderer || status === "running"}
-            onClick={() => void applyTracking()}
-            type="button"
-          >
-            {status === "running" ? "Tracking…" : "Apply tracking"}
-          </button>
+          <div className="docs-tracking-playground__header-actions">
+            <button
+              aria-label={
+                isPlaying
+                  ? "Pause basketball fixture"
+                  : "Play basketball fixture"
+              }
+              disabled={!demo.canUseRenderer || status === "running"}
+              onClick={demo.onTogglePlayback}
+              type="button"
+            >
+              <span aria-hidden="true">{isPlaying ? "Ⅱ" : "▶"}</span>
+              {isPlaying ? "Pause" : "Play"}
+            </button>
+            <button
+              disabled={!demo.canUseRenderer || status === "running"}
+              onClick={() => void applyTracking()}
+              type="button"
+            >
+              {status === "running" ? "Tracking…" : "Apply tracking"}
+            </button>
+          </div>
         </header>
 
         <div className="docs-layer-playground__controls">
@@ -167,13 +192,18 @@ export function DocsTrackingPostProcessorPlayground() {
             <select
               disabled={status === "running"}
               onChange={(event) => {
+                const nextGeometry = event.currentTarget
+                  .value as TrackingGeometry;
+                presentationModeRef.current = "raw";
+                geometryRef.current = nextGeometry;
                 controller.cancel();
                 controller.showRaw();
                 setStatus("raw");
-                setGeometry(event.currentTarget.value as TrackingGeometry);
+                setGeometry(nextGeometry);
                 setErrorMessage(null);
                 setProcessedChunks(0);
                 setDiagnostics(emptyDiagnostics);
+                demo.refreshPresentation();
                 demo.refreshDetections();
                 demo.onSeek(0);
               }}

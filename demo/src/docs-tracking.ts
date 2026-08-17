@@ -36,6 +36,8 @@ export interface DocsTrackingRunOptions {
   ) => void;
 }
 
+export type DocsTrackingPresentationMode = "raw" | "tracked";
+
 export interface DocsTrackingController extends DetectionFrameSource {
   attach(
     source: DetectionFrameSource,
@@ -190,15 +192,20 @@ export function createDocsTrackingController(): DocsTrackingController {
 
 export function createDocsTrackingPresentation(
   geometry: TrackingGeometry,
+  mode: DocsTrackingPresentationMode = "tracked",
 ): MediaRendererPresentation {
+  const isRaw = mode === "raw";
   const shouldRenderObserved = (detection: Detection) =>
-    detection.trackerId !== undefined &&
-    detection.trackerState !== DetectionTrackerState.Predicted &&
+    (isRaw ||
+      (detection.trackerId !== undefined &&
+        detection.trackerState !== DetectionTrackerState.Predicted)) &&
     hasGeometry(detection, geometry);
   const shouldRenderLabel = (detection: Detection) =>
-    detection.trackerId !== undefined &&
-    (detection.trackerState === DetectionTrackerState.Predicted ||
-      hasGeometry(detection, geometry));
+    isRaw
+      ? hasGeometry(detection, geometry)
+      : detection.trackerId !== undefined &&
+        (detection.trackerState === DetectionTrackerState.Predicted ||
+          hasGeometry(detection, geometry));
   const boxStyle = new BaseBoxStyle({
     fill: (detection) => ({
       alpha:
@@ -208,7 +215,7 @@ export function createDocsTrackingPresentation(
       color: getTrackStyle(detection).fill,
     }),
     shouldRender: (detection) =>
-      detection.trackerState === DetectionTrackerState.Predicted ||
+      (!isRaw && detection.trackerState === DetectionTrackerState.Predicted) ||
       (geometry === TrackingGeometry.Box && shouldRenderObserved(detection)),
     stroke: (detection) => ({
       alpha:
@@ -321,10 +328,22 @@ function hasGeometry(detection: Detection, geometry: TrackingGeometry) {
 }
 
 function getTrackStyle(detection: Detection) {
-  const index = Math.max(0, (detection.trackerId ?? 1) - 1);
+  const index =
+    detection.trackerId === undefined
+      ? hashClassName(detection.className)
+      : Math.max(0, detection.trackerId - 1);
   return DEFAULT_DETECTION_COLOR_SEQUENCE[
     index % DEFAULT_DETECTION_COLOR_SEQUENCE.length
   ]!;
+}
+
+function hashClassName(className: string | undefined) {
+  if (!className) return 0;
+  let hash = 0;
+  for (let index = 0; index < className.length; index += 1) {
+    hash = (hash * 31 + className.charCodeAt(index)) >>> 0;
+  }
+  return hash;
 }
 
 function geometryName(geometry: TrackingGeometry) {

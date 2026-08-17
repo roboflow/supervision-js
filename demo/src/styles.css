@@ -416,6 +416,12 @@ body {
   opacity: 0.55;
 }
 
+.docs-tracking-playground__header-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.45rem;
+}
+
 .docs-layer-playground__controls {
   background: rgba(255, 255, 255, 0.78);
   border: 1px solid #e4e4e7;
