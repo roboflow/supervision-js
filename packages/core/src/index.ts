@@ -21,12 +21,17 @@ export { createWritableDetectionFrameSource } from "#detections/writable-detecti
 
 // Semantic post-processing.
 export { createSortTracker } from "#post-processing/sort-tracker";
+export { createByteTrackTracker } from "#post-processing/byte-track-tracker";
 export {
   detectionPostProcessors,
   projectDetectionFrameForTracking,
 } from "#post-processing/tracking";
 export {
   TrackingGeometry,
+  type ByteTrackTracker,
+  type ByteTrackTrackerUpdate,
+  type ByteTrackTrackingDetectionPostProcessor,
+  type ByteTrackTrackingOptions,
   type DetectionPostProcessor,
   type DetectionPostProcessorFactory,
   type SortTracker,
@@ -35,6 +40,7 @@ export {
   type TrackingAssignment,
   type TrackingDetectionPostProcessor,
   type TrackingProjection,
+  type TrackingTracker,
 } from "#types/post-processing";
 
 // Interaction and picking.

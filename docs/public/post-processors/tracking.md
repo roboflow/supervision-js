@@ -1,6 +1,6 @@
 ---
 title: Tracking
-summary: Apply ordered SORT tracking to boxes, masks, or keypoints in a browser worker.
+summary: Apply ordered SORT or ByteTrack tracking to boxes, masks, or keypoints in a browser worker.
 ---
 
 # Tracking
@@ -8,7 +8,7 @@ summary: Apply ordered SORT tracking to boxes, masks, or keypoints in a browser 
 The tracking post processor assigns a numeric `trackerId` to each matched
 `Detection`. It preserves `Detection.id`: `id` remains annotation and picking
 identity, while `trackerId` is temporal identity produced by the selected
-tracker. Like Python SORT, motion predictions remain internal tracker state and
+tracker. Like the Python trackers, motion predictions remain internal state and
 are never emitted as synthetic detections.
 
 <div class="supervision-layer-playground supervision-post-processor-playground">
@@ -26,7 +26,8 @@ confidence, and an association rectangle to its worker, and appends the
 enriched semantic frame to browser cold storage. This comparison playground
 sets `mutateInput: false` so it can retain a raw view. Switch among boxes,
 masks, and keypoints to change both association input and the visible tracked
-annotation. While tracked detections are visible, changing any tracking control
+annotation. Choose SORT or ByteTrack to compare their association behavior.
+While tracked detections are visible, changing any tracking control
 cancels stale work and recomputes the derived output from the original raw
 detections.
 
@@ -100,6 +101,32 @@ boundary; Python's optional wall-clock `timestamp` and injectable state/IoU
 classes are not exposed in this first browser API. Both implementations return
 only observed detections with derived tracker identity; unmatched live tracks
 remain internal state.
+
+## ByteTrack
+
+Select `algorithm: "bytetrack"` to use the matching implementation from the
+open-source Python
+[`roboflow/trackers` ByteTrack tracker](https://github.com/roboflow/trackers/blob/60b21c8a48676784085fbee455559f16b75a7c9a/src/trackers/core/bytetrack/tracker.py)
+at source commit `60b21c8`.
+Its defaults are `lostTrackBuffer: 30`, `frameRate: 30`,
+`trackActivationThreshold: 0.7`, `minimumConsecutiveFrames: 2`,
+`minimumIouThreshold: 0.1`, and
+`highConfidenceDetectionThreshold: 0.6`.
+
+ByteTrack first matches detections at or above the high-confidence split to all
+live tracks. It then offers lower-confidence detections to tracks left
+unmatched by that first pass. A low-confidence observation can therefore keep
+an existing identity alive, but it cannot create a new track. Only an unmatched
+high-confidence detection that also reaches the activation threshold may spawn
+one. Missing confidence is treated as `1`.
+
+```ts
+detectionPostProcessors.tracking({
+  algorithm: "bytetrack",
+  highConfidenceDetectionThreshold: 0.6,
+  trackActivationThreshold: 0.7,
+});
+```
 
 ## Worker behavior
 

@@ -1,8 +1,9 @@
 import {
+  createByteTrackTracker,
   createSortTracker,
   projectDetectionFrameForTracking,
   type DetectionFrame,
-  type SortTracker,
+  type TrackingTracker,
   type TrackingAssignment,
   type TrackingDetectionPostProcessor,
   type TrackingProjection,
@@ -285,7 +286,10 @@ async function createTrackingExecution(
 function createMainThreadExecution(
   processor: TrackingDetectionPostProcessor,
 ): TrackingExecution {
-  const tracker: SortTracker = createSortTracker(processor.options);
+  const tracker: TrackingTracker =
+    processor.algorithm === "bytetrack"
+      ? createByteTrackTracker(processor.options)
+      : createSortTracker(processor.options);
   return {
     destroy() {},
     mode: "mainThread",

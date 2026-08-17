@@ -5,6 +5,7 @@
  */
 
 export {
+  createByteTrackTracker,
   createDefaultDetectionPostProcessingWorkerFactory,
   createDetectionPostProcessingPipeline,
   createSortTracker,
@@ -12,6 +13,10 @@ export {
   projectDetectionFrameForTracking,
   DetectionPostProcessingMode,
   TrackingGeometry,
+  type ByteTrackTracker,
+  type ByteTrackTrackerUpdate,
+  type ByteTrackTrackingDetectionPostProcessor,
+  type ByteTrackTrackingOptions,
   type DetectionPostProcessor,
   type DetectionPostProcessorFactory,
   type DetectionPostProcessingAppendResult,
@@ -25,4 +30,5 @@ export {
   type TrackingAssignment,
   type TrackingDetectionPostProcessor,
   type TrackingProjection,
+  type TrackingTracker,
 } from "supervision";

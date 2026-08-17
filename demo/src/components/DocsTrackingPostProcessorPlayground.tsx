@@ -8,6 +8,7 @@ import {
   createDocsTrackingController,
   createDocsTrackingPresentation,
   createDocsTrackingSnippet,
+  type DocsTrackingAlgorithm,
   type DocsTrackingPresentationMode,
 } from "../docs-tracking";
 import { useDemoRenderer } from "../hooks/useDemoRenderer";
@@ -28,7 +29,9 @@ const emptyDiagnostics: DetectionPostProcessingDiagnostics = {
 const RETRACK_DEBOUNCE_MS = 120;
 
 interface TrackingConfiguration {
+  readonly algorithm: DocsTrackingAlgorithm;
   readonly geometry: TrackingGeometry;
+  readonly highConfidenceDetectionThreshold: number;
   readonly lostTrackBuffer: number;
   readonly minimumConsecutiveFrames: number;
   readonly minimumIouThreshold: number;
@@ -41,7 +44,9 @@ export function DocsTrackingPostProcessorPlayground() {
   const [controller] = useState(createDocsTrackingController);
   const [trackingConfiguration, setTrackingConfiguration] =
     useState<TrackingConfiguration>({
+      algorithm: "sort",
       geometry: TrackingGeometry.Box,
+      highConfidenceDetectionThreshold: 0.6,
       lostTrackBuffer: 30,
       minimumConsecutiveFrames: 3,
       minimumIouThreshold: 0.3,
@@ -92,7 +97,9 @@ export function DocsTrackingPostProcessorPlayground() {
   const totalFrames = demo.fixtureSummary?.frameCount ?? 270;
   const totalChunks = Math.ceil((demo.fixtureSummary?.duration ?? 9) / 1);
   const {
+    algorithm,
     geometry,
+    highConfidenceDetectionThreshold,
     lostTrackBuffer,
     minimumConsecutiveFrames,
     minimumIouThreshold,
@@ -105,14 +112,18 @@ export function DocsTrackingPostProcessorPlayground() {
   const snippet = useMemo(
     () =>
       createDocsTrackingSnippet(
+        algorithm,
         geometry,
         minimumIouThreshold,
         lostTrackBuffer,
         trackActivationThreshold,
         minimumConsecutiveFrames,
+        highConfidenceDetectionThreshold,
       ),
     [
+      algorithm,
       geometry,
+      highConfidenceDetectionThreshold,
       lostTrackBuffer,
       minimumConsecutiveFrames,
       minimumIouThreshold,
@@ -294,7 +305,9 @@ export function DocsTrackingPostProcessorPlayground() {
           <div>
             <p>Post processor</p>
             <h1>Tracking</h1>
-            <span>Ordered SORT</span>
+            <span>
+              Ordered {algorithm === "bytetrack" ? "ByteTrack" : "SORT"}
+            </span>
           </div>
           <div className="docs-tracking-playground__header-actions">
             <button
@@ -314,6 +327,34 @@ export function DocsTrackingPostProcessorPlayground() {
         </header>
 
         <div className="docs-layer-playground__controls">
+          <label className="docs-layer-playground__select">
+            <strong>Algorithm</strong>
+            <select
+              onChange={(event) => {
+                const nextAlgorithm = event.currentTarget
+                  .value as DocsTrackingAlgorithm;
+                updateTrackingConfiguration({
+                  algorithm: nextAlgorithm,
+                  ...(nextAlgorithm === "bytetrack"
+                    ? {
+                        highConfidenceDetectionThreshold: 0.6,
+                        minimumConsecutiveFrames: 2,
+                        minimumIouThreshold: 0.1,
+                        trackActivationThreshold: 0.7,
+                      }
+                    : {
+                        minimumConsecutiveFrames: 3,
+                        minimumIouThreshold: 0.3,
+                        trackActivationThreshold: 0.25,
+                      }),
+                });
+              }}
+              value={algorithm}
+            >
+              <option value="sort">SORT</option>
+              <option value="bytetrack">ByteTrack</option>
+            </select>
+          </label>
           <label className="docs-layer-playground__select">
             <strong>Annotation</strong>
             <select
@@ -362,6 +403,21 @@ export function DocsTrackingPostProcessorPlayground() {
             value={trackActivationThreshold}
             valueLabel={trackActivationThreshold.toFixed(2)}
           />
+          {algorithm === "bytetrack" ? (
+            <TrackingRange
+              label="High-confidence split"
+              max={1}
+              min={0}
+              onChange={(value) =>
+                updateTrackingConfiguration({
+                  highConfidenceDetectionThreshold: value,
+                })
+              }
+              step={0.05}
+              value={highConfidenceDetectionThreshold}
+              valueLabel={highConfidenceDetectionThreshold.toFixed(2)}
+            />
+          ) : null}
           <TrackingRange
             label="Frames to confirm"
             max={8}

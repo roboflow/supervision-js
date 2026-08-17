@@ -111,6 +111,7 @@ describe("package entrypoint", () => {
       "createArrayDetectionFrameSource",
       "createBrowserColdDetectionFrameStore",
       "createBufferedDetectionTimeline",
+      "createByteTrackTracker",
       "createChunkedDetectionFrameSource",
       "createColdDetectionFrameSource",
       "createCompositeDetectionFrameSource",

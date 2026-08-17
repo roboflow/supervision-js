@@ -8,10 +8,15 @@ export { createCompositeDetectionFrameSource } from "supervision-js-core";
 export { createMemoryColdDetectionFrameStore } from "supervision-js-core";
 export { createWritableDetectionFrameSource } from "supervision-js-core";
 export {
+  createByteTrackTracker,
   createSortTracker,
   detectionPostProcessors,
   projectDetectionFrameForTracking,
   TrackingGeometry,
+  type ByteTrackTracker,
+  type ByteTrackTrackerUpdate,
+  type ByteTrackTrackingDetectionPostProcessor,
+  type ByteTrackTrackingOptions,
   type DetectionPostProcessor,
   type DetectionPostProcessorFactory,
   type SortTracker,
@@ -20,6 +25,7 @@ export {
   type TrackingAssignment,
   type TrackingDetectionPostProcessor,
   type TrackingProjection,
+  type TrackingTracker,
 } from "supervision-js-core";
 export { createDetectionPostProcessingPipeline } from "#post-processing/detection-post-processing-pipeline";
 export { createDefaultDetectionPostProcessingWorkerFactory } from "#post-processing/default-tracking-worker";

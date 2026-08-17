@@ -27,6 +27,24 @@ describe("detectionPostProcessors.tracking", () => {
     });
   });
 
+  it("creates a serializable ByteTrack descriptor with Python defaults", () => {
+    expect(
+      detectionPostProcessors.tracking({ algorithm: "bytetrack" }),
+    ).toEqual({
+      algorithm: "bytetrack",
+      geometry: "box",
+      kind: "tracking",
+      options: {
+        frameRate: 30,
+        highConfidenceDetectionThreshold: 0.6,
+        lostTrackBuffer: 30,
+        minimumConsecutiveFrames: 2,
+        minimumIouThreshold: 0.1,
+        trackActivationThreshold: 0.7,
+      },
+    });
+  });
+
   it("projects only the selected geometry without copying heavy payloads", () => {
     const frame = {
       detections: [

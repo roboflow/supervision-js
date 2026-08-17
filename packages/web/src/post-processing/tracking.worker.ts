@@ -1,10 +1,14 @@
-import { createSortTracker, type SortTracker } from "supervision-js-core";
+import {
+  createByteTrackTracker,
+  createSortTracker,
+  type TrackingTracker,
+} from "supervision-js-core";
 import type {
   TrackingWorkerRequest,
   TrackingWorkerResponse,
 } from "#post-processing/tracking-worker-protocol";
 
-let tracker: SortTracker | undefined;
+let tracker: TrackingTracker | undefined;
 
 self.addEventListener(
   "message",
@@ -15,7 +19,10 @@ self.addEventListener(
       let response: TrackingWorkerResponse;
 
       if (request.type === "configure") {
-        tracker = createSortTracker(request.processor.options);
+        tracker =
+          request.processor.algorithm === "bytetrack"
+            ? createByteTrackTracker(request.processor.options)
+            : createSortTracker(request.processor.options);
         response = { requestId: request.requestId, type: "success" };
       } else if (request.type === "reset") {
         tracker?.reset();

@@ -119,20 +119,26 @@ export function createSortTracker(
   };
 }
 
-class KalmanBoxTrack {
+export class KalmanBoxTrack {
   trackerId: number | undefined;
   successfulUpdates = 1;
   timeSinceUpdate = 0;
   private state: Matrix;
   private covariance = identity(8);
 
-  constructor(detection: TrackingProjection) {
+  constructor(
+    detection: TrackingProjection,
+    private readonly consecutiveUpdates = false,
+  ) {
     this.state = [...rectToXyxy(detection.rect), 0, 0, 0, 0].map((value) => [
       value,
     ]);
   }
 
   predict(frameStep: number, frameRate: number): Rect {
+    if (this.consecutiveUpdates && this.timeSinceUpdate > 0) {
+      this.successfulUpdates = 0;
+    }
     const transition = identity(8);
     for (let index = 0; index < 4; index += 1) {
       transition[index]![index + 4] = frameStep;
@@ -187,6 +193,10 @@ class KalmanBoxTrack {
     this.timeSinceUpdate = 0;
     this.successfulUpdates += 1;
   }
+
+  getStateRect(): Rect {
+    return stateToRect(this.state);
+  }
 }
 
 function associateDetectionsToTracks(
@@ -225,7 +235,7 @@ function associateDetectionsToTracks(
 }
 
 /** Hungarian assignment for a rectangular score matrix. */
-function maximizeAssignment(scores: readonly (readonly number[])[]) {
+export function maximizeAssignment(scores: readonly (readonly number[])[]) {
   if (scores.length === 0 || scores[0]?.length === 0) {
     return [] as [number, number][];
   }
@@ -345,7 +355,7 @@ function createProcessNoise(frameStep: number, frameRate: number): Matrix {
   return result;
 }
 
-function intersectionOverUnion(left: Rect, right: Rect) {
+export function intersectionOverUnion(left: Rect, right: Rect) {
   const leftX = left.x - left.width / 2;
   const leftY = left.y - left.height / 2;
   const rightX = right.x - right.width / 2;
@@ -366,7 +376,7 @@ function intersectionOverUnion(left: Rect, right: Rect) {
   return union <= 0 ? 0 : intersection / union;
 }
 
-function resolveFrameStep(
+export function resolveFrameStep(
   current: number | undefined,
   previous: number | undefined,
 ) {
@@ -374,21 +384,21 @@ function resolveFrameStep(
   return Math.max(1, current - previous);
 }
 
-function normalizePositiveInteger(value: number, label: string) {
+export function normalizePositiveInteger(value: number, label: string) {
   if (!Number.isInteger(value) || value < 1) {
     throw new Error(`${label} must be a positive integer.`);
   }
   return value;
 }
 
-function normalizeNonNegativeInteger(value: number, label: string) {
+export function normalizeNonNegativeInteger(value: number, label: string) {
   if (!Number.isInteger(value) || value < 0) {
     throw new Error(`${label} must be a non-negative integer.`);
   }
   return value;
 }
 
-function normalizeUnitInterval(value: number, label: string) {
+export function normalizeUnitInterval(value: number, label: string) {
   if (!Number.isFinite(value) || value < 0 || value > 1) {
     throw new Error(`${label} must be between 0 and 1.`);
   }

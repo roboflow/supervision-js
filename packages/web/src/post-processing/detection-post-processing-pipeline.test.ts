@@ -10,10 +10,15 @@ import {
 import { createDetectionPostProcessingPipeline } from "./detection-post-processing-pipeline";
 import { DetectionPostProcessingMode } from "../types/detection-post-processing";
 
-const frame = (frameIndex: number, x = frameIndex * 2): DetectionFrame => ({
+const frame = (
+  frameIndex: number,
+  x = frameIndex * 2,
+  confidence?: number,
+): DetectionFrame => ({
   detections: [
     {
       className: "person",
+      ...(confidence === undefined ? {} : { confidence }),
       id: `annotation:${frameIndex}`,
       mask: {
         counts: "11",
@@ -90,6 +95,22 @@ describe("createDetectionPostProcessingPipeline", () => {
     expect(result.processedFrames[2]!.detections[0]).not.toBe(inputDetection);
     expect(result.processedFrames[2]!.detections[0]!.trackerId).toBe(0);
     expect(inputDetection.trackerId).toBeUndefined();
+    pipeline.destroy();
+  });
+
+  it("runs ByteTrack's low-confidence recovery through the pipeline", async () => {
+    const inputFrames = [frame(0, 0, 0.9), frame(1, 1, 0.4)];
+    const pipeline = createDetectionPostProcessingPipeline({
+      mode: DetectionPostProcessingMode.MainThread,
+      processors: [
+        detectionPostProcessors.tracking({ algorithm: "bytetrack" }),
+      ],
+    });
+
+    const result = await pipeline.appendFrames(inputFrames);
+
+    expect(result.processedFrames[0]!.detections[0]!.trackerId).toBeUndefined();
+    expect(result.processedFrames[1]!.detections[0]!.trackerId).toBe(0);
     pipeline.destroy();
   });
 

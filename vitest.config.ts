@@ -33,7 +33,7 @@ export default defineConfig({
         replacement: `${coreSource("interactions")}/$1.ts`,
       },
       {
-        find: /^#post-processing\/(sort-tracker|tracking)$/,
+        find: /^#post-processing\/(byte-track-tracker|sort-tracker|tracking)$/,
         replacement: `${coreSource("post-processing")}/$1.ts`,
       },
       {

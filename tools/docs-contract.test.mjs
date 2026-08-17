@@ -229,7 +229,11 @@ test("tracking post processing has a focused live playground", async () => {
   assert.match(playground, /Show raw detections/);
   assert.match(playground, /Tracked detections/);
   assert.match(playground, /RETRACK_DEBOUNCE_MS/);
-  assert.match(playground, /<span>Ordered SORT<\/span>/);
+  assert.match(
+    playground,
+    /Ordered \{algorithm === "bytetrack" \? "ByteTrack" : "SORT"\}/,
+  );
+  assert.match(playground, /<option value="bytetrack">ByteTrack<\/option>/);
   assert.match(playground, /const resumeTime = demo\.getCurrentTime\(\)/);
   assert.match(playground, /demo\.pausePlayback\(\)/);
   assert.match(playground, /await demo\.onSeek\(resumeTime\)/);

@@ -27,7 +27,9 @@ const TRACKING_DATABASE_NAME = "supervision-docs-tracking-playground";
 const TRACKING_DATASET_ID = "basketball-tracking-output";
 
 export interface DocsTrackingRunOptions {
+  readonly algorithm: DocsTrackingAlgorithm;
   readonly geometry: TrackingGeometry;
+  readonly highConfidenceDetectionThreshold: number;
   readonly lostTrackBuffer: number;
   readonly minimumConsecutiveFrames: number;
   readonly minimumIouThreshold: number;
@@ -39,6 +41,7 @@ export interface DocsTrackingRunOptions {
 }
 
 export type DocsTrackingPresentationMode = "raw" | "tracked";
+export type DocsTrackingAlgorithm = "sort" | "bytetrack";
 
 export interface DocsTrackingController extends DetectionFrameSource {
   attach(
@@ -138,6 +141,26 @@ export function createDocsTrackingController(): DocsTrackingController {
         if (currentRunId !== runId) return;
         activeSource = output;
         generation += 1;
+        const trackingProcessor =
+          options.algorithm === "bytetrack"
+            ? detectionPostProcessors.tracking({
+                algorithm: "bytetrack",
+                geometry: options.geometry,
+                highConfidenceDetectionThreshold:
+                  options.highConfidenceDetectionThreshold,
+                lostTrackBuffer: options.lostTrackBuffer,
+                minimumConsecutiveFrames: options.minimumConsecutiveFrames,
+                minimumIouThreshold: options.minimumIouThreshold,
+                trackActivationThreshold: options.trackActivationThreshold,
+              })
+            : detectionPostProcessors.tracking({
+                algorithm: "sort",
+                geometry: options.geometry,
+                lostTrackBuffer: options.lostTrackBuffer,
+                minimumConsecutiveFrames: options.minimumConsecutiveFrames,
+                minimumIouThreshold: options.minimumIouThreshold,
+                trackActivationThreshold: options.trackActivationThreshold,
+              });
         const currentPipeline = createDetectionPostProcessingPipeline({
           maxPendingFrames: Math.max(
             45,
@@ -147,15 +170,7 @@ export function createDocsTrackingController(): DocsTrackingController {
           mutateInput: false,
           onDiagnostics: options.onDiagnostics,
           output,
-          processors: [
-            detectionPostProcessors.tracking({
-              geometry: options.geometry,
-              lostTrackBuffer: options.lostTrackBuffer,
-              minimumConsecutiveFrames: options.minimumConsecutiveFrames,
-              minimumIouThreshold: options.minimumIouThreshold,
-              trackActivationThreshold: options.trackActivationThreshold,
-            }),
-          ],
+          processors: [trackingProcessor],
           startFrameIndex: 0,
         });
         pipeline = currentPipeline;
@@ -387,17 +402,23 @@ function createDocsTrackingInteractionPresentation(
 }
 
 export function createDocsTrackingSnippet(
+  algorithm: DocsTrackingAlgorithm,
   geometry: TrackingGeometry,
   minimumIouThreshold: number,
   lostTrackBuffer: number,
   trackActivationThreshold: number,
   minimumConsecutiveFrames: number,
+  highConfidenceDetectionThreshold: number,
 ) {
+  const byteTrackOption =
+    algorithm === "bytetrack"
+      ? `\n      highConfidenceDetectionThreshold: ${highConfidenceDetectionThreshold.toFixed(2)},`
+      : "";
   return `const pipeline = createDetectionPostProcessingPipeline({
   mutateInput: false, // Keep raw frames for this comparison playground.
   processors: [
     detectionPostProcessors.tracking({
-      algorithm: "sort",
+      algorithm: "${algorithm}",${byteTrackOption}
       geometry: TrackingGeometry.${geometryName(geometry)},
       minimumIouThreshold: ${minimumIouThreshold.toFixed(2)},
       lostTrackBuffer: ${lostTrackBuffer},
