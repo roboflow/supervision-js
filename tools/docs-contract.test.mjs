@@ -208,6 +208,13 @@ test("tracking post processing has a focused live playground", async () => {
     path.join(rootDir, "demo/src/App.tsx"),
     "utf8",
   );
+  const playground = await readFile(
+    path.join(
+      rootDir,
+      "demo/src/components/DocsTrackingPostProcessorPlayground.tsx",
+    ),
+    "utf8",
+  );
 
   assert.match(index, /post-processors\/tracking\.md/);
   assert.match(
@@ -218,6 +225,11 @@ test("tracking post processing has a focused live playground", async () => {
   assert.match(tracking, /detectionPostProcessors\.tracking/);
   assert.match(tracking, /maxPendingFrames/);
   assert.match(demoApp, /DocsTrackingPostProcessorPlayground/);
+  assert.match(playground, /Track detections/);
+  assert.match(playground, /Show raw detections/);
+  assert.match(playground, /Tracked detections/);
+  assert.match(playground, /RETRACK_DEBOUNCE_MS/);
+  assert.doesNotMatch(playground, /Apply tracking/);
 });
 
 test("every fixture-backed annotation renderer has a focused live playground", async () => {

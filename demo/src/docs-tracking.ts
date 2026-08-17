@@ -62,6 +62,7 @@ export function createDocsTrackingController(): DocsTrackingController {
   let manifest: DemoFixtureDetectionManifest | undefined;
   let activeSource: DetectionFrameSource | undefined;
   let pipeline: DetectionPostProcessingPipeline | undefined;
+  let processing = Promise.resolve();
   let generation = 1;
   let runId = 0;
   let destroyed = false;
@@ -121,55 +122,67 @@ export function createDocsTrackingController(): DocsTrackingController {
         throw new Error("Basketball tracking source is not ready.");
       }
 
+      const source = rawSource;
+      const fixtureManifest = manifest;
       const currentRunId = runId + 1;
       runId = currentRunId;
+      const previousProcessing = processing;
       pipeline?.destroy();
-      await output.clear();
-      if (currentRunId !== runId) return;
-      activeSource = output;
-      generation += 1;
-      pipeline = createDetectionPostProcessingPipeline({
-        maxPendingFrames: Math.max(
-          45,
-          ...manifest.chunks.map((chunk) => chunk.frameCount + 4),
-        ),
-        mode: DetectionPostProcessingMode.Worker,
-        mutateInput: false,
-        onDiagnostics: options.onDiagnostics,
-        output,
-        processors: [
-          detectionPostProcessors.tracking({
-            geometry: options.geometry,
-            lostTrackBuffer: options.lostTrackBuffer,
-            minimumConsecutiveFrames: options.minimumConsecutiveFrames,
-            minimumIouThreshold: options.minimumIouThreshold,
-            trackActivationThreshold: options.trackActivationThreshold,
-          }),
-        ],
-        startFrameIndex: 0,
-      });
+      pipeline = undefined;
 
-      for (const chunk of manifest.chunks) {
+      const currentProcessing = (async () => {
+        await previousProcessing.catch(() => undefined);
         if (currentRunId !== runId) return;
-        const frames = await rawSource.loadFrames(
-          chunk.startTime,
-          chunk.endTime,
-        );
-        const futureFrames = frames.filter(
-          (frame) => (frame.frameIndex ?? 0) % 2 === 1,
-        );
-        const currentFrames = frames.filter(
-          (frame) => (frame.frameIndex ?? 0) % 2 === 0,
-        );
+        await output.clear();
+        if (currentRunId !== runId) return;
+        activeSource = output;
+        generation += 1;
+        const currentPipeline = createDetectionPostProcessingPipeline({
+          maxPendingFrames: Math.max(
+            45,
+            ...fixtureManifest.chunks.map((chunk) => chunk.frameCount + 4),
+          ),
+          mode: DetectionPostProcessingMode.Worker,
+          mutateInput: false,
+          onDiagnostics: options.onDiagnostics,
+          output,
+          processors: [
+            detectionPostProcessors.tracking({
+              geometry: options.geometry,
+              lostTrackBuffer: options.lostTrackBuffer,
+              minimumConsecutiveFrames: options.minimumConsecutiveFrames,
+              minimumIouThreshold: options.minimumIouThreshold,
+              trackActivationThreshold: options.trackActivationThreshold,
+            }),
+          ],
+          startFrameIndex: 0,
+        });
+        pipeline = currentPipeline;
 
-        // Deliberately enqueue later frames first. The public pipeline holds a
-        // bounded set of references, then drains only from the causal frontier.
-        await pipeline.appendFrames(futureFrames);
-        await nextPaint();
-        await pipeline.appendFrames(currentFrames);
-        options.onChunk?.(chunk.chunkIndex);
-        await nextPaint();
-      }
+        for (const chunk of fixtureManifest.chunks) {
+          if (currentRunId !== runId) return;
+          const frames = await source.loadFrames(
+            chunk.startTime,
+            chunk.endTime,
+          );
+          const futureFrames = frames.filter(
+            (frame) => (frame.frameIndex ?? 0) % 2 === 1,
+          );
+          const currentFrames = frames.filter(
+            (frame) => (frame.frameIndex ?? 0) % 2 === 0,
+          );
+
+          // Deliberately enqueue later frames first. The public pipeline holds a
+          // bounded set of references, then drains only from the causal frontier.
+          await currentPipeline.appendFrames(futureFrames);
+          await nextPaint();
+          await currentPipeline.appendFrames(currentFrames);
+          options.onChunk?.(chunk.chunkIndex);
+          await nextPaint();
+        }
+      })();
+      processing = currentProcessing;
+      await currentProcessing;
     },
 
     showRaw() {

@@ -25,22 +25,38 @@ const emptyDiagnostics: DetectionPostProcessingDiagnostics = {
   trackedDetectionCount: 0,
 };
 
+const RETRACK_DEBOUNCE_MS = 120;
+
+interface TrackingConfiguration {
+  readonly geometry: TrackingGeometry;
+  readonly lostTrackBuffer: number;
+  readonly minimumConsecutiveFrames: number;
+  readonly minimumIouThreshold: number;
+  readonly trackActivationThreshold: number;
+}
+
+type TrackingStatus = "raw" | "running" | "tracked" | "error";
+
 export function DocsTrackingPostProcessorPlayground() {
   const [controller] = useState(createDocsTrackingController);
-  const [geometry, setGeometry] = useState(TrackingGeometry.Box);
-  const geometryRef = useRef(geometry);
+  const [trackingConfiguration, setTrackingConfiguration] =
+    useState<TrackingConfiguration>({
+      geometry: TrackingGeometry.Box,
+      lostTrackBuffer: 30,
+      minimumConsecutiveFrames: 3,
+      minimumIouThreshold: 0.3,
+      trackActivationThreshold: 0.25,
+    });
+  const trackingConfigurationRef = useRef(trackingConfiguration);
   const presentationModeRef = useRef<DocsTrackingPresentationMode>("raw");
-  geometryRef.current = geometry;
-  const [minimumIouThreshold, setMinimumIouThreshold] = useState(0.3);
-  const [lostTrackBuffer, setLostTrackBuffer] = useState(30);
-  const [trackActivationThreshold, setTrackActivationThreshold] =
-    useState(0.25);
-  const [minimumConsecutiveFrames, setMinimumConsecutiveFrames] = useState(3);
+  const runRequestIdRef = useRef(0);
+  const retrackTimeoutRef = useRef<number | undefined>(undefined);
+  const statusRef = useRef<TrackingStatus>("raw");
+  const [presentationMode, setPresentationMode] =
+    useState<DocsTrackingPresentationMode>("raw");
   const [diagnostics, setDiagnostics] = useState(emptyDiagnostics);
   const [processedChunks, setProcessedChunks] = useState(0);
-  const [status, setStatus] = useState<"raw" | "running" | "tracked" | "error">(
-    "raw",
-  );
+  const [status, setStatus] = useState<TrackingStatus>("raw");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const sourceTransform = useCallback(
     (
@@ -55,7 +71,7 @@ export function DocsTrackingPostProcessorPlayground() {
   const [presentationTransform] = useState(
     () => () =>
       createDocsTrackingPresentation(
-        geometryRef.current,
+        trackingConfigurationRef.current.geometry,
         presentationModeRef.current,
       ),
   );
@@ -75,6 +91,13 @@ export function DocsTrackingPostProcessorPlayground() {
   });
   const totalFrames = demo.fixtureSummary?.frameCount ?? 270;
   const totalChunks = Math.ceil((demo.fixtureSummary?.duration ?? 9) / 1);
+  const {
+    geometry,
+    lostTrackBuffer,
+    minimumConsecutiveFrames,
+    minimumIouThreshold,
+    trackActivationThreshold,
+  } = trackingConfiguration;
   const progress = Math.min(
     100,
     totalFrames > 0 ? (diagnostics.processedFrameCount / totalFrames) * 100 : 0,
@@ -100,71 +123,142 @@ export function DocsTrackingPostProcessorPlayground() {
     demo.playbackState === MediaRendererPlaybackState.Playing ||
     demo.playbackState === MediaRendererPlaybackState.Buffering;
 
-  useEffect(() => () => controller.destroy?.(), [controller]);
+  const showPresentation = useCallback(
+    (mode: DocsTrackingPresentationMode) => {
+      presentationModeRef.current = mode;
+      setPresentationMode(mode);
+      demo.refreshPresentation();
+    },
+    [demo.refreshPresentation],
+  );
+
+  useEffect(
+    () => () => {
+      runRequestIdRef.current += 1;
+      if (retrackTimeoutRef.current !== undefined) {
+        window.clearTimeout(retrackTimeoutRef.current);
+      }
+      controller.destroy?.();
+    },
+    [controller],
+  );
 
   useEffect(() => {
     demo.refreshPresentation();
   }, [demo.refreshPresentation, geometry]);
 
-  const applyTracking = useCallback(async () => {
-    setStatus("running");
-    setErrorMessage(null);
-    setProcessedChunks(0);
-    setDiagnostics(emptyDiagnostics);
-    if (isPlaying) demo.onTogglePlayback();
-    demo.onSeek(0);
+  const applyTracking = useCallback(
+    (
+      configuration: TrackingConfiguration = trackingConfigurationRef.current,
+      delayMs = 0,
+    ) => {
+      const requestId = runRequestIdRef.current + 1;
+      runRequestIdRef.current = requestId;
+      controller.cancel();
+      if (retrackTimeoutRef.current !== undefined) {
+        window.clearTimeout(retrackTimeoutRef.current);
+        retrackTimeoutRef.current = undefined;
+      }
 
-    try {
-      await controller.run({
-        geometry,
-        lostTrackBuffer,
-        minimumConsecutiveFrames,
-        minimumIouThreshold,
-        trackActivationThreshold,
-        onChunk(chunkIndex) {
-          presentationModeRef.current = "tracked";
-          setProcessedChunks(chunkIndex + 1);
-          demo.refreshPresentation();
+      showPresentation("tracked");
+      if (isPlaying && statusRef.current !== "running") {
+        demo.onTogglePlayback();
+      }
+      statusRef.current = "running";
+      setStatus("running");
+      setErrorMessage(null);
+      setProcessedChunks(0);
+      setDiagnostics(emptyDiagnostics);
+      demo.onSeek(0);
+
+      const run = async () => {
+        try {
+          await controller.run({
+            ...configuration,
+            onChunk(chunkIndex) {
+              if (requestId !== runRequestIdRef.current) return;
+              setProcessedChunks(chunkIndex + 1);
+              demo.refreshDetections();
+            },
+            onDiagnostics(nextDiagnostics) {
+              if (requestId === runRequestIdRef.current) {
+                setDiagnostics(nextDiagnostics);
+              }
+            },
+          });
+          if (requestId !== runRequestIdRef.current) return;
           demo.refreshDetections();
-        },
-        onDiagnostics: setDiagnostics,
-      });
-      demo.refreshDetections();
-      // Python SORT intentionally leaves the first observations unconfirmed.
-      // Land on the first likely confirmed frame so the completed playground
-      // does not look empty even though tracking succeeded.
-      demo.onSeek((minimumConsecutiveFrames + 1) / 30);
-      setStatus("tracked");
-    } catch (error) {
-      presentationModeRef.current = "tracked";
-      demo.refreshPresentation();
-      setErrorMessage(
-        error instanceof Error ? error.message : "Unable to apply tracking.",
-      );
-      setStatus("error");
-    }
-  }, [
-    controller,
-    demo,
-    geometry,
-    isPlaying,
-    lostTrackBuffer,
-    minimumConsecutiveFrames,
-    minimumIouThreshold,
-    trackActivationThreshold,
-  ]);
+          // Python SORT intentionally leaves the first observations unconfirmed.
+          // Land on the first likely confirmed frame so the completed playground
+          // does not look empty even though tracking succeeded.
+          demo.onSeek((configuration.minimumConsecutiveFrames + 1) / 30);
+          statusRef.current = "tracked";
+          setStatus("tracked");
+        } catch (error) {
+          if (requestId !== runRequestIdRef.current) return;
+          showPresentation("tracked");
+          setErrorMessage(
+            error instanceof Error
+              ? error.message
+              : "Unable to apply tracking.",
+          );
+          statusRef.current = "error";
+          setStatus("error");
+        }
+      };
+
+      if (delayMs > 0) {
+        retrackTimeoutRef.current = window.setTimeout(() => {
+          retrackTimeoutRef.current = undefined;
+          void run();
+        }, delayMs);
+      } else {
+        void run();
+      }
+    },
+    [controller, demo, isPlaying, showPresentation],
+  );
+
+  const updateTrackingConfiguration = useCallback(
+    (change: Partial<TrackingConfiguration>) => {
+      const nextConfiguration = {
+        ...trackingConfigurationRef.current,
+        ...change,
+      };
+      trackingConfigurationRef.current = nextConfiguration;
+      setTrackingConfiguration(nextConfiguration);
+
+      if (change.geometry !== undefined) {
+        demo.refreshPresentation();
+        demo.refreshDetections();
+      }
+
+      if (
+        presentationModeRef.current === "tracked" ||
+        statusRef.current === "running"
+      ) {
+        applyTracking(nextConfiguration, RETRACK_DEBOUNCE_MS);
+      }
+    },
+    [applyTracking, demo],
+  );
 
   const showRaw = useCallback(() => {
-    presentationModeRef.current = "raw";
+    runRequestIdRef.current += 1;
+    if (retrackTimeoutRef.current !== undefined) {
+      window.clearTimeout(retrackTimeoutRef.current);
+      retrackTimeoutRef.current = undefined;
+    }
     controller.showRaw();
+    showPresentation("raw");
+    statusRef.current = "raw";
     setStatus("raw");
     setErrorMessage(null);
     setProcessedChunks(0);
     setDiagnostics(emptyDiagnostics);
-    demo.refreshPresentation();
     demo.refreshDetections();
     demo.onSeek(0);
-  }, [controller, demo]);
+  }, [controller, demo, showPresentation]);
 
   return (
     <main
@@ -178,9 +272,12 @@ export function DocsTrackingPostProcessorPlayground() {
           sessionState={demo.sessionState}
           uploadInferenceState={null}
         />
-        <div className="docs-tracking-playground__badge">
-          <span>{status === "raw" ? "Raw detections" : "SORT tracking"}</span>
-          <strong>{geometryLabel(geometry)}</strong>
+        <div aria-live="polite" className="docs-tracking-playground__badge">
+          <span>
+            {presentationMode === "raw"
+              ? "Raw detections"
+              : "Tracked detections"}
+          </span>
         </div>
       </section>
 
@@ -205,13 +302,6 @@ export function DocsTrackingPostProcessorPlayground() {
               <span aria-hidden="true">{isPlaying ? "Ⅱ" : "▶"}</span>
               {isPlaying ? "Pause" : "Play"}
             </button>
-            <button
-              disabled={!demo.canUseRenderer || status === "running"}
-              onClick={() => void applyTracking()}
-              type="button"
-            >
-              {status === "running" ? "Tracking…" : "Apply tracking"}
-            </button>
           </div>
         </header>
 
@@ -219,22 +309,10 @@ export function DocsTrackingPostProcessorPlayground() {
           <label className="docs-layer-playground__select">
             <strong>Annotation</strong>
             <select
-              disabled={status === "running"}
               onChange={(event) => {
                 const nextGeometry = event.currentTarget
                   .value as TrackingGeometry;
-                presentationModeRef.current = "raw";
-                geometryRef.current = nextGeometry;
-                controller.cancel();
-                controller.showRaw();
-                setStatus("raw");
-                setGeometry(nextGeometry);
-                setErrorMessage(null);
-                setProcessedChunks(0);
-                setDiagnostics(emptyDiagnostics);
-                demo.refreshPresentation();
-                demo.refreshDetections();
-                demo.onSeek(0);
+                updateTrackingConfiguration({ geometry: nextGeometry });
               }}
               value={geometry}
             >
@@ -247,7 +325,9 @@ export function DocsTrackingPostProcessorPlayground() {
             label="Minimum IoU"
             max={0.8}
             min={0.05}
-            onChange={setMinimumIouThreshold}
+            onChange={(value) =>
+              updateTrackingConfiguration({ minimumIouThreshold: value })
+            }
             step={0.05}
             value={minimumIouThreshold}
             valueLabel={minimumIouThreshold.toFixed(2)}
@@ -256,7 +336,9 @@ export function DocsTrackingPostProcessorPlayground() {
             label="Lost track buffer"
             max={90}
             min={0}
-            onChange={setLostTrackBuffer}
+            onChange={(value) =>
+              updateTrackingConfiguration({ lostTrackBuffer: value })
+            }
             step={1}
             value={lostTrackBuffer}
             valueLabel={`${lostTrackBuffer}f`}
@@ -265,7 +347,9 @@ export function DocsTrackingPostProcessorPlayground() {
             label="Activation threshold"
             max={1}
             min={0}
-            onChange={setTrackActivationThreshold}
+            onChange={(value) =>
+              updateTrackingConfiguration({ trackActivationThreshold: value })
+            }
             step={0.05}
             value={trackActivationThreshold}
             valueLabel={trackActivationThreshold.toFixed(2)}
@@ -274,18 +358,30 @@ export function DocsTrackingPostProcessorPlayground() {
             label="Frames to confirm"
             max={8}
             min={1}
-            onChange={setMinimumConsecutiveFrames}
+            onChange={(value) =>
+              updateTrackingConfiguration({ minimumConsecutiveFrames: value })
+            }
             step={1}
             value={minimumConsecutiveFrames}
             valueLabel={`${minimumConsecutiveFrames}f`}
           />
           <button
-            className="docs-tracking-playground__raw-button"
-            disabled={status === "running" || status === "raw"}
-            onClick={showRaw}
+            className={`docs-tracking-playground__mode-button${
+              presentationMode === "tracked" && status !== "running"
+                ? " docs-tracking-playground__mode-button--secondary"
+                : ""
+            }`}
+            disabled={!demo.canUseRenderer || status === "running"}
+            onClick={
+              presentationMode === "tracked" ? showRaw : () => applyTracking()
+            }
             type="button"
           >
-            Show raw detections
+            {status === "running"
+              ? "Tracking detections…"
+              : presentationMode === "tracked"
+                ? "Show raw detections"
+                : "Track detections"}
           </button>
         </div>
 
@@ -386,10 +482,4 @@ function TrackingRange({
       />
     </label>
   );
-}
-
-function geometryLabel(geometry: TrackingGeometry) {
-  if (geometry === TrackingGeometry.Mask) return "Masks";
-  if (geometry === TrackingGeometry.Keypoints) return "Poses";
-  return "Boxes";
 }

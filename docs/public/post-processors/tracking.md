@@ -19,14 +19,16 @@ are never emitted as synthetic detections.
   ></iframe>
 </div>
 
-The playground uses the frozen basketball fixture. Click **Apply tracking** to
+The playground uses the frozen basketball fixture. Click **Track detections** to
 stream each one-second chunk in deliberately shuffled frame order. The
 pipeline waits for the next known `frameIndex`, sends only detection index,
 confidence, and an association rectangle to its worker, and appends the
 enriched semantic frame to browser cold storage. This comparison playground
 sets `mutateInput: false` so it can retain a raw view. Switch among boxes,
 masks, and keypoints to change both association input and the visible tracked
-annotation.
+annotation. While tracked detections are visible, changing any tracking control
+cancels stale work and recomputes the derived output from the original raw
+detections.
 
 ## Consume out-of-order inference
 
