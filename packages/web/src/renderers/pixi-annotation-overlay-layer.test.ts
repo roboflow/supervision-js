@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { AnnotationGestureStateKind } from "supervision-js-core";
+import {
+  AnnotationGestureStateKind,
+  KeypointMarkerShape,
+} from "supervision-js-core";
 
 import { createPixiAnnotationOverlayLayer } from "./pixi-annotation-overlay-layer";
 
@@ -155,6 +158,79 @@ describe("Pixi annotation overlay presentation", () => {
     expect(graphics.stroke).toHaveBeenCalledWith({
       alpha: 1,
       color: 0xb6ff00,
+      width: 1,
+    });
+  });
+
+  it("renders keypoint editing previews with the configured keypoint style", () => {
+    const graphics = createGraphicsMock();
+    const preview = {
+      className: "person",
+      id: "person-1",
+      keypoints: {
+        edges: [[0, 1] as const],
+        points: [
+          { x: 10, y: 20 },
+          { x: 30, y: 40 },
+        ],
+      },
+      rect: { height: 20, width: 20, x: 20, y: 30 },
+    };
+    const engine = {
+      getState: () => ({
+        activeDetectionId: "person-1",
+        activeHandleId: "kp-1",
+        kind: AnnotationGestureStateKind.Resizing,
+        pointerId: 1,
+        preview,
+      }),
+      hasCreationTool: () => false,
+    };
+    const keypointStyle = {
+      resolve: vi.fn(() => ({
+        edges: [
+          {
+            from: preview.keypoints.points[0]!,
+            stroke: { alpha: 1, color: 0x00ff66, width: 2 },
+            to: preview.keypoints.points[1]!,
+          },
+        ],
+        markers: preview.keypoints.points.map((point, index) => ({
+          fill: { alpha: 1, color: 0x00ff66 },
+          index,
+          point,
+          radius: 4,
+          shape: KeypointMarkerShape.Circle,
+        })),
+      })),
+    };
+    const layer = createPixiAnnotationOverlayLayer(
+      engine as never,
+      undefined,
+      keypointStyle,
+    );
+
+    layer.attachGraphics(graphics as never);
+    layer.draw({
+      frame: undefined,
+      marquee: null,
+      mediaHeight: 100,
+      mediaWidth: 100,
+      now: 0,
+      pointer: null,
+      selectedDetectionIds: [],
+      viewportScale: 2,
+    });
+
+    expect(keypointStyle.resolve).toHaveBeenCalledWith(
+      preview,
+      expect.objectContaining({ selected: true, viewportScale: 2 }),
+    );
+    expect(graphics.roundRect).not.toHaveBeenCalled();
+    expect(graphics.circle).toHaveBeenCalledTimes(2);
+    expect(graphics.stroke).toHaveBeenCalledWith({
+      alpha: 1,
+      color: 0x00ff66,
       width: 1,
     });
   });

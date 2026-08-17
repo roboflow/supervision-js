@@ -301,57 +301,64 @@ export function createPixiVectorLayer(options: {
         viewportScale,
       );
 
-    if (!keypoints) return;
+    if (keypoints)
+      drawPixiKeypointInstruction(graphics, keypoints, viewportScale);
+  }
+}
 
-    for (const edge of keypoints.edges) {
-      if (edge.shadowStroke)
-        drawPixiPath(
-          graphics,
-          [edge.from, edge.to],
-          false,
-          edge.shadowStroke,
-          viewportScale,
-        );
+export function drawPixiKeypointInstruction(
+  graphics: PixiGraphics,
+  instruction: KeypointDrawInstruction,
+  viewportScale: number,
+) {
+  for (const edge of instruction.edges) {
+    if (edge.shadowStroke)
       drawPixiPath(
         graphics,
         [edge.from, edge.to],
         false,
-        edge.stroke,
+        edge.shadowStroke,
         viewportScale,
       );
-    }
+    drawPixiPath(
+      graphics,
+      [edge.from, edge.to],
+      false,
+      edge.stroke,
+      viewportScale,
+    );
+  }
 
-    for (const marker of keypoints.markers) {
-      if (marker.shape === KeypointMarkerShape.Cross) {
-        drawMarkerInstruction(
-          graphics,
-          {
-            center: marker.point,
-            kind: ShapeInstructionKind.Marker,
-            shape: MarkerShape.Cross,
-            size: marker.radius * 2,
-            sizeSpace: MarkerSizeSpace.Screen,
-            stroke: asOpenStroke(
-              marker.stroke ?? { alpha: 1, color: 0xffffff, width: 2 },
-            ),
-          },
-          viewportScale,
-        );
-      } else {
-        drawMarkerInstruction(
-          graphics,
-          {
-            center: marker.point,
-            fill: marker.fill,
-            kind: ShapeInstructionKind.Marker,
-            shape: MarkerShape.Circle,
-            size: marker.radius * 2,
-            sizeSpace: MarkerSizeSpace.Screen,
-            stroke: marker.stroke,
-          },
-          viewportScale,
-        );
-      }
+  for (const marker of instruction.markers) {
+    if (marker.shape === KeypointMarkerShape.Cross) {
+      drawMarkerInstruction(
+        graphics,
+        {
+          center: marker.point,
+          kind: ShapeInstructionKind.Marker,
+          shape: MarkerShape.Cross,
+          size: marker.radius * 2,
+          sizeSpace: MarkerSizeSpace.Screen,
+          stroke: asOpenStroke(
+            marker.stroke ?? { alpha: 1, color: 0xffffff, width: 2 },
+          ),
+        },
+        viewportScale,
+      );
+    } else {
+      drawMarkerInstruction(
+        graphics,
+        {
+          center: marker.point,
+          fill: marker.fill,
+          kind: ShapeInstructionKind.Marker,
+          shape: MarkerShape.Circle,
+          size: marker.radius * 2,
+          sizeSpace: MarkerSizeSpace.Screen,
+          stroke: marker.stroke,
+        },
+        viewportScale,
+      );
     }
   }
 }

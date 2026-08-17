@@ -1,9 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createPixiInteractionPresentationLayer } from "#renderers/pixi-interaction-presentation-layer";
-import { BaseInteractionStyle } from "supervision-js-core";
-import type { DetectionFrame } from "supervision-js-core";
-import { DetectionPickTarget } from "supervision-js-core";
+import { BaseBoxStyle, BaseInteractionStyle } from "supervision-js-core";
+import type {
+  Detection,
+  DetectionFrame,
+  InteractionStyleContext,
+} from "supervision-js-core";
+import {
+  DetectionInteractionState,
+  DetectionPickTarget,
+} from "supervision-js-core";
 
 const frame: DetectionFrame = {
   detections: [
@@ -18,6 +25,117 @@ const frame: DetectionFrame = {
 };
 
 describe("pixi interaction presentation layer", () => {
+  it("passes the picked sub-geometry index to interaction styles", () => {
+    const keypointFrame: DetectionFrame = {
+      detections: [
+        {
+          className: "person",
+          id: "person-1",
+          keypoints: {
+            edges: [],
+            points: [{ x: 20, y: 30 }],
+          },
+        },
+      ],
+      mediaTime: 0.1,
+    };
+    const resolve = vi.fn(() => ({
+      keypointStyle: {
+        resolve: () => ({ edges: [], markers: [] }),
+      },
+    }));
+    const layer = createPixiInteractionPresentationLayer({
+      Container: FakeContainer as never,
+      Graphics: FakeGraphics as never,
+      Text: FakeText as never,
+      interactionStyle: { resolve },
+    });
+    layer.createDisplay({ height: 80, width: 120 });
+
+    layer.drawFrame({
+      frame: keypointFrame,
+      hoveredPick: {
+        detection: keypointFrame.detections[0]!,
+        detectionIndex: 0,
+        frame: keypointFrame,
+        geometryIndex: 0,
+        mediaTime: keypointFrame.mediaTime,
+        point: { x: 20, y: 30 },
+        target: DetectionPickTarget.Keypoint,
+      },
+      mediaTime: keypointFrame.mediaTime,
+      selectedPick: null,
+    });
+
+    expect(resolve).toHaveBeenCalledWith(
+      keypointFrame.detections[0],
+      expect.objectContaining({
+        geometryIndex: 0,
+        target: DetectionPickTarget.Keypoint,
+      }),
+    );
+  });
+
+  it("prefers hovered presentation for a selected keypoint under the pointer", () => {
+    const keypointFrame: DetectionFrame = {
+      detections: [
+        {
+          className: "person",
+          id: "person-1",
+          keypoints: { edges: [], points: [{ x: 20, y: 30 }] },
+          rect: { height: 20, width: 20, x: 20, y: 30 },
+        },
+      ],
+      mediaTime: 0.1,
+    };
+    const pick = {
+      detection: keypointFrame.detections[0]!,
+      detectionIndex: 0,
+      frame: keypointFrame,
+      geometryIndex: 0,
+      mediaTime: keypointFrame.mediaTime,
+      point: { x: 20, y: 30 },
+      target: DetectionPickTarget.Keypoint,
+    };
+    const resolve = vi.fn(
+      (_detection: Detection, context: InteractionStyleContext) => ({
+        boxStyle: new BaseBoxStyle({
+          fill: { alpha: 0, color: 0 },
+          stroke: {
+            alpha: 1,
+            color:
+              context.state === DetectionInteractionState.Hovered
+                ? 0x00ff00
+                : 0xff0000,
+            width: 2,
+          },
+        }),
+      }),
+    );
+    const layer = createPixiInteractionPresentationLayer({
+      Container: FakeContainer as never,
+      Graphics: FakeGraphics as never,
+      Text: FakeText as never,
+      interactionStyle: { resolve },
+    });
+    const display = layer.createDisplay({
+      height: 80,
+      width: 120,
+    }) as FakeContainer;
+    const graphics = display.children[0] as FakeGraphics;
+
+    layer.drawFrame({
+      frame: keypointFrame,
+      hoveredPick: pick,
+      mediaTime: keypointFrame.mediaTime,
+      selectedPick: pick,
+    });
+
+    expect(graphics.stroke).toHaveBeenCalledWith(
+      expect.objectContaining({ color: 0x00ff00 }),
+    );
+  });
+
   it("draws selected presentations when the active frame is an equivalent clone", () => {
     const selectedPick = {
       detection: frame.detections[0]!,

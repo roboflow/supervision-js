@@ -1,5 +1,6 @@
 import {
   AnnotationGestureStateKind,
+  BaseKeypointStyle,
   getAnnotationHandles,
   getDetectionRect,
   lightenColor,
@@ -13,6 +14,7 @@ import {
   type BoxFillStyle,
   type BoxStrokeStyle,
   type DetectionFrame,
+  type KeypointStyle,
   type Point,
   type PreviewOverlayData,
 } from "supervision-js-core";
@@ -22,10 +24,12 @@ import {
   resolvePixiStroke,
   resolveScreenLength,
 } from "./pixi-path";
+import { drawPixiKeypointInstruction } from "./pixi-vector-layer";
 
 export interface PixiAnnotationOverlayLayer {
   attachGraphics(graphics: PixiGraphics): void;
   setStyle(style: AnnotationOverlayStyle | null | undefined): void;
+  setKeypointStyle(style: KeypointStyle | null | undefined): void;
   draw(context: {
     frame: DetectionFrame | undefined;
     selectedDetectionIds: readonly (string | number)[];
@@ -43,9 +47,14 @@ export interface PixiAnnotationOverlayLayer {
 export function createPixiAnnotationOverlayLayer(
   editingEngine?: AnnotationEditingEngine,
   initialStyle?: AnnotationOverlayStyle | null,
+  initialKeypointStyle?: KeypointStyle | null,
 ): PixiAnnotationOverlayLayer {
   let graphics: PixiGraphics | undefined;
   let style = resolveAnnotationOverlayStyle(initialStyle);
+  let keypointStyle =
+    initialKeypointStyle === undefined
+      ? new BaseKeypointStyle()
+      : initialKeypointStyle;
 
   return {
     attachGraphics(next) {
@@ -53,6 +62,9 @@ export function createPixiAnnotationOverlayLayer(
     },
     setStyle(next) {
       if (next !== undefined) style = resolveAnnotationOverlayStyle(next);
+    },
+    setKeypointStyle(next) {
+      if (next !== undefined) keypointStyle = next;
     },
     draw(context) {
       if (!graphics) return;
@@ -63,7 +75,14 @@ export function createPixiAnnotationOverlayLayer(
         context.viewportScale,
         style,
       );
-      drawEditingPreview(graphics, editingEngine, context.viewportScale, style);
+      drawEditingPreview(
+        graphics,
+        editingEngine,
+        context.frame,
+        context.viewportScale,
+        style,
+        keypointStyle,
+      );
       drawSelectionHandles(graphics, context, style);
       drawMarquee(graphics, context.marquee, style);
       drawGuides(graphics, editingEngine, context, style);
@@ -75,8 +94,10 @@ export function createPixiAnnotationOverlayLayer(
 function drawEditingPreview(
   graphics: PixiGraphics,
   engine: AnnotationEditingEngine | undefined,
+  frame: DetectionFrame | undefined,
   viewportScale: number,
   style: ResolvedAnnotationOverlayStyle,
+  keypointStyle: KeypointStyle | null,
 ) {
   const state = engine?.getState();
   const detection = state?.preview;
@@ -109,7 +130,8 @@ function drawEditingPreview(
     detection.rect &&
     !detection.mask &&
     !detection.polygon &&
-    !detection.polyline
+    !detection.polyline &&
+    !detection.keypoints
   ) {
     const { x, y, width, height } = detection.rect;
     if (state.kind === AnnotationGestureStateKind.Creating) {
@@ -169,6 +191,22 @@ function drawEditingPreview(
       stroke,
       viewportScale,
     );
+  if (detection.keypoints && keypointStyle) {
+    const previewFrame: DetectionFrame = {
+      detections: [detection],
+      frameIndex: frame?.frameIndex,
+      mediaTime: frame?.mediaTime ?? 0,
+    };
+    const instruction = keypointStyle.resolve(detection, {
+      detectionIndex: 0,
+      frame: previewFrame,
+      mediaTime: previewFrame.mediaTime,
+      selected: true,
+      viewportScale,
+    });
+    if (instruction)
+      drawPixiKeypointInstruction(graphics, instruction, viewportScale);
+  }
 }
 
 const CREATION_VERTEX_RADIUS = 6;

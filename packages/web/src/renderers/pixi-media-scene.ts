@@ -248,6 +248,7 @@ export async function createPixiMediaScene(
   const annotationOverlayLayer = createPixiAnnotationOverlayLayer(
     options.editingEngine,
     options.annotationOverlayStyle,
+    options.keypointStyle,
   );
   const maskBrushPreview = options.maskBrush
     ? createPixiMaskBrushPreview({
@@ -930,6 +931,7 @@ export async function createPixiMediaScene(
         polylineStyle: presentation.polylineStyle,
         keypointStyle: presentation.keypointStyle,
       });
+      annotationOverlayLayer.setKeypointStyle(presentation.keypointStyle);
       regionLayer.setRenderers(
         presentation.renderers?.filter(
           (renderer) => renderer.kind === "region",

@@ -287,6 +287,12 @@ export function createPixiInteractionPresentationLayer(options: {
       const key = createDetectionPickKey(pick.pick);
 
       if (!key || seenKeys.has(key)) {
+        if (key && pick.context.state === DetectionInteractionState.Hovered) {
+          const duplicateIndex = deduped.findIndex(
+            (candidate) => createDetectionPickKey(candidate.pick) === key,
+          );
+          if (duplicateIndex !== -1) deduped[duplicateIndex] = pick;
+        }
         continue;
       }
 
@@ -315,6 +321,7 @@ export function createPixiInteractionPresentationLayer(options: {
     const context = {
       detectionIndex: activePick.detectionIndex,
       frame: activePick.frame,
+      geometryIndex: activePick.geometryIndex,
       mediaTime,
       point: activePick.point,
       state,

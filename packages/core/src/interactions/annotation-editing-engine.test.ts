@@ -2,11 +2,14 @@ import { describe, expect, it, vi } from "vitest";
 import {
   AnnotationHandleKind,
   AnnotationGeometryKind,
+  applyAnnotationHandleDrag,
   createAnnotationEditingEngine,
   deleteAnnotationVertex,
   DetectionMaskEncoding,
   DetectionPickTarget,
   getAnnotationHandles,
+  KeypointVisibility,
+  pickAnnotationHandle,
 } from "../index";
 
 describe("annotation editing engine", () => {
@@ -86,12 +89,106 @@ describe("annotation editing engine", () => {
       id: "vertex-0",
       kind: AnnotationHandleKind.Vertex,
     });
+    const keypointDetection = {
+      keypoints: { edges: [[0, 1]] as const, points: points.slice(0, 2) },
+      rect,
+    };
+    const keypointHandles = getAnnotationHandles(keypointDetection);
+    expect(keypointHandles).toHaveLength(10);
+    expect(keypointHandles[0]).toMatchObject({
+      id: "nw",
+      kind: AnnotationHandleKind.Resize,
+      point: { x: 3, y: 8 },
+    });
+    expect(keypointHandles.at(-1)).toMatchObject({
+      id: "kp-1",
+      kind: AnnotationHandleKind.Keypoint,
+    });
+    expect(pickAnnotationHandle(keypointHandles, points[0]!)).toMatchObject({
+      kind: AnnotationHandleKind.Keypoint,
+    });
+
+    const hiddenKeypointHandles = getAnnotationHandles({
+      ...keypointDetection,
+      keypoints: {
+        ...keypointDetection.keypoints,
+        visibility: [KeypointVisibility.Visible, KeypointVisibility.NotLabeled],
+      },
+    });
+    expect(hiddenKeypointHandles).toHaveLength(9);
+    expect(hiddenKeypointHandles.some((handle) => handle.id === "kp-1")).toBe(
+      false,
+    );
+  });
+
+  it("resizes whole skeleton geometry from an outset bounding handle", () => {
+    const detection = {
+      keypoints: {
+        edges: [[0, 1]] as const,
+        points: [
+          { x: 15, y: 20 },
+          { x: 25, y: 40 },
+        ],
+      },
+      rect: { x: 20, y: 30, width: 10, height: 20 },
+    };
+    const southeast = getAnnotationHandles(detection).find(
+      (handle) => handle.id === "se",
+    )!;
+
     expect(
-      getAnnotationHandles({
-        keypoints: { edges: [[0, 1]], points: points.slice(0, 2) },
-        rect,
+      applyAnnotationHandleDrag(detection, southeast, { x: 47, y: 62 }),
+    ).toMatchObject({
+      keypoints: {
+        points: [
+          { x: 15, y: 20 },
+          { x: 35, y: 50 },
+        ],
+      },
+      rect: { x: 25, y: 35, width: 20, height: 30 },
+    });
+  });
+
+  it("moves a whole skeleton without changing its shape", () => {
+    const onCommit = vi.fn();
+    const engine = createAnnotationEditingEngine({ onCommit });
+    const detection = {
+      id: "skeleton-1",
+      keypoints: {
+        edges: [[0, 1]] as const,
+        points: [
+          { x: 15, y: 20 },
+          { x: 25, y: 40 },
+        ],
+      },
+      rect: { x: 20, y: 30, width: 10, height: 20 },
+    };
+    const pick = {
+      detection,
+      detectionIndex: 0,
+      frame: { detections: [detection], mediaTime: 0 },
+      mediaTime: 0,
+      point: { x: 20, y: 30 },
+      target: DetectionPickTarget.Box,
+    };
+
+    engine.pointerDown({ point: pick.point, timestamp: 0 }, pick);
+    engine.pointerMove({ point: { x: 30, y: 35 }, timestamp: 16 });
+    engine.pointerUp({ point: { x: 30, y: 35 }, timestamp: 32 });
+
+    expect(onCommit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        keypoints: {
+          edges: [[0, 1]],
+          points: [
+            { x: 25, y: 25 },
+            { x: 35, y: 45 },
+          ],
+        },
+        rect: { x: 30, y: 35, width: 10, height: 20 },
       }),
-    ).toHaveLength(2);
+      detection,
+    );
   });
 
   it("does not move a mask by changing only its ancillary bounds", () => {

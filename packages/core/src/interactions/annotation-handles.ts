@@ -2,12 +2,18 @@ import {
   AnnotationHandleKind,
   type AnnotationHandleDefinition,
 } from "#types/editing";
-import type { Detection, Point, Rect } from "#types/detections";
+import {
+  type Detection,
+  KeypointVisibility,
+  type Point,
+  type Rect,
+} from "#types/detections";
 import { distanceToSegment } from "#utils/geometry";
 
 const HANDLE_RADIUS = 6;
 const ADD_HANDLE_RADIUS = 3.6;
 const HANDLE_HIT_SIZE = 16;
+const KEYPOINT_RESIZE_HANDLE_OUTSET = 12;
 
 export function getAnnotationHandles(
   detection: Detection,
@@ -22,15 +28,36 @@ export function getAnnotationHandles(
   if (detection.polyline)
     return getPathHandles(detection.polyline.points, false, radius, hitSize);
   if (detection.keypoints) {
-    return detection.keypoints.points.map((point, geometryIndex) => ({
-      cursor: "move",
-      geometryIndex,
-      hitSize,
-      id: `kp-${geometryIndex}`,
-      kind: AnnotationHandleKind.Keypoint,
-      point,
-      radius,
-    }));
+    const keypointHandles = detection.keypoints.points.flatMap(
+      (point, geometryIndex) =>
+        detection.keypoints?.visibility?.[geometryIndex] ===
+        KeypointVisibility.NotLabeled
+          ? []
+          : [
+              {
+                cursor: "move",
+                geometryIndex,
+                hitSize,
+                id: `kp-${geometryIndex}`,
+                kind: AnnotationHandleKind.Keypoint,
+                point,
+                radius,
+              },
+            ],
+    );
+    if (!detection.rect) return keypointHandles;
+
+    // Keep whole-skeleton resize handles outside the tight keypoint bounds so
+    // an extreme keypoint remains independently draggable.
+    return [
+      ...getBoxHandles(
+        detection.rect,
+        radius,
+        hitSize,
+        KEYPOINT_RESIZE_HANDLE_OUTSET / viewportScale,
+      ),
+      ...keypointHandles,
+    ];
   }
   if (detection.rect) return getBoxHandles(detection.rect, radius, hitSize);
   return [];
@@ -55,7 +82,22 @@ export function applyAnnotationHandleDrag(
   point: Point,
 ): Detection {
   if (detection.rect && handle.kind === AnnotationHandleKind.Resize) {
-    return { ...detection, rect: resizeRect(detection.rect, handle.id, point) };
+    const resizePoint = resizeBoundaryPoint(detection.rect, handle, point);
+    const rect = resizeRect(detection.rect, handle.id, resizePoint);
+    if (!detection.keypoints) return { ...detection, rect };
+
+    return {
+      ...detection,
+      keypoints: {
+        ...detection.keypoints,
+        points: scalePointsBetweenRects(
+          detection.keypoints.points,
+          detection.rect,
+          rect,
+        ),
+      },
+      rect,
+    };
   }
 
   if (
@@ -130,11 +172,16 @@ export function offsetDetection(
   };
 }
 
-function getBoxHandles(rect: Rect, radius: number, hitSize: number) {
-  const left = rect.x - rect.width / 2;
-  const right = rect.x + rect.width / 2;
-  const top = rect.y - rect.height / 2;
-  const bottom = rect.y + rect.height / 2;
+function getBoxHandles(
+  rect: Rect,
+  radius: number,
+  hitSize: number,
+  outset = 0,
+) {
+  const left = rect.x - rect.width / 2 - outset;
+  const right = rect.x + rect.width / 2 + outset;
+  const top = rect.y - rect.height / 2 - outset;
+  const bottom = rect.y + rect.height / 2 + outset;
   const definitions: readonly [string, Point, string][] = [
     ["nw", { x: left, y: top }, "nwse-resize"],
     ["n", { x: rect.x, y: top }, "ns-resize"],
@@ -152,6 +199,46 @@ function getBoxHandles(rect: Rect, radius: number, hitSize: number) {
     kind: AnnotationHandleKind.Resize,
     point,
     radius,
+  }));
+}
+
+function resizeBoundaryPoint(
+  rect: Rect,
+  handle: AnnotationHandleDefinition,
+  point: Point,
+): Point {
+  const left = rect.x - rect.width / 2;
+  const right = rect.x + rect.width / 2;
+  const top = rect.y - rect.height / 2;
+  const bottom = rect.y + rect.height / 2;
+  const boundary = {
+    x: handle.id.includes("w")
+      ? left
+      : handle.id.includes("e")
+        ? right
+        : rect.x,
+    y: handle.id.includes("n")
+      ? top
+      : handle.id.includes("s")
+        ? bottom
+        : rect.y,
+  };
+  return {
+    x: point.x + boundary.x - handle.point.x,
+    y: point.y + boundary.y - handle.point.y,
+  };
+}
+
+function scalePointsBetweenRects(
+  points: readonly Point[],
+  from: Rect,
+  to: Rect,
+): Point[] {
+  const scaleX = from.width > 0 ? to.width / from.width : 1;
+  const scaleY = from.height > 0 ? to.height / from.height : 1;
+  return points.map((point) => ({
+    x: to.x + (point.x - from.x) * scaleX,
+    y: to.y + (point.y - from.y) * scaleY,
   }));
 }
 
