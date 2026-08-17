@@ -19,6 +19,24 @@ export {
 export { createMemoryColdDetectionFrameStore } from "#detections/memory-cold-detection-frame-store";
 export { createWritableDetectionFrameSource } from "#detections/writable-detection-frame-source";
 
+// Semantic post-processing.
+export { createSortTracker } from "#post-processing/sort-tracker";
+export {
+  detectionPostProcessors,
+  projectDetectionFrameForTracking,
+} from "#post-processing/tracking";
+export {
+  TrackingGeometry,
+  type DetectionPostProcessor,
+  type DetectionPostProcessorFactory,
+  type SortTracker,
+  type SortTrackerUpdate,
+  type SortTrackingOptions,
+  type TrackingAssignment,
+  type TrackingDetectionPostProcessor,
+  type TrackingProjection,
+} from "#types/post-processing";
+
 // Interaction and picking.
 export {
   createDetectionPickKey,

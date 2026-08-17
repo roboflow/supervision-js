@@ -7,6 +7,7 @@ const packageDir = path.dirname(fileURLToPath(import.meta.url));
 const sourceAliasRoots = new Set([
   "detections",
   "interactions",
+  "post-processing",
   "styles",
   "types",
   "utils",

@@ -169,7 +169,7 @@ test("the docs home embeds the local basketball playground", async () => {
   assert.equal(packageJson.scripts["docs:dev"], "npm run dev:demo-docs");
 });
 
-test("TypeDoc presents public guidance as four navigable sections", async () => {
+test("TypeDoc presents public guidance as five navigable sections", async () => {
   const config = JSON.parse(
     await readFile(path.join(rootDir, "typedoc.json"), "utf8"),
   );
@@ -178,6 +178,7 @@ test("TypeDoc presents public guidance as four navigable sections", async () => 
     "docs/public/getting-started.md",
     "docs/public/concepts.md",
     "docs/public/annotation-renderers.md",
+    "docs/public/post-processors.md",
     "docs/public/recipes.md",
   ]);
   assert.deepEqual(config.sort, ["documents-first", "source-order"]);
@@ -187,10 +188,36 @@ test("TypeDoc presents public guidance as four navigable sections", async () => 
     "Editing",
     "Interactions",
     "Media Preparation",
+    "Post Processing",
     "Media Sessions",
     "Rendering",
     "Styles",
   ]);
+});
+
+test("tracking post processing has a focused live playground", async () => {
+  const index = await readFile(
+    path.join(publicDocsDir, "post-processors.md"),
+    "utf8",
+  );
+  const tracking = await readFile(
+    path.join(publicDocsDir, "post-processors", "tracking.md"),
+    "utf8",
+  );
+  const demoApp = await readFile(
+    path.join(rootDir, "demo/src/App.tsx"),
+    "utf8",
+  );
+
+  assert.match(index, /post-processors\/tracking\.md/);
+  assert.match(
+    tracking,
+    /data-supervision-playground-src="demo\/\?embed=post-processor&amp;processor=tracking"/,
+  );
+  assert.match(tracking, /createDetectionPostProcessingPipeline/);
+  assert.match(tracking, /detectionPostProcessors\.tracking/);
+  assert.match(tracking, /maxPendingFrames/);
+  assert.match(demoApp, /DocsTrackingPostProcessorPlayground/);
 });
 
 test("every fixture-backed annotation renderer has a focused live playground", async () => {

@@ -116,6 +116,13 @@ The package should preserve this pipeline:
 This keeps memory proportional to configured window size rather than media
 duration.
 
+Stateful semantic post-processing sits between a raw cold source and a
+processed cold source. It consumes complete frame identities in causal order,
+even when inference arrives out of order, and must not be implemented inside
+range-loading or renderer callbacks. Browser workers receive only lightweight
+association projections; original masks and geometry remain in semantic cold
+storage.
+
 ## Renderer Boundary
 
 PixiJS is the first renderer backend, not the public architecture. The public

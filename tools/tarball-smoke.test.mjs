@@ -140,6 +140,10 @@ test("tarball ships both entrypoints with declarations and source maps", () => {
     manifest.exports["./render-preparation-worker"],
     "./dist/mask-preparation.worker.js",
   );
+  assert.equal(
+    manifest.exports["./detection-post-processing-worker"],
+    "./dist/tracking.worker.js",
+  );
 });
 
 test("tarball ships the project license and package README", () => {
@@ -156,47 +160,53 @@ test("tarball ships the project license and package README", () => {
   assert.doesNotMatch(readme, /has not been published yet/);
 });
 
-test("tarball ships a self-contained render-preparation worker", () => {
-  const workerPath = path.join(extractedDir, "dist/mask-preparation.worker.js");
+test("tarball ships self-contained worker assets", () => {
+  for (const workerFile of [
+    "mask-preparation.worker.js",
+    "tracking.worker.js",
+  ]) {
+    const workerPath = path.join(extractedDir, "dist", workerFile);
+    assert.ok(existsSync(workerPath), `Expected ${workerFile} in the tarball`);
+    assert.ok(existsSync(`${workerPath}.map`), `Expected ${workerFile}.map`);
+    const workerSource = readFileSync(workerPath, "utf8");
+    const relativeImports = [
+      ...workerSource.matchAll(/(?:from|import)\s*["'](\.[^"']+)["']/g),
+    ].map((match) => match[1]);
 
-  assert.ok(existsSync(workerPath), "Expected the worker entry in the tarball");
-  assert.ok(
-    existsSync(`${workerPath}.map`),
-    "Expected the worker source map in the tarball",
-  );
-
-  const workerSource = readFileSync(workerPath, "utf8");
-  const relativeImports = [
-    ...workerSource.matchAll(/(?:from|import)\s*["'](\.[^"']+)["']/g),
-  ].map((match) => match[1]);
-
-  assert.deepEqual(
-    relativeImports,
-    [],
-    "The standalone worker must not depend on sibling chunks",
-  );
-  assert.match(workerSource, /addEventListener\(["']message["']/);
+    assert.deepEqual(relativeImports, [], `${workerFile} imports a sibling`);
+    assert.match(workerSource, /addEventListener\(["']message["']/);
+  }
 });
 
-test("published browser entry embeds its default worker source", () => {
+test("published browser entry embeds its default worker sources", () => {
   const index = readFileSync(path.join(extractedDir, "dist/index.js"), "utf8");
-  const workerSource = readFileSync(
-    path.join(extractedDir, "dist/mask-preparation.worker.js"),
-    "utf8",
-  )
-    .trimEnd()
-    .replace(/\n\/\/# sourceMappingURL=[^\n]+$/, "");
 
   assert.match(index, /URL\.createObjectURL/);
   assert.match(index, /new Blob/);
-  assert.ok(
-    index.includes(JSON.stringify(workerSource)),
-    "Expected the browser entry to contain the exact standalone worker source",
-  );
+  for (const workerFile of [
+    "mask-preparation.worker.js",
+    "tracking.worker.js",
+  ]) {
+    const workerSource = readFileSync(
+      path.join(extractedDir, "dist", workerFile),
+      "utf8",
+    )
+      .trimEnd()
+      .replace(/\n\/\/# sourceMappingURL=[^\n]+$/, "");
+    assert.ok(
+      index.includes(JSON.stringify(workerSource)),
+      `Missing ${workerFile}`,
+    );
+  }
   assert.doesNotMatch(index, /mask-preparation\.worker\.js/);
+  assert.doesNotMatch(index, /tracking\.worker\.js/);
   assert.doesNotMatch(
     index,
     /__SUPERVISION_JS_EMBEDDED_MASK_PREPARATION_WORKER_SOURCE__/,
+  );
+  assert.doesNotMatch(
+    index,
+    /__SUPERVISION_JS_EMBEDDED_TRACKING_WORKER_SOURCE__/,
   );
 });
 
@@ -301,13 +311,14 @@ test("clean consumer resolves package entrypoints and the standalone worker", ()
         'import { createMediaSession, MediaSessionStatus } from "supervision";',
         'import { createAnnotationEditingEngine } from "supervision/editing";',
         'const workerUrl = import.meta.resolve("supervision/render-preparation-worker");',
-        "console.log(typeof createMediaSession, MediaSessionStatus.Ready, typeof createAnnotationEditingEngine, workerUrl.endsWith('/mask-preparation.worker.js'));",
+        'const trackingWorkerUrl = import.meta.resolve("supervision/detection-post-processing-worker");',
+        "console.log(typeof createMediaSession, MediaSessionStatus.Ready, typeof createAnnotationEditingEngine, workerUrl.endsWith('/mask-preparation.worker.js'), trackingWorkerUrl.endsWith('/tracking.worker.js'));",
       ].join("\n"),
     ],
     consumerDir,
   );
 
-  assert.equal(output.trim(), "function ready function true");
+  assert.equal(output.trim(), "function ready function true true");
 });
 
 test("clean consumer builds a browser bundle that imports createMediaSession", () => {

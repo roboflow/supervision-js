@@ -4,6 +4,7 @@ import { ControlBar } from "./components/ControlBar";
 import { DemoShell } from "./components/DemoShell";
 import { DocsBasketballPlayground } from "./components/DocsBasketballPlayground";
 import { DocsAnnotationRendererPlayground } from "./components/DocsAnnotationRendererPlayground";
+import { DocsTrackingPostProcessorPlayground } from "./components/DocsTrackingPostProcessorPlayground";
 import { PerformanceStrip } from "./components/PerformanceStrip";
 import { QualityControls } from "./components/QualityControls";
 import { RenderControls } from "./components/RenderControls";
@@ -42,6 +43,14 @@ export function App() {
         <DocsAnnotationRendererPlayground
           renderer={parseDocsAnnotationRenderer(searchParams.get("renderer"))}
         />
+      </EmbeddedPlaygroundFrame>
+    );
+  }
+
+  if (embeddedView === "post-processor") {
+    return (
+      <EmbeddedPlaygroundFrame>
+        <DocsTrackingPostProcessorPlayground />
       </EmbeddedPlaygroundFrame>
     );
   }

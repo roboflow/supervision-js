@@ -127,6 +127,11 @@ export interface Detection {
    */
   readonly id?: string | number;
   /**
+   * Optional temporal identity assigned by a tracking post-processor.
+   * This is separate from `id`, which remains the annotation/picking identity.
+   */
+  readonly trackerId?: number;
+  /**
    * Optional provenance for detections copied from a composed source.
    *
    * This is renderer-neutral source identity, not product workflow state.

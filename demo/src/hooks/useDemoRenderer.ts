@@ -18,6 +18,7 @@ import {
 } from "supervision";
 import type {
   DemoFixtureFrameTransform,
+  DemoFixtureDetectionSourceTransform,
   DemoFixtureSummary,
 } from "../fixtures/demo-fixtures";
 import {
@@ -90,6 +91,7 @@ export interface DemoRendererState {
     settings: DemoPresentationSettings,
   ) => void;
   readonly refreshPresentation: () => void;
+  readonly refreshDetections: () => void;
   readonly setRenderQuality: (quality: DemoRenderQuality) => void;
   readonly setSampleFixtureId: (sampleName: string) => void;
   readonly setSourceMode: (mode: DemoSourceMode) => void;
@@ -100,6 +102,8 @@ export interface DemoRendererState {
 export interface UseDemoRendererOptions {
   /** Optional docs/demo-only transformation over loaded fixture frames. */
   readonly fixtureFrameTransform?: DemoFixtureFrameTransform;
+  /** Optional docs/demo-only source wrapper, such as a post-processor view. */
+  readonly fixtureDetectionSourceTransform?: DemoFixtureDetectionSourceTransform;
   /**
    * Lets focused demo experiences start on a known fixture without first
    * constructing another media session.
@@ -145,6 +149,9 @@ export function useDemoRenderer(
       ) ?? defaultDemoFixture,
   );
   const [fixtureFrameTransform] = useState(() => options.fixtureFrameTransform);
+  const [fixtureDetectionSourceTransform] = useState(
+    () => options.fixtureDetectionSourceTransform,
+  );
   const [presentationTransform] = useState(() => options.presentationTransform);
   const [initialPresentationSettings] = useState(() =>
     constrainDemoPresentationSettings(
@@ -314,6 +321,7 @@ export function useDemoRenderer(
             container,
             definition: activeFixture,
             fixtureFrameTransform,
+            fixtureDetectionSourceTransform,
             isActive,
             onDetectionHover: setHoveredDetectionPick,
             onDetectionSelect: setSelectedDetectionPick,
@@ -398,6 +406,7 @@ export function useDemoRenderer(
   }, [
     activeFixture,
     fixtureFrameTransform,
+    fixtureDetectionSourceTransform,
     presentationTransform,
     sourceMode,
     syncRendererState,
@@ -555,6 +564,12 @@ export function useDemoRenderer(
     );
     syncRendererState(renderer);
   }, [presentationTransform, syncRendererState]);
+
+  const refreshDetections = useCallback(() => {
+    const session = sessionRef.current;
+    if (!session) return;
+    void session.refresh().then(() => syncRendererState(session.renderer));
+  }, [syncRendererState]);
 
   const setRenderQualityLive = useCallback(
     (quality: DemoRenderQuality) => {
@@ -726,6 +741,7 @@ export function useDemoRenderer(
     playbackState,
     presentationSettings,
     refreshPresentation,
+    refreshDetections,
     presentationAvailability:
       sourceMode === DemoSourceMode.Fixture
         ? activeFixture.presentationAvailability

@@ -23,6 +23,10 @@
       "types": "./dist/interactions/*.d.ts",
       "import": "./dist/interactions/*.js"
     },
+    "#post-processing/*": {
+      "types": "./dist/post-processing/*.d.ts",
+      "import": "./dist/post-processing/*.js"
+    },
     "#styles/*": {
       "types": "./dist/styles/*.d.ts",
       "import": "./dist/styles/*.js"
