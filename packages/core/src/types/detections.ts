@@ -112,14 +112,6 @@ export interface CompressedRleDetectionMask {
 
 export type DetectionMask = CompressedRleDetectionMask;
 
-/** Provenance assigned by a tracking post-processor. */
-export enum DetectionTrackerState {
-  /** The detection is backed by an observation in the current frame. */
-  Observed = "observed",
-  /** The detection was synthesized from the track motion model. */
-  Predicted = "predicted",
-}
-
 /**
  * One semantic detection for a media frame.
  *
@@ -142,10 +134,6 @@ export interface Detection {
    * Post-processors may update this derived field in place.
    */
   trackerId?: number;
-  /** Whether the tracker observed or predicted this detection. */
-  trackerState?: DetectionTrackerState;
-  /** Frames since the last observation. Zero for observed detections. */
-  trackerAge?: number;
   /**
    * Optional provenance for detections copied from a composed source.
    *

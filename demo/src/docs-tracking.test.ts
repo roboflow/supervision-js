@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   DetectionMaskEncoding,
-  DetectionTrackerState,
   TrackingGeometry,
   type Detection,
 } from "supervision";
@@ -53,24 +52,9 @@ describe("docs tracking presentation", () => {
     const trackedDetection: Detection = {
       ...rawDetection,
       trackerId: 7,
-      trackerState: DetectionTrackerState.Observed,
-    };
-    const predictedDetection: Detection = {
-      ...rawDetection,
-      trackerAge: 2,
-      trackerId: 7,
-      trackerState: DetectionTrackerState.Predicted,
     };
     const trackedBoxes = createDocsTrackingPresentation(
       TrackingGeometry.Box,
-      "tracked",
-    );
-    const trackedMasks = createDocsTrackingPresentation(
-      TrackingGeometry.Mask,
-      "tracked",
-    );
-    const trackedKeypoints = createDocsTrackingPresentation(
-      TrackingGeometry.Keypoints,
       "tracked",
     );
 
@@ -84,41 +68,11 @@ describe("docs tracking presentation", () => {
       )?.text,
     ).toBe("player #7");
     expect(
-      trackedMasks.boxStyle?.resolve(
-        predictedDetection,
-        styleContext(predictedDetection),
-      ),
-    ).toBeUndefined();
-    expect(
-      trackedMasks.labelStyle?.resolve(
-        predictedDetection,
-        styleContext(predictedDetection),
-      ),
-    ).toBeUndefined();
-    expect(
-      trackedKeypoints.boxStyle?.resolve(
-        predictedDetection,
-        styleContext(predictedDetection),
-      ),
-    ).toBeUndefined();
-    expect(
-      trackedKeypoints.labelStyle?.resolve(
-        predictedDetection,
-        styleContext(predictedDetection),
-      ),
-    ).toBeUndefined();
-    expect(
       trackedBoxes.boxStyle?.resolve(
-        predictedDetection,
-        styleContext(predictedDetection),
-      ),
-    ).toBeDefined();
-    expect(
-      trackedBoxes.labelStyle?.resolve(
-        predictedDetection,
-        styleContext(predictedDetection),
-      )?.text,
-    ).toBe("player #7 · predicted +2f");
+        trackedDetection,
+        styleContext(trackedDetection),
+      )?.stroke?.dash,
+    ).toBeUndefined();
   });
 });
 

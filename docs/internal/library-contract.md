@@ -119,11 +119,11 @@ duration.
 Stateful semantic post-processing consumes complete frame identities in causal
 order, even when inference arrives out of order, and must not be implemented
 inside range-loading or renderer callbacks. It updates derived detection fields
-and appends explicitly marked synthetic detections in place by default so the
-host may persist only processed truth. Hosts that need audit or comparison
-views may instead retain separate raw and processed cold sources. Browser
-workers receive only lightweight association projections and predicted boxes;
-masks and dense geometry remain in semantic cold storage.
+in place so the host may persist only processed truth. Hosts that need audit or
+comparison views may instead retain separate raw and processed cold sources.
+Browser workers receive only lightweight association projections; motion
+predictions remain internal to the tracker, while masks and dense geometry
+remain in semantic cold storage.
 
 ## Renderer Boundary
 

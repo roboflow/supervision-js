@@ -1,9 +1,4 @@
-import {
-  DetectionTrackerState,
-  type Detection,
-  type DetectionFrame,
-  type Rect,
-} from "#types/detections";
+import type { Detection, DetectionFrame, Rect } from "#types/detections";
 import {
   TrackingGeometry,
   type DetectionPostProcessorFactory,
@@ -47,7 +42,6 @@ export const detectionPostProcessors: DetectionPostProcessorFactory = {
       geometry: options.geometry ?? TrackingGeometry.Box,
       kind: "tracking",
       options: {
-        emitPredictions: options.emitPredictions ?? true,
         frameRate,
         lostTrackBuffer,
         minimumConsecutiveFrames,
@@ -67,9 +61,6 @@ export function projectDetectionFrameForTracking(
   geometry: TrackingGeometry,
 ): readonly TrackingProjection[] {
   return frame.detections.flatMap((detection, detectionIndex) => {
-    if (detection.trackerState === DetectionTrackerState.Predicted) {
-      return [];
-    }
     const rect = resolveTrackingRect(detection, geometry);
 
     if (!rect || rect.width <= 0 || rect.height <= 0) {
@@ -78,9 +69,6 @@ export function projectDetectionFrameForTracking(
 
     return [
       {
-        ...(detection.className === undefined
-          ? {}
-          : { className: detection.className }),
         ...(detection.confidence === undefined
           ? {}
           : { confidence: detection.confidence }),

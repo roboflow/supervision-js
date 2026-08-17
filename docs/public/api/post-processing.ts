@@ -11,7 +11,6 @@ export {
   detectionPostProcessors,
   projectDetectionFrameForTracking,
   DetectionPostProcessingMode,
-  DetectionTrackerState,
   TrackingGeometry,
   type DetectionPostProcessor,
   type DetectionPostProcessorFactory,
@@ -24,7 +23,6 @@ export {
   type SortTrackerUpdate,
   type SortTrackingOptions,
   type TrackingAssignment,
-  type TrackingPrediction,
   type TrackingDetectionPostProcessor,
   type TrackingProjection,
 } from "supervision";

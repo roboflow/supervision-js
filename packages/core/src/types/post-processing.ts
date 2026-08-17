@@ -21,8 +21,6 @@ export interface SortTrackingOptions {
   readonly minimumConsecutiveFrames?: number;
   /** Minimum intersection-over-union accepted by assignment. */
   readonly minimumIouThreshold?: number;
-  /** Emit predicted detections while confirmed tracks cross observation gaps. */
-  readonly emitPredictions?: boolean;
 }
 
 export interface TrackingDetectionPostProcessor {
@@ -33,7 +31,6 @@ export interface TrackingDetectionPostProcessor {
 }
 
 export interface TrackingProjection {
-  readonly className?: string;
   readonly confidence?: number;
   readonly detectionIndex: number;
   readonly rect: Rect;
@@ -44,18 +41,8 @@ export interface TrackingAssignment {
   readonly trackerId: number;
 }
 
-/** A confirmed track predicted into a frame with no matching observation. */
-export interface TrackingPrediction {
-  readonly trackerId: number;
-  readonly className?: string;
-  /** Frames since this track was last observed. */
-  readonly ageFrames: number;
-  readonly rect: Rect;
-}
-
 export interface SortTrackerUpdate {
   readonly assignments: readonly TrackingAssignment[];
-  readonly predictions: readonly TrackingPrediction[];
   readonly activeTrackCount: number;
   readonly confirmedTrackCount: number;
 }

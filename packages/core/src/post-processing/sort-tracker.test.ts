@@ -121,59 +121,20 @@ describe("createSortTracker", () => {
     expect(tracker.update([], 4).activeTrackCount).toBe(0);
   });
 
-  it("emits motion predictions for confirmed tracks across gaps", () => {
+  it("keeps motion predictions internal while reassociating across gaps", () => {
     const tracker = createSortTracker({ minimumConsecutiveFrames: 2 });
     tracker.update([detection(0, 10)], 0);
-    tracker.update([detection(0, 12)], 1);
+    expect(tracker.update([detection(0, 12)], 1).assignments).toEqual([
+      { detectionIndex: 0, trackerId: 0 },
+    ]);
 
     const gap = tracker.update([], 2);
 
     expect(gap.assignments).toEqual([]);
-    expect(gap.predictions).toHaveLength(1);
-    expect(gap.predictions[0]).toMatchObject({
-      ageFrames: 1,
-      className: "person",
-      trackerId: 0,
-    });
-    expect(gap.predictions[0]!.rect.x).toBeGreaterThan(12);
-  });
-
-  it("normalizes crossing XYXY predictions at the browser Rect boundary", () => {
-    const tracker = createSortTracker({
-      minimumConsecutiveFrames: 2,
-      minimumIouThreshold: 0,
-    });
-    tracker.update(
-      [
-        {
-          ...detection(0, 10),
-          rect: { height: 100, width: 100, x: 10, y: 10 },
-        },
-      ],
-      0,
-    );
-    tracker.update(
-      [{ ...detection(0, 10), rect: { height: 1, width: 1, x: 10, y: 10 } }],
-      1,
-    );
-
-    const prediction = tracker.update([], 2).predictions[0]!;
-    expect(prediction.rect.width).toBeGreaterThan(0);
-    expect(prediction.rect.height).toBeGreaterThan(0);
-  });
-
-  it("can disable prediction emission without changing track survival", () => {
-    const tracker = createSortTracker({
-      emitPredictions: false,
-      minimumConsecutiveFrames: 2,
-    });
-    tracker.update([detection(0, 10)], 0);
-    tracker.update([detection(0, 10)], 1);
-
-    const gap = tracker.update([], 2);
-
     expect(gap.activeTrackCount).toBe(1);
-    expect(gap.predictions).toEqual([]);
+    expect(tracker.update([detection(0, 16)], 3).assignments).toEqual([
+      { detectionIndex: 0, trackerId: 0 },
+    ]);
   });
 
   it("resets both tracks and the instance-local ID allocator", () => {

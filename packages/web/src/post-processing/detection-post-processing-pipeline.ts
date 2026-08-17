@@ -1,13 +1,10 @@
 import {
   createSortTracker,
-  DetectionTrackerState,
   projectDetectionFrameForTracking,
-  type Detection,
   type DetectionFrame,
   type SortTracker,
   type TrackingAssignment,
   type TrackingDetectionPostProcessor,
-  type TrackingPrediction,
   type TrackingProjection,
 } from "supervision-js-core";
 import { createDefaultDetectionPostProcessingWorkerFactory } from "#post-processing/default-tracking-worker";
@@ -77,7 +74,6 @@ export function createDetectionPostProcessingPipeline(
     nextFrameIndex,
     pendingFrameCount: 0,
     processedFrameCount: 0,
-    predictedDetectionCount: 0,
     trackedDetectionCount: 0,
   };
 
@@ -131,7 +127,6 @@ export function createDetectionPostProcessingPipeline(
         nextFrameIndex,
         pendingFrameCount: 0,
         processedFrameCount: 0,
-        predictedDetectionCount: 0,
         trackedDetectionCount: 0,
       };
       publishDiagnostics();
@@ -201,7 +196,6 @@ export function createDetectionPostProcessingPipeline(
         const processedFrame = attachTrackerIds(
           frame,
           result.assignments,
-          result.predictions,
           options.mutateInput ?? true,
         );
 
@@ -220,8 +214,6 @@ export function createDetectionPostProcessingPipeline(
           nextFrameIndex,
           pendingFrameCount: pendingFrames.size,
           processedFrameCount: diagnostics.processedFrameCount + 1,
-          predictedDetectionCount:
-            diagnostics.predictedDetectionCount + result.predictions.length,
           trackedDetectionCount:
             diagnostics.trackedDetectionCount + result.assignments.length,
         };
@@ -348,7 +340,6 @@ function createWorkerExecution(
         assignments: response.assignments ?? [],
         confirmedTrackCount: response.confirmedTrackCount ?? 0,
         durationMs: response.durationMs ?? 0,
-        predictions: response.predictions ?? [],
       };
     },
     async reset() {
@@ -365,7 +356,6 @@ function createWorkerExecution(
 function attachTrackerIds(
   frame: DetectionFrame,
   assignments: readonly TrackingAssignment[],
-  predictions: readonly TrackingPrediction[],
   mutateInput: boolean,
 ): DetectionFrame {
   const trackerIds = new Map(
@@ -375,74 +365,31 @@ function attachTrackerIds(
     ]),
   );
 
-  const observedDetections: Detection[] = [];
-
   for (const [detectionIndex, detection] of frame.detections.entries()) {
-    if (detection.trackerState === DetectionTrackerState.Predicted) {
-      continue;
-    }
-
     if (mutateInput) {
       const trackerId = trackerIds.get(detectionIndex);
       if (trackerId === undefined) {
         Reflect.deleteProperty(detection, "trackerId");
-        Reflect.deleteProperty(detection, "trackerAge");
-        Reflect.deleteProperty(detection, "trackerState");
       } else {
         detection.trackerId = trackerId;
-        detection.trackerAge = 0;
-        detection.trackerState = DetectionTrackerState.Observed;
       }
-      observedDetections.push(detection);
-      continue;
     }
-
-    const semanticDetection = { ...detection };
-    Reflect.deleteProperty(semanticDetection, "trackerId");
-    Reflect.deleteProperty(semanticDetection, "trackerAge");
-    Reflect.deleteProperty(semanticDetection, "trackerState");
-    const trackerId = trackerIds.get(detectionIndex);
-    observedDetections.push(
-      trackerId === undefined
-        ? semanticDetection
-        : {
-            ...semanticDetection,
-            trackerAge: 0,
-            trackerId,
-            trackerState: DetectionTrackerState.Observed,
-          },
-    );
   }
 
-  const syntheticDetections = predictions.map(createSyntheticDetection);
-
   if (mutateInput) {
-    const mutableDetections = frame.detections as Detection[];
-    mutableDetections.splice(
-      0,
-      mutableDetections.length,
-      ...observedDetections,
-      ...syntheticDetections,
-    );
     return frame;
   }
 
   return {
     ...frame,
-    detections: [...observedDetections, ...syntheticDetections],
-  };
-}
-
-function createSyntheticDetection(prediction: TrackingPrediction): Detection {
-  return {
-    ...(prediction.className === undefined
-      ? {}
-      : { className: prediction.className }),
-    id: `tracking-prediction:${prediction.trackerId}`,
-    rect: { ...prediction.rect },
-    trackerAge: prediction.ageFrames,
-    trackerId: prediction.trackerId,
-    trackerState: DetectionTrackerState.Predicted,
+    detections: frame.detections.map((detection, detectionIndex) => {
+      const semanticDetection = { ...detection };
+      Reflect.deleteProperty(semanticDetection, "trackerId");
+      const trackerId = trackerIds.get(detectionIndex);
+      return trackerId === undefined
+        ? semanticDetection
+        : { ...semanticDetection, trackerId };
+    }),
   };
 }
 

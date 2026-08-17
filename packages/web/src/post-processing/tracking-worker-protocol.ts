@@ -1,7 +1,6 @@
 import type {
   TrackingAssignment,
   TrackingDetectionPostProcessor,
-  TrackingPrediction,
   TrackingProjection,
 } from "supervision-js-core";
 import type { WorkerRpcMessage } from "#workers/worker-rpc-client";
@@ -35,7 +34,6 @@ export interface TrackingWorkerSuccessResponse extends WorkerRpcMessage {
   readonly assignments?: readonly TrackingAssignment[];
   readonly confirmedTrackCount?: number;
   readonly durationMs?: number;
-  readonly predictions?: readonly TrackingPrediction[];
 }
 
 export interface TrackingWorkerErrorResponse extends WorkerRpcMessage {

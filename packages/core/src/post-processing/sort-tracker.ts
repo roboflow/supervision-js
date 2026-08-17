@@ -16,9 +16,8 @@ interface Match {
 /**
  * Creates one stateful SORT tracker for a single ordered media sequence.
  *
- * Defaults and lifecycle semantics mirror roboflow/trackers SORT. Synthetic
- * gap predictions are a browser-specific extension controlled by
- * `emitPredictions`.
+ * Defaults, lifecycle semantics, and observation-only output mirror
+ * roboflow/trackers SORT. Motion predictions remain internal to association.
  */
 export function createSortTracker(
   options: SortTrackingOptions = {},
@@ -34,7 +33,6 @@ export function createSortTracker(
     "minimumConsecutiveFrames",
   );
   const minimumIouThreshold = options.minimumIouThreshold ?? 0.3;
-  const emitPredictions = options.emitPredictions ?? true;
 
   if (!Number.isFinite(frameRate) || frameRate <= 0) {
     throw new Error("frameRate must be a finite positive value.");
@@ -116,12 +114,6 @@ export function createSortTracker(
         confirmedTrackCount: tracks.filter(
           (track) => track.trackerId !== undefined,
         ).length,
-        predictions: emitPredictions
-          ? tracks.flatMap((track) => {
-              const prediction = track.getPrediction();
-              return prediction ? [prediction] : [];
-            })
-          : [],
       } satisfies SortTrackerUpdate;
     },
   };
@@ -131,28 +123,13 @@ class KalmanBoxTrack {
   trackerId: number | undefined;
   successfulUpdates = 1;
   timeSinceUpdate = 0;
-  private className: string | undefined;
   private state: Matrix;
   private covariance = identity(8);
 
   constructor(detection: TrackingProjection) {
-    this.className = detection.className;
     this.state = [...rectToXyxy(detection.rect), 0, 0, 0, 0].map((value) => [
       value,
     ]);
-  }
-
-  getPrediction() {
-    if (this.trackerId === undefined || this.timeSinceUpdate === 0) {
-      return undefined;
-    }
-
-    return {
-      ageFrames: this.timeSinceUpdate,
-      ...(this.className === undefined ? {} : { className: this.className }),
-      rect: stateToRect(this.state),
-      trackerId: this.trackerId,
-    };
   }
 
   predict(frameStep: number, frameRate: number): Rect {
@@ -207,7 +184,6 @@ class KalmanBoxTrack {
       ),
       multiply(multiply(gain, measurementNoise), transpose(gain)),
     );
-    this.className = detection.className ?? this.className;
     this.timeSinceUpdate = 0;
     this.successfulUpdates += 1;
   }

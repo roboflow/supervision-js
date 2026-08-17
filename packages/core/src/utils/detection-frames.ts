@@ -1,6 +1,5 @@
 import {
   DetectionMaskEncoding,
-  DetectionTrackerState,
   type DetectionFrame,
   type DetectionMask,
 } from "#types/detections";
@@ -139,23 +138,6 @@ export function validateDetectionFrames(
           integer: true,
           min: 0,
         });
-      }
-
-      if (detection.trackerAge !== undefined) {
-        validateNumber(detection.trackerAge, `${detectionPath}.trackerAge`, {
-          integer: true,
-          min: 0,
-        });
-      }
-
-      if (
-        detection.trackerState !== undefined &&
-        detection.trackerState !== DetectionTrackerState.Observed &&
-        detection.trackerState !== DetectionTrackerState.Predicted
-      ) {
-        throw new Error(
-          `${detectionPath}.trackerState must be observed or predicted.`,
-        );
       }
 
       if (

@@ -80,7 +80,7 @@ The current package already separates the important responsibilities:
   domain analytics.
 - the post-processing pipeline owns bounded causal ordering and browser-worker
   execution for semantic transforms such as SORT tracking; the renderer only
-  consumes the resulting observed and synthetic tracked detections.
+  consumes observed detections with derived tracking identity.
 
 The presentation now has a built-in renderer list. A consumer can
 configure the existing annotation renderers through one public surface while

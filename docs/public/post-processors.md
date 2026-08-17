@@ -13,16 +13,15 @@ on which frames the viewer happens to play.
 The browser pipeline accepts frames from streaming inference in any arrival
 order, holds a bounded set while a frame-index gap is open, and applies
 stateful processors serially from the causal frontier. It updates derived
-detection fields and appends synthesized results in place by default, so a cold
-`WritableDetectionFrameSource` can contain only the post-processed truth
-consumed by the media session.
+detection fields in place by default, so a cold `WritableDetectionFrameSource`
+can contain only the post-processed truth consumed by the media session.
 
 The first built-in post processor is [Tracking](./post-processors/tracking.md).
 It runs SORT in a dedicated browser worker and associates boxes, masks, or
 keypoints through lightweight rectangle projections. The original masks,
 polygons, keypoints, annotation IDs, and metadata never cross that worker
-boundary. Confirmed tracks can bridge missed observations with synthetic box
-detections whose provenance remains explicit.
+boundary. Motion predictions remain internal to SORT and are used only to
+associate later observed detections.
 
 ## Pipeline shape
 

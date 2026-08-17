@@ -5,7 +5,6 @@ import {
   BaseMaskStyle,
   DEFAULT_DETECTION_COLOR_SEQUENCE,
   DetectionPostProcessingMode,
-  DetectionTrackerState,
   MaskRenderMode,
   TrackingGeometry,
   annotationRenderers,
@@ -200,39 +199,23 @@ export function createDocsTrackingPresentation(
 ): MediaRendererPresentation {
   const isRaw = mode === "raw";
   const shouldRenderObserved = (detection: Detection) =>
-    (isRaw ||
-      (detection.trackerId !== undefined &&
-        detection.trackerState !== DetectionTrackerState.Predicted)) &&
+    (isRaw || detection.trackerId !== undefined) &&
     hasGeometry(detection, geometry);
-  const shouldRenderPrediction = (detection: Detection) =>
-    !isRaw &&
-    geometry === TrackingGeometry.Box &&
-    detection.trackerState === DetectionTrackerState.Predicted;
   const shouldRenderLabel = (detection: Detection) =>
     isRaw
       ? hasGeometry(detection, geometry)
-      : detection.trackerId !== undefined &&
-        (shouldRenderPrediction(detection) || shouldRenderObserved(detection));
+      : detection.trackerId !== undefined && shouldRenderObserved(detection);
   const boxStyle = new BaseBoxStyle({
     cornerRadius: 1,
     fill: (detection) => ({
-      alpha:
-        detection.trackerState === DetectionTrackerState.Predicted
-          ? 0.04
-          : 0.08,
+      alpha: 0.08,
       color: getTrackStyle(detection).fill,
     }),
     shouldRender: (detection) =>
-      shouldRenderPrediction(detection) ||
-      (geometry === TrackingGeometry.Box && shouldRenderObserved(detection)),
+      geometry === TrackingGeometry.Box && shouldRenderObserved(detection),
     stroke: (detection) => ({
-      alpha:
-        detection.trackerState === DetectionTrackerState.Predicted ? 0.72 : 1,
+      alpha: 1,
       color: getTrackStyle(detection).stroke,
-      dash:
-        detection.trackerState === DetectionTrackerState.Predicted
-          ? [8, 6]
-          : undefined,
       width: 2,
     }),
   });
@@ -279,11 +262,7 @@ export function createDocsTrackingPresentation(
     text: (detection) =>
       detection.trackerId === undefined
         ? undefined
-        : `${detection.className ?? "object"} #${detection.trackerId}${
-            detection.trackerState === DetectionTrackerState.Predicted
-              ? ` · predicted +${detection.trackerAge ?? 1}f`
-              : ""
-          }`,
+        : `${detection.className ?? "object"} #${detection.trackerId}`,
     textStyle: (detection) => ({
       color: getTrackStyle(detection).labelText,
       fontFamily:
@@ -330,7 +309,6 @@ export function createDocsTrackingSnippet(
       lostTrackBuffer: ${lostTrackBuffer},
       trackActivationThreshold: ${trackActivationThreshold.toFixed(2)},
       minimumConsecutiveFrames: ${minimumConsecutiveFrames},
-      emitPredictions: true,
     }),
   ],
   output: trackedSource,

@@ -33,7 +33,6 @@ export {
   type SortTrackerUpdate,
   type SortTrackingOptions,
   type TrackingAssignment,
-  type TrackingPrediction,
   type TrackingDetectionPostProcessor,
   type TrackingProjection,
 } from "#types/post-processing";
@@ -289,7 +288,6 @@ export {
   type WritableDetectionFrameSource,
 } from "#types/detection-timeline";
 export {
-  DetectionTrackerState,
   DetectionMaskEncoding,
   KeypointVisibility,
   type CompressedRleDetectionMask,

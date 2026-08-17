@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  DetectionMaskEncoding,
-  DetectionTrackerState,
-} from "../types/detections";
+import { DetectionMaskEncoding } from "../types/detections";
 import { TrackingGeometry } from "../types/post-processing";
 import {
   detectionPostProcessors,
@@ -21,7 +18,6 @@ describe("detectionPostProcessors.tracking", () => {
       geometry: "mask",
       kind: "tracking",
       options: {
-        emitPredictions: true,
         frameRate: 30,
         lostTrackBuffer: 12,
         minimumConsecutiveFrames: 3,
@@ -60,7 +56,6 @@ describe("detectionPostProcessors.tracking", () => {
       projectDetectionFrameForTracking(frame, TrackingGeometry.Keypoints),
     ).toEqual([
       {
-        className: "person",
         detectionIndex: 0,
         rect: { height: 6, width: 6, x: 5, y: 7 },
       },
@@ -68,30 +63,5 @@ describe("detectionPostProcessors.tracking", () => {
     expect(
       projectDetectionFrameForTracking(frame, TrackingGeometry.Mask)[0],
     ).not.toHaveProperty("mask");
-  });
-
-  it("does not feed materialized predictions back into the tracker", () => {
-    const frame = {
-      detections: [
-        {
-          rect: { height: 10, width: 10, x: 10, y: 10 },
-        },
-        {
-          rect: { height: 10, width: 10, x: 20, y: 10 },
-          trackerState: DetectionTrackerState.Predicted,
-        },
-      ],
-      frameIndex: 0,
-      mediaTime: 0,
-    };
-
-    expect(
-      projectDetectionFrameForTracking(frame, TrackingGeometry.Box),
-    ).toEqual([
-      {
-        detectionIndex: 0,
-        rect: { height: 10, width: 10, x: 10, y: 10 },
-      },
-    ]);
   });
 });
