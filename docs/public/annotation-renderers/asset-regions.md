@@ -6,9 +6,10 @@ summary: Place image assets over detection bounds or keypoint anchors.
 # Asset Regions
 
 The region annotation renderer places a browser-loadable image over a region
-owned by a semantic detection. It is useful for animated GIFs, badges, logos,
-and other assets that should follow objects across playback without exposing a
-Pixi texture, animation source, or display object to application code.
+owned by a semantic detection. It is useful for static icons, badges, logos,
+animated GIFs, and other assets that should follow objects across playback
+without exposing a Pixi texture, animation source, or display object to
+application code.
 
 <div class="supervision-layer-playground">
   <iframe
@@ -19,11 +20,41 @@ Pixi texture, animation source, or display object to application code.
 </div>
 
 The playground uses the frozen basketball fixture's real COCO pose keypoints.
-Its looping fire GIF is an original repository asset, loaded and animated by
-the browser renderer, then anchored to the visible face keypoints of each
-player.
+Switch between class-specific SVG team badges and a looping fire GIF, then tune
+the shared scale, offset, and rotation controls. Both examples are loaded by
+the browser renderer and anchored to visible face keypoints.
 
-## Add an asset region renderer
+## Add static icon regions
+
+Give each independently targeted asset a stable renderer id. This example
+maps two SVG badge URLs to the matching player classes while sharing the same
+semantic head anchor and transform:
+
+```ts
+const teamBadges = [
+  ["white-team-badge", "white team player", whiteBadgeUrl],
+  ["yellow-team-badge", "yellow team player", yellowBadgeUrl],
+] as const;
+
+session.setPresentation({
+  renderers: teamBadges.map(([id, className, src]) =>
+    annotationRenderers.region({
+      id,
+      target: { className },
+      source: { kind: "asset", asset: { src } },
+      region: { kind: "keypoint-anchor", anchor: "head" },
+      transform: {
+        scale: 0.95,
+        offset: { x: 0, y: -1.05 },
+        rotation: 0,
+      },
+      compose: { mode: "over" },
+    }),
+  ),
+});
+```
+
+## Add an animated asset region
 
 ```ts
 const fireGifUrl = new URL("./fire.gif", import.meta.url).href;

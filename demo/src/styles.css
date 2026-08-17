@@ -438,6 +438,58 @@ body {
   grid-template-columns: minmax(4.5rem, 0.7fr) minmax(0, 1.3fr);
 }
 
+.docs-layer-playground__asset-type {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.docs-layer-playground__asset-type legend {
+  color: var(--muted-strong);
+  font-size: 0.73rem;
+  font-weight: 690;
+}
+
+.docs-layer-playground__asset-type > div {
+  background: #ede9fe;
+  border-radius: 9px;
+  display: grid;
+  gap: 0.25rem;
+  grid-template-columns: 1fr 1fr;
+  padding: 0.25rem;
+}
+
+.docs-layer-playground__asset-type label {
+  cursor: pointer;
+  position: relative;
+}
+
+.docs-layer-playground__asset-type input {
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+}
+
+.docs-layer-playground__asset-type span {
+  border-radius: 7px;
+  color: var(--muted-strong);
+  display: block;
+  font-size: 0.68rem;
+  font-weight: 720;
+  padding: 0.42rem 0.5rem;
+  text-align: center;
+}
+
+.docs-layer-playground__asset-type input:checked + span {
+  background: #ffffff;
+  box-shadow: 0 1px 4px rgba(76, 29, 149, 0.16);
+  color: var(--violet);
+}
+
+.docs-layer-playground__asset-type input:focus-visible + span {
+  outline: 2px solid #8b5cf6;
+  outline-offset: 1px;
+}
+
 .docs-layer-playground__range > span,
 .docs-layer-playground__toggle {
   align-items: center;
