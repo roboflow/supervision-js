@@ -69,6 +69,10 @@ describe("docs tracking presentation", () => {
       TrackingGeometry.Mask,
       "tracked",
     );
+    const trackedKeypoints = createDocsTrackingPresentation(
+      TrackingGeometry.Keypoints,
+      "tracked",
+    );
 
     expect(
       trackedBoxes.boxStyle?.resolve(rawDetection, styleContext(rawDetection)),
@@ -84,9 +88,33 @@ describe("docs tracking presentation", () => {
         predictedDetection,
         styleContext(predictedDetection),
       ),
-    ).toBeDefined();
+    ).toBeUndefined();
     expect(
       trackedMasks.labelStyle?.resolve(
+        predictedDetection,
+        styleContext(predictedDetection),
+      ),
+    ).toBeUndefined();
+    expect(
+      trackedKeypoints.boxStyle?.resolve(
+        predictedDetection,
+        styleContext(predictedDetection),
+      ),
+    ).toBeUndefined();
+    expect(
+      trackedKeypoints.labelStyle?.resolve(
+        predictedDetection,
+        styleContext(predictedDetection),
+      ),
+    ).toBeUndefined();
+    expect(
+      trackedBoxes.boxStyle?.resolve(
+        predictedDetection,
+        styleContext(predictedDetection),
+      ),
+    ).toBeDefined();
+    expect(
+      trackedBoxes.labelStyle?.resolve(
         predictedDetection,
         styleContext(predictedDetection),
       )?.text,

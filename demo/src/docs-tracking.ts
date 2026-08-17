@@ -200,12 +200,15 @@ export function createDocsTrackingPresentation(
       (detection.trackerId !== undefined &&
         detection.trackerState !== DetectionTrackerState.Predicted)) &&
     hasGeometry(detection, geometry);
+  const shouldRenderPrediction = (detection: Detection) =>
+    !isRaw &&
+    geometry === TrackingGeometry.Box &&
+    detection.trackerState === DetectionTrackerState.Predicted;
   const shouldRenderLabel = (detection: Detection) =>
     isRaw
       ? hasGeometry(detection, geometry)
       : detection.trackerId !== undefined &&
-        (detection.trackerState === DetectionTrackerState.Predicted ||
-          hasGeometry(detection, geometry));
+        (shouldRenderPrediction(detection) || shouldRenderObserved(detection));
   const boxStyle = new BaseBoxStyle({
     fill: (detection) => ({
       alpha:
@@ -215,7 +218,7 @@ export function createDocsTrackingPresentation(
       color: getTrackStyle(detection).fill,
     }),
     shouldRender: (detection) =>
-      (!isRaw && detection.trackerState === DetectionTrackerState.Predicted) ||
+      shouldRenderPrediction(detection) ||
       (geometry === TrackingGeometry.Box && shouldRenderObserved(detection)),
     stroke: (detection) => ({
       alpha:

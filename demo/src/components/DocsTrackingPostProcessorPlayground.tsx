@@ -346,7 +346,7 @@ function TrackingRange({
 }
 
 function geometryLabel(geometry: TrackingGeometry) {
-  if (geometry === TrackingGeometry.Mask) return "Masks + gap boxes";
-  if (geometry === TrackingGeometry.Keypoints) return "Poses + gap boxes";
+  if (geometry === TrackingGeometry.Mask) return "Masks";
+  if (geometry === TrackingGeometry.Keypoints) return "Poses";
   return "Boxes + gap predictions";
 }
