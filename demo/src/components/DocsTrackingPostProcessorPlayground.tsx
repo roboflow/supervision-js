@@ -32,8 +32,11 @@ export function DocsTrackingPostProcessorPlayground() {
   const geometryRef = useRef(geometry);
   const presentationModeRef = useRef<DocsTrackingPresentationMode>("raw");
   geometryRef.current = geometry;
-  const [iouThreshold, setIouThreshold] = useState(0.3);
-  const [maxAge, setMaxAge] = useState(30);
+  const [minimumIouThreshold, setMinimumIouThreshold] = useState(0.3);
+  const [lostTrackBuffer, setLostTrackBuffer] = useState(30);
+  const [trackActivationThreshold, setTrackActivationThreshold] =
+    useState(0.25);
+  const [minimumConsecutiveFrames, setMinimumConsecutiveFrames] = useState(3);
   const [diagnostics, setDiagnostics] = useState(emptyDiagnostics);
   const [processedChunks, setProcessedChunks] = useState(0);
   const [status, setStatus] = useState<"raw" | "running" | "tracked" | "error">(
@@ -78,8 +81,21 @@ export function DocsTrackingPostProcessorPlayground() {
     totalFrames > 0 ? (diagnostics.processedFrameCount / totalFrames) * 100 : 0,
   );
   const snippet = useMemo(
-    () => createDocsTrackingSnippet(geometry, iouThreshold, maxAge),
-    [geometry, iouThreshold, maxAge],
+    () =>
+      createDocsTrackingSnippet(
+        geometry,
+        minimumIouThreshold,
+        lostTrackBuffer,
+        trackActivationThreshold,
+        minimumConsecutiveFrames,
+      ),
+    [
+      geometry,
+      lostTrackBuffer,
+      minimumConsecutiveFrames,
+      minimumIouThreshold,
+      trackActivationThreshold,
+    ],
   );
   const isPlaying =
     demo.playbackState === MediaRendererPlaybackState.Playing ||
@@ -102,8 +118,10 @@ export function DocsTrackingPostProcessorPlayground() {
     try {
       await controller.run({
         geometry,
-        iouThreshold,
-        maxAge,
+        lostTrackBuffer,
+        minimumConsecutiveFrames,
+        minimumIouThreshold,
+        trackActivationThreshold,
         onChunk(chunkIndex) {
           presentationModeRef.current = "tracked";
           setProcessedChunks(chunkIndex + 1);
@@ -113,7 +131,10 @@ export function DocsTrackingPostProcessorPlayground() {
         onDiagnostics: setDiagnostics,
       });
       demo.refreshDetections();
-      demo.onSeek(0);
+      // Python SORT intentionally leaves the first observations unconfirmed.
+      // Land on the first likely confirmed frame so the completed playground
+      // does not look empty even though tracking succeeded.
+      demo.onSeek((minimumConsecutiveFrames + 1) / 30);
       setStatus("tracked");
     } catch (error) {
       presentationModeRef.current = "tracked";
@@ -123,7 +144,16 @@ export function DocsTrackingPostProcessorPlayground() {
       );
       setStatus("error");
     }
-  }, [controller, demo, geometry, iouThreshold, isPlaying, maxAge]);
+  }, [
+    controller,
+    demo,
+    geometry,
+    isPlaying,
+    lostTrackBuffer,
+    minimumConsecutiveFrames,
+    minimumIouThreshold,
+    trackActivationThreshold,
+  ]);
 
   const showRaw = useCallback(() => {
     presentationModeRef.current = "raw";
@@ -215,22 +245,40 @@ export function DocsTrackingPostProcessorPlayground() {
             </select>
           </label>
           <TrackingRange
-            label="IoU threshold"
+            label="Minimum IoU"
             max={0.8}
             min={0.05}
-            onChange={setIouThreshold}
+            onChange={setMinimumIouThreshold}
             step={0.05}
-            value={iouThreshold}
-            valueLabel={iouThreshold.toFixed(2)}
+            value={minimumIouThreshold}
+            valueLabel={minimumIouThreshold.toFixed(2)}
           />
           <TrackingRange
-            label="Max age"
+            label="Lost track buffer"
             max={90}
-            min={1}
-            onChange={setMaxAge}
+            min={0}
+            onChange={setLostTrackBuffer}
             step={1}
-            value={maxAge}
-            valueLabel={`${maxAge}f`}
+            value={lostTrackBuffer}
+            valueLabel={`${lostTrackBuffer}f`}
+          />
+          <TrackingRange
+            label="Activation threshold"
+            max={1}
+            min={0}
+            onChange={setTrackActivationThreshold}
+            step={0.05}
+            value={trackActivationThreshold}
+            valueLabel={trackActivationThreshold.toFixed(2)}
+          />
+          <TrackingRange
+            label="Frames to confirm"
+            max={8}
+            min={1}
+            onChange={setMinimumConsecutiveFrames}
+            step={1}
+            value={minimumConsecutiveFrames}
+            valueLabel={`${minimumConsecutiveFrames}f`}
           />
           <button
             className="docs-tracking-playground__raw-button"

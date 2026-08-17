@@ -11,14 +11,16 @@ export enum TrackingGeometry {
 }
 
 export interface SortTrackingOptions {
-  /** Frames a missing track may survive. */
-  readonly maxAge?: number;
-  /** Consecutive hits before a track is reported as confirmed in diagnostics. */
-  readonly minHits?: number;
-  /** Minimum intersection-over-union accepted by Hungarian assignment. */
-  readonly iouThreshold?: number;
-  /** Prevent detections with different class names from being associated. */
-  readonly matchByClass?: boolean;
+  /** Missing-track buffer expressed in 30 FPS frames. Zero removes on the first miss. */
+  readonly lostTrackBuffer?: number;
+  /** Source frame rate used to scale `lostTrackBuffer`. */
+  readonly frameRate?: number;
+  /** Minimum confidence required to create a new track. Missing confidence is 1. */
+  readonly trackActivationThreshold?: number;
+  /** Successful observations required before a track receives an ID. */
+  readonly minimumConsecutiveFrames?: number;
+  /** Minimum intersection-over-union accepted by assignment. */
+  readonly minimumIouThreshold?: number;
   /** Emit predicted detections while confirmed tracks cross observation gaps. */
   readonly emitPredictions?: boolean;
 }

@@ -51,11 +51,12 @@ const pipeline = createDetectionPostProcessingPipeline({
     detectionPostProcessors.tracking({
       algorithm: "sort",
       emitPredictions: true,
+      frameRate: 30,
       geometry: TrackingGeometry.Mask,
-      iouThreshold: 0.3,
-      maxAge: 30,
-      minHits: 3,
-      matchByClass: true,
+      lostTrackBuffer: 30,
+      minimumConsecutiveFrames: 3,
+      minimumIouThreshold: 0.3,
+      trackActivationThreshold: 0.25,
     }),
   ],
 });
@@ -93,9 +94,21 @@ not pretend to know an unobserved mask bitmap or keypoint pose. Set
 `emitPredictions: false` when an application wants identity assignment without
 gap filling.
 
-Only tracks confirmed by `minHits` emit predictions, and they stop after
-`maxAge`. This avoids turning one-frame false positives into persistent
-synthetic objects.
+The defaults mirror the open-source Python
+[`roboflow/trackers` SORT tracker](https://github.com/roboflow/trackers/blob/2.6.0/src/trackers/core/sort/tracker.py):
+new tracks require `trackActivationThreshold`, receive a zero-based ID only
+after `minimumConsecutiveFrames` successful observations, associate
+class-agnostically at `minimumIouThreshold`, and survive gaps according to
+`lostTrackBuffer` scaled by `frameRate`. Missing confidence is treated as `1`.
+Only confirmed tracks emit predictions. This avoids turning one-frame false
+positives into persistent synthetic objects.
+
+The browser implementation uses the Python tracker's default eight-dimensional
+XYXY Kalman state. Its ordered `frameIndex` input is the fixed-rate integration
+boundary; Python's optional wall-clock `timestamp` and injectable state/IoU
+classes are not exposed in this first browser API. `emitPredictions` is a
+browser extension that materializes the Python tracker's confirmed live-track
+view into synthetic detections.
 
 ## Worker behavior
 

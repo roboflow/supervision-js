@@ -137,7 +137,7 @@ export function validateDetectionFrames(
       if (detection.trackerId !== undefined) {
         validateNumber(detection.trackerId, `${detectionPath}.trackerId`, {
           integer: true,
-          min: 1,
+          min: 0,
         });
       }
 

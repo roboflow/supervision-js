@@ -14,7 +14,7 @@ describe("detectionPostProcessors.tracking", () => {
     expect(
       detectionPostProcessors.tracking({
         geometry: TrackingGeometry.Mask,
-        maxAge: 12,
+        lostTrackBuffer: 12,
       }),
     ).toEqual({
       algorithm: "sort",
@@ -22,10 +22,11 @@ describe("detectionPostProcessors.tracking", () => {
       kind: "tracking",
       options: {
         emitPredictions: true,
-        iouThreshold: 0.3,
-        matchByClass: true,
-        maxAge: 12,
-        minHits: 3,
+        frameRate: 30,
+        lostTrackBuffer: 12,
+        minimumConsecutiveFrames: 3,
+        minimumIouThreshold: 0.3,
+        trackActivationThreshold: 0.25,
       },
     });
   });

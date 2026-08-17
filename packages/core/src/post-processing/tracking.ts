@@ -12,27 +12,35 @@ import {
 import { computeDetectionMaskRect } from "#utils/detection-masks";
 import { getPointsRect } from "#utils/geometry";
 
-const DEFAULT_MAX_AGE = 30;
-const DEFAULT_MIN_HITS = 3;
-const DEFAULT_IOU_THRESHOLD = 0.3;
+const DEFAULT_LOST_TRACK_BUFFER = 30;
+const DEFAULT_FRAME_RATE = 30;
+const DEFAULT_TRACK_ACTIVATION_THRESHOLD = 0.25;
+const DEFAULT_MINIMUM_CONSECUTIVE_FRAMES = 3;
+const DEFAULT_MINIMUM_IOU_THRESHOLD = 0.3;
 
 export const detectionPostProcessors: DetectionPostProcessorFactory = {
   tracking(options = {}) {
-    const maxAge = normalizeInteger(options.maxAge, DEFAULT_MAX_AGE, "maxAge");
-    const minHits = normalizeInteger(
-      options.minHits,
-      DEFAULT_MIN_HITS,
-      "minHits",
+    const lostTrackBuffer = normalizeNonNegativeInteger(
+      options.lostTrackBuffer,
+      DEFAULT_LOST_TRACK_BUFFER,
+      "lostTrackBuffer",
     );
-    const iouThreshold = options.iouThreshold ?? DEFAULT_IOU_THRESHOLD;
+    const frameRate = options.frameRate ?? DEFAULT_FRAME_RATE;
+    const trackActivationThreshold =
+      options.trackActivationThreshold ?? DEFAULT_TRACK_ACTIVATION_THRESHOLD;
+    const minimumConsecutiveFrames = normalizePositiveInteger(
+      options.minimumConsecutiveFrames,
+      DEFAULT_MINIMUM_CONSECUTIVE_FRAMES,
+      "minimumConsecutiveFrames",
+    );
+    const minimumIouThreshold =
+      options.minimumIouThreshold ?? DEFAULT_MINIMUM_IOU_THRESHOLD;
 
-    if (
-      !Number.isFinite(iouThreshold) ||
-      iouThreshold < 0 ||
-      iouThreshold > 1
-    ) {
-      throw new Error("iouThreshold must be between 0 and 1.");
+    if (!Number.isFinite(frameRate) || frameRate <= 0) {
+      throw new Error("frameRate must be a finite positive value.");
     }
+    normalizeUnitInterval(trackActivationThreshold, "trackActivationThreshold");
+    normalizeUnitInterval(minimumIouThreshold, "minimumIouThreshold");
 
     return {
       algorithm: options.algorithm ?? "sort",
@@ -40,10 +48,11 @@ export const detectionPostProcessors: DetectionPostProcessorFactory = {
       kind: "tracking",
       options: {
         emitPredictions: options.emitPredictions ?? true,
-        iouThreshold,
-        matchByClass: options.matchByClass ?? true,
-        maxAge,
-        minHits,
+        frameRate,
+        lostTrackBuffer,
+        minimumConsecutiveFrames,
+        minimumIouThreshold,
+        trackActivationThreshold,
       },
     };
   },
@@ -103,7 +112,7 @@ function resolveTrackingRect(
   }
 }
 
-function normalizeInteger(
+function normalizePositiveInteger(
   value: number | undefined,
   fallback: number,
   label: string,
@@ -115,4 +124,24 @@ function normalizeInteger(
   }
 
   return resolved;
+}
+
+function normalizeNonNegativeInteger(
+  value: number | undefined,
+  fallback: number,
+  label: string,
+) {
+  const resolved = value ?? fallback;
+
+  if (!Number.isInteger(resolved) || resolved < 0) {
+    throw new Error(`${label} must be a non-negative integer.`);
+  }
+
+  return resolved;
+}
+
+function normalizeUnitInterval(value: number, label: string) {
+  if (!Number.isFinite(value) || value < 0 || value > 1) {
+    throw new Error(`${label} must be between 0 and 1.`);
+  }
 }

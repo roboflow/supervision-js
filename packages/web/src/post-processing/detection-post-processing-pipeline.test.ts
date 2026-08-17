@@ -52,44 +52,44 @@ describe("createDetectionPostProcessingPipeline", () => {
 
     const loaded = await output.loadFrames(0, 1);
     expect(loaded.map((candidate) => candidate.frameIndex)).toEqual([0, 1, 2]);
-    expect(loaded[0]!.detections[0]).toMatchObject({
-      id: "annotation:0",
-      trackerId: 1,
-    });
     expect(loaded[0]!.detections[0]!.mask).toBeDefined();
+    expect(loaded[2]!.detections[0]).toMatchObject({
+      id: "annotation:2",
+      trackerId: 0,
+    });
     pipeline.destroy();
   });
 
   it("mutates derived tracking identity on input detections by default", async () => {
-    const inputFrame = frame(0);
-    const inputDetection = inputFrame.detections[0]!;
+    const inputFrames = [frame(0), frame(1), frame(2)];
+    const inputDetection = inputFrames[2]!.detections[0]!;
     const pipeline = createDetectionPostProcessingPipeline({
       mode: DetectionPostProcessingMode.MainThread,
       processors: [detectionPostProcessors.tracking()],
     });
 
-    const result = await pipeline.appendFrames([inputFrame]);
+    const result = await pipeline.appendFrames(inputFrames);
 
-    expect(result.processedFrames[0]).toBe(inputFrame);
-    expect(result.processedFrames[0]!.detections[0]).toBe(inputDetection);
-    expect(inputDetection.trackerId).toBe(1);
+    expect(result.processedFrames[2]).toBe(inputFrames[2]);
+    expect(result.processedFrames[2]!.detections[0]).toBe(inputDetection);
+    expect(inputDetection.trackerId).toBe(0);
     pipeline.destroy();
   });
 
   it("can preserve raw detections for comparison workflows", async () => {
-    const inputFrame = frame(0);
-    const inputDetection = inputFrame.detections[0]!;
+    const inputFrames = [frame(0), frame(1), frame(2)];
+    const inputDetection = inputFrames[2]!.detections[0]!;
     const pipeline = createDetectionPostProcessingPipeline({
       mode: DetectionPostProcessingMode.MainThread,
       mutateInput: false,
       processors: [detectionPostProcessors.tracking()],
     });
 
-    const result = await pipeline.appendFrames([inputFrame]);
+    const result = await pipeline.appendFrames(inputFrames);
 
-    expect(result.processedFrames[0]).not.toBe(inputFrame);
-    expect(result.processedFrames[0]!.detections[0]).not.toBe(inputDetection);
-    expect(result.processedFrames[0]!.detections[0]!.trackerId).toBe(1);
+    expect(result.processedFrames[2]).not.toBe(inputFrames[2]);
+    expect(result.processedFrames[2]!.detections[0]).not.toBe(inputDetection);
+    expect(result.processedFrames[2]!.detections[0]!.trackerId).toBe(0);
     expect(inputDetection.trackerId).toBeUndefined();
     pipeline.destroy();
   });
@@ -105,7 +105,7 @@ describe("createDetectionPostProcessingPipeline", () => {
       processors: [
         detectionPostProcessors.tracking({
           geometry: TrackingGeometry.Mask,
-          minHits: 2,
+          minimumConsecutiveFrames: 2,
         }),
       ],
     });
@@ -117,9 +117,9 @@ describe("createDetectionPostProcessingPipeline", () => {
     expect(gapFrame.detections).toHaveLength(1);
     expect(gapFrame.detections[0]).toMatchObject({
       className: "person",
-      id: "tracking-prediction:1",
+      id: "tracking-prediction:0",
       trackerAge: 1,
-      trackerId: 1,
+      trackerId: 0,
       trackerState: DetectionTrackerState.Predicted,
     });
     expect(gapFrame.detections[0]!.rect).toBeDefined();
@@ -137,7 +137,9 @@ describe("createDetectionPostProcessingPipeline", () => {
     const pipeline = createDetectionPostProcessingPipeline({
       mode: DetectionPostProcessingMode.MainThread,
       mutateInput: false,
-      processors: [detectionPostProcessors.tracking({ minHits: 2 })],
+      processors: [
+        detectionPostProcessors.tracking({ minimumConsecutiveFrames: 2 }),
+      ],
     });
 
     await pipeline.appendFrames([frame(0), frame(1)]);
@@ -146,7 +148,7 @@ describe("createDetectionPostProcessingPipeline", () => {
     expect(gapFrame.detections).toEqual([]);
     expect(result.processedFrames[0]!.detections[0]).toMatchObject({
       trackerAge: 1,
-      trackerId: 1,
+      trackerId: 0,
       trackerState: DetectionTrackerState.Predicted,
     });
     pipeline.destroy();
@@ -160,7 +162,9 @@ describe("createDetectionPostProcessingPipeline", () => {
     ] satisfies DetectionFrame[];
     const pipeline = createDetectionPostProcessingPipeline({
       mode: DetectionPostProcessingMode.MainThread,
-      processors: [detectionPostProcessors.tracking({ minHits: 2 })],
+      processors: [
+        detectionPostProcessors.tracking({ minimumConsecutiveFrames: 2 }),
+      ],
     });
 
     await pipeline.appendFrames(frames);

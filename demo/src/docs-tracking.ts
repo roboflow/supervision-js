@@ -28,8 +28,10 @@ const TRACKING_DATASET_ID = "basketball-tracking-output";
 
 export interface DocsTrackingRunOptions {
   readonly geometry: TrackingGeometry;
-  readonly iouThreshold: number;
-  readonly maxAge: number;
+  readonly lostTrackBuffer: number;
+  readonly minimumConsecutiveFrames: number;
+  readonly minimumIouThreshold: number;
+  readonly trackActivationThreshold: number;
   readonly onChunk?: (chunkIndex: number) => void;
   readonly onDiagnostics?: (
     diagnostics: DetectionPostProcessingDiagnostics,
@@ -139,8 +141,10 @@ export function createDocsTrackingController(): DocsTrackingController {
         processors: [
           detectionPostProcessors.tracking({
             geometry: options.geometry,
-            iouThreshold: options.iouThreshold,
-            maxAge: options.maxAge,
+            lostTrackBuffer: options.lostTrackBuffer,
+            minimumConsecutiveFrames: options.minimumConsecutiveFrames,
+            minimumIouThreshold: options.minimumIouThreshold,
+            trackActivationThreshold: options.trackActivationThreshold,
           }),
         ],
         startFrameIndex: 0,
@@ -210,11 +214,12 @@ export function createDocsTrackingPresentation(
       : detection.trackerId !== undefined &&
         (shouldRenderPrediction(detection) || shouldRenderObserved(detection));
   const boxStyle = new BaseBoxStyle({
+    cornerRadius: 1,
     fill: (detection) => ({
       alpha:
         detection.trackerState === DetectionTrackerState.Predicted
           ? 0.04
-          : 0.12,
+          : 0.08,
       color: getTrackStyle(detection).fill,
     }),
     shouldRender: (detection) =>
@@ -228,16 +233,16 @@ export function createDocsTrackingPresentation(
         detection.trackerState === DetectionTrackerState.Predicted
           ? [8, 6]
           : undefined,
-      width: detection.trackerState === DetectionTrackerState.Predicted ? 2 : 3,
+      width: 2,
     }),
   });
   const maskStyle =
     geometry === TrackingGeometry.Mask
       ? new BaseMaskStyle({
           color: (detection) => getTrackStyle(detection).fill,
-          fillAlpha: 0.62,
+          fillAlpha: 0.45,
           mode: MaskRenderMode.FillAndStroke,
-          opacity: 0.9,
+          opacity: 1,
           shouldRender: shouldRenderObserved,
           stroke: (detection) => ({
             color: getTrackStyle(detection).stroke,
@@ -248,22 +253,27 @@ export function createDocsTrackingPresentation(
   const keypointStyle =
     geometry === TrackingGeometry.Keypoints
       ? new BaseKeypointStyle({
-          edgeShadowStroke: { alpha: 0.5, color: 0x111827, width: 5 },
+          edgeShadowStroke: { alpha: 0.25, color: 0x000000, width: 3 },
           edgeStroke: (detection) => ({
             color: getTrackStyle(detection).stroke,
-            width: 2.5,
+            width: 1.5,
           }),
           markerFill: (detection) => ({
             color: getTrackStyle(detection).fill,
           }),
-          radius: 4.5,
+          markerStroke: { alpha: 1, color: 0xffffff, width: 1 },
+          radius: 3.5,
           shouldRender: shouldRenderObserved,
         })
       : null;
   const labelStyle = new BaseLabelStyle({
     background: (detection) => ({
-      alpha: 0.92,
+      alpha: 1,
       color: getTrackStyle(detection).labelBackground,
+      cornerRadius: 4,
+      paddingX: 6,
+      paddingY: 3,
+      topCornersOnly: true,
     }),
     shouldRender: shouldRenderLabel,
     text: (detection) =>
@@ -276,7 +286,10 @@ export function createDocsTrackingPresentation(
           }`,
     textStyle: (detection) => ({
       color: getTrackStyle(detection).labelText,
-      fontSize: 13,
+      fontFamily:
+        "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
+      fontSize: 12,
+      fontWeight: "600",
     }),
   });
 
@@ -302,8 +315,10 @@ export function createDocsTrackingPresentation(
 
 export function createDocsTrackingSnippet(
   geometry: TrackingGeometry,
-  iouThreshold: number,
-  maxAge: number,
+  minimumIouThreshold: number,
+  lostTrackBuffer: number,
+  trackActivationThreshold: number,
+  minimumConsecutiveFrames: number,
 ) {
   return `const pipeline = createDetectionPostProcessingPipeline({
   mutateInput: false, // Keep raw frames for this comparison playground.
@@ -311,8 +326,10 @@ export function createDocsTrackingSnippet(
     detectionPostProcessors.tracking({
       algorithm: "sort",
       geometry: TrackingGeometry.${geometryName(geometry)},
-      iouThreshold: ${iouThreshold.toFixed(2)},
-      maxAge: ${maxAge},
+      minimumIouThreshold: ${minimumIouThreshold.toFixed(2)},
+      lostTrackBuffer: ${lostTrackBuffer},
+      trackActivationThreshold: ${trackActivationThreshold.toFixed(2)},
+      minimumConsecutiveFrames: ${minimumConsecutiveFrames},
       emitPredictions: true,
     }),
   ],
@@ -334,7 +351,7 @@ function getTrackStyle(detection: Detection) {
   const index =
     detection.trackerId === undefined
       ? hashClassName(detection.className)
-      : Math.max(0, detection.trackerId - 1);
+      : detection.trackerId;
   return DEFAULT_DETECTION_COLOR_SEQUENCE[
     index % DEFAULT_DETECTION_COLOR_SEQUENCE.length
   ]!;

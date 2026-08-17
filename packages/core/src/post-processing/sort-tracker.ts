@@ -13,40 +13,60 @@ interface Match {
   readonly trackIndex: number;
 }
 
-/** Creates one stateful SORT tracker for a single ordered media sequence. */
+/**
+ * Creates one stateful SORT tracker for a single ordered media sequence.
+ *
+ * Defaults and lifecycle semantics mirror roboflow/trackers SORT. Synthetic
+ * gap predictions are a browser-specific extension controlled by
+ * `emitPredictions`.
+ */
 export function createSortTracker(
   options: SortTrackingOptions = {},
 ): SortTracker {
-  const maxAge = normalizePositiveInteger(options.maxAge ?? 30, "maxAge");
-  const minHits = normalizePositiveInteger(options.minHits ?? 3, "minHits");
-  const iouThreshold = options.iouThreshold ?? 0.3;
-  const matchByClass = options.matchByClass ?? true;
+  const lostTrackBuffer = normalizeNonNegativeInteger(
+    options.lostTrackBuffer ?? 30,
+    "lostTrackBuffer",
+  );
+  const frameRate = options.frameRate ?? 30;
+  const trackActivationThreshold = options.trackActivationThreshold ?? 0.25;
+  const minimumConsecutiveFrames = normalizePositiveInteger(
+    options.minimumConsecutiveFrames ?? 3,
+    "minimumConsecutiveFrames",
+  );
+  const minimumIouThreshold = options.minimumIouThreshold ?? 0.3;
   const emitPredictions = options.emitPredictions ?? true;
 
-  if (!Number.isFinite(iouThreshold) || iouThreshold < 0 || iouThreshold > 1) {
-    throw new Error("iouThreshold must be between 0 and 1.");
+  if (!Number.isFinite(frameRate) || frameRate <= 0) {
+    throw new Error("frameRate must be a finite positive value.");
   }
+  normalizeUnitInterval(trackActivationThreshold, "trackActivationThreshold");
+  normalizeUnitInterval(minimumIouThreshold, "minimumIouThreshold");
+
+  const maximumFramesWithoutUpdate =
+    lostTrackBuffer === 0
+      ? 0
+      : Math.max(1, Math.ceil((frameRate / 30) * lostTrackBuffer));
   let tracks: KalmanBoxTrack[] = [];
-  let nextTrackerId = 1;
+  let nextTrackerId = 0;
   let previousFrameIndex: number | undefined;
 
   return {
     reset() {
       tracks = [];
-      nextTrackerId = 1;
+      nextTrackerId = 0;
       previousFrameIndex = undefined;
     },
 
     update(detections, frameIndex) {
-      const deltaFrames = resolveDeltaFrames(frameIndex, previousFrameIndex);
+      const frameStep = resolveFrameStep(frameIndex, previousFrameIndex);
       previousFrameIndex = frameIndex ?? previousFrameIndex;
-      const predicted = tracks.map((track) => track.predict(deltaFrames));
+      const predicted = tracks.map((track) =>
+        track.predict(frameStep, frameRate),
+      );
       const { matches, unmatchedDetections } = associateDetectionsToTracks(
         detections,
         predicted,
-        tracks,
-        iouThreshold,
-        matchByClass,
+        minimumIouThreshold,
       );
       const trackerIds = new Map<number, number>();
 
@@ -54,21 +74,32 @@ export function createSortTracker(
         const track = tracks[match.trackIndex]!;
         const detection = detections[match.detectionIndex]!;
         track.update(detection);
-        trackerIds.set(detection.detectionIndex, track.id);
+
+        if (
+          track.trackerId === undefined &&
+          track.successfulUpdates >= minimumConsecutiveFrames
+        ) {
+          track.trackerId = nextTrackerId;
+          nextTrackerId += 1;
+        }
+        if (track.trackerId !== undefined) {
+          trackerIds.set(detection.detectionIndex, track.trackerId);
+        }
       }
 
       for (const detectionIndex of unmatchedDetections) {
         const detection = detections[detectionIndex]!;
-        const track = new KalmanBoxTrack(nextTrackerId, detection, minHits);
-        nextTrackerId += 1;
-        tracks.push(track);
-        trackerIds.set(detection.detectionIndex, track.id);
+        if ((detection.confidence ?? 1) >= trackActivationThreshold) {
+          tracks.push(new KalmanBoxTrack(detection));
+        }
       }
 
-      tracks = tracks.filter((track) => track.timeSinceUpdate <= maxAge);
-      const confirmedTrackCount = tracks.filter(
-        (track) => track.isConfirmed,
-      ).length;
+      tracks = tracks.filter(
+        (track) =>
+          track.timeSinceUpdate <= maximumFramesWithoutUpdate &&
+          (track.successfulUpdates >= minimumConsecutiveFrames ||
+            track.timeSinceUpdate === 0),
+      );
 
       return {
         activeTrackCount: tracks.length,
@@ -78,7 +109,9 @@ export function createSortTracker(
             ? []
             : [{ detectionIndex: detection.detectionIndex, trackerId }];
         }),
-        confirmedTrackCount,
+        confirmedTrackCount: tracks.filter(
+          (track) => track.trackerId !== undefined,
+        ).length,
         predictions: emitPredictions
           ? tracks.flatMap((track) => {
               const prediction = track.getPrediction();
@@ -91,37 +124,22 @@ export function createSortTracker(
 }
 
 class KalmanBoxTrack {
-  readonly id: number;
-  hits = 1;
-  hitStreak = 1;
+  trackerId: number | undefined;
+  successfulUpdates = 1;
   timeSinceUpdate = 0;
   private className: string | undefined;
-  private confirmed: boolean;
-  private readonly minHits: number;
   private state: Matrix;
-  private covariance: Matrix;
+  private covariance = identity(8);
 
-  constructor(id: number, detection: TrackingProjection, minHits: number) {
-    this.id = id;
-    this.minHits = minHits;
-    this.confirmed = minHits <= 1;
+  constructor(detection: TrackingProjection) {
     this.className = detection.className;
-    this.state = [...rectToMeasurement(detection.rect), 0, 0, 0].map(
-      (value) => [value],
-    );
-    this.covariance = diagonal([10, 10, 10, 10, 10_000, 10_000, 10_000]);
-  }
-
-  get detectionClassName() {
-    return this.className;
-  }
-
-  get isConfirmed() {
-    return this.confirmed;
+    this.state = [...rectToXyxy(detection.rect), 0, 0, 0, 0].map((value) => [
+      value,
+    ]);
   }
 
   getPrediction() {
-    if (!this.confirmed || this.timeSinceUpdate === 0) {
+    if (this.trackerId === undefined || this.timeSinceUpdate === 0) {
       return undefined;
     }
 
@@ -129,111 +147,94 @@ class KalmanBoxTrack {
       ageFrames: this.timeSinceUpdate,
       ...(this.className === undefined ? {} : { className: this.className }),
       rect: stateToRect(this.state),
-      trackerId: this.id,
+      trackerId: this.trackerId,
     };
   }
 
-  predict(deltaFrames: number): Rect {
-    if (this.timeSinceUpdate > 0 || deltaFrames > 1) {
-      this.hitStreak = 0;
-    }
-    const transition = identity(7);
-    transition[0]![4] = deltaFrames;
-    transition[1]![5] = deltaFrames;
-    transition[2]![6] = deltaFrames;
-    const processNoise = diagonal([
-      1,
-      1,
-      4,
-      0.01,
-      0.04 * deltaFrames,
-      0.04 * deltaFrames,
-      0.01 * deltaFrames,
-    ]);
-
-    if (this.state[2]![0]! + this.state[6]![0]! * deltaFrames <= 0) {
-      this.state[6]![0] = 0;
+  predict(frameStep: number, frameRate: number): Rect {
+    const transition = identity(8);
+    for (let index = 0; index < 4; index += 1) {
+      transition[index]![index + 4] = frameStep;
     }
 
     this.state = multiply(transition, this.state);
     this.covariance = add(
       multiply(multiply(transition, this.covariance), transpose(transition)),
-      processNoise,
+      createProcessNoise(frameStep, frameRate),
     );
-    this.timeSinceUpdate += deltaFrames;
+    // Python SORT counts update calls for the fixed-rate lost-track budget.
+    this.timeSinceUpdate += 1;
     return stateToRect(this.state);
   }
 
   update(detection: TrackingProjection) {
-    const measurement = rectToMeasurement(detection.rect).map((value) => [
-      value,
-    ]);
+    const measurement = rectToXyxy(detection.rect).map((value) => [value]);
     const observation = [
-      [1, 0, 0, 0, 0, 0, 0],
-      [0, 1, 0, 0, 0, 0, 0],
-      [0, 0, 1, 0, 0, 0, 0],
-      [0, 0, 0, 1, 0, 0, 0],
+      [1, 0, 0, 0, 0, 0, 0, 0],
+      [0, 1, 0, 0, 0, 0, 0, 0],
+      [0, 0, 1, 0, 0, 0, 0, 0],
+      [0, 0, 0, 1, 0, 0, 0, 0],
     ];
-    const measurementNoise = diagonal([1, 1, 10, 10]);
+    const measurementNoise = scale(identity(4), 0.1);
     const innovation = subtract(measurement, multiply(observation, this.state));
+    const covarianceObservationTranspose = multiply(
+      this.covariance,
+      transpose(observation),
+    );
     const innovationCovariance = add(
-      multiply(multiply(observation, this.covariance), transpose(observation)),
+      multiply(observation, covarianceObservationTranspose),
       measurementNoise,
     );
     const gain = multiply(
-      multiply(this.covariance, transpose(observation)),
+      covarianceObservationTranspose,
       inverse(innovationCovariance),
     );
 
     this.state = add(this.state, multiply(gain, innovation));
-    this.covariance = multiply(
-      subtract(identity(7), multiply(gain, observation)),
-      this.covariance,
+    const identityMinusGainObservation = subtract(
+      identity(8),
+      multiply(gain, observation),
+    );
+    // Joseph form matches the Python implementation and is more stable.
+    this.covariance = add(
+      multiply(
+        multiply(identityMinusGainObservation, this.covariance),
+        transpose(identityMinusGainObservation),
+      ),
+      multiply(multiply(gain, measurementNoise), transpose(gain)),
     );
     this.className = detection.className ?? this.className;
     this.timeSinceUpdate = 0;
-    this.hits += 1;
-    this.hitStreak += 1;
-    this.confirmed ||= this.hitStreak >= this.minHits;
+    this.successfulUpdates += 1;
   }
 }
 
 function associateDetectionsToTracks(
   detections: readonly TrackingProjection[],
   predicted: readonly Rect[],
-  tracks: readonly KalmanBoxTrack[],
-  iouThreshold: number,
-  matchByClass: boolean,
+  minimumIouThreshold: number,
 ) {
-  if (tracks.length === 0) {
+  if (predicted.length === 0 || detections.length === 0) {
     return {
       matches: [] as Match[],
       unmatchedDetections: detections.map((_, index) => index),
     };
   }
 
-  const scores = detections.map((detection) =>
-    predicted.map((rect, trackIndex) =>
-      matchByClass &&
-      detection.className !== undefined &&
-      tracks[trackIndex]!.detectionClassName !== undefined &&
-      detection.className !== tracks[trackIndex]!.detectionClassName
-        ? -1
-        : intersectionOverUnion(detection.rect, rect),
-    ),
+  // Python SORT associates all detections class-agnostically using standard IoU.
+  const scores = predicted.map((rect) =>
+    detections.map((detection) => intersectionOverUnion(rect, detection.rect)),
   );
   const candidateMatches = maximizeAssignment(scores);
   const matches: Match[] = [];
   const matchedDetections = new Set<number>();
 
-  for (const [detectionIndex, trackIndex] of candidateMatches) {
-    if (scores[detectionIndex]![trackIndex]! < iouThreshold) {
-      continue;
-    }
-
+  for (const [trackIndex, detectionIndex] of candidateMatches) {
+    if (scores[trackIndex]![detectionIndex]! < minimumIouThreshold) continue;
     matches.push({ detectionIndex, trackIndex });
     matchedDetections.add(detectionIndex);
   }
+  matches.sort((left, right) => left.trackIndex - right.trackIndex);
 
   return {
     matches,
@@ -320,17 +321,48 @@ function maximizeAssignment(scores: readonly (readonly number[])[]) {
   return assignments;
 }
 
-function rectToMeasurement(rect: Rect) {
-  const area = Math.max(Number.EPSILON, rect.width * rect.height);
-  return [rect.x, rect.y, area, rect.width / Math.max(rect.height, 1e-6)];
+function rectToXyxy(rect: Rect) {
+  return [
+    rect.x - rect.width / 2,
+    rect.y - rect.height / 2,
+    rect.x + rect.width / 2,
+    rect.y + rect.height / 2,
+  ];
 }
 
 function stateToRect(state: Matrix): Rect {
-  const area = Math.max(Number.EPSILON, state[2]![0]!);
-  const ratio = Math.max(Number.EPSILON, state[3]![0]!);
-  const width = Math.sqrt(area * ratio);
-  const height = area / width;
-  return { height, width, x: state[0]![0]!, y: state[1]![0]! };
+  // The Python XYXY estimator intentionally leaves corner velocities
+  // unconstrained. Normalize only at the browser Rect boundary so a crossing
+  // prediction cannot violate the positive-width/height storage contract.
+  const x1 = Math.min(state[0]![0]!, state[2]![0]!);
+  const y1 = Math.min(state[1]![0]!, state[3]![0]!);
+  const x2 = Math.max(state[0]![0]!, state[2]![0]!);
+  const y2 = Math.max(state[1]![0]!, state[3]![0]!);
+  return {
+    height: Math.max(Number.EPSILON, y2 - y1),
+    width: Math.max(Number.EPSILON, x2 - x1),
+    x: (x1 + x2) / 2,
+    y: (y1 + y2) / 2,
+  };
+}
+
+function createProcessNoise(frameStep: number, frameRate: number): Matrix {
+  if (Math.abs(frameStep - 1) <= 0.004 * frameRate) {
+    return scale(identity(8), 0.01);
+  }
+
+  const result = Array.from({ length: 8 }, () => new Array(8).fill(0));
+  const dt2 = frameStep * frameStep;
+  const dt3 = dt2 * frameStep;
+  const dt4 = dt2 * dt2;
+  for (let index = 0; index < 4; index += 1) {
+    const velocityIndex = index + 4;
+    result[index]![index] = (0.01 * dt4) / 4;
+    result[index]![velocityIndex] = (0.01 * dt3) / 2;
+    result[velocityIndex]![index] = (0.01 * dt3) / 2;
+    result[velocityIndex]![velocityIndex] = 0.01 * dt2;
+  }
+  return result;
 }
 
 function intersectionOverUnion(left: Rect, right: Rect) {
@@ -354,7 +386,7 @@ function intersectionOverUnion(left: Rect, right: Rect) {
   return union <= 0 ? 0 : intersection / union;
 }
 
-function resolveDeltaFrames(
+function resolveFrameStep(
   current: number | undefined,
   previous: number | undefined,
 ) {
@@ -369,16 +401,27 @@ function normalizePositiveInteger(value: number, label: string) {
   return value;
 }
 
+function normalizeNonNegativeInteger(value: number, label: string) {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error(`${label} must be a non-negative integer.`);
+  }
+  return value;
+}
+
+function normalizeUnitInterval(value: number, label: string) {
+  if (!Number.isFinite(value) || value < 0 || value > 1) {
+    throw new Error(`${label} must be between 0 and 1.`);
+  }
+}
+
 function identity(size: number): Matrix {
   return Array.from({ length: size }, (_, row) =>
     Array.from({ length: size }, (_, column) => (row === column ? 1 : 0)),
   );
 }
 
-function diagonal(values: readonly number[]): Matrix {
-  return values.map((value, row) =>
-    values.map((_, column) => (row === column ? value : 0)),
-  );
+function scale(matrix: Matrix, factor: number): Matrix {
+  return matrix.map((row) => row.map((value) => value * factor));
 }
 
 function transpose(matrix: Matrix): Matrix {
