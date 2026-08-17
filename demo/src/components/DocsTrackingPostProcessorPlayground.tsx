@@ -194,6 +194,7 @@ export function DocsTrackingPostProcessorPlayground() {
           demo.onSeek((configuration.minimumConsecutiveFrames + 1) / 30);
           statusRef.current = "tracked";
           setStatus("tracked");
+          demo.onTogglePlayback();
         } catch (error) {
           if (requestId !== runRequestIdRef.current) return;
           showPresentation("tracked");
@@ -286,7 +287,7 @@ export function DocsTrackingPostProcessorPlayground() {
           <div>
             <p>Post processor</p>
             <h1>Tracking</h1>
-            <span>Ordered SORT in a browser worker</span>
+            <span>Ordered SORT</span>
           </div>
           <div className="docs-tracking-playground__header-actions">
             <button

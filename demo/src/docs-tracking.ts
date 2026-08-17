@@ -1,5 +1,6 @@
 import {
   BaseBoxStyle,
+  BaseInteractionStyle,
   BaseKeypointStyle,
   BaseLabelStyle,
   BaseMaskStyle,
@@ -284,11 +285,25 @@ export function createDocsTrackingPresentation(
       fontWeight: "600",
     }),
   });
+  const interactionStyle = new BaseInteractionStyle({
+    hovered: createDocsTrackingInteractionPresentation(
+      geometry,
+      shouldRenderObserved,
+      false,
+    ),
+    selected: createDocsTrackingInteractionPresentation(
+      geometry,
+      shouldRenderObserved,
+      true,
+    ),
+    shouldRender: shouldRenderObserved,
+  });
 
   return {
     backgroundColor: 0xf3f4f6,
     boxStyle,
     focusStyle: null,
+    interactionStyle,
     keypointStyle,
     labelStyle,
     maskStyle,
@@ -302,6 +317,72 @@ export function createDocsTrackingPresentation(
         : []),
       annotationRenderers.label({ style: labelStyle }),
     ],
+  };
+}
+
+function createDocsTrackingInteractionPresentation(
+  geometry: TrackingGeometry,
+  shouldRender: (detection: Detection) => boolean,
+  selected: boolean,
+) {
+  if (geometry === TrackingGeometry.Mask) {
+    return {
+      boxStyle: null,
+      keypointStyle: null,
+      maskStyle: new BaseMaskStyle({
+        color: (detection) => getTrackStyle(detection).fill,
+        fillAlpha: selected ? 0.2 : 0.12,
+        mode: MaskRenderMode.FillAndStroke,
+        opacity: 1,
+        shouldRender,
+        stroke: (detection) => ({
+          color: getTrackStyle(detection).stroke,
+          width: selected ? 7 : 5,
+        }),
+      }),
+    };
+  }
+
+  if (geometry === TrackingGeometry.Keypoints) {
+    return {
+      boxStyle: null,
+      keypointStyle: new BaseKeypointStyle({
+        edgeShadowStroke: {
+          alpha: 0.35,
+          color: 0x000000,
+          width: selected ? 6 : 5,
+        },
+        edgeStroke: (detection) => ({
+          color: getTrackStyle(detection).stroke,
+          width: selected ? 4 : 3,
+        }),
+        markerFill: (detection) => ({
+          color: getTrackStyle(detection).fill,
+        }),
+        markerStroke: { alpha: 1, color: 0xffffff, width: 2 },
+        radius: selected ? 6 : 5,
+        shouldRender,
+      }),
+      maskStyle: null,
+    };
+  }
+
+  return {
+    boxStyle: new BaseBoxStyle({
+      cornerRadius: 1,
+      fill: (detection) => ({
+        alpha: selected ? 0.18 : 0.12,
+        color: getTrackStyle(detection).fill,
+      }),
+      shouldRender,
+      stroke: (detection) => ({
+        alpha: 1,
+        color: getTrackStyle(detection).stroke,
+        width: selected ? 5 : 4,
+      }),
+    }),
+    keypointStyle: null,
+    maskStyle: null,
   };
 }
 

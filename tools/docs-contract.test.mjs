@@ -229,7 +229,24 @@ test("tracking post processing has a focused live playground", async () => {
   assert.match(playground, /Show raw detections/);
   assert.match(playground, /Tracked detections/);
   assert.match(playground, /RETRACK_DEBOUNCE_MS/);
+  assert.match(playground, /<span>Ordered SORT<\/span>/);
+  assert.match(
+    playground,
+    /setStatus\("tracked"\);\s*demo\.onTogglePlayback\(\)/,
+  );
   assert.doesNotMatch(playground, /Apply tracking/);
+
+  const styles = await readFile(
+    path.join(rootDir, "demo/src/styles.css"),
+    "utf8",
+  );
+  const chipRule = styles.match(
+    /\.docs-tracking-playground__badge\s*\{(?<rule>[^}]*)\}/,
+  )?.groups?.rule;
+
+  assert.match(chipRule ?? "", /left:\s*1rem/);
+  assert.match(chipRule ?? "", /top:\s*1rem/);
+  assert.doesNotMatch(chipRule ?? "", /transform:/);
 });
 
 test("every fixture-backed annotation renderer has a focused live playground", async () => {
