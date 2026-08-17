@@ -73,6 +73,22 @@ describe("createByteTrackTracker", () => {
     ]);
   });
 
+  it("preserves the final fixed-rate reassociation opportunity", () => {
+    const tracker = createByteTrackTracker({
+      lostTrackBuffer: 1,
+      minimumConsecutiveFrames: 2,
+    });
+    tracker.update([detection(0, 10, 0.9)], 0);
+    expect(tracker.update([detection(0, 11, 0.9)], 1).assignments).toEqual([
+      { detectionIndex: 0, trackerId: 0 },
+    ]);
+    expect(tracker.update([], 2).activeTrackCount).toBe(1);
+
+    expect(tracker.update([detection(0, 13, 0.4)], 3).assignments).toEqual([
+      { detectionIndex: 0, trackerId: 0 },
+    ]);
+  });
+
   it("resets track state and its zero-based ID allocator", () => {
     const tracker = createByteTrackTracker();
     tracker.update([detection(0, 10, 0.9)], 0);

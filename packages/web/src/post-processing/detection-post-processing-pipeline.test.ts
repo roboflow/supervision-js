@@ -149,6 +149,22 @@ describe("createDetectionPostProcessingPipeline", () => {
     pipeline.destroy();
   });
 
+  it("terminates a failed worker before falling back to the main thread", async () => {
+    const fakeWorker = createFailingTrackingWorker();
+    const pipeline = createDetectionPostProcessingPipeline({
+      mode: DetectionPostProcessingMode.Auto,
+      processors: [detectionPostProcessors.tracking()],
+      workerFactory: { createWorker: () => fakeWorker.worker },
+    });
+
+    const result = await pipeline.appendFrames([frame(0)]);
+
+    expect(result.processedFrameCount).toBe(1);
+    expect(pipeline.getDiagnostics().executionMode).toBe("mainThread");
+    expect(fakeWorker.terminateCount).toBe(1);
+    pipeline.destroy();
+  });
+
   it("bounds pending out-of-order frames", async () => {
     const pipeline = createDetectionPostProcessingPipeline({
       maxPendingFrames: 2,
@@ -243,3 +259,40 @@ describe("createDetectionPostProcessingPipeline", () => {
     pipeline.destroy();
   });
 });
+
+function createFailingTrackingWorker() {
+  const listeners: Array<(event: MessageEvent<unknown>) => void> = [];
+  let terminateCount = 0;
+  const worker = {
+    addEventListener(type: string, listener: (event: MessageEvent) => void) {
+      if (type === "message") {
+        listeners.push(listener as (event: MessageEvent<unknown>) => void);
+      }
+    },
+
+    postMessage(message: { readonly requestId: number }) {
+      setTimeout(() => {
+        for (const listener of listeners) {
+          listener({
+            data: {
+              message: "configure failed",
+              requestId: message.requestId,
+              type: "error",
+            },
+          } as MessageEvent<unknown>);
+        }
+      }, 0);
+    },
+
+    terminate() {
+      terminateCount += 1;
+    },
+  } as unknown as Worker;
+
+  return {
+    get terminateCount() {
+      return terminateCount;
+    },
+    worker,
+  };
+}

@@ -267,17 +267,19 @@ async function createTrackingExecution(
     return createMainThreadExecution(processor);
   }
 
+  let workerExecution: TrackingExecution | undefined;
   try {
     const workerFactory =
       options.workerFactory ??
       createDefaultDetectionPostProcessingWorkerFactory();
-    const execution = createWorkerExecution(
+    workerExecution = createWorkerExecution(
       workerFactory.createWorker(),
       processor,
     );
-    await execution.reset();
-    return execution;
+    await workerExecution.reset();
+    return workerExecution;
   } catch (error) {
+    workerExecution?.destroy();
     if (mode === DetectionPostProcessingMode.Worker) throw error;
     return createMainThreadExecution(processor);
   }

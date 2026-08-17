@@ -77,12 +77,6 @@ export function createByteTrackTracker(
       previousFrameIndex = frameIndex ?? previousFrameIndex;
       tracks.forEach((track) => track.predict(frameStep, frameRate));
 
-      // Match Python's budget-only pre-association prune. Immature tracks are
-      // retained here so they can still be confirmed by the current frame.
-      tracks = tracks.filter(
-        (track) => track.timeSinceUpdate <= maximumFramesWithoutUpdate,
-      );
-
       const highDetectionIndexes: number[] = [];
       const lowDetectionIndexes: number[] = [];
       detections.forEach((detection, index) => {
