@@ -42,10 +42,14 @@ export function createSortTracker(
   normalizeUnitInterval(trackActivationThreshold, "trackActivationThreshold");
   normalizeUnitInterval(minimumIouThreshold, "minimumIouThreshold");
 
+  const scaledLostTrackBuffer = (frameRate / 30) * lostTrackBuffer;
+  if (!Number.isFinite(scaledLostTrackBuffer)) {
+    throw new Error(
+      "Scaled lostTrackBuffer overflows: frameRate / 30 * lostTrackBuffer must be finite.",
+    );
+  }
   const maximumFramesWithoutUpdate =
-    lostTrackBuffer === 0
-      ? 0
-      : Math.max(1, Math.ceil((frameRate / 30) * lostTrackBuffer));
+    lostTrackBuffer === 0 ? 0 : Math.max(1, Math.ceil(scaledLostTrackBuffer));
   let tracks: KalmanBoxTrack[] = [];
   let nextTrackerId = 0;
   let previousFrameIndex: number | undefined;

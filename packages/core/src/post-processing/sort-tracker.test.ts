@@ -197,6 +197,12 @@ describe("createSortTracker", () => {
     expect(() => createSortTracker({ frameRate: 0 })).toThrow(
       "frameRate must be a finite positive value",
     );
+    expect(() =>
+      createSortTracker({
+        frameRate: Number.MAX_VALUE,
+        lostTrackBuffer: Number.MAX_SAFE_INTEGER,
+      }),
+    ).toThrow("Scaled lostTrackBuffer overflows");
     expect(() => createSortTracker({ minimumIouThreshold: 1.1 })).toThrow(
       "minimumIouThreshold must be between 0 and 1",
     );
