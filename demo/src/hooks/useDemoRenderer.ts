@@ -80,18 +80,21 @@ export interface DemoRendererState {
   readonly uploadClassNames: string;
   readonly uploadFileName: string | null;
   readonly uploadInferenceState: UploadInferenceState;
+  readonly getCurrentTime: () => number;
   readonly onCancelUploadInference: () => void;
-  readonly onSeek: (time: number) => void;
+  readonly onSeek: (time: number) => Promise<void>;
   readonly onStartUploadInference: () => void;
   readonly onStepFrame: (frameDelta: number) => void;
-  readonly onTogglePlayback: () => void;
+  readonly onTogglePlayback: () => Promise<void>;
   readonly onUploadFileChange: (file: File | null) => void;
   readonly onClearSelectedDetection: () => void;
+  readonly pausePlayback: () => void;
+  readonly playPlayback: () => Promise<void>;
   readonly setPresentationSettings: (
     settings: DemoPresentationSettings,
   ) => void;
   readonly refreshPresentation: () => void;
-  readonly refreshDetections: () => void;
+  readonly refreshDetections: () => Promise<void>;
   readonly setRenderQuality: (quality: DemoRenderQuality) => void;
   readonly setSampleFixtureId: (sampleName: string) => void;
   readonly setSourceMode: (mode: DemoSourceMode) => void;
@@ -424,7 +427,41 @@ export function useDemoRenderer(
     uploadInferenceState.status === "preparing" ||
     uploadInferenceState.status === "running";
 
-  const onTogglePlayback = useCallback(() => {
+  const getCurrentTime = useCallback(
+    () => rendererRef.current?.getState().currentTime ?? 0,
+    [],
+  );
+
+  const pausePlayback = useCallback(() => {
+    const renderer = rendererRef.current;
+    if (!renderer) return;
+    renderer.pause();
+    syncRendererState(renderer);
+  }, [syncRendererState]);
+
+  const playPlayback = useCallback(async () => {
+    const renderer = rendererRef.current;
+    if (!renderer) return;
+    const playbackState = renderer.getState().playbackState;
+    if (
+      playbackState === MediaRendererPlaybackState.Playing ||
+      playbackState === MediaRendererPlaybackState.Buffering
+    ) {
+      return;
+    }
+
+    try {
+      await renderer.play();
+    } catch (error: unknown) {
+      setErrorMessage(
+        getErrorMessage(error, "Unable to start media playback."),
+      );
+    } finally {
+      syncRendererState(renderer);
+    }
+  }, [syncRendererState]);
+
+  const onTogglePlayback = useCallback(async () => {
     const renderer = rendererRef.current;
 
     if (!renderer) {
@@ -437,24 +474,15 @@ export function useDemoRenderer(
       playbackState === MediaRendererPlaybackState.Playing ||
       playbackState === MediaRendererPlaybackState.Buffering
     ) {
-      renderer.pause();
-      syncRendererState(renderer);
+      pausePlayback();
       return;
     }
 
-    void renderer
-      .play()
-      .then(() => syncRendererState(renderer))
-      .catch((error: unknown) => {
-        setErrorMessage(
-          getErrorMessage(error, "Unable to toggle media playback."),
-        );
-        syncRendererState(renderer);
-      });
-  }, [syncRendererState]);
+    await playPlayback();
+  }, [pausePlayback, playPlayback]);
 
   const onSeek = useCallback(
-    (time: number) => {
+    async (time: number) => {
       const renderer = rendererRef.current;
 
       if (!renderer) {
@@ -465,19 +493,17 @@ export function useDemoRenderer(
       seekRunRef.current = seekRunId;
       setHoveredDetectionPick(null);
       setSelectedDetectionPick(null);
-      void renderer
-        .seek(time)
-        .then(() => {
-          if (seekRunRef.current === seekRunId) {
-            syncRendererState(renderer);
-          }
-        })
-        .catch((error: unknown) => {
-          if (seekRunRef.current === seekRunId) {
-            setErrorMessage(getErrorMessage(error, "Unable to seek media."));
-            syncRendererState(renderer);
-          }
-        });
+      try {
+        await renderer.seek(time);
+      } catch (error: unknown) {
+        if (seekRunRef.current === seekRunId) {
+          setErrorMessage(getErrorMessage(error, "Unable to seek media."));
+        }
+      } finally {
+        if (seekRunRef.current === seekRunId) {
+          syncRendererState(renderer);
+        }
+      }
     },
     [syncRendererState],
   );
@@ -565,10 +591,16 @@ export function useDemoRenderer(
     syncRendererState(renderer);
   }, [presentationTransform, syncRendererState]);
 
-  const refreshDetections = useCallback(() => {
+  const refreshDetections = useCallback(async () => {
     const session = sessionRef.current;
     if (!session) return;
-    void session.refresh().then(() => syncRendererState(session.renderer));
+    try {
+      await session.refresh();
+    } catch (error: unknown) {
+      setErrorMessage(getErrorMessage(error, "Unable to refresh detections."));
+    } finally {
+      syncRendererState(session.renderer);
+    }
   }, [syncRendererState]);
 
   const setRenderQualityLive = useCallback(
@@ -729,6 +761,7 @@ export function useDemoRenderer(
     duration,
     errorMessage,
     fixtureSummary,
+    getCurrentTime,
     hoveredDetectionPick,
     mediaState,
     onCancelUploadInference,
@@ -738,7 +771,9 @@ export function useDemoRenderer(
     onStepFrame,
     onTogglePlayback,
     onUploadFileChange,
+    pausePlayback,
     playbackState,
+    playPlayback,
     presentationSettings,
     refreshPresentation,
     refreshDetections,

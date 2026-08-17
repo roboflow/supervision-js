@@ -143,16 +143,13 @@ export function DocsTrackingPostProcessorPlayground() {
     [controller],
   );
 
-  useEffect(() => {
-    demo.refreshPresentation();
-  }, [demo.refreshPresentation, geometry]);
-
   const applyTracking = useCallback(
     (
       configuration: TrackingConfiguration = trackingConfigurationRef.current,
       delayMs = 0,
     ) => {
       const requestId = runRequestIdRef.current + 1;
+      const resumeTime = demo.getCurrentTime();
       runRequestIdRef.current = requestId;
       controller.cancel();
       if (retrackTimeoutRef.current !== undefined) {
@@ -160,16 +157,13 @@ export function DocsTrackingPostProcessorPlayground() {
         retrackTimeoutRef.current = undefined;
       }
 
+      demo.pausePlayback();
       showPresentation("tracked");
-      if (isPlaying && statusRef.current !== "running") {
-        demo.onTogglePlayback();
-      }
       statusRef.current = "running";
       setStatus("running");
       setErrorMessage(null);
       setProcessedChunks(0);
       setDiagnostics(emptyDiagnostics);
-      demo.onSeek(0);
 
       const run = async () => {
         try {
@@ -178,7 +172,6 @@ export function DocsTrackingPostProcessorPlayground() {
             onChunk(chunkIndex) {
               if (requestId !== runRequestIdRef.current) return;
               setProcessedChunks(chunkIndex + 1);
-              demo.refreshDetections();
             },
             onDiagnostics(nextDiagnostics) {
               if (requestId === runRequestIdRef.current) {
@@ -187,14 +180,13 @@ export function DocsTrackingPostProcessorPlayground() {
             },
           });
           if (requestId !== runRequestIdRef.current) return;
-          demo.refreshDetections();
-          // Python SORT intentionally leaves the first observations unconfirmed.
-          // Land on the first likely confirmed frame so the completed playground
-          // does not look empty even though tracking succeeded.
-          demo.onSeek((configuration.minimumConsecutiveFrames + 1) / 30);
+          await demo.refreshDetections();
+          if (requestId !== runRequestIdRef.current) return;
+          await demo.onSeek(resumeTime);
+          if (requestId !== runRequestIdRef.current) return;
           statusRef.current = "tracked";
           setStatus("tracked");
-          demo.onTogglePlayback();
+          await demo.playPlayback();
         } catch (error) {
           if (requestId !== runRequestIdRef.current) return;
           showPresentation("tracked");
@@ -208,16 +200,23 @@ export function DocsTrackingPostProcessorPlayground() {
         }
       };
 
-      if (delayMs > 0) {
-        retrackTimeoutRef.current = window.setTimeout(() => {
-          retrackTimeoutRef.current = undefined;
-          void run();
-        }, delayMs);
-      } else {
+      const prepare = () => {
+        if (requestId !== runRequestIdRef.current) return;
+
+        if (delayMs > 0) {
+          retrackTimeoutRef.current = window.setTimeout(() => {
+            retrackTimeoutRef.current = undefined;
+            void run();
+          }, delayMs);
+          return;
+        }
+
         void run();
-      }
+      };
+
+      prepare();
     },
-    [controller, demo, isPlaying, showPresentation],
+    [controller, demo, showPresentation],
   );
 
   const updateTrackingConfiguration = useCallback(
@@ -229,23 +228,22 @@ export function DocsTrackingPostProcessorPlayground() {
       trackingConfigurationRef.current = nextConfiguration;
       setTrackingConfiguration(nextConfiguration);
 
-      if (change.geometry !== undefined) {
-        demo.refreshPresentation();
-        demo.refreshDetections();
-      }
-
       if (
         presentationModeRef.current === "tracked" ||
         statusRef.current === "running"
       ) {
         applyTracking(nextConfiguration, RETRACK_DEBOUNCE_MS);
+      } else if (change.geometry !== undefined) {
+        demo.refreshPresentation();
       }
     },
     [applyTracking, demo],
   );
 
   const showRaw = useCallback(() => {
-    runRequestIdRef.current += 1;
+    const resumeTime = demo.getCurrentTime();
+    const requestId = runRequestIdRef.current + 1;
+    runRequestIdRef.current = requestId;
     if (retrackTimeoutRef.current !== undefined) {
       window.clearTimeout(retrackTimeoutRef.current);
       retrackTimeoutRef.current = undefined;
@@ -257,9 +255,18 @@ export function DocsTrackingPostProcessorPlayground() {
     setErrorMessage(null);
     setProcessedChunks(0);
     setDiagnostics(emptyDiagnostics);
-    demo.refreshDetections();
-    demo.onSeek(0);
-  }, [controller, demo, showPresentation]);
+    void (async () => {
+      const shouldResume = isPlaying;
+      demo.pausePlayback();
+      await demo.refreshDetections();
+      if (requestId !== runRequestIdRef.current) return;
+      await demo.onSeek(resumeTime);
+      if (requestId !== runRequestIdRef.current) return;
+      if (shouldResume) {
+        await demo.playPlayback();
+      }
+    })();
+  }, [controller, demo, isPlaying, showPresentation]);
 
   return (
     <main

@@ -230,9 +230,12 @@ test("tracking post processing has a focused live playground", async () => {
   assert.match(playground, /Tracked detections/);
   assert.match(playground, /RETRACK_DEBOUNCE_MS/);
   assert.match(playground, /<span>Ordered SORT<\/span>/);
+  assert.match(playground, /const resumeTime = demo\.getCurrentTime\(\)/);
+  assert.match(playground, /demo\.pausePlayback\(\)/);
+  assert.match(playground, /await demo\.onSeek\(resumeTime\)/);
   assert.match(
     playground,
-    /setStatus\("tracked"\);\s*demo\.onTogglePlayback\(\)/,
+    /setStatus\("tracked"\);\s*await demo\.playPlayback\(\)/,
   );
   assert.doesNotMatch(playground, /Apply tracking/);
 
