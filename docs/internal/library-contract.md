@@ -116,12 +116,13 @@ The package should preserve this pipeline:
 This keeps memory proportional to configured window size rather than media
 duration.
 
-Stateful semantic post-processing sits between a raw cold source and a
-processed cold source. It consumes complete frame identities in causal order,
-even when inference arrives out of order, and must not be implemented inside
-range-loading or renderer callbacks. Browser workers receive only lightweight
-association projections; original masks and geometry remain in semantic cold
-storage.
+Stateful semantic post-processing consumes complete frame identities in causal
+order, even when inference arrives out of order, and must not be implemented
+inside range-loading or renderer callbacks. It updates derived detection fields
+in place by default so the host may persist only processed truth. Hosts that
+need audit or comparison views may instead retain separate raw and processed
+cold sources. Browser workers receive only lightweight association projections;
+masks and geometry remain in semantic cold storage.
 
 ## Renderer Boundary
 

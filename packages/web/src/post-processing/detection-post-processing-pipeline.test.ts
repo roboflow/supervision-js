@@ -59,6 +59,40 @@ describe("createDetectionPostProcessingPipeline", () => {
     pipeline.destroy();
   });
 
+  it("mutates derived tracking identity on input detections by default", async () => {
+    const inputFrame = frame(0);
+    const inputDetection = inputFrame.detections[0]!;
+    const pipeline = createDetectionPostProcessingPipeline({
+      mode: DetectionPostProcessingMode.MainThread,
+      processors: [detectionPostProcessors.tracking()],
+    });
+
+    const result = await pipeline.appendFrames([inputFrame]);
+
+    expect(result.processedFrames[0]).toBe(inputFrame);
+    expect(result.processedFrames[0]!.detections[0]).toBe(inputDetection);
+    expect(inputDetection.trackerId).toBe(1);
+    pipeline.destroy();
+  });
+
+  it("can preserve raw detections for comparison workflows", async () => {
+    const inputFrame = frame(0);
+    const inputDetection = inputFrame.detections[0]!;
+    const pipeline = createDetectionPostProcessingPipeline({
+      mode: DetectionPostProcessingMode.MainThread,
+      mutateInput: false,
+      processors: [detectionPostProcessors.tracking()],
+    });
+
+    const result = await pipeline.appendFrames([inputFrame]);
+
+    expect(result.processedFrames[0]).not.toBe(inputFrame);
+    expect(result.processedFrames[0]!.detections[0]).not.toBe(inputDetection);
+    expect(result.processedFrames[0]!.detections[0]!.trackerId).toBe(1);
+    expect(inputDetection.trackerId).toBeUndefined();
+    pipeline.destroy();
+  });
+
   it("bounds pending out-of-order frames", async () => {
     const pipeline = createDetectionPostProcessingPipeline({
       maxPendingFrames: 2,

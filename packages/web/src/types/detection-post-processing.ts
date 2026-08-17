@@ -35,6 +35,11 @@ export interface DetectionPostProcessingAppendResult {
 export interface DetectionPostProcessingPipelineOptions {
   /** Serializable built-in processors, applied in declaration order. */
   readonly processors: readonly DetectionPostProcessor[];
+  /**
+   * Update derived detection fields in place. Defaults to `true`.
+   * Set to `false` for immutable inputs or an untouched raw view.
+   */
+  readonly mutateInput?: boolean;
   /** First causal frame index expected from the inference stream. */
   readonly startFrameIndex?: number;
   /** Hard bound on out-of-order frames retained while a gap is open. */

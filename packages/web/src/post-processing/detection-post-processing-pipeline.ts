@@ -193,7 +193,11 @@ export function createDetectionPostProcessingPipeline(
           processor.geometry,
         );
         const result = await execution.process(projections, nextFrameIndex);
-        const processedFrame = attachTrackerIds(frame, result.assignments);
+        const processedFrame = attachTrackerIds(
+          frame,
+          result.assignments,
+          options.mutateInput ?? true,
+        );
 
         if (destroyed) break;
         await options.output?.appendFrames([processedFrame]);
@@ -352,6 +356,7 @@ function createWorkerExecution(
 function attachTrackerIds(
   frame: DetectionFrame,
   assignments: readonly TrackingAssignment[],
+  mutateInput: boolean,
 ): DetectionFrame {
   const trackerIds = new Map(
     assignments.map(({ detectionIndex, trackerId }) => [
@@ -359,6 +364,19 @@ function attachTrackerIds(
       trackerId,
     ]),
   );
+
+  if (mutateInput) {
+    for (const [detectionIndex, detection] of frame.detections.entries()) {
+      const trackerId = trackerIds.get(detectionIndex);
+      if (trackerId === undefined) {
+        Reflect.deleteProperty(detection, "trackerId");
+      } else {
+        detection.trackerId = trackerId;
+      }
+    }
+    return frame;
+  }
+
   return {
     ...frame,
     detections: frame.detections.map((detection, detectionIndex) => {

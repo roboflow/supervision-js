@@ -130,6 +130,7 @@ export function createDocsTrackingController(): DocsTrackingController {
           ...manifest.chunks.map((chunk) => chunk.frameCount + 4),
         ),
         mode: DetectionPostProcessingMode.Worker,
+        mutateInput: false,
         onDiagnostics: options.onDiagnostics,
         output,
         processors: [
@@ -276,6 +277,7 @@ export function createDocsTrackingSnippet(
   maxAge: number,
 ) {
   return `const pipeline = createDetectionPostProcessingPipeline({
+  mutateInput: false, // Keep raw frames for this comparison playground.
   processors: [
     detectionPostProcessors.tracking({
       algorithm: "sort",

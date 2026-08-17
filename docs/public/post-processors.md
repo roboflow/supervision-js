@@ -12,9 +12,9 @@ on which frames the viewer happens to play.
 
 The browser pipeline accepts frames from streaming inference in any arrival
 order, holds a bounded set while a frame-index gap is open, and applies
-stateful processors serially from the causal frontier. Processed frames can be
-written directly to a cold `WritableDetectionFrameSource`; the existing media
-session then loads only its configured hot window.
+stateful processors serially from the causal frontier. It updates derived
+detection fields in place by default, so a cold `WritableDetectionFrameSource`
+can contain only the post-processed truth consumed by the media session.
 
 The first built-in post processor is [Tracking](./post-processors/tracking.md).
 It runs SORT in a dedicated browser worker and associates boxes, masks, or
@@ -25,8 +25,11 @@ boundary.
 ## Pipeline shape
 
 ```text
-SSE inference -> raw cold source -> ordered post processor -> processed cold source -> hot render window
+SSE inference -> ordered post processor -> tracked cold source -> hot render window
 ```
+
+Hosts that need comparison or audit views may opt out of mutation and keep
+separate raw and processed sources.
 
 Stateful processors such as tracking are intentionally serial for one media
 sequence. Different videos or cameras may use independent pipelines. A future

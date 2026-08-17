@@ -5,9 +5,10 @@ summary: Apply ordered SORT tracking to boxes, masks, or keypoints in a browser 
 
 # Tracking
 
-The tracking post processor assigns a numeric `trackerId` while preserving the
-original `Detection.id`. `id` remains the annotation and picking identity;
-`trackerId` is temporal identity produced by the selected tracker.
+The tracking post processor assigns a numeric `trackerId` directly to each
+input `Detection` by default. It preserves `Detection.id`: `id` remains the
+annotation and picking identity, while `trackerId` is temporal identity
+produced by the selected tracker.
 
 <div class="supervision-layer-playground supervision-post-processor-playground">
   <iframe
@@ -21,8 +22,9 @@ The playground uses the frozen basketball fixture. Click **Apply tracking** to
 stream each one-second chunk in deliberately shuffled frame order. The
 pipeline waits for the next known `frameIndex`, sends only detection index,
 class, confidence, and an association rectangle to its worker, and appends the
-enriched semantic frame to browser cold storage. Switch among boxes, masks,
-and keypoints to change both association input and the visible tracked
+enriched semantic frame to browser cold storage. This comparison playground
+sets `mutateInput: false` so it can retain a raw view. Switch among boxes,
+masks, and keypoints to change both association input and the visible tracked
 annotation.
 
 ## Consume out-of-order inference
@@ -38,7 +40,7 @@ import {
 const pipeline = createDetectionPostProcessingPipeline({
   mode: DetectionPostProcessingMode.Worker,
   maxPendingFrames: 90,
-  output: trackedSource,
+  output: detectionsSource,
   processors: [
     detectionPostProcessors.tracking({
       algorithm: "sort",
@@ -57,6 +59,13 @@ for await (const detectionFrame of inferenceStream) {
 }
 ```
 
+`appendFrames()` mutates the derived `trackerId` field on the supplied
+detections and returns the same frame references by default. Point `output` at
+the application's only detection source when raw detections do not need to be
+retained. Set `mutateInput: false` to produce cloned tracked frames when a host
+uses immutable detections or explicitly needs both raw and tracked views, as
+the playground does.
+
 Await `appendFrames()` or otherwise apply upstream backpressure. If a missing
 frame lets the pending set reach `maxPendingFrames`, the pipeline rejects the
 new append instead of retaining an unbounded number of masks. Reset the
@@ -69,8 +78,9 @@ pipeline before replaying or revising frames behind its processed frontier.
   extent when available and decodes RLE bounds only when necessary.
 - `Keypoints` tracks detections that have keypoints using their point bounds.
 
-The geometry choice affects association only. The processed frame retains the
-complete original detection payload.
+The geometry choice affects association only. Tracking updates `trackerId`; it
+does not replace observed boxes, masks, keypoints, or metadata with Kalman
+predictions.
 
 ## Worker behavior
 

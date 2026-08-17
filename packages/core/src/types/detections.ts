@@ -129,8 +129,9 @@ export interface Detection {
   /**
    * Optional temporal identity assigned by a tracking post-processor.
    * This is separate from `id`, which remains the annotation/picking identity.
+   * Post-processors may update this derived field in place.
    */
-  readonly trackerId?: number;
+  trackerId?: number;
   /**
    * Optional provenance for detections copied from a composed source.
    *
