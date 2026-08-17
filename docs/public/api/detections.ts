@@ -17,6 +17,7 @@ export {
   DetectionFrameRetentionMode,
   DetectionFrameSelectionMode,
   DetectionMaskEncoding,
+  DetectionTrackerState,
   KeypointVisibility,
   type BufferedDetectionTimeline,
   type ColdDetectionFrameStore,

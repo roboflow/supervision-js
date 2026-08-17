@@ -1,6 +1,7 @@
 import type {
   DetectionFrame,
   DetectionPostProcessor,
+  TrackingPrediction,
   WritableDetectionFrameSource,
 } from "supervision-js-core";
 
@@ -23,6 +24,7 @@ export interface DetectionPostProcessingDiagnostics {
   readonly nextFrameIndex: number;
   readonly pendingFrameCount: number;
   readonly processedFrameCount: number;
+  readonly predictedDetectionCount: number;
   readonly trackedDetectionCount: number;
 }
 
@@ -36,7 +38,8 @@ export interface DetectionPostProcessingPipelineOptions {
   /** Serializable built-in processors, applied in declaration order. */
   readonly processors: readonly DetectionPostProcessor[];
   /**
-   * Update derived detection fields in place. Defaults to `true`.
+   * Update derived fields and append synthetic detections in place. Defaults to
+   * `true`.
    * Set to `false` for immutable inputs or an untouched raw view.
    */
   readonly mutateInput?: boolean;
@@ -71,4 +74,5 @@ export interface TrackingExecutionResult {
   }[];
   readonly confirmedTrackCount: number;
   readonly durationMs: number;
+  readonly predictions: readonly TrackingPrediction[];
 }

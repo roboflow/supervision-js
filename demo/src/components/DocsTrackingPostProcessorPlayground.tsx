@@ -21,6 +21,7 @@ const emptyDiagnostics: DetectionPostProcessingDiagnostics = {
   nextFrameIndex: 0,
   pendingFrameCount: 0,
   processedFrameCount: 0,
+  predictedDetectionCount: 0,
   trackedDetectionCount: 0,
 };
 
@@ -231,6 +232,14 @@ export function DocsTrackingPostProcessorPlayground() {
             <dd>{diagnostics.activeTrackCount}</dd>
           </div>
           <div>
+            <dt>Confirmed</dt>
+            <dd>{diagnostics.confirmedTrackCount}</dd>
+          </div>
+          <div>
+            <dt>Predicted</dt>
+            <dd>{diagnostics.predictedDetectionCount}</dd>
+          </div>
+          <div>
             <dt>Worker time</dt>
             <dd>
               {diagnostics.lastFrameDurationMs === null
@@ -307,7 +316,7 @@ function TrackingRange({
 }
 
 function geometryLabel(geometry: TrackingGeometry) {
-  if (geometry === TrackingGeometry.Mask) return "Mask identities";
-  if (geometry === TrackingGeometry.Keypoints) return "Pose identities";
-  return "Box identities";
+  if (geometry === TrackingGeometry.Mask) return "Masks + gap boxes";
+  if (geometry === TrackingGeometry.Keypoints) return "Poses + gap boxes";
+  return "Boxes + gap predictions";
 }

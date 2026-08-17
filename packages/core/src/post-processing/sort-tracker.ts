@@ -21,28 +21,25 @@ export function createSortTracker(
   const minHits = normalizePositiveInteger(options.minHits ?? 3, "minHits");
   const iouThreshold = options.iouThreshold ?? 0.3;
   const matchByClass = options.matchByClass ?? true;
+  const emitPredictions = options.emitPredictions ?? true;
 
   if (!Number.isFinite(iouThreshold) || iouThreshold < 0 || iouThreshold > 1) {
     throw new Error("iouThreshold must be between 0 and 1.");
   }
   let tracks: KalmanBoxTrack[] = [];
   let nextTrackerId = 1;
-  let frameCount = 0;
   let previousFrameIndex: number | undefined;
 
   return {
     reset() {
       tracks = [];
       nextTrackerId = 1;
-      frameCount = 0;
       previousFrameIndex = undefined;
     },
 
     update(detections, frameIndex) {
       const deltaFrames = resolveDeltaFrames(frameIndex, previousFrameIndex);
       previousFrameIndex = frameIndex ?? previousFrameIndex;
-      frameCount += deltaFrames;
-
       const predicted = tracks.map((track) => track.predict(deltaFrames));
       const { matches, unmatchedDetections } = associateDetectionsToTracks(
         detections,
@@ -62,7 +59,7 @@ export function createSortTracker(
 
       for (const detectionIndex of unmatchedDetections) {
         const detection = detections[detectionIndex]!;
-        const track = new KalmanBoxTrack(nextTrackerId, detection);
+        const track = new KalmanBoxTrack(nextTrackerId, detection, minHits);
         nextTrackerId += 1;
         tracks.push(track);
         trackerIds.set(detection.detectionIndex, track.id);
@@ -70,7 +67,7 @@ export function createSortTracker(
 
       tracks = tracks.filter((track) => track.timeSinceUpdate <= maxAge);
       const confirmedTrackCount = tracks.filter(
-        (track) => track.hitStreak >= minHits || frameCount <= minHits,
+        (track) => track.isConfirmed,
       ).length;
 
       return {
@@ -82,6 +79,12 @@ export function createSortTracker(
             : [{ detectionIndex: detection.detectionIndex, trackerId }];
         }),
         confirmedTrackCount,
+        predictions: emitPredictions
+          ? tracks.flatMap((track) => {
+              const prediction = track.getPrediction();
+              return prediction ? [prediction] : [];
+            })
+          : [],
       } satisfies SortTrackerUpdate;
     },
   };
@@ -93,11 +96,15 @@ class KalmanBoxTrack {
   hitStreak = 1;
   timeSinceUpdate = 0;
   private className: string | undefined;
+  private confirmed: boolean;
+  private readonly minHits: number;
   private state: Matrix;
   private covariance: Matrix;
 
-  constructor(id: number, detection: TrackingProjection) {
+  constructor(id: number, detection: TrackingProjection, minHits: number) {
     this.id = id;
+    this.minHits = minHits;
+    this.confirmed = minHits <= 1;
     this.className = detection.className;
     this.state = [...rectToMeasurement(detection.rect), 0, 0, 0].map(
       (value) => [value],
@@ -107,6 +114,23 @@ class KalmanBoxTrack {
 
   get detectionClassName() {
     return this.className;
+  }
+
+  get isConfirmed() {
+    return this.confirmed;
+  }
+
+  getPrediction() {
+    if (!this.confirmed || this.timeSinceUpdate === 0) {
+      return undefined;
+    }
+
+    return {
+      ageFrames: this.timeSinceUpdate,
+      ...(this.className === undefined ? {} : { className: this.className }),
+      rect: stateToRect(this.state),
+      trackerId: this.id,
+    };
   }
 
   predict(deltaFrames: number): Rect {
@@ -170,6 +194,7 @@ class KalmanBoxTrack {
     this.timeSinceUpdate = 0;
     this.hits += 1;
     this.hitStreak += 1;
+    this.confirmed ||= this.hitStreak >= this.minHits;
   }
 }
 

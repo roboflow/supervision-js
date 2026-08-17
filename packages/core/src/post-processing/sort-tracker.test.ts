@@ -47,6 +47,47 @@ describe("createSortTracker", () => {
     ]);
   });
 
+  it("emits motion predictions for confirmed tracks across gaps", () => {
+    const tracker = createSortTracker({ minHits: 2 });
+    tracker.update([detection(0, 10)], 0);
+    tracker.update([detection(0, 12)], 1);
+
+    const gap = tracker.update([], 2);
+
+    expect(gap.assignments).toEqual([]);
+    expect(gap.predictions).toHaveLength(1);
+    expect(gap.predictions[0]).toMatchObject({
+      ageFrames: 1,
+      className: "person",
+      trackerId: 1,
+    });
+    expect(gap.predictions[0]!.rect.x).toBeGreaterThan(12);
+  });
+
+  it("does not predict unconfirmed tracks and stops after maxAge", () => {
+    const unconfirmed = createSortTracker({ minHits: 2 });
+    unconfirmed.update([detection(0, 10)], 0);
+    expect(unconfirmed.update([], 1).predictions).toEqual([]);
+
+    const expiring = createSortTracker({ maxAge: 1, minHits: 1 });
+    expiring.update([detection(0, 10)], 0);
+    expect(expiring.update([], 1).predictions).toHaveLength(1);
+    expect(expiring.update([], 2).predictions).toEqual([]);
+  });
+
+  it("can disable prediction emission without changing track survival", () => {
+    const tracker = createSortTracker({
+      emitPredictions: false,
+      minHits: 1,
+    });
+    tracker.update([detection(0, 10)], 0);
+
+    const gap = tracker.update([], 1);
+
+    expect(gap.activeTrackCount).toBe(1);
+    expect(gap.predictions).toEqual([]);
+  });
+
   it("rejects invalid direct tracker options", () => {
     expect(() => createSortTracker({ maxAge: 0 })).toThrow(
       "maxAge must be a positive integer",

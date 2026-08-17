@@ -73,6 +73,7 @@ describe("package entrypoint", () => {
       "DetectionPickTarget",
       "DetectionPostProcessingMode",
       "DetectionTimelineOrigin",
+      "DetectionTrackerState",
       "FocusTargetMode",
       "KeypointMarkerShape",
       "KeypointVisibility",

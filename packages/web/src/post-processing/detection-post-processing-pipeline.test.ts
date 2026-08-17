@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  DetectionTrackerState,
   TrackingGeometry,
   createMemoryColdDetectionFrameStore,
   createWritableDetectionFrameSource,
@@ -90,6 +91,88 @@ describe("createDetectionPostProcessingPipeline", () => {
     expect(result.processedFrames[0]!.detections[0]).not.toBe(inputDetection);
     expect(result.processedFrames[0]!.detections[0]!.trackerId).toBe(1);
     expect(inputDetection.trackerId).toBeUndefined();
+    pipeline.destroy();
+  });
+
+  it("mutates confirmed track predictions into gap frames by default", async () => {
+    const gapFrame: DetectionFrame = {
+      detections: [],
+      frameIndex: 2,
+      mediaTime: 2 / 30,
+    };
+    const pipeline = createDetectionPostProcessingPipeline({
+      mode: DetectionPostProcessingMode.MainThread,
+      processors: [
+        detectionPostProcessors.tracking({
+          geometry: TrackingGeometry.Mask,
+          minHits: 2,
+        }),
+      ],
+    });
+
+    await pipeline.appendFrames([frame(0), frame(1)]);
+    const result = await pipeline.appendFrames([gapFrame]);
+
+    expect(result.processedFrames[0]).toBe(gapFrame);
+    expect(gapFrame.detections).toHaveLength(1);
+    expect(gapFrame.detections[0]).toMatchObject({
+      className: "person",
+      id: "tracking-prediction:1",
+      trackerAge: 1,
+      trackerId: 1,
+      trackerState: DetectionTrackerState.Predicted,
+    });
+    expect(gapFrame.detections[0]!.rect).toBeDefined();
+    expect(gapFrame.detections[0]!.mask).toBeUndefined();
+    expect(pipeline.getDiagnostics().predictedDetectionCount).toBe(1);
+    pipeline.destroy();
+  });
+
+  it("keeps raw gap frames untouched in copy mode", async () => {
+    const gapFrame: DetectionFrame = {
+      detections: [],
+      frameIndex: 2,
+      mediaTime: 2 / 30,
+    };
+    const pipeline = createDetectionPostProcessingPipeline({
+      mode: DetectionPostProcessingMode.MainThread,
+      mutateInput: false,
+      processors: [detectionPostProcessors.tracking({ minHits: 2 })],
+    });
+
+    await pipeline.appendFrames([frame(0), frame(1)]);
+    const result = await pipeline.appendFrames([gapFrame]);
+
+    expect(gapFrame.detections).toEqual([]);
+    expect(result.processedFrames[0]!.detections[0]).toMatchObject({
+      trackerAge: 1,
+      trackerId: 1,
+      trackerState: DetectionTrackerState.Predicted,
+    });
+    pipeline.destroy();
+  });
+
+  it("replaces materialized predictions instead of duplicating them on replay", async () => {
+    const frames = [
+      frame(0),
+      frame(1),
+      { detections: [], frameIndex: 2, mediaTime: 2 / 30 },
+    ] satisfies DetectionFrame[];
+    const pipeline = createDetectionPostProcessingPipeline({
+      mode: DetectionPostProcessingMode.MainThread,
+      processors: [detectionPostProcessors.tracking({ minHits: 2 })],
+    });
+
+    await pipeline.appendFrames(frames);
+    expect(frames[2]!.detections).toHaveLength(1);
+
+    await pipeline.reset();
+    await pipeline.appendFrames(frames);
+
+    expect(frames[2]!.detections).toHaveLength(1);
+    expect(frames[2]!.detections[0]!.trackerState).toBe(
+      DetectionTrackerState.Predicted,
+    );
     pipeline.destroy();
   });
 

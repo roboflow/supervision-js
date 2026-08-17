@@ -19,6 +19,8 @@ export interface SortTrackingOptions {
   readonly iouThreshold?: number;
   /** Prevent detections with different class names from being associated. */
   readonly matchByClass?: boolean;
+  /** Emit predicted detections while confirmed tracks cross observation gaps. */
+  readonly emitPredictions?: boolean;
 }
 
 export interface TrackingDetectionPostProcessor {
@@ -40,8 +42,18 @@ export interface TrackingAssignment {
   readonly trackerId: number;
 }
 
+/** A confirmed track predicted into a frame with no matching observation. */
+export interface TrackingPrediction {
+  readonly trackerId: number;
+  readonly className?: string;
+  /** Frames since this track was last observed. */
+  readonly ageFrames: number;
+  readonly rect: Rect;
+}
+
 export interface SortTrackerUpdate {
   readonly assignments: readonly TrackingAssignment[];
+  readonly predictions: readonly TrackingPrediction[];
   readonly activeTrackCount: number;
   readonly confirmedTrackCount: number;
 }

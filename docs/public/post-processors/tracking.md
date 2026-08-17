@@ -5,10 +5,16 @@ summary: Apply ordered SORT tracking to boxes, masks, or keypoints in a browser 
 
 # Tracking
 
-The tracking post processor assigns a numeric `trackerId` directly to each
-input `Detection` by default. It preserves `Detection.id`: `id` remains the
-annotation and picking identity, while `trackerId` is temporal identity
-produced by the selected tracker.
+The tracking post processor assigns a numeric `trackerId` to each observed
+`Detection` and, by default, emits synthetic detections while confirmed tracks
+cross short observation gaps. It preserves the `id` of observed detections:
+`id` remains annotation and picking identity, while `trackerId` is temporal
+identity produced by the selected tracker.
+
+Every tracked detection exposes explicit provenance. `trackerState` is
+`observed` or `predicted`, and `trackerAge` is zero for observations or the
+number of frames since the last observation for predictions. Synthetic
+detections use a stable `tracking-prediction:<trackerId>` ID.
 
 <div class="supervision-layer-playground supervision-post-processor-playground">
   <iframe
@@ -25,7 +31,7 @@ class, confidence, and an association rectangle to its worker, and appends the
 enriched semantic frame to browser cold storage. This comparison playground
 sets `mutateInput: false` so it can retain a raw view. Switch among boxes,
 masks, and keypoints to change both association input and the visible tracked
-annotation.
+annotation. Dashed boxes show motion-model predictions across detector gaps.
 
 ## Consume out-of-order inference
 
@@ -44,6 +50,7 @@ const pipeline = createDetectionPostProcessingPipeline({
   processors: [
     detectionPostProcessors.tracking({
       algorithm: "sort",
+      emitPredictions: true,
       geometry: TrackingGeometry.Mask,
       iouThreshold: 0.3,
       maxAge: 30,
@@ -59,12 +66,13 @@ for await (const detectionFrame of inferenceStream) {
 }
 ```
 
-`appendFrames()` mutates the derived `trackerId` field on the supplied
-detections and returns the same frame references by default. Point `output` at
-the application's only detection source when raw detections do not need to be
-retained. Set `mutateInput: false` to produce cloned tracked frames when a host
-uses immutable detections or explicitly needs both raw and tracked views, as
-the playground does.
+`appendFrames()` mutates the derived tracker fields on the supplied detections
+and returns the same frame references by default. Point `output` at the
+application's only detection source when raw detections do not need to be
+retained. Gap predictions are appended to the supplied frame's mutable
+`detections` array. Set `mutateInput: false` to produce cloned tracked frames
+when a host uses immutable detections or explicitly needs both raw and tracked
+views, as the playground does.
 
 Await `appendFrames()` or otherwise apply upstream backpressure. If a missing
 frame lets the pending set reach `maxPendingFrames`, the pipeline rejects the
@@ -78,9 +86,16 @@ pipeline before replaying or revising frames behind its processed frontier.
   extent when available and decodes RLE bounds only when necessary.
 - `Keypoints` tracks detections that have keypoints using their point bounds.
 
-The geometry choice affects association only. Tracking updates `trackerId`; it
-does not replace observed boxes, masks, keypoints, or metadata with Kalman
-predictions.
+The geometry choice affects association. Observed boxes, masks, keypoints, and
+metadata remain exact. When the detector misses a confirmed track, the
+post-processor emits its Kalman-predicted extent as a synthetic box. It does
+not pretend to know an unobserved mask bitmap or keypoint pose. Set
+`emitPredictions: false` when an application wants identity assignment without
+gap filling.
+
+Only tracks confirmed by `minHits` emit predictions, and they stop after
+`maxAge`. This avoids turning one-frame false positives into persistent
+synthetic objects.
 
 ## Worker behavior
 

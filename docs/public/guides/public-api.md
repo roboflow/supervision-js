@@ -49,6 +49,9 @@ Start here for normal application code:
 - `DetectionFrame`
 - `Detection`
 - `Detection.trackerId` for identity assigned by a tracking post-processor
+- `Detection.trackerState` and `Detection.trackerAge` for observed versus
+  motion-predicted tracking provenance
+- `DetectionTrackerState`
 - `Rect`
 - `DetectionMask`
 - `PolygonGeometry`
@@ -150,8 +153,8 @@ not the first thing most users should reach for:
   controls;
 - render-preparation diagnostics and worker options.
 - ordered detection post-processing, bounded out-of-order buffering, tracking
-  diagnostics, in-place derived detection updates by default, optional raw-copy
-  preservation, and worker options.
+  diagnostics, in-place derived detection updates and synthetic gap filling by
+  default, optional raw-copy preservation, and worker options.
 
 `RenderPreparationMode.Auto` uses the package's embedded Blob worker when the
 browser supports it and falls back to main-thread preparation after a worker

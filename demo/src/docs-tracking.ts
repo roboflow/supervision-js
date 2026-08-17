@@ -5,6 +5,7 @@ import {
   BaseMaskStyle,
   DEFAULT_DETECTION_COLOR_SEQUENCE,
   DetectionPostProcessingMode,
+  DetectionTrackerState,
   MaskRenderMode,
   TrackingGeometry,
   annotationRenderers,
@@ -190,22 +191,36 @@ export function createDocsTrackingController(): DocsTrackingController {
 export function createDocsTrackingPresentation(
   geometry: TrackingGeometry,
 ): MediaRendererPresentation {
-  const shouldRender = (detection: Detection) =>
-    detection.trackerId !== undefined && hasGeometry(detection, geometry);
-  const boxStyle =
-    geometry === TrackingGeometry.Box
-      ? new BaseBoxStyle({
-          fill: (detection) => ({
-            alpha: 0.12,
-            color: getTrackStyle(detection).fill,
-          }),
-          shouldRender,
-          stroke: (detection) => ({
-            color: getTrackStyle(detection).stroke,
-            width: 3,
-          }),
-        })
-      : null;
+  const shouldRenderObserved = (detection: Detection) =>
+    detection.trackerId !== undefined &&
+    detection.trackerState !== DetectionTrackerState.Predicted &&
+    hasGeometry(detection, geometry);
+  const shouldRenderLabel = (detection: Detection) =>
+    detection.trackerId !== undefined &&
+    (detection.trackerState === DetectionTrackerState.Predicted ||
+      hasGeometry(detection, geometry));
+  const boxStyle = new BaseBoxStyle({
+    fill: (detection) => ({
+      alpha:
+        detection.trackerState === DetectionTrackerState.Predicted
+          ? 0.04
+          : 0.12,
+      color: getTrackStyle(detection).fill,
+    }),
+    shouldRender: (detection) =>
+      detection.trackerState === DetectionTrackerState.Predicted ||
+      (geometry === TrackingGeometry.Box && shouldRenderObserved(detection)),
+    stroke: (detection) => ({
+      alpha:
+        detection.trackerState === DetectionTrackerState.Predicted ? 0.72 : 1,
+      color: getTrackStyle(detection).stroke,
+      dash:
+        detection.trackerState === DetectionTrackerState.Predicted
+          ? [8, 6]
+          : undefined,
+      width: detection.trackerState === DetectionTrackerState.Predicted ? 2 : 3,
+    }),
+  });
   const maskStyle =
     geometry === TrackingGeometry.Mask
       ? new BaseMaskStyle({
@@ -213,7 +228,7 @@ export function createDocsTrackingPresentation(
           fillAlpha: 0.62,
           mode: MaskRenderMode.FillAndStroke,
           opacity: 0.9,
-          shouldRender,
+          shouldRender: shouldRenderObserved,
           stroke: (detection) => ({
             color: getTrackStyle(detection).stroke,
             width: 2,
@@ -232,7 +247,7 @@ export function createDocsTrackingPresentation(
             color: getTrackStyle(detection).fill,
           }),
           radius: 4.5,
-          shouldRender,
+          shouldRender: shouldRenderObserved,
         })
       : null;
   const labelStyle = new BaseLabelStyle({
@@ -240,11 +255,15 @@ export function createDocsTrackingPresentation(
       alpha: 0.92,
       color: getTrackStyle(detection).labelBackground,
     }),
-    shouldRender,
+    shouldRender: shouldRenderLabel,
     text: (detection) =>
       detection.trackerId === undefined
         ? undefined
-        : `${detection.className ?? "object"} #${detection.trackerId}`,
+        : `${detection.className ?? "object"} #${detection.trackerId}${
+            detection.trackerState === DetectionTrackerState.Predicted
+              ? ` · predicted +${detection.trackerAge ?? 1}f`
+              : ""
+          }`,
     textStyle: (detection) => ({
       color: getTrackStyle(detection).labelText,
       fontSize: 13,
@@ -262,7 +281,7 @@ export function createDocsTrackingPresentation(
     polylineStyle: null,
     renderers: [
       ...(maskStyle ? [annotationRenderers.mask({ style: maskStyle })] : []),
-      ...(boxStyle ? [annotationRenderers.box({ style: boxStyle })] : []),
+      annotationRenderers.box({ style: boxStyle }),
       ...(keypointStyle
         ? [annotationRenderers.keypoints({ style: keypointStyle })]
         : []),
@@ -284,6 +303,7 @@ export function createDocsTrackingSnippet(
       geometry: TrackingGeometry.${geometryName(geometry)},
       iouThreshold: ${iouThreshold.toFixed(2)},
       maxAge: ${maxAge},
+      emitPredictions: true,
     }),
   ],
   output: trackedSource,
