@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createSortTracker } from "./sort-tracker";
+import { createSortTracker } from "./index";
 
 const detection = (
   detectionIndex: number,

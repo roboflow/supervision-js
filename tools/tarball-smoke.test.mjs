@@ -226,6 +226,31 @@ test("tarball bundles the private core package only", () => {
     ),
     "Expected the bundled core runtime in the tarball",
   );
+  const corePackageDir = path.join(
+    extractedDir,
+    "node_modules/supervision-js-core",
+  );
+  const coreManifest = JSON.parse(
+    readFileSync(path.join(corePackageDir, "package.json"), "utf8"),
+  );
+  const coreRuntime = readFileSync(
+    path.join(corePackageDir, "dist/index.js"),
+    "utf8",
+  );
+
+  assert.ok(
+    !("supervision-js-trackers" in (coreManifest.dependencies ?? {})),
+    "The internal tracker workspace must not become a runtime dependency",
+  );
+  assert.ok(
+    !("supervision-js-trackers" in (coreManifest.devDependencies ?? {})),
+    "The packaged core manifest must not expose monorepo-only build dependencies",
+  );
+  assert.doesNotMatch(
+    coreRuntime,
+    /supervision-js-trackers/,
+    "Tracker engines must be bundled into the private core runtime",
+  );
 
   // Public dependencies stay ordinary npm dependencies.
   for (const dependency of ["pixi.js", "mediabunny"]) {
@@ -269,6 +294,10 @@ test("clean consumer installs the tarball without the repository", () => {
   assert.ok(
     !JSON.stringify(lockfile).includes("packages/core"),
     "The consumer lockfile must not reference the private core workspace",
+  );
+  assert.ok(
+    !JSON.stringify(lockfile).includes("supervision-js-trackers"),
+    "The consumer must not resolve the internal tracker workspace",
   );
   assert.equal(
     lockfile.packages[

@@ -1,5 +1,5 @@
-import type { Rect } from "#types/detections";
-import { maximizeAssignment } from "#post-processing/sort-tracker";
+import type { Rect } from "./types";
+import { maximizeAssignment } from "./sort-tracker";
 
 export interface TrackingMatch {
   readonly detectionIndex: number;

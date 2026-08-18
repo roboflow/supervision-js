@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createOCSortTracker } from "./oc-sort-tracker";
+import { createOCSortTracker } from "./index";
 
 const detection = (detectionIndex: number, x: number, confidence = 0.9) => ({
   confidence,

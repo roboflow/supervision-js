@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createByteTrackTracker } from "./byte-track-tracker";
+import { createByteTrackTracker } from "./index";
 
 const detection = (detectionIndex: number, x: number, confidence?: number) => ({
   ...(confidence === undefined ? {} : { confidence }),

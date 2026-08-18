@@ -4,6 +4,10 @@ import { fileURLToPath } from "node:url";
 import typescript from "@rollup/plugin-typescript";
 
 const packageDir = path.dirname(fileURLToPath(import.meta.url));
+const internalTrackersEntry = path.resolve(
+  packageDir,
+  "../trackers/dist/index.js",
+);
 const sourceAliasRoots = new Set([
   "detections",
   "interactions",
@@ -28,6 +32,17 @@ function sourceAliasResolver() {
   };
 }
 
+function internalTrackersResolver() {
+  return {
+    name: "internal-trackers-resolver",
+    resolveId(source) {
+      return source === "supervision-js-trackers"
+        ? internalTrackersEntry
+        : null;
+    },
+  };
+}
+
 export default {
   input: {
     index: "src/index.ts",
@@ -40,6 +55,7 @@ export default {
   },
   plugins: [
     sourceAliasResolver(),
+    internalTrackersResolver(),
     typescript({
       tsconfig: "./tsconfig.json",
       declaration: false,

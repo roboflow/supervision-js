@@ -1,4 +1,4 @@
-import type { Rect } from "#types/detections";
+import type { Rect } from "./types";
 import {
   add,
   identity,
@@ -8,7 +8,7 @@ import {
   subtract,
   transpose,
   type Matrix,
-} from "#post-processing/sort-tracker";
+} from "./sort-tracker";
 
 export type TrackingStateRepresentation = "xcycwh" | "xcycsr";
 

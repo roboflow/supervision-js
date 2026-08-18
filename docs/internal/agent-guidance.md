@@ -77,6 +77,11 @@ toolbar value is a checked presentation mirror.
 ## Repo Shape
 
 - The root package is a private workspace orchestrator.
+- `packages/trackers/` is an internal, platform-neutral engine workspace. It
+  owns SORT, ByteTrack, C-BIoU, OC-SORT, association, Kalman state, and their
+  lightweight observation/assignment contracts. It must not import core
+  detections, masks, workers, rendering code, or browser APIs. Core bundles it;
+  it is not an independently published package.
 - `packages/core/` is the DOM-free, platform-neutral core package. It owns
   detections, rectangles, masks, detection timelines, memory-backed sources,
   retention policies, source composition, picking contracts, style contracts,
@@ -95,6 +100,9 @@ toolbar value is a checked presentation mirror.
   `supervision`.
 - `packages/core/src/index.ts` is the core package entrypoint. Keep it free of
   DOM/WebWorker APIs and browser/vendor dependencies.
+- Core consumes tracking engines through `supervision-js-trackers`. Detection
+  geometry projection, mask/keypoint bounds, mutation semantics, and public
+  tracker facades remain in core; never reach into `packages/trackers/src`.
 - Keep renderer orchestration provider-agnostic. The public/default renderer
   factory may wire Mediabunny and Pixi defaults, but the renderer core should
   depend on small media-source and scene contracts rather than vendor modules.
@@ -119,7 +127,8 @@ toolbar value is a checked presentation mirror.
   importing source files directly.
 - `test/` holds reusable Vitest harness helpers that should not be emitted as
   package source.
-- Rollup builds package JavaScript. The root build runs core first, then web.
+- Rollup builds package JavaScript. The root build builds trackers into core,
+  then builds React Native and web.
 - Rollup emits a self-contained render-preparation worker, then embeds that
   source in `dist/index.js` for a bundler-agnostic Blob-worker default. The
   `supervision/render-preparation-worker` subpath exposes the same standalone

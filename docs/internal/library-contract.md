@@ -7,8 +7,13 @@ renderer-first package.
 
 ## Package Boundary
 
-The repository is split into a private workspace core and the browser package:
+The repository is split into internal engine/core workspaces and the browser
+package:
 
+- `supervision-js-trackers` in `packages/trackers` is an internal build
+  boundary for generic tracking engines and lightweight geometric contracts.
+  It must not depend on detections, masks, workers, rendering, or browser APIs.
+  It is bundled into core and is not independently published.
 - `supervision-js-core` in `packages/core` is platform-neutral. It must not
   depend on DOM, WebWorker, Pixi, Mediabunny, IndexedDB, fetch, or browser media
   APIs.
@@ -29,6 +34,9 @@ retention policies, source composition, picking contracts, and session lifecycle
 contracts without inheriting browser implementation details. Core also owns
 renderer-neutral media-rendering readouts such as fit modes, playback/source
 status, frame diagnostics, presentation style bundles, and quality hints.
+Core adapts detections, masks, and keypoints into lightweight tracker
+observations and applies returned tracker assignments. Tracker engines never
+receive or mutate full detection payloads.
 
 React Native experiments should share the core semantic model and style
 resolution, but should not reuse Pixi, Mediabunny, browser workers, or IndexedDB.

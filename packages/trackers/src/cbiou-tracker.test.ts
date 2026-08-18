@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createCBIoUTracker } from "./cbiou-tracker";
+import { createCBIoUTracker } from "./index";
 
 const detection = (detectionIndex: number, x: number, confidence = 0.9) => ({
   confidence,
