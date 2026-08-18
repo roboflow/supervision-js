@@ -247,7 +247,7 @@
       `${base}assets/brand/roboflow-logomark.svg`,
       window.location.href,
     ).href;
-    const demoUrl = resolveDemoUrl(`${base}demo/`);
+    const demoUrl = resolveDemoUrl("demo/");
     const version = packageReleaseStatus
       ? `v${packageVersion} (${packageReleaseStatus})`
       : `v${packageVersion}`;
