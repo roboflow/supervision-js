@@ -44,7 +44,7 @@ namespace margelo::nitro::supervision {
 
     public:
       // Properties
-      virtual int64_t getPointer() = 0;
+      virtual uint64_t getPointer() = 0;
       virtual double getTimestampMs() = 0;
       virtual double getWidth() = 0;
       virtual double getHeight() = 0;

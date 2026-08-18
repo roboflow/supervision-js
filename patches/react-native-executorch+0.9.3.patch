@@ -1,0 +1,53 @@
+diff --git a/node_modules/react-native-executorch/common/rnexecutorch/data_processing/ImageProcessing.cpp b/node_modules/react-native-executorch/common/rnexecutorch/data_processing/ImageProcessing.cpp
+index 3e73a3d..65933e3 100644
+--- a/node_modules/react-native-executorch/common/rnexecutorch/data_processing/ImageProcessing.cpp
++++ b/node_modules/react-native-executorch/common/rnexecutorch/data_processing/ImageProcessing.cpp
+@@ -1,5 +1,6 @@
+ #include "ImageProcessing.h"
+ 
++#include <cmath>
+ #include <filesystem>
+ 
+ #include <ada/ada.h>
+@@ -250,7 +251,41 @@ readImageToTensor(const std::string &path,
+   return {image_processing::getTensorFromMatrix(tensorDims, input), imageSize};
+ }
+ 
++#ifdef __ANDROID__
++#include <sys/system_properties.h>
++namespace {
++// Local workaround (supervision-js bring-up): cv::exp's dispatched SIMD
++// kernel raises SIGILL on the Android emulator running on Apple Silicon.
++// Physical devices keep the fast vectorized path.
++bool isRunningOnEmulator() {
++  static const bool cached = [] {
++    char value[PROP_VALUE_MAX] = {0};
++    __system_property_get("ro.kernel.qemu", value);
++    return value[0] == '1';
++  }();
++  return cached;
++}
++} // namespace
++#endif
++
+ cv::Mat applySigmoid(const cv::Mat &logits) {
++#ifdef __ANDROID__
++  // Scalar fallback only where the SIMD kernel is unsafe; only correct for
++  // the CV_32FC1 logits this pipeline uses.
++  if (isRunningOnEmulator() && logits.type() == CV_32FC1) {
++    cv::Mat probMat(logits.rows, logits.cols, CV_8UC1);
++    for (int row = 0; row < logits.rows; ++row) {
++      const float *in = logits.ptr<float>(row);
++      uint8_t *out = probMat.ptr<uint8_t>(row);
++      for (int col = 0; col < logits.cols; ++col) {
++        out[col] =
++            static_cast<uint8_t>(255.0f / (1.0f + std::exp(-in[col])));
++      }
++    }
++    return probMat;
++  }
++#endif
++
+   cv::Mat probMat;
+   cv::exp(-logits, probMat);
+   probMat = 255.0f / (1.0f + probMat);

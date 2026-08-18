@@ -1,0 +1,17 @@
+diff --git a/node_modules/react-native-vision-camera/android/src/main/java/com/margelo/nitro/camera/views/HybridFrameRendererView.kt b/node_modules/react-native-vision-camera/android/src/main/java/com/margelo/nitro/camera/views/HybridFrameRendererView.kt
+index 8d3270d..ff9f1ba 100644
+--- a/node_modules/react-native-vision-camera/android/src/main/java/com/margelo/nitro/camera/views/HybridFrameRendererView.kt
++++ b/node_modules/react-native-vision-camera/android/src/main/java/com/margelo/nitro/camera/views/HybridFrameRendererView.kt
+@@ -26,8 +26,10 @@ class HybridFrameRendererView(
+       val oldRenderer = field as? NativeFrameRenderer
+       oldRenderer?.disconnectSurface()
+ 
+-      // Maybe connect new Renderer
+-      if (surfaceView.holder.surface != null) {
++      // Maybe connect new Renderer. The Surface object always exists, but it
++      // is only valid once surfaceCreated fired; connecting earlier throws
++      // "The surface has been released" inside ImageWriter.
++      if (surfaceView.holder.surface?.isValid == true) {
+         val newRenderer = value as? NativeFrameRenderer
+         newRenderer?.connectSurface(surfaceView.holder.surface)
+       }

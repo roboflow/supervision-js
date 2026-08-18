@@ -43,8 +43,9 @@ export interface ReactNativeBoxedVideoFrameSource {
 
 /**
  * Result of trying to create a native video frame source on the React/JS
- * thread. `boxed` is `null` when the native module is unavailable (Android,
- * Expo Go, missing pod install, plain Node); `fallbackReason` explains why.
+ * thread. `boxed` is `null` when the native module is unavailable (Expo Go,
+ * missing pod install, Android below API 26, plain Node); `fallbackReason`
+ * explains why.
  */
 export interface ReactNativeVideoFrameSourceHandle {
   readonly boxed: ReactNativeBoxedVideoFrameSource | null;
@@ -52,17 +53,23 @@ export interface ReactNativeVideoFrameSourceHandle {
 }
 
 /**
- * Saved-video decoding is currently implemented by the iOS AVFoundation
- * hybrid only. Android deliberately reports this capability as unavailable
- * until its MediaCodec/AHardwareBuffer implementation lands.
+ * Saved-video decoding is implemented by the iOS AVFoundation hybrid and the
+ * Android NDK MediaCodec/AHardwareBuffer hybrid. The Android native module
+ * builds against API 26+ (AImageReader/AHardwareBuffer); hosts running below
+ * that keep a stable capability reason instead of a native load failure.
  */
 export function getReactNativeVideoFilePlatformAvailability(
   platform: string | undefined,
+  platformVersion?: number,
 ) {
-  if (platform === "android") {
+  if (
+    platform === "android" &&
+    platformVersion !== undefined &&
+    platformVersion < 26
+  ) {
     return {
       available: false,
-      reason: "android-video-file-source-not-implemented-yet",
+      reason: "android-video-file-source-requires-api-26",
     } as const;
   }
 
@@ -84,8 +91,10 @@ export function createReactNativeVideoFrameSource(): ReactNativeVideoFrameSource
     };
   }
 
+  const runtime = resolveReactNativePlatform();
   const availability = getReactNativeVideoFilePlatformAvailability(
-    resolveReactNativePlatform(),
+    runtime?.os,
+    runtime?.version,
   );
 
   if (!availability.available) {
@@ -116,12 +125,20 @@ function resolveReactNativePlatform() {
     // Keep React Native optional for Node consumers and package tests.
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const reactNative = require("react-native") as {
-      readonly Platform?: { readonly OS?: unknown };
+      readonly Platform?: { readonly OS?: unknown; readonly Version?: unknown };
     };
+    const platform = reactNative.Platform;
 
-    return typeof reactNative.Platform?.OS === "string"
-      ? reactNative.Platform.OS
-      : undefined;
+    if (typeof platform?.OS !== "string") {
+      return undefined;
+    }
+
+    // Android reports a numeric API level; iOS reports a version string.
+    return {
+      os: platform.OS,
+      version:
+        typeof platform.Version === "number" ? platform.Version : undefined,
+    };
   } catch {
     return undefined;
   }

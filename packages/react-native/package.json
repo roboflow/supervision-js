@@ -70,6 +70,10 @@
     "dist",
     "src",
     "ios",
+    "android/build.gradle",
+    "android/gradle.properties",
+    "android/CMakeLists.txt",
+    "android/src",
     "nitrogen",
     "nitro.json",
     "*.podspec"
