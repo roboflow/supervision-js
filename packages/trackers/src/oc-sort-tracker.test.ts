@@ -43,6 +43,20 @@ describe("createOCSortTracker", () => {
     ]);
   });
 
+  it("does not spend the early-sequence activation window on leading empty frames", () => {
+    const tracker = createOCSortTracker({ minimumConsecutiveFrames: 3 });
+
+    tracker.update([], 0);
+    tracker.update([], 1);
+    tracker.update([], 2);
+    tracker.update([], 3);
+    tracker.update([detection(0, 10)], 4);
+
+    expect(tracker.update([detection(0, 11)], 5).assignments).toEqual([
+      { detectionIndex: 0, trackerId: 0 },
+    ]);
+  });
+
   it("keeps an allocated ID private until a recovered track is mature again", () => {
     const tracker = createOCSortTracker({ minimumConsecutiveFrames: 3 });
     tracker.update([detection(0, 10)], 0);

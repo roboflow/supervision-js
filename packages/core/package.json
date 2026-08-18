@@ -51,7 +51,8 @@
     "build:types": "npm run build:types -w supervision-js-trackers && npm run build:types:local",
     "build:types:local": "tsc --emitDeclarationOnly -p tsconfig.json",
     "clean": "node -e \"fs.rmSync('dist', { recursive: true, force: true })\"",
-    "dev": "rollup -c -w",
+    "dev": "npm run build -w supervision-js-trackers && npm run dev:local",
+    "dev:local": "rollup -c -w",
     "typecheck": "npm run build:types -w supervision-js-trackers && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json"
   },
   "devDependencies": {

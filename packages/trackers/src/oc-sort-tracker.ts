@@ -199,6 +199,17 @@ export function createOCSortTracker(
     update(detections, frameIndex) {
       const frameStep = resolveFrameStep(frameIndex, previousFrameIndex);
       previousFrameIndex = frameIndex ?? previousFrameIndex;
+
+      // Match roboflow/trackers: an empty stream before any track exists is
+      // not part of OC-SORT's early-sequence activation window.
+      if (tracks.length === 0 && detections.length === 0) {
+        return {
+          activeTrackCount: 0,
+          assignments: [],
+          confirmedTrackCount: 0,
+        };
+      }
+
       tracks.forEach((track) => track.predict(frameStep, frameRate));
 
       const highDetectionIndexes = detections.flatMap((detection, index) =>
