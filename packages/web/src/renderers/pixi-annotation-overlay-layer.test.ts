@@ -226,7 +226,10 @@ describe("Pixi annotation overlay presentation", () => {
       preview,
       expect.objectContaining({ selected: true, viewportScale: 2 }),
     );
+    // The skeleton's box previews with its keypoints (outline only while
+    // editing; the creation fill is reserved for creation gestures).
     expect(graphics.roundRect).not.toHaveBeenCalled();
+    expect(graphics.moveTo).toHaveBeenCalledWith(10, 20);
     expect(graphics.circle).toHaveBeenCalledTimes(2);
     expect(graphics.stroke).toHaveBeenCalledWith({
       alpha: 1,

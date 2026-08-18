@@ -121,7 +121,7 @@ describe("annotation editing engine", () => {
     );
   });
 
-  it("resizes whole skeleton geometry from an outset bounding handle", () => {
+  it("resizes a skeleton's box from an outset handle without moving its keypoints", () => {
     const detection = {
       keypoints: {
         edges: [[0, 1]] as const,
@@ -142,7 +142,7 @@ describe("annotation editing engine", () => {
       keypoints: {
         points: [
           { x: 15, y: 20 },
-          { x: 35, y: 50 },
+          { x: 25, y: 40 },
         ],
       },
       rect: { x: 25, y: 35, width: 20, height: 30 },

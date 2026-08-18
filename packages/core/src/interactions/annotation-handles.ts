@@ -82,21 +82,12 @@ export function applyAnnotationHandleDrag(
   point: Point,
 ): Detection {
   if (detection.rect && handle.kind === AnnotationHandleKind.Resize) {
+    // A skeleton's rect is an independent box around its keypoints: resizing
+    // it never moves the points, which keep their own handles.
     const resizePoint = resizeBoundaryPoint(detection.rect, handle, point);
-    const rect = resizeRect(detection.rect, handle.id, resizePoint);
-    if (!detection.keypoints) return { ...detection, rect };
-
     return {
       ...detection,
-      keypoints: {
-        ...detection.keypoints,
-        points: scalePointsBetweenRects(
-          detection.keypoints.points,
-          detection.rect,
-          rect,
-        ),
-      },
-      rect,
+      rect: resizeRect(detection.rect, handle.id, resizePoint),
     };
   }
 
@@ -227,19 +218,6 @@ function resizeBoundaryPoint(
     x: point.x + boundary.x - handle.point.x,
     y: point.y + boundary.y - handle.point.y,
   };
-}
-
-function scalePointsBetweenRects(
-  points: readonly Point[],
-  from: Rect,
-  to: Rect,
-): Point[] {
-  const scaleX = from.width > 0 ? to.width / from.width : 1;
-  const scaleY = from.height > 0 ? to.height / from.height : 1;
-  return points.map((point) => ({
-    x: to.x + (point.x - from.x) * scaleX,
-    y: to.y + (point.y - from.y) * scaleY,
-  }));
 }
 
 function getPathHandles(

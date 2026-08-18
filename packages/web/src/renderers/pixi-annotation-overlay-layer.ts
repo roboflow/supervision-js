@@ -126,12 +126,13 @@ function drawEditingPreview(
     detection,
     styleContext,
   )!;
+  // A skeleton's rect is part of its geometry, so it previews alongside the
+  // keypoints; polygon, polyline and mask rects are derived bounds and are not.
   if (
     detection.rect &&
     !detection.mask &&
     !detection.polygon &&
-    !detection.polyline &&
-    !detection.keypoints
+    !detection.polyline
   ) {
     const { x, y, width, height } = detection.rect;
     if (state.kind === AnnotationGestureStateKind.Creating) {
