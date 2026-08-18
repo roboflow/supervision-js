@@ -37,6 +37,12 @@ export interface DetectionPickOptions {
   readonly polylinePadding?: number;
   readonly keypointPadding?: number;
   readonly edgePadding?: number;
+  /**
+   * Media units per screen pixel. Pick paddings are divided by this scale so
+   * they stay constant on screen at any zoom, like editing handles. Defaults
+   * to 1 (paddings taken as media units).
+   */
+  readonly viewportScale?: number;
   /** Media dimensions used to map media-space points into mask raster space. */
   readonly maskMediaDimensions?: {
     readonly width: number;
@@ -65,7 +71,11 @@ export type DetectionSelectionOptions = DetectionSelectionOptionsBase &
       }
   );
 
-export interface MediaInteractionOptions extends DetectionPickOptions {
+/** The renderer supplies `viewportScale` from its own viewport. */
+export interface MediaInteractionOptions extends Omit<
+  DetectionPickOptions,
+  "viewportScale"
+> {
   readonly mode?: MediaInteractionMode;
   readonly onHover?: (pick: DetectionPickResult | null) => void;
   /**

@@ -421,6 +421,7 @@ export function createPixiInteractionLayer(options: {
       includeMasks: options.pickMaskDetectionAtPoint === undefined,
       maskMediaDimensions: options.getMediaDimensions?.(),
       padding: pickPadding,
+      viewportScale: options.getViewportScale?.() ?? 1,
     });
 
     if (geometryPick && POINT_PRECISE_PICK_TARGETS.has(geometryPick.target)) {

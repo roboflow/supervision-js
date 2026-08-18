@@ -185,6 +185,67 @@ describe("detection picker", () => {
     });
   });
 
+  it("keeps pick tolerances constant on screen when the viewport is zoomed out", () => {
+    const skeletonFrame: DetectionFrame = {
+      detections: [
+        {
+          id: "pose",
+          keypoints: {
+            edges: [[0, 1]],
+            points: [
+              { x: 100, y: 100 },
+              { x: 400, y: 100 },
+            ],
+          },
+          rect: { height: 200, width: 400, x: 250, y: 100 },
+        },
+      ],
+      mediaTime: 0,
+    };
+    // 6 screen px from the keypoint at a 0.25 media-to-screen scale is 24
+    // media units: outside the media-space default, inside the scaled one.
+    const nearKeypoint = { x: 100, y: 124 };
+    const nearEdge = { x: 250, y: 124 };
+    const outsideBox = { x: 40, y: 100 };
+
+    expect(pickDetectionAtPoint(skeletonFrame, nearKeypoint)?.target).toBe(
+      DetectionPickTarget.Box,
+    );
+    expect(
+      pickDetectionAtPoint(skeletonFrame, nearKeypoint, {
+        viewportScale: 0.25,
+      }),
+    ).toMatchObject({ geometryIndex: 0, target: DetectionPickTarget.Keypoint });
+    expect(
+      pickDetectionAtPoint(skeletonFrame, nearEdge, { viewportScale: 0.25 }),
+    ).toMatchObject({ geometryIndex: 0, target: DetectionPickTarget.Edge });
+    expect(
+      pickDetectionAtPoint(skeletonFrame, outsideBox, {
+        padding: 4,
+        viewportScale: 0.25,
+      })?.target,
+    ).toBe(DetectionPickTarget.Box);
+    expect(
+      pickDetectionAtPoint(skeletonFrame, outsideBox, { padding: 4 }),
+    ).toBeNull();
+    // Zooming in tightens the tolerance in media units.
+    expect(
+      pickDetectionAtPoint(
+        skeletonFrame,
+        { x: 100, y: 106 },
+        { viewportScale: 4 },
+      )?.target,
+    ).toBe(DetectionPickTarget.Box);
+    // A non-positive scale falls back to media units instead of dividing by zero.
+    expect(
+      pickDetectionAtPoint(
+        skeletonFrame,
+        { x: 105, y: 100 },
+        { viewportScale: 0 },
+      ),
+    ).toMatchObject({ target: DetectionPickTarget.Keypoint });
+  });
+
   it("maps media-space points into lower-resolution masks and caches decoding", () => {
     const encoded = encodeBinaryMask(Uint8Array.from([0, 0, 0, 1]), 2, 2);
     let countsReads = 0;

@@ -45,10 +45,21 @@ export function pickDetectionAtPoint(
     return null;
   }
 
-  const padding = Math.max(0, options.padding ?? 0);
-  const polylinePadding = Math.max(0, options.polylinePadding ?? 6);
-  const keypointPadding = Math.max(0, options.keypointPadding ?? 10);
-  const edgePadding = Math.max(0, options.edgePadding ?? 8);
+  // Tolerances are pointer-space sizes; a zoomed-out viewport maps fewer media
+  // units per screen pixel, so a fixed media-space padding would shrink the
+  // hit target below the drawn marker.
+  const viewportScale =
+    options.viewportScale !== undefined &&
+    Number.isFinite(options.viewportScale) &&
+    options.viewportScale > 0
+      ? options.viewportScale
+      : 1;
+  const padding = Math.max(0, options.padding ?? 0) / viewportScale;
+  const polylinePadding =
+    Math.max(0, options.polylinePadding ?? 6) / viewportScale;
+  const keypointPadding =
+    Math.max(0, options.keypointPadding ?? 10) / viewportScale;
+  const edgePadding = Math.max(0, options.edgePadding ?? 8) / viewportScale;
   const candidates: CandidatePick[] = [];
 
   for (

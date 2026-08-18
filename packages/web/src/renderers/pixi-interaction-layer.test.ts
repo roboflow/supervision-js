@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { createPixiAnnotationOverlayLayer } from "#renderers/pixi-annotation-overlay-layer";
 import { createPixiInteractionLayer } from "#renderers/pixi-interaction-layer";
 import {
   AnnotationGestureStateKind,
   createAnnotationEditingEngine,
   DetectionPickTarget,
+  KeypointMarkerShape,
   MediaInteractionMode,
 } from "supervision-js-core";
 import type { BufferedDetectionTimeline } from "supervision-js-core";
@@ -311,6 +313,64 @@ describe("pixi interaction layer", () => {
     expect(onHover).toHaveBeenLastCalledWith(
       expect.objectContaining({
         detection: keypointFrame.detections[1],
+        geometryIndex: 0,
+        target: DetectionPickTarget.Keypoint,
+      }),
+    );
+  });
+
+  it("keeps keypoint hover tolerance constant on screen when zoomed out", () => {
+    const onHover = vi.fn();
+    const keypointFrame: DetectionFrame = {
+      detections: [
+        {
+          className: "person",
+          id: "pose-1",
+          keypoints: {
+            edges: [[0, 1]],
+            points: [
+              { x: 100, y: 100 },
+              { x: 100, y: 400 },
+            ],
+          },
+          rect: { height: 400, width: 200, x: 150, y: 250 },
+        },
+      ],
+      frameIndex: 3,
+      mediaTime: 0.1,
+    };
+    let viewportScale = 1;
+    const layer = createPixiInteractionLayer({
+      Container: FakeContainer as never,
+      Rectangle: FakeRectangle as never,
+      canInteract: () => true,
+      detectionTimeline: createTimeline(keypointFrame),
+      getViewportScale: () => viewportScale,
+      interaction: {
+        mode: MediaInteractionMode.PausedOnly,
+        onHover,
+      },
+    });
+    const display = layer.createDisplay({
+      height: 800,
+      width: 800,
+    }) as FakeContainer;
+
+    layer.drawFrame(0.1);
+    // 24 media units from the keypoint: 24 screen px at 1:1, but only 6 screen
+    // px once the media is fitted at a quarter scale.
+    display.emit("pointermove", createPointerEvent(display, 124, 100));
+
+    expect(onHover).toHaveBeenLastCalledWith(
+      expect.objectContaining({ target: DetectionPickTarget.Box }),
+    );
+
+    viewportScale = 0.25;
+    display.emit("pointermove", createPointerEvent(display, 124, 101));
+
+    expect(onHover).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        detection: keypointFrame.detections[0],
         geometryIndex: 0,
         target: DetectionPickTarget.Keypoint,
       }),
@@ -812,6 +872,136 @@ describe("pixi interaction layer", () => {
     expect(layer.setSelectedDetection(null)).toBeNull();
     expect(layer.getState().selectedPick).toBeNull();
     expect(onSelect).toHaveBeenLastCalledWith(null);
+  });
+
+  it("previews a dragged keypoint at the pointer before the gesture commits", () => {
+    const onCommit = vi.fn();
+    const editingEngine = createAnnotationEditingEngine({
+      onCommit,
+      viewportScale: () => 0.5,
+    });
+    const skeletonFrame: DetectionFrame = {
+      detections: [
+        {
+          className: "person",
+          id: "pose-1",
+          keypoints: {
+            edges: [[0, 1]],
+            points: [
+              { x: 100, y: 100 },
+              { x: 100, y: 200 },
+            ],
+          },
+          rect: { height: 100, width: 100, x: 100, y: 150 },
+        },
+      ],
+      frameIndex: 3,
+      mediaTime: 0.1,
+    };
+    const layer = createPixiInteractionLayer({
+      Container: FakeContainer as never,
+      Rectangle: FakeRectangle as never,
+      canInteract: () => true,
+      detectionTimeline: createTimeline(skeletonFrame),
+      editingEngine,
+      getViewportScale: () => 0.5,
+      interaction: { mode: MediaInteractionMode.PausedOnly },
+    });
+    const display = layer.createDisplay({
+      height: 400,
+      width: 400,
+    }) as FakeContainer;
+    const graphics = {
+      arc: vi.fn(),
+      circle: vi.fn(),
+      clear: vi.fn(),
+      closePath: vi.fn(),
+      fill: vi.fn(),
+      lineTo: vi.fn(),
+      moveTo: vi.fn(),
+      poly: vi.fn(),
+      roundRect: vi.fn(),
+      stroke: vi.fn(),
+    };
+    for (const method of Object.values(graphics)) {
+      method.mockReturnValue(graphics);
+    }
+    const overlay = createPixiAnnotationOverlayLayer(editingEngine, undefined, {
+      resolve: (detection) => ({
+        edges: [],
+        markers: (detection.keypoints?.points ?? []).map((point, index) => ({
+          fill: { alpha: 1, color: 0x00ff66 },
+          index,
+          point,
+          radius: 4,
+          shape: KeypointMarkerShape.Circle,
+        })),
+      }),
+    });
+    overlay.attachGraphics(graphics as never);
+    const drawOverlay = () =>
+      overlay.draw({
+        frame: skeletonFrame,
+        marquee: null,
+        mediaHeight: 400,
+        mediaWidth: 400,
+        now: 0,
+        pointer: null,
+        selectedDetectionIds: ["pose-1"],
+        viewportScale: 0.5,
+      });
+
+    layer.drawFrame(0.1);
+    layer.setSelectedDetection({ detectionId: "pose-1" });
+    // Press on the first keypoint's handle, then move without releasing.
+    display.emit(
+      "pointerdown",
+      createPointerEvent(display, 100, 100, {
+        button: 0,
+        pointerId: 1,
+        timeStamp: 0,
+      }),
+    );
+    display.emit(
+      "pointermove",
+      createPointerEvent(display, 140, 130, {
+        buttons: 1,
+        pointerId: 1,
+        timeStamp: 1,
+      }),
+    );
+    drawOverlay();
+
+    expect(editingEngine.getState()).toMatchObject({
+      activeDetectionId: "pose-1",
+      kind: AnnotationGestureStateKind.Resizing,
+    });
+    expect(editingEngine.getState().preview?.keypoints?.points[0]).toEqual({
+      x: 140,
+      y: 130,
+    });
+    expect(graphics.circle).toHaveBeenCalledWith(140, 130, expect.any(Number));
+    expect(onCommit).not.toHaveBeenCalled();
+
+    display.emit(
+      "pointerup",
+      createPointerEvent(display, 140, 130, {
+        button: 0,
+        pointerId: 1,
+        timeStamp: 2,
+      }),
+    );
+
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onCommit.mock.calls[0]?.[0]).toMatchObject({
+      keypoints: expect.objectContaining({
+        points: [
+          { x: 140, y: 130 },
+          { x: 100, y: 200 },
+        ],
+      }),
+    });
+    expect(editingEngine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
   });
 
   it("selects a detection before beginning a primary editing gesture", () => {
