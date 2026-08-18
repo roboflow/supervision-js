@@ -113,10 +113,12 @@ export interface CompressedRleDetectionMask {
 export type DetectionMask = CompressedRleDetectionMask;
 
 /**
- * One model output for a media frame.
+ * One semantic detection for a media frame.
  *
- * A detection stores model data only: identity, class, confidence, geometry,
- * mask, and caller metadata. It intentionally does not carry render styling.
+ * A detection may come directly from a model or from a semantic
+ * post-processor such as tracking. It stores identity, class, confidence,
+ * geometry, mask, and caller metadata, but intentionally does not carry render
+ * styling.
  * Styling is resolved through presentation styles so the same detections can be
  * rendered as boxes, masks, labels, or future layers without mutating the
  * underlying annotation data.
@@ -126,6 +128,12 @@ export interface Detection {
    * Optional stable identity for picking, interaction, and host app metadata.
    */
   readonly id?: string | number;
+  /**
+   * Optional temporal identity assigned by a tracking post-processor.
+   * This is separate from `id`, which remains the annotation/picking identity.
+   * Post-processors may update this derived field in place.
+   */
+  trackerId?: number;
   /**
    * Optional provenance for detections copied from a composed source.
    *

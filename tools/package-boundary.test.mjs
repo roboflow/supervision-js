@@ -5,6 +5,7 @@ import process from "node:process";
 import test from "node:test";
 
 const rootDir = process.cwd();
+const trackersSourceDir = path.join(rootDir, "packages/trackers/src");
 const coreSourceDir = path.join(rootDir, "packages/core/src");
 const webSourceDir = path.join(rootDir, "packages/web/src");
 const reactNativeSourceDir = path.join(rootDir, "packages/react-native/src");
@@ -79,6 +80,58 @@ test("core source stays free of browser and vendor runtime APIs", async () => {
     const source = stripComments(await readFile(file, "utf8"));
 
     for (const { label, pattern } of forbiddenPatterns) {
+      if (pattern.test(source)) {
+        failures.push(`${path.relative(rootDir, file)} uses ${label}`);
+      }
+    }
+  }
+
+  assert.deepEqual(failures, []);
+});
+
+test("tracker engines stay behind their platform-neutral workspace boundary", async () => {
+  const files = await listSourceFiles(trackersSourceDir);
+  const failures = [];
+  const forbiddenTrackerPatterns = [
+    ...forbiddenPatterns,
+    {
+      label: "Supervision workspace import",
+      pattern:
+        /from\s+["'][^"']*(?:supervision-js-core|packages\/(?:core|web|react-native)|#(?:detections|post-processing|types|utils)\/)/,
+    },
+  ];
+
+  for (const file of files) {
+    const source = stripComments(await readFile(file, "utf8"));
+
+    for (const { label, pattern } of forbiddenTrackerPatterns) {
+      if (pattern.test(source)) {
+        failures.push(`${path.relative(rootDir, file)} uses ${label}`);
+      }
+    }
+  }
+
+  assert.deepEqual(failures, []);
+});
+
+test("core consumes tracker engines only through the internal package name", async () => {
+  const files = await listSourceFiles(coreSourceDir);
+  const failures = [];
+  const forbiddenCoreTrackerPatterns = [
+    {
+      label: "tracker workspace source path",
+      pattern: /from\s+["'][^"']*packages\/trackers/,
+    },
+    {
+      label: "relative tracker workspace import",
+      pattern: /from\s+["'](?:\.\.\/)+trackers(?:\/|["'])/,
+    },
+  ];
+
+  for (const file of files) {
+    const source = stripComments(await readFile(file, "utf8"));
+
+    for (const { label, pattern } of forbiddenCoreTrackerPatterns) {
       if (pattern.test(source)) {
         failures.push(`${path.relative(rootDir, file)} uses ${label}`);
       }

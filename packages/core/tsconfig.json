@@ -8,6 +8,7 @@
     "paths": {
       "#detections/*": ["src/detections/*"],
       "#interactions/*": ["src/interactions/*"],
+      "#post-processing/*": ["src/post-processing/*"],
       "#styles/*": ["src/styles/*"],
       "#types/*": ["src/types/*"],
       "#utils/*": ["src/utils/*"]

@@ -133,6 +133,13 @@ export function validateDetectionFrames(
         validateNumber(detection.zIndex, `${detectionPath}.zIndex`);
       }
 
+      if (detection.trackerId !== undefined) {
+        validateNumber(detection.trackerId, `${detectionPath}.trackerId`, {
+          integer: true,
+          min: 0,
+        });
+      }
+
       if (
         detection.sourceId !== undefined &&
         typeof detection.sourceId !== "string"

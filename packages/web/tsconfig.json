@@ -11,6 +11,7 @@
       "#editing/*": ["src/editing/*"],
       "#media/*": ["src/media/*"],
       "#playback/*": ["src/playback/*"],
+      "#post-processing/*": ["src/post-processing/*"],
       "#render-preparation/*": ["src/render-preparation/*"],
       "#renderers/*": ["src/renderers/*"],
       "#sessions/*": ["src/sessions/*"],

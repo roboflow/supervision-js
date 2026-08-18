@@ -9,6 +9,7 @@
       <nav class="supervision-home__entrypoints" aria-label="Documentation entry points">
         <span>Explore</span>
         <a href="documents/Annotation_Renderers.html">Annotation renderers</a>
+        <a href="documents/Post_Processors.html">Post processors</a>
         <a href="documents/Quickstart.html">Quickstart</a>
         <a href="documents/Recipes.html">Recipes</a>
         <a href="modules/Styles.html">API reference</a>
@@ -180,7 +181,7 @@ console.log(state.status, state.activities);
     <nav class="supervision-home__next-grid" aria-label="Documentation paths">
       <a href="documents/Quickstart.html"><strong>Quickstart</strong><span>Install, mount, and render your first detections.</span></a>
       <a href="documents/Annotation_Renderers.html"><strong>Annotation renderers</strong><span>Select and style boxes, masks, labels, polygons, pose, and asset regions in live playgrounds.</span></a>
-      <a href="documents/Core_Concepts.html"><strong>Core concepts</strong><span>Understand sessions, semantic detections, styles, and preparation.</span></a>
+      <a href="documents/Post_Processors.html"><strong>Post processors</strong><span>Apply ordered tracking to streaming boxes, masks, and keypoints in a browser worker.</span></a>
       <a href="documents/Recipes.html"><strong>Recipes</strong><span>Apply focused patterns for sources, picking, lifecycle, and React.</span></a>
     </nav>
   </section>
