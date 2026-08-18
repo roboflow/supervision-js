@@ -6,7 +6,7 @@ import type {
   TrackingProjection,
 } from "#types/post-processing";
 
-type Matrix = number[][];
+export type Matrix = number[][];
 
 interface Match {
   readonly detectionIndex: number;
@@ -404,33 +404,33 @@ export function normalizeUnitInterval(value: number, label: string) {
   }
 }
 
-function identity(size: number): Matrix {
+export function identity(size: number): Matrix {
   return Array.from({ length: size }, (_, row) =>
     Array.from({ length: size }, (_, column) => (row === column ? 1 : 0)),
   );
 }
 
-function scale(matrix: Matrix, factor: number): Matrix {
+export function scale(matrix: Matrix, factor: number): Matrix {
   return matrix.map((row) => row.map((value) => value * factor));
 }
 
-function transpose(matrix: Matrix): Matrix {
+export function transpose(matrix: Matrix): Matrix {
   return matrix[0]!.map((_, column) => matrix.map((row) => row[column]!));
 }
 
-function add(left: Matrix, right: Matrix): Matrix {
+export function add(left: Matrix, right: Matrix): Matrix {
   return left.map((row, rowIndex) =>
     row.map((value, columnIndex) => value + right[rowIndex]![columnIndex]!),
   );
 }
 
-function subtract(left: Matrix, right: Matrix): Matrix {
+export function subtract(left: Matrix, right: Matrix): Matrix {
   return left.map((row, rowIndex) =>
     row.map((value, columnIndex) => value - right[rowIndex]![columnIndex]!),
   );
 }
 
-function multiply(left: Matrix, right: Matrix): Matrix {
+export function multiply(left: Matrix, right: Matrix): Matrix {
   return left.map((row) =>
     right[0]!.map((_, column) =>
       row.reduce(
@@ -441,7 +441,7 @@ function multiply(left: Matrix, right: Matrix): Matrix {
   );
 }
 
-function inverse(matrix: Matrix): Matrix {
+export function inverse(matrix: Matrix): Matrix {
   const size = matrix.length;
   const augmented = matrix.map((row, index) => [
     ...row,

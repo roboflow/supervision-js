@@ -30,11 +30,17 @@ const RETRACK_DEBOUNCE_MS = 120;
 
 interface TrackingConfiguration {
   readonly algorithm: DocsTrackingAlgorithm;
+  readonly bufferRatioFirst: number;
+  readonly bufferRatioSecond: number;
+  readonly deltaT: number;
+  readonly directionConsistencyWeight: number;
   readonly geometry: TrackingGeometry;
   readonly highConfidenceDetectionThreshold: number;
   readonly lostTrackBuffer: number;
   readonly minimumConsecutiveFrames: number;
   readonly minimumIouThreshold: number;
+  readonly minimumIouThresholdSecondAssociation: number;
+  readonly minimumIouThresholdUnconfirmedAssociation: number;
   readonly trackActivationThreshold: number;
 }
 
@@ -43,15 +49,9 @@ type TrackingStatus = "raw" | "running" | "tracked" | "error";
 export function DocsTrackingPostProcessorPlayground() {
   const [controller] = useState(createDocsTrackingController);
   const [trackingConfiguration, setTrackingConfiguration] =
-    useState<TrackingConfiguration>({
-      algorithm: "sort",
-      geometry: TrackingGeometry.Box,
-      highConfidenceDetectionThreshold: 0.6,
-      lostTrackBuffer: 30,
-      minimumConsecutiveFrames: 3,
-      minimumIouThreshold: 0.3,
-      trackActivationThreshold: 0.25,
-    });
+    useState<TrackingConfiguration>(() =>
+      createDefaultTrackingConfiguration("sort", TrackingGeometry.Box),
+    );
   const trackingConfigurationRef = useRef(trackingConfiguration);
   const presentationModeRef = useRef<DocsTrackingPresentationMode>("raw");
   const runRequestIdRef = useRef(0);
@@ -98,11 +98,17 @@ export function DocsTrackingPostProcessorPlayground() {
   const totalChunks = Math.ceil((demo.fixtureSummary?.duration ?? 9) / 1);
   const {
     algorithm,
+    bufferRatioFirst,
+    bufferRatioSecond,
+    deltaT,
+    directionConsistencyWeight,
     geometry,
     highConfidenceDetectionThreshold,
     lostTrackBuffer,
     minimumConsecutiveFrames,
     minimumIouThreshold,
+    minimumIouThresholdSecondAssociation,
+    minimumIouThresholdUnconfirmedAssociation,
     trackActivationThreshold,
   } = trackingConfiguration;
   const progress = Math.min(
@@ -110,25 +116,8 @@ export function DocsTrackingPostProcessorPlayground() {
     totalFrames > 0 ? (diagnostics.processedFrameCount / totalFrames) * 100 : 0,
   );
   const snippet = useMemo(
-    () =>
-      createDocsTrackingSnippet(
-        algorithm,
-        geometry,
-        minimumIouThreshold,
-        lostTrackBuffer,
-        trackActivationThreshold,
-        minimumConsecutiveFrames,
-        highConfidenceDetectionThreshold,
-      ),
-    [
-      algorithm,
-      geometry,
-      highConfidenceDetectionThreshold,
-      lostTrackBuffer,
-      minimumConsecutiveFrames,
-      minimumIouThreshold,
-      trackActivationThreshold,
-    ],
+    () => createDocsTrackingSnippet(trackingConfiguration),
+    [trackingConfiguration],
   );
   const isPlaying =
     demo.playbackState === MediaRendererPlaybackState.Playing ||
@@ -305,9 +294,7 @@ export function DocsTrackingPostProcessorPlayground() {
           <div>
             <p>Post processor</p>
             <h1>Tracking</h1>
-            <span>
-              Ordered {algorithm === "bytetrack" ? "ByteTrack" : "SORT"}
-            </span>
+            <span>Ordered {trackingAlgorithmLabel(algorithm)}</span>
           </div>
           <div className="docs-tracking-playground__header-actions">
             <button
@@ -333,26 +320,16 @@ export function DocsTrackingPostProcessorPlayground() {
               onChange={(event) => {
                 const nextAlgorithm = event.currentTarget
                   .value as DocsTrackingAlgorithm;
-                updateTrackingConfiguration({
-                  algorithm: nextAlgorithm,
-                  ...(nextAlgorithm === "bytetrack"
-                    ? {
-                        highConfidenceDetectionThreshold: 0.6,
-                        minimumConsecutiveFrames: 2,
-                        minimumIouThreshold: 0.1,
-                        trackActivationThreshold: 0.7,
-                      }
-                    : {
-                        minimumConsecutiveFrames: 3,
-                        minimumIouThreshold: 0.3,
-                        trackActivationThreshold: 0.25,
-                      }),
-                });
+                updateTrackingConfiguration(
+                  createDefaultTrackingConfiguration(nextAlgorithm, geometry),
+                );
               }}
               value={algorithm}
             >
               <option value="sort">SORT</option>
               <option value="bytetrack">ByteTrack</option>
+              <option value="cbiou">C-BIoU</option>
+              <option value="ocsort">OC-SORT</option>
             </select>
           </label>
           <label className="docs-layer-playground__select">
@@ -371,7 +348,9 @@ export function DocsTrackingPostProcessorPlayground() {
             </select>
           </label>
           <TrackingRange
-            label="Minimum IoU"
+            label={
+              algorithm === "cbiou" ? "First association IoU" : "Minimum IoU"
+            }
             max={0.8}
             min={0.05}
             onChange={(value) =>
@@ -381,6 +360,38 @@ export function DocsTrackingPostProcessorPlayground() {
             value={minimumIouThreshold}
             valueLabel={minimumIouThreshold.toFixed(2)}
           />
+          {algorithm === "cbiou" ? (
+            <>
+              <TrackingRange
+                label="Second association IoU"
+                max={0.8}
+                min={0.05}
+                onChange={(value) =>
+                  updateTrackingConfiguration({
+                    minimumIouThresholdSecondAssociation: value,
+                  })
+                }
+                step={0.05}
+                value={minimumIouThresholdSecondAssociation}
+                valueLabel={minimumIouThresholdSecondAssociation.toFixed(2)}
+              />
+              <TrackingRange
+                label="Unconfirmed association IoU"
+                max={0.8}
+                min={0.05}
+                onChange={(value) =>
+                  updateTrackingConfiguration({
+                    minimumIouThresholdUnconfirmedAssociation: value,
+                  })
+                }
+                step={0.05}
+                value={minimumIouThresholdUnconfirmedAssociation}
+                valueLabel={minimumIouThresholdUnconfirmedAssociation.toFixed(
+                  2,
+                )}
+              />
+            </>
+          ) : null}
           <TrackingRange
             label="Lost track buffer"
             max={90}
@@ -392,18 +403,22 @@ export function DocsTrackingPostProcessorPlayground() {
             value={lostTrackBuffer}
             valueLabel={`${lostTrackBuffer}f`}
           />
-          <TrackingRange
-            label="Activation threshold"
-            max={1}
-            min={0}
-            onChange={(value) =>
-              updateTrackingConfiguration({ trackActivationThreshold: value })
-            }
-            step={0.05}
-            value={trackActivationThreshold}
-            valueLabel={trackActivationThreshold.toFixed(2)}
-          />
-          {algorithm === "bytetrack" ? (
+          {algorithm !== "ocsort" ? (
+            <TrackingRange
+              label="Activation threshold"
+              max={1}
+              min={0}
+              onChange={(value) =>
+                updateTrackingConfiguration({
+                  trackActivationThreshold: value,
+                })
+              }
+              step={0.05}
+              value={trackActivationThreshold}
+              valueLabel={trackActivationThreshold.toFixed(2)}
+            />
+          ) : null}
+          {algorithm !== "sort" ? (
             <TrackingRange
               label="High-confidence split"
               max={1}
@@ -417,6 +432,60 @@ export function DocsTrackingPostProcessorPlayground() {
               value={highConfidenceDetectionThreshold}
               valueLabel={highConfidenceDetectionThreshold.toFixed(2)}
             />
+          ) : null}
+          {algorithm === "cbiou" ? (
+            <>
+              <TrackingRange
+                label="First buffer ratio"
+                max={0.8}
+                min={0}
+                onChange={(value) =>
+                  updateTrackingConfiguration({ bufferRatioFirst: value })
+                }
+                step={0.05}
+                value={bufferRatioFirst}
+                valueLabel={bufferRatioFirst.toFixed(2)}
+              />
+              <TrackingRange
+                label="Second buffer ratio"
+                max={0.8}
+                min={0}
+                onChange={(value) =>
+                  updateTrackingConfiguration({ bufferRatioSecond: value })
+                }
+                step={0.05}
+                value={bufferRatioSecond}
+                valueLabel={bufferRatioSecond.toFixed(2)}
+              />
+            </>
+          ) : null}
+          {algorithm === "ocsort" ? (
+            <>
+              <TrackingRange
+                label="Direction weight"
+                max={0.5}
+                min={0}
+                onChange={(value) =>
+                  updateTrackingConfiguration({
+                    directionConsistencyWeight: value,
+                  })
+                }
+                step={0.05}
+                value={directionConsistencyWeight}
+                valueLabel={directionConsistencyWeight.toFixed(2)}
+              />
+              <TrackingRange
+                label="Velocity lookback"
+                max={8}
+                min={1}
+                onChange={(value) =>
+                  updateTrackingConfiguration({ deltaT: value })
+                }
+                step={1}
+                value={deltaT}
+                valueLabel={`${deltaT}f`}
+              />
+            </>
           ) : null}
           <TrackingRange
             label="Frames to confirm"
@@ -511,6 +580,61 @@ export function DocsTrackingPostProcessorPlayground() {
       </section>
     </main>
   );
+}
+
+function createDefaultTrackingConfiguration(
+  algorithm: DocsTrackingAlgorithm,
+  geometry: TrackingGeometry,
+): TrackingConfiguration {
+  const shared = {
+    algorithm,
+    bufferRatioFirst: 0.3,
+    bufferRatioSecond: 0.5,
+    deltaT: 3,
+    directionConsistencyWeight: 0.2,
+    geometry,
+    highConfidenceDetectionThreshold: 0.6,
+    lostTrackBuffer: 30,
+    minimumIouThresholdSecondAssociation: 0.5,
+    minimumIouThresholdUnconfirmedAssociation: 0.3,
+  };
+  switch (algorithm) {
+    case "bytetrack":
+      return {
+        ...shared,
+        minimumConsecutiveFrames: 2,
+        minimumIouThreshold: 0.1,
+        trackActivationThreshold: 0.7,
+      };
+    case "cbiou":
+      return {
+        ...shared,
+        minimumConsecutiveFrames: 2,
+        minimumIouThreshold: 0.2,
+        trackActivationThreshold: 0.7,
+      };
+    case "ocsort":
+      return {
+        ...shared,
+        minimumConsecutiveFrames: 3,
+        minimumIouThreshold: 0.3,
+        trackActivationThreshold: 0,
+      };
+    case "sort":
+      return {
+        ...shared,
+        minimumConsecutiveFrames: 3,
+        minimumIouThreshold: 0.3,
+        trackActivationThreshold: 0.25,
+      };
+  }
+}
+
+function trackingAlgorithmLabel(algorithm: DocsTrackingAlgorithm) {
+  if (algorithm === "bytetrack") return "ByteTrack";
+  if (algorithm === "cbiou") return "C-BIoU";
+  if (algorithm === "ocsort") return "OC-SORT";
+  return "SORT";
 }
 
 function TrackingRange({

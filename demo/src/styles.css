@@ -373,6 +373,15 @@ body {
   padding: clamp(1rem, 2.5vw, 1.5rem);
 }
 
+.docs-tracking-playground {
+  height: 100vh;
+  overflow: hidden;
+}
+
+.docs-tracking-playground .docs-layer-playground__panel {
+  overflow-y: auto;
+}
+
 .docs-layer-playground__header {
   align-items: start;
   display: flex;
@@ -736,6 +745,11 @@ body {
   }
 
   .docs-layer-playground__panel {
+    overflow: visible;
+  }
+
+  .docs-tracking-playground {
+    height: auto;
     overflow: visible;
   }
 }

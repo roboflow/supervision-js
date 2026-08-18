@@ -17,11 +17,12 @@ detection fields in place by default, so a cold `WritableDetectionFrameSource`
 can contain only the post-processed truth consumed by the media session.
 
 The first built-in post processor is [Tracking](./post-processors/tracking.md).
-It runs SORT in a dedicated browser worker and associates boxes, masks, or
-keypoints through lightweight rectangle projections. The original masks,
-polygons, keypoints, annotation IDs, and metadata never cross that worker
-boundary. Motion predictions remain internal to SORT and are used only to
-associate later observed detections.
+It runs SORT, ByteTrack, C-BIoU, or OC-SORT in a dedicated browser worker and
+associates boxes, masks, or keypoints through lightweight rectangle
+projections. The original masks, polygons, keypoints, annotation IDs, and
+metadata never cross that worker boundary. Motion predictions remain internal
+to the selected tracker and are used only to associate later observed
+detections.
 
 ## Pipeline shape
 

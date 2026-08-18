@@ -1,5 +1,7 @@
 import {
   createByteTrackTracker,
+  createCBIoUTracker,
+  createOCSortTracker,
   createSortTracker,
   type TrackingTracker,
 } from "supervision-js-core";
@@ -19,10 +21,19 @@ self.addEventListener(
       let response: TrackingWorkerResponse;
 
       if (request.type === "configure") {
-        tracker =
-          request.processor.algorithm === "bytetrack"
-            ? createByteTrackTracker(request.processor.options)
-            : createSortTracker(request.processor.options);
+        switch (request.processor.algorithm) {
+          case "bytetrack":
+            tracker = createByteTrackTracker(request.processor.options);
+            break;
+          case "cbiou":
+            tracker = createCBIoUTracker(request.processor.options);
+            break;
+          case "ocsort":
+            tracker = createOCSortTracker(request.processor.options);
+            break;
+          default:
+            tracker = createSortTracker(request.processor.options);
+        }
         response = { requestId: request.requestId, type: "success" };
       } else if (request.type === "reset") {
         tracker?.reset();

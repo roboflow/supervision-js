@@ -1,6 +1,6 @@
 ---
 title: Tracking
-summary: Apply ordered SORT or ByteTrack tracking to boxes, masks, or keypoints in a browser worker.
+summary: Apply ordered SORT, ByteTrack, C-BIoU, or OC-SORT tracking to boxes, masks, or keypoints in a browser worker.
 ---
 
 # Tracking
@@ -26,7 +26,8 @@ confidence, and an association rectangle to its worker, and appends the
 enriched semantic frame to browser cold storage. This comparison playground
 sets `mutateInput: false` so it can retain a raw view. Switch among boxes,
 masks, and keypoints to change both association input and the visible tracked
-annotation. Choose SORT or ByteTrack to compare their association behavior.
+annotation. Choose SORT, ByteTrack, C-BIoU, or OC-SORT to compare their
+association behavior.
 While tracked detections are visible, changing any tracking control
 cancels stale work and recomputes the derived output from the original raw
 detections.
@@ -95,12 +96,12 @@ after `minimumConsecutiveFrames` successful observations, associate
 class-agnostically at `minimumIouThreshold`, and survive gaps according to
 `lostTrackBuffer` scaled by `frameRate`. Missing confidence is treated as `1`.
 
-The browser implementation uses the Python tracker's default eight-dimensional
-XYXY Kalman state. Its ordered `frameIndex` input is the fixed-rate integration
-boundary; Python's optional wall-clock `timestamp` and injectable state/IoU
-classes are not exposed in this first browser API. Both implementations return
-only observed detections with derived tracker identity; unmatched live tracks
-remain internal state.
+The browser SORT implementation uses the Python tracker's default
+eight-dimensional XYXY Kalman state. Its ordered `frameIndex` input is the
+fixed-rate integration boundary; Python's optional wall-clock `timestamp` and
+injectable state/IoU classes are not exposed in this browser API. All four
+implementations return only observed detections with derived tracker identity;
+unmatched live tracks remain internal state.
 
 ## ByteTrack
 
@@ -125,6 +126,51 @@ detectionPostProcessors.tracking({
   algorithm: "bytetrack",
   highConfidenceDetectionThreshold: 0.6,
   trackActivationThreshold: 0.7,
+});
+```
+
+## C-BIoU
+
+Select `algorithm: "cbiou"` for the detection-only Cascaded Buffered IoU
+implementation from
+[`roboflow/trackers`](https://github.com/roboflow/trackers/blob/60b21c8a48676784085fbee455559f16b75a7c9a/src/trackers/core/cbiou/tracker.py)
+at source commit `60b21c8`. C-BIoU expands boxes before association: a smaller
+first buffer handles high-confidence detections, then a larger second buffer
+offers low-confidence observations another opportunity to preserve a live
+track. Its defaults are `bufferRatioFirst: 0.3`, `bufferRatioSecond: 0.5`,
+`minimumIouThresholdFirstAssociation: 0.2`,
+`minimumIouThresholdSecondAssociation: 0.5`, and
+`minimumIouThresholdUnconfirmedAssociation: 0.3`.
+C-BIoU uses the same eight-dimensional XCYCWH Kalman state and scale-aware
+noise tuning as its Python source.
+
+```ts
+detectionPostProcessors.tracking({
+  algorithm: "cbiou",
+  bufferRatioFirst: 0.3,
+  bufferRatioSecond: 0.5,
+  highConfidenceDetectionThreshold: 0.6,
+});
+```
+
+## OC-SORT
+
+Select `algorithm: "ocsort"` for the observation-centric implementation from
+[`roboflow/trackers`](https://github.com/roboflow/trackers/blob/60b21c8a48676784085fbee455559f16b75a7c9a/src/trackers/core/ocsort/tracker.py)
+at source commit `60b21c8`. OC-SORT combines IoU with motion-direction
+consistency, retries unmatched tracks against their last real observations,
+and replays virtual observations through its Kalman filter after an occlusion.
+Only detections at or above `highConfidenceDetectionThreshold` participate in
+tracking. Its additional defaults are `directionConsistencyWeight: 0.2` and
+`deltaT: 3`.
+OC-SORT uses the Python source's seven-dimensional XCYCSR Kalman state.
+
+```ts
+detectionPostProcessors.tracking({
+  algorithm: "ocsort",
+  deltaT: 3,
+  directionConsistencyWeight: 0.2,
+  highConfidenceDetectionThreshold: 0.6,
 });
 ```
 

@@ -22,6 +22,8 @@ export { createWritableDetectionFrameSource } from "#detections/writable-detecti
 // Semantic post-processing.
 export { createSortTracker } from "#post-processing/sort-tracker";
 export { createByteTrackTracker } from "#post-processing/byte-track-tracker";
+export { createCBIoUTracker } from "#post-processing/cbiou-tracker";
+export { createOCSortTracker } from "#post-processing/oc-sort-tracker";
 export {
   detectionPostProcessors,
   projectDetectionFrameForTracking,
@@ -32,11 +34,19 @@ export {
   type ByteTrackTrackerUpdate,
   type ByteTrackTrackingDetectionPostProcessor,
   type ByteTrackTrackingOptions,
+  type CBIoUTracker,
+  type CBIoUTrackerUpdate,
+  type CBIoUTrackingDetectionPostProcessor,
+  type CBIoUTrackingOptions,
   type DetectionPostProcessor,
   type DetectionPostProcessorFactory,
   type SortTracker,
   type SortTrackerUpdate,
   type SortTrackingOptions,
+  type OCSortTracker,
+  type OCSortTrackerUpdate,
+  type OCSortTrackingDetectionPostProcessor,
+  type OCSortTrackingOptions,
   type TrackingAssignment,
   type TrackingDetectionPostProcessor,
   type TrackingProjection,

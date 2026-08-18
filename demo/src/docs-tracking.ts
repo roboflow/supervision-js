@@ -28,11 +28,17 @@ const TRACKING_DATASET_ID = "basketball-tracking-output";
 
 export interface DocsTrackingRunOptions {
   readonly algorithm: DocsTrackingAlgorithm;
+  readonly bufferRatioFirst: number;
+  readonly bufferRatioSecond: number;
+  readonly deltaT: number;
+  readonly directionConsistencyWeight: number;
   readonly geometry: TrackingGeometry;
   readonly highConfidenceDetectionThreshold: number;
   readonly lostTrackBuffer: number;
   readonly minimumConsecutiveFrames: number;
   readonly minimumIouThreshold: number;
+  readonly minimumIouThresholdSecondAssociation: number;
+  readonly minimumIouThresholdUnconfirmedAssociation: number;
   readonly trackActivationThreshold: number;
   readonly onChunk?: (chunkIndex: number) => void;
   readonly onDiagnostics?: (
@@ -41,7 +47,7 @@ export interface DocsTrackingRunOptions {
 }
 
 export type DocsTrackingPresentationMode = "raw" | "tracked";
-export type DocsTrackingAlgorithm = "sort" | "bytetrack";
+export type DocsTrackingAlgorithm = "sort" | "bytetrack" | "cbiou" | "ocsort";
 
 export interface DocsTrackingController extends DetectionFrameSource {
   attach(
@@ -141,9 +147,10 @@ export function createDocsTrackingController(): DocsTrackingController {
         if (currentRunId !== runId) return;
         activeSource = output;
         generation += 1;
-        const trackingProcessor =
-          options.algorithm === "bytetrack"
-            ? detectionPostProcessors.tracking({
+        const trackingProcessor = (() => {
+          switch (options.algorithm) {
+            case "bytetrack":
+              return detectionPostProcessors.tracking({
                 algorithm: "bytetrack",
                 geometry: options.geometry,
                 highConfidenceDetectionThreshold:
@@ -152,8 +159,39 @@ export function createDocsTrackingController(): DocsTrackingController {
                 minimumConsecutiveFrames: options.minimumConsecutiveFrames,
                 minimumIouThreshold: options.minimumIouThreshold,
                 trackActivationThreshold: options.trackActivationThreshold,
-              })
-            : detectionPostProcessors.tracking({
+              });
+            case "cbiou":
+              return detectionPostProcessors.tracking({
+                algorithm: "cbiou",
+                bufferRatioFirst: options.bufferRatioFirst,
+                bufferRatioSecond: options.bufferRatioSecond,
+                geometry: options.geometry,
+                highConfidenceDetectionThreshold:
+                  options.highConfidenceDetectionThreshold,
+                lostTrackBuffer: options.lostTrackBuffer,
+                minimumConsecutiveFrames: options.minimumConsecutiveFrames,
+                minimumIouThresholdFirstAssociation:
+                  options.minimumIouThreshold,
+                minimumIouThresholdSecondAssociation:
+                  options.minimumIouThresholdSecondAssociation,
+                minimumIouThresholdUnconfirmedAssociation:
+                  options.minimumIouThresholdUnconfirmedAssociation,
+                trackActivationThreshold: options.trackActivationThreshold,
+              });
+            case "ocsort":
+              return detectionPostProcessors.tracking({
+                algorithm: "ocsort",
+                deltaT: options.deltaT,
+                directionConsistencyWeight: options.directionConsistencyWeight,
+                geometry: options.geometry,
+                highConfidenceDetectionThreshold:
+                  options.highConfidenceDetectionThreshold,
+                lostTrackBuffer: options.lostTrackBuffer,
+                minimumConsecutiveFrames: options.minimumConsecutiveFrames,
+                minimumIouThreshold: options.minimumIouThreshold,
+              });
+            case "sort":
+              return detectionPostProcessors.tracking({
                 algorithm: "sort",
                 geometry: options.geometry,
                 lostTrackBuffer: options.lostTrackBuffer,
@@ -161,6 +199,8 @@ export function createDocsTrackingController(): DocsTrackingController {
                 minimumIouThreshold: options.minimumIouThreshold,
                 trackActivationThreshold: options.trackActivationThreshold,
               });
+          }
+        })();
         const currentPipeline = createDetectionPostProcessingPipeline({
           maxPendingFrames: Math.max(
             45,
@@ -402,28 +442,17 @@ function createDocsTrackingInteractionPresentation(
 }
 
 export function createDocsTrackingSnippet(
-  algorithm: DocsTrackingAlgorithm,
-  geometry: TrackingGeometry,
-  minimumIouThreshold: number,
-  lostTrackBuffer: number,
-  trackActivationThreshold: number,
-  minimumConsecutiveFrames: number,
-  highConfidenceDetectionThreshold: number,
+  options: Omit<DocsTrackingRunOptions, "onChunk" | "onDiagnostics">,
 ) {
-  const byteTrackOption =
-    algorithm === "bytetrack"
-      ? `\n      highConfidenceDetectionThreshold: ${highConfidenceDetectionThreshold.toFixed(2)},`
-      : "";
+  const algorithmOptions = createAlgorithmSnippetOptions(options);
   return `const pipeline = createDetectionPostProcessingPipeline({
   mutateInput: false, // Keep raw frames for this comparison playground.
   processors: [
     detectionPostProcessors.tracking({
-      algorithm: "${algorithm}",${byteTrackOption}
-      geometry: TrackingGeometry.${geometryName(geometry)},
-      minimumIouThreshold: ${minimumIouThreshold.toFixed(2)},
-      lostTrackBuffer: ${lostTrackBuffer},
-      trackActivationThreshold: ${trackActivationThreshold.toFixed(2)},
-      minimumConsecutiveFrames: ${minimumConsecutiveFrames},
+      algorithm: "${options.algorithm}",${algorithmOptions}
+      geometry: TrackingGeometry.${geometryName(options.geometry)},
+      lostTrackBuffer: ${options.lostTrackBuffer},
+      minimumConsecutiveFrames: ${options.minimumConsecutiveFrames},
     }),
   ],
   output: trackedSource,
@@ -431,6 +460,37 @@ export function createDocsTrackingSnippet(
 
 // Safe for out-of-order SSE arrivals.
 await pipeline.appendFrames([detectionFrame]);`;
+}
+
+function createAlgorithmSnippetOptions(
+  options: Omit<DocsTrackingRunOptions, "onChunk" | "onDiagnostics">,
+) {
+  switch (options.algorithm) {
+    case "bytetrack":
+      return `
+      highConfidenceDetectionThreshold: ${options.highConfidenceDetectionThreshold.toFixed(2)},
+      minimumIouThreshold: ${options.minimumIouThreshold.toFixed(2)},
+      trackActivationThreshold: ${options.trackActivationThreshold.toFixed(2)},`;
+    case "cbiou":
+      return `
+      bufferRatioFirst: ${options.bufferRatioFirst.toFixed(2)},
+      bufferRatioSecond: ${options.bufferRatioSecond.toFixed(2)},
+      highConfidenceDetectionThreshold: ${options.highConfidenceDetectionThreshold.toFixed(2)},
+      minimumIouThresholdFirstAssociation: ${options.minimumIouThreshold.toFixed(2)},
+      minimumIouThresholdSecondAssociation: ${options.minimumIouThresholdSecondAssociation.toFixed(2)},
+      minimumIouThresholdUnconfirmedAssociation: ${options.minimumIouThresholdUnconfirmedAssociation.toFixed(2)},
+      trackActivationThreshold: ${options.trackActivationThreshold.toFixed(2)},`;
+    case "ocsort":
+      return `
+      deltaT: ${options.deltaT},
+      directionConsistencyWeight: ${options.directionConsistencyWeight.toFixed(2)},
+      highConfidenceDetectionThreshold: ${options.highConfidenceDetectionThreshold.toFixed(2)},
+      minimumIouThreshold: ${options.minimumIouThreshold.toFixed(2)},`;
+    case "sort":
+      return `
+      minimumIouThreshold: ${options.minimumIouThreshold.toFixed(2)},
+      trackActivationThreshold: ${options.trackActivationThreshold.toFixed(2)},`;
+  }
 }
 
 function hasGeometry(detection: Detection, geometry: TrackingGeometry) {

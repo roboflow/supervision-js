@@ -114,6 +114,33 @@ describe("createDetectionPostProcessingPipeline", () => {
     pipeline.destroy();
   });
 
+  it.each(["cbiou", "ocsort"] as const)(
+    "runs %s through the main-thread pipeline",
+    async (algorithm) => {
+      const pipeline = createDetectionPostProcessingPipeline({
+        mode: DetectionPostProcessingMode.MainThread,
+        processors: [
+          algorithm === "cbiou"
+            ? detectionPostProcessors.tracking({ algorithm: "cbiou" })
+            : detectionPostProcessors.tracking({ algorithm: "ocsort" }),
+        ],
+      });
+
+      const result = await pipeline.appendFrames([
+        frame(0, 0, 0.9),
+        frame(1, 1, 0.9),
+        frame(2, 2, 0.9),
+      ]);
+
+      expect(
+        result.processedFrames.some(
+          (candidate) => candidate.detections[0]?.trackerId === 0,
+        ),
+      ).toBe(true);
+      pipeline.destroy();
+    },
+  );
+
   it("keeps gap predictions internal and reassociates the observed detection", async () => {
     const output = createWritableDetectionFrameSource({
       datasetId: "observation-only",

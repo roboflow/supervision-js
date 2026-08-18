@@ -45,6 +45,44 @@ describe("detectionPostProcessors.tracking", () => {
     });
   });
 
+  it("creates a serializable C-BIoU descriptor with Python defaults", () => {
+    expect(detectionPostProcessors.tracking({ algorithm: "cbiou" })).toEqual({
+      algorithm: "cbiou",
+      geometry: "box",
+      kind: "tracking",
+      options: {
+        bufferRatioFirst: 0.3,
+        bufferRatioSecond: 0.5,
+        frameRate: 30,
+        highConfidenceDetectionThreshold: 0.6,
+        instantFirstFrameActivation: true,
+        lostTrackBuffer: 30,
+        minimumConsecutiveFrames: 2,
+        minimumIouThresholdFirstAssociation: 0.2,
+        minimumIouThresholdSecondAssociation: 0.5,
+        minimumIouThresholdUnconfirmedAssociation: 0.3,
+        trackActivationThreshold: 0.7,
+      },
+    });
+  });
+
+  it("creates a serializable OC-SORT descriptor with Python defaults", () => {
+    expect(detectionPostProcessors.tracking({ algorithm: "ocsort" })).toEqual({
+      algorithm: "ocsort",
+      geometry: "box",
+      kind: "tracking",
+      options: {
+        deltaT: 3,
+        directionConsistencyWeight: 0.2,
+        frameRate: 30,
+        highConfidenceDetectionThreshold: 0.6,
+        lostTrackBuffer: 30,
+        minimumConsecutiveFrames: 3,
+        minimumIouThreshold: 0.3,
+      },
+    });
+  });
+
   it("projects only the selected geometry without copying heavy payloads", () => {
     const frame = {
       detections: [

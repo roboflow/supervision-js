@@ -2,7 +2,9 @@ import type { Detection, DetectionFrame, Rect } from "#types/detections";
 import {
   TrackingGeometry,
   type ByteTrackTrackingOptions,
+  type CBIoUTrackingOptions,
   type DetectionPostProcessorFactory,
+  type OCSortTrackingOptions,
   type SortTrackingOptions,
   type TrackingDetectionPostProcessor,
   type TrackingProjection,
@@ -19,16 +21,26 @@ const DEFAULT_BYTE_TRACK_ACTIVATION_THRESHOLD = 0.7;
 const DEFAULT_BYTE_MINIMUM_CONSECUTIVE_FRAMES = 2;
 const DEFAULT_BYTE_MINIMUM_IOU_THRESHOLD = 0.1;
 const DEFAULT_HIGH_CONFIDENCE_DETECTION_THRESHOLD = 0.6;
+const DEFAULT_CBIOU_FIRST_IOU_THRESHOLD = 0.2;
+const DEFAULT_CBIOU_SECOND_IOU_THRESHOLD = 0.5;
+const DEFAULT_CBIOU_UNCONFIRMED_IOU_THRESHOLD = 0.3;
+const DEFAULT_CBIOU_FIRST_BUFFER_RATIO = 0.3;
+const DEFAULT_CBIOU_SECOND_BUFFER_RATIO = 0.5;
+const DEFAULT_OCSORT_DIRECTION_CONSISTENCY_WEIGHT = 0.2;
+const DEFAULT_OCSORT_DELTA_T = 3;
 
 export const detectionPostProcessors: DetectionPostProcessorFactory = {
   tracking: ((
     options: SortTrackingOptions &
       ByteTrackTrackingOptions & {
-        readonly algorithm?: "sort" | "bytetrack";
+        readonly algorithm?: "sort" | "bytetrack" | "cbiou" | "ocsort";
         readonly geometry?: TrackingGeometry;
-      } = {},
+      } & CBIoUTrackingOptions &
+      OCSortTrackingOptions = {},
   ): TrackingDetectionPostProcessor => {
     const isByteTrack = options.algorithm === "bytetrack";
+    const isCBIoU = options.algorithm === "cbiou";
+    const isOCSort = options.algorithm === "ocsort";
     const lostTrackBuffer = normalizeNonNegativeInteger(
       options.lostTrackBuffer,
       DEFAULT_LOST_TRACK_BUFFER,
@@ -37,12 +49,12 @@ export const detectionPostProcessors: DetectionPostProcessorFactory = {
     const frameRate = options.frameRate ?? DEFAULT_FRAME_RATE;
     const trackActivationThreshold =
       options.trackActivationThreshold ??
-      (isByteTrack
+      (isByteTrack || isCBIoU
         ? DEFAULT_BYTE_TRACK_ACTIVATION_THRESHOLD
         : DEFAULT_TRACK_ACTIVATION_THRESHOLD);
     const minimumConsecutiveFrames = normalizePositiveInteger(
       options.minimumConsecutiveFrames,
-      isByteTrack
+      isByteTrack || isCBIoU
         ? DEFAULT_BYTE_MINIMUM_CONSECUTIVE_FRAMES
         : DEFAULT_MINIMUM_CONSECUTIVE_FRAMES,
       "minimumConsecutiveFrames",
@@ -63,6 +75,96 @@ export const detectionPostProcessors: DetectionPostProcessorFactory = {
       geometry: options.geometry ?? TrackingGeometry.Box,
       kind: "tracking",
     } as const;
+
+    if (isCBIoU) {
+      const highConfidenceDetectionThreshold =
+        options.highConfidenceDetectionThreshold ??
+        DEFAULT_HIGH_CONFIDENCE_DETECTION_THRESHOLD;
+      const minimumIouThresholdFirstAssociation =
+        options.minimumIouThresholdFirstAssociation ??
+        DEFAULT_CBIOU_FIRST_IOU_THRESHOLD;
+      const minimumIouThresholdSecondAssociation =
+        options.minimumIouThresholdSecondAssociation ??
+        DEFAULT_CBIOU_SECOND_IOU_THRESHOLD;
+      const minimumIouThresholdUnconfirmedAssociation =
+        options.minimumIouThresholdUnconfirmedAssociation ??
+        DEFAULT_CBIOU_UNCONFIRMED_IOU_THRESHOLD;
+      const bufferRatioFirst =
+        options.bufferRatioFirst ?? DEFAULT_CBIOU_FIRST_BUFFER_RATIO;
+      const bufferRatioSecond =
+        options.bufferRatioSecond ?? DEFAULT_CBIOU_SECOND_BUFFER_RATIO;
+      normalizeUnitInterval(
+        highConfidenceDetectionThreshold,
+        "highConfidenceDetectionThreshold",
+      );
+      normalizeUnitInterval(
+        minimumIouThresholdFirstAssociation,
+        "minimumIouThresholdFirstAssociation",
+      );
+      normalizeUnitInterval(
+        minimumIouThresholdSecondAssociation,
+        "minimumIouThresholdSecondAssociation",
+      );
+      normalizeUnitInterval(
+        minimumIouThresholdUnconfirmedAssociation,
+        "minimumIouThresholdUnconfirmedAssociation",
+      );
+      normalizeNonNegativeFinite(bufferRatioFirst, "bufferRatioFirst");
+      normalizeNonNegativeFinite(bufferRatioSecond, "bufferRatioSecond");
+      return {
+        ...base,
+        algorithm: "cbiou" as const,
+        options: {
+          bufferRatioFirst,
+          bufferRatioSecond,
+          frameRate,
+          highConfidenceDetectionThreshold,
+          instantFirstFrameActivation:
+            options.instantFirstFrameActivation ?? true,
+          lostTrackBuffer,
+          minimumConsecutiveFrames,
+          minimumIouThresholdFirstAssociation,
+          minimumIouThresholdSecondAssociation,
+          minimumIouThresholdUnconfirmedAssociation,
+          trackActivationThreshold,
+        },
+      };
+    }
+
+    if (isOCSort) {
+      const directionConsistencyWeight =
+        options.directionConsistencyWeight ??
+        DEFAULT_OCSORT_DIRECTION_CONSISTENCY_WEIGHT;
+      const highConfidenceDetectionThreshold =
+        options.highConfidenceDetectionThreshold ??
+        DEFAULT_HIGH_CONFIDENCE_DETECTION_THRESHOLD;
+      const deltaT = normalizePositiveInteger(
+        options.deltaT,
+        DEFAULT_OCSORT_DELTA_T,
+        "deltaT",
+      );
+      normalizeUnitInterval(
+        directionConsistencyWeight,
+        "directionConsistencyWeight",
+      );
+      normalizeUnitInterval(
+        highConfidenceDetectionThreshold,
+        "highConfidenceDetectionThreshold",
+      );
+      return {
+        ...base,
+        algorithm: "ocsort" as const,
+        options: {
+          deltaT,
+          directionConsistencyWeight,
+          frameRate,
+          highConfidenceDetectionThreshold,
+          lostTrackBuffer,
+          minimumConsecutiveFrames,
+          minimumIouThreshold,
+        },
+      };
+    }
 
     if (isByteTrack) {
       const highConfidenceDetectionThreshold =
@@ -179,5 +281,11 @@ function normalizeNonNegativeInteger(
 function normalizeUnitInterval(value: number, label: string) {
   if (!Number.isFinite(value) || value < 0 || value > 1) {
     throw new Error(`${label} must be between 0 and 1.`);
+  }
+}
+
+function normalizeNonNegativeFinite(value: number, label: string) {
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(`${label} must be a finite non-negative value.`);
   }
 }

@@ -1,5 +1,7 @@
 import {
   createByteTrackTracker,
+  createCBIoUTracker,
+  createOCSortTracker,
   createSortTracker,
   projectDetectionFrameForTracking,
   type DetectionFrame,
@@ -288,10 +290,20 @@ async function createTrackingExecution(
 function createMainThreadExecution(
   processor: TrackingDetectionPostProcessor,
 ): TrackingExecution {
-  const tracker: TrackingTracker =
-    processor.algorithm === "bytetrack"
-      ? createByteTrackTracker(processor.options)
-      : createSortTracker(processor.options);
+  let tracker: TrackingTracker;
+  switch (processor.algorithm) {
+    case "bytetrack":
+      tracker = createByteTrackTracker(processor.options);
+      break;
+    case "cbiou":
+      tracker = createCBIoUTracker(processor.options);
+      break;
+    case "ocsort":
+      tracker = createOCSortTracker(processor.options);
+      break;
+    default:
+      tracker = createSortTracker(processor.options);
+  }
   return {
     destroy() {},
     mode: "mainThread",
