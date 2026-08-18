@@ -236,14 +236,24 @@ describe("detection picker", () => {
         { viewportScale: 4 },
       )?.target,
     ).toBe(DetectionPickTarget.Box);
-    // A non-positive scale falls back to media units instead of dividing by zero.
-    expect(
-      pickDetectionAtPoint(
-        skeletonFrame,
-        { x: 105, y: 100 },
-        { viewportScale: 0 },
-      ),
-    ).toMatchObject({ target: DetectionPickTarget.Keypoint });
+    // A non-finite or non-positive scale falls back to media units (10) rather
+    // than dividing into an unbounded (or negative) tolerance.
+    for (const viewportScale of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(
+        pickDetectionAtPoint(
+          skeletonFrame,
+          { x: 100, y: 105 },
+          { viewportScale },
+        ),
+      ).toMatchObject({ target: DetectionPickTarget.Keypoint });
+      expect(
+        pickDetectionAtPoint(
+          skeletonFrame,
+          { x: 100, y: 115 },
+          { viewportScale },
+        )?.target,
+      ).toBe(DetectionPickTarget.Box);
+    }
   });
 
   it("maps media-space points into lower-resolution masks and caches decoding", () => {

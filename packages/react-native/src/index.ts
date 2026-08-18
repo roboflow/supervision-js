@@ -738,6 +738,7 @@ export function pickReactNativeDetectionAtPoint(
       height: layout.mediaRect.height / layout.scale,
       width: layout.mediaRect.width / layout.scale,
     },
+    viewportScale: options.viewportScale ?? layout.scale,
   });
 }
 

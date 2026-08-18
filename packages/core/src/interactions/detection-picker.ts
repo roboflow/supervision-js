@@ -45,7 +45,7 @@ export function pickDetectionAtPoint(
     return null;
   }
 
-  // Tolerances are pointer-space sizes; a zoomed-out viewport maps fewer media
+  // Tolerances are screen-space sizes; a zoomed-out viewport maps more media
   // units per screen pixel, so a fixed media-space padding would shrink the
   // hit target below the drawn marker.
   const viewportScale =

@@ -38,9 +38,10 @@ export interface DetectionPickOptions {
   readonly keypointPadding?: number;
   readonly edgePadding?: number;
   /**
-   * Media units per screen pixel. Pick paddings are divided by this scale so
-   * they stay constant on screen at any zoom, like editing handles. Defaults
-   * to 1 (paddings taken as media units).
+   * Media-to-screen scale (screen pixels per media unit). Pick paddings are
+   * screen-space sizes divided by this scale so they stay constant on screen
+   * at any zoom, like editing handles. Defaults to 1 (paddings taken as
+   * media units).
    */
   readonly viewportScale?: number;
   /** Media dimensions used to map media-space points into mask raster space. */
