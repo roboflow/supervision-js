@@ -496,6 +496,41 @@ describe("buffered detection timeline", () => {
     expect(state.requestedEndTime).toBe(4.5);
   });
 
+  it("keeps a far paused jump selectable after several loop laps", async () => {
+    const loadFrames = vi.fn(async (startTime: number, endTime: number) => {
+      const loaded: DetectionFrame[] = [];
+      for (
+        let mediaTime = Math.max(0, Math.ceil(startTime * 2) / 2);
+        mediaTime <= Math.min(60, endTime);
+        mediaTime += 0.5
+      ) {
+        loaded.push({ detections: [], mediaTime });
+      }
+      return loaded;
+    });
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 7,
+      bufferBehindSeconds: 3.5,
+      source: { loadFrames },
+    });
+
+    timeline.setTimelineContext?.({ duration: 60, loop: true });
+
+    // A wrapped consumer clock walking through two full laps: the playhead
+    // hands the timeline only times inside [0, 60].
+    for (const playhead of [30, 45, 58, 2, 20, 40, 57, 3, 25, 39]) {
+      await timeline.prepare(playhead, { duration: 60, firstTimestamp: 0 });
+    }
+
+    expect(timeline.selectFrame(39)?.mediaTime).toBe(39);
+
+    // The paused far jump: one prepare, then no further playhead traffic.
+    await timeline.prepare(17.25, { duration: 60, firstTimestamp: 0 });
+
+    expect(timeline.selectFrame(17.25)?.mediaTime).toBe(17);
+    expect(timeline.selectFrame(17.5)?.mediaTime).toBe(17.5);
+  });
+
   it("still maps an unwrapped loop-crossing time back to the buffered window", async () => {
     const loadFrames = vi.fn(async () => []);
     const timeline = createBufferedDetectionTimeline({

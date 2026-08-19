@@ -612,15 +612,15 @@ export function createBufferedDetectionTimeline(
 
     const duration = timelineContext.duration;
 
-    // The representative of mediaTime (mod duration) NEAREST the buffer.
-    // Stepping until the time sits at or below the buffer's end instead would
-    // punish ordinary forward playback: the first frame past the buffered
-    // window would map a whole loop down, the window would follow it there,
-    // and every later time would ratchet further negative.
-    const bufferCenter = (state.bufferStartTime + state.bufferEndTime) / 2;
-    const loops = Math.round((bufferCenter - mediaTime) / duration);
-
-    return mediaTime + loops * duration;
+    // The representative of mediaTime (mod duration) anchored at the window
+    // start. The mapping must depend only on where the window sits, never on
+    // how many laps playback has accumulated, or membership drifts away from
+    // what the buffer actually holds. A time less than one lap past the
+    // anchor never wraps, so ordinary forward playback cannot ratchet.
+    return (
+      state.bufferStartTime +
+      modulo(mediaTime - state.bufferStartTime, duration)
+    );
   }
 
   function getSourceMediaTime(mediaTime: number) {
