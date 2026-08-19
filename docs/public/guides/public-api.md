@@ -228,11 +228,13 @@ A producer that streams results into a session has four supported contracts:
   media. It is idempotent.
 - `session.refresh()` still redraws on demand. By default the session also
   redraws itself when a write actually changed the frame selected for the
-  displayed time. Live and batch writes use the same rule: a result the source
-  dropped as stale changes nothing, and a frame whose interval does not contain
-  the displayed time cannot change what is on screen. A frame written without an
+  displayed time. Live writes, batch writes, and coverage finalization all use
+  the same rule: a result the source dropped as stale changes nothing, and a
+  frame whose interval does not contain the displayed time cannot change what
+  is on screen. A frame written without an
   `endTime` stays selected until a later frame supersedes it, so one appended
-  behind the displayed time still redraws. Requests arriving during a redraw
+  behind the displayed time still redraws, and rewriting one with a real end
+  redraws for the time it stops covering. Requests arriving during a redraw
   collapse into a single follow-up. Set `detections.autoRefresh: false` to own
   every redraw.
 

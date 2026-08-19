@@ -395,9 +395,22 @@ export async function createMediaSession(
           return null;
         }
 
-        return requireLiveDetectionSource(appendableSource).finalizeCoverage(
-          coverageEndTime,
+        const previousVersion = appendableSource.getVersion();
+        const summary =
+          await requireLiveDetectionSource(appendableSource).finalizeCoverage(
+            coverageEndTime,
+          );
+
+        // Finalizing changes what the displayed instant selects: it closes a
+        // frame that was still open, or extends the last one to the end of
+        // media. Both are writes like any other and need the same redraw.
+        requestDetectionRefresh(
+          appendableSource,
+          previousVersion,
+          getDisplayedRange(false),
         );
+
+        return summary;
       },
 
       async replaceDetectionFrames(frames, writeOptions) {

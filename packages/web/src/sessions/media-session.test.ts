@@ -556,6 +556,35 @@ describe("media session", () => {
     session.destroy();
   });
 
+  it("redraws when finalizing coverage changes the displayed instant", async () => {
+    resetMocks();
+    const { createMediaSession } = await import("../index");
+
+    const session = await createMediaSession({
+      container: createContainer(),
+      detections: { appendable: { datasetId: "finalized-refresh" } },
+      media: "sample.mp4",
+      renderer: { autoPlay: false },
+    });
+
+    await session.appendDetectionFrames([
+      { detections: [{ id: "open" }], frameIndex: 0, mediaTime: 0 },
+    ]);
+
+    const refresh = vi
+      .spyOn(session.renderer, "refresh")
+      .mockResolvedValue(undefined);
+
+    // Finalizing closes the frame the displayed instant is showing, so it is a
+    // write like any other and has to redraw.
+    await session.finalizeDetectionCoverage();
+
+    await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+
+    refresh.mockRestore();
+    session.destroy();
+  });
+
   it("coalesces refreshes for detections that cover the displayed time", async () => {
     resetMocks();
     const { createMediaSession } = await import("../index");
