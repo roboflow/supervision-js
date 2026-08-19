@@ -93,6 +93,18 @@ describe("media renderer over a push-based media source", () => {
     renderer.destroy();
   });
 
+  it("refuses a non-unit playback rate instead of faking it in the state", async () => {
+    const producer = createProducer();
+    const renderer = await createRenderer(producer, createScene());
+
+    expect(() => renderer.setPlaybackRate(4)).toThrow(
+      /fixed at 1 under engine-paced presentation/,
+    );
+    expect(renderer.getState().playbackRate).toBe(1);
+    renderer.setPlaybackRate(1);
+    renderer.destroy();
+  });
+
   it("reads playback state from the producer, seeking included", async () => {
     const producer = createProducer();
     const renderer = await createRenderer(producer, createScene());

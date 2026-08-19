@@ -361,6 +361,15 @@ export async function createMediaRendererCore(
         );
       }
 
+      // Under engine-paced presentation there is no pull controller to slow
+      // down or speed up, and the engine protocol carries no rate, so a
+      // non-unit rate would only falsify the state readout.
+      if (!playbackController && playbackRate !== 1) {
+        throw new Error(
+          "Playback rate is fixed at 1 under engine-paced presentation.",
+        );
+      }
+
       playbackController?.setPlaybackRate(playbackRate);
       runtimeState.setPlaybackRate(playbackRate);
     },
