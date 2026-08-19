@@ -7,7 +7,7 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
-import { basename, resolve } from "node:path";
+import { basename, extname, resolve } from "node:path";
 import process from "node:process";
 import { spawn } from "node:child_process";
 import { URL } from "node:url";
@@ -430,9 +430,8 @@ async function writeFixtureMeta(options) {
     inferenceLabel: "SAM3",
     media: {
       file: options.sourceFile,
-      loadingStatusLabel: `stream-normalizing ${options.displayName}`,
-      normalizeInBrowser: true,
-      readyStatusLabel: `${options.displayName} source media | browser-normalized WebM 30fps`,
+      loadingStatusLabel: `opening ${options.displayName}`,
+      readyStatusLabel: `${options.displayName} | video engine, source ${extname(options.sourceFile).slice(1).toUpperCase()}`,
     },
     sampleName: options.sampleName,
     schema: "supervision-js.demo.sam3-fixture-meta",
@@ -449,9 +448,10 @@ Generated SAM3 fixture for \`${options.sourceFile}\`.
 
 ## Runtime Shape
 
-The demo loads the original media file and normalizes it in-browser to the same
-30fps WebM timeline used to extract the frames for SAM3. Detections are loaded
-from committed JSON chunks instead of calling SAM3 at runtime.
+The demo plays this original media file. Detections were extracted from the same
+file's own frames at its native frame rate, so \`frameIndex\` counts presented
+source frames and detections land on the pixels they were computed from. The
+demo loads them from committed JSON chunks instead of calling SAM3 at runtime.
 
 ## Prompts
 

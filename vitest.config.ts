@@ -104,6 +104,7 @@ export default defineConfig({
       "packages/**/*.test.ts",
       "demo/src/**/*.test.ts",
       "examples/react-native/src/**/*.test.ts",
+      "tools/**/*.test.ts",
     ],
   },
 });

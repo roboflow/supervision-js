@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createWriteStream } from "node:fs";
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 
@@ -8,6 +8,7 @@ const DEFAULT_CHROME_DEBUG_URL = "http://127.0.0.1:9223";
 const DEFAULT_FIXTURE_URL = "http://127.0.0.1:5175/";
 const DEFAULT_OUTPUT = "tools/sam3-fixture/output/frames.jsonl";
 const DEFAULT_QUALITY = 0.92;
+const FRAMES_MANIFEST_FILE = "frames.meta.json";
 
 const options = parseArgs(process.argv.slice(2));
 
@@ -35,13 +36,27 @@ try {
     sourceFile: options.sourceFile,
     sourceUrl: options.sourceUrl,
   });
-  const frameCount = options.count ?? manifest.video.estimatedFrameCount;
+  const sourceFrameCount =
+    manifest.video.frameCount ?? manifest.video.estimatedFrameCount;
 
-  if (!Number.isInteger(frameCount) || frameCount <= 0) {
+  if (!Number.isInteger(sourceFrameCount) || sourceFrameCount <= 0) {
     throw new Error(
-      "Unable to infer frame count from the normalized fixture manifest. Pass --count explicitly.",
+      `The fixture manifest reports no source frames: frameCount=${sourceFrameCount}.`,
     );
   }
+
+  const frameCount = options.count ?? sourceFrameCount - options.startFrame;
+
+  if (frameCount <= 0 || options.startFrame + frameCount > sourceFrameCount) {
+    throw new Error(
+      `Requested frames past the end of ${options.sourceFile ?? "the source media"}: startFrame=${options.startFrame}, count=${frameCount}, frameCount=${sourceFrameCount}.`,
+    );
+  }
+
+  await writeFile(
+    path.join(path.dirname(options.output), FRAMES_MANIFEST_FILE),
+    `${JSON.stringify(manifest, null, 2)}\n`,
+  );
 
   const output = createWriteStream(options.output, { encoding: "utf8" });
 
@@ -323,14 +338,17 @@ node tools/sam3-fixture/extract-frames.mjs \\
 Options:
   --batch-size <count>               default: 1
   --chrome-debug-url <url>            default: ${DEFAULT_CHROME_DEBUG_URL}
-  --count <frames>                    default: normalized manifest frame count
+  --count <frames>                    default: every source frame after --start-frame
   --output <path>                     default: ${DEFAULT_OUTPUT}
   --quality <0..1>                    default: ${DEFAULT_QUALITY}
   --sample-name <name>
   --source-file <name>
   --source-url <url>
   --start-frame <frameIndex>          default: 0
-  --url <fixture page url>            default: ${DEFAULT_FIXTURE_URL}`);
+  --url <fixture page url>            default: ${DEFAULT_FIXTURE_URL}
+
+The source frame manifest is written next to --output as ${FRAMES_MANIFEST_FILE};
+run-sam3.mjs reads the real frame rate and frame times from it.`);
 }
 
 function removeUndefinedProperties(value) {

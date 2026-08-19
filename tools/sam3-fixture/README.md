@@ -1,8 +1,8 @@
 # SAM3 Fixture Tooling
 
 This internal tool creates committed demo fixtures from local videos. It is
-deliberately demo-owned: the reusable library feature is loading normalized
-media plus chunked detections; SAM3 calls are only fixture/demo tooling.
+deliberately demo-owned: the reusable library feature is loading media plus
+chunked detections; SAM3 calls are only fixture/demo tooling.
 
 ## One-Command Fixture Creation
 
@@ -27,9 +27,8 @@ The command:
 
 1. Copies the original media into `demo/fixtures/<sample-name>/`.
 2. Starts the fixture Vite page and a Chrome remote-debug session if needed.
-3. Normalizes the copied media in the browser to WebM VP9 at 30fps.
-4. Extracts deterministic normalized-frame JPEGs from the center of each frame
-   slot.
+3. Builds the source frame time table from the copied media's own packets.
+4. Extracts one JPEG per source frame, at that frame's own timestamp.
 5. Calls Roboflow Serverless SAM3 for the requested class prompts.
 6. Writes `detections.json`, chunked `detections/*.json`, and
    `detections.manifest.json`.
@@ -38,10 +37,8 @@ The command:
 SAM3 `output_prob_thresh` is fixed at `0.1` so generated fixtures are dense
 enough to stress-test mask rendering.
 
-The generated demo fixture uses the original media file at runtime. The browser
-normalizes that media live through the same `createMediaSession(..., normalize:
-{ stream: true })` path used by uploads, then reads detections from the
-committed chunk cache instead of calling SAM3 again.
+The demo plays the same original file the frames came from, and reads detections
+from the committed chunk cache instead of calling SAM3 again.
 
 Useful options:
 
@@ -56,6 +53,60 @@ npm run fixture:sam3:create -- \
 
 `--limit` is useful for smoke-testing the pipeline on a small frame count before
 running a full 1-2 minute sample.
+
+## Frame Identity
+
+There is no transcode, no proxy, and no forced frame rate. A resampled proxy
+duplicates or drops frames relative to the file the demo plays, which detaches
+every detection index from the pixels it was computed from.
+
+`prepareSam3Fixture` opens the original file with mediabunny's `ALL_FORMATS` and
+walks its primary video track with `EncodedPacketSink`, collecting every packet's
+timestamp and duration. Packets iterate in **decode** order, so B-frame
+reordering puts them out of presentation order: the horse trail sample starts
+`0, 0.1333, 0.0667, 0.0333, ...`. Sorting the collected packets by timestamp
+produces the presentation order the table is built from.
+
+```text
+frameIndex = position in the timestamp-sorted table
+mediaTime  = table[frameIndex].timestamp
+endTime    = table[frameIndex + 1].timestamp, or the track end for the last frame
+```
+
+Batches map ordinals straight through that table. A batch of
+`startFrameIndex..startFrameIndex + count` becomes the exact timestamps of those
+frames, requested through `CanvasSink.canvasesAtTimestamps` with a sub-millisecond
+offset that keeps each query strictly inside its own frame interval. Every
+decoded canvas is checked against its table entry within 2ms; a drift throws with
+both the expected and the decoded timestamp rather than writing a mispaired
+frame. Requesting past the end of the table throws instead of returning a short
+batch.
+
+At playback the demo selects detections with
+`DetectionFrameSelectionMode.NearestFrameIndex`, using the manifest's real
+`frameRate` and `frameIndexOriginTime = video.firstTimestamp`.
+
+### Constant vs variable frame rate
+
+Constant frame rate is the validated path. The two committed samples measure as:
+
+| sample                  | frames | duration | frameRate |
+| ----------------------- | -----: | -------: | --------: |
+| `basketball_sample.mp4` |    225 |     9.0s |     25.00 |
+| `1min-horse-video.mov`  |   2113 |  70.423s |    30.004 |
+
+The horse trail source is not perfectly uniform: 64 of its 2112 intervals are one
+timescale tick off (31.667ms or 35ms instead of 33.333ms). It still round-trips
+exactly, and the manifest reports that as `video.frameIndexRoundTripError: 0`,
+meaning `round((mediaTime - firstTimestamp) * frameRate)` recovers the source
+frame index for every frame in the file.
+
+On genuinely variable-rate media that error will be non-zero, and index-based
+selection can land on a neighbouring frame. Detection frames always carry exact
+`mediaTime` and `endTime`, so such a fixture should be played back with
+`DetectionFrameSelectionMode.Interval` instead, which pairs by interval rather
+than by grid position. Check `frameIndexRoundTripError` in the extractor manifest
+before committing a fixture from a new source.
 
 ## Output Shape
 
@@ -75,8 +126,9 @@ demo/fixtures/<sample-name>/
 ```
 
 `raw-sam3.jsonl` keeps request/response provenance without the API key or image
-payloads. Extracted JPEG frame JSONL is temporary and written under
-`tools/sam3-fixture/output/<sample-name>/frames.jsonl`, which is ignored by git.
+payloads. Extracted JPEG frames and the source frame manifest are temporary and
+written under `tools/sam3-fixture/output/<sample-name>/` as `frames.jsonl` and
+`frames.meta.json`, which git ignores.
 
 ## Lower-Level Commands
 
@@ -102,6 +154,10 @@ npm run fixture:sam3:chunk -- \
   --dataset-id my_sample_v1
 ```
 
+`fixture:sam3:extract` writes `frames.meta.json` next to its `--output`.
+`fixture:sam3:run` reads the source frame rate, frame count, duration, and first
+timestamp from it; pass `--frames-meta` to point somewhere else.
+
 The browser extractor still exposes backwards-compatible basketball aliases:
 
 ```js
@@ -120,32 +176,45 @@ await window.prepareSam3Fixture({
 await window.getSam3FrameBatch({ startFrameIndex: 0, count: 30 });
 ```
 
-## Frame Semantics
+## Manifest
 
-Frames are requested by deterministic normalized frame index and sampled from
-the center of each frame slot:
+`prepareSam3Fixture` returns a version 2 manifest. Version 1 described a WebM
+proxy and a forced 30fps grid; it had a `normalized` block, which version 2 does
+not.
 
-```text
-sampleQueryTime = (frameIndex + 0.5) / 30
+```json
+{
+  "schema": "supervision-js.tools.sam3-fixture.manifest",
+  "version": 2,
+  "sampleName": "horse_trail",
+  "source": { "url": "...", "file": "...", "size": 0, "mimeType": null },
+  "video": {
+    "width": 1504,
+    "height": 2016,
+    "duration": 70.42333333333333,
+    "firstTimestamp": 0,
+    "frameCount": 2113,
+    "frameRate": 30.00425995172055,
+    "averagePacketRate": 30.00425995172117,
+    "frameIndexRoundTripError": 0,
+    "estimatedFrameCount": 2113
+  }
+}
 ```
 
-Each detection frame stores:
-
-```text
-frameIndex = deterministic 30fps slot
-mediaTime = decoded normalized sample timestamp
-endTime = mediaTime + decoded sample duration
-```
-
-The renderer uses `DetectionFrameSelectionMode.NearestFrameIndex` with
-`frameRate = 30`, so samples resolve by the same normalized timeline used for
-SAM3 extraction.
+`frameRate` is `frameCount / duration`. `averagePacketRate` is the same count
+over the summed packet durations, kept as the raw unsmoothed reading.
+`estimatedFrameCount` is the version 1 name for `frameCount` and now carries the
+real table length, not a duration estimate.
 
 ## Verification
 
 ```sh
 npm run fixture:sam3:build
+npx vitest run tools/sam3-fixture
 ```
 
-This builds the package, typechecks the fixture page, and builds the Vite
-fixture tool. It intentionally does not call SAM3.
+The build typechecks the fixture page and builds the Vite fixture tool. The tests
+cover the frame time table: decode-order sorting, duplicate and missing timestamp
+rejection, batch mapping at the table tail, and last-frame `endTime`. Neither
+calls SAM3.

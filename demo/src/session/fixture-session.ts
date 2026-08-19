@@ -64,7 +64,7 @@ export async function createFixtureSession(
       detections: {
         source: detectionSource.detectionSource,
         sync: {
-          frameIndexOriginTime: 0,
+          frameIndexOriginTime: manifest.video.firstTimestamp ?? 0,
           frameRate: manifest.inference?.frameRate ?? manifest.frameRate,
           selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
         },

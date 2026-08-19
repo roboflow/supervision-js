@@ -125,6 +125,12 @@ export interface DemoFixtureDetectionManifest extends DetectionFrameChunkManifes
     readonly height: number;
     readonly frameRate: number;
     readonly duration: number;
+    /**
+     * Presentation timestamp of source frame index 0. Absent on fixtures
+     * extracted from a normalized proxy, whose grid always started at zero.
+     */
+    readonly firstTimestamp?: number;
+    readonly frameCount?: number;
   };
   readonly classNames?: readonly string[];
   readonly geometry?: DemoFixtureGeometrySummary;
