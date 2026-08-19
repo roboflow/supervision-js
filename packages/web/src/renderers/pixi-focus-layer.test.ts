@@ -44,6 +44,7 @@ const maskFrame: DetectionFrame = {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  FakeShaderFactory.descriptors.length = 0;
 });
 
 describe("pixi focus layer", () => {
@@ -223,6 +224,33 @@ describe("pixi focus layer", () => {
     expect(mesh.shader.resources.uTexture).toBe(textureSource);
     expect(graphics.visible).toBe(false);
     expect(graphics.fill).not.toHaveBeenCalled();
+  });
+
+  it("declares a WebGL and a WebGPU program for the focus ID-mask shader", () => {
+    vi.stubGlobal("document", {
+      createElement: vi.fn(() => ({ height: 0, width: 0 })),
+    });
+
+    const layer = createPixiFocusLayer({
+      Container: FakeContainer as never,
+      Graphics: FakeGraphics as never,
+      ImageSource: FakeImageSource as never,
+      Mesh: FakeMesh as never,
+      MeshGeometry: FakeMeshGeometry as never,
+      Shader: FakeShaderFactory as never,
+      UniformGroup: FakeUniformGroup as never,
+    });
+
+    layer.createDisplay({ height: 80, width: 120 });
+
+    const descriptor = FakeShaderFactory.descriptors.at(-1)!;
+
+    expect(descriptor.gl.vertex.length).toBeGreaterThan(0);
+    expect(descriptor.gl.fragment.length).toBeGreaterThan(0);
+    expect(descriptor.gpu.vertex.entryPoint).toBe("mainVertex");
+    expect(descriptor.gpu.fragment.entryPoint).toBe("mainFragment");
+    expect(descriptor.gpu.vertex.source).toContain("fn mainVertex(");
+    expect(descriptor.gpu.fragment.source).toContain("fn mainFragment(");
   });
 
   it("uses a bounds cutout for an unreadable mask when an ID-mask artifact is unavailable", () => {
@@ -418,8 +446,21 @@ class FakeShader {
   readonly destroy = vi.fn();
 }
 
+type ShaderDescriptor = {
+  readonly gl: { readonly fragment: string; readonly vertex: string };
+  readonly gpu: {
+    readonly fragment: { readonly entryPoint: string; readonly source: string };
+    readonly vertex: { readonly entryPoint: string; readonly source: string };
+  };
+  readonly resources: Record<string, unknown>;
+};
+
 class FakeShaderFactory {
-  static from(options: { readonly resources: Record<string, unknown> }) {
+  static readonly descriptors: ShaderDescriptor[] = [];
+
+  static from(options: ShaderDescriptor) {
+    FakeShaderFactory.descriptors.push(options);
+
     return new FakeShader(options.resources);
   }
 }

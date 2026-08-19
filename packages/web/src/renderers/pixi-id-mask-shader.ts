@@ -39,6 +39,10 @@ type MeshGeometryConstructor = new (options: {
 type ShaderFactory = {
   from(options: {
     gl: { fragment: string; vertex: string };
+    gpu: {
+      fragment: { entryPoint: string; source: string };
+      vertex: { entryPoint: string; source: string };
+    };
     resources: Record<string, unknown>;
   }): PixiShader;
 };
@@ -179,6 +183,16 @@ export function createPixiIdMaskShaderRenderer(options: {
       gl: {
         fragment: idMaskFragmentShader,
         vertex: idMaskVertexShader,
+      },
+      gpu: {
+        fragment: {
+          entryPoint: "mainFragment",
+          source: idMaskFragmentWgsl,
+        },
+        vertex: {
+          entryPoint: "mainVertex",
+          source: idMaskVertexWgsl,
+        },
       },
       resources: {
         maskUniforms: uniforms,
@@ -351,5 +365,174 @@ void main(void) {
   }
 
   finalColor = premultiplyAlpha(readFill(centerId) * vColor);
+}
+`;
+
+// A WGSL uniform array needs a 16-byte element stride, while Pixi uploads an f32
+// uniform array tightly packed, so uStrokeWidths is read back as vec4 lanes. That
+// only lines up while the palette entry count stays a multiple of four.
+const ID_MASK_STROKE_WIDTH_LANES = MAX_ID_MASK_PALETTE_ENTRIES / 4;
+
+const idMaskVertexWgsl = `
+struct GlobalUniforms {
+  uProjectionMatrix: mat3x3<f32>,
+  uWorldTransformMatrix: mat3x3<f32>,
+  uWorldColorAlpha: vec4<f32>,
+  uResolution: vec2<f32>,
+}
+
+struct LocalUniforms {
+  uTransformMatrix: mat3x3<f32>,
+  uColor: vec4<f32>,
+  uRound: f32,
+}
+
+@group(0) @binding(0) var<uniform> globalUniforms: GlobalUniforms;
+@group(1) @binding(0) var<uniform> localUniforms: LocalUniforms;
+
+struct VertexOutput {
+  @builtin(position) position: vec4<f32>,
+  @location(0) vUV: vec2<f32>,
+  @location(1) vColor: vec4<f32>,
+}
+
+@vertex
+fn mainVertex(
+  @location(0) aPosition: vec2<f32>,
+  @location(1) aUV: vec2<f32>,
+) -> VertexOutput {
+  let modelViewProjectionMatrix =
+    globalUniforms.uProjectionMatrix *
+    globalUniforms.uWorldTransformMatrix *
+    localUniforms.uTransformMatrix;
+
+  var output: VertexOutput;
+
+  output.position = vec4<f32>(
+    (modelViewProjectionMatrix * vec3<f32>(aPosition, 1.0)).xy,
+    0.0,
+    1.0
+  );
+  output.vUV = aUV;
+  output.vColor = globalUniforms.uWorldColorAlpha * localUniforms.uColor;
+
+  return output;
+}
+`;
+
+const idMaskFragmentWgsl = `
+struct MaskUniforms {
+  uBorderEnabled: f32,
+  uFillPalette: array<vec4<f32>, ${MAX_ID_MASK_PALETTE_ENTRIES}>,
+  uMaxStrokeWidth: f32,
+  uStrokePalette: array<vec4<f32>, ${MAX_ID_MASK_PALETTE_ENTRIES}>,
+  uStrokeWidths: array<vec4<f32>, ${ID_MASK_STROKE_WIDTH_LANES}>,
+  uTextureSize: vec2<f32>,
+}
+
+@group(2) @binding(0) var<uniform> maskUniforms: MaskUniforms;
+@group(2) @binding(1) var uTexture: texture_2d<f32>;
+@group(2) @binding(2) var uSampler: sampler;
+
+fn sampleMaskId(uv: vec2<f32>) -> f32 {
+  return floor(textureSampleLevel(uTexture, uSampler, uv, 0.0).r * 255.0 + 0.5);
+}
+
+fn paletteIndex(maskId: f32) -> i32 {
+  return i32(clamp(maskId, 0.0, ${MAX_ID_MASK_PALETTE_ENTRIES - 1}.0));
+}
+
+fn readFill(maskId: f32) -> vec4<f32> {
+  return maskUniforms.uFillPalette[paletteIndex(maskId)];
+}
+
+fn readStroke(maskId: f32) -> vec4<f32> {
+  return maskUniforms.uStrokePalette[paletteIndex(maskId)];
+}
+
+fn readStrokeWidth(maskId: f32) -> f32 {
+  let index = paletteIndex(maskId);
+
+  return maskUniforms.uStrokeWidths[index / 4][index % 4];
+}
+
+fn premultiplyAlpha(color: vec4<f32>) -> vec4<f32> {
+  return vec4<f32>(color.rgb * color.a, color.a);
+}
+
+fn differs(left: f32, right: f32) -> bool {
+  return abs(left - right) > 0.5;
+}
+
+fn findNeighborStrokeId(uv: vec2<f32>, centerId: f32, texel: vec2<f32>) -> f32 {
+  var bestId = 0.0;
+
+  for (var offsetY = -${MAX_ID_MASK_STROKE_WIDTH}; offsetY <= ${MAX_ID_MASK_STROKE_WIDTH}; offsetY += 1) {
+    for (var offsetX = -${MAX_ID_MASK_STROKE_WIDTH}; offsetX <= ${MAX_ID_MASK_STROKE_WIDTH}; offsetX += 1) {
+      if (offsetX == 0 && offsetY == 0) {
+        continue;
+      }
+
+      let offsetDistance = max(abs(f32(offsetX)), abs(f32(offsetY)));
+
+      if (offsetDistance > maskUniforms.uMaxStrokeWidth) {
+        continue;
+      }
+
+      let maskId = sampleMaskId(uv + vec2<f32>(f32(offsetX), f32(offsetY)) * texel);
+
+      if (maskId < 0.5 || !differs(maskId, centerId)) {
+        continue;
+      }
+
+      if (readStrokeWidth(maskId) >= offsetDistance && readStroke(maskId).a > 0.0) {
+        bestId = maskId;
+      }
+    }
+  }
+
+  return bestId;
+}
+
+fn isBoundary(uv: vec2<f32>, centerId: f32, texel: vec2<f32>) -> bool {
+  return
+    differs(sampleMaskId(uv + vec2<f32>(texel.x, 0.0)), centerId) ||
+    differs(sampleMaskId(uv + vec2<f32>(-texel.x, 0.0)), centerId) ||
+    differs(sampleMaskId(uv + vec2<f32>(0.0, texel.y)), centerId) ||
+    differs(sampleMaskId(uv + vec2<f32>(0.0, -texel.y)), centerId);
+}
+
+@fragment
+fn mainFragment(
+  @location(0) vUV: vec2<f32>,
+  @location(1) vColor: vec4<f32>,
+) -> @location(0) vec4<f32> {
+  let centerId = sampleMaskId(vUV);
+  let texel = 1.0 / maskUniforms.uTextureSize;
+
+  if (centerId < 0.5) {
+    if (maskUniforms.uBorderEnabled > 0.5 && maskUniforms.uMaxStrokeWidth > 0.0) {
+      let borderId = findNeighborStrokeId(vUV, centerId, texel);
+
+      if (borderId > 0.5) {
+        return premultiplyAlpha(readStroke(borderId) * vColor);
+      }
+    }
+
+    return vec4<f32>(0.0);
+  }
+
+  if (maskUniforms.uBorderEnabled > 0.5) {
+    let shouldStroke =
+      readStrokeWidth(centerId) > 0.0 &&
+      readStroke(centerId).a > 0.0 &&
+      isBoundary(vUV, centerId, texel);
+
+    if (shouldStroke) {
+      return premultiplyAlpha(readStroke(centerId) * vColor);
+    }
+  }
+
+  return premultiplyAlpha(readFill(centerId) * vColor);
 }
 `;

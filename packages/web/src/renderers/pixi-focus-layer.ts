@@ -54,6 +54,10 @@ type MeshGeometryConstructor = new (options: {
 type ShaderFactory = {
   from(options: {
     gl: { fragment: string; vertex: string };
+    gpu: {
+      fragment: { entryPoint: string; source: string };
+      vertex: { entryPoint: string; source: string };
+    };
     resources: Record<string, unknown>;
   }): PixiShader;
 };
@@ -494,17 +498,19 @@ function createFocusIdMaskRenderer(options: {
   readonly mediaWidth: number;
 }): FocusIdMaskRenderer {
   const selectedIds = new Float32Array(MAX_FOCUS_MASK_IDS);
+  // uSelectedIds is read back as vec4 lanes, which WGSL only allows at a 16-byte
+  // aligned offset, so it has to stay the first entry of this group.
   const uniforms = new options.UniformGroup({
-    uOverlayColor: {
-      type: "vec4<f32>",
-      value: new Float32Array([0, 0, 0, 0]),
-    },
-    uSelectedCount: { type: "f32", value: 0 },
     uSelectedIds: {
       size: MAX_FOCUS_MASK_IDS,
       type: "f32",
       value: selectedIds,
     },
+    uOverlayColor: {
+      type: "vec4<f32>",
+      value: new Float32Array([0, 0, 0, 0]),
+    },
+    uSelectedCount: { type: "f32", value: 0 },
     uAmbient: { type: "f32", value: 0 },
   });
   const placeholderSource = new options.ImageSource({
@@ -590,6 +596,16 @@ function createFocusIdMaskRenderer(options: {
       gl: {
         fragment: focusIdMaskFragmentShader,
         vertex: focusIdMaskVertexShader,
+      },
+      gpu: {
+        fragment: {
+          entryPoint: "mainFragment",
+          source: focusIdMaskFragmentWgsl,
+        },
+        vertex: {
+          entryPoint: "mainVertex",
+          source: focusIdMaskVertexWgsl,
+        },
       },
       resources: {
         focusUniforms: uniforms,
@@ -708,5 +724,112 @@ void main(void) {
   }
 
   finalColor = uOverlayColor * vColor;
+}
+`;
+
+// A WGSL uniform array needs a 16-byte element stride, while Pixi uploads an f32
+// uniform array tightly packed, so the ids are read back as vec4 lanes. That only
+// lines up while the id count stays a multiple of four.
+const FOCUS_MASK_ID_LANES = MAX_FOCUS_MASK_IDS / 4;
+
+const focusIdMaskVertexWgsl = `
+struct GlobalUniforms {
+  uProjectionMatrix: mat3x3<f32>,
+  uWorldTransformMatrix: mat3x3<f32>,
+  uWorldColorAlpha: vec4<f32>,
+  uResolution: vec2<f32>,
+}
+
+struct LocalUniforms {
+  uTransformMatrix: mat3x3<f32>,
+  uColor: vec4<f32>,
+  uRound: f32,
+}
+
+@group(0) @binding(0) var<uniform> globalUniforms: GlobalUniforms;
+@group(1) @binding(0) var<uniform> localUniforms: LocalUniforms;
+
+struct VertexOutput {
+  @builtin(position) position: vec4<f32>,
+  @location(0) vUV: vec2<f32>,
+  @location(1) vColor: vec4<f32>,
+}
+
+@vertex
+fn mainVertex(
+  @location(0) aPosition: vec2<f32>,
+  @location(1) aUV: vec2<f32>,
+) -> VertexOutput {
+  let modelViewProjectionMatrix =
+    globalUniforms.uProjectionMatrix *
+    globalUniforms.uWorldTransformMatrix *
+    localUniforms.uTransformMatrix;
+
+  var output: VertexOutput;
+
+  output.position = vec4<f32>(
+    (modelViewProjectionMatrix * vec3<f32>(aPosition, 1.0)).xy,
+    0.0,
+    1.0
+  );
+  output.vUV = aUV;
+  output.vColor = globalUniforms.uWorldColorAlpha * localUniforms.uColor;
+
+  return output;
+}
+`;
+
+const focusIdMaskFragmentWgsl = `
+struct FocusUniforms {
+  uSelectedIds: array<vec4<f32>, ${FOCUS_MASK_ID_LANES}>,
+  uOverlayColor: vec4<f32>,
+  uSelectedCount: f32,
+  uAmbient: f32,
+}
+
+@group(2) @binding(0) var<uniform> focusUniforms: FocusUniforms;
+@group(2) @binding(1) var uTexture: texture_2d<f32>;
+@group(2) @binding(2) var uSampler: sampler;
+
+fn sampleMaskId(uv: vec2<f32>) -> f32 {
+  return floor(textureSampleLevel(uTexture, uSampler, uv, 0.0).r * 255.0 + 0.5);
+}
+
+fn readSelectedId(index: i32) -> f32 {
+  return focusUniforms.uSelectedIds[index / 4][index % 4];
+}
+
+fn isFocusedMask(maskId: f32) -> bool {
+  if (maskId < 0.5) {
+    return false;
+  }
+
+  if (focusUniforms.uAmbient > 0.5) {
+    return true;
+  }
+
+  for (var index = 0; index < ${MAX_FOCUS_MASK_IDS}; index += 1) {
+    if (f32(index) >= focusUniforms.uSelectedCount) {
+      break;
+    }
+
+    if (abs(readSelectedId(index) - maskId) < 0.5) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+@fragment
+fn mainFragment(
+  @location(0) vUV: vec2<f32>,
+  @location(1) vColor: vec4<f32>,
+) -> @location(0) vec4<f32> {
+  if (isFocusedMask(sampleMaskId(vUV))) {
+    return vec4<f32>(0.0);
+  }
+
+  return focusUniforms.uOverlayColor * vColor;
 }
 `;
