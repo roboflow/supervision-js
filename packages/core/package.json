@@ -23,6 +23,10 @@
       "types": "./dist/interactions/*.d.ts",
       "import": "./dist/interactions/*.js"
     },
+    "#post-processing/*": {
+      "types": "./dist/post-processing/*.d.ts",
+      "import": "./dist/post-processing/*.js"
+    },
     "#styles/*": {
       "types": "./dist/styles/*.d.ts",
       "import": "./dist/styles/*.js"
@@ -41,11 +45,17 @@
   ],
   "sideEffects": false,
   "scripts": {
-    "build": "npm run clean && npm run build:types && npm run build:js",
-    "build:js": "rollup -c",
-    "build:types": "tsc --emitDeclarationOnly -p tsconfig.json",
+    "build": "npm run build -w supervision-js-trackers && npm run clean && npm run build:types:local && npm run build:js:local",
+    "build:js": "npm run build -w supervision-js-trackers && npm run build:js:local",
+    "build:js:local": "rollup -c",
+    "build:types": "npm run build:types -w supervision-js-trackers && npm run build:types:local",
+    "build:types:local": "tsc --emitDeclarationOnly -p tsconfig.json",
     "clean": "node -e \"fs.rmSync('dist', { recursive: true, force: true })\"",
-    "dev": "rollup -c -w",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json"
+    "dev": "npm run build -w supervision-js-trackers && npm run dev:local",
+    "dev:local": "rollup -c -w",
+    "typecheck": "npm run build:types -w supervision-js-trackers && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json"
+  },
+  "devDependencies": {
+    "supervision-js-trackers": "file:../trackers"
   }
 }

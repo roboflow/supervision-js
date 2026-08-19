@@ -5,6 +5,7 @@
   "entryPoints": [
     "docs/public/api/sessions.ts",
     "docs/public/api/detections.ts",
+    "docs/public/api/post-processing.ts",
     "docs/public/api/rendering.ts",
     "docs/public/api/styles.ts",
     "docs/public/api/interactions.ts",
@@ -32,6 +33,7 @@
     "Editing",
     "Interactions",
     "Media Preparation",
+    "Post Processing",
     "Media Sessions",
     "Rendering",
     "Styles"
@@ -42,6 +44,7 @@
     "docs/public/getting-started.md",
     "docs/public/concepts.md",
     "docs/public/annotation-renderers.md",
+    "docs/public/post-processors.md",
     "docs/public/recipes.md"
   ],
   "readme": "docs/public/index.md",

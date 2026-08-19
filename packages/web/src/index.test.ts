@@ -71,6 +71,7 @@ describe("package entrypoint", () => {
       "DetectionInteractionState",
       "DetectionMaskEncoding",
       "DetectionPickTarget",
+      "DetectionPostProcessingMode",
       "DetectionTimelineOrigin",
       "FocusTargetMode",
       "KeypointMarkerShape",
@@ -104,22 +105,30 @@ describe("package entrypoint", () => {
       "RenderPreparationMode",
       "RenderPreparationWorkerStatus",
       "SUPERVISION_ROBOFLOW_COLOR",
+      "TrackingGeometry",
       "annotationRendererKinds",
       "annotationRenderers",
       "createArrayDetectionFrameSource",
       "createBrowserColdDetectionFrameStore",
       "createBufferedDetectionTimeline",
+      "createByteTrackTracker",
+      "createCBIoUTracker",
       "createChunkedDetectionFrameSource",
       "createColdDetectionFrameSource",
       "createCompositeDetectionFrameSource",
       "createDefaultAnnotationPresentation",
+      "createDefaultDetectionPostProcessingWorkerFactory",
+      "createDetectionPostProcessingPipeline",
       "createImageUrlMediaSource",
       "createMediaRenderer",
       "createMediaSession",
       "createMediaStreamRendererSource",
       "createMemoryColdDetectionFrameStore",
+      "createOCSortTracker",
+      "createSortTracker",
       "createStaticImageMediaSource",
       "createWritableDetectionFrameSource",
+      "detectionPostProcessors",
       "normalizeDetectionClassName",
       "normalizeMedia",
       "normalizeMediaProgressively",
@@ -127,6 +136,7 @@ describe("package entrypoint", () => {
       "prepareMedia",
       "prepareMediaProgressively",
       "probeMedia",
+      "projectDetectionFrameForTracking",
       "resolveDetectionClassColorStyle",
     ]);
     expect(entrypoint.createMediaRenderer).toEqual(expect.any(Function));
@@ -148,6 +158,12 @@ describe("package entrypoint", () => {
     );
     expect(entrypoint.createMediaSession).toEqual(expect.any(Function));
     expect(entrypoint.createWritableDetectionFrameSource).toEqual(
+      expect.any(Function),
+    );
+    expect(entrypoint.createDetectionPostProcessingPipeline).toEqual(
+      expect.any(Function),
+    );
+    expect(entrypoint.detectionPostProcessors.tracking).toEqual(
       expect.any(Function),
     );
     expect(entrypoint.normalizeMedia).toEqual(expect.any(Function));

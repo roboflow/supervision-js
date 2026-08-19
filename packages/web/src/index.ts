@@ -7,6 +7,46 @@ export { createColdDetectionFrameSource } from "supervision-js-core";
 export { createCompositeDetectionFrameSource } from "supervision-js-core";
 export { createMemoryColdDetectionFrameStore } from "supervision-js-core";
 export { createWritableDetectionFrameSource } from "supervision-js-core";
+export {
+  createByteTrackTracker,
+  createCBIoUTracker,
+  createOCSortTracker,
+  createSortTracker,
+  detectionPostProcessors,
+  projectDetectionFrameForTracking,
+  TrackingGeometry,
+  type ByteTrackTracker,
+  type ByteTrackTrackerUpdate,
+  type ByteTrackTrackingDetectionPostProcessor,
+  type ByteTrackTrackingOptions,
+  type CBIoUTracker,
+  type CBIoUTrackerUpdate,
+  type CBIoUTrackingDetectionPostProcessor,
+  type CBIoUTrackingOptions,
+  type DetectionPostProcessor,
+  type DetectionPostProcessorFactory,
+  type OCSortTracker,
+  type OCSortTrackerUpdate,
+  type OCSortTrackingDetectionPostProcessor,
+  type OCSortTrackingOptions,
+  type SortTracker,
+  type SortTrackerUpdate,
+  type SortTrackingOptions,
+  type TrackingAssignment,
+  type TrackingDetectionPostProcessor,
+  type TrackingProjection,
+  type TrackingTracker,
+} from "supervision-js-core";
+export { createDetectionPostProcessingPipeline } from "#post-processing/detection-post-processing-pipeline";
+export { createDefaultDetectionPostProcessingWorkerFactory } from "#post-processing/default-tracking-worker";
+export {
+  DetectionPostProcessingMode,
+  type DetectionPostProcessingAppendResult,
+  type DetectionPostProcessingDiagnostics,
+  type DetectionPostProcessingPipeline,
+  type DetectionPostProcessingPipelineOptions,
+  type DetectionPostProcessingWorkerFactory,
+} from "#types/detection-post-processing";
 
 // Interaction and picking.
 export { pickDetectionAtPoint } from "supervision-js-core";
@@ -222,6 +262,7 @@ export {
   type DetectionFrameRetentionOptions,
   type DetectionFrameSelectionOptions,
   type DetectionFrameSource,
+  type DetectionFrameSourceChanges,
   type DetectionFrameSourceVersionRange,
   type DetectionPlaybackGateOptions,
   type DetectionTimelineContext,

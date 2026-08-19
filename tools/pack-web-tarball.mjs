@@ -30,6 +30,7 @@ const rootDir = path.resolve(
 );
 const webPackageName = "supervision";
 const corePackageName = "supervision-js-core";
+const internalTrackerPackageName = "supervision-js-trackers";
 
 function parseArgs(argv) {
   const options = { outDir: path.join(rootDir, "artifacts"), skipBuild: false };
@@ -160,6 +161,22 @@ function bundleCoreDependency(stagedManifestPath, coreVersion) {
   writeFileSync(stagedManifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
+/** Removes monorepo-only build dependencies from the bundled core manifest. */
+function removeInternalBuildDependencies(stagedManifestPath) {
+  const manifest = readManifest(stagedManifestPath);
+  const devDependencies = manifest.devDependencies ?? {};
+
+  delete devDependencies[internalTrackerPackageName];
+
+  if (Object.keys(devDependencies).length === 0) {
+    delete manifest.devDependencies;
+  } else {
+    manifest.devDependencies = devDependencies;
+  }
+
+  writeFileSync(stagedManifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
 function clearPreviousArchives(outDir) {
   mkdirSync(outDir, { recursive: true });
 
@@ -204,9 +221,15 @@ function main() {
     );
     copyPackageLicense(packageDir);
 
-    const coreManifest = readManifest(
-      path.join(packageDir, "node_modules", corePackageName, "package.json"),
+    const coreManifestPath = path.join(
+      packageDir,
+      "node_modules",
+      corePackageName,
+      "package.json",
     );
+    removeInternalBuildDependencies(coreManifestPath);
+
+    const coreManifest = readManifest(coreManifestPath);
 
     bundleCoreDependency(
       path.join(packageDir, "package.json"),

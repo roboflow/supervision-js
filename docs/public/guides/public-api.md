@@ -48,6 +48,7 @@ Start here for normal application code:
   rate, count, and current index while media timestamps remain canonical;
 - `DetectionFrame`
 - `Detection`
+- `Detection.trackerId` for identity assigned by a tracking post-processor
 - `Rect`
 - `DetectionMask`
 - `PolygonGeometry`
@@ -67,6 +68,10 @@ Start here for normal application code:
 - `AnnotationRenderer`
 - `AnnotationRendererKind`
 - `RegionAnnotationRenderer`
+- `detectionPostProcessors`
+- `createDetectionPostProcessingPipeline()`
+- `TrackingGeometry`
+- `DetectionPostProcessingMode`
 - `prepareMedia()`
 - `prepareMediaProgressively()`
 - `probeMedia()`
@@ -144,6 +149,9 @@ not the first thing most users should reach for:
 - polygons, polylines, keypoints, shared class-color helpers, and visibility
   controls;
 - render-preparation diagnostics and worker options.
+- ordered detection post-processing, bounded out-of-order buffering, tracking
+  diagnostics, in-place derived detection updates, optional raw-copy
+  preservation, and worker options.
 
 `RenderPreparationMode.Auto` uses the package's embedded Blob worker when the
 browser supports it and falls back to main-thread preparation after a worker
@@ -154,6 +162,11 @@ Hosts whose Content Security Policy blocks Blob workers may supply a
 `RenderPreparationWorkerFactory` and host the self-contained script exported at
 `supervision/render-preparation-worker`. That subpath is a deployment asset,
 not a JavaScript API; its message protocol is intentionally internal.
+
+Tracking uses the same deployment pattern. The self-contained script at
+`supervision/detection-post-processing-worker` can be hosted by strict-CSP
+applications through a `DetectionPostProcessingWorkerFactory`; its protocol is
+also private.
 
 ## Editing API
 
