@@ -1,5 +1,6 @@
 import {
   AnnotationGestureStateKind,
+  AnnotationHandleKind,
   BaseKeypointStyle,
   getAnnotationHandles,
   getDetectionRect,
@@ -83,7 +84,7 @@ export function createPixiAnnotationOverlayLayer(
         style,
         keypointStyle,
       );
-      drawSelectionHandles(graphics, context, style);
+      drawSelectionHandles(graphics, context, style, editingEngine);
       drawMarquee(graphics, context.marquee, style);
       drawGuides(graphics, editingEngine, context, style);
       drawLoading(graphics, context, style);
@@ -135,17 +136,17 @@ function drawEditingPreview(
     !detection.polyline
   ) {
     const { x, y, width, height } = detection.rect;
-    if (state.kind === AnnotationGestureStateKind.Creating) {
-      graphics
-        .roundRect(
-          x - width / 2,
-          y - height / 2,
-          width,
-          height,
-          resolveScreenLength(1, viewportScale),
-        )
-        .fill(boxFill);
-    }
+    // The source detection is hidden while it is edited, so the preview
+    // carries the box fill as well as its outline.
+    graphics
+      .roundRect(
+        x - width / 2,
+        y - height / 2,
+        width,
+        height,
+        resolveScreenLength(1, viewportScale),
+      )
+      .fill(boxFill);
     drawPixiPath(
       graphics,
       [
@@ -357,6 +358,7 @@ function drawSelectionHandles(
   graphics: PixiGraphics,
   context: Parameters<PixiAnnotationOverlayLayer["draw"]>[0],
   style: ResolvedAnnotationOverlayStyle,
+  engine: AnnotationEditingEngine | undefined,
 ) {
   const selected = new Set(context.selectedDetectionIds);
   for (const [detectionIndex, detection] of (
@@ -380,19 +382,32 @@ function drawSelectionHandles(
       detection,
       styleContext,
     ) ?? { alpha: 1, color: 0x2563eb, width: 2 };
-    for (const handle of getAnnotationHandles(
-      detection,
-      context.viewportScale,
-    )) {
+    // Handles ride on the live preview so they follow a move or reshape.
+    const state = engine?.getState();
+    const source =
+      state &&
+      (state.kind === AnnotationGestureStateKind.Moving ||
+        state.kind === AnnotationGestureStateKind.Resizing) &&
+      state.preview &&
+      state.activeDetectionId === detection.id
+        ? state.preview
+        : detection;
+    for (const handle of getAnnotationHandles(source, context.viewportScale)) {
+      const alpha =
+        handle.kind === AnnotationHandleKind.AddVertex
+          ? style.selectionHandle.addVertexAlpha
+          : handle.kind === AnnotationHandleKind.Keypoint
+            ? style.selectionHandle.keypointAlpha
+            : 1;
+      if (alpha <= 0) continue;
       graphics.circle(handle.point.x, handle.point.y, handle.radius);
-      graphics.fill({
-        ...fill,
-        alpha:
-          handle.kind === "addVertex"
-            ? style.selectionHandle.addVertexAlpha
-            : fill.alpha,
-      });
-      graphics.stroke(resolvePixiStroke(stroke, context.viewportScale));
+      graphics.fill({ ...fill, alpha: fill.alpha * alpha });
+      graphics.stroke(
+        resolvePixiStroke(
+          { ...stroke, alpha: stroke.alpha * alpha },
+          context.viewportScale,
+        ),
+      );
     }
   }
 }
@@ -550,6 +565,7 @@ interface ResolvedAnnotationOverlayStyle {
       NonNullable<AnnotationOverlayStyle["selectionHandle"]>["stroke"]
     >;
     readonly addVertexAlpha: number;
+    readonly keypointAlpha: number;
   };
   readonly marquee: { readonly fill: BoxFillStyle };
   readonly guide: {
@@ -579,6 +595,7 @@ const DEFAULT_ANNOTATION_OVERLAY_STYLE: ResolvedAnnotationOverlayStyle = {
     fill: { alpha: 1, color: 0xffffff },
     stroke: { alpha: 1, color: 0x2563eb, width: 2 },
     addVertexAlpha: 0.55,
+    keypointAlpha: 1,
   },
   marquee: { fill: { alpha: 0.2, color: 0x3b82f6 } },
   guide: {

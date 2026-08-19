@@ -95,10 +95,11 @@ describe("annotation editing engine", () => {
     };
     const keypointHandles = getAnnotationHandles(keypointDetection);
     expect(keypointHandles).toHaveLength(10);
+    // The skeleton's box carries the same inset handles as any box.
     expect(keypointHandles[0]).toMatchObject({
       id: "nw",
       kind: AnnotationHandleKind.Resize,
-      point: { x: 3, y: 8 },
+      point: { x: 15, y: 20 },
     });
     expect(keypointHandles.at(-1)).toMatchObject({
       id: "kp-1",
@@ -121,7 +122,7 @@ describe("annotation editing engine", () => {
     );
   });
 
-  it("resizes a skeleton's box from an outset handle without moving its keypoints", () => {
+  it("resizes a skeleton's box from its handles without moving its keypoints", () => {
     const detection = {
       keypoints: {
         edges: [[0, 1]] as const,
@@ -137,7 +138,7 @@ describe("annotation editing engine", () => {
     )!;
 
     expect(
-      applyAnnotationHandleDrag(detection, southeast, { x: 47, y: 62 }),
+      applyAnnotationHandleDrag(detection, southeast, { x: 35, y: 50 }),
     ).toMatchObject({
       keypoints: {
         points: [

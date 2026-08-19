@@ -540,20 +540,18 @@ export function createPixiInteractionLayer(options: {
 
     if (nextKey === hoveredPickKey) {
       hoveredPick = nextPick;
-      if (container) {
-        if (!selectedHandleAt(pointerPoint)) {
-          container.cursor = nextPick ? "pointer" : resolveIdleCursor();
-        }
+      if (container && !selectedHandleAt(pointerPoint)) {
+        container.cursor = nextPick
+          ? hoverCursor(nextPick)
+          : resolveIdleCursor();
       }
       return;
     }
 
     hoveredPick = nextPick;
     hoveredPickKey = nextKey;
-    if (container) {
-      if (!selectedHandleAt(pointerPoint)) {
-        container.cursor = nextPick ? "pointer" : resolveIdleCursor();
-      }
+    if (container && !selectedHandleAt(pointerPoint)) {
+      container.cursor = nextPick ? hoverCursor(nextPick) : resolveIdleCursor();
     }
     options.interaction.onHover?.(nextPick);
     notifyStateChange();
@@ -641,12 +639,19 @@ export function createPixiInteractionLayer(options: {
     if (!container) return;
     const editingState = options.editingEngine?.getState();
     if (editingState?.kind === AnnotationGestureStateKind.Moving) {
-      container.cursor = "grabbing";
+      container.cursor = "move";
       return;
     }
     const handle = selectedHandleAt(point);
     container.cursor =
-      handle?.cursor ?? (hoveredPick ? "pointer" : resolveIdleCursor());
+      handle?.cursor ??
+      (hoveredPick ? hoverCursor(hoveredPick) : resolveIdleCursor());
+  }
+
+  /** Editable geometry drags, so it advertises `move`; a keypoint is a point target. */
+  function hoverCursor(pick: DetectionPickResult) {
+    if (!options.editingEngine || pick.detection.locked) return "pointer";
+    return pick.target === DetectionPickTarget.Keypoint ? "pointer" : "move";
   }
 
   function resolveIdleCursor() {

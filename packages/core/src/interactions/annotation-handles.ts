@@ -13,7 +13,6 @@ import { distanceToSegment } from "#utils/geometry";
 const HANDLE_RADIUS = 6;
 const ADD_HANDLE_RADIUS = 3.6;
 const HANDLE_HIT_SIZE = 16;
-const KEYPOINT_RESIZE_HANDLE_OUTSET = 12;
 
 export function getAnnotationHandles(
   detection: Detection,
@@ -35,7 +34,7 @@ export function getAnnotationHandles(
           ? []
           : [
               {
-                cursor: "move",
+                cursor: "pointer",
                 geometryIndex,
                 hitSize,
                 id: `kp-${geometryIndex}`,
@@ -47,15 +46,10 @@ export function getAnnotationHandles(
     );
     if (!detection.rect) return keypointHandles;
 
-    // Keep whole-skeleton resize handles outside the tight keypoint bounds so
-    // an extreme keypoint remains independently draggable.
+    // The skeleton's box resizes like any box; keypoints come last so a point
+    // sitting on the box edge still wins the hit test.
     return [
-      ...getBoxHandles(
-        detection.rect,
-        radius,
-        hitSize,
-        KEYPOINT_RESIZE_HANDLE_OUTSET / viewportScale,
-      ),
+      ...getBoxHandles(detection.rect, radius, hitSize),
       ...keypointHandles,
     ];
   }
@@ -84,11 +78,7 @@ export function applyAnnotationHandleDrag(
   if (detection.rect && handle.kind === AnnotationHandleKind.Resize) {
     // A skeleton's rect is an independent box around its keypoints: resizing
     // it never moves the points, which keep their own handles.
-    const resizePoint = resizeBoundaryPoint(detection.rect, handle, point);
-    return {
-      ...detection,
-      rect: resizeRect(detection.rect, handle.id, resizePoint),
-    };
+    return { ...detection, rect: resizeRect(detection.rect, handle.id, point) };
   }
 
   if (
@@ -163,16 +153,11 @@ export function offsetDetection(
   };
 }
 
-function getBoxHandles(
-  rect: Rect,
-  radius: number,
-  hitSize: number,
-  outset = 0,
-) {
-  const left = rect.x - rect.width / 2 - outset;
-  const right = rect.x + rect.width / 2 + outset;
-  const top = rect.y - rect.height / 2 - outset;
-  const bottom = rect.y + rect.height / 2 + outset;
+function getBoxHandles(rect: Rect, radius: number, hitSize: number) {
+  const left = rect.x - rect.width / 2;
+  const right = rect.x + rect.width / 2;
+  const top = rect.y - rect.height / 2;
+  const bottom = rect.y + rect.height / 2;
   const definitions: readonly [string, Point, string][] = [
     ["nw", { x: left, y: top }, "nwse-resize"],
     ["n", { x: rect.x, y: top }, "ns-resize"],
@@ -191,33 +176,6 @@ function getBoxHandles(
     point,
     radius,
   }));
-}
-
-function resizeBoundaryPoint(
-  rect: Rect,
-  handle: AnnotationHandleDefinition,
-  point: Point,
-): Point {
-  const left = rect.x - rect.width / 2;
-  const right = rect.x + rect.width / 2;
-  const top = rect.y - rect.height / 2;
-  const bottom = rect.y + rect.height / 2;
-  const boundary = {
-    x: handle.id.includes("w")
-      ? left
-      : handle.id.includes("e")
-        ? right
-        : rect.x,
-    y: handle.id.includes("n")
-      ? top
-      : handle.id.includes("s")
-        ? bottom
-        : rect.y,
-  };
-  return {
-    x: point.x + boundary.x - handle.point.x,
-    y: point.y + boundary.y - handle.point.y,
-  };
 }
 
 function getPathHandles(

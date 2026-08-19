@@ -58,6 +58,42 @@ describe("pixi interaction layer", () => {
     expect(display.cursor).toBe("nwse-resize");
   });
 
+  it("advertises move over editable geometry and pointer over keypoints", () => {
+    const skeletonFrame: DetectionFrame = {
+      detections: [
+        {
+          id: "pose-1",
+          keypoints: { edges: [], points: [{ x: 15, y: 20 }] },
+          rect: { height: 30, width: 20, x: 15, y: 30 },
+        },
+      ],
+      frameIndex: 3,
+      mediaTime: 0.1,
+    };
+    const layer = createPixiInteractionLayer({
+      Container: FakeContainer as never,
+      Rectangle: FakeRectangle as never,
+      canInteract: () => true,
+      detectionTimeline: createTimeline(skeletonFrame),
+      editingEngine: createAnnotationEditingEngine(),
+      interaction: { mode: MediaInteractionMode.PausedOnly },
+    });
+    const display = layer.createDisplay({
+      height: 80,
+      width: 120,
+    }) as FakeContainer;
+
+    layer.drawFrame(0.1);
+    display.emit("pointermove", createPointerEvent(display, 15, 38));
+    expect(display.cursor).toBe("move");
+
+    display.emit("pointermove", createPointerEvent(display, 15, 20));
+    expect(display.cursor).toBe("pointer");
+
+    display.emit("pointermove", createPointerEvent(display, 100, 70));
+    expect(display.cursor).toBe("default");
+  });
+
   it("uses one media-sized hit surface and ignores picking while gated off", () => {
     const onHover = vi.fn();
     const onSelect = vi.fn();
