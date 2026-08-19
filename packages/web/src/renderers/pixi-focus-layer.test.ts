@@ -253,6 +253,35 @@ describe("pixi focus layer", () => {
     expect(descriptor.gpu.fragment.source).toContain("fn mainFragment(");
   });
 
+  it("samples the ID mask once per fragment and stops the ID scan at the selected count", () => {
+    vi.stubGlobal("document", {
+      createElement: vi.fn(() => ({ height: 0, width: 0 })),
+    });
+
+    const layer = createPixiFocusLayer({
+      Container: FakeContainer as never,
+      Graphics: FakeGraphics as never,
+      ImageSource: FakeImageSource as never,
+      Mesh: FakeMesh as never,
+      MeshGeometry: FakeMeshGeometry as never,
+      Shader: FakeShaderFactory as never,
+      UniformGroup: FakeUniformGroup as never,
+    });
+
+    layer.createDisplay({ height: 80, width: 120 });
+
+    const descriptor = FakeShaderFactory.descriptors.at(-1)!;
+
+    for (const source of [
+      descriptor.gl.fragment,
+      descriptor.gpu.fragment.source,
+    ]) {
+      expect(source.match(/sampleMaskId\(vUV\)/g)).toHaveLength(1);
+      expect(source).toContain("uSelectedCount");
+      expect(source).toContain("break;");
+    }
+  });
+
   it("uses a bounds cutout for an unreadable mask when an ID-mask artifact is unavailable", () => {
     const unreadableMaskFrame: DetectionFrame = {
       ...maskFrame,
