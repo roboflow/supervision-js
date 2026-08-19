@@ -179,9 +179,18 @@ Android saved-video decoding is implemented (experimental) as a Nitro C++
   the BigInt with `asUint64()` (ExecuTorch, Skia) reject it. The pipeline is
   validated end-to-end on an emulator (decode → ExecuTorch segmentation → Skia
   masks); the physical-device same-buffer gate and performance numbers are
-  still pending, and `patches/` carries the two required node_modules patches
-  (VisionCamera surface-validity fix, upstream-worthy; an emulator-only
-  ExecuTorch scalar-sigmoid workaround).
+  still pending. `patches/` carries two node_modules patches, applied
+  automatically by the root `postinstall` (`patch-package --error-on-fail
+--error-on-warn`), so a clean `npm install` is enough to build a working
+  Android app. The VisionCamera surface-validity fix is required on every
+  Android host: without it `HybridFrameRendererView.setRenderer` connects an
+  `ImageWriter` to a not-yet-valid Surface during Fabric view creation and the
+  app dies on first camera mount with "The surface has been released"
+  (reproduced deterministically on a Pixel 10 Pro; upstream-worthy, no
+  released VisionCamera contains the fix as of 5.2.2). The ExecuTorch
+  scalar-sigmoid workaround is emulator-only — its body is gated on
+  `ro.kernel.qemu`, so it is dead code on physical devices, confirmed by a
+  full device segmentation run with the patch reverted.
 
 The remaining package work is Android physical-device validation, the GPU
 blit/rotation follow-up, and measurement for bounded prepared windows.
