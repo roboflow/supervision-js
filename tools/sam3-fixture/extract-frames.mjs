@@ -8,6 +8,7 @@ const DEFAULT_CHROME_DEBUG_URL = "http://127.0.0.1:9223";
 const DEFAULT_FIXTURE_URL = "http://127.0.0.1:5175/";
 const DEFAULT_OUTPUT = "tools/sam3-fixture/output/frames.jsonl";
 const DEFAULT_QUALITY = 0.92;
+const BATCH_PULL_CHUNK_CHARS = 262144;
 const FRAMES_MANIFEST_FILE = "frames.meta.json";
 
 const options = parseArgs(process.argv.slice(2));
@@ -110,15 +111,46 @@ async function evaluateFixturePrepare(client, options) {
 }
 
 async function evaluateFixtureBatch(client, options) {
-  const response = await client.send("Runtime.evaluate", {
-    awaitPromise: true,
-    expression: `window.getSam3FrameBatch(${JSON.stringify({
+  // A batch of base64 JPEG frames is multiple megabytes, and Node's built-in
+  // WebSocket has been seen dropping the debug socket (close 1006) on large
+  // CDP payloads. The page serializes the batch once and the driver pulls it
+  // in bounded slices instead of one giant evaluate result.
+  const stash = await evaluateExpression(
+    client,
+    `window.getSam3FrameBatch(${JSON.stringify({
       count: options.count,
       processedFrameCount: options.processedFrameCount,
       quality: options.quality,
       startFrameIndex: options.frameIndex,
       totalFrameCount: options.totalFrameCount,
-    })})`,
+    })}).then((batch) => {
+      const json = JSON.stringify(batch);
+      window.__sam3BatchStash = json;
+      return json.length;
+    })`,
+  );
+
+  const totalChars = stash;
+  const pieces = [];
+
+  for (let offset = 0; offset < totalChars; offset += BATCH_PULL_CHUNK_CHARS) {
+    pieces.push(
+      await evaluateExpression(
+        client,
+        `window.__sam3BatchStash.slice(${offset}, ${offset + BATCH_PULL_CHUNK_CHARS})`,
+      ),
+    );
+  }
+
+  await evaluateExpression(client, "delete window.__sam3BatchStash");
+
+  return JSON.parse(pieces.join(""));
+}
+
+async function evaluateExpression(client, expression) {
+  const response = await client.send("Runtime.evaluate", {
+    awaitPromise: true,
+    expression,
     returnByValue: true,
   });
 
@@ -197,6 +229,23 @@ function createCdpClient(webSocketUrl) {
   let nextId = 1;
   const pending = new Map();
 
+  // A long frame batch can hold one evaluate open for minutes. If the socket
+  // dies in that window the pending promise would never settle and Node would
+  // exit on an empty event loop with no error, so a close must reject
+  // everything in flight, loudly.
+  let keepalive;
+
+  socket.addEventListener("close", (event) => {
+    clearInterval(keepalive);
+    const reason = `Chrome debug socket closed (code ${event.code}${
+      event.reason ? `, ${event.reason}` : ""
+    }) with ${pending.size} request(s) in flight.`;
+    for (const callbacks of pending.values()) {
+      callbacks.reject(new Error(reason));
+    }
+    pending.clear();
+  });
+
   socket.addEventListener("message", (event) => {
     const message = JSON.parse(event.data);
 
@@ -224,8 +273,18 @@ function createCdpClient(webSocketUrl) {
     socket.addEventListener(
       "open",
       () => {
+        // The ping also pins Node's event loop open for the whole extraction,
+        // which otherwise drains and exits mid-await without any error.
+        keepalive = setInterval(() => {
+          if (socket.readyState === globalThis.WebSocket.OPEN) {
+            socket.send(
+              JSON.stringify({ id: nextId++, method: "Runtime.evaluate", params: { expression: "0" } }),
+            );
+          }
+        }, 15000);
         resolve({
           close() {
+            clearInterval(keepalive);
             socket.close();
           },
           send(method, params = {}) {
