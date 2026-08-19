@@ -76,9 +76,31 @@ export function applyAnnotationHandleDrag(
   point: Point,
 ): Detection {
   if (detection.rect && handle.kind === AnnotationHandleKind.Resize) {
-    // A skeleton's rect is an independent box around its keypoints: resizing
-    // it never moves the points, which keep their own handles.
-    return { ...detection, rect: resizeRect(detection.rect, handle.id, point) };
+    const rect = resizeRect(detection.rect, handle.id, point);
+    const boxRelative = detection.keypoints?.boxRelative;
+    if (!detection.keypoints || !boxRelative?.some(Boolean)) {
+      return { ...detection, rect };
+    }
+    // Box-relative keypoints (unplaced template points) follow the rect;
+    // points the user positioned keep their coordinates.
+    const from = detection.rect;
+    const scaleX = from.width > 0 ? rect.width / from.width : 1;
+    const scaleY = from.height > 0 ? rect.height / from.height : 1;
+    return {
+      ...detection,
+      keypoints: {
+        ...detection.keypoints,
+        points: detection.keypoints.points.map((keypoint, index) =>
+          boxRelative[index]
+            ? {
+                x: rect.x + (keypoint.x - from.x) * scaleX,
+                y: rect.y + (keypoint.y - from.y) * scaleY,
+              }
+            : keypoint,
+        ),
+      },
+      rect,
+    };
   }
 
   if (
@@ -101,7 +123,18 @@ export function applyAnnotationHandleDrag(
   if (detection.keypoints) {
     const points = [...detection.keypoints.points];
     points[handle.geometryIndex] = point;
-    return { ...detection, keypoints: { ...detection.keypoints, points } };
+    // A positioned point no longer follows the box.
+    const boxRelative = detection.keypoints.boxRelative?.map(
+      (relative, index) => relative && index !== handle.geometryIndex,
+    );
+    return {
+      ...detection,
+      keypoints: {
+        ...detection.keypoints,
+        points,
+        ...(boxRelative ? { boxRelative } : {}),
+      },
+    };
   }
   return detection;
 }

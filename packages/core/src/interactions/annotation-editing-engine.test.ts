@@ -150,6 +150,50 @@ describe("annotation editing engine", () => {
     });
   });
 
+  it("scales only box-relative keypoints with the box and unflags dragged points", () => {
+    const detection = {
+      keypoints: {
+        boxRelative: [true, false],
+        edges: [[0, 1]] as const,
+        points: [
+          { x: 20, y: 30 },
+          { x: 23, y: 36 },
+        ],
+      },
+      rect: { x: 20, y: 30, width: 10, height: 20 },
+    };
+    const handles = getAnnotationHandles(detection);
+    const southeast = handles.find((handle) => handle.id === "se")!;
+
+    // Growing the box from its south-east corner: the template point at the
+    // old center lands on the new center, the placed point stays put.
+    expect(
+      applyAnnotationHandleDrag(detection, southeast, { x: 35, y: 50 }),
+    ).toMatchObject({
+      keypoints: {
+        boxRelative: [true, false],
+        points: [
+          { x: 25, y: 35 },
+          { x: 23, y: 36 },
+        ],
+      },
+      rect: { x: 25, y: 35, width: 20, height: 30 },
+    });
+
+    const keypointHandle = handles.find((handle) => handle.id === "kp-0")!;
+    const dragged = applyAnnotationHandleDrag(detection, keypointHandle, {
+      x: 18,
+      y: 22,
+    });
+    expect(dragged.keypoints).toMatchObject({
+      boxRelative: [false, false],
+      points: [
+        { x: 18, y: 22 },
+        { x: 23, y: 36 },
+      ],
+    });
+  });
+
   it("moves a whole skeleton without changing its shape", () => {
     const onCommit = vi.fn();
     const engine = createAnnotationEditingEngine({ onCommit });

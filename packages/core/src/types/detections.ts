@@ -59,6 +59,13 @@ export interface KeypointGeometry {
   readonly points: readonly Point[];
   readonly edges: readonly KeypointEdge[];
   readonly visibility?: readonly KeypointVisibility[];
+  /**
+   * Per-point flag for keypoints placed relative to `rect`, such as template
+   * points a user has not positioned yet. Resizing the rect scales these
+   * points with it; the others keep their coordinates. Dragging a point
+   * clears its flag.
+   */
+  readonly boxRelative?: readonly boolean[];
 }
 
 export interface SkeletonVertexDefinition {
