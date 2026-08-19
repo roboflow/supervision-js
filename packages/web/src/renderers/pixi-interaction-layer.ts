@@ -642,6 +642,20 @@ export function createPixiInteractionLayer(options: {
       container.cursor = "move";
       return;
     }
+    if (
+      editingState?.kind === AnnotationGestureStateKind.Resizing &&
+      selectedPick
+    ) {
+      // Keep the grabbed handle's cursor for the whole drag.
+      const active = getAnnotationHandles(
+        selectedPick.detection,
+        options.getViewportScale?.() ?? 1,
+      ).find((handle) => handle.id === editingState.activeHandleId);
+      if (active) {
+        container.cursor = active.cursor;
+        return;
+      }
+    }
     const handle = selectedHandleAt(point);
     container.cursor =
       handle?.cursor ??
