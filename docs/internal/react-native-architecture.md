@@ -46,11 +46,11 @@ directly through Skia or a future native GPU adapter.
 
 Mediabunny is browser-focused and stays in `packages/web`. React Native models
 platform media through `MediaFrameSource`, `MediaFrameProcessor`, and
-`MediaRendererAdapter`. The current iOS saved-video adapter wraps the optional
-Nitro `VideoFrameSource`. The VisionCamera adapter owns the camera/device/
-permission view, frame output, native frame renderer, and orientation
-presentation. Native handles stay outside core, and Android saved-video
-decoding is not yet implemented.
+`MediaRendererAdapter`. The saved-video adapter wraps the optional Nitro
+`VideoFrameSource`, implemented on iOS (AVFoundation/Swift) and on Android
+(NDK MediaCodec/C++, experimental). The VisionCamera adapter owns the
+camera/device/permission view, frame output, native frame renderer, and
+orientation presentation. Native handles stay outside core.
 
 ## Storage Direction
 
@@ -160,18 +160,42 @@ native-pointer pump and Skia presentation lanes remain package-private.
 alias. File sessions are analysis-paced, support pause/play/stop, and report
 seeking as unsupported.
 
-Android saved-video decoding is **not implemented yet**. The source reports
-`android-video-file-source-not-implemented-yet` before attempting Nitro lookup.
-Its implementation path is a Nitro C++ `VideoFrameSource` using
-`AMediaExtractor` + `AMediaCodec` and an API-26+ `AImageReader`/
-`AHardwareBuffer` output. It must preserve presentation timestamps and display
-orientation, expose exactly-once buffer release, register CMake/Gradle
-autolinking, and be validated with the same buffer in ExecuTorch and Skia on a
-physical device.
+Android saved-video decoding is implemented (experimental) as a Nitro C++
+`VideoFrameSource` under `packages/react-native/android/`: `AMediaExtractor`
 
-The remaining package work is Android saved-video decoding and measurement for
-bounded prepared windows. Inference engines remain injected producers rather
-than renderer dependencies.
+- `AMediaCodec` decode into a YUV_420_888 `AImageReader` (API 26+), and each
+  frame is converted on the decode thread into a source-allocated RGBA
+  `AHardwareBuffer` before entering the iOS-parity decode-ahead ring. The
+  conversion exists because MediaCodec renders YUV into an ImageReader surface
+  (an RGBA reader rejects the buffers), while ExecuTorch's Android
+  `FrameExtractor` only reads RGBA-family hardware buffers; a GPU blit is the
+  documented follow-up if device profiling shows the CPU convert dominating,
+  and it would also unlock rotated videos, which the source currently rejects
+  with an explicit error. Two hard-won constraints: the reader must keep
+  `GPU_SAMPLED_IMAGE` usage even though frames are read on the CPU (the codec
+  produces through gralloc and stalls against a CPU-only consumer), and the
+  handle `pointer` crosses JS as `UInt64`, not `Int64` — arm64 heap pointers
+  are top-byte-tagged, so a signed pointer goes negative and consumers reading
+  the BigInt with `asUint64()` (ExecuTorch, Skia) reject it. The pipeline is
+  validated end-to-end on an emulator (decode → ExecuTorch segmentation → Skia
+  masks); the physical-device same-buffer gate and performance numbers are
+  still pending. `patches/` carries two node_modules patches, applied
+  automatically by the root `postinstall` (`patch-package --error-on-fail
+--error-on-warn`), so a clean `npm install` is enough to build a working
+  Android app. The VisionCamera surface-validity fix is required on every
+  Android host: without it `HybridFrameRendererView.setRenderer` connects an
+  `ImageWriter` to a not-yet-valid Surface during Fabric view creation and the
+  app dies on first camera mount with "The surface has been released"
+  (reproduced deterministically on a Pixel 10 Pro; upstream-worthy, no
+  released VisionCamera contains the fix as of 5.2.2). The ExecuTorch
+  scalar-sigmoid workaround is emulator-only — its body is gated on
+  `ro.kernel.qemu`, so it is dead code on physical devices, confirmed by a
+  full device segmentation run with the patch reverted.
+
+The remaining package work is Android physical-device validation, the GPU
+blit/rotation follow-up, and measurement for bounded prepared windows.
+Inference engines remain injected producers rather than renderer
+dependencies.
 
 See [`react-native-live-rendering.md`](react-native-live-rendering.md) for the
 live rendering target and current V0 demo shape.

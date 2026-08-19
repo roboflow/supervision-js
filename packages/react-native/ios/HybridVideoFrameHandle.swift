@@ -25,11 +25,11 @@ final class HybridVideoFrameHandle: HybridVideoFrameHandleSpec {
     super.init()
   }
 
-  var pointer: Int64 {
+  var pointer: UInt64 {
     guard let retained else {
       return 0
     }
-    return Int64(Int(bitPattern: retained.toOpaque()))
+    return UInt64(UInt(bitPattern: retained.toOpaque()))
   }
 
   func release() throws {

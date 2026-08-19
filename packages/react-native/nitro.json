@@ -19,6 +19,10 @@
       "ios": {
         "language": "swift",
         "implementationClassName": "HybridVideoFrameSource"
+      },
+      "android": {
+        "language": "c++",
+        "implementationClassName": "HybridVideoFrameSource"
       }
     }
   },

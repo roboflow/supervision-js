@@ -255,14 +255,17 @@ Pause, play/resume, and stop are available; seeking is intentionally
 unsupported until native decoding can reposition accurately. The older
 `createReactNativeVideoSession()` name remains a deprecated forwarding alias.
 
-Saved-video decoding on Android is **not implemented yet**. On Android the
-file source fails with the stable
-`android-video-file-source-not-implemented-yet` reason rather than attempting a
-missing native module. The future implementation is a Nitro/C++ source backed
-by `AMediaExtractor` and `AMediaCodec`, delivering an API-26+
-`AHardwareBuffer` to the existing ExecuTorch and Skia consumers with explicit
-timestamp, orientation, and release ownership. Until that lands, do not claim
-cross-platform file support.
+Saved-video decoding on Android is implemented as an **experimental**
+Nitro/C++ source backed by `AMediaExtractor` and `AMediaCodec`, delivering an
+API-26+ RGBA `AHardwareBuffer` to the existing ExecuTorch and Skia consumers
+with explicit timestamp and release ownership. It requires Android API 26;
+older hosts report the stable `android-video-file-source-requires-api-26`
+reason, and hosts without the native module keep the usual fallback
+diagnostics. Rotated videos (portrait phone recordings with a
+`rotation-degrees` track metadata) are rejected with an explicit error until
+the GPU rotation pass lands. The pipeline is validated end-to-end on an
+emulator; physical-device validation and performance numbers are still
+pending, so do not claim production-ready cross-platform file support yet.
 
 React Native currently shares editing geometry, picking, and gesture semantics
 through `createReactNativeAnnotationGestureAdapter`. Native hosts own drawing
