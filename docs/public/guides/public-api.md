@@ -50,7 +50,9 @@ Start here for normal application code:
 - `DetectionFrame.coordinateSpace` when detections were produced against a
   differently sized copy of the media; the renderer projects vector geometry
   into media space for every detection input, so static frames, caller-owned
-  sources, composite sources, and appended frames all behave the same
+  sources, composite sources, and appended frames all behave the same. A
+  composite composes children that were each inferred at a different size, and
+  every child is projected from its own space before composition
 - `Detection`
 - `Detection.trackerId` for identity assigned by a tracking post-processor
 - `Rect`
@@ -143,7 +145,10 @@ not the first thing most users should reach for:
   display time — so a host can correlate transport-side results with what is on
   screen without opening a second hidden video. No DOM element or vendor object
   crosses that boundary, and every field beyond `mediaTime` is optional;
-- `DetectionFrameSource` for caller-owned range loading;
+- `DetectionFrameSource` for caller-owned range loading. `loadFrames` receives
+  optional `DetectionFrameLoadOptions`; a source that returns its own frames
+  unchanged can ignore it, while a source that flattens child frames uses
+  `coordinateSpace` to project each child before composing;
 - `WritableDetectionFrameSource` and `createWritableDetectionFrameSource()` for
   streaming inference ingestion. `appendLiveFrame()` and `finalizeCoverage()`
   are optional members of `WritableDetectionFrameSource`, so a source written
@@ -218,12 +223,12 @@ A producer that streams results into a session has four supported contracts:
   stalls on a terminal sliver or believes the source covers time past the end of
   media. It is idempotent.
 - `session.refresh()` still redraws on demand. By default the session also
-  redraws itself when a write actually changed the displayed time: a batch
-  append that covers it, and an accepted live result that has not already
-  expired behind it. A live result the source dropped as stale changes nothing
-  and redraws nothing. Requests arriving during a redraw collapse into a single
-  follow-up, and appends elsewhere on the timeline never force a render. Set
-  `detections.autoRefresh: false` to own every redraw.
+  redraws itself when a write actually changed the frame selected for the
+  displayed time. Live and batch writes use the same rule: a result the source
+  dropped as stale changes nothing, and a write whose interval does not contain
+  the displayed time cannot change what is on screen. Requests arriving during a
+  redraw collapse into a single follow-up. Set `detections.autoRefresh: false`
+  to own every redraw.
 
 Retention windows evict in place when the cold store implements `pruneFrames`
 (the built-in memory store does), so a long-running stream does not reload and

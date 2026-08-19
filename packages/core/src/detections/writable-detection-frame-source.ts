@@ -303,29 +303,13 @@ export function createWritableDetectionFrameSource(
         return version;
       }
 
-      return changedRanges.reduce(
-        (rangeVersion, changedRange) =>
-          rangesOverlap(range, changedRange)
-            ? Math.max(rangeVersion, changedRange.version)
-            : rangeVersion,
-        Math.max(allRangeVersion, journalFloorVersion),
-      );
+      return getRangeVersion(range);
     },
 
     getChangesSince(previousVersion, ranges) {
       const relevantVersion = ranges.reduce(
-        (rangeVersion, range) =>
-          Math.max(
-            rangeVersion,
-            changedRanges.reduce(
-              (changedVersion, changedRange) =>
-                rangesOverlap(range, changedRange)
-                  ? Math.max(changedVersion, changedRange.version)
-                  : changedVersion,
-              Math.max(allRangeVersion, journalFloorVersion),
-            ),
-          ),
-        Math.max(allRangeVersion, journalFloorVersion),
+        (rangeVersion, range) => Math.max(rangeVersion, getRangeVersion(range)),
+        getReloadFloorVersion(),
       );
 
       if (relevantVersion <= previousVersion) {
@@ -336,10 +320,7 @@ export function createWritableDetectionFrameSource(
         };
       }
 
-      if (
-        previousVersion < allRangeVersion ||
-        previousVersion < journalFloorVersion
-      ) {
+      if (previousVersion < getReloadFloorVersion()) {
         return {
           ranges: [],
           requiresReload: true,
@@ -382,6 +363,25 @@ export function createWritableDetectionFrameSource(
     if (destroyed) {
       throw createDestroyedError();
     }
+  }
+
+  /**
+   * Oldest version the journal can still describe incrementally. Anything
+   * older has to reload, because replacement, clearing, or journal compaction
+   * dropped the intervening changes.
+   */
+  function getReloadFloorVersion() {
+    return Math.max(allRangeVersion, journalFloorVersion);
+  }
+
+  function getRangeVersion(range: DetectionFrameSourceVersionRange) {
+    return changedRanges.reduce(
+      (rangeVersion, changedRange) =>
+        rangesOverlap(range, changedRange)
+          ? Math.max(rangeVersion, changedRange.version)
+          : rangeVersion,
+      getReloadFloorVersion(),
+    );
   }
 
   /**

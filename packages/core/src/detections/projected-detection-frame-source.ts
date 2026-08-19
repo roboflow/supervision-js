@@ -1,4 +1,5 @@
 import type {
+  DetectionFrameLoadOptions,
   DetectionFrameSource,
   DetectionFrameSourceVersionRange,
 } from "#types/detection-timeline";
@@ -14,6 +15,12 @@ import { projectDetectionFrames } from "#utils/detection-projection";
  * `coordinateSpace`, and loads made before a target exists, pass through by
  * reference, so a producer already emitting media-pixel geometry pays nothing.
  *
+ * The target is also handed to the wrapped source through
+ * `DetectionFrameLoadOptions`. A source that flattens child frames, such as a
+ * composite source, needs it to project each child while that child's own
+ * `coordinateSpace` is still attached; projecting the flattened result again
+ * here is then a no-op.
+ *
  * Optional source hooks are forwarded only when the wrapped source implements
  * them, so capability detection keeps working through the wrapper.
  */
@@ -25,9 +32,16 @@ export function createProjectedDetectionFrameSource(
     source;
 
   return {
-    async loadFrames(startTime, endTime) {
-      const frames = await source.loadFrames(startTime, endTime);
+    async loadFrames(
+      startTime: number,
+      endTime: number,
+      options?: DetectionFrameLoadOptions,
+    ) {
       const target = resolveTarget();
+      const frames = await source.loadFrames(startTime, endTime, {
+        ...options,
+        ...(target ? { coordinateSpace: target } : {}),
+      });
 
       return target ? projectDetectionFrames(frames, target) : frames;
     },

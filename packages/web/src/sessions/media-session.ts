@@ -297,20 +297,6 @@ export async function createMediaSession(
       };
     };
 
-    /**
-     * The displayed instant and everything after it.
-     *
-     * A live frame is held open into the future, and a live transport commonly
-     * delivers it just after its frame was presented. Any accepted live change
-     * that has not already ended before the displayed time is therefore what
-     * should be on screen.
-     */
-    const getLiveRange = (): DetectionFrameSourceVersionRange => ({
-      endTime: Number.POSITIVE_INFINITY,
-      startTime:
-        renderer.getState().currentTime - DISPLAY_RANGE_EPSILON_SECONDS,
-    });
-
     return {
       detectionSource: sessionDetections.detectionSource,
       media: sessionMedia.state,
@@ -355,10 +341,14 @@ export async function createMediaSession(
             projectedFrame,
           );
 
+        // Live writes are gated on the displayed instant like any other write.
+        // A result the source dropped as stale changes nothing, and one whose
+        // interval does not contain the displayed time cannot alter the frame
+        // currently selected for it.
         requestDetectionRefresh(
           appendableSource,
           previousVersion,
-          getLiveRange(),
+          getDisplayedRange(),
         );
 
         return summary;

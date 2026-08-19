@@ -239,6 +239,92 @@ describe("media session", () => {
     session.destroy();
   });
 
+  it("projects composite children from their own coordinate spaces", async () => {
+    resetMocks();
+    const { createMediaSession } = await import("../index");
+
+    const mask = {
+      counts: "abc",
+      encoding: DetectionMaskEncoding.CompressedRle,
+      height: 90,
+      width: 160,
+    } as const;
+    const session = await createMediaSession({
+      container: createContainer(),
+      detections: {
+        sources: [
+          {
+            frames: [
+              {
+                coordinateSpace: { height: 360, width: 640 },
+                detections: [
+                  {
+                    id: "half",
+                    mask,
+                    rect: { height: 36, width: 64, x: 320, y: 180 },
+                  },
+                ],
+                endTime: 1,
+                mediaTime: 0,
+              },
+            ],
+            id: "half-space",
+          },
+          {
+            frames: [
+              {
+                coordinateSpace: { height: 180, width: 320 },
+                detections: [
+                  {
+                    id: "quarter",
+                    rect: { height: 9, width: 16, x: 80, y: 45 },
+                  },
+                ],
+                endTime: 1,
+                mediaTime: 0,
+              },
+            ],
+            id: "quarter-space",
+          },
+          {
+            frames: [
+              {
+                detections: [
+                  {
+                    id: "media",
+                    rect: { height: 36, width: 64, x: 320, y: 180 },
+                  },
+                ],
+                endTime: 1,
+                mediaTime: 0,
+              },
+            ],
+            id: "media-space",
+          },
+        ],
+      },
+      media: "sample.mp4",
+      renderer: { autoPlay: false },
+    });
+
+    await session.refresh();
+
+    expect(session.renderer.getActiveDetectionFrame()).toMatchObject({
+      detections: [
+        {
+          id: "half",
+          // Masks carry their own dimensions and must not be scaled again.
+          mask,
+          rect: { height: 72, width: 128, x: 640, y: 360 },
+        },
+        { id: "quarter", rect: { height: 36, width: 64, x: 320, y: 180 } },
+        { id: "media", rect: { height: 36, width: 64, x: 320, y: 180 } },
+      ],
+    });
+
+    session.destroy();
+  });
+
   it("leaves a detection source without coordinate metadata untouched", async () => {
     resetMocks();
     const { createMediaSession } = await import("../index");
@@ -534,15 +620,41 @@ describe("media session", () => {
       .spyOn(session.renderer, "refresh")
       .mockResolvedValue(undefined);
 
-    // A live result describes the frame already on screen even when its
-    // timestamp lands slightly ahead of the last presented sample.
     await session.appendLiveDetectionFrame({
       detections: [{ id: "live" }],
       frameIndex: 0,
-      mediaTime: 0.5,
+      mediaTime: 0,
     });
 
     await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+
+    refresh.mockRestore();
+    session.destroy();
+  });
+
+  it("does not redraw for a live frame that starts after the displayed time", async () => {
+    resetMocks();
+    const { createMediaSession } = await import("../index");
+
+    const session = await createMediaSession({
+      container: createContainer(),
+      detections: { appendable: { datasetId: "future-live-refresh" } },
+      media: "sample.mp4",
+      renderer: { autoPlay: false },
+    });
+    const refresh = vi
+      .spyOn(session.renderer, "refresh")
+      .mockResolvedValue(undefined);
+
+    // The renderer is presenting time zero, so a result held open from five
+    // seconds ahead cannot be the frame selected for it.
+    await session.appendLiveDetectionFrame({
+      detections: [{ id: "future" }],
+      frameIndex: 0,
+      mediaTime: 5,
+    });
+
+    expect(refresh).not.toHaveBeenCalled();
 
     refresh.mockRestore();
     session.destroy();

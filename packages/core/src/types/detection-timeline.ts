@@ -1,4 +1,7 @@
-import type { DetectionFrame } from "#types/detections";
+import type {
+  DetectionCoordinateSpace,
+  DetectionFrame,
+} from "#types/detections";
 
 export enum DetectionBufferStatus {
   Idle = "idle",
@@ -149,17 +152,34 @@ export interface DetectionBufferState {
   readonly errorMessage: string | null;
 }
 
+/**
+ * Optional context a renderer passes when it loads detection frames.
+ */
+export interface DetectionFrameLoadOptions {
+  /**
+   * Coordinate space the loaded frames will be presented in.
+   *
+   * Sources that flatten several child frames into one, such as a composite
+   * source, need this to project each child while its `coordinateSpace` is
+   * still attached to its own detections. Sources that return their frames
+   * unchanged can ignore it: the renderer projects whatever it receives.
+   */
+  readonly coordinateSpace?: DetectionCoordinateSpace;
+}
+
 export interface DetectionFrameSource {
   /**
    * Load semantic detection frames for the requested media-time range.
    *
    * Sources should return detection data, not renderer artifacts. Implementers
    * should prefer sorted frames and avoid mutating returned frames after handing
-   * them to the renderer.
+   * them to the renderer. `options` is additive context; ignoring it stays
+   * correct for any source that does not compose other sources.
    */
   loadFrames(
     startTime: number,
     endTime: number,
+    options?: DetectionFrameLoadOptions,
   ): Promise<readonly DetectionFrame[]>;
   /**
    * Optional backpressure hook used by playback gates. Resolve when the source

@@ -272,6 +272,7 @@ export {
   type DetectionFrameChunkDescriptor,
   type DetectionFrameChunkFetch,
   type DetectionFrameChunkManifest,
+  type DetectionFrameLoadOptions,
   type DetectionFrameLiveOptions,
   type DetectionFrameRetentionOptions,
   type DetectionFrameSelectionOptions,

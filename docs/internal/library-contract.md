@@ -188,6 +188,13 @@ source. Sessions may additionally normalize what they write so a persisted
 dataset stays in one space; re-projecting an already-projected frame is a
 no-op.
 
+That wrapper also passes the target down through `DetectionFrameLoadOptions`,
+because a source that flattens child frames destroys the metadata projection
+needs. A composite carries one coordinate space but composes children that may
+each have been inferred at a different size, so it projects every child while
+that child's own `coordinateSpace` is still attached to its own detections. Any
+source that returns its frames unchanged can ignore the option.
+
 Media failures cross the boundary as a `MediaErrorKind` on
 `MediaSourceState.errorKind` and as a `MediaSourceError` that preserves its
 cause. The kind enum is a semantic contract and lives in core; classifying
