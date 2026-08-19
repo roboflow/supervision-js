@@ -127,6 +127,13 @@ not the first thing most users should reach for:
   without adding a second visible video layer; its bounded snapshot queue is
   latest-frame-wins, so a temporarily slow renderer resumes at the live edge
   instead of replaying stale frames;
+- `createVideoEngineMediaRendererSource()` and `openVideoEngineMediaSource()`
+  for video presented by the Roboflow video engine, which owns the playhead and
+  announces each frame it puts on screen while the renderer composites it with
+  annotations drawn from that frame's own timestamp; the engine package is
+  imported dynamically, so it is required only by applications that open such a
+  source. Under this source the renderer also answers `getRenderCount()` and
+  `getPreparedAnnotationWindow()`, which report `null` for pulled media;
 - `DetectionFrameSource` for caller-owned range loading;
 - `WritableDetectionFrameSource` and `createWritableDetectionFrameSource()` for
   streaming inference ingestion;

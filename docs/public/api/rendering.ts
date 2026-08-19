@@ -7,6 +7,7 @@
 export {
   createMediaRenderer,
   createMediaStreamRendererSource,
+  createVideoEngineMediaRendererSource,
   DetectionTimelineOrigin,
   MediaRendererFit,
   MediaRendererPlaybackState,
@@ -33,6 +34,8 @@ export {
   type MediaStreamRendererSourceOptions,
   type MediaRendererState,
   type MediaSourceState,
+  type PreparedAnnotationWindowFrame,
+  type PreparedAnnotationWindowSnapshot,
   type RenderPreparationActiveFrameDiagnostics,
   type RenderPreparationArtifactDiagnostics,
   type RenderPreparationArtifactWindowDiagnostics,

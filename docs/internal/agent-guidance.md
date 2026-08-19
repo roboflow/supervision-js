@@ -15,6 +15,9 @@ Before making project-direction or architecture changes, read:
   visualization recipes, fixtures, or annotator facades
 - [`pixijs-guidance.md`](pixijs-guidance.md)
 - [`library-contract.md`](library-contract.md)
+- [`video-engine-presentation.md`](video-engine-presentation.md) before touching
+  video presentation, the atomic present, the prepared annotation window, or
+  anything that imports the video engine
 - [`react-native-architecture.md`](react-native-architecture.md)
 - [`react-native-live-rendering.md`](react-native-live-rendering.md)
 - [`tarball-packaging.md`](tarball-packaging.md)
@@ -98,6 +101,12 @@ toolbar value is a checked presentation mirror.
 - Keep renderer orchestration provider-agnostic. The public/default renderer
   factory may wire Mediabunny and Pixi defaults, but the renderer core should
   depend on small media-source and scene contracts rather than vendor modules.
+- Video is push-only: an engine-backed media source announces every presented
+  frame and the scene composites it. `@roboflow/video-engine` and
+  `@roboflow/video-engine/analysis` are the only importable entries, ESLint
+  enforces that, and the remaining pull machinery is legacy rather than a model
+  to copy. Read [`video-engine-presentation.md`](video-engine-presentation.md)
+  before changing any of it.
 - Treat [`docs/public/guides/public-api.md`](../public/guides/public-api.md) as
   the public boundary. Prefer `createMediaSession()` for normal consumers,
   advanced renderer/detection/media hooks for serious integrations, and keep
@@ -160,6 +169,21 @@ the repository; it needs the registry and is not part of `npm run verify`. See
 The manual npm workflow publishes that generated tarball after environment
 approval; it never publishes `packages/web` directly. See
 [`npm-release.md`](npm-release.md) before running or modifying it.
+
+### The Demo Runs The Built Package
+
+The demo imports `supervision` through the package boundary, and that package's
+entry is its build output under `packages/web/dist`. Vitest resolves the same
+specifier to `packages/web/src`. After editing library source, the tests
+therefore see the change and the browser does not, which reads exactly like a
+broken feature: green suites over a page running yesterday's code.
+
+`npm run dev` is the loop that stays honest, because it keeps the package build
+watchers running next to the demo server. `npm run demo:dev` builds once before
+starting the server, and `npm run dev:demo` does not build at all, so under
+either of those every library edit needs `npm run build` before the browser can
+run it. The watchers rebuild JavaScript only; `npm run build` is also what
+refreshes the emitted declarations the demo typechecks against.
 
 For focused iterative work, use separate terminals:
 

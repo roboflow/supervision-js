@@ -141,13 +141,17 @@ scene adapters, workers, and prepared-artifact implementation details belong to
 
 ## Media Boundary
 
-Mediabunny is the first media engine. It should remain the default adapter for
-reading, decoding, and normalizing media, but the session contract should not be
-shaped around Mediabunny types.
+Video presentation is push-based and engine-backed: the media source announces
+every frame it puts on screen and the renderer composites it, with no pull loop
+and no second clock. Mediabunny remains the adapter behind the `src` path,
+media normalization and preparation, and browser `MediaStream` inputs, and the
+session contract is shaped around neither engine's types.
+[`video-engine-presentation.md`](video-engine-presentation.md) is the contract
+for the push path and describes what the pull path still covers.
 
 The session should expose normalized media status, playback state, canonical
-frame timing, seek/step/rate controls, and current-frame refresh, not Mediabunny
-internals. Navigation is latest-request-wins, and refresh reuses the retained
+frame timing, seek/step/rate controls, and current-frame refresh, not the media
+adapter's internals. Navigation is latest-request-wins, and refresh reuses the retained
 media presentation instead of decoding or uploading the frame again.
 
 Browser media, renderer, worker, and storage adapters belong in
