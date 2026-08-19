@@ -14,6 +14,9 @@ const TRACE_CATEGORIES = [
 ];
 const TRACE_WINDOW_MS = 6000;
 const SETTLE_MS = 600;
+// The prepared window honestly reports itself filling for a few seconds
+// after a pause; steady state is what the zero-paint law governs.
+const PAUSED_STEADY_STATE_MS = 6000;
 const VIEWPORT = { width: 1500, height: 1150, deviceScaleFactor: 1 };
 const SEEK_FRACTIONS = [0.1, 0.3, 0.5, 0.7, 0.9];
 const STEP_COUNT = 6;
@@ -252,7 +255,7 @@ export async function runPaints(session, info, attempts) {
   const measure = async () => {
     await session.send("Page.bringToFront");
     await session.evaluate("window.__demoRenderer.pause(); 1");
-    await delay(SETTLE_MS);
+    await delay(PAUSED_STEADY_STATE_MS);
     const pausedBefore = await session.readJson(SNAPSHOT);
     const pausedEvents = await session.trace(TRACE_CATEGORIES, TRACE_WINDOW_MS);
     const pausedAfter = await session.readJson(SNAPSHOT);

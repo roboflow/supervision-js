@@ -1283,73 +1283,322 @@ fieldset {
   white-space: nowrap;
 }
 
+/* Transport and scrub strip are the panel's primary controls. The lanes under
+ * them carry the same data in a quieter voice: an instrument cluster you read
+ * while your hands stay on the transport. */
 .control-bar {
-  align-items: center;
-  background: rgba(10, 12, 17, 0.88);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  box-shadow: none;
+  align-items: start;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid transparent;
+  border-radius: 14px;
+  box-shadow:
+    0 0 0 1px rgba(76, 29, 149, 0.07),
+    0 1px 2px rgba(76, 29, 149, 0.06),
+    0 10px 26px rgba(76, 29, 149, 0.07);
+  column-gap: 14px;
   display: grid;
-  gap: 9px;
-  grid-template-columns: auto minmax(280px, 1fr) auto;
+  grid-template-columns: [transport] auto [timeline] minmax(280px, 1fr);
+  grid-template-rows: auto auto;
   min-width: 0;
   padding: 8px;
+  row-gap: 6px;
 }
 
-.control-bar__time {
+.control-bar__transport {
+  align-content: space-between;
+  display: grid;
+  gap: 6px;
+  grid-column: transport;
+  grid-row: 1;
+  justify-items: start;
+  min-width: 178px;
+}
+
+.control-bar__timecode {
+  align-items: baseline;
+  display: flex;
+  gap: 5px;
+  margin: 0;
+}
+
+/* The current time is rewritten several times a second, so both figures hold a
+ * fixed advance and a new time repaints the text instead of moving the row. */
+.control-bar__timecode-now {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 660;
+  letter-spacing: -0.01em;
+  line-height: 18px;
+  min-width: 86px;
+}
+
+.control-bar__timecode-total {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 620;
+  line-height: 18px;
+  min-width: 58px;
+}
+
+.control-bar__ledger {
   align-items: center;
   contain: layout paint;
   display: flex;
-  flex-wrap: wrap;
   gap: 5px;
-  justify-content: end;
   min-width: 0;
 }
 
-/* These readouts change several times a second, so their digits hold a fixed
- * advance: a new time repaints the text instead of reflowing the row. */
-.control-bar__time .readout__value {
+.control-bar__ledger .control-bar__cell {
+  background: #fafafa;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  gap: 5px;
+  padding: 3px 6px;
+}
+
+.control-bar__cell .readout__label {
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.control-bar__cell .readout__value {
+  font-size: 10px;
   font-variant-numeric: tabular-nums;
 }
 
-.playback-controls {
-  align-items: center;
-  display: inline-flex;
-  gap: 6px;
+.control-bar__cell--detection .readout__value {
+  min-width: 52px;
 }
 
-.playback-controls__toggle {
+.control-bar__state {
   align-items: center;
-  background: var(--highlight);
-  border: 1px solid transparent;
+  background: #fafafa;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted-strong);
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 640;
+  gap: 5px;
+  line-height: 1.2;
+  min-width: 78px;
+  padding: 4px 7px;
+  white-space: nowrap;
+}
+
+.control-bar__state-dot {
+  background: var(--state-color);
   border-radius: 999px;
-  box-shadow: none;
-  color: #07080a;
+  flex: 0 0 auto;
+  height: 6px;
+  width: 6px;
+}
+
+.control-bar__state--live {
+  --state-color: var(--green);
+}
+
+.control-bar__state--waiting {
+  --state-color: var(--amber);
+}
+
+.control-bar__state--error {
+  --state-color: var(--danger);
+}
+
+.control-bar__state--idle {
+  --state-color: var(--muted);
+}
+
+.control-bar__hints {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 10px;
+  gap: 3px 10px;
+  grid-column: 1 / -1;
+  grid-row: 2;
+  justify-content: end;
+  line-height: 12px;
+  margin: 0;
+}
+
+.control-bar__hints span {
+  align-items: center;
+  display: inline-flex;
+  gap: 3px;
+}
+
+.control-bar__hints kbd {
+  background: #fafafa;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  box-shadow: 0 1px 0 rgba(76, 29, 149, 0.06);
+  color: var(--muted-strong);
+  font-family: var(--font-sans);
+  font-size: 9px;
+  font-weight: 640;
+  line-height: 1;
+  padding: 2px 4px;
+}
+
+.transport {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
+}
+
+.transport__play {
+  align-items: center;
+  background: var(--violet);
+  border: 1px solid var(--violet);
+  border-radius: 999px;
+  box-shadow:
+    0 1px 1px rgba(76, 29, 149, 0.18),
+    0 6px 14px rgba(124, 58, 237, 0.24);
+  color: #ffffff;
   cursor: pointer;
   display: inline-flex;
-  height: 40px;
+  height: 38px;
   justify-content: center;
-  min-height: 40px;
-  min-width: 40px;
   padding: 0;
   position: relative;
-  width: 40px;
-  transition:
-    background 140ms ease,
-    border-color 140ms ease,
-    box-shadow 140ms ease,
-    transform 140ms ease;
+  transition-duration: 140ms;
+  transition-property: background-color, border-color, box-shadow, scale;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+  width: 38px;
 }
 
-.playback-controls__toggle:hover:not(:disabled) {
-  background: #ffffff;
-  border-color: rgba(255, 255, 255, 0.8);
+.transport__play:hover:not(:disabled) {
+  background: #6d28d9;
+  border-color: #6d28d9;
+  box-shadow:
+    0 1px 1px rgba(76, 29, 149, 0.2),
+    0 10px 20px rgba(109, 40, 217, 0.3);
+}
+
+.transport__play:active:not(:disabled),
+.transport__step:active:not(:disabled) {
+  scale: 0.96;
+}
+
+.transport__play:disabled,
+.transport__step:disabled {
+  cursor: not-allowed;
+}
+
+.transport__play:disabled {
+  background: #ece9f6;
+  border-color: #ece9f6;
   box-shadow: none;
-  transform: translateY(-1px);
+  color: #b7b0cb;
 }
 
-.playback-controls__step:focus-visible,
-.playback-controls__toggle:focus-visible,
+.transport__glyphs {
+  display: block;
+  height: 16px;
+  position: relative;
+  width: 16px;
+}
+
+/* Both icons stay in the DOM and cross-fade, so a toggle interrupted halfway
+ * resumes from where it is instead of snapping. */
+.transport__glyph {
+  height: 16px;
+  inset: 0;
+  opacity: 0;
+  position: absolute;
+  scale: 0.72;
+  transition-duration: 160ms;
+  transition-property: opacity, scale;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+  width: 16px;
+}
+
+/* A triangle centred on its bounding box reads left of centre inside a circle. */
+.transport__glyph--play {
+  translate: 1px 0;
+}
+
+.transport__play[data-action="pause"] .transport__glyph--pause,
+.transport__play[data-action="play"] .transport__glyph--play,
+.transport__play[data-action="replay"] .transport__glyph--replay {
+  opacity: 1;
+  scale: 1;
+}
+
+/* Buffering already shows in the state chip; the ring says the same thing where
+ * the pointer already is. */
+.transport__ring {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  border-top-color: rgba(124, 58, 237, 0.85);
+  inset: -4px;
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  transition: opacity 160ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.transport__play[data-buffering] .transport__ring {
+  animation: transport-spin 820ms linear infinite;
+  opacity: 1;
+}
+
+@keyframes transport-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+.transport__step {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted-strong);
+  cursor: pointer;
+  display: inline-flex;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  height: 30px;
+  justify-content: center;
+  min-width: 34px;
+  padding: 0;
+  position: relative;
+  transition-duration: 140ms;
+  transition-property: background-color, border-color, color, scale;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* The pill reads at 30px; the pointer target stays 40px square. */
+.transport__step::after {
+  content: "";
+  inset: -5px -3px;
+  position: absolute;
+}
+
+.transport__step:hover:not(:disabled) {
+  background: #f5f3ff;
+  border-color: #a78bfa;
+  color: var(--violet);
+}
+
+.transport__step:disabled {
+  background: #f4f4f5;
+  color: #9ca3af;
+}
+
+.transport__play:focus-visible,
+.transport__step:focus-visible,
 .demo-shell__mode a:focus-visible,
 .demo-shell__mode button:focus-visible,
 .render-control button:focus-visible,
@@ -1358,175 +1607,171 @@ fieldset {
 .class-color-control input:focus-visible,
 .timeline-view__strip:focus-visible,
 .timeline-view__input:focus-visible {
-  outline: 2px solid var(--cyan);
+  outline: 2px solid var(--violet);
   outline-offset: 2px;
 }
 
-.playback-controls__step:disabled,
-.playback-controls__toggle:disabled {
-  background: rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.36);
-  cursor: not-allowed;
-  transform: none;
-}
-
-.playback-controls__step {
-  align-items: center;
-  background: rgba(255, 255, 255, 0.035);
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  color: var(--text);
-  cursor: pointer;
-  display: inline-flex;
-  font-size: 12px;
-  font-weight: 650;
-  height: 32px;
-  justify-content: center;
-  letter-spacing: 0;
-  min-width: 34px;
-  padding: 0 8px;
-  transition:
-    background 140ms ease,
-    border-color 140ms ease,
-    color 140ms ease,
-    transform 140ms ease;
-}
-
-.playback-controls__step:hover:not(:disabled) {
-  background: rgba(103, 232, 249, 0.15);
-  border-color: rgba(103, 232, 249, 0.4);
-  color: #e7fbff;
-  transform: translateY(-1px);
-}
-
-.playback-controls__label {
-  height: 1px;
-  overflow: hidden;
-  position: absolute;
-  white-space: nowrap;
-  width: 1px;
-}
-
-.playback-controls__play {
-  border-bottom: 8px solid transparent;
-  border-left: 12px solid #07080a;
-  border-top: 8px solid transparent;
-  display: block;
-  height: 0;
-  margin-left: 2px;
-  width: 0;
-}
-
-.playback-controls__pause {
-  display: inline-flex;
-  gap: 4px;
-}
-
-.playback-controls__pause::before,
-.playback-controls__pause::after {
-  background: #07080a;
-  border-radius: 2px;
-  content: "";
-  height: 15px;
-  width: 4px;
-}
-
+/* Every row shares the `track` column, so the axis, the scrub strip, and each
+ * lane measure the same media time at the same x. */
 .timeline-view {
+  align-items: center;
+  column-gap: 8px;
   display: grid;
-  gap: 5px;
+  grid-column: timeline;
+  grid-row: 1;
+  grid-template-columns:
+    [gutter] 168px
+    [track] minmax(0, 1fr)
+    [track-end];
+  grid-template-rows: 12px 18px repeat(5, 8px);
   min-width: 0;
+  row-gap: 3px;
 }
 
-.timeline-view__legend {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  min-width: 0;
+.timeline-view:focus-within .timeline-view__strip {
+  outline: 2px solid var(--violet);
+  outline-offset: 3px;
 }
 
-.timeline-view__chip {
-  align-items: center;
-  background: rgba(255, 255, 255, 0.025);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  color: var(--muted-strong);
-  display: inline-flex;
-  font-size: 11px;
-  font-weight: 560;
-  gap: 5px;
-  line-height: 1.2;
-  max-width: 100%;
-  min-height: 20px;
-  min-width: 0;
-  padding: 3px 6px;
+/* Groups the diagnostics lanes into one surface so they read as secondary to
+ * the strip above them. */
+.timeline-view__cluster {
+  align-self: stretch;
+  background: #fbfaff;
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px rgba(76, 29, 149, 0.05);
+  grid-column: gutter / track-end;
+  grid-row: 3 / -1;
+  margin: -4px -6px;
+  pointer-events: none;
 }
 
-.timeline-view__chip strong {
-  color: var(--text);
+.timeline-view__axis {
+  color: var(--muted);
   font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 620;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  grid-column: track;
+  grid-row: 1;
+  height: 12px;
+  line-height: 12px;
+  min-width: 0;
+  position: relative;
+}
+
+.timeline-view__tick {
+  left: var(--timeline-left);
+  position: absolute;
+  top: 0;
+  white-space: nowrap;
+}
+
+.timeline-view__tick--middle {
+  transform: translateX(-50%);
+}
+
+.timeline-view__tick--end {
+  transform: translateX(-100%);
+}
+
+.timeline-view__axis-note {
+  font-style: italic;
+}
+
+/* Rides over the axis row rather than inside the strip, which clips its own
+ * paint. Its position is written straight to the element on pointer move. */
+.timeline-view__hover {
+  align-self: center;
+  background: var(--text);
+  border-radius: 5px;
+  color: #ffffff;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 640;
+  grid-column: track;
+  grid-row: 1;
+  justify-self: start;
+  line-height: 12px;
+  min-width: 54px;
+  opacity: 0;
+  padding: 2px 6px;
+  pointer-events: none;
+  position: relative;
+  text-align: center;
+  transition: opacity 120ms cubic-bezier(0.2, 0, 0, 1);
+  white-space: nowrap;
+  will-change: opacity, transform;
+  z-index: 3;
+}
+
+.timeline-view__hover--visible {
+  opacity: 1;
+}
+
+.timeline-view__hover-line {
+  background: rgba(17, 24, 39, 0.5);
+  bottom: 0;
+  left: 0;
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  transition: opacity 120ms cubic-bezier(0.2, 0, 0, 1);
+  width: 1px;
+  will-change: opacity, transform;
+}
+
+.timeline-view__hover-line--visible {
+  opacity: 1;
+}
+
+.timeline-view__lane-head {
+  align-items: baseline;
+  display: flex;
+  gap: 6px;
+  grid-column: gutter;
+  grid-row: var(--timeline-row);
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.timeline-view__lane-label {
+  color: var(--muted);
+  flex: 0 0 auto;
+  font-size: 9px;
+  font-weight: 650;
+  line-height: 11px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.timeline-view__chip-dot {
-  border-radius: 999px;
-  display: inline-block;
-  flex: 0 0 auto;
-  height: 6px;
-  width: 6px;
-}
-
-.timeline-view__chip--buffer .timeline-view__chip-dot {
-  background: var(--green);
-  box-shadow: none;
-}
-
-.timeline-view__chip--ready .timeline-view__chip-dot {
-  background: #9bf6a5;
-  box-shadow: none;
-}
-
-.timeline-view__chip--requested .timeline-view__chip-dot {
-  background: rgba(255, 255, 255, 0.66);
-}
-
-.timeline-view__chip--processed .timeline-view__chip-dot {
-  background: var(--cyan);
-  box-shadow: none;
-}
-
-.timeline-view__chip--processing .timeline-view__chip-dot {
-  background: var(--amber);
-  box-shadow: none;
-}
-
-.timeline-view__scrubber {
-  display: grid;
-  gap: 3px;
+/* A lane's extent is rewritten several times a second while its window fills,
+ * so its digits hold a fixed advance and its box takes the rest of the gutter:
+ * a new reading repaints the text without relaying out the row. */
+.timeline-view__lane-value {
+  color: var(--muted-strong);
+  flex: 1 1 auto;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 620;
+  line-height: 11px;
   min-width: 0;
-  position: relative;
-}
-
-.timeline-view__scrubber:focus-within .timeline-view__strip {
-  outline: 2px solid var(--cyan);
-  outline-offset: 3px;
-}
-
-.timeline-view__lanes {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .timeline-view__lane {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(124, 58, 237, 0.1);
   border-radius: 999px;
   contain: layout paint;
-  height: 6px;
+  grid-column: track;
+  grid-row: var(--timeline-row);
+  height: 8px;
   overflow: hidden;
   position: relative;
 }
@@ -1540,14 +1785,20 @@ fieldset {
   width: var(--timeline-width);
 }
 
+.timeline-view__segment--buffer {
+  background: #15803d;
+}
+
+.timeline-view__segment--requested {
+  background: rgba(107, 114, 128, 0.45);
+}
+
 .timeline-view__segment--processed {
   background: var(--cyan);
-  box-shadow: none;
 }
 
 .timeline-view__segment--ready {
-  background: linear-gradient(90deg, rgba(155, 246, 165, 0.95), #e8ffd7);
-  box-shadow: none;
+  background: linear-gradient(90deg, #15803d, #22c55e);
 }
 
 .timeline-view__segment--processing {
@@ -1555,57 +1806,48 @@ fieldset {
   background:
     repeating-linear-gradient(
       135deg,
-      rgba(255, 209, 102, 0.92) 0 6px,
-      rgba(255, 209, 102, 0.36) 6px 12px
+      rgba(180, 83, 9, 0.9) 0 6px,
+      rgba(180, 83, 9, 0.34) 6px 12px
     ),
-    rgba(255, 209, 102, 0.54);
+    rgba(253, 230, 138, 0.85);
 }
 
 .timeline-view__strip {
-  background: rgba(3, 5, 8, 0.86);
-  border: 1px solid var(--line);
+  background: #f4f2fb;
+  border: 1px solid rgba(196, 181, 253, 0.6);
   border-radius: 999px;
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.55);
+  box-shadow: inset 0 1px 2px rgba(76, 29, 149, 0.08);
   contain: layout paint;
-  height: 16px;
+  grid-column: track;
+  grid-row: 2;
+  height: 18px;
   overflow: hidden;
   position: relative;
   touch-action: none;
+  transition: border-color 140ms cubic-bezier(0.2, 0, 0, 1);
 }
 
 .timeline-view__strip--interactive {
   cursor: pointer;
 }
 
-.timeline-view__range {
-  border-radius: 999px;
-  left: var(--timeline-left);
-  position: absolute;
-  width: var(--timeline-width);
+.timeline-view__strip--interactive:hover {
+  border-color: rgba(124, 58, 237, 0.65);
 }
 
-.timeline-view__range--requested {
-  background: rgba(255, 255, 255, 0.12);
-  border: 1px solid var(--line);
-  bottom: 2px;
-  top: 2px;
-}
-
-.timeline-view__range--buffer {
-  background: var(--green);
-  box-shadow: none;
-  height: 5px;
-  top: 5px;
-}
-
-/* Spans the strip, so translating it by a percentage lands the playhead where
- * an absolute `left` percentage would, on the compositor instead of on a layout
- * pass per displayed frame. */
+/* Spans the strip and every lane, so translating it by a percentage lands the
+ * playhead where an absolute `left` percentage would, on the compositor instead
+ * of on a layout pass per displayed frame. It sits over the scrub strip, so it
+ * must not take the pointer. */
 .timeline-view__playhead {
-  inset: 0;
-  position: absolute;
+  align-self: stretch;
+  grid-column: track;
+  grid-row: 2 / -1;
+  pointer-events: none;
+  position: relative;
   transform: translateX(0%);
   will-change: transform;
+  z-index: 2;
 }
 
 .timeline-view__marker {
@@ -1617,30 +1859,29 @@ fieldset {
 .timeline-view__marker--active-frame {
   background: var(--amber);
   bottom: 1px;
-  box-shadow: none;
   left: var(--timeline-left);
   top: 1px;
 }
 
 .timeline-view__marker--playhead {
-  background: #ffffff;
+  background: var(--violet);
   bottom: 0;
-  box-shadow: none;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.7);
   left: 0;
   top: 0;
 }
 
 .timeline-view__knob {
-  background: #ffffff;
-  border: 2px solid rgba(7, 9, 12, 0.85);
+  background: var(--violet);
+  border: 2px solid #ffffff;
   border-radius: 999px;
-  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.12);
-  height: 12px;
+  box-shadow: 0 1px 3px rgba(76, 29, 149, 0.35);
+  height: 14px;
   left: 0;
   position: absolute;
-  top: 50%;
+  top: 9px;
   transform: translate(-50%, -50%);
-  width: 12px;
+  width: 14px;
 }
 
 .timeline-view__input {
@@ -1648,17 +1889,75 @@ fieldset {
   appearance: none;
   background: transparent;
   cursor: pointer;
-  height: 18px;
-  inset: 18px 0 0;
+  grid-column: track;
+  grid-row: 2;
+  height: 100%;
   margin: 0;
+  min-height: 0;
   opacity: 0;
-  position: absolute;
   width: 100%;
   z-index: 2;
 }
 
 .timeline-view__input:disabled {
   cursor: not-allowed;
+}
+
+/* Too narrow to hold the lane labels at full width: the gutter tightens and the
+ * keyboard hints go, rather than the panel growing a second and third line. The
+ * lanes and their readings stay, because a hidden lane is an unreported state. */
+@media (max-width: 1200px) {
+  .control-bar {
+    grid-template-columns: [transport] auto [timeline] minmax(0, 1fr);
+  }
+
+  .control-bar__hints {
+    display: none;
+  }
+
+  .timeline-view {
+    column-gap: 6px;
+    grid-template-columns:
+      [gutter] 118px
+      [track] minmax(0, 1fr)
+      [track-end];
+  }
+
+  .timeline-view__lane-value {
+    font-size: 8px;
+  }
+}
+
+/* Stacked, the transport and the timeline each want a full row, so the panel
+ * buys the second row back out of its own padding and gaps. */
+@media (max-width: 860px) {
+  .control-bar {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 6px;
+    row-gap: 4px;
+  }
+
+  .control-bar__transport {
+    align-items: center;
+    column-gap: 10px;
+    grid-column: 1 / -1;
+    grid-template-columns: auto auto minmax(0, 1fr);
+  }
+
+  .control-bar__ledger {
+    justify-content: end;
+  }
+
+  .timeline-view {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    row-gap: 2px;
+  }
+
+  .timeline-view__lane-label,
+  .timeline-view__lane-value {
+    line-height: 10px;
+  }
 }
 
 .render-control--slider input {
@@ -2541,10 +2840,6 @@ fieldset {
     min-height: 360px;
   }
 
-  .control-bar {
-    grid-template-columns: auto minmax(0, 1fr);
-  }
-
   .benchmark-metrics {
     grid-template-columns: 1fr;
   }
@@ -2560,11 +2855,6 @@ fieldset {
   .benchmark-comparison-card__arrow {
     display: none;
   }
-
-  .control-bar__time {
-    grid-column: 1 / -1;
-    justify-content: start;
-  }
 }
 
 @media (max-width: 520px) {
@@ -2572,7 +2862,6 @@ fieldset {
     padding: 8px;
   }
 
-  .control-bar,
   .render-controls {
     border-radius: 14px;
   }
@@ -2587,8 +2876,7 @@ fieldset {
 .status-panel,
 .benchmark-card,
 .benchmark-metric-card,
-.benchmark-comparison-card,
-.control-bar {
+.benchmark-comparison-card {
   background: rgba(255, 255, 255, 0.92);
   border-color: var(--line);
   box-shadow: 0 10px 28px rgba(76, 29, 149, 0.06);
@@ -2597,8 +2885,6 @@ fieldset {
 .source-controls__mode button,
 .source-actions button,
 .selection-panel .inspector-card__header button,
-.playback-controls__step,
-.timeline-view__chip,
 .render-controls__tabs button,
 .render-control,
 .render-control--toggle,
@@ -2615,8 +2901,7 @@ fieldset {
 .source-controls__mode button[aria-pressed="true"],
 .source-actions__primary,
 .render-controls__tabs button[aria-pressed="true"],
-.render-control__segments button[aria-pressed="true"],
-.playback-controls__toggle {
+.render-control__segments button[aria-pressed="true"] {
   background: var(--violet);
   border-color: var(--violet);
   color: #ffffff;
@@ -2626,7 +2911,6 @@ fieldset {
 .source-controls__mode button:hover:not(:disabled, [aria-pressed="true"]),
 .source-actions button:hover:not(:disabled),
 .selection-panel .inspector-card__header button:hover,
-.playback-controls__step:hover:not(:disabled),
 .render-controls__tabs button:hover:not([aria-pressed="true"]),
 .render-control__segments button:hover:not(:disabled, [aria-pressed="true"]) {
   background: #f5f3ff;
@@ -2640,10 +2924,7 @@ fieldset {
 .quality-controls__toggle,
 .selection-details,
 .source-progress,
-.source-field--file,
-.timeline-view__strip,
-.timeline-view__lane,
-.timeline-view__input {
+.source-field--file {
   background: #fafafa;
   border-color: var(--line);
   color: var(--text);
@@ -2652,7 +2933,6 @@ fieldset {
 .source-field--file,
 .selection-details,
 .source-progress,
-.timeline-view__chip,
 .class-style-card,
 .readout {
   background: #fafafa;
@@ -2660,8 +2940,6 @@ fieldset {
 
 .source-controls__mode button:disabled,
 .source-actions button:disabled,
-.playback-controls__step:disabled,
-.playback-controls__toggle:disabled,
 .render-control__segments button:disabled {
   background: #f4f4f5;
   color: #9ca3af;
@@ -2672,7 +2950,6 @@ fieldset {
 .selection-details__title strong,
 .selection-details__grid dd,
 .source-progress strong,
-.timeline-view__chip strong,
 .benchmark-comparison-card__side strong,
 .benchmark-metric-card strong,
 .benchmark-card h2,
@@ -2748,21 +3025,6 @@ fieldset {
   background: linear-gradient(90deg, #a78bfa, var(--violet));
 }
 
-.playback-controls__play {
-  border-left-color: #ffffff;
-}
-
-.playback-controls__pause::before,
-.playback-controls__pause::after {
-  background: #ffffff;
-}
-
-.playback-controls__toggle:hover:not(:disabled) {
-  background: #6d28d9;
-  border-color: #6d28d9;
-  box-shadow: 0 10px 20px rgba(109, 40, 217, 0.3);
-}
-
 .render-control--slider input::-webkit-slider-runnable-track {
   background: linear-gradient(
     90deg,
@@ -2783,25 +3045,6 @@ fieldset {
 .render-control--slider input::-moz-range-thumb {
   background: var(--violet);
   box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.16);
-}
-
-.timeline-view__chip--requested .timeline-view__chip-dot {
-  background: #9ca3af;
-}
-
-.timeline-view__chip--buffer .timeline-view__chip-dot,
-.timeline-view__chip--ready .timeline-view__chip-dot,
-.timeline-view__range--buffer {
-  background: #15803d;
-}
-
-.timeline-view__segment--ready {
-  background: linear-gradient(90deg, #15803d, #22c55e);
-}
-
-.timeline-view__marker--playhead,
-.timeline-view__knob {
-  background: var(--violet);
 }
 
 .benchmark-table {
@@ -2924,8 +3167,7 @@ fieldset {
 .quality-controls,
 .selection-panel,
 .render-controls,
-.status-panel,
-.control-bar {
+.status-panel {
   border-color: #e7e2fb;
   border-radius: 13px;
   box-shadow: 0 8px 22px rgba(76, 29, 149, 0.045);
@@ -3037,23 +3279,6 @@ fieldset {
   height: 17px;
   margin-top: -6px;
   width: 17px;
-}
-
-.timeline-view__legend {
-  gap: 0.36rem;
-}
-
-.timeline-view__chip {
-  border-radius: 999px;
-  box-shadow: 0 2px 7px rgba(76, 29, 149, 0.045);
-  font-size: 0.68rem;
-  padding: 0.28rem 0.48rem;
-}
-
-.control-bar {
-  border-color: rgba(196, 181, 253, 0.68);
-  box-shadow: 0 12px 30px rgba(76, 29, 149, 0.065);
-  padding: 0.8rem;
 }
 
 @media (max-width: 780px) {

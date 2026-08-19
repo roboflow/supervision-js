@@ -1,0 +1,334 @@
+{
+  "startedAt": 1787160300336,
+  "scenarios": {
+    "paints": {
+      "windowSeconds": 6,
+      "frameRate": 30,
+      "geometry": {
+        "canvas": {
+          "width": 1080,
+          "height": 868
+        },
+        "viewport": {
+          "width": 1500,
+          "height": 1150
+        },
+        "devicePixelRatio": 1
+      },
+      "paused": {
+        "paintCount": 30,
+        "paintRate": 5,
+        "layoutCount": 15,
+        "updateLayoutTreeCount": 15,
+        "commitCount": 721,
+        "sceneRenderDelta": 0,
+        "canvasRectClass": "1500x1150",
+        "canvasRectSource": "viewport-box",
+        "canvasPaintCount": 30,
+        "rects": [
+          {
+            "size": "1500x1150",
+            "count": 30
+          }
+        ],
+        "elapsedSeconds": 6.595,
+        "mediaAdvancedSeconds": 0,
+        "presentedFrameDelta": 0,
+        "playbackState": "paused",
+        "advanced": false,
+        "presentRate": 0,
+        "presentRateSource": "mediaClock",
+        "starved": false
+      },
+      "playing": {
+        "paintCount": 176,
+        "paintRate": 29.33,
+        "layoutCount": 88,
+        "updateLayoutTreeCount": 720,
+        "commitCount": 720,
+        "sceneRenderDelta": 205,
+        "canvasRectClass": "1500x1150",
+        "canvasRectSource": "viewport-box",
+        "canvasPaintCount": 176,
+        "rects": [
+          {
+            "size": "1500x1150",
+            "count": 176
+          }
+        ],
+        "elapsedSeconds": 6.82,
+        "mediaAdvancedSeconds": 6.831,
+        "presentedFrameDelta": 0,
+        "playbackState": "playing",
+        "advanced": true,
+        "presentRate": 30.05,
+        "presentRateSource": "mediaClock",
+        "starved": false,
+        "domPaintCount": 0,
+        "domPaintRate": 0,
+        "domPaintRateLimit": 90.15
+      }
+    },
+    "sync": {
+      "frameRate": 30,
+      "framePeriodMs": 33.33,
+      "seeks": [
+        {
+          "requested": 7.042,
+          "currentTime": 7.033,
+          "detectionTime": 7.033,
+          "detectionCount": 17,
+          "detectionBufferStatus": "ready",
+          "detectionBufferWindow": [
+            76.965,
+            87.465
+          ],
+          "settleMs": 8066,
+          "requestedToCurrentMs": -9,
+          "currentToDetectionMs": 0
+        },
+        {
+          "requested": 21.127,
+          "currentTime": 21.098,
+          "detectionTime": 21.1,
+          "detectionCount": 22,
+          "detectionBufferStatus": "ready",
+          "detectionBufferWindow": [
+            91.05,
+            101.55
+          ],
+          "settleMs": 8070,
+          "requestedToCurrentMs": -29,
+          "currentToDetectionMs": -2
+        },
+        {
+          "requested": 35.212,
+          "currentTime": 35.197,
+          "detectionTime": 35.2,
+          "detectionCount": 16,
+          "detectionBufferStatus": "ready",
+          "detectionBufferWindow": [
+            105.12,
+            115.62
+          ],
+          "settleMs": 8068,
+          "requestedToCurrentMs": -15,
+          "currentToDetectionMs": -3
+        },
+        {
+          "requested": 49.296,
+          "currentTime": 49.293,
+          "detectionTime": 49.3,
+          "detectionCount": 19,
+          "detectionBufferStatus": "ready",
+          "detectionBufferWindow": [
+            119.219,
+            129.719
+          ],
+          "settleMs": 8064,
+          "requestedToCurrentMs": -3,
+          "currentToDetectionMs": -7
+        },
+        {
+          "requested": 63.381,
+          "currentTime": 63.357,
+          "detectionTime": 63.367,
+          "detectionCount": 22,
+          "detectionBufferStatus": "ready",
+          "detectionBufferWindow": [
+            133.304,
+            143.804
+          ],
+          "settleMs": 8070,
+          "requestedToCurrentMs": -24,
+          "currentToDetectionMs": -10
+        }
+      ]
+    },
+    "latency": {
+      "frameRate": 30,
+      "seek": {
+        "count": 5,
+        "p50": 44.8,
+        "p95": 46.9,
+        "max": 46.9,
+        "limitMs": 250,
+        "samples": [
+          {
+            "requested": 7.042,
+            "ms": 28.5
+          },
+          {
+            "requested": 21.127,
+            "ms": 46
+          },
+          {
+            "requested": 35.212,
+            "ms": 46.9
+          },
+          {
+            "requested": 49.296,
+            "ms": 44.8
+          },
+          {
+            "requested": 63.381,
+            "ms": 37.6
+          }
+        ]
+      },
+      "step": {
+        "count": 6,
+        "p50": 48.4,
+        "p95": 58.1,
+        "max": 58.1,
+        "limitMs": 80,
+        "samples": [
+          {
+            "direction": "forward",
+            "ms": 27.9
+          },
+          {
+            "direction": "backward",
+            "ms": 48.2
+          },
+          {
+            "direction": "forward",
+            "ms": 56
+          },
+          {
+            "direction": "backward",
+            "ms": 49.8
+          },
+          {
+            "direction": "forward",
+            "ms": 58.1
+          },
+          {
+            "direction": "backward",
+            "ms": 48.4
+          }
+        ]
+      }
+    },
+    "battery": {
+      "storyUrl": "http://localhost:6006/iframe.html?id=framesampler--default&viewMode=story",
+      "batteryUrl": "http://127.0.0.1:8123/stress-battery.js",
+      "armed": {
+        "workersSpawned": 2,
+        "timecode": "0:00.000",
+        "source": "/videos/ball-detection.mp4"
+      },
+      "total": 16,
+      "failures": 1,
+      "byScenario": [
+        {
+          "name": "slowForwardDrag",
+          "ratio": "1/1",
+          "verdict": "pass"
+        },
+        {
+          "name": "slowBackwardDrag",
+          "ratio": "1/1",
+          "verdict": "pass"
+        },
+        {
+          "name": "fastForwardFling",
+          "ratio": "1/1",
+          "verdict": "pass"
+        },
+        {
+          "name": "fastBackwardFling",
+          "ratio": "1/1",
+          "verdict": "pass"
+        },
+        {
+          "name": "jitterInPlace",
+          "ratio": "1/1",
+          "verdict": "pass"
+        },
+        {
+          "name": "reverseMidDrag",
+          "ratio": "1/1",
+          "verdict": "pass"
+        },
+        {
+          "name": "seekWhilePlaying",
+          "ratio": "1/1",
+          "verdict": "pass"
+        },
+        {
+          "name": "backtrackDuringPlayback",
+          "ratio": "1/1",
+          "verdict": "pass"
+        },
+        {
+          "name": "rapidTapSeeks",
+          "ratio": "1/1",
+          "verdict": "pass"
+        },
+        {
+          "name": "playPauseSpam",
+          "ratio": "1/1",
+          "verdict": "pass"
+        },
+        {
+          "name": "dragToStart",
+          "ratio": "1/1",
+          "verdict": "pass"
+        },
+        {
+          "name": "dragToEnd",
+          "ratio": "0/1",
+          "verdict": "fail"
+        },
+        {
+          "name": "stepSpam",
+          "ratio": "1/1",
+          "verdict": "pass"
+        },
+        {
+          "name": "seekThenImmediatePlay",
+          "ratio": "1/1",
+          "verdict": "pass"
+        },
+        {
+          "name": "doubleBackAndForth",
+          "ratio": "1/1",
+          "verdict": "pass"
+        },
+        {
+          "name": "pauseMidDragThenPlay",
+          "ratio": "1/1",
+          "verdict": "pass"
+        }
+      ],
+      "failing": [
+        {
+          "rep": 0,
+          "name": "dragToEnd",
+          "ms": 2179,
+          "threw": null,
+          "alive": false,
+          "clockMoved": false,
+          "mediaMoved": false,
+          "painted": 1,
+          "from": "0:08.125",
+          "to": "0:08.125",
+          "mediaBefore": 8125,
+          "mediaAfter": 8125
+        }
+      ]
+    }
+  },
+  "verdicts": {
+    "paints": "fail",
+    "sync": "pass",
+    "latency": "pass",
+    "battery": "fail"
+  },
+  "failures": [
+    "paints: paused window painted 30 times, expected 0",
+    "battery: dragToEnd passed 0/1",
+    "battery: dragToEnd left the frame pump dead"
+  ]
+}

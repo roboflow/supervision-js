@@ -71,7 +71,14 @@ async function main(runOptions, apiKeyValue) {
         const rawRecord = await callSam3(frame, runOptions, apiKeyValue);
         rawStream.write(`${JSON.stringify(rawRecord)}\n`);
         if ("error" in rawRecord) {
-          throw new Error(`SAM3 request failed for frame ${frame.frameIndex}.`);
+          const { status, statusText, body } = rawRecord.error;
+          const detail =
+            typeof body === "string"
+              ? body.slice(0, 300)
+              : JSON.stringify(body).slice(0, 300);
+          throw new Error(
+            `SAM3 request failed for frame ${frame.frameIndex}: ${status} ${statusText} ${detail}`,
+          );
         }
 
         console.log(`wrote raw SAM3 response for frame ${frame.frameIndex}`);

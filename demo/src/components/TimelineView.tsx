@@ -3,13 +3,28 @@ import type {
   CSSProperties,
   PointerEvent as ReactPointerEvent,
 } from "react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   MediaRendererPlaybackState,
   type DetectionBufferState,
 } from "supervision";
-import { formatTimeRange, toSourceTimeRange } from "../format";
+import { formatTime, formatTimeRange, toSourceTimeRange } from "../format";
 import type { TimelineRange } from "../session/demo-session-types";
+import { TimelineScrubInput } from "./TimelineScrubInput";
+
+const AXIS_TICK_FRACTIONS = [0, 0.25, 0.5, 0.75, 1] as const;
+const SHORT_MEDIA_SECONDS = 10;
+
+/** Lanes start below the axis label row and the scrub strip. */
+const LANE_ROW_OFFSET = 3;
 
 export function TimelineView({
   activeDetectionFrameTime,
@@ -78,31 +93,36 @@ export function TimelineView({
     visualDuration,
   });
   const displayedCurrentTime = scrubTime ?? playheadTime;
-  const requestedRange = createRangeStyle({
-    duration: visualDuration,
-    endTime: requestedSourceRange.endTime,
-    startTime: requestedSourceRange.startTime,
-  });
-  const bufferRange = createRangeStyle({
-    duration: visualDuration,
-    endTime: bufferSourceRange.endTime,
-    startTime: bufferSourceRange.startTime,
-  });
-  const preparedWindowRange = createRangeStyle({
-    duration: visualDuration,
-    endTime:
-      preparedAheadSeconds === null
-        ? null
-        : currentTime + Math.max(0, preparedAheadSeconds),
-    startTime: preparedAheadSeconds === null ? null : currentTime,
-  });
-  const processedRangeStyles = createSegmentStyles(
-    processedRanges,
+  const preparedWindowEndTime =
+    preparedAheadSeconds === null
+      ? null
+      : currentTime + Math.max(0, preparedAheadSeconds);
+  const preparedWindowStartTime =
+    preparedAheadSeconds === null ? null : currentTime;
+  /* A band whose numbers did not move keeps its style object, so React has
+   * nothing to write back to the DOM while the player sits paused. */
+  const requestedRange = useTimelineRangeStyle(
     visualDuration,
+    requestedSourceRange.startTime,
+    requestedSourceRange.endTime,
   );
-  const processingRangeStyles = createSegmentStyles(
-    processingRanges,
+  const bufferRange = useTimelineRangeStyle(
     visualDuration,
+    bufferSourceRange.startTime,
+    bufferSourceRange.endTime,
+  );
+  const preparedWindowRange = useTimelineRangeStyle(
+    visualDuration,
+    preparedWindowStartTime,
+    preparedWindowEndTime,
+  );
+  const processedRangeStyles = useMemo(
+    () => createSegmentStyles(processedRanges, visualDuration),
+    [processedRanges, visualDuration],
+  );
+  const processingRangeStyles = useMemo(
+    () => createSegmentStyles(processingRanges, visualDuration),
+    [processingRanges, visualDuration],
   );
   const showRequestedRange =
     requestedRange !== null &&
@@ -112,6 +132,67 @@ export function TimelineView({
       bufferSourceRange.startTime,
       bufferSourceRange.endTime,
     );
+  const lanes: TimelineLane[] = [
+    {
+      key: "buffer",
+      label: "Hot predictions",
+      segments: bufferRange
+        ? [{ key: "buffer", style: bufferRange }]
+        : EMPTY_SEGMENTS,
+      value: bufferRange
+        ? formatTimeRange(
+            bufferSourceRange.startTime,
+            bufferSourceRange.endTime,
+          )
+        : "none",
+      variant: "buffer",
+    },
+    {
+      key: "requested",
+      label: "Requested",
+      segments:
+        showRequestedRange && requestedRange
+          ? [{ key: "requested", style: requestedRange }]
+          : EMPTY_SEGMENTS,
+      value:
+        requestedRange === null
+          ? "none"
+          : showRequestedRange
+            ? formatTimeRange(
+                requestedSourceRange.startTime,
+                requestedSourceRange.endTime,
+              )
+            : "same as hot",
+      variant: "requested",
+    },
+    {
+      key: "prepared",
+      label: "Prepared",
+      segments: preparedWindowRange
+        ? [{ key: "prepared", style: preparedWindowRange }]
+        : EMPTY_SEGMENTS,
+      value:
+        preparedAheadSeconds === null
+          ? "unavailable"
+          : `+${formatTime(Math.max(0, preparedAheadSeconds))} · ${preparedAheadFrames ?? 0}f`,
+      variant: "ready",
+    },
+    {
+      key: "processed",
+      label: "Detections",
+      segments: processedRangeStyles,
+      value: formatRangeExtent(processedRanges, "none"),
+      variant: "processed",
+    },
+    {
+      key: "processing",
+      label: "Inference",
+      segments: processingRangeStyles,
+      value: formatRangeExtent(processingRanges, "idle"),
+      variant: "processing",
+    },
+  ];
+  const axisTicks = createAxisTicks(mediaDuration);
   const inputMax = mediaDuration ?? visualDuration;
   const inputValue = clamp(displayedCurrentTime, 0, inputMax);
   const activeFrameLeft =
@@ -127,15 +208,115 @@ export function TimelineView({
     .filter(Boolean)
     .join(" ");
 
-  const handleSeek = (event: ChangeEvent<HTMLInputElement>) => {
-    onScrubChange(Number(event.currentTarget.value));
-  };
-  const handleInputPointerDown = () => {
-    onScrubStart(readPlayheadTime());
-  };
-  const handleInputPointerUp = () => {
-    onScrubEnd();
-  };
+  const hoverLabelRef = useRef<HTMLSpanElement>(null);
+  const hoverLineRef = useRef<HTMLSpanElement>(null);
+  const hoverHalfWidthRef = useRef(0);
+  const writtenHoverLabelRef = useRef<string | null>(null);
+  const hoverContextRef = useRef({ disabled, mediaDuration });
+
+  useEffect(() => {
+    hoverContextRef.current = { disabled, mediaDuration };
+  });
+
+  /**
+   * A hover preview answers per pointer move, so it writes the label and the
+   * guide straight to their elements: the panel's React state stays the scrub
+   * gesture's, and hovering repaints nothing else.
+   */
+  const handleHoverMove = useCallback(
+    (event: ReactPointerEvent<HTMLElement>) => {
+      const { disabled: isDisabled, mediaDuration: hoverDuration } =
+        hoverContextRef.current;
+
+      if (isDisabled || hoverDuration === null) {
+        return;
+      }
+
+      const rect = event.currentTarget.getBoundingClientRect();
+      const offset = clamp(event.clientX - rect.left, 0, rect.width);
+      const label = hoverLabelRef.current;
+
+      if (label !== null) {
+        const nextLabel = formatTime((offset / rect.width) * hoverDuration);
+
+        if (nextLabel !== writtenHoverLabelRef.current) {
+          writtenHoverLabelRef.current = nextLabel;
+          label.textContent = nextLabel;
+        }
+
+        const halfWidth = hoverHalfWidthRef.current;
+
+        label.style.transform = `translateX(${clamp(
+          offset,
+          halfWidth,
+          Math.max(halfWidth, rect.width - halfWidth),
+        )}px) translateX(-50%)`;
+      }
+
+      if (hoverLineRef.current !== null) {
+        hoverLineRef.current.style.transform = `translateX(${offset}px)`;
+      }
+    },
+    [],
+  );
+  const handleHoverEnter = useCallback(
+    (event: ReactPointerEvent<HTMLElement>) => {
+      const { disabled: isDisabled, mediaDuration: hoverDuration } =
+        hoverContextRef.current;
+
+      if (isDisabled || hoverDuration === null) {
+        return;
+      }
+
+      const label = hoverLabelRef.current;
+
+      if (label !== null) {
+        hoverHalfWidthRef.current = label.offsetWidth / 2;
+        label.classList.add("timeline-view__hover--visible");
+      }
+
+      hoverLineRef.current?.classList.add("timeline-view__hover-line--visible");
+      handleHoverMove(event);
+    },
+    [handleHoverMove],
+  );
+  const handleHoverLeave = useCallback(() => {
+    hoverLabelRef.current?.classList.remove("timeline-view__hover--visible");
+    hoverLineRef.current?.classList.remove(
+      "timeline-view__hover-line--visible",
+    );
+  }, []);
+
+  const gestureRef = useRef({
+    flushSeek,
+    onScrubChange,
+    onScrubEnd,
+    onScrubStart,
+    readPlayheadTime,
+  });
+
+  useEffect(() => {
+    gestureRef.current = {
+      flushSeek,
+      onScrubChange,
+      onScrubEnd,
+      onScrubStart,
+      readPlayheadTime,
+    };
+  });
+
+  const handleSeek = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    gestureRef.current.onScrubChange(Number(event.currentTarget.value));
+  }, []);
+  const handleInputFlush = useCallback(() => {
+    gestureRef.current.flushSeek();
+  }, []);
+  const handleInputPointerDown = useCallback(() => {
+    gestureRef.current.onScrubStart(gestureRef.current.readPlayheadTime());
+  }, []);
+  const handleInputPointerUp = useCallback(() => {
+    gestureRef.current.onScrubEnd();
+  }, []);
   const handleStripPointer = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (disabled || mediaDuration === null) {
       return;
@@ -148,6 +329,8 @@ export function TimelineView({
     onScrubChange(nextTime);
   };
   const handleStripPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    handleHoverMove(event);
+
     if (event.buttons !== 1) {
       return;
     }
@@ -170,121 +353,92 @@ export function TimelineView({
 
   return (
     <div className="timeline-view">
-      <div className="timeline-view__legend" aria-hidden="true">
-        <span className="timeline-view__chip timeline-view__chip--buffer">
-          <span className="timeline-view__chip-dot" />
-          Hot predictions{" "}
-          <strong>
-            {formatTimeRange(
-              bufferSourceRange.startTime,
-              bufferSourceRange.endTime,
-            )}
-          </strong>
-        </span>
-        <span className="timeline-view__chip timeline-view__chip--ready">
-          <span className="timeline-view__chip-dot" />
-          Prepared window{" "}
-          <strong>
-            {preparedAheadSeconds === null
-              ? "-"
-              : `${preparedAheadSeconds.toFixed(2)}s · ${preparedAheadFrames ?? 0}f`}
-          </strong>
-        </span>
-        <span className="timeline-view__chip timeline-view__chip--requested">
-          <span className="timeline-view__chip-dot" />
-          Requested{" "}
-          <strong>
-            {formatTimeRange(
-              requestedSourceRange.startTime,
-              requestedSourceRange.endTime,
-            )}
-          </strong>
-        </span>
-        <span className="timeline-view__chip timeline-view__chip--processed">
-          <span className="timeline-view__chip-dot" />
-          Has detections
-        </span>
-        <span className="timeline-view__chip timeline-view__chip--processing">
-          <span className="timeline-view__chip-dot" />
-          Running inference
-        </span>
+      <div className="timeline-view__cluster" aria-hidden="true" />
+      <div className="timeline-view__axis" aria-hidden="true">
+        {axisTicks.length === 0 ? (
+          <span className="timeline-view__axis-note">duration unavailable</span>
+        ) : (
+          axisTicks.map((tick) => (
+            <span
+              className={`timeline-view__tick timeline-view__tick--${tick.anchor}`}
+              key={tick.left}
+              style={{ "--timeline-left": tick.left } as TimelineMarkerStyle}
+            >
+              {tick.label}
+            </span>
+          ))
+        )}
       </div>
+      <span
+        aria-hidden="true"
+        className="timeline-view__hover"
+        ref={hoverLabelRef}
+      />
+      <div
+        aria-hidden="true"
+        className={stripClassName}
+        onPointerDown={handleStripPointer}
+        onPointerEnter={handleHoverEnter}
+        onPointerLeave={handleHoverLeave}
+        onPointerMove={handleStripPointerMove}
+        onPointerUp={handleStripPointerUp}
+      >
+        {activeFrameLeft !== null ? (
+          <span
+            className="timeline-view__marker timeline-view__marker--active-frame"
+            style={
+              { "--timeline-left": activeFrameLeft } as TimelineMarkerStyle
+            }
+          />
+        ) : null}
+        <span className="timeline-view__hover-line" ref={hoverLineRef} />
+      </div>
+      <TimelineScrubInput
+        disabled={disabled || mediaDuration === null}
+        max={inputMax}
+        onBlur={handleInputFlush}
+        onChange={handleSeek}
+        onKeyUp={handleInputFlush}
+        onPointerDown={handleInputPointerDown}
+        onPointerEnter={handleHoverEnter}
+        onPointerLeave={handleHoverLeave}
+        onPointerMove={handleHoverMove}
+        onPointerUp={handleInputPointerUp}
+        value={inputValue}
+      />
+      {lanes.map((lane, index) => {
+        const rowStyle = LANE_ROW_STYLES[index];
 
-      <div className="timeline-view__scrubber">
-        <div className="timeline-view__lanes" aria-hidden="true">
-          <div className="timeline-view__lane timeline-view__lane--detections">
-            {processedRangeStyles.map(({ key, style }) => (
-              <span
-                className="timeline-view__segment timeline-view__segment--processed"
-                key={key}
-                style={style}
-              />
-            ))}
-            {processingRangeStyles.map(({ key, style }) => (
-              <span
-                className="timeline-view__segment timeline-view__segment--processing"
-                key={key}
-                style={style}
-              />
-            ))}
-          </div>
-          <div className="timeline-view__lane timeline-view__lane--ready">
-            {preparedWindowRange ? (
-              <span
-                className="timeline-view__segment timeline-view__segment--ready"
-                style={preparedWindowRange}
-              />
-            ) : null}
-          </div>
-        </div>
-        <div
-          aria-hidden="true"
-          className={stripClassName}
-          onPointerDown={handleStripPointer}
-          onPointerMove={handleStripPointerMove}
-          onPointerUp={handleStripPointerUp}
-        >
-          {showRequestedRange && requestedRange ? (
-            <span
-              className="timeline-view__range timeline-view__range--requested"
-              style={requestedRange}
-            />
-          ) : null}
-          {bufferRange ? (
-            <span
-              className="timeline-view__range timeline-view__range--buffer"
-              style={bufferRange}
-            />
-          ) : null}
-          {activeFrameLeft !== null ? (
-            <span
-              className="timeline-view__marker timeline-view__marker--active-frame"
-              style={
-                { "--timeline-left": activeFrameLeft } as TimelineMarkerStyle
-              }
-            />
-          ) : null}
-          <span className="timeline-view__playhead" ref={playheadRef}>
-            <span className="timeline-view__marker timeline-view__marker--playhead" />
-            <span className="timeline-view__knob" />
-          </span>
-        </div>
-        <input
-          aria-label="Timeline"
-          className="timeline-view__input"
-          disabled={disabled || mediaDuration === null}
-          max={inputMax}
-          min={0}
-          onChange={handleSeek}
-          onBlur={flushSeek}
-          onKeyUp={flushSeek}
-          onPointerDown={handleInputPointerDown}
-          onPointerUp={handleInputPointerUp}
-          step={0.01}
-          type="range"
-          value={inputValue}
-        />
-      </div>
+        return (
+          <Fragment key={lane.key}>
+            <span className="timeline-view__lane-head" style={rowStyle}>
+              <span className="timeline-view__lane-label">{lane.label}</span>
+              <span className="timeline-view__lane-value">{lane.value}</span>
+            </span>
+            <div
+              aria-hidden="true"
+              className="timeline-view__lane"
+              style={rowStyle}
+            >
+              {lane.segments.map(({ key, style }) => (
+                <span
+                  className={`timeline-view__segment timeline-view__segment--${lane.variant}`}
+                  key={key}
+                  style={style}
+                />
+              ))}
+            </div>
+          </Fragment>
+        );
+      })}
+      <span
+        aria-hidden="true"
+        className="timeline-view__playhead"
+        ref={playheadRef}
+      >
+        <span className="timeline-view__marker timeline-view__marker--playhead" />
+        <span className="timeline-view__knob" />
+      </span>
     </div>
   );
 }
@@ -558,9 +712,76 @@ type TimelineMarkerStyle = CSSProperties & {
   readonly "--timeline-left": string;
 };
 
+type TimelineRowStyle = CSSProperties & {
+  readonly "--timeline-row": string;
+};
+
 interface StyledTimelineRange {
   readonly key: string;
   readonly style: TimelineRangeStyle;
+}
+
+interface TimelineLane {
+  readonly key: string;
+  readonly label: string;
+  readonly segments: readonly StyledTimelineRange[];
+  readonly value: string;
+  readonly variant: string;
+}
+
+interface TimelineAxisTick {
+  readonly anchor: "end" | "middle" | "start";
+  readonly label: string;
+  readonly left: string;
+}
+
+const EMPTY_SEGMENTS: readonly StyledTimelineRange[] = [];
+
+const LANE_ROW_STYLES: readonly TimelineRowStyle[] = [0, 1, 2, 3, 4].map(
+  (index) =>
+    ({ "--timeline-row": String(index + LANE_ROW_OFFSET) }) as TimelineRowStyle,
+);
+
+function createAxisTicks(duration: number | null): TimelineAxisTick[] {
+  if (duration === null) {
+    return [];
+  }
+
+  return AXIS_TICK_FRACTIONS.map((fraction) => ({
+    anchor:
+      fraction === 0
+        ? ("start" as const)
+        : fraction === 1
+          ? ("end" as const)
+          : ("middle" as const),
+    label: formatAxisTime(fraction * duration, duration),
+    left: `${fraction * 100}%`,
+  }));
+}
+
+function formatAxisTime(time: number, duration: number) {
+  return `${time.toFixed(duration < SHORT_MEDIA_SECONDS ? 1 : 0)}s`;
+}
+
+/** Says how much of the media a lane's segments reach across, so a lane whose
+ *  bands are too narrow to read still reports what it covers. */
+function formatRangeExtent(
+  ranges: readonly TimelineRange[],
+  emptyLabel: string,
+) {
+  if (ranges.length === 0) {
+    return emptyLabel;
+  }
+
+  let startTime = Number.POSITIVE_INFINITY;
+  let endTime = Number.NEGATIVE_INFINITY;
+
+  for (const range of ranges) {
+    startTime = Math.min(startTime, range.startTime);
+    endTime = Math.max(endTime, range.endTime);
+  }
+
+  return formatTimeRange(startTime, endTime);
 }
 
 function createSegmentStyles(
@@ -623,8 +844,24 @@ function getMaxRangeEnd(ranges: readonly TimelineRange[]) {
   );
 }
 
+/**
+ * Positions are quantised well below one device pixel. Two readings of the same
+ * edge differ in the last bits of a float often enough that an unrounded
+ * percentage rewrites a band, and repaints it, while nothing has moved.
+ */
 function toPercent(time: number, duration: number) {
-  return `${clamp(time / duration, 0, 1) * 100}%`;
+  return `${(clamp(time / duration, 0, 1) * 100).toFixed(3)}%`;
+}
+
+function useTimelineRangeStyle(
+  duration: number,
+  startTime: number | null,
+  endTime: number | null,
+) {
+  return useMemo(
+    () => createRangeStyle({ duration, endTime, startTime }),
+    [duration, endTime, startTime],
+  );
 }
 
 function clamp(value: number, min: number, max: number) {

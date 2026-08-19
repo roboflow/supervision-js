@@ -155,7 +155,12 @@ async function main(runOptions) {
 
     console.log(`Created SAM3 fixture: demo/fixtures/${sampleName}`);
   } catch (error) {
-    await cleanupGeneratedArtifacts(stagingFixtureDir, framesPath);
+    // Extraction can take an hour; a late inference failure must not burn it.
+    // The staging dir and frames stay for a resumed run, and the next start
+    // cleans them itself.
+    console.error(
+      `Fixture creation failed. Keeping ${stagingFixtureDir} and ${framesPath} for inspection; rerun tools/sam3-fixture/run-sam3.mjs with --input ${framesPath} to resume inference without re-extracting.`,
+    );
     throw error;
   } finally {
     serverProcess?.kill();
