@@ -34,6 +34,7 @@ const expectedWebRuntimeExports = [
   "MarkerShape",
   "MarkerSizeSpace",
   "MaskRenderMode",
+  "MediaErrorKind",
   "MediaInteractionMode",
   "MediaNormalizationAudioCodec",
   "MediaNormalizationContainer",
@@ -48,6 +49,7 @@ const expectedWebRuntimeExports = [
   "MediaSessionActivityStatus",
   "MediaSessionMode",
   "MediaSessionStatus",
+  "MediaSourceError",
   "MediaSourceStatus",
   "RegionRendererComposeMode",
   "RegionRendererRegionKind",
@@ -82,6 +84,8 @@ const expectedWebRuntimeExports = [
   "createStaticImageMediaSource",
   "createWritableDetectionFrameSource",
   "detectionPostProcessors",
+  "getMediaErrorKind",
+  "isMediaSourceError",
   "normalizeDetectionClassName",
   "normalizeMedia",
   "normalizeMediaProgressively",
@@ -89,8 +93,11 @@ const expectedWebRuntimeExports = [
   "prepareMedia",
   "prepareMediaProgressively",
   "probeMedia",
+  "projectDetectionFrame",
   "projectDetectionFrameForTracking",
+  "projectDetectionFrames",
   "resolveDetectionClassColorStyle",
+  "toMediaSourceError",
 ];
 
 const expectedCoreRuntimeExports = [

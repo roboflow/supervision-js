@@ -179,6 +179,20 @@ export interface Detection {
 }
 
 /**
+ * Pixel space that a detection frame's vector geometry was produced in.
+ *
+ * Producers that infer on a resized or transcoded copy of the media can attach
+ * this to a `DetectionFrame` instead of scaling geometry themselves. Masks are
+ * unaffected: they already carry their own intrinsic `width`/`height`.
+ */
+export interface DetectionCoordinateSpace {
+  /** Source frame width in pixels. Must be greater than 0. */
+  readonly width: number;
+  /** Source frame height in pixels. Must be greater than 0. */
+  readonly height: number;
+}
+
+/**
  * Detections associated with one media time.
  *
  * `mediaTime` is seconds on the renderer media timeline. `endTime`, when
@@ -203,4 +217,13 @@ export interface DetectionFrame {
    * Detections active for this frame interval.
    */
   readonly detections: readonly Detection[];
+  /**
+   * Optional pixel space this frame's rectangles, polygons, polylines, and
+   * keypoints were produced in.
+   *
+   * Omit it when detections are already in media-pixel coordinates. Mask
+   * coordinates always use the mask's own intrinsic dimensions and are never
+   * rescaled by coordinate-space projection.
+   */
+  readonly coordinateSpace?: DetectionCoordinateSpace;
 }

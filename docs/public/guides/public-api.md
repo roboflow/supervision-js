@@ -47,6 +47,9 @@ Start here for normal application code:
 - renderer source/frame readouts for timeline UI, including estimated frame
   rate, count, and current index while media timestamps remain canonical;
 - `DetectionFrame`
+- `DetectionFrame.coordinateSpace` when detections were produced against a
+  differently sized copy of the media; the session projects vector geometry
+  into media space for you
 - `Detection`
 - `Detection.trackerId` for identity assigned by a tracking post-processor
 - `Rect`
@@ -75,6 +78,7 @@ Start here for normal application code:
 - `prepareMedia()`
 - `prepareMediaProgressively()`
 - `probeMedia()`
+- `MediaErrorKind` and `MediaSourceError` for branching on media failures
 
 These are the concepts a user should be able to understand without knowing how
 Pixi, Mediabunny, workers, or prepared mask artifacts are wired internally.
@@ -132,10 +136,20 @@ not the first thing most users should reach for:
 - `createMediaStreamRendererSource()` for adapting a browser `MediaStream`
   without adding a second visible video layer; its bounded snapshot queue is
   latest-frame-wins, so a temporarily slow renderer resumes at the live edge
-  instead of replaying stale frames;
+  instead of replaying stale frames. Its `onPresentedFrame` option reports
+  `MediaStreamPresentedFrame` metadata — media time plus, where the browser
+  supplies them, RTP timestamp, dimensions, presentation time, and expected
+  display time — so a host can correlate transport-side results with what is on
+  screen without opening a second hidden video. No DOM element or vendor object
+  crosses that boundary, and every field beyond `mediaTime` is optional;
 - `DetectionFrameSource` for caller-owned range loading;
 - `WritableDetectionFrameSource` and `createWritableDetectionFrameSource()` for
-  streaming inference ingestion;
+  streaming inference ingestion, including
+  `session.appendLiveDetectionFrame()` for latest-frame/hold-until-next live
+  semantics and `session.finalizeDetectionCoverage()` for closing the final
+  frame at a known end of media;
+- `projectDetectionFrame()` and `projectDetectionFrames()` when a host wants
+  the same coordinate-space projection outside a session;
 - `detections.sources`, `MediaSessionDetectionSourceOptions`, and
   `createCompositeDetectionFrameSource()` for composing model predictions,
   draft annotations, review overlays, or other app-owned detection streams over
@@ -167,6 +181,61 @@ Tracking uses the same deployment pattern. The self-contained script at
 `supervision/detection-post-processing-worker` can be hosted by strict-CSP
 applications through a `DetectionPostProcessingWorkerFactory`; its protocol is
 also private.
+
+### Live And Progressive Detections
+
+A producer that streams results into a session has four supported contracts:
+
+- `session.appendDetectionFrames()` writes a batch. Frames that declare
+  `coordinateSpace` are projected into media space first; rectangles, polygons,
+  polylines, and keypoints scale, while masks keep their own intrinsic
+  dimensions and are never scaled twice.
+- `session.appendLiveDetectionFrame()` writes the newest result for a live
+  stream. It stays active until the next live frame supersedes it, at which
+  point the previous frame is closed at the new frame's `mediaTime`. Exactly
+  two frames are written per call, so append cost does not grow with retained
+  history. Tune the open-ended hold with
+  `detections.appendable.live.holdSeconds` (default 60 seconds).
+- `session.finalizeDetectionCoverage(endTime?)` closes the last frame at the
+  end of media, defaulting to the renderer's reported duration. Containers can
+  declare a duration slightly beyond the last decoded sample; without this,
+  coverage-gated playback stalls on that terminal sliver. It is idempotent.
+- `session.refresh()` still redraws on demand. By default the session also
+  redraws itself when appended detections cover the displayed time, and after
+  every live frame because a live result describes the frame already on screen.
+  Requests arriving during a redraw collapse into a single follow-up, and
+  batch appends elsewhere on the timeline never force a render. Set
+  `detections.autoRefresh: false` to own every redraw.
+
+Retention windows evict in place when the cold store implements `pruneFrames`
+(the built-in memory store does), so a long-running stream does not reload and
+rewrite everything it keeps on every append. Stores without that hook keep
+working through a reload-and-replace fallback.
+
+### Media Failures
+
+Media failures carry a stable `MediaErrorKind` instead of asking applications to
+match decoder, demuxer, or container message text:
+
+```ts
+import { MediaErrorKind, getMediaErrorKind } from "supervision";
+
+const state = session.getState();
+
+if (state.renderer?.source.errorKind === MediaErrorKind.UnsupportedFormat) {
+  // Application-owned, localized copy.
+}
+```
+
+`MediaSourceError` preserves the originating failure on `cause`, and
+`getMediaErrorKind()` classifies a caught value. Unrecognized failures stay
+representable as `MediaErrorKind.Unknown`, and new kinds may be added over
+time, so treat unknown values like `Unknown`.
+
+Finite video sources present a zero-based timeline. Media trimmed through an
+edit list carries decodable samples ahead of presentation time zero; those are
+not presented, and the session reports `firstTimestamp` as the presentation
+start rather than the negative decode start.
 
 ## Editing API
 

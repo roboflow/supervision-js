@@ -1,8 +1,13 @@
 import { createMediaRenderer } from "#renderers/media-renderer";
 import {
   createDefaultAnnotationPresentation,
+  projectDetectionFrames,
   resolveAnnotationRendererPresentation,
   createSourceAwarePresentation,
+} from "supervision-js-core";
+import type {
+  DetectionCoordinateSpace,
+  DetectionFrame,
 } from "supervision-js-core";
 import type {
   MediaSession,
@@ -28,6 +33,8 @@ import {
   type PreparedSessionMedia,
 } from "./media-session-media";
 import { createMediaSessionStateSnapshot } from "./media-session-state";
+
+const DISPLAY_RANGE_EPSILON_SECONDS = 1e-6;
 
 /**
  * Creates a renderer-owned media session for one browser media item.
@@ -197,6 +204,83 @@ export async function createMediaSession(
     rendererState = renderer.getState();
     emitSessionState();
 
+    const autoRefresh = options.detections?.autoRefresh !== false;
+    let activeRefresh: Promise<void> | undefined;
+    let queuedRefresh = false;
+
+    const getMediaCoordinateSpace = (): DetectionCoordinateSpace | null => {
+      const state = renderer.getState();
+
+      return state.mediaWidth > 0 && state.mediaHeight > 0
+        ? { height: state.mediaHeight, width: state.mediaWidth }
+        : null;
+    };
+
+    /**
+     * Projects appended frames that declare a source coordinate space into the
+     * renderer's media space. Frames without that metadata pass through, so a
+     * producer that already emits media-pixel geometry is unaffected.
+     */
+    const projectAppendedFrames = (frames: readonly DetectionFrame[]) => {
+      const target = getMediaCoordinateSpace();
+
+      return target ? projectDetectionFrames(frames, target) : frames;
+    };
+
+    const coversDisplayedTime = (frames: readonly DetectionFrame[]) => {
+      const { currentTime } = renderer.getState();
+
+      return frames.some(
+        (frame) =>
+          frame.mediaTime <= currentTime + DISPLAY_RANGE_EPSILON_SECONDS &&
+          (frame.endTime ?? frame.mediaTime) >=
+            currentTime - DISPLAY_RANGE_EPSILON_SECONDS,
+      );
+    };
+
+    const runDetectionRefresh = () => {
+      activeRefresh = renderer
+        .refresh()
+        .catch(() => undefined)
+        .finally(() => {
+          activeRefresh = undefined;
+
+          if (queuedRefresh && !destroyed) {
+            queuedRefresh = false;
+            runDetectionRefresh();
+          }
+        });
+    };
+
+    /**
+     * Redraws once, collapsing requests that arrive during a redraw into a
+     * single follow-up.
+     */
+    const scheduleDetectionRefresh = () => {
+      if (!autoRefresh || destroyed) {
+        return;
+      }
+
+      if (activeRefresh) {
+        queuedRefresh = true;
+        return;
+      }
+
+      runDetectionRefresh();
+    };
+
+    /**
+     * Redraws for detections that land on the displayed time.
+     *
+     * Appends elsewhere on the timeline are already patched incrementally by
+     * the hot buffer, so forcing a render for them would only burn frames.
+     */
+    const requestDetectionRefresh = (frames: readonly DetectionFrame[]) => {
+      if (coversDisplayedTime(frames)) {
+        scheduleDetectionRefresh();
+      }
+    };
+
     return {
       detectionSource: sessionDetections.detectionSource,
       media: sessionMedia.state,
@@ -211,8 +295,49 @@ export async function createMediaSession(
           sessionDetections,
           writeOptions,
         );
+        const projectedFrames = projectAppendedFrames(frames);
+        const summary = await appendableSource.appendFrames(projectedFrames);
 
-        return appendableSource.appendFrames(frames);
+        requestDetectionRefresh(projectedFrames);
+
+        return summary;
+      },
+
+      async appendLiveDetectionFrame(frame, writeOptions) {
+        if (destroyed) {
+          throw new Error("Media session has been destroyed.");
+        }
+
+        const appendableSource = resolveAppendableSource(
+          sessionDetections,
+          writeOptions,
+        );
+        const [projectedFrame = frame] = projectAppendedFrames([frame]);
+        const summary = await appendableSource.appendLiveFrame(projectedFrame);
+
+        // The newest live result describes the frame on screen, and a live
+        // transport commonly delivers it after that frame was presented.
+        scheduleDetectionRefresh();
+
+        return summary;
+      },
+
+      async finalizeDetectionCoverage(endTime, writeOptions) {
+        if (destroyed) {
+          throw new Error("Media session has been destroyed.");
+        }
+
+        const appendableSource = resolveAppendableSource(
+          sessionDetections,
+          writeOptions,
+        );
+        const coverageEndTime = endTime ?? renderer.getState().duration;
+
+        if (coverageEndTime === null) {
+          return null;
+        }
+
+        return appendableSource.finalizeCoverage(coverageEndTime);
       },
 
       async replaceDetectionFrames(frames, writeOptions) {
@@ -224,8 +349,12 @@ export async function createMediaSession(
           sessionDetections,
           writeOptions,
         );
+        const projectedFrames = projectAppendedFrames(frames);
+        const summary = await appendableSource.replaceFrames(projectedFrames);
 
-        return appendableSource.replaceFrames(frames);
+        requestDetectionRefresh(projectedFrames);
+
+        return summary;
       },
 
       async clearDetectionFrames(writeOptions) {

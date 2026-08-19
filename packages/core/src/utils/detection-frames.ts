@@ -58,6 +58,9 @@ export function copySortedDetectionFrames(
           : undefined,
         rect: detection.rect ? { ...detection.rect } : undefined,
       })),
+      coordinateSpace: frame.coordinateSpace
+        ? { ...frame.coordinateSpace }
+        : undefined,
       endTime: frame.endTime,
       frameIndex: frame.frameIndex,
       mediaTime: frame.mediaTime,
@@ -117,6 +120,19 @@ export function validateDetectionFrames(
         integer: true,
         min: 0,
       });
+    }
+
+    if (frame.coordinateSpace !== undefined) {
+      validateNumber(
+        frame.coordinateSpace.width,
+        `frames[${frameOffset}].coordinateSpace.width`,
+        { exclusiveMin: 0 },
+      );
+      validateNumber(
+        frame.coordinateSpace.height,
+        `frames[${frameOffset}].coordinateSpace.height`,
+        { exclusiveMin: 0 },
+      );
     }
 
     for (const [detectionOffset, detection] of frame.detections.entries()) {

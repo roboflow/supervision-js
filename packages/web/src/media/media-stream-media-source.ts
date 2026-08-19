@@ -4,12 +4,46 @@ import type {
   DecodedVideoSampleSink,
 } from "#media/media-source";
 import type { MediaRendererSource } from "#types/media-renderer";
+import { MediaSourceError } from "#media/media-errors";
+import { MediaErrorKind, includeDefined } from "supervision-js-core";
 
 const DEFAULT_MAX_BUFFERED_FRAMES = 8;
 const DEFAULT_FRAME_RATE = 30;
 const TIMESTAMP_EPSILON_SECONDS = 1e-6;
 
+/**
+ * Renderer-neutral metadata for one frame the browser actually presented.
+ *
+ * `mediaTime` is on the same timeline the session reports, so a host can
+ * correlate transport-side results with what is on screen. Every other field
+ * is optional because browsers differ in what `requestVideoFrameCallback`
+ * reports; absent fields are normal and must not break rendering. No DOM
+ * element or vendor object is exposed.
+ */
+export type MediaStreamPresentedFrame = {
+  /** Presentation time on the session media timeline, in seconds. */
+  readonly mediaTime: number;
+  /** RTP timestamp the sender stamped this frame with, when reported. */
+  readonly rtpTimestamp?: number;
+  /** Frame width in pixels, when reported. */
+  readonly width?: number;
+  /** Frame height in pixels, when reported. */
+  readonly height?: number;
+  /** `performance.now()` time the user agent submitted the frame, when reported. */
+  readonly presentationTime?: number;
+  /** `performance.now()` time the frame is expected to be visible, when reported. */
+  readonly expectedDisplayTime?: number;
+};
+
 export type MediaStreamRendererSourceOptions = {
+  /**
+   * Receives metadata for each presented frame, before the snapshot is taken.
+   *
+   * Called synchronously from the browser frame callback so wall-clock
+   * correlation stays accurate. Keep the handler cheap; a handler that throws
+   * is ignored and does not interrupt playback.
+   */
+  readonly onPresentedFrame?: (frame: MediaStreamPresentedFrame) => void;
   /** Maximum decoded snapshots retained while the renderer is catching up. */
   readonly maxBufferedFrames?: number;
   /**
@@ -64,7 +98,10 @@ async function openMediaStreamMediaSource(
     typeof document === "undefined" ||
     typeof createImageBitmap === "undefined"
   ) {
-    throw new Error("MediaStream rendering requires browser media APIs.");
+    throw new MediaSourceError(
+      MediaErrorKind.EnvironmentUnsupported,
+      "MediaStream rendering requires browser media APIs.",
+    );
   }
 
   const maxBufferedFrames = resolveMaxBufferedFrames(options.maxBufferedFrames);
@@ -72,7 +109,10 @@ async function openMediaStreamMediaSource(
   const audioTracks = stream.getAudioTracks();
 
   if (videoTracks.length === 0) {
-    throw new Error("MediaStream does not contain a video track.");
+    throw new MediaSourceError(
+      MediaErrorKind.NoVideoTrack,
+      "MediaStream does not contain a video track.",
+    );
   }
 
   const video = document.createElement("video");
@@ -168,7 +208,30 @@ async function openMediaStreamMediaSource(
     notifyWaiters();
   };
 
-  const capturePresentedFrame = async (mediaTime: number) => {
+  const toSessionTimestamp = (mediaTime: number) => {
+    const mediaTimestamp = Number.isFinite(mediaTime)
+      ? mediaTime
+      : video.currentTime;
+
+    firstMediaTimestamp ??= mediaTimestamp;
+
+    return options.timestampOrigin === "first-frame"
+      ? Math.max(0, mediaTimestamp - firstMediaTimestamp)
+      : mediaTimestamp;
+  };
+
+  const reportPresentedFrame = (frame: MediaStreamPresentedFrame) => {
+    if (!options.onPresentedFrame) return;
+
+    try {
+      options.onPresentedFrame(frame);
+    } catch {
+      // Presented-frame reporting is host telemetry; never let it stop
+      // decoding the live stream.
+    }
+  };
+
+  const capturePresentedFrame = async (timestamp: number) => {
     callbackHandle = undefined;
     callbackKind = undefined;
 
@@ -176,14 +239,6 @@ async function openMediaStreamMediaSource(
 
     try {
       const image = await createImageBitmap(video);
-      const mediaTimestamp = Number.isFinite(mediaTime)
-        ? mediaTime
-        : video.currentTime;
-      firstMediaTimestamp ??= mediaTimestamp;
-      const timestamp =
-        options.timestampOrigin === "first-frame"
-          ? Math.max(0, mediaTimestamp - firstMediaTimestamp)
-          : mediaTimestamp;
       enqueueFrame({
         duration: fallbackFrameDuration,
         image,
@@ -210,14 +265,20 @@ async function openMediaStreamMediaSource(
     if (typeof video.requestVideoFrameCallback === "function") {
       callbackKind = "video";
       callbackHandle = video.requestVideoFrameCallback((_now, metadata) => {
-        void capturePresentedFrame(metadata.mediaTime);
+        const timestamp = toSessionTimestamp(metadata.mediaTime);
+
+        reportPresentedFrame(toPresentedFrame(timestamp, metadata));
+        void capturePresentedFrame(timestamp);
       });
       return;
     }
 
     callbackKind = "animation";
     callbackHandle = window.requestAnimationFrame(() => {
-      void capturePresentedFrame(video.currentTime);
+      const timestamp = toSessionTimestamp(video.currentTime);
+
+      reportPresentedFrame({ mediaTime: timestamp });
+      void capturePresentedFrame(timestamp);
     });
   }
 
@@ -345,6 +406,28 @@ async function openMediaStreamMediaSource(
     rejectWaiters(error);
     throw error;
   }
+}
+
+function toPresentedFrame(
+  mediaTime: number,
+  metadata: VideoFrameCallbackMetadata,
+): MediaStreamPresentedFrame {
+  return {
+    mediaTime,
+    ...includeDefined({
+      expectedDisplayTime: finiteOrUndefined(metadata.expectedDisplayTime),
+      height: finiteOrUndefined(metadata.height),
+      presentationTime: finiteOrUndefined(metadata.presentationTime),
+      rtpTimestamp: finiteOrUndefined(metadata.rtpTimestamp),
+      width: finiteOrUndefined(metadata.width),
+    }),
+  };
+}
+
+function finiteOrUndefined(value: number | undefined) {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
 }
 
 function createDecodedSample(

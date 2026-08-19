@@ -42,6 +42,30 @@ export enum MediaRendererPlaybackState {
 }
 
 /**
+ * Stable classification of a media failure.
+ *
+ * Applications branch on these kinds instead of parsing decoder, demuxer, or
+ * container error text, and still own their localized user-facing copy. New
+ * kinds may be added over time, so treat unrecognized values like `Unknown`.
+ */
+export enum MediaErrorKind {
+  /** The media could not be opened or read at all. */
+  Unreadable = "unreadable",
+  /** The container or codec is not supported by this platform. */
+  UnsupportedFormat = "unsupportedFormat",
+  /** The media opened but carries no usable video track. */
+  NoVideoTrack = "noVideoTrack",
+  /** Decoding a sample failed after the source opened. */
+  Decode = "decode",
+  /** The media could not be fetched. */
+  Network = "network",
+  /** The host environment lacks the APIs this media source requires. */
+  EnvironmentUnsupported = "environmentUnsupported",
+  /** The failure could not be classified. */
+  Unknown = "unknown",
+}
+
+/**
  * Lower-level media source readiness.
  */
 export enum MediaSourceStatus {
@@ -134,6 +158,13 @@ export interface MediaSourceState {
   readonly primaryVideoWidth: number | null;
   readonly primaryVideoHeight: number | null;
   readonly errorMessage: string | null;
+  /**
+   * Stable failure classification when `status` is `Error`, otherwise `null`.
+   *
+   * Prefer this over `errorMessage` for control flow. Messages are diagnostic
+   * text and may name vendor internals.
+   */
+  readonly errorKind: MediaErrorKind | null;
 }
 
 /**

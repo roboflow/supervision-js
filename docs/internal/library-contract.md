@@ -171,6 +171,28 @@ Browser media, renderer, worker, and storage adapters belong in
 `packages/web`. Core should only model semantic contracts that are not tied to a
 browser runtime.
 
+A media adapter presents a zero-based presentation timeline. Media trimmed
+through an edit list carries decodable samples ahead of presentation time zero;
+the adapter drops them, presents the sample straddling zero at zero, and reports
+`firstTimestamp` as the presentation start. A consumer should never have to
+clamp the public timeline or write its own opener to get that.
+
+Media failures cross the boundary as a `MediaErrorKind` on
+`MediaSourceState.errorKind` and as a `MediaSourceError` that preserves its
+cause. The kind enum is a semantic contract and lives in core; classifying
+vendor failures into it is the browser adapter's job. Applications branch on the
+kind and own their localized copy; they should never have to match decoder,
+demuxer, or container message text.
+
+Playback state must settle. `Buffering` means playback was requested and is
+waiting for data, so `play()` may not treat it as a settled active run and a
+seek taken while buffering must end in a valid playing or paused state.
+
+A live media source may report renderer-neutral presented-frame metadata for
+transport correlation. Media time is the only required field; everything the
+browser may omit stays optional, and no DOM element or vendor object may cross
+that boundary.
+
 ## State Contract
 
 Session lifecycle enums, activity records, and the generic lifecycle-state shell

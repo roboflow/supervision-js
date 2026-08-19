@@ -1,15 +1,16 @@
 import type {
-  ColdDetectionFrameStore,
   ColdDetectionFrameStoreWriteSummary,
   DetectionFrameRetentionOptions,
   DetectionFrameSourceVersionRange,
   WritableDetectionFrameSource,
+  WritableDetectionFrameSourceOptions,
 } from "#types/detection-timeline";
 import { DetectionFrameRetentionMode as RetentionMode } from "#types/detection-timeline";
 import type { DetectionFrame } from "#types/detections";
 
 const RANGE_EPSILON_SECONDS = 1e-6;
 const MAX_CHANGED_RANGE_JOURNAL_LENGTH = 512;
+const DEFAULT_LIVE_HOLD_SECONDS = 60;
 
 interface VersionedRange extends DetectionFrameSourceVersionRange {
   readonly version: number;
@@ -26,13 +27,25 @@ interface AvailableRange {
   startTime: number;
 }
 
-export function createWritableDetectionFrameSource(options: {
-  readonly store: ColdDetectionFrameStore;
-  readonly datasetId: string;
-  readonly chunkDurationSeconds?: number;
-  readonly retention?: DetectionFrameRetentionOptions;
-}): WritableDetectionFrameSource {
+type RetentionResult =
+  | { readonly kind: "unchanged" }
+  | {
+      readonly kind: "pruned";
+      readonly prunedRange: DetectionFrameSourceVersionRange;
+      readonly summary: ColdDetectionFrameStoreWriteSummary;
+    }
+  | {
+      readonly kind: "rewritten";
+      readonly summary: ColdDetectionFrameStoreWriteSummary;
+    };
+
+export function createWritableDetectionFrameSource(
+  options: WritableDetectionFrameSourceOptions,
+): WritableDetectionFrameSource {
+  const liveHoldSeconds = resolveLiveHoldSeconds(options.live?.holdSeconds);
   let summary: ColdDetectionFrameStoreWriteSummary | null = null;
+  let latestFrame: DetectionFrame | null = null;
+  let heldLiveFrame: DetectionFrame | null = null;
   let version = 0;
   let allRangeVersion = 0;
   let journalFloorVersion = 0;
@@ -50,6 +63,7 @@ export function createWritableDetectionFrameSource(options: {
   const recordRangeWrite = (
     nextSummary: ColdDetectionFrameStoreWriteSummary,
     changedSourceRanges: readonly DetectionFrameSourceVersionRange[],
+    prunedRange?: DetectionFrameSourceVersionRange,
   ) => {
     summary = nextSummary;
     version += 1;
@@ -57,6 +71,14 @@ export function createWritableDetectionFrameSource(options: {
     for (const changedRange of changedSourceRanges) {
       changedRanges.push({ ...changedRange, version });
       recordAvailableRange(changedRange, availableRanges);
+    }
+
+    if (prunedRange) {
+      // Evicting old history is a change to that range only. Recording it
+      // alongside the append keeps a buffered timeline patching two small
+      // ranges instead of invalidating and rebuilding everything it retains.
+      changedRanges.push({ ...prunedRange, version });
+      dropAvailableRangesBefore(prunedRange.endTime, availableRanges);
     }
 
     compactChangedRangeJournal();
@@ -100,21 +122,62 @@ export function createWritableDetectionFrameSource(options: {
         writeOptions(frames),
       );
       assertActive();
+      recordLatestFrame(frames);
 
-      const changedSourceRanges = getDetectionFrameRanges(frames);
-      const retainedSummary = await applyRetention(nextSummary);
+      return retainAndRecord(nextSummary, getDetectionFrameRanges(frames));
+    },
+
+    async appendLiveFrame(frame) {
       assertActive();
 
-      if (retainedSummary !== nextSummary) {
-        return recordAllRangesWrite(retainedSummary);
+      const framesToWrite = createLiveFrameWrite(frame);
+      const nextSummary = await options.store.appendFrames(
+        writeOptions(framesToWrite),
+      );
+      assertActive();
+      heldLiveFrame = framesToWrite.at(-1) ?? null;
+      recordLatestFrame(framesToWrite);
+
+      return retainAndRecord(
+        nextSummary,
+        getDetectionFrameRanges(framesToWrite),
+      );
+    },
+
+    async finalizeCoverage(endTime) {
+      assertActive();
+
+      if (!Number.isFinite(endTime)) {
+        throw new RangeError("finalizeCoverage requires a finite endTime.");
       }
 
-      if (changedSourceRanges.length === 0) {
-        summary = nextSummary;
-        return nextSummary;
+      const frameToFinalize = latestFrame;
+
+      if (
+        !frameToFinalize ||
+        getFrameEndTime(frameToFinalize) >= endTime ||
+        frameToFinalize.mediaTime > endTime
+      ) {
+        return summary ? { ...summary } : null;
       }
 
-      return recordRangeWrite(nextSummary, changedSourceRanges);
+      const finalizedFrame = { ...frameToFinalize, endTime };
+      const nextSummary = await options.store.appendFrames(
+        writeOptions([finalizedFrame]),
+      );
+      assertActive();
+      latestFrame = finalizedFrame;
+
+      if (
+        heldLiveFrame &&
+        haveSameDetectionFrameIdentity(heldLiveFrame, finalizedFrame)
+      ) {
+        heldLiveFrame = finalizedFrame;
+      }
+
+      return retainAndRecord(nextSummary, [
+        { endTime, startTime: frameToFinalize.mediaTime },
+      ]);
     },
 
     async replaceFrames(frames) {
@@ -122,10 +185,15 @@ export function createWritableDetectionFrameSource(options: {
 
       const nextSummary = await options.store.putFrames(writeOptions(frames));
       assertActive();
-      const retainedSummary = await applyRetention(nextSummary);
+      latestFrame = null;
+      heldLiveFrame = null;
+      recordLatestFrame(frames);
+      const retention = await applyRetention(nextSummary);
       assertActive();
 
-      return recordAllRangesWrite(retainedSummary);
+      return recordAllRangesWrite(
+        retention.kind === "unchanged" ? nextSummary : retention.summary,
+      );
     },
 
     async clear() {
@@ -134,6 +202,8 @@ export function createWritableDetectionFrameSource(options: {
       await options.store.clearDataset(options.datasetId);
       assertActive();
       summary = null;
+      latestFrame = null;
+      heldLiveFrame = null;
       version += 1;
       allRangeVersion = version;
       journalFloorVersion = version;
@@ -262,9 +332,42 @@ export function createWritableDetectionFrameSource(options: {
     }
   }
 
+  /**
+   * Applies retention and records the result as an incremental change when the
+   * store can prune in place, or as a full rewrite when it cannot.
+   */
+  async function retainAndRecord(
+    nextSummary: ColdDetectionFrameStoreWriteSummary,
+    changedSourceRanges: readonly DetectionFrameSourceVersionRange[],
+  ) {
+    const retention = await applyRetention(nextSummary);
+    assertActive();
+
+    if (retention.kind === "rewritten") {
+      return recordAllRangesWrite(retention.summary);
+    }
+
+    if (retention.kind === "unchanged") {
+      if (changedSourceRanges.length === 0) {
+        summary = nextSummary;
+        return nextSummary;
+      }
+
+      return recordRangeWrite(nextSummary, changedSourceRanges);
+    }
+
+    forgetFramesBefore(retention.prunedRange.endTime);
+
+    return recordRangeWrite(
+      retention.summary,
+      changedSourceRanges,
+      retention.prunedRange,
+    );
+  }
+
   async function applyRetention(
     nextSummary: ColdDetectionFrameStoreWriteSummary,
-  ) {
+  ): Promise<RetentionResult> {
     const retention = options.retention;
 
     if (
@@ -272,7 +375,7 @@ export function createWritableDetectionFrameSource(options: {
       !shouldApplyWindowRetention(retention) ||
       nextSummary.endTime === null
     ) {
-      return nextSummary;
+      return { kind: "unchanged" };
     }
 
     const retentionWindowSeconds = retention.windowSeconds;
@@ -294,16 +397,81 @@ export function createWritableDetectionFrameSource(options: {
       nextSummary.startTime !== null &&
       nextSummary.startTime + RANGE_EPSILON_SECONDS >= retentionStartTime
     ) {
-      return nextSummary;
+      return { kind: "unchanged" };
     }
 
+    if (options.store.pruneFrames) {
+      return {
+        kind: "pruned",
+        prunedRange: {
+          endTime: retentionStartTime,
+          startTime: nextSummary.startTime ?? 0,
+        },
+        summary: await options.store.pruneFrames({
+          datasetId: options.datasetId,
+          startTime: retentionStartTime,
+        }),
+      };
+    }
+
+    // Stores without in-place pruning still get a correct retention window,
+    // at the cost of reloading and rewriting everything they keep.
     const retainedFrames = await options.store.loadFrames({
       datasetId: options.datasetId,
       endTime: nextSummary.endTime,
       startTime: retentionStartTime,
     });
 
-    return options.store.putFrames(writeOptions(retainedFrames));
+    return {
+      kind: "rewritten",
+      summary: await options.store.putFrames(writeOptions(retainedFrames)),
+    };
+  }
+
+  /**
+   * Builds the one or two frames a live append writes: the newest frame held
+   * open, plus the previously held frame closed where the newest begins.
+   */
+  function createLiveFrameWrite(frame: DetectionFrame) {
+    const openFrame: DetectionFrame = {
+      ...frame,
+      endTime: Math.max(
+        frame.endTime ?? frame.mediaTime,
+        frame.mediaTime + liveHoldSeconds,
+      ),
+    };
+    const heldFrame = heldLiveFrame;
+
+    if (
+      !heldFrame ||
+      haveSameDetectionFrameIdentity(heldFrame, openFrame) ||
+      getFrameEndTime(heldFrame) <= frame.mediaTime ||
+      // A live frame that is not strictly newer cannot close its predecessor
+      // without collapsing it to a zero-length interval.
+      heldFrame.mediaTime >= frame.mediaTime
+    ) {
+      return [openFrame];
+    }
+
+    return [{ ...heldFrame, endTime: frame.mediaTime }, openFrame];
+  }
+
+  function recordLatestFrame(frames: readonly DetectionFrame[]) {
+    for (const frame of frames) {
+      if (!latestFrame || compareDetectionFrames(frame, latestFrame) > 0) {
+        latestFrame = frame;
+      }
+    }
+  }
+
+  function forgetFramesBefore(startTime: number) {
+    if (latestFrame && getFrameEndTime(latestFrame) < startTime) {
+      latestFrame = null;
+    }
+
+    if (heldLiveFrame && getFrameEndTime(heldLiveFrame) < startTime) {
+      heldLiveFrame = null;
+    }
   }
 
   function resolveCoveredWaiters() {
@@ -336,6 +504,60 @@ export function createWritableDetectionFrameSource(options: {
 
 function createDestroyedError() {
   return new Error("Detection frame source has been destroyed.");
+}
+
+function resolveLiveHoldSeconds(holdSeconds: number | undefined) {
+  if (holdSeconds === undefined) {
+    return DEFAULT_LIVE_HOLD_SECONDS;
+  }
+
+  if (!Number.isFinite(holdSeconds) || holdSeconds <= 0) {
+    throw new RangeError("live.holdSeconds must be greater than 0.");
+  }
+
+  return holdSeconds;
+}
+
+function getFrameEndTime(frame: DetectionFrame) {
+  return frame.endTime ?? frame.mediaTime;
+}
+
+function haveSameDetectionFrameIdentity(
+  left: DetectionFrame,
+  right: DetectionFrame,
+) {
+  return left.frameIndex === undefined || right.frameIndex === undefined
+    ? left.frameIndex === right.frameIndex && left.mediaTime === right.mediaTime
+    : left.frameIndex === right.frameIndex;
+}
+
+function compareDetectionFrames(left: DetectionFrame, right: DetectionFrame) {
+  if (left.mediaTime !== right.mediaTime) {
+    return left.mediaTime - right.mediaTime;
+  }
+
+  return (left.frameIndex ?? 0) - (right.frameIndex ?? 0);
+}
+
+function dropAvailableRangesBefore(
+  startTime: number,
+  availableRanges: AvailableRange[],
+) {
+  let writeIndex = 0;
+
+  for (const range of availableRanges) {
+    if (range.endTime <= startTime) {
+      continue;
+    }
+
+    availableRanges[writeIndex] = {
+      endTime: range.endTime,
+      startTime: Math.max(range.startTime, startTime),
+    };
+    writeIndex += 1;
+  }
+
+  availableRanges.length = writeIndex;
 }
 
 function shouldApplyWindowRetention(

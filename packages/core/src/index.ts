@@ -194,6 +194,10 @@ export {
   type MaskRectRun,
 } from "#utils/detection-masks";
 export {
+  projectDetectionFrame,
+  projectDetectionFrames,
+} from "#utils/detection-projection";
+export {
   centerRectToTopLeftRect,
   containsPoint,
   distanceToSegment,
@@ -282,6 +286,7 @@ export {
   type BufferedDetectionTimeline,
   type ColdDetectionFrameStore,
   type ColdDetectionFrameStoreLoadOptions,
+  type ColdDetectionFrameStorePruneOptions,
   type ColdDetectionFrameStoreWriteOptions,
   type ColdDetectionFrameStoreWriteSummary,
   type ChunkedDetectionFrameSourceOptions,
@@ -294,6 +299,7 @@ export {
   type DetectionFrameChunkDescriptor,
   type DetectionFrameChunkFetch,
   type DetectionFrameChunkManifest,
+  type DetectionFrameLiveOptions,
   type DetectionFrameRetentionOptions,
   type DetectionFrameSelectionOptions,
   type DetectionFrameSource,
@@ -302,12 +308,14 @@ export {
   type DetectionPlaybackGateOptions,
   type DetectionTimelineContext,
   type WritableDetectionFrameSource,
+  type WritableDetectionFrameSourceOptions,
 } from "#types/detection-timeline";
 export {
   DetectionMaskEncoding,
   KeypointVisibility,
   type CompressedRleDetectionMask,
   type Detection,
+  type DetectionCoordinateSpace,
   type DetectionFrame,
   type DetectionMask,
   type KeypointEdge,
@@ -329,6 +337,7 @@ export type {
   PlatformMediaFrameSource,
 } from "#types/media";
 export {
+  MediaErrorKind,
   MediaRendererFit,
   MediaRendererPlaybackState,
   MediaSourceStatus,

@@ -175,7 +175,10 @@ export async function createMediaRendererCore(
         throw new Error("Media renderer is not ready.");
       }
 
-      if (runtimeState.isPlaybackActive()) {
+      // Buffering is a stalled form of playing, not a settled one: the
+      // controller may already have been stopped by a seek taken while the
+      // gate was open. Only a run that is genuinely playing can no-op here.
+      if (runtimeState.isPlaying()) {
         return;
       }
 
@@ -207,7 +210,9 @@ export async function createMediaRendererCore(
         throw new Error("Media renderer is not ready.");
       }
 
-      const wasPlaying = runtimeState.isPlaying();
+      // A seek taken while buffering should resume playback, not strand it:
+      // buffering means playback was requested and is waiting for data.
+      const wasPlaying = runtimeState.isPlaybackActive();
       const requestVersion = ++navigationVersion;
       const targetTime = clampSeekTime({
         duration: runtimeState.duration(),
@@ -239,6 +244,10 @@ export async function createMediaRendererCore(
         if (wasPlaying) {
           runtimeState.setPlaying();
           playbackController.play();
+        } else if (runtimeState.isBuffering()) {
+          // Seeking always leaves the controller paused. Settle the reported
+          // state so the session is paused rather than perpetually buffering.
+          runtimeState.setPaused();
         }
       } catch (error) {
         if (

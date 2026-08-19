@@ -5,6 +5,7 @@ import type {
   ColdDetectionFrameStoreWriteSummary,
 } from "supervision-js-core";
 import type { DetectionFrame } from "supervision-js-core";
+import { DetectionMaskEncoding } from "supervision-js-core";
 import {
   MediaSessionActivityKind,
   MediaSessionStatus,
@@ -119,6 +120,290 @@ describe("media session", () => {
     });
     expect(await session.detectionSource?.loadFrames(0, 1)).toEqual(frames);
 
+    session.destroy();
+  });
+
+  it("projects appended detections from their declared coordinate space", async () => {
+    resetMocks();
+    const { createMediaSession } = await import("../index");
+
+    const session = await createMediaSession({
+      container: createContainer(),
+      detections: { appendable: { datasetId: "projected" } },
+      media: "sample.mp4",
+      renderer: { autoPlay: false },
+    });
+
+    const mask = {
+      counts: "abc",
+      encoding: DetectionMaskEncoding.CompressedRle,
+      height: 90,
+      width: 160,
+    } as const;
+
+    await session.appendDetectionFrames([
+      {
+        // Half the session's 1280x720 media space.
+        coordinateSpace: { height: 360, width: 640 },
+        detections: [
+          {
+            id: "scaled",
+            keypoints: { edges: [], points: [{ x: 10, y: 20 }] },
+            mask,
+            polygon: {
+              points: [
+                { x: 0, y: 0 },
+                { x: 64, y: 0 },
+                { x: 64, y: 36 },
+              ],
+            },
+            polyline: {
+              points: [
+                { x: 4, y: 8 },
+                { x: 8, y: 16 },
+              ],
+            },
+            rect: { height: 36, width: 64, x: 320, y: 180 },
+          },
+        ],
+        endTime: 0.5,
+        frameIndex: 0,
+        mediaTime: 0,
+      },
+      {
+        detections: [
+          {
+            id: "already-media-space",
+            rect: { height: 36, width: 64, x: 320, y: 180 },
+          },
+        ],
+        endTime: 1,
+        frameIndex: 1,
+        mediaTime: 0.5,
+      },
+    ]);
+
+    const stored = await session.detectionSource?.loadFrames(0, 1);
+
+    expect(stored?.[0]).toMatchObject({
+      coordinateSpace: { height: 720, width: 1280 },
+      detections: [
+        {
+          keypoints: { points: [{ x: 20, y: 40 }] },
+          // Masks carry their own dimensions and must not be scaled again.
+          mask,
+          polygon: {
+            points: [
+              { x: 0, y: 0 },
+              { x: 128, y: 0 },
+              { x: 128, y: 72 },
+            ],
+          },
+          polyline: {
+            points: [
+              { x: 8, y: 16 },
+              { x: 16, y: 32 },
+            ],
+          },
+          rect: { height: 72, width: 128, x: 640, y: 360 },
+        },
+      ],
+    });
+    expect(stored?.[1]).toMatchObject({
+      detections: [{ rect: { height: 36, width: 64, x: 320, y: 180 } }],
+    });
+    expect(stored?.[1]?.coordinateSpace).toBeUndefined();
+
+    session.destroy();
+  });
+
+  it("holds the newest live detection frame until the next one arrives", async () => {
+    resetMocks();
+    const { createMediaSession } = await import("../index");
+
+    const session = await createMediaSession({
+      container: createContainer(),
+      detections: {
+        appendable: { datasetId: "live", live: { holdSeconds: 10 } },
+      },
+      media: "sample.mp4",
+      renderer: { autoPlay: false },
+    });
+
+    await session.appendLiveDetectionFrame({
+      detections: [{ id: "first" }],
+      frameIndex: 0,
+      mediaTime: 0,
+    });
+    await session.appendLiveDetectionFrame({
+      detections: [{ id: "second" }],
+      frameIndex: 1,
+      mediaTime: 0.2,
+    });
+
+    expect(await session.detectionSource?.loadFrames(0, 20)).toEqual([
+      {
+        detections: [{ id: "first" }],
+        endTime: 0.2,
+        frameIndex: 0,
+        mediaTime: 0,
+      },
+      {
+        detections: [{ id: "second" }],
+        endTime: 10.2,
+        frameIndex: 1,
+        mediaTime: 0.2,
+      },
+    ]);
+
+    session.destroy();
+  });
+
+  it("finalizes detection coverage at the reported media duration", async () => {
+    resetMocks();
+    const { createMediaSession } = await import("../index");
+
+    const session = await createMediaSession({
+      container: createContainer(),
+      detections: { appendable: { datasetId: "finalized" } },
+      media: "sample.mp4",
+      renderer: { autoPlay: false },
+    });
+
+    await session.appendDetectionFrames([
+      {
+        detections: [{ id: "last" }],
+        endTime: 0.9,
+        frameIndex: 0,
+        mediaTime: 0.8,
+      },
+    ]);
+
+    await expect(session.finalizeDetectionCoverage()).resolves.toMatchObject({
+      endTime: 1,
+    });
+    expect(await session.detectionSource?.loadFrames(0, 1)).toEqual([
+      {
+        detections: [{ id: "last" }],
+        endTime: 1,
+        frameIndex: 0,
+        mediaTime: 0.8,
+      },
+    ]);
+
+    // Idempotent: a second call has nothing left to close.
+    await expect(session.finalizeDetectionCoverage()).resolves.toMatchObject({
+      endTime: 1,
+    });
+
+    session.destroy();
+  });
+
+  it("coalesces refreshes for detections that cover the displayed time", async () => {
+    resetMocks();
+    const { createMediaSession } = await import("../index");
+
+    const session = await createMediaSession({
+      container: createContainer(),
+      detections: { appendable: { datasetId: "refresh" } },
+      media: "sample.mp4",
+      renderer: { autoPlay: false },
+    });
+    let resolveRefresh: (() => void) | undefined;
+    const refresh = vi
+      .spyOn(session.renderer, "refresh")
+      .mockImplementation(
+        () => new Promise<void>((resolve) => (resolveRefresh = resolve)),
+      );
+
+    await session.appendDetectionFrames([
+      { detections: [{ id: "a" }], endTime: 0.5, frameIndex: 0, mediaTime: 0 },
+    ]);
+    expect(refresh).toHaveBeenCalledTimes(1);
+
+    // Requests arriving while a redraw is in flight collapse into one.
+    await session.appendDetectionFrames([
+      { detections: [{ id: "b" }], endTime: 0.5, frameIndex: 1, mediaTime: 0 },
+    ]);
+    await session.appendDetectionFrames([
+      { detections: [{ id: "c" }], endTime: 0.5, frameIndex: 2, mediaTime: 0 },
+    ]);
+    expect(refresh).toHaveBeenCalledTimes(1);
+
+    resolveRefresh?.();
+    await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(2));
+    resolveRefresh?.();
+
+    // Detections elsewhere on the timeline never force a render.
+    await session.appendDetectionFrames([
+      {
+        detections: [{ id: "far" }],
+        endTime: 51,
+        frameIndex: 9,
+        mediaTime: 50,
+      },
+    ]);
+    expect(refresh).toHaveBeenCalledTimes(2);
+
+    refresh.mockRestore();
+    session.destroy();
+  });
+
+  it("redraws for every live detection frame", async () => {
+    resetMocks();
+    const { createMediaSession } = await import("../index");
+
+    const session = await createMediaSession({
+      container: createContainer(),
+      detections: { appendable: { datasetId: "live-refresh" } },
+      media: "sample.mp4",
+      renderer: { autoPlay: false },
+    });
+    const refresh = vi
+      .spyOn(session.renderer, "refresh")
+      .mockResolvedValue(undefined);
+
+    // A live result describes the frame already on screen even when its
+    // timestamp lands slightly ahead of the last presented sample.
+    await session.appendLiveDetectionFrame({
+      detections: [{ id: "live" }],
+      frameIndex: 0,
+      mediaTime: 0.5,
+    });
+
+    await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+
+    refresh.mockRestore();
+    session.destroy();
+  });
+
+  it("leaves every redraw to the host when auto refresh is disabled", async () => {
+    resetMocks();
+    const { createMediaSession } = await import("../index");
+
+    const session = await createMediaSession({
+      container: createContainer(),
+      detections: {
+        appendable: { datasetId: "manual-refresh" },
+        autoRefresh: false,
+      },
+      media: "sample.mp4",
+      renderer: { autoPlay: false },
+    });
+    const refresh = vi
+      .spyOn(session.renderer, "refresh")
+      .mockResolvedValue(undefined);
+
+    await session.appendDetectionFrames([
+      { detections: [{ id: "a" }], endTime: 0.5, frameIndex: 0, mediaTime: 0 },
+    ]);
+
+    expect(refresh).not.toHaveBeenCalled();
+
+    await session.refresh();
+    expect(refresh).toHaveBeenCalledTimes(1);
+
+    refresh.mockRestore();
     session.destroy();
   });
 

@@ -1,5 +1,8 @@
+import { MediaSourceError, toMediaSourceError } from "#media/media-errors";
+import { normalizeMediaSourcePresentationTimeline } from "#media/presentation-timeline-media-source";
 import type { DecodedMediaSource } from "./media-source";
 import type { MediaRendererSource } from "#types/media-renderer";
+import { MediaErrorKind } from "supervision-js-core";
 import type { InputFormat, Source } from "mediabunny";
 
 export interface MediabunnyMediaSourceInput {
@@ -32,7 +35,10 @@ export async function openMediabunnyMediaSource(
     const canRead = await input.canRead();
 
     if (!canRead) {
-      throw new Error("Mediabunny cannot read this media source.");
+      throw new MediaSourceError(
+        MediaErrorKind.Unreadable,
+        "Mediabunny cannot read this media source.",
+      );
     }
 
     const [
@@ -53,7 +59,10 @@ export async function openMediabunnyMediaSource(
     const primaryVideoTrack = await input.getPrimaryVideoTrack();
 
     if (!primaryVideoTrack) {
-      throw new Error("No video track found in media source.");
+      throw new MediaSourceError(
+        MediaErrorKind.NoVideoTrack,
+        "No video track found in media source.",
+      );
     }
 
     const packetStatsPromise =
@@ -86,7 +95,7 @@ export async function openMediabunnyMediaSource(
         ? Math.max(1, Math.round(duration * estimatedFrameRate))
         : null;
 
-    return {
+    return normalizeMediaSourcePresentationTimeline({
       input,
       metadata: {
         audioTrackCount: audioTracks.length,
@@ -104,10 +113,10 @@ export async function openMediabunnyMediaSource(
         videoTrackCount: videoTracks.length,
       },
       sampleSink: new VideoSampleSink(primaryVideoTrack),
-    };
+    });
   } catch (error) {
     input.dispose();
-    throw error;
+    throw toMediaSourceError(error, "Unable to open this media source.");
   }
 }
 

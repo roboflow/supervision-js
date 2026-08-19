@@ -81,6 +81,7 @@ describe("package entrypoint", () => {
       "MarkerShape",
       "MarkerSizeSpace",
       "MaskRenderMode",
+      "MediaErrorKind",
       "MediaInteractionMode",
       "MediaNormalizationAudioCodec",
       "MediaNormalizationContainer",
@@ -95,6 +96,7 @@ describe("package entrypoint", () => {
       "MediaSessionActivityStatus",
       "MediaSessionMode",
       "MediaSessionStatus",
+      "MediaSourceError",
       "MediaSourceStatus",
       "RegionRendererComposeMode",
       "RegionRendererRegionKind",
@@ -129,6 +131,8 @@ describe("package entrypoint", () => {
       "createStaticImageMediaSource",
       "createWritableDetectionFrameSource",
       "detectionPostProcessors",
+      "getMediaErrorKind",
+      "isMediaSourceError",
       "normalizeDetectionClassName",
       "normalizeMedia",
       "normalizeMediaProgressively",
@@ -136,8 +140,11 @@ describe("package entrypoint", () => {
       "prepareMedia",
       "prepareMediaProgressively",
       "probeMedia",
+      "projectDetectionFrame",
       "projectDetectionFrameForTracking",
+      "projectDetectionFrames",
       "resolveDetectionClassColorStyle",
+      "toMediaSourceError",
     ]);
     expect(entrypoint.createMediaRenderer).toEqual(expect.any(Function));
     expect(entrypoint.annotationRenderers).toEqual({

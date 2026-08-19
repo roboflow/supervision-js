@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createMediaStreamRendererSource } from "./media-stream-media-source";
+import { MediaErrorKind } from "supervision-js-core";
+import { getMediaErrorKind } from "./media-errors";
+import {
+  createMediaStreamRendererSource,
+  type MediaStreamPresentedFrame,
+} from "./media-stream-media-source";
 
 type VideoFrameCallback = (
   now: DOMHighResTimeStamp,
@@ -70,12 +75,15 @@ class FakeVideo extends EventTarget {
     this.callbacks.delete(handle);
   }
 
-  async present(mediaTime: number) {
+  async present(
+    mediaTime: number,
+    metadata: Partial<VideoFrameCallbackMetadata> = {},
+  ) {
     await vi.waitFor(() => expect(this.callbacks.size).toBe(1));
     const [handle, callback] = this.callbacks.entries().next().value!;
     this.callbacks.delete(handle);
     this.currentTime = mediaTime;
-    callback(0, { mediaTime } as VideoFrameCallbackMetadata);
+    callback(0, { ...metadata, mediaTime } as VideoFrameCallbackMetadata);
     await Promise.resolve();
   }
 }
@@ -272,12 +280,90 @@ describe("createMediaStreamRendererSource", () => {
     expect(track.stop).toHaveBeenCalledOnce();
   });
 
+  it("reports presented-frame metadata the browser supplies", async () => {
+    const presentedFrames: MediaStreamPresentedFrame[] = [];
+    const stream = new FakeStream(new FakeTrack());
+    const opening = createMediaStreamRendererSource(
+      stream as unknown as MediaStream,
+      { onPresentedFrame: (frame) => presentedFrames.push(frame) },
+    ).open();
+
+    await fakeVideo.present(1.25, {
+      expectedDisplayTime: 2050,
+      height: 360,
+      presentationTime: 2000,
+      rtpTimestamp: 123456,
+      width: 640,
+    });
+    const decoded = await opening;
+
+    expect(presentedFrames).toEqual([
+      {
+        expectedDisplayTime: 2050,
+        height: 360,
+        mediaTime: 1.25,
+        presentationTime: 2000,
+        rtpTimestamp: 123456,
+        width: 640,
+      },
+    ]);
+
+    decoded.input.dispose();
+  });
+
+  it("omits presented-frame fields the browser does not supply", async () => {
+    const presentedFrames: MediaStreamPresentedFrame[] = [];
+    const stream = new FakeStream(new FakeTrack());
+    const opening = createMediaStreamRendererSource(
+      stream as unknown as MediaStream,
+      {
+        onPresentedFrame: (frame) => presentedFrames.push(frame),
+        timestampOrigin: "first-frame",
+      },
+    ).open();
+
+    await fakeVideo.present(10);
+    await fakeVideo.present(10.25);
+    const decoded = await opening;
+
+    // Absent RTP metadata is normal, and the reported time matches the
+    // timeline the session presents rather than the raw browser clock.
+    expect(presentedFrames).toEqual([{ mediaTime: 0 }, { mediaTime: 0.25 }]);
+
+    decoded.input.dispose();
+  });
+
+  it("keeps rendering when a presented-frame handler throws", async () => {
+    const stream = new FakeStream(new FakeTrack());
+    const opening = createMediaStreamRendererSource(
+      stream as unknown as MediaStream,
+      {
+        onPresentedFrame: () => {
+          throw new Error("host handler failed");
+        },
+      },
+    ).open();
+
+    await fakeVideo.present(0.5);
+    const decoded = await opening;
+
+    await expect(decoded.sampleSink.getSample(0.5)).resolves.toMatchObject({
+      timestamp: 0.5,
+    });
+
+    decoded.input.dispose();
+  });
+
   it("rejects streams without a video track", async () => {
     const stream = new FakeStream(new FakeTrack());
     vi.spyOn(stream, "getVideoTracks").mockReturnValue([]);
 
-    await expect(
-      createMediaStreamRendererSource(stream as unknown as MediaStream).open(),
-    ).rejects.toThrow("MediaStream does not contain a video track");
+    const error = await createMediaStreamRendererSource(
+      stream as unknown as MediaStream,
+    )
+      .open()
+      .catch((openError: unknown) => openError);
+
+    expect(getMediaErrorKind(error)).toBe(MediaErrorKind.NoVideoTrack);
   });
 });

@@ -62,6 +62,44 @@ server-side fan-out, and streamed HTTP responses.
 Full replacement and clear operations still invalidate every range because
 existing frame membership may have changed anywhere in the dataset.
 
+## Bounded Retention
+
+A rolling retention window used to be applied by reloading everything inside it
+and writing it back with `putFrames`. That rewrote the retained window on every
+append and invalidated every range, so a long-running stream paid for its whole
+history each time a frame arrived.
+
+`ColdDetectionFrameStore.pruneFrames` is the bounded path. A store that
+implements it drops the frames ending before the retention floor in place, and
+the writable source records that eviction as one more changed range next to the
+appended range. The hot timeline then patches the two ranges that actually
+moved. Stores that do not implement the hook keep the reload-and-replace
+fallback, which stays correct and is what the browser IndexedDB store still
+does today.
+
+## Live Latest-Frame Semantics
+
+A live producer only knows that its newest result is current. It learns that a
+result stopped being current when the next one arrives, not before.
+`appendLiveFrame` encodes exactly that: the newest frame is written with an
+open-ended hold, and the previously held frame is rewritten to end where the new
+one begins. Both frames keep their identity, so the store replaces rather than
+accumulates, and each live append writes at most two frames regardless of how
+much history is retained.
+
+Leaving every frame open instead is what makes this expensive: overlapping
+open-ended intervals pile up in the hot window, and each append reloads,
+deep-copies, and re-sorts them all.
+
+## Finalizing Coverage
+
+A container can declare a duration slightly beyond its last decoded sample --
+9.0 seconds for 89 frames at 10fps, for example. Coverage-gated playback then
+waits forever for that terminal sliver at the loop boundary.
+`finalizeCoverage(endTime)` extends the last retained frame to a known end of
+media without reaching into store internals, and is idempotent so a producer can
+call it whenever it finishes.
+
 ## Prediction-Gated Playback
 
 Some sessions should treat missing predictions as missing media. In those cases,
