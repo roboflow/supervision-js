@@ -545,7 +545,7 @@ function createFocusIdMaskRenderer(options: {
   return {
     destroy() {
       mesh.destroy();
-      shader.destroy(true);
+      shader.destroy();
       geometry.destroy();
       placeholderSource.destroy();
     },
@@ -617,7 +617,9 @@ function createFocusIdMaskRenderer(options: {
 
   function rebuildShader() {
     try {
-      shader.destroy(true);
+      // Never destroy(true): the program cache is keyed by source and shared
+      // by every shader built from it; a destroyed entry poisons the rebuild.
+      shader.destroy();
     } catch {
       // Pixi has already invalidated this shader's resource group.
     }
