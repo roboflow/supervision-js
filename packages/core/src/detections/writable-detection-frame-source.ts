@@ -11,10 +11,7 @@ import type { DetectionFrame } from "#types/detections";
 const RANGE_EPSILON_SECONDS = 1e-6;
 const MAX_CHANGED_RANGE_JOURNAL_LENGTH = 512;
 const DEFAULT_LIVE_HOLD_SECONDS = 60;
-const NO_COVERAGE_INVALIDATION: CoverageInvalidation = {
-  ranges: [],
-  requiresReload: false,
-};
+const NO_COVERAGE_INVALIDATION: CoverageInvalidation = { ranges: [] };
 
 interface VersionedRange extends DetectionFrameSourceVersionRange {
   readonly version: number;
@@ -31,7 +28,6 @@ interface RangeWaiter {
  */
 interface CoverageInvalidation {
   readonly ranges: readonly DetectionFrameSourceVersionRange[];
-  readonly requiresReload: boolean;
 }
 
 interface AvailableRange {
@@ -100,13 +96,6 @@ export function createWritableDetectionFrameSource(
       changedRanges.push({ ...invalidatedRange, version });
     }
 
-    if (invalidation.requiresReload) {
-      // An open-ended frame was selected with no upper bound, so the interval
-      // it stopped covering cannot be described as a range. Everything older
-      // than this write has to reload rather than patch.
-      journalFloorVersion = version;
-    }
-
     if (prunedRange) {
       // Evicting old history is a change to that range only. Recording it
       // alongside the append keeps a buffered timeline patching two small
@@ -157,16 +146,16 @@ export function createWritableDetectionFrameSource(
           writeOptions(frames),
         );
         assertActive();
-        const invalidation = getInvalidatedCoverage(frames);
+        const changedSourceRanges = getDetectionFrameRanges(frames);
+        const invalidation = getInvalidatedCoverage(
+          frames,
+          changedSourceRanges,
+        );
 
         recordLatestFrame(frames);
         recordCoverageFrontierFromFrames(frames);
 
-        return retainAndRecord(
-          nextSummary,
-          getDetectionFrameRanges(frames),
-          invalidation,
-        );
+        return retainAndRecord(nextSummary, changedSourceRanges, invalidation);
       });
     },
 
@@ -186,7 +175,11 @@ export function createWritableDetectionFrameSource(
           writeOptions(framesToWrite),
         );
         assertActive();
-        const invalidation = getInvalidatedCoverage(framesToWrite);
+        const changedSourceRanges = getDetectionFrameRanges(framesToWrite);
+        const invalidation = getInvalidatedCoverage(
+          framesToWrite,
+          changedSourceRanges,
+        );
 
         heldLiveFrame = framesToWrite.at(-1) ?? null;
         liveFrontierTime = Math.max(
@@ -197,11 +190,7 @@ export function createWritableDetectionFrameSource(
         // The hold end is a placeholder for "still current", not covered data.
         recordCoverageFrontier(getFrameEndTime(frame));
 
-        return retainAndRecord(
-          nextSummary,
-          getDetectionFrameRanges(framesToWrite),
-          invalidation,
-        );
+        return retainAndRecord(nextSummary, changedSourceRanges, invalidation);
       });
     },
 
@@ -231,6 +220,8 @@ export function createWritableDetectionFrameSource(
           writeOptions([finalizedFrame]),
         );
         assertActive();
+        const invalidation = getInvalidatedCoverage([finalizedFrame], []);
+
         latestFrame = finalizedFrame;
 
         if (
@@ -242,15 +233,19 @@ export function createWritableDetectionFrameSource(
 
         coverageFrontierTime = endTime;
 
-        const finalSummary = await retainAndRecord(nextSummary, [
-          {
-            // `endTime` is where media ends, so an open-ended frame gives up
-            // nothing reachable. Only a finite interval that shrank leaves a
-            // tail worth reporting, and the maximum already covers it.
-            endTime: Math.max(endTime, previousEndTime),
-            startTime: frameToFinalize.mediaTime,
-          },
-        ]);
+        const finalSummary = await retainAndRecord(
+          nextSummary,
+          [
+            {
+              endTime: Math.max(endTime, previousEndTime),
+              startTime: frameToFinalize.mediaTime,
+            },
+          ],
+          // Finalizing usually closes at the end of media, where the tail an
+          // open-ended frame gives up is unreachable. The caller may finalize
+          // earlier, though, so report it rather than assume.
+          invalidation,
+        );
 
         // Closing a held live frame shortens coverage. Reported availability
         // has to shrink with it, or a playback gate would still believe the
@@ -366,13 +361,19 @@ export function createWritableDetectionFrameSource(
         };
       }
 
+      // Clipped to the requested ranges: a consumer gets back exactly the part
+      // of the change it asked about, and an unbounded invalidation stays a
+      // bounded, loadable answer.
       const changedSourceRanges = changedRanges
-        .filter(
-          (changedRange) =>
-            changedRange.version > previousVersion &&
-            ranges.some((range) => rangesOverlap(range, changedRange)),
-        )
-        .map(({ endTime, startTime }) => ({ endTime, startTime }));
+        .filter((changedRange) => changedRange.version > previousVersion)
+        .flatMap((changedRange) =>
+          ranges
+            .filter((range) => rangesOverlap(range, changedRange))
+            .map((range) => ({
+              endTime: Math.min(range.endTime, changedRange.endTime),
+              startTime: Math.max(range.startTime, changedRange.startTime),
+            })),
+        );
 
       return {
         ranges: mergeRanges(changedSourceRanges),
@@ -521,8 +522,7 @@ export function createWritableDetectionFrameSource(
     if (retention.kind === "unchanged") {
       if (
         changedSourceRanges.length === 0 &&
-        invalidation.ranges.length === 0 &&
-        !invalidation.requiresReload
+        invalidation.ranges.length === 0
       ) {
         summary = nextSummary;
         return nextSummary;
@@ -659,15 +659,18 @@ export function createWritableDetectionFrameSource(
    * while writes only add. Rewriting a frame with a shorter interval, or at a
    * different time, instead stops covering times the new interval never
    * mentions, and a consumer parked in one of them would keep showing a frame
-   * the source no longer selects. An open-ended frame was selected with no
-   * upper bound at all, so what it vacates is not expressible as a range and
-   * older consumers have to reload instead.
+   * the source no longer selects.
+   *
+   * A frame without an `endTime` was selected with no upper bound, so what it
+   * gives up is genuinely unbounded and is journaled that way. The journal
+   * stays range-scoped either way: a consumer asking about times the write
+   * never touched still hears that nothing changed.
    */
   function getInvalidatedCoverage(
     frames: readonly DetectionFrame[],
+    coveredRanges: readonly DetectionFrameSourceVersionRange[],
   ): CoverageInvalidation {
     const invalidatedRanges: DetectionFrameSourceVersionRange[] = [];
-    let requiresReload = false;
 
     for (const frame of frames) {
       for (const trackedFrame of [latestFrame, heldLiveFrame]) {
@@ -678,30 +681,31 @@ export function createWritableDetectionFrameSource(
           continue;
         }
 
-        const previousEndTime =
-          trackedFrame.endTime ?? Number.POSITIVE_INFINITY;
+        const previousRange = {
+          endTime: trackedFrame.endTime ?? Number.POSITIVE_INFINITY,
+          startTime: trackedFrame.mediaTime,
+        };
         const nextEndTime = frame.endTime ?? Number.POSITIVE_INFINITY;
 
         if (
           trackedFrame.mediaTime >= frame.mediaTime &&
-          previousEndTime <= nextEndTime
+          previousRange.endTime <= nextEndTime
         ) {
           continue;
         }
 
-        if (previousEndTime === Number.POSITIVE_INFINITY) {
-          requiresReload = true;
+        // A live append closes the held frame and reopens it further out in the
+        // same write, so the write's own range already describes the tail. Only
+        // coverage nothing else reported is worth a second journal entry.
+        if (isRangeCovered(previousRange, coveredRanges)) {
           continue;
         }
 
-        invalidatedRanges.push({
-          endTime: previousEndTime,
-          startTime: trackedFrame.mediaTime,
-        });
+        invalidatedRanges.push(previousRange);
       }
     }
 
-    return { ranges: mergeRanges(invalidatedRanges), requiresReload };
+    return { ranges: mergeRanges(invalidatedRanges) };
   }
 
   function forgetFramesBefore(startTime: number) {

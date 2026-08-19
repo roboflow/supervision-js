@@ -233,8 +233,8 @@ A producer that streams results into a session has four supported contracts:
   frame whose interval does not contain the displayed time cannot change what
   is on screen. A frame written without an
   `endTime` stays selected until a later frame supersedes it, so one appended
-  behind the displayed time still redraws, and rewriting one with a real end
-  redraws for the time it stops covering. Requests arriving during a redraw
+  behind the displayed time still redraws, and rewriting the most recent one
+  with a real end redraws for the time it stops covering. Requests arriving during a redraw
   collapse into a single follow-up. Set `detections.autoRefresh: false` to own
   every redraw.
 

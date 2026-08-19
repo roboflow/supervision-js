@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createMemoryColdDetectionFrameStore } from "#detections/memory-cold-detection-frame-store";
 import { createWritableDetectionFrameSource } from "#detections/writable-detection-frame-source";
+
+const MAX_CHANGED_RANGE_JOURNAL_LENGTH = 512;
 import type {
   ColdDetectionFrameStore,
   ColdDetectionFrameStoreWriteSummary,
@@ -430,13 +432,54 @@ describe("writable detection frame source", () => {
 
     // The frame was selected everywhere past 0 while it was open-ended, so
     // closing it changes what a consumer parked at 0.5 should be showing. The
-    // vacated interval has no upper bound to report, so it reloads instead.
+    // vacated tail is unbounded, but the answer stays scoped to the range the
+    // consumer asked about instead of forcing a reload.
     expect(await source.loadFrames(0.5, 0.5)).toEqual([]);
     expect(
       source.getChangesSince?.(openEndedVersion, [
         { endTime: 0.5, startTime: 0.5 },
       ]),
-    ).toMatchObject({ requiresReload: true });
+    ).toEqual({
+      ranges: [{ endTime: 0.5, startTime: 0.5 }],
+      requiresReload: false,
+      version: 2,
+    });
+  });
+
+  it("leaves a consumer below the vacated coverage untouched", async () => {
+    const store = createMemoryColdDetectionFrameStore();
+    const source = createWritableDetectionFrameSource({
+      datasetId: "stream",
+      store,
+    });
+
+    await source.appendFrames([
+      {
+        detections: [{ id: "early" }],
+        endTime: 1,
+        frameIndex: 0,
+        mediaTime: 0,
+      },
+    ]);
+    await source.appendFrames([
+      { detections: [{ id: "late" }], frameIndex: 1, mediaTime: 500 },
+    ]);
+    const settledVersion = source.getVersion();
+
+    await source.appendFrames([
+      {
+        detections: [{ id: "late" }],
+        endTime: 500.1,
+        frameIndex: 1,
+        mediaTime: 500,
+      },
+    ]);
+
+    // Closing an open-ended frame at 500 cannot change what is selected at 5,
+    // so a timeline buffered around 5 keeps patching instead of reloading.
+    expect(
+      source.getChangesSince?.(settledVersion, [{ endTime: 6, startTime: 4 }]),
+    ).toMatchObject({ ranges: [], requiresReload: false });
   });
 
   it("invalidates the interval a rewritten frame no longer covers", async () => {
@@ -464,10 +507,69 @@ describe("writable detection frame source", () => {
         { endTime: 0.5, startTime: 0.5 },
       ]),
     ).toEqual({
-      ranges: [{ endTime: 1, startTime: 0 }],
+      ranges: [{ endTime: 0.5, startTime: 0.5 }],
       requiresReload: false,
       version: 2,
     });
+  });
+
+  it("does not journal a live hold the same write already reports", async () => {
+    const store = createMemoryColdDetectionFrameStore();
+    const source = createWritableDetectionFrameSource({
+      datasetId: "live",
+      store,
+    });
+
+    for (let index = 0; index < 600; index += 1) {
+      await source.appendLiveFrame({
+        detections: [{ id: `d${index}` }],
+        frameIndex: index,
+        mediaTime: index / 30,
+      });
+    }
+
+    // Closing the held frame and reopening it are one contiguous range, so a
+    // live append still costs a single journal entry. Spending two would halve
+    // how far a lagging consumer can patch before the journal forces a reload.
+    let patchableWrites = 0;
+
+    while (
+      !source.getChangesSince?.(source.getVersion() - patchableWrites - 1, [
+        { endTime: 20, startTime: 0 },
+      ])?.requiresReload
+    ) {
+      patchableWrites += 1;
+    }
+
+    expect(patchableWrites).toBe(MAX_CHANGED_RANGE_JOURNAL_LENGTH);
+  });
+
+  it("reports the tail an early coverage finalization takes away", async () => {
+    const store = createMemoryColdDetectionFrameStore();
+    const source = createWritableDetectionFrameSource({
+      datasetId: "stream",
+      store,
+    });
+
+    await source.appendFrames([
+      { detections: [{ id: "open" }], frameIndex: 0, mediaTime: 10 },
+    ]);
+    const openEndedVersion = source.getVersion();
+
+    // `finalizeCoverage` accepts any end time, not only the end of media, so
+    // the tail past it stops being selected and has to be reported.
+    await source.finalizeCoverage(50);
+
+    expect(
+      source.getChangesSince?.(openEndedVersion, [
+        { endTime: 100, startTime: 100 },
+      ]),
+    ).toMatchObject({ requiresReload: false });
+    expect(
+      source.getChangesSince?.(openEndedVersion, [
+        { endTime: 100, startTime: 100 },
+      ])?.ranges,
+    ).toEqual([{ endTime: 100, startTime: 100 }]);
   });
 
   it("holds the newest live frame open until the next one supersedes it", async () => {
