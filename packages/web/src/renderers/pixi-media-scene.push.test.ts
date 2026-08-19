@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createArrayDetectionFrameSource,
   createBufferedDetectionTimeline,
+  type DetectionFrame,
 } from "supervision-js-core";
 
 import type {
@@ -430,6 +431,43 @@ describe("push-presented Pixi scene", () => {
     );
   });
 
+  it("publishes the detections a load lands after the picture already went up", async () => {
+    const load = createDeferred<readonly DetectionFrame[]>();
+    const detectionTimeline = createBufferedDetectionTimeline({
+      source: { loadFrames: () => load.promise },
+    });
+    const onPresentationUpdate = vi.fn();
+    const channel = createChannel();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene({
+      ...createSceneOptions(channel.channel),
+      detectionTimeline,
+      onPresentationUpdate,
+    });
+    scene.initializeMedia({ height: 240, width: 320 });
+
+    const prepared = detectionTimeline.prepare(1);
+    channel.present(presentedFrame(1000));
+
+    expect(onPresentationUpdate.mock.lastCall?.[0]).toMatchObject({
+      activeDetectionCount: 0,
+      activeDetectionFrameTime: null,
+    });
+
+    load.resolve([
+      {
+        detections: [{ rect: { height: 10, width: 10, x: 0, y: 0 } }],
+        mediaTime: 1,
+      },
+    ]);
+    await prepared;
+
+    expect(onPresentationUpdate.mock.lastCall?.[0]).toMatchObject({
+      activeDetectionCount: 1,
+      activeDetectionFrameTime: 1,
+    });
+  });
+
   it("keeps driving the ticker when the source has no frame channel", async () => {
     const { createPixiMediaScene } = await import("./pixi-media-scene");
     const scene = await createPixiMediaScene(createSceneOptions(undefined));
@@ -452,6 +490,15 @@ async function applyDisplayAdjustment(scene: MediaRendererScene) {
 
   scene.setDisplayAdjustments?.({ brightness: 1.4, contrast: 0.8 });
   await vi.waitFor(() => expect(pixiMock.displayFilters).toHaveLength(built));
+}
+
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+
+  return { promise, resolve };
 }
 
 function createChannel() {

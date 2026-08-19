@@ -142,6 +142,11 @@ export interface DetectionBufferPrepareOptions {
 
 /**
  * Current hot detection-buffer state.
+ *
+ * Window ends are media times, so a current time sits inside them or outside
+ * them. On a looping timeline a window that reaches past the last frame keeps
+ * counting: its start stays within the media, and its end runs past the
+ * duration by however far it wraps into the replay.
  */
 export interface DetectionBufferState {
   readonly status: DetectionBufferStatus;
@@ -295,6 +300,14 @@ export interface BufferedDetectionTimeline {
   selectFrame(mediaTime: number): DetectionFrame | undefined;
   getBufferedFrames(): readonly DetectionFrame[];
   getState(): DetectionBufferState;
+  /**
+   * Observe the buffered window changing.
+   *
+   * A load landing is the only way a media time that answered nothing starts
+   * answering a frame, and a resting playhead draws nothing that would ask
+   * again. Without this a consumer keeps the answer from before the load.
+   */
+  subscribe?(listener: () => void): () => void;
   destroy(): void;
 }
 

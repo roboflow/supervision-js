@@ -134,6 +134,11 @@ export function createPreparedAnnotationWindow(options: {
       setTimelineContext(context) {
         options.detectionTimeline.setTimelineContext?.(context);
       },
+      subscribe(listener) {
+        return (
+          options.detectionTimeline.subscribe?.(listener) ?? (() => undefined)
+        );
+      },
     },
   };
 }

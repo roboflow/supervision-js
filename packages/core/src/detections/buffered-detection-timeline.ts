@@ -82,6 +82,13 @@ export function createBufferedDetectionTimeline(
   let pendingPrefetch:
     { readonly loadId: number; readonly mediaTime: number } | undefined;
   let prefetchPump: Promise<void> | undefined;
+  const listeners = new Set<() => void>();
+
+  const notifyBufferChanged = () => {
+    for (const listener of listeners) {
+      listener();
+    }
+  };
 
   const getSourceVersion = (
     ranges?: readonly DetectionFrameSourceVersionRange[],
@@ -162,6 +169,7 @@ export function createBufferedDetectionTimeline(
           requestedStartTime: startTime,
           status: DetectionBufferStatus.Ready,
         };
+        notifyBufferChanged();
       })
       .catch((error: unknown) => {
         if (!destroyed && currentLoadId === loadId) {
@@ -306,12 +314,21 @@ export function createBufferedDetectionTimeline(
       return { ...state };
     },
 
+    subscribe(listener) {
+      listeners.add(listener);
+
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+
     destroy() {
       if (destroyed) {
         return;
       }
 
       destroyed = true;
+      listeners.clear();
       pendingPrefetch = undefined;
       buffer = [];
       bufferedSourceVersion = null;
@@ -437,6 +454,7 @@ export function createBufferedDetectionTimeline(
         frameCount: buffer.length,
         status: DetectionBufferStatus.Ready,
       };
+      notifyBufferChanged();
     } catch (error) {
       if (!destroyed) {
         state = {
@@ -501,10 +519,16 @@ export function createBufferedDetectionTimeline(
       };
     }
 
+    // Both ends move by the same whole number of laps, so the window keeps its
+    // span and its source ranges while its start reads on the media clock: a
+    // window counted in the laps playback accumulated is one no host can hold
+    // against a current time.
+    const laps = Math.floor(startTime / duration);
+
     return {
-      endTime,
+      endTime: endTime - laps * duration,
       sourceRanges: getLoopingSourceRanges(startTime, endTime, duration),
-      startTime,
+      startTime: startTime - laps * duration,
     };
   }
 

@@ -594,9 +594,17 @@ export async function createPixiMediaScene(
     if (!document.hidden) renderScene();
   };
 
+  let unsubscribeDetectionTimeline: (() => void) | undefined;
+
   if (frameChannel) {
     frameChannel.onPresentedFrame(handlePresentedFrame);
     document.addEventListener?.("visibilitychange", handleVisibilityChange);
+    // A detection load landing moves what the window covers exactly as a cook
+    // landing does. Nothing else brings that to a resting playhead: the layers
+    // read the timeline only while drawing, and this is what makes the draw.
+    unsubscribeDetectionTimeline = options.detectionTimeline.subscribe?.(
+      handlePreparedWindowChange,
+    );
   } else {
     app.ticker.add(updateMediaSceneFit);
     app.ticker.add(drawAnnotationOverlayNow);
@@ -1129,6 +1137,7 @@ export async function createPixiMediaScene(
 
     destroy() {
       isDestroyed = true;
+      unsubscribeDetectionTimeline?.();
       disconnectContainerResizeObserver();
       app.cancelResize?.();
       app.ticker.remove(updateMediaSceneFit);

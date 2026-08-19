@@ -519,6 +519,69 @@ describe("buffered detection timeline", () => {
     expect(timeline.selectFrame(17.5)?.mediaTime).toBe(17.5);
   });
 
+  it("states the buffered window on the media clock after many laps", async () => {
+    const timeline = createLoopingTimeline();
+
+    timeline.setTimelineContext?.({ duration: 60, loop: true });
+
+    for (const playhead of [30, 50, 5, 45, 10, 55, 20, 40, 3, 35]) {
+      await timeline.prepare(playhead, { duration: 60, firstTimestamp: 0 });
+
+      const state = timeline.getState();
+
+      expect(state.bufferStartTime).toBe(playhead - 0.5);
+      expect(state.bufferEndTime).toBe(playhead + 7);
+      // What every host does with the window: hold it against the playhead.
+      expect(state.bufferStartTime).toBeLessThanOrEqual(playhead);
+      expect(state.bufferEndTime).toBeGreaterThanOrEqual(playhead);
+    }
+  });
+
+  it("resolves a revisited position the same on a later lap", async () => {
+    const timeline = createLoopingTimeline();
+
+    timeline.setTimelineContext?.({ duration: 60, loop: true });
+    await timeline.prepare(30, { duration: 60, firstTimestamp: 0 });
+
+    const firstVisitState = timeline.getState();
+    const firstVisitFrame = timeline.selectFrame(30);
+
+    for (const playhead of [45, 58, 2, 20, 44, 59, 1, 25, 55]) {
+      await timeline.prepare(playhead, { duration: 60, firstTimestamp: 0 });
+    }
+
+    await timeline.prepare(30, { duration: 60, firstTimestamp: 0 });
+
+    expect(timeline.getState()).toEqual(firstVisitState);
+    expect(timeline.selectFrame(30)).toEqual(firstVisitFrame);
+  });
+
+  it("announces a landed load to subscribers", async () => {
+    const load = createDeferred<DetectionFrame[]>();
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 2,
+      bufferBehindSeconds: 0.5,
+      source: { loadFrames: () => load.promise },
+    });
+    const listener = vi.fn();
+    const unsubscribe = timeline.subscribe?.(listener);
+
+    const prepared = timeline.prepare(1.25);
+
+    expect(listener).not.toHaveBeenCalled();
+
+    load.resolve(frames);
+    await prepared;
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(timeline.selectFrame(1.25)?.mediaTime).toBe(1);
+
+    unsubscribe?.();
+    await timeline.prepare(3.75);
+
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
   it("still maps an unwrapped loop-crossing time back to the buffered window", async () => {
     const loadFrames = vi.fn(async () => []);
     const timeline = createBufferedDetectionTimeline({
@@ -828,6 +891,28 @@ describe("buffered detection timeline", () => {
     expect(timeline.selectFrame(0.5)?.detections[0]?.id).toBe("new");
   });
 });
+
+function createLoopingTimeline() {
+  return createBufferedDetectionTimeline({
+    bufferAheadSeconds: 7,
+    bufferBehindSeconds: 0.5,
+    source: {
+      async loadFrames(startTime, endTime) {
+        const loaded: DetectionFrame[] = [];
+
+        for (
+          let mediaTime = Math.max(0, Math.ceil(startTime));
+          mediaTime <= Math.min(60, endTime);
+          mediaTime += 1
+        ) {
+          loaded.push({ detections: [], mediaTime });
+        }
+
+        return loaded;
+      },
+    },
+  });
+}
 
 function createDeferred<T>() {
   let resolve!: (value: T) => void;
