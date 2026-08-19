@@ -8,7 +8,7 @@ import {
   MediaRendererPlaybackState,
   type DetectionBufferState,
 } from "supervision";
-import { formatTimeRange } from "../format";
+import { formatTimeRange, toSourceTimeRange } from "../format";
 import type { TimelineRange } from "../session/demo-session-types";
 
 export function TimelineView({
@@ -39,6 +39,16 @@ export function TimelineView({
   readonly preparedAheadSeconds: number | null;
 }) {
   const mediaDuration = duration !== null && duration > 0 ? duration : null;
+  const bufferSourceRange = toSourceTimeRange(
+    detectionBuffer?.bufferStartTime ?? null,
+    detectionBuffer?.bufferEndTime ?? null,
+    mediaDuration,
+  );
+  const requestedSourceRange = toSourceTimeRange(
+    detectionBuffer?.requestedStartTime ?? null,
+    detectionBuffer?.requestedEndTime ?? null,
+    mediaDuration,
+  );
   const timelineCurrentTime = useSmoothTimelineCurrentTime({
     currentTime,
     disabled,
@@ -58,8 +68,8 @@ export function TimelineView({
     mediaDuration ??
     Math.max(
       displayedCurrentTime,
-      detectionBuffer?.bufferEndTime ?? 0,
-      detectionBuffer?.requestedEndTime ?? 0,
+      bufferSourceRange.endTime ?? 0,
+      requestedSourceRange.endTime ?? 0,
       activeDetectionFrameTime ?? 0,
       currentTime + (preparedAheadSeconds ?? 0),
       getMaxRangeEnd(processedRanges),
@@ -68,13 +78,13 @@ export function TimelineView({
     );
   const requestedRange = createRangeStyle({
     duration: visualDuration,
-    endTime: detectionBuffer?.requestedEndTime ?? null,
-    startTime: detectionBuffer?.requestedStartTime ?? null,
+    endTime: requestedSourceRange.endTime,
+    startTime: requestedSourceRange.startTime,
   });
   const bufferRange = createRangeStyle({
     duration: visualDuration,
-    endTime: detectionBuffer?.bufferEndTime ?? null,
-    startTime: detectionBuffer?.bufferStartTime ?? null,
+    endTime: bufferSourceRange.endTime,
+    startTime: bufferSourceRange.startTime,
   });
   const preparedWindowRange = createRangeStyle({
     duration: visualDuration,
@@ -95,10 +105,10 @@ export function TimelineView({
   const showRequestedRange =
     requestedRange !== null &&
     !sameRange(
-      detectionBuffer?.requestedStartTime ?? null,
-      detectionBuffer?.requestedEndTime ?? null,
-      detectionBuffer?.bufferStartTime ?? null,
-      detectionBuffer?.bufferEndTime ?? null,
+      requestedSourceRange.startTime,
+      requestedSourceRange.endTime,
+      bufferSourceRange.startTime,
+      bufferSourceRange.endTime,
     );
   const inputMax = mediaDuration ?? visualDuration;
   const inputValue = clamp(displayedCurrentTime, 0, inputMax);
@@ -166,8 +176,8 @@ export function TimelineView({
           Hot predictions{" "}
           <strong>
             {formatTimeRange(
-              detectionBuffer?.bufferStartTime ?? null,
-              detectionBuffer?.bufferEndTime ?? null,
+              bufferSourceRange.startTime,
+              bufferSourceRange.endTime,
             )}
           </strong>
         </span>
@@ -185,8 +195,8 @@ export function TimelineView({
           Requested{" "}
           <strong>
             {formatTimeRange(
-              detectionBuffer?.requestedStartTime ?? null,
-              detectionBuffer?.requestedEndTime ?? null,
+              requestedSourceRange.startTime,
+              requestedSourceRange.endTime,
             )}
           </strong>
         </span>

@@ -243,7 +243,6 @@ export function useDemoRenderer(
     effectRunRef.current = runId;
     let activeSession: MediaSession | undefined;
     let renderer: MediaRenderer | undefined;
-    let lastReadoutAt = 0;
     let lastPlaybackState: MediaRendererPlaybackState | null = null;
     let lastPublishedPlaybackState: MediaRendererPlaybackState | null = null;
     let cleanedUp = false;
@@ -251,7 +250,14 @@ export function useDemoRenderer(
       sourceMode === DemoSourceMode.Upload ? new AbortController() : undefined;
     const isActive = () => !cleanedUp && effectRunRef.current === runId;
     const renderPreparationPublisher = createThrottledPublisher(
-      setRenderPreparationDiagnostics,
+      (diagnostics: RenderPreparationDiagnostics) => {
+        setRenderPreparationDiagnostics(diagnostics);
+        if (import.meta.env.DEV) {
+          (
+            globalThis as { __demoRenderPrep?: RenderPreparationDiagnostics }
+          ).__demoRenderPrep = diagnostics;
+        }
+      },
       isActive,
       RENDERER_READOUT_INTERVAL_MS,
     );
@@ -260,33 +266,40 @@ export function useDemoRenderer(
       isActive,
       RENDERER_READOUT_INTERVAL_MS,
     );
+    const rendererStatePublisher = createThrottledPublisher<MediaRendererState>(
+      (state) => {
+        setRendererState(state);
+        setSourceState(state.source);
+      },
+      isActive,
+      RENDERER_READOUT_INTERVAL_MS,
+    );
+    // Every emission must eventually reach React: a paused step or seek emits
+    // exactly once, and a leading-edge-only throttle that drops it leaves the
+    // readouts describing the previous frame until the next emission, which
+    // while paused never comes.
     const publishRendererState = (
       state: MediaRendererState,
       options: { readonly force?: boolean } = {},
     ) => {
-      const now = performance.now();
-      const playbackStateChanged =
-        state.playbackState !== lastPublishedPlaybackState;
-
-      if (
-        !isActive() ||
-        (!options.force &&
-          !playbackStateChanged &&
-          now - lastReadoutAt < RENDERER_READOUT_INTERVAL_MS)
-      ) {
+      if (!isActive()) {
         return;
       }
 
-      lastReadoutAt = now;
+      const playbackStateChanged =
+        state.playbackState !== lastPublishedPlaybackState;
+
       lastPublishedPlaybackState = state.playbackState;
-      setRendererState(state);
-      setSourceState(state.source);
+
+      if (options.force || playbackStateChanged) {
+        rendererStatePublisher.publishNow(state);
+        return;
+      }
+
+      rendererStatePublisher.publish(state);
     };
     const onFrame = () => {
-      if (
-        !renderer ||
-        performance.now() - lastReadoutAt < RENDERER_READOUT_INTERVAL_MS
-      ) {
+      if (!renderer) {
         return;
       }
 
@@ -382,6 +395,10 @@ export function useDemoRenderer(
 
         sessionRef.current = activeSession ?? null;
         rendererRef.current = renderer;
+        if (import.meta.env.DEV) {
+          (globalThis as { __demoRenderer?: MediaRenderer }).__demoRenderer =
+            renderer;
+        }
         syncRendererState(renderer);
         await playRenderer(
           renderer,
@@ -400,6 +417,7 @@ export function useDemoRenderer(
       cleanedUp = true;
       renderPreparationPublisher.cancel();
       sessionStatePublisher.cancel();
+      rendererStatePublisher.cancel();
       abortController?.abort();
       rendererRef.current = null;
       sessionRef.current = null;
@@ -817,6 +835,10 @@ function createThrottledPublisher<Value>(
         publishPendingValue,
         intervalMs - elapsedMs,
       );
+    },
+    publishNow(value: Value) {
+      pendingValue = value;
+      publishPendingValue();
     },
   };
 }

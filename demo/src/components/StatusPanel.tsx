@@ -17,6 +17,7 @@ import {
   formatMilliseconds,
   formatTime,
   formatTimeRange,
+  toSourceTimeRange,
 } from "../format";
 import { selectPreparedWindowArtifact } from "../render-preparation";
 import { Readout } from "./Readout";
@@ -58,6 +59,16 @@ export const StatusPanel = memo(function StatusPanel({
   readonly sessionState: MediaSessionState | null;
   readonly sourceState: MediaSourceState | null;
 }) {
+  const loadedSourceRange = toSourceTimeRange(
+    rendererState?.detectionBuffer.bufferStartTime ?? null,
+    rendererState?.detectionBuffer.bufferEndTime ?? null,
+    sourceState?.duration ?? null,
+  );
+  const requestedSourceRange = toSourceTimeRange(
+    rendererState?.detectionBuffer.requestedStartTime ?? null,
+    rendererState?.detectionBuffer.requestedEndTime ?? null,
+    sourceState?.duration ?? null,
+  );
   const rendererErrorMessage =
     !errorMessage &&
     rendererState?.playbackState === MediaRendererPlaybackState.Error
@@ -121,8 +132,8 @@ export const StatusPanel = memo(function StatusPanel({
           value={
             rendererState
               ? `${formatTimeRange(
-                  rendererState.detectionBuffer.bufferStartTime,
-                  rendererState.detectionBuffer.bufferEndTime,
+                  loadedSourceRange.startTime,
+                  loadedSourceRange.endTime,
                 )} | ${formatInteger(
                   rendererState.detectionBuffer.frameCount,
                 )} frames | ${formatInteger(
@@ -136,8 +147,8 @@ export const StatusPanel = memo(function StatusPanel({
           value={
             rendererState
               ? formatTimeRange(
-                  rendererState.detectionBuffer.requestedStartTime,
-                  rendererState.detectionBuffer.requestedEndTime,
+                  requestedSourceRange.startTime,
+                  requestedSourceRange.endTime,
                 )
               : "-"
           }

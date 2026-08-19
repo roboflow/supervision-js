@@ -17,10 +17,10 @@
     "jsx": "react-jsx",
     "paths": {
       "@roboflow/video-engine": [
-        "../../roboflow-video-runtime/app/src/scripts/videoEngine/index.ts"
+        "../../roboflow-video-runtime/app/dist/videoEngineTypes/index.d.ts"
       ],
       "@roboflow/video-engine/analysis": [
-        "../../roboflow-video-runtime/app/src/scripts/videoEngine/analysis.ts"
+        "../../roboflow-video-runtime/app/dist/videoEngineTypes/analysis.d.ts"
       ]
     }
   },
