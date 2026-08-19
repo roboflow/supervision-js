@@ -384,13 +384,17 @@ export async function createMediaRendererCore(
         );
       }
 
-      // Under engine-paced presentation there is no pull controller to slow
-      // down or speed up, and the engine protocol carries no rate, so a
+      // Nothing paces the picture until one of the two paths is up, so a
       // non-unit rate would only falsify the state readout.
-      if (!playbackController && playbackRate !== 1) {
-        throw new Error(
-          "Playback rate is fixed at 1 under engine-paced presentation.",
-        );
+      if (!transport && !playbackController && playbackRate !== 1) {
+        throw new Error("Media renderer is not ready.");
+      }
+
+      if (transport) {
+        // The producer owns the rate as it owns the playhead, and answers on
+        // the rate signal; adopting it there keeps one reading of the truth.
+        transport.setPlaybackRate(playbackRate);
+        return;
       }
 
       playbackController?.setPlaybackRate(playbackRate);
@@ -664,12 +668,16 @@ export async function createMediaRendererCore(
       transport = createMediaRendererTransport({
         channel: presentedFrameChannel,
         loop: options.loop !== false,
+        onPlaybackRate: runtimeState.setPlaybackRate,
         onPlaybackState: adoptTransportPlaybackState,
         onPlayheadTime: (currentTime) => {
           runtimeState.recordPlayheadTime(currentTime);
           feedDetectionBuffer(currentTime);
         },
       });
+      if (initialPlaybackRate !== 1) {
+        transport.setPlaybackRate(initialPlaybackRate);
+      }
       feedDetectionBuffer(metadata.firstTimestamp);
       runtimeState.setReady();
 

@@ -1,4 +1,9 @@
 import { memo } from "react";
+import {
+  cyclePlaybackRate,
+  formatPlaybackRate,
+  isPlaybackRateSustained,
+} from "../session/playback-rate";
 
 type TransportAction = "pause" | "play" | "replay";
 
@@ -7,15 +12,21 @@ export const Transport = memo(function Transport({
   disabled,
   isBuffering,
   isPlaying,
+  onSetPlaybackRate,
   onStepFrame,
   onTogglePlayback,
+  playbackRate,
+  presentedRate,
 }: {
   readonly atClipEnd: boolean;
   readonly disabled: boolean;
   readonly isBuffering: boolean;
   readonly isPlaying: boolean;
+  readonly onSetPlaybackRate: (rate: number) => void;
   readonly onStepFrame: (direction: 1 | -1) => void;
   readonly onTogglePlayback: () => void;
+  readonly playbackRate: number;
+  readonly presentedRate: number | null;
 }) {
   const action: TransportAction = isPlaying
     ? "pause"
@@ -23,6 +34,12 @@ export const Transport = memo(function Transport({
       ? "replay"
       : "play";
   const label = TRANSPORT_LABELS[action];
+  const sustained = isPlaybackRateSustained(playbackRate, presentedRate);
+  const speedLabel = formatPlaybackRate(playbackRate);
+  const speedTitle =
+    sustained || presentedRate === null
+      ? `Speed ${speedLabel} (J slower, K stop, L faster)`
+      : `Speed ${speedLabel}, showing ${presentedRate.toFixed(1)}x. This source cannot decode that fast.`;
 
   return (
     <div className="transport" aria-label="Transport" role="group">
@@ -99,6 +116,18 @@ export const Transport = memo(function Transport({
         type="button"
       >
         +1
+      </button>
+      <button
+        aria-label={speedTitle}
+        className="transport__step transport__speed"
+        data-sustained={sustained ? undefined : "false"}
+        disabled={disabled}
+        onClick={() => onSetPlaybackRate(cyclePlaybackRate(playbackRate))}
+        title={speedTitle}
+        type="button"
+      >
+        <span aria-hidden="true" className="transport__speed-dot" />
+        <span className="transport__speed-value">{speedLabel}</span>
       </button>
     </div>
   );

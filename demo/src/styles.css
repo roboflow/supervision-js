@@ -1586,6 +1586,36 @@ fieldset {
   position: absolute;
 }
 
+/* Sized for the widest rung on the ladder so cycling the speed repaints the
+ * pill's text without moving the buttons beside it. */
+.transport__speed {
+  gap: 4px;
+  min-width: 56px;
+}
+
+.transport__speed-value {
+  min-width: 34px;
+}
+
+/* Reads like the state chip beside it: the dot carries whether the picture is
+ * keeping the speed the pill names, and it is lit at every speed so the pill
+ * neither grows nor recentres when the answer changes. */
+.transport__speed-dot {
+  background: var(--muted);
+  border-radius: 999px;
+  flex: 0 0 auto;
+  height: 6px;
+  width: 6px;
+}
+
+.transport__speed[data-sustained="false"] {
+  color: var(--amber);
+}
+
+.transport__speed[data-sustained="false"] .transport__speed-dot {
+  background: var(--amber);
+}
+
 .transport__step:hover:not(:disabled) {
   background: #f5f3ff;
   border-color: #a78bfa;

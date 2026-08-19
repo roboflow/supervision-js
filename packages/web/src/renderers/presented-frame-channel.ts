@@ -26,9 +26,10 @@ export type PresentedFrameSeekIntent = "gesture" | "jump";
 
 /**
  * Producer signals, one per cadence: `time` on every playhead move, `state` on
- * coarse status transitions, `seeking` when a seek starts or settles.
+ * coarse status transitions, `seeking` when a seek starts or settles, `rate`
+ * when the playback speed changes.
  */
-export type PresentedFrameChannelSignal = "time" | "state" | "seeking";
+export type PresentedFrameChannelSignal = "time" | "state" | "seeking" | "rate";
 
 /**
  * A producer's presented-frame plane. Registering replaces any previous
@@ -53,6 +54,12 @@ export interface PresentedFrameChannel extends PresentedFrameSource {
   commit(timeMs: number): Promise<void>;
   /** Walks one real source frame in presentation order. */
   step(direction: 1 | -1): Promise<void>;
+  /**
+   * Forward playback speed, in media seconds per wall second. Throws on a rate
+   * the producer cannot play, reverse included.
+   */
+  setPlaybackRate(rate: number): void;
+  getPlaybackRate(): number;
   /** Freezes a playing producer for the length of a drag. */
   beginInteractiveSeek(): void;
   /** Resumes play only if `beginInteractiveSeek` was what paused it. */

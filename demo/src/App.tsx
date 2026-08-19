@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { MediaSessionActivityKind } from "supervision";
+import {
+  MediaRendererPlaybackState,
+  MediaSessionActivityKind,
+} from "supervision";
 import { BenchmarksPanel } from "./components/BenchmarksPanel";
 import { ControlBar } from "./components/ControlBar";
 import { DemoShell } from "./components/DemoShell";
@@ -161,9 +164,14 @@ function DemoApp() {
         currentTime={demo.rendererState?.currentTime ?? null}
         disabled={!demo.canUseRenderer}
         duration={demo.duration}
+        isPlaying={demo.playbackState === MediaRendererPlaybackState.Playing}
+        onPause={demo.onPause}
+        onPlay={demo.onPlay}
         onSeek={demo.onSeek}
+        onSetPlaybackRate={demo.onSetPlaybackRate}
         onStepFrame={demo.onStepFrame}
         onTogglePlayback={demo.onTogglePlayback}
+        playbackRate={demo.playbackRate}
       />
       <DemoShell
         benchmarksPanel={<BenchmarksPanel />}
@@ -228,9 +236,12 @@ function DemoApp() {
             duration={demo.duration}
             onScrub={demo.onScrub}
             onSeek={demo.onSeek}
+            onSetPlaybackRate={demo.onSetPlaybackRate}
             onStepFrame={demo.onStepFrame}
             onTogglePlayback={demo.onTogglePlayback}
+            playbackRate={demo.playbackRate}
             playbackState={demo.playbackState}
+            presentedRate={demo.presentedRate}
             processedRanges={processedRanges}
             processingRanges={processingRanges}
             renderPreparationDiagnostics={demo.renderPreparationDiagnostics}
@@ -265,6 +276,7 @@ function DemoApp() {
             hoveredDetectionPick={demo.hoveredDetectionPick}
             mediaState={demo.mediaState}
             playbackState={demo.playbackState}
+            presentedRate={demo.presentedRate}
             renderPreparationDiagnostics={demo.renderPreparationDiagnostics}
             rendererState={demo.rendererState}
             selectedDetectionPick={demo.selectedDetectionPick}

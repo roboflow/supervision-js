@@ -8,6 +8,8 @@ import type { MediaRendererSource } from "supervision";
 import {
   createPresentedFrameTap,
   readPresentedPerSecond,
+  readPresentedRate,
+  type PresentedFrameRecord,
   type PresentedFrameTap,
 } from "./presented-frame-tap";
 
@@ -194,3 +196,60 @@ describe("presented frame rate", () => {
     expect(readPresentedPerSecond(records, 5_500)).toBe(3);
   });
 });
+
+describe("presented playback rate", () => {
+  it("measures the media time the picture covered per wall second", () => {
+    const records = createRecords([
+      [4_200, 8_400],
+      [4_600, 9_200],
+      [4_900, 9_800],
+      [5_000, 10_000],
+    ]);
+
+    expect(readPresentedRate(records, 5_000)).toBe(2);
+  });
+
+  it("reads a picture falling short of the rate it was commanded", () => {
+    const records = createRecords([
+      [4_200, 8_400],
+      [4_600, 8_800],
+      [5_000, 9_200],
+    ]);
+
+    expect(readPresentedRate(records, 5_000)).toBeCloseTo(1);
+  });
+
+  it("measures nothing from a window too thin to hold a slope", () => {
+    expect(readPresentedRate([], 5_000)).toBeNull();
+    expect(
+      readPresentedRate(
+        createRecords([
+          [4_800, 9_600],
+          [5_000, 10_000],
+        ]),
+        5_000,
+      ),
+    ).toBeNull();
+  });
+
+  it("measures nothing across a jump the playhead took", () => {
+    const records = createRecords([
+      [4_400, 9_800],
+      [4_600, 200],
+      [4_800, 600],
+      [5_000, 1_000],
+    ]);
+
+    expect(readPresentedRate(records, 5_000)).toBeNull();
+  });
+});
+
+function createRecords(
+  entries: readonly (readonly [number, number])[],
+): readonly PresentedFrameRecord[] {
+  return entries.map(([wallTimeMs, mediaTimeMs]) => ({
+    mediaTimeMs,
+    quality: "exact" as const,
+    wallTimeMs,
+  }));
+}

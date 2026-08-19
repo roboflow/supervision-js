@@ -13,6 +13,8 @@ export interface MediaRendererTransport {
   scrub(mediaTime: number): void;
   commit(mediaTime: number): Promise<void>;
   step(direction: 1 | -1): Promise<void>;
+  setPlaybackRate(rate: number): void;
+  getPlaybackRate(): number;
   destroy(): void;
 }
 
@@ -20,6 +22,7 @@ export interface MediaRendererTransportOptions {
   /** Replay from the start when the producer reports the source ended. */
   readonly loop: boolean;
   readonly channel: PresentedFrameChannel;
+  readonly onPlaybackRate: (rate: number) => void;
   readonly onPlaybackState: (state: MediaRendererPlaybackState) => void;
   readonly onPlayheadTime: (mediaTime: number) => void;
 }
@@ -66,10 +69,14 @@ export function createMediaRendererTransport(
   const publishPlayheadTime = () => {
     options.onPlayheadTime(channel.getTimeMs() / MILLISECONDS_PER_SECOND);
   };
+  const publishPlaybackRate = () => {
+    options.onPlaybackRate(channel.getPlaybackRate());
+  };
   const unsubscribes = [
     channel.subscribe("state", publishPlaybackState),
     channel.subscribe("seeking", publishPlaybackState),
     channel.subscribe("time", publishPlayheadTime),
+    channel.subscribe("rate", publishPlaybackRate),
   ];
 
   const releaseGesture = async () => {
@@ -112,6 +119,14 @@ export function createMediaRendererTransport(
     async step(direction) {
       await releaseGesture();
       await channel.step(direction);
+    },
+
+    setPlaybackRate(rate) {
+      channel.setPlaybackRate(rate);
+    },
+
+    getPlaybackRate() {
+      return channel.getPlaybackRate();
     },
 
     destroy() {

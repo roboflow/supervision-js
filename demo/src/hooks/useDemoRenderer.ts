@@ -18,6 +18,7 @@ import {
 } from "supervision";
 import {
   createPresentedFrameTap,
+  presentedRateWindowMs,
   type PresentedFrameTap,
 } from "../diagnostics/presented-frame-tap";
 import {
@@ -40,6 +41,7 @@ import {
   type DemoPresentationAvailability,
   type DemoPresentationSettings,
 } from "../presentation/demo-presentation";
+import { defaultPlaybackRate } from "../session/playback-rate";
 import { createFixtureSession } from "../session/fixture-session";
 import { DEFAULT_UPLOAD_CLASS_NAMES } from "../session/demo-session-config";
 import {
@@ -70,7 +72,10 @@ export interface DemoRendererState {
   readonly fixtureSummary: DemoFixtureSummary | null;
   readonly hoveredDetectionPick: DetectionPickResult | null;
   readonly mediaState: DemoMediaState;
+  readonly playbackRate: number;
   readonly playbackState: MediaRendererPlaybackState | null;
+  /** Media seconds the picture covered per wall second, as measured. */
+  readonly presentedRate: number | null;
   readonly readPresentationDiagnostics: () => PresentationDiagnosticsSample;
   readonly presentationSettings: DemoPresentationSettings;
   readonly presentationAvailability?: DemoPresentationAvailability;
@@ -89,9 +94,12 @@ export interface DemoRendererState {
   readonly uploadFileName: string | null;
   readonly uploadInferenceState: UploadInferenceState;
   readonly onCancelUploadInference: () => void;
+  readonly onPause: () => void;
+  readonly onPlay: () => void;
   readonly onScrub: (time: number) => void;
   readonly onSeek: (time: number) => void;
   readonly onStartUploadInference: () => void;
+  readonly onSetPlaybackRate: (rate: number) => void;
   readonly onStepFrame: (direction: 1 | -1) => void;
   readonly onTogglePlayback: () => void;
   readonly onUploadFileChange: (file: File | null) => void;
@@ -173,6 +181,7 @@ export function useDemoRenderer(
   const rendererRef = useRef<MediaRenderer | null>(null);
   const sessionRef = useRef<MediaSession | null>(null);
   const seekRunRef = useRef(0);
+  const rateChangedAtRef = useRef(Number.NEGATIVE_INFINITY);
   const uploadAbortRef = useRef<AbortController | null>(null);
   const uploadFileRef = useRef<File | null>(null);
   const presentationSettingsRef = useRef<DemoPresentationSettings>(
@@ -182,6 +191,7 @@ export function useDemoRenderer(
     null,
   );
   const [sourceState, setSourceState] = useState<MediaSourceState | null>(null);
+  const [presentedRate, setPresentedRate] = useState<number | null>(null);
   const [renderPreparationDiagnostics, setRenderPreparationDiagnostics] =
     useState<RenderPreparationDiagnostics | null>(null);
   const [sessionState, setSessionState] = useState<MediaSessionState | null>(
@@ -270,6 +280,12 @@ export function useDemoRenderer(
       (state) => {
         setRendererState(state);
         setSourceState(state.source);
+        // A window straddling a rate change measures neither rate, and the
+        // blend reads as a shortfall the picture is not actually in.
+        const rateSettled =
+          performance.now() - rateChangedAtRef.current >= presentedRateWindowMs;
+
+        setPresentedRate(rateSettled ? presentedFrameTap.readRate() : null);
       },
       isActive,
       RENDERER_READOUT_INTERVAL_MS,
@@ -438,6 +454,7 @@ export function useDemoRenderer(
   ]);
 
   const playbackState = rendererState?.playbackState ?? null;
+  const playbackRate = rendererState?.playbackRate ?? defaultPlaybackRate;
   const duration = rendererState?.duration ?? fixtureSummary?.duration ?? null;
   const canUseRenderer =
     !!rendererRef.current &&
@@ -456,6 +473,37 @@ export function useDemoRenderer(
     }
 
     renderer.togglePlayback();
+    syncRendererState(renderer);
+  }, [syncRendererState]);
+
+  const onPlay = useCallback(() => {
+    const renderer = rendererRef.current;
+
+    if (!renderer) {
+      return;
+    }
+
+    void (async () => {
+      try {
+        await renderer.play();
+      } catch (error: unknown) {
+        setErrorMessage(
+          getErrorMessage(error, "Unable to play the media renderer."),
+        );
+      }
+
+      syncRendererState(renderer);
+    })();
+  }, [syncRendererState]);
+
+  const onPause = useCallback(() => {
+    const renderer = rendererRef.current;
+
+    if (!renderer) {
+      return;
+    }
+
+    renderer.pause();
     syncRendererState(renderer);
   }, [syncRendererState]);
 
@@ -491,6 +539,22 @@ export function useDemoRenderer(
   const onScrub = useCallback((time: number) => {
     rendererRef.current?.scrub(time);
   }, []);
+
+  const onSetPlaybackRate = useCallback(
+    (rate: number) => {
+      const renderer = rendererRef.current;
+
+      if (!renderer || renderer.getState().playbackRate === rate) {
+        return;
+      }
+
+      renderer.setPlaybackRate(rate);
+      rateChangedAtRef.current = performance.now();
+      setPresentedRate(null);
+      syncRendererState(renderer);
+    },
+    [syncRendererState],
+  );
 
   const readPresentationDiagnostics = useCallback(
     () =>
@@ -699,6 +763,7 @@ export function useDemoRenderer(
           ? activeFixture.mediaLoadingStatusLabel
           : "waiting for upload inference",
     });
+    setPresentedRate(null);
     setRendererState(null);
     setRenderPreparationDiagnostics(null);
     setSelectedDetectionPick(null);
@@ -743,14 +808,19 @@ export function useDemoRenderer(
     mediaState,
     onCancelUploadInference,
     onClearSelectedDetection,
+    onPause,
+    onPlay,
     onScrub,
     onSeek,
+    onSetPlaybackRate,
     onStartUploadInference,
     onStepFrame,
     onTogglePlayback,
     onUploadFileChange,
+    playbackRate,
     playbackState,
     presentationSettings,
+    presentedRate,
     readPresentationDiagnostics,
     refreshPresentation,
     presentationAvailability:

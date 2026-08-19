@@ -93,15 +93,60 @@ describe("media renderer over a push-based media source", () => {
     renderer.destroy();
   });
 
-  it("refuses a non-unit playback rate instead of faking it in the state", async () => {
+  it("hands a non-unit playback rate to the producer", async () => {
     const producer = createProducer();
     const renderer = await createRenderer(producer, createScene());
 
-    expect(() => renderer.setPlaybackRate(4)).toThrow(
-      /fixed at 1 under engine-paced presentation/,
+    renderer.setPlaybackRate(4);
+
+    expect(producer.setPlaybackRate).toHaveBeenCalledExactlyOnceWith(4);
+    renderer.destroy();
+  });
+
+  it("reads the playback rate back from the producer", async () => {
+    const producer = createProducer();
+    const renderer = await createRenderer(producer, createScene());
+
+    renderer.setPlaybackRate(2);
+
+    expect(renderer.getState().playbackRate).toBe(2);
+    renderer.destroy();
+  });
+
+  it("opens at the rate it was asked for", async () => {
+    const producer = createProducer();
+    const renderer = await createRenderer(producer, createScene(), {
+      playbackRate: 2,
+    });
+
+    expect(producer.setPlaybackRate).toHaveBeenCalledExactlyOnceWith(2);
+    expect(renderer.getState().playbackRate).toBe(2);
+    renderer.destroy();
+  });
+
+  it("keeps the rate the producer reports through a drag", async () => {
+    const producer = createProducer();
+    const renderer = await createRenderer(producer, createScene());
+
+    renderer.setPlaybackRate(2);
+    renderer.scrub(1);
+    await renderer.seek(3);
+
+    expect(renderer.getState().playbackRate).toBe(2);
+    renderer.destroy();
+  });
+
+  it("lets a rate the producer refuses reach the caller", async () => {
+    const producer = createProducer();
+    producer.setPlaybackRate.mockImplementationOnce(() => {
+      throw new Error("playback rate 32 is outside the supported range");
+    });
+    const renderer = await createRenderer(producer, createScene());
+
+    expect(() => renderer.setPlaybackRate(32)).toThrow(
+      /outside the supported range/,
     );
     expect(renderer.getState().playbackRate).toBe(1);
-    renderer.setPlaybackRate(1);
     renderer.destroy();
   });
 
@@ -322,6 +367,7 @@ async function createRenderer(
 
 function createProducer() {
   const listeners = new Map<PresentedFrameChannelSignal, Set<() => void>>([
+    ["rate", new Set()],
     ["seeking", new Set()],
     ["state", new Set()],
     ["time", new Set()],
@@ -334,12 +380,14 @@ function createProducer() {
   let status: PresentedFrameChannelStatus = "READY";
   let seeking = false;
   let timeMs = 0;
+  let rate = 1;
 
   const engine: PresentedFrameChannel = {
     beginInteractiveSeek: vi.fn(),
     commit: vi.fn(async () => undefined),
     endInteractiveSeek: vi.fn(async () => undefined),
     getDurationMs: () => 4000,
+    getPlaybackRate: () => rate,
     getSeeking: () => seeking,
     getStatus: () => status,
     getTimeMs: () => timeMs,
@@ -347,6 +395,14 @@ function createProducer() {
     pause: vi.fn(),
     play: vi.fn(async () => undefined),
     scrub: vi.fn(),
+    setPlaybackRate: vi.fn((next: number) => {
+      if (next === rate) {
+        return;
+      }
+
+      rate = next;
+      announce("rate");
+    }),
     step: vi.fn(async () => undefined),
     subscribe: (signal, listener) => {
       listeners.get(signal)?.add(listener);
@@ -388,6 +444,7 @@ function createProducer() {
     play: engine.play as ReturnType<typeof vi.fn>,
     samples,
     scrub: engine.scrub as ReturnType<typeof vi.fn>,
+    setPlaybackRate: engine.setPlaybackRate as ReturnType<typeof vi.fn>,
     setSeeking(next: boolean) {
       seeking = next;
       announce("seeking");

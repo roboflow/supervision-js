@@ -19,6 +19,10 @@ import {
   formatTimeRange,
   toSourceTimeRange,
 } from "../format";
+import {
+  formatPlaybackRate,
+  isPlaybackRateSustained,
+} from "../session/playback-rate";
 import { selectPreparedWindowArtifact } from "../render-preparation";
 import { Readout } from "./Readout";
 
@@ -41,6 +45,7 @@ export const StatusPanel = memo(function StatusPanel({
   hoveredDetectionPick,
   mediaState,
   playbackState,
+  presentedRate,
   renderPreparationDiagnostics,
   rendererState,
   selectedDetectionPick,
@@ -53,6 +58,7 @@ export const StatusPanel = memo(function StatusPanel({
   readonly hoveredDetectionPick: DetectionPickResult | null;
   readonly mediaState: StatusPanelMediaState;
   readonly playbackState: MediaRendererPlaybackState | null;
+  readonly presentedRate: number | null;
   readonly renderPreparationDiagnostics: RenderPreparationDiagnostics | null;
   readonly rendererState: MediaRendererState | null;
   readonly selectedDetectionPick: DetectionPickResult | null;
@@ -93,6 +99,24 @@ export const StatusPanel = memo(function StatusPanel({
           value={fixtureSummary?.fixtureName ?? "loading"}
         />
         <Readout label="State" value={playbackState ?? "-"} />
+        <Readout
+          label="Speed"
+          tone={
+            rendererState &&
+            !isPlaybackRateSustained(rendererState.playbackRate, presentedRate)
+              ? "danger"
+              : "default"
+          }
+          value={
+            rendererState
+              ? `${formatPlaybackRate(rendererState.playbackRate)} commanded | ${
+                  presentedRate === null
+                    ? "not measured"
+                    : `${presentedRate.toFixed(2)}x presented`
+                }`
+              : "-"
+          }
+        />
         <Readout
           label="Renderer"
           value={rendererState?.rendererBackend ?? "-"}

@@ -1,13 +1,22 @@
 import { useEffect, useRef } from "react";
+import {
+  resolveShuttleCommand,
+  type ShuttleCommand,
+} from "../session/playback-rate";
 
 const NUDGE_SECONDS = 1;
 
 interface PlayerHotkeyBindings {
   readonly currentTime: number | null;
   readonly duration: number | null;
+  readonly isPlaying: boolean;
+  readonly onPause: () => void;
+  readonly onPlay: () => void;
   readonly onSeek: (time: number) => void;
+  readonly onSetPlaybackRate: (rate: number) => void;
   readonly onStepFrame: (direction: 1 | -1) => void;
   readonly onTogglePlayback: () => void;
+  readonly playbackRate: number;
 }
 
 /**
@@ -20,25 +29,40 @@ export function PlayerHotkeys({
   currentTime,
   disabled,
   duration,
+  isPlaying,
+  onPause,
+  onPlay,
   onSeek,
+  onSetPlaybackRate,
   onStepFrame,
   onTogglePlayback,
+  playbackRate,
 }: PlayerHotkeyBindings & { readonly disabled: boolean }) {
   const bindingsRef = useRef<PlayerHotkeyBindings>({
     currentTime,
     duration,
+    isPlaying,
+    onPause,
+    onPlay,
     onSeek,
+    onSetPlaybackRate,
     onStepFrame,
     onTogglePlayback,
+    playbackRate,
   });
 
   useEffect(() => {
     bindingsRef.current = {
       currentTime,
       duration,
+      isPlaying,
+      onPause,
+      onPlay,
       onSeek,
+      onSetPlaybackRate,
       onStepFrame,
       onTogglePlayback,
+      playbackRate,
     };
   });
 
@@ -65,6 +89,17 @@ export function PlayerHotkeys({
 
       seekTo(time + direction * NUDGE_SECONDS);
     };
+    const shuttle = (command: ShuttleCommand) => {
+      const bindings = bindingsRef.current;
+
+      bindings.onSetPlaybackRate(command.rate);
+
+      if (command.playback === "play") {
+        bindings.onPlay();
+      } else if (command.playback === "pause") {
+        bindings.onPause();
+      }
+    };
     const onKeyDown = (event: KeyboardEvent) => {
       if (
         event.defaultPrevented ||
@@ -80,6 +115,20 @@ export function PlayerHotkeys({
         if (!event.repeat) {
           event.preventDefault();
           bindingsRef.current.onTogglePlayback();
+        }
+
+        return;
+      }
+
+      const shuttleCommand = resolveShuttleCommand(event.key, {
+        isPlaying: bindingsRef.current.isPlaying,
+        rate: bindingsRef.current.playbackRate,
+      });
+
+      if (shuttleCommand) {
+        if (!event.repeat) {
+          event.preventDefault();
+          shuttle(shuttleCommand);
         }
 
         return;

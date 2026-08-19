@@ -209,6 +209,10 @@ export function createMediaRendererRuntimeState(
     },
 
     setPlaybackRate(nextPlaybackRate) {
+      if (playbackRate === nextPlaybackRate) {
+        return;
+      }
+
       playbackRate = nextPlaybackRate;
       emitState();
     },

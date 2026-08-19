@@ -49,9 +49,12 @@ export const ControlBar = memo(function ControlBar({
   duration,
   onScrub,
   onSeek,
+  onSetPlaybackRate,
   onStepFrame,
   onTogglePlayback,
+  playbackRate,
   playbackState,
+  presentedRate,
   processedRanges,
   processingRanges,
   renderPreparationDiagnostics,
@@ -63,9 +66,12 @@ export const ControlBar = memo(function ControlBar({
   readonly duration: number | null;
   readonly onScrub: (time: number) => void;
   readonly onSeek: (time: number) => void;
+  readonly onSetPlaybackRate: (rate: number) => void;
   readonly onStepFrame: (direction: 1 | -1) => void;
   readonly onTogglePlayback: () => void;
+  readonly playbackRate: number;
   readonly playbackState: MediaRendererPlaybackState | null;
+  readonly presentedRate: number | null;
   readonly processedRanges: readonly TimelineRange[];
   readonly processingRanges: readonly TimelineRange[];
   readonly renderPreparationDiagnostics: RenderPreparationDiagnostics | null;
@@ -100,8 +106,11 @@ export const ControlBar = memo(function ControlBar({
           disabled={!canUseRenderer}
           isBuffering={isBuffering}
           isPlaying={isPlaying}
+          onSetPlaybackRate={onSetPlaybackRate}
           onStepFrame={onStepFrame}
           onTogglePlayback={onTogglePlayback}
+          playbackRate={playbackRate}
+          presentedRate={presentedRate}
         />
         <p className="control-bar__timecode">
           <span className="control-bar__timecode-now">
@@ -154,6 +163,11 @@ export const ControlBar = memo(function ControlBar({
         <span>
           <kbd>Home</kbd>
           <kbd>End</kbd> clip ends
+        </span>
+        <span>
+          <kbd>J</kbd>
+          <kbd>K</kbd>
+          <kbd>L</kbd> speed
         </span>
       </p>
     </section>

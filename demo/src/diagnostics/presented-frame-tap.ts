@@ -6,8 +6,10 @@ import type {
 import type { MediaRendererSource } from "supervision";
 
 const DEFAULT_RING_CAPACITY = 300;
-const RATE_WINDOW_MS = 1000;
 const MILLISECONDS_PER_SECOND = 1000;
+
+/** The trailing stretch of presentation the rate readings are measured over. */
+export const presentedRateWindowMs = 1000;
 
 export interface PresentedFrameRecord {
   readonly mediaTimeMs: number;
@@ -24,6 +26,7 @@ export interface PresentedFrameTapSnapshot {
 
 export interface PresentedFrameTap {
   read(): PresentedFrameTapSnapshot;
+  readRate(): number | null;
   reset(): void;
   tap(source: MediaRendererSource): MediaRendererSource;
 }
@@ -45,7 +48,7 @@ interface PresentedFrameProducer {
 export function readPresentedPerSecond(
   records: readonly PresentedFrameRecord[],
   nowMs: number,
-  windowMs: number = RATE_WINDOW_MS,
+  windowMs: number = presentedRateWindowMs,
 ): number | null {
   const windowStartMs = nowMs - windowMs;
   let presentedInWindow = 0;
@@ -61,6 +64,45 @@ export function readPresentedPerSecond(
   return presentedInWindow === 0
     ? null
     : (presentedInWindow * MILLISECONDS_PER_SECOND) / windowMs;
+}
+
+/**
+ * Media seconds the picture actually covered per wall second, read off the
+ * frames that reached the screen. This is the speed the viewer sees, against
+ * which a commanded playback rate is a claim rather than a fact.
+ *
+ * Null unless the window holds enough frames to measure a slope, and null again
+ * when the playhead moved backwards inside it: a seek or a lap is a jump, and a
+ * jump has no rate.
+ */
+export function readPresentedRate(
+  records: readonly PresentedFrameRecord[],
+  nowMs: number,
+  windowMs: number = presentedRateWindowMs,
+): number | null {
+  const MINIMUM_SAMPLES = 3;
+  const windowStartMs = nowMs - windowMs;
+  const inWindow = records.filter(
+    (record) => record.wallTimeMs > windowStartMs,
+  );
+
+  if (inWindow.length < MINIMUM_SAMPLES) {
+    return null;
+  }
+
+  const movedBackwards = inWindow.some(
+    (record, index) =>
+      index > 0 && record.mediaTimeMs < inWindow[index - 1].mediaTimeMs,
+  );
+  const first = inWindow[0];
+  const last = inWindow[inWindow.length - 1];
+  const wallSpanMs = last.wallTimeMs - first.wallTimeMs;
+
+  if (movedBackwards || wallSpanMs <= 0) {
+    return null;
+  }
+
+  return (last.mediaTimeMs - first.mediaTimeMs) / wallSpanMs;
 }
 
 /**
@@ -111,6 +153,10 @@ export function createPresentedFrameTap(
         presentedPerSecond: readPresentedPerSecond(records, readWallTime()),
         records,
       };
+    },
+
+    readRate() {
+      return readPresentedRate(readRecords(), readWallTime());
     },
 
     reset() {
