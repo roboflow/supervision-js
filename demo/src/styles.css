@@ -1298,11 +1298,18 @@ fieldset {
 
 .control-bar__time {
   align-items: center;
+  contain: layout paint;
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
   justify-content: end;
   min-width: 0;
+}
+
+/* These readouts change several times a second, so their digits hold a fixed
+ * advance: a new time repaints the text instead of reflowing the row. */
+.control-bar__time .readout__value {
+  font-variant-numeric: tabular-nums;
 }
 
 .playback-controls {
@@ -1518,6 +1525,7 @@ fieldset {
 .timeline-view__lane {
   background: rgba(255, 255, 255, 0.08);
   border-radius: 999px;
+  contain: layout paint;
   height: 6px;
   overflow: hidden;
   position: relative;
@@ -1558,6 +1566,7 @@ fieldset {
   border: 1px solid var(--line);
   border-radius: 999px;
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.55);
+  contain: layout paint;
   height: 16px;
   overflow: hidden;
   position: relative;
@@ -1589,8 +1598,17 @@ fieldset {
   top: 5px;
 }
 
+/* Spans the strip, so translating it by a percentage lands the playhead where
+ * an absolute `left` percentage would, on the compositor instead of on a layout
+ * pass per displayed frame. */
+.timeline-view__playhead {
+  inset: 0;
+  position: absolute;
+  transform: translateX(0%);
+  will-change: transform;
+}
+
 .timeline-view__marker {
-  left: var(--timeline-left);
   position: absolute;
   transform: translateX(-1px);
   width: 2px;
@@ -1600,6 +1618,7 @@ fieldset {
   background: var(--amber);
   bottom: 1px;
   box-shadow: none;
+  left: var(--timeline-left);
   top: 1px;
 }
 
@@ -1607,6 +1626,7 @@ fieldset {
   background: #ffffff;
   bottom: 0;
   box-shadow: none;
+  left: 0;
   top: 0;
 }
 
@@ -1616,7 +1636,7 @@ fieldset {
   border-radius: 999px;
   box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.12);
   height: 12px;
-  left: var(--timeline-left);
+  left: 0;
   position: absolute;
   top: 50%;
   transform: translate(-50%, -50%);

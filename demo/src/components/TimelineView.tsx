@@ -3,7 +3,7 @@ import type {
   CSSProperties,
   PointerEvent as ReactPointerEvent,
 } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   MediaRendererPlaybackState,
   type DetectionBufferState,
@@ -49,12 +49,6 @@ export function TimelineView({
     detectionBuffer?.requestedEndTime ?? null,
     mediaDuration,
   );
-  const timelineCurrentTime = useSmoothTimelineCurrentTime({
-    currentTime,
-    disabled,
-    duration: mediaDuration,
-    playbackState,
-  });
   const { flushSeek, onScrubChange, onScrubEnd, onScrubStart, scrubTime } =
     useTimelineSeekGesture({
       currentTime,
@@ -63,11 +57,10 @@ export function TimelineView({
       onScrub,
       onSeek,
     });
-  const displayedCurrentTime = scrubTime ?? timelineCurrentTime;
   const visualDuration =
     mediaDuration ??
     Math.max(
-      displayedCurrentTime,
+      currentTime,
       bufferSourceRange.endTime ?? 0,
       requestedSourceRange.endTime ?? 0,
       activeDetectionFrameTime ?? 0,
@@ -76,6 +69,15 @@ export function TimelineView({
       getMaxRangeEnd(processingRanges),
       1,
     );
+  const { playheadRef, playheadTime, readPlayheadTime } = useTimelinePlayhead({
+    currentTime,
+    disabled,
+    duration: mediaDuration,
+    playbackState,
+    scrubTime,
+    visualDuration,
+  });
+  const displayedCurrentTime = scrubTime ?? playheadTime;
   const requestedRange = createRangeStyle({
     duration: visualDuration,
     endTime: requestedSourceRange.endTime,
@@ -112,8 +114,6 @@ export function TimelineView({
     );
   const inputMax = mediaDuration ?? visualDuration;
   const inputValue = clamp(displayedCurrentTime, 0, inputMax);
-  const playheadLeft = toPercent(displayedCurrentTime, visualDuration);
-  const playheadProgress = toPercent(inputValue, inputMax);
   const activeFrameLeft =
     activeDetectionFrameTime === null
       ? null
@@ -131,7 +131,7 @@ export function TimelineView({
     onScrubChange(Number(event.currentTarget.value));
   };
   const handleInputPointerDown = () => {
-    onScrubStart(inputValue);
+    onScrubStart(readPlayheadTime());
   };
   const handleInputPointerUp = () => {
     onScrubEnd();
@@ -264,14 +264,10 @@ export function TimelineView({
               }
             />
           ) : null}
-          <span
-            className="timeline-view__marker timeline-view__marker--playhead"
-            style={{ "--timeline-left": playheadLeft } as TimelineMarkerStyle}
-          />
-          <span
-            className="timeline-view__knob"
-            style={{ "--timeline-left": playheadLeft } as TimelineMarkerStyle}
-          />
+          <span className="timeline-view__playhead" ref={playheadRef}>
+            <span className="timeline-view__marker timeline-view__marker--playhead" />
+            <span className="timeline-view__knob" />
+          </span>
         </div>
         <input
           aria-label="Timeline"
@@ -285,9 +281,6 @@ export function TimelineView({
           onPointerDown={handleInputPointerDown}
           onPointerUp={handleInputPointerUp}
           step={0.01}
-          style={
-            { "--timeline-progress": playheadProgress } as TimelineInputStyle
-          }
           type="range"
           value={inputValue}
         />
@@ -296,11 +289,13 @@ export function TimelineView({
   );
 }
 
-interface SmoothTimelineCurrentTimeOptions {
+interface TimelinePlayheadOptions {
   readonly currentTime: number;
   readonly disabled: boolean;
   readonly duration: number | null;
   readonly playbackState: MediaRendererPlaybackState | null;
+  readonly scrubTime: number | null;
+  readonly visualDuration: number;
 }
 
 interface TimelineClockAnchor {
@@ -308,71 +303,121 @@ interface TimelineClockAnchor {
   readonly performanceTime: number;
 }
 
-const TIMELINE_DISCONTINUITY_THRESHOLD_SECONDS = 0.25;
-const TIMELINE_RENDER_EPSILON_SECONDS = 0.001;
+interface TimelinePlayheadClock {
+  readonly duration: number | null;
+  readonly isPlaying: boolean;
+  readonly scrubTime: number | null;
+  readonly visualDuration: number;
+}
 
-function useSmoothTimelineCurrentTime({
+const TIMELINE_PUBLISH_INTERVAL_MS = 100;
+
+/**
+ * The player reports its time a few times a second, so the playhead is
+ * interpolated against the wall clock in between. That interpolation runs at
+ * the display's refresh rate: its position goes straight to the element as a
+ * composited transform, and React hears the time only as often as the range
+ * input's value needs it.
+ */
+function useTimelinePlayhead({
   currentTime,
   disabled,
   duration,
   playbackState,
-}: SmoothTimelineCurrentTimeOptions) {
-  const isPlaying = playbackState === MediaRendererPlaybackState.Playing;
-  const [timelineCurrentTime, setTimelineCurrentTime] = useState(currentTime);
-  const timelineCurrentTimeRef = useRef(currentTime);
+  scrubTime,
+  visualDuration,
+}: TimelinePlayheadOptions) {
+  const isPlaying =
+    !disabled && playbackState === MediaRendererPlaybackState.Playing;
+  const isDocumentVisible = useDocumentVisible();
+  const [publishedTime, setPublishedTime] = useState(currentTime);
+  const playheadRef = useRef<HTMLSpanElement>(null);
   const anchorRef = useRef<TimelineClockAnchor>({
     mediaTime: currentTime,
     performanceTime: performance.now(),
   });
-  const lastAuthoritativeTimeRef = useRef(currentTime);
+  const clockRef = useRef<TimelinePlayheadClock>({
+    duration,
+    isPlaying,
+    scrubTime,
+    visualDuration,
+  });
+  const publishedAtRef = useRef(Number.NEGATIVE_INFINITY);
+  const writtenPositionRef = useRef<string | null>(null);
 
-  const updateTimelineCurrentTime = (nextCurrentTime: number) => {
-    timelineCurrentTimeRef.current = nextCurrentTime;
-    setTimelineCurrentTime((previousCurrentTime) =>
-      Math.abs(previousCurrentTime - nextCurrentTime) <
-      TIMELINE_RENDER_EPSILON_SECONDS
-        ? previousCurrentTime
-        : nextCurrentTime,
+  const readPlayheadTime = () => {
+    const clock = clockRef.current;
+
+    if (clock.scrubTime !== null) {
+      return clock.scrubTime;
+    }
+
+    const anchor = anchorRef.current;
+
+    if (!clock.isPlaying) {
+      return anchor.mediaTime;
+    }
+
+    const elapsedSeconds = Math.max(
+      0,
+      (performance.now() - anchor.performanceTime) / 1000,
     );
+
+    return clampTimelineTime(anchor.mediaTime + elapsedSeconds, clock.duration);
   };
 
-  useEffect(() => {
-    const now = performance.now();
-    const previousAuthoritativeTime = lastAuthoritativeTimeRef.current;
-    const currentVisualTime = timelineCurrentTimeRef.current;
-    const jumpedBackward =
-      currentTime < previousAuthoritativeTime - TIMELINE_RENDER_EPSILON_SECONDS;
-    const driftedFromAuthority =
-      Math.abs(currentTime - currentVisualTime) >
-      TIMELINE_DISCONTINUITY_THRESHOLD_SECONDS;
+  const writePlayheadPosition = () => {
+    const playhead = playheadRef.current;
 
-    lastAuthoritativeTimeRef.current = currentTime;
+    if (playhead === null) {
+      return;
+    }
+
+    const position = toPercent(
+      readPlayheadTime(),
+      clockRef.current.visualDuration,
+    );
+
+    if (position === writtenPositionRef.current) {
+      return;
+    }
+
+    writtenPositionRef.current = position;
+    playhead.style.transform = `translateX(${position})`;
+  };
+
+  useLayoutEffect(() => {
     anchorRef.current = {
       mediaTime: currentTime,
-      performanceTime: now,
+      performanceTime: performance.now(),
     };
+  }, [currentTime, isDocumentVisible, isPlaying]);
 
-    if (!isPlaying || disabled || jumpedBackward || driftedFromAuthority) {
-      updateTimelineCurrentTime(currentTime);
-    }
-  }, [currentTime, disabled, isPlaying]);
+  useLayoutEffect(() => {
+    clockRef.current = { duration, isPlaying, scrubTime, visualDuration };
+    writePlayheadPosition();
+  });
 
   useEffect(() => {
-    if (!isPlaying || disabled) {
+    if (!isPlaying || !isDocumentVisible) {
       return;
     }
 
     let animationFrameHandle: number | undefined;
-    const tick = (now: number) => {
-      const anchor = anchorRef.current;
-      const elapsedSeconds = Math.max(0, (now - anchor.performanceTime) / 1000);
+    const tick = () => {
+      writePlayheadPosition();
 
-      updateTimelineCurrentTime(
-        clampTimelineTime(anchor.mediaTime + elapsedSeconds, duration),
-      );
+      const now = performance.now();
+
+      if (now - publishedAtRef.current >= TIMELINE_PUBLISH_INTERVAL_MS) {
+        publishedAtRef.current = now;
+        setPublishedTime(readPlayheadTime());
+      }
+
       animationFrameHandle = window.requestAnimationFrame(tick);
     };
 
+    publishedAtRef.current = Number.NEGATIVE_INFINITY;
     animationFrameHandle = window.requestAnimationFrame(tick);
 
     return () => {
@@ -380,9 +425,33 @@ function useSmoothTimelineCurrentTime({
         window.cancelAnimationFrame(animationFrameHandle);
       }
     };
-  }, [disabled, duration, isPlaying]);
+  }, [isDocumentVisible, isPlaying]);
 
-  return timelineCurrentTime;
+  return {
+    playheadRef,
+    playheadTime: isPlaying ? publishedTime : currentTime,
+    readPlayheadTime,
+  };
+}
+
+function useDocumentVisible() {
+  const [isDocumentVisible, setIsDocumentVisible] = useState(
+    () => document.visibilityState !== "hidden",
+  );
+
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      setIsDocumentVisible(document.visibilityState !== "hidden");
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, []);
+
+  return isDocumentVisible;
 }
 
 interface TimelineSeekGestureOptions {
@@ -487,10 +556,6 @@ type TimelineRangeStyle = CSSProperties & {
 
 type TimelineMarkerStyle = CSSProperties & {
   readonly "--timeline-left": string;
-};
-
-type TimelineInputStyle = CSSProperties & {
-  readonly "--timeline-progress": string;
 };
 
 interface StyledTimelineRange {
