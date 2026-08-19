@@ -6,6 +6,12 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "baseUrl": ".",
     "paths": {
+      "@roboflow/video-engine": [
+        "../../../roboflow-video-runtime/app/dist/videoEngineTypes/index.d.ts"
+      ],
+      "@roboflow/video-engine/analysis": [
+        "../../../roboflow-video-runtime/app/dist/videoEngineTypes/analysis.d.ts"
+      ],
       "#constants/*": ["src/constants/*"],
       "#detections/*": ["src/detections/*"],
       "#editing/*": ["src/editing/*"],

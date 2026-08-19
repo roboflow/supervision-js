@@ -8,10 +8,22 @@ const coreSource = (folder: string) =>
   path.resolve(rootDir, "packages/core/src", folder);
 const webSource = (folder: string) =>
   path.resolve(rootDir, "packages/web/src", folder);
+const videoEngineDir = path.resolve(
+  rootDir,
+  "../roboflow-video-runtime/app/src/scripts/videoEngine",
+);
 
 export default defineConfig({
   resolve: {
     alias: [
+      {
+        find: /^@roboflow\/video-engine$/,
+        replacement: path.join(videoEngineDir, "index.ts"),
+      },
+      {
+        find: /^@roboflow\/video-engine\/analysis$/,
+        replacement: path.join(videoEngineDir, "analysis.ts"),
+      },
       {
         find: "supervision/editing",
         replacement: path.resolve(rootDir, "packages/web/src/editing.ts"),

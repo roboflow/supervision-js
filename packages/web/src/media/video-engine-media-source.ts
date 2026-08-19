@@ -1,0 +1,213 @@
+import type {
+  DecodedMediaSource,
+  DecodedMediaSourceMetadata,
+  DecodedVideoSample,
+  DecodedVideoSampleSink,
+} from "#media/media-source";
+import type { MediaRendererSource } from "#types/media-renderer";
+import { SourceKind, VideoEngine } from "@roboflow/video-engine";
+import type {
+  DecodeResolutionStrategy,
+  EngineReadySnapshot,
+  VideoEngineOptions,
+  VideoSource,
+} from "@roboflow/video-engine";
+import { AnalysisSession } from "@roboflow/video-engine/analysis";
+import type { ExtractedFrame } from "@roboflow/video-engine/analysis";
+
+const MILLISECONDS_PER_SECOND = 1000;
+const DEFAULT_FRAME_RATE = 30;
+const TIMESTAMP_EPSILON_SECONDS = 1e-6;
+
+export interface VideoEngineMediaSourceOptions extends VideoEngineOptions {
+  /**
+   * Sizes the frames the pull path decodes. The inherited `decodeStrategy`
+   * sizes what the engine decodes for its own presentation.
+   */
+  readonly frameDecodeStrategy?: DecodeResolutionStrategy;
+}
+
+export interface VideoEngineMediaSource extends DecodedMediaSource {
+  /** The loaded engine, kept reachable so the push channel can attach to it. */
+  readonly engine: VideoEngine;
+}
+
+/**
+ * Adapts Roboflow's video engine to the decoded-media source seam.
+ *
+ * The pull path, `sampleSink`, serves one-off reads such as thumbnails and
+ * single frame grabs, decoding each request from scratch through the engine's
+ * batch analysis entry. The push path serves playback and scrub presentation:
+ * the engine paints presented frames on its own canvas and announces them, so a
+ * compositor subscribes to `engine` and never pulls samples here.
+ */
+export async function openVideoEngineMediaSource(
+  options: VideoEngineMediaSourceOptions,
+): Promise<VideoEngineMediaSource> {
+  const { frameDecodeStrategy, ...engineOptions } = options;
+  const engine = new VideoEngine(engineOptions);
+
+  try {
+    const snapshot = await engine.load();
+    const frames = createAnalysisFrameReader({
+      decodeStrategy: frameDecodeStrategy,
+      frameDuration: resolveFrameDuration(snapshot.nativeFps),
+      source: options.source,
+    });
+
+    return {
+      engine,
+      input: {
+        dispose() {
+          void frames.close();
+          void engine.dispose();
+        },
+      },
+      metadata: createMetadata(options.source, snapshot),
+      sampleSink: frames.sampleSink,
+    };
+  } catch (error) {
+    await engine.dispose();
+    throw error;
+  }
+}
+
+export function createVideoEngineMediaRendererSource(
+  options: VideoEngineMediaSourceOptions,
+): MediaRendererSource {
+  return {
+    open() {
+      return openVideoEngineMediaSource(options);
+    },
+  };
+}
+
+function createAnalysisFrameReader(options: {
+  readonly decodeStrategy: DecodeResolutionStrategy | undefined;
+  readonly frameDuration: number;
+  readonly source: VideoSource;
+}) {
+  let sessionPromise: Promise<AnalysisSession> | undefined;
+  let closed = false;
+
+  const openSession = () => {
+    sessionPromise ??= AnalysisSession.open({
+      decodeStrategy: options.decodeStrategy,
+      source: options.source,
+    });
+    return sessionPromise;
+  };
+
+  const extractAt = async (
+    timestamp: number,
+  ): Promise<ExtractedFrame | null> => {
+    if (closed) return null;
+    const session = await openSession();
+    const [frame] = await session.extractFrames([timestamp]);
+    return frame ?? null;
+  };
+
+  const sampleSink: DecodedVideoSampleSink = {
+    async getSample(timestamp) {
+      const frame = await extractAt(timestamp);
+      return frame ? createSample(frame, options.frameDuration) : null;
+    },
+    async *samples(
+      startTimestamp = 0,
+      endTimestamp = Number.POSITIVE_INFINITY,
+    ) {
+      let cursor = startTimestamp;
+      let lastTimestamp = Number.NEGATIVE_INFINITY;
+
+      while (cursor <= endTimestamp) {
+        const frame = await extractAt(cursor);
+        if (!frame) return;
+        // The analysis entry answers with the frame on screen at the requested
+        // timestamp, so a request past the last frame answers with that frame
+        // again. A timestamp that does not advance is the end of the track.
+        if (frame.timestampS <= lastTimestamp + TIMESTAMP_EPSILON_SECONDS) {
+          return;
+        }
+
+        lastTimestamp = frame.timestampS;
+        cursor = Math.max(cursor, frame.timestampS) + options.frameDuration;
+        yield createSample(frame, options.frameDuration);
+      }
+    },
+  };
+
+  const close = async () => {
+    closed = true;
+    const opening = sessionPromise;
+    sessionPromise = undefined;
+    if (!opening) return;
+
+    try {
+      const session = await opening;
+      await session.close();
+    } catch {
+      // A session that failed to open already rejected the pull that opened it.
+    }
+  };
+
+  return { close, sampleSink };
+}
+
+function createSample(
+  frame: ExtractedFrame,
+  duration: number,
+): DecodedVideoSample {
+  let closed = false;
+
+  return {
+    close() {
+      closed = true;
+    },
+    draw(context, dx, dy, dWidth = frame.width, dHeight = frame.height) {
+      if (closed) throw new Error("Cannot draw a closed video engine frame.");
+      context.drawImage(frame.canvas, dx, dy, dWidth, dHeight);
+    },
+    duration,
+    timestamp: frame.timestampS,
+  };
+}
+
+function createMetadata(
+  source: VideoSource,
+  snapshot: EngineReadySnapshot,
+): DecodedMediaSourceMetadata {
+  const duration = Number.isFinite(snapshot.durationMs)
+    ? snapshot.durationMs / MILLISECONDS_PER_SECOND
+    : null;
+  const estimatedFrameRate =
+    snapshot.nativeFps !== null && snapshot.nativeFps > 0
+      ? snapshot.nativeFps
+      : null;
+
+  return {
+    audioTrackCount: 0,
+    canRead: snapshot.canDecode,
+    duration,
+    estimatedFrameCount:
+      duration !== null && estimatedFrameRate !== null
+        ? Math.max(1, Math.round(duration * estimatedFrameRate))
+        : null,
+    estimatedFrameRate,
+    // The engine's ready snapshot carries no first-sample timestamp, so a clip
+    // whose container starts at a non-zero time reports its origin as zero.
+    firstTimestamp: 0,
+    formatMimeType: null,
+    formatName: "video-engine",
+    mimeType: source.kind === SourceKind.Stream ? source.mimeType : null,
+    primaryVideoHeight: snapshot.naturalHeight,
+    primaryVideoWidth: snapshot.naturalWidth,
+    trackCount: 1,
+    videoTrackCount: 1,
+  };
+}
+
+function resolveFrameDuration(nativeFps: number | null) {
+  return nativeFps !== null && nativeFps > 0
+    ? 1 / nativeFps
+    : 1 / DEFAULT_FRAME_RATE;
+}
