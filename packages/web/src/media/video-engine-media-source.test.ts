@@ -275,6 +275,7 @@ describe("video engine media source", () => {
 
     await rendererSource.open();
 
-    expect(engine.options.at(-1)?.previewWidth).toBe(480);
+    const lastOptions = engine.options.at(-1) as { previewWidth?: number };
+    expect(lastOptions.previewWidth).toBe(480);
   });
 });
