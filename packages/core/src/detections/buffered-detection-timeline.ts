@@ -611,17 +611,16 @@ export function createBufferedDetectionTimeline(
     }
 
     const duration = timelineContext.duration;
-    let comparableMediaTime = mediaTime;
 
-    while (comparableMediaTime < state.bufferStartTime) {
-      comparableMediaTime += duration;
-    }
+    // The representative of mediaTime (mod duration) NEAREST the buffer.
+    // Stepping until the time sits at or below the buffer's end instead would
+    // punish ordinary forward playback: the first frame past the buffered
+    // window would map a whole loop down, the window would follow it there,
+    // and every later time would ratchet further negative.
+    const bufferCenter = (state.bufferStartTime + state.bufferEndTime) / 2;
+    const loops = Math.round((bufferCenter - mediaTime) / duration);
 
-    while (comparableMediaTime > state.bufferEndTime) {
-      comparableMediaTime -= duration;
-    }
-
-    return comparableMediaTime;
+    return mediaTime + loops * duration;
   }
 
   function getSourceMediaTime(mediaTime: number) {

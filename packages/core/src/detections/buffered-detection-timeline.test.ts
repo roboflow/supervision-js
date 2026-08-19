@@ -477,6 +477,43 @@ describe("buffered detection timeline", () => {
     expect(timeline.getState().status).toBe(DetectionBufferStatus.Ready);
   });
 
+  it("loads forward when playback advances past the buffered window on a looping timeline", async () => {
+    const loadFrames = vi.fn(async () => []);
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 2,
+      bufferBehindSeconds: 0.5,
+      source: { loadFrames },
+    });
+
+    timeline.setTimelineContext?.({ duration: 60, loop: true });
+    await timeline.prepare(0, { duration: 60, firstTimestamp: 0 });
+    // One step past the buffered window is ordinary forward playback; mapping
+    // it a whole loop down would drag every later request negative for good.
+    await timeline.prepare(2.5, { duration: 60, firstTimestamp: 0 });
+
+    const state = timeline.getState();
+    expect(state.requestedStartTime).toBe(2);
+    expect(state.requestedEndTime).toBe(4.5);
+  });
+
+  it("still maps an unwrapped loop-crossing time back to the buffered window", async () => {
+    const loadFrames = vi.fn(async () => []);
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 2,
+      bufferBehindSeconds: 0.5,
+      source: { loadFrames },
+    });
+
+    timeline.setTimelineContext?.({ duration: 60, loop: true });
+    await timeline.prepare(59.5, { duration: 60, firstTimestamp: 0 });
+    // A consumer running an unwrapped loop clock asks for 60.5, which is 0.5
+    // into the next lap; the nearest representative sits inside the window.
+    expect(timeline.selectFrame(60.5)).toBeUndefined();
+    const state = timeline.getState();
+    expect(state.requestedStartTime).toBe(59);
+    expect(state.requestedEndTime).toBe(61.5);
+  });
+
   it("waits for loop-crossing source coverage when playback gating is enabled", async () => {
     const source = {
       loadFrames: vi.fn(async () => []),
