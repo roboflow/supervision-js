@@ -407,6 +407,69 @@ describe("writable detection frame source", () => {
     expect(source.getAvailableRanges()).toEqual([{ endTime: 3, startTime: 2 }]);
   });
 
+  it("invalidates the coverage a closed open-ended frame gave up", async () => {
+    const store = createMemoryColdDetectionFrameStore();
+    const source = createWritableDetectionFrameSource({
+      datasetId: "stream",
+      store,
+    });
+
+    await source.appendFrames([
+      { detections: [{ id: "box" }], frameIndex: 0, mediaTime: 0 },
+    ]);
+    const openEndedVersion = source.getVersion();
+
+    await source.appendFrames([
+      {
+        detections: [{ id: "box" }],
+        endTime: 0.1,
+        frameIndex: 0,
+        mediaTime: 0,
+      },
+    ]);
+
+    // The frame was selected everywhere past 0 while it was open-ended, so
+    // closing it changes what a consumer parked at 0.5 should be showing. The
+    // vacated interval has no upper bound to report, so it reloads instead.
+    expect(await source.loadFrames(0.5, 0.5)).toEqual([]);
+    expect(
+      source.getChangesSince?.(openEndedVersion, [
+        { endTime: 0.5, startTime: 0.5 },
+      ]),
+    ).toMatchObject({ requiresReload: true });
+  });
+
+  it("invalidates the interval a rewritten frame no longer covers", async () => {
+    const store = createMemoryColdDetectionFrameStore();
+    const source = createWritableDetectionFrameSource({
+      datasetId: "stream",
+      store,
+    });
+
+    await source.appendFrames([
+      { detections: [{ id: "box" }], endTime: 1, frameIndex: 0, mediaTime: 0 },
+    ]);
+    const previousVersion = source.getVersion();
+
+    await source.appendFrames([
+      { detections: [{ id: "box" }], endTime: 6, frameIndex: 0, mediaTime: 5 },
+    ]);
+
+    // Rewriting the frame at a later time replaces it rather than adding a
+    // second one, so the interval it left behind is reported alongside the
+    // interval it moved to.
+    expect(await source.loadFrames(0.5, 0.5)).toEqual([]);
+    expect(
+      source.getChangesSince?.(previousVersion, [
+        { endTime: 0.5, startTime: 0.5 },
+      ]),
+    ).toEqual({
+      ranges: [{ endTime: 1, startTime: 0 }],
+      requiresReload: false,
+      version: 2,
+    });
+  });
+
   it("holds the newest live frame open until the next one supersedes it", async () => {
     const store = createInstrumentedMemoryStore();
     const source = createWritableDetectionFrameSource({
