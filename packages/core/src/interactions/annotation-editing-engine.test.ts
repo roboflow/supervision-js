@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  AnnotationGestureStateKind,
   AnnotationHandleKind,
   AnnotationGeometryKind,
   applyAnnotationHandleDrag,
@@ -192,6 +193,85 @@ describe("annotation editing engine", () => {
         { x: 23, y: 36 },
       ],
     });
+  });
+
+  it("picks the nearest handle when clustered handles share a hit area", () => {
+    const handles = getAnnotationHandles({
+      keypoints: {
+        edges: [[0, 1]] as const,
+        points: [
+          { x: 100, y: 100 },
+          { x: 104, y: 100 },
+          { x: 104, y: 100 },
+        ],
+      },
+    });
+
+    expect(pickAnnotationHandle(handles, { x: 101, y: 100 })?.id).toBe("kp-0");
+    expect(pickAnnotationHandle(handles, { x: 103, y: 101 })?.id).toBe("kp-2");
+    expect(pickAnnotationHandle(handles, { x: 120, y: 100 })).toBeUndefined();
+  });
+
+  it("treats a handle click without movement as a no-op instead of snapping to the pointer", () => {
+    const onCommit = vi.fn();
+    const onPreview = vi.fn();
+    const engine = createAnnotationEditingEngine({ onCommit, onPreview });
+    const detection = {
+      id: "skeleton-1",
+      keypoints: {
+        edges: [[0, 1]] as const,
+        points: [
+          { x: 15, y: 20 },
+          { x: 25, y: 40 },
+        ],
+      },
+      rect: { x: 20, y: 30, width: 10, height: 20 },
+    };
+    const keypointHandle = getAnnotationHandles(detection).find(
+      (handle) => handle.id === "kp-0",
+    )!;
+
+    // A click lands inside the handle's hit area, not on its exact center.
+    engine.beginHandleDrag(detection, keypointHandle, {
+      point: { x: 17, y: 21 },
+      timestamp: 0,
+      pointerId: 1,
+    });
+    engine.pointerMove({
+      point: { x: 18, y: 22 },
+      timestamp: 16,
+      pointerId: 1,
+    });
+    engine.pointerUp({ point: { x: 18, y: 22 }, timestamp: 32, pointerId: 1 });
+
+    expect(onPreview).not.toHaveBeenCalled();
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(engine.getState().kind).toBe(AnnotationGestureStateKind.Idle);
+
+    // Past the threshold it is a drag and the keypoint follows the pointer.
+    engine.beginHandleDrag(detection, keypointHandle, {
+      point: { x: 17, y: 21 },
+      timestamp: 100,
+      pointerId: 1,
+    });
+    engine.pointerMove({
+      point: { x: 30, y: 40 },
+      timestamp: 116,
+      pointerId: 1,
+    });
+    engine.pointerUp({ point: { x: 30, y: 40 }, timestamp: 132, pointerId: 1 });
+
+    expect(onCommit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        keypoints: expect.objectContaining({
+          points: [
+            { x: 30, y: 40 },
+            { x: 25, y: 40 },
+          ],
+        }),
+      }),
+      detection,
+    );
   });
 
   it("moves a whole skeleton without changing its shape", () => {

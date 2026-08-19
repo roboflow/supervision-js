@@ -128,13 +128,24 @@ export function pickDetectionAtPoint(
     }
 
     if (detection.keypoints) {
-      const keypointIndex = detection.keypoints.points.findIndex(
-        (keypoint, index) =>
-          detection.keypoints?.visibility?.[index] !==
-            KeypointVisibility.NotLabeled &&
-          Math.hypot(point.x - keypoint.x, point.y - keypoint.y) <=
-            keypointPadding,
-      );
+      // Clustered keypoints share the pick tolerance; take the nearest so the
+      // hover label, the menu, and the handle drag all name the same point.
+      // Later points draw on top, so they win exact ties.
+      let keypointIndex = -1;
+      let keypointDistance = Number.POSITIVE_INFINITY;
+      detection.keypoints.points.forEach((keypoint, index) => {
+        if (
+          detection.keypoints?.visibility?.[index] ===
+          KeypointVisibility.NotLabeled
+        ) {
+          return;
+        }
+        const distance = Math.hypot(point.x - keypoint.x, point.y - keypoint.y);
+        if (distance <= keypointPadding && distance <= keypointDistance) {
+          keypointIndex = index;
+          keypointDistance = distance;
+        }
+      });
 
       if (keypointIndex !== -1) {
         pushCandidate(

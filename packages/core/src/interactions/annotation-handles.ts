@@ -61,13 +61,22 @@ export function pickAnnotationHandle(
   handles: readonly AnnotationHandleDefinition[],
   point: Point,
 ) {
-  return [...handles]
-    .reverse()
-    .find(
-      (handle) =>
-        Math.abs(point.x - handle.point.x) <= handle.hitSize / 2 &&
-        Math.abs(point.y - handle.point.y) <= handle.hitSize / 2,
-    );
+  let picked: AnnotationHandleDefinition | undefined;
+  let pickedDistance = Number.POSITIVE_INFINITY;
+  for (const handle of handles) {
+    const dx = Math.abs(point.x - handle.point.x);
+    const dy = Math.abs(point.y - handle.point.y);
+    if (dx > handle.hitSize / 2 || dy > handle.hitSize / 2) continue;
+    // Clustered handles (face keypoints, a tiny box's corners) share hit
+    // areas; the nearest one is what the pointer is on. Later handles draw on
+    // top, so they win exact ties.
+    const distance = Math.hypot(dx, dy);
+    if (distance <= pickedDistance) {
+      picked = handle;
+      pickedDistance = distance;
+    }
+  }
+  return picked;
 }
 
 export function applyAnnotationHandleDrag(

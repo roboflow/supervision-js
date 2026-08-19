@@ -185,6 +185,47 @@ describe("detection picker", () => {
     });
   });
 
+  it("picks the nearest keypoint when several share the pick tolerance", () => {
+    const faceFrame: DetectionFrame = {
+      detections: [
+        {
+          id: "face",
+          keypoints: {
+            edges: [[0, 1]],
+            points: [
+              { x: 100, y: 100 },
+              { x: 104, y: 100 },
+              { x: 96, y: 100 },
+            ],
+            visibility: [
+              KeypointVisibility.Visible,
+              KeypointVisibility.Visible,
+              KeypointVisibility.NotLabeled,
+            ],
+          },
+          rect: { height: 40, width: 40, x: 100, y: 110 },
+        },
+      ],
+      mediaTime: 0,
+    };
+
+    expect(
+      pickDetectionAtPoint(
+        faceFrame,
+        { x: 103, y: 101 },
+        { keypointPadding: 8 },
+      ),
+    ).toMatchObject({ geometryIndex: 1, target: DetectionPickTarget.Keypoint });
+    // A not-labeled point never wins, even when it is the nearest one.
+    expect(
+      pickDetectionAtPoint(
+        faceFrame,
+        { x: 97, y: 100 },
+        { keypointPadding: 8 },
+      ),
+    ).toMatchObject({ geometryIndex: 0, target: DetectionPickTarget.Keypoint });
+  });
+
   it("keeps pick tolerances constant on screen when the viewport is zoomed out", () => {
     const skeletonFrame: DetectionFrame = {
       detections: [
