@@ -66,7 +66,13 @@ export async function createFixtureSession(
         sync: {
           frameIndexOriginTime: manifest.video.firstTimestamp ?? 0,
           frameRate: manifest.inference?.frameRate ?? manifest.frameRate,
-          selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
+          // A v2 fixture records each frame's real [mediaTime, endTime), so
+          // interval pairing is exact even on VFR sources; index-times-rate
+          // reconstruction stays only for v1 proxy fixtures that lack it.
+          selectionMode:
+            manifest.video.firstTimestamp === undefined
+              ? DetectionFrameSelectionMode.NearestFrameIndex
+              : DetectionFrameSelectionMode.Interval,
         },
       },
       media: options.tapMediaSource(createDemoFixtureMedia(options.definition)),
