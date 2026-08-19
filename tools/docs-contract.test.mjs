@@ -415,6 +415,10 @@ test("deployed site presents docs at the root and the workbench at /demo/", asyn
     /data-supervision-playground-src="demo\/\?embed=docs-playground"/,
   );
   assert.match(toolbar, /function resolveDemoUrl\(deployedPath\)/);
+  // resolveDemoUrl() prefixes data-base itself, so a call site that also
+  // interpolates the base applies it twice. That resolves above the project
+  // prefix on nested pages and sends the deployed link to /demo/.
+  assert.doesNotMatch(toolbar, /resolveDemoUrl\(`\$\{base\}/);
 });
 
 test("copyable integration examples typecheck", async () => {
