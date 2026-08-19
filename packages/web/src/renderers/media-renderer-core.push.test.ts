@@ -105,7 +105,7 @@ describe("media renderer over a push-based media source", () => {
     renderer.destroy();
   });
 
-  it("reads playback state from the producer, seeking included", async () => {
+  it("reads playback state from the producer", async () => {
     const producer = createProducer();
     const renderer = await createRenderer(producer, createScene());
 
@@ -114,15 +114,64 @@ describe("media renderer over a push-based media source", () => {
       MediaRendererPlaybackState.Playing,
     );
 
-    producer.setSeeking(true);
-    expect(renderer.getState().playbackState).toBe(
-      MediaRendererPlaybackState.Buffering,
-    );
-
-    producer.setSeeking(false);
     producer.setStatus("PAUSED");
     expect(renderer.getState().playbackState).toBe(
       MediaRendererPlaybackState.Paused,
+    );
+
+    renderer.destroy();
+  });
+
+  it("keeps playing while a seek settles under playback", async () => {
+    const producer = createProducer();
+    const renderer = await createRenderer(producer, createScene());
+
+    producer.setStatus("PLAYING");
+    producer.setSeeking(true);
+    expect(renderer.getState().playbackState).toBe(
+      MediaRendererPlaybackState.Playing,
+    );
+
+    producer.setStatus("SEEKING");
+    expect(renderer.getState().playbackState).toBe(
+      MediaRendererPlaybackState.Playing,
+    );
+
+    producer.setSeeking(false);
+    producer.setStatus("PLAYING");
+    expect(renderer.getState().playbackState).toBe(
+      MediaRendererPlaybackState.Playing,
+    );
+
+    renderer.destroy();
+  });
+
+  it("never reports buffering for a scrub while paused", async () => {
+    const producer = createProducer();
+    const onState = vi.fn();
+    const renderer = await createRenderer(producer, createScene(), { onState });
+
+    producer.setStatus("PAUSED");
+    renderer.scrub(1);
+    producer.setSeeking(true);
+    producer.setStatus("SEEKING");
+    producer.setTimeMs(1000);
+
+    expect(renderer.getState().playbackState).toBe(
+      MediaRendererPlaybackState.Paused,
+    );
+
+    await renderer.seek(1);
+    producer.setSeeking(false);
+    producer.setStatus("PAUSED");
+
+    expect(renderer.getState().playbackState).toBe(
+      MediaRendererPlaybackState.Paused,
+    );
+    expect(onState).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        playbackState: MediaRendererPlaybackState.Buffering,
+      }),
     );
 
     renderer.destroy();
@@ -169,11 +218,23 @@ describe("media renderer over a push-based media source", () => {
     renderer.destroy();
   });
 
-  it("reads a producer that drops back to loading", async () => {
+  it("reports buffering for a producer that drops back to loading mid-playback", async () => {
     const producer = createProducer();
     const renderer = await createRenderer(producer, createScene());
 
     producer.setStatus("PLAYING");
+    producer.setStatus("LOADING");
+
+    expect(renderer.getState().playbackState).toBe(
+      MediaRendererPlaybackState.Buffering,
+    );
+    renderer.destroy();
+  });
+
+  it("reads a producer still loading before playback", async () => {
+    const producer = createProducer();
+    const renderer = await createRenderer(producer, createScene());
+
     producer.setStatus("LOADING");
 
     expect(renderer.getState().playbackState).toBe(

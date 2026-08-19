@@ -2,7 +2,6 @@ import {
   DetectionBufferStatus,
   type BufferedDetectionTimeline,
   type DetectionBufferOptions,
-  type DetectionBufferPrepareOptions,
   type DetectionBufferState,
   type DetectionFrameSource,
   type DetectionFrameSourceVersionRange,
@@ -56,7 +55,6 @@ export function createBufferedDetectionTimeline(
     options.refreshIntervalSeconds === undefined
       ? null
       : Math.max(0, options.refreshIntervalSeconds);
-  const playbackGate = options.playbackGate;
 
   let buffer: DetectionFrame[] = [];
   let state = createIdleDetectionBufferState();
@@ -265,17 +263,9 @@ export function createBufferedDetectionTimeline(
   };
 
   const timeline: BufferedDetectionTimeline = {
-    async prepare(mediaTime, prepareOptions) {
+    async prepare(mediaTime) {
       if (destroyed) {
         return;
-      }
-
-      if (shouldWaitForPlaybackGate(prepareOptions)) {
-        await waitForPlaybackGate(mediaTime, prepareOptions);
-
-        if (destroyed) {
-          return;
-        }
       }
 
       await refreshBuffer(mediaTime);
@@ -460,69 +450,6 @@ export function createBufferedDetectionTimeline(
     }
   }
 
-  function shouldWaitForPlaybackGate(
-    prepareOptions: DetectionBufferPrepareOptions | undefined,
-  ) {
-    return (
-      prepareOptions?.gatePlayback === true &&
-      playbackGate?.enabled === true &&
-      Boolean(options.source.waitForRange)
-    );
-  }
-
-  async function waitForPlaybackGate(
-    mediaTime: number,
-    prepareOptions: DetectionBufferPrepareOptions | undefined,
-  ) {
-    if (!playbackGate?.enabled || !options.source.waitForRange) {
-      return;
-    }
-
-    const requiredAheadSeconds = Math.max(
-      0,
-      playbackGate.requiredAheadSeconds ?? 0,
-    );
-    const comparableMediaTime = getComparableMediaTime(mediaTime);
-    const endTime = getRequiredCoverageEndTime({
-      duration: isLoopingTimeline() ? null : prepareOptions?.duration,
-      firstTimestamp: prepareOptions?.firstTimestamp,
-      mediaTime: comparableMediaTime,
-      requiredAheadSeconds,
-    });
-
-    if (endTime <= comparableMediaTime) {
-      return;
-    }
-
-    const coveragePlan = createLoadPlan(comparableMediaTime, endTime);
-
-    state = {
-      ...state,
-      errorMessage: null,
-      requestedEndTime: coveragePlan.endTime,
-      requestedStartTime: coveragePlan.startTime,
-      status: DetectionBufferStatus.Loading,
-    };
-
-    try {
-      await Promise.all(
-        coveragePlan.sourceRanges.map((range) =>
-          options.source.waitForRange?.(range),
-        ),
-      );
-    } catch (error) {
-      if (!destroyed) {
-        state = {
-          ...state,
-          errorMessage: getErrorMessage(error),
-          status: DetectionBufferStatus.Error,
-        };
-      }
-
-      throw error;
-    }
-  }
-
   function shouldRefreshRollingWindow(mediaTime: number) {
     if (
       refreshIntervalSeconds === null ||
@@ -666,24 +593,6 @@ function getErrorMessage(error: unknown) {
   return error instanceof Error
     ? error.message
     : "Detection buffer load failed.";
-}
-
-function getRequiredCoverageEndTime(options: {
-  readonly duration?: number | null;
-  readonly firstTimestamp?: number;
-  readonly mediaTime: number;
-  readonly requiredAheadSeconds: number;
-}) {
-  const requestedEndTime = options.mediaTime + options.requiredAheadSeconds;
-
-  if (options.duration === null || options.duration === undefined) {
-    return requestedEndTime;
-  }
-
-  return Math.min(
-    requestedEndTime,
-    (options.firstTimestamp ?? 0) + Math.max(options.duration, 0),
-  );
 }
 
 function getLoopingSourceRanges(

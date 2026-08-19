@@ -80,7 +80,7 @@ export interface DetectionBufferOptions extends DetectionFrameSelectionOptions {
    */
   readonly refreshIntervalSeconds?: number;
   /**
-   * Optional playback gate based on detection availability.
+   * Accepted and ignored: playback never waits on detection availability.
    */
   readonly playbackGate?: DetectionPlaybackGateOptions;
 }
@@ -90,6 +90,10 @@ export interface DetectionTimelineContext {
   readonly loop: boolean;
 }
 
+/**
+ * Accepted and ignored: annotations catch up to the picture and never hold it.
+ * A frame the buffered window does not cover presents without annotations.
+ */
 export interface DetectionPlaybackGateOptions {
   /**
    * Pause playback while the requested detection window is unavailable.
@@ -132,6 +136,7 @@ export interface DetectionFrameRetentionOptions {
 export interface DetectionBufferPrepareOptions {
   readonly duration?: number | null;
   readonly firstTimestamp?: number;
+  /** Accepted and ignored: preparing detections never holds the picture. */
   readonly gatePlayback?: boolean;
 }
 

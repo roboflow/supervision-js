@@ -117,7 +117,7 @@ describe("media renderer core", () => {
     renderer.destroy();
   });
 
-  it("buffers playback until render preparation reaches the requested lookahead", async () => {
+  it("plays through render preparation that never finishes", async () => {
     resetMocks();
 
     const renderPreparation = createDeferred<void>();
@@ -126,6 +126,7 @@ describe("media renderer core", () => {
       createMockSample(0.04, 0),
       createMockSample(0.08, 0),
     ] as unknown as DecodedVideoSample[];
+    const onState = vi.fn();
     const scene = createScene({
       waitForRenderPreparation: vi.fn(() => renderPreparation.promise),
     });
@@ -134,6 +135,7 @@ describe("media renderer core", () => {
         autoPlay: false,
         container: {} as HTMLElement,
         loop: false,
+        onState,
         renderPreparation: {
           playbackGate: {
             enabled: true,
@@ -154,30 +156,24 @@ describe("media renderer core", () => {
     flushAnimationFrame(40);
 
     await vi.waitFor(() => {
-      expect(scene.waitForRenderPreparation).toHaveBeenCalledWith(0.04, {
-        enabled: true,
-        requiredAheadSeconds: 0.04,
-      });
-    });
-    expect(scene.presentSample).toHaveBeenCalledOnce();
-    expect(renderer.getState().playbackState).toBe(
-      MediaRendererPlaybackState.Buffering,
-    );
-
-    renderPreparation.resolve();
-
-    await vi.waitFor(() => {
       expect(scene.presentSample).toHaveBeenCalledTimes(2);
     });
+    expect(scene.waitForRenderPreparation).not.toHaveBeenCalled();
     expect(renderer.getState()).toMatchObject({
       currentTime: 0.04,
       playbackState: MediaRendererPlaybackState.Playing,
     });
+    expect(onState).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        playbackState: MediaRendererPlaybackState.Buffering,
+      }),
+    );
 
+    renderPreparation.resolve();
     renderer.destroy();
   });
 
-  it("surfaces strict worker failures when playback gating is disabled", async () => {
+  it("surfaces strict worker failures", async () => {
     resetMocks();
 
     let sceneOptions: MediaRendererSceneOptions | undefined;
@@ -189,7 +185,6 @@ describe("media renderer core", () => {
         renderPreparation: {
           mode: RenderPreparationMode.Worker,
           onDiagnostics,
-          playbackGate: { enabled: false },
         },
         source: createSource([
           createMockSample(0, 0.04) as unknown as DecodedVideoSample,

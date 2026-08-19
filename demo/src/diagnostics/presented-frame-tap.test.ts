@@ -43,7 +43,7 @@ function createFakeFrame(): VideoFrame {
 function createPresentedFrame(mediaTimeMs: number): PresentedFrame {
   return {
     frame: createFakeFrame(),
-    frameIdx: Math.round(mediaTimeMs / 33),
+    paintSeq: Math.round(mediaTimeMs / 33),
     mediaTimeMs,
     quality: "exact",
   };

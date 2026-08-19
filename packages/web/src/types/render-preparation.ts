@@ -95,7 +95,9 @@ export interface RenderPreparationMaskFrameOptions {
 }
 
 /**
- * Playback gate for prepared render artifacts.
+ * Accepted and ignored: presentation is never gated. Preparation runs behind
+ * the picture, and a frame the prepared window does not cover reaches no
+ * annotation layer instead of holding playback back.
  */
 export interface RenderPreparationPlaybackGateOptions {
   /**
@@ -170,6 +172,7 @@ export interface RenderPreparationOptions {
   readonly maskFrame?: RenderPreparationMaskFrameOptions;
   readonly mode?: RenderPreparationMode;
   readonly onDiagnostics?: (diagnostics: RenderPreparationDiagnostics) => void;
+  /** Accepted and ignored: presentation is never gated. */
   readonly playbackGate?: RenderPreparationPlaybackGateOptions;
   readonly workerFactory?: RenderPreparationWorkerFactory;
 }

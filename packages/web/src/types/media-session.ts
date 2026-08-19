@@ -176,8 +176,7 @@ export interface MediaSessionDetectionOptions {
   readonly buffer?: DetectionBufferOptions;
 
   /**
-   * Optional playback gate that treats detection coverage as part of media
-   * readiness.
+   * Accepted and ignored: presentation is never gated on detection coverage.
    */
   readonly playbackGate?: DetectionPlaybackGateOptions;
 

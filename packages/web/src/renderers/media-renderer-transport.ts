@@ -37,6 +37,7 @@ export function createMediaRendererTransport(
 ): MediaRendererTransport {
   const { channel } = options;
   let gestureInFlight = false;
+  let settledState: MediaRendererPlaybackState | null = null;
 
   const publishPlaybackState = () => {
     const status = channel.getStatus();
@@ -47,9 +48,14 @@ export function createMediaRendererTransport(
       void channel.play();
     }
 
-    options.onPlaybackState(
-      resolveTransportPlaybackState(status, channel.getSeeking()),
-    );
+    const seeking = channel.getSeeking();
+    const state = resolveTransportPlaybackState(status, seeking, settledState);
+
+    if (!isSettling(status, seeking)) {
+      settledState = state;
+    }
+
+    options.onPlaybackState(state);
   };
   const publishPlayheadTime = () => {
     options.onPlayheadTime(channel.getTimeMs() / MILLISECONDS_PER_SECOND);
@@ -110,30 +116,45 @@ export function createMediaRendererTransport(
   };
 }
 
+/**
+ * A settling seek is not a playback state: the picture is landing, and the
+ * transport keeps whatever play or pause the seek interrupted. Seeking travels
+ * as its own signal, so folding it in here would only spend the buffering
+ * state on every scrub and leave nothing to say when playback truly stalls.
+ */
 function resolveTransportPlaybackState(
   status: PresentedFrameChannelStatus,
   seeking: boolean,
+  settledState: MediaRendererPlaybackState | null,
 ): MediaRendererPlaybackState {
   if (status === "ERRORED") {
     return MediaRendererPlaybackState.Error;
   }
 
-  if (seeking) {
-    return MediaRendererPlaybackState.Buffering;
+  if (isSettling(status, seeking)) {
+    return settledState ?? MediaRendererPlaybackState.Ready;
   }
 
   switch (status) {
     case "PLAYING":
       return MediaRendererPlaybackState.Playing;
-    case "SEEKING":
-      return MediaRendererPlaybackState.Buffering;
     case "PAUSED":
     case "ENDED":
       return MediaRendererPlaybackState.Paused;
     case "READY":
       return MediaRendererPlaybackState.Ready;
+    case "SEEKING":
+      return settledState ?? MediaRendererPlaybackState.Ready;
     case "IDLE":
     case "LOADING":
-      return MediaRendererPlaybackState.Loading;
+      // Falling back to loading mid-playback is the producer saying it cannot
+      // advance the frame it is meant to be playing.
+      return settledState === MediaRendererPlaybackState.Playing
+        ? MediaRendererPlaybackState.Buffering
+        : MediaRendererPlaybackState.Loading;
   }
+}
+
+function isSettling(status: PresentedFrameChannelStatus, seeking: boolean) {
+  return seeking || status === "SEEKING";
 }
