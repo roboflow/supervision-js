@@ -195,7 +195,7 @@ function createMetadata(
     estimatedFrameRate,
     // The engine's ready snapshot carries no first-sample timestamp, so a clip
     // whose container starts at a non-zero time reports its origin as zero.
-    firstTimestamp: 0,
+    firstTimestamp: snapshot.firstTimestampMs / MILLISECONDS_PER_SECOND,
     formatMimeType: null,
     formatName: "video-engine",
     mimeType: source.kind === SourceKind.Stream ? source.mimeType : null,

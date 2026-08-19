@@ -41,6 +41,7 @@ import type {
   RenderPreparationPlaybackGateOptions,
 } from "#types/render-preparation";
 import type { MaskBrushPreviewOptions } from "#editing/mask-brush-editor";
+import type { PresentedFrameChannel } from "./presented-frame-channel";
 
 export interface MediaRendererSceneOptions {
   readonly container: HTMLElement;
@@ -73,6 +74,12 @@ export interface MediaRendererSceneOptions {
   readonly previewOverlay: (() => PreviewOverlayData | null) | undefined;
   /** Propagates renderer-owned asynchronous visual changes into runtime state. */
   readonly onPresentationUpdate?: (sample: PresentedMediaSample) => void;
+  /**
+   * Present plane of a media source that decides for itself which frame is on
+   * screen. Given one, the scene presents what the producer announces instead
+   * of what the renderer pulls, and renders only when something changed.
+   */
+  readonly presentedFrameChannel?: PresentedFrameChannel;
 }
 
 export interface PresentedMediaSample {
@@ -87,6 +94,11 @@ export interface PresentedMediaSample {
 
 export interface MediaRendererScene {
   readonly rendererBackend: string;
+  /**
+   * Explicit renders issued so far, which a push-presented scene only issues on
+   * change. A scene that free-runs on the ticker has no such count.
+   */
+  getRenderCount?(): number | null;
   initializeMedia(dimensions: { width: number; height: number }): void;
   setTimelineContext?(context: MediaRendererSceneTimelineContext): void;
   presentSample(sample: DecodedVideoSample): PresentedMediaSample;

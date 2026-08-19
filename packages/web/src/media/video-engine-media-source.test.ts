@@ -11,6 +11,7 @@ type ReadySnapshot = {
   readonly canDecode: boolean;
   readonly codec: string | null;
   readonly durationMs: number;
+  readonly firstTimestampMs: number;
   readonly nativeFps: number | null;
   readonly naturalHeight: number;
   readonly naturalWidth: number;
@@ -55,6 +56,7 @@ const READY_SNAPSHOT: ReadySnapshot = {
   canDecode: true,
   codec: "avc1.640028",
   durationMs: 4000,
+  firstTimestampMs: 40,
   nativeFps: 25,
   naturalHeight: 1080,
   naturalWidth: 1920,
@@ -123,7 +125,7 @@ describe("video engine media source", () => {
       duration: 4,
       estimatedFrameCount: 100,
       estimatedFrameRate: 25,
-      firstTimestamp: 0,
+      firstTimestamp: 0.04,
       formatMimeType: null,
       formatName: "video-engine",
       mimeType: null,

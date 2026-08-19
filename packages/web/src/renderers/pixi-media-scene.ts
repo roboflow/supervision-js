@@ -18,7 +18,13 @@ import type {
   MediaRendererSceneTimelineContext,
   PresentedMediaSample,
 } from "./media-renderer-scene";
+import type { MediaRendererPresentation } from "#types/media-renderer";
 import { captureCanvasMediaFrame } from "./media-frame-capture";
+import { presentVideoFrame } from "./pixi-frame-present";
+import type { FramePresentTargets } from "./pixi-frame-present";
+import type { PresentedVideoFrame } from "./presented-frame-channel";
+import { createSceneRenderScheduler } from "./scene-render-scheduler";
+import type { SceneRenderSignature } from "./scene-render-scheduler";
 import { createPixiBoxLayer, type PixiBoxLayerState } from "./pixi-box-layer";
 import { createPixiFocusLayer } from "./pixi-focus-layer";
 import { createPixiInteractionLayer } from "./pixi-interaction-layer";
@@ -47,9 +53,19 @@ import type {
   Application as PixiApplication,
   CanvasSource as PixiCanvasSource,
   Container as PixiContainer,
+  ExternalSource as PixiExternalSource,
   Graphics as PixiGraphics,
   Texture as PixiTexture,
 } from "pixi.js";
+
+const MILLISECONDS_PER_SECOND = 1000;
+
+/**
+ * How far a focus change with no frame behind it moves the focus layer's fade.
+ * It eases over elapsed milliseconds, and a push-presented scene only ever has
+ * media time, so anything past a fade's length lands the overlay at once.
+ */
+const STATIC_FOCUS_SETTLE_MS = 10_000;
 
 export function observePixiContainerResize(
   container: HTMLElement,
@@ -73,9 +89,53 @@ type TextureUpload = {
   update(): void;
 };
 
+type MediaCompositor = {
+  upload(frame: VideoFrame): void;
+  destroy(): void;
+};
+
+/** The binding a compositor points at whichever texture holds the last frame. */
+export interface MediaGpuTextureSource {
+  updateGPUTexture(texture: GPUTexture): void;
+}
+
+export interface MediaCompositorOptions {
+  readonly device: GPUDevice;
+  readonly height: number;
+  readonly width: number;
+  /**
+   * Puts the compositor's first texture on screen and returns the binding every
+   * later texture replaces it through.
+   */
+  readonly attach: (texture: GPUTexture) => MediaGpuTextureSource;
+  /** Runs after a decode of a new size swapped the texture underneath. */
+  readonly onTextureReplaced: () => void;
+}
+
+/**
+ * Two ways to drive the same layer stack.
+ *
+ * Pull presentation is the default: the renderer asks the media source for the
+ * sample it wants, hands it to `presentSample`, and Pixi's ticker paints the
+ * scene every frame.
+ *
+ * Push presentation engages when the opened source carries a presented-frame
+ * channel. The producer then decides which frame is on screen and announces it,
+ * so the ticker paints nothing and every render is an explicit answer to a
+ * change: a presented frame, a layer turned on or off, restyling, hover or
+ * selection, a viewport move, a resize, or the swapchain coming back after the
+ * tab was hidden. A notification that describes what is already drawn renders
+ * nothing, so a paused scene nobody touches renders nothing at all.
+ *
+ * The focus layer's fade is not an exception to that. It advances with the
+ * presented media time, so it fades during playback and is applied at once when
+ * a hover or selection arrives with no frame behind it: paused focus is static,
+ * and no animation keeps the scene rendering on its own.
+ */
 export async function createPixiMediaScene(
   options: MediaRendererSceneOptions,
 ): Promise<MediaRendererScene> {
+  const pixi = await import("pixi.js");
   const {
     Application,
     Assets,
@@ -91,9 +151,10 @@ export async function createPixiMediaScene(
     Text,
     Texture,
     UniformGroup,
-  } = await import("pixi.js");
+  } = pixi;
   const { GifSprite } = await import("pixi.js/gif");
   const app: PixiApplication = new Application();
+  const frameChannel = options.presentedFrameChannel;
   let currentLabelStyle: LabelStyle | null = options.labelStyle ?? null;
   let currentMaskStyle: MaskStyle | null = options.maskStyle ?? null;
   let currentPolygonStyle: PolygonStyle | null =
@@ -102,6 +163,8 @@ export async function createPixiMediaScene(
       : options.polygonStyle;
   let currentVisibility: AnnotationVisibility | undefined = options.visibility;
   let currentMediaTime = 0;
+  let displayBrightness = 1;
+  let displayContrast = 1;
   let viewportScale = 1;
   let hasPresentedSample = false;
   let mediaHeight = 0;
@@ -175,6 +238,7 @@ export async function createPixiMediaScene(
       options.onPresentationUpdate?.(
         createPresentedSampleState(currentMediaTime, boxState, regionState),
       );
+      renderNow();
     },
     onAssetError: options.diagnostics?.onAssetError,
     regionRenderers: options.regionRenderers,
@@ -223,8 +287,9 @@ export async function createPixiMediaScene(
 
   await app.init({
     autoDensity: true,
+    autoStart: frameChannel === undefined,
     backgroundColor: options.backgroundColor ?? 0x111111,
-    preference: RENDER_ENGINE_PREFERENCE,
+    preference: frameChannel ? "webgpu" : RENDER_ENGINE_PREFERENCE,
     resizeTo: options.container,
     resolution: resolvePixiResolution(options.maxDevicePixelRatio),
   });
@@ -242,6 +307,12 @@ export async function createPixiMediaScene(
     throw new Error("Unable to create staging canvas context.");
   }
 
+  const renderScheduler = createSceneRenderScheduler(() => app.render());
+  let appliedPresentation: MediaRendererPresentation | undefined;
+  let mediaCompositor: MediaCompositor | undefined;
+  let presentedFrameSerial = 0;
+  let focusAnimationTimeMs = 0;
+  let focusAnimationMediaTimeMs: number | null = null;
   let mediaScene: PixiContainer | undefined;
   let vectorDisplay: PixiContainer | undefined;
   let polygonDisplay: PixiContainer | undefined;
@@ -272,10 +343,15 @@ export async function createPixiMediaScene(
   ];
   const viewport = createViewportController({ scale: 1 });
   /**
-   * Timestamp of the sample whose pixels are on the staging canvas. Unlike
+   * Timestamp of the sample whose pixels are on screen. Unlike
    * `currentMediaTime`, presentation and selection updates never move it.
    */
   let presentedSampleTimestamp: number | null = null;
+  /**
+   * Surface holding those pixels. The GPU compositor keeps them in a texture no
+   * canvas ever sees, so a capture has to read them back through Pixi.
+   */
+  let readPresentedSurface = () => stagingCanvas;
   let baseFit: ReturnType<typeof calculatePixiSceneFit>;
   const interactionLayer =
     options.interaction || options.editingEngine
@@ -301,7 +377,8 @@ export async function createPixiMediaScene(
           onStateChange: () => {
             drawFocusLayer(currentMediaTime);
             drawInteractionPresentationLayer(currentMediaTime);
-            drawAnnotationOverlay();
+            drawAnnotationOverlay(currentMediaTime, overlayNow());
+            renderOnChange();
           },
           pickMaskDetectionAtPoint: (point, mediaTime) =>
             maskLayer?.pickDetectionAtPoint(point, mediaTime) ?? null,
@@ -335,6 +412,7 @@ export async function createPixiMediaScene(
       vectorLayer.translateDetection(id, dx, dy);
       regionLayer.translateDetection(id, dx, dy);
       labelLayer?.translateDetection(id, dx, dy);
+      renderNow();
     });
   const unsubscribeEditingState = options.editingEngine?.subscribe((state) => {
     if (
@@ -355,18 +433,21 @@ export async function createPixiMediaScene(
     vectorLayer.drawFrame(currentMediaTime, viewportScale);
     regionLayer.drawFrame(currentMediaTime, viewportScale);
     labelLayer?.drawFrame(currentMediaTime, viewportScale);
+    renderNow();
   });
   const handleKeyDown = (event: KeyboardEvent) => {
     if (event.key === "Tab" && interactionLayer) {
       interactionLayer.cycleSelection(event.shiftKey ? -1 : 1);
       event.preventDefault();
       drawInteractionPresentationLayer(currentMediaTime);
-      drawAnnotationOverlay();
+      drawAnnotationOverlay(currentMediaTime, overlayNow());
+      renderOnChange();
       return;
     }
 
     options.editingEngine?.keyDown(event.key);
-    drawAnnotationOverlay();
+    drawAnnotationOverlay(currentMediaTime, overlayNow());
+    renderOnChange();
   };
   const handleContextMenu = (event: Event) => {
     if (options.editingEngine) event.preventDefault();
@@ -467,15 +548,76 @@ export async function createPixiMediaScene(
     () => {
       app.resize();
       updateMediaSceneFit();
+      renderOnChange();
     },
   );
 
-  app.ticker.add(updateMediaSceneFit);
-  app.ticker.add(drawAnnotationOverlay);
+  const drawAnnotationOverlayNow = () =>
+    drawAnnotationOverlay(currentMediaTime, overlayNow());
   const tickFocusLayer = () => focusLayer?.tick(now());
-  app.ticker.add(tickFocusLayer);
+  const handleVisibilityChange = () => {
+    // A hidden tab loses its swapchain, and the configuration it comes back
+    // with has nothing in it. Nothing about the scene changed, so only an
+    // unconditional render puts the picture back.
+    if (!document.hidden) renderScene();
+  };
+
+  if (frameChannel) {
+    frameChannel.onPresentedFrame(handlePresentedFrame);
+    document.addEventListener?.("visibilitychange", handleVisibilityChange);
+  } else {
+    app.ticker.add(updateMediaSceneFit);
+    app.ticker.add(drawAnnotationOverlayNow);
+    app.ticker.add(tickFocusLayer);
+  }
+
+  const uploadFrameToStagingCanvas = (frame: VideoFrame) => {
+    stagingContext.drawImage(frame, 0, 0, mediaWidth, mediaHeight);
+    stagingTextureSource?.update();
+    stagingTexture?.update();
+  };
+
+  const framePresentTargets: FramePresentTargets = {
+    adoptMediaTime(mediaTime) {
+      currentMediaTime = mediaTime;
+      hasPresentedSample = true;
+      presentedFrameSerial += 1;
+    },
+    completePresentation(mediaTime, boxState, regionState) {
+      options.onPresentationUpdate?.(
+        createPresentedSampleState(mediaTime, boxState, regionState),
+      );
+    },
+    fitMediaScene: updateMediaSceneFit,
+    layers: {
+      advanceFocus: advanceFocusAnimation,
+      drawAnnotationOverlay: (mediaTime) =>
+        drawAnnotationOverlay(mediaTime, mediaTime * MILLISECONDS_PER_SECOND),
+      drawBox: (mediaTime) => boxLayer.drawFrame(mediaTime, viewportScale),
+      drawFocus: drawFocusLayer,
+      drawInteraction: (mediaTime) => interactionLayer?.drawFrame(mediaTime),
+      drawInteractionPresentation: drawInteractionPresentationLayer,
+      drawLabel: (mediaTime) => labelLayer?.drawFrame(mediaTime, viewportScale),
+      drawMask: (mediaTime) => maskLayer?.drawFrame(mediaTime),
+      drawPolygon: (mediaTime) =>
+        polygonLayer?.drawFrame(mediaTime, viewportScale),
+      drawRegion: (mediaTime) =>
+        regionLayer.drawFrame(mediaTime, viewportScale),
+      drawVector: (mediaTime) =>
+        vectorLayer.drawFrame(mediaTime, viewportScale),
+    },
+    render: renderScene,
+    uploadFrame: (frame) => {
+      mediaCompositor?.upload(frame);
+      presentedSampleTimestamp = currentMediaTime;
+    },
+  };
 
   return {
+    getRenderCount() {
+      return frameChannel ? renderScheduler.getRenderCount() : null;
+    },
+
     rendererBackend: String(app.renderer.name ?? "unknown"),
 
     initializeMedia({ width, height }) {
@@ -554,6 +696,7 @@ export async function createPixiMediaScene(
       stagingTextureSource = canvasSource;
       stagingTexture = texture;
       updateMediaSceneFit();
+      if (frameChannel) mediaCompositor = createSceneMediaCompositor();
     },
 
     setTimelineContext(context) {
@@ -679,7 +822,7 @@ export async function createPixiMediaScene(
         capture: captureOptions,
         createCanvas: () => document.createElement("canvas"),
         mediaTime: presentedSampleTimestamp,
-        source: stagingCanvas,
+        source: readPresentedSurface(),
       });
     },
 
@@ -697,14 +840,20 @@ export async function createPixiMediaScene(
 
       app.renderer.resize(screenWidth, screenHeight, resolution);
       updateMediaSceneFit();
+      renderOnChange();
     },
 
     setDisplayAdjustments(adjustments) {
       void import("pixi.js").then(({ ColorMatrixFilter }) => {
+        const brightness = adjustments.brightness ?? 1;
+        const contrast = adjustments.contrast ?? 1;
         const filter = new ColorMatrixFilter();
-        filter.brightness(adjustments.brightness ?? 1, false);
-        filter.contrast((adjustments.contrast ?? 1) - 1, true);
+        filter.brightness(brightness, false);
+        filter.contrast(contrast - 1, true);
         if (mediaSprite) mediaSprite.filters = [filter];
+        displayBrightness = brightness;
+        displayContrast = contrast;
+        renderOnChange();
       });
     },
 
@@ -732,6 +881,7 @@ export async function createPixiMediaScene(
       });
       applyViewportTransform();
       redrawViewportStyles();
+      renderOnChange();
     },
 
     setViewportLocked(locked) {
@@ -777,6 +927,7 @@ export async function createPixiMediaScene(
       viewport.setTransform({ x: Math.round(after.x), y: Math.round(after.y) });
       if (before === viewport.getTransform()) return;
       applyViewportTransform();
+      renderOnChange();
     },
 
     zoomViewportAt(point, factor) {
@@ -792,6 +943,7 @@ export async function createPixiMediaScene(
       });
       applyViewportTransform();
       redrawViewportStyles();
+      renderOnChange();
     },
 
     zoomViewportFromWheel(point, deltaY) {
@@ -807,9 +959,11 @@ export async function createPixiMediaScene(
       });
       applyViewportTransform();
       redrawViewportStyles();
+      renderOnChange();
     },
 
     setPresentation(presentation, mediaTime) {
+      appliedPresentation = presentation;
       currentMediaTime = mediaTime;
       if (presentation.backgroundColor !== undefined) {
         app.renderer.background.color = presentation.backgroundColor;
@@ -909,6 +1063,7 @@ export async function createPixiMediaScene(
       }
 
       if (mediaWidth <= 0 || mediaHeight <= 0) {
+        renderOnChange();
         return;
       }
 
@@ -921,6 +1076,7 @@ export async function createPixiMediaScene(
       drawFocusLayer(mediaTime);
       drawInteractionPresentationLayer(mediaTime);
       labelLayer?.drawFrame(mediaTime, viewportScale);
+      renderOnChange();
 
       return createPresentedSampleState(mediaTime, boxState, regionState);
     },
@@ -939,6 +1095,7 @@ export async function createPixiMediaScene(
 
       drawFocusLayer(currentMediaTime);
       drawInteractionPresentationLayer(currentMediaTime);
+      renderOnChange();
 
       return pick;
     },
@@ -947,8 +1104,17 @@ export async function createPixiMediaScene(
       disconnectContainerResizeObserver();
       app.cancelResize?.();
       app.ticker.remove(updateMediaSceneFit);
-      app.ticker.remove(drawAnnotationOverlay);
+      app.ticker.remove(drawAnnotationOverlayNow);
       app.ticker.remove(tickFocusLayer);
+      document.removeEventListener?.(
+        "visibilitychange",
+        handleVisibilityChange,
+      );
+      // Registering replaces the consumer, which is the only way to stop being
+      // one. A frame that arrives after this still has to be closed, or it pins
+      // a decoder buffer in a producer that outlives the scene.
+      frameChannel?.onPresentedFrame((presented) => presented.frame.close());
+      mediaCompositor?.destroy();
       interactionLayer?.destroy();
       interactionPresentationLayer?.destroy();
       focusLayer?.destroy();
@@ -1227,17 +1393,18 @@ export async function createPixiMediaScene(
   function handleActiveIdMaskFramePresented() {
     drawFocusLayer(currentMediaTime);
     drawInteractionPresentationLayer(currentMediaTime);
+    renderNow();
   }
 
-  function drawAnnotationOverlay() {
-    const frame = options.detectionTimeline.selectFrame(currentMediaTime);
+  function drawAnnotationOverlay(mediaTime: number, overlayNowMs: number) {
+    const frame = options.detectionTimeline.selectFrame(mediaTime);
     const interactionState = interactionLayer?.getState();
     const editingState = options.editingEngine?.getState();
     labelLayer?.drawCreationPreview(
       editingState?.kind === AnnotationGestureStateKind.Creating
         ? editingState.preview
         : null,
-      currentMediaTime,
+      mediaTime,
       viewportScale,
     );
     annotationOverlayLayer.draw({
@@ -1245,7 +1412,7 @@ export async function createPixiMediaScene(
       marquee: interactionState?.marqueeRect ?? null,
       mediaHeight,
       mediaWidth,
-      now: now(),
+      now: overlayNowMs,
       pointer: interactionState?.pointerPoint ?? null,
       previewOverlay: options.previewOverlay?.() ?? null,
       selectedDetectionIds: (interactionState?.selectedPicks ?? []).flatMap(
@@ -1254,6 +1421,155 @@ export async function createPixiMediaScene(
       viewportScale,
       visibility: currentVisibility,
     });
+  }
+
+  /**
+   * Milliseconds for animations that are not annotation geometry. A pull scene
+   * has a ticker and reads the wall clock; a push scene has the presented media
+   * time and nothing else, so its animations move only when the media does.
+   */
+  function overlayNow() {
+    return frameChannel ? currentMediaTime * MILLISECONDS_PER_SECOND : now();
+  }
+
+  function handlePresentedFrame(presented: PresentedVideoFrame) {
+    if (!mediaCompositor) {
+      presented.frame.close();
+      return;
+    }
+
+    presentVideoFrame(presented, framePresentTargets);
+  }
+
+  function advanceFocusAnimation(mediaTime: number) {
+    if (!focusLayer) return;
+
+    const mediaTimeMs = mediaTime * MILLISECONDS_PER_SECOND;
+
+    if (focusAnimationMediaTimeMs !== null) {
+      focusAnimationTimeMs += Math.abs(mediaTimeMs - focusAnimationMediaTimeMs);
+    }
+
+    focusAnimationMediaTimeMs = mediaTimeMs;
+    focusLayer.tick(focusAnimationTimeMs);
+  }
+
+  function settleFocusAnimation() {
+    if (!focusLayer) return;
+
+    focusAnimationTimeMs += STATIC_FOCUS_SETTLE_MS;
+    focusLayer.tick(focusAnimationTimeMs);
+  }
+
+  function renderScene() {
+    renderScheduler.render(describeSceneRender());
+  }
+
+  function renderNow() {
+    if (frameChannel) renderScene();
+  }
+
+  function renderOnChange() {
+    if (!frameChannel) return;
+
+    settleFocusAnimation();
+    renderScheduler.renderOnChange(describeSceneRender());
+  }
+
+  /**
+   * Everything a render would put on screen, as values that can be compared.
+   * Styles are opaque resolvers, so they are compared by identity: handing the
+   * scene a new style object is the only signal it has that styling changed.
+   */
+  function describeSceneRender(): SceneRenderSignature {
+    const interactionState = interactionLayer?.getState();
+    const transform = viewport.getTransform();
+
+    return [
+      presentedFrameSerial,
+      currentMediaTime,
+      viewportScale,
+      baseFit?.x,
+      baseFit?.y,
+      transform.scale,
+      transform.x,
+      transform.y,
+      app.screen.width,
+      app.screen.height,
+      app.renderer.resolution,
+      displayBrightness,
+      displayContrast,
+      appliedPresentation?.backgroundColor,
+      appliedPresentation?.annotationOverlayStyle,
+      appliedPresentation?.boxStyle,
+      appliedPresentation?.focusStyle,
+      appliedPresentation?.interactionStyle,
+      appliedPresentation?.keypointStyle,
+      appliedPresentation?.labelStyle,
+      appliedPresentation?.maskStyle,
+      appliedPresentation?.polygonStyle,
+      appliedPresentation?.polylineStyle,
+      appliedPresentation?.renderers,
+      appliedPresentation?.visibility,
+      currentMaskStyle?.opacity,
+      visibilityVersion,
+      interactionState?.hoveredPick?.detection,
+      interactionState?.hoveredPick?.detectionIndex,
+      interactionState?.selectedPick?.detection,
+      interactionState?.selectedPick?.detectionIndex,
+      interactionState?.selectedPicks,
+      interactionState?.marqueeRect,
+      options.editingEngine?.getState(),
+      options.editingEngine ? interactionState?.pointerPoint : null,
+    ];
+  }
+
+  /**
+   * Puts presented pixels on the media sprite. WebGPU takes the decoded frame
+   * straight into a texture Pixi samples; anywhere else the frame goes through
+   * the staging canvas the pull path already uses.
+   */
+  function createSceneMediaCompositor(): MediaCompositor {
+    const device = (
+      app.renderer as { readonly gpu?: { readonly device?: GPUDevice } }
+    ).gpu?.device;
+    const sprite = mediaSprite;
+
+    if (!device || !sprite) {
+      return { destroy: () => undefined, upload: uploadFrameToStagingCanvas };
+    }
+
+    readPresentedSurface = () =>
+      app.renderer.extract.canvas(sprite) as unknown as HTMLCanvasElement;
+
+    return createMediaCompositor({
+      attach: (texture) => {
+        const externalSource: PixiExternalSource = new pixi.ExternalSource({
+          renderer: app.renderer,
+          resource: texture,
+        });
+
+        sprite.texture = new Texture({ source: externalSource });
+        sizeMediaSprite();
+        return externalSource;
+      },
+      device,
+      height: mediaHeight,
+      onTextureReplaced: sizeMediaSprite,
+      width: mediaWidth,
+    });
+  }
+
+  /**
+   * The media sprite covers the media's own dimensions whatever the decode
+   * delivers, so annotations keep drawing in media coordinates at canvas
+   * resolution instead of inheriting the texture's size.
+   */
+  function sizeMediaSprite() {
+    if (!mediaSprite) return;
+
+    mediaSprite.width = mediaWidth;
+    mediaSprite.height = mediaHeight;
   }
 
   function ensureLabelLayer(
@@ -1351,6 +1667,64 @@ function haveEqualVisibilityValues<T>(
     previousValues.size === nextValues.size &&
     Array.from(previousValues).every((value) => nextValues.has(value))
   );
+}
+
+/**
+ * Copies presented frames into a GPU texture Pixi samples, with no CPU readback
+ * in between. A decode whose size changed gets a new texture, and the swap is
+ * all-or-nothing: exactly one of the two textures survives it.
+ */
+export function createMediaCompositor(
+  options: MediaCompositorOptions,
+): MediaCompositor {
+  const { device } = options;
+  let gpuTexture = createFrameTexture(device, options.width, options.height);
+  const textureSource = options.attach(gpuTexture);
+
+  return {
+    destroy() {
+      gpuTexture.destroy();
+    },
+
+    upload(frame) {
+      const width = frame.displayWidth;
+      const height = frame.displayHeight;
+
+      if (width !== gpuTexture.width || height !== gpuTexture.height) {
+        const replacement = createFrameTexture(device, width, height);
+
+        try {
+          textureSource.updateGPUTexture(replacement);
+        } catch (error) {
+          // A source that refused the swap is still sampling the texture on
+          // screen, so the replacement is the one nothing is left holding.
+          replacement.destroy();
+          throw error;
+        }
+
+        gpuTexture.destroy();
+        gpuTexture = replacement;
+        options.onTextureReplaced();
+      }
+
+      device.queue.copyExternalImageToTexture(
+        { source: frame },
+        { texture: gpuTexture },
+        { height, width },
+      );
+    },
+  };
+}
+
+function createFrameTexture(device: GPUDevice, width: number, height: number) {
+  return device.createTexture({
+    format: "rgba8unorm",
+    size: { height, width },
+    usage:
+      GPUTextureUsage.COPY_DST |
+      GPUTextureUsage.RENDER_ATTACHMENT |
+      GPUTextureUsage.TEXTURE_BINDING,
+  });
 }
 
 function measure(work: () => void) {

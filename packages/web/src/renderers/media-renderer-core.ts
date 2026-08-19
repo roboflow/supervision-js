@@ -38,6 +38,7 @@ import {
 } from "#types/render-preparation";
 import { createOffsetDetectionFrameSource } from "#detections/offset-detection-frame-source";
 import { createMediaRendererRuntimeState } from "./media-renderer-state";
+import { resolvePresentedFrameChannel } from "./presented-frame-channel";
 import type {
   MediaRendererScene,
   MediaRendererSceneOptions,
@@ -308,6 +309,10 @@ export async function createMediaRendererCore(
       return mediaScene.captureFrame(captureOptions);
     },
 
+    getRenderCount() {
+      return mediaScene?.getRenderCount?.() ?? null;
+    },
+
     getState() {
       return runtimeState.snapshot();
     },
@@ -456,6 +461,7 @@ export async function createMediaRendererCore(
           }
         : {}),
     });
+    const presentedFrameChannel = resolvePresentedFrameChannel(mediaSource);
     const mediaDimensions = runtimeState.recordMediaMetadata(metadata);
     mediaScene = await providers.createScene({
       annotationOverlayStyle: currentPresentation.annotationOverlayStyle,
@@ -483,6 +489,7 @@ export async function createMediaRendererCore(
       },
       polygonStyle: currentPresentation.polygonStyle,
       polylineStyle: currentPresentation.polylineStyle,
+      presentedFrameChannel: presentedFrameChannel ?? undefined,
       regionRenderers: resolveRegionRenderers(currentPresentation),
       previewOverlay: options.previewOverlay,
       renderPreparation: options.renderPreparation
@@ -504,6 +511,13 @@ export async function createMediaRendererCore(
     });
     mediaScene.initializeMedia(mediaDimensions);
     runtimeState.setSourceReady(metadata);
+
+    if (presentedFrameChannel) {
+      // The producer holds the playhead: it decides which frame is on screen
+      // and announces it. Pulling samples here would present a second opinion.
+      runtimeState.setReady();
+      return renderer;
+    }
 
     const firstSample = await readFirstDecodedVideoSample({
       sampleSink: mediaSource.sampleSink,
