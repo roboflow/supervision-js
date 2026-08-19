@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createPixiInteractionPresentationLayer } from "#renderers/pixi-interaction-presentation-layer";
+import {
+  MAX_INTERACTION_STROKE_RADIUS,
+  createPixiInteractionPresentationLayer,
+} from "#renderers/pixi-interaction-presentation-layer";
 import { BaseInteractionStyle } from "supervision-js-core";
 import type { DetectionFrame } from "supervision-js-core";
 import { DetectionPickTarget } from "supervision-js-core";
@@ -91,6 +94,48 @@ describe("pixi interaction presentation layer", () => {
     expect(descriptor.gpu.fragment.entryPoint).toBe("mainFragment");
     expect(descriptor.gpu.vertex.source).toContain("fn mainVertex(");
     expect(descriptor.gpu.fragment.source).toContain("fn mainFragment(");
+  });
+
+  it("bounds the stroke scan by the stroke width in use, not by the compile-time maximum", () => {
+    vi.stubGlobal("document", {
+      createElement: vi.fn(() => ({ height: 0, width: 0 })),
+    });
+
+    const layer = createPixiInteractionPresentationLayer({
+      Container: FakeContainer as never,
+      Graphics: FakeGraphics as never,
+      ImageSource: FakeImageSource as never,
+      Mesh: FakeMesh as never,
+      MeshGeometry: FakeMeshGeometry as never,
+      Shader: FakeShaderFactory as never,
+      Text: FakeText as never,
+      UniformGroup: FakeUniformGroup as never,
+    });
+
+    layer.createDisplay({ height: 80, width: 120 });
+
+    const descriptor = FakeShaderFactory.descriptors.at(-1)!;
+
+    expect(descriptor.gl.fragment).toContain(
+      `int radius = int(min(uMaxStrokeWidth, float(${MAX_INTERACTION_STROKE_RADIUS})));`,
+    );
+    expect(descriptor.gpu.fragment.source).toContain(
+      `let radius = i32(min(interactionMaskUniforms.uMaxStrokeWidth, ${MAX_INTERACTION_STROKE_RADIUS}.0));`,
+    );
+
+    for (const source of [
+      descriptor.gl.fragment,
+      descriptor.gpu.fragment.source,
+    ]) {
+      expect(source).toContain("offsetY = radius; offsetY >= -radius");
+      expect(source).toContain("offsetX = radius; offsetX >= -radius");
+      expect(source).not.toContain(
+        `offsetY = -${MAX_INTERACTION_STROKE_RADIUS}`,
+      );
+      expect(source).not.toContain(
+        `offsetX = -${MAX_INTERACTION_STROKE_RADIUS}`,
+      );
+    }
   });
 });
 

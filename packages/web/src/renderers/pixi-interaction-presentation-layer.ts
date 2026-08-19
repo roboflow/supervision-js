@@ -41,7 +41,7 @@ import type {
   UniformGroup as PixiUniformGroup,
 } from "pixi.js";
 
-const MAX_INTERACTION_STROKE_RADIUS = 12;
+export const MAX_INTERACTION_STROKE_RADIUS = 12;
 
 type PixiInteractionMesh = PixiMesh<PixiMeshGeometry, PixiShader>;
 
@@ -887,18 +887,16 @@ bool differs(float left, float right) {
   return abs(left - right) > 0.5;
 }
 
+// Offsets are whole texels, so the integer loop bounds are themselves the
+// Chebyshev stroke-radius test: |offset| <= floor(w) iff |offset| <= w.
+// The winning candidate is the max-(offsetY, offsetX) passing offset, so the
+// scan runs backwards and exits on the first hit.
 float findNeighborStrokeId(float centerId, vec2 texel) {
-  float bestId = 0.0;
+  int radius = int(min(uMaxStrokeWidth, float(${MAX_INTERACTION_STROKE_RADIUS})));
 
-  for (int offsetY = -${MAX_INTERACTION_STROKE_RADIUS}; offsetY <= ${MAX_INTERACTION_STROKE_RADIUS}; offsetY += 1) {
-    for (int offsetX = -${MAX_INTERACTION_STROKE_RADIUS}; offsetX <= ${MAX_INTERACTION_STROKE_RADIUS}; offsetX += 1) {
+  for (int offsetY = radius; offsetY >= -radius; offsetY -= 1) {
+    for (int offsetX = radius; offsetX >= -radius; offsetX -= 1) {
       if (offsetX == 0 && offsetY == 0) {
-        continue;
-      }
-
-      float distance = max(abs(float(offsetX)), abs(float(offsetY)));
-
-      if (distance > uMaxStrokeWidth) {
         continue;
       }
 
@@ -908,13 +906,15 @@ float findNeighborStrokeId(float centerId, vec2 texel) {
         continue;
       }
 
+      float distance = max(abs(float(offsetX)), abs(float(offsetY)));
+
       if (readStrokeWidth(maskId) >= distance && readStroke(maskId).a > 0.0) {
-        bestId = maskId;
+        return maskId;
       }
     }
   }
 
-  return bestId;
+  return 0.0;
 }
 
 bool isBoundary(float centerId, vec2 texel) {
@@ -1055,18 +1055,16 @@ fn differs(left: f32, right: f32) -> bool {
   return abs(left - right) > 0.5;
 }
 
+// Offsets are whole texels, so the integer loop bounds are themselves the
+// Chebyshev stroke-radius test: |offset| <= floor(w) iff |offset| <= w.
+// The winning candidate is the max-(offsetY, offsetX) passing offset, so the
+// scan runs backwards and exits on the first hit.
 fn findNeighborStrokeId(uv: vec2<f32>, centerId: f32, texel: vec2<f32>) -> f32 {
-  var bestId = 0.0;
+  let radius = i32(min(interactionMaskUniforms.uMaxStrokeWidth, ${MAX_INTERACTION_STROKE_RADIUS}.0));
 
-  for (var offsetY = -${MAX_INTERACTION_STROKE_RADIUS}; offsetY <= ${MAX_INTERACTION_STROKE_RADIUS}; offsetY += 1) {
-    for (var offsetX = -${MAX_INTERACTION_STROKE_RADIUS}; offsetX <= ${MAX_INTERACTION_STROKE_RADIUS}; offsetX += 1) {
+  for (var offsetY = radius; offsetY >= -radius; offsetY -= 1) {
+    for (var offsetX = radius; offsetX >= -radius; offsetX -= 1) {
       if (offsetX == 0 && offsetY == 0) {
-        continue;
-      }
-
-      let offsetDistance = max(abs(f32(offsetX)), abs(f32(offsetY)));
-
-      if (offsetDistance > interactionMaskUniforms.uMaxStrokeWidth) {
         continue;
       }
 
@@ -1076,13 +1074,15 @@ fn findNeighborStrokeId(uv: vec2<f32>, centerId: f32, texel: vec2<f32>) -> f32 {
         continue;
       }
 
+      let offsetDistance = max(abs(f32(offsetX)), abs(f32(offsetY)));
+
       if (readStrokeWidth(maskId) >= offsetDistance && readStroke(maskId).a > 0.0) {
-        bestId = maskId;
+        return maskId;
       }
     }
   }
 
-  return bestId;
+  return 0.0;
 }
 
 fn isBoundary(uv: vec2<f32>, centerId: f32, texel: vec2<f32>) -> bool {
