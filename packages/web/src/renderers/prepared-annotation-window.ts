@@ -28,28 +28,26 @@ export interface PreparedAnnotationLayer {
 
 export interface PreparedAnnotationWindow {
   /**
-   * The detection frame a media time may draw, or null while the window does
-   * not cover that frame yet.
+   * The detection frame a media time may draw, or null where the timeline holds
+   * none. A layer still cooking its artifact for that frame skips its own draw;
+   * it does not withhold the frame from the layers with nothing to cook.
    */
   getPreparedFrame(mediaTime: number): DetectionFrame | null;
   /**
-   * What a draw of a media time would find: its frame and each layer's cook,
-   * whether or not they add up to a covered frame. A caller holding the token
-   * of what is on screen knows a redraw would change it.
+   * What a draw of a media time would find: its frame and each layer's cook. A
+   * caller holding the token of what is on screen knows a redraw would change
+   * it, which is how a cook that lands late reaches the screen at all.
    */
   getReadinessToken(mediaTime: number): string;
   getSnapshot(): PreparedAnnotationWindowSnapshot;
-  /**
-   * The timeline the annotation layers see. It answers with a frame only where
-   * the window covers it, so a layer reading it draws nothing anywhere else.
-   */
+  /** The timeline the annotation layers see. */
   readonly preparedFrameTimeline: BufferedDetectionTimeline;
 }
 
 /**
- * Readiness as a fact about a frame: a frame the window covers has every
- * enabled layer's data cooked for it, and a frame it does not cover has nothing
- * to draw at all.
+ * Which frame a media time draws and how much of it is cooked, as two separate
+ * facts. Reporting readiness is what the snapshot and the token are for; a
+ * layer owing an artifact costs that layer its draw, not the whole frame.
  */
 export function createPreparedAnnotationWindow(options: {
   readonly detectionTimeline: BufferedDetectionTimeline;
@@ -61,19 +59,11 @@ export function createPreparedAnnotationWindow(options: {
     renderPreparation: options.renderPreparation,
   });
 
-  const getPreparedFrame = (mediaTime: number) => {
-    const detectionFrame = options.detectionTimeline.selectFrame(mediaTime);
+  const getPreparedFrame = (mediaTime: number) =>
+    options.detectionTimeline.selectFrame(mediaTime) ?? null;
 
-    if (!detectionFrame) {
-      return null;
-    }
-
-    return options
-      .getLayers()
-      .every((layer) => layer.isArtifactPrepared(mediaTime))
-      ? detectionFrame
-      : null;
-  };
+  const isFrameArtifactPrepared = (mediaTime: number) =>
+    options.getLayers().every((layer) => layer.isArtifactPrepared(mediaTime));
 
   return {
     getPreparedFrame,
@@ -100,13 +90,15 @@ export function createPreparedAnnotationWindow(options: {
         .map((frame) => ({
           frameIndex: frame.frameIndex ?? null,
           mediaTime: frame.mediaTime,
-          prepared: getPreparedFrame(frame.mediaTime) !== null,
+          prepared: isFrameArtifactPrepared(frame.mediaTime),
         }));
 
       return {
         frames,
         playheadMediaTime,
-        playheadPrepared: getPreparedFrame(playheadMediaTime) !== null,
+        playheadPrepared:
+          getPreparedFrame(playheadMediaTime) !== null &&
+          isFrameArtifactPrepared(playheadMediaTime),
         preparedFrameCount: frames.filter((frame) => frame.prepared).length,
         spanFrameCount,
       };

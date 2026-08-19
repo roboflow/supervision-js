@@ -109,6 +109,45 @@ describe("pixi mask layer", () => {
     expect(layer.getActiveIdMaskFrameTexture()).toBeNull();
   });
 
+  it("puts none of a cooked frame on a later frame still owing its cook", () => {
+    const layer = createPixiMaskLayer({
+      ImageSource: FakeImageSource as never,
+      Sprite: FakeSprite as never,
+      Texture: FakeTexture as never,
+      detectionTimeline: {} as never,
+      maskStyle: new BaseMaskStyle(),
+    });
+    const sprite = layer.createSprite({ height: 80, width: 120 }) as FakeSprite;
+
+    preparedWindow.frame = {
+      detectionFrame: { detections: [], mediaTime: 0.1 },
+      key: "mask-frame",
+      maskFrame: idMaskFrame(),
+      maskStatus: "prepared",
+    };
+    layer.drawFrame(0.1);
+
+    preparedWindow.frame = {
+      detectionFrame: { detections: [], mediaTime: 0.12 },
+      key: "owed-frame",
+      maskStatus: "pending",
+    };
+    layer.drawFrame(0.12);
+
+    // The fill holds for a moment against a flicker; the id raster, which
+    // consumers read detections out of, never holds at all.
+    expect(sprite.visible).toBe(true);
+    expect(layer.getActiveIdMaskFrameTexture()).toBeNull();
+
+    preparedWindow.frame = {
+      ...preparedWindow.frame,
+      detectionFrame: { detections: [], mediaTime: 0.3 },
+    };
+    layer.drawFrame(0.3);
+
+    expect(sprite.visible).toBe(false);
+  });
+
   it("reports the window's readiness for a media time", () => {
     const layer = createPixiMaskLayer({
       ImageSource: FakeImageSource as never,

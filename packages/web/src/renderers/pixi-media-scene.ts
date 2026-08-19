@@ -1494,7 +1494,8 @@ export async function createPixiMediaScene(
     const editingKind = options.editingEngine?.getState().kind;
     if (
       editingKind === AnnotationGestureStateKind.Creating ||
-      editingKind === AnnotationGestureStateKind.DragSelecting
+      editingKind === AnnotationGestureStateKind.DragSelecting ||
+      isFocusArtifactOwed(mediaTime)
     ) {
       focusLayer.drawFrame({
         frame: undefined,
@@ -1621,6 +1622,15 @@ export async function createPixiMediaScene(
     return (
       !frameChannel || annotationWindow.getPreparedFrame(mediaTime) !== null
     );
+  }
+
+  /**
+   * Focus reads the id raster the mask cook produces. While that cook is owed,
+   * the vector outline focus falls back to costs more than the frame budget
+   * holds, for a picture the cooked raster supersedes a frame later.
+   */
+  function isFocusArtifactOwed(mediaTime: number) {
+    return maskLayer !== undefined && !maskLayer.isArtifactPrepared(mediaTime);
   }
 
   function drawAnnotationOverlay(mediaTime: number, overlayNowMs: number) {

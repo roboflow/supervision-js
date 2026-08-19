@@ -27,22 +27,22 @@ beforeEach(async () => {
 });
 
 describe("prepared annotation window", () => {
-  it("covers a frame only once every layer has cooked it", () => {
-    const masks = createCook(["0"]);
+  it("hands over a frame no layer has cooked yet", () => {
+    const masks = createCook([]);
     const polygons = createCook([]);
-    const playhead = { mediaTime: 0 };
     const window = createPreparedAnnotationWindow({
       detectionTimeline,
       getLayers: () => [masks, polygons],
-      getPlayheadMediaTime: () => playhead.mediaTime,
+      getPlayheadMediaTime: () => 0,
     });
 
-    expect(window.getPreparedFrame(0)).toBeNull();
+    expect(window.getPreparedFrame(0)).toBe(detectionTimeline.selectFrame(0));
+    expect(window.getSnapshot().playheadPrepared).toBe(false);
 
+    masks.prepared.add("0");
     polygons.prepared.add("0");
 
-    expect(window.getPreparedFrame(0)).toBe(detectionTimeline.selectFrame(0));
-    expect(window.getPreparedFrame(0.1)).toBeNull();
+    expect(window.getSnapshot().playheadPrepared).toBe(true);
   });
 
   it("answers with no frame at all where detections are missing", () => {
@@ -56,7 +56,7 @@ describe("prepared annotation window", () => {
     expect(window.preparedFrameTimeline.selectFrame(9)).toBeUndefined();
   });
 
-  it("hands the layers only the frames it covers", () => {
+  it("hands the layers a buffered frame whatever the cooks owe on it", () => {
     const masks = createCook(["0"]);
     const window = createPreparedAnnotationWindow({
       detectionTimeline,
@@ -67,10 +67,9 @@ describe("prepared annotation window", () => {
     expect(window.preparedFrameTimeline.selectFrame(0)).toBe(
       detectionTimeline.selectFrame(0),
     );
-    expect(window.preparedFrameTimeline.selectFrame(0.1)).toBeUndefined();
-    expect(detectionTimeline.selectFrame(0.1)).toMatchObject({
-      frameIndex: 1,
-    });
+    expect(window.preparedFrameTimeline.selectFrame(0.1)).toBe(
+      detectionTimeline.selectFrame(0.1),
+    );
   });
 
   it("reports the span and each frame's readiness", () => {
@@ -120,7 +119,7 @@ describe("prepared annotation window", () => {
     masks.prepared.add("0");
 
     expect(window.getReadinessToken(0)).not.toBe(owed);
-    expect(window.getPreparedFrame(0)).toBeNull();
+    expect(window.getSnapshot().frames[0]).toMatchObject({ prepared: false });
   });
 });
 

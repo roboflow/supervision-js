@@ -30,6 +30,9 @@ const DEFAULT_MASK_PREFETCH_FRAME_COUNT = 12;
 const DEFAULT_MASK_SCHEDULE_BATCH_SIZE = 2;
 const DEFAULT_PREPARED_WINDOW_SCAN_INTERVAL_SECONDS = 0.15;
 const PREPARED_WINDOW_REFILL_RATIO = 5 / 7;
+/** One cook per four frames, the top of the playback-rate ladder on 60Hz. */
+const MAX_PRESENTED_FRAME_STRIDE = 4;
+const PRESENTED_FRAME_STRIDE_SAMPLE_COUNT = 4;
 
 type ScheduledPreparationTask = ReturnType<typeof setTimeout>;
 
@@ -163,6 +166,7 @@ export function createPreparedRenderWindow(options: {
     readonly mediaTime: number;
   } | null = null;
   let activeMaskFrameSignature: string | null = null;
+  const presentedFrameStrideSamples: number[] = [];
   let isDestroyed = false;
   let generation = 0;
   const preparedMaskFrames = new Map<string, PreparedMaskFrame>();
@@ -562,10 +566,11 @@ export function createPreparedRenderWindow(options: {
 
     const targetFrameCount = getPrefetchFrameCount();
 
-    lastPreparedTargetFrames = lastPreparedWindowFrames.slice(
-      0,
+    lastPreparedTargetFrames = selectPresentedTargetFrames({
+      stride: getPresentedFrameStride(),
       targetFrameCount,
-    );
+      windowFrames: lastPreparedWindowFrames,
+    });
 
     if (
       detectionFrame &&
@@ -702,18 +707,12 @@ export function createPreparedRenderWindow(options: {
       }
 
       isPlaybackActive = active;
+      rescanPreparedWindow();
 
-      if (active) {
-        rescanPreparedWindow();
-        emitDiagnostics();
-        return;
+      if (!active) {
+        dropQueuedMaskFramesBeyondTargets();
       }
 
-      lastPreparedTargetFrames = lastPreparedTargetFrames.slice(
-        0,
-        getPrefetchFrameCount(),
-      );
-      dropQueuedMaskFramesBeyondTargets();
       emitDiagnostics();
     },
 
@@ -772,6 +771,7 @@ export function createPreparedRenderWindow(options: {
 
     const key = getFrameKey(detectionFrame);
 
+    observePresentedFrameStride(key);
     setActiveMaskFrame({
       key,
       mediaTime: detectionFrame.mediaTime,
@@ -1121,6 +1121,61 @@ export function createPreparedRenderWindow(options: {
     });
   }
 
+  /**
+   * How many timeline frames the playhead crossed to reach this one. Above 1x
+   * the playhead skips source frames the display never paints, and cooking
+   * those spends the throughput that the frames it does paint need.
+   */
+  function observePresentedFrameStride(nextKey: string) {
+    const previousKey = activeMaskFrame?.key;
+
+    if (!previousKey || previousKey === nextKey) {
+      return;
+    }
+
+    const previousIndex = lastPreparedWindowFrames.findIndex(
+      (frame) => getFrameKey(frame) === previousKey,
+    );
+    const nextIndex = lastPreparedWindowFrames.findIndex(
+      (frame) => getFrameKey(frame) === nextKey,
+    );
+
+    if (previousIndex < 0 || nextIndex < 0) {
+      return;
+    }
+
+    const stride = nextIndex - previousIndex;
+
+    if (stride <= 0 || stride > MAX_PRESENTED_FRAME_STRIDE) {
+      return;
+    }
+
+    presentedFrameStrideSamples.push(stride);
+
+    if (
+      presentedFrameStrideSamples.length > PRESENTED_FRAME_STRIDE_SAMPLE_COUNT
+    ) {
+      presentedFrameStrideSamples.shift();
+    }
+  }
+
+  /**
+   * A cadence only counts once it has repeated, which is what separates it from
+   * a seek, and the narrowest of those repeats is what the cooks follow, so
+   * jitter costs cooks rather than coverage. A paused playhead presents every
+   * frame it lands on, whatever it was doing before it stopped.
+   */
+  function getPresentedFrameStride() {
+    if (
+      !isPlaybackActive ||
+      presentedFrameStrideSamples.length < PRESENTED_FRAME_STRIDE_SAMPLE_COUNT
+    ) {
+      return 1;
+    }
+
+    return Math.min(...presentedFrameStrideSamples);
+  }
+
   function getPrefetchFrameCount() {
     return isPlaybackActive ? prefetchFrameCount : pausedPrefetchFrameCount;
   }
@@ -1245,6 +1300,38 @@ function getPausedPreparedWindowFrameCount(options: {
   readonly scheduleBatchSize: number;
 }) {
   return Math.min(options.prefetchFrameCount, options.scheduleBatchSize + 1);
+}
+
+/**
+ * The same number of cooks, spread over the frames the display will paint. The
+ * walk starts on the playhead's own frame, so the frames it picks are the ones
+ * the playhead will land on rather than the ones between them.
+ */
+function selectPresentedTargetFrames(options: {
+  readonly stride: number;
+  readonly targetFrameCount: number;
+  readonly windowFrames: readonly DetectionFrame[];
+}) {
+  if (options.stride <= 1) {
+    return options.windowFrames.slice(0, options.targetFrameCount);
+  }
+
+  const targetFrames: DetectionFrame[] = [];
+
+  for (
+    let index = 0;
+    index < options.windowFrames.length &&
+    targetFrames.length < options.targetFrameCount;
+    index += options.stride
+  ) {
+    const frame = options.windowFrames[index];
+
+    if (frame) {
+      targetFrames.push(frame);
+    }
+  }
+
+  return targetFrames;
 }
 
 function getPreparedWindowRefillThresholdFrameCount(

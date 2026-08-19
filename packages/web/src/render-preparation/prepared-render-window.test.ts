@@ -1655,6 +1655,118 @@ describe("prepared render window", () => {
     }
   });
 
+  it("cooks the frames a skipping playhead lands on, not the ones between", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const cookedFrameIndexes = createCookedFrameIndexRecorder();
+      const renderWindow = createPreparedRenderWindow({
+        detectionTimeline: createTimeline(deepFrames),
+        maskStyle: new BaseMaskStyle(),
+        renderPreparation: {
+          maskFrame: {
+            maxCacheFrameCount: deepFrames.length,
+            maxPendingFrameCount: 10,
+            prefetchFrameCount: 2,
+            scanIntervalSeconds: 0,
+            scheduleBatchSize: 2,
+          },
+        },
+        resolveInstructions: cookedFrameIndexes.resolveInstructions,
+      });
+
+      for (const frameIndex of [0, 2, 4, 6, 8, 10]) {
+        renderWindow.getFrame(frameIndex * 0.04);
+        await flushMaskPreparationTimers(4);
+      }
+
+      expect(cookedFrameIndexes.recorded).toEqual([
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 12,
+      ]);
+
+      renderWindow.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a paused margin consecutive however the playhead was scrubbed", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const cookedFrameIndexes = createCookedFrameIndexRecorder();
+      const renderWindow = createPreparedRenderWindow({
+        detectionTimeline: createTimeline(deepFrames),
+        maskStyle: new BaseMaskStyle(),
+        renderPreparation: {
+          maskFrame: {
+            maxCacheFrameCount: deepFrames.length,
+            maxPendingFrameCount: 10,
+            prefetchFrameCount: 10,
+            scanIntervalSeconds: 0,
+            scheduleBatchSize: 2,
+          },
+        },
+        resolveInstructions: cookedFrameIndexes.resolveInstructions,
+      });
+
+      renderWindow.setPlaybackActive(false);
+
+      for (const frameIndex of [0, 2, 4, 6, 8]) {
+        renderWindow.getFrame(frameIndex * 0.04);
+        await flushMaskPreparationTimers(4);
+      }
+
+      expect(cookedFrameIndexes.recorded.slice(-3)).toEqual([8, 9, 10]);
+
+      renderWindow.setPlaybackActive(true);
+      renderWindow.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("goes back to cooking every frame once the playhead stops skipping", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const cookedFrameIndexes = createCookedFrameIndexRecorder();
+      const renderWindow = createPreparedRenderWindow({
+        detectionTimeline: createTimeline(deepFrames),
+        maskStyle: new BaseMaskStyle(),
+        renderPreparation: {
+          maskFrame: {
+            maxCacheFrameCount: deepFrames.length,
+            maxPendingFrameCount: 10,
+            prefetchFrameCount: 2,
+            scanIntervalSeconds: 0,
+            scheduleBatchSize: 2,
+          },
+        },
+        resolveInstructions: cookedFrameIndexes.resolveInstructions,
+      });
+
+      for (const frameIndex of [0, 2, 4, 6, 8]) {
+        renderWindow.getFrame(frameIndex * 0.04);
+        await flushMaskPreparationTimers(4);
+      }
+
+      cookedFrameIndexes.recorded.length = 0;
+      renderWindow.setPlaybackActive(false);
+      await flushMaskPreparationTimers(4);
+
+      expect(cookedFrameIndexes.recorded).toEqual([9]);
+
+      renderWindow.setPlaybackActive(true);
+      renderWindow.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps a paused step inside the margin", async () => {
     vi.useFakeTimers();
     resetMocks();
@@ -1720,6 +1832,27 @@ function createPausedScopeRenderWindow(options: {
       onDiagnostics: options.onDiagnostics,
     },
   });
+}
+
+/** Records which frames the window actually started a cook for, in order. */
+function createCookedFrameIndexRecorder() {
+  const recorded: number[] = [];
+
+  return {
+    recorded,
+    resolveInstructions({ frame }: { readonly frame: DetectionFrame }) {
+      recorded.push(frame.frameIndex ?? -1);
+
+      return [
+        {
+          alpha: 1,
+          color: 0x00ff66,
+          detectionIndex: 0,
+          mask: frame.detections[0]?.mask,
+        },
+      ] as never;
+    },
+  };
 }
 
 function createFakeMaskPreparationWorker(
