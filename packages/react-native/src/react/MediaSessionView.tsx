@@ -24,7 +24,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { type StyleProp, type ViewStyle, View } from "react-native";
+import { type StyleProp, type ViewStyle, Platform, View } from "react-native";
 import {
   BoxShape,
   type DetectionPickOptions,
@@ -436,7 +436,7 @@ function createSceneLabels(
 ): readonly SceneLabel[] {
   return labels.map((label, index) => {
     const font = matchFont(
-      resolveReactNativeSkiaLabelFontStyle(label.textStyle),
+      resolveReactNativeSkiaLabelFontStyle(label.textStyle, Platform.OS),
     );
     const bounds = font.measureText(label.text);
     const metrics = font.getMetrics();
