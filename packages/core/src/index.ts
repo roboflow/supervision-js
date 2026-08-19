@@ -17,6 +17,7 @@ export {
   type EditableAnnotationFrameSession,
 } from "#detections/editable-annotation-frame-session";
 export { createMemoryColdDetectionFrameStore } from "#detections/memory-cold-detection-frame-store";
+export { createProjectedDetectionFrameSource } from "#detections/projected-detection-frame-source";
 export { createWritableDetectionFrameSource } from "#detections/writable-detection-frame-source";
 
 // Semantic post-processing.
@@ -194,6 +195,10 @@ export {
   type MaskRectRun,
 } from "#utils/detection-masks";
 export {
+  projectDetectionFrame,
+  projectDetectionFrames,
+} from "#utils/detection-projection";
+export {
   centerRectToTopLeftRect,
   containsPoint,
   distanceToSegment,
@@ -282,6 +287,7 @@ export {
   type BufferedDetectionTimeline,
   type ColdDetectionFrameStore,
   type ColdDetectionFrameStoreLoadOptions,
+  type ColdDetectionFrameStorePruneOptions,
   type ColdDetectionFrameStoreWriteOptions,
   type ColdDetectionFrameStoreWriteSummary,
   type ChunkedDetectionFrameSourceOptions,
@@ -294,6 +300,8 @@ export {
   type DetectionFrameChunkDescriptor,
   type DetectionFrameChunkFetch,
   type DetectionFrameChunkManifest,
+  type DetectionFrameLoadOptions,
+  type DetectionFrameLiveOptions,
   type DetectionFrameRetentionOptions,
   type DetectionFrameSelectionOptions,
   type DetectionFrameSource,
@@ -301,13 +309,16 @@ export {
   type DetectionFrameSourceVersionRange,
   type DetectionPlaybackGateOptions,
   type DetectionTimelineContext,
+  type LiveWritableDetectionFrameSource,
   type WritableDetectionFrameSource,
+  type WritableDetectionFrameSourceOptions,
 } from "#types/detection-timeline";
 export {
   DetectionMaskEncoding,
   KeypointVisibility,
   type CompressedRleDetectionMask,
   type Detection,
+  type DetectionCoordinateSpace,
   type DetectionFrame,
   type DetectionMask,
   type KeypointEdge,
@@ -329,6 +340,7 @@ export type {
   PlatformMediaFrameSource,
 } from "#types/media";
 export {
+  MediaErrorKind,
   MediaRendererFit,
   MediaRendererPlaybackState,
   MediaSourceStatus,

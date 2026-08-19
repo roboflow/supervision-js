@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { createMemoryColdDetectionFrameStore } from "#detections/memory-cold-detection-frame-store";
 import { createWritableDetectionFrameSource } from "#detections/writable-detection-frame-source";
+
+const MAX_CHANGED_RANGE_JOURNAL_LENGTH = 512;
 import type {
   ColdDetectionFrameStore,
   ColdDetectionFrameStoreWriteSummary,
@@ -325,6 +328,624 @@ describe("writable detection frame source", () => {
     ]);
   });
 
+  it("prunes retained history in place instead of rewriting the window", async () => {
+    const store = createInstrumentedMemoryStore();
+    const source = createWritableDetectionFrameSource({
+      datasetId: "stream",
+      retention: {
+        mode: DetectionFrameRetentionMode.PersistWindow,
+        windowSeconds: 2,
+      },
+      store,
+    });
+    const frameRate = 30;
+
+    for (let index = 0; index < 300; index += 10) {
+      await source.appendFrames(
+        Array.from({ length: 10 }, (_, offset) => {
+          const frameIndex = index + offset;
+
+          return {
+            detections: [{ id: `frame-${frameIndex}` }],
+            endTime: (frameIndex + 1) / frameRate,
+            frameIndex,
+            mediaTime: frameIndex / frameRate,
+          };
+        }),
+      );
+    }
+
+    // Retention no longer reloads and republishes everything it keeps, and the
+    // hot timeline can patch the appended and evicted ranges instead of
+    // reloading its window.
+    expect(store.calls.loadFrames).toBe(0);
+    expect(store.calls.putFrames).toBe(0);
+    expect(source.getSummary()).toMatchObject({
+      endTime: 10,
+      frameCount: 60,
+      startTime: 8,
+    });
+    expect(source.getAvailableRanges()).toEqual([
+      { endTime: 10, startTime: 8 },
+    ]);
+    expect(
+      source.getChangesSince?.(0, [{ endTime: 10, startTime: 8 }])
+        ?.requiresReload,
+    ).toBe(false);
+  });
+
+  it("reports pruned history and the new append as separate bounded ranges", async () => {
+    const store = createInstrumentedMemoryStore();
+    const source = createWritableDetectionFrameSource({
+      datasetId: "stream",
+      retention: {
+        mode: DetectionFrameRetentionMode.PersistWindow,
+        windowSeconds: 1,
+      },
+      store,
+    });
+
+    await source.appendFrames([
+      {
+        detections: [{ id: "old" }],
+        endTime: 0.5,
+        frameIndex: 0,
+        mediaTime: 0,
+      },
+    ]);
+    const settledVersion = source.getVersion();
+    await source.appendFrames([
+      { detections: [{ id: "new" }], endTime: 3, frameIndex: 1, mediaTime: 2 },
+    ]);
+
+    const changes = source.getChangesSince?.(settledVersion, [
+      { endTime: 3, startTime: 0 },
+    ]);
+
+    // The evicted range and the appended range are reported together, so a hot
+    // timeline patches only what actually moved instead of reloading.
+    expect(changes?.requiresReload).toBe(false);
+    expect(changes?.ranges).toEqual([{ endTime: 3, startTime: 0 }]);
+    expect(source.getAvailableRanges()).toEqual([{ endTime: 3, startTime: 2 }]);
+  });
+
+  it("invalidates the coverage a closed open-ended frame gave up", async () => {
+    const store = createMemoryColdDetectionFrameStore();
+    const source = createWritableDetectionFrameSource({
+      datasetId: "stream",
+      store,
+    });
+
+    await source.appendFrames([
+      { detections: [{ id: "box" }], frameIndex: 0, mediaTime: 0 },
+    ]);
+    const openEndedVersion = source.getVersion();
+
+    await source.appendFrames([
+      {
+        detections: [{ id: "box" }],
+        endTime: 0.1,
+        frameIndex: 0,
+        mediaTime: 0,
+      },
+    ]);
+
+    // The frame was selected everywhere past 0 while it was open-ended, so
+    // closing it changes what a consumer parked at 0.5 should be showing. The
+    // vacated tail is unbounded, but the answer stays scoped to the range the
+    // consumer asked about instead of forcing a reload.
+    expect(await source.loadFrames(0.5, 0.5)).toEqual([]);
+    expect(
+      source.getChangesSince?.(openEndedVersion, [
+        { endTime: 0.5, startTime: 0.5 },
+      ]),
+    ).toEqual({
+      ranges: [{ endTime: 0.5, startTime: 0.5 }],
+      requiresReload: false,
+      version: 2,
+    });
+  });
+
+  it("leaves a consumer below the vacated coverage untouched", async () => {
+    const store = createMemoryColdDetectionFrameStore();
+    const source = createWritableDetectionFrameSource({
+      datasetId: "stream",
+      store,
+    });
+
+    await source.appendFrames([
+      {
+        detections: [{ id: "early" }],
+        endTime: 1,
+        frameIndex: 0,
+        mediaTime: 0,
+      },
+    ]);
+    await source.appendFrames([
+      { detections: [{ id: "late" }], frameIndex: 1, mediaTime: 500 },
+    ]);
+    const settledVersion = source.getVersion();
+
+    await source.appendFrames([
+      {
+        detections: [{ id: "late" }],
+        endTime: 500.1,
+        frameIndex: 1,
+        mediaTime: 500,
+      },
+    ]);
+
+    // Closing an open-ended frame at 500 cannot change what is selected at 5,
+    // so a timeline buffered around 5 keeps patching instead of reloading.
+    expect(
+      source.getChangesSince?.(settledVersion, [{ endTime: 6, startTime: 4 }]),
+    ).toMatchObject({ ranges: [], requiresReload: false });
+  });
+
+  it("invalidates the interval a rewritten frame no longer covers", async () => {
+    const store = createMemoryColdDetectionFrameStore();
+    const source = createWritableDetectionFrameSource({
+      datasetId: "stream",
+      store,
+    });
+
+    await source.appendFrames([
+      { detections: [{ id: "box" }], endTime: 1, frameIndex: 0, mediaTime: 0 },
+    ]);
+    const previousVersion = source.getVersion();
+
+    await source.appendFrames([
+      { detections: [{ id: "box" }], endTime: 6, frameIndex: 0, mediaTime: 5 },
+    ]);
+
+    // Rewriting the frame at a later time replaces it rather than adding a
+    // second one, so the interval it left behind is reported alongside the
+    // interval it moved to.
+    expect(await source.loadFrames(0.5, 0.5)).toEqual([]);
+    expect(
+      source.getChangesSince?.(previousVersion, [
+        { endTime: 0.5, startTime: 0.5 },
+      ]),
+    ).toEqual({
+      ranges: [{ endTime: 0.5, startTime: 0.5 }],
+      requiresReload: false,
+      version: 2,
+    });
+  });
+
+  it("answers an unbounded ask with a range the source can serve", async () => {
+    const store = createMemoryColdDetectionFrameStore();
+    const source = createWritableDetectionFrameSource({
+      datasetId: "stream",
+      store,
+    });
+
+    await source.appendFrames([
+      { detections: [{ id: "open" }], frameIndex: 0, mediaTime: 0 },
+    ]);
+    const openEndedVersion = source.getVersion();
+
+    await source.appendFrames([
+      {
+        detections: [{ id: "open" }],
+        endTime: 0.1,
+        frameIndex: 0,
+        mediaTime: 0,
+      },
+    ]);
+
+    const changes = source.getChangesSince?.(openEndedVersion, [
+      { endTime: Number.POSITIVE_INFINITY, startTime: 0 },
+    ]);
+
+    // A consumer takes these ranges straight to `loadFrames`, and an infinite
+    // end would never terminate a chunk walk.
+    expect(
+      changes?.ranges.every((range) => Number.isFinite(range.endTime)),
+    ).toBe(true);
+    await expect(
+      source.loadFrames(
+        changes!.ranges[0]!.startTime,
+        changes!.ranges[0]!.endTime,
+      ),
+    ).resolves.toEqual([
+      {
+        detections: [{ id: "open" }],
+        endTime: 0.1,
+        frameIndex: 0,
+        mediaTime: 0,
+      },
+    ]);
+  });
+
+  it("does not journal a live hold the same write already reports", async () => {
+    const store = createMemoryColdDetectionFrameStore();
+    const source = createWritableDetectionFrameSource({
+      datasetId: "live",
+      store,
+    });
+
+    for (let index = 0; index < 600; index += 1) {
+      await source.appendLiveFrame({
+        detections: [{ id: `d${index}` }],
+        frameIndex: index,
+        mediaTime: index / 30,
+      });
+    }
+
+    // Closing the held frame and reopening it are one contiguous range, so a
+    // live append still costs a single journal entry. Spending two would halve
+    // how far a lagging consumer can patch before the journal forces a reload.
+    let patchableWrites = 0;
+
+    while (
+      !source.getChangesSince?.(source.getVersion() - patchableWrites - 1, [
+        { endTime: 20, startTime: 0 },
+      ])?.requiresReload
+    ) {
+      patchableWrites += 1;
+    }
+
+    expect(patchableWrites).toBe(MAX_CHANGED_RANGE_JOURNAL_LENGTH);
+  });
+
+  it("reports the tail an early coverage finalization takes away", async () => {
+    const store = createMemoryColdDetectionFrameStore();
+    const source = createWritableDetectionFrameSource({
+      datasetId: "stream",
+      store,
+    });
+
+    await source.appendFrames([
+      { detections: [{ id: "open" }], frameIndex: 0, mediaTime: 10 },
+    ]);
+    const openEndedVersion = source.getVersion();
+
+    // `finalizeCoverage` accepts any end time, not only the end of media, so
+    // the tail past it stops being selected and has to be reported.
+    await source.finalizeCoverage(50);
+
+    expect(
+      source.getChangesSince?.(openEndedVersion, [
+        { endTime: 100, startTime: 100 },
+      ]),
+    ).toMatchObject({ requiresReload: false });
+    expect(
+      source.getChangesSince?.(openEndedVersion, [
+        { endTime: 100, startTime: 100 },
+      ])?.ranges,
+    ).toEqual([{ endTime: 100, startTime: 100 }]);
+  });
+
+  it("holds the newest live frame open until the next one supersedes it", async () => {
+    const store = createInstrumentedMemoryStore();
+    const source = createWritableDetectionFrameSource({
+      datasetId: "live",
+      live: { holdSeconds: 30 },
+      store,
+    });
+
+    await source.appendLiveFrame({
+      detections: [{ id: "first" }],
+      frameIndex: 0,
+      mediaTime: 1,
+    });
+
+    expect(await source.loadFrames(0, 40)).toEqual([
+      {
+        detections: [{ id: "first" }],
+        endTime: 31,
+        frameIndex: 0,
+        mediaTime: 1,
+      },
+    ]);
+
+    await source.appendLiveFrame({
+      detections: [{ id: "second" }],
+      frameIndex: 1,
+      mediaTime: 2,
+    });
+
+    // Two frames per live append, whatever the retained history looks like.
+    expect(store.calls.appendedFrameCounts).toEqual([1, 2]);
+    expect(await source.loadFrames(0, 40)).toEqual([
+      {
+        detections: [{ id: "first" }],
+        endTime: 2,
+        frameIndex: 0,
+        mediaTime: 1,
+      },
+      {
+        detections: [{ id: "second" }],
+        endTime: 32,
+        frameIndex: 1,
+        mediaTime: 2,
+      },
+    ]);
+  });
+
+  it("drops an out-of-order live result instead of reopening closed coverage", async () => {
+    const store = createInstrumentedMemoryStore();
+    const source = createWritableDetectionFrameSource({
+      datasetId: "live",
+      live: { holdSeconds: 30 },
+      store,
+    });
+
+    await source.appendLiveFrame({
+      detections: [{ id: "first" }],
+      frameIndex: 0,
+      mediaTime: 2,
+    });
+    const appendCallCount = store.calls.appendedFrameCounts.length;
+    const version = source.getVersion();
+
+    await source.appendLiveFrame({
+      detections: [{ id: "stale" }],
+      frameIndex: 1,
+      mediaTime: 1.5,
+    });
+
+    expect(store.calls.appendedFrameCounts).toHaveLength(appendCallCount);
+    expect(source.getVersion()).toBe(version);
+    expect(await source.loadFrames(0, 40)).toEqual([
+      {
+        detections: [{ id: "first" }],
+        endTime: 32,
+        frameIndex: 0,
+        mediaTime: 2,
+      },
+    ]);
+  });
+
+  it("revises the held live frame when the newest result repeats its identity", async () => {
+    const source = createWritableDetectionFrameSource({
+      datasetId: "live",
+      live: { holdSeconds: 30 },
+      store: createInstrumentedMemoryStore(),
+    });
+
+    await source.appendLiveFrame({
+      detections: [{ id: "first" }],
+      frameIndex: 0,
+      mediaTime: 2,
+    });
+    await source.appendLiveFrame({
+      detections: [{ id: "revised" }],
+      frameIndex: 0,
+      mediaTime: 2,
+    });
+
+    expect(await source.loadFrames(0, 40)).toEqual([
+      {
+        detections: [{ id: "revised" }],
+        endTime: 32,
+        frameIndex: 0,
+        mediaTime: 2,
+      },
+    ]);
+  });
+
+  it("serializes concurrent live appends so only the newest stays open", async () => {
+    const source = createWritableDetectionFrameSource({
+      datasetId: "live",
+      live: { holdSeconds: 10 },
+      store: createInstrumentedMemoryStore(),
+    });
+
+    await Promise.all([
+      source.appendLiveFrame({
+        detections: [{ id: "first" }],
+        frameIndex: 0,
+        mediaTime: 1,
+      }),
+      source.appendLiveFrame({
+        detections: [{ id: "second" }],
+        frameIndex: 1,
+        mediaTime: 2,
+      }),
+    ]);
+
+    expect(await source.loadFrames(0, 40)).toEqual([
+      {
+        detections: [{ id: "first" }],
+        endTime: 2,
+        frameIndex: 0,
+        mediaTime: 1,
+      },
+      {
+        detections: [{ id: "second" }],
+        endTime: 12,
+        frameIndex: 1,
+        mediaTime: 2,
+      },
+    ]);
+  });
+
+  it("places the retention window on real coverage, not on the live hold", async () => {
+    const source = createWritableDetectionFrameSource({
+      datasetId: "live",
+      live: { holdSeconds: 60 },
+      retention: {
+        mode: DetectionFrameRetentionMode.MemoryOnly,
+        windowSeconds: 2,
+      },
+      store: createInstrumentedMemoryStore(),
+    });
+
+    await source.appendLiveFrame({
+      detections: [{ id: "only" }],
+      frameIndex: 0,
+      mediaTime: 1,
+    });
+
+    expect(source.getAvailableRanges()).toEqual([
+      { endTime: 61, startTime: 1 },
+    ]);
+    expect(await source.loadFrames(0, 61)).toHaveLength(1);
+  });
+
+  it("closes a held live frame at a shorter known end of media", async () => {
+    const source = createWritableDetectionFrameSource({
+      datasetId: "live",
+      live: { holdSeconds: 60 },
+      store: createInstrumentedMemoryStore(),
+    });
+
+    await source.appendLiveFrame({
+      detections: [{ id: "last" }],
+      frameIndex: 0,
+      mediaTime: 2,
+    });
+    await source.finalizeCoverage(3);
+
+    expect(await source.loadFrames(0, 61)).toEqual([
+      {
+        detections: [{ id: "last" }],
+        endTime: 3,
+        frameIndex: 0,
+        mediaTime: 2,
+      },
+    ]);
+    expect(source.getAvailableRanges()).toEqual([{ endTime: 3, startTime: 2 }]);
+  });
+
+  it("finalizes the revision when a live frame was revised in place", async () => {
+    const source = createWritableDetectionFrameSource({
+      datasetId: "live",
+      live: { holdSeconds: 60 },
+      store: createInstrumentedMemoryStore(),
+    });
+
+    await source.appendLiveFrame({
+      detections: [{ id: "original" }],
+      frameIndex: 0,
+      mediaTime: 2,
+    });
+    await source.appendLiveFrame({
+      detections: [{ id: "revised" }],
+      frameIndex: 0,
+      mediaTime: 2,
+    });
+    await source.finalizeCoverage(3);
+
+    expect(await source.loadFrames(0, 61)).toEqual([
+      {
+        detections: [{ id: "revised" }],
+        endTime: 3,
+        frameIndex: 0,
+        mediaTime: 2,
+      },
+    ]);
+  });
+
+  it("finalizes the revision when an appended frame was revised in place", async () => {
+    const source = createWritableDetectionFrameSource({
+      datasetId: "dataset",
+      store: createInstrumentedMemoryStore(),
+    });
+
+    await source.appendFrames([
+      {
+        detections: [{ id: "original" }],
+        endTime: 8.9,
+        frameIndex: 88,
+        mediaTime: 8.8,
+      },
+    ]);
+    await source.appendFrames([
+      {
+        detections: [{ id: "revised" }],
+        endTime: 8.9,
+        frameIndex: 88,
+        mediaTime: 8.8,
+      },
+    ]);
+    await source.finalizeCoverage(9);
+
+    expect(await source.loadFrames(8, 9)).toEqual([
+      {
+        detections: [{ id: "revised" }],
+        endTime: 9,
+        frameIndex: 88,
+        mediaTime: 8.8,
+      },
+    ]);
+  });
+
+  it("finalizes a shortened coverage end only once", async () => {
+    const store = createInstrumentedMemoryStore();
+    const source = createWritableDetectionFrameSource({
+      datasetId: "live",
+      live: { holdSeconds: 60 },
+      store,
+    });
+
+    await source.appendLiveFrame({
+      detections: [{ id: "last" }],
+      frameIndex: 0,
+      mediaTime: 2,
+    });
+    await source.finalizeCoverage(3);
+    const appendCallCount = store.calls.appendedFrameCounts.length;
+    const version = source.getVersion();
+
+    await source.finalizeCoverage(3);
+
+    expect(store.calls.appendedFrameCounts).toHaveLength(appendCallCount);
+    expect(source.getVersion()).toBe(version);
+  });
+
+  it("finalizes the last frame's coverage once at a known end of media", async () => {
+    const store = createInstrumentedMemoryStore();
+    const source = createWritableDetectionFrameSource({
+      datasetId: "dataset",
+      store,
+    });
+
+    await source.appendFrames([
+      {
+        detections: [{ id: "last" }],
+        endTime: 8.9,
+        frameIndex: 88,
+        mediaTime: 8.8,
+      },
+    ]);
+    const finalized = await source.finalizeCoverage(9);
+
+    expect(finalized).toMatchObject({ endTime: 9, frameCount: 1 });
+    expect(await source.loadFrames(8, 9)).toEqual([
+      {
+        detections: [{ id: "last" }],
+        endTime: 9,
+        frameIndex: 88,
+        mediaTime: 8.8,
+      },
+    ]);
+
+    const appendCallCount = store.calls.appendedFrameCounts.length;
+    const version = source.getVersion();
+
+    await expect(source.finalizeCoverage(9)).resolves.toMatchObject({
+      endTime: 9,
+    });
+
+    expect(store.calls.appendedFrameCounts).toHaveLength(appendCallCount);
+    expect(source.getVersion()).toBe(version);
+  });
+
+  it("reports no finalization work when nothing has been appended", async () => {
+    const source = createWritableDetectionFrameSource({
+      datasetId: "dataset",
+      store: createInstrumentedMemoryStore(),
+    });
+
+    await expect(source.finalizeCoverage(9)).resolves.toBeNull();
+    await expect(source.finalizeCoverage(Number.NaN)).rejects.toThrow(
+      "finalizeCoverage requires a finite endTime.",
+    );
+  });
+
   it("rejects late operations after destroy without writing to storage", async () => {
     const store = createStore();
     const source = createWritableDetectionFrameSource({
@@ -372,6 +993,35 @@ describe("writable detection frame source", () => {
     expect(source.getVersion()).toBe(0);
   });
 });
+
+function createInstrumentedMemoryStore() {
+  const store = createMemoryColdDetectionFrameStore();
+  const calls = {
+    appendedFrameCounts: [] as number[],
+    loadFrames: 0,
+    putFrames: 0,
+  };
+
+  return {
+    ...store,
+    calls,
+    appendFrames(options) {
+      calls.appendedFrameCounts.push(options.frames.length);
+
+      return store.appendFrames(options);
+    },
+    loadFrames(options) {
+      calls.loadFrames += 1;
+
+      return store.loadFrames(options);
+    },
+    putFrames(options) {
+      calls.putFrames += 1;
+
+      return store.putFrames(options);
+    },
+  } satisfies ColdDetectionFrameStore & { readonly calls: typeof calls };
+}
 
 function createStore(): ColdDetectionFrameStore {
   return {

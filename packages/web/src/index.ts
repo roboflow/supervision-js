@@ -6,7 +6,12 @@ export { createChunkedDetectionFrameSource } from "#detections/chunked-detection
 export { createColdDetectionFrameSource } from "supervision-js-core";
 export { createCompositeDetectionFrameSource } from "supervision-js-core";
 export { createMemoryColdDetectionFrameStore } from "supervision-js-core";
+export { createProjectedDetectionFrameSource } from "supervision-js-core";
 export { createWritableDetectionFrameSource } from "supervision-js-core";
+export {
+  projectDetectionFrame,
+  projectDetectionFrames,
+} from "supervision-js-core";
 export {
   createByteTrackTracker,
   createCBIoUTracker,
@@ -79,8 +84,15 @@ export {
 } from "#media/static-image-media-source";
 export {
   createMediaStreamRendererSource,
+  type MediaStreamPresentedFrame,
   type MediaStreamRendererSourceOptions,
 } from "#media/media-stream-media-source";
+export {
+  MediaSourceError,
+  getMediaErrorKind,
+  isMediaSourceError,
+  toMediaSourceError,
+} from "#media/media-errors";
 
 // Renderer and session primitives.
 export { createMediaRenderer } from "#renderers/media-renderer";
@@ -247,6 +259,7 @@ export {
   type BufferedDetectionTimeline,
   type ColdDetectionFrameStore,
   type ColdDetectionFrameStoreLoadOptions,
+  type ColdDetectionFrameStorePruneOptions,
   type ColdDetectionFrameStoreWriteOptions,
   type ColdDetectionFrameStoreWriteSummary,
   type ChunkedDetectionFrameSourceOptions,
@@ -259,6 +272,8 @@ export {
   type DetectionFrameChunkDescriptor,
   type DetectionFrameChunkFetch,
   type DetectionFrameChunkManifest,
+  type DetectionFrameLoadOptions,
+  type DetectionFrameLiveOptions,
   type DetectionFrameRetentionOptions,
   type DetectionFrameSelectionOptions,
   type DetectionFrameSource,
@@ -266,13 +281,16 @@ export {
   type DetectionFrameSourceVersionRange,
   type DetectionPlaybackGateOptions,
   type DetectionTimelineContext,
+  type LiveWritableDetectionFrameSource,
   type WritableDetectionFrameSource,
+  type WritableDetectionFrameSourceOptions,
 } from "supervision-js-core";
 export {
   DetectionMaskEncoding,
   KeypointVisibility,
   type CompressedRleDetectionMask,
   type Detection,
+  type DetectionCoordinateSpace,
   type DetectionFrame,
   type DetectionMask,
   type KeypointEdge,
@@ -330,6 +348,7 @@ export {
   type ProgressiveNormalizedMedia,
 } from "#types/media-normalization";
 export {
+  type LiveMediaSession,
   type MediaSession,
   MediaSessionActivityKind,
   MediaSessionActivityStatus,
@@ -353,6 +372,7 @@ export {
   type MediaSessionStateUnsubscribe,
   type MediaSessionWritableDetectionOptions,
 } from "#types/media-session";
+export { MediaErrorKind } from "supervision-js-core";
 export {
   DetectionTimelineOrigin,
   MediaRendererFit,

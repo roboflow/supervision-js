@@ -10,6 +10,7 @@ export {
   MediaSessionActivityStatus,
   MediaSessionMode,
   MediaSessionStatus,
+  type LiveMediaSession,
   type MediaSession,
   type MediaSessionActivity,
   type MediaSessionAppendableDetectionOptions,
