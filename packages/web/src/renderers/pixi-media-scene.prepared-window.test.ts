@@ -184,11 +184,15 @@ vi.mock("pixi.js/gif", () => ({ GifSprite: class {} }));
 
 const documentMock = {
   addEventListener: vi.fn(),
-  createElement: () => ({
-    getContext: () => ({ drawImage: vi.fn() }),
-    height: 0,
-    width: 0,
-  }),
+  createElement: (tagName: string) =>
+    tagName === "div"
+      ? { appendChild: vi.fn(), style: {} }
+      : {
+          getContext: () => ({ drawImage: vi.fn() }),
+          height: 0,
+          style: {},
+          width: 0,
+        },
   hidden: false,
   removeEventListener: vi.fn(),
 };
@@ -230,16 +234,16 @@ afterEach(() => {
 });
 
 describe("the prepared annotation window under push presentation", () => {
-  it("draws no annotation layers for a frame it does not cover", async () => {
+  it("draws the vector layers of a frame whose cooks are still owed", async () => {
     const scene = await createScene();
 
     scene.present(1000);
 
     expect(scene.lastPresentation()).toMatchObject({
-      activeDetectionCount: 0,
-      activeDetectionFrameTime: null,
+      activeDetectionCount: 1,
+      activeDetectionFrameTime: 1,
     });
-    expect(boxGraphics().rect).not.toHaveBeenCalled();
+    expect(boxGraphics().rect).toHaveBeenCalled();
     expect(scene.snapshot()?.playheadPrepared).toBe(false);
   });
 
@@ -260,7 +264,7 @@ describe("the prepared annotation window under push presentation", () => {
     });
   });
 
-  it("never leaves the previous frame's annotations on an uncovered frame", async () => {
+  it("never leaves the previous frame's annotations on the next one", async () => {
     const scene = await createScene();
 
     scene.present(1000);
@@ -271,10 +275,11 @@ describe("the prepared annotation window under push presentation", () => {
     scene.present(2000);
 
     expect(scene.lastPresentation()).toMatchObject({
-      activeDetectionCount: 0,
-      activeDetectionFrameTime: null,
+      activeDetectionCount: 1,
+      activeDetectionFrameTime: 2,
     });
-    expect(boxGraphics().rect).toHaveBeenCalledTimes(drawnBefore);
+    expect(scene.snapshot()?.playheadPrepared).toBe(false);
+    expect(boxGraphics().rect.mock.calls.length).toBeGreaterThan(drawnBefore);
     expect(boxGraphics().clear.mock.calls.length).toBeGreaterThan(0);
   });
 
@@ -294,9 +299,8 @@ describe("the prepared annotation window under push presentation", () => {
     expect(scene.renderCount()).toBe(presented + 1);
   });
 
-  it("redraws when the last-owed cook lands, whichever layer owns it", async () => {
-    // Both cooks gate the window; the polygon one lands last. The frame stays
-    // blank forever if any gating layer cannot announce its landing.
+  it("redraws for each cook that lands, whichever layer owns it", async () => {
+    // A cook reaches the screen only through the redraw its own landing makes.
     const scene = await createScene({ polygonStyle: emptyPolygonStyle });
 
     scene.present(1000);
@@ -305,7 +309,7 @@ describe("the prepared annotation window under push presentation", () => {
     await scene.settleCooks();
 
     expect(scene.snapshot()?.playheadPrepared).toBe(true);
-    expect(scene.renderCount()).toBe(presented + 1);
+    expect(scene.renderCount()).toBe(presented + 2);
     expect(scene.lastPresentation()).toMatchObject({
       activeDetectionCount: 1,
       activeDetectionFrameTime: 1,

@@ -617,6 +617,10 @@ export function resetMocks() {
   domMock.cancelAnimationFrame.mockClear();
   domMock.createElement.mockClear();
   domMock.createElement.mockImplementation((tagName: string) => {
+    if (tagName === "div") {
+      return { appendChild: domMock.appendChild, style: {} };
+    }
+
     if (tagName !== "canvas") {
       throw new Error(`Unexpected element: ${tagName}`);
     }
@@ -624,6 +628,7 @@ export function resetMocks() {
     return {
       getContext: domMock.getContext,
       height: 0,
+      style: {},
       width: 0,
     };
   });

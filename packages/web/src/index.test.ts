@@ -2069,12 +2069,34 @@ describe("package entrypoint", () => {
     const renderer = await createRenderer(false, false);
 
     expect(pixiMock.appInit).toHaveBeenCalledOnce();
-    expect(pixiMock.rendererResize).not.toHaveBeenCalled();
+    pixiMock.rendererResize.mockClear();
 
-    renderer.setRenderQuality({ maxDevicePixelRatio: 1 });
+    renderer.setRenderQuality({ maxDevicePixelRatio: 0.5 });
 
     expect(pixiMock.appInit).toHaveBeenCalledOnce();
-    expect(pixiMock.rendererResize).toHaveBeenCalledWith(640, 360, 1);
+    expect(pixiMock.rendererResize).toHaveBeenCalledWith(640, 360, 0.5);
+
+    renderer.destroy();
+  });
+
+  it("stops the canvas at the picture so the letterbox margin is not in it", async () => {
+    resetMocks();
+    mediaMock.samples = [createMockSample(0, 0)];
+
+    const renderer = await createRenderer(false, false, {
+      container: {
+        appendChild: vi.fn(),
+        clientHeight: 480,
+        clientWidth: 640,
+      } as unknown as HTMLElement,
+    });
+
+    // 1280x720 contained in 640x480 leaves a 60px band above and below.
+    expect(pixiMock.rendererResize).toHaveBeenLastCalledWith(640, 360, 1);
+    expect(pixiMock.canvasInstances.at(-1)?.style).toMatchObject({
+      left: "0px",
+      top: "60px",
+    });
 
     renderer.destroy();
   });

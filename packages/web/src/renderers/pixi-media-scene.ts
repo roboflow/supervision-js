@@ -322,15 +322,15 @@ export async function createPixiMediaScene(
     autoStart: frameChannel === undefined,
     backgroundColor: options.backgroundColor ?? 0x111111,
     preference: frameChannel ? "webgpu" : RENDER_ENGINE_PREFERENCE,
-    resizeTo: options.container,
     resolution: resolvePixiResolution(options.maxDevicePixelRatio),
   });
 
   const rendererCanvas = app.canvas;
   rendererCanvas.style.display = "block";
-  rendererCanvas.style.height = "100%";
-  rendererCanvas.style.width = "100%";
-  options.container.appendChild(rendererCanvas);
+  rendererCanvas.style.position = "absolute";
+  const backdrop = createSceneBackdrop(options.backgroundColor);
+  backdrop.appendChild(rendererCanvas);
+  options.container.appendChild(backdrop);
 
   const stagingCanvas = document.createElement("canvas");
   const stagingContext = stagingCanvas.getContext("2d");
@@ -385,6 +385,22 @@ export async function createPixiMediaScene(
    */
   let readPresentedSurface = () => stagingCanvas;
   let baseFit: ReturnType<typeof calculatePixiSceneFit>;
+  let presentationBox = { height: 0, left: 0, top: 0, width: 0 };
+  /**
+   * Read only when the observer says the box moved. The fit is recomputed on
+   * every presented sample, and reading the element there would put a forced
+   * layout in the frame path.
+   */
+  const containerSize = { height: 0, width: 0 };
+  const measureContainer = () => {
+    containerSize.width = options.container.clientWidth || containerSize.width;
+    containerSize.height =
+      options.container.clientHeight || containerSize.height;
+  };
+  let presentationResolution = resolvePixiResolution(
+    options.maxDevicePixelRatio,
+  );
+  let appliedResolution: number | undefined;
   const interactionLayer =
     options.interaction || options.editingEngine
       ? createPixiInteractionLayer({
@@ -514,11 +530,11 @@ export async function createPixiMediaScene(
 
   const updateMediaSceneFit = () => {
     if (!mediaScene || mediaWidth <= 0 || mediaHeight <= 0) {
+      syncPresentationBox();
       return;
     }
 
-    const screenWidth = app.screen.width || options.container.clientWidth;
-    const screenHeight = app.screen.height || options.container.clientHeight;
+    const { height: screenHeight, width: screenWidth } = containerSize;
 
     const fit = calculatePixiSceneFit({
       fit: options.fit,
@@ -540,12 +556,73 @@ export async function createPixiMediaScene(
     }
   };
 
+  /**
+   * A canvas hands the compositor one damage rect: its whole box. A canvas
+   * spanning the container therefore repaints the letterbox margin at present
+   * rate, so the canvas is sized to the picture and positioned inside the
+   * container, leaving the margin to the backdrop.
+   *
+   * That margin only exists while the picture sits where the fit puts it. A
+   * panned or zoomed picture can reach any part of the container, so the box
+   * covers all of it again.
+   */
+  const syncPresentationBox = () => {
+    const { height: containerHeight, width: containerWidth } = containerSize;
+    if (containerWidth <= 0 || containerHeight <= 0) return presentationBox;
+
+    const transform = viewport.getTransform();
+    const untransformed =
+      transform.scale === 1 && transform.x === 0 && transform.y === 0;
+    const span =
+      untransformed && baseFit
+        ? {
+            left: Math.max(0, Math.floor(baseFit.x)),
+            top: Math.max(0, Math.floor(baseFit.y)),
+            right: Math.min(
+              containerWidth,
+              Math.ceil(baseFit.x + mediaWidth * baseFit.scale),
+            ),
+            bottom: Math.min(
+              containerHeight,
+              Math.ceil(baseFit.y + mediaHeight * baseFit.scale),
+            ),
+          }
+        : { left: 0, top: 0, right: containerWidth, bottom: containerHeight };
+    const next = {
+      left: span.left,
+      top: span.top,
+      width: Math.max(1, span.right - span.left),
+      height: Math.max(1, span.bottom - span.top),
+    };
+
+    if (
+      next.left === presentationBox.left &&
+      next.top === presentationBox.top &&
+      next.width === presentationBox.width &&
+      next.height === presentationBox.height &&
+      presentationResolution === appliedResolution
+    ) {
+      return presentationBox;
+    }
+
+    presentationBox = next;
+    appliedResolution = presentationResolution;
+    rendererCanvas.style.left = `${next.left}px`;
+    rendererCanvas.style.top = `${next.top}px`;
+    app.renderer.resize(next.width, next.height, presentationResolution);
+    return presentationBox;
+  };
+
   const applyViewportTransform = () => {
     if (!mediaScene || !baseFit) return;
     const transform = viewport.getTransform();
     viewportScale = baseFit.scale * transform.scale;
     mediaScene.scale.set(viewportScale);
-    mediaScene.position.set(baseFit.x + transform.x, baseFit.y + transform.y);
+    const box = syncPresentationBox();
+    mediaScene.position.set(
+      baseFit.x + transform.x - box.left,
+      baseFit.y + transform.y - box.top,
+    );
     maskBrushPreview?.setViewportScale(viewportScale);
   };
 
@@ -578,11 +655,15 @@ export async function createPixiMediaScene(
   const disconnectContainerResizeObserver = observePixiContainerResize(
     options.container,
     () => {
-      app.resize();
+      measureContainer();
+      syncPresentationBox();
       updateMediaSceneFit();
       renderOnChange();
     },
   );
+
+  measureContainer();
+  syncPresentationBox();
 
   const drawAnnotationOverlayNow = () =>
     drawAnnotationOverlay(currentMediaTime, overlayNow());
@@ -883,11 +964,8 @@ export async function createPixiMediaScene(
     },
 
     setRenderQuality(maxDevicePixelRatio) {
-      const resolution = resolvePixiResolution(maxDevicePixelRatio);
-      const screenWidth = options.container.clientWidth || app.screen.width;
-      const screenHeight = options.container.clientHeight || app.screen.height;
-
-      app.renderer.resize(screenWidth, screenHeight, resolution);
+      presentationResolution = resolvePixiResolution(maxDevicePixelRatio);
+      syncPresentationBox();
       updateMediaSceneFit();
       renderOnChange();
     },
@@ -1016,6 +1094,7 @@ export async function createPixiMediaScene(
       currentMediaTime = mediaTime;
       if (presentation.backgroundColor !== undefined) {
         app.renderer.background.color = presentation.backgroundColor;
+        applyBackdropColor(backdrop, presentation.backgroundColor);
       }
       annotationOverlayLayer.setStyle(presentation.annotationOverlayStyle);
       if (presentation.visibility !== undefined) {
@@ -1644,7 +1723,7 @@ export async function createPixiMediaScene(
     return [
       presentedFrameSerial,
       currentMediaTime,
-      annotationWindow.getPreparedFrame(currentMediaTime),
+      annotationWindow.getReadinessToken(currentMediaTime),
       viewportScale,
       baseFit?.x,
       baseFit?.y,
@@ -1917,6 +1996,29 @@ function elapsedSince(start: number) {
 
 function now() {
   return globalThis.performance?.now?.() ?? Date.now();
+}
+
+/**
+ * Fills the container and paints the margin around the canvas in the colour the
+ * renderer clears to. The scene owns this element so the canvas is positioned
+ * against a box it controls, whatever CSS the host puts on the container.
+ */
+function createSceneBackdrop(backgroundColor: number | undefined) {
+  const backdrop = document.createElement("div");
+  backdrop.style.height = "100%";
+  backdrop.style.overflow = "hidden";
+  backdrop.style.position = "relative";
+  backdrop.style.width = "100%";
+  applyBackdropColor(backdrop, backgroundColor);
+  return backdrop;
+}
+
+function applyBackdropColor(
+  backdrop: HTMLElement,
+  backgroundColor: number | undefined,
+) {
+  const color = (backgroundColor ?? 0x111111) >>> 0;
+  backdrop.style.backgroundColor = `#${color.toString(16).padStart(6, "0")}`;
 }
 
 function resolvePixiResolution(maxDevicePixelRatio: number | undefined) {

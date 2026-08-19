@@ -263,13 +263,17 @@ vi.mock("pixi.js/gif", () => ({ GifSprite: class {} }));
 
 const documentMock = {
   addEventListener: vi.fn(),
-  createElement: () => ({
-    getContext: () => ({ drawImage: vi.fn() }),
-    height: 0,
-    toBlob: (receive: (blob: Blob) => void, type: string) =>
-      receive(new Blob([], { type })),
-    width: 0,
-  }),
+  createElement: (tagName: string) =>
+    tagName === "div"
+      ? { appendChild: vi.fn(), style: {} }
+      : {
+          getContext: () => ({ drawImage: vi.fn() }),
+          height: 0,
+          style: {},
+          toBlob: (receive: (blob: Blob) => void, type: string) =>
+            receive(new Blob([], { type })),
+          width: 0,
+        },
   hidden: false,
   removeEventListener: vi.fn(),
 };
