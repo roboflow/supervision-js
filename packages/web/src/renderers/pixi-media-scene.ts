@@ -1675,7 +1675,11 @@ export async function createPixiMediaScene(
           resource: texture,
         });
 
-        sprite.texture = new Texture({ source: externalSource });
+        // A decode of another size resizes this source in place, and only a
+        // dynamic texture forwards that to the sprite. Without it the sprite
+        // takes the new size's scale while still drawing the previous size's
+        // quad, so a preview-sized frame paints the media oversized.
+        sprite.texture = new Texture({ dynamic: true, source: externalSource });
         sizeMediaSprite();
         return externalSource;
       },

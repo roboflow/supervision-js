@@ -69,6 +69,28 @@ describe("media compositor", () => {
     expect(gpu.copies).toStrictEqual([{ texture: replacement }]);
   });
 
+  it("reports the replacement's size to the source before announcing the swap", () => {
+    const gpu = createFakeDevice();
+    let sourceSize: [number, number] | null = null;
+    const source = {
+      updateGPUTexture: vi.fn((texture: GPUTexture) => {
+        sourceSize = [texture.width, texture.height];
+      }),
+    };
+    const seenAtAnnounce: ([number, number] | null)[] = [];
+    const compositor = createMediaCompositor({
+      attach: () => source,
+      device: gpu.device,
+      height: 240,
+      onTextureReplaced: () => seenAtAnnounce.push(sourceSize),
+      width: 320,
+    });
+
+    compositor.upload(frame(640, 360));
+
+    expect(seenAtAnnounce).toStrictEqual([[640, 360]]);
+  });
+
   it("leaves no texture behind when the swap is refused", () => {
     const gpu = createFakeDevice();
     const source = createTextureSource();
