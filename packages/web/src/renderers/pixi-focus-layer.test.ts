@@ -245,6 +245,52 @@ describe("pixi focus layer", () => {
     expect(graphics.fill).not.toHaveBeenCalled();
   });
 
+  it("falls back to vector focus when the shader backend cannot build a program", () => {
+    vi.stubGlobal("document", {
+      createElement: vi.fn(() => ({ height: 0, width: 0 })),
+    });
+
+    const selectedPick = {
+      detection: frame.detections[0]!,
+      detectionIndex: 0,
+      frame,
+      mediaTime: frame.mediaTime,
+      point: { x: 15, y: 20 },
+      target: DetectionPickTarget.Box,
+    };
+    const layer = createPixiFocusLayer({
+      Container: FakeContainer as never,
+      Graphics: FakeGraphics as never,
+      ImageSource: FakeImageSource as never,
+      Mesh: FakeMesh as never,
+      MeshGeometry: FakeMeshGeometry as never,
+      Shader: FailingShaderFactory as never,
+      UniformGroup: FakeUniformGroup as never,
+      focusStyle: new BaseFocusStyle({
+        cornerRadius: 6,
+        fill: { alpha: 0.5, color: 0x000000 },
+        shape: BoxShape.RoundedRect,
+      }),
+    });
+    const display = layer.createDisplay({
+      height: 80,
+      width: 120,
+    }) as FakeContainer;
+    const overlay = display.children[0] as FakeGraphics;
+    const cutout = display.children[1] as FakeGraphics;
+
+    layer.drawFrame({
+      frame,
+      hoveredPick: null,
+      mediaTime: frame.mediaTime,
+      selectedPick,
+    });
+
+    expect(display.children).toHaveLength(2);
+    expect(overlay.rect).toHaveBeenCalledWith(0, 0, 120, 80);
+    expect(cutout.roundRect).toHaveBeenCalledWith(10, 15, 20, 30, 6);
+  });
+
   it("declares a WebGL and a WebGPU program for the focus ID-mask shader", () => {
     vi.stubGlobal("document", {
       createElement: vi.fn(() => ({ height: 0, width: 0 })),
@@ -549,6 +595,12 @@ class FakeShaderFactory {
     FakeShaderFactory.descriptors.push(options);
 
     return new FakeShader(options.resources);
+  }
+}
+
+class FailingShaderFactory {
+  static from(): never {
+    throw new Error("Shader program compilation failed.");
   }
 }
 

@@ -110,6 +110,7 @@ export interface PixiMaskLayer {
     mediaTime: number,
   ): DetectionPickResult | null;
   getActiveIdMaskFrameTexture(): PixiActiveIdMaskFrameTexture | null;
+  setPlaybackActive(active: boolean): void;
   setTimelineContext(context: PreparedRenderTimelineContext): void;
   setMaskStyle(maskStyle: MaskStyle | null | undefined): void;
   /**
@@ -312,6 +313,10 @@ export function createPixiMaskLayer(options: {
         frame: activeIdMaskFrame,
         texture: getTexture(activeIdMaskFrame),
       };
+    },
+
+    setPlaybackActive(active) {
+      preparedRenderWindow.setPlaybackActive(active);
     },
 
     setTimelineContext(context) {

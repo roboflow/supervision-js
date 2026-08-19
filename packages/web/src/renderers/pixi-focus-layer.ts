@@ -155,6 +155,7 @@ export function createPixiFocusLayer(options: {
   let targetAlpha = 0;
   let lastTick: number | null = null;
   let isDestroyed = false;
+  let hasIdMaskShaderFailed = false;
   let vectorFocusSignature: VectorFocusSignature | null = null;
   // A frame can fall back to a composited RGBA texture when its colored ID-mask
   // palette is exhausted. Keep decoded row runs by the immutable mask payload so
@@ -485,6 +486,7 @@ export function createPixiFocusLayer(options: {
 
   function createIdMaskRenderer() {
     if (
+      hasIdMaskShaderFailed ||
       !options.ImageSource ||
       !options.Mesh ||
       !options.MeshGeometry ||
@@ -496,15 +498,20 @@ export function createPixiFocusLayer(options: {
       return undefined;
     }
 
-    return createFocusIdMaskRenderer({
-      ImageSource: options.ImageSource,
-      Mesh: options.Mesh,
-      MeshGeometry: options.MeshGeometry,
-      Shader: options.Shader,
-      UniformGroup: options.UniformGroup,
-      mediaHeight,
-      mediaWidth,
-    });
+    try {
+      return createFocusIdMaskRenderer({
+        ImageSource: options.ImageSource,
+        Mesh: options.Mesh,
+        MeshGeometry: options.MeshGeometry,
+        Shader: options.Shader,
+        UniformGroup: options.UniformGroup,
+        mediaHeight,
+        mediaWidth,
+      });
+    } catch {
+      hasIdMaskShaderFailed = true;
+      return undefined;
+    }
   }
 }
 

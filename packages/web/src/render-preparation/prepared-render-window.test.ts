@@ -20,11 +20,16 @@ import {
   RenderPreparationExecutionMode,
   RenderPreparationMode,
   RenderPreparationWorkerStatus,
+  type RenderPreparationDiagnostics,
 } from "#types/render-preparation";
 
 import { resetMocks } from "../../../../test/media-renderer-harness";
 import { MaskPreparationWorkerMessageType } from "./mask-preparation-worker-protocol";
-import { createPreparedRenderWindow } from "./prepared-render-window";
+import {
+  createPreparedRenderWindow,
+  PreparedRenderFrameMaskStatus,
+  type PreparedMaskFrame,
+} from "./prepared-render-window";
 
 const frames: DetectionFrame[] = [
   {
@@ -71,6 +76,20 @@ const denseFrames = Array.from({ length: 4 }, (_, frameIndex) => ({
   mediaTime: frameIndex * 0.04,
 })) satisfies DetectionFrame[];
 const manyFrames = Array.from({ length: 10 }, (_, frameIndex) => ({
+  detections: [
+    {
+      mask: {
+        counts: "021",
+        encoding: DetectionMaskEncoding.CompressedRle,
+        height: 2,
+        width: 2,
+      },
+    },
+  ],
+  frameIndex,
+  mediaTime: frameIndex * 0.04,
+})) satisfies DetectionFrame[];
+const deepFrames = Array.from({ length: 40 }, (_, frameIndex) => ({
   detections: [
     {
       mask: {
@@ -1440,7 +1459,268 @@ describe("prepared render window", () => {
       vi.useRealTimers();
     }
   });
+
+  it("narrows a paused window to the playhead frame plus one schedule batch", () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const onDiagnostics = vi.fn();
+      const renderWindow = createPausedScopeRenderWindow({
+        onDiagnostics,
+        scheduleBatchSize: 2,
+      });
+
+      renderWindow.getFrame(0);
+      renderWindow.setPlaybackActive(false);
+
+      expect(onDiagnostics).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          artifacts: [
+            expect.objectContaining({
+              prefetchCount: 3,
+              window: expect.objectContaining({ targetFrameCount: 3 }),
+            }),
+          ],
+        }),
+      );
+
+      renderWindow.setPlaybackActive(true);
+      renderWindow.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("sizes the paused margin from the configured schedule batch", () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const wideBatch = vi.fn();
+      const wideRenderWindow = createPausedScopeRenderWindow({
+        onDiagnostics: wideBatch,
+        scheduleBatchSize: 4,
+      });
+
+      wideRenderWindow.getFrame(0);
+      wideRenderWindow.setPlaybackActive(false);
+
+      expect(wideBatch).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          artifacts: [expect.objectContaining({ prefetchCount: 5 })],
+        }),
+      );
+
+      const cappedBatch = vi.fn();
+      const cappedRenderWindow = createPausedScopeRenderWindow({
+        onDiagnostics: cappedBatch,
+        prefetchFrameCount: 2,
+        scheduleBatchSize: 4,
+      });
+
+      cappedRenderWindow.getFrame(0);
+      cappedRenderWindow.setPlaybackActive(false);
+
+      expect(cappedBatch).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          artifacts: [expect.objectContaining({ prefetchCount: 2 })],
+        }),
+      );
+
+      wideRenderWindow.destroy();
+      cappedRenderWindow.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("drops a deep prefetch backlog on pause and schedules nothing past the margin", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const onDiagnostics = vi.fn();
+      const renderWindow = createPausedScopeRenderWindow({
+        frames: deepFrames,
+        onDiagnostics,
+        scheduleBatchSize: 2,
+      });
+
+      renderWindow.getFrame(0);
+      await flushMaskPreparationTimers(4);
+
+      const backlog = onDiagnostics.mock.lastCall?.[0].artifacts[0];
+
+      expect(backlog?.pendingCount).toBeGreaterThan(3);
+
+      renderWindow.setPlaybackActive(false);
+
+      const preparedOnPause =
+        onDiagnostics.mock.lastCall?.[0].artifacts[0]?.preparedCount;
+
+      await flushMaskPreparationTimers(30);
+
+      const drained = onDiagnostics.mock.lastCall?.[0].artifacts[0];
+
+      expect(drained?.inFlightCount).toBe(0);
+      expect(drained?.pendingCount).toBe(0);
+      expect(drained?.preparedAheadFrameCount).toBe(3);
+      expect(drained?.preparedCount).toBeLessThanOrEqual(preparedOnPause + 1);
+
+      renderWindow.setPlaybackActive(true);
+      renderWindow.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("cooks only the margin when a window is already paused", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const onMaskFramePrepared = vi.fn();
+      const renderWindow = createPausedScopeRenderWindow({
+        onMaskFramePrepared,
+        scheduleBatchSize: 2,
+      });
+
+      renderWindow.setPlaybackActive(false);
+      renderWindow.getFrame(0);
+      await flushMaskPreparationTimers(30);
+
+      expect(onMaskFramePrepared).toHaveBeenCalledTimes(3);
+
+      renderWindow.setPlaybackActive(true);
+      renderWindow.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("restores the full prefetch window when playback resumes", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const onDiagnostics = vi.fn();
+      const renderWindow = createPausedScopeRenderWindow({ onDiagnostics });
+
+      renderWindow.getFrame(0);
+      renderWindow.setPlaybackActive(false);
+      await flushMaskPreparationTimers(30);
+
+      renderWindow.setPlaybackActive(true);
+      await flushMaskPreparationTimers(30);
+
+      expect(onDiagnostics).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          artifacts: [
+            expect.objectContaining({
+              prefetchCount: 10,
+              preparedAheadFrameCount: 10,
+              preparedCount: 10,
+              window: expect.objectContaining({ targetFrameCount: 10 }),
+            }),
+          ],
+        }),
+      );
+
+      renderWindow.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("cooks the visible frame of a paused window landing on a cold region", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const renderWindow = createPausedScopeRenderWindow({});
+
+      renderWindow.setPlaybackActive(false);
+      renderWindow.getFrame(0.36);
+      await flushMaskPreparationTimers(30);
+
+      expect(renderWindow.getFrame(0.36)?.maskStatus).toBe(
+        PreparedRenderFrameMaskStatus.Prepared,
+      );
+
+      renderWindow.setPlaybackActive(true);
+      renderWindow.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a paused step inside the margin", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const onDiagnostics = vi.fn();
+      const onMaskFramePrepared = vi.fn();
+      const renderWindow = createPausedScopeRenderWindow({
+        onDiagnostics,
+        onMaskFramePrepared,
+        scheduleBatchSize: 2,
+      });
+
+      renderWindow.setPlaybackActive(false);
+      renderWindow.getFrame(0);
+      await flushMaskPreparationTimers(30);
+
+      renderWindow.getFrame(0.04);
+      await flushMaskPreparationTimers(30);
+
+      expect(onMaskFramePrepared).toHaveBeenCalledTimes(4);
+      expect(onDiagnostics).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          artifacts: [
+            expect.objectContaining({
+              pendingCount: 0,
+              preparedAheadFrameCount: 3,
+              window: expect.objectContaining({ targetFrameCount: 3 }),
+            }),
+          ],
+        }),
+      );
+
+      renderWindow.setPlaybackActive(true);
+      renderWindow.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
+
+function createPausedScopeRenderWindow(options: {
+  readonly frames?: readonly DetectionFrame[];
+  readonly onDiagnostics?: (diagnostics: RenderPreparationDiagnostics) => void;
+  readonly onMaskFramePrepared?: (maskFrame: PreparedMaskFrame) => void;
+  readonly prefetchFrameCount?: number;
+  readonly scheduleBatchSize?: number;
+}) {
+  const frames = options.frames ?? manyFrames;
+
+  return createPreparedRenderWindow({
+    detectionTimeline: createTimeline(frames),
+    maskStyle: new BaseMaskStyle(),
+    onMaskFramePrepared: options.onMaskFramePrepared,
+    renderPreparation: {
+      maskFrame: {
+        maxCacheFrameCount: frames.length,
+        maxPendingFrameCount: 10,
+        prefetchFrameCount: options.prefetchFrameCount ?? frames.length,
+        scanIntervalSeconds: 0,
+        scheduleBatchSize: options.scheduleBatchSize ?? 2,
+      },
+      onDiagnostics: options.onDiagnostics,
+    },
+  });
+}
 
 function createFakeMaskPreparationWorker(
   options: {

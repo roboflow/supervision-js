@@ -88,6 +88,18 @@ export async function createMediaRendererCore(
   });
   let detectionTimeline: BufferedDetectionTimeline | undefined;
   let mediaScene: MediaRendererScene | undefined;
+  // A drag is a run of scrubs closed by the seek that lands it, the pairing the
+  // transport already keeps for the producer.
+  let isSeekGestureInFlight = false;
+  const publishPlaybackActivity = () => {
+    mediaScene?.setPlaybackActive?.(
+      runtimeState.isPlaybackActive() || isSeekGestureInFlight,
+    );
+  };
+  const endSeekGesture = () => {
+    isSeekGestureInFlight = false;
+    publishPlaybackActivity();
+  };
   const runtimeState = createMediaRendererRuntimeState({
     fit,
     playbackRate: initialPlaybackRate,
@@ -95,7 +107,10 @@ export async function createMediaRendererCore(
       detectionTimeline?.getState() ?? createIdleDetectionBufferState(),
     onFrame: options.onFrame,
     onSource: options.onSource,
-    onState: options.onState,
+    onState(state) {
+      publishPlaybackActivity();
+      options.onState?.(state);
+    },
   });
   let activeSampleIterator: DecodedVideoSampleIterator | undefined;
   let mediaInput: DisposableMediaInput | undefined;
@@ -204,6 +219,8 @@ export async function createMediaRendererCore(
         );
       }
 
+      endSeekGesture();
+
       if (transport) {
         await transport.play();
         return;
@@ -225,6 +242,8 @@ export async function createMediaRendererCore(
       if (runtimeState.isDestroyed()) {
         return;
       }
+
+      endSeekGesture();
 
       if (transport) {
         transport.pause();
@@ -273,6 +292,8 @@ export async function createMediaRendererCore(
         firstTimestamp,
         mediaTime,
       });
+
+      endSeekGesture();
 
       if (transport) {
         await transport.commit(targetTime);
@@ -333,6 +354,9 @@ export async function createMediaRendererCore(
         firstTimestamp,
         mediaTime,
       });
+
+      isSeekGestureInFlight = true;
+      publishPlaybackActivity();
 
       if (transport) {
         transport.scrub(targetTime);
@@ -607,6 +631,7 @@ export async function createMediaRendererCore(
         : undefined,
       visibility: currentPresentation.visibility,
     });
+    publishPlaybackActivity();
     runtimeState.setRendererBackend(mediaScene.rendererBackend);
     detectionTimeline.setTimelineContext?.({
       duration: metadata.duration,

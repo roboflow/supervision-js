@@ -169,6 +169,7 @@ export async function createPixiMediaScene(
       : options.polygonStyle;
   let currentVisibility: AnnotationVisibility | undefined = options.visibility;
   let currentMediaTime = 0;
+  let isPlaybackActive = true;
   let displayBrightness = 1;
   let displayContrast = 1;
   let viewportScale = 1;
@@ -734,6 +735,11 @@ export async function createPixiMediaScene(
       if (frameChannel) mediaCompositor = createSceneMediaCompositor();
     },
 
+    setPlaybackActive(active) {
+      isPlaybackActive = active;
+      maskLayer?.setPlaybackActive(active);
+    },
+
     setTimelineContext(context) {
       timelineContext = context;
       maskLayer?.setTimelineContext(context);
@@ -1245,6 +1251,8 @@ export async function createPixiMediaScene(
         onPreparedWindowChange: handlePreparedWindowChange,
         renderPreparation: options.renderPreparation,
       });
+
+      maskLayer.setPlaybackActive(isPlaybackActive);
 
       if (timelineContext) {
         maskLayer.setTimelineContext(timelineContext);

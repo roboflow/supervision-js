@@ -106,6 +106,12 @@ export interface MediaRendererScene {
    */
   getPreparedAnnotationWindow?(): PreparedAnnotationWindowSnapshot | null;
   initializeMedia(dimensions: { width: number; height: number }): void;
+  /**
+   * Whether the playhead is moving. Cooking far ahead of a resting playhead is
+   * speculation, so the scene narrows what it prepares until the playhead moves
+   * again.
+   */
+  setPlaybackActive?(active: boolean): void;
   setTimelineContext?(context: MediaRendererSceneTimelineContext): void;
   presentSample(sample: DecodedVideoSample): PresentedMediaSample;
   /**

@@ -71,6 +71,11 @@ export interface PreparedRenderWindow {
     mediaTime: number,
     options: RenderPreparationPlaybackGateOptions,
   ): Promise<void>;
+  /**
+   * Whether the playhead is moving. A window over a resting playhead covers a
+   * paused margin instead of the full prefetch span.
+   */
+  setPlaybackActive(active: boolean): void;
   setTimelineContext(context: PreparedRenderTimelineContext): void;
   setMaskStyle(maskStyle: MaskStyle | null | undefined): void;
   destroy(): void;
@@ -119,8 +124,6 @@ export function createPreparedRenderWindow(options: {
       DEFAULT_MASK_FRAME_CACHE_SIZE,
   );
   const prefetchFrameCount = resolvePreparedWindowFrameCount(options);
-  const refillThresholdFrameCount =
-    getPreparedWindowRefillThresholdFrameCount(prefetchFrameCount);
   const preparedWindowScanIntervalSeconds = Math.max(
     0,
     options.preparedWindowScanIntervalSeconds ??
@@ -138,7 +141,16 @@ export function createPreparedRenderWindow(options: {
   const workerCount = getBrowserMaskPreparationWorkerCount(
     maskFrameOptions?.workerCount,
   );
+  const pausedPrefetchFrameCount = getPausedPreparedWindowFrameCount({
+    prefetchFrameCount,
+    scheduleBatchSize,
+  });
+  const refillThresholdFrameCount =
+    getPreparedWindowRefillThresholdFrameCount(prefetchFrameCount);
+  const pausedRefillThresholdFrameCount =
+    getPreparedWindowRefillThresholdFrameCount(pausedPrefetchFrameCount);
 
+  let isPlaybackActive = true;
   let maskStyle = options.maskStyle ?? null;
   const maskFramePreparer = createPreparer();
   let lastPreparedBufferSignature: string | null = null;
@@ -434,6 +446,35 @@ export function createPreparedRenderWindow(options: {
     }
   }
 
+  function dropQueuedMaskFramesBeyondTargets() {
+    const targetKeys = new Set(lastPreparedTargetFrames.map(getFrameKey));
+
+    for (let index = queuedMaskFrameKeys.length - 1; index >= 0; index -= 1) {
+      const key = queuedMaskFrameKeys[index];
+
+      if (!key || targetKeys.has(key)) {
+        continue;
+      }
+
+      queuedMaskFrameKeys.splice(index, 1);
+      pendingMaskFrames.delete(key);
+    }
+  }
+
+  function rescanPreparedWindow() {
+    if (!activeMaskFrame) {
+      return;
+    }
+
+    const { mediaTime } = activeMaskFrame;
+
+    schedulePreparedWindow(
+      options.detectionTimeline.selectFrame(mediaTime),
+      mediaTime,
+      { force: true },
+    );
+  }
+
   function removeQueuedMaskFrameKey(key: string) {
     const index = queuedMaskFrameKeys.indexOf(key);
 
@@ -518,9 +559,12 @@ export function createPreparedRenderWindow(options: {
       bufferedFrames,
       anchorTime,
     );
+
+    const targetFrameCount = getPrefetchFrameCount();
+
     lastPreparedTargetFrames = lastPreparedWindowFrames.slice(
       0,
-      prefetchFrameCount,
+      targetFrameCount,
     );
 
     if (
@@ -530,7 +574,7 @@ export function createPreparedRenderWindow(options: {
       lastPreparedTargetFrames = [
         detectionFrame,
         ...lastPreparedTargetFrames,
-      ].slice(0, prefetchFrameCount);
+      ].slice(0, targetFrameCount);
     }
 
     schedulePreparedTargetBatch();
@@ -539,9 +583,9 @@ export function createPreparedRenderWindow(options: {
   function shouldTopUpPreparedWindowAtLowWatermark() {
     if (
       !activeMaskFrame ||
-      prefetchFrameCount === 0 ||
+      getPrefetchFrameCount() === 0 ||
       lastPreparedWindowFrames.length === 0 ||
-      lastPreparedTargetFrames.length < prefetchFrameCount
+      lastPreparedTargetFrames.length < getPrefetchFrameCount()
     ) {
       return false;
     }
@@ -550,7 +594,7 @@ export function createPreparedRenderWindow(options: {
       getPreparedAheadDiagnosticsFor(activeMaskFrame).frameCount;
     const availableAhead = getAvailableAheadFrameCount(activeMaskFrame);
     const effectiveThreshold = Math.min(
-      refillThresholdFrameCount,
+      getRefillThresholdFrameCount(),
       availableAhead,
     );
 
@@ -652,6 +696,27 @@ export function createPreparedRenderWindow(options: {
       });
     },
 
+    setPlaybackActive(active) {
+      if (isDestroyed || active === isPlaybackActive) {
+        return;
+      }
+
+      isPlaybackActive = active;
+
+      if (active) {
+        rescanPreparedWindow();
+        emitDiagnostics();
+        return;
+      }
+
+      lastPreparedTargetFrames = lastPreparedTargetFrames.slice(
+        0,
+        getPrefetchFrameCount(),
+      );
+      dropQueuedMaskFramesBeyondTargets();
+      emitDiagnostics();
+    },
+
     setTimelineContext(context) {
       timeline.setContext(context);
       lastPreparedWindowMediaTime = null;
@@ -749,13 +814,13 @@ export function createPreparedRenderWindow(options: {
           pendingCount: pendingMaskFrames.size,
           preparedAheadFrameCount: preparedAhead.frameCount,
           preparedAheadSeconds: preparedAhead.seconds,
-          prefetchCount: prefetchFrameCount,
+          prefetchCount: getPrefetchFrameCount(),
           preparedCount: preparedMaskFrames.size,
-          refillThresholdCount: refillThresholdFrameCount,
+          refillThresholdCount: getRefillThresholdFrameCount(),
           scheduleBatchSize,
           window: {
             availableFrameCount: lastPreparedWindowFrames.length,
-            refillThresholdFrameCount,
+            refillThresholdFrameCount: getRefillThresholdFrameCount(),
             targetFrameCount: lastPreparedTargetFrames.length,
           },
         },
@@ -1056,6 +1121,16 @@ export function createPreparedRenderWindow(options: {
     });
   }
 
+  function getPrefetchFrameCount() {
+    return isPlaybackActive ? prefetchFrameCount : pausedPrefetchFrameCount;
+  }
+
+  function getRefillThresholdFrameCount() {
+    return isPlaybackActive
+      ? refillThresholdFrameCount
+      : pausedRefillThresholdFrameCount;
+  }
+
   function getMaxInFlightMaskFrameCount() {
     const status = maskFramePreparer.getStatus();
 
@@ -1158,6 +1233,18 @@ function getPreparationError(error: unknown) {
   return error instanceof Error
     ? error
     : new Error("Unable to prepare mask frame.");
+}
+
+/**
+ * The playhead's own frame plus one schedule batch ahead. A batch is the most
+ * this window commits to in one pass, so a resting playhead holds a single pass
+ * of work, and a step forward still lands on a frame already cooked.
+ */
+function getPausedPreparedWindowFrameCount(options: {
+  readonly prefetchFrameCount: number;
+  readonly scheduleBatchSize: number;
+}) {
+  return Math.min(options.prefetchFrameCount, options.scheduleBatchSize + 1);
 }
 
 function getPreparedWindowRefillThresholdFrameCount(
