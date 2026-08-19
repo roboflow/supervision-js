@@ -189,4 +189,26 @@ describe("memory cold detection frame store", () => {
       store.pruneFrames?.({ datasetId: "missing", startTime: 1 }),
     ).resolves.toMatchObject({ datasetId: "missing", frameCount: 0 });
   });
+
+  it.each([Number.NaN, -1, Number.POSITIVE_INFINITY])(
+    "rejects the retention floor %p without touching stored frames",
+    async (startTime) => {
+      const store = createMemoryColdDetectionFrameStore();
+      const frames = [
+        { detections: [{ id: "a" }], endTime: 1, mediaTime: 0 },
+        { detections: [{ id: "b" }], endTime: 2, mediaTime: 1 },
+      ];
+
+      await store.putFrames({ datasetId: "stream", frames });
+
+      await expect(
+        store.pruneFrames?.({ datasetId: "stream", startTime }),
+      ).rejects.toThrow(
+        "pruneFrames requires a finite, non-negative startTime.",
+      );
+      await expect(
+        store.loadFrames({ datasetId: "stream", endTime: 2, startTime: 0 }),
+      ).resolves.toEqual(frames);
+    },
+  );
 });

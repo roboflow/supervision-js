@@ -8,6 +8,9 @@ import {
 import type {
   DetectionCoordinateSpace,
   DetectionFrame,
+  DetectionFrameSourceVersionRange,
+  LiveWritableDetectionFrameSource,
+  WritableDetectionFrameSource,
 } from "supervision-js-core";
 import type {
   MediaSession,
@@ -154,6 +157,20 @@ export async function createMediaSession(
     };
     const initialPresentation =
       resolveRendererPresentation(currentPresentation);
+    let mediaCoordinateSpace: DetectionCoordinateSpace | null = null;
+
+    /**
+     * Latches the media coordinate space as soon as the renderer reports real
+     * media dimensions, so session writes can be normalized into it.
+     */
+    const recordMediaCoordinateSpace = (state: MediaRendererState) => {
+      if (state.mediaWidth > 0 && state.mediaHeight > 0) {
+        mediaCoordinateSpace = {
+          height: state.mediaHeight,
+          width: state.mediaWidth,
+        };
+      }
+    };
 
     const renderer = await createMediaRenderer({
       ...options.renderer,
@@ -181,6 +198,7 @@ export async function createMediaSession(
       visibility: initialPresentation.visibility,
       onState(state) {
         rendererState = state;
+        recordMediaCoordinateSpace(state);
         options.renderer?.onState?.(state);
         if (isDestroying) {
           return;
@@ -207,36 +225,6 @@ export async function createMediaSession(
     const autoRefresh = options.detections?.autoRefresh !== false;
     let activeRefresh: Promise<void> | undefined;
     let queuedRefresh = false;
-
-    const getMediaCoordinateSpace = (): DetectionCoordinateSpace | null => {
-      const state = renderer.getState();
-
-      return state.mediaWidth > 0 && state.mediaHeight > 0
-        ? { height: state.mediaHeight, width: state.mediaWidth }
-        : null;
-    };
-
-    /**
-     * Projects appended frames that declare a source coordinate space into the
-     * renderer's media space. Frames without that metadata pass through, so a
-     * producer that already emits media-pixel geometry is unaffected.
-     */
-    const projectAppendedFrames = (frames: readonly DetectionFrame[]) => {
-      const target = getMediaCoordinateSpace();
-
-      return target ? projectDetectionFrames(frames, target) : frames;
-    };
-
-    const coversDisplayedTime = (frames: readonly DetectionFrame[]) => {
-      const { currentTime } = renderer.getState();
-
-      return frames.some(
-        (frame) =>
-          frame.mediaTime <= currentTime + DISPLAY_RANGE_EPSILON_SECONDS &&
-          (frame.endTime ?? frame.mediaTime) >=
-            currentTime - DISPLAY_RANGE_EPSILON_SECONDS,
-      );
-    };
 
     const runDetectionRefresh = () => {
       activeRefresh = renderer
@@ -270,16 +258,58 @@ export async function createMediaSession(
     };
 
     /**
-     * Redraws for detections that land on the displayed time.
-     *
-     * Appends elsewhere on the timeline are already patched incrementally by
-     * the hot buffer, so forcing a render for them would only burn frames.
+     * Normalizes written frames into media space before they are stored, so a
+     * persisted dataset stays in one coordinate space. The renderer projects
+     * again on the read path for every other detection input, and re-projecting
+     * an already-projected frame is a no-op.
      */
-    const requestDetectionRefresh = (frames: readonly DetectionFrame[]) => {
-      if (coversDisplayedTime(frames)) {
+    const projectWrittenFrames = (frames: readonly DetectionFrame[]) =>
+      mediaCoordinateSpace
+        ? projectDetectionFrames(frames, mediaCoordinateSpace)
+        : frames;
+
+    /**
+     * Redraws once for a write that actually changed `range`.
+     *
+     * A write the source rejected as stale reports no change at all, and
+     * changes elsewhere on the timeline are already patched incrementally by
+     * the hot buffer, so forcing a render for either would only burn frames.
+     */
+    const requestDetectionRefresh = (
+      source: WritableDetectionFrameSource,
+      previousVersion: number,
+      range: DetectionFrameSourceVersionRange,
+    ) => {
+      const changes = source.getChangesSince?.(previousVersion, [range]);
+
+      if (!changes || changes.requiresReload || changes.ranges.length > 0) {
         scheduleDetectionRefresh();
       }
     };
+
+    /** The instant the renderer is currently presenting. */
+    const getDisplayedRange = (): DetectionFrameSourceVersionRange => {
+      const { currentTime } = renderer.getState();
+
+      return {
+        endTime: currentTime + DISPLAY_RANGE_EPSILON_SECONDS,
+        startTime: currentTime - DISPLAY_RANGE_EPSILON_SECONDS,
+      };
+    };
+
+    /**
+     * The displayed instant and everything after it.
+     *
+     * A live frame is held open into the future, and a live transport commonly
+     * delivers it just after its frame was presented. Any accepted live change
+     * that has not already ended before the displayed time is therefore what
+     * should be on screen.
+     */
+    const getLiveRange = (): DetectionFrameSourceVersionRange => ({
+      endTime: Number.POSITIVE_INFINITY,
+      startTime:
+        renderer.getState().currentTime - DISPLAY_RANGE_EPSILON_SECONDS,
+    });
 
     return {
       detectionSource: sessionDetections.detectionSource,
@@ -295,10 +325,16 @@ export async function createMediaSession(
           sessionDetections,
           writeOptions,
         );
-        const projectedFrames = projectAppendedFrames(frames);
-        const summary = await appendableSource.appendFrames(projectedFrames);
+        const previousVersion = appendableSource.getVersion();
+        const summary = await appendableSource.appendFrames(
+          projectWrittenFrames(frames),
+        );
 
-        requestDetectionRefresh(projectedFrames);
+        requestDetectionRefresh(
+          appendableSource,
+          previousVersion,
+          getDisplayedRange(),
+        );
 
         return summary;
       },
@@ -312,12 +348,18 @@ export async function createMediaSession(
           sessionDetections,
           writeOptions,
         );
-        const [projectedFrame = frame] = projectAppendedFrames([frame]);
-        const summary = await appendableSource.appendLiveFrame(projectedFrame);
+        const previousVersion = appendableSource.getVersion();
+        const [projectedFrame = frame] = projectWrittenFrames([frame]);
+        const summary =
+          await requireLiveDetectionSource(appendableSource).appendLiveFrame(
+            projectedFrame,
+          );
 
-        // The newest live result describes the frame on screen, and a live
-        // transport commonly delivers it after that frame was presented.
-        scheduleDetectionRefresh();
+        requestDetectionRefresh(
+          appendableSource,
+          previousVersion,
+          getLiveRange(),
+        );
 
         return summary;
       },
@@ -337,7 +379,9 @@ export async function createMediaSession(
           return null;
         }
 
-        return appendableSource.finalizeCoverage(coverageEndTime);
+        return requireLiveDetectionSource(appendableSource).finalizeCoverage(
+          coverageEndTime,
+        );
       },
 
       async replaceDetectionFrames(frames, writeOptions) {
@@ -349,10 +393,16 @@ export async function createMediaSession(
           sessionDetections,
           writeOptions,
         );
-        const projectedFrames = projectAppendedFrames(frames);
-        const summary = await appendableSource.replaceFrames(projectedFrames);
+        const previousVersion = appendableSource.getVersion();
+        const summary = await appendableSource.replaceFrames(
+          projectWrittenFrames(frames),
+        );
 
-        requestDetectionRefresh(projectedFrames);
+        requestDetectionRefresh(
+          appendableSource,
+          previousVersion,
+          getDisplayedRange(),
+        );
 
         return summary;
       },
@@ -523,6 +573,26 @@ function resolveAppendableSourceOrNull(
     sessionDetections.appendableSources.values().next().value ??
     null
   );
+}
+
+/**
+ * Narrows an appendable source to the live ingestion capability.
+ *
+ * Live appends and coverage finalization are optional on
+ * `WritableDetectionFrameSource` so implementations written before they existed
+ * stay assignable. Such a source fails here with a clear message rather than a
+ * `TypeError` at the call site.
+ */
+function requireLiveDetectionSource(
+  source: WritableDetectionFrameSource,
+): LiveWritableDetectionFrameSource {
+  if (!source.appendLiveFrame || !source.finalizeCoverage) {
+    throw new Error(
+      "This detection source does not support live appends or coverage finalization.",
+    );
+  }
+
+  return source as LiveWritableDetectionFrameSource;
 }
 
 function getErrorMessage(error: unknown, fallback: string) {

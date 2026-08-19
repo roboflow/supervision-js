@@ -25,7 +25,7 @@ export default defineConfig({
         replacement: path.resolve(rootDir, "packages/core/src/index.ts"),
       },
       {
-        find: /^#detections\/(array-detection-frame-source|buffered-detection-timeline|cold-detection-frame-source|composite-detection-frame-source|editable-annotation-frame-session|memory-cold-detection-frame-store|writable-detection-frame-source)$/,
+        find: /^#detections\/(array-detection-frame-source|buffered-detection-timeline|cold-detection-frame-source|composite-detection-frame-source|editable-annotation-frame-session|memory-cold-detection-frame-store|projected-detection-frame-source|writable-detection-frame-source)$/,
         replacement: `${coreSource("detections")}/$1.ts`,
       },
       {

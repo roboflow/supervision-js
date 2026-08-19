@@ -43,7 +43,20 @@ function createPresentationTimelineSampleSink(
         return null;
       }
 
-      return sample.timestamp >= 0 ? sample : clampSampleToZero(sample);
+      if (sample.timestamp >= 0) {
+        return sample;
+      }
+
+      if (isVisibleSample(sample)) {
+        return clampSampleToZero(sample);
+      }
+
+      // Random access can land on pre-roll that ends at or before zero. That
+      // sample is never presented, so fall forward to the first visible one
+      // instead of showing a zero-duration frame at time zero.
+      sample.close();
+
+      return getFirstVisibleSample(sink, options);
     },
 
     async *samples(startTimestamp, endTimestamp, options) {
@@ -57,7 +70,7 @@ function createPresentationTimelineSampleSink(
           continue;
         }
 
-        if (sample.timestamp + sample.duration > 0) {
+        if (isVisibleSample(sample)) {
           yield clampSampleToZero(sample);
           continue;
         }
@@ -66,6 +79,33 @@ function createPresentationTimelineSampleSink(
       }
     },
   };
+}
+
+/**
+ * Pre-roll that ends at or before presentation time zero is decodable but not
+ * presentable, so it is never a valid answer for a seek.
+ */
+function isVisibleSample(sample: DecodedVideoSample) {
+  return sample.timestamp + sample.duration > 0;
+}
+
+async function getFirstVisibleSample(
+  sink: DecodedVideoSampleSink,
+  options: Parameters<DecodedVideoSampleSink["getSample"]>[1],
+) {
+  for await (const sample of sink.samples(0, undefined, options)) {
+    if (sample.timestamp >= 0) {
+      return sample;
+    }
+
+    if (isVisibleSample(sample)) {
+      return clampSampleToZero(sample);
+    }
+
+    sample.close();
+  }
+
+  return null;
 }
 
 function clampSampleToZero(sample: DecodedVideoSample): DecodedVideoSample {

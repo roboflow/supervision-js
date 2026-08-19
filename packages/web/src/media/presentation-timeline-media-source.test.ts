@@ -67,6 +67,25 @@ describe("presentation timeline media source", () => {
     expect(sample).toMatchObject({ duration: 0.02, timestamp: 0 });
   });
 
+  it("skips pre-roll that ends exactly at zero when seeking to zero", async () => {
+    // The mock sink answers a seek with the newest sample at or before the
+    // requested time, which for a seek to zero is the pre-roll sample ending
+    // there. It is decodable but never presented.
+    const preRoll = createSample(-0.04, 0.04);
+    const firstVisible = createSample(0.02, 0.04);
+    const normalized = normalizeMediaSourcePresentationTimeline(
+      createSource({
+        firstTimestamp: -0.04,
+        samples: [preRoll, firstVisible],
+      }),
+    );
+
+    const sample = await normalized.sampleSink.getSample(0);
+
+    expect(sample).toBe(firstVisible);
+    expect(preRoll.close).toHaveBeenCalled();
+  });
+
   it("keeps seeking within the presentation timeline unchanged", async () => {
     const normalized = normalizeMediaSourcePresentationTimeline(
       createSource({

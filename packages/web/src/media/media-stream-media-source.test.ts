@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MediaErrorKind } from "supervision-js-core";
-import { getMediaErrorKind } from "./media-errors";
+import {
+  getMediaErrorKind,
+  isMediaSourceError,
+  type MediaSourceError,
+} from "./media-errors";
 import {
   createMediaStreamRendererSource,
   type MediaStreamPresentedFrame,
@@ -365,5 +369,33 @@ describe("createMediaStreamRendererSource", () => {
       .catch((openError: unknown) => openError);
 
     expect(getMediaErrorKind(error)).toBe(MediaErrorKind.NoVideoTrack);
+  });
+
+  it("classifies a playback failure and preserves its cause", async () => {
+    const cause = new Error("The play() request was aborted.");
+    fakeVideo.play.mockRejectedValueOnce(cause);
+
+    const error = await createMediaStreamRendererSource(
+      new FakeStream(new FakeTrack()) as unknown as MediaStream,
+    )
+      .open()
+      .catch((openError: unknown) => openError);
+
+    expect(isMediaSourceError(error)).toBe(true);
+    expect(getMediaErrorKind(error)).toBe(MediaErrorKind.Network);
+    expect((error as MediaSourceError).cause).toBe(cause);
+  });
+
+  it("reports an unclassifiable playback failure as unknown", async () => {
+    fakeVideo.play.mockRejectedValueOnce(new Error("Something else entirely."));
+
+    const error = await createMediaStreamRendererSource(
+      new FakeStream(new FakeTrack()) as unknown as MediaStream,
+    )
+      .open()
+      .catch((openError: unknown) => openError);
+
+    expect(isMediaSourceError(error)).toBe(true);
+    expect(getMediaErrorKind(error)).toBe(MediaErrorKind.Unknown);
   });
 });

@@ -48,8 +48,9 @@ Start here for normal application code:
   rate, count, and current index while media timestamps remain canonical;
 - `DetectionFrame`
 - `DetectionFrame.coordinateSpace` when detections were produced against a
-  differently sized copy of the media; the session projects vector geometry
-  into media space for you
+  differently sized copy of the media; the renderer projects vector geometry
+  into media space for every detection input, so static frames, caller-owned
+  sources, composite sources, and appended frames all behave the same
 - `Detection`
 - `Detection.trackerId` for identity assigned by a tracking post-processor
 - `Rect`
@@ -144,12 +145,16 @@ not the first thing most users should reach for:
   crosses that boundary, and every field beyond `mediaTime` is optional;
 - `DetectionFrameSource` for caller-owned range loading;
 - `WritableDetectionFrameSource` and `createWritableDetectionFrameSource()` for
-  streaming inference ingestion, including
-  `session.appendLiveDetectionFrame()` for latest-frame/hold-until-next live
-  semantics and `session.finalizeDetectionCoverage()` for closing the final
-  frame at a known end of media;
-- `projectDetectionFrame()` and `projectDetectionFrames()` when a host wants
-  the same coordinate-space projection outside a session;
+  streaming inference ingestion. `appendLiveFrame()` and `finalizeCoverage()`
+  are optional members of `WritableDetectionFrameSource`, so a source written
+  before they existed still satisfies the interface;
+  `createWritableDetectionFrameSource()` returns the narrower
+  `LiveWritableDetectionFrameSource`, which requires both, and the session
+  surfaces them as `session.appendLiveDetectionFrame()` and
+  `session.finalizeDetectionCoverage()`;
+- `projectDetectionFrame()`, `projectDetectionFrames()`, and
+  `createProjectedDetectionFrameSource()` when a host wants the same
+  coordinate-space projection outside a session;
 - `detections.sources`, `MediaSessionDetectionSourceOptions`, and
   `createCompositeDetectionFrameSource()` for composing model predictions,
   draft annotations, review overlays, or other app-owned detection streams over
@@ -187,30 +192,45 @@ also private.
 A producer that streams results into a session has four supported contracts:
 
 - `session.appendDetectionFrames()` writes a batch. Frames that declare
-  `coordinateSpace` are projected into media space first; rectangles, polygons,
-  polylines, and keypoints scale, while masks keep their own intrinsic
+  `coordinateSpace` are normalized into media space before storage; rectangles,
+  polygons, polylines, and keypoints scale, while masks keep their own intrinsic
   dimensions and are never scaled twice.
 - `session.appendLiveDetectionFrame()` writes the newest result for a live
   stream. It stays active until the next live frame supersedes it, at which
-  point the previous frame is closed at the new frame's `mediaTime`. Exactly
-  two frames are written per call, so append cost does not grow with retained
+  point the previous frame is closed at the new frame's `mediaTime`. At most two
+  frames are written per call, so append cost does not grow with retained
   history. Tune the open-ended hold with
   `detections.appendable.live.holdSeconds` (default 60 seconds).
+
+  Live writes are serialized inside the source and the newest causal result
+  wins: concurrent appends are applied in call order, and a result older than
+  the newest accepted live frame is dropped rather than reopening coverage the
+  source already closed. A repeat of the current frame's identity is treated as
+  a revision and replaces it. Because the hold is a placeholder for "still
+  current" rather than covered data, retention windows are measured against the
+  producer's real coverage, not against the hold.
+
 - `session.finalizeDetectionCoverage(endTime?)` closes the last frame at the
-  end of media, defaulting to the renderer's reported duration. Containers can
-  declare a duration slightly beyond the last decoded sample; without this,
-  coverage-gated playback stalls on that terminal sliver. It is idempotent.
+  end of media, defaulting to the renderer's reported duration. It sets that
+  frame's exclusive end to the requested time, extending a finite frame whose
+  container declared a duration past the last decoded sample, or shortening a
+  live frame that is still held open. Without it, coverage-gated playback either
+  stalls on a terminal sliver or believes the source covers time past the end of
+  media. It is idempotent.
 - `session.refresh()` still redraws on demand. By default the session also
-  redraws itself when appended detections cover the displayed time, and after
-  every live frame because a live result describes the frame already on screen.
-  Requests arriving during a redraw collapse into a single follow-up, and
-  batch appends elsewhere on the timeline never force a render. Set
+  redraws itself when a write actually changed the displayed time: a batch
+  append that covers it, and an accepted live result that has not already
+  expired behind it. A live result the source dropped as stale changes nothing
+  and redraws nothing. Requests arriving during a redraw collapse into a single
+  follow-up, and appends elsewhere on the timeline never force a render. Set
   `detections.autoRefresh: false` to own every redraw.
 
 Retention windows evict in place when the cold store implements `pruneFrames`
 (the built-in memory store does), so a long-running stream does not reload and
-rewrite everything it keeps on every append. Stores without that hook keep
-working through a reload-and-replace fallback.
+rewrite everything it keeps on every append. `pruneFrames` rejects a retention
+floor that is not finite and non-negative rather than silently emptying a
+dataset. Stores without that hook keep working through a reload-and-replace
+fallback.
 
 ### Media Failures
 
@@ -227,10 +247,14 @@ if (state.renderer?.source.errorKind === MediaErrorKind.UnsupportedFormat) {
 }
 ```
 
-`MediaSourceError` preserves the originating failure on `cause`, and
-`getMediaErrorKind()` classifies a caught value. Unrecognized failures stay
-representable as `MediaErrorKind.Unknown`, and new kinds may be added over
-time, so treat unknown values like `Unknown`.
+`MediaSourceError` preserves the originating failure on `cause`. Public media
+sources — finite video, `MediaStream`, and image sources — wrap what they throw,
+and `getMediaErrorKind()` classifies any caught value, including one that never
+passed through a source boundary. Unrecognized failures stay representable as
+`MediaErrorKind.Unknown`, and new kinds may be added over time, so treat unknown
+values like `Unknown`. `MediaSourceState.errorKind` is optional, so state
+fixtures written before it existed keep type-checking; read it as
+`state.renderer?.source.errorKind ?? null`.
 
 Finite video sources present a zero-based timeline. Media trimmed through an
 edit list carries decodable samples ahead of presentation time zero; those are

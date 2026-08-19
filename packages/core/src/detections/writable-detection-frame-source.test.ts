@@ -454,7 +454,7 @@ describe("writable detection frame source", () => {
     ]);
   });
 
-  it("keeps holding the current live frame when a later result is not newer", async () => {
+  it("drops an out-of-order live result instead of reopening closed coverage", async () => {
     const store = createInstrumentedMemoryStore();
     const source = createWritableDetectionFrameSource({
       datasetId: "live",
@@ -467,21 +467,18 @@ describe("writable detection frame source", () => {
       frameIndex: 0,
       mediaTime: 2,
     });
-    // An out-of-order result cannot close its predecessor without collapsing
-    // it to a zero-length interval, so the held frame is left alone.
+    const appendCallCount = store.calls.appendedFrameCounts.length;
+    const version = source.getVersion();
+
     await source.appendLiveFrame({
       detections: [{ id: "stale" }],
       frameIndex: 1,
       mediaTime: 1.5,
     });
 
+    expect(store.calls.appendedFrameCounts).toHaveLength(appendCallCount);
+    expect(source.getVersion()).toBe(version);
     expect(await source.loadFrames(0, 40)).toEqual([
-      {
-        detections: [{ id: "stale" }],
-        endTime: 31.5,
-        frameIndex: 1,
-        mediaTime: 1.5,
-      },
       {
         detections: [{ id: "first" }],
         endTime: 32,
@@ -489,6 +486,141 @@ describe("writable detection frame source", () => {
         mediaTime: 2,
       },
     ]);
+  });
+
+  it("revises the held live frame when the newest result repeats its identity", async () => {
+    const source = createWritableDetectionFrameSource({
+      datasetId: "live",
+      live: { holdSeconds: 30 },
+      store: createInstrumentedMemoryStore(),
+    });
+
+    await source.appendLiveFrame({
+      detections: [{ id: "first" }],
+      frameIndex: 0,
+      mediaTime: 2,
+    });
+    await source.appendLiveFrame({
+      detections: [{ id: "revised" }],
+      frameIndex: 0,
+      mediaTime: 2,
+    });
+
+    expect(await source.loadFrames(0, 40)).toEqual([
+      {
+        detections: [{ id: "revised" }],
+        endTime: 32,
+        frameIndex: 0,
+        mediaTime: 2,
+      },
+    ]);
+  });
+
+  it("serializes concurrent live appends so only the newest stays open", async () => {
+    const source = createWritableDetectionFrameSource({
+      datasetId: "live",
+      live: { holdSeconds: 10 },
+      store: createInstrumentedMemoryStore(),
+    });
+
+    await Promise.all([
+      source.appendLiveFrame({
+        detections: [{ id: "first" }],
+        frameIndex: 0,
+        mediaTime: 1,
+      }),
+      source.appendLiveFrame({
+        detections: [{ id: "second" }],
+        frameIndex: 1,
+        mediaTime: 2,
+      }),
+    ]);
+
+    expect(await source.loadFrames(0, 40)).toEqual([
+      {
+        detections: [{ id: "first" }],
+        endTime: 2,
+        frameIndex: 0,
+        mediaTime: 1,
+      },
+      {
+        detections: [{ id: "second" }],
+        endTime: 12,
+        frameIndex: 1,
+        mediaTime: 2,
+      },
+    ]);
+  });
+
+  it("places the retention window on real coverage, not on the live hold", async () => {
+    const source = createWritableDetectionFrameSource({
+      datasetId: "live",
+      live: { holdSeconds: 60 },
+      retention: {
+        mode: DetectionFrameRetentionMode.MemoryOnly,
+        windowSeconds: 2,
+      },
+      store: createInstrumentedMemoryStore(),
+    });
+
+    await source.appendLiveFrame({
+      detections: [{ id: "only" }],
+      frameIndex: 0,
+      mediaTime: 1,
+    });
+
+    expect(source.getAvailableRanges()).toEqual([
+      { endTime: 61, startTime: 1 },
+    ]);
+    expect(await source.loadFrames(0, 61)).toHaveLength(1);
+  });
+
+  it("closes a held live frame at a shorter known end of media", async () => {
+    const source = createWritableDetectionFrameSource({
+      datasetId: "live",
+      live: { holdSeconds: 60 },
+      store: createInstrumentedMemoryStore(),
+    });
+
+    await source.appendLiveFrame({
+      detections: [{ id: "last" }],
+      frameIndex: 0,
+      mediaTime: 2,
+    });
+    await source.finalizeCoverage(3);
+
+    expect(await source.loadFrames(0, 61)).toEqual([
+      {
+        detections: [{ id: "last" }],
+        endTime: 3,
+        frameIndex: 0,
+        mediaTime: 2,
+      },
+    ]);
+    expect(source.getAvailableRanges()).toEqual([{ endTime: 3, startTime: 2 }]);
+  });
+
+  it("finalizes a shortened coverage end only once", async () => {
+    const store = createInstrumentedMemoryStore();
+    const source = createWritableDetectionFrameSource({
+      datasetId: "live",
+      live: { holdSeconds: 60 },
+      store,
+    });
+
+    await source.appendLiveFrame({
+      detections: [{ id: "last" }],
+      frameIndex: 0,
+      mediaTime: 2,
+    });
+    await source.finalizeCoverage(3);
+    const appendCallCount = store.calls.appendedFrameCounts.length;
+    const version = source.getVersion();
+
+    await source.finalizeCoverage(3);
+
+    expect(store.calls.appendedFrameCounts).toHaveLength(appendCallCount);
+    expect(source.getVersion()).toBe(version);
   });
 
   it("finalizes the last frame's coverage once at a known end of media", async () => {

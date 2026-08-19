@@ -162,9 +162,10 @@ export interface MediaSourceState {
    * Stable failure classification when `status` is `Error`, otherwise `null`.
    *
    * Prefer this over `errorMessage` for control flow. Messages are diagnostic
-   * text and may name vendor internals.
+   * text and may name vendor internals. Optional so state fixtures written
+   * against the previous shape stay assignable.
    */
-  readonly errorKind: MediaErrorKind | null;
+  readonly errorKind?: MediaErrorKind | null;
 }
 
 /**

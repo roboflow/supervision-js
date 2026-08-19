@@ -174,15 +174,32 @@ browser runtime.
 A media adapter presents a zero-based presentation timeline. Media trimmed
 through an edit list carries decodable samples ahead of presentation time zero;
 the adapter drops them, presents the sample straddling zero at zero, and reports
-`firstTimestamp` as the presentation start. A consumer should never have to
-clamp the public timeline or write its own opener to get that.
+`firstTimestamp` as the presentation start. Random access follows the same rule
+as iteration: a seek that lands on pre-roll ending at or before zero falls
+forward to the first visible sample rather than presenting a zero-duration
+frame. A consumer should never have to clamp the public timeline or write its
+own opener to get that.
+
+Detection coordinate-space projection is a renderer pipeline step, not a session
+convenience. The renderer knows the media dimensions before it builds its hot
+detection timeline, so it wraps whatever detection source it was given --
+static frames, a caller-owned source, or a composite -- in one projecting
+source. Sessions may additionally normalize what they write so a persisted
+dataset stays in one space; re-projecting an already-projected frame is a
+no-op.
 
 Media failures cross the boundary as a `MediaErrorKind` on
 `MediaSourceState.errorKind` and as a `MediaSourceError` that preserves its
 cause. The kind enum is a semantic contract and lives in core; classifying
-vendor failures into it is the browser adapter's job. Applications branch on the
-kind and own their localized copy; they should never have to match decoder,
+vendor failures into it is the browser adapter's job, and every public media
+source wraps what it throws at its own `open()` boundary. Applications branch on
+the kind and own their localized copy; they should never have to match decoder,
 demuxer, or container message text.
+
+Additions to these public shapes stay structurally compatible. New members of an
+already-published interface are optional, and a capability that must be
+guaranteed gets a narrower interface the factory returns instead of being made
+required on the published one.
 
 Playback state must settle. `Buffering` means playback was requested and is
 waiting for data, so `play()` may not treat it as a settled active run and a

@@ -2,7 +2,7 @@ import type {
   ColdDetectionFrameStoreWriteSummary,
   DetectionFrameRetentionOptions,
   DetectionFrameSourceVersionRange,
-  WritableDetectionFrameSource,
+  LiveWritableDetectionFrameSource,
   WritableDetectionFrameSourceOptions,
 } from "#types/detection-timeline";
 import { DetectionFrameRetentionMode as RetentionMode } from "#types/detection-timeline";
@@ -41,11 +41,19 @@ type RetentionResult =
 
 export function createWritableDetectionFrameSource(
   options: WritableDetectionFrameSourceOptions,
-): WritableDetectionFrameSource {
+): LiveWritableDetectionFrameSource {
   const liveHoldSeconds = resolveLiveHoldSeconds(options.live?.holdSeconds);
   let summary: ColdDetectionFrameStoreWriteSummary | null = null;
   let latestFrame: DetectionFrame | null = null;
   let heldLiveFrame: DetectionFrame | null = null;
+  // Newest live `mediaTime` accepted so far. It survives retention so a late
+  // result cannot reopen coverage the source already moved past.
+  let liveFrontierTime: number | null = null;
+  // Newest media time actually covered by producer-declared data. Live frames
+  // are written with a synthetic hold end, so the summary end time cannot be
+  // used to place the retention window without pushing it into the future.
+  let coverageFrontierTime: number | null = null;
+  let writeQueue: Promise<unknown> = Promise.resolve();
   let version = 0;
   let allRangeVersion = 0;
   let journalFloorVersion = 0;
@@ -118,30 +126,48 @@ export function createWritableDetectionFrameSource(
     async appendFrames(frames) {
       assertActive();
 
-      const nextSummary = await options.store.appendFrames(
-        writeOptions(frames),
-      );
-      assertActive();
-      recordLatestFrame(frames);
+      return enqueueWrite(async () => {
+        const nextSummary = await options.store.appendFrames(
+          writeOptions(frames),
+        );
+        assertActive();
+        recordLatestFrame(frames);
+        recordCoverageFrontierFromFrames(frames);
 
-      return retainAndRecord(nextSummary, getDetectionFrameRanges(frames));
+        return retainAndRecord(nextSummary, getDetectionFrameRanges(frames));
+      });
     },
 
     async appendLiveFrame(frame) {
       assertActive();
 
-      const framesToWrite = createLiveFrameWrite(frame);
-      const nextSummary = await options.store.appendFrames(
-        writeOptions(framesToWrite),
-      );
-      assertActive();
-      heldLiveFrame = framesToWrite.at(-1) ?? null;
-      recordLatestFrame(framesToWrite);
+      return enqueueWrite(async () => {
+        if (isStaleLiveFrame(frame)) {
+          // A result older than the live frontier no longer describes what is
+          // on screen. Writing it would reopen coverage the source already
+          // closed, so the newest causal frame simply wins.
+          return summary ? { ...summary } : createEmptyWriteSummary();
+        }
 
-      return retainAndRecord(
-        nextSummary,
-        getDetectionFrameRanges(framesToWrite),
-      );
+        const framesToWrite = createLiveFrameWrite(frame);
+        const nextSummary = await options.store.appendFrames(
+          writeOptions(framesToWrite),
+        );
+        assertActive();
+        heldLiveFrame = framesToWrite.at(-1) ?? null;
+        liveFrontierTime = Math.max(
+          liveFrontierTime ?? frame.mediaTime,
+          frame.mediaTime,
+        );
+        recordLatestFrame(framesToWrite);
+        // The hold end is a placeholder for "still current", not covered data.
+        recordCoverageFrontier(getFrameEndTime(frame));
+
+        return retainAndRecord(
+          nextSummary,
+          getDetectionFrameRanges(framesToWrite),
+        );
+      });
     },
 
     async finalizeCoverage(endTime) {
@@ -151,64 +177,90 @@ export function createWritableDetectionFrameSource(
         throw new RangeError("finalizeCoverage requires a finite endTime.");
       }
 
-      const frameToFinalize = latestFrame;
+      return enqueueWrite(async () => {
+        const frameToFinalize = latestFrame;
 
-      if (
-        !frameToFinalize ||
-        getFrameEndTime(frameToFinalize) >= endTime ||
-        frameToFinalize.mediaTime > endTime
-      ) {
-        return summary ? { ...summary } : null;
-      }
+        if (
+          !frameToFinalize ||
+          // A frame that starts at or after the end of media cannot describe a
+          // non-empty terminal interval.
+          frameToFinalize.mediaTime >= endTime ||
+          getFrameEndTime(frameToFinalize) === endTime
+        ) {
+          return summary ? { ...summary } : null;
+        }
 
-      const finalizedFrame = { ...frameToFinalize, endTime };
-      const nextSummary = await options.store.appendFrames(
-        writeOptions([finalizedFrame]),
-      );
-      assertActive();
-      latestFrame = finalizedFrame;
+        const previousEndTime = getFrameEndTime(frameToFinalize);
+        const finalizedFrame = { ...frameToFinalize, endTime };
+        const nextSummary = await options.store.appendFrames(
+          writeOptions([finalizedFrame]),
+        );
+        assertActive();
+        latestFrame = finalizedFrame;
 
-      if (
-        heldLiveFrame &&
-        haveSameDetectionFrameIdentity(heldLiveFrame, finalizedFrame)
-      ) {
-        heldLiveFrame = finalizedFrame;
-      }
+        if (
+          heldLiveFrame &&
+          haveSameDetectionFrameIdentity(heldLiveFrame, finalizedFrame)
+        ) {
+          heldLiveFrame = finalizedFrame;
+        }
 
-      return retainAndRecord(nextSummary, [
-        { endTime, startTime: frameToFinalize.mediaTime },
-      ]);
+        coverageFrontierTime = endTime;
+
+        const finalSummary = await retainAndRecord(nextSummary, [
+          {
+            endTime: Math.max(endTime, previousEndTime),
+            startTime: frameToFinalize.mediaTime,
+          },
+        ]);
+
+        // Closing a held live frame shortens coverage. Reported availability
+        // has to shrink with it, or a playback gate would still believe the
+        // source covers time past the end of media.
+        clipAvailableRangesAfter(endTime);
+
+        return finalSummary;
+      });
     },
 
     async replaceFrames(frames) {
       assertActive();
 
-      const nextSummary = await options.store.putFrames(writeOptions(frames));
-      assertActive();
-      latestFrame = null;
-      heldLiveFrame = null;
-      recordLatestFrame(frames);
-      const retention = await applyRetention(nextSummary);
-      assertActive();
+      return enqueueWrite(async () => {
+        const nextSummary = await options.store.putFrames(writeOptions(frames));
+        assertActive();
+        latestFrame = null;
+        heldLiveFrame = null;
+        liveFrontierTime = null;
+        coverageFrontierTime = null;
+        recordLatestFrame(frames);
+        recordCoverageFrontierFromFrames(frames);
+        const retention = await applyRetention(nextSummary);
+        assertActive();
 
-      return recordAllRangesWrite(
-        retention.kind === "unchanged" ? nextSummary : retention.summary,
-      );
+        return recordAllRangesWrite(
+          retention.kind === "unchanged" ? nextSummary : retention.summary,
+        );
+      });
     },
 
     async clear() {
       assertActive();
 
-      await options.store.clearDataset(options.datasetId);
-      assertActive();
-      summary = null;
-      latestFrame = null;
-      heldLiveFrame = null;
-      version += 1;
-      allRangeVersion = version;
-      journalFloorVersion = version;
-      changedRanges.length = 0;
-      availableRanges.length = 0;
+      await enqueueWrite(async () => {
+        await options.store.clearDataset(options.datasetId);
+        assertActive();
+        summary = null;
+        latestFrame = null;
+        heldLiveFrame = null;
+        liveFrontierTime = null;
+        coverageFrontierTime = null;
+        version += 1;
+        allRangeVersion = version;
+        journalFloorVersion = version;
+        changedRanges.length = 0;
+        availableRanges.length = 0;
+      });
     },
 
     async loadFrames(startTime, endTime) {
@@ -333,6 +385,86 @@ export function createWritableDetectionFrameSource(
   }
 
   /**
+   * Runs mutating writes one at a time.
+   *
+   * Every write reads the held live frame, the latest frame, and the coverage
+   * frontier before it awaits storage. Without serialization two concurrent
+   * live appends would both observe the pre-write state and both stay open,
+   * which is exactly the stale overlay live semantics exist to prevent.
+   */
+  function enqueueWrite<TResult>(
+    run: () => Promise<TResult>,
+  ): Promise<TResult> {
+    const result = writeQueue.then(() => {
+      assertActive();
+
+      return run();
+    });
+
+    writeQueue = result.then(
+      () => undefined,
+      () => undefined,
+    );
+
+    return result;
+  }
+
+  function isStaleLiveFrame(frame: DetectionFrame) {
+    if (liveFrontierTime === null || frame.mediaTime > liveFrontierTime) {
+      return false;
+    }
+
+    // A frame at the frontier that shares the held frame's identity is a
+    // revision of the current result, not a late duplicate of an older one.
+    return !(
+      heldLiveFrame && haveSameDetectionFrameIdentity(heldLiveFrame, frame)
+    );
+  }
+
+  function recordCoverageFrontier(endTime: number) {
+    coverageFrontierTime =
+      coverageFrontierTime === null
+        ? endTime
+        : Math.max(coverageFrontierTime, endTime);
+  }
+
+  function recordCoverageFrontierFromFrames(frames: readonly DetectionFrame[]) {
+    for (const frame of frames) {
+      recordCoverageFrontier(getFrameEndTime(frame));
+    }
+  }
+
+  function clipAvailableRangesAfter(endTime: number) {
+    let writeIndex = 0;
+
+    for (const range of availableRanges) {
+      if (range.startTime >= endTime) {
+        continue;
+      }
+
+      availableRanges[writeIndex] = {
+        endTime: Math.min(range.endTime, endTime),
+        startTime: range.startTime,
+      };
+      writeIndex += 1;
+    }
+
+    availableRanges.length = writeIndex;
+  }
+
+  function createEmptyWriteSummary(): ColdDetectionFrameStoreWriteSummary {
+    return {
+      chunkCount: 0,
+      chunkDurationSeconds: options.chunkDurationSeconds ?? 1,
+      datasetId: options.datasetId,
+      detectionCount: 0,
+      endTime: null,
+      frameCount: 0,
+      startTime: null,
+    };
+  }
+
+  /**
    * Applies retention and records the result as an incremental change when the
    * store can prune in place, or as a full rewrite when it cannot.
    */
@@ -388,9 +520,15 @@ export function createWritableDetectionFrameSource(
       throw new Error("retention.windowSeconds must be greater than 0.");
     }
 
+    // Place the window against real producer coverage. A live frame held open
+    // for `holdSeconds` reports a summary end far in the future, and anchoring
+    // eviction there would evict everything the producer just wrote.
     const retentionStartTime = Math.max(
       0,
-      nextSummary.endTime - retentionWindowSeconds,
+      Math.min(
+        coverageFrontierTime ?? nextSummary.endTime,
+        nextSummary.endTime,
+      ) - retentionWindowSeconds,
     );
 
     if (
@@ -442,13 +580,12 @@ export function createWritableDetectionFrameSource(
     };
     const heldFrame = heldLiveFrame;
 
+    // Stale results are rejected before this point, so a held frame that is
+    // neither the same frame nor already closed always ends strictly later.
     if (
       !heldFrame ||
       haveSameDetectionFrameIdentity(heldFrame, openFrame) ||
-      getFrameEndTime(heldFrame) <= frame.mediaTime ||
-      // A live frame that is not strictly newer cannot close its predecessor
-      // without collapsing it to a zero-length interval.
-      heldFrame.mediaTime >= frame.mediaTime
+      getFrameEndTime(heldFrame) <= frame.mediaTime
     ) {
       return [openFrame];
     }

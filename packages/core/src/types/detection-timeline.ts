@@ -418,24 +418,22 @@ export interface WritableDetectionFrameSource extends DetectionFrameSource {
     frames: readonly DetectionFrame[],
   ): Promise<ColdDetectionFrameStoreWriteSummary>;
   /**
-   * Append the newest live frame with latest-frame/hold-until-next semantics.
+   * Optionally append the newest live frame with latest-frame semantics.
    *
-   * The frame is written with an open-ended hold, and the previously held live
-   * frame is closed at this frame's `mediaTime`. Exactly two frames are
-   * written, so append cost does not grow with retained history.
+   * Optional so existing implementations of this interface keep type-checking.
+   * `createWritableDetectionFrameSource` always provides it; see
+   * {@link LiveWritableDetectionFrameSource}.
    */
-  appendLiveFrame(
+  appendLiveFrame?(
     frame: DetectionFrame,
   ): Promise<ColdDetectionFrameStoreWriteSummary>;
   /**
-   * Close the final frame's coverage at a known end of media.
+   * Optionally close the final frame's coverage at a known end of media.
    *
-   * A container can declare a duration slightly beyond the last decoded sample.
-   * Finalizing extends the last retained frame to `endTime` so coverage-gated
-   * playback does not stall on that terminal sliver. It is idempotent and
-   * returns the current summary when there is nothing to extend.
+   * Optional for the same backward-compatibility reason as
+   * {@link WritableDetectionFrameSource.appendLiveFrame}.
    */
-  finalizeCoverage(
+  finalizeCoverage?(
     endTime: number,
   ): Promise<ColdDetectionFrameStoreWriteSummary | null>;
   replaceFrames(
@@ -446,4 +444,40 @@ export interface WritableDetectionFrameSource extends DetectionFrameSource {
   getAvailableRanges(): readonly DetectionFrameSourceVersionRange[];
   getSummary(): ColdDetectionFrameStoreWriteSummary | null;
   getVersion(range?: DetectionFrameSourceVersionRange): number;
+}
+
+/**
+ * Writable detection source that also supports live ingestion.
+ *
+ * `createWritableDetectionFrameSource` returns this shape. Consumers that only
+ * implement the historical {@link WritableDetectionFrameSource} contract stay
+ * assignable to it, so live ingestion is an added capability rather than a
+ * required one.
+ */
+export interface LiveWritableDetectionFrameSource extends WritableDetectionFrameSource {
+  /**
+   * Append the newest live frame with latest-frame/hold-until-next semantics.
+   *
+   * The frame is written with an open-ended hold, and the previously held live
+   * frame is closed at this frame's `mediaTime`. At most two frames are
+   * written, so append cost does not grow with retained history. Writes are
+   * serialized internally and a frame older than the newest accepted live
+   * frame is dropped, so the newest causal result always wins.
+   */
+  appendLiveFrame(
+    frame: DetectionFrame,
+  ): Promise<ColdDetectionFrameStoreWriteSummary>;
+  /**
+   * Close the final frame's coverage at a known end of media.
+   *
+   * A container can declare a duration beyond the last decoded sample, and a
+   * live frame is deliberately held open past the data it describes. Finalizing
+   * sets the latest frame's exclusive end to `endTime`, extending or shortening
+   * it as needed, so coverage-gated playback neither stalls on a terminal
+   * sliver nor believes the source covers time past the end of media. It is
+   * idempotent and returns the current summary when there is nothing to change.
+   */
+  finalizeCoverage(
+    endTime: number,
+  ): Promise<ColdDetectionFrameStoreWriteSummary | null>;
 }

@@ -17,6 +17,7 @@ export {
   type EditableAnnotationFrameSession,
 } from "#detections/editable-annotation-frame-session";
 export { createMemoryColdDetectionFrameStore } from "#detections/memory-cold-detection-frame-store";
+export { createProjectedDetectionFrameSource } from "#detections/projected-detection-frame-source";
 export { createWritableDetectionFrameSource } from "#detections/writable-detection-frame-source";
 
 // Semantic post-processing.
@@ -307,6 +308,7 @@ export {
   type DetectionFrameSourceVersionRange,
   type DetectionPlaybackGateOptions,
   type DetectionTimelineContext,
+  type LiveWritableDetectionFrameSource,
   type WritableDetectionFrameSource,
   type WritableDetectionFrameSourceOptions,
 } from "#types/detection-timeline";

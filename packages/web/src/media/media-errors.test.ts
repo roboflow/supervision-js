@@ -43,6 +43,15 @@ describe("media errors", () => {
     expect(getMediaErrorKind(error)).toBe(MediaErrorKind.NoVideoTrack);
   });
 
+  it("classifies an unwrapped failure that reached a consumer", () => {
+    expect(getMediaErrorKind(new Error("Network request failed."))).toBe(
+      MediaErrorKind.Network,
+    );
+    expect(getMediaErrorKind(new Error("Something else entirely."))).toBe(
+      MediaErrorKind.Unknown,
+    );
+  });
+
   it("represents non-error throws without inventing a kind", () => {
     const error = toMediaSourceError("boom", "Unable to open this media.");
 

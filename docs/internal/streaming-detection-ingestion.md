@@ -91,14 +91,34 @@ Leaving every frame open instead is what makes this expensive: overlapping
 open-ended intervals pile up in the hot window, and each append reloads,
 deep-copies, and re-sorts them all.
 
+Two properties keep that encoding honest under a real transport:
+
+- **Serialization.** Every live append reads the held frame before it awaits
+  storage, so the source runs its mutating writes through one internal queue.
+  Concurrent appends therefore apply in call order and only the newest stays
+  open, instead of both observing the same pre-write state.
+- **Latest-wins.** A result older than the newest accepted live frame is
+  dropped. Reordered transports are normal, and writing a late result would
+  reopen coverage the source already closed. A repeat of the held frame's
+  identity is a revision and replaces it.
+
+The hold is a placeholder for "still current", not a claim about covered data.
+Retention therefore measures its window against the producer's real coverage
+frontier. Anchoring it on the summary end time would push the retention floor
+`holdSeconds` into the future and evict the frames the producer just wrote.
+
 ## Finalizing Coverage
 
 A container can declare a duration slightly beyond its last decoded sample --
 9.0 seconds for 89 frames at 10fps, for example. Coverage-gated playback then
 waits forever for that terminal sliver at the loop boundary.
-`finalizeCoverage(endTime)` extends the last retained frame to a known end of
-media without reaching into store internals, and is idempotent so a producer can
-call it whenever it finishes.
+`finalizeCoverage(endTime)` sets the last retained frame's exclusive end to a
+known end of media without reaching into store internals. It extends a finite
+terminal frame, and it shortens a live frame that is still held open past the
+end of media -- otherwise a stream that ends earlier than its hold would keep
+reporting coverage that does not exist. Reported availability is clipped with
+it. The operation is idempotent, so a producer can call it whenever it
+finishes.
 
 ## Prediction-Gated Playback
 

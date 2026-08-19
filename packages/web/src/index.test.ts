@@ -127,6 +127,7 @@ describe("package entrypoint", () => {
       "createMediaStreamRendererSource",
       "createMemoryColdDetectionFrameStore",
       "createOCSortTracker",
+      "createProjectedDetectionFrameSource",
       "createSortTracker",
       "createStaticImageMediaSource",
       "createWritableDetectionFrameSource",

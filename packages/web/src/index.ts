@@ -6,6 +6,7 @@ export { createChunkedDetectionFrameSource } from "#detections/chunked-detection
 export { createColdDetectionFrameSource } from "supervision-js-core";
 export { createCompositeDetectionFrameSource } from "supervision-js-core";
 export { createMemoryColdDetectionFrameStore } from "supervision-js-core";
+export { createProjectedDetectionFrameSource } from "supervision-js-core";
 export { createWritableDetectionFrameSource } from "supervision-js-core";
 export {
   projectDetectionFrame,
@@ -279,6 +280,7 @@ export {
   type DetectionFrameSourceVersionRange,
   type DetectionPlaybackGateOptions,
   type DetectionTimelineContext,
+  type LiveWritableDetectionFrameSource,
   type WritableDetectionFrameSource,
   type WritableDetectionFrameSourceOptions,
 } from "supervision-js-core";

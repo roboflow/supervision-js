@@ -55,10 +55,13 @@ export function toMediaSourceError(
 }
 
 /**
- * Failure kind of a media error, or `Unknown` for anything unclassified.
+ * Failure kind of any caught media failure.
+ *
+ * A `MediaSourceError` reports the kind chosen where it failed. Anything else
+ * is classified from its message, and stays `Unknown` when no kind fits.
  */
 export function getMediaErrorKind(error: unknown): MediaErrorKind {
-  return isMediaSourceError(error) ? error.kind : MediaErrorKind.Unknown;
+  return toMediaSourceError(error).kind;
 }
 
 function classifyMediaErrorMessage(message: string): MediaErrorKind {

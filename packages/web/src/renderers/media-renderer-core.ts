@@ -1,6 +1,7 @@
 import {
   createArrayDetectionFrameSource,
   createDefaultAnnotationPresentation,
+  createProjectedDetectionFrameSource,
   resolveAnnotationRendererPresentation,
 } from "supervision-js-core";
 import {
@@ -446,9 +447,21 @@ export async function createMediaRendererCore(
     const { metadata } = mediaSource;
 
     firstTimestamp = metadata.firstTimestamp;
-    const detectionSource =
+    // One central projection step for every detection input this renderer can
+    // receive: static frames, a caller-owned source, or a composite source.
+    // Media dimensions are known here, so a producer can declare its own
+    // coordinate space and have vector geometry projected exactly once.
+    const detectionSource = createProjectedDetectionFrameSource(
       options.detectionSource ??
-      createArrayDetectionFrameSource(options.detectionFrames);
+        createArrayDetectionFrameSource(options.detectionFrames),
+      () =>
+        metadata.primaryVideoWidth > 0 && metadata.primaryVideoHeight > 0
+          ? {
+              height: metadata.primaryVideoHeight,
+              width: metadata.primaryVideoWidth,
+            }
+          : null,
+    );
     detectionTimeline = createBufferedDetectionTimeline({
       source:
         options.detectionTimelineOrigin ===

@@ -4,7 +4,7 @@ import type {
   DecodedVideoSampleSink,
 } from "#media/media-source";
 import type { MediaRendererSource } from "#types/media-renderer";
-import { MediaSourceError } from "#media/media-errors";
+import { MediaSourceError, toMediaSourceError } from "#media/media-errors";
 import { MediaErrorKind, includeDefined } from "supervision-js-core";
 
 const DEFAULT_MAX_BUFFERED_FRAMES = 8;
@@ -382,7 +382,10 @@ async function openMediaStreamMediaSource(
     if (terminalError !== undefined) throw terminalError;
     const firstFrame = bufferedFrames[0];
     if (!firstFrame)
-      throw new Error("MediaStream ended before producing a video frame.");
+      throw new MediaSourceError(
+        MediaErrorKind.Unreadable,
+        "MediaStream ended before producing a video frame.",
+      );
 
     return {
       input: { dispose },
@@ -404,7 +407,9 @@ async function openMediaStreamMediaSource(
   } catch (error) {
     dispose();
     rejectWaiters(error);
-    throw error;
+    // Playback and capture failures reach the public source boundary here.
+    // Classify them so consumers branch on a kind instead of vendor text.
+    throw toMediaSourceError(error, "Unable to start MediaStream playback.");
   }
 }
 

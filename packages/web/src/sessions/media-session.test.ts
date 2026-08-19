@@ -123,6 +123,177 @@ describe("media session", () => {
     session.destroy();
   });
 
+  it("projects initial detection frames into media space", async () => {
+    resetMocks();
+    const { createMediaSession } = await import("../index");
+
+    const session = await createMediaSession({
+      container: createContainer(),
+      detections: {
+        frames: [
+          {
+            coordinateSpace: { height: 360, width: 640 },
+            detections: [
+              {
+                id: "half-space",
+                rect: { height: 36, width: 64, x: 32, y: 18 },
+              },
+            ],
+            endTime: 1,
+            frameIndex: 0,
+            mediaTime: 0,
+          },
+        ],
+      },
+      media: "sample.mp4",
+      renderer: { autoPlay: false },
+    });
+
+    expect(session.renderer.getActiveDetectionFrame()).toMatchObject({
+      coordinateSpace: { height: 720, width: 1280 },
+      detections: [{ rect: { height: 72, width: 128, x: 64, y: 36 } }],
+    });
+
+    session.destroy();
+  });
+
+  it("projects a caller-owned detection source and leaves masks alone", async () => {
+    resetMocks();
+    const { createMediaSession } = await import("../index");
+
+    const mask = {
+      counts: "abc",
+      encoding: DetectionMaskEncoding.CompressedRle,
+      height: 90,
+      width: 160,
+    } as const;
+    const session = await createMediaSession({
+      container: createContainer(),
+      detections: {
+        source: {
+          async loadFrames() {
+            return [
+              {
+                coordinateSpace: { height: 360, width: 640 },
+                detections: [
+                  {
+                    id: "scaled",
+                    mask,
+                    polygon: {
+                      points: [
+                        { x: 32, y: 18 },
+                        { x: 64, y: 36 },
+                        { x: 96, y: 54 },
+                      ],
+                    },
+                  },
+                ],
+                endTime: 0.5,
+                frameIndex: 0,
+                mediaTime: 0,
+              },
+              {
+                detections: [
+                  {
+                    id: "already-media-space",
+                    polygon: {
+                      points: [
+                        { x: 8, y: 4 },
+                        { x: 16, y: 8 },
+                        { x: 24, y: 12 },
+                      ],
+                    },
+                  },
+                ],
+                endTime: 1,
+                frameIndex: 1,
+                mediaTime: 0.5,
+              },
+            ];
+          },
+        },
+      },
+      media: "sample.mp4",
+      renderer: { autoPlay: false },
+    });
+
+    await session.refresh();
+
+    expect(session.renderer.getActiveDetectionFrame()).toMatchObject({
+      detections: [
+        {
+          id: "scaled",
+          // Masks carry their own dimensions and must not be scaled again.
+          mask,
+          polygon: {
+            points: [
+              { x: 64, y: 36 },
+              { x: 128, y: 72 },
+              { x: 192, y: 108 },
+            ],
+          },
+        },
+      ],
+    });
+
+    session.destroy();
+  });
+
+  it("leaves a detection source without coordinate metadata untouched", async () => {
+    resetMocks();
+    const { createMediaSession } = await import("../index");
+
+    const session = await createMediaSession({
+      container: createContainer(),
+      detections: {
+        source: {
+          async loadFrames() {
+            return [
+              {
+                detections: [
+                  {
+                    id: "already-media-space",
+                    polygon: {
+                      points: [
+                        { x: 8, y: 4 },
+                        { x: 16, y: 8 },
+                        { x: 24, y: 12 },
+                      ],
+                    },
+                  },
+                ],
+                endTime: 1,
+                frameIndex: 0,
+                mediaTime: 0,
+              },
+            ];
+          },
+        },
+      },
+      media: "sample.mp4",
+      renderer: { autoPlay: false },
+    });
+
+    await session.refresh();
+
+    expect(session.renderer.getActiveDetectionFrame()).toMatchObject({
+      detections: [
+        {
+          id: "already-media-space",
+          polygon: {
+            points: [
+              { x: 8, y: 4 },
+              { x: 16, y: 8 },
+              { x: 24, y: 12 },
+            ],
+          },
+        },
+      ],
+    });
+
+    session.destroy();
+  });
+
   it("projects appended detections from their declared coordinate space", async () => {
     resetMocks();
     const { createMediaSession } = await import("../index");
@@ -349,7 +520,7 @@ describe("media session", () => {
     session.destroy();
   });
 
-  it("redraws for every live detection frame", async () => {
+  it("redraws for an accepted live frame that covers the displayed time", async () => {
     resetMocks();
     const { createMediaSession } = await import("../index");
 
@@ -372,6 +543,75 @@ describe("media session", () => {
     });
 
     await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+
+    refresh.mockRestore();
+    session.destroy();
+  });
+
+  it("does not redraw for a stale live result the source dropped", async () => {
+    resetMocks();
+    const { createMediaSession } = await import("../index");
+
+    const session = await createMediaSession({
+      container: createContainer(),
+      detections: { appendable: { datasetId: "stale-live-refresh" } },
+      media: "sample.mp4",
+      renderer: { autoPlay: false },
+    });
+
+    await session.appendLiveDetectionFrame({
+      detections: [{ id: "current" }],
+      frameIndex: 1,
+      mediaTime: 2,
+    });
+
+    const refresh = vi
+      .spyOn(session.renderer, "refresh")
+      .mockResolvedValue(undefined);
+
+    await session.appendLiveDetectionFrame({
+      detections: [{ id: "stale" }],
+      frameIndex: 0,
+      mediaTime: 1,
+    });
+
+    expect(refresh).not.toHaveBeenCalled();
+
+    refresh.mockRestore();
+    session.destroy();
+  });
+
+  it("does not redraw for live coverage that already expired before the displayed time", async () => {
+    resetMocks();
+    const { createMediaSession } = await import("../index");
+
+    const session = await createMediaSession({
+      container: createContainer(),
+      detections: {
+        appendable: {
+          datasetId: "expired-live-refresh",
+          live: { holdSeconds: 0.01 },
+        },
+      },
+      media: "sample.mp4",
+      renderer: { autoPlay: false },
+    });
+
+    await session.stepForward();
+
+    const refresh = vi
+      .spyOn(session.renderer, "refresh")
+      .mockResolvedValue(undefined);
+
+    // The hold expires well before the presented frame, so this result is not
+    // what is on screen and must not force a render.
+    await session.appendLiveDetectionFrame({
+      detections: [{ id: "expired" }],
+      frameIndex: 0,
+      mediaTime: 0,
+    });
+
+    expect(refresh).not.toHaveBeenCalled();
 
     refresh.mockRestore();
     session.destroy();

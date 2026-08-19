@@ -103,6 +103,7 @@ export function createMemoryColdDetectionFrameStore(): ColdDetectionFrameStore {
 
     async pruneFrames(options: ColdDetectionFrameStorePruneOptions) {
       assertActive();
+      assertRetentionFloor(options.startTime);
 
       const dataset = datasets.get(options.datasetId);
 
@@ -404,4 +405,19 @@ function getDetectionFrameDedupeKey(frame: DetectionFrame) {
   return frame.frameIndex === undefined
     ? `time:${frame.mediaTime}`
     : `index:${frame.frameIndex}`;
+}
+
+/**
+ * Rejects a retention floor that could not describe a real media time.
+ *
+ * Pruning mutates retained history in place, and `NaN` compares false against
+ * every retained frame, so an unvalidated floor would silently erase a dataset
+ * instead of evicting a bounded range.
+ */
+function assertRetentionFloor(startTime: number) {
+  if (!Number.isFinite(startTime) || startTime < 0) {
+    throw new RangeError(
+      "pruneFrames requires a finite, non-negative startTime.",
+    );
+  }
 }
