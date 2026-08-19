@@ -9,7 +9,7 @@ export const PlaybackControls = memo(function PlaybackControls({
 }: {
   readonly playbackState: MediaRendererPlaybackState | null;
   readonly disabled: boolean;
-  readonly onStepFrame: (frameDelta: number) => void;
+  readonly onStepFrame: (direction: 1 | -1) => void;
   readonly onTogglePlayback: () => void;
 }) {
   const isPlaybackActive =

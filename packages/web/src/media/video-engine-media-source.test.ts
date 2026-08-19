@@ -262,6 +262,8 @@ describe("video engine media source", () => {
     const source = await rendererSource.open();
 
     expect(source.metadata.primaryVideoWidth).toBe(1920);
-    expect(engine.options).toEqual([{ source: urlSource }]);
+    expect(engine.options).toEqual([
+      { presentation: "frames", source: urlSource },
+    ]);
   });
 });

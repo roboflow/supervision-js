@@ -4,22 +4,28 @@ import type {
   DecodedVideoSample,
   DecodedVideoSampleSink,
 } from "#media/media-source";
+import type { PresentedFrameChannel } from "#renderers/presented-frame-channel";
 import type { MediaRendererSource } from "#types/media-renderer";
-import { SourceKind, VideoEngine } from "@roboflow/video-engine";
 import type {
   DecodeResolutionStrategy,
   EngineReadySnapshot,
+  VideoEngine,
   VideoEngineOptions,
   VideoSource,
 } from "@roboflow/video-engine";
-import { AnalysisSession } from "@roboflow/video-engine/analysis";
-import type { ExtractedFrame } from "@roboflow/video-engine/analysis";
+import type {
+  AnalysisSession,
+  ExtractedFrame,
+} from "@roboflow/video-engine/analysis";
 
 const MILLISECONDS_PER_SECOND = 1000;
 const DEFAULT_FRAME_RATE = 30;
 const TIMESTAMP_EPSILON_SECONDS = 1e-6;
 
-export interface VideoEngineMediaSourceOptions extends VideoEngineOptions {
+export interface VideoEngineMediaSourceOptions extends Omit<
+  VideoEngineOptions,
+  "presentation"
+> {
   /**
    * Sizes the frames the pull path decodes. The inherited `decodeStrategy`
    * sizes what the engine decodes for its own presentation.
@@ -28,8 +34,11 @@ export interface VideoEngineMediaSourceOptions extends VideoEngineOptions {
 }
 
 export interface VideoEngineMediaSource extends DecodedMediaSource {
-  /** The loaded engine, kept reachable so the push channel can attach to it. */
-  readonly engine: VideoEngine;
+  /**
+   * The loaded engine. Naming the renderer's channel in the type is what fails
+   * the build if the engine's transport stops answering that seam.
+   */
+  readonly engine: VideoEngine & PresentedFrameChannel;
 }
 
 /**
@@ -38,14 +47,20 @@ export interface VideoEngineMediaSource extends DecodedMediaSource {
  * The pull path, `sampleSink`, serves one-off reads such as thumbnails and
  * single frame grabs, decoding each request from scratch through the engine's
  * batch analysis entry. The push path serves playback and scrub presentation:
- * the engine paints presented frames on its own canvas and announces them, so a
- * compositor subscribes to `engine` and never pulls samples here.
+ * the engine holds no canvas, paints nothing, and announces every frame that
+ * earns the screen, so a compositor subscribes to `engine` and never pulls
+ * samples here.
  */
 export async function openVideoEngineMediaSource(
   options: VideoEngineMediaSourceOptions,
 ): Promise<VideoEngineMediaSource> {
+  // The engine arrives via dynamic import so the package entry stays loadable
+  // for consumers that never open a video-engine source: the specifier is
+  // external to the build, and a static import would make resolving it a
+  // precondition of importing the package at all.
+  const { VideoEngine } = await import("@roboflow/video-engine");
   const { frameDecodeStrategy, ...engineOptions } = options;
-  const engine = new VideoEngine(engineOptions);
+  const engine = new VideoEngine({ ...engineOptions, presentation: "frames" });
 
   try {
     const snapshot = await engine.load();
@@ -91,10 +106,13 @@ function createAnalysisFrameReader(options: {
   let closed = false;
 
   const openSession = () => {
-    sessionPromise ??= AnalysisSession.open({
-      decodeStrategy: options.decodeStrategy,
-      source: options.source,
-    });
+    sessionPromise ??= import("@roboflow/video-engine/analysis").then(
+      ({ AnalysisSession }) =>
+        AnalysisSession.open({
+          decodeStrategy: options.decodeStrategy,
+          source: options.source,
+        }),
+    );
     return sessionPromise;
   };
 
@@ -193,12 +211,10 @@ function createMetadata(
         ? Math.max(1, Math.round(duration * estimatedFrameRate))
         : null,
     estimatedFrameRate,
-    // The engine's ready snapshot carries no first-sample timestamp, so a clip
-    // whose container starts at a non-zero time reports its origin as zero.
     firstTimestamp: snapshot.firstTimestampMs / MILLISECONDS_PER_SECOND,
     formatMimeType: null,
     formatName: "video-engine",
-    mimeType: source.kind === SourceKind.Stream ? source.mimeType : null,
+    mimeType: "stream" in source ? source.mimeType : null,
     primaryVideoHeight: snapshot.naturalHeight,
     primaryVideoWidth: snapshot.naturalWidth,
     trackCount: 1,

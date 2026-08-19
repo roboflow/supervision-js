@@ -16,6 +16,14 @@ import {
   type MediaSourceState,
   type RenderPreparationDiagnostics,
 } from "supervision";
+import {
+  createPresentedFrameTap,
+  type PresentedFrameTap,
+} from "../diagnostics/presented-frame-tap";
+import {
+  samplePresentationDiagnostics,
+  type PresentationDiagnosticsSample,
+} from "../diagnostics/presentation-diagnostics";
 import type {
   DemoFixtureFrameTransform,
   DemoFixtureSummary,
@@ -63,6 +71,7 @@ export interface DemoRendererState {
   readonly hoveredDetectionPick: DetectionPickResult | null;
   readonly mediaState: DemoMediaState;
   readonly playbackState: MediaRendererPlaybackState | null;
+  readonly readPresentationDiagnostics: () => PresentationDiagnosticsSample;
   readonly presentationSettings: DemoPresentationSettings;
   readonly presentationAvailability?: DemoPresentationAvailability;
   readonly renderQuality: DemoRenderQuality;
@@ -80,9 +89,10 @@ export interface DemoRendererState {
   readonly uploadFileName: string | null;
   readonly uploadInferenceState: UploadInferenceState;
   readonly onCancelUploadInference: () => void;
+  readonly onScrub: (time: number) => void;
   readonly onSeek: (time: number) => void;
   readonly onStartUploadInference: () => void;
-  readonly onStepFrame: (frameDelta: number) => void;
+  readonly onStepFrame: (direction: 1 | -1) => void;
   readonly onTogglePlayback: () => void;
   readonly onUploadFileChange: (file: File | null) => void;
   readonly onClearSelectedDetection: () => void;
@@ -126,7 +136,6 @@ const initialUploadInferenceState: UploadInferenceState = {
   completedFrames: 0,
   errorMessage: null,
   inferredDetections: 0,
-  normalizedRanges: [],
   preparedMedia: null,
   processedRanges: [],
   processingRanges: [],
@@ -155,6 +164,9 @@ export function useDemoRenderer(
       },
       initialFixture.presentationAvailability,
     ),
+  );
+  const [presentedFrameTap] = useState<PresentedFrameTap>(() =>
+    createPresentedFrameTap(),
   );
   const containerRef = useRef<HTMLDivElement | null>(null);
   const effectRunRef = useRef(0);
@@ -328,6 +340,7 @@ export function useDemoRenderer(
             presentationSettings: presentationSettingsRef.current,
             presentationTransform,
             renderQuality,
+            tapMediaSource: presentedFrameTap.tap,
           });
 
           activeSession = session;
@@ -350,6 +363,7 @@ export function useDemoRenderer(
             onUploadState: setUploadInferenceState,
             presentationSettings: presentationSettingsRef.current,
             renderQuality,
+            tapMediaSource: presentedFrameTap.tap,
             uploadRun,
           });
 
@@ -399,6 +413,7 @@ export function useDemoRenderer(
     activeFixture,
     fixtureFrameTransform,
     presentationTransform,
+    presentedFrameTap,
     sourceMode,
     syncRendererState,
     uploadRun,
@@ -422,26 +437,8 @@ export function useDemoRenderer(
       return;
     }
 
-    const playbackState = renderer.getState().playbackState;
-
-    if (
-      playbackState === MediaRendererPlaybackState.Playing ||
-      playbackState === MediaRendererPlaybackState.Buffering
-    ) {
-      renderer.pause();
-      syncRendererState(renderer);
-      return;
-    }
-
-    void renderer
-      .play()
-      .then(() => syncRendererState(renderer))
-      .catch((error: unknown) => {
-        setErrorMessage(
-          getErrorMessage(error, "Unable to toggle media playback."),
-        );
-        syncRendererState(renderer);
-      });
+    renderer.togglePlayback();
+    syncRendererState(renderer);
   }, [syncRendererState]);
 
   const onSeek = useCallback(
@@ -473,31 +470,40 @@ export function useDemoRenderer(
     [syncRendererState],
   );
 
+  const onScrub = useCallback((time: number) => {
+    rendererRef.current?.scrub(time);
+  }, []);
+
+  const readPresentationDiagnostics = useCallback(
+    () =>
+      samplePresentationDiagnostics({
+        renderer: rendererRef.current,
+        tap: presentedFrameTap,
+      }),
+    [presentedFrameTap],
+  );
+
   const onStepFrame = useCallback(
-    (frameDelta: number) => {
+    (direction: 1 | -1) => {
       const renderer = rendererRef.current;
 
       if (!renderer) {
         return;
       }
 
-      const state = renderer.getState();
-      const frameRate = fixtureSummary?.inferenceFrameRate ?? 30;
-      const currentFrameIndex =
-        state.activeDetectionFrameIndex ??
-        Math.round(Math.max(0, state.currentTime) * frameRate);
-      const duration = state.duration ?? fixtureSummary?.duration ?? null;
-      const targetTime = Math.max(
-        0,
-        Math.min(
-          (currentFrameIndex + frameDelta) / frameRate,
-          duration ?? Number.POSITIVE_INFINITY,
-        ),
-      );
+      setHoveredDetectionPick(null);
+      setSelectedDetectionPick(null);
+      const stepped =
+        direction === 1 ? renderer.stepForward() : renderer.stepBackward();
 
-      onSeek(targetTime);
+      void stepped
+        .then(() => syncRendererState(renderer))
+        .catch((error: unknown) => {
+          setErrorMessage(getErrorMessage(error, "Unable to step media."));
+          syncRendererState(renderer);
+        });
     },
-    [fixtureSummary, onSeek],
+    [syncRendererState],
   );
 
   const onClearSelectedDetection = useCallback(() => {
@@ -662,6 +668,7 @@ export function useDemoRenderer(
     nextSourceMode: DemoSourceMode,
   ) {
     container.replaceChildren();
+    presentedFrameTap.reset();
     rendererRef.current = null;
     setDetectionSourceState(initialDetectionSourceState);
     setErrorMessage(null);
@@ -718,6 +725,7 @@ export function useDemoRenderer(
     mediaState,
     onCancelUploadInference,
     onClearSelectedDetection,
+    onScrub,
     onSeek,
     onStartUploadInference,
     onStepFrame,
@@ -725,6 +733,7 @@ export function useDemoRenderer(
     onUploadFileChange,
     playbackState,
     presentationSettings,
+    readPresentationDiagnostics,
     refreshPresentation,
     presentationAvailability:
       sourceMode === DemoSourceMode.Fixture

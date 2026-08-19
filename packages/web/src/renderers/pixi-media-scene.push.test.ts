@@ -333,7 +333,7 @@ function presentedFrame(mediaTimeMs: number) {
 }
 
 function createSceneOptions(
-  presentedFrameChannel: MediaRendererSceneOptions["presentedFrameChannel"],
+  presentedFrames: MediaRendererSceneOptions["presentedFrames"],
 ): MediaRendererSceneOptions {
   return {
     annotationOverlayStyle: null,
@@ -361,7 +361,7 @@ function createSceneOptions(
     maxDevicePixelRatio: 1,
     polygonStyle: undefined,
     polylineStyle: null,
-    presentedFrameChannel,
+    presentedFrames,
     previewOverlay: undefined,
     regionRenderers: [],
     renderPreparation: undefined,

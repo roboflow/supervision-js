@@ -25,6 +25,7 @@ import type { FramePresentTargets } from "./pixi-frame-present";
 import type { PresentedVideoFrame } from "./presented-frame-channel";
 import { createSceneRenderScheduler } from "./scene-render-scheduler";
 import type { SceneRenderSignature } from "./scene-render-scheduler";
+import { createPreparedAnnotationWindow } from "./prepared-annotation-window";
 import { createPixiBoxLayer, type PixiBoxLayerState } from "./pixi-box-layer";
 import { createPixiFocusLayer } from "./pixi-focus-layer";
 import { createPixiInteractionLayer } from "./pixi-interaction-layer";
@@ -154,7 +155,7 @@ export async function createPixiMediaScene(
   } = pixi;
   const { GifSprite } = await import("pixi.js/gif");
   const app: PixiApplication = new Application();
-  const frameChannel = options.presentedFrameChannel;
+  const frameChannel = options.presentedFrames;
   let currentLabelStyle: LabelStyle | null = options.labelStyle ?? null;
   let currentMaskStyle: MaskStyle | null = options.maskStyle ?? null;
   let currentPolygonStyle: PolygonStyle | null =
@@ -175,6 +176,27 @@ export async function createPixiMediaScene(
     readonly style: MaskStyle;
     readonly version: number;
   } | null = null;
+  const annotationWindow = createPreparedAnnotationWindow({
+    detectionTimeline: options.detectionTimeline,
+    getLayers: () =>
+      [maskLayer, polygonLayer].filter(
+        (layer): layer is NonNullable<typeof layer> => layer !== undefined,
+      ),
+    getPlayheadMediaTime: () => currentMediaTime,
+    renderPreparation: options.renderPreparation,
+  });
+  /**
+   * What the annotation layers read. Under push presentation that is the
+   * window, so a frame it does not cover reaches no layer at all; a pull scene
+   * keeps drawing whatever the timeline holds.
+   */
+  const annotationDetectionTimeline = frameChannel
+    ? annotationWindow.preparedFrameTimeline
+    : options.detectionTimeline;
+  /** What the window answered for the media time the layers last drew. */
+  let drawnReadiness: string | null = null;
+  let isPresenting = false;
+  let isDestroyed = false;
   const resolveContextState = (
     detection: DetectionFrame["detections"][number],
   ) => resolveAnnotationStyleState(detection, currentVisibility);
@@ -189,7 +211,7 @@ export async function createPixiMediaScene(
   const boxLayer = createPixiBoxLayer({
     boxStyle: options.boxStyle,
     Container: options.editingEngine ? Container : undefined,
-    detectionTimeline: options.detectionTimeline,
+    detectionTimeline: annotationDetectionTimeline,
     Graphics: options.editingEngine ? Graphics : undefined,
     resolveContextState,
   });
@@ -207,6 +229,7 @@ export async function createPixiMediaScene(
           Texture,
           UniformGroup,
           detectionTimeline: options.detectionTimeline,
+          onPreparedWindowChange: handlePreparedWindowChange,
           polygonStyle: currentPolygonStyle,
           renderPreparation: options.renderPreparation,
           resolveContextState,
@@ -215,7 +238,7 @@ export async function createPixiMediaScene(
   const vectorLayer = createPixiVectorLayer({
     Container,
     Graphics,
-    detectionTimeline: options.detectionTimeline,
+    detectionTimeline: annotationDetectionTimeline,
     polygonStyle: polygonLayer?.getVectorFallbackStyle() ?? currentPolygonStyle,
     polylineStyle: options.polylineStyle,
     keypointStyle: options.keypointStyle,
@@ -227,7 +250,7 @@ export async function createPixiMediaScene(
     Container,
     GifSprite,
     Sprite,
-    detectionTimeline: options.detectionTimeline,
+    detectionTimeline: annotationDetectionTimeline,
     onInvalidate: () => {
       if (!hasPresentedSample || mediaWidth <= 0 || mediaHeight <= 0) return;
       const boxState = boxLayer.drawFrame(currentMediaTime, viewportScale);
@@ -270,7 +293,7 @@ export async function createPixiMediaScene(
         UniformGroup,
         detectionTimeline: options.detectionTimeline,
         maskStyle: createVisibilityMaskStyle(options.maskStyle),
-        onActiveIdMaskFramePresented: handleActiveIdMaskFramePresented,
+        onPreparedWindowChange: handlePreparedWindowChange,
         renderPreparation: options.renderPreparation,
       })
     : undefined;
@@ -279,7 +302,7 @@ export async function createPixiMediaScene(
         Container,
         Graphics,
         Text,
-        detectionTimeline: options.detectionTimeline,
+        detectionTimeline: annotationDetectionTimeline,
         labelStyle: options.labelStyle,
         resolveContextState: resolveLabelContextState,
       })
@@ -359,7 +382,7 @@ export async function createPixiMediaScene(
           Container,
           Rectangle,
           canInteract: options.canInteract,
-          detectionTimeline: options.detectionTimeline,
+          detectionTimeline: annotationDetectionTimeline,
           interaction: options.interaction ?? {
             mode: MediaInteractionMode.Always,
           },
@@ -532,7 +555,7 @@ export async function createPixiMediaScene(
   const redrawViewportStyles = () => {
     boxLayer.invalidate();
     boxLayer.drawFrame(currentMediaTime, viewportScale);
-    polygonLayer?.drawFrame(currentMediaTime, viewportScale);
+    drawPolygonFrame(currentMediaTime);
     vectorLayer.drawFrame(currentMediaTime, viewportScale);
     labelLayer?.drawFrame(currentMediaTime, viewportScale);
     drawFocusLayer(currentMediaTime);
@@ -582,6 +605,7 @@ export async function createPixiMediaScene(
       currentMediaTime = mediaTime;
       hasPresentedSample = true;
       presentedFrameSerial += 1;
+      drawnReadiness = annotationWindow.getReadinessToken(mediaTime);
     },
     completePresentation(mediaTime, boxState, regionState) {
       options.onPresentationUpdate?.(
@@ -598,9 +622,8 @@ export async function createPixiMediaScene(
       drawInteraction: (mediaTime) => interactionLayer?.drawFrame(mediaTime),
       drawInteractionPresentation: drawInteractionPresentationLayer,
       drawLabel: (mediaTime) => labelLayer?.drawFrame(mediaTime, viewportScale),
-      drawMask: (mediaTime) => maskLayer?.drawFrame(mediaTime),
-      drawPolygon: (mediaTime) =>
-        polygonLayer?.drawFrame(mediaTime, viewportScale),
+      drawMask: drawMaskFrame,
+      drawPolygon: drawPolygonFrame,
       drawRegion: (mediaTime) =>
         regionLayer.drawFrame(mediaTime, viewportScale),
       drawVector: (mediaTime) =>
@@ -616,6 +639,10 @@ export async function createPixiMediaScene(
   return {
     getRenderCount() {
       return frameChannel ? renderScheduler.getRenderCount() : null;
+    },
+
+    getPreparedAnnotationWindow() {
+      return frameChannel ? annotationWindow.getSnapshot() : null;
     },
 
     rendererBackend: String(app.renderer.name ?? "unknown"),
@@ -719,9 +746,9 @@ export async function createPixiMediaScene(
           presentedSampleTimestamp = sample.timestamp;
           stagingTextureSource?.update();
           stagingTexture?.update();
-          maskLayer?.drawFrame(sample.timestamp);
+          drawMaskFrame(sample.timestamp);
           const boxState = boxLayer.drawFrame(sample.timestamp, viewportScale);
-          polygonLayer?.drawFrame(sample.timestamp, viewportScale);
+          drawPolygonFrame(sample.timestamp);
           vectorLayer.drawFrame(sample.timestamp, viewportScale);
           const regionState = regionLayer.drawFrame(
             sample.timestamp,
@@ -759,14 +786,14 @@ export async function createPixiMediaScene(
           stagingTexture?.update();
         });
         maskMs = measure(() => {
-          maskLayer?.drawFrame(sample.timestamp);
+          drawMaskFrame(sample.timestamp);
         });
         let boxState: PixiBoxLayerState | undefined;
         let regionState: PixiRegionLayerState | undefined;
 
         boxMs = measure(() => {
           boxState = boxLayer.drawFrame(sample.timestamp, viewportScale);
-          polygonLayer?.drawFrame(sample.timestamp, viewportScale);
+          drawPolygonFrame(sample.timestamp);
           vectorLayer.drawFrame(sample.timestamp, viewportScale);
           regionState = regionLayer.drawFrame(sample.timestamp, viewportScale);
         });
@@ -1067,15 +1094,7 @@ export async function createPixiMediaScene(
         return;
       }
 
-      maskLayer?.drawFrame(mediaTime);
-      const boxState = boxLayer.drawFrame(mediaTime, viewportScale);
-      polygonLayer?.drawFrame(mediaTime, viewportScale);
-      vectorLayer.drawFrame(mediaTime, viewportScale);
-      const regionState = regionLayer.drawFrame(mediaTime, viewportScale);
-      interactionLayer?.drawFrame(mediaTime);
-      drawFocusLayer(mediaTime);
-      drawInteractionPresentationLayer(mediaTime);
-      labelLayer?.drawFrame(mediaTime, viewportScale);
+      const { boxState, regionState } = drawAnnotationFrame(mediaTime);
       renderOnChange();
 
       return createPresentedSampleState(mediaTime, boxState, regionState);
@@ -1101,6 +1120,7 @@ export async function createPixiMediaScene(
     },
 
     destroy() {
+      isDestroyed = true;
       disconnectContainerResizeObserver();
       app.cancelResize?.();
       app.ticker.remove(updateMediaSceneFit);
@@ -1148,7 +1168,7 @@ export async function createPixiMediaScene(
     boxState: PixiBoxLayerState,
     regionState?: PixiRegionLayerState,
   ): PresentedMediaSample {
-    const detectionFrame = options.detectionTimeline.selectFrame(mediaTime);
+    const detectionFrame = annotationDetectionTimeline.selectFrame(mediaTime);
 
     return {
       activeDetectionCount: countPresentedDetections(
@@ -1220,7 +1240,7 @@ export async function createPixiMediaScene(
         UniformGroup,
         detectionTimeline: options.detectionTimeline,
         maskStyle: createVisibilityMaskStyle(maskStyle),
-        onActiveIdMaskFramePresented: handleActiveIdMaskFramePresented,
+        onPreparedWindowChange: handlePreparedWindowChange,
         renderPreparation: options.renderPreparation,
       });
 
@@ -1248,6 +1268,7 @@ export async function createPixiMediaScene(
         Texture,
         UniformGroup,
         detectionTimeline: options.detectionTimeline,
+        onPreparedWindowChange: handlePreparedWindowChange,
         polygonStyle,
         renderPreparation: options.renderPreparation,
         resolveContextState,
@@ -1357,7 +1378,7 @@ export async function createPixiMediaScene(
       return;
     }
 
-    const frame = options.detectionTimeline.selectFrame(mediaTime);
+    const frame = annotationDetectionTimeline.selectFrame(mediaTime);
 
     const interactionState = interactionLayer?.getState();
 
@@ -1376,7 +1397,7 @@ export async function createPixiMediaScene(
       return;
     }
 
-    const frame = options.detectionTimeline.selectFrame(mediaTime);
+    const frame = annotationDetectionTimeline.selectFrame(mediaTime);
     const interactionState = interactionLayer?.getState();
 
     interactionPresentationLayer.drawFrame({
@@ -1390,14 +1411,93 @@ export async function createPixiMediaScene(
     });
   }
 
-  function handleActiveIdMaskFramePresented() {
-    drawFocusLayer(currentMediaTime);
-    drawInteractionPresentationLayer(currentMediaTime);
-    renderNow();
+  /**
+   * A cook landed, so what the window covers may have moved. A result for a
+   * frame that is not on screen stays in the window; a window that reaches the
+   * frame on screen gets there as a redraw of that frame, which is the only way
+   * anything a cook produced is ever drawn.
+   */
+  function handlePreparedWindowChange() {
+    if (isPresenting || isDestroyed) {
+      return;
+    }
+
+    if (
+      annotationWindow.getReadinessToken(currentMediaTime) === drawnReadiness
+    ) {
+      return;
+    }
+
+    const { boxState, regionState } = drawAnnotationFrame(currentMediaTime);
+
+    if (
+      !frameChannel ||
+      !renderScheduler.renderOnChange(describeSceneRender())
+    ) {
+      return;
+    }
+
+    options.onPresentationUpdate?.(
+      createPresentedSampleState(currentMediaTime, boxState, regionState),
+    );
+  }
+
+  function drawAnnotationFrame(mediaTime: number) {
+    drawnReadiness = annotationWindow.getReadinessToken(mediaTime);
+
+    drawMaskFrame(mediaTime);
+    const boxState = boxLayer.drawFrame(mediaTime, viewportScale);
+    drawPolygonFrame(mediaTime);
+    vectorLayer.drawFrame(mediaTime, viewportScale);
+    const regionState = regionLayer.drawFrame(mediaTime, viewportScale);
+    interactionLayer?.drawFrame(mediaTime);
+    drawFocusLayer(mediaTime);
+    drawInteractionPresentationLayer(mediaTime);
+    labelLayer?.drawFrame(mediaTime, viewportScale);
+
+    return { boxState, regionState };
+  }
+
+  /**
+   * Drawing an uncovered frame is drawing nothing, and the cook still has to be
+   * pointed at it or the window would never reach it.
+   */
+  function drawMaskFrame(mediaTime: number) {
+    if (!maskLayer) {
+      return;
+    }
+
+    if (isFramePrepared(mediaTime)) {
+      maskLayer.drawFrame(mediaTime);
+      return;
+    }
+
+    maskLayer.clearFrame();
+    maskLayer.prepareFrame(mediaTime);
+  }
+
+  function drawPolygonFrame(mediaTime: number) {
+    if (!polygonLayer) {
+      return;
+    }
+
+    if (isFramePrepared(mediaTime)) {
+      polygonLayer.drawFrame(mediaTime, viewportScale);
+      return;
+    }
+
+    polygonLayer.clearFrame();
+    polygonLayer.prepareFrame(mediaTime, viewportScale);
+  }
+
+  function isFramePrepared(mediaTime: number) {
+    return (
+      !frameChannel || annotationWindow.getPreparedFrame(mediaTime) !== null
+    );
   }
 
   function drawAnnotationOverlay(mediaTime: number, overlayNowMs: number) {
-    const frame = options.detectionTimeline.selectFrame(mediaTime);
+    const frame = annotationDetectionTimeline.selectFrame(mediaTime);
     const interactionState = interactionLayer?.getState();
     const editingState = options.editingEngine?.getState();
     labelLayer?.drawCreationPreview(
@@ -1438,7 +1538,15 @@ export async function createPixiMediaScene(
       return;
     }
 
-    presentVideoFrame(presented, framePresentTargets);
+    // Scheduling a cook notifies, and a notification that drew or rendered
+    // here would put a second render inside one present.
+    isPresenting = true;
+
+    try {
+      presentVideoFrame(presented, framePresentTargets);
+    } finally {
+      isPresenting = false;
+    }
   }
 
   function advanceFocusAnimation(mediaTime: number) {
@@ -1488,6 +1596,7 @@ export async function createPixiMediaScene(
     return [
       presentedFrameSerial,
       currentMediaTime,
+      annotationWindow.getPreparedFrame(currentMediaTime),
       viewportScale,
       baseFit?.x,
       baseFit?.y,
@@ -1580,7 +1689,7 @@ export async function createPixiMediaScene(
         Container,
         Graphics,
         Text,
-        detectionTimeline: options.detectionTimeline,
+        detectionTimeline: annotationDetectionTimeline,
         labelStyle,
         resolveContextState: resolveLabelContextState,
       });

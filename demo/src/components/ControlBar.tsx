@@ -17,7 +17,7 @@ export const ControlBar = memo(function ControlBar({
   currentTime,
   detectionBuffer,
   duration,
-  normalizedRanges,
+  onScrub,
   onSeek,
   onStepFrame,
   onTogglePlayback,
@@ -31,9 +31,9 @@ export const ControlBar = memo(function ControlBar({
   readonly currentTime: number | null;
   readonly detectionBuffer: DetectionBufferState | null;
   readonly duration: number | null;
-  readonly normalizedRanges: readonly TimelineRange[];
+  readonly onScrub: (time: number) => void;
   readonly onSeek: (time: number) => void;
-  readonly onStepFrame: (frameDelta: number) => void;
+  readonly onStepFrame: (direction: 1 | -1) => void;
   readonly onTogglePlayback: () => void;
   readonly playbackState: MediaRendererPlaybackState | null;
   readonly processedRanges: readonly TimelineRange[];
@@ -58,7 +58,7 @@ export const ControlBar = memo(function ControlBar({
         detectionBuffer={detectionBuffer}
         disabled={!canUseRenderer}
         duration={duration}
-        normalizedRanges={normalizedRanges}
+        onScrub={onScrub}
         onSeek={onSeek}
         playbackState={playbackState}
         processedRanges={processedRanges}

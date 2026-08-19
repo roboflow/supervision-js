@@ -8,12 +8,13 @@ const preparedWindow = vi.hoisted(() => ({
     | {
         detectionFrame: { detections: never[]; mediaTime: number };
         key: string;
+        maskFrame?: unknown;
         maskStatus: string;
       }
     | undefined,
   options: undefined as
     | {
-        onMaskFramePrepared?: (frame: unknown) => void;
+        onPreparedWindowChange?: () => void;
       }
     | undefined,
 }));
@@ -30,6 +31,9 @@ vi.mock("#render-preparation/prepared-render-window", () => ({
     return {
       destroy: vi.fn(),
       getFrame: vi.fn(() => preparedWindow.frame),
+      isArtifactPrepared: vi.fn(
+        () => preparedWindow.frame?.maskStatus === "prepared",
+      ),
       setMaskStyle: vi.fn(),
       setTimelineContext: vi.fn(),
       waitForReady: vi.fn(() => Promise.resolve()),
@@ -45,15 +49,15 @@ beforeEach(() => {
 });
 
 describe("pixi mask layer", () => {
-  it("notifies when the active ID-mask frame finishes preparing", () => {
-    const onActiveIdMaskFramePresented = vi.fn();
+  it("leaves the drawn frame alone when a cook lands, and draws it on the redraw", () => {
+    const onPreparedWindowChange = vi.fn();
     const layer = createPixiMaskLayer({
       ImageSource: FakeImageSource as never,
       Sprite: FakeSprite as never,
       Texture: FakeTexture as never,
       detectionTimeline: {} as never,
       maskStyle: new BaseMaskStyle(),
-      onActiveIdMaskFramePresented,
+      onPreparedWindowChange,
     });
 
     layer.createSprite({ height: 80, width: 120 });
@@ -64,25 +68,86 @@ describe("pixi mask layer", () => {
     };
     layer.drawFrame(0.1);
 
-    preparedWindow.options?.onMaskFramePrepared?.({
-      close: vi.fn(),
-      fillPalette: new Float32Array(),
-      hasStroke: false,
-      height: 80,
-      key: "mask-frame",
-      kind: PreparedMaskFrameKind.PngIdMask,
-      maxStrokeWidth: 0,
-      png: new Uint8Array(),
-      source: {},
-      strokePalette: new Float32Array(),
-      strokeWidths: new Float32Array(),
-      width: 120,
-    });
+    preparedWindow.frame = {
+      ...preparedWindow.frame,
+      maskFrame: idMaskFrame(),
+      maskStatus: "prepared",
+    };
+    preparedWindow.options?.onPreparedWindowChange?.();
 
-    expect(onActiveIdMaskFramePresented).toHaveBeenCalledOnce();
+    expect(onPreparedWindowChange).toHaveBeenCalledOnce();
+    expect(layer.getActiveIdMaskFrameTexture()).toBeNull();
+
+    layer.drawFrame(0.1);
+
     expect(layer.getActiveIdMaskFrameTexture()?.frame.key).toBe("mask-frame");
   });
+
+  it("takes a shown frame off screen when asked to clear", () => {
+    const layer = createPixiMaskLayer({
+      ImageSource: FakeImageSource as never,
+      Sprite: FakeSprite as never,
+      Texture: FakeTexture as never,
+      detectionTimeline: {} as never,
+      maskStyle: new BaseMaskStyle(),
+    });
+    const sprite = layer.createSprite({ height: 80, width: 120 }) as FakeSprite;
+
+    preparedWindow.frame = {
+      detectionFrame: { detections: [], mediaTime: 0.1 },
+      key: "mask-frame",
+      maskFrame: idMaskFrame(),
+      maskStatus: "prepared",
+    };
+    layer.drawFrame(0.1);
+
+    expect(sprite.visible).toBe(true);
+
+    layer.clearFrame();
+
+    expect(sprite.visible).toBe(false);
+    expect(layer.getActiveIdMaskFrameTexture()).toBeNull();
+  });
+
+  it("reports the window's readiness for a media time", () => {
+    const layer = createPixiMaskLayer({
+      ImageSource: FakeImageSource as never,
+      Sprite: FakeSprite as never,
+      Texture: FakeTexture as never,
+      detectionTimeline: {} as never,
+      maskStyle: new BaseMaskStyle(),
+    });
+
+    preparedWindow.frame = {
+      detectionFrame: { detections: [], mediaTime: 0.1 },
+      key: "mask-frame",
+      maskStatus: "pending",
+    };
+
+    expect(layer.isArtifactPrepared(0.1)).toBe(false);
+
+    preparedWindow.frame = { ...preparedWindow.frame, maskStatus: "prepared" };
+
+    expect(layer.isArtifactPrepared(0.1)).toBe(true);
+  });
 });
+
+function idMaskFrame() {
+  return {
+    close: vi.fn(),
+    fillPalette: new Float32Array(),
+    hasStroke: false,
+    height: 80,
+    key: "mask-frame",
+    kind: PreparedMaskFrameKind.PngIdMask,
+    maxStrokeWidth: 0,
+    png: new Uint8Array(),
+    source: {},
+    strokePalette: new Float32Array(),
+    strokeWidths: new Float32Array(),
+    width: 120,
+  };
+}
 
 class FakeImageSource {
   readonly style = {};

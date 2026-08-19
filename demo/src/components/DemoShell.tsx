@@ -8,6 +8,7 @@ export function DemoShell({
   mode,
   onModeChange,
   performanceStrip,
+  presentationDiagnostics,
   qualityControls,
   renderControls,
   selectionPanel,
@@ -21,6 +22,7 @@ export function DemoShell({
   readonly mode: DemoViewMode;
   readonly onModeChange: (mode: DemoViewMode) => void;
   readonly performanceStrip: ReactNode;
+  readonly presentationDiagnostics: ReactNode;
   readonly qualityControls: ReactNode;
   readonly renderControls: ReactNode;
   readonly selectionPanel: ReactNode;
@@ -87,6 +89,7 @@ export function DemoShell({
             {selectionPanel}
             {renderControls}
             {mode === DemoViewMode.Debug ? performanceStrip : null}
+            {mode === DemoViewMode.Debug ? presentationDiagnostics : null}
             {mode === DemoViewMode.Debug ? statusPanel : null}
           </aside>
           <section className="demo-shell__stage" aria-label="Renderer stage">

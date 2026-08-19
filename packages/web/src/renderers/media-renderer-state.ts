@@ -40,11 +40,15 @@ export interface MediaRendererRuntimeState {
   };
   setSourceReady(metadata: DecodedMediaSourceMetadata): void;
   setCurrentTime(currentTime: number): void;
+  /** A playhead the producer moved. Emits, so a readout follows a seek
+   *  before its frame lands. */
+  recordPlayheadTime(currentTime: number): void;
   setPlaybackRate(playbackRate: number): void;
   setRendererBackend(rendererBackend: string | null): void;
   recordPresentedSample(sample: PresentedMediaSample): void;
   recordPresentationUpdate(sample: PresentedMediaSample): void;
   setReady(): void;
+  setLoading(): void;
   setPlaying(): void;
   setBuffering(): void;
   setPaused(): void;
@@ -195,6 +199,15 @@ export function createMediaRendererRuntimeState(
       currentTime = nextCurrentTime;
     },
 
+    recordPlayheadTime(nextCurrentTime) {
+      if (currentTime === nextCurrentTime) {
+        return;
+      }
+
+      currentTime = nextCurrentTime;
+      emitState();
+    },
+
     setPlaybackRate(nextPlaybackRate) {
       playbackRate = nextPlaybackRate;
       emitState();
@@ -229,6 +242,11 @@ export function createMediaRendererRuntimeState(
 
     setReady() {
       playbackState = MediaRendererPlaybackState.Ready;
+      emitState();
+    },
+
+    setLoading() {
+      playbackState = MediaRendererPlaybackState.Loading;
       emitState();
     },
 

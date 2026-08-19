@@ -41,7 +41,8 @@ import type {
   RenderPreparationPlaybackGateOptions,
 } from "#types/render-preparation";
 import type { MaskBrushPreviewOptions } from "#editing/mask-brush-editor";
-import type { PresentedFrameChannel } from "./presented-frame-channel";
+import type { PresentedFrameSource } from "./presented-frame-channel";
+import type { PreparedAnnotationWindowSnapshot } from "./prepared-annotation-window";
 
 export interface MediaRendererSceneOptions {
   readonly container: HTMLElement;
@@ -79,7 +80,7 @@ export interface MediaRendererSceneOptions {
    * screen. Given one, the scene presents what the producer announces instead
    * of what the renderer pulls, and renders only when something changed.
    */
-  readonly presentedFrameChannel?: PresentedFrameChannel;
+  readonly presentedFrames?: PresentedFrameSource;
 }
 
 export interface PresentedMediaSample {
@@ -99,6 +100,11 @@ export interface MediaRendererScene {
    * change. A scene that free-runs on the ticker has no such count.
    */
   getRenderCount?(): number | null;
+  /**
+   * Which frames around the playhead have every enabled layer's data cooked. A
+   * scene that free-runs on the ticker gates nothing and reports none.
+   */
+  getPreparedAnnotationWindow?(): PreparedAnnotationWindowSnapshot | null;
   initializeMedia(dimensions: { width: number; height: number }): void;
   setTimelineContext?(context: MediaRendererSceneTimelineContext): void;
   presentSample(sample: DecodedVideoSample): PresentedMediaSample;

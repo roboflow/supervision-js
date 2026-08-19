@@ -1,0 +1,196 @@
+import { describe, expect, it, vi } from "vitest";
+
+import type {
+  PresentedFrame,
+  PresentedFrameHandler,
+} from "@roboflow/video-engine";
+import type { MediaRendererSource } from "supervision";
+import {
+  createPresentedFrameTap,
+  readPresentedPerSecond,
+  type PresentedFrameTap,
+} from "./presented-frame-tap";
+
+interface FakeProducer {
+  onPresentedFrame(handler: PresentedFrameHandler): void;
+  present(presented: PresentedFrame): void;
+  scrub(timeMs: number): void;
+  readonly seeks: number[];
+}
+
+function createFakeProducer(): FakeProducer {
+  let handler: PresentedFrameHandler | null = null;
+  const seeks: number[] = [];
+
+  return {
+    onPresentedFrame(nextHandler) {
+      handler = nextHandler;
+    },
+    present(presented) {
+      handler?.(presented);
+    },
+    scrub(timeMs) {
+      seeks.push(timeMs);
+    },
+    seeks,
+  };
+}
+
+function createFakeFrame(): VideoFrame {
+  return { close: vi.fn() } as unknown as VideoFrame;
+}
+
+function createPresentedFrame(mediaTimeMs: number): PresentedFrame {
+  return {
+    frame: createFakeFrame(),
+    frameIdx: Math.round(mediaTimeMs / 33),
+    mediaTimeMs,
+    quality: "exact",
+  };
+}
+
+async function openTappedSource(
+  tap: PresentedFrameTap,
+  producer: FakeProducer,
+) {
+  const source: MediaRendererSource = {
+    open: async () =>
+      ({ engine: producer }) as unknown as Awaited<
+        ReturnType<MediaRendererSource["open"]>
+      >,
+  };
+  const opened = await tap.tap(source).open();
+
+  return (opened as unknown as { readonly engine: FakeProducer }).engine;
+}
+
+describe("presented frame tap", () => {
+  it("forwards the presented frame untouched, in the producer's call", async () => {
+    const tap = createPresentedFrameTap();
+    const producer = createFakeProducer();
+    const tappedProducer = await openTappedSource(tap, producer);
+    const received: PresentedFrame[] = [];
+    let insidePresent = false;
+    let forwardedInsidePresent = false;
+
+    tappedProducer.onPresentedFrame((presented) => {
+      forwardedInsidePresent = insidePresent;
+      received.push(presented);
+    });
+
+    const presented = createPresentedFrame(120);
+
+    insidePresent = true;
+    producer.present(presented);
+    insidePresent = false;
+
+    expect(received).toEqual([presented]);
+    expect(received[0]).toBe(presented);
+    expect(forwardedInsidePresent).toBe(true);
+    expect(presented.frame.close).not.toHaveBeenCalled();
+  });
+
+  it("records identity without holding the frame", async () => {
+    const tap = createPresentedFrameTap({ now: () => 1_000 });
+    const producer = createFakeProducer();
+    const tappedProducer = await openTappedSource(tap, producer);
+
+    tappedProducer.onPresentedFrame(() => {});
+    producer.present(createPresentedFrame(240));
+
+    const { records } = tap.read();
+
+    expect(records).toEqual([
+      { mediaTimeMs: 240, quality: "exact", wallTimeMs: 1_000 },
+    ]);
+    expect(Object.keys(records[0])).toEqual([
+      "mediaTimeMs",
+      "quality",
+      "wallTimeMs",
+    ]);
+  });
+
+  it("keeps presentation order and counts every frame past the ring", async () => {
+    const tap = createPresentedFrameTap({ capacity: 3, now: () => 0 });
+    const producer = createFakeProducer();
+    const tappedProducer = await openTappedSource(tap, producer);
+    const forwardedMediaTimes: number[] = [];
+
+    tappedProducer.onPresentedFrame((presented) => {
+      forwardedMediaTimes.push(presented.mediaTimeMs);
+    });
+
+    for (const mediaTimeMs of [10, 20, 30, 40, 50]) {
+      producer.present(createPresentedFrame(mediaTimeMs));
+    }
+
+    const snapshot = tap.read();
+
+    expect(forwardedMediaTimes).toEqual([10, 20, 30, 40, 50]);
+    expect(snapshot.records.map((record) => record.mediaTimeMs)).toEqual([
+      30, 40, 50,
+    ]);
+    expect(snapshot.presentedCount).toBe(5);
+    expect(snapshot.lastPresented?.mediaTimeMs).toBe(50);
+  });
+
+  it("leaves the producer's other members reachable", async () => {
+    const tap = createPresentedFrameTap();
+    const producer = createFakeProducer();
+    const tappedProducer = await openTappedSource(tap, producer);
+
+    (tappedProducer as unknown as { scrub(timeMs: number): void }).scrub(500);
+
+    expect(producer.seeks).toEqual([500]);
+  });
+
+  it("leaves a source without a presented-frame producer alone", async () => {
+    const tap = createPresentedFrameTap();
+    const opened = { sampleSink: {} };
+    const source = {
+      open: async () => opened,
+    } as unknown as MediaRendererSource;
+
+    expect(await tap.tap(source).open()).toBe(opened);
+  });
+
+  it("drops every record on reset", async () => {
+    const tap = createPresentedFrameTap({ now: () => 0 });
+    const producer = createFakeProducer();
+    const tappedProducer = await openTappedSource(tap, producer);
+
+    tappedProducer.onPresentedFrame(() => {});
+    producer.present(createPresentedFrame(80));
+    tap.reset();
+
+    expect(tap.read()).toEqual({
+      lastPresented: null,
+      presentedCount: 0,
+      presentedPerSecond: null,
+      records: [],
+    });
+  });
+});
+
+describe("presented frame rate", () => {
+  it("reports no rate while nothing presents", () => {
+    expect(readPresentedPerSecond([], 5_000)).toBeNull();
+    expect(
+      readPresentedPerSecond(
+        [{ mediaTimeMs: 0, quality: "exact", wallTimeMs: 3_500 }],
+        5_000,
+      ),
+    ).toBeNull();
+  });
+
+  it("counts only the frames inside the trailing window", () => {
+    const records = [4_200, 4_600, 4_900, 5_000].map((wallTimeMs) => ({
+      mediaTimeMs: wallTimeMs,
+      quality: "exact" as const,
+      wallTimeMs,
+    }));
+
+    expect(readPresentedPerSecond(records, 5_000)).toBe(4);
+    expect(readPresentedPerSecond(records, 5_500)).toBe(3);
+  });
+});

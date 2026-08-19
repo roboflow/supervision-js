@@ -41,9 +41,19 @@ export {
   createMediaStreamRendererSource,
   type MediaStreamRendererSourceOptions,
 } from "#media/media-stream-media-source";
+export {
+  createVideoEngineMediaRendererSource,
+  openVideoEngineMediaSource,
+  type VideoEngineMediaSource,
+  type VideoEngineMediaSourceOptions,
+} from "#media/video-engine-media-source";
 
 // Renderer and session primitives.
 export { createMediaRenderer } from "#renderers/media-renderer";
+export type {
+  PreparedAnnotationWindowFrame,
+  PreparedAnnotationWindowSnapshot,
+} from "#renderers/prepared-annotation-window";
 export { createMediaSession } from "#sessions/media-session";
 export type {
   MediaFrameCapture,

@@ -1,32 +1,29 @@
 import {
   DetectionFrameSelectionMode,
-  MediaNormalizationContainer,
-  MediaNormalizationVideoCodec,
   MediaInteractionMode,
   MediaRendererFit,
   MediaRendererPlaybackState,
   RenderPreparationMode,
   createBrowserColdDetectionFrameStore,
   createMediaSession,
+  createVideoEngineMediaRendererSource,
   type ColdDetectionFrameStoreWriteSummary,
   type DetectionFrame,
   type MediaSession,
-  type MediaNormalizationProgress,
   type MediaRenderer,
   type WritableDetectionFrameSource,
 } from "supervision";
+import { SourceKind } from "@roboflow/video-engine";
 import type {
   DemoFixtureDetectionSourceSummary,
   DemoFixtureSummary,
 } from "../fixtures/demo-fixtures";
 import { inferSam3FrameBatchStream } from "../inference/roboflow-sam3";
 import {
-  NORMALIZED_UPLOAD_VIDEO_BITRATE,
   TARGET_UPLOAD_FRAME_RATE,
   createPreparedUploadedVideoMedia,
   extractInferenceFrameBatches,
   prepareUploadedImageMedia,
-  UploadedMediaKind,
   type PreparedUploadMedia,
 } from "../media/upload-media";
 import { createDemoPresentation } from "../presentation/demo-presentation";
@@ -102,32 +99,14 @@ export async function createUploadSession(
           selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
         },
       },
-      media: preparedMedia?.blob ?? options.uploadRun.file,
-      normalize: isImageUpload
-        ? false
-        : {
-            audio: { discard: true },
-            container: MediaNormalizationContainer.WebM,
-            onProgress(progress) {
-              options.onUploadState((current) => ({
-                ...current,
-                normalizedRanges: createNormalizationTimelineRanges(progress),
-                status: "preparing",
-                statusLabel: `stream-normalizing media ${Math.round(
-                  progress.progress * 100,
-                )}%`,
-              }));
-            },
-            signal: options.abortSignal,
-            stream: true,
-            video: {
-              bitrate: NORMALIZED_UPLOAD_VIDEO_BITRATE,
-              codec: MediaNormalizationVideoCodec.Vp9,
-              forceTranscode: true,
-              frameRate: TARGET_UPLOAD_FRAME_RATE,
-              keyFrameInterval: 1,
-            },
+      media: options.tapMediaSource(
+        createVideoEngineMediaRendererSource({
+          source: {
+            blob: preparedMedia?.blob ?? options.uploadRun.file,
+            kind: SourceKind.Blob,
           },
+        }),
+      ),
       presentation,
       onState: options.onSessionState,
       renderer: {
@@ -158,7 +137,7 @@ export async function createUploadSession(
   if (!isImageUpload) {
     preparedMedia = createPreparedUploadedVideoMedia({
       file: options.uploadRun.file,
-      media: session.media,
+      renderer: session.renderer,
     });
   }
 
@@ -188,22 +167,12 @@ export async function createUploadSession(
     completedFrames: 0,
     errorMessage: null,
     inferredDetections: 0,
-    normalizedRanges:
-      preparedMedia.kind === UploadedMediaKind.Image
-        ? [{ endTime: preparedMedia.duration, startTime: 0 }]
-        : [],
     preparedMedia,
     processedRanges: [],
     processingRanges: [],
     status: "running",
     statusLabel: "running SAM3",
     totalFrames: preparedMedia.frameCount,
-  });
-  watchNormalizationCompletion({
-    isActive: options.isActive,
-    onMediaState: options.onMediaState,
-    onUploadState: options.onUploadState,
-    preparedMedia,
   });
 
   void runUploadInference({
@@ -238,50 +207,6 @@ function getAppendableSessionDetectionSource(
   }
 
   return detectionSource as WritableDetectionFrameSource;
-}
-
-function watchNormalizationCompletion(options: {
-  readonly isActive: () => boolean;
-  readonly onMediaState: DemoSessionCallbacks["onMediaState"];
-  readonly onUploadState: UploadInferenceStateSetter;
-  readonly preparedMedia: PreparedUploadMedia;
-}) {
-  if (!options.preparedMedia.normalizationCompletion) {
-    return;
-  }
-
-  void options.preparedMedia.normalizationCompletion
-    .then(() => {
-      if (!options.isActive()) {
-        return;
-      }
-
-      options.onMediaState({
-        errorMessage: null,
-        status: `upload normalized WebM ${options.preparedMedia.frameRate}fps complete`,
-      });
-      options.onUploadState((current) => ({
-        ...current,
-        normalizedRanges: [
-          { endTime: options.preparedMedia.duration, startTime: 0 },
-        ],
-      }));
-    })
-    .catch((error: unknown) => {
-      if (!options.isActive()) {
-        return;
-      }
-
-      const message = getErrorMessage(error, "Media normalization failed.");
-
-      options.onMediaState({ errorMessage: message, status: "error" });
-      options.onUploadState((current) => ({
-        ...current,
-        errorMessage: message,
-        status: "error",
-        statusLabel: message,
-      }));
-    });
 }
 
 async function runUploadInference(options: {
@@ -487,16 +412,6 @@ function createUploadSummary(
     maskWidth: media.width,
     missingFrameIndexes: [],
   };
-}
-
-function createNormalizationTimelineRanges(
-  progress: MediaNormalizationProgress,
-) {
-  if (progress.processedTime <= 0) {
-    return [];
-  }
-
-  return [{ endTime: progress.processedTime, startTime: 0 }];
 }
 
 function getDetectionSourceSummary(

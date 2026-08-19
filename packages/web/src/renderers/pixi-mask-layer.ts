@@ -97,6 +97,10 @@ export interface PixiMaskLayer {
     height: number;
   }): PixiContainer | PixiSprite;
   drawFrame(mediaTime: number): void;
+  /** Puts the media time in front of the cook without drawing it. */
+  prepareFrame(mediaTime: number): void;
+  clearFrame(): void;
+  isArtifactPrepared(mediaTime: number): boolean;
   waitForRenderPreparation(
     mediaTime: number,
     options: RenderPreparationPlaybackGateOptions,
@@ -128,7 +132,7 @@ export function createPixiMaskLayer(options: {
   readonly UniformGroup?: UniformGroupConstructor;
   readonly detectionTimeline: BufferedDetectionTimeline;
   readonly maskStyle: MaskStyle;
-  readonly onActiveIdMaskFramePresented?: () => void;
+  readonly onPreparedWindowChange?: () => void;
   readonly renderPreparation?: RenderPreparationOptions;
   readonly resolveInstructions?: (options: {
     readonly frame: import("supervision-js-core").DetectionFrame;
@@ -142,7 +146,6 @@ export function createPixiMaskLayer(options: {
     ReturnType<typeof createPixiIdMaskShaderRenderer> | undefined;
   let maskSprite: PixiSprite | undefined;
   let activeFrameKey: string | null = null;
-  let activeFrameMediaTime: number | null = null;
   let activeIdMaskFrame: PreparedPngIdMaskFrame | null = null;
   let maskOpacity = resolveMaskStyleOpacity(options.maskStyle);
   let maskPickCanvas: HTMLCanvasElement | undefined;
@@ -162,24 +165,16 @@ export function createPixiMaskLayer(options: {
       }
       if (key === activeFrameKey) {
         activeFrameKey = null;
-        activeFrameMediaTime = null;
         hideSprite();
       }
     },
-    onMaskFramePrepared(maskFrame) {
-      if (!isDestroyed && maskFrame.key === activeFrameKey) {
-        showMaskFrame(maskFrame, activeFrameMediaTime);
-        if (
-          maskFrame.kind === PreparedMaskFrameKind.PngIdMask &&
-          activeFrameMediaTime !== null
-        ) {
-          options.onActiveIdMaskFramePresented?.();
-        }
+    onPreparedWindowChange() {
+      if (!isDestroyed) {
+        options.onPreparedWindowChange?.();
       }
     },
     onMaskFramesCleared() {
       activeFrameKey = null;
-      activeFrameMediaTime = null;
       resetMaskPickCanvas();
       destroyTextures();
       hideSprite();
@@ -212,18 +207,13 @@ export function createPixiMaskLayer(options: {
     },
 
     drawFrame(mediaTime) {
-      const preparedFrame = preparedRenderWindow.getFrame(mediaTime);
+      const preparedFrame = prepareFrame(mediaTime);
 
       if (!preparedFrame || !maskSprite) {
-        activeFrameKey = preparedFrame?.key ?? null;
-        activeFrameMediaTime = preparedFrame?.detectionFrame.mediaTime ?? null;
         activeIdMaskFrame = null;
         hideSprite();
         return;
       }
-
-      activeFrameKey = preparedFrame.key;
-      activeFrameMediaTime = preparedFrame.detectionFrame.mediaTime;
 
       if (preparedFrame.maskFrame) {
         showMaskFrame(
@@ -247,6 +237,18 @@ export function createPixiMaskLayer(options: {
       if (!canHoldVisibleMaskFor(preparedFrame.detectionFrame.mediaTime)) {
         hideSprite();
       }
+    },
+
+    prepareFrame(mediaTime) {
+      prepareFrame(mediaTime);
+    },
+
+    clearFrame() {
+      hideSprite();
+    },
+
+    isArtifactPrepared(mediaTime) {
+      return preparedRenderWindow.isArtifactPrepared(mediaTime);
     },
 
     waitForRenderPreparation(mediaTime, gateOptions) {
@@ -321,10 +323,15 @@ export function createPixiMaskLayer(options: {
     },
   };
 
-  function showMaskFrame(
-    maskFrame: PreparedMaskFrame,
-    mediaTime: number | null,
-  ) {
+  function prepareFrame(mediaTime: number) {
+    const preparedFrame = preparedRenderWindow.getFrame(mediaTime);
+
+    activeFrameKey = preparedFrame?.key ?? null;
+
+    return preparedFrame;
+  }
+
+  function showMaskFrame(maskFrame: PreparedMaskFrame, mediaTime: number) {
     visibleMaskMediaTime = mediaTime;
     activeIdMaskFrame =
       maskFrame.kind === PreparedMaskFrameKind.PngIdMask ? maskFrame : null;

@@ -9,6 +9,7 @@ import type {
   MediaRendererStateController,
   MediaSourceState,
 } from "supervision-js-core";
+import type { PreparedAnnotationWindowSnapshot } from "#renderers/prepared-annotation-window";
 import type { DetectionFrame } from "supervision-js-core";
 import type {
   DetectionPickResult,
@@ -163,7 +164,19 @@ export interface DetectionLabelBounds {
 export interface MediaRenderer extends MediaRendererStateController {
   play(): Promise<void>;
   pause(): void;
+  /**
+   * Flips playback without the caller first reading which way it is going, so
+   * a frame presented between the read and the call cannot invert the result.
+   */
+  togglePlayback(): void;
+  /** Lands on `mediaTime` and resolves once the frame there is presented. */
   seek(mediaTime: number): Promise<void>;
+  /**
+   * Moves the playhead for a gesture that is still moving, such as a timeline
+   * drag between pointer down and up. The frame that answers it may be an
+   * approximation; `seek` is what lands the released position exactly.
+   */
+  scrub(mediaTime: number): void;
   stepForward(): Promise<void>;
   stepBackward(): Promise<void>;
   setPlaybackRate(playbackRate: number): void;
@@ -188,6 +201,12 @@ export interface MediaRenderer extends MediaRendererStateController {
    * ticker then paints every animation frame and no count describes that.
    */
   getRenderCount(): number | null;
+  /**
+   * Span and per-frame readiness of the prepared annotation window, for
+   * instruments; null when the scene free-runs on the ticker or no window
+   * exists.
+   */
+  getPreparedAnnotationWindow(): PreparedAnnotationWindowSnapshot | null;
   destroy(): void;
   getViewportTransform(): import("supervision-js-core").ViewportTransform;
   setViewportTransform(

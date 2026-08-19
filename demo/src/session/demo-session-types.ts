@@ -1,6 +1,7 @@
 import type { Dispatch, SetStateAction } from "react";
 import type {
   DetectionPickResult,
+  MediaRendererSource,
   MediaRendererState,
   MediaSessionState,
   MediaSourceState,
@@ -35,7 +36,6 @@ export interface UploadInferenceState {
   readonly completedFrames: number;
   readonly errorMessage: string | null;
   readonly inferredDetections: number;
-  readonly normalizedRanges: readonly TimelineRange[];
   readonly preparedMedia: PreparedUploadMedia | null;
   readonly processedRanges: readonly TimelineRange[];
   readonly processingRanges: readonly TimelineRange[];
@@ -65,6 +65,7 @@ export interface DemoSessionCallbacks {
   readonly onSourceState: (state: MediaSourceState) => void;
   readonly presentationSettings: DemoPresentationSettings;
   readonly renderQuality: DemoRenderQuality;
+  readonly tapMediaSource: (source: MediaRendererSource) => MediaRendererSource;
 }
 
 export type UploadInferenceStateSetter = Dispatch<

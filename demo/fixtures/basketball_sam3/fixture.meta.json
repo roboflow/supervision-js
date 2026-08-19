@@ -4,9 +4,8 @@
   "inferenceLabel": "SAM3",
   "media": {
     "file": "../basketball_sample/basketball_sample.mp4",
-    "loadingStatusLabel": "stream-normalizing 9s basketball sample",
-    "normalizeInBrowser": true,
-    "readyStatusLabel": "9s basketball sample source MP4 | browser-normalized WebM 30fps"
+    "loadingStatusLabel": "opening 9s basketball sample",
+    "readyStatusLabel": "9s basketball sample | video engine, source MP4"
   },
   "sampleName": "basketball_sam3",
   "schema": "supervision-js.demo.sam3-fixture-meta",

@@ -25,6 +25,7 @@ import {
 import {
   DetectionTimelineOrigin,
   MediaRendererFit,
+  MediaRendererPlaybackState,
   type MediaRenderer,
   type MediaRendererOptions,
   type MediaRendererPresentation,
@@ -38,6 +39,10 @@ import {
 } from "#types/render-preparation";
 import { createOffsetDetectionFrameSource } from "#detections/offset-detection-frame-source";
 import { createMediaRendererRuntimeState } from "./media-renderer-state";
+import {
+  createMediaRendererTransport,
+  type MediaRendererTransport,
+} from "./media-renderer-transport";
 import { resolvePresentedFrameChannel } from "./presented-frame-channel";
 import type {
   MediaRendererScene,
@@ -96,9 +101,41 @@ export async function createMediaRendererCore(
   let activeSampleIterator: DecodedVideoSampleIterator | undefined;
   let mediaInput: DisposableMediaInput | undefined;
   let playbackController: MediaPlaybackController | undefined;
+  let transport: MediaRendererTransport | undefined;
   let sampleSink: DecodedVideoSampleSink | undefined;
   let firstTimestamp = 0;
   let navigationVersion = 0;
+
+  const adoptTransportPlaybackState = (state: MediaRendererPlaybackState) => {
+    // Not gated on isError: the producer owns playback truth here, so a
+    // recovery after a transient error must be adopted, not ignored forever.
+    if (runtimeState.isDestroyed()) {
+      return;
+    }
+
+    switch (state) {
+      case MediaRendererPlaybackState.Playing:
+        runtimeState.setPlaying();
+        break;
+      case MediaRendererPlaybackState.Buffering:
+        runtimeState.setBuffering();
+        break;
+      case MediaRendererPlaybackState.Paused:
+        runtimeState.setPaused();
+        break;
+      case MediaRendererPlaybackState.Ready:
+        runtimeState.setReady();
+        break;
+      case MediaRendererPlaybackState.Loading:
+        runtimeState.setLoading();
+        break;
+      case MediaRendererPlaybackState.Error:
+        runtimeState.setRenderError(new Error("Media playback failed."));
+        break;
+      default:
+        break;
+    }
+  };
 
   const handleRenderPreparationDiagnostics = (
     diagnostics: RenderPreparationDiagnostics,
@@ -168,6 +205,11 @@ export async function createMediaRendererCore(
         );
       }
 
+      if (transport) {
+        await transport.play();
+        return;
+      }
+
       if (!playbackController) {
         throw new Error("Media renderer is not ready.");
       }
@@ -181,12 +223,39 @@ export async function createMediaRendererCore(
     },
 
     pause() {
-      if (runtimeState.isDestroyed() || !runtimeState.isPlaybackActive()) {
+      if (runtimeState.isDestroyed()) {
+        return;
+      }
+
+      if (transport) {
+        transport.pause();
+        return;
+      }
+
+      if (!runtimeState.isPlaybackActive()) {
         return;
       }
 
       runtimeState.setPaused();
       playbackController?.pause();
+    },
+
+    togglePlayback() {
+      if (runtimeState.isDestroyed()) {
+        return;
+      }
+
+      if (transport) {
+        transport.togglePlayback();
+        return;
+      }
+
+      if (runtimeState.isPlaybackActive()) {
+        renderer.pause();
+        return;
+      }
+
+      void renderer.play().catch(() => undefined);
     },
 
     async seek(mediaTime) {
@@ -200,17 +269,23 @@ export async function createMediaRendererCore(
         );
       }
 
+      const targetTime = clampSeekTime({
+        duration: runtimeState.duration(),
+        firstTimestamp,
+        mediaTime,
+      });
+
+      if (transport) {
+        await transport.commit(targetTime);
+        return;
+      }
+
       if (!playbackController || !sampleSink) {
         throw new Error("Media renderer is not ready.");
       }
 
       const wasPlaying = runtimeState.isPlaying();
       const requestVersion = ++navigationVersion;
-      const targetTime = clampSeekTime({
-        duration: runtimeState.duration(),
-        firstTimestamp,
-        mediaTime,
-      });
 
       playbackController.pause();
 
@@ -247,6 +322,25 @@ export async function createMediaRendererCore(
         runtimeState.setRenderError(error);
         throw error;
       }
+    },
+
+    scrub(mediaTime) {
+      if (runtimeState.isDestroyed() || runtimeState.isError()) {
+        return;
+      }
+
+      const targetTime = clampSeekTime({
+        duration: runtimeState.duration(),
+        firstTimestamp,
+        mediaTime,
+      });
+
+      if (transport) {
+        transport.scrub(targetTime);
+        return;
+      }
+
+      void renderer.seek(targetTime).catch(() => undefined);
     },
 
     async stepForward() {
@@ -311,6 +405,10 @@ export async function createMediaRendererCore(
 
     getRenderCount() {
       return mediaScene?.getRenderCount?.() ?? null;
+    },
+
+    getPreparedAnnotationWindow() {
+      return mediaScene?.getPreparedAnnotationWindow?.() ?? null;
     },
 
     getState() {
@@ -405,6 +503,7 @@ export async function createMediaRendererCore(
       }
 
       runtimeState.markDestroyed();
+      transport?.destroy();
       playbackController?.destroy();
       stopActiveIterator();
       destroyMediaInput();
@@ -489,7 +588,7 @@ export async function createMediaRendererCore(
       },
       polygonStyle: currentPresentation.polygonStyle,
       polylineStyle: currentPresentation.polylineStyle,
-      presentedFrameChannel: presentedFrameChannel ?? undefined,
+      presentedFrames: presentedFrameChannel ?? undefined,
       regionRenderers: resolveRegionRenderers(currentPresentation),
       previewOverlay: options.previewOverlay,
       renderPreparation: options.renderPreparation
@@ -515,7 +614,36 @@ export async function createMediaRendererCore(
     if (presentedFrameChannel) {
       // The producer holds the playhead: it decides which frame is on screen
       // and announces it. Pulling samples here would present a second opinion.
+      // The producer's playhead is also what keeps the detection buffer hot:
+      // the pull path fed it per presented sample, so the push path feeds it
+      // per playhead move. Fire-and-forget by design: awaiting it anywhere
+      // near a draw would gate presentation on chunk loads, and a landing for
+      // the frame on screen renders through the prepared window's own term.
+      // A failed chunk load is retried by the next playhead move.
+      const feedDetectionBuffer = (currentTime: number) => {
+        void detectionTimeline
+          ?.prepare(currentTime, {
+            duration: runtimeState.duration(),
+            firstTimestamp,
+          })
+          .catch(() => undefined);
+      };
+      transport = createMediaRendererTransport({
+        channel: presentedFrameChannel,
+        loop: options.loop !== false,
+        onPlaybackState: adoptTransportPlaybackState,
+        onPlayheadTime: (currentTime) => {
+          runtimeState.recordPlayheadTime(currentTime);
+          feedDetectionBuffer(currentTime);
+        },
+      });
+      feedDetectionBuffer(metadata.firstTimestamp);
       runtimeState.setReady();
+
+      if (options.autoPlay ?? true) {
+        await renderer.play();
+      }
+
       return renderer;
     }
 
@@ -619,6 +747,11 @@ export async function createMediaRendererCore(
         runtimeState.errorMessage() ?? "Media renderer is in error state.",
       );
     }
+    if (transport) {
+      await transport.step(direction === "forward" ? 1 : -1);
+      return;
+    }
+
     if (!playbackController || !sampleSink) {
       throw new Error("Media renderer is not ready.");
     }

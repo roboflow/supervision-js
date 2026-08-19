@@ -1,7 +1,5 @@
 import {
   DetectionFrameSelectionMode,
-  MediaNormalizationContainer,
-  MediaNormalizationVideoCodec,
   MediaInteractionMode,
   RenderPreparationMode,
   MediaRendererFit,
@@ -15,13 +13,9 @@ import type {
 } from "../fixtures/demo-fixtures";
 import {
   createDemoFixtureDetectionSource,
+  createDemoFixtureMedia,
   loadDemoFixtureDetectionManifest,
-  loadDemoFixtureMedia,
 } from "../fixtures/demo-fixtures";
-import {
-  NORMALIZED_UPLOAD_VIDEO_BITRATE,
-  TARGET_UPLOAD_FRAME_RATE,
-} from "../media/upload-media";
 import { createDemoPresentation } from "../presentation/demo-presentation";
 import { getDemoMaxDevicePixelRatio } from "./render-quality";
 import type { DemoSessionCallbacks } from "./demo-session-types";
@@ -56,16 +50,9 @@ export async function createFixtureSession(
     status: detectionSource.status,
   });
 
-  const mediaSource = await loadDemoFixtureMedia(options.definition);
-
-  if (!options.isActive()) {
-    detectionSource.destroy();
-    throw new Error("Fixture session was canceled.");
-  }
-
   options.onMediaState({
-    errorMessage: mediaSource.error?.message ?? null,
-    status: mediaSource.statusLabel,
+    errorMessage: null,
+    status: options.definition.mediaReadyStatusLabel,
   });
 
   const basePresentation = createDemoPresentation(options.presentationSettings);
@@ -82,21 +69,7 @@ export async function createFixtureSession(
           selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
         },
       },
-      media: mediaSource.media,
-      normalize: mediaSource.normalizeInBrowser
-        ? {
-            audio: { discard: true },
-            container: MediaNormalizationContainer.WebM,
-            stream: true,
-            video: {
-              bitrate: NORMALIZED_UPLOAD_VIDEO_BITRATE,
-              codec: MediaNormalizationVideoCodec.Vp9,
-              forceTranscode: true,
-              frameRate: TARGET_UPLOAD_FRAME_RATE,
-              keyFrameInterval: 1,
-            },
-          }
-        : false,
+      media: options.tapMediaSource(createDemoFixtureMedia(options.definition)),
       onState: options.onSessionState,
       presentation,
       renderer: {

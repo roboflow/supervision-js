@@ -62,6 +62,11 @@ export enum PreparedRenderFrameMaskStatus {
 
 export interface PreparedRenderWindow {
   getFrame(mediaTime: number): PreparedRenderFrame | undefined;
+  /**
+   * Whether this window's artifact for a media time is cooked, scheduling
+   * nothing. True when there is nothing to cook: no style, no frame there.
+   */
+  isArtifactPrepared(mediaTime: number): boolean;
   waitForReady(
     mediaTime: number,
     options: RenderPreparationPlaybackGateOptions,
@@ -74,6 +79,19 @@ export interface PreparedRenderWindow {
 export type { PreparedMaskFrame } from "./mask-frame-preparer";
 export type { PreparedRenderTimelineContext } from "./prepared-window-timeline";
 
+/** How many frames ahead of the playhead a prepared window aims to cover. */
+export function resolvePreparedWindowFrameCount(options: {
+  readonly prefetchFrameCount?: number;
+  readonly renderPreparation?: RenderPreparationOptions;
+}) {
+  return Math.max(
+    0,
+    options.prefetchFrameCount ??
+      options.renderPreparation?.maskFrame?.prefetchFrameCount ??
+      DEFAULT_MASK_PREFETCH_FRAME_COUNT,
+  );
+}
+
 export function createPreparedRenderWindow(options: {
   readonly artifactKind?: RenderPreparationArtifactKind;
   readonly detectionTimeline: BufferedDetectionTimeline;
@@ -82,6 +100,8 @@ export function createPreparedRenderWindow(options: {
   readonly onMaskFrameEvicted?: (key: string) => void;
   readonly onMaskFramePrepared?: (maskFrame: PreparedMaskFrame) => void;
   readonly onMaskFramesCleared?: () => void;
+  /** Fires whenever what the window covers may have changed. */
+  readonly onPreparedWindowChange?: () => void;
   readonly prefetchFrameCount?: number;
   readonly preparedWindowScanIntervalSeconds?: number;
   readonly renderPreparation?: RenderPreparationOptions;
@@ -98,12 +118,7 @@ export function createPreparedRenderWindow(options: {
       maskFrameOptions?.maxCacheFrameCount ??
       DEFAULT_MASK_FRAME_CACHE_SIZE,
   );
-  const prefetchFrameCount = Math.max(
-    0,
-    options.prefetchFrameCount ??
-      maskFrameOptions?.prefetchFrameCount ??
-      DEFAULT_MASK_PREFETCH_FRAME_COUNT,
-  );
+  const prefetchFrameCount = resolvePreparedWindowFrameCount(options);
   const refillThresholdFrameCount =
     getPreparedWindowRefillThresholdFrameCount(prefetchFrameCount);
   const preparedWindowScanIntervalSeconds = Math.max(
@@ -573,6 +588,23 @@ export function createPreparedRenderWindow(options: {
   return {
     getFrame,
 
+    isArtifactPrepared(mediaTime) {
+      if (isDestroyed || !maskStyle) {
+        return true;
+      }
+
+      const detectionFrame = options.detectionTimeline.selectFrame(mediaTime);
+
+      if (!detectionFrame) {
+        return true;
+      }
+
+      return (
+        getMaskStatus(getFrameKey(detectionFrame)) !==
+        PreparedRenderFrameMaskStatus.Pending
+      );
+    },
+
     waitForReady(mediaTime, waitOptions) {
       if (waitOptions.enabled === false) {
         return Promise.resolve();
@@ -733,6 +765,7 @@ export function createPreparedRenderWindow(options: {
       workerStatus: status.workerStatus,
     });
     notifyReadinessWaiters();
+    options.onPreparedWindowChange?.();
   }
 
   function evictPreparedMaskFrames() {

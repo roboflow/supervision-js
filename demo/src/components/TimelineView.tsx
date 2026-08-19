@@ -17,7 +17,7 @@ export function TimelineView({
   detectionBuffer,
   disabled,
   duration,
-  normalizedRanges = [],
+  onScrub,
   onSeek,
   playbackState,
   processedRanges = [],
@@ -30,7 +30,7 @@ export function TimelineView({
   readonly detectionBuffer: DetectionBufferState | null;
   readonly disabled: boolean;
   readonly duration: number | null;
-  readonly normalizedRanges?: readonly TimelineRange[];
+  readonly onScrub: (time: number) => void;
   readonly onSeek: (time: number) => void;
   readonly playbackState: MediaRendererPlaybackState | null;
   readonly processedRanges?: readonly TimelineRange[];
@@ -46,10 +46,11 @@ export function TimelineView({
     playbackState,
   });
   const { flushSeek, onScrubChange, onScrubEnd, onScrubStart, scrubTime } =
-    useDebouncedTimelineSeek({
+    useTimelineSeekGesture({
       currentTime,
       disabled,
       duration: mediaDuration,
+      onScrub,
       onSeek,
     });
   const displayedCurrentTime = scrubTime ?? timelineCurrentTime;
@@ -61,7 +62,6 @@ export function TimelineView({
       detectionBuffer?.requestedEndTime ?? 0,
       activeDetectionFrameTime ?? 0,
       currentTime + (preparedAheadSeconds ?? 0),
-      getMaxRangeEnd(normalizedRanges),
       getMaxRangeEnd(processedRanges),
       getMaxRangeEnd(processingRanges),
       1,
@@ -90,10 +90,6 @@ export function TimelineView({
   );
   const processingRangeStyles = createSegmentStyles(
     processingRanges,
-    visualDuration,
-  );
-  const normalizedRangeStyles = createSegmentStyles(
-    normalizedRanges,
     visualDuration,
   );
   const showRequestedRange =
@@ -198,10 +194,6 @@ export function TimelineView({
           <span className="timeline-view__chip-dot" />
           Has detections
         </span>
-        <span className="timeline-view__chip timeline-view__chip--normalized">
-          <span className="timeline-view__chip-dot" />
-          Normalized
-        </span>
         <span className="timeline-view__chip timeline-view__chip--processing">
           <span className="timeline-view__chip-dot" />
           Running inference
@@ -210,15 +202,6 @@ export function TimelineView({
 
       <div className="timeline-view__scrubber">
         <div className="timeline-view__lanes" aria-hidden="true">
-          <div className="timeline-view__lane timeline-view__lane--normalization">
-            {normalizedRangeStyles.map(({ key, style }) => (
-              <span
-                className="timeline-view__segment timeline-view__segment--normalized"
-                key={key}
-                style={style}
-              />
-            ))}
-          </div>
           <div className="timeline-view__lane timeline-view__lane--detections">
             {processedRangeStyles.map(({ key, style }) => (
               <span
@@ -392,51 +375,52 @@ function useSmoothTimelineCurrentTime({
   return timelineCurrentTime;
 }
 
-interface DebouncedTimelineSeekOptions {
+interface TimelineSeekGestureOptions {
   readonly currentTime: number;
   readonly disabled: boolean;
   readonly duration: number | null;
+  readonly onScrub: (time: number) => void;
   readonly onSeek: (time: number) => void;
 }
 
-const TIMELINE_SEEK_DEBOUNCE_MS = 120;
 const TIMELINE_SCRUB_SETTLE_EPSILON_SECONDS = 0.05;
 
-function useDebouncedTimelineSeek({
+/**
+ * Splits a timeline drag into the two things a player answers differently:
+ * every position the pointer passes through is a scrub, and the position it is
+ * released on is a seek. The knob follows the pointer until the player's own
+ * time catches up with where the drag ended.
+ */
+function useTimelineSeekGesture({
   currentTime,
   disabled,
   duration,
+  onScrub,
   onSeek,
-}: DebouncedTimelineSeekOptions) {
+}: TimelineSeekGestureOptions) {
   const [scrubTime, setScrubTime] = useState<number | null>(null);
   const scrubTimeRef = useRef<number | null>(null);
-  const seekTimerRef = useRef<number | undefined>(undefined);
 
-  const clearTimer = () => {
-    if (seekTimerRef.current !== undefined) {
-      window.clearTimeout(seekTimerRef.current);
-      seekTimerRef.current = undefined;
+  const moveTo = (nextTime: number) => {
+    if (disabled || duration === null) {
+      return null;
     }
+
+    const clampedTime = clamp(nextTime, 0, duration);
+
+    scrubTimeRef.current = clampedTime;
+    setScrubTime(clampedTime);
+    return clampedTime;
   };
 
-  const commitSeek = () => {
+  const releaseSeek = () => {
     const nextTime = scrubTimeRef.current;
-
-    clearTimer();
 
     if (nextTime === null || disabled || duration === null) {
       return;
     }
 
     onSeek(clamp(nextTime, 0, duration));
-  };
-
-  const scheduleSeek = () => {
-    clearTimer();
-
-    seekTimerRef.current = window.setTimeout(() => {
-      commitSeek();
-    }, TIMELINE_SEEK_DEBOUNCE_MS);
   };
 
   useEffect(() => {
@@ -457,41 +441,22 @@ function useDebouncedTimelineSeek({
       return;
     }
 
-    clearTimer();
     scrubTimeRef.current = null;
     setScrubTime(null);
   }, [disabled, duration]);
 
-  useEffect(
-    () => () => {
-      clearTimer();
-    },
-    [],
-  );
-
   return {
-    flushSeek: commitSeek,
+    flushSeek: releaseSeek,
     onScrubChange(nextTime: number) {
-      if (disabled || duration === null) {
-        return;
+      const clampedTime = moveTo(nextTime);
+
+      if (clampedTime !== null) {
+        onScrub(clampedTime);
       }
-
-      const clampedTime = clamp(nextTime, 0, duration);
-
-      scrubTimeRef.current = clampedTime;
-      setScrubTime(clampedTime);
-      scheduleSeek();
     },
-    onScrubEnd: commitSeek,
+    onScrubEnd: releaseSeek,
     onScrubStart(nextTime: number) {
-      if (disabled || duration === null) {
-        return;
-      }
-
-      const clampedTime = clamp(nextTime, 0, duration);
-
-      scrubTimeRef.current = clampedTime;
-      setScrubTime(clampedTime);
+      moveTo(nextTime);
     },
     scrubTime,
   };

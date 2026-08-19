@@ -1,11 +1,13 @@
 import {
   createChunkedDetectionFrameSource,
+  createVideoEngineMediaRendererSource,
   type DetectionFrameChunkFetch,
   type DetectionFrameChunkManifest,
   type DetectionFrameSource,
   type DetectionFrame,
-  type MediaSessionMedia,
+  type MediaRendererSource,
 } from "supervision";
+import { SourceKind } from "@roboflow/video-engine";
 import type { DemoPresentationAvailability } from "../presentation/demo-presentation";
 
 const fixtureMetaModules = import.meta.glob(
@@ -68,7 +70,6 @@ interface DemoFixtureMeta {
   readonly media: {
     readonly file: string;
     readonly loadingStatusLabel: string;
-    readonly normalizeInBrowser: boolean;
     readonly readyStatusLabel: string;
   };
   readonly presentation?: DemoFixturePresentationDefaults;
@@ -93,7 +94,6 @@ export interface DemoFixtureDefinition {
   readonly displayName: string;
   readonly inferenceLabel: string;
   readonly mediaLoadingStatusLabel: string;
-  readonly normalizeInBrowser: boolean;
   readonly presentationDefaults?: DemoFixturePresentationDefaults;
   readonly presentationAvailability?: DemoPresentationAvailability;
   readonly sampleName: string;
@@ -179,13 +179,6 @@ export type DemoFixtureFrameTransform = (
   frames: readonly DetectionFrame[],
 ) => readonly DetectionFrame[];
 
-export interface DemoFixtureMediaSource {
-  readonly error: Error | null;
-  readonly media: MediaSessionMedia;
-  readonly normalizeInBrowser: boolean;
-  readonly statusLabel: string;
-}
-
 export async function loadDemoFixtureDetectionManifest(
   definition: DemoFixtureDefinition = defaultDemoFixture,
 ): Promise<DemoFixtureDetectionManifest> {
@@ -200,32 +193,12 @@ export async function loadDemoFixtureDetectionManifest(
   return (await response.json()) as DemoFixtureDetectionManifest;
 }
 
-export async function loadDemoFixtureMedia(
+export function createDemoFixtureMedia(
   definition: DemoFixtureDefinition = defaultDemoFixture,
-): Promise<DemoFixtureMediaSource> {
-  if (!definition.normalizeInBrowser) {
-    return {
-      error: null,
-      media: definition.videoSrc,
-      normalizeInBrowser: false,
-      statusLabel: definition.mediaReadyStatusLabel,
-    };
-  }
-
-  const response = await fetch(definition.videoSrc);
-
-  if (!response.ok) {
-    throw new Error(
-      `Unable to load sample source media: ${response.status} ${response.statusText}`,
-    );
-  }
-
-  return {
-    error: null,
-    media: await response.blob(),
-    normalizeInBrowser: true,
-    statusLabel: definition.mediaReadyStatusLabel,
-  };
+): MediaRendererSource {
+  return createVideoEngineMediaRendererSource({
+    source: { kind: SourceKind.Url, url: definition.videoSrc },
+  });
 }
 
 export function createDemoFixtureDetectionSource(
@@ -327,7 +300,6 @@ function createDemoFixtures(): readonly DemoFixtureDefinition[] {
           inferenceLabel: meta.inferenceLabel,
           mediaLoadingStatusLabel: meta.media.loadingStatusLabel,
           mediaReadyStatusLabel: meta.media.readyStatusLabel,
-          normalizeInBrowser: meta.media.normalizeInBrowser,
           presentationDefaults: meta.presentation,
           presentationAvailability: meta.presentationAvailability,
           sampleName: meta.sampleName,

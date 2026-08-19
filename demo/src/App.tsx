@@ -5,6 +5,7 @@ import { DemoShell } from "./components/DemoShell";
 import { DocsBasketballPlayground } from "./components/DocsBasketballPlayground";
 import { DocsAnnotationRendererPlayground } from "./components/DocsAnnotationRendererPlayground";
 import { PerformanceStrip } from "./components/PerformanceStrip";
+import { PresentationDiagnostics } from "./components/PresentationDiagnostics";
 import { QualityControls } from "./components/QualityControls";
 import { RenderControls } from "./components/RenderControls";
 import { RendererViewport } from "./components/RendererViewport";
@@ -16,7 +17,6 @@ import { parseDocsAnnotationRenderer } from "./docs-annotation-renderer";
 import { DemoSourceMode, useDemoRenderer } from "./hooks/useDemoRenderer";
 import { defaultDemoClassNames } from "./presentation/demo-presentation";
 import { DemoViewMode } from "./session/demo-view-mode";
-import type { TimelineRange } from "./session/demo-session-types";
 
 const docsUrl = resolveDemoDocsUrl(
   import.meta.env.VITE_SUPERVISION_DOCS_URL,
@@ -116,21 +116,6 @@ function DemoApp() {
         : [],
     [demo.sourceMode, demo.uploadInferenceState.processingRanges],
   );
-  const normalizedRanges = useMemo(
-    () =>
-      demo.sourceMode === DemoSourceMode.Upload
-        ? demo.uploadInferenceState.normalizedRanges
-        : createSampleNormalizationRanges({
-            duration: demo.duration,
-            progress: demo.sessionState?.normalization?.progress ?? null,
-          }),
-    [
-      demo.duration,
-      demo.sessionState?.normalization?.progress,
-      demo.sourceMode,
-      demo.uploadInferenceState.normalizedRanges,
-    ],
-  );
   const styleClassNames = useMemo(
     () =>
       demo.sourceMode === DemoSourceMode.Upload
@@ -201,11 +186,11 @@ function DemoApp() {
           currentTime={demo.rendererState?.currentTime ?? null}
           detectionBuffer={demo.rendererState?.detectionBuffer ?? null}
           duration={demo.duration}
+          onScrub={demo.onScrub}
           onSeek={demo.onSeek}
           onStepFrame={demo.onStepFrame}
           onTogglePlayback={demo.onTogglePlayback}
           playbackState={demo.playbackState}
-          normalizedRanges={normalizedRanges}
           processedRanges={processedRanges}
           processingRanges={processingRanges}
           renderPreparationDiagnostics={demo.renderPreparationDiagnostics}
@@ -225,6 +210,13 @@ function DemoApp() {
           rendererState={demo.rendererState}
         />
       }
+      presentationDiagnostics={
+        <PresentationDiagnostics
+          detectionRanges={processedRanges}
+          duration={demo.duration}
+          readSample={demo.readPresentationDiagnostics}
+        />
+      }
       statusPanel={
         <StatusPanel
           detectionSourceState={demo.detectionSourceState}
@@ -242,37 +234,6 @@ function DemoApp() {
       }
     />
   );
-}
-
-function createSampleNormalizationRanges({
-  duration,
-  progress,
-}: {
-  readonly duration: number | null;
-  readonly progress: {
-    readonly processedTime: number;
-    readonly progress: number;
-  } | null;
-}): readonly TimelineRange[] {
-  if (duration === null || duration <= 0) {
-    return [];
-  }
-
-  if (progress === null) {
-    return [];
-  }
-
-  const endTime =
-    progress.progress >= 0.999
-      ? duration
-      : Math.min(Math.max(progress.processedTime, 0), duration);
-
-  return [
-    {
-      endTime,
-      startTime: 0,
-    },
-  ];
 }
 
 function parseClassNames(value: string) {
