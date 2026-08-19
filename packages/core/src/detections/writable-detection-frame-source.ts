@@ -220,7 +220,16 @@ export function createWritableDetectionFrameSource(
           writeOptions([finalizedFrame]),
         );
         assertActive();
-        const invalidation = getInvalidatedCoverage([finalizedFrame], []);
+        const changedSourceRanges = [
+          {
+            endTime: Math.max(endTime, previousEndTime),
+            startTime: frameToFinalize.mediaTime,
+          },
+        ];
+        const invalidation = getInvalidatedCoverage(
+          [finalizedFrame],
+          changedSourceRanges,
+        );
 
         latestFrame = finalizedFrame;
 
@@ -235,12 +244,7 @@ export function createWritableDetectionFrameSource(
 
         const finalSummary = await retainAndRecord(
           nextSummary,
-          [
-            {
-              endTime: Math.max(endTime, previousEndTime),
-              startTime: frameToFinalize.mediaTime,
-            },
-          ],
+          changedSourceRanges,
           // Finalizing usually closes at the end of media, where the tail an
           // open-ended frame gives up is unreachable. The caller may finalize
           // earlier, though, so report it rather than assume.
@@ -369,10 +373,24 @@ export function createWritableDetectionFrameSource(
         .flatMap((changedRange) =>
           ranges
             .filter((range) => rangesOverlap(range, changedRange))
-            .map((range) => ({
-              endTime: Math.min(range.endTime, changedRange.endTime),
-              startTime: Math.max(range.startTime, changedRange.startTime),
-            })),
+            .map((range) => {
+              const startTime = Math.max(
+                range.startTime,
+                changedRange.startTime,
+              );
+              const endTime = Math.min(range.endTime, changedRange.endTime);
+
+              return {
+                // An unbounded ask against an unbounded invalidation would
+                // otherwise hand back an infinite range, and a consumer would
+                // take it straight to `loadFrames`. Nothing past the coverage
+                // the source knows about can be loaded.
+                endTime: Number.isFinite(endTime)
+                  ? endTime
+                  : Math.max(startTime, getKnownEndTime()),
+                startTime,
+              };
+            }),
         );
 
       return {
@@ -411,6 +429,13 @@ export function createWritableDetectionFrameSource(
    */
   function getReloadFloorVersion() {
     return Math.max(allRangeVersion, journalFloorVersion);
+  }
+
+  /**
+   * Latest media time the source can actually serve frames for.
+   */
+  function getKnownEndTime() {
+    return Math.max(coverageFrontierTime ?? 0, summary?.endTime ?? 0);
   }
 
   function getRangeVersion(range: DetectionFrameSourceVersionRange) {

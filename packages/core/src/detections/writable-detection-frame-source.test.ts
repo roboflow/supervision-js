@@ -513,6 +513,51 @@ describe("writable detection frame source", () => {
     });
   });
 
+  it("answers an unbounded ask with a range the source can serve", async () => {
+    const store = createMemoryColdDetectionFrameStore();
+    const source = createWritableDetectionFrameSource({
+      datasetId: "stream",
+      store,
+    });
+
+    await source.appendFrames([
+      { detections: [{ id: "open" }], frameIndex: 0, mediaTime: 0 },
+    ]);
+    const openEndedVersion = source.getVersion();
+
+    await source.appendFrames([
+      {
+        detections: [{ id: "open" }],
+        endTime: 0.1,
+        frameIndex: 0,
+        mediaTime: 0,
+      },
+    ]);
+
+    const changes = source.getChangesSince?.(openEndedVersion, [
+      { endTime: Number.POSITIVE_INFINITY, startTime: 0 },
+    ]);
+
+    // A consumer takes these ranges straight to `loadFrames`, and an infinite
+    // end would never terminate a chunk walk.
+    expect(
+      changes?.ranges.every((range) => Number.isFinite(range.endTime)),
+    ).toBe(true);
+    await expect(
+      source.loadFrames(
+        changes!.ranges[0]!.startTime,
+        changes!.ranges[0]!.endTime,
+      ),
+    ).resolves.toEqual([
+      {
+        detections: [{ id: "open" }],
+        endTime: 0.1,
+        frameIndex: 0,
+        mediaTime: 0,
+      },
+    ]);
+  });
+
   it("does not journal a live hold the same write already reports", async () => {
     const store = createMemoryColdDetectionFrameStore();
     const source = createWritableDetectionFrameSource({
