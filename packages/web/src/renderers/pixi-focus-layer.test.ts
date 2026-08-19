@@ -42,6 +42,25 @@ const maskFrame: DetectionFrame = {
   mediaTime: 0.1,
 };
 
+const polygonFrame: DetectionFrame = {
+  detections: [
+    {
+      className: "player",
+      id: "player-1",
+      polygon: {
+        points: [
+          { x: 10, y: 10 },
+          { x: 40, y: 10 },
+          { x: 40, y: 50 },
+        ],
+      },
+      rect: { height: 30, width: 20, x: 20, y: 30 },
+    },
+  ],
+  frameIndex: 3,
+  mediaTime: 0.1,
+};
+
 afterEach(() => {
   vi.unstubAllGlobals();
   FakeShaderFactory.descriptors.length = 0;
@@ -432,6 +451,45 @@ describe("pixi focus layer", () => {
     expect(display.rect).toHaveBeenCalledOnce();
     expect(display.rect).toHaveBeenCalledWith(0, 0, 120, 80);
     expect(display.cut).not.toHaveBeenCalled();
+  });
+
+  it("rebuilds vector cutouts only when their inputs change", () => {
+    const layer = createPixiFocusLayer({
+      Graphics: FakeGraphics as never,
+      focusStyle: new BaseFocusStyle({
+        fill: { alpha: 0.5, color: 0x000000 },
+        targetMode: FocusTargetMode.Ambient,
+      }),
+    });
+    const display = layer.createDisplay({
+      height: 80,
+      width: 120,
+    }) as FakeGraphics;
+
+    const drawPolygonFrame = (drawnFrame: DetectionFrame) =>
+      layer.drawFrame({
+        frame: drawnFrame,
+        hoveredPick: null,
+        mediaTime: drawnFrame.mediaTime,
+        selectedPick: null,
+      });
+
+    drawPolygonFrame(polygonFrame);
+
+    expect(display.clear).toHaveBeenCalledOnce();
+    expect(display.poly).toHaveBeenCalledOnce();
+
+    drawPolygonFrame(polygonFrame);
+    drawPolygonFrame(polygonFrame);
+
+    expect(display.clear).toHaveBeenCalledOnce();
+    expect(display.poly).toHaveBeenCalledOnce();
+    expect(display.visible).toBe(true);
+
+    drawPolygonFrame({ ...polygonFrame, frameIndex: 4, mediaTime: 0.2 });
+
+    expect(display.clear).toHaveBeenCalledTimes(2);
+    expect(display.poly).toHaveBeenCalledTimes(2);
   });
 });
 

@@ -30,6 +30,21 @@ type MaskCutoutCacheEntry = {
   readonly width: number;
 } | null;
 
+/**
+ * What the vector cutout geometry is built from. Detections are immutable
+ * snapshots, so identity is enough to tell one frame's targets from another's.
+ */
+interface VectorFocusSignature {
+  readonly cornerRadius: number | undefined;
+  readonly detections: readonly object[];
+  readonly fillAlpha: number;
+  readonly fillColor: number;
+  readonly frame: object;
+  readonly mediaHeight: number;
+  readonly mediaWidth: number;
+  readonly shape: BoxShape | undefined;
+}
+
 type GraphicsConstructor = new () => PixiFocusGraphics;
 type ContainerConstructor = new () => PixiContainer;
 type ImageSourceConstructor = new (options: {
@@ -140,6 +155,7 @@ export function createPixiFocusLayer(options: {
   let targetAlpha = 0;
   let lastTick: number | null = null;
   let isDestroyed = false;
+  let vectorFocusSignature: VectorFocusSignature | null = null;
   // A frame can fall back to a composited RGBA texture when its colored ID-mask
   // palette is exhausted. Keep decoded row runs by the immutable mask payload so
   // that fallback focus still cuts out the actual mask, not its bounding rect.
@@ -149,6 +165,7 @@ export function createPixiFocusLayer(options: {
     createDisplay({ width, height }) {
       mediaWidth = width;
       mediaHeight = height;
+      vectorFocusSignature = null;
       focusGraphics = new options.Graphics();
       focusGraphics.visible = false;
       idMaskRenderer = createIdMaskRenderer();
@@ -224,7 +241,7 @@ export function createPixiFocusLayer(options: {
       }
 
       idMaskRenderer?.hide();
-      drawVectorFocus(instruction);
+      drawVectorFocus(instruction, context.frame);
     },
 
     tick(timestamp) {
@@ -283,7 +300,10 @@ export function createPixiFocusLayer(options: {
     return true;
   }
 
-  function drawVectorFocus(instruction: FocusDrawInstruction) {
+  function drawVectorFocus(
+    instruction: FocusDrawInstruction,
+    frame: FocusDrawFrame,
+  ) {
     if (!focusGraphics) {
       return;
     }
@@ -300,13 +320,32 @@ export function createPixiFocusLayer(options: {
       return;
     }
 
+    const signature: VectorFocusSignature = {
+      cornerRadius: instruction.fallback?.cornerRadius,
+      detections: targetsWithGeometry.map((target) => target.detection),
+      fillAlpha: instruction.fill.alpha,
+      fillColor: instruction.fill.color,
+      frame,
+      mediaHeight,
+      mediaWidth,
+      shape: instruction.fallback?.shape,
+    };
+
     focusGraphics.visible = true;
+    if (focusMaskGraphics) focusMaskGraphics.visible = true;
+
+    // Tessellating thousands of mask runs on every draw is what makes this path
+    // expensive, and nothing it draws moves while its inputs hold still.
+    if (isSameVectorFocus(vectorFocusSignature, signature)) {
+      return;
+    }
+
+    vectorFocusSignature = signature;
     focusGraphics.clear();
     focusGraphics.rect(0, 0, mediaWidth, mediaHeight);
     focusGraphics.fill(instruction.fill);
 
     if (focusMaskGraphics) {
-      focusMaskGraphics.visible = true;
       focusMaskGraphics.clear();
 
       for (const target of targetsWithGeometry) {
@@ -437,6 +476,7 @@ export function createPixiFocusLayer(options: {
       return;
     }
 
+    vectorFocusSignature = null;
     focusGraphics.clear();
     focusGraphics.visible = false;
     focusMaskGraphics?.clear();
@@ -466,6 +506,26 @@ export function createPixiFocusLayer(options: {
       mediaWidth,
     });
   }
+}
+
+function isSameVectorFocus(
+  previous: VectorFocusSignature | null,
+  next: VectorFocusSignature,
+) {
+  return (
+    previous !== null &&
+    previous.frame === next.frame &&
+    previous.fillAlpha === next.fillAlpha &&
+    previous.fillColor === next.fillColor &&
+    previous.cornerRadius === next.cornerRadius &&
+    previous.shape === next.shape &&
+    previous.mediaHeight === next.mediaHeight &&
+    previous.mediaWidth === next.mediaWidth &&
+    previous.detections.length === next.detections.length &&
+    previous.detections.every(
+      (detection, index) => detection === next.detections[index],
+    )
+  );
 }
 
 function getTargetMaskIds(targets: readonly DetectionPickResult[]) {

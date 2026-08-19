@@ -4,6 +4,7 @@ import {
   type DetectionFrame,
   type PolygonStyle,
 } from "supervision-js-core";
+import type { FocusStyle } from "supervision-js-core";
 import type { LabelStyle } from "supervision-js-core";
 import type { MaskStyle } from "supervision-js-core";
 import {
@@ -31,7 +32,10 @@ import { createPixiFocusLayer } from "./pixi-focus-layer";
 import { createPixiInteractionLayer } from "./pixi-interaction-layer";
 import { createPixiInteractionPresentationLayer } from "./pixi-interaction-presentation-layer";
 import { createPixiLabelLayer } from "./pixi-label-layer";
-import { createPixiMaskLayer } from "./pixi-mask-layer";
+import {
+  createPixiMaskLayer,
+  ID_MASK_PREPARATION_STYLE,
+} from "./pixi-mask-layer";
 import { createPixiMaskBrushPreview } from "./pixi-mask-brush-preview";
 import { createPixiPolygonLayer } from "./pixi-polygon-layer";
 import { createPixiVectorLayer } from "./pixi-vector-layer";
@@ -156,6 +160,7 @@ export async function createPixiMediaScene(
   const { GifSprite } = await import("pixi.js/gif");
   const app: PixiApplication = new Application();
   const frameChannel = options.presentedFrames;
+  let currentFocusStyle: FocusStyle | null = options.focusStyle ?? null;
   let currentLabelStyle: LabelStyle | null = options.labelStyle ?? null;
   let currentMaskStyle: MaskStyle | null = options.maskStyle ?? null;
   let currentPolygonStyle: PolygonStyle | null =
@@ -281,7 +286,8 @@ export async function createPixiMediaScene(
         preview: options.maskBrush,
       })
     : undefined;
-  let maskLayer = options.maskStyle
+  const initialMaskPreparationStyle = resolveMaskPreparationStyle();
+  let maskLayer = initialMaskPreparationStyle
     ? createPixiMaskLayer({
         Container,
         ImageSource,
@@ -292,11 +298,13 @@ export async function createPixiMediaScene(
         Texture,
         UniformGroup,
         detectionTimeline: options.detectionTimeline,
-        maskStyle: createVisibilityMaskStyle(options.maskStyle),
+        maskStyle: initialMaskPreparationStyle,
         onPreparedWindowChange: handlePreparedWindowChange,
         renderPreparation: options.renderPreparation,
       })
     : undefined;
+
+  maskLayer?.setFillVisible(currentMaskStyle !== null);
   let labelLayer = options.labelStyle
     ? createPixiLabelLayer({
         Container,
@@ -1006,9 +1014,9 @@ export async function createPixiMediaScene(
         vectorLayer.setStyles({});
         labelLayer?.setLabelStyle(currentLabelStyle);
         polygonLayer?.setPolygonStyle(currentPolygonStyle);
-        if (maskVisibilityChanged && currentMaskStyle) {
+        if (maskVisibilityChanged && (currentMaskStyle || currentFocusStyle)) {
           visibilityVersion += 1;
-          maskLayer?.setMaskStyle(createVisibilityMaskStyle(currentMaskStyle));
+          syncMaskPreparation();
         }
       }
       boxLayer.setBoxStyle(presentation.boxStyle);
@@ -1042,15 +1050,7 @@ export async function createPixiMediaScene(
 
       if (presentation.maskStyle !== undefined) {
         currentMaskStyle = presentation.maskStyle;
-        const nextMaskLayer = presentation.maskStyle
-          ? ensureMaskLayer(presentation.maskStyle)
-          : maskLayer;
-
-        nextMaskLayer?.setMaskStyle(
-          presentation.maskStyle
-            ? createVisibilityMaskStyle(presentation.maskStyle)
-            : presentation.maskStyle,
-        );
+        syncMaskPreparation();
 
         if (presentation.maskStyle) {
           attachMaskLayerDisplay();
@@ -1077,11 +1077,13 @@ export async function createPixiMediaScene(
       );
 
       if (presentation.focusStyle !== undefined) {
+        currentFocusStyle = presentation.focusStyle;
         const nextFocusLayer = presentation.focusStyle
           ? ensureFocusLayer(presentation.focusStyle)
           : focusLayer;
 
         nextFocusLayer?.setFocusStyle(presentation.focusStyle);
+        syncMaskPreparation();
 
         if (presentation.focusStyle) {
           attachFocusLayerDisplay();
@@ -1227,7 +1229,7 @@ export async function createPixiMediaScene(
     return visibleDetectionIndexes.size;
   }
 
-  function ensureMaskLayer(maskStyle: NonNullable<typeof options.maskStyle>) {
+  function ensureMaskLayer(preparationStyle: MaskStyle) {
     if (!maskLayer) {
       maskLayer = createPixiMaskLayer({
         Container,
@@ -1239,7 +1241,7 @@ export async function createPixiMediaScene(
         Texture,
         UniformGroup,
         detectionTimeline: options.detectionTimeline,
-        maskStyle: createVisibilityMaskStyle(maskStyle),
+        maskStyle: preparationStyle,
         onPreparedWindowChange: handlePreparedWindowChange,
         renderPreparation: options.renderPreparation,
       });
@@ -1250,6 +1252,35 @@ export async function createPixiMediaScene(
     }
 
     return maskLayer;
+  }
+
+  /**
+   * The id-mask artifact is what the focus cutout samples as well as what the
+   * mask fill draws, so preparation has to keep running while either one is on.
+   */
+  function resolveMaskPreparationStyle() {
+    if (currentMaskStyle) {
+      return createVisibilityMaskStyle(currentMaskStyle);
+    }
+
+    return currentFocusStyle
+      ? createVisibilityMaskStyle(ID_MASK_PREPARATION_STYLE)
+      : null;
+  }
+
+  function syncMaskPreparation() {
+    const preparationStyle = resolveMaskPreparationStyle();
+
+    if (!preparationStyle) {
+      maskLayer?.setFillVisible(false);
+      maskLayer?.setMaskStyle(null);
+      return;
+    }
+
+    const layer = ensureMaskLayer(preparationStyle);
+
+    layer.setFillVisible(currentMaskStyle !== null);
+    layer.setMaskStyle(preparationStyle);
   }
 
   function ensurePolygonLayer(polygonStyle: PolygonStyle) {

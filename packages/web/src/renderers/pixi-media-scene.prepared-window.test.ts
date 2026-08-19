@@ -1,14 +1,22 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  BaseFocusStyle,
   createArrayDetectionFrameSource,
   createBufferedDetectionTimeline,
 } from "supervision-js-core";
 import type {
   BufferedDetectionTimeline,
   DetectionFrame,
+  FocusStyle,
   MaskStyle,
   PolygonStyle,
 } from "supervision-js-core";
+import {
+  RenderPreparationArtifactFrameStatus,
+  RenderPreparationArtifactKind,
+  type RenderPreparationDiagnostics,
+  type RenderPreparationOptions,
+} from "#types/render-preparation";
 
 import type {
   MediaRendererSceneOptions,
@@ -76,7 +84,9 @@ vi.mock("pixi.js", () => {
 
   class Graphics extends Container {
     clear = vi.fn(() => this);
+    cut = vi.fn(() => this);
     fill = vi.fn(() => this);
+    poly = vi.fn(() => this);
     rect = vi.fn(() => this);
     roundRect = vi.fn(() => this);
     stroke = vi.fn(() => this);
@@ -109,6 +119,42 @@ vi.mock("pixi.js", () => {
     update = vi.fn();
   }
 
+  class ImageSource {
+    readonly style = {};
+    constructor(public readonly options: unknown) {}
+    destroy = vi.fn();
+  }
+
+  class Shader {
+    static from = vi.fn(() => new Shader());
+    readonly resources: Record<string, unknown> = {};
+    destroy = vi.fn();
+  }
+
+  class UniformGroup {
+    readonly uniforms: Record<string, unknown> = {};
+    constructor(uniforms: Record<string, { value: unknown }>) {
+      for (const [name, uniform] of Object.entries(uniforms)) {
+        this.uniforms[name] = uniform.value;
+      }
+    }
+    update = vi.fn();
+  }
+
+  class Mesh {
+    visible = false;
+    shader: unknown;
+    constructor(options: { shader: unknown }) {
+      this.shader = options.shader;
+    }
+    destroy = vi.fn();
+  }
+
+  class MeshGeometry {
+    constructor(public readonly options: unknown) {}
+    destroy = vi.fn();
+  }
+
   class ExternalSource {
     constructor(public readonly options: unknown) {}
     updateGPUTexture = vi.fn();
@@ -122,15 +168,15 @@ vi.mock("pixi.js", () => {
     Container,
     ExternalSource,
     Graphics,
-    ImageSource: Stub,
-    Mesh: Stub,
-    MeshGeometry: Stub,
+    ImageSource,
+    Mesh,
+    MeshGeometry,
     Rectangle: Stub,
-    Shader: Stub,
+    Shader,
     Sprite,
     Text: Stub,
     Texture,
-    UniformGroup: Stub,
+    UniformGroup,
   };
 });
 
@@ -300,6 +346,41 @@ describe("the prepared annotation window under push presentation", () => {
     expect(pixiMock.render).toHaveBeenCalledTimes(settled);
   });
 
+  it("keeps preparing id-mask artifacts for focus while the mask fill is off", async () => {
+    const diagnostics: RenderPreparationDiagnostics[] = [];
+    const scene = await createScene({
+      focusStyle: new BaseFocusStyle(),
+      maskStyle: null,
+      renderPreparation: {
+        onDiagnostics: (next) => diagnostics.push(next),
+      },
+    });
+
+    scene.present(1000);
+    await scene.settleCooks();
+
+    expect(maskArtifactStatuses(diagnostics)).not.toContain(
+      RenderPreparationArtifactFrameStatus.Disabled,
+    );
+    expect(maskArtifactStatuses(diagnostics).length).toBeGreaterThan(0);
+  });
+
+  it("prepares no id-mask artifacts when neither the fill nor focus is on", async () => {
+    const diagnostics: RenderPreparationDiagnostics[] = [];
+    const scene = await createScene({
+      focusStyle: null,
+      maskStyle: null,
+      renderPreparation: {
+        onDiagnostics: (next) => diagnostics.push(next),
+      },
+    });
+
+    scene.present(1000);
+    await scene.settleCooks();
+
+    expect(maskArtifactStatuses(diagnostics)).toHaveLength(0);
+  });
+
   it("reports no window to a scene that free-runs on the ticker", async () => {
     const { createPixiMediaScene } = await import("./pixi-media-scene");
     const scene = await createPixiMediaScene(
@@ -309,6 +390,19 @@ describe("the prepared annotation window under push presentation", () => {
     expect(scene.getPreparedAnnotationWindow?.()).toBeNull();
   });
 });
+
+function maskArtifactStatuses(
+  diagnostics: readonly RenderPreparationDiagnostics[],
+) {
+  return diagnostics
+    .flatMap((entry) => entry.artifacts)
+    .filter(
+      (artifact) =>
+        artifact.kind === RenderPreparationArtifactKind.MaskFrame &&
+        artifact.activeFrame,
+    )
+    .map((artifact) => artifact.activeFrame?.status);
+}
 
 function boxGraphics() {
   const graphics = pixiMock.graphics[0];
@@ -325,9 +419,11 @@ function boxGraphics() {
 
 async function createScene(
   options: {
+    readonly focusStyle?: FocusStyle | null;
     readonly maskStyle?: MaskStyle | null;
     readonly polygonStyle?: PolygonStyle;
     readonly prepareDetections?: boolean;
+    readonly renderPreparation?: RenderPreparationOptions;
   } = {},
 ) {
   const detectionTimeline = createTimeline();
@@ -342,10 +438,12 @@ async function createScene(
   const scene = await createPixiMediaScene(
     createSceneOptions({
       detectionTimeline,
+      focusStyle: options.focusStyle ?? null,
       maskStyle:
         options.maskStyle === undefined ? emptyMaskStyle : options.maskStyle,
       onPresentationUpdate: (sample) => presentations.push(sample),
       polygonStyle: options.polygonStyle,
+      renderPreparation: options.renderPreparation,
       presentedFrames: {
         onPresentedFrame(next) {
           handler = next;

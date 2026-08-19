@@ -112,8 +112,26 @@ export interface PixiMaskLayer {
   getActiveIdMaskFrameTexture(): PixiActiveIdMaskFrameTexture | null;
   setTimelineContext(context: PreparedRenderTimelineContext): void;
   setMaskStyle(maskStyle: MaskStyle | null | undefined): void;
+  /**
+   * Whether the mask fill reaches the screen. Preparation runs either way, so
+   * consumers of the id raster still get an artifact while the fill is off.
+   */
+  setFillVisible(visible: boolean): void;
   destroy(): void;
 }
+
+/**
+ * Cook-only style for consumers that read detection ids out of the raster
+ * instead of drawing the fill. Ids come from the detection index, so the colour
+ * and alpha here never reach the screen.
+ */
+export const ID_MASK_PREPARATION_STYLE: MaskStyle = {
+  artifactKey: "id-mask-preparation",
+  resolve: (detection) =>
+    detection.mask
+      ? { alpha: 1, color: 0xffffff, mask: detection.mask }
+      : undefined,
+};
 
 export interface PixiActiveIdMaskFrameTexture {
   readonly frame: PreparedPngIdMaskFrame;
@@ -148,6 +166,7 @@ export function createPixiMaskLayer(options: {
   let activeFrameKey: string | null = null;
   let activeIdMaskFrame: PreparedPngIdMaskFrame | null = null;
   let maskOpacity = resolveMaskStyleOpacity(options.maskStyle);
+  let isFillVisible = true;
   let maskPickCanvas: HTMLCanvasElement | undefined;
   let maskPickContext: CanvasRenderingContext2D | null | undefined;
   let maskPickFrameKey: string | null = null;
@@ -209,8 +228,7 @@ export function createPixiMaskLayer(options: {
     drawFrame(mediaTime) {
       const preparedFrame = prepareFrame(mediaTime);
 
-      if (!preparedFrame || !maskSprite) {
-        activeIdMaskFrame = null;
+      if (!preparedFrame) {
         hideSprite();
         return;
       }
@@ -227,7 +245,6 @@ export function createPixiMaskLayer(options: {
         preparedFrame.maskStatus === PreparedRenderFrameMaskStatus.Empty ||
         preparedFrame.maskStatus === PreparedRenderFrameMaskStatus.Disabled
       ) {
-        activeIdMaskFrame = null;
         hideSprite();
         return;
       }
@@ -310,6 +327,14 @@ export function createPixiMaskLayer(options: {
       preparedRenderWindow.setMaskStyle(nextMaskStyle);
     },
 
+    setFillVisible(visible) {
+      isFillVisible = visible;
+
+      if (!visible) {
+        hideFill();
+      }
+    },
+
     destroy() {
       if (isDestroyed) {
         return;
@@ -335,6 +360,11 @@ export function createPixiMaskLayer(options: {
     visibleMaskMediaTime = mediaTime;
     activeIdMaskFrame =
       maskFrame.kind === PreparedMaskFrameKind.PngIdMask ? maskFrame : null;
+
+    if (!isFillVisible) {
+      hideFill();
+      return;
+    }
 
     if (maskFrame.kind === PreparedMaskFrameKind.PngIdMask && idMaskRenderer) {
       showIdMaskFrame(maskFrame);
@@ -401,15 +431,18 @@ export function createPixiMaskLayer(options: {
     idMaskRenderer.render(maskFrame, getTexture(maskFrame));
   }
 
-  function hideSprite() {
-    visibleMaskMediaTime = null;
-    activeIdMaskFrame = null;
-
+  function hideFill() {
     if (maskSprite) {
       maskSprite.visible = false;
     }
 
     idMaskRenderer?.hide();
+  }
+
+  function hideSprite() {
+    visibleMaskMediaTime = null;
+    activeIdMaskFrame = null;
+    hideFill();
   }
 
   function canHoldVisibleMaskFor(mediaTime: number) {
