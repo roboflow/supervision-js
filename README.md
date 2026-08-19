@@ -60,7 +60,7 @@ session.setPresentation({
 npm install supervision
 ```
 
-The next browser release is `0.1.5`, prepared for npm's default `latest` tag.
+The next browser release is `0.1.6`, prepared for npm's default `latest` tag.
 Its package includes the private core dependency. Consumers import
 only the public browser entrypoints:
 
