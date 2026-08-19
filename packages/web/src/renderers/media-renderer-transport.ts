@@ -49,9 +49,15 @@ export function createMediaRendererTransport(
     }
 
     const seeking = channel.getSeeking();
-    const state = resolveTransportPlaybackState(status, seeking, settledState);
+    // Inside the transport's own drag gesture the engine pauses itself as a
+    // mechanic and resumes on release; the user never asked to pause, so the
+    // state holds whatever was settled when the gesture began.
+    const state =
+      gestureInFlight && settledState !== null && status !== "ERRORED"
+        ? settledState
+        : resolveTransportPlaybackState(status, seeking, settledState);
 
-    if (!isSettling(status, seeking)) {
+    if (!gestureInFlight && !isSettling(status, seeking)) {
       settledState = state;
     }
 

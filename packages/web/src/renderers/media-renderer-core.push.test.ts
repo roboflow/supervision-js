@@ -122,6 +122,26 @@ describe("media renderer over a push-based media source", () => {
     renderer.destroy();
   });
 
+  it("holds the playing state through a drag even as the producer pauses itself", async () => {
+    const producer = createProducer();
+    const renderer = await createRenderer(producer, createScene());
+
+    producer.setStatus("PLAYING");
+    renderer.scrub(2);
+    producer.setStatus("PAUSED");
+    expect(renderer.getState().playbackState).toBe(
+      MediaRendererPlaybackState.Playing,
+    );
+
+    await renderer.seek(3);
+    producer.setStatus("PLAYING");
+    expect(renderer.getState().playbackState).toBe(
+      MediaRendererPlaybackState.Playing,
+    );
+
+    renderer.destroy();
+  });
+
   it("keeps playing while a seek settles under playback", async () => {
     const producer = createProducer();
     const renderer = await createRenderer(producer, createScene());
