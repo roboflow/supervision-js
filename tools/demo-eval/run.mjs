@@ -7,6 +7,7 @@ import process from "node:process";
 import { parseArgs } from "node:util";
 
 import { closeTarget, listTargets, openTarget } from "./cdp.mjs";
+import { layersDetail, runLayers } from "./scenarios-layers.mjs";
 import {
   Invalid,
   openDemoPage,
@@ -16,7 +17,7 @@ import {
   runSync,
 } from "./scenarios.mjs";
 
-const SCENARIOS = ["paints", "sync", "latency", "battery"];
+const SCENARIOS = ["paints", "sync", "latency", "layers", "battery"];
 const LABEL_WIDTH = 27;
 
 const { values } = parseArgs({
@@ -73,6 +74,7 @@ async function main() {
       paints: runPaints,
       sync: runSync,
       latency: runLatency,
+      layers: runLayers,
     };
     try {
       for (const name of demoScenarios) {
@@ -251,6 +253,9 @@ function detail(name, scenario) {
         ),
       ),
     ];
+  }
+  if (name === "layers") {
+    return layersDetail(scenario, field);
   }
   if (name === "latency") {
     return [
