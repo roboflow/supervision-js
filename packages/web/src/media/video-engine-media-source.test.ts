@@ -263,7 +263,18 @@ describe("video engine media source", () => {
 
     expect(source.metadata.primaryVideoWidth).toBe(1920);
     expect(engine.options).toEqual([
-      { presentation: "frames", source: urlSource },
+      { presentation: "frames", previewWidth: 960, source: urlSource },
     ]);
+  });
+
+  it("lets the caller size scrub previews themselves", async () => {
+    const rendererSource = createVideoEngineMediaRendererSource({
+      previewWidth: 480,
+      source: urlSource,
+    });
+
+    await rendererSource.open();
+
+    expect(engine.options.at(-1)?.previewWidth).toBe(480);
   });
 });

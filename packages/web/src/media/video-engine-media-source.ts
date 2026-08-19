@@ -21,6 +21,7 @@ import type {
 const MILLISECONDS_PER_SECOND = 1000;
 const DEFAULT_FRAME_RATE = 30;
 const TIMESTAMP_EPSILON_SECONDS = 1e-6;
+const FRAMES_PRESENTATION_PREVIEW_WIDTH_PX = 960;
 
 export interface VideoEngineMediaSourceOptions extends Omit<
   VideoEngineOptions,
@@ -60,7 +61,15 @@ export async function openVideoEngineMediaSource(
   // precondition of importing the package at all.
   const { VideoEngine } = await import("@roboflow/video-engine");
   const { frameDecodeStrategy, ...engineOptions } = options;
-  const engine = new VideoEngine({ ...engineOptions, presentation: "frames" });
+  const engine = new VideoEngine({
+    // The engine's preview cache defaults to thumbnail-strip resolution. A
+    // frames-mode consumer is a full-view player, where a scrub preview at
+    // that size upscales into visible mush, so ask for previews near display
+    // size unless the caller decides otherwise.
+    previewWidth: FRAMES_PRESENTATION_PREVIEW_WIDTH_PX,
+    ...engineOptions,
+    presentation: "frames",
+  });
 
   try {
     const snapshot = await engine.load();
