@@ -1,9 +1,23 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createPixiInteractionPresentationLayer } from "#renderers/pixi-interaction-presentation-layer";
 import { BaseInteractionStyle } from "supervision-js-core";
 import type { DetectionFrame } from "supervision-js-core";
 import { DetectionPickTarget } from "supervision-js-core";
+
+type ShaderDescriptor = {
+  readonly gl: { readonly fragment: string; readonly vertex: string };
+  readonly gpu: {
+    readonly fragment: { readonly entryPoint: string; readonly source: string };
+    readonly vertex: { readonly entryPoint: string; readonly source: string };
+  };
+  readonly resources: Record<string, unknown>;
+};
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  FakeShaderFactory.descriptors.length = 0;
+});
 
 const frame: DetectionFrame = {
   detections: [
@@ -50,6 +64,34 @@ describe("pixi interaction presentation layer", () => {
     expect(graphics.rect).toHaveBeenCalledWith(10, 15, 20, 30);
     expect(graphics.stroke).toHaveBeenCalled();
   });
+
+  it("declares a WebGL and a WebGPU program for the interaction mask shader", () => {
+    vi.stubGlobal("document", {
+      createElement: vi.fn(() => ({ height: 0, width: 0 })),
+    });
+
+    const layer = createPixiInteractionPresentationLayer({
+      Container: FakeContainer as never,
+      Graphics: FakeGraphics as never,
+      ImageSource: FakeImageSource as never,
+      Mesh: FakeMesh as never,
+      MeshGeometry: FakeMeshGeometry as never,
+      Shader: FakeShaderFactory as never,
+      Text: FakeText as never,
+      UniformGroup: FakeUniformGroup as never,
+    });
+
+    layer.createDisplay({ height: 80, width: 120 });
+
+    const descriptor = FakeShaderFactory.descriptors.at(-1)!;
+
+    expect(descriptor.gl.vertex.length).toBeGreaterThan(0);
+    expect(descriptor.gl.fragment.length).toBeGreaterThan(0);
+    expect(descriptor.gpu.vertex.entryPoint).toBe("mainVertex");
+    expect(descriptor.gpu.fragment.entryPoint).toBe("mainFragment");
+    expect(descriptor.gpu.vertex.source).toContain("fn mainVertex(");
+    expect(descriptor.gpu.fragment.source).toContain("fn mainFragment(");
+  });
 });
 
 class FakeContainer {
@@ -66,6 +108,62 @@ class FakeGraphics {
   readonly rect = vi.fn(() => this);
   readonly roundRect = vi.fn(() => this);
   readonly stroke = vi.fn(() => this);
+}
+
+class FakeImageSource {
+  readonly style = {};
+
+  constructor(readonly _options: unknown) {}
+
+  readonly destroy = vi.fn();
+}
+
+class FakeMeshGeometry {
+  constructor(readonly _options: unknown) {}
+
+  readonly destroy = vi.fn();
+}
+
+class FakeShader {
+  constructor(readonly resources: Record<string, unknown>) {}
+
+  readonly destroy = vi.fn();
+}
+
+class FakeShaderFactory {
+  static readonly descriptors: ShaderDescriptor[] = [];
+
+  static from(options: ShaderDescriptor) {
+    FakeShaderFactory.descriptors.push(options);
+
+    return new FakeShader(options.resources);
+  }
+}
+
+class FakeUniformGroup {
+  constructor(readonly uniforms: Record<string, unknown>) {}
+
+  readonly update = vi.fn();
+}
+
+class FakeMesh {
+  alpha = 1;
+  visible = true;
+
+  constructor(
+    readonly options: {
+      readonly geometry: FakeMeshGeometry;
+      readonly shader: FakeShader;
+    },
+  ) {}
+
+  get shader() {
+    return this.options.shader;
+  }
+
+  set shader(_shader: FakeShader) {}
+
+  readonly destroy = vi.fn();
 }
 
 class FakeText {
