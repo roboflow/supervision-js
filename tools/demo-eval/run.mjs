@@ -6,7 +6,7 @@ import { dirname, resolve } from "node:path";
 import process from "node:process";
 import { parseArgs } from "node:util";
 
-import { closeTarget, listTargets } from "./cdp.mjs";
+import { closeTarget, listTargets, openTarget } from "./cdp.mjs";
 import {
   Invalid,
   openDemoPage,
@@ -57,6 +57,7 @@ async function main() {
   if (demoScenarios.length > 0) {
     try {
       await assertChrome();
+      await sweepStaleTargets();
       page = await openDemoPage(values["chrome-debug-url"], values.url);
       mediaInfo = page.info;
     } catch (error) {
@@ -86,6 +87,9 @@ async function main() {
   }
 
   if (selected.includes("battery")) {
+    if (demoScenarios.length === 0) {
+      await sweepStaleTargets().catch(() => {});
+    }
     await record("battery", () =>
       runBattery(values["chrome-debug-url"], values.storybook, values.battery),
     );
@@ -106,6 +110,37 @@ async function assertChrome() {
   if (!Array.isArray(targets)) {
     throw new Invalid(`${values["chrome-debug-url"]} is not a CDP endpoint`);
   }
+}
+
+/**
+ * A run that dies between openTarget and its finally leaves demo/story tabs
+ * behind, and those tabs hold hardware VideoDecoder sessions that starve the
+ * next run. Closing the whole set would quit Chrome, so a blank tab is opened
+ * first when every page is stale.
+ */
+async function sweepStaleTargets() {
+  const chromeDebugUrl = values["chrome-debug-url"];
+  const demoOrigin = new URL(values.url).origin;
+  const storybookOrigin = new URL(values.storybook).origin;
+  const pages = (await listTargets(chromeDebugUrl)).filter(
+    (target) => target.type === "page",
+  );
+  const stale = pages.filter(
+    (target) =>
+      target.url.startsWith(demoOrigin) ||
+      target.url.startsWith(storybookOrigin),
+  );
+
+  if (stale.length === 0) return;
+  if (stale.length === pages.length) {
+    await openTarget(chromeDebugUrl, "about:blank");
+  }
+  for (const target of stale) {
+    await closeTarget(chromeDebugUrl, target.id);
+  }
+  process.stderr.write(
+    `closed ${stale.length} stale tab(s) from a previous run\n`,
+  );
 }
 
 async function record(name, run) {
