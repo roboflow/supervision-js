@@ -1648,8 +1648,25 @@ export async function createPixiMediaScene(
       return { destroy: () => undefined, upload: uploadFrameToStagingCanvas };
     }
 
-    readPresentedSurface = () =>
-      app.renderer.extract.canvas(sprite) as unknown as HTMLCanvasElement;
+    // Extract through a detached stand-in sprite: the scene's media sprite
+    // carries the contain-fit transform, which bakes display scaling into a
+    // media-sized canvas, and the GPU-external texture reads back black when
+    // extracted directly. A parentless sprite at media size reads the frame
+    // one-to-one, matching what the staging canvas holds on the other path.
+    readPresentedSurface = () => {
+      const detached: InstanceType<typeof Sprite> = new Sprite({
+        texture: sprite.texture,
+      });
+      detached.width = mediaWidth;
+      detached.height = mediaHeight;
+      try {
+        return app.renderer.extract.canvas(
+          detached,
+        ) as unknown as HTMLCanvasElement;
+      } finally {
+        detached.destroy();
+      }
+    };
 
     return createMediaCompositor({
       attach: (texture) => {

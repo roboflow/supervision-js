@@ -94,6 +94,7 @@ vi.mock("pixi.js", () => {
     constructor(options: { texture?: unknown } = {}) {
       this.texture = options.texture;
     }
+    destroy = vi.fn();
   }
 
   class Texture {
