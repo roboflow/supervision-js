@@ -660,6 +660,70 @@ describe("media session", () => {
     session.destroy();
   });
 
+  it("redraws for an open-ended frame appended behind the displayed time", async () => {
+    resetMocks();
+    const { createMediaSession } = await import("../index");
+
+    const session = await createMediaSession({
+      container: createContainer(),
+      detections: { appendable: { datasetId: "open-ended-refresh" } },
+      media: "sample.mp4",
+      renderer: { autoPlay: false },
+    });
+
+    await session.stepForward();
+
+    const refresh = vi
+      .spyOn(session.renderer, "refresh")
+      .mockResolvedValue(undefined);
+
+    // A frame written without an `endTime` stays selected until a later frame
+    // supersedes it, so one appended behind the presented frame is what the
+    // renderer will now show.
+    await session.appendDetectionFrames([
+      { detections: [{ id: "open" }], frameIndex: 0, mediaTime: 0 },
+    ]);
+
+    await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+
+    refresh.mockRestore();
+    session.destroy();
+  });
+
+  it("does not redraw for a closed frame that ended before the displayed time", async () => {
+    resetMocks();
+    const { createMediaSession } = await import("../index");
+
+    const session = await createMediaSession({
+      container: createContainer(),
+      detections: { appendable: { datasetId: "closed-refresh" } },
+      media: "sample.mp4",
+      renderer: { autoPlay: false },
+    });
+
+    await session.stepForward();
+
+    const refresh = vi
+      .spyOn(session.renderer, "refresh")
+      .mockResolvedValue(undefined);
+
+    // The same frame with an explicit end is never selected at the presented
+    // time, so it must not force a render.
+    await session.appendDetectionFrames([
+      {
+        detections: [{ id: "closed" }],
+        endTime: 0.01,
+        frameIndex: 0,
+        mediaTime: 0,
+      },
+    ]);
+
+    expect(refresh).not.toHaveBeenCalled();
+
+    refresh.mockRestore();
+    session.destroy();
+  });
+
   it("does not redraw for a stale live result the source dropped", async () => {
     resetMocks();
     const { createMediaSession } = await import("../index");

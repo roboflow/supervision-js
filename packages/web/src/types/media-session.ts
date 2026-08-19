@@ -321,26 +321,23 @@ export interface MediaSession {
     options?: MediaSessionDetectionWriteOptions,
   ): Promise<ColdDetectionFrameStoreWriteSummary>;
   /**
-   * Append the newest live detection frame to a session-owned appendable
-   * source.
+   * Optionally append the newest live detection frame.
    *
-   * The frame stays active until the next live frame supersedes it, which is
-   * closed at the new frame's `mediaTime`. Use this for streams whose producer
-   * only knows that its latest result is current.
+   * Optional so controllers written against the previous shape stay
+   * assignable. `createMediaSession` always provides it; see
+   * {@link LiveMediaSession}.
    */
-  appendLiveDetectionFrame(
+  appendLiveDetectionFrame?(
     frame: DetectionFrame,
     options?: MediaSessionDetectionWriteOptions,
   ): Promise<ColdDetectionFrameStoreWriteSummary>;
   /**
-   * Close the appendable source's final coverage at the end of media.
+   * Optionally close the appendable source's final coverage.
    *
-   * `endTime` defaults to the renderer's reported media duration. Calling it
-   * again is a no-op. Use it when a producer has finished so coverage-gated
-   * playback does not stall on a terminal sliver the container declares beyond
-   * the last decoded sample.
+   * Optional for the same backward-compatibility reason as
+   * {@link MediaSession.appendLiveDetectionFrame}.
    */
-  finalizeDetectionCoverage(
+  finalizeDetectionCoverage?(
     endTime?: number,
     options?: MediaSessionDetectionWriteOptions,
   ): Promise<ColdDetectionFrameStoreWriteSummary | null>;
@@ -378,4 +375,38 @@ export interface MediaSession {
   subscribe(listener: MediaSessionStateListener): MediaSessionStateUnsubscribe;
   getState(): MediaSessionState;
   destroy(): void;
+}
+
+/**
+ * Media session that also exposes live detection ingestion.
+ *
+ * `createMediaSession` returns this shape. Controllers that only satisfy the
+ * historical {@link MediaSession} contract stay assignable to it, so live
+ * ingestion is an added capability rather than a required one.
+ */
+export interface LiveMediaSession extends MediaSession {
+  /**
+   * Append the newest live detection frame to a session-owned appendable
+   * source.
+   *
+   * The frame stays active until the next live frame supersedes it, which is
+   * closed at the new frame's `mediaTime`. Use this for streams whose producer
+   * only knows that its latest result is current.
+   */
+  appendLiveDetectionFrame(
+    frame: DetectionFrame,
+    options?: MediaSessionDetectionWriteOptions,
+  ): Promise<ColdDetectionFrameStoreWriteSummary>;
+  /**
+   * Close the appendable source's final coverage at the end of media.
+   *
+   * `endTime` defaults to the renderer's reported media duration. Calling it
+   * again is a no-op. Use it when a producer has finished so coverage-gated
+   * playback does not stall on a terminal sliver the container declares beyond
+   * the last decoded sample.
+   */
+  finalizeDetectionCoverage(
+    endTime?: number,
+    options?: MediaSessionDetectionWriteOptions,
+  ): Promise<ColdDetectionFrameStoreWriteSummary | null>;
 }

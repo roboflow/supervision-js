@@ -600,6 +600,69 @@ describe("writable detection frame source", () => {
     expect(source.getAvailableRanges()).toEqual([{ endTime: 3, startTime: 2 }]);
   });
 
+  it("finalizes the revision when a live frame was revised in place", async () => {
+    const source = createWritableDetectionFrameSource({
+      datasetId: "live",
+      live: { holdSeconds: 60 },
+      store: createInstrumentedMemoryStore(),
+    });
+
+    await source.appendLiveFrame({
+      detections: [{ id: "original" }],
+      frameIndex: 0,
+      mediaTime: 2,
+    });
+    await source.appendLiveFrame({
+      detections: [{ id: "revised" }],
+      frameIndex: 0,
+      mediaTime: 2,
+    });
+    await source.finalizeCoverage(3);
+
+    expect(await source.loadFrames(0, 61)).toEqual([
+      {
+        detections: [{ id: "revised" }],
+        endTime: 3,
+        frameIndex: 0,
+        mediaTime: 2,
+      },
+    ]);
+  });
+
+  it("finalizes the revision when an appended frame was revised in place", async () => {
+    const source = createWritableDetectionFrameSource({
+      datasetId: "dataset",
+      store: createInstrumentedMemoryStore(),
+    });
+
+    await source.appendFrames([
+      {
+        detections: [{ id: "original" }],
+        endTime: 8.9,
+        frameIndex: 88,
+        mediaTime: 8.8,
+      },
+    ]);
+    await source.appendFrames([
+      {
+        detections: [{ id: "revised" }],
+        endTime: 8.9,
+        frameIndex: 88,
+        mediaTime: 8.8,
+      },
+    ]);
+    await source.finalizeCoverage(9);
+
+    expect(await source.loadFrames(8, 9)).toEqual([
+      {
+        detections: [{ id: "revised" }],
+        endTime: 9,
+        frameIndex: 88,
+        mediaTime: 8.8,
+      },
+    ]);
+  });
+
   it("finalizes a shortened coverage end only once", async () => {
     const store = createInstrumentedMemoryStore();
     const source = createWritableDetectionFrameSource({

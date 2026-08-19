@@ -149,6 +149,10 @@ not the first thing most users should reach for:
   optional `DetectionFrameLoadOptions`; a source that returns its own frames
   unchanged can ignore it, while a source that flattens child frames uses
   `coordinateSpace` to project each child before composing;
+- `LiveMediaSession`, the shape `createMediaSession()` returns. It guarantees
+  `appendLiveDetectionFrame()` and `finalizeDetectionCoverage()`, which stay
+  optional on `MediaSession` so controllers and test doubles written against the
+  previous shape remain assignable;
 - `WritableDetectionFrameSource` and `createWritableDetectionFrameSource()` for
   streaming inference ingestion. `appendLiveFrame()` and `finalizeCoverage()`
   are optional members of `WritableDetectionFrameSource`, so a source written
@@ -225,10 +229,12 @@ A producer that streams results into a session has four supported contracts:
 - `session.refresh()` still redraws on demand. By default the session also
   redraws itself when a write actually changed the frame selected for the
   displayed time. Live and batch writes use the same rule: a result the source
-  dropped as stale changes nothing, and a write whose interval does not contain
-  the displayed time cannot change what is on screen. Requests arriving during a
-  redraw collapse into a single follow-up. Set `detections.autoRefresh: false`
-  to own every redraw.
+  dropped as stale changes nothing, and a frame whose interval does not contain
+  the displayed time cannot change what is on screen. A frame written without an
+  `endTime` stays selected until a later frame supersedes it, so one appended
+  behind the displayed time still redraws. Requests arriving during a redraw
+  collapse into a single follow-up. Set `detections.autoRefresh: false` to own
+  every redraw.
 
 Retention windows evict in place when the cold store implements `pruneFrames`
 (the built-in memory store does), so a long-running stream does not reload and

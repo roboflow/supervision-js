@@ -595,7 +595,14 @@ export function createWritableDetectionFrameSource(
 
   function recordLatestFrame(frames: readonly DetectionFrame[]) {
     for (const frame of frames) {
-      if (!latestFrame || compareDetectionFrames(frame, latestFrame) > 0) {
+      if (
+        !latestFrame ||
+        compareDetectionFrames(frame, latestFrame) > 0 ||
+        // A write that shares the tracked frame's identity replaces its stored
+        // record. Keeping the superseded contents here would let a later
+        // `finalizeCoverage` write them back over the revision.
+        haveSameDetectionFrameIdentity(frame, latestFrame)
+      ) {
         latestFrame = frame;
       }
     }

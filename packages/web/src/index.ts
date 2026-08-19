@@ -348,6 +348,7 @@ export {
   type ProgressiveNormalizedMedia,
 } from "#types/media-normalization";
 export {
+  type LiveMediaSession,
   type MediaSession,
   MediaSessionActivityKind,
   MediaSessionActivityStatus,

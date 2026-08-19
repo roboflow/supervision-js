@@ -1,11 +1,13 @@
 import { createMediaRenderer } from "#renderers/media-renderer";
 import {
+  DetectionFrameSelectionMode,
   createDefaultAnnotationPresentation,
   projectDetectionFrames,
   resolveAnnotationRendererPresentation,
   createSourceAwarePresentation,
 } from "supervision-js-core";
 import type {
+  DetectionBufferOptions,
   DetectionCoordinateSpace,
   DetectionFrame,
   DetectionFrameSourceVersionRange,
@@ -13,7 +15,8 @@ import type {
   WritableDetectionFrameSource,
 } from "supervision-js-core";
 import type {
-  MediaSession,
+  LiveMediaSession,
+  MediaSessionDetectionSourceOptions,
   MediaSessionDetectionWriteOptions,
   MediaSessionMediaState,
   MediaSessionNormalizationState,
@@ -48,7 +51,7 @@ const DISPLAY_RANGE_EPSILON_SECONDS = 1e-6;
  */
 export async function createMediaSession(
   options: MediaSessionOptions,
-): Promise<MediaSession> {
+): Promise<LiveMediaSession> {
   const stateListeners = new Set<MediaSessionStateListener>();
   let rendererState: MediaRendererState | null = null;
   let renderPreparationState: RenderPreparationDiagnostics | null = null;
@@ -287,13 +290,36 @@ export async function createMediaSession(
       }
     };
 
-    /** The instant the renderer is currently presenting. */
-    const getDisplayedRange = (): DetectionFrameSourceVersionRange => {
-      const { currentTime } = renderer.getState();
+    const selectionLookaheadSeconds = resolveSelectionLookaheadSeconds(
+      sessionDefaults.detectionBuffer,
+      options.detections?.sources,
+    );
+
+    const hasOpenEndedFrame = (frames: readonly DetectionFrame[]) =>
+      frames.some((frame) => frame.endTime === undefined);
+
+    /**
+     * The interval a write has to touch to change what is on screen.
+     *
+     * A frame written with an `endTime` is journaled exactly as it is selected,
+     * so comparing against the displayed instant is precise. A frame written
+     * without one is journaled as a point at its `mediaTime` but stays selected
+     * until a later frame supersedes it, so such a write can change the
+     * selection anywhere from the active frame's start onward. Nothing earlier
+     * than the active frame can, which is what keeps unrelated historical
+     * appends from forcing a render.
+     */
+    const getDisplayedRange = (
+      includesOpenEndedFrame: boolean,
+    ): DetectionFrameSourceVersionRange => {
+      const { activeDetectionFrameTime, currentTime } = renderer.getState();
+      const startTime = includesOpenEndedFrame
+        ? Math.min(activeDetectionFrameTime ?? 0, currentTime)
+        : currentTime;
 
       return {
-        endTime: currentTime + DISPLAY_RANGE_EPSILON_SECONDS,
-        startTime: currentTime - DISPLAY_RANGE_EPSILON_SECONDS,
+        endTime: currentTime + selectionLookaheadSeconds,
+        startTime: startTime - DISPLAY_RANGE_EPSILON_SECONDS,
       };
     };
 
@@ -319,7 +345,7 @@ export async function createMediaSession(
         requestDetectionRefresh(
           appendableSource,
           previousVersion,
-          getDisplayedRange(),
+          getDisplayedRange(hasOpenEndedFrame(frames)),
         );
 
         return summary;
@@ -342,13 +368,13 @@ export async function createMediaSession(
           );
 
         // Live writes are gated on the displayed instant like any other write.
-        // A result the source dropped as stale changes nothing, and one whose
-        // interval does not contain the displayed time cannot alter the frame
-        // currently selected for it.
+        // A result the source dropped as stale changes nothing, and the hold
+        // always closes a live frame, so its journaled interval is exactly the
+        // interval it is selected for.
         requestDetectionRefresh(
           appendableSource,
           previousVersion,
-          getDisplayedRange(),
+          getDisplayedRange(false),
         );
 
         return summary;
@@ -391,7 +417,7 @@ export async function createMediaSession(
         requestDetectionRefresh(
           appendableSource,
           previousVersion,
-          getDisplayedRange(),
+          getDisplayedRange(hasOpenEndedFrame(frames)),
         );
 
         return summary;
@@ -563,6 +589,39 @@ function resolveAppendableSourceOrNull(
     sessionDetections.appendableSources.values().next().value ??
     null
   );
+}
+
+/**
+ * How far past the displayed instant a write can still change the selection.
+ *
+ * Interval selection never looks ahead, but nearest-frame-index selection snaps
+ * to the closest inference frame, which may sit just after the displayed time.
+ * Composite sources can enable that mode per source, so the widest configured
+ * inference frame wins and plain interval sessions keep a point window.
+ */
+function resolveSelectionLookaheadSeconds(
+  detectionBuffer: DetectionBufferOptions,
+  sources: readonly MediaSessionDetectionSourceOptions[] | undefined,
+): number {
+  const frameIntervals = [
+    detectionBuffer,
+    ...(sources ?? []).map((source) => source.sync),
+  ]
+    .filter(
+      (selection) =>
+        selection?.selectionMode ===
+        DetectionFrameSelectionMode.NearestFrameIndex,
+    )
+    .map((selection) => selection?.frameRate ?? detectionBuffer.frameRate)
+    .filter(
+      (frameRate): frameRate is number =>
+        frameRate !== undefined && frameRate > 0,
+    )
+    .map((frameRate) => 1 / frameRate);
+
+  return frameIntervals.length === 0
+    ? DISPLAY_RANGE_EPSILON_SECONDS
+    : Math.max(...frameIntervals);
 }
 
 /**

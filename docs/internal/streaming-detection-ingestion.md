@@ -112,6 +112,11 @@ frontier. Anchoring it on the summary end time would push the retention floor
 A container can declare a duration slightly beyond its last decoded sample --
 9.0 seconds for 89 frames at 10fps, for example. Coverage-gated playback then
 waits forever for that terminal sliver at the loop boundary.
+A source tracks its latest frame so it can finalize without scanning storage.
+That tracking follows identity, not just ordering: a write that replaces or
+revises the tracked frame's stored record replaces what is tracked, or
+finalization would later write superseded detections back over the revision.
+
 `finalizeCoverage(endTime)` sets the last retained frame's exclusive end to a
 known end of media without reaching into store internals. It extends a finite
 terminal frame, and it shortens a live frame that is still held open past the
