@@ -1,17 +1,15 @@
 # 9s Basketball Sample Fixture
 
-This fixture is the default cached-detection demo sample. It keeps SAM3
-detections generated from a normalized 30fps WebM timeline, but the demo now
-starts from the original source MP4 declared in `fixture.meta.json`:
+This fixture keeps SAM3 detections generated from a normalized 30fps WebM
+timeline. The source MP4 runs at 25fps, so its frames land on the 30fps
+detection grid only every fifth frame; the demo therefore plays the proxy
+declared as `media.proxyFile` in `fixture.meta.json`:
 
 ```text
-../basketball_sample/basketball_sample.mp4
+../basketball_sample/proxy-30fps.webm
 ```
 
-At runtime, `createMediaSession` stream-normalizes that original media in the
-browser and loads detections from committed chunks. That keeps this sample on
-the same architectural path as uploaded media, except SAM3 has already been run
-and cached.
+Detections load from committed chunks rather than calling SAM3 at runtime.
 
 ## Files
 
@@ -25,8 +23,9 @@ basketball_sample.normalized.webm
 ```
 
 `basketball_sample.normalized.webm` is retained as provenance for the original
-fixture generation and sync checks. The normal demo path does not need to load
-it directly.
+fixture generation and sync checks. `../basketball_sample/proxy-30fps.webm` is
+what the demo plays; `npm run fixture:sam3:proxy` rebuilds it and lands the same
+270 frame timestamps this file carries.
 
 ## Generation
 

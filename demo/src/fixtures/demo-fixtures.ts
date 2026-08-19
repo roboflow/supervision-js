@@ -70,6 +70,12 @@ interface DemoFixtureMeta {
   readonly media: {
     readonly file: string;
     readonly loadingStatusLabel: string;
+    /**
+     * Forced-CFR 30fps transcode the fixture's detections were computed
+     * against. A v1 fixture indexes that timeline rather than the source's own
+     * frames, so playing `file` draws every detection against the wrong frame.
+     */
+    readonly proxyFile?: string;
     readonly readyStatusLabel: string;
   };
   readonly presentation?: DemoFixturePresentationDefaults;
@@ -98,6 +104,8 @@ export interface DemoFixtureDefinition {
   readonly presentationAvailability?: DemoPresentationAvailability;
   readonly sampleName: string;
   readonly mediaReadyStatusLabel: string;
+  /** Declared detection-timeline transcode, or null when the fixture has none. */
+  readonly proxyVideoSrc: string | null;
   readonly videoSrc: string;
 }
 
@@ -199,11 +207,25 @@ export async function loadDemoFixtureDetectionManifest(
   return (await response.json()) as DemoFixtureDetectionManifest;
 }
 
+/**
+ * Media a fixture session plays. A fixture whose detections were computed on a
+ * transcoded timeline has to play that transcode, because its frame indexes
+ * describe the transcode's grid and not the source's own frames.
+ */
+export function resolveDemoFixturePlaybackSrc(
+  definition: DemoFixtureDefinition,
+): string {
+  return definition.proxyVideoSrc ?? definition.videoSrc;
+}
+
 export function createDemoFixtureMedia(
   definition: DemoFixtureDefinition = defaultDemoFixture,
 ): MediaRendererSource {
   return createVideoEngineMediaRendererSource({
-    source: { kind: SourceKind.Url, url: definition.videoSrc },
+    source: {
+      kind: SourceKind.Url,
+      url: resolveDemoFixturePlaybackSrc(definition),
+    },
   });
 }
 
@@ -287,12 +309,23 @@ function createDemoFixtures(): readonly DemoFixtureDefinition[] {
       const basePath = metaPath.replace(/\/fixture\.meta\.json$/, "");
       const manifestPath = `${basePath}/detections.manifest.json`;
       const mediaPath = normalizeFixturePath(basePath, meta.media.file);
+      const proxyPath = meta.media.proxyFile
+        ? normalizeFixturePath(basePath, meta.media.proxyFile)
+        : null;
       const detectionsManifestSrc = fixtureManifestUrls[manifestPath];
       const videoSrc = fixtureMediaUrls[mediaPath];
+      const proxyVideoSrc = proxyPath ? fixtureMediaUrls[proxyPath] : null;
 
       if (!detectionsManifestSrc || !videoSrc) {
         console.warn(
           `Skipping incomplete demo fixture ${meta.sampleName}. Expected ${manifestPath} and ${mediaPath}.`,
+        );
+        return [];
+      }
+
+      if (proxyPath && !proxyVideoSrc) {
+        console.warn(
+          `Skipping demo fixture ${meta.sampleName} with a declared but missing proxy. Expected ${proxyPath}.`,
         );
         return [];
       }
@@ -308,6 +341,7 @@ function createDemoFixtures(): readonly DemoFixtureDefinition[] {
           mediaReadyStatusLabel: meta.media.readyStatusLabel,
           presentationDefaults: meta.presentation,
           presentationAvailability: meta.presentationAvailability,
+          proxyVideoSrc: proxyVideoSrc ?? null,
           sampleName: meta.sampleName,
           videoSrc,
         } satisfies DemoFixtureDefinition,

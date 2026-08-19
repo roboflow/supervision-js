@@ -130,6 +130,34 @@ payloads. Extracted JPEG frames and the source frame manifest are temporary and
 written under `tools/sam3-fixture/output/<sample-name>/` as `frames.jsonl` and
 `frames.meta.json`, which git ignores.
 
+## Rebuilding a v1 Fixture's Proxy
+
+Fixtures generated before the frame-identity rewrite were inferred against a
+forced-CFR 30fps VP9 WebM transcode, and their `frameIndex` values count slots
+on that grid. Playing the source instead puts every detection on the wrong
+frame, so those fixtures declare the transcode as `media.proxyFile` and the demo
+plays it:
+
+```sh
+npm run fixture:sam3:dev      # in one terminal
+npm run fixture:sam3:proxy -- --sample-name horse_trail
+```
+
+The command writes `proxy-30fps.webm` beside the fixture's source media and adds
+`media.proxyFile` to `fixture.meta.json`. It reuses the same
+`normalizeMedia` call the v1 pipeline used (WebM, VP9, `forceTranscode`, 30fps,
+1 second key frame interval), which reproduces the committed
+`basketball_sample.normalized.webm` timestamp for timestamp.
+
+Mediabunny's default quality has risen about sixfold since those fixtures were
+made, which turns the 70 second 1504x2016 horse sample into 627MB, so the rate
+defaults to the committed proxy's own 0.07038 bits per pixel instead. Override
+with `--bits-per-pixel` or an absolute `--bitrate`; neither moves a frame
+boundary.
+
+New fixtures need none of this: they pair detections with the source's own
+frames and declare no proxy.
+
 ## Lower-Level Commands
 
 The one-command creator composes these scripts:

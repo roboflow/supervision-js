@@ -5,7 +5,8 @@
   "media": {
     "file": "../basketball_sample/basketball_sample.mp4",
     "loadingStatusLabel": "opening 9s basketball sample",
-    "readyStatusLabel": "9s basketball sample | video engine, source MP4"
+    "proxyFile": "../basketball_sample/proxy-30fps.webm",
+    "readyStatusLabel": "9s basketball sample | video engine, 30fps proxy WebM"
   },
   "sampleName": "basketball_sam3",
   "schema": "supervision-js.demo.sam3-fixture-meta",

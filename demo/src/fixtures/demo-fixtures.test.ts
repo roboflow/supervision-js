@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 
 import { KeypointVisibility, type DetectionFrame } from "supervision";
 import { computeDetectionMaskRect } from "supervision/editing";
-import { demoFixtures } from "./demo-fixtures";
+import { demoFixtures, resolveDemoFixturePlaybackSrc } from "./demo-fixtures";
 
 const MAX_POLYGON_POINTS = 48;
 const fixturesRoot = fileURLToPath(new URL("../../fixtures", import.meta.url));
@@ -327,6 +327,62 @@ describe("geometry showcase fixture", () => {
     });
   });
 });
+
+describe("fixture playback media", () => {
+  it("plays the declared detection-timeline proxy", () => {
+    expect(
+      resolveDemoFixturePlaybackSrc({
+        ...baseDefinition,
+        proxyVideoSrc: "/proxy-30fps.webm",
+        videoSrc: "/source.mov",
+      }),
+    ).toBe("/proxy-30fps.webm");
+  });
+
+  it("plays the source media when no proxy is declared", () => {
+    expect(
+      resolveDemoFixturePlaybackSrc({
+        ...baseDefinition,
+        proxyVideoSrc: null,
+        videoSrc: "/source.mov",
+      }),
+    ).toBe("/source.mov");
+  });
+
+  it("gives every committed v1 fixture the proxy its detections were computed on", () => {
+    for (const fixture of demoFixtures) {
+      const meta = readJson<{
+        readonly media: { readonly proxyFile?: string };
+      }>(join(fixturesRoot, fixture.sampleName, "fixture.meta.json"));
+      const manifest = readJson<{
+        readonly video: { readonly firstTimestamp?: number };
+      }>(join(fixturesRoot, fixture.sampleName, "detections.manifest.json"));
+
+      if (manifest.video.firstTimestamp !== undefined) continue;
+
+      expect(meta.media.proxyFile).toBeDefined();
+      expect(
+        existsSync(
+          resolve(fixturesRoot, fixture.sampleName, meta.media.proxyFile ?? ""),
+        ),
+      ).toBe(true);
+      expect(resolveDemoFixturePlaybackSrc(fixture)).toBe(
+        fixture.proxyVideoSrc,
+      );
+    }
+  });
+});
+
+const baseDefinition = {
+  basePath: "../../fixtures/sample",
+  datasetId: "sample_v1",
+  detectionsManifestSrc: "/detections.manifest.json",
+  displayName: "Sample",
+  inferenceLabel: "SAM3",
+  mediaLoadingStatusLabel: "opening sample",
+  mediaReadyStatusLabel: "sample ready",
+  sampleName: "sample",
+} as const;
 
 interface DetectionChunk {
   readonly frames: readonly DetectionFrame[];

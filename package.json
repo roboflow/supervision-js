@@ -91,6 +91,7 @@
     "fixture:sam3:chunk": "node tools/sam3-fixture/chunk-detections.mjs",
     "fixture:sam3:create": "node tools/sam3-fixture/create-fixture.mjs",
     "fixture:sam3:extract": "node tools/sam3-fixture/extract-frames.mjs",
+    "fixture:sam3:proxy": "node tools/sam3-fixture/create-proxy.mjs",
     "fixture:sam3:run": "npm run build -w supervision-js-core && node tools/sam3-fixture/run-sam3.mjs",
     "fixture:geometry:create": "npm run build -w supervision-js-core && node tools/geometry-fixture/create-geometry-fixture.mjs",
     "typecheck": "npm run typecheck -w supervision-js-core && npm run build -w supervision-js-core && npm run typecheck -w supervision-js-react-native && npm run build -w supervision-js-react-native && npm run typecheck -w supervision && npm run build -w supervision && tsc --noEmit -p demo/tsconfig.json && tsc --noEmit -p examples/vanilla/tsconfig.json && npm run example:react-native:typecheck",
