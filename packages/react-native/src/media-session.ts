@@ -33,19 +33,25 @@ export {
   type MediaSessionStateListener,
   type MediaSessionStateUnsubscribe,
 } from "./types/media-session";
+export { isSyncMediaFrameProcessor } from "./types/frame-processor";
 export type {
+  AsyncMediaFrameProcessor,
   MediaFrameProcessor,
   MediaFrameProcessorResult,
+  SyncMediaFrameProcessor,
 } from "./types/frame-processor";
 export type {
   MediaFrameSource,
   MediaFrameSourceConsumer,
   MediaSessionCapabilities,
 } from "./types/frame-source";
+export { isSyncMediaRendererAdapter } from "./types/renderer";
 export type {
+  AsyncMediaRendererAdapter,
   MediaRendererAdapter,
   MediaRendererPrepareOptions,
   MediaSessionRendererState,
   MediaSessionRenderPreparationState,
   PreparedMediaFramePacket,
+  SyncMediaRendererAdapter,
 } from "./types/renderer";

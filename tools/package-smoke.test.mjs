@@ -209,6 +209,8 @@ const expectedReactNativeRuntimeExports = [
   "decodeDetectionMask",
   "getReactNativeVideoFilePlatformAvailability",
   "isReactNativeLiveIdMaskNativeBuilderAvailable",
+  "isSyncMediaFrameProcessor",
+  "isSyncMediaRendererAdapter",
   "loadReactNativeLiveIdMaskNativeBuilder",
   "normalizeDetectionClassName",
   "pickDetectionAtPoint",
@@ -426,6 +428,8 @@ test("built React Native subpath entries ship and resolve", async () => {
     "MediaSessionMode",
     "MediaSessionStatus",
     "createMediaSession",
+    "isSyncMediaFrameProcessor",
+    "isSyncMediaRendererAdapter",
   ]);
 
   // The legacy Skia and sessions entries require optional native peers, so
