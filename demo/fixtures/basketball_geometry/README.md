@@ -104,3 +104,12 @@ npm run fixture:geometry:create
 
 Step 3 is fully deterministic given the committed inputs; steps 1-2 only need
 to be repeated to change the pose model or media.
+
+## Frozen segmentation source
+
+`sam3-source.detections.json` is the exact SAM3 detections file this fixture's polygons were
+derived from (the 30fps-proxy-era run; its SHA-256 is pinned in the manifest's provenance).
+`../basketball_sam3/` has since been regenerated at native 25fps against the original MP4, so
+the live file no longer matches this fixture's derivation. Rebuilding this fixture from the
+native-fps detections (`npm run fixture:geometry:create`) also requires regenerating
+`raw-pose.jsonl` on the same frame grid.
