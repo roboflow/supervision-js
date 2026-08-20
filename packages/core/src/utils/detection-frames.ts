@@ -33,6 +33,9 @@ export function copySortedDetectionFrames(
           : undefined,
         keypoints: detection.keypoints
           ? {
+              boxRelative: detection.keypoints.boxRelative
+                ? [...detection.keypoints.boxRelative]
+                : undefined,
               edges: detection.keypoints.edges.map(
                 (edge) => [edge[0], edge[1]] as const,
               ),

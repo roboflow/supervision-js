@@ -2,7 +2,12 @@ import {
   AnnotationHandleKind,
   type AnnotationHandleDefinition,
 } from "#types/editing";
-import type { Detection, Point, Rect } from "#types/detections";
+import {
+  type Detection,
+  KeypointVisibility,
+  type Point,
+  type Rect,
+} from "#types/detections";
 import { distanceToSegment } from "#utils/geometry";
 
 const HANDLE_RADIUS = 6;
@@ -22,15 +27,31 @@ export function getAnnotationHandles(
   if (detection.polyline)
     return getPathHandles(detection.polyline.points, false, radius, hitSize);
   if (detection.keypoints) {
-    return detection.keypoints.points.map((point, geometryIndex) => ({
-      cursor: "move",
-      geometryIndex,
-      hitSize,
-      id: `kp-${geometryIndex}`,
-      kind: AnnotationHandleKind.Keypoint,
-      point,
-      radius,
-    }));
+    const keypointHandles = detection.keypoints.points.flatMap(
+      (point, geometryIndex) =>
+        detection.keypoints?.visibility?.[geometryIndex] ===
+        KeypointVisibility.NotLabeled
+          ? []
+          : [
+              {
+                cursor: "pointer",
+                geometryIndex,
+                hitSize,
+                id: `kp-${geometryIndex}`,
+                kind: AnnotationHandleKind.Keypoint,
+                point,
+                radius,
+              },
+            ],
+    );
+    if (!detection.rect) return keypointHandles;
+
+    // The skeleton's box resizes like any box; keypoints come last so a point
+    // sitting on the box edge still wins the hit test.
+    return [
+      ...getBoxHandles(detection.rect, radius, hitSize),
+      ...keypointHandles,
+    ];
   }
   if (detection.rect) return getBoxHandles(detection.rect, radius, hitSize);
   return [];
@@ -40,13 +61,22 @@ export function pickAnnotationHandle(
   handles: readonly AnnotationHandleDefinition[],
   point: Point,
 ) {
-  return [...handles]
-    .reverse()
-    .find(
-      (handle) =>
-        Math.abs(point.x - handle.point.x) <= handle.hitSize / 2 &&
-        Math.abs(point.y - handle.point.y) <= handle.hitSize / 2,
-    );
+  let picked: AnnotationHandleDefinition | undefined;
+  let pickedDistance = Number.POSITIVE_INFINITY;
+  for (const handle of handles) {
+    const dx = Math.abs(point.x - handle.point.x);
+    const dy = Math.abs(point.y - handle.point.y);
+    if (dx > handle.hitSize / 2 || dy > handle.hitSize / 2) continue;
+    // Clustered handles (face keypoints, a tiny box's corners) share hit
+    // areas; the nearest one is what the pointer is on. Later handles draw on
+    // top, so they win exact ties.
+    const distance = Math.hypot(dx, dy);
+    if (distance <= pickedDistance) {
+      picked = handle;
+      pickedDistance = distance;
+    }
+  }
+  return picked;
 }
 
 export function applyAnnotationHandleDrag(
@@ -55,7 +85,31 @@ export function applyAnnotationHandleDrag(
   point: Point,
 ): Detection {
   if (detection.rect && handle.kind === AnnotationHandleKind.Resize) {
-    return { ...detection, rect: resizeRect(detection.rect, handle.id, point) };
+    const rect = resizeRect(detection.rect, handle.id, point);
+    const boxRelative = detection.keypoints?.boxRelative;
+    if (!detection.keypoints || !boxRelative?.some(Boolean)) {
+      return { ...detection, rect };
+    }
+    // Box-relative keypoints (unplaced template points) follow the rect;
+    // points the user positioned keep their coordinates.
+    const from = detection.rect;
+    const scaleX = from.width > 0 ? rect.width / from.width : 1;
+    const scaleY = from.height > 0 ? rect.height / from.height : 1;
+    return {
+      ...detection,
+      keypoints: {
+        ...detection.keypoints,
+        points: detection.keypoints.points.map((keypoint, index) =>
+          boxRelative[index]
+            ? {
+                x: rect.x + (keypoint.x - from.x) * scaleX,
+                y: rect.y + (keypoint.y - from.y) * scaleY,
+              }
+            : keypoint,
+        ),
+      },
+      rect,
+    };
   }
 
   if (
@@ -78,7 +132,18 @@ export function applyAnnotationHandleDrag(
   if (detection.keypoints) {
     const points = [...detection.keypoints.points];
     points[handle.geometryIndex] = point;
-    return { ...detection, keypoints: { ...detection.keypoints, points } };
+    // A positioned point no longer follows the box.
+    const boxRelative = detection.keypoints.boxRelative?.map(
+      (relative, index) => relative && index !== handle.geometryIndex,
+    );
+    return {
+      ...detection,
+      keypoints: {
+        ...detection.keypoints,
+        points,
+        ...(boxRelative ? { boxRelative } : {}),
+      },
+    };
   }
   return detection;
 }

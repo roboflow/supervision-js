@@ -185,6 +185,118 @@ describe("detection picker", () => {
     });
   });
 
+  it("picks the nearest keypoint when several share the pick tolerance", () => {
+    const faceFrame: DetectionFrame = {
+      detections: [
+        {
+          id: "face",
+          keypoints: {
+            edges: [[0, 1]],
+            points: [
+              { x: 100, y: 100 },
+              { x: 104, y: 100 },
+              { x: 96, y: 100 },
+            ],
+            visibility: [
+              KeypointVisibility.Visible,
+              KeypointVisibility.Visible,
+              KeypointVisibility.NotLabeled,
+            ],
+          },
+          rect: { height: 40, width: 40, x: 100, y: 110 },
+        },
+      ],
+      mediaTime: 0,
+    };
+
+    expect(
+      pickDetectionAtPoint(
+        faceFrame,
+        { x: 103, y: 101 },
+        { keypointPadding: 8 },
+      ),
+    ).toMatchObject({ geometryIndex: 1, target: DetectionPickTarget.Keypoint });
+    // A not-labeled point never wins, even when it is the nearest one.
+    expect(
+      pickDetectionAtPoint(
+        faceFrame,
+        { x: 97, y: 100 },
+        { keypointPadding: 8 },
+      ),
+    ).toMatchObject({ geometryIndex: 0, target: DetectionPickTarget.Keypoint });
+  });
+
+  it("keeps pick tolerances constant on screen when the viewport is zoomed out", () => {
+    const skeletonFrame: DetectionFrame = {
+      detections: [
+        {
+          id: "pose",
+          keypoints: {
+            edges: [[0, 1]],
+            points: [
+              { x: 100, y: 100 },
+              { x: 400, y: 100 },
+            ],
+          },
+          rect: { height: 200, width: 400, x: 250, y: 100 },
+        },
+      ],
+      mediaTime: 0,
+    };
+    // 6 screen px from the keypoint at a 0.25 media-to-screen scale is 24
+    // media units: outside the media-space default, inside the scaled one.
+    const nearKeypoint = { x: 100, y: 124 };
+    const nearEdge = { x: 250, y: 124 };
+    const outsideBox = { x: 40, y: 100 };
+
+    expect(pickDetectionAtPoint(skeletonFrame, nearKeypoint)?.target).toBe(
+      DetectionPickTarget.Box,
+    );
+    expect(
+      pickDetectionAtPoint(skeletonFrame, nearKeypoint, {
+        viewportScale: 0.25,
+      }),
+    ).toMatchObject({ geometryIndex: 0, target: DetectionPickTarget.Keypoint });
+    expect(
+      pickDetectionAtPoint(skeletonFrame, nearEdge, { viewportScale: 0.25 }),
+    ).toMatchObject({ geometryIndex: 0, target: DetectionPickTarget.Edge });
+    expect(
+      pickDetectionAtPoint(skeletonFrame, outsideBox, {
+        padding: 4,
+        viewportScale: 0.25,
+      })?.target,
+    ).toBe(DetectionPickTarget.Box);
+    expect(
+      pickDetectionAtPoint(skeletonFrame, outsideBox, { padding: 4 }),
+    ).toBeNull();
+    // Zooming in tightens the tolerance in media units.
+    expect(
+      pickDetectionAtPoint(
+        skeletonFrame,
+        { x: 100, y: 106 },
+        { viewportScale: 4 },
+      )?.target,
+    ).toBe(DetectionPickTarget.Box);
+    // A non-finite or non-positive scale falls back to media units (10) rather
+    // than dividing into an unbounded (or negative) tolerance.
+    for (const viewportScale of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(
+        pickDetectionAtPoint(
+          skeletonFrame,
+          { x: 100, y: 105 },
+          { viewportScale },
+        ),
+      ).toMatchObject({ target: DetectionPickTarget.Keypoint });
+      expect(
+        pickDetectionAtPoint(
+          skeletonFrame,
+          { x: 100, y: 115 },
+          { viewportScale },
+        )?.target,
+      ).toBe(DetectionPickTarget.Box);
+    }
+  });
+
   it("maps media-space points into lower-resolution masks and caches decoding", () => {
     const encoded = encodeBinaryMask(Uint8Array.from([0, 0, 0, 1]), 2, 2);
     let countsReads = 0;

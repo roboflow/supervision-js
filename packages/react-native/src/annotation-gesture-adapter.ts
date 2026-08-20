@@ -67,6 +67,7 @@ export function createReactNativeAnnotationGestureAdapter(options: {
           height: layout.mediaRect.height / layout.scale,
           width: layout.mediaRect.width / layout.scale,
         },
+        viewportScale: options.pickOptions?.viewportScale ?? layout.scale,
       });
 
       options.onPick?.(pick);

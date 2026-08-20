@@ -45,10 +45,21 @@ export function pickDetectionAtPoint(
     return null;
   }
 
-  const padding = Math.max(0, options.padding ?? 0);
-  const polylinePadding = Math.max(0, options.polylinePadding ?? 6);
-  const keypointPadding = Math.max(0, options.keypointPadding ?? 10);
-  const edgePadding = Math.max(0, options.edgePadding ?? 8);
+  // Tolerances are screen-space sizes; a zoomed-out viewport maps more media
+  // units per screen pixel, so a fixed media-space padding would shrink the
+  // hit target below the drawn marker.
+  const viewportScale =
+    options.viewportScale !== undefined &&
+    Number.isFinite(options.viewportScale) &&
+    options.viewportScale > 0
+      ? options.viewportScale
+      : 1;
+  const padding = Math.max(0, options.padding ?? 0) / viewportScale;
+  const polylinePadding =
+    Math.max(0, options.polylinePadding ?? 6) / viewportScale;
+  const keypointPadding =
+    Math.max(0, options.keypointPadding ?? 10) / viewportScale;
+  const edgePadding = Math.max(0, options.edgePadding ?? 8) / viewportScale;
   const candidates: CandidatePick[] = [];
 
   for (
@@ -117,13 +128,24 @@ export function pickDetectionAtPoint(
     }
 
     if (detection.keypoints) {
-      const keypointIndex = detection.keypoints.points.findIndex(
-        (keypoint, index) =>
-          detection.keypoints?.visibility?.[index] !==
-            KeypointVisibility.NotLabeled &&
-          Math.hypot(point.x - keypoint.x, point.y - keypoint.y) <=
-            keypointPadding,
-      );
+      // Clustered keypoints share the pick tolerance; take the nearest so the
+      // hover label, the menu, and the handle drag all name the same point.
+      // Later points draw on top, so they win exact ties.
+      let keypointIndex = -1;
+      let keypointDistance = Number.POSITIVE_INFINITY;
+      detection.keypoints.points.forEach((keypoint, index) => {
+        if (
+          detection.keypoints?.visibility?.[index] ===
+          KeypointVisibility.NotLabeled
+        ) {
+          return;
+        }
+        const distance = Math.hypot(point.x - keypoint.x, point.y - keypoint.y);
+        if (distance <= keypointPadding && distance <= keypointDistance) {
+          keypointIndex = index;
+          keypointDistance = distance;
+        }
+      });
 
       if (keypointIndex !== -1) {
         pushCandidate(

@@ -52,6 +52,7 @@ type ActiveGesture =
       handle: AnnotationHandleDefinition;
       start: AnnotationPointerInput;
       current: AnnotationPointerInput;
+      moved: boolean;
     };
 
 export function createAnnotationEditingEngine(
@@ -90,7 +91,7 @@ export function createAnnotationEditingEngine(
           const dx = input.point.x - gesture.start.point.x;
           const dy = input.point.y - gesture.start.point.y;
           const moved =
-            gesture.moved || Math.hypot(dx, dy) >= MOVE_THRESHOLD / scale();
+            gesture.moved || exceedsMoveThreshold(gesture.start, input);
           gesture = { ...gesture, current: input, moved };
           if (moved) {
             const preview = offsetDetection(gesture.detection, dx, dy);
@@ -104,16 +105,24 @@ export function createAnnotationEditingEngine(
           }
           break;
         }
-        case "resize":
-          gesture = { ...gesture, current: input };
-          setPreview(
-            applyAnnotationHandleDrag(
-              gesture.detection,
-              gesture.handle,
-              input.point,
-            ),
-          );
+        case "resize": {
+          // A click on a handle is not a drag: a keypoint tapped to open its
+          // menu must not snap to the pointer, so nothing previews or commits
+          // until the pointer has travelled like a move gesture.
+          const moved =
+            gesture.moved || exceedsMoveThreshold(gesture.start, input);
+          gesture = { ...gesture, current: input, moved };
+          if (moved) {
+            setPreview(
+              applyAnnotationHandleDrag(
+                gesture.detection,
+                gesture.handle,
+                input.point,
+              ),
+            );
+          }
           break;
+        }
         case "path":
           setPreview(resolvePathPreview([...gesture.points, input.point]));
           break;
@@ -185,6 +194,10 @@ export function createAnnotationEditingEngine(
         commit(preview, active.detection);
         return;
       }
+      if (!active.moved) {
+        setState(idleState());
+        return;
+      }
       const preview = applyAnnotationHandleDrag(
         active.detection,
         active.handle,
@@ -207,6 +220,7 @@ export function createAnnotationEditingEngine(
         detection,
         handle,
         kind: "resize",
+        moved: false,
         start: input,
       };
       setState({
@@ -214,7 +228,7 @@ export function createAnnotationEditingEngine(
         activeHandleId: handle.id,
         kind: AnnotationGestureStateKind.Resizing,
         pointerId: input.pointerId ?? null,
-        preview: detection,
+        preview: null,
       });
     },
     deleteVertex(detection, vertexIndex) {
@@ -415,6 +429,19 @@ export function createAnnotationEditingEngine(
 
   function scale() {
     return Math.max(options.viewportScale?.() ?? 1, Number.EPSILON);
+  }
+
+  function exceedsMoveThreshold(
+    start: AnnotationPointerInput,
+    input: AnnotationPointerInput,
+  ) {
+    return (
+      Math.hypot(
+        input.point.x - start.point.x,
+        input.point.y - start.point.y,
+      ) >=
+      MOVE_THRESHOLD / scale()
+    );
   }
 
   function capture(pointerId: number | undefined) {

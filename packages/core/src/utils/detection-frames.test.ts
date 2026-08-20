@@ -304,6 +304,37 @@ describe("detection frame utilities", () => {
     );
   });
 
+  it("copies keypoint box-relative flags without leaking mutable arrays", () => {
+    const source: DetectionFrame[] = [
+      {
+        detections: [
+          {
+            keypoints: {
+              boxRelative: [true, false],
+              edges: [[0, 1]],
+              points: [
+                { x: 1, y: 1 },
+                { x: 3, y: 3 },
+              ],
+            },
+            rect: { height: 4, width: 4, x: 2, y: 2 },
+          },
+        ],
+        mediaTime: 0,
+      },
+    ];
+
+    const copied = copySortedDetectionFrames(source);
+
+    expect(copied[0]?.detections[0]?.keypoints?.boxRelative).toEqual([
+      true,
+      false,
+    ]);
+    expect(copied[0]?.detections[0]?.keypoints?.boxRelative).not.toBe(
+      source[0]?.detections[0]?.keypoints?.boxRelative,
+    );
+  });
+
   it("rejects invalid detection frame timing", () => {
     expect(() =>
       copySortedDetectionFrames([
