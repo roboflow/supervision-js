@@ -60,6 +60,64 @@ describe("media renderer over a push-based media source", () => {
     renderer.destroy();
   });
 
+  it("releases the drag a pause interrupts", async () => {
+    const producer = createProducer();
+    const renderer = await createRenderer(producer, createScene());
+
+    producer.setStatus("PLAYING");
+    renderer.scrub(1);
+    renderer.pause();
+
+    expect(producer.pause).toHaveBeenCalledOnce();
+    expect(producer.endInteractiveSeek).toHaveBeenCalledOnce();
+    renderer.destroy();
+  });
+
+  it("gives a scrub after that pause a gesture of its own", async () => {
+    const producer = createProducer();
+    const renderer = await createRenderer(producer, createScene());
+
+    producer.setStatus("PLAYING");
+    renderer.scrub(1);
+    renderer.pause();
+    renderer.scrub(2);
+    await renderer.seek(3);
+
+    expect(producer.beginInteractiveSeek).toHaveBeenCalledTimes(2);
+    expect(producer.endInteractiveSeek).toHaveBeenCalledTimes(2);
+    renderer.destroy();
+  });
+
+  it("pauses on a toggle inside a drag the player entered playing", async () => {
+    const producer = createProducer();
+    const renderer = await createRenderer(producer, createScene());
+
+    producer.setStatus("PLAYING");
+    renderer.scrub(1);
+    renderer.togglePlayback();
+
+    expect(producer.togglePlayback).not.toHaveBeenCalled();
+    expect(producer.pause).toHaveBeenCalledOnce();
+    expect(producer.endInteractiveSeek).toHaveBeenCalledOnce();
+    renderer.destroy();
+  });
+
+  it("plays on a toggle inside a drag the player entered paused", async () => {
+    const producer = createProducer();
+    const renderer = await createRenderer(producer, createScene());
+
+    producer.setStatus("PAUSED");
+    renderer.scrub(1);
+    renderer.togglePlayback();
+
+    await vi.waitFor(() => {
+      expect(producer.play).toHaveBeenCalledOnce();
+    });
+    expect(producer.togglePlayback).not.toHaveBeenCalled();
+    expect(producer.endInteractiveSeek).toHaveBeenCalledOnce();
+    renderer.destroy();
+  });
+
   it("leaves a seek outside a drag with no gesture to release", async () => {
     const producer = createProducer();
     const renderer = await createRenderer(producer, createScene());

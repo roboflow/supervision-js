@@ -88,18 +88,33 @@ export function createMediaRendererTransport(
     await channel.endInteractiveSeek();
   };
 
-  return {
+  const transport: MediaRendererTransport = {
     async play() {
       await releaseGesture();
       await channel.play();
     },
 
     pause() {
+      // A pause ends the producer's mechanical hold, so it lands ahead of the
+      // release the open gesture still owes.
       channel.pause();
+      void releaseGesture();
     },
 
     togglePlayback() {
-      channel.togglePlayback();
+      if (!gestureInFlight) {
+        channel.togglePlayback();
+        return;
+      }
+
+      // Mid-gesture the producer sits paused as a mechanic, and its own toggle
+      // would read that as the user's pause. What the user settled on is what
+      // there is to toggle.
+      if (settledState === MediaRendererPlaybackState.Playing) {
+        transport.pause();
+      } else {
+        void transport.play();
+      }
     },
 
     scrub(mediaTime) {
@@ -135,6 +150,8 @@ export function createMediaRendererTransport(
       }
     },
   };
+
+  return transport;
 }
 
 /**

@@ -263,6 +263,8 @@ export async function createMediaRendererCore(
         return;
       }
 
+      endSeekGesture();
+
       if (transport) {
         transport.togglePlayback();
         return;
