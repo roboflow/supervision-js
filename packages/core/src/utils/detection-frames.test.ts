@@ -85,9 +85,43 @@ describe("detection frame utilities", () => {
       },
     ];
 
-    expect(selectDetectionFrame(frames, frameDuration - 1e-8)).toBe(frames[0]);
+    expect(selectDetectionFrame(frames, frameDuration - 0.001)).toBe(frames[0]);
     expect(selectDetectionFrame(frames, frameDuration)).toBe(frames[1]);
     expect(selectDetectionFrame(frames, frameDuration * 2)).toBeUndefined();
+  });
+
+  it("selects the frame a whole-millisecond playhead rounds down into", () => {
+    const frames: DetectionFrame[] = [
+      {
+        detections: [],
+        endTime: 151 / 30,
+        frameIndex: 150,
+        mediaTime: 5,
+      },
+      {
+        detections: [],
+        endTime: 152 / 30,
+        frameIndex: 151,
+        mediaTime: 151 / 30,
+      },
+    ];
+
+    expect(Math.round((151 / 30) * 1000) / 1000).toBe(5.033);
+    expect(selectDetectionFrame(frames, 5.033)?.frameIndex).toBe(151);
+  });
+
+  it("waits for a frame further than the playhead's rounding error away", () => {
+    const atTheLimit: DetectionFrame[] = [
+      { detections: [], endTime: 5.0335, frameIndex: 150, mediaTime: 5 },
+      { detections: [], endTime: 5.07, frameIndex: 151, mediaTime: 5.0335 },
+    ];
+    const pastTheLimit: DetectionFrame[] = [
+      { detections: [], endTime: 5.034, frameIndex: 150, mediaTime: 5 },
+      { detections: [], endTime: 5.07, frameIndex: 151, mediaTime: 5.034 },
+    ];
+
+    expect(selectDetectionFrame(atTheLimit, 5.033)?.frameIndex).toBe(151);
+    expect(selectDetectionFrame(pastTheLimit, 5.033)?.frameIndex).toBe(150);
   });
 
   it("selects interval frames without mutating caller-owned frame data", () => {

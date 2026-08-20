@@ -19,6 +19,15 @@ interface NearestFrameIndexSelection {
   readonly frame: DetectionFrame | undefined;
 }
 
+/**
+ * A presented playhead arrives on the producer's whole-millisecond plane,
+ * rounded, so it can read half a millisecond below the frame timestamp it
+ * stands for: a source frame at 5.033333s is reported at 5.033s. Half a
+ * millisecond is the whole of that error and no more, so a frame starting
+ * within it may already be on screen while one starting past it cannot.
+ */
+const PLAYHEAD_QUANTIZATION_TOLERANCE_SECONDS = 0.0005;
+
 export function copySortedDetectionFrames(
   detectionFrames: readonly DetectionFrame[] | undefined,
 ): DetectionFrame[] {
@@ -354,7 +363,7 @@ function selectIntervalDetectionFrame(
     const middle = Math.floor((low + high) / 2);
     const frame = detectionFrames[middle];
 
-    if (frame.mediaTime <= mediaTime) {
+    if (hasDetectionFrameStarted(frame, mediaTime)) {
       selectedFrame = frame;
       low = middle + 1;
     } else {
@@ -417,9 +426,13 @@ function selectNearestFrameIndexDetectionFrame(
   };
 }
 
+function hasDetectionFrameStarted(frame: DetectionFrame, mediaTime: number) {
+  return frame.mediaTime - PLAYHEAD_QUANTIZATION_TOLERANCE_SECONDS <= mediaTime;
+}
+
 function isDetectionFrameActive(frame: DetectionFrame, mediaTime: number) {
   return (
-    frame.mediaTime <= mediaTime &&
+    hasDetectionFrameStarted(frame, mediaTime) &&
     (frame.endTime === undefined || mediaTime < frame.endTime)
   );
 }
