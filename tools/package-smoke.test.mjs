@@ -408,6 +408,7 @@ test("built React Native subpath entries ship and resolve", async () => {
     "EXECUTORCH_COCO_SKELETON_EDGES",
     "createDetectionFrameFromExecutorchCocoPoses",
     "createExecutorchLivePoseProcessor",
+    "createExecutorchLivePoseProducer",
     "createExecutorchLiveSegmentationProcessor",
     "createExecutorchLiveSegmentationProducer",
     "createExecutorchPoseKeypointInstructions",

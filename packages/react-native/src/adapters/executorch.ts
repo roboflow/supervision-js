@@ -464,6 +464,32 @@ export function createExecutorchVideoFrameSerializer<TRunOnFrame>(
 }
 
 /**
+ * Live pose producer: the vendor-neutral form of
+ * {@link createExecutorchLivePoseProcessor}.
+ *
+ * Thin on purpose. The pose path already returned a `DetectionFrame`, so the
+ * only thing missing was a named entry point under the shared contract,
+ * symmetric with {@link createExecutorchLiveSegmentationProducer}. The live
+ * hook currently repeats this runner call and frame conversion inline; this
+ * is what lets that duplication move behind the adapter.
+ */
+export function createExecutorchLivePoseProducer<TRunOnFrame>(
+  options: ExecutorchLivePoseConfiguration<TRunOnFrame>,
+): ReactNativeLiveDetectionProducer {
+  const processor = createExecutorchLivePoseProcessor(options);
+
+  return {
+    process(frame) {
+      "worklet";
+
+      return processor.process(
+        frame as Parameters<ExecutorchLivePoseProcessor["process"]>[0],
+      );
+    },
+  };
+}
+
+/**
  * ExecuTorch's frame orientation API is camera-centric: there is no value
  * meaning "the buffer is already screen-upright, leave inputs and outputs
  * alone". For `orientation: "up"` the model receives the buffer unrotated
