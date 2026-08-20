@@ -1,11 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { KeypointVisibility } from "supervision-js-core";
+import {
+  decodeDetectionMask,
+  DetectionMaskEncoding,
+  KeypointVisibility,
+} from "supervision-js-core";
 
 import {
   createDetectionFrameFromExecutorchCocoPoses,
   createExecutorchLivePoseProcessor,
   createExecutorchLiveSegmentationProcessor,
+  createExecutorchLiveSegmentationProducer,
   createExecutorchVideoFrameSerializer,
   EXECUTORCH_COCO_KEYPOINT_NAMES,
   unrotateExecutorchUpBbox,
@@ -354,5 +359,103 @@ describe("live ExecuTorch processors", () => {
     expect(points?.[5]).toEqual({ x: 10, y: 20 });
     expect(points?.[6]).toEqual({ x: 30, y: 20 });
     expect(points?.[11]).toEqual({ x: 12, y: 50 });
+  });
+});
+
+describe("createExecutorchLiveSegmentationProducer", () => {
+  const rawDetection = {
+    bbox: { x1: 10, y1: 20, x2: 50, y2: 100 },
+    label: "person",
+    mask: new Uint8Array([1, 0, 0, 1, 0, 0]),
+    maskHeight: 3,
+    maskWidth: 2,
+    score: 0.9,
+  };
+
+  it("publishes a DetectionFrame with core geometry and no styling", () => {
+    const produce = createExecutorchLiveSegmentationProducer({
+      runOnFrame: () => [rawDetection],
+    });
+
+    const frame = produce.process({ height: 0, timestamp: 2_000_000_000 });
+
+    expect(frame.mediaTime).toBe(2);
+    expect(frame.detections).toHaveLength(1);
+
+    const detection = frame.detections[0]!;
+
+    expect(detection.className).toBe("person");
+    expect(detection.confidence).toBe(0.9);
+    // Center-based Rect, converted from ExecuTorch's corner bbox.
+    expect(detection.rect).toEqual({ height: 80, width: 40, x: 30, y: 60 });
+    // Core detections carry no color; presentation resolves it from className.
+    expect(detection).not.toHaveProperty("color");
+  });
+
+  it("publishes the mask buffer in place, with swapped logical dims when rotated", () => {
+    const produce = createExecutorchLiveSegmentationProducer({
+      framePixelsAreUpright: true,
+      runOnFrame: () => [rawDetection],
+    });
+
+    const frame = produce.process({ height: 200, timestamp: 0 });
+    const mask = frame.detections[0]!.mask;
+
+    expect(mask).toMatchObject({
+      encoding: DetectionMaskEncoding.DenseBitmap,
+      // ExecuTorch reports the rotated buffer's dims; logical dims swap.
+      height: 2,
+      rotatedCw: true,
+      width: 3,
+    });
+    // No upright copy: the model's buffer is published as-is.
+    expect((mask as { data: Uint8Array }).data).toBe(rawDetection.mask);
+  });
+
+  it("decodes a produced rotated mask to the same bytes the fill loop samples", () => {
+    const produce = createExecutorchLiveSegmentationProducer({
+      framePixelsAreUpright: true,
+      runOnFrame: () => [rawDetection],
+    });
+
+    const mask = produce.process({ height: 200, timestamp: 0 }).detections[0]!
+      .mask!;
+    const decoded = decodeDetectionMask(mask);
+
+    // Transcribed from the ID-mask fill loops in src/index.ts:
+    //   logical(x, y) = stored[x * storedRowWidth + (storedRowWidth - 1 - y)]
+    const storedRowWidth = rawDetection.maskWidth;
+    const expected = new Uint8Array(decoded.width * decoded.height);
+
+    for (let y = 0; y < decoded.height; y += 1) {
+      for (let x = 0; x < decoded.width; x += 1) {
+        expected[y * decoded.width + x] =
+          rawDetection.mask[x * storedRowWidth + (storedRowWidth - 1 - y)] ?? 0;
+      }
+    }
+
+    expect(decoded.data).toEqual(expected);
+  });
+
+  it("leaves bboxes alone when the frame is not reported upright", () => {
+    const produce = createExecutorchLiveSegmentationProducer({
+      runOnFrame: () => [rawDetection],
+    });
+
+    const detection = produce.process({ timestamp: 0 }).detections[0]!;
+
+    expect(detection.rect).toEqual({ height: 80, width: 40, x: 30, y: 60 });
+    expect(detection.mask).toMatchObject({ rotatedCw: false, width: 2 });
+  });
+
+  it("returns an empty frame when no runner is configured", () => {
+    const produce = createExecutorchLiveSegmentationProducer({
+      runOnFrame: null,
+    });
+
+    expect(produce.process({ timestamp: 1_000_000_000 })).toEqual({
+      detections: [],
+      mediaTime: 1,
+    });
   });
 });

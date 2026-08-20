@@ -152,6 +152,7 @@ export type {
   MediaSessionState,
   MediaSessionStateListener,
 } from "./types/media-session";
+export type { ReactNativeLiveDetectionProducer } from "./types/live-producer";
 export { isSyncMediaFrameProcessor } from "./types/frame-processor";
 export type {
   AsyncMediaFrameProcessor,
