@@ -163,6 +163,25 @@ comfortable.
 **Exit criteria.** A 10-second clip plays in about 10 seconds under `media`,
 with the overlay updating at inference rate. `analysis` output is unchanged.
 
+**Media clock done, validated on an iPhone 15.** The saved-video session takes
+a `clock`, `analysis` remains the default, and the demo exposes a toggle so the
+two can be compared on one clip. Inference rate self-regulates: running a model
+puts the session behind, the next frames present cheaply from held detections
+until the schedule recovers, and another inference becomes affordable. The
+policy lives in `sessions/media-clock-policy.ts` as pure functions, because
+nothing inside the pump worklet is reachable from a test.
+
+Two limits carried forward. The wait spins — the pump runtime has no sleep
+primitive — which costs less than `analysis` (never waits, never stops
+inferring) but is worse than pacing presentation off vsync. And held
+detections lag their frame; propagating with a tracker is the next step, worth
+judging against device numbers rather than in the abstract.
+
+**`realtime` deliberately not lifted yet.** The live lane does not run through
+`createMediaSession`, so turning `dropFramesWhileBusy` into a session policy
+today would add an option with exactly one valid value. It belongs with Phase
+3, where the clock becomes a real parameter across both lanes.
+
 ## Phase 3 — Converge the lanes onto one core
 
 With Phase 0 done, `media-session-core.ts` can host the worklet pump. Port the
