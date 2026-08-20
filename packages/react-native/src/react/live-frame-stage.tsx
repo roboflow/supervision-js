@@ -23,7 +23,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { type StyleProp, type ViewStyle, View } from "react-native";
+import { type StyleProp, type ViewStyle, Platform, View } from "react-native";
 import {
   BoxShape,
   type BoxDrawInstruction,
@@ -57,6 +57,7 @@ import {
 } from "../skia";
 import type { ReactNativeVideoSession } from "../sessions";
 import { getReactNativeVideoSessionPresentation } from "../sessions/react-native-video-presentation";
+import { resolveReactNativeSkiaDefaultFontFamily } from "./label-font";
 
 /**
  * Allocates a disposable native resource only after React commits. The deferred
@@ -711,7 +712,10 @@ function createLabels(
 ): ReactNativeLiveStageLabel[] {
   return labels.map((label, index) => {
     const fontSize = label.textStyle?.fontSize ?? 13;
-    const font = matchFont({ fontSize });
+    const font = matchFont({
+      fontFamily: resolveReactNativeSkiaDefaultFontFamily(Platform.OS),
+      fontSize,
+    });
     const bounds = font.measureText(label.text);
     const metrics = font.getMetrics();
     const labelLayout = resolveReactNativeLabelLayout({

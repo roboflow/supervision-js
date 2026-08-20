@@ -179,6 +179,11 @@ export type DemoFixtureFrameTransform = (
   frames: readonly DetectionFrame[],
 ) => readonly DetectionFrame[];
 
+export type DemoFixtureDetectionSourceTransform = (
+  source: DetectionFrameSource,
+  manifest: DemoFixtureDetectionManifest,
+) => DetectionFrameSource;
+
 export interface DemoFixtureMediaSource {
   readonly error: Error | null;
   readonly media: MediaSessionMedia;
@@ -232,8 +237,9 @@ export function createDemoFixtureDetectionSource(
   manifest: DemoFixtureDetectionManifest,
   definition: DemoFixtureDefinition = defaultDemoFixture,
   frameTransform?: DemoFixtureFrameTransform,
+  sourceTransform?: DemoFixtureDetectionSourceTransform,
 ): DemoFixtureDetectionSource {
-  const detectionSource = createChunkedDetectionFrameSource({
+  const baseDetectionSource = createChunkedDetectionFrameSource({
     baseUrl: definition.detectionsManifestSrc,
     fetchChunk: async (chunk) => {
       const loaded = await fetchDemoFixtureDetectionChunk(chunk, definition);
@@ -244,6 +250,8 @@ export function createDemoFixtureDetectionSource(
     },
     manifest,
   });
+  const detectionSource =
+    sourceTransform?.(baseDetectionSource, manifest) ?? baseDetectionSource;
   let destroyed = false;
   const destroy = () => {
     if (destroyed) {
@@ -252,6 +260,9 @@ export function createDemoFixtureDetectionSource(
 
     destroyed = true;
     detectionSource.destroy?.();
+    if (detectionSource !== baseDetectionSource) {
+      baseDetectionSource.destroy?.();
+    }
   };
 
   return {

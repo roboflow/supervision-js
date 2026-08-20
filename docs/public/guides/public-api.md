@@ -47,7 +47,14 @@ Start here for normal application code:
 - renderer source/frame readouts for timeline UI, including estimated frame
   rate, count, and current index while media timestamps remain canonical;
 - `DetectionFrame`
+- `DetectionFrame.coordinateSpace` when detections were produced against a
+  differently sized copy of the media; the renderer projects vector geometry
+  into media space for every detection input, so static frames, caller-owned
+  sources, composite sources, and appended frames all behave the same. A
+  composite composes children that were each inferred at a different size, and
+  every child is projected from its own space before composition
 - `Detection`
+- `Detection.trackerId` for identity assigned by a tracking post-processor
 - `Rect`
 - `DetectionMask`
 - `PolygonGeometry`
@@ -67,9 +74,14 @@ Start here for normal application code:
 - `AnnotationRenderer`
 - `AnnotationRendererKind`
 - `RegionAnnotationRenderer`
+- `detectionPostProcessors`
+- `createDetectionPostProcessingPipeline()`
+- `TrackingGeometry`
+- `DetectionPostProcessingMode`
 - `prepareMedia()`
 - `prepareMediaProgressively()`
 - `probeMedia()`
+- `MediaErrorKind` and `MediaSourceError` for branching on media failures
 
 These are the concepts a user should be able to understand without knowing how
 Pixi, Mediabunny, workers, or prepared mask artifacts are wired internally.
@@ -127,10 +139,31 @@ not the first thing most users should reach for:
 - `createMediaStreamRendererSource()` for adapting a browser `MediaStream`
   without adding a second visible video layer; its bounded snapshot queue is
   latest-frame-wins, so a temporarily slow renderer resumes at the live edge
-  instead of replaying stale frames;
-- `DetectionFrameSource` for caller-owned range loading;
+  instead of replaying stale frames. Its `onPresentedFrame` option reports
+  `MediaStreamPresentedFrame` metadata — media time plus, where the browser
+  supplies them, RTP timestamp, dimensions, presentation time, and expected
+  display time — so a host can correlate transport-side results with what is on
+  screen without opening a second hidden video. No DOM element or vendor object
+  crosses that boundary, and every field beyond `mediaTime` is optional;
+- `DetectionFrameSource` for caller-owned range loading. `loadFrames` receives
+  optional `DetectionFrameLoadOptions`; a source that returns its own frames
+  unchanged can ignore it, while a source that flattens child frames uses
+  `coordinateSpace` to project each child before composing;
+- `LiveMediaSession`, the shape `createMediaSession()` returns. It guarantees
+  `appendLiveDetectionFrame()` and `finalizeDetectionCoverage()`, which stay
+  optional on `MediaSession` so controllers and test doubles written against the
+  previous shape remain assignable;
 - `WritableDetectionFrameSource` and `createWritableDetectionFrameSource()` for
-  streaming inference ingestion;
+  streaming inference ingestion. `appendLiveFrame()` and `finalizeCoverage()`
+  are optional members of `WritableDetectionFrameSource`, so a source written
+  before they existed still satisfies the interface;
+  `createWritableDetectionFrameSource()` returns the narrower
+  `LiveWritableDetectionFrameSource`, which requires both, and the session
+  surfaces them as `session.appendLiveDetectionFrame()` and
+  `session.finalizeDetectionCoverage()`;
+- `projectDetectionFrame()`, `projectDetectionFrames()`, and
+  `createProjectedDetectionFrameSource()` when a host wants the same
+  coordinate-space projection outside a session;
 - `detections.sources`, `MediaSessionDetectionSourceOptions`, and
   `createCompositeDetectionFrameSource()` for composing model predictions,
   draft annotations, review overlays, or other app-owned detection streams over
@@ -144,6 +177,9 @@ not the first thing most users should reach for:
 - polygons, polylines, keypoints, shared class-color helpers, and visibility
   controls;
 - render-preparation diagnostics and worker options.
+- ordered detection post-processing, bounded out-of-order buffering, tracking
+  diagnostics, in-place derived detection updates, optional raw-copy
+  preservation, and worker options.
 
 `RenderPreparationMode.Auto` uses the package's embedded Blob worker when the
 browser supports it and falls back to main-thread preparation after a worker
@@ -154,6 +190,89 @@ Hosts whose Content Security Policy blocks Blob workers may supply a
 `RenderPreparationWorkerFactory` and host the self-contained script exported at
 `supervision/render-preparation-worker`. That subpath is a deployment asset,
 not a JavaScript API; its message protocol is intentionally internal.
+
+Tracking uses the same deployment pattern. The self-contained script at
+`supervision/detection-post-processing-worker` can be hosted by strict-CSP
+applications through a `DetectionPostProcessingWorkerFactory`; its protocol is
+also private.
+
+### Live And Progressive Detections
+
+A producer that streams results into a session has four supported contracts:
+
+- `session.appendDetectionFrames()` writes a batch. Frames that declare
+  `coordinateSpace` are normalized into media space before storage; rectangles,
+  polygons, polylines, and keypoints scale, while masks keep their own intrinsic
+  dimensions and are never scaled twice.
+- `session.appendLiveDetectionFrame()` writes the newest result for a live
+  stream. It stays active until the next live frame supersedes it, at which
+  point the previous frame is closed at the new frame's `mediaTime`. At most two
+  frames are written per call, so append cost does not grow with retained
+  history. Tune the open-ended hold with
+  `detections.appendable.live.holdSeconds` (default 60 seconds).
+
+  Live writes are serialized inside the source and the newest causal result
+  wins: concurrent appends are applied in call order, and a result older than
+  the newest accepted live frame is dropped rather than reopening coverage the
+  source already closed. A repeat of the current frame's identity is treated as
+  a revision and replaces it. Because the hold is a placeholder for "still
+  current" rather than covered data, retention windows are measured against the
+  producer's real coverage, not against the hold.
+
+- `session.finalizeDetectionCoverage(endTime?)` closes the last frame at the
+  end of media, defaulting to the renderer's reported duration. It sets that
+  frame's exclusive end to the requested time, extending a finite frame whose
+  container declared a duration past the last decoded sample, or shortening a
+  live frame that is still held open. Without it, coverage-gated playback either
+  stalls on a terminal sliver or believes the source covers time past the end of
+  media. It is idempotent.
+- `session.refresh()` still redraws on demand. By default the session also
+  redraws itself when a write actually changed the frame selected for the
+  displayed time. Live writes, batch writes, and coverage finalization all use
+  the same rule: a result the source dropped as stale changes nothing, and a
+  frame whose interval does not contain the displayed time cannot change what
+  is on screen. A frame written without an
+  `endTime` stays selected until a later frame supersedes it, so one appended
+  behind the displayed time still redraws, and rewriting the most recent one
+  with a real end redraws for the time it stops covering. Requests arriving during a redraw
+  collapse into a single follow-up. Set `detections.autoRefresh: false` to own
+  every redraw.
+
+Retention windows evict in place when the cold store implements `pruneFrames`
+(the built-in memory store does), so a long-running stream does not reload and
+rewrite everything it keeps on every append. `pruneFrames` rejects a retention
+floor that is not finite and non-negative rather than silently emptying a
+dataset. Stores without that hook keep working through a reload-and-replace
+fallback.
+
+### Media Failures
+
+Media failures carry a stable `MediaErrorKind` instead of asking applications to
+match decoder, demuxer, or container message text:
+
+```ts
+import { MediaErrorKind, getMediaErrorKind } from "supervision";
+
+const state = session.getState();
+
+if (state.renderer?.source.errorKind === MediaErrorKind.UnsupportedFormat) {
+  // Application-owned, localized copy.
+}
+```
+
+`MediaSourceError` preserves the originating failure on `cause`. Public media
+sources — finite video, `MediaStream`, and image sources — wrap what they throw,
+and `getMediaErrorKind()` classifies any caught value, including one that never
+passed through a source boundary. Unrecognized failures stay representable as
+`MediaErrorKind.Unknown`, and new kinds may be added over time, so treat unknown
+values like `Unknown`. `MediaSourceState.errorKind` is optional, so state
+fixtures written before it existed keep type-checking; read it as
+`state.renderer?.source.errorKind ?? null`.
+
+Finite video sources present a zero-based timeline. Media trimmed through an
+edit list carries decodable samples ahead of presentation time zero; those are
+not presented, and the session reports `firstTimestamp` as the presentation
+start rather than the negative decode start.
 
 ## Editing API
 
@@ -242,14 +361,17 @@ Pause, play/resume, and stop are available; seeking is intentionally
 unsupported until native decoding can reposition accurately. The older
 `createReactNativeVideoSession()` name remains a deprecated forwarding alias.
 
-Saved-video decoding on Android is **not implemented yet**. On Android the
-file source fails with the stable
-`android-video-file-source-not-implemented-yet` reason rather than attempting a
-missing native module. The future implementation is a Nitro/C++ source backed
-by `AMediaExtractor` and `AMediaCodec`, delivering an API-26+
-`AHardwareBuffer` to the existing ExecuTorch and Skia consumers with explicit
-timestamp, orientation, and release ownership. Until that lands, do not claim
-cross-platform file support.
+Saved-video decoding on Android is implemented as an **experimental**
+Nitro/C++ source backed by `AMediaExtractor` and `AMediaCodec`, delivering an
+API-26+ RGBA `AHardwareBuffer` to the existing ExecuTorch and Skia consumers
+with explicit timestamp and release ownership. It requires Android API 26;
+older hosts report the stable `android-video-file-source-requires-api-26`
+reason, and hosts without the native module keep the usual fallback
+diagnostics. Rotated videos (portrait phone recordings with a
+`rotation-degrees` track metadata) are rejected with an explicit error until
+the GPU rotation pass lands. The pipeline is validated end-to-end on an
+emulator; physical-device validation and performance numbers are still
+pending, so do not claim production-ready cross-platform file support yet.
 
 React Native currently shares editing geometry, picking, and gesture semantics
 through `createReactNativeAnnotationGestureAdapter`. Native hosts own drawing

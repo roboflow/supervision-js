@@ -88,11 +88,11 @@ This is intentionally still a proof. The package now has a generic
 live/video stage, and a package-owned `useReactNativeLiveInference()` controller
 from the optional `react/live-inference` entrypoint, plus a live-inference
 extension for serializable recipe rules. It still lacks
-native-thread prepared windows, camera recording/export, Android saved-video
-decoding, and a fully custom Skia/native renderer that imports and draws the
-camera frame directly. Android saved-video decoding is intentionally **not
-implemented yet**; see `react-native-architecture.md` for the
-MediaCodec/AHardwareBuffer implementation path.
+native-thread prepared windows, camera recording/export, and a fully custom
+Skia/native renderer that imports and draws the camera frame directly.
+Android saved-video decoding is implemented (experimental,
+emulator-validated); see `react-native-architecture.md` for the
+MediaCodec/AHardwareBuffer design and its pending physical-device gate.
 
 ## Next Architecture Step
 
@@ -191,3 +191,23 @@ upload/serialization ~0ms. Target for native prep: fill under ~8-12ms p90 so
 the strict-sync tick approaches model time. Post-native numbers are pending a
 manual device run; record them here and decide whether the next bottleneck is
 model inference, ArrayBuffer transfer, or Skia image construction.
+
+Android saved-video first device numbers (Pixel 10 Pro, 2026-08-18, Basketball
+sample, RF-DETR Nano **XNNPACK fp32**, full-resolution masks, 6 masks/frame,
+JS mask prep): release build SEG 688ms, FILL 15ms, TICK 736ms (~1.4 fps);
+debug build for comparison SEG 1308ms, FILL 25ms, TICK 1478ms. The tick is
+~93% model inference, so the decoder (NDK decode + CPU YUV→RGBA convert) and
+the JS mask fill are not the bottleneck. The gap to the iPhone CoreML INT8
+numbers (~12x) is a backend/quantization question for the detection producer
+— the ExecuTorch model registry currently serves an fp32 XNNPACK artifact
+even with `quant: true` — not a renderer or media-pipeline cost. A native
+Android ID-mask builder remains unjustified by these numbers (15ms JS fill vs
+688ms model).
+
+Same-day iPhone 15 comparison (debug build, same code, same Basketball
+sample, 6 masks, CoreML INT8, native mask prep): SEG 72ms, FILL 1ms, TICK
+88ms (~7.8 fps) — consistent with the pre-extraction 46-58ms baseline plus
+dev-mode overhead. The cross-platform gap is entirely the detection
+producer's backend (ANE INT8 vs CPU fp32); both platforms are strict-sync
+analysis-paced by design, so file playback intentionally runs at inference
+speed rather than media speed.

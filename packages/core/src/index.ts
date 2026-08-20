@@ -17,7 +17,42 @@ export {
   type EditableAnnotationFrameSession,
 } from "#detections/editable-annotation-frame-session";
 export { createMemoryColdDetectionFrameStore } from "#detections/memory-cold-detection-frame-store";
+export { createProjectedDetectionFrameSource } from "#detections/projected-detection-frame-source";
 export { createWritableDetectionFrameSource } from "#detections/writable-detection-frame-source";
+
+// Semantic post-processing.
+export { createSortTracker } from "#post-processing/sort-tracker";
+export { createByteTrackTracker } from "#post-processing/byte-track-tracker";
+export { createCBIoUTracker } from "#post-processing/cbiou-tracker";
+export { createOCSortTracker } from "#post-processing/oc-sort-tracker";
+export {
+  detectionPostProcessors,
+  projectDetectionFrameForTracking,
+} from "#post-processing/tracking";
+export {
+  TrackingGeometry,
+  type ByteTrackTracker,
+  type ByteTrackTrackerUpdate,
+  type ByteTrackTrackingDetectionPostProcessor,
+  type ByteTrackTrackingOptions,
+  type CBIoUTracker,
+  type CBIoUTrackerUpdate,
+  type CBIoUTrackingDetectionPostProcessor,
+  type CBIoUTrackingOptions,
+  type DetectionPostProcessor,
+  type DetectionPostProcessorFactory,
+  type SortTracker,
+  type SortTrackerUpdate,
+  type SortTrackingOptions,
+  type OCSortTracker,
+  type OCSortTrackerUpdate,
+  type OCSortTrackingDetectionPostProcessor,
+  type OCSortTrackingOptions,
+  type TrackingAssignment,
+  type TrackingDetectionPostProcessor,
+  type TrackingProjection,
+  type TrackingTracker,
+} from "#types/post-processing";
 
 // Interaction and picking.
 export {
@@ -160,6 +195,10 @@ export {
   type MaskRectRun,
 } from "#utils/detection-masks";
 export {
+  projectDetectionFrame,
+  projectDetectionFrames,
+} from "#utils/detection-projection";
+export {
   centerRectToTopLeftRect,
   containsPoint,
   distanceToSegment,
@@ -248,6 +287,7 @@ export {
   type BufferedDetectionTimeline,
   type ColdDetectionFrameStore,
   type ColdDetectionFrameStoreLoadOptions,
+  type ColdDetectionFrameStorePruneOptions,
   type ColdDetectionFrameStoreWriteOptions,
   type ColdDetectionFrameStoreWriteSummary,
   type ChunkedDetectionFrameSourceOptions,
@@ -260,6 +300,8 @@ export {
   type DetectionFrameChunkDescriptor,
   type DetectionFrameChunkFetch,
   type DetectionFrameChunkManifest,
+  type DetectionFrameLoadOptions,
+  type DetectionFrameLiveOptions,
   type DetectionFrameRetentionOptions,
   type DetectionFrameSelectionOptions,
   type DetectionFrameSource,
@@ -267,13 +309,16 @@ export {
   type DetectionFrameSourceVersionRange,
   type DetectionPlaybackGateOptions,
   type DetectionTimelineContext,
+  type LiveWritableDetectionFrameSource,
   type WritableDetectionFrameSource,
+  type WritableDetectionFrameSourceOptions,
 } from "#types/detection-timeline";
 export {
   DetectionMaskEncoding,
   KeypointVisibility,
   type CompressedRleDetectionMask,
   type Detection,
+  type DetectionCoordinateSpace,
   type DetectionFrame,
   type DetectionMask,
   type KeypointEdge,
@@ -295,6 +340,7 @@ export type {
   PlatformMediaFrameSource,
 } from "#types/media";
 export {
+  MediaErrorKind,
   MediaRendererFit,
   MediaRendererPlaybackState,
   MediaSourceStatus,

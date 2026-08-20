@@ -3,15 +3,21 @@ import {
   DetectionFrameSelectionMode,
   type CompositeDetectionFrameSourceEntry,
   type CompositeDetectionFrameSourceOptions,
+  type DetectionFrameLoadOptions,
   type DetectionFrameSource,
   type DetectionFrameSourceVersionRange,
   type DetectionFrameSelectionOptions,
 } from "#types/detection-timeline";
-import type { Detection, DetectionFrame } from "#types/detections";
+import type {
+  Detection,
+  DetectionCoordinateSpace,
+  DetectionFrame,
+} from "#types/detections";
 import {
   copySortedDetectionFrames,
   selectDetectionFrame,
 } from "#utils/detection-frames";
+import { projectDetectionFrames } from "#utils/detection-projection";
 
 interface NormalizedCompositeSource {
   readonly declarationIndex: number;
@@ -32,14 +38,28 @@ export function createCompositeDetectionFrameSource(
   const sources = normalizeCompositeSources(options.sources);
 
   return {
-    async loadFrames(startTime, endTime) {
+    async loadFrames(
+      startTime: number,
+      endTime: number,
+      loadOptions?: DetectionFrameLoadOptions,
+    ) {
+      const target = loadOptions?.coordinateSpace;
       const loadedSources = await Promise.all(
-        sources.map(async (source) => ({
-          ...source,
-          frames: copySortedDetectionFrames(
-            await source.source.loadFrames(startTime, endTime),
-          ),
-        })),
+        sources.map(async (source) => {
+          const frames = copySortedDetectionFrames(
+            await source.source.loadFrames(startTime, endTime, loadOptions),
+          );
+
+          return {
+            ...source,
+            // Composition flattens child detections into one frame, which can
+            // only carry one coordinate space. Each child is projected here,
+            // while its own `coordinateSpace` is still attached to its own
+            // detections, so children inferred at different sizes compose
+            // correctly. Masks keep their intrinsic dimensions.
+            frames: target ? projectDetectionFrames(frames, target) : frames,
+          };
+        }),
       );
 
       if (
@@ -50,6 +70,7 @@ export function createCompositeDetectionFrameSource(
           startTime,
           endTime,
           options,
+          target,
         );
 
         if (nearestFrames) {
@@ -57,7 +78,13 @@ export function createCompositeDetectionFrameSource(
         }
       }
 
-      return composeIntervalFrames(loadedSources, startTime, endTime, options);
+      return composeIntervalFrames(
+        loadedSources,
+        startTime,
+        endTime,
+        options,
+        target,
+      );
     },
 
     async waitForRange(range) {
@@ -135,6 +162,7 @@ function composeIntervalFrames(
   startTime: number,
   endTime: number,
   options: DetectionFrameSelectionOptions,
+  coordinateSpace?: DetectionCoordinateSpace,
 ) {
   const boundaryTimes = new Set<number>([startTime]);
 
@@ -166,10 +194,14 @@ function composeIntervalFrames(
 
     const nextBoundaryTime = sortedBoundaryTimes[boundaryIndex + 1] ?? endTime;
     const endTimeForFrame = Math.min(nextBoundaryTime, endTime);
-    const frame = composeFrameAtTime(sources, mediaTime, endTimeForFrame, {
-      ...options,
-      selectionMode: DetectionFrameSelectionMode.Interval,
-    });
+    const frame = composeFrameAtTime(
+      sources,
+      mediaTime,
+      endTimeForFrame,
+      { ...options, selectionMode: DetectionFrameSelectionMode.Interval },
+      undefined,
+      coordinateSpace,
+    );
 
     if (frame) {
       frames.push(frame);
@@ -184,6 +216,7 @@ function composeNearestFrameIndexFrames(
   startTime: number,
   endTime: number,
   options: DetectionFrameSelectionOptions,
+  coordinateSpace?: DetectionCoordinateSpace,
 ) {
   const frameRate = options.frameRate;
 
@@ -228,6 +261,7 @@ function composeNearestFrameIndexFrames(
         selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
       },
       frameIndex,
+      coordinateSpace,
     );
 
     if (frame) {
@@ -244,6 +278,7 @@ function composeFrameAtTime(
   endTime: number,
   options: DetectionFrameSelectionOptions,
   frameIndex?: number,
+  coordinateSpace?: DetectionCoordinateSpace,
 ): DetectionFrame | undefined {
   const detections: Detection[] = [];
   const activeFrameIndexes: number[] = [];
@@ -279,6 +314,9 @@ function composeFrameAtTime(
     frameIndex:
       frameIndex ?? resolveComposedFrameIndex(activeFrameIndexes) ?? undefined,
     mediaTime,
+    // Children were projected before composition, so a composed frame is
+    // already in the coordinate space the renderer presents.
+    ...(coordinateSpace ? { coordinateSpace } : {}),
   };
 }
 

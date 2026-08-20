@@ -418,6 +418,7 @@ function createRendererState(options: {
       audioTrackCount: null,
       canRead: null,
       duration: null,
+      errorKind: null,
       errorMessage: options.sourceErrorMessage ?? null,
       estimatedFrameCount: null,
       estimatedFrameRate: null,

@@ -1,6 +1,7 @@
 import type {
   ColdDetectionFrameStore,
   ColdDetectionFrameStoreLoadOptions,
+  ColdDetectionFrameStorePruneOptions,
   ColdDetectionFrameStoreWriteOptions,
   ColdDetectionFrameStoreWriteSummary,
 } from "#types/detection-timeline";
@@ -100,6 +101,24 @@ export function createMemoryColdDetectionFrameStore(): ColdDetectionFrameStore {
       return copySortedDetectionFrames(frames);
     },
 
+    async pruneFrames(options: ColdDetectionFrameStorePruneOptions) {
+      assertActive();
+      assertRetentionFloor(options.startTime);
+
+      const dataset = datasets.get(options.datasetId);
+
+      if (!dataset) {
+        return createWriteSummary(
+          options.datasetId,
+          createDataset(DEFAULT_CHUNK_DURATION_SECONDS),
+        );
+      }
+
+      pruneDatasetBefore(dataset, options.startTime);
+
+      return createWriteSummary(options.datasetId, dataset);
+    },
+
     async clearDataset(datasetId) {
       assertActive();
       datasets.delete(datasetId);
@@ -194,6 +213,98 @@ function removeStoredFrame(
       dataset.frameKeysByChunk.delete(chunkIndex);
     }
   }
+}
+
+/**
+ * Drops frames that end before `startTime`.
+ *
+ * Only chunks at or below the retention boundary are visited, and the new
+ * start bound is read from the lowest surviving chunk, so eviction costs work
+ * proportional to the evicted range rather than to retained history.
+ */
+function pruneDatasetBefore(
+  dataset: MemoryDetectionDataset,
+  startTime: number,
+) {
+  const boundaryChunkIndex = getChunkIndex(
+    Math.max(0, startTime),
+    dataset.chunkDurationSeconds,
+  );
+  let didRemoveFrame = false;
+
+  for (const chunkIndex of Array.from(dataset.frameKeysByChunk.keys())) {
+    if (chunkIndex > boundaryChunkIndex) {
+      continue;
+    }
+
+    for (const frameKey of Array.from(
+      dataset.frameKeysByChunk.get(chunkIndex) ?? [],
+    )) {
+      const storedFrame = dataset.framesByKey.get(frameKey);
+
+      if (!storedFrame || isFrameRetainedFrom(storedFrame.frame, startTime)) {
+        continue;
+      }
+
+      removeStoredFrame(dataset, frameKey, storedFrame);
+      didRemoveFrame = true;
+    }
+  }
+
+  if (!didRemoveFrame) {
+    return;
+  }
+
+  if (dataset.framesByKey.size === 0) {
+    dataset.startTime = null;
+    dataset.endTime = null;
+    return;
+  }
+
+  // Every frame is registered in the chunk its `mediaTime` falls in, so the
+  // earliest retained frame lives in the lowest remaining chunk. Removing
+  // frames can only raise the start bound; `endTime` is unchanged because only
+  // frames ending before `startTime` were dropped.
+  dataset.startTime = getEarliestChunkStartTime(dataset);
+}
+
+/**
+ * Mirrors `detectionFrameOverlapsRange` so pruning keeps exactly the frames a
+ * load from `startTime` would return.
+ */
+function isFrameRetainedFrom(frame: DetectionFrame, startTime: number) {
+  return frame.endTime === undefined
+    ? frame.mediaTime >= startTime
+    : frame.endTime > startTime;
+}
+
+function getEarliestChunkStartTime(dataset: MemoryDetectionDataset) {
+  let earliestChunkIndex: number | null = null;
+
+  for (const chunkIndex of dataset.frameKeysByChunk.keys()) {
+    if (earliestChunkIndex === null || chunkIndex < earliestChunkIndex) {
+      earliestChunkIndex = chunkIndex;
+    }
+  }
+
+  let startTime: number | null = null;
+
+  for (const frameKey of dataset.frameKeysByChunk.get(
+    earliestChunkIndex ?? 0,
+  ) ?? []) {
+    const storedFrame = dataset.framesByKey.get(frameKey);
+
+    if (!storedFrame) {
+      continue;
+    }
+
+    startTime = Math.min(
+      startTime ?? storedFrame.frame.mediaTime,
+      storedFrame.frame.mediaTime,
+    );
+  }
+
+  return startTime;
 }
 
 function replacementCanShrinkBounds(
@@ -294,4 +405,19 @@ function getDetectionFrameDedupeKey(frame: DetectionFrame) {
   return frame.frameIndex === undefined
     ? `time:${frame.mediaTime}`
     : `index:${frame.frameIndex}`;
+}
+
+/**
+ * Rejects a retention floor that could not describe a real media time.
+ *
+ * Pruning mutates retained history in place, and `NaN` compares false against
+ * every retained frame, so an unvalidated floor would silently erase a dataset
+ * instead of evicting a bounded range.
+ */
+function assertRetentionFloor(startTime: number) {
+  if (!Number.isFinite(startTime) || startTime < 0) {
+    throw new RangeError(
+      "pruneFrames requires a finite, non-negative startTime.",
+    );
+  }
 }

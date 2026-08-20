@@ -121,7 +121,7 @@ open class HybridVideoFrameHandleSpec_cxx {
   }
 
   // Properties
-  public final var pointer: Int64 {
+  public final var pointer: UInt64 {
     @inline(__always)
     get {
       return self.__implementation.pointer

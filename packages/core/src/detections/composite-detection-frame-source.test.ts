@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createCompositeDetectionFrameSource } from "#detections/composite-detection-frame-source";
 import { DetectionFrameSelectionMode } from "#types/detection-timeline";
+import { DetectionMaskEncoding } from "#types/detections";
 import type { DetectionFrame, Rect } from "#types/detections";
 
 const rect: Rect = { height: 10, width: 20, x: 1, y: 2 };
@@ -170,6 +171,126 @@ describe("createCompositeDetectionFrameSource", () => {
       startTime: 1,
     });
     expect(optionalWaitForRange).not.toHaveBeenCalled();
+  });
+
+  it("projects each child from its own coordinate space before composing", async () => {
+    const mask = {
+      counts: "abc",
+      encoding: DetectionMaskEncoding.CompressedRle,
+      height: 90,
+      width: 160,
+    } as const;
+    const source = createCompositeDetectionFrameSource({
+      sources: [
+        {
+          frames: [
+            {
+              coordinateSpace: { height: 360, width: 640 },
+              detections: [
+                {
+                  id: "half",
+                  mask,
+                  polyline: {
+                    points: [
+                      { x: 32, y: 18 },
+                      { x: 64, y: 36 },
+                    ],
+                  },
+                  rect: { height: 36, width: 64, x: 320, y: 180 },
+                },
+              ],
+              endTime: 1,
+              mediaTime: 0,
+            },
+          ],
+          id: "half-space",
+        },
+        {
+          frames: [
+            {
+              coordinateSpace: { height: 180, width: 320 },
+              detections: [
+                {
+                  id: "quarter",
+                  keypoints: { edges: [], points: [{ x: 10, y: 20 }] },
+                },
+              ],
+              endTime: 1,
+              mediaTime: 0,
+            },
+          ],
+          id: "quarter-space",
+        },
+        {
+          frames: [
+            {
+              detections: [
+                {
+                  id: "media",
+                  rect: { height: 36, width: 64, x: 320, y: 180 },
+                },
+              ],
+              endTime: 1,
+              mediaTime: 0,
+            },
+          ],
+          id: "media-space",
+        },
+      ],
+    });
+
+    const [frame] = await source.loadFrames(0, 1, {
+      coordinateSpace: { height: 720, width: 1280 },
+    });
+
+    expect(frame).toMatchObject({
+      coordinateSpace: { height: 720, width: 1280 },
+      detections: [
+        {
+          id: "half",
+          // Masks carry their own dimensions and must not be scaled again.
+          mask,
+          polyline: {
+            points: [
+              { x: 64, y: 36 },
+              { x: 128, y: 72 },
+            ],
+          },
+          rect: { height: 72, width: 128, x: 640, y: 360 },
+        },
+        // A different child space scales by its own ratio, not the first one's.
+        { id: "quarter", keypoints: { points: [{ x: 40, y: 80 }] } },
+        // A child without coordinate metadata is already in media space.
+        { id: "media", rect: { height: 36, width: 64, x: 320, y: 180 } },
+      ],
+    });
+  });
+
+  it("leaves composed children unchanged without a projection target", async () => {
+    const source = createCompositeDetectionFrameSource({
+      sources: [
+        {
+          frames: [
+            {
+              coordinateSpace: { height: 360, width: 640 },
+              detections: [
+                { id: "half", rect: { height: 36, width: 64, x: 320, y: 180 } },
+              ],
+              endTime: 1,
+              mediaTime: 0,
+            },
+          ],
+          id: "half-space",
+        },
+      ],
+    });
+
+    const [frame] = await source.loadFrames(0, 1);
+
+    expect(frame).toMatchObject({
+      detections: [{ rect: { height: 36, width: 64, x: 320, y: 180 } }],
+    });
+    expect(frame?.coordinateSpace).toBeUndefined();
   });
 
   it("rejects invalid source declarations", () => {

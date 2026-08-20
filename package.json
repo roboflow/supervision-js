@@ -21,6 +21,7 @@
     "typescript"
   ],
   "workspaces": [
+    "packages/trackers",
     "packages/core",
     "packages/react-native",
     "packages/web",
@@ -52,9 +53,9 @@
     "build": "npm run build -w supervision-js-core && npm run build -w supervision-js-react-native && npm run build -w supervision",
     "build:js": "npm run build:js -w supervision-js-core && npm run build:js -w supervision-js-react-native && npm run build:js -w supervision",
     "build:types": "npm run build:types -w supervision-js-core && npm run build:types -w supervision-js-react-native && npm run build:types -w supervision",
-    "clean": "npm run clean -w supervision-js-core && npm run clean -w supervision-js-react-native && npm run clean -w supervision",
+    "clean": "npm run clean -w supervision-js-trackers && npm run clean -w supervision-js-core && npm run clean -w supervision-js-react-native && npm run clean -w supervision",
     "dev": "npm run build && concurrently -k -n lib,demo -c cyan,magenta \"npm run dev:lib\" \"npm run dev:demo\"",
-    "dev:lib": "concurrently -k -n core,rn,web -c blue,green,cyan \"npm run dev -w supervision-js-core\" \"npm run dev -w supervision-js-react-native\" \"npm run dev -w supervision\"",
+    "dev:lib": "npm run build -w supervision-js-trackers && concurrently -k -n trackers,core,rn,web -c yellow,blue,green,cyan \"npm run dev -w supervision-js-trackers\" \"npm run dev:local -w supervision-js-core\" \"npm run dev -w supervision-js-react-native\" \"npm run dev -w supervision\"",
     "dev:demo": "npm run dev -w demo",
     "dev:demo-docs": "npm run build && concurrently -k -n demo,docs -c magenta,blue \"npm run dev:demo\" \"npm run docs:dev:server\"",
     "demo:dev": "npm run build && npm run dev:demo",
@@ -93,7 +94,7 @@
     "fixture:sam3:extract": "node tools/sam3-fixture/extract-frames.mjs",
     "fixture:sam3:run": "npm run build -w supervision-js-core && node tools/sam3-fixture/run-sam3.mjs",
     "fixture:geometry:create": "npm run build -w supervision-js-core && node tools/geometry-fixture/create-geometry-fixture.mjs",
-    "typecheck": "npm run typecheck -w supervision-js-core && npm run build -w supervision-js-core && npm run typecheck -w supervision-js-react-native && npm run build -w supervision-js-react-native && npm run typecheck -w supervision && npm run build -w supervision && tsc --noEmit -p demo/tsconfig.json && tsc --noEmit -p examples/vanilla/tsconfig.json && npm run example:react-native:typecheck",
+    "typecheck": "npm run typecheck -w supervision-js-trackers && npm run typecheck -w supervision-js-core && npm run build -w supervision-js-core && npm run typecheck -w supervision-js-react-native && npm run build -w supervision-js-react-native && npm run typecheck -w supervision && npm run build -w supervision && tsc --noEmit -p demo/tsconfig.json && tsc --noEmit -p examples/vanilla/tsconfig.json && npm run example:react-native:typecheck",
     "boundary:check": "node --test tools/package-boundary.test.mjs",
     "test": "vitest run && npm run boundary:check && npm run docs:check && node --test tools/react-runtime-contract.test.mjs tools/release-workflow-contract.test.mjs tools/sam3-fixture/*.test.mjs tools/geometry-fixture/*.test.mjs",
     "package:smoke": "node --test tools/package-smoke.test.mjs",
@@ -105,6 +106,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "verify": "npm run format:check && npm run lint && npm run typecheck && npm run test && npm run build && npm run package:smoke && npm run demo:build && npm run benchmark:initial:build && npm run benchmark:media-upload:build && npm run benchmark:masks:gpu:build",
+    "postinstall": "patch-package --error-on-fail --error-on-warn",
     "prepare": "node -e \"process.exit(process.env.CI || process.env.NODE_ENV === 'production' ? 0 : 1)\" || husky"
   },
   "lint-staged": {
@@ -122,6 +124,7 @@
     "eslint": "^10.8.0",
     "husky": "^9.1.7",
     "lint-staged": "^17.3.0",
+    "patch-package": "8.0.1",
     "prettier": "^3.9.6",
     "rollup": "^4.62.4",
     "tslib": "^2.8.1",

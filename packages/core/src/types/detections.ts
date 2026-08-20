@@ -120,10 +120,12 @@ export interface CompressedRleDetectionMask {
 export type DetectionMask = CompressedRleDetectionMask;
 
 /**
- * One model output for a media frame.
+ * One semantic detection for a media frame.
  *
- * A detection stores model data only: identity, class, confidence, geometry,
- * mask, and caller metadata. It intentionally does not carry render styling.
+ * A detection may come directly from a model or from a semantic
+ * post-processor such as tracking. It stores identity, class, confidence,
+ * geometry, mask, and caller metadata, but intentionally does not carry render
+ * styling.
  * Styling is resolved through presentation styles so the same detections can be
  * rendered as boxes, masks, labels, or future layers without mutating the
  * underlying annotation data.
@@ -133,6 +135,12 @@ export interface Detection {
    * Optional stable identity for picking, interaction, and host app metadata.
    */
   readonly id?: string | number;
+  /**
+   * Optional temporal identity assigned by a tracking post-processor.
+   * This is separate from `id`, which remains the annotation/picking identity.
+   * Post-processors may update this derived field in place.
+   */
+  trackerId?: number;
   /**
    * Optional provenance for detections copied from a composed source.
    *
@@ -178,6 +186,20 @@ export interface Detection {
 }
 
 /**
+ * Pixel space that a detection frame's vector geometry was produced in.
+ *
+ * Producers that infer on a resized or transcoded copy of the media can attach
+ * this to a `DetectionFrame` instead of scaling geometry themselves. Masks are
+ * unaffected: they already carry their own intrinsic `width`/`height`.
+ */
+export interface DetectionCoordinateSpace {
+  /** Source frame width in pixels. Must be greater than 0. */
+  readonly width: number;
+  /** Source frame height in pixels. Must be greater than 0. */
+  readonly height: number;
+}
+
+/**
  * Detections associated with one media time.
  *
  * `mediaTime` is seconds on the renderer media timeline. `endTime`, when
@@ -202,4 +224,13 @@ export interface DetectionFrame {
    * Detections active for this frame interval.
    */
   readonly detections: readonly Detection[];
+  /**
+   * Optional pixel space this frame's rectangles, polygons, polylines, and
+   * keypoints were produced in.
+   *
+   * Omit it when detections are already in media-pixel coordinates. Mask
+   * coordinates always use the mask's own intrinsic dimensions and are never
+   * rescaled by coordinate-space projection.
+   */
+  readonly coordinateSpace?: DetectionCoordinateSpace;
 }

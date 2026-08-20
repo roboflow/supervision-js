@@ -136,4 +136,79 @@ describe("memory cold detection frame store", () => {
       startTime: 0,
     });
   });
+
+  it("prunes frames that end before the retention floor", async () => {
+    const store = createMemoryColdDetectionFrameStore();
+
+    await store.putFrames({
+      datasetId: "stream",
+      frames: [
+        { detections: [{ id: "a" }], endTime: 1, mediaTime: 0 },
+        { detections: [{ id: "b" }], endTime: 2, mediaTime: 1 },
+        { detections: [{ id: "c" }], endTime: 3, mediaTime: 2 },
+      ],
+    });
+
+    await expect(
+      store.pruneFrames?.({ datasetId: "stream", startTime: 2 }),
+    ).resolves.toMatchObject({
+      detectionCount: 1,
+      endTime: 3,
+      frameCount: 1,
+      startTime: 2,
+    });
+    await expect(
+      store.loadFrames({ datasetId: "stream", endTime: 3, startTime: 0 }),
+    ).resolves.toEqual([
+      { detections: [{ id: "c" }], endTime: 3, mediaTime: 2 },
+    ]);
+  });
+
+  it("clears its bounds when pruning removes every frame", async () => {
+    const store = createMemoryColdDetectionFrameStore();
+
+    await store.putFrames({
+      datasetId: "stream",
+      frames: [{ detections: [{ id: "a" }], endTime: 1, mediaTime: 0 }],
+    });
+
+    await expect(
+      store.pruneFrames?.({ datasetId: "stream", startTime: 5 }),
+    ).resolves.toMatchObject({
+      detectionCount: 0,
+      endTime: null,
+      frameCount: 0,
+      startTime: null,
+    });
+  });
+
+  it("reports an empty summary when pruning an unknown dataset", async () => {
+    const store = createMemoryColdDetectionFrameStore();
+
+    await expect(
+      store.pruneFrames?.({ datasetId: "missing", startTime: 1 }),
+    ).resolves.toMatchObject({ datasetId: "missing", frameCount: 0 });
+  });
+
+  it.each([Number.NaN, -1, Number.POSITIVE_INFINITY])(
+    "rejects the retention floor %p without touching stored frames",
+    async (startTime) => {
+      const store = createMemoryColdDetectionFrameStore();
+      const frames = [
+        { detections: [{ id: "a" }], endTime: 1, mediaTime: 0 },
+        { detections: [{ id: "b" }], endTime: 2, mediaTime: 1 },
+      ];
+
+      await store.putFrames({ datasetId: "stream", frames });
+
+      await expect(
+        store.pruneFrames?.({ datasetId: "stream", startTime }),
+      ).rejects.toThrow(
+        "pruneFrames requires a finite, non-negative startTime.",
+      );
+      await expect(
+        store.loadFrames({ datasetId: "stream", endTime: 2, startTime: 0 }),
+      ).resolves.toEqual(frames);
+    },
+  );
 });
