@@ -27,3 +27,6 @@ pnpm-debug.log*
 .env
 .env.*
 !.env.example
+
+# Agent working notes, probes and evidence. Never part of the package.
+local_claude/
