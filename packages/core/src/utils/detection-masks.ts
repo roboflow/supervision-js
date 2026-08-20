@@ -1,12 +1,13 @@
 import {
   DetectionMaskEncoding,
+  type CompressedRleDetectionMask,
   type DetectionMask,
   type Point,
   type Rect,
   type TopLeftRect,
 } from "#types/detections";
 import {
-  decodeCompressedRleMask,
+  decodeDetectionMask,
   encodeCompressedRleCounts,
 } from "#utils/detection-frames";
 
@@ -25,14 +26,14 @@ export type MaskRectRun = TopLeftRect;
 
 export interface EncodedBinaryMask {
   readonly bounds: Rect | null;
-  readonly mask: DetectionMask;
+  readonly mask: CompressedRleDetectionMask;
 }
 
 export function encodeBinaryMask(
   data: Uint8Array,
   width: number,
   height: number,
-): DetectionMask {
+): CompressedRleDetectionMask {
   assertMaskDimensions(data, width, height);
 
   const runs: number[] = [];
@@ -121,8 +122,13 @@ export function encodeBinaryMaskWithBounds(
   };
 }
 
+/**
+ * The payload format is the RLE counts string, so this accepts only the
+ * cold-storage encoding. Convert a dense mask with `encodeDenseBitmapMask()`
+ * before storing it.
+ */
 export function encodeDetectionMaskPayload(
-  mask: DetectionMask,
+  mask: CompressedRleDetectionMask,
   codec?: DetectionMaskCompressionCodec,
 ): string {
   return codec ? codec.deflate(mask.counts) : mask.counts;
@@ -136,7 +142,7 @@ export function decodeDetectionMaskPayload(
     readonly codec?: DetectionMaskCompressionCodec;
     readonly format?: DetectionMaskPayloadFormat;
   } = {},
-): DetectionMask {
+): CompressedRleDetectionMask {
   const format =
     options.format ??
     (isDeflatedBase64DetectionMaskPayload(payload)
@@ -208,7 +214,7 @@ export function computeMaskBounds(
 export function computeDetectionMaskRect(
   mask: DetectionMask,
 ): Rect | undefined {
-  const decoded = decodeCompressedRleMask(mask);
+  const decoded = decodeDetectionMask(mask);
   const bounds = computeMaskBounds(decoded.data, decoded.width, decoded.height);
   return bounds ?? undefined;
 }

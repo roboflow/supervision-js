@@ -2,7 +2,7 @@ import type { SerializableMaskInstruction } from "#render-preparation/mask-prepa
 import type { MaskStrokeStyle } from "supervision-js-core";
 import {
   createIdMaskFrame,
-  decodeCompressedRleMask,
+  decodeDetectionMask,
   encodeBinaryMask,
   rasterizePolygonToMask,
   type IdMaskInstruction,
@@ -92,7 +92,7 @@ function compositeInstruction(
   canvasWidth: number,
   instruction: IdMaskInstruction,
 ) {
-  const decodedMask = decodeCompressedRleMask(instruction.mask);
+  const decodedMask = decodeDetectionMask(instruction.mask);
   const fill = resolveRgbaColor(instruction.color, instruction.alpha);
 
   compositeMaskFill(rgba, canvasWidth, decodedMask, fill);

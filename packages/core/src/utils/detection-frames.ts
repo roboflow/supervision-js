@@ -1,5 +1,6 @@
 import {
   DetectionMaskEncoding,
+  type DenseBitmapDetectionMask,
   type DetectionFrame,
   type DetectionMask,
 } from "#types/detections";
@@ -239,7 +240,15 @@ export function validateDetectionFrames(
           exclusiveMin: 0,
         });
 
-        if (detection.mask.counts.length === 0) {
+        if (detection.mask.encoding === DetectionMaskEncoding.DenseBitmap) {
+          const expectedLength = detection.mask.width * detection.mask.height;
+
+          if (detection.mask.data.length !== expectedLength) {
+            throw new Error(
+              `${detectionPath}.mask.data must have ${expectedLength} bytes, received ${detection.mask.data.length}.`,
+            );
+          }
+        } else if (detection.mask.counts.length === 0) {
           throw new Error(`${detectionPath}.mask.counts must not be empty.`);
         }
       }
@@ -366,6 +375,54 @@ export function decodeCompressedRleMask(
     height: mask.height,
     width: mask.width,
   };
+}
+
+/**
+ * Reads a dense mask into row-major order.
+ *
+ * An upright buffer is returned as-is, so the common case stays copy-free.
+ * A transposed buffer is un-rotated into a fresh array, because every
+ * `DecodedDetectionMask` consumer indexes as `data[y * width + x]`.
+ */
+export function decodeDenseBitmapMask(
+  mask: DenseBitmapDetectionMask,
+): DecodedDetectionMask {
+  const expectedLength = mask.width * mask.height;
+
+  if (mask.data.length !== expectedLength) {
+    throw new Error(
+      `Dense detection mask data must have ${expectedLength} bytes, received ${mask.data.length}.`,
+    );
+  }
+
+  if (!mask.transposed) {
+    return { data: mask.data, height: mask.height, width: mask.width };
+  }
+
+  const data = new Uint8Array(expectedLength);
+
+  for (let y = 0; y < mask.height; y += 1) {
+    const rowOffset = y * mask.width;
+
+    for (let x = 0; x < mask.width; x += 1) {
+      data[rowOffset + x] = mask.data[x * mask.height + y] ?? 0;
+    }
+  }
+
+  return { data, height: mask.height, width: mask.width };
+}
+
+/**
+ * Decodes any supported mask encoding into row-major bytes.
+ *
+ * Prefer this over the per-encoding decoders whenever the value is typed as
+ * `DetectionMask`; a producer chooses its encoding, and consumers should not
+ * assume cold storage.
+ */
+export function decodeDetectionMask(mask: DetectionMask): DecodedDetectionMask {
+  return mask.encoding === DetectionMaskEncoding.DenseBitmap
+    ? decodeDenseBitmapMask(mask)
+    : decodeCompressedRleMask(mask);
 }
 
 function selectIntervalDetectionFrame(

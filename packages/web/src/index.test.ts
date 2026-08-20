@@ -9,7 +9,7 @@ import {
   type BoxStyle,
 } from "supervision-js-core";
 import type { BufferedDetectionTimeline } from "supervision-js-core";
-import type { Detection } from "supervision-js-core";
+import type { Detection, DetectionMask } from "supervision-js-core";
 import type { MaskStyle } from "supervision-js-core";
 
 import {
@@ -33,6 +33,15 @@ let DetectionFrameSelectionMode: PackageEntrypoint["DetectionFrameSelectionMode"
 let DetectionMaskEncoding: PackageEntrypoint["DetectionMaskEncoding"];
 let MediaRendererPlaybackState: PackageEntrypoint["MediaRendererPlaybackState"];
 let MediaSourceStatus: PackageEntrypoint["MediaSourceStatus"];
+
+// Built lazily: DetectionMaskEncoding is bound from the dynamically
+// imported entrypoint in beforeAll, not at module scope.
+const createTestMask = (): DetectionMask => ({
+  counts: "021",
+  encoding: DetectionMaskEncoding.CompressedRle,
+  height: 2,
+  width: 2,
+});
 
 describe("package entrypoint", () => {
   beforeAll(async () => {
@@ -308,6 +317,7 @@ describe("package entrypoint", () => {
     });
     expect(entrypoint.DetectionMaskEncoding).toEqual({
       CompressedRle: "compressedRle",
+      DenseBitmap: "denseBitmap",
     });
     expect(entrypoint.MediaNormalizationContainer).toEqual({
       Mp4: "mp4",
@@ -380,12 +390,7 @@ describe("package entrypoint", () => {
 
   it("resolves BaseMaskStyle defaults only for detections with masks", () => {
     const style = new BaseMaskStyle();
-    const mask = {
-      counts: "021",
-      encoding: DetectionMaskEncoding.CompressedRle,
-      height: 2,
-      width: 2,
-    };
+    const mask = createTestMask();
     const context = {
       detectionIndex: 0,
       frame: { detections: [], mediaTime: 0 },
@@ -1254,12 +1259,7 @@ describe("package entrypoint", () => {
         {
           detections: [
             {
-              mask: {
-                counts: "021",
-                encoding: DetectionMaskEncoding.CompressedRle,
-                height: 2,
-                width: 2,
-              },
+              mask: createTestMask(),
               rect: {
                 height: 20,
                 width: 10,
@@ -1290,12 +1290,7 @@ describe("package entrypoint", () => {
           {
             detections: [
               {
-                mask: {
-                  counts: "021",
-                  encoding: DetectionMaskEncoding.CompressedRle,
-                  height: 2,
-                  width: 2,
-                },
+                mask: createTestMask(),
               },
             ],
             mediaTime: 0,
@@ -1338,12 +1333,7 @@ describe("package entrypoint", () => {
           detections: [
             {
               className: "player",
-              mask: {
-                counts: "021",
-                encoding: DetectionMaskEncoding.CompressedRle,
-                height: 2,
-                width: 2,
-              },
+              mask: createTestMask(),
               rect: { height: 20, width: 10, x: 9, y: 15 },
             },
           ],
@@ -1399,12 +1389,7 @@ describe("package entrypoint", () => {
         {
           detections: [
             {
-              mask: {
-                counts: "021",
-                encoding: DetectionMaskEncoding.CompressedRle,
-                height: 2,
-                width: 2,
-              },
+              mask: createTestMask(),
               rect: {
                 height: 20,
                 width: 10,
@@ -1475,12 +1460,7 @@ describe("package entrypoint", () => {
       {
         detections: [
           {
-            mask: {
-              counts: "021",
-              encoding: DetectionMaskEncoding.CompressedRle,
-              height: 2,
-              width: 2,
-            },
+            mask: createTestMask(),
           },
         ],
         mediaTime: 0,
@@ -1488,12 +1468,7 @@ describe("package entrypoint", () => {
       {
         detections: [
           {
-            mask: {
-              counts: "021",
-              encoding: DetectionMaskEncoding.CompressedRle,
-              height: 2,
-              width: 2,
-            },
+            mask: createTestMask(),
           },
         ],
         mediaTime: 0.04,
@@ -1501,12 +1476,7 @@ describe("package entrypoint", () => {
       {
         detections: [
           {
-            mask: {
-              counts: "021",
-              encoding: DetectionMaskEncoding.CompressedRle,
-              height: 2,
-              width: 2,
-            },
+            mask: createTestMask(),
           },
         ],
         mediaTime: 0.08,
@@ -1561,12 +1531,7 @@ describe("package entrypoint", () => {
       const detectionFrames = Array.from({ length: 14 }, (_, index) => ({
         detections: [
           {
-            mask: {
-              counts: "021",
-              encoding: DetectionMaskEncoding.CompressedRle,
-              height: 2,
-              width: 2,
-            },
+            mask: createTestMask(),
           },
         ],
         mediaTime: index * 0.04,
@@ -1628,12 +1593,7 @@ describe("package entrypoint", () => {
         {
           detections: [
             {
-              mask: {
-                counts: "021",
-                encoding: DetectionMaskEncoding.CompressedRle,
-                height: 2,
-                width: 2,
-              },
+              mask: createTestMask(),
             },
           ],
           mediaTime: 0,
@@ -1719,12 +1679,7 @@ describe("package entrypoint", () => {
         {
           detections: [
             {
-              mask: {
-                counts: "021",
-                encoding: DetectionMaskEncoding.CompressedRle,
-                height: 2,
-                width: 2,
-              },
+              mask: createTestMask(),
             },
           ],
           mediaTime: 0,
@@ -2279,12 +2234,7 @@ describe("package entrypoint", () => {
         {
           detections: [
             {
-              mask: {
-                counts: "021",
-                encoding: DetectionMaskEncoding.CompressedRle,
-                height: 2,
-                width: 2,
-              },
+              mask: createTestMask(),
             },
           ],
           mediaTime: 0,
@@ -2344,12 +2294,7 @@ describe("package entrypoint", () => {
         {
           detections: [
             {
-              mask: {
-                counts: "021",
-                encoding: DetectionMaskEncoding.CompressedRle,
-                height: 2,
-                width: 2,
-              },
+              mask: createTestMask(),
             },
           ],
           mediaTime: 0,
@@ -2396,12 +2341,7 @@ describe("package entrypoint", () => {
         {
           detections: [
             {
-              mask: {
-                counts: "021",
-                encoding: DetectionMaskEncoding.CompressedRle,
-                height: 2,
-                width: 2,
-              },
+              mask: createTestMask(),
             },
           ],
           mediaTime: 0,

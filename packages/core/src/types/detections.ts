@@ -89,6 +89,7 @@ export type SkeletonDefinitions = Readonly<Record<string, SkeletonDefinition>>;
 
 export enum DetectionMaskEncoding {
   CompressedRle = "compressedRle",
+  DenseBitmap = "denseBitmap",
 }
 
 /**
@@ -117,7 +118,52 @@ export interface CompressedRleDetectionMask {
   readonly counts: string;
 }
 
-export type DetectionMask = CompressedRleDetectionMask;
+/**
+ * Uncompressed one-byte-per-pixel binary mask.
+ *
+ * This is the hot-path representation: a model producer that already holds
+ * dense mask bytes can publish them without an encoding pass. RLE remains the
+ * cold-storage form, but encoding into it costs a full pass plus a string
+ * allocation per mask, which a per-frame live pipeline cannot afford.
+ *
+ * Consumers that need row-major semantics should call `decodeDetectionMask()`,
+ * which normalizes both encodings. Renderers that sample the buffer directly
+ * may read `data` and honor `transposed` themselves to stay copy-free.
+ *
+ * `data` is treated as immutable and is shared, not deep-copied, when
+ * detections are copied. Duplicating a full-resolution mask per frame would
+ * defeat the reason this encoding exists, so a producer must not mutate a
+ * buffer it has already published.
+ */
+export interface DenseBitmapDetectionMask {
+  readonly encoding: DetectionMaskEncoding.DenseBitmap;
+  /**
+   * Logical mask width in mask pixels.
+   */
+  readonly width: number;
+  /**
+   * Logical mask height in mask pixels.
+   */
+  readonly height: number;
+  /**
+   * Mask bytes, one per pixel. Non-zero is foreground.
+   *
+   * Length must be `width * height` regardless of `transposed`.
+   */
+  readonly data: Uint8Array;
+  /**
+   * Set when `data` stores the mask rotated 90° clockwise, so it is indexed
+   * as `data[x * height + y]` instead of `data[y * width + x]`.
+   *
+   * This describes buffer layout only. It lets a producer whose runtime emits
+   * a rotated buffer avoid an upright copy per frame; `width` and `height`
+   * always describe the logical, upright mask.
+   */
+  readonly transposed?: boolean;
+}
+
+export type DetectionMask =
+  CompressedRleDetectionMask | DenseBitmapDetectionMask;
 
 /**
  * One semantic detection for a media frame.
