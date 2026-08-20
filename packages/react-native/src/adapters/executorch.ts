@@ -220,12 +220,13 @@ export function createExecutorchLiveSegmentationProducer<TRunOnFrame>(
   const toUprightFrame = createExecutorchUprightFrame;
   const getUprightFrameHeight = readExecutorchFrameHeight;
   const unrotateBbox = unrotateExecutorchUpBbox;
+  const readTimestampSeconds = readExecutorchFrameTimestampSeconds;
 
   return {
     process(frame) {
       "worklet";
 
-      const mediaTime = readExecutorchFrameTimestampSeconds(frame);
+      const mediaTime = readTimestampSeconds(frame);
 
       if (runOnFrame === null) {
         return { detections: [], mediaTime };
@@ -262,7 +263,9 @@ export function createExecutorchLiveSegmentationProducer<TRunOnFrame>(
           confidence: raw.score,
           mask: {
             data: raw.mask,
-            encoding: DetectionMaskEncoding.DenseBitmap,
+            // The literal, not the imported enum object: capturing an
+            // enum in VisionCamera's isolated runtime is unreliable.
+            encoding: "denseBitmap" as DetectionMaskEncoding.DenseBitmap,
             height: rotatedCw ? raw.maskWidth : raw.maskHeight,
             rotatedCw,
             width: rotatedCw ? raw.maskHeight : raw.maskWidth,
