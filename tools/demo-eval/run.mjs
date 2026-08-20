@@ -216,6 +216,14 @@ function detail(name, scenario) {
       field("paused scene renders", paused.sceneRenderDelta),
       field("playing paints", playing.paintCount),
       field(
+        "playing style recalcs",
+        `${playing.styleRecalcRate ?? 0}/s  (limit ${playing.styleRecalcRateLimit ?? 0}/s)`,
+      ),
+      field(
+        "playing viewport paints",
+        `${playing.viewportPaintCount ?? 0}  (limit 0)`,
+      ),
+      field(
         "playing canvas class",
         `${playing.canvasRectClass ?? "none"} x${playing.canvasPaintCount}` +
           `${playing.canvasRectSource ? ` (${playing.canvasRectSource})` : ""}`,

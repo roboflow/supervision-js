@@ -26,7 +26,15 @@ const RECT_TOLERANCE_PX = 2;
 const MIN_ADVANCE_RATIO = 0.25;
 const SEEK_P95_LIMIT_MS = 250;
 const STEP_P95_LIMIT_MS = 80;
-const DOM_PAINT_RATE_MULTIPLIER = 3;
+/* A canvas presenting video paints once per presented frame, so the budget has
+ * to sit above a readout updating and below a page repainting per frame. Tying
+ * it to the present rate instead made a per-frame repaint pass by construction. */
+const DOM_PAINT_RATE_LIMIT = 15;
+/* Style invalidations per second while playing. A player at steady state should
+ * not need one per presented frame, let alone the four measured here; each one
+ * pulls layout and paint behind it on the main thread, which is the budget a
+ * weaker machine does not have. */
+const STYLE_RECALC_RATE_LIMIT = 60;
 const DETECTION_SETTLE_MS = 8000;
 const BATTERY_TIMEOUT_MS = 900_000;
 
@@ -200,24 +208,20 @@ function matchesBox(rect, box) {
 }
 
 /**
- * Finds the rect class the canvas presents through. The canvas own box is the
- * clean case; a canvas that backs most of the page instead presents through the
- * viewport-sized layer rect, and that class is the one to exclude from the DOM
- * paint budget.
+ * The rect the canvas presents through, and only when it is provably that: a
+ * rect the size of the canvas own box. A viewport-sized rect was once credited
+ * to the canvas whenever the canvas covered enough of the page, which spent the
+ * whole budget on an assumption and left a page repainting per frame
+ * indistinguishable from a video presenting.
  */
 function findCanvasRect(rects, geometry) {
   const own = rects.find((rect) => matchesBox(rect, geometry.canvas));
-  if (own) return { ...own, source: "canvas-box" };
-  const canvas = geometry.canvas;
-  if (!canvas) return null;
-  const coverage =
-    (canvas.width * canvas.height) /
-    (geometry.viewport.width * geometry.viewport.height);
-  if (coverage < 0.5) return null;
-  const viewportRect = rects.find((rect) =>
-    matchesBox(rect, geometry.viewport),
-  );
-  return viewportRect ? { ...viewportRect, source: "viewport-box" } : null;
+  return own ? { ...own, source: "canvas-box" } : null;
+}
+
+/** Rects the size of the whole page. Nothing the player does earns one. */
+function findViewportRects(rects, geometry) {
+  return rects.filter((rect) => matchesBox(rect, geometry.viewport));
 }
 
 /**
@@ -424,10 +428,7 @@ export async function runPaints(session, info, attempts) {
   const excluded = phases.playing.canvasPaintCount;
   const domPaintCount = phases.playing.paintCount - excluded;
   const domPaintRate = round(domPaintCount / windowSeconds, 2);
-  const domPaintRateLimit = round(
-    phases.playing.presentRate * DOM_PAINT_RATE_MULTIPLIER,
-    2,
-  );
+  const domPaintRateLimit = DOM_PAINT_RATE_LIMIT;
 
   const failures = [];
   if (phases.paused.paintCount !== 0) {
@@ -437,8 +438,21 @@ export async function runPaints(session, info, attempts) {
   }
   if (domPaintRate >= domPaintRateLimit) {
     failures.push(
-      `paints: DOM paint rate ${domPaintRate}/s is not under ${domPaintRateLimit}/s ` +
-        `(${DOM_PAINT_RATE_MULTIPLIER}x the ${phases.playing.presentRate}/s present rate)`,
+      `paints: DOM paint rate ${domPaintRate}/s is not under ${domPaintRateLimit}/s`,
+    );
+  }
+  const styleRecalcRate = round(
+    phases.playing.updateLayoutTreeCount / windowSeconds,
+    1,
+  );
+  if (styleRecalcRate >= STYLE_RECALC_RATE_LIMIT) {
+    failures.push(
+      `paints: ${styleRecalcRate} style recalcs/s while playing is not under ${STYLE_RECALC_RATE_LIMIT}/s`,
+    );
+  }
+  if (phases.playing.viewportPaintCount > 0) {
+    failures.push(
+      `paints: ${phases.playing.viewportPaintCount} full-viewport paints while playing, expected 0`,
     );
   }
   const damageAreaLimit = Math.round(
@@ -466,6 +480,8 @@ export async function runPaints(session, info, attempts) {
         domPaintCount,
         domPaintRate,
         domPaintRateLimit,
+        styleRecalcRate,
+        styleRecalcRateLimit: STYLE_RECALC_RATE_LIMIT,
         damageAreaLimit,
       },
     },
@@ -489,6 +505,10 @@ function buildPhase(events, before, after, geometry) {
       : null,
     canvasRectSource: canvasRect ? canvasRect.source : null,
     canvasPaintCount: canvasRect ? canvasRect.count : 0,
+    viewportPaintCount: findViewportRects(rects, geometry).reduce(
+      (total, rect) => total + rect.count,
+      0,
+    ),
     rects: rects.slice(0, 8).map((rect) => ({
       size: `${rect.width}x${rect.height}`,
       count: rect.count,
