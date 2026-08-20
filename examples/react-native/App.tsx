@@ -1917,6 +1917,11 @@ function VideoFileProof(props: {
   const canvasWidth = window.width;
   const canvasHeight = window.height;
   const [videoStatus, setVideoStatus] = useState<VideoStatus>("idle");
+  // Which clock paces playback. Analysis is the historical behaviour:
+  // every frame inferred, so the clip runs at inference speed.
+  const [videoClock, setVideoClock] = useState<"analysis" | "media">(
+    "analysis",
+  );
   const [videoError, setVideoError] = useState<string | null>(null);
   const [videoStats, setVideoStats] = useState<VideoStats | null>(null);
   const [videoDims, setVideoDims] = useState<{
@@ -2037,6 +2042,7 @@ function VideoFileProof(props: {
 
       try {
         const session = createReactNativeVideoFileSession({
+          clock: videoClock,
           fileUri,
           mediaRect: videoLayout.mediaRect,
           onDetections: setVideoDetections,
@@ -2078,6 +2084,7 @@ function VideoFileProof(props: {
       handleVideoEnded,
       resolveVideoMaskEffects,
       serializeVideoFrame,
+      videoClock,
       videoLayout.mediaRect,
     ],
   );
@@ -2220,9 +2227,27 @@ function VideoFileProof(props: {
               {videoStatus === "error"
                 ? (videoError ?? "unknown error")
                 : modelReady
-                  ? "Run RF-DETR on every decoded frame, rendered in strict sync."
+                  ? videoClock === "analysis"
+                    ? "Analysis clock: RF-DETR on every decoded frame, so the clip runs at inference speed."
+                    : "Media clock: the clip plays on its own timeline, inferring on whatever subset fits."
                   : modelStatus}
             </Text>
+            <View style={styles.videoActionsRow}>
+              <TouchableOpacity
+                onPress={() => {
+                  setVideoClock((current) =>
+                    current === "analysis" ? "media" : "analysis",
+                  );
+                }}
+                style={styles.detectionMenuAction}
+              >
+                <Text style={styles.detectionMenuActionText}>
+                  {videoClock === "analysis"
+                    ? "Clock: analysis"
+                    : "Clock: media"}
+                </Text>
+              </TouchableOpacity>
+            </View>
             <View style={styles.videoActionsRow}>
               <TouchableOpacity
                 disabled={!modelReady}
