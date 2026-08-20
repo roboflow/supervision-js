@@ -52,6 +52,18 @@ export function createMediaRendererTransport(
     }
 
     const seeking = channel.getSeeking();
+    // The hold below is only honest while the producer is actually sitting in
+    // the mechanical pause the gesture asked for. A producer that reports
+    // anything else is speaking for itself, and a gesture whose release is
+    // lost must not latch the whole surface onto a state the producer left.
+    if (
+      gestureInFlight &&
+      !isSettling(status, seeking) &&
+      status !== "PAUSED"
+    ) {
+      gestureInFlight = false;
+    }
+
     // Inside the transport's own drag gesture the engine pauses itself as a
     // mechanic and resumes on release; the user never asked to pause, so the
     // state holds whatever was settled when the gesture began.

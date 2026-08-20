@@ -2101,6 +2101,28 @@ describe("package entrypoint", () => {
     renderer.destroy();
   });
 
+  it("keeps the canvas on the picture when the viewport is zoomed", async () => {
+    resetMocks();
+    mediaMock.samples = [createMockSample(0, 0)];
+
+    const renderer = await createRenderer(false, false, {
+      container: {
+        appendChild: vi.fn(),
+        clientHeight: 480,
+        clientWidth: 640,
+      } as unknown as HTMLElement,
+    });
+
+    // A pan moves the picture without filling the container, so the letterbox
+    // band it leaves must stay outside the canvas.
+    renderer.setViewportTransform({ scale: 1, x: 0, y: 40 });
+
+    const [, pannedHeight] = pixiMock.rendererResize.mock.lastCall ?? [];
+    expect(pannedHeight).toBeLessThan(480);
+
+    renderer.destroy();
+  });
+
   it("updates mask style at runtime and invalidates cached mask textures", async () => {
     resetMocks();
     mediaMock.samples = [createMockSample(0, 0), createMockSample(0.02, 0)];

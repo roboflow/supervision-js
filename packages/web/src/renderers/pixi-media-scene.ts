@@ -562,32 +562,29 @@ export async function createPixiMediaScene(
    * rate, so the canvas is sized to the picture and positioned inside the
    * container, leaving the margin to the backdrop.
    *
-   * That margin only exists while the picture sits where the fit puts it. A
-   * panned or zoomed picture can reach any part of the container, so the box
-   * covers all of it again.
+   * The box follows the picture under pan and zoom rather than growing to the
+   * container, so the margin keeps its exemption at every viewport transform.
    */
   const syncPresentationBox = () => {
     const { height: containerHeight, width: containerWidth } = containerSize;
     if (containerWidth <= 0 || containerHeight <= 0) return presentationBox;
 
     const transform = viewport.getTransform();
-    const untransformed =
-      transform.scale === 1 && transform.x === 0 && transform.y === 0;
-    const span =
-      untransformed && baseFit
-        ? {
-            left: Math.max(0, Math.floor(baseFit.x)),
-            top: Math.max(0, Math.floor(baseFit.y)),
-            right: Math.min(
-              containerWidth,
-              Math.ceil(baseFit.x + mediaWidth * baseFit.scale),
-            ),
-            bottom: Math.min(
-              containerHeight,
-              Math.ceil(baseFit.y + mediaHeight * baseFit.scale),
-            ),
-          }
-        : { left: 0, top: 0, right: containerWidth, bottom: containerHeight };
+    const pictureScale = baseFit ? baseFit.scale * transform.scale : 0;
+    const span = baseFit
+      ? {
+          left: Math.max(0, Math.floor(baseFit.x + transform.x)),
+          top: Math.max(0, Math.floor(baseFit.y + transform.y)),
+          right: Math.min(
+            containerWidth,
+            Math.ceil(baseFit.x + transform.x + mediaWidth * pictureScale),
+          ),
+          bottom: Math.min(
+            containerHeight,
+            Math.ceil(baseFit.y + transform.y + mediaHeight * pictureScale),
+          ),
+        }
+      : { left: 0, top: 0, right: containerWidth, bottom: containerHeight };
     const next = {
       left: span.left,
       top: span.top,
