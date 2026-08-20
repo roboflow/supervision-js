@@ -228,7 +228,7 @@ export function createAnnotationEditingEngine(
         activeHandleId: handle.id,
         kind: AnnotationGestureStateKind.Resizing,
         pointerId: input.pointerId ?? null,
-        preview: detection,
+        preview: null,
       });
     },
     deleteVertex(detection, vertexIndex) {

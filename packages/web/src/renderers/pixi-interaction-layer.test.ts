@@ -5,6 +5,7 @@ import { createPixiInteractionLayer } from "#renderers/pixi-interaction-layer";
 import {
   AnnotationGestureStateKind,
   createAnnotationEditingEngine,
+  DetectionMaskEncoding,
   DetectionPickTarget,
   KeypointMarkerShape,
   MediaInteractionMode,
@@ -260,13 +261,27 @@ describe("pixi interaction layer", () => {
     ]);
   });
 
-  it("prefers exact mask picks before falling back to box picks", () => {
+  it("prefers exact mask picks without advertising an unsupported move", () => {
     const onHover = vi.fn();
+    const maskFrame: DetectionFrame = {
+      ...frame,
+      detections: [
+        {
+          ...frame.detections[0]!,
+          mask: {
+            counts: "04",
+            encoding: DetectionMaskEncoding.CompressedRle,
+            height: 80,
+            width: 120,
+          },
+        },
+      ],
+    };
     const maskPick = {
-      detection: frame.detections[0],
+      detection: maskFrame.detections[0],
       detectionIndex: 0,
-      frame,
-      mediaTime: frame.mediaTime,
+      frame: maskFrame,
+      mediaTime: maskFrame.mediaTime,
       point: { x: 15, y: 20 },
       target: DetectionPickTarget.Mask,
     };
@@ -275,7 +290,8 @@ describe("pixi interaction layer", () => {
       Container: FakeContainer as never,
       Rectangle: FakeRectangle as never,
       canInteract: () => true,
-      detectionTimeline: createTimeline(frame),
+      detectionTimeline: createTimeline(maskFrame),
+      editingEngine: createAnnotationEditingEngine(),
       interaction: {
         mode: MediaInteractionMode.PausedOnly,
         onHover,
@@ -295,6 +311,7 @@ describe("pixi interaction layer", () => {
       0.1,
     );
     expect(onHover).toHaveBeenLastCalledWith(maskPick);
+    expect(display.cursor).toBe("pointer");
   });
 
   it("lets keypoint picks outrank the prepared-mask fast path", () => {

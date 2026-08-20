@@ -664,7 +664,8 @@ export function createPixiInteractionLayer(options: {
 
   /** Editable geometry drags, so it advertises `move`; a keypoint is a point target. */
   function hoverCursor(pick: DetectionPickResult) {
-    if (!options.editingEngine || pick.detection.locked) return "pointer";
+    if (!options.editingEngine || pick.detection.locked || pick.detection.mask)
+      return "pointer";
     return pick.target === DetectionPickTarget.Keypoint ? "pointer" : "move";
   }
 

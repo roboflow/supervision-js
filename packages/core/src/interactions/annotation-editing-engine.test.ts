@@ -237,6 +237,7 @@ describe("annotation editing engine", () => {
       timestamp: 0,
       pointerId: 1,
     });
+    expect(engine.getState().preview).toBeNull();
     engine.pointerMove({
       point: { x: 18, y: 22 },
       timestamp: 16,
