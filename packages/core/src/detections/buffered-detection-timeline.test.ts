@@ -652,7 +652,10 @@ describe("buffered detection timeline", () => {
 
     firstLoad.resolve([frames[0]]);
     await initialLoad;
-    expect(timeline.getState().status).toBe(DetectionBufferStatus.Ready);
+    // The landed window leaves 1s of lead, under the refill threshold, so the
+    // next window is already fetching while this one still answers.
+    expect(source.loadFrames).toHaveBeenNthCalledWith(2, 4, 9);
+    expect(timeline.selectFrame(4)?.mediaTime).toBe(0);
     secondLoad.resolve([frames[2]]);
   });
 
@@ -890,6 +893,122 @@ describe("buffered detection timeline", () => {
     expect(loadFrames).toHaveBeenCalledTimes(3);
     expect(timeline.selectFrame(0.5)?.detections[0]?.id).toBe("new");
   });
+
+  it("fetches the next window while the current one still leads the playhead", async () => {
+    const source = createCountingSecondFrameSource();
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 10,
+      bufferBehindSeconds: 0.5,
+      source,
+    });
+
+    await timeline.prepare(0);
+    expect(timeline.getState().bufferEndTime).toBe(10);
+    expect(source.loadFrames).toHaveBeenCalledOnce();
+
+    // Four seconds of lead left, above the five-second threshold: nothing yet.
+    await timeline.prepare(4.5);
+    expect(source.loadFrames).toHaveBeenCalledOnce();
+
+    await timeline.prepare(5.5);
+    await vi.waitFor(() => expect(source.loadFrames).toHaveBeenCalledTimes(2));
+    expect(source.loadFrames).toHaveBeenNthCalledWith(2, 5, 15.5);
+  });
+
+  it("keeps answering a media time while the next window loads", async () => {
+    const pending = createDeferred<readonly DetectionFrame[]>();
+    const source = createCountingSecondFrameSource();
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 10,
+      bufferBehindSeconds: 0.5,
+      source,
+    });
+
+    await timeline.prepare(0);
+    source.loadFrames.mockImplementationOnce(() => pending.promise);
+    await timeline.prepare(6);
+    await vi.waitFor(() =>
+      expect(timeline.getState().status).toBe(DetectionBufferStatus.Loading),
+    );
+
+    expect(timeline.selectFrame(6)?.mediaTime).toBe(6);
+    expect(timeline.selectFrame(9)?.mediaTime).toBe(9);
+
+    pending.resolve([]);
+  });
+
+  it("never loses the playhead across a window handover during playback", async () => {
+    const source = createCountingSecondFrameSource();
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 10,
+      bufferBehindSeconds: 0.5,
+      source,
+    });
+
+    const blanks: number[] = [];
+
+    // The first window is cold; playback starts once it has landed.
+    await timeline.prepare(0);
+
+    for (let frame = 0; frame <= 30 * 40; frame += 1) {
+      const mediaTime = frame / 30;
+
+      void timeline.prepare(mediaTime);
+      await Promise.resolve();
+
+      if (!timeline.selectFrame(mediaTime)) {
+        blanks.push(mediaTime);
+      }
+    }
+
+    expect(blanks).toEqual([]);
+  });
+
+  it("does not supersede a load that still covers the advancing playhead", async () => {
+    const pending = createDeferred<readonly DetectionFrame[]>();
+    const source = createCountingSecondFrameSource();
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 10,
+      bufferBehindSeconds: 0.5,
+      source,
+    });
+
+    await timeline.prepare(0);
+    source.loadFrames.mockImplementationOnce(() => pending.promise);
+    await timeline.prepare(5.5);
+    await vi.waitFor(() => expect(source.loadFrames).toHaveBeenCalledTimes(2));
+
+    // Every frame of the load's flight asks again from a slightly later
+    // playhead. The window already loading still covers all of them.
+    for (let frame = 1; frame <= 30; frame += 1) {
+      await timeline.prepare(5.5 + frame / 30);
+    }
+
+    expect(source.loadFrames).toHaveBeenCalledTimes(2);
+
+    pending.resolve([]);
+  });
+
+  it("supersedes a load the playhead has outrun", async () => {
+    const pending = createDeferred<readonly DetectionFrame[]>();
+    const source = createCountingSecondFrameSource();
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 10,
+      bufferBehindSeconds: 0.5,
+      source,
+    });
+
+    await timeline.prepare(0);
+    source.loadFrames.mockImplementationOnce(() => pending.promise);
+    await timeline.prepare(5.5);
+    await vi.waitFor(() => expect(source.loadFrames).toHaveBeenCalledTimes(2));
+
+    await timeline.prepare(40);
+
+    expect(source.loadFrames).toHaveBeenNthCalledWith(3, 39.5, 50);
+
+    pending.resolve([]);
+  });
 });
 
 function createLoopingTimeline() {
@@ -912,6 +1031,25 @@ function createLoopingTimeline() {
       },
     },
   });
+}
+
+/** One frame per media second, so a window's coverage is countable. */
+function createCountingSecondFrameSource() {
+  return {
+    loadFrames: vi.fn(async (startTime: number, endTime: number) => {
+      const loaded: DetectionFrame[] = [];
+
+      for (
+        let mediaTime = Math.max(0, Math.ceil(startTime));
+        mediaTime <= endTime;
+        mediaTime += 1
+      ) {
+        loaded.push({ detections: [], endTime: mediaTime + 1, mediaTime });
+      }
+
+      return loaded;
+    }),
+  };
 }
 
 function createDeferred<T>() {

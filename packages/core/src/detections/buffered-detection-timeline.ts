@@ -16,6 +16,17 @@ import {
 
 const DEFAULT_BUFFER_AHEAD_SECONDS = 5;
 const DEFAULT_BUFFER_BEHIND_SECONDS = 0.5;
+/**
+ * Share of the ahead window that must still lead the playhead when the next
+ * window is fetched.
+ *
+ * A window fetched only once the playhead reaches its end leaves the playhead
+ * uncovered for exactly as long as the fetch takes, every time, so annotations
+ * blink out once per window at a steady rate. Fetching while the current window
+ * still answers means the load lands behind a picture that never lost them.
+ */
+const REFILL_LEAD_FRACTION = 0.5;
+const MIN_REFILL_LEAD_SECONDS = 1;
 
 interface DetectionBufferLoadPlan {
   readonly endTime: number;
@@ -55,6 +66,16 @@ export function createBufferedDetectionTimeline(
     options.refreshIntervalSeconds === undefined
       ? null
       : Math.max(0, options.refreshIntervalSeconds);
+  const refillLeadSeconds =
+    bufferAheadSeconds <= 0
+      ? 0
+      : Math.min(
+          bufferAheadSeconds,
+          Math.max(
+            MIN_REFILL_LEAD_SECONDS,
+            bufferAheadSeconds * REFILL_LEAD_FRACTION,
+          ),
+        );
 
   let buffer: DetectionFrame[] = [];
   let state = createIdleDetectionBufferState();
@@ -74,6 +95,8 @@ export function createBufferedDetectionTimeline(
         readonly id: number;
         readonly startTime: number;
         readonly endTime: number;
+        /** Playhead the window was anchored on, on the comparable clock. */
+        readonly mediaTime: number;
         readonly sourceVersion: number;
         readonly promise: Promise<void>;
       }
@@ -116,16 +139,31 @@ export function createBufferedDetectionTimeline(
   };
 
   const loadWindow = (mediaTime: number) => {
+    const comparableMediaTime = getComparableMediaTime(mediaTime);
     const { endTime, sourceRanges, startTime } = getLoadRange(mediaTime);
     const versionRange = { endTime, startTime };
     const sourceVersion = getSourceVersion(sourceRanges);
 
-    if (
-      inFlight &&
-      inFlight.sourceVersion === sourceVersion &&
-      rangeContains(inFlight.startTime, inFlight.endTime, startTime, endTime)
-    ) {
-      return inFlight.promise;
+    if (inFlight && inFlight.sourceVersion === sourceVersion) {
+      if (
+        rangeContains(inFlight.startTime, inFlight.endTime, startTime, endTime)
+      ) {
+        return inFlight.promise;
+      }
+
+      // A load already in flight that still covers where the playhead is going
+      // answers the same question a fresh one would. Playback moves the anchor
+      // every frame, so a window superseded on anchor equality alone is
+      // superseded on every frame of its own flight: the fetch is thrown away
+      // and the wait restarts, which is how a gap grows instead of closing.
+      if (
+        refillLeadSeconds > 0 &&
+        comparableMediaTime >= inFlight.mediaTime &&
+        comparableMediaTime + refillLeadSeconds <=
+          inFlight.mediaTime + bufferAheadSeconds
+      ) {
+        return inFlight.promise;
+      }
     }
 
     const currentLoadId = loadId + 1;
@@ -191,6 +229,7 @@ export function createBufferedDetectionTimeline(
     inFlight = {
       endTime,
       id: currentLoadId,
+      mediaTime: comparableMediaTime,
       promise,
       sourceVersion,
       startTime,
@@ -223,8 +262,32 @@ export function createBufferedDetectionTimeline(
     );
   };
 
+  const getRemainingLead = (mediaTime: number) =>
+    state.bufferEndTime === null
+      ? null
+      : state.bufferEndTime - getComparableMediaTime(mediaTime);
+
+  /**
+   * Fetches the next window while the current one still answers, so the load
+   * lands behind annotations that never went away.
+   */
+  const refillRollingWindow = (mediaTime: number) => {
+    if (destroyed || refillLeadSeconds <= 0) {
+      return;
+    }
+
+    const remainingLead = getRemainingLead(mediaTime);
+
+    if (remainingLead === null || remainingLead > refillLeadSeconds) {
+      return;
+    }
+
+    void loadWindow(mediaTime).catch(() => undefined);
+  };
+
   const refreshBuffer = async (mediaTime: number) => {
     if (isBuffered(mediaTime)) {
+      refillRollingWindow(mediaTime);
       return;
     }
 
