@@ -194,7 +194,17 @@ export function TimelineView({
   ];
   const axisTicks = createAxisTicks(mediaDuration);
   const inputMax = mediaDuration ?? visualDuration;
-  const inputValue = clamp(displayedCurrentTime, 0, inputMax);
+  // The input carries opacity 0: it is the interaction and accessibility
+  // surface, never the visible playhead, which is drawn separately. Tracking
+  // playback to the frame therefore bought nothing and repainted the whole bar
+  // on every commit, so while the picture is moving the value is carried at
+  // one-second resolution, which is all a keyboard step or a screen reader
+  // needs. Scrubbing and paused positions stay exact.
+  const rawInputValue = clamp(displayedCurrentTime, 0, inputMax);
+  const inputValue =
+    playbackState === MediaRendererPlaybackState.Playing && scrubTime === null
+      ? Math.floor(rawInputValue)
+      : rawInputValue;
   const activeFrameLeft =
     activeDetectionFrameTime === null
       ? null
@@ -465,6 +475,8 @@ interface TimelinePlayheadClock {
 }
 
 const TIMELINE_PUBLISH_INTERVAL_MS = 100;
+/** Playhead step when the track has no measured width yet. */
+const PLAYHEAD_MIN_STEP_PERCENT = 0.05;
 
 /**
  * The player reports its time a few times a second, so the playhead is
@@ -498,6 +510,7 @@ function useTimelinePlayhead({
   });
   const publishedAtRef = useRef(Number.NEGATIVE_INFINITY);
   const writtenPositionRef = useRef<string | null>(null);
+  const trackWidthRef = useRef(0);
 
   const readPlayheadTime = () => {
     const clock = clockRef.current;
@@ -527,10 +540,21 @@ function useTimelinePlayhead({
       return;
     }
 
-    const position = toPercent(
-      readPlayheadTime(),
-      clockRef.current.visualDuration,
+    // Quantized to half a rendered pixel. A percentage carried to three
+    // decimals changes on every display refresh, and each write invalidates
+    // style for the whole bar, which was the entire main-thread paint load
+    // during playback. Half a pixel is below what the eye can resolve on a
+    // playhead moving twenty pixels a second.
+    const trackWidth = trackWidthRef.current;
+    const stepPercent =
+      trackWidth > 0 ? 50 / trackWidth : PLAYHEAD_MIN_STEP_PERCENT;
+    const ratio = clamp(
+      readPlayheadTime() / clockRef.current.visualDuration,
+      0,
+      1,
     );
+    const stepped = Math.round((ratio * 100) / stepPercent) * stepPercent;
+    const position = `${stepped.toFixed(3)}%`;
 
     if (position === writtenPositionRef.current) {
       return;
@@ -549,6 +573,9 @@ function useTimelinePlayhead({
 
   useLayoutEffect(() => {
     clockRef.current = { duration, isPlaying, scrubTime, visualDuration };
+    // Read here, where layout has already run. The tick that writes the
+    // playhead must never measure, or it forces a layout per frame.
+    trackWidthRef.current = playheadRef.current?.offsetWidth ?? 0;
     writePlayheadPosition();
   });
 
