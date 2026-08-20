@@ -1,4 +1,5 @@
 import {
+  DetectionMaskEncoding,
   KeypointMarkerShape,
   KeypointVisibility,
   resolveDetectionClassColorStyle,
@@ -7,6 +8,7 @@ import {
   type KeypointDrawInstruction,
 } from "supervision-js-core";
 import type { ReactNativeLiveSerializedDetection } from "../index";
+import type { ReactNativeLiveDetectionProducer } from "../types/live-producer";
 import type { ReactNativeVideoFrameHandle } from "../video-frame-source";
 
 /**
@@ -188,6 +190,111 @@ export function createExecutorchLiveSegmentationProcessor<TRunOnFrame>(
       return serialized;
     },
   };
+}
+
+/**
+ * Live segmentation producer: the vendor-neutral form of
+ * {@link createExecutorchLiveSegmentationProcessor}.
+ *
+ * Returns a `DetectionFrame` instead of the package's flat serialized shape,
+ * so nothing downstream needs to know ExecuTorch produced it. Every quirk is
+ * repaired here:
+ *
+ * - bboxes are un-rotated out of ExecuTorch's "portrait screen space" mapping
+ *   and converted to core's center-based `Rect`;
+ * - masks are published as `DenseBitmapDetectionMask` without an upright
+ *   copy, carrying `rotatedCw` so the fill loops keep sampling the buffer in
+ *   place;
+ * - class color is deliberately absent. Core detections carry no styling;
+ *   presentation resolves color from `className`.
+ */
+export function createExecutorchLiveSegmentationProducer<TRunOnFrame>(
+  options: ExecutorchLiveSegmentationProcessorOptions<TRunOnFrame>,
+): ReactNativeLiveDetectionProducer {
+  const runOnFrame =
+    options.runOnFrame as ExecutorchInstanceSegmentationRunner | null;
+  const confidenceThreshold = options.confidenceThreshold ?? 0.45;
+  const framePixelsAreUpright = options.framePixelsAreUpright ?? false;
+  const maxInstances = options.maxInstances ?? 6;
+  const mirrorFrame = options.mirrorFrame ?? false;
+  const returnMasksAtOriginalResolution =
+    options.returnMasksAtOriginalResolution ?? true;
+  const toUprightFrame = createExecutorchUprightFrame;
+  const getUprightFrameHeight = readExecutorchFrameHeight;
+  const unrotateBbox = unrotateExecutorchUpBbox;
+
+  return {
+    process(frame) {
+      "worklet";
+
+      const mediaTime = readExecutorchFrameTimestampSeconds(frame);
+
+      if (runOnFrame === null) {
+        return { detections: [], mediaTime };
+      }
+
+      const uprightFrameHeight = framePixelsAreUpright
+        ? getUprightFrameHeight(frame)
+        : null;
+      const rawDetections = runOnFrame(
+        framePixelsAreUpright
+          ? toUprightFrame(frame)
+          : (frame as Parameters<ExecutorchInstanceSegmentationRunner>[0]),
+        mirrorFrame,
+        {
+          confidenceThreshold,
+          maxInstances,
+          returnMaskAtOriginalResolution: returnMasksAtOriginalResolution,
+        },
+      );
+      const detections: Detection[] = [];
+
+      for (let index = 0; index < rawDetections.length; index += 1) {
+        const raw = rawDetections[index]!;
+        const bbox =
+          uprightFrameHeight === null
+            ? raw.bbox
+            : unrotateBbox(raw.bbox, uprightFrameHeight);
+        // ExecuTorch rotates mask output 90° clockwise for "up" frames, so the
+        // reported dims describe the rotated buffer and the logical dims swap.
+        const rotatedCw = uprightFrameHeight !== null;
+
+        detections[index] = {
+          className: typeof raw.label === "string" ? raw.label : "",
+          confidence: raw.score,
+          mask: {
+            data: raw.mask,
+            encoding: DetectionMaskEncoding.DenseBitmap,
+            height: rotatedCw ? raw.maskWidth : raw.maskHeight,
+            rotatedCw,
+            width: rotatedCw ? raw.maskHeight : raw.maskWidth,
+          },
+          rect: {
+            height: bbox.y2 - bbox.y1,
+            width: bbox.x2 - bbox.x1,
+            x: (bbox.x1 + bbox.x2) / 2,
+            y: (bbox.y1 + bbox.y2) / 2,
+          },
+        };
+      }
+
+      return { detections, mediaTime };
+    },
+  };
+}
+
+/**
+ * VisionCamera reports frame timestamps in nanoseconds; core detection frames
+ * are on a seconds media timeline.
+ */
+function readExecutorchFrameTimestampSeconds(frame: unknown): number {
+  "worklet";
+
+  const timestamp = (frame as { readonly timestamp?: unknown }).timestamp;
+
+  return typeof timestamp === "number" && Number.isFinite(timestamp)
+    ? timestamp / 1_000_000_000
+    : 0;
 }
 
 export interface ExecutorchLivePoseRunnerOptions {
