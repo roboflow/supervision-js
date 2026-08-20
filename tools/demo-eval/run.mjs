@@ -8,6 +8,7 @@ import { parseArgs } from "node:util";
 
 import { closeTarget, listTargets, openTarget } from "./cdp.mjs";
 import { layersDetail, runLayers } from "./scenarios-layers.mjs";
+import { runThrottle, throttleDetail } from "./scenarios-throttle.mjs";
 import {
   Invalid,
   openDemoPage,
@@ -17,7 +18,14 @@ import {
   runSync,
 } from "./scenarios.mjs";
 
-const SCENARIOS = ["paints", "sync", "latency", "layers", "battery"];
+const SCENARIOS = [
+  "paints",
+  "sync",
+  "latency",
+  "layers",
+  "throttle",
+  "battery",
+];
 const LABEL_WIDTH = 27;
 
 const { values } = parseArgs({
@@ -75,6 +83,7 @@ async function main() {
       sync: runSync,
       latency: runLatency,
       layers: runLayers,
+      throttle: runThrottle,
     };
     try {
       for (const name of demoScenarios) {
@@ -259,17 +268,22 @@ function detail(name, scenario) {
   if (name === "sync") {
     return [
       field("frame period", `${scenario.framePeriodMs}ms`),
+      field("settle budget", `${scenario.settleLimitMs}ms`),
       ...scenario.seeks.map((seek) =>
         field(
           `  seek ${seek.requested}s`,
           `landed ${seek.requestedToCurrentMs}ms, detection ` +
-            `${seek.currentToDetectionMs === null ? "none" : `${seek.currentToDetectionMs}ms`}`,
+            `${seek.currentToDetectionMs === null ? "none" : `${seek.currentToDetectionMs}ms`}` +
+            `, settle ${seek.settleMs}ms`,
         ),
       ),
     ];
   }
   if (name === "layers") {
     return layersDetail(scenario, field);
+  }
+  if (name === "throttle") {
+    return throttleDetail(scenario, field);
   }
   if (name === "latency") {
     return [

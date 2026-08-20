@@ -1314,8 +1314,11 @@ fieldset {
   min-width: 178px;
 }
 
+/* A new reading damages the layer it paints into, and with no boundary that
+ * layer is the root: four timecodes a second repaint the whole viewport. */
 .control-bar__timecode {
   align-items: baseline;
+  contain: layout paint;
   display: flex;
   gap: 5px;
   margin: 0;
@@ -1756,8 +1759,10 @@ fieldset {
   opacity: 1;
 }
 
+/* Paint containment keeps a new lane reading off the root layer. */
 .timeline-view__lane-head {
   align-items: baseline;
+  contain: layout paint;
   display: flex;
   gap: 6px;
   grid-column: gutter;
@@ -1886,10 +1891,19 @@ fieldset {
   width: 2px;
 }
 
+/* The wrapper spans the strip because a percentage transform resolves against
+ * the element's own width, and the 2px mark it carries moves with the frame
+ * on show. */
+.timeline-view__frame-mark {
+  inset: 0;
+  position: absolute;
+  transform: translateX(var(--timeline-left));
+}
+
 .timeline-view__marker--active-frame {
   background: var(--amber);
   bottom: 1px;
-  left: var(--timeline-left);
+  left: 0;
   top: 1px;
 }
 

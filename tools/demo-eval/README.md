@@ -30,15 +30,15 @@ npm run eval:demo
 
 Flags, all optional:
 
-| flag                 | default                                        |
-| -------------------- | ---------------------------------------------- |
-| `--chrome-debug-url` | `http://127.0.0.1:9223`                        |
-| `--url`              | `http://localhost:5173/`                       |
-| `--out`              | `tools/demo-eval/report.json`                  |
-| `--scenario`         | `all` (or `paints`/`sync`/`latency`/`battery`) |
-| `--storybook`        | `http://localhost:6006`                        |
-| `--battery`          | `http://127.0.0.1:8123/stress-battery.js`      |
-| `--attempts`         | `3` tries before a disturbed window is invalid |
+| flag                 | default                                                            |
+| -------------------- | ------------------------------------------------------------------ |
+| `--chrome-debug-url` | `http://127.0.0.1:9223`                                            |
+| `--url`              | `http://localhost:5173/`                                           |
+| `--out`              | `tools/demo-eval/report.json`                                      |
+| `--scenario`         | `all` (or `paints`/`sync`/`latency`/`layers`/`throttle`/`battery`) |
+| `--storybook`        | `http://localhost:6006`                                            |
+| `--battery`          | `http://127.0.0.1:8123/stress-battery.js`                          |
+| `--attempts`         | `3` tries before a disturbed window is invalid                     |
 
 Pass flags through npm with `--`, for example
 `npm run eval:demo -- --scenario paints`.
@@ -76,6 +76,30 @@ page, after an untimed warm-up pass so cold decode setup stays out of the
 numbers. Thresholds: seek p95 under 250ms, step p95 under 80ms. Stepping is the
 gesture a labeller repeats hundreds of times an hour, which is why its budget is
 the tight one.
+
+**throttle** is the slow-machine floor. It sets a 2x CPU slowdown through
+`Emulation.setCPUThrottlingRate`, plays six seconds from `t=5s`, and asserts
+three things a player has to hold to still be worth watching: the picture
+presents at least 90% of the source frame rate, at least 97% of sampled frames
+carry a detection, and no main-thread task runs past 200ms.
+
+Every floor comes from a sweep of 1x, 2x, 4x and 6x on an M3 Max against the 70s
+horse fixture. This page's own main thread measured 15% busy at 1x, 30% at 2x,
+54% at 4x and 82% at 6x. Through 2x the picture held 0.997 to 1.112 of the
+source rate with every sampled frame carrying a detection, and the longest
+main-thread task was 122ms; at 4x the rate fell to 0.803 and tasks reached
+179ms, at 6x 361ms. So 2x is the hardest slowdown the demo survives whole today
+and the rate the floor is asserted at. It is the knob to raise once the mask
+cook stops flooding the main thread; the gate is written so raising
+`THROTTLE_RATE` is the only edit.
+
+The report also carries the prepared window's depth and the cook backlog.
+Neither is asserted. On one unchanged build the window came out bimodal across
+sessions: some runs sat 150 to 211 frames ahead of the playhead, others spent
+their whole life at zero ahead with about 200 of the same 211 frames uncooked,
+at every throttle level including 1x. Until that splits into something a session
+can be judged on, a floor written against it would fail on which side of the coin
+the run landed.
 
 **battery** opens the FrameSampler story, injects the gesture stress harness and
 runs `battery(1)`: sixteen scripted scrub, fling, jitter and play-pause-spam

@@ -36,6 +36,11 @@ const DOM_PAINT_RATE_LIMIT = 15;
  * weaker machine does not have. */
 const STYLE_RECALC_RATE_LIMIT = 60;
 const DETECTION_SETTLE_MS = 8000;
+/* How long a seek may take to answer with a covered, genuinely new detection.
+ * Fifteen seeks across three runs settled in 100ms to 126ms, so a seek spending
+ * four times that is waiting on something, and one that never settles rides the
+ * DETECTION_SETTLE_MS deadline out and lands far above this. */
+const SEEK_SETTLE_LIMIT_MS = 500;
 const BATTERY_TIMEOUT_MS = 900_000;
 
 const SNAPSHOT = `(() => {
@@ -542,10 +547,16 @@ export async function runSync(session, info, attempts) {
           while (performance.now() - started < ${DETECTION_SETTLE_MS}) {
             state = renderer.getState();
             const buffer = state.detectionBuffer;
+            /* The buffer window keeps counting across laps while the playhead
+             * wraps at the clip end, so the two only compare after the
+             * playhead is carried into the lap the window is quoting. */
+            const lap =
+              Math.round((buffer.bufferStartTime - state.currentTime) / duration) *
+              duration;
             const covered =
               buffer.status === "ready" &&
-              buffer.bufferStartTime <= state.currentTime &&
-              state.currentTime <= buffer.bufferEndTime;
+              buffer.bufferStartTime <= state.currentTime + lap &&
+              state.currentTime + lap <= buffer.bufferEndTime;
             const fresh =
               state.activeDetectionFrameTime !== null &&
               state.activeDetectionFrameTime !== stale;
@@ -596,6 +607,12 @@ export async function runSync(session, info, attempts) {
           `detection, over the ${round(framePeriodMs, 1)}ms frame period`,
       );
     }
+    if (seek.settleMs >= SEEK_SETTLE_LIMIT_MS) {
+      failures.push(
+        `sync: ${seek.requested}s took ${seek.settleMs}ms to answer with a ` +
+          `covered, fresh detection, over the ${SEEK_SETTLE_LIMIT_MS}ms budget`,
+      );
+    }
     return { ...seek, requestedToCurrentMs, currentToDetectionMs };
   });
 
@@ -603,6 +620,7 @@ export async function runSync(session, info, attempts) {
     scenario: {
       frameRate: info.frameRate,
       framePeriodMs: round(framePeriodMs, 2),
+      settleLimitMs: SEEK_SETTLE_LIMIT_MS,
       seeks: rows,
     },
     failures,

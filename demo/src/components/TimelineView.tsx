@@ -84,7 +84,7 @@ export function TimelineView({
       getMaxRangeEnd(processingRanges),
       1,
     );
-  const { playheadRef, playheadTime, readPlayheadTime } = useTimelinePlayhead({
+  const { playheadRef, readPlayheadTime } = useTimelinePlayhead({
     currentTime,
     disabled,
     duration: mediaDuration,
@@ -92,7 +92,7 @@ export function TimelineView({
     scrubTime,
     visualDuration,
   });
-  const displayedCurrentTime = scrubTime ?? playheadTime;
+  const displayedCurrentTime = scrubTime ?? currentTime;
   const preparedWindowEndTime =
     preparedAheadSeconds === null
       ? null
@@ -395,11 +395,13 @@ export function TimelineView({
       >
         {activeFrameLeft !== null ? (
           <span
-            className="timeline-view__marker timeline-view__marker--active-frame"
+            className="timeline-view__frame-mark"
             style={
               { "--timeline-left": activeFrameLeft } as TimelineMarkerStyle
             }
-          />
+          >
+            <span className="timeline-view__marker timeline-view__marker--active-frame" />
+          </span>
         ) : null}
         <span className="timeline-view__hover-line" ref={hoverLineRef} />
       </div>
@@ -474,16 +476,14 @@ interface TimelinePlayheadClock {
   readonly visualDuration: number;
 }
 
-const TIMELINE_PUBLISH_INTERVAL_MS = 100;
 /** Playhead step when the track has no measured width yet. */
 const PLAYHEAD_MIN_STEP_PERCENT = 0.05;
 
 /**
  * The player reports its time a few times a second, so the playhead is
  * interpolated against the wall clock in between. That interpolation runs at
- * the display's refresh rate: its position goes straight to the element as a
- * composited transform, and React hears the time only as often as the range
- * input's value needs it.
+ * the display's refresh rate and its position goes straight to the element as
+ * a composited transform, so React never hears about it.
  */
 function useTimelinePlayhead({
   currentTime,
@@ -496,7 +496,6 @@ function useTimelinePlayhead({
   const isPlaying =
     !disabled && playbackState === MediaRendererPlaybackState.Playing;
   const isDocumentVisible = useDocumentVisible();
-  const [publishedTime, setPublishedTime] = useState(currentTime);
   const playheadRef = useRef<HTMLSpanElement>(null);
   const anchorRef = useRef<TimelineClockAnchor>({
     mediaTime: currentTime,
@@ -508,7 +507,6 @@ function useTimelinePlayhead({
     scrubTime,
     visualDuration,
   });
-  const publishedAtRef = useRef(Number.NEGATIVE_INFINITY);
   const writtenPositionRef = useRef<string | null>(null);
   const trackWidthRef = useRef(0);
 
@@ -587,18 +585,9 @@ function useTimelinePlayhead({
     let animationFrameHandle: number | undefined;
     const tick = () => {
       writePlayheadPosition();
-
-      const now = performance.now();
-
-      if (now - publishedAtRef.current >= TIMELINE_PUBLISH_INTERVAL_MS) {
-        publishedAtRef.current = now;
-        setPublishedTime(readPlayheadTime());
-      }
-
       animationFrameHandle = window.requestAnimationFrame(tick);
     };
 
-    publishedAtRef.current = Number.NEGATIVE_INFINITY;
     animationFrameHandle = window.requestAnimationFrame(tick);
 
     return () => {
@@ -608,11 +597,7 @@ function useTimelinePlayhead({
     };
   }, [isDocumentVisible, isPlaying]);
 
-  return {
-    playheadRef,
-    playheadTime: isPlaying ? publishedTime : currentTime,
-    readPlayheadTime,
-  };
+  return { playheadRef, readPlayheadTime };
 }
 
 function useDocumentVisible() {

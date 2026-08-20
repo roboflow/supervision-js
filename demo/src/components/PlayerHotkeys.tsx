@@ -178,6 +178,18 @@ export function PlayerHotkeys({
   return null;
 }
 
+/**
+ * Inputs that hold focus after a click without accepting text. A layer checkbox
+ * keeps focus once clicked, and treating it as a typing target retires every
+ * shortcut the hint bar still advertises.
+ */
+const NON_TYPING_INPUT_TYPES = new Set([
+  "button",
+  "checkbox",
+  "radio",
+  "range",
+]);
+
 function isTypingTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) {
     return false;
@@ -189,7 +201,8 @@ function isTypingTarget(target: EventTarget | null) {
 
   return (
     target instanceof HTMLSelectElement ||
-    (target instanceof HTMLInputElement && target.type !== "range")
+    (target instanceof HTMLInputElement &&
+      !NON_TYPING_INPUT_TYPES.has(target.type))
   );
 }
 
