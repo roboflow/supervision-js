@@ -8,7 +8,6 @@ export {
   type ReactNativeLiveInferenceExtensionOptions,
   type ReactNativeLiveInferenceInteractionRequest,
   type ReactNativeLiveInferenceInteractionResult,
-  type ReactNativeLiveInferenceMode,
   type ReactNativeLiveInferenceReadout,
   type UseReactNativeLiveInferenceOptions,
 } from "./use-live-inference";
