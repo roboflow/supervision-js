@@ -746,6 +746,27 @@ export function useReactNativeLiveInference(
   const reportRuntime = useLatestReporter(options.onRuleRuntime);
   const reportInteraction = useLatestReporter(options.onInteraction);
   const producer = options.producer;
+  // Swapping producers necessarily rebuilds `onFrame`, and VisionCamera has to
+  // re-serialize and install that callback on the camera thread. Until it
+  // lands, the camera keeps invoking the previous closure, which captured the
+  // previous producer — so a mode switch used to keep inferring with the old
+  // model for a moment.
+  //
+  // Each closure captures its own generation and compares it against the
+  // shared value, which React updates immediately. A superseded closure sees
+  // the mismatch and skips the frame instead of running a stale model.
+  const producerGenerationRef = useRef(0);
+  const producerGeneration = useMemo(() => {
+    producerGenerationRef.current += 1;
+    return producerGenerationRef.current;
+  }, [producer]);
+  const activeProducerGeneration =
+    useReactNativeSharedValue(producerGeneration);
+
+  useEffect(() => {
+    activeProducerGeneration.value = producerGeneration;
+  }, [activeProducerGeneration, producerGeneration]);
+
   const poseInstructionColor = resolveDetectionClassColorStyle("person").fill;
   // Capture initialized worklet functions before the callback is serialized.
   // Worklets' Babel transform does not preserve normal function hoisting.
@@ -765,6 +786,11 @@ export function useReactNativeLiveInference(
 
       try {
         if (!presentation.isReady) {
+          return false;
+        }
+
+        // A newer producer exists; this closure is on its way out.
+        if (activeProducerGeneration.value !== producerGeneration) {
           return false;
         }
 
@@ -946,8 +972,10 @@ export function useReactNativeLiveInference(
       mosaicCellPx,
       poseInstructionColor,
       presentation,
+      activeProducerGeneration,
       privacyContourWidth,
       producer,
+      producerGeneration,
       reportDetections,
       reportError,
       reportFrame,
