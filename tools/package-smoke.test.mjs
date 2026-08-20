@@ -209,6 +209,8 @@ const expectedReactNativeRuntimeExports = [
   "createReactNativePreparedFramePacket",
   "createReactNativeVideoFrameSource",
   "decodeCompressedRleMask",
+  "decodeDenseBitmapMask",
+  "decodeDetectionMask",
   "getReactNativeVideoFilePlatformAvailability",
   "isReactNativeLiveIdMaskNativeBuilderAvailable",
   "loadReactNativeLiveIdMaskNativeBuilder",

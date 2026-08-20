@@ -298,6 +298,7 @@ export {
   DetectionMaskEncoding,
   KeypointVisibility,
   type CompressedRleDetectionMask,
+  type DenseBitmapDetectionMask,
   type Detection,
   type DetectionCoordinateSpace,
   type DetectionFrame,

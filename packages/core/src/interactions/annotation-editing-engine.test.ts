@@ -11,6 +11,7 @@ import {
   getAnnotationHandles,
   KeypointVisibility,
   pickAnnotationHandle,
+  type Detection,
 } from "../index";
 
 describe("annotation editing engine", () => {
@@ -320,7 +321,7 @@ describe("annotation editing engine", () => {
   it("does not move a mask by changing only its ancillary bounds", () => {
     const onCommit = vi.fn();
     const engine = createAnnotationEditingEngine({ onCommit });
-    const detection = {
+    const detection: Detection = {
       id: "mask-1",
       mask: {
         counts: "04",

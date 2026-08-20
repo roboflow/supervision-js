@@ -5,7 +5,7 @@ import type {
   PolygonGeometry,
   Rect,
 } from "#types/detections";
-import { decodeCompressedRleMask } from "#utils/detection-frames";
+import { decodeDetectionMask } from "#utils/detection-frames";
 import {
   computeDetectionMaskRect,
   encodeBinaryMask,
@@ -139,7 +139,7 @@ export function convertDetectionMaskToPolygon(detection: Detection): Detection {
     return detection;
   }
 
-  const decoded = decodeCompressedRleMask(detection.mask);
+  const decoded = decodeDetectionMask(detection.mask);
   const contour = extractMaskContour(
     decoded.data,
     decoded.width,
@@ -203,7 +203,7 @@ export function mergeDetectionMasks(
     return null;
   }
 
-  const masks = detections.map(({ mask }) => decodeCompressedRleMask(mask!));
+  const masks = detections.map(({ mask }) => decodeDetectionMask(mask!));
   const width = masks[0]!.width;
   const height = masks[0]!.height;
 
