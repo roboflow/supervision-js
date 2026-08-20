@@ -225,6 +225,12 @@ function detail(name, scenario) {
         `${playing.domPaintRate}/s  (limit ${playing.domPaintRateLimit}/s)`,
       ),
       field(
+        "playing damage off picture",
+        `${playing.damage.largestOutsidePicture?.size ?? "none"}` +
+          ` ${playing.damage.largestOutsidePicture?.area ?? 0}px²` +
+          `  (limit ${playing.damageAreaLimit}px²)`,
+      ),
+      field(
         "playing present rate",
         `${playing.presentRate}/s via ${playing.presentRateSource}`,
       ),

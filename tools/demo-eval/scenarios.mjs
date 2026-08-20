@@ -50,6 +50,14 @@ const GEOMETRY = `(() => {
   const box = canvas ? canvas.getBoundingClientRect() : null;
   return {
     canvas: box ? { width: Math.round(box.width), height: Math.round(box.height) } : null,
+    canvasBox: box
+      ? {
+          x: Math.round(box.x),
+          y: Math.round(box.y),
+          width: Math.round(box.width),
+          height: Math.round(box.height),
+        }
+      : null,
     viewport: { width: window.innerWidth, height: window.innerHeight },
     devicePixelRatio: window.devicePixelRatio,
   };
@@ -248,6 +256,119 @@ const STARVATION_NOTE =
   "and no frames were presented. Another tab holding the hardware decoder " +
   "sessions produces exactly this signature; close it and re-run.";
 
+const DAMAGE_SHOT_COUNT = 3;
+const DAMAGE_SHOT_INTERVAL_MS = 900;
+/* The widest damage the transport legitimately produces is one timeline lane
+ * fill; the flood this guards against covers a stage. */
+const DAMAGE_AREA_LIMIT_FRACTION = 0.01;
+
+const GREEN_COMPONENTS = `(async (dataUrl) => {
+  const image = new Image();
+  image.src = dataUrl;
+  await image.decode();
+  const surface = new OffscreenCanvas(image.width, image.height);
+  const context = surface.getContext("2d", { willReadFrequently: true });
+  context.drawImage(image, 0, 0);
+  const { data, width, height } = context.getImageData(0, 0, image.width, image.height);
+  const isFlash = (index) => {
+    const r = data[index];
+    const g = data[index + 1];
+    const b = data[index + 2];
+    return g > 90 && g - r > 45 && g - b > 45;
+  };
+  const seen = new Uint8Array(width * height);
+  const boxes = [];
+  const stack = [];
+  for (let start = 0; start < width * height; start += 1) {
+    if (seen[start] || !isFlash(start * 4)) continue;
+    let minX = width;
+    let minY = height;
+    let maxX = 0;
+    let maxY = 0;
+    let pixels = 0;
+    stack.push(start);
+    seen[start] = 1;
+    while (stack.length > 0) {
+      const at = stack.pop();
+      const x = at % width;
+      const y = (at / width) | 0;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+      pixels += 1;
+      for (const next of [at - 1, at + 1, at - width, at + width]) {
+        if (next < 0 || next >= width * height) continue;
+        if (Math.abs((next % width) - x) > 1) continue;
+        if (seen[next] || !isFlash(next * 4)) continue;
+        seen[next] = 1;
+        stack.push(next);
+      }
+    }
+    if (pixels > 40) {
+      boxes.push({ x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 });
+    }
+  }
+  return boxes;
+})`;
+
+function overlapsCanvas(box, canvas) {
+  if (canvas === null) return false;
+  return (
+    box.x < canvas.x + canvas.width + RECT_TOLERANCE_PX &&
+    box.x + box.width > canvas.x - RECT_TOLERANCE_PX &&
+    box.y < canvas.y + canvas.height + RECT_TOLERANCE_PX &&
+    box.y + box.height > canvas.y - RECT_TOLERANCE_PX
+  );
+}
+
+/**
+ * Largest region the paint-rect overlay flashed away from the picture, while
+ * playing.
+ *
+ * A Paint event's `clip` is the cull rect of the paint chunk it belongs to, not
+ * the region that was invalidated, so every paint in the root scrolling layer
+ * reports the whole viewport however small the damage was. The overlay's rects
+ * are the only reading that answers how far a repaint actually spread.
+ */
+async function measurePaintDamage(session, geometry) {
+  await session.send("DOM.enable");
+  await session.send("Overlay.enable");
+  await session.send("Overlay.setShowPaintRects", { result: true });
+  const boxes = [];
+  try {
+    for (let shot = 0; shot < DAMAGE_SHOT_COUNT; shot += 1) {
+      await delay(DAMAGE_SHOT_INTERVAL_MS);
+      const { data } = await session.send("Page.captureScreenshot", {
+        format: "png",
+      });
+      const found = await session.readJson(
+        `${GREEN_COMPONENTS}("data:image/png;base64,${data}")`,
+      );
+      boxes.push(...found);
+    }
+  } finally {
+    await session.send("Overlay.setShowPaintRects", { result: false });
+  }
+
+  const canvas = geometry.canvasBox ?? null;
+  const outside = boxes.filter((box) => !overlapsCanvas(box, canvas));
+  outside.sort((a, b) => b.width * b.height - a.width * a.height);
+  const largest = outside[0] ?? null;
+  return {
+    shots: DAMAGE_SHOT_COUNT,
+    largestOutsidePicture: largest
+      ? {
+          size: `${largest.width}x${largest.height}`,
+          area: largest.width * largest.height,
+        }
+      : null,
+    outsidePictureBoxes: outside
+      .slice(0, 8)
+      .map((box) => `${box.width}x${box.height}@${box.x},${box.y}`),
+  };
+}
+
 export async function runPaints(session, info, attempts) {
   const geometry = await session.readJson(GEOMETRY);
   const windowSeconds = TRACE_WINDOW_MS / 1000;
@@ -268,6 +389,7 @@ export async function runPaints(session, info, attempts) {
       TRACE_WINDOW_MS,
     );
     const playingAfter = await session.readJson(SNAPSHOT);
+    const damage = await measurePaintDamage(session, geometry);
     await session.evaluate("window.__demoRenderer.pause(); 1");
 
     const playingMotion = advancement(
@@ -291,6 +413,7 @@ export async function runPaints(session, info, attempts) {
       playing: {
         ...buildPhase(playingEvents, playingBefore, playingAfter, geometry),
         ...playingMotion,
+        damage,
       },
     };
   };
@@ -318,6 +441,19 @@ export async function runPaints(session, info, attempts) {
         `(${DOM_PAINT_RATE_MULTIPLIER}x the ${phases.playing.presentRate}/s present rate)`,
     );
   }
+  const damageAreaLimit = Math.round(
+    geometry.viewport.width *
+      geometry.viewport.height *
+      DAMAGE_AREA_LIMIT_FRACTION,
+  );
+  const largestDamage = phases.playing.damage.largestOutsidePicture;
+  if (largestDamage !== null && largestDamage.area > damageAreaLimit) {
+    failures.push(
+      `paints: playing repainted ${largestDamage.size} (${largestDamage.area}px²) ` +
+        `away from the picture, over the ${damageAreaLimit}px² budget ` +
+        `(${phases.playing.damage.outsidePictureBoxes.join(", ")})`,
+    );
+  }
 
   return {
     scenario: {
@@ -330,6 +466,7 @@ export async function runPaints(session, info, attempts) {
         domPaintCount,
         domPaintRate,
         domPaintRateLimit,
+        damageAreaLimit,
       },
     },
     failures,
