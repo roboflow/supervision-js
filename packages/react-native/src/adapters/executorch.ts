@@ -468,26 +468,21 @@ export function createExecutorchVideoFrameSerializer<TRunOnFrame>(
  * Live pose producer: the vendor-neutral form of
  * {@link createExecutorchLivePoseProcessor}.
  *
- * Thin on purpose. The pose path already returned a `DetectionFrame`, so the
- * only thing missing was a named entry point under the shared contract,
- * symmetric with {@link createExecutorchLiveSegmentationProducer}. The live
- * hook currently repeats this runner call and frame conversion inline; this
- * is what lets that duplication move behind the adapter.
+ * Returns the processor itself rather than wrapping it, and that is load
+ * bearing. `react-native-live-rendering.md` records that a JSI runner hidden
+ * inside a second processor worklet can serialize successfully while the
+ * recursively captured HostFunction becomes non-callable in the isolated
+ * runtime. One worklet layer over the runner is the proven depth; adding a
+ * pass-through worklet here would make two.
+ *
+ * This works without adaptation because the pose path already returned a
+ * `DetectionFrame` — the shared contract only needed a named entry point,
+ * symmetric with {@link createExecutorchLiveSegmentationProducer}.
  */
 export function createExecutorchLivePoseProducer<TRunOnFrame>(
   options: ExecutorchLivePoseConfiguration<TRunOnFrame>,
 ): ReactNativeLiveDetectionProducer {
-  const processor = createExecutorchLivePoseProcessor(options);
-
-  return {
-    process(frame) {
-      "worklet";
-
-      return processor.process(
-        frame as Parameters<ExecutorchLivePoseProcessor["process"]>[0],
-      );
-    },
-  };
+  return createExecutorchLivePoseProcessor(options);
 }
 
 /**

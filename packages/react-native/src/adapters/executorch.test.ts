@@ -472,7 +472,7 @@ describe("createExecutorchLivePoseProducer", () => {
     ]),
   ) as ExecutorchCocoPose;
 
-  it("produces the same DetectionFrame the pose processor does", () => {
+  it("adds no worklet layer over the pose processor", () => {
     const runOnFrame = () => [pose];
     const processor = createExecutorchLivePoseProcessor({ runOnFrame });
     const producer: ReactNativeLiveDetectionProducer =
@@ -480,6 +480,11 @@ describe("createExecutorchLivePoseProducer", () => {
     const frame = { timestamp: 3_000_000_000 };
 
     expect(producer.process(frame)).toEqual(processor.process(frame));
+    // A JSI runner hidden inside a second processor worklet can serialize and
+    // still become non-callable on the isolated runtime, so the producer must
+    // stay the processor rather than wrap it. Node cannot observe worklet
+    // depth; comparing the source is the closest available signal.
+    expect(String(producer.process)).toBe(String(processor.process));
   });
 
   it("carries keypoint geometry on the shared producer contract", () => {
