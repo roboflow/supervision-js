@@ -245,6 +245,7 @@ function DemoApp() {
             processedRanges={processedRanges}
             processingRanges={processingRanges}
             renderPreparationDiagnostics={demo.renderPreparationDiagnostics}
+            sourceFrameRate={demo.sourceState?.estimatedFrameRate ?? null}
           />
         }
         renderControls={
@@ -259,6 +260,7 @@ function DemoApp() {
           <PerformanceStrip
             renderPreparationDiagnostics={demo.renderPreparationDiagnostics}
             rendererState={demo.rendererState}
+            sourceFrameRate={demo.sourceState?.estimatedFrameRate ?? null}
           />
         }
         presentationDiagnostics={

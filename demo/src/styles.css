@@ -1290,24 +1290,23 @@ fieldset {
   align-items: start;
   background: rgba(255, 255, 255, 0.94);
   border: 1px solid transparent;
-  border-radius: 14px;
+  border-radius: 6px;
   box-shadow:
-    0 0 0 1px rgba(76, 29, 149, 0.07),
-    0 1px 2px rgba(76, 29, 149, 0.06),
-    0 10px 26px rgba(76, 29, 149, 0.07);
-  column-gap: 14px;
+    0 0 0 1px rgba(76, 29, 149, 0.09),
+    0 1px 2px rgba(76, 29, 149, 0.06);
+  column-gap: 10px;
   display: grid;
   grid-template-columns: [transport] auto [timeline] minmax(280px, 1fr);
-  grid-template-rows: auto auto;
+  grid-template-rows: auto auto auto;
   min-width: 0;
-  padding: 8px;
-  row-gap: 6px;
+  padding: 6px;
+  row-gap: 4px;
 }
 
 .control-bar__transport {
   align-content: space-between;
   display: grid;
-  gap: 6px;
+  gap: 5px;
   grid-column: transport;
   grid-row: 1;
   justify-items: start;
@@ -1347,74 +1346,79 @@ fieldset {
   min-width: 58px;
 }
 
+/* One surface split by hairlines rather than four boxes with gaps between
+ * them, so the readings align into columns and read as one ledger. */
 .control-bar__ledger {
-  align-items: center;
-  contain: layout paint;
-  display: flex;
-  gap: 5px;
-  min-width: 0;
-}
-
-.control-bar__ledger .control-bar__cell {
   background: #fafafa;
   border: 1px solid var(--line);
-  border-radius: 6px;
-  gap: 5px;
-  padding: 3px 6px;
+  border-radius: 3px;
+  display: grid;
+  gap: 1px;
+  grid-column: 1 / -1;
+  grid-row: 2;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  min-width: 0;
+  overflow: hidden;
 }
 
-.control-bar__cell .readout__label {
-  font-size: 9px;
+.control-bar__cell {
+  --state-color: var(--muted);
+
+  align-items: baseline;
+  background: #fafafa;
+  box-shadow: 0 0 0 1px var(--line);
+  display: flex;
+  gap: 7px;
+  min-width: 0;
+  padding: 3px 8px;
+}
+
+/* The ledger's rows sit far enough apart to grow a target upward and down. */
+.control-bar__cell .diagnostic-label__name {
   letter-spacing: 0.05em;
+  margin: -7px -6px;
+  padding: 7px 6px;
   text-transform: uppercase;
 }
 
-.control-bar__cell .readout__value {
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
-}
-
-.control-bar__cell--detection .readout__value {
-  min-width: 52px;
-}
-
-.control-bar__state {
+.control-bar__cell-value {
   align-items: center;
-  background: #fafafa;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  color: var(--muted-strong);
-  display: inline-flex;
-  font-size: 10px;
+  color: var(--text);
+  contain: layout paint;
+  display: flex;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
   font-weight: 640;
-  gap: 5px;
-  line-height: 1.2;
-  min-width: 78px;
-  padding: 4px 7px;
+  gap: 4px;
+  line-height: 13px;
   white-space: nowrap;
 }
 
-.control-bar__state-dot {
+.control-bar__cell-dot {
   background: var(--state-color);
-  border-radius: 999px;
+  border-radius: 1px;
   flex: 0 0 auto;
-  height: 6px;
-  width: 6px;
+  height: 5px;
+  width: 5px;
 }
 
-.control-bar__state--live {
+.control-bar__cell--live {
   --state-color: var(--green);
 }
 
-.control-bar__state--waiting {
+.control-bar__cell--waiting {
   --state-color: var(--amber);
 }
 
-.control-bar__state--error {
+.control-bar__cell--error {
   --state-color: var(--danger);
 }
 
-.control-bar__state--idle {
+.control-bar__cell--idle {
   --state-color: var(--muted);
 }
 
@@ -1424,9 +1428,9 @@ fieldset {
   display: flex;
   flex-wrap: wrap;
   font-size: 10px;
-  gap: 3px 10px;
+  gap: 2px 8px;
   grid-column: 1 / -1;
-  grid-row: 2;
+  grid-row: 3;
   justify-content: end;
   line-height: 12px;
   margin: 0;
@@ -1441,8 +1445,8 @@ fieldset {
 .control-bar__hints kbd {
   background: #fafafa;
   border: 1px solid var(--line);
-  border-radius: 4px;
-  box-shadow: 0 1px 0 rgba(76, 29, 149, 0.06);
+  border-radius: 2px;
+  box-shadow: none;
   color: var(--muted-strong);
   font-family: var(--font-sans);
   font-size: 9px;
@@ -1454,36 +1458,32 @@ fieldset {
 .transport {
   align-items: center;
   display: inline-flex;
-  gap: 8px;
+  gap: 4px;
 }
 
 .transport__play {
   align-items: center;
   background: var(--violet);
   border: 1px solid var(--violet);
-  border-radius: 999px;
-  box-shadow:
-    0 1px 1px rgba(76, 29, 149, 0.18),
-    0 6px 14px rgba(124, 58, 237, 0.24);
+  border-radius: 4px;
+  box-shadow: 0 1px 1px rgba(76, 29, 149, 0.18);
   color: #ffffff;
   cursor: pointer;
   display: inline-flex;
-  height: 38px;
+  height: 30px;
   justify-content: center;
   padding: 0;
   position: relative;
   transition-duration: 140ms;
   transition-property: background-color, border-color, box-shadow, scale;
   transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
-  width: 38px;
+  width: 34px;
 }
 
 .transport__play:hover:not(:disabled) {
   background: #6d28d9;
   border-color: #6d28d9;
-  box-shadow:
-    0 1px 1px rgba(76, 29, 149, 0.2),
-    0 10px 20px rgba(109, 40, 217, 0.3);
+  box-shadow: 0 1px 1px rgba(76, 29, 149, 0.2);
 }
 
 .transport__play:active:not(:disabled),
@@ -1524,7 +1524,7 @@ fieldset {
   width: 16px;
 }
 
-/* A triangle centred on its bounding box reads left of centre inside a circle. */
+/* A triangle centred on its bounding box reads left of centre. */
 .transport__glyph--play {
   translate: 1px 0;
 }
@@ -1540,7 +1540,7 @@ fieldset {
  * the pointer already is. */
 .transport__ring {
   border: 2px solid transparent;
-  border-radius: 999px;
+  border-radius: 5px;
   border-top-color: rgba(124, 58, 237, 0.85);
   inset: -4px;
   opacity: 0;
@@ -1564,7 +1564,7 @@ fieldset {
   align-items: center;
   background: #ffffff;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: 3px;
   color: var(--muted-strong);
   cursor: pointer;
   display: inline-flex;
@@ -1572,9 +1572,9 @@ fieldset {
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   font-weight: 650;
-  height: 30px;
+  height: 26px;
   justify-content: center;
-  min-width: 34px;
+  min-width: 30px;
   padding: 0;
   position: relative;
   transition-duration: 140ms;
@@ -1582,10 +1582,10 @@ fieldset {
   transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
 }
 
-/* The pill reads at 30px; the pointer target stays 40px square. */
+/* The button reads at 26px; the pointer target stays 40px square. */
 .transport__step::after {
   content: "";
-  inset: -5px -3px;
+  inset: -7px -5px;
   position: absolute;
 }
 
@@ -1593,7 +1593,7 @@ fieldset {
  * pill's text without moving the buttons beside it. */
 .transport__speed {
   gap: 4px;
-  min-width: 56px;
+  min-width: 52px;
 }
 
 .transport__speed-value {
@@ -1605,10 +1605,10 @@ fieldset {
  * neither grows nor recentres when the answer changes. */
 .transport__speed-dot {
   background: var(--muted);
-  border-radius: 999px;
+  border-radius: 1px;
   flex: 0 0 auto;
-  height: 6px;
-  width: 6px;
+  height: 5px;
+  width: 5px;
 }
 
 .transport__speed[data-sustained="false"] {
@@ -1638,8 +1638,7 @@ fieldset {
 .render-control input:focus-visible,
 .render-controls__tabs button:focus-visible,
 .class-color-control input:focus-visible,
-.timeline-view__strip:focus-visible,
-.timeline-view__input:focus-visible {
+.render-controls__tabs button:focus-visible {
   outline: 2px solid var(--violet);
   outline-offset: 2px;
 }
@@ -1648,22 +1647,24 @@ fieldset {
  * lane measure the same media time at the same x. */
 .timeline-view {
   align-items: center;
-  column-gap: 8px;
+  column-gap: 6px;
   display: grid;
   grid-column: timeline;
   grid-row: 1;
   grid-template-columns:
-    [gutter] 168px
+    [gutter] 176px
     [track] minmax(0, 1fr)
     [track-end];
-  grid-template-rows: 12px 18px repeat(5, 8px);
+  grid-template-rows: 12px 16px repeat(5, 9px);
   min-width: 0;
-  row-gap: 3px;
+  row-gap: 2px;
 }
 
-.timeline-view:focus-within .timeline-view__strip {
-  outline: 2px solid var(--violet);
-  outline-offset: 3px;
+/* The scrub input is invisible and spans the full width, so a focus ring on it
+ * framed the whole panel instead of pointing at anything. Its keys move the
+ * playhead, and the playhead moving is the feedback. */
+.timeline-view__input:focus-visible {
+  outline: none;
 }
 
 /* Groups the diagnostics lanes into one surface so they read as secondary to
@@ -1671,11 +1672,11 @@ fieldset {
 .timeline-view__cluster {
   align-self: stretch;
   background: #fbfaff;
-  border-radius: 6px;
-  box-shadow: inset 0 0 0 1px rgba(76, 29, 149, 0.05);
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px rgba(76, 29, 149, 0.07);
   grid-column: gutter / track-end;
   grid-row: 3 / -1;
-  margin: -4px -6px;
+  margin: -3px -4px;
   pointer-events: none;
 }
 
@@ -1716,7 +1717,7 @@ fieldset {
 .timeline-view__hover {
   align-self: center;
   background: var(--text);
-  border-radius: 5px;
+  border-radius: 2px;
   color: #ffffff;
   font-family: var(--font-mono);
   font-size: 10px;
@@ -1759,10 +1760,82 @@ fieldset {
   opacity: 1;
 }
 
-/* Paint containment keeps a new lane reading off the root layer. */
+/* A reading's name carries its own explanation. The name stays small for
+ * density, so the hit area is grown back past the text, sideways only: the
+ * lanes are stacked eleven pixels apart, and a target grown vertically covers
+ * its neighbour's row and answers a hover meant for the lane above. */
+.diagnostic-label {
+  display: inline-flex;
+  min-width: 0;
+  position: relative;
+}
+
+.diagnostic-label__name {
+  align-items: center;
+  background: none;
+  border: 0;
+  color: var(--muted);
+  cursor: help;
+  display: inline-flex;
+  font-family: inherit;
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  line-height: 11px;
+  margin: 0 -6px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 6px;
+  text-align: left;
+  text-overflow: ellipsis;
+  transition: color 120ms cubic-bezier(0.2, 0, 0, 1);
+  white-space: nowrap;
+}
+
+.diagnostic-label__name:hover,
+.diagnostic-label__name:focus-visible {
+  color: var(--text);
+  outline: none;
+}
+
+.diagnostic-label__tip {
+  background: var(--text);
+  border-radius: 4px;
+  bottom: 100%;
+  color: #ffffff;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 1.35;
+  margin-bottom: 8px;
+  opacity: 0;
+  padding: 7px 9px;
+  pointer-events: none;
+  position: absolute;
+  text-align: left;
+  text-transform: none;
+  text-wrap: pretty;
+  transition: opacity 120ms cubic-bezier(0.2, 0, 0, 1);
+  width: 268px;
+  z-index: 6;
+}
+
+.diagnostic-label__tip--start {
+  left: 0;
+}
+
+.diagnostic-label__tip--end {
+  right: 0;
+}
+
+.diagnostic-label:hover .diagnostic-label__tip,
+.diagnostic-label:focus-within .diagnostic-label__tip {
+  opacity: 1;
+}
+
 .timeline-view__lane-head {
-  align-items: baseline;
-  contain: layout paint;
+  align-items: center;
   display: flex;
   gap: 6px;
   grid-column: gutter;
@@ -1771,28 +1844,21 @@ fieldset {
   min-width: 0;
 }
 
-.timeline-view__lane-label {
-  color: var(--muted);
-  flex: 0 0 auto;
-  font-size: 9px;
-  font-weight: 650;
-  line-height: 11px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 /* A lane's extent is rewritten several times a second while its window fills,
  * so its digits hold a fixed advance and its box takes the rest of the gutter:
  * a new reading repaints the text without relaying out the row. */
+/* Paint containment sits here rather than on the row, because this is the only
+ * part that is rewritten several times a second, and a contained row would clip
+ * its label's tooltip. */
 .timeline-view__lane-value {
   color: var(--muted-strong);
+  contain: layout paint;
   flex: 1 1 auto;
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: 10px;
   font-variant-numeric: tabular-nums;
   font-weight: 620;
-  line-height: 11px;
+  line-height: 12px;
   min-width: 0;
   overflow: hidden;
   text-align: right;
@@ -1802,22 +1868,29 @@ fieldset {
 
 .timeline-view__lane {
   background: rgba(124, 58, 237, 0.1);
-  border-radius: 999px;
+  border-radius: 2px;
   contain: layout paint;
   grid-column: track;
   grid-row: var(--timeline-row);
-  height: 8px;
+  height: 9px;
   overflow: hidden;
   position: relative;
 }
 
 .timeline-view__segment {
-  border-radius: 999px;
+  border-radius: 1px;
   bottom: 0;
   left: var(--timeline-left);
   position: absolute;
   top: 0;
   width: var(--timeline-width);
+}
+
+/* The reach the cook is aiming for, drawn hollow under the solid run it has
+ * actually finished. */
+.timeline-view__segment--target {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px rgba(21, 128, 61, 0.55);
 }
 
 .timeline-view__segment--buffer {
@@ -1850,12 +1923,12 @@ fieldset {
 .timeline-view__strip {
   background: #f4f2fb;
   border: 1px solid rgba(196, 181, 253, 0.6);
-  border-radius: 999px;
+  border-radius: 3px;
   box-shadow: inset 0 1px 2px rgba(76, 29, 149, 0.08);
   contain: layout paint;
   grid-column: track;
   grid-row: 2;
-  height: 18px;
+  height: 16px;
   overflow: hidden;
   position: relative;
   touch-action: none;
@@ -1917,15 +1990,15 @@ fieldset {
 
 .timeline-view__knob {
   background: var(--violet);
-  border: 2px solid #ffffff;
-  border-radius: 999px;
-  box-shadow: 0 1px 3px rgba(76, 29, 149, 0.35);
-  height: 14px;
+  border: 1px solid #ffffff;
+  border-radius: 2px;
+  box-shadow: 0 1px 2px rgba(76, 29, 149, 0.35);
+  height: 16px;
   left: 0;
   position: absolute;
-  top: 9px;
+  top: 8px;
   transform: translate(-50%, -50%);
-  width: 14px;
+  width: 8px;
 }
 
 .timeline-view__input {
@@ -1962,13 +2035,19 @@ fieldset {
   .timeline-view {
     column-gap: 6px;
     grid-template-columns:
-      [gutter] 118px
+      [gutter] 150px
       [track] minmax(0, 1fr)
       [track-end];
   }
 
+  /* Two wide readings rather than four clipped ones: a label cut to "H" names
+   * nothing. */
+  .control-bar__ledger {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .timeline-view__lane-value {
-    font-size: 8px;
+    font-size: 9px;
   }
 }
 
@@ -1985,11 +2064,14 @@ fieldset {
     align-items: center;
     column-gap: 10px;
     grid-column: 1 / -1;
-    grid-template-columns: auto auto minmax(0, 1fr);
+    grid-template-columns: auto minmax(0, 1fr);
   }
 
+  /* Four columns of readings do not survive this width; two rows of two keep
+   * every reading rather than dropping half of them. */
   .control-bar__ledger {
-    justify-content: end;
+    grid-row: 3;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .timeline-view {
@@ -1998,7 +2080,10 @@ fieldset {
     row-gap: 2px;
   }
 
-  .timeline-view__lane-label,
+  .control-bar__hints {
+    grid-row: 4;
+  }
+
   .timeline-view__lane-value {
     line-height: 10px;
   }

@@ -4,10 +4,15 @@ import {
   type DetectionBufferState,
   type RenderPreparationDiagnostics,
 } from "supervision";
-import { formatExactTime, formatTime } from "../format";
+import { formatExactTime, formatInteger, formatTime } from "../format";
 import { selectPreparedWindowArtifact } from "../render-preparation";
+import {
+  formatPlaybackRate,
+  isPlaybackRateSustained,
+} from "../session/playback-rate";
 import type { TimelineRange } from "../session/demo-session-types";
-import { Readout } from "./Readout";
+import { DiagnosticLabel } from "./DiagnosticLabel";
+import { readPreparedWindow } from "./prepared-window";
 import { TimelineView } from "./TimelineView";
 import { Transport } from "./Transport";
 
@@ -16,9 +21,13 @@ interface PlaybackStatePresentation {
   readonly tone: "error" | "idle" | "live" | "waiting";
 }
 
-const PLAYBACK_STATES: Record<
-  MediaRendererPlaybackState,
-  PlaybackStatePresentation
+/**
+ * The states the transport publishes that the play button cannot draw. Playing
+ * and paused are absent on purpose: the button is already showing them, so the
+ * chip spends its space on the rate the picture is actually keeping instead.
+ */
+const NAMED_PLAYBACK_STATES: Partial<
+  Record<MediaRendererPlaybackState, PlaybackStatePresentation>
 > = {
   [MediaRendererPlaybackState.Buffering]: {
     label: "Buffering",
@@ -27,18 +36,14 @@ const PLAYBACK_STATES: Record<
   [MediaRendererPlaybackState.Destroyed]: { label: "Destroyed", tone: "error" },
   [MediaRendererPlaybackState.Error]: { label: "Error", tone: "error" },
   [MediaRendererPlaybackState.Loading]: { label: "Loading", tone: "waiting" },
-  [MediaRendererPlaybackState.Paused]: { label: "Paused", tone: "idle" },
-  [MediaRendererPlaybackState.Playing]: { label: "Playing", tone: "live" },
   [MediaRendererPlaybackState.Ready]: { label: "Ready", tone: "idle" },
 };
 
-const UNKNOWN_PLAYBACK_STATE: PlaybackStatePresentation = {
-  label: "Unknown",
-  tone: "idle",
-};
+const STATE_TOOLTIP =
+  "What the transport is doing, and while it plays, the rate the picture is really keeping against the rate you asked for. Amber means the source cannot decode that fast and the picture is running slower than the speed shown.";
 
-/** Used to read "the playhead is on the last frame" until the prepared window
- *  reports the media's real frame pitch. */
+/** Used to read "the playhead is on the last frame" until the source reports
+ *  its own frame rate. */
 const FALLBACK_FRAME_PITCH_SECONDS = 1 / 60;
 
 export const ControlBar = memo(function ControlBar({
@@ -58,6 +63,7 @@ export const ControlBar = memo(function ControlBar({
   processedRanges,
   processingRanges,
   renderPreparationDiagnostics,
+  sourceFrameRate,
 }: {
   readonly activeDetectionFrameTime: number | null;
   readonly canUseRenderer: boolean;
@@ -75,18 +81,12 @@ export const ControlBar = memo(function ControlBar({
   readonly processedRanges: readonly TimelineRange[];
   readonly processingRanges: readonly TimelineRange[];
   readonly renderPreparationDiagnostics: RenderPreparationDiagnostics | null;
+  readonly sourceFrameRate: number | null;
 }) {
-  const preparedWindowArtifact = selectPreparedWindowArtifact(
-    renderPreparationDiagnostics,
+  const preparedWindow = readPreparedWindow(
+    selectPreparedWindowArtifact(renderPreparationDiagnostics),
+    sourceFrameRate,
   );
-  const preparedAheadSeconds =
-    preparedWindowArtifact?.preparedAheadSeconds ?? null;
-  const preparedAheadFrames =
-    preparedWindowArtifact?.preparedAheadFrameCount ?? null;
-  const playbackStatePresentation =
-    playbackState === null
-      ? UNKNOWN_PLAYBACK_STATE
-      : PLAYBACK_STATES[playbackState];
   const isBuffering = playbackState === MediaRendererPlaybackState.Buffering;
   const isPlaying = playbackState === MediaRendererPlaybackState.Playing;
   const atClipEnd =
@@ -96,7 +96,14 @@ export const ControlBar = memo(function ControlBar({
     duration !== null &&
     duration > 0 &&
     duration - currentTime <=
-      resolveFramePitchSeconds(preparedAheadSeconds, preparedAheadFrames);
+      (preparedWindow?.framePitchSeconds ?? FALLBACK_FRAME_PITCH_SECONDS);
+  const statePresentation = resolveStatePresentation({
+    atClipEnd,
+    isPlaying,
+    playbackRate,
+    playbackState,
+    presentedRate,
+  });
 
   return (
     <section className="control-bar" aria-label="Playback controls">
@@ -120,19 +127,29 @@ export const ControlBar = memo(function ControlBar({
             / {formatTime(duration)}
           </span>
         </p>
-        <div className="control-bar__ledger">
-          <span
-            className={`control-bar__state control-bar__state--${playbackStatePresentation.tone}`}
-          >
-            <span className="control-bar__state-dot" aria-hidden="true" />
-            {playbackStatePresentation.label}
-          </span>
-          <Readout
-            className="control-bar__cell control-bar__cell--detection"
-            label="Detection"
-            value={formatExactTime(activeDetectionFrameTime)}
-          />
-        </div>
+      </div>
+      <div className="control-bar__ledger">
+        <LedgerCell
+          label="State"
+          tone={statePresentation.tone}
+          tooltip={STATE_TOOLTIP}
+          value={statePresentation.label}
+        />
+        <LedgerCell
+          label="Detection"
+          tooltip="The media time of the prediction frame currently on screen. It lags the playhead by up to one frame, and a gap wider than that means the drawn boxes belong to an older frame than the picture."
+          value={formatExactTime(activeDetectionFrameTime)}
+        />
+        <LedgerCell
+          label="Hot buffer"
+          tooltip="Prediction frames held in memory around the playhead, and the boxes and masks they carry between them. This is what the hot predictions lane spans."
+          value={formatBuffer(detectionBuffer)}
+        />
+        <LedgerCell
+          label="Cook"
+          tooltip="Mask rasterising right now: workers busy out of workers available, then frames queued behind them. Queued frames climbing while the prepared run shrinks is the picture outrunning the cook."
+          value={formatCook(renderPreparationDiagnostics)}
+        />
       </div>
       <TimelineView
         activeDetectionFrameTime={activeDetectionFrameTime}
@@ -143,49 +160,149 @@ export const ControlBar = memo(function ControlBar({
         onScrub={onScrub}
         onSeek={onSeek}
         playbackState={playbackState}
+        preparedWindow={preparedWindow}
         processedRanges={processedRanges}
         processingRanges={processingRanges}
-        preparedAheadFrames={preparedAheadFrames}
-        preparedAheadSeconds={preparedAheadSeconds}
       />
       <p className="control-bar__hints">
         <span>
           <kbd>Space</kbd> play
         </span>
         <span>
+          <kbd>,</kbd>
+          <kbd>.</kbd> frame
+        </span>
+        <span>
           <kbd>←</kbd>
-          <kbd>→</kbd> frame
+          <kbd>→</kbd> 1s
         </span>
         <span>
           <kbd>⇧←</kbd>
-          <kbd>⇧→</kbd> 1s
+          <kbd>⇧→</kbd> 10s
         </span>
         <span>
-          <kbd>Home</kbd>
-          <kbd>End</kbd> clip ends
+          <kbd>&lt;</kbd>
+          <kbd>&gt;</kbd> speed
         </span>
         <span>
           <kbd>J</kbd>
           <kbd>K</kbd>
-          <kbd>L</kbd> speed
+          <kbd>L</kbd> shuttle
+        </span>
+        <span>
+          <kbd>Home</kbd>
+          <kbd>End</kbd> clip ends
         </span>
       </p>
     </section>
   );
 });
 
-function resolveFramePitchSeconds(
-  preparedAheadSeconds: number | null,
-  preparedAheadFrames: number | null,
-) {
-  if (
-    preparedAheadSeconds === null ||
-    preparedAheadFrames === null ||
-    preparedAheadFrames <= 0 ||
-    preparedAheadSeconds <= 0
-  ) {
-    return FALLBACK_FRAME_PITCH_SECONDS;
+function LedgerCell({
+  label,
+  tone = "idle",
+  tooltip,
+  value,
+}: {
+  readonly label: string;
+  readonly tone?: PlaybackStatePresentation["tone"];
+  readonly tooltip: string;
+  readonly value: string;
+}) {
+  return (
+    <span className={`control-bar__cell control-bar__cell--${tone}`}>
+      <DiagnosticLabel label={label} tooltip={tooltip} />
+      <span className="control-bar__cell-value">
+        <span className="control-bar__cell-dot" aria-hidden="true" />
+        {value}
+      </span>
+    </span>
+  );
+}
+
+/**
+ * A state worth naming takes the chip; otherwise it carries the one fact the
+ * play button cannot, which is whether the picture is really running at the
+ * speed it was asked for.
+ */
+function resolveStatePresentation({
+  atClipEnd,
+  isPlaying,
+  playbackRate,
+  playbackState,
+  presentedRate,
+}: {
+  readonly atClipEnd: boolean;
+  readonly isPlaying: boolean;
+  readonly playbackRate: number;
+  readonly playbackState: MediaRendererPlaybackState | null;
+  readonly presentedRate: number | null;
+}): PlaybackStatePresentation {
+  if (playbackState === null) {
+    return { label: "No renderer", tone: "idle" };
   }
 
-  return preparedAheadSeconds / preparedAheadFrames;
+  const named = NAMED_PLAYBACK_STATES[playbackState];
+
+  if (named) {
+    return named;
+  }
+
+  if (atClipEnd) {
+    return { label: "Ended", tone: "idle" };
+  }
+
+  if (
+    presentedRate !== null &&
+    !isPlaybackRateSustained(playbackRate, presentedRate)
+  ) {
+    return {
+      label: `${formatRate(presentedRate)} of ${formatRate(playbackRate)}`,
+      tone: "waiting",
+    };
+  }
+
+  if (!isPlaying) {
+    return { label: "Paused", tone: "idle" };
+  }
+
+  /* Nothing measured yet is not a verdict. The rate that was asked for is still
+   * worth naming, but without the word that would claim it is being kept. */
+  if (presentedRate === null) {
+    return { label: `${formatPlaybackRate(playbackRate)} asked`, tone: "idle" };
+  }
+
+  /* A kept rate is named rather than measured, so the chip states a verdict
+   * that holds instead of a figure that rewrites itself several times a
+   * second. */
+  return {
+    label: `${formatPlaybackRate(playbackRate)} sustained`,
+    tone: "live",
+  };
+}
+
+function formatRate(rate: number | null) {
+  return rate === null ? "?" : `${rate.toFixed(1)}x`;
+}
+
+function formatBuffer(detectionBuffer: DetectionBufferState | null) {
+  if (detectionBuffer === null) {
+    return "-";
+  }
+
+  return `${formatInteger(detectionBuffer.frameCount)}f · ${formatInteger(
+    detectionBuffer.detectionCount,
+  )}d`;
+}
+
+function formatCook(diagnostics: RenderPreparationDiagnostics | null) {
+  const artifact = selectPreparedWindowArtifact(diagnostics);
+
+  if (artifact === null) {
+    return "-";
+  }
+
+  return `${formatInteger(artifact.inFlightCount ?? 0)}/${formatInteger(
+    artifact.maxInFlightCount ?? 0,
+  )} · ${formatInteger(artifact.pendingCount)}q`;
 }

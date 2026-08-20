@@ -1,10 +1,12 @@
 import { useEffect, useRef } from "react";
 import {
   resolveShuttleCommand,
+  stepPlaybackRate,
   type ShuttleCommand,
 } from "../session/playback-rate";
 
-const NUDGE_SECONDS = 1;
+const SKIP_SECONDS = 1;
+const LONG_SKIP_SECONDS = 10;
 
 interface PlayerHotkeyBindings {
   readonly currentTime: number | null;
@@ -22,8 +24,10 @@ interface PlayerHotkeyBindings {
 /**
  * A player's keys have to answer while the pointer is somewhere else, so they
  * listen on the window rather than on a focused control. Typing surfaces keep
- * their keys, and the timeline's own range input keeps the arrows, Home, and
- * End the browser already gives it.
+ * their keys.
+ *
+ * Frame stepping and speed sit on the physical comma and period keys, read
+ * through `code` so a layout that prints something else there still steps.
  */
 export function PlayerHotkeys({
   currentTime,
@@ -80,14 +84,21 @@ export function PlayerHotkeys({
 
       seek(Math.min(Math.max(time, 0), mediaDuration));
     };
-    const nudge = (direction: 1 | -1) => {
+    const skip = (direction: 1 | -1, seconds: number) => {
       const { currentTime: time } = bindingsRef.current;
 
       if (time === null) {
         return;
       }
 
-      seekTo(time + direction * NUDGE_SECONDS);
+      seekTo(time + direction * seconds);
+    };
+    const stepRate = (direction: 1 | -1) => {
+      const bindings = bindingsRef.current;
+
+      bindings.onSetPlaybackRate(
+        stepPlaybackRate(bindings.playbackRate, direction),
+      );
     };
     const shuttle = (command: ShuttleCommand) => {
       const bindings = bindingsRef.current;
@@ -134,26 +145,28 @@ export function PlayerHotkeys({
         return;
       }
 
-      if (isRangeTarget(event.target)) {
+      const stepDirection = FRAME_STEP_DIRECTIONS[event.code];
+
+      if (stepDirection !== undefined) {
+        event.preventDefault();
+        if (!event.shiftKey) {
+          bindingsRef.current.onStepFrame(stepDirection);
+        } else if (!event.repeat) {
+          stepRate(stepDirection);
+        }
         return;
       }
+
+      const skipSeconds = event.shiftKey ? LONG_SKIP_SECONDS : SKIP_SECONDS;
 
       switch (event.key) {
         case "ArrowLeft":
           event.preventDefault();
-          if (event.shiftKey) {
-            nudge(-1);
-          } else {
-            bindingsRef.current.onStepFrame(-1);
-          }
+          skip(-1, skipSeconds);
           return;
         case "ArrowRight":
           event.preventDefault();
-          if (event.shiftKey) {
-            nudge(1);
-          } else {
-            bindingsRef.current.onStepFrame(1);
-          }
+          skip(1, skipSeconds);
           return;
         case "End":
           event.preventDefault();
@@ -206,6 +219,7 @@ function isTypingTarget(target: EventTarget | null) {
   );
 }
 
-function isRangeTarget(target: EventTarget | null) {
-  return target instanceof HTMLInputElement && target.type === "range";
-}
+const FRAME_STEP_DIRECTIONS: Record<string, 1 | -1 | undefined> = {
+  Comma: -1,
+  Period: 1,
+};

@@ -96,6 +96,35 @@ describe("geometry showcase fixture", () => {
     });
   });
 
+  it("throttles the dense basketball sample the way its siblings are throttled", () => {
+    const fixture = demoFixtures.find(
+      ({ sampleName }) => sampleName === "basketball_sam3",
+    );
+
+    expect(fixture?.presentationDefaults).toEqual({
+      boxesEnabled: false,
+      confidenceThreshold: 0.5,
+      keypointsEnabled: false,
+      polygonsEnabled: false,
+      polylinesEnabled: false,
+    });
+    expect(fixture?.presentationAvailability).toEqual({
+      keypointsEnabled: false,
+      polygonsEnabled: false,
+      polylinesEnabled: false,
+    });
+  });
+
+  it("curates presentation defaults for every sample the picker offers", () => {
+    expect(
+      demoFixtures
+        .filter(
+          ({ presentationDefaults }) => presentationDefaults === undefined,
+        )
+        .map(({ sampleName }) => sampleName),
+    ).toEqual([]);
+  });
+
   it("publishes per-geometry detection counts in its manifest", () => {
     const geometry = geometryManifest.geometry as Record<string, number>;
 
@@ -350,8 +379,13 @@ describe("fixture playback media", () => {
     ).toBe("/source.mov");
   });
 
-  it("gives every committed v1 fixture the proxy its detections were computed on", () => {
-    for (const fixture of demoFixtures) {
+  it("declares a proxy on exactly the fixtures whose detections were computed on one", () => {
+    // Playback and detection pairing read different files to decide the same
+    // thing: playback prefers meta.media.proxyFile, pairing switches on
+    // manifest.video.firstTimestamp. A fixture carrying both plays a 30fps
+    // transcode while pairing detections by native-fps intervals, drawing every
+    // annotation on the wrong frame.
+    const mismatched = demoFixtures.filter((fixture) => {
       const meta = readJson<{
         readonly media: { readonly proxyFile?: string };
       }>(join(fixturesRoot, fixture.sampleName, "fixture.meta.json"));
@@ -359,12 +393,29 @@ describe("fixture playback media", () => {
         readonly video: { readonly firstTimestamp?: number };
       }>(join(fixturesRoot, fixture.sampleName, "detections.manifest.json"));
 
-      if (manifest.video.firstTimestamp !== undefined) continue;
+      return (
+        (manifest.video.firstTimestamp === undefined) !==
+        (meta.media.proxyFile !== undefined)
+      );
+    });
 
-      expect(meta.media.proxyFile).toBeDefined();
+    expect(mismatched.map(({ sampleName }) => sampleName)).toEqual([]);
+  });
+
+  it("plays the proxy file it declares, and it exists", () => {
+    for (const fixture of demoFixtures) {
+      const meta = readJson<{
+        readonly media: { readonly proxyFile?: string };
+      }>(join(fixturesRoot, fixture.sampleName, "fixture.meta.json"));
+
+      if (meta.media.proxyFile === undefined) {
+        expect(fixture.proxyVideoSrc).toBeNull();
+        continue;
+      }
+
       expect(
         existsSync(
-          resolve(fixturesRoot, fixture.sampleName, meta.media.proxyFile ?? ""),
+          resolve(fixturesRoot, fixture.sampleName, meta.media.proxyFile),
         ),
       ).toBe(true);
       expect(resolveDemoFixturePlaybackSrc(fixture)).toBe(

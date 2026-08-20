@@ -7,6 +7,18 @@
     "loadingStatusLabel": "opening 9s basketball sample",
     "readyStatusLabel": "9s basketball sample | video engine, source MP4"
   },
+  "presentation": {
+    "boxesEnabled": false,
+    "confidenceThreshold": 0.5,
+    "keypointsEnabled": false,
+    "polygonsEnabled": false,
+    "polylinesEnabled": false
+  },
+  "presentationAvailability": {
+    "keypointsEnabled": false,
+    "polygonsEnabled": false,
+    "polylinesEnabled": false
+  },
   "sampleName": "basketball_sam3",
   "schema": "supervision-js.demo.sam3-fixture-meta",
   "version": 1

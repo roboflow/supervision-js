@@ -18,6 +18,8 @@ import {
 } from "supervision";
 import { formatTime, formatTimeRange, toSourceTimeRange } from "../format";
 import type { TimelineRange } from "../session/demo-session-types";
+import { DiagnosticLabel } from "./DiagnosticLabel";
+import type { PreparedWindowReading } from "./prepared-window";
 import { TimelineScrubInput } from "./TimelineScrubInput";
 
 const AXIS_TICK_FRACTIONS = [0, 0.25, 0.5, 0.75, 1] as const;
@@ -35,10 +37,9 @@ export function TimelineView({
   onScrub,
   onSeek,
   playbackState,
+  preparedWindow,
   processedRanges = [],
   processingRanges = [],
-  preparedAheadFrames,
-  preparedAheadSeconds,
 }: {
   readonly activeDetectionFrameTime: number | null;
   readonly currentTime: number;
@@ -48,10 +49,9 @@ export function TimelineView({
   readonly onScrub: (time: number) => void;
   readonly onSeek: (time: number) => void;
   readonly playbackState: MediaRendererPlaybackState | null;
+  readonly preparedWindow: PreparedWindowReading | null;
   readonly processedRanges?: readonly TimelineRange[];
   readonly processingRanges?: readonly TimelineRange[];
-  readonly preparedAheadFrames: number | null;
-  readonly preparedAheadSeconds: number | null;
 }) {
   const mediaDuration = duration !== null && duration > 0 ? duration : null;
   const bufferSourceRange = toSourceTimeRange(
@@ -79,7 +79,7 @@ export function TimelineView({
       bufferSourceRange.endTime ?? 0,
       requestedSourceRange.endTime ?? 0,
       activeDetectionFrameTime ?? 0,
-      currentTime + (preparedAheadSeconds ?? 0),
+      currentTime + (preparedWindow?.targetSeconds ?? 0),
       getMaxRangeEnd(processedRanges),
       getMaxRangeEnd(processingRanges),
       1,
@@ -93,12 +93,11 @@ export function TimelineView({
     visualDuration,
   });
   const displayedCurrentTime = scrubTime ?? currentTime;
-  const preparedWindowEndTime =
-    preparedAheadSeconds === null
-      ? null
-      : currentTime + Math.max(0, preparedAheadSeconds);
-  const preparedWindowStartTime =
-    preparedAheadSeconds === null ? null : currentTime;
+  const preparedStartTime = preparedWindow === null ? null : currentTime;
+  const cookedEndTime =
+    preparedWindow === null ? null : currentTime + preparedWindow.cookedSeconds;
+  const preparedTargetEndTime =
+    preparedWindow === null ? null : currentTime + preparedWindow.targetSeconds;
   /* A band whose numbers did not move keeps its style object, so React has
    * nothing to write back to the DOM while the player sits paused. */
   const requestedRange = useTimelineRangeStyle(
@@ -111,10 +110,15 @@ export function TimelineView({
     bufferSourceRange.startTime,
     bufferSourceRange.endTime,
   );
-  const preparedWindowRange = useTimelineRangeStyle(
+  const cookedRange = useTimelineRangeStyle(
     visualDuration,
-    preparedWindowStartTime,
-    preparedWindowEndTime,
+    preparedStartTime,
+    cookedEndTime,
+  );
+  const preparedTargetRange = useTimelineRangeStyle(
+    visualDuration,
+    preparedStartTime,
+    preparedTargetEndTime,
   );
   const processedRangeStyles = useMemo(
     () => createSegmentStyles(processedRanges, visualDuration),
@@ -132,6 +136,29 @@ export function TimelineView({
       bufferSourceRange.startTime,
       bufferSourceRange.endTime,
     );
+  /* The hollow target sits under the solid cooked run, so the two read as one
+   * bar filling rather than two lanes disagreeing. A cook that has finished
+   * everything it aimed for draws only the run: the outline would sit exactly
+   * under it, saying nothing and repainting on every reading. */
+  const showPreparedTarget =
+    preparedWindow !== null &&
+    preparedWindow.targetFrameCount > preparedWindow.cookedFrameCount;
+  const preparedSegments: readonly StyledTimelineRange[] =
+    preparedWindow === null
+      ? EMPTY_SEGMENTS
+      : [
+          ...(showPreparedTarget && preparedTargetRange
+            ? [{ key: "prepared-target", style: preparedTargetRange }]
+            : []),
+          ...(cookedRange
+            ? [{ key: "prepared-cooked", style: cookedRange }]
+            : []),
+        ];
+  const preparedValue =
+    preparedWindow === null
+      ? "unavailable"
+      : `${preparedWindow.cookedFrameCount}/${preparedWindow.targetFrameCount}f \u00b7 +${formatTime(preparedWindow.cookedSeconds)}`;
+
   const lanes: TimelineLane[] = [
     {
       key: "buffer",
@@ -139,6 +166,8 @@ export function TimelineView({
       segments: bufferRange
         ? [{ key: "buffer", style: bufferRange }]
         : EMPTY_SEGMENTS,
+      tooltip:
+        "The stretch of the clip whose predictions are already in memory and can be drawn with no further fetch. It rolls along with the playhead, and on a looping clip it wraps past the end into the replay.",
       value: bufferRange
         ? formatTimeRange(
             bufferSourceRange.startTime,
@@ -154,6 +183,8 @@ export function TimelineView({
         showRequestedRange && requestedRange
           ? [{ key: "requested", style: requestedRange }]
           : EMPTY_SEGMENTS,
+      tooltip:
+        "The stretch the buffer last asked the prediction source for. It reads \u201csame as hot\u201d once everything asked for has arrived, so a band of its own means a fetch is still outstanding.",
       value:
         requestedRange === null
           ? "none"
@@ -168,19 +199,18 @@ export function TimelineView({
     {
       key: "prepared",
       label: "Prepared",
-      segments: preparedWindowRange
-        ? [{ key: "prepared", style: preparedWindowRange }]
-        : EMPTY_SEGMENTS,
-      value:
-        preparedAheadSeconds === null
-          ? "unavailable"
-          : `+${formatTime(Math.max(0, preparedAheadSeconds))} · ${preparedAheadFrames ?? 0}f`,
+      segments: preparedSegments,
+      tooltip:
+        "Frames whose masks are already drawn into a texture and waiting, counted forward from the playhead to the first frame that is not. The hollow bar is how far the cook is aiming; it aims much further ahead while playing than while paused, which is why this shrinks the moment you pause.",
+      value: preparedValue,
       variant: "ready",
     },
     {
       key: "processed",
       label: "Detections",
       segments: processedRangeStyles,
+      tooltip:
+        "The stretches that have predictions at all. A bundled clip ships with the whole clip predicted; an uploaded one fills in as the inference server answers.",
       value: formatRangeExtent(processedRanges, "none"),
       variant: "processed",
     },
@@ -188,6 +218,8 @@ export function TimelineView({
       key: "processing",
       label: "Inference",
       segments: processingRangeStyles,
+      tooltip:
+        "The stretches queued at the inference server right now, still waiting on their predictions. Only an uploaded clip runs inference, so a bundled clip sits idle here.",
       value: formatRangeExtent(processingRanges, "idle"),
       variant: "processing",
     },
@@ -424,7 +456,7 @@ export function TimelineView({
         return (
           <Fragment key={lane.key}>
             <span className="timeline-view__lane-head" style={rowStyle}>
-              <span className="timeline-view__lane-label">{lane.label}</span>
+              <DiagnosticLabel label={lane.label} tooltip={lane.tooltip} />
               <span className="timeline-view__lane-value">{lane.value}</span>
             </span>
             <div
@@ -434,7 +466,7 @@ export function TimelineView({
             >
               {lane.segments.map(({ key, style }) => (
                 <span
-                  className={`timeline-view__segment timeline-view__segment--${lane.variant}`}
+                  className={`timeline-view__segment timeline-view__segment--${SEGMENT_VARIANTS[key] ?? lane.variant}`}
                   key={key}
                   style={style}
                 />
@@ -745,6 +777,7 @@ interface TimelineLane {
   readonly key: string;
   readonly label: string;
   readonly segments: readonly StyledTimelineRange[];
+  readonly tooltip: string;
   readonly value: string;
   readonly variant: string;
 }
@@ -756,6 +789,13 @@ interface TimelineAxisTick {
 }
 
 const EMPTY_SEGMENTS: readonly StyledTimelineRange[] = [];
+
+/** The prepared lane draws two bands of its own, so its keys carry the variant
+ *  rather than the lane. */
+const SEGMENT_VARIANTS: Record<string, string | undefined> = {
+  "prepared-cooked": "ready",
+  "prepared-target": "target",
+};
 
 const LANE_ROW_STYLES: readonly TimelineRowStyle[] = [0, 1, 2, 3, 4].map(
   (index) =>
