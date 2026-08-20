@@ -20,7 +20,11 @@ afterEach(() => {
 describe("pixi ID-mask shader", () => {
   it("declares a WebGL and a WebGPU program for the same shader", () => {
     vi.stubGlobal("document", {
-      createElement: vi.fn(() => ({ height: 0, width: 0 })),
+      createElement: vi.fn(() => ({
+        getContext: vi.fn(),
+        height: 0,
+        width: 0,
+      })),
     });
 
     createPixiIdMaskShaderRenderer({
@@ -43,9 +47,32 @@ describe("pixi ID-mask shader", () => {
     expect(descriptor.gpu.fragment.source).toContain("fn mainFragment(");
   });
 
+  it("gives the placeholder texture canvas a rendering context", () => {
+    const getContext = vi.fn();
+    vi.stubGlobal("document", {
+      createElement: vi.fn(() => ({ getContext, height: 0, width: 0 })),
+    });
+
+    createPixiIdMaskShaderRenderer({
+      ImageSource: FakeImageSource as never,
+      Mesh: FakeMesh as never,
+      MeshGeometry: FakeMeshGeometry as never,
+      Shader: FakeShaderFactory as never,
+      UniformGroup: FakeUniformGroup as never,
+      mediaHeight: 80,
+      mediaWidth: 120,
+    });
+
+    expect(getContext).toHaveBeenCalledWith("2d");
+  });
+
   it("bounds the border scan by the stroke width in use, not by the compile-time maximum", () => {
     vi.stubGlobal("document", {
-      createElement: vi.fn(() => ({ height: 0, width: 0 })),
+      createElement: vi.fn(() => ({
+        getContext: vi.fn(),
+        height: 0,
+        width: 0,
+      })),
     });
 
     createPixiIdMaskShaderRenderer({

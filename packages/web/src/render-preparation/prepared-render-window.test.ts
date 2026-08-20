@@ -583,7 +583,7 @@ describe("prepared render window", () => {
       renderWindow.getFrame(0);
       await flushMaskPreparationTimers(4);
 
-      expect(onMaskFrameEvicted).toHaveBeenCalledWith("1:0.04");
+      expect(onMaskFrameEvicted).toHaveBeenCalledWith("2:0.08");
       expect(onDiagnostics).toHaveBeenLastCalledWith(
         expect.objectContaining({
           artifacts: [
@@ -600,6 +600,96 @@ describe("prepared render window", () => {
             }),
           ],
         }),
+      );
+      expect(renderWindow.getFrame(0.04)?.maskFrame).toMatchObject({
+        key: "1:0.04",
+      });
+
+      renderWindow.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("cooks only where a dragged playhead lands, not ahead of it", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const onMaskFramePrepared = vi.fn();
+      const renderWindow = createPreparedRenderWindow({
+        detectionTimeline: createFloorTimeline(deepFrames),
+        maskStyle: new BaseMaskStyle(),
+        onMaskFramePrepared,
+        renderPreparation: {
+          maskFrame: {
+            maxCacheFrameCount: 40,
+            maxPendingFrameCount: 10,
+            prefetchFrameCount: 7,
+            scheduleBatchSize: 10,
+            scanIntervalSeconds: 0,
+          },
+        },
+      });
+
+      renderWindow.getFrame(0);
+      await flushMaskPreparationTimers(20);
+
+      expect(onMaskFramePrepared.mock.calls.length).toBe(7);
+
+      /* One jump is a seek that lands, and the window leads it again. */
+      renderWindow.getFrame(0.4);
+      await flushMaskPreparationTimers(20);
+
+      expect(onMaskFramePrepared.mock.calls.length).toBe(14);
+
+      /* The jumps that follow are a drag, and only their landings cook. */
+      renderWindow.getFrame(0.8);
+      await flushMaskPreparationTimers(20);
+      renderWindow.getFrame(1.2);
+      await flushMaskPreparationTimers(20);
+
+      expect(
+        onMaskFramePrepared.mock.calls
+          .slice(14)
+          .map((call) => (call[0] as { readonly key: string }).key),
+      ).toEqual(["20:0.8", "30:1.2"]);
+
+      renderWindow.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the ground just behind the playhead when the cache overflows", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const renderWindow = createPreparedRenderWindow({
+        detectionTimeline: createFloorTimeline(deepFrames),
+        maskStyle: new BaseMaskStyle(),
+        renderPreparation: {
+          maskFrame: {
+            maxCacheFrameCount: 5,
+            maxPendingFrameCount: 10,
+            prefetchFrameCount: 3,
+            scheduleBatchSize: 10,
+            scanIntervalSeconds: 0,
+          },
+        },
+      });
+
+      for (let frameIndex = 0; frameIndex <= 10; frameIndex += 1) {
+        renderWindow.getFrame(frameIndex * 0.04);
+        await flushMaskPreparationTimers(10);
+      }
+
+      expect(renderWindow.getFrame(0.36)?.maskStatus).toBe(
+        PreparedRenderFrameMaskStatus.Prepared,
+      );
+      expect(renderWindow.getFrame(0)?.maskStatus).toBe(
+        PreparedRenderFrameMaskStatus.Pending,
       );
 
       renderWindow.destroy();

@@ -659,6 +659,28 @@ describe("buffered detection timeline", () => {
     secondLoad.resolve([frames[2]]);
   });
 
+  it("stops refilling once the window covers the whole looping media", async () => {
+    const source = {
+      loadFrames: vi.fn(async () => [frames[0], frames[1], frames[2]]),
+    };
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 10,
+      bufferBehindSeconds: 0.5,
+      source,
+    });
+
+    timeline.setTimelineContext?.({ duration: 9, loop: true });
+    await timeline.prepare(0);
+
+    expect(source.loadFrames).toHaveBeenNthCalledWith(1, 0, 9);
+
+    for (let mediaTime = 0; mediaTime < 9; mediaTime += 1 / 30) {
+      await timeline.prepare(mediaTime);
+    }
+
+    expect(source.loadFrames).toHaveBeenCalledOnce();
+  });
+
   it("destroys its source and prevents further loads", async () => {
     const source = {
       destroy: vi.fn(),

@@ -70,7 +70,11 @@ describe("pixi interaction presentation layer", () => {
 
   it("declares a WebGL and a WebGPU program for the interaction mask shader", () => {
     vi.stubGlobal("document", {
-      createElement: vi.fn(() => ({ height: 0, width: 0 })),
+      createElement: vi.fn(() => ({
+        getContext: vi.fn(),
+        height: 0,
+        width: 0,
+      })),
     });
 
     const layer = createPixiInteractionPresentationLayer({
@@ -96,9 +100,35 @@ describe("pixi interaction presentation layer", () => {
     expect(descriptor.gpu.fragment.source).toContain("fn mainFragment(");
   });
 
+  it("gives the placeholder texture canvas a rendering context", () => {
+    const getContext = vi.fn();
+    vi.stubGlobal("document", {
+      createElement: vi.fn(() => ({ getContext, height: 0, width: 0 })),
+    });
+
+    const layer = createPixiInteractionPresentationLayer({
+      Container: FakeContainer as never,
+      Graphics: FakeGraphics as never,
+      ImageSource: FakeImageSource as never,
+      Mesh: FakeMesh as never,
+      MeshGeometry: FakeMeshGeometry as never,
+      Shader: FakeShaderFactory as never,
+      Text: FakeText as never,
+      UniformGroup: FakeUniformGroup as never,
+    });
+
+    layer.createDisplay({ height: 80, width: 120 });
+
+    expect(getContext).toHaveBeenCalledWith("2d");
+  });
+
   it("bounds the stroke scan by the stroke width in use, not by the compile-time maximum", () => {
     vi.stubGlobal("document", {
-      createElement: vi.fn(() => ({ height: 0, width: 0 })),
+      createElement: vi.fn(() => ({
+        getContext: vi.fn(),
+        height: 0,
+        width: 0,
+      })),
     });
 
     const layer = createPixiInteractionPresentationLayer({

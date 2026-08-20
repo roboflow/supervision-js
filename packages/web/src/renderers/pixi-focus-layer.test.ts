@@ -502,6 +502,299 @@ describe("pixi focus layer", () => {
     expect(display.cut).not.toHaveBeenCalled();
   });
 
+  it("keeps the dim overlay on a frame that arrives with nothing to cut", () => {
+    const selectedPick = {
+      detection: frame.detections[0]!,
+      detectionIndex: 0,
+      frame,
+      mediaTime: frame.mediaTime,
+      point: { x: 15, y: 20 },
+      target: DetectionPickTarget.Box,
+    };
+    const layer = createPixiFocusLayer({
+      Graphics: FakeGraphics as never,
+      focusStyle: new BaseFocusStyle({
+        cornerRadius: 6,
+        fill: { alpha: 0.5, color: 0x000000 },
+        shape: BoxShape.RoundedRect,
+      }),
+    });
+    const display = layer.createDisplay({
+      height: 80,
+      width: 120,
+    }) as FakeGraphics;
+
+    layer.drawFrame({
+      frame,
+      hoveredPick: null,
+      mediaTime: frame.mediaTime,
+      selectedPick,
+    });
+    layer.drawFrame({
+      frame: undefined,
+      hoveredPick: null,
+      mediaTime: frame.mediaTime + 0.5,
+      selectedPick: null,
+    });
+
+    expect(display.visible).toBe(true);
+    expect(display.rect).toHaveBeenCalledTimes(2);
+    expect(display.rect).toHaveBeenLastCalledWith(0, 0, 120, 80);
+    expect(display.fill).toHaveBeenLastCalledWith({
+      alpha: 0.5,
+      color: 0x000000,
+    });
+    expect(display.roundRect).toHaveBeenCalledOnce();
+  });
+
+  it("holds a vector cutout across a frame the detections have not caught up with", () => {
+    const selectedPick = {
+      detection: frame.detections[0]!,
+      detectionIndex: 0,
+      frame,
+      mediaTime: frame.mediaTime,
+      point: { x: 15, y: 20 },
+      target: DetectionPickTarget.Box,
+    };
+    const layer = createPixiFocusLayer({
+      Graphics: FakeGraphics as never,
+      focusStyle: new BaseFocusStyle({ fill: { alpha: 0.5, color: 0 } }),
+    });
+    const display = layer.createDisplay({
+      height: 80,
+      width: 120,
+    }) as FakeGraphics;
+
+    layer.drawFrame({
+      frame,
+      hoveredPick: null,
+      mediaTime: frame.mediaTime,
+      selectedPick,
+    });
+    layer.drawFrame({
+      frame: undefined,
+      hoveredPick: null,
+      mediaTime: frame.mediaTime + 0.033,
+      selectedPick: null,
+    });
+
+    expect(display.visible).toBe(true);
+    expect(display.clear).toHaveBeenCalledOnce();
+    expect(display.cut).toHaveBeenCalledOnce();
+  });
+
+  it("holds an ID-mask cutout across a frame the mask cook has not caught up with", () => {
+    vi.stubGlobal("document", {
+      createElement: vi.fn(() => ({ height: 0, width: 0 })),
+    });
+
+    const { artifact, layer, mesh, textureSource } = createIdMaskFocus();
+
+    layer.drawFrame({
+      frame: maskFrame,
+      hoveredPick: null,
+      idMaskArtifact: artifact,
+      mediaTime: maskFrame.mediaTime,
+      selectedPick: null,
+    });
+
+    const uniforms = mesh.shader.resources.focusUniforms as FakeUniformGroup;
+    const updatesAfterDraw = uniforms.update.mock.calls.length;
+
+    layer.drawFrame({
+      frame: undefined,
+      hoveredPick: null,
+      mediaTime: maskFrame.mediaTime + 0.033,
+      selectedPick: null,
+    });
+
+    expect(mesh.visible).toBe(true);
+    expect(mesh.shader.resources.uTexture).toBe(textureSource);
+    expect(uniforms.update).toHaveBeenCalledTimes(updatesAfterDraw);
+  });
+
+  it("drops a held cutout the media has moved away from, and dims the whole frame", () => {
+    vi.stubGlobal("document", {
+      createElement: vi.fn(() => ({ height: 0, width: 0 })),
+    });
+
+    const { artifact, layer, mesh, textureSource } = createIdMaskFocus();
+
+    layer.drawFrame({
+      frame: maskFrame,
+      hoveredPick: null,
+      idMaskArtifact: artifact,
+      mediaTime: maskFrame.mediaTime,
+      selectedPick: null,
+    });
+    layer.drawFrame({
+      frame: undefined,
+      hoveredPick: null,
+      mediaTime: maskFrame.mediaTime + 12,
+      selectedPick: null,
+    });
+
+    const uniforms = mesh.shader.resources.focusUniforms as FakeUniformGroup;
+
+    expect(mesh.visible).toBe(true);
+    expect(mesh.shader.resources.uTexture).not.toBe(textureSource);
+    expect(uniforms.uniforms.uSelectedCount).toBe(0);
+    expect(uniforms.uniforms.uAmbient).toBe(0);
+  });
+
+  it("drops a held cutout whose ID raster has been evicted", () => {
+    vi.stubGlobal("document", {
+      createElement: vi.fn(() => ({ height: 0, width: 0 })),
+    });
+
+    const { artifact, layer, mesh, textureSource } = createIdMaskFocus();
+
+    layer.drawFrame({
+      frame: maskFrame,
+      hoveredPick: null,
+      idMaskArtifact: artifact,
+      mediaTime: maskFrame.mediaTime,
+      selectedPick: null,
+    });
+
+    textureSource.destroyed = true;
+
+    layer.drawFrame({
+      frame: undefined,
+      hoveredPick: null,
+      mediaTime: maskFrame.mediaTime + 0.033,
+      selectedPick: null,
+    });
+
+    expect(mesh.visible).toBe(true);
+    expect(mesh.shader.resources.uTexture).not.toBe(textureSource);
+  });
+
+  it("fades a held overlay out instead of cutting it when nothing arrives", () => {
+    const selectedPick = {
+      detection: frame.detections[0]!,
+      detectionIndex: 0,
+      frame,
+      mediaTime: frame.mediaTime,
+      point: { x: 15, y: 20 },
+      target: DetectionPickTarget.Box,
+    };
+    const layer = createPixiFocusLayer({
+      Graphics: FakeGraphics as never,
+      focusStyle: new BaseFocusStyle({ fill: { alpha: 0.5, color: 0 } }),
+    });
+    const display = layer.createDisplay({
+      height: 80,
+      width: 120,
+    }) as FakeGraphics;
+
+    layer.drawFrame({
+      frame,
+      hoveredPick: null,
+      mediaTime: frame.mediaTime,
+      selectedPick,
+    });
+    layer.tick(0);
+    layer.tick(120);
+
+    expect(display.alpha).toBe(1);
+
+    const holdFrame = (timestamp: number) => {
+      layer.drawFrame({
+        frame: undefined,
+        hoveredPick: null,
+        mediaTime: frame.mediaTime,
+        selectedPick: null,
+      });
+      layer.tick(timestamp);
+    };
+
+    for (let timestamp = 150; timestamp <= 1140; timestamp += 30) {
+      holdFrame(timestamp);
+    }
+
+    expect(display.visible).toBe(true);
+    expect(display.alpha).toBe(1);
+
+    holdFrame(1170);
+
+    expect(display.alpha).toBeLessThan(1);
+    expect(display.alpha).toBeGreaterThan(0);
+  });
+
+  it("stays hidden when a frame without detections follows focus resolving to nothing", () => {
+    const layer = createPixiFocusLayer({
+      Graphics: FakeGraphics as never,
+      focusStyle: new BaseFocusStyle(),
+    });
+    const display = layer.createDisplay({
+      height: 80,
+      width: 120,
+    }) as FakeGraphics;
+
+    layer.drawFrame({
+      frame,
+      hoveredPick: null,
+      mediaTime: frame.mediaTime,
+      selectedPick: {
+        detection: frame.detections[0]!,
+        detectionIndex: 0,
+        frame,
+        mediaTime: frame.mediaTime,
+        point: { x: 15, y: 20 },
+        target: DetectionPickTarget.Box,
+      },
+    });
+    layer.drawFrame({
+      frame,
+      hoveredPick: null,
+      mediaTime: frame.mediaTime,
+      selectedPick: null,
+    });
+    layer.drawFrame({
+      frame: undefined,
+      hoveredPick: null,
+      mediaTime: frame.mediaTime,
+      selectedPick: null,
+    });
+
+    expect(display.visible).toBe(false);
+  });
+
+  it("rewrites ID-mask uniforms only when the focus they describe changes", () => {
+    vi.stubGlobal("document", {
+      createElement: vi.fn(() => ({ height: 0, width: 0 })),
+    });
+
+    const { artifact, layer, mesh } = createIdMaskFocus();
+    const drawMaskFrame = (mediaTime: number, detectionCount: number) =>
+      layer.drawFrame({
+        frame: {
+          detections: Array.from(
+            { length: detectionCount },
+            () => maskFrame.detections[0]!,
+          ),
+          frameIndex: 3,
+          mediaTime,
+        },
+        hoveredPick: null,
+        idMaskArtifact: artifact,
+        mediaTime,
+        selectedPick: null,
+      });
+
+    drawMaskFrame(maskFrame.mediaTime, 1);
+
+    const uniforms = mesh.shader.resources.focusUniforms as FakeUniformGroup;
+
+    expect(uniforms.update).toHaveBeenCalledOnce();
+
+    drawMaskFrame(maskFrame.mediaTime + 0.033, 3);
+    drawMaskFrame(maskFrame.mediaTime + 0.066, 2);
+
+    expect(uniforms.update).toHaveBeenCalledOnce();
+  });
+
   it("rebuilds vector cutouts only when their inputs change", () => {
     const layer = createPixiFocusLayer({
       Graphics: FakeGraphics as never,
@@ -563,11 +856,61 @@ class FakeContainer {
 }
 
 class FakeImageSource {
+  destroyed = false;
   readonly style = {};
 
   constructor(readonly _options: unknown) {}
 
   readonly destroy = vi.fn();
+}
+
+function createIdMaskFocus() {
+  const layer = createPixiFocusLayer({
+    Container: FakeContainer as never,
+    Graphics: FakeGraphics as never,
+    ImageSource: FakeImageSource as never,
+    Mesh: FakeMesh as never,
+    MeshGeometry: FakeMeshGeometry as never,
+    Shader: FakeShaderFactory as never,
+    UniformGroup: FakeUniformGroup as never,
+    focusStyle: new BaseFocusStyle({
+      fill: { alpha: 0.5, color: 0x000000 },
+      targetMode: FocusTargetMode.Ambient,
+    }),
+  });
+  const display = layer.createDisplay({
+    height: 80,
+    width: 120,
+  }) as FakeContainer;
+  const textureSource = new FakeImageSource({
+    dynamic: false,
+    height: 80,
+    resource: {},
+    width: 120,
+  });
+
+  return {
+    artifact: {
+      frame: {
+        close: vi.fn(),
+        fillPalette: new Float32Array(),
+        hasStroke: false,
+        height: 80,
+        key: "mask-frame",
+        kind: PreparedMaskFrameKind.IdMask,
+        maxStrokeWidth: 0,
+        raster: new Uint8Array(120 * 80),
+        rasterFormat: IdMaskRasterFormat.R8,
+        strokePalette: new Float32Array(),
+        strokeWidths: new Float32Array(),
+        width: 120,
+      },
+      texture: { source: textureSource } as never,
+    },
+    layer,
+    mesh: display.children[0] as FakeMesh,
+    textureSource,
+  };
 }
 
 class FakeMeshGeometry {

@@ -32,6 +32,8 @@ const DEFAULT_PREPARED_WINDOW_SCAN_INTERVAL_SECONDS = 0.15;
 const PREPARED_WINDOW_REFILL_RATIO = 5 / 7;
 /** One cook per four frames, the top of the playback-rate ladder on 60Hz. */
 const MAX_PRESENTED_FRAME_STRIDE = 4;
+/** A jump that repeats. One on its own is a seek, and it lands somewhere. */
+const DRAGGED_PLAYHEAD_JUMP_COUNT = 2;
 const PRESENTED_FRAME_STRIDE_SAMPLE_COUNT = 4;
 
 type ScheduledPreparationTask = ReturnType<typeof setTimeout>;
@@ -167,6 +169,9 @@ export function createPreparedRenderWindow(options: {
   } | null = null;
   let activeMaskFrameSignature: string | null = null;
   const presentedFrameStrideSamples: number[] = [];
+  let previousActiveFrameMediaTime: number | null = null;
+  let consecutivePlayheadJumpCount = 0;
+  let isPlayheadSettled = true;
   let isDestroyed = false;
   let generation = 0;
   const preparedMaskFrames = new Map<string, PreparedMaskFrame>();
@@ -582,7 +587,7 @@ export function createPreparedRenderWindow(options: {
       ].slice(0, targetFrameCount);
     }
 
-    schedulePreparedTargetBatch();
+    schedulePreparedTargetBatch({ force: scheduleOptions.force });
   };
 
   function shouldTopUpPreparedWindowAtLowWatermark() {
@@ -608,8 +613,14 @@ export function createPreparedRenderWindow(options: {
     );
   }
 
-  function schedulePreparedTargetBatch() {
+  function schedulePreparedTargetBatch(
+    batchOptions: { readonly force?: boolean } = {},
+  ) {
     if (isDestroyed || terminalPreparationError) {
+      return;
+    }
+
+    if (!isPlayheadSettled && !batchOptions.force) {
       return;
     }
 
@@ -707,6 +718,10 @@ export function createPreparedRenderWindow(options: {
       }
 
       isPlaybackActive = active;
+      /* Whichever way this goes, the gesture that was moving the playhead is
+         over, and the window may lead it again. */
+      consecutivePlayheadJumpCount = 0;
+      isPlayheadSettled = true;
       rescanPreparedWindow();
 
       if (!active) {
@@ -772,6 +787,7 @@ export function createPreparedRenderWindow(options: {
     const key = getFrameKey(detectionFrame);
 
     observePresentedFrameStride(key);
+    observePlayheadStep(detectionFrame.mediaTime);
     setActiveMaskFrame({
       key,
       mediaTime: detectionFrame.mediaTime,
@@ -861,19 +877,41 @@ export function createPreparedRenderWindow(options: {
     const targetKeys = new Set(lastPreparedTargetFrames.map(getFrameKey));
     const activeKey = activeMaskFrame?.key ?? null;
 
+    return (
+      findFarthestPreparedMaskFrame(
+        (key) => key !== activeKey && !targetKeys.has(key),
+      ) ?? findFarthestPreparedMaskFrame((key) => key !== activeKey)
+    );
+  }
+
+  /**
+   * The cache is a span around the playhead rather than a queue behind it. A
+   * cache emptied in cook order empties from the ground the playhead just
+   * crossed, which is the ground a reversing gesture reaches first.
+   */
+  function findFarthestPreparedMaskFrame(canEvict: (key: string) => boolean) {
+    const playheadMediaTime = activeMaskFrame?.mediaTime;
+    let farthestKey: string | undefined;
+    let farthestDistance = -1;
+
     for (const key of preparedMaskFrames.keys()) {
-      if (key !== activeKey && !targetKeys.has(key)) {
-        return key;
+      if (!canEvict(key)) {
+        continue;
+      }
+
+      const frameMediaTime = observedMaskFrames.get(key)?.mediaTime;
+      const distance =
+        playheadMediaTime === undefined || frameMediaTime === undefined
+          ? Number.POSITIVE_INFINITY
+          : Math.abs(frameMediaTime - playheadMediaTime);
+
+      if (distance > farthestDistance) {
+        farthestDistance = distance;
+        farthestKey = key;
       }
     }
 
-    for (const key of preparedMaskFrames.keys()) {
-      if (key !== activeKey) {
-        return key;
-      }
-    }
-
-    return undefined;
+    return farthestKey;
   }
 
   function clearPreparedMaskFrames() {
@@ -1157,6 +1195,48 @@ export function createPreparedRenderWindow(options: {
     ) {
       presentedFrameStrideSamples.shift();
     }
+  }
+
+  /**
+   * A playhead one playback step from where it was is a playhead the prefetch
+   * can lead, and one jump on its own is a seek that lands. A run of jumps is a
+   * drag, and the frames a prefetch picks for it are frames it has gone past.
+   */
+  function observePlayheadStep(mediaTime: number) {
+    const previousMediaTime = previousActiveFrameMediaTime;
+
+    previousActiveFrameMediaTime = mediaTime;
+
+    /* One presented frame is drawn several times over, and a redraw of the
+       frame already on screen says nothing about how the playhead is moving. */
+    if (previousMediaTime === null || mediaTime === previousMediaTime) {
+      return;
+    }
+
+    const advance = mediaTime - previousMediaTime;
+
+    if (advance > 0 && advance <= getSettledPlayheadAdvanceSeconds()) {
+      consecutivePlayheadJumpCount = 0;
+      isPlayheadSettled = true;
+      return;
+    }
+
+    consecutivePlayheadJumpCount += 1;
+    isPlayheadSettled =
+      consecutivePlayheadJumpCount < DRAGGED_PLAYHEAD_JUMP_COUNT;
+  }
+
+  function getSettledPlayheadAdvanceSeconds() {
+    const [firstFrame, secondFrame] = lastPreparedWindowFrames;
+
+    if (!firstFrame || !secondFrame) {
+      return preparedWindowScanIntervalSeconds;
+    }
+
+    return (
+      (secondFrame.mediaTime - firstFrame.mediaTime) *
+      MAX_PRESENTED_FRAME_STRIDE
+    );
   }
 
   /**

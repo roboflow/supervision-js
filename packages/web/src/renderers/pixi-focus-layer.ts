@@ -21,8 +21,22 @@ import type {
 } from "pixi.js";
 
 const MAX_FOCUS_MASK_IDS = 16;
+/**
+ * How far the media may travel before a cutout drawn for an earlier frame stops
+ * covering what it cut out. Detections in a 30fps handheld clip move a sixth of
+ * their own size across two frames, and a hole that far off its subject reads as
+ * a hole in the wrong place.
+ */
+const HELD_CUTOUT_SECONDS = 0.05;
+/**
+ * How long the dim overlay survives frames that arrive with nothing to cut. It
+ * covers a mask cook running behind (872ms at its worst under a six-times CPU
+ * throttle) and then gives up through the fade, never through a cut.
+ */
+const HELD_OVERLAY_MS = 1000;
 
 type PixiFocusMesh = PixiMesh<PixiMeshGeometry, PixiShader>;
+type FocusFill = FocusDrawInstruction["fill"];
 type CutoutShapeResult = "drawn" | "empty";
 type MaskCutoutCacheEntry = {
   readonly height: number;
@@ -157,6 +171,11 @@ export function createPixiFocusLayer(options: {
   let isDestroyed = false;
   let hasIdMaskShaderFailed = false;
   let vectorFocusSignature: VectorFocusSignature | null = null;
+  let heldFill: FocusFill | null = null;
+  let cutoutMediaTime: number | null = null;
+  let drawnOverlayWithoutCutout: FocusFill | null = null;
+  let isHoldingOverlay = false;
+  let holdStartedAtMs: number | null = null;
   // A frame can fall back to a composited RGBA texture when its colored ID-mask
   // palette is exhausted. Keep decoded row runs by the immutable mask payload so
   // that fallback focus still cuts out the actual mask, not its bounding rect.
@@ -166,7 +185,7 @@ export function createPixiFocusLayer(options: {
     createDisplay({ width, height }) {
       mediaWidth = width;
       mediaHeight = height;
-      vectorFocusSignature = null;
+      resetHeldFocus();
       focusGraphics = new options.Graphics();
       focusGraphics.visible = false;
       idMaskRenderer = createIdMaskRenderer();
@@ -209,14 +228,13 @@ export function createPixiFocusLayer(options: {
     },
 
     drawFrame(context) {
-      if (
-        isDestroyed ||
-        !focusStyle ||
-        !context.frame ||
-        mediaWidth <= 0 ||
-        mediaHeight <= 0
-      ) {
+      if (isDestroyed || !focusStyle || mediaWidth <= 0 || mediaHeight <= 0) {
         hide();
+        return;
+      }
+
+      if (!context.frame) {
+        holdOverlay(context.mediaTime);
         return;
       }
 
@@ -228,24 +246,34 @@ export function createPixiFocusLayer(options: {
         viewportScale: context.viewportScale,
       });
 
+      endHold();
+
       if (!instruction || instruction.targets.length === 0) {
+        resetHeldFocus();
         transitionToHidden();
         return;
       }
 
+      heldFill = instruction.fill;
       targetAlpha = 1;
       if (focusDisplay) focusDisplay.visible = true;
 
       if (drawIdMaskFocus(context.idMaskArtifact, instruction)) {
         hideVectorFocus();
+        markCutoutDrawn(context.mediaTime);
         return;
       }
 
       idMaskRenderer?.hide();
-      drawVectorFocus(instruction, context.frame);
+
+      if (drawVectorFocus(instruction, context.frame)) {
+        markCutoutDrawn(context.mediaTime);
+      }
     },
 
     tick(timestamp) {
+      expireHold(timestamp);
+
       if (!focusDisplay || currentAlpha === targetAlpha) {
         lastTick = timestamp;
         return;
@@ -275,12 +303,17 @@ export function createPixiFocusLayer(options: {
     artifact: PixiFocusMaskArtifact | null | undefined,
     instruction: FocusDrawInstruction,
   ) {
-    const maskIds = getTargetMaskIds(instruction.targets);
-
     if (
       !idMaskRenderer ||
       !artifact ||
-      artifact.frame.kind !== PreparedMaskFrameKind.IdMask ||
+      artifact.frame.kind !== PreparedMaskFrameKind.IdMask
+    ) {
+      return false;
+    }
+
+    const maskIds = getTargetMaskIds(instruction.targets);
+
+    if (
       maskIds.length === 0 ||
       (!instruction.ambient && maskIds.length !== instruction.targets.length)
     ) {
@@ -291,10 +324,7 @@ export function createPixiFocusLayer(options: {
       artifact.frame,
       artifact.texture,
       maskIds,
-      {
-        alpha: instruction.fill.alpha,
-        color: instruction.fill.color,
-      },
+      instruction.fill,
       instruction.ambient === true,
     );
 
@@ -306,7 +336,7 @@ export function createPixiFocusLayer(options: {
     frame: FocusDrawFrame,
   ) {
     if (!focusGraphics) {
-      return;
+      return false;
     }
 
     const targetsWithGeometry = instruction.targets.filter(
@@ -317,8 +347,8 @@ export function createPixiFocusLayer(options: {
     );
 
     if (targetsWithGeometry.length === 0) {
-      hideVectorFocus();
-      return;
+      drawOverlayWithoutCutout(instruction.fill);
+      return false;
     }
 
     const signature: VectorFocusSignature = {
@@ -338,7 +368,7 @@ export function createPixiFocusLayer(options: {
     // Tessellating thousands of mask runs on every draw is what makes this path
     // expensive, and nothing it draws moves while its inputs hold still.
     if (isSameVectorFocus(vectorFocusSignature, signature)) {
-      return;
+      return true;
     }
 
     vectorFocusSignature = signature;
@@ -356,7 +386,7 @@ export function createPixiFocusLayer(options: {
           focusMaskGraphics.fill({ alpha: 1, color: 0xffffff });
         }
       }
-      return;
+      return true;
     }
 
     for (const target of targetsWithGeometry) {
@@ -364,6 +394,8 @@ export function createPixiFocusLayer(options: {
         focusGraphics.cut();
       }
     }
+
+    return true;
   }
 
   function drawCutoutShape(
@@ -462,6 +494,7 @@ export function createPixiFocusLayer(options: {
   }
 
   function hide() {
+    resetHeldFocus();
     hideVectorFocus();
     idMaskRenderer?.hide();
     if (focusDisplay) focusDisplay.visible = false;
@@ -470,6 +503,108 @@ export function createPixiFocusLayer(options: {
   function transitionToHidden() {
     targetAlpha = 0;
     if (currentAlpha === 0) hide();
+  }
+
+  /**
+   * Keeps the dim overlay on screen for a frame the cutout cannot be drawn for.
+   * Everything dimmed for a moment reads as a pause; the picture flashing to
+   * full brightness and back reads as a fault.
+   */
+  function holdOverlay(mediaTime: number) {
+    if (!heldFill) {
+      transitionToHidden();
+      return;
+    }
+
+    isHoldingOverlay = true;
+    targetAlpha = 1;
+    if (focusDisplay) focusDisplay.visible = true;
+
+    if (
+      cutoutMediaTime !== null &&
+      Math.abs(mediaTime - cutoutMediaTime) <= HELD_CUTOUT_SECONDS &&
+      isDrawnCutoutIntact()
+    ) {
+      return;
+    }
+
+    drawOverlayWithoutCutout(heldFill);
+  }
+
+  function endHold() {
+    isHoldingOverlay = false;
+    holdStartedAtMs = null;
+  }
+
+  function expireHold(timestamp: number) {
+    if (!isHoldingOverlay) {
+      return;
+    }
+
+    holdStartedAtMs ??= timestamp;
+
+    if (timestamp - holdStartedAtMs > HELD_OVERLAY_MS) {
+      endHold();
+      transitionToHidden();
+    }
+  }
+
+  function markCutoutDrawn(mediaTime: number) {
+    cutoutMediaTime = mediaTime;
+    drawnOverlayWithoutCutout = null;
+  }
+
+  function resetHeldFocus() {
+    cutoutMediaTime = null;
+    drawnOverlayWithoutCutout = null;
+    heldFill = null;
+    vectorFocusSignature = null;
+    endHold();
+  }
+
+  /**
+   * A cutout drawn from an ID mask lives in a texture the mask cook owns and
+   * evicts, so what is on screen can outlive the pixels behind it. Vector
+   * cutouts are this layer's own geometry and outlive nothing.
+   */
+  function isDrawnCutoutIntact() {
+    return (
+      idMaskRenderer?.isDrawnFrameIntact() === true ||
+      focusGraphics?.visible === true
+    );
+  }
+
+  function drawOverlayWithoutCutout(fill: FocusFill) {
+    if (
+      drawnOverlayWithoutCutout?.alpha === fill.alpha &&
+      drawnOverlayWithoutCutout.color === fill.color
+    ) {
+      return;
+    }
+
+    cutoutMediaTime = null;
+    drawnOverlayWithoutCutout = fill;
+
+    if (idMaskRenderer) {
+      hideVectorFocus();
+      idMaskRenderer.renderWithoutCutout(fill);
+      return;
+    }
+
+    if (!focusGraphics) {
+      return;
+    }
+
+    vectorFocusSignature = null;
+    focusGraphics.visible = true;
+    focusGraphics.clear();
+    focusGraphics.rect(0, 0, mediaWidth, mediaHeight);
+    focusGraphics.fill(fill);
+
+    if (focusMaskGraphics) {
+      focusMaskGraphics.visible = true;
+      focusMaskGraphics.clear();
+    }
   }
 
   function hideVectorFocus() {
@@ -545,13 +680,16 @@ function getTargetMaskIds(targets: readonly DetectionPickResult[]) {
 interface FocusIdMaskRenderer {
   readonly mesh: PixiFocusMesh;
   hide(): void;
+  /** Whether what the mesh last drew still has its ID raster behind it. */
+  isDrawnFrameIntact(): boolean;
   render(
     frame: PreparedIdMaskFrame,
     texture: PixiTexture,
     maskIds: readonly number[],
-    fill: { readonly alpha: number; readonly color: number },
+    fill: FocusFill,
     ambient: boolean,
   ): void;
+  renderWithoutCutout(fill: FocusFill): void;
   destroy(): void;
 }
 
@@ -606,6 +744,12 @@ function createFocusIdMaskRenderer(options: {
     uvs: new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]),
   });
   const mesh = new options.Mesh({ geometry, shader });
+  const overlayColor = new Float32Array(4);
+  let boundSource: PixiImageSource | undefined;
+  let drawnAmbient: number | null = null;
+  let drawnCount = -1;
+  let drawnFillAlpha = Number.NaN;
+  let drawnFillColor = Number.NaN;
 
   mesh.visible = false;
 
@@ -621,33 +765,86 @@ function createFocusIdMaskRenderer(options: {
       mesh.visible = false;
     },
 
+    isDrawnFrameIntact() {
+      return (
+        mesh.visible &&
+        boundSource !== undefined &&
+        boundSource !== placeholderSource &&
+        !boundSource.destroyed
+      );
+    },
+
     mesh,
 
     render(_frame, texture, maskIds, fill, ambient) {
-      bindTexture(texture.source);
-      selectedIds.fill(0);
+      let hasNewIds = false;
+      let count = 0;
 
-      for (
-        let index = 0;
-        index < maskIds.length && index < MAX_FOCUS_MASK_IDS;
-        index += 1
-      ) {
-        selectedIds[index] = maskIds[index] ?? 0;
+      // Ambient focus keeps every ID the raster carries, so the shader reads
+      // neither the list nor its length, and a count that tracked the detections
+      // would dirty the uniform buffer on every frame they changed.
+      if (!ambient) {
+        count = Math.min(maskIds.length, MAX_FOCUS_MASK_IDS);
+
+        for (let index = 0; index < MAX_FOCUS_MASK_IDS; index += 1) {
+          const maskId = index < count ? (maskIds[index] ?? 0) : 0;
+
+          if (selectedIds[index] !== maskId) {
+            selectedIds[index] = maskId;
+            hasNewIds = true;
+          }
+        }
       }
 
-      uniforms.uniforms.uSelectedCount = Math.min(
-        maskIds.length,
-        MAX_FOCUS_MASK_IDS,
-      );
-      uniforms.uniforms.uSelectedIds = selectedIds;
-      uniforms.uniforms.uOverlayColor = createPremultipliedColor(fill);
-      uniforms.uniforms.uAmbient = ambient ? 1 : 0;
-      uniforms.update();
+      bindTexture(texture.source);
+      applyUniforms(count, ambient ? 1 : 0, fill, hasNewIds);
+      mesh.visible = true;
+    },
+
+    renderWithoutCutout(fill) {
+      // The placeholder raster reads back as ID zero everywhere, which is the
+      // one value the shader never treats as focused.
+      bindTexture(placeholderSource);
+      applyUniforms(0, 0, fill, false);
       mesh.visible = true;
     },
   };
 
+  function applyUniforms(
+    count: number,
+    ambient: number,
+    fill: FocusFill,
+    hasNewIds: boolean,
+  ) {
+    if (
+      !hasNewIds &&
+      count === drawnCount &&
+      ambient === drawnAmbient &&
+      fill.alpha === drawnFillAlpha &&
+      fill.color === drawnFillColor
+    ) {
+      return;
+    }
+
+    drawnAmbient = ambient;
+    drawnCount = count;
+    drawnFillAlpha = fill.alpha;
+    drawnFillColor = fill.color;
+    writePremultipliedColor(overlayColor, fill);
+    uniforms.uniforms.uSelectedCount = count;
+    uniforms.uniforms.uSelectedIds = selectedIds;
+    uniforms.uniforms.uOverlayColor = overlayColor;
+    uniforms.uniforms.uAmbient = ambient;
+    uniforms.update();
+  }
+
   function bindTexture(source: PixiImageSource) {
+    if (source === boundSource) {
+      return;
+    }
+
+    boundSource = source;
+
     try {
       shader.resources.uTexture = source;
       shader.resources.uSampler = source.style;
@@ -696,18 +893,13 @@ function createFocusIdMaskRenderer(options: {
   }
 }
 
-function createPremultipliedColor(fill: {
-  readonly alpha: number;
-  readonly color: number;
-}) {
+function writePremultipliedColor(target: Float32Array, fill: FocusFill) {
   const alpha = Math.max(0, Math.min(fill.alpha, 1));
 
-  return new Float32Array([
-    (((fill.color >> 16) & 0xff) / 255) * alpha,
-    (((fill.color >> 8) & 0xff) / 255) * alpha,
-    ((fill.color & 0xff) / 255) * alpha,
-    alpha,
-  ]);
+  target[0] = (((fill.color >> 16) & 0xff) / 255) * alpha;
+  target[1] = (((fill.color >> 8) & 0xff) / 255) * alpha;
+  target[2] = ((fill.color & 0xff) / 255) * alpha;
+  target[3] = alpha;
 }
 
 function createPlaceholderCanvas() {

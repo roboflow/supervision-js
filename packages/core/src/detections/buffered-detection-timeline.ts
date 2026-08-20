@@ -282,6 +282,18 @@ export function createBufferedDetectionTimeline(
       return;
     }
 
+    const { endTime, startTime } = getLoadRange(mediaTime);
+
+    // A window already spanning everything the source can offer has nowhere to
+    // advance to, so its lead only shrinks from here. Refetching it would
+    // repeat for every remaining frame of playback and buy no coverage.
+    if (
+      startTime === state.bufferStartTime &&
+      endTime === state.bufferEndTime
+    ) {
+      return;
+    }
+
     void loadWindow(mediaTime).catch(() => undefined);
   };
 

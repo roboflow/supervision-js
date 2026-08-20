@@ -118,6 +118,21 @@ describe("media renderer over a push-based media source", () => {
     renderer.destroy();
   });
 
+  it("keeps a scrub landing with the seek inside the drag it belongs to", async () => {
+    const producer = createProducer();
+    const renderer = await createRenderer(producer, createScene());
+
+    producer.setStatus("PLAYING");
+    renderer.scrub(1);
+    const landing = renderer.seek(2);
+    renderer.scrub(2);
+    await landing;
+
+    expect(producer.beginInteractiveSeek).toHaveBeenCalledOnce();
+    expect(producer.endInteractiveSeek).toHaveBeenCalledOnce();
+    renderer.destroy();
+  });
+
   it("leaves a seek outside a drag with no gesture to release", async () => {
     const producer = createProducer();
     const renderer = await createRenderer(producer, createScene());
@@ -225,7 +240,7 @@ describe("media renderer over a push-based media source", () => {
     renderer.destroy();
   });
 
-  it("holds the playing state through a drag even as the producer pauses itself", async () => {
+  it("reports the stopped picture through a drag, and playing again on release", async () => {
     const producer = createProducer();
     const renderer = await createRenderer(producer, createScene());
 
@@ -233,13 +248,51 @@ describe("media renderer over a push-based media source", () => {
     renderer.scrub(2);
     producer.setStatus("PAUSED");
     expect(renderer.getState().playbackState).toBe(
-      MediaRendererPlaybackState.Playing,
+      MediaRendererPlaybackState.Paused,
     );
 
+    producer.setSeeking(true);
+    producer.setStatus("SEEKING");
+    expect(renderer.getState().playbackState).toBe(
+      MediaRendererPlaybackState.Paused,
+    );
+
+    producer.setSeeking(false);
     await renderer.seek(3);
     producer.setStatus("PLAYING");
     expect(renderer.getState().playbackState).toBe(
       MediaRendererPlaybackState.Playing,
+    );
+
+    renderer.destroy();
+  });
+
+  it("resumes on release the playback a drag stopped", async () => {
+    const producer = createProducer();
+    const renderer = await createRenderer(producer, createScene());
+
+    producer.setStatus("PLAYING");
+    renderer.scrub(2);
+    producer.setStatus("PAUSED");
+    await renderer.seek(3);
+
+    expect(producer.endInteractiveSeek).toHaveBeenCalledOnce();
+    renderer.destroy();
+  });
+
+  it("leaves a drag that started paused paused on release", async () => {
+    const producer = createProducer();
+    const renderer = await createRenderer(producer, createScene());
+
+    producer.setStatus("PAUSED");
+    renderer.scrub(2);
+    expect(renderer.getState().playbackState).toBe(
+      MediaRendererPlaybackState.Paused,
+    );
+
+    await renderer.seek(3);
+    expect(renderer.getState().playbackState).toBe(
+      MediaRendererPlaybackState.Paused,
     );
 
     renderer.destroy();

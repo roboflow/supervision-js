@@ -40,7 +40,17 @@ export function createMediaRendererTransport(
 ): MediaRendererTransport {
   const { channel } = options;
   let gestureInFlight = false;
+  let landingRelease: Promise<void> | null = null;
   let settledState: MediaRendererPlaybackState | null = null;
+
+  const releaseGesture = async () => {
+    if (!gestureInFlight) {
+      return;
+    }
+
+    gestureInFlight = false;
+    await channel.endInteractiveSeek();
+  };
 
   const publishPlaybackState = () => {
     const status = channel.getStatus();
@@ -52,24 +62,25 @@ export function createMediaRendererTransport(
     }
 
     const seeking = channel.getSeeking();
-    // The hold below is only honest while the producer is actually sitting in
-    // the mechanical pause the gesture asked for. A producer that reports
-    // anything else is speaking for itself, and a gesture whose release is
-    // lost must not latch the whole surface onto a state the producer left.
+    // The gesture only speaks for the surface while the producer sits in the
+    // mechanical pause it asked for. A producer reporting anything else has
+    // moved on, and letting the gesture go means paying the release it owes:
+    // dropping the bookkeeping alone would leave the producer frozen for a
+    // drag nobody is holding.
     if (
       gestureInFlight &&
       !isSettling(status, seeking) &&
       status !== "PAUSED"
     ) {
-      gestureInFlight = false;
+      void releaseGesture();
     }
 
-    // Inside the transport's own drag gesture the engine pauses itself as a
-    // mechanic and resumes on release; the user never asked to pause, so the
-    // state holds whatever was settled when the gesture began.
+    // A drag stops the picture, and a control that reads this state has to be
+    // able to say so. What the user settled on survives in `settledState`,
+    // which is what the release resumes and what a mid-drag toggle acts on.
     const state =
-      gestureInFlight && settledState !== null && status !== "ERRORED"
-        ? settledState
+      gestureInFlight && status !== "ERRORED"
+        ? MediaRendererPlaybackState.Paused
         : resolveTransportPlaybackState(status, seeking, settledState);
 
     if (!gestureInFlight && !isSettling(status, seeking)) {
@@ -90,15 +101,6 @@ export function createMediaRendererTransport(
     channel.subscribe("time", publishPlayheadTime),
     channel.subscribe("rate", publishPlaybackRate),
   ];
-
-  const releaseGesture = async () => {
-    if (!gestureInFlight) {
-      return;
-    }
-
-    gestureInFlight = false;
-    await channel.endInteractiveSeek();
-  };
 
   const transport: MediaRendererTransport = {
     async play() {
@@ -130,7 +132,10 @@ export function createMediaRendererTransport(
     },
 
     scrub(mediaTime) {
-      if (!gestureInFlight) {
+      // A drag whose landing seek is still releasing the producer is the drag
+      // this scrub belongs to. Opening a second one there would stop the
+      // picture for a gesture nobody is holding, and nothing would release it.
+      if (!gestureInFlight && landingRelease === null) {
         gestureInFlight = true;
         channel.beginInteractiveSeek();
       }
@@ -143,7 +148,16 @@ export function createMediaRendererTransport(
       // release: the producer resumes on its own terms, and the landing decode
       // for a cold region no longer sits between the pointer coming up and
       // playback continuing.
-      await releaseGesture();
+      const release = releaseGesture();
+      landingRelease = release;
+      try {
+        await release;
+      } finally {
+        if (landingRelease === release) {
+          landingRelease = null;
+        }
+      }
+
       await channel.commit(mediaTime * MILLISECONDS_PER_SECOND);
     },
 
