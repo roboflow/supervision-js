@@ -633,6 +633,13 @@ function useTimelineSeekGesture({
 }: TimelineSeekGestureOptions) {
   const [scrubTime, setScrubTime] = useState<number | null>(null);
   const scrubTimeRef = useRef<number | null>(null);
+  /**
+   * The gesture outlives the scrub position. The settle effect clears that
+   * position as soon as the player reports it reached the drag target, which
+   * during a drag happens while the pointer is still down, so a release keyed
+   * on the position never fires and the producer is never told the drag ended.
+   */
+  const gestureActiveRef = useRef(false);
 
   const moveTo = (nextTime: number) => {
     if (disabled || duration === null) {
@@ -647,13 +654,12 @@ function useTimelineSeekGesture({
   };
 
   const releaseSeek = () => {
-    const nextTime = scrubTimeRef.current;
-
-    if (nextTime === null || disabled || duration === null) {
+    if (!gestureActiveRef.current || disabled || duration === null) {
       return;
     }
 
-    onSeek(clamp(nextTime, 0, duration));
+    gestureActiveRef.current = false;
+    onSeek(clamp(scrubTimeRef.current ?? currentTime, 0, duration));
   };
 
   useEffect(() => {
@@ -674,6 +680,7 @@ function useTimelineSeekGesture({
       return;
     }
 
+    gestureActiveRef.current = false;
     scrubTimeRef.current = null;
     setScrubTime(null);
   }, [disabled, duration]);
@@ -689,6 +696,7 @@ function useTimelineSeekGesture({
     },
     onScrubEnd: releaseSeek,
     onScrubStart(nextTime: number) {
+      gestureActiveRef.current = true;
       moveTo(nextTime);
     },
     scrubTime,

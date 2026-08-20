@@ -127,8 +127,12 @@ export function createMediaRendererTransport(
     },
 
     async commit(mediaTime) {
-      await channel.commit(mediaTime * MILLISECONDS_PER_SECOND);
+      // Releasing first is what keeps a drag from freezing the picture on
+      // release: the producer resumes on its own terms, and the landing decode
+      // for a cold region no longer sits between the pointer coming up and
+      // playback continuing.
       await releaseGesture();
+      await channel.commit(mediaTime * MILLISECONDS_PER_SECOND);
     },
 
     async step(direction) {
