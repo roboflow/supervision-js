@@ -9,6 +9,7 @@ import {
 import {
   createDetectionFrameFromExecutorchCocoPoses,
   createExecutorchLivePoseProcessor,
+  createExecutorchLivePoseProducer,
   createExecutorchLiveSegmentationProcessor,
   createExecutorchLiveSegmentationProducer,
   createExecutorchVideoFrameSerializer,
@@ -17,6 +18,7 @@ import {
   type ExecutorchBbox,
   type ExecutorchCocoPose,
 } from "./executorch";
+import type { ReactNativeLiveDetectionProducer } from "../types/live-producer";
 
 /**
  * ExecuTorch's forward mapping for `orientation: "up"` outputs, transcribed
@@ -457,5 +459,50 @@ describe("createExecutorchLiveSegmentationProducer", () => {
       detections: [],
       mediaTime: 1,
     });
+  });
+});
+
+describe("createExecutorchLivePoseProducer", () => {
+  // A full COCO skeleton: the converter drops poses without enough visible
+  // points, so a partial fixture would produce no detection at all.
+  const pose = Object.fromEntries(
+    EXECUTORCH_COCO_KEYPOINT_NAMES.map((name, index) => [
+      name,
+      { x: 100 + index * 2, y: 200 + index * 3 },
+    ]),
+  ) as ExecutorchCocoPose;
+
+  it("produces the same DetectionFrame the pose processor does", () => {
+    const runOnFrame = () => [pose];
+    const processor = createExecutorchLivePoseProcessor({ runOnFrame });
+    const producer: ReactNativeLiveDetectionProducer =
+      createExecutorchLivePoseProducer({ runOnFrame });
+    const frame = { timestamp: 3_000_000_000 };
+
+    expect(producer.process(frame)).toEqual(processor.process(frame));
+  });
+
+  it("carries keypoint geometry on the shared producer contract", () => {
+    const producer: ReactNativeLiveDetectionProducer =
+      createExecutorchLivePoseProducer({ runOnFrame: () => [pose] });
+
+    const detectionFrame = producer.process({ timestamp: 1_000_000_000 });
+
+    expect(detectionFrame.mediaTime).toBe(1);
+    expect(detectionFrame.detections[0]?.keypoints?.points.length).toBe(
+      EXECUTORCH_COCO_KEYPOINT_NAMES.length,
+    );
+    // Pose detections carry no mask; the renderer branches on the geometry
+    // present rather than on a task enum.
+    expect(detectionFrame.detections[0]?.mask).toBeUndefined();
+  });
+
+  it("stays inert while the runner has not crossed into the frame runtime", () => {
+    const producer: ReactNativeLiveDetectionProducer =
+      createExecutorchLivePoseProducer({
+        runOnFrame: undefined as unknown as null,
+      });
+
+    expect(producer.process({ timestamp: 0 }).detections).toEqual([]);
   });
 });
