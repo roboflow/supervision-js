@@ -1036,6 +1036,56 @@ describe("package entrypoint", () => {
     renderer.destroy();
   });
 
+  it("keeps a label drawn and moving while its detection is edited", async () => {
+    resetMocks();
+    const editing = createEditingEngineHarness();
+    const detection = {
+      className: "player",
+      id: "player-7",
+      rect: { height: 100, width: 50, x: 100, y: 90 },
+    };
+    const renderer = await createRenderer(false, false, {
+      detectionFrames: [
+        { detections: [detection], frameIndex: 0, mediaTime: 0 },
+      ],
+      editingEngine: editing.engine,
+      labelStyle: {
+        resolve: (candidate: Detection) => ({
+          background: { alpha: 0.7, color: 0x111827 },
+          rect: candidate.rect,
+          text: candidate.className ?? "",
+          textStyle: { alpha: 1, color: 0xffffff, fontSize: 14 },
+        }),
+      },
+    });
+
+    const label = pixiMock.textInstances[0];
+    expect(label).toMatchObject({ text: "player", visible: true });
+    const baseX = label!.x;
+    const baseY = label!.y;
+
+    // The base layers hide the detection under a gesture and the overlay
+    // preview draws no label, so the label layer must stay out of that hide.
+    editing.emitState({
+      activeDetectionId: "player-7",
+      activeHandleId: null,
+      kind: AnnotationGestureStateKind.Moving,
+      pointerId: 1,
+      preview: { ...detection, rect: { ...detection.rect, x: 107, y: 87 } },
+    });
+    expect(label).toMatchObject({ visible: true });
+
+    editing.fastTranslate?.("player-7", 7, -3);
+    expect(label!.x).toBe(baseX + 7);
+    expect(label!.y).toBe(baseY - 3);
+
+    editing.emitState(createIdleEditingState());
+    expect(label!.x).toBe(baseX);
+    expect(label!.y).toBe(baseY);
+
+    renderer.destroy();
+  });
+
   it("draws rounded BaseBoxStyle boxes with fill and stroke", async () => {
     resetMocks();
 
