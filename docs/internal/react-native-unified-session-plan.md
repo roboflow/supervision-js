@@ -125,6 +125,18 @@ Move every ExecuTorch-specific repair — `unrotateExecutorchUpBbox`,
 can be written without touching any file outside `adapters/`. No identifier
 containing "Executorch" appears in the live hook's public options.
 
+**Done.** The hook takes one `ReactNativeLiveDetectionProducer` and branches on
+published geometry, so `ReactNativeLiveInferenceMode` is gone. Keypoint drawing
+moved out of the adapter as `createReactNativeKeypointDrawInstructions`, which
+was the last vendor name the hook imported.
+
+Two notes for whoever picks this up. Detections still cross into the ID-mask
+fill through `serializeReactNativeLiveDetectionFrame`, a shallow bridge to the
+older flat shape; retiring it means teaching the fill loops to read `Detection`
+directly, which is hot-path work worth measuring first. And a frame carrying
+both keypoints and masks currently renders only the keypoints, because the two
+lanes still evaluate different extension rules.
+
 ## Phase 2 — Make the clock a parameter
 
 Add an explicit timing policy to the session options. The
