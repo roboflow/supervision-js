@@ -72,7 +72,7 @@ describe("resolveReactNativeFramePresentation", () => {
     expect(presentation.labels).toHaveLength(0);
   });
 
-  it("reports asset regions as unsupported instead of omitting them", () => {
+  it("reports regions as unsupported instead of omitting them", () => {
     expect(() =>
       resolveReactNativeFramePresentation({
         detectionFrame: { detections: [], mediaTime: 0 },

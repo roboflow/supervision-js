@@ -62,6 +62,35 @@ describe("docs region annotation renderer", () => {
     ]);
   });
 
+  it("crops the current media frame for the big-head example", () => {
+    const settings = {
+      ...createRegionPlaygroundSettings(RegionPlaygroundMode.MediaCrop),
+      flipHorizontal: true,
+      offsetY: -0.1,
+      scale: 3,
+    };
+
+    expect(createRegionPlaygroundRenderers(settings, assets)).toMatchObject([
+      {
+        id: "player-big-heads",
+        kind: "region",
+        region: { anchor: "head", kind: "keypoint-anchor" },
+        source: {
+          kind: "media",
+          region: { anchor: "head", kind: "keypoint-anchor" },
+        },
+        target: {
+          className: ["white team player", "yellow team player"],
+        },
+        transform: {
+          flip: { horizontal: true },
+          offset: { x: 0, y: -0.1 },
+          scale: 3,
+        },
+      },
+    ]);
+  });
+
   it("keeps the selected asset type and live transforms in the snippet", () => {
     const icons = createRegionPlaygroundSnippet({
       ...createRegionPlaygroundSettings(RegionPlaygroundMode.StaticIcons),
@@ -72,11 +101,17 @@ describe("docs region annotation renderer", () => {
     const animated = createRegionPlaygroundSnippet(
       createRegionPlaygroundSettings(RegionPlaygroundMode.AnimatedGif),
     );
+    const mediaCrop = createRegionPlaygroundSnippet({
+      ...createRegionPlaygroundSettings(RegionPlaygroundMode.MediaCrop),
+      flipHorizontal: true,
+    });
 
     expect(icons).toContain("id, className, src");
     expect(icons).toContain("offset: { x: 0, y: -0.75 }");
     expect(icons).toContain("rotation: 0.52");
     expect(icons).toContain("scale: 1.10");
     expect(animated).toContain("asset: { src: fireGifUrl }");
+    expect(mediaCrop).toContain('kind: "media"');
+    expect(mediaCrop).toContain("flip: { horizontal: true }");
   });
 });

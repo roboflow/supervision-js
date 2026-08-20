@@ -330,8 +330,9 @@ export const docsAnnotationRenderers: Readonly<
   },
   regions: {
     controls: [],
-    description: "Asset overlays anchored to detection geometry",
-    title: "Asset Regions",
+    description:
+      "Media crops and asset overlays anchored to detection geometry",
+    title: "Regions",
   },
 };
 

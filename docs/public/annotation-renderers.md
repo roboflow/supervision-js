@@ -48,7 +48,7 @@ motion-gated basketball trajectory rather than inventing geometry at runtime.
 - [Polygons](./annotation-renderers/polygons.md)
 - [Polylines](./annotation-renderers/polylines.md)
 - [Keypoints and skeletons](./annotation-renderers/keypoints-and-skeletons.md)
-- [Asset regions](./annotation-renderers/asset-regions.md)
+- [Regions](./annotation-renderers/asset-regions.md)
 
 ## Renderer Configuration
 
@@ -76,7 +76,8 @@ including when the list is empty. A listed renderer without an explicit
 `style` uses its matching compatibility field. Source-specific overrides refine
 selected renderers but cannot re-enable an omitted renderer.
 
-Most established renderers are singleton style-backed layers. Asset-region
+Most established renderers are singleton style-backed layers. Region
 renderers are intentionally multi-instance: each descriptor has its own `id`,
-target, source, anchor, transform, and composition order, so an application can
-place independent assets without creating a parallel layer API.
+target, asset or media source, anchor, transform, and composition order, so an
+application can place independent effects without creating a parallel layer
+API.

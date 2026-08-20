@@ -77,10 +77,6 @@ type TextureUploadSource = {
   update(): void;
 };
 
-type TextureUpload = {
-  update(): void;
-};
-
 export async function createPixiMediaScene(
   options: MediaRendererSceneOptions,
 ): Promise<MediaRendererScene> {
@@ -203,6 +199,10 @@ export async function createPixiMediaScene(
     };
   }
 
+  let mediaSprite: InstanceType<typeof Sprite> | undefined;
+  let stagingTexture: PixiTexture | undefined;
+  let stagingTextureSource: TextureUploadSource | undefined;
+
   const boxLayer = createPixiBoxLayer({
     boxStyle: options.boxStyle,
     Container: options.editingEngine ? Container : undefined,
@@ -243,8 +243,11 @@ export async function createPixiMediaScene(
     Assets,
     Container,
     GifSprite,
+    Rectangle,
     Sprite,
+    Texture,
     detectionTimeline: options.detectionTimeline,
+    getMediaTexture: () => (hasPresentedSample ? stagingTexture : undefined),
     onInvalidate: () => {
       if (!hasPresentedSample || mediaWidth <= 0 || mediaHeight <= 0) return;
       const boxState = boxLayer.drawFrame(currentMediaTime, viewportScale);
@@ -502,9 +505,6 @@ export async function createPixiMediaScene(
           !resolveAnnotationStyleState(detection, currentVisibility).hidden,
       })
     : undefined;
-  let mediaSprite: InstanceType<typeof Sprite> | undefined;
-  let stagingTexture: TextureUpload | undefined;
-  let stagingTextureSource: TextureUploadSource | undefined;
   const collectFrameTimings = options.diagnostics?.frameTimings === true;
 
   const syncSceneChildren = () => {

@@ -184,5 +184,34 @@ describe("annotation renderer registry", () => {
       source: { asset: { src: "/hat.png" }, kind: "asset" },
       target: { className: "person" },
     });
+
+    expect(
+      annotationRenderers.region({
+        id: "big-heads",
+        region: { anchor: "head", kind: "keypoint-anchor" },
+        source: {
+          kind: "media",
+          region: { anchor: "head", kind: "keypoint-anchor" },
+        },
+        target: { className: "person" },
+        transform: {
+          flip: { horizontal: true },
+          scale: 3,
+        },
+      }),
+    ).toEqual({
+      id: "big-heads",
+      kind: "region",
+      region: { anchor: "head", kind: "keypoint-anchor" },
+      source: {
+        kind: "media",
+        region: { anchor: "head", kind: "keypoint-anchor" },
+      },
+      target: { className: "person" },
+      transform: {
+        flip: { horizontal: true },
+        scale: 3,
+      },
+    });
   });
 });

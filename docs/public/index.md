@@ -101,7 +101,7 @@ console.log(state.status, state.activities);
       <article class="supervision-home__capability-card">
         <span class="supervision-home__capability-number">02</span>
         <h3>Detection rendering</h3>
-        <p>Annotation renderers for boxes, masks, polygons, polylines, keypoints, labels, and multi-instance asset regions, selected from canonical media timing.</p>
+        <p>Annotation renderers for boxes, masks, polygons, polylines, keypoints, labels, and multi-instance regions, selected from canonical media timing.</p>
         <a href="documents/Core_Concepts.Detections_And_Rendering.html">Detections and rendering</a>
       </article>
       <article class="supervision-home__capability-card">
@@ -180,7 +180,7 @@ console.log(state.status, state.activities);
     <h2 id="next-title">Choose the path that matches your integration.</h2>
     <nav class="supervision-home__next-grid" aria-label="Documentation paths">
       <a href="documents/Quickstart.html"><strong>Quickstart</strong><span>Install, mount, and render your first detections.</span></a>
-      <a href="documents/Annotation_Renderers.html"><strong>Annotation renderers</strong><span>Select and style boxes, masks, labels, polygons, pose, and asset regions in live playgrounds.</span></a>
+      <a href="documents/Annotation_Renderers.html"><strong>Annotation renderers</strong><span>Select and style boxes, masks, labels, polygons, pose, and regions in live playgrounds.</span></a>
       <a href="documents/Post_Processors.html"><strong>Post processors</strong><span>Apply ordered tracking to streaming boxes, masks, and keypoints in a browser worker.</span></a>
       <a href="documents/Recipes.html"><strong>Recipes</strong><span>Apply focused patterns for sources, picking, lifecycle, and React.</span></a>
     </nav>

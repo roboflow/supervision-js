@@ -129,6 +129,7 @@ export interface PolylineAnnotationRenderer extends BaseAnnotationRenderer {
 /** Sources currently supported by a region renderer. */
 export const RegionRendererSourceKind = {
   Asset: "asset",
+  Media: "media",
 } as const;
 
 export type RegionRendererSourceKind =
@@ -177,6 +178,21 @@ export interface RegionRendererAssetSource {
   readonly asset: RegionRendererAssetReference;
 }
 
+/**
+ * Reuses pixels from the renderer-owned media frame.
+ *
+ * The source region is resolved from the same semantic detection as the
+ * destination region. Browser backends crop the already-presented media
+ * texture; they must not create another decoder or expose that texture.
+ */
+export interface RegionRendererMediaSource {
+  readonly kind: typeof RegionRendererSourceKind.Media;
+  readonly region: RegionRendererRegion;
+}
+
+export type RegionRendererSource =
+  RegionRendererAssetSource | RegionRendererMediaSource;
+
 export interface RegionRendererBoundsRegion {
   readonly kind: typeof RegionRendererRegionKind.Bounds;
 }
@@ -206,6 +222,11 @@ export interface RegionRendererTransform {
   readonly rotation?: number;
   /** Sprite opacity from 0 through 1. Defaults to 1. */
   readonly opacity?: number;
+  /** Mirrors the rendered region around its destination anchor. */
+  readonly flip?: {
+    readonly horizontal?: boolean;
+    readonly vertical?: boolean;
+  };
 }
 
 export interface RegionRendererCompose {
@@ -215,15 +236,16 @@ export interface RegionRendererCompose {
 }
 
 /**
- * Places a browser-loaded asset over a detection-owned region.
+ * Places an asset or a crop of the current media frame over a
+ * detection-owned region.
  *
  * This descriptor is intentionally semantic and backend-neutral. Asset
- * loading, texture caching, sprites, and teardown remain backend details.
+ * loading, media texture reuse, sprites, and teardown remain backend details.
  */
 export interface RegionAnnotationRenderer extends BaseAnnotationRenderer {
   readonly kind: "region";
   readonly target: RegionRendererTarget;
-  readonly source: RegionRendererAssetSource;
+  readonly source: RegionRendererSource;
   readonly region: RegionRendererRegion;
   readonly transform?: RegionRendererTransform;
   readonly compose?: RegionRendererCompose;

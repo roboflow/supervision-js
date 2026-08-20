@@ -42,6 +42,7 @@ describe("pixi region layer", () => {
     const load = vi.fn(async () => texture);
     const onInvalidate = vi.fn();
     const layer = createPixiRegionLayer({
+      ...createTestBackend(),
       Assets: { load, unload: vi.fn(async () => undefined) } as never,
       Container: FakeContainer as never,
       GifSprite: FakeGifSprite as never,
@@ -89,6 +90,7 @@ describe("pixi region layer", () => {
   it("supports multiple identified region renderers and replaces released displays", async () => {
     const unload = vi.fn(async () => undefined);
     const layer = createPixiRegionLayer({
+      ...createTestBackend(),
       Assets: {
         load: vi.fn(async (src: string) => ({
           height: src.includes("hat") ? 20 : 30,
@@ -141,6 +143,7 @@ describe("pixi region layer", () => {
 
   it("fast-translates every active region display for a detection", async () => {
     const layer = createPixiRegionLayer({
+      ...createTestBackend(),
       Assets: {
         load: vi.fn(async () => ({ height: 10, width: 10 })),
         unload: vi.fn(async () => undefined),
@@ -188,6 +191,7 @@ describe("pixi region layer", () => {
       })),
     };
     const layer = createPixiRegionLayer({
+      ...createTestBackend(),
       Assets: {
         load: vi.fn(async () => ({ height: 10, width: 10 })),
         unload: vi.fn(async () => undefined),
@@ -222,6 +226,7 @@ describe("pixi region layer", () => {
     const onInvalidate = vi.fn();
     const unload = vi.fn(async () => undefined);
     const layer = createPixiRegionLayer({
+      ...createTestBackend(),
       Assets: { load: () => texture, unload } as never,
       Container: FakeContainer as never,
       GifSprite: FakeGifSprite as never,
@@ -251,6 +256,7 @@ describe("pixi region layer", () => {
     const error = new Error("asset unavailable");
     const onAssetError = vi.fn();
     const layer = createPixiRegionLayer({
+      ...createTestBackend(),
       Assets: {
         load: vi.fn(async () => Promise.reject(error)),
         unload: vi.fn(async () => undefined),
@@ -281,6 +287,98 @@ describe("pixi region layer", () => {
     layer.destroy();
   });
 
+  it("reuses the presented media texture for cropped regions across seek and transform updates", () => {
+    const mediaTexture = new FakeTexture({
+      source: { height: 200, width: 300 },
+    });
+    const loopedFrame: DetectionFrame = {
+      ...frame,
+      detections: [
+        {
+          ...frame.detections[0]!,
+          keypoints: {
+            ...frame.detections[0]!.keypoints!,
+            points: frame.detections[0]!.keypoints!.points.map(({ x, y }) => ({
+              x: x + 20,
+              y: y + 10,
+            })),
+          },
+        },
+      ],
+      frameIndex: 0,
+      mediaTime: 0,
+    };
+    const timeline = createTimeline(frame, (mediaTime) =>
+      mediaTime < 0.5 ? loopedFrame : frame,
+    );
+    const renderer = annotationRenderers.region({
+      id: "big-heads",
+      region: { anchor: "head", kind: "keypoint-anchor" },
+      source: {
+        kind: "media",
+        region: { anchor: "head", kind: "keypoint-anchor" },
+      },
+      target: { className: "player" },
+      transform: {
+        flip: { horizontal: true },
+        scale: 2,
+      },
+    });
+    const load = vi.fn();
+    const layer = createPixiRegionLayer({
+      ...createTestBackend(mediaTexture),
+      Assets: { load, unload: vi.fn(async () => undefined) } as never,
+      Container: FakeContainer as never,
+      GifSprite: FakeGifSprite as never,
+      Sprite: FakeSprite as never,
+      detectionTimeline: timeline,
+      regionRenderers: [renderer],
+    });
+    const container = layer.createContainer() as unknown as FakeContainer;
+
+    expect(layer.drawFrame(1).activeDetectionIndexes).toEqual([0]);
+    expect(load).not.toHaveBeenCalled();
+    expect(container.children).toHaveLength(1);
+    const display = container.children[0]!;
+    const cropTexture = display.texture as FakeTexture;
+    expect(cropTexture.source).toBe(mediaTexture.source);
+    expect(cropTexture.frame.x).toBeCloseTo(80);
+    expect(cropTexture.frame.y).toBeCloseTo(18.8);
+    expect(cropTexture.frame.width).toBeCloseTo(40);
+    expect(cropTexture.frame.height).toBeCloseTo(40);
+    expect(display).toMatchObject({ height: 80, width: 80 });
+    expect(display.scale.x).toBe(-1);
+
+    layer.drawFrame(0);
+    expect(container.children).toHaveLength(1);
+    expect(cropTexture.frame.x).toBeCloseTo(100);
+    expect(cropTexture.frame.y).toBeCloseTo(28.8);
+    expect(cropTexture.frame.width).toBeCloseTo(40);
+    expect(cropTexture.frame.height).toBeCloseTo(40);
+    expect(cropTexture.update).toHaveBeenCalled();
+
+    layer.setRenderers([
+      {
+        ...renderer,
+        transform: {
+          flip: { vertical: true },
+          offset: { x: 0.1, y: -0.2 },
+          scale: 3,
+        },
+      },
+    ]);
+    expect(container.children).toHaveLength(1);
+    expect(display).toMatchObject({ height: 120, width: 120 });
+    expect(display.scale).toMatchObject({ x: 1, y: -1 });
+    const [x, y] = display.position.set.mock.lastCall!;
+    expect(x).toBeCloseTo(124);
+    expect(y).toBeCloseTo(40.8);
+
+    layer.destroy();
+    expect(cropTexture.destroy).toHaveBeenCalledWith(false);
+    expect(mediaTexture.destroy).not.toHaveBeenCalled();
+  });
+
   it("creates a looping GifSprite and releases its shared source", async () => {
     const gifSource = {
       duration: 1_000,
@@ -298,6 +396,7 @@ describe("pixi region layer", () => {
       target: { className: "player" },
     });
     const layer = createPixiRegionLayer({
+      ...createTestBackend(),
       Assets: {
         load: vi.fn(async () => gifSource),
         unload,
@@ -357,6 +456,7 @@ class FakeSprite {
   readonly destroy = vi.fn();
   readonly position = { set: vi.fn() };
   readonly removeFromParent = vi.fn(() => this.parent?.removeChild(this));
+  readonly scale = { x: 1, y: 1 };
   alpha = 1;
   height = 0;
   rotation = 0;
@@ -368,6 +468,41 @@ class FakeSprite {
 
   constructor(options: { texture: { height: number; width: number } }) {
     this.texture = options.texture;
+  }
+}
+
+class FakeRectangle {
+  constructor(
+    public x = 0,
+    public y = 0,
+    public width = 0,
+    public height = 0,
+  ) {}
+}
+
+class FakeTexture {
+  readonly destroy = vi.fn();
+  readonly dynamic: boolean;
+  readonly frame: FakeRectangle;
+  readonly update = vi.fn();
+  source: { height: number; width: number };
+
+  constructor(options: {
+    readonly dynamic?: boolean;
+    readonly frame?: FakeRectangle;
+    readonly source: { height: number; width: number };
+  }) {
+    this.dynamic = options.dynamic ?? false;
+    this.frame = options.frame ?? new FakeRectangle();
+    this.source = options.source;
+  }
+
+  get height() {
+    return this.frame.height || this.source.height;
+  }
+
+  get width() {
+    return this.frame.width || this.source.width;
   }
 }
 
@@ -392,6 +527,7 @@ class FakeGifSprite extends FakeSprite {
 
 function createTimeline(
   activeFrame: DetectionFrame,
+  selectFrame: (mediaTime: number) => DetectionFrame = () => activeFrame,
 ): BufferedDetectionTimeline {
   return {
     destroy() {},
@@ -408,6 +544,14 @@ function createTimeline(
     }),
     prepare: async () => undefined,
     prefetch() {},
-    selectFrame: () => activeFrame,
+    selectFrame,
   } as unknown as BufferedDetectionTimeline;
+}
+
+function createTestBackend(mediaTexture?: FakeTexture) {
+  return {
+    Rectangle: FakeRectangle as never,
+    Texture: FakeTexture as never,
+    getMediaTexture: () => mediaTexture as never,
+  };
 }

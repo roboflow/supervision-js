@@ -81,11 +81,12 @@ export function DocsRegionAnnotationRendererPlayground() {
     [updateSettings],
   );
   const showsIcons = settings.mode === RegionPlaygroundMode.StaticIcons;
+  const showsMediaCrop = settings.mode === RegionPlaygroundMode.MediaCrop;
 
   return (
     <main
       className="docs-layer-playground"
-      aria-label="Asset region annotation renderer playground"
+      aria-label="Region annotation renderer playground"
     >
       <section className="docs-layer-playground__stage">
         <RendererViewport
@@ -100,11 +101,13 @@ export function DocsRegionAnnotationRendererPlayground() {
         <header className="docs-layer-playground__header">
           <div>
             <p>Annotation renderer</p>
-            <h1>Asset Regions</h1>
+            <h1>Regions</h1>
             <span>
-              {showsIcons
-                ? "Class-specific SVG badges anchored to player keypoints"
-                : "Looping fire GIFs anchored to player keypoints"}
+              {showsMediaCrop
+                ? "Live media crops anchored to player face keypoints"
+                : showsIcons
+                  ? "Class-specific SVG badges anchored to player keypoints"
+                  : "Looping fire GIFs anchored to player keypoints"}
             </span>
           </div>
           <button
@@ -123,9 +126,15 @@ export function DocsRegionAnnotationRendererPlayground() {
         <div className="docs-layer-playground__controls">
           <RegionModeControl onChange={updateMode} value={settings.mode} />
           <RegionRangeControl
-            label={showsIcons ? "Icon scale" : "GIF scale"}
-            max={2.2}
-            min={0.5}
+            label={
+              showsMediaCrop
+                ? "Head scale"
+                : showsIcons
+                  ? "Icon scale"
+                  : "GIF scale"
+            }
+            max={showsMediaCrop ? 3.5 : 2.2}
+            min={showsMediaCrop ? 1 : 0.5}
             onChange={(scale) =>
               updateSettings({ ...settingsRef.current, scale })
             }
@@ -155,6 +164,17 @@ export function DocsRegionAnnotationRendererPlayground() {
             value={settings.rotationDegrees}
             valueLabel={`${settings.rotationDegrees}°`}
           />
+          {showsMediaCrop ? (
+            <RegionFlipControl
+              checked={settings.flipHorizontal}
+              onChange={(flipHorizontal) =>
+                updateSettings({
+                  ...settingsRef.current,
+                  flipHorizontal,
+                })
+              }
+            />
+          ) : null}
         </div>
 
         <section
@@ -186,26 +206,59 @@ function RegionModeControl({
   readonly value: RegionPlaygroundModeValue;
 }) {
   return (
-    <fieldset className="docs-layer-playground__asset-type">
-      <legend>Asset type</legend>
+    <fieldset className="docs-layer-playground__asset-type docs-layer-playground__asset-type--sources">
+      <legend>Region source</legend>
       <div>
         <label>
           <input
+            checked={value === RegionPlaygroundMode.MediaCrop}
+            name="region-source"
+            onChange={() => onChange(RegionPlaygroundMode.MediaCrop)}
+            type="radio"
+          />
+          <span>Big heads</span>
+        </label>
+        <label>
+          <input
             checked={value === RegionPlaygroundMode.StaticIcons}
-            name="region-asset-type"
+            name="region-source"
             onChange={() => onChange(RegionPlaygroundMode.StaticIcons)}
             type="radio"
           />
-          <span>Static icons</span>
+          <span>Team badges</span>
         </label>
         <label>
           <input
             checked={value === RegionPlaygroundMode.AnimatedGif}
-            name="region-asset-type"
+            name="region-source"
             onChange={() => onChange(RegionPlaygroundMode.AnimatedGif)}
             type="radio"
           />
           <span>Animated GIF</span>
+        </label>
+      </div>
+    </fieldset>
+  );
+}
+
+function RegionFlipControl({
+  checked,
+  onChange,
+}: {
+  readonly checked: boolean;
+  readonly onChange: (checked: boolean) => void;
+}) {
+  return (
+    <fieldset className="docs-layer-playground__asset-type docs-layer-playground__asset-type--single">
+      <legend>Crop transform</legend>
+      <div>
+        <label>
+          <input
+            checked={checked}
+            onChange={(event) => onChange(event.currentTarget.checked)}
+            type="checkbox"
+          />
+          <span>Mirror horizontally</span>
         </label>
       </div>
     </fieldset>

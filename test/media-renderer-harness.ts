@@ -100,6 +100,7 @@ const mockState = vi.hoisted(() => {
       height: number;
       options: unknown;
       position: { set: ReturnType<typeof vi.fn> };
+      scale: { x: number; y: number };
       texture: unknown;
       visible: boolean;
       width: number;
@@ -319,6 +320,7 @@ vi.mock("pixi.js", () => {
     position = { set: vi.fn() };
     removeFromParent = vi.fn();
     rotation = 0;
+    scale = { x: 1, y: 1 };
     texture: unknown;
     visible = true;
     width = 0;
