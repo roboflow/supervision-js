@@ -1,4 +1,10 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   MediaRendererPlaybackState,
   MediaSessionActivityKind,
@@ -6,6 +12,7 @@ import {
 import { BenchmarksPanel } from "./components/BenchmarksPanel";
 import { ControlBar } from "./components/ControlBar";
 import { DemoShell } from "./components/DemoShell";
+import { EngineDiagnostics } from "./components/EngineDiagnostics";
 import { DocsBasketballPlayground } from "./components/DocsBasketballPlayground";
 import { DocsAnnotationRendererPlayground } from "./components/DocsAnnotationRendererPlayground";
 import { PerformanceStrip } from "./components/PerformanceStrip";
@@ -21,7 +28,11 @@ import { resolveDemoDocsUrl } from "./docs-url";
 import { parseDocsAnnotationRenderer } from "./docs-annotation-renderer";
 import { DemoSourceMode, useDemoRenderer } from "./hooks/useDemoRenderer";
 import { defaultDemoClassNames } from "./presentation/demo-presentation";
-import { DemoViewMode } from "./session/demo-view-mode";
+import {
+  DemoViewMode,
+  readStoredDemoViewMode,
+  writeStoredDemoViewMode,
+} from "./session/demo-view-mode";
 
 const docsUrl = resolveDemoDocsUrl(
   import.meta.env.VITE_SUPERVISION_DOCS_URL,
@@ -120,7 +131,13 @@ function EmbeddedPlaygroundFrame({
 
 function DemoApp() {
   const demo = useDemoRenderer();
-  const [viewMode, setViewMode] = useState(DemoViewMode.Demo);
+  const [viewMode, setViewMode] = useState(() =>
+    readStoredDemoViewMode(DemoViewMode.Demo),
+  );
+  const onViewModeChange = useCallback((mode: DemoViewMode) => {
+    setViewMode(mode);
+    writeStoredDemoViewMode(mode);
+  }, []);
   const processedRanges = useMemo(
     () =>
       demo.sourceMode === DemoSourceMode.Fixture && demo.duration !== null
@@ -177,7 +194,7 @@ function DemoApp() {
         benchmarksPanel={<BenchmarksPanel />}
         docsUrl={docsUrl}
         mode={viewMode}
-        onModeChange={setViewMode}
+        onModeChange={onViewModeChange}
         viewport={
           <RendererViewport
             containerRef={demo.containerRef}
@@ -227,12 +244,7 @@ function DemoApp() {
         }
         controlBar={
           <ControlBar
-            activeDetectionFrameTime={
-              demo.rendererState?.activeDetectionFrameTime ?? null
-            }
             canUseRenderer={demo.canUseRenderer}
-            currentTime={demo.rendererState?.currentTime ?? null}
-            detectionBuffer={demo.rendererState?.detectionBuffer ?? null}
             duration={demo.duration}
             onScrub={demo.onScrub}
             onSeek={demo.onSeek}
@@ -244,8 +256,6 @@ function DemoApp() {
             presentedRate={demo.presentedRate}
             processedRanges={processedRanges}
             processingRanges={processingRanges}
-            renderPreparationDiagnostics={demo.renderPreparationDiagnostics}
-            sourceFrameRate={demo.sourceState?.estimatedFrameRate ?? null}
           />
         }
         renderControls={
@@ -264,11 +274,14 @@ function DemoApp() {
           />
         }
         presentationDiagnostics={
-          <PresentationDiagnostics
-            detectionRanges={processedRanges}
-            duration={demo.duration}
-            readSample={demo.readPresentationDiagnostics}
-          />
+          <>
+            <EngineDiagnostics tap={demo.engineDiagnosticsTap} />
+            <PresentationDiagnostics
+              detectionRanges={processedRanges}
+              duration={demo.duration}
+              readSample={demo.readPresentationDiagnostics}
+            />
+          </>
         }
         statusPanel={
           <StatusPanel

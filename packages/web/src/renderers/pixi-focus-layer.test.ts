@@ -178,9 +178,37 @@ describe("pixi focus layer", () => {
     expect(display.fill).not.toHaveBeenCalled();
   });
 
+  it("gives the placeholder texture canvas a rendering context", () => {
+    const getContext = vi.fn();
+    vi.stubGlobal("document", {
+      createElement: vi.fn(() => ({ getContext, height: 0, width: 0 })),
+    });
+
+    const layer = createPixiFocusLayer({
+      Container: FakeContainer as never,
+      Graphics: FakeGraphics as never,
+      ImageSource: FakeImageSource as never,
+      Mesh: FakeMesh as never,
+      MeshGeometry: FakeMeshGeometry as never,
+      Shader: FakeShaderFactory as never,
+      UniformGroup: FakeUniformGroup as never,
+      focusStyle: new BaseFocusStyle({
+        fill: { alpha: 0.5, color: 0x000000 },
+      }),
+    });
+
+    layer.createDisplay({ height: 80, width: 120 });
+
+    expect(getContext).toHaveBeenCalledWith("2d");
+  });
+
   it("uses ID-mask focus for masked detections even when the pick target is a box", () => {
     vi.stubGlobal("document", {
-      createElement: vi.fn(() => ({ height: 0, width: 0 })),
+      createElement: vi.fn(() => ({
+        getContext: vi.fn(),
+        height: 0,
+        width: 0,
+      })),
     });
 
     const selectedPick = {
@@ -250,7 +278,11 @@ describe("pixi focus layer", () => {
 
   it("falls back to vector focus when the shader backend cannot build a program", () => {
     vi.stubGlobal("document", {
-      createElement: vi.fn(() => ({ height: 0, width: 0 })),
+      createElement: vi.fn(() => ({
+        getContext: vi.fn(),
+        height: 0,
+        width: 0,
+      })),
     });
 
     const selectedPick = {
@@ -296,7 +328,11 @@ describe("pixi focus layer", () => {
 
   it("declares a WebGL and a WebGPU program for the focus ID-mask shader", () => {
     vi.stubGlobal("document", {
-      createElement: vi.fn(() => ({ height: 0, width: 0 })),
+      createElement: vi.fn(() => ({
+        getContext: vi.fn(),
+        height: 0,
+        width: 0,
+      })),
     });
 
     const layer = createPixiFocusLayer({
@@ -323,7 +359,11 @@ describe("pixi focus layer", () => {
 
   it("samples the ID mask once per fragment and stops the ID scan at the selected count", () => {
     vi.stubGlobal("document", {
-      createElement: vi.fn(() => ({ height: 0, width: 0 })),
+      createElement: vi.fn(() => ({
+        getContext: vi.fn(),
+        height: 0,
+        width: 0,
+      })),
     });
 
     const layer = createPixiFocusLayer({
@@ -585,7 +625,11 @@ describe("pixi focus layer", () => {
 
   it("holds an ID-mask cutout across a frame the mask cook has not caught up with", () => {
     vi.stubGlobal("document", {
-      createElement: vi.fn(() => ({ height: 0, width: 0 })),
+      createElement: vi.fn(() => ({
+        getContext: vi.fn(),
+        height: 0,
+        width: 0,
+      })),
     });
 
     const { artifact, layer, mesh, textureSource } = createIdMaskFocus();
@@ -615,7 +659,11 @@ describe("pixi focus layer", () => {
 
   it("drops a held cutout the media has moved away from, and dims the whole frame", () => {
     vi.stubGlobal("document", {
-      createElement: vi.fn(() => ({ height: 0, width: 0 })),
+      createElement: vi.fn(() => ({
+        getContext: vi.fn(),
+        height: 0,
+        width: 0,
+      })),
     });
 
     const { artifact, layer, mesh, textureSource } = createIdMaskFocus();
@@ -644,7 +692,11 @@ describe("pixi focus layer", () => {
 
   it("drops a held cutout whose ID raster has been evicted", () => {
     vi.stubGlobal("document", {
-      createElement: vi.fn(() => ({ height: 0, width: 0 })),
+      createElement: vi.fn(() => ({
+        getContext: vi.fn(),
+        height: 0,
+        width: 0,
+      })),
     });
 
     const { artifact, layer, mesh, textureSource } = createIdMaskFocus();
@@ -763,7 +815,11 @@ describe("pixi focus layer", () => {
 
   it("rewrites ID-mask uniforms only when the focus they describe changes", () => {
     vi.stubGlobal("document", {
-      createElement: vi.fn(() => ({ height: 0, width: 0 })),
+      createElement: vi.fn(() => ({
+        getContext: vi.fn(),
+        height: 0,
+        width: 0,
+      })),
     });
 
     const { artifact, layer, mesh } = createIdMaskFocus();
@@ -897,7 +953,7 @@ function createIdMaskFocus() {
         hasStroke: false,
         height: 80,
         key: "mask-frame",
-        kind: PreparedMaskFrameKind.IdMask,
+        kind: PreparedMaskFrameKind.IdMask as const,
         maxStrokeWidth: 0,
         raster: new Uint8Array(120 * 80),
         rasterFormat: IdMaskRasterFormat.R8,

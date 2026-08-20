@@ -161,6 +161,55 @@ describe("createChunkedDetectionFrameSource", () => {
     ]);
   });
 
+  it("keeps the window it just left resident when no cache cap is set", async () => {
+    const manifest = createSecondChunkManifest(40);
+    const fetchChunk = vi.fn(async (chunk: { chunkIndex: number }) => ({
+      frames: [
+        {
+          detections: [],
+          endTime: chunk.chunkIndex + 1,
+          frameIndex: chunk.chunkIndex,
+          mediaTime: chunk.chunkIndex,
+        },
+      ],
+    }));
+    const source = createChunkedDetectionFrameSource({ fetchChunk, manifest });
+
+    // The demo's file-mode buffer window: half a second behind, ten ahead.
+    await source.loadFrames(0, 10);
+    await source.loadFrames(19.5, 30);
+    fetchChunk.mockClear();
+    await source.loadFrames(0, 10);
+
+    expect(fetchChunk).not.toHaveBeenCalled();
+  });
+
+  it("still honours an explicit cache cap narrower than the window", async () => {
+    const manifest = createSecondChunkManifest(40);
+    const fetchChunk = vi.fn(async (chunk: { chunkIndex: number }) => ({
+      frames: [
+        {
+          detections: [],
+          endTime: chunk.chunkIndex + 1,
+          frameIndex: chunk.chunkIndex,
+          mediaTime: chunk.chunkIndex,
+        },
+      ],
+    }));
+    const source = createChunkedDetectionFrameSource({
+      fetchChunk,
+      manifest,
+      maxCachedChunks: 12,
+    });
+
+    await source.loadFrames(0, 10);
+    await source.loadFrames(19.5, 30);
+    fetchChunk.mockClear();
+    await source.loadFrames(0, 10);
+
+    expect(fetchChunk).toHaveBeenCalledTimes(9);
+  });
+
   it("retries a chunk request after a failed load", async () => {
     const manifest = createManifest();
     const fetchChunk = vi
@@ -211,6 +260,26 @@ function createManifest(): DetectionFrameChunkManifest {
     datasetId: "long_fixture_v1",
     duration: 3,
     frameRate: 2,
+    schema: "supervision-js.detection-frame-chunk-manifest",
+    version: 1,
+  };
+}
+
+function createSecondChunkManifest(
+  chunkCount: number,
+): DetectionFrameChunkManifest {
+  return {
+    chunkDurationSeconds: 1,
+    chunks: Array.from({ length: chunkCount }, (_, chunkIndex) => ({
+      chunkIndex,
+      endTime: chunkIndex + 1,
+      frameCount: 1,
+      startTime: chunkIndex,
+      src: `chunks/${String(chunkIndex).padStart(6, "0")}.json`,
+    })),
+    datasetId: "window_fixture_v1",
+    duration: chunkCount,
+    frameRate: 1,
     schema: "supervision-js.detection-frame-chunk-manifest",
     version: 1,
   };

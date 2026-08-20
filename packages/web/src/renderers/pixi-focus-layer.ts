@@ -907,6 +907,9 @@ function createPlaceholderCanvas() {
 
   canvas.height = 1;
   canvas.width = 1;
+  // WebGPU rejects a canvas that was never given a rendering context, and Pixi
+  // uploads this placeholder while it builds the shader's first bind group.
+  canvas.getContext("2d");
 
   return canvas;
 }

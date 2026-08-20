@@ -13,9 +13,14 @@ import {
   type MediaRendererState,
   type MediaSessionState,
   type MediaRendererPresentation,
+  type MediaRendererSource,
   type MediaSourceState,
   type RenderPreparationDiagnostics,
 } from "supervision";
+import {
+  createEngineDiagnosticsTap,
+  type EngineDiagnosticsTap,
+} from "../diagnostics/engine-diagnostics-tap";
 import {
   createPresentedFrameTap,
   presentedRateWindowMs,
@@ -29,6 +34,11 @@ import type {
   DemoFixtureFrameTransform,
   DemoFixtureSummary,
 } from "../fixtures/demo-fixtures";
+import {
+  clearLiveReadouts,
+  publishLiveRenderPreparation,
+  publishLiveRendererState,
+} from "./live-readouts";
 import {
   demoFixtures,
   defaultDemoFixture,
@@ -76,6 +86,8 @@ export interface DemoRendererState {
   readonly playbackState: MediaRendererPlaybackState | null;
   /** Media seconds the picture covered per wall second, as measured. */
   readonly presentedRate: number | null;
+  /** The engine's own diagnostics broadcast, for the parity surface. */
+  readonly engineDiagnosticsTap: EngineDiagnosticsTap;
   readonly readPresentationDiagnostics: () => PresentationDiagnosticsSample;
   readonly presentationSettings: DemoPresentationSettings;
   readonly presentationAvailability?: DemoPresentationAvailability;
@@ -176,6 +188,14 @@ export function useDemoRenderer(
   const [presentedFrameTap] = useState<PresentedFrameTap>(() =>
     createPresentedFrameTap(),
   );
+  const [engineDiagnosticsTap] = useState<EngineDiagnosticsTap>(() =>
+    createEngineDiagnosticsTap(),
+  );
+  const tapMediaSource = useCallback(
+    (source: MediaRendererSource) =>
+      engineDiagnosticsTap.tap(presentedFrameTap.tap(source)),
+    [engineDiagnosticsTap, presentedFrameTap],
+  );
   const containerRef = useRef<HTMLDivElement | null>(null);
   const effectRunRef = useRef(0);
   const rendererRef = useRef<MediaRenderer | null>(null);
@@ -271,21 +291,32 @@ export function useDemoRenderer(
       isActive,
       RENDERER_READOUT_INTERVAL_MS,
     );
+    const publishRenderPreparation = (
+      diagnostics: RenderPreparationDiagnostics,
+    ) => {
+      if (!isActive()) {
+        return;
+      }
+
+      publishLiveRenderPreparation(diagnostics);
+      renderPreparationPublisher.publish(diagnostics);
+    };
     const sessionStatePublisher = createThrottledPublisher(
       setSessionState,
       isActive,
       RENDERER_READOUT_INTERVAL_MS,
     );
+    // A window straddling a rate change measures neither rate, and the blend
+    // reads as a shortfall the picture is not actually in.
+    const readSettledPresentedRate = () =>
+      performance.now() - rateChangedAtRef.current >= presentedRateWindowMs
+        ? presentedFrameTap.readRate()
+        : null;
     const rendererStatePublisher = createThrottledPublisher<MediaRendererState>(
       (state) => {
         setRendererState(state);
         setSourceState(state.source);
-        // A window straddling a rate change measures neither rate, and the
-        // blend reads as a shortfall the picture is not actually in.
-        const rateSettled =
-          performance.now() - rateChangedAtRef.current >= presentedRateWindowMs;
-
-        setPresentedRate(rateSettled ? presentedFrameTap.readRate() : null);
+        setPresentedRate(readSettledPresentedRate());
       },
       isActive,
       RENDERER_READOUT_INTERVAL_MS,
@@ -301,6 +332,8 @@ export function useDemoRenderer(
       if (!isActive()) {
         return;
       }
+
+      publishLiveRendererState(state, readSettledPresentedRate());
 
       const playbackStateChanged =
         state.playbackState !== lastPublishedPlaybackState;
@@ -362,14 +395,14 @@ export function useDemoRenderer(
             onFixtureSummary: setFixtureSummary,
             onFrame,
             onMediaState: setMediaState,
-            onRenderPreparationDiagnostics: renderPreparationPublisher.publish,
+            onRenderPreparationDiagnostics: publishRenderPreparation,
             onRendererState,
             onSessionState: sessionStatePublisher.publish,
             onSourceState: setSourceState,
             presentationSettings: presentationSettingsRef.current,
             presentationTransform,
             renderQuality,
-            tapMediaSource: presentedFrameTap.tap,
+            tapMediaSource,
           });
 
           activeSession = session;
@@ -385,14 +418,14 @@ export function useDemoRenderer(
             onFixtureSummary: setFixtureSummary,
             onFrame,
             onMediaState: setMediaState,
-            onRenderPreparationDiagnostics: renderPreparationPublisher.publish,
+            onRenderPreparationDiagnostics: publishRenderPreparation,
             onRendererState,
             onSessionState: sessionStatePublisher.publish,
             onSourceState: setSourceState,
             onUploadState: setUploadInferenceState,
             presentationSettings: presentationSettingsRef.current,
             renderQuality,
-            tapMediaSource: presentedFrameTap.tap,
+            tapMediaSource,
             uploadRun,
           });
 
@@ -431,6 +464,7 @@ export function useDemoRenderer(
 
     return () => {
       cleanedUp = true;
+      clearLiveReadouts();
       renderPreparationPublisher.cancel();
       sessionStatePublisher.cancel();
       rendererStatePublisher.cancel();
@@ -447,8 +481,8 @@ export function useDemoRenderer(
     activeFixture,
     fixtureFrameTransform,
     presentationTransform,
-    presentedFrameTap,
     sourceMode,
+    tapMediaSource,
     syncRendererState,
     uploadRun,
   ]);
@@ -820,6 +854,7 @@ export function useDemoRenderer(
     playbackRate,
     playbackState,
     presentationSettings,
+    engineDiagnosticsTap,
     presentedRate,
     readPresentationDiagnostics,
     refreshPresentation,

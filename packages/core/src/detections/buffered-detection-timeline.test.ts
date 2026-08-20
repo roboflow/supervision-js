@@ -537,6 +537,26 @@ describe("buffered detection timeline", () => {
     }
   });
 
+  it("states a window that ran past the loop point on the lap the playhead is on", async () => {
+    const timeline = createLoopingTimeline();
+
+    timeline.setTimelineContext?.({ duration: 60, loop: true });
+
+    // Playback into the last seconds plans a window that runs past 60, then
+    // the source loops and the clock restarts at 0.
+    for (const playhead of [55, 58, 59.5, 0.2, 1, 3, 5.5, 8]) {
+      await timeline.prepare(playhead, { duration: 60, firstTimestamp: 0 });
+
+      const state = timeline.getState();
+
+      expect(state.bufferStartTime).toBeLessThanOrEqual(playhead);
+      expect(state.bufferEndTime).toBeGreaterThanOrEqual(playhead);
+      expect(timeline.selectFrame(playhead)?.mediaTime).toBe(
+        Math.floor(playhead),
+      );
+    }
+  });
+
   it("resolves a revisited position the same on a later lap", async () => {
     const timeline = createLoopingTimeline();
 

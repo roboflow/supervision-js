@@ -204,6 +204,8 @@ export async function createPixiMediaScene(
   let drawnReadiness: string | null = null;
   let isPresenting = false;
   let isDestroyed = false;
+  let displayFrameHandle: number | null = null;
+  let hasDeferredPresentRender = false;
   const resolveContextState = (
     detection: DetectionFrame["detections"][number],
   ) => resolveAnnotationStyleState(detection, currentVisibility);
@@ -726,7 +728,7 @@ export async function createPixiMediaScene(
       drawVector: (mediaTime) =>
         vectorLayer.drawFrame(mediaTime, viewportScale),
     },
-    render: renderScene,
+    render: renderPresent,
     uploadFrame: (frame) => {
       mediaCompositor?.upload(frame);
       presentedSampleTimestamp = currentMediaTime;
@@ -1215,6 +1217,10 @@ export async function createPixiMediaScene(
 
     destroy() {
       isDestroyed = true;
+      if (displayFrameHandle !== null) {
+        cancelDisplayFrame(displayFrameHandle);
+        displayFrameHandle = null;
+      }
       unsubscribeDetectionTimeline?.();
       disconnectContainerResizeObserver();
       app.cancelResize?.();
@@ -1710,6 +1716,35 @@ export async function createPixiMediaScene(
     renderScheduler.render(describeSceneRender());
   }
 
+  /**
+   * Renders a present at most once per display refresh. Frames arrive as
+   * messages from the producer's own thread, so a main thread that falls
+   * behind takes a whole burst in one refresh and submits a scene per frame
+   * that only the last of can reach the screen. Deferring costs no latency:
+   * the skipped render is replaced before the refresh it would have made.
+   */
+  function renderPresent() {
+    if (displayFrameHandle !== null) {
+      hasDeferredPresentRender = true;
+      return;
+    }
+
+    renderScene();
+    displayFrameHandle = requestDisplayFrame(flushDeferredPresentRender);
+  }
+
+  function flushDeferredPresentRender() {
+    displayFrameHandle = null;
+
+    if (!hasDeferredPresentRender || isDestroyed) {
+      return;
+    }
+
+    hasDeferredPresentRender = false;
+    renderScene();
+    displayFrameHandle = requestDisplayFrame(flushDeferredPresentRender);
+  }
+
   function renderNow() {
     if (frameChannel) renderScene();
   }
@@ -1992,6 +2027,19 @@ function createFrameTexture(device: GPUDevice, width: number, height: number) {
       GPUTextureUsage.RENDER_ATTACHMENT |
       GPUTextureUsage.TEXTURE_BINDING,
   });
+}
+
+/** The next display refresh, or null where there is no animation frame. */
+function requestDisplayFrame(callback: () => void): number | null {
+  return typeof globalThis.requestAnimationFrame === "function"
+    ? globalThis.requestAnimationFrame(callback)
+    : null;
+}
+
+function cancelDisplayFrame(handle: number) {
+  if (typeof globalThis.cancelAnimationFrame === "function") {
+    globalThis.cancelAnimationFrame(handle);
+  }
 }
 
 function measure(work: () => void) {

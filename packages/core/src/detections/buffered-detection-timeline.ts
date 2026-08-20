@@ -238,6 +238,44 @@ export function createBufferedDetectionTimeline(
     return promise;
   };
 
+  /**
+   * Restates the window in the lap the playhead is on.
+   *
+   * A window planned near the end of a looping source runs past the loop
+   * point, so once playback wraps, a host comparing the window against the
+   * media clock reads a range that starts after the time it is holding. The
+   * offset removed here is a whole number of laps, which is what
+   * `getComparableMediaTime` already treats as the same position, so
+   * membership and the frames on screen are untouched.
+   */
+  const anchorWindowToPlayhead = (mediaTime: number) => {
+    const duration = timelineContext.duration;
+
+    if (
+      !isLoopingTimeline() ||
+      duration === null ||
+      state.bufferStartTime === null ||
+      state.bufferEndTime === null
+    ) {
+      return;
+    }
+
+    const laps = Math.round(
+      (getComparableMediaTime(mediaTime) - mediaTime) / duration,
+    );
+
+    if (laps === 0) {
+      return;
+    }
+
+    state = {
+      ...state,
+      bufferEndTime: state.bufferEndTime - laps * duration,
+      bufferStartTime: state.bufferStartTime - laps * duration,
+    };
+    notifyBufferChanged();
+  };
+
   const isBuffered = (mediaTime: number) => {
     const comparableMediaTime = getComparableMediaTime(mediaTime);
 
@@ -352,6 +390,7 @@ export function createBufferedDetectionTimeline(
       }
 
       await refreshBuffer(mediaTime);
+      anchorWindowToPlayhead(mediaTime);
     },
 
     prefetch(mediaTime) {

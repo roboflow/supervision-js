@@ -5,7 +5,12 @@ import {
   encodeCompressedRleCounts,
 } from "supervision-js-core";
 
-import { IdMaskRasterFormat } from "./mask-frame-artifact";
+import {
+  IdMaskRasterFormat,
+  PreparedMaskFrameKind,
+  readIdMaskRasterValue,
+  type PreparedIdMaskFrame,
+} from "./mask-frame-artifact";
 import {
   compositeMaskFrame,
   createIdMaskFrame,
@@ -33,6 +38,52 @@ describe("mask frame compositor", () => {
     expect([...frame!.data]).toEqual([
       1, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255,
     ]);
+  });
+
+  it("keeps an odd-width ID raster pickable at four bytes per pixel", () => {
+    const frame = createIdMaskRasterFrame([
+      {
+        alpha: 0.5,
+        color: 0xff0000,
+        detectionIndex: 0,
+        mask: {
+          counts: encodeCompressedRleCounts([1, 2, 3]),
+          encoding: DetectionMaskEncoding.CompressedRle,
+          height: 2,
+          width: 3,
+        },
+      },
+    ]);
+
+    expect(frame).toBeDefined();
+    expect(frame!.rasterFormat).toBe(IdMaskRasterFormat.Rgba8);
+    expect(frame!.data.length).toBe(3 * 2 * 4);
+
+    const prepared: PreparedIdMaskFrame = {
+      close() {},
+      fillPalette: frame!.fillPalette,
+      hasStroke: frame!.hasStroke,
+      height: frame!.height,
+      key: "odd",
+      kind: PreparedMaskFrameKind.IdMask,
+      maxStrokeWidth: frame!.maxStrokeWidth,
+      raster: frame!.data,
+      rasterFormat: frame!.rasterFormat,
+      strokePalette: frame!.strokePalette,
+      strokeWidths: frame!.strokeWidths,
+      width: frame!.width,
+    };
+    const picked: number[] = [];
+
+    for (let y = 0; y < 2; y += 1) {
+      for (let x = 0; x < 3; x += 1) {
+        picked.push(readIdMaskRasterValue(prepared, x, y));
+      }
+    }
+
+    // Compressed RLE runs down columns, so the two mask pixels of run [1, 2]
+    // are (0,1) and (1,0).
+    expect(picked).toEqual([0, 1, 0, 1, 0, 0]);
   });
 
   it("hands an aligned ID raster to the GPU one byte per pixel", () => {

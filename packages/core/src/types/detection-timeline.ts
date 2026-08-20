@@ -283,6 +283,11 @@ export interface ChunkedDetectionFrameSourceOptions {
   readonly fetchChunk?: DetectionFrameChunkFetch;
   /**
    * Maximum number of decoded chunks cached in memory.
+   *
+   * Left unset, the cache grows to twice the widest buffer window it has been
+   * asked to serve, so the ground a backwards scrub lands on is still resident.
+   * A fixed value caps the cache at that size even when the window is wider,
+   * which costs a refetch on every load that spans more chunks than the cap.
    */
   readonly maxCachedChunks?: number;
 }

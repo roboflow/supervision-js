@@ -319,6 +319,70 @@ describe("push-presented Pixi scene", () => {
     expect(second.frame.close).toHaveBeenCalledTimes(1);
   });
 
+  it("renders a burst of presents once per display refresh", async () => {
+    const frames = stubAnimationFrames();
+    const channel = createChannel();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene(
+      createSceneOptions(channel.channel),
+    );
+    scene.initializeMedia({ height: 240, width: 320 });
+
+    channel.present(presentedFrame(1000));
+    channel.present(presentedFrame(2000));
+    channel.present(presentedFrame(3000));
+
+    expect(scene.getRenderCount?.()).toBe(1);
+
+    frames.run();
+
+    expect(scene.getRenderCount?.()).toBe(2);
+
+    frames.run();
+
+    // Nothing was deferred by the second render, so the scene stops asking for
+    // frames instead of holding one open forever.
+    expect(scene.getRenderCount?.()).toBe(2);
+    expect(frames.pending()).toBe(0);
+  });
+
+  it("renders the next present straight away once the burst has drained", async () => {
+    const frames = stubAnimationFrames();
+    const channel = createChannel();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene(
+      createSceneOptions(channel.channel),
+    );
+    scene.initializeMedia({ height: 240, width: 320 });
+
+    channel.present(presentedFrame(1000));
+    frames.run();
+    channel.present(presentedFrame(2000));
+
+    expect(scene.getRenderCount?.()).toBe(2);
+  });
+
+  it("closes every frame of a burst even though most of them never render", async () => {
+    stubAnimationFrames();
+    const channel = createChannel();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene(
+      createSceneOptions(channel.channel),
+    );
+    scene.initializeMedia({ height: 240, width: 320 });
+
+    const burst = [1000, 2000, 3000, 4000].map((time) => presentedFrame(time));
+
+    for (const presented of burst) {
+      channel.present(presented);
+    }
+
+    expect(scene.getRenderCount?.()).toBe(1);
+    for (const presented of burst) {
+      expect(presented.frame.close).toHaveBeenCalledTimes(1);
+    }
+  });
+
   it("leaves Pixi's ticker unused so nothing free-runs", async () => {
     const channel = createChannel();
     const { createPixiMediaScene } = await import("./pixi-media-scene");
@@ -504,6 +568,35 @@ function createDeferred<T>() {
   });
 
   return { promise, resolve };
+}
+
+/**
+ * Animation frames the test drives by hand. A scene that coalesces on the
+ * display refresh cannot be measured against a refresh that never arrives.
+ */
+function stubAnimationFrames() {
+  let nextHandle = 0;
+  const callbacks = new Map<number, () => void>();
+
+  vi.stubGlobal("requestAnimationFrame", (callback: () => void) => {
+    nextHandle += 1;
+    callbacks.set(nextHandle, callback);
+    return nextHandle;
+  });
+  vi.stubGlobal("cancelAnimationFrame", (handle: number) => {
+    callbacks.delete(handle);
+  });
+
+  return {
+    pending: () => callbacks.size,
+    run() {
+      const due = [...callbacks.values()];
+      callbacks.clear();
+      for (const callback of due) {
+        callback();
+      }
+    },
+  };
 }
 
 function createChannel() {

@@ -70,7 +70,7 @@ describe("detection frame utilities", () => {
     expect(selectDetectionFrame(frames, 1.5 / 30, options)?.frameIndex).toBe(2);
   });
 
-  it("selects timestamp interval frames with exclusive end boundaries", () => {
+  it("ends a timestamp interval frame half a millisecond before its end time", () => {
     const frameDuration = 1 / 30;
     const frames: DetectionFrame[] = [
       {
@@ -88,6 +88,15 @@ describe("detection frame utilities", () => {
     expect(selectDetectionFrame(frames, frameDuration - 0.001)).toBe(frames[0]);
     expect(selectDetectionFrame(frames, frameDuration)).toBe(frames[1]);
     expect(selectDetectionFrame(frames, frameDuration * 2)).toBeUndefined();
+    // The boundary a playhead on the producer's millisecond plane needs: a
+    // frame within its rounding error is already the one on screen. Widening
+    // the tolerance beyond that would hand the next frame out early.
+    expect(selectDetectionFrame(frames, frameDuration - 0.0004)).toBe(
+      frames[1],
+    );
+    expect(selectDetectionFrame(frames, frameDuration - 0.0006)).toBe(
+      frames[0],
+    );
   });
 
   it("selects the frame a whole-millisecond playhead rounds down into", () => {

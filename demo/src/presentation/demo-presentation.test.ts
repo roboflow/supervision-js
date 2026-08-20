@@ -410,6 +410,73 @@ describe("demo presentation", () => {
     );
   });
 
+  it("drops the label when no enabled layer draws the detection", () => {
+    const settings = {
+      ...defaultDemoPresentationSettings,
+      boxesEnabled: false,
+      keypointsEnabled: false,
+      labelsEnabled: true,
+      masksEnabled: false,
+      polygonsEnabled: false,
+      polylinesEnabled: true,
+    };
+    const presentation = createDemoPresentation(settings);
+    const context = {
+      detectionIndex: 0,
+      frame: { detections: [detection], mediaTime: 0 },
+      mediaTime: 0,
+    };
+
+    expect(
+      presentation.labelStyle?.resolve(detection, context),
+    ).toBeUndefined();
+    expect(
+      presentation.interactionStyle?.resolve(detection, {
+        ...context,
+        point: { x: 12, y: 14 },
+        state: DetectionInteractionState.Hovered,
+        target: DetectionPickTarget.Mask,
+      }),
+    ).toBeUndefined();
+    expect(
+      createDemoPresentation({
+        ...settings,
+        masksEnabled: true,
+      }).labelStyle?.resolve(detection, context),
+    ).toMatchObject({ text: "horse" });
+  });
+
+  it("keeps the label only for detections the enabled geometry layer carries", () => {
+    const presentation = createDemoPresentation({
+      ...defaultDemoPresentationSettings,
+      boxesEnabled: false,
+      keypointsEnabled: true,
+      labelsEnabled: true,
+      masksEnabled: false,
+      polygonsEnabled: false,
+      polylinesEnabled: false,
+    });
+    const frame = {
+      detections: [rectangleDetection, vectorDetection],
+      mediaTime: 0,
+    };
+
+    expect(
+      presentation.labelStyle?.resolve(vectorDetection, {
+        detectionIndex: 1,
+        frame,
+        mediaTime: 0,
+      }),
+    ).toMatchObject({ text: "person" });
+    expect(
+      presentation.labelStyle?.resolve(rectangleDetection, {
+        detectionIndex: 0,
+        frame,
+        mediaTime: 0,
+      }),
+    ).toBeUndefined();
+  });
+
   it("toggles each vector layer independently without touching the other styles", () => {
     const allEnabled = createDemoPresentation(defaultDemoPresentationSettings);
     const polygonsOnly = createDemoPresentation({

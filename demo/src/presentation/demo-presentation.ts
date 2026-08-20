@@ -453,7 +453,9 @@ function createDemoLabelStyle(settings: DemoPresentationSettings): LabelStyle {
       y: settings.labelOffsetY,
     },
     placement: settings.labelPlacement,
-    shouldRender: (detection) => passesConfidenceThreshold(detection, settings),
+    shouldRender: (detection) =>
+      passesConfidenceThreshold(detection, settings) &&
+      hasDrawnGeometry(detection, settings),
     textStyle: (detection) => ({
       color: resolveClassStyle(detection, settings).labelText,
       fontFamily:
@@ -478,11 +480,7 @@ function createDemoInteractionStyle(
     ),
     shouldRender: (detection) =>
       passesConfidenceThreshold(detection, settings) &&
-      (settings.boxesEnabled ||
-        settings.masksEnabled ||
-        settings.polygonsEnabled ||
-        settings.polylinesEnabled ||
-        settings.keypointsEnabled),
+      hasDrawnGeometry(detection, settings),
   });
 }
 
@@ -657,6 +655,26 @@ function passesConfidenceThreshold(
   settings: DemoPresentationSettings,
 ) {
   return (detection.confidence ?? 1) >= settings.confidenceThreshold;
+}
+
+/**
+ * Whether any enabled layer draws geometry this detection actually carries.
+ *
+ * Each geometry layer draws only its own field, so a detection whose fields
+ * are all either absent or switched off contributes nothing to the picture,
+ * and a label or hover highlight over it would name a shape that is not there.
+ */
+function hasDrawnGeometry(
+  detection: Detection,
+  settings: DemoPresentationSettings,
+) {
+  return (
+    (settings.boxesEnabled && detection.rect !== undefined) ||
+    (settings.masksEnabled && detection.mask !== undefined) ||
+    (settings.polygonsEnabled && detection.polygon !== undefined) ||
+    (settings.polylinesEnabled && detection.polyline !== undefined) ||
+    (settings.keypointsEnabled && detection.keypoints !== undefined)
+  );
 }
 
 export function resolveDemoClassStyle(
