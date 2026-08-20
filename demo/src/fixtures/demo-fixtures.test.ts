@@ -55,6 +55,7 @@ describe("geometry showcase fixture", () => {
       })),
     ).toEqual([
       { displayName: "70s horse trail", sampleName: "horse_trail" },
+      { displayName: "9s basketball sample", sampleName: "basketball_sam3" },
       {
         displayName: "Basketball with Keypoints",
         sampleName: "basketball_geometry",
