@@ -7,7 +7,7 @@ import {
   type PolygonDrawInstruction,
 } from "supervision-js-core";
 
-import { createExecutorchPoseKeypointInstructions } from "../adapters/executorch";
+import { createReactNativeKeypointDrawInstructions } from "../renderers/keypoint-draw-instructions";
 import {
   createInstantCvGoldenPoseBaseline,
   createInstantCvRuleVectorInstructions,
@@ -749,7 +749,7 @@ export function useReactNativeLiveInference(
   const poseInstructionColor = resolveDetectionClassColorStyle("person").fill;
   // Capture initialized worklet functions before the callback is serialized.
   // Worklets' Babel transform does not preserve normal function hoisting.
-  const createPoseInstructions = createExecutorchPoseKeypointInstructions;
+  const createPoseInstructions = createReactNativeKeypointDrawInstructions;
   const serializeDetections = serializeReactNativeLiveDetectionFrame;
   const hasKeypointGeometry = detectionFrameHasKeypoints;
   const maskBorderWidth = options.presentation?.maskBorderWidth ?? 0;
