@@ -381,7 +381,7 @@ export function decodeCompressedRleMask(
  * Reads a dense mask into row-major order.
  *
  * An upright buffer is returned as-is, so the common case stays copy-free.
- * A transposed buffer is un-rotated into a fresh array, because every
+ * A clockwise-rotated buffer is un-rotated into a fresh array, because every
  * `DecodedDetectionMask` consumer indexes as `data[y * width + x]`.
  */
 export function decodeDenseBitmapMask(
@@ -395,17 +395,21 @@ export function decodeDenseBitmapMask(
     );
   }
 
-  if (!mask.transposed) {
+  if (!mask.rotatedCw) {
     return { data: mask.data, height: mask.height, width: mask.width };
   }
 
+  // Undo a 90° clockwise rotation: the stored buffer is `height` wide, and
+  // logical (x, y) lives at stored[x * height + (height - 1 - y)]. This
+  // matches the sampling the React Native ID-mask fill loops already use.
   const data = new Uint8Array(expectedLength);
 
   for (let y = 0; y < mask.height; y += 1) {
     const rowOffset = y * mask.width;
+    const storedColumn = mask.height - 1 - y;
 
     for (let x = 0; x < mask.width; x += 1) {
-      data[rowOffset + x] = mask.data[x * mask.height + y] ?? 0;
+      data[rowOffset + x] = mask.data[x * mask.height + storedColumn] ?? 0;
     }
   }
 

@@ -429,14 +429,16 @@ describe("detection frame utilities", () => {
     expect(decoded.data).toBe(data);
   });
 
-  it("un-rotates a transposed dense mask into row-major order", () => {
-    // Logical 3x2 mask [[0, 1, 0], [1, 0, 0]] stored rotated 90° clockwise,
-    // so it is indexed as data[x * height + y].
+  it("un-rotates a clockwise-rotated dense mask into row-major order", () => {
+    // Logical 3x2 mask [[0, 1, 0], [1, 0, 0]] stored rotated 90° clockwise.
+    // The stored buffer is 2 wide and 3 tall, and logical (x, y) lives at
+    // stored[x * 2 + (1 - y)] — the same sampling the React Native ID-mask
+    // fill loops already use for maskRotatedCw buffers.
     const decoded = decodeDetectionMask({
-      data: new Uint8Array([0, 1, 1, 0, 0, 0]),
+      data: new Uint8Array([1, 0, 0, 1, 0, 0]),
       encoding: DetectionMaskEncoding.DenseBitmap,
       height: 2,
-      transposed: true,
+      rotatedCw: true,
       width: 3,
     });
 

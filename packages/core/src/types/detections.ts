@@ -128,7 +128,7 @@ export interface CompressedRleDetectionMask {
  *
  * Consumers that need row-major semantics should call `decodeDetectionMask()`,
  * which normalizes both encodings. Renderers that sample the buffer directly
- * may read `data` and honor `transposed` themselves to stay copy-free.
+ * may read `data` and honor `rotatedCw` themselves to stay copy-free.
  *
  * `data` is treated as immutable and is shared, not deep-copied, when
  * detections are copied. Duplicating a full-resolution mask per frame would
@@ -148,18 +148,19 @@ export interface DenseBitmapDetectionMask {
   /**
    * Mask bytes, one per pixel. Non-zero is foreground.
    *
-   * Length must be `width * height` regardless of `transposed`.
+   * Length must be `width * height` regardless of `rotatedCw`.
    */
   readonly data: Uint8Array;
   /**
-   * Set when `data` stores the mask rotated 90° clockwise, so it is indexed
-   * as `data[x * height + y]` instead of `data[y * width + x]`.
+   * Set when `data` stores the mask rotated 90° clockwise. The stored buffer
+   * is then `height` wide and `width` tall, and a logical pixel reads as
+   * `data[x * height + (height - 1 - y)]` rather than `data[y * width + x]`.
    *
    * This describes buffer layout only. It lets a producer whose runtime emits
    * a rotated buffer avoid an upright copy per frame; `width` and `height`
    * always describe the logical, upright mask.
    */
-  readonly transposed?: boolean;
+  readonly rotatedCw?: boolean;
 }
 
 export type DetectionMask =

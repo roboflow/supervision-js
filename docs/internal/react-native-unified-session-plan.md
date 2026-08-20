@@ -66,11 +66,11 @@ Small in code, and nothing else can proceed without them.
 
 **0.1 Add a dense mask encoding to core.** Introduce
 `DenseBitmapDetectionMask` (`Uint8Array` data, `width`, `height`, and a
-`transposed` flag) alongside the RLE variant and widen the `DetectionMask`
+`rotatedCw` flag) alongside the RLE variant and widen the `DetectionMask`
 union. This gives the hot path a zero-cost normalization target and keeps one
 `Detection` shape serving both the web cold path and the native hot path.
 
-The `transposed` flag replaces `ReactNativeLiveSerializedDetection.maskRotatedCw`
+The `rotatedCw` flag replaces `ReactNativeLiveSerializedDetection.maskRotatedCw`
 with a vendor-neutral concept: it describes buffer layout, not a fact about
 ExecuTorch.
 
