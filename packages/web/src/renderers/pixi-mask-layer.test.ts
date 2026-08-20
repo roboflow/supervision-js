@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { PreparedMaskFrameKind } from "#render-preparation/mask-frame-artifact";
+import {
+  IdMaskRasterFormat,
+  PreparedMaskFrameKind,
+} from "#render-preparation/mask-frame-artifact";
 import { BaseMaskStyle } from "supervision-js-core";
 
 const preparedWindow = vi.hoisted(() => ({
@@ -52,6 +55,7 @@ describe("pixi mask layer", () => {
   it("leaves the drawn frame alone when a cook lands, and draws it on the redraw", () => {
     const onPreparedWindowChange = vi.fn();
     const layer = createPixiMaskLayer({
+      BufferImageSource: FakeBufferImageSource as never,
       ImageSource: FakeImageSource as never,
       Sprite: FakeSprite as never,
       Texture: FakeTexture as never,
@@ -85,6 +89,7 @@ describe("pixi mask layer", () => {
 
   it("takes a shown frame off screen when asked to clear", () => {
     const layer = createPixiMaskLayer({
+      BufferImageSource: FakeBufferImageSource as never,
       ImageSource: FakeImageSource as never,
       Sprite: FakeSprite as never,
       Texture: FakeTexture as never,
@@ -111,6 +116,7 @@ describe("pixi mask layer", () => {
 
   it("puts none of a cooked frame on a later frame still owing its cook", () => {
     const layer = createPixiMaskLayer({
+      BufferImageSource: FakeBufferImageSource as never,
       ImageSource: FakeImageSource as never,
       Sprite: FakeSprite as never,
       Texture: FakeTexture as never,
@@ -150,6 +156,7 @@ describe("pixi mask layer", () => {
 
   it("reports the window's readiness for a media time", () => {
     const layer = createPixiMaskLayer({
+      BufferImageSource: FakeBufferImageSource as never,
       ImageSource: FakeImageSource as never,
       Sprite: FakeSprite as never,
       Texture: FakeTexture as never,
@@ -178,10 +185,10 @@ function idMaskFrame() {
     hasStroke: false,
     height: 80,
     key: "mask-frame",
-    kind: PreparedMaskFrameKind.PngIdMask,
+    kind: PreparedMaskFrameKind.IdMask,
     maxStrokeWidth: 0,
-    png: new Uint8Array(),
-    source: {},
+    raster: new Uint8Array(120 * 80),
+    rasterFormat: IdMaskRasterFormat.R8,
     strokePalette: new Float32Array(),
     strokeWidths: new Float32Array(),
     width: 120,
@@ -189,6 +196,12 @@ function idMaskFrame() {
 }
 
 class FakeImageSource {
+  readonly style = {};
+
+  constructor(readonly _options: unknown) {}
+}
+
+class FakeBufferImageSource {
   readonly style = {};
 
   constructor(readonly _options: unknown) {}

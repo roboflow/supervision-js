@@ -1,5 +1,5 @@
 import type { MaskDrawInstruction } from "#types/mask-style";
-import { decodeCompressedRleMask } from "#utils/detection-frames";
+import { decodeCompressedRleCounts } from "#utils/detection-frames";
 
 export const MAX_ID_MASK_PALETTE_ENTRIES = 64;
 export const MAX_ID_MASK_STROKE_WIDTH = 16;
@@ -75,17 +75,7 @@ export function createIdMaskFrame(
       );
     }
 
-    const decodedMask = decodeCompressedRleMask(instruction.mask);
-
-    for (let y = 0; y < decodedMask.height; y += 1) {
-      for (let x = 0; x < decodedMask.width; x += 1) {
-        const maskOffset = y * decodedMask.width + x;
-
-        if (decodedMask.data[maskOffset]) {
-          data[y * width + x] = detectionMaskId;
-        }
-      }
-    }
+    writeMaskRuns(data, width, instruction.mask, detectionMaskId);
   }
 
   return {
@@ -98,6 +88,53 @@ export function createIdMaskFrame(
     strokeWidths,
     width,
   };
+}
+
+/**
+ * Compressed RLE counts runs down each column in turn, so a foreground run is
+ * a contiguous walk down one column that wraps into the next.
+ */
+function writeMaskRuns(
+  data: Uint8Array,
+  frameWidth: number,
+  mask: IdMaskInstruction["mask"],
+  detectionMaskId: number,
+) {
+  const counts = decodeCompressedRleCounts(mask.counts);
+  const maskWidth = mask.width;
+  const maskHeight = mask.height;
+  let maskOffset = 0;
+
+  for (let index = 0; index < counts.length; index += 1) {
+    const runLength = counts[index] ?? 0;
+
+    if (index % 2 === 0 || runLength <= 0) {
+      maskOffset += runLength;
+      continue;
+    }
+
+    let x = Math.floor(maskOffset / maskHeight);
+    let y = maskOffset - x * maskHeight;
+    let frameOffset = y * frameWidth + x;
+
+    for (let step = 0; step < runLength; step += 1) {
+      if (x >= maskWidth) {
+        break;
+      }
+
+      data[frameOffset] = detectionMaskId;
+      y += 1;
+      frameOffset += frameWidth;
+
+      if (y === maskHeight) {
+        y = 0;
+        x += 1;
+        frameOffset = x;
+      }
+    }
+
+    maskOffset += runLength;
+  }
 }
 
 function writePaletteEntry(

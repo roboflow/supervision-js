@@ -79,6 +79,7 @@ const mockState = vi.hoisted(() => {
       x: number;
       y: number;
     }>,
+    bufferImageSourceOptions: [] as unknown[],
     imageSourceDestroy: vi.fn(),
     imageSourceOptions: [] as unknown[],
     meshGeometryDestroy: vi.fn(),
@@ -213,6 +214,15 @@ vi.mock("pixi.js", () => {
 
     constructor(options: unknown) {
       pixiMock.imageSourceOptions.push(options);
+    }
+  }
+
+  class BufferImageSource {
+    destroy = pixiMock.imageSourceDestroy;
+    style = {};
+
+    constructor(options: unknown) {
+      pixiMock.bufferImageSourceOptions.push(options);
     }
   }
 
@@ -405,6 +415,7 @@ vi.mock("pixi.js", () => {
   return {
     Application,
     Assets,
+    BufferImageSource,
     CanvasSource,
     Container,
     Graphics,
@@ -544,6 +555,7 @@ export function resetMocks() {
   pixiMock.containerAddChild.mockClear();
   pixiMock.containerInstances.length = 0;
   pixiMock.graphicsInstances.length = 0;
+  pixiMock.bufferImageSourceOptions.length = 0;
   pixiMock.imageSourceDestroy.mockClear();
   pixiMock.imageSourceOptions.length = 0;
   pixiMock.meshGeometryDestroy.mockClear();

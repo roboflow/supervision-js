@@ -2,7 +2,7 @@ import {
   MAX_ID_MASK_PALETTE_ENTRIES,
   MAX_ID_MASK_STROKE_WIDTH,
 } from "#render-preparation/mask-frame-compositor";
-import type { PreparedPngIdMaskFrame } from "#render-preparation/mask-frame-artifact";
+import type { PreparedIdMaskFrame } from "#render-preparation/mask-frame-artifact";
 import type {
   ImageSource as PixiImageSource,
   Mesh as PixiMesh,
@@ -60,7 +60,7 @@ export interface PixiIdMaskShaderRenderer {
   readonly mesh: PixiIdMaskMesh;
   clearTexture(): void;
   hide(): void;
-  render(frame: PreparedPngIdMaskFrame, texture: PixiTexture): void;
+  render(frame: PreparedIdMaskFrame, texture: PixiTexture): void;
   setOpacity(opacity: number): void;
   destroy(): void;
 }

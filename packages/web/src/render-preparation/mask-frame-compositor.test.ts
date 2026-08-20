@@ -5,17 +5,16 @@ import {
   encodeCompressedRleCounts,
 } from "supervision-js-core";
 
+import { IdMaskRasterFormat } from "./mask-frame-artifact";
 import {
   compositeMaskFrame,
   createIdMaskFrame,
-  createPngIdMaskFrame,
+  createIdMaskRasterFrame,
 } from "./mask-frame-compositor";
 
-const pngSignature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
-
 describe("mask frame compositor", () => {
-  it("encodes style-indexed ID masks as PNG artifacts", async () => {
-    const frame = await createPngIdMaskFrame([
+  it("carries an unaligned ID raster four bytes per pixel", () => {
+    const frame = createIdMaskRasterFrame([
       {
         alpha: 0.5,
         color: 0xff0000,
@@ -30,12 +29,34 @@ describe("mask frame compositor", () => {
     ]);
 
     expect(frame).toBeDefined();
-    expect([...frame!.png.slice(0, 8)]).toEqual(pngSignature);
+    expect(frame!.rasterFormat).toBe(IdMaskRasterFormat.Rgba8);
+    expect([...frame!.data]).toEqual([
+      1, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255,
+    ]);
+  });
+
+  it("hands an aligned ID raster to the GPU one byte per pixel", () => {
+    const frame = createIdMaskRasterFrame([
+      {
+        alpha: 0.5,
+        color: 0xff0000,
+        detectionIndex: 0,
+        mask: {
+          counts: encodeCompressedRleCounts([0, 1, 3]),
+          encoding: DetectionMaskEncoding.CompressedRle,
+          height: 1,
+          width: 4,
+        },
+      },
+    ]);
+
+    expect(frame).toBeDefined();
+    expect(frame!.rasterFormat).toBe(IdMaskRasterFormat.R8);
     expect([...frame!.data]).toEqual([1, 0, 0, 0]);
   });
 
-  it("rasterizes polygons into worker-preparable ID-mask artifacts", async () => {
-    const frame = await createPngIdMaskFrame([
+  it("rasterizes polygons into worker-preparable ID-mask artifacts", () => {
+    const frame = createIdMaskRasterFrame([
       {
         alpha: 0.25,
         color: 0x00ff00,
@@ -59,8 +80,8 @@ describe("mask frame compositor", () => {
     ]);
 
     expect(frame).toBeDefined();
-    expect(frame!.data[2 * 6 + 2]).toBe(3);
-    expect(frame!.data[4 * 6 + 4]).toBe(0);
+    expect(frame!.data[(2 * 6 + 2) * 4]).toBe(3);
+    expect(frame!.data[(4 * 6 + 4) * 4]).toBe(0);
     expect(frame!.fillPalette.slice(12, 16)).toEqual(
       Float32Array.from([0, 1, 0, 0.25]),
     );
@@ -127,8 +148,8 @@ describe("mask frame compositor", () => {
     expect(frame!.hasStroke).toBe(true);
   });
 
-  it("keeps thick mask strokes on the PNG ID-mask path", async () => {
-    const frame = await createPngIdMaskFrame([
+  it("keeps thick mask strokes on the ID-mask path", () => {
+    const frame = createIdMaskRasterFrame([
       {
         alpha: 0.5,
         color: 0xff0000,
@@ -148,7 +169,6 @@ describe("mask frame compositor", () => {
     ]);
 
     expect(frame).toBeDefined();
-    expect([...frame!.png.slice(0, 8)]).toEqual(pngSignature);
     expect(frame!.hasStroke).toBe(true);
     expect(frame!.maxStrokeWidth).toBe(5);
     expect(frame!.strokeWidths[1]).toBe(5);

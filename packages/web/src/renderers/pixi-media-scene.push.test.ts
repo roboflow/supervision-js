@@ -242,6 +242,7 @@ vi.mock("pixi.js", () => {
   return {
     Application,
     Assets: { load: vi.fn(), unload: vi.fn() },
+    BufferImageSource: Stub,
     CanvasSource,
     ColorMatrixFilter,
     Container,

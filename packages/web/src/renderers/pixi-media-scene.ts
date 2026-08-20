@@ -144,6 +144,7 @@ export async function createPixiMediaScene(
   const {
     Application,
     Assets,
+    BufferImageSource,
     CanvasSource,
     Container,
     Graphics,
@@ -290,6 +291,7 @@ export async function createPixiMediaScene(
   const initialMaskPreparationStyle = resolveMaskPreparationStyle();
   let maskLayer = initialMaskPreparationStyle
     ? createPixiMaskLayer({
+        BufferImageSource,
         Container,
         ImageSource,
         Mesh,
@@ -1323,6 +1325,7 @@ export async function createPixiMediaScene(
   function ensureMaskLayer(preparationStyle: MaskStyle) {
     if (!maskLayer) {
       maskLayer = createPixiMaskLayer({
+        BufferImageSource,
         Container,
         ImageSource,
         Mesh,

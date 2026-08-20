@@ -1,6 +1,6 @@
 import {
   compositeMaskFrame,
-  createPngIdMaskFrame,
+  createIdMaskRasterFrame,
 } from "#render-preparation/mask-frame-compositor";
 import { createDefaultRenderPreparationWorkerFactory } from "#render-preparation/default-render-preparation-worker";
 import {
@@ -206,10 +206,10 @@ function createMainThreadMaskFramePreparer(
         throw new Error("Mask frame preparer has been destroyed.");
       }
 
-      const pngIdMaskFrame = await createPreparedPngIdMaskFrame(job);
+      const idMaskFrame = createPreparedIdMaskFrame(job);
 
-      if (pngIdMaskFrame) {
-        return pngIdMaskFrame;
+      if (idMaskFrame) {
+        return idMaskFrame;
       }
 
       const compositedFrame = compositeMaskFrame(job.instructions);
@@ -258,47 +258,29 @@ function createMainThreadMaskFramePreparer(
   return preparer;
 }
 
-async function createPreparedPngIdMaskFrame(
+function createPreparedIdMaskFrame(
   job: MaskFramePreparationJob,
-): Promise<PreparedMaskFrame | undefined> {
-  if (
-    typeof Blob === "undefined" ||
-    typeof createImageBitmap === "undefined" ||
-    typeof CompressionStream === "undefined"
-  ) {
+): PreparedMaskFrame | undefined {
+  const frame = createIdMaskRasterFrame(job.instructions);
+
+  if (!frame) {
     return undefined;
   }
 
-  try {
-    const frame = await createPngIdMaskFrame(job.instructions);
-
-    if (!frame) {
-      return undefined;
-    }
-
-    const imageBitmap = await createImageBitmap(
-      new Blob([frame.png], { type: "image/png" }),
-    );
-
-    return {
-      close() {
-        imageBitmap.close();
-      },
-      fillPalette: frame.fillPalette,
-      hasStroke: frame.hasStroke,
-      height: imageBitmap.height,
-      key: job.key,
-      kind: PreparedMaskFrameKind.PngIdMask,
-      maxStrokeWidth: frame.maxStrokeWidth,
-      png: frame.png,
-      source: imageBitmap,
-      strokePalette: frame.strokePalette,
-      strokeWidths: frame.strokeWidths,
-      width: imageBitmap.width,
-    };
-  } catch {
-    return undefined;
-  }
+  return {
+    close() {},
+    fillPalette: frame.fillPalette,
+    hasStroke: frame.hasStroke,
+    height: frame.height,
+    key: job.key,
+    kind: PreparedMaskFrameKind.IdMask,
+    maxStrokeWidth: frame.maxStrokeWidth,
+    raster: frame.data,
+    rasterFormat: frame.rasterFormat,
+    strokePalette: frame.strokePalette,
+    strokeWidths: frame.strokeWidths,
+    width: frame.width,
+  };
 }
 
 function createWorkerMaskFramePreparer(
@@ -457,13 +439,15 @@ function createPreparedFrameFromWorkerResponse(
     { readonly type: MaskPreparationWorkerMessageType.Complete }
   >,
 ): PreparedMaskFrame {
-  if (message.artifactKind === PreparedMaskFrameKind.PngIdMask) {
+  if (message.artifactKind === PreparedMaskFrameKind.IdMask) {
     if (
-      !message.imageBitmap ||
+      !message.raster ||
+      !message.rasterFormat ||
       !message.fillPalette ||
-      !message.png ||
       !message.strokePalette ||
-      !message.strokeWidths
+      !message.strokeWidths ||
+      !message.width ||
+      !message.height
     ) {
       throw new Error(
         "Mask preparation worker returned an incomplete ID mask artifact.",
@@ -471,20 +455,18 @@ function createPreparedFrameFromWorkerResponse(
     }
 
     return {
-      close() {
-        message.imageBitmap?.close();
-      },
+      close() {},
       fillPalette: message.fillPalette,
       hasStroke: message.hasStroke ?? false,
-      height: message.imageBitmap.height,
+      height: message.height,
       key: message.key,
-      kind: PreparedMaskFrameKind.PngIdMask,
+      kind: PreparedMaskFrameKind.IdMask,
       maxStrokeWidth: message.maxStrokeWidth ?? 0,
-      png: message.png,
-      source: message.imageBitmap,
+      raster: message.raster,
+      rasterFormat: message.rasterFormat,
       strokePalette: message.strokePalette,
       strokeWidths: message.strokeWidths,
-      width: message.imageBitmap.width,
+      width: message.width,
     };
   }
 

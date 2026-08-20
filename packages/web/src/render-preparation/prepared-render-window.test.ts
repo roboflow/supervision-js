@@ -25,6 +25,7 @@ import {
 
 import { resetMocks } from "../../../../test/media-renderer-harness";
 import { MaskPreparationWorkerMessageType } from "./mask-preparation-worker-protocol";
+import { PreparedMaskFrameKind } from "./mask-frame-artifact";
 import {
   createPreparedRenderWindow,
   PreparedRenderFrameMaskStatus,
@@ -272,7 +273,7 @@ describe("prepared render window", () => {
       fakeWorker.completeNext();
       await flushMaskPreparationTimers(4);
 
-      expect(renderWindow.getFrame(0)?.maskFrame?.source).toBe(
+      expect(rgbaSource(renderWindow.getFrame(0)?.maskFrame)).toBe(
         replacementImageBitmap,
       );
       expect(replacementImageBitmap.close).not.toHaveBeenCalled();
@@ -2023,4 +2024,10 @@ function createFloorTimeline(
       [...sortedFrames].reverse().find((frame) => frame.mediaTime <= mediaTime),
     ),
   };
+}
+
+function rgbaSource(maskFrame: PreparedMaskFrame | undefined) {
+  return maskFrame?.kind === PreparedMaskFrameKind.RgbaImage
+    ? maskFrame.source
+    : undefined;
 }

@@ -4,7 +4,7 @@ import {
 } from "supervision-js-core";
 import { MAX_ID_MASK_PALETTE_ENTRIES } from "#render-preparation/mask-frame-compositor";
 import { PreparedMaskFrameKind } from "#render-preparation/mask-frame-artifact";
-import type { PreparedPngIdMaskFrame } from "#render-preparation/mask-frame-artifact";
+import type { PreparedIdMaskFrame } from "#render-preparation/mask-frame-artifact";
 import { createPixiBoxLayer } from "#renderers/pixi-box-layer";
 import { createPixiLabelLayer } from "#renderers/pixi-label-layer";
 import { createPixiVectorLayer } from "#renderers/pixi-vector-layer";
@@ -89,7 +89,7 @@ type UniformGroupConstructor = new (
 ) => PixiUniformGroup;
 
 export interface PixiInteractionMaskArtifact {
-  readonly frame: PreparedPngIdMaskFrame;
+  readonly frame: PreparedIdMaskFrame;
   readonly texture: PixiTexture;
 }
 
@@ -602,7 +602,7 @@ interface InteractionMaskRenderer {
   readonly mesh: PixiInteractionMesh;
   hide(): void;
   render(
-    frame: PreparedPngIdMaskFrame,
+    frame: PreparedIdMaskFrame,
     texture: PixiTexture,
     instructions: readonly InteractionMaskInstruction[],
   ): void;
@@ -687,7 +687,7 @@ function createInteractionMaskRenderer(options: {
     mesh,
 
     render(frame, texture, instructions) {
-      if (frame.kind !== PreparedMaskFrameKind.PngIdMask) {
+      if (frame.kind !== PreparedMaskFrameKind.IdMask) {
         mesh.visible = false;
         return;
       }

@@ -349,21 +349,19 @@ describe("media session integration", () => {
         createMockSample(5, 0),
       ];
       const fakeWorker = createFakeMaskPreparationWorker((message) => ({
-        artifactKind: "pngIdMask",
+        artifactKind: "idMask",
         fillPalette: new Float32Array([0, 0, 0, 0, 1, 0, 0, 0.7]),
         hasStroke: true,
-        imageBitmap: {
-          close: vi.fn(),
-          height: 2,
-          width: 2,
-        },
+        height: 2,
         key: message.job.key,
         maxStrokeWidth: 1,
-        png: new Uint8Array([1, 2, 3]),
+        raster: new Uint8Array([1, 0, 0, 0]),
+        rasterFormat: "rgba8unorm",
         requestId: message.requestId,
         strokePalette: new Float32Array([0, 0, 0, 0, 1, 1, 1, 1]),
         strokeWidths: new Float32Array([0, 1]),
         type: "complete",
+        width: 2,
       }));
       const {
         BaseBoxStyle,

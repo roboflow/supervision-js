@@ -1,6 +1,6 @@
 import {
   compositeMaskFrame,
-  createPngIdMaskFrame,
+  createIdMaskRasterFrame,
 } from "#render-preparation/mask-frame-compositor";
 import { PreparedMaskFrameKind } from "#render-preparation/mask-frame-artifact";
 import {
@@ -30,21 +30,37 @@ workerScope.addEventListener("message", (event) => {
     return;
   }
 
-  void prepareMaskFrame(message);
+  prepareMaskFrame(message);
 });
 
-async function prepareMaskFrame(message: MaskPreparationWorkerRequest) {
+function prepareMaskFrame(message: MaskPreparationWorkerRequest) {
   try {
-    const pngIdMaskFrame = await createPngIdMaskWorkerResponse(message);
+    const idMaskFrame = createIdMaskRasterFrame(message.job.instructions);
 
-    if (pngIdMaskFrame) {
-      workerScope.postMessage(pngIdMaskFrame, [
-        pngIdMaskFrame.imageBitmap,
-        pngIdMaskFrame.png.buffer,
-        pngIdMaskFrame.fillPalette.buffer,
-        pngIdMaskFrame.strokePalette.buffer,
-        pngIdMaskFrame.strokeWidths.buffer,
-      ]);
+    if (idMaskFrame) {
+      workerScope.postMessage(
+        {
+          artifactKind: PreparedMaskFrameKind.IdMask,
+          fillPalette: idMaskFrame.fillPalette,
+          hasStroke: idMaskFrame.hasStroke,
+          height: idMaskFrame.height,
+          key: message.job.key,
+          maxStrokeWidth: idMaskFrame.maxStrokeWidth,
+          raster: idMaskFrame.data,
+          rasterFormat: idMaskFrame.rasterFormat,
+          requestId: message.requestId,
+          strokePalette: idMaskFrame.strokePalette,
+          strokeWidths: idMaskFrame.strokeWidths,
+          type: MaskPreparationWorkerMessageType.Complete,
+          width: idMaskFrame.width,
+        },
+        [
+          idMaskFrame.data.buffer,
+          idMaskFrame.fillPalette.buffer,
+          idMaskFrame.strokePalette.buffer,
+          idMaskFrame.strokeWidths.buffer,
+        ],
+      );
       return;
     }
 
@@ -99,64 +115,6 @@ async function prepareMaskFrame(message: MaskPreparationWorkerRequest) {
       type: MaskPreparationWorkerMessageType.Error,
     });
   }
-}
-
-async function createPngIdMaskWorkerResponse(
-  message: MaskPreparationWorkerRequest,
-): Promise<
-  | (MaskPreparationWorkerResponse & {
-      readonly fillPalette: Float32Array<ArrayBuffer>;
-      readonly imageBitmap: ImageBitmap;
-      readonly maxStrokeWidth: number;
-      readonly png: Uint8Array<ArrayBuffer>;
-      readonly strokePalette: Float32Array<ArrayBuffer>;
-      readonly strokeWidths: Float32Array<ArrayBuffer>;
-    })
-  | undefined
-> {
-  if (
-    typeof Blob === "undefined" ||
-    typeof createImageBitmap === "undefined" ||
-    typeof CompressionStream === "undefined"
-  ) {
-    return undefined;
-  }
-
-  let frame: Awaited<ReturnType<typeof createPngIdMaskFrame>>;
-
-  try {
-    frame = await createPngIdMaskFrame(message.job.instructions);
-  } catch {
-    return undefined;
-  }
-
-  if (!frame) {
-    return undefined;
-  }
-
-  let imageBitmap: ImageBitmap;
-
-  try {
-    imageBitmap = await createImageBitmap(
-      new Blob([frame.png], { type: "image/png" }),
-    );
-  } catch {
-    return undefined;
-  }
-
-  return {
-    artifactKind: PreparedMaskFrameKind.PngIdMask,
-    fillPalette: frame.fillPalette,
-    hasStroke: frame.hasStroke,
-    imageBitmap,
-    key: message.job.key,
-    maxStrokeWidth: frame.maxStrokeWidth,
-    png: frame.png,
-    requestId: message.requestId,
-    strokePalette: frame.strokePalette,
-    strokeWidths: frame.strokeWidths,
-    type: MaskPreparationWorkerMessageType.Complete,
-  };
 }
 
 function createImageBitmapFromImageData(imageData: ImageData) {

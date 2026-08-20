@@ -1205,7 +1205,7 @@ describe("package entrypoint", () => {
     }
   });
 
-  it("prepares a composited mask texture without breaking box drawing", async () => {
+  it("prepares an ID-mask texture without breaking box drawing", async () => {
     resetMocks();
 
     const resolve = vi.fn((detection: Detection) =>
@@ -1253,7 +1253,7 @@ describe("package entrypoint", () => {
 
     await vi.waitFor(() => {
       expect(pixiMock.canvasSourceOptions).toHaveLength(1);
-      expect(pixiMock.imageSourceOptions).toHaveLength(2);
+      expect(pixiMock.bufferImageSourceOptions).toHaveLength(1);
       expect(pixiMock.textureOptions).toHaveLength(2);
     });
 
@@ -1275,11 +1275,13 @@ describe("package entrypoint", () => {
       pixiMock.spriteInstances[1],
       pixiMock.meshInstances[0],
     ]);
-    expect(pixiMock.spriteInstances[1]).toMatchObject({
-      height: 720,
-      texture: expect.any(Object),
-      visible: true,
-      width: 1280,
+    expect(pixiMock.spriteInstances[1]?.visible).toBe(false);
+    expect(pixiMock.meshInstances[0]?.visible).toBe(true);
+    expect(pixiMock.bufferImageSourceOptions[0]).toMatchObject({
+      format: "rgba8unorm",
+      height: 2,
+      scaleMode: "nearest",
+      width: 2,
     });
     expect(boxGraphics.rect).toHaveBeenLastCalledWith(4, 5, 10, 20);
     expect(boxGraphics.stroke).toHaveBeenLastCalledWith({
@@ -1384,7 +1386,8 @@ describe("package entrypoint", () => {
     try {
       const { createPixiMaskLayer } =
         await import("./renderers/pixi-mask-layer");
-      const { ImageSource, Sprite, Texture } = await import("pixi.js");
+      const { BufferImageSource, ImageSource, Sprite, Texture } =
+        await import("pixi.js");
       const detectionFrames = Array.from({ length: 14 }, (_, index) => ({
         detections: [
           {
@@ -1419,6 +1422,7 @@ describe("package entrypoint", () => {
       } satisfies BufferedDetectionTimeline;
 
       const layer = createPixiMaskLayer({
+        BufferImageSource,
         detectionTimeline,
         ImageSource,
         maskStyle: new BaseMaskStyle(),
@@ -1450,7 +1454,8 @@ describe("package entrypoint", () => {
     try {
       const { createPixiMaskLayer } =
         await import("./renderers/pixi-mask-layer");
-      const { ImageSource, Sprite, Texture } = await import("pixi.js");
+      const { BufferImageSource, ImageSource, Sprite, Texture } =
+        await import("pixi.js");
       const detectionFrames = [
         {
           detections: [
@@ -1487,6 +1492,7 @@ describe("package entrypoint", () => {
       } satisfies BufferedDetectionTimeline;
 
       const layer = createPixiMaskLayer({
+        BufferImageSource,
         detectionTimeline,
         ImageSource,
         maskStyle: createArtifactStableMaskStyle(0.2),
@@ -1516,7 +1522,7 @@ describe("package entrypoint", () => {
     }
   });
 
-  it("renders PNG ID-mask artifacts through the Pixi shader path", async () => {
+  it("renders ID-mask artifacts through the Pixi shader path", async () => {
     vi.useFakeTimers();
     resetMocks();
 
@@ -1533,6 +1539,7 @@ describe("package entrypoint", () => {
       const { createPixiMaskLayer } =
         await import("./renderers/pixi-mask-layer");
       const {
+        BufferImageSource,
         Container,
         ImageSource,
         Mesh,
@@ -1578,6 +1585,7 @@ describe("package entrypoint", () => {
       } satisfies BufferedDetectionTimeline;
 
       const layer = createPixiMaskLayer({
+        BufferImageSource,
         Container,
         detectionTimeline,
         ImageSource,
@@ -1594,9 +1602,9 @@ describe("package entrypoint", () => {
       layer.drawFrame(0);
       await vi.runOnlyPendingTimersAsync();
       await vi.waitFor(() => {
-        expect(globalThis.createImageBitmap).toHaveBeenCalled();
+        layer.drawFrame(0);
+        expect(pixiMock.bufferImageSourceOptions).not.toHaveLength(0);
       });
-      layer.drawFrame(0);
 
       expect(pixiMock.shaderFrom).toHaveBeenCalledOnce();
       expect(
@@ -1608,7 +1616,7 @@ describe("package entrypoint", () => {
       await vi.waitFor(() => {
         expect(pixiMock.meshInstances[0]?.visible).toBe(true);
       });
-      expect(pixiMock.imageSourceOptions).toContainEqual(
+      expect(pixiMock.bufferImageSourceOptions).toContainEqual(
         expect.objectContaining({
           autoGenerateMipmaps: false,
           scaleMode: "nearest",
@@ -1638,7 +1646,7 @@ describe("package entrypoint", () => {
     }
   });
 
-  it("premultiplies PNG ID-mask shader colors for Pixi blending", async () => {
+  it("premultiplies ID-mask shader colors for Pixi blending", async () => {
     const fsModuleName = "node:fs/promises";
     const { readFile } = (await import(fsModuleName)) as {
       readFile(path: URL, encoding: "utf8"): Promise<string>;
@@ -2196,12 +2204,8 @@ describe("package entrypoint", () => {
     });
 
     expect(firstResolve).toHaveBeenCalled();
-    expect(pixiMock.spriteInstances[1]).toMatchObject({
-      height: 720,
-      texture: expect.any(Object),
-      visible: true,
-      width: 1280,
-    });
+    expect(pixiMock.spriteInstances[1]?.visible).toBe(false);
+    expect(pixiMock.meshInstances[0]?.visible).toBe(true);
 
     renderer.destroy();
   });
@@ -2231,7 +2235,7 @@ describe("package entrypoint", () => {
 
     await vi.waitFor(() => {
       expect(pixiMock.textureOptions).toHaveLength(2);
-      expect(pixiMock.spriteInstances[1]?.visible).toBe(true);
+      expect(pixiMock.meshInstances[0]?.visible).toBe(true);
     });
 
     renderer.setPresentation({ maskStyle: null });
@@ -2239,9 +2243,8 @@ describe("package entrypoint", () => {
     expect(mediaMock.samples[1].draw).not.toHaveBeenCalled();
     expect(pixiMock.textureDestroy).toHaveBeenCalledWith(true);
     expect(pixiMock.textureOptions).toHaveLength(2);
-    expect(pixiMock.spriteInstances[1]).toMatchObject({
-      visible: false,
-    });
+    expect(pixiMock.spriteInstances[1]?.visible).toBe(false);
+    expect(pixiMock.meshInstances[0]?.visible).toBe(false);
 
     await renderer.play();
     flushAnimationFrame(20);
@@ -2251,9 +2254,8 @@ describe("package entrypoint", () => {
 
     expect(pixiMock.textureDestroy).toHaveBeenCalledWith(true);
     expect(pixiMock.textureOptions).toHaveLength(2);
-    expect(pixiMock.spriteInstances[1]).toMatchObject({
-      visible: false,
-    });
+    expect(pixiMock.spriteInstances[1]?.visible).toBe(false);
+    expect(pixiMock.meshInstances[0]?.visible).toBe(false);
 
     renderer.destroy();
   });

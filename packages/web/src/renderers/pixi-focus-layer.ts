@@ -1,5 +1,5 @@
 import { PreparedMaskFrameKind } from "#render-preparation/mask-frame-artifact";
-import type { PreparedPngIdMaskFrame } from "#render-preparation/mask-frame-artifact";
+import type { PreparedIdMaskFrame } from "#render-preparation/mask-frame-artifact";
 import { BaseFocusStyle } from "supervision-js-core";
 import { BoxShape } from "supervision-js-core";
 import type { FocusDrawInstruction, FocusStyle } from "supervision-js-core";
@@ -102,7 +102,7 @@ type PixiFocusGraphics = {
 };
 
 export interface PixiFocusMaskArtifact {
-  readonly frame: PreparedPngIdMaskFrame;
+  readonly frame: PreparedIdMaskFrame;
   readonly texture: PixiTexture;
 }
 
@@ -280,7 +280,7 @@ export function createPixiFocusLayer(options: {
     if (
       !idMaskRenderer ||
       !artifact ||
-      artifact.frame.kind !== PreparedMaskFrameKind.PngIdMask ||
+      artifact.frame.kind !== PreparedMaskFrameKind.IdMask ||
       maskIds.length === 0 ||
       (!instruction.ambient && maskIds.length !== instruction.targets.length)
     ) {
@@ -546,7 +546,7 @@ interface FocusIdMaskRenderer {
   readonly mesh: PixiFocusMesh;
   hide(): void;
   render(
-    frame: PreparedPngIdMaskFrame,
+    frame: PreparedIdMaskFrame,
     texture: PixiTexture,
     maskIds: readonly number[],
     fill: { readonly alpha: number; readonly color: number },

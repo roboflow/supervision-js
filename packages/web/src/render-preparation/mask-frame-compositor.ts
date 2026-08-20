@@ -1,3 +1,4 @@
+import { IdMaskRasterFormat } from "#render-preparation/mask-frame-artifact";
 import type { SerializableMaskInstruction } from "#render-preparation/mask-preparation-worker-protocol";
 import type { MaskStrokeStyle } from "supervision-js-core";
 import {
@@ -15,9 +16,8 @@ export {
   type IdMaskFrame,
 } from "supervision-js-core";
 
-const PNG_SIGNATURE = new Uint8Array([
-  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-]);
+/** WebGL uploads texture rows on a four-byte alignment. */
+const TEXTURE_ROW_ALIGNMENT_BYTES = 4;
 
 interface DecodedMaskPixels {
   readonly data: Uint8Array;
@@ -38,8 +38,8 @@ export interface CompositedMaskFrame {
   readonly width: number;
 }
 
-export interface PngIdMaskFrame extends IdMaskFrame {
-  readonly png: Uint8Array<ArrayBuffer>;
+export interface IdMaskRasterFrame extends IdMaskFrame {
+  readonly rasterFormat: IdMaskRasterFormat;
 }
 
 export function compositeMaskFrame(
@@ -62,23 +62,35 @@ export function compositeMaskFrame(
   return { data, height, width };
 }
 
-export async function createPngIdMaskFrame(
+export function createIdMaskRasterFrame(
   instructions: readonly SerializableMaskInstruction[],
-): Promise<PngIdMaskFrame | undefined> {
+): IdMaskRasterFrame | undefined {
   const frame = createIdMaskFrame(materializeMaskInstructions(instructions));
 
   if (!frame) {
     return undefined;
   }
 
+  if (frame.width % TEXTURE_ROW_ALIGNMENT_BYTES === 0) {
+    return { ...frame, rasterFormat: IdMaskRasterFormat.R8 };
+  }
+
   return {
     ...frame,
-    png: await encodeGrayscalePng({
-      height: frame.height,
-      pixels: frame.data,
-      width: frame.width,
-    }),
+    data: expandIdsToRgba(frame.data),
+    rasterFormat: IdMaskRasterFormat.Rgba8,
   };
+}
+
+function expandIdsToRgba(ids: Uint8Array): Uint8Array<ArrayBuffer> {
+  const rgba = new Uint8Array(new ArrayBuffer(ids.length * 4));
+
+  for (let index = 0; index < ids.length; index += 1) {
+    rgba[index * 4] = ids[index] ?? 0;
+    rgba[index * 4 + 3] = 0xff;
+  }
+
+  return rgba;
 }
 
 function compositeInstruction(
@@ -233,119 +245,4 @@ function writePixel(
   rgba[rgbaOffset + 1] = color.green;
   rgba[rgbaOffset + 2] = color.blue;
   rgba[rgbaOffset + 3] = color.alpha;
-}
-
-async function encodeGrayscalePng(options: {
-  readonly height: number;
-  readonly pixels: Uint8Array;
-  readonly width: number;
-}): Promise<Uint8Array<ArrayBuffer>> {
-  if (typeof CompressionStream === "undefined") {
-    throw new Error("CompressionStream is required to encode PNG ID masks.");
-  }
-
-  const rawScanlines = createFilterlessPngScanlines(options);
-  const ihdr = new Uint8Array(13);
-  const ihdrView = new DataView(ihdr.buffer);
-
-  ihdrView.setUint32(0, options.width);
-  ihdrView.setUint32(4, options.height);
-  ihdr[8] = 8;
-  ihdr[9] = 0;
-  ihdr[10] = 0;
-  ihdr[11] = 0;
-  ihdr[12] = 0;
-
-  const compressed = new Uint8Array(
-    await new Response(
-      new Blob([rawScanlines])
-        .stream()
-        .pipeThrough(new CompressionStream("deflate")),
-    ).arrayBuffer(),
-  );
-
-  return concatUint8Arrays([
-    PNG_SIGNATURE,
-    createPngChunk("IHDR", ihdr),
-    createPngChunk("IDAT", compressed),
-    createPngChunk("IEND", new Uint8Array(0)),
-  ]);
-}
-
-function createFilterlessPngScanlines(options: {
-  readonly height: number;
-  readonly pixels: Uint8Array;
-  readonly width: number;
-}) {
-  const rowStride = options.width + 1;
-  const scanlines = new Uint8Array(rowStride * options.height);
-
-  for (let y = 0; y < options.height; y += 1) {
-    const sourceOffset = y * options.width;
-    const targetOffset = y * rowStride;
-
-    scanlines[targetOffset] = 0;
-    scanlines.set(
-      options.pixels.subarray(sourceOffset, sourceOffset + options.width),
-      targetOffset + 1,
-    );
-  }
-
-  return scanlines;
-}
-
-function createPngChunk(type: string, data: Uint8Array) {
-  const typeBytes = new TextEncoder().encode(type);
-  const chunk = new Uint8Array(12 + data.length);
-  const view = new DataView(chunk.buffer);
-
-  view.setUint32(0, data.length);
-  chunk.set(typeBytes, 4);
-  chunk.set(data, 8);
-  view.setUint32(8 + data.length, crc32(concatUint8Arrays([typeBytes, data])));
-
-  return chunk;
-}
-
-const crc32Table = createCrc32Table();
-
-function createCrc32Table() {
-  const table = new Uint32Array(256);
-
-  for (let index = 0; index < table.length; index += 1) {
-    let value = index;
-
-    for (let bit = 0; bit < 8; bit += 1) {
-      value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
-    }
-
-    table[index] = value >>> 0;
-  }
-
-  return table;
-}
-
-function crc32(bytes: Uint8Array) {
-  let crc = 0xffffffff;
-
-  for (const byte of bytes) {
-    crc = crc32Table[(crc ^ byte) & 0xff] ^ (crc >>> 8);
-  }
-
-  return (crc ^ 0xffffffff) >>> 0;
-}
-
-function concatUint8Arrays(
-  chunks: readonly Uint8Array[],
-): Uint8Array<ArrayBuffer> {
-  const totalLength = chunks.reduce((total, chunk) => total + chunk.length, 0);
-  const result = new Uint8Array(totalLength);
-  let offset = 0;
-
-  for (const chunk of chunks) {
-    result.set(chunk, offset);
-    offset += chunk.length;
-  }
-
-  return result;
 }
