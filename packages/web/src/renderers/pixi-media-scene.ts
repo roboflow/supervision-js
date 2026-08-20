@@ -166,14 +166,17 @@ export async function createPixiMediaScene(
       ? { ...state, hidden: true }
       : state;
   };
+  // Labels have no overlay preview either: they stay drawn and follow a move
+  // through the fast-translate path, like regions.
   const resolveLabelContextState = (
     detection: DetectionFrame["detections"][number],
-  ) => ({
-    ...resolveContextState(detection),
-    hidden:
-      currentVisibility?.labelsHidden === true ||
-      resolveContextState(detection).hidden,
-  });
+  ) => {
+    const state = resolveAnnotationStyleState(detection, currentVisibility);
+    return {
+      ...state,
+      hidden: currentVisibility?.labelsHidden === true || state.hidden,
+    };
+  };
   // The vector layer consumes one shape style; renderer kinds that lower to
   // shape instructions compose with the internal hook here.
   function resolveVectorShapeStyle(): ShapeStyle | null {
@@ -426,12 +429,11 @@ export async function createPixiMediaScene(
     options.editingEngine?.subscribeFastTranslate((id, dx, dy) => {
       fastTranslatedDetectionId = id;
       regionLayer.translateDetection(id, dx, dy);
+      labelLayer?.translateDetection(id, dx, dy);
     });
   const redrawDetectionLayers = (id: string | number) => {
     boxLayer.invalidateDetection(id);
     vectorLayer.invalidateDetection(id);
-    // The label layer re-resolves only on style or frame changes.
-    labelLayer?.setLabelStyle(currentLabelStyle);
     boxLayer.drawFrame(currentMediaTime, viewportScale);
     vectorLayer.drawFrame(currentMediaTime, viewportScale);
     regionLayer.drawFrame(currentMediaTime, viewportScale);
@@ -458,8 +460,10 @@ export async function createPixiMediaScene(
       fastTranslatedDetectionId !== null
     ) {
       regionLayer.translateDetection(fastTranslatedDetectionId, 0, 0);
+      labelLayer?.translateDetection(fastTranslatedDetectionId, 0, 0);
       fastTranslatedDetectionId = null;
       regionLayer.drawFrame(currentMediaTime, viewportScale);
+      labelLayer?.drawFrame(currentMediaTime, viewportScale);
     }
   });
   const handleKeyDown = (event: KeyboardEvent) => {
