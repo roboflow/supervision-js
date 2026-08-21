@@ -1,5 +1,7 @@
 import type { DecodedVideoSample } from "#media/media-source";
 import type { BoxStyle } from "supervision-js-core";
+import type { BoxCornerStyle } from "supervision-js-core";
+import type { EllipseStyle } from "supervision-js-core";
 import type {
   BufferedDetectionTimeline,
   DetectionBufferState,
@@ -21,7 +23,8 @@ import type {
 import type { FocusStyle } from "supervision-js-core";
 import type { InteractionStyle } from "supervision-js-core";
 import type { LabelStyle } from "supervision-js-core";
-import type { MaskStyle } from "supervision-js-core";
+import type { MaskHaloStyle, MaskStyle } from "supervision-js-core";
+import type { MarkerStyle } from "supervision-js-core";
 import type {
   RegionAnnotationRenderer,
   PolygonStyle,
@@ -51,9 +54,13 @@ export interface MediaRendererSceneOptions {
   readonly maxDevicePixelRatio: number | undefined;
   readonly detectionTimeline: BufferedDetectionTimeline;
   readonly boxStyle: BoxStyle | null | undefined;
+  readonly boxCornerStyle: BoxCornerStyle | null | undefined;
+  readonly ellipseStyle: EllipseStyle | null | undefined;
   readonly focusStyle: FocusStyle | null | undefined;
   readonly labelStyle: LabelStyle | null | undefined;
+  readonly maskHaloStyle: MaskHaloStyle | null | undefined;
   readonly maskStyle: MaskStyle | null | undefined;
+  readonly markerStyle: MarkerStyle | null | undefined;
   readonly polygonStyle: PolygonStyle | null | undefined;
   readonly polylineStyle: PolylineStyle | null | undefined;
   /**

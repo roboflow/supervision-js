@@ -2,6 +2,7 @@ import type {
   ColdDetectionFrameStore,
   ColdDetectionFrameStoreWriteSummary,
   DetectionBufferOptions,
+  DetectionFrameLiveOptions,
   DetectionFrameRetentionOptions,
   DetectionFrameSelectionOptions,
   DetectionPlaybackGateOptions,
@@ -78,6 +79,11 @@ export interface MediaSessionAppendableDetectionOptions {
   readonly chunkDurationSeconds?: number;
   readonly clearOnCreate?: boolean;
   readonly retention?: DetectionFrameRetentionOptions;
+  /**
+   * Latest-frame/hold-until-next semantics used by
+   * `appendLiveDetectionFrame`.
+   */
+  readonly live?: DetectionFrameLiveOptions;
 }
 
 /**
@@ -189,6 +195,16 @@ export interface MediaSessionDetectionOptions {
    * timestamps begin at zero independently of the file's encoded PTS.
    */
   readonly timelineOrigin?: DetectionTimelineOrigin;
+
+  /**
+   * Redraw automatically when appended detections cover the displayed time.
+   *
+   * At most one refresh is in flight at a time, and appends that land outside
+   * the currently displayed interval never force a render. Set it to `false`
+   * to drive every redraw with an explicit `session.refresh()`. Defaults to
+   * `true`.
+   */
+  readonly autoRefresh?: boolean;
 }
 
 export interface MediaSessionRendererOptions {
@@ -307,6 +323,27 @@ export interface MediaSession {
     frames: readonly DetectionFrame[],
     options?: MediaSessionDetectionWriteOptions,
   ): Promise<ColdDetectionFrameStoreWriteSummary>;
+  /**
+   * Optionally append the newest live detection frame.
+   *
+   * Optional so controllers written against the previous shape stay
+   * assignable. `createMediaSession` always provides it; see
+   * {@link LiveMediaSession}.
+   */
+  appendLiveDetectionFrame?(
+    frame: DetectionFrame,
+    options?: MediaSessionDetectionWriteOptions,
+  ): Promise<ColdDetectionFrameStoreWriteSummary>;
+  /**
+   * Optionally close the appendable source's final coverage.
+   *
+   * Optional for the same backward-compatibility reason as
+   * {@link MediaSession.appendLiveDetectionFrame}.
+   */
+  finalizeDetectionCoverage?(
+    endTime?: number,
+    options?: MediaSessionDetectionWriteOptions,
+  ): Promise<ColdDetectionFrameStoreWriteSummary | null>;
   replaceDetectionFrames(
     frames: readonly DetectionFrame[],
     options?: MediaSessionDetectionWriteOptions,
@@ -341,4 +378,38 @@ export interface MediaSession {
   subscribe(listener: MediaSessionStateListener): MediaSessionStateUnsubscribe;
   getState(): MediaSessionState;
   destroy(): void;
+}
+
+/**
+ * Media session that also exposes live detection ingestion.
+ *
+ * `createMediaSession` returns this shape. Controllers that only satisfy the
+ * historical {@link MediaSession} contract stay assignable to it, so live
+ * ingestion is an added capability rather than a required one.
+ */
+export interface LiveMediaSession extends MediaSession {
+  /**
+   * Append the newest live detection frame to a session-owned appendable
+   * source.
+   *
+   * The frame stays active until the next live frame supersedes it, which is
+   * closed at the new frame's `mediaTime`. Use this for streams whose producer
+   * only knows that its latest result is current.
+   */
+  appendLiveDetectionFrame(
+    frame: DetectionFrame,
+    options?: MediaSessionDetectionWriteOptions,
+  ): Promise<ColdDetectionFrameStoreWriteSummary>;
+  /**
+   * Close the appendable source's final coverage at the end of media.
+   *
+   * `endTime` defaults to the renderer's reported media duration. Calling it
+   * again is a no-op. Use it when a producer has finished so coverage-gated
+   * playback does not stall on a terminal sliver the container declares beyond
+   * the last decoded sample.
+   */
+  finalizeDetectionCoverage(
+    endTime?: number,
+    options?: MediaSessionDetectionWriteOptions,
+  ): Promise<ColdDetectionFrameStoreWriteSummary | null>;
 }

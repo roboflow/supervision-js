@@ -1,5 +1,6 @@
 import {
   createDetectionPickKey,
+  DetectionPickTarget,
   rebaseDetectionPickToFrame,
 } from "supervision-js-core";
 import { MAX_ID_MASK_PALETTE_ENTRIES } from "#render-preparation/mask-frame-compositor";
@@ -132,6 +133,7 @@ export function createPixiInteractionPresentationLayer(options: {
   readonly Text: TextConstructor;
   readonly UniformGroup?: UniformGroupConstructor;
   readonly interactionStyle?: InteractionStyle | null;
+  readonly isDetectionVisible?: (detection: Detection) => boolean;
 }): PixiInteractionPresentationLayer {
   let interactionStyle: InteractionStyle | null =
     options.interactionStyle === undefined
@@ -224,7 +226,11 @@ export function createPixiInteractionPresentationLayer(options: {
       }
 
       syntheticFrame = {
-        detections: activePicks.map(({ detection }) => detection),
+        detections: activePicks.map(({ detection }) =>
+          detection.id === undefined
+            ? detection
+            : { ...detection, id: undefined },
+        ),
         frameIndex: context.frame.frameIndex,
         mediaTime: context.frame.mediaTime,
       };
@@ -290,6 +296,16 @@ export function createPixiInteractionPresentationLayer(options: {
       const key = createDetectionPickKey(pick.pick);
 
       if (!key || seenKeys.has(key)) {
+        if (
+          key &&
+          pick.context.state === DetectionInteractionState.Hovered &&
+          pick.pick.target === DetectionPickTarget.Keypoint
+        ) {
+          const duplicateIndex = deduped.findIndex(
+            (candidate) => createDetectionPickKey(candidate.pick) === key,
+          );
+          if (duplicateIndex !== -1) deduped[duplicateIndex] = pick;
+        }
         continue;
       }
 
@@ -308,13 +324,17 @@ export function createPixiInteractionPresentationLayer(options: {
   ): ActiveInteractionPick | null {
     const activePick = rebaseDetectionPickToFrame(pick, frame);
 
-    if (!activePick) {
+    if (
+      !activePick ||
+      options.isDetectionVisible?.(activePick.detection) === false
+    ) {
       return null;
     }
 
     const context = {
       detectionIndex: activePick.detectionIndex,
       frame: activePick.frame,
+      geometryIndex: activePick.geometryIndex,
       mediaTime,
       point: activePick.point,
       state,

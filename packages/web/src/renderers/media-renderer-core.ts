@@ -1,6 +1,7 @@
 import {
   createArrayDetectionFrameSource,
   createDefaultAnnotationPresentation,
+  createProjectedDetectionFrameSource,
   resolveAnnotationRendererPresentation,
 } from "supervision-js-core";
 import {
@@ -76,11 +77,15 @@ export async function createMediaRendererCore(
     annotationOverlayStyle: options.annotationOverlayStyle,
     backgroundColor: options.backgroundColor,
     boxStyle: options.boxStyle,
+    boxCornerStyle: options.boxCornerStyle,
+    ellipseStyle: options.ellipseStyle,
     focusStyle: options.focusStyle,
     interactionStyle: options.interactionStyle,
     keypointStyle: options.keypointStyle,
     labelStyle: options.labelStyle,
+    maskHaloStyle: options.maskHaloStyle,
     maskStyle: options.maskStyle,
+    markerStyle: options.markerStyle,
     polygonStyle: options.polygonStyle,
     polylineStyle: options.polylineStyle,
     renderers: options.renderers,
@@ -230,7 +235,10 @@ export async function createMediaRendererCore(
         throw new Error("Media renderer is not ready.");
       }
 
-      if (runtimeState.isPlaybackActive()) {
+      // Buffering is a stalled form of playing, not a settled one: the
+      // controller may already have been stopped by a seek taken while the
+      // gate was open. Only a run that is genuinely playing can no-op here.
+      if (runtimeState.isPlaying()) {
         return;
       }
 
@@ -306,7 +314,9 @@ export async function createMediaRendererCore(
         throw new Error("Media renderer is not ready.");
       }
 
-      const wasPlaying = runtimeState.isPlaying();
+      // A seek taken while buffering should resume playback, not strand it:
+      // buffering means playback was requested and is waiting for data.
+      const wasPlaying = runtimeState.isPlaybackActive();
       const requestVersion = ++navigationVersion;
 
       playbackController.pause();
@@ -333,6 +343,10 @@ export async function createMediaRendererCore(
         if (wasPlaying) {
           runtimeState.setPlaying();
           playbackController.play();
+        } else if (runtimeState.isBuffering()) {
+          // Seeking always leaves the controller paused. Settle the reported
+          // state so the session is paused rather than perpetually buffering.
+          runtimeState.setPaused();
         }
       } catch (error) {
         if (
@@ -575,9 +589,21 @@ export async function createMediaRendererCore(
     const { metadata } = mediaSource;
 
     firstTimestamp = metadata.firstTimestamp;
-    const detectionSource =
+    // One central projection step for every detection input this renderer can
+    // receive: static frames, a caller-owned source, or a composite source.
+    // Media dimensions are known here, so a producer can declare its own
+    // coordinate space and have vector geometry projected exactly once.
+    const detectionSource = createProjectedDetectionFrameSource(
       options.detectionSource ??
-      createArrayDetectionFrameSource(options.detectionFrames);
+        createArrayDetectionFrameSource(options.detectionFrames),
+      () =>
+        metadata.primaryVideoWidth > 0 && metadata.primaryVideoHeight > 0
+          ? {
+              height: metadata.primaryVideoHeight,
+              width: metadata.primaryVideoWidth,
+            }
+          : null,
+    );
     detectionTimeline = createBufferedDetectionTimeline({
       source:
         options.detectionTimelineOrigin ===
@@ -604,6 +630,8 @@ export async function createMediaRendererCore(
       annotationOverlayStyle: currentPresentation.annotationOverlayStyle,
       backgroundColor: currentPresentation.backgroundColor,
       boxStyle: currentPresentation.boxStyle,
+      boxCornerStyle: currentPresentation.boxCornerStyle,
+      ellipseStyle: currentPresentation.ellipseStyle,
       canInteract: () => canInteract(options, runtimeState.isPlaybackActive()),
       container: options.container,
       detectionTimeline,
@@ -617,7 +645,9 @@ export async function createMediaRendererCore(
       labelStyle: currentPresentation.labelStyle,
       maskBrush:
         options.createMaskBrush?.(mediaDimensions) ?? options.maskBrush,
+      maskHaloStyle: currentPresentation.maskHaloStyle,
       maskStyle: currentPresentation.maskStyle,
+      markerStyle: currentPresentation.markerStyle,
       maxDevicePixelRatio: options.maxDevicePixelRatio,
       onPresentationUpdate(presentedSample) {
         if (!runtimeState.isDestroyed()) {

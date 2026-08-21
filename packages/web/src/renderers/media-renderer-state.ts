@@ -13,6 +13,7 @@ import {
   type MediaRendererState,
   type MediaSourceState,
 } from "#types/media-renderer";
+import { toMediaSourceError } from "#media/media-errors";
 import type { PresentedMediaSample } from "./media-renderer-scene";
 
 interface MediaRendererRuntimeStateOptions {
@@ -333,10 +334,12 @@ function estimateFrameIndex(
 
 function createMediaRenderErrorSourcePatch(
   error: unknown,
-): Pick<MediaSourceState, "errorMessage" | "status"> {
+): Pick<MediaSourceState, "errorKind" | "errorMessage" | "status"> {
+  const mediaError = toMediaSourceError(error, "Media decode failed.");
+
   return {
-    errorMessage:
-      error instanceof Error ? error.message : "Media decode failed.",
+    errorKind: mediaError.kind,
+    errorMessage: mediaError.message,
     status: MediaSourceStatus.Error,
   };
 }
