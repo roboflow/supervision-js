@@ -161,8 +161,10 @@ vi.mock("pixi.js", () => {
   }
 
   return {
+    AlphaMask: Stub,
     Application,
     Assets: { load: vi.fn(), unload: vi.fn() },
+    BlurFilter: Stub,
     BufferImageSource: ImageSource,
     CanvasSource,
     ColorMatrixFilter: Stub,

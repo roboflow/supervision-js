@@ -1,8 +1,18 @@
 import { RENDER_ENGINE_PREFERENCE } from "#constants/media-renderer";
 import {
   BasePolygonStyle,
+  RegionRendererCoverageKind,
+  RegionRendererSourceKind,
+  type BoxCornerStyle,
+  type Detection,
   type DetectionFrame,
+  type EllipseStyle,
+  type MarkerStyle,
+  type MaskHaloStyle,
   type PolygonStyle,
+  type RegionAnnotationRenderer,
+  type RegionRendererTarget,
+  type ShapeStyle,
 } from "supervision-js-core";
 import type { FocusStyle } from "supervision-js-core";
 import type { LabelStyle } from "supervision-js-core";
@@ -39,6 +49,8 @@ import {
 import { createPixiMaskBrushPreview } from "./pixi-mask-brush-preview";
 import { createPixiPolygonLayer } from "./pixi-polygon-layer";
 import { createPixiVectorLayer } from "./pixi-vector-layer";
+import { resolveAnnotationShapeStyle } from "./annotation-shape-styles";
+import type { SerializableMaskInstruction } from "#render-preparation/mask-preparation-worker-protocol";
 import {
   createPixiRegionLayer,
   type PixiRegionLayerState,
@@ -66,6 +78,24 @@ import type {
 const MILLISECONDS_PER_SECOND = 1000;
 
 /**
+ * Halo-only and coverage-only presentations still need a prepared artifact.
+ * Neither draws a fill, so both resolve to nothing visible and exist only to
+ * keep preparation running.
+ */
+const HALO_ONLY_MASK_STYLE: MaskStyle = {
+  artifactKey: "mask-halo-only",
+  resolve: (detection) =>
+    detection.mask
+      ? { alpha: 0, color: 0x000000, mask: detection.mask }
+      : undefined,
+};
+
+const REGION_COVERAGE_ONLY_MASK_STYLE: MaskStyle = {
+  artifactKey: "region-mask-coverage-only",
+  resolve: () => undefined,
+};
+
+/**
  * How far a focus change with no frame behind it moves the focus layer's fade.
  * It eases over elapsed milliseconds, and a push-presented scene only ever has
  * media time, so anything past a fade's length lands the overlay at once.
@@ -87,10 +117,6 @@ export function observePixiContainerResize(
 }
 
 type TextureUploadSource = {
-  update(): void;
-};
-
-type TextureUpload = {
   update(): void;
 };
 
@@ -142,8 +168,10 @@ export async function createPixiMediaScene(
 ): Promise<MediaRendererScene> {
   const pixi = await import("pixi.js");
   const {
+    AlphaMask,
     Application,
     Assets,
+    BlurFilter,
     BufferImageSource,
     CanvasSource,
     Container,
@@ -171,6 +199,17 @@ export async function createPixiMediaScene(
   let currentFocusStyle: FocusStyle | null = options.focusStyle ?? null;
   let currentLabelStyle: LabelStyle | null = options.labelStyle ?? null;
   let currentMaskStyle: MaskStyle | null = options.maskStyle ?? null;
+  let currentMaskHaloStyle: MaskHaloStyle | null =
+    options.maskHaloStyle ?? null;
+  let currentBoxCornerStyle: BoxCornerStyle | null =
+    options.boxCornerStyle ?? null;
+  let currentEllipseStyle: EllipseStyle | null = options.ellipseStyle ?? null;
+  let currentMarkerStyle: MarkerStyle | null = options.markerStyle ?? null;
+  let currentRegionRenderers: readonly RegionAnnotationRenderer[] =
+    options.regionRenderers;
+  let regionMaskCoverageKey = resolveRegionMaskCoverageKey(
+    currentRegionRenderers,
+  );
   let currentPolygonStyle: PolygonStyle | null =
     options.polygonStyle === undefined
       ? new BasePolygonStyle()
@@ -189,6 +228,11 @@ export async function createPixiMediaScene(
     readonly source: MaskStyle;
     readonly style: MaskStyle;
     readonly version: number;
+  } | null = null;
+  let regionCoverageStyleCache: {
+    readonly key: string;
+    readonly source: MaskStyle;
+    readonly style: MaskStyle;
   } | null = null;
   const annotationWindow = createPreparedAnnotationWindow({
     detectionTimeline: options.detectionTimeline,
@@ -260,15 +304,27 @@ export async function createPixiMediaScene(
     polygonStyle: polygonLayer?.getVectorFallbackStyle() ?? currentPolygonStyle,
     polylineStyle: options.polylineStyle,
     keypointStyle: options.keypointStyle,
-    shapeStyle: options.shapeStyle,
+    shapeStyle: resolveVectorShapeStyle(),
     resolveContextState,
   });
   const regionLayer = createPixiRegionLayer({
+    AlphaMask,
     Assets,
     Container,
     GifSprite,
+    Graphics,
+    ImageSource,
+    Mesh,
+    MeshGeometry,
+    Rectangle,
+    Shader,
     Sprite,
+    Texture,
+    UniformGroup,
     detectionTimeline: annotationDetectionTimeline,
+    getActiveRegionMaskCoverage: () =>
+      maskLayer?.getActiveRegionMaskCoverage() ?? null,
+    getMediaTexture: () => (hasPresentedSample ? stagingTexture : undefined),
     onInvalidate: () => {
       if (!hasPresentedSample || mediaWidth <= 0 || mediaHeight <= 0) return;
       const boxState = boxLayer.drawFrame(currentMediaTime, viewportScale);
@@ -282,7 +338,7 @@ export async function createPixiMediaScene(
       renderNow();
     },
     onAssetError: options.diagnostics?.onAssetError,
-    regionRenderers: options.regionRenderers,
+    regionRenderers: currentRegionRenderers,
     resolveContextState,
   });
   const annotationOverlayLayer = createPixiAnnotationOverlayLayer(
@@ -302,20 +358,24 @@ export async function createPixiMediaScene(
   const initialMaskPreparationStyle = resolveMaskPreparationStyle();
   let maskLayer = initialMaskPreparationStyle
     ? createPixiMaskLayer({
+        BlurFilter,
         BufferImageSource,
         Container,
         ImageSource,
         Mesh,
         MeshGeometry,
+        Rectangle,
         Shader,
         Sprite,
         Texture,
         UniformGroup,
         acceptsUnalignedTextureRows,
         detectionTimeline: options.detectionTimeline,
+        maskHaloStyle: resolveVisibilityMaskHaloStyle(),
         maskStyle: initialMaskPreparationStyle,
         onPreparedWindowChange: handlePreparedWindowChange,
         renderPreparation: options.renderPreparation,
+        resolveInstructions: resolveArtifactMaskInstructions,
       })
     : undefined;
 
@@ -534,7 +594,7 @@ export async function createPixiMediaScene(
       })
     : undefined;
   let mediaSprite: InstanceType<typeof Sprite> | undefined;
-  let stagingTexture: TextureUpload | undefined;
+  let stagingTexture: PixiTexture | undefined;
   let stagingTextureSource: TextureUploadSource | undefined;
   const collectFrameTimings = options.diagnostics?.frameTimings === true;
 
@@ -1147,17 +1207,53 @@ export async function createPixiMediaScene(
         polylineStyle: presentation.polylineStyle,
         keypointStyle: presentation.keypointStyle,
       });
-      regionLayer.setRenderers(
-        presentation.renderers?.filter(
-          (renderer) => renderer.kind === "region",
-        ) ?? [],
-      );
+      if (
+        presentation.boxCornerStyle !== undefined ||
+        presentation.ellipseStyle !== undefined ||
+        presentation.markerStyle !== undefined
+      ) {
+        if (presentation.boxCornerStyle !== undefined) {
+          currentBoxCornerStyle = presentation.boxCornerStyle;
+        }
+        if (presentation.ellipseStyle !== undefined) {
+          currentEllipseStyle = presentation.ellipseStyle;
+        }
+        if (presentation.markerStyle !== undefined) {
+          currentMarkerStyle = presentation.markerStyle;
+        }
+        vectorLayer.setStyles({ shapeStyle: resolveVectorShapeStyle() });
+      }
 
-      if (presentation.maskStyle !== undefined) {
-        currentMaskStyle = presentation.maskStyle;
+      currentRegionRenderers =
+        presentation.renderers?.filter(
+          (renderer): renderer is RegionAnnotationRenderer =>
+            renderer.kind === "region",
+        ) ?? [];
+      const nextRegionMaskCoverageKey = resolveRegionMaskCoverageKey(
+        currentRegionRenderers,
+      );
+      const regionMaskCoverageChanged =
+        nextRegionMaskCoverageKey !== regionMaskCoverageKey;
+
+      regionMaskCoverageKey = nextRegionMaskCoverageKey;
+      regionLayer.setRenderers(currentRegionRenderers);
+
+      if (
+        presentation.maskStyle !== undefined ||
+        presentation.maskHaloStyle !== undefined ||
+        regionMaskCoverageChanged
+      ) {
+        if (presentation.maskStyle !== undefined) {
+          currentMaskStyle = presentation.maskStyle;
+        }
+
+        if (presentation.maskHaloStyle !== undefined) {
+          currentMaskHaloStyle = presentation.maskHaloStyle;
+        }
+
         syncMaskPreparation();
 
-        if (presentation.maskStyle) {
+        if (currentMaskStyle || currentMaskHaloStyle) {
           attachMaskLayerDisplay();
           syncSceneChildren();
         }
@@ -1343,20 +1439,24 @@ export async function createPixiMediaScene(
   function ensureMaskLayer(preparationStyle: MaskStyle) {
     if (!maskLayer) {
       maskLayer = createPixiMaskLayer({
+        BlurFilter,
         BufferImageSource,
         Container,
         ImageSource,
         Mesh,
         MeshGeometry,
+        Rectangle,
         Shader,
         Sprite,
         Texture,
         UniformGroup,
         acceptsUnalignedTextureRows,
         detectionTimeline: options.detectionTimeline,
+        maskHaloStyle: resolveVisibilityMaskHaloStyle(),
         maskStyle: preparationStyle,
         onPreparedWindowChange: handlePreparedWindowChange,
         renderPreparation: options.renderPreparation,
+        resolveInstructions: resolveArtifactMaskInstructions,
       });
 
       maskLayer.setPlaybackActive(isPlaybackActive);
@@ -1374,13 +1474,21 @@ export async function createPixiMediaScene(
    * mask fill draws, so preparation has to keep running while either one is on.
    */
   function resolveMaskPreparationStyle() {
-    if (currentMaskStyle) {
-      return createVisibilityMaskStyle(currentMaskStyle);
+    const baseStyle =
+      currentMaskStyle ??
+      (currentMaskHaloStyle ? HALO_ONLY_MASK_STYLE : null) ??
+      (currentFocusStyle ? ID_MASK_PREPARATION_STYLE : null) ??
+      (regionMaskCoverageKey ? REGION_COVERAGE_ONLY_MASK_STYLE : null);
+
+    if (!baseStyle) {
+      return null;
     }
 
-    return currentFocusStyle
-      ? createVisibilityMaskStyle(ID_MASK_PREPARATION_STYLE)
-      : null;
+    return createVisibilityMaskStyle(
+      regionMaskCoverageKey
+        ? keyArtifactByRegionCoverage(baseStyle)
+        : baseStyle,
+    );
   }
 
   function syncMaskPreparation() {
@@ -1389,6 +1497,7 @@ export async function createPixiMediaScene(
     if (!preparationStyle) {
       maskLayer?.setFillVisible(false);
       maskLayer?.setMaskStyle(null);
+      maskLayer?.setMaskHaloStyle(null);
       return;
     }
 
@@ -1396,6 +1505,195 @@ export async function createPixiMediaScene(
 
     layer.setFillVisible(currentMaskStyle !== null);
     layer.setMaskStyle(preparationStyle);
+    layer.setMaskHaloStyle(resolveVisibilityMaskHaloStyle());
+  }
+
+  /**
+   * Which targets crop to their own mask, as the identity the prepared
+   * artifact is keyed by: changing that set has to invalidate frames cooked
+   * for the previous one, and the coverage planes are not part of the style.
+   */
+  function resolveRegionMaskCoverageKey(
+    renderers: readonly RegionAnnotationRenderer[],
+  ) {
+    const exactTargets = renderers
+      .filter(usesExactMaskCoverage)
+      .map(({ target }) => ({
+        className: target.className,
+        id: target.id,
+        sourceId: target.sourceId,
+      }));
+
+    return exactTargets.length > 0 ? JSON.stringify(exactTargets) : "";
+  }
+
+  function keyArtifactByRegionCoverage(style: MaskStyle): MaskStyle {
+    if (
+      regionCoverageStyleCache?.source === style &&
+      regionCoverageStyleCache.key === regionMaskCoverageKey
+    ) {
+      return regionCoverageStyleCache.style;
+    }
+
+    const keyedStyle: MaskStyle = {
+      ...style,
+      artifactKey:
+        style.artifactKey === undefined
+          ? undefined
+          : `${style.artifactKey}:region-coverage:${regionMaskCoverageKey}`,
+    };
+
+    regionCoverageStyleCache = {
+      key: regionMaskCoverageKey,
+      source: style,
+      style: keyedStyle,
+    };
+
+    return keyedStyle;
+  }
+
+  function usesExactMaskCoverage(renderer: RegionAnnotationRenderer) {
+    return (
+      renderer.source.kind === RegionRendererSourceKind.Media &&
+      renderer.source.coverage?.kind === RegionRendererCoverageKind.Mask
+    );
+  }
+
+  function matchesStaticRegionTarget(
+    target: RegionRendererTarget,
+    detection: Detection,
+  ) {
+    return (
+      matchesStaticTargetValue(target.id, detection.id) &&
+      matchesStaticTargetValue(target.className, detection.className) &&
+      matchesStaticTargetValue(target.sourceId, detection.sourceId)
+    );
+  }
+
+  function matchesStaticTargetValue(
+    configured: string | number | readonly (string | number)[] | undefined,
+    actual: string | number | undefined,
+  ) {
+    if (configured === undefined) {
+      return true;
+    }
+
+    if (actual === undefined) {
+      return false;
+    }
+
+    return Array.isArray(configured)
+      ? configured.some((value) => value === actual)
+      : configured === actual;
+  }
+
+  /**
+   * Coverage rides on the same prepared frame as the visible masks, so a
+   * target that crops to its own mask without drawing one still needs an
+   * instruction. That instruction says it is invisible, and the compositor
+   * keeps it out of both the composite and the id raster.
+   */
+  function resolveArtifactMaskInstructions(instructionOptions: {
+    readonly frame: DetectionFrame;
+    readonly maskStyle: MaskStyle;
+    readonly mediaTime: number;
+  }) {
+    const instructions: SerializableMaskInstruction[] = [];
+    const exactRegionRenderers = currentRegionRenderers.filter(
+      usesExactMaskCoverage,
+    );
+    const orderedDetections = instructionOptions.frame.detections
+      .map((detection, detectionIndex) => ({ detection, detectionIndex }))
+      .sort(
+        (left, right) =>
+          (left.detection.zIndex ?? left.detectionIndex) -
+          (right.detection.zIndex ?? right.detectionIndex),
+      );
+
+    for (const { detection, detectionIndex } of orderedDetections) {
+      const visibleInstruction = instructionOptions.maskStyle.resolve(
+        detection,
+        {
+          detectionIndex,
+          frame: instructionOptions.frame,
+          mediaTime: instructionOptions.mediaTime,
+        },
+      );
+      const regionCoverageMask =
+        detection.mask &&
+        !resolveContextState(detection).hidden &&
+        exactRegionRenderers.some((renderer) =>
+          matchesStaticRegionTarget(renderer.target, detection),
+        )
+          ? detection.mask
+          : undefined;
+
+      if (!visibleInstruction && !regionCoverageMask) {
+        continue;
+      }
+
+      instructions.push({
+        ...(visibleInstruction ?? {
+          alpha: 0,
+          color: 0,
+          mask: regionCoverageMask!,
+          visible: false,
+        }),
+        detectionIndex,
+        regionCoverageMask,
+      });
+    }
+
+    return instructions;
+  }
+
+  function resolveVisibilityMaskHaloStyle(): MaskHaloStyle | null {
+    const style = currentMaskHaloStyle;
+
+    if (!style) {
+      return null;
+    }
+
+    return {
+      resolve(detection, context) {
+        const state = resolveContextState(detection);
+
+        if (state.hidden) {
+          return undefined;
+        }
+
+        return style.resolve(detection, { ...context, ...state });
+      },
+    };
+  }
+
+  /**
+   * The vector layer takes one shape style, and the ellipse, marker and
+   * box-corner renderer kinds all lower to shape instructions, so they are
+   * composed onto whatever style the caller passed.
+   */
+  function resolveVectorShapeStyle(): ShapeStyle | null {
+    const kindShapeStyle = resolveAnnotationShapeStyle({
+      boxCornerStyle: currentBoxCornerStyle,
+      ellipseStyle: currentEllipseStyle,
+      markerStyle: currentMarkerStyle,
+    });
+    const baseShapeStyle = options.shapeStyle ?? null;
+
+    if (!kindShapeStyle || !baseShapeStyle) {
+      return kindShapeStyle ?? baseShapeStyle;
+    }
+
+    return {
+      resolve(detection, context) {
+        const combined = [
+          ...(baseShapeStyle.resolve(detection, context) ?? []),
+          ...(kindShapeStyle.resolve(detection, context) ?? []),
+        ];
+
+        return combined.length > 0 ? combined : undefined;
+      },
+    };
   }
 
   function ensurePolygonLayer(polygonStyle: PolygonStyle) {

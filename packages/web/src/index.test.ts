@@ -1307,10 +1307,12 @@ describe("package entrypoint", () => {
     expect(scene?.children[0]).toBe(pixiMock.spriteInstances[0]);
     expect(scene?.children[1]).toBe(maskContainer);
     expect(scene?.children[2]).toBe(boxGraphics);
-    expect(maskContainer?.children).toEqual([
-      pixiMock.spriteInstances[1],
-      pixiMock.meshInstances[0],
-    ]);
+    // Halo pass container first so the glow draws beneath the mask sprite and
+    // the id mesh.
+    expect(maskContainer?.children).toHaveLength(3);
+    expect(pixiMock.containerInstances).toContain(maskContainer?.children[0]);
+    expect(maskContainer?.children[1]).toBe(pixiMock.spriteInstances[1]);
+    expect(maskContainer?.children[2]).toBe(pixiMock.meshInstances[0]);
     expect(pixiMock.spriteInstances[1]?.visible).toBe(false);
     expect(pixiMock.meshInstances[0]?.visible).toBe(true);
     expect(pixiMock.bufferImageSourceOptions[0]).toMatchObject({

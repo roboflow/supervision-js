@@ -469,6 +469,9 @@ export function createPixiMaskLayer(options: {
     activeRgbaMaskFrame =
       maskFrame.kind === PreparedMaskFrameKind.RgbaImage ? maskFrame : null;
 
+    // A halo-only presentation turns the fill off and still draws a glow.
+    refreshHalo();
+
     if (!isFillVisible) {
       hideFill();
       return;
@@ -600,17 +603,6 @@ export function createPixiMaskLayer(options: {
     maskSprite.height = mediaHeight;
     maskSprite.visible = true;
     idMaskRenderer?.hide();
-
-    const haloTexture =
-      maskFrame.kind === PreparedMaskFrameKind.RgbaImage
-        ? getHaloTexture(maskFrame)
-        : undefined;
-
-    if (haloTexture) {
-      renderHalo(maskFrame, haloTexture);
-    } else {
-      haloRenderer?.hide();
-    }
   }
 
   function showIdMaskFrame(
@@ -627,7 +619,6 @@ export function createPixiMaskLayer(options: {
 
     maskSprite.visible = false;
     idMaskRenderer.render(maskFrame, texture);
-    renderHalo(maskFrame, texture);
   }
 
   function hideFill() {
@@ -886,8 +877,11 @@ export function createPixiMaskLayer(options: {
 
       if (texture) {
         renderHalo(activeRgbaMaskFrame, texture);
+        return;
       }
     }
+
+    haloRenderer?.hide();
   }
 
   /**
