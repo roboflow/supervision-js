@@ -5,6 +5,7 @@ import {
   LabelPlacement,
   MaskRenderMode,
 } from "supervision";
+import { DemoEvalHook } from "../eval-hooks";
 import {
   resolveDemoClassStyle,
   type DemoClassStyle,
@@ -134,47 +135,54 @@ function GlobalRenderControls({
 
   return (
     <div className="render-controls__panel render-controls__panel--global">
-      <ControlSection title="Layers">
+      <ControlSection evalHook={DemoEvalHook.LayersSection} title="Layers">
         <div className="render-controls__toggles">
           <ToggleControl
             checked={settings.boxesEnabled}
             disabled={availability?.boxesEnabled === false}
+            evalHook={DemoEvalHook.BoxesToggle}
             label="Boxes"
             onChange={(checked) => onChange("boxesEnabled", checked)}
           />
           <ToggleControl
             checked={settings.masksEnabled}
             disabled={availability?.masksEnabled === false}
+            evalHook={DemoEvalHook.MasksToggle}
             label="Masks"
             onChange={(checked) => onChange("masksEnabled", checked)}
           />
           <ToggleControl
             checked={settings.polygonsEnabled}
             disabled={availability?.polygonsEnabled === false}
+            evalHook={DemoEvalHook.PolygonsToggle}
             label="Polygons"
             onChange={(checked) => onChange("polygonsEnabled", checked)}
           />
           <ToggleControl
             checked={settings.polylinesEnabled}
             disabled={availability?.polylinesEnabled === false}
+            evalHook={DemoEvalHook.PolylinesToggle}
             label="Polylines"
             onChange={(checked) => onChange("polylinesEnabled", checked)}
           />
           <ToggleControl
             checked={settings.keypointsEnabled}
             disabled={availability?.keypointsEnabled === false}
+            evalHook={DemoEvalHook.KeypointsToggle}
             label="Keypoints"
             onChange={(checked) => onChange("keypointsEnabled", checked)}
           />
           <ToggleControl
             checked={settings.labelsEnabled}
             disabled={availability?.labelsEnabled === false}
+            evalHook={DemoEvalHook.LabelsToggle}
             label="Labels"
             onChange={(checked) => onChange("labelsEnabled", checked)}
           />
           <ToggleControl
             checked={settings.focusEnabled}
             disabled={availability?.focusEnabled === false}
+            evalHook={DemoEvalHook.FocusToggle}
             label="Focus"
             onChange={(checked) => onChange("focusEnabled", checked)}
           />
@@ -232,6 +240,7 @@ function GlobalRenderControls({
 
       <ControlSection
         enabled={segmentationEnabled}
+        evalHook={DemoEvalHook.SegmentationSection}
         onToggleEnabled={(checked) =>
           onPatch({
             masksEnabled: checked && availability?.masksEnabled !== false,
@@ -241,7 +250,7 @@ function GlobalRenderControls({
         title="Segmentation"
         toggleDisabled={segmentationUnavailable}
       >
-        <SubLayerHeading
+        <SubLayerToggle
           checked={settings.masksEnabled}
           disabled={availability?.masksEnabled === false}
           label="Masks"
@@ -280,6 +289,7 @@ function GlobalRenderControls({
         />
         <SliderControl
           disabled={!settings.masksEnabled}
+          evalHook={DemoEvalHook.MaskBorderSlider}
           label="Border"
           max={8}
           min={0}
@@ -298,7 +308,7 @@ function GlobalRenderControls({
           value={settings.maskStrokeAlpha}
           valueLabel={formatPercent(settings.maskStrokeAlpha)}
         />
-        <SubLayerHeading
+        <SubLayerToggle
           checked={settings.polygonsEnabled}
           disabled={availability?.polygonsEnabled === false}
           label="Polygons"
@@ -680,12 +690,14 @@ function ClassRenderControls({
 function ControlSection({
   children,
   enabled,
+  evalHook,
   onToggleEnabled,
   title,
   toggleDisabled = false,
 }: {
   readonly children: ReactNode;
   readonly enabled?: boolean;
+  readonly evalHook?: string;
   readonly onToggleEnabled?: (enabled: boolean) => void;
   readonly title: string;
   readonly toggleDisabled?: boolean;
@@ -698,6 +710,7 @@ function ControlSection({
         <button
           aria-expanded={open}
           className="render-control-section__toggle"
+          data-eval={evalHook}
           onClick={() => setOpen((current) => !current)}
           type="button"
         >
@@ -710,12 +723,13 @@ function ControlSection({
         {onToggleEnabled ? (
           <label className="render-control-section__enable">
             <input
-              aria-label={`Enable ${title.toLowerCase()} layer`}
+              aria-label={`Show ${title.toLowerCase()}`}
               checked={enabled}
               disabled={toggleDisabled}
               onChange={(event) => onToggleEnabled(event.currentTarget.checked)}
               type="checkbox"
             />
+            <span>Show</span>
           </label>
         ) : null}
       </div>
@@ -726,7 +740,7 @@ function ControlSection({
   );
 }
 
-function SubLayerHeading({
+function SubLayerToggle({
   checked,
   disabled = false,
   label,
@@ -738,34 +752,36 @@ function SubLayerHeading({
   readonly onChange: (checked: boolean) => void;
 }) {
   return (
-    <div className="render-control-section__subheading-row">
-      <h4 className="render-control-section__subheading">{label}</h4>
-      <label className="render-control-section__enable">
-        <input
-          aria-label={`Enable ${label.toLowerCase()} layer`}
-          checked={checked}
-          disabled={disabled}
-          onChange={(event) => onChange(event.currentTarget.checked)}
-          type="checkbox"
-        />
-      </label>
-    </div>
+    <label className="render-control-section__group">
+      <input
+        checked={checked}
+        disabled={disabled}
+        onChange={(event) => onChange(event.currentTarget.checked)}
+        type="checkbox"
+      />
+      <span>{label}</span>
+    </label>
   );
 }
 
 function ToggleControl({
   checked,
   disabled = false,
+  evalHook,
   label,
   onChange,
 }: {
   readonly checked: boolean;
   readonly disabled?: boolean;
+  readonly evalHook?: string;
   readonly label: string;
   readonly onChange: (checked: boolean) => void;
 }) {
   return (
-    <label className="render-control render-control--toggle">
+    <label
+      className="render-control render-control--toggle"
+      data-eval={evalHook}
+    >
       <input
         checked={checked}
         disabled={disabled}
@@ -843,6 +859,7 @@ function ColorControl({
 
 function SliderControl({
   disabled = false,
+  evalHook,
   label,
   max,
   min,
@@ -852,6 +869,7 @@ function SliderControl({
   valueLabel,
 }: {
   readonly disabled?: boolean;
+  readonly evalHook?: string;
   readonly label: string;
   readonly max: number;
   readonly min: number;
@@ -865,6 +883,7 @@ function SliderControl({
   return (
     <label
       className="render-control render-control--slider"
+      data-eval={evalHook}
       style={{ "--control-progress": `${progress}%` } as SliderControlStyle}
     >
       <span className="render-control__label">

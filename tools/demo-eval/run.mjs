@@ -22,6 +22,7 @@ import {
   spread,
 } from "./baseline.mjs";
 import { closeTarget, listTargets, openTarget } from "./cdp.mjs";
+import { missingHooks } from "./hooks.mjs";
 import {
   guardDetail,
   runBackscrub,
@@ -152,6 +153,7 @@ async function measure(pass) {
         viewMode: values.view,
       });
       mediaInfo = page.info;
+      await checkHookContract(page);
     } catch (error) {
       for (const name of demoScenarios) {
         record(pass, scenarios, name, null, describe(error));
@@ -196,6 +198,24 @@ async function measure(pass) {
   }
 
   return { scenarios };
+}
+
+/**
+ * A scenario that cannot find the control it drives reports
+ * invalid-environment, which is the tool declining to turn a disturbed window
+ * into a number rather than a defect, so the run still reads as acceptable.
+ * Three gates sat in that state for a whole merge. Resolving the hooks up
+ * front turns the same drift into a failure that names what moved.
+ */
+async function checkHookContract(page) {
+  if (page.info.viewMode === "benchmarks") return;
+  const missing = await missingHooks(page.session);
+  keepWorse("contract", missing.length > 0 ? "fail" : "pass");
+  if (missing.length === 0) return;
+  report.failures.push(
+    `contract: the demo is not stamping ${missing.join(", ")}, so every ` +
+      "scenario that drives those controls measures nothing",
+  );
 }
 
 async function assertChrome() {
@@ -414,6 +434,9 @@ function printSummary() {
       ),
       field("view", mediaInfo.viewMode),
     );
+  }
+  if (report.verdicts.contract) {
+    lines.push(field("hooks", report.verdicts.contract));
   }
 
   for (const name of selected) {

@@ -36,8 +36,10 @@ describe("mask halo palette", () => {
 });
 
 function createHarness() {
+  const getContext = vi.fn();
+
   vi.stubGlobal("document", {
-    createElement: vi.fn(() => ({ height: 0, width: 0 })),
+    createElement: vi.fn(() => ({ getContext, height: 0, width: 0 })),
   });
 
   const uniformGroups: { uniforms: Record<string, unknown> }[] = [];
@@ -113,7 +115,15 @@ function createHarness() {
   const frame = { height: 80, width: 120 } as PreparedIdMaskFrame;
   const texture = { source: { style: {} } };
 
-  return { blurFilters, frame, meshes, renderer, texture, uniformGroups };
+  return {
+    blurFilters,
+    frame,
+    getContext,
+    meshes,
+    renderer,
+    texture,
+    uniformGroups,
+  };
 }
 
 describe("mask halo renderer", () => {
@@ -148,6 +158,14 @@ describe("mask halo renderer", () => {
     expect(meshes[0]!.visible).toBe(true);
     expect(meshes[1]!.visible).toBe(false);
     expect(blurFilters[0]!.strength).toBe(8);
+  });
+
+  it("gives its placeholder canvas a rendering context", () => {
+    const { getContext } = createHarness();
+
+    // WebGPU builds the placeholder into the shader's first bind group, and a
+    // canvas that was never given a rendering context has nothing to bind.
+    expect(getContext).toHaveBeenCalledWith("2d");
   });
 
   it("hides the display when no group renders", () => {

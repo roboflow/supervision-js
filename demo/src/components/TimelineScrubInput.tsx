@@ -4,6 +4,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type RefObject,
 } from "react";
+import { DemoEvalHook } from "../eval-hooks";
 
 /**
  * React rewrites an input's `name` and `type` attributes on every commit that
@@ -41,6 +42,7 @@ export const TimelineScrubInput = memo(function TimelineScrubInput({
     <input
       aria-label="Timeline"
       className="timeline-view__input"
+      data-eval={DemoEvalHook.TimelineInput}
       disabled={disabled}
       max={max}
       min={0}

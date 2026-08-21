@@ -2,6 +2,15 @@
  * against the layers-off floor measured in the same run. */
 
 import { delay } from "./cdp.mjs";
+import {
+  at,
+  Hook,
+  LAYER_TOGGLE_HOOKS,
+  layerToggleSelector,
+  openControlSections,
+  VIEW_MODE_PREFIX,
+  viewModeSelector,
+} from "./hooks.mjs";
 
 const SEEK_SECONDS = 2;
 const SETTLE_MS = 500;
@@ -18,12 +27,6 @@ const P95_ABSOLUTE_SLACK_MS = 4;
 const DROPPED_FRAME_LIMIT = 0;
 const VIEW_MODE_SETTLE_MS = 15_000;
 const VIEW_MODE_POLL_MS = 100;
-
-const VIEW_MODE_LABELS = {
-  benchmarks: "Benchmarks",
-  debug: "Debug",
-  demo: "Demo",
-};
 
 const TOGGLE_LABELS = [
   "Boxes",
@@ -78,14 +81,11 @@ class Invalid extends Error {}
 
 const READ_CONTROLS = `(() => {
   const toggles = {};
-  for (const el of document.querySelectorAll("label.render-control--toggle")) {
-    const name = el.querySelector("span")?.textContent.trim();
-    const input = el.querySelector("input");
-    if (name && input) toggles[name] = { checked: input.checked, disabled: input.disabled };
+  for (const [name, hook] of Object.entries(${JSON.stringify(LAYER_TOGGLE_HOOKS)})) {
+    const input = document.querySelector('[data-eval="' + hook + '"] input');
+    if (input) toggles[name] = { checked: input.checked, disabled: input.disabled };
   }
-  const control = [...document.querySelectorAll("label.render-control--slider")]
-    .find((el) => el.querySelector(".render-control__label > span")?.textContent.trim() === "Border");
-  const input = control?.querySelector('input[type="range"]');
+  const input = document.querySelector(${at(Hook.MaskBorderSlider)} + ' input[type="range"]');
   const state = window.__demoRenderer.getState();
   return {
     toggles,
@@ -98,19 +98,15 @@ const READ_CONTROLS = `(() => {
 })()`;
 
 const setToggle = (label, checked) => `(() => {
-  const el = [...document.querySelectorAll("label.render-control--toggle")]
-    .find((node) => node.querySelector("span")?.textContent.trim() === ${JSON.stringify(label)});
-  if (!el) return { found: false };
-  const input = el.querySelector("input");
+  const input = document.querySelector(${layerToggleSelector(label)} + " input");
+  if (!input) return { found: false };
   if (input.checked !== ${checked} && !input.disabled) input.click();
   return { found: true, disabled: input.disabled, checked: input.checked };
 })()`;
 
 const setBorder = (value) => `(() => {
-  const control = [...document.querySelectorAll("label.render-control--slider")]
-    .find((el) => el.querySelector(".render-control__label > span")?.textContent.trim() === "Border");
-  if (!control) return { found: false };
-  const input = control.querySelector('input[type="range"]');
+  const input = document.querySelector(${at(Hook.MaskBorderSlider)} + ' input[type="range"]');
+  if (!input) return { found: false };
   if (input.disabled) return { found: true, disabled: true, value: Number(input.value) };
   const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
   setter.call(input, String(${value}));
@@ -120,13 +116,14 @@ const setBorder = (value) => `(() => {
 })()`;
 
 const READ_STAGE = `(() => {
-  const shell = document.querySelector("main.demo-shell");
-  const mode = shell
-    ? [...shell.classList]
-        .filter((name) => name.startsWith("demo-shell--"))
-        .map((name) => name.slice("demo-shell--".length))[0] ?? null
+  const shell = document.querySelector(${at(Hook.Shell)});
+  const pressed = document.querySelector(
+    '[data-eval^="' + ${JSON.stringify(VIEW_MODE_PREFIX)} + '"][aria-pressed="true"]',
+  );
+  const mode = pressed
+    ? pressed.getAttribute("data-eval").slice(${JSON.stringify(VIEW_MODE_PREFIX)}.length)
     : null;
-  const mount = document.querySelector(".renderer-viewport__mount");
+  const mount = document.querySelector(${at(Hook.ViewportMount)});
   const canvases = mount
     ? [...mount.querySelectorAll("canvas")].map((canvas) => ({
         width: canvas.width,
@@ -157,9 +154,8 @@ const READ_STAGE = `(() => {
   };
 })()`;
 
-const clickViewMode = (label) => `(() => {
-  const button = [...document.querySelectorAll(".demo-shell__mode button")]
-    .find((node) => node.textContent.trim() === ${JSON.stringify(label)});
+const clickViewMode = (mode) => `(() => {
+  const button = document.querySelector(${viewModeSelector(mode)});
   if (!button) return { found: false };
   button.click();
   return { found: true };
@@ -200,6 +196,7 @@ const sampler = (seekSeconds) => `(async () => {
 export async function runLayers(session, info, attempts) {
   await session.send("Page.bringToFront");
   const roundTrip = await checkViewModeRoundTrip(session);
+  await openControlSections(session);
   const baseline = await session.readJson(READ_CONTROLS);
   assertControls(baseline);
 
@@ -379,16 +376,10 @@ async function checkViewModeRoundTrip(session) {
 }
 
 async function selectViewMode(session, mode) {
-  const label = VIEW_MODE_LABELS[mode];
-
-  if (!label) {
-    throw new Invalid(`the demo has no ${mode} view to select`);
-  }
-
-  const clicked = await session.readJson(clickViewMode(label));
+  const clicked = await session.readJson(clickViewMode(mode));
 
   if (!clicked.found) {
-    throw new Invalid(`the demo is not showing a ${label} view button`);
+    throw new Invalid(`the demo is not showing a ${mode} view button`);
   }
 
   const deadline = Date.now() + VIEW_MODE_SETTLE_MS;
@@ -401,7 +392,7 @@ async function selectViewMode(session, mode) {
   }
 
   throw new Invalid(
-    `the demo stayed in the ${last?.mode} view after the ${label} button was clicked`,
+    `the demo stayed in the ${last?.mode} view after the ${mode} button was clicked`,
   );
 }
 

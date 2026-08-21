@@ -40,6 +40,10 @@ type MeshGeometryConstructor = new (options: {
 type ShaderFactory = {
   from(options: {
     gl: { fragment: string; vertex: string };
+    gpu: {
+      fragment: { entryPoint: string; source: string };
+      vertex: { entryPoint: string; source: string };
+    };
     resources: Record<string, unknown>;
   }): PixiShader;
 };
@@ -179,6 +183,16 @@ export function createPixiRegionCoverageMask(options: {
         fragment: regionCoverageMaskFragmentShader,
         vertex: regionCoverageMaskVertexShader,
       },
+      gpu: {
+        fragment: {
+          entryPoint: "mainFragment",
+          source: regionCoverageMaskFragmentWgsl,
+        },
+        vertex: {
+          entryPoint: "mainVertex",
+          source: regionCoverageMaskVertexWgsl,
+        },
+      },
       resources: {
         regionMaskUniforms: uniforms,
         uSampler: placeholderSource.style,
@@ -196,6 +210,9 @@ function createPlaceholderCanvas() {
   const canvas = document.createElement("canvas");
   canvas.height = 1;
   canvas.width = 1;
+  // WebGPU builds this placeholder into the shader's first bind group, and a
+  // canvas that was never given a rendering context has nothing to bind.
+  canvas.getContext("2d");
   return canvas;
 }
 
@@ -242,5 +259,78 @@ void main(void) {
   }
   float alpha = texture(uTexture, vMaskUV).r;
   finalColor = vec4(alpha);
+}
+`;
+
+const regionCoverageMaskVertexWgsl = `
+struct GlobalUniforms {
+  uProjectionMatrix: mat3x3<f32>,
+  uWorldTransformMatrix: mat3x3<f32>,
+  uWorldColorAlpha: vec4<f32>,
+  uResolution: vec2<f32>,
+}
+
+struct LocalUniforms {
+  uTransformMatrix: mat3x3<f32>,
+  uColor: vec4<f32>,
+  uRound: f32,
+}
+
+@group(0) @binding(0) var<uniform> globalUniforms: GlobalUniforms;
+@group(1) @binding(0) var<uniform> localUniforms: LocalUniforms;
+
+struct VertexOutput {
+  @builtin(position) position: vec4<f32>,
+  @location(0) vUV: vec2<f32>,
+}
+
+@vertex
+fn mainVertex(
+  @location(0) aPosition: vec2<f32>,
+  @location(1) aUV: vec2<f32>,
+) -> VertexOutput {
+  let modelViewProjectionMatrix =
+    globalUniforms.uProjectionMatrix *
+    globalUniforms.uWorldTransformMatrix *
+    localUniforms.uTransformMatrix;
+
+  var output: VertexOutput;
+
+  output.position = vec4<f32>(
+    (modelViewProjectionMatrix * vec3<f32>(aPosition, 1.0)).xy,
+    0.0,
+    1.0
+  );
+  output.vUV = aUV;
+
+  return output;
+}
+`;
+
+// Resolving the crop per fragment keeps the uniform block out of the vertex
+// stage's bind group.
+const regionCoverageMaskFragmentWgsl = `
+struct RegionMaskUniforms {
+  uCrop: vec4<f32>,
+  uMaskRegion: vec4<f32>,
+}
+
+@group(2) @binding(0) var<uniform> regionMaskUniforms: RegionMaskUniforms;
+@group(2) @binding(1) var uTexture: texture_2d<f32>;
+@group(2) @binding(2) var uSampler: sampler;
+
+@fragment
+fn mainFragment(@location(0) vUV: vec2<f32>) -> @location(0) vec4<f32> {
+  let mediaPoint =
+    regionMaskUniforms.uCrop.xy + vUV * regionMaskUniforms.uCrop.zw;
+  let maskUV =
+    (mediaPoint - regionMaskUniforms.uMaskRegion.xy) /
+    regionMaskUniforms.uMaskRegion.zw;
+
+  if (any(maskUV < vec2<f32>(0.0)) || any(maskUV > vec2<f32>(1.0))) {
+    return vec4<f32>(0.0);
+  }
+
+  return vec4<f32>(textureSampleLevel(uTexture, uSampler, maskUV, 0.0).r);
 }
 `;

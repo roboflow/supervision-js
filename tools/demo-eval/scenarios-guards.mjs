@@ -10,6 +10,12 @@
  */
 
 import { delay } from "./cdp.mjs";
+import {
+  at,
+  Hook,
+  layerToggleSelector,
+  openControlSections,
+} from "./hooks.mjs";
 
 const BLANKING_SEEK_SECONDS = 3;
 const BLANKING_SETTLE_MS = 1500;
@@ -422,7 +428,7 @@ export function judgeBlanking(scenario) {
 const INSTALL_DRAG_PROBE = `(() => {
   window.__dragProbe?.stop();
   const renderer = window.__demoRenderer;
-  const input = document.querySelector("input.timeline-view__input");
+  const input = document.querySelector(${at(Hook.TimelineInput)});
   if (!input) return null;
   const box = input.getBoundingClientRect();
   const state = {
@@ -813,7 +819,7 @@ const PLAYHEAD_SAMPLER = `(async (holdMs, intervalMs) => {
   const renderer = window.__demoRenderer;
   const samples = [];
   const read = () => {
-    const node = document.querySelector(".timeline-view__playhead");
+    const node = document.querySelector(${at(Hook.TimelinePlayhead)});
     const state = renderer.getState();
     samples.push({
       at: performance.now(),
@@ -832,7 +838,7 @@ const PLAYHEAD_SAMPLER = `(async (holdMs, intervalMs) => {
 })`;
 
 const READ_PLAYHEAD_PERCENT = `(() => {
-  const node = document.querySelector(".timeline-view__playhead");
+  const node = document.querySelector(${at(Hook.TimelinePlayhead)});
   const state = window.__demoRenderer.getState();
   return {
     transform: node ? node.style.transform : null,
@@ -1073,7 +1079,7 @@ export function judgeBackscrub(scenario) {
 }
 
 const CANVAS_BOX = `(() => {
-  const canvas = document.querySelector("canvas");
+  const canvas = document.querySelector(${at(Hook.ViewportMount)} + " canvas");
   const box = canvas ? canvas.getBoundingClientRect() : null;
   return {
     canvasBox: box
@@ -1125,18 +1131,14 @@ function summariseWalk(walked) {
 /* ------------------------------------------------------------------- focus */
 
 const SET_TOGGLE = (label, checked) => `(() => {
-  const el = [...document.querySelectorAll("label.render-control--toggle")]
-    .find((node) => node.querySelector("span")?.textContent.trim() === ${JSON.stringify(label)});
-  if (!el) return { found: false };
-  const input = el.querySelector("input");
+  const input = document.querySelector(${layerToggleSelector(label)} + " input");
+  if (!input) return { found: false };
   if (input.checked !== ${checked} && !input.disabled) input.click();
   return { found: true, checked: input.checked, disabled: input.disabled };
 })()`;
 
 const READ_TOGGLE = (label) => `(() => {
-  const el = [...document.querySelectorAll("label.render-control--toggle")]
-    .find((node) => node.querySelector("span")?.textContent.trim() === ${JSON.stringify(label)});
-  const input = el?.querySelector("input");
+  const input = document.querySelector(${layerToggleSelector(label)} + " input");
   return input ? { found: true, checked: input.checked, disabled: input.disabled } : { found: false };
 })()`;
 
@@ -1151,6 +1153,7 @@ export async function runFocus(session, info, attempts = 1) {
 
 async function measureFocus(session) {
   await focusPage(session);
+  await openControlSections(session);
   const geometry = await session.readJson(CANVAS_BOX);
   const restore = await session.readJson(READ_TOGGLE("Focus"));
   if (!restore.found) {
@@ -1263,10 +1266,9 @@ async function pressKey(session, name) {
 }
 
 const FIND_TOGGLE_BOX = (label) => `(() => {
-  const el = [...document.querySelectorAll("label.render-control--toggle")]
-    .find((node) => node.querySelector("span")?.textContent.trim() === ${JSON.stringify(label)});
-  const input = el?.querySelector("input");
+  const input = document.querySelector(${layerToggleSelector(label)} + " input");
   if (!input) return null;
+  input.scrollIntoView({ block: "center" });
   const box = input.getBoundingClientRect();
   return {
     x: Math.round(box.x + box.width / 2),
@@ -1328,6 +1330,7 @@ export async function runHotkeys(session, info, attempts = 1) {
 
 async function measureHotkeys(session, info) {
   await focusPage(session);
+  await openControlSections(session);
   const toggle = await session.readJson(FIND_TOGGLE_BOX("Masks"));
   if (toggle === null) {
     throw new Invalid("the demo is not showing the Masks toggle to click");

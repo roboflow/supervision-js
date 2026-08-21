@@ -15,6 +15,7 @@ import {
 } from "react";
 import { MediaRendererPlaybackState } from "supervision";
 import { formatTime, formatTimeRange, toSourceTimeRange } from "../format";
+import { DemoEvalHook } from "../eval-hooks";
 import {
   readLiveReadouts,
   useLiveReadoutWriter,
@@ -378,6 +379,7 @@ export function TimelineView({
       <span
         aria-hidden="true"
         className="timeline-view__playhead"
+        data-eval={DemoEvalHook.TimelinePlayhead}
         ref={playheadRef}
       >
         <span className="timeline-view__marker timeline-view__marker--playhead" />

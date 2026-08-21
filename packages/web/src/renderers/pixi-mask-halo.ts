@@ -38,6 +38,10 @@ type MeshGeometryConstructor = new (options: {
 type ShaderFactory = {
   from(options: {
     gl: { fragment: string; vertex: string };
+    gpu: {
+      fragment: { entryPoint: string; source: string };
+      vertex: { entryPoint: string; source: string };
+    };
     resources: Record<string, unknown>;
   }): PixiShader;
 };
@@ -250,6 +254,16 @@ export function createPixiMaskHaloRenderer(options: {
         fragment: maskHaloFragmentShader,
         vertex: maskHaloVertexShader,
       },
+      gpu: {
+        fragment: {
+          entryPoint: "mainFragment",
+          source: maskHaloFragmentWgsl,
+        },
+        vertex: {
+          entryPoint: "mainVertex",
+          source: maskHaloVertexWgsl,
+        },
+      },
       resources: {
         haloUniforms: uniforms,
         uSampler: placeholderSource.style,
@@ -293,6 +307,9 @@ function createPlaceholderCanvas() {
 
   canvas.height = 1;
   canvas.width = 1;
+  // WebGPU rejects a canvas that was never given a rendering context, and Pixi
+  // uploads this placeholder while it builds the shader's first bind group.
+  canvas.getContext("2d");
 
   return canvas;
 }
@@ -341,5 +358,73 @@ void main(void) {
     int(clamp(maskId, 0.0, float(${MAX_ID_MASK_PALETTE_ENTRIES - 1})));
 
   finalColor = uHaloPalette[paletteIndex] * vColor;
+}
+`;
+
+const maskHaloVertexWgsl = `
+struct GlobalUniforms {
+  uProjectionMatrix: mat3x3<f32>,
+  uWorldTransformMatrix: mat3x3<f32>,
+  uWorldColorAlpha: vec4<f32>,
+  uResolution: vec2<f32>,
+}
+
+struct LocalUniforms {
+  uTransformMatrix: mat3x3<f32>,
+  uColor: vec4<f32>,
+  uRound: f32,
+}
+
+@group(0) @binding(0) var<uniform> globalUniforms: GlobalUniforms;
+@group(1) @binding(0) var<uniform> localUniforms: LocalUniforms;
+
+struct VertexOutput {
+  @builtin(position) position: vec4<f32>,
+  @location(0) vUV: vec2<f32>,
+  @location(1) vColor: vec4<f32>,
+}
+
+@vertex
+fn mainVertex(
+  @location(0) aPosition: vec2<f32>,
+  @location(1) aUV: vec2<f32>,
+) -> VertexOutput {
+  let modelViewProjectionMatrix =
+    globalUniforms.uProjectionMatrix *
+    globalUniforms.uWorldTransformMatrix *
+    localUniforms.uTransformMatrix;
+
+  var output: VertexOutput;
+
+  output.position = vec4<f32>(
+    (modelViewProjectionMatrix * vec3<f32>(aPosition, 1.0)).xy,
+    0.0,
+    1.0
+  );
+  output.vUV = aUV;
+  output.vColor = globalUniforms.uWorldColorAlpha * localUniforms.uColor;
+
+  return output;
+}
+`;
+
+const maskHaloFragmentWgsl = `
+struct HaloUniforms {
+  uHaloPalette: array<vec4<f32>, ${MAX_ID_MASK_PALETTE_ENTRIES}>,
+}
+
+@group(2) @binding(0) var<uniform> haloUniforms: HaloUniforms;
+@group(2) @binding(1) var uTexture: texture_2d<f32>;
+@group(2) @binding(2) var uSampler: sampler;
+
+@fragment
+fn mainFragment(
+  @location(0) vUV: vec2<f32>,
+  @location(1) vColor: vec4<f32>,
+) -> @location(0) vec4<f32> {
+  let maskId = floor(textureSampleLevel(uTexture, uSampler, vUV, 0.0).r * 255.0 + 0.5);
+  let paletteIndex = i32(clamp(maskId, 0.0, ${MAX_ID_MASK_PALETTE_ENTRIES - 1}.0));
+
+  return haloUniforms.uHaloPalette[paletteIndex] * vColor;
 }
 `;

@@ -62,6 +62,30 @@ a baseline. Each verdict is `pass`, `fail`,
 `invalid-environment` verdict means the tool refused to turn a disturbed window
 into a number, and the summary says what disturbed it.
 
+## How it finds the controls
+
+Every control this tool drives carries a `data-eval` id. The demo declares the
+set in `demo/src/eval-hooks.ts`, this tool declares the same set in
+`hooks.mjs`, and `source-contracts.test.ts` fails when the two disagree.
+
+That indirection is not decoration. The tool used to find controls by class
+name and by the text on them, and an upstream redesign of the style panel
+renamed both: `layers`, `focus` and `hotkeys` went from `pass` to
+`invalid-environment` and stayed there for a whole merge, because an abstention
+is not a failure and nothing in the summary says a gate has stopped running.
+So a run now resolves every declared id against the live page before it
+measures anything, and reports `contract fail` — which exits 1 — naming the ids
+that have gone missing.
+
+The style panel's sections unmount their bodies while they are collapsed, so
+the layer toggles and the mask border slider are absent rather than hidden
+until something opens them. The tool opens the two it reads and leaves them
+open for the whole run: the inspector is a fixed-width column that scrolls on
+its own, so the stage it measures is the same size either way, and expanding
+and collapsing around each read would re-render the panel immediately before a
+sample. Returning to the Demo view mounts a fresh panel, so the scenarios that
+change view open them again afterwards.
+
 ## The baseline
 
 A threshold catches a fall off a cliff. It does not catch a number walking from

@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -93,5 +93,35 @@ describe("the player shortcuts", () => {
     expect(source).toContain(
       'window.removeEventListener("keydown", onKeyDown)',
     );
+  });
+});
+
+/* The harness reaches the demo's controls through `data-eval` ids rather than
+ * through class names and button text, because it once reached through those
+ * and an upstream redesign moved them: three scenarios stopped measuring and
+ * reported invalid-environment, which no gate treats as a failure. A run
+ * resolves every id against the live page before it measures anything, so that
+ * drift now goes red. These two check the halves agree without a browser. */
+describe("the eval hook catalogue", () => {
+  it("declares the same ids in the demo and in the harness", async () => {
+    const demo = await import("../../demo/src/eval-hooks");
+    const harness = await import("./hooks.mjs");
+
+    expect([...harness.HOOKS].sort()).toEqual([...demo.DEMO_EVAL_HOOKS].sort());
+  });
+
+  it("stamps every declared id somewhere in the demo", async () => {
+    const { DemoEvalHook } = await import("../../demo/src/eval-hooks");
+    const components = path.join(demoDir, "components");
+    const source = readdirSync(components)
+      .filter((file) => file.endsWith(".tsx"))
+      .map((file) => readFileSync(path.join(components, file), "utf8"))
+      .join("\n");
+
+    for (const name of Object.keys(DemoEvalHook)) {
+      expect(source, `${name} is declared but nothing renders it`).toContain(
+        `DemoEvalHook.${name}`,
+      );
+    }
   });
 });

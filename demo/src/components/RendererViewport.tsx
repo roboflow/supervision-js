@@ -10,6 +10,7 @@ import type {
   DemoMediaState,
   UploadInferenceState,
 } from "../session/demo-session-types";
+import { DemoEvalHook } from "../eval-hooks";
 
 interface RendererViewportProps {
   readonly containerRef: RefCallback<HTMLDivElement>;
@@ -32,7 +33,11 @@ export const RendererViewport = memo(function RendererViewport({
 
   return (
     <section className="renderer-viewport" aria-label="Renderer viewport">
-      <div ref={containerRef} className="renderer-viewport__mount" />
+      <div
+        ref={containerRef}
+        className="renderer-viewport__mount"
+        data-eval={DemoEvalHook.ViewportMount}
+      />
       {overlay ? (
         <div
           className={`renderer-viewport__overlay renderer-viewport__overlay--${overlay.tone}`}

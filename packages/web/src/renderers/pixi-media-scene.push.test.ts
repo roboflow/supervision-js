@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  annotationRenderers,
   createArrayDetectionFrameSource,
   createBufferedDetectionTimeline,
+  RegionRendererRegionKind,
+  RegionRendererSourceKind,
   type DetectionFrame,
 } from "supervision-js-core";
 
@@ -16,14 +19,29 @@ import { MediaRendererFit } from "#types/media-renderer";
 
 const pixiMock = vi.hoisted(() => ({
   copyExternalImageToTexture: vi.fn(),
+  externalSources: [] as MockExternalSource[],
   displayFilters: [] as unknown[],
   extractCanvas: vi.fn(() => ({ height: 240, width: 320 })),
   render: vi.fn(),
   sprites: [] as PaintedSprite[],
+  textures: [] as MockTextureInstance[],
   tickerAdd: vi.fn(),
   tickerRemove: vi.fn(),
   updateGPUTexture: vi.fn(),
 }));
+
+/** The dimensions a source advertises, and the ones its texture really has. */
+interface MockExternalSource {
+  height: number;
+  pixelHeight: number;
+  pixelWidth: number;
+  width: number;
+}
+
+interface MockTextureInstance {
+  readonly frame?: { height: number; width: number; x: number; y: number };
+  readonly source: unknown;
+}
 
 /**
  * What the batcher would put on screen: the quad Pixi last built from the
@@ -118,8 +136,14 @@ vi.mock("pixi.js", () => {
    * changed, which a texture reports only while it is dynamic.
    */
   class Sprite {
+    alpha = 1;
+    anchor = { set: vi.fn() };
+    position = { set: vi.fn() };
     quad = { height: 0, width: 0 };
+    rotation = 0;
     scale = { x: 1, y: 1 };
+    visible = false;
+    zIndex = 0;
     destroy = vi.fn();
     private _height: number | undefined;
     private _texture: MockTexture | undefined;
@@ -170,16 +194,25 @@ vi.mock("pixi.js", () => {
 
   class Texture {
     readonly dynamic: boolean;
+    readonly frame?: { height: number; width: number; x: number; y: number };
     readonly orig: { height: number; width: number };
+    source: MockSource | undefined;
     update = vi.fn();
     private readonly _listeners: (() => void)[] = [];
 
     constructor(
-      public readonly options: { dynamic?: boolean; source?: MockSource } = {},
+      public readonly options: {
+        dynamic?: boolean;
+        frame?: { height: number; width: number; x: number; y: number };
+        source?: MockSource;
+      } = {},
     ) {
       const source = options.source;
 
+      pixiMock.textures.push(this);
       this.dynamic = options.dynamic ?? false;
+      this.frame = options.frame;
+      this.source = source;
       this.orig = { height: source?.height ?? 0, width: source?.width ?? 0 };
       source?.onResize?.(() => {
         this.orig.height = source.height;
@@ -214,8 +247,19 @@ vi.mock("pixi.js", () => {
     }
   }
 
+  class Rectangle {
+    constructor(
+      public x: number,
+      public y: number,
+      public width: number,
+      public height: number,
+    ) {}
+  }
+
   class ExternalSource {
     height: number;
+    pixelHeight: number;
+    pixelWidth: number;
     width: number;
     private readonly _listeners: (() => void)[] = [];
 
@@ -226,16 +270,29 @@ vi.mock("pixi.js", () => {
     ) {
       this.height = options.resource?.height ?? 0;
       this.width = options.resource?.width ?? 0;
+      this.pixelHeight = this.height;
+      this.pixelWidth = this.width;
+      pixiMock.externalSources.push(this);
     }
 
     onResize(listener: () => void) {
       this._listeners.push(listener);
     }
 
+    resize(width: number, height: number, resolution: number) {
+      this.height = height;
+      this.width = width;
+      this.pixelHeight = Math.round(height * resolution);
+      this.pixelWidth = Math.round(width * resolution);
+      for (const listener of this._listeners) listener();
+    }
+
     updateGPUTexture(texture: { height: number; width: number }) {
       pixiMock.updateGPUTexture(texture);
       this.height = texture.height;
       this.width = texture.width;
+      this.pixelHeight = texture.height;
+      this.pixelWidth = texture.width;
       for (const listener of this._listeners) listener();
     }
   }
@@ -254,7 +311,7 @@ vi.mock("pixi.js", () => {
     ImageSource: Stub,
     Mesh: Stub,
     MeshGeometry: Stub,
-    Rectangle: Stub,
+    Rectangle,
     Shader: Stub,
     Sprite,
     Text: Stub,
@@ -294,7 +351,9 @@ beforeEach(() => {
   pixiMock.displayFilters.length = 0;
   pixiMock.extractCanvas.mockClear();
   pixiMock.render.mockClear();
+  pixiMock.externalSources.length = 0;
   pixiMock.sprites.length = 0;
+  pixiMock.textures.length = 0;
   pixiMock.tickerAdd.mockClear();
 });
 
@@ -521,6 +580,64 @@ describe("push-presented Pixi scene", () => {
     expect(painted).toStrictEqual(
       sizes.map(() => ({ height: 240, width: 320 })),
     );
+  });
+
+  it("crops a media region out of the frame the compositor presented", async () => {
+    const load = createDeferred<readonly DetectionFrame[]>();
+    const detectionTimeline = createBufferedDetectionTimeline({
+      source: { loadFrames: () => load.promise },
+    });
+    const channel = createChannel();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene({
+      ...createSceneOptions(channel.channel),
+      detectionTimeline,
+    });
+    scene.initializeMedia({ height: 240, width: 320 });
+    scene.setPresentation(
+      {
+        renderers: [
+          annotationRenderers.region({
+            id: "head-crop",
+            region: { kind: RegionRendererRegionKind.Bounds },
+            source: {
+              kind: RegionRendererSourceKind.Media,
+              region: { kind: RegionRendererRegionKind.Bounds },
+            },
+            target: { className: "head" },
+          }),
+        ],
+      },
+      1,
+    );
+
+    const prepared = detectionTimeline.prepare(1);
+
+    load.resolve([
+      {
+        detections: [
+          {
+            className: "head",
+            rect: { height: 30, width: 40, x: 160, y: 120 },
+          },
+        ],
+        mediaTime: 1,
+      },
+    ]);
+    await prepared;
+    // A proxy decode: the same picture at half the media's resolution.
+    channel.present(presentedFrame(1000, { height: 120, width: 160 }));
+
+    const presentedSource = pixiMock.externalSources.at(-1);
+    const crop = pixiMock.textures.find((texture) => texture.frame);
+
+    expect(crop?.source).toBe(presentedSource);
+    expect({ ...crop?.frame }).toStrictEqual({
+      height: 30,
+      width: 40,
+      x: 140,
+      y: 105,
+    });
   });
 
   it("publishes the detections a load lands after the picture already went up", async () => {

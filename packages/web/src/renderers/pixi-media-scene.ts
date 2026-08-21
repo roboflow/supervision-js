@@ -324,7 +324,11 @@ export async function createPixiMediaScene(
     detectionTimeline: annotationDetectionTimeline,
     getActiveRegionMaskCoverage: () =>
       maskLayer?.getActiveRegionMaskCoverage() ?? null,
-    getMediaTexture: () => (hasPresentedSample ? stagingTexture : undefined),
+    // Under GPU compositing the decoded frame lands in a texture the
+    // compositor swaps onto the media sprite, leaving the canvas that
+    // stagingTexture wraps empty.
+    getMediaTexture: () =>
+      hasPresentedSample ? mediaSprite?.texture : undefined,
     onInvalidate: () => {
       if (!hasPresentedSample || mediaWidth <= 0 || mediaHeight <= 0) return;
       const boxState = boxLayer.drawFrame(currentMediaTime, viewportScale);
@@ -602,6 +606,7 @@ export async function createPixiMediaScene(
       })
     : undefined;
   let mediaSprite: InstanceType<typeof Sprite> | undefined;
+  let mediaTextureSource: PixiExternalSource | undefined;
   let stagingTexture: PixiTexture | undefined;
   let stagingTextureSource: TextureUploadSource | undefined;
   const collectFrameTimings = options.diagnostics?.frameTimings === true;
@@ -2170,6 +2175,8 @@ export async function createPixiMediaScene(
           resource: texture,
         });
 
+        mediaTextureSource = externalSource;
+
         // A decode of another size resizes this source in place, and only a
         // dynamic texture forwards that to the sprite. Without it the sprite
         // takes the new size's scale while still drawing the previous size's
@@ -2180,7 +2187,18 @@ export async function createPixiMediaScene(
       },
       device,
       height: mediaHeight,
-      onTextureReplaced: sizeMediaSprite,
+      onTextureReplaced: () => {
+        // A proxy decode is the same picture at a lower resolution, and the
+        // region crops address this texture in media coordinates, so the
+        // source keeps the media's dimensions and takes the decode's as its
+        // resolution.
+        mediaTextureSource?.resize(
+          mediaWidth,
+          mediaHeight,
+          mediaTextureSource.pixelWidth / mediaWidth,
+        );
+        sizeMediaSprite();
+      },
       width: mediaWidth,
     });
   }

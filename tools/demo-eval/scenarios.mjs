@@ -7,6 +7,14 @@ import {
   isReachable,
   openTarget,
 } from "./cdp.mjs";
+import {
+  at,
+  FIXTURE_PREFIX,
+  fixtureHook,
+  Hook,
+  openControlSections,
+  startingAt,
+} from "./hooks.mjs";
 
 const TRACE_CATEGORIES = [
   "disabled-by-default-devtools.timeline",
@@ -48,16 +56,12 @@ const DETECTION_SETTLE_MS = 8000;
  * DETECTION_SETTLE_MS deadline out and lands far above this. */
 const SEEK_SETTLE_LIMIT_MS = 500;
 const BATTERY_TIMEOUT_MS = 900_000;
-/* The basketball clip, under whichever name the demo is offering it. Its
+/* The basketball clip, under whichever sample the demo is offering it. Its
  * detections thicken from 3.8 a frame at the clip's opening to a plateau of
  * 12.9 to 13.1 from media 4 onwards, which is the half of the clip the stall
- * lived in, and nothing else in this harness selects it. The buttons carry no
- * identifier, so a label is the only handle, and more than one fixture has
- * carried this clip; the first name the demo answers to wins. */
-const CADENCE_FIXTURE_LABELS = [
-  "Basketball with Keypoints",
-  "9s basketball sample",
-];
+ * lived in, and nothing else in this harness selects it. More than one fixture
+ * has carried this clip; the first the demo answers to wins. */
+const CADENCE_FIXTURE_IDS = ["basketball_geometry", "basketball_sam3"];
 const CADENCE_HEAD_SECONDS = 0.3;
 /* Kept clear of the clip end so a window cannot wrap into the next lap. */
 const CADENCE_TAIL_SECONDS = 0.5;
@@ -115,7 +119,7 @@ const SNAPSHOT = `(() => {
 })()`;
 
 const GEOMETRY = `(() => {
-  const canvas = document.querySelector("canvas");
+  const canvas = document.querySelector(${at(Hook.ViewportMount)} + " canvas");
   const box = canvas ? canvas.getBoundingClientRect() : null;
   return {
     canvas: box ? { width: Math.round(box.width), height: Math.round(box.height) } : null,
@@ -187,6 +191,7 @@ export async function openDemoPage(
   const settled = await session.evaluate(
     `localStorage.getItem(${JSON.stringify(VIEW_MODE_STORAGE_KEY)}) ?? "demo"`,
   );
+  if (settled !== "benchmarks") await openControlSections(session);
   return { session, targetId: target.id, info: { ...info, viewMode: settled } };
 }
 
@@ -861,22 +866,22 @@ export async function runCadence(session, info, attempts) {
     );
   }
 
-  const label = CADENCE_FIXTURE_LABELS.find((candidate) =>
-    opening.some((button) => button.label === candidate),
+  const id = CADENCE_FIXTURE_IDS.find((candidate) =>
+    opening.some((button) => button.id === candidate),
   );
-  if (!label) {
+  if (!id) {
     invalid(
       "the demo is not offering the basketball clip as " +
-        `${CADENCE_FIXTURE_LABELS.map((name) => `"${name}"`).join(" or ")}; ` +
-        `it has ${opening.map((button) => `"${button.label}"`).join(", ")}`,
+        `${CADENCE_FIXTURE_IDS.map((name) => `"${name}"`).join(" or ")}; ` +
+        `it has ${opening.map((button) => `"${button.id}"`).join(", ")}`,
     );
   }
 
   try {
-    const fixture = await selectFixture(session, label);
+    const fixture = await selectFixture(session, id);
     return await measureCadence(session, fixture, attempts);
   } finally {
-    await selectFixture(session, pressed.label).catch(() => {});
+    await selectFixture(session, pressed.id).catch(() => {});
   }
 }
 
@@ -1277,8 +1282,9 @@ export function cadenceDetail(scenario, field) {
   return lines;
 }
 
-const FIXTURE_BUTTONS = `[...document.querySelectorAll(".source-controls__mode button")]
+const FIXTURE_BUTTONS = `[...document.querySelectorAll(${startingAt(FIXTURE_PREFIX)})]
   .map((button) => ({
+    id: button.getAttribute("data-eval").slice(${JSON.stringify(FIXTURE_PREFIX)}.length),
     label: button.textContent.trim(),
     pressed: button.getAttribute("aria-pressed") === "true",
     disabled: button.disabled,
@@ -1288,9 +1294,8 @@ function readFixtureButtons(session) {
   return session.readJson(FIXTURE_BUTTONS);
 }
 
-const clickFixture = (label) => `(() => {
-  const button = [...document.querySelectorAll(".source-controls__mode button")]
-    .find((node) => node.textContent.trim() === ${JSON.stringify(label)});
+const clickFixture = (id) => `(() => {
+  const button = document.querySelector(${at(fixtureHook(id))});
   if (!button) return { found: false };
   if (button.disabled) return { found: true, disabled: true };
   window.__demoEvalFixtureMark = window.__demoRenderer;
@@ -1303,20 +1308,23 @@ const clickFixture = (label) => `(() => {
  * the page answers with is a different object afterwards. Waiting for a ready
  * status alone would be answered by the outgoing one straight away.
  */
-async function selectFixture(session, label, timeoutMs = 90_000) {
+async function selectFixture(session, id, timeoutMs = 90_000) {
   const buttons = await readFixtureButtons(session);
-  const wanted = buttons.find((button) => button.label === label);
+  const wanted = buttons.find((button) => button.id === id);
   if (!wanted) {
     invalid(
-      `the demo is not offering a "${label}" source; it has ` +
-        `${buttons.map((button) => `"${button.label}"`).join(", ")}`,
+      `the demo is not offering a "${id}" source; it has ` +
+        `${buttons.map((button) => `"${button.id}"`).join(", ")}`,
     );
   }
-  if (wanted.pressed) return waitForRenderer(session, timeoutMs);
+  if (wanted.pressed) {
+    const info = await waitForRenderer(session, timeoutMs);
+    return { ...info, id, label: wanted.label };
+  }
 
-  const clicked = await session.readJson(clickFixture(label));
+  const clicked = await session.readJson(clickFixture(id));
   if (clicked.disabled) {
-    invalid(`the "${label}" source button was disabled when the sweep set it`);
+    invalid(`the "${id}" source button was disabled when the sweep set it`);
   }
 
   const deadline = Date.now() + timeoutMs;
@@ -1329,13 +1337,11 @@ async function selectFixture(session, label, timeoutMs = 90_000) {
     if (swapped) {
       const info = await waitForRenderer(session, timeoutMs);
       await session.evaluate("delete window.__demoEvalFixtureMark; 1");
-      return { ...info, label };
+      return { ...info, id, label: wanted.label };
     }
     await delay(200);
   }
-  invalid(
-    `the demo stayed on its previous source after "${label}" was clicked`,
-  );
+  invalid(`the demo stayed on its previous source after "${id}" was clicked`);
 }
 
 const cadenceSampler = (startSeconds, playSeconds) => `(async () => {

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { DemoEvalHook } from "../eval-hooks";
 import { DemoViewMode } from "../session/demo-view-mode";
 
 export function DemoShell({
@@ -34,7 +35,7 @@ export function DemoShell({
   const isBenchmarksMode = mode === DemoViewMode.Benchmarks;
 
   return (
-    <main className={shellClassName}>
+    <main className={shellClassName} data-eval={DemoEvalHook.Shell}>
       <header className="demo-shell__header">
         <div className="demo-shell__brand">
           <div className="demo-shell__mark" aria-hidden="true">
@@ -55,6 +56,7 @@ export function DemoShell({
           </a>
           <button
             aria-pressed={mode === DemoViewMode.Benchmarks}
+            data-eval={DemoEvalHook.BenchmarksView}
             onClick={() => onModeChange(DemoViewMode.Benchmarks)}
             type="button"
           >
@@ -62,6 +64,7 @@ export function DemoShell({
           </button>
           <button
             aria-pressed={mode === DemoViewMode.Demo}
+            data-eval={DemoEvalHook.DemoView}
             onClick={() => onModeChange(DemoViewMode.Demo)}
             type="button"
           >
@@ -69,6 +72,7 @@ export function DemoShell({
           </button>
           <button
             aria-pressed={mode === DemoViewMode.Debug}
+            data-eval={DemoEvalHook.DebugView}
             onClick={() => onModeChange(DemoViewMode.Debug)}
             type="button"
           >

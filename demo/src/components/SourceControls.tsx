@@ -4,6 +4,7 @@ import {
   type UploadInferenceState,
 } from "../session/demo-session-types";
 import type { DemoFixtureDefinition } from "../fixtures/demo-fixtures";
+import { fixtureEvalHook } from "../eval-hooks";
 
 export const SourceControls = memo(function SourceControls({
   apiKey,
@@ -56,6 +57,7 @@ export const SourceControls = memo(function SourceControls({
               mode === DemoSourceMode.Fixture &&
               sampleFixtureId === fixture.sampleName
             }
+            data-eval={fixtureEvalHook(fixture.sampleName)}
             disabled={disabled}
             key={fixture.sampleName}
             onClick={() => onSampleChange(fixture.sampleName)}
