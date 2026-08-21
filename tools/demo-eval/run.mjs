@@ -72,9 +72,6 @@ const LABEL_WIDTH = 27;
  * or was disturbed once cannot be reported as passing because a later pass
  * happened to run clean. */
 const VERDICT_SEVERITY = ["skipped", "pass", "invalid-environment", "fail"];
-/* The engine is consumed from source through a vite alias, so its working tree
- * is part of what every number here measures. */
-const ENGINE_CHECKOUT = "../roboflow-video-runtime";
 
 const { values } = parseArgs({
   options: {
@@ -328,10 +325,7 @@ async function compareAgainstBaseline() {
       };
       return;
     }
-    const source = sourceFingerprint({
-      consumer: process.cwd(),
-      engine: ENGINE_CHECKOUT,
-    });
+    const source = sourceFingerprint({ consumer: process.cwd() });
     const next = buildBaseline({
       source,
       recordedWithFailures: failing.map(

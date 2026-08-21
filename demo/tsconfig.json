@@ -14,15 +14,7 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
-    "jsx": "react-jsx",
-    "paths": {
-      "@roboflow/video-engine": [
-        "../../roboflow-video-runtime/app/dist/videoEngineTypes/index.d.ts"
-      ],
-      "@roboflow/video-engine/analysis": [
-        "../../roboflow-video-runtime/app/dist/videoEngineTypes/analysis.d.ts"
-      ]
-    }
+    "jsx": "react-jsx"
   },
   "include": ["src"]
 }

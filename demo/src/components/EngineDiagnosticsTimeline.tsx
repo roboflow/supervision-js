@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, type CSSProperties } from "react";
-import type { DiagnosticsSnapshot } from "@roboflow/video-engine";
+import type { DiagnosticsSnapshot } from "supervision-js-video-engine";
 
 /**
  * The engine's coverage timeline, lane for lane: GOP heat, what each cache tier

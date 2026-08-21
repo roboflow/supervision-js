@@ -1,5 +1,5 @@
-import { SourceKind } from "@roboflow/video-engine";
-import type { UrlVideoSource } from "@roboflow/video-engine";
+import { SourceKind } from "supervision-js-video-engine";
+import type { UrlVideoSource } from "supervision-js-video-engine";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -36,7 +36,7 @@ const analysis = vi.hoisted(() => ({
   open: vi.fn(),
 }));
 
-vi.mock("@roboflow/video-engine", () => ({
+vi.mock("supervision-js-video-engine", () => ({
   SourceKind: { Blob: "blob", Stream: "stream", Url: "url" },
   displayBoxResolution: (options: unknown) => ({
     kind: "displayBox",
@@ -52,7 +52,7 @@ vi.mock("@roboflow/video-engine", () => ({
   },
 }));
 
-vi.mock("@roboflow/video-engine/analysis", () => ({
+vi.mock("supervision-js-video-engine/analysis", () => ({
   AnalysisSession: { open: analysis.open },
 }));
 

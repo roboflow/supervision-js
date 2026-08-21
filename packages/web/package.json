@@ -98,10 +98,10 @@
     "supervision-js-core": "file:../core"
   },
   "peerDependencies": {
-    "@roboflow/video-engine": "*"
+    "supervision-js-video-engine": "*"
   },
   "peerDependenciesMeta": {
-    "@roboflow/video-engine": {
+    "supervision-js-video-engine": {
       "optional": true
     }
   }

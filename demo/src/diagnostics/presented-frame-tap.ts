@@ -2,7 +2,7 @@ import type {
   FrameQuality,
   PresentedFrame,
   PresentedFrameHandler,
-} from "@roboflow/video-engine";
+} from "supervision-js-video-engine";
 import type { MediaRendererSource } from "supervision";
 
 const DEFAULT_RING_CAPACITY = 300;

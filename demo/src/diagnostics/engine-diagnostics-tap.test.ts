@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { DiagnosticsSnapshot } from "@roboflow/video-engine";
+import type { DiagnosticsSnapshot } from "supervision-js-video-engine";
 import type { MediaRendererSource } from "supervision";
 import {
   createEngineDiagnosticsTap,

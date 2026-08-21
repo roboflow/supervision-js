@@ -1,4 +1,4 @@
-import type { DiagnosticsSnapshot } from "@roboflow/video-engine";
+import type { DiagnosticsSnapshot } from "supervision-js-video-engine";
 import type { MediaRendererSource } from "supervision";
 
 /** Matches the engine's own broadcast rate, so the demo's readings and the

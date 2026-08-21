@@ -102,10 +102,10 @@ toolbar value is a checked presentation mirror.
   factory may wire Mediabunny and Pixi defaults, but the renderer core should
   depend on small media-source and scene contracts rather than vendor modules.
 - Video is push-only: an engine-backed media source announces every presented
-  frame and the scene composites it. `@roboflow/video-engine` and
-  `@roboflow/video-engine/analysis` are the only importable entries, ESLint
-  enforces that, and the remaining pull machinery is legacy rather than a model
-  to copy. Read [`video-engine-presentation.md`](video-engine-presentation.md)
+  frame and the scene composites it. `supervision-js-video-engine` and
+  `supervision-js-video-engine/analysis` are the only entries that carry code,
+  ESLint enforces that, and the remaining pull machinery is legacy rather than a
+  model to copy. Read [`video-engine-presentation.md`](video-engine-presentation.md)
   before changing any of it.
 - Treat [`docs/public/guides/public-api.md`](../public/guides/public-api.md) as
   the public boundary. Prefer `createMediaSession()` for normal consumers,
@@ -193,10 +193,8 @@ watchers running next to the demo server. `npm run demo:dev` builds once before
 starting the server, and `npm run dev:demo` does not build at all, so under
 either of those every library edit needs `npm run build` before the browser can
 run it. The watchers rebuild JavaScript only; `npm run build` is also what
-refreshes the `supervision` declarations the demo typechecks against. The video
-engine's declarations are the producer's to emit, with `npm run
-types:videoengine` from its `app/` directory, so an engine change reaches this
-repo's typecheck only after that runs there.
+refreshes the `supervision` and `supervision-js-video-engine` declarations the
+demo typechecks against.
 
 For focused iterative work, use separate terminals:
 

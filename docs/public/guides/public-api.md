@@ -131,7 +131,7 @@ not the first thing most users should reach for:
   for video presented by the Roboflow video engine, which owns the playhead and
   announces each frame it puts on screen while the renderer composites it with
   annotations drawn from that frame's own timestamp. `supervision` does not
-  bundle the engine: it imports `@roboflow/video-engine` dynamically at the
+  bundle the engine: it imports `supervision-js-video-engine` dynamically at the
   moment one of these opens a source, so importing `supervision` costs nothing
   for an application that never opens one, and an application that does needs
   that specifier resolvable in its own build. Pass `display` to size the decode

@@ -1,0 +1,56 @@
+{
+  "name": "supervision-js-video-engine",
+  "version": "0.0.0",
+  "description": "Frame-accurate video decoding, scrubbing, and playback engine for supervision-js.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/roboflow/supervision-js.git"
+  },
+  "homepage": "https://github.com/roboflow/supervision-js#readme",
+  "bugs": {
+    "url": "https://github.com/roboflow/supervision-js/issues"
+  },
+  "keywords": [
+    "computer-vision",
+    "video",
+    "playback",
+    "scrubbing",
+    "webcodecs",
+    "mediabunny",
+    "typescript"
+  ],
+  "type": "module",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./analysis": {
+      "types": "./dist/analysis.d.ts",
+      "import": "./dist/analysis.js"
+    },
+    "./worker": "./dist/engine.worker.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "npm run clean && npm run build:types && npm run build:js",
+    "build:js": "rollup -c",
+    "build:types": "tsc --emitDeclarationOnly -p tsconfig.json",
+    "clean": "node -e \"fs.rmSync('dist', { recursive: true, force: true })\"",
+    "dev": "rollup -c -w",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json"
+  },
+  "dependencies": {
+    "mediabunny": "^1.52.3"
+  }
+}

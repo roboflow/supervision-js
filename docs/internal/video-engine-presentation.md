@@ -13,26 +13,26 @@ law for future edits.
 
 ## The Engine Boundary
 
-Two specifiers resolve, and nothing else: `@roboflow/video-engine` and
-`@roboflow/video-engine/analysis`. `no-restricted-imports` in
-`eslint.config.js` errors on any other entry, including relative paths into the
-engine's checkout, so this repo cannot bind itself to the engine's file layout.
+The engine is the `packages/video-engine` workspace, published on its own as
+`supervision-js-video-engine`. Two specifiers carry code, and nothing else:
+`supervision-js-video-engine` and `supervision-js-video-engine/analysis`, the
+second being the only one that pulls Mediabunny. A third export,
+`supervision-js-video-engine/worker`, is the built worker as a deployment asset
+for hosts whose CSP forbids `blob:` workers. `no-restricted-imports` in
+`eslint.config.js` errors on any other entry, and on relative paths into
+`packages/video-engine/src`, so importers cannot bind themselves to the engine's
+file layout.
 
 Types and runtime arrive from different places:
 
-- Every typecheck reads the producer's emitted declarations. The producer
-  generates them with `npm run types:videoengine` from its `app/` directory,
-  and both `packages/web/tsconfig.json` and `demo/tsconfig.json` map the two
-  specifiers onto that output. Neither compiles the engine's source, so this
-  repo's strictness never lands on another repo's internals.
-- What runs resolves to the engine's TypeScript source, through aliases in
-  `demo/vite.config.ts` and `vitest.config.ts`.
+- Every typecheck reads the engine's emitted declarations, resolved through the
+  workspace by package name. `npm run typecheck` builds the engine before it
+  reaches `supervision` and the demo, so those declarations are present.
+- Vitest resolves both specifiers to the engine's TypeScript source, through
+  aliases in `vitest.config.ts`, the same way it resolves `supervision` and
+  `supervision-js-core`.
 - Rollup treats both specifiers as external, so the engine is never bundled
-  into the published package.
-
-Every one of those mappings points at a checkout of the producer beside this
-repository, so the typechecks, the demo and the Vitest suite all need it present
-to resolve those specifiers at all.
+  into the published `supervision` package.
 
 The engine import inside `packages/web/src/media/video-engine-media-source.ts`
 is dynamic for one reason: importing `supervision` must keep working for

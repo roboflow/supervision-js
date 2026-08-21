@@ -125,8 +125,8 @@ const packageConfig = {
   external(source) {
     return (
       source === "mediabunny" ||
-      source === "@roboflow/video-engine" ||
-      source.startsWith("@roboflow/video-engine/") ||
+      source === "supervision-js-video-engine" ||
+      source.startsWith("supervision-js-video-engine/") ||
       source === "pixi.js" ||
       source.startsWith("pixi.js/") ||
       source === "supervision-js-core"

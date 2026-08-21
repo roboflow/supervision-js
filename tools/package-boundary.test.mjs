@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
@@ -18,24 +17,9 @@ const reactNativeExampleSourceDir = path.join(
   "examples/react-native/src",
 );
 
-const publishedPackages = ["core", "react-native", "web"];
-const videoEngineCheckout = "roboflow-video-runtime";
+const publishedPackages = ["core", "react-native", "video-engine", "web"];
 const importSpecifier =
   /(?:\bfrom\s*|\bimport\s*[(\s]\s*|\brequire\s*\(\s*)["']([^"']+)["']/g;
-const videoEngineCheckoutPath = new RegExp(
-  `"([^"]*${videoEngineCheckout}[^"]*)"`,
-  "g",
-);
-const videoEngineSourceConfigs = ["vitest.config.ts", "demo/vite.config.ts"];
-const videoEngineDeclarationConfigs = [
-  "packages/web/tsconfig.json",
-  "demo/tsconfig.json",
-];
-const videoEngineAliasConfigs = [
-  ...videoEngineSourceConfigs,
-  ...videoEngineDeclarationConfigs,
-];
-const videoEngineSourceFiles = ["index.ts", "analysis.ts"];
 
 const forbiddenPatterns = [
   {
@@ -290,70 +274,6 @@ test("published packages declare every package their source imports", async () =
   assert.deepEqual(failures, []);
 });
 
-test("the video engine checkout the build resolves through is present", async () => {
-  const targets = await videoEngineAliasTargets();
-  const checkouts = new Set(targets.map(({ checkout }) => checkout));
-
-  assert.equal(
-    checkouts.size,
-    1,
-    `The video engine aliases resolve through different checkouts: ${[...checkouts].join(", ")}`,
-  );
-
-  const [checkout] = checkouts;
-
-  assert.ok(
-    existsSync(checkout),
-    [
-      `No video engine checkout at ${checkout}.`,
-      `@roboflow/video-engine is not published, so ${videoEngineAliasConfigs.join(", ")} resolve it through that directory.`,
-      'CONTRIBUTING.md, "Video Engine Checkout", says what belongs there.',
-    ].join("\n"),
-  );
-
-  const declarationTargets = targets.filter(({ config }) =>
-    videoEngineDeclarationConfigs.includes(config),
-  );
-  const missingDeclarations = declarationTargets.filter(
-    ({ resolved }) => !existsSync(resolved),
-  );
-
-  assert.deepEqual(
-    missingDeclarations.map(({ resolved }) =>
-      path.relative(checkout, resolved),
-    ),
-    [],
-    [
-      ...missingDeclarations.map(
-        ({ config, resolved }) =>
-          `${config} resolves @roboflow/video-engine to ${resolved}, which is not there.`,
-      ),
-      "The engine emits its declarations with `npm run types:videoengine` from its `app/` directory.",
-    ].join("\n"),
-  );
-
-  const sourceTargets = targets.filter(({ config }) =>
-    videoEngineSourceConfigs.includes(config),
-  );
-  const missingSourceFiles = sourceTargets.flatMap(({ config, resolved }) =>
-    videoEngineSourceFiles
-      .filter((file) => !existsSync(path.join(resolved, file)))
-      .map(
-        (file) =>
-          `${config} resolves @roboflow/video-engine into ${resolved}, but ${file} is not there.`,
-      ),
-  );
-
-  assert.deepEqual(
-    missingSourceFiles,
-    [],
-    [
-      ...missingSourceFiles,
-      "The checkout directory exists but is missing the engine's TypeScript source, which vitest and the demo dev server compile directly.",
-    ].join("\n"),
-  );
-});
-
 async function listSourceFiles(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
   const files = await Promise.all(
@@ -410,37 +330,4 @@ function importedPackages(source) {
   }
 
   return packages;
-}
-
-async function videoEngineAliasTargets() {
-  const targets = [];
-
-  for (const config of videoEngineAliasConfigs) {
-    const configPath = path.join(rootDir, config);
-    const source = stripComments(await readFile(configPath, "utf8"));
-    const paths = [...source.matchAll(videoEngineCheckoutPath)].map(
-      ([, value]) => value,
-    );
-
-    assert.notEqual(
-      paths.length,
-      0,
-      `${config} spells no ${videoEngineCheckout} path, so nothing there resolves @roboflow/video-engine`,
-    );
-
-    for (const value of paths) {
-      const resolved = path.resolve(path.dirname(configPath), value);
-      const segments = resolved.split(path.sep);
-
-      targets.push({
-        checkout: segments
-          .slice(0, segments.lastIndexOf(videoEngineCheckout) + 1)
-          .join(path.sep),
-        config,
-        resolved,
-      });
-    }
-  }
-
-  return targets;
 }

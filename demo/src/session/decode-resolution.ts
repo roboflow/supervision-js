@@ -1,4 +1,4 @@
-import type { DisplayBoxResolutionOptions } from "@roboflow/video-engine";
+import type { DisplayBoxResolutionOptions } from "supervision-js-video-engine";
 import {
   getDemoMaxDevicePixelRatio,
   type DemoRenderQuality,

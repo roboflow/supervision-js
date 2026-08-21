@@ -7,8 +7,8 @@ import {
   type DetectionFrame,
   type MediaRendererSource,
 } from "supervision";
-import { SourceKind } from "@roboflow/video-engine";
-import type { DisplayBoxResolutionOptions } from "@roboflow/video-engine";
+import { SourceKind } from "supervision-js-video-engine";
+import type { DisplayBoxResolutionOptions } from "supervision-js-video-engine";
 import type {
   DemoPresentationAvailability,
   DemoPresentationLayerSetting,

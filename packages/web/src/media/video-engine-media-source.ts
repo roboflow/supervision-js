@@ -13,11 +13,11 @@ import type {
   VideoEngine,
   VideoEngineOptions,
   VideoSource,
-} from "@roboflow/video-engine";
+} from "supervision-js-video-engine";
 import type {
   AnalysisSession,
   ExtractedFrame,
-} from "@roboflow/video-engine/analysis";
+} from "supervision-js-video-engine/analysis";
 
 const MILLISECONDS_PER_SECOND = 1000;
 const DEFAULT_FRAME_RATE = 30;
@@ -75,7 +75,7 @@ export async function openVideoEngineMediaSource(
   // external to the build, and a static import would make resolving it a
   // precondition of importing the package at all.
   const { VideoEngine, displayBoxResolution } =
-    await import("@roboflow/video-engine");
+    await import("supervision-js-video-engine");
   const { display, frameDecodeStrategy, ...engineOptions } = options;
   const engine = new VideoEngine({
     decodeStrategy: display ? displayBoxResolution(display) : undefined,
@@ -153,7 +153,7 @@ function createAnalysisFrameReader(options: {
   let closed = false;
 
   const openSession = () => {
-    sessionPromise ??= import("@roboflow/video-engine/analysis").then(
+    sessionPromise ??= import("supervision-js-video-engine/analysis").then(
       ({ AnalysisSession }) =>
         AnalysisSession.open({
           decodeStrategy: options.decodeStrategy,

@@ -14,8 +14,12 @@ export default [
   {
     languageOptions: {
       globals: {
+        clearInterval: "readonly",
+        clearTimeout: "readonly",
         console: "readonly",
         document: "readonly",
+        setInterval: "readonly",
+        setTimeout: "readonly",
         window: "readonly",
       },
     },
@@ -24,26 +28,43 @@ export default [
   ...tseslint.configs.recommended,
   {
     rules: {
+      /* A leading underscore marks a binding the code is required to accept and
+       * has no use for: a parameter the worker protocol carries, or the value of
+       * a generator drained for its side effects. */
+      "@typescript-eslint/no-unused-vars": [
+        "error",
+        { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
+      ],
       "no-restricted-imports": [
         "error",
         {
           patterns: [
             {
               group: [
-                "@roboflow/video-engine/*",
-                "!@roboflow/video-engine/analysis",
+                "supervision-js-video-engine/*",
+                "!supervision-js-video-engine/analysis",
+                "!supervision-js-video-engine/worker",
               ],
               message:
-                "The video engine exposes two entries: @roboflow/video-engine and @roboflow/video-engine/analysis. Anything else is an internal module.",
+                "The video engine exposes three entries: supervision-js-video-engine, supervision-js-video-engine/analysis, and supervision-js-video-engine/worker. Anything else is an internal module.",
             },
             {
-              group: ["**/roboflow-video-runtime/**", "**/videoEngine/**"],
+              group: ["**/video-engine/src/**"],
               message:
-                "Import @roboflow/video-engine or @roboflow/video-engine/analysis. A path into the video engine checkout binds this repo to its file layout.",
+                "Import supervision-js-video-engine or supervision-js-video-engine/analysis. A path into the engine's source binds the importer to its file layout.",
             },
           ],
         },
       ],
+    },
+  },
+  {
+    files: ["packages/video-engine/src/decode-scheduler.test.ts"],
+    rules: {
+      /* Doubles for a decode that hangs: the generator awaits a promise that
+       * never settles, so it can never reach a yield. Being a generator is what
+       * the caller consumes, not an accident of how it was written. */
+      "require-yield": "off",
     },
   },
 ];

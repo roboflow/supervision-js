@@ -13,7 +13,7 @@ import {
   type MediaRenderer,
   type WritableDetectionFrameSource,
 } from "supervision";
-import { SourceKind } from "@roboflow/video-engine";
+import { SourceKind } from "supervision-js-video-engine";
 import type {
   DemoFixtureDetectionSourceSummary,
   DemoFixtureSummary,

@@ -1,0 +1,565 @@
+import { beforeAll, describe, expect, it } from "vitest";
+
+import { FrameCache, type FrameCacheOptions, FrameTier } from "./frame-cache";
+import { installWorkerGlobals } from "../test/fake-engine-deps";
+
+beforeAll(() => {
+  installWorkerGlobals();
+});
+
+const MB = 1024 * 1024;
+
+/** Source handle for puts; the fake 2D context ignores it, so any shape works. */
+const SRC = { width: 4, height: 4 } as unknown as OffscreenCanvas;
+
+const BASE: FrameCacheOptions = {
+  exactWidth: 320,
+  exactHeight: 180,
+  previewWidth: 320,
+  exactBudgetBytes: 0,
+  previewCapacity: 0,
+  bucketMs: 1,
+};
+
+function makeCache(overrides: Partial<FrameCacheOptions> = {}): FrameCache {
+  return new FrameCache({ ...BASE, ...overrides });
+}
+
+describe("FrameCache", () => {
+  describe("preview tier", () => {
+    it("stores a downscaled copy and tags the hit Preview", () => {
+      const cache = makeCache({ previewWidth: 160, previewCapacity: 4 });
+      cache.putPreview(1000, SRC, 320, 180);
+
+      const hit = cache.get(1000, 50, 50);
+      expect(hit).not.toBeNull();
+      expect(hit?.tier).toBe(FrameTier.Preview);
+      expect(hit?.timestampMs).toBe(1000);
+      // Downscaled into the tier's own canvas, not aliasing the source.
+      expect(hit?.canvas).not.toBe(SRC);
+      expect(hit?.canvas.width).toBe(160);
+      expect(hit?.canvas.height).toBe(90);
+    });
+
+    it("returns null past tolerance", () => {
+      const cache = makeCache({ previewCapacity: 4 });
+      cache.putPreview(1000, SRC, 320, 180);
+      expect(cache.get(1100, 50, 50)).toBeNull();
+    });
+
+    it("returns the nearest entry within tolerance", () => {
+      const cache = makeCache({ previewCapacity: 5 });
+      cache.putPreview(1000, SRC, 320, 180);
+      cache.putPreview(1080, SRC, 320, 180);
+
+      const hit = cache.get(1030, 60, 60);
+      expect(hit?.timestampMs).toBe(1000);
+    });
+
+    it("evicts the least-recently-used entry past capacity", () => {
+      const cache = makeCache({ previewCapacity: 2 });
+      cache.putPreview(0, SRC, 320, 180);
+      cache.putPreview(1000, SRC, 320, 180);
+      cache.putPreview(2000, SRC, 320, 180);
+
+      expect(cache.stats.previewSize).toBe(2);
+      expect(cache.get(0, 50, 50)).toBeNull();
+      expect(cache.get(1000, 50, 50)?.tier).toBe(FrameTier.Preview);
+      expect(cache.get(2000, 50, 50)?.tier).toBe(FrameTier.Preview);
+    });
+
+    it("a get bumps recency so a later entry evicts first", () => {
+      const cache = makeCache({ previewCapacity: 2 });
+      cache.putPreview(0, SRC, 320, 180);
+      cache.putPreview(1000, SRC, 320, 180);
+      // Touch 0 so 1000 becomes the least-recently-used slot.
+      cache.get(0, 50, 50);
+      cache.putPreview(2000, SRC, 320, 180);
+
+      expect(cache.get(1000, 50, 50)).toBeNull();
+      expect(cache.get(0, 50, 50)?.tier).toBe(FrameTier.Preview);
+      expect(cache.get(2000, 50, 50)?.tier).toBe(FrameTier.Preview);
+    });
+
+    it("collapses re-decodes of one frame onto one slot", () => {
+      const cache = makeCache({ previewCapacity: 5, bucketMs: 33 });
+      // The same frame, twice, with the float slop a re-decode carries.
+      cache.putPreview(1000.2, SRC, 320, 180);
+      cache.putPreview(1000.4, SRC, 320, 180);
+
+      expect(cache.stats.previewSize).toBe(1);
+      expect(cache.get(1000, 50, 50)?.tier).toBe(FrameTier.Preview);
+    });
+
+    it("keeps two frames a few milliseconds apart in their own slots", () => {
+      const cache = makeCache({ previewCapacity: 5, bucketMs: 33 });
+      cache.putPreview(0, SRC, 320, 180);
+      cache.putPreview(10, SRC, 320, 180);
+
+      expect(cache.stats.previewSize).toBe(2);
+      expect(cache.get(0, 50, 50)?.timestampMs).toBe(0);
+      expect(cache.get(10, 50, 50)?.timestampMs).toBe(10);
+    });
+  });
+
+  describe("exact tier", () => {
+    it("stores a full-resolution copy and tags the hit Exact", () => {
+      const cache = makeCache({ exactBudgetBytes: 64 * MB });
+      cache.putExact(1000, SRC, 320, 180);
+
+      const hit = cache.get(1000, 50, 50);
+      expect(hit?.tier).toBe(FrameTier.Exact);
+      expect(hit?.timestampMs).toBe(1000);
+      expect(hit?.canvas.width).toBe(320);
+      expect(hit?.canvas.height).toBe(180);
+    });
+
+    it("answers with the frame at or before the target, never the one after", () => {
+      // A 30fps grid: frames 33ms apart, and a 50ms tolerance reaches both
+      // neighbours of a target between them.
+      const cache = makeCache({ exactBudgetBytes: 64 * MB, bucketMs: 33 });
+      cache.putExact(1000, SRC, 320, 180);
+      cache.putExact(1033, SRC, 320, 180);
+
+      // A decode for 1010 returns the frame at 1000. The cache has to agree,
+      // or the same pointer position paints a different frame depending on
+      // which one served it, and the picture steps forward then back as the
+      // two alternate.
+      expect(cache.get(1010, 50, 50)?.timestampMs).toBe(1000);
+      expect(cache.get(1030, 50, 50)?.timestampMs).toBe(1000);
+      expect(cache.get(1033, 50, 50)?.timestampMs).toBe(1033);
+    });
+
+    it("derives slot count from the RAM budget and evicts past it", () => {
+      // 100x100x4 = 40_000 bytes/frame; a 100_000-byte budget yields 2 slots.
+      const cache = makeCache({
+        exactWidth: 100,
+        exactHeight: 100,
+        exactBudgetBytes: 100000,
+      });
+      cache.putExact(0, SRC, 100, 100);
+      cache.putExact(1000, SRC, 100, 100);
+      cache.putExact(2000, SRC, 100, 100);
+
+      expect(cache.stats.exactCapacity).toBe(2);
+      expect(cache.stats.exactSize).toBe(2);
+      expect(cache.get(0, 50, 50)).toBeNull();
+      expect(cache.get(2000, 50, 50)?.tier).toBe(FrameTier.Exact);
+    });
+
+    it("an evicted slot's canvas is refilled rather than reallocated", () => {
+      const cache = makeCache({
+        exactWidth: 100,
+        exactHeight: 100,
+        exactBudgetBytes: 100000,
+      });
+      cache.putExact(0, SRC, 100, 100);
+      const first = cache.get(0, 50, 50)?.canvas;
+      cache.putExact(1000, SRC, 100, 100);
+      // Evicts bucket 0, releasing its canvas after this put took its own.
+      cache.putExact(2000, SRC, 100, 100);
+      cache.putExact(3000, SRC, 100, 100);
+
+      expect(cache.get(0, 50, 50)).toBeNull();
+      expect(cache.get(3000, 50, 50)?.canvas).toBe(first);
+    });
+
+    it("keeps at least one slot for a tiny non-zero budget", () => {
+      const cache = makeCache({
+        exactWidth: 100,
+        exactHeight: 100,
+        exactBudgetBytes: 1,
+      });
+      expect(cache.stats.exactCapacity).toBe(1);
+      cache.putExact(0, SRC, 100, 100);
+      cache.putExact(1000, SRC, 100, 100);
+
+      expect(cache.get(0, 50, 50)).toBeNull();
+      expect(cache.get(1000, 50, 50)?.tier).toBe(FrameTier.Exact);
+    });
+
+    it("the slot floor raises capacity above what the byte budget alone gives", () => {
+      // 100x100x4 = 40_000 bytes/frame; a 100_000-byte budget gives 2 slots,
+      // but a floor of 13 must win so a full prefetch window fits.
+      const cache = makeCache({
+        exactWidth: 100,
+        exactHeight: 100,
+        exactBudgetBytes: 100000,
+        minExactSlots: 13,
+      });
+      expect(cache.stats.exactCapacity).toBe(13);
+    });
+
+    it("the floor never binds when the byte budget already exceeds it", () => {
+      const cache = makeCache({
+        exactWidth: 100,
+        exactHeight: 100,
+        exactBudgetBytes: 64 * MB,
+        minExactSlots: 13,
+      });
+      // 64MiB / 40_000 ~= 1677 slots, far above the floor.
+      expect(cache.stats.exactCapacity).toBeGreaterThan(13);
+    });
+
+    it("the floor leaves a zero budget at zero slots (disabled tier)", () => {
+      const cache = makeCache({ exactBudgetBytes: 0, minExactSlots: 13 });
+      expect(cache.stats.exactCapacity).toBe(0);
+    });
+
+    it("the reported budget grows so the fill percentage stays <= 100", () => {
+      // The floor holds 13 frames at 40_000 bytes = 520_000 bytes, well past
+      // the configured 100_000-byte budget. The stats budget must reflect the
+      // real resident ceiling so exactBytesPct never reads above 100.
+      const cache = makeCache({
+        exactWidth: 100,
+        exactHeight: 100,
+        exactBudgetBytes: 100000,
+        minExactSlots: 13,
+      });
+      const frameBytes = 100 * 100 * 4;
+      expect(cache.stats.exactBudgetBytes).toBe(13 * frameBytes);
+
+      for (let i = 0; i < 13; i++) cache.putExact(i * 1000, SRC, 100, 100);
+      const stats = cache.stats;
+      const residentBytes = stats.exactSize * frameBytes;
+      const pct = (residentBytes / stats.exactBudgetBytes) * 100;
+      expect(pct).toBeLessThanOrEqual(100);
+    });
+  });
+
+  describe("frame identity", () => {
+    it("adjacent frames keep a slot each where a bucket grid rounds two into one", () => {
+      // 15fps frames sit 66.67ms apart, so a 67ms grid rounds frames 100 and
+      // 101 onto one key and the second overwrites the first.
+      const cache = makeCache({ exactBudgetBytes: 64 * MB, bucketMs: 67 });
+      cache.putExact(6667, SRC, 320, 180);
+      cache.putExact(6733, SRC, 320, 180);
+
+      expect(cache.stats.exactSize).toBe(2);
+      expect(cache.stats.bucketCollapses).toBe(0);
+      expect(cache.get(6667, 50, 50)?.timestampMs).toBe(6667);
+      expect(cache.get(6733, 50, 50)?.timestampMs).toBe(6733);
+    });
+
+    it("a frame keeps its own timestamp when it is not a whole millisecond", () => {
+      // A 1/600-timebase source puts frames at 33.3333ms, and a cache-served
+      // paint is what most scrub positions read.
+      const cache = makeCache({ exactBudgetBytes: 64 * MB, bucketMs: 33 });
+      cache.putExact(100 / 3, SRC, 320, 180);
+
+      expect(cache.get(100 / 3, 5, 5)?.timestampMs).toBe(100 / 3);
+    });
+
+    it("a 30fps frame never answers for the next frame's timestamp", () => {
+      // 33.33ms apart, so a neighbour's timestamp sits well inside a 50ms
+      // reach of this one.
+      const cache = makeCache({ exactBudgetBytes: 64 * MB, bucketMs: 33 });
+      cache.putExact(1000, SRC, 320, 180);
+      cache.putExact(1033, SRC, 320, 180);
+
+      expect(cache.get(1000, 50, 50)?.timestampMs).toBe(1000);
+      expect(cache.get(1033, 50, 50)?.timestampMs).toBe(1033);
+      // The frame at 1067 is not resident, and no other frame is it.
+      expect(cache.get(1067, 50, 50)).toBeNull();
+    });
+
+    it("falls back to the caller's tolerance until a second frame reveals the spacing", () => {
+      const cache = makeCache({ exactBudgetBytes: 64 * MB, bucketMs: 33 });
+      cache.putExact(1000, SRC, 320, 180);
+
+      // A lone frame is no evidence of how far apart frames are.
+      expect(cache.get(1040, 50, 50)?.timestampMs).toBe(1000);
+
+      // Its neighbour puts the source's 33ms spacing on the record, and
+      // 1040 is a frame past 1000.
+      cache.putExact(967, SRC, 320, 180);
+      expect(cache.get(1040, 50, 50)).toBeNull();
+    });
+
+    it("learns the spacing from stored timestamps, not the declared interval", () => {
+      // The declared interval claims 30fps; the frames are 15fps, where a
+      // target 50ms past a frame is still that frame's.
+      const cache = makeCache({ exactBudgetBytes: 64 * MB, bucketMs: 33 });
+      cache.putExact(0, SRC, 320, 180);
+      cache.putExact(67, SRC, 320, 180);
+
+      expect(cache.get(50, 50, 50)?.timestampMs).toBe(0);
+    });
+
+    it("the caller's tolerance still bounds a lookup inside one frame's span", () => {
+      // 15fps: the frame span is wider than the 50ms constant, so the
+      // constant is what binds.
+      const cache = makeCache({ exactBudgetBytes: 64 * MB, bucketMs: 67 });
+      cache.putExact(0, SRC, 320, 180);
+      cache.putExact(67, SRC, 320, 180);
+
+      expect(cache.get(40, 50, 50)?.timestampMs).toBe(0);
+      expect(cache.get(60, 50, 50)).toBeNull();
+    });
+  });
+
+  describe("peek", () => {
+    it("returns the same hit as get but does not count it", () => {
+      const cache = makeCache({
+        exactBudgetBytes: 64 * MB,
+        previewCapacity: 8,
+      });
+      cache.putExact(1000, SRC, 320, 180);
+
+      const peeked = cache.peek(1000, 50, 50);
+      expect(peeked?.tier).toBe(FrameTier.Exact);
+      expect(peeked?.timestampMs).toBe(1000);
+      // The lookup is invisible to the hit/miss accounting.
+      expect(cache.stats.exactHits).toBe(0);
+      expect(cache.stats.misses).toBe(0);
+
+      // get() on the same target still counts, so the two together book a
+      // single hit per gesture rather than two.
+      cache.get(1000, 50, 50);
+      expect(cache.stats.exactHits).toBe(1);
+    });
+
+    it("a peek miss is not counted either", () => {
+      const cache = makeCache({
+        exactBudgetBytes: 64 * MB,
+        previewCapacity: 8,
+      });
+      expect(cache.peek(5000, 50, 50)).toBeNull();
+      expect(cache.stats.misses).toBe(0);
+    });
+  });
+
+  describe("bumpExact", () => {
+    it("promotes an entry so a later entry evicts first", () => {
+      // 40_000 bytes/frame, 80_000-byte budget = 2 slots.
+      const cache = makeCache({
+        exactWidth: 100,
+        exactHeight: 100,
+        exactBudgetBytes: 80000,
+      });
+      cache.putExact(0, SRC, 100, 100);
+      cache.putExact(1000, SRC, 100, 100);
+      // Touch 0 so 1000 becomes the LRU victim of the next put.
+      cache.bumpExact(0);
+      cache.putExact(2000, SRC, 100, 100);
+
+      expect(cache.get(1000, 50, 50)).toBeNull();
+      expect(cache.get(0, 50, 50)?.tier).toBe(FrameTier.Exact);
+      expect(cache.get(2000, 50, 50)?.tier).toBe(FrameTier.Exact);
+    });
+
+    it("protects the frame under an off-grid gesture position", () => {
+      // 40_000 bytes/frame, 80_000-byte budget = 2 slots.
+      const cache = makeCache({
+        exactWidth: 100,
+        exactHeight: 100,
+        exactBudgetBytes: 80000,
+      });
+      cache.putExact(0, SRC, 100, 100);
+      cache.putExact(33, SRC, 100, 100);
+      // The scheduler bumps with the gesture's position, which is not a
+      // frame timestamp.
+      cache.bumpExact(10);
+      cache.putExact(67, SRC, 100, 100);
+
+      expect(cache.get(33, 50, 50)).toBeNull();
+      expect(cache.get(0, 50, 50)?.timestampMs).toBe(0);
+    });
+
+    it("does not count as a hit", () => {
+      const cache = makeCache({
+        exactWidth: 100,
+        exactHeight: 100,
+        exactBudgetBytes: 64 * MB,
+      });
+      cache.putExact(0, SRC, 100, 100);
+      cache.bumpExact(0);
+      expect(cache.stats.exactHits).toBe(0);
+    });
+
+    it("is a no-op on a miss", () => {
+      const cache = makeCache({
+        exactWidth: 100,
+        exactHeight: 100,
+        exactBudgetBytes: 64 * MB,
+      });
+      cache.bumpExact(5000);
+      expect(cache.stats.exactHits).toBe(0);
+      expect(cache.stats.misses).toBe(0);
+    });
+  });
+
+  describe("tier preference", () => {
+    it("prefers an exact hit over a preview hit", () => {
+      const cache = makeCache({
+        exactBudgetBytes: 64 * MB,
+        previewCapacity: 8,
+      });
+      cache.putExact(1000, SRC, 320, 180);
+      cache.putPreview(1000, SRC, 320, 180);
+
+      const hit = cache.get(1000, 50, 50);
+      expect(hit?.tier).toBe(FrameTier.Exact);
+      expect(cache.stats.exactHits).toBe(1);
+      expect(cache.stats.previewHits).toBe(0);
+    });
+
+    it("falls back to preview when the exact tier misses", () => {
+      const cache = makeCache({
+        exactBudgetBytes: 64 * MB,
+        previewCapacity: 8,
+      });
+      cache.putExact(1000, SRC, 320, 180);
+      cache.putPreview(5000, SRC, 320, 180);
+
+      const hit = cache.get(5000, 50, 50);
+      expect(hit?.tier).toBe(FrameTier.Preview);
+      expect(cache.stats.previewHits).toBe(1);
+    });
+  });
+
+  describe("disabled tiers", () => {
+    it("drops puts when both tiers are zero-capacity", () => {
+      const cache = makeCache();
+      cache.putExact(1000, SRC, 320, 180);
+      cache.putPreview(1000, SRC, 320, 180);
+
+      expect(cache.stats.exactCapacity).toBe(0);
+      expect(cache.stats.previewCapacity).toBe(0);
+      expect(cache.stats.exactSize).toBe(0);
+      expect(cache.stats.previewSize).toBe(0);
+      expect(cache.get(1000, 50, 50)).toBeNull();
+    });
+  });
+
+  describe("stats", () => {
+    it("counts hits per tier and misses", () => {
+      const cache = makeCache({
+        exactBudgetBytes: 64 * MB,
+        previewCapacity: 8,
+      });
+      cache.putExact(1000, SRC, 320, 180);
+      cache.putPreview(2000, SRC, 320, 180);
+
+      cache.get(1000, 50, 50);
+      cache.get(2000, 50, 50);
+      cache.get(9000, 50, 50);
+
+      expect(cache.stats.exactHits).toBe(1);
+      expect(cache.stats.previewHits).toBe(1);
+      expect(cache.stats.misses).toBe(1);
+    });
+
+    it("exposes resident timestamps and bucket size for diagnostics", () => {
+      const cache = makeCache({ exactBudgetBytes: 64 * MB, bucketMs: 1 });
+      cache.putExact(1000, SRC, 320, 180);
+      cache.putExact(2000, SRC, 320, 180);
+
+      const stats = cache.stats;
+      expect([...stats.exactTimestampsMs].sort((a, b) => a - b)).toEqual([
+        1000, 2000,
+      ]);
+      expect(stats.bucketMs).toBe(1);
+    });
+
+    it("reports sizes and derived capacities", () => {
+      const cache = makeCache({
+        exactWidth: 100,
+        exactHeight: 100,
+        exactBudgetBytes: 100000,
+        previewCapacity: 5,
+      });
+      expect(cache.stats.exactCapacity).toBe(2);
+      expect(cache.stats.previewCapacity).toBe(5);
+
+      cache.putExact(0, SRC, 100, 100);
+      cache.putPreview(0, SRC, 320, 180);
+      expect(cache.stats.exactSize).toBe(1);
+      expect(cache.stats.previewSize).toBe(1);
+    });
+  });
+
+  describe("clear", () => {
+    it("empties both tiers", () => {
+      const cache = makeCache({
+        exactBudgetBytes: 64 * MB,
+        previewCapacity: 8,
+      });
+      cache.putExact(1000, SRC, 320, 180);
+      cache.putPreview(2000, SRC, 320, 180);
+      cache.clear();
+
+      expect(cache.stats.exactSize).toBe(0);
+      expect(cache.stats.previewSize).toBe(0);
+      expect(cache.get(1000, 50, 50)).toBeNull();
+      expect(cache.get(2000, 50, 50)).toBeNull();
+    });
+  });
+
+  describe("diagnostics counters", () => {
+    it("exact eviction past capacity surfaces in stats", () => {
+      // 100x100x4 = 40_000 bytes/frame; a 100_000-byte budget yields 2 slots.
+      const cache = makeCache({
+        exactWidth: 100,
+        exactHeight: 100,
+        exactBudgetBytes: 100000,
+      });
+      cache.putExact(0, SRC, 100, 100);
+      cache.putExact(1000, SRC, 100, 100);
+      cache.putExact(2000, SRC, 100, 100);
+
+      expect(cache.stats.exactEvictions).toBe(1);
+      expect(cache.stats.previewEvictions).toBe(0);
+    });
+
+    it("re-decoding one frame increments bucketCollapses", () => {
+      const cache = makeCache({ exactBudgetBytes: 64 * MB, bucketMs: 100 });
+      // One frame decoded twice: same millisecond, so one slot.
+      cache.putExact(1010.2, SRC, 320, 180);
+      cache.putExact(1010.4, SRC, 320, 180);
+
+      expect(cache.stats.bucketCollapses).toBe(1);
+      expect(cache.stats.exactSize).toBe(1);
+    });
+
+    it("distinct frames never count as a collapse", () => {
+      const cache = makeCache({ exactBudgetBytes: 64 * MB, bucketMs: 100 });
+      cache.putExact(1010, SRC, 320, 180);
+      cache.putExact(1020, SRC, 320, 180);
+
+      expect(cache.stats.bucketCollapses).toBe(0);
+      expect(cache.stats.exactSize).toBe(2);
+    });
+
+    it("stats expose the budget and per-tier frame dimensions", () => {
+      const cache = makeCache({
+        exactWidth: 640,
+        exactHeight: 360,
+        previewWidth: 320,
+        exactBudgetBytes: 64 * MB,
+        previewCapacity: 8,
+      });
+      const stats = cache.stats;
+      expect(stats.exactBudgetBytes).toBe(64 * MB);
+      expect(stats.exactFrameWidth).toBe(640);
+      expect(stats.exactFrameHeight).toBe(360);
+      expect(stats.previewFrameWidth).toBe(320);
+      expect(stats.previewFrameHeight).toBe(180);
+    });
+
+    it("resident bytes derive from size x width x height x 4", () => {
+      const cache = makeCache({
+        exactWidth: 100,
+        exactHeight: 100,
+        exactBudgetBytes: 64 * MB,
+      });
+      cache.putExact(0, SRC, 100, 100);
+      cache.putExact(1000, SRC, 100, 100);
+
+      const stats = cache.stats;
+      const exactBytes =
+        stats.exactSize * stats.exactFrameWidth * stats.exactFrameHeight * 4;
+      expect(exactBytes).toBe(2 * 100 * 100 * 4);
+    });
+  });
+});

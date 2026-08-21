@@ -12,15 +12,8 @@
     "mediabunny": "^1.52.3",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "supervision": "file:../packages/web"
-  },
-  "peerDependencies": {
-    "@roboflow/video-engine": "*"
-  },
-  "peerDependenciesMeta": {
-    "@roboflow/video-engine": {
-      "optional": true
-    }
+    "supervision": "file:../packages/web",
+    "supervision-js-video-engine": "file:../packages/video-engine"
   },
   "devDependencies": {
     "@types/react": "^19.2.18",

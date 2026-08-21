@@ -5,7 +5,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import type { DiagnosticsSnapshot, Warning } from "@roboflow/video-engine";
+import type { DiagnosticsSnapshot, Warning } from "supervision-js-video-engine";
 import {
   engineDiagnosticsBroadcastHz,
   engineTraceWindowMs,
