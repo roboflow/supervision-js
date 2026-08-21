@@ -1,9 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import {
-  IdMaskRasterFormat,
-  PreparedMaskFrameKind,
-} from "#render-preparation/mask-frame-artifact";
+import { PreparedMaskFrameKind } from "#render-preparation/mask-frame-artifact";
 import { createPixiFocusLayer } from "#renderers/pixi-focus-layer";
 import { BaseFocusStyle } from "supervision-js-core";
 import { BoxShape } from "supervision-js-core";
@@ -257,7 +254,6 @@ describe("pixi focus layer", () => {
           kind: PreparedMaskFrameKind.IdMask,
           maxStrokeWidth: 0,
           raster: new Uint8Array(120 * 80),
-          rasterFormat: IdMaskRasterFormat.R8,
           strokePalette: new Float32Array(),
           strokeWidths: new Float32Array(),
           width: 120,
@@ -956,7 +952,6 @@ function createIdMaskFocus() {
         kind: PreparedMaskFrameKind.IdMask as const,
         maxStrokeWidth: 0,
         raster: new Uint8Array(120 * 80),
-        rasterFormat: IdMaskRasterFormat.R8,
         strokePalette: new Float32Array(),
         strokeWidths: new Float32Array(),
         width: 120,

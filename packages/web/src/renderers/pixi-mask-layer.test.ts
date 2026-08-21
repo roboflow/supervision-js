@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  IdMaskRasterFormat,
+  IdMaskTextureFormat,
   PreparedMaskFrameKind,
 } from "#render-preparation/mask-frame-artifact";
 import { BaseMaskStyle } from "supervision-js-core";
@@ -154,6 +154,36 @@ describe("pixi mask layer", () => {
     expect(sprite.visible).toBe(false);
   });
 
+  it("uploads an odd-width id raster one byte per pixel on a renderer that takes it", () => {
+    const upload = uploadIdMask(121, () => true);
+
+    expect(upload.format).toBe(IdMaskTextureFormat.R8);
+    expect(upload.resource.length).toBe(121 * 80);
+    expect(upload.resource[121]).toBe(7);
+  });
+
+  it("pays four channels for an odd-width id raster the renderer would reject", () => {
+    const upload = uploadIdMask(121, () => false);
+
+    expect(upload.format).toBe(IdMaskTextureFormat.Rgba8);
+    expect(upload.resource.length).toBe(121 * 80 * 4);
+    expect([...upload.resource.slice(121 * 4, 121 * 4 + 4)]).toEqual([
+      7, 0, 0, 255,
+    ]);
+  });
+
+  it("uploads an aligned id raster one byte per pixel whatever the renderer takes", () => {
+    for (const acceptsUnaligned of [true, false, undefined]) {
+      const upload = uploadIdMask(
+        120,
+        acceptsUnaligned === undefined ? undefined : () => acceptsUnaligned,
+      );
+
+      expect(upload.format).toBe(IdMaskTextureFormat.R8);
+      expect(upload.resource.length).toBe(120 * 80);
+    }
+  });
+
   it("reports the window's readiness for a media time", () => {
     const layer = createPixiMaskLayer({
       BufferImageSource: FakeBufferImageSource as never,
@@ -178,7 +208,11 @@ describe("pixi mask layer", () => {
   });
 });
 
-function idMaskFrame() {
+function idMaskFrame(width = 120) {
+  const raster = new Uint8Array(width * 80);
+
+  raster[width] = 7;
+
   return {
     close: vi.fn(),
     fillPalette: new Float32Array(),
@@ -187,11 +221,44 @@ function idMaskFrame() {
     key: "mask-frame",
     kind: PreparedMaskFrameKind.IdMask,
     maxStrokeWidth: 0,
-    raster: new Uint8Array(120 * 80),
-    rasterFormat: IdMaskRasterFormat.R8,
+    raster,
     strokePalette: new Float32Array(),
     strokeWidths: new Float32Array(),
-    width: 120,
+    width,
+  };
+}
+
+function uploadIdMask(
+  width: number,
+  acceptsUnalignedTextureRows: (() => boolean) | undefined,
+) {
+  const layer = createPixiMaskLayer({
+    BufferImageSource: FakeBufferImageSource as never,
+    ImageSource: FakeImageSource as never,
+    Sprite: FakeSprite as never,
+    Texture: FakeTexture as never,
+    acceptsUnalignedTextureRows,
+    detectionTimeline: {} as never,
+    maskStyle: new BaseMaskStyle(),
+  });
+
+  layer.createSprite({ height: 80, width });
+  preparedWindow.frame = {
+    detectionFrame: { detections: [], mediaTime: 0.1 },
+    key: "mask-frame",
+    maskFrame: idMaskFrame(width),
+    maskStatus: "prepared",
+  };
+  layer.drawFrame(0.1);
+
+  const texture = layer.getActiveIdMaskFrameTexture()?.texture as unknown as {
+    source: FakeBufferImageSource;
+  };
+
+  return texture.source._options as {
+    format: IdMaskTextureFormat;
+    resource: Uint8Array;
+    width: number;
   };
 }
 
@@ -209,9 +276,11 @@ class FakeBufferImageSource {
 
 class FakeTexture {
   static readonly EMPTY = new FakeTexture({});
-  readonly source = {};
+  readonly source: unknown;
 
-  constructor(readonly _options: unknown) {}
+  constructor(readonly _options: { source?: unknown }) {
+    this.source = _options.source ?? {};
+  }
 }
 
 class FakeSprite {

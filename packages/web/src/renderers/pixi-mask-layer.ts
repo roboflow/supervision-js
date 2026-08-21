@@ -9,7 +9,7 @@ import {
   type PreparedRenderTimelineContext,
 } from "#render-preparation/prepared-render-window";
 import {
-  IdMaskRasterFormat,
+  IdMaskTextureFormat,
   PreparedMaskFrameKind,
   readIdMaskRasterValue,
   type PreparedIdMaskFrame,
@@ -41,6 +41,7 @@ import type {
 } from "pixi.js";
 
 const MAX_PENDING_MASK_HOLD_SECONDS = 0.05;
+const TEXTURE_ROW_ALIGNMENT_BYTES = 4;
 
 type ImageSourceConstructor = new (options: {
   autoGenerateMipmaps?: boolean;
@@ -54,7 +55,7 @@ type ImageSourceConstructor = new (options: {
 export type BufferImageSourceConstructor = new (options: {
   autoGenerateMipmaps?: boolean;
   dynamic: boolean;
-  format: IdMaskRasterFormat;
+  format: IdMaskTextureFormat;
   height: number;
   resource: Uint8Array;
   scaleMode?: "linear" | "nearest";
@@ -166,6 +167,12 @@ export function createPixiMaskLayer(options: {
   readonly detectionTimeline: BufferedDetectionTimeline;
   readonly maskStyle: MaskStyle;
   readonly onPreparedWindowChange?: () => void;
+  /**
+   * Whether the renderer takes a single-channel upload whose rows are not on a
+   * four-byte boundary. Answered when the first raster is uploaded, since the
+   * renderer this scene ends up with is not known when the layer is built.
+   */
+  readonly acceptsUnalignedTextureRows?: () => boolean;
   readonly renderPreparation?: RenderPreparationOptions;
   readonly resolveInstructions?: (options: {
     readonly frame: import("supervision-js-core").DetectionFrame;
@@ -426,12 +433,20 @@ export function createPixiMaskLayer(options: {
       return undefined;
     }
 
+    const needsFourChannels =
+      maskFrame.width % TEXTURE_ROW_ALIGNMENT_BYTES !== 0 &&
+      options.acceptsUnalignedTextureRows?.() !== true;
+
     return new BufferImageSource({
       autoGenerateMipmaps: false,
       dynamic: false,
-      format: maskFrame.rasterFormat,
+      format: needsFourChannels
+        ? IdMaskTextureFormat.Rgba8
+        : IdMaskTextureFormat.R8,
       height: maskFrame.height,
-      resource: maskFrame.raster,
+      resource: needsFourChannels
+        ? expandIdsToRgba(maskFrame.raster)
+        : maskFrame.raster,
       scaleMode: "nearest",
       width: maskFrame.width,
     });
@@ -556,4 +571,20 @@ export function createPixiMaskLayer(options: {
       return undefined;
     }
   }
+}
+
+/**
+ * Ids in the red channel of four, for a renderer that will not take them one
+ * byte per pixel. Four times the memory and a full pass over the raster, so it
+ * runs only where the single-channel upload would be rejected.
+ */
+function expandIdsToRgba(ids: Uint8Array): Uint8Array<ArrayBuffer> {
+  const rgba = new Uint8Array(new ArrayBuffer(ids.length * 4));
+
+  for (let index = 0; index < ids.length; index += 1) {
+    rgba[index * 4] = ids[index] ?? 0;
+    rgba[index * 4 + 3] = 0xff;
+  }
+
+  return rgba;
 }

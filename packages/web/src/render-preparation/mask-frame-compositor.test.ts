@@ -6,7 +6,6 @@ import {
 } from "supervision-js-core";
 
 import {
-  IdMaskRasterFormat,
   PreparedMaskFrameKind,
   readIdMaskRasterValue,
   type PreparedIdMaskFrame,
@@ -18,7 +17,7 @@ import {
 } from "./mask-frame-compositor";
 
 describe("mask frame compositor", () => {
-  it("carries an unaligned ID raster four bytes per pixel", () => {
+  it("carries an unaligned ID raster one byte per pixel", () => {
     const frame = createIdMaskRasterFrame([
       {
         alpha: 0.5,
@@ -34,13 +33,10 @@ describe("mask frame compositor", () => {
     ]);
 
     expect(frame).toBeDefined();
-    expect(frame!.rasterFormat).toBe(IdMaskRasterFormat.Rgba8);
-    expect([...frame!.data]).toEqual([
-      1, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255,
-    ]);
+    expect([...frame!.data]).toEqual([1, 0, 0, 0]);
   });
 
-  it("keeps an odd-width ID raster pickable at four bytes per pixel", () => {
+  it("keeps an odd-width ID raster pickable", () => {
     const frame = createIdMaskRasterFrame([
       {
         alpha: 0.5,
@@ -56,8 +52,7 @@ describe("mask frame compositor", () => {
     ]);
 
     expect(frame).toBeDefined();
-    expect(frame!.rasterFormat).toBe(IdMaskRasterFormat.Rgba8);
-    expect(frame!.data.length).toBe(3 * 2 * 4);
+    expect(frame!.data.length).toBe(3 * 2);
 
     const prepared: PreparedIdMaskFrame = {
       close() {},
@@ -68,7 +63,6 @@ describe("mask frame compositor", () => {
       kind: PreparedMaskFrameKind.IdMask,
       maxStrokeWidth: frame!.maxStrokeWidth,
       raster: frame!.data,
-      rasterFormat: frame!.rasterFormat,
       strokePalette: frame!.strokePalette,
       strokeWidths: frame!.strokeWidths,
       width: frame!.width,
@@ -102,7 +96,6 @@ describe("mask frame compositor", () => {
     ]);
 
     expect(frame).toBeDefined();
-    expect(frame!.rasterFormat).toBe(IdMaskRasterFormat.R8);
     expect([...frame!.data]).toEqual([1, 0, 0, 0]);
   });
 
@@ -131,8 +124,8 @@ describe("mask frame compositor", () => {
     ]);
 
     expect(frame).toBeDefined();
-    expect(frame!.data[(2 * 6 + 2) * 4]).toBe(3);
-    expect(frame!.data[(4 * 6 + 4) * 4]).toBe(0);
+    expect(frame!.data[2 * 6 + 2]).toBe(3);
+    expect(frame!.data[4 * 6 + 4]).toBe(0);
     expect(frame!.fillPalette.slice(12, 16)).toEqual(
       Float32Array.from([0, 1, 0, 0.25]),
     );

@@ -160,6 +160,13 @@ export async function createPixiMediaScene(
   } = pixi;
   const { GifSprite } = await import("pixi.js/gif");
   const app: PixiApplication = new Application();
+  /**
+   * WebGPU takes any bytesPerRow, so id rasters of any width go up one byte per
+   * pixel. WebGL rejects a single-channel upload whose width is not a multiple
+   * of four (measured: GL_INVALID_OPERATION, blank texture), and the layer pays
+   * four channels there instead. The renderer is only known after init.
+   */
+  const acceptsUnalignedTextureRows = () => app.renderer?.name === "webgpu";
   const frameChannel = options.presentedFrames;
   let currentFocusStyle: FocusStyle | null = options.focusStyle ?? null;
   let currentLabelStyle: LabelStyle | null = options.labelStyle ?? null;
@@ -229,6 +236,7 @@ export async function createPixiMediaScene(
     currentPolygonStyle &&
     !options.editingEngine
       ? createPixiPolygonLayer({
+          BufferImageSource,
           Container,
           ImageSource,
           Mesh,
@@ -237,6 +245,7 @@ export async function createPixiMediaScene(
           Sprite,
           Texture,
           UniformGroup,
+          acceptsUnalignedTextureRows,
           detectionTimeline: options.detectionTimeline,
           onPreparedWindowChange: handlePreparedWindowChange,
           polygonStyle: currentPolygonStyle,
@@ -302,6 +311,7 @@ export async function createPixiMediaScene(
         Sprite,
         Texture,
         UniformGroup,
+        acceptsUnalignedTextureRows,
         detectionTimeline: options.detectionTimeline,
         maskStyle: initialMaskPreparationStyle,
         onPreparedWindowChange: handlePreparedWindowChange,
@@ -1340,6 +1350,7 @@ export async function createPixiMediaScene(
         Sprite,
         Texture,
         UniformGroup,
+        acceptsUnalignedTextureRows,
         detectionTimeline: options.detectionTimeline,
         maskStyle: preparationStyle,
         onPreparedWindowChange: handlePreparedWindowChange,
@@ -1392,6 +1403,7 @@ export async function createPixiMediaScene(
 
     if (!polygonLayer) {
       polygonLayer = createPixiPolygonLayer({
+        BufferImageSource,
         Container,
         ImageSource,
         Mesh,
@@ -1400,6 +1412,7 @@ export async function createPixiMediaScene(
         Sprite,
         Texture,
         UniformGroup,
+        acceptsUnalignedTextureRows,
         detectionTimeline: options.detectionTimeline,
         onPreparedWindowChange: handlePreparedWindowChange,
         polygonStyle,

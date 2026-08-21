@@ -15,7 +15,6 @@ import {
   type MaskFramePreparationJob,
   MaskPreparationWorkerMessageType,
 } from "./mask-preparation-worker-protocol";
-import { IdMaskRasterFormat } from "./mask-frame-artifact";
 import {
   createMaskFramePreparer,
   PreparedMaskFrameKind,
@@ -78,7 +77,6 @@ describe("mask frame preparer", () => {
           height: 2,
           key: "0:0",
           kind: PreparedMaskFrameKind.IdMask,
-          rasterFormat: IdMaskRasterFormat.Rgba8,
           width: 2,
         },
       );
@@ -403,7 +401,6 @@ describe("mask frame preparer", () => {
         key: message.job.key,
         maxStrokeWidth: 5,
         raster,
-        rasterFormat: IdMaskRasterFormat.R8,
         requestId: message.requestId,
         strokePalette,
         strokeWidths,
@@ -430,7 +427,6 @@ describe("mask frame preparer", () => {
         kind: PreparedMaskFrameKind.IdMask,
         maxStrokeWidth: 5,
         raster,
-        rasterFormat: IdMaskRasterFormat.R8,
         strokePalette,
         strokeWidths,
         width: 2,

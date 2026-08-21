@@ -20,11 +20,14 @@ interface NearestFrameIndexSelection {
 }
 
 /**
- * A presented playhead arrives on the producer's whole-millisecond plane,
- * rounded, so it can read half a millisecond below the frame timestamp it
- * stands for: a source frame at 5.033333s is reported at 5.033s. Half a
- * millisecond is the whole of that error and no more, so a frame starting
- * within it may already be on screen while one starting past it cannot.
+ * A playhead compared by time can arrive perturbed by whatever plane it crossed
+ * to get here: a producer that publishes whole milliseconds reports a source
+ * frame at 5.033333s as 5.033s, and even an exact producer loses a bit to a
+ * seconds-to-milliseconds-and-back trip. A frame starting within that reach may
+ * already be on screen while one starting past it cannot.
+ *
+ * Selection by identity carries none of this, which is why it lives in its own
+ * function and not in a smaller number here.
  */
 const PLAYHEAD_QUANTIZATION_TOLERANCE_SECONDS = 0.0005;
 
@@ -311,6 +314,45 @@ export function selectDetectionFrame(
   }
 
   return selectIntervalDetectionFrame(detectionFrames, mediaTime);
+}
+
+/**
+ * The detections standing over the source frame at `frameIndex`.
+ *
+ * At or before, not equality: an inference run over every Nth frame still holds
+ * its detections across the frames in between, and "at or before" in index space
+ * is the exact analogue of the interval rule with no arithmetic to be wrong
+ * about. Both sides count frames of the same container from its first packet, so
+ * the comparison is integer equality and needs no tolerance at all.
+ *
+ * A run whose frames carry no index has no answer here; that source belongs on
+ * `selectDetectionFrame`.
+ */
+export function selectDetectionFrameAtIndex(
+  detectionFrames: readonly DetectionFrame[],
+  frameIndex: number,
+): DetectionFrame | undefined {
+  let selected: DetectionFrame | undefined;
+  let low = 0;
+  let high = detectionFrames.length - 1;
+
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    const index = detectionFrames[middle].frameIndex;
+
+    if (index === undefined) {
+      return undefined;
+    }
+
+    if (index <= frameIndex) {
+      selected = detectionFrames[middle];
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+  }
+
+  return selected;
 }
 
 export function decodeCompressedRleMask(

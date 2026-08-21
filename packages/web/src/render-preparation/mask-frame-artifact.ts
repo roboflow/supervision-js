@@ -4,11 +4,12 @@ export enum PreparedMaskFrameKind {
 }
 
 /**
- * How detection ids are laid out in a prepared frame's raster. WebGL aligns
- * every uploaded texture row to four bytes, so a raster whose width is not a
- * multiple of four carries the id in the red channel of four instead of one.
+ * How an id raster is laid out for the texture it is uploaded into. WebGPU
+ * takes any bytesPerRow, so ids go up one byte per pixel. WebGL aligns every
+ * uploaded row to four bytes and rejects a single-channel upload whose width
+ * is not a multiple of four, which is what the four-channel layout is for.
  */
-export enum IdMaskRasterFormat {
+export enum IdMaskTextureFormat {
   R8 = "r8unorm",
   Rgba8 = "rgba8unorm",
 }
@@ -30,7 +31,6 @@ export interface PreparedIdMaskFrame {
   readonly kind: PreparedMaskFrameKind.IdMask;
   readonly maxStrokeWidth: number;
   readonly raster: Uint8Array<ArrayBuffer>;
-  readonly rasterFormat: IdMaskRasterFormat;
   readonly strokePalette: Float32Array<ArrayBuffer>;
   readonly strokeWidths: Float32Array<ArrayBuffer>;
   readonly width: number;
@@ -44,13 +44,5 @@ export function readIdMaskRasterValue(
   x: number,
   y: number,
 ) {
-  const pixelOffset = y * frame.width + x;
-
-  return (
-    frame.raster[
-      frame.rasterFormat === IdMaskRasterFormat.R8
-        ? pixelOffset
-        : pixelOffset * 4
-    ] ?? 0
-  );
+  return frame.raster[y * frame.width + x] ?? 0;
 }

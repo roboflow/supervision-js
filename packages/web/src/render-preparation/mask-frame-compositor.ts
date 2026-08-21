@@ -1,4 +1,3 @@
-import { IdMaskRasterFormat } from "#render-preparation/mask-frame-artifact";
 import type { SerializableMaskInstruction } from "#render-preparation/mask-preparation-worker-protocol";
 import type { MaskStrokeStyle } from "supervision-js-core";
 import {
@@ -15,9 +14,6 @@ export {
   createIdMaskFrame,
   type IdMaskFrame,
 } from "supervision-js-core";
-
-/** WebGL uploads texture rows on a four-byte alignment. */
-const TEXTURE_ROW_ALIGNMENT_BYTES = 4;
 
 interface DecodedMaskPixels {
   readonly data: Uint8Array;
@@ -36,10 +32,6 @@ export interface CompositedMaskFrame {
   readonly data: Uint8ClampedArray<ArrayBuffer>;
   readonly height: number;
   readonly width: number;
-}
-
-export interface IdMaskRasterFrame extends IdMaskFrame {
-  readonly rasterFormat: IdMaskRasterFormat;
 }
 
 export function compositeMaskFrame(
@@ -64,45 +56,14 @@ export function compositeMaskFrame(
 
 export function createIdMaskRasterFrame(
   instructions: readonly SerializableMaskInstruction[],
-): IdMaskRasterFrame | undefined {
+): IdMaskFrame | undefined {
   try {
-    return buildIdMaskRasterFrame(instructions);
+    return createIdMaskFrame(materializeMaskInstructions(instructions));
   } catch {
     // The id raster is the fast path, not the only one: answering with nothing
     // puts the caller on the RGBA composite, which draws the same picture.
     return undefined;
   }
-}
-
-function buildIdMaskRasterFrame(
-  instructions: readonly SerializableMaskInstruction[],
-): IdMaskRasterFrame | undefined {
-  const frame = createIdMaskFrame(materializeMaskInstructions(instructions));
-
-  if (!frame) {
-    return undefined;
-  }
-
-  if (frame.width % TEXTURE_ROW_ALIGNMENT_BYTES === 0) {
-    return { ...frame, rasterFormat: IdMaskRasterFormat.R8 };
-  }
-
-  return {
-    ...frame,
-    data: expandIdsToRgba(frame.data),
-    rasterFormat: IdMaskRasterFormat.Rgba8,
-  };
-}
-
-function expandIdsToRgba(ids: Uint8Array): Uint8Array<ArrayBuffer> {
-  const rgba = new Uint8Array(new ArrayBuffer(ids.length * 4));
-
-  for (let index = 0; index < ids.length; index += 1) {
-    rgba[index * 4] = ids[index] ?? 0;
-    rgba[index * 4 + 3] = 0xff;
-  }
-
-  return rgba;
 }
 
 function compositeInstruction(

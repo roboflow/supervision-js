@@ -276,7 +276,6 @@ function createPreparedIdMaskFrame(
     kind: PreparedMaskFrameKind.IdMask,
     maxStrokeWidth: frame.maxStrokeWidth,
     raster: frame.data,
-    rasterFormat: frame.rasterFormat,
     strokePalette: frame.strokePalette,
     strokeWidths: frame.strokeWidths,
     width: frame.width,
@@ -442,7 +441,6 @@ function createPreparedFrameFromWorkerResponse(
   if (message.artifactKind === PreparedMaskFrameKind.IdMask) {
     if (
       !message.raster ||
-      !message.rasterFormat ||
       !message.fillPalette ||
       !message.strokePalette ||
       !message.strokeWidths ||
@@ -463,7 +461,6 @@ function createPreparedFrameFromWorkerResponse(
       kind: PreparedMaskFrameKind.IdMask,
       maxStrokeWidth: message.maxStrokeWidth ?? 0,
       raster: message.raster,
-      rasterFormat: message.rasterFormat,
       strokePalette: message.strokePalette,
       strokeWidths: message.strokeWidths,
       width: message.width,

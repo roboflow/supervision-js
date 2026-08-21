@@ -47,7 +47,6 @@ function prepareMaskFrame(message: MaskPreparationWorkerRequest) {
           key: message.job.key,
           maxStrokeWidth: idMaskFrame.maxStrokeWidth,
           raster: idMaskFrame.data,
-          rasterFormat: idMaskFrame.rasterFormat,
           requestId: message.requestId,
           strokePalette: idMaskFrame.strokePalette,
           strokeWidths: idMaskFrame.strokeWidths,

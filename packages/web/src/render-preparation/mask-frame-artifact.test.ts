@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  IdMaskRasterFormat,
   PreparedMaskFrameKind,
   readIdMaskRasterValue,
   type PreparedIdMaskFrame,
@@ -13,10 +12,7 @@ const HEIGHT = 2;
 /** Row-major ids, all distinct, so a misread returns another detection's id. */
 const IDS = [11, 12, 13, 14, 15, 16];
 
-function createFrame(
-  rasterFormat: IdMaskRasterFormat,
-  raster: Uint8Array<ArrayBuffer>,
-): PreparedIdMaskFrame {
+function createFrame(raster: Uint8Array<ArrayBuffer>): PreparedIdMaskFrame {
   return {
     close() {},
     fillPalette: new Float32Array(new ArrayBuffer(0)),
@@ -26,29 +22,17 @@ function createFrame(
     kind: PreparedMaskFrameKind.IdMask,
     maxStrokeWidth: 0,
     raster,
-    rasterFormat,
     strokePalette: new Float32Array(new ArrayBuffer(0)),
     strokeWidths: new Float32Array(new ArrayBuffer(0)),
     width: WIDTH,
   };
 }
 
-function createSingleChannelRaster() {
+function createRaster() {
   const raster = new Uint8Array(new ArrayBuffer(WIDTH * HEIGHT));
 
   IDS.forEach((id, pixelOffset) => {
     raster[pixelOffset] = id;
-  });
-
-  return raster;
-}
-
-function createFourChannelRaster() {
-  const raster = new Uint8Array(new ArrayBuffer(WIDTH * HEIGHT * 4));
-
-  IDS.forEach((id, pixelOffset) => {
-    raster[pixelOffset * 4] = id;
-    raster[pixelOffset * 4 + 3] = 0xff;
   });
 
   return raster;
@@ -67,32 +51,24 @@ function readAll(frame: PreparedIdMaskFrame) {
 }
 
 describe("readIdMaskRasterValue", () => {
-  it("reads an odd-width single-channel raster one byte per pixel", () => {
-    const frame = createFrame(
-      IdMaskRasterFormat.R8,
-      createSingleChannelRaster(),
-    );
-
-    expect(readAll(frame)).toEqual(IDS);
+  it("reads an odd-width raster one byte per pixel", () => {
+    expect(readAll(createFrame(createRaster()))).toEqual(IDS);
   });
 
-  it("reads an odd-width four-channel raster from the red channel", () => {
-    const frame = createFrame(
-      IdMaskRasterFormat.Rgba8,
-      createFourChannelRaster(),
+  it("strides by the frame's own width rather than a padded one", () => {
+    const frame = createFrame(createRaster());
+    // What the second row would read at a four-byte-aligned stride.
+    const paddedStrideRow = [4, 5, 6].map(
+      (offset) => frame.raster[offset] ?? 0,
     );
 
-    expect(readAll(frame)).toEqual(IDS);
+    expect(paddedStrideRow).toEqual([15, 16, 0]);
+    expect(readAll(frame).slice(WIDTH)).toEqual([14, 15, 16]);
   });
 
-  it("takes the stride from the format rather than the raster length", () => {
-    const raster = createFourChannelRaster();
-    // Ids a single-channel read would return from the four-channel raster.
-    const decoys = [raster[0], raster[1], raster[2], raster[3]];
-
-    expect(decoys).toEqual([11, 0, 0, 255]);
-    expect(
-      readAll(createFrame(IdMaskRasterFormat.Rgba8, raster)).slice(0, 4),
-    ).toEqual([11, 12, 13, 14]);
+  it("answers zero outside the raster rather than undefined", () => {
+    expect(readIdMaskRasterValue(createFrame(createRaster()), 0, HEIGHT)).toBe(
+      0,
+    );
   });
 });
