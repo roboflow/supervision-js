@@ -27,9 +27,13 @@ type IsExact<TLeft, TRight> = [TLeft] extends [TRight]
 
 const expectedStyleFields = {
   box: "boxStyle",
+  "box-corners": "boxCornerStyle",
+  ellipse: "ellipseStyle",
   keypoints: "keypointStyle",
   label: "labelStyle",
   mask: "maskStyle",
+  maskHalo: "maskHaloStyle",
+  marker: "markerStyle",
   polygon: "polygonStyle",
   polyline: "polylineStyle",
 } as const satisfies Record<
@@ -48,18 +52,32 @@ const styleFieldPairingIsExact: {
   >;
 } = {
   box: true,
+  "box-corners": true,
+  ellipse: true,
   keypoints: true,
   label: true,
   mask: true,
+  maskHalo: true,
+  marker: true,
   polygon: true,
   polyline: true,
 };
 
 const expectedCanonicalStyles = {
   box: BaseBoxStyle,
+  // Box corners are opt-in, like ellipses, and therefore do not appear in
+  // the legacy default presentation.
+  "box-corners": null,
+  // The ellipse's canonical style is a plain resolver object and the
+  // capability is opt-in, so it never appears in the default presentation.
+  ellipse: null,
   keypoints: BaseKeypointStyle,
   label: BaseLabelStyle,
   mask: BaseMaskStyle,
+  // The mask halo's canonical style is a plain resolver object and the
+  // capability is opt-in, so it never appears in the default presentation.
+  maskHalo: null,
+  marker: null,
   polygon: BasePolygonStyle,
   polyline: BasePolylineStyle,
 } as const satisfies Record<
@@ -88,12 +106,18 @@ describe("annotation renderer registry", () => {
       const { createCanonicalStyle, styleField } =
         annotationRendererRegistry[kind];
       const style = createCanonicalStyle();
+      const expectedStyle = expectedCanonicalStyles[kind];
 
-      expect(style).toBeInstanceOf(expectedCanonicalStyles[kind]);
       expect(style).not.toBe(createCanonicalStyle());
-      expect(defaultPresentation[styleField]).toBeInstanceOf(
-        expectedCanonicalStyles[kind],
-      );
+
+      if (expectedStyle === null) {
+        expect(style).toHaveProperty("resolve");
+        expect(defaultPresentation[styleField]).toBeUndefined();
+        continue;
+      }
+
+      expect(style).toBeInstanceOf(expectedStyle);
+      expect(defaultPresentation[styleField]).toBeInstanceOf(expectedStyle);
     }
   });
 
@@ -109,9 +133,40 @@ describe("annotation renderer registry", () => {
   });
 
   it("builds a descriptor whose id and kind match the vocabulary", () => {
-    for (const kind of styledAnnotationRendererKinds) {
-      expect(annotationRenderers[kind]()).toEqual({ id: kind, kind });
-    }
+    expect(annotationRenderers.box()).toEqual({ id: "box", kind: "box" });
+    expect(annotationRenderers.boxCorners()).toEqual({
+      id: "box-corners",
+      kind: "box-corners",
+    });
+    expect(annotationRenderers.ellipse()).toEqual({
+      id: "ellipse",
+      kind: "ellipse",
+    });
+    expect(annotationRenderers.keypoints()).toEqual({
+      id: "keypoints",
+      kind: "keypoints",
+    });
+    expect(annotationRenderers.label()).toEqual({
+      id: "label",
+      kind: "label",
+    });
+    expect(annotationRenderers.mask()).toEqual({ id: "mask", kind: "mask" });
+    expect(annotationRenderers.maskHalo()).toEqual({
+      id: "maskHalo",
+      kind: "maskHalo",
+    });
+    expect(annotationRenderers.marker()).toEqual({
+      id: "marker",
+      kind: "marker",
+    });
+    expect(annotationRenderers.polygon()).toEqual({
+      id: "polygon",
+      kind: "polygon",
+    });
+    expect(annotationRenderers.polyline()).toEqual({
+      id: "polyline",
+      kind: "polyline",
+    });
   });
 
   it("builds independently identified region renderers", () => {
@@ -128,6 +183,35 @@ describe("annotation renderer registry", () => {
       region: { anchor: "head", kind: "keypoint-anchor" },
       source: { asset: { src: "/hat.png" }, kind: "asset" },
       target: { className: "person" },
+    });
+
+    expect(
+      annotationRenderers.region({
+        id: "big-heads",
+        region: { anchor: "head", kind: "keypoint-anchor" },
+        source: {
+          kind: "media",
+          region: { anchor: "head", kind: "keypoint-anchor" },
+        },
+        target: { className: "person" },
+        transform: {
+          flip: { horizontal: true },
+          scale: 3,
+        },
+      }),
+    ).toEqual({
+      id: "big-heads",
+      kind: "region",
+      region: { anchor: "head", kind: "keypoint-anchor" },
+      source: {
+        kind: "media",
+        region: { anchor: "head", kind: "keypoint-anchor" },
+      },
+      target: { className: "person" },
+      transform: {
+        flip: { horizontal: true },
+        scale: 3,
+      },
     });
   });
 });

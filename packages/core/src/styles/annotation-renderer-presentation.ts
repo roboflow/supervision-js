@@ -26,9 +26,13 @@ export function resolveAnnotationRendererPresentation(
 
   const resolved: ResolvedAnnotationRendererStyles = {
     boxStyle: null,
+    boxCornerStyle: null,
+    ellipseStyle: null,
     keypointStyle: null,
     labelStyle: null,
+    maskHaloStyle: null,
     maskStyle: null,
+    markerStyle: null,
     polygonStyle: null,
     polylineStyle: null,
   };

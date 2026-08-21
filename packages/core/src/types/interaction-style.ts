@@ -24,6 +24,8 @@ export interface InteractionStyleContext extends AnnotationStyleContext {
   readonly state: DetectionInteractionState;
   readonly target: DetectionPickTarget;
   readonly point: DetectionPickPoint;
+  /** Index of the picked keypoint or edge when the target has sub-geometry. */
+  readonly geometryIndex?: number;
 }
 
 /**

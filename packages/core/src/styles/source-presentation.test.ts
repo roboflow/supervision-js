@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import { BaseBoxStyle } from "#styles/box-style";
 import { BaseLabelStyle } from "#styles/label-style";
 import { BaseMaskStyle } from "#styles/mask-style";
+import { BaseMarkerStyle } from "#styles/marker-style";
+import { createDefaultMaskHaloStyle } from "#styles/default-annotation-presentation";
 import { BaseKeypointStyle } from "#styles/keypoint-style";
 import { BasePolygonStyle } from "#styles/polygon-style";
 import { BasePolylineStyle } from "#styles/polyline-style";
@@ -180,6 +182,142 @@ describe("createSourceAwarePresentation", () => {
     expect(presentation.polylineStyle?.resolve(detection, context)).toBe(
       undefined,
     );
+  });
+
+  it("applies source overrides to ellipse renderer styles", () => {
+    const globalStyle = {
+      resolve(detection: unknown, context: unknown) {
+        void detection;
+        void context;
+        return {
+          center: { x: 4, y: 4 },
+          radiusX: 2,
+          radiusY: 1,
+        };
+      },
+    };
+    const sourceStyle = {
+      resolve(detection: unknown, context: unknown) {
+        void detection;
+        void context;
+        return {
+          center: { x: 8, y: 8 },
+          radiusX: 3,
+          radiusY: 1,
+        };
+      },
+    };
+    const presentation = createSourceAwarePresentation(
+      { ellipseStyle: globalStyle },
+      [{ id: "draft", presentation: { ellipseStyle: sourceStyle } }],
+    );
+    const context = { detectionIndex: 0, frame, mediaTime: 0 };
+
+    expect(
+      presentation.ellipseStyle?.resolve(createDetection("base"), context),
+    ).toMatchObject({ center: { x: 4, y: 4 } });
+    expect(
+      presentation.ellipseStyle?.resolve(createDetection("draft"), context),
+    ).toMatchObject({ center: { x: 8, y: 8 } });
+  });
+
+  it("applies mask halo source overrides and disables", () => {
+    const presentation = createSourceAwarePresentation(
+      {
+        maskHaloStyle: createDefaultMaskHaloStyle(),
+      },
+      [
+        {
+          id: "draft",
+          presentation: {
+            maskHaloStyle: {
+              resolve() {
+                return { alpha: 0.25, color: 0x00ff00, spread: 4 };
+              },
+            },
+          },
+        },
+        {
+          id: "hidden",
+          presentation: { maskHaloStyle: null },
+        },
+      ],
+    );
+    const context = { detectionIndex: 0, frame, hidden: false, mediaTime: 0 };
+
+    expect(
+      presentation.maskHaloStyle?.resolve(createDetection("draft"), context),
+    ).toEqual({ alpha: 0.25, color: 0x00ff00, spread: 4 });
+    expect(
+      presentation.maskHaloStyle?.resolve(createDetection("hidden"), context),
+    ).toBeUndefined();
+  });
+
+  it("applies source overrides to box-corner renderer styles", () => {
+    const globalStyle = {
+      resolve(_detection: unknown, _context: unknown) {
+        void _detection;
+        void _context;
+        return {
+          segments: [],
+          stroke: { alpha: 1, color: 0x123456, width: 2 },
+        };
+      },
+    };
+    const sourceStyle = {
+      resolve(_detection: unknown, _context: unknown) {
+        void _detection;
+        void _context;
+        return {
+          segments: [],
+          stroke: { alpha: 1, color: 0xabcdef, width: 3 },
+        };
+      },
+    };
+    const presentation = createSourceAwarePresentation(
+      { boxCornerStyle: globalStyle },
+      [{ id: "draft", presentation: { boxCornerStyle: sourceStyle } }],
+    );
+    const context = { detectionIndex: 0, frame, mediaTime: 0 };
+
+    expect(
+      presentation.boxCornerStyle?.resolve(createDetection("base"), context)
+        ?.stroke.color,
+    ).toBe(0x123456);
+    expect(
+      presentation.boxCornerStyle?.resolve(createDetection("draft"), context)
+        ?.stroke.color,
+    ).toBe(0xabcdef);
+  });
+
+  it("applies source overrides to marker renderer styles", () => {
+    const presentation = createSourceAwarePresentation(
+      {
+        markerStyle: new BaseMarkerStyle({
+          fill: { color: 0x123456 },
+        }),
+      },
+      [
+        {
+          id: "draft",
+          presentation: {
+            markerStyle: new BaseMarkerStyle({
+              fill: { color: 0xabcdef },
+            }),
+          },
+        },
+      ],
+    );
+    const context = { detectionIndex: 0, frame, mediaTime: 0 };
+
+    expect(
+      presentation.markerStyle?.resolve(createDetection("base"), context)?.fill
+        ?.color,
+    ).toBe(0x123456);
+    expect(
+      presentation.markerStyle?.resolve(createDetection("draft"), context)?.fill
+        ?.color,
+    ).toBe(0xabcdef);
   });
 
   it("keeps global interaction and focus styles source-aware without wrapping them", () => {

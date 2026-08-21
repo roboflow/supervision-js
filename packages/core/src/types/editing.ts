@@ -160,6 +160,12 @@ export interface AnnotationOverlayStyle {
       AnnotationStyleContext
     >;
     readonly addVertexAlpha?: number;
+    /**
+     * Alpha for keypoint handles. Keypoint markers are already drawn by the
+     * keypoint style, so consumers that treat the marker itself as the handle
+     * set 0 to keep hit testing without a second disc over every point.
+     */
+    readonly keypointAlpha?: number;
   };
   readonly marquee?: {
     readonly fill?: BoxFillStyle;

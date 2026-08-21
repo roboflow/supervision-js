@@ -112,10 +112,23 @@ describe("annotation renderer presentation", () => {
   });
 
   it("resolves only the listed renderer's style field for every kind", () => {
+    const renderers = {
+      box: annotationRenderers.box,
+      "box-corners": annotationRenderers.boxCorners,
+      ellipse: annotationRenderers.ellipse,
+      keypoints: annotationRenderers.keypoints,
+      label: annotationRenderers.label,
+      mask: annotationRenderers.mask,
+      maskHalo: annotationRenderers.maskHalo,
+      marker: annotationRenderers.marker,
+      polygon: annotationRenderers.polygon,
+      polyline: annotationRenderers.polyline,
+    } as const;
+
     for (const kind of styledAnnotationRendererKinds) {
       const { styleField } = annotationRendererRegistry[kind];
       const presentation = resolveAnnotationRendererPresentation({
-        renderers: [annotationRenderers[kind]()],
+        renderers: [renderers[kind]()],
       });
 
       expect(presentation[styleField]).not.toBeNull();

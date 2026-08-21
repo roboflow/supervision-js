@@ -1,8 +1,12 @@
 import {
   createDefaultBoxStyle,
+  createDefaultBoxCornerStyle,
+  createDefaultEllipseStyle,
+  createDefaultMaskHaloStyle,
   createDefaultKeypointStyle,
   createDefaultLabelStyle,
   createDefaultMaskStyle,
+  createDefaultMarkerStyle,
   createDefaultPolygonStyle,
   createDefaultPolylineStyle,
 } from "#styles/default-annotation-presentation";
@@ -15,9 +19,13 @@ import type { MediaRendererPresentation } from "#types/media-rendering";
 /** The style contract configured by one renderer kind. */
 export const styledAnnotationRendererKinds = [
   "box",
+  "box-corners",
+  "ellipse",
   "keypoints",
   "label",
   "mask",
+  "maskHalo",
+  "marker",
   "polygon",
   "polyline",
 ] as const;
@@ -96,6 +104,16 @@ export const annotationRendererRegistry: AnnotationRendererRegistry = {
     createCanonicalStyle: createDefaultBoxStyle,
     styleField: "boxStyle",
   },
+  "box-corners": {
+    cardinality: "singleton",
+    createCanonicalStyle: createDefaultBoxCornerStyle,
+    styleField: "boxCornerStyle",
+  },
+  ellipse: {
+    cardinality: "singleton",
+    createCanonicalStyle: createDefaultEllipseStyle,
+    styleField: "ellipseStyle",
+  },
   keypoints: {
     cardinality: "singleton",
     createCanonicalStyle: createDefaultKeypointStyle,
@@ -110,6 +128,16 @@ export const annotationRendererRegistry: AnnotationRendererRegistry = {
     cardinality: "singleton",
     createCanonicalStyle: createDefaultMaskStyle,
     styleField: "maskStyle",
+  },
+  maskHalo: {
+    cardinality: "singleton",
+    createCanonicalStyle: () => createDefaultMaskHaloStyle(),
+    styleField: "maskHaloStyle",
+  },
+  marker: {
+    cardinality: "singleton",
+    createCanonicalStyle: createDefaultMarkerStyle,
+    styleField: "markerStyle",
   },
   polygon: {
     cardinality: "singleton",

@@ -1,14 +1,18 @@
 import type { DetectionBufferState } from "#types/detection-timeline";
 import type { DetectionFrame } from "#types/detections";
 import type { BoxStyle } from "#types/box-style";
+import type { BoxCornerStyle } from "#types/box-corner-style";
 import type { FocusStyle } from "#types/focus-style";
 import type { InteractionStyle } from "#types/interaction-style";
 import type { LabelStyle } from "#types/label-style";
+import type { MaskHaloStyle } from "#types/mask-halo-style";
 import type { MaskStyle } from "#types/mask-style";
+import type { MarkerStyle } from "#types/marker-style";
 import type { Point } from "#types/detections";
 import type { ViewportTransform } from "#types/viewport";
 import type { PolygonStyle } from "#types/polygon-style";
 import type { PolylineStyle } from "#types/polyline-style";
+import type { EllipseStyle } from "#types/ellipse-style";
 import type { KeypointStyle } from "#types/keypoint-style";
 import type { AnnotationOverlayStyle } from "#types/editing";
 import type { AnnotationRenderer } from "#types/annotation-renderer";
@@ -35,6 +39,30 @@ export enum MediaRendererPlaybackState {
   Paused = "paused",
   Error = "error",
   Destroyed = "destroyed",
+}
+
+/**
+ * Stable classification of a media failure.
+ *
+ * Applications branch on these kinds instead of parsing decoder, demuxer, or
+ * container error text, and still own their localized user-facing copy. New
+ * kinds may be added over time, so treat unrecognized values like `Unknown`.
+ */
+export enum MediaErrorKind {
+  /** The media could not be opened or read at all. */
+  Unreadable = "unreadable",
+  /** The container or codec is not supported by this platform. */
+  UnsupportedFormat = "unsupportedFormat",
+  /** The media opened but carries no usable video track. */
+  NoVideoTrack = "noVideoTrack",
+  /** Decoding a sample failed after the source opened. */
+  Decode = "decode",
+  /** The media could not be fetched. */
+  Network = "network",
+  /** The host environment lacks the APIs this media source requires. */
+  EnvironmentUnsupported = "environmentUnsupported",
+  /** The failure could not be classified. */
+  Unknown = "unknown",
 }
 
 /**
@@ -130,6 +158,14 @@ export interface MediaSourceState {
   readonly primaryVideoWidth: number | null;
   readonly primaryVideoHeight: number | null;
   readonly errorMessage: string | null;
+  /**
+   * Stable failure classification when `status` is `Error`, otherwise `null`.
+   *
+   * Prefer this over `errorMessage` for control flow. Messages are diagnostic
+   * text and may name vendor internals. Optional so state fixtures written
+   * against the previous shape stay assignable.
+   */
+  readonly errorKind?: MediaErrorKind | null;
 }
 
 /**
@@ -174,12 +210,16 @@ export interface MediaRendererPresentation {
    */
   readonly renderers?: readonly AnnotationRenderer[];
   readonly boxStyle?: BoxStyle | null;
+  readonly boxCornerStyle?: BoxCornerStyle | null;
   readonly focusStyle?: FocusStyle | null;
   readonly interactionStyle?: InteractionStyle | null;
   readonly labelStyle?: LabelStyle | null;
+  readonly maskHaloStyle?: MaskHaloStyle | null;
   readonly maskStyle?: MaskStyle | null;
+  readonly markerStyle?: MarkerStyle | null;
   readonly polygonStyle?: PolygonStyle | null;
   readonly polylineStyle?: PolylineStyle | null;
+  readonly ellipseStyle?: EllipseStyle | null;
   readonly keypointStyle?: KeypointStyle | null;
   readonly visibility?: AnnotationVisibility;
 }

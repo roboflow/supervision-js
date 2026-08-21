@@ -17,11 +17,48 @@ export {
   type EditableAnnotationFrameSession,
 } from "#detections/editable-annotation-frame-session";
 export { createMemoryColdDetectionFrameStore } from "#detections/memory-cold-detection-frame-store";
+export { createProjectedDetectionFrameSource } from "#detections/projected-detection-frame-source";
 export { createWritableDetectionFrameSource } from "#detections/writable-detection-frame-source";
+
+// Semantic post-processing.
+export { createSortTracker } from "#post-processing/sort-tracker";
+export { createByteTrackTracker } from "#post-processing/byte-track-tracker";
+export { createCBIoUTracker } from "#post-processing/cbiou-tracker";
+export { createOCSortTracker } from "#post-processing/oc-sort-tracker";
+export {
+  detectionPostProcessors,
+  projectDetectionFrameForTracking,
+} from "#post-processing/tracking";
+export {
+  TrackingGeometry,
+  type ByteTrackTracker,
+  type ByteTrackTrackerUpdate,
+  type ByteTrackTrackingDetectionPostProcessor,
+  type ByteTrackTrackingOptions,
+  type CBIoUTracker,
+  type CBIoUTrackerUpdate,
+  type CBIoUTrackingDetectionPostProcessor,
+  type CBIoUTrackingOptions,
+  type DetectionPostProcessor,
+  type DetectionPostProcessorFactory,
+  type SortTracker,
+  type SortTrackerUpdate,
+  type SortTrackingOptions,
+  type OCSortTracker,
+  type OCSortTrackerUpdate,
+  type OCSortTrackingDetectionPostProcessor,
+  type OCSortTrackingOptions,
+  type TrackingAssignment,
+  type TrackingDetectionPostProcessor,
+  type TrackingProjection,
+  type TrackingTracker,
+} from "#types/post-processing";
 
 // Interaction and picking.
 export {
   createDetectionPickKey,
+  followDetectionPickAcrossFrames,
+  haveSameDetectionPickIdentities,
   pickDetectionAtPoint,
   pickDetectionByMaskId,
   rebaseDetectionPickToFrame,
@@ -44,6 +81,8 @@ export {
 // Presentation styles.
 export { BaseBoxStyle } from "#styles/box-style";
 export type { BaseBoxStyleOptions } from "#styles/box-style";
+export { BaseBoxCornerStyle } from "#styles/box-corner-style";
+export type { BaseBoxCornerStyleOptions } from "#types/box-corner-style";
 export { BaseFocusStyle } from "#styles/focus-style";
 export type { BaseFocusStyleOptions } from "#styles/focus-style";
 export { BaseInteractionStyle } from "#styles/interaction-style";
@@ -52,6 +91,8 @@ export { BaseLabelStyle } from "#styles/label-style";
 export type { BaseLabelStyleOptions } from "#styles/label-style";
 export { BaseMaskStyle } from "#styles/mask-style";
 export type { BaseMaskStyleOptions } from "#styles/mask-style";
+export { BaseMarkerStyle } from "#styles/marker-style";
+export type { BaseMarkerStyleOptions } from "#types/marker-style";
 export { BasePolygonStyle } from "#styles/polygon-style";
 export type { BasePolygonStyleOptions } from "#styles/polygon-style";
 export { BasePolylineStyle } from "#styles/polyline-style";
@@ -69,26 +110,46 @@ export {
   type AnnotationRendererFactory,
   type AnnotationRendererKind,
   type BoxAnnotationRenderer,
+  type BoxCornerAnnotationRenderer,
+  type EllipseAnnotationRenderer,
   type KeypointAnnotationRenderer,
   type LabelAnnotationRenderer,
   type MaskAnnotationRenderer,
+  type MaskHaloAnnotationRenderer,
+  type MarkerAnnotationRenderer,
   type PolygonAnnotationRenderer,
   type PolylineAnnotationRenderer,
   RegionRendererComposeMode,
+  RegionRendererCoverageKind,
   RegionRendererRegionKind,
+  RegionRendererSizeSpace,
   RegionRendererSourceKind,
   type RegionAnnotationRenderer,
   type RegionRendererAssetReference,
   type RegionRendererAssetSource,
   type RegionRendererBoundsRegion,
   type RegionRendererCompose,
+  type RegionRendererMaskCoverage,
+  type RegionRendererPolygonCoverage,
   type RegionRendererKeypointAnchorRegion,
+  type RegionRendererMediaSource,
   type RegionRendererRegion,
+  type RegionRendererRelativeTransform,
+  type RegionRendererSize,
+  type RegionRendererSizedTransform,
+  type RegionRendererSource,
   type RegionRendererTarget,
   type RegionRendererTargetContext,
   type RegionRendererTargetValue,
   type RegionRendererTransform,
 } from "#types/annotation-renderer";
+export {
+  type ClosedMarkerDrawInstruction,
+  type CrossMarkerDrawInstruction,
+  type MarkerDrawInstruction,
+  type MarkerStyle,
+  type MarkerStyleContext,
+} from "#types/marker-style";
 export { resolveAnnotationRendererPresentation } from "#styles/annotation-renderer-presentation";
 export {
   createSourceAwarePresentation,
@@ -143,6 +204,10 @@ export {
   type MaskRectRun,
 } from "#utils/detection-masks";
 export {
+  projectDetectionFrame,
+  projectDetectionFrames,
+} from "#utils/detection-projection";
+export {
   centerRectToTopLeftRect,
   containsPoint,
   distanceToSegment,
@@ -177,6 +242,11 @@ export {
   resolveMarkerGeometry,
   sampleEllipseArc,
 } from "#utils/shape-geometry";
+export type {
+  BoxCornerDrawInstruction,
+  BoxCornerStyle,
+  BoxCornerStyleContext,
+} from "#types/box-corner-style";
 export type {
   EllipseGeometry,
   MarkerGeometry,
@@ -226,6 +296,7 @@ export {
   type BufferedDetectionTimeline,
   type ColdDetectionFrameStore,
   type ColdDetectionFrameStoreLoadOptions,
+  type ColdDetectionFrameStorePruneOptions,
   type ColdDetectionFrameStoreWriteOptions,
   type ColdDetectionFrameStoreWriteSummary,
   type ChunkedDetectionFrameSourceOptions,
@@ -238,6 +309,8 @@ export {
   type DetectionFrameChunkDescriptor,
   type DetectionFrameChunkFetch,
   type DetectionFrameChunkManifest,
+  type DetectionFrameLoadOptions,
+  type DetectionFrameLiveOptions,
   type DetectionFrameRetentionOptions,
   type DetectionFrameSelectionOptions,
   type DetectionFrameSource,
@@ -245,13 +318,16 @@ export {
   type DetectionFrameSourceVersionRange,
   type DetectionPlaybackGateOptions,
   type DetectionTimelineContext,
+  type LiveWritableDetectionFrameSource,
   type WritableDetectionFrameSource,
+  type WritableDetectionFrameSourceOptions,
 } from "#types/detection-timeline";
 export {
   DetectionMaskEncoding,
   KeypointVisibility,
   type CompressedRleDetectionMask,
   type Detection,
+  type DetectionCoordinateSpace,
   type DetectionFrame,
   type DetectionMask,
   type KeypointEdge,
@@ -273,6 +349,7 @@ export type {
   PlatformMediaFrameSource,
 } from "#types/media";
 export {
+  MediaErrorKind,
   MediaRendererFit,
   MediaRendererPlaybackState,
   MediaSourceStatus,
@@ -342,6 +419,11 @@ export type {
   MaskStyle,
   MaskStyleContext,
 } from "#types/mask-style";
+export type {
+  MaskHaloDrawInstruction,
+  MaskHaloStyle,
+  MaskHaloStyleContext,
+} from "#types/mask-halo-style";
 export { MaskRenderMode } from "#types/mask-style";
 export type {
   PolygonDrawInstruction,
@@ -372,6 +454,13 @@ export type {
   ShapeStyle,
   ShapeStyleContext,
 } from "#types/shape-style";
+export type {
+  ClosedEllipseDrawInstruction,
+  EllipseDrawInstruction,
+  EllipseArcDrawInstruction,
+  EllipseStyle,
+  EllipseStyleContext,
+} from "#types/ellipse-style";
 export { KeypointMarkerShape } from "#types/keypoint-style";
 export type {
   KeypointDrawInstruction,
