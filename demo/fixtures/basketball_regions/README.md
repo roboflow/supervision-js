@@ -28,8 +28,10 @@ and tracker ids across frames.
 
 The selected or translated SAM3 compressed RLE mask remains the authored source
 under `sourceId: "sam3-head"`; the temporal pass only regularizes that mask
-within each stable player track and records the original SAM3 bounds in
-`metadata.rawSam3MaskRect`. No bounded polygon approximation is used.
+within each stable player track. Observed frames record the original SAM3
+bounds in `metadata.rawSam3MaskRect`; gap-filled frames omit that field and
+retain `headObservation: "gap-filled"` plus their source detection and
+translation metadata. No bounded polygon approximation is used.
 The Region renderer reuses the prepared GPU id-mask artifact to enlarge only
 the head pixels with transparency and has no runtime model or keypoint
 dependency.

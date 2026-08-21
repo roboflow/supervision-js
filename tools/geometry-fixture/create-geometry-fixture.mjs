@@ -36,6 +36,7 @@ import {
   DEFAULT_POSE_MATCH_IOU,
   DEFAULT_POLYGON_TOLERANCE,
   attachPoseKeypointsToDetections,
+  closeBinaryGrid,
   createTemporallyStabilizedRects,
   normalizePoseDetection,
   selectMotionGatedDetection,
@@ -471,7 +472,9 @@ function stabilizeAuthoredHeadMasks(stabilizedHeads) {
         detection.metadata = {
           ...detection.metadata,
           maskStabilization: HEAD_ASSOCIATION_ALGORITHM,
-          rawSam3MaskRect: detection.metadata.rawMaskRect,
+          ...(detection.metadata.headObservation === "observed"
+            ? { rawSam3MaskRect: detection.metadata.rawMaskRect }
+            : {}),
           rawMaskRect: projected.bounds,
         };
         projectedBounds.set(frameIndex, projected.bounds);
@@ -566,59 +569,6 @@ function temporalMajorityMask(masks, frameIndexes, index, radius) {
     result[pixelIndex] = activeWeight * 2 >= totalWeight ? 1 : 0;
   }
   return result;
-}
-
-function closeBinaryGrid(mask, size) {
-  const dilated = new Uint8Array(mask.length);
-  const closed = new Uint8Array(mask.length);
-
-  for (let y = 0; y < size; y += 1) {
-    for (let x = 0; x < size; x += 1) {
-      let active = 0;
-      for (let offsetY = -1; offsetY <= 1 && !active; offsetY += 1) {
-        for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
-          const sourceX = x + offsetX;
-          const sourceY = y + offsetY;
-          if (
-            sourceX >= 0 &&
-            sourceX < size &&
-            sourceY >= 0 &&
-            sourceY < size &&
-            mask[sourceY * size + sourceX]
-          ) {
-            active = 1;
-            break;
-          }
-        }
-      }
-      dilated[y * size + x] = active;
-    }
-  }
-
-  for (let y = 0; y < size; y += 1) {
-    for (let x = 0; x < size; x += 1) {
-      let active = 1;
-      for (let offsetY = -1; offsetY <= 1 && active; offsetY += 1) {
-        for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
-          const sourceX = x + offsetX;
-          const sourceY = y + offsetY;
-          if (
-            sourceX < 0 ||
-            sourceX >= size ||
-            sourceY < 0 ||
-            sourceY >= size ||
-            !dilated[sourceY * size + sourceX]
-          ) {
-            active = 0;
-            break;
-          }
-        }
-      }
-      closed[y * size + x] = active;
-    }
-  }
-
-  return closed;
 }
 
 function projectGridMask(grid, size, rect, width, height) {

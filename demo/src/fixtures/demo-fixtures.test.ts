@@ -381,7 +381,12 @@ describe("basketball region fixture", () => {
             "sam3-head-temporal-mask-v4",
           );
           expect(rawMaskRect).toBeDefined();
-          expect(rawSam3MaskRect).toBeDefined();
+          if (detection.metadata?.headObservation === "observed") {
+            expect(rawSam3MaskRect).toBeDefined();
+          } else {
+            expect(detection.metadata?.headObservation).toBe("gap-filled");
+            expect(rawSam3MaskRect).toBeUndefined();
+          }
           if (!rawMaskRect) throw new Error("Head mask bounds are required.");
           expect(cropRect.x - cropRect.width / 2).toBeLessThanOrEqual(
             rawMaskRect.x - rawMaskRect.width / 2,

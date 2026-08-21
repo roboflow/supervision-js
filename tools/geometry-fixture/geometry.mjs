@@ -643,6 +643,86 @@ export function createTemporallyStabilizedRects(observations, options = {}) {
   return result;
 }
 
+/**
+ * Closes one-cell holes in a square binary grid without eroding foreground
+ * that touches the normalized region boundary. The temporary border gives the
+ * erosion pass the dilation context it needs outside the authored grid.
+ */
+export function closeBinaryGrid(mask, size) {
+  const padding = 1;
+  const paddedSize = size + padding * 2;
+  const padded = new Uint8Array(paddedSize * paddedSize);
+
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      padded[(y + padding) * paddedSize + x + padding] = mask[y * size + x];
+    }
+  }
+
+  const closedPadded = closeBinaryGridWithoutPadding(padded, paddedSize);
+  const closed = new Uint8Array(mask.length);
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      closed[y * size + x] =
+        closedPadded[(y + padding) * paddedSize + x + padding];
+    }
+  }
+  return closed;
+}
+
+function closeBinaryGridWithoutPadding(mask, size) {
+  const dilated = new Uint8Array(mask.length);
+  const closed = new Uint8Array(mask.length);
+
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      let active = 0;
+      for (let offsetY = -1; offsetY <= 1 && !active; offsetY += 1) {
+        for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
+          const sourceX = x + offsetX;
+          const sourceY = y + offsetY;
+          if (
+            sourceX >= 0 &&
+            sourceX < size &&
+            sourceY >= 0 &&
+            sourceY < size &&
+            mask[sourceY * size + sourceX]
+          ) {
+            active = 1;
+            break;
+          }
+        }
+      }
+      dilated[y * size + x] = active;
+    }
+  }
+
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      let active = 1;
+      for (let offsetY = -1; offsetY <= 1 && active; offsetY += 1) {
+        for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
+          const sourceX = x + offsetX;
+          const sourceY = y + offsetY;
+          if (
+            sourceX < 0 ||
+            sourceX >= size ||
+            sourceY < 0 ||
+            sourceY >= size ||
+            !dilated[sourceY * size + sourceX]
+          ) {
+            active = 0;
+            break;
+          }
+        }
+      }
+      closed[y * size + x] = active;
+    }
+  }
+
+  return closed;
+}
+
 export function createContainedSmoothedRect(rect, previous, options = {}) {
   const padding = options.padding ?? DEFAULT_HEAD_CROP_PADDING_PIXELS;
   const smoothing = options.smoothing ?? DEFAULT_HEAD_CROP_SMOOTHING;

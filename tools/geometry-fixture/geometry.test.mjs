@@ -7,6 +7,7 @@ import {
   KEYPOINT_VISIBILITY_VISIBLE,
   associateHeadDetectionsToPlayers,
   attachPoseKeypointsToDetections,
+  closeBinaryGrid,
   convertOneBasedEdges,
   createContainedSmoothedRect,
   createTemporallyStabilizedRects,
@@ -487,6 +488,24 @@ describe("createTemporallyStabilizedRects", () => {
           observation.rect.y + observation.rect.height / 2,
       );
     }
+  });
+});
+
+describe("closeBinaryGrid", () => {
+  it("preserves a foreground contour that touches the normalized boundary", () => {
+    const mask = new Uint8Array([
+      1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    ]);
+
+    assert.deepEqual(closeBinaryGrid(mask, 4), mask);
+  });
+
+  it("closes a one-cell hole inside a foreground region", () => {
+    const mask = new Uint8Array([
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    ]);
+
+    assert.equal(closeBinaryGrid(mask, 5)[12], 1);
   });
 });
 
