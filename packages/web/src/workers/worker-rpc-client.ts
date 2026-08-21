@@ -13,8 +13,11 @@ export interface WorkerRpcClient<
 > {
   destroy(): void;
   getFailureMessage(): string | null;
-  request(message: Omit<Request, "requestId">): Promise<Response>;
+  request(message: WorkerRpcRequestInput<Request>): Promise<Response>;
 }
+
+export type WorkerRpcRequestInput<Request extends WorkerRpcMessage> =
+  Request extends unknown ? Omit<Request, "requestId"> : never;
 
 export function createWorkerRpcClient<
   Request extends WorkerRpcMessage,
@@ -71,7 +74,7 @@ export function createWorkerRpcClient<
       const request = {
         ...message,
         requestId: nextRequestId,
-      } as Request;
+      } as unknown as Request;
 
       nextRequestId += 1;
 
