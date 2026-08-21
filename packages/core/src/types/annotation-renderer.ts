@@ -144,6 +144,23 @@ export const RegionRendererRegionKind = {
 export type RegionRendererRegionKind =
   (typeof RegionRendererRegionKind)[keyof typeof RegionRendererRegionKind];
 
+/** Semantic coverage used to clip pixels sampled from the current media. */
+export const RegionRendererCoverageKind = {
+  Polygon: "polygon",
+} as const;
+
+export type RegionRendererCoverageKind =
+  (typeof RegionRendererCoverageKind)[keyof typeof RegionRendererCoverageKind];
+
+/** Coordinate space used by an explicit region-renderer size. */
+export const RegionRendererSizeSpace = {
+  Media: "media",
+  Screen: "screen",
+} as const;
+
+export type RegionRendererSizeSpace =
+  (typeof RegionRendererSizeSpace)[keyof typeof RegionRendererSizeSpace];
+
 /** Composition modes currently supported by a region renderer. */
 export const RegionRendererComposeMode = {
   Over: "over",
@@ -188,6 +205,13 @@ export interface RegionRendererAssetSource {
 export interface RegionRendererMediaSource {
   readonly kind: typeof RegionRendererSourceKind.Media;
   readonly region: RegionRendererRegion;
+  /** Optional semantic coverage that removes pixels outside the source shape. */
+  readonly coverage?: RegionRendererPolygonCoverage;
+}
+
+/** Clips a media crop to the detection's closed polygon. */
+export interface RegionRendererPolygonCoverage {
+  readonly kind: typeof RegionRendererCoverageKind.Polygon;
 }
 
 export type RegionRendererSource =
@@ -212,10 +236,7 @@ export interface RegionRendererKeypointAnchorRegion {
 export type RegionRendererRegion =
   RegionRendererBoundsRegion | RegionRendererKeypointAnchorRegion;
 
-/** Media-space transform applied after a target region is resolved. */
-export interface RegionRendererTransform {
-  /** Uniform scale relative to the resolved region. Defaults to 1. */
-  readonly scale?: number;
+interface RegionRendererTransformBase {
   /** Region-relative translation. `{ x: 1, y: 1 }` moves one region size. */
   readonly offset?: { readonly x: number; readonly y: number };
   /** Clockwise rotation in radians. Defaults to 0. */
@@ -228,6 +249,31 @@ export interface RegionRendererTransform {
     readonly vertical?: boolean;
   };
 }
+
+/** Keeps an asset at one explicit size instead of deriving it from a detection. */
+export interface RegionRendererSize {
+  /** Rendered width in the declared size space. */
+  readonly width: number;
+  /** Rendered height. Omit it to preserve the source aspect ratio. */
+  readonly height?: number;
+  /** Defaults to media space. Screen space stays constant while zooming. */
+  readonly space?: RegionRendererSizeSpace;
+}
+
+export interface RegionRendererRelativeTransform extends RegionRendererTransformBase {
+  /** Uniform scale relative to the resolved region. Defaults to 1. */
+  readonly scale?: number;
+  readonly size?: never;
+}
+
+export interface RegionRendererSizedTransform extends RegionRendererTransformBase {
+  readonly scale?: never;
+  readonly size: RegionRendererSize;
+}
+
+/** Transform applied after a target region is resolved. */
+export type RegionRendererTransform =
+  RegionRendererRelativeTransform | RegionRendererSizedTransform;
 
 export interface RegionRendererCompose {
   readonly mode: typeof RegionRendererComposeMode.Over;

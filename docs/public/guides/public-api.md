@@ -127,8 +127,11 @@ the renderer list.
 `region` carries its target, source, anchor, transform, and composition
 configuration directly because it does not lower into one of the legacy style
 fields. Its browser backend supports URL-based assets and crops of the existing
-renderer-owned media texture. Multiple region descriptors may coexist when
-each has a unique `id`.
+renderer-owned media texture. Media crops may request polygon coverage to
+remove pixels outside a detection silhouette. Asset transforms may use an
+explicit media- or screen-space size; screen-space assets stay the same visible
+size across differently sized detections and viewport zoom. Multiple region
+descriptors may coexist when each has a unique `id`.
 Do not pass Pixi display objects or custom drawing callbacks: the public API
 describes semantic renderer configuration while the browser backend owns
 composition and resource lifetime.

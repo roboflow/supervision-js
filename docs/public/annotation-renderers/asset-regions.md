@@ -19,16 +19,20 @@ source, or display object.
   ></iframe>
 </div>
 
-The playground uses the frozen basketball fixture's real COCO pose keypoints.
-It opens with live crops of the players' heads enlarged over the original
-frame. Switch to class-specific SVG team badges or a looping fire GIF, then tune
-the scale, offset, rotation, and media-crop mirror controls.
+The playground uses frozen, pose-located and mask-derived `head` detections from
+the basketball fixture. It opens with transparent player-head crops enlarged
+over the original frame; no rectangular background patch or runtime keypoint is
+used for that mode.
+Switch to class-specific SVG team badges or a looping fire GIF, then tune the
+head scale or fixed screen-pixel asset size, offset, rotation, and media-crop
+mirror controls.
 
 ## Enlarge a region from the current media frame
 
 Use a `media` source to crop pixels from the same frame the renderer is already
 presenting. The source and destination regions are resolved independently from
-the same detection; this example uses the semantic head anchor for both:
+the same detection. This example targets dedicated `head` detections and clips
+the sampled pixels to their mask-derived polygons:
 
 ```ts
 session.setPresentation({
@@ -36,13 +40,15 @@ session.setPresentation({
     annotationRenderers.region({
       id: "player-big-heads",
       target: {
-        className: ["white team player", "yellow team player"],
+        className: "head",
+        sourceId: "derived-head-polygon",
       },
       source: {
         kind: "media",
-        region: { kind: "keypoint-anchor", anchor: "head" },
+        region: { kind: "bounds" },
+        coverage: { kind: "polygon" },
       },
-      region: { kind: "keypoint-anchor", anchor: "head" },
+      region: { kind: "bounds" },
       transform: {
         scale: 2.5,
         offset: { x: 0, y: 0 },
@@ -55,10 +61,12 @@ session.setPresentation({
 ```
 
 The browser backend implements this as a dynamic subtexture of the
-renderer-owned media texture. It does not decode the video again, copy the
-composited canvas, or read the frame back through the CPU. The source crop is
-clipped to the media bounds and updates with the active detection frame across
-playback, seek, and loop.
+renderer-owned media texture plus a polygon stencil mask. It does not decode
+the video again, copy the composited canvas, or read the frame back through the
+CPU. The source crop is clipped to the media bounds and its semantic polygon;
+both update with the active detection frame across playback, seek, and loop. A
+media source that requests polygon coverage is omitted for detections without a
+usable polygon instead of falling back to a visible rectangle.
 
 ## Add static icon regions
 
@@ -80,7 +88,7 @@ session.setPresentation({
       source: { kind: "asset", asset: { src } },
       region: { kind: "keypoint-anchor", anchor: "head" },
       transform: {
-        scale: 0.95,
+        size: { width: 44, space: "screen" },
         offset: { x: 0, y: -1.05 },
         rotation: 0,
       },
@@ -105,7 +113,7 @@ session.setPresentation({
       source: { kind: "asset", asset: { src: fireGifUrl } },
       region: { kind: "keypoint-anchor", anchor: "head" },
       transform: {
-        scale: 1.35,
+        size: { width: 52, space: "screen" },
         offset: { x: 0, y: -0.58 },
         rotation: 0,
       },
@@ -121,7 +129,12 @@ rectangle. A numeric keypoint anchor addresses one keypoint index; the `head`
 anchor uses visible COCO face points 0 through 4 and falls back to the top of
 the detection rectangle.
 
-`scale` is uniform. Offsets are relative to the resolved region, rotation is in
+`scale` is uniform and relative to the resolved detection region. Use
+`size: { width, height?, space: "screen" }` when every asset should keep the
+same visible pixel dimensions regardless of detection size or viewport zoom;
+omitting `height` preserves the asset aspect ratio. Media-space size is also
+available through `space: "media"`. `size` and `scale` are intentionally
+mutually exclusive. Offsets are relative to the resolved region, rotation is in
 radians, `flip.horizontal` and `flip.vertical` mirror around the destination
 anchor, and `compose.zIndex` orders multiple region renderer instances. The
 asset must be fetchable by the browser under the host application's normal URL

@@ -40,7 +40,7 @@ export function DocsRegionAnnotationRendererPlayground() {
     [],
   );
   const demo = useDemoRenderer({
-    initialFixtureId: "basketball_geometry",
+    initialFixtureId: "basketball_regions",
     initialPresentationSettings: {
       boxesEnabled: false,
       focusEnabled: false,
@@ -104,7 +104,7 @@ export function DocsRegionAnnotationRendererPlayground() {
             <h1>Regions</h1>
             <span>
               {showsMediaCrop
-                ? "Live media crops anchored to player face keypoints"
+                ? "Mask-derived head crops with transparent coverage"
                 : showsIcons
                   ? "Class-specific SVG badges anchored to player keypoints"
                   : "Looping fire GIFs anchored to player keypoints"}
@@ -125,23 +125,31 @@ export function DocsRegionAnnotationRendererPlayground() {
 
         <div className="docs-layer-playground__controls">
           <RegionModeControl onChange={updateMode} value={settings.mode} />
-          <RegionRangeControl
-            label={
-              showsMediaCrop
-                ? "Head scale"
-                : showsIcons
-                  ? "Icon scale"
-                  : "GIF scale"
-            }
-            max={showsMediaCrop ? 3.5 : 2.2}
-            min={showsMediaCrop ? 1 : 0.5}
-            onChange={(scale) =>
-              updateSettings({ ...settingsRef.current, scale })
-            }
-            step={0.05}
-            value={settings.scale}
-            valueLabel={`${settings.scale.toFixed(2)}×`}
-          />
+          {showsMediaCrop ? (
+            <RegionRangeControl
+              label="Head scale"
+              max={3.5}
+              min={1}
+              onChange={(scale) =>
+                updateSettings({ ...settingsRef.current, scale })
+              }
+              step={0.05}
+              value={settings.scale}
+              valueLabel={`${settings.scale.toFixed(2)}×`}
+            />
+          ) : (
+            <RegionRangeControl
+              label={showsIcons ? "Badge size" : "GIF size"}
+              max={96}
+              min={16}
+              onChange={(assetSize) =>
+                updateSettings({ ...settingsRef.current, assetSize })
+              }
+              step={1}
+              value={settings.assetSize}
+              valueLabel={`${settings.assetSize}px`}
+            />
+          )}
           <RegionRangeControl
             label="Vertical offset"
             max={0.25}

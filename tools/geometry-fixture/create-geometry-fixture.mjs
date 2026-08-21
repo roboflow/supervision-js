@@ -27,6 +27,7 @@ import {
   DEFAULT_POSE_MATCH_IOU,
   DEFAULT_POLYGON_TOLERANCE,
   attachPoseKeypointsToDetections,
+  deriveHeadPolygonDetection,
   normalizePoseDetection,
   selectMotionGatedDetection,
   simplifyPolygonPoints,
@@ -46,6 +47,8 @@ const BASKETBALL_TRACE_POSITION_TOLERANCE_PIXELS = 12;
 const BASKETBALL_TRACE_TRACK_ID = "basketball-track:0";
 const BASKETBALL_TRACE_MAX_SPEED_PIXELS_PER_SECOND = 2_700;
 const BASKETBALL_TRACE_WINDOW_SECONDS = 1;
+const HEAD_DERIVATION_ALGORITHM = "player-mask-pose-head-clip-v2";
+const HEAD_SOURCE_ID = "derived-head-polygon";
 
 const options = parseArgs(process.argv.slice(2));
 
@@ -114,16 +117,48 @@ const frames = sam3Fixture.frames.map((frame) => {
   );
   previousBasketballTraceObservation = traceResult.previousObservation;
 
-  return { ...frame, detections: traceResult.detections };
+  const headDetections = options.derivePlayerHeads
+    ? traceResult.detections.flatMap((detection, detectionIndex) => {
+        if (!POSE_TARGET_CLASS_NAMES.includes(detection.className)) return [];
+
+        const head = deriveHeadPolygonDetection(detection, {
+          algorithm: HEAD_DERIVATION_ALGORITHM,
+          id: `head:${frame.frameIndex}:${detection.id ?? detectionIndex}`,
+          maxPoints: options.maxPolygonPoints,
+          sourceId: HEAD_SOURCE_ID,
+          tolerance: options.polygonTolerance,
+        });
+
+        return head ? [head] : [];
+      })
+    : [];
+
+  return {
+    ...frame,
+    detections: [...traceResult.detections, ...headDetections],
+  };
 });
 const geometry = summarizeFrameGeometry(frames);
 const fixture = {
-  classNames: [...(sam3Fixture.inference?.prompts ?? [])],
+  classNames: [
+    ...(sam3Fixture.inference?.prompts ?? []),
+    ...(options.derivePlayerHeads ? ["head"] : []),
+  ],
   frames,
   geometry,
   inference: sam3Fixture.inference,
   provenance: {
     generationCommand: "npm run fixture:geometry:create",
+    ...(options.derivePlayerHeads
+      ? {
+          headRegions: {
+            algorithm: HEAD_DERIVATION_ALGORITHM,
+            derivedFrom:
+              "a convex facial window located from frozen COCO face and shoulder keypoints, intersected with each matched SAM3 player mask-derived polygon; keypoints are authoring input only",
+            sourceId: HEAD_SOURCE_ID,
+          },
+        }
+      : {}),
     polygon: {
       derivedFrom:
         "sam3 compressed RLE masks via convertDetectionMaskToPolygon",
@@ -351,6 +386,7 @@ function sha256(content) {
 function parseArgs(args) {
   const parsed = {
     datasetId: "basketball_geometry_v1",
+    derivePlayerHeads: false,
     fixtureDir: "demo/fixtures/basketball_geometry",
     help: false,
     maxPolygonPoints: DEFAULT_MAX_POLYGON_POINTS,
@@ -371,6 +407,9 @@ function parseArgs(args) {
         break;
       case "--dataset-id":
         parsed.datasetId = readFlagValue(args, (index += 1), arg);
+        break;
+      case "--derive-player-heads":
+        parsed.derivePlayerHeads = true;
         break;
       case "--fixture-dir":
         parsed.fixtureDir = readFlagValue(args, (index += 1), arg);
@@ -423,6 +462,7 @@ npm run fixture:geometry:create -- [options]
 
 Options:
   --dataset-id <id>                default: basketball_geometry_v1
+  --derive-player-heads            append pose-located, mask-derived head detections
   --fixture-dir <path>             default: demo/fixtures/basketball_geometry
   --max-polygon-points <count>     default: ${DEFAULT_MAX_POLYGON_POINTS}
   --output <path>                  default: tools/geometry-fixture/output/detections.json

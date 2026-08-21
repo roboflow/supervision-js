@@ -243,6 +243,7 @@ export async function createPixiMediaScene(
     Assets,
     Container,
     GifSprite,
+    Graphics,
     Rectangle,
     Sprite,
     Texture,

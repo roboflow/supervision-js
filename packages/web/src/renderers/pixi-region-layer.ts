@@ -7,9 +7,14 @@ import type {
   RegionAnnotationRenderer,
   RegionRendererRegion,
 } from "supervision-js-core";
-import { RegionRendererSourceKind } from "supervision-js-core";
+import {
+  RegionRendererCoverageKind,
+  RegionRendererSizeSpace,
+  RegionRendererSourceKind,
+} from "supervision-js-core";
 import type {
   Container as PixiContainer,
+  Graphics as PixiGraphics,
   Rectangle as PixiRectangle,
   Sprite as PixiSprite,
   Texture as PixiTexture,
@@ -39,6 +44,7 @@ interface RegionSpriteEntry {
   readonly ownedTexture?: PixiTexture;
   readonly rendererId: string;
   readonly sourceKey: string;
+  coverageMask?: PixiGraphics;
   active: boolean;
   baseX: number;
   baseY: number;
@@ -78,6 +84,7 @@ export function createPixiRegionLayer(options: {
     readonly loop?: boolean;
     readonly source: PixiGifSource;
   }) => PixiGifSprite;
+  readonly Graphics: new () => PixiGraphics;
   readonly Rectangle: new (
     x?: number,
     y?: number,
@@ -189,6 +196,7 @@ export function createPixiRegionLayer(options: {
               detectionIndex,
             );
             let entry: RegionSpriteEntry;
+            let mediaCrop: TopLeftCrop | undefined;
             let sourceSize: { readonly height: number; readonly width: number };
 
             if (
@@ -211,16 +219,16 @@ export function createPixiRegionLayer(options: {
                 renderer.source.region,
                 detection,
               );
-              const crop = sourceRegion
+              mediaCrop = sourceRegion
                 ? resolveMediaCrop(sourceRegion, mediaTexture)
                 : undefined;
-              if (!crop) continue;
+              if (!mediaCrop) continue;
               entry = ensureMediaEntry(
                 key,
                 renderer.id,
                 sourceKey,
                 mediaTexture,
-                crop,
+                mediaCrop,
                 detection.id,
               );
               sourceSize = entry.ownedTexture!;
@@ -233,7 +241,15 @@ export function createPixiRegionLayer(options: {
               renderer,
               region,
               sourceSize,
+              viewportScale,
             );
+            if (
+              renderer.source.kind === RegionRendererSourceKind.Media &&
+              mediaCrop &&
+              !updateMediaCoverage(entry, renderer, detection, mediaCrop)
+            ) {
+              continue;
+            }
             entry.baseX = position.x;
             entry.baseY = position.y;
             entry.detectionId = detection.id;
@@ -274,6 +290,7 @@ export function createPixiRegionLayer(options: {
       for (const entry of entries.values()) {
         if (!entry.active || entry.detectionId !== id) continue;
         entry.display.position.set(entry.baseX + x, entry.baseY + y);
+        entry.coverageMask?.position.set(entry.baseX + x, entry.baseY + y);
         translated = true;
       }
       return translated;
@@ -427,6 +444,65 @@ export function createPixiRegionLayer(options: {
     return entry;
   }
 
+  function updateMediaCoverage(
+    entry: RegionSpriteEntry,
+    renderer: RegionAnnotationRenderer,
+    detection: Detection,
+    crop: TopLeftCrop,
+  ) {
+    if (
+      renderer.source.kind !== RegionRendererSourceKind.Media ||
+      renderer.source.coverage === undefined
+    ) {
+      removeCoverageMask(entry);
+      return true;
+    }
+
+    if (
+      renderer.source.coverage.kind !== RegionRendererCoverageKind.Polygon ||
+      !detection.polygon ||
+      detection.polygon.points.length < 3
+    ) {
+      removeCoverageMask(entry);
+      return false;
+    }
+
+    const mask = entry.coverageMask ?? new options.Graphics();
+    if (!entry.coverageMask) {
+      entry.coverageMask = mask;
+      container?.addChild(mask);
+      entry.display.mask = mask;
+    }
+
+    mask
+      .clear()
+      .poly(
+        detection.polygon.points.flatMap(({ x, y }) => [
+          x - crop.x - crop.width / 2,
+          y - crop.y - crop.height / 2,
+        ]),
+        true,
+      )
+      .fill({ alpha: 1, color: 0xffffff });
+    mask.position.set(entry.display.position.x, entry.display.position.y);
+    mask.scale.set(
+      (entry.display.width / crop.width) *
+        (renderer.transform?.flip?.horizontal ? -1 : 1),
+      (entry.display.height / crop.height) *
+        (renderer.transform?.flip?.vertical ? -1 : 1),
+    );
+    mask.rotation = entry.display.rotation;
+    return true;
+  }
+
+  function removeCoverageMask(entry: RegionSpriteEntry) {
+    if (!entry.coverageMask) return;
+    entry.display.mask = null;
+    entry.coverageMask.removeFromParent();
+    entry.coverageMask.destroy();
+    entry.coverageMask = undefined;
+  }
+
   function destroyRendererDisplays(rendererId: string) {
     for (const [key, entry] of entries) {
       if (entry.rendererId !== rendererId) continue;
@@ -455,6 +531,9 @@ export function createPixiRegionLayer(options: {
 }
 
 function destroyEntry(entry: RegionSpriteEntry) {
+  entry.display.mask = null;
+  entry.coverageMask?.removeFromParent();
+  entry.coverageMask?.destroy();
   entry.display.removeFromParent?.();
   // GifSprite sources are shared and released through Assets.unload().
   entry.display.destroy();
@@ -545,14 +624,15 @@ function positionSprite(
   renderer: RegionAnnotationRenderer,
   region: Rect,
   source: { readonly height: number; readonly width: number },
+  viewportScale: number,
 ) {
-  const scale = finiteOr(renderer.transform?.scale, 1);
   const opacity = Math.min(
     1,
     Math.max(0, finiteOr(renderer.transform?.opacity, 1)),
   );
   const sourceWidth = Math.max(1, source.width);
   const sourceHeight = Math.max(1, source.height);
+  const size = renderer.transform?.size;
   const containScale = Math.min(
     region.width / sourceWidth,
     region.height / sourceHeight,
@@ -560,8 +640,22 @@ function positionSprite(
   const offset = renderer.transform?.offset;
 
   sprite.alpha = opacity;
-  sprite.width = sourceWidth * containScale * scale;
-  sprite.height = sourceHeight * containScale * scale;
+  if (size) {
+    const sizeScale =
+      size.space === RegionRendererSizeSpace.Screen
+        ? 1 / Math.max(Number.EPSILON, finiteOr(viewportScale, 1))
+        : 1;
+    sprite.width = Math.max(0, finiteOr(size.width, 0)) * sizeScale;
+    sprite.height =
+      Math.max(
+        0,
+        finiteOr(size.height, size.width * (sourceHeight / sourceWidth)),
+      ) * sizeScale;
+  } else {
+    const scale = finiteOr(renderer.transform?.scale, 1);
+    sprite.width = sourceWidth * containScale * scale;
+    sprite.height = sourceHeight * containScale * scale;
+  }
   sprite.scale.x =
     Math.abs(sprite.scale.x) * (renderer.transform?.flip?.horizontal ? -1 : 1);
   sprite.scale.y =

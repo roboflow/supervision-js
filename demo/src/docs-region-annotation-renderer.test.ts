@@ -18,7 +18,7 @@ describe("docs region annotation renderer", () => {
       ...createRegionPlaygroundSettings(RegionPlaygroundMode.StaticIcons),
       offsetY: -0.8,
       rotationDegrees: 15,
-      scale: 1.2,
+      assetSize: 40,
     };
     const renderers = createRegionPlaygroundRenderers(settings, assets);
 
@@ -41,7 +41,7 @@ describe("docs region annotation renderer", () => {
     expect(renderers[0]?.transform).toMatchObject({
       offset: { x: 0, y: -0.8 },
       rotation: Math.PI / 12,
-      scale: 1.2,
+      size: { space: "screen", width: 40 },
     });
   });
 
@@ -74,13 +74,15 @@ describe("docs region annotation renderer", () => {
       {
         id: "player-big-heads",
         kind: "region",
-        region: { anchor: "head", kind: "keypoint-anchor" },
+        region: { kind: "bounds" },
         source: {
+          coverage: { kind: "polygon" },
           kind: "media",
-          region: { anchor: "head", kind: "keypoint-anchor" },
+          region: { kind: "bounds" },
         },
         target: {
-          className: ["white team player", "yellow team player"],
+          className: "head",
+          sourceId: "derived-head-polygon",
         },
         transform: {
           flip: { horizontal: true },
@@ -96,7 +98,7 @@ describe("docs region annotation renderer", () => {
       ...createRegionPlaygroundSettings(RegionPlaygroundMode.StaticIcons),
       offsetY: -0.75,
       rotationDegrees: 30,
-      scale: 1.1,
+      assetSize: 36,
     });
     const animated = createRegionPlaygroundSnippet(
       createRegionPlaygroundSettings(RegionPlaygroundMode.AnimatedGif),
@@ -109,9 +111,10 @@ describe("docs region annotation renderer", () => {
     expect(icons).toContain("id, className, src");
     expect(icons).toContain("offset: { x: 0, y: -0.75 }");
     expect(icons).toContain("rotation: 0.52");
-    expect(icons).toContain("scale: 1.10");
+    expect(icons).toContain('size: { width: 36, space: "screen" }');
     expect(animated).toContain("asset: { src: fireGifUrl }");
     expect(mediaCrop).toContain('kind: "media"');
+    expect(mediaCrop).toContain('coverage: { kind: "polygon" }');
     expect(mediaCrop).toContain("flip: { horizontal: true }");
   });
 });

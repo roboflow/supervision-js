@@ -7,6 +7,7 @@ import {
   KEYPOINT_VISIBILITY_VISIBLE,
   attachPoseKeypointsToDetections,
   convertOneBasedEdges,
+  deriveHeadPolygonDetection,
   normalizePoseDetection,
   selectMotionGatedDetection,
   simplifyPolygonPoints,
@@ -156,6 +157,62 @@ describe("simplifyPolygonPoints", () => {
         { x: 0, y: 0 },
         { x: 0.2, y: 0.1 },
       ]),
+      undefined,
+    );
+  });
+});
+
+describe("deriveHeadPolygonDetection", () => {
+  it("uses facial pose points to author an independent head polygon", () => {
+    const head = deriveHeadPolygonDetection(
+      {
+        className: "yellow team player",
+        confidence: 0.92,
+        id: "player-7",
+        polygon: {
+          points: [
+            { x: 80, y: 0 },
+            { x: 120, y: 0 },
+            { x: 140, y: 200 },
+            { x: 60, y: 200 },
+          ],
+        },
+        keypoints: {
+          edges: [],
+          points: [
+            { x: 100, y: 22 },
+            { x: 95, y: 20 },
+            { x: 105, y: 20 },
+            { x: 93, y: 21 },
+            { x: 107, y: 21 },
+            { x: 85, y: 50 },
+            { x: 115, y: 50 },
+          ],
+          visibility: [2, 2, 2, 2, 2, 2, 2],
+        },
+        rect: { height: 200, width: 80, x: 100, y: 100 },
+      },
+      { id: "head:7", maxPoints: 16, tolerance: 0 },
+    );
+
+    assert.equal(head.className, "head");
+    assert.equal(head.id, "head:7");
+    assert.equal(head.sourceId, "derived-head-polygon");
+    assert.equal(head.keypoints, undefined);
+    assert.ok(head.rect.width <= 30);
+    assert.ok(head.rect.height <= 40);
+    assert.ok(head.polygon.points.every(({ y }) => y < 40));
+    assert.deepEqual(head.metadata, {
+      derivation: "player-mask-pose-head-clip-v2",
+      derivedFromDetectionId: "player-7",
+    });
+  });
+
+  it("omits detections without a usable semantic polygon", () => {
+    assert.equal(
+      deriveHeadPolygonDetection({
+        rect: { height: 100, width: 50, x: 50, y: 50 },
+      }),
       undefined,
     );
   });

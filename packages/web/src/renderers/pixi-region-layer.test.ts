@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import { createPixiRegionLayer } from "#renderers/pixi-region-layer";
 import {
   KeypointVisibility,
+  RegionRendererCoverageKind,
+  RegionRendererSizeSpace,
   annotationRenderers,
   type BufferedDetectionTimeline,
   type DetectionFrame,
@@ -379,6 +381,103 @@ describe("pixi region layer", () => {
     expect(mediaTexture.destroy).not.toHaveBeenCalled();
   });
 
+  it("clips a media crop to the detection polygon", () => {
+    const mediaTexture = new FakeTexture({
+      source: { height: 200, width: 300 },
+    });
+    const headFrame: DetectionFrame = {
+      detections: [
+        {
+          className: "head",
+          id: "head-7",
+          polygon: {
+            points: [
+              { x: 90, y: 30 },
+              { x: 110, y: 30 },
+              { x: 108, y: 50 },
+              { x: 92, y: 50 },
+            ],
+          },
+          rect: { height: 20, width: 20, x: 100, y: 40 },
+        },
+      ],
+      frameIndex: 1,
+      mediaTime: 1,
+    };
+    const layer = createPixiRegionLayer({
+      ...createTestBackend(mediaTexture),
+      Assets: { load: vi.fn(), unload: vi.fn() } as never,
+      Container: FakeContainer as never,
+      GifSprite: FakeGifSprite as never,
+      Sprite: FakeSprite as never,
+      detectionTimeline: createTimeline(headFrame),
+      regionRenderers: [
+        annotationRenderers.region({
+          id: "big-heads",
+          region: { kind: "bounds" },
+          source: {
+            coverage: { kind: RegionRendererCoverageKind.Polygon },
+            kind: "media",
+            region: { kind: "bounds" },
+          },
+          target: { className: "head" },
+          transform: { scale: 2.5 },
+        }),
+      ],
+    });
+    const container = layer.createContainer() as unknown as FakeContainer;
+
+    expect(layer.drawFrame(1).activeDetectionIndexes).toEqual([0]);
+    expect(container.children).toHaveLength(2);
+    const display = container.children[0]!;
+    const mask = container.children[1] as FakeGraphics;
+    expect(display).toMatchObject({ height: 50, mask, width: 50 });
+    expect(mask.poly).toHaveBeenCalledWith(
+      [-10, -10, 10, -10, 8, 10, -8, 10],
+      true,
+    );
+    expect(mask.scale.set).toHaveBeenCalledWith(2.5, 2.5);
+
+    layer.destroy();
+    expect(mask.destroy).toHaveBeenCalledOnce();
+  });
+
+  it("keeps explicit screen-space assets the same size across detections and zoom", async () => {
+    const layer = createPixiRegionLayer({
+      ...createTestBackend(),
+      Assets: {
+        load: vi.fn(async () => ({ height: 20, width: 40 })),
+        unload: vi.fn(async () => undefined),
+      } as never,
+      Container: FakeContainer as never,
+      GifSprite: FakeGifSprite as never,
+      Sprite: FakeSprite as never,
+      detectionTimeline: createTimeline(frame),
+      regionRenderers: [
+        annotationRenderers.region({
+          id: "fixed-badges",
+          region: { kind: "bounds" },
+          source: { asset: { src: "/badge.svg" }, kind: "asset" },
+          target: {},
+          transform: {
+            size: { space: RegionRendererSizeSpace.Screen, width: 32 },
+          },
+        }),
+      ],
+    });
+    const container = layer.createContainer() as unknown as FakeContainer;
+    await Promise.resolve();
+
+    layer.drawFrame(1, 0.5);
+    expect(container.children).toHaveLength(2);
+    expect(container.children[0]).toMatchObject({ height: 32, width: 64 });
+    expect(container.children[1]).toMatchObject({ height: 32, width: 64 });
+
+    layer.drawFrame(1, 2);
+    expect(container.children[0]).toMatchObject({ height: 8, width: 16 });
+    expect(container.children[1]).toMatchObject({ height: 8, width: 16 });
+  });
+
   it("creates a looping GifSprite and releases its shared source", async () => {
     const gifSource = {
       duration: 1_000,
@@ -454,9 +553,23 @@ class FakeContainer {
 class FakeSprite {
   readonly anchor = { set: vi.fn() };
   readonly destroy = vi.fn();
-  readonly position = { set: vi.fn() };
+  readonly position = {
+    set: vi.fn((x: number, y: number) => {
+      this.position.x = x;
+      this.position.y = y;
+    }),
+    x: 0,
+    y: 0,
+  };
   readonly removeFromParent = vi.fn(() => this.parent?.removeChild(this));
-  readonly scale = { x: 1, y: 1 };
+  readonly scale = {
+    set: vi.fn((x: number, y: number) => {
+      this.scale.x = x;
+      this.scale.y = y;
+    }),
+    x: 1,
+    y: 1,
+  };
   alpha = 1;
   height = 0;
   rotation = 0;
@@ -464,10 +577,21 @@ class FakeSprite {
   visible = true;
   width = 0;
   zIndex = 0;
+  mask: FakeGraphics | null = null;
   parent: FakeContainer | undefined;
 
   constructor(options: { texture: { height: number; width: number } }) {
     this.texture = options.texture;
+  }
+}
+
+class FakeGraphics extends FakeSprite {
+  readonly clear = vi.fn(() => this);
+  readonly fill = vi.fn(() => this);
+  readonly poly = vi.fn(() => this);
+
+  constructor() {
+    super({ texture: { height: 0, width: 0 } });
   }
 }
 
@@ -550,6 +674,7 @@ function createTimeline(
 
 function createTestBackend(mediaTexture?: FakeTexture) {
   return {
+    Graphics: FakeGraphics as never,
     Rectangle: FakeRectangle as never,
     Texture: FakeTexture as never,
     getMediaTexture: () => mediaTexture as never,
