@@ -113,15 +113,15 @@ export interface RenderPreparationMaskFrameOptions {
  */
 export interface RenderPreparationPlaybackGateOptions {
   /**
-   * Pause playback while required artifacts are not prepared.
+   * Ignored. Playback runs whether or not required artifacts are prepared.
    */
   readonly enabled?: boolean;
   /**
-   * Soft target ahead of the active frame.
+   * Ignored. Preparation targets its own window ahead of the active frame.
    */
   readonly minimumAheadSeconds?: number;
   /**
-   * Required ahead time before playback can continue.
+   * Ignored. No prepared lead is required before playback continues.
    */
   readonly requiredAheadSeconds?: number;
 }

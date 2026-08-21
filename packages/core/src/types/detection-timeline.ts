@@ -99,11 +99,11 @@ export interface DetectionTimelineContext {
  */
 export interface DetectionPlaybackGateOptions {
   /**
-   * Pause playback while the requested detection window is unavailable.
+   * Ignored. Playback runs whether or not the requested window is available.
    */
   readonly enabled?: boolean;
   /**
-   * Required detections ahead of the active playback time.
+   * Ignored. No detection lead is required ahead of the playback time.
    */
   readonly requiredAheadSeconds?: number;
 }
@@ -136,10 +136,14 @@ export interface DetectionFrameRetentionOptions {
   readonly windowSeconds?: number;
 }
 
+/**
+ * Accepted and ignored. The timeline learns duration and looping through
+ * {@link BufferedDetectionTimeline.setTimelineContext}, and preparing
+ * detections never holds the picture.
+ */
 export interface DetectionBufferPrepareOptions {
   readonly duration?: number | null;
   readonly firstTimestamp?: number;
-  /** Accepted and ignored: preparing detections never holds the picture. */
   readonly gatePlayback?: boolean;
 }
 
@@ -519,8 +523,9 @@ export interface LiveWritableDetectionFrameSource extends WritableDetectionFrame
    * A container can declare a duration beyond the last decoded sample, and a
    * live frame is deliberately held open past the data it describes. Finalizing
    * sets the latest frame's exclusive end to `endTime`, extending or shortening
-   * it as needed, so coverage-gated playback neither stalls on a terminal
-   * sliver nor believes the source covers time past the end of media. It is
+   * it as needed, so the source stops answering for time past the end of media.
+   * Playback never awaits detection coverage, so the readers this serves are
+   * `waitForRange` and the buffered window's own coverage arithmetic. It is
    * idempotent and returns the current summary when there is nothing to change.
    */
   finalizeCoverage(

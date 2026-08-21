@@ -252,8 +252,8 @@ export function createWritableDetectionFrameSource(
         );
 
         // Closing a held live frame shortens coverage. Reported availability
-        // has to shrink with it, or a playback gate would still believe the
-        // source covers time past the end of media.
+        // has to shrink with it, or `waitForRange` and the buffered window
+        // would still believe the source covers time past the end of media.
         clipAvailableRangesAfter(endTime);
 
         return finalSummary;

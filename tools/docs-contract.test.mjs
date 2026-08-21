@@ -126,6 +126,42 @@ test("documentation toolbar mirrors the browser package manifest version", async
   assert.equal(packageReleaseStatus, "");
 });
 
+const playbackGateSurfaces = [
+  "packages/core/src/types/detection-timeline.ts",
+  "packages/web/src/types/media-session.ts",
+  "docs/public/recipes/multiple-detection-sources.md",
+];
+
+test("every playback-gate surface documents playback that never waits", async () => {
+  // The playback-gate options survive as accepted-and-ignored, so three
+  // separate surfaces each have to say so. Prose asserting that the gate works
+  // compiles cleanly, and nothing else compares the three against each other.
+  const statesNoGate =
+    /(?:playback|presentation) (?:is )?never (?:gated|awaits|waits)/i;
+  const claimsGate = [
+    /pause playback while/i,
+    /coverage-gated/i,
+    /required detections ahead/i,
+  ];
+  const failures = [];
+
+  for (const surface of playbackGateSurfaces) {
+    const source = await readFile(path.join(rootDir, surface), "utf8");
+
+    if (!statesNoGate.test(source)) {
+      failures.push(`${surface} never states that playback does not wait`);
+    }
+
+    for (const claim of claimsGate) {
+      if (claim.test(source)) {
+        failures.push(`${surface} documents a gate this build does not have`);
+      }
+    }
+  }
+
+  assert.deepEqual(failures, []);
+});
+
 test("public installation guidance uses the stable browser package", async () => {
   const consumerDocs = [
     path.join(rootDir, "README.md"),

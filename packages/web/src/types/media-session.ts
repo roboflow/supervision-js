@@ -404,9 +404,10 @@ export interface LiveMediaSession extends MediaSession {
    * Close the appendable source's final coverage at the end of media.
    *
    * `endTime` defaults to the renderer's reported media duration. Calling it
-   * again is a no-op. Use it when a producer has finished so coverage-gated
-   * playback does not stall on a terminal sliver the container declares beyond
-   * the last decoded sample.
+   * again is a no-op. Use it when a producer has finished, so the source stops
+   * answering for the terminal sliver a container can declare beyond the last
+   * decoded sample. Presentation is never gated on detection coverage, so what
+   * the sliver would otherwise strand is a `waitForRange` caller.
    */
   finalizeDetectionCoverage(
     endTime?: number,
