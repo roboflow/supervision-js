@@ -52,6 +52,13 @@ The source tree, package boundary checks, and Rollup externals are unchanged.
 `pixi.js` and `mediabunny` stay ordinary dependencies and are installed from the
 registry by the consumer.
 
+`@roboflow/video-engine` is external to the build as well, and the packer leaves
+it alone. The published JavaScript keeps its dynamic
+`import("@roboflow/video-engine")`, which runs only when a caller opens a
+video-engine media source, so importing either entrypoint never reaches for it.
+An application that does open such a source has to resolve that specifier in its
+own build.
+
 ## Verify The Artifact
 
 ```sh

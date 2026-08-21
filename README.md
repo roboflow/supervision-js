@@ -60,7 +60,7 @@ session.setPresentation({
 npm install supervision
 ```
 
-The current browser release is `0.1.1`, published as npm's default `latest`
+The current browser release is `0.1.3`, published as npm's default `latest`
 release. Its package includes the private core dependency. Consumers import
 only the public browser entrypoints:
 

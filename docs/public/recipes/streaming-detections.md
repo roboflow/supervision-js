@@ -27,10 +27,6 @@ const session = await createMediaSession({
         mode: DetectionFrameRetentionMode.PersistAll,
       },
     },
-    playbackGate: {
-      enabled: true,
-      requiredAheadSeconds: 2,
-    },
   },
   normalize: { stream: true },
   renderer: {
@@ -42,6 +38,10 @@ for await (const frames of streamInferenceFrames(file)) {
   await session.appendDetectionFrames(frames);
 }
 ```
+
+Playback never waits for appended detections. A frame the source does not cover
+yet presents without annotations and draws them when the append covering it
+lands, so inference falling behind slows annotations rather than the video.
 
 ## Appending Results
 
@@ -95,5 +95,6 @@ session.subscribe((state) => {
 });
 ```
 
-`playbackBlocked` means playback should wait. `presentationBlocked` means the
-visual frame may still be preparing even if playback can continue.
+`playbackBlocked` means playback should wait; media buffering and session errors
+raise it, and detection coverage never does. `presentationBlocked` means the
+visual frame is still preparing an artifact while playback continues.

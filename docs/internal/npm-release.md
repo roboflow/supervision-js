@@ -57,9 +57,9 @@ publisher.
 
 Use SemVer against the published browser surface only:
 
-| Change                                                                                                   | Example version from `0.1.1` | Tag      |
+| Change                                                                                                   | Example version from `0.1.3` | Tag      |
 | -------------------------------------------------------------------------------------------------------- | ---------------------------- | -------- |
-| Backward-compatible fix, docs, dependency maintenance, internal refactor, or public browser API addition | `0.1.2`                      | `latest` |
+| Backward-compatible fix, docs, dependency maintenance, internal refactor, or public browser API addition | `0.1.4`                      | `latest` |
 | Breaking browser API or behavior change before 1.0                                                       | `0.2.0`                      | `latest` |
 
 While the browser package remains in the experimental `0.1.x` line,

@@ -151,6 +151,7 @@ Run from the repository root:
 - `npm run lint`
 - `npm run typecheck`
 - `npm run test`
+- `npm run eval:demo`
 - `npm run build`
 - `npm run demo:build`
 - `npm run benchmark:initial:build`
@@ -170,6 +171,15 @@ The manual npm workflow publishes that generated tarball after environment
 approval; it never publishes `packages/web` directly. See
 [`npm-release.md`](npm-release.md) before running or modifying it.
 
+`eval:demo` measures the running demo over the Chrome DevTools Protocol:
+painting while nothing moves, detection sync, transport latency, gesture stress,
+per-defect regression guards, and a comparison against this machine's recorded
+baseline. It is the check that catches defects a unit test under a mock cannot,
+and it needs a real browser and a running dev server, so `npm run verify` does
+not include it. Its own `.test.ts` files do run under `npm run test`. See
+[`../../tools/demo-eval/README.md`](../../tools/demo-eval/README.md) for
+prerequisites, scenarios and flags.
+
 ### The Demo Runs The Built Package
 
 The demo imports `supervision` through the package boundary, and that package's
@@ -183,7 +193,10 @@ watchers running next to the demo server. `npm run demo:dev` builds once before
 starting the server, and `npm run dev:demo` does not build at all, so under
 either of those every library edit needs `npm run build` before the browser can
 run it. The watchers rebuild JavaScript only; `npm run build` is also what
-refreshes the emitted declarations the demo typechecks against.
+refreshes the `supervision` declarations the demo typechecks against. The video
+engine's declarations are the producer's to emit, with `npm run
+types:videoengine` from its `app/` directory, so an engine change reaches this
+repo's typecheck only after that runs there.
 
 For focused iterative work, use separate terminals:
 

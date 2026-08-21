@@ -20,19 +20,19 @@ engine's checkout, so this repo cannot bind itself to the engine's file layout.
 
 Types and runtime arrive from different places:
 
-- Type-checking `packages/web` reads the producer's emitted declarations. The
-  producer generates them with `npm run types:videoengine` from its `app/`
-  directory, and `packages/web/tsconfig.json` maps both specifiers onto that
-  output.
-- The demo and Vitest resolve the same two specifiers to the engine's
-  TypeScript source through aliases in `demo/vite.config.ts`,
-  `demo/tsconfig.json`, and `vitest.config.ts`.
+- Every typecheck reads the producer's emitted declarations. The producer
+  generates them with `npm run types:videoengine` from its `app/` directory,
+  and both `packages/web/tsconfig.json` and `demo/tsconfig.json` map the two
+  specifiers onto that output. Neither compiles the engine's source, so this
+  repo's strictness never lands on another repo's internals.
+- What runs resolves to the engine's TypeScript source, through aliases in
+  `demo/vite.config.ts` and `vitest.config.ts`.
 - Rollup treats both specifiers as external, so the engine is never bundled
   into the published package.
 
-Both mappings point at a checkout of the producer beside this repository, so the
-package typecheck and the demo need it present to resolve those specifiers at
-all.
+Every one of those mappings points at a checkout of the producer beside this
+repository, so the typechecks, the demo and the Vitest suite all need it present
+to resolve those specifiers at all.
 
 The engine import inside `packages/web/src/media/video-engine-media-source.ts`
 is dynamic for one reason: importing `supervision` must keep working for

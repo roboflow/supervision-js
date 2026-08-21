@@ -19,8 +19,8 @@ The library owns:
 - `DetectionFrameSource` as the renderer-readable contract.
 - cold detection storage for frames that should not all live in hot memory.
 - writable detection ingestion for append/upsert workflows.
-- optional prediction-coverage gating so playback can wait for annotation data
-  the same way media playback waits for decoded media.
+- prediction-coverage reporting, as `getAvailableRanges()` and the optional
+  `waitForRange()` waiter, for callers that want to know what is covered.
 - hot buffer refresh when a source version changes.
 
 The demo owns:
@@ -62,19 +62,19 @@ server-side fan-out, and streamed HTTP responses.
 Full replacement and clear operations still invalidate every range because
 existing frame membership may have changed anywhere in the dataset.
 
-## Prediction-Gated Playback
+## Prediction Coverage
 
-Some sessions should treat missing predictions as missing media. In those cases,
-the writable source tracks appended time ranges and exposes range waiters. The
-renderer can opt into a playback gate with a required lookahead window. When
-playback reaches media time that does not yet have prediction coverage ahead,
-the renderer reports `buffering`, waits for the writable source to cover that
-range, then resumes from the same media timestamp instead of letting video and
-annotations drift apart.
+Missing predictions are not treated as missing media. Playback never awaits
+prediction coverage: `detections.playbackGate` is accepted and ignored, and a
+frame the ingested ranges do not cover presents without annotations rather than
+holding the picture. `DetectionFrameSource.waitForRange()` says so in its own
+TSDoc: "Playback never awaits it. A caller that wants to wait awaits it itself."
 
-This gate belongs in the media session/renderer path, not in React. The demo may
-show processed and processing ranges, but it should not run its own pause/play
-loop to enforce synchronization.
+The writable source still tracks appended time ranges and exposes that waiter,
+so an app that genuinely wants to hold playback until a range lands awaits
+`waitForRange()` on `MediaSession.detectionSource` and pauses itself. That
+decision belongs to the app. A demo that only wants to show progress should
+read `getAvailableRanges()` and render it rather than running a pause/play loop.
 
 ## Image Handling
 

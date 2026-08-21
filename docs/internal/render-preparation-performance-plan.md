@@ -99,10 +99,11 @@ Manual observation:
 
 - Increasing the prepared window should reduce active-frame pending overlays.
 - Very large values should increase memory use and may delay style changes.
-- The basketball demo currently uses a 5s mask prefetch window and a 5s
-  prepared mask cache, derived from the fixture inference frame rate, so we can
-  test whether a larger ready-ahead window removes active-frame misses without
-  changing package defaults.
+- The basketball demo does not configure the mask prefetch window or cache
+  size at all; it takes the library's file-mode session defaults, a 7s mask
+  prefetch window and an 8s prepared mask cache, so we can test whether a
+  larger ready-ahead window removes active-frame misses without changing
+  package defaults.
 
 ### 3. Rolling Windows, Worker Pool, And Backpressure
 
@@ -144,44 +145,29 @@ Manual observation:
   waiting behind stale queued work.
 - Dense videos should prepare future masks faster.
 - CPU usage may rise, but the main UI should remain responsive.
-- The basketball demo currently uses a 4-worker mask-preparation pool and
+- The demo requests no worker count, so it runs on the automatic default and
   exposes in-flight worker diagnostics so throughput can be observed directly.
 - Automatic worker count uses a conservative browser-aware default: roughly half
-  of `navigator.hardwareConcurrency`, capped at 4 workers. Explicit worker
-  counts are clamped to a small safe range so callers can tune without creating
-  runaway worker pools.
+  of `navigator.hardwareConcurrency`, capped at 4 workers. An explicit count is
+  clamped to between 1 and 8 so callers can tune without creating runaway worker
+  pools.
 
 ### 4. Prepared-Artifact Playback Gate
 
-Status: implemented.
+Status: withdrawn. A watermarked lookahead gate was specced here; the picture
+does not wait for annotations.
 
-Spec:
+`RenderPreparationOptions.playbackGate` is accepted and ignored. Nothing in
+`packages/web/src` asks a scene to wait for render preparation, and
+`media-renderer-core.test.ts` pins that by name with "plays through render
+preparation that never finishes". A frame whose artifacts are not ready
+presents without those annotation layers; the prepared annotation window in
+[`video-engine-presentation.md`](video-engine-presentation.md) is what keeps a
+stale frame's annotations off that picture.
 
-- Add an optional playback gate that waits for a minimum prepared-artifact
-  lookahead, similar to detection prediction buffering.
-- Use high/low watermarks so playback does not wait a tiny amount before every
-  frame. Below the low watermark, the gate buffers back up to the requested
-  lookahead.
-- Gate only on artifact kinds enabled by the current presentation.
-- Keep media playback ungated by default unless the caller opts in.
-- Keep the renderer core generic: it asks the scene to wait for render
-  preparation, while Pixi masks are the only current prepared artifact behind
-  that boundary.
-
-Test:
-
-- Playback waits when required active/lookahead artifacts are missing.
-- Playback resumes when enough prepared artifacts are ready.
-- Disabling masks or disabling the gate removes the wait condition.
-
-Manual observation:
-
-- With the gate enabled, playback may wait briefly before motion starts.
-- Once playing, masks should feel less flickery because prepared frames are
-  already available.
-- The demo enables a 1s render-preparation playback gate for the basketball and
-  upload flows with a 0.25s low watermark so this can be exercised without
-  turning playback into a continuous speed governor.
+The work still reaches the host, as an activity. A `RenderPreparing` activity
+sets `blockingPresentation` while the frame on screen waits for an artifact, and
+never sets `blockingPlayback`.
 
 ### 5. Future Mask Representation Research
 

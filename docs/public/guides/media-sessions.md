@@ -72,10 +72,11 @@ It also includes activity details such as media normalization, detection loading
 playback buffering, and render artifact preparation. Apps can use this to show
 loading UI without wiring every internal subsystem manually.
 
-`activities` are the host-facing loading contract. They distinguish media
-normalization, detection buffering, playback gates, and render-artifact
-preparation, so apps can choose a compact status chip, a media overlay, or a
-debug panel without reading lower-level renderer internals.
+`activities` are the host-facing loading contract. They distinguish opening
+media, media normalization, playback buffering, detection loading and
+buffering, render-artifact preparation, and errors, so apps can choose a compact
+status chip, a media overlay, or a debug panel without reading lower-level
+renderer internals.
 
 For common UI decisions, use the aggregate flags first:
 
