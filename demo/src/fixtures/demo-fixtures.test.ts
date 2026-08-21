@@ -340,7 +340,7 @@ describe("geometry showcase fixture", () => {
 });
 
 describe("basketball region fixture", () => {
-  it("keeps exact, padded head masks with stable short-gap-free tracks", () => {
+  it("keeps stabilized, padded head masks with stable short-gap-free tracks", () => {
     let headCount = 0;
     let frameCount = 0;
     const framesByTrack = new Map<string, number[]>();
@@ -365,6 +365,8 @@ describe("basketball region fixture", () => {
           );
           const rawMaskRect = detection.metadata?.rawMaskRect as
             NonNullable<typeof detection.rect> | undefined;
+          const rawSam3MaskRect = detection.metadata?.rawSam3MaskRect as
+            NonNullable<typeof detection.rect> | undefined;
           const cropRect = detection.rect!;
           const trackId = String(detection.id);
           const trackFrames = framesByTrack.get(trackId) ?? [];
@@ -373,9 +375,13 @@ describe("basketball region fixture", () => {
           expect(detection.mask).toBeDefined();
           expect(detection.polygon).toBeUndefined();
           expect(detection.metadata?.association).toBe(
-            "sam3-head-cbiou-player-v3",
+            "sam3-head-temporal-mask-v4",
+          );
+          expect(detection.metadata?.maskStabilization).toBe(
+            "sam3-head-temporal-mask-v4",
           );
           expect(rawMaskRect).toBeDefined();
+          expect(rawSam3MaskRect).toBeDefined();
           if (!rawMaskRect) throw new Error("Head mask bounds are required.");
           expect(cropRect.x - cropRect.width / 2).toBeLessThanOrEqual(
             rawMaskRect.x - rawMaskRect.width / 2,
@@ -444,7 +450,7 @@ describe("basketball region fixture", () => {
     const headSource = provenance.sources.find(({ id }) => id === "sam3-head");
 
     expect(provenance.headRegions).toMatchObject({
-      algorithm: "sam3-head-cbiou-player-v3",
+      algorithm: "sam3-head-temporal-mask-v4",
       prompt: "head",
       sourceId: "sam3-head",
     });
@@ -452,11 +458,14 @@ describe("basketball region fixture", () => {
       "internal gaps of at most 7 frames are filled",
     );
     expect(provenance.headRegions.cropPolicy).toContain(
-      "every crop remains a superset of its exact mask bounds",
+      "every crop remains a superset of its stabilized mask bounds",
     );
     expect(provenance.headRegions.gapFilledHeadCount).toBeGreaterThan(0);
     expect(provenance.headRegions.stableTrackCount).toBeGreaterThan(0);
     expect(provenance.headRegions.matchedHeadCount).toBeGreaterThan(0);
+    expect(
+      provenance.headRegions.temporallyStabilizedMaskCount,
+    ).toBeGreaterThan(0);
     expect(headSource).toBeDefined();
     expect(headSource?.inputSha256).toBe(
       sourceSha256(

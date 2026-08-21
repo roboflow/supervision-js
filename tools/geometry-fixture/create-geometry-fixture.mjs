@@ -26,7 +26,9 @@ import {
   convertDetectionMaskToPolygon,
   createCBIoUTracker,
   decodeCompressedRleMask,
+  decodeCompressedRleCounts,
   encodeBinaryMask,
+  encodeCompressedRleCounts,
 } from "supervision-js-core";
 import {
   DEFAULT_KEYPOINT_VISIBLE_CONFIDENCE,
@@ -34,6 +36,7 @@ import {
   DEFAULT_POSE_MATCH_IOU,
   DEFAULT_POLYGON_TOLERANCE,
   attachPoseKeypointsToDetections,
+  createTemporallyStabilizedRects,
   normalizePoseDetection,
   selectMotionGatedDetection,
   simplifyPolygonPoints,
@@ -54,8 +57,10 @@ const BASKETBALL_TRACE_POSITION_TOLERANCE_PIXELS = 12;
 const BASKETBALL_TRACE_TRACK_ID = "basketball-track:0";
 const BASKETBALL_TRACE_MAX_SPEED_PIXELS_PER_SECOND = 2_700;
 const BASKETBALL_TRACE_WINDOW_SECONDS = 1;
-const HEAD_ASSOCIATION_ALGORITHM = "sam3-head-cbiou-player-v3";
+const HEAD_ASSOCIATION_ALGORITHM = "sam3-head-temporal-mask-v4";
 const HEAD_MAX_GAP_FRAMES = 7;
+const HEAD_MASK_NORMALIZATION_SIZE = 64;
+const HEAD_MASK_SMOOTHING_RADIUS = 2;
 const HEAD_SOURCE_ID = "sam3-head";
 
 const options = parseArgs(process.argv.slice(2));
@@ -157,6 +162,9 @@ const stabilizedHeads = headSam3Fixture
       },
     )
   : undefined;
+if (stabilizedHeads) {
+  stabilizeAuthoredHeadMasks(stabilizedHeads);
+}
 const frames = baseFrames.map((frame) => ({
   ...frame,
   detections: [
@@ -179,11 +187,10 @@ const fixture = {
       ? {
           headRegions: {
             algorithm: HEAD_ASSOCIATION_ALGORITHM,
-            associationPolicy: `C-BIoU assigns stable team-player tracks before one-to-one top-center head matching; confidence >= 0.7 starts a head track, confidence >= 0.5 continues it, and internal gaps of at most ${HEAD_MAX_GAP_FRAMES} frames are filled`,
+            associationPolicy: `C-BIoU assigns stable team-player tracks before global one-to-one head matching; exact repeated masks retain their prior owner, implausible relative position/scale jumps are rejected, confidence >= 0.7 starts a head track, confidence >= 0.5 continues it, and internal gaps of at most ${HEAD_MAX_GAP_FRAMES} frames are filled`,
             cropPolicy:
-              "6px mask-bounds padding with 0.45 exponential crop smoothing; every crop remains a superset of its exact mask bounds",
-            derivedFrom:
-              "direct SAM3 `head` masks associated with offline C-BIoU team-player tracks; observed mask pixels remain unchanged and short gaps translate the nearest exact mask with tracked player motion",
+              "6px mask-bounds padding with bidirectional exponential smoothing and a seven-frame local size envelope; every crop remains a superset of its stabilized mask bounds",
+            derivedFrom: `direct SAM3 \`head\` masks associated with offline C-BIoU team-player tracks; masks are normalized to ${HEAD_MASK_NORMALIZATION_SIZE}x${HEAD_MASK_NORMALIZATION_SIZE}, stabilized by a ${HEAD_MASK_SMOOTHING_RADIUS * 2 + 1}-frame weighted temporal majority and one-cell morphological close, then projected into the current frame's SAM3 bounds so media pixels remain spatially aligned; short gaps translate the nearest observation with tracked player motion`,
             continuedLowConfidenceHeadCount:
               stabilizedHeads.summary.continuedLowConfidenceHeadCount,
             gapFilledHeadCount: stabilizedHeads.summary.gapFilledHeadCount,
@@ -196,6 +203,8 @@ const fixture = {
             prompt: "head",
             sourceId: HEAD_SOURCE_ID,
             stableTrackCount: stabilizedHeads.summary.trackCount,
+            temporallyStabilizedMaskCount:
+              stabilizedHeads.summary.temporallyStabilizedMaskCount,
             unmatchedHeadCount: stabilizedHeads.summary.unmatchedHeadCount,
             unmatchedPlayerCount: stabilizedHeads.summary.unmatchedPlayerCount,
           },
@@ -407,6 +416,297 @@ function translateHeadMaskToPlayer({ sourceHead, sourcePlayer, targetPlayer }) {
       y: top + (bottom - top + 1) / 2,
     },
   };
+}
+
+function stabilizeAuthoredHeadMasks(stabilizedHeads) {
+  const observationsByTrack = new Map();
+
+  for (const [frameIndex, detections] of stabilizedHeads.detectionsByFrame) {
+    for (const detection of detections) {
+      if (!detection.mask || !detection.metadata?.rawMaskRect) continue;
+      const observations = observationsByTrack.get(detection.id) ?? [];
+      observations.push({ detection, frameIndex });
+      observationsByTrack.set(detection.id, observations);
+    }
+  }
+
+  let stabilizedMaskCount = 0;
+
+  for (const observations of observationsByTrack.values()) {
+    observations.sort((left, right) => left.frameIndex - right.frameIndex);
+    for (const segment of splitContiguousObservations(
+      observations,
+      HEAD_MAX_GAP_FRAMES + 1,
+    )) {
+      const normalizedMasks = segment.map(({ detection }) =>
+        normalizeMaskToGrid(
+          detection.mask,
+          detection.metadata.rawMaskRect,
+          HEAD_MASK_NORMALIZATION_SIZE,
+        ),
+      );
+      const projectedBounds = new Map();
+
+      for (let index = 0; index < segment.length; index += 1) {
+        const { detection, frameIndex } = segment[index];
+        const normalizedMask = closeBinaryGrid(
+          temporalMajorityMask(
+            normalizedMasks,
+            segment.map((observation) => observation.frameIndex),
+            index,
+            HEAD_MASK_SMOOTHING_RADIUS,
+          ),
+          HEAD_MASK_NORMALIZATION_SIZE,
+        );
+        const projected = projectGridMask(
+          normalizedMask,
+          HEAD_MASK_NORMALIZATION_SIZE,
+          detection.metadata.rawMaskRect,
+          detection.mask.width,
+          detection.mask.height,
+        );
+
+        if (!projected) continue;
+        detection.mask = projected.mask;
+        detection.metadata = {
+          ...detection.metadata,
+          maskStabilization: HEAD_ASSOCIATION_ALGORITHM,
+          rawSam3MaskRect: detection.metadata.rawMaskRect,
+          rawMaskRect: projected.bounds,
+        };
+        projectedBounds.set(frameIndex, projected.bounds);
+        stabilizedMaskCount += 1;
+      }
+
+      const stabilizedCrops = createTemporallyStabilizedRects(
+        [...projectedBounds].map(([frameIndex, rect]) => ({
+          frameIndex,
+          rect,
+        })),
+        {
+          maxGapFrames: HEAD_MAX_GAP_FRAMES,
+        },
+      );
+
+      for (const { detection, frameIndex } of segment) {
+        const rect = stabilizedCrops.get(frameIndex);
+        if (rect) detection.rect = rect;
+      }
+    }
+  }
+
+  stabilizedHeads.summary.temporallyStabilizedMaskCount = stabilizedMaskCount;
+}
+
+function splitContiguousObservations(observations, maximumGap) {
+  const segments = [];
+  let segment = [];
+
+  for (const observation of observations) {
+    const previous = segment.at(-1);
+    if (previous && observation.frameIndex - previous.frameIndex > maximumGap) {
+      segments.push(segment);
+      segment = [];
+    }
+    segment.push(observation);
+  }
+  if (segment.length > 0) segments.push(segment);
+  return segments;
+}
+
+function normalizeMaskToGrid(mask, rect, size) {
+  const counts = decodeCompressedRleCounts(mask.counts);
+  const runEnds = [];
+  let offset = 0;
+  for (const count of counts) {
+    offset += count;
+    runEnds.push(offset);
+  }
+  const result = new Uint8Array(size * size);
+  const left = rect.x - rect.width / 2;
+  const top = rect.y - rect.height / 2;
+
+  for (let gridY = 0; gridY < size; gridY += 1) {
+    const y = clampInteger(
+      Math.floor(top + ((gridY + 0.5) * rect.height) / size),
+      0,
+      mask.height - 1,
+    );
+    for (let gridX = 0; gridX < size; gridX += 1) {
+      const x = clampInteger(
+        Math.floor(left + ((gridX + 0.5) * rect.width) / size),
+        0,
+        mask.width - 1,
+      );
+      const runIndex = findRunIndex(runEnds, x * mask.height + y);
+      result[gridY * size + gridX] = runIndex % 2;
+    }
+  }
+
+  return result;
+}
+
+function temporalMajorityMask(masks, frameIndexes, index, radius) {
+  const result = new Uint8Array(masks[index].length);
+  const currentFrameIndex = frameIndexes[index];
+  const neighbors = masks.flatMap((mask, candidateIndex) => {
+    const distance = Math.abs(frameIndexes[candidateIndex] - currentFrameIndex);
+    return distance <= radius ? [{ mask, weight: radius + 1 - distance }] : [];
+  });
+  const totalWeight = neighbors.reduce(
+    (total, neighbor) => total + neighbor.weight,
+    0,
+  );
+
+  for (let pixelIndex = 0; pixelIndex < result.length; pixelIndex += 1) {
+    let activeWeight = 0;
+    for (const neighbor of neighbors) {
+      activeWeight += neighbor.mask[pixelIndex] * neighbor.weight;
+    }
+    result[pixelIndex] = activeWeight * 2 >= totalWeight ? 1 : 0;
+  }
+  return result;
+}
+
+function closeBinaryGrid(mask, size) {
+  const dilated = new Uint8Array(mask.length);
+  const closed = new Uint8Array(mask.length);
+
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      let active = 0;
+      for (let offsetY = -1; offsetY <= 1 && !active; offsetY += 1) {
+        for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
+          const sourceX = x + offsetX;
+          const sourceY = y + offsetY;
+          if (
+            sourceX >= 0 &&
+            sourceX < size &&
+            sourceY >= 0 &&
+            sourceY < size &&
+            mask[sourceY * size + sourceX]
+          ) {
+            active = 1;
+            break;
+          }
+        }
+      }
+      dilated[y * size + x] = active;
+    }
+  }
+
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      let active = 1;
+      for (let offsetY = -1; offsetY <= 1 && active; offsetY += 1) {
+        for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
+          const sourceX = x + offsetX;
+          const sourceY = y + offsetY;
+          if (
+            sourceX < 0 ||
+            sourceX >= size ||
+            sourceY < 0 ||
+            sourceY >= size ||
+            !dilated[sourceY * size + sourceX]
+          ) {
+            active = 0;
+            break;
+          }
+        }
+      }
+      closed[y * size + x] = active;
+    }
+  }
+
+  return closed;
+}
+
+function projectGridMask(grid, size, rect, width, height) {
+  const left = Math.max(0, Math.floor(rect.x - rect.width / 2));
+  const right = Math.min(width - 1, Math.ceil(rect.x + rect.width / 2) - 1);
+  const top = Math.max(0, Math.floor(rect.y - rect.height / 2));
+  const bottom = Math.min(height - 1, Math.ceil(rect.y + rect.height / 2) - 1);
+  const runs = [];
+  let runValue = 0;
+  let runLength = 0;
+  let boundsLeft = width;
+  let boundsRight = -1;
+  let boundsTop = height;
+  let boundsBottom = -1;
+
+  const append = (value, length) => {
+    if (length <= 0) return;
+    if (value === runValue) {
+      runLength += length;
+      return;
+    }
+    runs.push(runLength);
+    runValue = value;
+    runLength = length;
+  };
+
+  append(0, left * height);
+  for (let x = left; x <= right; x += 1) {
+    append(0, top);
+    for (let y = top; y <= bottom; y += 1) {
+      const gridX = clampInteger(
+        Math.floor(((x + 0.5 - (rect.x - rect.width / 2)) / rect.width) * size),
+        0,
+        size - 1,
+      );
+      const gridY = clampInteger(
+        Math.floor(
+          ((y + 0.5 - (rect.y - rect.height / 2)) / rect.height) * size,
+        ),
+        0,
+        size - 1,
+      );
+      const value = grid[gridY * size + gridX];
+      append(value, 1);
+      if (value) {
+        boundsLeft = Math.min(boundsLeft, x);
+        boundsRight = Math.max(boundsRight, x);
+        boundsTop = Math.min(boundsTop, y);
+        boundsBottom = Math.max(boundsBottom, y);
+      }
+    }
+    append(0, height - bottom - 1);
+  }
+  append(0, (width - right - 1) * height);
+  runs.push(runLength);
+
+  if (boundsRight < boundsLeft || boundsBottom < boundsTop) return undefined;
+  const bounds = {
+    height: boundsBottom - boundsTop + 1,
+    width: boundsRight - boundsLeft + 1,
+    x: boundsLeft + (boundsRight - boundsLeft + 1) / 2,
+    y: boundsTop + (boundsBottom - boundsTop + 1) / 2,
+  };
+
+  return {
+    bounds,
+    mask: {
+      counts: encodeCompressedRleCounts(runs),
+      encoding: "compressedRle",
+      height,
+      width,
+    },
+  };
+}
+
+function findRunIndex(runEnds, flatIndex) {
+  let low = 0;
+  let high = runEnds.length - 1;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (flatIndex < runEnds[middle]) high = middle;
+    else low = middle + 1;
+  }
+  return low;
+}
+
+function clampInteger(value, minimum, maximum) {
+  return Math.min(maximum, Math.max(minimum, value));
 }
 
 function attachBasketballCenterTrace(

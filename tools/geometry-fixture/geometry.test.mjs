@@ -9,6 +9,7 @@ import {
   attachPoseKeypointsToDetections,
   convertOneBasedEdges,
   createContainedSmoothedRect,
+  createTemporallyStabilizedRects,
   normalizePoseDetection,
   selectMotionGatedDetection,
   simplifyPolygonPoints,
@@ -249,6 +250,87 @@ describe("associateHeadDetectionsToPlayers", () => {
     assert.equal(result.ignoredLowConfidenceHeadCount, 1);
     assert.equal(result.unmatchedHeadCount, 1);
   });
+
+  it("keeps an exact repeated mask with its previous player", () => {
+    const leftPlayer = {
+      className: "yellow team player",
+      id: "yellow:0",
+      rect: { height: 200, width: 80, x: 100, y: 180 },
+    };
+    const rightPlayer = {
+      className: "white team player",
+      id: "white:0",
+      rect: { height: 200, width: 80, x: 130, y: 180 },
+    };
+    const repeatedHead = {
+      className: "head",
+      confidence: 0.8,
+      id: "raw:repeated",
+      mask: { ...mask, counts: "stable-mask" },
+      rect: { height: 40, width: 30, x: 119, y: 95 },
+    };
+    const competingHead = {
+      ...repeatedHead,
+      id: "raw:competing",
+      mask: { ...mask, counts: "new-mask" },
+      rect: { ...repeatedHead.rect, x: 111 },
+    };
+
+    const result = associateHeadDetectionsToPlayers(
+      [repeatedHead, competingHead],
+      [leftPlayer, rightPlayer],
+      {
+        frameIndex: 11,
+        previousAssignments: new Map([
+          [
+            "yellow:0",
+            {
+              frameIndex: 10,
+              maskSignature: "x:stable-mask",
+              relativeCenter: { x: 0.2, y: 0.075 },
+              relativeHeight: 0.2,
+              relativeWidth: 0.375,
+            },
+          ],
+        ]),
+        targetClassNames: ["white team player", "yellow team player"],
+      },
+    );
+
+    assert.equal(
+      result.matches.find(({ player }) => player.id === "yellow:0")?.head.id,
+      "raw:repeated",
+    );
+  });
+
+  it("does not transfer a repeated mask to a different player", () => {
+    const repeatedHead = {
+      className: "head",
+      confidence: 0.8,
+      id: "raw:repeated",
+      mask: { ...mask, counts: "stable-mask" },
+      rect: { height: 40, width: 30, x: 130, y: 95 },
+    };
+    const result = associateHeadDetectionsToPlayers(
+      [repeatedHead],
+      [
+        {
+          className: "white team player",
+          id: "white:0",
+          rect: { height: 200, width: 80, x: 130, y: 180 },
+        },
+      ],
+      {
+        frameIndex: 11,
+        previousMaskOwners: new Map([
+          ["x:stable-mask", { frameIndex: 10, playerId: "yellow:0" }],
+        ]),
+        targetClassNames: ["white team player"],
+      },
+    );
+
+    assert.equal(result.matches.length, 0);
+  });
 });
 
 describe("stabilizeHeadDetectionFrames", () => {
@@ -368,6 +450,43 @@ describe("stabilizeHeadDetectionFrames", () => {
     assert.ok(result.x + result.width / 2 >= maskRect.x + 21);
     assert.ok(result.y - result.height / 2 <= maskRect.y - 26);
     assert.ok(result.y + result.height / 2 >= maskRect.y + 26);
+  });
+});
+
+describe("createTemporallyStabilizedRects", () => {
+  it("anticipates local growth while containing every current mask", () => {
+    const observations = [
+      { frameIndex: 0, rect: { height: 20, width: 18, x: 100, y: 100 } },
+      { frameIndex: 1, rect: { height: 22, width: 20, x: 102, y: 101 } },
+      { frameIndex: 2, rect: { height: 44, width: 40, x: 106, y: 103 } },
+      { frameIndex: 3, rect: { height: 22, width: 20, x: 108, y: 104 } },
+    ];
+    const stabilized = createTemporallyStabilizedRects(observations, {
+      padding: 0,
+      windowRadius: 2,
+    });
+
+    assert.equal(stabilized.get(1).width, 40);
+    for (const observation of observations) {
+      const crop = stabilized.get(observation.frameIndex);
+      assert.ok(crop);
+      assert.ok(
+        crop.x - crop.width / 2 <=
+          observation.rect.x - observation.rect.width / 2,
+      );
+      assert.ok(
+        crop.x + crop.width / 2 >=
+          observation.rect.x + observation.rect.width / 2,
+      );
+      assert.ok(
+        crop.y - crop.height / 2 <=
+          observation.rect.y - observation.rect.height / 2,
+      );
+      assert.ok(
+        crop.y + crop.height / 2 >=
+          observation.rect.y + observation.rect.height / 2,
+      );
+    }
   });
 });
 

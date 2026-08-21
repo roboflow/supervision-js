@@ -334,7 +334,8 @@ on one frozen segmentation identity. `basketball_regions` adds direct SAM3
 `head` masks associated one-to-one with frozen team-player detections by their
 top-center geometry. The authoring pass assigns stable player-backed identities,
 admits lower-confidence candidates only for established tracks, repairs short
-gaps, and pads/smooths crop rectangles without changing observed mask pixels.
+gaps, and temporally regularizes mask coverage and crop rectangles without any
+runtime tracking or model dependency.
 The Region renderer reuses the prepared exact mask as transparent media-crop
 coverage and has no runtime keypoint dependency.
 

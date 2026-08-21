@@ -22,10 +22,13 @@ export const DEFAULT_HEAD_MINIMUM_CONFIDENCE = 0.7;
 export const DEFAULT_HEAD_CONTINUATION_CONFIDENCE = 0.5;
 export const DEFAULT_HEAD_MAX_GAP_FRAMES = 3;
 export const DEFAULT_HEAD_CROP_PADDING_PIXELS = 6;
-export const DEFAULT_HEAD_CROP_SMOOTHING = 0.45;
+export const DEFAULT_HEAD_CROP_SMOOTHING = 0.35;
+export const DEFAULT_HEAD_CROP_WINDOW_RADIUS = 3;
 export const DEFAULT_HEAD_MAX_WIDTH_TO_PLAYER_RATIO = 0.7;
 export const DEFAULT_HEAD_MAX_HEIGHT_TO_PLAYER_RATIO = 0.42;
 export const DEFAULT_HEAD_MAX_CENTER_Y_TO_PLAYER_RATIO = 0.45;
+export const DEFAULT_HEAD_MAX_RELATIVE_CENTER_DELTA = 0.28;
+export const DEFAULT_HEAD_MAX_RELATIVE_SCALE_DELTA = Math.log(1.9);
 
 export const KEYPOINT_VISIBILITY_NOT_LABELED = 0;
 export const KEYPOINT_VISIBILITY_VISIBLE = 2;
@@ -161,7 +164,17 @@ export function associateHeadDetectionsToPlayers(
     options.maximumCenterYRatio ?? DEFAULT_HEAD_MAX_CENTER_Y_TO_PLAYER_RATIO;
   const targetClassNames = new Set(options.targetClassNames ?? []);
   const previousRelativeCenters = options.previousRelativeCenters ?? new Map();
-  const temporalWeight = options.temporalWeight ?? 0.75;
+  const previousAssignments = options.previousAssignments ?? new Map();
+  const previousMaskOwners = options.previousMaskOwners ?? new Map();
+  const currentFrameIndex = options.frameIndex;
+  const maximumTemporalGapFrames = options.maximumTemporalGapFrames ?? 7;
+  const maximumRelativeCenterDelta =
+    options.maximumRelativeCenterDelta ??
+    DEFAULT_HEAD_MAX_RELATIVE_CENTER_DELTA;
+  const maximumRelativeScaleDelta =
+    options.maximumRelativeScaleDelta ?? DEFAULT_HEAD_MAX_RELATIVE_SCALE_DELTA;
+  const temporalWeight = options.temporalWeight ?? 2;
+  const scaleWeight = options.scaleWeight ?? 0.25;
   const eligiblePlayers = playerDetections.filter(
     (player) =>
       player.rect &&
@@ -193,22 +206,75 @@ export function associateHeadDetectionsToPlayers(
 
       const normalizedX = (head.rect.x - player.rect.x) / player.rect.width;
       const normalizedY = (head.rect.y - playerTop) / player.rect.height;
-      const previousRelativeCenter = previousRelativeCenters.get(player.id);
+      const previousAssignment = previousAssignments.get(player.id);
+      const previousAssignmentIsCurrent =
+        previousAssignment &&
+        (currentFrameIndex === undefined ||
+          previousAssignment.frameIndex === undefined ||
+          currentFrameIndex - previousAssignment.frameIndex <=
+            maximumTemporalGapFrames);
+      const previousRelativeCenter = previousAssignmentIsCurrent
+        ? previousAssignment.relativeCenter
+        : previousRelativeCenters.get(player.id);
       const temporalDistance = previousRelativeCenter
         ? Math.hypot(
             normalizedX - previousRelativeCenter.x,
             normalizedY - previousRelativeCenter.y,
           )
         : 0;
+      const relativeWidth = head.rect.width / player.rect.width;
+      const relativeHeight = head.rect.height / player.rect.height;
+      const previousRelativeWidth = previousAssignmentIsCurrent
+        ? previousAssignment.relativeWidth
+        : undefined;
+      const previousRelativeHeight = previousAssignmentIsCurrent
+        ? previousAssignment.relativeHeight
+        : undefined;
+      const relativeScaleDistance =
+        previousRelativeWidth && previousRelativeHeight
+          ? Math.max(
+              Math.abs(Math.log(relativeWidth / previousRelativeWidth)),
+              Math.abs(Math.log(relativeHeight / previousRelativeHeight)),
+            )
+          : 0;
+      const sameMaskAsPrevious =
+        previousAssignmentIsCurrent &&
+        maskSignature(head) === previousAssignment.maskSignature;
+      const previousMaskOwner = previousMaskOwners.get(maskSignature(head));
+
+      if (
+        previousMaskOwner &&
+        previousMaskOwner.playerId !== player.id &&
+        (currentFrameIndex === undefined ||
+          previousMaskOwner.frameIndex === undefined ||
+          currentFrameIndex - previousMaskOwner.frameIndex <=
+            maximumTemporalGapFrames)
+      ) {
+        continue;
+      }
+
+      if (
+        previousAssignmentIsCurrent &&
+        !sameMaskAsPrevious &&
+        (temporalDistance > maximumRelativeCenterDelta ||
+          relativeScaleDistance > maximumRelativeScaleDelta)
+      ) {
+        continue;
+      }
+
       candidates.push({
         head,
         headIndex,
         player,
         playerIndex,
         relativeCenter: { x: normalizedX, y: normalizedY },
+        relativeHeight,
+        relativeWidth,
+        sameMaskAsPrevious,
         score:
           Math.hypot(normalizedX, normalizedY) +
-          temporalDistance * temporalWeight,
+          temporalDistance * temporalWeight +
+          relativeScaleDistance * scaleWeight,
       });
     }
   }
@@ -221,27 +287,19 @@ export function associateHeadDetectionsToPlayers(
       left.playerIndex - right.playerIndex,
   );
 
-  const matchedHeadIndexes = new Set();
-  const matchedPlayerIndexes = new Set();
-  const matches = [];
-
-  for (const candidate of candidates) {
-    if (
-      matchedHeadIndexes.has(candidate.headIndex) ||
-      matchedPlayerIndexes.has(candidate.playerIndex)
-    ) {
-      continue;
-    }
-
-    matchedHeadIndexes.add(candidate.headIndex);
-    matchedPlayerIndexes.add(candidate.playerIndex);
-    matches.push({
-      head: candidate.head,
-      normalizedTopCenterDistance: round(candidate.score, 4),
-      player: candidate.player,
-      relativeCenter: candidate.relativeCenter,
-    });
-  }
+  const assignedCandidates = assignHeadCandidates(
+    candidates,
+    eligibleHeads.length,
+    eligiblePlayers.length,
+  );
+  const matches = assignedCandidates.map((candidate) => ({
+    head: candidate.head,
+    normalizedTopCenterDistance: round(candidate.score, 4),
+    player: candidate.player,
+    relativeCenter: candidate.relativeCenter,
+    relativeHeight: candidate.relativeHeight,
+    relativeWidth: candidate.relativeWidth,
+  }));
 
   return {
     ignoredLowConfidenceHeadCount: headDetections.length - eligibleHeads.length,
@@ -271,6 +329,8 @@ export function stabilizeHeadDetectionFrames(frames, options = {}) {
     options.associationAlgorithm ?? "sam3-head-temporal-player-v2";
   const targetClassNames = options.targetClassNames ?? [];
   const previousRelativeCenters = new Map();
+  const previousAssignments = new Map();
+  const previousMaskOwners = new Map();
   const associatedFrames = [];
   const associationSummary = {
     ignoredLowConfidenceHeadCount: 0,
@@ -283,7 +343,11 @@ export function stabilizeHeadDetectionFrames(frames, options = {}) {
       frame.headDetections,
       frame.playerDetections,
       {
+        frameIndex: frame.frameIndex,
         minimumConfidence: continuationConfidence,
+        maximumTemporalGapFrames: maxGapFrames,
+        previousAssignments,
+        previousMaskOwners,
         previousRelativeCenters,
         targetClassNames,
       },
@@ -292,6 +356,17 @@ export function stabilizeHeadDetectionFrames(frames, options = {}) {
     for (const match of association.matches) {
       if (match.player.id !== undefined) {
         previousRelativeCenters.set(match.player.id, match.relativeCenter);
+        previousAssignments.set(match.player.id, {
+          frameIndex: frame.frameIndex,
+          maskSignature: maskSignature(match.head),
+          relativeCenter: match.relativeCenter,
+          relativeHeight: match.relativeHeight,
+          relativeWidth: match.relativeWidth,
+        });
+        previousMaskOwners.set(maskSignature(match.head), {
+          frameIndex: frame.frameIndex,
+          playerId: match.player.id,
+        });
       }
     }
 
@@ -427,27 +502,29 @@ export function stabilizeHeadDetectionFrames(frames, options = {}) {
       }
     }
 
-    let previousCrop;
-    let previousFrameIndex;
-
-    for (const frameIndex of [...observations.keys()].sort(
+    const orderedFrameIndexes = [...observations.keys()].sort(
       (left, right) => left - right,
-    )) {
+    );
+    const stabilizedRects = createTemporallyStabilizedRects(
+      orderedFrameIndexes.map((frameIndex) => ({
+        frameIndex,
+        rect: observations.get(frameIndex).head.rect,
+      })),
+      {
+        maxGapFrames,
+        padding: cropPadding,
+        smoothing: cropSmoothing,
+      },
+    );
+
+    for (const frameIndex of orderedFrameIndexes) {
       const observation = observations.get(frameIndex);
 
       if (!observation.head.mask || !observation.head.rect) continue;
-      if (
-        previousFrameIndex === undefined ||
-        frameIndex - previousFrameIndex > maxGapFrames + 1
-      ) {
-        previousCrop = undefined;
-      }
 
       const rawMaskRect = observation.head.rect;
-      const rect = createContainedSmoothedRect(rawMaskRect, previousCrop, {
-        padding: cropPadding,
-        smoothing: cropSmoothing,
-      });
+      const rect = stabilizedRects.get(frameIndex);
+      if (!rect) continue;
       const detection = {
         ...observation.head,
         id: `head:${playerId}`,
@@ -467,8 +544,6 @@ export function stabilizeHeadDetectionFrames(frames, options = {}) {
       };
 
       detectionsByFrame.get(frameIndex).push(detection);
-      previousCrop = rect;
-      previousFrameIndex = frameIndex;
       observedHeadCount += observation.synthetic ? 0 : 1;
       continuedLowConfidenceHeadCount +=
         !observation.synthetic &&
@@ -492,6 +567,80 @@ export function stabilizeHeadDetectionFrames(frames, options = {}) {
       trackCount,
     },
   };
+}
+
+/**
+ * Creates acausal, locally stable crop rectangles while keeping every current
+ * semantic mask inside its crop. A local maximum anticipates a larger mask
+ * before it arrives and delays shrinking afterwards; forward/backward EMA
+ * prevents causal lag from becoming visible as crop breathing.
+ */
+export function createTemporallyStabilizedRects(observations, options = {}) {
+  const maxGapFrames = options.maxGapFrames ?? DEFAULT_HEAD_MAX_GAP_FRAMES;
+  const padding = options.padding ?? DEFAULT_HEAD_CROP_PADDING_PIXELS;
+  const smoothing = options.smoothing ?? DEFAULT_HEAD_CROP_SMOOTHING;
+  const windowRadius = options.windowRadius ?? DEFAULT_HEAD_CROP_WINDOW_RADIUS;
+  const result = new Map();
+  let segment = [];
+
+  const flushSegment = () => {
+    if (segment.length === 0) return;
+    const padded = segment.map(({ rect }) => ({
+      height: rect.height + padding * 2,
+      width: rect.width + padding * 2,
+      x: rect.x,
+      y: rect.y,
+    }));
+    const smoothed = bidirectionalSmoothRects(padded, smoothing);
+
+    for (let index = 0; index < segment.length; index += 1) {
+      const start = Math.max(0, index - windowRadius);
+      const end = Math.min(segment.length, index + windowRadius + 1);
+      const local = padded.slice(start, end);
+      const current = padded[index];
+      const width = Math.max(
+        smoothed[index].width,
+        ...local.map((rect) => rect.width),
+      );
+      const height = Math.max(
+        smoothed[index].height,
+        ...local.map((rect) => rect.height),
+      );
+      const x = clamp(
+        smoothed[index].x,
+        current.x + current.width / 2 - width / 2,
+        current.x - current.width / 2 + width / 2,
+      );
+      const y = clamp(
+        smoothed[index].y,
+        current.y + current.height / 2 - height / 2,
+        current.y - current.height / 2 + height / 2,
+      );
+
+      result.set(segment[index].frameIndex, {
+        height: round(height, 1),
+        width: round(width, 1),
+        x: round(x, 1),
+        y: round(y, 1),
+      });
+    }
+
+    segment = [];
+  };
+
+  for (const observation of observations) {
+    const previous = segment.at(-1);
+    if (
+      previous &&
+      observation.frameIndex - previous.frameIndex > maxGapFrames + 1
+    ) {
+      flushSegment();
+    }
+    segment.push(observation);
+  }
+  flushSegment();
+
+  return result;
 }
 
 export function createContainedSmoothedRect(rect, previous, options = {}) {
@@ -534,6 +683,205 @@ function boundsToCenterRect({ bottom, left, right, top }) {
 
 function lerp(from, to, amount) {
   return from + (to - from) * amount;
+}
+
+function assignHeadCandidates(candidates, headCount, playerCount) {
+  if (headCount === 0 || playerCount === 0 || candidates.length === 0) {
+    return [];
+  }
+
+  const selected = [];
+  const usedHeads = new Set();
+  const usedPlayers = new Set();
+
+  for (const candidate of candidates.filter(
+    ({ sameMaskAsPrevious }) => sameMaskAsPrevious,
+  )) {
+    if (
+      usedHeads.has(candidate.headIndex) ||
+      usedPlayers.has(candidate.playerIndex)
+    ) {
+      continue;
+    }
+    usedHeads.add(candidate.headIndex);
+    usedPlayers.add(candidate.playerIndex);
+    selected.push(candidate);
+  }
+
+  const remainingHeads = [...Array(headCount).keys()].filter(
+    (index) => !usedHeads.has(index),
+  );
+  const remainingPlayers = [...Array(playerCount).keys()].filter(
+    (index) => !usedPlayers.has(index),
+  );
+  if (remainingHeads.length === 0 || remainingPlayers.length === 0) {
+    return selected;
+  }
+
+  const candidateByPair = new Map(
+    candidates
+      .filter(
+        (candidate) =>
+          !usedHeads.has(candidate.headIndex) &&
+          !usedPlayers.has(candidate.playerIndex),
+      )
+      .map((candidate) => [
+        `${candidate.playerIndex}:${candidate.headIndex}`,
+        candidate,
+      ]),
+  );
+  const unmatchedCost = 1_000;
+  const invalidCost = 1_000_000;
+  const costs = remainingPlayers.map((playerIndex) => [
+    ...remainingHeads.map(
+      (headIndex) =>
+        candidateByPair.get(`${playerIndex}:${headIndex}`)?.score ??
+        invalidCost,
+    ),
+    ...remainingPlayers.map((_, dummyIndex) =>
+      dummyIndex === remainingPlayers.indexOf(playerIndex)
+        ? unmatchedCost
+        : invalidCost,
+    ),
+  ]);
+  const assignment = solveRectangularAssignment(costs);
+
+  for (let rowIndex = 0; rowIndex < assignment.length; rowIndex += 1) {
+    const columnIndex = assignment[rowIndex];
+    if (columnIndex < 0 || columnIndex >= remainingHeads.length) continue;
+    const candidate = candidateByPair.get(
+      `${remainingPlayers[rowIndex]}:${remainingHeads[columnIndex]}`,
+    );
+    if (candidate) selected.push(candidate);
+  }
+
+  return selected.sort(
+    (left, right) =>
+      left.playerIndex - right.playerIndex || left.headIndex - right.headIndex,
+  );
+}
+
+function solveRectangularAssignment(costs) {
+  const rowCount = costs.length;
+  const columnCount = costs[0]?.length ?? 0;
+  if (rowCount === 0) return [];
+  if (columnCount < rowCount) {
+    throw new Error("Assignment requires at least as many columns as rows.");
+  }
+
+  const rowPotential = new Array(rowCount + 1).fill(0);
+  const columnPotential = new Array(columnCount + 1).fill(0);
+  const matchedRowByColumn = new Array(columnCount + 1).fill(0);
+  const previousColumn = new Array(columnCount + 1).fill(0);
+
+  for (let row = 1; row <= rowCount; row += 1) {
+    matchedRowByColumn[0] = row;
+    let column = 0;
+    const minimum = new Array(columnCount + 1).fill(Infinity);
+    const used = new Array(columnCount + 1).fill(false);
+
+    do {
+      used[column] = true;
+      const currentRow = matchedRowByColumn[column];
+      let delta = Infinity;
+      let nextColumn = 0;
+
+      for (
+        let candidateColumn = 1;
+        candidateColumn <= columnCount;
+        candidateColumn += 1
+      ) {
+        if (used[candidateColumn]) continue;
+        const current =
+          costs[currentRow - 1][candidateColumn - 1] -
+          rowPotential[currentRow] -
+          columnPotential[candidateColumn];
+        if (current < minimum[candidateColumn]) {
+          minimum[candidateColumn] = current;
+          previousColumn[candidateColumn] = column;
+        }
+        if (minimum[candidateColumn] < delta) {
+          delta = minimum[candidateColumn];
+          nextColumn = candidateColumn;
+        }
+      }
+
+      for (
+        let candidateColumn = 0;
+        candidateColumn <= columnCount;
+        candidateColumn += 1
+      ) {
+        if (used[candidateColumn]) {
+          rowPotential[matchedRowByColumn[candidateColumn]] += delta;
+          columnPotential[candidateColumn] -= delta;
+        } else {
+          minimum[candidateColumn] -= delta;
+        }
+      }
+      column = nextColumn;
+    } while (matchedRowByColumn[column] !== 0);
+
+    do {
+      const nextColumn = previousColumn[column];
+      matchedRowByColumn[column] = matchedRowByColumn[nextColumn];
+      column = nextColumn;
+    } while (column !== 0);
+  }
+
+  const assignment = new Array(rowCount).fill(-1);
+  for (let column = 1; column <= columnCount; column += 1) {
+    const row = matchedRowByColumn[column];
+    if (row > 0) assignment[row - 1] = column - 1;
+  }
+  return assignment;
+}
+
+function bidirectionalSmoothRects(rects, amount) {
+  const forward = smoothRects(rects, amount);
+  const backward = smoothRects([...rects].reverse(), amount).reverse();
+  return rects.map((_, index) => ({
+    height: Math.exp(
+      (Math.log(forward[index].height) + Math.log(backward[index].height)) / 2,
+    ),
+    width: Math.exp(
+      (Math.log(forward[index].width) + Math.log(backward[index].width)) / 2,
+    ),
+    x: (forward[index].x + backward[index].x) / 2,
+    y: (forward[index].y + backward[index].y) / 2,
+  }));
+}
+
+function smoothRects(rects, amount) {
+  const result = [];
+  for (const rect of rects) {
+    const previous = result.at(-1);
+    result.push(
+      previous
+        ? {
+            height: Math.exp(
+              lerp(Math.log(previous.height), Math.log(rect.height), amount),
+            ),
+            width: Math.exp(
+              lerp(Math.log(previous.width), Math.log(rect.width), amount),
+            ),
+            x: lerp(previous.x, rect.x, amount),
+            y: lerp(previous.y, rect.y, amount),
+          }
+        : { ...rect },
+    );
+  }
+  return result;
+}
+
+function maskSignature(detection) {
+  const mask = detection?.mask;
+  return mask
+    ? `${mask.width ?? ""}x${mask.height ?? ""}:${mask.counts}`
+    : undefined;
+}
+
+function clamp(value, minimum, maximum) {
+  return Math.min(maximum, Math.max(minimum, value));
 }
 
 function interpolatePlayerDetection(previous, next, amount) {
