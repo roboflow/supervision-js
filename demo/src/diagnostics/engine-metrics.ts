@@ -176,7 +176,7 @@ export const engineMetricGroups: readonly MetricGroup[] = [
       {
         label: "Avg scrub",
         tooltip:
-          "Mean time from a drag landing to its crisp frame painting. The typical wait you feel while scrubbing.",
+          "Mean time from a cursor seek to its crisp frame painting. The wait between moving the playhead and seeing where it landed.",
         value: (snapshot) => formatMs(snapshot.scrub.avgMs),
         status: (snapshot) =>
           band(snapshot.scrub.avgMs < 120, snapshot.scrub.avgMs < 250),
@@ -210,6 +210,55 @@ export const engineMetricGroups: readonly MetricGroup[] = [
             snapshot.scrub.targetVsLandedMs < 120,
             snapshot.scrub.targetVsLandedMs < 250,
           ),
+      },
+      {
+        label: "Timed seeks",
+        tooltip:
+          "Cursor seeks that got timed, which is what Avg scrub averages. A scrub the next one overtook before it started, and a key-only seek, are never among them; a seek issued while playing is timed in its own group.",
+        value: (snapshot) => formatInt(snapshot.scrub.samples),
+      },
+    ],
+  },
+  {
+    title: "Seek while playing",
+    metrics: [
+      {
+        label: "Seeks",
+        tooltip:
+          "Seeks issued while playing. The engine serves them by re-anchoring the playback walk, so they never touch the cursor and no Scrub reading counts them.",
+        value: (snapshot) => formatInt(snapshot.playSeek.seeks),
+      },
+      {
+        label: "Avg wait",
+        tooltip:
+          "Mean time from a seek issued while playing to its crisp frame painting, the same wait Avg scrub reports for the other kind of seek. Only seeks that reached that frame while still playing are timed: a superseded one, or one you paused under, is counted above but never averaged here. Reads n/a until something has been timed.",
+        value: (snapshot) =>
+          snapshot.playSeek.samples === 0
+            ? NO_DATA
+            : formatMs(snapshot.playSeek.avgMs),
+        status: (snapshot) =>
+          snapshot.playSeek.samples === 0
+            ? "neutral"
+            : band(
+                snapshot.playSeek.avgMs < 120,
+                snapshot.playSeek.avgMs < 250,
+              ),
+      },
+      {
+        label: "Slowest wait",
+        tooltip:
+          "The longest of those waits. A seek into a region the decoder has never visited is where it shows up.",
+        value: (snapshot) =>
+          snapshot.playSeek.samples === 0
+            ? NO_DATA
+            : formatMs(snapshot.playSeek.maxMs),
+        status: (snapshot) =>
+          snapshot.playSeek.samples === 0
+            ? "neutral"
+            : band(
+                snapshot.playSeek.maxMs < 250,
+                snapshot.playSeek.maxMs < 400,
+              ),
       },
     ],
   },

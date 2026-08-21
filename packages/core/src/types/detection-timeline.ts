@@ -172,8 +172,11 @@ export interface DetectionFrameSource {
     endTime: number,
   ): Promise<readonly DetectionFrame[]>;
   /**
-   * Optional backpressure hook used by playback gates. Resolve when the source
-   * has enough data to answer `loadFrames` for the requested range.
+   * Optional coverage hook. Resolve when the source has enough data to answer
+   * `loadFrames` for the requested range.
+   *
+   * Playback never awaits it. A caller that wants to wait awaits it itself, and
+   * a composed source fans it out to the entries it composes.
    */
   waitForRange?(range: DetectionFrameSourceVersionRange): Promise<void>;
   /**
@@ -222,7 +225,7 @@ export interface CompositeDetectionFrameSourceEntry {
    */
   readonly sync?: DetectionFrameSelectionOptions;
   /**
-   * When false, playback gates skip this source's `waitForRange` hook.
+   * When false, the composed source's `waitForRange` skips this entry.
    */
   readonly requiredForPlayback?: boolean;
 }

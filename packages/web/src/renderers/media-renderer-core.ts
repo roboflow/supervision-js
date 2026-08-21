@@ -425,7 +425,7 @@ export async function createMediaRendererCore(
         mediaTime,
       );
       if (presentedSample) {
-        runtimeState.recordPresentationUpdate(presentedSample);
+        runtimeState.recordPresentationRefresh(presentedSample);
       }
     },
 
@@ -482,7 +482,7 @@ export async function createMediaRendererCore(
       );
 
       if (presentedSample) {
-        runtimeState.recordPresentationUpdate(presentedSample);
+        runtimeState.recordPresentationRefresh(presentedSample);
       }
     },
 

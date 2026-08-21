@@ -42,11 +42,18 @@ function createFakeFrame(): VideoFrame {
   return { close: vi.fn() } as unknown as VideoFrame;
 }
 
+const TICK_RATE = 30000;
+const FRAME_RATE = 30;
+
 function createPresentedFrame(mediaTimeMs: number): PresentedFrame {
+  const index = Math.round((mediaTimeMs / 1000) * FRAME_RATE);
+  const ticks = (index * TICK_RATE) / FRAME_RATE;
   return {
     frame: createFakeFrame(),
-    paintSeq: Math.round(mediaTimeMs / 33),
+    frameId: { index, ticks },
     mediaTimeMs,
+    mediaTimeS: ticks / TICK_RATE,
+    paintSeq: index,
     quality: "exact",
   };
 }

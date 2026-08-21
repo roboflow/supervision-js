@@ -6,6 +6,7 @@ import {
   type LiveReadouts,
 } from "../hooks/live-readouts";
 import type { TimelineRange } from "../session/demo-session-types";
+import { isPlaybackRateSustained } from "../session/playback-rate";
 import { DiagnosticLabel } from "./DiagnosticLabel";
 import {
   formatLiveCook,
@@ -23,6 +24,21 @@ import { Transport } from "./Transport";
 const STATE_TOOLTIP =
   "What the transport is doing, and while it plays, the rate the picture is really keeping against the rate you asked for. Amber means the source cannot decode that fast and the picture is running slower than the speed shown.";
 
+interface ControlBarProps {
+  readonly canUseRenderer: boolean;
+  readonly duration: number | null;
+  readonly onScrub: (time: number) => void;
+  readonly onSeek: (time: number) => void;
+  readonly onSetPlaybackRate: (rate: number) => void;
+  readonly onStepFrame: (direction: 1 | -1) => void;
+  readonly onTogglePlayback: () => void;
+  readonly playbackRate: number;
+  readonly playbackState: MediaRendererPlaybackState | null;
+  readonly presentedRate: number | null;
+  readonly processedRanges: readonly TimelineRange[];
+  readonly processingRanges: readonly TimelineRange[];
+}
+
 export const ControlBar = memo(function ControlBar({
   canUseRenderer,
   duration,
@@ -36,20 +52,9 @@ export const ControlBar = memo(function ControlBar({
   presentedRate,
   processedRanges,
   processingRanges,
-}: {
-  readonly canUseRenderer: boolean;
-  readonly duration: number | null;
-  readonly onScrub: (time: number) => void;
-  readonly onSeek: (time: number) => void;
-  readonly onSetPlaybackRate: (rate: number) => void;
-  readonly onStepFrame: (direction: 1 | -1) => void;
-  readonly onTogglePlayback: () => void;
-  readonly playbackRate: number;
-  readonly playbackState: MediaRendererPlaybackState | null;
-  readonly presentedRate: number | null;
-  readonly processedRanges: readonly TimelineRange[];
-  readonly processingRanges: readonly TimelineRange[];
-}) {
+}: ControlBarProps) {
+  countControlBarRender();
+
   const isBuffering = playbackState === MediaRendererPlaybackState.Buffering;
   const isPlaying = playbackState === MediaRendererPlaybackState.Playing;
   const atClipEnd = useLiveClipEnd(!isPlaying && !isBuffering);
@@ -136,7 +141,52 @@ export const ControlBar = memo(function ControlBar({
       </p>
     </section>
   );
-});
+}, areControlBarPropsEqual);
+
+/**
+ * `presentedRate` is a live measurement: a fresh float lands on the bar
+ * several times a second, and all it decides is whether the speed pill is
+ * marked unsustained and which tenth its tooltip quotes. Two rates that answer
+ * those the same way draw the same bar, and every other figure on it is
+ * written into its own text node by a live readout writer without a commit.
+ */
+export function areControlBarPropsEqual(
+  previous: ControlBarProps,
+  next: ControlBarProps,
+) {
+  const keys = Object.keys(next) as readonly (keyof ControlBarProps)[];
+
+  return (
+    keys.length === Object.keys(previous).length &&
+    keys.every(
+      (key) => key === "presentedRate" || Object.is(previous[key], next[key]),
+    ) &&
+    readSpeedShortfall(next.playbackRate, previous.presentedRate) ===
+      readSpeedShortfall(next.playbackRate, next.presentedRate)
+  );
+}
+
+/** The tenth the speed pill quotes while the picture cannot keep the commanded
+ *  rate, and null while it keeps it. */
+function readSpeedShortfall(
+  playbackRate: number,
+  presentedRate: number | null,
+) {
+  return presentedRate === null ||
+    isPlaybackRateSustained(playbackRate, presentedRate)
+    ? null
+    : presentedRate.toFixed(1);
+}
+
+function countControlBarRender() {
+  if (!import.meta.env.DEV) {
+    return;
+  }
+
+  const scope = globalThis as { __demoControlBarRenders?: number };
+
+  scope.__demoControlBarRenders = (scope.__demoControlBarRenders ?? 0) + 1;
+}
 
 /**
  * The play button turning into a replay button is a React commit, so it is

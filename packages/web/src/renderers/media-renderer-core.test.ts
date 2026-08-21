@@ -28,6 +28,10 @@ import type {
   MediaRendererScene,
   MediaRendererSceneOptions,
 } from "./media-renderer-scene";
+import type {
+  PresentedFrameChannel,
+  PresentedFrameChannelSignal,
+} from "./presented-frame-channel";
 
 describe("media renderer core", () => {
   it("captures the raw frame from the scene at its presented timestamp", async () => {
@@ -754,6 +758,111 @@ describe("media renderer core", () => {
 
     renderer.destroy();
   });
+
+  it("counts the frames a push producer presents", async () => {
+    resetMocks();
+
+    const producer = createPushProducer();
+    let sceneOptions: MediaRendererSceneOptions | undefined;
+    const renderer = await createMediaRendererCore(
+      {
+        autoPlay: false,
+        container: {} as HTMLElement,
+        source: producer.source,
+      } satisfies MediaRendererOptions,
+      {
+        createScene: vi.fn(async (options) => {
+          sceneOptions = options;
+          return createScene();
+        }),
+        openMediaSource: vi.fn(),
+      },
+    );
+
+    expect(renderer.getState().presentedFrames).toBe(0);
+
+    for (const mediaTime of [0, 0.04, 0.08]) {
+      sceneOptions?.onPresentationUpdate?.(createPresentedSample(mediaTime));
+      producer.setTimeMs(mediaTime * 1000);
+    }
+
+    expect(renderer.getState()).toMatchObject({
+      currentTime: 0.08,
+      presentedFrames: 3,
+    });
+
+    renderer.destroy();
+  });
+
+  it("counts a push producer's frame once when a detection load redraws it", async () => {
+    resetMocks();
+
+    const producer = createPushProducer();
+    let sceneOptions: MediaRendererSceneOptions | undefined;
+    const renderer = await createMediaRendererCore(
+      {
+        autoPlay: false,
+        container: {} as HTMLElement,
+        source: producer.source,
+      } satisfies MediaRendererOptions,
+      {
+        createScene: vi.fn(async (options) => {
+          sceneOptions = options;
+          return createScene();
+        }),
+        openMediaSource: vi.fn(),
+      },
+    );
+
+    sceneOptions?.onPresentationUpdate?.(createPresentedSample(0.04));
+    sceneOptions?.onPresentationUpdate?.({
+      ...createPresentedSample(0.04),
+      activeDetectionCount: 2,
+    });
+
+    expect(renderer.getState()).toMatchObject({
+      activeDetectionCount: 2,
+      presentedFrames: 1,
+    });
+
+    renderer.destroy();
+  });
+
+  it("counts no frame for a presentation change made between a producer's frames", async () => {
+    resetMocks();
+
+    const producer = createPushProducer();
+    let sceneOptions: MediaRendererSceneOptions | undefined;
+    const scene = createScene({
+      setPresentation: vi.fn((_presentation, mediaTime) =>
+        createPresentedSample(mediaTime),
+      ),
+    });
+    const renderer = await createMediaRendererCore(
+      {
+        autoPlay: false,
+        container: {} as HTMLElement,
+        source: producer.source,
+      } satisfies MediaRendererOptions,
+      {
+        createScene: vi.fn(async (options) => {
+          sceneOptions = options;
+          return scene;
+        }),
+        openMediaSource: vi.fn(),
+      },
+    );
+
+    sceneOptions?.onPresentationUpdate?.(createPresentedSample(0.04));
+    producer.setTimeMs(80);
+    renderer.setPresentation({ backgroundColor: 0x101010 });
+    await renderer.refresh();
+
+    expect(scene.setPresentation).toHaveBeenCalledTimes(2);
+    expect(renderer.getState().presentedFrames).toBe(1);
+
+    renderer.destroy();
+  });
 });
 
 function createScene(
@@ -825,5 +934,84 @@ function createSource(
 
   return {
     open: vi.fn(async () => source),
+  };
+}
+
+function createPresentedSample(mediaTime: number) {
+  return {
+    activeDetectionCount: 0,
+    activeDetectionFrameIndex: null,
+    activeDetectionFrameTime: null,
+    detectionBuffer: createIdleDetectionBufferState(),
+    mediaTime,
+  };
+}
+
+/**
+ * A media source that owns its own playhead: the renderer pulls no samples
+ * from it, and frames reach runtime state through the scene.
+ */
+function createPushProducer() {
+  const listeners = new Map<PresentedFrameChannelSignal, Set<() => void>>([
+    ["rate", new Set()],
+    ["seeking", new Set()],
+    ["state", new Set()],
+    ["time", new Set()],
+  ]);
+  let timeMs = 0;
+
+  const engine: PresentedFrameChannel = {
+    beginInteractiveSeek: vi.fn(),
+    commit: vi.fn(async () => undefined),
+    endInteractiveSeek: vi.fn(async () => undefined),
+    getDurationMs: () => 4000,
+    getPlaybackRate: () => 1,
+    getSeeking: () => false,
+    getStatus: () => "READY",
+    getTimeMs: () => timeMs,
+    onPresentedFrame: vi.fn(),
+    pause: vi.fn(),
+    play: vi.fn(async () => undefined),
+    scrub: vi.fn(),
+    setPlaybackRate: vi.fn(),
+    step: vi.fn(async () => undefined),
+    subscribe: (signal, listener) => {
+      listeners.get(signal)?.add(listener);
+      return () => listeners.get(signal)?.delete(listener);
+    },
+    togglePlayback: vi.fn(),
+  };
+  const source: DecodedMediaSource & {
+    readonly engine: PresentedFrameChannel;
+  } = {
+    engine,
+    input: { dispose: vi.fn() },
+    metadata: {
+      audioTrackCount: 0,
+      canRead: true,
+      duration: 4,
+      firstTimestamp: 0,
+      formatMimeType: null,
+      formatName: "video-engine",
+      mimeType: null,
+      primaryVideoHeight: 720,
+      primaryVideoWidth: 1280,
+      trackCount: 1,
+      videoTrackCount: 1,
+    },
+    sampleSink: {
+      getSample: vi.fn(async () => null),
+      samples: vi.fn(async function* () {}),
+    },
+  };
+
+  return {
+    setTimeMs(next: number) {
+      timeMs = next;
+      for (const listener of listeners.get("time") ?? []) {
+        listener();
+      }
+    },
+    source: { open: async () => source },
   };
 }

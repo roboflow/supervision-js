@@ -46,7 +46,13 @@ export interface MediaRendererRuntimeState {
   setPlaybackRate(playbackRate: number): void;
   setRendererBackend(rendererBackend: string | null): void;
   recordPresentedSample(sample: PresentedMediaSample): void;
+  /** What the scene put on screen on its own: a frame a push producer
+   *  announced, or a redraw of the frame already up. A media time other than
+   *  the one last counted counts a frame, so a redraw does not. */
   recordPresentationUpdate(sample: PresentedMediaSample): void;
+  /** A repaint the renderer asked the scene for. Takes the sample's playhead
+   *  and detections and counts no frame, whatever media time it carries. */
+  recordPresentationRefresh(sample: PresentedMediaSample): void;
   setReady(): void;
   setLoading(): void;
   setPlaying(): void;
@@ -73,7 +79,13 @@ export function createMediaRendererRuntimeState(
   let mediaHeight = 0;
   let mediaWidth = 0;
   let rendererBackend: string | null = null;
+  /**
+   * Media times presented, not paints: a presented sample carries no frame
+   * identity. A pulled sample counts on every presentation; a scene
+   * presentation counts only at a media time other than the one last counted.
+   */
   let presentedFrames = 0;
+  let presentedMediaTime: number | null = null;
   let activeDetectionFrameTime: number | null = null;
   let activeDetectionFrameIndex: number | null = null;
   let activeDetectionCount = 0;
@@ -139,6 +151,13 @@ export function createMediaRendererRuntimeState(
 
   const emitState = () => {
     options.onState?.(createStateSnapshot());
+  };
+
+  const adoptPresentedSample = (sample: PresentedMediaSample) => {
+    currentTime = sample.mediaTime;
+    activeDetectionFrameIndex = sample.activeDetectionFrameIndex;
+    activeDetectionFrameTime = sample.activeDetectionFrameTime;
+    activeDetectionCount = sample.activeDetectionCount;
   };
 
   return {
@@ -222,12 +241,10 @@ export function createMediaRendererRuntimeState(
     },
 
     recordPresentedSample(sample) {
-      currentTime = sample.mediaTime;
       currentFrameDuration = sample.duration ?? currentFrameDuration;
       presentedFrames += 1;
-      activeDetectionFrameIndex = sample.activeDetectionFrameIndex;
-      activeDetectionFrameTime = sample.activeDetectionFrameTime;
-      activeDetectionCount = sample.activeDetectionCount;
+      presentedMediaTime = sample.mediaTime;
+      adoptPresentedSample(sample);
       lastFrameRenderTimings = sample.renderTimings ?? null;
 
       options.onFrame?.(createFrameDiagnostics(sample));
@@ -235,10 +252,19 @@ export function createMediaRendererRuntimeState(
     },
 
     recordPresentationUpdate(sample) {
-      currentTime = sample.mediaTime;
-      activeDetectionFrameIndex = sample.activeDetectionFrameIndex;
-      activeDetectionFrameTime = sample.activeDetectionFrameTime;
-      activeDetectionCount = sample.activeDetectionCount;
+      if (sample.mediaTime !== presentedMediaTime) {
+        presentedFrames += 1;
+        presentedMediaTime = sample.mediaTime;
+      }
+
+      adoptPresentedSample(sample);
+      lastFrameRenderTimings = sample.renderTimings ?? lastFrameRenderTimings;
+
+      emitState();
+    },
+
+    recordPresentationRefresh(sample) {
+      adoptPresentedSample(sample);
       lastFrameRenderTimings = sample.renderTimings ?? lastFrameRenderTimings;
 
       emitState();
