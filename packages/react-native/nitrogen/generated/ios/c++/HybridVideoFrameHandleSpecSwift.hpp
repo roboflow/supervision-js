@@ -62,7 +62,7 @@ namespace margelo::nitro::supervision {
 
   public:
     // Properties
-    inline int64_t getPointer() noexcept override {
+    inline uint64_t getPointer() noexcept override {
       return _swiftPart.getPointer();
     }
     inline double getTimestampMs() noexcept override {

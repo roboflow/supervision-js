@@ -17,7 +17,8 @@
     },
     "android": {
       "edgeToEdgeEnabled": true,
-      "permissions": ["android.permission.CAMERA"]
+      "permissions": ["android.permission.CAMERA"],
+      "package": "com.joaomarcoscrs.supervisionjsreactnativeexample"
     },
     "plugins": [
       [
@@ -25,6 +26,9 @@
         {
           "ios": {
             "deploymentTarget": "17.0"
+          },
+          "android": {
+            "minSdkVersion": 26
           }
         }
       ]

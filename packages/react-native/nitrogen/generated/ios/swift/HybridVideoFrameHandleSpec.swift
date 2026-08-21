@@ -10,7 +10,7 @@ import NitroModules
 /// See ``HybridVideoFrameHandleSpec``
 public protocol HybridVideoFrameHandleSpec_protocol: HybridObject {
   // Properties
-  var pointer: Int64 { get }
+  var pointer: UInt64 { get }
   var timestampMs: Double { get }
   var width: Double { get }
   var height: Double { get }

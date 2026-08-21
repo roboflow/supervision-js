@@ -38,11 +38,26 @@ const NAMED_FONT_WEIGHTS: Readonly<Record<string, SkiaFontWeight>> = {
   thin: "100",
 };
 
+/**
+ * Family name Skia's system font manager resolves when a label names none.
+ *
+ * `matchFont()` defaults to `"System"`, which only exists on CoreText. Android
+ * returns a null typeface for it, and the resulting font makes `<Text>` reject
+ * the blob with "Invalid prop value for SkTextBlob received", so Android needs
+ * its own generic family instead.
+ */
+export function resolveReactNativeSkiaDefaultFontFamily(
+  platformOs: string,
+): string {
+  return platformOs === "android" ? "sans-serif" : "System";
+}
+
 /** Maps core's CSS-like text style to the native Skia font matcher contract. */
 export function resolveReactNativeSkiaLabelFontStyle(
   textStyle: LabelTextStyle | undefined,
+  platformOs: string,
 ): {
-  readonly fontFamily?: string;
+  readonly fontFamily: string;
   readonly fontSize: number;
   readonly fontWeight?: SkiaFontWeight;
 } {
@@ -50,7 +65,8 @@ export function resolveReactNativeSkiaLabelFontStyle(
   const fontWeight = resolveFontWeight(textStyle?.fontWeight);
 
   return {
-    ...(fontFamily ? { fontFamily } : {}),
+    fontFamily:
+      fontFamily || resolveReactNativeSkiaDefaultFontFamily(platformOs),
     fontSize: textStyle?.fontSize ?? 13,
     ...(fontWeight ? { fontWeight } : {}),
   };
