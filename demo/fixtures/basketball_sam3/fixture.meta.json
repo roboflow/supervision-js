@@ -10,14 +10,11 @@
   "presentation": {
     "boxesEnabled": false,
     "confidenceThreshold": 0.5,
-    "keypointsEnabled": false,
+    "keypointsEnabled": true,
+    "labelsEnabled": true,
+    "masksEnabled": true,
     "polygonsEnabled": false,
-    "polylinesEnabled": false
-  },
-  "presentationAvailability": {
-    "keypointsEnabled": false,
-    "polygonsEnabled": false,
-    "polylinesEnabled": false
+    "polylinesEnabled": true
   },
   "sampleName": "basketball_sam3",
   "schema": "supervision-js.demo.sam3-fixture-meta",

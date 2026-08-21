@@ -52,7 +52,7 @@ const manifests = fixturePaths.flatMap((fixturePath) => {
     ? [readJson<Record<string, unknown>>(manifestPath)]
     : [];
 });
-const geometryFixturePath = join(fixturesRoot, "basketball_geometry");
+const geometryFixturePath = join(fixturesRoot, "basketball_sam3");
 const geometryManifest = readJson<Record<string, unknown>>(
   join(geometryFixturePath, "detections.manifest.json"),
 );
@@ -85,10 +85,6 @@ describe("geometry showcase fixture", () => {
     ).toEqual([
       { displayName: "70s horse trail", sampleName: "horse_trail" },
       { displayName: "9s basketball sample", sampleName: "basketball_sam3" },
-      {
-        displayName: "Basketball with Keypoints",
-        sampleName: "basketball_geometry",
-      },
     ]);
   });
 
@@ -109,23 +105,7 @@ describe("geometry showcase fixture", () => {
     });
   });
 
-  it("defaults the basketball keypoint sample to keypoints and labels", () => {
-    const fixture = demoFixtures.find(
-      ({ sampleName }) => sampleName === "basketball_geometry",
-    );
-
-    expect(fixture?.presentationDefaults).toEqual({
-      boxesEnabled: false,
-      focusEnabled: false,
-      keypointsEnabled: true,
-      labelsEnabled: true,
-      masksEnabled: false,
-      polygonsEnabled: false,
-      polylinesEnabled: false,
-    });
-  });
-
-  it("throttles the dense basketball sample the way its siblings are throttled", () => {
+  it("opens the basketball sample on the kinds its detections carry", () => {
     const fixture = demoFixtures.find(
       ({ sampleName }) => sampleName === "basketball_sam3",
     );
@@ -133,15 +113,14 @@ describe("geometry showcase fixture", () => {
     expect(fixture?.presentationDefaults).toEqual({
       boxesEnabled: false,
       confidenceThreshold: 0.5,
-      keypointsEnabled: false,
+      keypointsEnabled: true,
+      labelsEnabled: true,
+      masksEnabled: true,
       polygonsEnabled: false,
-      polylinesEnabled: false,
+      polylinesEnabled: true,
     });
-    expect(fixture?.presentationAvailability).toEqual({
-      keypointsEnabled: false,
-      polygonsEnabled: false,
-      polylinesEnabled: false,
-    });
+    // Nothing is closed: the detections carry every kind the demo can draw.
+    expect(fixture?.presentationAvailability).toEqual({});
   });
 
   it("curates presentation defaults for every sample the picker offers", () => {
@@ -181,7 +160,9 @@ describe("geometry showcase fixture", () => {
     );
     expect(provenance.pose.minimumMatchIou).toBe(0.3);
     expect(provenance.pose.matchedPoseDetectionCount).toBeGreaterThan(0);
-    expect(provenance.pose.weightsSha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(provenance.pose.model).toBe("yolov8m-pose-640");
+    expect(provenance.pose.runtime).toBe("roboflow-serverless");
+    expect(provenance.pose.frameCount).toBe(geometryManifest.frameCount);
     expect(provenance.pose.visibilityPolicy).toContain("NotLabeled");
     expect(provenance.sources).toHaveLength(2);
     expect(JSON.stringify(provenance)).not.toMatch(/api[_-]?key/i);
