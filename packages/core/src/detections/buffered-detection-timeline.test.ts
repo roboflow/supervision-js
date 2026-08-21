@@ -9,6 +9,7 @@ import { createMemoryColdDetectionFrameStore } from "#detections/memory-cold-det
 import { createWritableDetectionFrameSource } from "#detections/writable-detection-frame-source";
 import {
   DetectionBufferStatus,
+  DetectionFrameRetentionMode,
   DetectionFrameSelectionMode,
 } from "#types/detection-timeline";
 import { DetectionMaskEncoding, type DetectionFrame } from "#types/detections";
@@ -867,6 +868,54 @@ describe("buffered detection timeline", () => {
     expect(timeline.selectFrame(149 / 30)?.frameIndex).toBe(149);
   });
 
+  it("keeps a live retention window patching instead of reloading", async () => {
+    const writableSource = createWritableDetectionFrameSource({
+      datasetId: "live-retention",
+      retention: {
+        mode: DetectionFrameRetentionMode.PersistWindow,
+        windowSeconds: 2,
+      },
+      store: createMemoryColdDetectionFrameStore(),
+    });
+    let loadedFrameRecords = 0;
+    const source = {
+      ...writableSource,
+      async loadFrames(startTime: number, endTime: number) {
+        const loadedFrames = await writableSource.loadFrames(
+          startTime,
+          endTime,
+        );
+
+        loadedFrameRecords += loadedFrames.length;
+        return loadedFrames;
+      },
+    };
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 1,
+      bufferBehindSeconds: 1,
+      source,
+    });
+
+    for (let frameIndex = 0; frameIndex < 150; frameIndex += 1) {
+      await writableSource.appendFrames([
+        {
+          detections: [{ id: `live-${frameIndex}` }],
+          endTime: (frameIndex + 1) / 30,
+          frameIndex,
+          mediaTime: frameIndex / 30,
+        },
+      ]);
+      await timeline.prepare(frameIndex / 30);
+    }
+
+    // Eviction is reported as its own bounded range, so the timeline keeps
+    // patching the two ranges that moved. A per-append window rewrite would
+    // have reloaded the retained window 150 times over.
+    expect(loadedFrameRecords).toBeLessThanOrEqual(300);
+    expect(timeline.selectFrame(149 / 30)?.frameIndex).toBe(149);
+    expect(writableSource.getSummary()).toMatchObject({ startTime: 3 });
+  });
+
   it("falls back to a full hot-window reload after replacement", async () => {
     const source = createWritableDetectionFrameSource({
       datasetId: "replace",
@@ -1078,19 +1127,24 @@ function createLoopingTimeline() {
 /** One frame per media second, so a window's coverage is countable. */
 function createCountingSecondFrameSource() {
   return {
-    loadFrames: vi.fn(async (startTime: number, endTime: number) => {
-      const loaded: DetectionFrame[] = [];
+    loadFrames: vi.fn(
+      async (
+        startTime: number,
+        endTime: number,
+      ): Promise<readonly DetectionFrame[]> => {
+        const loaded: DetectionFrame[] = [];
 
-      for (
-        let mediaTime = Math.max(0, Math.ceil(startTime));
-        mediaTime <= endTime;
-        mediaTime += 1
-      ) {
-        loaded.push({ detections: [], endTime: mediaTime + 1, mediaTime });
-      }
+        for (
+          let mediaTime = Math.max(0, Math.ceil(startTime));
+          mediaTime <= endTime;
+          mediaTime += 1
+        ) {
+          loaded.push({ detections: [], endTime: mediaTime + 1, mediaTime });
+        }
 
-      return loaded;
-    }),
+        return loaded;
+      },
+    ),
   };
 }
 

@@ -1,4 +1,7 @@
-import type { DetectionFrame } from "#types/detections";
+import type {
+  DetectionCoordinateSpace,
+  DetectionFrame,
+} from "#types/detections";
 
 export enum DetectionBufferStatus {
   Idle = "idle",
@@ -159,17 +162,34 @@ export interface DetectionBufferState {
   readonly errorMessage: string | null;
 }
 
+/**
+ * Optional context a renderer passes when it loads detection frames.
+ */
+export interface DetectionFrameLoadOptions {
+  /**
+   * Coordinate space the loaded frames will be presented in.
+   *
+   * Sources that flatten several child frames into one, such as a composite
+   * source, need this to project each child while its `coordinateSpace` is
+   * still attached to its own detections. Sources that return their frames
+   * unchanged can ignore it: the renderer projects whatever it receives.
+   */
+  readonly coordinateSpace?: DetectionCoordinateSpace;
+}
+
 export interface DetectionFrameSource {
   /**
    * Load semantic detection frames for the requested media-time range.
    *
    * Sources should return detection data, not renderer artifacts. Implementers
    * should prefer sorted frames and avoid mutating returned frames after handing
-   * them to the renderer.
+   * them to the renderer. `options` is additive context; ignoring it stays
+   * correct for any source that does not compose other sources.
    */
   loadFrames(
     startTime: number,
     endTime: number,
+    options?: DetectionFrameLoadOptions,
   ): Promise<readonly DetectionFrame[]>;
   /**
    * Optional coverage hook. Resolve when the source has enough data to answer
@@ -357,6 +377,21 @@ export interface ColdDetectionFrameStoreLoadOptions {
 }
 
 /**
+ * Prune options for bounded retention.
+ *
+ * Stores that implement `pruneFrames` drop everything ending before
+ * `startTime` in place, so a retention window costs work proportional to the
+ * evicted range instead of the complete history.
+ */
+export interface ColdDetectionFrameStorePruneOptions {
+  readonly datasetId: string;
+  /**
+   * Inclusive media-time floor to retain. Frames ending before it are removed.
+   */
+  readonly startTime: number;
+}
+
+/**
  * Cold semantic detection storage.
  *
  * Stores validated detection frames outside the active render path. Browser
@@ -373,8 +408,47 @@ export interface ColdDetectionFrameStore {
   loadFrames(
     options: ColdDetectionFrameStoreLoadOptions,
   ): Promise<readonly DetectionFrame[]>;
+  /**
+   * Optionally drop retained frames that end before `startTime`.
+   *
+   * Implementing this lets writable sources apply a retention window without
+   * reloading and rewriting the frames they keep. Stores that omit it fall
+   * back to a reload-and-replace rewrite.
+   */
+  pruneFrames?(
+    options: ColdDetectionFrameStorePruneOptions,
+  ): Promise<ColdDetectionFrameStoreWriteSummary>;
   clearDataset(datasetId: string): Promise<void>;
   destroy?(): void;
+}
+
+/**
+ * Live ingestion policy for `appendLiveFrame`.
+ *
+ * A live producer only knows that its newest result is current; it learns when
+ * that result stopped being current only when the next one arrives. The source
+ * therefore holds the newest frame open for `holdSeconds` and closes it at the
+ * next frame's `mediaTime` when that frame lands.
+ */
+export interface DetectionFrameLiveOptions {
+  /**
+   * How long the newest live frame stays active while no successor exists.
+   *
+   * Keep it long enough to cover a stalled producer and short enough that a
+   * stale overlay eventually disappears. Defaults to 60 seconds.
+   */
+  readonly holdSeconds?: number;
+}
+
+export interface WritableDetectionFrameSourceOptions {
+  readonly store: ColdDetectionFrameStore;
+  readonly datasetId: string;
+  readonly chunkDurationSeconds?: number;
+  readonly retention?: DetectionFrameRetentionOptions;
+  /**
+   * Live latest-frame semantics used by `appendLiveFrame`.
+   */
+  readonly live?: DetectionFrameLiveOptions;
 }
 
 /**
@@ -389,6 +463,25 @@ export interface WritableDetectionFrameSource extends DetectionFrameSource {
   appendFrames(
     frames: readonly DetectionFrame[],
   ): Promise<ColdDetectionFrameStoreWriteSummary>;
+  /**
+   * Optionally append the newest live frame with latest-frame semantics.
+   *
+   * Optional so existing implementations of this interface keep type-checking.
+   * `createWritableDetectionFrameSource` always provides it; see
+   * {@link LiveWritableDetectionFrameSource}.
+   */
+  appendLiveFrame?(
+    frame: DetectionFrame,
+  ): Promise<ColdDetectionFrameStoreWriteSummary>;
+  /**
+   * Optionally close the final frame's coverage at a known end of media.
+   *
+   * Optional for the same backward-compatibility reason as
+   * {@link WritableDetectionFrameSource.appendLiveFrame}.
+   */
+  finalizeCoverage?(
+    endTime: number,
+  ): Promise<ColdDetectionFrameStoreWriteSummary | null>;
   replaceFrames(
     frames: readonly DetectionFrame[],
   ): Promise<ColdDetectionFrameStoreWriteSummary>;
@@ -397,4 +490,40 @@ export interface WritableDetectionFrameSource extends DetectionFrameSource {
   getAvailableRanges(): readonly DetectionFrameSourceVersionRange[];
   getSummary(): ColdDetectionFrameStoreWriteSummary | null;
   getVersion(range?: DetectionFrameSourceVersionRange): number;
+}
+
+/**
+ * Writable detection source that also supports live ingestion.
+ *
+ * `createWritableDetectionFrameSource` returns this shape. Consumers that only
+ * implement the historical {@link WritableDetectionFrameSource} contract stay
+ * assignable to it, so live ingestion is an added capability rather than a
+ * required one.
+ */
+export interface LiveWritableDetectionFrameSource extends WritableDetectionFrameSource {
+  /**
+   * Append the newest live frame with latest-frame/hold-until-next semantics.
+   *
+   * The frame is written with an open-ended hold, and the previously held live
+   * frame is closed at this frame's `mediaTime`. At most two frames are
+   * written, so append cost does not grow with retained history. Writes are
+   * serialized internally and a frame older than the newest accepted live
+   * frame is dropped, so the newest causal result always wins.
+   */
+  appendLiveFrame(
+    frame: DetectionFrame,
+  ): Promise<ColdDetectionFrameStoreWriteSummary>;
+  /**
+   * Close the final frame's coverage at a known end of media.
+   *
+   * A container can declare a duration beyond the last decoded sample, and a
+   * live frame is deliberately held open past the data it describes. Finalizing
+   * sets the latest frame's exclusive end to `endTime`, extending or shortening
+   * it as needed, so coverage-gated playback neither stalls on a terminal
+   * sliver nor believes the source covers time past the end of media. It is
+   * idempotent and returns the current summary when there is nothing to change.
+   */
+  finalizeCoverage(
+    endTime: number,
+  ): Promise<ColdDetectionFrameStoreWriteSummary | null>;
 }
