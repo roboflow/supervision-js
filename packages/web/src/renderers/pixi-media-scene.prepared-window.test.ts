@@ -524,8 +524,12 @@ function createSceneOptions(
   return {
     annotationOverlayStyle: null,
     backgroundColor: undefined,
+    boxCornerStyle: undefined,
     boxStyle: undefined,
     canInteract: () => false,
+    ellipseStyle: undefined,
+    markerStyle: undefined,
+    maskHaloStyle: undefined,
     container: {
       appendChild: vi.fn(),
       clientHeight: 360,

@@ -5,7 +5,7 @@ import {
   buildMaskHaloPalette,
   createPixiMaskHaloRenderer,
 } from "#renderers/pixi-mask-halo";
-import type { PreparedPngIdMaskFrame } from "#render-preparation/mask-frame-artifact";
+import type { PreparedIdMaskFrame } from "#render-preparation/mask-frame-artifact";
 
 describe("mask halo palette", () => {
   it("premultiplies halo colors into per-id slots", () => {
@@ -110,7 +110,7 @@ function createHarness() {
     mediaHeight: 80,
     mediaWidth: 120,
   });
-  const frame = { height: 80, width: 120 } as PreparedPngIdMaskFrame;
+  const frame = { height: 80, width: 120 } as PreparedIdMaskFrame;
   const texture = { source: { style: {} } };
 
   return { blurFilters, frame, meshes, renderer, texture, uniformGroups };
