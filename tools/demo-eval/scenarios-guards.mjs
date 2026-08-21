@@ -39,15 +39,17 @@ const DRAG_MIN_SAMPLES = 30;
  * to 9ms. The wide end of each of those is the one pass in three this machine
  * disturbs; the baseline records the median of three, which drops it.
  *
- * Lag is the exception: across fourteen runs of the identical gesture its p95
- * came out 0.03s on eight of them and 0.12s, 1.67s, 2.80s, 3.42s and 7.32s on
- * the rest. Either the picture keeps up for most of the drag or it spends most
- * of it catching up, and no threshold inside a spread that wide means
- * anything. So the cliff clears every run measured and catches only a
- * catastrophe, and the baseline's median of three passes is what actually
- * watches this number. Closing the spread itself is open work: it is the
- * scrub-smoothness difference against the FrameSampler story. */
-const DRAG_LAG_P95_LIMIT_SECONDS = 10;
+ * Lag carries the tightest cliff here because it is the best measured number in
+ * the scenario: one session's five passes spread 0.04s, and twenty-one passes
+ * across four sessions ran 2.27s to 3.40s, the top of that reached only while
+ * other work had the browser. 5s clears the worst of them by 47%, so a clean
+ * re-run has room and a picture trailing half again as far fails.
+ *
+ * Nothing here says 2.3s is well: a drag covering 41 media seconds a wall
+ * second really does leave the picture more than two seconds behind the thumb,
+ * and the same drag repeated on a warm cache falls to zero. The gate holds that
+ * ground rather than defending it. */
+const DRAG_LAG_P95_LIMIT_SECONDS = 5;
 /* The longest the screen may hold one frame while the thumb keeps moving. The
  * p95 is the number that describes the gesture; the max exists so a genuine
  * freeze cannot hide behind a healthy p95. */
@@ -454,13 +456,44 @@ const INSTALL_DRAG_PROBE = `(() => {
       window.removeEventListener("pointermove", onMove, true);
       window.removeEventListener("pointerup", onUp, true);
       delete window.__dragProbe;
-      return { ...state, visibility: document.visibilityState };
+      return {
+        ...state,
+        visibility: document.visibilityState,
+        timeOrigin: performance.timeOrigin,
+      };
     },
   };
   return {
     left: box.x,
     width: box.width,
     y: Math.round(box.y + box.height / 2),
+  };
+})()`;
+
+/**
+ * The engine's own record of every frame it put on the canvas, taken from the
+ * worker-realm ring the gesture arms and frees around itself.
+ *
+ * The two realms stamp their events with two different `performance.now`
+ * origins, so the capture is placed on the wall clock they share: it says when
+ * it was assembled and how long it had been recording, and those two put its
+ * origin on that clock.
+ */
+const CAPTURE_PAINTS = `(async () => {
+  const tap = window.__demoEngineDiagnostics;
+  if (!tap) return null;
+  const trace = await tap.exportTrace();
+  tap.disarmTrace();
+  if (!trace) return null;
+  return {
+    originWallMs: trace.capturedAt - trace.durationMs,
+    paints: trace.events
+      .filter((event) => event.type === "paint")
+      .map((event) => ({
+        tMs: event.tMs,
+        mediaTimeMs: event.mediaTimeMs,
+        targetMs: event.targetMs,
+      })),
   };
 })()`;
 
@@ -511,10 +544,12 @@ async function measureDrag(session, info) {
       "the demo is not showing the timeline input; the control bar changed or never mounted",
     );
   }
+  await session.evaluate("window.__demoEngineDiagnostics?.armTrace(); 1");
 
   const fromX = geometry.left + geometry.width * DRAG_START_FRACTION;
   const toX = geometry.left + geometry.width * DRAG_END_FRACTION;
   let probe;
+  let capture;
   try {
     await dispatchMouse(session, "mousePressed", fromX, geometry.y);
     const startedAt = Date.now();
@@ -531,6 +566,7 @@ async function measureDrag(session, info) {
     probe = await session
       .readJson("window.__dragProbe?.stop() ?? null")
       .catch(() => null);
+    capture = await session.readJson(CAPTURE_PAINTS).catch(() => null);
   }
   if (probe === null) {
     throw new Invalid("the drag probe was torn down before the drag ended");
@@ -544,8 +580,16 @@ async function measureDrag(session, info) {
       "the synthesised pointer never reached the timeline; the input moved or is covered",
     );
   }
+  if (capture === null) {
+    throw new Invalid(
+      "the engine kept no record of what it painted, so how far the picture " +
+        "trailed the thumb cannot be measured; window.__demoEngineDiagnostics " +
+        "is absent or no video engine source is open",
+    );
+  }
 
   const summary = summariseDrag(probe, {
+    capture,
     frameRate: info.frameRate,
     startedPaused: before.playbackState !== "playing",
   });
@@ -573,17 +617,37 @@ async function measureDrag(session, info) {
 }
 
 /**
+ * Every frame the engine put on the canvas between the press and the release,
+ * each with how far behind the position it was serving that frame was.
+ *
+ * A paint carries both halves on the engine's own clock: the frame it drew, and
+ * where the transport had been told to be when it drew it. Their distance is
+ * the picture trailing the thumb, and it is a distance no main-thread reading
+ * can produce, because the main thread learns a scrub has landed only after the
+ * worker answers.
+ */
+function paintsDuringDrag(probe, capture) {
+  const toProbeClock = capture.originWallMs - probe.timeOrigin;
+  return capture.paints
+    .map((paint) => ({
+      at: paint.tMs + toProbeClock,
+      lagSeconds: Math.abs(paint.targetMs - paint.mediaTimeMs) / 1000,
+    }))
+    .filter((paint) => paint.at >= probe.downAt && paint.at <= probe.upAt);
+}
+
+/**
  * Turns one recorded drag into the four numbers the gesture is judged on: how
  * far the picture trailed the thumb, the longest it held a single frame, how
  * many frames reached the screen, and how long the release took to land.
  *
- * The position the thumb is at is read from the timeline input rather than
+ * Where the release was let go is read from the timeline input rather than
  * derived from the pointer's pixel: a range input maps its track through a
  * half-thumb inset at each end, so a pixel converted to a time by hand is
  * wrong by most of a second near the ends, which is where a drag spends its
  * fastest moments.
  */
-export function summariseDrag(probe, { frameRate, startedPaused }) {
+export function summariseDrag(probe, { capture, frameRate, startedPaused }) {
   const during = probe.samples.filter(
     (sample) =>
       sample.at >= probe.downAt &&
@@ -597,11 +661,21 @@ export function summariseDrag(probe, { frameRate, startedPaused }) {
     );
   }
 
-  const lags = during.map((sample) =>
-    Math.abs(sample.scrubValue - sample.currentTime),
-  );
   const dragSeconds = (probe.upAt - probe.downAt) / 1000;
   const framesPresented = during.at(-1).renderCount - during[0].renderCount;
+  /* A frozen screen legitimately paints nothing, and the hold and frame-rate
+   * gates are what fail on it. Frames the scene rendered against a capture
+   * holding none of them is the other thing entirely: the two clocks did not
+   * meet, and no lag read off them would mean anything. */
+  const painted = paintsDuringDrag(probe, capture);
+  if (painted.length === 0 && framesPresented > 0) {
+    throw new Invalid(
+      `the engine's capture holds no paint inside a drag the scene rendered ` +
+        `${framesPresented} frames across; the capture and the gesture do not ` +
+        `line up on the wall clock`,
+    );
+  }
+  const lags = painted.map((paint) => paint.lagSeconds);
 
   const holds = [];
   let lastChangeAt = during[0].at;
@@ -627,9 +701,10 @@ export function summariseDrag(probe, { frameRate, startedPaused }) {
     scrubbedFromSeconds: round(during[0].scrubValue, 3),
     samples: during.length,
     startedPaused,
-    lagMeanSeconds: round(mean(lags), 3),
-    lagP95Seconds: percentile(lags, 0.95),
-    lagMaxSeconds: round(Math.max(...lags), 3),
+    paintsMeasured: painted.length,
+    lagMeanSeconds: lags.length === 0 ? null : round(mean(lags), 3),
+    lagP95Seconds: lags.length === 0 ? null : percentile(lags, 0.95),
+    lagMaxSeconds: lags.length === 0 ? null : round(Math.max(...lags), 3),
     holdP95Ms: percentile(holds, 0.95),
     holdMaxMs: round(Math.max(...holds), 1),
     framesPresented,
@@ -652,10 +727,14 @@ export function summariseDrag(probe, { frameRate, startedPaused }) {
 
 export function judgeDrag(scenario) {
   const failures = [];
-  if (scenario.lagP95Seconds > DRAG_LAG_P95_LIMIT_SECONDS) {
+  if (
+    scenario.lagP95Seconds !== null &&
+    scenario.lagP95Seconds > DRAG_LAG_P95_LIMIT_SECONDS
+  ) {
     failures.push(
-      `drag: the picture sat ${scenario.lagP95Seconds}s behind the thumb at p95 ` +
-        `(limit ${DRAG_LAG_P95_LIMIT_SECONDS}s)`,
+      `drag: the frames that reached the canvas sat ${scenario.lagP95Seconds}s ` +
+        `behind the position they were serving at p95, over ${scenario.paintsMeasured} ` +
+        `paints (limit ${DRAG_LAG_P95_LIMIT_SECONDS}s)`,
     );
   }
   if (scenario.holdP95Ms > DRAG_HOLD_P95_LIMIT_MS) {
@@ -1353,8 +1432,11 @@ export function guardDetail(name, scenario, field) {
   if (name === "drag") {
     return [
       field(
-        "lag mean / p95 / max",
-        `${scenario.lagMeanSeconds} / ${scenario.lagP95Seconds} / ${scenario.lagMaxSeconds} s` +
+        "canvas lag mean / p95 / max",
+        (scenario.paintsMeasured === 0
+          ? "nothing painted"
+          : `${scenario.lagMeanSeconds} / ${scenario.lagP95Seconds} / ` +
+            `${scenario.lagMaxSeconds} s over ${scenario.paintsMeasured} paints`) +
           `  (limit ${scenario.limits.lagP95Seconds}s at p95)`,
       ),
       field(

@@ -204,6 +204,32 @@ describe("comparing against a baseline", () => {
   });
 });
 
+/* Both numbers are measured across 62 passes of one unchanged build: 2.899s is
+ * the top of the middle mode this gesture settles on, and 3.4s is the slow mode
+ * it reached on four of them. The floor has to sit between the two. */
+describe("the drag lag floor", () => {
+  const recorded = baselineOf({ "drag.lagP95Seconds": 2.266 });
+
+  it("swallows the widest drift an unchanged build produced", () => {
+    const { rows } = compareToBaseline(
+      { "drag.lagP95Seconds": 2.899 },
+      recorded,
+    );
+    expect(rowFor(rows, "drag.lagP95Seconds").verdict).toBe("steady");
+  });
+
+  it("reports the slow mode becoming the usual answer", () => {
+    const { rows, regressions } = compareToBaseline(
+      { "drag.lagP95Seconds": 3.4 },
+      recorded,
+    );
+    const row = rowFor(rows, "drag.lagP95Seconds");
+    expect(row.verdict).toBe("regressed");
+    expect(row.percent).toBe(50);
+    expect(regressions).toHaveLength(1);
+  });
+});
+
 describe("repeated measurements", () => {
   it("takes the median of an odd run and the midpoint of an even one", () => {
     expect(median([5, 1, 3])).toBe(3);

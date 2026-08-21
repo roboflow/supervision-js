@@ -16,6 +16,14 @@ const DROPPED_FRAME_MS = 34;
 const P95_FLOOR_MULTIPLE = 2;
 const P95_ABSOLUTE_SLACK_MS = 4;
 const DROPPED_FRAME_LIMIT = 0;
+const VIEW_MODE_SETTLE_MS = 15_000;
+const VIEW_MODE_POLL_MS = 100;
+
+const VIEW_MODE_LABELS = {
+  benchmarks: "Benchmarks",
+  debug: "Debug",
+  demo: "Demo",
+};
 
 const TOGGLE_LABELS = [
   "Boxes",
@@ -111,6 +119,52 @@ const setBorder = (value) => `(() => {
   return { found: true, disabled: false, value: Number(input.value) };
 })()`;
 
+const READ_STAGE = `(() => {
+  const shell = document.querySelector("main.demo-shell");
+  const mode = shell
+    ? [...shell.classList]
+        .filter((name) => name.startsWith("demo-shell--"))
+        .map((name) => name.slice("demo-shell--".length))[0] ?? null
+    : null;
+  const mount = document.querySelector(".renderer-viewport__mount");
+  const canvases = mount
+    ? [...mount.querySelectorAll("canvas")].map((canvas) => ({
+        width: canvas.width,
+        height: canvas.height,
+      }))
+    : [];
+  const renderer = window.__demoRenderer;
+  let rendererState = null;
+  let rendererError = renderer ? null : "window.__demoRenderer is not defined";
+  if (renderer) {
+    try {
+      const state = renderer.getState();
+      rendererState = {
+        playbackState: state.playbackState,
+        sourceStatus: state.source.status,
+      };
+    } catch (error) {
+      rendererError = String(error?.message ?? error);
+    }
+  }
+  return {
+    canvases,
+    hasMount: !!mount,
+    hasShell: !!shell,
+    mode,
+    rendererError,
+    rendererState,
+  };
+})()`;
+
+const clickViewMode = (label) => `(() => {
+  const button = [...document.querySelectorAll(".demo-shell__mode button")]
+    .find((node) => node.textContent.trim() === ${JSON.stringify(label)});
+  if (!button) return { found: false };
+  button.click();
+  return { found: true };
+})()`;
+
 const sampler = (seekSeconds) => `(async () => {
   const renderer = window.__demoRenderer;
   await renderer.seek(${seekSeconds});
@@ -145,6 +199,7 @@ const sampler = (seekSeconds) => `(async () => {
 
 export async function runLayers(session, info, attempts) {
   await session.send("Page.bringToFront");
+  const roundTrip = await checkViewModeRoundTrip(session);
   const baseline = await session.readJson(READ_CONTROLS);
   assertControls(baseline);
 
@@ -197,12 +252,16 @@ export async function runLayers(session, info, attempts) {
       rows.push(judged);
     }
 
-    const failures = rows.flatMap((row) =>
-      row.reasons.map((reason) => `layers: ${row.name} ${reason}`),
-    );
+    const failures = [
+      ...roundTrip.failures,
+      ...rows.flatMap((row) =>
+        row.reasons.map((reason) => `layers: ${row.name} ${reason}`),
+      ),
+    ];
 
     return {
       scenario: {
+        viewModeRoundTrip: roundTrip.observed,
         seekSeconds,
         settleMs: SETTLE_MS,
         sampleFrames: SAMPLE_FRAMES,
@@ -234,6 +293,143 @@ export async function runLayers(session, info, attempts) {
   } finally {
     await restore(session, baseline);
   }
+}
+
+/**
+ * Leaving the Demo view unmounts the viewport and returning mounts a different
+ * element, so a session still drawing into the first one keeps decoding into a
+ * canvas nobody can see. That failure reports nothing: no console error, no
+ * stalled clock, no stopped frame counter, just an empty stage. Every other
+ * scenario measures inside a single view, which is why the whole harness could
+ * be green while the demo showed nothing.
+ */
+async function checkViewModeRoundTrip(session) {
+  const opening = await session.readJson(READ_STAGE);
+
+  if (!opening.hasShell) {
+    throw new Invalid("the demo shell is not on the page");
+  }
+
+  const startingMode = opening.mode;
+
+  try {
+    if (startingMode !== "demo") {
+      await selectViewMode(session, "demo");
+    }
+
+    const before = await waitForStage(session);
+
+    if (!drawnCanvases(before).length || !before.rendererState) {
+      throw new Invalid(
+        "the Demo view had no drawn stage before the round trip, so leaving " +
+          "and returning proves nothing about it",
+      );
+    }
+
+    const away = await selectViewMode(session, "benchmarks");
+
+    if (away.hasMount) {
+      throw new Invalid(
+        "the Benchmarks view left the renderer viewport mounted, so this " +
+          "guard does not exercise a remount",
+      );
+    }
+
+    await selectViewMode(session, "demo");
+
+    const after = await waitForStage(session);
+    const failures = [];
+
+    if (after.canvases.length === 0) {
+      failures.push(
+        "layers: the viewport mount came back empty after a Benchmarks round " +
+          "trip; the stage is blank while the session draws into the element " +
+          "the previous mount left behind",
+      );
+    } else if (drawnCanvases(after).length === 0) {
+      failures.push(
+        `layers: the canvas came back sized ${describeCanvases(after)} after ` +
+          "a Benchmarks round trip, which draws nothing",
+      );
+    }
+
+    if (!after.rendererState) {
+      failures.push(
+        `layers: window.__demoRenderer stopped answering after a Benchmarks ` +
+          `round trip (${after.rendererError})`,
+      );
+    }
+
+    return {
+      failures,
+      observed: {
+        startingMode,
+        canvasesBefore: describeCanvases(before),
+        canvasesAfter: describeCanvases(after),
+        mountedWhileAway: away.hasMount,
+        playbackState: after.rendererState?.playbackState ?? null,
+        sourceStatus: after.rendererState?.sourceStatus ?? null,
+      },
+    };
+  } finally {
+    if (startingMode !== "demo") {
+      await selectViewMode(session, startingMode).catch(() => {});
+    }
+  }
+}
+
+async function selectViewMode(session, mode) {
+  const label = VIEW_MODE_LABELS[mode];
+
+  if (!label) {
+    throw new Invalid(`the demo has no ${mode} view to select`);
+  }
+
+  const clicked = await session.readJson(clickViewMode(label));
+
+  if (!clicked.found) {
+    throw new Invalid(`the demo is not showing a ${label} view button`);
+  }
+
+  const deadline = Date.now() + VIEW_MODE_SETTLE_MS;
+  let last = null;
+
+  while (Date.now() < deadline) {
+    last = await session.readJson(READ_STAGE);
+    if (last.mode === mode) return last;
+    await delay(VIEW_MODE_POLL_MS);
+  }
+
+  throw new Invalid(
+    `the demo stayed in the ${last?.mode} view after the ${label} button was clicked`,
+  );
+}
+
+/* The picture returns on a React commit, not on the click that asks for it. */
+async function waitForStage(session) {
+  const deadline = Date.now() + VIEW_MODE_SETTLE_MS;
+  let last = null;
+
+  while (Date.now() < deadline) {
+    last = await session.readJson(READ_STAGE);
+    if (drawnCanvases(last).length > 0 && last.rendererState) return last;
+    await delay(VIEW_MODE_POLL_MS);
+  }
+
+  return last;
+}
+
+function drawnCanvases(stage) {
+  return stage.canvases.filter(
+    (canvas) => canvas.width > 0 && canvas.height > 0,
+  );
+}
+
+function describeCanvases(stage) {
+  if (stage.canvases.length === 0) return "none";
+  return stage.canvases
+    .map((canvas) => `${canvas.width}x${canvas.height}`)
+    .join(", ");
 }
 
 function assertControls(baseline) {
@@ -426,8 +622,17 @@ async function waitForRenderer(session, timeoutMs = 60_000) {
 }
 
 export function layersDetail(scenario, field) {
-  const { budgets, floor } = scenario;
+  const { budgets, floor, viewModeRoundTrip } = scenario;
   const lines = [
+    ...(viewModeRoundTrip
+      ? [
+          field(
+            "view-mode round trip",
+            `Benchmarks and back: canvas ${viewModeRoundTrip.canvasesAfter}, ` +
+              `renderer ${viewModeRoundTrip.playbackState ?? "gone"}`,
+          ),
+        ]
+      : []),
     field(
       "config base",
       `every layer on except the ones a config names, ` +

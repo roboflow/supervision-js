@@ -230,6 +230,15 @@ function disturbance(session, navMark, patchMark, guardPatches) {
   return null;
 }
 
+/**
+ * Paint passes over the trace window, bucketed by the clip each one carries.
+ *
+ * A clip is the cull rect of the paint chunk it belongs to, not the region that
+ * was invalidated, so every paint into the root scrolling layer reports the
+ * whole viewport however small the damage was. The histogram is therefore a
+ * census of paint passes and the layers they went into, and it answers nothing
+ * about how far a repaint spread; `measurePaintDamage` is what answers that.
+ */
 function bucketPaints(events) {
   const buckets = new Map();
   let paintCount = 0;
@@ -269,11 +278,6 @@ function matchesBox(rect, box) {
 function findCanvasRect(rects, geometry) {
   const own = rects.find((rect) => matchesBox(rect, geometry.canvas));
   return own ? { ...own, source: "canvas-box" } : null;
-}
-
-/** Rects the size of the whole page. Nothing the player does earns one. */
-function findViewportRects(rects, geometry) {
-  return rects.filter((rect) => matchesBox(rect, geometry.viewport));
 }
 
 /**
@@ -317,6 +321,11 @@ const DAMAGE_SHOT_INTERVAL_MS = 900;
 /* The widest damage the transport legitimately produces is one timeline lane
  * fill; the flood this guards against covers a stage. */
 const DAMAGE_AREA_LIMIT_FRACTION = 0.01;
+/* A flash reaching this far across both axes is the page redrawing behind the
+ * picture rather than any one element of it. Measured: the canvas, the widest
+ * thing that legitimately flashes, covers 0.43 of the viewport across and 0.74
+ * down, and a root-background write flashes it whole at 1.0 by 1.0. */
+const VIEWPORT_FLASH_FRACTION = 0.9;
 
 const GREEN_COMPONENTS = `(async (dataUrl) => {
   const image = new Image();
@@ -368,6 +377,13 @@ const GREEN_COMPONENTS = `(async (dataUrl) => {
   return boxes;
 })`;
 
+function coversViewport(box, geometry) {
+  return (
+    box.width >= geometry.viewport.width * VIEWPORT_FLASH_FRACTION &&
+    box.height >= geometry.viewport.height * VIEWPORT_FLASH_FRACTION
+  );
+}
+
 function overlapsCanvas(box, canvas) {
   if (canvas === null) return false;
   return (
@@ -379,13 +395,23 @@ function overlapsCanvas(box, canvas) {
 }
 
 /**
- * Largest region the paint-rect overlay flashed away from the picture, while
- * playing.
+ * How far a repaint spread while playing: the largest region the paint-rect
+ * overlay flashed away from the picture, and how many times it flashed the
+ * viewport whole.
  *
  * A Paint event's `clip` is the cull rect of the paint chunk it belongs to, not
  * the region that was invalidated, so every paint in the root scrolling layer
  * reports the whole viewport however small the damage was. The overlay's rects
  * are the only reading that answers how far a repaint actually spread.
+ *
+ * The two readings are taken from different sides of the canvas because a
+ * repaint of everything necessarily covers the picture too, so the
+ * away-from-the-picture filter that makes the largest region meaningful is the
+ * same filter that would hide a page-wide flood completely.
+ *
+ * Three shots is a sample rather than a census: the overlay holds each rect for
+ * about a frame, so a flood that runs for a whole window is caught and a single
+ * stray repaint may not be.
  */
 async function measurePaintDamage(session, geometry) {
   await session.send("DOM.enable");
@@ -413,6 +439,8 @@ async function measurePaintDamage(session, geometry) {
   const largest = outside[0] ?? null;
   return {
     shots: DAMAGE_SHOT_COUNT,
+    viewportFlashes: boxes.filter((box) => coversViewport(box, geometry))
+      .length,
     largestOutsidePicture: largest
       ? {
           size: `${largest.width}x${largest.height}`,
@@ -490,7 +518,8 @@ export async function runPaints(session, info, attempts) {
   }
   if (domPaintRate >= domPaintRateLimit) {
     failures.push(
-      `paints: DOM paint rate ${domPaintRate}/s is not under ${domPaintRateLimit}/s`,
+      `paints: the main thread ran ${domPaintRate} paint passes a second ` +
+        `beside the picture, over the ${domPaintRateLimit}/s budget`,
     );
   }
   const styleRecalcRate = round(
@@ -508,9 +537,12 @@ export async function runPaints(session, info, attempts) {
       `paints: ${layoutRate} layouts/s while playing is not under ${LAYOUT_RATE_LIMIT}/s`,
     );
   }
-  if (phases.playing.viewportPaintCount > 0) {
+  const viewportPaintCount = phases.playing.damage.viewportFlashes;
+  if (viewportPaintCount > 0) {
     failures.push(
-      `paints: ${phases.playing.viewportPaintCount} full-viewport paints while playing, expected 0`,
+      `paints: the paint-rect overlay flashed the whole ` +
+        `${geometry.viewport.width}x${geometry.viewport.height} viewport on ` +
+        `${viewportPaintCount} of ${phases.playing.damage.shots} shots while playing`,
     );
   }
   const damageAreaLimit = Math.round(
@@ -535,6 +567,7 @@ export async function runPaints(session, info, attempts) {
       paused: phases.paused,
       playing: {
         ...phases.playing,
+        viewportPaintCount,
         domPaintCount,
         domPaintRate,
         domPaintRateLimit,
@@ -565,10 +598,6 @@ function buildPhase(events, before, after, geometry) {
       : null,
     canvasRectSource: canvasRect ? canvasRect.source : null,
     canvasPaintCount: canvasRect ? canvasRect.count : 0,
-    viewportPaintCount: findViewportRects(rects, geometry).reduce(
-      (total, rect) => total + rect.count,
-      0,
-    ),
     rects: rects.slice(0, 8).map((rect) => ({
       size: `${rect.width}x${rect.height}`,
       count: rect.count,

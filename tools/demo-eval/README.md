@@ -93,9 +93,24 @@ else on it, and a single disturbed pass reports regressions that are not
 there: one run taken while other work was going on came back with five
 regressed and twenty-five steady, and every one of the five was the machine.
 Three passes and a median drop that pass on the floor. Recording a baseline
-while a test suite ran beside it put the drag 3.4s behind the thumb and the
-throttled picture at 0.80 of the source rate, against 1.3s and 0.99 with
-nothing else running.
+while a test suite ran beside it put the throttled picture at 0.80 of the source
+rate against 0.99 with nothing else running; a second browser tab on the same
+demo puts the drag's canvas lag at 3.40s against 2.27s, and loses a release
+outright about one pass in five.
+
+Changing how a metric is measured retires its recorded number, and the file
+cannot tell: a stale entry compares this week's instrument against last week's
+and reports a percentage that means nothing. So the entry is replaced by hand,
+in the same commit, or removed outright when the metric is. `drag.lagP95Seconds`
+was replaced this way when it moved off `currentTime` and onto the engine's
+trace; its old value of 1.672s was a reading of a different quantity and is
+gone. The five passes recorded in its place spread by 0.035s, and three other
+sessions on the same build sat at 2.27s, 2.87s and 3.40s, so about 0.6s
+separates one session's mode from another's and its noise floor has to cover
+that and no more. The floors in `baseline.mjs` are the other half of a rebuilt
+metric: a floor is the spread of the instrument that produced it, and one left
+behind from a looser instrument absorbs every regression the tolerance was
+meant to catch.
 
 Recording is deliberate and never automatic. `--update-baseline` refuses while
 any scenario is failing or invalid, because freezing a broken number as the new
@@ -116,15 +131,33 @@ block.
 
 ## What each scenario proves
 
-**paints** traces six paused seconds and six playing seconds and buckets every
-`Paint` by clip rect. A paused demo should paint exactly nothing: a paused page
-that still paints is doing per-frame DOM work with no frame to show for it.
-While playing, the canvas presents through one rect class (its own box, or the
-viewport-sized layer rect when the canvas backs most of the page); every other
-paint is DOM work sitting on top of playback, and its rate has to stay under
-three times the rate frames are presented. The report also carries `Layout` and
-`Commit` counts and the scene render delta so a paint regression can be traced
-to the layer that caused it.
+**paints** traces six paused seconds and six playing seconds, and photographs
+the page with Chrome's paint-rect overlay on. A paused demo should paint exactly
+nothing: a paused page that still paints is doing per-frame DOM work with no
+frame to show for it. Playing, it asserts two separate things, and keeping them
+separate is the point:
+
+- **How often** the main thread paints, from the trace. A canvas presenting
+  video paints once per presented frame; every paint beyond that is DOM work
+  sitting on top of playback, and the budget is 15 passes a second.
+- **How far** a repaint spreads, from the overlay. The transport's widest honest
+  damage is one timeline lane, so the budget away from the picture is 1% of the
+  viewport, and a flash covering nine tenths of the viewport in both directions
+  fails outright however small its rate.
+
+The report also carries `Layout` and `Commit` counts and the scene render delta
+so a paint regression can be traced to the layer that caused it.
+
+The rect histogram beside them answers neither question, and reading it as
+damage is a trap this harness fell into once. A `Paint` event's `clip` is the
+cull rect of the paint chunk it belongs to, so every paint into the root
+scrolling layer carries the full viewport whatever it actually invalidated: a
+`1500x1150` row means the main thread ran that many paint passes, not that it
+redrew the page that many times. In the run that made the point, the histogram
+showed 64 viewport-sized rects while the overlay in the same window measured the
+widest repaint at `156x11`, 1716px² against a 17250px² budget. The overlay is
+the instrument; the histogram is a census of paint passes and the layers they
+went into.
 
 **sync** pauses, seeks to five spread positions, and waits for a detection
 frame that is genuinely new rather than the previous window's leftover. It then
@@ -176,16 +209,32 @@ or so, because the detection buffer only reloaded once the playhead had already
 left the window it was drawing from, and the PNG round trip in the mask cook
 never let it get ahead.
 
-**drag** presses the timeline at 15%, drags to 85% as fast as the protocol will
-carry pointer moves, and lets go. Four defects lived in that one gesture, so it
-reports four numbers: how far the picture trailed the thumb (against the scrub
-value the input reports, never a pixel converted by hand, because a range input
-maps its track through a half-thumb inset), the longest the screen held a
-single frame while the thumb kept moving, how many frames a second actually
-reached the screen, and how long the release took to land. It then presses play
-and checks the clock moves: the release that never reached the producer left
-the engine mechanically paused for good while the chip still read Playing, and
-only trying to play afterwards finds that.
+**drag** presses the timeline at 15%, drags to 85% over a paced 1200ms, and lets
+go. Four defects lived in that one gesture, so it reports four numbers: how far
+the frames that reached the canvas sat behind the position they were serving,
+the longest the screen held a single frame while the thumb kept moving, how many
+frames a second actually reached the screen, and how long the release took to
+land. It then presses play and checks the clock moves: the release that never
+reached the producer left the engine mechanically paused for good while the chip
+still read Playing, and only trying to play afterwards finds that.
+
+The lag number comes from the engine's own trace, armed around the gesture and
+freed after it. Nothing on the main thread knows which frame is on the canvas:
+`currentTime` is written the moment a scrub is commanded, so a lag measured
+against it times the command travelling and calls it the picture arriving. Read
+that way it could not fail on the defect it exists for, and it did not behave
+like a measurement either: five passes on one unchanged build gave 1.642, 0.032,
+1.148, 0.032 and 1.677 seconds, a 52x spread, while its three neighbours on the
+same passes moved by 1.2x to 1.3x. Read off the trace, five passes on that same
+build spread 0.035s, which is what makes the baseline comparison mean something
+for it. The spread was the metric, not the machine.
+
+Read the three drag numbers together, because none of them sees what the others
+do. A screen that paints steadily but always from two seconds ago is only in the
+lag number; a screen frozen on one frame paints nothing, so it has no lag to
+report and the hold and frame-rate gates are what fail. Repeating the same drag
+without reloading takes the lag from 2.3s to zero as the cache warms, so a run's
+number describes the cache it was measured against as much as the code.
 
 **playhead** pauses, holds for four seconds and reads the playhead's transform
 alongside the media clock. A stopped picture whose playhead keeps sliding is the

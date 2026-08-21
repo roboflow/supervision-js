@@ -131,10 +131,10 @@
       "samples": [0, 0, 0]
     },
     "drag.lagP95Seconds": {
-      "value": 1.672,
+      "value": 2.266,
       "unit": "s",
       "better": "lower",
-      "samples": [2.802, 1.672, 0.118]
+      "samples": [2.3, 2.265, 2.265, 2.266, 2.3]
     },
     "drag.holdP95Ms": {
       "value": 94.5,

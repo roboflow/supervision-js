@@ -27,6 +27,12 @@ interface DragSample {
   renderCount: number;
 }
 
+interface EnginePaint {
+  tMs: number;
+  mediaTimeMs: number;
+  targetMs: number;
+}
+
 interface DragProbeOptions {
   samples?: number;
   renderEvery?: number;
@@ -34,7 +40,14 @@ interface DragProbeOptions {
   stallSamples?: number;
   playbackState?: string;
   landsOnRelease?: boolean;
+  paintsBehind?: number;
 }
+
+/* The probe's clock and the engine's are two different `performance.now`
+ * origins joined on the wall clock they share, so the fixture arms the capture
+ * a tenth of a second before the press and stamps its paints against that. */
+const TIME_ORIGIN = 1_700_000_000_000;
+const ARMED_AT = 900;
 
 function buildProbe({
   samples = 60,
@@ -43,15 +56,20 @@ function buildProbe({
   stallSamples = 0,
   playbackState = "paused",
   landsOnRelease = true,
+  paintsBehind = 0,
 }: DragProbeOptions = {}) {
   const downAt = 1000;
   const stepMs = 16;
   const drag: DragSample[] = [];
+  const paints: EnginePaint[] = [];
   let renderCount = 0;
   let frozenTime = 0;
 
+  const positionAt = (index: number) => (DURATION * index) / samples;
+
   for (let index = 0; index < samples; index += 1) {
-    const scrubValue = (DURATION * index) / samples;
+    const scrubValue = positionAt(index);
+    const at = downAt + index * stepMs;
     const stalled =
       index % renderEvery !== 0 ||
       (stallFrom >= 0 &&
@@ -59,10 +77,15 @@ function buildProbe({
         index < stallFrom + stallSamples);
     if (!stalled) {
       renderCount += 1;
-      frozenTime = scrubValue;
+      frozenTime = positionAt(Math.max(0, index - paintsBehind));
+      paints.push({
+        tMs: at - ARMED_AT,
+        mediaTimeMs: frozenTime * 1000,
+        targetMs: scrubValue * 1000,
+      });
     }
     drag.push({
-      at: downAt + index * stepMs,
+      at,
       pointerX: 100 + index,
       scrubValue,
       currentTime: frozenTime,
@@ -84,11 +107,26 @@ function buildProbe({
     },
   ];
 
-  return { downAt, upAt, samples: [...drag, ...tail] };
+  return {
+    downAt,
+    upAt,
+    timeOrigin: TIME_ORIGIN,
+    samples: [...drag, ...tail],
+    capture: {
+      originWallMs: TIME_ORIGIN + ARMED_AT,
+      paints,
+    },
+  };
 }
 
-const summarise = (options?: DragProbeOptions) =>
-  summariseDrag(buildProbe(options), { frameRate: 30, startedPaused: true });
+const summarise = (options?: DragProbeOptions) => {
+  const probe = buildProbe(options);
+  return summariseDrag(probe, {
+    capture: probe.capture,
+    frameRate: 30,
+    startedPaused: true,
+  });
+};
 
 const withResume = (
   scenario: Record<string, unknown>,
@@ -175,18 +213,51 @@ describe("a drag of the timeline", () => {
   /* A hold that never gets long enough to look like a freeze but happens on
    * every frame is the same defect spread thin, and the p95 is what sees it. */
   it("fails a drag that held every frame a little too long", () => {
-    const scenario = summarise({ renderEvery: 16 });
+    const scenario = summarise({ renderEvery: 20 });
     expect(scenario.holdMaxMs).toBeLessThan(600);
     const failures = judgeDrag(withResume(scenario));
-    expect(failures.join(" ")).toContain("at p95");
+    expect(failures.join(" ")).toContain("held one frame for 320ms at p95");
   });
 
-  it("fails a drag the picture never caught up with", () => {
-    const scenario = summarise({ stallFrom: 3, stallSamples: 55 });
-    expect(scenario.lagP95Seconds).toBeGreaterThan(3);
+  /* The defect the lag number exists for, and the one the other three cannot
+   * see: the screen keeps painting at a healthy rate and never holds a frame
+   * long, and every frame it paints is from seconds ago. */
+  it("fails a drag whose paints all landed seconds behind their target", () => {
+    const scenario = summarise({ paintsBehind: 8 });
+    expect(scenario.lagP95Seconds).toBeCloseTo(9.333, 3);
+    expect(scenario.holdP95Ms).toBeLessThanOrEqual(32);
+    expect(scenario.framesPerSecond).toBeGreaterThan(30);
     const failures = judgeDrag(withResume(scenario));
-    expect(failures.join(" ")).toContain("behind the thumb");
-    expect(failures.join(" ")).toContain("frames a second reached the screen");
+    expect(failures).toHaveLength(1);
+    expect(failures[0]).toContain("behind the position they were serving");
+  });
+
+  /* The one the lag number cannot see: nothing painted at all, so there is no
+   * paint to be behind. Reporting a healthy zero there is what a metric that
+   * cannot fail looks like, so it reports nothing and the holds fail instead. */
+  it("says nothing about lag across a drag that painted nothing", () => {
+    const scenario = summarise({ stallFrom: 0, stallSamples: 60 });
+    expect(scenario.paintsMeasured).toBe(0);
+    expect(scenario.lagP95Seconds).toBeNull();
+    const failures = judgeDrag(withResume(scenario));
+    expect(failures.join(" ")).not.toContain("behind the position");
+    expect(failures.join(" ")).toContain("froze on one frame");
+  });
+
+  /* Two clocks that never met report a lag off unrelated moments, so the
+   * gesture is refused rather than turned into a number. */
+  it("refuses a capture that does not overlap the gesture", () => {
+    const probe = buildProbe();
+    expect(() =>
+      summariseDrag(probe, {
+        capture: {
+          ...probe.capture,
+          originWallMs: probe.capture.originWallMs + 60_000,
+        },
+        frameRate: 30,
+        startedPaused: true,
+      }),
+    ).toThrow(/line up on the wall clock/);
   });
 
   it("fails a release that never landed on the position it was let go at", () => {

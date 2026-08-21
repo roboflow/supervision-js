@@ -23,9 +23,12 @@ const DEFAULT_TOLERANCE_PERCENT = 25;
  * A metric whose right answer is a fixed value carries `tolerancePercent: 0`,
  * so its noise floor is the only thing standing between it and a regression.
  *
- * The floors below come from the spread of three passes recorded back to back
- * on an idle M3 Max, halved: the baseline stores a median, which already
- * throws away the one disturbed pass in three that this machine produces.
+ * A floor has to be measured on an idle M3 Max, across passes of one unchanged
+ * build. Half the spread of three back-to-back passes covers a rate or an
+ * average, because the baseline stores a median and throws away the one
+ * disturbed pass in three that this machine produces. A near-max statistic
+ * moves in steps too large for three passes to find, so its entry says how many
+ * passes its floor took and what they showed.
  */
 export const METRICS = [
   {
@@ -196,11 +199,13 @@ export const METRICS = [
     label: "drag picture lag p95",
     unit: "s",
     better: "lower",
-    /* Bimodal at 0.03s or 1.7s to 3.4s on the same gesture, so a percentage
-     * only means something once the median of three passes has settled on one
-     * mode. Until the split closes this metric reports the drift and the
-     * scenario's own limit is what fails. */
-    noise: 3.5,
+    /* p95 here is the third-largest lag among the ~45 paints one drag puts on
+     * the canvas, so it settles on one of three modes about 0.6s apart. Across
+     * 62 passes of one unchanged build they sat at 2.27s (43 passes), 2.77s
+     * (15) and 3.40s (4), the widest gap between neighbours measuring 0.633s.
+     * The floor covers one mode step and no more, so a pass that landed on the
+     * middle mode reads steady and a build sitting on the slow one does not. */
+    noise: 0.65,
     read: (report) => report.drag?.lagP95Seconds,
   },
   {
