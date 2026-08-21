@@ -131,7 +131,10 @@ export interface MediaSessionDetectionSourceOptions {
    */
   readonly sync?: MediaSessionDetectionSyncOptions;
   /**
-   * When false, playback gates skip this source's readiness checks.
+   * When false, the composed source's `waitForRange` skips this entry.
+   *
+   * Playback waits on nothing here, so the flag reaches only a host that calls
+   * `waitForRange` on `MediaSession.detectionSource` itself.
    */
   readonly requiredForPlayback?: boolean;
 }
@@ -176,7 +179,8 @@ export interface MediaSessionDetectionOptions {
   readonly buffer?: DetectionBufferOptions;
 
   /**
-   * Accepted and ignored: presentation is never gated on detection coverage.
+   * @deprecated Accepted and ignored: presentation is never gated on detection
+   * coverage.
    */
   readonly playbackGate?: DetectionPlaybackGateOptions;
 

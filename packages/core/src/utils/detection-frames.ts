@@ -323,7 +323,7 @@ export function selectDetectionFrame(
  * its detections across the frames in between, and "at or before" in index space
  * is the exact analogue of the interval rule with no arithmetic to be wrong
  * about. Both sides count frames of the same container from its first packet, so
- * the comparison is integer equality and needs no tolerance at all.
+ * the indexes compare exactly and need no tolerance at all.
  *
  * A run whose frames carry no index has no answer here; that source belongs on
  * `selectDetectionFrame`.

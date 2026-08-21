@@ -11,7 +11,7 @@ import {
   detectionFrameOverlapsRange,
 } from "supervision-js-core";
 
-const DEFAULT_MAX_CACHED_CHUNKS = 12;
+const UNPINNED_CACHE_FLOOR_CHUNKS = 12;
 /**
  * Windows of cached chunks when the caller sets no cap: the one being served
  * and the one before it. A cache that holds only the live window has nothing
@@ -26,11 +26,11 @@ export function createChunkedDetectionFrameSource(
   const fetchChunk =
     options.fetchChunk ??
     ((chunk) => fetchJsonDetectionFrameChunk(chunk, options.baseUrl));
-  const maxCachedChunks = options.maxCachedChunks ?? DEFAULT_MAX_CACHED_CHUNKS;
-  let cacheCapacity = maxCachedChunks;
+  const pinnedMaxCachedChunks = options.maxCachedChunks;
+  let cacheCapacity = pinnedMaxCachedChunks ?? UNPINNED_CACHE_FLOOR_CHUNKS;
   let destroyed = false;
 
-  if (maxCachedChunks <= 0) {
+  if (cacheCapacity <= 0) {
     throw new Error("maxCachedChunks must be greater than 0.");
   }
 
@@ -56,7 +56,7 @@ export function createChunkedDetectionFrameSource(
         chunks.map((chunk) => loadChunk(chunk, fetchChunk, chunkCache)),
       );
 
-      if (options.maxCachedChunks === undefined) {
+      if (pinnedMaxCachedChunks === undefined) {
         cacheCapacity = Math.max(
           cacheCapacity,
           chunks.length * CACHED_WINDOW_COUNT,
