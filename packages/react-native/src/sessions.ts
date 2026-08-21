@@ -38,6 +38,8 @@ import { loadReactNativeLiveIdMaskNativeBuilder } from "./native-id-mask-builder
 import { PreparedFrameStore } from "./renderers/prepared-frame-store";
 import { REACT_NATIVE_FILE_SESSION_DEFAULTS } from "./sessions/media-session-defaults";
 import {
+  advanceMediaClockBudget,
+  createMediaClockBudget,
   resolveMediaClockDecision,
   resolveMediaClockDueAt,
 } from "./sessions/media-clock-policy";
@@ -552,6 +554,7 @@ export function createReactNativeVideoFileSession(
     const isMediaClock = clock === "media";
     let mediaAnchorMs = 0;
     let mediaAnchorPts = 0;
+    let mediaBudget = createMediaClockBudget();
     let heldDetections: ReactNativeLiveSerializedDetection[] = [];
 
     try {
@@ -564,6 +567,7 @@ export function createReactNativeVideoFileSession(
         }
 
         let shouldInfer = true;
+        let waitedMs = 0;
 
         if (isMediaClock) {
           if (processedFrames === 0) {
@@ -574,6 +578,7 @@ export function createReactNativeVideoFileSession(
           const decision = resolveMediaClockDecision({
             anchorMs: mediaAnchorMs,
             anchorPts: mediaAnchorPts,
+            budget: mediaBudget,
             nowMs: Date.now(),
             timestampMs: handle.timestampMs,
           });
@@ -585,19 +590,27 @@ export function createReactNativeVideoFileSession(
 
           shouldInfer = decision.shouldInfer;
 
-          // Ahead of this frame's moment, so wait for it. The pump runtime has
-          // no sleep primitive, so the wait spins. That still costs less than
-          // the analysis clock, which never waits and never stops inferring,
-          // but a vsync-paced presentation lane would remove the spin.
+          // Ahead of this frame's moment, so wait for it. The wait is also the
+          // only slack this session ever has, so it is measured and banked:
+          // inference is paid for out of it rather than fired whenever the
+          // schedule happens to be caught up.
+          //
+          // The pump runtime has no sleep primitive, so the wait spins. That
+          // costs less than the analysis clock, which never waits and never
+          // stops inferring, but pacing presentation off vsync would remove
+          // the spin.
           const dueAtMs = resolveMediaClockDueAt({
             anchorMs: mediaAnchorMs,
             anchorPts: mediaAnchorPts,
             timestampMs: handle.timestampMs,
           });
+          const waitStartedAt = Date.now();
 
           while (Date.now() < dueAtMs && playingShared.value) {
             // Spin until this frame is due.
           }
+
+          waitedMs = Date.now() - waitStartedAt;
         }
 
         const tickStartedAt = Date.now();
@@ -605,12 +618,24 @@ export function createReactNativeVideoFileSession(
         const detections = shouldInfer
           ? serializeFrame(handle, returnMasksAtOriginalResolution)
           : heldDetections;
+        const inferenceMs = shouldInfer ? Date.now() - tickStartedAt : 0;
 
         if (shouldInfer) {
           heldDetections = detections;
         }
 
-        const segmentationMs = shouldInfer ? Date.now() - tickStartedAt : 0;
+        if (isMediaClock) {
+          mediaBudget = advanceMediaClockBudget({
+            budget: mediaBudget,
+            inferenceMs,
+            inferred: shouldInfer,
+            waitedMs,
+          });
+        }
+
+        // Same measurement the budget was charged, so the HUD and the pacing
+        // rule can never disagree about what a model run cost.
+        const segmentationMs = inferenceMs;
 
         const overlayDetections: ReactNativeVideoSessionDetection[] = [];
 
