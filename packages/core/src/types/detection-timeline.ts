@@ -250,6 +250,9 @@ export interface CompositeDetectionFrameSourceEntry {
   readonly sync?: DetectionFrameSelectionOptions;
   /**
    * When false, the composed source's `waitForRange` skips this entry.
+   *
+   * Playback waits on nothing here, so the flag reaches only a caller that
+   * awaits `waitForRange` on the composed source itself.
    */
   readonly requiredForPlayback?: boolean;
 }
