@@ -11,11 +11,15 @@ const maskPreparationWorkerPath = path.resolve(
   rootDir,
   "dist/mask-preparation.worker.js",
 );
+const trackingWorkerSentinel =
+  "__SUPERVISION_JS_EMBEDDED_TRACKING_WORKER_SOURCE__";
+const trackingWorkerPath = path.resolve(rootDir, "dist/tracking.worker.js");
 const sourceAliasRoots = new Set([
   "constants",
   "detections",
   "media",
   "playback",
+  "post-processing",
   "render-preparation",
   "renderers",
   "sessions",
@@ -59,34 +63,44 @@ function typescriptPlugin() {
   });
 }
 
-function embedMaskPreparationWorker() {
-  let didEmbedWorker = false;
+function embedWorkers() {
+  let didEmbedMaskWorker = false;
+  let didEmbedTrackingWorker = false;
 
   return {
-    name: "embed-mask-preparation-worker",
+    name: "embed-workers",
     buildStart() {
       this.addWatchFile(maskPreparationWorkerPath);
+      this.addWatchFile(trackingWorkerPath);
     },
     renderChunk(code) {
-      if (!code.includes(embeddedWorkerSentinel)) {
+      if (
+        !code.includes(embeddedWorkerSentinel) &&
+        !code.includes(trackingWorkerSentinel)
+      ) {
         return null;
       }
-
-      const workerSource = readFileSync(maskPreparationWorkerPath, "utf8")
+      const maskWorkerSource = readFileSync(maskPreparationWorkerPath, "utf8")
         .trimEnd()
         .replace(/\n\/\/# sourceMappingURL=[^\n]+$/, "");
-      const embeddedCode = code.replace(
+      const trackingWorkerSource = readFileSync(trackingWorkerPath, "utf8")
+        .trimEnd()
+        .replace(/\n\/\/# sourceMappingURL=[^\n]+$/, "");
+      let embeddedCode = code.replace(
         JSON.stringify(embeddedWorkerSentinel),
-        JSON.stringify(workerSource),
+        JSON.stringify(maskWorkerSource),
       );
-
-      if (embeddedCode === code) {
-        throw new Error(
-          "Unable to replace the render-preparation worker source sentinel.",
-        );
+      if (embeddedCode !== code) {
+        didEmbedMaskWorker = true;
       }
-
-      didEmbedWorker = true;
+      const withTrackingWorker = embeddedCode.replace(
+        JSON.stringify(trackingWorkerSentinel),
+        JSON.stringify(trackingWorkerSource),
+      );
+      if (withTrackingWorker !== embeddedCode) {
+        didEmbedTrackingWorker = true;
+      }
+      embeddedCode = withTrackingWorker;
 
       return {
         code: embeddedCode,
@@ -94,9 +108,9 @@ function embedMaskPreparationWorker() {
       };
     },
     generateBundle() {
-      if (!didEmbedWorker) {
+      if (!didEmbedMaskWorker || !didEmbedTrackingWorker) {
         throw new Error(
-          "The browser package did not embed the render-preparation worker.",
+          "The browser package did not embed every public worker asset.",
         );
       }
     },
@@ -115,6 +129,18 @@ const workerConfig = {
   treeshake: {
     moduleSideEffects: false,
   },
+};
+
+const trackingWorkerConfig = {
+  input: "src/post-processing/tracking.worker.ts",
+  output: {
+    file: "dist/tracking.worker.js",
+    format: "iife",
+    name: "SupervisionDetectionPostProcessingWorker",
+    sourcemap: true,
+  },
+  plugins: [sourceAliasResolver(), privateCoreResolver(), typescriptPlugin()],
+  treeshake: { moduleSideEffects: false },
 };
 
 const packageConfig = {
@@ -138,14 +164,10 @@ const packageConfig = {
     format: "es",
     sourcemap: true,
   },
-  plugins: [
-    sourceAliasResolver(),
-    typescriptPlugin(),
-    embedMaskPreparationWorker(),
-  ],
+  plugins: [sourceAliasResolver(), typescriptPlugin(), embedWorkers()],
   treeshake: {
     moduleSideEffects: false,
   },
 };
 
-export default [workerConfig, packageConfig];
+export default [workerConfig, trackingWorkerConfig, packageConfig];
