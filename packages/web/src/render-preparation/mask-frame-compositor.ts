@@ -274,7 +274,11 @@ function isBoundaryPixel(mask: DecodedMaskPixels, x: number, y: number) {
 }
 
 function isMaskPixel(mask: DecodedMaskPixels, x: number, y: number) {
-  return mask.data[y * mask.width + x] === 1;
+  // Non-zero, not `=== 1`. A decoded mask used to always come from the RLE
+  // decoder, which writes a literal 1, so equality happened to be safe. A
+  // dense mask hands over the producer's bytes untouched, and models commonly
+  // emit 255, so equality would fill the shape and silently drop its stroke.
+  return mask.data[y * mask.width + x] !== 0;
 }
 
 function isOutsideMaskBounds(mask: DecodedMaskPixels, x: number, y: number) {

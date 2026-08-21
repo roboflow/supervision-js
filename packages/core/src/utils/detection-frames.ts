@@ -9,6 +9,14 @@ import {
   type DetectionFrameSelectionOptions,
 } from "#types/detection-timeline";
 
+/**
+ * Row-major mask bytes, one per pixel.
+ *
+ * **Foreground is any non-zero byte, not specifically `1`.** The RLE decoder
+ * writes a literal 1, but a dense mask carries the producer's own bytes and
+ * models commonly emit 255. Consumers that compare against `1` will read a
+ * valid mask as empty.
+ */
 export interface DecodedDetectionMask {
   readonly width: number;
   readonly height: number;

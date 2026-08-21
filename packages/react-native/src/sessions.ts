@@ -108,7 +108,15 @@ export const REACT_NATIVE_VIDEO_SESSION_DEFAULTS =
   REACT_NATIVE_FILE_SESSION_DEFAULTS;
 
 /** Saved-video playback processes every decoded frame as quickly as inference allows. */
+/**
+ * @deprecated The pacing is now a session option, so a single constant
+ * cannot describe it. Read `session.playbackMode`, which reflects the
+ * `clock` that session was created with.
+ */
 export const REACT_NATIVE_VIDEO_SESSION_PLAYBACK_MODE = "analysis-paced";
+
+/** Pacing a saved-video session reports, one per {@link ReactNativeVideoClock}. */
+export type ReactNativeVideoPlaybackMode = "analysis-paced" | "media-paced";
 
 /**
  * The current native file source supports start, pause/resume, and stop. It
@@ -256,7 +264,8 @@ export interface ReactNativeVideoSession extends MediaSession {
   readonly frameHeight: number;
   readonly frameWidth: number;
   readonly nominalFrameRate: number;
-  readonly playbackMode: typeof REACT_NATIVE_VIDEO_SESSION_PLAYBACK_MODE;
+  /** Reflects the `clock` this session was created with. */
+  readonly playbackMode: ReactNativeVideoPlaybackMode;
   /** Updates dynamic canvas-space geometry used by the private Skia stage. */
   setMediaRect(rect: TopLeftRect): void;
   /** @deprecated Use the common `play()` control. */
@@ -610,6 +619,14 @@ export function createReactNativeVideoFileSession(
             // Spin until this frame is due.
           }
 
+          // The wait also ends when pause, stop, or destroy clears the flag.
+          // Falling through would start a full model run after cancellation,
+          // present one more frame, and make destroy wait for both.
+          if (!playingShared.value) {
+            handle.release();
+            break;
+          }
+
           waitedMs = Date.now() - waitStartedAt;
         }
 
@@ -871,7 +888,7 @@ export function createReactNativeVideoFileSession(
     frameHeight,
     frameWidth,
     nominalFrameRate,
-    playbackMode: REACT_NATIVE_VIDEO_SESSION_PLAYBACK_MODE,
+    playbackMode: clock === "media" ? "media-paced" : "analysis-paced",
     timeline,
     destroy() {
       if (destroyed) {

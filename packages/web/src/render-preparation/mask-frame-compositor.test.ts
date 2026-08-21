@@ -68,6 +68,60 @@ describe("mask frame compositor", () => {
     expect(frame!.strokeWidths[3]).toBe(2);
   });
 
+  it("strokes a dense mask whose foreground bytes are 255, not 1", () => {
+    // A model producer publishes its own bytes, and 0/255 is the common shape.
+    // Comparing foreground against `1` used to be safe because every decoded
+    // mask came from the RLE decoder, which writes a literal 1.
+    const composite = (value: number) =>
+      compositeMaskFrame([
+        {
+          alpha: 1,
+          color: 0xff0000,
+          detectionIndex: 0,
+          mask: {
+            // 4x4 with a 2x2 block in the middle, so it has a real boundary.
+            data: new Uint8Array([
+              0,
+              0,
+              0,
+              0,
+              0,
+              value,
+              value,
+              0,
+              0,
+              value,
+              value,
+              0,
+              0,
+              0,
+              0,
+              0,
+            ]),
+            encoding: DetectionMaskEncoding.DenseBitmap,
+            height: 4,
+            width: 4,
+          },
+          stroke: { alpha: 1, color: 0x00ff00, width: 1 },
+        },
+      ]);
+
+    const ones = composite(1);
+    const full = composite(255);
+
+    expect(full).toBeDefined();
+    // Identical geometry must produce an identical composite regardless of
+    // which non-zero value the producer chose.
+    expect([...full!.data]).toEqual([...ones!.data]);
+
+    // The stroke color must actually be written somewhere, not silently lost.
+    const strokePixels = [...full!.data]
+      .filter((_, index) => index % 4 === 1)
+      .filter((green) => green > 0);
+
+    expect(strokePixels.length).toBeGreaterThan(0);
+  });
+
   it("builds detection-indexed ID mask artifacts for shader rendering and picking", () => {
     const frame = createIdMaskFrame([
       {
