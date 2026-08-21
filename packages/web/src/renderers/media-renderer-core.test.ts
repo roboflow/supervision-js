@@ -24,6 +24,11 @@ import {
   resetMocks,
 } from "../../../../test/media-renderer-harness";
 import { createMediaRendererCore } from "./media-renderer-core";
+
+/** The harness reports 1280x720 media, so every load carries that space. */
+const mediaCoordinateSpaceLoadOptions = {
+  coordinateSpace: { height: 720, width: 1280 },
+};
 import type {
   MediaRendererScene,
   MediaRendererSceneOptions,
@@ -256,8 +261,20 @@ describe("media renderer core", () => {
     );
 
     expect(detectionSource.loadFrames).toHaveBeenCalledTimes(2);
-    expect(detectionSource.loadFrames).toHaveBeenNthCalledWith(1, 4.25, 5);
-    expect(detectionSource.loadFrames).toHaveBeenNthCalledWith(2, 0, 1.75);
+    // The renderer hands its media coordinate space to every load so a
+    // composing source can project children before it flattens them.
+    expect(detectionSource.loadFrames).toHaveBeenNthCalledWith(
+      1,
+      4.25,
+      5,
+      mediaCoordinateSpaceLoadOptions,
+    );
+    expect(detectionSource.loadFrames).toHaveBeenNthCalledWith(
+      2,
+      0,
+      1.75,
+      mediaCoordinateSpaceLoadOptions,
+    );
 
     renderer.destroy();
   });
@@ -321,7 +338,11 @@ describe("media renderer core", () => {
       },
     );
 
-    expect(detectionSource.loadFrames).toHaveBeenCalledWith(0, 0);
+    expect(detectionSource.loadFrames).toHaveBeenCalledWith(
+      0,
+      0,
+      mediaCoordinateSpaceLoadOptions,
+    );
     expect(renderer.getState()).toMatchObject({
       activeDetectionCount: 1,
       activeDetectionFrameIndex: 0,
@@ -368,7 +389,11 @@ describe("media renderer core", () => {
 
     await renderer.seek(1.5 / 30);
 
-    expect(detectionSource.loadFrames).toHaveBeenCalledWith(1 / 30, 1 / 30);
+    expect(detectionSource.loadFrames).toHaveBeenCalledWith(
+      1 / 30,
+      1 / 30,
+      mediaCoordinateSpaceLoadOptions,
+    );
     expect(renderer.getState()).toMatchObject({
       currentTime: 1 / 30,
     });

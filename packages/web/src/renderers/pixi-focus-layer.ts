@@ -151,6 +151,9 @@ export function createPixiFocusLayer(options: {
   readonly Shader?: ShaderFactory;
   readonly UniformGroup?: UniformGroupConstructor;
   readonly focusStyle?: FocusStyle | null;
+  readonly isDetectionVisible?: (
+    detection: DetectionPickResult["detection"],
+  ) => boolean;
 }): PixiFocusLayer {
   let mediaHeight = 0;
   let mediaWidth = 0;
@@ -238,13 +241,24 @@ export function createPixiFocusLayer(options: {
         return;
       }
 
-      const instruction = focusStyle.resolve({
+      const resolvedInstruction = focusStyle.resolve({
         frame: context.frame,
         hoveredPick: context.hoveredPick,
         mediaTime: context.mediaTime,
         selectedPick: context.selectedPick,
         viewportScale: context.viewportScale,
       });
+      // Ambient focus targets every detection in the frame, so a class the
+      // caller has hidden would otherwise be cut out of the overlay.
+      const instruction = resolvedInstruction
+        ? {
+            ...resolvedInstruction,
+            targets: resolvedInstruction.targets.filter(
+              ({ detection }) =>
+                options.isDetectionVisible?.(detection) ?? true,
+            ),
+          }
+        : undefined;
 
       endHold();
 

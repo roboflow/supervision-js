@@ -524,6 +524,12 @@ export async function createPixiMediaScene(
         Text,
         UniformGroup,
         interactionStyle: options.interactionStyle,
+        // A detection under an editing gesture is drawn live by the base
+        // layers, so its hover or selection redraw would sit at the position
+        // the gesture already left.
+        isDetectionVisible: (detection) =>
+          !resolveContextState(detection).hidden &&
+          !isUnderEditingGesture(detection),
       })
     : undefined;
   let fastTranslatedDetectionId: string | number | null = null;
@@ -591,6 +597,8 @@ export async function createPixiMediaScene(
         Shader,
         UniformGroup,
         focusStyle: options.focusStyle,
+        isDetectionVisible: (detection) =>
+          !resolveContextState(detection).hidden,
       })
     : undefined;
   let mediaSprite: InstanceType<typeof Sprite> | undefined;
@@ -1781,6 +1789,8 @@ export async function createPixiMediaScene(
         Shader,
         UniformGroup,
         focusStyle,
+        isDetectionVisible: (detection) =>
+          !resolveContextState(detection).hidden,
       });
     }
 
@@ -2210,6 +2220,19 @@ export async function createPixiMediaScene(
     }
 
     labelSlot.setDisplay(labelLayer.createContainer());
+  }
+
+  function isUnderEditingGesture(detection: Detection) {
+    const state = options.editingEngine?.getState();
+
+    return (
+      state !== undefined &&
+      (state.kind === AnnotationGestureStateKind.Moving ||
+        state.kind === AnnotationGestureStateKind.Resizing) &&
+      state.preview !== null &&
+      detection.id !== undefined &&
+      state.activeDetectionId === detection.id
+    );
   }
 
   function createVisibilityMaskStyle(style: MaskStyle): MaskStyle {
