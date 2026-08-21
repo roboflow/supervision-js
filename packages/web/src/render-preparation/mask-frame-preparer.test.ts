@@ -90,6 +90,31 @@ describe("mask frame preparer", () => {
     }
   });
 
+  it("keeps exact-region coverage when palette preparation falls back to RGBA", async () => {
+    resetMocks();
+    const preparer = createMaskFramePreparer({
+      renderPreparation: { mode: RenderPreparationMode.MainThread },
+    });
+    const frame = await preparer.prepare({
+      instructions: [
+        {
+          ...maskPreparationJob.instructions[0]!,
+          detectionIndex: 63,
+          regionCoverage: true,
+        },
+      ],
+      key: "dense:0",
+    });
+
+    expect(frame).toMatchObject({
+      kind: PreparedMaskFrameKind.RgbaImage,
+      regionMaskCoverage: {
+        entries: [expect.objectContaining({ detectionIndex: 63 })],
+      },
+    });
+    preparer.destroy();
+  });
+
   it("distributes concurrent worker requests across the configured worker pool", async () => {
     vi.useFakeTimers();
     resetMocks();

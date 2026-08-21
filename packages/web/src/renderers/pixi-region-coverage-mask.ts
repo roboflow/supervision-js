@@ -1,4 +1,4 @@
-import type { PreparedPngIdMaskFrame } from "#render-preparation/mask-frame-artifact";
+import type { PreparedRegionMaskCoverageEntry } from "#render-preparation/mask-frame-artifact";
 import type {
   AlphaMask as PixiAlphaMask,
   ImageSource as PixiImageSource,
@@ -9,10 +9,10 @@ import type {
   UniformGroup as PixiUniformGroup,
 } from "pixi.js";
 
-type RegionIdMaskMesh = PixiMesh<PixiMeshGeometry, PixiShader>;
+type RegionCoverageMaskMesh = PixiMesh<PixiMeshGeometry, PixiShader>;
 
 type AlphaMaskConstructor = new (options: {
-  mask: RegionIdMaskMesh;
+  mask: RegionCoverageMaskMesh;
 }) => PixiAlphaMask;
 
 type ImageSourceConstructor = new (options: {
@@ -27,7 +27,7 @@ type ImageSourceConstructor = new (options: {
 type MeshConstructor = new (options: {
   geometry: PixiMeshGeometry;
   shader: PixiShader;
-}) => RegionIdMaskMesh;
+}) => RegionCoverageMaskMesh;
 
 type MeshGeometryConstructor = new (options: {
   indices: Uint32Array;
@@ -51,16 +51,16 @@ type UniformGroupConstructor = new (
   >,
 ) => PixiUniformGroup;
 
-export interface PixiRegionIdMaskArtifact {
-  readonly frame: PreparedPngIdMaskFrame;
+export interface PixiRegionCoverageMaskArtifact {
   readonly texture: PixiTexture;
 }
 
-export interface PixiRegionIdMask {
-  readonly display: RegionIdMaskMesh;
+export interface PixiRegionCoverageMask {
+  readonly display: RegionCoverageMaskMesh;
   readonly effect: PixiAlphaMask;
   render(options: {
-    readonly artifact: PixiRegionIdMaskArtifact;
+    readonly artifact: PixiRegionCoverageMaskArtifact;
+    readonly coverage: PreparedRegionMaskCoverageEntry;
     readonly crop: {
       readonly height: number;
       readonly width: number;
@@ -70,9 +70,6 @@ export interface PixiRegionIdMask {
     readonly flipHorizontal: boolean;
     readonly flipVertical: boolean;
     readonly height: number;
-    readonly maskId: number;
-    readonly mediaHeight: number;
-    readonly mediaWidth: number;
     readonly rotation: number;
     readonly width: number;
     readonly x: number;
@@ -82,24 +79,27 @@ export interface PixiRegionIdMask {
 }
 
 /**
- * Produces a per-detection alpha mask from the renderer's prepared ID mask.
+ * Produces a per-detection alpha mask from a compact prepared coverage crop.
  * The crop is sampled and transformed entirely on the GPU; semantic RLE masks
  * never enter the playback hot path.
  */
-export function createPixiRegionIdMask(options: {
+export function createPixiRegionCoverageMask(options: {
   readonly AlphaMask: AlphaMaskConstructor;
   readonly ImageSource: ImageSourceConstructor;
   readonly Mesh: MeshConstructor;
   readonly MeshGeometry: MeshGeometryConstructor;
   readonly Shader: ShaderFactory;
   readonly UniformGroup: UniformGroupConstructor;
-}): PixiRegionIdMask {
+}): PixiRegionCoverageMask {
   const uniforms = new options.UniformGroup({
     uCrop: {
       type: "vec4<f32>",
       value: new Float32Array([0, 0, 1, 1]),
     },
-    uMaskId: { type: "f32", value: 0 },
+    uMaskRegion: {
+      type: "vec4<f32>",
+      value: new Float32Array([0, 0, 1, 1]),
+    },
   });
   const placeholderSource = new options.ImageSource({
     autoGenerateMipmaps: false,
@@ -135,12 +135,17 @@ export function createPixiRegionIdMask(options: {
     render(renderOptions) {
       bindTexture(renderOptions.artifact.texture.source);
       uniforms.uniforms.uCrop = new Float32Array([
-        renderOptions.crop.x / renderOptions.mediaWidth,
-        renderOptions.crop.y / renderOptions.mediaHeight,
-        renderOptions.crop.width / renderOptions.mediaWidth,
-        renderOptions.crop.height / renderOptions.mediaHeight,
+        renderOptions.crop.x,
+        renderOptions.crop.y,
+        renderOptions.crop.width,
+        renderOptions.crop.height,
       ]);
-      uniforms.uniforms.uMaskId = renderOptions.maskId;
+      uniforms.uniforms.uMaskRegion = new Float32Array([
+        renderOptions.coverage.x,
+        renderOptions.coverage.y,
+        renderOptions.coverage.width,
+        renderOptions.coverage.height,
+      ]);
       uniforms.update();
       display.position.set(renderOptions.x, renderOptions.y);
       display.scale.set(
@@ -171,8 +176,8 @@ export function createPixiRegionIdMask(options: {
   function createShader() {
     return options.Shader.from({
       gl: {
-        fragment: regionIdMaskFragmentShader,
-        vertex: regionIdMaskVertexShader,
+        fragment: regionCoverageMaskFragmentShader,
+        vertex: regionCoverageMaskVertexShader,
       },
       resources: {
         regionMaskUniforms: uniforms,
@@ -194,7 +199,7 @@ function createPlaceholderCanvas() {
   return canvas;
 }
 
-const regionIdMaskVertexShader = `#version 300 es
+const regionCoverageMaskVertexShader = `#version 300 es
 precision highp float;
 
 in vec2 aPosition;
@@ -206,6 +211,7 @@ uniform vec4 uWorldColorAlpha;
 uniform mat3 uTransformMatrix;
 uniform vec4 uColor;
 uniform vec4 uCrop;
+uniform vec4 uMaskRegion;
 
 out vec2 vMaskUV;
 
@@ -215,23 +221,26 @@ void main(void) {
 
   gl_Position =
     vec4((modelViewProjectionMatrix * vec3(aPosition, 1.0)).xy, 0.0, 1.0);
-  vMaskUV = uCrop.xy + aUV * uCrop.zw;
+  vec2 mediaPoint = uCrop.xy + aUV * uCrop.zw;
+  vMaskUV = (mediaPoint - uMaskRegion.xy) / uMaskRegion.zw;
 }
 `;
 
-const regionIdMaskFragmentShader = `#version 300 es
+const regionCoverageMaskFragmentShader = `#version 300 es
 precision highp float;
 
 in vec2 vMaskUV;
 
 uniform sampler2D uTexture;
-uniform float uMaskId;
 
 out vec4 finalColor;
 
 void main(void) {
-  float sampledId = floor(texture(uTexture, vMaskUV).r * 255.0 + 0.5);
-  float alpha = abs(sampledId - uMaskId) < 0.5 ? 1.0 : 0.0;
+  if (any(lessThan(vMaskUV, vec2(0.0))) || any(greaterThan(vMaskUV, vec2(1.0)))) {
+    finalColor = vec4(0.0);
+    return;
+  }
+  float alpha = texture(uTexture, vMaskUV).r;
   finalColor = vec4(alpha);
 }
 `;

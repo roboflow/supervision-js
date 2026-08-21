@@ -2,6 +2,7 @@ import {
   compositeMaskFrame,
   createMaskIdFrame,
   createPngIdMaskFrame,
+  createRegionMaskCoverageFrame,
 } from "#render-preparation/mask-frame-compositor";
 import { createDefaultRenderPreparationWorkerFactory } from "#render-preparation/default-render-preparation-worker";
 import {
@@ -214,6 +215,9 @@ function createMainThreadMaskFramePreparer(
       }
 
       const compositedFrame = compositeMaskFrame(job.instructions);
+      const regionMaskCoverage = createRegionMaskCoverageFrame(
+        job.instructions,
+      );
 
       if (!compositedFrame) {
         return undefined;
@@ -247,6 +251,7 @@ function createMainThreadMaskFramePreparer(
         idMaskData: createMaskIdFrame(job.instructions)?.data,
         key: job.key,
         kind: PreparedMaskFrameKind.RgbaImage,
+        regionMaskCoverage,
         source: canvas,
         width: compositedFrame.width,
       };
@@ -272,6 +277,7 @@ async function createPreparedPngIdMaskFrame(
   }
 
   try {
+    const regionMaskCoverage = createRegionMaskCoverageFrame(job.instructions);
     const frame = await createPngIdMaskFrame(job.instructions);
 
     if (!frame) {
@@ -293,6 +299,7 @@ async function createPreparedPngIdMaskFrame(
       kind: PreparedMaskFrameKind.PngIdMask,
       maxStrokeWidth: frame.maxStrokeWidth,
       png: frame.png,
+      regionMaskCoverage,
       source: imageBitmap,
       strokePalette: frame.strokePalette,
       strokeWidths: frame.strokeWidths,
@@ -483,6 +490,7 @@ function createPreparedFrameFromWorkerResponse(
       kind: PreparedMaskFrameKind.PngIdMask,
       maxStrokeWidth: message.maxStrokeWidth ?? 0,
       png: message.png,
+      regionMaskCoverage: message.regionMaskCoverage,
       source: message.imageBitmap,
       strokePalette: message.strokePalette,
       strokeWidths: message.strokeWidths,
@@ -499,6 +507,7 @@ function createPreparedFrameFromWorkerResponse(
       idMaskData: message.idMaskData,
       key: message.key,
       kind: PreparedMaskFrameKind.RgbaImage,
+      regionMaskCoverage: message.regionMaskCoverage,
       source: message.imageBitmap,
       width: message.imageBitmap.width,
     };
@@ -528,6 +537,7 @@ function createPreparedFrameFromWorkerResponse(
     idMaskData: message.idMaskData,
     key: message.key,
     kind: PreparedMaskFrameKind.RgbaImage,
+    regionMaskCoverage: message.regionMaskCoverage,
     source: canvas,
     width: message.imageData.width,
   };

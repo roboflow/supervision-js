@@ -9,6 +9,7 @@ import {
   compositeMaskFrame,
   createIdMaskFrame,
   createPngIdMaskFrame,
+  createRegionMaskCoverageFrame,
 } from "./mask-frame-compositor";
 
 const pngSignature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
@@ -153,6 +154,73 @@ describe("mask frame compositor", () => {
     expect(frame!.maxStrokeWidth).toBe(5);
     expect(frame!.strokeWidths[1]).toBe(5);
     expect([...frame!.strokePalette.slice(4, 8)]).toEqual([0, 1, 1, 1]);
+  });
+
+  it("preserves overlapping exact-region masks independently of detection indexes", () => {
+    const mask = {
+      counts: encodeCompressedRleCounts([0, 1]),
+      encoding: DetectionMaskEncoding.CompressedRle,
+      height: 1,
+      width: 1,
+    } as const;
+    const frame = createRegionMaskCoverageFrame([
+      {
+        alpha: 0,
+        color: 0,
+        detectionIndex: 0,
+        mask,
+        regionCoverage: true,
+      },
+      {
+        alpha: 0,
+        color: 0,
+        detectionIndex: 63,
+        mask,
+        regionCoverage: true,
+      },
+    ]);
+
+    expect(frame?.entries).toEqual([
+      {
+        data: Uint8Array.from([255]),
+        detectionIndex: 0,
+        height: 1,
+        width: 1,
+        x: 0,
+        y: 0,
+      },
+      {
+        data: Uint8Array.from([255]),
+        detectionIndex: 63,
+        height: 1,
+        width: 1,
+        x: 0,
+        y: 0,
+      },
+    ]);
+  });
+
+  it("does not impose a renderer target limit", () => {
+    const mask = {
+      counts: encodeCompressedRleCounts([0, 1]),
+      encoding: DetectionMaskEncoding.CompressedRle,
+      height: 1,
+      width: 1,
+    } as const;
+    const frame = createRegionMaskCoverageFrame(
+      Array.from({ length: 25 }, (_, detectionIndex) => ({
+        alpha: 0,
+        color: 0,
+        detectionIndex,
+        mask,
+        regionCoverage: true,
+      })),
+    );
+
+    expect(frame?.entries).toHaveLength(25);
+    expect(frame?.entries[24]).toMatchObject({
+      detectionIndex: 24,
+    });
   });
 
   it("composites mask strokes into the prepared frame artifact", () => {

@@ -1,6 +1,9 @@
 import type { DetectionMask, Point } from "supervision-js-core";
 import type { MaskStrokeStyle } from "supervision-js-core";
-import type { PreparedMaskFrameKind } from "./mask-frame-artifact";
+import type {
+  PreparedMaskFrameKind,
+  PreparedRegionMaskCoverageFrame,
+} from "./mask-frame-artifact";
 
 export enum MaskPreparationWorkerMessageType {
   Complete = "complete",
@@ -13,6 +16,7 @@ interface SerializableRasterInstructionBase {
   readonly alpha: number;
   readonly color: number;
   readonly detectionIndex: number;
+  readonly regionCoverage?: boolean;
   readonly stroke?: MaskStrokeStyle;
 }
 
@@ -52,6 +56,7 @@ export interface MaskPreparationWorkerCompleteMessage {
   readonly maxStrokeWidth?: number;
   readonly png?: Uint8Array<ArrayBuffer>;
   readonly requestId: number;
+  readonly regionMaskCoverage?: PreparedRegionMaskCoverageFrame;
   readonly strokePalette?: Float32Array<ArrayBuffer>;
   readonly strokeWidths?: Float32Array<ArrayBuffer>;
   readonly type: MaskPreparationWorkerMessageType.Complete;

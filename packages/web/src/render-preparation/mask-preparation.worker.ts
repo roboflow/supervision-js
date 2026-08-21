@@ -2,6 +2,7 @@ import {
   compositeMaskFrame,
   createMaskIdFrame,
   createPngIdMaskFrame,
+  createRegionMaskCoverageFrame,
 } from "#render-preparation/mask-frame-compositor";
 import { PreparedMaskFrameKind } from "#render-preparation/mask-frame-artifact";
 import {
@@ -36,7 +37,13 @@ workerScope.addEventListener("message", (event) => {
 
 async function prepareMaskFrame(message: MaskPreparationWorkerRequest) {
   try {
-    const pngIdMaskFrame = await createPngIdMaskWorkerResponse(message);
+    const regionMaskCoverage = createRegionMaskCoverageFrame(
+      message.job.instructions,
+    );
+    const pngIdMaskFrame = await createPngIdMaskWorkerResponse(
+      message,
+      regionMaskCoverage,
+    );
 
     if (pngIdMaskFrame) {
       workerScope.postMessage(pngIdMaskFrame, [
@@ -45,6 +52,7 @@ async function prepareMaskFrame(message: MaskPreparationWorkerRequest) {
         pngIdMaskFrame.fillPalette.buffer,
         pngIdMaskFrame.strokePalette.buffer,
         pngIdMaskFrame.strokeWidths.buffer,
+        ...getRegionMaskCoverageTransfers(regionMaskCoverage),
       ]);
       return;
     }
@@ -74,10 +82,15 @@ async function prepareMaskFrame(message: MaskPreparationWorkerRequest) {
           imageBitmap,
           idMaskData,
           key: message.job.key,
+          regionMaskCoverage,
           requestId: message.requestId,
           type: MaskPreparationWorkerMessageType.Complete,
         },
-        [...(idMaskData ? [idMaskData.buffer] : []), imageBitmap],
+        [
+          ...(idMaskData ? [idMaskData.buffer] : []),
+          ...getRegionMaskCoverageTransfers(regionMaskCoverage),
+          imageBitmap,
+        ],
       );
       return;
     }
@@ -87,10 +100,15 @@ async function prepareMaskFrame(message: MaskPreparationWorkerRequest) {
         idMaskData,
         imageData,
         key: message.job.key,
+        regionMaskCoverage,
         requestId: message.requestId,
         type: MaskPreparationWorkerMessageType.Complete,
       },
-      [...(idMaskData ? [idMaskData.buffer] : []), imageData.data.buffer],
+      [
+        ...(idMaskData ? [idMaskData.buffer] : []),
+        ...getRegionMaskCoverageTransfers(regionMaskCoverage),
+        imageData.data.buffer,
+      ],
     );
   } catch (error) {
     workerScope.postMessage({
@@ -107,6 +125,7 @@ async function prepareMaskFrame(message: MaskPreparationWorkerRequest) {
 
 async function createPngIdMaskWorkerResponse(
   message: MaskPreparationWorkerRequest,
+  regionMaskCoverage: ReturnType<typeof createRegionMaskCoverageFrame>,
 ): Promise<
   | (MaskPreparationWorkerResponse & {
       readonly fillPalette: Float32Array<ArrayBuffer>;
@@ -157,10 +176,17 @@ async function createPngIdMaskWorkerResponse(
     maxStrokeWidth: frame.maxStrokeWidth,
     png: frame.png,
     requestId: message.requestId,
+    regionMaskCoverage,
     strokePalette: frame.strokePalette,
     strokeWidths: frame.strokeWidths,
     type: MaskPreparationWorkerMessageType.Complete,
   };
+}
+
+function getRegionMaskCoverageTransfers(
+  coverage: ReturnType<typeof createRegionMaskCoverageFrame>,
+) {
+  return coverage?.entries.map(({ data }) => data.buffer) ?? [];
 }
 
 function createImageBitmapFromImageData(imageData: ImageData) {

@@ -30,10 +30,10 @@ import type {
   GifSprite as PixiGifSprite,
 } from "pixi.js/gif";
 import {
-  createPixiRegionIdMask,
-  type PixiRegionIdMask,
-  type PixiRegionIdMaskArtifact,
-} from "./pixi-region-id-mask";
+  createPixiRegionCoverageMask,
+  type PixiRegionCoverageMask,
+} from "./pixi-region-coverage-mask";
+import type { PixiActiveRegionMaskCoverage } from "./pixi-mask-layer";
 
 type RegionAsset = PixiTexture | PixiGifSource;
 type RegionDisplay = PixiSprite | PixiGifSprite;
@@ -56,7 +56,7 @@ interface RegionSpriteEntry {
   readonly rendererId: string;
   readonly sourceKey: string;
   coverageMask?: PixiGraphics;
-  idCoverageMask?: PixiRegionIdMask;
+  exactCoverageMask?: PixiRegionCoverageMask;
   active: boolean;
   baseX: number;
   baseY: number;
@@ -145,7 +145,7 @@ export function createPixiRegionLayer(options: {
     >,
   ) => PixiUniformGroup;
   readonly detectionTimeline: BufferedDetectionTimeline;
-  readonly getActiveIdMaskFrameTexture: () => PixiRegionIdMaskArtifact | null;
+  readonly getActiveRegionMaskCoverage: () => PixiActiveRegionMaskCoverage | null;
   readonly getMediaTexture: () => PixiTexture | undefined;
   readonly onInvalidate?: () => void;
   readonly onAssetError?: (options: {
@@ -347,7 +347,7 @@ export function createPixiRegionLayer(options: {
         if (!entry.active || entry.detectionId !== id) continue;
         entry.display.position.set(entry.baseX + x, entry.baseY + y);
         entry.coverageMask?.position.set(entry.baseX + x, entry.baseY + y);
-        entry.idCoverageMask?.display.position.set(
+        entry.exactCoverageMask?.display.position.set(
           entry.baseX + x,
           entry.baseY + y,
         );
@@ -521,16 +521,28 @@ export function createPixiRegionLayer(options: {
 
     if (renderer.source.coverage.kind === RegionRendererCoverageKind.Mask) {
       removePolygonCoverageMask(entry);
-      const artifact = options.getActiveIdMaskFrameTexture();
+      const artifact = options.getActiveRegionMaskCoverage();
 
       if (!detection.mask || !artifact) {
-        removeIdCoverageMask(entry);
+        removeExactCoverageMask(entry);
+        return false;
+      }
+
+      const coverageEntry = artifact.frame.entries.find(
+        (entry) => entry.detectionIndex === detectionIndex,
+      );
+      const coverageTexture = coverageEntry
+        ? artifact.getTexture(coverageEntry)
+        : undefined;
+
+      if (!coverageEntry || !coverageTexture) {
+        removeExactCoverageMask(entry);
         return false;
       }
 
       const mask =
-        entry.idCoverageMask ??
-        createPixiRegionIdMask({
+        entry.exactCoverageMask ??
+        createPixiRegionCoverageMask({
           AlphaMask: options.AlphaMask,
           ImageSource: options.ImageSource,
           Mesh: options.Mesh,
@@ -539,8 +551,8 @@ export function createPixiRegionLayer(options: {
           UniformGroup: options.UniformGroup,
         });
 
-      if (!entry.idCoverageMask) {
-        entry.idCoverageMask = mask;
+      if (!entry.exactCoverageMask) {
+        entry.exactCoverageMask = mask;
         container?.addChild(mask.display);
         // A Mesh assigned through `display.mask` becomes a stencil mask in
         // Pixi v8, which clips by the quad geometry and ignores shader alpha.
@@ -552,19 +564,17 @@ export function createPixiRegionLayer(options: {
       const mediaTexture = options.getMediaTexture();
 
       if (!mediaTexture) {
-        removeIdCoverageMask(entry);
+        removeExactCoverageMask(entry);
         return false;
       }
 
       mask.render({
-        artifact,
+        artifact: { texture: coverageTexture },
+        coverage: coverageEntry,
         crop,
         flipHorizontal: renderer.transform?.flip?.horizontal ?? false,
         flipVertical: renderer.transform?.flip?.vertical ?? false,
         height: entry.display.height,
-        maskId: detectionIndex + 1,
-        mediaHeight: mediaTexture.source.height,
-        mediaWidth: mediaTexture.source.width,
         rotation: entry.display.rotation,
         width: entry.display.width,
         x: entry.display.position.x,
@@ -582,7 +592,7 @@ export function createPixiRegionLayer(options: {
       return false;
     }
 
-    removeIdCoverageMask(entry);
+    removeExactCoverageMask(entry);
 
     const mask = entry.coverageMask ?? new options.Graphics();
     if (!entry.coverageMask) {
@@ -614,7 +624,7 @@ export function createPixiRegionLayer(options: {
 
   function removeCoverageMask(entry: RegionSpriteEntry) {
     removePolygonCoverageMask(entry);
-    removeIdCoverageMask(entry);
+    removeExactCoverageMask(entry);
   }
 
   function removePolygonCoverageMask(entry: RegionSpriteEntry) {
@@ -625,12 +635,12 @@ export function createPixiRegionLayer(options: {
     entry.coverageMask = undefined;
   }
 
-  function removeIdCoverageMask(entry: RegionSpriteEntry) {
-    if (!entry.idCoverageMask) return;
-    entry.display.removeEffect(entry.idCoverageMask.effect);
-    entry.idCoverageMask.display.removeFromParent();
-    entry.idCoverageMask.destroy();
-    entry.idCoverageMask = undefined;
+  function removeExactCoverageMask(entry: RegionSpriteEntry) {
+    if (!entry.exactCoverageMask) return;
+    entry.display.removeEffect(entry.exactCoverageMask.effect);
+    entry.exactCoverageMask.display.removeFromParent();
+    entry.exactCoverageMask.destroy();
+    entry.exactCoverageMask = undefined;
   }
 
   function destroyRendererDisplays(rendererId: string) {
@@ -664,10 +674,10 @@ function destroyEntry(entry: RegionSpriteEntry) {
   entry.display.mask = null;
   entry.coverageMask?.removeFromParent();
   entry.coverageMask?.destroy();
-  if (entry.idCoverageMask) {
-    entry.display.removeEffect(entry.idCoverageMask.effect);
-    entry.idCoverageMask.display.removeFromParent();
-    entry.idCoverageMask.destroy();
+  if (entry.exactCoverageMask) {
+    entry.display.removeEffect(entry.exactCoverageMask.effect);
+    entry.exactCoverageMask.display.removeFromParent();
+    entry.exactCoverageMask.destroy();
   }
   entry.display.removeFromParent?.();
   // GifSprite sources are shared and released through Assets.unload().

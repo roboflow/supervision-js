@@ -474,10 +474,21 @@ describe("pixi region layer", () => {
       GifSprite: FakeGifSprite as never,
       Sprite: FakeSprite as never,
       detectionTimeline: createTimeline(headFrame),
-      getActiveIdMaskFrameTexture: () =>
+      getActiveRegionMaskCoverage: () =>
         ({
-          frame: { height: 200, width: 300 },
-          texture: idMaskTexture,
+          frame: {
+            entries: [
+              {
+                data: new Uint8Array(400),
+                detectionIndex: 0,
+                height: 20,
+                width: 20,
+                x: 90,
+                y: 30,
+              },
+            ],
+          },
+          getTexture: () => idMaskTexture,
         }) as never,
       regionRenderers: [
         annotationRenderers.region({
@@ -505,12 +516,14 @@ describe("pixi region layer", () => {
 
     expect(display).toMatchObject({ height: 60, width: 70 });
     expect(maskEffect.mask).toBe(mask);
-    expect(uniforms.uniforms.uMaskId).toBe(1);
     const crop = Array.from(uniforms.uniforms.uCrop as Float32Array);
-    const expectedCrop = [86 / 300, 28 / 200, 28 / 300, 24 / 200];
+    const expectedCrop = [86, 28, 28, 24];
     crop.forEach((value, index) =>
       expect(value).toBeCloseTo(expectedCrop[index]!),
     );
+    expect(Array.from(uniforms.uniforms.uMaskRegion as Float32Array)).toEqual([
+      90, 30, 20, 20,
+    ]);
     expect(mask.position.set).toHaveBeenCalledWith(100, 40);
     expect(mask.scale.set).toHaveBeenCalledWith(70, 60);
   });
@@ -874,7 +887,7 @@ function createTestBackend(mediaTexture?: FakeTexture) {
     } as never,
     Texture: FakeTexture as never,
     UniformGroup: FakeUniformGroup as never,
-    getActiveIdMaskFrameTexture: () => null,
+    getActiveRegionMaskCoverage: () => null,
     getMediaTexture: () => mediaTexture as never,
   };
 }
