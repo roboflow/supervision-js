@@ -267,7 +267,7 @@ describe("video engine media source", () => {
 
     expect(source.metadata.primaryVideoWidth).toBe(1920);
     expect(engine.options).toEqual([
-      { presentation: "frames", previewWidth: 960, source: urlSource },
+      { presentation: "frames", previewWidth: 320, source: urlSource },
     ]);
   });
 
@@ -316,6 +316,52 @@ describe("video engine media source", () => {
 
     const lastOptions = engine.options.at(-1) as { decodeStrategy?: unknown };
     expect(lastOptions.decodeStrategy).toEqual({ kind: "native" });
+  });
+
+  it("holds scrub previews to one width across every box big enough for them", async () => {
+    const rendererSource = createVideoEngineMediaRendererSource({
+      display: {
+        boxWidth: 1080,
+        boxHeight: 854,
+        devicePixelRatio: 2,
+        maxDevicePixelRatio: 2,
+      },
+      source: urlSource,
+    });
+
+    await rendererSource.open();
+
+    const lastOptions = engine.options.at(-1) as { previewWidth?: number };
+    expect(lastOptions.previewWidth).toBe(320);
+  });
+
+  it("keeps a scrub preview no wider than the device pixels of a small box", async () => {
+    const rendererSource = createVideoEngineMediaRendererSource({
+      display: {
+        boxWidth: 180,
+        boxHeight: 320,
+        devicePixelRatio: 2,
+        maxDevicePixelRatio: 1.5,
+      },
+      source: urlSource,
+    });
+
+    await rendererSource.open();
+
+    const lastOptions = engine.options.at(-1) as { previewWidth?: number };
+    expect(lastOptions.previewWidth).toBe(270);
+  });
+
+  it("caps an unstated pixel-ratio ceiling the way the decode strategy does", async () => {
+    const rendererSource = createVideoEngineMediaRendererSource({
+      display: { boxWidth: 100, boxHeight: 200, devicePixelRatio: 3 },
+      source: urlSource,
+    });
+
+    await rendererSource.open();
+
+    const lastOptions = engine.options.at(-1) as { previewWidth?: number };
+    expect(lastOptions.previewWidth).toBe(200);
   });
 
   it("lets the caller size scrub previews themselves", async () => {

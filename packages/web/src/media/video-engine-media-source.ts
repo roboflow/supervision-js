@@ -22,7 +22,8 @@ import type {
 const MILLISECONDS_PER_SECOND = 1000;
 const DEFAULT_FRAME_RATE = 30;
 const TIMESTAMP_EPSILON_SECONDS = 1e-6;
-const FRAMES_PRESENTATION_PREVIEW_WIDTH_PX = 960;
+const FRAMES_PRESENTATION_PREVIEW_MAX_WIDTH_PX = 320;
+const DEFAULT_MAX_DEVICE_PIXEL_RATIO = 2;
 
 export interface VideoEngineMediaSourceOptions extends Omit<
   VideoEngineOptions,
@@ -78,11 +79,7 @@ export async function openVideoEngineMediaSource(
   const { display, frameDecodeStrategy, ...engineOptions } = options;
   const engine = new VideoEngine({
     decodeStrategy: display ? displayBoxResolution(display) : undefined,
-    // The engine's preview cache defaults to thumbnail-strip resolution. A
-    // frames-mode consumer is a full-view player, where a scrub preview at
-    // that size upscales into visible mush, so ask for previews near display
-    // size unless the caller decides otherwise.
-    previewWidth: FRAMES_PRESENTATION_PREVIEW_WIDTH_PX,
+    previewWidth: framesPreviewWidth(display),
     ...engineOptions,
     presentation: "frames",
   });
@@ -120,6 +117,31 @@ export function createVideoEngineMediaRendererSource(
       return openVideoEngineMediaSource(options);
     },
   };
+}
+
+/**
+ * A wider coarse frame means fewer of them resident, and residency is what a
+ * drag spends: a scrub position holding no coarse frame paints nothing until a
+ * full decode returns. A stated box only ever lowers the width, since a preview
+ * wider than the picture it stands in for buys no sharpness and costs resident
+ * frames.
+ */
+function framesPreviewWidth(
+  display: DisplayBoxResolutionOptions | undefined,
+): number {
+  if (display === undefined || !(display.boxWidth > 0)) {
+    return FRAMES_PRESENTATION_PREVIEW_MAX_WIDTH_PX;
+  }
+
+  const devicePixelRatio = Math.min(
+    display.devicePixelRatio > 0 ? display.devicePixelRatio : 1,
+    display.maxDevicePixelRatio ?? DEFAULT_MAX_DEVICE_PIXEL_RATIO,
+  );
+
+  return Math.min(
+    FRAMES_PRESENTATION_PREVIEW_MAX_WIDTH_PX,
+    Math.ceil(display.boxWidth * devicePixelRatio),
+  );
 }
 
 function createAnalysisFrameReader(options: {
