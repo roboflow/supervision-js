@@ -38,6 +38,10 @@ const analysis = vi.hoisted(() => ({
 
 vi.mock("@roboflow/video-engine", () => ({
   SourceKind: { Blob: "blob", Stream: "stream", Url: "url" },
+  displayBoxResolution: (options: unknown) => ({
+    kind: "displayBox",
+    ...(options as object),
+  }),
   VideoEngine: class {
     readonly dispose = engine.dispose;
     readonly load = engine.load;
@@ -265,6 +269,53 @@ describe("video engine media source", () => {
     expect(engine.options).toEqual([
       { presentation: "frames", previewWidth: 960, source: urlSource },
     ]);
+  });
+
+  it("leaves the decode resolution to the engine when no display box is given", async () => {
+    const rendererSource = createVideoEngineMediaRendererSource({
+      source: urlSource,
+    });
+
+    await rendererSource.open();
+
+    const lastOptions = engine.options.at(-1) as { decodeStrategy?: unknown };
+    expect(lastOptions.decodeStrategy).toBeUndefined();
+  });
+
+  it("decodes to the display box the caller composites into", async () => {
+    const rendererSource = createVideoEngineMediaRendererSource({
+      display: {
+        boxWidth: 1080,
+        boxHeight: 854,
+        devicePixelRatio: 2,
+        maxDevicePixelRatio: 2,
+      },
+      source: urlSource,
+    });
+
+    await rendererSource.open();
+
+    const lastOptions = engine.options.at(-1) as { decodeStrategy?: unknown };
+    expect(lastOptions.decodeStrategy).toEqual({
+      kind: "displayBox",
+      boxWidth: 1080,
+      boxHeight: 854,
+      devicePixelRatio: 2,
+      maxDevicePixelRatio: 2,
+    });
+  });
+
+  it("lets an explicit decode strategy win over the display box", async () => {
+    const rendererSource = createVideoEngineMediaRendererSource({
+      decodeStrategy: { kind: "native" },
+      display: { boxWidth: 1080, boxHeight: 854, devicePixelRatio: 2 },
+      source: urlSource,
+    });
+
+    await rendererSource.open();
+
+    const lastOptions = engine.options.at(-1) as { decodeStrategy?: unknown };
+    expect(lastOptions.decodeStrategy).toEqual({ kind: "native" });
   });
 
   it("lets the caller size scrub previews themselves", async () => {

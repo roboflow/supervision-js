@@ -17,6 +17,7 @@ import {
   loadDemoFixtureDetectionManifest,
 } from "../fixtures/demo-fixtures";
 import { createDemoPresentation } from "../presentation/demo-presentation";
+import { readDemoDisplayBox } from "./decode-resolution";
 import { getDemoMaxDevicePixelRatio } from "./render-quality";
 import type { DemoSessionCallbacks } from "./demo-session-types";
 
@@ -75,7 +76,12 @@ export async function createFixtureSession(
               : DetectionFrameSelectionMode.Interval,
         },
       },
-      media: options.tapMediaSource(createDemoFixtureMedia(options.definition)),
+      media: options.tapMediaSource(
+        createDemoFixtureMedia(
+          options.definition,
+          readDemoDisplayBox(options.container, options.renderQuality),
+        ),
+      ),
       onState: options.onSessionState,
       presentation,
       renderer: {

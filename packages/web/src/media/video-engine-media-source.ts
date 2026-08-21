@@ -8,6 +8,7 @@ import type { PresentedFrameChannel } from "#renderers/presented-frame-channel";
 import type { MediaRendererSource } from "#types/media-renderer";
 import type {
   DecodeResolutionStrategy,
+  DisplayBoxResolutionOptions,
   EngineReadySnapshot,
   VideoEngine,
   VideoEngineOptions,
@@ -27,6 +28,19 @@ export interface VideoEngineMediaSourceOptions extends Omit<
   VideoEngineOptions,
   "presentation"
 > {
+  /**
+   * The box a compositor paints these frames into, in CSS pixels, with the
+   * viewer's device pixel ratio.
+   *
+   * This source runs the engine canvas-less, so nothing on the engine side ever
+   * measures a display box and its viewport strategy has nothing to read: left
+   * unsaid, frames decode at the source's full resolution however small the box
+   * is. Saying it here decodes at the size the frames are actually shown at,
+   * which cuts per-frame paint work and buys the scrub cache more slots at the
+   * cost of preview sharpness while scrubbing. An explicit `decodeStrategy`
+   * wins over this.
+   */
+  readonly display?: DisplayBoxResolutionOptions;
   /**
    * Sizes the frames the pull path decodes. The inherited `decodeStrategy`
    * sizes what the engine decodes for its own presentation.
@@ -59,9 +73,11 @@ export async function openVideoEngineMediaSource(
   // for consumers that never open a video-engine source: the specifier is
   // external to the build, and a static import would make resolving it a
   // precondition of importing the package at all.
-  const { VideoEngine } = await import("@roboflow/video-engine");
-  const { frameDecodeStrategy, ...engineOptions } = options;
+  const { VideoEngine, displayBoxResolution } =
+    await import("@roboflow/video-engine");
+  const { display, frameDecodeStrategy, ...engineOptions } = options;
   const engine = new VideoEngine({
+    decodeStrategy: display ? displayBoxResolution(display) : undefined,
     // The engine's preview cache defaults to thumbnail-strip resolution. A
     // frames-mode consumer is a full-view player, where a scrub preview at
     // that size upscales into visible mush, so ask for previews near display

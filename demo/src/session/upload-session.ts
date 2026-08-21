@@ -27,6 +27,7 @@ import {
   type PreparedUploadMedia,
 } from "../media/upload-media";
 import { createDemoPresentation } from "../presentation/demo-presentation";
+import { readDemoDisplayBox } from "./decode-resolution";
 import { UPLOAD_DETECTION_CHUNK_SECONDS } from "./demo-session-config";
 import { getDemoMaxDevicePixelRatio } from "./render-quality";
 import type {
@@ -101,6 +102,7 @@ export async function createUploadSession(
       },
       media: options.tapMediaSource(
         createVideoEngineMediaRendererSource({
+          display: readDemoDisplayBox(options.container, options.renderQuality),
           source: {
             blob: preparedMedia?.blob ?? options.uploadRun.file,
             kind: SourceKind.Blob,

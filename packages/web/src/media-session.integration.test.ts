@@ -356,7 +356,6 @@ describe("media session integration", () => {
         key: message.job.key,
         maxStrokeWidth: 1,
         raster: new Uint8Array([1, 0, 0, 0]),
-        rasterFormat: "rgba8unorm",
         requestId: message.requestId,
         strokePalette: new Float32Array([0, 0, 0, 0, 1, 1, 1, 1]),
         strokeWidths: new Float32Array([0, 1]),
