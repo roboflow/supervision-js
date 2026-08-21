@@ -105,7 +105,7 @@ Start with [Application Integration](docs/public/guides/application-integration.
 **Supported browser APIs** include `createMediaSession`, media preparation and
 playback controls, detections, the renderer-first `annotationRenderers` API,
 boxes, box corners, ellipses, markers, masks, mask halos, polygons, polylines,
-keypoints, labels, asset regions, presentation styles, picking, and the
+keypoints, labels, asset- and media-backed regions, presentation styles, picking, and the
 advanced editing subpath.
 
 **Advanced browser APIs** expose lower-level renderer construction, detection

@@ -129,6 +129,7 @@ export interface PolylineAnnotationRenderer extends BaseAnnotationRenderer {
 /** Sources currently supported by a region renderer. */
 export const RegionRendererSourceKind = {
   Asset: "asset",
+  Media: "media",
 } as const;
 
 export type RegionRendererSourceKind =
@@ -142,6 +143,24 @@ export const RegionRendererRegionKind = {
 
 export type RegionRendererRegionKind =
   (typeof RegionRendererRegionKind)[keyof typeof RegionRendererRegionKind];
+
+/** Semantic coverage used to clip pixels sampled from the current media. */
+export const RegionRendererCoverageKind = {
+  Mask: "mask",
+  Polygon: "polygon",
+} as const;
+
+export type RegionRendererCoverageKind =
+  (typeof RegionRendererCoverageKind)[keyof typeof RegionRendererCoverageKind];
+
+/** Coordinate space used by an explicit region-renderer size. */
+export const RegionRendererSizeSpace = {
+  Media: "media",
+  Screen: "screen",
+} as const;
+
+export type RegionRendererSizeSpace =
+  (typeof RegionRendererSizeSpace)[keyof typeof RegionRendererSizeSpace];
 
 /** Composition modes currently supported by a region renderer. */
 export const RegionRendererComposeMode = {
@@ -177,6 +196,34 @@ export interface RegionRendererAssetSource {
   readonly asset: RegionRendererAssetReference;
 }
 
+/**
+ * Reuses pixels from the renderer-owned media frame.
+ *
+ * The source region is resolved from the same semantic detection as the
+ * destination region. Browser backends crop the already-presented media
+ * texture; they must not create another decoder or expose that texture.
+ */
+export interface RegionRendererMediaSource {
+  readonly kind: typeof RegionRendererSourceKind.Media;
+  readonly region: RegionRendererRegion;
+  /** Optional semantic coverage that removes pixels outside the source shape. */
+  readonly coverage?:
+    RegionRendererMaskCoverage | RegionRendererPolygonCoverage;
+}
+
+/** Clips a media crop to the detection's exact semantic mask. */
+export interface RegionRendererMaskCoverage {
+  readonly kind: typeof RegionRendererCoverageKind.Mask;
+}
+
+/** Clips a media crop to the detection's closed polygon. */
+export interface RegionRendererPolygonCoverage {
+  readonly kind: typeof RegionRendererCoverageKind.Polygon;
+}
+
+export type RegionRendererSource =
+  RegionRendererAssetSource | RegionRendererMediaSource;
+
 export interface RegionRendererBoundsRegion {
   readonly kind: typeof RegionRendererRegionKind.Bounds;
 }
@@ -196,17 +243,44 @@ export interface RegionRendererKeypointAnchorRegion {
 export type RegionRendererRegion =
   RegionRendererBoundsRegion | RegionRendererKeypointAnchorRegion;
 
-/** Media-space transform applied after a target region is resolved. */
-export interface RegionRendererTransform {
-  /** Uniform scale relative to the resolved region. Defaults to 1. */
-  readonly scale?: number;
+interface RegionRendererTransformBase {
   /** Region-relative translation. `{ x: 1, y: 1 }` moves one region size. */
   readonly offset?: { readonly x: number; readonly y: number };
   /** Clockwise rotation in radians. Defaults to 0. */
   readonly rotation?: number;
   /** Sprite opacity from 0 through 1. Defaults to 1. */
   readonly opacity?: number;
+  /** Mirrors the rendered region around its destination anchor. */
+  readonly flip?: {
+    readonly horizontal?: boolean;
+    readonly vertical?: boolean;
+  };
 }
+
+/** Keeps an asset at one explicit size instead of deriving it from a detection. */
+export interface RegionRendererSize {
+  /** Rendered width in the declared size space. */
+  readonly width: number;
+  /** Rendered height. Omit it to preserve the source aspect ratio. */
+  readonly height?: number;
+  /** Defaults to media space. Screen space stays constant while zooming. */
+  readonly space?: RegionRendererSizeSpace;
+}
+
+export interface RegionRendererRelativeTransform extends RegionRendererTransformBase {
+  /** Uniform scale relative to the resolved region. Defaults to 1. */
+  readonly scale?: number;
+  readonly size?: never;
+}
+
+export interface RegionRendererSizedTransform extends RegionRendererTransformBase {
+  readonly scale?: never;
+  readonly size: RegionRendererSize;
+}
+
+/** Transform applied after a target region is resolved. */
+export type RegionRendererTransform =
+  RegionRendererRelativeTransform | RegionRendererSizedTransform;
 
 export interface RegionRendererCompose {
   readonly mode: typeof RegionRendererComposeMode.Over;
@@ -215,15 +289,16 @@ export interface RegionRendererCompose {
 }
 
 /**
- * Places a browser-loaded asset over a detection-owned region.
+ * Places an asset or a crop of the current media frame over a
+ * detection-owned region.
  *
  * This descriptor is intentionally semantic and backend-neutral. Asset
- * loading, texture caching, sprites, and teardown remain backend details.
+ * loading, media texture reuse, sprites, and teardown remain backend details.
  */
 export interface RegionAnnotationRenderer extends BaseAnnotationRenderer {
   readonly kind: "region";
   readonly target: RegionRendererTarget;
-  readonly source: RegionRendererAssetSource;
+  readonly source: RegionRendererSource;
   readonly region: RegionRendererRegion;
   readonly transform?: RegionRendererTransform;
   readonly compose?: RegionRendererCompose;

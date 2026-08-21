@@ -11,6 +11,8 @@ import {
 import {
   PreparedMaskFrameKind,
   type PreparedPngIdMaskFrame,
+  type PreparedRegionMaskCoverageEntry,
+  type PreparedRegionMaskCoverageFrame,
   type PreparedRgbaMaskFrame,
 } from "#render-preparation/mask-frame-artifact";
 import type { BufferedDetectionTimeline } from "supervision-js-core";
@@ -112,6 +114,7 @@ export interface PixiMaskLayer {
     mediaTime: number,
   ): DetectionPickResult | null;
   getActiveIdMaskFrameTexture(): PixiActiveIdMaskFrameTexture | null;
+  getActiveRegionMaskCoverage(): PixiActiveRegionMaskCoverage | null;
   setTimelineContext(context: PreparedRenderTimelineContext): void;
   setMaskStyle(maskStyle: MaskStyle | null | undefined): void;
   setMaskHaloStyle(maskHaloStyle: MaskHaloStyle | null | undefined): void;
@@ -121,6 +124,11 @@ export interface PixiMaskLayer {
 export interface PixiActiveIdMaskFrameTexture {
   readonly frame: PreparedPngIdMaskFrame;
   readonly texture: PixiTexture;
+}
+
+export interface PixiActiveRegionMaskCoverage {
+  readonly frame: PreparedRegionMaskCoverageFrame;
+  getTexture(entry: PreparedRegionMaskCoverageEntry): PixiTexture | undefined;
 }
 
 export function createPixiMaskLayer(options: {
@@ -165,6 +173,7 @@ export function createPixiMaskLayer(options: {
   let maskSprite: PixiSprite | undefined;
   let activeFrameKey: string | null = null;
   let activeFrameMediaTime: number | null = null;
+  let activeRegionMaskFrameKey: string | null = null;
   let activeIdMaskFrame: PreparedPngIdMaskFrame | null = null;
   let activeRgbaMaskFrame: PreparedRgbaMaskFrame | null = null;
   let maskOpacity = resolveMaskStyleOpacity(options.maskStyle);
@@ -175,6 +184,7 @@ export function createPixiMaskLayer(options: {
   let isDestroyed = false;
   const maskTextures = new Map<string, PixiTexture>();
   const haloTextures = new Map<string, PixiTexture>();
+  const regionMaskTextures = new Map<string, Map<number, PixiTexture>>();
   const preparedRenderWindow = createPreparedRenderWindow({
     artifactKind: options.artifactKind,
     detectionTimeline: options.detectionTimeline,
@@ -194,7 +204,8 @@ export function createPixiMaskLayer(options: {
       if (!isDestroyed && maskFrame.key === activeFrameKey) {
         showMaskFrame(maskFrame, activeFrameMediaTime);
         if (
-          maskFrame.kind === PreparedMaskFrameKind.PngIdMask &&
+          (maskFrame.kind === PreparedMaskFrameKind.PngIdMask ||
+            maskFrame.regionMaskCoverage) &&
           activeFrameMediaTime !== null
         ) {
           options.onActiveIdMaskFramePresented?.();
@@ -332,6 +343,20 @@ export function createPixiMaskLayer(options: {
       };
     },
 
+    getActiveRegionMaskCoverage() {
+      if (activeRegionMaskFrameKey !== activeFrameKey) return null;
+      const coverage =
+        activeIdMaskFrame?.regionMaskCoverage ??
+        activeRgbaMaskFrame?.regionMaskCoverage;
+
+      if (!coverage) return null;
+
+      return {
+        frame: coverage,
+        getTexture: (entry) => getRegionMaskTexture(activeFrameKey!, entry),
+      };
+    },
+
     setTimelineContext(context) {
       preparedRenderWindow.setTimelineContext(context);
     },
@@ -375,6 +400,7 @@ export function createPixiMaskLayer(options: {
     mediaTime: number | null,
   ) {
     visibleMaskMediaTime = mediaTime;
+    activeRegionMaskFrameKey = maskFrame.key;
     activeIdMaskFrame =
       maskFrame.kind === PreparedMaskFrameKind.PngIdMask ? maskFrame : null;
     activeRgbaMaskFrame =
@@ -462,6 +488,46 @@ export function createPixiMaskLayer(options: {
 
     haloTextures.set(maskFrame.key, texture);
 
+    return texture;
+  }
+
+  function getRegionMaskTexture(
+    frameKey: string,
+    entry: PreparedRegionMaskCoverageEntry,
+  ) {
+    const textures = regionMaskTextures.get(frameKey) ?? new Map();
+    const existingTexture = textures.get(entry.detectionIndex);
+    if (existingTexture) return existingTexture;
+
+    if (typeof document === "undefined") return undefined;
+
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
+    if (!context) return undefined;
+
+    canvas.width = entry.width;
+    canvas.height = entry.height;
+    const rgba = new Uint8ClampedArray(
+      new ArrayBuffer(entry.width * entry.height * 4),
+    );
+    for (let index = 0; index < entry.data.length; index += 1) {
+      const offset = index * 4;
+      rgba[offset] = entry.data[index]!;
+      rgba[offset + 3] = 255;
+    }
+    context.putImageData(new ImageData(rgba, entry.width, entry.height), 0, 0);
+    const source = new options.ImageSource({
+      autoGenerateMipmaps: false,
+      dynamic: false,
+      height: entry.height,
+      resource: canvas,
+      scaleMode: "nearest",
+      width: entry.width,
+    });
+    const texture = new options.Texture({ dynamic: false, source });
+
+    textures.set(entry.detectionIndex, texture);
+    regionMaskTextures.set(frameKey, textures);
     return texture;
   }
 
@@ -595,6 +661,7 @@ export function createPixiMaskLayer(options: {
     visibleMaskMediaTime = null;
     activeIdMaskFrame = null;
     activeRgbaMaskFrame = null;
+    activeRegionMaskFrameKey = null;
 
     if (maskSprite) {
       maskSprite.visible = false;
@@ -625,6 +692,7 @@ export function createPixiMaskLayer(options: {
 
     if (!texture) {
       destroyHaloTexture(key);
+      destroyRegionMaskTextures(key);
       return;
     }
 
@@ -632,6 +700,7 @@ export function createPixiMaskLayer(options: {
     maskTextures.delete(key);
     texture.destroy(true);
     destroyHaloTexture(key);
+    destroyRegionMaskTextures(key);
   }
 
   function destroyHaloTexture(key: string) {
@@ -643,6 +712,13 @@ export function createPixiMaskLayer(options: {
 
     haloTextures.delete(key);
     texture.destroy(true);
+  }
+
+  function destroyRegionMaskTextures(key: string) {
+    const textures = regionMaskTextures.get(key);
+    if (!textures) return;
+    regionMaskTextures.delete(key);
+    for (const texture of textures.values()) texture.destroy(true);
   }
 
   function destroyTextures() {
@@ -659,6 +735,12 @@ export function createPixiMaskLayer(options: {
     }
 
     haloTextures.clear();
+
+    for (const textures of regionMaskTextures.values()) {
+      for (const texture of textures.values()) texture.destroy(true);
+    }
+
+    regionMaskTextures.clear();
   }
 
   function releaseTextureBindings(key?: string, texture?: PixiTexture) {

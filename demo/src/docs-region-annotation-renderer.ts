@@ -1,10 +1,13 @@
 import {
+  RegionRendererCoverageKind,
+  RegionRendererSizeSpace,
   annotationRenderers,
   type RegionAnnotationRenderer,
 } from "supervision";
 
 export const RegionPlaygroundMode = {
   AnimatedGif: "animated-gif",
+  MediaCrop: "media-crop",
   StaticIcons: "static-icons",
 } as const;
 
@@ -12,6 +15,8 @@ export type RegionPlaygroundMode =
   (typeof RegionPlaygroundMode)[keyof typeof RegionPlaygroundMode];
 
 export interface RegionPlaygroundSettings {
+  readonly assetSize: number;
+  readonly flipHorizontal: boolean;
   readonly mode: RegionPlaygroundMode;
   readonly offsetY: number;
   readonly rotationDegrees: number;
@@ -28,21 +33,33 @@ const modeDefaults: Readonly<
   Record<RegionPlaygroundMode, RegionPlaygroundSettings>
 > = {
   [RegionPlaygroundMode.AnimatedGif]: {
+    assetSize: 52,
+    flipHorizontal: false,
     mode: RegionPlaygroundMode.AnimatedGif,
     offsetY: -0.58,
     rotationDegrees: 0,
-    scale: 1.35,
+    scale: 1,
+  },
+  [RegionPlaygroundMode.MediaCrop]: {
+    assetSize: 48,
+    flipHorizontal: false,
+    mode: RegionPlaygroundMode.MediaCrop,
+    offsetY: 0,
+    rotationDegrees: 0,
+    scale: 2.5,
   },
   [RegionPlaygroundMode.StaticIcons]: {
+    assetSize: 44,
+    flipHorizontal: false,
     mode: RegionPlaygroundMode.StaticIcons,
     offsetY: -1.05,
     rotationDegrees: 0,
-    scale: 0.95,
+    scale: 1,
   },
 };
 
 export const initialRegionPlaygroundSettings =
-  modeDefaults[RegionPlaygroundMode.StaticIcons];
+  modeDefaults[RegionPlaygroundMode.MediaCrop];
 
 export function createRegionPlaygroundSettings(
   mode: RegionPlaygroundMode,
@@ -54,6 +71,31 @@ export function createRegionPlaygroundRenderers(
   settings: RegionPlaygroundSettings,
   assets: RegionPlaygroundAssets,
 ): readonly RegionAnnotationRenderer[] {
+  if (settings.mode === RegionPlaygroundMode.MediaCrop) {
+    return [
+      annotationRenderers.region({
+        compose: { mode: "over" },
+        id: "player-big-heads",
+        region: { kind: "bounds" },
+        source: {
+          coverage: { kind: RegionRendererCoverageKind.Mask },
+          kind: "media",
+          region: { kind: "bounds" },
+        },
+        target: {
+          className: "head",
+          sourceId: "sam3-head",
+        },
+        transform: {
+          flip: { horizontal: settings.flipHorizontal },
+          offset: { x: 0, y: settings.offsetY },
+          rotation: degreesToRadians(settings.rotationDegrees),
+          scale: settings.scale,
+        },
+      }),
+    ];
+  }
+
   if (settings.mode === RegionPlaygroundMode.AnimatedGif) {
     return [
       createRegionRenderer({
@@ -84,11 +126,38 @@ export function createRegionPlaygroundRenderers(
 export function createRegionPlaygroundSnippet(
   settings: RegionPlaygroundSettings,
 ) {
-  const transform = `transform: {
+  const flip = settings.flipHorizontal
+    ? "\n        flip: { horizontal: true },"
+    : "";
+  const relativeTransform = `transform: {
         scale: ${settings.scale.toFixed(2)},
+        offset: { x: 0, y: ${settings.offsetY.toFixed(2)} },
+        rotation: ${degreesToRadians(settings.rotationDegrees).toFixed(2)},${flip}
+      }`;
+  const assetTransform = `transform: {
+        size: { width: ${settings.assetSize}, space: "screen" },
         offset: { x: 0, y: ${settings.offsetY.toFixed(2)} },
         rotation: ${degreesToRadians(settings.rotationDegrees).toFixed(2)},
       }`;
+
+  if (settings.mode === RegionPlaygroundMode.MediaCrop) {
+    return `session.setPresentation({
+  renderers: [
+    annotationRenderers.region({
+      id: "player-big-heads",
+      target: { className: "head", sourceId: "sam3-head" },
+      source: {
+        kind: "media",
+        region: { kind: "bounds" },
+        coverage: { kind: "mask" },
+      },
+      region: { kind: "bounds" },
+      ${relativeTransform},
+      compose: { mode: "over" },
+    }),
+  ],
+});`;
+  }
 
   if (settings.mode === RegionPlaygroundMode.AnimatedGif) {
     return `session.setPresentation({
@@ -98,7 +167,7 @@ export function createRegionPlaygroundSnippet(
       target: { className: ["white team player", "yellow team player"] },
       source: { kind: "asset", asset: { src: fireGifUrl } },
       region: { kind: "keypoint-anchor", anchor: "head" },
-      ${transform},
+      ${assetTransform},
       compose: { mode: "over" },
     }),
   ],
@@ -117,7 +186,7 @@ session.setPresentation({
       target: { className },
       source: { kind: "asset", asset: { src } },
       region: { kind: "keypoint-anchor", anchor: "head" },
-      ${transform},
+      ${assetTransform},
       compose: { mode: "over" },
     }),
   ),
@@ -139,7 +208,10 @@ function createRegionRenderer(options: {
     transform: {
       offset: { x: 0, y: options.settings.offsetY },
       rotation: degreesToRadians(options.settings.rotationDegrees),
-      scale: options.settings.scale,
+      size: {
+        space: RegionRendererSizeSpace.Screen,
+        width: options.settings.assetSize,
+      },
     },
   });
 }

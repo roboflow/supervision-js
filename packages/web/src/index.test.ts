@@ -99,7 +99,9 @@ describe("package entrypoint", () => {
       "MediaSourceError",
       "MediaSourceStatus",
       "RegionRendererComposeMode",
+      "RegionRendererCoverageKind",
       "RegionRendererRegionKind",
+      "RegionRendererSizeSpace",
       "RegionRendererSourceKind",
       "RenderPreparationArtifactFrameStatus",
       "RenderPreparationArtifactKind",
@@ -1010,6 +1012,51 @@ describe("package entrypoint", () => {
       }),
     );
 
+    renderer.destroy();
+  });
+
+  it("keeps screen-sized region assets stable across paused viewport zoom", async () => {
+    resetMocks();
+    const asset = { height: 20, width: 40 };
+    pixiMock.assetLoad.mockResolvedValue(asset);
+    const renderer = await createRenderer(false, false, {
+      detectionFrames: [
+        {
+          detections: [
+            {
+              id: "player-7",
+              rect: { height: 100, width: 50, x: 100, y: 90 },
+            },
+          ],
+          frameIndex: 0,
+          mediaTime: 0,
+        },
+      ],
+      renderers: [
+        annotationRenderers.region({
+          id: "fixed-badge",
+          region: { kind: "bounds" },
+          source: { asset: { src: "/fixed-badge.png" }, kind: "asset" },
+          target: { id: "player-7" },
+          transform: { size: { space: "screen", width: 48 } },
+        }),
+      ],
+    });
+
+    await vi.waitFor(() => {
+      expect(renderer.getState().activeDetectionCount).toBe(1);
+    });
+    const display = pixiMock.spriteInstances.find(
+      (sprite) => (sprite.options as { texture?: unknown }).texture === asset,
+    );
+    const initialWidth = display!.width;
+    const initialScale = renderer.getViewportTransform().scale;
+
+    renderer.setViewportTransform({ scale: 2, x: 0, y: 0 });
+
+    expect(display!.width * renderer.getViewportTransform().scale).toBeCloseTo(
+      initialWidth * initialScale,
+    );
     renderer.destroy();
   });
 

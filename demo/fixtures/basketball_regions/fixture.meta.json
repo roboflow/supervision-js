@@ -1,0 +1,23 @@
+{
+  "datasetId": "basketball_regions_v1",
+  "displayName": "Basketball Region Effects",
+  "inferenceLabel": "SAM3 player and head masks",
+  "media": {
+    "file": "../basketball_sample/basketball_sample.mp4",
+    "loadingStatusLabel": "stream-normalizing 9s basketball sample",
+    "normalizeInBrowser": true,
+    "readyStatusLabel": "9s basketball sample source MP4 | browser-normalized WebM 30fps"
+  },
+  "presentation": {
+    "boxesEnabled": false,
+    "focusEnabled": false,
+    "keypointsEnabled": false,
+    "labelsEnabled": false,
+    "masksEnabled": false,
+    "polygonsEnabled": false,
+    "polylinesEnabled": false
+  },
+  "sampleName": "basketball_regions",
+  "schema": "supervision-js.demo.fixture-meta",
+  "version": 1
+}

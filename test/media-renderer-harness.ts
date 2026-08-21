@@ -39,6 +39,10 @@ type MockSamplesImplementation = (
 
 const mockState = vi.hoisted(() => {
   const pixiMock = {
+    alphaMaskInstances: [] as Array<{
+      destroy: ReturnType<typeof vi.fn>;
+      mask: unknown;
+    }>,
     assetLoad: vi.fn(async () => ({ height: 16, width: 16 })),
     assetUnload: vi.fn(async () => undefined),
     appDestroy: vi.fn(),
@@ -100,6 +104,7 @@ const mockState = vi.hoisted(() => {
       height: number;
       options: unknown;
       position: { set: ReturnType<typeof vi.fn> };
+      scale: { x: number; y: number };
       texture: unknown;
       visible: boolean;
       width: number;
@@ -315,10 +320,13 @@ vi.mock("pixi.js", () => {
     anchor = { set: vi.fn() };
     alpha = 1;
     destroy = vi.fn();
+    effects: unknown[] = [];
     height = 0;
+    mask: unknown = null;
     position = { set: vi.fn() };
     removeFromParent = vi.fn();
     rotation = 0;
+    scale = { x: 1, y: 1 };
     texture: unknown;
     visible = true;
     width = 0;
@@ -328,14 +336,39 @@ vi.mock("pixi.js", () => {
       this.texture = options.texture;
       pixiMock.spriteInstances.push(this);
     }
+
+    addEffect(effect: unknown) {
+      if (!this.effects.includes(effect)) this.effects.push(effect);
+    }
+
+    removeEffect(effect: unknown) {
+      const index = this.effects.indexOf(effect);
+      if (index >= 0) this.effects.splice(index, 1);
+    }
   }
 
   class Mesh {
     destroy = vi.fn();
+    position = { set: vi.fn() };
+    removeFromParent = vi.fn();
+    rotation = 0;
+    scale = { set: vi.fn() };
+    shader: unknown;
     visible = true;
 
-    constructor(public readonly options: unknown) {
+    constructor(public readonly options: { shader?: unknown }) {
+      this.shader = options.shader;
       pixiMock.meshInstances.push(this);
+    }
+  }
+
+  class AlphaMask {
+    destroy = vi.fn();
+    readonly mask: unknown;
+
+    constructor(options: { mask: unknown }) {
+      this.mask = options.mask;
+      pixiMock.alphaMaskInstances.push(this);
     }
   }
 
@@ -415,6 +448,7 @@ vi.mock("pixi.js", () => {
   }
 
   return {
+    AlphaMask,
     Application,
     Assets,
     BlurFilter,
@@ -542,6 +576,7 @@ vi.stubGlobal(
 );
 
 export function resetMocks() {
+  pixiMock.alphaMaskInstances.length = 0;
   pixiMock.assetLoad.mockClear();
   pixiMock.assetLoad.mockResolvedValue({ height: 16, width: 16 });
   pixiMock.assetUnload.mockClear();

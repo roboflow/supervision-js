@@ -9,6 +9,7 @@ import {
   compositeMaskFrame,
   createIdMaskFrame,
   createPngIdMaskFrame,
+  createRegionMaskCoverageFrame,
 } from "./mask-frame-compositor";
 
 const pngSignature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
@@ -153,6 +154,124 @@ describe("mask frame compositor", () => {
     expect(frame!.maxStrokeWidth).toBe(5);
     expect(frame!.strokeWidths[1]).toBe(5);
     expect([...frame!.strokePalette.slice(4, 8)]).toEqual([0, 1, 1, 1]);
+  });
+
+  it("preserves overlapping exact-region masks independently of detection indexes", () => {
+    const mask = {
+      counts: encodeCompressedRleCounts([0, 1]),
+      encoding: DetectionMaskEncoding.CompressedRle,
+      height: 1,
+      width: 1,
+    } as const;
+    const frame = createRegionMaskCoverageFrame([
+      {
+        alpha: 0,
+        color: 0,
+        detectionIndex: 0,
+        mask,
+        regionCoverageMask: mask,
+      },
+      {
+        alpha: 0,
+        color: 0,
+        detectionIndex: 63,
+        mask,
+        regionCoverageMask: mask,
+      },
+    ]);
+
+    expect(frame?.entries).toEqual([
+      {
+        data: Uint8Array.from([255]),
+        detectionIndex: 0,
+        height: 1,
+        width: 1,
+        x: 0,
+        y: 0,
+      },
+      {
+        data: Uint8Array.from([255]),
+        detectionIndex: 63,
+        height: 1,
+        width: 1,
+        x: 0,
+        y: 0,
+      },
+    ]);
+  });
+
+  it("does not impose a renderer target limit", () => {
+    const mask = {
+      counts: encodeCompressedRleCounts([0, 1]),
+      encoding: DetectionMaskEncoding.CompressedRle,
+      height: 1,
+      width: 1,
+    } as const;
+    const frame = createRegionMaskCoverageFrame(
+      Array.from({ length: 25 }, (_, detectionIndex) => ({
+        alpha: 0,
+        color: 0,
+        detectionIndex,
+        mask,
+        regionCoverageMask: mask,
+      })),
+    );
+
+    expect(frame?.entries).toHaveLength(25);
+    expect(frame?.entries[24]).toMatchObject({
+      detectionIndex: 24,
+    });
+  });
+
+  it("keeps Region coverage separate from visible mask composition", () => {
+    const visibleMask = {
+      counts: encodeCompressedRleCounts([0, 1]),
+      encoding: DetectionMaskEncoding.CompressedRle,
+      height: 1,
+      width: 2,
+    } as const;
+    const semanticCoverageMask = {
+      counts: encodeCompressedRleCounts([1, 1]),
+      encoding: DetectionMaskEncoding.CompressedRle,
+      height: 1,
+      width: 2,
+    } as const;
+    const instructions = [
+      {
+        alpha: 1,
+        color: 0xff0000,
+        detectionIndex: 0,
+        mask: visibleMask,
+        regionCoverageMask: semanticCoverageMask,
+      },
+      {
+        alpha: 0,
+        color: 0,
+        detectionIndex: 1,
+        mask: semanticCoverageMask,
+        regionCoverageMask: semanticCoverageMask,
+        visible: false,
+      },
+    ] as const;
+
+    const composited = compositeMaskFrame(instructions);
+    const coverage = createRegionMaskCoverageFrame(instructions);
+
+    expect(composited?.data).toEqual(
+      Uint8ClampedArray.from([255, 0, 0, 255, 0, 0, 0, 0]),
+    );
+    expect(coverage?.entries).toEqual([
+      expect.objectContaining({
+        data: Uint8Array.from([255]),
+        detectionIndex: 0,
+        x: 1,
+      }),
+      expect.objectContaining({
+        data: Uint8Array.from([255]),
+        detectionIndex: 1,
+        x: 1,
+      }),
+    ]);
   });
 
   it("composites mask strokes into the prepared frame artifact", () => {

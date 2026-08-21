@@ -30,6 +30,13 @@ const geometryManifest = readJson<Record<string, unknown>>(
 const geometryChunks = listDetectionChunkPaths(geometryFixturePath).map(
   (path) => readJson<DetectionChunk>(path),
 );
+const regionsFixturePath = join(fixturesRoot, "basketball_regions");
+const regionsManifest = readJson<Record<string, unknown>>(
+  join(regionsFixturePath, "detections.manifest.json"),
+);
+const regionsChunks = listDetectionChunkPaths(regionsFixturePath).map((path) =>
+  readJson<DetectionChunk>(path),
+);
 
 describe("fixture geometry", () => {
   it("uses center-based rects for deterministic fixture mask samples", () => {
@@ -55,6 +62,10 @@ describe("geometry showcase fixture", () => {
       })),
     ).toEqual([
       { displayName: "70s horse trail", sampleName: "horse_trail" },
+      {
+        displayName: "Basketball Region Effects",
+        sampleName: "basketball_regions",
+      },
       {
         displayName: "Basketball with Keypoints",
         sampleName: "basketball_geometry",
@@ -325,6 +336,147 @@ describe("geometry showcase fixture", () => {
     expect(geometryManifest.geometry).toMatchObject({
       polylineDetectionCount: polylineCount,
     });
+  });
+});
+
+describe("basketball region fixture", () => {
+  it("keeps stabilized, padded head masks with stable short-gap-free tracks", () => {
+    let headCount = 0;
+    let frameCount = 0;
+    const framesByTrack = new Map<string, number[]>();
+    const representativeHeadByTrack = new Map<
+      string,
+      DetectionFrame["detections"][number]
+    >();
+
+    for (const chunk of regionsChunks) {
+      for (const frame of chunk.frames) {
+        frameCount += 1;
+        const matchedPlayerIds = new Set<string>();
+        let frameHeadCount = 0;
+
+        for (const detection of frame.detections) {
+          if (detection.sourceId !== "sam3-head") continue;
+
+          headCount += 1;
+          frameHeadCount += 1;
+          const matchedPlayerId = String(
+            detection.metadata?.matchedPlayerDetectionId ?? "",
+          );
+          const rawMaskRect = detection.metadata?.rawMaskRect as
+            NonNullable<typeof detection.rect> | undefined;
+          const rawSam3MaskRect = detection.metadata?.rawSam3MaskRect as
+            NonNullable<typeof detection.rect> | undefined;
+          const cropRect = detection.rect!;
+          const trackId = String(detection.id);
+          const trackFrames = framesByTrack.get(trackId) ?? [];
+
+          expect(detection.className).toBe("head");
+          expect(detection.mask).toBeDefined();
+          expect(detection.polygon).toBeUndefined();
+          expect(detection.metadata?.association).toBe(
+            "sam3-head-temporal-mask-v4",
+          );
+          expect(detection.metadata?.maskStabilization).toBe(
+            "sam3-head-temporal-mask-v4",
+          );
+          expect(rawMaskRect).toBeDefined();
+          if (detection.metadata?.headObservation === "observed") {
+            expect(rawSam3MaskRect).toBeDefined();
+          } else {
+            expect(detection.metadata?.headObservation).toBe("gap-filled");
+            expect(rawSam3MaskRect).toBeUndefined();
+          }
+          if (!rawMaskRect) throw new Error("Head mask bounds are required.");
+          expect(cropRect.x - cropRect.width / 2).toBeLessThanOrEqual(
+            rawMaskRect.x - rawMaskRect.width / 2,
+          );
+          expect(cropRect.x + cropRect.width / 2).toBeGreaterThanOrEqual(
+            rawMaskRect.x + rawMaskRect.width / 2,
+          );
+          expect(cropRect.y - cropRect.height / 2).toBeLessThanOrEqual(
+            rawMaskRect.y - rawMaskRect.height / 2,
+          );
+          expect(cropRect.y + cropRect.height / 2).toBeGreaterThanOrEqual(
+            rawMaskRect.y + rawMaskRect.height / 2,
+          );
+          expect(detection.trackerId).toBeTypeOf("number");
+          expect(trackId).toBe(`head:${matchedPlayerId}`);
+          expect(matchedPlayerId).not.toBe("");
+          expect(matchedPlayerIds.has(matchedPlayerId)).toBe(false);
+          matchedPlayerIds.add(matchedPlayerId);
+          trackFrames.push(frame.frameIndex!);
+          framesByTrack.set(trackId, trackFrames);
+          if (!representativeHeadByTrack.has(trackId)) {
+            representativeHeadByTrack.set(trackId, detection);
+          }
+        }
+
+        expect(frameHeadCount).toBeGreaterThan(0);
+      }
+    }
+
+    expect(headCount).toBeGreaterThan(0);
+    expect(frameCount).toBe(regionsManifest.frameCount);
+
+    for (const frameIndexes of framesByTrack.values()) {
+      for (let index = 1; index < frameIndexes.length; index += 1) {
+        const gapLength = frameIndexes[index] - frameIndexes[index - 1] - 1;
+
+        expect(gapLength === 0 || gapLength > 7).toBe(true);
+      }
+    }
+
+    for (const detection of representativeHeadByTrack.values()) {
+      expect(detection.metadata?.rawMaskRect).toEqual(
+        computeDetectionMaskRect(detection.mask!),
+      );
+    }
+
+    expect(regionsManifest.geometry).toMatchObject({
+      maskDetectionCount: regionsManifest.detectionCount,
+    });
+    expect(
+      (regionsManifest.geometry as Record<string, number>).maskDetectionCount -
+        (regionsManifest.geometry as Record<string, number>)
+          .polygonDetectionCount,
+    ).toBe(headCount);
+  });
+
+  it("records the frozen SAM3 head input and association policy", () => {
+    const provenance = regionsManifest.provenance as {
+      readonly headRegions: Record<string, unknown>;
+      readonly sources: readonly {
+        readonly id: string;
+        readonly input: string;
+        readonly inputSha256: string;
+      }[];
+    };
+    const headSource = provenance.sources.find(({ id }) => id === "sam3-head");
+
+    expect(provenance.headRegions).toMatchObject({
+      algorithm: "sam3-head-temporal-mask-v4",
+      prompt: "head",
+      sourceId: "sam3-head",
+    });
+    expect(provenance.headRegions.associationPolicy).toContain(
+      "internal gaps of at most 7 frames are filled",
+    );
+    expect(provenance.headRegions.cropPolicy).toContain(
+      "every crop remains a superset of its stabilized mask bounds",
+    );
+    expect(provenance.headRegions.gapFilledHeadCount).toBeGreaterThan(0);
+    expect(provenance.headRegions.stableTrackCount).toBeGreaterThan(0);
+    expect(provenance.headRegions.matchedHeadCount).toBeGreaterThan(0);
+    expect(
+      provenance.headRegions.temporallyStabilizedMaskCount,
+    ).toBeGreaterThan(0);
+    expect(headSource).toBeDefined();
+    expect(headSource?.inputSha256).toBe(
+      sourceSha256(
+        readFileSync(resolve(regionsFixturePath, headSource!.input)),
+      ),
+    );
   });
 });
 

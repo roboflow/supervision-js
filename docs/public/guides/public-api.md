@@ -112,7 +112,8 @@ session.setPresentation({
 
 The current built-ins are `box`, `box-corners`, `ellipse`, `marker`, `mask`,
 `maskHalo`, `polygon`, `polyline`, `keypoints`, `label`, and the
-multi-instance `region` asset renderer;
+multi-instance `region` renderer for asset overlays and current-frame media
+crops;
 `annotationRendererKinds` enumerates that vocabulary and
 `AnnotationRendererKind` names it in application code. When supplied, the list
 is authoritative: omitted built-ins are
@@ -123,9 +124,15 @@ but cannot re-enable an omitted layer. The existing `boxStyle`, `maskStyle`,
 and related presentation fields remain supported for compatibility and
 source-specific style overrides. New global presentation code should prefer
 the renderer list.
-`region` carries its target, asset source, anchor, transform, and composition
+`region` carries its target, source, anchor, transform, and composition
 configuration directly because it does not lower into one of the legacy style
-fields. Multiple region descriptors may coexist when each has a unique `id`.
+fields. Its browser backend supports URL-based assets and crops of the existing
+renderer-owned media texture. Media crops may request exact mask coverage,
+which reuses the renderer's prepared GPU ID-mask artifact, or polygon coverage
+for canonical closed polygons. Asset transforms may use an
+explicit media- or screen-space size; screen-space assets stay the same visible
+size across differently sized detections and viewport zoom. Multiple region
+descriptors may coexist when each has a unique `id`.
 Do not pass Pixi display objects or custom drawing callbacks: the public API
 describes semantic renderer configuration while the browser backend owns
 composition and resource lifetime.

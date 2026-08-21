@@ -18,7 +18,7 @@ describe("docs region annotation renderer", () => {
       ...createRegionPlaygroundSettings(RegionPlaygroundMode.StaticIcons),
       offsetY: -0.8,
       rotationDegrees: 15,
-      scale: 1.2,
+      assetSize: 40,
     };
     const renderers = createRegionPlaygroundRenderers(settings, assets);
 
@@ -41,7 +41,7 @@ describe("docs region annotation renderer", () => {
     expect(renderers[0]?.transform).toMatchObject({
       offset: { x: 0, y: -0.8 },
       rotation: Math.PI / 12,
-      scale: 1.2,
+      size: { space: "screen", width: 40 },
     });
   });
 
@@ -62,21 +62,59 @@ describe("docs region annotation renderer", () => {
     ]);
   });
 
+  it("crops the current media frame for the big-head example", () => {
+    const settings = {
+      ...createRegionPlaygroundSettings(RegionPlaygroundMode.MediaCrop),
+      flipHorizontal: true,
+      offsetY: -0.1,
+      scale: 3,
+    };
+
+    expect(createRegionPlaygroundRenderers(settings, assets)).toMatchObject([
+      {
+        id: "player-big-heads",
+        kind: "region",
+        region: { kind: "bounds" },
+        source: {
+          coverage: { kind: "mask" },
+          kind: "media",
+          region: { kind: "bounds" },
+        },
+        target: {
+          className: "head",
+          sourceId: "sam3-head",
+        },
+        transform: {
+          flip: { horizontal: true },
+          offset: { x: 0, y: -0.1 },
+          scale: 3,
+        },
+      },
+    ]);
+  });
+
   it("keeps the selected asset type and live transforms in the snippet", () => {
     const icons = createRegionPlaygroundSnippet({
       ...createRegionPlaygroundSettings(RegionPlaygroundMode.StaticIcons),
       offsetY: -0.75,
       rotationDegrees: 30,
-      scale: 1.1,
+      assetSize: 36,
     });
     const animated = createRegionPlaygroundSnippet(
       createRegionPlaygroundSettings(RegionPlaygroundMode.AnimatedGif),
     );
+    const mediaCrop = createRegionPlaygroundSnippet({
+      ...createRegionPlaygroundSettings(RegionPlaygroundMode.MediaCrop),
+      flipHorizontal: true,
+    });
 
     expect(icons).toContain("id, className, src");
     expect(icons).toContain("offset: { x: 0, y: -0.75 }");
     expect(icons).toContain("rotation: 0.52");
-    expect(icons).toContain("scale: 1.10");
+    expect(icons).toContain('size: { width: 36, space: "screen" }');
     expect(animated).toContain("asset: { src: fireGifUrl }");
+    expect(mediaCrop).toContain('kind: "media"');
+    expect(mediaCrop).toContain('coverage: { kind: "mask" }');
+    expect(mediaCrop).toContain("flip: { horizontal: true }");
   });
 });

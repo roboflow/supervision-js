@@ -5,12 +5,17 @@ import {
   DEFAULT_POSE_MATCH_IOU,
   KEYPOINT_VISIBILITY_NOT_LABELED,
   KEYPOINT_VISIBILITY_VISIBLE,
+  associateHeadDetectionsToPlayers,
   attachPoseKeypointsToDetections,
+  closeBinaryGrid,
   convertOneBasedEdges,
+  createContainedSmoothedRect,
+  createTemporallyStabilizedRects,
   normalizePoseDetection,
   selectMotionGatedDetection,
   simplifyPolygonPoints,
   summarizeFrameGeometry,
+  stabilizeHeadDetectionFrames,
   xyxyToCenterRect,
 } from "./geometry.mjs";
 
@@ -158,6 +163,349 @@ describe("simplifyPolygonPoints", () => {
       ]),
       undefined,
     );
+  });
+});
+
+describe("associateHeadDetectionsToPlayers", () => {
+  const mask = { counts: "fixture", encoding: "compressedRle" };
+
+  it("matches direct head masks one-to-one by the player top-center", () => {
+    const leftPlayer = {
+      className: "yellow team player",
+      id: "yellow:0",
+      rect: { height: 300, width: 120, x: 200, y: 300 },
+    };
+    const rightPlayer = {
+      className: "white team player",
+      id: "white:0",
+      rect: { height: 320, width: 130, x: 275, y: 330 },
+    };
+    const leftHead = {
+      className: "head",
+      confidence: 0.84,
+      id: "head:0",
+      mask,
+      rect: { height: 50, width: 40, x: 205, y: 165 },
+    };
+    const rightHead = {
+      className: "head",
+      confidence: 0.82,
+      id: "head:1",
+      mask,
+      rect: { height: 48, width: 38, x: 270, y: 180 },
+    };
+
+    const result = associateHeadDetectionsToPlayers(
+      [rightHead, leftHead],
+      [leftPlayer, rightPlayer],
+      {
+        targetClassNames: ["white team player", "yellow team player"],
+      },
+    );
+
+    assert.equal(result.matches.length, 2);
+    assert.deepEqual(
+      result.matches.map(({ head, player }) => [head.id, player.id]).sort(),
+      [
+        ["head:0", "yellow:0"],
+        ["head:1", "white:0"],
+      ],
+    );
+    assert.equal(result.unmatchedHeadCount, 0);
+    assert.equal(result.unmatchedPlayerCount, 0);
+  });
+
+  it("drops audience heads and low-confidence candidates without changing masks", () => {
+    const player = {
+      className: "yellow team player",
+      id: "yellow:0",
+      rect: { height: 300, width: 120, x: 200, y: 300 },
+    };
+    const directHead = {
+      className: "head",
+      confidence: 0.81,
+      id: "head:player",
+      mask,
+      rect: { height: 50, width: 40, x: 205, y: 165 },
+    };
+    const result = associateHeadDetectionsToPlayers(
+      [
+        directHead,
+        {
+          ...directHead,
+          confidence: 0.2,
+          id: "head:low-confidence",
+        },
+        {
+          ...directHead,
+          id: "head:audience",
+          rect: { ...directHead.rect, x: 600 },
+        },
+      ],
+      [player],
+    );
+
+    assert.equal(result.matches.length, 1);
+    assert.equal(result.matches[0].head, directHead);
+    assert.equal(result.matches[0].head.mask, mask);
+    assert.equal(result.ignoredLowConfidenceHeadCount, 1);
+    assert.equal(result.unmatchedHeadCount, 1);
+  });
+
+  it("keeps an exact repeated mask with its previous player", () => {
+    const leftPlayer = {
+      className: "yellow team player",
+      id: "yellow:0",
+      rect: { height: 200, width: 80, x: 100, y: 180 },
+    };
+    const rightPlayer = {
+      className: "white team player",
+      id: "white:0",
+      rect: { height: 200, width: 80, x: 130, y: 180 },
+    };
+    const repeatedHead = {
+      className: "head",
+      confidence: 0.8,
+      id: "raw:repeated",
+      mask: { ...mask, counts: "stable-mask" },
+      rect: { height: 40, width: 30, x: 119, y: 95 },
+    };
+    const competingHead = {
+      ...repeatedHead,
+      id: "raw:competing",
+      mask: { ...mask, counts: "new-mask" },
+      rect: { ...repeatedHead.rect, x: 111 },
+    };
+
+    const result = associateHeadDetectionsToPlayers(
+      [repeatedHead, competingHead],
+      [leftPlayer, rightPlayer],
+      {
+        frameIndex: 11,
+        previousAssignments: new Map([
+          [
+            "yellow:0",
+            {
+              frameIndex: 10,
+              maskSignature: "x:stable-mask",
+              relativeCenter: { x: 0.2, y: 0.075 },
+              relativeHeight: 0.2,
+              relativeWidth: 0.375,
+            },
+          ],
+        ]),
+        targetClassNames: ["white team player", "yellow team player"],
+      },
+    );
+
+    assert.equal(
+      result.matches.find(({ player }) => player.id === "yellow:0")?.head.id,
+      "raw:repeated",
+    );
+  });
+
+  it("does not transfer a repeated mask to a different player", () => {
+    const repeatedHead = {
+      className: "head",
+      confidence: 0.8,
+      id: "raw:repeated",
+      mask: { ...mask, counts: "stable-mask" },
+      rect: { height: 40, width: 30, x: 130, y: 95 },
+    };
+    const result = associateHeadDetectionsToPlayers(
+      [repeatedHead],
+      [
+        {
+          className: "white team player",
+          id: "white:0",
+          rect: { height: 200, width: 80, x: 130, y: 180 },
+        },
+      ],
+      {
+        frameIndex: 11,
+        previousMaskOwners: new Map([
+          ["x:stable-mask", { frameIndex: 10, playerId: "yellow:0" }],
+        ]),
+        targetClassNames: ["white team player"],
+      },
+    );
+
+    assert.equal(result.matches.length, 0);
+  });
+});
+
+describe("stabilizeHeadDetectionFrames", () => {
+  const mask = {
+    counts: "fixture",
+    encoding: "compressedRle",
+    height: 300,
+    width: 400,
+  };
+  const player = (frameIndex) => ({
+    className: "yellow team player",
+    id: "yellow:0",
+    rect: { height: 200, width: 80, x: 100 + frameIndex * 2, y: 180 },
+  });
+  const head = (frameIndex, confidence) => ({
+    className: "head",
+    confidence,
+    id: `raw:${frameIndex}`,
+    mask,
+    rect: { height: 40, width: 30, x: 100 + frameIndex * 2, y: 95 },
+  });
+
+  it("continues an established track through low confidence and a short gap", () => {
+    const result = stabilizeHeadDetectionFrames(
+      [
+        {
+          frameIndex: 0,
+          headDetections: [head(0, 0.8)],
+          playerDetections: [player(0)],
+        },
+        {
+          frameIndex: 1,
+          headDetections: [],
+          playerDetections: [],
+        },
+        {
+          frameIndex: 2,
+          headDetections: [head(2, 0.55)],
+          playerDetections: [player(2)],
+        },
+      ],
+      {
+        fillGap: ({ sourceHead, sourcePlayer, targetPlayer }) => ({
+          ...sourceHead,
+          rect: {
+            ...sourceHead.rect,
+            x: sourceHead.rect.x + targetPlayer.rect.x - sourcePlayer.rect.x,
+          },
+        }),
+        sourceId: "sam3-head",
+        targetClassNames: ["yellow team player"],
+      },
+    );
+    const detections = [0, 1, 2].map(
+      (frameIndex) => result.detectionsByFrame.get(frameIndex)[0],
+    );
+
+    assert.deepEqual(
+      detections.map((detection) => detection.id),
+      ["head:yellow:0", "head:yellow:0", "head:yellow:0"],
+    );
+    assert.deepEqual(
+      detections.map((detection) => detection.trackerId),
+      [1, 1, 1],
+    );
+    assert.equal(detections[1].metadata.headObservation, "gap-filled");
+    assert.equal(detections[1].metadata.rawMaskRect.x, 102);
+    assert.equal(detections[2].metadata.headObservation, "observed");
+    assert.equal(result.summary.gapFilledHeadCount, 1);
+    assert.equal(result.summary.continuedLowConfidenceHeadCount, 1);
+  });
+
+  it("uses the other boundary when the nearest mask cannot be translated", () => {
+    const result = stabilizeHeadDetectionFrames(
+      [
+        {
+          frameIndex: 0,
+          headDetections: [head(0, 0.8)],
+          playerDetections: [player(0)],
+        },
+        { frameIndex: 1, headDetections: [], playerDetections: [] },
+        {
+          frameIndex: 2,
+          headDetections: [head(2, 0.8)],
+          playerDetections: [player(2)],
+        },
+      ],
+      {
+        fillGap: ({ sourceHead }) =>
+          sourceHead.id === "raw:0"
+            ? undefined
+            : {
+                ...sourceHead,
+                metadata: { gapFillBoundary: "next" },
+              },
+        sourceId: "sam3-head",
+        targetClassNames: ["yellow team player"],
+      },
+    );
+
+    assert.equal(
+      result.detectionsByFrame.get(1)[0].metadata.gapFillBoundary,
+      "next",
+    );
+    assert.equal(result.summary.gapFilledHeadCount, 1);
+  });
+
+  it("pads and smooths crops without excluding current mask bounds", () => {
+    const previous = { height: 60, width: 50, x: 100, y: 100 };
+    const maskRect = { height: 40, width: 30, x: 130, y: 115 };
+    const result = createContainedSmoothedRect(maskRect, previous, {
+      padding: 6,
+      smoothing: 0.2,
+    });
+
+    assert.ok(result.x - result.width / 2 <= maskRect.x - 21);
+    assert.ok(result.x + result.width / 2 >= maskRect.x + 21);
+    assert.ok(result.y - result.height / 2 <= maskRect.y - 26);
+    assert.ok(result.y + result.height / 2 >= maskRect.y + 26);
+  });
+});
+
+describe("createTemporallyStabilizedRects", () => {
+  it("anticipates local growth while containing every current mask", () => {
+    const observations = [
+      { frameIndex: 0, rect: { height: 20, width: 18, x: 100, y: 100 } },
+      { frameIndex: 1, rect: { height: 22, width: 20, x: 102, y: 101 } },
+      { frameIndex: 2, rect: { height: 44, width: 40, x: 106, y: 103 } },
+      { frameIndex: 3, rect: { height: 22, width: 20, x: 108, y: 104 } },
+    ];
+    const stabilized = createTemporallyStabilizedRects(observations, {
+      padding: 0,
+      windowRadius: 2,
+    });
+
+    assert.equal(stabilized.get(1).width, 40);
+    for (const observation of observations) {
+      const crop = stabilized.get(observation.frameIndex);
+      assert.ok(crop);
+      assert.ok(
+        crop.x - crop.width / 2 <=
+          observation.rect.x - observation.rect.width / 2,
+      );
+      assert.ok(
+        crop.x + crop.width / 2 >=
+          observation.rect.x + observation.rect.width / 2,
+      );
+      assert.ok(
+        crop.y - crop.height / 2 <=
+          observation.rect.y - observation.rect.height / 2,
+      );
+      assert.ok(
+        crop.y + crop.height / 2 >=
+          observation.rect.y + observation.rect.height / 2,
+      );
+    }
+  });
+});
+
+describe("closeBinaryGrid", () => {
+  it("preserves a foreground contour that touches the normalized boundary", () => {
+    const mask = new Uint8Array([
+      1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    ]);
+
+    assert.deepEqual(closeBinaryGrid(mask, 4), mask);
+  });
+
+  it("closes a one-cell hole inside a foreground region", () => {
+    const mask = new Uint8Array([
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    ]);
+
+    assert.equal(closeBinaryGrid(mask, 5)[12], 1);
   });
 });
 

@@ -1,28 +1,74 @@
 ---
-title: Asset Regions
-summary: Place image assets over detection bounds or keypoint anchors.
+title: Regions
+summary: Place media crops or image assets over detection-owned regions.
 ---
 
-# Asset Regions
+# Regions
 
-The region annotation renderer places a browser-loadable image over a region
-owned by a semantic detection. It is useful for static icons, badges, logos,
-animated GIFs, and other assets that should follow objects across playback
-without exposing a Pixi texture, animation source, or display object to
-application code.
+The region annotation renderer places a crop of the current media frame or a
+browser-loadable image over a region owned by a semantic detection. It supports
+media effects such as an enlarged head alongside static icons, badges, logos,
+and animated GIFs. Application code never receives a Pixi texture, animation
+source, or display object.
 
 <div class="supervision-layer-playground">
   <iframe
     data-supervision-playground-src="demo/?embed=annotation-renderer&amp;renderer=regions"
     loading="lazy"
-    title="Interactive asset region annotation renderer playground"
+    title="Interactive region annotation renderer playground"
   ></iframe>
 </div>
 
-The playground uses the frozen basketball fixture's real COCO pose keypoints.
-Switch between class-specific SVG team badges and a looping fire GIF, then tune
-the shared scale, offset, and rotation controls. Both examples are loaded by
-the browser renderer and anchored to visible face keypoints.
+The playground uses frozen, direct SAM3 `head` masks associated offline with
+the basketball fixture's team-player detections. It opens with transparent
+player-head crops enlarged over the original frame; no rectangular background
+patch, synthetic head window, or runtime keypoint is used for that mode.
+Switch to class-specific SVG team badges or a looping fire GIF, then tune the
+head scale or fixed screen-pixel asset size, offset, rotation, and media-crop
+mirror controls.
+
+## Enlarge a region from the current media frame
+
+Use a `media` source to crop pixels from the same frame the renderer is already
+presenting. The source and destination regions are resolved independently from
+the same detection. This example targets dedicated `head` detections and clips
+the sampled pixels to their exact SAM3 masks:
+
+```ts
+session.setPresentation({
+  renderers: [
+    annotationRenderers.region({
+      id: "player-big-heads",
+      target: {
+        className: "head",
+        sourceId: "sam3-head",
+      },
+      source: {
+        kind: "media",
+        region: { kind: "bounds" },
+        coverage: { kind: "mask" },
+      },
+      region: { kind: "bounds" },
+      transform: {
+        scale: 2.5,
+        offset: { x: 0, y: 0 },
+        rotation: 0,
+      },
+      compose: { mode: "over" },
+    }),
+  ],
+});
+```
+
+The browser backend implements this as a dynamic subtexture of the
+renderer-owned media texture plus the already-prepared GPU ID-mask artifact. It
+does not decode RLE masks on the playback path, decode the video again, copy the
+composited canvas, or read the frame back through the CPU. The source crop is
+clipped to the media bounds and its exact semantic mask; both update with the
+active detection frame across playback, seek, and loop. A media source that
+requests mask coverage is omitted for detections without a usable mask instead
+of falling back to a visible rectangle. Polygon coverage remains available for
+detections whose canonical geometry is a closed polygon.
 
 ## Add static icon regions
 
@@ -44,7 +90,7 @@ session.setPresentation({
       source: { kind: "asset", asset: { src } },
       region: { kind: "keypoint-anchor", anchor: "head" },
       transform: {
-        scale: 0.95,
+        size: { width: 44, space: "screen" },
         offset: { x: 0, y: -1.05 },
         rotation: 0,
       },
@@ -69,7 +115,7 @@ session.setPresentation({
       source: { kind: "asset", asset: { src: fireGifUrl } },
       region: { kind: "keypoint-anchor", anchor: "head" },
       transform: {
-        scale: 1.35,
+        size: { width: 52, space: "screen" },
         offset: { x: 0, y: -0.58 },
         rotation: 0,
       },
@@ -85,8 +131,14 @@ rectangle. A numeric keypoint anchor addresses one keypoint index; the `head`
 anchor uses visible COCO face points 0 through 4 and falls back to the top of
 the detection rectangle.
 
-`scale` is uniform. Offsets are relative to the resolved region, rotation is in
-radians, and `compose.zIndex` orders multiple region renderer instances. The
+`scale` is uniform and relative to the resolved detection region. Use
+`size: { width, height?, space: "screen" }` when every asset should keep the
+same visible pixel dimensions regardless of detection size or viewport zoom;
+omitting `height` preserves the asset aspect ratio. Media-space size is also
+available through `space: "media"`. `size` and `scale` are intentionally
+mutually exclusive. Offsets are relative to the resolved region, rotation is in
+radians, `flip.horizontal` and `flip.vertical` mirror around the destination
+anchor, and `compose.zIndex` orders multiple region renderer instances. The
 asset must be fetchable by the browser under the host application's normal URL
 and CORS policy. Static browser image formats render as sprites. GIF files loop
 automatically while preserving the same URL-based public API.
@@ -94,8 +146,6 @@ Asset failures omit that renderer instance without stopping playback and are
 reported through `renderer.diagnostics.onAssetError` when configured. Replacing
 the descriptor with a new asset source retries loading.
 
-This first region source draws an asset **over** media. Cropping the current
-media frame for effects such as an enlarged head, or covering a mask before
-drawing a replacement asset, requires the later media-source and replacement
-coverage capabilities; an asset overlay does not claim to erase the original
-pixels.
+Both media crops and assets currently compose **over** the media. Covering a
+mask before drawing a replacement asset requires the later replacement-coverage
+capability; an overlay does not claim to erase the original pixels.
