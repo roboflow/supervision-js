@@ -1,6 +1,7 @@
 import { RENDER_ENGINE_PREFERENCE } from "#constants/media-renderer";
 import {
   BasePolygonStyle,
+  type AnnotationStyleContext,
   type Detection,
   type DetectionFrame,
   type PolygonStyle,
@@ -16,7 +17,13 @@ import type {
   BoxCornerStyle,
   EllipseStyle,
   MarkerStyle,
+  RegionAnnotationRenderer,
+  RegionRendererTarget,
   ShapeStyle,
+} from "supervision-js-core";
+import {
+  RegionRendererCoverageKind,
+  RegionRendererSourceKind,
 } from "supervision-js-core";
 import type { Point } from "supervision-js-core";
 import type {
@@ -81,6 +88,7 @@ export async function createPixiMediaScene(
   options: MediaRendererSceneOptions,
 ): Promise<MediaRendererScene> {
   const {
+    AlphaMask,
     Application,
     Assets,
     BlurFilter,
@@ -107,6 +115,15 @@ export async function createPixiMediaScene(
   let currentMarkerStyle: MarkerStyle | null = options.markerStyle ?? null;
   let currentMaskHaloStyle: MaskHaloStyle | null =
     options.maskHaloStyle ?? null;
+  const regionTargetResolverIds = new WeakMap<
+    NonNullable<RegionRendererTarget["resolve"]>,
+    number
+  >();
+  let nextRegionTargetResolverId = 1;
+  let currentRegionRenderers = [...options.regionRenderers];
+  let regionMaskCoverageKey = resolveRegionMaskCoverageKey(
+    currentRegionRenderers,
+  );
   // Halo-only presentations still need prepared id-mask artifacts; this
   // invisible style drives preparation without drawing any fill or border.
   const haloOnlyMaskStyle: MaskStyle = {
@@ -129,8 +146,108 @@ export async function createPixiMediaScene(
       return style.resolve(detection, { ...context, ...state });
     },
   });
-  const resolveArtifactMaskStyle = () =>
-    currentMaskStyle ?? (currentMaskHaloStyle ? haloOnlyMaskStyle : null);
+  const resolveArtifactMaskStyle = (): MaskStyle | null => {
+    const exactRegionRenderers = currentRegionRenderers.filter(
+      usesExactMaskCoverage,
+    );
+
+    if (exactRegionRenderers.length === 0) {
+      return (
+        currentMaskStyle ?? (currentMaskHaloStyle ? haloOnlyMaskStyle : null)
+      );
+    }
+
+    const visibleMaskStyle = currentMaskStyle;
+    return {
+      artifactKey: `region-mask-coverage:v1:${visibleMaskStyle?.artifactKey ?? "none"}:${regionMaskCoverageKey}`,
+      opacity: visibleMaskStyle?.opacity,
+      resolve(detection, context) {
+        const visibleInstruction = visibleMaskStyle?.resolve(
+          detection,
+          context,
+        );
+
+        if (visibleInstruction) {
+          return visibleInstruction;
+        }
+
+        if (
+          !detection.mask ||
+          (!currentMaskHaloStyle &&
+            !exactRegionRenderers.some((renderer) =>
+              matchesRegionTarget(renderer, detection, context),
+            ))
+        ) {
+          return undefined;
+        }
+
+        return { alpha: 0, color: 0, mask: detection.mask };
+      },
+    };
+  };
+
+  function usesExactMaskCoverage(renderer: RegionAnnotationRenderer) {
+    return (
+      renderer.source.kind === RegionRendererSourceKind.Media &&
+      renderer.source.coverage?.kind === RegionRendererCoverageKind.Mask
+    );
+  }
+
+  function resolveRegionMaskCoverageKey(
+    renderers: readonly RegionAnnotationRenderer[],
+  ) {
+    return JSON.stringify(
+      renderers.filter(usesExactMaskCoverage).map((renderer) => {
+        const resolver = renderer.target.resolve;
+        let resolverId = 0;
+
+        if (resolver) {
+          resolverId = regionTargetResolverIds.get(resolver) ?? 0;
+          if (resolverId === 0) {
+            resolverId = nextRegionTargetResolverId++;
+            regionTargetResolverIds.set(resolver, resolverId);
+          }
+        }
+
+        return {
+          id: renderer.id,
+          resolverId,
+          target: {
+            className: renderer.target.className,
+            id: renderer.target.id,
+            sourceId: renderer.target.sourceId,
+          },
+        };
+      }),
+    );
+  }
+
+  function matchesRegionTarget(
+    renderer: RegionAnnotationRenderer,
+    detection: Detection,
+    context: AnnotationStyleContext,
+  ) {
+    return (
+      matchesRegionTargetValue(renderer.target.id, detection.id) &&
+      matchesRegionTargetValue(
+        renderer.target.className,
+        detection.className,
+      ) &&
+      matchesRegionTargetValue(renderer.target.sourceId, detection.sourceId) &&
+      (renderer.target.resolve?.(detection, context) ?? true)
+    );
+  }
+
+  function matchesRegionTargetValue<T extends string | number>(
+    configured: T | readonly T[] | undefined,
+    actual: T | undefined,
+  ) {
+    if (configured === undefined) return true;
+    if (actual === undefined) return false;
+    return Array.isArray(configured)
+      ? configured.includes(actual)
+      : configured === actual;
+  }
   let currentPolygonStyle: PolygonStyle | null =
     options.polygonStyle === undefined
       ? new BasePolygonStyle()
@@ -240,14 +357,22 @@ export async function createPixiMediaScene(
     resolveContextState,
   });
   const regionLayer = createPixiRegionLayer({
+    AlphaMask,
     Assets,
     Container,
     GifSprite,
     Graphics,
+    ImageSource,
+    Mesh,
+    MeshGeometry,
     Rectangle,
+    Shader,
     Sprite,
     Texture,
+    UniformGroup,
     detectionTimeline: options.detectionTimeline,
+    getActiveIdMaskFrameTexture: () =>
+      maskLayer?.getActiveIdMaskFrameTexture() ?? null,
     getMediaTexture: () => (hasPresentedSample ? stagingTexture : undefined),
     onInvalidate: () => {
       if (!hasPresentedSample || mediaWidth <= 0 || mediaHeight <= 0) return;
@@ -261,7 +386,7 @@ export async function createPixiMediaScene(
       );
     },
     onAssetError: options.diagnostics?.onAssetError,
-    regionRenderers: options.regionRenderers,
+    regionRenderers: currentRegionRenderers,
     // Regions (badges, icons) have no overlay preview: they stay drawn and
     // follow a move through the fast-translate path instead.
     resolveContextState: (detection) =>
@@ -938,9 +1063,11 @@ export async function createPixiMediaScene(
         vectorLayer.setStyles({});
         labelLayer?.setLabelStyle(currentLabelStyle);
         polygonLayer?.setPolygonStyle(currentPolygonStyle);
-        if (maskVisibilityChanged && currentMaskStyle) {
+        if (maskVisibilityChanged && resolveArtifactMaskStyle()) {
           visibilityVersion += 1;
-          maskLayer?.setMaskStyle(createVisibilityMaskStyle(currentMaskStyle));
+          maskLayer?.setMaskStyle(
+            createVisibilityMaskStyle(resolveArtifactMaskStyle()!),
+          );
         }
         interactionLayer?.drawFrame(mediaTime);
       }
@@ -968,11 +1095,19 @@ export async function createPixiMediaScene(
         keypointStyle: presentation.keypointStyle,
       });
       annotationOverlayLayer.setKeypointStyle(presentation.keypointStyle);
-      regionLayer.setRenderers(
+      const nextRegionRenderers =
         presentation.renderers?.filter(
-          (renderer) => renderer.kind === "region",
-        ) ?? [],
-      );
+          (renderer): renderer is RegionAnnotationRenderer =>
+            renderer.kind === "region",
+        ) ?? [];
+      const nextRegionMaskCoverageKey =
+        resolveRegionMaskCoverageKey(nextRegionRenderers);
+      const regionMaskCoverageChanged =
+        nextRegionMaskCoverageKey !== regionMaskCoverageKey;
+
+      currentRegionRenderers = nextRegionRenderers;
+      regionMaskCoverageKey = nextRegionMaskCoverageKey;
+      regionLayer.setRenderers(currentRegionRenderers);
 
       if (
         presentation.boxCornerStyle !== undefined ||
@@ -993,7 +1128,8 @@ export async function createPixiMediaScene(
 
       if (
         presentation.maskStyle !== undefined ||
-        presentation.maskHaloStyle !== undefined
+        presentation.maskHaloStyle !== undefined ||
+        regionMaskCoverageChanged
       ) {
         if (presentation.maskStyle !== undefined) {
           currentMaskStyle = presentation.maskStyle;
@@ -1385,6 +1521,7 @@ export async function createPixiMediaScene(
   }
 
   function handleActiveIdMaskFramePresented() {
+    regionLayer.drawFrame(currentMediaTime, viewportScale);
     drawFocusLayer(currentMediaTime);
     drawInteractionPresentationLayer(currentMediaTime);
   }

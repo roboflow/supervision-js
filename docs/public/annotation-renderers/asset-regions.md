@@ -32,7 +32,7 @@ mirror controls.
 Use a `media` source to crop pixels from the same frame the renderer is already
 presenting. The source and destination regions are resolved independently from
 the same detection. This example targets dedicated `head` detections and clips
-the sampled pixels to bounded polygons converted from those exact SAM3 masks:
+the sampled pixels to their exact SAM3 masks:
 
 ```ts
 session.setPresentation({
@@ -46,7 +46,7 @@ session.setPresentation({
       source: {
         kind: "media",
         region: { kind: "bounds" },
-        coverage: { kind: "polygon" },
+        coverage: { kind: "mask" },
       },
       region: { kind: "bounds" },
       transform: {
@@ -61,12 +61,14 @@ session.setPresentation({
 ```
 
 The browser backend implements this as a dynamic subtexture of the
-renderer-owned media texture plus a polygon stencil mask. It does not decode
-the video again, copy the composited canvas, or read the frame back through the
-CPU. The source crop is clipped to the media bounds and its semantic polygon;
-both update with the active detection frame across playback, seek, and loop. A
-media source that requests polygon coverage is omitted for detections without a
-usable polygon instead of falling back to a visible rectangle.
+renderer-owned media texture plus the already-prepared GPU ID-mask artifact. It
+does not decode RLE masks on the playback path, decode the video again, copy the
+composited canvas, or read the frame back through the CPU. The source crop is
+clipped to the media bounds and its exact semantic mask; both update with the
+active detection frame across playback, seek, and loop. A media source that
+requests mask coverage is omitted for detections without a usable mask instead
+of falling back to a visible rectangle. Polygon coverage remains available for
+detections whose canonical geometry is a closed polygon.
 
 ## Add static icon regions
 

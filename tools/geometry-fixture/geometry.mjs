@@ -19,6 +19,10 @@ export const DEFAULT_POSE_MATCH_IOU = 0.3;
 export const DEFAULT_TRAJECTORY_MAX_SPEED_PIXELS_PER_SECOND = 2_700;
 export const DEFAULT_TRAJECTORY_POSITION_TOLERANCE_PIXELS = 12;
 export const DEFAULT_HEAD_MINIMUM_CONFIDENCE = 0.7;
+export const DEFAULT_HEAD_CONTINUATION_CONFIDENCE = 0.5;
+export const DEFAULT_HEAD_MAX_GAP_FRAMES = 3;
+export const DEFAULT_HEAD_CROP_PADDING_PIXELS = 6;
+export const DEFAULT_HEAD_CROP_SMOOTHING = 0.45;
 export const DEFAULT_HEAD_MAX_WIDTH_TO_PLAYER_RATIO = 0.7;
 export const DEFAULT_HEAD_MAX_HEIGHT_TO_PLAYER_RATIO = 0.42;
 export const DEFAULT_HEAD_MAX_CENTER_Y_TO_PLAYER_RATIO = 0.45;
@@ -156,6 +160,8 @@ export function associateHeadDetectionsToPlayers(
   const maximumCenterYRatio =
     options.maximumCenterYRatio ?? DEFAULT_HEAD_MAX_CENTER_Y_TO_PLAYER_RATIO;
   const targetClassNames = new Set(options.targetClassNames ?? []);
+  const previousRelativeCenters = options.previousRelativeCenters ?? new Map();
+  const temporalWeight = options.temporalWeight ?? 0.75;
   const eligiblePlayers = playerDetections.filter(
     (player) =>
       player.rect &&
@@ -187,12 +193,22 @@ export function associateHeadDetectionsToPlayers(
 
       const normalizedX = (head.rect.x - player.rect.x) / player.rect.width;
       const normalizedY = (head.rect.y - playerTop) / player.rect.height;
+      const previousRelativeCenter = previousRelativeCenters.get(player.id);
+      const temporalDistance = previousRelativeCenter
+        ? Math.hypot(
+            normalizedX - previousRelativeCenter.x,
+            normalizedY - previousRelativeCenter.y,
+          )
+        : 0;
       candidates.push({
         head,
         headIndex,
         player,
         playerIndex,
-        score: Math.hypot(normalizedX, normalizedY),
+        relativeCenter: { x: normalizedX, y: normalizedY },
+        score:
+          Math.hypot(normalizedX, normalizedY) +
+          temporalDistance * temporalWeight,
       });
     }
   }
@@ -223,6 +239,7 @@ export function associateHeadDetectionsToPlayers(
       head: candidate.head,
       normalizedTopCenterDistance: round(candidate.score, 4),
       player: candidate.player,
+      relativeCenter: candidate.relativeCenter,
     });
   }
 
@@ -231,6 +248,306 @@ export function associateHeadDetectionsToPlayers(
     matches,
     unmatchedHeadCount: eligibleHeads.length - matches.length,
     unmatchedPlayerCount: eligiblePlayers.length - matches.length,
+  };
+}
+
+/**
+ * Stabilizes independently inferred head masks against persistent player ids.
+ *
+ * High-confidence observations start tracks; lower-confidence observations may
+ * only continue them. Short internal gaps can be synthesized by an offline
+ * caller, and crop rectangles are padded/smoothed while remaining guaranteed
+ * to contain the exact current mask bounds.
+ */
+export function stabilizeHeadDetectionFrames(frames, options = {}) {
+  const startConfidence =
+    options.startConfidence ?? DEFAULT_HEAD_MINIMUM_CONFIDENCE;
+  const continuationConfidence =
+    options.continuationConfidence ?? DEFAULT_HEAD_CONTINUATION_CONFIDENCE;
+  const maxGapFrames = options.maxGapFrames ?? DEFAULT_HEAD_MAX_GAP_FRAMES;
+  const cropPadding = options.cropPadding ?? DEFAULT_HEAD_CROP_PADDING_PIXELS;
+  const cropSmoothing = options.cropSmoothing ?? DEFAULT_HEAD_CROP_SMOOTHING;
+  const associationAlgorithm =
+    options.associationAlgorithm ?? "sam3-head-temporal-player-v2";
+  const targetClassNames = options.targetClassNames ?? [];
+  const previousRelativeCenters = new Map();
+  const associatedFrames = [];
+  const associationSummary = {
+    ignoredLowConfidenceHeadCount: 0,
+    unmatchedHeadCount: 0,
+    unmatchedPlayerCount: 0,
+  };
+
+  for (const frame of frames) {
+    const association = associateHeadDetectionsToPlayers(
+      frame.headDetections,
+      frame.playerDetections,
+      {
+        minimumConfidence: continuationConfidence,
+        previousRelativeCenters,
+        targetClassNames,
+      },
+    );
+
+    for (const match of association.matches) {
+      if (match.player.id !== undefined) {
+        previousRelativeCenters.set(match.player.id, match.relativeCenter);
+      }
+    }
+
+    associationSummary.ignoredLowConfidenceHeadCount +=
+      association.ignoredLowConfidenceHeadCount;
+    associationSummary.unmatchedHeadCount += association.unmatchedHeadCount;
+    associationSummary.unmatchedPlayerCount += association.unmatchedPlayerCount;
+    associatedFrames.push({ ...frame, matches: association.matches });
+  }
+
+  const allPlayerIds = [
+    ...new Set(
+      associatedFrames.flatMap((frame) =>
+        frame.playerDetections.flatMap((player) =>
+          player.id === undefined ? [] : [String(player.id)],
+        ),
+      ),
+    ),
+  ].sort();
+  const trackerIds = new Map(
+    allPlayerIds.map((playerId, index) => [playerId, index + 1]),
+  );
+  const frameByIndex = new Map(
+    associatedFrames.map((frame) => [frame.frameIndex, frame]),
+  );
+  const observationsByPlayer = new Map();
+
+  for (const frame of associatedFrames) {
+    for (const match of frame.matches) {
+      if (match.player.id === undefined) continue;
+      const playerId = String(match.player.id);
+      const observations = observationsByPlayer.get(playerId) ?? new Map();
+      observations.set(frame.frameIndex, { ...match, synthetic: false });
+      observationsByPlayer.set(playerId, observations);
+    }
+  }
+
+  const detectionsByFrame = new Map(
+    associatedFrames.map((frame) => [frame.frameIndex, []]),
+  );
+  let gapFilledHeadCount = 0;
+  let observedHeadCount = 0;
+  let continuedLowConfidenceHeadCount = 0;
+  let trackCount = 0;
+
+  for (const [playerId, allObservations] of observationsByPlayer) {
+    const sortedObservedIndexes = [...allObservations.keys()].sort(
+      (left, right) => left - right,
+    );
+    const firstHighConfidenceIndex = sortedObservedIndexes.find(
+      (frameIndex) =>
+        (allObservations.get(frameIndex).head.confidence ?? 0) >=
+        startConfidence,
+    );
+
+    if (firstHighConfidenceIndex === undefined) continue;
+    trackCount += 1;
+
+    const observations = new Map(
+      [...allObservations].filter(
+        ([frameIndex]) => frameIndex >= firstHighConfidenceIndex,
+      ),
+    );
+    const observedIndexes = [...observations.keys()].sort(
+      (left, right) => left - right,
+    );
+
+    for (let index = 1; index < observedIndexes.length; index += 1) {
+      const previousFrameIndex = observedIndexes[index - 1];
+      const nextFrameIndex = observedIndexes[index];
+      const gapLength = nextFrameIndex - previousFrameIndex - 1;
+
+      if (gapLength <= 0 || gapLength > maxGapFrames || !options.fillGap) {
+        continue;
+      }
+
+      for (
+        let frameIndex = previousFrameIndex + 1;
+        frameIndex < nextFrameIndex;
+        frameIndex += 1
+      ) {
+        const frame = frameByIndex.get(frameIndex);
+        const previousObservation = observations.get(previousFrameIndex);
+        const nextObservation = observations.get(nextFrameIndex);
+        const interpolationAmount =
+          (frameIndex - previousFrameIndex) /
+          (nextFrameIndex - previousFrameIndex);
+        const targetPlayer =
+          frame?.playerDetections.find(
+            (player) => String(player.id) === playerId,
+          ) ??
+          interpolatePlayerDetection(
+            previousObservation?.player,
+            nextObservation?.player,
+            interpolationAmount,
+          );
+        const sourceFrameIndexes = [previousFrameIndex, nextFrameIndex].sort(
+          (left, right) =>
+            Math.abs(frameIndex - left) - Math.abs(frameIndex - right),
+        );
+        let filledHead;
+        let sourceObservation;
+
+        if (!frame || !targetPlayer) continue;
+
+        for (const sourceFrameIndex of sourceFrameIndexes) {
+          const candidate = observations.get(sourceFrameIndex);
+
+          if (!candidate) continue;
+          const candidateHead = options.fillGap({
+            frame,
+            sourceHead: candidate.head,
+            sourcePlayer: candidate.player,
+            targetPlayer,
+          });
+
+          if (!candidateHead?.mask || !candidateHead.rect) continue;
+          filledHead = candidateHead;
+          sourceObservation = candidate;
+          break;
+        }
+
+        if (!filledHead || !sourceObservation) continue;
+        observations.set(frameIndex, {
+          head: filledHead,
+          normalizedTopCenterDistance:
+            sourceObservation.normalizedTopCenterDistance,
+          player: targetPlayer,
+          relativeCenter: sourceObservation.relativeCenter,
+          synthetic: true,
+        });
+        gapFilledHeadCount += 1;
+      }
+    }
+
+    let previousCrop;
+    let previousFrameIndex;
+
+    for (const frameIndex of [...observations.keys()].sort(
+      (left, right) => left - right,
+    )) {
+      const observation = observations.get(frameIndex);
+
+      if (!observation.head.mask || !observation.head.rect) continue;
+      if (
+        previousFrameIndex === undefined ||
+        frameIndex - previousFrameIndex > maxGapFrames + 1
+      ) {
+        previousCrop = undefined;
+      }
+
+      const rawMaskRect = observation.head.rect;
+      const rect = createContainedSmoothedRect(rawMaskRect, previousCrop, {
+        padding: cropPadding,
+        smoothing: cropSmoothing,
+      });
+      const detection = {
+        ...observation.head,
+        id: `head:${playerId}`,
+        metadata: {
+          ...observation.head.metadata,
+          association: associationAlgorithm,
+          headObservation: observation.synthetic ? "gap-filled" : "observed",
+          matchedPlayerClassName: observation.player.className,
+          matchedPlayerDetectionId: observation.player.id,
+          normalizedTopCenterDistance: observation.normalizedTopCenterDistance,
+          rawMaskRect,
+        },
+        polygon: undefined,
+        rect,
+        sourceId: options.sourceId,
+        trackerId: trackerIds.get(playerId),
+      };
+
+      detectionsByFrame.get(frameIndex).push(detection);
+      previousCrop = rect;
+      previousFrameIndex = frameIndex;
+      observedHeadCount += observation.synthetic ? 0 : 1;
+      continuedLowConfidenceHeadCount +=
+        !observation.synthetic &&
+        (observation.head.confidence ?? 0) < startConfidence
+          ? 1
+          : 0;
+    }
+  }
+
+  for (const detections of detectionsByFrame.values()) {
+    detections.sort((left, right) => left.trackerId - right.trackerId);
+  }
+
+  return {
+    detectionsByFrame,
+    summary: {
+      ...associationSummary,
+      continuedLowConfidenceHeadCount,
+      gapFilledHeadCount,
+      observedHeadCount,
+      trackCount,
+    },
+  };
+}
+
+export function createContainedSmoothedRect(rect, previous, options = {}) {
+  const padding = options.padding ?? DEFAULT_HEAD_CROP_PADDING_PIXELS;
+  const smoothing = options.smoothing ?? DEFAULT_HEAD_CROP_SMOOTHING;
+  const padded = {
+    left: rect.x - rect.width / 2 - padding,
+    right: rect.x + rect.width / 2 + padding,
+    top: rect.y - rect.height / 2 - padding,
+    bottom: rect.y + rect.height / 2 + padding,
+  };
+
+  if (!previous) {
+    return boundsToCenterRect(padded);
+  }
+
+  const desired = {
+    height: lerp(previous.height, rect.height + padding * 2, smoothing),
+    width: lerp(previous.width, rect.width + padding * 2, smoothing),
+    x: lerp(previous.x, rect.x, smoothing),
+    y: lerp(previous.y, rect.y, smoothing),
+  };
+
+  return boundsToCenterRect({
+    bottom: Math.max(desired.y + desired.height / 2, padded.bottom),
+    left: Math.min(desired.x - desired.width / 2, padded.left),
+    right: Math.max(desired.x + desired.width / 2, padded.right),
+    top: Math.min(desired.y - desired.height / 2, padded.top),
+  });
+}
+
+function boundsToCenterRect({ bottom, left, right, top }) {
+  return {
+    height: round(bottom - top, 1),
+    width: round(right - left, 1),
+    x: round((left + right) / 2, 1),
+    y: round((top + bottom) / 2, 1),
+  };
+}
+
+function lerp(from, to, amount) {
+  return from + (to - from) * amount;
+}
+
+function interpolatePlayerDetection(previous, next, amount) {
+  if (!previous?.rect || !next?.rect) return undefined;
+
+  return {
+    ...previous,
+    className: next.className ?? previous.className,
+    rect: {
+      height: lerp(previous.rect.height, next.rect.height, amount),
+      width: lerp(previous.rect.width, next.rect.width, amount),
+      x: lerp(previous.rect.x, next.rect.x, amount),
+      y: lerp(previous.rect.y, next.rect.y, amount),
+    },
   };
 }
 

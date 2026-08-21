@@ -146,6 +146,7 @@ export type RegionRendererRegionKind =
 
 /** Semantic coverage used to clip pixels sampled from the current media. */
 export const RegionRendererCoverageKind = {
+  Mask: "mask",
   Polygon: "polygon",
 } as const;
 
@@ -206,7 +207,13 @@ export interface RegionRendererMediaSource {
   readonly kind: typeof RegionRendererSourceKind.Media;
   readonly region: RegionRendererRegion;
   /** Optional semantic coverage that removes pixels outside the source shape. */
-  readonly coverage?: RegionRendererPolygonCoverage;
+  readonly coverage?:
+    RegionRendererMaskCoverage | RegionRendererPolygonCoverage;
+}
+
+/** Clips a media crop to the detection's exact semantic mask. */
+export interface RegionRendererMaskCoverage {
+  readonly kind: typeof RegionRendererCoverageKind.Mask;
 }
 
 /** Clips a media crop to the detection's closed polygon. */

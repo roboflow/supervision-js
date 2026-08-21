@@ -76,7 +76,7 @@ describe("docs region annotation renderer", () => {
         kind: "region",
         region: { kind: "bounds" },
         source: {
-          coverage: { kind: "polygon" },
+          coverage: { kind: "mask" },
           kind: "media",
           region: { kind: "bounds" },
         },
@@ -114,7 +114,7 @@ describe("docs region annotation renderer", () => {
     expect(icons).toContain('size: { width: 36, space: "screen" }');
     expect(animated).toContain("asset: { src: fireGifUrl }");
     expect(mediaCrop).toContain('kind: "media"');
-    expect(mediaCrop).toContain('coverage: { kind: "polygon" }');
+    expect(mediaCrop).toContain('coverage: { kind: "mask" }');
     expect(mediaCrop).toContain("flip: { horizontal: true }");
   });
 });

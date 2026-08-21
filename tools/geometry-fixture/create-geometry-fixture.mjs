@@ -22,17 +22,22 @@ import { spawn } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, relative, resolve } from "node:path";
 import process from "node:process";
-import { convertDetectionMaskToPolygon } from "supervision-js-core";
+import {
+  convertDetectionMaskToPolygon,
+  createCBIoUTracker,
+  decodeCompressedRleMask,
+  encodeBinaryMask,
+} from "supervision-js-core";
 import {
   DEFAULT_KEYPOINT_VISIBLE_CONFIDENCE,
   DEFAULT_MAX_POLYGON_POINTS,
   DEFAULT_POSE_MATCH_IOU,
   DEFAULT_POLYGON_TOLERANCE,
-  associateHeadDetectionsToPlayers,
   attachPoseKeypointsToDetections,
   normalizePoseDetection,
   selectMotionGatedDetection,
   simplifyPolygonPoints,
+  stabilizeHeadDetectionFrames,
   summarizeFrameGeometry,
 } from "./geometry.mjs";
 
@@ -49,7 +54,8 @@ const BASKETBALL_TRACE_POSITION_TOLERANCE_PIXELS = 12;
 const BASKETBALL_TRACE_TRACK_ID = "basketball-track:0";
 const BASKETBALL_TRACE_MAX_SPEED_PIXELS_PER_SECOND = 2_700;
 const BASKETBALL_TRACE_WINDOW_SECONDS = 1;
-const HEAD_ASSOCIATION_ALGORITHM = "sam3-head-top-center-v1";
+const HEAD_ASSOCIATION_ALGORITHM = "sam3-head-cbiou-player-v3";
+const HEAD_MAX_GAP_FRAMES = 7;
 const HEAD_SOURCE_ID = "sam3-head";
 
 const options = parseArgs(process.argv.slice(2));
@@ -98,15 +104,9 @@ const poseAssociation = {
   unmatchedPoseCount: 0,
   unmatchedTargetCount: 0,
 };
-const headAssociation = {
-  ignoredLowConfidenceHeadCount: 0,
-  matchedHeadCount: 0,
-  unmatchedHeadCount: 0,
-  unmatchedPlayerCount: 0,
-};
 const basketballTrace = [];
 let previousBasketballTraceObservation;
-const frames = sam3Fixture.frames.map((frame) => {
+const baseFrames = sam3Fixture.frames.map((frame) => {
   const segmentationDetections = frame.detections.map((detection) =>
     deriveMaskPolygonDetection(detection, polygonOptions),
   );
@@ -135,49 +135,35 @@ const frames = sam3Fixture.frames.map((frame) => {
   );
   previousBasketballTraceObservation = traceResult.previousObservation;
 
-  const associatedHeads = headSam3Fixture
-    ? associateHeadDetectionsToPlayers(
-        headFrames.get(frame.frameIndex)?.detections ?? [],
-        traceResult.detections,
-        { targetClassNames: POSE_TARGET_CLASS_NAMES },
-      )
-    : undefined;
-  const headDetections = (associatedHeads?.matches ?? []).flatMap(
-    ({ head, normalizedTopCenterDistance, player }) => {
-      const withPolygon = deriveMaskPolygonDetection(
-        {
-          ...head,
-          id: `head:${frame.frameIndex}:${player.id}`,
-          metadata: {
-            ...head.metadata,
-            association: HEAD_ASSOCIATION_ALGORITHM,
-            matchedPlayerClassName: player.className,
-            matchedPlayerDetectionId: player.id,
-            normalizedTopCenterDistance,
-          },
-        },
-        polygonOptions,
-        HEAD_SOURCE_ID,
-      );
-
-      return withPolygon.polygon ? [withPolygon] : [];
-    },
-  );
-
-  if (associatedHeads) {
-    headAssociation.ignoredLowConfidenceHeadCount +=
-      associatedHeads.ignoredLowConfidenceHeadCount;
-    headAssociation.matchedHeadCount += headDetections.length;
-    headAssociation.unmatchedHeadCount += associatedHeads.unmatchedHeadCount;
-    headAssociation.unmatchedPlayerCount +=
-      associatedHeads.unmatchedPlayerCount;
-  }
-
   return {
     ...frame,
-    detections: [...traceResult.detections, ...headDetections],
+    detections: traceResult.detections,
   };
 });
+const trackedHeadPlayerFrames = trackHeadPlayerDetections(baseFrames);
+const stabilizedHeads = headSam3Fixture
+  ? stabilizeHeadDetectionFrames(
+      baseFrames.map((frame) => ({
+        frameIndex: frame.frameIndex,
+        headDetections: headFrames.get(frame.frameIndex)?.detections ?? [],
+        playerDetections: trackedHeadPlayerFrames.get(frame.frameIndex) ?? [],
+      })),
+      {
+        associationAlgorithm: HEAD_ASSOCIATION_ALGORITHM,
+        fillGap: translateHeadMaskToPlayer,
+        maxGapFrames: HEAD_MAX_GAP_FRAMES,
+        sourceId: HEAD_SOURCE_ID,
+        targetClassNames: POSE_TARGET_CLASS_NAMES,
+      },
+    )
+  : undefined;
+const frames = baseFrames.map((frame) => ({
+  ...frame,
+  detections: [
+    ...frame.detections,
+    ...(stabilizedHeads?.detectionsByFrame.get(frame.frameIndex) ?? []),
+  ],
+}));
 const geometry = summarizeFrameGeometry(frames);
 const fixture = {
   classNames: [
@@ -193,18 +179,25 @@ const fixture = {
       ? {
           headRegions: {
             algorithm: HEAD_ASSOCIATION_ALGORITHM,
-            associationPolicy:
-              "confidence >= 0.7; one-to-one nearest player top-center inside the upper 45% of a plausible player rectangle; direct SAM3 head masks are never clipped by player masks",
+            associationPolicy: `C-BIoU assigns stable team-player tracks before one-to-one top-center head matching; confidence >= 0.7 starts a head track, confidence >= 0.5 continues it, and internal gaps of at most ${HEAD_MAX_GAP_FRAMES} frames are filled`,
+            cropPolicy:
+              "6px mask-bounds padding with 0.45 exponential crop smoothing; every crop remains a superset of its exact mask bounds",
             derivedFrom:
-              "direct SAM3 `head` masks converted to bounded polygons after offline association with frozen team-player detections",
+              "direct SAM3 `head` masks associated with offline C-BIoU team-player tracks; observed mask pixels remain unchanged and short gaps translate the nearest exact mask with tracked player motion",
+            continuedLowConfidenceHeadCount:
+              stabilizedHeads.summary.continuedLowConfidenceHeadCount,
+            gapFilledHeadCount: stabilizedHeads.summary.gapFilledHeadCount,
             ignoredLowConfidenceHeadCount:
-              headAssociation.ignoredLowConfidenceHeadCount,
-            matchedHeadCount: headAssociation.matchedHeadCount,
+              stabilizedHeads.summary.ignoredLowConfidenceHeadCount,
+            matchedHeadCount:
+              stabilizedHeads.summary.observedHeadCount +
+              stabilizedHeads.summary.gapFilledHeadCount,
             modelId: headSam3Fixture.inference?.modelId,
             prompt: "head",
             sourceId: HEAD_SOURCE_ID,
-            unmatchedHeadCount: headAssociation.unmatchedHeadCount,
-            unmatchedPlayerCount: headAssociation.unmatchedPlayerCount,
+            stableTrackCount: stabilizedHeads.summary.trackCount,
+            unmatchedHeadCount: stabilizedHeads.summary.unmatchedHeadCount,
+            unmatchedPlayerCount: stabilizedHeads.summary.unmatchedPlayerCount,
           },
         }
       : {}),
@@ -308,6 +301,112 @@ function deriveMaskPolygonDetection(
     : undefined;
 
   return points ? { ...withSource, polygon: { points } } : withSource;
+}
+
+function trackHeadPlayerDetections(frames) {
+  const trackers = new Map(
+    POSE_TARGET_CLASS_NAMES.map((className) => [
+      className,
+      createCBIoUTracker({
+        frameRate: 30,
+        highConfidenceDetectionThreshold: 0,
+        instantFirstFrameActivation: true,
+        lostTrackBuffer: 6,
+        minimumConsecutiveFrames: 1,
+        trackActivationThreshold: 0,
+      }),
+    ]),
+  );
+  const classIndexes = new Map(
+    POSE_TARGET_CLASS_NAMES.map((className, index) => [className, index]),
+  );
+  const result = new Map();
+
+  for (const frame of frames) {
+    const trackedPlayers = [];
+
+    for (const className of POSE_TARGET_CLASS_NAMES) {
+      const detections = frame.detections.filter(
+        (detection) => detection.className === className && detection.rect,
+      );
+      const assignments = trackers.get(className).update(
+        detections.map((detection, detectionIndex) => ({
+          confidence: detection.confidence,
+          detectionIndex,
+          rect: detection.rect,
+        })),
+        frame.frameIndex,
+      ).assignments;
+
+      for (const { detectionIndex, trackerId } of assignments) {
+        const detection = detections[detectionIndex];
+
+        if (!detection) continue;
+        trackedPlayers.push({
+          ...detection,
+          id: `player-track:${classIndexes.get(className)}:${trackerId}`,
+          metadata: {
+            ...detection.metadata,
+            headAuthoringSourceDetectionId: detection.id,
+          },
+          trackerId,
+        });
+      }
+    }
+
+    result.set(frame.frameIndex, trackedPlayers);
+  }
+
+  return result;
+}
+
+function translateHeadMaskToPlayer({ sourceHead, sourcePlayer, targetPlayer }) {
+  if (!sourceHead.mask || !sourceHead.rect) return undefined;
+  const sourceTop = sourcePlayer.rect.y - sourcePlayer.rect.height / 2;
+  const targetTop = targetPlayer.rect.y - targetPlayer.rect.height / 2;
+  const offsetX = Math.round(targetPlayer.rect.x - sourcePlayer.rect.x);
+  const offsetY = Math.round(targetTop - sourceTop);
+  const decoded = decodeCompressedRleMask(sourceHead.mask);
+  const translated = new Uint8Array(decoded.data.length);
+  let left = decoded.width;
+  let right = -1;
+  let top = decoded.height;
+  let bottom = -1;
+
+  for (let y = 0; y < decoded.height; y += 1) {
+    const targetY = y + offsetY;
+    if (targetY < 0 || targetY >= decoded.height) continue;
+
+    for (let x = 0; x < decoded.width; x += 1) {
+      if (!decoded.data[y * decoded.width + x]) continue;
+      const targetX = x + offsetX;
+      if (targetX < 0 || targetX >= decoded.width) continue;
+      translated[targetY * decoded.width + targetX] = 1;
+      left = Math.min(left, targetX);
+      right = Math.max(right, targetX);
+      top = Math.min(top, targetY);
+      bottom = Math.max(bottom, targetY);
+    }
+  }
+
+  if (right < left || bottom < top) return undefined;
+
+  return {
+    ...sourceHead,
+    confidence: Math.min(sourceHead.confidence ?? 0.5, 0.5),
+    mask: encodeBinaryMask(translated, decoded.width, decoded.height),
+    metadata: {
+      ...sourceHead.metadata,
+      gapFillOffset: { x: offsetX, y: offsetY },
+      gapFillSourceDetectionId: sourceHead.id,
+    },
+    rect: {
+      height: bottom - top + 1,
+      width: right - left + 1,
+      x: left + (right - left + 1) / 2,
+      y: top + (bottom - top + 1) / 2,
+    },
+  };
 }
 
 function attachBasketballCenterTrace(

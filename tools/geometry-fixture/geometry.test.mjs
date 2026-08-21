@@ -8,10 +8,12 @@ import {
   associateHeadDetectionsToPlayers,
   attachPoseKeypointsToDetections,
   convertOneBasedEdges,
+  createContainedSmoothedRect,
   normalizePoseDetection,
   selectMotionGatedDetection,
   simplifyPolygonPoints,
   summarizeFrameGeometry,
+  stabilizeHeadDetectionFrames,
   xyxyToCenterRect,
 } from "./geometry.mjs";
 
@@ -246,6 +248,126 @@ describe("associateHeadDetectionsToPlayers", () => {
     assert.equal(result.matches[0].head.mask, mask);
     assert.equal(result.ignoredLowConfidenceHeadCount, 1);
     assert.equal(result.unmatchedHeadCount, 1);
+  });
+});
+
+describe("stabilizeHeadDetectionFrames", () => {
+  const mask = {
+    counts: "fixture",
+    encoding: "compressedRle",
+    height: 300,
+    width: 400,
+  };
+  const player = (frameIndex) => ({
+    className: "yellow team player",
+    id: "yellow:0",
+    rect: { height: 200, width: 80, x: 100 + frameIndex * 2, y: 180 },
+  });
+  const head = (frameIndex, confidence) => ({
+    className: "head",
+    confidence,
+    id: `raw:${frameIndex}`,
+    mask,
+    rect: { height: 40, width: 30, x: 100 + frameIndex * 2, y: 95 },
+  });
+
+  it("continues an established track through low confidence and a short gap", () => {
+    const result = stabilizeHeadDetectionFrames(
+      [
+        {
+          frameIndex: 0,
+          headDetections: [head(0, 0.8)],
+          playerDetections: [player(0)],
+        },
+        {
+          frameIndex: 1,
+          headDetections: [],
+          playerDetections: [],
+        },
+        {
+          frameIndex: 2,
+          headDetections: [head(2, 0.55)],
+          playerDetections: [player(2)],
+        },
+      ],
+      {
+        fillGap: ({ sourceHead, sourcePlayer, targetPlayer }) => ({
+          ...sourceHead,
+          rect: {
+            ...sourceHead.rect,
+            x: sourceHead.rect.x + targetPlayer.rect.x - sourcePlayer.rect.x,
+          },
+        }),
+        sourceId: "sam3-head",
+        targetClassNames: ["yellow team player"],
+      },
+    );
+    const detections = [0, 1, 2].map(
+      (frameIndex) => result.detectionsByFrame.get(frameIndex)[0],
+    );
+
+    assert.deepEqual(
+      detections.map((detection) => detection.id),
+      ["head:yellow:0", "head:yellow:0", "head:yellow:0"],
+    );
+    assert.deepEqual(
+      detections.map((detection) => detection.trackerId),
+      [1, 1, 1],
+    );
+    assert.equal(detections[1].metadata.headObservation, "gap-filled");
+    assert.equal(detections[1].metadata.rawMaskRect.x, 102);
+    assert.equal(detections[2].metadata.headObservation, "observed");
+    assert.equal(result.summary.gapFilledHeadCount, 1);
+    assert.equal(result.summary.continuedLowConfidenceHeadCount, 1);
+  });
+
+  it("uses the other boundary when the nearest mask cannot be translated", () => {
+    const result = stabilizeHeadDetectionFrames(
+      [
+        {
+          frameIndex: 0,
+          headDetections: [head(0, 0.8)],
+          playerDetections: [player(0)],
+        },
+        { frameIndex: 1, headDetections: [], playerDetections: [] },
+        {
+          frameIndex: 2,
+          headDetections: [head(2, 0.8)],
+          playerDetections: [player(2)],
+        },
+      ],
+      {
+        fillGap: ({ sourceHead }) =>
+          sourceHead.id === "raw:0"
+            ? undefined
+            : {
+                ...sourceHead,
+                metadata: { gapFillBoundary: "next" },
+              },
+        sourceId: "sam3-head",
+        targetClassNames: ["yellow team player"],
+      },
+    );
+
+    assert.equal(
+      result.detectionsByFrame.get(1)[0].metadata.gapFillBoundary,
+      "next",
+    );
+    assert.equal(result.summary.gapFilledHeadCount, 1);
+  });
+
+  it("pads and smooths crops without excluding current mask bounds", () => {
+    const previous = { height: 60, width: 50, x: 100, y: 100 };
+    const maskRect = { height: 40, width: 30, x: 130, y: 115 };
+    const result = createContainedSmoothedRect(maskRect, previous, {
+      padding: 6,
+      smoothing: 0.2,
+    });
+
+    assert.ok(result.x - result.width / 2 <= maskRect.x - 21);
+    assert.ok(result.x + result.width / 2 >= maskRect.x + 21);
+    assert.ok(result.y - result.height / 2 <= maskRect.y - 26);
+    assert.ok(result.y + result.height / 2 >= maskRect.y + 26);
   });
 });
 

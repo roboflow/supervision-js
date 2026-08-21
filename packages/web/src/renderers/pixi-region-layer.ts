@@ -13,16 +13,27 @@ import {
   RegionRendererSourceKind,
 } from "supervision-js-core";
 import type {
+  AlphaMask as PixiAlphaMask,
   Container as PixiContainer,
   Graphics as PixiGraphics,
+  ImageSource as PixiImageSource,
+  Mesh as PixiMesh,
+  MeshGeometry as PixiMeshGeometry,
   Rectangle as PixiRectangle,
+  Shader as PixiShader,
   Sprite as PixiSprite,
   Texture as PixiTexture,
+  UniformGroup as PixiUniformGroup,
 } from "pixi.js";
 import type {
   GifSource as PixiGifSource,
   GifSprite as PixiGifSprite,
 } from "pixi.js/gif";
+import {
+  createPixiRegionIdMask,
+  type PixiRegionIdMask,
+  type PixiRegionIdMaskArtifact,
+} from "./pixi-region-id-mask";
 
 type RegionAsset = PixiTexture | PixiGifSource;
 type RegionDisplay = PixiSprite | PixiGifSprite;
@@ -45,6 +56,7 @@ interface RegionSpriteEntry {
   readonly rendererId: string;
   readonly sourceKey: string;
   coverageMask?: PixiGraphics;
+  idCoverageMask?: PixiRegionIdMask;
   active: boolean;
   baseX: number;
   baseY: number;
@@ -77,6 +89,9 @@ export interface PixiRegionLayer {
 
 /** Browser implementation for asset- and media-backed region descriptors. */
 export function createPixiRegionLayer(options: {
+  readonly AlphaMask: new (options: {
+    mask: PixiMesh<PixiMeshGeometry, PixiShader>;
+  }) => PixiAlphaMask;
   readonly Assets: RegionAssetLoader;
   readonly Container: new () => PixiContainer;
   readonly GifSprite: new (options: {
@@ -85,6 +100,25 @@ export function createPixiRegionLayer(options: {
     readonly source: PixiGifSource;
   }) => PixiGifSprite;
   readonly Graphics: new () => PixiGraphics;
+  readonly ImageSource: new (options: {
+    autoGenerateMipmaps?: boolean;
+    dynamic: boolean;
+    height: number;
+    resource: HTMLCanvasElement;
+    scaleMode?: "linear" | "nearest";
+    width: number;
+  }) => PixiImageSource;
+  readonly Mesh: new (options: {
+    geometry: PixiMeshGeometry;
+    shader: PixiShader;
+  }) => PixiMesh<PixiMeshGeometry, PixiShader>;
+  readonly MeshGeometry: new (options: {
+    indices: Uint32Array;
+    positions: Float32Array;
+    shrinkBuffersToFit: boolean;
+    topology: "triangle-list";
+    uvs: Float32Array;
+  }) => PixiMeshGeometry;
   readonly Rectangle: new (
     x?: number,
     y?: number,
@@ -92,12 +126,26 @@ export function createPixiRegionLayer(options: {
     height?: number,
   ) => PixiRectangle;
   readonly Sprite: new (options: { texture: PixiTexture }) => PixiSprite;
+  readonly Shader: {
+    from(options: {
+      gl: { fragment: string; vertex: string };
+      resources: Record<string, unknown>;
+    }): PixiShader;
+  };
   readonly Texture: new (options: {
     readonly dynamic?: boolean;
     readonly frame?: PixiRectangle;
     readonly source: PixiTexture["source"];
   }) => PixiTexture;
+  readonly UniformGroup: new (
+    uniforms: Record<
+      string,
+      | { type: "f32"; value: number }
+      | { type: "vec4<f32>"; value: Float32Array }
+    >,
+  ) => PixiUniformGroup;
   readonly detectionTimeline: BufferedDetectionTimeline;
+  readonly getActiveIdMaskFrameTexture: () => PixiRegionIdMaskArtifact | null;
   readonly getMediaTexture: () => PixiTexture | undefined;
   readonly onInvalidate?: () => void;
   readonly onAssetError?: (options: {
@@ -150,6 +198,7 @@ export function createPixiRegionLayer(options: {
 
       if (currentFrame) {
         for (const [rendererIndex, renderer] of renderers.entries()) {
+          const identityOccurrences = new Map<string, number>();
           const sourceKey = sourceKeys.get(renderer.id);
           if (!sourceKey) continue;
           const asset =
@@ -194,6 +243,7 @@ export function createPixiRegionLayer(options: {
               renderer.id,
               detection,
               detectionIndex,
+              identityOccurrences,
             );
             let entry: RegionSpriteEntry;
             let mediaCrop: TopLeftCrop | undefined;
@@ -246,7 +296,13 @@ export function createPixiRegionLayer(options: {
             if (
               renderer.source.kind === RegionRendererSourceKind.Media &&
               mediaCrop &&
-              !updateMediaCoverage(entry, renderer, detection, mediaCrop)
+              !updateMediaCoverage(
+                entry,
+                renderer,
+                detection,
+                detectionIndex,
+                mediaCrop,
+              )
             ) {
               continue;
             }
@@ -291,6 +347,10 @@ export function createPixiRegionLayer(options: {
         if (!entry.active || entry.detectionId !== id) continue;
         entry.display.position.set(entry.baseX + x, entry.baseY + y);
         entry.coverageMask?.position.set(entry.baseX + x, entry.baseY + y);
+        entry.idCoverageMask?.display.position.set(
+          entry.baseX + x,
+          entry.baseY + y,
+        );
         translated = true;
       }
       return translated;
@@ -448,6 +508,7 @@ export function createPixiRegionLayer(options: {
     entry: RegionSpriteEntry,
     renderer: RegionAnnotationRenderer,
     detection: Detection,
+    detectionIndex: number,
     crop: TopLeftCrop,
   ) {
     if (
@@ -458,14 +519,70 @@ export function createPixiRegionLayer(options: {
       return true;
     }
 
+    if (renderer.source.coverage.kind === RegionRendererCoverageKind.Mask) {
+      removePolygonCoverageMask(entry);
+      const artifact = options.getActiveIdMaskFrameTexture();
+
+      if (!detection.mask || !artifact) {
+        removeIdCoverageMask(entry);
+        return false;
+      }
+
+      const mask =
+        entry.idCoverageMask ??
+        createPixiRegionIdMask({
+          AlphaMask: options.AlphaMask,
+          ImageSource: options.ImageSource,
+          Mesh: options.Mesh,
+          MeshGeometry: options.MeshGeometry,
+          Shader: options.Shader,
+          UniformGroup: options.UniformGroup,
+        });
+
+      if (!entry.idCoverageMask) {
+        entry.idCoverageMask = mask;
+        container?.addChild(mask.display);
+        // A Mesh assigned through `display.mask` becomes a stencil mask in
+        // Pixi v8, which clips by the quad geometry and ignores shader alpha.
+        // AlphaMask renders the id-sampling mesh to a GPU texture first, so
+        // only pixels belonging to this detection reveal the media crop.
+        entry.display.addEffect(mask.effect);
+      }
+
+      const mediaTexture = options.getMediaTexture();
+
+      if (!mediaTexture) {
+        removeIdCoverageMask(entry);
+        return false;
+      }
+
+      mask.render({
+        artifact,
+        crop,
+        flipHorizontal: renderer.transform?.flip?.horizontal ?? false,
+        flipVertical: renderer.transform?.flip?.vertical ?? false,
+        height: entry.display.height,
+        maskId: detectionIndex + 1,
+        mediaHeight: mediaTexture.source.height,
+        mediaWidth: mediaTexture.source.width,
+        rotation: entry.display.rotation,
+        width: entry.display.width,
+        x: entry.display.position.x,
+        y: entry.display.position.y,
+      });
+      return true;
+    }
+
     if (
       renderer.source.coverage.kind !== RegionRendererCoverageKind.Polygon ||
       !detection.polygon ||
       detection.polygon.points.length < 3
     ) {
-      removeCoverageMask(entry);
+      removePolygonCoverageMask(entry);
       return false;
     }
+
+    removeIdCoverageMask(entry);
 
     const mask = entry.coverageMask ?? new options.Graphics();
     if (!entry.coverageMask) {
@@ -496,11 +613,24 @@ export function createPixiRegionLayer(options: {
   }
 
   function removeCoverageMask(entry: RegionSpriteEntry) {
+    removePolygonCoverageMask(entry);
+    removeIdCoverageMask(entry);
+  }
+
+  function removePolygonCoverageMask(entry: RegionSpriteEntry) {
     if (!entry.coverageMask) return;
     entry.display.mask = null;
     entry.coverageMask.removeFromParent();
     entry.coverageMask.destroy();
     entry.coverageMask = undefined;
+  }
+
+  function removeIdCoverageMask(entry: RegionSpriteEntry) {
+    if (!entry.idCoverageMask) return;
+    entry.display.removeEffect(entry.idCoverageMask.effect);
+    entry.idCoverageMask.display.removeFromParent();
+    entry.idCoverageMask.destroy();
+    entry.idCoverageMask = undefined;
   }
 
   function destroyRendererDisplays(rendererId: string) {
@@ -534,6 +664,11 @@ function destroyEntry(entry: RegionSpriteEntry) {
   entry.display.mask = null;
   entry.coverageMask?.removeFromParent();
   entry.coverageMask?.destroy();
+  if (entry.idCoverageMask) {
+    entry.display.removeEffect(entry.idCoverageMask.effect);
+    entry.idCoverageMask.display.removeFromParent();
+    entry.idCoverageMask.destroy();
+  }
   entry.display.removeFromParent?.();
   // GifSprite sources are shared and released through Assets.unload().
   entry.display.destroy();
@@ -741,8 +876,19 @@ function resolveSpriteKey(
   rendererId: string,
   detection: Detection,
   detectionIndex: number,
+  occurrences: Map<string, number>,
 ) {
-  return JSON.stringify([rendererId, detection.id ?? null, detectionIndex]);
+  const identity =
+    detection.trackerId !== undefined
+      ? ["tracker", detection.sourceId ?? null, detection.trackerId]
+      : detection.id !== undefined
+        ? ["id", detection.id]
+        : ["index", detectionIndex];
+  const serializedIdentity = JSON.stringify(identity);
+  const occurrence = occurrences.get(serializedIdentity) ?? 0;
+
+  occurrences.set(serializedIdentity, occurrence + 1);
+  return JSON.stringify([rendererId, identity, occurrence]);
 }
 
 function finiteOr(value: number | undefined, fallback: number) {

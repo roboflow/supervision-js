@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createPixiRegionLayer } from "#renderers/pixi-region-layer";
 import {
+  DetectionMaskEncoding,
   KeypointVisibility,
   RegionRendererCoverageKind,
   RegionRendererSizeSpace,
@@ -442,6 +443,129 @@ describe("pixi region layer", () => {
     expect(mask.destroy).toHaveBeenCalledOnce();
   });
 
+  it("clips a media crop with the prepared exact detection mask", () => {
+    const mediaTexture = new FakeTexture({
+      source: { height: 200, width: 300 },
+    });
+    const idMaskTexture = new FakeTexture({
+      source: { height: 200, style: {}, width: 300 },
+    });
+    const headFrame: DetectionFrame = {
+      detections: [
+        {
+          className: "head",
+          id: "head-7",
+          mask: {
+            counts: "fixture",
+            encoding: DetectionMaskEncoding.CompressedRle,
+            height: 200,
+            width: 300,
+          },
+          rect: { height: 24, width: 28, x: 100, y: 40 },
+        },
+      ],
+      frameIndex: 1,
+      mediaTime: 1,
+    };
+    const layer = createPixiRegionLayer({
+      ...createTestBackend(mediaTexture),
+      Assets: { load: vi.fn(), unload: vi.fn() } as never,
+      Container: FakeContainer as never,
+      GifSprite: FakeGifSprite as never,
+      Sprite: FakeSprite as never,
+      detectionTimeline: createTimeline(headFrame),
+      getActiveIdMaskFrameTexture: () =>
+        ({
+          frame: { height: 200, width: 300 },
+          texture: idMaskTexture,
+        }) as never,
+      regionRenderers: [
+        annotationRenderers.region({
+          id: "big-heads",
+          region: { kind: "bounds" },
+          source: {
+            coverage: { kind: RegionRendererCoverageKind.Mask },
+            kind: "media",
+            region: { kind: "bounds" },
+          },
+          target: { className: "head" },
+          transform: { scale: 2.5 },
+        }),
+      ],
+    });
+    const container = layer.createContainer() as unknown as FakeContainer;
+
+    expect(layer.drawFrame(1).activeDetectionIndexes).toEqual([0]);
+    expect(container.children).toHaveLength(2);
+    const display = container.children[0]!;
+    const mask = container.children[1] as FakeMesh;
+    const maskEffect = (display as FakeSprite).effects[0] as FakeAlphaMask;
+    const uniforms = mask.shader.resources
+      .regionMaskUniforms as FakeUniformGroup;
+
+    expect(display).toMatchObject({ height: 60, width: 70 });
+    expect(maskEffect.mask).toBe(mask);
+    expect(uniforms.uniforms.uMaskId).toBe(1);
+    const crop = Array.from(uniforms.uniforms.uCrop as Float32Array);
+    const expectedCrop = [86 / 300, 28 / 200, 28 / 300, 24 / 200];
+    crop.forEach((value, index) =>
+      expect(value).toBeCloseTo(expectedCrop[index]!),
+    );
+    expect(mask.position.set).toHaveBeenCalledWith(100, 40);
+    expect(mask.scale.set).toHaveBeenCalledWith(70, 60);
+  });
+
+  it("keeps one display across frames for a stable tracker identity", async () => {
+    const nextFrame: DetectionFrame = {
+      ...frame,
+      detections: [
+        {
+          ...frame.detections[0]!,
+          id: "frame-scoped-id",
+          trackerId: 42,
+        },
+      ],
+      frameIndex: 2,
+      mediaTime: 2,
+    };
+    const firstFrame: DetectionFrame = {
+      ...nextFrame,
+      detections: [{ ...nextFrame.detections[0]!, id: "old-id" }],
+      frameIndex: 1,
+      mediaTime: 1,
+    };
+    const layer = createPixiRegionLayer({
+      ...createTestBackend(),
+      Assets: {
+        load: vi.fn(async () => ({ height: 10, width: 10 })),
+        unload: vi.fn(async () => undefined),
+      } as never,
+      Container: FakeContainer as never,
+      GifSprite: FakeGifSprite as never,
+      Sprite: FakeSprite as never,
+      detectionTimeline: createTimeline(firstFrame, (mediaTime) =>
+        mediaTime < 2 ? firstFrame : nextFrame,
+      ),
+      regionRenderers: [
+        annotationRenderers.region({
+          id: "badge",
+          region: { kind: "bounds" },
+          source: { asset: { src: "/badge.png" }, kind: "asset" },
+          target: {},
+        }),
+      ],
+    });
+    const container = layer.createContainer() as unknown as FakeContainer;
+    await Promise.resolve();
+
+    layer.drawFrame(1);
+    const display = container.children[0];
+    layer.drawFrame(2);
+
+    expect(container.children).toHaveLength(1);
+    expect(container.children[0]).toBe(display);
+  });
+
   it("keeps explicit screen-space assets the same size across detections and zoom", async () => {
     const layer = createPixiRegionLayer({
       ...createTestBackend(),
@@ -551,6 +675,7 @@ class FakeContainer {
 }
 
 class FakeSprite {
+  readonly effects: unknown[] = [];
   readonly anchor = { set: vi.fn() };
   readonly destroy = vi.fn();
   readonly position = {
@@ -583,6 +708,25 @@ class FakeSprite {
   constructor(options: { texture: { height: number; width: number } }) {
     this.texture = options.texture;
   }
+
+  addEffect(effect: unknown) {
+    if (!this.effects.includes(effect)) this.effects.push(effect);
+  }
+
+  removeEffect(effect: unknown) {
+    const index = this.effects.indexOf(effect);
+    if (index >= 0) this.effects.splice(index, 1);
+  }
+}
+
+class FakeAlphaMask {
+  readonly destroy = vi.fn();
+
+  constructor(readonly options: { readonly mask: FakeMesh }) {}
+
+  get mask() {
+    return this.options.mask;
+  }
 }
 
 class FakeGraphics extends FakeSprite {
@@ -609,12 +753,12 @@ class FakeTexture {
   readonly dynamic: boolean;
   readonly frame: FakeRectangle;
   readonly update = vi.fn();
-  source: { height: number; width: number };
+  source: { height: number; style?: object; width: number };
 
   constructor(options: {
     readonly dynamic?: boolean;
     readonly frame?: FakeRectangle;
-    readonly source: { height: number; width: number };
+    readonly source: { height: number; style?: object; width: number };
   }) {
     this.dynamic = options.dynamic ?? false;
     this.frame = options.frame ?? new FakeRectangle();
@@ -627,6 +771,50 @@ class FakeTexture {
 
   get width() {
     return this.frame.width || this.source.width;
+  }
+}
+
+class FakeImageSource {
+  readonly destroy = vi.fn();
+  readonly style = {};
+
+  constructor(
+    readonly options: {
+      readonly height: number;
+      readonly width: number;
+    },
+  ) {}
+}
+
+class FakeUniformGroup {
+  readonly update = vi.fn();
+  readonly uniforms: Record<string, number | Float32Array>;
+
+  constructor(
+    uniforms: Record<string, { readonly value: number | Float32Array }>,
+  ) {
+    this.uniforms = Object.fromEntries(
+      Object.entries(uniforms).map(([key, value]) => [key, value.value]),
+    );
+  }
+}
+
+class FakeShader {
+  readonly destroy = vi.fn();
+
+  constructor(readonly resources: Record<string, unknown>) {}
+}
+
+class FakeMeshGeometry {
+  readonly destroy = vi.fn();
+}
+
+class FakeMesh extends FakeSprite {
+  shader: FakeShader;
+
+  constructor(options: { shader: FakeShader }) {
+    super({ texture: { height: 0, width: 0 } });
+    this.shader = options.shader;
   }
 }
 
@@ -674,9 +862,19 @@ function createTimeline(
 
 function createTestBackend(mediaTexture?: FakeTexture) {
   return {
+    AlphaMask: FakeAlphaMask as never,
     Graphics: FakeGraphics as never,
+    ImageSource: FakeImageSource as never,
+    Mesh: FakeMesh as never,
+    MeshGeometry: FakeMeshGeometry as never,
     Rectangle: FakeRectangle as never,
+    Shader: {
+      from: ({ resources }: { resources: Record<string, unknown> }) =>
+        new FakeShader(resources),
+    } as never,
     Texture: FakeTexture as never,
+    UniformGroup: FakeUniformGroup as never,
+    getActiveIdMaskFrameTexture: () => null,
     getMediaTexture: () => mediaTexture as never,
   };
 }

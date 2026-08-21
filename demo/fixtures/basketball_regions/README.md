@@ -5,17 +5,25 @@ This fixture reuses the committed basketball media and the frozen
 playground. It adds direct SAM3 `head` masks associated with the existing white
 and yellow team-player detections.
 
-The versioned `sam3-head-top-center-v1` authoring transform keeps SAM3 head
-predictions with confidence at least `0.7`, then performs deterministic
-one-to-one matching against plausible player rectangles. The score measures
-distance from the head center to the top-center of the player rectangle. This
-avoids relying on player masks that can temporarily omit the neck or head.
+The versioned `sam3-head-cbiou-player-v3` authoring transform first runs the
+supervision-js C-BIoU tracker over frozen team-player boxes. It then starts head
+tracks from SAM3 predictions with confidence at least `0.7` and uses
+predictions down to `0.5` only to continue an established track. Head matching
+is deterministic and one-to-one, combining distance from the tracked player's
+top-center with the head track's previous relative position.
 
-The selected SAM3 mask remains unchanged. Its exact coverage is converted into
-a bounded polygon for Region renderer stencil coverage, and the committed head
-detection retains both the compressed RLE mask and polygon under
-`sourceId: "sam3-head"`. The renderer therefore enlarges clean head pixels with
-transparency and has no runtime keypoint dependency.
+Internal gaps of at most seven frames are filled offline by translating the
+nearest exact mask with player motion. If the frozen player detection is also
+missing in a gap frame, its rectangle is interpolated from the two surrounding
+observations. Crop rectangles receive 6 px of padding and exponential
+smoothing, while remaining guaranteed to contain every pixel in the exact
+mask. The committed detections keep stable ids and tracker ids across frames.
+
+The selected or translated SAM3 compressed RLE mask remains the source of
+truth under `sourceId: "sam3-head"`; no bounded polygon approximation is used.
+The Region renderer reuses the prepared GPU id-mask artifact to enlarge only
+the head pixels with transparency and has no runtime model or keypoint
+dependency.
 
 `head-detections.json` is the frozen normalized output of the SAM3 `head`
 prompt. Inference and API credentials are authoring-only: the hosted docs and

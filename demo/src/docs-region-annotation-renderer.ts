@@ -78,7 +78,7 @@ export function createRegionPlaygroundRenderers(
         id: "player-big-heads",
         region: { kind: "bounds" },
         source: {
-          coverage: { kind: RegionRendererCoverageKind.Polygon },
+          coverage: { kind: RegionRendererCoverageKind.Mask },
           kind: "media",
           region: { kind: "bounds" },
         },
@@ -149,7 +149,7 @@ export function createRegionPlaygroundSnippet(
       source: {
         kind: "media",
         region: { kind: "bounds" },
-        coverage: { kind: "polygon" },
+        coverage: { kind: "mask" },
       },
       region: { kind: "bounds" },
       ${relativeTransform},

@@ -149,6 +149,7 @@ export {
   type RegionRendererAssetSource,
   type RegionRendererBoundsRegion,
   type RegionRendererCompose,
+  type RegionRendererMaskCoverage,
   type RegionRendererPolygonCoverage,
   type RegionRendererKeypointAnchorRegion,
   type RegionRendererMediaSource,
