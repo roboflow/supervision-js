@@ -120,6 +120,12 @@ export function createPreparedRenderWindow(options: {
     readonly maskStyle: MaskStyle;
     readonly mediaTime: number;
   }) => readonly SerializableMaskInstruction[];
+  /**
+   * The widest id raster a cook may produce. A function because the raster is
+   * sized against media dimensions the caller only learns once its display
+   * exists, which is after this window does.
+   */
+  readonly resolveMaxRasterWidth?: () => number | undefined;
 }): PreparedRenderWindow {
   const maskFrameOptions = options.renderPreparation?.maskFrame;
   const maxMaskFrameCacheSize = Math.max(
@@ -316,7 +322,11 @@ export function createPreparedRenderWindow(options: {
       }
 
       void maskFramePreparer
-        .prepare({ instructions, key })
+        .prepare({
+          instructions,
+          key,
+          maxRasterWidth: options.resolveMaxRasterWidth?.(),
+        })
         .then((maskFrame) => {
           inFlightMaskFrames.delete(job);
           const pendingJob = pendingMaskFrames.get(key);

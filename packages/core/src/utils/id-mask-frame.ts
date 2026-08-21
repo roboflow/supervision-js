@@ -19,15 +19,34 @@ export interface IdMaskFrame {
   readonly width: number;
 }
 
+export interface IdMaskFrameOptions {
+  /**
+   * Widest raster to cook. A value at or above the instructions' own width
+   * cooks at their width, and a smaller one keeps their aspect ratio.
+   */
+  readonly maxWidth?: number;
+}
+
 export function createIdMaskFrame(
   instructions: readonly IdMaskInstruction[],
+  options: IdMaskFrameOptions = {},
 ): IdMaskFrame | undefined {
   if (instructions.length === 0) {
     return undefined;
   }
 
-  const width = Math.max(...instructions.map(({ mask }) => mask.width));
-  const height = Math.max(...instructions.map(({ mask }) => mask.height));
+  const maskWidth = Math.max(...instructions.map(({ mask }) => mask.width));
+  const maskHeight = Math.max(...instructions.map(({ mask }) => mask.height));
+  const width = resolveRasterWidth(maskWidth, options.maxWidth);
+  const height =
+    width === maskWidth
+      ? maskHeight
+      : Math.max(1, Math.round((width * maskHeight) / maskWidth));
+  const strokeScale = width / maskWidth;
+  const scaledAxes =
+    width === maskWidth
+      ? undefined
+      : createScaledMaskAxes({ height, maskHeight, maskWidth, width });
   const data = new Uint8Array(new ArrayBuffer(width * height));
   const fillPalette = new Float32Array(
     new ArrayBuffer(MAX_ID_MASK_PALETTE_ENTRIES * 4 * 4),
@@ -60,7 +79,7 @@ export function createIdMaskFrame(
 
     if (instruction.stroke && instruction.stroke.width > 0) {
       const strokeWidth = Math.min(
-        Math.max(0, instruction.stroke.width),
+        resolveStrokeTexels(instruction.stroke.width, strokeScale),
         MAX_ID_MASK_STROKE_WIDTH,
       );
 
@@ -75,7 +94,11 @@ export function createIdMaskFrame(
       );
     }
 
-    writeMaskRuns(data, width, instruction.mask, detectionMaskId);
+    if (scaledAxes) {
+      writeScaledMaskRuns(data, scaledAxes, instruction.mask, detectionMaskId);
+    } else {
+      writeMaskRuns(data, width, instruction.mask, detectionMaskId);
+    }
   }
 
   return {
@@ -135,6 +158,102 @@ function writeMaskRuns(
 
     maskOffset += runLength;
   }
+}
+
+/**
+ * The scaled twin of writeMaskRuns. Every source pixel marks the texel it lands
+ * in, so a mask keeps every part of itself the smaller raster can hold and
+ * gains up to a texel at its edges.
+ */
+function writeScaledMaskRuns(
+  data: Uint8Array,
+  axes: ScaledMaskAxes,
+  mask: IdMaskInstruction["mask"],
+  detectionMaskId: number,
+) {
+  const counts = decodeCompressedRleCounts(mask.counts);
+  const maskWidth = mask.width;
+  const maskHeight = mask.height;
+  let maskOffset = 0;
+
+  for (let index = 0; index < counts.length; index += 1) {
+    const runLength = counts[index] ?? 0;
+
+    if (index % 2 === 0 || runLength <= 0) {
+      maskOffset += runLength;
+      continue;
+    }
+
+    let x = Math.floor(maskOffset / maskHeight);
+    let y = maskOffset - x * maskHeight;
+    let column = axes.columns[x];
+
+    for (let step = 0; step < runLength; step += 1) {
+      if (x >= maskWidth) {
+        break;
+      }
+
+      data[axes.rows[y] + column] = detectionMaskId;
+      y += 1;
+
+      if (y === maskHeight) {
+        y = 0;
+        x += 1;
+        column = axes.columns[x];
+      }
+    }
+
+    maskOffset += runLength;
+  }
+}
+
+function resolveRasterWidth(maskWidth: number, maxWidth: number | undefined) {
+  return maxWidth !== undefined && maxWidth > 0 && maxWidth < maskWidth
+    ? Math.max(1, Math.floor(maxWidth))
+    : maskWidth;
+}
+
+/**
+ * A stroke is measured in texels of the raster it is drawn on, so a coarser
+ * raster measures it in coarser texels. A stroke of a texel or more keeps at
+ * least one, the thinnest line the shader can draw; a narrower one keeps its
+ * own width, which the shader draws as an inner boundary at any scale.
+ */
+function resolveStrokeTexels(strokeWidth: number, scale: number) {
+  return Math.max(strokeWidth * scale, Math.min(strokeWidth, 1));
+}
+
+interface ScaledMaskAxes {
+  readonly columns: Int32Array;
+  readonly rows: Int32Array;
+}
+
+function createScaledMaskAxes(frame: {
+  readonly height: number;
+  readonly maskHeight: number;
+  readonly maskWidth: number;
+  readonly width: number;
+}): ScaledMaskAxes {
+  return {
+    columns: createMaskAxisMap(frame.maskWidth, frame.width, 1),
+    rows: createMaskAxisMap(frame.maskHeight, frame.height, frame.width),
+  };
+}
+
+/** Rows hold their destination offset, so writing a run is two lookups. */
+function createMaskAxisMap(
+  sourceLength: number,
+  targetLength: number,
+  stride: number,
+) {
+  const map = new Int32Array(sourceLength);
+  const scale = targetLength / sourceLength;
+
+  for (let index = 0; index < sourceLength; index += 1) {
+    map[index] = Math.min(targetLength - 1, Math.floor(index * scale)) * stride;
+  }
+
+  return map;
 }
 
 function writePaletteEntry(

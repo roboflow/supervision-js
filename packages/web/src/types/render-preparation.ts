@@ -69,6 +69,18 @@ export interface RenderPreparationWorkerFactory {
  */
 export interface RenderPreparationMaskFrameOptions {
   /**
+   * The box the host paints prepared masks into, in CSS pixels, with the pixel
+   * ratio it paints them at. A mask frame's id raster is then capped to the
+   * size that box can show; absent, it is cooked at the detections' own
+   * resolution.
+   */
+  readonly display?: {
+    readonly boxHeight: number;
+    readonly boxWidth: number;
+    readonly devicePixelRatio: number;
+    readonly maxDevicePixelRatio?: number;
+  };
+  /**
    * Maximum number of prepared mask frames retained in memory.
    */
   readonly maxCacheFrameCount?: number;

@@ -35,7 +35,10 @@ workerScope.addEventListener("message", (event) => {
 
 function prepareMaskFrame(message: MaskPreparationWorkerRequest) {
   try {
-    const idMaskFrame = createIdMaskRasterFrame(message.job.instructions);
+    const idMaskFrame = createIdMaskRasterFrame(
+      message.job.instructions,
+      message.job.maxRasterWidth,
+    );
 
     if (idMaskFrame) {
       workerScope.postMessage(

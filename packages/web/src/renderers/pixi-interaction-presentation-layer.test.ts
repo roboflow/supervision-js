@@ -7,6 +7,7 @@ import {
 import { BaseInteractionStyle } from "supervision-js-core";
 import type { DetectionFrame } from "supervision-js-core";
 import { DetectionPickTarget } from "supervision-js-core";
+import { PreparedMaskFrameKind } from "#render-preparation/mask-frame-artifact";
 
 type ShaderDescriptor = {
   readonly gl: { readonly fragment: string; readonly vertex: string };
@@ -167,7 +168,97 @@ describe("pixi interaction presentation layer", () => {
       );
     }
   });
+
+  it("measures an interaction stroke in the texels of the raster it draws on", () => {
+    expect(uploadedStrokeWidth({ rasterWidth: 120, strokeWidth: 2 })).toBe(2);
+    expect(uploadedStrokeWidth({ rasterWidth: 60, strokeWidth: 4 })).toBe(2);
+    // The thinnest line the shader can draw at all.
+    expect(uploadedStrokeWidth({ rasterWidth: 60, strokeWidth: 1.5 })).toBe(1);
+    // A sub-texel stroke is an inner boundary at any scale, so it keeps its own
+    // width on a raster of any size.
+    expect(uploadedStrokeWidth({ rasterWidth: 120, strokeWidth: 0.5 })).toBe(
+      0.5,
+    );
+    expect(uploadedStrokeWidth({ rasterWidth: 60, strokeWidth: 0.5 })).toBe(
+      0.5,
+    );
+  });
 });
+
+function uploadedStrokeWidth(options: {
+  readonly rasterWidth: number;
+  readonly strokeWidth: number;
+}) {
+  vi.stubGlobal("document", {
+    createElement: vi.fn(() => ({
+      getContext: vi.fn(),
+      height: 0,
+      width: 0,
+    })),
+  });
+
+  const mask = {
+    counts: "",
+    encoding: "compressedRle",
+    height: 80,
+    width: 120,
+  };
+  const layer = createPixiInteractionPresentationLayer({
+    Container: FakeContainer as never,
+    Graphics: FakeGraphics as never,
+    ImageSource: FakeImageSource as never,
+    Mesh: FakeMesh as never,
+    MeshGeometry: FakeMeshGeometry as never,
+    Shader: FakeShaderFactory as never,
+    Text: FakeText as never,
+    UniformGroup: FakeUniformGroup as never,
+    interactionStyle: {
+      resolve: () => ({
+        maskStyle: {
+          resolve: () => ({
+            alpha: 1,
+            color: 0x00ff00,
+            mask,
+            stroke: {
+              alpha: 1,
+              color: 0xffffff,
+              width: options.strokeWidth,
+            },
+          }),
+        },
+      }),
+    } as never,
+  });
+
+  layer.createDisplay({ height: 80, width: 120 });
+  layer.drawFrame({
+    frame,
+    hoveredPick: null,
+    idMaskArtifact: {
+      frame: {
+        height: 80,
+        key: "mask-frame",
+        kind: PreparedMaskFrameKind.IdMask,
+        width: options.rasterWidth,
+      },
+      texture: { source: { style: {} } },
+    } as never,
+    mediaTime: frame.mediaTime,
+    selectedPick: {
+      detection: frame.detections[0]!,
+      detectionIndex: 0,
+      frame,
+      mediaTime: frame.mediaTime,
+      point: { x: 15, y: 20 },
+      target: DetectionPickTarget.Mask,
+    },
+  });
+
+  const uniforms = FakeShaderFactory.descriptors.at(-1)!.resources
+    .interactionMaskUniforms as FakeUniformGroup;
+
+  return (uniforms.uniforms.uStrokeWidths as Float32Array)[1];
+}
 
 class FakeContainer {
   readonly children: unknown[] = [];

@@ -28,6 +28,7 @@ import {
 } from "../media/upload-media";
 import { createDemoPresentation } from "../presentation/demo-presentation";
 import { readDemoDisplayBox } from "./decode-resolution";
+import { readDemoMaskFrameOptions } from "./mask-raster-resolution";
 import { UPLOAD_DETECTION_CHUNK_SECONDS } from "./demo-session-config";
 import { getDemoMaxDevicePixelRatio } from "./render-quality";
 import type {
@@ -124,6 +125,10 @@ export async function createUploadSession(
         onFrame: options.onFrame,
         onState: options.onRendererState,
         renderPreparation: {
+          maskFrame: readDemoMaskFrameOptions(
+            options.container,
+            options.renderQuality,
+          ),
           mode: RenderPreparationMode.Worker,
           onDiagnostics: options.onRenderPreparationDiagnostics,
         },

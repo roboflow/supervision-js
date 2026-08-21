@@ -18,6 +18,7 @@ import {
 } from "../fixtures/demo-fixtures";
 import { createDemoPresentation } from "../presentation/demo-presentation";
 import { readDemoDisplayBox } from "./decode-resolution";
+import { readDemoMaskFrameOptions } from "./mask-raster-resolution";
 import { getDemoMaxDevicePixelRatio } from "./render-quality";
 import type { DemoSessionCallbacks } from "./demo-session-types";
 
@@ -97,6 +98,10 @@ export async function createFixtureSession(
         onFrame: options.onFrame,
         onState: options.onRendererState,
         renderPreparation: {
+          maskFrame: readDemoMaskFrameOptions(
+            options.container,
+            options.renderQuality,
+          ),
           mode: RenderPreparationMode.Worker,
           onDiagnostics: options.onRenderPreparationDiagnostics,
         },

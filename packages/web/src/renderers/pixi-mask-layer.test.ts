@@ -4,6 +4,8 @@ import {
   IdMaskTextureFormat,
   PreparedMaskFrameKind,
 } from "#render-preparation/mask-frame-artifact";
+import { RenderPreparationArtifactKind } from "#types/render-preparation";
+import type { RenderPreparationMaskFrameOptions } from "#types/render-preparation";
 import { BaseMaskStyle } from "supervision-js-core";
 
 const preparedWindow = vi.hoisted(() => ({
@@ -18,6 +20,7 @@ const preparedWindow = vi.hoisted(() => ({
   options: undefined as
     | {
         onPreparedWindowChange?: () => void;
+        resolveMaxRasterWidth?: () => number | undefined;
       }
     | undefined,
 }));
@@ -45,6 +48,7 @@ vi.mock("#render-preparation/prepared-render-window", () => ({
 }));
 
 import { createPixiMaskLayer } from "#renderers/pixi-mask-layer";
+import type { IdMaskDisplayBox } from "#renderers/pixi-mask-layer";
 
 beforeEach(() => {
   preparedWindow.frame = undefined;
@@ -184,6 +188,59 @@ describe("pixi mask layer", () => {
     }
   });
 
+  it("cooks id rasters no wider than the declared display box shows", () => {
+    const layer = maskLayerWithDisplayBox({
+      acceptsUnalignedTextureRows: true,
+    });
+
+    layer.createSprite({ height: 2016, width: 1504 });
+
+    // 767 / 2016 is the tighter fit of the two axes.
+    expect(preparedWindow.options?.resolveMaxRasterWidth?.()).toBe(573);
+  });
+
+  it("keeps a cooked raster on the four-byte boundary the renderer needs", () => {
+    const layer = maskLayerWithDisplayBox({
+      acceptsUnalignedTextureRows: false,
+    });
+
+    layer.createSprite({ height: 2016, width: 1504 });
+
+    expect(preparedWindow.options?.resolveMaxRasterWidth?.()).toBe(572);
+  });
+
+  it("asks for no width of its own before a sprite gives it media dimensions", () => {
+    maskLayerWithDisplayBox({ acceptsUnalignedTextureRows: true });
+
+    expect(preparedWindow.options?.resolveMaxRasterWidth?.()).toBeUndefined();
+  });
+
+  it("leaves a layer with no display box at the detections' own resolution", () => {
+    const layer = createPixiMaskLayer({
+      BufferImageSource: FakeBufferImageSource as never,
+      ImageSource: FakeImageSource as never,
+      Sprite: FakeSprite as never,
+      Texture: FakeTexture as never,
+      detectionTimeline: {} as never,
+      maskStyle: new BaseMaskStyle(),
+    });
+
+    layer.createSprite({ height: 2016, width: 1504 });
+
+    expect(preparedWindow.options?.resolveMaxRasterWidth?.()).toBeUndefined();
+  });
+
+  it("leaves a polygon frame at the size its geometry was rasterized to", () => {
+    const layer = maskLayerWithDisplayBox({
+      acceptsUnalignedTextureRows: true,
+      artifactKind: RenderPreparationArtifactKind.PolygonFrame,
+    });
+
+    layer.createSprite({ height: 2016, width: 1504 });
+
+    expect(preparedWindow.options?.resolveMaxRasterWidth?.()).toBeUndefined();
+  });
+
   it("reports the window's readiness for a media time", () => {
     const layer = createPixiMaskLayer({
       BufferImageSource: FakeBufferImageSource as never,
@@ -207,6 +264,33 @@ describe("pixi mask layer", () => {
     expect(layer.isArtifactPrepared(0.1)).toBe(true);
   });
 });
+
+function maskLayerWithDisplayBox(options: {
+  readonly acceptsUnalignedTextureRows: boolean;
+  readonly artifactKind?: RenderPreparationArtifactKind;
+}) {
+  const display: IdMaskDisplayBox = {
+    boxHeight: 767,
+    boxWidth: 574,
+    devicePixelRatio: 2,
+    maxDevicePixelRatio: 1,
+  };
+  const maskFrame: RenderPreparationMaskFrameOptions & {
+    readonly display: IdMaskDisplayBox;
+  } = { display };
+
+  return createPixiMaskLayer({
+    BufferImageSource: FakeBufferImageSource as never,
+    ImageSource: FakeImageSource as never,
+    Sprite: FakeSprite as never,
+    Texture: FakeTexture as never,
+    acceptsUnalignedTextureRows: () => options.acceptsUnalignedTextureRows,
+    artifactKind: options.artifactKind,
+    detectionTimeline: {} as never,
+    maskStyle: new BaseMaskStyle(),
+    renderPreparation: { maskFrame },
+  });
+}
 
 function idMaskFrame(width = 120) {
   const raster = new Uint8Array(width * 80);

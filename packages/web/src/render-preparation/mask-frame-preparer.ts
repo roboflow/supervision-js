@@ -261,7 +261,7 @@ function createMainThreadMaskFramePreparer(
 function createPreparedIdMaskFrame(
   job: MaskFramePreparationJob,
 ): PreparedMaskFrame | undefined {
-  const frame = createIdMaskRasterFrame(job.instructions);
+  const frame = createIdMaskRasterFrame(job.instructions, job.maxRasterWidth);
 
   if (!frame) {
     return undefined;

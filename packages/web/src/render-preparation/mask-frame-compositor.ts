@@ -56,9 +56,12 @@ export function compositeMaskFrame(
 
 export function createIdMaskRasterFrame(
   instructions: readonly SerializableMaskInstruction[],
+  maxRasterWidth?: number,
 ): IdMaskFrame | undefined {
   try {
-    return createIdMaskFrame(materializeMaskInstructions(instructions));
+    return createIdMaskFrame(materializeMaskInstructions(instructions), {
+      maxWidth: maxRasterWidth,
+    });
   } catch {
     // The id raster is the fast path, not the only one: answering with nothing
     // puts the caller on the RGBA composite, which draws the same picture.

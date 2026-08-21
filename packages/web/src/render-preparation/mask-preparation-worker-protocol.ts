@@ -33,6 +33,8 @@ export type SerializableMaskInstruction =
 export interface MaskFramePreparationJob {
   readonly instructions: readonly SerializableMaskInstruction[];
   readonly key: string;
+  /** Widest id raster to cook; absent, the instructions' own resolution. */
+  readonly maxRasterWidth?: number;
 }
 
 export interface MaskPreparationWorkerPrepareMessage {

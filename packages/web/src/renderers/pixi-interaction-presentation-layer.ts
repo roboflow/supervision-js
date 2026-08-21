@@ -721,7 +721,11 @@ function createInteractionMaskRenderer(options: {
             instruction.stroke.alpha,
           );
           strokeWidths[maskId] = Math.min(
-            Math.max(0, instruction.stroke.width),
+            resolveRasterStrokeTexels(
+              instruction.stroke.width,
+              instruction.mask.width,
+              frame.width,
+            ),
             MAX_INTERACTION_STROKE_RADIUS,
           );
           maxStrokeWidth = Math.max(maxStrokeWidth, strokeWidths[maskId] ?? 0);
@@ -791,6 +795,23 @@ function createInteractionMaskRenderer(options: {
     shader = createShader();
     mesh.shader = shader;
   }
+}
+
+/**
+ * A stroke is measured in texels of the raster the shader samples, so a raster
+ * cooked below the mask's own resolution measures it in coarser texels. A
+ * stroke of a texel or more keeps at least one, the thinnest line the shader
+ * can draw; a narrower one keeps its own width, which the shader draws as an
+ * inner boundary at any scale.
+ */
+function resolveRasterStrokeTexels(
+  strokeWidth: number,
+  maskWidth: number,
+  rasterWidth: number,
+) {
+  const scale = maskWidth > 0 ? rasterWidth / maskWidth : 1;
+
+  return Math.max(strokeWidth * scale, Math.min(strokeWidth, 1));
 }
 
 function writePaletteEntry(

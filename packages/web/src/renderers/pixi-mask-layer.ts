@@ -20,9 +20,10 @@ import type {
   DetectionPickResult,
 } from "supervision-js-core";
 import type { MaskStyle } from "supervision-js-core";
+import { RenderPreparationArtifactKind } from "#types/render-preparation";
 import type {
+  RenderPreparationMaskFrameOptions,
   RenderPreparationOptions,
-  RenderPreparationArtifactKind,
   RenderPreparationPlaybackGateOptions,
 } from "#types/render-preparation";
 import type { SerializableMaskInstruction } from "#render-preparation/mask-preparation-worker-protocol";
@@ -148,6 +149,10 @@ export const ID_MASK_PREPARATION_STYLE: MaskStyle = {
       : undefined,
 };
 
+export type IdMaskDisplayBox = NonNullable<
+  RenderPreparationMaskFrameOptions["display"]
+>;
+
 export interface PixiActiveIdMaskFrameTexture {
   readonly frame: PreparedIdMaskFrame;
   readonly texture: PixiTexture;
@@ -192,6 +197,7 @@ export function createPixiMaskLayer(options: {
   let visibleMaskMediaTime: number | null = null;
   let isDestroyed = false;
   const maskTextures = new Map<string, PixiTexture>();
+  const maskFrameOptions = options.renderPreparation?.maskFrame;
   const preparedRenderWindow = createPreparedRenderWindow({
     artifactKind: options.artifactKind,
     detectionTimeline: options.detectionTimeline,
@@ -215,6 +221,7 @@ export function createPixiMaskLayer(options: {
     },
     renderPreparation: options.renderPreparation,
     resolveInstructions: options.resolveInstructions,
+    resolveMaxRasterWidth,
   });
 
   return {
@@ -413,6 +420,54 @@ export function createPixiMaskLayer(options: {
     maskTextures.set(maskFrame.key, texture);
 
     return texture;
+  }
+
+  /**
+   * The widest raster the picture can show. Polygon frames rasterize geometry
+   * at a size of their own choosing, so this sizes mask frames only.
+   */
+  function resolveMaxRasterWidth() {
+    const display = maskFrameOptions?.display;
+    const artifactKind =
+      options.artifactKind ?? RenderPreparationArtifactKind.MaskFrame;
+
+    if (
+      !display ||
+      artifactKind !== RenderPreparationArtifactKind.MaskFrame ||
+      mediaWidth <= 0 ||
+      mediaHeight <= 0
+    ) {
+      return undefined;
+    }
+
+    const fit = Math.min(
+      display.boxWidth / mediaWidth,
+      display.boxHeight / mediaHeight,
+    );
+    const pixelRatio = Math.min(
+      display.devicePixelRatio,
+      display.maxDevicePixelRatio ?? display.devicePixelRatio,
+    );
+
+    return fit > 0 && pixelRatio > 0
+      ? alignRasterWidth(Math.ceil(mediaWidth * fit * pixelRatio))
+      : undefined;
+  }
+
+  /**
+   * An unaligned single-channel upload is paid for in four channels, so a width
+   * off the boundary costs four times the raster.
+   */
+  function alignRasterWidth(rasterWidth: number) {
+    if (options.acceptsUnalignedTextureRows?.() === true) {
+      return rasterWidth;
+    }
+
+    return Math.max(
+      TEXTURE_ROW_ALIGNMENT_BYTES,
+      Math.floor(rasterWidth / TEXTURE_ROW_ALIGNMENT_BYTES) *
+        TEXTURE_ROW_ALIGNMENT_BYTES,
+    );
   }
 
   function createTextureSource(maskFrame: PreparedMaskFrame) {
