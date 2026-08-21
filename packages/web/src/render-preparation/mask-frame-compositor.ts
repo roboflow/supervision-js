@@ -1,4 +1,8 @@
 import type { SerializableMaskInstruction } from "#render-preparation/mask-preparation-worker-protocol";
+import type {
+  PreparedRegionMaskCoverageEntry,
+  PreparedRegionMaskCoverageFrame,
+} from "#render-preparation/mask-frame-artifact";
 import type { MaskStrokeStyle } from "supervision-js-core";
 import {
   createIdMaskFrame,
@@ -32,6 +36,73 @@ export interface CompositedMaskFrame {
   readonly data: Uint8ClampedArray<ArrayBuffer>;
   readonly height: number;
   readonly width: number;
+}
+
+/** Builds compact, independent alpha crops so overlapping masks stay exact. */
+export function createRegionMaskCoverageFrame(
+  instructions: readonly SerializableMaskInstruction[],
+): PreparedRegionMaskCoverageFrame | undefined {
+  const entries: PreparedRegionMaskCoverageEntry[] = [];
+
+  for (const instruction of instructions) {
+    if (!instruction.regionCoverageMask) {
+      continue;
+    }
+
+    const entry = cropCoverageMask(
+      instruction.detectionIndex,
+      decodeCompressedRleMask(instruction.regionCoverageMask),
+    );
+
+    if (entry) {
+      entries.push(entry);
+    }
+  }
+
+  return entries.length > 0 ? { entries } : undefined;
+}
+
+function cropCoverageMask(
+  detectionIndex: number,
+  decodedMask: DecodedMaskPixels,
+): PreparedRegionMaskCoverageEntry | undefined {
+  let minX = decodedMask.width;
+  let minY = decodedMask.height;
+  let maxX = -1;
+  let maxY = -1;
+
+  for (let y = 0; y < decodedMask.height; y += 1) {
+    for (let x = 0; x < decodedMask.width; x += 1) {
+      if (!decodedMask.data[y * decodedMask.width + x]) {
+        continue;
+      }
+
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+  }
+
+  if (maxX < minX || maxY < minY) {
+    return undefined;
+  }
+
+  const width = maxX - minX + 1;
+  const height = maxY - minY + 1;
+  const data = new Uint8Array(new ArrayBuffer(width * height));
+
+  for (let y = minY; y <= maxY; y += 1) {
+    for (let x = minX; x <= maxX; x += 1) {
+      if (!decodedMask.data[y * decodedMask.width + x]) {
+        continue;
+      }
+
+      data[(y - minY) * width + (x - minX)] = 255;
+    }
+  }
+
+  return { data, detectionIndex, height, width, x: minX, y: minY };
 }
 
 export function compositeMaskFrame(
@@ -87,25 +158,27 @@ function compositeInstruction(
 function materializeMaskInstructions(
   instructions: readonly SerializableMaskInstruction[],
 ): IdMaskInstruction[] {
-  return instructions.map((instruction) => {
-    if (instruction.mask) {
-      return instruction;
-    }
+  return instructions
+    .filter((instruction) => instruction.visible !== false)
+    .map((instruction) => {
+      if (instruction.mask) {
+        return instruction;
+      }
 
-    const { height, points, width } = instruction.polygon;
+      const { height, points, width } = instruction.polygon;
 
-    return {
-      alpha: instruction.alpha,
-      color: instruction.color,
-      detectionIndex: instruction.detectionIndex,
-      mask: encodeBinaryMask(
-        rasterizePolygonToMask(points, { height, width }),
-        width,
-        height,
-      ),
-      stroke: instruction.stroke,
-    };
-  });
+      return {
+        alpha: instruction.alpha,
+        color: instruction.color,
+        detectionIndex: instruction.detectionIndex,
+        mask: encodeBinaryMask(
+          rasterizePolygonToMask(points, { height, width }),
+          width,
+          height,
+        ),
+        stroke: instruction.stroke,
+      };
+    });
 }
 
 function compositeMaskFill(

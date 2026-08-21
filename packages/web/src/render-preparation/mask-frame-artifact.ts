@@ -14,10 +14,34 @@ export enum IdMaskTextureFormat {
   Rgba8 = "rgba8unorm",
 }
 
+export interface PreparedRegionMaskCoverageEntry {
+  readonly data: Uint8Array<ArrayBuffer>;
+  readonly detectionIndex: number;
+  readonly height: number;
+  readonly width: number;
+  readonly x: number;
+  readonly y: number;
+}
+
+/**
+ * Overlap-preserving membership planes for exact region crops. Every target
+ * owns an alpha crop, so masks remain independent where their pixels overlap.
+ */
+export interface PreparedRegionMaskCoverageFrame {
+  readonly entries: readonly PreparedRegionMaskCoverageEntry[];
+}
+
 export interface PreparedRgbaMaskFrame {
   readonly height: number;
+  /**
+   * The uncomposited detection-id plane carried alongside the RGBA composite,
+   * so id-keyed effects such as the mask halo still have a plane to read when
+   * the id raster could not be cooked.
+   */
+  readonly idMaskData?: Uint8Array<ArrayBuffer>;
   readonly key: string;
   readonly kind: PreparedMaskFrameKind.RgbaImage;
+  readonly regionMaskCoverage?: PreparedRegionMaskCoverageFrame;
   readonly source: HTMLCanvasElement | ImageBitmap;
   readonly width: number;
   close(): void;
@@ -31,6 +55,7 @@ export interface PreparedIdMaskFrame {
   readonly kind: PreparedMaskFrameKind.IdMask;
   readonly maxStrokeWidth: number;
   readonly raster: Uint8Array<ArrayBuffer>;
+  readonly regionMaskCoverage?: PreparedRegionMaskCoverageFrame;
   readonly strokePalette: Float32Array<ArrayBuffer>;
   readonly strokeWidths: Float32Array<ArrayBuffer>;
   readonly width: number;

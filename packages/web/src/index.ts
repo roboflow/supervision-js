@@ -6,7 +6,52 @@ export { createChunkedDetectionFrameSource } from "#detections/chunked-detection
 export { createColdDetectionFrameSource } from "supervision-js-core";
 export { createCompositeDetectionFrameSource } from "supervision-js-core";
 export { createMemoryColdDetectionFrameStore } from "supervision-js-core";
+export { createProjectedDetectionFrameSource } from "supervision-js-core";
 export { createWritableDetectionFrameSource } from "supervision-js-core";
+export {
+  projectDetectionFrame,
+  projectDetectionFrames,
+} from "supervision-js-core";
+export {
+  createByteTrackTracker,
+  createCBIoUTracker,
+  createOCSortTracker,
+  createSortTracker,
+  detectionPostProcessors,
+  projectDetectionFrameForTracking,
+  TrackingGeometry,
+  type ByteTrackTracker,
+  type ByteTrackTrackerUpdate,
+  type ByteTrackTrackingDetectionPostProcessor,
+  type ByteTrackTrackingOptions,
+  type CBIoUTracker,
+  type CBIoUTrackerUpdate,
+  type CBIoUTrackingDetectionPostProcessor,
+  type CBIoUTrackingOptions,
+  type DetectionPostProcessor,
+  type DetectionPostProcessorFactory,
+  type OCSortTracker,
+  type OCSortTrackerUpdate,
+  type OCSortTrackingDetectionPostProcessor,
+  type OCSortTrackingOptions,
+  type SortTracker,
+  type SortTrackerUpdate,
+  type SortTrackingOptions,
+  type TrackingAssignment,
+  type TrackingDetectionPostProcessor,
+  type TrackingProjection,
+  type TrackingTracker,
+} from "supervision-js-core";
+export { createDetectionPostProcessingPipeline } from "#post-processing/detection-post-processing-pipeline";
+export { createDefaultDetectionPostProcessingWorkerFactory } from "#post-processing/default-tracking-worker";
+export {
+  DetectionPostProcessingMode,
+  type DetectionPostProcessingAppendResult,
+  type DetectionPostProcessingDiagnostics,
+  type DetectionPostProcessingPipeline,
+  type DetectionPostProcessingPipelineOptions,
+  type DetectionPostProcessingWorkerFactory,
+} from "#types/detection-post-processing";
 
 // Interaction and picking.
 export { pickDetectionAtPoint } from "supervision-js-core";
@@ -39,8 +84,15 @@ export {
 } from "#media/static-image-media-source";
 export {
   createMediaStreamRendererSource,
+  type MediaStreamPresentedFrame,
   type MediaStreamRendererSourceOptions,
 } from "#media/media-stream-media-source";
+export {
+  MediaSourceError,
+  getMediaErrorKind,
+  isMediaSourceError,
+  toMediaSourceError,
+} from "#media/media-errors";
 export {
   createVideoEngineMediaRendererSource,
   openVideoEngineMediaSource,
@@ -63,6 +115,8 @@ export type {
 // Presentation styles.
 export { BaseBoxStyle } from "supervision-js-core";
 export type { BaseBoxStyleOptions } from "supervision-js-core";
+export { BaseBoxCornerStyle } from "supervision-js-core";
+export type { BaseBoxCornerStyleOptions } from "supervision-js-core";
 export { BaseFocusStyle } from "supervision-js-core";
 export type { BaseFocusStyleOptions } from "supervision-js-core";
 export { BaseInteractionStyle } from "supervision-js-core";
@@ -71,6 +125,8 @@ export { BaseLabelStyle } from "supervision-js-core";
 export type { BaseLabelStyleOptions } from "supervision-js-core";
 export { BaseMaskStyle } from "supervision-js-core";
 export type { BaseMaskStyleOptions } from "supervision-js-core";
+export { BaseMarkerStyle } from "supervision-js-core";
+export type { BaseMarkerStyleOptions } from "supervision-js-core";
 export { BasePolygonStyle } from "supervision-js-core";
 export type { BasePolygonStyleOptions } from "supervision-js-core";
 export { BasePolylineStyle } from "supervision-js-core";
@@ -84,21 +140,34 @@ export {
   type AnnotationRendererFactory,
   type AnnotationRendererKind,
   type BoxAnnotationRenderer,
+  type BoxCornerAnnotationRenderer,
+  type EllipseAnnotationRenderer,
   type KeypointAnnotationRenderer,
   type LabelAnnotationRenderer,
   type MaskAnnotationRenderer,
+  type MaskHaloAnnotationRenderer,
+  type MarkerAnnotationRenderer,
   type PolygonAnnotationRenderer,
   type PolylineAnnotationRenderer,
   RegionRendererComposeMode,
+  RegionRendererCoverageKind,
   RegionRendererRegionKind,
+  RegionRendererSizeSpace,
   RegionRendererSourceKind,
   type RegionAnnotationRenderer,
   type RegionRendererAssetReference,
   type RegionRendererAssetSource,
   type RegionRendererBoundsRegion,
   type RegionRendererCompose,
+  type RegionRendererMaskCoverage,
+  type RegionRendererPolygonCoverage,
   type RegionRendererKeypointAnchorRegion,
+  type RegionRendererMediaSource,
   type RegionRendererRegion,
+  type RegionRendererRelativeTransform,
+  type RegionRendererSize,
+  type RegionRendererSizedTransform,
+  type RegionRendererSource,
   type RegionRendererTarget,
   type RegionRendererTargetContext,
   type RegionRendererTargetValue,
@@ -118,11 +187,21 @@ export {
 } from "supervision-js-core";
 export { BoxShape, BoxStrokeAlignment } from "supervision-js-core";
 export type {
+  BoxCornerDrawInstruction,
+  BoxCornerStyle,
+  BoxCornerStyleContext,
+} from "supervision-js-core";
+export type {
   BoxDrawInstruction,
   BoxFillStyle,
   BoxStrokeStyle,
   BoxStyle,
   BoxStyleContext,
+} from "supervision-js-core";
+export type {
+  EllipseDrawInstruction,
+  EllipseStyle,
+  EllipseStyleContext,
 } from "supervision-js-core";
 export type {
   FocusDrawInstruction,
@@ -148,12 +227,23 @@ export type {
 } from "supervision-js-core";
 export type {
   MaskDrawInstruction,
+  MaskHaloDrawInstruction,
+  MaskHaloStyle,
+  MaskHaloStyleContext,
   MaskStrokeStyle,
   MaskStrokeStyleOptions,
   MaskStyle,
   MaskStyleContext,
 } from "supervision-js-core";
 export { MaskRenderMode } from "supervision-js-core";
+export { MarkerShape, MarkerSizeSpace } from "supervision-js-core";
+export type {
+  ClosedMarkerDrawInstruction,
+  CrossMarkerDrawInstruction,
+  MarkerDrawInstruction,
+  MarkerStyle,
+  MarkerStyleContext,
+} from "supervision-js-core";
 export type {
   PolygonDrawInstruction,
   PolygonStyle,
@@ -188,6 +278,7 @@ export {
   type BufferedDetectionTimeline,
   type ColdDetectionFrameStore,
   type ColdDetectionFrameStoreLoadOptions,
+  type ColdDetectionFrameStorePruneOptions,
   type ColdDetectionFrameStoreWriteOptions,
   type ColdDetectionFrameStoreWriteSummary,
   type ChunkedDetectionFrameSourceOptions,
@@ -200,19 +291,25 @@ export {
   type DetectionFrameChunkDescriptor,
   type DetectionFrameChunkFetch,
   type DetectionFrameChunkManifest,
+  type DetectionFrameLoadOptions,
+  type DetectionFrameLiveOptions,
   type DetectionFrameRetentionOptions,
   type DetectionFrameSelectionOptions,
   type DetectionFrameSource,
+  type DetectionFrameSourceChanges,
   type DetectionFrameSourceVersionRange,
   type DetectionPlaybackGateOptions,
   type DetectionTimelineContext,
+  type LiveWritableDetectionFrameSource,
   type WritableDetectionFrameSource,
+  type WritableDetectionFrameSourceOptions,
 } from "supervision-js-core";
 export {
   DetectionMaskEncoding,
   KeypointVisibility,
   type CompressedRleDetectionMask,
   type Detection,
+  type DetectionCoordinateSpace,
   type DetectionFrame,
   type DetectionMask,
   type KeypointEdge,
@@ -270,6 +367,7 @@ export {
   type ProgressiveNormalizedMedia,
 } from "#types/media-normalization";
 export {
+  type LiveMediaSession,
   type MediaSession,
   MediaSessionActivityKind,
   MediaSessionActivityStatus,
@@ -293,6 +391,7 @@ export {
   type MediaSessionStateUnsubscribe,
   type MediaSessionWritableDetectionOptions,
 } from "#types/media-session";
+export { MediaErrorKind } from "supervision-js-core";
 export {
   DetectionTimelineOrigin,
   MediaRendererFit,

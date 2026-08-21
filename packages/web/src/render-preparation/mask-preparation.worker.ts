@@ -1,6 +1,7 @@
 import {
   compositeMaskFrame,
   createIdMaskRasterFrame,
+  createRegionMaskCoverageFrame,
 } from "#render-preparation/mask-frame-compositor";
 import { PreparedMaskFrameKind } from "#render-preparation/mask-frame-artifact";
 import {
@@ -35,6 +36,11 @@ workerScope.addEventListener("message", (event) => {
 
 function prepareMaskFrame(message: MaskPreparationWorkerRequest) {
   try {
+    const regionMaskCoverage = createRegionMaskCoverageFrame(
+      message.job.instructions,
+    );
+    const coverageTransfers =
+      getRegionMaskCoverageTransfers(regionMaskCoverage);
     const idMaskFrame = createIdMaskRasterFrame(
       message.job.instructions,
       message.job.maxRasterWidth,
@@ -50,6 +56,7 @@ function prepareMaskFrame(message: MaskPreparationWorkerRequest) {
           key: message.job.key,
           maxStrokeWidth: idMaskFrame.maxStrokeWidth,
           raster: idMaskFrame.data,
+          regionMaskCoverage,
           requestId: message.requestId,
           strokePalette: idMaskFrame.strokePalette,
           strokeWidths: idMaskFrame.strokeWidths,
@@ -61,6 +68,7 @@ function prepareMaskFrame(message: MaskPreparationWorkerRequest) {
           idMaskFrame.fillPalette.buffer,
           idMaskFrame.strokePalette.buffer,
           idMaskFrame.strokeWidths.buffer,
+          ...coverageTransfers,
         ],
       );
       return;
@@ -68,7 +76,7 @@ function prepareMaskFrame(message: MaskPreparationWorkerRequest) {
 
     const compositedFrame = compositeMaskFrame(message.job.instructions);
 
-    if (!compositedFrame) {
+    if (!compositedFrame && !regionMaskCoverage) {
       workerScope.postMessage({
         key: message.job.key,
         requestId: message.requestId,
@@ -77,34 +85,42 @@ function prepareMaskFrame(message: MaskPreparationWorkerRequest) {
       return;
     }
 
+    const preparedPixels =
+      compositedFrame ?? createTransparentCoverageCarrier();
     const imageData = new ImageData(
-      compositedFrame.data,
-      compositedFrame.width,
-      compositedFrame.height,
+      preparedPixels.data,
+      preparedPixels.width,
+      preparedPixels.height,
     );
     const imageBitmap = createImageBitmapFromImageData(imageData);
+    const idMaskData = createIdMaskRasterFrame(message.job.instructions)?.data;
+    const idMaskTransfers = idMaskData ? [idMaskData.buffer] : [];
 
     if (imageBitmap) {
       workerScope.postMessage(
         {
+          idMaskData,
           imageBitmap,
           key: message.job.key,
+          regionMaskCoverage,
           requestId: message.requestId,
           type: MaskPreparationWorkerMessageType.Complete,
         },
-        [imageBitmap],
+        [imageBitmap, ...idMaskTransfers, ...coverageTransfers],
       );
       return;
     }
 
     workerScope.postMessage(
       {
+        idMaskData,
         imageData,
         key: message.job.key,
+        regionMaskCoverage,
         requestId: message.requestId,
         type: MaskPreparationWorkerMessageType.Complete,
       },
-      [imageData.data.buffer],
+      [imageData.data.buffer, ...idMaskTransfers, ...coverageTransfers],
     );
   } catch (error) {
     workerScope.postMessage({
@@ -117,6 +133,24 @@ function prepareMaskFrame(message: MaskPreparationWorkerRequest) {
       type: MaskPreparationWorkerMessageType.Error,
     });
   }
+}
+
+/**
+ * A frame that carries only region coverage has nothing to composite, and the
+ * RGBA branch still has to produce an artifact for the coverage to ride on.
+ */
+function createTransparentCoverageCarrier() {
+  return {
+    data: new Uint8ClampedArray(new ArrayBuffer(4)),
+    height: 1,
+    width: 1,
+  };
+}
+
+function getRegionMaskCoverageTransfers(
+  coverage: ReturnType<typeof createRegionMaskCoverageFrame>,
+) {
+  return coverage?.entries.map(({ data }) => data.buffer) ?? [];
 }
 
 function createImageBitmapFromImageData(imageData: ImageData) {
