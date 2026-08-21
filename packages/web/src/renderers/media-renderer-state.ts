@@ -47,11 +47,12 @@ export interface MediaRendererRuntimeState {
   setRendererBackend(rendererBackend: string | null): void;
   recordPresentedSample(sample: PresentedMediaSample): void;
   /** What the scene put on screen on its own: a frame a push producer
-   *  announced, or a redraw of the frame already up. A media time other than
-   *  the one last counted counts a frame, so a redraw does not. */
+   *  announced, or a redraw of the frame already up. Counts a frame not counted
+   *  before, so a redraw counts nothing and one media time presented twice
+   *  counts twice. */
   recordPresentationUpdate(sample: PresentedMediaSample): void;
   /** A repaint the renderer asked the scene for. Takes the sample's playhead
-   *  and detections and counts no frame, whatever media time it carries. */
+   *  and detections and counts no frame, whichever frame the sample carries. */
   recordPresentationRefresh(sample: PresentedMediaSample): void;
   setReady(): void;
   setLoading(): void;
@@ -79,13 +80,9 @@ export function createMediaRendererRuntimeState(
   let mediaHeight = 0;
   let mediaWidth = 0;
   let rendererBackend: string | null = null;
-  /**
-   * Media times presented, not paints: a presented sample carries no frame
-   * identity. A pulled sample counts on every presentation; a scene
-   * presentation counts only at a media time other than the one last counted.
-   */
+  /** Frames put on screen, not paints. */
   let presentedFrames = 0;
-  let presentedMediaTime: number | null = null;
+  let presentedFrameSerial: number | null = null;
   let activeDetectionFrameTime: number | null = null;
   let activeDetectionFrameIndex: number | null = null;
   let activeDetectionCount = 0;
@@ -243,7 +240,7 @@ export function createMediaRendererRuntimeState(
     recordPresentedSample(sample) {
       currentFrameDuration = sample.duration ?? currentFrameDuration;
       presentedFrames += 1;
-      presentedMediaTime = sample.mediaTime;
+      presentedFrameSerial = sample.presentedFrameSerial;
       adoptPresentedSample(sample);
       lastFrameRenderTimings = sample.renderTimings ?? null;
 
@@ -252,9 +249,9 @@ export function createMediaRendererRuntimeState(
     },
 
     recordPresentationUpdate(sample) {
-      if (sample.mediaTime !== presentedMediaTime) {
+      if (sample.presentedFrameSerial !== presentedFrameSerial) {
         presentedFrames += 1;
-        presentedMediaTime = sample.mediaTime;
+        presentedFrameSerial = sample.presentedFrameSerial;
       }
 
       adoptPresentedSample(sample);

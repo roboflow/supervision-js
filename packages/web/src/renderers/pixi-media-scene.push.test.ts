@@ -8,6 +8,7 @@ import {
 import type {
   MediaRendererScene,
   MediaRendererSceneOptions,
+  PresentedMediaSample,
 } from "./media-renderer-scene";
 import type { MediaRendererPresentation } from "#types/media-renderer";
 import type { PresentedVideoFrame } from "./presented-frame-channel";
@@ -317,6 +318,26 @@ describe("push-presented Pixi scene", () => {
     expect(scene.getRenderCount?.()).toBe(2);
     expect(first.frame.close).toHaveBeenCalledTimes(1);
     expect(second.frame.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives every frame it presents a serial of its own", async () => {
+    const channel = createChannel();
+    const presented: PresentedMediaSample[] = [];
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene({
+      ...createSceneOptions(channel.channel),
+      onPresentationUpdate: (sample) => presented.push(sample),
+    });
+    scene.initializeMedia({ height: 240, width: 320 });
+
+    channel.present(presentedFrame(1000));
+    channel.present(presentedFrame(1000));
+    channel.present(presentedFrame(2000));
+
+    expect(presented.map((sample) => sample.mediaTime)).toEqual([1, 1, 2]);
+    expect(
+      new Set(presented.map((sample) => sample.presentedFrameSerial)).size,
+    ).toBe(3);
   });
 
   it("renders a burst of presents once per display refresh", async () => {

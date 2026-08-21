@@ -854,6 +854,7 @@ export async function createPixiMediaScene(
       try {
         currentMediaTime = sample.timestamp;
         hasPresentedSample = true;
+        presentedFrameSerial += 1;
 
         if (!collectFrameTimings) {
           sample.draw(stagingContext, 0, 0, mediaWidth, mediaHeight);
@@ -1292,6 +1293,7 @@ export async function createPixiMediaScene(
       activeDetectionFrameTime: detectionFrame?.mediaTime ?? null,
       detectionBuffer: options.detectionTimeline.getState(),
       mediaTime,
+      presentedFrameSerial,
     };
   }
 

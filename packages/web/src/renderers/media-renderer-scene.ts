@@ -84,6 +84,12 @@ export interface MediaRendererSceneOptions {
 }
 
 export interface PresentedMediaSample {
+  /**
+   * Which frame the scene has on screen, as its count of the frames it has
+   * presented. Two presentations of one media time carry different serials, and
+   * every redraw of the frame on screen carries that frame's own.
+   */
+  readonly presentedFrameSerial: number;
   readonly mediaTime: number;
   readonly duration?: number;
   readonly activeDetectionFrameTime: number | null;

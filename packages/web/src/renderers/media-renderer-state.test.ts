@@ -10,18 +10,29 @@ describe("media renderer runtime state", () => {
   it("counts every frame a push producer puts on screen", () => {
     const state = createRuntimeState();
 
-    state.recordPresentationUpdate(createSample(0));
-    state.recordPresentationUpdate(createSample(0.04));
-    state.recordPresentationUpdate(createSample(0.08));
+    state.recordPresentationUpdate(createPresentedFrame(0, 1));
+    state.recordPresentationUpdate(createPresentedFrame(0.04, 2));
+    state.recordPresentationUpdate(createPresentedFrame(0.08, 3));
 
     expect(state.snapshot().presentedFrames).toBe(3);
+  });
+
+  it("counts a producer's second presentation of one media time twice", () => {
+    const state = createRuntimeState();
+
+    state.recordPresentationUpdate(createPresentedFrame(0.04, 1));
+    state.recordPresentationUpdate(createPresentedFrame(0.04, 2));
+
+    expect(state.snapshot().presentedFrames).toBe(2);
   });
 
   it("keeps the playhead and the frame count in step under a push producer", () => {
     const state = createRuntimeState();
 
-    for (const mediaTime of [0, 0.04, 0.08, 0.12]) {
-      state.recordPresentationUpdate(createSample(mediaTime));
+    for (const [index, mediaTime] of [0, 0.04, 0.08, 0.12].entries()) {
+      state.recordPresentationUpdate(
+        createPresentedFrame(mediaTime, index + 1),
+      );
       state.recordPlayheadTime(mediaTime);
     }
 
@@ -34,9 +45,9 @@ describe("media renderer runtime state", () => {
   it("counts a frame once however many times the scene redraws it", () => {
     const state = createRuntimeState();
 
-    state.recordPresentationUpdate(createSample(0.04));
+    state.recordPresentationUpdate(createPresentedFrame(0.04, 1));
     state.recordPresentationUpdate({
-      ...createSample(0.04),
+      ...createPresentedFrame(0.04, 1),
       activeDetectionCount: 3,
     });
 
@@ -49,16 +60,28 @@ describe("media renderer runtime state", () => {
   it("leaves the count alone when the renderer redraws the frame on screen", () => {
     const state = createRuntimeState();
 
-    state.recordPresentationUpdate(createSample(0.04));
-    state.recordPresentationRefresh(createSample(0.04));
+    state.recordPresentationUpdate(createPresentedFrame(0.04, 1));
+    state.recordPresentationRefresh(createPresentedFrame(0.04, 1));
 
     expect(state.snapshot().presentedFrames).toBe(1);
+  });
+
+  it("counts no new frame when the scene redraws the frame on screen at a moved playhead", () => {
+    const state = createRuntimeState();
+
+    state.recordPresentationUpdate(createPresentedFrame(0.04, 1));
+    state.recordPresentationUpdate(createPresentedFrame(0.08, 1));
+
+    expect(state.snapshot()).toMatchObject({
+      currentTime: 0.08,
+      presentedFrames: 1,
+    });
   });
 
   it("counts nothing for a redraw the renderer asks for ahead of the first frame", () => {
     const state = createRuntimeState();
 
-    state.recordPresentationRefresh(createSample(0));
+    state.recordPresentationRefresh(createPresentedFrame(0, 0));
 
     expect(state.snapshot().presentedFrames).toBe(0);
   });
@@ -78,8 +101,17 @@ describe("media renderer runtime state", () => {
   it("counts every sample the renderer pulls and presents", () => {
     const state = createRuntimeState();
 
-    state.recordPresentedSample(createSample(0));
-    state.recordPresentedSample(createSample(0.04));
+    state.recordPresentedSample(createPresentedFrame(0, 1));
+    state.recordPresentedSample(createPresentedFrame(0.04, 2));
+
+    expect(state.snapshot().presentedFrames).toBe(2);
+  });
+
+  it("counts a pulled sample the renderer presents at the media time before it", () => {
+    const state = createRuntimeState();
+
+    state.recordPresentedSample(createPresentedFrame(0.04, 1));
+    state.recordPresentedSample(createPresentedFrame(0.04, 2));
 
     expect(state.snapshot().presentedFrames).toBe(2);
   });
@@ -87,8 +119,8 @@ describe("media renderer runtime state", () => {
   it("leaves the count alone when the scene redraws a pulled frame", () => {
     const state = createRuntimeState();
 
-    state.recordPresentedSample(createSample(0.04));
-    state.recordPresentationUpdate(createSample(0.04));
+    state.recordPresentedSample(createPresentedFrame(0.04, 1));
+    state.recordPresentationUpdate(createPresentedFrame(0.04, 1));
 
     expect(state.snapshot().presentedFrames).toBe(1);
   });
@@ -97,7 +129,7 @@ describe("media renderer runtime state", () => {
     const onState = vi.fn();
     const state = createRuntimeState({ onState });
 
-    state.recordPresentationUpdate(createSample(0.04));
+    state.recordPresentationUpdate(createPresentedFrame(0.04, 1));
 
     expect(onState).toHaveBeenLastCalledWith(
       expect.objectContaining({ currentTime: 0.04, presentedFrames: 1 }),
@@ -118,12 +150,16 @@ function createRuntimeState(
   });
 }
 
-function createSample(mediaTime: number): PresentedMediaSample {
+function createPresentedFrame(
+  mediaTime: number,
+  presentedFrameSerial: number,
+): PresentedMediaSample {
   return {
     activeDetectionCount: 0,
     activeDetectionFrameIndex: null,
     activeDetectionFrameTime: null,
     detectionBuffer: createIdleDetectionBufferState(),
     mediaTime,
+    presentedFrameSerial,
   };
 }

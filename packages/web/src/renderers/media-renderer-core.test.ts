@@ -312,6 +312,7 @@ describe("media renderer core", () => {
                 detectionBuffer: createIdleDetectionBufferState(),
                 duration: sample.duration,
                 mediaTime: sample.timestamp,
+                presentedFrameSerial: 1,
               };
             }),
           }),
@@ -544,6 +545,7 @@ describe("media renderer core", () => {
       activeDetectionFrameTime: 0,
       detectionBuffer: createIdleDetectionBufferState(),
       mediaTime: 0,
+      presentedFrameSerial: 1,
     });
 
     expect(renderer.getState()).toMatchObject({
@@ -649,6 +651,7 @@ describe("media renderer core", () => {
                 activeDetectionFrameTime: null,
                 detectionBuffer: createIdleDetectionBufferState(),
                 mediaTime: sample.timestamp,
+                presentedFrameSerial: 1,
                 renderTimings,
               };
             }),
@@ -781,8 +784,10 @@ describe("media renderer core", () => {
 
     expect(renderer.getState().presentedFrames).toBe(0);
 
-    for (const mediaTime of [0, 0.04, 0.08]) {
-      sceneOptions?.onPresentationUpdate?.(createPresentedSample(mediaTime));
+    for (const [index, mediaTime] of [0, 0.04, 0.08].entries()) {
+      sceneOptions?.onPresentationUpdate?.(
+        createPresentedSample(mediaTime, index + 1),
+      );
       producer.setTimeMs(mediaTime * 1000);
     }
 
@@ -881,6 +886,7 @@ function createScene(
         detectionBuffer: createIdleDetectionBufferState(),
         duration: sample.duration,
         mediaTime: sample.timestamp,
+        presentedFrameSerial: 1,
       };
     }),
     rendererBackend: "test",
@@ -937,13 +943,14 @@ function createSource(
   };
 }
 
-function createPresentedSample(mediaTime: number) {
+function createPresentedSample(mediaTime: number, presentedFrameSerial = 1) {
   return {
     activeDetectionCount: 0,
     activeDetectionFrameIndex: null,
     activeDetectionFrameTime: null,
     detectionBuffer: createIdleDetectionBufferState(),
     mediaTime,
+    presentedFrameSerial,
   };
 }
 

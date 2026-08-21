@@ -584,6 +584,7 @@ function createScene(): MediaRendererScene {
       activeDetectionFrameTime: null,
       detectionBuffer: createIdleDetectionBufferState(),
       mediaTime: 0,
+      presentedFrameSerial: 1,
     })),
     rendererBackend: "test",
     setPresentation: vi.fn(),
