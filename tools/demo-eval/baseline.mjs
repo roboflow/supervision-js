@@ -23,12 +23,18 @@ const DEFAULT_TOLERANCE_PERCENT = 25;
  * A metric whose right answer is a fixed value carries `tolerancePercent: 0`,
  * so its noise floor is the only thing standing between it and a regression.
  *
- * A floor has to be measured on an idle M3 Max, across passes of one unchanged
- * build. Half the spread of three back-to-back passes covers a rate or an
- * average, because the baseline stores a median and throws away the one
- * disturbed pass in three that this machine produces. A near-max statistic
- * moves in steps too large for three passes to find, so its entry says how many
- * passes its floor took and what they showed.
+ * A floor is the full spread one unchanged build produced across every pass
+ * that was a measurement, taken on an idle M3 Max and rounded up so the widest
+ * honest pass sits inside it: only a move strictly larger than the floor
+ * counts, and two readings a tenth apart subtract to a hair over a tenth in
+ * binary. The tool's default is a single pass, so a single pass is what a
+ * floor has to survive. A pass whose extremes land on several unrelated
+ * metrics at once is the machine and not the build: four passes behind these
+ * numbers were that, and each entry that leaves one out says which other
+ * numbers went with it.
+ *
+ * A floor of 0 means every pass returned the same number, and where that number
+ * is also the only right answer the entry says so.
  */
 export const METRICS = [
   {
@@ -36,7 +42,10 @@ export const METRICS = [
     label: "paused paints",
     unit: "",
     better: "lower",
-    noise: 1,
+    /* Zero on all thirty-six passes, which is also the only answer the scenario
+     * accepts: a paused page that paints is doing per-frame work with no frame
+     * to show for it. */
+    noise: 0,
     read: (report) => report.paints?.paused?.paintCount,
   },
   {
@@ -44,7 +53,10 @@ export const METRICS = [
     label: "playing paints",
     unit: "/s",
     better: "lower",
-    noise: 3,
+    /* Thirty-six passes ran 46.33/s to 53.17/s, thirty-four of them from 50.33
+     * up. The two low ones came from passes that were ordinary in every other
+     * number, so the spread belongs to the instrument. */
+    noise: 7,
     read: (report) => report.paints?.playing?.paintRate,
   },
   {
@@ -52,7 +64,10 @@ export const METRICS = [
     label: "playing style recalcs",
     unit: "/s",
     better: "lower",
-    noise: 5,
+    /* Fifty-eight recalcs over the six second window on thirty-three of
+     * thirty-six passes and fifty-seven on the other three, which is 9.7/s
+     * against 9.5/s. One event is the whole spread. */
+    noise: 0.3,
     read: (report) => report.paints?.playing?.styleRecalcRate,
   },
   {
@@ -60,7 +75,9 @@ export const METRICS = [
     label: "playing layouts",
     unit: "/s",
     better: "lower",
-    noise: 3,
+    /* The same six second window and the same one-event spread as the recalcs:
+     * 9.7/s on thirty-three of thirty-six passes, 9.5/s on three. */
+    noise: 0.3,
     read: (report) =>
       report.paints?.playing?.layoutRate ??
       rate(report.paints?.playing, "layoutCount"),
@@ -70,7 +87,10 @@ export const METRICS = [
     label: "playing DOM paints",
     unit: "/s",
     better: "lower",
-    noise: 2,
+    /* Every paint the window traced minus the canvas's own, and this build
+     * attributes none to the canvas, so the two read the same number and share
+     * a spread: 46.33/s to 53.17/s across thirty-six passes. */
+    noise: 7,
     read: (report) => report.paints?.playing?.domPaintRate,
   },
   {
@@ -78,7 +98,9 @@ export const METRICS = [
     label: "playing present rate",
     unit: "/s",
     better: "higher",
-    noise: 1,
+    /* Presented frames over the wall time the window spanned: thirty-six passes
+     * ran 29.88/s to 30.07/s against a 30fps source. */
+    noise: 0.2,
     read: (report) => report.paints?.playing?.presentRate,
   },
   {
@@ -86,7 +108,11 @@ export const METRICS = [
     label: "worst detection offset",
     unit: "ms",
     better: "lower",
-    noise: 5,
+    /* Exactly 0 on all thirty-six passes: the transport and the detection it is
+     * drawing report the same media time. Any other number means the boxes came
+     * from a neighbouring frame, which is the defect this scenario exists for,
+     * and the one frame period the scenario allows is the cliff. */
+    noise: 0,
     read: (report) =>
       maximum(
         (report.sync?.seeks ?? []).map((seek) =>
@@ -101,7 +127,11 @@ export const METRICS = [
     label: "worst detection settle",
     unit: "ms",
     better: "lower",
-    noise: 50,
+    /* The wait for a detection frame that is genuinely new, polled at 100ms, so
+     * it lands on a poll boundary: thirty-five passes read 101 to 107ms, and
+     * thirty-two of those read 101 or 102. A thirty-sixth read 131ms in the
+     * pass that also put the seek p95 at 53.8ms, which is the machine. */
+    noise: 7,
     read: (report) =>
       maximum((report.sync?.seeks ?? []).map((s) => s.settleMs)),
   },
@@ -110,6 +140,11 @@ export const METRICS = [
     label: "seek p95",
     unit: "ms",
     better: "lower",
+    /* Five awaited seeks, so the p95 is the slowest of them. Thirty-five passes
+     * ran 1.8ms to 9.6ms: seventeen sat under 3ms in one session and the rest
+     * spread to 9.6ms in another, with nothing changed between them. A
+     * thirty-sixth read 53.8ms in the pass that also took 131ms to settle a
+     * detection, and no floor should try to cover that one. */
     noise: 10,
     read: (report) => report.latency?.seek?.p95,
   },
@@ -118,7 +153,14 @@ export const METRICS = [
     label: "step p95",
     unit: "ms",
     better: "lower",
-    noise: 12,
+    /* Six alternating steps, so the p95 is the slowest of them, and it is the
+     * loudest number in the eval: thirty-six passes of one build ran 43.5ms to
+     * 73.7ms around a median of 47.7ms, and the passes at the top were ordinary
+     * everywhere else. Covering that leaves an entry that cannot see a walk
+     * smaller than two thirds of its own median, against a threshold 32ms above
+     * it. Fed the 80ms the scenario itself fails at, this entry reads steady,
+     * so timing more than six steps a pass is what would make it a gate. */
+    noise: 31,
     read: (report) => report.latency?.step?.p95,
   },
   {
@@ -126,7 +168,12 @@ export const METRICS = [
     label: "layers floor frame p95",
     unit: "ms",
     better: "lower",
-    noise: 2,
+    /* Thirty-three passes across two sessions: sixteen read 9.8 to 10.1ms and
+     * the seventeen after them 9.0 to 9.2ms, with no change to the demo, the
+     * engine, the dist it imports or this harness between them. Inside a
+     * session the spread is 0.3ms; the floor covers the step from one session
+     * to the next and no more. */
+    noise: 1.2,
     read: (report) => configP95(report.layers, report.layers?.floor?.config),
   },
   {
@@ -134,7 +181,9 @@ export const METRICS = [
     label: "everything-on frame p95",
     unit: "ms",
     better: "lower",
-    noise: 2,
+    /* The same two sessions, sampled in the same windows: 9.7 to 10.2ms across
+     * the first sixteen passes and 9.1 to 9.2ms across the next seventeen. */
+    noise: 1.2,
     read: (report) => configP95(report.layers, "everything-on"),
   },
   {
@@ -240,7 +289,18 @@ export const METRICS = [
     label: "throttled present fraction",
     unit: "",
     better: "higher",
-    noise: 0.05,
+    /* Thirty passes at the 2x throttle held 0.988 to 0.999 of the source rate.
+     * A thirty-first read 0.901 in the pass that also booked the window's
+     * longest task and the slowest backward settle. Thirty-four passes of a
+     * full run held 0.984 to 1.002, and inside each of the two largest groups
+     * that shared one build the spread was 0.009 and 0.012; a thirty-fifth read
+     * 0.575 beside a test suite and failed the scenario outright, which is the
+     * only pass any of this moved on. The floor is the width of that band and
+     * has to be the whole gate: a quarter off 0.989 is 0.742, under the 0.9 the
+     * scenario fails at, so a tolerance beside the floor speaks only about
+     * pictures the run has already failed on. */
+    noise: 0.012,
+    tolerancePercent: 0,
     read: (report) => report.throttle?.presentedRateFraction,
   },
   {
@@ -248,7 +308,11 @@ export const METRICS = [
     label: "throttled detection coverage",
     unit: "",
     better: "higher",
-    noise: 0.02,
+    /* Exactly 1.000 on all thirty-one passes: every frame the sampler read
+     * under the throttle carried a detection. The first one that does not is
+     * the blanking defect arriving under load, and the scenario's own 0.97
+     * floor is the cliff. */
+    noise: 0,
     tolerancePercent: 0,
     read: (report) => report.throttle?.coverage,
   },
@@ -257,7 +321,17 @@ export const METRICS = [
     label: "throttled longest task",
     unit: "ms",
     better: "lower",
-    noise: 60,
+    /* The longest main-thread task the window saw, and the browser reports no
+     * task under 50ms, so this is 0 or it is 50 and up with nothing in between.
+     * Which end it lands on depends on what ran ahead of it: thirty-two of
+     * thirty-five passes of a full run, where cadence plays the clip through
+     * first, read 51 to 58ms, while the same window with only layers ahead of
+     * it read 0. Two of the thirty-five read 0 in passes a rebuild hot-patched,
+     * and one read 80ms in the pass whose throttled picture fell to 0.575. The
+     * floor is the width of the 51-to-58 band, so a longest task that has grown
+     * reports far under the scenario's 200ms ceiling, and a window that finds
+     * none reads 0 and counts as the improvement it is. */
+    noise: 7,
     read: (report) => report.throttle?.longTaskMaxMs,
   },
   {
@@ -265,6 +339,9 @@ export const METRICS = [
     label: "battery failures",
     unit: "",
     better: "lower",
+    /* A failing battery scenario is a wedged frame pump, so no amount of it is
+     * noise. Unmeasured this session: the harness serving the battery was not
+     * running, and the scenario skipped. */
     noise: 0,
     read: (report) => report.battery?.failures,
   },
@@ -273,7 +350,11 @@ export const METRICS = [
     label: "prepared ahead of playhead",
     unit: " frames",
     better: "higher",
-    noise: 10,
+    /* Exactly 208 frames on forty-two passes, and the throttle scenario read
+     * the same window at the same depth on every one of its own. The only other
+     * reading, 197, came from the pass that put every metric in this file at
+     * its extreme. */
+    noise: 0,
     read: (report) => report.blanking?.preparedAheadMedian,
   },
   {
@@ -281,7 +362,10 @@ export const METRICS = [
     label: "frames drawing no detection",
     unit: "",
     better: "lower",
-    noise: 0.005,
+    /* Zero on all thirty passes. A sampled frame drawing no detection at all is
+     * the blanking defect itself, so the first one is worth a run failing
+     * over. */
+    noise: 0,
     read: (report) => report.blanking?.nullDetectionFraction,
   },
   {
@@ -289,29 +373,35 @@ export const METRICS = [
     label: "frames drawn unprepared",
     unit: "",
     better: "lower",
-    noise: 0.02,
+    /* Zero on all thirty passes: nothing reached the screen ahead of its own
+     * masks. */
+    noise: 0,
     read: (report) => report.blanking?.unpreparedFraction,
   },
   {
-    key: "drag.lagP95Seconds",
-    label: "drag picture lag p95",
-    unit: "s",
+    key: "drag.staleMeanMs",
+    label: "drag picture out of date",
+    unit: "ms",
     better: "lower",
-    /* p95 here is the third-largest lag among the ~45 paints one drag puts on
-     * the canvas, so it settles on one of three modes about 0.6s apart. Across
-     * 62 passes of one unchanged build they sat at 2.27s (43 passes), 2.77s
-     * (15) and 3.40s (4), the widest gap between neighbours measuring 0.633s.
-     * The floor covers one mode step and no more, so a pass that landed on the
-     * middle mode reads steady and a build sitting on the slow one does not. */
-    noise: 0.65,
-    read: (report) => report.drag?.lagP95Seconds,
+    /* Twenty-nine cold drags on one unchanged build ran 22.4ms to 34.9ms.
+     * Resampling three of those twenty-nine puts the recorded median between
+     * 23.1ms and 33.1ms, so two recordings of one build can sit 10ms apart with
+     * nothing having changed between them. */
+    noise: 10,
+    read: (report) => report.drag?.staleMeanMs,
   },
   {
     key: "drag.holdP95Ms",
     label: "drag stale hold p95",
     unit: "ms",
     better: "lower",
-    noise: 70,
+    /* Twenty-seven passes with the drag as the only scenario held 47.8ms to
+     * 74.1ms. The same gesture at the end of a full run inherits whatever the
+     * ten scenarios before it left in the page, and nineteen of those spread
+     * 50.3ms to 234.7ms on this build inside the same hour. The floor is the
+     * measured gesture, so a full run reports this entry moving until the
+     * scenario is given a starting state of its own. */
+    noise: 27,
     read: (report) => report.drag?.holdP95Ms,
   },
   {
@@ -319,7 +409,10 @@ export const METRICS = [
     label: "drag longest stale hold",
     unit: "ms",
     better: "lower",
-    noise: 200,
+    /* The longest single hold in the same gesture: twenty-seven passes with the
+     * drag alone ran 49.4ms to 111.6ms, and nineteen at the end of a full run
+     * spread 60.6ms to 333.4ms. */
+    noise: 63,
     read: (report) => report.drag?.holdMaxMs,
   },
   {
@@ -327,7 +420,10 @@ export const METRICS = [
     label: "drag frames reaching screen",
     unit: "/s",
     better: "higher",
-    noise: 15,
+    /* Twenty-seven passes with the drag alone put 47.17 to 66.47 frames a
+     * second on the screen; nineteen at the end of a full run managed 18.46 to
+     * 52.68 of them. */
+    noise: 20,
     read: (report) => report.drag?.framesPerSecond,
   },
   {
@@ -335,7 +431,13 @@ export const METRICS = [
     label: "drag release",
     unit: "ms",
     better: "lower",
-    noise: 60,
+    /* How long the transport took to report the released position, read off a
+     * requestAnimationFrame sampler, so it counts frames: nineteen of
+     * twenty-six passes landed inside 7ms, seven took 40 to 93ms and one more
+     * never landed at all. Nothing in the pass separates the two modes, so a
+     * floor quiet enough to clear the slow one cannot report anything until a
+     * release is a fifth of the way to the scenario's 500ms limit. */
+    noise: 93,
     read: (report) => report.drag?.releaseMs,
   },
   {
@@ -343,7 +445,9 @@ export const METRICS = [
     label: "playhead drift while stopped",
     unit: "%",
     better: "lower",
-    noise: 0.05,
+    /* Zero on all twenty-nine passes. A playhead sliding while the picture is
+     * stopped is the defect, and there is no small honest amount of it. */
+    noise: 0,
     read: (report) => report.playhead?.stoppedDriftPercent,
   },
   {
@@ -351,7 +455,10 @@ export const METRICS = [
     label: "playhead vs picture disagreement",
     unit: "%",
     better: "lower",
-    noise: 0.2,
+    /* 0.031% on all twenty-nine passes: five seeks to fixed fractions and a
+     * line fitted through them return the same worst residual every time, so a
+     * different number means the playhead is drawn somewhere else. */
+    noise: 0,
     read: (report) => report.playhead?.worstDisagreementPercent,
   },
   {
@@ -359,7 +466,14 @@ export const METRICS = [
     label: "backward-scrub mask ink",
     unit: "x forward",
     better: "higher",
-    noise: 0.05,
+    /* Exactly 1.000 on all twenty-eight passes, and on thirty-six more of a
+     * full run across sixteen build states: every backward stop carried the ink
+     * its forward stop had. Each stop's ratio is rounded to three decimals, so
+     * a thousandth of the forward ink is the smallest move there is to report,
+     * and the floor has to be the whole gate: a quarter off 1.000 is 0.75,
+     * under the 0.9 the scenario itself fails at. */
+    noise: 0,
+    tolerancePercent: 0,
     read: (report) => report.backscrub?.maskInkRatio,
   },
   {
@@ -367,7 +481,12 @@ export const METRICS = [
     label: "backward-scrub settle p95",
     unit: "ms",
     better: "lower",
-    noise: 100,
+    /* Twenty-seven passes through a six-scenario run spread 144ms to 165ms, the
+     * first ten of them between 144 and 153 and the rest from 152 up, one
+     * session apart. A twenty-eighth read 235ms in the pass that also dropped
+     * the throttled picture to 0.901. The same five stops at the end of a full
+     * run meet a busier page: seventeen of those spread 155ms to 459ms. */
+    noise: 22,
     read: (report) => report.backscrub?.backward?.settleP95Ms,
   },
   {
@@ -375,7 +494,11 @@ export const METRICS = [
     label: "focus dim added",
     unit: "",
     better: "higher",
-    noise: 0.01,
+    /* One paused frame photographed with the overlay off and on, which returns
+     * the same fraction on every pass of a session and stepped once between
+     * two: 0.1628 across thirty passes and 0.1621 across the fourteen after
+     * them, with nothing changed in between. */
+    noise: 0.0008,
     read: (report) => report.focus?.dimmedFractionDelta,
   },
   {
@@ -383,7 +506,10 @@ export const METRICS = [
     label: "focus cutout left bright",
     unit: "",
     better: "higher",
-    noise: 0.01,
+    /* The same pair of photographs and the same step between the same two
+     * sessions: 0.1001 across thirty passes and 0.1016 across the fourteen
+     * after them. */
+    noise: 0.0016,
     read: (report) => report.focus?.cutoutFraction,
   },
   {
@@ -391,6 +517,7 @@ export const METRICS = [
     label: "hotkeys answering after a click",
     unit: "",
     better: "higher",
+    /* All four shortcuts answered on all twenty-eight passes. */
     noise: 0,
     tolerancePercent: 0,
     read: (report) => report.hotkeys?.answeredFraction,

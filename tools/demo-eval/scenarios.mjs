@@ -48,12 +48,16 @@ const DETECTION_SETTLE_MS = 8000;
  * DETECTION_SETTLE_MS deadline out and lands far above this. */
 const SEEK_SETTLE_LIMIT_MS = 500;
 const BATTERY_TIMEOUT_MS = 900_000;
-/* The only fixture in the demo that draws keypoints, and the only one nothing
- * else in this harness ever selects. Its detections thicken from 3.8 a frame at
- * the clip's opening to a plateau of 12.9 to 13.1 from media 4 onwards, which
- * is the half of the clip the stall lived in. The button carries no identifier,
- * so its label is the handle. */
-const CADENCE_FIXTURE_LABEL = "Basketball with Keypoints";
+/* The basketball clip, under whichever name the demo is offering it. Its
+ * detections thicken from 3.8 a frame at the clip's opening to a plateau of
+ * 12.9 to 13.1 from media 4 onwards, which is the half of the clip the stall
+ * lived in, and nothing else in this harness selects it. The buttons carry no
+ * identifier, so a label is the only handle, and more than one fixture has
+ * carried this clip; the first name the demo answers to wins. */
+const CADENCE_FIXTURE_LABELS = [
+  "Basketball with Keypoints",
+  "9s basketball sample",
+];
 const CADENCE_HEAD_SECONDS = 0.3;
 /* Kept clear of the clip end so a window cannot wrap into the next lap. */
 const CADENCE_TAIL_SECONDS = 0.5;
@@ -857,8 +861,19 @@ export async function runCadence(session, info, attempts) {
     );
   }
 
+  const label = CADENCE_FIXTURE_LABELS.find((candidate) =>
+    opening.some((button) => button.label === candidate),
+  );
+  if (!label) {
+    invalid(
+      "the demo is not offering the basketball clip as " +
+        `${CADENCE_FIXTURE_LABELS.map((name) => `"${name}"`).join(" or ")}; ` +
+        `it has ${opening.map((button) => `"${button.label}"`).join(", ")}`,
+    );
+  }
+
   try {
-    const fixture = await selectFixture(session, CADENCE_FIXTURE_LABEL);
+    const fixture = await selectFixture(session, label);
     return await measureCadence(session, fixture, attempts);
   } finally {
     await selectFixture(session, pressed.label).catch(() => {});
@@ -930,9 +945,9 @@ function planCadenceWindows(duration) {
   );
   if (lateSpan < CADENCE_MIN_LATE_SPAN_SECONDS) {
     invalid(
-      `the ${CADENCE_FIXTURE_LABEL} fixture runs ${duration}s, which leaves ` +
-        `${lateSpan}s to play from ${CADENCE_LATE_START_SECONDS}s; the window ` +
-        `that starts past the stall needs ${CADENCE_MIN_LATE_SPAN_SECONDS}s`,
+      `the basketball fixture runs ${duration}s, which leaves ${lateSpan}s to ` +
+        `play from ${CADENCE_LATE_START_SECONDS}s; the window that starts ` +
+        `past the stall needs ${CADENCE_MIN_LATE_SPAN_SECONDS}s`,
     );
   }
   return [

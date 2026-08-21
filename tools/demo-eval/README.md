@@ -87,6 +87,59 @@ rather than a budget carries no tolerance at all, so only its noise floor
 stands between it and a regression: one shortcut in four dying is a quarter of
 them gone, and no percentage should absorb that.
 
+Every floor was measured against one unchanged build. A hundred and fifty-five
+passes ran and a hundred and twenty-three came back with numbers, the rest dying
+with the browser dropping the debugging socket mid-pass. Each floor is the full
+spread of the passes that were measurements, rounded up so the widest of them
+sits inside it, because this tool's default is a single pass and a single pass
+is what a floor has to survive. Four passes put their extremes on several
+unrelated metrics at once, which is the machine rather than the build, and each
+entry that leaves one out says what else moved in the same pass. Two of these
+numbers are not properties of a build at all: the drag and the backward scrub
+inherit whatever the scenarios ahead of them left in the page, and the size of
+that is under **drag** below.
+
+Twenty-one floors came down, six went up and three were already right. The ones
+that came down were entries that could not fail: a paused window could paint
+once and call it noise, the style recalc rate could walk from 9.7/s to 14.7/s,
+the drag's longest hold could triple. The ones that went up were entries firing
+on their own instrument: the step p95 spreads 30.2ms across thirty-six passes
+against a floor of 12ms, and the drag release lands inside 7ms on seventeen
+passes in twenty-two and takes 40 to 93ms on the other five.
+
+A later sweep checked those floors the way the tool runs by default,
+`--scenario all` and a single pass, hashing the engine checkout and both `dist`
+trees before and after every pass so a rebuild could not split a sample.
+Thirty-six passes ran across sixteen build states, because the engine was being
+edited while they ran, and the two largest groups sharing one build hold eight
+passes and seven. Every entry carrying a floor of 0 that a run measures sat on
+one number in all thirty-four to thirty-six passes that read it, across sixteen
+builds. In the later group every metric but the drag's came in at or under its
+floor; in the earlier one the backward-scrub settle came in over as well,
+spreading 54ms against a floor of 22, and the later group put it at 16ms with
+the engine changed in between. The drag came in over in both: 10.9ms of stale
+mean against a floor of 10, and 21 to 22 frames a second against a floor of 20,
+which is the starting state the gesture inherits rather than the gesture.
+
+Three entries said nothing at all when they were fed the value their own
+scenario fails at. Two of those were a tolerance rather than a floor: a quarter
+off the throttled present fraction is 0.742 and a quarter off the backward-scrub
+ink is 0.75, both under the 0.9 their scenarios fail at, so both carry no
+tolerance and their floors are the whole gate. The third is the step p95, whose
+31ms floor is the honest spread of its instrument and sits 2.6ms past the 80ms
+threshold; six steps a pass is too few to gate for drift, and no floor changes
+that.
+
+One floor was wrong rather than wide. The throttled window's longest main-thread
+task read 51 to 58ms on thirty-two of thirty-five full-run passes and never the
+0 its 65ms floor was built to tolerate, so it came down to 7 and the entry
+reports at 65ms against a 200ms ceiling. Which end that number lands on depends
+on what ran ahead of it, the same dependency the drag and the backward scrub
+carry: the same window with only `layers` in front of it reads 0. Replaying all
+thirty-six passes against the recorded baseline with those three changes in
+place adds one regression report, on the pass whose throttled picture fell to
+0.575 of the source rate and failed its scenario outright.
+
 Measure on a quiet machine, and use `--repeat 3` to compare as well as to
 record. Roughly one pass in three on this machine is disturbed by something
 else on it, and a single disturbed pass reports regressions that are not
@@ -94,23 +147,25 @@ there: one run taken while other work was going on came back with five
 regressed and twenty-five steady, and every one of the five was the machine.
 Three passes and a median drop that pass on the floor. Recording a baseline
 while a test suite ran beside it put the throttled picture at 0.80 of the source
-rate against 0.99 with nothing else running; a second browser tab on the same
-demo puts the drag's canvas lag at 3.40s against 2.27s, and loses a release
-outright about one pass in five.
+rate against 0.99 with nothing else running, and a second browser tab on the same
+demo loses a release outright about one pass in five.
 
 Changing how a metric is measured retires its recorded number, and the file
 cannot tell: a stale entry compares this week's instrument against last week's
 and reports a percentage that means nothing. So the entry is replaced by hand,
-in the same commit, or removed outright when the metric is. `drag.lagP95Seconds`
-was replaced this way when it moved off `currentTime` and onto the engine's
-trace; its old value of 1.672s was a reading of a different quantity and is
-gone. The five passes recorded in its place spread by 0.035s, and three other
-sessions on the same build sat at 2.27s, 2.87s and 3.40s, so about 0.6s
-separates one session's mode from another's and its noise floor has to cover
-that and no more. The floors in `baseline.mjs` are the other half of a rebuilt
-metric: a floor is the spread of the instrument that produced it, and one left
-behind from a looser instrument absorbs every regression the tolerance was
-meant to catch.
+in the same commit, or removed outright when the metric is. The drag's picture
+lag was retired twice this way. It first moved off `currentTime` and onto the
+engine's trace, which fixed where it read from; `drag.lagP95Seconds` then went
+too, because a percentile in media seconds could not describe the player. A
+paint's distance from its target can only be a whole number of scrub commands,
+so a percentile over the forty-odd paints one drag lands is an order statistic
+on a 0.56s grid: it reads 2.27s, 2.83s or 3.40s and nothing between, and
+resampling one unchanged drag's own paints moves it across all three. Its
+replacement `drag.staleMeanMs` is the mean of the same distances divided by the
+rate the thumb was travelling, which is a wall-clock age. The floors in
+`baseline.mjs` are the other half of a rebuilt metric: a floor is the spread of
+the instrument that produced it, and one left behind from a looser instrument
+absorbs every regression the tolerance was meant to catch.
 
 Recording is deliberate and never automatic. `--update-baseline` refuses while
 any scenario is failing or invalid, because freezing a broken number as the new
@@ -172,19 +227,28 @@ numbers. Thresholds: seek p95 under 250ms, step p95 under 80ms. Stepping is the
 gesture a labeller repeats hundreds of times an hour, which is why its budget is
 the tight one.
 
-**cadence** plays the keypoint fixture through and asks whether the picture
+**cadence** plays the basketball fixture through and asks whether the picture
 holds its rate in every media second of it, from two clocks that fail
 differently.
 
 It is the only scenario that picks a fixture. Every other one measures whatever
 the demo happened to load, which is the 70s horse trail, and the only other
 scenario that samples playback frame time seeks to `t=2s` and stays there. Both
-of those are where a stall on the keypoint fixture lived: 33ms a frame up to
+of those are where a stall on the basketball fixture lived: 33ms a frame up to
 media 4.0 and 101 to 123ms past it, positional and not cumulative, so starting
 playback cold at 4.5s reproduced it at about 8fps straight away. That
 fixture's detections thicken from 3.8 a frame at the opening to a plateau of
 12.9 to 13.1 from media 4 onwards, which is the half of the clip nothing was
 watching.
+
+It picks that fixture by button label, because the source controls carry no
+identifier, and it tries `CADENCE_FIXTURE_LABELS` in order: `Basketball with
+Keypoints` first, then `9s basketball sample`. More than one fixture has carried
+this clip, so the scenario takes the first name the demo answers to and reports
+every label it was offered when none of them is there. The rate limits are
+fractions of whatever source rate the fixture declares, so they follow it, but
+they were calibrated on a 30fps clip; the basketball source MP4 runs at 25fps,
+and the numbers quoted below are from the 30fps one.
 
 So it plays two windows, `whole-clip` from 0.3s and `late-start` cold from 4.5s,
 and reduces each one three ways:
@@ -271,12 +335,14 @@ cook stops flooding the main thread; the gate is written so raising
 `THROTTLE_RATE` is the only edit.
 
 The report also carries the prepared window's depth and the cook backlog.
-Neither is asserted. On one unchanged build the window came out bimodal across
-sessions: some runs sat 150 to 211 frames ahead of the playhead, others spent
-their whole life at zero ahead with about 200 of the same 211 frames uncooked,
-at every throttle level including 1x. Until that splits into something a session
-can be judged on, a floor written against it would fail on which side of the coin
-the run landed.
+Neither is asserted here. On one unchanged build the window came out bimodal
+across sessions: some runs sat 150 to 211 frames ahead of the playhead, others
+spent their whole life at zero ahead with about 200 of the same 211 frames
+uncooked, at every throttle level including 1x. Sixty-one windows on the build
+measured since, thirty-one through this scenario and thirty through blanking,
+read 208 frames ahead every one of them, never fell below 147 and never carried
+a backlog past 64, so that coin did not come up once. `blanking` does assert the
+depth, and its noise floor is 0 on the strength of those sixty-one readings.
 
 ### The per-defect guards
 
@@ -292,30 +358,54 @@ left the window it was drawing from, and the PNG round trip in the mask cook
 never let it get ahead.
 
 **drag** presses the timeline at 15%, drags to 85% over a paced 1200ms, and lets
-go. Four defects lived in that one gesture, so it reports four numbers: how far
-the frames that reached the canvas sat behind the position they were serving,
-the longest the screen held a single frame while the thumb kept moving, how many
-frames a second actually reached the screen, and how long the release took to
-land. It then presses play and checks the clock moves: the release that never
-reached the producer left the engine mechanically paused for good while the chip
-still read Playing, and only trying to play afterwards finds that.
+go. Four defects lived in that one gesture, so it reports four numbers: how old
+the picture reaching the canvas was, the longest the screen held a single frame
+while the thumb kept moving, how many frames a second actually reached the
+screen, and how long the release took to land. It then presses play and checks
+the clock moves: the release that never reached the producer left the engine
+mechanically paused for good while the chip still read Playing, and only trying
+to play afterwards finds that.
 
-The lag number comes from the engine's own trace, armed around the gesture and
+The age number comes from the engine's own trace, armed around the gesture and
 freed after it. Nothing on the main thread knows which frame is on the canvas:
 `currentTime` is written the moment a scrub is commanded, so a lag measured
 against it times the command travelling and calls it the picture arriving. Read
 that way it could not fail on the defect it exists for, and it did not behave
 like a measurement either: five passes on one unchanged build gave 1.642, 0.032,
 1.148, 0.032 and 1.677 seconds, a 52x spread, while its three neighbours on the
-same passes moved by 1.2x to 1.3x. Read off the trace, five passes on that same
-build spread 0.035s, which is what makes the baseline comparison mean something
-for it. The spread was the metric, not the machine.
+same passes moved by 1.2x to 1.3x. The spread was the metric, not the machine.
+
+What the trace gives is a distance in media seconds, and a drag covering 41
+media seconds a wall second turns a small age into a large distance. The same
+gesture started at 5% of the clip reports 2.6s of content and started at 75%
+reports 0.23s, across a picture that was 27.9ms and 17.1ms old. So the distance
+is divided by the rate the thumb was travelling before it is reported, and the
+statistic is the mean rather than a percentile: a paint can only be a whole
+number of scrub commands behind, and a percentile over forty-odd of them lands
+on one of a handful of rungs 0.56s apart. Twenty-nine cold drags on one
+unchanged build spread 22.4ms to 34.9ms as an age, against 1.7s to 3.37s in
+three clusters as a distance; three consecutive passes of the scenario gave
+28.4ms, 30.4ms and 29.3ms.
+
+Which scenarios ran first is part of the cache it met. Measured on its own, on a
+page that has done nothing else, twenty-seven passes of the drag put 47.17 to
+66.47 frames a second on the screen, held a frame 47.8 to 74.1ms at p95 and drew
+a picture 24.4 to 35.0ms out of date. The same gesture at the end of a full run,
+on the same build inside the same hour, managed 18.46 to 52.68 frames a second,
+held 50.3 to 234.7ms and reached 70.6ms of age; it failed its own gates in eight
+passes of twenty-one, against one of twenty-eight measured alone. The ten
+scenarios ahead of it leave a warm cache, a full prepared window and a cook
+still working, and the drag inherits all of it. Backward-scrub settle carries
+the same dependency, 144 to 165ms in a six-scenario run against 155 to 459ms at
+the end of a full one. The floors in `baseline.mjs` are the measured gesture, so
+a full run reports these entries moving until the scenarios are given a starting
+state of their own.
 
 Read the three drag numbers together, because none of them sees what the others
 do. A screen that paints steadily but always from two seconds ago is only in the
-lag number; a screen frozen on one frame paints nothing, so it has no lag to
+age number; a screen frozen on one frame paints nothing, so it has no age to
 report and the hold and frame-rate gates are what fail. Repeating the same drag
-without reloading takes the lag from 2.3s to zero as the cache warms, so a run's
+without reloading takes the age from 26ms to zero as the cache warms, so a run's
 number describes the cache it was measured against as much as the code.
 
 **playhead** pauses, holds for four seconds and reads the playhead's transform

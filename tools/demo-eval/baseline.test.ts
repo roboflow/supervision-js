@@ -111,26 +111,43 @@ describe("comparing against a baseline", () => {
     expect(rowFor(rows, "latency.seek.p95").verdict).toBe("steady");
   });
 
-  /* A metric whose baseline is small produces enormous percentages from
-   * changes a person would never see, which is how a drift gate turns into
-   * noise nobody reads. */
+  /* A loud instrument produces enormous percentages from changes it makes on
+   * its own, which is how a drift gate turns into noise nobody reads. The step
+   * p95 is the loudest here: thirty-six passes of one build spread 30.2ms. */
   it("ignores a large percentage on a change smaller than the noise floor", () => {
     const { rows } = compareToBaseline(
-      { "paints.playing.styleRecalcRate": 27 },
-      baselineOf({ "paints.playing.styleRecalcRate": 23 }),
+      { "latency.step.p95": 70 },
+      baselineOf({ "latency.step.p95": 45 }),
     );
-    expect(rowFor(rows, "paints.playing.styleRecalcRate").percent).toBe(17.4);
-    expect(rowFor(rows, "paints.playing.styleRecalcRate").verdict).toBe(
-      "steady",
-    );
+    expect(rowFor(rows, "latency.step.p95").percent).toBe(55.6);
+    expect(rowFor(rows, "latency.step.p95").verdict).toBe("steady");
   });
 
-  it("still catches a move past the noise floor on a small baseline", () => {
+  it("still catches a move past the noise floor", () => {
     const { rows } = compareToBaseline(
-      { "paints.playing.styleRecalcRate": 40 },
-      baselineOf({ "paints.playing.styleRecalcRate": 23 }),
+      { "latency.step.p95": 90 },
+      baselineOf({ "latency.step.p95": 45 }),
     );
-    expect(rowFor(rows, "paints.playing.styleRecalcRate").verdict).toBe(
+    expect(rowFor(rows, "latency.step.p95").verdict).toBe("regressed");
+  });
+
+  /* The floor is the whole gate on a metric the baseline recorded as zero,
+   * because a percentage off zero is not a number and the tolerance is skipped
+   * for it. Both of these read zero on every pass ever measured here. */
+  it("reports the first paint a paused window makes", () => {
+    const { rows } = compareToBaseline(
+      { "paints.paused.paintCount": 1 },
+      baselineOf({ "paints.paused.paintCount": 0 }),
+    );
+    expect(rowFor(rows, "paints.paused.paintCount").verdict).toBe("regressed");
+  });
+
+  it("reports the first sampled frame that drew no detection", () => {
+    const { rows } = compareToBaseline(
+      { "blanking.nullDetectionFraction": 0.005 },
+      baselineOf({ "blanking.nullDetectionFraction": 0 }),
+    );
+    expect(rowFor(rows, "blanking.nullDetectionFraction").verdict).toBe(
       "regressed",
     );
   });
@@ -204,29 +221,82 @@ describe("comparing against a baseline", () => {
   });
 });
 
-/* Both numbers are measured across 62 passes of one unchanged build: 2.899s is
- * the top of the middle mode this gesture settles on, and 3.4s is the slow mode
- * it reached on four of them. The floor has to sit between the two. */
-describe("the drag lag floor", () => {
-  const recorded = baselineOf({ "drag.lagP95Seconds": 2.266 });
+/* The release lands inside 7ms on seventeen passes in twenty-two and takes 40
+ * to 93ms on the other five, with nothing in the pass to tell the two apart, so
+ * the floor has to clear the slow mode whole. */
+describe("the drag release floor", () => {
+  const recorded = baselineOf({ "drag.releaseMs": 5 });
 
-  it("swallows the widest drift an unchanged build produced", () => {
-    const { rows } = compareToBaseline(
-      { "drag.lagP95Seconds": 2.899 },
-      recorded,
-    );
-    expect(rowFor(rows, "drag.lagP95Seconds").verdict).toBe("steady");
+  it("swallows the slow mode one unchanged build lands on", () => {
+    const { rows } = compareToBaseline({ "drag.releaseMs": 93 }, recorded);
+    expect(rowFor(rows, "drag.releaseMs").verdict).toBe("steady");
   });
 
-  it("reports the slow mode becoming the usual answer", () => {
+  it("reports a release slower than anything that build produced", () => {
     const { rows, regressions } = compareToBaseline(
-      { "drag.lagP95Seconds": 3.4 },
+      { "drag.releaseMs": 100 },
       recorded,
     );
-    const row = rowFor(rows, "drag.lagP95Seconds");
-    expect(row.verdict).toBe("regressed");
-    expect(row.percent).toBe(50);
+    expect(rowFor(rows, "drag.releaseMs").verdict).toBe("regressed");
     expect(regressions).toHaveLength(1);
+  });
+});
+
+/* Both of these sit on one number every pass, so their floor is the whole gate
+ * and a percentage tolerance beside it is what would swallow the defect: a
+ * quarter off either one lands past the value its own scenario fails at, 0.9 in
+ * both cases. A full run measured the ink at exactly 1.000 on thirty-six passes
+ * and the throttled picture between 0.984 and 1.002 on thirty-four. */
+describe("the two gates a fixed answer leaves to the floor alone", () => {
+  it("reports a throttled picture thinned to the scenario's own floor", () => {
+    const { rows } = compareToBaseline(
+      { "throttle.presentedRateFraction": 0.9 },
+      baselineOf({ "throttle.presentedRateFraction": 0.989 }),
+    );
+    expect(rowFor(rows, "throttle.presentedRateFraction").verdict).toBe(
+      "regressed",
+    );
+  });
+
+  it("leaves the spread one build produces on its own alone", () => {
+    const { rows } = compareToBaseline(
+      { "throttle.presentedRateFraction": 0.988 },
+      baselineOf({ "throttle.presentedRateFraction": 0.997 }),
+    );
+    expect(rowFor(rows, "throttle.presentedRateFraction").verdict).toBe(
+      "steady",
+    );
+  });
+
+  it("reports the first thousandth of backward-scrub ink that goes missing", () => {
+    const { rows } = compareToBaseline(
+      { "backscrub.maskInkRatio": 0.999 },
+      baselineOf({ "backscrub.maskInkRatio": 1 }),
+    );
+    expect(rowFor(rows, "backscrub.maskInkRatio").verdict).toBe("regressed");
+  });
+});
+
+/* Twenty-three passes of a full run read 51 to 57ms and a twenty-fourth 80ms
+ * while a test suite ran beside it, against a 200ms ceiling. The floor covers
+ * the band, and a quarter of the band's own middle is what reports above it. */
+describe("the throttled long-task floor", () => {
+  const recorded = baselineOf({ "throttle.longTaskMaxMs": 52 });
+
+  it("leaves the band one build sits in alone", () => {
+    const { rows } = compareToBaseline(
+      { "throttle.longTaskMaxMs": 57 },
+      recorded,
+    );
+    expect(rowFor(rows, "throttle.longTaskMaxMs").verdict).toBe("steady");
+  });
+
+  it("reports a longest task past anything that band produced", () => {
+    const { rows } = compareToBaseline(
+      { "throttle.longTaskMaxMs": 66 },
+      recorded,
+    );
+    expect(rowFor(rows, "throttle.longTaskMaxMs").verdict).toBe("regressed");
   });
 });
 

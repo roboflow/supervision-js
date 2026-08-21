@@ -191,7 +191,7 @@ describe("annotations blanking during playback", () => {
 describe("a drag of the timeline", () => {
   it("passes a drag whose picture keeps up with the thumb", () => {
     const scenario = withResume(summarise());
-    expect(scenario.lagP95Seconds).toBeLessThan(1);
+    expect(scenario.staleMeanMs).toBe(0);
     expect(scenario.holdP95Ms).toBeLessThanOrEqual(32);
     expect(judgeDrag(scenario)).toEqual([]);
   });
@@ -225,12 +225,25 @@ describe("a drag of the timeline", () => {
    * long, and every frame it paints is from seconds ago. */
   it("fails a drag whose paints all landed seconds behind their target", () => {
     const scenario = summarise({ paintsBehind: 8 });
-    expect(scenario.lagP95Seconds).toBeCloseTo(9.333, 3);
+    expect(scenario.lagMeanSeconds).toBeCloseTo(8.633, 3);
     expect(scenario.holdP95Ms).toBeLessThanOrEqual(32);
     expect(scenario.framesPerSecond).toBeGreaterThan(30);
     const failures = judgeDrag(withResume(scenario));
     expect(failures).toHaveLength(1);
-    expect(failures[0]).toContain("behind the position they were serving");
+    expect(failures[0]).toContain("out of date");
+  });
+
+  /* Where the gate turns over, so the 60ms it was given is the 60ms it keeps.
+   * One paint behind is what a healthy drag looks like; the fixture's paints
+   * are 1.167 media seconds apart at 71.7x, so each one costs 16ms of age. */
+  it("passes a picture three paints old and fails one four paints old", () => {
+    const near = summarise({ paintsBehind: 3 });
+    expect(near.staleMeanMs).toBeCloseTo(47.2, 1);
+    expect(judgeDrag(withResume(near))).toEqual([]);
+
+    const far = summarise({ paintsBehind: 4 });
+    expect(far.staleMeanMs).toBeCloseTo(62.4, 1);
+    expect(judgeDrag(withResume(far)).join(" ")).toContain("out of date");
   });
 
   /* The one the lag number cannot see: nothing painted at all, so there is no
@@ -239,9 +252,9 @@ describe("a drag of the timeline", () => {
   it("says nothing about lag across a drag that painted nothing", () => {
     const scenario = summarise({ stallFrom: 0, stallSamples: 60 });
     expect(scenario.paintsMeasured).toBe(0);
-    expect(scenario.lagP95Seconds).toBeNull();
+    expect(scenario.staleMeanMs).toBeNull();
     const failures = judgeDrag(withResume(scenario));
-    expect(failures.join(" ")).not.toContain("behind the position");
+    expect(failures.join(" ")).not.toContain("out of date");
     expect(failures.join(" ")).toContain("froze on one frame");
   });
 

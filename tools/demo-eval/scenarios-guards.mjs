@@ -39,17 +39,27 @@ const DRAG_MIN_SAMPLES = 30;
  * to 9ms. The wide end of each of those is the one pass in three this machine
  * disturbs; the baseline records the median of three, which drops it.
  *
- * Lag carries the tightest cliff here because it is the best measured number in
- * the scenario: one session's five passes spread 0.04s, and twenty-one passes
- * across four sessions ran 2.27s to 3.40s, the top of that reached only while
- * other work had the browser. 5s clears the worst of them by 47%, so a clean
- * re-run has room and a picture trailing half again as far fails.
+ * How old the picture was, in wall time. What the trace carries is a media
+ * distance, and this drag sweeps 41 media seconds a wall second: the same
+ * gesture reports 2.6s of content starting at 5% of the clip and 0.23s starting
+ * at 75%, an elevenfold swing across a picture that was 27.9ms and 17.1ms out
+ * of date. Divided by the rate the thumb was travelling, the number describes
+ * the player and not the gesture.
  *
- * Nothing here says 2.3s is well: a drag covering 41 media seconds a wall
- * second really does leave the picture more than two seconds behind the thumb,
- * and the same drag repeated on a warm cache falls to zero. The gate holds that
- * ground rather than defending it. */
-const DRAG_LAG_P95_LIMIT_SECONDS = 5;
+ * Twenty-nine cold drags at this scenario's own start on one build ran 22.4ms
+ * to 34.9ms, seven of them taken while a second tab seeked and played the same
+ * demo, which did not move the worst. 60ms clears that worst by 72%. Three
+ * consecutive passes of the scenario itself gave 28.4ms, 30.4ms and 29.3ms.
+ *
+ * The mean is the statistic, and not a percentile, because a paint's age can
+ * only be a whole number of scrub commands: a percentile over the forty-odd
+ * paints one drag lands is an order statistic on a 0.56s grid, and resampling
+ * one unchanged drag's own paints moves its p95 across three of those rungs.
+ *
+ * Nothing here says 26ms is well: the same drag repeated without reloading
+ * falls to zero as the cache warms, so the number describes the cache it met as
+ * much as the code. The gate holds that ground rather than defending it. */
+const DRAG_STALE_MEAN_LIMIT_MS = 60;
 /* The longest the screen may hold one frame while the thumb keeps moving. The
  * p95 is the number that describes the gesture; the max exists so a genuine
  * freeze cannot hide behind a healthy p95. */
@@ -638,8 +648,8 @@ function paintsDuringDrag(probe, capture) {
 
 /**
  * Turns one recorded drag into the four numbers the gesture is judged on: how
- * far the picture trailed the thumb, the longest it held a single frame, how
- * many frames reached the screen, and how long the release took to land.
+ * old the picture on the canvas was, the longest the screen held a single
+ * frame, how many frames reached it, and how long the release took to land.
  *
  * Where the release was let go is read from the timeline input rather than
  * derived from the pointer's pixel: a range input maps its track through a
@@ -676,6 +686,18 @@ export function summariseDrag(probe, { capture, frameRate, startedPaused }) {
     );
   }
   const lags = painted.map((paint) => paint.lagSeconds);
+  /* Media seconds the thumb covered per wall second, read off the input it was
+   * dragging. It converts a paint's media distance from its target into the
+   * wall time the picture had been out of date for. */
+  const scrubRate =
+    (during.at(-1).scrubValue - during[0].scrubValue) / dragSeconds;
+  if (!(scrubRate > 0)) {
+    throw new Invalid(
+      "the timeline input never moved forward across the drag; the pointer " +
+        "missed it or something else is driving the transport",
+    );
+  }
+  const stales = lags.map((lag) => (lag / scrubRate) * 1000);
 
   const holds = [];
   let lastChangeAt = during[0].at;
@@ -702,9 +724,9 @@ export function summariseDrag(probe, { capture, frameRate, startedPaused }) {
     samples: during.length,
     startedPaused,
     paintsMeasured: painted.length,
+    scrubRatePerSecond: round(scrubRate, 1),
+    staleMeanMs: stales.length === 0 ? null : round(mean(stales), 1),
     lagMeanSeconds: lags.length === 0 ? null : round(mean(lags), 3),
-    lagP95Seconds: lags.length === 0 ? null : percentile(lags, 0.95),
-    lagMaxSeconds: lags.length === 0 ? null : round(Math.max(...lags), 3),
     holdP95Ms: percentile(holds, 0.95),
     holdMaxMs: round(Math.max(...holds), 1),
     framesPresented,
@@ -716,7 +738,7 @@ export function summariseDrag(probe, { capture, frameRate, startedPaused }) {
       ? during.filter((sample) => sample.playbackState === "playing").length
       : 0,
     limits: {
-      lagP95Seconds: DRAG_LAG_P95_LIMIT_SECONDS,
+      staleMeanMs: DRAG_STALE_MEAN_LIMIT_MS,
       holdP95Ms: DRAG_HOLD_P95_LIMIT_MS,
       holdMaxMs: DRAG_HOLD_MAX_LIMIT_MS,
       framesPerSecond: DRAG_FRAME_RATE_FLOOR,
@@ -728,13 +750,14 @@ export function summariseDrag(probe, { capture, frameRate, startedPaused }) {
 export function judgeDrag(scenario) {
   const failures = [];
   if (
-    scenario.lagP95Seconds !== null &&
-    scenario.lagP95Seconds > DRAG_LAG_P95_LIMIT_SECONDS
+    scenario.staleMeanMs !== null &&
+    scenario.staleMeanMs > DRAG_STALE_MEAN_LIMIT_MS
   ) {
     failures.push(
-      `drag: the frames that reached the canvas sat ${scenario.lagP95Seconds}s ` +
-        `behind the position they were serving at p95, over ${scenario.paintsMeasured} ` +
-        `paints (limit ${DRAG_LAG_P95_LIMIT_SECONDS}s)`,
+      `drag: the picture reaching the canvas was ${scenario.staleMeanMs}ms out of ` +
+        `date across ${scenario.paintsMeasured} paints, ${scenario.lagMeanSeconds}s ` +
+        `of media at ${scenario.scrubRatePerSecond}x (limit ` +
+        `${DRAG_STALE_MEAN_LIMIT_MS}ms)`,
     );
   }
   if (scenario.holdP95Ms > DRAG_HOLD_P95_LIMIT_MS) {
@@ -1432,12 +1455,12 @@ export function guardDetail(name, scenario, field) {
   if (name === "drag") {
     return [
       field(
-        "canvas lag mean / p95 / max",
+        "picture out of date",
         (scenario.paintsMeasured === 0
           ? "nothing painted"
-          : `${scenario.lagMeanSeconds} / ${scenario.lagP95Seconds} / ` +
-            `${scenario.lagMaxSeconds} s over ${scenario.paintsMeasured} paints`) +
-          `  (limit ${scenario.limits.lagP95Seconds}s at p95)`,
+          : `${scenario.staleMeanMs}ms mean over ${scenario.paintsMeasured} paints ` +
+            `= ${scenario.lagMeanSeconds}s of media at ${scenario.scrubRatePerSecond}x`) +
+          `  (limit ${scenario.limits.staleMeanMs}ms)`,
       ),
       field(
         "stale hold p95 / max",
