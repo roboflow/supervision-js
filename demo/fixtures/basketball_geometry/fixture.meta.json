@@ -1,0 +1,23 @@
+{
+  "datasetId": "basketball_geometry_v1",
+  "displayName": "Basketball with Keypoints",
+  "inferenceLabel": "SAM3 + YOLOv8m-pose",
+  "media": {
+    "file": "../basketball_sample/basketball_sample.mp4",
+    "loadingStatusLabel": "opening basketball with keypoints",
+    "proxyFile": "../basketball_sample/proxy-30fps.webm",
+    "readyStatusLabel": "9s basketball sample | video engine, 30fps proxy WebM"
+  },
+  "presentation": {
+    "boxesEnabled": false,
+    "focusEnabled": false,
+    "keypointsEnabled": true,
+    "labelsEnabled": true,
+    "masksEnabled": false,
+    "polygonsEnabled": false,
+    "polylinesEnabled": false
+  },
+  "sampleName": "basketball_geometry",
+  "schema": "supervision-js.demo.fixture-meta",
+  "version": 1
+}

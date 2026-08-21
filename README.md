@@ -60,8 +60,8 @@ session.setPresentation({
 npm install supervision
 ```
 
-The current browser release is `0.1.3`, published as npm's default `latest`
-release. Its package includes the private core dependency. Consumers import
+The next browser release is `0.1.7`, prepared for npm's default `latest` tag.
+Its package includes the private core dependency. Consumers import
 only the public browser entrypoints:
 
 ```ts
@@ -103,8 +103,10 @@ Start with [Application Integration](docs/public/guides/application-integration.
 ## Current API Status
 
 **Supported browser APIs** include `createMediaSession`, media preparation and
-playback controls, detections, boxes, masks, polygons, polylines, keypoints,
-labels, presentation styles, picking, and the advanced editing subpath.
+playback controls, detections, the renderer-first `annotationRenderers` API,
+boxes, box corners, ellipses, markers, masks, mask halos, polygons, polylines,
+keypoints, labels, asset- and media-backed regions, presentation styles, picking, and the
+advanced editing subpath.
 
 **Advanced browser APIs** expose lower-level renderer construction, detection
 sources, streaming ingestion, normalization, interaction, and diagnostics for

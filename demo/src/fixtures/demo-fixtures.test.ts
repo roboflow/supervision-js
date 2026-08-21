@@ -89,6 +89,10 @@ describe("geometry showcase fixture", () => {
         displayName: "Basketball Region Effects",
         sampleName: "basketball_regions",
       },
+      {
+        displayName: "Basketball with Keypoints",
+        sampleName: "basketball_geometry",
+      },
     ]);
   });
 
