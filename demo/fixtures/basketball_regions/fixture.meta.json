@@ -1,7 +1,7 @@
 {
   "datasetId": "basketball_regions_v1",
   "displayName": "Basketball Region Effects",
-  "inferenceLabel": "SAM3 masks + pose-located head regions",
+  "inferenceLabel": "SAM3 player and head masks",
   "media": {
     "file": "../basketball_sample/basketball_sample.mp4",
     "loadingStatusLabel": "stream-normalizing 9s basketball sample",

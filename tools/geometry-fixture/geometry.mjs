@@ -18,10 +18,10 @@ export const DEFAULT_KEYPOINT_VISIBLE_CONFIDENCE = 0.5;
 export const DEFAULT_POSE_MATCH_IOU = 0.3;
 export const DEFAULT_TRAJECTORY_MAX_SPEED_PIXELS_PER_SECOND = 2_700;
 export const DEFAULT_TRAJECTORY_POSITION_TOLERANCE_PIXELS = 12;
-export const DEFAULT_HEAD_WIDTH_TO_SHOULDERS_RATIO = 0.9;
-export const DEFAULT_HEAD_WIDTH_TO_PERSON_RATIO = 0.32;
-export const DEFAULT_HEAD_HEIGHT_TO_WIDTH_RATIO = 1.25;
-export const DEFAULT_HEAD_ELLIPSE_POINT_COUNT = 20;
+export const DEFAULT_HEAD_MINIMUM_CONFIDENCE = 0.7;
+export const DEFAULT_HEAD_MAX_WIDTH_TO_PLAYER_RATIO = 0.7;
+export const DEFAULT_HEAD_MAX_HEIGHT_TO_PLAYER_RATIO = 0.42;
+export const DEFAULT_HEAD_MAX_CENTER_Y_TO_PLAYER_RATIO = 0.45;
 
 export const KEYPOINT_VISIBILITY_NOT_LABELED = 0;
 export const KEYPOINT_VISIBILITY_VISIBLE = 2;
@@ -136,103 +136,101 @@ export function simplifyPolygonPoints(points, options = {}) {
 }
 
 /**
- * Derives one transparent head detection from a segmented person silhouette.
+ * Associates direct SAM3 head masks with frozen player detections.
  *
- * The crop is an explicit, versioned fixture-authoring transform. Facial pose
- * points locate a conservative head window, then that window clips the real
- * mask-derived player polygon. Keypoints are fixture-authoring input only: the
- * resulting public fixture contains an independent polygon detection and the
- * renderer never depends on pose data.
+ * The player's top-center is a stable authoring anchor even when its mask
+ * temporarily omits part of the neck or head. Matching is one-to-one and never
+ * clips or otherwise changes the SAM3 head mask.
  */
-export function deriveHeadPolygonDetection(detection, options = {}) {
-  const polygon = detection.polygon?.points;
-  const rect = detection.rect;
-  const keypoints = detection.keypoints;
-
-  if (!rect || !polygon || polygon.length < 3 || !keypoints) return undefined;
-
-  const visibleFacePoints = keypoints.points
-    .slice(0, 5)
-    .filter(
-      (_, index) => keypoints.visibility[index] === KEYPOINT_VISIBILITY_VISIBLE,
-    );
-  if (visibleFacePoints.length < 2) return undefined;
-
-  const faceXs = visibleFacePoints.map(({ x }) => x);
-  const faceYs = visibleFacePoints.map(({ y }) => y);
-  const faceWidth = Math.max(...faceXs) - Math.min(...faceXs);
-  const faceHeight = Math.max(...faceYs) - Math.min(...faceYs);
-  const faceCenter = {
-    x: average(faceXs),
-    y: average(faceYs),
-  };
-  const personTop = rect.y - rect.height / 2;
-  if (faceCenter.y > personTop + rect.height * 0.4) return undefined;
-
-  const shoulders = [5, 6]
-    .filter(
-      (index) => keypoints.visibility[index] === KEYPOINT_VISIBILITY_VISIBLE,
-    )
-    .map((index) => keypoints.points[index]);
-  const shoulderWidth =
-    shoulders.length === 2
-      ? Math.hypot(
-          shoulders[0].x - shoulders[1].x,
-          shoulders[0].y - shoulders[1].y,
-        )
-      : 0;
-
-  const headWidth = Math.max(
-    faceWidth * 1.55,
-    faceHeight * 2.2,
-    shoulderWidth *
-      (options.headWidthToShouldersRatio ??
-        DEFAULT_HEAD_WIDTH_TO_SHOULDERS_RATIO),
-    rect.width *
-      (options.headWidthToPersonRatio ?? DEFAULT_HEAD_WIDTH_TO_PERSON_RATIO),
+export function associateHeadDetectionsToPlayers(
+  headDetections,
+  playerDetections,
+  options = {},
+) {
+  const minimumConfidence =
+    options.minimumConfidence ?? DEFAULT_HEAD_MINIMUM_CONFIDENCE;
+  const maximumWidthRatio =
+    options.maximumWidthRatio ?? DEFAULT_HEAD_MAX_WIDTH_TO_PLAYER_RATIO;
+  const maximumHeightRatio =
+    options.maximumHeightRatio ?? DEFAULT_HEAD_MAX_HEIGHT_TO_PLAYER_RATIO;
+  const maximumCenterYRatio =
+    options.maximumCenterYRatio ?? DEFAULT_HEAD_MAX_CENTER_Y_TO_PLAYER_RATIO;
+  const targetClassNames = new Set(options.targetClassNames ?? []);
+  const eligiblePlayers = playerDetections.filter(
+    (player) =>
+      player.rect &&
+      (targetClassNames.size === 0 || targetClassNames.has(player.className)),
   );
-  const headHeight =
-    headWidth *
-    (options.headHeightToWidthRatio ?? DEFAULT_HEAD_HEIGHT_TO_WIDTH_RATIO);
-
-  if (!(headWidth > 0) || !(headHeight > 0)) return undefined;
-
-  const headEllipse = createEllipsePolygon(
-    faceCenter,
-    headWidth / 2,
-    headHeight / 2,
-    options.ellipsePointCount ?? DEFAULT_HEAD_ELLIPSE_POINT_COUNT,
+  const eligibleHeads = headDetections.filter(
+    (head) =>
+      head.rect && head.mask && (head.confidence ?? 0) >= minimumConfidence,
   );
-  const clipped = clipPolygonToConvexPolygon(polygon, headEllipse);
-  const points = simplifyPolygonPoints(clipped, options);
+  const candidates = [];
 
-  if (!points) return undefined;
+  for (const [headIndex, head] of eligibleHeads.entries()) {
+    for (const [playerIndex, player] of eligiblePlayers.entries()) {
+      const playerLeft = player.rect.x - player.rect.width / 2;
+      const playerRight = player.rect.x + player.rect.width / 2;
+      const playerTop = player.rect.y - player.rect.height / 2;
+      const playerHeadBandBottom =
+        playerTop + player.rect.height * maximumCenterYRatio;
+      const centerIsInHeadBand =
+        head.rect.x >= playerLeft &&
+        head.rect.x <= playerRight &&
+        head.rect.y >= playerTop &&
+        head.rect.y <= playerHeadBandBottom;
+      const sizeIsPlausible =
+        head.rect.width <= player.rect.width * maximumWidthRatio &&
+        head.rect.height <= player.rect.height * maximumHeightRatio;
 
-  const xs = points.map(({ x }) => x);
-  const ys = points.map(({ y }) => y);
-  const left = Math.min(...xs);
-  const right = Math.max(...xs);
-  const clippedTop = Math.min(...ys);
-  const bottom = Math.max(...ys);
+      if (!centerIsInHeadBand || !sizeIsPlausible) continue;
 
-  if (!(right > left) || !(bottom > clippedTop)) return undefined;
+      const normalizedX = (head.rect.x - player.rect.x) / player.rect.width;
+      const normalizedY = (head.rect.y - playerTop) / player.rect.height;
+      candidates.push({
+        head,
+        headIndex,
+        player,
+        playerIndex,
+        score: Math.hypot(normalizedX, normalizedY),
+      });
+    }
+  }
+
+  candidates.sort(
+    (left, right) =>
+      left.score - right.score ||
+      (right.head.confidence ?? 0) - (left.head.confidence ?? 0) ||
+      left.headIndex - right.headIndex ||
+      left.playerIndex - right.playerIndex,
+  );
+
+  const matchedHeadIndexes = new Set();
+  const matchedPlayerIndexes = new Set();
+  const matches = [];
+
+  for (const candidate of candidates) {
+    if (
+      matchedHeadIndexes.has(candidate.headIndex) ||
+      matchedPlayerIndexes.has(candidate.playerIndex)
+    ) {
+      continue;
+    }
+
+    matchedHeadIndexes.add(candidate.headIndex);
+    matchedPlayerIndexes.add(candidate.playerIndex);
+    matches.push({
+      head: candidate.head,
+      normalizedTopCenterDistance: round(candidate.score, 4),
+      player: candidate.player,
+    });
+  }
 
   return {
-    className: options.className ?? "head",
-    confidence: detection.confidence,
-    id: options.id,
-    metadata: {
-      derivedFromDetectionId: detection.id,
-      derivation: options.algorithm ?? "player-mask-pose-head-clip-v2",
-    },
-    polygon: { points },
-    rect: {
-      height: round(bottom - clippedTop, 1),
-      width: round(right - left, 1),
-      x: round(left + (right - left) / 2, 1),
-      y: round(clippedTop + (bottom - clippedTop) / 2, 1),
-    },
-    sourceId: options.sourceId ?? "derived-head-polygon",
+    ignoredLowConfidenceHeadCount: headDetections.length - eligibleHeads.length,
+    matches,
+    unmatchedHeadCount: eligibleHeads.length - matches.length,
+    unmatchedPlayerCount: eligiblePlayers.length - matches.length,
   };
 }
 
@@ -482,87 +480,6 @@ function rectIntersectionOverUnion(left, right) {
   return unionArea > 0 ? intersectionArea / unionArea : 0;
 }
 
-function createEllipsePolygon(center, radiusX, radiusY, pointCount) {
-  if (!Number.isInteger(pointCount) || pointCount < 8) {
-    throw new Error("ellipsePointCount must be an integer of at least 8.");
-  }
-
-  return Array.from({ length: pointCount }, (_, index) => {
-    const angle = (index / pointCount) * Math.PI * 2;
-    return {
-      x: center.x + Math.cos(angle) * radiusX,
-      y: center.y + Math.sin(angle) * radiusY,
-    };
-  });
-}
-
-function clipPolygonToConvexPolygon(points, clipPolygon) {
-  const orientation = Math.sign(polygonSignedArea(clipPolygon)) || 1;
-
-  return clipPolygon.reduce((clipped, start, index) => {
-    const end = clipPolygon[(index + 1) % clipPolygon.length];
-    if (clipped.length === 0) return clipped;
-
-    const output = [];
-    let previous = clipped[clipped.length - 1];
-    let previousInside = isInsideConvexEdge(previous, start, end, orientation);
-
-    for (const current of clipped) {
-      const currentInside = isInsideConvexEdge(
-        current,
-        start,
-        end,
-        orientation,
-      );
-
-      if (currentInside !== previousInside) {
-        output.push(intersectLines(previous, current, start, end));
-      }
-      if (currentInside) output.push(current);
-
-      previous = current;
-      previousInside = currentInside;
-    }
-
-    return output;
-  }, points);
-}
-
-function isInsideConvexEdge(point, start, end, orientation) {
-  const cross =
-    (end.x - start.x) * (point.y - start.y) -
-    (end.y - start.y) * (point.x - start.x);
-  return cross * orientation >= -1e-6;
-}
-
-function intersectLines(subjectStart, subjectEnd, clipStart, clipEnd) {
-  const subjectDx = subjectEnd.x - subjectStart.x;
-  const subjectDy = subjectEnd.y - subjectStart.y;
-  const clipDx = clipEnd.x - clipStart.x;
-  const clipDy = clipEnd.y - clipStart.y;
-  const denominator = subjectDx * clipDy - subjectDy * clipDx;
-
-  if (Math.abs(denominator) < 1e-9) return subjectEnd;
-
-  const offsetX = clipStart.x - subjectStart.x;
-  const offsetY = clipStart.y - subjectStart.y;
-  const t = (offsetX * clipDy - offsetY * clipDx) / denominator;
-
-  return {
-    x: subjectStart.x + t * subjectDx,
-    y: subjectStart.y + t * subjectDy,
-  };
-}
-
-function polygonSignedArea(points) {
-  return (
-    points.reduce((area, point, index) => {
-      const next = points[(index + 1) % points.length];
-      return area + point.x * next.y - next.x * point.y;
-    }, 0) / 2
-  );
-}
-
 function simplifyClosedRing(points, tolerance) {
   if (points.length <= 3) {
     return points;
@@ -690,8 +607,4 @@ function round(value, decimals) {
   const factor = 10 ** decimals;
 
   return Math.round(value * factor) / factor;
-}
-
-function average(values) {
-  return values.reduce((sum, value) => sum + value, 0) / values.length;
 }

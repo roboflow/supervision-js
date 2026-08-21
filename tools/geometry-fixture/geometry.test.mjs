@@ -5,9 +5,9 @@ import {
   DEFAULT_POSE_MATCH_IOU,
   KEYPOINT_VISIBILITY_NOT_LABELED,
   KEYPOINT_VISIBILITY_VISIBLE,
+  associateHeadDetectionsToPlayers,
   attachPoseKeypointsToDetections,
   convertOneBasedEdges,
-  deriveHeadPolygonDetection,
   normalizePoseDetection,
   selectMotionGatedDetection,
   simplifyPolygonPoints,
@@ -162,59 +162,90 @@ describe("simplifyPolygonPoints", () => {
   });
 });
 
-describe("deriveHeadPolygonDetection", () => {
-  it("uses facial pose points to author an independent head polygon", () => {
-    const head = deriveHeadPolygonDetection(
+describe("associateHeadDetectionsToPlayers", () => {
+  const mask = { counts: "fixture", encoding: "compressedRle" };
+
+  it("matches direct head masks one-to-one by the player top-center", () => {
+    const leftPlayer = {
+      className: "yellow team player",
+      id: "yellow:0",
+      rect: { height: 300, width: 120, x: 200, y: 300 },
+    };
+    const rightPlayer = {
+      className: "white team player",
+      id: "white:0",
+      rect: { height: 320, width: 130, x: 275, y: 330 },
+    };
+    const leftHead = {
+      className: "head",
+      confidence: 0.84,
+      id: "head:0",
+      mask,
+      rect: { height: 50, width: 40, x: 205, y: 165 },
+    };
+    const rightHead = {
+      className: "head",
+      confidence: 0.82,
+      id: "head:1",
+      mask,
+      rect: { height: 48, width: 38, x: 270, y: 180 },
+    };
+
+    const result = associateHeadDetectionsToPlayers(
+      [rightHead, leftHead],
+      [leftPlayer, rightPlayer],
       {
-        className: "yellow team player",
-        confidence: 0.92,
-        id: "player-7",
-        polygon: {
-          points: [
-            { x: 80, y: 0 },
-            { x: 120, y: 0 },
-            { x: 140, y: 200 },
-            { x: 60, y: 200 },
-          ],
-        },
-        keypoints: {
-          edges: [],
-          points: [
-            { x: 100, y: 22 },
-            { x: 95, y: 20 },
-            { x: 105, y: 20 },
-            { x: 93, y: 21 },
-            { x: 107, y: 21 },
-            { x: 85, y: 50 },
-            { x: 115, y: 50 },
-          ],
-          visibility: [2, 2, 2, 2, 2, 2, 2],
-        },
-        rect: { height: 200, width: 80, x: 100, y: 100 },
+        targetClassNames: ["white team player", "yellow team player"],
       },
-      { id: "head:7", maxPoints: 16, tolerance: 0 },
     );
 
-    assert.equal(head.className, "head");
-    assert.equal(head.id, "head:7");
-    assert.equal(head.sourceId, "derived-head-polygon");
-    assert.equal(head.keypoints, undefined);
-    assert.ok(head.rect.width <= 30);
-    assert.ok(head.rect.height <= 40);
-    assert.ok(head.polygon.points.every(({ y }) => y < 40));
-    assert.deepEqual(head.metadata, {
-      derivation: "player-mask-pose-head-clip-v2",
-      derivedFromDetectionId: "player-7",
-    });
+    assert.equal(result.matches.length, 2);
+    assert.deepEqual(
+      result.matches.map(({ head, player }) => [head.id, player.id]).sort(),
+      [
+        ["head:0", "yellow:0"],
+        ["head:1", "white:0"],
+      ],
+    );
+    assert.equal(result.unmatchedHeadCount, 0);
+    assert.equal(result.unmatchedPlayerCount, 0);
   });
 
-  it("omits detections without a usable semantic polygon", () => {
-    assert.equal(
-      deriveHeadPolygonDetection({
-        rect: { height: 100, width: 50, x: 50, y: 50 },
-      }),
-      undefined,
+  it("drops audience heads and low-confidence candidates without changing masks", () => {
+    const player = {
+      className: "yellow team player",
+      id: "yellow:0",
+      rect: { height: 300, width: 120, x: 200, y: 300 },
+    };
+    const directHead = {
+      className: "head",
+      confidence: 0.81,
+      id: "head:player",
+      mask,
+      rect: { height: 50, width: 40, x: 205, y: 165 },
+    };
+    const result = associateHeadDetectionsToPlayers(
+      [
+        directHead,
+        {
+          ...directHead,
+          confidence: 0.2,
+          id: "head:low-confidence",
+        },
+        {
+          ...directHead,
+          id: "head:audience",
+          rect: { ...directHead.rect, x: 600 },
+        },
+      ],
+      [player],
     );
+
+    assert.equal(result.matches.length, 1);
+    assert.equal(result.matches[0].head, directHead);
+    assert.equal(result.matches[0].head.mask, mask);
+    assert.equal(result.ignoredLowConfidenceHeadCount, 1);
+    assert.equal(result.unmatchedHeadCount, 1);
   });
 });
 

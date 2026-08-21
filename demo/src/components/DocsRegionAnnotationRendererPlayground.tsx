@@ -104,7 +104,7 @@ export function DocsRegionAnnotationRendererPlayground() {
             <h1>Regions</h1>
             <span>
               {showsMediaCrop
-                ? "Mask-derived head crops with transparent coverage"
+                ? "Direct SAM3 head crops with transparent coverage"
                 : showsIcons
                   ? "Class-specific SVG badges anchored to player keypoints"
                   : "Looping fire GIFs anchored to player keypoints"}

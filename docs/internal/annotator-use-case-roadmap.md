@@ -316,25 +316,26 @@ claim a live playground. A renderer primitive alone is not enough: the
 playground must consume a committed fixture containing the matching semantic
 field. Do not inject docs-only detections to simulate coverage.
 
-| Visualization capability | Browser renderer and style        | Frozen fixture evidence                                                                        | Public docs state | Next required work                                                                     |
-| ------------------------ | --------------------------------- | ---------------------------------------------------------------------------------------------- | ----------------- | -------------------------------------------------------------------------------------- |
-| Boxes                    | Implemented                       | `basketball_geometry.rect`                                                                     | Live playground   | Maintain regression coverage with the basketball fixture                               |
-| Masks                    | Implemented                       | `basketball_geometry.mask` (compressed RLE)                                                    | Live playground   | Maintain mask-preparation and visual coverage                                          |
-| Labels                   | Implemented                       | `basketball_geometry.className` and `confidence`                                               | Live playground   | Maintain label layout and contrast coverage                                            |
-| Polygons                 | Implemented                       | `basketball_geometry.polygon`                                                                  | Live playground   | Maintain contour and fill/stroke coverage                                              |
-| Keypoints and skeletons  | Implemented                       | `basketball_geometry.keypoints` including edges and visibility                                 | Live playground   | Maintain pose association and visibility coverage                                      |
-| Polylines                | Implemented (`BasePolylineStyle`) | `basketball_geometry` motion-gated basketball track plus mask (versioned bounded center trace) | Live playground   | Maintain source-identity, path, timing, mask-color, and provenance regression coverage |
-| Regions                  | Implemented (`region`)            | `basketball_regions` mask-derived head polygons, original media, badges, and `player-fire.gif` | Live playground   | Add replacement coverage in its separately reviewed phase                              |
+| Visualization capability | Browser renderer and style        | Frozen fixture evidence                                                                             | Public docs state | Next required work                                                                     |
+| ------------------------ | --------------------------------- | --------------------------------------------------------------------------------------------------- | ----------------- | -------------------------------------------------------------------------------------- |
+| Boxes                    | Implemented                       | `basketball_geometry.rect`                                                                          | Live playground   | Maintain regression coverage with the basketball fixture                               |
+| Masks                    | Implemented                       | `basketball_geometry.mask` (compressed RLE)                                                         | Live playground   | Maintain mask-preparation and visual coverage                                          |
+| Labels                   | Implemented                       | `basketball_geometry.className` and `confidence`                                                    | Live playground   | Maintain label layout and contrast coverage                                            |
+| Polygons                 | Implemented                       | `basketball_geometry.polygon`                                                                       | Live playground   | Maintain contour and fill/stroke coverage                                              |
+| Keypoints and skeletons  | Implemented                       | `basketball_geometry.keypoints` including edges and visibility                                      | Live playground   | Maintain pose association and visibility coverage                                      |
+| Polylines                | Implemented (`BasePolylineStyle`) | `basketball_geometry` motion-gated basketball track plus mask (versioned bounded center trace)      | Live playground   | Maintain source-identity, path, timing, mask-color, and provenance regression coverage |
+| Regions                  | Implemented (`region`)            | `basketball_regions` direct SAM3 head masks/polygons, original media, badges, and `player-fire.gif` | Live playground   | Add replacement coverage in its separately reviewed phase                              |
 
 The basketball fixtures are therefore the current visual baseline for seven
 renderers: boxes, masks, labels, polygons, polylines, keypoints/skeletons, and
 regions backed by either assets or the current media frame.
 The geometry fixture's polyline example is a transparent derived center trace
-on one frozen segmentation identity. `basketball_regions` adds explicitly
-derived `head` detections by using frozen facial pose only during fixture
-authoring, then intersecting a conservative head window with the player mask
-polygon. The Region renderer receives those standalone polygons as transparent
-media-crop coverage and has no runtime keypoint dependency.
+on one frozen segmentation identity. `basketball_regions` adds direct SAM3
+`head` masks associated one-to-one with frozen team-player detections by their
+top-center geometry. Their exact mask coverage is converted to bounded polygons
+without clipping it against the noisier player masks. The Region renderer
+receives those standalone detections as transparent media-crop coverage and has
+no runtime keypoint dependency.
 
 ### Gaps Before New Facades
 

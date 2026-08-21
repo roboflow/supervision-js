@@ -84,7 +84,7 @@ export function createRegionPlaygroundRenderers(
         },
         target: {
           className: "head",
-          sourceId: "derived-head-polygon",
+          sourceId: "sam3-head",
         },
         transform: {
           flip: { horizontal: settings.flipHorizontal },
@@ -145,7 +145,7 @@ export function createRegionPlaygroundSnippet(
   renderers: [
     annotationRenderers.region({
       id: "player-big-heads",
-      target: { className: "head", sourceId: "derived-head-polygon" },
+      target: { className: "head", sourceId: "sam3-head" },
       source: {
         kind: "media",
         region: { kind: "bounds" },

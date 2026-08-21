@@ -30,6 +30,13 @@ const geometryManifest = readJson<Record<string, unknown>>(
 const geometryChunks = listDetectionChunkPaths(geometryFixturePath).map(
   (path) => readJson<DetectionChunk>(path),
 );
+const regionsFixturePath = join(fixturesRoot, "basketball_regions");
+const regionsManifest = readJson<Record<string, unknown>>(
+  join(regionsFixturePath, "detections.manifest.json"),
+);
+const regionsChunks = listDetectionChunkPaths(regionsFixturePath).map((path) =>
+  readJson<DetectionChunk>(path),
+);
 
 describe("fixture geometry", () => {
   it("uses center-based rects for deterministic fixture mask samples", () => {
@@ -329,6 +336,75 @@ describe("geometry showcase fixture", () => {
     expect(geometryManifest.geometry).toMatchObject({
       polylineDetectionCount: polylineCount,
     });
+  });
+});
+
+describe("basketball region fixture", () => {
+  it("keeps direct SAM3 head masks and one matched player per frame", () => {
+    let headCount = 0;
+
+    for (const chunk of regionsChunks) {
+      for (const frame of chunk.frames) {
+        const matchedPlayerIds = new Set<string>();
+
+        for (const detection of frame.detections) {
+          if (detection.sourceId !== "sam3-head") continue;
+
+          headCount += 1;
+          const matchedPlayerId = String(
+            detection.metadata?.matchedPlayerDetectionId ?? "",
+          );
+
+          expect(detection.className).toBe("head");
+          expect(detection.confidence).toBeGreaterThanOrEqual(0.7);
+          expect(detection.mask).toBeDefined();
+          expect(detection.polygon?.points.length).toBeGreaterThanOrEqual(3);
+          expect(detection.polygon?.points.length).toBeLessThanOrEqual(
+            MAX_POLYGON_POINTS,
+          );
+          expect(detection.metadata?.association).toBe(
+            "sam3-head-top-center-v1",
+          );
+          expect(matchedPlayerId).not.toBe("");
+          expect(matchedPlayerIds.has(matchedPlayerId)).toBe(false);
+          matchedPlayerIds.add(matchedPlayerId);
+        }
+      }
+    }
+
+    expect(headCount).toBeGreaterThan(0);
+    expect(regionsManifest.geometry).toMatchObject({
+      maskDetectionCount: regionsManifest.detectionCount,
+      polygonDetectionCount: regionsManifest.detectionCount,
+    });
+  });
+
+  it("records the frozen SAM3 head input and association policy", () => {
+    const provenance = regionsManifest.provenance as {
+      readonly headRegions: Record<string, unknown>;
+      readonly sources: readonly {
+        readonly id: string;
+        readonly input: string;
+        readonly inputSha256: string;
+      }[];
+    };
+    const headSource = provenance.sources.find(({ id }) => id === "sam3-head");
+
+    expect(provenance.headRegions).toMatchObject({
+      algorithm: "sam3-head-top-center-v1",
+      prompt: "head",
+      sourceId: "sam3-head",
+    });
+    expect(provenance.headRegions.associationPolicy).toContain(
+      "direct SAM3 head masks are never clipped",
+    );
+    expect(provenance.headRegions.matchedHeadCount).toBeGreaterThan(0);
+    expect(headSource).toBeDefined();
+    expect(headSource?.inputSha256).toBe(
+      sourceSha256(
+        readFileSync(resolve(regionsFixturePath, headSource!.input)),
+      ),
+    );
   });
 });
 

@@ -19,10 +19,10 @@ source, or display object.
   ></iframe>
 </div>
 
-The playground uses frozen, pose-located and mask-derived `head` detections from
-the basketball fixture. It opens with transparent player-head crops enlarged
-over the original frame; no rectangular background patch or runtime keypoint is
-used for that mode.
+The playground uses frozen, direct SAM3 `head` masks associated offline with
+the basketball fixture's team-player detections. It opens with transparent
+player-head crops enlarged over the original frame; no rectangular background
+patch, synthetic head window, or runtime keypoint is used for that mode.
 Switch to class-specific SVG team badges or a looping fire GIF, then tune the
 head scale or fixed screen-pixel asset size, offset, rotation, and media-crop
 mirror controls.
@@ -32,7 +32,7 @@ mirror controls.
 Use a `media` source to crop pixels from the same frame the renderer is already
 presenting. The source and destination regions are resolved independently from
 the same detection. This example targets dedicated `head` detections and clips
-the sampled pixels to their mask-derived polygons:
+the sampled pixels to bounded polygons converted from those exact SAM3 masks:
 
 ```ts
 session.setPresentation({
@@ -41,7 +41,7 @@ session.setPresentation({
       id: "player-big-heads",
       target: {
         className: "head",
-        sourceId: "derived-head-polygon",
+        sourceId: "sam3-head",
       },
       source: {
         kind: "media",

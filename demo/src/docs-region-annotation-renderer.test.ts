@@ -82,7 +82,7 @@ describe("docs region annotation renderer", () => {
         },
         target: {
           className: "head",
-          sourceId: "derived-head-polygon",
+          sourceId: "sam3-head",
         },
         transform: {
           flip: { horizontal: true },
