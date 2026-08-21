@@ -47,8 +47,14 @@ export interface PngIdMaskFrame extends IdMaskFrame {
 export function createRegionMaskCoverageFrame(
   instructions: readonly SerializableMaskInstruction[],
 ): PreparedRegionMaskCoverageFrame | undefined {
-  const coverageInstructions = materializeMaskInstructions(
-    instructions.filter((instruction) => instruction.regionCoverage === true),
+  const coverageInstructions = instructions.filter(
+    (
+      instruction,
+    ): instruction is SerializableMaskInstruction & {
+      readonly regionCoverageMask: NonNullable<
+        SerializableMaskInstruction["regionCoverageMask"]
+      >;
+    } => instruction.regionCoverageMask !== undefined,
   );
 
   if (coverageInstructions.length === 0) return undefined;
@@ -56,7 +62,7 @@ export function createRegionMaskCoverageFrame(
   const entries: PreparedRegionMaskCoverageFrame["entries"][number][] = [];
 
   for (const instruction of coverageInstructions) {
-    const decodedMask = decodeCompressedRleMask(instruction.mask);
+    const decodedMask = decodeCompressedRleMask(instruction.regionCoverageMask);
     let minX = decodedMask.width;
     let minY = decodedMask.height;
     let maxX = -1;
@@ -161,25 +167,27 @@ function compositeInstruction(
 function materializeMaskInstructions(
   instructions: readonly SerializableMaskInstruction[],
 ): IdMaskInstruction[] {
-  return instructions.map((instruction) => {
-    if (instruction.mask) {
-      return instruction;
-    }
+  return instructions
+    .filter((instruction) => instruction.visible !== false)
+    .map((instruction) => {
+      if (instruction.mask) {
+        return instruction;
+      }
 
-    const { height, points, width } = instruction.polygon;
+      const { height, points, width } = instruction.polygon;
 
-    return {
-      alpha: instruction.alpha,
-      color: instruction.color,
-      detectionIndex: instruction.detectionIndex,
-      mask: encodeBinaryMask(
-        rasterizePolygonToMask(points, { height, width }),
-        width,
-        height,
-      ),
-      stroke: instruction.stroke,
-    };
-  });
+      return {
+        alpha: instruction.alpha,
+        color: instruction.color,
+        detectionIndex: instruction.detectionIndex,
+        mask: encodeBinaryMask(
+          rasterizePolygonToMask(points, { height, width }),
+          width,
+          height,
+        ),
+        stroke: instruction.stroke,
+      };
+    });
 }
 
 function compositeMaskFill(

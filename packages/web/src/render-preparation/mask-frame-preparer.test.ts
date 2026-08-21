@@ -100,17 +100,20 @@ describe("mask frame preparer", () => {
         {
           ...maskPreparationJob.instructions[0]!,
           detectionIndex: 63,
-          regionCoverage: true,
+          regionCoverageMask: maskPreparationJob.instructions[0]!.mask,
+          visible: false,
         },
       ],
       key: "dense:0",
     });
 
     expect(frame).toMatchObject({
+      height: 1,
       kind: PreparedMaskFrameKind.RgbaImage,
       regionMaskCoverage: {
         entries: [expect.objectContaining({ detectionIndex: 63 })],
       },
+      width: 1,
     });
     preparer.destroy();
   });

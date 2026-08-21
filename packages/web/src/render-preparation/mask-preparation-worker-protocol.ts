@@ -16,8 +16,11 @@ interface SerializableRasterInstructionBase {
   readonly alpha: number;
   readonly color: number;
   readonly detectionIndex: number;
-  readonly regionCoverage?: boolean;
+  /** Semantic mask used only by exact Region renderer coverage. */
+  readonly regionCoverageMask?: DetectionMask;
   readonly stroke?: MaskStrokeStyle;
+  /** False when this instruction only carries Region coverage. */
+  readonly visible?: boolean;
 }
 
 export type SerializableMaskInstruction =

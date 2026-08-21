@@ -219,9 +219,12 @@ function createMainThreadMaskFramePreparer(
         job.instructions,
       );
 
-      if (!compositedFrame) {
+      if (!compositedFrame && !regionMaskCoverage) {
         return undefined;
       }
+
+      const preparedPixels =
+        compositedFrame ?? createTransparentCoverageCarrier();
 
       const canvas = document.createElement("canvas");
       const context = canvas.getContext("2d");
@@ -230,13 +233,13 @@ function createMainThreadMaskFramePreparer(
         throw new Error("Unable to create mask frame canvas context.");
       }
 
-      canvas.width = compositedFrame.width;
-      canvas.height = compositedFrame.height;
+      canvas.width = preparedPixels.width;
+      canvas.height = preparedPixels.height;
       context.putImageData(
         new ImageData(
-          compositedFrame.data,
-          compositedFrame.width,
-          compositedFrame.height,
+          preparedPixels.data,
+          preparedPixels.width,
+          preparedPixels.height,
         ),
         0,
         0,
@@ -247,13 +250,13 @@ function createMainThreadMaskFramePreparer(
           canvas.width = 0;
           canvas.height = 0;
         },
-        height: compositedFrame.height,
+        height: preparedPixels.height,
         idMaskData: createMaskIdFrame(job.instructions)?.data,
         key: job.key,
         kind: PreparedMaskFrameKind.RgbaImage,
         regionMaskCoverage,
         source: canvas,
-        width: compositedFrame.width,
+        width: preparedPixels.width,
       };
     },
 
@@ -263,6 +266,14 @@ function createMainThreadMaskFramePreparer(
   };
 
   return preparer;
+}
+
+function createTransparentCoverageCarrier() {
+  return {
+    data: new Uint8ClampedArray(new ArrayBuffer(4)),
+    height: 1,
+    width: 1,
+  };
 }
 
 async function createPreparedPngIdMaskFrame(

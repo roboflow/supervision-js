@@ -337,6 +337,121 @@ describe("media session integration", () => {
     session.destroy();
   });
 
+  it("prepares semantic Region coverage only for static targets", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      mediaMock.samples = [createMockSample(0, 0)];
+      const fakeWorker = createFakeMaskPreparationWorker((message) => ({
+        imageData: new ImageData(new Uint8ClampedArray(4), 1, 1),
+        key: message.job.key,
+        requestId: message.requestId,
+        type: "complete",
+      }));
+      const {
+        annotationRenderers,
+        createMediaSession,
+        DetectionMaskEncoding,
+        RegionRendererCoverageKind,
+        RegionRendererRegionKind,
+        RegionRendererSourceKind,
+        RenderPreparationMode,
+      } = await import("./index");
+      const semanticHeadMask = {
+        counts: "021",
+        encoding: DetectionMaskEncoding.CompressedRle,
+        height: 2,
+        width: 2,
+      } as const;
+      const presentationMask = {
+        counts: "12",
+        encoding: DetectionMaskEncoding.CompressedRle,
+        height: 2,
+        width: 2,
+      } as const;
+      const unrelatedMask = {
+        counts: "121",
+        encoding: DetectionMaskEncoding.CompressedRle,
+        height: 2,
+        width: 2,
+      } as const;
+      const alternateMaskStyle = {
+        artifactKey: "alternate-visible-mask",
+        resolve: (detection: { readonly id?: string | number }) =>
+          detection.id === "head-1"
+            ? { alpha: 1, color: 0xff0000, mask: presentationMask }
+            : undefined,
+      };
+      const session = await createMediaSession({
+        container: createContainer(),
+        detections: {
+          frames: [
+            {
+              detections: [
+                {
+                  className: "head",
+                  id: "head-1",
+                  mask: semanticHeadMask,
+                  rect: { height: 4, width: 4, x: 2, y: 2 },
+                  sourceId: "sam3-head",
+                },
+                {
+                  className: "player",
+                  id: "player-1",
+                  mask: unrelatedMask,
+                  rect: { height: 8, width: 4, x: 2, y: 4 },
+                  sourceId: "players",
+                },
+              ],
+              mediaTime: 0,
+            },
+          ],
+        },
+        media: "sample.mp4",
+        presentation: {
+          renderers: [
+            annotationRenderers.mask({ style: alternateMaskStyle }),
+            annotationRenderers.region({
+              id: "head-crop",
+              region: { kind: RegionRendererRegionKind.Bounds },
+              source: {
+                coverage: { kind: RegionRendererCoverageKind.Mask },
+                kind: RegionRendererSourceKind.Media,
+                region: { kind: RegionRendererRegionKind.Bounds },
+              },
+              target: { className: "head", sourceId: "sam3-head" },
+            }),
+          ],
+        },
+        renderer: {
+          autoPlay: false,
+          renderPreparation: {
+            mode: RenderPreparationMode.Worker,
+            workerFactory: { createWorker: () => fakeWorker.worker },
+          },
+        },
+      });
+
+      await vi.runOnlyPendingTimersAsync();
+      await Promise.resolve();
+
+      const instructions = fakeWorker.messages[0]?.job.instructions;
+
+      expect(instructions).toEqual([
+        expect.objectContaining({
+          detectionIndex: 0,
+          mask: presentationMask,
+          regionCoverageMask: semanticHeadMask,
+        }),
+      ]);
+
+      session.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("runs a complete appendable media session through rendering, updates, seeking, and cleanup", async () => {
     vi.useFakeTimers();
     resetMocks();
@@ -568,6 +683,7 @@ describe("media session integration", () => {
 
 interface FakeMaskPreparationWorkerMessage {
   readonly job: {
+    readonly instructions: readonly unknown[];
     readonly key: string;
   };
   readonly requestId: number;

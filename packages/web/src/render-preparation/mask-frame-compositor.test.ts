@@ -169,14 +169,14 @@ describe("mask frame compositor", () => {
         color: 0,
         detectionIndex: 0,
         mask,
-        regionCoverage: true,
+        regionCoverageMask: mask,
       },
       {
         alpha: 0,
         color: 0,
         detectionIndex: 63,
         mask,
-        regionCoverage: true,
+        regionCoverageMask: mask,
       },
     ]);
 
@@ -213,7 +213,7 @@ describe("mask frame compositor", () => {
         color: 0,
         detectionIndex,
         mask,
-        regionCoverage: true,
+        regionCoverageMask: mask,
       })),
     );
 
@@ -221,6 +221,57 @@ describe("mask frame compositor", () => {
     expect(frame?.entries[24]).toMatchObject({
       detectionIndex: 24,
     });
+  });
+
+  it("keeps Region coverage separate from visible mask composition", () => {
+    const visibleMask = {
+      counts: encodeCompressedRleCounts([0, 1]),
+      encoding: DetectionMaskEncoding.CompressedRle,
+      height: 1,
+      width: 2,
+    } as const;
+    const semanticCoverageMask = {
+      counts: encodeCompressedRleCounts([1, 1]),
+      encoding: DetectionMaskEncoding.CompressedRle,
+      height: 1,
+      width: 2,
+    } as const;
+    const instructions = [
+      {
+        alpha: 1,
+        color: 0xff0000,
+        detectionIndex: 0,
+        mask: visibleMask,
+        regionCoverageMask: semanticCoverageMask,
+      },
+      {
+        alpha: 0,
+        color: 0,
+        detectionIndex: 1,
+        mask: semanticCoverageMask,
+        regionCoverageMask: semanticCoverageMask,
+        visible: false,
+      },
+    ] as const;
+
+    const composited = compositeMaskFrame(instructions);
+    const coverage = createRegionMaskCoverageFrame(instructions);
+
+    expect(composited?.data).toEqual(
+      Uint8ClampedArray.from([255, 0, 0, 255, 0, 0, 0, 0]),
+    );
+    expect(coverage?.entries).toEqual([
+      expect.objectContaining({
+        data: Uint8Array.from([255]),
+        detectionIndex: 0,
+        x: 1,
+      }),
+      expect.objectContaining({
+        data: Uint8Array.from([255]),
+        detectionIndex: 1,
+        x: 1,
+      }),
+    ]);
   });
 
   it("composites mask strokes into the prepared frame artifact", () => {

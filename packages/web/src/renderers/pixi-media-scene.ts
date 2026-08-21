@@ -17,6 +17,7 @@ import type {
   EllipseStyle,
   MarkerStyle,
   RegionAnnotationRenderer,
+  RegionRendererTarget,
   ShapeStyle,
 } from "supervision-js-core";
 import {
@@ -115,6 +116,9 @@ export async function createPixiMediaScene(
   let currentMaskHaloStyle: MaskHaloStyle | null =
     options.maskHaloStyle ?? null;
   let currentRegionRenderers = [...options.regionRenderers];
+  let regionMaskCoverageKey = resolveRegionMaskCoverageKey(
+    currentRegionRenderers,
+  );
   // Halo-only presentations still need prepared id-mask artifacts; this
   // invisible style drives preparation without drawing any fill or border.
   const haloOnlyMaskStyle: MaskStyle = {
@@ -150,7 +154,7 @@ export async function createPixiMediaScene(
 
     const visibleMaskStyle = currentMaskStyle;
     return {
-      artifactKey: `region-mask-coverage:v2:${visibleMaskStyle?.artifactKey ?? "none"}`,
+      artifactKey: `region-mask-coverage:v3:${visibleMaskStyle?.artifactKey ?? "none"}:${regionMaskCoverageKey}`,
       opacity: visibleMaskStyle?.opacity,
       resolve(detection, context) {
         const visibleInstruction = visibleMaskStyle?.resolve(
@@ -178,13 +182,51 @@ export async function createPixiMediaScene(
     );
   }
 
+  function resolveRegionMaskCoverageKey(
+    renderers: readonly RegionAnnotationRenderer[],
+  ) {
+    return JSON.stringify(
+      renderers.filter(usesExactMaskCoverage).map(({ target }) => ({
+        className: target.className,
+        id: target.id,
+        sourceId: target.sourceId,
+      })),
+    );
+  }
+
+  function matchesStaticRegionTarget(
+    target: RegionRendererTarget,
+    detection: Detection,
+  ) {
+    return (
+      matchesStaticTargetValue(target.id, detection.id) &&
+      matchesStaticTargetValue(target.className, detection.className) &&
+      matchesStaticTargetValue(target.sourceId, detection.sourceId)
+    );
+  }
+
+  function matchesStaticTargetValue(
+    configured: string | number | readonly (string | number)[] | undefined,
+    actual: string | number | undefined,
+  ) {
+    if (configured === undefined) return true;
+    if (actual === undefined) return false;
+    return Array.isArray(configured)
+      ? configured.some((value) => value === actual)
+      : configured === actual;
+  }
+
   function resolveArtifactMaskInstructions(options: {
     readonly frame: DetectionFrame;
     readonly maskStyle: MaskStyle;
     readonly mediaTime: number;
   }) {
     const instructions: SerializableMaskInstruction[] = [];
-    const regionCoverage = currentRegionRenderers.some(usesExactMaskCoverage);
+    const exactRegionRenderers = currentRegionRenderers.filter(
+      usesExactMaskCoverage,
+    );
+    const visibleArtifactStyle =
+      currentMaskStyle ?? (currentMaskHaloStyle ? haloOnlyMaskStyle : null);
     const orderedDetections = options.frame.detections
       .map((detection, detectionIndex) => ({ detection, detectionIndex }))
       .sort(
@@ -194,18 +236,38 @@ export async function createPixiMediaScene(
       );
 
     for (const { detection, detectionIndex } of orderedDetections) {
-      const instruction = options.maskStyle.resolve(detection, {
+      const context = {
         detectionIndex,
         frame: options.frame,
         mediaTime: options.mediaTime,
-      });
+      };
+      const state = resolveContextState(detection);
 
-      if (!instruction) continue;
+      if (state.hidden) continue;
+
+      const visibleInstruction = visibleArtifactStyle?.resolve(detection, {
+        ...context,
+        ...state,
+      });
+      const regionCoverageMask =
+        detection.mask &&
+        exactRegionRenderers.some((renderer) =>
+          matchesStaticRegionTarget(renderer.target, detection),
+        )
+          ? detection.mask
+          : undefined;
+
+      if (!visibleInstruction && !regionCoverageMask) continue;
 
       instructions.push({
-        ...instruction,
+        ...(visibleInstruction ?? {
+          alpha: 0,
+          color: 0,
+          mask: regionCoverageMask!,
+          visible: false,
+        }),
         detectionIndex,
-        regionCoverage: regionCoverage && detection.mask !== undefined,
+        regionCoverageMask,
       });
     }
 
@@ -1066,11 +1128,13 @@ export async function createPixiMediaScene(
           (renderer): renderer is RegionAnnotationRenderer =>
             renderer.kind === "region",
         ) ?? [];
+      const nextRegionMaskCoverageKey =
+        resolveRegionMaskCoverageKey(nextRegionRenderers);
       const regionMaskCoverageChanged =
-        nextRegionRenderers.some(usesExactMaskCoverage) !==
-        currentRegionRenderers.some(usesExactMaskCoverage);
+        nextRegionMaskCoverageKey !== regionMaskCoverageKey;
 
       currentRegionRenderers = nextRegionRenderers;
+      regionMaskCoverageKey = nextRegionMaskCoverageKey;
       regionLayer.setRenderers(currentRegionRenderers);
 
       if (

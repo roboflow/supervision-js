@@ -59,7 +59,7 @@ async function prepareMaskFrame(message: MaskPreparationWorkerRequest) {
 
     const compositedFrame = compositeMaskFrame(message.job.instructions);
 
-    if (!compositedFrame) {
+    if (!compositedFrame && !regionMaskCoverage) {
       workerScope.postMessage({
         key: message.job.key,
         requestId: message.requestId,
@@ -68,10 +68,13 @@ async function prepareMaskFrame(message: MaskPreparationWorkerRequest) {
       return;
     }
 
+    const preparedPixels =
+      compositedFrame ?? createTransparentCoverageCarrier();
+
     const imageData = new ImageData(
-      compositedFrame.data,
-      compositedFrame.width,
-      compositedFrame.height,
+      preparedPixels.data,
+      preparedPixels.width,
+      preparedPixels.height,
     );
     const imageBitmap = createImageBitmapFromImageData(imageData);
     const idMaskData = createMaskIdFrame(message.job.instructions)?.data;
@@ -121,6 +124,14 @@ async function prepareMaskFrame(message: MaskPreparationWorkerRequest) {
       type: MaskPreparationWorkerMessageType.Error,
     });
   }
+}
+
+function createTransparentCoverageCarrier() {
+  return {
+    data: new Uint8ClampedArray(new ArrayBuffer(4)),
+    height: 1,
+    width: 1,
+  };
 }
 
 async function createPngIdMaskWorkerResponse(
