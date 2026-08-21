@@ -5,6 +5,7 @@ import process from "node:process";
 import test from "node:test";
 
 const rootDir = process.cwd();
+const trackersSourceDir = path.join(rootDir, "packages/trackers/src");
 const coreSourceDir = path.join(rootDir, "packages/core/src");
 const webSourceDir = path.join(rootDir, "packages/web/src");
 const reactNativeSourceDir = path.join(rootDir, "packages/react-native/src");
@@ -83,6 +84,58 @@ test("core source stays free of browser and vendor runtime APIs", async () => {
     const source = stripComments(await readFile(file, "utf8"));
 
     for (const { label, pattern } of forbiddenPatterns) {
+      if (pattern.test(source)) {
+        failures.push(`${path.relative(rootDir, file)} uses ${label}`);
+      }
+    }
+  }
+
+  assert.deepEqual(failures, []);
+});
+
+test("tracker engines stay behind their platform-neutral workspace boundary", async () => {
+  const files = await listSourceFiles(trackersSourceDir);
+  const failures = [];
+  const forbiddenTrackerPatterns = [
+    ...forbiddenPatterns,
+    {
+      label: "Supervision workspace import",
+      pattern:
+        /from\s+["'][^"']*(?:supervision-js-core|packages\/(?:core|web|react-native)|#(?:detections|post-processing|types|utils)\/)/,
+    },
+  ];
+
+  for (const file of files) {
+    const source = stripComments(await readFile(file, "utf8"));
+
+    for (const { label, pattern } of forbiddenTrackerPatterns) {
+      if (pattern.test(source)) {
+        failures.push(`${path.relative(rootDir, file)} uses ${label}`);
+      }
+    }
+  }
+
+  assert.deepEqual(failures, []);
+});
+
+test("core consumes tracker engines only through the internal package name", async () => {
+  const files = await listSourceFiles(coreSourceDir);
+  const failures = [];
+  const forbiddenCoreTrackerPatterns = [
+    {
+      label: "tracker workspace source path",
+      pattern: /from\s+["'][^"']*packages\/trackers/,
+    },
+    {
+      label: "relative tracker workspace import",
+      pattern: /from\s+["'](?:\.\.\/)+trackers(?:\/|["'])/,
+    },
+  ];
+
+  for (const file of files) {
+    const source = stripComments(await readFile(file, "utf8"));
+
+    for (const { label, pattern } of forbiddenCoreTrackerPatterns) {
       if (pattern.test(source)) {
         failures.push(`${path.relative(rootDir, file)} uses ${label}`);
       }
@@ -244,13 +297,18 @@ test("React Native example keeps frame worklets and renderer ownership in the pa
 
 test("published packages declare every package their source imports", async () => {
   const failures = [];
+  const internalPackages = await listInternalWorkspacePackages();
 
   for (const name of publishedPackages) {
     const packageDir = path.join(rootDir, "packages", name);
     const manifest = JSON.parse(
       await readFile(path.join(packageDir, "package.json"), "utf8"),
     );
+    // A private workspace package is never published, so a published package
+    // cannot resolve one at install time and must inline it at build time
+    // instead. Declaring it would ship a manifest npm cannot satisfy.
     const declared = new Set([
+      ...internalPackages,
       ...Object.keys(manifest.dependencies ?? {}),
       ...Object.keys(manifest.peerDependencies ?? {}),
     ]);
@@ -273,6 +331,32 @@ test("published packages declare every package their source imports", async () =
 
   assert.deepEqual(failures, []);
 });
+
+async function listInternalWorkspacePackages() {
+  const entries = await readdir(path.join(rootDir, "packages"), {
+    withFileTypes: true,
+  });
+  const names = [];
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+
+    const manifest = JSON.parse(
+      await readFile(
+        path.join(rootDir, "packages", entry.name, "package.json"),
+        "utf8",
+      ),
+    );
+
+    if (manifest.private === true) {
+      names.push(manifest.name);
+    }
+  }
+
+  return names;
+}
 
 async function listSourceFiles(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
