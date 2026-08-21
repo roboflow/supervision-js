@@ -10,7 +10,11 @@ import {
   type PolygonStyle,
 } from "supervision-js-core";
 import { resolveScreenLength } from "./pixi-path";
-import { createPixiMaskLayer, type PixiMaskLayer } from "./pixi-mask-layer";
+import {
+  createPixiMaskLayer,
+  type BufferImageSourceConstructor,
+  type PixiMaskLayer,
+} from "./pixi-mask-layer";
 
 type PixiMaskLayerOptions = Parameters<typeof createPixiMaskLayer>[0];
 
@@ -33,8 +37,10 @@ export interface PixiPolygonLayer {
 export function createPixiPolygonLayer(
   options: Omit<
     PixiMaskLayerOptions,
-    "artifactKind" | "maskStyle" | "resolveInstructions"
+    "BufferImageSource" | "artifactKind" | "maskStyle" | "resolveInstructions"
   > & {
+    /** Without it a frame that cooked to an id raster reaches no texture. */
+    readonly BufferImageSource: BufferImageSourceConstructor;
     readonly polygonStyle: PolygonStyle;
     readonly resolveContextState?: (
       detection: Detection,

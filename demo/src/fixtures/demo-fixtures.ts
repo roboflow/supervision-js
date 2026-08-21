@@ -8,6 +8,7 @@ import {
   type MediaRendererSource,
 } from "supervision";
 import { SourceKind } from "@roboflow/video-engine";
+import type { DisplayBoxResolutionOptions } from "@roboflow/video-engine";
 import type { DemoPresentationAvailability } from "../presentation/demo-presentation";
 
 const fixtureMetaModules = import.meta.glob(
@@ -214,8 +215,10 @@ export function resolveDemoFixturePlaybackSrc(
 
 export function createDemoFixtureMedia(
   definition: DemoFixtureDefinition = defaultDemoFixture,
+  display?: DisplayBoxResolutionOptions,
 ): MediaRendererSource {
   return createVideoEngineMediaRendererSource({
+    display,
     source: {
       kind: SourceKind.Url,
       url: resolveDemoFixturePlaybackSrc(definition),
