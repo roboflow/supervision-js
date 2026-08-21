@@ -90,7 +90,7 @@ export function createMediaRendererTransport(
     options.onPlaybackState(state);
   };
   const publishPlayheadTime = () => {
-    options.onPlayheadTime(channel.getTimeMs() / MILLISECONDS_PER_SECOND);
+    options.onPlayheadTime(channel.getPlayhead().mediaTimeS);
   };
   const publishPlaybackRate = () => {
     options.onPlaybackRate(channel.getPlaybackRate());

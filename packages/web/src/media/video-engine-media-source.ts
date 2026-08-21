@@ -19,6 +19,12 @@ import type {
   ExtractedFrame,
 } from "supervision-js-video-engine/analysis";
 
+import {
+  rethrowEngineImportFailure,
+  VIDEO_ENGINE_ANALYSIS_ENTRY,
+  VIDEO_ENGINE_PACKAGE,
+} from "./engine-import-failure";
+
 const MILLISECONDS_PER_SECOND = 1000;
 const DEFAULT_FRAME_RATE = 30;
 const TIMESTAMP_EPSILON_SECONDS = 1e-6;
@@ -70,12 +76,7 @@ export interface VideoEngineMediaSource extends DecodedMediaSource {
 export async function openVideoEngineMediaSource(
   options: VideoEngineMediaSourceOptions,
 ): Promise<VideoEngineMediaSource> {
-  // The engine arrives via dynamic import so the package entry stays loadable
-  // for consumers that never open a video-engine source: the specifier is
-  // external to the build, and a static import would make resolving it a
-  // precondition of importing the package at all.
-  const { VideoEngine, displayBoxResolution } =
-    await import("supervision-js-video-engine");
+  const { VideoEngine, displayBoxResolution } = await importEngineEntry();
   const { display, frameDecodeStrategy, ...engineOptions } = options;
   const engine = new VideoEngine({
     decodeStrategy: display ? displayBoxResolution(display) : undefined,
@@ -120,6 +121,28 @@ export function createVideoEngineMediaRendererSource(
 }
 
 /**
+ * The engine arrives via dynamic import so the package entry stays loadable for
+ * consumers that never open a video-engine source: the specifier is external to
+ * the build, and a static import would make resolving it a precondition of
+ * importing the package at all.
+ */
+async function importEngineEntry() {
+  try {
+    return await import("supervision-js-video-engine");
+  } catch (error) {
+    rethrowEngineImportFailure(error, VIDEO_ENGINE_PACKAGE);
+  }
+}
+
+async function importAnalysisEntry() {
+  try {
+    return await import("supervision-js-video-engine/analysis");
+  } catch (error) {
+    rethrowEngineImportFailure(error, VIDEO_ENGINE_ANALYSIS_ENTRY);
+  }
+}
+
+/**
  * A wider coarse frame means fewer of them resident, and residency is what a
  * drag spends: a scrub position holding no coarse frame paints nothing until a
  * full decode returns. A stated box only ever lowers the width, since a preview
@@ -153,13 +176,13 @@ function createAnalysisFrameReader(options: {
   let closed = false;
 
   const openSession = () => {
-    sessionPromise ??= import("supervision-js-video-engine/analysis").then(
-      ({ AnalysisSession }) =>
-        AnalysisSession.open({
-          decodeStrategy: options.decodeStrategy,
-          source: options.source,
-        }),
-    );
+    sessionPromise ??= (async () => {
+      const { AnalysisSession } = await importAnalysisEntry();
+      return AnalysisSession.open({
+        decodeStrategy: options.decodeStrategy,
+        source: options.source,
+      });
+    })();
     return sessionPromise;
   };
 

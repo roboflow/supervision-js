@@ -19,6 +19,10 @@ describe("presented frame channel", () => {
       "a producer that announces frames but drives none of the playhead",
       { engine: { onPresentedFrame: () => undefined } },
     ],
+    [
+      "a producer that cannot say which frame its playhead sits on",
+      { engine: { ...createChannel(), getPlayhead: undefined } },
+    ],
     ["nothing", null],
   ])("has no channel for %s", (_label, source) => {
     expect(resolvePresentedFrameChannel(source)).toBeNull();
@@ -34,7 +38,10 @@ function createChannel(): PresentedFrameChannel {
     getPlaybackRate: vi.fn(() => 1),
     getSeeking: vi.fn(() => false),
     getStatus: vi.fn(() => "READY" as const),
-    getTimeMs: vi.fn(() => 0),
+    getPlayhead: vi.fn(() => ({
+      frame: { index: 0, ticks: 0 },
+      mediaTimeS: 0,
+    })),
     onPresentedFrame: vi.fn(),
     pause: vi.fn(),
     play: vi.fn(async () => undefined),

@@ -504,7 +504,9 @@ function createTimeline(): BufferedDetectionTimeline {
 function presentedFrame(mediaTimeMs: number) {
   return {
     frame: { close: vi.fn(), displayHeight: 240, displayWidth: 320 },
+    frameId: { index: mediaTimeMs / 1000, ticks: mediaTimeMs },
     mediaTimeMs,
+    mediaTimeS: mediaTimeMs / 1000,
   } as unknown as PresentedVideoFrame;
 }
 

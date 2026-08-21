@@ -13,7 +13,6 @@ import type { TimelineRange } from "../session/demo-session-types";
 import { Readout } from "./Readout";
 
 const POLL_INTERVAL_MS = 250;
-const MILLISECONDS_PER_SECOND = 1000;
 const UNAVAILABLE = "n/a";
 
 type TimelineMarkerStyle = CSSProperties & {
@@ -35,9 +34,7 @@ export const PresentationDiagnostics = memo(function PresentationDiagnostics({
 }) {
   const sample = usePolledSample(readSample);
   const playheadTime =
-    sample.lastPresented === null
-      ? null
-      : sample.lastPresented.mediaTimeMs / MILLISECONDS_PER_SECOND;
+    sample.lastPresented === null ? null : sample.lastPresented.mediaTimeS;
 
   return (
     <section className="status-group" aria-label="Presented frames">
@@ -126,10 +123,7 @@ function PresentedFrameTimeline({
             key={`${index}-${tick.wallTimeMs}`}
             style={
               {
-                "--timeline-left": toPercent(
-                  tick.mediaTimeMs / MILLISECONDS_PER_SECOND,
-                  duration,
-                ),
+                "--timeline-left": toPercent(tick.mediaTimeS, duration),
               } as TimelineMarkerStyle
             }
           />

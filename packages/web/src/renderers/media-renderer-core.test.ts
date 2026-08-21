@@ -975,7 +975,10 @@ function createPushProducer() {
     getPlaybackRate: () => 1,
     getSeeking: () => false,
     getStatus: () => "READY",
-    getTimeMs: () => timeMs,
+    getPlayhead: () => ({
+      frame: { index: Math.trunc(timeMs / 1000), ticks: timeMs },
+      mediaTimeS: timeMs / 1000,
+    }),
     onPresentedFrame: vi.fn(),
     pause: vi.fn(),
     play: vi.fn(async () => undefined),

@@ -52,5 +52,8 @@
   },
   "dependencies": {
     "mediabunny": "^1.52.3"
+  },
+  "devDependencies": {
+    "@webgpu/types": "^0.1.72"
   }
 }

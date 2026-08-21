@@ -36,7 +36,7 @@ const analysis = vi.hoisted(() => ({
   open: vi.fn(),
 }));
 
-vi.mock("supervision-js-video-engine", () => ({
+const engineModule = vi.hoisted(() => () => ({
   SourceKind: { Blob: "blob", Stream: "stream", Url: "url" },
   displayBoxResolution: (options: unknown) => ({
     kind: "displayBox",
@@ -52,9 +52,13 @@ vi.mock("supervision-js-video-engine", () => ({
   },
 }));
 
-vi.mock("supervision-js-video-engine/analysis", () => ({
+const analysisModule = vi.hoisted(() => () => ({
   AnalysisSession: { open: analysis.open },
 }));
+
+vi.mock("supervision-js-video-engine", engineModule);
+
+vi.mock("supervision-js-video-engine/analysis", analysisModule);
 
 const READY_SNAPSHOT: ReadySnapshot = {
   canDecode: true,

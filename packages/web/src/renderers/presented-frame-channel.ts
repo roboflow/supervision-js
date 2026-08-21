@@ -1,10 +1,34 @@
 /**
+ * A frame of the source, named by its place in presentation order and by its
+ * presentation timestamp in the container's own integer grain.
+ */
+export interface PresentedFrameId {
+  readonly index: number;
+  readonly ticks: number;
+}
+
+/**
  * One frame a push-based media producer has decided is on screen, carrying the
- * media time it stands for. Whoever receives it owns it and must close it.
+ * frame it is and the media time it stands for. Whoever receives it owns it and
+ * must close it.
  */
 export interface PresentedVideoFrame {
-  readonly mediaTimeMs: number;
+  readonly frameId: PresentedFrameId;
+  /**
+   * The producer's seconds for `frameId`. The producer also states the position
+   * in milliseconds, and this deliberately does not carry it: that value is the
+   * seconds scaled by a thousand, so dividing it back is not the identity, and
+   * on a container whose tick grain is not whole milliseconds, an NTSC
+   * 30000/1001 track among them, the result names no frame at all.
+   */
+  readonly mediaTimeS: number;
   readonly frame: VideoFrame;
+}
+
+/** Where the producer's playhead sits, named as a frame of the source. */
+export interface PresentedFramePlayhead {
+  readonly frame: PresentedFrameId;
+  readonly mediaTimeS: number;
 }
 
 /** Coarse producer status, reported in the producer's own vocabulary. */
@@ -64,7 +88,7 @@ export interface PresentedFrameChannel extends PresentedFrameSource {
   beginInteractiveSeek(): void;
   /** Resumes play only if `beginInteractiveSeek` was what paused it. */
   endInteractiveSeek(): Promise<void>;
-  getTimeMs(): number;
+  getPlayhead(): PresentedFramePlayhead;
   getDurationMs(): number;
   getStatus(): PresentedFrameChannelStatus;
   getSeeking(): boolean;
@@ -102,6 +126,7 @@ function isPresentedFrameChannel(
 
   return (
     typeof candidate.onPresentedFrame === "function" &&
+    typeof candidate.getPlayhead === "function" &&
     typeof candidate.commit === "function" &&
     typeof candidate.step === "function" &&
     typeof candidate.subscribe === "function"

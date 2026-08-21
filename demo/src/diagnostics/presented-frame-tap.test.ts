@@ -105,15 +105,25 @@ describe("presented frame tap", () => {
     const tappedProducer = await openTappedSource(tap, producer);
 
     tappedProducer.onPresentedFrame(() => {});
-    producer.present(createPresentedFrame(240));
+    const presented = createPresentedFrame(240);
+    producer.present(presented);
 
     const { records } = tap.read();
 
+    // The producer's own seconds, not the millisecond divided back: at this
+    // frame rate those are 0.2333 and 0.24, and only the first names a frame.
+    expect(presented.mediaTimeS).not.toBe(240 / 1000);
     expect(records).toEqual([
-      { mediaTimeMs: 240, quality: "exact", wallTimeMs: 1_000 },
+      {
+        mediaTimeMs: 240,
+        mediaTimeS: presented.mediaTimeS,
+        quality: "exact",
+        wallTimeMs: 1_000,
+      },
     ]);
     expect(Object.keys(records[0])).toEqual([
       "mediaTimeMs",
+      "mediaTimeS",
       "quality",
       "wallTimeMs",
     ]);
@@ -186,7 +196,14 @@ describe("presented frame rate", () => {
     expect(readPresentedPerSecond([], 5_000)).toBeNull();
     expect(
       readPresentedPerSecond(
-        [{ mediaTimeMs: 0, quality: "exact", wallTimeMs: 3_500 }],
+        [
+          {
+            mediaTimeMs: 0,
+            mediaTimeS: 0 / 1000,
+            quality: "exact",
+            wallTimeMs: 3_500,
+          },
+        ],
         5_000,
       ),
     ).toBeNull();
@@ -195,6 +212,7 @@ describe("presented frame rate", () => {
   it("counts only the frames inside the trailing window", () => {
     const records = [4_200, 4_600, 4_900, 5_000].map((wallTimeMs) => ({
       mediaTimeMs: wallTimeMs,
+      mediaTimeS: wallTimeMs / 1000,
       quality: "exact" as const,
       wallTimeMs,
     }));
@@ -256,6 +274,7 @@ function createRecords(
 ): readonly PresentedFrameRecord[] {
   return entries.map(([wallTimeMs, mediaTimeMs]) => ({
     mediaTimeMs,
+    mediaTimeS: mediaTimeMs / 1000,
     quality: "exact" as const,
     wallTimeMs,
   }));

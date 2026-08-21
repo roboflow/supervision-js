@@ -2,8 +2,6 @@ import type { PixiBoxLayerState } from "./pixi-box-layer";
 import type { PixiRegionLayerState } from "./pixi-region-layer";
 import type { PresentedVideoFrame } from "./presented-frame-channel";
 
-const MILLISECONDS_PER_SECOND = 1000;
-
 /**
  * The present's timestamp tripwire, armed in every build including production.
  * It is around eleven comparisons per presented frame, and it is what fails
@@ -11,6 +9,8 @@ const MILLISECONDS_PER_SECOND = 1000;
  * silently putting annotations from one moment over pixels from another.
  */
 const PRESENT_TIMESTAMP_TRIPWIRE_ENABLED = true;
+
+type PresentedFrameStamp = Pick<PresentedVideoFrame, "frameId" | "mediaTimeS">;
 
 /**
  * Every drawing step of a present, each taking the media time in seconds and
@@ -49,38 +49,37 @@ export interface FramePresentTargets {
 /**
  * The atomic present: one frame the producer put on screen becomes one screen.
  *
- * The media time is derived once, from the event, and is the only time any step
- * below sees. Nothing here awaits, so no other frame can be presented between
- * the pixel upload and the annotations drawn over it, and nothing here consults
- * a wall clock, a playhead getter or a store, so no step can disagree with the
- * pixels about which moment is on screen. One render closes the block, after
- * every layer has drawn; the frame is closed on the way out, once, by its only
- * owner.
+ * The media time is the one the producer published for the frame these pixels
+ * are, and it is the only time any step below sees. Nothing here awaits, so no
+ * other frame can be presented between the pixel upload and the annotations
+ * drawn over it, and nothing here consults a wall clock, a playhead getter or
+ * a store, so no step can disagree with the pixels about which moment is on
+ * screen. One render closes the block, after every layer has drawn; the frame
+ * is closed on the way out, once, by its only owner.
  */
 export function presentVideoFrame(
   presented: PresentedVideoFrame,
   targets: FramePresentTargets,
 ): void {
-  const presentedMediaTimeMs = presented.mediaTimeMs;
-  const mediaTime = presentedMediaTimeMs / MILLISECONDS_PER_SECOND;
+  const mediaTime = presented.mediaTimeS;
   const { layers } = targets;
 
   try {
-    at(targets.adoptMediaTime, mediaTime, presentedMediaTimeMs);
+    at(targets.adoptMediaTime, mediaTime, presented);
     targets.fitMediaScene();
     targets.uploadFrame(presented.frame);
 
-    maybeAt(layers.drawMask, mediaTime, presentedMediaTimeMs);
-    const boxState = at(layers.drawBox, mediaTime, presentedMediaTimeMs);
-    maybeAt(layers.drawPolygon, mediaTime, presentedMediaTimeMs);
-    at(layers.drawVector, mediaTime, presentedMediaTimeMs);
-    const regionState = at(layers.drawRegion, mediaTime, presentedMediaTimeMs);
-    maybeAt(layers.drawInteraction, mediaTime, presentedMediaTimeMs);
-    at(layers.drawFocus, mediaTime, presentedMediaTimeMs);
-    at(layers.advanceFocus, mediaTime, presentedMediaTimeMs);
-    at(layers.drawInteractionPresentation, mediaTime, presentedMediaTimeMs);
-    maybeAt(layers.drawLabel, mediaTime, presentedMediaTimeMs);
-    at(layers.drawAnnotationOverlay, mediaTime, presentedMediaTimeMs);
+    maybeAt(layers.drawMask, mediaTime, presented);
+    const boxState = at(layers.drawBox, mediaTime, presented);
+    maybeAt(layers.drawPolygon, mediaTime, presented);
+    at(layers.drawVector, mediaTime, presented);
+    const regionState = at(layers.drawRegion, mediaTime, presented);
+    maybeAt(layers.drawInteraction, mediaTime, presented);
+    at(layers.drawFocus, mediaTime, presented);
+    at(layers.advanceFocus, mediaTime, presented);
+    at(layers.drawInteractionPresentation, mediaTime, presented);
+    maybeAt(layers.drawLabel, mediaTime, presented);
+    at(layers.drawAnnotationOverlay, mediaTime, presented);
 
     targets.render();
     targets.completePresentation(mediaTime, boxState, regionState);
@@ -96,38 +95,38 @@ export function presentVideoFrame(
  */
 export function assertPresentedTimestamp(
   mediaTime: number,
-  presentedMediaTimeMs: number,
+  presented: PresentedFrameStamp,
 ): void {
   if (
     !PRESENT_TIMESTAMP_TRIPWIRE_ENABLED ||
-    mediaTime === presentedMediaTimeMs / MILLISECONDS_PER_SECOND
+    mediaTime === presented.mediaTimeS
   ) {
     return;
   }
 
   throw new Error(
-    `Presented frame at ${presentedMediaTimeMs}ms drew a layer at ${mediaTime}s.`,
+    `Presented frame ${presented.frameId.index} at ${presented.mediaTimeS}s drew a layer at ${mediaTime}s.`,
   );
 }
 
 function at<T>(
   step: (mediaTime: number) => T,
   mediaTime: number,
-  presentedMediaTimeMs: number,
+  presented: PresentedFrameStamp,
 ): T {
-  assertPresentedTimestamp(mediaTime, presentedMediaTimeMs);
+  assertPresentedTimestamp(mediaTime, presented);
   return step(mediaTime);
 }
 
 function maybeAt(
   step: ((mediaTime: number) => void) | undefined,
   mediaTime: number,
-  presentedMediaTimeMs: number,
+  presented: PresentedFrameStamp,
 ): void {
   if (!step) {
     return;
   }
 
-  assertPresentedTimestamp(mediaTime, presentedMediaTimeMs);
+  assertPresentedTimestamp(mediaTime, presented);
   step(mediaTime);
 }

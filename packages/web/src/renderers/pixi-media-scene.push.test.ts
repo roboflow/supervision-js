@@ -648,7 +648,9 @@ function presentedFrame(
       displayHeight: size.height,
       displayWidth: size.width,
     },
+    frameId: { index: mediaTimeMs / 1000, ticks: mediaTimeMs },
     mediaTimeMs,
+    mediaTimeS: mediaTimeMs / 1000,
   } as unknown as PresentedVideoFrame & {
     readonly frame: { readonly close: ReturnType<typeof vi.fn> };
   };

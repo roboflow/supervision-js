@@ -16,6 +16,8 @@ const boxState: PixiBoxLayerState = {
   activeDetectionIndexes: [],
 };
 const regionState: PixiRegionLayerState = { activeDetectionIndexes: [] };
+const NTSC_TICK_RATE = 30000;
+const NTSC_FRAME_27_SECONDS = (27 * 1001) / NTSC_TICK_RATE;
 
 /**
  * Every step a present runs after the presented time has been adopted. Two of
@@ -50,8 +52,8 @@ describe("atomic present", () => {
   it("draws every layer from the presented timestamp alone", () => {
     const recording = recordPresents();
 
-    presentVideoFrame(presentedFrame(1500), recording.targets);
-    presentVideoFrame(presentedFrame(4250), recording.targets);
+    presentVideoFrame(presentedFrame(1.5), recording.targets);
+    presentVideoFrame(presentedFrame(4.25), recording.targets);
 
     for (const [step, timestamps] of recording.timestamps) {
       expect([step, timestamps]).toStrictEqual([step, [1.5, 4.25]]);
@@ -61,7 +63,7 @@ describe("atomic present", () => {
   it("uploads pixels, then draws, then renders once", () => {
     const recording = recordPresents();
 
-    presentVideoFrame(presentedFrame(1000), recording.targets);
+    presentVideoFrame(presentedFrame(1), recording.targets);
 
     expect(recording.order).toStrictEqual([
       "adoptMediaTime",
@@ -86,7 +88,7 @@ describe("atomic present", () => {
   it("adopts the presented time before any step that draws or uploads", () => {
     const recording = recordPresents();
 
-    presentVideoFrame(presentedFrame(1000), recording.targets);
+    presentVideoFrame(presentedFrame(1), recording.targets);
 
     const adopted = recording.order.indexOf("adoptMediaTime");
     const stepsNotAfterAdoption = STEPS_AFTER_TIME_ADOPTION.filter(
@@ -98,7 +100,7 @@ describe("atomic present", () => {
 
   it("closes the frame it was handed, including when a layer throws", () => {
     const recording = recordPresents();
-    const failing = presentedFrame(2000);
+    const failing = presentedFrame(2);
     const targets: FramePresentTargets = {
       ...recording.targets,
       layers: {
@@ -112,23 +114,40 @@ describe("atomic present", () => {
     expect(() => presentVideoFrame(failing, targets)).toThrow("layer failed");
     expect(failing.frame.close).toHaveBeenCalledTimes(1);
 
-    const presented = presentedFrame(2000);
+    const presented = presentedFrame(2);
     presentVideoFrame(presented, recording.targets);
     expect(presented.frame.close).toHaveBeenCalledTimes(1);
   });
 
   it("reports a step that drew from a time of its own", () => {
-    expect(() => assertPresentedTimestamp(3.5, 3500)).not.toThrow();
-    expect(() => assertPresentedTimestamp(3.4, 3500)).toThrow(
-      "Presented frame at 3500ms drew a layer at 3.4s",
+    const presented = presentedFrame(3.5, 105);
+
+    expect(() => assertPresentedTimestamp(3.5, presented)).not.toThrow();
+    expect(() => assertPresentedTimestamp(3.4, presented)).toThrow(
+      "Presented frame 105 at 3.5s drew a layer at 3.4s",
     );
+  });
+
+  it("draws an NTSC frame at the second its producer published", () => {
+    const recording = recordPresents();
+    // Frame 27 of a 30000/1001 track. Its millisecond plane reads
+    // 900.9000000000001, which divides back to a second no frame stands on.
+    const presented = presentedFrame(NTSC_FRAME_27_SECONDS, 27);
+
+    presentVideoFrame(presented, recording.targets);
+
+    for (const [step, timestamps] of recording.timestamps) {
+      expect([step, timestamps]).toStrictEqual([step, [NTSC_FRAME_27_SECONDS]]);
+    }
   });
 });
 
-function presentedFrame(mediaTimeMs: number) {
+function presentedFrame(mediaTimeS: number, frameIndex = 0) {
   return {
     frame: { close: vi.fn() },
-    mediaTimeMs,
+    frameId: { index: frameIndex, ticks: mediaTimeS * NTSC_TICK_RATE },
+    mediaTimeMs: mediaTimeS * 1000,
+    mediaTimeS,
   } as unknown as PresentedVideoFrame & {
     readonly frame: { readonly close: ReturnType<typeof vi.fn> };
   };

@@ -13,6 +13,8 @@ export const presentedRateWindowMs = 1000;
 
 export interface PresentedFrameRecord {
   readonly mediaTimeMs: number;
+  /** The producer's own seconds, so a readout never divides the millisecond back. */
+  readonly mediaTimeS: number;
   readonly quality: FrameQuality;
   readonly wallTimeMs: number;
 }
@@ -125,6 +127,7 @@ export function createPresentedFrameTap(
   const record = (presented: PresentedFrame) => {
     const entry: PresentedFrameRecord = {
       mediaTimeMs: presented.mediaTimeMs,
+      mediaTimeS: presented.mediaTimeS,
       quality: presented.quality,
       wallTimeMs: readWallTime(),
     };
