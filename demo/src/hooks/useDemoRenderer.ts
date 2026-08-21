@@ -3,7 +3,7 @@ import {
   useEffect,
   useRef,
   useState,
-  type RefObject,
+  type RefCallback,
 } from "react";
 import {
   MediaRendererPlaybackState,
@@ -76,7 +76,7 @@ export type { DemoDetectionSourceState, DemoMediaState, UploadInferenceState };
 export interface DemoRendererState {
   readonly canUseRenderer: boolean;
   readonly detectionSourceState: DemoDetectionSourceState;
-  readonly containerRef: RefObject<HTMLDivElement | null>;
+  readonly containerRef: RefCallback<HTMLDivElement>;
   readonly duration: number | null;
   readonly errorMessage: string | null;
   readonly fixtureSummary: DemoFixtureSummary | null;
@@ -191,12 +191,29 @@ export function useDemoRenderer(
   const [engineDiagnosticsTap] = useState<EngineDiagnosticsTap>(() =>
     createEngineDiagnosticsTap(),
   );
+  if (import.meta.env.DEV) {
+    (
+      globalThis as { __demoEngineDiagnostics?: EngineDiagnosticsTap }
+    ).__demoEngineDiagnostics = engineDiagnosticsTap;
+  }
   const tapMediaSource = useCallback(
     (source: MediaRendererSource) =>
       engineDiagnosticsTap.tap(presentedFrameTap.tap(source)),
     [engineDiagnosticsTap, presentedFrameTap],
   );
-  const containerRef = useRef<HTMLDivElement | null>(null);
+  /**
+   * Never returns to false: the session effect tears the session down whenever
+   * it re-runs, and a view-mode switch only takes the viewport off screen.
+   */
+  const [stageAttached, setStageAttached] = useState(false);
+  const [stage] = useState(() =>
+    createDemoStage(document.createElement("div"), () => {
+      setStageAttached(true);
+      // Nothing draws a paused stage: no frame is coming, and putting the
+      // canvas back on the page is not a change the scene renders on.
+      refreshPresentation();
+    }),
+  );
   const effectRunRef = useRef(0);
   const rendererRef = useRef<MediaRenderer | null>(null);
   const sessionRef = useRef<MediaSession | null>(null);
@@ -263,12 +280,11 @@ export function useDemoRenderer(
   }, []);
 
   useEffect(() => {
-    const container = containerRef.current;
-
-    if (!container) {
+    if (!stageAttached) {
       return;
     }
 
+    const container = stage.host;
     const runId = effectRunRef.current + 1;
     effectRunRef.current = runId;
     let activeSession: MediaSession | undefined;
@@ -482,6 +498,8 @@ export function useDemoRenderer(
     fixtureFrameTransform,
     presentationTransform,
     sourceMode,
+    stage,
+    stageAttached,
     tapMediaSource,
     syncRendererState,
     uploadRun,
@@ -833,7 +851,7 @@ export function useDemoRenderer(
 
   return {
     canUseRenderer,
-    containerRef,
+    containerRef: stage.attach,
     detectionSourceState,
     duration,
     errorMessage,
@@ -882,6 +900,25 @@ export function useDemoRenderer(
     uploadClassNames,
     uploadFileName,
     uploadInferenceState,
+  };
+}
+
+/**
+ * The element the media session draws into. A view-mode switch unmounts the
+ * viewport, and the session, its warm decoder and any inference run in flight
+ * stay bound to this element, which moves to whichever mount is on screen.
+ */
+export function createDemoStage(host: HTMLDivElement, onAttached: () => void) {
+  host.style.height = "100%";
+  host.style.width = "100%";
+
+  return {
+    host,
+    attach(mount: HTMLDivElement | null) {
+      mount?.appendChild(host);
+      onAttached();
+      return () => host.remove();
+    },
   };
 }
 

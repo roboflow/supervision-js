@@ -1,4 +1,4 @@
-import { memo, type CSSProperties, type RefObject } from "react";
+import { memo, type CSSProperties, type RefCallback } from "react";
 import {
   MediaSessionActivityKind,
   MediaSessionActivityStatus,
@@ -12,7 +12,7 @@ import type {
 } from "../session/demo-session-types";
 
 interface RendererViewportProps {
-  readonly containerRef: RefObject<HTMLDivElement | null>;
+  readonly containerRef: RefCallback<HTMLDivElement>;
   readonly mediaState: DemoMediaState;
   readonly sessionState: MediaSessionState | null;
   readonly uploadInferenceState: UploadInferenceState | null;

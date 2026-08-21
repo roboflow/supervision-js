@@ -103,6 +103,7 @@ export default defineConfig({
     include: [
       "packages/**/*.test.ts",
       "demo/src/**/*.test.ts",
+      "demo/src/**/*.test.tsx",
       "examples/react-native/src/**/*.test.ts",
       "tools/**/*.test.ts",
     ],
