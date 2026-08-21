@@ -35,6 +35,12 @@ const DOM_PAINT_RATE_LIMIT = 15;
  * pulls layout and paint behind it on the main thread, which is the budget a
  * weaker machine does not have. */
 const STYLE_RECALC_RATE_LIMIT = 60;
+/* Layouts per second while playing. A layout is a style recalc that had to be
+ * paid for, so this sits below the style budget: a player at steady state is
+ * drawing into a canvas, and the boxes around it are not supposed to be
+ * changing size. Measured at 8.8/s once the playhead moved on a promoted
+ * transform, and at 16.8/s before it. */
+const LAYOUT_RATE_LIMIT = 30;
 const DETECTION_SETTLE_MS = 8000;
 /* How long a seek may take to answer with a covered, genuinely new detection.
  * Fifteen seeks across three runs settled in 100ms to 126ms, so a seek spending
@@ -82,11 +88,25 @@ function invalid(reason) {
   throw new Invalid(reason);
 }
 
+/* The demo remembers which view it was left in, and the Debug view carries
+ * fifty-four readouts that rewrite ten times a second. Measured in it, the
+ * paused page painted 1440 times in a window that owes zero and the playing
+ * DOM paint rate read 277/s against 46/s in the Demo view. Every number here
+ * therefore states the view it was taken in, and the run picks one rather than
+ * inheriting whatever the last person clicked. */
+const VIEW_MODE_STORAGE_KEY = "supervision-demo:view-mode";
+const VIEW_MODES = ["benchmarks", "demo", "debug"];
+
 export async function openDemoPage(
   chromeDebugUrl,
   url,
-  readyTimeoutMs = 60_000,
+  { readyTimeoutMs = 60_000, viewMode = "demo" } = {},
 ) {
+  if (viewMode !== "as-is" && !VIEW_MODES.includes(viewMode)) {
+    invalid(
+      `unknown view mode "${viewMode}", expected as-is|${VIEW_MODES.join("|")}`,
+    );
+  }
   const target = await openTarget(chromeDebugUrl, url);
   const session = await CdpSession.attach(target.webSocketDebuggerUrl);
   await session.send("Page.enable");
@@ -95,15 +115,40 @@ export async function openDemoPage(
     ...VIEWPORT,
     mobile: false,
   });
+  if (viewMode !== "as-is") {
+    const changed = await session.evaluate(
+      `(() => {
+        const key = ${JSON.stringify(VIEW_MODE_STORAGE_KEY)};
+        if (localStorage.getItem(key) === ${JSON.stringify(viewMode)}) return false;
+        localStorage.setItem(key, ${JSON.stringify(viewMode)});
+        return true;
+      })()`,
+    );
+    if (changed) {
+      const navMark = session.navigations;
+      await session.send("Page.reload");
+      const deadline = Date.now() + 15_000;
+      while (session.navigations === navMark && Date.now() < deadline) {
+        await delay(100);
+      }
+    }
+  }
   const info = await waitForRenderer(session, readyTimeoutMs);
-  return { session, targetId: target.id, info };
+  const settled = await session.evaluate(
+    `localStorage.getItem(${JSON.stringify(VIEW_MODE_STORAGE_KEY)}) ?? "demo"`,
+  );
+  return { session, targetId: target.id, info: { ...info, viewMode: settled } };
 }
 
 async function waitForRenderer(session, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   let last = null;
   while (Date.now() < deadline) {
-    last = await session.readJson(`(() => {
+    // A page mid-navigation answers every evaluate with "target navigated or
+    // closed", which is what waiting for it to come back looks like.
+    last = await session
+      .readJson(
+        `(() => {
       const renderer = window.__demoRenderer;
       if (!renderer) return { ready: false, reason: "window.__demoRenderer is absent" };
       const state = renderer.getState();
@@ -118,7 +163,9 @@ async function waitForRenderer(session, timeoutMs) {
         mediaWidth: state.mediaWidth,
         mediaHeight: state.mediaHeight,
       };
-    })()`);
+    })()`,
+      )
+      .catch((error) => ({ ready: false, reason: error.message }));
     if (last.ready) return last;
     await delay(500);
   }
@@ -455,6 +502,12 @@ export async function runPaints(session, info, attempts) {
       `paints: ${styleRecalcRate} style recalcs/s while playing is not under ${STYLE_RECALC_RATE_LIMIT}/s`,
     );
   }
+  const layoutRate = round(phases.playing.layoutCount / windowSeconds, 1);
+  if (layoutRate >= LAYOUT_RATE_LIMIT) {
+    failures.push(
+      `paints: ${layoutRate} layouts/s while playing is not under ${LAYOUT_RATE_LIMIT}/s`,
+    );
+  }
   if (phases.playing.viewportPaintCount > 0) {
     failures.push(
       `paints: ${phases.playing.viewportPaintCount} full-viewport paints while playing, expected 0`,
@@ -487,6 +540,8 @@ export async function runPaints(session, info, attempts) {
         domPaintRateLimit,
         styleRecalcRate,
         styleRecalcRateLimit: STYLE_RECALC_RATE_LIMIT,
+        layoutRate,
+        layoutRateLimit: LAYOUT_RATE_LIMIT,
         damageAreaLimit,
       },
     },

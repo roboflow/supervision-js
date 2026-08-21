@@ -30,27 +30,89 @@ npm run eval:demo
 
 Flags, all optional:
 
-| flag                 | default                                                            |
-| -------------------- | ------------------------------------------------------------------ |
-| `--chrome-debug-url` | `http://127.0.0.1:9223`                                            |
-| `--url`              | `http://localhost:5173/`                                           |
-| `--out`              | `tools/demo-eval/report.json`                                      |
-| `--scenario`         | `all` (or `paints`/`sync`/`latency`/`layers`/`throttle`/`battery`) |
-| `--storybook`        | `http://localhost:6006`                                            |
-| `--battery`          | `http://127.0.0.1:8123/stress-battery.js`                          |
-| `--attempts`         | `3` tries before a disturbed window is invalid                     |
+| flag                 | default                                                     |
+| -------------------- | ----------------------------------------------------------- |
+| `--chrome-debug-url` | `http://127.0.0.1:9223`                                     |
+| `--url`              | `http://localhost:5173/`                                    |
+| `--out`              | `tools/demo-eval/report.json`                               |
+| `--scenario`         | `all`, or a comma-separated subset (see the list below)     |
+| `--storybook`        | `http://localhost:6006`                                     |
+| `--battery`          | `http://127.0.0.1:8123/stress-battery.js`                   |
+| `--attempts`         | `3` tries before a disturbed window is invalid              |
+| `--repeat`           | `1` full pass; more takes the median and reports the spread |
+| `--baseline`         | `tools/demo-eval/baseline.json`                             |
+| `--update-baseline`  | off; records this run as the new baseline                   |
+| `--tolerance`        | the baseline file's own, normally `25` percent              |
 
-Pass flags through npm with `--`, for example
+`--scenario` also takes a comma-separated list, for example
+`--scenario drag,playhead`. Pass flags through npm with `--`, for example
 `npm run eval:demo -- --scenario paints`.
 
+Scenario names: `paints`, `sync`, `latency`, `layers`, `throttle`, `blanking`,
+`drag`, `playhead`, `backscrub`, `focus`, `hotkeys`, `battery`.
+
 The run prints a summary and writes
-`{ startedAt, scenarios, verdicts, failures }` to the report path. That file is
-generated output: keep it out of commits, and note that `npm run format:check`
-covers it unless `tools/demo-eval/report.json` is listed in `.prettierignore`. Each verdict
-is `pass`, `fail`, `invalid-environment` or `skipped`; the process exits 1 when
-any verdict is `fail`. An `invalid-environment` verdict means the tool refused
-to turn a disturbed window into a number, and the summary says what disturbed
-it.
+`{ startedAt, scenarios, metrics, verdicts, failures, baseline }` to the report
+path. Both that file and `baseline.json` are written by the tool, so
+`.prettierignore` excludes them from the format check; unlike the report, the
+baseline belongs in the repository, because a baseline nobody else has is not
+a baseline. Each verdict is `pass`, `fail`,
+`invalid-environment` or `skipped`; the process exits 1 when any verdict is
+`fail`, and also when a metric regressed against the baseline. An
+`invalid-environment` verdict means the tool refused to turn a disturbed window
+into a number, and the summary says what disturbed it.
+
+## The baseline
+
+A threshold catches a fall off a cliff. It does not catch a number walking from
+40ms to 190ms one commit at a time while a 250ms limit keeps reporting pass,
+which is how most of these numbers got slow the first time. So every run also
+compares itself against `baseline.json`: the numbers this machine measured on a
+day somebody was willing to defend them.
+
+```bash
+npm run eval:demo -- --repeat 3                     # measure and compare
+npm run eval:demo -- --repeat 3 --update-baseline   # record a new baseline
+npm run eval:demo -- --scenario drag,playhead       # one gesture, quickly
+```
+
+The comparison reports each metric as a percentage of what it was, and the run
+exits 1 on a regression as well as on a threshold breach. A metric only counts
+as regressed when it moves the wrong way by more than the tolerance **and** by
+more than its own noise floor, which is the absolute change this machine
+produces run to run with nothing changed. Both live next to the metric in
+`baseline.mjs`; the noise floor is what keeps a number whose baseline is 0 or
+0.4 from crying on every run. A metric whose right answer is a fixed value
+rather than a budget carries no tolerance at all, so only its noise floor
+stands between it and a regression: one shortcut in four dying is a quarter of
+them gone, and no percentage should absorb that.
+
+Measure on a quiet machine, and use `--repeat 3` to compare as well as to
+record. Roughly one pass in three on this machine is disturbed by something
+else on it, and a single disturbed pass reports regressions that are not
+there: one run taken while other work was going on came back with five
+regressed and twenty-five steady, and every one of the five was the machine.
+Three passes and a median drop that pass on the floor. Recording a baseline
+while a test suite ran beside it put the drag 3.4s behind the thumb and the
+throttled picture at 0.80 of the source rate, against 1.3s and 0.99 with
+nothing else running.
+
+Recording is deliberate and never automatic. `--update-baseline` refuses while
+any scenario is failing or invalid, because freezing a broken number as the new
+normal is how a baseline stops meaning anything; `--allow-failing-baseline`
+overrides that on purpose and writes the failing verdicts into the file so
+nobody later reads those numbers as a target. The file also records the
+machine, and the commit and dirtiness of both checkouts, since the engine is
+consumed from source and its working tree is part of what every number here
+measures. A baseline recorded on another processor is somebody else's numbers,
+and the summary says so rather than printing deltas between two machines.
+
+Use `--repeat 3` when recording. Each pass is measured whole, the median of
+each metric becomes the baseline, and the spread is kept beside it so a quiet
+median cannot hide a loud machine. Across passes the worst verdict stands and
+every failure carries the pass it came from, while the scenario detail printed
+under each name is the last pass's; the medians live in the report's `metrics`
+block.
 
 ## What each scenario proves
 
@@ -100,6 +162,62 @@ their whole life at zero ahead with about 200 of the same 211 frames uncooked,
 at every throttle level including 1x. Until that splits into something a session
 can be judged on, a floor written against it would fail on which side of the coin
 the run landed.
+
+### The per-defect guards
+
+Six scenarios exist because the thing each measures shipped broken once, and a
+person watching the player found it. Each drives the page the way a hand does.
+
+**blanking** plays ten seconds and watches the annotations rather than the
+picture: how many frames the mask cook is ahead of the playhead, what share of
+sampled frames drew no detection at all, and what share were on screen before
+their masks were cooked. The defect: detections went missing every ten seconds
+or so, because the detection buffer only reloaded once the playhead had already
+left the window it was drawing from, and the PNG round trip in the mask cook
+never let it get ahead.
+
+**drag** presses the timeline at 15%, drags to 85% as fast as the protocol will
+carry pointer moves, and lets go. Four defects lived in that one gesture, so it
+reports four numbers: how far the picture trailed the thumb (against the scrub
+value the input reports, never a pixel converted by hand, because a range input
+maps its track through a half-thumb inset), the longest the screen held a
+single frame while the thumb kept moving, how many frames a second actually
+reached the screen, and how long the release took to land. It then presses play
+and checks the clock moves: the release that never reached the producer left
+the engine mechanically paused for good while the chip still read Playing, and
+only trying to play afterwards finds that.
+
+**playhead** pauses, holds for four seconds and reads the playhead's transform
+alongside the media clock. A stopped picture whose playhead keeps sliding is the
+defect. It then samples five positions and fits a line through them, so a
+playhead drawn away from the time it is drawing fails too.
+
+**backscrub** walks five stops forwards, then the same five backwards, and
+compares the coloured ink on the canvas at each. Masks that arrive on the way
+forward and not on the way back is the defect, and comparing the two passes is
+what makes it visible without anyone deciding in advance how much ink a frame
+owes. Measured at exactly 1.000 at every stop; the same frames with masks off
+carry 0.50 to 0.75 of their ink, so the floor sits between the two.
+
+**focus** photographs one paused frame with the overlay off and again with it
+on, and reduces the pair to two numbers: how much dark the overlay added, and
+how much of the picture it left bright. An overlay that vanishes adds no dark;
+an overlay that loses its cutout leaves nothing bright. The first is what
+shipped.
+
+**hotkeys** clicks a layer checkbox, confirms the checkbox is what now holds
+focus, and then presses Space, Space, `.` and ArrowRight. That click is what
+killed them: a checkbox is an `input`, the key handler treated every focused
+input as somewhere the user was typing, and every shortcut the hint bar still
+advertised stopped answering.
+
+Three more guards for the same defects are unit tests rather than scenarios,
+because what they check has no browser in it. `guards.test.ts` feeds each
+scenario's verdict both healthy numbers and the signature of the defect it
+exists for, so no gate here can quietly become one that cannot fail.
+`baseline.test.ts` covers the comparison arithmetic. `source-contracts.test.ts`
+reads the two invariants that live inside React hooks this repo has no DOM
+environment to render.
 
 **battery** opens the FrameSampler story, injects the gesture stress harness and
 runs `battery(1)`: sixteen scripted scrub, fling, jitter and play-pause-spam

@@ -8,3 +8,4 @@ benchmark/masks/results/
 *.csv
 demo/fixtures/
 tools/demo-eval/report.json
+tools/demo-eval/baseline.json

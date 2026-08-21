@@ -1,12 +1,36 @@
-/* Demo evaluation: paint discipline, detection sync, transport latency and the
- * gesture stress battery, measured over CDP against a running demo. */
+/* Demo evaluation: paint discipline, detection sync, transport latency, the
+ * gesture stress battery, the per-defect regression guards, and a comparison
+ * against the numbers this machine recorded as its baseline. */
 
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import process from "node:process";
+import { URL } from "node:url";
 import { parseArgs } from "node:util";
 
+import {
+  buildBaseline,
+  compareToBaseline,
+  formatRow,
+  loadBaseline,
+  machineFingerprint,
+  median,
+  readMetrics,
+  sameMachine,
+  saveBaseline,
+  sourceFingerprint,
+  spread,
+} from "./baseline.mjs";
 import { closeTarget, listTargets, openTarget } from "./cdp.mjs";
+import {
+  guardDetail,
+  runBackscrub,
+  runBlanking,
+  runDrag,
+  runFocus,
+  runHotkeys,
+  runPlayhead,
+} from "./scenarios-guards.mjs";
 import { layersDetail, runLayers } from "./scenarios-layers.mjs";
 import { runThrottle, throttleDetail } from "./scenarios-throttle.mjs";
 import {
@@ -24,9 +48,30 @@ const SCENARIOS = [
   "latency",
   "layers",
   "throttle",
+  "blanking",
+  "drag",
+  "playhead",
+  "backscrub",
+  "focus",
+  "hotkeys",
   "battery",
 ];
+const GUARD_SCENARIOS = new Set([
+  "blanking",
+  "drag",
+  "playhead",
+  "backscrub",
+  "focus",
+  "hotkeys",
+]);
 const LABEL_WIDTH = 27;
+/* Across repeated passes the worst verdict stands, so a scenario that failed
+ * or was disturbed once cannot be reported as passing because a later pass
+ * happened to run clean. */
+const VERDICT_SEVERITY = ["skipped", "pass", "invalid-environment", "fail"];
+/* The engine is consumed from source through a vite alias, so its working tree
+ * is part of what every number here measures. */
+const ENGINE_CHECKOUT = "../roboflow-video-runtime";
 
 const { values } = parseArgs({
   options: {
@@ -40,26 +85,62 @@ const { values } = parseArgs({
       default: "http://127.0.0.1:8123/stress-battery.js",
     },
     attempts: { type: "string", default: "3" },
+    repeat: { type: "string", default: "1" },
+    baseline: { type: "string", default: "tools/demo-eval/baseline.json" },
+    "update-baseline": { type: "boolean", default: false },
+    "allow-failing-baseline": { type: "boolean", default: false },
+    tolerance: { type: "string" },
+    view: { type: "string", default: "demo" },
   },
 });
 
-if (values.scenario !== "all" && !SCENARIOS.includes(values.scenario)) {
+const requested =
+  values.scenario === "all" ? SCENARIOS : values.scenario.split(",");
+const unknown = requested.filter((name) => !SCENARIOS.includes(name));
+if (unknown.length > 0) {
   process.stderr.write(
-    `unknown scenario "${values.scenario}", expected all|${SCENARIOS.join("|")}\n`,
+    `unknown scenario "${unknown.join(",")}", expected all or a comma-separated ` +
+      `subset of ${SCENARIOS.join("|")}\n`,
   );
   process.exit(2);
 }
 
-const selected = values.scenario === "all" ? SCENARIOS : [values.scenario];
+const selected = requested;
 const attempts = Math.max(1, Number(values.attempts) || 1);
+const repeat = Math.max(1, Number(values.repeat) || 1);
 const startedAt = Date.now();
-const report = { startedAt, scenarios: {}, verdicts: {}, failures: [] };
+const report = {
+  startedAt,
+  repeat,
+  machine: machineFingerprint(),
+  scenarios: {},
+  verdicts: {},
+  failures: [],
+};
 const notes = {};
+const metricRuns = [];
 let mediaInfo = null;
 
 await main();
 
 async function main() {
+  for (let pass = 1; pass <= repeat; pass += 1) {
+    const measured = await measure(pass);
+    metricRuns.push(readMetrics(measured.scenarios));
+  }
+
+  report.metrics = summariseMetrics();
+  await compareAgainstBaseline();
+  await writeReport();
+  printSummary();
+
+  if (Object.values(report.verdicts).includes("fail")) process.exitCode = 1;
+  if ((report.baseline?.regressions?.length ?? 0) > 0) process.exitCode = 1;
+}
+
+/** One full pass over the selected scenarios, folded into the shared report. */
+async function measure(pass) {
+  const scenarios = {};
   const demoScenarios = selected.filter((name) => name !== "battery");
   let page = null;
 
@@ -67,12 +148,13 @@ async function main() {
     try {
       await assertChrome();
       await sweepStaleTargets();
-      page = await openDemoPage(values["chrome-debug-url"], values.url);
+      page = await openDemoPage(values["chrome-debug-url"], values.url, {
+        viewMode: values.view,
+      });
       mediaInfo = page.info;
     } catch (error) {
       for (const name of demoScenarios) {
-        report.verdicts[name] = "invalid-environment";
-        notes[name] = describe(error);
+        record(pass, scenarios, name, null, describe(error));
       }
     }
   }
@@ -84,10 +166,16 @@ async function main() {
       latency: runLatency,
       layers: runLayers,
       throttle: runThrottle,
+      blanking: runBlanking,
+      drag: runDrag,
+      playhead: runPlayhead,
+      backscrub: runBackscrub,
+      focus: runFocus,
+      hotkeys: runHotkeys,
     };
     try {
       for (const name of demoScenarios) {
-        await record(name, () =>
+        await attempt(pass, scenarios, name, () =>
           runners[name](page.session, page.info, attempts),
         );
       }
@@ -101,14 +189,12 @@ async function main() {
     if (demoScenarios.length === 0) {
       await sweepStaleTargets().catch(() => {});
     }
-    await record("battery", () =>
+    await attempt(pass, scenarios, "battery", () =>
       runBattery(values["chrome-debug-url"], values.storybook, values.battery),
     );
   }
 
-  await writeReport();
-  printSummary();
-  if (Object.values(report.verdicts).includes("fail")) process.exitCode = 1;
+  return { scenarios };
 }
 
 async function assertChrome() {
@@ -154,25 +240,156 @@ async function sweepStaleTargets() {
   );
 }
 
-async function record(name, run) {
+async function attempt(pass, scenarios, name, run) {
   try {
     const result = await run();
     if (result.skipped) {
-      report.verdicts[name] = "skipped";
+      keepWorse(name, "skipped");
       notes[name] = result.skipped;
       return;
     }
-    report.scenarios[name] = result.scenario;
-    report.failures.push(...result.failures);
-    report.verdicts[name] = result.failures.length === 0 ? "pass" : "fail";
+    record(pass, scenarios, name, result);
   } catch (error) {
-    report.verdicts[name] = "invalid-environment";
-    notes[name] = describe(error);
+    record(pass, scenarios, name, null, describe(error));
   }
+}
+
+function keepWorse(name, verdict) {
+  const existing = report.verdicts[name];
+  if (
+    existing === undefined ||
+    VERDICT_SEVERITY.indexOf(verdict) > VERDICT_SEVERITY.indexOf(existing)
+  ) {
+    report.verdicts[name] = verdict;
+  }
+}
+
+function record(pass, scenarios, name, result, invalidReason) {
+  const prefix = repeat > 1 ? `run ${pass}: ` : "";
+  if (result === null) {
+    keepWorse(name, "invalid-environment");
+    notes[name] = `${prefix}${invalidReason}`;
+    return;
+  }
+  scenarios[name] = result.scenario;
+  report.scenarios[name] = result.scenario;
+  report.failures.push(
+    ...result.failures.map((failure) => `${prefix}${failure}`),
+  );
+  keepWorse(name, result.failures.length > 0 ? "fail" : "pass");
 }
 
 function describe(error) {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Median and spread of every registry metric across the repeated passes. */
+function summariseMetrics() {
+  const keys = new Set(metricRuns.flatMap((run) => Object.keys(run)));
+  const summary = {};
+  for (const key of keys) {
+    const samples = metricRuns
+      .map((run) => run[key])
+      .filter((value) => typeof value === "number");
+    if (samples.length === 0) continue;
+    summary[key] = {
+      value: median(samples),
+      samples,
+      spread: spread(samples),
+    };
+  }
+  return summary;
+}
+
+async function compareAgainstBaseline() {
+  const path = resolve(process.cwd(), values.baseline);
+  const measured = Object.fromEntries(
+    Object.entries(report.metrics).map(([key, entry]) => [key, entry.value]),
+  );
+  const recorded = await loadBaseline(path);
+
+  if (values["update-baseline"]) {
+    const failing = Object.entries(report.verdicts).filter(
+      ([, verdict]) => verdict === "fail" || verdict === "invalid-environment",
+    );
+    if (failing.length > 0 && !values["allow-failing-baseline"]) {
+      report.baseline = {
+        path,
+        updated: false,
+        reason:
+          `refusing to record a baseline while ${failing
+            .map(([name, verdict]) => `${name} is ${verdict}`)
+            .join(", ")}; fix it, or pass --allow-failing-baseline to freeze ` +
+          "these numbers on purpose",
+      };
+      return;
+    }
+    const source = sourceFingerprint({
+      consumer: process.cwd(),
+      engine: ENGINE_CHECKOUT,
+    });
+    const next = buildBaseline({
+      source,
+      recordedWithFailures: failing.map(
+        ([name, verdict]) => `${name}: ${verdict}`,
+      ),
+      runs: repeat,
+      media: mediaInfo
+        ? `${mediaInfo.duration}s at ${mediaInfo.frameRate}fps, ${mediaInfo.backend}`
+        : null,
+      viewMode: mediaInfo?.viewMode ?? null,
+      samples: Object.fromEntries(
+        Object.entries(report.metrics).map(([key, entry]) => [
+          key,
+          entry.samples,
+        ]),
+      ),
+      values: measured,
+    });
+    await saveBaseline(path, next);
+    report.baseline = {
+      path,
+      updated: true,
+      metrics: Object.keys(measured).length,
+      source,
+      withFailures: failing.map(([name, verdict]) => `${name}: ${verdict}`),
+      dirty: Object.entries(source)
+        .filter(([, entry]) => entry?.dirty)
+        .map(([name]) => name),
+    };
+    return;
+  }
+
+  if (recorded === null || recorded.unreadable) {
+    report.baseline = {
+      path,
+      updated: false,
+      reason:
+        recorded?.unreadable ??
+        `no baseline at ${values.baseline}; run with --update-baseline once the ` +
+          "numbers are ones you would defend",
+    };
+    return;
+  }
+
+  const comparison = compareToBaseline(measured, recorded, {
+    tolerancePercent: values.tolerance ? Number(values.tolerance) : undefined,
+  });
+  /* A metric belongs to the scenario its key is named for, and a run of one
+   * scenario has nothing to say about the rest. */
+  const mine = (row) => selected.includes(row.key.split(".")[0]);
+  report.baseline = {
+    path,
+    updated: false,
+    recordedAt: recorded.recordedAt,
+    recordedOn: recorded.machine,
+    recordedFrom: recorded.source ?? null,
+    recordedView: recorded.viewMode ?? null,
+    sameMachine: sameMachine(recorded.machine, report.machine),
+    tolerancePercent: comparison.tolerancePercent,
+    rows: comparison.rows.filter(mine),
+    regressions: comparison.regressions.filter(mine),
+  };
 }
 
 async function writeReport() {
@@ -190,12 +407,14 @@ function printSummary() {
   if (selected.some((name) => name !== "battery")) {
     lines.push(field("page", values.url));
   }
+  if (repeat > 1) lines.push(field("passes", repeat));
   if (mediaInfo) {
     lines.push(
       field(
         "media",
         `${mediaInfo.duration}s at ${mediaInfo.frameRate}fps, ${mediaInfo.backend}`,
       ),
+      field("view", mediaInfo.viewMode),
     );
   }
 
@@ -206,6 +425,8 @@ function printSummary() {
     if (scenario) lines.push(...detail(name, scenario));
   }
 
+  lines.push(...baselineSummary());
+
   const failures = report.failures;
   lines.push("", `failures  ${failures.length}`);
   for (const failure of failures) lines.push(...wrap(failure));
@@ -213,7 +434,96 @@ function printSummary() {
   process.stdout.write(`${lines.join("\n")}\n`);
 }
 
+function baselineSummary() {
+  const baseline = report.baseline;
+  if (!baseline) return [];
+  const lines = ["", "baseline"];
+  if (baseline.updated) {
+    lines.push(
+      ...wrap(`recorded ${baseline.metrics} metrics to ${baseline.path}`),
+      ...wrap(
+        Object.entries(baseline.source)
+          .map(
+            ([name, entry]) =>
+              `${name} ${entry?.commit ?? "unknown"}${entry?.dirty ? " (dirty)" : ""}`,
+          )
+          .join(", "),
+      ),
+    );
+    if (baseline.withFailures.length > 0) {
+      lines.push(
+        ...wrap(
+          `recorded while ${baseline.withFailures.join(", ")}; those numbers are ` +
+            "the state of a known defect, not a target to defend",
+        ),
+      );
+    }
+    if (baseline.dirty.length > 0) {
+      lines.push(
+        ...wrap(
+          `PROVISIONAL: ${baseline.dirty.join(" and ")} had uncommitted changes, so ` +
+            "these numbers describe work in flight rather than a commit anyone can " +
+            "check out. Re-record once the tree is clean.",
+        ),
+      );
+    }
+    return lines;
+  }
+  if (baseline.reason) {
+    lines.push(...wrap(baseline.reason));
+    return lines;
+  }
+  if (baseline.recordedView && baseline.recordedView !== mediaInfo?.viewMode) {
+    lines.push(
+      ...wrap(
+        `recorded in the ${baseline.recordedView} view, measured in the ` +
+          `${mediaInfo?.viewMode}; the two views repaint at different rates and ` +
+          "the percentages below are not comparing the same page",
+      ),
+    );
+  }
+  lines.push(
+    field("recorded", `${baseline.recordedAt} on ${baseline.recordedOn.cpu}`),
+    field(
+      "from",
+      Object.entries(baseline.recordedFrom ?? {})
+        .map(
+          ([name, entry]) =>
+            `${name} ${entry?.commit ?? "unknown"}${entry?.dirty ? " (dirty)" : ""}`,
+        )
+        .join(", ") || "unrecorded",
+    ),
+    field("tolerance", `${baseline.tolerancePercent}% past the noise floor`),
+  );
+  if (!baseline.sameMachine) {
+    lines.push(
+      ...wrap(
+        `recorded on ${baseline.recordedOn.cpu} (${baseline.recordedOn.cores} cores), ` +
+          `running on ${report.machine.cpu} (${report.machine.cores} cores); the ` +
+          "percentages below compare two different machines",
+      ),
+    );
+  }
+  const moved = baseline.rows.filter((row) => row.verdict !== "steady");
+  lines.push(
+    field(
+      "moved",
+      `${baseline.regressions.length} regressed, ` +
+        `${moved.length - baseline.regressions.length} improved or new, ` +
+        `${baseline.rows.length - moved.length} steady`,
+    ),
+  );
+  for (const row of baseline.rows) {
+    if (row.verdict === "steady") continue;
+    lines.push(...wrap(`${row.verdict.toUpperCase()}  ${formatRow(row)}`));
+  }
+  return lines;
+}
+
 function detail(name, scenario) {
+  if (GUARD_SCENARIOS.has(name)) {
+    return guardDetail(name, scenario, field);
+  }
   if (name === "paints") {
     const { paused, playing } = scenario;
     return [
@@ -227,6 +537,10 @@ function detail(name, scenario) {
       field(
         "playing style recalcs",
         `${playing.styleRecalcRate ?? 0}/s  (limit ${playing.styleRecalcRateLimit ?? 0}/s)`,
+      ),
+      field(
+        "playing layouts",
+        `${playing.layoutRate ?? 0}/s  (limit ${playing.layoutRateLimit ?? 0}/s)`,
       ),
       field(
         "playing viewport paints",
