@@ -2,7 +2,7 @@
 
 Status: active contribution and sequencing guide
 
-Last reviewed: August 10, 2026
+Last reviewed: August 21, 2026
 
 Scope: browser visualization capabilities; this is not an API commitment
 
@@ -78,13 +78,18 @@ The current package already separates the important responsibilities:
   prepared browser artifacts.
 - host applications own controlled product state, persistence, undo/redo, and
   domain analytics.
+- the post-processing pipeline owns bounded causal ordering and browser-worker
+  execution for semantic transforms such as SORT tracking; the renderer only
+  consumes observed detections with derived tracking identity.
 
 The presentation now has a built-in renderer list. A consumer can
 configure the existing annotation renderers through one public surface while
 the browser backend continues to use the established specialized box, mask,
-label, polygon, polyline, and keypoint paths. The next missing capability is
-renderer kinds that compose assets or media regions. A consumer should eventually be
-able to request a presentation such as:
+label, polygon, polyline, and keypoint paths. The multi-instance `region`
+renderer now composes both external assets and crops from the current media
+frame without adding another decoder or canvas readback. The next missing
+capability is replacement coverage and prepared region effects. A consumer
+should eventually be able to request a presentation such as:
 
 ```text
 mask + halo + box corners + label + confidence bar + trace
@@ -115,7 +120,7 @@ This inventory is based on the 32 public annotators in Python Supervision
 | `EllipseAnnotator`              | Planned                   | Ellipse/path derived from detection bounds               |
 | `DotAnnotator`                  | Planned                   | Anchored marker                                          |
 | `TriangleAnnotator`             | Planned                   | Anchored polygon marker                                  |
-| `IconAnnotator`                 | Planned                   | Atlas-backed sprite with asset resolver                  |
+| `IconAnnotator`                 | Covered in essence        | Asset-backed region anchored to semantic geometry        |
 | `PercentageBarAnnotator`        | Planned                   | Composite rectangles with numeric resolver               |
 | `VertexLabelAnnotator`          | Planned                   | Per-keypoint text recipe                                 |
 | `VertexEllipseAreaAnnotator`    | Planned                   | Covariance utility plus filled ellipse                   |
@@ -125,7 +130,7 @@ This inventory is based on the 32 public annotators in Python Supervision
 | `BlurAnnotator`                 | Planned                   | Media effect clipped by semantic geometry                |
 | `PixelateAnnotator`             | Planned                   | Pixelation clipped by semantic geometry                  |
 | `BackgroundOverlayAnnotator`    | Partial                   | Generalized complement-of-region spotlight               |
-| `CropAnnotator`                 | Planned                   | Magnified media-texture crop at a detection anchor       |
+| `CropAnnotator`                 | Covered in essence        | Media-backed region crop at a detection anchor           |
 | `TraceAnnotator`                | Planned                   | Deterministic media-time trace                           |
 | `HeatMapAnnotator`              | Planned                   | Deterministic timeline heat field                        |
 | `ComparisonAnnotator`           | Planned                   | Pure two-source comparison transform plus normal recipes |
@@ -174,21 +179,21 @@ PolygonZone   -> polygon path + count label
 LineZone      -> line path + endpoint markers + count labels
 ```
 
-An illustrative public shape could be:
+The renderer-first public shape is:
 
 ```ts
 session.setPresentation({
-  boxStyle,
-  maskStyle,
-  labelStyle,
-  layers: [
-    annotationLayers.boxCorners({
+  renderers: [
+    annotationRenderers.box({ style: boxStyle }),
+    annotationRenderers.mask({ style: maskStyle }),
+    annotationRenderers.label({ style: labelStyle }),
+    annotationRenderers.boxCorners({
       stroke: detectionClassStroke,
     }),
-    annotationLayers.percentageBar({
+    annotationRenderers.percentageBar({
       value: (detection) => detection.confidence ?? 0,
     }),
-    annotationLayers.trace({
+    annotationRenderers.trace({
       anchor: "bottom-center",
       identity: (detection) => detection.id,
       windowSeconds: 1.5,
@@ -197,15 +202,15 @@ session.setPresentation({
 });
 ```
 
-This is a design direction, not final naming. The first composition PR must
-justify the exact API with tests and a real facade.
+The renderer names beyond the currently implemented set remain illustrative.
+Each addition must justify its exact semantic API with tests and a real facade.
 
 ### Recipe Contract Requirements
 
 The platform-neutral core should own only renderer-neutral recipe fields:
 
-- stable layer identity;
-- semantic phase and ordering;
+- stable renderer identity;
+- explicit ordering only where the renderer contract supports it;
 - media or viewport coordinate space;
 - explicit pick behavior;
 - static values or detection/style-context resolvers;
@@ -311,31 +316,38 @@ claim a live playground. A renderer primitive alone is not enough: the
 playground must consume a committed fixture containing the matching semantic
 field. Do not inject docs-only detections to simulate coverage.
 
-| Visualization capability | Browser renderer and style        | Frozen fixture evidence                                                                        | Public docs state | Next required work                                                                     |
-| ------------------------ | --------------------------------- | ---------------------------------------------------------------------------------------------- | ----------------- | -------------------------------------------------------------------------------------- |
-| Boxes                    | Implemented                       | `basketball_geometry.rect`                                                                     | Live playground   | Maintain regression coverage with the basketball fixture                               |
-| Masks                    | Implemented                       | `basketball_geometry.mask` (compressed RLE)                                                    | Live playground   | Maintain mask-preparation and visual coverage                                          |
-| Labels                   | Implemented                       | `basketball_geometry.className` and `confidence`                                               | Live playground   | Maintain label layout and contrast coverage                                            |
-| Polygons                 | Implemented                       | `basketball_geometry.polygon`                                                                  | Live playground   | Maintain contour and fill/stroke coverage                                              |
-| Keypoints and skeletons  | Implemented                       | `basketball_geometry.keypoints` including edges and visibility                                 | Live playground   | Maintain pose association and visibility coverage                                      |
-| Polylines                | Implemented (`BasePolylineStyle`) | `basketball_geometry` motion-gated basketball track plus mask (versioned bounded center trace) | Live playground   | Maintain source-identity, path, timing, mask-color, and provenance regression coverage |
-| Asset regions            | Implemented (`region`)            | `basketball_geometry.keypoints` plus original animated `player-fire.gif` asset                 | Live playground   | Add media-frame sources and replacement coverage in their separately reviewed phases   |
+| Visualization capability | Browser renderer and style        | Frozen fixture evidence                                                                               | Public docs state | Next required work                                                                     |
+| ------------------------ | --------------------------------- | ----------------------------------------------------------------------------------------------------- | ----------------- | -------------------------------------------------------------------------------------- |
+| Boxes                    | Implemented                       | `basketball_geometry.rect`                                                                            | Live playground   | Maintain regression coverage with the basketball fixture                               |
+| Masks                    | Implemented                       | `basketball_geometry.mask` (compressed RLE)                                                           | Live playground   | Maintain mask-preparation and visual coverage                                          |
+| Labels                   | Implemented                       | `basketball_geometry.className` and `confidence`                                                      | Live playground   | Maintain label layout and contrast coverage                                            |
+| Polygons                 | Implemented                       | `basketball_geometry.polygon`                                                                         | Live playground   | Maintain contour and fill/stroke coverage                                              |
+| Keypoints and skeletons  | Implemented                       | `basketball_geometry.keypoints` including edges and visibility                                        | Live playground   | Maintain pose association and visibility coverage                                      |
+| Polylines                | Implemented (`BasePolylineStyle`) | `basketball_geometry` motion-gated basketball track plus mask (versioned bounded center trace)        | Live playground   | Maintain source-identity, path, timing, mask-color, and provenance regression coverage |
+| Regions                  | Implemented (`region`)            | `basketball_regions` stabilized direct SAM3 head masks, original media, badges, and `player-fire.gif` | Live playground   | Add replacement coverage in its separately reviewed phase                              |
 
-The basketball fixture is therefore the current visual baseline for seven
+The basketball fixtures are therefore the current visual baseline for seven
 renderers: boxes, masks, labels, polygons, polylines, keypoints/skeletons, and
-asset regions.
-Its polyline example is a transparent derived center trace on one frozen
-segmentation identity.
+regions backed by either assets or the current media frame.
+The geometry fixture's polyline example is a transparent derived center trace
+on one frozen segmentation identity. `basketball_regions` adds direct SAM3
+`head` masks associated one-to-one with frozen team-player detections by their
+top-center geometry. The authoring pass assigns stable player-backed identities,
+admits lower-confidence candidates only for established tracks, repairs short
+gaps, and temporally regularizes mask coverage and crop rectangles without any
+runtime tracking or model dependency.
+The Region renderer reuses the prepared exact mask as transparent media-crop
+coverage and has no runtime keypoint dependency.
 
 ### Gaps Before New Facades
 
-| Gap                                               | Status                                    | Earliest prerequisite                                                                            |
-| ------------------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| Open-path fixture for the existing polyline layer | Completed with `basketball_geometry`      | Maintain frozen trace derivation, source identity, and visual regression evidence                |
-| Oriented quadrilateral renderer                   | No first-class public annotation renderer | Generic quadrilateral primitive plus a mask-derived or explicitly annotated fixture              |
-| Markers and ellipses                              | No first-class public annotation renderer | Generic marker/ellipse primitives plus a future pose fixture                                     |
-| Mask/media effects                                | No public annotation renderer             | Prepared media-effect primitive plus `people_walking_segmentation_v1`                            |
-| Temporal and analytic overlays                    | No public annotation renderer             | Temporal/HUD primitives plus `vehicles_zone_v1` with frozen tracks, zone coordinates, and events |
+| Gap                                               | Status                                           | Earliest prerequisite                                                                            |
+| ------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
+| Open-path fixture for the existing polyline layer | Completed with `basketball_geometry`             | Maintain frozen trace derivation, source identity, and visual regression evidence                |
+| Oriented quadrilateral renderer                   | No first-class public annotation renderer        | Generic quadrilateral primitive plus a mask-derived or explicitly annotated fixture              |
+| Markers and ellipses                              | No first-class public annotation renderer        | Generic marker/ellipse primitives plus a future pose fixture                                     |
+| Prepared mask/media effects                       | Media crops covered by `region`; filters pending | Prepared filter primitive plus `people_walking_segmentation_v1`                                  |
+| Temporal and analytic overlays                    | No public annotation renderer                    | Temporal/HUD primitives plus `vehicles_zone_v1` with frozen tracks, zone coordinates, and events |
 
 No annotator facade may be added ahead of the matching row's primitive and
 fixture evidence. Each facade remains one pull request after those prerequisites
@@ -563,13 +575,14 @@ exercise.
 
 ### Tier 4: Compound And Analytics Facades
 
-17. `CropAnnotator`
-18. `IconAnnotator`
-19. `PercentageBarAnnotator`
-20. `ComparisonAnnotator`
-21. `LineZoneAnnotator`
-22. `PolygonZoneAnnotator`
-23. `LineZoneAnnotatorMulticlass`
+The crop and icon use cases are covered by media-backed and asset-backed
+`region` renderers respectively. Remaining compound and analytics facades are:
+
+17. `PercentageBarAnnotator`
+18. `ComparisonAnnotator`
+19. `LineZoneAnnotator`
+20. `PolygonZoneAnnotator`
+21. `LineZoneAnnotatorMulticlass`
 
 The sequence may pause for platform or performance work, but compound facades
 should not move ahead of the primitives and lifecycle rules they require.

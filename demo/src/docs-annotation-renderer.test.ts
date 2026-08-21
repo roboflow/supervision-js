@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { MarkerShape } from "supervision";
 import { defaultDemoPresentationSettings } from "./presentation/demo-presentation";
 import {
   createDocsAnnotationRendererPresentation,
@@ -17,17 +18,24 @@ describe("docs annotation renderers", () => {
         .filter(([key, value]) => key.endsWith("Enabled") && value)
         .map(([key]) => key);
 
-      expect(enabled).toEqual(
-        renderer === "regions"
-          ? []
-          : renderer === "polylines"
-            ? ["masksEnabled", "polylinesEnabled"]
-            : [
-                renderer === "keypoints"
-                  ? "keypointsEnabled"
-                  : `${renderer}Enabled`,
-              ],
-      );
+      const expectedEnabled =
+        renderer === "polylines"
+          ? ["masksEnabled", "polylinesEnabled"]
+          : renderer === "keypoints"
+            ? ["keypointsEnabled"]
+            : renderer === "markers"
+              ? ["markersEnabled"]
+              : renderer === "box-corners"
+                ? ["boxCornersEnabled"]
+                : renderer === "ellipse"
+                  ? ["ellipsesEnabled"]
+                  : renderer === "mask-halo"
+                    ? ["maskHaloEnabled"]
+                    : renderer === "regions"
+                      ? []
+                      : [`${renderer}Enabled`];
+
+      expect(enabled).toEqual(expectedEnabled);
     }
   });
 
@@ -58,11 +66,58 @@ describe("docs annotation renderers", () => {
       }),
     ).toContain("stroke: { width: 7 }");
     expect(
+      createDocsAnnotationRendererSnippet("markers", {
+        ...defaultDemoPresentationSettings,
+        markerPosition: "bottom-right",
+        markerShape: MarkerShape.Triangle,
+        markerSize: 20,
+        markerStrokeWidth: 3,
+      }),
+    ).toContain("size: 20");
+    const markerSnippet = createDocsAnnotationRendererSnippet("markers", {
+      ...defaultDemoPresentationSettings,
+      markerPosition: "bottom-right",
+      markerShape: MarkerShape.Triangle,
+    });
+    expect(markerSnippet).toContain("shape: MarkerShape.Triangle");
+    expect(markerSnippet).toContain("x: rect.x + rect.width / 2");
+    expect(markerSnippet).toContain("y: rect.y + rect.height / 2");
+    expect(
+      createDocsAnnotationRendererSnippet("box-corners", {
+        ...defaultDemoPresentationSettings,
+        boxCornerLength: 31,
+        boxCornerStrokeWidth: 4,
+      }),
+    ).toContain("length: 31");
+    expect(
       createDocsAnnotationRendererSnippet(
         "masks",
         defaultDemoPresentationSettings,
       ),
     ).toContain("annotationRenderers.mask({");
+    const ellipseSnippet = createDocsAnnotationRendererSnippet(
+      "ellipse",
+      defaultDemoPresentationSettings,
+    );
+    expect(ellipseSnippet).toContain("x: detection.rect.x,");
+    expect(ellipseSnippet).toContain(
+      "y: detection.rect.y + detection.rect.height / 2 - radiusY,",
+    );
+    expect(ellipseSnippet).toContain("alpha: 1,");
+  });
+
+  it("exposes marker shape and bounding-box position controls", () => {
+    expect(createDocsAnnotationRendererPresentation("markers")).toMatchObject({
+      markerPosition: "bottom-center",
+      markerShape: MarkerShape.Triangle,
+    });
+    expect(docsAnnotationRenderers.markers.selects).toMatchObject([
+      { key: "markerShape" },
+      { key: "markerPosition" },
+    ]);
+    expect(docsAnnotationRenderers.markers.selects?.[1]?.options).toHaveLength(
+      9,
+    );
   });
 
   it("keeps the polyline playground focused on one committed basketball trace", () => {

@@ -2,7 +2,7 @@
 
 (function () {
   const packageName = "supervision";
-  const packageVersion = "0.1.3";
+  const packageVersion = "0.1.7";
   const packageReleaseStatus = "";
   const kindIconMap = {
     Accessor: "A",
@@ -247,7 +247,7 @@
       `${base}assets/brand/roboflow-logomark.svg`,
       window.location.href,
     ).href;
-    const demoUrl = resolveDemoUrl(`${base}demo/`);
+    const demoUrl = resolveDemoUrl("demo/");
     const version = packageReleaseStatus
       ? `v${packageVersion} (${packageReleaseStatus})`
       : `v${packageVersion}`;

@@ -1,12 +1,23 @@
-import type { DetectionFrame } from "supervision";
-import type { DemoPresentationSettings } from "./presentation/demo-presentation";
+import { MarkerShape, type DetectionFrame } from "supervision";
+import {
+  demoMarkerPositionOffsets,
+  type DemoMarkerPosition,
+  type DemoPresentationSettings,
+} from "./presentation/demo-presentation";
+
+const DOCS_ELLIPSE_COLOR = 0x8b5cf6;
+const DOCS_MASK_HALO_COLOR = 0x8b5cf6;
 
 const BASKETBALL_TRACE_CLASS_NAME = "basketball";
 const BASKETBALL_TRACE_TRACK_ID = "basketball-track:0";
 
 export const docsAnnotationRendererIds = [
   "boxes",
+  "box-corners",
+  "ellipse",
   "masks",
+  "mask-halo",
+  "markers",
   "labels",
   "polygons",
   "polylines",
@@ -26,9 +37,22 @@ export interface DocsAnnotationRendererControl {
   readonly unit: "percent" | "pixels";
 }
 
+export type DocsAnnotationRendererSelectSetting =
+  "markerPosition" | "markerShape";
+
+export interface DocsAnnotationRendererSelectControl {
+  readonly key: DocsAnnotationRendererSelectSetting;
+  readonly label: string;
+  readonly options: readonly {
+    readonly label: string;
+    readonly value: DemoPresentationSettings[DocsAnnotationRendererSelectSetting];
+  }[];
+}
+
 export interface DocsAnnotationRendererDefinition {
   readonly controls: readonly DocsAnnotationRendererControl[];
   readonly description: string;
+  readonly selects?: readonly DocsAnnotationRendererSelectControl[];
   readonly title: string;
 }
 
@@ -71,6 +95,50 @@ export const docsAnnotationRenderers: Readonly<
     description: "Axis-aligned detection bounds",
     title: "Boxes",
   },
+  "box-corners": {
+    controls: [
+      {
+        key: "boxCornerLength",
+        label: "Corner length",
+        max: 48,
+        min: 4,
+        step: 1,
+        unit: "pixels",
+      },
+      {
+        key: "boxCornerStrokeWidth",
+        label: "Stroke width",
+        max: 8,
+        min: 1,
+        step: 1,
+        unit: "pixels",
+      },
+    ],
+    description: "Four open corner segments derived from detection bounds",
+    title: "Box Corners",
+  },
+  ellipse: {
+    controls: [
+      {
+        key: "ellipseStrokeWidth",
+        label: "Stroke width",
+        max: 8,
+        min: 1,
+        step: 1,
+        unit: "pixels",
+      },
+      {
+        key: "ellipseAxisRatio",
+        label: "Axis ratio",
+        max: 0.6,
+        min: 0.15,
+        step: 0.01,
+        unit: "percent",
+      },
+    ],
+    description: "Elliptical footprint arc under each detection",
+    title: "Ellipse",
+  },
   masks: {
     controls: [
       {
@@ -100,6 +168,77 @@ export const docsAnnotationRenderers: Readonly<
     ],
     description: "Compressed RLE segmentation",
     title: "Masks",
+  },
+  "mask-halo": {
+    controls: [
+      {
+        key: "maskHaloSpread",
+        label: "Spread",
+        max: 32,
+        min: 4,
+        step: 1,
+        unit: "pixels",
+      },
+      {
+        key: "maskHaloAlpha",
+        label: "Glow opacity",
+        max: 1,
+        min: 0,
+        step: 0.01,
+        unit: "percent",
+      },
+    ],
+    description: "GPU glow following the exact mask silhouette",
+    title: "Mask Halo",
+  },
+  markers: {
+    controls: [
+      {
+        key: "markerSize",
+        label: "Marker size",
+        max: 32,
+        min: 4,
+        step: 1,
+        unit: "pixels",
+      },
+      {
+        key: "markerStrokeWidth",
+        label: "Stroke width",
+        max: 8,
+        min: 1,
+        step: 1,
+        unit: "pixels",
+      },
+    ],
+    description: "Geometric markers anchored to detection bounds",
+    selects: [
+      {
+        key: "markerShape",
+        label: "Shape",
+        options: [
+          { label: "Circle", value: MarkerShape.Circle },
+          { label: "Square", value: MarkerShape.Square },
+          { label: "Triangle", value: MarkerShape.Triangle },
+          { label: "Cross", value: MarkerShape.Cross },
+        ],
+      },
+      {
+        key: "markerPosition",
+        label: "Position",
+        options: [
+          { label: "Top left", value: "top-left" },
+          { label: "Top center", value: "top-center" },
+          { label: "Top right", value: "top-right" },
+          { label: "Center left", value: "center-left" },
+          { label: "Center", value: "center" },
+          { label: "Center right", value: "center-right" },
+          { label: "Bottom left", value: "bottom-left" },
+          { label: "Bottom center", value: "bottom-center" },
+          { label: "Bottom right", value: "bottom-right" },
+        ],
+      },
+    ],
+    title: "Markers",
   },
   labels: {
     controls: [
@@ -191,8 +330,9 @@ export const docsAnnotationRenderers: Readonly<
   },
   regions: {
     controls: [],
-    description: "Asset overlays anchored to detection geometry",
-    title: "Asset Regions",
+    description:
+      "Media crops and asset overlays anchored to detection geometry",
+    title: "Regions",
   },
 };
 
@@ -209,10 +349,26 @@ export function createDocsAnnotationRendererPresentation(
 ): Partial<DemoPresentationSettings> {
   return {
     boxesEnabled: renderer === "boxes",
+    boxCornersEnabled: renderer === "box-corners",
+    // Pinned so the live snippet's fixed color is exactly what renders.
+    ellipseColor: DOCS_ELLIPSE_COLOR,
+    ellipsesEnabled: renderer === "ellipse",
     focusEnabled: false,
     keypointsEnabled: renderer === "keypoints",
     labelsEnabled: renderer === "labels",
+    // The halo page renders the glow alone so the silhouette-following
+    // effect is unmistakable; the scene prepares mask coverage internally.
+    // Pinned so the live snippet's fixed color is exactly what renders.
+    maskHaloColor: DOCS_MASK_HALO_COLOR,
+    maskHaloEnabled: renderer === "mask-halo",
     masksEnabled: renderer === "masks" || renderer === "polylines",
+    markersEnabled: renderer === "markers",
+    ...(renderer === "markers"
+      ? {
+          markerPosition: "bottom-center" as const,
+          markerShape: MarkerShape.Triangle,
+        }
+      : {}),
     polygonsEnabled: renderer === "polygons",
     polylinesEnabled: renderer === "polylines",
     maskFillAlpha: 1,
@@ -258,6 +414,46 @@ export function createDocsAnnotationRendererSnippet(
     }),
   ],
 });`;
+    case "ellipse":
+      return `session.setPresentation({
+  renderers: [
+    annotationRenderers.ellipse({
+      style: {
+        resolve: (detection) => {
+          if (!detection.rect) return undefined;
+          const radiusX = detection.rect.width / 2;
+          const radiusY = radiusX * ${formatNumber(settings.ellipseAxisRatio)};
+          return {
+            center: {
+              x: detection.rect.x,
+              y: detection.rect.y + detection.rect.height / 2 - radiusY,
+            },
+            endAngle: (235 * Math.PI) / 180,
+            radiusX,
+            radiusY,
+            startAngle: (-45 * Math.PI) / 180,
+            stroke: {
+              alpha: 1,
+              color: ${formatColor(DOCS_ELLIPSE_COLOR)},
+              width: ${formatNumber(settings.ellipseStrokeWidth)},
+            },
+          };
+        },
+      },
+    }),
+  ],
+});`;
+    case "box-corners":
+      return `session.setPresentation({
+  renderers: [
+    annotationRenderers.boxCorners({
+      style: new BaseBoxCornerStyle({
+        length: ${formatNumber(settings.boxCornerLength)},
+        stroke: { width: ${formatNumber(settings.boxCornerStrokeWidth)} },
+      }),
+    }),
+  ],
+});`;
     case "masks":
       return `session.setPresentation({
   renderers: [
@@ -266,6 +462,43 @@ export function createDocsAnnotationRendererSnippet(
         fillAlpha: ${formatNumber(settings.maskFillAlpha)},
         opacity: ${formatNumber(settings.maskOpacity)},
         stroke: { alpha: 1, width: ${formatNumber(settings.maskStrokeWidth)} },
+      }),
+    }),
+  ],
+});`;
+    case "mask-halo":
+      return `session.setPresentation({
+  renderers: [
+    annotationRenderers.maskHalo({
+      style: {
+        resolve: (detection) =>
+          detection.mask
+            ? {
+                alpha: ${formatNumber(settings.maskHaloAlpha)},
+                color: ${formatColor(DOCS_MASK_HALO_COLOR)},
+                spread: ${formatNumber(settings.maskHaloSpread)},
+              }
+            : undefined,
+      },
+    }),
+  ],
+});`;
+    case "markers":
+      return `session.setPresentation({
+  renderers: [
+    annotationRenderers.marker({
+      style: new BaseMarkerStyle({
+        center: (detection) => {
+          const rect = detection.rect;
+          if (!rect) return undefined;
+          return {
+            x: ${formatMarkerCoordinate("x", settings.markerPosition)},
+            y: ${formatMarkerCoordinate("y", settings.markerPosition)},
+          };
+        },
+        shape: MarkerShape.${markerShapeMemberNames[settings.markerShape]},
+        size: ${formatNumber(settings.markerSize)},
+        stroke: { width: ${formatNumber(settings.markerStrokeWidth)} },
       }),
     }),
   ],
@@ -335,4 +568,24 @@ export function createDocsAnnotationRendererSnippet(
 
 function formatNumber(value: number) {
   return Number(value.toFixed(2)).toString();
+}
+
+function formatColor(color: number) {
+  return `0x${color.toString(16).padStart(6, "0")}`;
+}
+
+const markerShapeMemberNames: Readonly<Record<MarkerShape, string>> = {
+  [MarkerShape.Circle]: "Circle",
+  [MarkerShape.Cross]: "Cross",
+  [MarkerShape.Square]: "Square",
+  [MarkerShape.Triangle]: "Triangle",
+};
+
+function formatMarkerCoordinate(axis: "x" | "y", position: DemoMarkerPosition) {
+  const offset = demoMarkerPositionOffsets[position][axis];
+  const dimension = axis === "x" ? "width" : "height";
+
+  if (offset === 0) return `rect.${axis}`;
+
+  return `rect.${axis} ${offset < 0 ? "-" : "+"} rect.${dimension} / 2`;
 }

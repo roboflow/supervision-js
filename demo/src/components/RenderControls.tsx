@@ -53,6 +53,23 @@ export const RenderControls = memo(function RenderControls({
       },
     });
   };
+  const updateClassVisibility = (className: string, visible: boolean) => {
+    onChange({
+      ...settings,
+      hiddenClasses: visible
+        ? settings.hiddenClasses.filter((name) => name !== className)
+        : [...settings.hiddenClasses, className],
+    });
+  };
+  const patchSettings = (patch: Partial<DemoPresentationSettings>) => {
+    onChange({ ...settings, ...patch });
+  };
+  const updateAllClassVisibility = (visible: boolean) => {
+    onChange({
+      ...settings,
+      hiddenClasses: visible ? [] : [...classNames],
+    });
+  };
 
   return (
     <section className="render-controls" aria-label="Render controls">
@@ -80,12 +97,15 @@ export const RenderControls = memo(function RenderControls({
         <GlobalRenderControls
           availability={availability}
           onChange={updateSettings}
+          onPatch={patchSettings}
           settings={settings}
         />
       ) : (
         <ClassRenderControls
           classNames={classNames}
           onChange={updateClassStyle}
+          onChangeAllVisibility={updateAllClassVisibility}
+          onChangeVisibility={updateClassVisibility}
           settings={settings}
         />
       )}
@@ -96,6 +116,7 @@ export const RenderControls = memo(function RenderControls({
 function GlobalRenderControls({
   availability,
   onChange,
+  onPatch,
   settings,
 }: {
   readonly availability?: DemoPresentationAvailability;
@@ -103,8 +124,14 @@ function GlobalRenderControls({
     key: Key,
     value: DemoPresentationSettings[Key],
   ) => void;
+  readonly onPatch: (patch: Partial<DemoPresentationSettings>) => void;
   readonly settings: DemoPresentationSettings;
 }) {
+  const segmentationEnabled = settings.masksEnabled || settings.polygonsEnabled;
+  const segmentationUnavailable =
+    availability?.masksEnabled === false &&
+    availability?.polygonsEnabled === false;
+
   return (
     <div className="render-controls__panel render-controls__panel--global">
       <ControlSection title="Layers">
@@ -154,7 +181,12 @@ function GlobalRenderControls({
         </div>
       </ControlSection>
 
-      <ControlSection title="Boxes">
+      <ControlSection
+        enabled={settings.boxesEnabled}
+        onToggleEnabled={(checked) => onChange("boxesEnabled", checked)}
+        title="Boxes"
+        toggleDisabled={availability?.boxesEnabled === false}
+      >
         <SegmentedControl
           disabled={!settings.boxesEnabled}
           label="Stroke Align"
@@ -198,7 +230,23 @@ function GlobalRenderControls({
         />
       </ControlSection>
 
-      <ControlSection title="Masks">
+      <ControlSection
+        enabled={segmentationEnabled}
+        onToggleEnabled={(checked) =>
+          onPatch({
+            masksEnabled: checked && availability?.masksEnabled !== false,
+            polygonsEnabled: checked && availability?.polygonsEnabled !== false,
+          })
+        }
+        title="Segmentation"
+        toggleDisabled={segmentationUnavailable}
+      >
+        <SubLayerHeading
+          checked={settings.masksEnabled}
+          disabled={availability?.masksEnabled === false}
+          label="Masks"
+          onChange={(checked) => onChange("masksEnabled", checked)}
+        />
         <SegmentedControl
           disabled={!settings.masksEnabled}
           label="Mode"
@@ -250,9 +298,12 @@ function GlobalRenderControls({
           value={settings.maskStrokeAlpha}
           valueLabel={formatPercent(settings.maskStrokeAlpha)}
         />
-      </ControlSection>
-
-      <ControlSection title="Polygons">
+        <SubLayerHeading
+          checked={settings.polygonsEnabled}
+          disabled={availability?.polygonsEnabled === false}
+          label="Polygons"
+          onChange={(checked) => onChange("polygonsEnabled", checked)}
+        />
         <SliderControl
           disabled={!settings.polygonsEnabled}
           label="Stroke"
@@ -275,7 +326,12 @@ function GlobalRenderControls({
         />
       </ControlSection>
 
-      <ControlSection title="Polylines">
+      <ControlSection
+        enabled={settings.polylinesEnabled}
+        onToggleEnabled={(checked) => onChange("polylinesEnabled", checked)}
+        title="Polylines"
+        toggleDisabled={availability?.polylinesEnabled === false}
+      >
         <SliderControl
           disabled={!settings.polylinesEnabled}
           label="Stroke"
@@ -288,7 +344,12 @@ function GlobalRenderControls({
         />
       </ControlSection>
 
-      <ControlSection title="Keypoints">
+      <ControlSection
+        enabled={settings.keypointsEnabled}
+        onToggleEnabled={(checked) => onChange("keypointsEnabled", checked)}
+        title="Keypoints"
+        toggleDisabled={availability?.keypointsEnabled === false}
+      >
         <SliderControl
           disabled={!settings.keypointsEnabled}
           label="Radius"
@@ -311,7 +372,12 @@ function GlobalRenderControls({
         />
       </ControlSection>
 
-      <ControlSection title="Labels">
+      <ControlSection
+        enabled={settings.labelsEnabled}
+        onToggleEnabled={(checked) => onChange("labelsEnabled", checked)}
+        title="Labels"
+        toggleDisabled={availability?.labelsEnabled === false}
+      >
         <ToggleControl
           checked={settings.labelIncludeConfidence}
           disabled={!settings.labelsEnabled}
@@ -415,7 +481,51 @@ function GlobalRenderControls({
         />
       </ControlSection>
 
-      <ControlSection title="Interaction">
+      <ControlSection
+        enabled={settings.focusEnabled}
+        onToggleEnabled={(checked) => onChange("focusEnabled", checked)}
+        title="Focus"
+        toggleDisabled={availability?.focusEnabled === false}
+      >
+        <SegmentedControl
+          disabled={!settings.focusEnabled}
+          label="Target"
+          onChange={(value) => onChange("focusTargetMode", value)}
+          options={[
+            { label: "Ambient", value: FocusTargetMode.Ambient },
+            { label: "Selected", value: FocusTargetMode.Selected },
+            { label: "Hover", value: FocusTargetMode.Hovered },
+            { label: "Both", value: FocusTargetMode.HoveredAndSelected },
+          ]}
+          value={settings.focusTargetMode}
+        />
+        <ColorControl
+          disabled={!settings.focusEnabled}
+          label="Tone"
+          onChange={(value) => onChange("focusDimColor", value)}
+          value={settings.focusDimColor}
+        />
+        <SliderControl
+          disabled={!settings.focusEnabled}
+          label="Dim"
+          max={0.8}
+          min={0}
+          onChange={(value) => onChange("focusDimAlpha", value)}
+          step={0.01}
+          value={settings.focusDimAlpha}
+          valueLabel={formatPercent(settings.focusDimAlpha)}
+        />
+        <SliderControl
+          disabled={!settings.focusEnabled}
+          label="Cutout Radius"
+          max={36}
+          min={0}
+          onChange={(value) => onChange("focusCornerRadius", value)}
+          step={1}
+          value={settings.focusCornerRadius}
+          valueLabel={`${settings.focusCornerRadius}px`}
+        />
+        <h4 className="render-control-section__subheading">Interaction</h4>
         <SliderControl
           label="Hover Fill"
           max={0.5}
@@ -455,47 +565,6 @@ function GlobalRenderControls({
           valueLabel={`${settings.interactionSelectedStrokeWidth}px`}
         />
       </ControlSection>
-
-      <ControlSection title="Focus">
-        <SegmentedControl
-          disabled={!settings.focusEnabled}
-          label="Target"
-          onChange={(value) => onChange("focusTargetMode", value)}
-          options={[
-            { label: "Ambient", value: FocusTargetMode.Ambient },
-            { label: "Selected", value: FocusTargetMode.Selected },
-            { label: "Hover", value: FocusTargetMode.Hovered },
-            { label: "Both", value: FocusTargetMode.HoveredAndSelected },
-          ]}
-          value={settings.focusTargetMode}
-        />
-        <ColorControl
-          disabled={!settings.focusEnabled}
-          label="Tone"
-          onChange={(value) => onChange("focusDimColor", value)}
-          value={settings.focusDimColor}
-        />
-        <SliderControl
-          disabled={!settings.focusEnabled}
-          label="Dim"
-          max={0.8}
-          min={0}
-          onChange={(value) => onChange("focusDimAlpha", value)}
-          step={0.01}
-          value={settings.focusDimAlpha}
-          valueLabel={formatPercent(settings.focusDimAlpha)}
-        />
-        <SliderControl
-          disabled={!settings.focusEnabled}
-          label="Cutout Radius"
-          max={36}
-          min={0}
-          onChange={(value) => onChange("focusCornerRadius", value)}
-          step={1}
-          value={settings.focusCornerRadius}
-          valueLabel={`${settings.focusCornerRadius}px`}
-        />
-      </ControlSection>
     </div>
   );
 }
@@ -503,6 +572,8 @@ function GlobalRenderControls({
 function ClassRenderControls({
   classNames,
   onChange,
+  onChangeAllVisibility,
+  onChangeVisibility,
   settings,
 }: {
   readonly classNames: readonly string[];
@@ -511,15 +582,50 @@ function ClassRenderControls({
     key: keyof DemoClassStyle,
     value: number,
   ) => void;
+  readonly onChangeAllVisibility: (visible: boolean) => void;
+  readonly onChangeVisibility: (className: string, visible: boolean) => void;
   readonly settings: DemoPresentationSettings;
 }) {
+  const hiddenCount = classNames.filter((className) =>
+    settings.hiddenClasses.includes(className),
+  ).length;
+
   return (
     <div className="render-controls__panel render-controls__panel--classes">
+      <div className="class-visibility-toolbar">
+        <span className="render-control__label">
+          <span>Visibility</span>
+        </span>
+        <div className="class-visibility-toolbar__actions">
+          <button
+            disabled={hiddenCount === 0}
+            onClick={() => onChangeAllVisibility(true)}
+            type="button"
+          >
+            Show all
+          </button>
+          <button
+            disabled={hiddenCount === classNames.length}
+            onClick={() => onChangeAllVisibility(false)}
+            type="button"
+          >
+            Hide all
+          </button>
+        </div>
+      </div>
       {classNames.map((className) => {
         const style = resolveDemoClassStyle(settings, className);
+        const visible = !settings.hiddenClasses.includes(className);
 
         return (
-          <article className="class-style-card" key={className}>
+          <article
+            className={
+              visible
+                ? "class-style-card"
+                : "class-style-card class-style-card--hidden"
+            }
+            key={className}
+          >
             <header>
               <span
                 className="class-style-card__swatch"
@@ -528,6 +634,17 @@ function ClassRenderControls({
                 }
               />
               <strong>{className}</strong>
+              <label className="class-style-card__visibility">
+                <input
+                  aria-label={`Show ${className} detections`}
+                  checked={visible}
+                  onChange={(event) =>
+                    onChangeVisibility(className, event.currentTarget.checked)
+                  }
+                  type="checkbox"
+                />
+                <span>Show</span>
+              </label>
             </header>
             <div className="class-style-card__controls">
               <ColorControl
@@ -562,16 +679,77 @@ function ClassRenderControls({
 
 function ControlSection({
   children,
+  enabled,
+  onToggleEnabled,
   title,
+  toggleDisabled = false,
 }: {
   readonly children: ReactNode;
+  readonly enabled?: boolean;
+  readonly onToggleEnabled?: (enabled: boolean) => void;
   readonly title: string;
+  readonly toggleDisabled?: boolean;
 }) {
+  const [open, setOpen] = useState(false);
+
   return (
     <section className="render-control-section">
-      <h3>{title}</h3>
-      <div className="render-control-section__body">{children}</div>
+      <div className="render-control-section__header">
+        <button
+          aria-expanded={open}
+          className="render-control-section__toggle"
+          onClick={() => setOpen((current) => !current)}
+          type="button"
+        >
+          <h3>{title}</h3>
+          <span
+            aria-hidden="true"
+            className="render-control-section__chevron"
+          />
+        </button>
+        {onToggleEnabled ? (
+          <label className="render-control-section__enable">
+            <input
+              aria-label={`Enable ${title.toLowerCase()} layer`}
+              checked={enabled}
+              disabled={toggleDisabled}
+              onChange={(event) => onToggleEnabled(event.currentTarget.checked)}
+              type="checkbox"
+            />
+          </label>
+        ) : null}
+      </div>
+      {open ? (
+        <div className="render-control-section__body">{children}</div>
+      ) : null}
     </section>
+  );
+}
+
+function SubLayerHeading({
+  checked,
+  disabled = false,
+  label,
+  onChange,
+}: {
+  readonly checked: boolean;
+  readonly disabled?: boolean;
+  readonly label: string;
+  readonly onChange: (checked: boolean) => void;
+}) {
+  return (
+    <div className="render-control-section__subheading-row">
+      <h4 className="render-control-section__subheading">{label}</h4>
+      <label className="render-control-section__enable">
+        <input
+          aria-label={`Enable ${label.toLowerCase()} layer`}
+          checked={checked}
+          disabled={disabled}
+          onChange={(event) => onChange(event.currentTarget.checked)}
+          type="checkbox"
+        />
+      </label>
+    </div>
   );
 }
 

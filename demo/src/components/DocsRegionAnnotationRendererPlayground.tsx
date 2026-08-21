@@ -1,37 +1,46 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
   MediaRendererPlaybackState,
-  annotationRenderers,
   type MediaRendererPresentation,
 } from "supervision";
 import playerFireUrl from "../assets/player-fire.gif?url";
+import whiteTeamBadgeUrl from "../assets/white-team-badge.svg?url";
+import yellowTeamBadgeUrl from "../assets/yellow-team-badge.svg?url";
+import {
+  createRegionPlaygroundRenderers,
+  createRegionPlaygroundSettings,
+  createRegionPlaygroundSnippet,
+  initialRegionPlaygroundSettings,
+  RegionPlaygroundMode,
+  type RegionPlaygroundMode as RegionPlaygroundModeValue,
+  type RegionPlaygroundSettings,
+} from "../docs-region-annotation-renderer";
 import { useDemoRenderer } from "../hooks/useDemoRenderer";
 import { RendererViewport } from "./RendererViewport";
 
-interface RegionPlaygroundSettings {
-  readonly offsetY: number;
-  readonly rotationDegrees: number;
-  readonly scale: number;
-}
-
-const initialSettings: RegionPlaygroundSettings = {
-  offsetY: -0.58,
-  rotationDegrees: 0,
-  scale: 1.35,
+const regionPlaygroundAssets = {
+  fireGif: playerFireUrl,
+  whiteTeamBadge: whiteTeamBadgeUrl,
+  yellowTeamBadge: yellowTeamBadgeUrl,
 };
 
 export function DocsRegionAnnotationRendererPlayground() {
-  const settingsRef = useRef(initialSettings);
-  const [settings, setSettings] = useState(initialSettings);
+  const settingsRef = useRef(initialRegionPlaygroundSettings);
+  const [settings, setSettings] = useState(initialRegionPlaygroundSettings);
   const presentationTransform = useCallback(
     (presentation: MediaRendererPresentation): MediaRendererPresentation => ({
       ...presentation,
-      renderers: [createFireRenderer(settingsRef.current)],
+      renderers: [
+        ...createRegionPlaygroundRenderers(
+          settingsRef.current,
+          regionPlaygroundAssets,
+        ),
+      ],
     }),
     [],
   );
   const demo = useDemoRenderer({
-    initialFixtureId: "basketball_geometry",
+    initialFixtureId: "basketball_regions",
     initialPresentationSettings: {
       boxesEnabled: false,
       focusEnabled: false,
@@ -54,7 +63,10 @@ export function DocsRegionAnnotationRendererPlayground() {
         : 0,
     [currentTime, demo.duration],
   );
-  const snippet = useMemo(() => createSnippet(settings), [settings]);
+  const snippet = useMemo(
+    () => createRegionPlaygroundSnippet(settings),
+    [settings],
+  );
   const updateSettings = useCallback(
     (next: RegionPlaygroundSettings) => {
       settingsRef.current = next;
@@ -63,11 +75,18 @@ export function DocsRegionAnnotationRendererPlayground() {
     },
     [demo],
   );
+  const updateMode = useCallback(
+    (mode: RegionPlaygroundModeValue) =>
+      updateSettings(createRegionPlaygroundSettings(mode)),
+    [updateSettings],
+  );
+  const showsIcons = settings.mode === RegionPlaygroundMode.StaticIcons;
+  const showsMediaCrop = settings.mode === RegionPlaygroundMode.MediaCrop;
 
   return (
     <main
       className="docs-layer-playground"
-      aria-label="Asset region annotation renderer playground"
+      aria-label="Region annotation renderer playground"
     >
       <section className="docs-layer-playground__stage">
         <RendererViewport
@@ -82,8 +101,14 @@ export function DocsRegionAnnotationRendererPlayground() {
         <header className="docs-layer-playground__header">
           <div>
             <p>Annotation renderer</p>
-            <h1>Animated Asset Regions</h1>
-            <span>Looping fire GIFs anchored to player keypoints</span>
+            <h1>Regions</h1>
+            <span>
+              {showsMediaCrop
+                ? "Direct SAM3 head crops with transparent coverage"
+                : showsIcons
+                  ? "Class-specific SVG badges anchored to player keypoints"
+                  : "Looping fire GIFs anchored to player keypoints"}
+            </span>
           </div>
           <button
             aria-label={
@@ -99,17 +124,32 @@ export function DocsRegionAnnotationRendererPlayground() {
         </header>
 
         <div className="docs-layer-playground__controls">
-          <RegionRangeControl
-            label="Scale"
-            max={2.2}
-            min={0.5}
-            onChange={(scale) =>
-              updateSettings({ ...settingsRef.current, scale })
-            }
-            step={0.05}
-            value={settings.scale}
-            valueLabel={`${settings.scale.toFixed(2)}×`}
-          />
+          <RegionModeControl onChange={updateMode} value={settings.mode} />
+          {showsMediaCrop ? (
+            <RegionRangeControl
+              label="Head scale"
+              max={3.5}
+              min={1}
+              onChange={(scale) =>
+                updateSettings({ ...settingsRef.current, scale })
+              }
+              step={0.05}
+              value={settings.scale}
+              valueLabel={`${settings.scale.toFixed(2)}×`}
+            />
+          ) : (
+            <RegionRangeControl
+              label={showsIcons ? "Badge size" : "GIF size"}
+              max={96}
+              min={16}
+              onChange={(assetSize) =>
+                updateSettings({ ...settingsRef.current, assetSize })
+              }
+              step={1}
+              value={settings.assetSize}
+              valueLabel={`${settings.assetSize}px`}
+            />
+          )}
           <RegionRangeControl
             label="Vertical offset"
             max={0.25}
@@ -117,7 +157,7 @@ export function DocsRegionAnnotationRendererPlayground() {
             onChange={(offsetY) =>
               updateSettings({ ...settingsRef.current, offsetY })
             }
-            step={0.05}
+            step={0.01}
             value={settings.offsetY}
             valueLabel={settings.offsetY.toFixed(2)}
           />
@@ -132,6 +172,17 @@ export function DocsRegionAnnotationRendererPlayground() {
             value={settings.rotationDegrees}
             valueLabel={`${settings.rotationDegrees}°`}
           />
+          {showsMediaCrop ? (
+            <RegionFlipControl
+              checked={settings.flipHorizontal}
+              onChange={(flipHorizontal) =>
+                updateSettings({
+                  ...settingsRef.current,
+                  flipHorizontal,
+                })
+              }
+            />
+          ) : null}
         </div>
 
         <section
@@ -152,6 +203,73 @@ export function DocsRegionAnnotationRendererPlayground() {
         </div>
       </section>
     </main>
+  );
+}
+
+function RegionModeControl({
+  onChange,
+  value,
+}: {
+  readonly onChange: (mode: RegionPlaygroundModeValue) => void;
+  readonly value: RegionPlaygroundModeValue;
+}) {
+  return (
+    <fieldset className="docs-layer-playground__asset-type docs-layer-playground__asset-type--sources">
+      <legend>Region source</legend>
+      <div>
+        <label>
+          <input
+            checked={value === RegionPlaygroundMode.MediaCrop}
+            name="region-source"
+            onChange={() => onChange(RegionPlaygroundMode.MediaCrop)}
+            type="radio"
+          />
+          <span>Big heads</span>
+        </label>
+        <label>
+          <input
+            checked={value === RegionPlaygroundMode.StaticIcons}
+            name="region-source"
+            onChange={() => onChange(RegionPlaygroundMode.StaticIcons)}
+            type="radio"
+          />
+          <span>Team badges</span>
+        </label>
+        <label>
+          <input
+            checked={value === RegionPlaygroundMode.AnimatedGif}
+            name="region-source"
+            onChange={() => onChange(RegionPlaygroundMode.AnimatedGif)}
+            type="radio"
+          />
+          <span>Animated GIF</span>
+        </label>
+      </div>
+    </fieldset>
+  );
+}
+
+function RegionFlipControl({
+  checked,
+  onChange,
+}: {
+  readonly checked: boolean;
+  readonly onChange: (checked: boolean) => void;
+}) {
+  return (
+    <fieldset className="docs-layer-playground__asset-type docs-layer-playground__asset-type--single">
+      <legend>Crop transform</legend>
+      <div>
+        <label>
+          <input
+            checked={checked}
+            onChange={(event) => onChange(event.currentTarget.checked)}
+            type="checkbox"
+          />
+          <span>Mirror horizontally</span>
+        </label>
+      </div>
+    </fieldset>
   );
 }
 
@@ -188,40 +306,4 @@ function RegionRangeControl({
       />
     </label>
   );
-}
-
-function createFireRenderer(settings: RegionPlaygroundSettings) {
-  return annotationRenderers.region({
-    compose: { mode: "over" },
-    id: "player-fire",
-    region: { anchor: "head", kind: "keypoint-anchor" },
-    source: { asset: { src: playerFireUrl }, kind: "asset" },
-    target: {
-      className: ["white team player", "yellow team player"],
-    },
-    transform: {
-      offset: { x: 0, y: settings.offsetY },
-      rotation: (settings.rotationDegrees * Math.PI) / 180,
-      scale: settings.scale,
-    },
-  });
-}
-
-function createSnippet(settings: RegionPlaygroundSettings) {
-  return `session.setPresentation({
-  renderers: [
-    annotationRenderers.region({
-      id: "player-fire",
-      target: { className: ["white team player", "yellow team player"] },
-      source: { kind: "asset", asset: { src: fireGifUrl } },
-      region: { kind: "keypoint-anchor", anchor: "head" },
-      transform: {
-        scale: ${settings.scale.toFixed(2)},
-        offset: { x: 0, y: ${settings.offsetY.toFixed(2)} },
-        rotation: ${((settings.rotationDegrees * Math.PI) / 180).toFixed(2)},
-      },
-      compose: { mode: "over" },
-    }),
-  ],
-});`;
 }

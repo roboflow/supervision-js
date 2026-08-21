@@ -7,6 +7,8 @@ import {
   filterDocsAnnotationRendererFrames,
   type DocsAnnotationRendererControl,
   type DocsAnnotationRendererId,
+  type DocsAnnotationRendererSelectControl,
+  type DocsAnnotationRendererSelectSetting,
   type NumericPresentationSetting,
 } from "../docs-annotation-renderer";
 import { useDemoRenderer } from "../hooks/useDemoRenderer";
@@ -77,6 +79,18 @@ function DocsStyleAnnotationRendererPlayground({
     },
     [demo.presentationSettings, demo.setPresentationSettings],
   );
+  const updateSelectPresentation = useCallback(
+    (
+      key: DocsAnnotationRendererSelectSetting,
+      value: DemoPresentationSettings[DocsAnnotationRendererSelectSetting],
+    ) => {
+      demo.setPresentationSettings({
+        ...demo.presentationSettings,
+        [key]: value,
+      });
+    },
+    [demo.presentationSettings, demo.setPresentationSettings],
+  );
 
   return (
     <main
@@ -113,6 +127,14 @@ function DocsStyleAnnotationRendererPlayground({
         </header>
 
         <div className="docs-layer-playground__controls">
+          {definition.selects?.map((control) => (
+            <RendererSelectControl
+              control={control}
+              key={control.key}
+              onChange={(value) => updateSelectPresentation(control.key, value)}
+              value={demo.presentationSettings[control.key]}
+            />
+          ))}
           {definition.controls.map((control) => (
             <RendererRangeControl
               control={control}
@@ -161,6 +183,39 @@ function DocsStyleAnnotationRendererPlayground({
         </div>
       </section>
     </main>
+  );
+}
+
+function RendererSelectControl({
+  control,
+  onChange,
+  value,
+}: {
+  readonly control: DocsAnnotationRendererSelectControl;
+  readonly onChange: (
+    value: DemoPresentationSettings[DocsAnnotationRendererSelectSetting],
+  ) => void;
+  readonly value: DemoPresentationSettings[DocsAnnotationRendererSelectSetting];
+}) {
+  return (
+    <label className="docs-layer-playground__select">
+      <strong>{control.label}</strong>
+      <select
+        onChange={(event) =>
+          onChange(
+            event.currentTarget
+              .value as DemoPresentationSettings[DocsAnnotationRendererSelectSetting],
+          )
+        }
+        value={value}
+      >
+        {control.options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
 

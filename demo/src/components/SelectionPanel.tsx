@@ -69,7 +69,7 @@ function SelectionDetails({
       <dl className="selection-details__grid">
         <SelectionDatum label="Target" value={formatTarget(activePick)} />
         <SelectionDatum
-          label="Frame"
+          label="Picked frame"
           value={
             activePick.frame.frameIndex === undefined
               ? formatTime(activePick.frame.mediaTime)
@@ -77,7 +77,7 @@ function SelectionDetails({
           }
         />
         <SelectionDatum
-          label="Time"
+          label="Picked at"
           value={formatExactTime(activePick.mediaTime)}
         />
         <SelectionDatum

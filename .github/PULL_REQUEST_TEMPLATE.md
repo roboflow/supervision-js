@@ -21,4 +21,4 @@
 
 ## Notes For Reviewers
 
-<!-- Include migration, compatibility, performance, or deployment considerations. -->
+<!-- Include migration, compatibility, or performance considerations when relevant. -->

@@ -2,7 +2,11 @@
 title: Annotation Renderers
 children:
   - ./annotation-renderers/boxes.md
+  - ./annotation-renderers/ellipse.md
+  - ./annotation-renderers/box-corners.md
   - ./annotation-renderers/masks.md
+  - ./annotation-renderers/mask-halo.md
+  - ./annotation-renderers/markers.md
   - ./annotation-renderers/labels.md
   - ./annotation-renderers/polygons.md
   - ./annotation-renderers/polylines.md
@@ -35,12 +39,16 @@ minimal code snippet. The polyline playground uses the fixture's committed,
 motion-gated basketball trajectory rather than inventing geometry at runtime.
 
 - [Boxes](./annotation-renderers/boxes.md)
+- [Ellipse](./annotation-renderers/ellipse.md)
+- [Box corners](./annotation-renderers/box-corners.md)
 - [Masks](./annotation-renderers/masks.md)
+- [Mask Halo](./annotation-renderers/mask-halo.md)
+- [Markers](./annotation-renderers/markers.md)
 - [Labels](./annotation-renderers/labels.md)
 - [Polygons](./annotation-renderers/polygons.md)
 - [Polylines](./annotation-renderers/polylines.md)
 - [Keypoints and skeletons](./annotation-renderers/keypoints-and-skeletons.md)
-- [Asset regions](./annotation-renderers/asset-regions.md)
+- [Regions](./annotation-renderers/asset-regions.md)
 
 ## Renderer Configuration
 
@@ -68,7 +76,8 @@ including when the list is empty. A listed renderer without an explicit
 `style` uses its matching compatibility field. Source-specific overrides refine
 selected renderers but cannot re-enable an omitted renderer.
 
-Most established renderers are singleton style-backed layers. Asset-region
+Most established renderers are singleton style-backed layers. Region
 renderers are intentionally multi-instance: each descriptor has its own `id`,
-target, source, anchor, transform, and composition order, so an application can
-place independent assets without creating a parallel layer API.
+target, asset or media source, anchor, transform, and composition order, so an
+application can place independent effects without creating a parallel layer
+API.
