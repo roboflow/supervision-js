@@ -96,5 +96,13 @@
     "mediabunny": "^1.52.3",
     "pixi.js": "^8.19.0",
     "supervision-js-core": "file:../core"
+  },
+  "peerDependencies": {
+    "@roboflow/video-engine": "*"
+  },
+  "peerDependenciesMeta": {
+    "@roboflow/video-engine": {
+      "optional": true
+    }
   }
 }

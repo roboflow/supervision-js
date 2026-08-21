@@ -25,6 +25,38 @@ also follow the
 [annotator use-case roadmap](docs/internal/annotator-use-case-roadmap.md),
 including its one-annotator-per-PR and frozen-fixture requirements.
 
+## Video Engine Checkout
+
+`supervision` decodes video through `@roboflow/video-engine`, a Roboflow module
+that is not published to npm and is not vendored here. Four files resolve the
+specifier onto a checkout of the engine beside this repository, at
+`../roboflow-video-runtime`: `vitest.config.ts` and `demo/vite.config.ts` map it
+to the engine's TypeScript source (`app/src/scripts/videoEngine/index.ts` and
+`analysis.ts`), and `packages/web/tsconfig.json` and `demo/tsconfig.json` map
+it to the declarations the engine emits with `npm run types:videoengine` from
+its `app/` directory.
+
+That `../roboflow-video-runtime` directory is **not a git repository of its
+own**. It has to be a git worktree of Roboflow's `roboflow/roboflow` monorepo,
+checked out to a branch that carries `app/src/scripts/videoEngine` — the
+directory name is a local convention, not something git or npm resolves for
+you. As of this writing, that engine source exists on no remote branch of
+`roboflow/roboflow`: it lives only in local commits on one machine, so cloning
+`roboflow/roboflow` and checking out a branch will not produce it. The engine
+is not yet obtainable anywhere else. Until it reaches a shared branch,
+reproducing this checkout means copying `app/src/scripts/videoEngine` (and
+running `npm run types:videoengine` for the declarations) from that machine.
+
+Without the checkout, `npm run typecheck`, `npm run test`, `npm run build` and
+`npm run demo:build` cannot resolve the specifier. `npm run boundary:check`
+names the path it expected instead, and both CI and `npm run verify` run it
+before anything else.
+
+Installing the published `supervision` package pulls no engine:
+`packages/web/package.json` declares it as an optional peer dependency, the
+build leaves both specifiers external, and the adapter imports them only when a
+caller opens a video source.
+
 ## Local Development
 
 Use Node.js 20.19 or newer.
