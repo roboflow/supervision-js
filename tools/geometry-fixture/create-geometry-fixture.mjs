@@ -1,18 +1,25 @@
 #!/usr/bin/env node
 /**
- * Builds the combined geometry showcase fixture from two offline inputs:
+ * Rebuilds a SAM3 fixture in place so one detection set carries every geometry
+ * kind the demo can draw, from up to two offline inputs:
  *
  * 1. the committed SAM3 segmentation timeline
  *    (`demo/fixtures/basketball_sam3/detections.json`), whose masks are
- *    converted into bounded simplified polygons on the same detections; and
- * 2. a raw pose JSONL produced once by `run-pose.py`, normalized here into
- *    center-based rects, zero-based COCO skeleton edges, and an explicit
+ *    converted into bounded simplified polygons on the same detections and
+ *    whose basketball detections carry a bounded center trace; and
+ * 2. an optional raw pose JSONL produced once by `run-pose.py`, normalized here
+ *    into center-based rects, zero-based COCO skeleton edges, and an explicit
  *    visibility policy.
  *
- * Both sources share the SAM3 fixture's frame records (frameIndex, mediaTime,
- * endTime), so every geometry type stays on the same detection-frame timing
- * reference. The script then chunks the combined timeline with the existing
- * chunker. Requires `npm run build -w supervision-js-core` first; run through
+ * Pose is optional because it is the one input that cannot be derived from the
+ * detections: it is measured against extracted frames, so a detection set
+ * inferred on a different grid needs its own pose run. Without `--pose-input`
+ * the fixture is built with no keypoints and says so in its provenance.
+ *
+ * Every geometry kind lands on the SAM3 fixture's own frame records
+ * (frameIndex, mediaTime, endTime), so they share one timing reference. The
+ * script then chunks the combined timeline with the existing chunker. Requires
+ * `npm run build -w supervision-js-core` first; run through
  * `npm run fixture:geometry:create`.
  */
 import { createHash } from "node:crypto";
@@ -38,6 +45,8 @@ const SEGMENTATION_SOURCE_ID = "sam3";
 const POSE_SOURCE_ID = "yolo-pose";
 const POSE_Z_INDEX_BASE = 100;
 const POSE_TARGET_CLASS_NAMES = ["white team player", "yellow team player"];
+const NO_POSE_POLICY =
+  "no pose input was supplied, so no detection carries keypoints";
 const BASKETBALL_TRACE_ALGORITHM = "basketball-motion-track-v1";
 const BASKETBALL_TRACE_CLASS_NAME = "basketball";
 const BASKETBALL_TRACE_MAX_ASSOCIATION_GAP_SECONDS = 0.1;
@@ -55,28 +64,17 @@ if (options.help) {
 }
 
 const sam3InputPath = resolve(options.sam3Input);
-const poseInputPath = resolve(options.poseInput);
+const poseInputPath = options.poseInput ? resolve(options.poseInput) : null;
 const outputPath = resolve(options.output);
 const fixtureDir = resolve(options.fixtureDir);
 const sam3Raw = await readFile(sam3InputPath, "utf8");
-const poseRaw = await readFile(poseInputPath, "utf8");
 const sam3Fixture = JSON.parse(sam3Raw);
-const { poseMeta, poseFrames } = parseRawPose(poseRaw);
+const pose = poseInputPath ? await readPose(poseInputPath, sam3Fixture) : null;
+const poseFrames = pose?.poseFrames ?? new Map();
 const polygonOptions = {
   maxPoints: options.maxPolygonPoints,
   tolerance: options.polygonTolerance,
 };
-
-let droppedPoseFrameCount = 0;
-const knownFrameIndexes = new Set(
-  sam3Fixture.frames.map((frame) => frame.frameIndex),
-);
-
-for (const frameIndex of poseFrames.keys()) {
-  if (!knownFrameIndexes.has(frameIndex)) {
-    droppedPoseFrameCount += 1;
-  }
-}
 
 const poseAssociation = {
   matchedPoseCount: 0,
@@ -131,20 +129,24 @@ const fixture = {
       simplification: "ramer-douglas-peucker with uniform-decimation cap",
       tolerance: options.polygonTolerance,
     },
-    pose: {
-      ...poseMeta,
-      associationPolicy:
-        "greedy one-to-one center-rect IoU; keypoints attach to the matched SAM3 class detection and standalone pose detections are omitted",
-      coordinateConversion:
-        "xyxy corner boxes to center-based rects; COCO one-based skeleton edges to zero-based indexes",
-      matchedPoseDetectionCount: poseAssociation.matchedPoseCount,
-      minimumMatchIou: DEFAULT_POSE_MATCH_IOU,
-      sourceFile: relative(fixtureDir, poseInputPath),
-      targetClassNames: POSE_TARGET_CLASS_NAMES,
-      unmatchedPoseDetectionCount: poseAssociation.unmatchedPoseCount,
-      unmatchedTargetDetectionCount: poseAssociation.unmatchedTargetCount,
-      visibilityPolicy: `keypoint confidence >= ${options.visibleConfidence} maps to Visible(2), otherwise NotLabeled(0); Occluded(1) is never inferred`,
-    },
+    pose: pose
+      ? {
+          ...pose.poseMeta,
+          associationPolicy:
+            "greedy one-to-one center-rect IoU; keypoints attach to the matched SAM3 class detection and standalone pose detections are omitted",
+          coordinateConversion:
+            "xyxy corner boxes to center-based rects; COCO one-based skeleton edges to zero-based indexes",
+          matchedPoseDetectionCount: poseAssociation.matchedPoseCount,
+          minimumMatchIou: DEFAULT_POSE_MATCH_IOU,
+          sourceFile: relative(fixtureDir, pose.inputPath),
+          targetClassNames: POSE_TARGET_CLASS_NAMES,
+          unmatchedPoseDetectionCount: poseAssociation.unmatchedPoseCount,
+          unmatchedTargetDetectionCount: poseAssociation.unmatchedTargetCount,
+          visibilityPolicy: `keypoint confidence >= ${options.visibleConfidence} maps to Visible(2), otherwise NotLabeled(0); Occluded(1) is never inferred`,
+        }
+      : {
+          keypointPolicy: NO_POSE_POLICY,
+        },
     polyline: {
       algorithm: BASKETBALL_TRACE_ALGORITHM,
       derivedFrom:
@@ -167,13 +169,17 @@ const fixture = {
         kind: "segmentation",
         modelId: sam3Fixture.inference?.modelId,
       },
-      {
-        id: POSE_SOURCE_ID,
-        input: relative(fixtureDir, poseInputPath),
-        inputSha256: sha256(poseRaw),
-        kind: "pose",
-        modelId: poseMeta.model,
-      },
+      ...(pose
+        ? [
+            {
+              id: POSE_SOURCE_ID,
+              input: relative(fixtureDir, pose.inputPath),
+              inputSha256: sha256(pose.raw),
+              kind: "pose",
+              modelId: pose.poseMeta.model,
+            },
+          ]
+        : []),
     ],
   },
   schema: DETECTIONS_SCHEMA,
@@ -186,12 +192,6 @@ await writeFile(outputPath, `${JSON.stringify(fixture)}\n`);
 console.log(
   `Wrote combined timeline (${frames.length} frames, ${JSON.stringify(geometry)}) to ${outputPath}`,
 );
-
-if (droppedPoseFrameCount > 0) {
-  console.warn(
-    `Dropped pose output for ${droppedPoseFrameCount} frame indexes without a SAM3 frame record.`,
-  );
-}
 
 await runChunker(outputPath, fixtureDir, options.datasetId);
 
@@ -298,6 +298,44 @@ function normalizePoseFrame(rawDetections, frame) {
   });
 }
 
+/**
+ * Pose read against the detection grid it claims to describe.
+ *
+ * Keypoints join the timeline by frame index alone, and an index resolves on
+ * any grid. A pose run against a different frame rate therefore lands every
+ * skeleton on a frame it was not measured from, which reads as annotations
+ * quietly drifting rather than as a failure.
+ */
+async function readPose(inputPath, sam3Fixture) {
+  const raw = await readFile(inputPath, "utf8");
+  const { poseMeta, poseFrames } = parseRawPose(raw);
+  const detectionFrameCount = sam3Fixture.frames.length;
+  const knownFrameIndexes = new Set(
+    sam3Fixture.frames.map((frame) => frame.frameIndex),
+  );
+  const unknownFrameIndexes = [...poseFrames.keys()].filter(
+    (frameIndex) => !knownFrameIndexes.has(frameIndex),
+  );
+
+  if (
+    poseMeta.frameCount !== detectionFrameCount ||
+    unknownFrameIndexes.length > 0
+  ) {
+    throw new Error(
+      `${inputPath} was run over ${poseMeta.frameCount} frames and the ` +
+        `detections cover ${detectionFrameCount}` +
+        (unknownFrameIndexes.length > 0
+          ? `, with ${unknownFrameIndexes.length} pose frame indexes absent ` +
+            `from the detection grid`
+          : "") +
+        `. Rerun run-pose.py over frames extracted from the video these ` +
+        `detections were inferred against.`,
+    );
+  }
+
+  return { inputPath, poseFrames, poseMeta, raw };
+}
+
 function parseRawPose(raw) {
   const lines = raw.split("\n").filter(Boolean);
   const poseMeta = JSON.parse(lines[0]);
@@ -350,12 +388,12 @@ function sha256(content) {
 
 function parseArgs(args) {
   const parsed = {
-    datasetId: "basketball_geometry_v1",
-    fixtureDir: "demo/fixtures/basketball_geometry",
+    datasetId: "basketball_sam3_v1",
+    fixtureDir: "demo/fixtures/basketball_sam3",
     help: false,
     maxPolygonPoints: DEFAULT_MAX_POLYGON_POINTS,
     output: "tools/geometry-fixture/output/detections.json",
-    poseInput: "demo/fixtures/basketball_geometry/raw-pose.jsonl",
+    poseInput: null,
     polygonTolerance: DEFAULT_POLYGON_TOLERANCE,
     sam3Input: "demo/fixtures/basketball_sam3/detections.json",
     visibleConfidence: DEFAULT_KEYPOINT_VISIBLE_CONFIDENCE,
@@ -422,11 +460,11 @@ function printHelp() {
 npm run fixture:geometry:create -- [options]
 
 Options:
-  --dataset-id <id>                default: basketball_geometry_v1
-  --fixture-dir <path>             default: demo/fixtures/basketball_geometry
+  --dataset-id <id>                default: basketball_sam3_v1
+  --fixture-dir <path>             default: demo/fixtures/basketball_sam3
   --max-polygon-points <count>     default: ${DEFAULT_MAX_POLYGON_POINTS}
   --output <path>                  default: tools/geometry-fixture/output/detections.json
-  --pose-input <path>              default: demo/fixtures/basketball_geometry/raw-pose.jsonl
+  --pose-input <path>              a pose run over this fixture's own frames; omitted, the fixture carries no keypoints
   --polygon-tolerance <pixels>     default: ${DEFAULT_POLYGON_TOLERANCE}
   --sam3-input <path>              default: demo/fixtures/basketball_sam3/detections.json
   --visible-confidence <value>     default: ${DEFAULT_KEYPOINT_VISIBLE_CONFIDENCE}`);

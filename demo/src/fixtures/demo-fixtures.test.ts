@@ -9,7 +9,36 @@ import { describe, expect, it } from "vitest";
 
 import { KeypointVisibility, type DetectionFrame } from "supervision";
 import { computeDetectionMaskRect } from "supervision/editing";
-import { demoFixtures, resolveDemoFixturePlaybackSrc } from "./demo-fixtures";
+import {
+  constrainDemoPresentationSettings,
+  defaultDemoPresentationSettings,
+  type DemoPresentationLayerSetting,
+} from "../presentation/demo-presentation";
+import {
+  demoFixtures,
+  resolveDemoFixtureAvailability,
+  resolveDemoFixturePlaybackSrc,
+  type DemoFixtureGeometrySummary,
+} from "./demo-fixtures";
+
+const geometryCountKeys = {
+  boxesEnabled: "boxDetectionCount",
+  keypointsEnabled: "keypointDetectionCount",
+  masksEnabled: "maskDetectionCount",
+  polygonsEnabled: "polygonDetectionCount",
+  polylinesEnabled: "polylineDetectionCount",
+} as const satisfies Record<string, keyof DemoFixtureGeometrySummary>;
+const geometryBackedLayers = Object.keys(
+  geometryCountKeys,
+) as readonly (keyof typeof geometryCountKeys & DemoPresentationLayerSetting)[];
+/** The merged basketball fixture as its builder reports it without a pose run. */
+const maskDerivedGeometry: DemoFixtureGeometrySummary = {
+  boxDetectionCount: 5948,
+  keypointDetectionCount: 0,
+  maskDetectionCount: 5948,
+  polygonDetectionCount: 5948,
+  polylineDetectionCount: 224,
+};
 
 const MAX_POLYGON_POINTS = 48;
 const fixturesRoot = fileURLToPath(new URL("../../fixtures", import.meta.url));
@@ -355,6 +384,63 @@ describe("geometry showcase fixture", () => {
     expect(geometryManifest.geometry).toMatchObject({
       polylineDetectionCount: polylineCount,
     });
+  });
+});
+
+describe("fixture layer availability", () => {
+  it("closes a toggle the detections count none of", () => {
+    expect(
+      resolveDemoFixtureAvailability(undefined, maskDerivedGeometry),
+    ).toEqual({ keypointsEnabled: false });
+  });
+
+  it("keeps a layer a fixture curates away even when the detections carry it", () => {
+    expect(
+      resolveDemoFixtureAvailability(
+        { polygonsEnabled: false },
+        maskDerivedGeometry,
+      ),
+    ).toEqual({ keypointsEnabled: false, polygonsEnabled: false });
+  });
+
+  it("leaves a manifest that counts nothing to its own declaration", () => {
+    expect(
+      resolveDemoFixtureAvailability({ keypointsEnabled: false }, undefined),
+    ).toEqual({ keypointsEnabled: false });
+  });
+
+  it("offers no sample a layer its own manifest counts none of", () => {
+    const offered = demoFixtures.flatMap((fixture) => {
+      const geometry = readJson<{
+        readonly geometry?: DemoFixtureGeometrySummary;
+      }>(
+        join(fixturesRoot, fixture.sampleName, "detections.manifest.json"),
+      ).geometry;
+
+      if (!geometry) return [];
+
+      return geometryBackedLayers.flatMap((layer) =>
+        geometry[geometryCountKeys[layer]] === 0 &&
+        fixture.presentationAvailability?.[layer] !== false
+          ? [`${fixture.sampleName}.${layer}`]
+          : [],
+      );
+    });
+
+    expect(offered).toEqual([]);
+  });
+
+  it("draws some geometry on every sample the picker opens with", () => {
+    const blank = demoFixtures.filter((fixture) => {
+      const settings = constrainDemoPresentationSettings(
+        { ...defaultDemoPresentationSettings, ...fixture.presentationDefaults },
+        fixture.presentationAvailability,
+      );
+
+      return geometryBackedLayers.every((layer) => settings[layer] === false);
+    });
+
+    expect(blank.map(({ sampleName }) => sampleName)).toEqual([]);
   });
 });
 

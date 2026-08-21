@@ -9,7 +9,10 @@ import {
 } from "supervision";
 import { SourceKind } from "@roboflow/video-engine";
 import type { DisplayBoxResolutionOptions } from "@roboflow/video-engine";
-import type { DemoPresentationAvailability } from "../presentation/demo-presentation";
+import type {
+  DemoPresentationAvailability,
+  DemoPresentationLayerSetting,
+} from "../presentation/demo-presentation";
 
 const fixtureMetaModules = import.meta.glob(
   "../../fixtures/*/fixture.meta.json",
@@ -18,6 +21,13 @@ const fixtureMetaModules = import.meta.glob(
     import: "default",
   },
 ) as Record<string, DemoFixtureMeta>;
+const fixtureManifests = import.meta.glob(
+  ["../../fixtures/*/detections.manifest.json"],
+  {
+    eager: true,
+    import: "default",
+  },
+) as Record<string, DemoFixtureDetectionManifest>;
 const fixtureManifestUrls = import.meta.glob(
   ["../../fixtures/*/detections.manifest.json"],
   {
@@ -102,6 +112,45 @@ export interface DemoFixtureDefinition {
   /** Declared detection-timeline transcode, or null when the fixture has none. */
   readonly proxyVideoSrc: string | null;
   readonly videoSrc: string;
+}
+
+/** Layers that draw nothing unless the detections carry the matching geometry. */
+const geometryBackedLayers: readonly (readonly [
+  DemoPresentationLayerSetting,
+  keyof DemoFixtureGeometrySummary,
+])[] = [
+  ["boxesEnabled", "boxDetectionCount"],
+  ["keypointsEnabled", "keypointDetectionCount"],
+  ["masksEnabled", "maskDetectionCount"],
+  ["polygonsEnabled", "polygonDetectionCount"],
+  ["polylinesEnabled", "polylineDetectionCount"],
+];
+
+/**
+ * The layers a fixture is allowed to offer.
+ *
+ * A manifest that counts its own geometry settles what the detections hold, and
+ * a declared flag may only take a layer away from that, never hand one back: a
+ * fixture is regenerated far more often than its metadata is reread, so the
+ * count is the side that stays true.
+ */
+export function resolveDemoFixtureAvailability(
+  declared: DemoPresentationAvailability | undefined,
+  geometry: DemoFixtureGeometrySummary | undefined,
+): DemoPresentationAvailability | undefined {
+  if (!geometry) {
+    return declared;
+  }
+
+  const availability: DemoPresentationAvailability = { ...declared };
+
+  for (const [layer, countKey] of geometryBackedLayers) {
+    if (geometry[countKey] === 0) {
+      availability[layer] = false;
+    }
+  }
+
+  return availability;
 }
 
 export const demoFixtures = createDemoFixtures();
@@ -337,7 +386,10 @@ function createDemoFixtures(): readonly DemoFixtureDefinition[] {
           mediaLoadingStatusLabel: meta.media.loadingStatusLabel,
           mediaReadyStatusLabel: meta.media.readyStatusLabel,
           presentationDefaults: meta.presentation,
-          presentationAvailability: meta.presentationAvailability,
+          presentationAvailability: resolveDemoFixtureAvailability(
+            meta.presentationAvailability,
+            fixtureManifests[manifestPath]?.geometry,
+          ),
           proxyVideoSrc: proxyVideoSrc ?? null,
           sampleName: meta.sampleName,
           videoSrc,
