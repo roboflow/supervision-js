@@ -1,11 +1,22 @@
 import { createMediaRenderer } from "#renderers/media-renderer";
 import {
+  DetectionFrameSelectionMode,
   createDefaultAnnotationPresentation,
+  projectDetectionFrames,
   resolveAnnotationRendererPresentation,
   createSourceAwarePresentation,
 } from "supervision-js-core";
 import type {
-  MediaSession,
+  DetectionBufferOptions,
+  DetectionCoordinateSpace,
+  DetectionFrame,
+  DetectionFrameSourceVersionRange,
+  LiveWritableDetectionFrameSource,
+  WritableDetectionFrameSource,
+} from "supervision-js-core";
+import type {
+  LiveMediaSession,
+  MediaSessionDetectionSourceOptions,
   MediaSessionDetectionWriteOptions,
   MediaSessionMediaState,
   MediaSessionNormalizationState,
@@ -29,6 +40,8 @@ import {
 } from "./media-session-media";
 import { createMediaSessionStateSnapshot } from "./media-session-state";
 
+const DISPLAY_RANGE_EPSILON_SECONDS = 1e-6;
+
 /**
  * Creates a renderer-owned media session for one browser media item.
  *
@@ -38,7 +51,7 @@ import { createMediaSessionStateSnapshot } from "./media-session-state";
  */
 export async function createMediaSession(
   options: MediaSessionOptions,
-): Promise<MediaSession> {
+): Promise<LiveMediaSession> {
   const stateListeners = new Set<MediaSessionStateListener>();
   let rendererState: MediaRendererState | null = null;
   let renderPreparationState: RenderPreparationDiagnostics | null = null;
@@ -130,22 +143,37 @@ export async function createMediaSession(
       presentation: MediaRendererPresentation | undefined,
     ): MediaRendererPresentation => {
       const resolved = resolvePresentation(presentation);
-      const directRenderers = resolved.renderers?.filter(
-        (renderer) => renderer.kind === "region",
-      );
+
       return {
         ...resolved,
-        // Style-backed renderers have already been lowered into their existing
-        // specialized fields. Direct renderers retain their descriptors for
-        // the browser scene implementation.
-        renderers:
-          directRenderers && directRenderers.length > 0
-            ? directRenderers
-            : undefined,
+        // Style-backed renderers have already been lowered into their
+        // specialized fields, including source overrides. Keep their kinds in
+        // the authoritative list so the renderer core does not clear those
+        // fields when direct renderers are also present, but let the resolved
+        // fields win over the descriptors' original global styles.
+        renderers: resolved.renderers?.map((renderer) =>
+          renderer.kind === "region"
+            ? renderer
+            : { ...renderer, style: undefined },
+        ),
       };
     };
     const initialPresentation =
       resolveRendererPresentation(currentPresentation);
+    let mediaCoordinateSpace: DetectionCoordinateSpace | null = null;
+
+    /**
+     * Latches the media coordinate space as soon as the renderer reports real
+     * media dimensions, so session writes can be normalized into it.
+     */
+    const recordMediaCoordinateSpace = (state: MediaRendererState) => {
+      if (state.mediaWidth > 0 && state.mediaHeight > 0) {
+        mediaCoordinateSpace = {
+          height: state.mediaHeight,
+          width: state.mediaWidth,
+        };
+      }
+    };
 
     const renderer = await createMediaRenderer({
       ...options.renderer,
@@ -153,6 +181,8 @@ export async function createMediaSession(
       backgroundColor: initialPresentation.backgroundColor,
       annotationOverlayStyle: initialPresentation.annotationOverlayStyle,
       boxStyle: initialPresentation.boxStyle,
+      boxCornerStyle: initialPresentation.boxCornerStyle,
+      ellipseStyle: initialPresentation.ellipseStyle,
       container: options.container,
       detectionBuffer: sessionDefaults.detectionBuffer,
       detectionFrames: sessionDetections.detectionFrames,
@@ -161,7 +191,9 @@ export async function createMediaSession(
       focusStyle: initialPresentation.focusStyle,
       interactionStyle: initialPresentation.interactionStyle,
       labelStyle: initialPresentation.labelStyle,
+      maskHaloStyle: initialPresentation.maskHaloStyle,
       maskStyle: initialPresentation.maskStyle,
+      markerStyle: initialPresentation.markerStyle,
       polygonStyle: initialPresentation.polygonStyle,
       polylineStyle: initialPresentation.polylineStyle,
       renderers: initialPresentation.renderers,
@@ -169,6 +201,7 @@ export async function createMediaSession(
       visibility: initialPresentation.visibility,
       onState(state) {
         rendererState = state;
+        recordMediaCoordinateSpace(state);
         options.renderer?.onState?.(state);
         if (isDestroying) {
           return;
@@ -192,6 +225,104 @@ export async function createMediaSession(
     rendererState = renderer.getState();
     emitSessionState();
 
+    const autoRefresh = options.detections?.autoRefresh !== false;
+    let activeRefresh: Promise<void> | undefined;
+    let queuedRefresh = false;
+
+    const runDetectionRefresh = () => {
+      activeRefresh = renderer
+        .refresh()
+        .catch(() => undefined)
+        .finally(() => {
+          activeRefresh = undefined;
+
+          if (queuedRefresh && !destroyed) {
+            queuedRefresh = false;
+            runDetectionRefresh();
+          }
+        });
+    };
+
+    /**
+     * Redraws once, collapsing requests that arrive during a redraw into a
+     * single follow-up.
+     */
+    const scheduleDetectionRefresh = () => {
+      if (!autoRefresh || destroyed) {
+        return;
+      }
+
+      if (activeRefresh) {
+        queuedRefresh = true;
+        return;
+      }
+
+      runDetectionRefresh();
+    };
+
+    /**
+     * Normalizes written frames into media space before they are stored, so a
+     * persisted dataset stays in one coordinate space. The renderer projects
+     * again on the read path for every other detection input, and re-projecting
+     * an already-projected frame is a no-op.
+     */
+    const projectWrittenFrames = (frames: readonly DetectionFrame[]) =>
+      mediaCoordinateSpace
+        ? projectDetectionFrames(frames, mediaCoordinateSpace)
+        : frames;
+
+    /**
+     * Redraws once for a write that actually changed `range`.
+     *
+     * A write the source rejected as stale reports no change at all, and
+     * changes elsewhere on the timeline are already patched incrementally by
+     * the hot buffer, so forcing a render for either would only burn frames.
+     */
+    const requestDetectionRefresh = (
+      source: WritableDetectionFrameSource,
+      previousVersion: number,
+      range: DetectionFrameSourceVersionRange,
+    ) => {
+      const changes = source.getChangesSince?.(previousVersion, [range]);
+
+      if (!changes || changes.requiresReload || changes.ranges.length > 0) {
+        scheduleDetectionRefresh();
+      }
+    };
+
+    const selectionLookaheadSeconds = resolveSelectionLookaheadSeconds(
+      sessionDefaults.detectionBuffer,
+      options.detections?.sources,
+    );
+
+    const hasOpenEndedFrame = (frames: readonly DetectionFrame[]) =>
+      frames.some((frame) => frame.endTime === undefined);
+
+    /**
+     * The interval a write has to touch to change what is on screen.
+     *
+     * A frame written with an `endTime` is journaled exactly as it is selected,
+     * so comparing against the displayed instant is precise. A frame written
+     * without one is journaled as a point at its `mediaTime` but stays selected
+     * until a later frame supersedes it, so such a write can change the
+     * selection anywhere from the active frame's start onward. Nothing earlier
+     * than the active frame can, which is what keeps unrelated historical
+     * appends from forcing a render.
+     */
+    const getDisplayedRange = (
+      includesOpenEndedFrame: boolean,
+    ): DetectionFrameSourceVersionRange => {
+      const { activeDetectionFrameTime, currentTime } = renderer.getState();
+      const startTime = includesOpenEndedFrame
+        ? Math.min(activeDetectionFrameTime ?? 0, currentTime)
+        : currentTime;
+
+      return {
+        endTime: currentTime + selectionLookaheadSeconds,
+        startTime: startTime - DISPLAY_RANGE_EPSILON_SECONDS,
+      };
+    };
+
     return {
       detectionSource: sessionDetections.detectionSource,
       media: sessionMedia.state,
@@ -206,8 +337,80 @@ export async function createMediaSession(
           sessionDetections,
           writeOptions,
         );
+        const previousVersion = appendableSource.getVersion();
+        const summary = await appendableSource.appendFrames(
+          projectWrittenFrames(frames),
+        );
 
-        return appendableSource.appendFrames(frames);
+        requestDetectionRefresh(
+          appendableSource,
+          previousVersion,
+          getDisplayedRange(hasOpenEndedFrame(frames)),
+        );
+
+        return summary;
+      },
+
+      async appendLiveDetectionFrame(frame, writeOptions) {
+        if (destroyed) {
+          throw new Error("Media session has been destroyed.");
+        }
+
+        const appendableSource = resolveAppendableSource(
+          sessionDetections,
+          writeOptions,
+        );
+        const previousVersion = appendableSource.getVersion();
+        const [projectedFrame = frame] = projectWrittenFrames([frame]);
+        const summary =
+          await requireLiveDetectionSource(appendableSource).appendLiveFrame(
+            projectedFrame,
+          );
+
+        // Live writes are gated on the displayed instant like any other write.
+        // A result the source dropped as stale changes nothing, and the hold
+        // always closes a live frame, so its journaled interval is exactly the
+        // interval it is selected for.
+        requestDetectionRefresh(
+          appendableSource,
+          previousVersion,
+          getDisplayedRange(false),
+        );
+
+        return summary;
+      },
+
+      async finalizeDetectionCoverage(endTime, writeOptions) {
+        if (destroyed) {
+          throw new Error("Media session has been destroyed.");
+        }
+
+        const appendableSource = resolveAppendableSource(
+          sessionDetections,
+          writeOptions,
+        );
+        const coverageEndTime = endTime ?? renderer.getState().duration;
+
+        if (coverageEndTime === null) {
+          return null;
+        }
+
+        const previousVersion = appendableSource.getVersion();
+        const summary =
+          await requireLiveDetectionSource(appendableSource).finalizeCoverage(
+            coverageEndTime,
+          );
+
+        // Finalizing changes what the displayed instant selects: it closes a
+        // frame that was still open, or extends the last one to the end of
+        // media. Both are writes like any other and need the same redraw.
+        requestDetectionRefresh(
+          appendableSource,
+          previousVersion,
+          getDisplayedRange(false),
+        );
+
+        return summary;
       },
 
       async replaceDetectionFrames(frames, writeOptions) {
@@ -219,8 +422,18 @@ export async function createMediaSession(
           sessionDetections,
           writeOptions,
         );
+        const previousVersion = appendableSource.getVersion();
+        const summary = await appendableSource.replaceFrames(
+          projectWrittenFrames(frames),
+        );
 
-        return appendableSource.replaceFrames(frames);
+        requestDetectionRefresh(
+          appendableSource,
+          previousVersion,
+          getDisplayedRange(hasOpenEndedFrame(frames)),
+        );
+
+        return summary;
       },
 
       async clearDetectionFrames(writeOptions) {
@@ -389,6 +602,59 @@ function resolveAppendableSourceOrNull(
     sessionDetections.appendableSources.values().next().value ??
     null
   );
+}
+
+/**
+ * How far past the displayed instant a write can still change the selection.
+ *
+ * Interval selection never looks ahead, but nearest-frame-index selection snaps
+ * to the closest inference frame, which may sit just after the displayed time.
+ * Composite sources can enable that mode per source, so the widest configured
+ * inference frame wins and plain interval sessions keep a point window.
+ */
+function resolveSelectionLookaheadSeconds(
+  detectionBuffer: DetectionBufferOptions,
+  sources: readonly MediaSessionDetectionSourceOptions[] | undefined,
+): number {
+  const frameIntervals = [
+    detectionBuffer,
+    ...(sources ?? []).map((source) => source.sync),
+  ]
+    .filter(
+      (selection) =>
+        selection?.selectionMode ===
+        DetectionFrameSelectionMode.NearestFrameIndex,
+    )
+    .map((selection) => selection?.frameRate ?? detectionBuffer.frameRate)
+    .filter(
+      (frameRate): frameRate is number =>
+        frameRate !== undefined && frameRate > 0,
+    )
+    .map((frameRate) => 1 / frameRate);
+
+  return frameIntervals.length === 0
+    ? DISPLAY_RANGE_EPSILON_SECONDS
+    : Math.max(...frameIntervals);
+}
+
+/**
+ * Narrows an appendable source to the live ingestion capability.
+ *
+ * Live appends and coverage finalization are optional on
+ * `WritableDetectionFrameSource` so implementations written before they existed
+ * stay assignable. Such a source fails here with a clear message rather than a
+ * `TypeError` at the call site.
+ */
+function requireLiveDetectionSource(
+  source: WritableDetectionFrameSource,
+): LiveWritableDetectionFrameSource {
+  if (!source.appendLiveFrame || !source.finalizeCoverage) {
+    throw new Error(
+      "This detection source does not support live appends or coverage finalization.",
+    );
+  }
+
+  return source as LiveWritableDetectionFrameSource;
 }
 
 function getErrorMessage(error: unknown, fallback: string) {

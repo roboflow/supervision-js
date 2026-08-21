@@ -1,11 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { AnnotationGestureStateKind } from "supervision-js-core";
+import {
+  AnnotationGestureStateKind,
+  KeypointMarkerShape,
+} from "supervision-js-core";
 
 import { createPixiAnnotationOverlayLayer } from "./pixi-annotation-overlay-layer";
 
 function createGraphicsMock() {
   const graphics = {
+    arc: vi.fn(),
     circle: vi.fn(),
     clear: vi.fn(),
     closePath: vi.fn(),
@@ -18,6 +22,7 @@ function createGraphicsMock() {
   };
   for (const method of [
     graphics.circle,
+    graphics.arc,
     graphics.fill,
     graphics.poly,
     graphics.roundRect,
@@ -29,6 +34,38 @@ function createGraphicsMock() {
 }
 
 describe("Pixi annotation overlay presentation", () => {
+  it("does not draw loading overlays for hidden detections", () => {
+    const graphics = createGraphicsMock();
+    const layer = createPixiAnnotationOverlayLayer();
+    layer.attachGraphics(graphics as never);
+
+    layer.draw({
+      frame: {
+        detections: [
+          {
+            className: "player",
+            id: "player-1",
+            rect: { height: 20, width: 30, x: 40, y: 50 },
+          },
+        ],
+        mediaTime: 0,
+      },
+      marquee: null,
+      mediaHeight: 100,
+      mediaWidth: 100,
+      now: 0,
+      pointer: null,
+      selectedDetectionIds: [],
+      viewportScale: 1,
+      visibility: {
+        hiddenClasses: ["player"],
+        loadingDetectionIds: ["player-1"],
+      },
+    });
+
+    expect(graphics.arc).not.toHaveBeenCalled();
+  });
+
   it("fills box creation previews with the configured class treatment", () => {
     const graphics = createGraphicsMock();
     const preview = {
@@ -121,6 +158,83 @@ describe("Pixi annotation overlay presentation", () => {
     expect(graphics.stroke).toHaveBeenCalledWith({
       alpha: 1,
       color: 0xb6ff00,
+      width: 1,
+    });
+  });
+
+  it("renders keypoint editing previews with the configured keypoint style", () => {
+    const graphics = createGraphicsMock();
+    const preview = {
+      className: "person",
+      id: "person-1",
+      keypoints: {
+        edges: [[0, 1] as const],
+        points: [
+          { x: 10, y: 20 },
+          { x: 30, y: 40 },
+        ],
+      },
+      rect: { height: 20, width: 20, x: 20, y: 30 },
+    };
+    const engine = {
+      getState: () => ({
+        activeDetectionId: "person-1",
+        activeHandleId: "kp-1",
+        kind: AnnotationGestureStateKind.Resizing,
+        pointerId: 1,
+        preview,
+      }),
+      hasCreationTool: () => false,
+    };
+    const keypointStyle = {
+      resolve: vi.fn(() => ({
+        edges: [
+          {
+            from: preview.keypoints.points[0]!,
+            stroke: { alpha: 1, color: 0x00ff66, width: 2 },
+            to: preview.keypoints.points[1]!,
+          },
+        ],
+        markers: preview.keypoints.points.map((point, index) => ({
+          fill: { alpha: 1, color: 0x00ff66 },
+          index,
+          point,
+          radius: 4,
+          shape: KeypointMarkerShape.Circle,
+        })),
+      })),
+    };
+    const layer = createPixiAnnotationOverlayLayer(
+      engine as never,
+      undefined,
+      keypointStyle,
+    );
+
+    layer.attachGraphics(graphics as never);
+    layer.draw({
+      frame: undefined,
+      marquee: null,
+      mediaHeight: 100,
+      mediaWidth: 100,
+      now: 0,
+      pointer: null,
+      selectedDetectionIds: [],
+      viewportScale: 2,
+    });
+
+    expect(keypointStyle.resolve).toHaveBeenCalledWith(
+      preview,
+      expect.objectContaining({ selected: true, viewportScale: 2 }),
+    );
+    // The skeleton's box previews with its keypoints: while the source
+    // detection is hidden for the reshape, the preview carries the box fill
+    // and outline so the annotation keeps its look.
+    expect(graphics.roundRect).toHaveBeenCalledWith(10, 20, 20, 20, 0.5);
+    expect(graphics.moveTo).toHaveBeenCalledWith(10, 20);
+    expect(graphics.circle).toHaveBeenCalledTimes(2);
+    expect(graphics.stroke).toHaveBeenCalledWith({
+      alpha: 1,
+      color: 0x00ff66,
       width: 1,
     });
   });
@@ -230,6 +344,92 @@ describe("Pixi annotation overlay presentation", () => {
       alpha: 1,
       color: 0x22c55e,
     });
+  });
+
+  it("draws a move preview in place of the hidden source and moves the handles with it", () => {
+    const graphics = createGraphicsMock();
+    const detection = {
+      id: "box-1",
+      rect: { height: 20, width: 20, x: 20, y: 20 },
+    };
+    const frame = { detections: [detection], mediaTime: 0 };
+    const engine = {
+      getState: () => ({
+        activeDetectionId: "box-1",
+        activeHandleId: null,
+        kind: AnnotationGestureStateKind.Moving,
+        pointerId: 1,
+        preview: { ...detection, rect: { ...detection.rect, x: 50, y: 60 } },
+      }),
+      hasCreationTool: () => false,
+    };
+    const layer = createPixiAnnotationOverlayLayer(engine as never);
+
+    layer.attachGraphics(graphics as never);
+    layer.draw({
+      frame,
+      marquee: null,
+      mediaHeight: 100,
+      mediaWidth: 100,
+      now: 0,
+      pointer: null,
+      selectedDetectionIds: ["box-1"],
+      viewportScale: 1,
+    });
+
+    // The source is hidden while it moves: the overlay draws the preview box
+    // (fill and outline) at the new spot and the handles follow it.
+    expect(graphics.roundRect).toHaveBeenCalledWith(40, 50, 20, 20, 1);
+    expect(graphics.moveTo).toHaveBeenCalledWith(40, 50);
+    expect(graphics.circle).toHaveBeenCalledWith(40, 50, expect.any(Number));
+    expect(graphics.circle).not.toHaveBeenCalledWith(
+      10,
+      10,
+      expect.any(Number),
+    );
+  });
+
+  it("lets keypoint handles hide behind their markers with keypointAlpha 0", () => {
+    const graphics = createGraphicsMock();
+    const frame = {
+      detections: [
+        {
+          id: "pose-1",
+          keypoints: {
+            edges: [],
+            points: [
+              { x: 10, y: 10 },
+              { x: 30, y: 30 },
+            ],
+          },
+          rect: { height: 40, width: 40, x: 20, y: 20 },
+        },
+      ],
+      mediaTime: 0,
+    };
+    const layer = createPixiAnnotationOverlayLayer(undefined, {
+      selectionHandle: { keypointAlpha: 0 },
+    });
+
+    layer.attachGraphics(graphics as never);
+    layer.draw({
+      frame,
+      marquee: null,
+      mediaHeight: 100,
+      mediaWidth: 100,
+      now: 0,
+      pointer: null,
+      selectedDetectionIds: ["pose-1"],
+      viewportScale: 1,
+    });
+
+    // Eight box handles, no discs over the two keypoints.
+    expect(graphics.circle).toHaveBeenCalledTimes(8);
+    expect(graphics.circle).not.toHaveBeenCalledWith(
+      30,
+      30,
+      expect.any(Number),
+    );
   });
 
   it("resolves selection handles from each selected annotation", () => {

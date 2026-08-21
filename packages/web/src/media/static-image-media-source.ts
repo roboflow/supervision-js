@@ -4,6 +4,8 @@ import type {
   DecodedVideoSampleSink,
 } from "#media/media-source";
 import type { MediaRendererSource } from "#types/media-renderer";
+import { MediaSourceError, toMediaSourceError } from "#media/media-errors";
+import { MediaErrorKind } from "supervision-js-core";
 
 export type StaticImageSource =
   | HTMLImageElement
@@ -30,19 +32,25 @@ export function createStaticImageMediaSource(
 ): MediaRendererSource {
   return {
     async open() {
-      if (
-        typeof HTMLImageElement !== "undefined" &&
-        source instanceof HTMLImageElement
-      ) {
-        await waitForImage(source);
-      }
+      try {
+        if (
+          typeof HTMLImageElement !== "undefined" &&
+          source instanceof HTMLImageElement
+        ) {
+          await waitForImage(source);
+        }
 
-      const dimensions = getDimensions(source);
-      return createSingleFrameSource(
-        source,
-        dimensions.width,
-        dimensions.height,
-      );
+        const dimensions = getDimensions(source);
+        return createSingleFrameSource(
+          source,
+          dimensions.width,
+          dimensions.height,
+        );
+      } catch (error) {
+        // Decode and dimension failures leave through a public source, so they
+        // carry a stable kind and preserve the original cause.
+        throw toMediaSourceError(error, "Unable to open image media source.");
+      }
     },
   };
 }
@@ -125,7 +133,10 @@ function getDimensions(source: StaticImageSource | HostFrameSource) {
     return { width: source.naturalWidth, height: source.naturalHeight };
   }
 
-  throw new Error("Static image source dimensions must be greater than zero.");
+  throw new MediaSourceError(
+    MediaErrorKind.Unreadable,
+    "Static image source dimensions must be greater than zero.",
+  );
 }
 
 async function waitForImage(image: HTMLImageElement) {
@@ -140,7 +151,10 @@ async function waitForImage(image: HTMLImageElement) {
     image.addEventListener("load", () => resolve(), { once: true });
     image.addEventListener(
       "error",
-      () => reject(new Error("Unable to load image.")),
+      () =>
+        reject(
+          new MediaSourceError(MediaErrorKind.Network, "Unable to load image."),
+        ),
       { once: true },
     );
   });

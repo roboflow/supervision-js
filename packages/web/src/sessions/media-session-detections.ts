@@ -77,6 +77,7 @@ export async function prepareSessionDetections(options: {
     const writableSource = createWritableDetectionFrameSource({
       chunkDurationSeconds: appendableDetections.chunkDurationSeconds,
       datasetId: appendableDetections.datasetId,
+      live: appendableDetections.live,
       retention,
       store,
     });
@@ -217,6 +218,7 @@ async function createSessionWritableDetectionSource(options: {
   const writableSource = createWritableDetectionFrameSource({
     chunkDurationSeconds: options.appendable.chunkDurationSeconds,
     datasetId: options.appendable.datasetId,
+    live: options.appendable.live,
     retention,
     store,
   });
