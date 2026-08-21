@@ -44,6 +44,8 @@ import {
 } from "supervision-js-react-native/react";
 import {
   useReactNativeLiveInference,
+  type ReactNativeGhostCoachIntent,
+  type ReactNativeGhostCoachRuntime,
   type ReactNativeLiveInferenceDetection,
   type ReactNativeLiveInferenceError,
   type ReactNativeLiveInferenceReadout,
@@ -88,7 +90,7 @@ import {
   type InstantCvZoneShape,
 } from "supervision-js-react-native/adapters/live-inference";
 
-type DemoMode = "home" | "static" | "live" | "video" | "instant";
+type DemoMode = "home" | "static" | "live" | "video" | "instant" | "sports";
 type LiveInferenceMode = "segmentation" | "pose";
 type LiveDetectionDisplayMode = "masks" | "boxes";
 type LiveClassEffect = "redact" | "spotlight";
@@ -186,6 +188,8 @@ export default function App() {
     (nextMode: DemoMode) => {
       if (nextMode === "instant") {
         setLiveInferenceMode(resolveInstantCvInferenceMode(instantRecipe));
+      } else if (nextMode === "sports") {
+        setLiveInferenceMode("pose");
       }
 
       setMode(nextMode);
@@ -207,7 +211,7 @@ export default function App() {
     );
   }
 
-  if (mode === "live" || mode === "instant") {
+  if (mode === "live" || mode === "instant" || mode === "sports") {
     return (
       <LiveCameraProof
         inferenceMode={liveInferenceMode}
@@ -254,7 +258,16 @@ function InstantCvHome(props: {
               <Text style={styles.subtitle}>React Native demo</Text>
             </View>
           </View>
-          <ModeSwitch mode="home" onModeChange={props.onModeChange} />
+          <View style={styles.homeExperienceSwitch}>
+            <ModeSwitch mode="home" onModeChange={props.onModeChange} />
+            <TouchableOpacity
+              accessibilityLabel="Open Sports demo"
+              onPress={() => props.onModeChange("sports")}
+              style={styles.homeSportsButton}
+            >
+              <Text style={styles.homeSportsButtonText}>Sports</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         <View style={styles.homeHero}>
@@ -790,6 +803,7 @@ function LiveCameraProof(props: {
   readonly segmentation: LiveSegmentation;
 }) {
   const isInstantCv = props.mode === "instant";
+  const isSports = props.mode === "sports";
   const window = useWindowDimensions();
   const [cameraPosition, setCameraPosition] =
     useState<LiveCameraPosition>("back");
@@ -834,6 +848,17 @@ function LiveCameraProof(props: {
   const [instantMessage, setInstantMessage] = useState(
     "Hold a person to teach the golden pose.",
   );
+  const [ghostCoachIntent, setGhostCoachIntent] =
+    useState<ReactNativeGhostCoachIntent>("idle");
+  const [ghostCoachRuntime, setGhostCoachRuntime] =
+    useState<ReactNativeGhostCoachRuntime>({
+      cue: "Step into frame to begin",
+      match: 0,
+      progress: 0,
+      sampleCount: 0,
+      status: "finding-athlete",
+    });
+  const [ghostReplayPosition, setGhostReplayPosition] = useState(0.5);
   const instantGestureRef = useRef<{
     readonly canvasStart: { readonly x: number; readonly y: number };
     readonly freeShapePoints: InstantCvNormalizedPoint[];
@@ -922,6 +947,9 @@ function LiveCameraProof(props: {
   useEffect(() => {
     setAwaitingSyncedFrame(true);
   }, [isInstantCv]);
+  useEffect(() => {
+    if (!isSports) setGhostCoachIntent("idle");
+  }, [isSports]);
   useEffect(() => {
     if (isInstantCv) {
       return;
@@ -1448,10 +1476,17 @@ function LiveCameraProof(props: {
     classEffects:
       !isInstantCv || instantRecipe === "privacy" ? classEffects : {},
     extension: liveExtension,
+    ghostCoach: {
+      active: isSports,
+      intent: ghostCoachIntent,
+      reference: null,
+      replayPosition: ghostReplayPosition,
+    },
     inferenceMode: props.inferenceMode,
     mediaRect: liveLayout.mediaRect,
     onDetections: reportLiveDetections,
     onError: reportLiveError,
+    onGhostCoachRuntime: setGhostCoachRuntime,
     onInteraction: reportInstantCvPick,
     onReadout: reportLiveFrame,
     onRuleRuntime: reportInstantCvRuntime,
@@ -1582,7 +1617,16 @@ function LiveCameraProof(props: {
           </View>
         ) : null}
 
-        {isInstantCv ? (
+        {isSports ? (
+          <GhostCoachHud
+            intent={ghostCoachIntent}
+            onIntentChange={setGhostCoachIntent}
+            onModeChange={props.onModeChange}
+            onReplayPositionChange={setGhostReplayPosition}
+            replayPosition={ghostReplayPosition}
+            runtime={ghostCoachRuntime}
+          />
+        ) : isInstantCv ? (
           <InstantCvHud
             canRunCamera={Boolean(canRunCamera)}
             message={instantMessage}
@@ -2428,6 +2472,132 @@ function ClassEffectMenu(props: {
   );
 }
 
+function GhostCoachHud(props: {
+  readonly intent: ReactNativeGhostCoachIntent;
+  readonly onIntentChange: (intent: ReactNativeGhostCoachIntent) => void;
+  readonly onModeChange: (mode: DemoMode) => void;
+  readonly onReplayPositionChange: (position: number) => void;
+  readonly replayPosition: number;
+  readonly runtime: ReactNativeGhostCoachRuntime;
+}) {
+  const coaching = props.intent === "coach";
+  const replay = props.intent === "replay";
+  const recording = props.intent === "recording";
+  const referenceReady = props.runtime.status === "ready";
+
+  return (
+    <>
+      <View style={styles.ghostTopBar}>
+        <View>
+          <Text style={styles.ghostEyebrow}>SPORTS / GHOST COACH</Text>
+          <Text style={styles.ghostTitle}>Your movement, live.</Text>
+        </View>
+        <TouchableOpacity
+          onPress={() => props.onModeChange("home")}
+          style={styles.ghostClassicButton}
+        >
+          <Text style={styles.ghostClassicButtonText}>Classic</Text>
+        </TouchableOpacity>
+      </View>
+      <View style={styles.ghostCueCard}>
+        <Text style={styles.ghostCue}>{props.runtime.cue}</Text>
+        <View style={styles.ghostMetricRow}>
+          <Text style={styles.ghostMetric}>
+            {props.runtime.sampleCount} poses
+          </Text>
+          <Text style={styles.ghostMetric}>{props.runtime.match}% match</Text>
+          <Text style={styles.ghostMetric}>
+            {Math.round(props.runtime.progress * 100)}% sequence
+          </Text>
+        </View>
+      </View>
+      <View style={styles.ghostActionDock}>
+        {props.intent === "idle" ||
+        props.runtime.status === "finding-athlete" ? (
+          <TouchableOpacity
+            onPress={() => props.onIntentChange("recording")}
+            style={styles.ghostPrimaryButton}
+          >
+            <Text style={styles.ghostPrimaryButtonText}>Start recording</Text>
+          </TouchableOpacity>
+        ) : null}
+        {recording ? (
+          <TouchableOpacity
+            onPress={() => props.onIntentChange("finish-recording")}
+            style={styles.ghostPrimaryButton}
+          >
+            <Text style={styles.ghostPrimaryButtonText}>Finish recording</Text>
+          </TouchableOpacity>
+        ) : null}
+        {props.runtime.status === "needs-more-poses" ? (
+          <TouchableOpacity
+            onPress={() => props.onIntentChange("recording")}
+            style={styles.ghostPrimaryButton}
+          >
+            <Text style={styles.ghostPrimaryButtonText}>Keep recording</Text>
+          </TouchableOpacity>
+        ) : null}
+        {referenceReady && !coaching && !replay ? (
+          <TouchableOpacity
+            onPress={() => props.onIntentChange("coach")}
+            style={styles.ghostPrimaryButton}
+          >
+            <Text style={styles.ghostPrimaryButtonText}>Compare live</Text>
+          </TouchableOpacity>
+        ) : null}
+        {coaching ? (
+          <>
+            <TouchableOpacity
+              onPress={() => props.onIntentChange("replay")}
+              style={styles.ghostPrimaryButton}
+            >
+              <Text style={styles.ghostPrimaryButtonText}>Open Rep Lab</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => props.onIntentChange("recording")}
+              style={styles.ghostPrimaryButton}
+            >
+              <Text style={styles.ghostPrimaryButtonText}>Record again</Text>
+            </TouchableOpacity>
+          </>
+        ) : null}
+        {replay ? (
+          <View style={styles.ghostLabRow}>
+            <TouchableOpacity
+              onPress={() =>
+                props.onReplayPositionChange(
+                  Math.max(0, props.replayPosition - 0.1),
+                )
+              }
+              style={styles.ghostLabButton}
+            >
+              <Text style={styles.ghostLabButtonText}>‹</Text>
+            </TouchableOpacity>
+            <Text style={styles.ghostLabLabel}>
+              REP LAB · {Math.round(props.replayPosition * 100)}% sequence
+            </Text>
+            <TouchableOpacity
+              onPress={() =>
+                props.onReplayPositionChange(
+                  Math.min(1, props.replayPosition + 0.1),
+                )
+              }
+              style={styles.ghostLabButton}
+            >
+              <Text style={styles.ghostLabButtonText}>›</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => props.onIntentChange("coach")}
+              style={styles.ghostLabBack}
+            >
+              <Text style={styles.ghostLabBackText}>Live</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+      </View>
+    </>
+  );
+}
 const DEMO_MODE_OPTIONS: readonly {
   readonly label: string;
   readonly mode: DemoMode;
@@ -2437,6 +2607,7 @@ const DEMO_MODE_OPTIONS: readonly {
   { label: "Live", mode: "live" },
   { label: "Video", mode: "video" },
   { label: "Instant CV", mode: "instant" },
+  { label: "Sports", mode: "sports" },
 ];
 
 function ModeSwitch(props: {
@@ -2878,6 +3049,22 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     lineHeight: 17,
     maxWidth: 640,
+  },
+  homeExperienceSwitch: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 8,
+  },
+  homeSportsButton: {
+    backgroundColor: "#312e81",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  homeSportsButtonText: {
+    color: "#ffffff",
+    fontSize: 11,
+    fontWeight: "900",
   },
   homeHeader: {
     alignItems: "center",
@@ -3331,6 +3518,131 @@ const styles = StyleSheet.create({
     right: 14,
     top: 58,
     zIndex: 6,
+  },
+  ghostActionDock: {
+    alignItems: "center",
+    bottom: 34,
+    gap: 10,
+    left: 18,
+    position: "absolute",
+    right: 18,
+    zIndex: 8,
+  },
+  ghostClassicButton: {
+    backgroundColor: "rgba(15, 23, 42, 0.78)",
+    borderColor: "rgba(196, 181, 253, 0.55)",
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  ghostClassicButtonText: {
+    color: "#ede9fe",
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  ghostCue: {
+    color: "#f5f3ff",
+    fontSize: 15,
+    fontWeight: "900",
+  },
+  ghostCueCard: {
+    backgroundColor: "rgba(15, 23, 42, 0.74)",
+    borderColor: "rgba(110, 231, 183, 0.42)",
+    borderRadius: 16,
+    borderWidth: 1,
+    gap: 8,
+    left: 18,
+    padding: 13,
+    position: "absolute",
+    right: 18,
+    top: 124,
+    zIndex: 8,
+  },
+  ghostEyebrow: {
+    color: "#a7f3d0",
+    fontSize: 10,
+    fontWeight: "900",
+    letterSpacing: 1.3,
+  },
+  ghostLabBack: {
+    paddingHorizontal: 8,
+    paddingVertical: 7,
+  },
+  ghostLabBackText: {
+    color: "#c4b5fd",
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  ghostLabButton: {
+    alignItems: "center",
+    backgroundColor: "#312e81",
+    borderRadius: 16,
+    height: 32,
+    justifyContent: "center",
+    width: 32,
+  },
+  ghostLabButtonText: {
+    color: "#ffffff",
+    fontSize: 21,
+    fontWeight: "900",
+    lineHeight: 24,
+  },
+  ghostLabLabel: {
+    color: "#e9d5ff",
+    fontSize: 10,
+    fontWeight: "900",
+    letterSpacing: 0.7,
+  },
+  ghostLabRow: {
+    alignItems: "center",
+    backgroundColor: "rgba(15, 23, 42, 0.9)",
+    borderColor: "rgba(196, 181, 253, 0.5)",
+    borderRadius: 18,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 8,
+    padding: 6,
+  },
+  ghostMetric: {
+    color: "#bbf7d0",
+    fontSize: 11,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "800",
+  },
+  ghostMetricRow: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  ghostPrimaryButton: {
+    alignItems: "center",
+    backgroundColor: "#6d28d9",
+    borderColor: "#c4b5fd",
+    borderRadius: 999,
+    borderWidth: 1,
+    minWidth: 154,
+    paddingHorizontal: 22,
+    paddingVertical: 13,
+  },
+  ghostPrimaryButtonText: {
+    color: "#ffffff",
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  ghostTitle: {
+    color: "#ffffff",
+    fontSize: 19,
+    fontWeight: "900",
+  },
+  ghostTopBar: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    left: 18,
+    position: "absolute",
+    right: 18,
+    top: 58,
+    zIndex: 8,
   },
   metric: {
     backgroundColor: DEMO_COLORS.surface,
