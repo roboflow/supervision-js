@@ -1,15 +1,17 @@
 import type {
-  ColdDetectionFrameStore,
   ColdDetectionFrameStoreWriteSummary,
   DetectionFrameRetentionOptions,
   DetectionFrameSourceVersionRange,
-  WritableDetectionFrameSource,
+  LiveWritableDetectionFrameSource,
+  WritableDetectionFrameSourceOptions,
 } from "#types/detection-timeline";
 import { DetectionFrameRetentionMode as RetentionMode } from "#types/detection-timeline";
 import type { DetectionFrame } from "#types/detections";
 
 const RANGE_EPSILON_SECONDS = 1e-6;
 const MAX_CHANGED_RANGE_JOURNAL_LENGTH = 512;
+const DEFAULT_LIVE_HOLD_SECONDS = 60;
+const NO_COVERAGE_INVALIDATION: CoverageInvalidation = { ranges: [] };
 
 interface VersionedRange extends DetectionFrameSourceVersionRange {
   readonly version: number;
@@ -21,18 +23,45 @@ interface RangeWaiter {
   resolve(): void;
 }
 
+/**
+ * Coverage a write removed, as the journal has to describe it.
+ */
+interface CoverageInvalidation {
+  readonly ranges: readonly DetectionFrameSourceVersionRange[];
+}
+
 interface AvailableRange {
   endTime: number;
   startTime: number;
 }
 
-export function createWritableDetectionFrameSource(options: {
-  readonly store: ColdDetectionFrameStore;
-  readonly datasetId: string;
-  readonly chunkDurationSeconds?: number;
-  readonly retention?: DetectionFrameRetentionOptions;
-}): WritableDetectionFrameSource {
+type RetentionResult =
+  | { readonly kind: "unchanged" }
+  | {
+      readonly kind: "pruned";
+      readonly prunedRange: DetectionFrameSourceVersionRange;
+      readonly summary: ColdDetectionFrameStoreWriteSummary;
+    }
+  | {
+      readonly kind: "rewritten";
+      readonly summary: ColdDetectionFrameStoreWriteSummary;
+    };
+
+export function createWritableDetectionFrameSource(
+  options: WritableDetectionFrameSourceOptions,
+): LiveWritableDetectionFrameSource {
+  const liveHoldSeconds = resolveLiveHoldSeconds(options.live?.holdSeconds);
   let summary: ColdDetectionFrameStoreWriteSummary | null = null;
+  let latestFrame: DetectionFrame | null = null;
+  let heldLiveFrame: DetectionFrame | null = null;
+  // Newest live `mediaTime` accepted so far. It survives retention so a late
+  // result cannot reopen coverage the source already moved past.
+  let liveFrontierTime: number | null = null;
+  // Newest media time actually covered by producer-declared data. Live frames
+  // are written with a synthetic hold end, so the summary end time cannot be
+  // used to place the retention window without pushing it into the future.
+  let coverageFrontierTime: number | null = null;
+  let writeQueue: Promise<unknown> = Promise.resolve();
   let version = 0;
   let allRangeVersion = 0;
   let journalFloorVersion = 0;
@@ -50,6 +79,8 @@ export function createWritableDetectionFrameSource(options: {
   const recordRangeWrite = (
     nextSummary: ColdDetectionFrameStoreWriteSummary,
     changedSourceRanges: readonly DetectionFrameSourceVersionRange[],
+    invalidation: CoverageInvalidation,
+    prunedRange?: DetectionFrameSourceVersionRange,
   ) => {
     summary = nextSummary;
     version += 1;
@@ -57,6 +88,20 @@ export function createWritableDetectionFrameSource(options: {
     for (const changedRange of changedSourceRanges) {
       changedRanges.push({ ...changedRange, version });
       recordAvailableRange(changedRange, availableRanges);
+    }
+
+    for (const invalidatedRange of invalidation.ranges) {
+      // Coverage a write took away is journaled but never made available: a
+      // consumer parked there has to redraw, and nothing new can be loaded.
+      changedRanges.push({ ...invalidatedRange, version });
+    }
+
+    if (prunedRange) {
+      // Evicting old history is a change to that range only. Recording it
+      // alongside the append keeps a buffered timeline patching two small
+      // ranges instead of invalidating and rebuilding everything it retains.
+      changedRanges.push({ ...prunedRange, version });
+      dropAvailableRangesBefore(prunedRange.endTime, availableRanges);
     }
 
     compactChangedRangeJournal();
@@ -96,49 +141,163 @@ export function createWritableDetectionFrameSource(options: {
     async appendFrames(frames) {
       assertActive();
 
-      const nextSummary = await options.store.appendFrames(
-        writeOptions(frames),
-      );
+      return enqueueWrite(async () => {
+        const nextSummary = await options.store.appendFrames(
+          writeOptions(frames),
+        );
+        assertActive();
+        const changedSourceRanges = getDetectionFrameRanges(frames);
+        const invalidation = getInvalidatedCoverage(
+          frames,
+          changedSourceRanges,
+        );
+
+        recordLatestFrame(frames);
+        recordCoverageFrontierFromFrames(frames);
+
+        return retainAndRecord(nextSummary, changedSourceRanges, invalidation);
+      });
+    },
+
+    async appendLiveFrame(frame) {
       assertActive();
 
-      const changedSourceRanges = getDetectionFrameRanges(frames);
-      const retainedSummary = await applyRetention(nextSummary);
+      return enqueueWrite(async () => {
+        if (isStaleLiveFrame(frame)) {
+          // A result older than the live frontier no longer describes what is
+          // on screen. Writing it would reopen coverage the source already
+          // closed, so the newest causal frame simply wins.
+          return summary ? { ...summary } : createEmptyWriteSummary();
+        }
+
+        const framesToWrite = createLiveFrameWrite(frame);
+        const nextSummary = await options.store.appendFrames(
+          writeOptions(framesToWrite),
+        );
+        assertActive();
+        const changedSourceRanges = getDetectionFrameRanges(framesToWrite);
+        const invalidation = getInvalidatedCoverage(
+          framesToWrite,
+          changedSourceRanges,
+        );
+
+        heldLiveFrame = framesToWrite.at(-1) ?? null;
+        liveFrontierTime = Math.max(
+          liveFrontierTime ?? frame.mediaTime,
+          frame.mediaTime,
+        );
+        recordLatestFrame(framesToWrite);
+        // The hold end is a placeholder for "still current", not covered data.
+        recordCoverageFrontier(getFrameEndTime(frame));
+
+        return retainAndRecord(nextSummary, changedSourceRanges, invalidation);
+      });
+    },
+
+    async finalizeCoverage(endTime) {
       assertActive();
 
-      if (retainedSummary !== nextSummary) {
-        return recordAllRangesWrite(retainedSummary);
+      if (!Number.isFinite(endTime)) {
+        throw new RangeError("finalizeCoverage requires a finite endTime.");
       }
 
-      if (changedSourceRanges.length === 0) {
-        summary = nextSummary;
-        return nextSummary;
-      }
+      return enqueueWrite(async () => {
+        const frameToFinalize = latestFrame;
 
-      return recordRangeWrite(nextSummary, changedSourceRanges);
+        if (
+          !frameToFinalize ||
+          // A frame that starts at or after the end of media cannot describe a
+          // non-empty terminal interval.
+          frameToFinalize.mediaTime >= endTime ||
+          getFrameEndTime(frameToFinalize) === endTime
+        ) {
+          return summary ? { ...summary } : null;
+        }
+
+        const previousEndTime = getFrameEndTime(frameToFinalize);
+        const finalizedFrame = { ...frameToFinalize, endTime };
+        const nextSummary = await options.store.appendFrames(
+          writeOptions([finalizedFrame]),
+        );
+        assertActive();
+        const changedSourceRanges = [
+          {
+            endTime: Math.max(endTime, previousEndTime),
+            startTime: frameToFinalize.mediaTime,
+          },
+        ];
+        const invalidation = getInvalidatedCoverage(
+          [finalizedFrame],
+          changedSourceRanges,
+        );
+
+        latestFrame = finalizedFrame;
+
+        if (
+          heldLiveFrame &&
+          haveSameDetectionFrameIdentity(heldLiveFrame, finalizedFrame)
+        ) {
+          heldLiveFrame = finalizedFrame;
+        }
+
+        coverageFrontierTime = endTime;
+
+        const finalSummary = await retainAndRecord(
+          nextSummary,
+          changedSourceRanges,
+          // Finalizing usually closes at the end of media, where the tail an
+          // open-ended frame gives up is unreachable. The caller may finalize
+          // earlier, though, so report it rather than assume.
+          invalidation,
+        );
+
+        // Closing a held live frame shortens coverage. Reported availability
+        // has to shrink with it, or a playback gate would still believe the
+        // source covers time past the end of media.
+        clipAvailableRangesAfter(endTime);
+
+        return finalSummary;
+      });
     },
 
     async replaceFrames(frames) {
       assertActive();
 
-      const nextSummary = await options.store.putFrames(writeOptions(frames));
-      assertActive();
-      const retainedSummary = await applyRetention(nextSummary);
-      assertActive();
+      return enqueueWrite(async () => {
+        const nextSummary = await options.store.putFrames(writeOptions(frames));
+        assertActive();
+        latestFrame = null;
+        heldLiveFrame = null;
+        liveFrontierTime = null;
+        coverageFrontierTime = null;
+        recordLatestFrame(frames);
+        recordCoverageFrontierFromFrames(frames);
+        const retention = await applyRetention(nextSummary);
+        assertActive();
 
-      return recordAllRangesWrite(retainedSummary);
+        return recordAllRangesWrite(
+          retention.kind === "unchanged" ? nextSummary : retention.summary,
+        );
+      });
     },
 
     async clear() {
       assertActive();
 
-      await options.store.clearDataset(options.datasetId);
-      assertActive();
-      summary = null;
-      version += 1;
-      allRangeVersion = version;
-      journalFloorVersion = version;
-      changedRanges.length = 0;
-      availableRanges.length = 0;
+      await enqueueWrite(async () => {
+        await options.store.clearDataset(options.datasetId);
+        assertActive();
+        summary = null;
+        latestFrame = null;
+        heldLiveFrame = null;
+        liveFrontierTime = null;
+        coverageFrontierTime = null;
+        version += 1;
+        allRangeVersion = version;
+        journalFloorVersion = version;
+        changedRanges.length = 0;
+        availableRanges.length = 0;
+      });
     },
 
     async loadFrames(startTime, endTime) {
@@ -181,29 +340,13 @@ export function createWritableDetectionFrameSource(options: {
         return version;
       }
 
-      return changedRanges.reduce(
-        (rangeVersion, changedRange) =>
-          rangesOverlap(range, changedRange)
-            ? Math.max(rangeVersion, changedRange.version)
-            : rangeVersion,
-        Math.max(allRangeVersion, journalFloorVersion),
-      );
+      return getRangeVersion(range);
     },
 
     getChangesSince(previousVersion, ranges) {
       const relevantVersion = ranges.reduce(
-        (rangeVersion, range) =>
-          Math.max(
-            rangeVersion,
-            changedRanges.reduce(
-              (changedVersion, changedRange) =>
-                rangesOverlap(range, changedRange)
-                  ? Math.max(changedVersion, changedRange.version)
-                  : changedVersion,
-              Math.max(allRangeVersion, journalFloorVersion),
-            ),
-          ),
-        Math.max(allRangeVersion, journalFloorVersion),
+        (rangeVersion, range) => Math.max(rangeVersion, getRangeVersion(range)),
+        getReloadFloorVersion(),
       );
 
       if (relevantVersion <= previousVersion) {
@@ -214,10 +357,7 @@ export function createWritableDetectionFrameSource(options: {
         };
       }
 
-      if (
-        previousVersion < allRangeVersion ||
-        previousVersion < journalFloorVersion
-      ) {
+      if (previousVersion < getReloadFloorVersion()) {
         return {
           ranges: [],
           requiresReload: true,
@@ -225,13 +365,33 @@ export function createWritableDetectionFrameSource(options: {
         };
       }
 
+      // Clipped to the requested ranges: a consumer gets back exactly the part
+      // of the change it asked about, and an unbounded invalidation stays a
+      // bounded, loadable answer.
       const changedSourceRanges = changedRanges
-        .filter(
-          (changedRange) =>
-            changedRange.version > previousVersion &&
-            ranges.some((range) => rangesOverlap(range, changedRange)),
-        )
-        .map(({ endTime, startTime }) => ({ endTime, startTime }));
+        .filter((changedRange) => changedRange.version > previousVersion)
+        .flatMap((changedRange) =>
+          ranges
+            .filter((range) => rangesOverlap(range, changedRange))
+            .map((range) => {
+              const startTime = Math.max(
+                range.startTime,
+                changedRange.startTime,
+              );
+              const endTime = Math.min(range.endTime, changedRange.endTime);
+
+              return {
+                // An unbounded ask against an unbounded invalidation would
+                // otherwise hand back an infinite range, and a consumer would
+                // take it straight to `loadFrames`. Nothing past the coverage
+                // the source knows about can be loaded.
+                endTime: Number.isFinite(endTime)
+                  ? endTime
+                  : Math.max(startTime, getKnownEndTime()),
+                startTime,
+              };
+            }),
+        );
 
       return {
         ranges: mergeRanges(changedSourceRanges),
@@ -262,9 +422,153 @@ export function createWritableDetectionFrameSource(options: {
     }
   }
 
+  /**
+   * Oldest version the journal can still describe incrementally. Anything
+   * older has to reload, because replacement, clearing, or journal compaction
+   * dropped the intervening changes.
+   */
+  function getReloadFloorVersion() {
+    return Math.max(allRangeVersion, journalFloorVersion);
+  }
+
+  /**
+   * Latest media time the source can actually serve frames for.
+   */
+  function getKnownEndTime() {
+    return Math.max(coverageFrontierTime ?? 0, summary?.endTime ?? 0);
+  }
+
+  function getRangeVersion(range: DetectionFrameSourceVersionRange) {
+    return changedRanges.reduce(
+      (rangeVersion, changedRange) =>
+        rangesOverlap(range, changedRange)
+          ? Math.max(rangeVersion, changedRange.version)
+          : rangeVersion,
+      getReloadFloorVersion(),
+    );
+  }
+
+  /**
+   * Runs mutating writes one at a time.
+   *
+   * Every write reads the held live frame, the latest frame, and the coverage
+   * frontier before it awaits storage. Without serialization two concurrent
+   * live appends would both observe the pre-write state and both stay open,
+   * which is exactly the stale overlay live semantics exist to prevent.
+   */
+  function enqueueWrite<TResult>(
+    run: () => Promise<TResult>,
+  ): Promise<TResult> {
+    const result = writeQueue.then(() => {
+      assertActive();
+
+      return run();
+    });
+
+    writeQueue = result.then(
+      () => undefined,
+      () => undefined,
+    );
+
+    return result;
+  }
+
+  function isStaleLiveFrame(frame: DetectionFrame) {
+    if (liveFrontierTime === null || frame.mediaTime > liveFrontierTime) {
+      return false;
+    }
+
+    // A frame at the frontier that shares the held frame's identity is a
+    // revision of the current result, not a late duplicate of an older one.
+    return !(
+      heldLiveFrame && haveSameDetectionFrameIdentity(heldLiveFrame, frame)
+    );
+  }
+
+  function recordCoverageFrontier(endTime: number) {
+    coverageFrontierTime =
+      coverageFrontierTime === null
+        ? endTime
+        : Math.max(coverageFrontierTime, endTime);
+  }
+
+  function recordCoverageFrontierFromFrames(frames: readonly DetectionFrame[]) {
+    for (const frame of frames) {
+      recordCoverageFrontier(getFrameEndTime(frame));
+    }
+  }
+
+  function clipAvailableRangesAfter(endTime: number) {
+    let writeIndex = 0;
+
+    for (const range of availableRanges) {
+      if (range.startTime >= endTime) {
+        continue;
+      }
+
+      availableRanges[writeIndex] = {
+        endTime: Math.min(range.endTime, endTime),
+        startTime: range.startTime,
+      };
+      writeIndex += 1;
+    }
+
+    availableRanges.length = writeIndex;
+  }
+
+  function createEmptyWriteSummary(): ColdDetectionFrameStoreWriteSummary {
+    return {
+      chunkCount: 0,
+      chunkDurationSeconds: options.chunkDurationSeconds ?? 1,
+      datasetId: options.datasetId,
+      detectionCount: 0,
+      endTime: null,
+      frameCount: 0,
+      startTime: null,
+    };
+  }
+
+  /**
+   * Applies retention and records the result as an incremental change when the
+   * store can prune in place, or as a full rewrite when it cannot.
+   */
+  async function retainAndRecord(
+    nextSummary: ColdDetectionFrameStoreWriteSummary,
+    changedSourceRanges: readonly DetectionFrameSourceVersionRange[],
+    invalidation: CoverageInvalidation = NO_COVERAGE_INVALIDATION,
+  ) {
+    const retention = await applyRetention(nextSummary);
+    assertActive();
+
+    if (retention.kind === "rewritten") {
+      return recordAllRangesWrite(retention.summary);
+    }
+
+    if (retention.kind === "unchanged") {
+      if (
+        changedSourceRanges.length === 0 &&
+        invalidation.ranges.length === 0
+      ) {
+        summary = nextSummary;
+        return nextSummary;
+      }
+
+      return recordRangeWrite(nextSummary, changedSourceRanges, invalidation);
+    }
+
+    forgetFramesBefore(retention.prunedRange.endTime);
+
+    return recordRangeWrite(
+      retention.summary,
+      changedSourceRanges,
+      invalidation,
+      retention.prunedRange,
+    );
+  }
+
   async function applyRetention(
     nextSummary: ColdDetectionFrameStoreWriteSummary,
-  ) {
+  ): Promise<RetentionResult> {
     const retention = options.retention;
 
     if (
@@ -272,7 +576,7 @@ export function createWritableDetectionFrameSource(options: {
       !shouldApplyWindowRetention(retention) ||
       nextSummary.endTime === null
     ) {
-      return nextSummary;
+      return { kind: "unchanged" };
     }
 
     const retentionWindowSeconds = retention.windowSeconds;
@@ -285,25 +589,158 @@ export function createWritableDetectionFrameSource(options: {
       throw new Error("retention.windowSeconds must be greater than 0.");
     }
 
+    // Place the window against real producer coverage. A live frame held open
+    // for `holdSeconds` reports a summary end far in the future, and anchoring
+    // eviction there would evict everything the producer just wrote.
     const retentionStartTime = Math.max(
       0,
-      nextSummary.endTime - retentionWindowSeconds,
+      Math.min(
+        coverageFrontierTime ?? nextSummary.endTime,
+        nextSummary.endTime,
+      ) - retentionWindowSeconds,
     );
 
     if (
       nextSummary.startTime !== null &&
       nextSummary.startTime + RANGE_EPSILON_SECONDS >= retentionStartTime
     ) {
-      return nextSummary;
+      return { kind: "unchanged" };
     }
 
+    if (options.store.pruneFrames) {
+      return {
+        kind: "pruned",
+        prunedRange: {
+          endTime: retentionStartTime,
+          startTime: nextSummary.startTime ?? 0,
+        },
+        summary: await options.store.pruneFrames({
+          datasetId: options.datasetId,
+          startTime: retentionStartTime,
+        }),
+      };
+    }
+
+    // Stores without in-place pruning still get a correct retention window,
+    // at the cost of reloading and rewriting everything they keep.
     const retainedFrames = await options.store.loadFrames({
       datasetId: options.datasetId,
       endTime: nextSummary.endTime,
       startTime: retentionStartTime,
     });
 
-    return options.store.putFrames(writeOptions(retainedFrames));
+    return {
+      kind: "rewritten",
+      summary: await options.store.putFrames(writeOptions(retainedFrames)),
+    };
+  }
+
+  /**
+   * Builds the one or two frames a live append writes: the newest frame held
+   * open, plus the previously held frame closed where the newest begins.
+   */
+  function createLiveFrameWrite(frame: DetectionFrame) {
+    const openFrame: DetectionFrame = {
+      ...frame,
+      endTime: Math.max(
+        frame.endTime ?? frame.mediaTime,
+        frame.mediaTime + liveHoldSeconds,
+      ),
+    };
+    const heldFrame = heldLiveFrame;
+
+    // Stale results are rejected before this point, so a held frame that is
+    // neither the same frame nor already closed always ends strictly later.
+    if (
+      !heldFrame ||
+      haveSameDetectionFrameIdentity(heldFrame, openFrame) ||
+      getFrameEndTime(heldFrame) <= frame.mediaTime
+    ) {
+      return [openFrame];
+    }
+
+    return [{ ...heldFrame, endTime: frame.mediaTime }, openFrame];
+  }
+
+  function recordLatestFrame(frames: readonly DetectionFrame[]) {
+    for (const frame of frames) {
+      if (
+        !latestFrame ||
+        compareDetectionFrames(frame, latestFrame) > 0 ||
+        // A write that shares the tracked frame's identity replaces its stored
+        // record. Keeping the superseded contents here would let a later
+        // `finalizeCoverage` write them back over the revision.
+        haveSameDetectionFrameIdentity(frame, latestFrame)
+      ) {
+        latestFrame = frame;
+      }
+    }
+  }
+
+  /**
+   * Coverage a write takes away from a frame the source already wrote.
+   *
+   * The journal describes a write by the interval it covers, which is enough
+   * while writes only add. Rewriting a frame with a shorter interval, or at a
+   * different time, instead stops covering times the new interval never
+   * mentions, and a consumer parked in one of them would keep showing a frame
+   * the source no longer selects.
+   *
+   * A frame without an `endTime` was selected with no upper bound, so what it
+   * gives up is genuinely unbounded and is journaled that way. The journal
+   * stays range-scoped either way: a consumer asking about times the write
+   * never touched still hears that nothing changed.
+   */
+  function getInvalidatedCoverage(
+    frames: readonly DetectionFrame[],
+    coveredRanges: readonly DetectionFrameSourceVersionRange[],
+  ): CoverageInvalidation {
+    const invalidatedRanges: DetectionFrameSourceVersionRange[] = [];
+
+    for (const frame of frames) {
+      for (const trackedFrame of [latestFrame, heldLiveFrame]) {
+        if (
+          !trackedFrame ||
+          !haveSameDetectionFrameIdentity(trackedFrame, frame)
+        ) {
+          continue;
+        }
+
+        const previousRange = {
+          endTime: trackedFrame.endTime ?? Number.POSITIVE_INFINITY,
+          startTime: trackedFrame.mediaTime,
+        };
+        const nextEndTime = frame.endTime ?? Number.POSITIVE_INFINITY;
+
+        if (
+          trackedFrame.mediaTime >= frame.mediaTime &&
+          previousRange.endTime <= nextEndTime
+        ) {
+          continue;
+        }
+
+        // A live append closes the held frame and reopens it further out in the
+        // same write, so the write's own range already describes the tail. Only
+        // coverage nothing else reported is worth a second journal entry.
+        if (isRangeCovered(previousRange, coveredRanges)) {
+          continue;
+        }
+
+        invalidatedRanges.push(previousRange);
+      }
+    }
+
+    return { ranges: mergeRanges(invalidatedRanges) };
+  }
+
+  function forgetFramesBefore(startTime: number) {
+    if (latestFrame && getFrameEndTime(latestFrame) < startTime) {
+      latestFrame = null;
+    }
+
+    if (heldLiveFrame && getFrameEndTime(heldLiveFrame) < startTime) {
+      heldLiveFrame = null;
+    }
   }
 
   function resolveCoveredWaiters() {
@@ -336,6 +773,60 @@ export function createWritableDetectionFrameSource(options: {
 
 function createDestroyedError() {
   return new Error("Detection frame source has been destroyed.");
+}
+
+function resolveLiveHoldSeconds(holdSeconds: number | undefined) {
+  if (holdSeconds === undefined) {
+    return DEFAULT_LIVE_HOLD_SECONDS;
+  }
+
+  if (!Number.isFinite(holdSeconds) || holdSeconds <= 0) {
+    throw new RangeError("live.holdSeconds must be greater than 0.");
+  }
+
+  return holdSeconds;
+}
+
+function getFrameEndTime(frame: DetectionFrame) {
+  return frame.endTime ?? frame.mediaTime;
+}
+
+function haveSameDetectionFrameIdentity(
+  left: DetectionFrame,
+  right: DetectionFrame,
+) {
+  return left.frameIndex === undefined || right.frameIndex === undefined
+    ? left.frameIndex === right.frameIndex && left.mediaTime === right.mediaTime
+    : left.frameIndex === right.frameIndex;
+}
+
+function compareDetectionFrames(left: DetectionFrame, right: DetectionFrame) {
+  if (left.mediaTime !== right.mediaTime) {
+    return left.mediaTime - right.mediaTime;
+  }
+
+  return (left.frameIndex ?? 0) - (right.frameIndex ?? 0);
+}
+
+function dropAvailableRangesBefore(
+  startTime: number,
+  availableRanges: AvailableRange[],
+) {
+  let writeIndex = 0;
+
+  for (const range of availableRanges) {
+    if (range.endTime <= startTime) {
+      continue;
+    }
+
+    availableRanges[writeIndex] = {
+      endTime: range.endTime,
+      startTime: Math.max(range.startTime, startTime),
+    };
+    writeIndex += 1;
+  }
+
+  availableRanges.length = writeIndex;
 }
 
 function shouldApplyWindowRetention(
