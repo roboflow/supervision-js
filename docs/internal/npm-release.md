@@ -1,8 +1,10 @@
 # npm Release Operations
 
 This repository publishes one public package: `supervision`. The root
-workspace, `supervision-js-core`, and `supervision-js-react-native` remain
-private. The registry artifact is the portable tarball assembled by
+workspace, `supervision-js-trackers`, `supervision-js-core`, and
+`supervision-js-react-native` remain private. The tracker workspace is compiled
+into core rather than shipped as another installable package. The registry
+artifact is the portable tarball assembled by
 `tools/pack-web-tarball.mjs`; it embeds the private core package without
 exposing the workspace-relative `file:../core` dependency.
 

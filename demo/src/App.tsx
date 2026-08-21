@@ -15,6 +15,7 @@ import { DemoShell } from "./components/DemoShell";
 import { EngineDiagnostics } from "./components/EngineDiagnostics";
 import { DocsBasketballPlayground } from "./components/DocsBasketballPlayground";
 import { DocsAnnotationRendererPlayground } from "./components/DocsAnnotationRendererPlayground";
+import { DocsTrackingPostProcessorPlayground } from "./components/DocsTrackingPostProcessorPlayground";
 import { PerformanceStrip } from "./components/PerformanceStrip";
 import { PlayerHotkeys } from "./components/PlayerHotkeys";
 import { PresentationDiagnostics } from "./components/PresentationDiagnostics";
@@ -72,6 +73,14 @@ export function App() {
         <DocsAnnotationRendererPlayground
           renderer={parseDocsAnnotationRenderer(searchParams.get("renderer"))}
         />
+      </EmbeddedPlaygroundFrame>
+    );
+  }
+
+  if (embeddedView === "post-processor") {
+    return (
+      <EmbeddedPlaygroundFrame>
+        <DocsTrackingPostProcessorPlayground />
       </EmbeddedPlaygroundFrame>
     );
   }

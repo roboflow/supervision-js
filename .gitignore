@@ -11,6 +11,12 @@ examples/react-native/build/
 examples/react-native/ios/
 examples/react-native/android/
 
+# Android library module build outputs (Gradle/CMake)
+packages/react-native/android/build/
+packages/react-native/android/.cxx/
+.gradle/
+local.properties
+
 *.tsbuildinfo
 .eslintcache
 __pycache__/

@@ -11,6 +11,7 @@ import {
   FocusTargetMode,
   KeypointVisibility,
   LabelPlacement,
+  MarkerShape,
   MaskRenderMode,
 } from "supervision";
 import {
@@ -131,6 +132,25 @@ describe("demo presentation", () => {
         presentation.boxStyle?.resolve(combinedDetection, context),
       ).toMatchObject({ rect: combinedDetection.rect });
     }
+  });
+
+  it("places the ellipse footprint below a center-based detection rect", () => {
+    const presentation = createDemoPresentation({
+      ...defaultDemoPresentationSettings,
+      ellipsesEnabled: true,
+    });
+
+    expect(
+      presentation.ellipseStyle?.resolve(rectangleDetection, {
+        detectionIndex: 0,
+        frame: { detections: [rectangleDetection], mediaTime: 0 },
+        mediaTime: 0,
+      }),
+    ).toMatchObject({
+      center: { x: 10, y: 28.5 },
+      radiusX: 10,
+      radiusY: 3.5,
+    });
   });
 
   it("removes the box style when boxes are disabled", () => {
@@ -504,6 +524,26 @@ describe("demo presentation", () => {
     ).not.toContain("polygon");
   });
 
+  it("maps marker shape and bounding-box position onto the marker style", () => {
+    const presentation = createDemoPresentation({
+      ...defaultDemoPresentationSettings,
+      markerPosition: "top-left",
+      markerShape: MarkerShape.Triangle,
+      markersEnabled: true,
+    });
+
+    expect(
+      presentation.markerStyle?.resolve(rectangleDetection, {
+        detectionIndex: 0,
+        frame: { detections: [rectangleDetection], mediaTime: 0 },
+        mediaTime: 0,
+      }),
+    ).toMatchObject({
+      center: { x: 0, y: -8 },
+      shape: MarkerShape.Triangle,
+    });
+  });
+
   it("maps polygon controls onto class-aware polygon draw instructions", () => {
     const presentation = createDemoPresentation({
       ...defaultDemoPresentationSettings,
@@ -584,6 +624,47 @@ describe("demo presentation", () => {
     ).toBeUndefined();
     expect(
       presentation.keypointStyle?.resolve(vectorDetection, context),
+    ).toBeUndefined();
+  });
+
+  it("routes class visibility through the renderer-owned contract", () => {
+    const presentation = createDemoPresentation({
+      ...defaultDemoPresentationSettings,
+      hiddenClasses: ["person", "cow"],
+    });
+
+    expect(presentation.visibility).toEqual({
+      hiddenClasses: ["person", "cow"],
+    });
+    // Styles keep confidence as their only local predicate; the mask
+    // artifact key never encodes class visibility, so the backend owns
+    // hidden-class invalidation.
+    expect(
+      presentation.maskStyle && "artifactKey" in presentation.maskStyle
+        ? presentation.maskStyle.artifactKey
+        : "",
+    ).toBe(
+      createDemoPresentation(defaultDemoPresentationSettings).maskStyle
+        ?.artifactKey,
+    );
+  });
+
+  it("hides detections in demo-owned styles when the context marks them hidden", () => {
+    const presentation = createDemoPresentation(
+      defaultDemoPresentationSettings,
+    );
+    const context = {
+      detectionIndex: 0,
+      frame: { detections: [rectangleDetection], mediaTime: 0 },
+      hidden: true,
+      mediaTime: 0,
+    };
+
+    expect(
+      presentation.boxStyle?.resolve(rectangleDetection, context),
+    ).toBeUndefined();
+    expect(
+      presentation.labelStyle?.resolve(rectangleDetection, context),
     ).toBeUndefined();
   });
 

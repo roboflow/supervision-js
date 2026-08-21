@@ -1,7 +1,9 @@
 import {
   BoxStrokeAlignment,
   BoxShape,
+  BaseMarkerStyle,
   BaseFocusStyle,
+  BaseBoxCornerStyle,
   BaseInteractionStyle,
   BaseKeypointStyle,
   BaseLabelStyle,
@@ -12,17 +14,23 @@ import {
   type DetectionClassColorStyle,
   FocusTargetMode,
   LabelPlacement,
+  MarkerShape,
   MaskRenderMode,
   annotationRenderers,
   type BoxDrawInstruction,
+  type BoxCornerStyle,
   type BoxStyle,
+  type BoxStyleContext,
   type Detection,
+  type EllipseStyle,
   type FocusStyle,
   type InteractionStyle,
   type KeypointStyle,
   type LabelStyle,
   type MaskDrawInstruction,
+  type MaskHaloStyle,
   type MaskStyle,
+  type MarkerStyle,
   type MediaRendererPresentation,
   type PolygonStyle,
   type PolylineStyle,
@@ -31,15 +39,34 @@ import {
 
 export type DemoClassStyle = DetectionClassColorStyle;
 
+export const demoMarkerPositionOffsets = {
+  "top-left": { x: -0.5, y: -0.5 },
+  "top-center": { x: 0, y: -0.5 },
+  "top-right": { x: 0.5, y: -0.5 },
+  "center-left": { x: -0.5, y: 0 },
+  center: { x: 0, y: 0 },
+  "center-right": { x: 0.5, y: 0 },
+  "bottom-left": { x: -0.5, y: 0.5 },
+  "bottom-center": { x: 0, y: 0.5 },
+  "bottom-right": { x: 0.5, y: 0.5 },
+} as const;
+
+export type DemoMarkerPosition = keyof typeof demoMarkerPositionOffsets;
+
 export interface DemoPresentationSettings {
   readonly boxesEnabled: boolean;
+  readonly boxCornersEnabled: boolean;
+  readonly ellipsesEnabled: boolean;
   readonly focusEnabled: boolean;
   readonly keypointsEnabled: boolean;
   readonly labelsEnabled: boolean;
   readonly masksEnabled: boolean;
+  readonly markersEnabled: boolean;
   readonly polygonsEnabled: boolean;
   readonly polylinesEnabled: boolean;
   readonly boxCornerRadius: number;
+  readonly boxCornerLength: number;
+  readonly boxCornerStrokeWidth: number;
   readonly boxStrokeWidth: number;
   readonly boxStrokeAlignment: BoxStrokeAlignment;
   readonly boxFillAlpha: number;
@@ -48,6 +75,11 @@ export interface DemoPresentationSettings {
   readonly labelCornerRadius: number;
   readonly labelFontSize: number;
   readonly labelIncludeConfidence: boolean;
+  readonly maskHaloAlpha: number;
+  /** Fixed glow color; null follows each detection's class color. */
+  readonly maskHaloColor: number | null;
+  readonly maskHaloEnabled: boolean;
+  readonly maskHaloSpread: number;
   readonly labelOffsetX: number;
   readonly labelOffsetY: number;
   readonly labelPaddingX: number;
@@ -58,12 +90,21 @@ export interface DemoPresentationSettings {
   readonly maskOpacity: number;
   readonly maskStrokeAlpha: number;
   readonly maskStrokeWidth: number;
+  readonly markerPosition: DemoMarkerPosition;
+  readonly markerShape: MarkerShape;
+  readonly markerSize: number;
+  readonly markerStrokeWidth: number;
   readonly polygonFillAlpha: number;
   readonly polygonStrokeWidth: number;
   readonly polylineStrokeWidth: number;
+  readonly ellipseAxisRatio: number;
+  /** Fixed arc color; null follows each detection's class color. */
+  readonly ellipseColor: number | null;
+  readonly ellipseStrokeWidth: number;
   readonly keypointRadius: number;
   readonly keypointEdgeWidth: number;
   readonly confidenceThreshold: number;
+  readonly hiddenClasses: readonly string[];
   readonly interactionHoverFillAlpha: number;
   readonly interactionHoverStrokeWidth: number;
   readonly interactionSelectedFillAlpha: number;
@@ -76,10 +117,13 @@ export interface DemoPresentationSettings {
 
 export type DemoPresentationLayerSetting =
   | "boxesEnabled"
+  | "boxCornersEnabled"
+  | "ellipsesEnabled"
   | "focusEnabled"
   | "keypointsEnabled"
   | "labelsEnabled"
   | "masksEnabled"
+  | "markersEnabled"
   | "polygonsEnabled"
   | "polylinesEnabled";
 
@@ -89,10 +133,13 @@ export type DemoPresentationAvailability = Partial<
 
 const demoPresentationLayerSettings: readonly DemoPresentationLayerSetting[] = [
   "boxesEnabled",
+  "boxCornersEnabled",
+  "ellipsesEnabled",
   "focusEnabled",
   "keypointsEnabled",
   "labelsEnabled",
   "masksEnabled",
+  "markersEnabled",
   "polygonsEnabled",
   "polylinesEnabled",
 ];
@@ -131,17 +178,25 @@ const defaultDemoClassStyles: Record<string, DemoClassStyle> = {
 
 export const defaultDemoPresentationSettings: DemoPresentationSettings = {
   boxesEnabled: true,
+  boxCornersEnabled: false,
+  boxCornerLength: 20,
+  boxCornerStrokeWidth: 2,
   boxCornerRadius: 1,
   boxFillAlpha: 0.08,
   boxStrokeAlignment: BoxStrokeAlignment.Center,
   boxStrokeWidth: 2,
   classStyles: defaultDemoClassStyles,
   confidenceThreshold: 0,
+  ellipseAxisRatio: 0.35,
+  ellipseColor: null,
+  ellipseStrokeWidth: 2,
+  ellipsesEnabled: false,
   focusCornerRadius: 1,
   focusDimAlpha: 0.4,
   focusDimColor: 0x000000,
   focusEnabled: true,
   focusTargetMode: FocusTargetMode.Ambient,
+  hiddenClasses: [],
   interactionHoverFillAlpha: 0.08,
   interactionHoverStrokeWidth: 2,
   interactionSelectedFillAlpha: 0.22,
@@ -153,6 +208,10 @@ export const defaultDemoPresentationSettings: DemoPresentationSettings = {
   labelCornerRadius: 4,
   labelFontSize: 12,
   labelIncludeConfidence: false,
+  maskHaloAlpha: 0.6,
+  maskHaloColor: null,
+  maskHaloEnabled: false,
+  maskHaloSpread: 12,
   labelOffsetX: 0,
   labelOffsetY: 0,
   labelPaddingX: 6,
@@ -165,6 +224,11 @@ export const defaultDemoPresentationSettings: DemoPresentationSettings = {
   maskStrokeAlpha: 1,
   maskStrokeWidth: 2,
   masksEnabled: true,
+  markerPosition: "center",
+  markerShape: MarkerShape.Circle,
+  markerSize: 14,
+  markerStrokeWidth: 2,
+  markersEnabled: false,
   polygonFillAlpha: 0.08,
   polygonStrokeWidth: 2,
   polygonsEnabled: true,
@@ -176,6 +240,12 @@ export function createDemoPresentation(
   settings: DemoPresentationSettings,
 ): MediaRendererPresentation {
   const boxStyle = settings.boxesEnabled ? createDemoBoxStyle(settings) : null;
+  const boxCornerStyle = settings.boxCornersEnabled
+    ? createDemoBoxCornerStyle(settings)
+    : null;
+  const ellipseStyle = settings.ellipsesEnabled
+    ? createDemoEllipseStyle(settings)
+    : null;
   const keypointStyle = settings.keypointsEnabled
     ? createDemoKeypointStyle(settings)
     : null;
@@ -184,6 +254,12 @@ export function createDemoPresentation(
     : null;
   const maskStyle = settings.masksEnabled
     ? createDemoMaskStyle(settings)
+    : null;
+  const maskHaloStyle = settings.maskHaloEnabled
+    ? createDemoMaskHaloStyle(settings)
+    : null;
+  const markerStyle = settings.markersEnabled
+    ? createDemoMarkerStyle(settings)
     : null;
   const polygonStyle = settings.polygonsEnabled
     ? createDemoPolygonStyle(settings)
@@ -197,16 +273,35 @@ export function createDemoPresentation(
     // letterbox around non-matching aspect ratios.
     backgroundColor: 0xf3f4f6,
     boxStyle,
+    boxCornerStyle,
+    // Class visibility rides the renderer-owned visibility contract so every
+    // layer and the prepared-mask cache invalidate consistently.
+    visibility: { hiddenClasses: settings.hiddenClasses },
+    ellipseStyle,
     focusStyle: settings.focusEnabled ? createDemoFocusStyle(settings) : null,
     interactionStyle: createDemoInteractionStyle(settings),
     keypointStyle,
     labelStyle,
     maskStyle,
+    markerStyle,
     polygonStyle,
     polylineStyle,
+    maskHaloStyle,
     renderers: [
       ...(boxStyle ? [annotationRenderers.box({ style: boxStyle })] : []),
+      ...(boxCornerStyle
+        ? [annotationRenderers.boxCorners({ style: boxCornerStyle })]
+        : []),
+      ...(ellipseStyle
+        ? [annotationRenderers.ellipse({ style: ellipseStyle })]
+        : []),
       ...(maskStyle ? [annotationRenderers.mask({ style: maskStyle })] : []),
+      ...(maskHaloStyle
+        ? [annotationRenderers.maskHalo({ style: maskHaloStyle })]
+        : []),
+      ...(markerStyle
+        ? [annotationRenderers.marker({ style: markerStyle })]
+        : []),
       ...(polygonStyle
         ? [annotationRenderers.polygon({ style: polygonStyle })]
         : []),
@@ -218,6 +313,88 @@ export function createDemoPresentation(
         : []),
       ...(labelStyle ? [annotationRenderers.label({ style: labelStyle })] : []),
     ],
+  };
+}
+
+function createDemoMarkerStyle(
+  settings: DemoPresentationSettings,
+): MarkerStyle {
+  const positionOffset = demoMarkerPositionOffsets[settings.markerPosition];
+
+  return new BaseMarkerStyle({
+    center: (detection) =>
+      detection.rect
+        ? {
+            x: detection.rect.x + detection.rect.width * positionOffset.x,
+            y: detection.rect.y + detection.rect.height * positionOffset.y,
+          }
+        : undefined,
+    fill: (detection) => ({
+      color: resolveClassStyle(detection, settings).fill,
+    }),
+    shape: settings.markerShape,
+    shouldRender: (detection) => passesConfidenceThreshold(detection, settings),
+    size: settings.markerSize,
+    stroke: (detection) => ({
+      color: resolveClassStyle(detection, settings).stroke,
+      width: settings.markerStrokeWidth,
+    }),
+  });
+}
+
+function createDemoBoxCornerStyle(
+  settings: DemoPresentationSettings,
+): BoxCornerStyle {
+  return new BaseBoxCornerStyle({
+    length: settings.boxCornerLength,
+    shouldRender: (detection) => passesConfidenceThreshold(detection, settings),
+    stroke: (detection) => ({
+      color: resolveClassStyle(detection, settings).stroke,
+      width: settings.boxCornerStrokeWidth,
+    }),
+  });
+}
+
+/**
+ * The Python Supervision EllipseAnnotator look: an elliptical footprint arc
+ * swept from -45deg to 235deg under the detection box.
+ */
+function createDemoEllipseStyle(
+  settings: DemoPresentationSettings,
+): EllipseStyle {
+  return {
+    resolve(detection, context) {
+      if (
+        !detection.rect ||
+        context.hidden ||
+        !passesConfidenceThreshold(detection, settings)
+      ) {
+        return undefined;
+      }
+
+      const radiusX = detection.rect.width / 2;
+      const radiusY = radiusX * settings.ellipseAxisRatio;
+
+      return {
+        center: {
+          x: detection.rect.x,
+          // Bottom-tangent so the arc hugs the detection instead of dipping
+          // below its feet.
+          y: detection.rect.y + detection.rect.height / 2 - radiusY,
+        },
+        endAngle: (235 * Math.PI) / 180,
+        radiusX,
+        radiusY,
+        startAngle: (-45 * Math.PI) / 180,
+        stroke: {
+          alpha: 1,
+          color:
+            settings.ellipseColor ??
+            resolveClassStyle(detection, settings).stroke,
+          width: settings.ellipseStrokeWidth,
+        },
+      };
+    },
   };
 }
 
@@ -281,8 +458,15 @@ function createDemoKeypointStyle(
 
 function createDemoBoxStyle(settings: DemoPresentationSettings): BoxStyle {
   return {
-    resolve(detection: Detection): BoxDrawInstruction | undefined {
-      if (!detection.rect || !passesConfidenceThreshold(detection, settings)) {
+    resolve(
+      detection: Detection,
+      context: BoxStyleContext,
+    ): BoxDrawInstruction | undefined {
+      if (
+        !detection.rect ||
+        context.hidden ||
+        !passesConfidenceThreshold(detection, settings)
+      ) {
         return undefined;
       }
 
@@ -432,6 +616,29 @@ function createDemoMaskStyle(settings: DemoPresentationSettings): MaskStyle {
                 width: settings.maskStrokeWidth,
               }
             : undefined,
+      };
+    },
+  };
+}
+
+function createDemoMaskHaloStyle(
+  settings: DemoPresentationSettings,
+): MaskHaloStyle {
+  return {
+    resolve(detection, context) {
+      if (
+        !detection.mask ||
+        context.hidden ||
+        !passesConfidenceThreshold(detection, settings)
+      ) {
+        return undefined;
+      }
+
+      return {
+        alpha: settings.maskHaloAlpha,
+        color:
+          settings.maskHaloColor ?? resolveClassStyle(detection, settings).fill,
+        spread: settings.maskHaloSpread,
       };
     },
   };
@@ -587,8 +794,15 @@ function createDemoInteractionBoxStyle(
   state: DetectionInteractionState,
 ): BoxStyle {
   return {
-    resolve(detection: Detection): BoxDrawInstruction | undefined {
-      if (!detection.rect || !passesConfidenceThreshold(detection, settings)) {
+    resolve(
+      detection: Detection,
+      context: BoxStyleContext,
+    ): BoxDrawInstruction | undefined {
+      if (
+        !detection.rect ||
+        context.hidden ||
+        !passesConfidenceThreshold(detection, settings)
+      ) {
         return undefined;
       }
 

@@ -11,8 +11,9 @@ or change the packaging path.
 npm run package:tarball
 ```
 
-That command builds `supervision-js-core` and the published `supervision`
-package, then writes a single archive to the ignored `artifacts/` directory:
+That command builds the internal tracker engines into `supervision-js-core`,
+builds the published `supervision` package, and then writes a single archive to
+the ignored `artifacts/` directory:
 
 ```text
 artifacts/supervision-<version>.tgz
@@ -44,9 +45,11 @@ resolves it at pack time:
 2. Extract the web archive into a staging directory.
 3. Extract the core archive into `node_modules/supervision-js-core` inside that
    staging directory.
-4. Rewrite the staged manifest: pin `supervision-js-core` to its version
+4. Remove core's monorepo-only `supervision-js-trackers` build dependency. Its
+   JavaScript is already bundled into the core entrypoint.
+5. Rewrite the staged manifest: pin `supervision-js-core` to its version
    instead of `file:../core`, and list it in `bundleDependencies`.
-5. `npm pack` the staging directory into the output archive.
+6. `npm pack` the staging directory into the output archive.
 
 The source tree, package boundary checks, and Rollup externals are unchanged.
 `pixi.js` and `mediabunny` stay ordinary dependencies and are installed from the
@@ -75,6 +78,8 @@ the OS temp directory — outside this repository — to check that:
 - the main browser entry embeds the worker source instead of referencing a
   runtime-relative worker URL;
 - `supervision-js-core` is bundled while `pixi.js` and `mediabunny` are not;
+- tracker engines are embedded in core and do not appear as an install-time
+  package or lockfile dependency;
 - a clean archive installation produces a lockfile with no `file:` path;
 - `supervision` and `supervision/editing` import under Node;
 - a minimal Vite production build that imports `createMediaSession` succeeds.

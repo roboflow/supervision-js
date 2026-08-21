@@ -9,6 +9,7 @@ import {
 } from "supervision";
 import type {
   DemoFixtureDefinition,
+  DemoFixtureDetectionSourceTransform,
   DemoFixtureFrameTransform,
 } from "../fixtures/demo-fixtures";
 import {
@@ -27,6 +28,7 @@ export async function createFixtureSession(
     readonly container: HTMLDivElement;
     readonly definition: DemoFixtureDefinition;
     readonly fixtureFrameTransform?: DemoFixtureFrameTransform;
+    readonly fixtureDetectionSourceTransform?: DemoFixtureDetectionSourceTransform;
     readonly presentationTransform?: (
       presentation: MediaRendererPresentation,
     ) => MediaRendererPresentation;
@@ -37,6 +39,7 @@ export async function createFixtureSession(
     manifest,
     options.definition,
     options.fixtureFrameTransform,
+    options.fixtureDetectionSourceTransform,
   );
 
   if (!options.isActive()) {
