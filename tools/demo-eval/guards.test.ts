@@ -10,6 +10,7 @@ import {
   summariseBlanking,
   summariseDrag,
 } from "./scenarios-guards.mjs";
+import { judgeCadence } from "./scenarios.mjs";
 
 /* Every guard is checked twice: once against numbers a healthy player
  * produces, and once against the signature of the defect it exists for. A gate
@@ -423,6 +424,205 @@ describe("shortcuts after a layer toggle takes focus", () => {
     expect(failures).toHaveLength(1);
     expect(failures[0]).toContain("Space");
     expect(failures[0]).toContain("INPUT:checkbox");
+  });
+});
+
+/* The keypoint fixture runs 9s at 30.00/s. Forty passes of the demo produced
+ * the shape below: a whole-clip window from 0.3s whose first and last media
+ * seconds are partial, and a late-start window from 4.5s whose last one holds a
+ * single interval and is too thin to be a rate. */
+const CADENCE_SOURCE_FPS = 30.002;
+const CADENCE_FLOOR_FPS = 27;
+const CADENCE_HOLD_LIMIT_MS = 66.7;
+const CADENCE_MIN_INTERVALS = 8;
+/* 29.97/s, the rate a healthy media second reads on this machine. */
+const HEALTHY_PERIOD_MS = 33.37;
+/* The stall held frames for 101 to 123ms. */
+const STALL_PERIOD_MS = 112;
+/* Under the 66.7ms hold budget and still slow enough to leave its media second
+ * at 20/s. */
+const SLOW_PERIOD_MS = 50;
+const WHOLE_CLIP: Array<[number, number]> = [
+  [0, 20],
+  [1, 30],
+  [2, 30],
+  [3, 30],
+  [4, 30],
+  [5, 30],
+  [6, 30],
+  [7, 30],
+  [8, 16],
+];
+const LATE_START: Array<[number, number]> = [
+  [4, 13],
+  [5, 30],
+  [6, 30],
+  [7, 30],
+  [8, 1],
+];
+
+interface MediaSecond {
+  second: number;
+  intervals: number;
+  periodMs: number;
+}
+
+interface CadenceShape {
+  periodFor?: (second: number) => number;
+  intervalsFor?: (second: number, intervals: number) => number;
+}
+
+const round2 = (value: number) => Math.round(value * 100) / 100;
+
+/* A window is built from the frame period each media second ran at, so its
+ * bucket rates, its two window rates and its held-frame count all come out of
+ * one cadence and cannot disagree with each other. */
+function cadenceWindow(
+  name: string,
+  startSeconds: number,
+  spanSeconds: number,
+  seconds: MediaSecond[],
+) {
+  const intervals = seconds.reduce(
+    (total, media) => total + media.intervals,
+    0,
+  );
+  const wallMs = seconds.reduce(
+    (total, media) => total + media.intervals * media.periodMs,
+    0,
+  );
+  const fps = round2(intervals / (wallMs / 1000));
+  return {
+    name,
+    startSeconds,
+    spanSeconds,
+    consumer: {
+      fps,
+      presentedFrames: intervals + 1,
+      wallSeconds: round(wallMs / 1000),
+      mediaAdvancedSeconds: round(wallMs / 1000),
+    },
+    engine: {
+      fps,
+      paints: intervals + 1,
+      lateFrames: 0,
+      stalls: 0,
+      maxCatchUpMs: 7,
+      longestHoldMs: Math.max(...seconds.map((media) => media.periodMs)),
+      skips: seconds
+        .filter((media) => media.periodMs > CADENCE_HOLD_LIMIT_MS)
+        .reduce((total, media) => total + media.intervals, 0),
+      backwardPaints: 0,
+    },
+    disagreementFps: 0,
+    buckets: seconds.map((media) => ({
+      second: media.second,
+      intervals: media.intervals,
+      fps: round2(1000 / media.periodMs),
+      longestHoldMs: media.periodMs,
+      judged: media.intervals >= CADENCE_MIN_INTERVALS,
+    })),
+  };
+}
+
+function cadenceScenario({
+  periodFor = () => HEALTHY_PERIOD_MS,
+  intervalsFor = (_second, intervals) => intervals,
+}: CadenceShape = {}) {
+  const plan = (entries: Array<[number, number]>) =>
+    entries.map(([second, intervals]) => ({
+      second,
+      intervals: intervalsFor(second, intervals),
+      periodMs: periodFor(second),
+    }));
+  const windows = [
+    cadenceWindow("whole-clip", 0.3, 8.2, plan(WHOLE_CLIP)),
+    cadenceWindow("late-start", 4.5, 3.5, plan(LATE_START)),
+  ];
+  const judged = new Set(
+    windows.flatMap((window) =>
+      window.buckets
+        .filter((bucket) => bucket.judged)
+        .map((bucket) => bucket.second),
+    ),
+  );
+  const owed = [0, 1, 2, 3, 4, 5, 6, 7, 8];
+  return {
+    sourceRateFps: CADENCE_SOURCE_FPS,
+    floorFraction: 0.9,
+    floorFps: CADENCE_FLOOR_FPS,
+    holdPeriods: 2,
+    holdLimitMs: CADENCE_HOLD_LIMIT_MS,
+    skipLimit: 0,
+    lateFrameFraction: 0.02,
+    agreementLimitFps: 1.5,
+    minBucketIntervals: CADENCE_MIN_INTERVALS,
+    coverage: {
+      fromSecond: 0,
+      toSecond: 8,
+      judgedSeconds: owed.filter((second) => judged.has(second)),
+      missingSeconds: owed.filter((second) => !judged.has(second)),
+    },
+    windows,
+  };
+}
+
+describe("the keypoint fixture's cadence", () => {
+  it("passes a clip that held its rate in every media second of it", () => {
+    const scenario = cadenceScenario();
+    expect(scenario.coverage.missingSeconds).toEqual([]);
+    expect(judgeCadence(scenario)).toEqual([]);
+  });
+
+  /* The stall as it was diagnosed: 33ms a frame up to media 4 and 101 to 123ms
+   * past it, positional and not cumulative. */
+  it("names every media second past the mark the stall appeared at", () => {
+    const failures = judgeCadence(
+      cadenceScenario({
+        periodFor: (second) =>
+          second >= 4 ? STALL_PERIOD_MS : HEALTHY_PERIOD_MS,
+      }),
+    );
+    const named = failures.filter((failure) => failure.includes("at media "));
+    expect(named).toHaveLength(9);
+    for (const second of [4, 5, 6, 7, 8]) {
+      expect(named.join(" ")).toContain(`at media ${second}s`);
+    }
+    for (const second of [0, 1, 2, 3]) {
+      expect(named.join(" ")).not.toContain(`at media ${second}s`);
+    }
+    expect(failures.join(" ")).toContain("held 136 frames longer than 66.7ms");
+  });
+
+  /* One media second slow enough to fail the floor and never holding a frame
+   * past the budget. Both window clocks average it away and the held-frame
+   * count never moves, so the per-media-second reading is the only one that
+   * sees it: this is the gate the scenario exists for. */
+  it("fails one slow media second that both window clocks average away", () => {
+    const scenario = cadenceScenario({
+      periodFor: (second) =>
+        second === 8 ? SLOW_PERIOD_MS : HEALTHY_PERIOD_MS,
+    });
+    for (const window of scenario.windows) {
+      expect(window.consumer.fps).toBeGreaterThan(CADENCE_FLOOR_FPS);
+      expect(window.engine.fps).toBeGreaterThan(CADENCE_FLOOR_FPS);
+      expect(window.engine.skips).toBe(0);
+      expect(window.engine.longestHoldMs).toBeLessThan(CADENCE_HOLD_LIMIT_MS);
+    }
+    const failures = judgeCadence(scenario);
+    expect(failures).toHaveLength(1);
+    expect(failures[0]).toContain("presented 20/s at media 8s");
+  });
+
+  it("fails a run that judged the clip in part", () => {
+    const failures = judgeCadence(
+      cadenceScenario({
+        intervalsFor: (second, intervals) => (second === 4 ? 3 : intervals),
+      }),
+    );
+    expect(failures).toHaveLength(1);
+    expect(failures[0]).toContain("media second 4");
+    expect(failures[0]).toContain("judged in part");
   });
 });
 

@@ -138,6 +138,104 @@ export const METRICS = [
     read: (report) => configP95(report.layers, "everything-on"),
   },
   {
+    key: "cadence.worstMediaSecondFps",
+    label: "keypoint worst media second",
+    unit: "/s",
+    better: "higher",
+    /* The slowest media second in either window. The clip is nine seconds and
+     * the two windows judge thirteen buckets between them, because the
+     * late-start pass re-judges the seconds it shares with the whole-clip pass.
+     * Forty passes of one unchanged build: thirty-one landed between 29.91/s
+     * and 29.99/s, six between 29.73 and 29.75, one at 29.63 and two at 29.53
+     * to 29.54, a full spread of 0.46/s. A floor cut to the thirty-one
+     * calls the other nine a regression, so it is the full spread rounded up.
+     * The metric carries no tolerance, so anything past half a frame a second
+     * off the recorded median is one. The scenario's own gate sits 2.5/s lower
+     * and is the cliff; this is the walk. */
+    noise: 0.5,
+    tolerancePercent: 0,
+    read: (report) => worstBucketFps(report.cadence),
+  },
+  {
+    key: "cadence.lateStartFps",
+    label: "keypoint late-start present rate",
+    unit: "/s",
+    better: "higher",
+    /* The consumer clock over the window that starts past the stall: presented
+     * frames over wall time, and 3.5s of window lands on a whole number of
+     * them. The same forty passes returned 104 frames seventeen times, reading
+     * 29.65 to 29.70/s, 105 sixteen times, reading 29.92 to 29.97, and 106
+     * seven times, reading 30.19 to 30.24. One frame either way is 0.29/s, so
+     * the floor clears two of them. */
+    noise: 0.65,
+    tolerancePercent: 0,
+    read: (report) => cadenceWindow(report.cadence, "late-start")?.consumer.fps,
+  },
+  {
+    key: "cadence.longestHoldMs",
+    label: "keypoint longest frame hold",
+    unit: "ms",
+    better: "lower",
+    /* Across those forty passes: nineteen sat at 35.1 to 35.5ms, seventeen at
+     * 40.5 to 43.5ms and four between at 37.4 to 38.9ms, a full spread of
+     * 8.4ms. Taking the full spread leaves the walk past both clusters towards
+     * the 66.7ms hold budget; the budget itself is the scenario's gate. */
+    noise: 8.5,
+    read: (report) =>
+      maximum(
+        (report.cadence?.windows ?? []).map((w) => w.engine.longestHoldMs),
+      ),
+  },
+  {
+    key: "cadence.skippedIntervals",
+    label: "keypoint frames held past budget",
+    unit: "",
+    better: "lower",
+    /* Zero on all forty passes, and the longest hold measured 23ms under the
+     * budget, so the first one that appears is worth a run failing over. */
+    noise: 0,
+    tolerancePercent: 0,
+    read: (report) =>
+      sum((report.cadence?.windows ?? []).map((w) => w.engine.skips)),
+  },
+  {
+    key: "cadence.engineLateFrames",
+    label: "keypoint late frames by the engine",
+    unit: "",
+    better: "lower",
+    /* Thirty-eight of forty passes booked none and two booked a single frame
+     * over the late-start window, so one is inside the floor and two is not. */
+    noise: 1,
+    read: (report) =>
+      maximum((report.cadence?.windows ?? []).map((w) => w.engine.lateFrames)),
+  },
+  {
+    key: "cadence.engineStalls",
+    label: "keypoint stalls by the engine",
+    unit: "",
+    better: "lower",
+    /* Zero on all forty passes. A stall is the engine saying it ran out of
+     * frames to paint, so there is no amount of it that is noise. */
+    noise: 0,
+    tolerancePercent: 0,
+    read: (report) =>
+      maximum((report.cadence?.windows ?? []).map((w) => w.engine.stalls)),
+  },
+  {
+    key: "cadence.clockDisagreementFps",
+    label: "keypoint clocks apart",
+    unit: "/s",
+    better: "lower",
+    /* How far the engine's ledger and the page's presented-frame counter landed
+     * from each other across the forty passes: fourteen at 0.10/s or under,
+     * twenty-five between 0.19 and 0.37, and one at 0.58, a spread of 0.55/s.
+     * Drifting apart is the tell that one of them stopped watching the same
+     * thing. */
+    noise: 0.6,
+    read: (report) =>
+      maximum((report.cadence?.windows ?? []).map((w) => w.disagreementFps)),
+  },
+  {
     key: "throttle.presentedRateFraction",
     label: "throttled present fraction",
     unit: "",
@@ -304,6 +402,27 @@ const METRICS_BY_KEY = new Map(METRICS.map((metric) => [metric.key, metric]));
 function rate(phase, countKey) {
   if (!phase || !(phase.elapsedSeconds > 0)) return undefined;
   return round(phase[countKey] / phase.elapsedSeconds, 2);
+}
+
+function cadenceWindow(cadence, name) {
+  return cadence?.windows?.find((window) => window.name === name);
+}
+
+/** The slowest media second any window judged: the reading a run average hides. */
+function worstBucketFps(cadence) {
+  const judged = (cadence?.windows ?? []).flatMap((window) =>
+    window.buckets
+      .filter((bucket) => bucket.judged)
+      .map((bucket) => bucket.fps),
+  );
+  return judged.length === 0 ? undefined : Math.min(...judged);
+}
+
+function sum(values) {
+  const usable = values.filter((value) => typeof value === "number");
+  return usable.length === 0
+    ? undefined
+    : usable.reduce((total, value) => total + value, 0);
 }
 
 function configP95(layers, name) {

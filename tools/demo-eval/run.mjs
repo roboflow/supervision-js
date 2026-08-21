@@ -34,9 +34,11 @@ import {
 import { layersDetail, runLayers } from "./scenarios-layers.mjs";
 import { runThrottle, throttleDetail } from "./scenarios-throttle.mjs";
 import {
+  cadenceDetail,
   Invalid,
   openDemoPage,
   runBattery,
+  runCadence,
   runLatency,
   runPaints,
   runSync,
@@ -47,6 +49,7 @@ const SCENARIOS = [
   "sync",
   "latency",
   "layers",
+  "cadence",
   "throttle",
   "blanking",
   "drag",
@@ -165,6 +168,7 @@ async function measure(pass) {
       sync: runSync,
       latency: runLatency,
       layers: runLayers,
+      cadence: runCadence,
       throttle: runThrottle,
       blanking: runBlanking,
       drag: runDrag,
@@ -595,6 +599,9 @@ function detail(name, scenario) {
   }
   if (name === "layers") {
     return layersDetail(scenario, field);
+  }
+  if (name === "cadence") {
+    return cadenceDetail(scenario, field);
   }
   if (name === "throttle") {
     return throttleDetail(scenario, field);

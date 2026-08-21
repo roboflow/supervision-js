@@ -48,8 +48,8 @@ Flags, all optional:
 `--scenario drag,playhead`. Pass flags through npm with `--`, for example
 `npm run eval:demo -- --scenario paints`.
 
-Scenario names: `paints`, `sync`, `latency`, `layers`, `throttle`, `blanking`,
-`drag`, `playhead`, `backscrub`, `focus`, `hotkeys`, `battery`.
+Scenario names: `paints`, `sync`, `latency`, `layers`, `cadence`, `throttle`,
+`blanking`, `drag`, `playhead`, `backscrub`, `focus`, `hotkeys`, `battery`.
 
 The run prints a summary and writes
 `{ startedAt, scenarios, metrics, verdicts, failures, baseline }` to the report
@@ -171,6 +171,88 @@ page, after an untimed warm-up pass so cold decode setup stays out of the
 numbers. Thresholds: seek p95 under 250ms, step p95 under 80ms. Stepping is the
 gesture a labeller repeats hundreds of times an hour, which is why its budget is
 the tight one.
+
+**cadence** plays the keypoint fixture through and asks whether the picture
+holds its rate in every media second of it, from two clocks that fail
+differently.
+
+It is the only scenario that picks a fixture. Every other one measures whatever
+the demo happened to load, which is the 70s horse trail, and the only other
+scenario that samples playback frame time seeks to `t=2s` and stays there. Both
+of those are where a stall on the keypoint fixture lived: 33ms a frame up to
+media 4.0 and 101 to 123ms past it, positional and not cumulative, so starting
+playback cold at 4.5s reproduced it at about 8fps straight away. That
+fixture's detections thicken from 3.8 a frame at the opening to a plateau of
+12.9 to 13.1 from media 4 onwards, which is the half of the clip nothing was
+watching.
+
+So it plays two windows, `whole-clip` from 0.3s and `late-start` cold from 4.5s,
+and reduces each one three ways:
+
+- **Per media second**, from the engine's own trace: every paint the engine made
+  is stamped with the media position it was serving, so the paints are grouped
+  by the second they landed in and each group's rate is judged on its own. A
+  media second has to present at least 90% of the source rate. This is the gate
+  an average cannot replace: an injected stall over the last 0.3s of the clip
+  left the window averaging 27.44/s, which clears the same floor, while the
+  second it happened in read 12.31/s.
+- **Over the window, from the page**, which counts presented frames against wall
+  time on the main thread.
+- **Over the window, from the engine**, which counts paints against its own
+  playing time in the worker, and books late frames and stalls while it does.
+  The two are read together because they do not share a failure mode, and the
+  run fails when they land more than 1.5/s apart: a stall only one of them can
+  see is a stall in the instrument.
+
+It also asserts its own coverage. Every whole media second the windows span has
+to be judged by at least one of them, so windows that creep back towards the
+opening report that instead of a pass over less of the clip.
+
+The windows overlap on purpose. A second at the thin edge of one is in the body
+of the other, and a bucket holding fewer than eight intervals is reported but
+not judged, because one interval quotes a whole second's cadence from a single
+frame period.
+
+Forty passes of one unchanged build put the slowest judged media second between
+29.53/s and 29.99/s against a 30.00/s source, the late-start window between
+29.65/s and 30.24/s, the longest single frame hold between 35.1ms and 43.5ms,
+the two clocks 0.03/s to 0.58/s apart, and zero held frames and zero stalls
+every time. Two passes in forty booked a single late frame over the late-start
+window's 106 paints. Those numbers set the noise floors in `baseline.mjs`, and
+setting them was worth doing carefully: thirty-one of the forty sat within
+0.08/s of each other on the worst media second, and a floor cut to fit those
+alone calls the other nine a regression. Each floor is the full spread of all
+forty, rounded up. Four of the seven metrics carry no tolerance at all, so the
+registry moves on anything past half a frame a second off the worst media
+second while the scenario's own floor sits 2.5/s lower and catches the cliff.
+
+No baseline has been recorded for these seven yet, so they print as new until
+somebody runs `--update-baseline` from a clean tree. The medians to expect on an
+M3 Max: worst media second 29.95/s, late-start present rate 29.93/s, frames held
+past budget 0, late frames 0, stalls 0, clocks apart 0.24/s. The longest frame
+hold has no single median to quote: nineteen of the forty read 35.1 to 35.5ms
+and seventeen read 40.5 to 43.5ms.
+
+Its gates have been watched to fail. Re-timing the exported engine trace to the
+stall's own cadence, with the page presenting normally underneath, failed 19 of
+them and named media seconds 4 through 8 while 0 through 3 passed. Freezing the
+page's presented-frame counter at a third of its rate, with the engine painting
+normally, failed the consumer floor and the disagreement gate on their own.
+Feeding the judge the stall's recorded frame times, 33ms then 101ms and again
+33ms then 123ms, failed 17 gates against 0 for the numbers this machine measures
+today. Neither CPU throttling to 20x nor blocking the main thread for 90ms a
+frame moves any of these numbers, which is worth knowing on its own: the engine
+decodes and paints off the main thread, so nothing done to the main thread
+starves the picture.
+
+`judgeCadence` carries the same demonstration as a unit test in
+`guards.test.ts`. Fed the rates forty healthy passes produced it returns
+nothing; fed 112ms holds from media 4 onwards it names media seconds 4 through 8
+and leaves 0 through 3 alone. Its third case is the one the per-media-second
+reading exists for: a single media second at 20/s whose two window clocks both
+still clear the floor and whose frames are never held past the budget. Deleting
+the per-media-second gate takes that case from one failure to none, which is how
+the case was checked to be gated on that reading and nothing else.
 
 **throttle** is the slow-machine floor. It sets a 2x CPU slowdown through
 `Emulation.setCPUThrottlingRate`, plays six seconds from `t=5s`, and asserts

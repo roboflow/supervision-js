@@ -48,6 +48,52 @@ const DETECTION_SETTLE_MS = 8000;
  * DETECTION_SETTLE_MS deadline out and lands far above this. */
 const SEEK_SETTLE_LIMIT_MS = 500;
 const BATTERY_TIMEOUT_MS = 900_000;
+/* The only fixture in the demo that draws keypoints, and the only one nothing
+ * else in this harness ever selects. Its detections thicken from 3.8 a frame at
+ * the clip's opening to a plateau of 12.9 to 13.1 from media 4 onwards, which
+ * is the half of the clip the stall lived in. The button carries no identifier,
+ * so its label is the handle. */
+const CADENCE_FIXTURE_LABEL = "Basketball with Keypoints";
+const CADENCE_HEAD_SECONDS = 0.3;
+/* Kept clear of the clip end so a window cannot wrap into the next lap. */
+const CADENCE_TAIL_SECONDS = 0.5;
+/* The mark the stall appeared past, and the position the original diagnosis
+ * started playback from to reproduce it cold. */
+const CADENCE_LATE_START_SECONDS = 4.5;
+const CADENCE_LATE_PLAY_SECONDS = 3.5;
+const CADENCE_MIN_LATE_SPAN_SECONDS = 2;
+const CADENCE_SEEK_SETTLE_MS = 700;
+const CADENCE_BUCKET_SECONDS = 1;
+const CADENCE_SAMPLE_TIMEOUT_MS = 120_000;
+/* Intervals a media second needs before its rate is a rate. A bucket at the
+ * edge of a window holds whatever the edge left it, and one interval quotes a
+ * whole second's cadence from a single frame period. */
+const CADENCE_MIN_BUCKET_INTERVALS = 8;
+/* The share of the source rate a media second has to present. Forty passes of
+ * one unchanged build put the slowest judged second between 29.53/s and
+ * 29.99/s against a 30.00/s source, so the floor sits 2.53/s under the worst of
+ * them. The stall it exists for ran at 8/s, 0.27 of source. The tighter watch
+ * on the same number is cadence.worstMediaSecondFps in the registry, which
+ * carries no tolerance at all. */
+const CADENCE_FLOOR_FRACTION = 0.9;
+/* Frame periods a single frame may stay on screen. The longest hold across
+ * those forty passes was 43.5ms against a 33.3ms period, and the stall held
+ * frames for 101 to 123ms. */
+const CADENCE_HOLD_PERIODS = 2;
+/* No frame was held that long on any of the forty passes, and the longest hold
+ * on any of them cleared the budget by 23ms. */
+const CADENCE_SKIP_LIMIT = 0;
+/* Frames the engine may book as late, as a share of the ones it painted in the
+ * window. Two passes in forty booked a single late frame out of the 106 the
+ * late-start window painted. A window whose frames are all arriving late books
+ * them all. */
+const CADENCE_LATE_FRAME_FRACTION = 0.02;
+/* The two clocks count different things in different realms, so they are never
+ * going to agree exactly; across forty passes they sat 0.03/s to 0.58/s
+ * apart.
+ * This is wide because its job is catching one of them going blind, which puts
+ * them twenty apart, and not the tenths they honestly differ by. */
+const CADENCE_AGREEMENT_LIMIT_FPS = 1.5;
 
 const SNAPSHOT = `(() => {
   const renderer = window.__demoRenderer;
@@ -783,6 +829,558 @@ export async function runLatency(session, info, attempts) {
     failures,
   };
 }
+
+/**
+ * The keypoint fixture, played through in windows that between them cover every
+ * media second of the clip.
+ *
+ * The stall this scenario exists for was positional: 33ms a frame up to media
+ * 4.0 and 101 to 123ms past it. A window that seeks once into the opening and
+ * samples a few hundred frames therefore reports a healthy player from the
+ * healthy half of the clip, so one window here starts cold past that mark and
+ * the rate is judged per media second.
+ *
+ * Both clocks are read because they fail differently. The consumer counts
+ * presented frames against wall time on the main thread; the engine counts
+ * paints against its own playing time in the worker. A stall only one of them
+ * can see is a stall in the instrument.
+ */
+export async function runCadence(session, info, attempts) {
+  await session.send("Page.bringToFront");
+  const opening = await readFixtureButtons(session);
+  const pressed = opening.find((button) => button.pressed);
+  if (!pressed) {
+    invalid(
+      "no sample fixture is selected, so this scenario has nothing to put " +
+        "back when it is done; the demo is in upload mode or the source " +
+        "controls changed",
+    );
+  }
+
+  try {
+    const fixture = await selectFixture(session, CADENCE_FIXTURE_LABEL);
+    return await measureCadence(session, fixture, attempts);
+  } finally {
+    await selectFixture(session, pressed.label).catch(() => {});
+  }
+}
+
+async function measureCadence(session, fixture, attempts) {
+  const sourceRateFps = fixture.frameRate;
+  const framePeriodMs = 1000 / sourceRateFps;
+  const holdLimitMs = round(framePeriodMs * CADENCE_HOLD_PERIODS, 1);
+  const floorFps = round(sourceRateFps * CADENCE_FLOOR_FRACTION, 2);
+  const plans = planCadenceWindows(fixture.duration);
+
+  const windows = [];
+  for (const plan of plans) {
+    const sample = await attemptStable(
+      session,
+      attempts,
+      async () => {
+        await session.send("Page.bringToFront");
+        return session.readJson(
+          cadenceSampler(plan.startSeconds, plan.spanSeconds),
+          { timeoutMs: CADENCE_SAMPLE_TIMEOUT_MS },
+        );
+      },
+      { guardPatches: true },
+    );
+    windows.push(
+      summariseCadenceWindow(plan, sample, { sourceRateFps, holdLimitMs }),
+    );
+  }
+
+  const scenario = {
+    fixture,
+    sourceRateFps: round(sourceRateFps, 3),
+    framePeriodMs: round(framePeriodMs, 2),
+    bucketSeconds: CADENCE_BUCKET_SECONDS,
+    minBucketIntervals: CADENCE_MIN_BUCKET_INTERVALS,
+    floorFraction: CADENCE_FLOOR_FRACTION,
+    floorFps,
+    holdPeriods: CADENCE_HOLD_PERIODS,
+    holdLimitMs,
+    skipLimit: CADENCE_SKIP_LIMIT,
+    lateFrameFraction: CADENCE_LATE_FRAME_FRACTION,
+    agreementLimitFps: CADENCE_AGREEMENT_LIMIT_FPS,
+    coverage: coverageOf(plans, windows),
+    windows,
+  };
+  return { scenario, failures: judgeCadence(scenario) };
+}
+
+/**
+ * One window over the whole clip and one that starts cold past the mark the
+ * stall appeared at. The two overlap on purpose: a media second sitting at the
+ * thin edge of one window is in the body of the other, so every second of the
+ * clip is judged from a bucket with enough intervals to be a rate.
+ */
+function planCadenceWindows(duration) {
+  const wholeClipSpan = round(
+    duration - CADENCE_HEAD_SECONDS - CADENCE_TAIL_SECONDS,
+    3,
+  );
+  const lateSpan = round(
+    Math.min(
+      CADENCE_LATE_PLAY_SECONDS,
+      duration - CADENCE_LATE_START_SECONDS - CADENCE_TAIL_SECONDS,
+    ),
+    3,
+  );
+  if (lateSpan < CADENCE_MIN_LATE_SPAN_SECONDS) {
+    invalid(
+      `the ${CADENCE_FIXTURE_LABEL} fixture runs ${duration}s, which leaves ` +
+        `${lateSpan}s to play from ${CADENCE_LATE_START_SECONDS}s; the window ` +
+        `that starts past the stall needs ${CADENCE_MIN_LATE_SPAN_SECONDS}s`,
+    );
+  }
+  return [
+    {
+      name: "whole-clip",
+      startSeconds: CADENCE_HEAD_SECONDS,
+      spanSeconds: wholeClipSpan,
+    },
+    {
+      name: "late-start",
+      startSeconds: CADENCE_LATE_START_SECONDS,
+      spanSeconds: lateSpan,
+    },
+  ];
+}
+
+/**
+ * Which media seconds the windows judged, against the ones the clip owes.
+ *
+ * This scenario was written to close a suite that measured playback in a single
+ * early window. Without a coverage reading, windows that creep back towards the
+ * opening keep reporting a pass over less and less of the clip.
+ */
+function coverageOf(plans, windows) {
+  const judged = new Set(
+    windows.flatMap((window) =>
+      window.buckets
+        .filter((bucket) => bucket.judged)
+        .map((bucket) => bucket.second),
+    ),
+  );
+  const whole = plans[0];
+  const fromSecond = Math.floor(whole.startSeconds);
+  const toSecond = Math.ceil(whole.startSeconds + whole.spanSeconds) - 1;
+  const owed = [];
+  for (let second = fromSecond; second <= toSecond; second += 1) {
+    owed.push(second);
+  }
+  return {
+    fromSecond,
+    toSecond,
+    judgedSeconds: owed.filter((second) => judged.has(second)),
+    missingSeconds: owed.filter((second) => !judged.has(second)),
+  };
+}
+
+function summariseCadenceWindow(plan, sample, { sourceRateFps, holdLimitMs }) {
+  if (!sample.tap) {
+    invalid(
+      "window.__demoEngineDiagnostics is absent, so the engine's own count of " +
+        "what it painted cannot be read; no video engine source is open",
+    );
+  }
+  if (sample.visibility !== "visible") {
+    invalid(
+      `the demo tab was ${sample.visibility} during the ${plan.name} window; ` +
+        "a backgrounded tab presents nothing",
+    );
+  }
+  if (sample.trace === null) {
+    invalid(
+      `the engine kept no record of what it painted during the ${plan.name} window`,
+    );
+  }
+  if (sample.trace.droppedEvents > 0) {
+    invalid(
+      `the engine's event ring overwrote ${sample.trace.droppedEvents} entries ` +
+        `during the ${plan.name} window, so it does not reach back to the start of it`,
+    );
+  }
+
+  const first = sample.samples[0];
+  const last = sample.samples.at(-1);
+  /* Every floor here is a share of the source frame rate, which is a statement
+   * about presented cadence only while the transport is running at 1x. */
+  const rates = [
+    ...new Set(sample.samples.map((reading) => reading.playbackRate)),
+  ];
+  if (rates.length !== 1 || rates[0] !== 1) {
+    invalid(
+      `the transport ran the ${plan.name} window at ${rates.join(" then ")}x, ` +
+        "so what it presented cannot be read against the source frame rate",
+    );
+  }
+  const motion = advancement(first, last, sourceRateFps);
+  if (motion.starved) invalid(STARVATION_NOTE);
+  if (!motion.advanced) {
+    invalid(
+      `media advanced only ${motion.mediaAdvancedSeconds}s over ` +
+        `${motion.elapsedSeconds}s of the ${plan.name} window (state ` +
+        `${motion.playbackState})`,
+    );
+  }
+
+  const paints = bucketPaintsByMediaSecond(sample.trace.paints, holdLimitMs);
+  if (paints.buckets.length === 0) {
+    invalid(
+      `the engine painted nothing it could place in the clip during the ` +
+        `${plan.name} window`,
+    );
+  }
+
+  const engineFps = sample.trace.summary.effectivePaintFps;
+  return {
+    name: plan.name,
+    startSeconds: plan.startSeconds,
+    spanSeconds: plan.spanSeconds,
+    consumer: {
+      fps: motion.presentRate,
+      presentedFrames: motion.presentedFrameDelta,
+      wallSeconds: motion.elapsedSeconds,
+      mediaAdvancedSeconds: motion.mediaAdvancedSeconds,
+    },
+    engine: {
+      fps: engineFps === null ? null : round(engineFps, 2),
+      paints: sample.trace.paints.length,
+      lateFrames: sample.trace.summary.lateFrames,
+      stalls: sample.trace.summary.stalls,
+      maxCatchUpMs: sample.trace.summary.maxCatchUpMs,
+      longestHoldMs: paints.longestHoldMs,
+      skips: paints.skips,
+      backwardPaints: paints.backwardPaints,
+    },
+    disagreementFps:
+      engineFps === null
+        ? null
+        : round(Math.abs(engineFps - motion.presentRate), 2),
+    buckets: paints.buckets,
+  };
+}
+
+/**
+ * Paints grouped by the media second each one landed in, so the rate is read
+ * where it was earned. An average over a window spends a stalled half of a clip
+ * against a healthy half and reports the mean of the two.
+ */
+function bucketPaintsByMediaSecond(paints, holdLimitMs) {
+  const placed = paints.filter(
+    (paint) => typeof paint.mediaTimeMs === "number",
+  );
+  const buckets = new Map();
+  let backwardPaints = 0;
+  let longestHoldMs = 0;
+  let skips = 0;
+
+  for (let index = 1; index < placed.length; index += 1) {
+    const previous = placed[index - 1];
+    const current = placed[index];
+    if (current.mediaTimeMs <= previous.mediaTimeMs) {
+      backwardPaints += 1;
+      continue;
+    }
+    const holdMs = current.tMs - previous.tMs;
+    if (holdMs > longestHoldMs) longestHoldMs = holdMs;
+    if (holdMs > holdLimitMs) skips += 1;
+    const second =
+      Math.floor(current.mediaTimeMs / (CADENCE_BUCKET_SECONDS * 1000)) *
+      CADENCE_BUCKET_SECONDS;
+    const bucket = buckets.get(second) ?? {
+      second,
+      intervals: 0,
+      wallMs: 0,
+      longestHoldMs: 0,
+    };
+    bucket.intervals += 1;
+    bucket.wallMs += holdMs;
+    if (holdMs > bucket.longestHoldMs) bucket.longestHoldMs = holdMs;
+    buckets.set(second, bucket);
+  }
+
+  return {
+    backwardPaints,
+    longestHoldMs: round(longestHoldMs, 1),
+    skips,
+    buckets: [...buckets.values()]
+      .sort((left, right) => left.second - right.second)
+      .map((bucket) => ({
+        second: bucket.second,
+        intervals: bucket.intervals,
+        fps: round(bucket.intervals / (bucket.wallMs / 1000), 2),
+        longestHoldMs: round(bucket.longestHoldMs, 1),
+        judged: bucket.intervals >= CADENCE_MIN_BUCKET_INTERVALS,
+      })),
+  };
+}
+
+/** Every gate this scenario carries, over the numbers alone. */
+export function judgeCadence(scenario) {
+  const failures = [];
+
+  for (const window of scenario.windows) {
+    for (const bucket of window.buckets) {
+      if (!bucket.judged) continue;
+      if (bucket.fps < scenario.floorFps) {
+        failures.push(
+          `cadence: ${window.name} presented ${bucket.fps}/s at media ` +
+            `${bucket.second}s, under the ${scenario.floorFps}/s floor ` +
+            `(${scenario.floorFraction} of the ${scenario.sourceRateFps}/s source)`,
+        );
+      }
+    }
+    if (window.consumer.fps < scenario.floorFps) {
+      failures.push(
+        `cadence: ${window.name} put ${window.consumer.presentedFrames} frames ` +
+          `on screen over ${window.consumer.wallSeconds}s, ${window.consumer.fps}/s ` +
+          `against the ${scenario.floorFps}/s floor`,
+      );
+    }
+    if (window.engine.fps !== null && window.engine.fps < scenario.floorFps) {
+      failures.push(
+        `cadence: ${window.name} painted ${window.engine.fps}/s by the engine's ` +
+          `own ledger, under the ${scenario.floorFps}/s floor`,
+      );
+    }
+    if (window.engine.fps === null) {
+      failures.push(
+        `cadence: the engine reported no paint rate for the ${window.name} ` +
+          "window, so only the consumer clock saw it",
+      );
+    }
+    if (window.engine.skips > scenario.skipLimit) {
+      failures.push(
+        `cadence: ${window.name} held ${window.engine.skips} frames longer than ` +
+          `${scenario.holdLimitMs}ms (${scenario.holdPeriods} frame periods), ` +
+          `longest ${window.engine.longestHoldMs}ms, over the ${scenario.skipLimit} allowed`,
+      );
+    }
+    const lateFrameLimit = Math.floor(
+      window.engine.paints * scenario.lateFrameFraction,
+    );
+    if (window.engine.lateFrames > lateFrameLimit) {
+      failures.push(
+        `cadence: the engine booked ${window.engine.lateFrames} of the ` +
+          `${window.engine.paints} frames it painted over ${window.name} as late, ` +
+          `over the ${lateFrameLimit} allowed`,
+      );
+    }
+    if (window.engine.stalls > 0) {
+      failures.push(
+        `cadence: the engine ran dry ${window.engine.stalls} times over the ` +
+          `${window.name} window`,
+      );
+    }
+    if (
+      window.disagreementFps !== null &&
+      window.disagreementFps > scenario.agreementLimitFps
+    ) {
+      failures.push(
+        `cadence: over ${window.name} the engine counted ${window.engine.fps}/s ` +
+          `and the page counted ${window.consumer.fps}/s, ${window.disagreementFps}/s ` +
+          `apart and over the ${scenario.agreementLimitFps}/s the two clocks may differ by`,
+      );
+    }
+  }
+
+  if (scenario.coverage.missingSeconds.length > 0) {
+    failures.push(
+      `cadence: media second${scenario.coverage.missingSeconds.length > 1 ? "s" : ""} ` +
+        `${scenario.coverage.missingSeconds.join(", ")} of ` +
+        `${scenario.coverage.fromSecond} to ${scenario.coverage.toSecond} carried ` +
+        `fewer than ${scenario.minBucketIntervals} intervals in every window, so ` +
+        "the clip was judged in part",
+    );
+  }
+  return failures;
+}
+
+/** The per-window and per-media-second table the run summary prints. */
+export function cadenceDetail(scenario, field) {
+  const lines = [
+    field(
+      "fixture",
+      `${scenario.fixture.label}  ${scenario.fixture.duration}s at ` +
+        `${scenario.sourceRateFps}fps, ${scenario.fixture.backend}`,
+    ),
+    field(
+      "floor",
+      `${scenario.floorFps}/s per media second (${scenario.floorFraction} of source)`,
+    ),
+    field(
+      "hold budget",
+      `${scenario.skipLimit} frames held past ${scenario.holdLimitMs}ms ` +
+        `(${scenario.holdPeriods} frame periods)`,
+    ),
+    field("clocks may differ by", `${scenario.agreementLimitFps}/s`),
+    field(
+      "media seconds judged",
+      `${scenario.coverage.judgedSeconds.length} of ` +
+        `${scenario.coverage.toSecond - scenario.coverage.fromSecond + 1}` +
+        (scenario.coverage.missingSeconds.length > 0
+          ? `  (missing ${scenario.coverage.missingSeconds.join(", ")})`
+          : ""),
+    ),
+  ];
+
+  for (const window of scenario.windows) {
+    lines.push(
+      "",
+      field(
+        `  ${window.name}`,
+        `from ${window.startSeconds}s for ${window.spanSeconds}s`,
+      ),
+      field(
+        "    engine / page",
+        `${window.engine.fps ?? "none"}/s vs ${window.consumer.fps}/s ` +
+          `(${window.disagreementFps ?? "none"} apart)`,
+      ),
+      field(
+        "    engine ledger",
+        `${window.engine.lateFrames} late, ${window.engine.stalls} stalls, ` +
+          `${window.engine.maxCatchUpMs}ms peak catch-up`,
+      ),
+      field(
+        "    longest hold / skips",
+        `${window.engine.longestHoldMs}ms / ${window.engine.skips}`,
+      ),
+      `    ${"media".padEnd(10)}${"fps".padStart(8)}${"held".padStart(9)}${"n".padStart(6)}`,
+    );
+    for (const bucket of window.buckets) {
+      lines.push(
+        `    ${`${bucket.second}s`.padEnd(10)}${String(bucket.fps).padStart(8)}` +
+          `${`${bucket.longestHoldMs}ms`.padStart(9)}${String(bucket.intervals).padStart(6)}` +
+          `${bucket.judged ? "" : "  thin"}`,
+      );
+    }
+  }
+  return lines;
+}
+
+const FIXTURE_BUTTONS = `[...document.querySelectorAll(".source-controls__mode button")]
+  .map((button) => ({
+    label: button.textContent.trim(),
+    pressed: button.getAttribute("aria-pressed") === "true",
+    disabled: button.disabled,
+  }))`;
+
+function readFixtureButtons(session) {
+  return session.readJson(FIXTURE_BUTTONS);
+}
+
+const clickFixture = (label) => `(() => {
+  const button = [...document.querySelectorAll(".source-controls__mode button")]
+    .find((node) => node.textContent.trim() === ${JSON.stringify(label)});
+  if (!button) return { found: false };
+  if (button.disabled) return { found: true, disabled: true };
+  window.__demoEvalFixtureMark = window.__demoRenderer;
+  button.click();
+  return { found: true, disabled: false };
+})()`;
+
+/**
+ * Switching sources tears the session down and builds another, so the renderer
+ * the page answers with is a different object afterwards. Waiting for a ready
+ * status alone would be answered by the outgoing one straight away.
+ */
+async function selectFixture(session, label, timeoutMs = 90_000) {
+  const buttons = await readFixtureButtons(session);
+  const wanted = buttons.find((button) => button.label === label);
+  if (!wanted) {
+    invalid(
+      `the demo is not offering a "${label}" source; it has ` +
+        `${buttons.map((button) => `"${button.label}"`).join(", ")}`,
+    );
+  }
+  if (wanted.pressed) return waitForRenderer(session, timeoutMs);
+
+  const clicked = await session.readJson(clickFixture(label));
+  if (clicked.disabled) {
+    invalid(`the "${label}" source button was disabled when the sweep set it`);
+  }
+
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const swapped = await session
+      .evaluate(
+        "Boolean(window.__demoRenderer) && window.__demoRenderer !== window.__demoEvalFixtureMark",
+      )
+      .catch(() => false);
+    if (swapped) {
+      const info = await waitForRenderer(session, timeoutMs);
+      await session.evaluate("delete window.__demoEvalFixtureMark; 1");
+      return { ...info, label };
+    }
+    await delay(200);
+  }
+  invalid(
+    `the demo stayed on its previous source after "${label}" was clicked`,
+  );
+}
+
+const cadenceSampler = (startSeconds, playSeconds) => `(async () => {
+  const renderer = window.__demoRenderer;
+  const tap = window.__demoEngineDiagnostics;
+  if (!tap) return { tap: false };
+  renderer.pause();
+  await renderer.seek(${startSeconds});
+  await new Promise((resolve) => setTimeout(resolve, ${CADENCE_SEEK_SETTLE_MS}));
+  const samples = [];
+  const sample = () => {
+    const state = renderer.getState();
+    samples.push({
+      at: performance.now(),
+      currentTime: state.currentTime,
+      presentedFrames: state.presentedFrames,
+      playbackRate: state.playbackRate,
+      playbackState: state.playbackState,
+    });
+  };
+  /* The engine assembles a snapshot only while a surface is subscribed, and the
+   * Demo view subscribes to none, so the ledger reads null without this. */
+  const stopBroadcast = tap.start();
+  tap.armTrace();
+  await renderer.play();
+  sample();
+  await new Promise((resolve) => {
+    const deadline = performance.now() + ${Math.round(playSeconds * 1000)};
+    const tick = () => {
+      sample();
+      if (performance.now() < deadline) requestAnimationFrame(tick);
+      else resolve();
+    };
+    requestAnimationFrame(tick);
+  });
+  renderer.pause();
+  sample();
+  const trace = await tap.exportTrace();
+  tap.disarmTrace();
+  stopBroadcast();
+  return {
+    tap: true,
+    visibility: document.visibilityState,
+    samples,
+    trace: trace === null ? null : {
+      durationMs: trace.durationMs,
+      truncatedReason: trace.truncatedReason,
+      droppedEvents: trace.coverage.events.dropped,
+      summary: {
+        effectivePaintFps: trace.summary.effectivePaintFps,
+        lateFrames: trace.summary.lateFrames,
+        stalls: trace.summary.stalls,
+        maxCatchUpMs: trace.summary.maxCatchUpMs,
+      },
+      paints: trace.events
+        .filter((event) => event.type === "paint")
+        .map((event) => ({ tMs: event.tMs, mediaTimeMs: event.mediaTimeMs })),
+    },
+  };
+})()`;
 
 export async function runBattery(chromeDebugUrl, storybookUrl, batteryUrl) {
   const storyUrl = `${storybookUrl.replace(/\/$/, "")}/iframe.html?id=framesampler--default&viewMode=story`;
