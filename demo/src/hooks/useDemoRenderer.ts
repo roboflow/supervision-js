@@ -31,6 +31,7 @@ import {
   type PresentationDiagnosticsSample,
 } from "../diagnostics/presentation-diagnostics";
 import type {
+  DemoFixtureDetectionSourceTransform,
   DemoFixtureFrameTransform,
   DemoFixtureSummary,
 } from "../fixtures/demo-fixtures";
@@ -105,11 +106,10 @@ export interface DemoRendererState {
   readonly uploadClassNames: string;
   readonly uploadFileName: string | null;
   readonly uploadInferenceState: UploadInferenceState;
+  readonly getCurrentTime: () => number;
   readonly onCancelUploadInference: () => void;
-  readonly onPause: () => void;
-  readonly onPlay: () => void;
   readonly onScrub: (time: number) => void;
-  readonly onSeek: (time: number) => void;
+  readonly onSeek: (time: number) => Promise<void>;
   readonly onStartUploadInference: () => void;
   readonly onSetPlaybackRate: (rate: number) => void;
   readonly onStepFrame: (direction: 1 | -1) => void;
@@ -119,6 +119,9 @@ export interface DemoRendererState {
   readonly setPresentationSettings: (
     settings: DemoPresentationSettings,
   ) => void;
+  readonly pausePlayback: () => void;
+  readonly playPlayback: () => Promise<void>;
+  readonly refreshDetections: () => Promise<void>;
   readonly refreshPresentation: () => void;
   readonly setRenderQuality: (quality: DemoRenderQuality) => void;
   readonly setSampleFixtureId: (sampleName: string) => void;
@@ -128,6 +131,8 @@ export interface DemoRendererState {
 }
 
 export interface UseDemoRendererOptions {
+  /** Optional docs/demo-only wrap over the fixture's detection source. */
+  readonly fixtureDetectionSourceTransform?: DemoFixtureDetectionSourceTransform;
   /** Optional docs/demo-only transformation over loaded fixture frames. */
   readonly fixtureFrameTransform?: DemoFixtureFrameTransform;
   /**
@@ -172,6 +177,9 @@ export function useDemoRenderer(
       demoFixtures.find(
         (fixture) => fixture.sampleName === options.initialFixtureId,
       ) ?? defaultDemoFixture,
+  );
+  const [fixtureDetectionSourceTransform] = useState(
+    () => options.fixtureDetectionSourceTransform,
   );
   const [fixtureFrameTransform] = useState(() => options.fixtureFrameTransform);
   const [presentationTransform] = useState(() => options.presentationTransform);
@@ -403,6 +411,7 @@ export function useDemoRenderer(
           const session = await createFixtureSession({
             container,
             definition: activeFixture,
+            fixtureDetectionSourceTransform,
             fixtureFrameTransform,
             isActive,
             onDetectionHover: setHoveredDetectionPick,
@@ -495,6 +504,7 @@ export function useDemoRenderer(
     };
   }, [
     activeFixture,
+    fixtureDetectionSourceTransform,
     fixtureFrameTransform,
     presentationTransform,
     sourceMode,
@@ -528,27 +538,30 @@ export function useDemoRenderer(
     syncRendererState(renderer);
   }, [syncRendererState]);
 
-  const onPlay = useCallback(() => {
+  const getCurrentTime = useCallback(
+    () => rendererRef.current?.getState().currentTime ?? 0,
+    [],
+  );
+
+  const playPlayback = useCallback(async () => {
     const renderer = rendererRef.current;
 
     if (!renderer) {
       return;
     }
 
-    void (async () => {
-      try {
-        await renderer.play();
-      } catch (error: unknown) {
-        setErrorMessage(
-          getErrorMessage(error, "Unable to play the media renderer."),
-        );
-      }
-
+    try {
+      await renderer.play();
+    } catch (error: unknown) {
+      setErrorMessage(
+        getErrorMessage(error, "Unable to play the media renderer."),
+      );
+    } finally {
       syncRendererState(renderer);
-    })();
+    }
   }, [syncRendererState]);
 
-  const onPause = useCallback(() => {
+  const pausePlayback = useCallback(() => {
     const renderer = rendererRef.current;
 
     if (!renderer) {
@@ -560,7 +573,7 @@ export function useDemoRenderer(
   }, [syncRendererState]);
 
   const onSeek = useCallback(
-    (time: number) => {
+    async (time: number) => {
       const renderer = rendererRef.current;
 
       if (!renderer) {
@@ -571,19 +584,18 @@ export function useDemoRenderer(
       seekRunRef.current = seekRunId;
       setHoveredDetectionPick(null);
       setSelectedDetectionPick(null);
-      void renderer
-        .seek(time)
-        .then(() => {
-          if (seekRunRef.current === seekRunId) {
-            syncRendererState(renderer);
-          }
-        })
-        .catch((error: unknown) => {
-          if (seekRunRef.current === seekRunId) {
-            setErrorMessage(getErrorMessage(error, "Unable to seek media."));
-            syncRendererState(renderer);
-          }
-        });
+
+      try {
+        await renderer.seek(time);
+      } catch (error: unknown) {
+        if (seekRunRef.current === seekRunId) {
+          setErrorMessage(getErrorMessage(error, "Unable to seek media."));
+        }
+      } finally {
+        if (seekRunRef.current === seekRunId) {
+          syncRendererState(renderer);
+        }
+      }
     },
     [syncRendererState],
   );
@@ -683,6 +695,22 @@ export function useDemoRenderer(
       syncRendererState,
     ],
   );
+
+  const refreshDetections = useCallback(async () => {
+    const session = sessionRef.current;
+
+    if (!session) {
+      return;
+    }
+
+    try {
+      await session.refresh();
+    } catch (error: unknown) {
+      setErrorMessage(getErrorMessage(error, "Unable to refresh detections."));
+    } finally {
+      syncRendererState(session.renderer);
+    }
+  }, [syncRendererState]);
 
   const refreshPresentation = useCallback(() => {
     const renderer = rendererRef.current;
@@ -860,8 +888,6 @@ export function useDemoRenderer(
     mediaState,
     onCancelUploadInference,
     onClearSelectedDetection,
-    onPause,
-    onPlay,
     onScrub,
     onSeek,
     onSetPlaybackRate,
@@ -875,6 +901,10 @@ export function useDemoRenderer(
     engineDiagnosticsTap,
     presentedRate,
     readPresentationDiagnostics,
+    getCurrentTime,
+    pausePlayback,
+    playPlayback,
+    refreshDetections,
     refreshPresentation,
     presentationAvailability:
       sourceMode === DemoSourceMode.Fixture

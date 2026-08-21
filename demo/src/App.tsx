@@ -191,8 +191,8 @@ function DemoApp() {
         disabled={!demo.canUseRenderer}
         duration={demo.duration}
         isPlaying={demo.playbackState === MediaRendererPlaybackState.Playing}
-        onPause={demo.onPause}
-        onPlay={demo.onPlay}
+        onPause={demo.pausePlayback}
+        onPlay={() => void demo.playPlayback()}
         onSeek={demo.onSeek}
         onSetPlaybackRate={demo.onSetPlaybackRate}
         onStepFrame={demo.onStepFrame}

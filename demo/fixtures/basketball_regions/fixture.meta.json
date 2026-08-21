@@ -13,7 +13,7 @@
     "focusEnabled": false,
     "keypointsEnabled": false,
     "labelsEnabled": false,
-    "masksEnabled": false,
+    "masksEnabled": true,
     "polygonsEnabled": false,
     "polylinesEnabled": false
   },
