@@ -819,13 +819,13 @@ function sha256(content) {
 
 function parseArgs(args) {
   const parsed = {
-    datasetId: "basketball_geometry_v1",
-    fixtureDir: "demo/fixtures/basketball_geometry",
+    datasetId: "basketball_sam3_v1",
+    fixtureDir: "demo/fixtures/basketball_sam3",
     headSam3Input: undefined,
     help: false,
     maxPolygonPoints: DEFAULT_MAX_POLYGON_POINTS,
-    output: "tools/geometry-fixture/output/detections.json",
-    poseInput: "demo/fixtures/basketball_geometry/raw-pose.jsonl",
+    output: "tools/geometry-fixture/output/merged-detections.json",
+    poseInput: "demo/fixtures/basketball_sam3/raw-pose.jsonl",
     polygonTolerance: DEFAULT_POLYGON_TOLERANCE,
     sam3Input: "demo/fixtures/basketball_sam3/detections.json",
     visibleConfidence: DEFAULT_KEYPOINT_VISIBLE_CONFIDENCE,
@@ -895,12 +895,12 @@ function printHelp() {
 npm run fixture:geometry:create -- [options]
 
 Options:
-  --dataset-id <id>                default: basketball_geometry_v1
-  --fixture-dir <path>             default: demo/fixtures/basketball_geometry
+  --dataset-id <id>                default: basketball_sam3_v1
+  --fixture-dir <path>             default: demo/fixtures/basketball_sam3
   --head-sam3-input <path>         append direct SAM3 head masks associated to players
   --max-polygon-points <count>     default: ${DEFAULT_MAX_POLYGON_POINTS}
-  --output <path>                  default: tools/geometry-fixture/output/detections.json
-  --pose-input <path>              default: demo/fixtures/basketball_geometry/raw-pose.jsonl
+  --output <path>                  default: tools/geometry-fixture/output/merged-detections.json
+  --pose-input <path>              default: demo/fixtures/basketball_sam3/raw-pose.jsonl
   --polygon-tolerance <pixels>     default: ${DEFAULT_POLYGON_TOLERANCE}
   --sam3-input <path>              default: demo/fixtures/basketball_sam3/detections.json
   --visible-confidence <value>     default: ${DEFAULT_KEYPOINT_VISIBLE_CONFIDENCE}`);

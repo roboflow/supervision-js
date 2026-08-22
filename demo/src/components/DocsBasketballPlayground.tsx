@@ -31,7 +31,7 @@ const annotationLayers: readonly {
 /** A compact, embeddable consumer of the browser demo for the docs homepage. */
 export function DocsBasketballPlayground() {
   const demo = useDemoRenderer({
-    initialFixtureId: "basketball_geometry",
+    initialFixtureId: "basketball_sam3",
     initialPresentationSettings: {
       boxesEnabled: true,
       focusEnabled: false,

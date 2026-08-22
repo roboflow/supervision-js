@@ -82,7 +82,7 @@ export function DocsTrackingPostProcessorPlayground() {
   );
   const demo = useDemoRenderer({
     fixtureDetectionSourceTransform: sourceTransform,
-    initialFixtureId: "basketball_geometry",
+    initialFixtureId: "basketball_sam3",
     initialPresentationSettings: {
       boxesEnabled: true,
       focusEnabled: false,
@@ -94,8 +94,8 @@ export function DocsTrackingPostProcessorPlayground() {
     },
     presentationTransform,
   });
-  const totalFrames = demo.fixtureSummary?.frameCount ?? 270;
-  const totalChunks = Math.ceil((demo.fixtureSummary?.duration ?? 9) / 1);
+  const totalFrames = demo.fixtureSummary?.frameCount ?? 0;
+  const totalChunks = Math.ceil(demo.fixtureSummary?.duration ?? 0);
   const {
     algorithm,
     bufferRatioFirst,

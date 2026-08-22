@@ -1,9 +1,10 @@
 # Geometry Fixture Tooling
 
-Offline tooling that builds the demo's `basketball_geometry` fixture: one
-combined `DetectionFrame` timeline that carries SAM3 masks, mask-derived
-polygons, a bounded basketball center trace, and YOLO pose keypoints on the
-shared 30fps basketball frame grid.
+Offline tooling that builds the demo's basketball fixtures: one combined
+`DetectionFrame` timeline that carries SAM3 masks, mask-derived polygons, a
+bounded basketball center trace, and YOLO pose keypoints on one shared frame
+grid. It builds `basketball_sam3` by default and `basketball_regions` through
+the flags that README records.
 Nothing here runs in the browser; the demo only consumes the committed chunks.
 
 ## Pieces
@@ -31,5 +32,5 @@ npm run fixture:geometry:create        # builds core, converts, chunks
 node --test tools/geometry-fixture/*.test.mjs
 ```
 
-See `demo/fixtures/basketball_geometry/README.md` for full provenance and the
-pose regeneration steps.
+See `demo/fixtures/basketball_sam3/README.md` for full provenance and the pose
+regeneration steps.

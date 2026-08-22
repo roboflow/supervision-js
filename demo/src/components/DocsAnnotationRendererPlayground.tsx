@@ -38,7 +38,7 @@ function DocsStyleAnnotationRendererPlayground({
   const demo = useDemoRenderer({
     fixtureFrameTransform: (frames) =>
       filterDocsAnnotationRendererFrames(renderer, frames),
-    initialFixtureId: "basketball_geometry",
+    initialFixtureId: "basketball_sam3",
     initialPresentationSettings:
       createDocsAnnotationRendererPresentation(renderer),
   });

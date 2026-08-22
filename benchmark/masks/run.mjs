@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* global Buffer, process, setTimeout */
+/* global Buffer, process */
 
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -47,7 +47,10 @@ const fallbackClassStyle = {
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const fixture = await loadFixture();
-  const sourceBytes = await measureSourceBytes(fixture.manifest);
+  const sourceBytes = await measureSourceBytes(
+    fixture.manifest,
+    fixture.mediaPath,
+  );
   const staticStats = summarizeFixture(fixture, sourceBytes);
   const cases = [];
 
@@ -196,14 +199,17 @@ function parseArgs(argv) {
 async function loadFixture() {
   const manifestPath = path.join(fixtureDir, "detections.manifest.json");
   const detectionsPath = path.join(fixtureDir, "detections.json");
-  const [manifest, detections] = await Promise.all([
+  const metaPath = path.join(fixtureDir, "fixture.meta.json");
+  const [manifest, detections, meta] = await Promise.all([
     readJson(manifestPath),
     readJson(detectionsPath),
+    readJson(metaPath),
   ]);
 
   return {
     frames: detections.frames,
     manifest,
+    mediaPath: path.resolve(fixtureDir, meta.media.file),
   };
 }
 
@@ -211,7 +217,7 @@ async function readJson(filePath) {
   return JSON.parse(await fs.readFile(filePath, "utf8"));
 }
 
-async function measureSourceBytes(manifest) {
+async function measureSourceBytes(manifest, mediaPath) {
   const chunkFiles = manifest.chunks.map((chunk) =>
     path.join(fixtureDir, chunk.src),
   );
@@ -224,7 +230,7 @@ async function measureSourceBytes(manifest) {
   const [manifestStats, detectionsStats, videoStats] = await Promise.all([
     fs.stat(path.join(fixtureDir, "detections.manifest.json")),
     fs.stat(path.join(fixtureDir, "detections.json")),
-    fs.stat(path.join(fixtureDir, manifest.video.file)),
+    fs.stat(mediaPath),
   ]);
 
   return {

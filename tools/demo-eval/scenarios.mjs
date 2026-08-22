@@ -56,12 +56,12 @@ const DETECTION_SETTLE_MS = 8000;
  * DETECTION_SETTLE_MS deadline out and lands far above this. */
 const SEEK_SETTLE_LIMIT_MS = 500;
 const BATTERY_TIMEOUT_MS = 900_000;
-/* The basketball clip, under whichever sample the demo is offering it. Its
- * detections thicken from 3.8 a frame at the clip's opening to a plateau of
- * 12.9 to 13.1 from media 4 onwards, which is the half of the clip the stall
- * lived in, and nothing else in this harness selects it. More than one fixture
- * has carried this clip; the first the demo answers to wins. */
-const CADENCE_FIXTURE_IDS = ["basketball_geometry", "basketball_sam3"];
+/* The basketball clip, under whichever sample the demo is offering it. At its
+ * opening confidence gate the detections thicken from 4.4 a frame to a plateau
+ * of 11.8 to 13.1 from media 3 onwards, which is the half of the clip the stall
+ * lived in, and nothing else in this harness selects it. The first id the demo
+ * answers to wins. */
+const CADENCE_FIXTURE_IDS = ["basketball_sam3"];
 const CADENCE_HEAD_SECONDS = 0.3;
 /* Kept clear of the clip end so a window cannot wrap into the next lap. */
 const CADENCE_TAIL_SECONDS = 0.5;

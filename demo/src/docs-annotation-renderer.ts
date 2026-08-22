@@ -371,6 +371,9 @@ export function createDocsAnnotationRendererPresentation(
       : {}),
     polygonsEnabled: renderer === "polygons",
     polylinesEnabled: renderer === "polylines",
+    // The frame filter already scopes this page to the one derived trace, so
+    // the fixture's confidence gate can only subtract from it.
+    ...(renderer === "polylines" ? { confidenceThreshold: 0 } : {}),
     maskFillAlpha: 1,
     maskOpacity: 0.72,
   };
