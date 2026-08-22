@@ -278,7 +278,11 @@ function createCdpClient(webSocketUrl) {
         keepalive = setInterval(() => {
           if (socket.readyState === globalThis.WebSocket.OPEN) {
             socket.send(
-              JSON.stringify({ id: nextId++, method: "Runtime.evaluate", params: { expression: "0" } }),
+              JSON.stringify({
+                id: nextId++,
+                method: "Runtime.evaluate",
+                params: { expression: "0" },
+              }),
             );
           }
         }, 15000);
