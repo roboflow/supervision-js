@@ -3,11 +3,14 @@ import {
   BaseFocusStyle,
   createArrayDetectionFrameSource,
   createBufferedDetectionTimeline,
+  DetectionMaskEncoding,
 } from "supervision-js-core";
 import type {
   BufferedDetectionTimeline,
   DetectionFrame,
+  DetectionMask,
   FocusStyle,
+  MaskHaloStyle,
   MaskStyle,
   PolygonStyle,
 } from "supervision-js-core";
@@ -213,6 +216,96 @@ const detectionFrames: readonly DetectionFrame[] = [
   },
 ];
 
+const singlePixelMask: DetectionMask = {
+  counts: "01",
+  encoding: DetectionMaskEncoding.CompressedRle,
+  height: 1,
+  width: 1,
+};
+
+const haloDetectionFrames: readonly DetectionFrame[] = [
+  {
+    detections: [
+      {
+        className: "glowing",
+        confidence: 0.9,
+        mask: singlePixelMask,
+        rect: makeRect(),
+      },
+      {
+        className: "dim",
+        confidence: 0.1,
+        mask: singlePixelMask,
+        rect: makeRect(),
+      },
+    ],
+    frameIndex: 0,
+    mediaTime: 1,
+  },
+];
+
+/** A fresh object and a fresh closure per call, the way a live control feeds one. */
+function createGlowingOnlyHaloStyle(spread: number): MaskHaloStyle {
+  return {
+    resolve: (detection) =>
+      detection.className === "glowing"
+        ? { alpha: 1, color: 0xffffff, spread }
+        : undefined,
+  };
+}
+
+const transparentOnDimHaloStyle: MaskHaloStyle = {
+  resolve: (detection) => ({
+    alpha: detection.className === "glowing" ? 1 : 0,
+    color: 0xffffff,
+    spread: 8,
+  }),
+};
+
+/** Answers empty so the preparation queue drains. */
+function createRecordingWorkerFactory(cooks: number[][]) {
+  return {
+    createWorker() {
+      const listeners = new Set<(event: { data: unknown }) => void>();
+
+      return {
+        addEventListener(type: string, listener: (event: unknown) => void) {
+          if (type === "message") {
+            listeners.add(listener as (event: { data: unknown }) => void);
+          }
+        },
+        postMessage(message: {
+          job: {
+            instructions: readonly { detectionIndex: number }[];
+            key: string;
+          };
+          requestId: number;
+        }) {
+          cooks.push(
+            message.job.instructions.map(
+              ({ detectionIndex }) => detectionIndex,
+            ),
+          );
+
+          for (const listener of listeners) {
+            listener({
+              data: {
+                key: message.job.key,
+                requestId: message.requestId,
+                type: "empty",
+              },
+            });
+          }
+        },
+        removeEventListener(_type: string, listener: (event: unknown) => void) {
+          listeners.delete(listener as (event: { data: unknown }) => void);
+        },
+        terminate: vi.fn(),
+      } as unknown as Worker;
+    },
+  };
+}
+
 /** Cooks to nothing, so a frame is prepared exactly when its cook has run. */
 const emptyMaskStyle: MaskStyle = { resolve: () => undefined };
 const emptyPolygonStyle: PolygonStyle = { resolve: () => undefined };
@@ -372,6 +465,67 @@ describe("the prepared annotation window under push presentation", () => {
     expect(maskArtifactStatuses(diagnostics).length).toBeGreaterThan(0);
   });
 
+  it("prepares mask coverage for only the detections the halo paints", async () => {
+    const cooks: number[][] = [];
+    const scene = await createScene({
+      detectionFrames: haloDetectionFrames,
+      maskHaloStyle: createGlowingOnlyHaloStyle(8),
+      maskStyle: null,
+      renderPreparation: {
+        workerFactory: createRecordingWorkerFactory(cooks),
+      },
+    });
+
+    scene.present(1000);
+    await scene.settleCooks();
+
+    // One id per pixel: a detection the halo skips would bury the one it draws.
+    expect(cooks.length).toBeGreaterThan(0);
+    expect(cooks.at(-1)).toEqual([0]);
+  });
+
+  it("leaves a halo that paints nothing out of the prepared coverage", async () => {
+    const cooks: number[][] = [];
+    const scene = await createScene({
+      detectionFrames: haloDetectionFrames,
+      maskHaloStyle: transparentOnDimHaloStyle,
+      maskStyle: null,
+      renderPreparation: {
+        workerFactory: createRecordingWorkerFactory(cooks),
+      },
+    });
+
+    scene.present(1000);
+    await scene.settleCooks();
+
+    expect(cooks.length).toBeGreaterThan(0);
+    expect(cooks.at(-1)).toEqual([0]);
+  });
+
+  it("keeps prepared mask coverage across a halo restyle that admits the same detections", async () => {
+    const cooks: number[][] = [];
+    const scene = await createScene({
+      detectionFrames: haloDetectionFrames,
+      maskHaloStyle: createGlowingOnlyHaloStyle(8),
+      maskStyle: null,
+      renderPreparation: {
+        workerFactory: createRecordingWorkerFactory(cooks),
+      },
+    });
+
+    scene.present(1000);
+    await scene.settleCooks();
+
+    const cookCountBeforeRestyle = cooks.length;
+
+    scene.setPresentation({ maskHaloStyle: createGlowingOnlyHaloStyle(24) });
+    scene.present(1000);
+    await scene.settleCooks();
+
+    expect(cookCountBeforeRestyle).toBeGreaterThan(0);
+    expect(cooks.length).toBe(cookCountBeforeRestyle);
+  });
+
   it("prepares no id-mask artifacts when neither the fill nor focus is on", async () => {
     const diagnostics: RenderPreparationDiagnostics[] = [];
     const scene = await createScene({
@@ -427,13 +581,15 @@ function boxGraphics() {
 async function createScene(
   options: {
     readonly focusStyle?: FocusStyle | null;
+    readonly detectionFrames?: readonly DetectionFrame[];
+    readonly maskHaloStyle?: MaskHaloStyle | null;
     readonly maskStyle?: MaskStyle | null;
     readonly polygonStyle?: PolygonStyle;
     readonly prepareDetections?: boolean;
     readonly renderPreparation?: RenderPreparationOptions;
   } = {},
 ) {
-  const detectionTimeline = createTimeline();
+  const detectionTimeline = createTimeline(options.detectionFrames);
 
   if (options.prepareDetections !== false) {
     await detectionTimeline.prepare(1);
@@ -446,6 +602,7 @@ async function createScene(
     createSceneOptions({
       detectionTimeline,
       focusStyle: options.focusStyle ?? null,
+      maskHaloStyle: options.maskHaloStyle ?? undefined,
       maskStyle:
         options.maskStyle === undefined ? emptyMaskStyle : options.maskStyle,
       onPresentationUpdate: (sample) => presentations.push(sample),
@@ -491,15 +648,21 @@ async function createScene(
 
     scene,
 
+    setPresentation(presentation: MediaRendererPresentation) {
+      scene.setPresentation(presentation, 1);
+    },
+
     snapshot() {
       return scene.getPreparedAnnotationWindow?.();
     },
   };
 }
 
-function createTimeline(): BufferedDetectionTimeline {
+function createTimeline(
+  frames: readonly DetectionFrame[] = detectionFrames,
+): BufferedDetectionTimeline {
   return createBufferedDetectionTimeline({
-    source: createArrayDetectionFrameSource(detectionFrames),
+    source: createArrayDetectionFrameSource(frames),
   });
 }
 

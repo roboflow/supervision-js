@@ -37,6 +37,10 @@ import type { PresentedVideoFrame } from "./presented-frame-channel";
 import { createSceneRenderScheduler } from "./scene-render-scheduler";
 import type { SceneRenderSignature } from "./scene-render-scheduler";
 import { createPreparedAnnotationWindow } from "./prepared-annotation-window";
+import {
+  createMaskHaloPreparationStyle,
+  resolvePaintedMaskHalo,
+} from "./pixi-mask-halo";
 import { createPixiBoxLayer, type PixiBoxLayerState } from "./pixi-box-layer";
 import { createPixiFocusLayer } from "./pixi-focus-layer";
 import { createPixiInteractionLayer } from "./pixi-interaction-layer";
@@ -78,18 +82,9 @@ import type {
 const MILLISECONDS_PER_SECOND = 1000;
 
 /**
- * Halo-only and coverage-only presentations still need a prepared artifact.
- * Neither draws a fill, so both resolve to nothing visible and exist only to
- * keep preparation running.
+ * Coverage-only presentations still need a prepared artifact. Nothing here
+ * draws a fill; it exists only to keep preparation running.
  */
-const HALO_ONLY_MASK_STYLE: MaskStyle = {
-  artifactKey: "mask-halo-only",
-  resolve: (detection) =>
-    detection.mask
-      ? { alpha: 0, color: 0x000000, mask: detection.mask }
-      : undefined,
-};
-
 const REGION_COVERAGE_ONLY_MASK_STYLE: MaskStyle = {
   artifactKey: "region-mask-coverage-only",
   resolve: () => undefined,
@@ -224,6 +219,12 @@ export async function createPixiMediaScene(
   let mediaHeight = 0;
   let mediaWidth = 0;
   let visibilityVersion = 0;
+  let maskHaloVersion = 0;
+  let haloPreparationStyleCache: {
+    readonly source: MaskHaloStyle;
+    readonly style: MaskStyle;
+    readonly version: number;
+  } | null = null;
   let visibilityMaskStyleCache: {
     readonly source: MaskStyle;
     readonly style: MaskStyle;
@@ -1261,7 +1262,20 @@ export async function createPixiMediaScene(
         }
 
         if (presentation.maskHaloStyle !== undefined) {
+          const previousMaskHaloStyle = currentMaskHaloStyle;
+
           currentMaskHaloStyle = presentation.maskHaloStyle;
+
+          if (
+            previousMaskHaloStyle &&
+            currentMaskHaloStyle &&
+            admitsDifferentMaskCoverage(
+              previousMaskHaloStyle,
+              currentMaskHaloStyle,
+            )
+          ) {
+            maskHaloVersion += 1;
+          }
         }
 
         syncMaskPreparation();
@@ -1489,7 +1503,9 @@ export async function createPixiMediaScene(
   function resolveMaskPreparationStyle() {
     const baseStyle =
       currentMaskStyle ??
-      (currentMaskHaloStyle ? HALO_ONLY_MASK_STYLE : null) ??
+      (currentMaskHaloStyle
+        ? resolveHaloPreparationStyle(currentMaskHaloStyle)
+        : null) ??
       (currentFocusStyle ? ID_MASK_PREPARATION_STYLE : null) ??
       (regionMaskCoverageKey ? REGION_COVERAGE_ONLY_MASK_STYLE : null);
 
@@ -1502,6 +1518,86 @@ export async function createPixiMediaScene(
         ? keyArtifactByRegionCoverage(baseStyle)
         : baseStyle,
     );
+  }
+
+  /**
+   * Whether two halo styles disagree about which detections belong in the
+   * prepared coverage. `resolve` is caller-supplied, so admission is observable
+   * only by running it against real detections: a swap that restyles the glow
+   * leaves the cooked artifacts valid, one that moves the admission boundary
+   * does not.
+   *
+   * Only the buffered window is asked, so a prepared frame the buffer has
+   * already rolled past can survive an admission change that touches it and
+   * nothing buffered. An empty buffer is evidence of nothing and counts as
+   * changed.
+   */
+  function admitsDifferentMaskCoverage(
+    previousStyle: MaskHaloStyle,
+    nextStyle: MaskHaloStyle,
+  ) {
+    if (previousStyle === nextStyle) {
+      return false;
+    }
+
+    const frames = options.detectionTimeline.getBufferedFrames();
+
+    if (frames.length === 0) {
+      return true;
+    }
+
+    for (const frame of frames) {
+      for (const [detectionIndex, detection] of frame.detections.entries()) {
+        const state = resolveContextState(detection);
+
+        if (state.hidden) {
+          continue;
+        }
+
+        const context = {
+          detectionIndex,
+          frame,
+          mediaTime: frame.mediaTime,
+          ...state,
+        };
+
+        if (
+          !resolvePaintedMaskHalo(previousStyle, detection, context) !==
+          !resolvePaintedMaskHalo(nextStyle, detection, context)
+        ) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Cooks run the halo style, so a restyle that kept the artifact key still has
+   * to reach the queue: the key decides which artifacts survive, the closure
+   * decides what the next cook admits.
+   */
+  function resolveHaloPreparationStyle(haloStyle: MaskHaloStyle): MaskStyle {
+    if (
+      haloPreparationStyleCache?.source === haloStyle &&
+      haloPreparationStyleCache.version === maskHaloVersion
+    ) {
+      return haloPreparationStyleCache.style;
+    }
+
+    const style = createMaskHaloPreparationStyle(
+      haloStyle,
+      `mask-halo-only:${maskHaloVersion}`,
+    );
+
+    haloPreparationStyleCache = {
+      source: haloStyle,
+      style,
+      version: maskHaloVersion,
+    };
+
+    return style;
   }
 
   function syncMaskPreparation() {

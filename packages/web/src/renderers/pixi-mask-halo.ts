@@ -1,5 +1,12 @@
 import { MAX_ID_MASK_PALETTE_ENTRIES } from "#render-preparation/mask-frame-compositor";
 import type {
+  Detection,
+  MaskHaloDrawInstruction,
+  MaskHaloStyle,
+  MaskHaloStyleContext,
+  MaskStyle,
+} from "supervision-js-core";
+import type {
   Container as PixiContainer,
   ImageSource as PixiImageSource,
   Mesh as PixiMesh,
@@ -53,6 +60,51 @@ type UniformGroupConstructor = new (
     | { size?: number; type: "vec4<f32>"; value: Float32Array }
   >,
 ) => PixiUniformGroup;
+
+/**
+ * The halo a detection actually paints, or `undefined`. A style may answer an
+ * instruction that draws nothing, and both the coverage the halo prepares and
+ * the passes it renders have to read that the same way: the raster carries one
+ * detection id per pixel, so a detection admitted into the coverage but never
+ * painted still claims its pixels and buries the ids the glow is drawn from.
+ */
+export function resolvePaintedMaskHalo(
+  haloStyle: MaskHaloStyle,
+  detection: Detection,
+  context: MaskHaloStyleContext,
+): MaskHaloDrawInstruction | undefined {
+  if (!detection.mask) {
+    return undefined;
+  }
+
+  const halo = haloStyle.resolve(detection, context);
+
+  if (!halo || halo.alpha <= 0 || halo.spread <= 0) {
+    return undefined;
+  }
+
+  return halo;
+}
+
+/**
+ * The mask coverage a halo-only presentation prepares. Nothing here reaches the
+ * screen, so the fill colour and alpha are arbitrary.
+ */
+export function createMaskHaloPreparationStyle(
+  haloStyle: MaskHaloStyle,
+  artifactKey: string,
+): MaskStyle {
+  return {
+    artifactKey,
+    resolve: (detection, context) => {
+      const { mask } = detection;
+
+      return mask && resolvePaintedMaskHalo(haloStyle, detection, context)
+        ? { alpha: 0, color: 0x000000, mask }
+        : undefined;
+    },
+  };
+}
 
 export interface PixiBlurFilterLike {
   strength: number;

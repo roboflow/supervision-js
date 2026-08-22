@@ -35,6 +35,7 @@ import { createPixiIdMaskShaderRenderer } from "./pixi-id-mask-shader";
 import {
   buildMaskHaloPalette,
   createPixiMaskHaloRenderer,
+  resolvePaintedMaskHalo,
 } from "./pixi-mask-halo";
 import type { MaskHaloPassGroup, PixiMaskHaloRenderer } from "./pixi-mask-halo";
 import type {
@@ -908,17 +909,13 @@ export function createPixiMaskLayer(options: {
     >();
 
     for (const [detectionIndex, detection] of frame.detections.entries()) {
-      if (!detection.mask) {
-        continue;
-      }
-
-      const halo = currentMaskHaloStyle.resolve(detection, {
+      const halo = resolvePaintedMaskHalo(currentMaskHaloStyle, detection, {
         detectionIndex,
         frame,
         mediaTime: visibleMaskMediaTime,
       });
 
-      if (!halo || halo.alpha <= 0 || halo.spread <= 0) {
+      if (!halo) {
         continue;
       }
 
