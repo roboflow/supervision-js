@@ -3,6 +3,7 @@ import {
   type PlatformMediaFrame,
 } from "supervision-js-core";
 
+import { isSyncMediaFrameProcessor } from "../types/frame-processor";
 import type { MediaFrameSourceConsumer } from "../types/frame-source";
 import {
   createPreparedFramePacket,
@@ -18,9 +19,10 @@ import {
   type MediaSessionStateListener,
   type MediaSessionStateUnsubscribe,
 } from "../types/media-session";
-import type {
-  MediaSessionRendererState,
-  MediaSessionRenderPreparationState,
+import {
+  isSyncMediaRendererAdapter,
+  type MediaSessionRendererState,
+  type MediaSessionRenderPreparationState,
 } from "../types/renderer";
 
 /**
@@ -55,9 +57,23 @@ export async function createMediaSession<TPayload, TPacket extends object>(
   const teardownErrors: unknown[] = [];
   let lastDiagnostics: MediaSessionRenderPreparationState["lastDiagnostics"] =
     null;
+  // Narrow once: the sync branches below need the adapter, not just the flag.
+  const syncRenderer = isSyncMediaRendererAdapter(options.renderer)
+    ? options.renderer
+    : null;
+  // A sync renderer must get a sync disposer. PreparedFrameStore's `*Now`
+  // variants reject a disposer that returns a Promise, so wrapping this in
+  // `async` would make every synchronous release throw.
   const preparedFrameStore = new PreparedFrameStore<
     PreparedFramePacket<TPayload, TPacket>
-  >(async (packet) => options.renderer.disposePacket?.(packet.rendererPacket));
+  >(
+    syncRenderer
+      ? (packet) => {
+          syncRenderer.disposePacket?.(packet.rendererPacket);
+        }
+      : async (packet) =>
+          options.renderer.disposePacket?.(packet.rendererPacket),
+  );
 
   const state = (): MediaSessionState => {
     return createMediaSessionStateSnapshot({
@@ -116,7 +132,12 @@ export async function createMediaSession<TPayload, TPacket extends object>(
     let stage: "processor" | "renderer" = "processor";
 
     try {
-      const result = await options.processor.process(frame);
+      // A sync processor is called inline on purpose: awaiting it would queue
+      // a microtask between producing the result and re-checking cancellation,
+      // and a worklet pump has no Promise boundary to spend there at all.
+      const result = isSyncMediaFrameProcessor(options.processor)
+        ? options.processor.process(frame)
+        : await options.processor.process(frame);
 
       if (shouldAbandonFrame()) {
         return;
@@ -126,12 +147,10 @@ export async function createMediaSession<TPayload, TPacket extends object>(
 
       nextPacketId += 1;
       stage = "renderer";
-      const rendererPacket = await options.renderer.prepare({
-        frame,
-        packetId,
-        presentation,
-        result,
-      });
+      const prepareOptions = { frame, packetId, presentation, result };
+      const rendererPacket = syncRenderer
+        ? syncRenderer.prepare(prepareOptions)
+        : await options.renderer.prepare(prepareOptions);
       nextPacket = createPreparedFramePacket(
         packetId,
         frame,
@@ -144,7 +163,11 @@ export async function createMediaSession<TPayload, TPacket extends object>(
         return;
       }
 
-      await options.renderer.present(nextPacket.rendererPacket);
+      if (syncRenderer) {
+        syncRenderer.present(nextPacket.rendererPacket);
+      } else {
+        await options.renderer.present(nextPacket.rendererPacket);
+      }
 
       if (shouldAbandonFrame()) {
         await disposeNextPacket();
@@ -156,7 +179,11 @@ export async function createMediaSession<TPayload, TPacket extends object>(
       lastDiagnostics = result.diagnostics ?? null;
       preparedFrameCount += 1;
       presentedFrames += 1;
-      await preparedFrameStore.present(nextPacket);
+      if (syncRenderer) {
+        preparedFrameStore.presentNow(nextPacket);
+      } else {
+        await preparedFrameStore.present(nextPacket);
+      }
       nextPacket = null;
     } catch (cause) {
       try {
@@ -184,7 +211,11 @@ export async function createMediaSession<TPayload, TPacket extends object>(
       nextPacket = null;
       try {
         if (packet) {
-          await preparedFrameStore.discard(packet);
+          if (syncRenderer) {
+            preparedFrameStore.discardNow(packet);
+          } else {
+            await preparedFrameStore.discard(packet);
+          }
         }
       } catch (cause) {
         if (destroyed) {

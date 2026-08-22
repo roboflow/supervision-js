@@ -10,7 +10,7 @@ import {
   type DetectionPickPoint,
   type DetectionPickResult,
 } from "#types/interaction";
-import { decodeCompressedRleMask } from "#utils/detection-frames";
+import { decodeDetectionMask } from "#utils/detection-frames";
 import {
   containsPoint,
   distanceToSegment,
@@ -253,7 +253,7 @@ function getDecodedMask(mask: DetectionMask): CachedDecodedMask {
   const cached = decodedMaskCache.get(mask);
   if (cached) return cached;
 
-  const decoded = decodeCompressedRleMask(mask);
+  const decoded = decodeDetectionMask(mask);
   const result = {
     ...decoded,
     pixelArea: countMaskPixels(decoded.data),

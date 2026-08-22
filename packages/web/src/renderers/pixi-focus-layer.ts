@@ -5,10 +5,7 @@ import { BoxShape } from "supervision-js-core";
 import type { FocusDrawInstruction, FocusStyle } from "supervision-js-core";
 import type { DetectionPickResult } from "supervision-js-core";
 import { centerRectToTopLeftRect } from "supervision-js-core";
-import {
-  decodeCompressedRleMask,
-  extractMaskRectRuns,
-} from "supervision-js-core";
+import { decodeDetectionMask, extractMaskRectRuns } from "supervision-js-core";
 import type { MaskRectRun } from "supervision-js-core";
 import type {
   Container as PixiContainer,
@@ -391,7 +388,7 @@ export function createPixiFocusLayer(options: {
 
     if (!maskCutoutRuns.has(mask)) {
       try {
-        const decoded = decodeCompressedRleMask(mask);
+        const decoded = decodeDetectionMask(mask);
         runs = {
           height: decoded.height,
           runs:

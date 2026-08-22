@@ -12,7 +12,7 @@ import {
   createSourceAwarePresentation,
   type PresentationStyleSet,
 } from "#styles/source-presentation";
-import type { DetectionFrame } from "#types/detections";
+import type { Detection, DetectionFrame } from "#types/detections";
 import { DetectionMaskEncoding } from "#types/detections";
 import type { FocusStyle } from "#types/focus-style";
 import type { InteractionStyle } from "#types/interaction-style";
@@ -357,7 +357,7 @@ describe("createSourceAwarePresentation", () => {
   });
 });
 
-function createDetection(sourceId: string) {
+function createDetection(sourceId: string): Detection {
   return {
     className: "person",
     mask: {

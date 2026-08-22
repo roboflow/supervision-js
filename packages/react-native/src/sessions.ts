@@ -37,6 +37,11 @@ import {
 import { loadReactNativeLiveIdMaskNativeBuilder } from "./native-id-mask-builder";
 import { PreparedFrameStore } from "./renderers/prepared-frame-store";
 import { REACT_NATIVE_FILE_SESSION_DEFAULTS } from "./sessions/media-session-defaults";
+import {
+  resolveMediaClockDecision,
+  resolveMediaClockDueAt,
+} from "./sessions/media-clock-policy";
+import type { ReactNativeVideoClock } from "./types/media-clock";
 import { createMediaSessionStateSnapshot } from "./sessions/media-session-state";
 import {
   MediaSessionError,
@@ -205,6 +210,12 @@ export interface ReactNativeVideoSessionPresentationOptions {
 }
 
 export interface ReactNativeVideoSessionOptions {
+  /**
+   * What paces playback. Defaults to `analysis`, which processes every frame
+   * as fast as the pipeline allows and therefore plays at inference speed.
+   * Use `media` to play the clip on its own timeline.
+   */
+  readonly clock?: ReactNativeVideoClock;
   readonly fileUri: string;
   /** Canvas-space rect the video is drawn into; update via `setMediaRect`. */
   readonly mediaRect: TopLeftRect;
@@ -395,6 +406,7 @@ export function createReactNativeVideoFileSession(
   });
 
   const presentation = options.presentation ?? {};
+  const clock = options.clock ?? "analysis";
   const fullResMaskMaxPixels =
     presentation.fullResMaskMaxPixels ??
     REACT_NATIVE_FILE_SESSION_DEFAULTS.fullResMaskMaxPixels;
@@ -535,6 +547,12 @@ export function createReactNativeVideoFileSession(
     let processedFrames = 0;
     let endReason = "";
     let failureStage: MediaSessionErrorStage = "source";
+    // Media-clock state. `mediaAnchorMs` pins the wall clock to the first
+    // frame's presentation time so every later frame has a due date.
+    const isMediaClock = clock === "media";
+    let mediaAnchorMs = 0;
+    let mediaAnchorPts = 0;
+    let heldDetections: ReactNativeLiveSerializedDetection[] = [];
 
     try {
       while (playingShared.value) {
@@ -545,13 +563,54 @@ export function createReactNativeVideoFileSession(
           break;
         }
 
+        let shouldInfer = true;
+
+        if (isMediaClock) {
+          if (processedFrames === 0) {
+            mediaAnchorMs = Date.now();
+            mediaAnchorPts = handle.timestampMs;
+          }
+
+          const decision = resolveMediaClockDecision({
+            anchorMs: mediaAnchorMs,
+            anchorPts: mediaAnchorPts,
+            nowMs: Date.now(),
+            timestampMs: handle.timestampMs,
+          });
+
+          if (decision.shouldDrop) {
+            handle.release();
+            continue;
+          }
+
+          shouldInfer = decision.shouldInfer;
+
+          // Ahead of this frame's moment, so wait for it. The pump runtime has
+          // no sleep primitive, so the wait spins. That still costs less than
+          // the analysis clock, which never waits and never stops inferring,
+          // but a vsync-paced presentation lane would remove the spin.
+          const dueAtMs = resolveMediaClockDueAt({
+            anchorMs: mediaAnchorMs,
+            anchorPts: mediaAnchorPts,
+            timestampMs: handle.timestampMs,
+          });
+
+          while (Date.now() < dueAtMs && playingShared.value) {
+            // Spin until this frame is due.
+          }
+        }
+
         const tickStartedAt = Date.now();
         failureStage = "processor";
-        const detections = serializeFrame(
-          handle,
-          returnMasksAtOriginalResolution,
-        );
-        const segmentationMs = Date.now() - tickStartedAt;
+        const detections = shouldInfer
+          ? serializeFrame(handle, returnMasksAtOriginalResolution)
+          : heldDetections;
+
+        if (shouldInfer) {
+          heldDetections = detections;
+        }
+
+        const segmentationMs = shouldInfer ? Date.now() - tickStartedAt : 0;
 
         const overlayDetections: ReactNativeVideoSessionDetection[] = [];
 
