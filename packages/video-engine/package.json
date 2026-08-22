@@ -1,6 +1,6 @@
 {
   "name": "supervision-js-video-engine",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Frame-accurate video decoding, scrubbing, and playback engine for supervision-js.",
   "repository": {
     "type": "git",

@@ -60,13 +60,23 @@ session.setPresentation({
 npm install supervision
 ```
 
-The next browser release is `0.1.7`, prepared for npm's default `latest` tag.
+The next browser release is `0.1.8`, prepared for npm's default `latest` tag.
 Its package includes the private core dependency. Consumers import
 only the public browser entrypoints:
 
 ```ts
 import { createMediaSession } from "supervision";
 import { createMaskBrushEditor } from "supervision/editing";
+```
+
+That release also publishes the video engine as its own package, versioned
+independently. `supervision` declares `supervision-js-video-engine` as an
+optional peer and loads it through a dynamic import, so installing
+`supervision` does not install it. An application that opens a video-engine
+media source installs it as well:
+
+```sh
+npm install supervision-js-video-engine
 ```
 
 ## Documentation And Demo
