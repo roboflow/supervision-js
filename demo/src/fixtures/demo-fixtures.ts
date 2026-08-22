@@ -307,7 +307,6 @@ export function createDemoFixtureDetectionSource(
 
     destroyed = true;
     detectionSource.destroy?.();
-
     if (detectionSource !== baseDetectionSource) {
       baseDetectionSource.destroy?.();
     }

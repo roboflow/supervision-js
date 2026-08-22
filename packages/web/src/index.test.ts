@@ -987,6 +987,51 @@ describe("package entrypoint", () => {
     renderer.destroy();
   });
 
+  it("keeps screen-sized region assets stable across paused viewport zoom", async () => {
+    resetMocks();
+    const asset = { height: 20, width: 40 };
+    pixiMock.assetLoad.mockResolvedValue(asset);
+    const renderer = await createRenderer(false, false, {
+      detectionFrames: [
+        {
+          detections: [
+            {
+              id: "player-7",
+              rect: { height: 100, width: 50, x: 100, y: 90 },
+            },
+          ],
+          frameIndex: 0,
+          mediaTime: 0,
+        },
+      ],
+      renderers: [
+        annotationRenderers.region({
+          id: "fixed-badge",
+          region: { kind: "bounds" },
+          source: { asset: { src: "/fixed-badge.png" }, kind: "asset" },
+          target: { id: "player-7" },
+          transform: { size: { space: "screen", width: 48 } },
+        }),
+      ],
+    });
+
+    await vi.waitFor(() => {
+      expect(renderer.getState().activeDetectionCount).toBe(1);
+    });
+    const display = pixiMock.spriteInstances.find(
+      (sprite) => (sprite.options as { texture?: unknown }).texture === asset,
+    );
+    const initialWidth = display!.width;
+    const initialScale = renderer.getViewportTransform().scale;
+
+    renderer.setViewportTransform({ scale: 2, x: 0, y: 0 });
+
+    expect(display!.width * renderer.getViewportTransform().scale).toBeCloseTo(
+      initialWidth * initialScale,
+    );
+    renderer.destroy();
+  });
+
   it("keeps region displays synchronized with fast editing translation", async () => {
     resetMocks();
     const asset = { height: 16, width: 16 };
@@ -1239,6 +1284,63 @@ describe("package entrypoint", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("renders halo passes for a halo-only renderer list", async () => {
+    resetMocks();
+
+    const haloResolve = vi.fn(() => ({
+      alpha: 0.6,
+      color: 0x8b5cf6,
+      spread: 12,
+    }));
+    const renderer = await createRenderer(false, false, {
+      detectionFrames: [
+        {
+          detections: [
+            {
+              className: "player",
+              mask: {
+                counts: "021",
+                encoding: DetectionMaskEncoding.CompressedRle,
+                height: 2,
+                width: 2,
+              },
+              rect: { height: 20, width: 10, x: 9, y: 15 },
+            },
+          ],
+          mediaTime: 0,
+        },
+      ],
+      renderers: [
+        annotationRenderers.maskHalo({ style: { resolve: haloResolve } }),
+      ],
+    });
+
+    // No mask renderer is listed, so the coverage the glow reads exists only
+    // if the scene prepared it from the halo style.
+    await vi.waitFor(() => {
+      expect(haloResolve).toHaveBeenCalled();
+    });
+
+    await vi.waitFor(() => {
+      const haloPass = pixiMock.meshInstances.find(
+        (mesh) => mesh.filters !== undefined,
+      );
+
+      expect(haloPass).toMatchObject({ visible: true });
+      expect(haloPass?.filters).toEqual([
+        expect.objectContaining({ strength: 12 }),
+      ]);
+    });
+
+    const fillMesh = pixiMock.meshInstances.find(
+      (mesh) => mesh.filters === undefined,
+    );
+
+    expect(fillMesh?.visible).toBe(false);
+
+    renderer.destroy();
   });
 
   it("prepares an ID-mask texture without breaking box drawing", async () => {

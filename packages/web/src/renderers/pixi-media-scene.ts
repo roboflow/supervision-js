@@ -349,6 +349,7 @@ export async function createPixiMediaScene(
   const annotationOverlayLayer = createPixiAnnotationOverlayLayer(
     options.editingEngine,
     options.annotationOverlayStyle,
+    options.keypointStyle,
   );
   const maskBrushPreview = options.maskBrush
     ? createPixiMaskBrushPreview({
@@ -490,6 +491,8 @@ export async function createPixiMediaScene(
           interaction: options.interaction ?? {
             mode: MediaInteractionMode.Always,
           },
+          canPickDetection: (detection) =>
+            !resolveContextState(detection).hidden,
           editingEngine: options.editingEngine,
           capturePointer: (pointerId) => {
             if (!rendererCanvas.hasPointerCapture?.(pointerId)) {
@@ -728,6 +731,7 @@ export async function createPixiMediaScene(
     boxLayer.drawFrame(currentMediaTime, viewportScale);
     drawPolygonFrame(currentMediaTime);
     vectorLayer.drawFrame(currentMediaTime, viewportScale);
+    regionLayer.drawFrame(currentMediaTime, viewportScale);
     labelLayer?.drawFrame(currentMediaTime, viewportScale);
     drawFocusLayer(currentMediaTime);
     drawInteractionPresentationLayer(currentMediaTime);

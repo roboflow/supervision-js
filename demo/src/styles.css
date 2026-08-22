@@ -755,6 +755,11 @@ body {
   .docs-layer-playground__panel {
     overflow: visible;
   }
+
+  .docs-tracking-playground {
+    height: auto;
+    overflow: visible;
+  }
 }
 
 button,
@@ -2969,6 +2974,12 @@ fieldset {
   display: grid;
   gap: 7px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.class-style-card--hidden .class-style-card__swatch,
+.class-style-card--hidden strong,
+.class-style-card--hidden .class-style-card__controls {
+  opacity: 0.45;
 }
 
 .class-color-control {
