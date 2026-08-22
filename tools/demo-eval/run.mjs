@@ -10,6 +10,7 @@ import { parseArgs } from "node:util";
 
 import {
   buildBaseline,
+  compareProvenance,
   compareToBaseline,
   formatRow,
   loadBaseline,
@@ -114,6 +115,11 @@ const report = {
   startedAt,
   repeat,
   machine: machineFingerprint(),
+  /* Which tree produced these numbers: a report carrying none can be held up
+   * against a baseline recorded on other code with nothing to contradict it. */
+  source: sourceFingerprint({ consumer: process.cwd() }),
+  media: null,
+  fixture: null,
   scenarios: {},
   verdicts: {},
   failures: [],
@@ -153,6 +159,13 @@ async function measure(pass) {
         viewMode: values.view,
       });
       mediaInfo = page.info;
+      report.media = {
+        duration: mediaInfo.duration,
+        frameRate: mediaInfo.frameRate,
+        backend: mediaInfo.backend,
+        viewMode: mediaInfo.viewMode,
+      };
+      report.fixture = mediaInfo.fixture;
       await checkHookContract(page);
     } catch (error) {
       for (const name of demoScenarios) {
@@ -345,9 +358,8 @@ async function compareAgainstBaseline() {
       };
       return;
     }
-    const source = sourceFingerprint({ consumer: process.cwd() });
     const next = buildBaseline({
-      source,
+      source: report.source,
       recordedWithFailures: failing.map(
         ([name, verdict]) => `${name}: ${verdict}`,
       ),
@@ -355,6 +367,7 @@ async function compareAgainstBaseline() {
       media: mediaInfo
         ? `${mediaInfo.duration}s at ${mediaInfo.frameRate}fps, ${mediaInfo.backend}`
         : null,
+      fixture: report.fixture,
       viewMode: mediaInfo?.viewMode ?? null,
       samples: Object.fromEntries(
         Object.entries(report.metrics).map(([key, entry]) => [
@@ -369,9 +382,9 @@ async function compareAgainstBaseline() {
       path,
       updated: true,
       metrics: Object.keys(measured).length,
-      source,
+      source: report.source,
       withFailures: failing.map(([name, verdict]) => `${name}: ${verdict}`),
-      dirty: Object.entries(source)
+      dirty: Object.entries(report.source)
         .filter(([, entry]) => entry?.dirty)
         .map(([name]) => name),
     };
@@ -402,8 +415,10 @@ async function compareAgainstBaseline() {
     recordedAt: recorded.recordedAt,
     recordedOn: recorded.machine,
     recordedFrom: recorded.source ?? null,
+    recordedFixture: recorded.fixture ?? null,
     recordedView: recorded.viewMode ?? null,
     sameMachine: sameMachine(recorded.machine, report.machine),
+    provenance: compareProvenance(recorded, report),
     tolerancePercent: comparison.tolerancePercent,
     rows: comparison.rows.filter(mine),
     regressions: comparison.regressions.filter(mine),
@@ -421,6 +436,7 @@ function printSummary() {
   const lines = [
     `demo-eval  ${new Date(startedAt).toISOString()}`,
     field("chrome", values["chrome-debug-url"]),
+    field("tree", commits(report.source)),
   ];
   if (selected.some((name) => name !== "battery")) {
     lines.push(field("page", values.url));
@@ -432,6 +448,7 @@ function printSummary() {
         "media",
         `${mediaInfo.duration}s at ${mediaInfo.frameRate}fps, ${mediaInfo.backend}`,
       ),
+      field("clip", report.fixture?.id ?? "unnamed"),
       field("view", mediaInfo.viewMode),
     );
   }
@@ -462,14 +479,7 @@ function baselineSummary() {
   if (baseline.updated) {
     lines.push(
       ...wrap(`recorded ${baseline.metrics} metrics to ${baseline.path}`),
-      ...wrap(
-        Object.entries(baseline.source)
-          .map(
-            ([name, entry]) =>
-              `${name} ${entry?.commit ?? "unknown"}${entry?.dirty ? " (dirty)" : ""}`,
-          )
-          .join(", "),
-      ),
+      ...wrap(commits(baseline.source)),
     );
     if (baseline.withFailures.length > 0) {
       lines.push(
@@ -505,17 +515,16 @@ function baselineSummary() {
   }
   lines.push(
     field("recorded", `${baseline.recordedAt} on ${baseline.recordedOn.cpu}`),
+    field("from", commits(baseline.recordedFrom)),
+    field("measured", commits(report.source)),
     field(
-      "from",
-      Object.entries(baseline.recordedFrom ?? {})
-        .map(
-          ([name, entry]) =>
-            `${name} ${entry?.commit ?? "unknown"}${entry?.dirty ? " (dirty)" : ""}`,
-        )
-        .join(", ") || "unrecorded",
+      "clip",
+      `${baseline.recordedFixture?.id ?? "unrecorded"} then, ` +
+        `${report.fixture?.id ?? "unnamed"} now`,
     ),
     field("tolerance", `${baseline.tolerancePercent}% past the noise floor`),
   );
+  for (const warning of baseline.provenance ?? []) lines.push(...wrap(warning));
   if (!baseline.sameMachine) {
     lines.push(
       ...wrap(
@@ -541,13 +550,32 @@ function baselineSummary() {
   return lines;
 }
 
+function commits(source) {
+  return (
+    Object.entries(source ?? {})
+      .map(
+        ([name, entry]) =>
+          `${name} ${entry?.commit ?? "unknown"}${entry?.dirty ? " (dirty)" : ""}`,
+      )
+      .join(", ") || "unrecorded"
+  );
+}
+
 function detail(name, scenario) {
   if (GUARD_SCENARIOS.has(name)) {
     return guardDetail(name, scenario, field);
   }
   if (name === "paints") {
-    const { paused, playing } = scenario;
+    const { settling, paused, playing } = scenario;
     return [
+      field(
+        "settling quiet after",
+        `${settling.quietAfterMs}ms  (limit ${settling.quietLimitMs}ms)`,
+      ),
+      field(
+        "settling paints",
+        `${settling.paintCount} over ${settling.windowSeconds}s`,
+      ),
       field("paused paints", `${paused.paintCount}  (limit 0)`),
       field(
         "paused layout / commit",

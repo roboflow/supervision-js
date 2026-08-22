@@ -6,6 +6,7 @@ import {
   delay,
   isReachable,
   openTarget,
+  reloadPage,
 } from "./cdp.mjs";
 import {
   at,
@@ -22,9 +23,25 @@ const TRACE_CATEGORIES = [
 ];
 const TRACE_WINDOW_MS = 6000;
 const SETTLE_MS = 600;
-// The prepared window honestly reports itself filling for a few seconds
-// after a pause; steady state is what the zero-paint law governs.
+/* Where steady state starts. The zero-paint law governs from here on; the six
+ * seconds before it are the pause coming to rest, and they are traced as their
+ * own window rather than waited out, so work that decays inside them is a
+ * number somebody can read instead of a gap in the coverage. */
 const PAUSED_STEADY_STATE_MS = 6000;
+/* Tracing has to be live before the pause is commanded, or the repaint the
+ * pause itself causes lands in the gap between the two and the window opens
+ * having already missed what it is watching for. */
+const PAUSE_TRACE_LEAD_MS = 500;
+const PAUSE_MARK = "demo-eval:pause";
+/* How long a pause may go on painting. Twenty passes of one unchanged build
+ * stopped between 167.5 and 177.3ms, in three bursts inside the first fifth of
+ * a second, and the six seconds after them painted zero every time. The budget
+ * is a second because the gate is for a pause that keeps drawing rather than for
+ * the transition: at five times the widest pass it cannot fire on the spread,
+ * and a player still repainting a second after the user pressed pause is doing
+ * per-frame work with no frame to show. The drift this leaves is the registry's,
+ * under paints.settling.quietAfterMs. */
+const PAUSE_QUIET_LIMIT_MS = 1000;
 const VIEWPORT = { width: 1500, height: 1150, deviceScaleFactor: 1 };
 const SEEK_FRACTIONS = [0.1, 0.3, 0.5, 0.7, 0.9];
 const STEP_COUNT = 6;
@@ -178,21 +195,27 @@ export async function openDemoPage(
         return true;
       })()`,
     );
-    if (changed) {
-      const navMark = session.navigations;
-      await session.send("Page.reload");
-      const deadline = Date.now() + 15_000;
-      while (session.navigations === navMark && Date.now() < deadline) {
-        await delay(100);
-      }
-    }
+    if (changed) await reloadPage(session);
   }
   const info = await waitForRenderer(session, readyTimeoutMs);
   const settled = await session.evaluate(
     `localStorage.getItem(${JSON.stringify(VIEW_MODE_STORAGE_KEY)}) ?? "demo"`,
   );
   if (settled !== "benchmarks") await openControlSections(session);
-  return { session, targetId: target.id, info: { ...info, viewMode: settled } };
+  const fixture = await activeFixture(session);
+  return {
+    session,
+    targetId: target.id,
+    info: { ...info, viewMode: settled, fixture },
+  };
+}
+
+/** The source the demo opened on, which is the clip every scenario but cadence
+ * measures. */
+async function activeFixture(session) {
+  const buttons = await readFixtureButtons(session).catch(() => []);
+  const pressed = buttons.find((button) => button.pressed);
+  return pressed ? { id: pressed.id, label: pressed.label } : null;
 }
 
 async function waitForRenderer(session, timeoutMs) {
@@ -230,13 +253,27 @@ async function waitForRenderer(session, timeoutMs) {
 /**
  * Runs one measurement attempt and discards it when the page navigated while it
  * was in flight: a dev-server reload silently restarts the renderer mid-window.
+ *
+ * The discarded attempt still drove the player, so the page it leaves behind
+ * has the frames the next attempt is about to ask for already decoded. Every
+ * attempt therefore starts from a reloaded page, except for the one caller
+ * whose fixture would not survive the reload.
  */
 async function attemptStable(
   session,
   attempts,
   measure,
-  { guardPatches = false } = {},
+  { guardPatches = false, keepPage = false } = {},
 ) {
+  const recover = async () => {
+    if (keepPage) {
+      await waitForRenderer(session, 60_000);
+      return;
+    }
+    await reloadPage(session);
+    await waitForRenderer(session, 60_000);
+    await openControlSections(session);
+  };
   let lastReason = null;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     const navMark = session.navigations;
@@ -246,8 +283,7 @@ async function attemptStable(
       const disturbed = disturbance(session, navMark, patchMark, guardPatches);
       if (disturbed) {
         lastReason = disturbed;
-        if (session.navigations !== navMark)
-          await waitForRenderer(session, 60_000);
+        await recover();
         continue;
       }
       return result;
@@ -257,7 +293,7 @@ async function attemptStable(
       lastReason = reloaded
         ? "the page reloaded during the measurement window"
         : error.message;
-      if (reloaded) await waitForRenderer(session, 60_000);
+      await recover();
     }
   }
   invalid(`${lastReason} (after ${attempts} attempts)`);
@@ -514,8 +550,9 @@ export async function runPaints(session, info, attempts) {
 
   const measure = async () => {
     await session.send("Page.bringToFront");
-    await session.evaluate("window.__demoRenderer.pause(); 1");
-    await delay(PAUSED_STEADY_STATE_MS);
+    await session.evaluate("window.__demoRenderer.play(); 1");
+    await delay(SETTLE_MS);
+    const settling = await tracePause(session);
     const pausedBefore = await session.readJson(SNAPSHOT);
     const pausedEvents = await session.trace(TRACE_CATEGORIES, TRACE_WINDOW_MS);
     const pausedAfter = await session.readJson(SNAPSHOT);
@@ -545,6 +582,7 @@ export async function runPaints(session, info, attempts) {
       );
     }
     return {
+      settling,
       paused: {
         ...buildPhase(pausedEvents, pausedBefore, pausedAfter, geometry),
         ...advancement(pausedBefore, pausedAfter, info.frameRate),
@@ -569,6 +607,13 @@ export async function runPaints(session, info, attempts) {
   if (phases.paused.paintCount !== 0) {
     failures.push(
       `paints: paused window painted ${phases.paused.paintCount} times, expected 0`,
+    );
+  }
+  if (phases.settling.quietAfterMs > PAUSE_QUIET_LIMIT_MS) {
+    failures.push(
+      `paints: the page was still painting ${phases.settling.quietAfterMs}ms after ` +
+        `the pause (${phases.settling.paintCount} passes, budget ` +
+        `${PAUSE_QUIET_LIMIT_MS}ms)`,
     );
   }
   if (domPaintRate >= domPaintRateLimit) {
@@ -619,6 +664,7 @@ export async function runPaints(session, info, attempts) {
       windowSeconds,
       frameRate: info.frameRate,
       geometry,
+      settling: phases.settling,
       paused: phases.paused,
       playing: {
         ...phases.playing,
@@ -634,6 +680,62 @@ export async function runPaints(session, info, attempts) {
       },
     },
     failures,
+  };
+}
+
+/**
+ * Pauses the player from inside a running trace and reports how long it went on
+ * painting afterwards.
+ *
+ * The steady-state window opens six seconds after the pause, so anything that
+ * decays before then used to be measured by nobody: a transition that repainted
+ * for four seconds and a transition that repainted for forty milliseconds
+ * produced the same report. The pause is stamped into the trace it lands in, so
+ * every paint is placed against the moment the player was told to stop rather
+ * than against whenever the tracer happened to attach.
+ */
+async function tracePause(session) {
+  const tracing = session.trace(
+    TRACE_CATEGORIES,
+    PAUSE_TRACE_LEAD_MS + PAUSED_STEADY_STATE_MS,
+  );
+  await delay(PAUSE_TRACE_LEAD_MS);
+  await session.evaluate(
+    `console.timeStamp(${JSON.stringify(PAUSE_MARK)});` +
+      "window.__demoRenderer.pause(); 1",
+  );
+  const events = await tracing;
+  const mark = events.find(
+    (event) =>
+      event.name === "TimeStamp" && event.args?.data?.message === PAUSE_MARK,
+  );
+  if (mark === undefined) {
+    invalid(
+      "the pause never appeared in the trace it was issued into, so nothing " +
+        "places the paints that followed it",
+    );
+  }
+  const afterPause = events.filter(
+    (event) =>
+      event.ts >= mark.ts &&
+      event.ts <= mark.ts + PAUSED_STEADY_STATE_MS * 1000,
+  );
+  const paints = afterPause
+    .filter((event) => event.name === "Paint")
+    .map((event) => round((event.ts - mark.ts) / 1000, 1));
+  const { paintCount, counts, rects } = bucketPaints(afterPause);
+  return {
+    windowSeconds: PAUSED_STEADY_STATE_MS / 1000,
+    paintCount,
+    quietAfterMs: paints.length === 0 ? 0 : Math.max(...paints),
+    quietLimitMs: PAUSE_QUIET_LIMIT_MS,
+    layoutCount: counts.Layout,
+    updateLayoutTreeCount: counts.UpdateLayoutTree,
+    commitCount: counts.Commit,
+    rects: rects.slice(0, 4).map((rect) => ({
+      size: `${rect.width}x${rect.height}`,
+      count: rect.count,
+    })),
   };
 }
 
@@ -904,7 +1006,13 @@ async function measureCadence(session, fixture, attempts) {
           { timeoutMs: CADENCE_SAMPLE_TIMEOUT_MS },
         );
       },
-      { guardPatches: true },
+      {
+        guardPatches: true,
+        /* This scenario picked its own fixture and puts the demo's back when it
+         * is done. A reload between attempts would drop it onto the default
+         * clip while every number it reported still named the basketball one. */
+        keepPage: true,
+      },
     );
     windows.push(
       summariseCadenceWindow(plan, sample, { sourceRateFps, holdLimitMs }),

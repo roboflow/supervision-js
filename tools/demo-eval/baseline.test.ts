@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   METRICS,
+  compareProvenance,
   compareToBaseline,
   median,
   readMetrics,
@@ -319,5 +320,68 @@ describe("the machine the numbers came from", () => {
     expect(sameMachine(here, { ...here, cpu: "M1" })).toBe(false);
     expect(sameMachine(here, { ...here, cores: 8 })).toBe(false);
     expect(sameMachine(here, null)).toBe(false);
+  });
+});
+
+describe("the tree the numbers came from", () => {
+  const clean = {
+    source: { consumer: { commit: "abc1234", dirty: false } },
+    fixture: { id: "horse_trail", label: "70s horse trail" },
+  };
+
+  it("says nothing when both sides are the same commit and the same clip", () => {
+    expect(compareProvenance(clean, { ...clean })).toEqual([]);
+  });
+
+  it("names both commits when the baseline was recorded on other code", () => {
+    const [warning, ...rest] = compareProvenance(clean, {
+      ...clean,
+      source: { consumer: { commit: "def5678", dirty: false } },
+    });
+    expect(rest).toEqual([]);
+    expect(warning).toContain("abc1234");
+    expect(warning).toContain("def5678");
+  });
+
+  it("reports a comparison where either tree carried uncommitted changes", () => {
+    const [recorded] = compareProvenance(
+      { ...clean, source: { consumer: { commit: "abc1234", dirty: true } } },
+      clean,
+    );
+    expect(recorded).toContain("the baseline");
+    const [measured] = compareProvenance(clean, {
+      ...clean,
+      source: { consumer: { commit: "abc1234", dirty: true } },
+    });
+    expect(measured).toContain("this run");
+  });
+
+  it("reports a checkout only one side fingerprints", () => {
+    const [warning] = compareProvenance(
+      {
+        ...clean,
+        source: {
+          ...clean.source,
+          engine: { commit: "9f9f9f9", dirty: false },
+        },
+      },
+      clean,
+    );
+    expect(warning).toContain("engine");
+    expect(warning).toContain("9f9f9f9");
+  });
+
+  it("reports a comparison taken on a different clip", () => {
+    const [warning] = compareProvenance(clean, {
+      ...clean,
+      fixture: { id: "basketball_sam3", label: "9s basketball sample" },
+    });
+    expect(warning).toContain("horse_trail");
+    expect(warning).toContain("basketball_sam3");
+  });
+
+  it("reports a baseline that never recorded a clip at all", () => {
+    const [warning] = compareProvenance({ ...clean, fixture: null }, clean);
+    expect(warning).toContain("does not record which clip");
   });
 });

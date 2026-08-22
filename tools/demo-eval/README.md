@@ -30,19 +30,19 @@ npm run eval:demo
 
 Flags, all optional:
 
-| flag                 | default                                                     |
-| -------------------- | ----------------------------------------------------------- |
-| `--chrome-debug-url` | `http://127.0.0.1:9223`                                     |
-| `--url`              | `http://localhost:5173/`                                    |
-| `--out`              | `tools/demo-eval/report.json`                               |
-| `--scenario`         | `all`, or a comma-separated subset (see the list below)     |
-| `--storybook`        | `http://localhost:6006`                                     |
-| `--battery`          | `http://127.0.0.1:8123/stress-battery.js`                   |
-| `--attempts`         | `3` tries before a disturbed window is invalid              |
-| `--repeat`           | `1` full pass; more takes the median and reports the spread |
-| `--baseline`         | `tools/demo-eval/baseline.json`                             |
-| `--update-baseline`  | off; records this run as the new baseline                   |
-| `--tolerance`        | the baseline file's own, normally `25` percent              |
+| flag                 | default                                                            |
+| -------------------- | ------------------------------------------------------------------ |
+| `--chrome-debug-url` | `http://127.0.0.1:9223`                                            |
+| `--url`              | `http://localhost:5173/`                                           |
+| `--out`              | `tools/demo-eval/report.json`                                      |
+| `--scenario`         | `all`, or a comma-separated subset (see the list below)            |
+| `--storybook`        | `http://localhost:6006`                                            |
+| `--battery`          | `http://127.0.0.1:8123/stress-battery.js`                          |
+| `--attempts`         | `3` tries before a disturbed window is invalid; each retry reloads |
+| `--repeat`           | `1` full pass; more takes the median and reports the spread        |
+| `--baseline`         | `tools/demo-eval/baseline.json`                                    |
+| `--update-baseline`  | off; records this run as the new baseline                          |
+| `--tolerance`        | the baseline file's own, normally `25` percent                     |
 
 `--scenario` also takes a comma-separated list, for example
 `--scenario drag,playhead`. Pass flags through npm with `--`, for example
@@ -52,8 +52,8 @@ Scenario names: `paints`, `sync`, `latency`, `layers`, `cadence`, `throttle`,
 `blanking`, `drag`, `playhead`, `backscrub`, `focus`, `hotkeys`, `battery`.
 
 The run prints a summary and writes
-`{ startedAt, scenarios, metrics, verdicts, failures, baseline }` to the report
-path. Both that file and `baseline.json` are written by the tool, so
+`{ startedAt, source, media, fixture, scenarios, metrics, verdicts, failures, baseline }`
+to the report path. Both that file and `baseline.json` are written by the tool, so
 `.prettierignore` excludes them from the format check; unlike the report, the
 baseline belongs in the repository, because a baseline nobody else has is not
 a baseline. Each verdict is `pass`, `fail`,
@@ -196,10 +196,21 @@ any scenario is failing or invalid, because freezing a broken number as the new
 normal is how a baseline stops meaning anything; `--allow-failing-baseline`
 overrides that on purpose and writes the failing verdicts into the file so
 nobody later reads those numbers as a target. The file also records the
-machine, and the commit and dirtiness of both checkouts, since the engine is
-consumed from source and its working tree is part of what every number here
-measures. A baseline recorded on another processor is somebody else's numbers,
-and the summary says so rather than printing deltas between two machines.
+machine, the commit and dirtiness of the checkout, and the clip the scenarios
+ran on, since a working tree is part of what every number here measures. A
+baseline recorded on another processor is somebody else's numbers, and the
+summary says so rather than printing deltas between two machines.
+
+The report carries the same three, so a comparison can be checked rather than
+assumed. Every run writes its own commit, whether that tree was dirty, and the
+fixture the demo opened on into `report.json`, and prints them at the top of the
+summary. The baseline comparison reads both sides: a percentage taken against a
+baseline recorded on a different commit says so before it prints a single delta,
+so does one where either tree carried uncommitted changes, and so does one where
+the two ran on different clips. None of the three changes the exit code, because
+this repository's own baseline was recorded from a dirty tree and a warning
+nobody can act on is a warning everybody learns to skip. They change what the
+number means, and the summary says which of them applies.
 
 Use `--repeat 3` when recording. Each pass is measured whole, the median of
 each metric becomes the baseline, and the spread is kept beside it so a quiet
@@ -210,11 +221,11 @@ block.
 
 ## What each scenario proves
 
-**paints** traces six paused seconds and six playing seconds, and photographs
-the page with Chrome's paint-rect overlay on. A paused demo should paint exactly
-nothing: a paused page that still paints is doing per-frame DOM work with no
-frame to show for it. Playing, it asserts two separate things, and keeping them
-separate is the point:
+**paints** traces the pause itself, then six paused seconds and six playing
+seconds, and photographs the page with Chrome's paint-rect overlay on. A paused
+demo should paint exactly nothing: a paused page that still paints is doing
+per-frame DOM work with no frame to show for it. Playing, it asserts two
+separate things, and keeping them separate is the point:
 
 - **How often** the main thread paints, from the trace. A canvas presenting
   video paints once per presented frame; every paint beyond that is DOM work
@@ -226,6 +237,28 @@ separate is the point:
 
 The report also carries `Layout` and `Commit` counts and the scene render delta
 so a paint regression can be traced to the layer that caused it.
+
+The zero-paint law governs steady state, which begins six seconds after the
+pause. Those six seconds used to be spent asleep, so a transition that repainted
+for four seconds and one that repainted for forty milliseconds wrote the same
+report, and anything that decayed inside them was invisible by construction. It
+now traces them as a window of their own and reports how long the page went on
+painting: the pause is issued into a trace that is already running and stamped
+into it with `console.timeStamp`, so every paint is placed against the moment
+the player was told to stop rather than against whenever the tracer attached.
+
+There is something in there, and it is short. Twenty passes of one unchanged
+build painted 11 to 15 times after the pause and stopped between 167.5 and
+177.3ms, in three bursts inside the first fifth of a second, with nothing at all
+in the six seconds that followed. So the budget is a second, five times the
+widest pass: the gate is for a pause that keeps drawing, not for the transition,
+and `paints.settling.quietAfterMs` in the registry is what catches the
+transition walking towards the budget one commit at a time. Tracing the extra
+window did not move the ones beside it: across those same twenty passes the
+playing paint rate ran 46.0 to 53.5/s and the present rate 29.88 to 30.14/s.
+Both spreads sit a little wider than the noise floors beside them (46.33 to
+53.17 and 29.88 to 30.07), so the extra window is not free of the metrics around
+it, and the floors are the numbers to revisit, not the spread.
 
 The rect histogram beside them answers neither question, and reading it as
 damage is a trap this harness fell into once. A `Paint` event's `clip` is the
@@ -490,3 +523,22 @@ Two related guards protect the same honesty: a window in which the page
 navigated, or in which the dev server hot-patched the app, is discarded and
 retried up to `--attempts` times, because a reload restarts the renderer
 mid-trace and a hot patch re-renders the whole app into the paint counts.
+
+A retry reloads the page first. The discarded attempt still drove the player: it
+decoded the frames the next attempt is about to ask for and cooked the masks it
+is about to sample, so a second attempt on the same page is measuring a cache
+the first one filled. Taken that way the drag reported the picture 4.7 to 6.9ms
+out of date and 104.67 to 108.68 frames a second, against 27.0 to 28.6ms and
+55.62 to 60.61 on the first attempt of the same passes: four times fresher and
+nearly twice the frame rate, on the same build, in the same minute. Reloading
+between attempts puts the retry back where the first attempt stood, at 25.9 to
+28.5ms and 56.26 to 62.42 frames a second across four more passes. How much a
+scenario gains from a warm page is its own business: the backward scrub's settle
+sits on a fixed poll rather than on the cache, and it read 125 to 156ms on both
+attempts with the reload and without it. The reload costs about 0.6 seconds,
+timed at 613 to 620ms across four consecutive calls, and only a disturbed
+attempt pays it. Roughly 100ms of that is the navigation; the rest is waiting
+for the renderer and reopening the control sections. `cadence` is the
+one scenario that keeps its page, because it selects the basketball fixture
+itself and a reload would drop the demo back onto its default clip while every
+number it reported still named the other one.

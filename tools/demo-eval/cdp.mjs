@@ -245,3 +245,16 @@ export class CdpSession {
 export function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+/**
+ * Reloads the page and waits for the new document, which the caller still has
+ * to wait for the app inside.
+ */
+export async function reloadPage(session, timeoutMs = 15_000) {
+  const navMark = session.navigations;
+  await session.send("Page.reload");
+  const deadline = Date.now() + timeoutMs;
+  while (session.navigations === navMark && Date.now() < deadline) {
+    await delay(100);
+  }
+}

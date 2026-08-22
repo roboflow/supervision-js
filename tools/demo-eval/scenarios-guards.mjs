@@ -9,7 +9,7 @@
  * back quietly.
  */
 
-import { delay } from "./cdp.mjs";
+import { delay, reloadPage } from "./cdp.mjs";
 import {
   at,
   Hook,
@@ -149,6 +149,25 @@ async function waitForRenderer(session, timeoutMs = 60_000) {
 const DISTURBED =
   /Media renderer has been destroyed|__demoRenderer is (absent|undefined)|Cannot read properties of undefined/i;
 
+/**
+ * Puts the page back to the state a scenario's first attempt met, so a second
+ * attempt measures the same thing.
+ *
+ * A discarded attempt still drove the player: it decoded the frames the next
+ * attempt is about to seek to, cooked the masks it is about to sample, and left
+ * whatever layer toggles it clicked. The drag taken again on that page reported
+ * a picture four times fresher and nearly twice the frame rate, and a retry is
+ * the one reading nobody sanity-checks. A reload is the only starting state
+ * this tool can reproduce: the view mode survives in storage, the fixture and
+ * the toggles return to the demo's own defaults, and the caches go with the
+ * document.
+ */
+async function resetPage(session) {
+  await reloadPage(session);
+  await waitForRenderer(session);
+  await openControlSections(session);
+}
+
 export async function stable(session, attempts, run) {
   let last = null;
   for (let attempt = 1; attempt <= Math.max(1, attempts); attempt += 1) {
@@ -168,7 +187,7 @@ export async function stable(session, attempts, run) {
       if (!DISTURBED.test(message)) throw error;
       last = message;
     }
-    await waitForRenderer(session);
+    await resetPage(session);
   }
   throw new Invalid(
     `${attempts} attempts were all disturbed; the last said: ${last}`,

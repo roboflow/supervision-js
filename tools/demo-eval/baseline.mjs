@@ -49,6 +49,19 @@ export const METRICS = [
     read: (report) => report.paints?.paused?.paintCount,
   },
   {
+    key: "paints.settling.quietAfterMs",
+    label: "quiet after the pause",
+    unit: "ms",
+    better: "lower",
+    /* How long the page went on painting once the player was told to stop.
+     * Twenty passes of one unchanged build, taken the way the tool runs by
+     * default, ran 167.5ms to 177.3ms with a median of 171.25ms; the floor is
+     * that spread rounded up. The scenario's own budget is a second, which is
+     * the cliff; this is what catches the transition growing towards it. */
+    noise: 10,
+    read: (report) => report.paints?.settling?.quietAfterMs,
+  },
+  {
     key: "paints.playing.paintRate",
     label: "playing paints",
     unit: "/s",
@@ -652,9 +665,84 @@ export function sourceFingerprint(repositories) {
   return Object.fromEntries(Object.entries(repositories).map(entry));
 }
 
+/** One repository's commit, in the shape the summary prints. */
+function commitLine(entry) {
+  if (!entry?.commit) return "unknown";
+  return `${entry.commit}${entry.dirty ? " (dirty)" : ""}`;
+}
+
+/**
+ * @returns what stands between these two sets of numbers and a valid
+ * comparison, in plain sentences, or nothing when they describe the same tree
+ * and the same clip.
+ *
+ * A percentage is only worth reading when both halves of it measured the same
+ * code against the same media. Neither the commit nor the fixture is visible in
+ * a number, so a baseline recorded on other code, or from a working tree nobody
+ * else can check out, otherwise reports drift that is really the difference
+ * between two builds.
+ */
+export function compareProvenance(recorded, current) {
+  const warnings = [];
+  const names = new Set([
+    ...Object.keys(recorded?.source ?? {}),
+    ...Object.keys(current?.source ?? {}),
+  ]);
+  for (const name of names) {
+    const before = recorded?.source?.[name];
+    const after = current?.source?.[name];
+    if (before === undefined || after === undefined) {
+      const known = before === undefined ? "this run" : "the baseline";
+      const missing = before === undefined ? "the baseline" : "this run";
+      warnings.push(
+        `${known} fingerprints a ${name} checkout at ` +
+          `${commitLine(before ?? after)} and ${missing} does not, so whatever ` +
+          "that tree contributed is unaccounted for on one side",
+      );
+      continue;
+    }
+    if (before?.commit !== after?.commit) {
+      warnings.push(
+        `${name} was ${commitLine(before)} when the baseline was recorded and is ` +
+          `${commitLine(after)} now; the percentages below are the difference ` +
+          "between two builds as much as anything that drifted",
+      );
+      continue;
+    }
+    if (before?.dirty || after?.dirty) {
+      const sides = [
+        before?.dirty ? "the baseline" : null,
+        after?.dirty ? "this run" : null,
+      ].filter((side) => side !== null);
+      warnings.push(
+        `${name} is ${after?.commit ?? before?.commit} on both sides, but ` +
+          `${sides.join(" and ")} measured a working tree carrying uncommitted ` +
+          "changes, so the two are not provably the same code",
+      );
+    }
+  }
+
+  const recordedFixture = recorded?.fixture?.id ?? null;
+  const currentFixture = current?.fixture?.id ?? null;
+  if (recordedFixture === null && currentFixture !== null) {
+    warnings.push(
+      `the baseline does not record which clip it ran on; this run ran on ` +
+        `${currentFixture}`,
+    );
+  } else if (recordedFixture !== null && recordedFixture !== currentFixture) {
+    warnings.push(
+      `the baseline ran on ${recordedFixture} and this run ran on ` +
+        `${currentFixture ?? "a clip it could not name"}; two clips decode and ` +
+        "cook different amounts of work",
+    );
+  }
+  return warnings;
+}
+
 export function buildBaseline({
   runs,
   media,
+  fixture,
   viewMode,
   samples,
   source,
@@ -667,6 +755,7 @@ export function buildBaseline({
     source,
     runs,
     media,
+    fixture,
     viewMode,
     recordedWithFailures,
     toleranceDefaultPercent: DEFAULT_TOLERANCE_PERCENT,
