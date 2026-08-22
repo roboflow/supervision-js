@@ -212,6 +212,16 @@ export const engineMetricGroups: readonly MetricGroup[] = [
           ),
       },
       {
+        label: "Cursor seeks",
+        wide: true,
+        tooltip:
+          "Seeks the cursor served, split by the landing each asked for. Only the exact ones feed the four readings above; a key-only seek is counted here and timed nowhere. A seek issued while playing is served by re-anchoring the playback walk instead, so it reaches neither count and is reported in the group below.",
+        value: (snapshot) =>
+          `${formatInt(snapshot.counters.exactSeeks)} exact · ${formatInt(
+            snapshot.counters.keySeeks,
+          )} key`,
+      },
+      {
         label: "Timed seeks",
         tooltip:
           "Cursor seeks that got timed, which is what Avg scrub averages. A scrub the next one overtook before it started, and a key-only seek, are never among them; a seek issued while playing is timed in its own group.",
