@@ -5,20 +5,26 @@ import process from "node:process";
 import test from "node:test";
 import ts from "typescript";
 
+import {
+  checkChecksums,
+  checkExports,
+  checkNpmScripts,
+  checkPaths,
+  checkScriptFlags,
+  checkVersions,
+  loadDocuments,
+  loadRepository,
+} from "./docs-claims.mjs";
+
 const rootDir = process.cwd();
 const publicDocsDir = path.join(rootDir, "docs/public");
 const publicApiDir = path.join(publicDocsDir, "api");
 
-test("public Markdown links resolve inside the repository", async () => {
-  const markdownFiles = [
-    path.join(rootDir, "README.md"),
-    ...(await listFiles(publicDocsDir, ".md")),
-  ];
+test("Markdown links resolve inside the repository", async () => {
+  const { documents } = await documentation();
   const failures = [];
 
-  for (const file of markdownFiles) {
-    const source = await readFile(file, "utf8");
-
+  for (const { file, source } of documents) {
     for (const target of findMarkdownLinks(source)) {
       if (target.startsWith("#") || /^[a-z][a-z0-9+.-]*:/i.test(target)) {
         continue;
@@ -484,6 +490,54 @@ test("copyable integration examples typecheck", async () => {
     ts.JsxEmit.ReactJSX,
   );
 });
+
+test("every path a document names exists", async () => {
+  const { repository, documents } = await documentation();
+
+  assert.deepEqual(await checkPaths(repository, documents), []);
+});
+
+test("every npm script a document runs is declared", async () => {
+  const { repository, documents } = await documentation();
+
+  assert.deepEqual(await checkNpmScripts(repository, documents), []);
+});
+
+test("every flag a document shows is one its script reads", async () => {
+  const { repository, documents } = await documentation();
+
+  assert.deepEqual(await checkScriptFlags(repository, documents), []);
+});
+
+test("every checksum a document quotes matches the file beside it", async () => {
+  const { repository, documents } = await documentation();
+
+  assert.deepEqual(await checkChecksums(repository, documents), []);
+});
+
+test("every version a document states matches the package manifest", async () => {
+  const { repository, documents } = await documentation();
+
+  assert.deepEqual(await checkVersions(repository, documents), []);
+});
+
+test("every symbol a document imports is exported", async () => {
+  const { repository, documents } = await documentation();
+
+  assert.deepEqual(await checkExports(repository, documents), []);
+});
+
+let corpus;
+
+function documentation() {
+  corpus ??= (async () => {
+    const repository = await loadRepository(rootDir);
+
+    return { documents: await loadDocuments(repository), repository };
+  })();
+
+  return corpus;
+}
 
 function findMarkdownLinks(source) {
   return [...source.matchAll(/!?\[[^\]]*]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/g)]
