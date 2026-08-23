@@ -11,7 +11,7 @@ values: `xyxy` corner boxes and COCO-17 keypoints with per-point confidence.
 Usage:
     python3 run-pose.py \
       --frames-dir /tmp/geometry-fixture/frames \
-      --output demo/fixtures/basketball_geometry/raw-pose.jsonl
+      --output demo/fixtures/basketball_sam3/raw-pose.jsonl
 
 Frames must be named `<frameIndex>.png` (zero padded) and share the frame grid
 of the detection fixture they will be merged into. No image payloads and no

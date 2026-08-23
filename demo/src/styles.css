@@ -1,6 +1,4 @@
 :root {
-  --surface: #ffffff;
-  --surface-strong: #ffffff;
   --surface-soft: #f5f3ff;
   --line: #e4e4e7;
   --line-strong: #c4b5fd;
@@ -12,13 +10,9 @@
   --amber: #b45309;
   --violet: #7c3aed;
   --danger: #dc2626;
-  --glass: rgba(255, 255, 255, 0.9);
-  --glass-strong: rgba(255, 255, 255, 0.97);
   --highlight: #7c3aed;
   --radius-lg: 8px;
   --radius-md: 7px;
-  --shadow-high: 0 18px 50px rgba(0, 0, 0, 0.32);
-  --shadow-soft: 0 8px 22px rgba(0, 0, 0, 0.18);
   --font-sans:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
     "Segoe UI", sans-serif;
@@ -1334,7 +1328,7 @@ fieldset {
 .quality-controls__input-row input[type="number"] {
   background: rgba(255, 255, 255, 0.045);
   border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   color: var(--text);
   font-family: var(--font-mono);
   font-size: 12px;
@@ -1353,7 +1347,7 @@ fieldset {
   align-items: center;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   cursor: pointer;
   display: flex !important;
   gap: 6px !important;
