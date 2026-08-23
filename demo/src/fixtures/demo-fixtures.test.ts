@@ -508,6 +508,8 @@ describe("basketball region fixture", () => {
     let headCount = 0;
     let frameCount = 0;
     const framesByTrack = new Map<string, number[]>();
+    const observedFramesByTrack = new Map<string, number[]>();
+    const gapFilledFramesByTrack = new Map<string, number[]>();
     const representativeHeadByTrack = new Map<
       string,
       DetectionFrame["detections"][number]
@@ -571,6 +573,14 @@ describe("basketball region fixture", () => {
           matchedPlayerIds.add(matchedPlayerId);
           trackFrames.push(frame.frameIndex!);
           framesByTrack.set(trackId, trackFrames);
+          const observationFrames =
+            detection.metadata?.headObservation === "observed"
+              ? observedFramesByTrack
+              : gapFilledFramesByTrack;
+          observationFrames.set(trackId, [
+            ...(observationFrames.get(trackId) ?? []),
+            frame.frameIndex!,
+          ]);
           if (!representativeHeadByTrack.has(trackId)) {
             representativeHeadByTrack.set(trackId, detection);
           }
@@ -583,11 +593,16 @@ describe("basketball region fixture", () => {
     expect(headCount).toBeGreaterThan(0);
     expect(frameCount).toBe(regionsManifest.frameCount);
 
-    for (const frameIndexes of framesByTrack.values()) {
-      for (let index = 1; index < frameIndexes.length; index += 1) {
-        const gapLength = frameIndexes[index] - frameIndexes[index - 1] - 1;
+    for (const [trackId, frameIndexes] of gapFilledFramesByTrack) {
+      const observed = observedFramesByTrack.get(trackId) ?? [];
 
-        expect(gapLength === 0 || gapLength > 7).toBe(true);
+      for (const frameIndex of frameIndexes) {
+        const previous = Math.max(...observed.filter((at) => at < frameIndex));
+        const next = Math.min(...observed.filter((at) => at > frameIndex));
+
+        expect(Number.isFinite(previous)).toBe(true);
+        expect(Number.isFinite(next)).toBe(true);
+        expect(next - previous - 1).toBeLessThanOrEqual(4);
       }
     }
 
@@ -619,12 +634,12 @@ describe("basketball region fixture", () => {
     const headSource = provenance.sources.find(({ id }) => id === "sam3-head");
 
     expect(provenance.headRegions).toMatchObject({
-      algorithm: "sam3-head-temporal-mask-v4",
+      algorithm: "sam3-head-temporal-mask-v5",
       prompt: "head",
       sourceId: "sam3-head",
     });
     expect(provenance.headRegions.associationPolicy).toContain(
-      "internal gaps of at most 7 frames are filled",
+      "internal gaps of at most 4 frames are filled",
     );
     expect(provenance.headRegions.cropPolicy).toContain(
       "every crop remains a superset of its stabilized mask bounds",

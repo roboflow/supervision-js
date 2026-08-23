@@ -59,7 +59,9 @@ const BASKETBALL_TRACE_TRACK_ID = "basketball-track:0";
 const BASKETBALL_TRACE_MAX_SPEED_PIXELS_PER_SECOND = 2_700;
 const BASKETBALL_TRACE_WINDOW_SECONDS = 1;
 const HEAD_ASSOCIATION_ALGORITHM = "sam3-head-temporal-mask-v4";
-const HEAD_MAX_GAP_FRAMES = 7;
+const HEAD_REGION_ALGORITHM = "sam3-head-temporal-mask-v5";
+const GAP_FILL_ALGORITHM = "head-observation-interpolation-v1";
+const HEAD_MAX_GAP_FRAMES = 4;
 const HEAD_MASK_NORMALIZATION_SIZE = 64;
 const HEAD_MASK_SMOOTHING_RADIUS = 2;
 const HEAD_SOURCE_ID = "sam3-head";
@@ -145,7 +147,7 @@ const stabilizedHeads = headSam3Fixture
       })),
       {
         associationAlgorithm: HEAD_ASSOCIATION_ALGORITHM,
-        fillGap: translateHeadMaskToPlayer,
+        fillGap: interpolateHeadBetweenObservations,
         maxGapFrames: HEAD_MAX_GAP_FRAMES,
         sourceId: HEAD_SOURCE_ID,
         targetClassNames: POSE_TARGET_CLASS_NAMES,
@@ -176,11 +178,13 @@ const fixture = {
     ...(headSam3Fixture
       ? {
           headRegions: {
-            algorithm: HEAD_ASSOCIATION_ALGORITHM,
+            algorithm: HEAD_REGION_ALGORITHM,
             associationPolicy: `C-BIoU assigns stable team-player tracks before global one-to-one head matching; exact repeated masks retain their prior owner, implausible relative position/scale jumps are rejected, confidence >= 0.7 starts a head track, confidence >= 0.5 continues it, and internal gaps of at most ${HEAD_MAX_GAP_FRAMES} frames are filled`,
             cropPolicy:
               "6px mask-bounds padding with bidirectional exponential smoothing and a seven-frame local size envelope; every crop remains a superset of its stabilized mask bounds",
-            derivedFrom: `direct SAM3 \`head\` masks associated with offline C-BIoU team-player tracks; masks are normalized to ${HEAD_MASK_NORMALIZATION_SIZE}x${HEAD_MASK_NORMALIZATION_SIZE}, stabilized by a ${HEAD_MASK_SMOOTHING_RADIUS * 2 + 1}-frame weighted temporal majority and one-cell morphological close, then projected into the current frame's SAM3 bounds so media pixels remain spatially aligned; short gaps translate the nearest observation with tracked player motion`,
+            derivedFrom: `direct SAM3 \`head\` masks associated with offline C-BIoU team-player tracks; masks are normalized to ${HEAD_MASK_NORMALIZATION_SIZE}x${HEAD_MASK_NORMALIZATION_SIZE}, stabilized by a ${HEAD_MASK_SMOOTHING_RADIUS * 2 + 1}-frame weighted temporal majority and one-cell morphological close, then projected into the current frame's SAM3 bounds so media pixels remain spatially aligned; a gap frame carries the nearer bracketing observation's mask, rigidly translated onto the position interpolated between both bracketing observations`,
+            gapFillAlgorithm: GAP_FILL_ALGORITHM,
+            gapFillPolicy: `a gap frame's head center is the linear interpolation of both bracketing observations' mask centers; a gap frame whose player track has no frozen detection stays empty`,
             continuedLowConfidenceHeadCount:
               stabilizedHeads.summary.continuedLowConfidenceHeadCount,
             gapFilledHeadCount: stabilizedHeads.summary.gapFilledHeadCount,
@@ -353,12 +357,53 @@ function trackHeadPlayerDetections(frames) {
   return result;
 }
 
-function translateHeadMaskToPlayer({ sourceHead, sourcePlayer, targetPlayer }) {
+/**
+ * The player box is limb-driven: its top follows whichever body part is
+ * highest, usually a raised arm. Moving a head by that box's delta tracks the
+ * arm, not the head, and the error compounds with distance from the
+ * observation it was moved from, so both bracketing observations anchor the
+ * placement.
+ */
+function interpolateHeadBetweenObservations({
+  interpolationAmount,
+  nextHead,
+  previousHead,
+}) {
+  if (!previousHead.rect || !nextHead.rect) return undefined;
+  const ordered =
+    interpolationAmount <= 0.5
+      ? [previousHead, nextHead]
+      : [nextHead, previousHead];
+
+  for (const sourceHead of ordered) {
+    const filled = translateHeadMaskToInterpolatedCenter({
+      interpolationAmount,
+      nextHead,
+      previousHead,
+      sourceHead,
+    });
+
+    if (filled) return filled;
+  }
+
+  return undefined;
+}
+
+function translateHeadMaskToInterpolatedCenter({
+  interpolationAmount,
+  nextHead,
+  previousHead,
+  sourceHead,
+}) {
   if (!sourceHead.mask || !sourceHead.rect) return undefined;
-  const sourceTop = sourcePlayer.rect.y - sourcePlayer.rect.height / 2;
-  const targetTop = targetPlayer.rect.y - targetPlayer.rect.height / 2;
-  const offsetX = Math.round(targetPlayer.rect.x - sourcePlayer.rect.x);
-  const offsetY = Math.round(targetTop - sourceTop);
+  const offsetX = Math.round(
+    lerp(previousHead.rect.x, nextHead.rect.x, interpolationAmount) -
+      sourceHead.rect.x,
+  );
+  const offsetY = Math.round(
+    lerp(previousHead.rect.y, nextHead.rect.y, interpolationAmount) -
+      sourceHead.rect.y,
+  );
   const decoded = decodeCompressedRleMask(sourceHead.mask);
   const translated = new Uint8Array(decoded.data.length);
   let left = decoded.width;
@@ -390,6 +435,7 @@ function translateHeadMaskToPlayer({ sourceHead, sourcePlayer, targetPlayer }) {
     mask: encodeBinaryMask(translated, decoded.width, decoded.height),
     metadata: {
       ...sourceHead.metadata,
+      gapFill: GAP_FILL_ALGORITHM,
       gapFillOffset: { x: offsetX, y: offsetY },
       gapFillSourceDetectionId: sourceHead.id,
     },
@@ -640,6 +686,10 @@ function findRunIndex(runEnds, flatIndex) {
 
 function clampInteger(value, minimum, maximum) {
   return Math.min(maximum, Math.max(minimum, value));
+}
+
+function lerp(from, to, amount) {
+  return from + (to - from) * amount;
 }
 
 function attachBasketballCenterTrace(

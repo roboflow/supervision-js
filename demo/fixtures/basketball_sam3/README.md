@@ -107,10 +107,20 @@ The merge is deterministic given the committed inputs and needs no network:
 npm run fixture:geometry:create
 ```
 
-The two model runs behind those inputs are not reproducible from this repo as it
-stands. `raw-sam3.jsonl` came from `tools/sam3-fixture/run-sam3.mjs`, which needs
-an extracted frames manifest that is not committed. `raw-pose.jsonl` came from
-the hosted `roboflow_core/roboflow_keypoint_detection_model@v3` block, and the
-only pose script here is `tools/geometry-fixture/run-pose.py`, which runs
-Ultralytics locally and produced the earlier 30fps run that
-`basketball_regions` still uses. A script for the hosted 25fps run is missing.
+Both model runs behind those inputs have a committed path back to them, with one
+genuine hole and one format mismatch.
+
+`raw-sam3.jsonl` came from `tools/sam3-fixture/run-sam3.mjs`, which reads an
+extracted frames manifest. That manifest is not committed, but
+`npm run fixture:sam3:extract` re-extracts it from a media URL you pass, so the
+rerun needs a Roboflow API key rather than a lost input.
+
+`raw-pose.jsonl` came from the hosted
+`roboflow_core/roboflow_keypoint_detection_model@v3` block, and no driver for
+that hosted run is committed: that is the hole.
+`tools/geometry-fixture/run-pose.py` is committed and takes `--frames-dir`,
+`--output`, `--model` and `--confidence`, but it runs Ultralytics locally and
+produced the 30fps run that `basketball_regions` uses, not this fixture's 25fps
+one. It also does not chain onto the extractor as the two stand:
+`extract-frames.mjs` writes a `frames.jsonl` of encoded frames, while
+`run-pose.py` globs a directory of zero-padded `.png` files.
