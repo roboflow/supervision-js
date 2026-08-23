@@ -40,8 +40,6 @@ export interface PreparedAnnotationWindow {
    */
   getReadinessToken(mediaTime: number): string;
   getSnapshot(): PreparedAnnotationWindowSnapshot;
-  /** The timeline the annotation layers see. */
-  readonly preparedFrameTimeline: BufferedDetectionTimeline;
 }
 
 /**
@@ -102,35 +100,6 @@ export function createPreparedAnnotationWindow(options: {
         preparedFrameCount: frames.filter((frame) => frame.prepared).length,
         spanFrameCount,
       };
-    },
-
-    preparedFrameTimeline: {
-      destroy() {
-        options.detectionTimeline.destroy();
-      },
-      getBufferedFrames() {
-        return options.detectionTimeline.getBufferedFrames();
-      },
-      getState() {
-        return options.detectionTimeline.getState();
-      },
-      prefetch(mediaTime) {
-        options.detectionTimeline.prefetch(mediaTime);
-      },
-      prepare(mediaTime, prepareOptions) {
-        return options.detectionTimeline.prepare(mediaTime, prepareOptions);
-      },
-      selectFrame(mediaTime) {
-        return getPreparedFrame(mediaTime) ?? undefined;
-      },
-      setTimelineContext(context) {
-        options.detectionTimeline.setTimelineContext?.(context);
-      },
-      subscribe(listener) {
-        return (
-          options.detectionTimeline.subscribe?.(listener) ?? (() => undefined)
-        );
-      },
     },
   };
 }

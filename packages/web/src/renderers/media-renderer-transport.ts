@@ -14,7 +14,6 @@ export interface MediaRendererTransport {
   commit(mediaTime: number): Promise<void>;
   step(direction: 1 | -1): Promise<void>;
   setPlaybackRate(rate: number): void;
-  getPlaybackRate(): number;
   destroy(): void;
 }
 
@@ -168,10 +167,6 @@ export function createMediaRendererTransport(
 
     setPlaybackRate(rate) {
       channel.setPlaybackRate(rate);
-    },
-
-    getPlaybackRate() {
-      return channel.getPlaybackRate();
     },
 
     destroy() {

@@ -475,12 +475,7 @@ export function useDemoRenderer(
             renderer;
         }
         syncRendererState(renderer);
-        await playRenderer(
-          renderer,
-          isActive,
-          setErrorMessage,
-          syncRendererState,
-        );
+        await startPlayback(renderer, isActive, syncRendererState);
       } catch (error: unknown) {
         if (isActive()) {
           handleSessionError(error, sourceMode);
@@ -551,15 +546,11 @@ export function useDemoRenderer(
       return;
     }
 
-    try {
-      await renderer.play();
-    } catch (error: unknown) {
-      setErrorMessage(
-        getErrorMessage(error, "Unable to play the media renderer."),
-      );
-    } finally {
-      syncRendererState(renderer);
-    }
+    await startPlayback(
+      renderer,
+      () => rendererRef.current === renderer,
+      syncRendererState,
+    );
   }, [syncRendererState]);
 
   const pausePlayback = useCallback(() => {
@@ -1016,32 +1007,12 @@ function createThrottledPublisher<Value>(
   };
 }
 
-async function playRenderer(
-  renderer: MediaRenderer,
-  isActive: () => boolean,
-  setErrorMessage: (message: string) => void,
-  syncRendererState: (renderer: MediaRenderer) => void,
-) {
-  try {
-    await renderer.play();
-    if (isActive()) {
-      syncRendererState(renderer);
-    }
-  } catch (error: unknown) {
-    if (isActive()) {
-      syncRendererState(renderer);
-      setErrorMessage(
-        getErrorMessage(error, "Unable to play the media renderer."),
-      );
-    }
-  }
-}
-
 /**
  * `togglePlayback` starts a play and drops its rejection, so a play that fails
- * through the play/pause button or the space bar says nothing. Reporting from
- * `play` itself reaches that play and leaves the pause-or-play decision with
- * the renderer, which alone knows whether a drag is holding the picture.
+ * through the play/pause button or the space bar would otherwise say nothing.
+ * Reporting from `play` itself reaches that play and leaves the pause-or-play
+ * decision with the renderer, which alone knows whether a drag is holding the
+ * picture.
  */
 function reportPlayFailures(
   renderer: MediaRenderer,
@@ -1063,6 +1034,20 @@ function reportPlayFailures(
       throw error;
     }
   };
+}
+
+/** Settles the readout however the play goes. The failure itself is swallowed
+ *  because `reportPlayFailures` has already shown it. */
+async function startPlayback(
+  renderer: MediaRenderer,
+  isActive: () => boolean,
+  syncRendererState: (renderer: MediaRenderer) => void,
+) {
+  await renderer.play().catch(() => undefined);
+
+  if (isActive()) {
+    syncRendererState(renderer);
+  }
 }
 
 function createUploadErrorState(message: string): UploadInferenceState {

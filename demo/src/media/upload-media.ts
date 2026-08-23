@@ -1,5 +1,4 @@
-import { type MediaRenderer } from "supervision";
-import type { WrappedCanvas } from "mediabunny";
+import type { DecodedVideoSampleSink, MediaRenderer } from "supervision";
 
 export const TARGET_UPLOAD_FRAME_RATE = 30;
 const IMAGE_MEDIA_DURATION_SECONDS = 1;
@@ -88,88 +87,65 @@ export async function prepareUploadedImageMedia(options: {
   }
 }
 
+/**
+ * Frames are queried on a synthetic `frameRate` grid rather than the media's
+ * own, because that grid is what the session pairs detections against.
+ */
 export async function* extractInferenceFrameBatches(options: {
   readonly media: PreparedUploadMedia;
+  readonly sampleSink: DecodedVideoSampleSink;
   readonly batchSize?: number;
   readonly quality?: number;
   readonly signal?: AbortSignal;
 }): AsyncGenerator<readonly ExtractedInferenceFrame[], void, unknown> {
-  const { ALL_FORMATS, BlobSource, CanvasSink, Input, WEBM } =
-    await import("mediabunny");
-  const sourceBlob = options.media.blob ?? options.media.sourceFile;
+  const batchSize = options.batchSize ?? DEFAULT_FRAME_BATCH_SIZE;
+  const quality = options.quality ?? DEFAULT_JPEG_QUALITY;
+  const canvas = new OffscreenCanvas(options.media.width, options.media.height);
+  const context = canvas.getContext("2d", { alpha: false });
 
-  if (!sourceBlob) {
-    throw new Error("Prepared upload media has no readable inference source.");
+  if (!context) {
+    throw new Error("Unable to create upload inference canvas.");
   }
 
-  const input = new Input({
-    formats: options.media.blob ? [WEBM] : ALL_FORMATS,
-    source: new BlobSource(sourceBlob),
-  });
+  let frames: ExtractedInferenceFrame[] = [];
 
-  try {
-    const videoTrack = await input.getPrimaryVideoTrack();
+  for (
+    let frameIndex = 0;
+    frameIndex < options.media.frameCount;
+    frameIndex += 1
+  ) {
+    throwIfAborted(options.signal);
 
-    if (!videoTrack) {
-      throw new Error("Prepared upload media has no video track.");
+    const sample = await options.sampleSink.getSample(
+      (frameIndex + 0.5) / options.media.frameRate,
+      { skipLiveWait: true },
+    );
+
+    if (!sample) {
+      throw new Error(`Unable to decode uploaded frame #${frameIndex}.`);
     }
 
-    const sink = new CanvasSink(videoTrack, { poolSize: 4 });
-    const batchSize = options.batchSize ?? DEFAULT_FRAME_BATCH_SIZE;
-    const quality = options.quality ?? DEFAULT_JPEG_QUALITY;
-
-    for (
-      let startFrameIndex = 0;
-      startFrameIndex < options.media.frameCount;
-      startFrameIndex += batchSize
-    ) {
-      throwIfAborted(options.signal);
-      const count = Math.min(
-        batchSize,
-        options.media.frameCount - startFrameIndex,
-      );
-      const frameIndexes = Array.from(
-        { length: count },
-        (_, offset) => startFrameIndex + offset,
-      );
-      const sampleQueryTimes = frameIndexes.map(
-        (frameIndex) => (frameIndex + 0.5) / options.media.frameRate,
-      );
-      const frames: ExtractedInferenceFrame[] = [];
-      let frameOffset = 0;
-
-      for await (const wrappedCanvas of sink.canvasesAtTimestamps(
-        sampleQueryTimes,
-        { skipLiveWait: true },
-      )) {
-        throwIfAborted(options.signal);
-        const frameIndex = frameIndexes[frameOffset];
-
-        frameOffset += 1;
-
-        if (frameIndex === undefined) {
-          break;
-        }
-
-        if (!wrappedCanvas) {
-          throw new Error(`Unable to decode uploaded frame #${frameIndex}.`);
-        }
-
-        frames.push(
-          await createExtractedInferenceFrame({
-            frameIndex,
-            quality,
-            wrappedCanvas,
-          }),
-        );
-      }
-
-      if (frames.length > 0) {
-        yield frames;
-      }
+    try {
+      sample.draw(context, 0, 0, canvas.width, canvas.height);
+    } finally {
+      sample.close();
     }
-  } finally {
-    input.dispose();
+
+    frames.push({
+      duration: sample.duration,
+      frameIndex,
+      imageBase64: await canvasToJpegBase64(canvas, quality),
+      mediaTime: sample.timestamp,
+    });
+
+    if (frames.length === batchSize) {
+      yield frames;
+      frames = [];
+    }
+  }
+
+  if (frames.length > 0) {
+    yield frames;
   }
 }
 
@@ -204,53 +180,11 @@ async function encodeCanvasAsWebM(
   return new Blob([target.buffer], { type: "video/webm" });
 }
 
-async function createExtractedInferenceFrame(options: {
-  readonly frameIndex: number;
-  readonly quality: number;
-  readonly wrappedCanvas: WrappedCanvas;
-}): Promise<ExtractedInferenceFrame> {
-  return {
-    duration: options.wrappedCanvas.duration,
-    frameIndex: options.frameIndex,
-    imageBase64: await canvasToJpegBase64(
-      options.wrappedCanvas.canvas,
-      options.quality,
-    ),
-    mediaTime: options.wrappedCanvas.timestamp,
-  };
-}
-
-async function canvasToJpegBase64(
-  canvas: HTMLCanvasElement | OffscreenCanvas,
-  quality: number,
-) {
-  const blob =
-    canvas instanceof HTMLCanvasElement
-      ? await htmlCanvasToBlob(canvas, quality)
-      : await canvas.convertToBlob({ quality, type: "image/jpeg" });
+async function canvasToJpegBase64(canvas: OffscreenCanvas, quality: number) {
+  const blob = await canvas.convertToBlob({ quality, type: "image/jpeg" });
   const dataUrl = await blobToDataUrl(blob);
 
   return dataUrl.slice(dataUrl.indexOf(",") + 1);
-}
-
-async function htmlCanvasToBlob(
-  canvas: HTMLCanvasElement,
-  quality: number,
-): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    canvas.toBlob(
-      (blob) => {
-        if (!blob) {
-          reject(new Error("Unable to encode upload frame as JPEG."));
-          return;
-        }
-
-        resolve(blob);
-      },
-      "image/jpeg",
-      quality,
-    );
-  });
 }
 
 async function blobToDataUrl(blob: Blob): Promise<string> {

@@ -40,21 +40,16 @@ export interface MediaRendererRuntimeState {
     width: number;
   };
   setSourceReady(metadata: DecodedMediaSourceMetadata): void;
-  setCurrentTime(currentTime: number): void;
-  /** A playhead the producer moved. Emits, so a readout follows a seek
-   *  before its frame lands. */
+  /** A playhead that moved. Emits, so a readout follows a seek before its
+   *  frame lands. */
   recordPlayheadTime(currentTime: number): void;
   setPlaybackRate(playbackRate: number): void;
   setRendererBackend(rendererBackend: string | null): void;
   recordPresentedSample(sample: PresentedMediaSample): void;
-  /** What the scene put on screen on its own: a frame a push producer
-   *  announced, or a redraw of the frame already up. Counts a frame not counted
-   *  before, so a redraw counts nothing and one media time presented twice
-   *  counts twice. */
+  /** What the scene put on screen, whether on its own or on a repaint the
+   *  renderer asked for. Counts a frame not counted before, so a redraw counts
+   *  nothing and one media time presented twice counts twice. */
   recordPresentationUpdate(sample: PresentedMediaSample): void;
-  /** A repaint the renderer asked the scene for. Takes the sample's playhead
-   *  and detections and counts no frame, whichever frame the sample carries. */
-  recordPresentationRefresh(sample: PresentedMediaSample): void;
   setReady(): void;
   setLoading(): void;
   setPlaying(): void;
@@ -83,7 +78,7 @@ export function createMediaRendererRuntimeState(
   let rendererBackend: string | null = null;
   /** Frames put on screen, not paints. */
   let presentedFrames = 0;
-  let presentedFrameSerial: number | null = null;
+  let presentedFrameSerial = 0;
   let activeDetectionFrameTime: number | null = null;
   let activeDetectionFrameIndex: number | null = null;
   let activeDetectionCount = 0;
@@ -212,10 +207,6 @@ export function createMediaRendererRuntimeState(
       emitSourceState();
     },
 
-    setCurrentTime(nextCurrentTime) {
-      currentTime = nextCurrentTime;
-    },
-
     recordPlayheadTime(nextCurrentTime) {
       if (currentTime === nextCurrentTime) {
         return;
@@ -255,13 +246,6 @@ export function createMediaRendererRuntimeState(
         presentedFrameSerial = sample.presentedFrameSerial;
       }
 
-      adoptPresentedSample(sample);
-      lastFrameRenderTimings = sample.renderTimings ?? lastFrameRenderTimings;
-
-      emitState();
-    },
-
-    recordPresentationRefresh(sample) {
       adoptPresentedSample(sample);
       lastFrameRenderTimings = sample.renderTimings ?? lastFrameRenderTimings;
 

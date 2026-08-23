@@ -201,15 +201,15 @@ function PipelineLedger({
 
   return (
     <div className="engine-ledger">
-      <LedgerCell label="decoded" value={formatInt(decodedFrames)} />
-      <LedgerCell label="painted" value={formatInt(paintedFrames)} />
-      <LedgerCell label="dropped" value={formatInt(droppedFrames)} />
-      <LedgerCell label="per paint" value={perPaint} />
+      <EngineLedgerCell label="decoded" value={formatInt(decodedFrames)} />
+      <EngineLedgerCell label="painted" value={formatInt(paintedFrames)} />
+      <EngineLedgerCell label="dropped" value={formatInt(droppedFrames)} />
+      <EngineLedgerCell label="per paint" value={perPaint} />
     </div>
   );
 }
 
-function LedgerCell({
+function EngineLedgerCell({
   label,
   value,
 }: {

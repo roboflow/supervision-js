@@ -8,53 +8,7 @@ import {
   encodeCompressedRleCounts,
   filterDetectionFramesForRange,
   selectDetectionFrame,
-  selectDetectionFrameAtIndex,
 } from "#utils/detection-frames";
-
-describe("selection by frame identity", () => {
-  /** A sparse run: one inference every fifth frame of the source. */
-  const sparse: DetectionFrame[] = [0, 5, 10, 15].map((frameIndex) => ({
-    detections: [],
-    frameIndex,
-    mediaTime: frameIndex / 30,
-  }));
-
-  it("holds a sparse run's detections across the frames between inferences", () => {
-    expect(selectDetectionFrameAtIndex(sparse, 5)?.frameIndex).toBe(5);
-    expect(selectDetectionFrameAtIndex(sparse, 6)?.frameIndex).toBe(5);
-    expect(selectDetectionFrameAtIndex(sparse, 9)?.frameIndex).toBe(5);
-    expect(selectDetectionFrameAtIndex(sparse, 10)?.frameIndex).toBe(10);
-    expect(selectDetectionFrameAtIndex(sparse, 400)?.frameIndex).toBe(15);
-  });
-
-  it("answers nothing before the first inference", () => {
-    expect(
-      selectDetectionFrameAtIndex(
-        sparse.filter((frame) => frame.frameIndex !== 0),
-        3,
-      ),
-    ).toBeUndefined();
-  });
-
-  it("is unmoved by a media time that no arithmetic can name exactly", () => {
-    // 1/30 s is not representable in binary, in whole microseconds, or in whole
-    // milliseconds. Selection never touches it.
-    const dense: DetectionFrame[] = Array.from({ length: 60 }, (_, index) => ({
-      detections: [],
-      frameIndex: index,
-      mediaTime: index / 30,
-    }));
-
-    for (let index = 0; index < dense.length; index += 1) {
-      expect(selectDetectionFrameAtIndex(dense, index)?.frameIndex).toBe(index);
-    }
-  });
-
-  it("answers nothing for a source whose frames carry no identity", () => {
-    const unindexed: DetectionFrame[] = [{ detections: [], mediaTime: 0 }];
-    expect(selectDetectionFrameAtIndex(unindexed, 0)).toBeUndefined();
-  });
-});
 
 describe("detection frame utilities", () => {
   it("selects interval frames until their exclusive end time", () => {

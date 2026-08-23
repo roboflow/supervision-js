@@ -342,45 +342,6 @@ export function selectDetectionFrame(
   return selectIntervalDetectionFrame(detectionFrames, mediaTime);
 }
 
-/**
- * The detections standing over the source frame at `frameIndex`.
- *
- * At or before, not equality: an inference run over every Nth frame still holds
- * its detections across the frames in between, and "at or before" in index space
- * is the exact analogue of the interval rule with no arithmetic to be wrong
- * about. Both sides count frames of the same container from its first packet, so
- * the indexes compare exactly and need no tolerance at all.
- *
- * A run whose frames carry no index has no answer here; that source belongs on
- * `selectDetectionFrame`.
- */
-export function selectDetectionFrameAtIndex(
-  detectionFrames: readonly DetectionFrame[],
-  frameIndex: number,
-): DetectionFrame | undefined {
-  let selected: DetectionFrame | undefined;
-  let low = 0;
-  let high = detectionFrames.length - 1;
-
-  while (low <= high) {
-    const middle = Math.floor((low + high) / 2);
-    const index = detectionFrames[middle].frameIndex;
-
-    if (index === undefined) {
-      return undefined;
-    }
-
-    if (index <= frameIndex) {
-      selected = detectionFrames[middle];
-      low = middle + 1;
-    } else {
-      high = middle - 1;
-    }
-  }
-
-  return selected;
-}
-
 export function decodeCompressedRleMask(
   mask: DetectionMask,
 ): DecodedDetectionMask {

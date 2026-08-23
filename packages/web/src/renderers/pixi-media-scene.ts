@@ -244,14 +244,7 @@ export async function createPixiMediaScene(
     getPlayheadMediaTime: () => currentMediaTime,
     renderPreparation: options.renderPreparation,
   });
-  /**
-   * What the annotation layers read. Under push presentation that is the
-   * window, so a frame it does not cover reaches no layer at all; a pull scene
-   * keeps drawing whatever the timeline holds.
-   */
-  const annotationDetectionTimeline = frameChannel
-    ? annotationWindow.preparedFrameTimeline
-    : options.detectionTimeline;
+  const annotationDetectionTimeline = options.detectionTimeline;
   /** What the window answered for the media time the layers last drew. */
   let drawnReadiness: string | null = null;
   let isPresenting = false;

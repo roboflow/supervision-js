@@ -1,16 +1,12 @@
 import {
   DetectionFrameSelectionMode,
-  MediaInteractionMode,
-  MediaRendererFit,
-  MediaRendererPlaybackState,
-  RenderPreparationMode,
   createBrowserColdDetectionFrameStore,
   createMediaSession,
   createVideoEngineMediaRendererSource,
   type ColdDetectionFrameStoreWriteSummary,
-  type DetectionFrame,
+  type DecodedVideoSampleSink,
   type MediaSession,
-  type MediaRenderer,
+  type MediaRendererSource,
   type WritableDetectionFrameSource,
 } from "supervision";
 import { SourceKind } from "supervision-js-video-engine";
@@ -28,9 +24,8 @@ import {
 } from "../media/upload-media";
 import { createDemoPresentation } from "../presentation/demo-presentation";
 import { readDemoDisplayBox } from "./decode-resolution";
-import { readDemoMaskFrameOptions } from "./mask-raster-resolution";
+import { createDemoRendererOptions } from "./demo-session-renderer";
 import { UPLOAD_DETECTION_CHUNK_SECONDS } from "./demo-session-config";
-import { getDemoMaxDevicePixelRatio } from "./render-quality";
 import type {
   DemoSessionCallbacks,
   UploadInferenceStateSetter,
@@ -72,6 +67,7 @@ export async function createUploadSession(
   const presentation = createDemoPresentation(options.presentationSettings);
   const isImageUpload = options.uploadRun.file.type.startsWith("image/");
   let preparedMedia: PreparedUploadMedia | undefined;
+  let sampleSink: DecodedVideoSampleSink | undefined;
   let session: MediaSession | undefined;
 
   try {
@@ -102,38 +98,25 @@ export async function createUploadSession(
         },
       },
       media: options.tapMediaSource(
-        createVideoEngineMediaRendererSource({
-          display: readDemoDisplayBox(options.container, options.renderQuality),
-          source: {
-            blob: preparedMedia?.blob ?? options.uploadRun.file,
-            kind: SourceKind.Blob,
+        tapSampleSink(
+          createVideoEngineMediaRendererSource({
+            display: readDemoDisplayBox(
+              options.container,
+              options.renderQuality,
+            ),
+            source: {
+              blob: preparedMedia?.blob ?? options.uploadRun.file,
+              kind: SourceKind.Blob,
+            },
+          }),
+          (opened) => {
+            sampleSink = opened;
           },
-        }),
+        ),
       ),
       presentation,
       onState: options.onSessionState,
-      renderer: {
-        autoPlay: false,
-        fit: MediaRendererFit.Contain,
-        interaction: {
-          mode: MediaInteractionMode.PausedOnly,
-          onHover: options.onDetectionHover,
-          onSelect: options.onDetectionSelect,
-        },
-        loop: true,
-        maxDevicePixelRatio: getDemoMaxDevicePixelRatio(options.renderQuality),
-        onFrame: options.onFrame,
-        onState: options.onRendererState,
-        renderPreparation: {
-          maskFrame: readDemoMaskFrameOptions(
-            options.container,
-            options.renderQuality,
-          ),
-          mode: RenderPreparationMode.Worker,
-          onDiagnostics: options.onRenderPreparationDiagnostics,
-        },
-        onSource: options.onSourceState,
-      },
+      renderer: createDemoRendererOptions(options),
     });
   } catch (error) {
     session?.destroy();
@@ -151,6 +134,11 @@ export async function createUploadSession(
   if (!preparedMedia) {
     session.destroy();
     throw new Error("Upload media could not be prepared.");
+  }
+
+  if (!sampleSink) {
+    session.destroy();
+    throw new Error("Upload media session opened no readable frame source.");
   }
 
   if (!options.isActive()) {
@@ -190,11 +178,29 @@ export async function createUploadSession(
     onFixtureSummary: options.onFixtureSummary,
     onUploadState: options.onUploadState,
     preparedMedia,
+    sampleSink,
     session,
     uploadRun: options.uploadRun,
   });
 
   return session;
+}
+
+/** Hands the opened source's pull path to the inference pass, so the upload is
+ *  read back through the media the player already demuxed. */
+function tapSampleSink(
+  source: MediaRendererSource,
+  onSampleSink: (sampleSink: DecodedVideoSampleSink) => void,
+): MediaRendererSource {
+  return {
+    async open() {
+      const opened = await source.open();
+
+      onSampleSink(opened.sampleSink);
+
+      return opened;
+    },
+  };
 }
 
 function getAppendableSessionDetectionSource(
@@ -224,12 +230,14 @@ async function runUploadInference(options: {
   readonly onFixtureSummary: DemoSessionCallbacks["onFixtureSummary"];
   readonly onUploadState: UploadInferenceStateSetter;
   readonly preparedMedia: PreparedUploadMedia;
+  readonly sampleSink: DecodedVideoSampleSink;
   readonly session: MediaSession;
   readonly uploadRun: Pick<UploadRunRequest, "apiKey" | "classNames">;
 }) {
   try {
     for await (const batch of extractInferenceFrameBatches({
       media: options.preparedMedia,
+      sampleSink: options.sampleSink,
       signal: options.abortSignal,
     })) {
       if (!options.isActive()) {
@@ -293,7 +301,6 @@ async function runUploadInference(options: {
           statusLabel: "SAM3 frames streaming into cold storage",
           totalFrames: options.preparedMedia.frameCount,
         }));
-        refreshPausedRendererForFrame(options.session.renderer, detectionFrame);
       }
 
       options.onUploadState((current) => ({
@@ -371,32 +378,6 @@ function handleUploadInferenceError(
     sourceSummary: getDetectionSourceSummary(options.detectionSource),
     status: "error",
   });
-}
-
-function refreshPausedRendererForFrame(
-  renderer: MediaRenderer,
-  frame: DetectionFrame,
-) {
-  const state = renderer.getState();
-
-  if (
-    state.playbackState === MediaRendererPlaybackState.Playing ||
-    state.playbackState === MediaRendererPlaybackState.Buffering
-  ) {
-    return;
-  }
-
-  if (!frameOverlapsTime(frame, state.currentTime)) {
-    return;
-  }
-
-  void renderer.seek(state.currentTime).catch(() => undefined);
-}
-
-function frameOverlapsTime(frame: DetectionFrame, time: number) {
-  const frameEndTime = frame.endTime ?? frame.mediaTime;
-
-  return frame.mediaTime <= time && time <= frameEndTime;
 }
 
 function createUploadSummary(

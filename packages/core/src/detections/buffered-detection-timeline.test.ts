@@ -1109,11 +1109,12 @@ describe("buffered detection timeline", () => {
     expect(timeline.getState().bufferEndTime).toBe(10);
     expect(source.loadFrames).toHaveBeenCalledOnce();
 
-    // Four seconds of lead left, above the five-second threshold: nothing yet.
-    await timeline.prepare(4.5);
+    // Five and a half seconds of lead left, above the five-second threshold:
+    // nothing yet.
+    timeline.prefetch(4.5);
     expect(source.loadFrames).toHaveBeenCalledOnce();
 
-    await timeline.prepare(5.5);
+    timeline.prefetch(5.5);
     await vi.waitFor(() => expect(source.loadFrames).toHaveBeenCalledTimes(2));
     expect(source.loadFrames).toHaveBeenNthCalledWith(2, 5, 15.5);
   });
@@ -1129,7 +1130,7 @@ describe("buffered detection timeline", () => {
 
     await timeline.prepare(0);
     source.loadFrames.mockImplementationOnce(() => pending.promise);
-    await timeline.prepare(6);
+    timeline.prefetch(6);
     await vi.waitFor(() =>
       expect(timeline.getState().status).toBe(DetectionBufferStatus.Loading),
     );
@@ -1156,7 +1157,7 @@ describe("buffered detection timeline", () => {
     for (let frame = 0; frame <= 30 * 40; frame += 1) {
       const mediaTime = frame / 30;
 
-      void timeline.prepare(mediaTime);
+      timeline.prefetch(mediaTime);
       await Promise.resolve();
 
       if (!timeline.selectFrame(mediaTime)) {
@@ -1178,13 +1179,13 @@ describe("buffered detection timeline", () => {
 
     await timeline.prepare(0);
     source.loadFrames.mockImplementationOnce(() => pending.promise);
-    await timeline.prepare(5.5);
+    void timeline.prepare(10.5);
     await vi.waitFor(() => expect(source.loadFrames).toHaveBeenCalledTimes(2));
 
     // Every frame of the load's flight asks again from a slightly later
     // playhead. The window already loading still covers all of them.
     for (let frame = 1; frame <= 30; frame += 1) {
-      await timeline.prepare(5.5 + frame / 30);
+      void timeline.prepare(10.5 + frame / 30);
     }
 
     expect(source.loadFrames).toHaveBeenCalledTimes(2);
@@ -1203,10 +1204,10 @@ describe("buffered detection timeline", () => {
 
     await timeline.prepare(0);
     source.loadFrames.mockImplementationOnce(() => pending.promise);
-    await timeline.prepare(5.5);
+    void timeline.prepare(10.5);
     await vi.waitFor(() => expect(source.loadFrames).toHaveBeenCalledTimes(2));
 
-    await timeline.prepare(40);
+    void timeline.prepare(40);
 
     expect(source.loadFrames).toHaveBeenNthCalledWith(3, 39.5, 50);
 

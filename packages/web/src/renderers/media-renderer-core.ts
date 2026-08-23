@@ -440,7 +440,7 @@ export async function createMediaRendererCore(
         mediaTime,
       );
       if (presentedSample) {
-        runtimeState.recordPresentationRefresh(presentedSample);
+        runtimeState.recordPresentationUpdate(presentedSample);
       }
     },
 
@@ -497,7 +497,7 @@ export async function createMediaRendererCore(
       );
 
       if (presentedSample) {
-        runtimeState.recordPresentationRefresh(presentedSample);
+        runtimeState.recordPresentationUpdate(presentedSample);
       }
     },
 
@@ -684,20 +684,12 @@ export async function createMediaRendererCore(
     if (presentedFrameChannel) {
       // The producer holds the playhead: it decides which frame is on screen
       // and announces it. Pulling samples here would present a second opinion.
-      // The producer's playhead is also what keeps the detection buffer hot:
-      // the pull path fed it per presented sample, so the push path feeds it
-      // per playhead move. Fire-and-forget by design: awaiting it anywhere
-      // near a draw would gate presentation on chunk loads, and a landing for
-      // the frame on screen renders through the prepared window's own term.
-      // A failed chunk load is retried by the next playhead move.
-      const feedDetectionBuffer = (currentTime: number) => {
-        void detectionTimeline
-          ?.prepare(currentTime, {
-            duration: runtimeState.duration(),
-            firstTimestamp,
-          })
-          .catch(() => undefined);
-      };
+      // The producer's playhead is also what keeps the detection buffer hot,
+      // through the same coalescing pump the pull path feeds per presented
+      // sample. Fire-and-forget by design: awaiting a load anywhere near a draw
+      // would gate presentation on it, and a landing for the frame on screen
+      // renders through the prepared window's own term. A failed chunk load is
+      // retried by the next playhead move.
       transport = createMediaRendererTransport({
         channel: presentedFrameChannel,
         loop: options.loop !== false,
@@ -705,13 +697,13 @@ export async function createMediaRendererCore(
         onPlaybackState: adoptTransportPlaybackState,
         onPlayheadTime: (currentTime) => {
           runtimeState.recordPlayheadTime(currentTime);
-          feedDetectionBuffer(currentTime);
+          detectionTimeline?.prefetch(currentTime);
         },
       });
       if (initialPlaybackRate !== 1) {
         transport.setPlaybackRate(initialPlaybackRate);
       }
-      feedDetectionBuffer(metadata.firstTimestamp);
+      detectionTimeline?.prefetch(metadata.firstTimestamp);
       runtimeState.setReady();
 
       if (options.autoPlay ?? true) {
@@ -780,7 +772,7 @@ export async function createMediaRendererCore(
       loop: options.loop !== false,
       playbackRate: initialPlaybackRate,
       onCurrentTimeChange(nextCurrentTime) {
-        runtimeState.setCurrentTime(nextCurrentTime);
+        runtimeState.recordPlayheadTime(nextCurrentTime);
       },
       onEnded() {
         runtimeState.setPaused();

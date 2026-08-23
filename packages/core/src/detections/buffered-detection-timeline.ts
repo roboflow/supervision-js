@@ -302,44 +302,8 @@ export function createBufferedDetectionTimeline(
     );
   };
 
-  const getRemainingLead = (mediaTime: number) =>
-    state.bufferEndTime === null
-      ? null
-      : state.bufferEndTime - getComparableMediaTime(mediaTime);
-
-  /**
-   * Fetches the next window while the current one still answers, so the load
-   * lands behind annotations that never went away.
-   */
-  const refillRollingWindow = (mediaTime: number) => {
-    if (destroyed || refillLeadSeconds <= 0) {
-      return;
-    }
-
-    const remainingLead = getRemainingLead(mediaTime);
-
-    if (remainingLead === null || remainingLead > refillLeadSeconds) {
-      return;
-    }
-
-    const { endTime, startTime } = getLoadRange(mediaTime);
-
-    // A window already spanning everything the source can offer has nowhere to
-    // advance to, so its lead only shrinks from here. Refetching it would
-    // repeat for every remaining frame of playback and buy no coverage.
-    if (
-      startTime === state.bufferStartTime &&
-      endTime === state.bufferEndTime
-    ) {
-      return;
-    }
-
-    void loadWindow(mediaTime).catch(() => undefined);
-  };
-
   const refreshBuffer = async (mediaTime: number) => {
     if (isBuffered(mediaTime)) {
-      refillRollingWindow(mediaTime);
       return;
     }
 
@@ -366,6 +330,10 @@ export function createBufferedDetectionTimeline(
     await loadWindow(mediaTime);
   };
 
+  /**
+   * Whether the next window is worth fetching while the current one still
+   * answers, so the load lands behind annotations that never went away.
+   */
   const shouldPrefetch = (mediaTime: number) => {
     if (!isBuffered(mediaTime)) {
       return true;
@@ -379,9 +347,20 @@ export function createBufferedDetectionTimeline(
       return false;
     }
 
-    return (
-      getComparableMediaTime(mediaTime) + bufferAheadSeconds / 2 >=
+    if (
+      getComparableMediaTime(mediaTime) + bufferAheadSeconds / 2 <
       state.bufferEndTime
+    ) {
+      return false;
+    }
+
+    const { endTime, startTime } = getLoadRange(mediaTime);
+
+    // A window already spanning everything the source can offer has nowhere to
+    // advance to, so its lead only shrinks from here. Refetching it would
+    // repeat for every remaining frame of playback and buy no coverage.
+    return (
+      startTime !== state.bufferStartTime || endTime !== state.bufferEndTime
     );
   };
 
@@ -404,7 +383,13 @@ export function createBufferedDetectionTimeline(
     },
 
     prefetch(mediaTime) {
-      if (destroyed || !shouldPrefetch(mediaTime)) {
+      if (destroyed) {
+        return;
+      }
+
+      anchorWindowToPlayhead(mediaTime);
+
+      if (!shouldPrefetch(mediaTime)) {
         return;
       }
 
@@ -509,7 +494,7 @@ export function createBufferedDetectionTimeline(
       }
 
       await (
-        shouldRefreshRollingWindow(mediaTime)
+        isBuffered(mediaTime) || shouldRefreshRollingWindow(mediaTime)
           ? loadWindow(mediaTime)
           : refreshBuffer(mediaTime)
       ).catch(() => undefined);

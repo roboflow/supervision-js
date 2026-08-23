@@ -53,7 +53,6 @@ describe("prepared annotation window", () => {
     });
 
     expect(window.getPreparedFrame(9)).toBeNull();
-    expect(window.preparedFrameTimeline.selectFrame(9)).toBeUndefined();
   });
 
   it("hands the layers a buffered frame whatever the cooks owe on it", () => {
@@ -64,10 +63,8 @@ describe("prepared annotation window", () => {
       getPlayheadMediaTime: () => 0,
     });
 
-    expect(window.preparedFrameTimeline.selectFrame(0)).toBe(
-      detectionTimeline.selectFrame(0),
-    );
-    expect(window.preparedFrameTimeline.selectFrame(0.1)).toBe(
+    expect(window.getPreparedFrame(0)).toBe(detectionTimeline.selectFrame(0));
+    expect(window.getPreparedFrame(0.1)).toBe(
       detectionTimeline.selectFrame(0.1),
     );
   });

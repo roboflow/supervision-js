@@ -57,15 +57,6 @@ describe("media renderer runtime state", () => {
     });
   });
 
-  it("leaves the count alone when the renderer redraws the frame on screen", () => {
-    const state = createRuntimeState();
-
-    state.recordPresentationUpdate(createPresentedFrame(0.04, 1));
-    state.recordPresentationRefresh(createPresentedFrame(0.04, 1));
-
-    expect(state.snapshot().presentedFrames).toBe(1);
-  });
-
   it("counts no new frame when the scene redraws the frame on screen at a moved playhead", () => {
     const state = createRuntimeState();
 
@@ -81,7 +72,7 @@ describe("media renderer runtime state", () => {
   it("counts nothing for a redraw the renderer asks for ahead of the first frame", () => {
     const state = createRuntimeState();
 
-    state.recordPresentationRefresh(createPresentedFrame(0, 0));
+    state.recordPresentationUpdate(createPresentedFrame(0, 0));
 
     expect(state.snapshot().presentedFrames).toBe(0);
   });

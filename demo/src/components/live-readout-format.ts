@@ -127,7 +127,7 @@ export function readLiveStatePresentation(
     !isPlaybackRateSustained(playbackRate, presentedRate)
   ) {
     return {
-      label: `${formatRate(presentedRate)} of ${formatRate(playbackRate)}`,
+      label: `${formatMeasuredRate(presentedRate)} of ${formatPlaybackRate(playbackRate)}`,
       tone: "waiting",
     };
   }
@@ -151,6 +151,8 @@ export function readLiveStatePresentation(
   };
 }
 
-function formatRate(rate: number | null) {
-  return rate === null ? "?" : `${rate.toFixed(1)}x`;
+/** A rate read off the picture, which lands anywhere; a commanded rate is a
+ *  ladder rung and renders through `formatPlaybackRate` exactly as asked. */
+function formatMeasuredRate(rate: number) {
+  return `${rate.toFixed(1)}x`;
 }

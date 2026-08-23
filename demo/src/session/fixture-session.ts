@@ -1,8 +1,5 @@
 import {
   DetectionFrameSelectionMode,
-  MediaInteractionMode,
-  RenderPreparationMode,
-  MediaRendererFit,
   createMediaSession,
   type MediaSession,
   type MediaRendererPresentation,
@@ -19,8 +16,7 @@ import {
 } from "../fixtures/demo-fixtures";
 import { createDemoPresentation } from "../presentation/demo-presentation";
 import { readDemoDisplayBox } from "./decode-resolution";
-import { readDemoMaskFrameOptions } from "./mask-raster-resolution";
-import { getDemoMaxDevicePixelRatio } from "./render-quality";
+import { createDemoRendererOptions } from "./demo-session-renderer";
 import type { DemoSessionCallbacks } from "./demo-session-types";
 
 export async function createFixtureSession(
@@ -69,7 +65,6 @@ export async function createFixtureSession(
       detections: {
         source: detectionSource.detectionSource,
         sync: {
-          frameIndexOriginTime: manifest.video.firstTimestamp ?? 0,
           frameRate: manifest.inference?.frameRate ?? manifest.frameRate,
           // A v2 fixture records each frame's real [mediaTime, endTime), so
           // interval pairing is exact even on VFR sources; index-times-rate
@@ -88,28 +83,7 @@ export async function createFixtureSession(
       ),
       onState: options.onSessionState,
       presentation,
-      renderer: {
-        autoPlay: false,
-        fit: MediaRendererFit.Contain,
-        interaction: {
-          mode: MediaInteractionMode.PausedOnly,
-          onHover: options.onDetectionHover,
-          onSelect: options.onDetectionSelect,
-        },
-        loop: true,
-        maxDevicePixelRatio: getDemoMaxDevicePixelRatio(options.renderQuality),
-        onFrame: options.onFrame,
-        onState: options.onRendererState,
-        renderPreparation: {
-          maskFrame: readDemoMaskFrameOptions(
-            options.container,
-            options.renderQuality,
-          ),
-          mode: RenderPreparationMode.Worker,
-          onDiagnostics: options.onRenderPreparationDiagnostics,
-        },
-        onSource: options.onSourceState,
-      },
+      renderer: createDemoRendererOptions(options),
     });
 
     return session;
