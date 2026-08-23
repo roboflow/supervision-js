@@ -1,7 +1,7 @@
 # demo-eval
 
 Measures the library through the running demo the way a reviewer would: does
-the canvas draw more often than it has frames to show, do the boxes land on the
+the picture hold its rate in every second of a clip, do the boxes land on the
 frame they belong to, how long does a seek take, and does the engine survive
 being scrubbed by an impatient thumb. Everything is
 read over the Chrome DevTools Protocol from a real browser against a real dev
@@ -47,10 +47,10 @@ Flags, all optional:
 
 `--scenario` also takes a comma-separated list, for example
 `--scenario drag,playhead`. Pass flags through npm with `--`, for example
-`npm run eval:demo -- --scenario canvas`.
+`npm run eval:demo -- --scenario cadence`.
 
-Scenario names: `canvas`, `sync`, `latency`, `layers`, `cadence`, `throttle`,
-`blanking`, `drag`, `playhead`, `backscrub`, `focus`, `battery`.
+Scenario names: `sync`, `latency`, `layers`, `cadence`, `throttle`, `blanking`,
+`drag`, `playhead`, `backscrub`, `focus`, `battery`.
 
 The run prints a summary and writes
 `{ startedAt, source, media, fixture, scenarios, metrics, verdicts, failures, baseline }`
@@ -230,87 +230,6 @@ under each name is the last pass's; the medians live in the report's `metrics`
 block.
 
 ## What each scenario proves
-
-**canvas** asks the one question a canvas presenting video has to answer: does
-it draw once per frame it shows, or more? It plays a window, reads the
-renderer's own draw counter and the engine's presented-frame counter across it,
-and divides. One draw per presented frame is the floor and should be the
-ceiling; a second draw inside one frame period submits pixels the next draw
-replaces before the display ever shows them. Six passes of one build read
-exactly 1.0000, so the budget is 1.05 and the registry entry carries no
-tolerance at all. It also holds the transport stopped for six seconds and
-requires zero draws over them.
-
-A ratio needs frames under it before it is a ratio, so a window that presents
-less than half of what the source rate implies is reported as
-`invalid-environment` rather than as a number. Without that floor a stalled pass
-that presented 3 frames and drew 4 read 1.3333 and failed the budget on a single
-settling render, which is the edge of the window and not the renderer.
-
-Both readings come off `getRenderCount()` and `getState().presentedFrames`
-rather than off Chrome's trace, because **the canvas does not paint on the main
-thread and a paint census cannot see it.** In a playing window where the
-renderer drew 199 scenes, Chrome traced 366 `Paint` events and every one of them
-named a demo node: `P.control-bar__timecode`, `SPAN.control-bar__cell-value`,
-`SPAN.timeline-view__segment`, `SPAN.timeline-view__lane-value`,
-`ASIDE.demo-shell__inspector`, `INPUT.timeline-view__input`. Not one named the
-canvas. Pixi 8 presents through a compositor layer, so the 199 draws crossed to
-the GPU without producing a main-thread `Paint` at all.
-
-That is why this scenario used to measure the wrong thing. It counted every
-`Paint` in the window, subtracted the ones it could attribute to the canvas, and
-called the remainder DOM work sitting on top of playback, with a budget of 15
-passes a second. The subtraction always subtracted nothing: the attribution
-matched a `Paint` event's `clip` against the canvas's box, and a `clip` is the
-cull rect of the paint chunk it belongs to rather than the region that was
-invalidated. On a 1500x1150 viewport the traced rects were `3000x2300` for the
-root document and `678x3092` for the inspector column, some of them at negative
-origins. They are not damage in viewport coordinates and no box comparison can
-make them so. So the total and the remainder were the same number on every pass
-the tool ever recorded, and the budget of 15 was being asked to police the
-demo's own control bar, which repaints its timecode and its timeline lanes
-whether or not any library is beneath them.
-
-Deleting that budget costs nothing the library was relying on, and the
-measurement below is why.
-
-### What a presented frame actually costs
-
-One traced playing window, 6.002s spanning 194 presented frames, main thread
-27.1% occupied at 8.390ms of work per presented frame. Times are the trace's own
-`dur` totals, so the nested ones overlap:
-
-| where the main thread was | total    | per presented frame | share of busy |
-| ------------------------- | -------- | ------------------- | ------------- |
-| busy, all causes          | 1627.7ms | 8.390ms             | 100%          |
-| `HandlePostMessage`       | 361.2ms  | **1.862ms**         | 22.2%         |
-| `GPUTask`                 | 266.6ms  | 1.374ms             | 16.4%         |
-| `FireAnimationFrame`      | 76.4ms   | 0.394ms             | 4.7%          |
-| `Layout`                  | 37.9ms   | 0.195ms             | 2.3%          |
-| `Paint`, all 366 of them  | 20.6ms   | 0.106ms             | **1.3%**      |
-
-Two things follow, and both are the point of taking the measurement.
-
-The gate that was deleted policed the bottom row. All 366 `Paint` events in the
-window together cost 1.3% of the main thread's busy time, every one of them was
-a demo control-bar, timeline or inspector node, and the budget they were held
-against had never once passed.
-
-**`HandlePostMessage` at 1.862ms per presented frame is the frames-presentation
-hop, and it is the number the deferred decision about moving to canvas
-presentation has been waiting for.** The demo mounts the presentation mode in
-which each decoded `VideoFrame` crosses from the producer's thread to the main
-thread as a message, and a Pixi scene draws it there; that crossing is what the
-row measures. It is 17.6 times the entire DOM paint load the old gate was
-watching, and it is not reducible by drawing less, because the draw count is
-already at its floor of exactly one per presented frame. Canvas presentation,
-where the surface is transferred to the producer and no pixels cross a thread
-boundary, is the alternative that row prices.
-
-What this harness cannot tell you is what the other side costs. The comparison
-needs the `framesampler--default` story, which lives in the engine repository
-rather than in this checkout, so the `battery` scenario has nothing to run
-against here and the hop is priced on one side only.
 
 **sync** pauses, seeks to five spread positions, and waits for a detection
 frame that is genuinely new rather than the previous window's leftover. It then
@@ -562,8 +481,8 @@ A playing measurement window can look perfectly healthy in a trace while
 measuring nothing at all. When another tab holds the hardware decoder sessions,
 this page keeps reporting `playbackState: "playing"`, the compositor keeps
 committing, and the trace fills with events, but the media clock does not move
-and no frames are presented. Paint counts gathered over that window describe an
-idle page wearing a playing page's costume, and every rate derived from them is
+and no frames are presented. Counts gathered over that window describe an idle
+page wearing a playing page's costume, and every rate derived from them is
 meaningless. So every playing window is checked against the media clock before
 its numbers are used: if playback claims to be playing while the clock is frozen
 and zero frames were presented, the scenario is reported as

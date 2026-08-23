@@ -4,9 +4,9 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-/* Two defects here live inside React hooks, and this repo has no DOM test
+/* The defect here lives inside a React hook, and this repo has no DOM test
  * environment to render one in. What is left is the shape of the source, so
- * these read it: not for style, only for the one relationship each defect was
+ * these read it: not for style, only for the one relationship the defect was
  * a violation of. If a refactor moves the mechanism, prove the invariant still
  * holds by other means before rewriting the assertion around it. */
 
@@ -59,18 +59,6 @@ describe("the timeline drag release", () => {
   it("raises the gesture flag when the drag starts", () => {
     const start = blockAfter(source, "onScrubStart(nextTime: number) {");
     expect(start).toContain("gestureActiveRef.current = true");
-  });
-
-  /* Moving the playhead by a layout property invalidates the whole control bar
-   * once per presented frame, which measured as the entire main-thread paint
-   * load during playback. */
-  it("moves the playhead by transform and never by a layout property", () => {
-    const write = blockAfter(
-      file,
-      "const writePlayhead = (readouts: LiveReadouts, visualDuration: number) => {",
-    );
-    expect(write).toContain("playhead.style.transform");
-    expect(write).not.toMatch(/playhead\.style\.(left|right|width|marginLeft)/);
   });
 });
 

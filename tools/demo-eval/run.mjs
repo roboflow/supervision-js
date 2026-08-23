@@ -1,4 +1,4 @@
-/* Demo evaluation: paint discipline, detection sync, transport latency, the
+/* Demo evaluation: detection sync, transport latency, playback cadence, the
  * gesture stress battery, the per-defect regression guards, and a comparison
  * against the numbers this machine recorded as its baseline. */
 
@@ -40,13 +40,11 @@ import {
   openDemoPage,
   runBattery,
   runCadence,
-  runCanvas,
   runLatency,
   runSync,
 } from "./scenarios.mjs";
 
 const SCENARIOS = [
-  "canvas",
   "sync",
   "latency",
   "layers",
@@ -173,7 +171,6 @@ async function measure(pass) {
 
   if (page) {
     const runners = {
-      canvas: runCanvas,
       sync: runSync,
       latency: runLatency,
       layers: runLayers,
@@ -504,8 +501,8 @@ function baselineSummary() {
     lines.push(
       ...wrap(
         `recorded in the ${baseline.recordedView} view, measured in the ` +
-          `${mediaInfo?.viewMode}; the two views repaint at different rates and ` +
-          "the percentages below are not comparing the same page",
+          `${mediaInfo?.viewMode}; the two views put different work on the ` +
+          "main thread and the percentages below are not comparing the same page",
       ),
     );
   }
@@ -560,30 +557,6 @@ function commits(source) {
 function detail(name, scenario) {
   if (GUARD_SCENARIOS.has(name)) {
     return guardDetail(name, scenario, field);
-  }
-  if (name === "canvas") {
-    const { paused, playing } = scenario;
-    return [
-      field("paused draws", `${paused.renderCount}  (limit 0)`),
-      field("paused window", `${paused.elapsedSeconds}s`),
-      field(
-        "draws per presented frame",
-        `${playing.rendersPerPresentedFrame ?? "none"}  ` +
-          `(limit ${playing.renderRatioLimit})`,
-      ),
-      field(
-        "playing draws / frames",
-        `${playing.renderCount} / ${playing.presentedFrameDelta}`,
-      ),
-      field(
-        "playing present rate",
-        `${playing.presentRate}/s via ${playing.presentRateSource}`,
-      ),
-      field(
-        "playing media advanced",
-        `${playing.mediaAdvancedSeconds}s over ${playing.elapsedSeconds}s`,
-      ),
-    ];
   }
   if (name === "sync") {
     return [

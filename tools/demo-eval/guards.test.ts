@@ -13,8 +13,7 @@ import { judgeCadence } from "./scenarios.mjs";
 
 /* Every guard is checked twice: once against numbers a healthy player
  * produces, and once against the signature of the defect it exists for. A gate
- * that has never been shown to fail is not a gate, which is how this codebase
- * spent weeks reporting a paint budget that could not be exceeded. */
+ * that has never been shown to fail is not a gate. */
 
 const DURATION = 70;
 

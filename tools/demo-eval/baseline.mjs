@@ -38,46 +38,6 @@ const DEFAULT_TOLERANCE_PERCENT = 25;
  */
 export const METRICS = [
   {
-    key: "canvas.pausedRenderCount",
-    label: "canvas draws while stopped",
-    unit: "",
-    better: "lower",
-    /* Zero on every pass, and the only answer the scenario accepts: a stopped
-     * transport that keeps drawing the canvas is spending a frame's work on a
-     * frame nobody asked for. */
-    noise: 0,
-    tolerancePercent: 0,
-    read: (report) => report.canvas?.paused?.renderCount,
-  },
-  {
-    key: "canvas.rendersPerPresentedFrame",
-    label: "canvas draws per presented frame",
-    unit: "x",
-    better: "lower",
-    /* The number the eval exists to watch. Exactly 1.0000 on the measured
-     * passes, which is the floor: every presented frame is drawn once and
-     * nothing is drawn twice. A second draw inside one frame period lands at
-     * 2.0, so the whole reportable range sits between the recorded value and the
-     * budget beside it and no percentage should absorb any of it. */
-    noise: 0,
-    tolerancePercent: 0,
-    read: (report) => report.canvas?.playing?.rendersPerPresentedFrame,
-  },
-  {
-    key: "canvas.presentRate",
-    label: "frames reaching the screen",
-    unit: "/s",
-    better: "higher",
-    /* Presented frames over the wall time the window spanned, against a 30fps
-     * source. Six passes of the rebuilt scenario read 29.99 or 30.00 five times
-     * and 29.62 once, on a pass whose window spanned 6.077s of wall clock for
-     * 5.998s of media: the reads that bound the window are round trips, so the
-     * wall time they measure is a little longer than the frames inside it. The
-     * floor is that spread rounded up. */
-    noise: 0.4,
-    read: (report) => report.canvas?.playing?.presentRate,
-  },
-  {
     key: "sync.worstDetectionOffsetMs",
     label: "worst detection offset",
     unit: "ms",

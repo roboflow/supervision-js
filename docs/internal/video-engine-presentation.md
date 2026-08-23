@@ -185,3 +185,32 @@ A pull scene keeps Pixi's ticker, has no prepared annotation window, and reports
 no render count. Deleting that machinery is a planned, separate decision, so
 none of it is precedent: new video work goes through the engine-backed source
 and the push path described above.
+
+## A cost recorded for a deferred decision
+
+trace, kept here because the decision they price is deferred to its own pull
+request: moving presentation off the main thread, where the surface is
+transferred to the producer and no pixels cross a thread boundary.
+
+One traced playing window, 6.002s spanning 194 presented frames, main thread
+27.1% occupied at 8.390ms of work per presented frame. Times are the trace's own
+`dur` totals, so the nested ones overlap:
+
+| where the main thread was | total    | per presented frame | share of busy |
+| ------------------------- | -------- | ------------------- | ------------- |
+| busy, all causes          | 1627.7ms | 8.390ms             | 100%          |
+| `HandlePostMessage`       | 361.2ms  | **1.862ms**         | 22.2%         |
+| `GPUTask`                 | 266.6ms  | 1.374ms             | 16.4%         |
+| `FireAnimationFrame`      | 76.4ms   | 0.394ms             | 4.7%          |
+| `Layout`                  | 37.9ms   | 0.195ms             | 2.3%          |
+| `Paint`, all 366 of them  | 20.6ms   | 0.106ms             | 1.3%          |
+
+`HandlePostMessage` at 1.862ms per presented frame is the hop being priced. The
+demo mounts the presentation mode in which each decoded `VideoFrame` crosses
+from the producer's thread to the main thread as a message and a Pixi scene
+draws it there; that crossing is what the row measures.
+
+What this harness cannot tell you is what the other side costs. The comparison
+needs the `framesampler--default` story, which lives in the engine repository
+rather than in this checkout, so the `battery` scenario has nothing to run
+against here and the hop is priced on one side only.

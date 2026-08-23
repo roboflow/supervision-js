@@ -898,8 +898,7 @@ async function measurePlayhead(session, info) {
     seekSeconds: PLAYHEAD_SEEK_SECONDS,
     stoppedDriftSeconds: round(Math.max(...times) - Math.min(...times), 4),
     /* Reported and not judged: it separates a clock that held still from a
-     * renderer that was never running. The gate on it is
-     * canvas.pausedRenderCount. */
+     * renderer that was never running. */
     drawsDuringHold: Math.max(...renders) - Math.min(...renders),
     playingDuringHold: raw.samples.filter(
       (sample) => sample.playbackState === "playing",

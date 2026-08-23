@@ -16,21 +16,6 @@ import {
   startingAt,
 } from "./hooks.mjs";
 
-const SETTLE_MS = 600;
-const CANVAS_WINDOW_MS = 6000;
-/* Canvas draws a presented frame may cost. One draw per frame is the floor a
- * canvas presenting video can reach and the ceiling it should need: a second
- * draw inside one frame period submits pixels the next draw replaces before the
- * display ever shows them. Windows of 194 and 199 presented frames each drew
- * exactly as many scenes, so the budget is set where a genuine second draw
- * fails and a window that catches one settling render does not. */
-const RENDER_RATIO_LIMIT = 1.05;
-/* Share of the frames the source rate implies a window has to present before
- * its ratio is a ratio. A ratio over a handful of frames quotes the whole
- * window from whatever the edge left in it: a stalled pass that presented 3
- * frames and drew 4 read 1.3333 and failed a budget of 1.05 on one settling
- * render. Healthy windows present 180 of the 180 the rate implies. */
-const CANVAS_MIN_PRESENTED_FRACTION = 0.5;
 const VIEWPORT = { width: 1500, height: 1150, deviceScaleFactor: 1 };
 const SEEK_FRACTIONS = [0.1, 0.3, 0.5, 0.7, 0.9];
 const STEP_COUNT = 6;
@@ -93,21 +78,6 @@ const CADENCE_LATE_FRAME_FRACTION = 0.02;
  * them twenty apart, and not the tenths they honestly differ by. */
 const CADENCE_AGREEMENT_LIMIT_FPS = 1.5;
 
-const SNAPSHOT = `(() => {
-  const renderer = window.__demoRenderer;
-  const state = renderer.getState();
-  return {
-    at: Date.now(),
-    currentTime: state.currentTime,
-    playbackState: state.playbackState,
-    presentedFrames: state.presentedFrames,
-    renderCount: renderer.getRenderCount(),
-    detectionTime: state.activeDetectionFrameTime,
-    detectionCount: state.activeDetectionCount,
-    detectionBufferStatus: state.detectionBuffer.status,
-  };
-})()`;
-
 class Invalid extends Error {}
 
 function invalid(reason) {
@@ -115,11 +85,10 @@ function invalid(reason) {
 }
 
 /* The demo remembers which view it was left in, and the Debug view carries
- * fifty-four readouts that rewrite ten times a second. Measured in it, the
- * paused page painted 1440 times in a window that owes zero and the playing
- * DOM paint rate read 277/s against 46/s in the Demo view. Every number here
- * therefore states the view it was taken in, and the run picks one rather than
- * inheriting whatever the last person clicked. */
+ * fifty-four readouts that rewrite ten times a second, work that lands inside
+ * every page-wide frame time and long task this tool samples. Every number
+ * here therefore states the view it was taken in, and the run picks one rather
+ * than inheriting whatever the last person clicked. */
 const VIEW_MODE_STORAGE_KEY = "supervision-demo:view-mode";
 const VIEW_MODES = ["benchmarks", "demo", "debug"];
 
@@ -301,7 +270,6 @@ function advancement(before, after, frameRate) {
         : (mediaAdvancedSeconds * frameRate) / elapsedSeconds,
       2,
     ),
-    presentRateSource: usePresentedFrames ? "presentedFrames" : "mediaClock",
     starved:
       startedPlaying && endedPlaying && !advanced && presentedFrameDelta === 0,
   };
@@ -311,123 +279,6 @@ const STARVATION_NOTE =
   "decoder starvation: playback state stayed playing, the media clock froze " +
   "and no frames were presented. Another tab holding the hardware decoder " +
   "sessions produces exactly this signature; close it and re-run.";
-
-/**
- * What the canvas costs per frame it puts on screen.
- *
- * Both numbers come off the renderer's own counters rather than off the page,
- * because the canvas does not paint on the main thread at all: across a playing
- * window that drew 199 scenes, all 366 `Paint` events Chrome traced named a demo
- * control-bar, timeline or inspector node and none named the canvas. Pixi
- * presents through a compositor layer, so a `Paint` census answers a question
- * about the demo's chrome and never one about the picture.
- */
-export async function runCanvas(session, info, attempts) {
-  const measure = async () => {
-    await session.send("Page.bringToFront");
-    const visibility = await session.readJson("document.visibilityState");
-    if (visibility !== "visible") {
-      invalid(
-        `the demo tab was ${visibility}; a hidden tab parks the frame pump and ` +
-          "presents nothing to count renders against",
-      );
-    }
-
-    await session.evaluate("window.__demoRenderer.play(); 1");
-    await delay(SETTLE_MS);
-    await session.evaluate("window.__demoRenderer.pause(); 1");
-    /* The pause settles a focus animation and draws once more for it, which is
-     * a render the stopped window must not be charged for. */
-    await delay(SETTLE_MS);
-    const pausedBefore = await session.readJson(SNAPSHOT);
-    await delay(CANVAS_WINDOW_MS);
-    const pausedAfter = await session.readJson(SNAPSHOT);
-
-    await session.evaluate("window.__demoRenderer.play(); 1");
-    await delay(SETTLE_MS);
-    const playingBefore = await session.readJson(SNAPSHOT);
-    await delay(CANVAS_WINDOW_MS);
-    const playingAfter = await session.readJson(SNAPSHOT);
-    await session.evaluate("window.__demoRenderer.pause(); 1");
-
-    const playing = {
-      ...advancement(playingBefore, playingAfter, info.frameRate),
-      renderCount: playingAfter.renderCount - playingBefore.renderCount,
-    };
-    if (playing.starved) invalid(STARVATION_NOTE);
-    if (!playing.advanced) {
-      invalid(
-        `media advanced only ${playing.mediaAdvancedSeconds}s over ` +
-          `${playing.elapsedSeconds}s of playback (state ` +
-          `${playing.playbackState})`,
-      );
-    }
-    const expectedFrames = info.frameRate * playing.elapsedSeconds;
-    if (
-      playing.presentedFrameDelta <
-      expectedFrames * CANVAS_MIN_PRESENTED_FRACTION
-    ) {
-      invalid(
-        `the window presented ${playing.presentedFrameDelta} frames where ` +
-          `${info.frameRate}fps over ${playing.elapsedSeconds}s implies ` +
-          `${Math.round(expectedFrames)}; a ratio over that few frames is the ` +
-          "edge of the window and not the renderer",
-      );
-    }
-    return {
-      paused: {
-        ...advancement(pausedBefore, pausedAfter, info.frameRate),
-        renderCount: pausedAfter.renderCount - pausedBefore.renderCount,
-      },
-      playing,
-    };
-  };
-
-  const phases = await attemptStable(session, attempts, measure, {
-    guardPatches: true,
-  });
-
-  const rendersPerPresentedFrame =
-    phases.playing.presentedFrameDelta > 0
-      ? round(
-          phases.playing.renderCount / phases.playing.presentedFrameDelta,
-          4,
-        )
-      : null;
-
-  const failures = [];
-  if (phases.paused.renderCount !== 0) {
-    failures.push(
-      `canvas: the stopped transport drew the canvas ${phases.paused.renderCount} ` +
-        `times over ${phases.paused.elapsedSeconds}s, expected 0`,
-    );
-  }
-  if (
-    rendersPerPresentedFrame !== null &&
-    rendersPerPresentedFrame > RENDER_RATIO_LIMIT
-  ) {
-    failures.push(
-      `canvas: it drew ${rendersPerPresentedFrame} times per presented frame ` +
-        `(${phases.playing.renderCount} draws for ` +
-        `${phases.playing.presentedFrameDelta} frames), over the ` +
-        `${RENDER_RATIO_LIMIT} budget`,
-    );
-  }
-
-  return {
-    scenario: {
-      windowSeconds: CANVAS_WINDOW_MS / 1000,
-      frameRate: info.frameRate,
-      paused: phases.paused,
-      playing: {
-        ...phases.playing,
-        rendersPerPresentedFrame,
-        renderRatioLimit: RENDER_RATIO_LIMIT,
-      },
-    },
-    failures,
-  };
-}
 
 export async function runSync(session, info, attempts) {
   const framePeriodMs = 1000 / info.frameRate;

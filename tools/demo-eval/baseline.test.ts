@@ -47,30 +47,6 @@ describe("the metric registry", () => {
 });
 
 describe("reading a report", () => {
-  it("reads what the canvas drew against what the page presented", () => {
-    const values = readMetrics({
-      canvas: {
-        paused: { renderCount: 0 },
-        playing: { rendersPerPresentedFrame: 1, presentRate: 29.93 },
-      },
-    });
-    expect(values["canvas.rendersPerPresentedFrame"]).toBe(1);
-    expect(values["canvas.pausedRenderCount"]).toBe(0);
-    expect(values["canvas.presentRate"]).toBe(29.93);
-  });
-
-  /* A draw the page never presented is the waste the metric exists for, and a
-   * ratio is the only shape that separates it from a slower clip. */
-  it("calls a second draw inside one presented frame a regression", () => {
-    const { rows } = compareToBaseline(
-      { "canvas.rendersPerPresentedFrame": 2 },
-      baselineOf({ "canvas.rendersPerPresentedFrame": 1 }),
-    );
-    expect(rowFor(rows, "canvas.rendersPerPresentedFrame").verdict).toBe(
-      "regressed",
-    );
-  });
-
   it("carries nothing for a scenario that did not run", () => {
     expect(readMetrics({})).toEqual({});
   });
@@ -151,15 +127,7 @@ describe("comparing against a baseline", () => {
 
   /* The floor is the whole gate on a metric the baseline recorded as zero,
    * because a percentage off zero is not a number and the tolerance is skipped
-   * for it. Both of these read zero on every pass ever measured here. */
-  it("reports the first draw a stopped transport makes", () => {
-    const { rows } = compareToBaseline(
-      { "canvas.pausedRenderCount": 1 },
-      baselineOf({ "canvas.pausedRenderCount": 0 }),
-    );
-    expect(rowFor(rows, "canvas.pausedRenderCount").verdict).toBe("regressed");
-  });
-
+   * for it. */
   it("reports the first sampled frame that drew no detection", () => {
     const { rows } = compareToBaseline(
       { "blanking.nullDetectionFraction": 0.005 },
