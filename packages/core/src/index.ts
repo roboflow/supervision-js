@@ -151,6 +151,7 @@ export {
   type MarkerStyleContext,
 } from "#types/marker-style";
 export { resolveAnnotationRendererPresentation } from "#styles/annotation-renderer-presentation";
+export { resolveAnnotationRendererStyleFields } from "#styles/annotation-renderer-registry";
 export {
   createSourceAwarePresentation,
   type PresentationStyleSet,

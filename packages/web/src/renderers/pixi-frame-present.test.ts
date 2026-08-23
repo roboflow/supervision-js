@@ -4,6 +4,7 @@ import type { PixiBoxLayerState } from "./pixi-box-layer";
 import type { PixiRegionLayerState } from "./pixi-region-layer";
 import {
   assertPresentedTimestamp,
+  drawFramePresentLayers,
   presentVideoFrame,
   type FramePresentTargets,
 } from "./pixi-frame-present";
@@ -19,14 +20,8 @@ const regionState: PixiRegionLayerState = { activeDetectionIndexes: [] };
 const NTSC_TICK_RATE = 30000;
 const NTSC_FRAME_27_SECONDS = (27 * 1001) / NTSC_TICK_RATE;
 
-/**
- * Every step a present runs after the presented time has been adopted. Two of
- * them, `fitMediaScene` and `uploadFrame`, take no time argument and read the
- * scene's adopted one, so their pixels come from whatever moment ran last.
- */
-const STEPS_AFTER_TIME_ADOPTION = [
-  "fitMediaScene",
-  "uploadFrame",
+/** The draw order, named once so a present and a redraw are held to the same one. */
+const LAYER_DRAW_ORDER = [
   "drawMask",
   "drawBox",
   "drawPolygon",
@@ -38,6 +33,17 @@ const STEPS_AFTER_TIME_ADOPTION = [
   "drawInteractionPresentation",
   "drawLabel",
   "drawAnnotationOverlay",
+];
+
+/**
+ * Every step a present runs after the presented time has been adopted. Two of
+ * them, `fitMediaScene` and `uploadFrame`, take no time argument and read the
+ * scene's adopted one, so their pixels come from whatever moment ran last.
+ */
+const STEPS_AFTER_TIME_ADOPTION = [
+  "fitMediaScene",
+  "uploadFrame",
+  ...LAYER_DRAW_ORDER,
   "render",
   "completePresentation",
 ];
@@ -69,20 +75,20 @@ describe("atomic present", () => {
       "adoptMediaTime",
       "fitMediaScene",
       "uploadFrame",
-      "drawMask",
-      "drawBox",
-      "drawPolygon",
-      "drawVector",
-      "drawRegion",
-      "drawInteraction",
-      "drawFocus",
-      "advanceFocus",
-      "drawInteractionPresentation",
-      "drawLabel",
-      "drawAnnotationOverlay",
+      ...LAYER_DRAW_ORDER,
       "render",
       "completePresentation",
     ]);
+  });
+
+  it("redraws outside a present in the order a present draws in", () => {
+    const recording = recordPresents();
+
+    drawFramePresentLayers(recording.targets.layers, 6.5);
+
+    expect([recording.order, [...recording.timestamps.values()]]).toStrictEqual(
+      [LAYER_DRAW_ORDER, LAYER_DRAW_ORDER.map(() => [6.5])],
+    );
   });
 
   it("adopts the presented time before any step that draws or uploads", () => {

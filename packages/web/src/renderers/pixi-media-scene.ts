@@ -18,7 +18,9 @@ import type { FocusStyle } from "supervision-js-core";
 import type { LabelStyle } from "supervision-js-core";
 import type { MaskStyle } from "supervision-js-core";
 import {
+  annotationRendererKinds,
   createViewportController,
+  resolveAnnotationRendererStyleFields,
   resolveAnnotationStyleState,
 } from "supervision-js-core";
 import type { AnnotationVisibility } from "supervision-js-core";
@@ -31,8 +33,14 @@ import type {
 } from "./media-renderer-scene";
 import type { MediaRendererPresentation } from "#types/media-renderer";
 import { captureCanvasMediaFrame } from "./media-frame-capture";
-import { presentVideoFrame } from "./pixi-frame-present";
-import type { FramePresentTargets } from "./pixi-frame-present";
+import {
+  drawFramePresentLayers,
+  presentVideoFrame,
+} from "./pixi-frame-present";
+import type {
+  FramePresentLayers,
+  FramePresentTargets,
+} from "./pixi-frame-present";
 import type { PresentedVideoFrame } from "./presented-frame-channel";
 import { createSceneRenderScheduler } from "./scene-render-scheduler";
 import type { SceneRenderSignature } from "./scene-render-scheduler";
@@ -96,6 +104,21 @@ const REGION_COVERAGE_ONLY_MASK_STYLE: MaskStyle = {
  * media time, so anything past a fade's length lands the overlay at once.
  */
 const STATIC_FOCUS_SETTLE_MS = 10_000;
+
+/**
+ * Presentation fields a render answers to. The style half comes from the
+ * renderer registry, so a renderer kind added there joins it on its own.
+ */
+const RENDERED_PRESENTATION_FIELDS: readonly (keyof MediaRendererPresentation)[] =
+  [
+    ...resolveAnnotationRendererStyleFields(annotationRendererKinds),
+    "annotationOverlayStyle",
+    "backgroundColor",
+    "focusStyle",
+    "interactionStyle",
+    "renderers",
+    "visibility",
+  ];
 
 export function observePixiContainerResize(
   container: HTMLElement,
@@ -855,6 +878,14 @@ export async function createPixiMediaScene(
       mediaCompositor?.upload(frame);
       presentedSampleTimestamp = currentMediaTime;
     },
+  };
+
+  // A redraw at a resting playhead has no new media time, so both of these
+  // would run at the moment the last present already ran them at.
+  const annotationRedrawLayers: FramePresentLayers = {
+    ...framePresentTargets.layers,
+    advanceFocus: () => undefined,
+    drawAnnotationOverlay: () => undefined,
   };
 
   return {
@@ -2046,17 +2077,7 @@ export async function createPixiMediaScene(
   function drawAnnotationFrame(mediaTime: number) {
     drawnReadiness = annotationWindow.getReadinessToken(mediaTime);
 
-    drawMaskFrame(mediaTime);
-    const boxState = boxLayer.drawFrame(mediaTime, viewportScale);
-    drawPolygonFrame(mediaTime);
-    vectorLayer.drawFrame(mediaTime, viewportScale);
-    const regionState = regionLayer.drawFrame(mediaTime, viewportScale);
-    interactionLayer?.drawFrame(mediaTime);
-    drawFocusLayer(mediaTime);
-    drawInteractionPresentationLayer(mediaTime);
-    labelLayer?.drawFrame(mediaTime, viewportScale);
-
-    return { boxState, regionState };
+    return drawFramePresentLayers(annotationRedrawLayers, mediaTime);
   }
 
   /**
@@ -2247,20 +2268,12 @@ export async function createPixiMediaScene(
       app.renderer.resolution,
       displayBrightness,
       displayContrast,
-      appliedPresentation?.backgroundColor,
-      appliedPresentation?.annotationOverlayStyle,
-      appliedPresentation?.boxStyle,
-      appliedPresentation?.focusStyle,
-      appliedPresentation?.interactionStyle,
-      appliedPresentation?.keypointStyle,
-      appliedPresentation?.labelStyle,
-      appliedPresentation?.maskStyle,
-      appliedPresentation?.polygonStyle,
-      appliedPresentation?.polylineStyle,
-      appliedPresentation?.renderers,
-      appliedPresentation?.visibility,
+      ...RENDERED_PRESENTATION_FIELDS.map(
+        (field) => appliedPresentation?.[field],
+      ),
+      // Styles above compare by identity; mask opacity is applied after
+      // preparation, so a host can move it inside a style object it keeps.
       currentMaskStyle?.opacity,
-      visibilityVersion,
       interactionState?.hoveredPick?.detection,
       interactionState?.hoveredPick?.detectionIndex,
       interactionState?.selectedPick?.detection,

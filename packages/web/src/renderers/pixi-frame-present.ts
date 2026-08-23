@@ -32,6 +32,11 @@ export interface FramePresentLayers {
   readonly drawAnnotationOverlay: (mediaTime: number) => void;
 }
 
+export interface FramePresentLayerStates {
+  readonly boxState: PixiBoxLayerState;
+  readonly regionState: PixiRegionLayerState;
+}
+
 export interface FramePresentTargets {
   /** Adopts the presented time as the scene's media time, before anything draws. */
   readonly adoptMediaTime: (mediaTime: number) => void;
@@ -69,23 +74,45 @@ export function presentVideoFrame(
     targets.fitMediaScene();
     targets.uploadFrame(presented.frame);
 
-    maybeAt(layers.drawMask, mediaTime, presented);
-    const boxState = at(layers.drawBox, mediaTime, presented);
-    maybeAt(layers.drawPolygon, mediaTime, presented);
-    at(layers.drawVector, mediaTime, presented);
-    const regionState = at(layers.drawRegion, mediaTime, presented);
-    maybeAt(layers.drawInteraction, mediaTime, presented);
-    at(layers.drawFocus, mediaTime, presented);
-    at(layers.advanceFocus, mediaTime, presented);
-    at(layers.drawInteractionPresentation, mediaTime, presented);
-    maybeAt(layers.drawLabel, mediaTime, presented);
-    at(layers.drawAnnotationOverlay, mediaTime, presented);
+    const { boxState, regionState } = drawFramePresentLayers(
+      layers,
+      mediaTime,
+      presented,
+    );
 
     targets.render();
     targets.completePresentation(mediaTime, boxState, regionState);
   } finally {
     presented.frame.close();
   }
+}
+
+/**
+ * The one declaration of the draw order: a present walks it, and so does a
+ * redraw at a resting playhead, so a layer cannot be in one sequence and be
+ * missing or out of place in the other.
+ *
+ * A walk with no presented frame is not a present, and has no frame timestamp
+ * to check its steps against.
+ */
+export function drawFramePresentLayers(
+  layers: FramePresentLayers,
+  mediaTime: number,
+  presented?: PresentedFrameStamp,
+): FramePresentLayerStates {
+  maybeAt(layers.drawMask, mediaTime, presented);
+  const boxState = at(layers.drawBox, mediaTime, presented);
+  maybeAt(layers.drawPolygon, mediaTime, presented);
+  at(layers.drawVector, mediaTime, presented);
+  const regionState = at(layers.drawRegion, mediaTime, presented);
+  maybeAt(layers.drawInteraction, mediaTime, presented);
+  at(layers.drawFocus, mediaTime, presented);
+  at(layers.advanceFocus, mediaTime, presented);
+  at(layers.drawInteractionPresentation, mediaTime, presented);
+  maybeAt(layers.drawLabel, mediaTime, presented);
+  at(layers.drawAnnotationOverlay, mediaTime, presented);
+
+  return { boxState, regionState };
 }
 
 /**
@@ -112,21 +139,21 @@ export function assertPresentedTimestamp(
 function at<T>(
   step: (mediaTime: number) => T,
   mediaTime: number,
-  presented: PresentedFrameStamp,
+  presented: PresentedFrameStamp | undefined,
 ): T {
-  assertPresentedTimestamp(mediaTime, presented);
+  if (presented) assertPresentedTimestamp(mediaTime, presented);
   return step(mediaTime);
 }
 
 function maybeAt(
   step: ((mediaTime: number) => void) | undefined,
   mediaTime: number,
-  presented: PresentedFrameStamp,
+  presented: PresentedFrameStamp | undefined,
 ): void {
   if (!step) {
     return;
   }
 
-  assertPresentedTimestamp(mediaTime, presented);
+  if (presented) assertPresentedTimestamp(mediaTime, presented);
   step(mediaTime);
 }

@@ -514,6 +514,30 @@ describe("push-presented Pixi scene", () => {
     expect(scene.getRenderCount?.()).toBe(settled);
   });
 
+  it("renders a style swap on a memoized renderer list", async () => {
+    const channel = createChannel();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene(
+      createSceneOptions(channel.channel),
+    );
+    scene.initializeMedia({ height: 240, width: 320 });
+    channel.present(presentedFrame(2000));
+
+    const renderers = [annotationRenderers.marker()];
+    scene.setPresentation(
+      { markerStyle: { resolve: () => undefined }, renderers },
+      2,
+    );
+    const settled = scene.getRenderCount?.();
+
+    scene.setPresentation(
+      { markerStyle: { resolve: () => undefined }, renderers },
+      2,
+    );
+
+    expect(scene.getRenderCount?.()).toBe((settled ?? 0) + 1);
+  });
+
   it("renders a display adjustment once, and a repeat of it never", async () => {
     const channel = createChannel();
     const { createPixiMediaScene } = await import("./pixi-media-scene");

@@ -72,6 +72,9 @@ presented timestamp alone" and "reports a step that drew from a time of its own"
 hold the single clock, and "closes the frame it was handed, including when a
 layer throws" holds ownership.
 
+`drawFramePresentLayers` is where that sequence is declared. A redraw at a
+resting playhead walks the same declaration, so the two cannot drift.
+
 Adding a layer to the present means adding a step that takes the media time,
 reads nothing else, and returns synchronously. Anything that needs to await, or
 to know the wall clock, does not belong inside the present.
