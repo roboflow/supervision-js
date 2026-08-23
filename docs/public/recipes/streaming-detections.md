@@ -39,9 +39,13 @@ for await (const frames of streamInferenceFrames(file)) {
 }
 ```
 
-Playback never waits for appended detections. A frame the source does not cover
-yet presents without annotations and draws them when the append covering it
-lands, so inference falling behind slows annotations rather than the video.
+Playback does not wait for appended detections. A frame the source does not
+cover yet presents without annotations and draws them when the append covering
+it lands, so inference falling behind slows annotations rather than the video.
+
+Pass `detections.playbackGate: { enabled: true, requiredAheadSeconds }` when you
+would rather the video hold for its predictions. It is off by default, so a
+session that never mentions it keeps the picture moving.
 
 ## Appending Results
 

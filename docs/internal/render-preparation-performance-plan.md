@@ -154,20 +154,25 @@ Manual observation:
 
 ### 4. Prepared-Artifact Playback Gate
 
-Status: withdrawn. A watermarked lookahead gate was specced here; the picture
-does not wait for annotations.
+Status: shipped as an opt-in, off by default.
 
-`RenderPreparationOptions.playbackGate` is accepted and ignored. Nothing in
-`packages/web/src` asks a scene to wait for render preparation, and
-`media-renderer-core.test.ts` pins that by name with "plays through render
-preparation that never finishes". A frame whose artifacts are not ready
-presents without those annotation layers; the prepared annotation window in
+`RenderPreparationOptions.playbackGate` is the watermarked lookahead gate
+specced here, and a session that never mentions it gets the gate off. Off, a
+frame whose artifacts are not ready presents without those annotation layers,
+which `media-renderer-core.test.ts` pins by name with "plays through render
+preparation that never finishes". The prepared annotation window in
 [`video-engine-presentation.md`](video-engine-presentation.md) is what keeps a
 stale frame's annotations off that picture.
 
-The work still reaches the host, as an activity. A `RenderPreparing` activity
-sets `blockingPresentation` while the frame on screen waits for an artifact, and
-never sets `blockingPlayback`.
+On, the renderer awaits the scene before presenting a sample and holds until the
+prepared window leads the playhead by `requiredAheadSeconds`, which
+"buffers playback until render preparation reaches the requested lookahead"
+pins by name.
+
+The work reaches the host as an activity either way. A `RenderPreparing`
+activity sets `blockingPresentation` while the frame on screen waits for an
+artifact, and never sets `blockingPlayback`: a gated hold surfaces separately,
+as the `PlaybackBuffering` activity the buffering playback state raises.
 
 ### 5. Future Mask Representation Research
 

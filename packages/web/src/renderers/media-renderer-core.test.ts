@@ -126,6 +126,187 @@ describe("media renderer core", () => {
     renderer.destroy();
   });
 
+  it("buffers playback until render preparation reaches the requested lookahead", async () => {
+    resetMocks();
+
+    const renderPreparation = createDeferred<void>();
+    const samples = [
+      createMockSample(0, 0),
+      createMockSample(0.04, 0),
+      createMockSample(0.08, 0),
+    ] as unknown as DecodedVideoSample[];
+    const scene = createScene({
+      waitForRenderPreparation: vi.fn(() => renderPreparation.promise),
+    });
+    const renderer = await createMediaRendererCore(
+      {
+        autoPlay: false,
+        container: {} as HTMLElement,
+        loop: false,
+        renderPreparation: {
+          playbackGate: {
+            enabled: true,
+            requiredAheadSeconds: 0.04,
+          },
+        },
+        source: createSource(samples),
+      } satisfies MediaRendererOptions,
+      {
+        createScene: vi.fn(async () => scene),
+        openMediaSource: vi.fn(),
+      },
+    );
+
+    expect(scene.presentSample).toHaveBeenCalledOnce();
+
+    await renderer.play();
+    flushAnimationFrame(40);
+
+    await vi.waitFor(() => {
+      expect(scene.waitForRenderPreparation).toHaveBeenCalledWith(0.04, {
+        enabled: true,
+        requiredAheadSeconds: 0.04,
+      });
+    });
+    expect(scene.presentSample).toHaveBeenCalledOnce();
+    expect(renderer.getState().playbackState).toBe(
+      MediaRendererPlaybackState.Buffering,
+    );
+
+    renderPreparation.resolve();
+
+    await vi.waitFor(() => {
+      expect(scene.presentSample).toHaveBeenCalledTimes(2);
+    });
+    expect(renderer.getState()).toMatchObject({
+      currentTime: 0.04,
+      playbackState: MediaRendererPlaybackState.Playing,
+    });
+
+    renderer.destroy();
+  });
+
+  it("resumes playback after seeking while buffering", async () => {
+    resetMocks();
+
+    const renderPreparation = createDeferred<void>();
+    const samples = [
+      createMockSample(0, 0),
+      createMockSample(0.04, 0),
+      createMockSample(0.08, 0),
+    ] as unknown as DecodedVideoSample[];
+    const scene = createScene({
+      waitForRenderPreparation: vi.fn(() => renderPreparation.promise),
+    });
+    const renderer = await createMediaRendererCore(
+      {
+        autoPlay: false,
+        container: {} as HTMLElement,
+        loop: false,
+        renderPreparation: {
+          playbackGate: { enabled: true, requiredAheadSeconds: 0.04 },
+        },
+        source: createSource(samples, { duration: 1 }),
+      } satisfies MediaRendererOptions,
+      {
+        createScene: vi.fn(async () => scene),
+        openMediaSource: vi.fn(),
+      },
+    );
+
+    await renderer.play();
+    flushAnimationFrame(40);
+    await vi.waitFor(() => {
+      expect(renderer.getState().playbackState).toBe(
+        MediaRendererPlaybackState.Buffering,
+      );
+    });
+
+    // Buffering means playback was requested and is waiting for data, and
+    // seeking stops the decoder, so the seek has to hand playback back.
+    await renderer.seek(0.04);
+
+    expect(renderer.getState()).toMatchObject({
+      currentTime: 0.04,
+      playbackState: MediaRendererPlaybackState.Playing,
+    });
+
+    // A later play() must not be a no-op either: it is what a host calls after
+    // its own pause/seek shim, and playback has to actually run.
+    const presentedBeforeResume = countPresentedSamples(scene);
+
+    await renderer.play();
+    renderPreparation.resolve();
+    await presentNextSample(scene, 100);
+
+    expect(countPresentedSamples(scene)).toBeGreaterThan(presentedBeforeResume);
+    expect(renderer.getState()).toMatchObject({
+      currentTime: 0.08,
+      playbackState: MediaRendererPlaybackState.Playing,
+    });
+
+    renderer.destroy();
+  });
+
+  it("settles a paused seek taken while buffering", async () => {
+    resetMocks();
+
+    const renderPreparation = createDeferred<void>();
+    const samples = [
+      createMockSample(0, 0),
+      createMockSample(0.04, 0),
+      createMockSample(0.08, 0),
+    ] as unknown as DecodedVideoSample[];
+    const scene = createScene({
+      waitForRenderPreparation: vi.fn(() => renderPreparation.promise),
+    });
+    const renderer = await createMediaRendererCore(
+      {
+        autoPlay: false,
+        container: {} as HTMLElement,
+        loop: false,
+        renderPreparation: {
+          playbackGate: { enabled: true, requiredAheadSeconds: 0.04 },
+        },
+        source: createSource(samples, { duration: 1 }),
+      } satisfies MediaRendererOptions,
+      {
+        createScene: vi.fn(async () => scene),
+        openMediaSource: vi.fn(),
+      },
+    );
+
+    await renderer.play();
+    flushAnimationFrame(40);
+    await vi.waitFor(() => {
+      expect(renderer.getState().playbackState).toBe(
+        MediaRendererPlaybackState.Buffering,
+      );
+    });
+
+    renderer.pause();
+    await renderer.seek(0.04);
+
+    expect(renderer.getState()).toMatchObject({
+      currentTime: 0.04,
+      playbackState: MediaRendererPlaybackState.Paused,
+    });
+
+    const presentedBeforeResume = countPresentedSamples(scene);
+
+    renderPreparation.resolve();
+    await renderer.play();
+    await presentNextSample(scene, 100);
+
+    expect(countPresentedSamples(scene)).toBeGreaterThan(presentedBeforeResume);
+    expect(renderer.getState()).toMatchObject({
+      currentTime: 0.08,
+      playbackState: MediaRendererPlaybackState.Playing,
+    });
+
+    renderer.destroy();
+  });
+
   it("plays through render preparation that never finishes", async () => {
     resetMocks();
 
@@ -145,12 +326,6 @@ describe("media renderer core", () => {
         container: {} as HTMLElement,
         loop: false,
         onState,
-        renderPreparation: {
-          playbackGate: {
-            enabled: true,
-            requiredAheadSeconds: 0.04,
-          },
-        },
         source: createSource(samples),
       } satisfies MediaRendererOptions,
       {
@@ -894,6 +1069,29 @@ describe("media renderer core", () => {
     renderer.destroy();
   });
 });
+
+/**
+ * Drives playback frames until the scene presents another sample.
+ *
+ * The controller queues decoded samples asynchronously, so one animation frame
+ * is not guaranteed to have the due sample in hand yet.
+ */
+async function presentNextSample(scene: MediaRendererScene, now: number) {
+  const presentedBefore = countPresentedSamples(scene);
+
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    if (countPresentedSamples(scene) > presentedBefore) {
+      return;
+    }
+
+    flushAnimationFrame(now);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+}
+
+function countPresentedSamples(scene: MediaRendererScene) {
+  return vi.mocked(scene.presentSample).mock.calls.length;
+}
 
 function createScene(
   overrides: Partial<MediaRendererScene> = {},

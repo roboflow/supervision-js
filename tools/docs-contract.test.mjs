@@ -138,29 +138,34 @@ const playbackGateSurfaces = [
   "docs/public/recipes/multiple-detection-sources.md",
 ];
 
-test("every playback-gate surface documents playback that never waits", async () => {
-  // The playback-gate options survive as accepted-and-ignored, so three
-  // separate surfaces each have to say so. Prose asserting that the gate works
-  // compiles cleanly, and nothing else compares the three against each other.
-  const statesNoGate =
-    /(?:playback|presentation) (?:is )?never (?:gated|awaits|waits)/i;
-  const claimsGate = [
-    /pause playback while/i,
-    /coverage-gated/i,
-    /required detections ahead/i,
+test("every playback-gate surface documents a gate that ships off", async () => {
+  // The playback gate is real and off until a host asks for it, so three
+  // separate surfaces each have to say both halves. Prose asserting that the
+  // gate is a no-op, or that it is simply on, compiles cleanly, and nothing
+  // else compares the three against each other.
+  const namesTheGate = /playbackGate|playback gate/;
+  const statesDefaultOff =
+    /off by default|off unless|the gate off, which is the default/i;
+  const claimsNoGate = [
+    /accepted and ignored/i,
+    /(?:playback|presentation) (?:is )?never (?:gated|awaits|waits)/i,
   ];
   const failures = [];
 
   for (const surface of playbackGateSurfaces) {
     const source = await readFile(path.join(rootDir, surface), "utf8");
 
-    if (!statesNoGate.test(source)) {
-      failures.push(`${surface} never states that playback does not wait`);
+    if (!namesTheGate.test(source)) {
+      failures.push(`${surface} never names the playback gate`);
     }
 
-    for (const claim of claimsGate) {
+    if (!statesDefaultOff.test(source)) {
+      failures.push(`${surface} never states that the gate is off by default`);
+    }
+
+    for (const claim of claimsNoGate) {
       if (claim.test(source)) {
-        failures.push(`${surface} documents a gate this build does not have`);
+        failures.push(`${surface} documents the gate as a no-op it is not`);
       }
     }
   }

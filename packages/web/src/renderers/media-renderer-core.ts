@@ -36,6 +36,7 @@ import {
   RenderPreparationMode,
   RenderPreparationWorkerStatus,
   type RenderPreparationDiagnostics,
+  type RenderPreparationPlaybackGateOptions,
 } from "#types/render-preparation";
 import { createOffsetDetectionFrameSource } from "#detections/offset-detection-frame-source";
 import { createMediaRendererRuntimeState } from "./media-renderer-state";
@@ -730,6 +731,47 @@ export async function createMediaRendererCore(
 
     await prepareAndPresentSample(firstSample);
     runtimeState.setReady();
+    const detectionPlaybackGate = options.detectionBuffer?.playbackGate;
+    const renderPreparationPlaybackGate =
+      options.renderPreparation?.playbackGate;
+    const shouldGateDetectionPlayback = detectionPlaybackGate?.enabled === true;
+    const shouldGateRenderPreparationPlayback =
+      renderPreparationPlaybackGate?.enabled === true;
+    const shouldGatePlayback =
+      shouldGateDetectionPlayback || shouldGateRenderPreparationPlayback;
+    const waitForSample = shouldGatePlayback
+      ? (sample: DecodedVideoSample) =>
+          waitForPlaybackReadiness(sample, {
+            detectionEnabled: shouldGateDetectionPlayback,
+            renderPreparationEnabled: shouldGateRenderPreparationPlayback,
+            renderPreparationOptions: renderPreparationPlaybackGate,
+          })
+      : undefined;
+
+    async function waitForPlaybackReadiness(
+      sample: DecodedVideoSample,
+      waitOptions: {
+        readonly detectionEnabled: boolean;
+        readonly renderPreparationEnabled: boolean;
+        readonly renderPreparationOptions:
+          RenderPreparationPlaybackGateOptions | undefined;
+      },
+    ) {
+      if (waitOptions.detectionEnabled) {
+        await detectionTimeline?.prepare(sample.timestamp, {
+          duration: runtimeState.duration(),
+          firstTimestamp,
+          gatePlayback: true,
+        });
+      }
+
+      if (waitOptions.renderPreparationEnabled) {
+        await mediaScene?.waitForRenderPreparation?.(
+          sample.timestamp,
+          waitOptions.renderPreparationOptions ?? {},
+        );
+      }
+    }
 
     playbackController = createMediaPlaybackController({
       duration: runtimeState.duration(),
@@ -756,6 +798,7 @@ export async function createMediaRendererCore(
       },
       presentSample,
       sampleSink: mediaSource.sampleSink,
+      waitForSample,
     });
 
     if (options.autoPlay ?? true) {

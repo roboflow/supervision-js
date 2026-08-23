@@ -41,7 +41,7 @@ describe("media session defaults", () => {
         scheduleBatchSize: 16,
       },
       playbackGate: {
-        enabled: true,
+        enabled: false,
         minimumAheadSeconds: 0.25,
         requiredAheadSeconds: 1,
       },
@@ -92,7 +92,7 @@ describe("media session defaults", () => {
     });
   });
 
-  it("defaults appendable stream sessions to gated prediction playback and rolling retention", () => {
+  it("defaults appendable stream sessions to ungated prediction playback and rolling retention", () => {
     const appendable = {
       datasetId: "stream",
     };
@@ -109,7 +109,7 @@ describe("media session defaults", () => {
     });
 
     expect(defaults.detectionBuffer.playbackGate).toEqual({
-      enabled: true,
+      enabled: false,
       requiredAheadSeconds: 2,
     });
     expect(retention).toEqual({
@@ -135,11 +135,36 @@ describe("media session defaults", () => {
     });
 
     expect(defaults.detectionBuffer.playbackGate).toEqual({
-      enabled: true,
+      enabled: false,
       requiredAheadSeconds: 2,
     });
     expect(retention).toEqual({
       mode: DetectionFrameRetentionMode.PersistAll,
+    });
+  });
+
+  it("carries an opted-in playback gate through to both resolved configs", () => {
+    const defaults = resolveMediaSessionDefaults({
+      detections: {
+        appendable: { datasetId: "stream" },
+        playbackGate: { enabled: true },
+      },
+      mode: MediaSessionMode.Stream,
+      renderer: {
+        renderPreparation: {
+          playbackGate: { enabled: true },
+        },
+      },
+    });
+
+    expect(defaults.detectionBuffer.playbackGate).toEqual({
+      enabled: true,
+      requiredAheadSeconds: 2,
+    });
+    expect(defaults.renderPreparation.playbackGate).toEqual({
+      enabled: true,
+      minimumAheadSeconds: 0.25,
+      requiredAheadSeconds: 1,
     });
   });
 

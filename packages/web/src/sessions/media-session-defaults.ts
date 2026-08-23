@@ -26,13 +26,17 @@ const STREAM_DETECTION_BUFFER_DEFAULTS = {
   refreshIntervalSeconds: 0.25,
 } satisfies DetectionBufferOptions;
 
+/**
+ * The gates ship off, so these carry only the lookahead a host inherits once it
+ * turns one on for itself.
+ */
 const APPENDABLE_PREDICTION_GATE_DEFAULTS = {
-  enabled: true,
+  enabled: false,
   requiredAheadSeconds: 2,
 };
 
 const RENDER_PREPARATION_PLAYBACK_GATE_DEFAULTS = {
-  enabled: true,
+  enabled: false,
   minimumAheadSeconds: 0.25,
   requiredAheadSeconds: 1,
 };

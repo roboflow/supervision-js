@@ -441,7 +441,90 @@ describe("buffered detection timeline", () => {
     expect(timeline.selectFrame(0.5)?.mediaTime).toBe(0);
   });
 
-  it("loads without waiting for source coverage", async () => {
+  it("waits for source coverage before loading when playback gating is enabled", async () => {
+    const coverage = createDeferred<void>();
+    const source = {
+      loadFrames: vi.fn(async () => [frames[0]]),
+      waitForRange: vi.fn(() => coverage.promise),
+    };
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 1,
+      bufferBehindSeconds: 0,
+      playbackGate: {
+        enabled: true,
+        requiredAheadSeconds: 2,
+      },
+      source,
+    });
+    const prepare = timeline.prepare(1, { gatePlayback: true });
+
+    await Promise.resolve();
+
+    expect(source.waitForRange).toHaveBeenCalledWith({
+      endTime: 3,
+      startTime: 1,
+    });
+    expect(source.loadFrames).not.toHaveBeenCalled();
+    expect(timeline.getState()).toMatchObject({
+      requestedEndTime: 3,
+      requestedStartTime: 1,
+      status: DetectionBufferStatus.Loading,
+    });
+
+    coverage.resolve();
+    await prepare;
+
+    expect(source.loadFrames).toHaveBeenCalledWith(1, 2);
+    expect(timeline.getState().status).toBe(DetectionBufferStatus.Ready);
+  });
+
+  it("loads without waiting for source coverage when no gate is configured", async () => {
+    const coverage = createDeferred<void>();
+    const source = {
+      loadFrames: vi.fn(async () => [frames[0]]),
+      waitForRange: vi.fn(() => coverage.promise),
+    };
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 1,
+      bufferBehindSeconds: 0,
+      source,
+    });
+
+    await timeline.prepare(1, { gatePlayback: true });
+
+    expect(source.waitForRange).not.toHaveBeenCalled();
+    expect(source.loadFrames).toHaveBeenCalledWith(1, 2);
+    expect(timeline.getState().status).toBe(DetectionBufferStatus.Ready);
+
+    coverage.resolve();
+  });
+
+  it("loads without waiting for source coverage when the gate is disabled", async () => {
+    const coverage = createDeferred<void>();
+    const source = {
+      loadFrames: vi.fn(async () => [frames[0]]),
+      waitForRange: vi.fn(() => coverage.promise),
+    };
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 1,
+      bufferBehindSeconds: 0,
+      playbackGate: {
+        enabled: false,
+        requiredAheadSeconds: 2,
+      },
+      source,
+    });
+
+    await timeline.prepare(1, { gatePlayback: true });
+
+    expect(source.waitForRange).not.toHaveBeenCalled();
+    expect(source.loadFrames).toHaveBeenCalledWith(1, 2);
+    expect(timeline.getState().status).toBe(DetectionBufferStatus.Ready);
+
+    coverage.resolve();
+  });
+
+  it("loads without waiting for source coverage when the caller does not gate", async () => {
     const coverage = createDeferred<void>();
     const source = {
       loadFrames: vi.fn(async () => [frames[0]]),
@@ -457,7 +540,7 @@ describe("buffered detection timeline", () => {
       source,
     });
 
-    await timeline.prepare(1, { gatePlayback: true });
+    await timeline.prepare(1);
 
     expect(source.waitForRange).not.toHaveBeenCalled();
     expect(source.loadFrames).toHaveBeenCalledWith(1, 2);
@@ -621,7 +704,7 @@ describe("buffered detection timeline", () => {
     expect(state.requestedEndTime).toBe(61.5);
   });
 
-  it("loads a loop-crossing window without waiting for source coverage", async () => {
+  it("waits for loop-crossing source coverage when playback gating is enabled", async () => {
     const source = {
       loadFrames: vi.fn(async () => []),
       waitForRange: vi.fn(async () => undefined),
@@ -633,6 +716,35 @@ describe("buffered detection timeline", () => {
         enabled: true,
         requiredAheadSeconds: 2,
       },
+      source,
+    });
+
+    timeline.setTimelineContext?.({ duration: 5, loop: true });
+    await timeline.prepare(4.75, {
+      duration: 5,
+      firstTimestamp: 0,
+      gatePlayback: true,
+    });
+
+    expect(source.waitForRange).toHaveBeenCalledTimes(2);
+    expect(source.waitForRange).toHaveBeenNthCalledWith(1, {
+      endTime: 5,
+      startTime: 4.75,
+    });
+    expect(source.waitForRange).toHaveBeenNthCalledWith(2, {
+      endTime: 1.75,
+      startTime: 0,
+    });
+  });
+
+  it("loads a loop-crossing window without waiting when no gate is configured", async () => {
+    const source = {
+      loadFrames: vi.fn(async () => []),
+      waitForRange: vi.fn(async () => undefined),
+    };
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 2,
+      bufferBehindSeconds: 0,
       source,
     });
 

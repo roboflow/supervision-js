@@ -7,12 +7,45 @@ import type {
 import {
   createContainer,
   createMockSample,
+  flushAnimationFrame,
   mediaMock,
   pixiMock,
   resetMocks,
 } from "../../../test/media-renderer-harness";
 
 describe("media session consumer workflows", () => {
+  it("plays an appendable session whose predictions have not arrived", async () => {
+    resetMocks();
+    mediaMock.samples = [createMockSample(0, 0), createMockSample(0.04, 0)];
+    const { createMediaSession, MediaRendererPlaybackState } =
+      await import("./index");
+    const session = await createMediaSession({
+      container: createContainer(),
+      detections: {
+        appendable: { datasetId: "no-predictions-yet" },
+      },
+      media: "sample.mp4",
+      renderer: {
+        autoPlay: false,
+        loop: false,
+      },
+    });
+
+    await session.play();
+    flushAnimationFrame(40);
+    await vi.waitFor(() => {
+      expect(mediaMock.samples[1].draw).toHaveBeenCalledOnce();
+    });
+
+    expect(session.getState()).toMatchObject({ playbackBlocked: false });
+    expect(session.getState().renderer).toMatchObject({
+      currentTime: 0.04,
+      playbackState: MediaRendererPlaybackState.Playing,
+    });
+
+    session.destroy();
+  });
+
   it("creates a session, appends detections, seeks, updates styles, and destroys cleanly", async () => {
     resetMocks();
     mediaMock.samples = [createMockSample(0, 0), createMockSample(0.5, 0)];

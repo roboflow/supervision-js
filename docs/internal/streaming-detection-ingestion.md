@@ -191,17 +191,21 @@ finishes.
 
 ## Prediction Coverage
 
-Missing predictions are not treated as missing media. Playback never awaits
-prediction coverage: `detections.playbackGate` is accepted and ignored, and a
-frame the ingested ranges do not cover presents without annotations rather than
-holding the picture. `DetectionFrameSource.waitForRange()` says so in its own
-TSDoc: "Playback never awaits it. A caller that wants to wait awaits it itself."
+Missing predictions are not treated as missing media by default. A frame the
+ingested ranges do not cover presents without annotations rather than holding
+the picture, and `detections.playbackGate` is off unless a host enables it.
 
-The writable source still tracks appended time ranges and exposes that waiter,
-so an app that genuinely wants to hold playback until a range lands awaits
-`waitForRange()` on `MediaSession.detectionSource` and pauses itself. That
-decision belongs to the app. A demo that only wants to show progress should
-read `getAvailableRanges()` and render it rather than running a pause/play loop.
+Enabling it makes prediction coverage part of media readiness: the renderer
+awaits `DetectionFrameSource.waitForRange()` for the configured lookahead before
+each frame is presented, and reports buffering while it waits. That is a
+deliberate trade of promptness for completeness, so it belongs to the app rather
+than to the ingestion path.
+
+The writable source tracks appended time ranges and exposes that waiter either
+way, so an app can also hold playback itself by awaiting `waitForRange()` on
+`MediaSession.detectionSource` and pausing. A demo that only wants to show
+progress should read `getAvailableRanges()` and render it rather than running a
+pause/play loop.
 
 ## Image Handling
 

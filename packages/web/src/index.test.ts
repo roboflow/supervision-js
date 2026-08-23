@@ -525,6 +525,73 @@ describe("package entrypoint", () => {
     renderer.destroy();
   });
 
+  it("buffers playback until prediction coverage reaches the required lookahead", async () => {
+    resetMocks();
+    mediaMock.samples = [
+      createMockSample(0, 0),
+      createMockSample(0.04, 0),
+      createMockSample(0.08, 0),
+    ];
+    const predictionCoverage = createDeferred<void>();
+    const detectionSource = {
+      loadFrames: vi.fn(async () => []),
+      waitForRange: vi.fn(
+        (range: { readonly endTime: number; readonly startTime: number }) =>
+          range.endTime > 0.04 ? predictionCoverage.promise : Promise.resolve(),
+      ),
+    };
+    const onState = vi.fn();
+
+    const renderer = await createRenderer(false, false, {
+      detectionBuffer: {
+        playbackGate: {
+          enabled: true,
+          requiredAheadSeconds: 0.08,
+        },
+      },
+      detectionSource,
+      onState,
+    });
+
+    mediaMock.getSample.mockClear();
+    mediaMock.samplesCallStarts.length = 0;
+    await renderer.play();
+    await vi.waitFor(() => {
+      expect(mediaMock.samplesCallStarts).toEqual([0]);
+      expect(mediaMock.sampleNextCalls.length).toBeGreaterThanOrEqual(3);
+    });
+
+    flushAnimationFrame(40);
+    await vi.waitFor(() => {
+      expect(detectionSource.waitForRange).toHaveBeenCalledWith({
+        endTime: 0.12,
+        startTime: 0.04,
+      });
+    });
+
+    expect(mediaMock.samples[1].draw).not.toHaveBeenCalled();
+    expect(renderer.getState().playbackState).toBe(
+      MediaRendererPlaybackState.Buffering,
+    );
+    expect(onState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        playbackState: MediaRendererPlaybackState.Buffering,
+      }),
+    );
+
+    predictionCoverage.resolve();
+    await vi.waitFor(() => {
+      expect(mediaMock.samples[1].draw).toHaveBeenCalledOnce();
+    });
+
+    expect(renderer.getState()).toMatchObject({
+      currentTime: 0.04,
+      playbackState: MediaRendererPlaybackState.Playing,
+    });
+
+    renderer.destroy();
+  });
+
   it("plays through prediction coverage that never arrives", async () => {
     resetMocks();
     mediaMock.samples = [
@@ -540,12 +607,6 @@ describe("package entrypoint", () => {
     const onState = vi.fn();
 
     const renderer = await createRenderer(false, false, {
-      detectionBuffer: {
-        playbackGate: {
-          enabled: true,
-          requiredAheadSeconds: 0.08,
-        },
-      },
       detectionSource,
       onState,
     });
@@ -578,7 +639,7 @@ describe("package entrypoint", () => {
     renderer.destroy();
   });
 
-  it("plays a frame whose predictions were never appended", async () => {
+  it("keeps prediction-gated playback inside exact appended coverage", async () => {
     resetMocks();
     mediaMock.samples = [
       createMockSample(0, 0),
@@ -606,6 +667,69 @@ describe("package entrypoint", () => {
           requiredAheadSeconds: 0.08,
         },
       },
+      detectionSource,
+    });
+
+    mediaMock.getSample.mockClear();
+    mediaMock.samplesCallStarts.length = 0;
+    await renderer.play();
+    await vi.waitFor(() => {
+      expect(mediaMock.samplesCallStarts).toEqual([0]);
+      expect(mediaMock.sampleNextCalls.length).toBeGreaterThanOrEqual(3);
+    });
+
+    flushAnimationFrame(40);
+    await vi.waitFor(() => {
+      expect(renderer.getState().playbackState).toBe(
+        MediaRendererPlaybackState.Buffering,
+      );
+    });
+
+    expect(mediaMock.samples[1].draw).not.toHaveBeenCalled();
+
+    await detectionSource.appendFrames([
+      {
+        detections: [],
+        endTime: 0.08,
+        frameIndex: 1,
+        mediaTime: 0.04,
+      },
+    ]);
+    await vi.waitFor(() => {
+      expect(mediaMock.samples[1].draw).toHaveBeenCalledOnce();
+    });
+
+    expect(renderer.getState()).toMatchObject({
+      currentTime: 0.04,
+      playbackState: MediaRendererPlaybackState.Playing,
+    });
+
+    renderer.destroy();
+    detectionSource.destroy?.();
+  });
+
+  it("plays a frame whose predictions were never appended", async () => {
+    resetMocks();
+    mediaMock.samples = [
+      createMockSample(0, 0),
+      createMockSample(0.04, 0),
+      createMockSample(0.08, 0),
+    ];
+    const {
+      createMemoryColdDetectionFrameStore,
+      createWritableDetectionFrameSource,
+    } = await import("./index");
+    const detectionSource = createWritableDetectionFrameSource({
+      datasetId: "sparse-predictions",
+      store: createMemoryColdDetectionFrameStore(),
+    });
+
+    await detectionSource.appendFrames([
+      { detections: [], endTime: 0.04, frameIndex: 0, mediaTime: 0 },
+      { detections: [], endTime: 0.12, frameIndex: 2, mediaTime: 0.08 },
+    ]);
+
+    const renderer = await createRenderer(false, false, {
       detectionSource,
     });
 

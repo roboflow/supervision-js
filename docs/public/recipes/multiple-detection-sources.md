@@ -130,8 +130,9 @@ await session.replaceDetectionFrames(draftFrames, {
 ```
 
 `requiredForPlayback` picks which entries the composed source's `waitForRange`
-fans out to: predictions here, not drafts. Playback never awaits detection
-coverage, so the flag reaches only an app that calls `waitForRange` on
+fans out to: predictions here, not drafts. That waiter is what an enabled
+`detections.playbackGate` awaits. The gate is off by default, so on a default
+session the flag reaches only an app that calls `waitForRange` on
 `session.detectionSource` itself.
 
 `order` controls draw order. Lower sources compose first. Higher sources render
@@ -208,8 +209,9 @@ const source = createCompositeDetectionFrameSource({
 - Use multiple sources when the app needs separate ownership, separate writes,
   separate retention, separate presentation, or source-aware interaction.
 - Keep source IDs stable and app-owned.
-- Set `requiredForPlayback: false` when your app awaits `waitForRange` on
-  `session.detectionSource` and that source should not hold the wait. The flag
-  does not gate playback, which never awaits detection coverage.
+- Set `requiredForPlayback: false` when a source should not hold the coverage
+  wait, whether that wait is your own `waitForRange` call on
+  `session.detectionSource` or an enabled `detections.playbackGate`. The gate is
+  off by default, so on a default session only your own call reaches the flag.
 - Do not combine `detections.sources` with single-source inputs such as
   `frames`, `source`, or `appendable`.

@@ -83,7 +83,13 @@ export interface DetectionBufferOptions extends DetectionFrameSelectionOptions {
    */
   readonly refreshIntervalSeconds?: number;
   /**
-   * Accepted and ignored: playback never waits on detection availability.
+   * Hold playback until detections cover the frame about to be presented.
+   *
+   * Off by default: the picture moves first, and a frame the buffered window
+   * does not cover presents without annotations until a later load reaches it.
+   * Enabled, a gated `prepare` awaits the source's `waitForRange` for the
+   * requested lookahead before it loads, so playback stalls rather than
+   * showing an unannotated frame.
    */
   readonly playbackGate?: DetectionPlaybackGateOptions;
 }
@@ -94,16 +100,23 @@ export interface DetectionTimelineContext {
 }
 
 /**
- * Accepted and ignored: annotations catch up to the picture and never hold it.
- * A frame the buffered window does not cover presents without annotations.
+ * Detection-coverage playback gate, off unless `enabled` says otherwise.
+ *
+ * Off, annotations catch up to the picture and never hold it: a frame the
+ * buffered window does not cover presents without annotations. On, playback
+ * waits for the requested coverage before the next frame is presented, and the
+ * renderer reports buffering for as long as that wait lasts.
  */
 export interface DetectionPlaybackGateOptions {
   /**
-   * Ignored. Playback runs whether or not the requested window is available.
+   * Pause playback while the requested detection window is unavailable.
+   * Defaults to false.
    */
   readonly enabled?: boolean;
   /**
-   * Ignored. No detection lead is required ahead of the playback time.
+   * Detection lead required ahead of the playback time before an enabled gate
+   * lets playback continue. Defaults to none, and a gate asked for no lead
+   * waits for nothing, so an enabled gate needs one to do anything.
    */
   readonly requiredAheadSeconds?: number;
 }
@@ -137,13 +150,24 @@ export interface DetectionFrameRetentionOptions {
 }
 
 /**
- * Accepted and ignored. The timeline learns duration and looping through
- * {@link BufferedDetectionTimeline.setTimelineContext}, and preparing
- * detections never holds the picture.
+ * Per-call preparation context.
+ *
+ * Only a gated prepare reads `duration` and `firstTimestamp`, which bound the
+ * coverage it asks for at the end of media. Everything else the timeline needs
+ * about duration and looping arrives through
+ * {@link BufferedDetectionTimeline.setTimelineContext}.
  */
 export interface DetectionBufferPrepareOptions {
   readonly duration?: number | null;
   readonly firstTimestamp?: number;
+  /**
+   * Wait for the coverage {@link DetectionPlaybackGateOptions} asks for before
+   * loading the hot window.
+   *
+   * Defaults to false, and does nothing unless the timeline was built with an
+   * enabled gate. Both have to say yes, so a caller that prepares detections
+   * for its own reasons never blocks on coverage.
+   */
   readonly gatePlayback?: boolean;
 }
 
@@ -199,8 +223,9 @@ export interface DetectionFrameSource {
    * Optional coverage hook. Resolve when the source has enough data to answer
    * `loadFrames` for the requested range.
    *
-   * Playback never awaits it. A caller that wants to wait awaits it itself, and
-   * a composed source fans it out to the entries it composes.
+   * Playback awaits it only under an enabled detection playback gate, which is
+   * off by default; otherwise a caller that wants to wait awaits it itself. A
+   * composed source fans it out to the entries it composes.
    */
   waitForRange?(range: DetectionFrameSourceVersionRange): Promise<void>;
   /**
@@ -251,8 +276,9 @@ export interface CompositeDetectionFrameSourceEntry {
   /**
    * When false, the composed source's `waitForRange` skips this entry.
    *
-   * Playback waits on nothing here, so the flag reaches only a caller that
-   * awaits `waitForRange` on the composed source itself.
+   * An enabled detection playback gate awaits that waiter, and so does a caller
+   * awaiting coverage itself. With the gate off, which is the default, the flag
+   * reaches only the caller.
    */
   readonly requiredForPlayback?: boolean;
 }
@@ -527,9 +553,9 @@ export interface LiveWritableDetectionFrameSource extends WritableDetectionFrame
    * live frame is deliberately held open past the data it describes. Finalizing
    * sets the latest frame's exclusive end to `endTime`, extending or shortening
    * it as needed, so the source stops answering for time past the end of media.
-   * Playback never awaits detection coverage, so the readers this serves are
-   * `waitForRange` and the buffered window's own coverage arithmetic. It is
-   * idempotent and returns the current summary when there is nothing to change.
+   * The readers this serves are `waitForRange` and the buffered window's own
+   * coverage arithmetic. It is idempotent and returns the current summary when
+   * there is nothing to change.
    */
   finalizeCoverage(
     endTime: number,

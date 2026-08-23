@@ -107,21 +107,30 @@ export interface RenderPreparationMaskFrameOptions {
 }
 
 /**
- * Accepted and ignored: presentation is never gated. Preparation runs behind
- * the picture, and a frame the prepared window does not cover reaches no
- * annotation layer instead of holding playback back.
+ * Prepared-artifact playback gate, off unless `enabled` says otherwise.
+ *
+ * Off, preparation runs behind the picture and a frame the prepared window
+ * does not cover reaches no annotation layer instead of holding playback back.
+ * On, playback waits until the prepared window leads the playhead, so masks and
+ * polygons arrive with their frame rather than after it.
  */
 export interface RenderPreparationPlaybackGateOptions {
   /**
-   * Ignored. Playback runs whether or not required artifacts are prepared.
+   * Pause playback while required artifacts are unprepared. Defaults to false.
    */
   readonly enabled?: boolean;
   /**
-   * Ignored. Preparation targets its own window ahead of the active frame.
+   * Prepared lead that is enough not to start a wait at all. Defaults to
+   * `requiredAheadSeconds` and is capped by it: playback stalls only below this
+   * lead, and a stall then clears only once the lead reaches
+   * `requiredAheadSeconds`. Setting it lower buys hysteresis, so a lead
+   * hovering at the requirement does not stutter.
    */
   readonly minimumAheadSeconds?: number;
   /**
-   * Ignored. No prepared lead is required before playback continues.
+   * Prepared lead a wait in progress must reach before an enabled gate lets
+   * playback continue. Defaults to none, which asks only that the frame about
+   * to be presented is no longer pending.
    */
   readonly requiredAheadSeconds?: number;
 }
@@ -184,7 +193,11 @@ export interface RenderPreparationOptions {
   readonly maskFrame?: RenderPreparationMaskFrameOptions;
   readonly mode?: RenderPreparationMode;
   readonly onDiagnostics?: (diagnostics: RenderPreparationDiagnostics) => void;
-  /** Accepted and ignored: presentation is never gated. */
+  /**
+   * Hold playback until prepared artifacts cover the frame about to be
+   * presented. Off by default: the picture moves and unprepared layers are
+   * simply absent from it until preparation catches up.
+   */
   readonly playbackGate?: RenderPreparationPlaybackGateOptions;
   readonly workerFactory?: RenderPreparationWorkerFactory;
 }

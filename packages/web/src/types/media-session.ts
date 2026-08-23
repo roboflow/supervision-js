@@ -139,8 +139,9 @@ export interface MediaSessionDetectionSourceOptions {
   /**
    * When false, the composed source's `waitForRange` skips this entry.
    *
-   * Playback waits on nothing here, so the flag reaches only a host that calls
-   * `waitForRange` on `MediaSession.detectionSource` itself.
+   * An enabled detection playback gate awaits that waiter, and so does a host
+   * that calls `waitForRange` on `MediaSession.detectionSource` itself. With
+   * the gate off, which is the default, the flag reaches only the host.
    */
   readonly requiredForPlayback?: boolean;
 }
@@ -185,8 +186,12 @@ export interface MediaSessionDetectionOptions {
   readonly buffer?: DetectionBufferOptions;
 
   /**
-   * @deprecated Accepted and ignored: presentation is never gated on detection
-   * coverage.
+   * Hold playback until detections cover the frame about to be presented.
+   *
+   * Off by default: the session presents a frame the detection window does not
+   * cover without annotations and draws them once coverage lands. Enabled, the
+   * session treats detection coverage as part of media readiness and reports
+   * buffering while it waits. Merges over `buffer.playbackGate`.
    */
   readonly playbackGate?: DetectionPlaybackGateOptions;
 
@@ -406,8 +411,8 @@ export interface LiveMediaSession extends MediaSession {
    * `endTime` defaults to the renderer's reported media duration. Calling it
    * again is a no-op. Use it when a producer has finished, so the source stops
    * answering for the terminal sliver a container can declare beyond the last
-   * decoded sample. Presentation is never gated on detection coverage, so what
-   * the sliver would otherwise strand is a `waitForRange` caller.
+   * decoded sample. What the sliver would otherwise strand is a `waitForRange`
+   * caller, and an enabled detection playback gate along with it.
    */
   finalizeDetectionCoverage(
     endTime?: number,
