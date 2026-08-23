@@ -468,6 +468,7 @@ export function useDemoRenderer(
         }
 
         sessionRef.current = activeSession ?? null;
+        reportPlayFailures(renderer, isActive, setErrorMessage);
         rendererRef.current = renderer;
         if (import.meta.env.DEV) {
           (globalThis as { __demoRenderer?: MediaRenderer }).__demoRenderer =
@@ -1034,6 +1035,34 @@ async function playRenderer(
       );
     }
   }
+}
+
+/**
+ * `togglePlayback` starts a play and drops its rejection, so a play that fails
+ * through the play/pause button or the space bar says nothing. Reporting from
+ * `play` itself reaches that play and leaves the pause-or-play decision with
+ * the renderer, which alone knows whether a drag is holding the picture.
+ */
+function reportPlayFailures(
+  renderer: MediaRenderer,
+  isActive: () => boolean,
+  setErrorMessage: (message: string) => void,
+) {
+  const play = renderer.play.bind(renderer);
+
+  renderer.play = async () => {
+    try {
+      await play();
+    } catch (error: unknown) {
+      if (isActive()) {
+        setErrorMessage(
+          getErrorMessage(error, "Unable to play the media renderer."),
+        );
+      }
+
+      throw error;
+    }
+  };
 }
 
 function createUploadErrorState(message: string): UploadInferenceState {

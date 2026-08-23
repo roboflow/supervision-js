@@ -277,6 +277,7 @@ const sessions = vi.hoisted(() => ({
   createFixtureSession: vi.fn(),
   createUploadSession: vi.fn(),
   abortSignals: [] as AbortSignal[],
+  playFailure: null as Error | null,
   uploadStateReporters: [] as ((state: UploadProgress) => void)[],
   spies: [] as SessionSpy[],
 }));
@@ -299,10 +300,19 @@ function openSession(options: SessionOptions): Promise<MediaSession> {
 
   const setPresentation = vi.fn();
   const destroy = vi.fn();
-  const renderer = {
+  const renderer: MediaRenderer = {
     getState: () => ({ playbackState: "playing", source: { status: "ready" } }),
-    play: () => Promise.resolve(),
+    play: async () => {
+      if (sessions.playFailure) {
+        throw sessions.playFailure;
+      }
+    },
     setPresentation,
+    // Shaped like the renderer's own toggle, which starts a play and drops the
+    // rejection.
+    togglePlayback: () => {
+      void renderer.play().catch(() => undefined);
+    },
   } as unknown as MediaRenderer;
 
   if (options.abortSignal) {
@@ -423,6 +433,7 @@ beforeEach(() => {
 
 afterEach(() => {
   sessions.abortSignals.length = 0;
+  sessions.playFailure = null;
   sessions.uploadStateReporters.length = 0;
   sessions.spies.length = 0;
   vi.unstubAllGlobals();
@@ -447,6 +458,21 @@ describe("useDemoRenderer", () => {
 
     expect(isOnStage(canvas, nextMount)).toBe(true);
     expect(sessions.createFixtureSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("says why the play behind the play button failed", async () => {
+    const demo = mountDemo();
+
+    await demo.settle();
+
+    expect(demo.state.errorMessage).toBeNull();
+
+    sessions.playFailure = new Error("Media renderer is not ready.");
+
+    demo.act(() => demo.state.onTogglePlayback());
+    await demo.settle();
+
+    expect(demo.state.errorMessage).toBe("Media renderer is not ready.");
   });
 
   it("takes the stage off the page while the viewport is gone", async () => {

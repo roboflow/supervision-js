@@ -191,13 +191,6 @@ describe("media session consumer workflows", () => {
   it("forwards the mask halo renderer style from session presentation", async () => {
     resetMocks();
     mediaMock.samples = [createMockSample(0, 0)];
-    // Node lacks createImageBitmap; stubbing it lets the prepared pipeline
-    // take the PngIdMask path the halo depends on.
-    vi.stubGlobal(
-      "createImageBitmap",
-      vi.fn(async () => ({ close: vi.fn(), height: 2, width: 2 })),
-    );
-
     const { annotationRenderers, createMediaSession, DetectionMaskEncoding } =
       await import("./index");
     const haloResolve = vi.fn(() => ({
@@ -251,8 +244,6 @@ describe("media session consumer workflows", () => {
     });
 
     session.destroy();
-    // Restore the node default so later tests take the RGBA fallback again.
-    vi.stubGlobal("createImageBitmap", undefined);
   });
 
   it("forwards the box-corners renderer style from session presentation", async () => {
