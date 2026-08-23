@@ -1,6 +1,6 @@
 {
   "name": "supervision",
-  "version": "0.1.8",
+  "version": "0.2.0",
   "description": "Browser-native computer vision media rendering and annotation engine.",
   "repository": {
     "type": "git",
