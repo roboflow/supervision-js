@@ -8,6 +8,9 @@ const SEMVER = /^v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/;
 const OUTPUT_FLAG = /(?:^|-)(?:out|output|dest|destination|dir)(?:-|$)/;
 const PROPOSAL = /^\s*[-*]\s*(?:Add|Create|New)\b/i;
 const TEMPLATE = /[<>{}*$~|?!,()[\]"'`\\]|\.\.\./;
+const JAVASCRIPT = new Set([".cjs", ".js", ".mjs", ".ts", ".tsx"]);
+const SHELL = new Set([".bash", ".sh"]);
+const SOURCE = new Set([...JAVASCRIPT, ...SHELL, ".py"]);
 
 export async function loadRepository(rootDir) {
   const ignore = parseIgnoreFile(
@@ -56,8 +59,66 @@ export async function loadDocuments(repository) {
 }
 
 /**
+ * Every non-Markdown file that can carry the same claims, presented to the
+ * checks as a document. A comment claims what a paragraph claims and rots
+ * faster, because nobody proofreads it; a manifest script claims what a shell
+ * fence claims, because it is one.
+ *
+ * Comments arrive as prose blocks rather than fences. Prose is the conservative
+ * reading: a bare token has to look like a file to count, and no earlier line
+ * can excuse a later one. A comment is a statement about the repository, never
+ * a transcript of a pipeline that produced part of it.
+ */
+export async function loadSources(repository) {
+  const files = await listSources(repository, repository.rootDir);
+  const sources = await Promise.all(
+    files.map(async (file) => {
+      const source = await readFile(file, "utf8");
+      const relative = path
+        .relative(repository.rootDir, file)
+        .split(path.sep)
+        .join("/");
+      const directory = path.dirname(relative);
+      const document = {
+        directory: path.dirname(file),
+        file,
+        relative,
+        source,
+      };
+
+      if (path.basename(file) === "package.json") {
+        const manifest = JSON.parse(source);
+
+        return {
+          ...document,
+          blocks: manifestBlocks(manifest, source),
+          owners: [{ directory, manifest }],
+        };
+      }
+
+      const comments = readComments(file, source);
+      const workspace = repository.packages.find((candidate) =>
+        relative.startsWith(`${candidate.directory}/`),
+      );
+
+      return {
+        ...document,
+        blocks: comments.blocks,
+        code: comments.code,
+        owners: [
+          { directory: ".", manifest: repository.rootManifest },
+          ...(workspace ? [workspace] : []),
+        ],
+      };
+    }),
+  );
+
+  return sources.filter((source) => source.blocks.length > 0);
+}
+
+/**
  * Class 1. A path token is a claim when it is rooted at a real top-level entry
- * of this repository, which is what separates `tools/x/y.mjs` from a module
+ * of this repository, which is what separates `tools/build-pages.mjs` from a module
  * specifier, a runtime URL, or a path relative to some other file the document
  * quotes. Outside code formatting the token also has to look like a file, so
  * that prose pairs such as "demo/docs changes" stay prose. Generated output,
@@ -68,12 +129,14 @@ export async function checkPaths(repository, documents) {
   const failures = [];
 
   for (const document of documents) {
+    const plan = document.relative.split("/").includes("plans");
+
     for (const block of document.blocks) {
       const produced =
-        block.kind === "fence" ? producedPaths(block.text) : new Set();
+        block.kind === "fence" ? producedPaths(block.text) : new Map();
 
       for (const [offset, line] of block.text.split("\n").entries()) {
-        if (block.kind === "text" && PROPOSAL.test(line)) {
+        if (plan && block.kind === "text" && PROPOSAL.test(line)) {
           continue;
         }
 
@@ -84,8 +147,10 @@ export async function checkPaths(repository, documents) {
         );
 
         for (const token of pathTokens(line)) {
+          const written = produced.get(token) ?? Infinity;
+
           if (
-            produced.has(token) ||
+            written <= offset ||
             (block.kind === "text" &&
               !quoted.has(token) &&
               !/\.[a-z0-9]+$|\/$/i.test(token))
@@ -112,13 +177,26 @@ export async function checkPaths(repository, documents) {
   return failures;
 }
 
-/** Class 2. Every `npm run` in a document runs a script that exists. */
+/**
+ * Class 2. Every `npm run` runs a script that exists. In prose the invocation
+ * has to sit inside one backticked span, the same quoting a path claim needs,
+ * so that a sentence about `npm run` does not read its next word as a script.
+ */
 export async function checkNpmScripts(repository, documents) {
   const failures = [];
 
   for (const document of documents) {
+    const owners = document.owners ?? [
+      { directory: ".", manifest: repository.rootManifest },
+    ];
+
     for (const block of document.blocks) {
-      for (const invocation of npmRunInvocations(block.text)) {
+      const scopes =
+        block.kind === "fence"
+          ? [block.text]
+          : [...block.text.matchAll(/`([^`]+)`/g)].map((match) => match[1]);
+
+      for (const invocation of scopes.flatMap(npmRunInvocations)) {
         const workspace = resolveWorkspace(repository, invocation.workspace);
 
         if (invocation.workspace && !workspace) {
@@ -128,12 +206,17 @@ export async function checkNpmScripts(repository, documents) {
           continue;
         }
 
-        const manifest = workspace?.manifest ?? repository.rootManifest;
-        const owner = workspace ? workspace.directory : ".";
+        const candidates = workspace ? [workspace] : owners;
 
-        if (!manifest.scripts?.[invocation.script]) {
+        if (
+          candidates.every(
+            (candidate) => !candidate.manifest.scripts?.[invocation.script],
+          )
+        ) {
           failures.push(
-            `${document.relative}:${block.line} runs missing script "${invocation.script}" in ${owner}/package.json`,
+            `${document.relative}:${block.line} runs missing script "${invocation.script}" in ${candidates
+              .map((candidate) => `${candidate.directory}/package.json`)
+              .join(" or ")}`,
           );
         }
       }
@@ -171,7 +254,7 @@ export async function checkScriptFlags(repository, documents) {
 
         const accepted = await acceptedFlags(target.file);
 
-        for (const flag of command.flags) {
+        for (const flag of scriptFlags(command, target.script)) {
           if (!accepted.has(flag)) {
             failures.push(
               `${document.relative}:${block.line} passes ${flag} to ${target.relative}, which does not read it`,
@@ -357,6 +440,44 @@ export async function checkExports(repository, documents) {
   return failures;
 }
 
+/**
+ * Class 3 for a script that documents itself. Only an executable is asked: a
+ * flag in a library comment names some other command's interface. The accepted
+ * set comes from the file with its comments blanked out, so a usage example
+ * cannot vouch for itself.
+ */
+export async function checkCommentFlags(repository, sources) {
+  const failures = [];
+
+  for (const source of sources) {
+    if (!source.code || !isExecutable(source)) {
+      continue;
+    }
+
+    const accepted = await acceptedFlags(source.file, source.code);
+
+    if (accepted.size === 0) {
+      continue;
+    }
+
+    for (const block of source.blocks) {
+      for (const [offset, line] of block.text.split("\n").entries()) {
+        for (const [, flag] of line.matchAll(
+          /(?<![\w-])(--[a-z0-9][a-z0-9-]*)(?![\w-])/g,
+        )) {
+          if (!accepted.has(flag)) {
+            failures.push(
+              `${source.relative}:${block.line + offset} shows ${flag}, which ${source.relative} does not read`,
+            );
+          }
+        }
+      }
+    }
+  }
+
+  return failures;
+}
+
 function segment(source) {
   const lines = source.split("\n");
   const blocks = [];
@@ -434,7 +555,8 @@ function segment(source) {
 function pathTokens(text) {
   return [...text.matchAll(/(?<![\w./@-])([\w.@-]+(?:\/[\w.@-]+)+\/?)/g)]
     .map((match) => match[1])
-    .filter((token) => !TEMPLATE.test(token));
+    .filter((token) => !TEMPLATE.test(token))
+    .map((token) => token.replace(/\.$/, ""));
 }
 
 function resolveClaimedPath(repository, token) {
@@ -455,24 +577,41 @@ function resolveClaimedPath(repository, token) {
     : { absolute, relative: relative.split(path.sep).join("/") };
 }
 
+/**
+ * Where each destination in a block is first written. A command excuses only
+ * the lines that follow it: reading a file the block has not written yet is a
+ * claim that it already exists.
+ */
 function producedPaths(text) {
-  const produced = new Set();
+  const lines = text.split("\n");
+  const produced = new Map();
+  let start = 0;
 
-  for (const command of commandLines(text)) {
-    for (const [index, token] of command.tokens.entries()) {
-      const flag = token.match(/^--([a-z0-9][a-z0-9-]*)(=(.*))?$/);
+  for (const [offset, line] of lines.entries()) {
+    if (line.trimEnd().endsWith("\\")) {
+      continue;
+    }
 
-      if (flag && OUTPUT_FLAG.test(flag[1])) {
-        produced.add(flag[3] ?? command.tokens[index + 1]);
-      }
+    for (const command of commandLines(
+      lines.slice(start, offset + 1).join("\n"),
+    )) {
+      for (const [index, token] of command.tokens.entries()) {
+        const flag = token.match(/^--([a-z0-9][a-z0-9-]*)(=(.*))?$/);
+        const destination =
+          flag && OUTPUT_FLAG.test(flag[1])
+            ? (flag[3] ?? command.tokens[index + 1])
+            : token === ">" || token === ">>"
+              ? command.tokens[index + 1]
+              : undefined;
 
-      if (token === ">" || token === ">>") {
-        produced.add(command.tokens[index + 1]);
+        if (destination !== undefined && !produced.has(destination)) {
+          produced.set(destination, start);
+        }
       }
     }
-  }
 
-  produced.delete(undefined);
+    start = offset + 1;
+  }
 
   return produced;
 }
@@ -568,7 +707,7 @@ async function resolveScriptTarget(repository, command, seen = new Set()) {
     const resolved = resolveClaimedPath(repository, direct);
 
     return resolved && (await exists(resolved.absolute))
-      ? { file: resolved.absolute, relative: resolved.relative }
+      ? { file: resolved.absolute, relative: resolved.relative, script: direct }
       : null;
   }
 
@@ -606,28 +745,54 @@ async function resolveScriptTarget(repository, command, seen = new Set()) {
     }
   }
 
-  return targets.length === 1 ? targets[0] : null;
+  return targets.length === 1
+    ? { file: targets[0].file, relative: targets[0].relative }
+    : null;
+}
+
+/**
+ * Flags left of the script path are the runtime's, not the script's: `node
+ * --test x.mjs` asks node for a test runner and says nothing about x.mjs.
+ */
+function scriptFlags(command, script) {
+  const start = script === undefined ? -1 : command.tokens.indexOf(script);
+
+  if (start === -1) {
+    return command.flags;
+  }
+
+  return [
+    ...new Set(
+      command.tokens
+        .slice(start + 1)
+        .map((token) => token.match(/^(--[a-z0-9][a-z0-9-]*)(=|$)/)?.[1])
+        .filter(Boolean),
+    ),
+  ];
 }
 
 const flagCache = new Map();
 
-async function acceptedFlags(file) {
-  const cached = flagCache.get(file);
+async function acceptedFlags(file, code) {
+  const key = code === undefined ? file : `code:${file}`;
+  const cached = flagCache.get(key);
 
   if (cached) {
     return cached;
   }
 
-  const source = await readFile(file, "utf8");
+  const source = code ?? (await readFile(file, "utf8"));
   const flags = new Set(
     [...source.matchAll(/--[a-z0-9][a-z0-9-]*/g)].map((match) => match[0]),
   );
 
-  for (const name of parseArgsOptionNames(file, source)) {
-    flags.add(`--${name}`);
+  if (JAVASCRIPT.has(path.extname(file))) {
+    for (const name of parseArgsOptionNames(file, source)) {
+      flags.add(`--${name}`);
+    }
   }
 
-  flagCache.set(file, flags);
+  flagCache.set(key, flags);
 
   return flags;
 }
@@ -992,6 +1157,252 @@ function parseIgnoreFile(source) {
       )
     );
   };
+}
+
+function isExecutable(source) {
+  return (
+    source.source.startsWith("#!") ||
+    /\bparseArgs\(|\bargparse\b/.test(source.code)
+  );
+}
+
+/**
+ * A comment is read as the lines it occupies with its markers removed, so a
+ * reported line number is the line a reader will open, and a run of adjacent
+ * comment lines reads as the one paragraph it is.
+ */
+function readComments(file, source) {
+  const lines = source.split("\n");
+  const text = lines.map(() => "");
+  const code = lines.map((line) => line);
+  const extension = path.extname(file);
+
+  for (const range of commentRanges(file, source)) {
+    for (const [number, start, end] of spanLines(lines, range)) {
+      text[number] = [
+        text[number],
+        strip(code[number].slice(start, end), extension),
+      ]
+        .filter(Boolean)
+        .join(" ");
+      code[number] =
+        code[number].slice(0, start) +
+        " ".repeat(end - start) +
+        code[number].slice(end);
+    }
+  }
+
+  const blocks = [];
+  let buffer = [];
+
+  const flush = (number) => {
+    if (buffer.length > 0) {
+      blocks.push({
+        kind: "text",
+        line: number - buffer.length + 1,
+        text: buffer.join("\n"),
+      });
+      buffer = [];
+    }
+  };
+
+  for (const [index, line] of text.entries()) {
+    if (line.trim()) {
+      buffer.push(line);
+      continue;
+    }
+
+    flush(index);
+  }
+
+  flush(text.length);
+
+  return { blocks, code: code.join("\n") };
+}
+
+function commentRanges(file, source) {
+  if (path.extname(file) === ".py") {
+    return hashCommentRanges(source, true);
+  }
+
+  if (SHELL.has(path.extname(file))) {
+    return hashCommentRanges(source, false);
+  }
+
+  const parsed = ts.createSourceFile(
+    file,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    file.endsWith(".tsx") ? ts.ScriptKind.TSX : undefined,
+  );
+  const starts = new Set();
+  const ranges = [];
+
+  const visit = (node) => {
+    for (const range of ts.getLeadingCommentRanges(
+      source,
+      node.getFullStart(),
+    ) ?? []) {
+      if (!starts.has(range.pos)) {
+        starts.add(range.pos);
+        ranges.push([range.pos, range.end]);
+      }
+    }
+
+    for (const child of node.getChildren(parsed)) {
+      visit(child);
+    }
+  };
+
+  visit(parsed);
+
+  return ranges.sort(([left], [right]) => left - right);
+}
+
+/**
+ * A `#` starts a comment only outside a string, which is the whole reason this
+ * walks characters instead of matching lines. Python triple quotes are read the
+ * same way, because a module or function docstring is where a usage example
+ * lives.
+ */
+function hashCommentRanges(source, docstrings) {
+  const ranges = [];
+  let index = 0;
+
+  while (index < source.length) {
+    const character = source[index];
+
+    if (character === "#") {
+      const end = source.indexOf("\n", index);
+      const stop = end === -1 ? source.length : end;
+
+      if (!(index === 0 && source[1] === "!")) {
+        ranges.push([index, stop]);
+      }
+
+      index = stop;
+      continue;
+    }
+
+    if (character !== '"' && character !== "'") {
+      index += 1;
+      continue;
+    }
+
+    const triple = source.slice(index, index + 3);
+    const quote =
+      docstrings && (triple === '"""' || triple === "'''") ? triple : character;
+    let cursor = index + quote.length;
+
+    while (cursor < source.length) {
+      if (source[cursor] === "\\") {
+        cursor += 2;
+        continue;
+      }
+
+      if (source.startsWith(quote, cursor)) {
+        break;
+      }
+
+      if (quote.length === 1 && source[cursor] === "\n") {
+        break;
+      }
+
+      cursor += 1;
+    }
+
+    const end = Math.min(cursor + quote.length, source.length);
+
+    if (quote.length === 3) {
+      ranges.push([index, end]);
+    }
+
+    index = end;
+  }
+
+  return ranges;
+}
+
+function spanLines(lines, [start, end]) {
+  const spans = [];
+  let offset = 0;
+
+  for (const [number, line] of lines.entries()) {
+    const lineEnd = offset + line.length;
+
+    if (lineEnd > start && offset < end) {
+      spans.push([
+        number,
+        Math.max(start - offset, 0),
+        Math.min(end - offset, line.length),
+      ]);
+    }
+
+    offset = lineEnd + 1;
+
+    if (offset > end) {
+      break;
+    }
+  }
+
+  return spans;
+}
+
+function strip(line, extension) {
+  if (extension === ".py" || SHELL.has(extension)) {
+    return line.replace(/^\s*#+/, "").replace(/^\s*("""|''')/, "");
+  }
+
+  return line
+    .replace(/^\s*\/\/+/, "")
+    .replace(/^\s*\/\*+/, "")
+    .replace(/\*+\/\s*$/, "")
+    .replace(/^\s*\*+ ?/, "");
+}
+
+/** A manifest script is a shell fence the repository actually runs. */
+function manifestBlocks(manifest, source) {
+  const lines = source.split("\n");
+
+  return Object.entries(manifest.scripts ?? {}).map(([name, body]) => ({
+    kind: "fence",
+    line:
+      lines.findIndex((line) => line.trimStart().startsWith(`"${name}":`)) + 1,
+    text: body,
+  }));
+}
+
+async function listSources(repository, directory) {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const files = await Promise.all(
+    entries.map(async (entry) => {
+      const entryPath = path.join(directory, entry.name);
+      const relative = path
+        .relative(repository.rootDir, entryPath)
+        .split(path.sep)
+        .join("/");
+
+      if (entry.name === ".git" || repository.ignore(relative)) {
+        return [];
+      }
+
+      if (entry.isDirectory()) {
+        return listSources(repository, entryPath);
+      }
+
+      if (!entry.isFile()) {
+        return [];
+      }
+
+      return entry.name === "package.json" ||
+        SOURCE.has(path.extname(entry.name))
+        ? [entryPath]
+        : [];
+    }),
+  );
+
+  return files.flat().sort();
 }
 
 async function listMarkdown(repository, directory) {

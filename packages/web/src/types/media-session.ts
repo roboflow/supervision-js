@@ -189,6 +189,14 @@ export interface MediaSessionDetectionOptions {
    * cover without annotations and draws them once coverage lands. Enabled, the
    * session treats detection coverage as part of media readiness and reports
    * buffering while it waits. Merges over `buffer.playbackGate`.
+   *
+   * The wait is the renderer holding a decoded sample back, so it applies only
+   * when the renderer pulls samples: a URL, a `Blob`, or any `media` source
+   * without a presented-frame channel. A source that presents its own frames
+   * drives the playhead itself and never consults this option, which is what
+   * `createVideoEngineMediaRendererSource` returns and therefore what most
+   * video sessions actually run on. Enabling the gate there changes nothing
+   * and reports nothing; gate that playback at the producer instead.
    */
   readonly playbackGate?: DetectionPlaybackGateOptions;
 
@@ -213,7 +221,6 @@ export interface MediaSessionRendererOptions {
   readonly autoPlay?: boolean;
   readonly loop?: boolean;
   readonly playbackRate?: number;
-  readonly muted?: boolean;
   readonly fit?: MediaRendererFit;
   readonly maxDevicePixelRatio?: MediaRendererOptions["maxDevicePixelRatio"];
   readonly interaction?: MediaInteractionOptions;

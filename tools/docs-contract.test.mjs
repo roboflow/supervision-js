@@ -7,6 +7,7 @@ import ts from "typescript";
 
 import {
   checkChecksums,
+  checkCommentFlags,
   checkExports,
   checkNpmScripts,
   checkPaths,
@@ -14,6 +15,7 @@ import {
   checkVersions,
   loadDocuments,
   loadRepository,
+  loadSources,
 } from "./docs-claims.mjs";
 
 const rootDir = process.cwd();
@@ -135,17 +137,43 @@ test("documentation toolbar mirrors the browser package manifest version", async
 const playbackGateSurfaces = [
   "packages/core/src/types/detection-timeline.ts",
   "packages/web/src/types/media-session.ts",
+  "packages/web/src/types/render-preparation.ts",
   "docs/public/recipes/multiple-detection-sources.md",
+  "docs/public/recipes/streaming-detections.md",
 ];
 
+/**
+ * Splits prose into sentences so a claim can be judged against the qualifier
+ * standing next to it. Comment leaders and Markdown bullets are stripped first
+ * and the split needs whitespace after the terminator, so `session.play` and
+ * `detections.playbackGate` survive it intact.
+ */
+function proseSentences(source) {
+  return source
+    .replace(/^[ \t]*(?:\/\*\*|\*\/|\*|\/\/|[-*+]|#+)[ \t]?/gm, " ")
+    .replace(/\s+/g, " ")
+    .split(/(?<=[.;:])\s+/);
+}
+
 test("every playback-gate surface documents a gate that ships off", async () => {
-  // The playback gate is real and off until a host asks for it, so three
-  // separate surfaces each have to say both halves. Prose asserting that the
-  // gate is a no-op, or that it is simply on, compiles cleanly, and nothing
-  // else compares the three against each other.
+  // The playback gate is real, off until a host asks for it, and honoured only
+  // where the renderer pulls decoded samples, so every surface that names it
+  // has to say all three. Prose asserting that the gate is a no-op everywhere,
+  // or that it is simply on, compiles cleanly, and nothing else compares the
+  // surfaces against each other.
   const namesTheGate = /playbackGate|playback gate/;
   const statesDefaultOff =
     /off by default|off unless|the gate off, which is the default/i;
+  const namesThePulledPath = /pulls? (?:decoded )?samples|pulling samples/i;
+  const namesTheExemptSource =
+    /presents? its own frames|push-presented|presented-frame channel|VideoEngineMediaSource|VideoEngineMediaRendererSource/i;
+  // A no-op claim is honest when it says which sources it is about and false
+  // when it stands alone, so each claim is judged against its own sentence
+  // rather than against the file.
+  const scopesTheClaim = new RegExp(
+    `${namesThePulledPath.source}|${namesTheExemptSource.source}`,
+    "i",
+  );
   const claimsNoGate = [
     /accepted and ignored/i,
     /(?:playback|presentation) (?:is )?never (?:gated|awaits|waits)/i,
@@ -163,9 +191,23 @@ test("every playback-gate surface documents a gate that ships off", async () => 
       failures.push(`${surface} never states that the gate is off by default`);
     }
 
-    for (const claim of claimsNoGate) {
-      if (claim.test(source)) {
-        failures.push(`${surface} documents the gate as a no-op it is not`);
+    if (
+      !namesThePulledPath.test(source) ||
+      !namesTheExemptSource.test(source)
+    ) {
+      failures.push(
+        `${surface} never states which media sources the gate reaches`,
+      );
+    }
+
+    for (const sentence of proseSentences(source)) {
+      if (
+        claimsNoGate.some((claim) => claim.test(sentence)) &&
+        !scopesTheClaim.test(sentence)
+      ) {
+        failures.push(
+          `${surface} documents the gate as a no-op everywhere, which it is not`,
+        );
       }
     }
   }
@@ -532,7 +574,50 @@ test("every symbol a document imports is exported", async () => {
   assert.deepEqual(await checkExports(repository, documents), []);
 });
 
+test("every path a comment or manifest script names exists", async () => {
+  const { repository, sources } = await commentary();
+
+  assert.deepEqual(await checkPaths(repository, sources), []);
+});
+
+test("every npm script a comment or manifest script runs is declared", async () => {
+  const { repository, sources } = await commentary();
+
+  assert.deepEqual(await checkNpmScripts(repository, sources), []);
+});
+
+test("every flag a manifest script passes is one its script reads", async () => {
+  const { repository, sources } = await commentary();
+
+  assert.deepEqual(await checkScriptFlags(repository, sources), []);
+});
+
+test("every flag a script's own comments show is one it reads", async () => {
+  const { repository, sources } = await commentary();
+
+  assert.deepEqual(await checkCommentFlags(repository, sources), []);
+});
+
+test("every checksum a comment quotes matches the file beside it", async () => {
+  const { repository, sources } = await commentary();
+
+  assert.deepEqual(await checkChecksums(repository, sources), []);
+});
+
+test("every version a comment states matches the package manifest", async () => {
+  const { repository, sources } = await commentary();
+
+  assert.deepEqual(await checkVersions(repository, sources), []);
+});
+
+test("every subpath a comment imports is exported", async () => {
+  const { repository, sources } = await commentary();
+
+  assert.deepEqual(await checkExports(repository, sources), []);
+});
+
 let corpus;
+let commentCorpus;
 
 function documentation() {
   corpus ??= (async () => {
@@ -542,6 +627,16 @@ function documentation() {
   })();
 
   return corpus;
+}
+
+function commentary() {
+  commentCorpus ??= (async () => {
+    const { repository } = await documentation();
+
+    return { repository, sources: await loadSources(repository) };
+  })();
+
+  return commentCorpus;
 }
 
 function findMarkdownLinks(source) {

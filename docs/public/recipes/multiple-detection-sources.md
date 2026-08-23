@@ -132,8 +132,16 @@ await session.replaceDetectionFrames(draftFrames, {
 `requiredForCoverage` picks which entries the composed source's `waitForRange`
 fans out to: predictions here, not drafts. Awaiting `waitForRange` on
 `session.detectionSource` therefore returns once predictions cover the range,
-while drafts may still be loading. An enabled `detections.playbackGate` awaits
-that same waiter. The gate is off by default.
+while drafts may still be loading. That call is yours to make and works on any
+session, whatever media backs it.
+
+An enabled `detections.playbackGate` awaits that same waiter, but it reaches
+only a media source the renderer pulls decoded samples from, such as a URL or a
+`Blob`. A source that presents its own frames owns the playhead and paces
+itself. That is what `createVideoEngineMediaRendererSource` returns, and what
+most video sessions run on. Setting `detections.playbackGate` on a source that
+presents its own frames is accepted and ignored, with no wait, no buffering
+report and no error. The gate is off by default.
 
 `order` controls draw order. Lower sources compose first. Higher sources render
 later and appear on top.
@@ -211,7 +219,10 @@ const source = createCompositeDetectionFrameSource({
 - Keep source IDs stable and app-owned.
 - Set `requiredForCoverage: false` when a source should not hold the coverage
   wait, whether that wait is your own `waitForRange` call on
-  `session.detectionSource` or an enabled `detections.playbackGate`. The gate is
-  off by default.
+  `session.detectionSource` or an enabled `detections.playbackGate`. Your own
+  call works on any session; the gate is off by default and reaches only a media
+  source the renderer pulls decoded samples from, so on a source that presents
+  its own frames, such as `createVideoEngineMediaRendererSource`, enabling it
+  does nothing.
 - Do not combine `detections.sources` with single-source inputs such as
   `frames`, `source`, or `appendable`.

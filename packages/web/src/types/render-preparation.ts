@@ -113,6 +113,16 @@ export interface RenderPreparationMaskFrameOptions {
  * does not cover reaches no annotation layer instead of holding playback back.
  * On, playback waits until the prepared window leads the playhead, so masks and
  * polygons arrive with their frame rather than after it.
+ *
+ * The renderer can only hold a frame it is about to draw itself, so this gate
+ * reaches only a media source it pulls decoded samples from. A source that
+ * presents its own frames owns the playhead and paces itself; that is the
+ * video-engine source, `openVideoEngineMediaSource` and the
+ * `createVideoEngineMediaRendererSource` wrapper around it, which is what most
+ * video sessions render through. Enabling this gate on a source that presents
+ * its own frames is accepted and ignored, silently: playback runs at its
+ * normal pace and unprepared layers stay absent until preparation catches up,
+ * exactly as if the gate were off.
  */
 export interface RenderPreparationPlaybackGateOptions {
   /**
@@ -197,6 +207,11 @@ export interface RenderPreparationOptions {
    * Hold playback until prepared artifacts cover the frame about to be
    * presented. Off by default: the picture moves and unprepared layers are
    * simply absent from it until preparation catches up.
+   *
+   * Only a media source the renderer pulls decoded samples from can be held.
+   * On a source that presents its own frames, such as
+   * `openVideoEngineMediaSource`, this option does nothing at all. See
+   * {@link RenderPreparationPlaybackGateOptions}.
    */
   readonly playbackGate?: RenderPreparationPlaybackGateOptions;
   readonly workerFactory?: RenderPreparationWorkerFactory;

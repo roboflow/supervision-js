@@ -62,10 +62,6 @@ export interface MediaRendererOptions extends MediaRendererPresentation {
   readonly autoPlay?: boolean;
   readonly loop?: boolean;
   readonly playbackRate?: number;
-  /**
-   * No-op in the current video-only renderer. Audio playback is deferred.
-   */
-  readonly muted?: boolean;
   readonly fit?: MediaRendererFit;
   /**
    * Caps Pixi's render resolution relative to device pixels.

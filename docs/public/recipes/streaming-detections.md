@@ -47,6 +47,26 @@ Pass `detections.playbackGate: { enabled: true, requiredAheadSeconds }` when you
 would rather the video hold for its predictions. It is off by default, so a
 session that never mentions it keeps the picture moving.
 
+### Which Sources The Gate Reaches
+
+The gate is the renderer holding a decoded sample back before it draws it, so it
+only works when the renderer is the one pulling samples. That is the case for
+the `media` inputs above: a URL, a `File`, or a `Blob`.
+
+A media source that presents its own frames owns the playhead, and the renderer
+follows it rather than pacing it. `createVideoEngineMediaRendererSource` and
+`openVideoEngineMediaSource` return that kind of source, and they are what most
+hosts render video through. Setting `detections.playbackGate` on a source that
+presents its own frames is accepted and ignored, with playback running at its
+normal pace, nothing reporting a wait, and no error raised. Hold playback at the
+producer in that case, or start the session paused and wait on coverage
+yourself:
+
+```ts
+await session.detectionSource?.waitForRange?.({ startTime: 0, endTime: 2 });
+await session.play();
+```
+
 ## Appending Results
 
 Append semantic frames in batches. The batch can contain one frame or many
@@ -100,5 +120,7 @@ session.subscribe((state) => {
 ```
 
 `playbackBlocked` means playback should wait; media buffering and session errors
-raise it, and detection coverage never does. `presentationBlocked` means the
-visual frame is still preparing an artifact while playback continues.
+raise it. Detection coverage raises it only through a gate that is both enabled
+and reached, so with the default gate off, or on a source that presents its own
+frames, coverage never blocks playback. `presentationBlocked` means the visual
+frame is still preparing an artifact while playback continues.
