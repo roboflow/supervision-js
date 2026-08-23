@@ -38,83 +38,44 @@ const DEFAULT_TOLERANCE_PERCENT = 25;
  */
 export const METRICS = [
   {
-    key: "paints.paused.paintCount",
-    label: "paused paints",
+    key: "canvas.pausedRenderCount",
+    label: "canvas draws while stopped",
     unit: "",
     better: "lower",
-    /* Zero on all thirty-six passes, which is also the only answer the scenario
-     * accepts: a paused page that paints is doing per-frame work with no frame
-     * to show for it. */
+    /* Zero on every pass, and the only answer the scenario accepts: a stopped
+     * transport that keeps drawing the canvas is spending a frame's work on a
+     * frame nobody asked for. */
     noise: 0,
-    read: (report) => report.paints?.paused?.paintCount,
+    tolerancePercent: 0,
+    read: (report) => report.canvas?.paused?.renderCount,
   },
   {
-    key: "paints.settling.quietAfterMs",
-    label: "quiet after the pause",
-    unit: "ms",
+    key: "canvas.rendersPerPresentedFrame",
+    label: "canvas draws per presented frame",
+    unit: "x",
     better: "lower",
-    /* How long the page went on painting once the player was told to stop.
-     * Twenty passes of one unchanged build, taken the way the tool runs by
-     * default, ran 167.5ms to 177.3ms with a median of 171.25ms; the floor is
-     * that spread rounded up. The scenario's own budget is a second, which is
-     * the cliff; this is what catches the transition growing towards it. */
-    noise: 10,
-    read: (report) => report.paints?.settling?.quietAfterMs,
+    /* The number the eval exists to watch. Exactly 1.0000 on the measured
+     * passes, which is the floor: every presented frame is drawn once and
+     * nothing is drawn twice. A second draw inside one frame period lands at
+     * 2.0, so the whole reportable range sits between the recorded value and the
+     * budget beside it and no percentage should absorb any of it. */
+    noise: 0,
+    tolerancePercent: 0,
+    read: (report) => report.canvas?.playing?.rendersPerPresentedFrame,
   },
   {
-    key: "paints.playing.paintRate",
-    label: "playing paints",
-    unit: "/s",
-    better: "lower",
-    /* Thirty-six passes ran 46.33/s to 53.17/s, thirty-four of them from 50.33
-     * up. The two low ones came from passes that were ordinary in every other
-     * number, so the spread belongs to the instrument. */
-    noise: 7,
-    read: (report) => report.paints?.playing?.paintRate,
-  },
-  {
-    key: "paints.playing.styleRecalcRate",
-    label: "playing style recalcs",
-    unit: "/s",
-    better: "lower",
-    /* Fifty-eight recalcs over the six second window on thirty-three of
-     * thirty-six passes and fifty-seven on the other three, which is 9.7/s
-     * against 9.5/s. One event is the whole spread. */
-    noise: 0.3,
-    read: (report) => report.paints?.playing?.styleRecalcRate,
-  },
-  {
-    key: "paints.playing.layoutRate",
-    label: "playing layouts",
-    unit: "/s",
-    better: "lower",
-    /* The same six second window and the same one-event spread as the recalcs:
-     * 9.7/s on thirty-three of thirty-six passes, 9.5/s on three. */
-    noise: 0.3,
-    read: (report) =>
-      report.paints?.playing?.layoutRate ??
-      rate(report.paints?.playing, "layoutCount"),
-  },
-  {
-    key: "paints.playing.domPaintRate",
-    label: "playing DOM paints",
-    unit: "/s",
-    better: "lower",
-    /* Every paint the window traced minus the canvas's own, and this build
-     * attributes none to the canvas, so the two read the same number and share
-     * a spread: 46.33/s to 53.17/s across thirty-six passes. */
-    noise: 7,
-    read: (report) => report.paints?.playing?.domPaintRate,
-  },
-  {
-    key: "paints.playing.presentRate",
-    label: "playing present rate",
+    key: "canvas.presentRate",
+    label: "frames reaching the screen",
     unit: "/s",
     better: "higher",
-    /* Presented frames over the wall time the window spanned: thirty-six passes
-     * ran 29.88/s to 30.07/s against a 30fps source. */
-    noise: 0.2,
-    read: (report) => report.paints?.playing?.presentRate,
+    /* Presented frames over the wall time the window spanned, against a 30fps
+     * source. Six passes of the rebuilt scenario read 29.99 or 30.00 five times
+     * and 29.62 once, on a pass whose window spanned 6.077s of wall clock for
+     * 5.998s of media: the reads that bound the window are round trips, so the
+     * wall time they measure is a little longer than the frames inside it. The
+     * floor is that spread rounded up. */
+    noise: 0.4,
+    read: (report) => report.canvas?.playing?.presentRate,
   },
   {
     key: "sync.worstDetectionOffsetMs",
@@ -185,7 +146,9 @@ export const METRICS = [
      * the seventeen after them 9.0 to 9.2ms, with no change to the demo, the
      * engine, the dist it imports or this harness between them. Inside a
      * session the spread is 0.3ms; the floor covers the step from one session
-     * to the next and no more. */
+     * to the next and no more.
+     * Demo-contaminated: frame time is sampled page-wide, so the demo's React
+     * commits land inside the library's frame budget. */
     noise: 1.2,
     read: (report) => configP95(report.layers, report.layers?.floor?.config),
   },
@@ -195,7 +158,8 @@ export const METRICS = [
     unit: "ms",
     better: "lower",
     /* The same two sessions, sampled in the same windows: 9.7 to 10.2ms across
-     * the first sixteen passes and 9.1 to 9.2ms across the next seventeen. */
+     * the first sixteen passes and 9.1 to 9.2ms across the next seventeen.
+     * Demo-contaminated: sampled page-wide, same as the floor beside it. */
     noise: 1.2,
     read: (report) => configP95(report.layers, "everything-on"),
   },
@@ -343,7 +307,10 @@ export const METRICS = [
      * and one read 80ms in the pass whose throttled picture fell to 0.575. The
      * floor is the width of the 51-to-58 band, so a longest task that has grown
      * reports far under the scenario's 200ms ceiling, and a window that finds
-     * none reads 0 and counts as the improvement it is. */
+     * none reads 0 and counts as the improvement it is.
+     * Demo-contaminated: the browser reports long tasks for the whole main
+     * thread, so a demo re-render lands in this number as readily as engine
+     * work. */
     noise: 7,
     read: (report) => report.throttle?.longTaskMaxMs,
   },
@@ -399,7 +366,10 @@ export const METRICS = [
     /* Twenty-nine cold drags on one unchanged build ran 22.4ms to 34.9ms.
      * Resampling three of those twenty-nine puts the recorded median between
      * 23.1ms and 33.1ms, so two recordings of one build can sit 10ms apart with
-     * nothing having changed between them. */
+     * nothing having changed between them.
+     * Demo-contaminated: the lag is library work, but it is scaled by the demo
+     * range input's own `value`, so a change to how the demo maps pointer to
+     * time moves this number. */
     noise: 10,
     read: (report) => report.drag?.staleMeanMs,
   },
@@ -449,30 +419,26 @@ export const METRICS = [
      * twenty-six passes landed inside 7ms, seven took 40 to 93ms and one more
      * never landed at all. Nothing in the pass separates the two modes, so a
      * floor quiet enough to clear the slow one cannot report anything until a
-     * release is a fifth of the way to the scenario's 500ms limit. */
+     * release is a fifth of the way to the scenario's 500ms limit.
+     * Demo-contaminated: the wait is library work, but the target position is
+     * read off the demo range input's `value`. */
     noise: 93,
     read: (report) => report.drag?.releaseMs,
   },
   {
-    key: "playhead.stoppedDriftPercent",
-    label: "playhead drift while stopped",
-    unit: "%",
+    key: "playhead.stoppedDriftSeconds",
+    label: "transport clock drift while stopped",
+    unit: "s",
     better: "lower",
-    /* Zero on all twenty-nine passes. A playhead sliding while the picture is
-     * stopped is the defect, and there is no small honest amount of it. */
+    /* Exactly 0.0000 on every clean pass, which is also the only answer the
+     * scenario accepts: `currentTime` on a stopped transport is a stored value,
+     * so there is no honest small amount of it to absorb. Replaces a metric
+     * that parsed the demo playhead's `translateX` percentage, whose floor was
+     * that component's rendering quantum rather than anything the library
+     * decides. */
     noise: 0,
-    read: (report) => report.playhead?.stoppedDriftPercent,
-  },
-  {
-    key: "playhead.worstDisagreementPercent",
-    label: "playhead vs picture disagreement",
-    unit: "%",
-    better: "lower",
-    /* 0.031% on all twenty-nine passes: five seeks to fixed fractions and a
-     * line fitted through them return the same worst residual every time, so a
-     * different number means the playhead is drawn somewhere else. */
-    noise: 0,
-    read: (report) => report.playhead?.worstDisagreementPercent,
+    tolerancePercent: 0,
+    read: (report) => report.playhead?.stoppedDriftSeconds,
   },
   {
     key: "backscrub.maskInkRatio",
@@ -525,24 +491,9 @@ export const METRICS = [
     noise: 0.0016,
     read: (report) => report.focus?.cutoutFraction,
   },
-  {
-    key: "hotkeys.answeredFraction",
-    label: "hotkeys answering after a click",
-    unit: "",
-    better: "higher",
-    /* All four shortcuts answered on all twenty-eight passes. */
-    noise: 0,
-    tolerancePercent: 0,
-    read: (report) => report.hotkeys?.answeredFraction,
-  },
 ];
 
 const METRICS_BY_KEY = new Map(METRICS.map((metric) => [metric.key, metric]));
-
-function rate(phase, countKey) {
-  if (!phase || !(phase.elapsedSeconds > 0)) return undefined;
-  return round(phase[countKey] / phase.elapsedSeconds, 2);
-}
 
 function cadenceWindow(cadence, name) {
   return cadence?.windows?.find((window) => window.name === name);

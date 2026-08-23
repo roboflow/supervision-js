@@ -12,60 +12,33 @@ import {
   at,
   FIXTURE_PREFIX,
   fixtureHook,
-  Hook,
   openControlSections,
   startingAt,
 } from "./hooks.mjs";
 
-const TRACE_CATEGORIES = [
-  "disabled-by-default-devtools.timeline",
-  "devtools.timeline",
-];
-const TRACE_WINDOW_MS = 6000;
 const SETTLE_MS = 600;
-/* Where steady state starts. The zero-paint law governs from here on; the six
- * seconds before it are the pause coming to rest, and they are traced as their
- * own window rather than waited out, so work that decays inside them is a
- * number somebody can read instead of a gap in the coverage. */
-const PAUSED_STEADY_STATE_MS = 6000;
-/* Tracing has to be live before the pause is commanded, or the repaint the
- * pause itself causes lands in the gap between the two and the window opens
- * having already missed what it is watching for. */
-const PAUSE_TRACE_LEAD_MS = 500;
-const PAUSE_MARK = "demo-eval:pause";
-/* How long a pause may go on painting. Twenty passes of one unchanged build
- * stopped between 167.5 and 177.3ms, in three bursts inside the first fifth of
- * a second, and the six seconds after them painted zero every time. The budget
- * is a second because the gate is for a pause that keeps drawing rather than for
- * the transition: at five times the widest pass it cannot fire on the spread,
- * and a player still repainting a second after the user pressed pause is doing
- * per-frame work with no frame to show. The drift this leaves is the registry's,
- * under paints.settling.quietAfterMs. */
-const PAUSE_QUIET_LIMIT_MS = 1000;
+const CANVAS_WINDOW_MS = 6000;
+/* Canvas draws a presented frame may cost. One draw per frame is the floor a
+ * canvas presenting video can reach and the ceiling it should need: a second
+ * draw inside one frame period submits pixels the next draw replaces before the
+ * display ever shows them. Windows of 194 and 199 presented frames each drew
+ * exactly as many scenes, so the budget is set where a genuine second draw
+ * fails and a window that catches one settling render does not. */
+const RENDER_RATIO_LIMIT = 1.05;
+/* Share of the frames the source rate implies a window has to present before
+ * its ratio is a ratio. A ratio over a handful of frames quotes the whole
+ * window from whatever the edge left in it: a stalled pass that presented 3
+ * frames and drew 4 read 1.3333 and failed a budget of 1.05 on one settling
+ * render. Healthy windows present 180 of the 180 the rate implies. */
+const CANVAS_MIN_PRESENTED_FRACTION = 0.5;
 const VIEWPORT = { width: 1500, height: 1150, deviceScaleFactor: 1 };
 const SEEK_FRACTIONS = [0.1, 0.3, 0.5, 0.7, 0.9];
 const STEP_COUNT = 6;
-const RECT_TOLERANCE_PX = 2;
 /* A playing window that advances less than this fraction of wall time is not a
  * measurement of playback, whatever the trace says. */
 const MIN_ADVANCE_RATIO = 0.25;
 const SEEK_P95_LIMIT_MS = 250;
 const STEP_P95_LIMIT_MS = 80;
-/* A canvas presenting video paints once per presented frame, so the budget has
- * to sit above a readout updating and below a page repainting per frame. Tying
- * it to the present rate instead made a per-frame repaint pass by construction. */
-const DOM_PAINT_RATE_LIMIT = 15;
-/* Style invalidations per second while playing. A player at steady state should
- * not need one per presented frame, let alone the four measured here; each one
- * pulls layout and paint behind it on the main thread, which is the budget a
- * weaker machine does not have. */
-const STYLE_RECALC_RATE_LIMIT = 60;
-/* Layouts per second while playing. A layout is a style recalc that had to be
- * paid for, so this sits below the style budget: a player at steady state is
- * drawing into a canvas, and the boxes around it are not supposed to be
- * changing size. Measured at 8.8/s once the playhead moved on a promoted
- * transform, and at 16.8/s before it. */
-const LAYOUT_RATE_LIMIT = 30;
 const DETECTION_SETTLE_MS = 8000;
 /* How long a seek may take to answer with a covered, genuinely new detection.
  * Fifteen seeks across three runs settled in 100ms to 126ms, so a seek spending
@@ -132,24 +105,6 @@ const SNAPSHOT = `(() => {
     detectionTime: state.activeDetectionFrameTime,
     detectionCount: state.activeDetectionCount,
     detectionBufferStatus: state.detectionBuffer.status,
-  };
-})()`;
-
-const GEOMETRY = `(() => {
-  const canvas = document.querySelector(${at(Hook.ViewportMount)} + " canvas");
-  const box = canvas ? canvas.getBoundingClientRect() : null;
-  return {
-    canvas: box ? { width: Math.round(box.width), height: Math.round(box.height) } : null,
-    canvasBox: box
-      ? {
-          x: Math.round(box.x),
-          y: Math.round(box.y),
-          width: Math.round(box.width),
-          height: Math.round(box.height),
-        }
-      : null,
-    viewport: { width: window.innerWidth, height: window.innerHeight },
-    devicePixelRatio: window.devicePixelRatio,
   };
 })()`;
 
@@ -322,56 +277,6 @@ function disturbance(session, navMark, patchMark, guardPatches) {
 }
 
 /**
- * Paint passes over the trace window, bucketed by the clip each one carries.
- *
- * A clip is the cull rect of the paint chunk it belongs to, not the region that
- * was invalidated, so every paint into the root scrolling layer reports the
- * whole viewport however small the damage was. The histogram is therefore a
- * census of paint passes and the layers they went into, and it answers nothing
- * about how far a repaint spread; `measurePaintDamage` is what answers that.
- */
-function bucketPaints(events) {
-  const buckets = new Map();
-  let paintCount = 0;
-  const counts = { Layout: 0, Commit: 0, UpdateLayoutTree: 0 };
-  for (const event of events) {
-    if (event.name in counts) counts[event.name] += 1;
-    if (event.name !== "Paint") continue;
-    paintCount += 1;
-    const clip = event.args?.data?.clip;
-    if (!clip) continue;
-    const width = Math.round(Math.abs(clip[2] - clip[0]));
-    const height = Math.round(Math.abs(clip[5] - clip[1]));
-    const key = `${width}x${height}`;
-    const bucket = buckets.get(key) ?? { count: 0, width, height };
-    bucket.count += 1;
-    buckets.set(key, bucket);
-  }
-  const rects = [...buckets.values()].sort((a, b) => b.count - a.count);
-  return { paintCount, counts, rects };
-}
-
-function matchesBox(rect, box) {
-  return (
-    box !== null &&
-    Math.abs(rect.width - box.width) <= RECT_TOLERANCE_PX &&
-    Math.abs(rect.height - box.height) <= RECT_TOLERANCE_PX
-  );
-}
-
-/**
- * The rect the canvas presents through, and only when it is provably that: a
- * rect the size of the canvas own box. A viewport-sized rect was once credited
- * to the canvas whenever the canvas covered enough of the page, which spent the
- * whole budget on an assumption and left a page repainting per frame
- * indistinguishable from a video presenting.
- */
-function findCanvasRect(rects, geometry) {
-  const own = rects.find((rect) => matchesBox(rect, geometry.canvas));
-  return own ? { ...own, source: "canvas-box" } : null;
-}
-
-/**
  * Playback rates come from the wall time actually spanned by the two
  * snapshots, which is longer than the trace window: stopping a trace and
  * draining it takes seconds during which the media keeps playing.
@@ -407,358 +312,120 @@ const STARVATION_NOTE =
   "and no frames were presented. Another tab holding the hardware decoder " +
   "sessions produces exactly this signature; close it and re-run.";
 
-const DAMAGE_SHOT_COUNT = 3;
-const DAMAGE_SHOT_INTERVAL_MS = 900;
-/* The widest damage the transport legitimately produces is one timeline lane
- * fill; the flood this guards against covers a stage. */
-const DAMAGE_AREA_LIMIT_FRACTION = 0.01;
-/* A flash reaching this far across both axes is the page redrawing behind the
- * picture rather than any one element of it. Measured: the canvas, the widest
- * thing that legitimately flashes, covers 0.43 of the viewport across and 0.74
- * down, and a root-background write flashes it whole at 1.0 by 1.0. */
-const VIEWPORT_FLASH_FRACTION = 0.9;
-
-const GREEN_COMPONENTS = `(async (dataUrl) => {
-  const image = new Image();
-  image.src = dataUrl;
-  await image.decode();
-  const surface = new OffscreenCanvas(image.width, image.height);
-  const context = surface.getContext("2d", { willReadFrequently: true });
-  context.drawImage(image, 0, 0);
-  const { data, width, height } = context.getImageData(0, 0, image.width, image.height);
-  const isFlash = (index) => {
-    const r = data[index];
-    const g = data[index + 1];
-    const b = data[index + 2];
-    return g > 90 && g - r > 45 && g - b > 45;
-  };
-  const seen = new Uint8Array(width * height);
-  const boxes = [];
-  const stack = [];
-  for (let start = 0; start < width * height; start += 1) {
-    if (seen[start] || !isFlash(start * 4)) continue;
-    let minX = width;
-    let minY = height;
-    let maxX = 0;
-    let maxY = 0;
-    let pixels = 0;
-    stack.push(start);
-    seen[start] = 1;
-    while (stack.length > 0) {
-      const at = stack.pop();
-      const x = at % width;
-      const y = (at / width) | 0;
-      if (x < minX) minX = x;
-      if (x > maxX) maxX = x;
-      if (y < minY) minY = y;
-      if (y > maxY) maxY = y;
-      pixels += 1;
-      for (const next of [at - 1, at + 1, at - width, at + width]) {
-        if (next < 0 || next >= width * height) continue;
-        if (Math.abs((next % width) - x) > 1) continue;
-        if (seen[next] || !isFlash(next * 4)) continue;
-        seen[next] = 1;
-        stack.push(next);
-      }
-    }
-    if (pixels > 40) {
-      boxes.push({ x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 });
-    }
-  }
-  return boxes;
-})`;
-
-function coversViewport(box, geometry) {
-  return (
-    box.width >= geometry.viewport.width * VIEWPORT_FLASH_FRACTION &&
-    box.height >= geometry.viewport.height * VIEWPORT_FLASH_FRACTION
-  );
-}
-
-function overlapsCanvas(box, canvas) {
-  if (canvas === null) return false;
-  return (
-    box.x < canvas.x + canvas.width + RECT_TOLERANCE_PX &&
-    box.x + box.width > canvas.x - RECT_TOLERANCE_PX &&
-    box.y < canvas.y + canvas.height + RECT_TOLERANCE_PX &&
-    box.y + box.height > canvas.y - RECT_TOLERANCE_PX
-  );
-}
-
 /**
- * How far a repaint spread while playing: the largest region the paint-rect
- * overlay flashed away from the picture, and how many times it flashed the
- * viewport whole.
+ * What the canvas costs per frame it puts on screen.
  *
- * A Paint event's `clip` is the cull rect of the paint chunk it belongs to, not
- * the region that was invalidated, so every paint in the root scrolling layer
- * reports the whole viewport however small the damage was. The overlay's rects
- * are the only reading that answers how far a repaint actually spread.
- *
- * The two readings are taken from different sides of the canvas because a
- * repaint of everything necessarily covers the picture too, so the
- * away-from-the-picture filter that makes the largest region meaningful is the
- * same filter that would hide a page-wide flood completely.
- *
- * Three shots is a sample rather than a census: the overlay holds each rect for
- * about a frame, so a flood that runs for a whole window is caught and a single
- * stray repaint may not be.
+ * Both numbers come off the renderer's own counters rather than off the page,
+ * because the canvas does not paint on the main thread at all: across a playing
+ * window that drew 199 scenes, all 366 `Paint` events Chrome traced named a demo
+ * control-bar, timeline or inspector node and none named the canvas. Pixi
+ * presents through a compositor layer, so a `Paint` census answers a question
+ * about the demo's chrome and never one about the picture.
  */
-async function measurePaintDamage(session, geometry) {
-  await session.send("DOM.enable");
-  await session.send("Overlay.enable");
-  await session.send("Overlay.setShowPaintRects", { result: true });
-  const boxes = [];
-  try {
-    for (let shot = 0; shot < DAMAGE_SHOT_COUNT; shot += 1) {
-      await delay(DAMAGE_SHOT_INTERVAL_MS);
-      const { data } = await session.send("Page.captureScreenshot", {
-        format: "png",
-      });
-      const found = await session.readJson(
-        `${GREEN_COMPONENTS}("data:image/png;base64,${data}")`,
-      );
-      boxes.push(...found);
-    }
-  } finally {
-    await session.send("Overlay.setShowPaintRects", { result: false });
-  }
-
-  const canvas = geometry.canvasBox ?? null;
-  const outside = boxes.filter((box) => !overlapsCanvas(box, canvas));
-  outside.sort((a, b) => b.width * b.height - a.width * a.height);
-  const largest = outside[0] ?? null;
-  return {
-    shots: DAMAGE_SHOT_COUNT,
-    viewportFlashes: boxes.filter((box) => coversViewport(box, geometry))
-      .length,
-    largestOutsidePicture: largest
-      ? {
-          size: `${largest.width}x${largest.height}`,
-          area: largest.width * largest.height,
-        }
-      : null,
-    outsidePictureBoxes: outside
-      .slice(0, 8)
-      .map((box) => `${box.width}x${box.height}@${box.x},${box.y}`),
-  };
-}
-
-export async function runPaints(session, info, attempts) {
-  const geometry = await session.readJson(GEOMETRY);
-  const windowSeconds = TRACE_WINDOW_MS / 1000;
-
+export async function runCanvas(session, info, attempts) {
   const measure = async () => {
     await session.send("Page.bringToFront");
+    const visibility = await session.readJson("document.visibilityState");
+    if (visibility !== "visible") {
+      invalid(
+        `the demo tab was ${visibility}; a hidden tab parks the frame pump and ` +
+          "presents nothing to count renders against",
+      );
+    }
+
     await session.evaluate("window.__demoRenderer.play(); 1");
     await delay(SETTLE_MS);
-    const settling = await tracePause(session);
+    await session.evaluate("window.__demoRenderer.pause(); 1");
+    /* The pause settles a focus animation and draws once more for it, which is
+     * a render the stopped window must not be charged for. */
+    await delay(SETTLE_MS);
     const pausedBefore = await session.readJson(SNAPSHOT);
-    const pausedEvents = await session.trace(TRACE_CATEGORIES, TRACE_WINDOW_MS);
+    await delay(CANVAS_WINDOW_MS);
     const pausedAfter = await session.readJson(SNAPSHOT);
 
     await session.evaluate("window.__demoRenderer.play(); 1");
     await delay(SETTLE_MS);
     const playingBefore = await session.readJson(SNAPSHOT);
-    const playingEvents = await session.trace(
-      TRACE_CATEGORIES,
-      TRACE_WINDOW_MS,
-    );
+    await delay(CANVAS_WINDOW_MS);
     const playingAfter = await session.readJson(SNAPSHOT);
-    const damage = await measurePaintDamage(session, geometry);
     await session.evaluate("window.__demoRenderer.pause(); 1");
 
-    const playingMotion = advancement(
-      playingBefore,
-      playingAfter,
-      info.frameRate,
-    );
-    if (playingMotion.starved) invalid(STARVATION_NOTE);
-    if (!playingMotion.advanced) {
+    const playing = {
+      ...advancement(playingBefore, playingAfter, info.frameRate),
+      renderCount: playingAfter.renderCount - playingBefore.renderCount,
+    };
+    if (playing.starved) invalid(STARVATION_NOTE);
+    if (!playing.advanced) {
       invalid(
-        `media advanced only ${playingMotion.mediaAdvancedSeconds}s over ` +
-          `${playingMotion.elapsedSeconds}s of playback (state ` +
-          `${playingMotion.playbackState})`,
+        `media advanced only ${playing.mediaAdvancedSeconds}s over ` +
+          `${playing.elapsedSeconds}s of playback (state ` +
+          `${playing.playbackState})`,
+      );
+    }
+    const expectedFrames = info.frameRate * playing.elapsedSeconds;
+    if (
+      playing.presentedFrameDelta <
+      expectedFrames * CANVAS_MIN_PRESENTED_FRACTION
+    ) {
+      invalid(
+        `the window presented ${playing.presentedFrameDelta} frames where ` +
+          `${info.frameRate}fps over ${playing.elapsedSeconds}s implies ` +
+          `${Math.round(expectedFrames)}; a ratio over that few frames is the ` +
+          "edge of the window and not the renderer",
       );
     }
     return {
-      settling,
       paused: {
-        ...buildPhase(pausedEvents, pausedBefore, pausedAfter, geometry),
         ...advancement(pausedBefore, pausedAfter, info.frameRate),
+        renderCount: pausedAfter.renderCount - pausedBefore.renderCount,
       },
-      playing: {
-        ...buildPhase(playingEvents, playingBefore, playingAfter, geometry),
-        ...playingMotion,
-        damage,
-      },
+      playing,
     };
   };
 
   const phases = await attemptStable(session, attempts, measure, {
     guardPatches: true,
   });
-  const excluded = phases.playing.canvasPaintCount;
-  const domPaintCount = phases.playing.paintCount - excluded;
-  const domPaintRate = round(domPaintCount / windowSeconds, 2);
-  const domPaintRateLimit = DOM_PAINT_RATE_LIMIT;
+
+  const rendersPerPresentedFrame =
+    phases.playing.presentedFrameDelta > 0
+      ? round(
+          phases.playing.renderCount / phases.playing.presentedFrameDelta,
+          4,
+        )
+      : null;
 
   const failures = [];
-  if (phases.paused.paintCount !== 0) {
+  if (phases.paused.renderCount !== 0) {
     failures.push(
-      `paints: paused window painted ${phases.paused.paintCount} times, expected 0`,
+      `canvas: the stopped transport drew the canvas ${phases.paused.renderCount} ` +
+        `times over ${phases.paused.elapsedSeconds}s, expected 0`,
     );
   }
-  if (phases.settling.quietAfterMs > PAUSE_QUIET_LIMIT_MS) {
+  if (
+    rendersPerPresentedFrame !== null &&
+    rendersPerPresentedFrame > RENDER_RATIO_LIMIT
+  ) {
     failures.push(
-      `paints: the page was still painting ${phases.settling.quietAfterMs}ms after ` +
-        `the pause (${phases.settling.paintCount} passes, budget ` +
-        `${PAUSE_QUIET_LIMIT_MS}ms)`,
-    );
-  }
-  if (domPaintRate >= domPaintRateLimit) {
-    failures.push(
-      `paints: the main thread ran ${domPaintRate} paint passes a second ` +
-        `beside the picture, over the ${domPaintRateLimit}/s budget`,
-    );
-  }
-  const styleRecalcRate = round(
-    phases.playing.updateLayoutTreeCount / windowSeconds,
-    1,
-  );
-  if (styleRecalcRate >= STYLE_RECALC_RATE_LIMIT) {
-    failures.push(
-      `paints: ${styleRecalcRate} style recalcs/s while playing is not under ${STYLE_RECALC_RATE_LIMIT}/s`,
-    );
-  }
-  const layoutRate = round(phases.playing.layoutCount / windowSeconds, 1);
-  if (layoutRate >= LAYOUT_RATE_LIMIT) {
-    failures.push(
-      `paints: ${layoutRate} layouts/s while playing is not under ${LAYOUT_RATE_LIMIT}/s`,
-    );
-  }
-  const viewportPaintCount = phases.playing.damage.viewportFlashes;
-  if (viewportPaintCount > 0) {
-    failures.push(
-      `paints: the paint-rect overlay flashed the whole ` +
-        `${geometry.viewport.width}x${geometry.viewport.height} viewport on ` +
-        `${viewportPaintCount} of ${phases.playing.damage.shots} shots while playing`,
-    );
-  }
-  const damageAreaLimit = Math.round(
-    geometry.viewport.width *
-      geometry.viewport.height *
-      DAMAGE_AREA_LIMIT_FRACTION,
-  );
-  const largestDamage = phases.playing.damage.largestOutsidePicture;
-  if (largestDamage !== null && largestDamage.area > damageAreaLimit) {
-    failures.push(
-      `paints: playing repainted ${largestDamage.size} (${largestDamage.area}px²) ` +
-        `away from the picture, over the ${damageAreaLimit}px² budget ` +
-        `(${phases.playing.damage.outsidePictureBoxes.join(", ")})`,
+      `canvas: it drew ${rendersPerPresentedFrame} times per presented frame ` +
+        `(${phases.playing.renderCount} draws for ` +
+        `${phases.playing.presentedFrameDelta} frames), over the ` +
+        `${RENDER_RATIO_LIMIT} budget`,
     );
   }
 
   return {
     scenario: {
-      windowSeconds,
+      windowSeconds: CANVAS_WINDOW_MS / 1000,
       frameRate: info.frameRate,
-      geometry,
-      settling: phases.settling,
       paused: phases.paused,
       playing: {
         ...phases.playing,
-        viewportPaintCount,
-        domPaintCount,
-        domPaintRate,
-        domPaintRateLimit,
-        styleRecalcRate,
-        styleRecalcRateLimit: STYLE_RECALC_RATE_LIMIT,
-        layoutRate,
-        layoutRateLimit: LAYOUT_RATE_LIMIT,
-        damageAreaLimit,
+        rendersPerPresentedFrame,
+        renderRatioLimit: RENDER_RATIO_LIMIT,
       },
     },
     failures,
-  };
-}
-
-/**
- * Pauses the player from inside a running trace and reports how long it went on
- * painting afterwards.
- *
- * The steady-state window opens six seconds after the pause, so anything that
- * decays before then used to be measured by nobody: a transition that repainted
- * for four seconds and a transition that repainted for forty milliseconds
- * produced the same report. The pause is stamped into the trace it lands in, so
- * every paint is placed against the moment the player was told to stop rather
- * than against whenever the tracer happened to attach.
- */
-async function tracePause(session) {
-  const tracing = session.trace(
-    TRACE_CATEGORIES,
-    PAUSE_TRACE_LEAD_MS + PAUSED_STEADY_STATE_MS,
-  );
-  await delay(PAUSE_TRACE_LEAD_MS);
-  await session.evaluate(
-    `console.timeStamp(${JSON.stringify(PAUSE_MARK)});` +
-      "window.__demoRenderer.pause(); 1",
-  );
-  const events = await tracing;
-  const mark = events.find(
-    (event) =>
-      event.name === "TimeStamp" && event.args?.data?.message === PAUSE_MARK,
-  );
-  if (mark === undefined) {
-    invalid(
-      "the pause never appeared in the trace it was issued into, so nothing " +
-        "places the paints that followed it",
-    );
-  }
-  const afterPause = events.filter(
-    (event) =>
-      event.ts >= mark.ts &&
-      event.ts <= mark.ts + PAUSED_STEADY_STATE_MS * 1000,
-  );
-  const paints = afterPause
-    .filter((event) => event.name === "Paint")
-    .map((event) => round((event.ts - mark.ts) / 1000, 1));
-  const { paintCount, counts, rects } = bucketPaints(afterPause);
-  return {
-    windowSeconds: PAUSED_STEADY_STATE_MS / 1000,
-    paintCount,
-    quietAfterMs: paints.length === 0 ? 0 : Math.max(...paints),
-    quietLimitMs: PAUSE_QUIET_LIMIT_MS,
-    layoutCount: counts.Layout,
-    updateLayoutTreeCount: counts.UpdateLayoutTree,
-    commitCount: counts.Commit,
-    rects: rects.slice(0, 4).map((rect) => ({
-      size: `${rect.width}x${rect.height}`,
-      count: rect.count,
-    })),
-  };
-}
-
-function buildPhase(events, before, after, geometry) {
-  const windowSeconds = TRACE_WINDOW_MS / 1000;
-  const { paintCount, counts, rects } = bucketPaints(events);
-  const canvasRect = findCanvasRect(rects, geometry);
-  return {
-    paintCount,
-    paintRate: round(paintCount / windowSeconds, 2),
-    layoutCount: counts.Layout,
-    updateLayoutTreeCount: counts.UpdateLayoutTree,
-    commitCount: counts.Commit,
-    sceneRenderDelta: after.renderCount - before.renderCount,
-    canvasRectClass: canvasRect
-      ? `${canvasRect.width}x${canvasRect.height}`
-      : null,
-    canvasRectSource: canvasRect ? canvasRect.source : null,
-    canvasPaintCount: canvasRect ? canvasRect.count : 0,
-    rects: rects.slice(0, 8).map((rect) => ({
-      size: `${rect.width}x${rect.height}`,
-      count: rect.count,
-    })),
   };
 }
 

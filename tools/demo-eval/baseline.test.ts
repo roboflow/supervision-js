@@ -47,11 +47,28 @@ describe("the metric registry", () => {
 });
 
 describe("reading a report", () => {
-  it("derives rates the scenarios only report as counts", () => {
+  it("reads what the canvas drew against what the page presented", () => {
     const values = readMetrics({
-      paints: { playing: { layoutCount: 88, elapsedSeconds: 6.82 } },
+      canvas: {
+        paused: { renderCount: 0 },
+        playing: { rendersPerPresentedFrame: 1, presentRate: 29.93 },
+      },
     });
-    expect(values["paints.playing.layoutRate"]).toBeCloseTo(12.9, 1);
+    expect(values["canvas.rendersPerPresentedFrame"]).toBe(1);
+    expect(values["canvas.pausedRenderCount"]).toBe(0);
+    expect(values["canvas.presentRate"]).toBe(29.93);
+  });
+
+  /* A draw the page never presented is the waste the metric exists for, and a
+   * ratio is the only shape that separates it from a slower clip. */
+  it("calls a second draw inside one presented frame a regression", () => {
+    const { rows } = compareToBaseline(
+      { "canvas.rendersPerPresentedFrame": 2 },
+      baselineOf({ "canvas.rendersPerPresentedFrame": 1 }),
+    );
+    expect(rowFor(rows, "canvas.rendersPerPresentedFrame").verdict).toBe(
+      "regressed",
+    );
   });
 
   it("carries nothing for a scenario that did not run", () => {
@@ -135,12 +152,12 @@ describe("comparing against a baseline", () => {
   /* The floor is the whole gate on a metric the baseline recorded as zero,
    * because a percentage off zero is not a number and the tolerance is skipped
    * for it. Both of these read zero on every pass ever measured here. */
-  it("reports the first paint a paused window makes", () => {
+  it("reports the first draw a stopped transport makes", () => {
     const { rows } = compareToBaseline(
-      { "paints.paused.paintCount": 1 },
-      baselineOf({ "paints.paused.paintCount": 0 }),
+      { "canvas.pausedRenderCount": 1 },
+      baselineOf({ "canvas.pausedRenderCount": 0 }),
     );
-    expect(rowFor(rows, "paints.paused.paintCount").verdict).toBe("regressed");
+    expect(rowFor(rows, "canvas.pausedRenderCount").verdict).toBe("regressed");
   });
 
   it("reports the first sampled frame that drew no detection", () => {
@@ -205,10 +222,10 @@ describe("comparing against a baseline", () => {
    * four dying is a quarter of them gone, which no tolerance should absorb. */
   it("gives no tolerance at all to a metric that should be exact", () => {
     const { rows } = compareToBaseline(
-      { "hotkeys.answeredFraction": 0.75, "throttle.coverage": 0.97 },
-      baselineOf({ "hotkeys.answeredFraction": 1, "throttle.coverage": 1 }),
+      { "backscrub.maskInkRatio": 0.75, "throttle.coverage": 0.97 },
+      baselineOf({ "backscrub.maskInkRatio": 1, "throttle.coverage": 1 }),
     );
-    expect(rowFor(rows, "hotkeys.answeredFraction").verdict).toBe("regressed");
+    expect(rowFor(rows, "backscrub.maskInkRatio").verdict).toBe("regressed");
     expect(rowFor(rows, "throttle.coverage").verdict).toBe("regressed");
   });
 

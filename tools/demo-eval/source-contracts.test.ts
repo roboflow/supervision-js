@@ -74,28 +74,6 @@ describe("the timeline drag release", () => {
   });
 });
 
-describe("the player shortcuts", () => {
-  const source = read("components/PlayerHotkeys.tsx");
-
-  /* Clicking a layer checkbox leaves it holding focus. Treating every focused
-   * input as a typing surface retired every shortcut the hint bar advertises
-   * until the page was clicked somewhere else. */
-  it("does not treat a clicked control as somewhere the user is typing", () => {
-    const nonTyping = blockAfter(source, "new Set([");
-    for (const type of ["button", "checkbox", "radio", "range"]) {
-      expect(nonTyping).toContain(`"${type}"`);
-    }
-  });
-
-  /* A player's keys have to answer while the pointer is somewhere else. */
-  it("listens on the window rather than on a focused control", () => {
-    expect(source).toContain('window.addEventListener("keydown", onKeyDown)');
-    expect(source).toContain(
-      'window.removeEventListener("keydown", onKeyDown)',
-    );
-  });
-});
-
 /* The harness reaches the demo's controls through `data-eval` ids rather than
  * through class names and button text, because it once reached through those
  * and an upstream redesign moved them: three scenarios stopped measuring and

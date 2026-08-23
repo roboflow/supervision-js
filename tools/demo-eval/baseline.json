@@ -19,188 +19,258 @@
   "runs": 3,
   "media": "70.423s at 30fps, webgpu",
   "viewMode": "demo",
-  "recordedWithFailures": ["paints: fail", "throttle: fail", "drag: fail"],
+  "recordedWithFailures": [
+    "throttle: fail",
+    "drag: fail"
+  ],
   "toleranceDefaultPercent": 25,
   "metrics": {
-    "paints.paused.paintCount": {
+    "canvas.pausedRenderCount": {
       "value": 0,
       "unit": "",
       "better": "lower",
-      "samples": [0, 0, 0]
+      "samples": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
     },
-    "paints.playing.paintRate": {
-      "value": 47.17,
-      "unit": "/s",
+    "canvas.rendersPerPresentedFrame": {
+      "value": 1,
+      "unit": "x",
       "better": "lower",
-      "samples": [47.5, 47.17, 45]
+      "samples": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ]
     },
-    "paints.playing.styleRecalcRate": {
-      "value": 11.8,
-      "unit": "/s",
-      "better": "lower",
-      "samples": [12.2, 11.8, 11.7]
-    },
-    "paints.playing.layoutRate": {
-      "value": 9.7,
-      "unit": "/s",
-      "better": "lower",
-      "samples": [9.7, 9.7, 9.2]
-    },
-    "paints.playing.domPaintRate": {
-      "value": 47.17,
-      "unit": "/s",
-      "better": "lower",
-      "samples": [47.5, 47.17, 45]
-    },
-    "paints.playing.presentRate": {
-      "value": 30,
+    "canvas.presentRate": {
+      "value": 29.99,
       "unit": "/s",
       "better": "higher",
-      "samples": [29.98, 30.12, 30]
+      "samples": [
+        30,
+        29.99,
+        29.99,
+        29.99,
+        29.99
+      ]
     },
     "sync.worstDetectionOffsetMs": {
       "value": 0,
       "unit": "ms",
       "better": "lower",
-      "samples": [0, 0, 0]
+      "samples": [
+        0,
+        0,
+        0
+      ]
     },
     "sync.worstSettleMs": {
       "value": 102,
       "unit": "ms",
       "better": "lower",
-      "samples": [102, 101, 191]
+      "samples": [
+        102,
+        101,
+        191
+      ]
     },
     "latency.seek.p95": {
       "value": 2.4,
       "unit": "ms",
       "better": "lower",
-      "samples": [2.4, 2.2, 3.6]
+      "samples": [
+        2.4,
+        2.2,
+        3.6
+      ]
     },
     "latency.step.p95": {
       "value": 51.6,
       "unit": "ms",
       "better": "lower",
-      "samples": [48, 51.6, 65.8]
+      "samples": [
+        48,
+        51.6,
+        65.8
+      ]
     },
     "layers.floor.p95": {
       "value": 9,
       "unit": "ms",
       "better": "lower",
-      "samples": [9.8, 8.8, 9]
+      "samples": [
+        9.8,
+        8.8,
+        9
+      ]
     },
     "layers.everythingOn.p95": {
       "value": 9,
       "unit": "ms",
       "better": "lower",
-      "samples": [9.8, 9, 8.9]
+      "samples": [
+        9.8,
+        9,
+        8.9
+      ]
     },
     "throttle.presentedRateFraction": {
       "value": 0.989,
       "unit": "",
       "better": "higher",
-      "samples": [0.993, 0.989, 0.51]
+      "samples": [
+        0.993,
+        0.989,
+        0.51
+      ]
     },
     "throttle.coverage": {
       "value": 1,
       "unit": "",
       "better": "higher",
-      "samples": [1, 1, 1]
+      "samples": [
+        1,
+        1,
+        1
+      ]
     },
     "throttle.longTaskMaxMs": {
       "value": 52,
       "unit": "ms",
       "better": "lower",
-      "samples": [0, 52, 107]
+      "samples": [
+        0,
+        52,
+        107
+      ]
     },
     "blanking.preparedAheadMedian": {
       "value": 208,
       "unit": " frames",
       "better": "higher",
-      "samples": [208, 208, 208]
+      "samples": [
+        208,
+        208,
+        208
+      ]
     },
     "blanking.nullDetectionFraction": {
       "value": 0,
       "unit": "",
       "better": "lower",
-      "samples": [0, 0, 0]
+      "samples": [
+        0,
+        0,
+        0
+      ]
     },
     "blanking.unpreparedFraction": {
       "value": 0,
       "unit": "",
       "better": "lower",
-      "samples": [0, 0, 0]
-    },
-    "drag.lagP95Seconds": {
-      "value": 2.266,
-      "unit": "s",
-      "better": "lower",
-      "samples": [2.3, 2.265, 2.265, 2.266, 2.3]
+      "samples": [
+        0,
+        0,
+        0
+      ]
     },
     "drag.holdP95Ms": {
       "value": 94.5,
       "unit": "ms",
       "better": "lower",
-      "samples": [64.6, 94.5, 222.5]
+      "samples": [
+        64.6,
+        94.5,
+        222.5
+      ]
     },
     "drag.holdMaxMs": {
       "value": 98.2,
       "unit": "ms",
       "better": "lower",
-      "samples": [98.2, 98.1, 541.5]
+      "samples": [
+        98.2,
+        98.1,
+        541.5
+      ]
     },
     "drag.framesPerSecond": {
       "value": 34.89,
       "unit": "/s",
       "better": "higher",
-      "samples": [57.21, 34.89, 15.24]
+      "samples": [
+        57.21,
+        34.89,
+        15.24
+      ]
     },
     "drag.releaseMs": {
       "value": 5,
       "unit": "ms",
       "better": "lower",
-      "samples": [5, 6, 2]
-    },
-    "playhead.stoppedDriftPercent": {
-      "value": 0,
-      "unit": "%",
-      "better": "lower",
-      "samples": [0, 0, 0]
-    },
-    "playhead.worstDisagreementPercent": {
-      "value": 0.031,
-      "unit": "%",
-      "better": "lower",
-      "samples": [0.031, 0.031, 0.031]
+      "samples": [
+        5,
+        6,
+        2
+      ]
     },
     "backscrub.maskInkRatio": {
       "value": 1,
       "unit": "x forward",
       "better": "higher",
-      "samples": [1, 1, 1]
+      "samples": [
+        1,
+        1,
+        1
+      ]
     },
     "backscrub.settleP95Ms": {
       "value": 240,
       "unit": "ms",
       "better": "lower",
-      "samples": [156, 240, 359]
+      "samples": [
+        156,
+        240,
+        359
+      ]
     },
     "focus.dimmedFractionDelta": {
       "value": 0.1628,
       "unit": "",
       "better": "higher",
-      "samples": [0.1628, 0.1628, 0.1628]
+      "samples": [
+        0.1628,
+        0.1628,
+        0.1628
+      ]
     },
     "focus.cutoutFraction": {
       "value": 0.1001,
       "unit": "",
       "better": "higher",
-      "samples": [0.1001, 0.1001, 0.1001]
+      "samples": [
+        0.1001,
+        0.1001,
+        0.1001
+      ]
     },
-    "hotkeys.answeredFraction": {
-      "value": 1,
-      "unit": "",
-      "better": "higher",
-      "samples": [1, 1, 1]
+    "playhead.stoppedDriftSeconds": {
+      "value": 0,
+      "unit": "s",
+      "better": "lower",
+      "samples": [
+        0,
+        0,
+        0,
+        0
+      ]
     }
   }
 }

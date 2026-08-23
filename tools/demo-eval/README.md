@@ -1,8 +1,9 @@
 # demo-eval
 
-Measures the running demo the way a reviewer would: does it paint when nothing
-moves, do the boxes land on the frame they belong to, how long does a seek take,
-and does the engine survive being scrubbed by an impatient thumb. Everything is
+Measures the library through the running demo the way a reviewer would: does
+the canvas draw more often than it has frames to show, do the boxes land on the
+frame they belong to, how long does a seek take, and does the engine survive
+being scrubbed by an impatient thumb. Everything is
 read over the Chrome DevTools Protocol from a real browser against a real dev
 server, so the numbers describe the app as shipped rather than a unit under a
 mock.
@@ -46,10 +47,10 @@ Flags, all optional:
 
 `--scenario` also takes a comma-separated list, for example
 `--scenario drag,playhead`. Pass flags through npm with `--`, for example
-`npm run eval:demo -- --scenario paints`.
+`npm run eval:demo -- --scenario canvas`.
 
-Scenario names: `paints`, `sync`, `latency`, `layers`, `cadence`, `throttle`,
-`blanking`, `drag`, `playhead`, `backscrub`, `focus`, `hotkeys`, `battery`.
+Scenario names: `canvas`, `sync`, `latency`, `layers`, `cadence`, `throttle`,
+`blanking`, `drag`, `playhead`, `backscrub`, `focus`, `battery`.
 
 The run prints a summary and writes
 `{ startedAt, source, media, fixture, scenarios, metrics, verdicts, failures, baseline }`
@@ -70,7 +71,7 @@ set in `demo/src/eval-hooks.ts`, this tool declares the same set in
 
 That indirection is not decoration. The tool used to find controls by class
 name and by the text on them, and an upstream redesign of the style panel
-renamed both: `layers`, `focus` and `hotkeys` went from `pass` to
+renamed both: `layers` and `focus` went from `pass` to
 `invalid-environment` and stayed there for a whole merge, because an abstention
 is not a failure and nothing in the summary says a gate has stopped running.
 So a run now resolves every declared id against the live page before it
@@ -124,12 +125,21 @@ inherit whatever the scenarios ahead of them left in the page, and the size of
 that is under **drag** below.
 
 Twenty-one floors came down, six went up and three were already right. The ones
-that came down were entries that could not fail: a paused window could paint
-once and call it noise, the style recalc rate could walk from 9.7/s to 14.7/s,
-the drag's longest hold could triple. The ones that went up were entries firing
+that came down were entries that could not fail: the drag's longest hold could
+triple, and the backward scrub could lose a tenth of its ink. The ones that went up were entries firing
 on their own instrument: the step p95 spreads 30.2ms across thirty-six passes
 against a floor of 12ms, and the drag release lands inside 7ms on seventeen
 passes in twenty-two and takes 40 to 93ms on the other five.
+
+Five entries carry a `Demo-contaminated` line in `baseline.mjs`, and it means
+what it says: `drag.staleMeanMs` and `drag.releaseMs` measure library work but
+scale it by the demo range input's own `value`; `layers.floor.p95` and
+`layers.everythingOn.p95` sample frame time page-wide, so the demo's React
+commits land inside the library's frame budget; and `throttle.longTaskMaxMs` is
+a whole-main-thread reading that a demo re-render enters as readily as engine
+work. Their subject is the library and the contamination is a known limitation
+rather than a wrong question, but a number that moved should be checked against
+the demo before it is blamed on the engine.
 
 A later sweep checked those floors the way the tool runs by default,
 `--scenario all` and a single pass, hashing the engine checkout and both `dist`
@@ -221,55 +231,86 @@ block.
 
 ## What each scenario proves
 
-**paints** traces the pause itself, then six paused seconds and six playing
-seconds, and photographs the page with Chrome's paint-rect overlay on. A paused
-demo should paint exactly nothing: a paused page that still paints is doing
-per-frame DOM work with no frame to show for it. Playing, it asserts two
-separate things, and keeping them separate is the point:
+**canvas** asks the one question a canvas presenting video has to answer: does
+it draw once per frame it shows, or more? It plays a window, reads the
+renderer's own draw counter and the engine's presented-frame counter across it,
+and divides. One draw per presented frame is the floor and should be the
+ceiling; a second draw inside one frame period submits pixels the next draw
+replaces before the display ever shows them. Six passes of one build read
+exactly 1.0000, so the budget is 1.05 and the registry entry carries no
+tolerance at all. It also holds the transport stopped for six seconds and
+requires zero draws over them.
 
-- **How often** the main thread paints, from the trace. A canvas presenting
-  video paints once per presented frame; every paint beyond that is DOM work
-  sitting on top of playback, and the budget is 15 passes a second.
-- **How far** a repaint spreads, from the overlay. The transport's widest honest
-  damage is one timeline lane, so the budget away from the picture is 1% of the
-  viewport, and a flash covering nine tenths of the viewport in both directions
-  fails outright however small its rate.
+A ratio needs frames under it before it is a ratio, so a window that presents
+less than half of what the source rate implies is reported as
+`invalid-environment` rather than as a number. Without that floor a stalled pass
+that presented 3 frames and drew 4 read 1.3333 and failed the budget on a single
+settling render, which is the edge of the window and not the renderer.
 
-The report also carries `Layout` and `Commit` counts and the scene render delta
-so a paint regression can be traced to the layer that caused it.
+Both readings come off `getRenderCount()` and `getState().presentedFrames`
+rather than off Chrome's trace, because **the canvas does not paint on the main
+thread and a paint census cannot see it.** In a playing window where the
+renderer drew 199 scenes, Chrome traced 366 `Paint` events and every one of them
+named a demo node: `P.control-bar__timecode`, `SPAN.control-bar__cell-value`,
+`SPAN.timeline-view__segment`, `SPAN.timeline-view__lane-value`,
+`ASIDE.demo-shell__inspector`, `INPUT.timeline-view__input`. Not one named the
+canvas. Pixi 8 presents through a compositor layer, so the 199 draws crossed to
+the GPU without producing a main-thread `Paint` at all.
 
-The zero-paint law governs steady state, which begins six seconds after the
-pause. Those six seconds used to be spent asleep, so a transition that repainted
-for four seconds and one that repainted for forty milliseconds wrote the same
-report, and anything that decayed inside them was invisible by construction. It
-now traces them as a window of their own and reports how long the page went on
-painting: the pause is issued into a trace that is already running and stamped
-into it with `console.timeStamp`, so every paint is placed against the moment
-the player was told to stop rather than against whenever the tracer attached.
+That is why this scenario used to measure the wrong thing. It counted every
+`Paint` in the window, subtracted the ones it could attribute to the canvas, and
+called the remainder DOM work sitting on top of playback, with a budget of 15
+passes a second. The subtraction always subtracted nothing: the attribution
+matched a `Paint` event's `clip` against the canvas's box, and a `clip` is the
+cull rect of the paint chunk it belongs to rather than the region that was
+invalidated. On a 1500x1150 viewport the traced rects were `3000x2300` for the
+root document and `678x3092` for the inspector column, some of them at negative
+origins. They are not damage in viewport coordinates and no box comparison can
+make them so. So the total and the remainder were the same number on every pass
+the tool ever recorded, and the budget of 15 was being asked to police the
+demo's own control bar, which repaints its timecode and its timeline lanes
+whether or not any library is beneath them.
 
-There is something in there, and it is short. Twenty passes of one unchanged
-build painted 11 to 15 times after the pause and stopped between 167.5 and
-177.3ms, in three bursts inside the first fifth of a second, with nothing at all
-in the six seconds that followed. So the budget is a second, five times the
-widest pass: the gate is for a pause that keeps drawing, not for the transition,
-and `paints.settling.quietAfterMs` in the registry is what catches the
-transition walking towards the budget one commit at a time. Tracing the extra
-window did not move the ones beside it: across those same twenty passes the
-playing paint rate ran 46.0 to 53.5/s and the present rate 29.88 to 30.14/s.
-Both spreads sit a little wider than the noise floors beside them (46.33 to
-53.17 and 29.88 to 30.07), so the extra window is not free of the metrics around
-it, and the floors are the numbers to revisit, not the spread.
+Deleting that budget costs nothing the library was relying on, and the
+measurement below is why.
 
-The rect histogram beside them answers neither question, and reading it as
-damage is a trap this harness fell into once. A `Paint` event's `clip` is the
-cull rect of the paint chunk it belongs to, so every paint into the root
-scrolling layer carries the full viewport whatever it actually invalidated: a
-`1500x1150` row means the main thread ran that many paint passes, not that it
-redrew the page that many times. In the run that made the point, the histogram
-showed 64 viewport-sized rects while the overlay in the same window measured the
-widest repaint at `156x11`, 1716px² against a 17250px² budget. The overlay is
-the instrument; the histogram is a census of paint passes and the layers they
-went into.
+### What a presented frame actually costs
+
+One traced playing window, 6.002s spanning 194 presented frames, main thread
+27.1% occupied at 8.390ms of work per presented frame. Times are the trace's own
+`dur` totals, so the nested ones overlap:
+
+| where the main thread was | total    | per presented frame | share of busy |
+| ------------------------- | -------- | ------------------- | ------------- |
+| busy, all causes          | 1627.7ms | 8.390ms             | 100%          |
+| `HandlePostMessage`       | 361.2ms  | **1.862ms**         | 22.2%         |
+| `GPUTask`                 | 266.6ms  | 1.374ms             | 16.4%         |
+| `FireAnimationFrame`      | 76.4ms   | 0.394ms             | 4.7%          |
+| `Layout`                  | 37.9ms   | 0.195ms             | 2.3%          |
+| `Paint`, all 366 of them  | 20.6ms   | 0.106ms             | **1.3%**      |
+
+Two things follow, and both are the point of taking the measurement.
+
+The gate that was deleted policed the bottom row. All 366 `Paint` events in the
+window together cost 1.3% of the main thread's busy time, every one of them was
+a demo control-bar, timeline or inspector node, and the budget they were held
+against had never once passed.
+
+**`HandlePostMessage` at 1.862ms per presented frame is the frames-presentation
+hop, and it is the number the deferred decision about moving to canvas
+presentation has been waiting for.** The demo mounts the presentation mode in
+which each decoded `VideoFrame` crosses from the producer's thread to the main
+thread as a message, and a Pixi scene draws it there; that crossing is what the
+row measures. It is 17.6 times the entire DOM paint load the old gate was
+watching, and it is not reducible by drawing less, because the draw count is
+already at its floor of exactly one per presented frame. Canvas presentation,
+where the surface is transferred to the producer and no pixels cross a thread
+boundary, is the alternative that row prices.
+
+What this harness cannot tell you is what the other side costs. The comparison
+needs the `framesampler--default` story, which lives in the engine repository
+rather than in this checkout, so the `battery` scenario has nothing to run
+against here and the hop is priced on one side only.
 
 **sync** pauses, seeks to five spread positions, and waits for a detection
 frame that is genuinely new rather than the previous window's leftover. It then
@@ -465,10 +506,21 @@ report and the hold and frame-rate gates are what fail. Repeating the same drag
 without reloading takes the age from 26ms to zero as the cache warms, so a run's
 number describes the cache it was measured against as much as the code.
 
-**playhead** pauses, holds for four seconds and reads the playhead's transform
-alongside the media clock. A stopped picture whose playhead keeps sliding is the
-defect. It then samples five positions and fits a line through them, so a
-playhead drawn away from the time it is drawing fails too.
+**playhead** pauses, seeks, holds for four seconds and asks the transport what
+time it thinks it is, forty-two times. A stopped transport whose clock keeps
+advancing is the defect, and the limit is zero: `currentTime` on a stopped
+transport is a stored number rather than a computed one, so it does not jitter
+and every clean pass read exactly 0.0000. A hold in which the transport reports
+Playing fails too.
+
+It used to read the demo playhead `<span>`'s `translateX` percentage and fit a
+line through five of them, with a drift limit of 0.2% of the track. That
+measured how the demo draws the answer, and 0.2% was that component's
+half-pixel quantum rather than anything the library decides. The line fit went
+with it: whether the clocks agree is a library question, and it is gated where
+the library answers it, by `sync.worstDetectionOffsetMs` holding `currentTime`
+against the detection being drawn and by `cadence.clockDisagreementFps` holding
+the engine's ledger against the page's presented-frame counter.
 
 **backscrub** walks five stops forwards, then the same five backwards, and
 compares the coloured ink on the canvas at each. Masks that arrive on the way
@@ -483,19 +535,20 @@ how much of the picture it left bright. An overlay that vanishes adds no dark;
 an overlay that loses its cutout leaves nothing bright. The first is what
 shipped.
 
-**hotkeys** clicks a layer checkbox, confirms the checkbox is what now holds
-focus, and then presses Space, Space, `.` and ArrowRight. That click is what
-killed them: a checkbox is an `input`, the key handler treated every focused
-input as somewhere the user was typing, and every shortcut the hint bar still
-advertised stopped answering.
-
 Three more guards for the same defects are unit tests rather than scenarios,
 because what they check has no browser in it. `guards.test.ts` feeds each
 scenario's verdict both healthy numbers and the signature of the defect it
 exists for, so no gate here can quietly become one that cannot fail.
 `baseline.test.ts` covers the comparison arithmetic. `source-contracts.test.ts`
-reads the two invariants that live inside React hooks this repo has no DOM
+reads the invariants that live inside React hooks this repo has no DOM
 environment to render.
+
+A **hotkeys** scenario used to sit here, pressing Space, `.` and ArrowRight
+after a layer checkbox had taken focus. It is gone, along with the source
+contract that read `PlayerHotkeys.tsx`. The handler it exercised is
+`demo/src/components/PlayerHotkeys.tsx`, its skip distance was a harness
+constant duplicating the demo's own, and no library code sat anywhere on the
+path: it gated this repository on the demo application's keyboard handling.
 
 **battery** opens the FrameSampler story, injects the gesture stress harness and
 runs `battery(1)`: sixteen scripted scrub, fling, jitter and play-pause-spam
@@ -522,7 +575,7 @@ advanced too little to be measuring playback at all.
 Two related guards protect the same honesty: a window in which the page
 navigated, or in which the dev server hot-patched the app, is discarded and
 retried up to `--attempts` times, because a reload restarts the renderer
-mid-trace and a hot patch re-renders the whole app into the paint counts.
+mid-trace and a hot patch re-renders the whole app into the window.
 
 A retry reloads the page first. The discarded attempt still drove the player: it
 decoded the frames the next attempt is about to ask for and cooked the masks it

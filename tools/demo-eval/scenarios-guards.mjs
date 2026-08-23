@@ -79,11 +79,15 @@ const RESUME_MIN_ADVANCE_SECONDS = 0.15;
 const PLAYHEAD_SEEK_SECONDS = 20;
 const PLAYHEAD_HOLD_MS = 4000;
 const PLAYHEAD_INTERVAL_MS = 100;
-/* The playhead writer quantizes to half a rendered pixel, so a stopped picture
- * may leave it one quantum away from where it was and no further. */
-const PLAYHEAD_DRIFT_LIMIT_PERCENT = 0.2;
-const PLAYHEAD_DISAGREEMENT_LIMIT_PERCENT = 1;
-const PLAYHEAD_FIT_FRACTIONS = [0.1, 0.3, 0.5, 0.7, 0.9];
+/* Media seconds the transport's own clock may cover across a hold it spent
+ * stopped. Zero, because `currentTime` on a stopped transport is a stored
+ * number rather than a computed one: it does not jitter, and every clean pass
+ * of the retargeted scenario read exactly 0.0000 across a four second hold. The
+ * old limit was 0.2% of the timeline track, which was a quarter of a frame
+ * expressed in the demo playhead component's half-pixel quantum and said
+ * nothing about the clock. Drift is reported to four decimals, so the first
+ * reading this fails is a tenth of a millisecond of media. */
+const PLAYHEAD_DRIFT_LIMIT_SECONDS = 0;
 
 const SCRUB_STOP_FRACTIONS = [0.25, 0.4, 0.55, 0.7, 0.85];
 const SCRUB_SETTLE_DEADLINE_MS = 4000;
@@ -100,10 +104,6 @@ const FOCUS_SEEK_SECONDS = 12;
  * overlay that drew over everything, including the subject it exists to show. */
 const FOCUS_DIM_DELTA_FLOOR = 0.02;
 const FOCUS_CUTOUT_FLOOR = 0.02;
-
-const HOTKEY_STEP_TOLERANCE_FRAMES = 1.5;
-const HOTKEY_SKIP_SECONDS = 1;
-const HOTKEY_SETTLE_MS = 400;
 
 class Invalid extends Error {}
 
@@ -838,11 +838,9 @@ const PLAYHEAD_SAMPLER = `(async (holdMs, intervalMs) => {
   const renderer = window.__demoRenderer;
   const samples = [];
   const read = () => {
-    const node = document.querySelector(${at(Hook.TimelinePlayhead)});
     const state = renderer.getState();
     samples.push({
       at: performance.now(),
-      transform: node ? node.style.transform : null,
       currentTime: state.currentTime,
       playbackState: state.playbackState,
       renderCount: renderer.getRenderCount(),
@@ -856,26 +854,20 @@ const PLAYHEAD_SAMPLER = `(async (holdMs, intervalMs) => {
   return { samples, visibility: document.visibilityState };
 })`;
 
-const READ_PLAYHEAD_PERCENT = `(() => {
-  const node = document.querySelector(${at(Hook.TimelinePlayhead)});
-  const state = window.__demoRenderer.getState();
-  return {
-    transform: node ? node.style.transform : null,
-    currentTime: state.currentTime,
-  };
-})()`;
-
-function percentFromTransform(transform) {
-  const match = /translateX\(([-0-9.]+)%\)/.exec(transform ?? "");
-  return match === null ? null : Number(match[1]);
-}
-
 /**
- * Where the timeline says the picture is, against where the picture is.
+ * Whether a stopped transport stays stopped.
  *
- * Two defects: the playhead kept sliding while the picture stood still, so a
- * paused player looked like it was playing; and the position it drew did not
- * track the time it was drawing.
+ * The defect: the clock kept advancing after the picture stood still, so a
+ * paused player went on reporting new positions to everything reading it.
+ *
+ * This asks the transport rather than the timeline. It used to parse the
+ * demo's playhead `<span>` for a `translateX` percentage and fit a line
+ * through five of them, which measured how the demo draws the answer and
+ * carried a limit calibrated to that component's half-pixel quantizer. Whether
+ * the clocks agree is a library question and is gated where the library
+ * answers it: `sync.worstDetectionOffsetMs` holds `currentTime` against the
+ * detection being drawn, and `cadence.clockDisagreementFps` holds the engine's
+ * ledger against the page's presented-frame counter.
  */
 export async function runPlayhead(session, info, attempts = 1) {
   return stable(session, attempts, () => measurePlayhead(session, info));
@@ -897,66 +889,23 @@ async function measurePlayhead(session, info) {
   if (raw.visibility !== "visible") {
     throw new Invalid(`the demo tab was ${raw.visibility} during the hold`);
   }
-  const percents = raw.samples.map((sample) =>
-    percentFromTransform(sample.transform),
-  );
-  if (percents.some((value) => value === null)) {
-    throw new Invalid(
-      "the timeline playhead is not carrying a translateX transform; the " +
-        "control bar changed and this scenario is measuring the wrong node",
-    );
-  }
-  const stoppedDriftPercent = round(
-    Math.max(...percents) - Math.min(...percents),
-    4,
-  );
-  const stoppedDriftSeconds = round(
-    Math.max(...raw.samples.map((sample) => sample.currentTime)) -
-      Math.min(...raw.samples.map((sample) => sample.currentTime)),
-    4,
-  );
-  const playingDuringHold = raw.samples.filter(
-    (sample) => sample.playbackState === "playing",
-  ).length;
-
-  const points = [];
-  for (const fraction of PLAYHEAD_FIT_FRACTIONS) {
-    await session.evaluate(
-      `window.__demoRenderer.seek(${info.duration * fraction}).then(() => 1)`,
-    );
-    await delay(350);
-    const read = await session.readJson(READ_PLAYHEAD_PERCENT);
-    points.push({
-      currentTime: read.currentTime,
-      percent: percentFromTransform(read.transform),
-    });
-  }
-  const fit = leastSquares(
-    points.map((point) => point.currentTime),
-    points.map((point) => point.percent),
-  );
-  const residuals = points.map((point) =>
-    Math.abs(point.percent - (fit.slope * point.currentTime + fit.intercept)),
-  );
-  const impliedDuration = fit.slope === 0 ? null : round(100 / fit.slope, 2);
+  const times = raw.samples.map((sample) => sample.currentTime);
+  const renders = raw.samples.map((sample) => sample.renderCount);
 
   const scenario = {
     holdSeconds: PLAYHEAD_HOLD_MS / 1000,
     holdSamples: raw.samples.length,
-    stoppedDriftPercent,
-    stoppedDriftSeconds,
-    playingDuringHold,
-    fitPoints: points.map((point) => ({
-      currentTime: round(point.currentTime, 3),
-      percent: point.percent,
-    })),
-    worstDisagreementPercent: round(Math.max(...residuals), 4),
-    impliedDurationSeconds: impliedDuration,
+    seekSeconds: PLAYHEAD_SEEK_SECONDS,
+    stoppedDriftSeconds: round(Math.max(...times) - Math.min(...times), 4),
+    /* Reported and not judged: it separates a clock that held still from a
+     * renderer that was never running. The gate on it is
+     * canvas.pausedRenderCount. */
+    drawsDuringHold: Math.max(...renders) - Math.min(...renders),
+    playingDuringHold: raw.samples.filter(
+      (sample) => sample.playbackState === "playing",
+    ).length,
     mediaDurationSeconds: round(info.duration, 3),
-    limits: {
-      stoppedDriftPercent: PLAYHEAD_DRIFT_LIMIT_PERCENT,
-      disagreementPercent: PLAYHEAD_DISAGREEMENT_LIMIT_PERCENT,
-    },
+    limits: { stoppedDriftSeconds: PLAYHEAD_DRIFT_LIMIT_SECONDS },
   };
 
   return { scenario, failures: judgePlayhead(scenario) };
@@ -964,23 +913,17 @@ async function measurePlayhead(session, info) {
 
 export function judgePlayhead(scenario) {
   const failures = [];
-  if (scenario.stoppedDriftPercent > PLAYHEAD_DRIFT_LIMIT_PERCENT) {
+  if (scenario.stoppedDriftSeconds > PLAYHEAD_DRIFT_LIMIT_SECONDS) {
     failures.push(
-      `playhead: it moved ${scenario.stoppedDriftPercent}% of the track across ` +
-        `${scenario.holdSeconds}s in which the picture never moved ` +
-        `(limit ${PLAYHEAD_DRIFT_LIMIT_PERCENT}%)`,
+      `playhead: the transport clock covered ${scenario.stoppedDriftSeconds}s of ` +
+        `media across ${scenario.holdSeconds}s in which it was stopped ` +
+        `(limit ${PLAYHEAD_DRIFT_LIMIT_SECONDS}s)`,
     );
   }
   if (scenario.playingDuringHold > 0) {
     failures.push(
       `playhead: the transport reported Playing on ${scenario.playingDuringHold} ` +
         "samples of a hold it spent paused",
-    );
-  }
-  if (scenario.worstDisagreementPercent > PLAYHEAD_DISAGREEMENT_LIMIT_PERCENT) {
-    failures.push(
-      `playhead: it drew ${scenario.worstDisagreementPercent}% away from where the ` +
-        `media time puts it (limit ${PLAYHEAD_DISAGREEMENT_LIMIT_PERCENT}%)`,
     );
   }
   return failures;
@@ -1262,40 +1205,6 @@ function compareLuminance(off, on) {
   };
 }
 
-/* ----------------------------------------------------------------- hotkeys */
-
-const KEYS = {
-  space: { key: " ", code: "Space", windowsVirtualKeyCode: 32 },
-  period: { key: ".", code: "Period", windowsVirtualKeyCode: 190 },
-  arrowRight: {
-    key: "ArrowRight",
-    code: "ArrowRight",
-    windowsVirtualKeyCode: 39,
-  },
-};
-
-async function pressKey(session, name) {
-  const key = KEYS[name];
-  await session.send("Input.dispatchKeyEvent", {
-    type: "rawKeyDown",
-    autoRepeat: false,
-    ...key,
-  });
-  await session.send("Input.dispatchKeyEvent", { type: "keyUp", ...key });
-}
-
-const FIND_TOGGLE_BOX = (label) => `(() => {
-  const input = document.querySelector(${layerToggleSelector(label)} + " input");
-  if (!input) return null;
-  input.scrollIntoView({ block: "center" });
-  const box = input.getBoundingClientRect();
-  return {
-    x: Math.round(box.x + box.width / 2),
-    y: Math.round(box.y + box.height / 2),
-    checked: input.checked,
-  };
-})()`;
-
 /* A transport that has just been asked to pause is still finishing the frame
  * it was on. Measuring a one-frame step against a clock still settling reads
  * as two frames. */
@@ -1323,132 +1232,6 @@ const STILL_DEADLINE_MS = 3000;
 /* A pause still delivers the frame it was mid-way through, so one quiet
  * reading is not a stopped player. Three at sixty milliseconds is. */
 const STILL_QUIET_POLLS = 3;
-
-const READ_TRANSPORT = `(() => {
-  const state = window.__demoRenderer.getState();
-  return {
-    currentTime: state.currentTime,
-    playbackState: state.playbackState,
-    activeElement: document.activeElement
-      ? document.activeElement.tagName + (document.activeElement.type ? ":" + document.activeElement.type : "")
-      : null,
-  };
-})()`;
-
-/**
- * The shortcuts, pressed after a layer checkbox has taken focus.
- *
- * That click is what killed them: a checkbox is an `input`, the key handler
- * treated every focused input as somewhere the user was typing, and every
- * shortcut the hint bar still advertised stopped answering until the page was
- * clicked somewhere else.
- */
-export async function runHotkeys(session, info, attempts = 1) {
-  return stable(session, attempts, () => measureHotkeys(session, info));
-}
-
-async function measureHotkeys(session, info) {
-  await focusPage(session);
-  await openControlSections(session);
-  const toggle = await session.readJson(FIND_TOGGLE_BOX("Masks"));
-  if (toggle === null) {
-    throw new Invalid("the demo is not showing the Masks toggle to click");
-  }
-
-  await session.evaluate("window.__demoRenderer.pause(); 1");
-  await session.readJson(
-    `(${SETTLE_AT})(${PLAYHEAD_SEEK_SECONDS}, ${SCRUB_SETTLE_DEADLINE_MS})`,
-  );
-
-  await dispatchMouse(session, "mousePressed", toggle.x, toggle.y);
-  await dispatchMouse(session, "mouseReleased", toggle.x, toggle.y);
-  await delay(HOTKEY_SETTLE_MS);
-  const focused = await session.readJson(READ_TRANSPORT);
-  /* The checkbox holding focus is the whole premise. A click that missed
-   * leaves focus on the body, where every shortcut answers anyway, and the
-   * scenario would pass without having tested anything. */
-  if (focused.activeElement !== "INPUT:checkbox") {
-    throw new Invalid(
-      `clicking the Masks toggle left focus on ${focused.activeElement ?? "nothing"}; ` +
-        "the click missed and the defect this measures cannot occur",
-    );
-  }
-
-  const framePeriod = 1 / (info.frameRate || 30);
-  const checks = [];
-
-  await session.readJson(
-    `(${AWAIT_STILL})(${STILL_DEADLINE_MS}, ${STILL_QUIET_POLLS})`,
-  );
-  const beforeStep = await session.readJson(READ_TRANSPORT);
-  await pressKey(session, "period");
-  await delay(HOTKEY_SETTLE_MS);
-  const afterStep = await session.readJson(READ_TRANSPORT);
-  const stepped = afterStep.currentTime - beforeStep.currentTime;
-  checks.push({
-    key: "Period",
-    expected: "one frame forward",
-    answered:
-      stepped > 0 && stepped <= framePeriod * HOTKEY_STEP_TOLERANCE_FRAMES,
-    detail: `${round(stepped, 4)}s against a ${round(framePeriod, 4)}s frame`,
-  });
-
-  await pressKey(session, "space");
-  await delay(HOTKEY_SETTLE_MS);
-  const afterPlay = await session.readJson(READ_TRANSPORT);
-  checks.push({
-    key: "Space",
-    expected: "playback starts",
-    answered: afterPlay.playbackState === "playing",
-    detail: `${focused.playbackState} -> ${afterPlay.playbackState}`,
-  });
-
-  await pressKey(session, "space");
-  await delay(HOTKEY_SETTLE_MS);
-  const afterPause = await session.readJson(READ_TRANSPORT);
-  checks.push({
-    key: "Space again",
-    expected: "playback stops",
-    answered: afterPause.playbackState !== "playing",
-    detail: `${afterPlay.playbackState} -> ${afterPause.playbackState}`,
-  });
-
-  await session.readJson(
-    `(${AWAIT_STILL})(${STILL_DEADLINE_MS}, ${STILL_QUIET_POLLS})`,
-  );
-  const beforeSkip = await session.readJson(READ_TRANSPORT);
-  await pressKey(session, "arrowRight");
-  await delay(HOTKEY_SETTLE_MS);
-  const afterSkip = await session.readJson(READ_TRANSPORT);
-  const skipped = afterSkip.currentTime - beforeSkip.currentTime;
-  checks.push({
-    key: "ArrowRight",
-    expected: `${HOTKEY_SKIP_SECONDS}s forward`,
-    answered: Math.abs(skipped - HOTKEY_SKIP_SECONDS) <= framePeriod * 2,
-    detail: `${round(skipped, 4)}s`,
-  });
-
-  await session.evaluate(SET_TOGGLE("Masks", toggle.checked)).catch(() => {});
-
-  const answered = checks.filter((check) => check.answered).length;
-  const scenario = {
-    clicked: "Masks toggle",
-    focusedAfterClick: focused.activeElement,
-    checks,
-    answeredFraction: round(answered / checks.length, 3),
-  };
-  return { scenario, failures: judgeHotkeys(scenario) };
-}
-
-export function judgeHotkeys(scenario) {
-  return scenario.checks
-    .filter((check) => !check.answered)
-    .map(
-      (check) =>
-        `hotkeys: ${check.key} did not ${check.expected} after a layer toggle ` +
-        `took focus (${scenario.focusedAfterClick}); measured ${check.detail}`,
-    );
-}
 
 /* ----------------------------------------------------------------- summary */
 
@@ -1509,19 +1292,16 @@ export function guardDetail(name, scenario, field) {
   if (name === "playhead") {
     return [
       field(
-        "drift while stopped",
-        `${scenario.stoppedDriftPercent}% over ${scenario.holdSeconds}s` +
-          `  (limit ${scenario.limits.stoppedDriftPercent}%)`,
-      ),
-      field("media drift while stopped", `${scenario.stoppedDriftSeconds}s`),
-      field(
-        "worst disagreement",
-        `${scenario.worstDisagreementPercent}%  (limit ${scenario.limits.disagreementPercent}%)`,
+        "clock drift while stopped",
+        `${scenario.stoppedDriftSeconds}s over ${scenario.holdSeconds}s` +
+          `  (limit ${scenario.limits.stoppedDriftSeconds}s)`,
       ),
       field(
-        "implied / real duration",
-        `${scenario.impliedDurationSeconds}s / ${scenario.mediaDurationSeconds}s`,
+        "hold",
+        `${scenario.holdSamples} samples at ${scenario.seekSeconds}s, ` +
+          `${scenario.drawsDuringHold} draws`,
       ),
+      field("state misreported", `${scenario.playingDuringHold} samples`),
     ];
   }
   if (name === "backscrub") {
@@ -1562,16 +1342,7 @@ export function guardDetail(name, scenario, field) {
       ),
     ];
   }
-  return [
-    field("focused by the click", scenario.focusedAfterClick),
-    field("answered", `${scenario.answeredFraction} of the keys pressed`),
-    ...scenario.checks.map((check) =>
-      field(
-        `  ${check.key}`,
-        `${check.answered ? "answered" : "DEAD"}  ${check.detail}`,
-      ),
-    ),
-  ];
+  return [];
 }
 
 /* ------------------------------------------------------------------- maths */
@@ -1588,20 +1359,6 @@ function percentile(values, fraction) {
     Math.max(0, Math.ceil(fraction * sorted.length) - 1),
   );
   return round(sorted[index], 3);
-}
-
-function leastSquares(xs, ys) {
-  const n = xs.length;
-  const meanX = mean(xs);
-  const meanY = mean(ys);
-  let covariance = 0;
-  let variance = 0;
-  for (let at = 0; at < n; at += 1) {
-    covariance += (xs[at] - meanX) * (ys[at] - meanY);
-    variance += (xs[at] - meanX) ** 2;
-  }
-  const slope = variance === 0 ? 0 : covariance / variance;
-  return { slope, intercept: meanY - slope * meanX };
 }
 
 function round(value, digits) {

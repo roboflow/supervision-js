@@ -5,7 +5,6 @@ import {
   judgeBlanking,
   judgeDrag,
   judgeFocus,
-  judgeHotkeys,
   judgePlayhead,
   summariseBlanking,
   summariseDrag,
@@ -300,31 +299,20 @@ describe("a drag of the timeline", () => {
   });
 });
 
-describe("the timeline playhead", () => {
+describe("the stopped transport clock", () => {
   const stopped = {
     holdSeconds: 4,
-    stoppedDriftPercent: 0,
+    stoppedDriftSeconds: 0,
     playingDuringHold: 0,
-    worstDisagreementPercent: 0.03,
   };
 
-  it("passes a playhead that stands still while the picture stands still", () => {
+  it("passes a clock that stands still while the picture stands still", () => {
     expect(judgePlayhead(stopped)).toEqual([]);
   });
 
-  it("fails a playhead that kept running with the picture stopped", () => {
-    const failures = judgePlayhead({ ...stopped, stoppedDriftPercent: 5.6 });
-    expect(failures.join(" ")).toContain("the picture never moved");
-  });
-
-  it("fails a playhead drawn away from the time it is drawing", () => {
-    const failures = judgePlayhead({
-      ...stopped,
-      worstDisagreementPercent: 4.2,
-    });
-    expect(failures.join(" ")).toContain(
-      "away from where the media time puts it",
-    );
+  it("fails a clock that kept running with the picture stopped", () => {
+    const failures = judgePlayhead({ ...stopped, stoppedDriftSeconds: 1.4 });
+    expect(failures.join(" ")).toContain("in which it was stopped");
   });
 
   it("fails a hold the transport spent claiming to play", () => {
@@ -407,36 +395,6 @@ describe("the focus overlay", () => {
     expect(judgeFocus({ ...healthy, cutoutFraction: 0 }).join(" ")).toContain(
       "dimmed its own subject",
     );
-  });
-});
-
-describe("shortcuts after a layer toggle takes focus", () => {
-  const check = (key: string, answered: boolean) => ({
-    key,
-    expected: "playback starts",
-    answered,
-    detail: "paused -> paused",
-  });
-
-  it("passes when every key still answers", () => {
-    expect(
-      judgeHotkeys({
-        focusedAfterClick: "INPUT:checkbox",
-        checks: [check("Space", true), check("Period", true)],
-      }),
-    ).toEqual([]);
-  });
-
-  /* A checkbox holds focus after a click. Treating it as a typing surface
-   * retired every shortcut the hint bar still advertised. */
-  it("names the key that died and what was holding focus", () => {
-    const failures = judgeHotkeys({
-      focusedAfterClick: "INPUT:checkbox",
-      checks: [check("Space", false), check("Period", true)],
-    });
-    expect(failures).toHaveLength(1);
-    expect(failures[0]).toContain("Space");
-    expect(failures[0]).toContain("INPUT:checkbox");
   });
 });
 

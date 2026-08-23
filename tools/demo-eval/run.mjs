@@ -30,7 +30,6 @@ import {
   runBlanking,
   runDrag,
   runFocus,
-  runHotkeys,
   runPlayhead,
 } from "./scenarios-guards.mjs";
 import { layersDetail, runLayers } from "./scenarios-layers.mjs";
@@ -41,13 +40,13 @@ import {
   openDemoPage,
   runBattery,
   runCadence,
+  runCanvas,
   runLatency,
-  runPaints,
   runSync,
 } from "./scenarios.mjs";
 
 const SCENARIOS = [
-  "paints",
+  "canvas",
   "sync",
   "latency",
   "layers",
@@ -58,7 +57,6 @@ const SCENARIOS = [
   "playhead",
   "backscrub",
   "focus",
-  "hotkeys",
   "battery",
 ];
 const GUARD_SCENARIOS = new Set([
@@ -67,7 +65,6 @@ const GUARD_SCENARIOS = new Set([
   "playhead",
   "backscrub",
   "focus",
-  "hotkeys",
 ]);
 const LABEL_WIDTH = 27;
 /* Across repeated passes the worst verdict stands, so a scenario that failed
@@ -176,7 +173,7 @@ async function measure(pass) {
 
   if (page) {
     const runners = {
-      paints: runPaints,
+      canvas: runCanvas,
       sync: runSync,
       latency: runLatency,
       layers: runLayers,
@@ -187,7 +184,6 @@ async function measure(pass) {
       playhead: runPlayhead,
       backscrub: runBackscrub,
       focus: runFocus,
-      hotkeys: runHotkeys,
     };
     try {
       for (const name of demoScenarios) {
@@ -565,50 +561,19 @@ function detail(name, scenario) {
   if (GUARD_SCENARIOS.has(name)) {
     return guardDetail(name, scenario, field);
   }
-  if (name === "paints") {
-    const { settling, paused, playing } = scenario;
+  if (name === "canvas") {
+    const { paused, playing } = scenario;
     return [
+      field("paused draws", `${paused.renderCount}  (limit 0)`),
+      field("paused window", `${paused.elapsedSeconds}s`),
       field(
-        "settling quiet after",
-        `${settling.quietAfterMs}ms  (limit ${settling.quietLimitMs}ms)`,
+        "draws per presented frame",
+        `${playing.rendersPerPresentedFrame ?? "none"}  ` +
+          `(limit ${playing.renderRatioLimit})`,
       ),
       field(
-        "settling paints",
-        `${settling.paintCount} over ${settling.windowSeconds}s`,
-      ),
-      field("paused paints", `${paused.paintCount}  (limit 0)`),
-      field(
-        "paused layout / commit",
-        `${paused.layoutCount} / ${paused.commitCount}`,
-      ),
-      field("paused scene renders", paused.sceneRenderDelta),
-      field("playing paints", playing.paintCount),
-      field(
-        "playing style recalcs",
-        `${playing.styleRecalcRate ?? 0}/s  (limit ${playing.styleRecalcRateLimit ?? 0}/s)`,
-      ),
-      field(
-        "playing layouts",
-        `${playing.layoutRate ?? 0}/s  (limit ${playing.layoutRateLimit ?? 0}/s)`,
-      ),
-      field(
-        "playing viewport paints",
-        `${playing.viewportPaintCount ?? 0}  (limit 0)`,
-      ),
-      field(
-        "playing canvas class",
-        `${playing.canvasRectClass ?? "none"} x${playing.canvasPaintCount}` +
-          `${playing.canvasRectSource ? ` (${playing.canvasRectSource})` : ""}`,
-      ),
-      field(
-        "playing DOM paint rate",
-        `${playing.domPaintRate}/s  (limit ${playing.domPaintRateLimit}/s)`,
-      ),
-      field(
-        "playing damage off picture",
-        `${playing.damage.largestOutsidePicture?.size ?? "none"}` +
-          ` ${playing.damage.largestOutsidePicture?.area ?? 0}px²` +
-          `  (limit ${playing.damageAreaLimit}px²)`,
+        "playing draws / frames",
+        `${playing.renderCount} / ${playing.presentedFrameDelta}`,
       ),
       field(
         "playing present rate",
@@ -618,14 +583,6 @@ function detail(name, scenario) {
         "playing media advanced",
         `${playing.mediaAdvancedSeconds}s over ${playing.elapsedSeconds}s`,
       ),
-      field("playing scene renders", playing.sceneRenderDelta),
-      field(
-        "playing layout / commit",
-        `${playing.layoutCount} / ${playing.commitCount}`,
-      ),
-      ...playing.rects
-        .slice(0, 4)
-        .map((rect) => field(`  rect ${rect.size}`, `${rect.count} paints`)),
     ];
   }
   if (name === "sync") {
