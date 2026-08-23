@@ -145,6 +145,7 @@ type MediaCompositor = {
 
 /** The binding a compositor points at whichever texture holds the last frame. */
 export interface MediaGpuTextureSource {
+  resize(width: number, height: number, resolution: number): void;
   updateGPUTexture(texture: GPUTexture): void;
 }
 
@@ -667,7 +668,6 @@ export async function createPixiMediaScene(
       })
     : undefined;
   let mediaSprite: InstanceType<typeof Sprite> | undefined;
-  let mediaTextureSource: PixiExternalSource | undefined;
   let stagingTexture: PixiTexture | undefined;
   let stagingTextureSource: TextureUploadSource | undefined;
   const collectFrameTimings = options.diagnostics?.frameTimings === true;
@@ -2327,8 +2327,6 @@ export async function createPixiMediaScene(
           resource: texture,
         });
 
-        mediaTextureSource = externalSource;
-
         // A decode of another size resizes this source in place, and only a
         // dynamic texture forwards that to the sprite. Without it the sprite
         // takes the new size's scale while still drawing the previous size's
@@ -2339,18 +2337,7 @@ export async function createPixiMediaScene(
       },
       device,
       height: mediaHeight,
-      onTextureReplaced: () => {
-        // A proxy decode is the same picture at a lower resolution, and the
-        // region crops address this texture in media coordinates, so the
-        // source keeps the media's dimensions and takes the decode's as its
-        // resolution.
-        mediaTextureSource?.resize(
-          mediaWidth,
-          mediaHeight,
-          mediaTextureSource.pixelWidth / mediaWidth,
-        );
-        sizeMediaSprite();
-      },
+      onTextureReplaced: sizeMediaSprite,
       width: mediaWidth,
     });
   }
@@ -2528,6 +2515,7 @@ export function createMediaCompositor(
 
       if (width !== gpuTexture.width || height !== gpuTexture.height) {
         const replacement = createFrameTexture(device, width, height);
+        const retired = gpuTexture;
 
         try {
           textureSource.updateGPUTexture(replacement);
@@ -2538,9 +2526,23 @@ export function createMediaCompositor(
           throw error;
         }
 
-        gpuTexture.destroy();
         gpuTexture = replacement;
+        // A proxy decode is the same picture at a lower resolution, and the
+        // region crops address this texture in media coordinates, so the source
+        // keeps the media's dimensions and takes the decode's as its
+        // resolution. The pixel size it ends up stating is the replacement's
+        // own, and it has to be: a renderer reuses whatever it bound to the
+        // source for as long as that size holds, so a swap leaving the size
+        // untouched leaves the retired texture bound, and a destroyed texture
+        // reached by a submitted command buffer takes the whole scene off the
+        // screen.
+        textureSource.resize(
+          options.width,
+          options.height,
+          width / options.width,
+        );
         options.onTextureReplaced();
+        retired.destroy();
       }
 
       device.queue.copyExternalImageToTexture(

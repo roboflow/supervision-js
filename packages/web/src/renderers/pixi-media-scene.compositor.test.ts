@@ -73,6 +73,7 @@ describe("media compositor", () => {
     const gpu = createFakeDevice();
     let sourceSize: [number, number] | null = null;
     const source = {
+      resize: vi.fn(),
       updateGPUTexture: vi.fn((texture: GPUTexture) => {
         sourceSize = [texture.width, texture.height];
       }),
@@ -175,6 +176,7 @@ function createFakeDevice(): FakeDevice {
 
 function createTextureSource() {
   return {
+    resize: vi.fn<MediaGpuTextureSource["resize"]>(),
     updateGPUTexture: vi.fn<MediaGpuTextureSource["updateGPUTexture"]>(),
   };
 }
@@ -182,3 +184,54 @@ function createTextureSource() {
 function frame(displayWidth: number, displayHeight: number): VideoFrame {
   return { displayHeight, displayWidth } as unknown as VideoFrame;
 }
+
+describe("media compositor texture lifetime", () => {
+  it("restates the source at the pixels the replacement actually has", () => {
+    const gpu = createFakeDevice();
+    const source = createTextureSource();
+    const compositor = createMediaCompositor({
+      attach: () => source,
+      device: gpu.device,
+      height: 1080,
+      onTextureReplaced: vi.fn(),
+      width: 1920,
+    });
+
+    compositor.upload(frame(320, 180));
+    compositor.upload(frame(1920, 1080));
+
+    expect(source.resize.mock.calls).toStrictEqual([
+      [1920, 1080, 320 / 1920],
+      [1920, 1080, 1],
+    ]);
+  });
+
+  it("frees the texture it retired only once nothing points at it", () => {
+    const gpu = createFakeDevice();
+    const order: string[] = [];
+    const source = {
+      resize: vi.fn(() => order.push("resize")),
+      updateGPUTexture: vi.fn(() => order.push("updateGPUTexture")),
+    };
+    const compositor = createMediaCompositor({
+      attach: () => source,
+      device: gpu.device,
+      height: 1080,
+      onTextureReplaced: () => order.push("onTextureReplaced"),
+      width: 1920,
+    });
+
+    compositor.upload(frame(320, 180));
+    const retired = gpu.created[1];
+    retired!.destroy.mockImplementation(() => order.push("destroy"));
+    order.length = 0;
+    compositor.upload(frame(1920, 1080));
+
+    expect(order).toStrictEqual([
+      "updateGPUTexture",
+      "resize",
+      "onTextureReplaced",
+      "destroy",
+    ]);
+  });
+});
