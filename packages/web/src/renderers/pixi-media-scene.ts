@@ -258,17 +258,38 @@ export async function createPixiMediaScene(
   let isDestroyed = false;
   let displayFrameHandle: number | null = null;
   let hasDeferredPresentRender = false;
+  /**
+   * The detection under an editing gesture. The base layers hide it while the
+   * annotation overlay draws its live preview, so an edit never shows beside a
+   * stale copy of itself.
+   *
+   * Only those layers hide it. Labels, regions and masks read the plain
+   * visibility state because nothing previews them; picking reads it because
+   * the gesture's own selection would otherwise be dropped mid-drag; focus
+   * reads it because its pick is retargeted at the preview.
+   */
+  let editingDetectionId: string | number | null = null;
   const resolveContextState = (
     detection: DetectionFrame["detections"][number],
-  ) => resolveAnnotationStyleState(detection, currentVisibility);
+  ) => {
+    const state = resolveAnnotationStyleState(detection, currentVisibility);
+
+    return editingDetectionId !== null &&
+      detection.id === editingDetectionId &&
+      !state.hidden
+      ? { ...state, hidden: true }
+      : state;
+  };
   const resolveLabelContextState = (
     detection: DetectionFrame["detections"][number],
-  ) => ({
-    ...resolveContextState(detection),
-    hidden:
-      currentVisibility?.labelsHidden === true ||
-      resolveContextState(detection).hidden,
-  });
+  ) => {
+    const state = resolveAnnotationStyleState(detection, currentVisibility);
+
+    return {
+      ...state,
+      hidden: currentVisibility?.labelsHidden === true || state.hidden,
+    };
+  };
   const boxLayer = createPixiBoxLayer({
     boxStyle: options.boxStyle,
     Container: options.editingEngine ? Container : undefined,
@@ -344,7 +365,8 @@ export async function createPixiMediaScene(
     },
     onAssetError: options.diagnostics?.onAssetError,
     regionRenderers: currentRegionRenderers,
-    resolveContextState,
+    resolveContextState: (detection) =>
+      resolveAnnotationStyleState(detection, currentVisibility),
   });
   const annotationOverlayLayer = createPixiAnnotationOverlayLayer(
     options.editingEngine,
@@ -492,7 +514,7 @@ export async function createPixiMediaScene(
             mode: MediaInteractionMode.Always,
           },
           canPickDetection: (detection) =>
-            !resolveContextState(detection).hidden,
+            !resolveAnnotationStyleState(detection, currentVisibility).hidden,
           editingEngine: options.editingEngine,
           capturePointer: (pointerId) => {
             if (!rendererCanvas.hasPointerCapture?.(pointerId)) {
@@ -532,11 +554,11 @@ export async function createPixiMediaScene(
         Text,
         UniformGroup,
         interactionStyle: options.interactionStyle,
-        // A detection under an editing gesture is drawn live by the base
-        // layers, so its hover or selection redraw would sit at the position
+        // A detection under an editing gesture is drawn by the overlay
+        // preview, so its hover or selection redraw would sit at the position
         // the gesture already left.
         isDetectionVisible: (detection) =>
-          !resolveContextState(detection).hidden &&
+          !resolveAnnotationStyleState(detection, currentVisibility).hidden &&
           !isUnderEditingGesture(detection),
       })
     : undefined;
@@ -544,32 +566,51 @@ export async function createPixiMediaScene(
   const unsubscribeFastTranslate =
     options.editingEngine?.subscribeFastTranslate((id, dx, dy) => {
       fastTranslatedDetectionId = id;
-      boxLayer.translateDetection(id, dx, dy);
-      vectorLayer.translateDetection(id, dx, dy);
       regionLayer.translateDetection(id, dx, dy);
       labelLayer?.translateDetection(id, dx, dy);
       renderNow();
     });
-  const unsubscribeEditingState = options.editingEngine?.subscribe((state) => {
-    if (
-      state.kind !== AnnotationGestureStateKind.Idle ||
-      fastTranslatedDetectionId === null
-    ) {
-      return;
-    }
-    const id = fastTranslatedDetectionId;
-    fastTranslatedDetectionId = null;
-    boxLayer.translateDetection(id, 0, 0);
-    vectorLayer.translateDetection(id, 0, 0);
-    regionLayer.translateDetection(id, 0, 0);
-    labelLayer?.translateDetection(id, 0, 0);
+  const redrawDetectionLayers = (id: string | number) => {
     boxLayer.invalidateDetection(id);
     vectorLayer.invalidateDetection(id);
     boxLayer.drawFrame(currentMediaTime, viewportScale);
     vectorLayer.drawFrame(currentMediaTime, viewportScale);
     regionLayer.drawFrame(currentMediaTime, viewportScale);
     labelLayer?.drawFrame(currentMediaTime, viewportScale);
-    renderNow();
+  };
+  const unsubscribeEditingState = options.editingEngine?.subscribe((state) => {
+    // The brush paints into the detection's own mask and the overlay previews
+    // no mask, so hiding it would blank the stroke as it is drawn.
+    const nextEditingId =
+      (state.kind === AnnotationGestureStateKind.Moving ||
+        state.kind === AnnotationGestureStateKind.Resizing) &&
+      state.activeDetectionId !== null &&
+      state.preview &&
+      !state.preview.mask
+        ? state.activeDetectionId
+        : null;
+
+    if (nextEditingId !== editingDetectionId) {
+      const previous = editingDetectionId;
+      editingDetectionId = nextEditingId;
+      if (previous !== null) redrawDetectionLayers(previous);
+      if (nextEditingId !== null) redrawDetectionLayers(nextEditingId);
+      drawInteractionPresentationLayer(currentMediaTime);
+      renderNow();
+    }
+
+    if (
+      state.kind === AnnotationGestureStateKind.Idle &&
+      fastTranslatedDetectionId !== null
+    ) {
+      const id = fastTranslatedDetectionId;
+      fastTranslatedDetectionId = null;
+      regionLayer.translateDetection(id, 0, 0);
+      labelLayer?.translateDetection(id, 0, 0);
+      regionLayer.drawFrame(currentMediaTime, viewportScale);
+      labelLayer?.drawFrame(currentMediaTime, viewportScale);
+      renderNow();
+    }
   });
   const handleKeyDown = (event: KeyboardEvent) => {
     if (event.key === "Tab" && interactionLayer) {
@@ -606,7 +647,7 @@ export async function createPixiMediaScene(
         UniformGroup,
         focusStyle: options.focusStyle,
         isDetectionVisible: (detection) =>
-          !resolveContextState(detection).hidden,
+          !resolveAnnotationStyleState(detection, currentVisibility).hidden,
       })
     : undefined;
   let mediaSprite: InstanceType<typeof Sprite> | undefined;
@@ -1197,7 +1238,7 @@ export async function createPixiMediaScene(
         vectorLayer.setStyles({});
         labelLayer?.setLabelStyle(currentLabelStyle);
         polygonLayer?.setPolygonStyle(currentPolygonStyle);
-        if (maskVisibilityChanged && (currentMaskStyle || currentFocusStyle)) {
+        if (maskVisibilityChanged && resolveMaskPreparationStyle()) {
           visibilityVersion += 1;
           syncMaskPreparation();
         }
@@ -1225,6 +1266,7 @@ export async function createPixiMediaScene(
         polylineStyle: presentation.polylineStyle,
         keypointStyle: presentation.keypointStyle,
       });
+      annotationOverlayLayer.setKeypointStyle(presentation.keypointStyle);
       if (
         presentation.boxCornerStyle !== undefined ||
         presentation.ellipseStyle !== undefined ||
@@ -1895,7 +1937,7 @@ export async function createPixiMediaScene(
         UniformGroup,
         focusStyle,
         isDetectionVisible: (detection) =>
-          !resolveContextState(detection).hidden,
+          !resolveAnnotationStyleState(detection, currentVisibility).hidden,
       });
     }
 
@@ -1946,10 +1988,14 @@ export async function createPixiMediaScene(
 
     focusLayer.drawFrame({
       frame,
-      hoveredPick: interactionState?.hoveredPick ?? null,
+      hoveredPick: withEditingPreview(
+        filterVisiblePick(interactionState?.hoveredPick ?? null),
+      ),
       idMaskArtifact: maskLayer?.getActiveIdMaskFrameTexture() ?? null,
       mediaTime,
-      selectedPick: interactionState?.selectedPick ?? null,
+      selectedPick: withEditingPreview(
+        filterVisiblePick(interactionState?.selectedPick ?? null),
+      ),
       viewportScale,
     });
   }
@@ -2340,17 +2386,45 @@ export async function createPixiMediaScene(
     labelSlot.setDisplay(labelLayer.createContainer());
   }
 
-  function isUnderEditingGesture(detection: Detection) {
+  function editingPreviewFor(detection: Detection): Detection | null {
     const state = options.editingEngine?.getState();
 
-    return (
-      state !== undefined &&
+    return state !== undefined &&
       (state.kind === AnnotationGestureStateKind.Moving ||
         state.kind === AnnotationGestureStateKind.Resizing) &&
       state.preview !== null &&
       detection.id !== undefined &&
       state.activeDetectionId === detection.id
-    );
+      ? state.preview
+      : null;
+  }
+
+  function isUnderEditingGesture(detection: Detection) {
+    return editingPreviewFor(detection) !== null;
+  }
+
+  /**
+   * Ambient focus falls back to the whole frame when it sees no pick, so a
+   * pick whose detection is hidden has to read as no pick at all.
+   */
+  function filterVisiblePick<T extends { readonly detection: Detection }>(
+    pick: T | null,
+  ): T | null {
+    return pick &&
+      !resolveAnnotationStyleState(pick.detection, currentVisibility).hidden
+      ? pick
+      : null;
+  }
+
+  /** Point a pick at the live editing preview so focus follows the gesture. */
+  function withEditingPreview<T extends { readonly detection: Detection }>(
+    pick: T | null,
+  ): T | null {
+    if (!pick) return null;
+
+    const preview = editingPreviewFor(pick.detection);
+
+    return preview ? { ...pick, detection: preview } : pick;
   }
 
   function createVisibilityMaskStyle(style: MaskStyle): MaskStyle {
