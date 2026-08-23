@@ -74,7 +74,7 @@ const session = await createMediaSession({
           datasetId: "video-123-predictions",
         },
         id: PREDICTIONS_SOURCE_ID,
-        requiredForPlayback: true,
+        requiredForCoverage: true,
       },
       {
         appendable: {
@@ -103,7 +103,7 @@ const session = await createMediaSession({
           }),
           maskStyle: null,
         },
-        requiredForPlayback: false,
+        requiredForCoverage: false,
       },
     ],
   },
@@ -129,11 +129,11 @@ await session.replaceDetectionFrames(draftFrames, {
 });
 ```
 
-`requiredForPlayback` picks which entries the composed source's `waitForRange`
-fans out to: predictions here, not drafts. That waiter is what an enabled
-`detections.playbackGate` awaits. The gate is off by default, so on a default
-session the flag reaches only an app that calls `waitForRange` on
-`session.detectionSource` itself.
+`requiredForCoverage` picks which entries the composed source's `waitForRange`
+fans out to: predictions here, not drafts. Awaiting `waitForRange` on
+`session.detectionSource` therefore returns once predictions cover the range,
+while drafts may still be loading. An enabled `detections.playbackGate` awaits
+that same waiter. The gate is off by default.
 
 `order` controls draw order. Lower sources compose first. Higher sources render
 later and appear on top.
@@ -209,9 +209,9 @@ const source = createCompositeDetectionFrameSource({
 - Use multiple sources when the app needs separate ownership, separate writes,
   separate retention, separate presentation, or source-aware interaction.
 - Keep source IDs stable and app-owned.
-- Set `requiredForPlayback: false` when a source should not hold the coverage
+- Set `requiredForCoverage: false` when a source should not hold the coverage
   wait, whether that wait is your own `waitForRange` call on
   `session.detectionSource` or an enabled `detections.playbackGate`. The gate is
-  off by default, so on a default session only your own call reaches the flag.
+  off by default.
 - Do not combine `detections.sources` with single-source inputs such as
   `frames`, `source`, or `appendable`.

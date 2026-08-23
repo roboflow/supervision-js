@@ -274,13 +274,10 @@ export interface CompositeDetectionFrameSourceEntry {
    */
   readonly sync?: DetectionFrameSelectionOptions;
   /**
-   * When false, the composed source's `waitForRange` skips this entry.
-   *
-   * An enabled detection playback gate awaits that waiter, and so does a caller
-   * awaiting coverage itself. With the gate off, which is the default, the flag
-   * reaches only the caller.
+   * When false, the composed source's `waitForRange` resolves without waiting
+   * for this entry. Defaults to true.
    */
-  readonly requiredForPlayback?: boolean;
+  readonly requiredForCoverage?: boolean;
 }
 
 export interface CompositeDetectionFrameSourceOptions extends DetectionFrameSelectionOptions {

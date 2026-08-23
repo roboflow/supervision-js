@@ -1,11 +1,7 @@
-import { resolveStyleValue } from "#styles/style-value";
-import { resolveStrokeStyle } from "#styles/stroke-style";
 import {
   BoxShape,
   type BoxDrawInstruction,
-  type BoxFillStyle,
   type BoxStyle,
-  type BoxStrokeStyle,
 } from "#types/box-style";
 import type { Detection, Rect } from "#types/detections";
 import {
@@ -14,10 +10,7 @@ import {
   type InteractionStyle,
   type InteractionStyleContext,
 } from "#types/interaction-style";
-import type {
-  DetectionStylePredicate,
-  DetectionStyleValue,
-} from "#types/style";
+import type { DetectionStylePredicate } from "#types/style";
 
 const DEFAULT_HOVER_FILL_COLOR = 0x67e8f9;
 const DEFAULT_HOVER_FILL_ALPHA = 0.1;
@@ -42,41 +35,6 @@ export interface BaseInteractionStyleOptions {
    */
   readonly selected?: InteractionPresentation | null;
   /**
-   * Highlight geometry. Pass a resolver for per-class or per-state changes.
-   *
-   * @deprecated Prefer `hovered.boxStyle` and `selected.boxStyle`.
-   */
-  readonly shape?: DetectionStyleValue<BoxShape, InteractionStyleContext>;
-  /**
-   * Rounded highlight corner radius in media pixels.
-   *
-   * @deprecated Prefer `hovered.boxStyle` and `selected.boxStyle`.
-   */
-  readonly cornerRadius?: DetectionStyleValue<
-    number | undefined,
-    InteractionStyleContext
-  >;
-  /**
-   * Highlight stroke. Pass `null` to disable strokes, or a resolver for
-   * per-state/per-detection styling.
-   *
-   * @deprecated Prefer `hovered.boxStyle` and `selected.boxStyle`.
-   */
-  readonly stroke?: DetectionStyleValue<
-    Partial<BoxStrokeStyle> | null,
-    InteractionStyleContext
-  >;
-  /**
-   * Highlight fill. Pass `null` to disable fills, or a resolver for
-   * per-state/per-detection styling.
-   *
-   * @deprecated Prefer `hovered.boxStyle` and `selected.boxStyle`.
-   */
-  readonly fill?: DetectionStyleValue<
-    Partial<BoxFillStyle> | null,
-    InteractionStyleContext
-  >;
-  /**
    * Return false to skip rendering an interaction highlight.
    */
   readonly shouldRender?: DetectionStylePredicate<InteractionStyleContext>;
@@ -86,8 +44,8 @@ export interface BaseInteractionStyleOptions {
  * Default configurable interaction style.
  *
  * It resolves hover and selected picks into state-specific presentations using
- * the same style contracts as normal boxes, masks, and labels. The older
- * rectangle options are kept as compatibility sugar and resolve to a box style.
+ * the same style contracts as normal boxes, masks, and labels. A state left
+ * unconfigured falls back to a highlight rectangle over the detection.
  */
 export class BaseInteractionStyle implements InteractionStyle {
   protected readonly options: BaseInteractionStyleOptions;
@@ -120,95 +78,27 @@ export class BaseInteractionStyle implements InteractionStyle {
     }
 
     return {
-      boxStyle: createResolvedBoxStyle(
-        this.resolveBoxInstruction(detection, context, rect),
-      ),
-    };
-  }
-
-  protected resolveBoxInstruction(
-    detection: Detection,
-    context: InteractionStyleContext,
-    rect: Rect,
-  ): BoxDrawInstruction {
-    const shape = this.resolveShape(detection, context);
-    const cornerRadius = this.resolveCornerRadius(detection, context, shape);
-    const instruction: BoxDrawInstruction = {
-      fill: this.resolveFill(detection, context),
-      rect,
-      shape,
-      stroke: this.resolveStroke(detection, context),
-    };
-
-    if (cornerRadius !== undefined) {
-      return {
-        ...instruction,
-        cornerRadius,
-      };
-    }
-
-    return instruction;
-  }
-
-  protected resolveShape(
-    detection: Detection,
-    context: InteractionStyleContext,
-  ): BoxShape {
-    return (
-      resolveStyleValue(this.options.shape, detection, context) ?? BoxShape.Rect
-    );
-  }
-
-  protected resolveCornerRadius(
-    detection: Detection,
-    context: InteractionStyleContext,
-    shape: BoxShape,
-  ): number | undefined {
-    if (shape !== BoxShape.RoundedRect) {
-      return undefined;
-    }
-
-    return resolveStyleValue(this.options.cornerRadius, detection, context);
-  }
-
-  protected resolveStroke(
-    detection: Detection,
-    context: InteractionStyleContext,
-  ): BoxStrokeStyle | undefined {
-    const stroke = resolveStyleValue(this.options.stroke, detection, context);
-
-    if (stroke === null) {
-      return undefined;
-    }
-
-    const defaults = getStateDefaults(context.state);
-    return resolveStrokeStyle(stroke, {
-      alpha: defaults.strokeAlpha,
-      color: defaults.strokeColor,
-      width: defaults.strokeWidth,
-    });
-  }
-
-  protected resolveFill(
-    detection: Detection,
-    context: InteractionStyleContext,
-  ): BoxFillStyle | undefined {
-    const fill = resolveStyleValue(this.options.fill, detection, context);
-
-    if (fill === null) {
-      return undefined;
-    }
-
-    const defaults = getStateDefaults(context.state);
-
-    return {
-      alpha: fill?.alpha ?? defaults.fillAlpha,
-      color: fill?.color ?? defaults.fillColor,
+      boxStyle: createDefaultHighlightBoxStyle(context.state, rect),
     };
   }
 }
 
-function createResolvedBoxStyle(instruction: BoxDrawInstruction): BoxStyle {
+function createDefaultHighlightBoxStyle(
+  state: DetectionInteractionState,
+  rect: Rect,
+): BoxStyle {
+  const defaults = getStateDefaults(state);
+  const instruction: BoxDrawInstruction = {
+    fill: { alpha: defaults.fillAlpha, color: defaults.fillColor },
+    rect,
+    shape: BoxShape.Rect,
+    stroke: {
+      alpha: defaults.strokeAlpha,
+      color: defaults.strokeColor,
+      width: defaults.strokeWidth,
+    },
+  };
+
   return {
     resolve() {
       return instruction;

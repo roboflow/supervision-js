@@ -137,13 +137,10 @@ export interface MediaSessionDetectionSourceOptions {
    */
   readonly sync?: MediaSessionDetectionSyncOptions;
   /**
-   * When false, the composed source's `waitForRange` skips this entry.
-   *
-   * An enabled detection playback gate awaits that waiter, and so does a host
-   * that calls `waitForRange` on `MediaSession.detectionSource` itself. With
-   * the gate off, which is the default, the flag reaches only the host.
+   * When false, `waitForRange` on `MediaSession.detectionSource` resolves
+   * without waiting for this source. Defaults to true.
    */
-  readonly requiredForPlayback?: boolean;
+  readonly requiredForCoverage?: boolean;
 }
 
 export interface MediaSessionDetectionOptions {

@@ -141,7 +141,7 @@ describe("createCompositeDetectionFrameSource", () => {
     ]);
   });
 
-  it("waits only for sources required for playback", async () => {
+  it("waits only for sources required for coverage", async () => {
     const requiredWaitForRange = vi.fn(async () => undefined);
     const optionalWaitForRange = vi.fn(async () => undefined);
     const source = createCompositeDetectionFrameSource({
@@ -155,7 +155,7 @@ describe("createCompositeDetectionFrameSource", () => {
         },
         {
           id: "optional",
-          requiredForPlayback: false,
+          requiredForCoverage: false,
           source: {
             loadFrames: vi.fn(async () => []),
             waitForRange: optionalWaitForRange,

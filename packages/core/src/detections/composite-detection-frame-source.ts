@@ -23,7 +23,7 @@ interface NormalizedCompositeSource {
   readonly declarationIndex: number;
   readonly id: string;
   readonly order: number;
-  readonly requiredForPlayback: boolean;
+  readonly requiredForCoverage: boolean;
   readonly source: DetectionFrameSource;
   readonly sync?: DetectionFrameSelectionOptions;
 }
@@ -90,7 +90,7 @@ export function createCompositeDetectionFrameSource(
     async waitForRange(range) {
       await Promise.all(
         sources
-          .filter((source) => source.requiredForPlayback)
+          .filter((source) => source.requiredForCoverage)
           .map((source) => source.source.waitForRange?.(range)),
       );
     },
@@ -144,7 +144,7 @@ function normalizeCompositeSources(
         declarationIndex,
         id: entry.id,
         order: entry.order ?? 0,
-        requiredForPlayback: entry.requiredForPlayback !== false,
+        requiredForCoverage: entry.requiredForCoverage !== false,
         source:
           entry.source ?? createArrayDetectionFrameSource(entry.frames ?? []),
         sync: entry.sync,
