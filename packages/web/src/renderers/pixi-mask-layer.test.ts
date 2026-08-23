@@ -209,6 +209,18 @@ describe("pixi mask layer", () => {
     expect(preparedWindow.options?.resolveMaxRasterWidth?.()).toBe(572);
   });
 
+  it("holds a box that states no ceiling to the ratio the decode uses", () => {
+    const layer = maskLayerWithDisplayBox({
+      acceptsUnalignedTextureRows: true,
+      display: { devicePixelRatio: 3, maxDevicePixelRatio: undefined },
+    });
+
+    layer.createSprite({ height: 2016, width: 1504 });
+
+    // 2x of the fitted 572.2, not the 1717 a 3x display would ask for.
+    expect(preparedWindow.options?.resolveMaxRasterWidth?.()).toBe(1145);
+  });
+
   it("asks for no width of its own before a sprite gives it media dimensions", () => {
     maskLayerWithDisplayBox({ acceptsUnalignedTextureRows: true });
 
@@ -468,12 +480,14 @@ describe("pixi mask layer", () => {
 function maskLayerWithDisplayBox(options: {
   readonly acceptsUnalignedTextureRows: boolean;
   readonly artifactKind?: RenderPreparationArtifactKind;
+  readonly display?: Partial<IdMaskDisplayBox>;
 }) {
   const display: IdMaskDisplayBox = {
     boxHeight: 767,
     boxWidth: 574,
     devicePixelRatio: 2,
     maxDevicePixelRatio: 1,
+    ...options.display,
   };
   const maskFrame: RenderPreparationMaskFrameOptions & {
     readonly display: IdMaskDisplayBox;

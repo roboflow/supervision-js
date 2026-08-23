@@ -1,3 +1,4 @@
+import { tintedMaskVertexWgsl } from "#renderers/mask-vertex-wgsl";
 import {
   MAX_ID_MASK_PALETTE_ENTRIES,
   MAX_ID_MASK_STROKE_WIDTH,
@@ -191,7 +192,7 @@ export function createPixiIdMaskShaderRenderer(options: {
         },
         vertex: {
           entryPoint: "mainVertex",
-          source: idMaskVertexWgsl,
+          source: tintedMaskVertexWgsl,
         },
       },
       resources: {
@@ -377,53 +378,6 @@ void main(void) {
 // uniform array tightly packed, so uStrokeWidths is read back as vec4 lanes. That
 // only lines up while the palette entry count stays a multiple of four.
 const ID_MASK_STROKE_WIDTH_LANES = MAX_ID_MASK_PALETTE_ENTRIES / 4;
-
-const idMaskVertexWgsl = `
-struct GlobalUniforms {
-  uProjectionMatrix: mat3x3<f32>,
-  uWorldTransformMatrix: mat3x3<f32>,
-  uWorldColorAlpha: vec4<f32>,
-  uResolution: vec2<f32>,
-}
-
-struct LocalUniforms {
-  uTransformMatrix: mat3x3<f32>,
-  uColor: vec4<f32>,
-  uRound: f32,
-}
-
-@group(0) @binding(0) var<uniform> globalUniforms: GlobalUniforms;
-@group(1) @binding(0) var<uniform> localUniforms: LocalUniforms;
-
-struct VertexOutput {
-  @builtin(position) position: vec4<f32>,
-  @location(0) vUV: vec2<f32>,
-  @location(1) vColor: vec4<f32>,
-}
-
-@vertex
-fn mainVertex(
-  @location(0) aPosition: vec2<f32>,
-  @location(1) aUV: vec2<f32>,
-) -> VertexOutput {
-  let modelViewProjectionMatrix =
-    globalUniforms.uProjectionMatrix *
-    globalUniforms.uWorldTransformMatrix *
-    localUniforms.uTransformMatrix;
-
-  var output: VertexOutput;
-
-  output.position = vec4<f32>(
-    (modelViewProjectionMatrix * vec3<f32>(aPosition, 1.0)).xy,
-    0.0,
-    1.0
-  );
-  output.vUV = aUV;
-  output.vColor = globalUniforms.uWorldColorAlpha * localUniforms.uColor;
-
-  return output;
-}
-`;
 
 const idMaskFragmentWgsl = `
 struct MaskUniforms {

@@ -250,6 +250,8 @@ function createMainThreadMaskFramePreparer(
           canvas.height = 0;
         },
         height: preparedPixels.height,
+        // The halo lays this plane into a canvas sized from the composite, so
+        // a raster width of its own would shear every row.
         idMaskData: createIdMaskRasterFrame(job.instructions)?.data,
         key: job.key,
         kind: PreparedMaskFrameKind.RgbaImage,

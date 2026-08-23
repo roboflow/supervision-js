@@ -19,6 +19,7 @@ import type {
   ExtractedFrame,
 } from "supervision-js-video-engine/analysis";
 
+import { resolveDisplayPixelRatio } from "./display-pixel-ratio";
 import {
   rethrowEngineImportFailure,
   VIDEO_ENGINE_ANALYSIS_ENTRY,
@@ -29,7 +30,6 @@ const MILLISECONDS_PER_SECOND = 1000;
 const DEFAULT_FRAME_RATE = 30;
 const TIMESTAMP_EPSILON_SECONDS = 1e-6;
 const FRAMES_PRESENTATION_PREVIEW_MAX_WIDTH_PX = 320;
-const DEFAULT_MAX_DEVICE_PIXEL_RATIO = 2;
 
 export interface VideoEngineMediaSourceOptions extends Omit<
   VideoEngineOptions,
@@ -156,14 +156,9 @@ function framesPreviewWidth(
     return FRAMES_PRESENTATION_PREVIEW_MAX_WIDTH_PX;
   }
 
-  const devicePixelRatio = Math.min(
-    display.devicePixelRatio > 0 ? display.devicePixelRatio : 1,
-    display.maxDevicePixelRatio ?? DEFAULT_MAX_DEVICE_PIXEL_RATIO,
-  );
-
   return Math.min(
     FRAMES_PRESENTATION_PREVIEW_MAX_WIDTH_PX,
-    Math.ceil(display.boxWidth * devicePixelRatio),
+    Math.ceil(display.boxWidth * resolveDisplayPixelRatio(display)),
   );
 }
 

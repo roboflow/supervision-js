@@ -1,3 +1,4 @@
+import { resolveDisplayPixelRatio } from "#media/display-pixel-ratio";
 import {
   pickDetectionByMaskId,
   pickDetectionAtPoint as pickDetectionAtPointCpu,
@@ -528,10 +529,7 @@ export function createPixiMaskLayer(options: {
       display.boxWidth / mediaWidth,
       display.boxHeight / mediaHeight,
     );
-    const pixelRatio = Math.min(
-      display.devicePixelRatio,
-      display.maxDevicePixelRatio ?? display.devicePixelRatio,
-    );
+    const pixelRatio = resolveDisplayPixelRatio(display);
 
     return fit > 0 && pixelRatio > 0
       ? alignRasterWidth(Math.ceil(mediaWidth * fit * pixelRatio))

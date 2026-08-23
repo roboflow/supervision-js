@@ -93,6 +93,8 @@ function prepareMaskFrame(message: MaskPreparationWorkerRequest) {
       preparedPixels.height,
     );
     const imageBitmap = createImageBitmapFromImageData(imageData);
+    // The halo lays this plane into a canvas sized from the composite, so a
+    // raster width of its own would shear every row.
     const idMaskData = createIdMaskRasterFrame(message.job.instructions)?.data;
     const idMaskTransfers = idMaskData ? [idMaskData.buffer] : [];
 

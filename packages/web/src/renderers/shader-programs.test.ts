@@ -129,15 +129,43 @@ function readStage(
 }
 
 function readTemplate(source: string, name: string): string {
+  for (const module of [source, ...readImportedSources(source)]) {
+    const template = findTemplate(module, name);
+
+    if (template !== undefined) {
+      return expandTemplate(module, template);
+    }
+  }
+
+  throw new Error(`no template literal declares ${name}`);
+}
+
+function readImportedSources(source: string): readonly string[] {
+  return [...source.matchAll(/from "(?:\.\/|#renderers\/)([\w-]+)"/g)].map(
+    (match) => readSource(`${match[1]!}.ts`),
+  );
+}
+
+function findTemplate(source: string, name: string): string | undefined {
   const declaration = source.indexOf(`const ${name} = \``);
 
   if (declaration < 0) {
-    throw new Error(`no template literal declares ${name}`);
+    return undefined;
   }
 
   const open = source.indexOf("`", declaration);
 
   return source.slice(open + 1, source.indexOf("`", open + 1));
+}
+
+function expandTemplate(source: string, template: string): string {
+  // A shader also interpolates plain numbers, which name no template and so
+  // stay as written.
+  return template.replace(/\$\{(\w+)\}/g, (reference, name: string) => {
+    const part = findTemplate(source, name);
+
+    return part === undefined ? reference : expandTemplate(source, part);
+  });
 }
 
 function readNamedBlock(source: string, name: string): string | undefined {
