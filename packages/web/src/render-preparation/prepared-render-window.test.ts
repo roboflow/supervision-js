@@ -104,6 +104,15 @@ const deepFrames = Array.from({ length: 40 }, (_, frameIndex) => ({
   frameIndex,
   mediaTime: frameIndex * 0.04,
 })) satisfies DetectionFrame[];
+const HORSE_TRAIL_DURATION_SECONDS = 70.4233;
+const HORSE_TRAIL_FRAME_PITCH_SECONDS = 1 / 30.004;
+const HORSE_TRAIL_PLAYHEAD_SECONDS = 107 * HORSE_TRAIL_FRAME_PITCH_SECONDS;
+const HORSE_TRAIL_BUFFER_END_SECONDS = 10.54;
+const horseTrailFrames = Array.from({ length: 340 }, (_, frameIndex) => ({
+  detections: [],
+  frameIndex,
+  mediaTime: frameIndex * HORSE_TRAIL_FRAME_PITCH_SECONDS,
+})) satisfies DetectionFrame[];
 
 describe("prepared render window", () => {
   it("keeps prepared overlap across an immutable rolling buffer refresh", async () => {
@@ -1897,6 +1906,67 @@ describe("prepared render window", () => {
       vi.useRealTimers();
     }
   });
+
+  it("reports the reach of the run it cooked, not a lap back to a frame the playhead has passed", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const onDiagnostics = vi.fn();
+      const detectionTimeline = createBufferedSpanTimeline(horseTrailFrames);
+      const renderWindow = createPreparedRenderWindow({
+        detectionTimeline,
+        maskStyle: new BaseMaskStyle(),
+        renderPreparation: {
+          maskFrame: {
+            maxPendingFrameCount: 400,
+            prefetchFrameCount: 211,
+            scheduleBatchSize: 400,
+            scanIntervalSeconds: 0,
+          },
+          onDiagnostics,
+        },
+      });
+
+      (
+        renderWindow as unknown as {
+          setTimelineContext(context: {
+            readonly duration: number;
+            readonly loop: boolean;
+          }): void;
+        }
+      ).setTimelineContext({
+        duration: HORSE_TRAIL_DURATION_SECONDS,
+        loop: true,
+      });
+
+      detectionTimeline.setBufferSpan(0, 0);
+      renderWindow.getFrame(0);
+      await flushMaskPreparationTimers(20);
+
+      detectionTimeline.setBufferSpan(
+        HORSE_TRAIL_PLAYHEAD_SECONDS,
+        HORSE_TRAIL_BUFFER_END_SECONDS,
+      );
+      renderWindow.getFrame(HORSE_TRAIL_PLAYHEAD_SECONDS);
+      await flushMaskPreparationTimers(20);
+
+      expect(onDiagnostics).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          artifacts: [
+            expect.objectContaining({
+              preparedAheadFrameCount: 210,
+              preparedAheadSeconds: expect.closeTo(6.9657, 3),
+            }),
+          ],
+        }),
+      );
+
+      renderWindow.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 function createPausedScopeRenderWindow(options: {
@@ -2098,6 +2168,44 @@ function createTimeline(
     selectFrame: vi.fn((mediaTime: number) =>
       detectionFrames.find((frame) => frame.mediaTime === mediaTime),
     ),
+  };
+}
+
+function createBufferedSpanTimeline(
+  detectionFrames: readonly DetectionFrame[],
+): BufferedDetectionTimeline & {
+  setBufferSpan(startTime: number, endTime: number): void;
+} {
+  let bufferStartTime = 0;
+  let bufferEndTime = 0;
+  const readBufferedFrames = () =>
+    detectionFrames.filter(
+      (frame) =>
+        frame.mediaTime >= bufferStartTime && frame.mediaTime <= bufferEndTime,
+    );
+
+  return {
+    destroy: vi.fn(),
+    getBufferedFrames: vi.fn(readBufferedFrames),
+    getState: vi.fn(() => ({
+      bufferEndTime,
+      bufferStartTime,
+      detectionCount: 0,
+      errorMessage: null,
+      frameCount: readBufferedFrames().length,
+      requestedEndTime: bufferEndTime,
+      requestedStartTime: bufferStartTime,
+      status: DetectionBufferStatus.Ready,
+    })),
+    prepare: vi.fn(),
+    prefetch: vi.fn(),
+    selectFrame: vi.fn((mediaTime: number) =>
+      readBufferedFrames().find((frame) => frame.mediaTime === mediaTime),
+    ),
+    setBufferSpan(startTime: number, endTime: number) {
+      bufferStartTime = startTime;
+      bufferEndTime = endTime;
+    },
   };
 }
 

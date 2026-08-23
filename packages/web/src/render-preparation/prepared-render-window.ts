@@ -168,7 +168,7 @@ export function createPreparedRenderWindow(options: {
   let lastPreparedWindowMediaTime: number | null = null;
   let lastPreparedWindowFrames: readonly DetectionFrame[] = [];
   let lastPreparedTargetFrames: readonly DetectionFrame[] = [];
-  const timeline = createPreparedWindowTimeline({ getFrameKey });
+  const timeline = createPreparedWindowTimeline();
   let activeMaskFrame: {
     readonly key: string;
     readonly mediaTime: number;
@@ -572,11 +572,11 @@ export function createPreparedRenderWindow(options: {
     );
     const retainedKeys = getKnownFrameRetentionKeys(bufferedFrames);
 
-    timeline.rememberFrames(bufferedFrames, retainedKeys);
     pruneObservedMaskFrames(retainedKeys);
     lastPreparedWindowFrames = timeline.getWindowFrames(
       bufferedFrames,
       anchorTime,
+      bufferState.bufferEndTime,
     );
 
     const targetFrameCount = getPrefetchFrameCount();
@@ -940,7 +940,6 @@ export function createPreparedRenderWindow(options: {
     queuedMaskFrameKeys.length = 0;
     emptyMaskFrameKeys.clear();
     observedMaskFrames.clear();
-    timeline.clear();
 
     if (preparedMaskFrames.size > 0) {
       const maskFrames = Array.from(preparedMaskFrames.values());

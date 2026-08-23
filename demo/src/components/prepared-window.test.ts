@@ -17,7 +17,7 @@ function artifact(
 }
 
 describe("readPreparedWindow", () => {
-  it("reports the reach the frame count can account for", () => {
+  it("reports the reach the cook published", () => {
     const reading = readPreparedWindow(
       artifact({ preparedAheadFrameCount: 211, preparedAheadSeconds: 7 }),
       30,
@@ -25,15 +25,6 @@ describe("readPreparedWindow", () => {
 
     expect(reading?.cookedFrameCount).toBe(211);
     expect(reading?.cookedSeconds).toBeCloseTo(7, 5);
-  });
-
-  it("refuses a lap-length reach that the frame count contradicts", () => {
-    const reading = readPreparedWindow(
-      artifact({ preparedAheadFrameCount: 211, preparedAheadSeconds: 66.86 }),
-      30,
-    );
-
-    expect(reading?.cookedSeconds).toBeCloseTo(211 / 30, 5);
   });
 
   it("takes the target from the frames the cook selected", () => {
@@ -74,11 +65,11 @@ describe("readPreparedWindow", () => {
 
   it("falls back to a 60Hz pitch when the source reported no rate", () => {
     const reading = readPreparedWindow(
-      artifact({ preparedAheadFrameCount: 60, preparedAheadSeconds: 99 }),
+      artifact({ preparedAheadFrameCount: 60, preparedAheadSeconds: 1 }),
       null,
     );
 
-    expect(reading?.cookedSeconds).toBeCloseTo(1, 5);
+    expect(reading?.targetSeconds).toBeCloseTo(1, 5);
   });
 
   it("reads nothing from an artifact that publishes no prepared run", () => {

@@ -24,6 +24,7 @@ import {
   isPlaybackRateSustained,
 } from "../session/playback-rate";
 import { selectPreparedWindowArtifact } from "../render-preparation";
+import { readPreparedWindow } from "./prepared-window";
 import { Readout } from "./Readout";
 
 export interface StatusPanelMediaState {
@@ -89,6 +90,10 @@ export const StatusPanel = memo(function StatusPanel({
     Boolean(detectionSourceState.errorMessage);
   const preparedWindowArtifact = selectPreparedWindowArtifact(
     renderPreparationDiagnostics,
+  );
+  const preparedWindow = readPreparedWindow(
+    preparedWindowArtifact,
+    sourceState?.estimatedFrameRate ?? null,
   );
 
   return (
@@ -254,12 +259,10 @@ export const StatusPanel = memo(function StatusPanel({
         <Readout
           label="Prepared Window"
           value={
-            preparedWindowArtifact
+            preparedWindow
               ? `${formatInteger(
-                  preparedWindowArtifact.preparedAheadFrameCount ?? 0,
-                )} frames | ${formatExactTime(
-                  preparedWindowArtifact.preparedAheadSeconds ?? 0,
-                )}`
+                  preparedWindow.cookedFrameCount,
+                )} frames | ${formatExactTime(preparedWindow.cookedSeconds)}`
               : "-"
           }
         />

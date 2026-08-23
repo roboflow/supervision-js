@@ -14,19 +14,7 @@ export interface PreparedWindowReading {
   readonly targetSeconds: number;
 }
 
-/**
- * Reads the cook's own numbers into something a timeline can draw.
- *
- * The engine measures the last cooked frame's distance the long way round a
- * looping timeline, so a run ending just behind the playhead is reported as
- * almost a full lap ahead: measured here at 1x, `preparedAheadSeconds` reads
- * 66.86s for the same 211 frames that cover 7.0s. The frame count is never
- * wrapped, so it sets the reach and the reported seconds may only shorten it.
- *
- * The cook may cover a fast playhead by preparing every second or third frame
- * instead of every one, which this reads as a shorter reach than the run truly
- * has. That direction is the safe one: the bar never claims more than is cooked.
- */
+/** Reads the cook's own numbers into something a timeline can draw. */
 export function readPreparedWindow(
   artifact: RenderPreparationArtifactDiagnostics | null,
   sourceFrameRate: number | null,
@@ -41,7 +29,6 @@ export function readPreparedWindow(
       : FALLBACK_FRAME_RATE;
   const framePitchSeconds = 1 / frameRate;
   const cookedFrameCount = Math.max(0, artifact.preparedAheadFrameCount);
-  const reportedSeconds = Math.max(0, artifact.preparedAheadSeconds ?? 0);
   const targetFrameCount = Math.max(
     cookedFrameCount,
     artifact.window?.targetFrameCount ?? artifact.prefetchCount ?? 0,
@@ -49,10 +36,7 @@ export function readPreparedWindow(
 
   return {
     cookedFrameCount,
-    cookedSeconds: Math.min(
-      reportedSeconds,
-      cookedFrameCount * framePitchSeconds,
-    ),
+    cookedSeconds: Math.max(0, artifact.preparedAheadSeconds ?? 0),
     framePitchSeconds,
     targetFrameCount,
     targetSeconds: targetFrameCount * framePitchSeconds,
