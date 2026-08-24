@@ -15,6 +15,7 @@ import {
   openControlSections,
   startingAt,
 } from "./hooks.mjs";
+import { percentile, round } from "./stats.mjs";
 
 const VIEWPORT = { width: 1500, height: 1150, deviceScaleFactor: 1 };
 const SEEK_FRACTIONS = [0.1, 0.3, 0.5, 0.7, 0.9];
@@ -89,8 +90,8 @@ function invalid(reason) {
  * every page-wide frame time and long task this tool samples. Every number
  * here therefore states the view it was taken in, and the run picks one rather
  * than inheriting whatever the last person clicked. */
-const VIEW_MODE_STORAGE_KEY = "supervision-demo:view-mode";
-const VIEW_MODES = ["benchmarks", "demo", "debug"];
+export const VIEW_MODE_STORAGE_KEY = "supervision-demo:view-mode";
+export const VIEW_MODES = ["benchmarks", "demo", "debug"];
 
 export async function openDemoPage(
   chromeDebugUrl,
@@ -1128,17 +1129,6 @@ export function stats(samples) {
     p95: percentile(sorted, 0.95),
     max: sorted.at(-1) ?? null,
   };
-}
-
-function percentile(sorted, fraction) {
-  if (sorted.length === 0) return null;
-  const rank = Math.ceil(fraction * sorted.length);
-  return sorted[Math.min(rank, sorted.length) - 1];
-}
-
-function round(value, digits) {
-  const factor = 10 ** digits;
-  return Math.round(value * factor) / factor;
 }
 
 export { Invalid, STARVATION_NOTE };

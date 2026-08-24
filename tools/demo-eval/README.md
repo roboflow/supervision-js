@@ -31,23 +31,31 @@ npm run eval:demo
 
 Flags, all optional:
 
-| flag                 | default                                                            |
-| -------------------- | ------------------------------------------------------------------ |
-| `--chrome-debug-url` | `http://127.0.0.1:9223`                                            |
-| `--url`              | `http://localhost:5173/`                                           |
-| `--out`              | `tools/demo-eval/report.json`                                      |
-| `--scenario`         | `all`, or a comma-separated subset (see the list below)            |
-| `--storybook`        | `http://localhost:6006`                                            |
-| `--battery`          | `http://127.0.0.1:8123/stress-battery.js`                          |
-| `--attempts`         | `3` tries before a disturbed window is invalid; each retry reloads |
-| `--repeat`           | `1` full pass; more takes the median and reports the spread        |
-| `--baseline`         | `tools/demo-eval/baseline.json`                                    |
-| `--update-baseline`  | off; records this run as the new baseline                          |
-| `--tolerance`        | the baseline file's own, normally `25` percent                     |
+| flag                       | default                                                                              |
+| -------------------------- | ------------------------------------------------------------------------------------ |
+| `--chrome-debug-url`       | `http://127.0.0.1:9223`                                                              |
+| `--url`                    | `http://localhost:5173/`                                                             |
+| `--out`                    | `tools/demo-eval/report.json`                                                        |
+| `--scenario`               | `all`, or a comma-separated subset (see the list below)                              |
+| `--storybook`              | `http://localhost:6006`                                                              |
+| `--battery`                | `http://127.0.0.1:8123/stress-battery.js`                                            |
+| `--attempts`               | `3` tries before a disturbed window is invalid; each retry reloads                   |
+| `--repeat`                 | `1` full pass; more takes the median and reports the spread                          |
+| `--baseline`               | `tools/demo-eval/baseline.json`                                                      |
+| `--update-baseline`        | off; records this run as the new baseline                                            |
+| `--allow-failing-baseline` | off; records a baseline over failing verdicts                                        |
+| `--tolerance`              | the baseline file's own, normally `25` percent                                       |
+| `--view`                   | `demo`; also `benchmarks`, `debug`, or `as-is` to take the view the demo was left in |
 
 `--scenario` also takes a comma-separated list, for example
 `--scenario drag,playhead`. Pass flags through npm with `--`, for example
 `npm run eval:demo -- --scenario cadence`.
+
+The view decides how much work the page does outside the scenario: the Debug
+view's readouts rewrite ten times a second and land in every frame time this
+tool samples. A baseline records the view it was measured in, and a run that
+compares against a baseline recorded in another view says so instead of
+printing deltas between two different pages.
 
 Scenario names: `sync`, `latency`, `layers`, `cadence`, `throttle`, `blanking`,
 `drag`, `playhead`, `backscrub`, `focus`, `battery`.

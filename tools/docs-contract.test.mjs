@@ -8,6 +8,7 @@ import ts from "typescript";
 import {
   checkChecksums,
   checkCommentFlags,
+  checkDeclaredFlags,
   checkExports,
   checkNpmScripts,
   checkPaths,
@@ -554,6 +555,12 @@ test("every flag a document shows is one its script reads", async () => {
   const { repository, documents } = await documentation();
 
   assert.deepEqual(await checkScriptFlags(repository, documents), []);
+});
+
+test("every flag a script declares is one the document beside it shows", async () => {
+  const { repository, documents } = await documentation();
+
+  assert.deepEqual(await checkDeclaredFlags(repository, documents), []);
 });
 
 test("every checksum a document quotes matches the file beside it", async () => {

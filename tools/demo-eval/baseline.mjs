@@ -12,6 +12,8 @@ import { execFileSync } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 
+import { round } from "./stats.mjs";
+
 const DEFAULT_TOLERANCE_PERCENT = 25;
 
 /**
@@ -483,11 +485,6 @@ function configP95(layers, name) {
 function maximum(values) {
   const usable = values.filter((value) => typeof value === "number");
   return usable.length === 0 ? undefined : Math.max(...usable);
-}
-
-function round(value, digits) {
-  const factor = 10 ** digits;
-  return Math.round(value * factor) / factor;
 }
 
 /** Every registry metric this report carries, as a flat key/value map. */

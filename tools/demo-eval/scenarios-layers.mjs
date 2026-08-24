@@ -11,6 +11,7 @@ import {
   VIEW_MODE_PREFIX,
   viewModeSelector,
 } from "./hooks.mjs";
+import { percentile, round } from "./stats.mjs";
 
 const SEEK_SECONDS = 2;
 const SETTLE_MS = 500;
@@ -541,9 +542,9 @@ function summarize(sample) {
       sorted.reduce((sum, value) => sum + value, 0) / sorted.length,
       2,
     ),
-    p50: percentile(sorted, 0.5),
-    p95: percentile(sorted, 0.95),
-    p99: percentile(sorted, 0.99),
+    p50: percentile(sorted, 0.5, 2),
+    p95: percentile(sorted, 0.95, 2),
+    p99: percentile(sorted, 0.99, 2),
     max: round(sorted.at(-1), 2),
     over20ms: sorted.filter((value) => value > SLOW_FRAME_MS).length,
     over34ms: sorted.filter((value) => value > DROPPED_FRAME_MS).length,
@@ -667,14 +668,4 @@ export function layersDetail(scenario, field) {
     );
   }
   return lines;
-}
-
-function percentile(sorted, fraction) {
-  const rank = Math.ceil(fraction * sorted.length);
-  return round(sorted[Math.min(rank, sorted.length) - 1], 2);
-}
-
-function round(value, digits) {
-  const factor = 10 ** digits;
-  return Math.round(value * factor) / factor;
 }

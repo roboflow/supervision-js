@@ -16,6 +16,7 @@ import {
   layerToggleSelector,
   openControlSections,
 } from "./hooks.mjs";
+import { percentile, round } from "./stats.mjs";
 
 const BLANKING_SEEK_SECONDS = 3;
 const BLANKING_SETTLE_MS = 1500;
@@ -395,7 +396,7 @@ export function summariseBlanking(samples) {
   const count = (predicate) => samples.filter(predicate).length;
   return {
     samples: samples.length,
-    preparedAheadMedian: percentile(preparedAhead, 0.5),
+    preparedAheadMedian: percentile(preparedAhead, 0.5, 3),
     preparedAheadMin: Math.min(...preparedAhead),
     nullDetectionFraction: round(
       count((sample) => sample.detectionTime === null) / samples.length,
@@ -752,7 +753,7 @@ export function summariseDrag(probe, { capture, frameRate, startedPaused }) {
     scrubRatePerSecond: round(scrubRate, 1),
     staleMeanMs: stales.length === 0 ? null : round(mean(stales), 1),
     lagMeanSeconds: lags.length === 0 ? null : round(mean(lags), 3),
-    holdP95Ms: percentile(holds, 0.95),
+    holdP95Ms: percentile(holds, 0.95, 3),
     holdMaxMs: round(Math.max(...holds), 1),
     framesPresented,
     framesPerSecond: round(framesPresented / dragSeconds, 2),
@@ -1082,7 +1083,7 @@ async function walk(session, geometry, stops) {
 function summariseWalk(walked) {
   const settles = walked.stops.map((stop) => stop.settleMs);
   return {
-    settleP95Ms: percentile(settles, 0.95),
+    settleP95Ms: percentile(settles, 0.95, 3),
     settleMaxMs: Math.max(...settles),
     preparedCount: walked.stops.filter((stop) => stop.prepared).length,
     stops: walked.stops,
@@ -1348,21 +1349,6 @@ export function guardDetail(name, scenario, field) {
 
 function mean(values) {
   return values.reduce((sum, value) => sum + value, 0) / values.length;
-}
-
-function percentile(values, fraction) {
-  const sorted = [...values].sort((a, b) => a - b);
-  if (sorted.length === 0) return 0;
-  const index = Math.min(
-    sorted.length - 1,
-    Math.max(0, Math.ceil(fraction * sorted.length) - 1),
-  );
-  return round(sorted[index], 3);
-}
-
-function round(value, digits) {
-  const factor = 10 ** digits;
-  return Math.round(value * factor) / factor;
 }
 
 export { Invalid };

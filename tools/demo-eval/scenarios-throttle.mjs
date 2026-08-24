@@ -2,6 +2,7 @@
  * against the rates the player has to hold to still be worth watching. */
 
 import { delay } from "./cdp.mjs";
+import { percentile, round } from "./stats.mjs";
 
 /* Chrome's throttle divides the CPU every thread of the renderer process gets.
  * A sweep of 1x/2x/4x/6x against the 70s horse fixture measured this page's own
@@ -288,16 +289,4 @@ export function throttleDetail(scenario, field) {
         `(ceiling ${floors.taskCeilingMs}ms)`,
     ),
   ];
-}
-
-function percentile(values, fraction) {
-  const sorted = [...values].sort((a, b) => a - b);
-  if (sorted.length === 0) return null;
-  const rank = Math.ceil(fraction * sorted.length);
-  return sorted[Math.min(rank, sorted.length) - 1];
-}
-
-function round(value, digits) {
-  const factor = 10 ** digits;
-  return Math.round(value * factor) / factor;
 }

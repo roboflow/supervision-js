@@ -91,3 +91,21 @@ describe("the eval hook catalogue", () => {
     }
   });
 });
+
+/* The harness drives the view the demo remembers by writing the demo's own
+ * localStorage key before it measures anything. A renamed key leaves the
+ * harness writing one nobody reads, and the run stays green while every number
+ * comes from whichever view the last person left the tab in. */
+describe("the demo view mode", () => {
+  it("writes the key and the modes the demo reads", async () => {
+    const demo = await import("../../demo/src/session/demo-view-mode");
+    const harness = await import("./scenarios.mjs");
+
+    expect(harness.VIEW_MODE_STORAGE_KEY).toEqual(
+      demo.DEMO_VIEW_MODE_STORAGE_KEY,
+    );
+    expect([...harness.VIEW_MODES].sort()).toEqual(
+      Object.values(demo.DemoViewMode).sort(),
+    );
+  });
+});

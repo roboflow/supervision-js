@@ -299,6 +299,52 @@ export async function checkScriptFlags(repository, documents) {
  * digest of that file, or a digest the file itself records. A checksum that has
  * drifted from its file is how a swapped input stays invisible.
  */
+/**
+ * A flag table is where a reader learns an option exists, so an option the
+ * script declares and its own document never shows is one only the source
+ * states. Declared means the option table, not every `--word` in the file: a
+ * script that spells a browser's flag in a comment claims nothing about its own
+ * interface.
+ */
+export async function checkDeclaredFlags(repository, documents) {
+  const failures = [];
+
+  for (const document of documents) {
+    if (!isColocated(document)) {
+      continue;
+    }
+
+    const text = document.blocks.map((block) => block.text).join("\n");
+    const invoked = new Map();
+
+    for (const block of document.blocks) {
+      if (block.kind !== "fence") {
+        continue;
+      }
+
+      for (const command of commandLines(block.text)) {
+        const target = await resolveScriptTarget(repository, command);
+
+        if (target) {
+          invoked.set(target.file, target);
+        }
+      }
+    }
+
+    for (const target of invoked.values()) {
+      for (const flag of await declaredFlags(target.file)) {
+        if (!new RegExp(`${flag}(?![a-z0-9-])`).test(text)) {
+          failures.push(
+            `${document.relative} shows no ${flag}, which ${target.relative} declares`,
+          );
+        }
+      }
+    }
+  }
+
+  return failures;
+}
+
 export async function checkChecksums(repository, documents) {
   const failures = [];
 
@@ -789,6 +835,7 @@ function scriptFlags(command, script) {
 }
 
 const flagCache = new Map();
+const declaredFlagCache = new Map();
 
 async function acceptedFlags(file, code) {
   const key = code === undefined ? file : `code:${file}`;
@@ -810,6 +857,26 @@ async function acceptedFlags(file, code) {
   }
 
   flagCache.set(key, flags);
+
+  return flags;
+}
+
+async function declaredFlags(file) {
+  if (!JAVASCRIPT.has(path.extname(file))) {
+    return [];
+  }
+
+  const cached = declaredFlagCache.get(file);
+
+  if (cached) {
+    return cached;
+  }
+
+  const flags = parseArgsOptionNames(file, await readFile(file, "utf8")).map(
+    (name) => `--${name}`,
+  );
+
+  declaredFlagCache.set(file, flags);
 
   return flags;
 }
