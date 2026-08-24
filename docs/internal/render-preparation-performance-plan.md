@@ -10,9 +10,9 @@ block playback or presentation.
 
 `supervision-js` currently keeps raw detections in cold storage, hydrates a hot
 detection window near playback time, and prepares mask render artifacts from
-that hot window. A prepared mask artifact is one composited image-like object per
-detection frame. Pixi then presents that artifact as a texture for the active
-frame.
+that hot window. A prepared mask artifact is one plane of pixels per detection
+frame, which Pixi presents as a texture for the active frame. Checkpoint 5
+records which plane that is.
 
 The current diagnostics expose total pending and prepared artifact counts, but
 they do not distinguish between:
@@ -164,47 +164,50 @@ preparation that never finishes". The prepared annotation window in
 [`video-engine-presentation.md`](video-engine-presentation.md) is what keeps a
 stale frame's annotations off that picture.
 
-On, the renderer awaits the scene before presenting a sample and holds until the
-prepared window leads the playhead by `requiredAheadSeconds`, which
-"buffers playback until render preparation reaches the requested lookahead"
-pins by name.
+On, and on a media source the renderer pulls decoded samples from, the renderer
+awaits the scene before presenting a sample and holds until the prepared window
+leads the playhead by `requiredAheadSeconds`, which "buffers playback until
+render preparation reaches the requested lookahead" pins by name. A source that
+presents its own frames owns the playhead, so the gate is accepted and ignored
+there, which is every session the video engine backs.
 
 The work reaches the host as an activity either way. A `RenderPreparing`
 activity sets `blockingPresentation` while the frame on screen waits for an
 artifact, and never sets `blockingPlayback`: a gated hold surfaces separately,
 as the `PlaybackBuffering` activity the buffering playback state raises.
 
-### 5. Future Mask Representation Research
+### 5. Mask Representation
 
-Status: baseline benchmark added.
+Status: shipped. The id raster is the default prepared mask artifact and the
+RGBA composite is its fallback.
 
-Spec:
+A prepared mask frame is an id raster, one byte per pixel naming the detection
+that owns it, next to the fill and stroke palettes the shader reads. Both the
+worker and the main-thread preparer build that raster first and answer with a
+composited RGBA frame only when it cannot represent the frame, which is a
+detection index at or past the 64-entry palette ceiling.
+`mask-frame-preparer.test.ts` pins both answers by name with "builds ID-mask
+rasters on the main thread" and "falls back to a composited RGBA frame past the
+ID palette". Either artifact draws the same picture.
 
-- Compare full RGBA composited mask frames with an ID-mask plus shader palette
-  path and a bounded mask atlas path.
-- Preserve current RLE cold storage and prepared artifact boundary.
-- Design for per-class color, opacity, borders, hover, and labels.
-- Do not replace the current implementation until benchmarks show the pressure.
-- Run `npm run benchmark:masks` to benchmark the basketball SAM3 fixture without
-  involving the demo UI.
+The raster is prepared at the width the picture can show rather than at media
+width, so a 1080p mask on a smaller viewport carries display-resolution bytes.
+Strokes ride the same raster and are drawn from the stroke palette, so a border
+costs a shader test per pixel instead of a CPU contour pass. The RGBA fallback
+still composites its borders.
 
-Test:
+The basketball fixture is what settled it, measured by `npm run benchmark:masks`
+for CPU preparation and `npm run benchmark:masks:gpu` for upload and draw, with
+the numbers in [`findings.md`](../../benchmark/masks/findings.md): a 5s prepared
+window of full-frame RGBA artifacts at 1920 x 1080 is roughly 1.2 GB of raw
+bytes, and the same window of id rasters is roughly 297 MB.
 
-- Programmatically measure current RGBA artifact preparation, RGBA artifact
-  preparation with mask borders, and an ID-mask candidate.
-- Report source fixture bytes, RLE payload bytes, prepared artifact bytes,
-  projected prepared-window byte pressure, and local CPU preparation timings.
-- Treat GPU upload/render timings as a separate browser/GPU follow-up because
-  the current Node benchmark estimates upload bytes but does not exercise Pixi
-  or the GPU.
+Still open:
 
-Current takeaway:
-
-- Current RGBA mask artifacts remain the stable implementation path because they
-  are simple and already work.
-- The basketball fixture shows full-frame RGBA artifacts are byte-heavy: a 5s
-  prepared window is roughly 1.2 GB of raw RGBA artifact bytes at 1920 x 1080.
-- The ID-mask candidate cuts that same 5s window to roughly 297 MB and makes
-  per-class style updates palette-sized instead of prepared-window-sized.
-- CPU mask borders are expensive enough that future border styling should move
-  toward an ID-mask/shader path rather than thicker CPU contour preparation.
+- A per-class style change clears the prepared mask frames and prepares them
+  again, because the palettes are written during preparation. Rewriting the
+  palettes on the artifacts already in hand would make that restyle
+  palette-sized. A style that names an `artifactKey` keeps its artifacts across
+  a change, which is how the focus and halo cooks avoid re-preparation.
+- The bounded mask atlas specced here was not built. The byte pressure the
+  atlas was meant to relieve is what the id raster took out.
