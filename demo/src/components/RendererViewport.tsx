@@ -210,6 +210,10 @@ function formatActivityDetail(activity: MediaSessionActivity) {
     return `${activity.preparedCount} ready, ${activity.pendingCount} pending`;
   }
 
+  if (activity.errorMessage) {
+    return activity.errorMessage;
+  }
+
   if (activity.detail) {
     return activity.detail;
   }

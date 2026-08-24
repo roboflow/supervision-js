@@ -95,6 +95,15 @@ through the same staging canvas every non-WebGPU scene already uses. The answer
 is a property of the browser, so nothing is probed per frame and a browser that
 takes the frame keeps the straight copy.
 
+That settles the upload and nothing else. A source only reaches the compositor
+once WebCodecs has decoded it, and `openInput` refuses a track whose codec
+`canDecode` rejects. A browser's WebCodecs support can be narrower than its media
+element's: Firefox 154 plays HEVC in a `<video>` while `VideoDecoder` reports
+`hvc1` and `hev1` configurations unsupported, so an HEVC source raises
+`DecodeUnsupported` before a frame is ever presented. The demo's own `horse_trail`
+fixture is HEVC Main 10, which is why it errors in Firefox while the H.264
+basketball fixtures play.
+
 ## Rendering Only On Change
 
 Under push presentation Pixi's ticker paints nothing. Every render is an
