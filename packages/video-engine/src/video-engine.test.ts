@@ -516,6 +516,39 @@ describe("VideoEngine", () => {
   });
 });
 
+describe("VideoEngine page heap", () => {
+  const USED_JS_HEAP_BYTES = 7_113_863;
+
+  it("the facade fills in the heap the worker realm cannot read", async () => {
+    vi.useFakeTimers();
+    // Blink exposes performance.memory on Window only and this realm has none,
+    // so the reading is installed here. After the swap fake timers make: they
+    // replace the whole performance object, discarding anything put on the one
+    // before it.
+    Object.defineProperty(performance, "memory", {
+      configurable: true,
+      value: { usedJSHeapSize: USED_JS_HEAP_BYTES },
+    });
+    const { engine } = setup();
+    await engine.load();
+    engine.armTrace(60000);
+    engine.startDiagnostics(10);
+    vi.advanceTimersByTime(100);
+    vi.useRealTimers();
+
+    expect(engine.getLatestDiagnostics()?.memory.jsHeapUsedBytes).toBe(
+      USED_JS_HEAP_BYTES,
+    );
+    // The trace is assembled inside the worker, which never sees the reading,
+    // so it says n/a rather than carrying a number from the wrong realm.
+    const trace = await engine.exportTrace();
+    expect(trace?.snapshots[0].memory.jsHeapUsedBytes).toBeNull();
+
+    engine.stopDiagnostics();
+    await engine.dispose();
+  });
+});
+
 describe("VideoEngine playback rate", () => {
   it("setPlaybackRate reaches the worker clock and wakes the rate channel once", async () => {
     const { engine, clock } = setup();

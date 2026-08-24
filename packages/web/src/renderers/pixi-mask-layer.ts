@@ -116,12 +116,30 @@ type UniformGroupConstructor = new (
   >,
 ) => PixiUniformGroup;
 
+/**
+ * What the mask layer has on screen after its last draw.
+ *
+ * `drawnFrameTime` is the DETECTION frame the visible raster belongs to, which
+ * is not always the frame the rest of the present drew: with the cook short of
+ * the presented frame, the layer keeps the previous mask up for up to
+ * MAX_PENDING_MASK_HOLD_SECONDS of media time. `heldStale` is that branch, and
+ * it separates a late cook from the layers resolving different frames, which
+ * have different fixes.
+ */
+export interface PixiMaskLayerState {
+  readonly drawnFrameTime: number | null;
+  readonly drawnFrameKey: string | null;
+  readonly heldStale: boolean;
+}
+
 export interface PixiMaskLayer {
   createSprite(dimensions: {
     width: number;
     height: number;
   }): PixiContainer | PixiSprite;
   drawFrame(mediaTime: number): void;
+  /** The state the last drawFrame or clearFrame left on screen. */
+  getDrawnState(): PixiMaskLayerState;
   /** Puts the media time in front of the cook without drawing it. */
   prepareFrame(mediaTime: number): void;
   clearFrame(): void;
@@ -227,6 +245,7 @@ export function createPixiMaskLayer(options: {
   let maskOpacity = resolveMaskStyleOpacity(options.maskStyle);
   let isFillVisible = true;
   let visibleMaskMediaTime: number | null = null;
+  let heldStale = false;
   let isDestroyed = false;
   const maskTextures = new Map<string, PixiTexture>();
   const haloTextures = new Map<string, PixiTexture>();
@@ -317,7 +336,18 @@ export function createPixiMaskLayer(options: {
 
       if (!canHoldVisibleMaskFor(preparedFrame.detectionFrame.mediaTime)) {
         hideSprite();
+        return;
       }
+
+      heldStale = true;
+    },
+
+    getDrawnState() {
+      return {
+        drawnFrameTime: visibleMaskMediaTime,
+        drawnFrameKey: visibleMaskFrameKey,
+        heldStale,
+      };
     },
 
     prepareFrame(mediaTime) {
@@ -449,6 +479,7 @@ export function createPixiMaskLayer(options: {
   function showMaskFrame(maskFrame: PreparedMaskFrame, mediaTime: number) {
     visibleMaskMediaTime = mediaTime;
     visibleMaskFrameKey = maskFrame.key;
+    heldStale = false;
     activeIdMaskFrame =
       maskFrame.kind === PreparedMaskFrameKind.IdMask ? maskFrame : null;
     activeRgbaMaskFrame =
@@ -614,6 +645,7 @@ export function createPixiMaskLayer(options: {
   function hideSprite() {
     visibleMaskMediaTime = null;
     visibleMaskFrameKey = null;
+    heldStale = false;
     activeIdMaskFrame = null;
     activeRgbaMaskFrame = null;
     hideFill();

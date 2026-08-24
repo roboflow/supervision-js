@@ -19,6 +19,7 @@ import {
   formatTimeRange,
   toSourceTimeRange,
 } from "../format";
+import { DEMO_INTERACTION_MODE } from "../session/demo-session-renderer";
 import {
   formatPlaybackRate,
   isPlaybackRateSustained,
@@ -151,6 +152,11 @@ export const StatusPanel = memo(function StatusPanel({
                   )} | ${rendererState.activeDetectionCount} detections`
               : "-"
           }
+        />
+        <Readout
+          label="Mask Frame"
+          tone={rendererState?.maskHeldStale ? "danger" : "default"}
+          value={formatMaskFrame(rendererState)}
         />
         <Readout
           label="Buffer"
@@ -369,7 +375,7 @@ export const StatusPanel = memo(function StatusPanel({
           label="Inference"
           value={formatInferenceSummary(fixtureSummary)}
         />
-        <Readout label="Audio" value="video-only source" />
+        <Readout label="Audio" value={formatAudioSummary(sourceState)} />
       </StatusGroup>
 
       {hasErrors ? (
@@ -452,8 +458,7 @@ function InteractionStatusGroup({
   const activePick = selectedDetectionPick ?? hoveredDetectionPick;
 
   return (
-    <StatusGroup title="Selection">
-      <Readout label="Mode" value="paused-only" />
+    <StatusGroup title={`Selection (${DEMO_INTERACTION_MODE})`}>
       <Readout
         label="State"
         value={
@@ -524,6 +529,52 @@ function formatInferenceSummary(fixtureSummary: DemoFixtureSummary | null) {
   return `${fixtureSummary.inferenceLabel} ${formatInteger(
     fixtureSummary.inferenceFrameRate,
   )} fps${maskInfo}`;
+}
+
+/**
+ * Which detection frame the mask raster on screen belongs to, against the frame
+ * the boxes over it were drawn from. The mask layer holds the previous raster
+ * for a moment while its cook catches up, so the two naming different frames is
+ * the desync, stated in seconds.
+ */
+function formatMaskFrame(rendererState: MediaRendererState | null) {
+  if (!rendererState) {
+    return "-";
+  }
+
+  if (rendererState.drawnMaskFrameTime === null) {
+    return "none";
+  }
+
+  const drawn = formatExactTime(rendererState.drawnMaskFrameTime);
+
+  if (!rendererState.maskHeldStale) {
+    return drawn;
+  }
+
+  const detectionFrameTime = rendererState.activeDetectionFrameTime;
+  const behind =
+    detectionFrameTime === null
+      ? ""
+      : ` | ${formatMilliseconds(
+          (detectionFrameTime - rendererState.drawnMaskFrameTime) * 1000,
+        )} behind`;
+
+  return `${drawn} | held${behind}`;
+}
+
+function formatAudioSummary(sourceState: MediaSourceState | null) {
+  const audioTrackCount = sourceState?.audioTrackCount ?? null;
+
+  if (audioTrackCount === null) {
+    return "-";
+  }
+
+  return audioTrackCount === 0
+    ? "video-only source"
+    : `${formatInteger(audioTrackCount)} audio ${
+        audioTrackCount === 1 ? "track" : "tracks"
+      }`;
 }
 
 function formatPickTarget(pick: DetectionPickResult | null) {

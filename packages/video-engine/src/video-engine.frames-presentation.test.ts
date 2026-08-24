@@ -10,6 +10,7 @@ import {
 
 import type { MediaClock } from "./clock";
 import * as factoryModule from "./create-scrub-cursor";
+import { displayBoxResolution } from "./decode-resolution";
 import { EngineCore } from "./engine-core";
 import { ScrubController, setDiagnosticsEnabled } from "./scrub-controller";
 import type {
@@ -21,6 +22,7 @@ import { asSec, VideoEngineError, VideoEngineErrorCode } from "./types";
 import { type EngineWorkerPort, VideoEngine } from "./video-engine";
 import { handleEngineCommand } from "./worker-dispatch";
 import type {
+  DiagnosticsEvent,
   EngineCommand,
   EngineEvent,
   EngineLoadConfig,
@@ -109,6 +111,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.useRealTimers();
   setDiagnosticsEnabled(false);
 });
 
@@ -259,6 +262,100 @@ describe("EngineCore in frames presentation", () => {
 
     expect(presented).toEqual([]);
     expect(wrapped).toEqual([]);
+    await engine.dispose();
+  });
+});
+
+/**
+ * Every geometry reading the engine can make in this mode comes from the box the
+ * host declared on load: nothing here measures a canvas, and the engine has no
+ * window of its own to read a device pixel ratio off.
+ */
+describe("EngineCore diagnostics in frames presentation", () => {
+  const DISPLAY_BOX_CONFIG: EngineLoadConfig = {
+    ...FRAMES_CONFIG,
+    decodeStrategy: displayBoxResolution({
+      boxWidth: 320,
+      boxHeight: 320,
+      devicePixelRatio: 2,
+    }),
+  };
+
+  it("the snapshot names the presentation, so a null backend is not an unresolved one", async () => {
+    vi.useFakeTimers();
+    const diags: DiagnosticsEvent[] = [];
+    const cursor = makeFakeCursor();
+    vi.spyOn(factoryModule, "createScrubCursor").mockResolvedValue(cursor);
+    const engine = new EngineCore({
+      emit: () => undefined,
+      emitDiagnostics: (event) => diags.push(event),
+      clock: new FakeClock(),
+    });
+    await engine.load(FRAMES_CONFIG);
+    engine.diagnosticsStart(10);
+    vi.advanceTimersByTime(100);
+
+    expect(diags[0].snapshot.presentation).toBe("frames");
+    expect(diags[0].snapshot.renderer).toBeNull();
+
+    engine.diagnosticsStop();
+    vi.useRealTimers();
+    await engine.dispose();
+  });
+
+  it("decodeVsDisplay reads the box the host declared, with no canvas to measure", async () => {
+    vi.useFakeTimers();
+    const diags: DiagnosticsEvent[] = [];
+    const cursor = makeFakeCursor();
+    vi.spyOn(factoryModule, "createScrubCursor").mockResolvedValue(cursor);
+    const engine = new EngineCore({
+      emit: () => undefined,
+      emitDiagnostics: (event) => diags.push(event),
+      clock: new FakeClock(),
+    });
+    await engine.load(DISPLAY_BOX_CONFIG);
+    engine.diagnosticsStart(10);
+    vi.advanceTimersByTime(100);
+
+    // Decode is 1280x720. A 1280x720 picture fitted into a 320x320 box paints
+    // 320 CSS px wide, 640 physical at dpr 2, so decode dwarfs display.
+    const ratio = diags[0].snapshot.geometry.decodeVsDisplayAreaRatio;
+    expect(ratio).toBeCloseTo(2.25, 5);
+    // The engine holds no canvas, and the readouts that describe one say so.
+    expect(diags[0].snapshot.geometry.boundCanvasWidth).toBeNull();
+
+    engine.diagnosticsStop();
+    vi.useRealTimers();
+    await engine.dispose();
+  });
+
+  it("the trace reports the ratio the host measured rather than a stand-in 1", async () => {
+    const cursor = makeFakeCursor();
+    vi.spyOn(factoryModule, "createScrubCursor").mockResolvedValue(cursor);
+    const engine = new EngineCore({
+      emit: () => undefined,
+      clock: new FakeClock(),
+    });
+    await engine.load(DISPLAY_BOX_CONFIG);
+    engine.traceArm(60_000);
+
+    expect(engine.traceExport()?.environment.devicePixelRatio).toBe(2);
+
+    await engine.dispose();
+  });
+
+  it("the trace reports no ratio when neither side measured one", async () => {
+    const cursor = makeFakeCursor();
+    vi.spyOn(factoryModule, "createScrubCursor").mockResolvedValue(cursor);
+    const engine = new EngineCore({
+      emit: () => undefined,
+      clock: new FakeClock(),
+    });
+    await engine.load(FRAMES_CONFIG);
+    engine.traceArm(60_000);
+
+    expect(engine.traceExport()?.environment.devicePixelRatio).toBeNull();
+
     await engine.dispose();
   });
 });

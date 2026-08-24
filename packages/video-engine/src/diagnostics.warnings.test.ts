@@ -80,6 +80,7 @@ function healthyScheduler(): SchedulerStats {
 function healthySnapshot(): DiagnosticsSnapshot {
   const scheduler = healthyScheduler();
   return {
+    presentation: "canvas",
     renderer: "webgpu",
     track: {
       decodeWidth: 640,

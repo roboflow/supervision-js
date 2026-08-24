@@ -113,6 +113,7 @@ function snapshotWith(
   overrides: Partial<DiagnosticsSnapshot> = {},
 ): DiagnosticsSnapshot {
   return {
+    presentation: "canvas",
     renderer: "webgpu",
     track: null,
     scheduler: null,

@@ -859,39 +859,62 @@ export async function createPixiMediaScene(
     stagingTexture?.update();
   };
 
+  const presentLayers: FramePresentLayers = {
+    advanceFocus: advanceFocusAnimation,
+    drawAnnotationOverlay: (mediaTime) =>
+      drawAnnotationOverlay(mediaTime, mediaTime * MILLISECONDS_PER_SECOND),
+    drawBox: (mediaTime) => boxLayer.drawFrame(mediaTime, viewportScale),
+    drawFocus: drawFocusLayer,
+    drawInteraction: (mediaTime) => interactionLayer?.drawFrame(mediaTime),
+    drawInteractionPresentation: drawInteractionPresentationLayer,
+    drawLabel: (mediaTime) => labelLayer?.drawFrame(mediaTime, viewportScale),
+    drawMask: drawMaskFrame,
+    drawPolygon: drawPolygonFrame,
+    drawRegion: (mediaTime) => regionLayer.drawFrame(mediaTime, viewportScale),
+    drawVector: (mediaTime) => vectorLayer.drawFrame(mediaTime, viewportScale),
+  };
+
   const framePresentTargets: FramePresentTargets = {
     adoptMediaTime(mediaTime) {
       currentMediaTime = mediaTime;
       hasPresentedSample = true;
       presentedFrameSerial += 1;
       drawnReadiness = annotationWindow.getReadinessToken(mediaTime);
+      if (collectFrameTimings) openPresentTimings();
     },
     completePresentation(mediaTime, boxState, regionState) {
+      const state = createPresentedSampleState(
+        mediaTime,
+        boxState,
+        regionState,
+      );
       options.onPresentationUpdate?.(
-        createPresentedSampleState(mediaTime, boxState, regionState),
+        collectFrameTimings
+          ? { ...state, renderTimings: closePresentTimings() }
+          : state,
       );
     },
-    fitMediaScene: updateMediaSceneFit,
-    layers: {
-      advanceFocus: advanceFocusAnimation,
-      drawAnnotationOverlay: (mediaTime) =>
-        drawAnnotationOverlay(mediaTime, mediaTime * MILLISECONDS_PER_SECOND),
-      drawBox: (mediaTime) => boxLayer.drawFrame(mediaTime, viewportScale),
-      drawFocus: drawFocusLayer,
-      drawInteraction: (mediaTime) => interactionLayer?.drawFrame(mediaTime),
-      drawInteractionPresentation: drawInteractionPresentationLayer,
-      drawLabel: (mediaTime) => labelLayer?.drawFrame(mediaTime, viewportScale),
-      drawMask: drawMaskFrame,
-      drawPolygon: drawPolygonFrame,
-      drawRegion: (mediaTime) =>
-        regionLayer.drawFrame(mediaTime, viewportScale),
-      drawVector: (mediaTime) =>
-        vectorLayer.drawFrame(mediaTime, viewportScale),
+    fitMediaScene: () => {
+      if (!collectFrameTimings) {
+        updateMediaSceneFit();
+        return;
+      }
+      presentFitMs += measure(updateMediaSceneFit);
     },
+    layers: collectFrameTimings
+      ? measureFramePresentLayers(presentLayers, measureDrawStep)
+      : presentLayers,
     render: renderPresent,
     uploadFrame: (frame) => {
-      mediaCompositor?.upload(frame);
-      presentedSampleTimestamp = currentMediaTime;
+      if (!collectFrameTimings) {
+        mediaCompositor?.upload(frame);
+        presentedSampleTimestamp = currentMediaTime;
+        return;
+      }
+      presentMediaUploadMs += measure(() => {
+        mediaCompositor?.upload(frame);
+        presentedSampleTimestamp = currentMediaTime;
+      });
     },
   };
 
@@ -899,7 +922,7 @@ export async function createPixiMediaScene(
   // time in a push scene, the ticker in a pull one. Drawing them from a walk
   // that clock did not drive would move them out of turn.
   const annotationDrawLayers: FramePresentLayers = {
-    ...framePresentTargets.layers,
+    ...presentLayers,
     advanceFocus: () => undefined,
     drawAnnotationOverlay: () => undefined,
   };
@@ -918,6 +941,27 @@ export async function createPixiMediaScene(
   };
 
   let frameDrawTimings = createFrameDrawTimings();
+  let presentStartMs = 0;
+  let presentFitMs = 0;
+  let presentMediaUploadMs = 0;
+
+  function openPresentTimings() {
+    frameDrawTimings = createFrameDrawTimings();
+    presentFitMs = 0;
+    presentMediaUploadMs = 0;
+    presentStartMs = now();
+  }
+
+  /** The present's costs, its render call included: the submit to the
+   *  compositor happens inside this block, so nothing outside it can time it. */
+  function closePresentTimings(): MediaFrameRenderTimings {
+    return {
+      ...frameDrawTimings,
+      fitMs: presentFitMs,
+      mediaUploadMs: presentMediaUploadMs,
+      totalMs: elapsedSince(presentStartMs),
+    };
+  }
 
   function measureDrawStep<T>(step: FramePresentStep, draw: () => T): T {
     const start = now();
@@ -1474,12 +1518,18 @@ export async function createPixiMediaScene(
     },
   };
 
+  /**
+   * What the layers put on screen for this present, read back from the layers.
+   * The timeline's answer for one media time is not fixed: a load landing moves
+   * it, and the frame that was drawn is the one a viewer is looking at.
+   */
   function createPresentedSampleState(
     mediaTime: number,
     boxState: PixiBoxLayerState,
     regionState?: PixiRegionLayerState,
   ): PresentedMediaSample {
-    const detectionFrame = annotationDetectionTimeline.selectFrame(mediaTime);
+    const detectionFrame = boxState.activeDetectionFrame;
+    const maskState = maskLayer?.getDrawnState();
 
     return {
       activeDetectionCount: countPresentedDetections(
@@ -1488,9 +1538,11 @@ export async function createPixiMediaScene(
         boxState,
         regionState,
       ),
-      activeDetectionFrameIndex: detectionFrame?.frameIndex ?? null,
-      activeDetectionFrameTime: detectionFrame?.mediaTime ?? null,
+      activeDetectionFrameIndex: boxState.activeDetectionFrameIndex,
+      activeDetectionFrameTime: boxState.activeDetectionFrameTime,
       detectionBuffer: options.detectionTimeline.getState(),
+      drawnMaskFrameTime: maskState?.drawnFrameTime ?? null,
+      maskHeldStale: maskState?.heldStale ?? false,
       mediaTime,
       presentedFrameSerial,
     };

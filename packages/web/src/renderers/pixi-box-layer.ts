@@ -12,6 +12,10 @@ import type { Container as PixiContainer } from "pixi.js";
 import { drawPixiPath, resolvePixiStroke } from "./pixi-path";
 
 export interface PixiBoxLayerState {
+  /** The frame this layer resolved and drew. The timeline's answer for one
+   *  media time moves when a load lands, so this is the only record of which
+   *  frame the screen actually got. */
+  readonly activeDetectionFrame: DetectionFrame | undefined;
   readonly activeDetectionFrameTime: number | null;
   readonly activeDetectionFrameIndex: number | null;
   readonly activeDetectionCount: number;
@@ -241,6 +245,7 @@ function getBoxLayerState(
 ): PixiBoxLayerState {
   return {
     activeDetectionCount: activeDetectionIndexes.length,
+    activeDetectionFrame: detectionFrame,
     activeDetectionIndexes,
     activeDetectionFrameIndex: detectionFrame?.frameIndex ?? null,
     activeDetectionFrameTime: detectionFrame?.mediaTime ?? null,

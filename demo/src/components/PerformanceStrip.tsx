@@ -41,17 +41,20 @@ export const PerformanceStrip = memo(function PerformanceStrip({
     <section className="performance-strip" aria-label="Performance summary">
       <PerformanceMetric
         label="Frame"
-        tone={frameTime !== null && frameTime > 16.7 ? "warn" : "good"}
+        tone={
+          frameTime === null ? "default" : frameTime > 16.7 ? "warn" : "good"
+        }
         value={formatMilliseconds(frameTime)}
       />
       <PerformanceMetric label="Workers" value={workerLabel} />
       <PerformanceMetric
         label="Prepared window"
         tone={
-          preparedWindow !== null &&
-          preparedWindow.cookedSeconds < PREPARED_WINDOW_WARN_SECONDS
-            ? "warn"
-            : "good"
+          preparedWindow === null
+            ? "default"
+            : preparedWindow.cookedSeconds < PREPARED_WINDOW_WARN_SECONDS
+              ? "warn"
+              : "good"
         }
         value={
           preparedWindow === null

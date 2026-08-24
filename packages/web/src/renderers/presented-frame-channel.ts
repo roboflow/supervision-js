@@ -15,6 +15,13 @@ export interface PresentedFrameId {
 export interface PresentedVideoFrame {
   readonly frameId: PresentedFrameId;
   /**
+   * The producer's count of the paints it has made, which is what its own
+   * diagnostics name a paint by. Two paints of one frame carry different
+   * numbers, so this is the only key that joins a frame the renderer drew to
+   * the paint the producer recorded making.
+   */
+  readonly paintSeq: number;
+  /**
    * The producer's seconds for `frameId`. The producer also states the position
    * in milliseconds, and this deliberately does not carry it: that value is the
    * seconds scaled by a thousand, so dividing it back is not the identity, and

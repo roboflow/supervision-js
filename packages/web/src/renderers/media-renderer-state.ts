@@ -82,6 +82,8 @@ export function createMediaRendererRuntimeState(
   let activeDetectionFrameTime: number | null = null;
   let activeDetectionFrameIndex: number | null = null;
   let activeDetectionCount = 0;
+  let drawnMaskFrameTime: number | null = null;
+  let maskHeldStale = false;
   let lastFrameRenderTimings: MediaFrameRenderTimings | null = null;
   let currentFrameDuration = 0;
   let destroyed = false;
@@ -105,9 +107,11 @@ export function createMediaRendererRuntimeState(
     currentTime,
     playbackRate,
     detectionBuffer: options.getDetectionBufferState(),
+    drawnMaskFrameTime,
     duration,
     fit: options.fit,
     lastFrameRenderTimings,
+    maskHeldStale,
     mediaHeight,
     mediaWidth,
     playbackState,
@@ -151,6 +155,8 @@ export function createMediaRendererRuntimeState(
     activeDetectionFrameIndex = sample.activeDetectionFrameIndex;
     activeDetectionFrameTime = sample.activeDetectionFrameTime;
     activeDetectionCount = sample.activeDetectionCount;
+    drawnMaskFrameTime = sample.drawnMaskFrameTime;
+    maskHeldStale = sample.maskHeldStale;
   };
 
   return {

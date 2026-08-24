@@ -3,6 +3,7 @@ import {
   annotationRenderers,
   createArrayDetectionFrameSource,
   createBufferedDetectionTimeline,
+  createIdleDetectionBufferState,
   RegionRendererRegionKind,
   RegionRendererSourceKind,
   type DetectionFrame,
@@ -423,6 +424,68 @@ describe("push-presented Pixi scene", () => {
     ).toBe(3);
   });
 
+  it("reports the detection frame the layers drew, not the one selected at completion", async () => {
+    const drawnFrame: DetectionFrame = {
+      detections: [],
+      frameIndex: 7,
+      mediaTime: 1,
+    };
+    const revisedFrame: DetectionFrame = {
+      detections: [],
+      frameIndex: 8,
+      mediaTime: 1,
+    };
+    let answer = drawnFrame;
+    const channel = createChannel();
+    const presented: PresentedMediaSample[] = [];
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene({
+      ...createSceneOptions(channel.channel),
+      detectionTimeline: stubDetectionTimeline(() => answer),
+      onPresentationUpdate: (sample) => presented.push(sample),
+    });
+    scene.initializeMedia({ height: 240, width: 320 });
+    // A detection load landing between the draw and the completion: the same
+    // media time now answers a different frame from the one on screen.
+    pixiMock.render.mockImplementationOnce(() => {
+      answer = revisedFrame;
+    });
+
+    channel.present(presentedFrame(1000));
+
+    expect(pixiMock.render).toHaveBeenCalled();
+    expect(presented).toHaveLength(1);
+    expect(presented[0].activeDetectionFrameIndex).toBe(drawnFrame.frameIndex);
+    expect(presented[0].activeDetectionFrameTime).toBe(drawnFrame.mediaTime);
+  });
+
+  it("measures the present it makes when frame timings are asked for", async () => {
+    const channel = createChannel();
+    const presented: PresentedMediaSample[] = [];
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene({
+      ...createSceneOptions(channel.channel),
+      diagnostics: { frameTimings: true },
+      onPresentationUpdate: (sample) => presented.push(sample),
+    });
+    scene.initializeMedia({ height: 240, width: 320 });
+
+    channel.present(presentedFrame(1000));
+
+    // A push-presented scene never pulls a sample, so timings only the pull
+    // path fills leave every per-layer cost unmeasured for the whole session.
+    expect(presented[0].renderTimings).toEqual({
+      boxMs: expect.any(Number),
+      fitMs: expect.any(Number),
+      focusMs: expect.any(Number),
+      interactionMs: expect.any(Number),
+      labelMs: expect.any(Number),
+      maskMs: expect.any(Number),
+      mediaUploadMs: expect.any(Number),
+      totalMs: expect.any(Number),
+    });
+  });
+
   it("renders a burst of presents once per display refresh", async () => {
     const frames = stubAnimationFrames();
     const channel = createChannel();
@@ -824,6 +887,21 @@ function stubAnimationFrames() {
         callback();
       }
     },
+  };
+}
+
+/** A timeline whose answer for a media time is whatever the test says it is
+ *  at the moment it is asked. */
+function stubDetectionTimeline(
+  answer: () => DetectionFrame | undefined,
+): MediaRendererSceneOptions["detectionTimeline"] {
+  return {
+    async prepare() {},
+    prefetch() {},
+    selectFrame: () => answer(),
+    getBufferedFrames: () => [],
+    getState: () => createIdleDetectionBufferState(),
+    destroy() {},
   };
 }
 

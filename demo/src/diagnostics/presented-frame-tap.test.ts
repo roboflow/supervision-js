@@ -115,15 +115,19 @@ describe("presented frame tap", () => {
     expect(presented.mediaTimeS).not.toBe(240 / 1000);
     expect(records).toEqual([
       {
+        frameIndex: presented.frameId.index,
         mediaTimeMs: 240,
         mediaTimeS: presented.mediaTimeS,
+        paintSeq: presented.paintSeq,
         quality: "exact",
         wallTimeMs: 1_000,
       },
     ]);
     expect(Object.keys(records[0])).toEqual([
+      "frameIndex",
       "mediaTimeMs",
       "mediaTimeS",
+      "paintSeq",
       "quality",
       "wallTimeMs",
     ]);
@@ -198,8 +202,10 @@ describe("presented frame rate", () => {
       readPresentedPerSecond(
         [
           {
+            frameIndex: 0,
             mediaTimeMs: 0,
             mediaTimeS: 0 / 1000,
+            paintSeq: 1,
             quality: "exact",
             wallTimeMs: 3_500,
           },
@@ -210,9 +216,11 @@ describe("presented frame rate", () => {
   });
 
   it("counts only the frames inside the trailing window", () => {
-    const records = [4_200, 4_600, 4_900, 5_000].map((wallTimeMs) => ({
+    const records = [4_200, 4_600, 4_900, 5_000].map((wallTimeMs, index) => ({
+      frameIndex: index,
       mediaTimeMs: wallTimeMs,
       mediaTimeS: wallTimeMs / 1000,
+      paintSeq: index + 1,
       quality: "exact" as const,
       wallTimeMs,
     }));
@@ -272,9 +280,11 @@ describe("presented playback rate", () => {
 function createRecords(
   entries: readonly (readonly [number, number])[],
 ): readonly PresentedFrameRecord[] {
-  return entries.map(([wallTimeMs, mediaTimeMs]) => ({
+  return entries.map(([wallTimeMs, mediaTimeMs], index) => ({
+    frameIndex: index,
     mediaTimeMs,
     mediaTimeS: mediaTimeMs / 1000,
+    paintSeq: index + 1,
     quality: "exact" as const,
     wallTimeMs,
   }));

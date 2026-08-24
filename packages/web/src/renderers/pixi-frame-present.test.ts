@@ -14,6 +14,7 @@ import type { PresentedVideoFrame } from "./presented-frame-channel";
 
 const boxState: PixiBoxLayerState = {
   activeDetectionCount: 0,
+  activeDetectionFrame: undefined,
   activeDetectionFrameIndex: null,
   activeDetectionFrameTime: null,
   activeDetectionIndexes: [],

@@ -591,6 +591,7 @@ export class VideoEngine {
     if (data.type === "diag") {
       this.diagnosticsStore.write({
         ...data.snapshot,
+        memory: { jsHeapUsedBytes: readPageHeapBytes() },
         webgpuAvailable: this.webgpuAvailable,
       });
       return;
@@ -758,6 +759,18 @@ function toWorkerSource(source: VideoSource): VideoSource {
     ...source,
     url: new URL(source.url, globalThis.location?.href).href,
   };
+}
+
+/**
+ * Blink exposes performance.memory on Window only, so the worker that assembles
+ * the snapshot can never read it and the facade fills it in on receipt. Null off
+ * Blink.
+ */
+function readPageHeapBytes(): number | null {
+  const timing = performance as Performance & {
+    memory?: { usedJSHeapSize?: number };
+  };
+  return timing.memory?.usedJSHeapSize ?? null;
 }
 
 function toEngineError(cause: unknown): VideoEngineError {

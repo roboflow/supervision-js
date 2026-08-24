@@ -150,6 +150,8 @@ function createPresentedFrame(
     activeDetectionFrameIndex: null,
     activeDetectionFrameTime: null,
     detectionBuffer: createIdleDetectionBufferState(),
+    drawnMaskFrameTime: null,
+    maskHeldStale: false,
     mediaTime,
     presentedFrameSerial,
   };

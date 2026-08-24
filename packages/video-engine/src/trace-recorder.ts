@@ -36,6 +36,10 @@ export interface TraceEvent {
   readonly tMs: number;
   readonly mediaTimeMs?: number;
   readonly paintSeq?: number;
+  /** paint: which frame of the source these pixels are, by the engine's frame
+   *  table. The snapshot ring samples at 10Hz and paints outrun it, so without
+   *  this the frame most paints put up is named nowhere in the trace. */
+  readonly frameIndex?: number;
   readonly catchUpMs?: number;
   /** paint: whether a full decode or the coarse stand-in reached the canvas.
    *  Paints come from sources with materially different pixel quality, so a
@@ -63,7 +67,9 @@ export type TracedSnapshot = DiagnosticsSnapshot & { readonly tMs: number };
 export interface TraceEnvironment {
   readonly userAgent: string;
   readonly webgpuAvailable: boolean;
-  readonly devicePixelRatio: number;
+  /** Null when nobody measured one: the engine has no window to read it off, so
+   *  it knows the ratio only when a host hands it a display box or a canvas. */
+  readonly devicePixelRatio: number | null;
   readonly hardwareConcurrency: number;
 }
 
@@ -164,7 +170,7 @@ class Ring<T> {
 export interface TraceRecorderEnvironment {
   readonly userAgent: string;
   readonly webgpuAvailable: boolean;
-  readonly devicePixelRatio: number;
+  readonly devicePixelRatio: number | null;
   readonly hardwareConcurrency: number;
 }
 

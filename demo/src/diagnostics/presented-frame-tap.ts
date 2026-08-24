@@ -12,6 +12,14 @@ const MILLISECONDS_PER_SECOND = 1000;
 export const presentedRateWindowMs = 1000;
 
 export interface PresentedFrameRecord {
+  /** Which frame of the source this is, by the producer's frame table. */
+  readonly frameIndex: number;
+  /**
+   * The producer's count of the paints it has made. Media time is a float that
+   * two paints of one frame share, so this is the only key that joins a record
+   * here to the paint the producer's own trace recorded making.
+   */
+  readonly paintSeq: number;
   readonly mediaTimeMs: number;
   /** The producer's own seconds, so a readout never divides the millisecond back. */
   readonly mediaTimeS: number;
@@ -126,8 +134,10 @@ export function createPresentedFrameTap(
 
   const record = (presented: PresentedFrame) => {
     const entry: PresentedFrameRecord = {
+      frameIndex: presented.frameId.index,
       mediaTimeMs: presented.mediaTimeMs,
       mediaTimeS: presented.mediaTimeS,
+      paintSeq: presented.paintSeq,
       quality: presented.quality,
       wallTimeMs: readWallTime(),
     };

@@ -4,7 +4,11 @@ import type { MediaClock } from "./clock";
 import * as factoryModule from "./create-scrub-cursor";
 import { EngineCore } from "./engine-core";
 import { setDiagnosticsEnabled } from "./scrub-controller";
-import { ScrubCursorState, type ScrubFrame } from "./scrub-cursor";
+import {
+  ScrubCursorState,
+  type SchedulerStats,
+  type ScrubFrame,
+} from "./scrub-cursor";
 import {
   asSec,
   PlaybackStatus,
@@ -89,6 +93,70 @@ function flushRaf(): Promise<void> {
   return new Promise<void>((resolve) => {
     requestAnimationFrame(() => resolve());
   });
+}
+
+/** Scheduler stats whose only live field is the discovered keyframe lane. */
+function schedulerWithKeyframes(keyframesMs: number[]): SchedulerStats {
+  return {
+    mode: "idle",
+    decodePath: "canvas",
+    cache: {
+      exactHits: 0,
+      previewHits: 0,
+      misses: 0,
+      exactSize: 0,
+      previewSize: 0,
+      exactCapacity: 30,
+      previewCapacity: 0,
+      exactTimestampsMs: [],
+      previewTimestampsMs: [],
+      bucketMs: 33,
+      exactEvictions: 0,
+      previewEvictions: 0,
+      bucketCollapses: 0,
+      exactFrameWidth: 640,
+      exactFrameHeight: 360,
+      previewFrameWidth: 320,
+      previewFrameHeight: 180,
+      exactBudgetBytes: 0,
+    },
+    scrub: {
+      samples: 0,
+      lastMs: 0,
+      avgMs: 0,
+      maxMs: 0,
+      p50Ms: 0,
+      p95Ms: 0,
+      targetVsLandedMs: 0,
+      timeToCrispMs: 0,
+    },
+    decode: {
+      foreground: 0,
+      prefetchExact: 0,
+      prefetchPreview: 0,
+      keyframeAnchored: 0,
+      framesOut: 0,
+      nextPending: 0,
+    },
+    seek: { exact: 0, key: 0, coalesceDepth: 0 },
+    gop: {
+      count: 0,
+      avgGopS: 0,
+      maxGopS: 0,
+      minGopS: 0,
+      stddevS: 0,
+      densityPerS: 0,
+    },
+    probeRoundTrips: 0,
+    keyframesMs,
+    prefetch: null,
+    prefetchState: { inFlight: false, generation: 0 },
+    exactToleranceMs: 50,
+    previewToleranceMs: 250,
+    decoderDead: false,
+    decoderStalled: false,
+    drain: { draining: false, pendingTargetMs: null, recovering: false },
+  };
 }
 
 describe("EngineCore", () => {
@@ -757,6 +825,53 @@ describe("EngineCore", () => {
       expect(traced?.scheduler).toBe(broadcast.scheduler);
       expect(traced?.realtime).toBe(broadcast.realtime);
       expect(traced?.counters).toBe(broadcast.counters);
+
+      engine.diagnosticsStop();
+      vi.useRealTimers();
+      await engine.dispose();
+    });
+
+    it("a paint event names the frame it put up", async () => {
+      const clock = new FakeClock();
+      const { engine, cursor } = setup(clock);
+      await engine.load(LOAD_CONFIG);
+      bindFakeCanvas(engine);
+      engine.traceArm(60000);
+
+      cursor.emit(asSec(1.5));
+      await flushRaf();
+
+      const paint = engine
+        .traceExport()
+        ?.events.find((event) => event.type === "paint");
+      // The snapshot ring samples at 10Hz and paints outrun it, so a paint that
+      // names no frame is a paint the trace cannot place.
+      expect(paint?.frameIndex).toBe(FRAME(1.5));
+
+      await engine.dispose();
+    });
+
+    it("the keyframe distance is measured against the playhead once an anchor is known", async () => {
+      vi.useFakeTimers();
+      const { engine, diags, cursor } = setup();
+      let keyframesMs: number[] = [];
+      cursor.getStats = () => schedulerWithKeyframes(keyframesMs);
+      await engine.load(LOAD_CONFIG);
+      engine.scrub(FRAME(2.3));
+      engine.diagnosticsStart(10);
+      vi.advanceTimersByTime(100);
+
+      // The index fills lazily, and a distance to nothing is not zero.
+      expect(diags[0].snapshot.gop.distanceToNearestKeyframeS).toBeNull();
+
+      keyframesMs = [0, 2_000, 4_000, 6_000];
+      vi.advanceTimersByTime(100);
+
+      // The playhead sits 0.3s past the 2s anchor and 1.7s short of the 4s one.
+      expect(diags[1].snapshot.gop.distanceToNearestKeyframeS).toBeCloseTo(
+        0.3,
+        5,
+      );
 
       engine.diagnosticsStop();
       vi.useRealTimers();

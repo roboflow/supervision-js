@@ -12,6 +12,7 @@ interface SeekLedger {
 
 function snapshotWithSeeks(ledger: SeekLedger): DiagnosticsSnapshot {
   return {
+    presentation: "canvas",
     renderer: "webgpu",
     track: {
       decodeWidth: 640,
@@ -121,6 +122,34 @@ describe("engineMetricGroups", () => {
     });
     expect(metric("Cursor seeks").value(playing)).toMatch(/\b0\b.*\b0\b/);
     expect(metric("Seeks").value(playing)).toBe("7");
+  });
+
+  it("names the mode when the engine paints no canvas of its own", () => {
+    const frames: DiagnosticsSnapshot = {
+      ...snapshotWithSeeks({ exactSeeks: 0, keySeeks: 0, playSeeks: 0 }),
+      presentation: "frames",
+      renderer: null,
+    };
+    const resolving: DiagnosticsSnapshot = {
+      ...frames,
+      presentation: "canvas",
+    };
+
+    // A renderer that is null forever by design reads differently from one that
+    // is null for the moment it takes WebGPU to answer.
+    expect(metric("Backend").value(frames)).toBe("host-painted");
+    expect(metric("Backend").value(resolving)).toBe("resolving");
+  });
+
+  it("points at the panel that holds the backend painting the demo", () => {
+    // The engine panel has a "Playback" group of its own with no Renderer in
+    // it, so naming the group alone sends a reader nowhere.
+    expect(metric("Backend").tooltip).toContain("Status panel");
+    expect(
+      engineMetricGroups
+        .find((group) => group.title === "Playback")
+        ?.metrics.map((descriptor) => descriptor.label),
+    ).not.toContain("Renderer");
   });
 
   it("puts the cursor seek count in the group whose timings it explains", () => {

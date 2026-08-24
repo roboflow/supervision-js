@@ -70,6 +70,16 @@ export const PresentationDiagnostics = memo(function PresentationDiagnostics({
           label="Quality"
           value={sample.lastPresented?.quality ?? UNAVAILABLE}
         />
+        <Readout
+          label="Frame"
+          value={
+            sample.lastPresented === null
+              ? UNAVAILABLE
+              : `#${formatInteger(sample.lastPresented.frameIndex)} | paint ${formatInteger(
+                  sample.lastPresented.paintSeq,
+                )}`
+          }
+        />
       </div>
       <PresentedFrameTimeline
         detectionRanges={detectionRanges}

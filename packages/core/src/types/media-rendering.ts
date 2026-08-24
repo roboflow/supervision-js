@@ -184,6 +184,15 @@ export interface MediaRendererState {
   readonly activeDetectionFrameTime: number | null;
   readonly activeDetectionFrameIndex: number | null;
   readonly activeDetectionCount: number;
+  /**
+   * Detection frame the mask raster on screen belongs to, null when no mask is
+   * up. A mask renderer may briefly hold the previous frame's raster while its
+   * data catches up, so this and `activeDetectionFrameTime` can name different
+   * frames over one picture.
+   */
+  readonly drawnMaskFrameTime: number | null;
+  /** Whether that hold is what is on screen right now. */
+  readonly maskHeldStale: boolean;
   readonly detectionBuffer: DetectionBufferState;
   readonly lastFrameRenderTimings: MediaFrameRenderTimings | null;
   readonly source: MediaSourceState;

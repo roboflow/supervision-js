@@ -4,7 +4,7 @@ import type { DiagnosticsSnapshot } from "supervision-js-video-engine";
 /**
  * The engine's coverage timeline, lane for lane: GOP heat, what each cache tier
  * holds, where the next sweep would decode, the discovered keyframes, the
- * engine's playhead and what is actually on screen.
+ * engine's playhead and the frame it last put out.
  *
  * The two cache lanes are residency, not paints. Playback deliberately writes
  * only the coarse tier, so the exact lane stays still through a watched span
@@ -126,6 +126,11 @@ export const EngineDiagnosticsTimeline = memo(
       keyframesMs.length >= GOP_MIN_SAMPLE
         ? buildGopGaps(keyframesMs, durationMs)
         : [];
+    // In frames presentation the engine paints nothing: this marker is the last
+    // frame it handed to the host, and whether the host composited it is a
+    // question only the host can answer.
+    const screenLabel =
+      snapshot.presentation === "frames" ? "handed out" : "on screen";
 
     return (
       <div className="engine-timeline">
@@ -222,8 +227,8 @@ export const EngineDiagnosticsTimeline = memo(
             </text>
           ))}
 
-          {/* What is actually on the canvas, coloured by its quality; its distance
-            from the playhead is the live landing error. */}
+          {/* The frame the engine last put out, coloured by its quality; its
+            distance from the playhead is the live landing error. */}
           {snapshot.screen ? (
             <line
               className={`engine-timeline__screen engine-timeline__screen--${snapshot.screen.quality}`}
@@ -251,8 +256,8 @@ export const EngineDiagnosticsTimeline = memo(
           <LegendSwatch modifier="prefetch" label="next sweep (planned)" />
           <LegendSwatch modifier="keyframe" label="keyframe (discovered)" />
           <LegendSwatch modifier="playhead" label="playhead (engine clock)" />
-          <LegendSwatch modifier="crisp" label="on screen (crisp)" />
-          <LegendSwatch modifier="coarse" label="on screen (coarse)" />
+          <LegendSwatch modifier="crisp" label={`${screenLabel} (crisp)`} />
+          <LegendSwatch modifier="coarse" label={`${screenLabel} (coarse)`} />
         </div>
       </div>
     );

@@ -473,8 +473,13 @@ export const engineMetricGroups: readonly MetricGroup[] = [
       {
         label: "Backend",
         tooltip:
-          "Which renderer paints the engine's own canvas. Reads n/a in frames presentation, where the engine hands frames out and supervision paints them; the backend that paints this demo is the Playback group's Renderer readout.",
-        value: (snapshot) => snapshot.renderer ?? NO_DATA,
+          "Which renderer paints the engine's own canvas. In frames presentation the engine holds no canvas and hands frames out for supervision to paint, so it reads host-painted; the backend painting this demo is the Renderer readout in the Status panel.",
+        value: (snapshot) => {
+          if (snapshot.renderer) return snapshot.renderer;
+          return snapshot.presentation === "frames"
+            ? "host-painted"
+            : "resolving";
+        },
         status: (snapshot) => {
           if (snapshot.renderer === "webgpu") return "good";
           if (snapshot.renderer === "2d")
@@ -494,9 +499,9 @@ export const engineMetricGroups: readonly MetricGroup[] = [
     title: "Memory",
     metrics: [
       {
-        label: "JS heap",
+        label: "Page JS heap",
         tooltip:
-          "Worker JS heap in use, read from performance.memory. Chromium-only; shown as n/a elsewhere.",
+          "The page's JS heap in use, read from performance.memory on the main thread. Chromium-only; shown as n/a elsewhere, and n/a in an exported trace, which the worker assembles and the worker cannot read this.",
         value: (snapshot) =>
           snapshot.memory.jsHeapUsedBytes === null
             ? NO_DATA

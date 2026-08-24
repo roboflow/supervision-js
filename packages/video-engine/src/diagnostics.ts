@@ -3,6 +3,7 @@ import type { FrameCacheStats } from "./frame-cache";
 import type { FrameId } from "./frame-timeline";
 import type { GopStats } from "./keyframe-index";
 import type { FrameQuality, SchedulerStats } from "./scrub-cursor";
+import type { PresentationMode } from "./types";
 
 /** Which render backend is painting the display canvas. */
 export type RendererName = "2d" | "webgpu";
@@ -109,6 +110,9 @@ export interface TrackGeometryDiagnostics {
  *  an ESTIMATE: frames a worst-case off-anchor scrub would decode, derived from
  *  avg GOP and native fps, never measured inside the decode loop. */
 export interface GopDiagnostics extends GopStats {
+  /** Media seconds from the playhead to the closest anchor the keyframe index
+   *  has discovered so far. The index fills lazily, so this reads null until it
+   *  holds one and tightens as it walks further. */
   readonly distanceToNearestKeyframeS: number | null;
   readonly estimatedGopWalkDepthFrames: number;
 }
@@ -161,7 +165,13 @@ export interface CounterDiagnostics {
   readonly seekDrainingForMs: number;
 }
 
-/** Worker memory read, Chromium-only (performance.memory). Omitted elsewhere. */
+/**
+ * The page's JS heap in use. Blink exposes performance.memory on Window only,
+ * never in a worker scope, so the worker cannot read this at all: it leaves the
+ * field null and the main thread fills it on receipt, as it does
+ * webgpuAvailable. Null off Blink, and null in a trace, which is assembled
+ * inside the worker.
+ */
 export interface MemoryDiagnostics {
   readonly jsHeapUsedBytes: number | null;
 }
@@ -192,12 +202,21 @@ export interface Warning {
  * play-time seek block, counters, memory, the clock/screen pair, and the
  * worker-evaluated warnings. Only plain data crosses the boundary.
  *
- * webgpuAvailable is the one field the worker leaves at its empty value for the
- * main thread to fill after the broadcast, so a rule in evaluateWarnings (which
- * runs in the worker) can never read it. Warnings are evaluated once,
- * worker-side, so the HUD and an exported trace always show the same diagnoses.
+ * webgpuAvailable and memory.jsHeapUsedBytes are the fields the worker leaves at
+ * their empty value for the main thread to fill after the broadcast, so a rule
+ * in evaluateWarnings (which runs in the worker) can never read them, and an
+ * exported trace, assembled worker-side, carries the unfilled value. Warnings
+ * are evaluated once, worker-side, so the HUD and an exported trace always show
+ * the same diagnoses.
  */
 export interface DiagnosticsSnapshot {
+  /**
+   * Which presentation the engine was loaded for. `renderer` and the geometry
+   * fields that need a bound canvas are null for the whole life of a "frames"
+   * engine, which holds none by design; without this a reader cannot tell that
+   * from a "canvas" engine whose renderer has not resolved yet.
+   */
+  readonly presentation: PresentationMode;
   readonly renderer: RendererName | null;
   readonly track: DiagnosticsTrack | null;
   readonly scheduler: SchedulerStats | null;

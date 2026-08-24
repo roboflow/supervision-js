@@ -102,6 +102,12 @@ export interface PresentedMediaSample {
   readonly activeDetectionFrameTime: number | null;
   readonly activeDetectionFrameIndex: number | null;
   readonly activeDetectionCount: number;
+  /** Detection frame the mask raster on screen belongs to, null when no mask is
+   *  up. Apart from `activeDetectionFrameTime` it names a desync in seconds. */
+  readonly drawnMaskFrameTime: number | null;
+  /** The mask layer is holding the previous frame's raster while its cook
+   *  catches up, which is what put the two frames apart. */
+  readonly maskHeldStale: boolean;
   readonly detectionBuffer: DetectionBufferState;
   readonly renderTimings?: MediaFrameRenderTimings;
 }

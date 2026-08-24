@@ -64,11 +64,6 @@ export interface EngineCoreOptions {
   clock?: MediaClock;
 }
 
-/** Chromium-only heap read; absent elsewhere, so the snapshot reports null. */
-interface PerformanceWithMemory {
-  memory?: { usedJSHeapSize?: number };
-}
-
 /**
  * The engine, with every main-thread concern removed. Owns the clock, cursor,
  * and render controller; runs entirely inside the worker. It never touches the
@@ -93,6 +88,14 @@ export class EngineCore {
   private controller: ScrubController | null = null;
   private canvas: OffscreenCanvas | null = null;
   private viewport: SerializedViewport | null = null;
+  /** The box the host said it paints these frames into, kept from the load
+   *  command. Under "frames" presentation nothing ever measures a canvas here,
+   *  so this is the only display geometry the engine is ever given. */
+  private displayBox: {
+    cssWidth: number;
+    cssHeight: number;
+    devicePixelRatio: number;
+  } | null = null;
   private metadata: EngineReadySnapshot | null = null;
   private presentation: PresentationMode = "canvas";
   private durationMs = 0;
@@ -164,6 +167,14 @@ export class EngineCore {
 
   async load(config: EngineLoadConfig): Promise<EngineReadySnapshot> {
     this.presentation = config.presentation ?? "canvas";
+    this.displayBox =
+      config.decodeStrategy?.kind === "displayBox"
+        ? {
+            cssWidth: config.decodeStrategy.boxWidth,
+            cssHeight: config.decodeStrategy.boxHeight,
+            devicePixelRatio: config.decodeStrategy.devicePixelRatio,
+          }
+        : null;
     // A canvas may arrive before load, so a bind that predates the mode can
     // only be judged here, where the mode first exists.
     if (this.canvas && this.presentation === "frames")
@@ -615,6 +626,7 @@ export class EngineCore {
       tMs: this.traceRecorder.elapsedMs(),
       mediaTimeMs: Math.round(mediaTimeMs),
       paintSeq: this.paintSeq,
+      frameIndex: frameId.index,
       catchUpMs,
       quality: frame.quality,
       // The clock holds what this paint was serving: the last commanded
@@ -760,8 +772,9 @@ export class EngineCore {
     // The backing-store size equals the decode size by construction (the
     // controller forces it), so it cannot answer "decode vs display". The
     // real painted box is the measured CSS width scaled by device pixels.
-    const displayCssWidth = this.viewport?.displayWidth ?? null;
-    const dpr = this.viewport?.devicePixelRatio ?? 1;
+    const displayCssWidth =
+      this.viewport?.displayWidth ?? this.paintedBoxCssWidth(nativeW, nativeH);
+    const dpr = this.devicePixelRatio();
     const boundW = this.canvas?.width ?? null;
     const boundH = this.canvas?.height ?? null;
 
@@ -771,7 +784,8 @@ export class EngineCore {
     // ratio compares physical pixels painted to physical pixels decoded.
     // Null when the display box is unmeasured, so the metric reads n/a
     // rather than a misleading 1.00.
-    const paintedW = displayCssWidth !== null ? displayCssWidth * dpr : null;
+    const paintedW =
+      displayCssWidth !== null && dpr !== null ? displayCssWidth * dpr : null;
     const paintedArea = paintedW !== null ? paintedW * paintedW : null;
     const decodeVsDisplayAreaRatio =
       paintedArea && paintedArea > 0 ? decodeArea / paintedArea : null;
@@ -792,10 +806,8 @@ export class EngineCore {
     const lookups = cache ? hits + cache.misses : 0;
     const cacheHitRatePct = lookups > 0 ? (hits / lookups) * 100 : 0;
 
-    const memory =
-      (performance as PerformanceWithMemory).memory?.usedJSHeapSize ?? null;
-
     const nowMs = performance.now();
+    const playheadMs = this.cursor ? Math.round(this.clock.now() * 1000) : null;
     const paintedMs = this.controller?.getLastPaintedMs() ?? null;
     const screen =
       paintedMs === null || !this.controller || !this.lastPaintedId
@@ -815,6 +827,7 @@ export class EngineCore {
         : performance.now() - this.drainingSinceMs;
 
     const snapshot: DiagnosticsSnapshot = {
+      presentation: this.presentation,
       renderer: base?.renderer ?? null,
       track: base?.track ?? null,
       scheduler,
@@ -856,7 +869,13 @@ export class EngineCore {
       },
       gop: {
         ...gop,
-        distanceToNearestKeyframeS: null,
+        distanceToNearestKeyframeS:
+          playheadMs === null
+            ? null
+            : nearestKeyframeDistanceS(
+                scheduler?.keyframesMs ?? [],
+                playheadMs,
+              ),
         estimatedGopWalkDepthFrames,
       },
       scrub: {
@@ -892,7 +911,7 @@ export class EngineCore {
         nextPending: scheduler?.decode.nextPending ?? 0,
         seekDrainingForMs,
       },
-      memory: { jsHeapUsedBytes: memory },
+      memory: { jsHeapUsedBytes: null },
       nativeFps,
       rate: this.clock.rate,
       presentedRate: this.presentedRateMeter.sample(
@@ -900,7 +919,7 @@ export class EngineCore {
         paintedMs,
         this.playing,
       ),
-      playheadMs: this.cursor ? Math.round(this.clock.now() * 1000) : null,
+      playheadMs,
       screen,
       status: this.statusString(),
       webgpuAvailable: false,
@@ -916,10 +935,39 @@ export class EngineCore {
     return this.playing ? PlaybackStatus.Playing : PlaybackStatus.Paused;
   }
 
+  /**
+   * CSS width the picture occupies inside the box the host declared, native
+   * aspect fitted into it, or null when no box was declared. A portrait source
+   * in a landscape box paints far narrower than the box, so the fit is what the
+   * ratio has to be measured against.
+   */
+  private paintedBoxCssWidth(
+    nativeWidth: number | null,
+    nativeHeight: number | null,
+  ): number | null {
+    const box = this.displayBox;
+    if (!box || !(box.cssWidth > 0) || !(box.cssHeight > 0)) return null;
+    if (!nativeWidth || !nativeHeight) return box.cssWidth;
+    return (
+      nativeWidth *
+      Math.min(box.cssWidth / nativeWidth, box.cssHeight / nativeHeight)
+    );
+  }
+
+  /** The ratio whichever side measured one reported, or null when neither did.
+   *  The engine has no window of its own to read it off. */
+  private devicePixelRatio(): number | null {
+    return (
+      this.viewport?.devicePixelRatio ??
+      this.displayBox?.devicePixelRatio ??
+      null
+    );
+  }
+
   private traceEnvironment(): {
     userAgent: string;
     webgpuAvailable: boolean;
-    devicePixelRatio: number;
+    devicePixelRatio: number | null;
     hardwareConcurrency: number;
   } {
     const nav = (globalThis as { navigator?: Navigator }).navigator;
@@ -927,8 +975,20 @@ export class EngineCore {
       userAgent: nav?.userAgent ?? "",
       webgpuAvailable:
         typeof (globalThis as { GPU?: unknown }).GPU !== "undefined",
-      devicePixelRatio: this.viewport?.devicePixelRatio ?? 1,
+      devicePixelRatio: this.devicePixelRatio(),
       hardwareConcurrency: nav?.hardwareConcurrency ?? 0,
     };
   }
+}
+
+function nearestKeyframeDistanceS(
+  keyframesMs: readonly number[],
+  playheadMs: number,
+): number | null {
+  let nearestMs: number | null = null;
+  for (const keyframeMs of keyframesMs) {
+    const distanceMs = Math.abs(keyframeMs - playheadMs);
+    if (nearestMs === null || distanceMs < nearestMs) nearestMs = distanceMs;
+  }
+  return nearestMs === null ? null : nearestMs / 1000;
 }

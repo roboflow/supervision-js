@@ -604,6 +604,8 @@ function createScene(): MediaRendererScene {
       activeDetectionFrameIndex: null,
       activeDetectionFrameTime: null,
       detectionBuffer: createIdleDetectionBufferState(),
+      drawnMaskFrameTime: null,
+      maskHeldStale: false,
       mediaTime: 0,
       presentedFrameSerial: 1,
     })),

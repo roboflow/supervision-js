@@ -159,6 +159,59 @@ describe("pixi mask layer", () => {
     expect(layer.getActiveIdMaskFrameTexture()).toBeNull();
   });
 
+  it("says which frame it is holding, and stops saying so once it lets go", () => {
+    const layer = createPixiMaskLayer({
+      BufferImageSource: FakeBufferImageSource as never,
+      ImageSource: FakeImageSource as never,
+      Sprite: FakeSprite as never,
+      Texture: FakeTexture as never,
+      detectionTimeline: {} as never,
+      maskStyle: new BaseMaskStyle(),
+    });
+
+    layer.createSprite({ height: 80, width: 120 });
+    preparedWindow.frame = {
+      detectionFrame: { detections: [], mediaTime: 0.1 },
+      key: "mask-frame",
+      maskFrame: idMaskFrame(),
+      maskStatus: "prepared",
+    };
+    layer.drawFrame(0.1);
+
+    expect(layer.getDrawnState()).toEqual({
+      drawnFrameKey: "mask-frame",
+      drawnFrameTime: 0.1,
+      heldStale: false,
+    });
+
+    preparedWindow.frame = {
+      detectionFrame: { detections: [], mediaTime: 0.1333 },
+      key: "owed-frame",
+      maskStatus: "pending",
+    };
+    layer.drawFrame(0.1333);
+
+    // The raster on screen is a frame older than the one the rest of the
+    // present drew, which is the whole reason the hold is worth naming.
+    expect(layer.getDrawnState()).toEqual({
+      drawnFrameKey: "mask-frame",
+      drawnFrameTime: 0.1,
+      heldStale: true,
+    });
+
+    preparedWindow.frame = {
+      ...preparedWindow.frame,
+      detectionFrame: { detections: [], mediaTime: 0.3 },
+    };
+    layer.drawFrame(0.3);
+
+    expect(layer.getDrawnState()).toEqual({
+      drawnFrameKey: null,
+      drawnFrameTime: null,
+      heldStale: false,
+    });
+  });
+
   it("keeps the held frame's region coverage while its successor cooks", () => {
     const layer = createPixiMaskLayer({
       BufferImageSource: FakeBufferImageSource as never,
