@@ -293,17 +293,64 @@ describe("teardown-race early-return close discipline", () => {
     expect(sink.produced[0].closeCount).toBe(1);
   });
 
+  /**
+   * A sink whose sweep cancels itself mid-batch: the gesture lands while the
+   * next frame of the batch is still decoding, so that sample arrives after the
+   * sweep stopped awaiting it. Nothing downstream ever owns it, which leaves
+   * the sweep holding its close.
+   */
+  class SelfCancellingSweepSink implements SampleFrameSource {
+    readonly swept: FakeVideoSample[] = [];
+    cancel: (() => void) | null = null;
+
+    private make(t: number): FakeVideoSample {
+      return new FakeVideoSample(t);
+    }
+
+    async getSample(t: number): Promise<VideoSampleLike> {
+      return this.make(t);
+    }
+
+    async *samples(): AsyncGenerator<VideoSampleLike, void, unknown> {}
+
+    async *samplesAtTimestamps(
+      timestamps: Iterable<number>,
+    ): AsyncGenerator<VideoSampleLike | null, void, unknown> {
+      for (const t of timestamps) {
+        const cancel = this.cancel;
+
+        if (cancel) {
+          this.cancel = null;
+          queueMicrotask(cancel);
+        }
+
+        const sample = this.make(t);
+        this.swept.push(sample);
+        yield sample;
+      }
+    }
+  }
+
   it("a swept sample is closed when a gesture cancels the sweep mid-batch", async () => {
-    // The prefetch early-return fires when the sweep generation moves between
-    // a frame decoding and being drawn into the cache. Open seeds a sweep;
-    // a fresh seek bumps the generation, so the in-flight swept sample must be
-    // closed on the early return rather than leaked.
-    const { scheduler, sink } = makeScheduler();
-    await scheduler.open();
+    const sink = new SelfCancellingSweepSink();
+    const scheduler = new DecodeScheduler({
+      source: {
+        track: TRACK,
+        sampleSink: sink,
+        keyframeProbe: PROBE,
+        dispose: async () => undefined,
+      },
+      cache: makeCache(),
+    });
+
+    sink.cancel = () => scheduler.seekTo(asSec(4));
+    scheduler.seekTo(asSec(1));
     await scheduler.whenSettled();
-    // Every produced sample is either emitted (the seed) or swept-then-closed.
-    const swept = sink.produced.slice(1);
-    for (const s of swept) expect(s.closeCount).toBe(1);
+    await flushTasks();
+
+    expect(sink.swept.length).toBeGreaterThan(0);
+    for (const sample of sink.swept) expect(sample.closeCount).toBe(1);
+    await scheduler.close();
   });
 });
 

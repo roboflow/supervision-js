@@ -592,17 +592,18 @@ describe("package entrypoint", () => {
     renderer.destroy();
   });
 
-  it("plays through prediction coverage that never arrives", async () => {
+  it("plays without waiting on prediction coverage when no gate is configured", async () => {
     resetMocks();
     mediaMock.samples = [
       createMockSample(0, 0),
       createMockSample(0.04, 0),
       createMockSample(0.08, 0),
     ];
-    const predictionCoverage = createDeferred<void>();
     const detectionSource = {
       loadFrames: vi.fn(async () => []),
-      waitForRange: vi.fn(() => predictionCoverage.promise),
+      // A wait that never settles, so a gate that turned itself on would stall
+      // the draw below rather than pass quietly.
+      waitForRange: vi.fn(() => new Promise<void>(() => undefined)),
     };
     const onState = vi.fn();
 
@@ -635,7 +636,6 @@ describe("package entrypoint", () => {
       }),
     );
 
-    predictionCoverage.resolve();
     renderer.destroy();
   });
 
@@ -1840,15 +1840,6 @@ describe("package entrypoint", () => {
     vi.useFakeTimers();
     resetMocks();
 
-    const originalCreateImageBitmap = globalThis.createImageBitmap;
-    const imageBitmap = {
-      close: vi.fn(),
-      height: 2,
-      width: 2,
-    } as unknown as ImageBitmap;
-
-    globalThis.createImageBitmap = vi.fn(async () => imageBitmap);
-
     try {
       const { createPixiMaskLayer } =
         await import("./renderers/pixi-mask-layer");
@@ -1955,7 +1946,6 @@ describe("package entrypoint", () => {
 
       layer.destroy();
     } finally {
-      globalThis.createImageBitmap = originalCreateImageBitmap;
       vi.useRealTimers();
     }
   });

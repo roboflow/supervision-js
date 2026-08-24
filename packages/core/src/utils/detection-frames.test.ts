@@ -115,7 +115,8 @@ describe("detection frame utilities", () => {
       },
     ];
 
-    expect(Math.round((151 / 30) * 1000) / 1000).toBe(5.033);
+    // 5.033 is where a whole-millisecond playhead lands on frame 151 of a
+    // 30fps source, whose exact start is 151/30.
     expect(selectDetectionFrame(frames, 5.033)?.frameIndex).toBe(151);
   });
 

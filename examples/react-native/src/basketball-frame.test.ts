@@ -32,6 +32,8 @@ describe("React Native basketball geometry fixture", () => {
     ) as GeometryFixture;
     const sourceDetections = fixture.frames[0]!.detections;
 
+    expect(basketballDetectionFrame.detections).toHaveLength(3);
+
     for (const detection of basketballDetectionFrame.detections) {
       // Five basketballs share a class name, so the example pins the one a
       // viewer would look at. Taking the first would tie this file to the

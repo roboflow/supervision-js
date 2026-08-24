@@ -56,86 +56,58 @@ describe("mask frame preparer", () => {
     }
   });
 
-  it("builds ID-mask rasters on the main thread without an image decoder", async () => {
+  it("builds ID-mask rasters on the main thread", async () => {
     resetMocks();
 
-    const originalCreateImageBitmap = globalThis.createImageBitmap;
-    const createImageBitmap = vi.fn();
+    const preparer = createMaskFramePreparer({
+      renderPreparation: {
+        mode: RenderPreparationMode.MainThread,
+      },
+    });
 
-    globalThis.createImageBitmap =
-      createImageBitmap as unknown as typeof globalThis.createImageBitmap;
+    await expect(preparer.prepare(maskPreparationJob)).resolves.toMatchObject({
+      height: 2,
+      key: "0:0",
+      kind: PreparedMaskFrameKind.IdMask,
+      width: 2,
+    });
 
-    try {
-      const preparer = createMaskFramePreparer({
-        renderPreparation: {
-          mode: RenderPreparationMode.MainThread,
-        },
-      });
-
-      await expect(preparer.prepare(maskPreparationJob)).resolves.toMatchObject(
-        {
-          height: 2,
-          key: "0:0",
-          kind: PreparedMaskFrameKind.IdMask,
-          width: 2,
-        },
-      );
-      expect(createImageBitmap).not.toHaveBeenCalled();
-
-      preparer.destroy();
-    } finally {
-      globalThis.createImageBitmap = originalCreateImageBitmap;
-    }
+    preparer.destroy();
   });
 
   it("falls back to a composited RGBA frame past the ID palette", async () => {
     resetMocks();
 
-    const imageBitmap = {
-      close: vi.fn(),
-      height: 2,
-      width: 2,
-    } as unknown as ImageBitmap;
-    const originalCreateImageBitmap = globalThis.createImageBitmap;
+    const preparer = createMaskFramePreparer({
+      renderPreparation: {
+        mode: RenderPreparationMode.MainThread,
+      },
+    });
 
-    globalThis.createImageBitmap = vi.fn(
-      async () => imageBitmap,
-    ) as unknown as typeof globalThis.createImageBitmap;
-
-    try {
-      const preparer = createMaskFramePreparer({
-        renderPreparation: {
-          mode: RenderPreparationMode.MainThread,
-        },
-      });
-
-      await expect(
-        preparer.prepare({
-          instructions: Array.from(
-            { length: MAX_ID_MASK_PALETTE_ENTRIES },
-            (_unused, detectionIndex) => ({
-              alpha: 0.5,
-              color: 0xff0000,
-              detectionIndex,
-              mask: {
-                counts: "021",
-                encoding: DetectionMaskEncoding.CompressedRle,
-                height: 2,
-                width: 2,
-              },
-            }),
-          ),
-          key: "0:0",
-        }),
-      ).resolves.toMatchObject({
+    await expect(
+      preparer.prepare({
+        instructions: Array.from(
+          { length: MAX_ID_MASK_PALETTE_ENTRIES },
+          (_unused, detectionIndex) => ({
+            alpha: 0.5,
+            color: 0xff0000,
+            detectionIndex,
+            mask: {
+              counts: "021",
+              encoding: DetectionMaskEncoding.CompressedRle,
+              height: 2,
+              width: 2,
+            },
+          }),
+        ),
         key: "0:0",
-        kind: PreparedMaskFrameKind.RgbaImage,
-      });
+      }),
+    ).resolves.toMatchObject({
+      key: "0:0",
+      kind: PreparedMaskFrameKind.RgbaImage,
+    });
 
-      preparer.destroy();
-    } finally {
-      globalThis.createImageBitmap = originalCreateImageBitmap;
-    }
+    preparer.destroy();
   });
 
   it("keeps exact-region coverage when palette preparation falls back to RGBA", async () => {

@@ -69,6 +69,10 @@ const regionsChunks = listDetectionChunkPaths(regionsFixturePath).map((path) =>
 
 describe("fixture geometry", () => {
   it("uses center-based rects for deterministic fixture mask samples", () => {
+    let comparedRects = 0;
+
+    expect(manifests.length).toBeGreaterThan(0);
+
     for (const manifest of manifests) {
       expect(manifest).not.toHaveProperty("rectCoordinateConvention");
     }
@@ -77,8 +81,12 @@ describe("fixture geometry", () => {
       const detection = findFirstMaskedDetection(chunk);
 
       if (!detection?.mask || !detection.rect) continue;
+
+      comparedRects += 1;
       expect(detection.rect).toEqual(computeDetectionMaskRect(detection.mask));
     }
+
+    expect(comparedRects).toBeGreaterThan(0);
   });
 });
 
@@ -481,6 +489,8 @@ describe("fixture playback media", () => {
   });
 
   it("plays the proxy file it declares, and it exists", () => {
+    expect(demoFixtures.length).toBeGreaterThan(0);
+
     for (const fixture of demoFixtures) {
       const meta = readJson<{
         readonly media: { readonly proxyFile?: string };
@@ -592,6 +602,8 @@ describe("basketball region fixture", () => {
 
     expect(headCount).toBeGreaterThan(0);
     expect(frameCount).toBe(regionsManifest.frameCount);
+
+    expect(gapFilledFramesByTrack.size).toBeGreaterThan(0);
 
     for (const [trackId, frameIndexes] of gapFilledFramesByTrack) {
       const observed = observedFramesByTrack.get(trackId) ?? [];

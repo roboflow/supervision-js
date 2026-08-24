@@ -47,20 +47,28 @@ describe("resolveDecodeDimensions", () => {
     expect(resolveDecodeDimensions(strategy, UNMEASURED).width).toBe(956);
   });
 
-  it("clamps the device pixel ratio to the ceiling", () => {
+  it("clamps a display-box device pixel ratio to the ceiling of 2", () => {
     const at3 = displayBoxResolution({
       boxWidth: 1080,
       boxHeight: 854,
       devicePixelRatio: 3,
     });
-    const at2 = displayBoxResolution({
-      boxWidth: 1080,
-      boxHeight: 854,
-      devicePixelRatio: 2,
+    expect(resolveDecodeDimensions(at3, UNMEASURED)).toEqual({
+      width: 1275,
+      height: 1709,
     });
-    expect(resolveDecodeDimensions(at3, UNMEASURED)).toEqual(
-      resolveDecodeDimensions(at2, UNMEASURED),
-    );
+  });
+
+  it("clamps a viewport device pixel ratio to the ceiling of 2", () => {
+    const measured = {
+      ...PORTRAIT,
+      displayWidth: 400,
+      devicePixelRatio: 3,
+    };
+    expect(resolveDecodeDimensions(viewportResolution(), measured)).toEqual({
+      width: 800,
+      height: 1072,
+    });
   });
 
   it("never upscales past native", () => {

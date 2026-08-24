@@ -687,7 +687,11 @@ describe("buffered detection timeline", () => {
   });
 
   it("still maps an unwrapped loop-crossing time back to the buffered window", async () => {
-    const loadFrames = vi.fn(async () => []);
+    const loopFrames: DetectionFrame[] = [
+      { detections: [], mediaTime: 0.5 },
+      { detections: [], mediaTime: 59.5 },
+    ];
+    const loadFrames = vi.fn(async () => loopFrames);
     const timeline = createBufferedDetectionTimeline({
       bufferAheadSeconds: 2,
       bufferBehindSeconds: 0.5,
@@ -698,7 +702,7 @@ describe("buffered detection timeline", () => {
     await timeline.prepare(59.5, { duration: 60, firstTimestamp: 0 });
     // A consumer running an unwrapped loop clock asks for 60.5, which is 0.5
     // into the next lap; the nearest representative sits inside the window.
-    expect(timeline.selectFrame(60.5)).toBeUndefined();
+    expect(timeline.selectFrame(60.5)?.mediaTime).toBe(0.5);
     const state = timeline.getState();
     expect(state.requestedStartTime).toBe(59);
     expect(state.requestedEndTime).toBe(61.5);
