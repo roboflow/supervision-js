@@ -104,6 +104,14 @@ manifest counts, and leaves every observed head, player, ball, mask, polygon,
 polyline and keypoint byte for byte as it found them. Running it twice changes
 nothing the second time.
 
+Every committed gap fill came from that script: each carries
+`gapFill: "head-observation-interpolation-v1"`, and
+`provenance.headRegions.gapFillCommand` records the run. The end-to-end rebuild
+above also fills gaps, but from the head rects rather than the stabilized mask
+bounds and leaving the crop to the later stabilization pass, so it stamps its
+own `head-rect-center-interpolation-v1`. A rebuild lands on the committed heads
+only after the refill above runs over it.
+
 The media is reused from `../basketball_sample/basketball_sample.mp4`; no new
 video binary is committed. The detections index a forced-CFR 30fps grid rather
 than the source's own variable-rate frames, so `fixture.meta.json` declares

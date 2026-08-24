@@ -224,6 +224,7 @@ manifest.provenance.headRegions = {
     "direct SAM3 `head` masks associated with offline C-BIoU team-player tracks; masks are normalized to 64x64, stabilized by a 5-frame weighted temporal majority and one-cell morphological close, then projected into the current frame's SAM3 bounds so media pixels remain spatially aligned; a gap frame carries the nearer bracketing observation's stabilized mask, rigidly translated onto the position interpolated between both bracketing observations",
   gapFillAlgorithm: GAP_FILL_ALGORITHM,
   gapFillPolicy: `regenerated offline from the committed chunks by refill-head-gaps.mjs; a gap frame's head bounds are the linear interpolation of both bracketing observations' stabilized mask bounds, its mask is the nearer bracketing observation's mask translated onto those bounds, and its crop is the interpolation of both bracketing crops widened to hold that mask with ${options.cropPadding}px of padding; a gap frame whose player track has no frozen detection stays empty`,
+  gapFillCommand: describeInvocation(),
   gapFilledHeadCount: summary.filledCount,
   matchedHeadCount: headCount,
   temporallyStabilizedMaskCount: headCount,
@@ -258,6 +259,21 @@ console.log(
     2,
   ),
 );
+
+/**
+ * The committed heads carry this script's fill, not the one
+ * `create-geometry-fixture.mjs` writes under its own tag, so the manifest has
+ * to name the run that produced them.
+ */
+function describeInvocation() {
+  const args = process.argv
+    .slice(2)
+    .map((arg) => (/\s/.test(arg) ? JSON.stringify(arg) : arg));
+
+  return ["node tools/geometry-fixture/refill-head-gaps.mjs", ...args].join(
+    " ",
+  );
+}
 
 function interpolateHeadBetweenObservations({
   amount,

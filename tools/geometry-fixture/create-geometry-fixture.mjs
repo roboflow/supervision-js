@@ -60,7 +60,7 @@ const BASKETBALL_TRACE_MAX_SPEED_PIXELS_PER_SECOND = 2_700;
 const BASKETBALL_TRACE_WINDOW_SECONDS = 1;
 const HEAD_ASSOCIATION_ALGORITHM = "sam3-head-temporal-mask-v4";
 const HEAD_REGION_ALGORITHM = "sam3-head-temporal-mask-v5";
-const GAP_FILL_ALGORITHM = "head-observation-interpolation-v1";
+const GAP_FILL_ALGORITHM = "head-rect-center-interpolation-v1";
 const HEAD_MAX_GAP_FRAMES = 4;
 const HEAD_MASK_NORMALIZATION_SIZE = 64;
 const HEAD_MASK_SMOOTHING_RADIUS = 2;
@@ -174,7 +174,7 @@ const fixture = {
   geometry,
   inference: sam3Fixture.inference,
   provenance: {
-    generationCommand: "npm run fixture:geometry:create",
+    generationCommand: describeInvocation(),
     ...(headSam3Fixture
       ? {
           headRegions: {
@@ -865,6 +865,22 @@ function runChunker(inputPath, fixtureDir, datasetId) {
 
 function sha256(content) {
   return createHash("sha256").update(content).digest("hex");
+}
+
+/**
+ * The flags decide which fixture is built and which inputs it reads, so a
+ * manifest that records the bare script records a rebuild of something else.
+ */
+function describeInvocation() {
+  const args = process.argv
+    .slice(2)
+    .map((arg) => (/\s/.test(arg) ? JSON.stringify(arg) : arg));
+
+  return [
+    "npm run fixture:geometry:create",
+    ...(args.length ? ["--"] : []),
+    ...args,
+  ].join(" ");
 }
 
 function parseArgs(args) {
