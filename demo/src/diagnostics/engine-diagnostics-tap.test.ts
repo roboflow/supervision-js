@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { DiagnosticsSnapshot } from "supervision-js-video-engine";
+import {
+  DIAGNOSTICS,
+  TRACE_RING_BOUNDS,
+  type DiagnosticsSnapshot,
+} from "supervision-js-video-engine";
 import type { MediaRendererSource } from "supervision";
 import {
   createEngineDiagnosticsTap,
-  engineDiagnosticsBroadcastHz,
-  engineTraceWindowMs,
   type EngineDiagnosticsTap,
 } from "./engine-diagnostics-tap";
 
@@ -101,7 +103,7 @@ describe("createEngineDiagnosticsTap", () => {
     const first = tap.start();
     const second = tap.start();
 
-    expect(engine.starts).toEqual([engineDiagnosticsBroadcastHz]);
+    expect(engine.starts).toEqual([DIAGNOSTICS.BROADCAST_HZ]);
     expect(engine.listeners).toBe(1);
 
     first();
@@ -123,7 +125,7 @@ describe("createEngineDiagnosticsTap", () => {
 
     await openTapped(tap, engine);
 
-    expect(engine.starts).toEqual([engineDiagnosticsBroadcastHz]);
+    expect(engine.starts).toEqual([DIAGNOSTICS.BROADCAST_HZ]);
 
     engine.snapshot = { status: "PLAYING" } as DiagnosticsSnapshot;
     engine.broadcast();
@@ -143,7 +145,7 @@ describe("createEngineDiagnosticsTap", () => {
 
     expect(first.stops).toBe(1);
     expect(first.listeners).toBe(0);
-    expect(second.starts).toEqual([engineDiagnosticsBroadcastHz]);
+    expect(second.starts).toEqual([DIAGNOSTICS.BROADCAST_HZ]);
   });
 
   it("arms the trace over the window the engine's own rings keep", async () => {
@@ -154,7 +156,7 @@ describe("createEngineDiagnosticsTap", () => {
     tap.armTrace();
     tap.disarmTrace();
 
-    expect(engine.armed).toEqual([engineTraceWindowMs]);
+    expect(engine.armed).toEqual([TRACE_RING_BOUNDS.snapshotWindowMs]);
     expect(engine.disarms).toBe(1);
     await expect(tap.exportTrace()).resolves.toEqual({
       schema: "video-trace",

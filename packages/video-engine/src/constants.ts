@@ -103,8 +103,14 @@ export const PLAYBACK = {
  * goes is a property of that source's frame size and encode. The engine measures
  * it instead of guessing: DiagnosticsSnapshot carries the commanded rate beside
  * the presented one, and PLAYBACK_RATE_NOT_SUSTAINED fires when they diverge.
+ * SUSTAINED_SHORTFALL is the share of the commanded rate the presented one has
+ * to hold to count as sustained.
  */
-export const PLAYBACK_RATE = { MIN: 0.25, MAX: 8 } as const;
+export const PLAYBACK_RATE = {
+  MIN: 0.25,
+  MAX: 8,
+  SUSTAINED_SHORTFALL: 0.8,
+} as const;
 
 /**
  * CanvasSink frame-pool size: how many decoded canvases the sink recycles
@@ -214,6 +220,20 @@ export const DIAGNOSTICS = {
   TRACE_EVENT_CAP: 2000,
   TRACE_SNAPSHOT_CAP: 600,
   SCRUB_LATENCY_RING: 64,
+} as const;
+
+/**
+ * What an armed capture actually keeps. The snapshot ring is fed at the fixed
+ * broadcast rate, so its capacity converts to a wall-clock window; the event
+ * ring is fed by paints and gestures at no fixed rate, so its bound is a count
+ * and nothing more. A readout that states one number for "the capture" is
+ * describing neither ring.
+ */
+export const TRACE_RING_BOUNDS = {
+  snapshotWindowMs:
+    (DIAGNOSTICS.TRACE_SNAPSHOT_CAP / DIAGNOSTICS.BROADCAST_HZ) * 1000,
+  snapshotCap: DIAGNOSTICS.TRACE_SNAPSHOT_CAP,
+  eventCap: DIAGNOSTICS.TRACE_EVENT_CAP,
 } as const;
 
 /**

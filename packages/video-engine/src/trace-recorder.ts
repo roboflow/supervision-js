@@ -28,20 +28,6 @@ import {
 
 export const TRACE_SCHEMA = "roboflow.videoEngine.trace/2";
 
-/**
- * What an armed capture actually keeps. The snapshot ring is fed at the fixed
- * broadcast rate, so its capacity converts to a wall-clock window; the event
- * ring is fed by paints and gestures at no fixed rate, so its bound is a count
- * and nothing more. A readout that states one number for "the capture" is
- * describing neither ring.
- */
-export const TRACE_RING_BOUNDS = {
-  snapshotWindowMs:
-    (DIAGNOSTICS.TRACE_SNAPSHOT_CAP / DIAGNOSTICS.BROADCAST_HZ) * 1000,
-  snapshotCap: DIAGNOSTICS.TRACE_SNAPSHOT_CAP,
-  eventCap: DIAGNOSTICS.TRACE_EVENT_CAP,
-} as const;
-
 /** One captured runtime event. type is the moment ("paint", "scrub", "seek",
  *  "status"); tMs is worker-clock relative to arm; the rest are optional payload
  *  fields the relevant moment fills. All plain data. */

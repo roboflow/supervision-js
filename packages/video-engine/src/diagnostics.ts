@@ -1,4 +1,4 @@
-import { PLAYBACK, HANG_RECOVERY } from "./constants";
+import { PLAYBACK, HANG_RECOVERY, PLAYBACK_RATE } from "./constants";
 import type { FrameCacheStats } from "./frame-cache";
 import type { FrameId } from "./frame-timeline";
 import type { GopStats } from "./keyframe-index";
@@ -434,13 +434,12 @@ export function evaluateWarnings(snapshot: DiagnosticsSnapshot): Warning[] {
   // sparse, which a slow rate on a low-fps source produces from a perfectly
   // healthy pipeline, so catch-up depth has to corroborate that the picture
   // really has fallen behind.
-  const RATE_SHORTFALL = 0.8;
   const presented = snapshot.presentedRate;
   if (
     status === "PLAYING" &&
     snapshot.rate !== 1 &&
     presented !== null &&
-    presented < snapshot.rate * RATE_SHORTFALL &&
+    presented < snapshot.rate * PLAYBACK_RATE.SUSTAINED_SHORTFALL &&
     realtime.catchUpMs > catchUpThreshold
   ) {
     out.push({

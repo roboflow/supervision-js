@@ -1,13 +1,9 @@
-import type { DiagnosticsSnapshot } from "supervision-js-video-engine";
+import {
+  DIAGNOSTICS,
+  TRACE_RING_BOUNDS,
+  type DiagnosticsSnapshot,
+} from "supervision-js-video-engine";
 import type { MediaRendererSource } from "supervision";
-
-/** Matches the engine's own broadcast rate, so the demo's readings and the
- *  storybook panel's are sampled over the same interval. */
-export const engineDiagnosticsBroadcastHz = 10;
-
-/** Matches the worker's snapshot ring, so an armed capture here spans the same
- *  window the engine's own recorder captures. */
-export const engineTraceWindowMs = 60_000;
 
 /**
  * The slice of the engine handle the diagnostics surface needs, named
@@ -63,7 +59,7 @@ export function createEngineDiagnosticsTap(): EngineDiagnosticsTap {
       return;
     }
 
-    producer.startDiagnostics(engineDiagnosticsBroadcastHz);
+    producer.startDiagnostics(DIAGNOSTICS.BROADCAST_HZ);
     unsubscribeProducer = producer.subscribeDiagnostics(notify);
   };
 
@@ -75,7 +71,7 @@ export function createEngineDiagnosticsTap(): EngineDiagnosticsTap {
 
   return {
     armTrace() {
-      producer?.armTrace(engineTraceWindowMs);
+      producer?.armTrace(TRACE_RING_BOUNDS.snapshotWindowMs);
     },
 
     disarmTrace() {

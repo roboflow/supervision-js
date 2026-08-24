@@ -1,13 +1,9 @@
+import { PLAYBACK_RATE } from "supervision-js-video-engine";
+
 /** The speeds the player offers, slowest first. */
 export const playbackRateLadder = [0.25, 0.5, 1, 2, 4, 8] as const;
 
 export const defaultPlaybackRate = 1;
-
-/**
- * How far under the commanded rate the picture may run before the readout stops
- * repeating that rate as if it were real. Matches the engine's own shortfall.
- */
-const SUSTAINED_RATE_SHORTFALL = 0.8;
 
 /** What a J, K, or L press asks of the player. */
 export interface ShuttleCommand {
@@ -71,7 +67,7 @@ export function isPlaybackRateSustained(
     return true;
   }
 
-  return presentedRate >= commandedRate * SUSTAINED_RATE_SHORTFALL;
+  return presentedRate >= commandedRate * PLAYBACK_RATE.SUSTAINED_SHORTFALL;
 }
 
 function resolveShuttleStep(

@@ -5,12 +5,13 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import type { DiagnosticsSnapshot, Warning } from "supervision-js-video-engine";
 import {
-  engineDiagnosticsBroadcastHz,
-  engineTraceWindowMs,
-  type EngineDiagnosticsTap,
-} from "../diagnostics/engine-diagnostics-tap";
+  DIAGNOSTICS,
+  TRACE_RING_BOUNDS,
+  type DiagnosticsSnapshot,
+  type Warning,
+} from "supervision-js-video-engine";
+import type { EngineDiagnosticsTap } from "../diagnostics/engine-diagnostics-tap";
 import {
   engineMetricGroups,
   formatInt,
@@ -41,7 +42,7 @@ export const EngineDiagnostics = memo(function EngineDiagnostics({
       <header className="engine-panel__header">
         <h2 className="engine-panel__title">Video Engine</h2>
         <span className="engine-panel__rate">
-          {snapshot?.status ?? "idle"} · {engineDiagnosticsBroadcastHz}Hz
+          {snapshot?.status ?? "idle"} · {DIAGNOSTICS.BROADCAST_HZ}Hz
         </span>
         <EngineTraceRecorder attached={snapshot !== null} tap={tap} />
       </header>
@@ -94,7 +95,7 @@ function EngineTraceRecorder({
 }) {
   const [armed, setArmed] = useState(false);
   const [hasCapture, setHasCapture] = useState(false);
-  const windowSeconds = Math.round(engineTraceWindowMs / 1000);
+  const windowSeconds = Math.round(TRACE_RING_BOUNDS.snapshotWindowMs / 1000);
 
   const toggleArm = () => {
     if (armed) {

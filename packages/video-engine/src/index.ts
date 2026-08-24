@@ -73,3 +73,4 @@ export type { Warning, WarningSeverity } from "./diagnostics";
 
 /* ----------------------------------------------------------------- instruments */
 export type { DiagnosticsSnapshot } from "./diagnostics";
+export { DIAGNOSTICS, TRACE_RING_BOUNDS } from "./constants";
