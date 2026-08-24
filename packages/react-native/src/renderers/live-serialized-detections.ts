@@ -7,6 +7,20 @@ import {
 import type { ReactNativeLiveSerializedDetection } from "../index";
 
 /**
+ * One frame's worth of flat live detections, plus what the bridge could not
+ * carry across.
+ */
+export interface ReactNativeLiveSerializedDetectionFrame {
+  readonly detections: ReactNativeLiveSerializedDetection[];
+  /**
+   * Detections whose mask was dropped because it was RLE-encoded. Decoding one
+   * per frame is the cost the dense encoding exists to avoid, so the mask is
+   * skipped rather than paid for — and counted rather than hidden.
+   */
+  readonly skippedRleMaskCount: number;
+}
+
+/**
  * Converts one detection, or returns null when it carries no rectangle.
  *
  * The flat shape is bbox-centric: every consumer indexes the mask through the
@@ -77,22 +91,33 @@ export function serializeReactNativeLiveDetection(
  * Color is resolved here rather than carried by the producer. Core detections
  * hold no styling, so `className` is the input and presentation owns the
  * mapping.
+ *
+ * `skippedRleMaskCount` reports detections whose mask was dropped for being
+ * RLE-encoded. The producer contract accepts the whole `DetectionMask` union,
+ * but only dense masks reach the fill loops, so without this count an adapter
+ * that publishes cold-storage masks would render a blank overlay with nothing
+ * anywhere saying why.
  */
 export function serializeReactNativeLiveDetectionFrame(
   detectionFrame: DetectionFrame,
-): ReactNativeLiveSerializedDetection[] {
+): ReactNativeLiveSerializedDetectionFrame {
   "worklet";
 
-  const serialized: ReactNativeLiveSerializedDetection[] = [];
+  const detections: ReactNativeLiveSerializedDetection[] = [];
+  let skippedRleMaskCount = 0;
 
   for (let index = 0; index < detectionFrame.detections.length; index += 1) {
     const detection = detectionFrame.detections[index]!;
     const converted = serializeReactNativeLiveDetection(detection);
 
+    if (detection.mask && !("data" in detection.mask)) {
+      skippedRleMaskCount += 1;
+    }
+
     if (converted) {
-      serialized[serialized.length] = converted;
+      detections[detections.length] = converted;
     }
   }
 
-  return serialized;
+  return { detections, skippedRleMaskCount };
 }

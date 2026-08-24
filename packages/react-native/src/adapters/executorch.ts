@@ -6,6 +6,7 @@ import {
   type DetectionFrame,
 } from "supervision-js-core";
 import type { ReactNativeLiveSerializedDetection } from "../index";
+import { createReactNativeKeypointDrawInstructions } from "../renderers/keypoint-draw-instructions";
 import type { ReactNativeLiveDetectionProducer } from "../types/live-producer";
 import type { ReactNativeVideoFrameHandle } from "../video-frame-source";
 
@@ -704,3 +705,16 @@ export function createDetectionFrameFromExecutorchCocoPoses(
     mediaTime: options.mediaTime ?? 0,
   };
 }
+
+/**
+ * @deprecated Renamed to `createReactNativeKeypointDrawInstructions` and moved
+ * to `renderers/`. Keypoint drawing reads only core types, so nothing about it
+ * was ever specific to ExecuTorch; the vendor name here was an artifact of
+ * pose support having been written in this adapter first.
+ *
+ * Kept as a forwarding alias so the rename does not break an import. The
+ * replacement additionally resolves color per detection instead of taking a
+ * single color for the whole frame.
+ */
+export const createExecutorchPoseKeypointInstructions =
+  createReactNativeKeypointDrawInstructions;

@@ -17,7 +17,24 @@ import type { DetectionFrame } from "supervision-js-core";
  * `adapters/` needs to know which runtime produced the detections.
  *
  * `process()` is called on the camera frame worklet and must return directly.
- * See {@link SyncMediaFrameProcessor} for the session-level equivalent.
+ * See `SyncMediaFrameProcessor` for the session-level equivalent.
+ *
+ * ## What the live lane accepts
+ *
+ * Two narrowings apply here that do not apply to a `DetectionFrame` generally,
+ * both because this runs per frame on a camera thread:
+ *
+ * - **Only `DenseBitmapDetectionMask` is drawn.** An RLE mask is cold storage;
+ *   decoding one per detection per frame is exactly the cost the dense encoding
+ *   exists to avoid. RLE masks are skipped and reported through the readout's
+ *   `skippedRleMaskCount`, so a producer can tell that its masks are not
+ *   reaching the screen.
+ * - **Geometry is trusted, not validated.** Mask `data.length` is assumed to be
+ *   `width * height`, and keypoint edge indices are assumed to be in range
+ *   (out-of-range edges are dropped rather than drawn). Core's
+ *   `validateDetectionFrames()` enforces these on the cold path; the hot path
+ *   cannot afford a per-frame pass, so holding the invariant is the adapter's
+ *   job.
  */
 export interface ReactNativeLiveDetectionProducer {
   process(frame: unknown): DetectionFrame;

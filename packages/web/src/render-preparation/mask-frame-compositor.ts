@@ -62,7 +62,7 @@ export function createRegionMaskCoverageFrame(
   const entries: PreparedRegionMaskCoverageFrame["entries"][number][] = [];
 
   for (const instruction of coverageInstructions) {
-    const decodedMask = decodeCompressedRleMask(instruction.regionCoverageMask);
+    const decodedMask = decodeDetectionMask(instruction.regionCoverageMask);
     let minX = decodedMask.width;
     let minY = decodedMask.height;
     let maxX = -1;

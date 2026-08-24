@@ -411,6 +411,7 @@ test("built React Native subpath entries ship and resolve", async () => {
     "createExecutorchLivePoseProducer",
     "createExecutorchLiveSegmentationProcessor",
     "createExecutorchLiveSegmentationProducer",
+    "createExecutorchPoseKeypointInstructions",
     "createExecutorchVideoFrameSerializer",
     "unrotateExecutorchUpBbox",
   ]);

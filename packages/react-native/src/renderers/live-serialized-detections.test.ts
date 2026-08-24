@@ -42,7 +42,7 @@ describe("serializeReactNativeLiveDetectionFrame", () => {
       }).process(frame),
     );
 
-    expect(viaProducer).toEqual(viaProcessor);
+    expect(viaProducer.detections).toEqual(viaProcessor);
   });
 
   it("matches the processor for a frame that is not reported upright", () => {
@@ -56,7 +56,7 @@ describe("serializeReactNativeLiveDetectionFrame", () => {
       createExecutorchLiveSegmentationProducer({ runOnFrame }).process(frame),
     );
 
-    expect(viaProducer).toEqual(viaProcessor);
+    expect(viaProducer.detections).toEqual(viaProcessor);
   });
 
   it("passes mask buffers by reference rather than copying them", () => {
@@ -76,7 +76,9 @@ describe("serializeReactNativeLiveDetectionFrame", () => {
       mediaTime: 0,
     };
 
-    const [serialized] = serializeReactNativeLiveDetectionFrame(detectionFrame);
+    const { detections } =
+      serializeReactNativeLiveDetectionFrame(detectionFrame);
+    const serialized = detections[0];
 
     expect(serialized!.mask).toBe(rawDetection.mask);
   });
@@ -119,7 +121,7 @@ describe("serializeReactNativeLiveDetectionFrame", () => {
         detections: [{ className: "person" }],
         mediaTime: 0,
       }),
-    ).toEqual([]);
+    ).toEqual({ detections: [], skippedRleMaskCount: 0 });
   });
 
   it("treats a cold-storage RLE mask as no mask", () => {
@@ -136,5 +138,40 @@ describe("serializeReactNativeLiveDetectionFrame", () => {
 
     expect(serialized).toMatchObject({ maskHeight: 0, maskWidth: 0 });
     expect(serialized!.mask).toHaveLength(0);
+  });
+
+  it("counts skipped RLE masks so a producer can tell they were dropped", () => {
+    // The detection still renders its box; only the mask is missing. Without a
+    // count that is indistinguishable from a model that produced no mask.
+    const result = serializeReactNativeLiveDetectionFrame({
+      detections: [
+        {
+          className: "person",
+          mask: {
+            counts: "021",
+            encoding: DetectionMaskEncoding.CompressedRle,
+            height: 2,
+            width: 2,
+          },
+          rect: { height: 80, width: 40, x: 30, y: 60 },
+        },
+        {
+          className: "ball",
+          mask: {
+            data: rawDetection.mask,
+            encoding: DetectionMaskEncoding.DenseBitmap,
+            height: 3,
+            width: 2,
+          },
+          rect: { height: 10, width: 10, x: 5, y: 5 },
+        },
+      ],
+      mediaTime: 0,
+    });
+
+    expect(result.detections).toHaveLength(2);
+    expect(result.skippedRleMaskCount).toBe(1);
+    expect(result.detections[0]!.mask).toHaveLength(0);
+    expect(result.detections[1]!.mask).toBe(rawDetection.mask);
   });
 });

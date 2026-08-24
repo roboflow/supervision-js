@@ -104,6 +104,17 @@ or `SyncMediaRendererAdapter` directly.
 processor and renderer are both sync is proven to run its whole frame path
 with no microtask in it, and the async default is proven to still yield.
 
+**Widening a union means auditing its consumers, not just its decoders.**
+Routing every reader through `decodeDetectionMask()` was necessary and not
+sufficient: `createEditableAnnotationFrameSession()` never decodes, it deep
+freezes, and `Object.freeze()` throws on an array buffer view with elements. A
+dense mask crashed it. Every mask had been a `counts` string, so nothing in
+core had ever met a typed array nested in a `Detection`. The freeze now steps
+over views, and the same question — what does this do with bytes rather than a
+string? — is worth asking of any new `DetectionMask` consumer. Main added one
+during this branch's life (`regionCoverageMask`, in the web mask compositor)
+and it needed the same fix.
+
 ## Phase 1 — Open the producer contract (live camera first)
 
 Today `UseReactNativeLiveInferenceOptions` requires
@@ -129,6 +140,18 @@ containing "Executorch" appears in the live hook's public options.
 published geometry, so `ReactNativeLiveInferenceMode` is gone. Keypoint drawing
 moved out of the adapter as `createReactNativeKeypointDrawInstructions`, which
 was the last vendor name the hook imported.
+`createExecutorchPoseKeypointInstructions` stays as a deprecated forwarding
+alias, so the rename does not break an import.
+
+**What an open contract had to admit.** Opening the door meant being honest
+about what is behind it. Only `DenseBitmapDetectionMask` reaches the fill
+loops, so an RLE mask is skipped rather than decoded per frame — but that is now
+counted and reported through the readout's `skippedRleMaskCount`, because a
+blank overlay with no signal is not an open contract. Keypoint edge indices are
+bounds-checked instead of asserted, since the skeleton is no longer a constant
+this package owns. And keypoint color resolves per detection from `className`,
+the same way boxes already did; a single frame-wide color was an artifact of
+pose having had exactly one class.
 
 Two notes for whoever picks this up. Detections still cross into the ID-mask
 fill through `serializeReactNativeLiveDetectionFrame`, a shallow bridge to the
@@ -171,9 +194,29 @@ until the schedule recovers, and another inference becomes affordable. The
 policy lives in `sessions/media-clock-policy.ts` as pure functions, because
 nothing inside the pump worklet is reachable from a test.
 
-Two limits carried forward. The wait spins — the pump runtime has no sleep
-primitive — which costs less than `analysis` (never waits, never stops
-inferring) but is worse than pacing presentation off vsync. And held
+**Two costs the first cut paid, since removed.** Held frames re-reported
+identical detections to React on every presented frame, turning a ~1.4 Hz
+cross-thread hop under `analysis` into a ~30 Hz one under `media`; reporting is
+now gated on `shouldInfer`, which is the only rate at which the payload
+changes. And every held frame rebuilt the ID-mask artifact from scratch — ~15 ms
+per frame with the JS builder on a Pixel 10 Pro, taken directly out of the wait
+time the budget banks, so refilling an identical artifact was lowering the
+inference cadence it was supposed to protect. `skia.ts` now splits into
+`buildReactNativeSkiaMaskArtifact()` and
+`createReactNativeSkiaMaskFrameFromArtifact()`; the pump caches the build keyed
+on the detections array identity that held frames already share. Uniforms and
+the `SkImage` are still per packet, so `PreparedFrameStore` ownership is
+unchanged, and a reused artifact reports `fillMs: 0` rather than repeating a
+cost it did not pay.
+
+**Two limits carried forward.** The wait spins. That is a structural choice,
+not a missing primitive: `createWorkletRuntimeForThread()` delegates to
+worklets' `createWorkletRuntime()`, whose `enableEventLoop` defaults to true
+and installs `setTimeout` on the runtime. What cannot happen is firing one from
+inside `runPump`, a single synchronous loop that never returns to the run loop.
+Removing the spin means restructuring the pump into a per-frame continuation,
+which also moves pause, resume, teardown, and source close off the guarantee
+that loop exit currently provides — so it belongs with Phase 3. And held
 detections lag their frame; propagating with a tracker is the next step, worth
 judging against device numbers rather than in the abstract.
 

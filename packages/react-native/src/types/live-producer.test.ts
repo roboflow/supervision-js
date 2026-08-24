@@ -75,7 +75,7 @@ describe("ReactNativeLiveDetectionProducer", () => {
       producer.process({ ts: 1500 }),
     );
 
-    expect(serialized).toEqual([
+    expect(serialized.detections).toEqual([
       {
         bbox: { x1: 90, x2: 110, y1: 180, y2: 220 },
         color: expect.any(Number),
@@ -138,9 +138,9 @@ describe("ReactNativeLiveDetectionProducer", () => {
       mediaTime: 0,
     };
 
-    expect(serializeReactNativeLiveDetectionFrame(detectionFrame)).toHaveLength(
-      1,
-    );
+    expect(
+      serializeReactNativeLiveDetectionFrame(detectionFrame).detections,
+    ).toHaveLength(1);
     expect(
       createReactNativeKeypointDrawInstructions(detectionFrame),
     ).toHaveLength(1);

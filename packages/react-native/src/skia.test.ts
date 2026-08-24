@@ -4,8 +4,10 @@ import { describe, expect, it, vi } from "vitest";
 import { KeypointMarkerShape } from "./index";
 
 import {
+  buildReactNativeSkiaMaskArtifact,
   createEmptyReactNativeSkiaPicture,
   createReactNativeSkiaMaskFrame,
+  createReactNativeSkiaMaskFrameFromArtifact,
   createReactNativeSkiaVectorFrame,
   disposeReactNativeSkiaImage,
   disposeReactNativeSkiaPicture,
@@ -129,6 +131,105 @@ describe("createReactNativeSkiaMaskFrame", () => {
         frameHeight: 2,
         frameWidth: 2,
         mediaRect: { height: 2, width: 2, x: 0, y: 0 },
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("reusing one built mask artifact across frames", () => {
+  const artifactOptions = {
+    detections: [detection],
+    frameHeight: 2,
+    frameWidth: 2,
+  };
+
+  it("gives every frame its own Skia image so packets stay independently owned", () => {
+    // PreparedFrameStore disposes each retired packet's image. Sharing one
+    // handle across packets would let the first retirement dispose an image a
+    // later packet is still drawing, which paints the media rect black.
+    const build = buildReactNativeSkiaMaskArtifact(artifactOptions);
+    const mediaRect = { height: 2, width: 2, x: 0, y: 0 };
+
+    const first = createReactNativeSkiaMaskFrameFromArtifact({
+      artifact: build!.artifact,
+      diagnostics: build!.diagnostics,
+      mediaRect,
+    });
+    const second = createReactNativeSkiaMaskFrameFromArtifact({
+      artifact: build!.artifact,
+      diagnostics: build!.diagnostics,
+      mediaRect,
+    });
+
+    expect(first!.image).not.toBe(second!.image);
+    expect(first!.uniforms).toEqual(second!.uniforms);
+  });
+
+  it("re-resolves uniforms so a moved media rect still tracks", () => {
+    // Uniforms are frame-local; only the fill is cacheable. A session that
+    // reused them would pin the overlay to wherever the video was when the
+    // artifact was built.
+    const build = buildReactNativeSkiaMaskArtifact(artifactOptions);
+
+    const before = createReactNativeSkiaMaskFrameFromArtifact({
+      artifact: build!.artifact,
+      diagnostics: build!.diagnostics,
+      mediaRect: { height: 2, width: 2, x: 0, y: 0 },
+    });
+    const after = createReactNativeSkiaMaskFrameFromArtifact({
+      artifact: build!.artifact,
+      diagnostics: build!.diagnostics,
+      mediaRect: { height: 8, width: 6, x: 4, y: 5 },
+    });
+
+    expect(before!.uniforms.uMediaRect).toEqual([0, 0, 2, 2]);
+    expect(after!.uniforms.uMediaRect).toEqual([4, 5, 6, 8]);
+  });
+
+  it("does not re-run the fill when presenting from a cached artifact", () => {
+    const build = buildReactNativeSkiaMaskArtifact(artifactOptions);
+    const fromBytesCalls = vi.mocked(Skia.Data.fromBytes).mock.calls.length;
+
+    createReactNativeSkiaMaskFrameFromArtifact({
+      artifact: build!.artifact,
+      // What the session reports for a reused artifact: no fill happened on
+      // this frame, so the readout must not repeat the original cost.
+      diagnostics: { ...build!.diagnostics, fillMs: 0 },
+      mediaRect: { height: 2, width: 2, x: 0, y: 0 },
+    });
+
+    // One upload, and the same bytes the build already produced.
+    expect(vi.mocked(Skia.Data.fromBytes).mock.calls.length).toBe(
+      fromBytesCalls + 1,
+    );
+    expect(vi.mocked(Skia.Data.fromBytes).mock.lastCall?.[0]).toBe(
+      build!.artifact.data,
+    );
+  });
+
+  it("composes the two halves into the one-shot builder", () => {
+    const composed = createReactNativeSkiaMaskFrame({
+      ...artifactOptions,
+      mediaRect: { height: 2, width: 2, x: 0, y: 0 },
+    });
+    const build = buildReactNativeSkiaMaskArtifact(artifactOptions);
+    const split = createReactNativeSkiaMaskFrameFromArtifact({
+      artifact: build!.artifact,
+      diagnostics: build!.diagnostics,
+      mediaRect: { height: 2, width: 2, x: 0, y: 0 },
+    });
+
+    expect(composed!.uniforms).toEqual(split!.uniforms);
+    expect(composed!.builder).toBe(split!.builder);
+    expect(composed!.byteLength).toBe(split!.byteLength);
+  });
+
+  it("returns null from the builder when there is nothing to fill", () => {
+    expect(
+      buildReactNativeSkiaMaskArtifact({
+        detections: [],
+        frameHeight: 2,
+        frameWidth: 2,
       }),
     ).toBeNull();
   });

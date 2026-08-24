@@ -24,7 +24,10 @@ import {
   createReactNativeLiveIdMaskArtifactAuto,
   resolveReactNativeLiveIdMaskUniforms,
   type ReactNativeIdMaskUniforms,
+  type ReactNativeLiveIdMaskArtifact,
   type ReactNativeLiveIdMaskArtifactAutoOptions,
+  type ReactNativeLiveIdMaskBuildDiagnostics,
+  type ReactNativeLiveIdMaskBuildResult,
   type KeypointDrawInstruction,
   type PolygonDrawInstruction,
   type PolylineDrawInstruction,
@@ -444,29 +447,108 @@ export function disposeReactNativeSkiaImage(image: SkImage | null | undefined) {
 }
 
 /**
- * Builds one live ID-mask packet end to end: artifact (native builder with
- * JS fallback) → Alpha_8 Skia image upload → shader uniforms.
+ * Inputs that turn a built artifact into a presentable packet.
+ *
+ * Deliberately disjoint from the artifact's own inputs: nothing here is baked
+ * into the mask bytes, which is what makes an artifact reusable across frames
+ * whose media rect or effect selection has moved on.
+ */
+export interface ReactNativeSkiaMaskFrameFromArtifactOptions {
+  readonly artifact: ReactNativeLiveIdMaskArtifact;
+  readonly diagnostics: ReactNativeLiveIdMaskBuildDiagnostics;
+  readonly edgeSmoothing?: number;
+  /** Canvas-space rect the media is drawn into. */
+  readonly mediaRect: TopLeftRect;
+  /** Cell size (canvas px) of the censor mosaic for `mosaicMaskIds`. */
+  readonly mosaicCellPx?: number;
+  /** Mask ids (detection index + 1) rendered as an opaque censor mosaic. */
+  readonly mosaicMaskIds?: readonly number[];
+  /** Mask ids spotlit through the dark veil. */
+  readonly spotlightMaskIds?: readonly number[];
+}
+
+/**
+ * Normalizes a thrown value into the worklet-safe `{ message, name }` shape,
+ * prefixed with the stage that failed. Worklet runtimes do not reliably carry
+ * `Error` instances across the boundary, so this never rethrows the original.
+ */
+function resolveMaskFrameError(stage: string, error: unknown) {
+  "worklet";
+
+  let message = "unknown error";
+  let name = "Error";
+
+  if (typeof error === "string") {
+    message = error;
+  } else if (typeof error === "object" && error !== null) {
+    const record = error as {
+      readonly message?: unknown;
+      readonly name?: unknown;
+    };
+
+    if (typeof record.message === "string") {
+      message = record.message;
+    }
+
+    if (typeof record.name === "string") {
+      name = record.name;
+    }
+  }
+
+  return {
+    message: `${stage}: ${message}`,
+    name,
+  };
+}
+
+/**
+ * Runs only the fill: detections in, raw ID-mask bytes out.
+ *
+ * Split out from `createReactNativeSkiaMaskFrame()` because this is the whole
+ * cost — ~15 ms per frame with the JS builder on a Pixel 10 Pro against ~0 ms
+ * for the upload — and it depends on nothing that changes between two frames
+ * sharing the same detections. A caller presenting held detections can build
+ * once and pass the result to `createReactNativeSkiaMaskFrameFromArtifact()`
+ * for each frame.
  *
  * Returns `null` when there is nothing to draw. Throws worklet-safe plain
- * `{ message, name }` errors prefixed with the failing stage so callers can
- * log exactly where a frame died.
+ * `{ message, name }` errors prefixed with the failing stage.
  */
-export function createReactNativeSkiaMaskFrame(
-  options: ReactNativeSkiaMaskFrameOptions,
+export function buildReactNativeSkiaMaskArtifact(
+  options: ReactNativeLiveIdMaskArtifactAutoOptions,
+): ReactNativeLiveIdMaskBuildResult | null {
+  "worklet";
+
+  try {
+    return createReactNativeLiveIdMaskArtifactAuto(options) ?? null;
+  } catch (error) {
+    throw resolveMaskFrameError("mask-build-artifact", error);
+  }
+}
+
+/**
+ * Uploads a built artifact as an Alpha_8 Skia image and resolves its shader
+ * uniforms.
+ *
+ * Each call mints its own `SkImage`, so reusing one artifact across frames
+ * still gives every packet an image it solely owns — `PreparedFrameStore` can
+ * retire and dispose packets exactly as before, with no shared-handle
+ * refcounting to get wrong.
+ *
+ * Pass `diagnostics.fillMs` as 0 when reusing an artifact; reporting the
+ * original fill would tell the readout work happened on this frame that did
+ * not.
+ */
+export function createReactNativeSkiaMaskFrameFromArtifact(
+  options: ReactNativeSkiaMaskFrameFromArtifactOptions,
 ): ReactNativeSkiaMaskFrame | null {
   "worklet";
 
   let stage = "mask-init";
 
   try {
-    stage = "mask-build-artifact";
-    const build = createReactNativeLiveIdMaskArtifactAuto(options);
-
-    if (!build) {
-      return null;
-    }
-
-    const { artifact, diagnostics } = build;
+    const artifact = options.artifact;
+    const diagnostics = options.diagnostics;
     const uploadStartedAt = Date.now();
 
     stage = "mask-create-skia-data";
@@ -526,29 +608,36 @@ export function createReactNativeSkiaMaskFrame(
       width: artifact.width,
     };
   } catch (error) {
-    let message = "unknown error";
-    let name = "Error";
-
-    if (typeof error === "string") {
-      message = error;
-    } else if (typeof error === "object" && error !== null) {
-      const record = error as {
-        readonly message?: unknown;
-        readonly name?: unknown;
-      };
-
-      if (typeof record.message === "string") {
-        message = record.message;
-      }
-
-      if (typeof record.name === "string") {
-        name = record.name;
-      }
-    }
-
-    throw {
-      message: `${stage}: ${message}`,
-      name,
-    };
+    throw resolveMaskFrameError(stage, error);
   }
+}
+
+/**
+ * Builds one live ID-mask packet end to end: artifact (native builder with
+ * JS fallback) → Alpha_8 Skia image upload → shader uniforms.
+ *
+ * Returns `null` when there is nothing to draw. Throws worklet-safe plain
+ * `{ message, name }` errors prefixed with the failing stage so callers can
+ * log exactly where a frame died.
+ */
+export function createReactNativeSkiaMaskFrame(
+  options: ReactNativeSkiaMaskFrameOptions,
+): ReactNativeSkiaMaskFrame | null {
+  "worklet";
+
+  const build = buildReactNativeSkiaMaskArtifact(options);
+
+  if (!build) {
+    return null;
+  }
+
+  return createReactNativeSkiaMaskFrameFromArtifact({
+    artifact: build.artifact,
+    diagnostics: build.diagnostics,
+    edgeSmoothing: options.edgeSmoothing,
+    mediaRect: options.mediaRect,
+    mosaicCellPx: options.mosaicCellPx,
+    mosaicMaskIds: options.mosaicMaskIds,
+    spotlightMaskIds: options.spotlightMaskIds,
+  });
 }

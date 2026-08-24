@@ -4,6 +4,7 @@ import {
   AnnotationFrameMutationKind,
   createEditableAnnotationFrameSession,
 } from "#detections/editable-annotation-frame-session";
+import { DetectionMaskEncoding } from "#types/detections";
 
 describe("editable annotation frame session", () => {
   const initialFrame = {
@@ -127,5 +128,37 @@ describe("editable annotation frame session", () => {
     expect(() => session.update("first", { id: "changed" })).toThrow(
       "preserve the stable id",
     );
+  });
+
+  it("snapshots a dense bitmap mask without freezing its bytes", () => {
+    // `Object.freeze()` throws on an array buffer view with elements, so the
+    // snapshot's deep freeze has to step over mask bytes. Every mask used to
+    // arrive RLE-encoded, where the payload is a string, which is why this
+    // only became reachable once the encoding widened.
+    const data = new Uint8Array([0, 255, 0, 255]);
+    const session = createEditableAnnotationFrameSession({
+      detections: [
+        {
+          id: "dense",
+          mask: {
+            data,
+            encoding: DetectionMaskEncoding.DenseBitmap,
+            height: 2,
+            width: 2,
+          },
+        },
+      ],
+      mediaTime: 0,
+    });
+
+    const snapshot = session.getSnapshot();
+    const mask = snapshot.detections[0]?.mask;
+
+    expect(Object.isFrozen(snapshot)).toBe(true);
+    expect(Object.isFrozen(mask)).toBe(true);
+    // Shared, not deep-copied: duplicating a full-resolution mask per frame is
+    // exactly the cost this encoding exists to avoid.
+    expect(mask && "data" in mask ? mask.data : null).toBe(data);
+    expect(Object.isFrozen(data)).toBe(false);
   });
 });

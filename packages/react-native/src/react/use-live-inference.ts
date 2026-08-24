@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import {
   KeypointMarkerShape,
-  resolveDetectionClassColorStyle,
   type DetectionFrame,
   type KeypointDrawInstruction,
   type PolygonDrawInstruction,
@@ -69,6 +68,12 @@ export interface ReactNativeLiveInferenceReadout {
   readonly segmentationMs: number;
   readonly serializationMs: number;
   readonly shaderActive: boolean;
+  /**
+   * Detections whose mask the producer published RLE-encoded. Only dense masks
+   * reach the fill loops, so a non-zero value here means masks were produced
+   * but nothing was drawn for them.
+   */
+  readonly skippedRleMaskCount: number;
   readonly syncMode: "synced";
   readonly timestamp: number;
   readonly visibleKeypointCount: number;
@@ -686,6 +691,7 @@ function reportLiveInference(
     segmentationMs: metrics.segmentationMs.value,
     serializationMs: metrics.serializationMs.value,
     shaderActive: metrics.shaderActive.value,
+    skippedRleMaskCount: metrics.skippedRleMaskCount.value,
     syncMode: "synced",
     timestamp: frame.timestamp,
     visibleKeypointCount: metrics.visibleKeypointCount.value,
@@ -753,8 +759,22 @@ export function useReactNativeLiveInference(
   // model for a moment.
   //
   // Each closure captures its own generation and compares it against the
-  // shared value, which React updates immediately. A superseded closure sees
-  // the mismatch and skips the frame instead of running a stale model.
+  // shared value, which the effect below writes on commit — ahead of the
+  // camera's own effect reinstalling `onFrame`, which is the ordering that
+  // matters. A superseded closure sees the mismatch and skips the frame
+  // instead of running a stale model.
+  //
+  // The obvious simplification — put `producer` itself in a shared value and
+  // compare identity — is deliberately avoided. A shared value serializes what
+  // it holds, and a producer closes over a JSI HostFunction; that is exactly
+  // the recursive-capture case `react-native-live-rendering.md` records as
+  // serializing successfully and then being non-callable on the worklet
+  // runtime. An integer carries no such risk.
+  //
+  // Incrementing inside `useMemo` is a render-phase write, which a StrictMode
+  // double render inflates. That is harmless here because only equality is
+  // ever tested, and a recomputed memo rebuilds `onFrame` and republishes the
+  // shared value together.
   const producerGenerationRef = useRef(0);
   const producerGeneration = useMemo(() => {
     producerGenerationRef.current += 1;
@@ -767,7 +787,6 @@ export function useReactNativeLiveInference(
     activeProducerGeneration.value = producerGeneration;
   }, [activeProducerGeneration, producerGeneration]);
 
-  const poseInstructionColor = resolveDetectionClassColorStyle("person").fill;
   // Capture initialized worklet functions before the callback is serialized.
   // Worklets' Babel transform does not preserve normal function hoisting.
   const createPoseInstructions = createReactNativeKeypointDrawInstructions;
@@ -847,10 +866,9 @@ export function useReactNativeLiveInference(
             );
           }
           stage = "pose-instruction-conversion";
-          const poseInstructions = createPoseInstructions(
-            detectionFrame,
-            poseInstructionColor,
-          );
+          // No color argument: each skeleton takes its own class color, so a
+          // producer publishing more than one class does not draw them alike.
+          const poseInstructions = createPoseInstructions(detectionFrame);
           stage = "pose-prepare-vector";
           const vector = presentation.prepareVector({
             frameHeight: frameSize.height,
@@ -882,7 +900,11 @@ export function useReactNativeLiveInference(
         }
 
         stage = "detection-serialization";
-        const detections = serializeDetections(detectionFrame);
+        const serialized = serializeDetections(detectionFrame);
+        const detections = serialized.detections;
+
+        metrics.skippedRleMaskCount.value = serialized.skippedRleMaskCount;
+
         const segmentationMs = inferenceMs;
         const extensionResult = activeExtension.active
           ? evaluateLiveInferenceObjectExtension({
@@ -970,7 +992,6 @@ export function useReactNativeLiveInference(
       mediaRect,
       metrics,
       mosaicCellPx,
-      poseInstructionColor,
       presentation,
       activeProducerGeneration,
       privacyContourWidth,
@@ -1025,6 +1046,7 @@ function useLiveInferenceMetrics() {
   const segmentationMs = useReactNativeSharedValue(0);
   const serializationMs = useReactNativeSharedValue(0);
   const shaderActive = useReactNativeSharedValue(false);
+  const skippedRleMaskCount = useReactNativeSharedValue(0);
   const visibleKeypointCount = useReactNativeSharedValue(0);
 
   return useMemo(
@@ -1045,6 +1067,7 @@ function useLiveInferenceMetrics() {
       segmentationMs,
       serializationMs,
       shaderActive,
+      skippedRleMaskCount,
       visibleKeypointCount,
     }),
     [
@@ -1064,6 +1087,7 @@ function useLiveInferenceMetrics() {
       segmentationMs,
       serializationMs,
       shaderActive,
+      skippedRleMaskCount,
       visibleKeypointCount,
     ],
   );

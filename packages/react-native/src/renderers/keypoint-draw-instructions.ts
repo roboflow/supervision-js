@@ -1,5 +1,6 @@
 import {
   KeypointMarkerShape,
+  resolveDetectionClassColorStyle,
   type DetectionFrame,
   type KeypointDrawInstruction,
   type KeypointVisibility,
@@ -15,10 +16,14 @@ import {
  *
  * Worklet-safe, so live producers never need to recreate Skia-oriented pose
  * geometry in an application callback.
+ *
+ * `color` overrides the whole frame. Left unset, each skeleton takes its class
+ * color the same way `serializeReactNativeLiveDetection()` colors boxes, so a
+ * producer that publishes more than one class does not draw them all alike.
  */
 export function createReactNativeKeypointDrawInstructions(
   frame: DetectionFrame,
-  color = 0x22c55e,
+  color?: number,
 ): KeypointDrawInstruction[] {
   "worklet";
 
@@ -37,15 +42,28 @@ export function createReactNativeKeypointDrawInstructions(
       continue;
     }
 
+    const detectionColor =
+      color ??
+      resolveDetectionClassColorStyle(detection.className ?? "person").fill;
     const edges: Array<KeypointDrawInstruction["edges"][number]> = [];
     const markers: Array<KeypointDrawInstruction["markers"][number]> = [];
 
     for (let edgeIndex = 0; edgeIndex < geometry.edges.length; edgeIndex += 1) {
       const edge = geometry.edges[edgeIndex]!;
+      const from = geometry.points[edge[0]];
+      const to = geometry.points[edge[1]];
+
+      // An edge index the producer got wrong would otherwise reach the vector
+      // lane as an undefined point. The skeleton was a fixed constant while
+      // this lived in the adapter; an open producer contract supplies its own.
+      if (!from || !to) {
+        continue;
+      }
+
       edges[edges.length] = {
-        from: geometry.points[edge[0]]!,
-        stroke: { alpha: 0.98, color, width: 3 },
-        to: geometry.points[edge[1]]!,
+        from,
+        stroke: { alpha: 0.98, color: detectionColor, width: 3 },
+        to,
       };
     }
 
@@ -59,14 +77,14 @@ export function createReactNativeKeypointDrawInstructions(
       }
 
       markers[markers.length] = {
-        fill: { alpha: 1, color },
+        fill: { alpha: 1, color: detectionColor },
         index: pointIndex,
         point: geometry.points[pointIndex]!,
         radius: 5,
         // Avoid capturing an imported enum object in VisionCamera's isolated
         // runtime. The literal is the stable renderer-neutral contract value.
         shape: "circle" as KeypointMarkerShape,
-        stroke: { alpha: 1, color, width: 2 },
+        stroke: { alpha: 1, color: detectionColor, width: 2 },
       };
     }
 
