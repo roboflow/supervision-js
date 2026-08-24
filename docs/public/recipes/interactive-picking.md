@@ -71,7 +71,7 @@ The renderer picks inside the same Pixi scene that presents media and
 detections. Mask hits are checked first, then box hits are used as a fallback.
 The highlight layer and the focus layer are separate from masks, boxes, and
 labels, so selecting a detection does not rebuild prepared mask frames. When the
-active selected target has a prepared PNG ID-mask, focus rendering uses that
+active selected target has a prepared ID-mask, focus rendering uses that
 artifact for a shape-accurate cutout; otherwise it falls back to the detection
 rectangle.
 

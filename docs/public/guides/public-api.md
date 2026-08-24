@@ -328,7 +328,7 @@ These are implementation details, even when they are important to performance:
 - Pixi scene layers;
 - Mediabunny adapter internals;
 - worker message protocols;
-- PNG ID-mask artifact payloads;
+- ID-mask artifact payloads;
 - shader palette formats;
 - prepared render-window cache internals;
 - demo-only Roboflow or SAM3 request code;

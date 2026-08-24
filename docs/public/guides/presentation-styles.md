@@ -293,7 +293,7 @@ session.setPresentation({
 ```
 
 Focus styles dim the rest of the media around the selected or hovered
-detections. The renderer may use the prepared PNG ID-mask artifact for
+detections. The renderer may use the prepared ID-mask artifact for
 shape-accurate mask cutouts and falls back to detection rectangles when no mask
 artifact is available:
 

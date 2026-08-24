@@ -84,7 +84,7 @@ The public data model should remain small and evidence-based:
 - `WritableDetectionFrameSource`: the write contract for streaming detections
   into a session.
 
-Prepared render artifacts are not public annotation data. PNG ID masks, RGBA
+Prepared render artifacts are not public annotation data. ID masks, RGBA
 fallbacks, Pixi textures, palettes, and worker payloads are renderer-owned
 runtime representations.
 
@@ -116,7 +116,7 @@ The package should preserve this pipeline:
    A small time window of parsed detection frames around playback.
 3. **Prepared render window**
    Runtime-friendly artifacts derived from the hot window. For masks this is
-   usually one prepared frame-level artifact, such as a PNG ID mask.
+   usually one prepared frame-level artifact, such as an ID mask.
 4. **Active render frame**
    The renderer presents media and overlays selected from the same media timing
    reference.
@@ -260,7 +260,7 @@ The public contract should eventually support:
 - Keep React out of the core library.
 - Keep visual composition renderer-owned.
 - Keep RLE as semantic cold storage.
-- Keep PNG ID masks and other prepared artifacts internal unless a future use
+- Keep ID masks and other prepared artifacts internal unless a future use
   case proves that they need to be public.
 - Prefer one strong session API over many low-level public constructors.
 - Add public extension points only after a second real pressure point appears.

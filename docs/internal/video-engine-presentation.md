@@ -85,6 +85,16 @@ a refused swap leaves nothing behind. `captureFrame` reads the composited
 surface rather than re-decoding. `pixi-media-scene.compositor.test.ts` covers
 those cases against a fake device.
 
+Not every browser converts a decoded frame into a copy source. Firefox's queue
+takes only ImageBitmap, HTMLImageElement, HTMLCanvasElement and OffscreenCanvas,
+and refuses a VideoFrame with a TypeError raised inside the present, which
+abandons the steps after the upload and leaves the annotation layers drawing
+over a picture that never arrived. `acceptsVideoFrameUpload` asks the device
+once, when the compositor is built, and a device that refuses sends its frames
+through the same staging canvas every non-WebGPU scene already uses. The answer
+is a property of the browser, so nothing is probed per frame and a browser that
+takes the frame keeps the straight copy.
+
 ## Rendering Only On Change
 
 Under push presentation Pixi's ticker paints nothing. Every render is an
@@ -113,16 +123,18 @@ scene rendering on its own.
 
 ## The Prepared Annotation Window
 
-Readiness is a fact about a frame, not about the session.
-`packages/web/src/renderers/prepared-annotation-window.ts` admits a frame only
-when its detections are resident and every enabled cook, such as the mask and
-polygon layers, reports its artifact prepared for that frame. Inside the window
-every enabled layer draws; outside it, they draw nothing, so an uncovered frame
-can never keep the previous frame's annotations on screen.
+Readiness is two facts about a frame, not one about the session.
+`packages/web/src/renderers/prepared-annotation-window.ts` reports which
+detection frame a media time draws, and separately which enabled cooks, such as
+the mask and polygon layers, hold a prepared artifact for it. The frame is
+handed over as soon as the timeline holds it: a layer still owing its artifact
+skips its own draw, while the layers with nothing to cook draw that frame
+anyway. Above 1x, where mask cooking cannot match the demand, that is what keeps
+boxes and labels on screen.
 
-Under push presentation the annotation layers read the window's own timeline
-rather than the detection timeline, which is what makes "outside the window" mean
-"no frame at all" for every layer at once.
+Under push presentation every layer draws from the frame the media time selects,
+so a media time the timeline holds no frame for clears every layer at once, and
+the previous frame's annotations can never stay on screen.
 
 A cook landing never writes into the draw in progress: notifications that arrive
 while a present is running are ignored, because a draw or render inside one
@@ -132,10 +144,10 @@ the render description, which is also how detections arriving while paused get
 drawn.
 
 The behavior is pinned by name in
-`packages/web/src/renderers/pixi-media-scene.prepared-window.test.ts`: "draws no
-annotation layers for a frame it does not cover", "never leaves the previous
-frame's annotations on an uncovered frame", "renders exactly once when the
-window reaches the frame on screen", "redraws when the last-owed cook lands,
+`packages/web/src/renderers/pixi-media-scene.prepared-window.test.ts`: "draws
+the vector layers of a frame whose cooks are still owed", "never leaves the
+previous frame's annotations on the next one", "renders exactly once when the
+window reaches the frame on screen", "redraws for each cook that lands,
 whichever layer owns it", and "renders detections that arrive while paused".
 
 `renderer.getPreparedAnnotationWindow()` returns the window's real readiness

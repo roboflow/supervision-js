@@ -18,7 +18,7 @@ runtime artifacts.
    Keeps a bounded range of detection frames near the current playback time.
 3. **Prepared render window**
    Converts hot detections into renderer-friendly artifacts. Masks use prepared
-   frame-level PNG ID-mask artifacts by default.
+   frame-level ID-mask artifacts by default.
 4. **Active render frame**
    Presents the one media frame and matching annotation artifacts selected from
    the current playback reference.
