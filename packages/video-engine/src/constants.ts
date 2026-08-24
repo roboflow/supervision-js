@@ -191,15 +191,18 @@ export const FRAME_TIMELINE = {
  * unknown. Finer than the frame interval at any rate up to 30fps, so distinct
  * frames never collapse onto one slot.
  *
- * DEFAULT_DEVICE_MEMORY_GB: assumed RAM when navigator.deviceMemory is absent
- * (Safari/Firefox, and tests).
+ * DEFAULT_DEVICE_MEMORY_GB: the RAM assumed for every browser that reports
+ * none, which is all of them outside Chromium and any page off a secure
+ * context. It is a guess, and the byte clamps above are what bound a wrong
+ * one: at 8 the exact tier sits on its ceiling and the preview tier at two
+ * thirds of its own.
  */
 export const FRAME_CACHE = {
   PREVIEW_WIDTH_PX: 320,
   SKIP_NEAR_MS: 100,
   DEFAULT_BUCKET_MS: 33,
   MIN_EXACT_SLOTS: 13,
-  DEFAULT_DEVICE_MEMORY_GB: 4,
+  DEFAULT_DEVICE_MEMORY_GB: 8,
   EXACT_BUDGET_BYTES_PER_GB: 24 * 1024 * 1024,
   EXACT_BUDGET_BYTES_MIN: 64 * 1024 * 1024,
   EXACT_BUDGET_BYTES_MAX: 128 * 1024 * 1024,

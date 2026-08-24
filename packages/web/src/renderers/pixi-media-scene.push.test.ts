@@ -606,6 +606,25 @@ describe("push-presented Pixi scene", () => {
     expect(pixiMock.render).toHaveBeenCalled();
   });
 
+  it("captures at the media's size off the staging canvas, whatever was decoded", async () => {
+    // Decode size follows the viewport. The exported still must not.
+    pixiMock.copyExternalImageToTexture.mockImplementationOnce(() => {
+      throw new TypeError("source could not be converted");
+    });
+    const channel = createChannel();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene(
+      createSceneOptions(channel.channel),
+    );
+    scene.initializeMedia({ height: 240, width: 320 });
+
+    channel.present(presentedFrame(2000, { height: 120, width: 160 }));
+    const capture = await scene.captureFrame?.(undefined);
+
+    expect(capture).toMatchObject({ height: 240, mediaTime: 2, width: 320 });
+    expect(pixiMock.extractCanvas).not.toHaveBeenCalled();
+  });
+
   it("captures the pixels the compositor put on screen", async () => {
     const channel = createChannel();
     const { createPixiMediaScene } = await import("./pixi-media-scene");

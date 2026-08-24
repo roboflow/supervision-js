@@ -1,7 +1,8 @@
 import { FRAME_CACHE } from "./constants";
 
-/** navigator.deviceMemory is GB (Chromium-only, capped at 8 for privacy); absent
- *  on Safari/Firefox and in tests, where we assume a midrange machine. */
+/** navigator.deviceMemory reports GB in Chromium alone, and there only in a
+ *  secure context. Safari, Firefox and any plain-http page never measure at
+ *  all; they take the assumption below. */
 function deviceMemoryGb(): number {
   if (typeof navigator === "undefined")
     return FRAME_CACHE.DEFAULT_DEVICE_MEMORY_GB;

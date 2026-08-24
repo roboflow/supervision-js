@@ -3,10 +3,10 @@ import { describe, expect, it, vi } from "vitest";
 import { resolveCacheBudgets } from "./cache-budget";
 import { FRAME_CACHE } from "./constants";
 
-function withDeviceMemory(gb: number | undefined, fn: () => void): void {
+function withDeviceMemory<T>(gb: number | undefined, fn: () => T): T {
   vi.stubGlobal("navigator", { deviceMemory: gb });
   try {
-    fn();
+    return fn();
   } finally {
     vi.unstubAllGlobals();
   }
@@ -82,13 +82,20 @@ describe("resolveCacheBudgets", () => {
     });
   });
 
-  it("falls back to the default device memory when the API is absent", () => {
-    withDeviceMemory(undefined, () => {
-      expect(resolveCacheBudgets(1280, 720, 320).exactBudgetBytes).toBe(
-        FRAME_CACHE.DEFAULT_DEVICE_MEMORY_GB *
-          FRAME_CACHE.EXACT_BUDGET_BYTES_PER_GB,
+  it("budgets a browser that reports no device memory like a mainstream laptop", () => {
+    const budgets = (gb: number | undefined) =>
+      withDeviceMemory(gb, () =>
+        resolveCacheBudgets(
+          PORTRAIT_DECODE.decodeWidth,
+          PORTRAIT_DECODE.decodeHeight,
+          320,
+        ),
       );
-    });
+
+    expect(budgets(undefined)).toStrictEqual(budgets(8));
+    expect(budgets(undefined).previewCapacity).toBeGreaterThan(
+      budgets(4).previewCapacity,
+    );
   });
 
   it("a big square frame gets fewer preview slots than a small 16:9 frame", () => {
