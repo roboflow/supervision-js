@@ -28,17 +28,41 @@ describe("media renderer over a push-based media source", () => {
     renderer.destroy();
   });
 
-  it("forwards play, pause and toggle to the producer", async () => {
+  it("forwards play and pause to the producer", async () => {
     const producer = createProducer();
     const renderer = await createRenderer(producer, createScene());
 
     await renderer.play();
     renderer.pause();
-    renderer.togglePlayback();
 
     expect(producer.play).toHaveBeenCalledOnce();
     expect(producer.pause).toHaveBeenCalledOnce();
-    expect(producer.togglePlayback).toHaveBeenCalledOnce();
+    renderer.destroy();
+  });
+
+  it("plays a toggle the producer has yet to answer as a pause", async () => {
+    const producer = createProducer();
+    const renderer = await createRenderer(producer, createScene());
+
+    producer.setStatus("PLAYING");
+    await renderer.togglePlayback();
+    await renderer.togglePlayback();
+
+    expect(producer.pause).toHaveBeenCalledOnce();
+    expect(producer.play).toHaveBeenCalledOnce();
+    renderer.destroy();
+  });
+
+  it("says why the play behind a toggle failed", async () => {
+    const producer = createProducer();
+    const renderer = await createRenderer(producer, createScene());
+
+    producer.setStatus("PAUSED");
+    producer.play.mockRejectedValueOnce(new Error("video engine crashed"));
+
+    await expect(renderer.togglePlayback()).rejects.toThrow(
+      "video engine crashed",
+    );
     renderer.destroy();
   });
 
@@ -94,9 +118,8 @@ describe("media renderer over a push-based media source", () => {
 
     producer.setStatus("PLAYING");
     renderer.scrub(1);
-    renderer.togglePlayback();
+    await renderer.togglePlayback();
 
-    expect(producer.togglePlayback).not.toHaveBeenCalled();
     expect(producer.pause).toHaveBeenCalledOnce();
     expect(producer.endInteractiveSeek).toHaveBeenCalledOnce();
     renderer.destroy();
@@ -108,12 +131,9 @@ describe("media renderer over a push-based media source", () => {
 
     producer.setStatus("PAUSED");
     renderer.scrub(1);
-    renderer.togglePlayback();
+    await renderer.togglePlayback();
 
-    await vi.waitFor(() => {
-      expect(producer.play).toHaveBeenCalledOnce();
-    });
-    expect(producer.togglePlayback).not.toHaveBeenCalled();
+    expect(producer.play).toHaveBeenCalledOnce();
     expect(producer.endInteractiveSeek).toHaveBeenCalledOnce();
     renderer.destroy();
   });
@@ -522,7 +542,6 @@ function createProducer() {
       listeners.get(signal)?.add(listener);
       return () => listeners.get(signal)?.delete(listener);
     },
-    togglePlayback: vi.fn(),
   };
   const getSample = vi.fn(async () => null);
   const samples = vi.fn(async function* () {});
@@ -573,7 +592,6 @@ function createProducer() {
     },
     source,
     step: engine.step as ReturnType<typeof vi.fn>,
-    togglePlayback: engine.togglePlayback as ReturnType<typeof vi.fn>,
   };
 }
 

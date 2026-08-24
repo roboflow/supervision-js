@@ -49,6 +49,5 @@ function createChannel(): PresentedFrameChannel {
     setPlaybackRate: vi.fn(),
     step: vi.fn(async () => undefined),
     subscribe: vi.fn(() => () => undefined),
-    togglePlayback: vi.fn(),
   };
 }

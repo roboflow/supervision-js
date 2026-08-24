@@ -76,7 +76,6 @@ function createProducer() {
 
       return () => listeners.delete(listener);
     },
-    togglePlayback: vi.fn(),
   };
 
   return {

@@ -468,14 +468,19 @@ export function useDemoRenderer(
         }
 
         sessionRef.current = activeSession ?? null;
-        reportPlayFailures(renderer, isActive, setErrorMessage);
         rendererRef.current = renderer;
         if (import.meta.env.DEV) {
           (globalThis as { __demoRenderer?: MediaRenderer }).__demoRenderer =
             renderer;
         }
         syncRendererState(renderer);
-        await startPlayback(renderer, isActive, syncRendererState);
+        await runPlaybackRequest(
+          renderer.play(),
+          renderer,
+          isActive,
+          syncRendererState,
+          setErrorMessage,
+        );
       } catch (error: unknown) {
         if (isActive()) {
           handleSessionError(error, sourceMode);
@@ -530,8 +535,13 @@ export function useDemoRenderer(
       return;
     }
 
-    renderer.togglePlayback();
-    syncRendererState(renderer);
+    void runPlaybackRequest(
+      renderer.togglePlayback(),
+      renderer,
+      () => rendererRef.current === renderer,
+      syncRendererState,
+      setErrorMessage,
+    );
   }, [syncRendererState]);
 
   const getCurrentTime = useCallback(
@@ -546,10 +556,12 @@ export function useDemoRenderer(
       return;
     }
 
-    await startPlayback(
+    await runPlaybackRequest(
+      renderer.play(),
       renderer,
       () => rendererRef.current === renderer,
       syncRendererState,
+      setErrorMessage,
     );
   }, [syncRendererState]);
 
@@ -1007,43 +1019,24 @@ function createThrottledPublisher<Value>(
   };
 }
 
-/**
- * `togglePlayback` starts a play and drops its rejection, so a play that fails
- * through the play/pause button or the space bar would otherwise say nothing.
- * Reporting from `play` itself reaches that play and leaves the pause-or-play
- * decision with the renderer, which alone knows whether a drag is holding the
- * picture.
- */
-function reportPlayFailures(
-  renderer: MediaRenderer,
-  isActive: () => boolean,
-  setErrorMessage: (message: string) => void,
-) {
-  const play = renderer.play.bind(renderer);
-
-  renderer.play = async () => {
-    try {
-      await play();
-    } catch (error: unknown) {
-      if (isActive()) {
-        setErrorMessage(
-          getErrorMessage(error, "Unable to play the media renderer."),
-        );
-      }
-
-      throw error;
-    }
-  };
-}
-
-/** Settles the readout however the play goes. The failure itself is swallowed
- *  because `reportPlayFailures` has already shown it. */
-async function startPlayback(
+/** Says why a playback request the viewer made failed, and settles the readout
+ *  however it went. */
+async function runPlaybackRequest(
+  request: Promise<void>,
   renderer: MediaRenderer,
   isActive: () => boolean,
   syncRendererState: (renderer: MediaRenderer) => void,
+  setErrorMessage: (message: string) => void,
 ) {
-  await renderer.play().catch(() => undefined);
+  try {
+    await request;
+  } catch (error: unknown) {
+    if (isActive()) {
+      setErrorMessage(
+        getErrorMessage(error, "Unable to play the media renderer."),
+      );
+    }
+  }
 
   if (isActive()) {
     syncRendererState(renderer);

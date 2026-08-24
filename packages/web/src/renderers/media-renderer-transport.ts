@@ -9,7 +9,7 @@ const MILLISECONDS_PER_SECOND = 1000;
 export interface MediaRendererTransport {
   play(): Promise<void>;
   pause(): void;
-  togglePlayback(): void;
+  togglePlayback(): Promise<void>;
   scrub(mediaTime: number): void;
   commit(mediaTime: number): Promise<void>;
   step(direction: 1 | -1): Promise<void>;
@@ -76,7 +76,7 @@ export function createMediaRendererTransport(
 
     // A drag stops the picture, and a control that reads this state has to be
     // able to say so. What the user settled on survives in `settledState`,
-    // which is what the release resumes and what a mid-drag toggle acts on.
+    // which is what the release resumes and what a toggle acts on.
     const state =
       gestureInFlight && status !== "ERRORED"
         ? MediaRendererPlaybackState.Paused
@@ -103,31 +103,37 @@ export function createMediaRendererTransport(
 
   const transport: MediaRendererTransport = {
     async play() {
+      // The producer answers on its own thread, so its status still reads the
+      // previous playback until it does. Recording the ask here is what lets a
+      // second toggle arriving in that window flip it.
+      settledState = MediaRendererPlaybackState.Playing;
       await releaseGesture();
       await channel.play();
     },
 
     pause() {
+      settledState = MediaRendererPlaybackState.Paused;
       // A pause ends the producer's mechanical hold, so it lands ahead of the
       // release the open gesture still owes.
       channel.pause();
       void releaseGesture();
     },
 
-    togglePlayback() {
-      if (!gestureInFlight) {
-        channel.togglePlayback();
+    async togglePlayback() {
+      // The producer's own toggle is fire-and-forget, so a play that fails
+      // inside it reaches nobody. Deciding here is also what a drag needs: the
+      // producer sits paused as a mechanic for its length and would read that
+      // as the user's pause, while `settledState` holds what the user chose.
+      // A stall is a play still being asked for, so it toggles off.
+      if (
+        settledState === MediaRendererPlaybackState.Playing ||
+        settledState === MediaRendererPlaybackState.Buffering
+      ) {
+        transport.pause();
         return;
       }
 
-      // Mid-gesture the producer sits paused as a mechanic, and its own toggle
-      // would read that as the user's pause. What the user settled on is what
-      // there is to toggle.
-      if (settledState === MediaRendererPlaybackState.Playing) {
-        transport.pause();
-      } else {
-        void transport.play();
-      }
+      await transport.play();
     },
 
     scrub(mediaTime) {

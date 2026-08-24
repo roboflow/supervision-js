@@ -300,19 +300,18 @@ function openSession(options: SessionOptions): Promise<MediaSession> {
 
   const setPresentation = vi.fn();
   const destroy = vi.fn();
+  const startPlayback = async () => {
+    if (sessions.playFailure) {
+      throw sessions.playFailure;
+    }
+  };
   const renderer: MediaRenderer = {
     getState: () => ({ playbackState: "playing", source: { status: "ready" } }),
-    play: async () => {
-      if (sessions.playFailure) {
-        throw sessions.playFailure;
-      }
-    },
+    play: startPlayback,
     setPresentation,
-    // Shaped like the renderer's own toggle, which starts a play and drops the
-    // rejection.
-    togglePlayback: () => {
-      void renderer.play().catch(() => undefined);
-    },
+    // The renderer picks play or pause inside its own toggle, so a toggle
+    // never reaches the `play` above.
+    togglePlayback: startPlayback,
   } as unknown as MediaRenderer;
 
   if (options.abortSignal) {

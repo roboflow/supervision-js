@@ -163,8 +163,9 @@ export interface MediaRenderer extends MediaRendererStateController {
   /**
    * Flips playback without the caller first reading which way it is going, so
    * a frame presented between the read and the call cannot invert the result.
+   * Rejects when the play it decides on fails.
    */
-  togglePlayback(): void;
+  togglePlayback(): Promise<void>;
   /** Lands on `mediaTime` and resolves once the frame there is presented. */
   seek(mediaTime: number): Promise<void>;
   /**

@@ -267,7 +267,7 @@ export async function createMediaRendererCore(
       playbackController?.pause();
     },
 
-    togglePlayback() {
+    async togglePlayback() {
       if (runtimeState.isDestroyed()) {
         return;
       }
@@ -275,7 +275,7 @@ export async function createMediaRendererCore(
       endSeekGesture();
 
       if (transport) {
-        transport.togglePlayback();
+        await transport.togglePlayback();
         return;
       }
 
@@ -284,7 +284,7 @@ export async function createMediaRendererCore(
         return;
       }
 
-      void renderer.play().catch(() => undefined);
+      await renderer.play();
     },
 
     async seek(mediaTime) {

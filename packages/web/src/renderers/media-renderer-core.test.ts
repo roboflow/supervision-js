@@ -1212,7 +1212,6 @@ function createPushProducer() {
       listeners.get(signal)?.add(listener);
       return () => listeners.get(signal)?.delete(listener);
     },
-    togglePlayback: vi.fn(),
   };
   const source: DecodedMediaSource & {
     readonly engine: PresentedFrameChannel;

@@ -71,7 +71,6 @@ export interface PresentedFrameSource {
 export interface PresentedFrameChannel extends PresentedFrameSource {
   play(): Promise<void>;
   pause(): void;
-  togglePlayback(): void;
   /** Latest-wins seek for a gesture in flight; returns without settling. */
   scrub(timeMs: number, intent?: PresentedFrameSeekIntent): void;
   /** Seek that settles: resolves once the producer has landed on `timeMs`. */
