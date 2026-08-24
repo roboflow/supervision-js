@@ -18,6 +18,13 @@ export enum DetectionFrameSelectionMode {
   /**
    * Select the frame whose `[mediaTime, endTime)` interval contains the media
    * time. This is the default for interval annotations and timestamped sources.
+   *
+   * Frame times must come from the media itself. Times reconstructed from a
+   * nominal frame rate drift against a clip whose real rate differs, and once
+   * that drift passes the half-millisecond selection tolerance a playhead
+   * landing on a frame boundary selects the previous frame's detections.
+   * {@link DetectionFrameSelectionMode.NearestFrameIndex} compares indices and
+   * carries none of this.
    */
   Interval = "interval",
 

@@ -221,8 +221,7 @@ export function createPixiMaskLayer(options: {
   let currentMaskHaloStyle: MaskHaloStyle | null =
     options.maskHaloStyle ?? null;
   let maskSprite: PixiSprite | undefined;
-  let activeFrameKey: string | null = null;
-  let activeRegionMaskFrameKey: string | null = null;
+  let visibleMaskFrameKey: string | null = null;
   let activeIdMaskFrame: PreparedIdMaskFrame | null = null;
   let activeRgbaMaskFrame: PreparedRgbaMaskFrame | null = null;
   let maskOpacity = resolveMaskStyleOpacity(options.maskStyle);
@@ -239,8 +238,8 @@ export function createPixiMaskLayer(options: {
     maskStyle: options.maskStyle,
     onMaskFrameEvicted(key) {
       destroyTexture(key);
-      if (key === activeFrameKey) {
-        activeFrameKey = null;
+
+      if (key === visibleMaskFrameKey) {
         hideSprite();
       }
     },
@@ -250,7 +249,6 @@ export function createPixiMaskLayer(options: {
       }
     },
     onMaskFramesCleared() {
-      activeFrameKey = null;
       destroyTextures();
       hideSprite();
     },
@@ -294,7 +292,7 @@ export function createPixiMaskLayer(options: {
     },
 
     drawFrame(mediaTime) {
-      const preparedFrame = prepareFrame(mediaTime);
+      const preparedFrame = preparedRenderWindow.getFrame(mediaTime);
 
       if (!preparedFrame) {
         hideSprite();
@@ -317,16 +315,13 @@ export function createPixiMaskLayer(options: {
         return;
       }
 
-      activeIdMaskFrame = null;
-      activeRgbaMaskFrame = null;
-
       if (!canHoldVisibleMaskFor(preparedFrame.detectionFrame.mediaTime)) {
         hideSprite();
       }
     },
 
     prepareFrame(mediaTime) {
-      prepareFrame(mediaTime);
+      preparedRenderWindow.getFrame(mediaTime);
     },
 
     clearFrame() {
@@ -387,19 +382,15 @@ export function createPixiMaskLayer(options: {
     },
 
     getActiveRegionMaskCoverage() {
-      if (activeRegionMaskFrameKey !== activeFrameKey) {
-        return null;
-      }
-
       const coverage =
         activeIdMaskFrame?.regionMaskCoverage ??
         activeRgbaMaskFrame?.regionMaskCoverage;
 
-      if (!coverage || !activeFrameKey) {
+      if (!coverage || !visibleMaskFrameKey) {
         return null;
       }
 
-      const frameKey = activeFrameKey;
+      const frameKey = visibleMaskFrameKey;
 
       return {
         frame: coverage,
@@ -455,17 +446,9 @@ export function createPixiMaskLayer(options: {
     },
   };
 
-  function prepareFrame(mediaTime: number) {
-    const preparedFrame = preparedRenderWindow.getFrame(mediaTime);
-
-    activeFrameKey = preparedFrame?.key ?? null;
-
-    return preparedFrame;
-  }
-
   function showMaskFrame(maskFrame: PreparedMaskFrame, mediaTime: number) {
     visibleMaskMediaTime = mediaTime;
-    activeRegionMaskFrameKey = maskFrame.key;
+    visibleMaskFrameKey = maskFrame.key;
     activeIdMaskFrame =
       maskFrame.kind === PreparedMaskFrameKind.IdMask ? maskFrame : null;
     activeRgbaMaskFrame =
@@ -630,9 +613,9 @@ export function createPixiMaskLayer(options: {
 
   function hideSprite() {
     visibleMaskMediaTime = null;
+    visibleMaskFrameKey = null;
     activeIdMaskFrame = null;
     activeRgbaMaskFrame = null;
-    activeRegionMaskFrameKey = null;
     hideFill();
     haloRenderer?.hide();
   }
@@ -724,7 +707,7 @@ export function createPixiMaskLayer(options: {
       }
     }
 
-    if (!key || activeFrameKey === key) {
+    if (!key || visibleMaskFrameKey === key) {
       idMaskRenderer?.clearTexture();
     }
   }

@@ -19,6 +19,7 @@ const preparedWindow = vi.hoisted(() => ({
     | undefined,
   options: undefined as
     | {
+        onMaskFrameEvicted?: (key: string) => void;
         onPreparedWindowChange?: () => void;
         resolveMaxRasterWidth?: () => number | undefined;
       }
@@ -118,7 +119,7 @@ describe("pixi mask layer", () => {
     expect(layer.getActiveIdMaskFrameTexture()).toBeNull();
   });
 
-  it("puts none of a cooked frame on a later frame still owing its cook", () => {
+  it("holds the whole of a cooked frame over a step that owes its cook", () => {
     const layer = createPixiMaskLayer({
       BufferImageSource: FakeBufferImageSource as never,
       ImageSource: FakeImageSource as never,
@@ -138,16 +139,15 @@ describe("pixi mask layer", () => {
     layer.drawFrame(0.1);
 
     preparedWindow.frame = {
-      detectionFrame: { detections: [], mediaTime: 0.12 },
+      detectionFrame: { detections: [], mediaTime: 0.1333 },
       key: "owed-frame",
       maskStatus: "pending",
     };
-    layer.drawFrame(0.12);
+    layer.drawFrame(0.1333);
 
-    // The fill holds for a moment against a flicker; the id raster, which
-    // consumers read detections out of, never holds at all.
+    // One 30 fps step lands inside the hold; the jump below is past it.
     expect(sprite.visible).toBe(true);
-    expect(layer.getActiveIdMaskFrameTexture()).toBeNull();
+    expect(layer.getActiveIdMaskFrameTexture()?.frame.key).toBe("mask-frame");
 
     preparedWindow.frame = {
       ...preparedWindow.frame,
@@ -156,6 +156,100 @@ describe("pixi mask layer", () => {
     layer.drawFrame(0.3);
 
     expect(sprite.visible).toBe(false);
+    expect(layer.getActiveIdMaskFrameTexture()).toBeNull();
+  });
+
+  it("keeps the held frame's region coverage while its successor cooks", () => {
+    const layer = createPixiMaskLayer({
+      BufferImageSource: FakeBufferImageSource as never,
+      ImageSource: FakeImageSource as never,
+      Sprite: FakeSprite as never,
+      Texture: FakeTexture as never,
+      detectionTimeline: {} as never,
+      maskStyle: new BaseMaskStyle(),
+    });
+    const coverage = regionMaskCoverage();
+
+    layer.createSprite({ height: 80, width: 120 });
+    preparedWindow.frame = {
+      detectionFrame: { detections: [], mediaTime: 0.1 },
+      key: "mask-frame",
+      maskFrame: { ...idMaskFrame(), regionMaskCoverage: coverage },
+      maskStatus: "prepared",
+    };
+    layer.drawFrame(0.1);
+
+    preparedWindow.frame = {
+      detectionFrame: { detections: [], mediaTime: 0.1333 },
+      key: "owed-frame",
+      maskStatus: "pending",
+    };
+    layer.drawFrame(0.1333);
+
+    expect(layer.getActiveRegionMaskCoverage()?.frame).toBe(coverage);
+  });
+
+  it("leaves the frame on screen whole while a later frame is prefetched", () => {
+    const layer = createPixiMaskLayer({
+      BufferImageSource: FakeBufferImageSource as never,
+      ImageSource: FakeImageSource as never,
+      Sprite: FakeSprite as never,
+      Texture: FakeTexture as never,
+      detectionTimeline: {} as never,
+      maskStyle: new BaseMaskStyle(),
+    });
+    const coverage = regionMaskCoverage();
+    const sprite = layer.createSprite({ height: 80, width: 120 }) as FakeSprite;
+
+    preparedWindow.frame = {
+      detectionFrame: { detections: [], mediaTime: 0.1 },
+      key: "mask-frame",
+      maskFrame: { ...idMaskFrame(), regionMaskCoverage: coverage },
+      maskStatus: "prepared",
+    };
+    layer.drawFrame(0.1);
+
+    preparedWindow.frame = {
+      detectionFrame: { detections: [], mediaTime: 0.5 },
+      key: "prefetched-frame",
+      maskStatus: "pending",
+    };
+    layer.prepareFrame(0.5);
+
+    expect(sprite.visible).toBe(true);
+    expect(layer.getActiveIdMaskFrameTexture()?.frame.key).toBe("mask-frame");
+    expect(layer.getActiveRegionMaskCoverage()?.frame).toBe(coverage);
+  });
+
+  it("takes a held frame off screen when its cook is evicted", () => {
+    const layer = createPixiMaskLayer({
+      BufferImageSource: FakeBufferImageSource as never,
+      ImageSource: FakeImageSource as never,
+      Sprite: FakeSprite as never,
+      Texture: FakeTexture as never,
+      detectionTimeline: {} as never,
+      maskStyle: new BaseMaskStyle(),
+    });
+    const sprite = layer.createSprite({ height: 80, width: 120 }) as FakeSprite;
+
+    preparedWindow.frame = {
+      detectionFrame: { detections: [], mediaTime: 0.1 },
+      key: "mask-frame",
+      maskFrame: idMaskFrame(),
+      maskStatus: "prepared",
+    };
+    layer.drawFrame(0.1);
+
+    preparedWindow.frame = {
+      detectionFrame: { detections: [], mediaTime: 0.1333 },
+      key: "owed-frame",
+      maskStatus: "pending",
+    };
+    layer.drawFrame(0.1333);
+    preparedWindow.options?.onMaskFrameEvicted?.("mask-frame");
+
+    expect(sprite.visible).toBe(false);
+    expect(layer.getActiveIdMaskFrameTexture()).toBeNull();
   });
 
   it("uploads an odd-width id raster one byte per pixel on a renderer that takes it", () => {
@@ -506,6 +600,21 @@ function maskLayerWithDisplayBox(options: {
   });
 }
 
+function regionMaskCoverage() {
+  return {
+    entries: [
+      {
+        data: new Uint8Array(4),
+        detectionIndex: 0,
+        height: 2,
+        width: 2,
+        x: 0,
+        y: 0,
+      },
+    ],
+  };
+}
+
 function idMaskFrame(width = 120) {
   const raster = new Uint8Array(width * 80);
 
@@ -616,6 +725,8 @@ class FakeTexture {
   constructor(readonly _options: { source?: unknown }) {
     this.source = _options.source ?? {};
   }
+
+  destroy() {}
 }
 
 class FakeSprite {
