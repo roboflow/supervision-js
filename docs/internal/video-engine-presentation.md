@@ -191,27 +191,53 @@ and the push path described above.
 
 ## A cost recorded for a deferred decision
 
-trace, kept here because the decision they price is deferred to its own pull
-request: moving presentation off the main thread, where the surface is
-transferred to the producer and no pixels cross a thread boundary.
+These numbers price a decision deferred to its own pull request: moving
+presentation off the main thread, where the surface is transferred to the
+producer and no pixels cross a thread boundary.
 
-One traced playing window, 6.002s spanning 194 presented frames, main thread
-27.1% occupied at 8.390ms of work per presented frame. Times are the trace's own
-`dur` totals, so the nested ones overlap:
+The demo mounts the presentation mode in which each decoded `VideoFrame` crosses
+from the producer's thread to the main thread as a message, and a Pixi scene
+draws it there. That crossing is the hop being priced.
 
-| where the main thread was | total    | per presented frame | share of busy |
-| ------------------------- | -------- | ------------------- | ------------- |
-| busy, all causes          | 1627.7ms | 8.390ms             | 100%          |
-| `HandlePostMessage`       | 361.2ms  | **1.862ms**         | 22.2%         |
-| `GPUTask`                 | 266.6ms  | 1.374ms             | 16.4%         |
-| `FireAnimationFrame`      | 76.4ms   | 0.394ms             | 4.7%          |
-| `Layout`                  | 37.9ms   | 0.195ms             | 2.3%          |
-| `Paint`, all 366 of them  | 20.6ms   | 0.106ms             | 1.3%          |
+Measured on an Apple M3 Max against the 70s horse trail clip at 30fps through
+the WebGPU renderer, playing from `t=5s`. Three runs per column, each a 6.0s
+window holding 180 presented frames at 29.96 to 30.03 a second with the media
+clock advancing at 1.00x. Two instruments read the same windows: a Chrome trace
+attributing time to `HandlePostMessage`, and a counter inside
+`presentVideoFrame` timing it from entry to return.
 
-`HandlePostMessage` at 1.862ms per presented frame is the hop being priced. The
-demo mounts the presentation mode in which each decoded `VideoFrame` crosses
-from the producer's thread to the main thread as a message and a Pixi scene
-draws it there; that crossing is what the row measures.
+| per presented frame                      | annotations off | annotations on |
+| ---------------------------------------- | --------------- | -------------- |
+| the message handler, arrival to returned | 1.28 to 1.33ms  | 1.31 to 1.40ms |
+| `presentVideoFrame`, entry to return     | 1.05 to 1.10ms  | 1.08 to 1.14ms |
+| main thread busy, all causes             | 7.23 to 7.27ms  | 7.23 to 7.50ms |
+| main thread occupancy                    | 21.7 to 21.8%   | 21.7 to 22.5%  |
+
+The two instruments bracket the hop rather than disagreeing. The trace times the
+whole main-thread task, so it includes the browser deserializing the transferred
+frame before any code here runs; the counter starts at the first line of
+`presentVideoFrame`. The 0.23 to 0.27ms between them is the delivery the handler
+cannot see. Annotations cost 0.03 to 0.07ms of the total, which is the same
+answer the eval's layer configs give when their frame times land within 0.15ms
+of each other.
+
+The long tasks in the window are not the hop. Every window carries six
+`HandlePostMessage` events of 39 to 62ms that are `RunMicrotasks` almost end to
+end: worker RPC replies draining a promise chain, about one a second. Those six
+hold 54 to 56% of all `HandlePostMessage` time out of roughly 540 messages,
+alongside some 355 messages under half a millisecond. The frame hop is
+synchronous and fires once per presented frame, which is why it lands in a band
+of 178 to 181 messages against 180 frames.
+
+An earlier reading of 1.862ms for this hop is retired. It divided every
+`HandlePostMessage` in a window by the frames presented in it, which folds those
+six drains and the sub-millisecond traffic into a number that reads as the cost
+of one crossing. That arithmetic on these windows gives 3.12 to 3.30ms, and it
+moves with how many worker replies happened to land rather than with the hop.
+The same table put `GPUTask` on the main thread at 1.374ms a frame; it does not
+appear on the renderer's main thread in these traces, because it belongs to the
+GPU process. What does sit beside the hop is small: `FireAnimationFrame` 0.29 to
+0.31ms, `Layout` 0.35 to 0.41ms and `Paint` 0.16 to 0.18ms per presented frame.
 
 What this harness cannot tell you is what the other side costs. The comparison
 needs the `framesampler--default` story, which lives in the engine repository
