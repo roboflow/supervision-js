@@ -133,7 +133,9 @@ export async function checkPaths(repository, documents) {
 
     for (const block of document.blocks) {
       const produced =
-        block.kind === "fence" ? producedPaths(block.text) : new Map();
+        block.kind === "fence"
+          ? await producedPaths(repository, block.text)
+          : new Map();
 
       for (const [offset, line] of block.text.split("\n").entries()) {
         if (plan && block.kind === "text" && PROPOSAL.test(line)) {
@@ -581,8 +583,19 @@ function resolveClaimedPath(repository, token) {
  * Where each destination in a block is first written. A command excuses only
  * the lines that follow it: reading a file the block has not written yet is a
  * claim that it already exists.
+ *
+ * An output flag names a destination only when the command runs a script in
+ * this repository that reads that flag. Any word can be spelled as the value of
+ * an output-shaped flag, so a command nothing in the repository answers for
+ * would excuse whatever path a fence planted at the top of itself. Redirection
+ * needs no such backing: `>` creates its file whatever runs to the left of it.
+ *
+ * A resolved script's destination stays excused for the rest of its block.
+ * Requiring that destination's parent directory to exist would close that too,
+ * and fails three lines of `tools/sam3-fixture/README.md`, whose placeholder
+ * sample name writes into a fixture directory no checkout is meant to have.
  */
-function producedPaths(text) {
+async function producedPaths(repository, text) {
   const lines = text.split("\n");
   const produced = new Map();
   let start = 0;
@@ -595,10 +608,13 @@ function producedPaths(text) {
     for (const command of commandLines(
       lines.slice(start, offset + 1).join("\n"),
     )) {
+      const target = await resolveScriptTarget(repository, command);
+      const accepted = target ? await acceptedFlags(target.file) : undefined;
+
       for (const [index, token] of command.tokens.entries()) {
         const flag = token.match(/^--([a-z0-9][a-z0-9-]*)(=(.*))?$/);
         const destination =
-          flag && OUTPUT_FLAG.test(flag[1])
+          flag && OUTPUT_FLAG.test(flag[1]) && accepted?.has(`--${flag[1]}`)
             ? (flag[3] ?? command.tokens[index + 1])
             : token === ">" || token === ">>"
               ? command.tokens[index + 1]
@@ -701,9 +717,10 @@ function resolveWorkspace(repository, reference) {
  * whose target is an external tool has no readable flag set and is skipped.
  */
 async function resolveScriptTarget(repository, command, seen = new Set()) {
-  const direct = command.tokens.find((token) => /\.[cm]?js$/.test(token));
+  const direct = command.tokens.find((token) => /\.([cm]?js|py)$/.test(token));
+  const runtimes = direct?.endsWith(".py") ? ["python", "python3"] : ["node"];
 
-  if (direct && command.tokens.includes("node")) {
+  if (direct && runtimes.some((runtime) => command.tokens.includes(runtime))) {
     const resolved = resolveClaimedPath(repository, direct);
 
     return resolved && (await exists(resolved.absolute))

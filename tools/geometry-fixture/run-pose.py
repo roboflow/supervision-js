@@ -10,18 +10,26 @@ values: `xyxy` corner boxes and COCO-17 keypoints with per-point confidence.
 
 Usage:
     python3 run-pose.py \
-      --frames-dir /tmp/geometry-fixture/frames \
+      --frames-jsonl tools/sam3-fixture/output/basketball_sam3/frames.jsonl \
       --output demo/fixtures/basketball_sam3/raw-pose.jsonl
 
-Frames must be named `<frameIndex>.png` (zero padded) and share the frame grid
-of the detection fixture they will be merged into. No image payloads and no
-credentials are written to the output.
+`--frames-jsonl` reads the frame manifest `tools/sam3-fixture/extract-frames.mjs`
+writes and `tools/sam3-fixture/run-sam3.mjs` consumes, so both models see one
+frame grid. `--frames-dir` reads `<frameIndex>.png` files (zero padded) on that
+same grid. Exactly one of the two is required.
+
+The `--frames-jsonl` path has been exercised only as far as the decoded frame it
+hands the model: no Ultralytics install was available to run a pose over one.
+
+No image payloads and no credentials are written to the output.
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
+import io
 import json
 import platform
 import sys
@@ -32,22 +40,45 @@ DEFAULT_MODEL = "yolov8m-pose.pt"
 DEFAULT_CONFIDENCE = 0.25
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--frames-dir", required=True, type=Path)
+    frames = parser.add_mutually_exclusive_group(required=True)
+    frames.add_argument("--frames-dir", type=Path)
+    frames.add_argument("--frames-jsonl", type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--confidence", default=DEFAULT_CONFIDENCE, type=float)
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def main() -> int:
     args = parse_args()
-    frame_paths = sorted(args.frames_dir.glob("*.png"))
 
-    if not frame_paths:
-        print(f"No .png frames found in {args.frames_dir}", file=sys.stderr)
-        return 1
+    if args.frames_dir is not None:
+        frame_paths = sorted(args.frames_dir.glob("*.png"))
+
+        if not frame_paths:
+            print(f"No .png frames found in {args.frames_dir}", file=sys.stderr)
+            return 1
+
+        frame_count = len(frame_paths)
+        frames = ((int(path.stem), path) for path in frame_paths)
+    else:
+        # frameCount stands in the header above every prediction, and
+        # create-geometry-fixture.mjs rejects a run whose count disagrees with
+        # the detection grid, so the manifest is counted before the model loads.
+        frame_count = sum(1 for _ in read_extracted_frames(args.frames_jsonl))
+
+        if frame_count == 0:
+            print(f"No frames found in {args.frames_jsonl}", file=sys.stderr)
+            return 1
+
+        frames = (
+            (frame_index, decode_frame_image(image_base64))
+            for frame_index, image_base64 in read_extracted_frames(
+                args.frames_jsonl
+            )
+        )
 
     from ultralytics import YOLO
     import torch
@@ -68,7 +99,7 @@ def main() -> int:
                     "confidenceThreshold": args.confidence,
                     "keypointFormat": "coco-17",
                     "boxFormat": "xyxy",
-                    "frameCount": len(frame_paths),
+                    "frameCount": frame_count,
                     "pythonVersion": platform.python_version(),
                     "torchVersion": torch.__version__,
                     "ultralyticsVersion": ultralytics.__version__,
@@ -78,10 +109,9 @@ def main() -> int:
             + "\n"
         )
 
-        for frame_path in frame_paths:
-            frame_index = int(frame_path.stem)
+        for frame_index, frame in frames:
             result = model.predict(
-                source=frame_path,
+                source=frame,
                 conf=args.confidence,
                 device="cpu",
                 verbose=False,
@@ -94,8 +124,66 @@ def main() -> int:
             if frame_index % 30 == 0:
                 print(f"pose frame {frame_index}", flush=True)
 
-    print(f"Wrote raw pose output for {len(frame_paths)} frames to {args.output}")
+    print(f"Wrote raw pose output for {frame_count} frames to {args.output}")
     return 0
+
+
+def read_extracted_frames(path: Path):
+    """The frame index and base64 JPEG of every frame in an extractor manifest.
+
+    A line holds one extraction batch, which is one frame or many.
+    """
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            record = line.strip()
+
+            if not record:
+                continue
+
+            for frame in batch_frames(json.loads(record)):
+                yield read_extracted_frame(frame)
+
+
+def batch_frames(record) -> list:
+    if isinstance(record, list):
+        return record
+
+    if isinstance(record, dict) and isinstance(record.get("frames"), list):
+        return record["frames"]
+
+    return [record]
+
+
+def read_extracted_frame(frame) -> tuple[int, str]:
+    if not isinstance(frame, dict):
+        raise ValueError("Extracted frame entries must be objects.")
+
+    frame_index = frame.get("frameIndex")
+    image = frame.get("image")
+    value = frame.get("jpegBase64")
+
+    if not isinstance(value, str) and isinstance(image, dict):
+        value = image.get("value")
+
+    if not isinstance(frame_index, int) or frame_index < 0:
+        raise ValueError("Extracted frame is missing a valid frameIndex.")
+
+    if not isinstance(value, str) or not value:
+        raise ValueError(
+            f"Extracted frame {frame_index} is missing JPEG base64 image data."
+        )
+
+    return frame_index, strip_data_url_prefix(value)
+
+
+def strip_data_url_prefix(value: str) -> str:
+    return value.split(",", 1)[1] if value.startswith("data:") else value
+
+
+def decode_frame_image(image_base64: str):
+    from PIL import Image
+
+    return Image.open(io.BytesIO(base64.b64decode(image_base64)))
 
 
 def serialize_frame(frame_index: int, result) -> dict:

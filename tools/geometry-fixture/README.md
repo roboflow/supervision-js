@@ -10,7 +10,10 @@ Nothing here runs in the browser; the demo only consumes the committed chunks.
 ## Pieces
 
 - `run-pose.py` — one-time pose generation following the Python Supervision
-  keypoint recipe (Ultralytics YOLO pose over extracted frames). Writes raw,
+  keypoint recipe (Ultralytics YOLO pose over extracted frames). Reads either
+  the frame manifest `tools/sam3-fixture/extract-frames.mjs` writes, which is
+  the file the SAM3 run consumes, so one extraction feeds both models, or a
+  directory of zero-padded PNG frames on that same grid. Writes raw,
   model-native output (`xyxy` boxes, COCO-17 keypoints with confidence) plus a
   metadata header with model checksum and generator versions. No image
   payloads, no credentials.

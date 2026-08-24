@@ -107,20 +107,42 @@ The merge is deterministic given the committed inputs and needs no network:
 npm run fixture:geometry:create
 ```
 
-Both model runs behind those inputs have a committed path back to them, with one
-genuine hole and one format mismatch.
+Both raw inputs behind that merge have a committed path back to them. Both models
+read one extraction of the source's own frames, so a full rebuild is four
+commands:
 
-`raw-sam3.jsonl` came from `tools/sam3-fixture/run-sam3.mjs`, which reads an
-extracted frames manifest. That manifest is not committed, but
-`npm run fixture:sam3:extract` re-extracts it from a media URL you pass, so the
-rerun needs a Roboflow API key rather than a lost input.
+```bash
+npm run fixture:sam3:extract -- \
+  --output tools/sam3-fixture/output/basketball_sam3/frames.jsonl \
+  --sample-name basketball_sam3 \
+  --source-file basketball_sample.mp4 \
+  --source-url /@fs//absolute/repo/path/demo/fixtures/basketball_sample/basketball_sample.mp4
 
-`raw-pose.jsonl` came from the hosted
+npm run fixture:sam3:run -- \
+  --input tools/sam3-fixture/output/basketball_sam3/frames.jsonl \
+  --raw-output demo/fixtures/basketball_sam3/raw-sam3.jsonl \
+  --detections-output demo/fixtures/basketball_sam3/detections.json \
+  --classes "white team player, yellow team player, basketball"
+
+python3 tools/geometry-fixture/run-pose.py \
+  --frames-jsonl tools/sam3-fixture/output/basketball_sam3/frames.jsonl \
+  --output demo/fixtures/basketball_sam3/raw-pose.jsonl
+
+npm run fixture:geometry:create
+```
+
+The extraction needs the fixture page from `npm run fixture:sam3:dev` and a
+Chrome remote-debug session, which `tools/sam3-fixture/README.md` describes. The
+SAM3 step needs a Roboflow API key in `ROBOFLOW_API_KEY`. The pose step needs a
+local `ultralytics` install and no key.
+
+That rebuild remakes `raw-sam3.jsonl` from the model and prompts recorded above,
+and it replaces `raw-pose.jsonl` with a different model's output. The committed
+pose came from the hosted
 `roboflow_core/roboflow_keypoint_detection_model@v3` block, and no driver for
-that hosted run is committed: that is the hole.
-`tools/geometry-fixture/run-pose.py` is committed and takes `--frames-dir`,
-`--output`, `--model` and `--confidence`, but it runs Ultralytics locally and
-produced the 30fps run that `basketball_regions` uses, not this fixture's 25fps
-one. It also does not chain onto the extractor as the two stand:
-`extract-frames.mjs` writes a `frames.jsonl` of encoded frames, while
-`run-pose.py` globs a directory of zero-padded `.png` files.
+that hosted run is committed. `tools/geometry-fixture/run-pose.py` runs an
+Ultralytics checkpoint locally over the extracted JPEG frames, and its header
+records `yolov8m-pose.pt` with a weights checksum where the committed header
+records a hosted model id, runtime, endpoint and block. Every count on this page
+describes the committed file, so a rerun of the pose step moves the keypoint
+coverage and the association totals.

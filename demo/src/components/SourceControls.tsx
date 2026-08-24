@@ -105,7 +105,7 @@ export const SourceControls = memo(function SourceControls({
             />
           </label>
 
-          <label className="source-field source-field--prompts">
+          <label className="source-field">
             <span>Class names / prompts</span>
             <textarea
               disabled={uploadActive}

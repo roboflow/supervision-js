@@ -186,6 +186,10 @@ npm run fixture:sam3:chunk -- \
 `fixture:sam3:run` reads the source frame rate, frame count, duration, and first
 timestamp from it; pass `--frames-meta` to point somewhere else.
 
+`tools/geometry-fixture/run-pose.py` reads the same extracted frames, so a pose
+run for a merged fixture lands on the grid its detections were inferred on
+without a second extraction.
+
 The browser extractor still exposes backwards-compatible basketball aliases:
 
 ```js
