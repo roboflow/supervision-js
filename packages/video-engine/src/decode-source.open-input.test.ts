@@ -17,6 +17,7 @@ import {
 
 interface FakeTrackConfig {
   canDecode: boolean;
+  codec?: string;
   firstTimestamp: number;
   hasTrack?: boolean;
   packetCount?: number;
@@ -33,6 +34,11 @@ class FakeVideoTrack {
   displayHeight = 180;
   canDecode(): Promise<boolean> {
     return Promise.resolve(trackConfig.canDecode);
+  }
+  getDecoderConfig(): Promise<{ codec: string } | null> {
+    return Promise.resolve(
+      trackConfig.codec ? { codec: trackConfig.codec } : null,
+    );
   }
   getTimeResolution(): Promise<number> {
     return Promise.resolve(TICK_RATE);
@@ -102,6 +108,24 @@ describe("openInput decodability (T4a)", () => {
     await expect(openDecodeSource({ source: SOURCE })).rejects.toMatchObject({
       code: VideoEngineErrorCode.DecodeUnsupported,
     });
+  });
+
+  it("the refusal names the codec the browser turned down", async () => {
+    trackConfig = {
+      canDecode: false,
+      codec: "hev1.2.4.L150.B0",
+      firstTimestamp: 0,
+    };
+    await expect(openDecodeSource({ source: SOURCE })).rejects.toThrow(
+      "hev1.2.4.L150.B0",
+    );
+  });
+
+  it("a track whose decoder config cannot be read still names the refusal", async () => {
+    trackConfig = { canDecode: false, firstTimestamp: 0 };
+    await expect(openDecodeSource({ source: SOURCE })).rejects.toThrow(
+      /codec \(unknown\)/,
+    );
   });
 
   it("the thrown value is a typed VideoEngineError, not a bare Error", async () => {

@@ -152,13 +152,13 @@ describe("detectWebgpuImport", () => {
     expect(detectWebgpuImport()).toBe(false);
   });
 
-  it("false when GPUDevice lacks importExternalTexture (Firefox shape)", () => {
+  it("false when GPUDevice lacks importExternalTexture", () => {
     vi.stubGlobal("navigator", { gpu: {} });
     g.GPUDevice = function GPUDevice(): void {} as unknown;
     expect(detectWebgpuImport()).toBe(false);
   });
 
-  it("true when navigator.gpu and importExternalTexture exist (Chrome shape)", () => {
+  it("true when navigator.gpu and importExternalTexture exist", () => {
     vi.stubGlobal("navigator", { gpu: {} });
     const ctor = function GPUDevice(): void {} as unknown as {
       prototype: { importExternalTexture: () => void };

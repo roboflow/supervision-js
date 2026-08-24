@@ -1,5 +1,6 @@
 import { isValidElement, type ReactElement, type ReactNode } from "react";
 import {
+  MediaErrorKind,
   MediaSessionActivityKind,
   MediaSessionActivityStatus,
   MediaSessionStatus,
@@ -74,12 +75,16 @@ function renderViewport(
   });
 }
 
-function erroredSession(errorMessage: string): MediaSessionState {
+function erroredSession(
+  errorMessage: string,
+  errorKind: MediaErrorKind | null = null,
+): MediaSessionState {
   return {
     activities: [
       {
         blockingPlayback: true,
         blockingPresentation: true,
+        errorKind,
         errorMessage,
         kind: MediaSessionActivityKind.Error,
         label: "Renderer error",
@@ -220,6 +225,23 @@ describe("RendererViewport", () => {
       ),
     );
 
+    expect(overlayText(overlay)).toContain(message);
+  });
+
+  it("leads a classified failure with copy a viewer can act on", () => {
+    const message =
+      "openInput: browser cannot decode this video track's codec hev1.2.4.L150.B0";
+    const overlay = findOverlay(
+      renderViewport(
+        vi.fn(),
+        "opening 70s horse trail",
+        erroredSession(message, MediaErrorKind.UnsupportedFormat),
+      ),
+    );
+
+    expect(overlayText(overlay)).toContain(
+      "This browser cannot decode this video",
+    );
     expect(overlayText(overlay)).toContain(message);
   });
 

@@ -127,6 +127,7 @@ export function createMediaSessionStateSnapshot({
       createActivity({
         blockingPlayback: true,
         blockingPresentation: true,
+        errorKind: renderer.source.errorKind ?? null,
         errorMessage: renderer.source.errorMessage,
         kind: MediaSessionActivityKind.Error,
         label: "Renderer error",

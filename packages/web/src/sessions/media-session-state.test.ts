@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { DetectionBufferStatus } from "supervision-js-core";
+import { DetectionBufferStatus, MediaErrorKind } from "supervision-js-core";
 import {
   MediaRendererFit,
   MediaRendererPlaybackState,
@@ -325,6 +325,34 @@ describe("media session state", () => {
     ]);
   });
 
+  it("carries the source's failure kind on the renderer error activity", () => {
+    const state = createMediaSessionStateSnapshot({
+      errorMessage: null,
+      media: {
+        inputMetadata: null,
+        normalizedMedia: null,
+        objectUrl: null,
+      },
+      normalization: null,
+      renderPreparation: null,
+      renderer: createRendererState({
+        detectionBufferStatus: DetectionBufferStatus.Ready,
+        playbackState: MediaRendererPlaybackState.Error,
+        sourceErrorKind: MediaErrorKind.UnsupportedFormat,
+        sourceErrorMessage:
+          "openInput: browser cannot decode this video track's codec hevc",
+        sourceStatus: MediaSourceStatus.Error,
+      }),
+    });
+
+    expect(state.activities).toEqual([
+      expect.objectContaining({
+        errorKind: MediaErrorKind.UnsupportedFormat,
+        kind: MediaSessionActivityKind.Error,
+      }),
+    ]);
+  });
+
   it("reports session errors as blocking errors", () => {
     const state = createMediaSessionStateSnapshot({
       errorMessage: "Session setup failed",
@@ -387,6 +415,7 @@ describe("media session state", () => {
 function createRendererState(options: {
   readonly detectionBufferStatus: DetectionBufferStatus;
   readonly playbackState: MediaRendererPlaybackState;
+  readonly sourceErrorKind?: MediaErrorKind | null;
   readonly sourceErrorMessage?: string | null;
   readonly sourceStatus?: MediaSourceStatus;
 }): MediaRendererState {
@@ -418,7 +447,7 @@ function createRendererState(options: {
       audioTrackCount: null,
       canRead: null,
       duration: null,
-      errorKind: null,
+      errorKind: options.sourceErrorKind ?? null,
       errorMessage: options.sourceErrorMessage ?? null,
       estimatedFrameCount: null,
       estimatedFrameRate: null,

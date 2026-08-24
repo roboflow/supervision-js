@@ -528,9 +528,12 @@ async function openInput(
     );
   }
   if (!(await videoTrack.canDecode())) {
+    const decoderConfig = await videoTrack.getDecoderConfig();
     throw new VideoEngineError(
       VideoEngineErrorCode.DecodeUnsupported,
-      "openInput: browser cannot decode this video track's codec",
+      `openInput: browser cannot decode this video track's codec ${
+        decoderConfig?.codec ?? "(unknown)"
+      }`,
     );
   }
   const displayWidth = videoTrack.displayWidth;
@@ -697,8 +700,7 @@ export function detectVideoDecoder(): boolean {
  * Probes the worker realm for WebGPU with importExternalTexture. Checks for the
  * method on the prototype rather than acquiring a device, so it is synchronous
  * and cheap; the actual device acquisition still happens (and can still fail
- * back to 2D) in the renderer. Firefox ships navigator.gpu without
- * importExternalTexture, which this filters out.
+ * back to 2D) in the renderer.
  */
 export function detectWebgpuImport(): boolean {
   const nav = (globalThis as { navigator?: { gpu?: unknown } }).navigator;

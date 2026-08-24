@@ -11,6 +11,7 @@ import type {
   UploadInferenceState,
 } from "../session/demo-session-types";
 import { DemoEvalHook } from "../eval-hooks";
+import { mediaFailureHeadline } from "./media-failure-copy";
 
 interface RendererViewportProps {
   readonly containerRef: RefCallback<HTMLDivElement>;
@@ -133,7 +134,7 @@ function createViewportOverlay(
     return {
       detail: formatActivityDetail(activity),
       kicker: formatSessionStatus(sessionState?.status ?? null),
-      label: activity.label,
+      label: mediaFailureHeadline(activity.errorKind) ?? activity.label,
       progress: activity.progress ?? null,
       tone:
         activity.status === MediaSessionActivityStatus.Error

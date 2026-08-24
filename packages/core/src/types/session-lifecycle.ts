@@ -1,3 +1,5 @@
+import type { MediaErrorKind } from "#types/media-rendering";
+
 /**
  * Media-session operating mode.
  *
@@ -73,6 +75,14 @@ export interface MediaSessionActivity {
    */
   readonly blockingPresentation: boolean;
   readonly detail?: string | null;
+  /**
+   * Stable failure classification when this activity reports an error.
+   *
+   * Prefer this over `errorMessage` for control flow: messages are diagnostic
+   * text and may name vendor internals. Absent when the reporting subsystem
+   * does not classify its failures.
+   */
+  readonly errorKind?: MediaErrorKind | null;
   readonly errorMessage?: string | null;
   readonly kind: MediaSessionActivityKind;
   readonly label: string;
