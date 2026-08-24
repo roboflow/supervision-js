@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  acceptsVideoFrameUpload,
   createMediaCompositor,
   type MediaGpuTextureSource,
 } from "./pixi-media-scene";
@@ -144,7 +145,7 @@ describe("media compositor", () => {
   });
 });
 
-function createFakeDevice(): FakeDevice {
+function createFakeDevice({ acceptsVideoFrames = true } = {}): FakeDevice {
   const created: FakeTexture[] = [];
   const copies: { texture: FakeTexture }[] = [];
 
@@ -163,9 +164,20 @@ function createFakeDevice(): FakeDevice {
     },
     queue: {
       copyExternalImageToTexture(
-        _source: unknown,
+        source: { readonly source: unknown },
         destination: { readonly texture: FakeTexture },
       ) {
+        // Firefox's own wording, because the message is the evidence that this
+        // is a converter refusing the type rather than a copy going wrong.
+        if (!acceptsVideoFrames && source.source instanceof FakeVideoFrame) {
+          throw new TypeError(
+            "GPUQueue.copyExternalImageToTexture: 'source' member of " +
+              "GPUCopyExternalImageSourceInfo could not be converted to any " +
+              "of: ImageBitmap, HTMLImageElement, HTMLCanvasElement, " +
+              "OffscreenCanvas.",
+          );
+        }
+
         copies.push({ texture: destination.texture });
       },
     },
@@ -235,3 +247,70 @@ describe("media compositor texture lifetime", () => {
     ]);
   });
 });
+
+describe("decoded frame upload support", () => {
+  /** A browser that has WebCodecs and a canvas to build a probe frame from. */
+  const stubDecodedFrames = () => {
+    vi.stubGlobal(
+      "OffscreenCanvas",
+      class {
+        getContext() {
+          return { fillRect: vi.fn() };
+        }
+      },
+    );
+    vi.stubGlobal("VideoFrame", FakeVideoFrame);
+  };
+
+  it("reports a queue that converts a decoded frame", () => {
+    const gpu = createFakeDevice();
+    stubDecodedFrames();
+
+    expect(acceptsVideoFrameUpload(gpu.device)).toBe(true);
+  });
+
+  it("reports a queue that refuses a decoded frame", () => {
+    const gpu = createFakeDevice({ acceptsVideoFrames: false });
+    stubDecodedFrames();
+
+    expect(acceptsVideoFrameUpload(gpu.device)).toBe(false);
+  });
+
+  it("closes the probe frame and frees its texture on either answer", () => {
+    stubDecodedFrames();
+
+    for (const acceptsVideoFrames of [true, false]) {
+      const gpu = createFakeDevice({ acceptsVideoFrames });
+      FakeVideoFrame.opened.length = 0;
+
+      acceptsVideoFrameUpload(gpu.device);
+
+      expect(FakeVideoFrame.opened.map((probe) => probe.closed)).toStrictEqual([
+        true,
+      ]);
+      expect(
+        gpu.created.map((texture) => texture.destroy.mock.calls.length),
+      ).toStrictEqual([1]);
+    }
+  });
+
+  it("refuses a browser that cannot make a decoded frame at all", () => {
+    const gpu = createFakeDevice();
+
+    expect(acceptsVideoFrameUpload(gpu.device)).toBe(false);
+    expect(gpu.created).toHaveLength(0);
+  });
+});
+
+class FakeVideoFrame {
+  static readonly opened: FakeVideoFrame[] = [];
+  closed = false;
+
+  constructor() {
+    FakeVideoFrame.opened.push(this);
+  }
+
+  close() {
+    this.closed = true;
+  }
+}

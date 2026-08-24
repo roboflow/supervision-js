@@ -322,13 +322,16 @@ vi.mock("pixi.js", () => {
 
 vi.mock("pixi.js/gif", () => ({ GifSprite: class {} }));
 
+/** Shared so a test can see what the staging fallback drew into it. */
+const stagingContext = { drawImage: vi.fn() };
+
 const documentMock = {
   addEventListener: vi.fn(),
   createElement: (tagName: string) =>
     tagName === "div"
       ? { appendChild: vi.fn(), style: {} }
       : {
-          getContext: () => ({ drawImage: vi.fn() }),
+          getContext: () => stagingContext,
           height: 0,
           style: {},
           toBlob: (receive: (blob: Blob) => void, type: string) =>
@@ -348,8 +351,27 @@ beforeEach(() => {
     RENDER_ATTACHMENT: 2,
     TEXTURE_BINDING: 4,
   });
+  // Before the scene takes the GPU path it asks the device whether it converts
+  // a decoded frame at all, and it asks by building one, so a browser that has
+  // WebCodecs is part of what this mock stands for.
+  vi.stubGlobal(
+    "OffscreenCanvas",
+    class {
+      getContext() {
+        return { fillRect: vi.fn() };
+      }
+    },
+  );
+  vi.stubGlobal(
+    "VideoFrame",
+    class {
+      close() {}
+    },
+  );
+  pixiMock.copyExternalImageToTexture.mockReset();
   pixiMock.displayFilters.length = 0;
   pixiMock.extractCanvas.mockClear();
+  stagingContext.drawImage.mockClear();
   pixiMock.render.mockClear();
   pixiMock.externalSources.length = 0;
   pixiMock.sprites.length = 0;
@@ -559,6 +581,29 @@ describe("push-presented Pixi scene", () => {
       (presented ?? 0) + 1,
       adjusted,
     ]);
+  });
+
+  it("keeps the media on the staging canvas when the device refuses a decoded frame", async () => {
+    // The refusal lands on the capability probe, which is the first copy the
+    // scene asks for. Firefox refuses every one after it too, and the point of
+    // asking first is that none of them is a presented frame.
+    pixiMock.copyExternalImageToTexture.mockImplementationOnce(() => {
+      throw new TypeError("source could not be converted");
+    });
+    const channel = createChannel();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene(
+      createSceneOptions(channel.channel),
+    );
+    scene.initializeMedia({ height: 240, width: 320 });
+
+    const presented = presentedFrame(2000);
+    channel.present(presented);
+
+    expect(pixiMock.externalSources).toStrictEqual([]);
+    expect(stagingContext.drawImage).toHaveBeenCalledTimes(1);
+    expect(presented.frame.close).toHaveBeenCalledTimes(1);
+    expect(pixiMock.render).toHaveBeenCalled();
   });
 
   it("captures the pixels the compositor put on screen", async () => {

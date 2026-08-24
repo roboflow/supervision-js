@@ -2293,8 +2293,9 @@ export async function createPixiMediaScene(
 
   /**
    * Puts presented pixels on the media sprite. WebGPU takes the decoded frame
-   * straight into a texture Pixi samples; anywhere else the frame goes through
-   * the staging canvas the pull path already uses.
+   * straight into a texture Pixi samples; anywhere else, and on a WebGPU that
+   * will not convert a decoded frame, the frame goes through the staging
+   * canvas the pull path already uses.
    */
   function createSceneMediaCompositor(): MediaCompositor {
     const device = (
@@ -2302,7 +2303,7 @@ export async function createPixiMediaScene(
     ).gpu?.device;
     const sprite = mediaSprite;
 
-    if (!device || !sprite) {
+    if (!device || !sprite || !acceptsVideoFrameUpload(device)) {
       return { destroy: () => undefined, upload: uploadFrameToStagingCanvas };
     }
 
@@ -2558,6 +2559,57 @@ export function createMediaCompositor(
       );
     },
   };
+}
+
+/**
+ * Whether this device's queue takes a decoded frame as a copy source.
+ *
+ * Chrome converts a VideoFrame. Firefox's converter accepts only ImageBitmap,
+ * HTMLImageElement, HTMLCanvasElement and OffscreenCanvas, and rejects the
+ * frame with a TypeError thrown from inside the present. The present abandons
+ * the steps after the upload, so the media sprite keeps a texture nothing ever
+ * wrote to while the redraw at the resting playhead keeps putting annotations
+ * over it: the scene then reads as a working library over a broken video,
+ * which is worse than an error. Answering here instead routes those frames
+ * through the staging canvas, which every non-WebGPU scene already uses.
+ *
+ * The answer is a property of the browser rather than of the decode, so it is
+ * asked once when the compositor is built and never per frame: a browser that
+ * takes the frame pays one one-pixel copy each time media is opened, and
+ * nothing at all while it plays.
+ */
+export function acceptsVideoFrameUpload(device: GPUDevice): boolean {
+  if (
+    typeof VideoFrame !== "function" ||
+    typeof OffscreenCanvas !== "function"
+  ) {
+    return false;
+  }
+
+  let probe: VideoFrame | undefined;
+  let texture: GPUTexture | undefined;
+
+  try {
+    const canvas = new OffscreenCanvas(1, 1);
+    const context = canvas.getContext("2d");
+
+    if (!context) return false;
+
+    context.fillRect(0, 0, 1, 1);
+    probe = new VideoFrame(canvas, { timestamp: 0 });
+    texture = createFrameTexture(device, 1, 1);
+    device.queue.copyExternalImageToTexture(
+      { source: probe },
+      { texture },
+      { height: 1, width: 1 },
+    );
+    return true;
+  } catch {
+    return false;
+  } finally {
+    probe?.close();
+    texture?.destroy();
+  }
 }
 
 function createFrameTexture(device: GPUDevice, width: number, height: number) {
