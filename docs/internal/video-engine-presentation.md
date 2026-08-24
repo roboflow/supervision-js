@@ -95,6 +95,30 @@ through the same staging canvas every non-WebGPU scene already uses. The answer
 is a property of the browser, so nothing is probed per frame and a browser that
 takes the frame keeps the straight copy.
 
+A refusing device is the narrow case; the wide one is a browser with no WebGPU
+to refuse. `navigator.gpu` is undefined in Safari 18.6, in the page and in a
+worker, so Pixi builds its WebGL renderer, `createSceneMediaCompositor` finds no
+device, and every present runs `uploadFrameToStagingCanvas`: one 2D draw of the
+decoded frame into the staging canvas, then one upload of that whole canvas into
+the sprite's texture. Both steps land inside the present: Pixi's GL texture
+system uploads from the `update()` call rather than at render time, so this cost
+follows presented frames rather than the renders `renderPresent` coalesces.
+
+The upload is what Safari costs: on the demo's default clip it runs once per
+presented frame at 24.8 ms, and about seven tenths of the wall clock goes into
+it during playback. It is not the pixels. The same frames uploaded straight from
+the decoded VideoFrame into a WebGL texture, in the same browser, take 0.6 ms
+each, measured with a forced readback after every upload so neither figure can
+be work WebKit deferred, and the pixel that comes back is the staging route's
+colour rather than the black a bad upload gives. Part of that gap is per-pixel
+and part of it is that the staging surface is media-sized whatever the decode
+delivers, so a decode below media size is drawn back up before it is uploaded.
+It is sized that way because `captureFrame` reads it, and a capture is
+media-sized on both paths. Anything that stops writing that canvas therefore
+owns the captured pixels, the decode sizes the sprite has to keep ignoring, and
+a per-browser answer to whether this WebGL context takes a VideoFrame at all,
+which is the question `acceptsVideoFrameUpload` already asks the GPU queue.
+
 That settles the upload and nothing else. A source only reaches the compositor
 once WebCodecs has decoded it, and `openInput` refuses a track whose codec
 `canDecode` rejects. A browser's WebCodecs support can be narrower than its media
@@ -102,7 +126,9 @@ element's: Firefox 154 plays HEVC in a `<video>` while `VideoDecoder` reports
 `hvc1` and `hev1` configurations unsupported, so an HEVC source raises
 `DecodeUnsupported` before a frame is ever presented. The demo's own `horse_trail`
 fixture is HEVC Main 10, which is why it errors in Firefox while the H.264
-basketball fixtures play.
+basketball fixtures play. That is Firefox's decoder and not a rule about
+non-Chromium browsers: Safari 18.6 reports `hvc1` and `hev1` supported alongside
+`avc1`, `vp8`, `vp09` and `av01`, and opens and plays `horse_trail`.
 
 ## Rendering Only On Change
 

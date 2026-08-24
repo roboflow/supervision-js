@@ -18,11 +18,11 @@ import type { ScrubFrame } from "./scrub-cursor";
  *
  *   - Zero-copy import (texture_external, importExternalTexture): the decoded
  *     VideoFrame is wrapped as an external texture and sampled directly, no copy.
- *     Used only for sample frames and only where importExternalTexture exists
- *     (Chrome/Safari). The external texture and the VideoFrame it wraps are valid
- *     only for the current task, so import, draw, submit, and close happen in one
- *     tick. The renderer closes the transient VideoFrame it creates; the
- *     controller still owns and closes the VideoSample.
+ *     Used only for sample frames and only where importExternalTexture exists.
+ *     The external texture and the VideoFrame it wraps are valid only for the
+ *     current task, so import, draw, submit, and close happen in one tick. The
+ *     renderer closes the transient VideoFrame it creates; the controller still
+ *     owns and closes the VideoSample.
  *
  * A decoded frame carries its own colour space and the browser converts it on
  * whichever route the frame takes. The routes are not guaranteed to agree: a
