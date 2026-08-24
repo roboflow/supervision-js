@@ -4,6 +4,11 @@ import {
   canReuseMaskVisibilityArtifacts,
   observePixiContainerResize,
 } from "./pixi-media-scene";
+import {
+  createPixiSceneLayerSlot,
+  PixiSceneLayerKind,
+  syncPixiSceneLayerChildren,
+} from "./pixi-scene-layer-slot";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -92,4 +97,30 @@ describe("Pixi media scene mask visibility", () => {
       expect(canReuseMaskVisibilityArtifacts(previous, next)).toBe(false);
     },
   );
+});
+
+describe("Pixi media scene layer stacking", () => {
+  it("stacks the focus veil under the interaction affordances, whatever order they arrive in", () => {
+    const scene = { children: [] as { name: string }[] };
+    const focusSlot = createPixiSceneLayerSlot(PixiSceneLayerKind.Focus);
+    const interactionSlot = createPixiSceneLayerSlot(
+      PixiSceneLayerKind.Interaction,
+    );
+    const slots = [interactionSlot, focusSlot];
+    const container = {
+      addChild: (...children: { name: string }[]) => {
+        scene.children.push(...children);
+      },
+      removeChildren: () => scene.children.splice(0),
+    };
+
+    interactionSlot.setDisplay({ name: "interaction" } as never);
+    focusSlot.setDisplay({ name: "focus" } as never);
+    syncPixiSceneLayerChildren(container as never, slots);
+
+    expect(scene.children.map(({ name }) => name)).toStrictEqual([
+      "focus",
+      "interaction",
+    ]);
+  });
 });

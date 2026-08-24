@@ -5,7 +5,9 @@ import type { PixiRegionLayerState } from "./pixi-region-layer";
 import {
   assertPresentedTimestamp,
   drawFramePresentLayers,
+  measureFramePresentLayers,
   presentVideoFrame,
+  type FramePresentStep,
   type FramePresentTargets,
 } from "./pixi-frame-present";
 import type { PresentedVideoFrame } from "./presented-frame-channel";
@@ -89,6 +91,46 @@ describe("atomic present", () => {
     expect([recording.order, [...recording.timestamps.values()]]).toStrictEqual(
       [LAYER_DRAW_ORDER, LAYER_DRAW_ORDER.map(() => [6.5])],
     );
+  });
+
+  it("walks only the steps a bundle brings, in the order it declares", () => {
+    const recording = recordPresents();
+
+    drawFramePresentLayers(
+      {
+        ...recording.targets.layers,
+        drawInteraction: undefined,
+        drawMask: undefined,
+      },
+      3,
+    );
+
+    expect(recording.order).toStrictEqual(
+      LAYER_DRAW_ORDER.filter(
+        (step) => step !== "drawMask" && step !== "drawInteraction",
+      ),
+    );
+  });
+
+  it("measures every step it walks, in that order, and hands back what each drew", () => {
+    const recording = recordPresents();
+    const measured: string[] = [];
+    const measureStep = <T>(step: FramePresentStep, draw: () => T): T => {
+      const drawn = draw();
+      measured.push(step);
+      return drawn;
+    };
+
+    const states = drawFramePresentLayers(
+      measureFramePresentLayers(recording.targets.layers, measureStep),
+      8.25,
+    );
+
+    expect([recording.order, measured, states]).toStrictEqual([
+      LAYER_DRAW_ORDER,
+      LAYER_DRAW_ORDER,
+      { boxState, regionState },
+    ]);
   });
 
   it("adopts the presented time before any step that draws or uploads", () => {

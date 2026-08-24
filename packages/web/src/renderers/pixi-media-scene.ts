@@ -31,14 +31,19 @@ import type {
   MediaRendererSceneTimelineContext,
   PresentedMediaSample,
 } from "./media-renderer-scene";
-import type { MediaRendererPresentation } from "#types/media-renderer";
+import type {
+  MediaFrameRenderTimings,
+  MediaRendererPresentation,
+} from "#types/media-renderer";
 import { captureCanvasMediaFrame } from "./media-frame-capture";
 import {
   drawFramePresentLayers,
+  measureFramePresentLayers,
   presentVideoFrame,
 } from "./pixi-frame-present";
 import type {
   FramePresentLayers,
+  FramePresentStep,
   FramePresentTargets,
 } from "./pixi-frame-present";
 import type { PresentedVideoFrame } from "./presented-frame-channel";
@@ -119,6 +124,27 @@ const RENDERED_PRESENTATION_FIELDS: readonly (keyof MediaRendererPresentation)[]
     "renderers",
     "visibility",
   ];
+
+type FrameDrawTimings = {
+  -readonly [
+    Key in "boxMs" | "focusMs" | "interactionMs" | "labelMs" | "maskMs"
+  ]: MediaFrameRenderTimings[Key];
+};
+
+/** Several steps share a bucket: the public timings name fewer than the walk draws. */
+const FRAME_DRAW_TIMING_BUCKETS: Partial<
+  Record<FramePresentStep, keyof FrameDrawTimings>
+> = {
+  drawBox: "boxMs",
+  drawFocus: "focusMs",
+  drawInteraction: "interactionMs",
+  drawInteractionPresentation: "interactionMs",
+  drawLabel: "labelMs",
+  drawMask: "maskMs",
+  drawPolygon: "boxMs",
+  drawRegion: "boxMs",
+  drawVector: "boxMs",
+};
 
 export function observePixiContainerResize(
   container: HTMLElement,
@@ -783,17 +809,6 @@ export async function createPixiMediaScene(
     };
   };
 
-  const redrawViewportStyles = () => {
-    boxLayer.invalidate();
-    boxLayer.drawFrame(currentMediaTime, viewportScale);
-    drawPolygonFrame(currentMediaTime);
-    vectorLayer.drawFrame(currentMediaTime, viewportScale);
-    regionLayer.drawFrame(currentMediaTime, viewportScale);
-    labelLayer?.drawFrame(currentMediaTime, viewportScale);
-    drawFocusLayer(currentMediaTime);
-    drawInteractionPresentationLayer(currentMediaTime);
-  };
-
   // Pixi's ResizePlugin listens to the window resize event, which does not
   // fire when an application drawer or split pane changes only this element's
   // dimensions. Resize Pixi and recompute the contain/cover transform in the
@@ -880,12 +895,45 @@ export async function createPixiMediaScene(
     },
   };
 
-  // A redraw at a resting playhead has no new media time, so both of these
-  // would run at the moment the last present already ran them at.
-  const annotationRedrawLayers: FramePresentLayers = {
+  // The focus fade and the overlay are advanced by a clock: the presented media
+  // time in a push scene, the ticker in a pull one. Drawing them from a walk
+  // that clock did not drive would move them out of turn.
+  const annotationDrawLayers: FramePresentLayers = {
     ...framePresentTargets.layers,
     advanceFocus: () => undefined,
     drawAnnotationOverlay: () => undefined,
+  };
+
+  // A viewport-style redraw covers the layers whose geometry is a function of
+  // the viewport scale. Neither the mask raster nor the interaction hit map
+  // takes one, and the hit map is what decides the hover a pan must not move.
+  const viewportStyleRedrawLayers: FramePresentLayers = {
+    ...annotationDrawLayers,
+    drawBox: (mediaTime) => {
+      boxLayer.invalidate();
+      return boxLayer.drawFrame(mediaTime, viewportScale);
+    },
+    drawInteraction: undefined,
+    drawMask: undefined,
+  };
+
+  let frameDrawTimings = createFrameDrawTimings();
+
+  function measureDrawStep<T>(step: FramePresentStep, draw: () => T): T {
+    const start = now();
+    const drawn = draw();
+    const bucket = FRAME_DRAW_TIMING_BUCKETS[step];
+    if (bucket) frameDrawTimings[bucket] += elapsedSince(start);
+    return drawn;
+  }
+
+  const measuredAnnotationDrawLayers = measureFramePresentLayers(
+    annotationDrawLayers,
+    measureDrawStep,
+  );
+
+  const redrawViewportStyles = () => {
+    drawFramePresentLayers(viewportStyleRedrawLayers, currentMediaTime);
   };
 
   return {
@@ -1004,18 +1052,11 @@ export async function createPixiMediaScene(
           presentedSampleTimestamp = sample.timestamp;
           stagingTextureSource?.update();
           stagingTexture?.update();
-          drawMaskFrame(sample.timestamp);
-          const boxState = boxLayer.drawFrame(sample.timestamp, viewportScale);
-          drawPolygonFrame(sample.timestamp);
-          vectorLayer.drawFrame(sample.timestamp, viewportScale);
-          const regionState = regionLayer.drawFrame(
+
+          const { boxState, regionState } = drawFramePresentLayers(
+            annotationDrawLayers,
             sample.timestamp,
-            viewportScale,
           );
-          interactionLayer?.drawFrame(sample.timestamp);
-          drawFocusLayer(sample.timestamp);
-          drawInteractionPresentationLayer(sample.timestamp);
-          labelLayer?.drawFrame(sample.timestamp, viewportScale);
           updateMediaSceneFit();
 
           return {
@@ -1029,58 +1070,18 @@ export async function createPixiMediaScene(
         }
 
         const totalStart = now();
-        let mediaUploadMs = 0;
-        let maskMs = 0;
-        let boxMs = 0;
-        let interactionMs = 0;
-        let labelMs = 0;
-        let fitMs = 0;
-        let focusMs = 0;
-
-        mediaUploadMs = measure(() => {
+        frameDrawTimings = createFrameDrawTimings();
+        const mediaUploadMs = measure(() => {
           sample.draw(stagingContext, 0, 0, mediaWidth, mediaHeight);
           presentedSampleTimestamp = sample.timestamp;
           stagingTextureSource?.update();
           stagingTexture?.update();
         });
-        maskMs = measure(() => {
-          drawMaskFrame(sample.timestamp);
-        });
-        let boxState: PixiBoxLayerState | undefined;
-        let regionState: PixiRegionLayerState | undefined;
-
-        boxMs = measure(() => {
-          boxState = boxLayer.drawFrame(sample.timestamp, viewportScale);
-          drawPolygonFrame(sample.timestamp);
-          vectorLayer.drawFrame(sample.timestamp, viewportScale);
-          regionState = regionLayer.drawFrame(sample.timestamp, viewportScale);
-        });
-        interactionMs = measure(() => {
-          interactionLayer?.drawFrame(sample.timestamp);
-          drawInteractionPresentationLayer(sample.timestamp);
-        });
-        focusMs = measure(() => {
-          drawFocusLayer(sample.timestamp);
-        });
-        labelMs = measure(() => {
-          labelLayer?.drawFrame(sample.timestamp, viewportScale);
-        });
-        fitMs = measure(updateMediaSceneFit);
-
-        if (!boxState) {
-          throw new Error("Unable to draw Pixi box layer.");
-        }
-
-        const renderTimings = {
-          boxMs,
-          fitMs,
-          focusMs,
-          interactionMs,
-          labelMs,
-          maskMs,
-          mediaUploadMs,
-          totalMs: elapsedSince(totalStart),
-        };
+        const { boxState, regionState } = drawFramePresentLayers(
+          measuredAnnotationDrawLayers,
+          sample.timestamp,
+        );
+        const fitMs = measure(updateMediaSceneFit);
 
         return {
           ...createPresentedSampleState(
@@ -1089,7 +1090,12 @@ export async function createPixiMediaScene(
             regionState,
           ),
           duration: sample.duration,
-          renderTimings,
+          renderTimings: {
+            ...frameDrawTimings,
+            fitMs,
+            mediaUploadMs,
+            totalMs: elapsedSince(totalStart),
+          },
         };
       } finally {
         sample.close();
@@ -2077,7 +2083,7 @@ export async function createPixiMediaScene(
   function drawAnnotationFrame(mediaTime: number) {
     drawnReadiness = annotationWindow.getReadinessToken(mediaTime);
 
-    return drawFramePresentLayers(annotationRedrawLayers, mediaTime);
+    return drawFramePresentLayers(annotationDrawLayers, mediaTime);
   }
 
   /**
@@ -2576,6 +2582,10 @@ function cancelDisplayFrame(handle: number) {
   if (typeof globalThis.cancelAnimationFrame === "function") {
     globalThis.cancelAnimationFrame(handle);
   }
+}
+
+function createFrameDrawTimings(): FrameDrawTimings {
+  return { boxMs: 0, focusMs: 0, interactionMs: 0, labelMs: 0, maskMs: 0 };
 }
 
 function measure(work: () => void) {

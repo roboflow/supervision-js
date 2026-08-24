@@ -115,6 +115,46 @@ export function drawFramePresentLayers(
   return { boxState, regionState };
 }
 
+export type FramePresentStep = keyof FramePresentLayers;
+
+/**
+ * The steps a walk would take, each reporting its cost, so a present that
+ * wants a timing breakdown still reads the one declared order.
+ */
+export function measureFramePresentLayers(
+  layers: FramePresentLayers,
+  measureStep: <T>(step: FramePresentStep, draw: () => T) => T,
+): FramePresentLayers {
+  const timed =
+    <T>(step: FramePresentStep, draw: (mediaTime: number) => T) =>
+    (mediaTime: number): T =>
+      measureStep(step, () => draw(mediaTime));
+  const maybeTimed = (
+    step: FramePresentStep,
+    draw: ((mediaTime: number) => void) | undefined,
+  ) => (draw ? timed(step, draw) : undefined);
+
+  return {
+    advanceFocus: timed("advanceFocus", layers.advanceFocus),
+    drawAnnotationOverlay: timed(
+      "drawAnnotationOverlay",
+      layers.drawAnnotationOverlay,
+    ),
+    drawBox: timed("drawBox", layers.drawBox),
+    drawFocus: timed("drawFocus", layers.drawFocus),
+    drawInteraction: maybeTimed("drawInteraction", layers.drawInteraction),
+    drawInteractionPresentation: timed(
+      "drawInteractionPresentation",
+      layers.drawInteractionPresentation,
+    ),
+    drawLabel: maybeTimed("drawLabel", layers.drawLabel),
+    drawMask: maybeTimed("drawMask", layers.drawMask),
+    drawPolygon: maybeTimed("drawPolygon", layers.drawPolygon),
+    drawRegion: timed("drawRegion", layers.drawRegion),
+    drawVector: timed("drawVector", layers.drawVector),
+  };
+}
+
 /**
  * Fails when a step is handed anything but the presented media time. It reads
  * as a tautology against the line above it, and that is the point: it is the
