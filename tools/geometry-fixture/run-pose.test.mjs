@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { URL, fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 
 const SUITE = fileURLToPath(new URL("./run-pose.test.py", import.meta.url));
+const CI_WORKFLOW = fileURLToPath(
+  new URL("../../.github/workflows/ci.yml", import.meta.url),
+);
 
 /**
  * `run-pose.py` decodes frames with Pillow, so an interpreter without it cannot
@@ -36,4 +40,19 @@ describe("run-pose.py", () => {
       assert.equal(run.status, 0, `${run.stdout ?? ""}${run.stderr ?? ""}`);
     },
   );
+
+  it("is given the interpreter it needs on CI", () => {
+    const workflow = readFileSync(CI_WORKFLOW, "utf8");
+
+    assert.match(
+      workflow,
+      /uses: actions\/setup-python/,
+      "CI has no Python step, so the suite above reports a skip and passes",
+    );
+    assert.match(
+      workflow,
+      /pip install .*Pillow/,
+      "CI installs no Pillow, so the suite above reports a skip and passes",
+    );
+  });
 });
