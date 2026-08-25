@@ -43,7 +43,6 @@ describe("zeroCopyViable", () => {
   const base = {
     prefer2d: false,
     strategy: nativeResolution(),
-    decodesNative: true,
     webgpuImportAvailable: true,
   };
 
@@ -55,24 +54,16 @@ describe("zeroCopyViable", () => {
     expect(zeroCopyViable({ ...base, prefer2d: true })).toBe(false);
   });
 
-  it("a downscale rules it out", () => {
-    expect(zeroCopyViable({ ...base, decodesNative: false })).toBe(false);
-  });
-
   it("no webgpu import rules it out", () => {
     expect(zeroCopyViable({ ...base, webgpuImportAvailable: false })).toBe(
       false,
     );
   });
 
-  it("a viewport strategy with a downscale stays on the canvas path", () => {
-    expect(
-      zeroCopyViable({
-        ...base,
-        strategy: viewportResolution(),
-        decodesNative: false,
-      }),
-    ).toBe(false);
+  it("a viewport strategy takes the path anyway, and the GPU scales", () => {
+    expect(zeroCopyViable({ ...base, strategy: viewportResolution() })).toBe(
+      true,
+    );
   });
 });
 

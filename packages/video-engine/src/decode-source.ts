@@ -371,7 +371,6 @@ export async function openScrubSource(
     zeroCopyViable({
       prefer2d: options.prefer2d ?? false,
       strategy: opened.strategy,
-      decodesNative: opened.strategy.kind === "native",
       webgpuImportAvailable: detectWebgpuImport(),
     })
   ) {
@@ -641,22 +640,24 @@ export interface ZeroCopyContext {
   readonly strategy: DecodeResolutionStrategy;
   /** Whether decode runs at the source's native size (the strategy requests no
    *  downscale). A downscale rules the path out: the sample arrives native, so
-   *  importing it zero-copy would paint at the wrong resolution. */
-  readonly decodesNative: boolean;
   /** Whether the worker realm has WebGPU with importExternalTexture, the API
    *  the zero-copy import needs. */
   readonly webgpuImportAvailable: boolean;
 }
 
 /**
- * The gate. True only when every condition holds: the 2D path is not pinned, the
- * strategy decodes at native (no downscale), and the realm offers WebGPU's
+ * The gate. True when the 2D path is not pinned and the realm offers WebGPU's
  * importExternalTexture. False keeps the byte-identical CanvasSink path; this is
  * the one place the additive path is allowed to switch on.
+ *
+ * A requested downscale does not refuse the path. The sample sink yields frames
+ * at the source's native size whatever the strategy asks for, and the shader
+ * samples them into the box it draws, so the GPU performs the downscale during
+ * sampling. The strategy stays a canvas and cache concern, which is what the
+ * long-lived session already treats it as.
  */
 export function zeroCopyViable(ctx: ZeroCopyContext): boolean {
   if (ctx.prefer2d) return false;
-  if (!ctx.decodesNative) return false;
   if (!ctx.webgpuImportAvailable) return false;
   return true;
 }
