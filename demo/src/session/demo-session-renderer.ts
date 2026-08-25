@@ -5,6 +5,7 @@ import {
   type MediaSessionRendererOptions,
 } from "supervision";
 
+import { DemoViewMode, readStoredDemoViewMode } from "./demo-view-mode";
 import { readDemoMaskFrameOptions } from "./mask-raster-resolution";
 import { getDemoMaxDevicePixelRatio } from "./render-quality";
 import type { DemoSessionCallbacks } from "./demo-session-types";
@@ -31,9 +32,12 @@ export function createDemoRendererOptions(
 ): MediaSessionRendererOptions {
   return {
     autoPlay: false,
-    // The Frame Time panel and the Frame chip on the always-visible strip read
-    // nothing else, and this is what fills them.
-    diagnostics: { frameTimings: true },
+    // Timing every layer of every present costs about ten points of process CPU
+    // on a 120Hz display, so only the view that reads the numbers pays for them.
+    diagnostics: {
+      frameTimings:
+        readStoredDemoViewMode(DemoViewMode.Demo) === DemoViewMode.Debug,
+    },
     fit: MediaRendererFit.Contain,
     interaction: {
       mode: DEMO_INTERACTION_MODE,
