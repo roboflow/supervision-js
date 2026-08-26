@@ -83,16 +83,26 @@ export const EngineDiagnosticsTimeline = memo(
       }
 
       let frame = 0;
+      let drawnX: string | null = null;
       const tick = () => {
         const line = playheadRef.current;
         const clock = clockRef.current;
 
         if (line && clock) {
           const elapsedMs = clock.playing ? performance.now() - clock.atMs : 0;
-          const x =
-            clamp01((clock.playheadMs + elapsedMs) / durationMs) * VIEW_WIDTH;
-          line.setAttribute("x1", String(x));
-          line.setAttribute("x2", String(x));
+          const x = String(
+            clamp01((clock.playheadMs + elapsedMs) / durationMs) * VIEW_WIDTH,
+          );
+
+          // Chrome invalidates layout on an SVG geometry attribute write even
+          // when the value is identical, and this column carries no
+          // containment, so a stopped playhead relayouts and repaints it at the
+          // display refresh rate.
+          if (x !== drawnX) {
+            drawnX = x;
+            line.setAttribute("x1", x);
+            line.setAttribute("x2", x);
+          }
         }
 
         frame = requestAnimationFrame(tick);
