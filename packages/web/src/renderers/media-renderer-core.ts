@@ -142,7 +142,10 @@ export async function createMediaRendererCore(
     mediaInput = undefined;
   };
 
-  const prepareAndPresentSample = async (sample: DecodedVideoSample) => {
+  const prepareAndPresentSample = async (
+    sample: DecodedVideoSample,
+    isCurrent: () => boolean = () => true,
+  ) => {
     let shouldCloseSample = true;
 
     try {
@@ -150,6 +153,10 @@ export async function createMediaRendererCore(
         duration: runtimeState.duration(),
         firstTimestamp,
       });
+
+      if (!isCurrent()) {
+        return;
+      }
 
       presentSample(sample);
       shouldCloseSample = false;
@@ -239,7 +246,19 @@ export async function createMediaRendererCore(
           return;
         }
 
-        await prepareAndPresentSample(sample);
+        await prepareAndPresentSample(
+          sample,
+          () =>
+            requestVersion === navigationVersion && !runtimeState.isDestroyed(),
+        );
+
+        if (
+          requestVersion !== navigationVersion ||
+          runtimeState.isDestroyed()
+        ) {
+          return;
+        }
+
         playbackController.seek(runtimeState.currentTime());
 
         if (wasPlaying) {
@@ -675,7 +694,16 @@ export async function createMediaRendererCore(
 
       const sampleToPresent = sample;
       sample = null;
-      await prepareAndPresentSample(sampleToPresent);
+      await prepareAndPresentSample(
+        sampleToPresent,
+        () =>
+          requestVersion === navigationVersion && !runtimeState.isDestroyed(),
+      );
+
+      if (requestVersion !== navigationVersion || runtimeState.isDestroyed()) {
+        return;
+      }
+
       playbackController.seek(runtimeState.currentTime());
     } catch (error) {
       sample?.close();
