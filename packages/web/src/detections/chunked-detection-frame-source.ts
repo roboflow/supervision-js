@@ -95,7 +95,7 @@ function getOverlappingChunks(
   endTime: number,
 ) {
   return chunks.filter(
-    (chunk) => chunk.startTime < endTime && chunk.endTime > startTime,
+    (chunk) => chunk.startTime <= endTime && chunk.endTime > startTime,
   );
 }
 

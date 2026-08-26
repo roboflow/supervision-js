@@ -63,6 +63,50 @@ describe("createChunkedDetectionFrameSource", () => {
     ]);
   });
 
+  it("returns frames that start exactly at the requested range end", async () => {
+    const manifest = createManifest();
+    const chunks = new Map<number, DetectionFrameChunk>([
+      [
+        1,
+        {
+          frames: [
+            { detections: [], endTime: 1.8, frameIndex: 2, mediaTime: 1.6 },
+          ],
+        },
+      ],
+      [
+        2,
+        {
+          frames: [
+            { detections: [], frameIndex: 3, mediaTime: 2 },
+            { detections: [], endTime: 2.5, frameIndex: 4, mediaTime: 2 },
+            { detections: [], frameIndex: 5, mediaTime: 2.05 },
+          ],
+        },
+      ],
+    ]);
+    const fetchChunk = vi.fn(async (chunk: { chunkIndex: number }) => {
+      const fixtureChunk = chunks.get(chunk.chunkIndex);
+
+      if (!fixtureChunk) {
+        throw new Error(`Missing test chunk ${chunk.chunkIndex}.`);
+      }
+
+      return fixtureChunk;
+    });
+    const source = createChunkedDetectionFrameSource({
+      fetchChunk,
+      manifest,
+    });
+
+    const frames = await source.loadFrames(1.5, 2);
+
+    expect(frames.map((frame) => frame.frameIndex).sort()).toEqual([2, 3, 4]);
+    expect(
+      fetchChunk.mock.calls.map(([chunk]) => chunk.chunkIndex).sort(),
+    ).toEqual([1, 2]);
+  });
+
   it("loads JSON chunks from descriptor URLs by default", async () => {
     const manifest = createManifest();
     const fetchMock = vi.fn(async () => {
