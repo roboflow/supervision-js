@@ -374,11 +374,19 @@ export function createPreparedRenderWindow(options: {
   }
 
   function pruneStaleQueuedMaskFrames(mediaTime: number, exemptKey?: string) {
+    const upcomingKeys = new Set(
+      timeline.getWindowFrameKeys(mediaTime, prefetchFrameCount),
+    );
+
     for (let index = queuedMaskFrameKeys.length - 1; index >= 0; index -= 1) {
       const key = queuedMaskFrameKeys[index];
       const job = key ? pendingMaskFrames.get(key) : undefined;
 
-      if (key !== exemptKey && (!job || job.mediaTime < mediaTime)) {
+      if (key === exemptKey) {
+        continue;
+      }
+
+      if (!job || !upcomingKeys.has(key)) {
         queuedMaskFrameKeys.splice(index, 1);
 
         if (key) {
@@ -400,7 +408,7 @@ export function createPreparedRenderWindow(options: {
         break;
       }
 
-      const distance = Math.abs(job.mediaTime - mediaTime);
+      const distance = timeline.getFrameDistance(job.mediaTime, mediaTime);
 
       if (distance > farthestDistance) {
         farthestDistance = distance;

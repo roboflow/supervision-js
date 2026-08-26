@@ -8,6 +8,7 @@ export interface PreparedRenderTimelineContext {
 export interface PreparedWindowTimeline {
   clear(): void;
   getFrameDistance(frameTime: number, mediaTime: number): number;
+  getWindowFrameKeys(mediaTime: number, count: number): readonly string[];
   getWindowFrames(
     bufferedFrames: readonly DetectionFrame[],
     mediaTime: number,
@@ -41,16 +42,16 @@ export function createPreparedWindowTimeline(options: {
       return Math.max(0, frameTime - mediaTime);
     },
 
-    getWindowFrames(bufferedFrames, mediaTime) {
-      if (!isLoopingTimeline()) {
-        return bufferedFrames.filter((frame) => frame.mediaTime >= mediaTime);
-      }
+    getWindowFrameKeys(mediaTime, count) {
+      const windowCount = Math.max(0, count);
 
-      return Array.from(knownFrames.values()).sort(
-        (leftFrame, rightFrame) =>
-          getLoopDistance(leftFrame.mediaTime, mediaTime) -
-          getLoopDistance(rightFrame.mediaTime, mediaTime),
-      );
+      return orderWindowFrames(Array.from(knownFrames.values()), mediaTime)
+        .slice(0, windowCount)
+        .map(options.getFrameKey);
+    },
+
+    getWindowFrames(bufferedFrames, mediaTime) {
+      return orderWindowFrames(bufferedFrames, mediaTime);
     },
 
     rememberFrames(frames, retainedKeys) {
@@ -69,6 +70,25 @@ export function createPreparedWindowTimeline(options: {
       timelineContext = context;
     },
   };
+
+  function orderWindowFrames(
+    frames: readonly DetectionFrame[],
+    mediaTime: number,
+  ) {
+    if (!isLoopingTimeline()) {
+      return frames
+        .filter((frame) => frame.mediaTime >= mediaTime)
+        .sort(
+          (leftFrame, rightFrame) => leftFrame.mediaTime - rightFrame.mediaTime,
+        );
+    }
+
+    return Array.from(frames).sort(
+      (leftFrame, rightFrame) =>
+        getLoopDistance(leftFrame.mediaTime, mediaTime) -
+        getLoopDistance(rightFrame.mediaTime, mediaTime),
+    );
+  }
 
   function isLoopingTimeline() {
     return (

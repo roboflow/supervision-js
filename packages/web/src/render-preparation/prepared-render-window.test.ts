@@ -827,6 +827,83 @@ describe("prepared render window", () => {
     }
   });
 
+  it("keeps wrapped-ahead mask jobs queued across a loop boundary under load", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const fakeWorker = createFakeMaskPreparationWorker({
+        autoComplete: false,
+      });
+      const onMaskFramePrepared = vi.fn();
+      const renderWindow = createPreparedRenderWindow({
+        detectionTimeline: createTimeline(manyFrames),
+        maskStyle: new BaseMaskStyle(),
+        onMaskFramePrepared,
+        renderPreparation: {
+          maskFrame: {
+            maxPendingFrameCount: 10,
+            prefetchFrameCount: 7,
+            scheduleBatchSize: 10,
+            scanIntervalSeconds: 0,
+            workerCount: 1,
+          },
+          mode: RenderPreparationMode.Worker,
+          workerFactory: {
+            createWorker: () => fakeWorker.worker,
+          },
+        },
+      });
+
+      (
+        renderWindow as unknown as {
+          setTimelineContext(context: {
+            readonly duration: number;
+            readonly loop: boolean;
+          }): void;
+        }
+      ).setTimelineContext({ duration: 0.4, loop: true });
+
+      renderWindow.getFrame(0);
+      await flushMaskPreparationTimers(2);
+
+      expect(
+        fakeWorker.messages.map(
+          (message) => (message as { job: { key: string } }).job.key,
+        ),
+      ).toEqual(["0:0"]);
+
+      renderWindow.getFrame(0.36);
+      await flushMaskPreparationTimers(2);
+
+      expect(
+        fakeWorker.messages.map(
+          (message) =>
+            (message as { readonly job: { readonly key: string } }).job.key,
+        ),
+      ).toEqual(["0:0"]);
+
+      for (let index = 0; index < 7; index += 1) {
+        fakeWorker.completeNext();
+        await flushMaskPreparationTimers(2);
+      }
+
+      const preparedKeys = onMaskFramePrepared.mock.calls.map(
+        (call) => (call[0] as { readonly key: string }).key,
+      );
+
+      expect(preparedKeys).toContain("1:0.04");
+      expect(preparedKeys).toContain("2:0.08");
+      expect(preparedKeys).toContain("3:0.12");
+      expect(preparedKeys).toContain("4:0.16");
+      expect(preparedKeys).toContain("5:0.2");
+
+      renderWindow.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps prepared lookahead across a looping media boundary", async () => {
     vi.useFakeTimers();
     resetMocks();
