@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createArrayDetectionFrameSource,
   createBufferedDetectionTimeline,
@@ -101,6 +101,20 @@ describe("prepared annotation window", () => {
     expect(window.getSnapshot().frames.map((frame) => frame.mediaTime)).toEqual(
       [0.1, 0.2],
     );
+  });
+
+  it("reads the buffer without paying for a defensive copy of it", () => {
+    const copies = vi.spyOn(detectionTimeline, "getBufferedFrames");
+    const window = createPreparedAnnotationWindow({
+      detectionTimeline,
+      getLayers: () => [],
+      getPlayheadMediaTime: () => 0,
+    });
+
+    expect(window.getSnapshot().frames.map((frame) => frame.mediaTime)).toEqual(
+      [0, 0.1, 0.2],
+    );
+    expect(copies).not.toHaveBeenCalled();
   });
 
   it("moves its readiness token when one layer lands a frame others still owe", () => {

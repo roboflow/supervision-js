@@ -1,5 +1,6 @@
 import { resolvePreparedWindowFrameCount } from "#render-preparation/prepared-render-window";
 import type { RenderPreparationOptions } from "#types/render-preparation";
+import { getBufferedDetectionTimelineFrameSnapshot } from "supervision-js-core";
 import type {
   BufferedDetectionTimeline,
   DetectionFrame,
@@ -81,8 +82,9 @@ export function createPreparedAnnotationWindow(options: {
       const anchorTime =
         options.detectionTimeline.selectFrame(playheadMediaTime)?.mediaTime ??
         playheadMediaTime;
-      const frames = options.detectionTimeline
-        .getBufferedFrames()
+      const frames = getBufferedDetectionTimelineFrameSnapshot(
+        options.detectionTimeline,
+      )
         .filter((frame) => frame.mediaTime >= anchorTime)
         .slice(0, spanFrameCount)
         .map((frame) => ({
