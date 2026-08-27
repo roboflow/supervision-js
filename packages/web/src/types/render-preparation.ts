@@ -209,13 +209,18 @@ export interface RenderPreparationOptions {
   readonly onDiagnostics?: (diagnostics: RenderPreparationDiagnostics) => void;
   /**
    * Hold playback until prepared artifacts cover the frame about to be
-   * presented. Off by default: the picture moves and unprepared layers are
-   * simply absent from it until preparation catches up.
+   * presented.
    *
-   * A media source the renderer pulls decoded samples from is held frame by
-   * frame. A source that presents its own frames, such as
-   * `openVideoEngineMediaSource`, is held at the start of playback and not
-   * after it, because the producer owns the playhead once it is running. See
+   * **This option reaches two different distances depending on the source, and
+   * the renderer reports which one it got as `playbackGateReach` on its state.**
+   * A source the renderer pulls samples from is held at every frame. A source
+   * that presents its own frames is held only at the start of playback, because
+   * the producer owns the playhead once it is running, and frames after that
+   * arrive whether their artifacts are ready or not.
+   *
+   * A renderer created directly leaves this off. `createMediaSession()` turns it
+   * on, so a session opens with its annotations rather than opening bare; pass
+   * `playbackGate: false` to the session to opt out. See
    * {@link RenderPreparationPlaybackGateOptions}.
    */
   readonly playbackGate?: RenderPreparationPlaybackGateOptions;

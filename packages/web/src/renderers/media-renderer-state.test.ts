@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createIdleDetectionBufferState } from "supervision-js-core";
+import {
+  PlaybackGateReach,
+  createIdleDetectionBufferState,
+} from "supervision-js-core";
 import { MediaRendererFit } from "#types/media-renderer";
 
 import { createMediaRendererRuntimeState } from "./media-renderer-state";
@@ -126,6 +129,22 @@ describe("media renderer runtime state", () => {
       expect.objectContaining({ currentTime: 0.04, presentedFrames: 1 }),
     );
   });
+
+  it("reports how far the playback gate reaches on this source", () => {
+    for (const reach of [
+      PlaybackGateReach.Off,
+      PlaybackGateReach.EveryFrame,
+      PlaybackGateReach.StartOfPlayback,
+    ]) {
+      const runtimeState = createRuntimeState({
+        getPlaybackGateReach: () => reach,
+      });
+
+      // One option holds every frame on a pulled source and only the start on a
+      // source that presents its own, so a host has to be able to read which.
+      expect(runtimeState.snapshot().playbackGateReach).toBe(reach);
+    }
+  });
 });
 
 function createRuntimeState(
@@ -136,6 +155,7 @@ function createRuntimeState(
   return createMediaRendererRuntimeState({
     fit: MediaRendererFit.Contain,
     getDetectionBufferState: createIdleDetectionBufferState,
+    getPlaybackGateReach: () => PlaybackGateReach.Off,
     playbackRate: 1,
     ...overrides,
   });

@@ -354,6 +354,7 @@ export {
   MediaErrorKind,
   MediaRendererFit,
   MediaRendererPlaybackState,
+  PlaybackGateReach,
   MediaSourceStatus,
 } from "#types/media-rendering";
 export type {

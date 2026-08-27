@@ -98,6 +98,7 @@ describe("package entrypoint", () => {
       "MediaSessionStatus",
       "MediaSourceError",
       "MediaSourceStatus",
+      "PlaybackGateReach",
       "RegionRendererComposeMode",
       "RegionRendererCoverageKind",
       "RegionRendererRegionKind",

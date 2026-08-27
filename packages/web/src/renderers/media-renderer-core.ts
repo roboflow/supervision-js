@@ -1,4 +1,5 @@
 import {
+  PlaybackGateReach,
   createArrayDetectionFrameSource,
   createDefaultAnnotationPresentation,
   createProjectedDetectionFrameSource,
@@ -109,9 +110,16 @@ export async function createMediaRendererCore(
     runtimeState.setPlaybackRate(playbackRate);
     mediaScene?.setPlaybackRate?.(playbackRate);
   };
+  let presentsOwnFrames = false;
   const runtimeState = createMediaRendererRuntimeState({
     fit,
     playbackRate: initialPlaybackRate,
+    getPlaybackGateReach: () =>
+      !shouldGatePlayback
+        ? PlaybackGateReach.Off
+        : presentsOwnFrames
+          ? PlaybackGateReach.StartOfPlayback
+          : PlaybackGateReach.EveryFrame,
     getDetectionBufferState: () =>
       detectionTimeline?.getState() ?? createIdleDetectionBufferState(),
     onFrame: options.onFrame,
@@ -673,6 +681,8 @@ export async function createMediaRendererCore(
         : {}),
     });
     const presentedFrameChannel = resolvePresentedFrameChannel(mediaSource);
+
+    presentsOwnFrames = presentedFrameChannel !== null;
     const mediaDimensions = runtimeState.recordMediaMetadata(metadata);
     mediaScene = await providers.createScene({
       annotationOverlayStyle: currentPresentation.annotationOverlayStyle,

@@ -223,6 +223,11 @@ export interface MediaSessionRendererOptions {
   readonly autoPlay?: boolean;
   readonly loop?: boolean;
   readonly playbackRate?: number;
+  /**
+   * @deprecated Nothing reads this. The renderer is video-only and audio
+   * playback is deferred, so setting it changes nothing either way.
+   */
+  readonly muted?: boolean;
   readonly fit?: MediaRendererFit;
   readonly maxDevicePixelRatio?: MediaRendererOptions["maxDevicePixelRatio"];
   readonly interaction?: MediaInteractionOptions;

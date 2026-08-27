@@ -171,6 +171,23 @@ export interface MediaSourceState {
 /**
  * Current renderer state.
  */
+/**
+ * What a playback gate holds back.
+ *
+ * A source the renderer pulls samples from can be held at every frame, because
+ * the renderer decides when each one is drawn. A source that presents its own
+ * frames owns the playhead once it is running, so the only moment left to hold
+ * is the start.
+ */
+export enum PlaybackGateReach {
+  /** No gate: the picture moves and unprepared layers are absent from it. */
+  Off = "off",
+  /** Every frame waits for the artifacts it needs. */
+  EveryFrame = "everyFrame",
+  /** Playback waits to begin; frames after that are not held. */
+  StartOfPlayback = "startOfPlayback",
+}
+
 export interface MediaRendererState {
   readonly rendererBackend: string | null;
   readonly playbackState: MediaRendererPlaybackState;
@@ -194,6 +211,12 @@ export interface MediaRendererState {
    * satisfies the type.
    */
   readonly drawnMaskFrameTime?: number | null;
+  /**
+   * How far the playback gate reaches on the source this renderer opened.
+   * The same option means different things to the two kinds of source, and this
+   * reports which one a host got.
+   */
+  readonly playbackGateReach?: PlaybackGateReach;
   /** Whether that hold is what is on screen right now. */
   readonly maskHeldStale?: boolean;
   readonly detectionBuffer: DetectionBufferState;

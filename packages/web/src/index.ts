@@ -403,7 +403,7 @@ export {
   type MediaSessionStateUnsubscribe,
   type MediaSessionWritableDetectionOptions,
 } from "#types/media-session";
-export { MediaErrorKind } from "supervision-js-core";
+export { MediaErrorKind, PlaybackGateReach } from "supervision-js-core";
 export {
   DetectionTimelineOrigin,
   MediaRendererFit,

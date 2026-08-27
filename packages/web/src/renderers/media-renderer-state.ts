@@ -1,3 +1,4 @@
+import type { PlaybackGateReach } from "supervision-js-core";
 import {
   createLoadingMediaSourceState,
   createReadyMediaSourceState,
@@ -18,6 +19,7 @@ import type { PresentedMediaSample } from "./media-renderer-scene";
 
 interface MediaRendererRuntimeStateOptions {
   readonly fit: MediaRendererFit;
+  readonly getPlaybackGateReach: () => PlaybackGateReach;
   readonly playbackRate: number;
   readonly getDetectionBufferState: () => DetectionBufferState;
   readonly onFrame?: (diagnostics: MediaFrameDiagnostics) => void;
@@ -114,6 +116,7 @@ export function createMediaRendererRuntimeState(
     maskHeldStale,
     mediaHeight,
     mediaWidth,
+    playbackGateReach: options.getPlaybackGateReach(),
     playbackState,
     presentedFrames,
     rendererBackend,

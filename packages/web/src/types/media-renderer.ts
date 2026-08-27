@@ -62,6 +62,11 @@ export interface MediaRendererOptions extends MediaRendererPresentation {
   readonly autoPlay?: boolean;
   readonly loop?: boolean;
   readonly playbackRate?: number;
+  /**
+   * @deprecated Nothing reads this. The renderer is video-only and audio
+   * playback is deferred, so setting it changes nothing either way.
+   */
+  readonly muted?: boolean;
   readonly fit?: MediaRendererFit;
   /**
    * Caps Pixi's render resolution relative to device pixels.
@@ -196,12 +201,16 @@ export interface MediaRenderer extends MediaRendererStateController {
    * something on screen changed, so a paused, untouched renderer holds it
    * still. It is `null` when the renderer pulls samples instead, because Pixi's
    * ticker then paints every animation frame and no count describes that.
+   * `playbackGateReach` on the renderer's state says which kind of source is
+   * open, so a host reading `null` here can tell that apart from an error.
    */
   getRenderCount(): number | null;
   /**
    * Span and per-frame readiness of the prepared annotation window, for
    * instruments; null when the scene free-runs on the ticker or no window
-   * exists.
+   * exists. `playbackGateReach` on the renderer's state says which kind of
+   * source is open, so a host reading `null` here can tell that apart from an
+   * error.
    */
   getPreparedAnnotationWindow(): PreparedAnnotationWindowSnapshot | null;
   destroy(): void;

@@ -16,6 +16,7 @@ export {
   MediaSourceError,
   MediaRendererFit,
   MediaRendererPlaybackState,
+  PlaybackGateReach,
   MediaSourceStatus,
   RenderPreparationArtifactFrameStatus,
   RenderPreparationArtifactKind,
