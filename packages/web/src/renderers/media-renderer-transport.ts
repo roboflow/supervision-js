@@ -148,6 +148,9 @@ export function createMediaRendererTransport(
       }
 
       await channel.play();
+      // A producer already at speed reports no change, so nothing else would
+      // retire the hold's own Buffering and it would stand for good.
+      publishPlaybackState();
     },
 
     pause() {

@@ -86,6 +86,32 @@ describe("media renderer transport", () => {
 
     expect(seeking.at(-1)).toBe(false);
   });
+
+  it("stops reporting a wait once a producer already at speed is asked to play", async () => {
+    const producer = createProducer();
+    const playbackStates: MediaRendererPlaybackState[] = [];
+    let releaseReadiness = () => {};
+    const readiness = new Promise<void>((resolve) => {
+      releaseReadiness = resolve;
+    });
+    const transport = createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: (state) => playbackStates.push(state),
+      onPlayheadTime: vi.fn(),
+      onSeeking: vi.fn(),
+      waitForReadiness: () => readiness,
+    });
+
+    const playing = transport.play();
+    releaseReadiness();
+    await playing;
+
+    // The producer was already running, so it reports no change of its own.
+    // Nothing else retires the wait the hold published on its way in.
+    expect(playbackStates.at(-1)).toBe(MediaRendererPlaybackState.Playing);
+  });
 });
 
 const secondsAt = (index: number) => (index * TICKS_PER_FRAME) / TICK_RATE;
