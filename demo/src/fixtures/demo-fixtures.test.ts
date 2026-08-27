@@ -9,7 +9,11 @@ import { describe, expect, it } from "vitest";
 
 import { KeypointVisibility, type DetectionFrame } from "supervision";
 import { computeDetectionMaskRect } from "supervision/editing";
-import { demoFixtureCatalog, demoFixtures } from "./demo-fixtures";
+import {
+  demoFixtureCatalog,
+  demoFixtures,
+  resolveDemoFixture,
+} from "./demo-fixtures";
 
 const MAX_POLYGON_POINTS = 48;
 const fixturesRoot = fileURLToPath(new URL("../../fixtures", import.meta.url));
@@ -63,6 +67,10 @@ describe("geometry showcase fixture", () => {
       datasetId: "basketball_sam3_v1",
       normalizeInBrowser: false,
       showInDemo: false,
+    });
+    expect(resolveDemoFixture("basketball_sam3")).toMatchObject({
+      sampleName: "basketball_sam3",
+      videoSrc: expect.any(String),
     });
   });
 

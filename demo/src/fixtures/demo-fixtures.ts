@@ -108,6 +108,14 @@ export const defaultDemoFixture = requireDemoFixture(
   ) ?? demoFixtures[0],
 );
 
+/** Resolves focused documentation fixtures as well as selector-visible samples. */
+export function resolveDemoFixture(sampleName: string | undefined) {
+  return (
+    demoFixtureCatalog.find((fixture) => fixture.sampleName === sampleName) ??
+    defaultDemoFixture
+  );
+}
+
 /** Per-geometry detection counts reported by generated fixture manifests. */
 export interface DemoFixtureGeometrySummary {
   readonly boxDetectionCount: number;
