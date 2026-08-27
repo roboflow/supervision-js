@@ -33,6 +33,7 @@ const idleReadouts: LiveReadouts = {
   playbackState: MediaRendererPlaybackState.Playing,
   presentedRate: 1,
   renderPreparation: null,
+  seeking: false,
   sourceFrameRate: 30,
 };
 

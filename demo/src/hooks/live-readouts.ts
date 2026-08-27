@@ -16,6 +16,8 @@ export interface LiveReadouts {
   readonly playbackState: MediaRendererPlaybackState | null;
   readonly presentedRate: number | null;
   readonly renderPreparation: RenderPreparationDiagnostics | null;
+  /** The playhead has moved somewhere the picture has not reached yet. */
+  readonly seeking: boolean;
   readonly sourceFrameRate: number | null;
 }
 
@@ -33,6 +35,7 @@ const idleReadouts: LiveReadouts = {
   playbackState: null,
   presentedRate: null,
   renderPreparation: null,
+  seeking: false,
   sourceFrameRate: null,
 };
 
@@ -133,6 +136,7 @@ export function publishLiveRendererState(
     playbackRate: state.playbackRate,
     playbackState: state.playbackState,
     presentedRate,
+    seeking: state.seeking === true,
     sourceFrameRate: state.source.estimatedFrameRate ?? null,
   };
   scheduleWrite(MOVING_INTERVAL_MS);

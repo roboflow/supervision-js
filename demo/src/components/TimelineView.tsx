@@ -49,13 +49,19 @@ export function TimelineView({
   readonly processingRanges?: readonly TimelineRange[];
 }) {
   const mediaDuration = duration !== null && duration > 0 ? duration : null;
-  const { flushSeek, onScrubChange, onScrubEnd, onScrubStart, scrubTime } =
-    useTimelineSeekGesture({
-      disabled,
-      duration: mediaDuration,
-      onScrub,
-      onSeek,
-    });
+  const {
+    flushSeek,
+    onScrubChange,
+    onScrubEnd,
+    onScrubStart,
+    pendingSeekTime,
+    scrubTime,
+  } = useTimelineSeekGesture({
+    disabled,
+    duration: mediaDuration,
+    onScrub,
+    onSeek,
+  });
   const rangeFloor = useMemo(
     () => Math.max(1, getMaxRangeEnd(processedRanges, processingRanges)),
     [processedRanges, processingRanges],
@@ -74,6 +80,7 @@ export function TimelineView({
   const trackWidthRef = useRef(0);
   const { playheadRef, readPlayheadTime, writePlayhead } = useTimelinePlayhead({
     duration: mediaDuration,
+    pendingSeekTime,
     readVisualDuration,
     scrubTime,
     trackWidthRef,
@@ -248,7 +255,11 @@ export function TimelineView({
 
   useLiveReadoutWriter((readouts) => {
     writePlayhead(readouts, readVisualDuration(readouts));
-    writeScrubInputValue(scrubInputRef.current, readouts, scrubTime);
+    writeScrubInputValue(
+      scrubInputRef.current,
+      readouts,
+      resolveTimelineTime(scrubTime, pendingSeekTime, null),
+    );
   });
 
   useLiveReadoutWriter((readouts) => {
@@ -582,8 +593,25 @@ function writeTimelineBands(
   );
 }
 
+/**
+ * Where the timeline should say the viewer is.
+ *
+ * A drag speaks for itself, and a committed seek speaks until its picture
+ * arrives. The player's reported time is last because during a seek it still
+ * describes the frame on screen, which is where the viewer was, not where they
+ * are going.
+ */
+export function resolveTimelineTime(
+  scrubTime: number | null,
+  pendingSeekTime: number | null,
+  currentTime: number | null,
+) {
+  return scrubTime ?? pendingSeekTime ?? currentTime;
+}
+
 interface TimelinePlayheadOptions {
   readonly duration: number | null;
+  readonly pendingSeekTime: number | null;
   readonly readVisualDuration: (readouts: LiveReadouts) => number;
   readonly scrubTime: number | null;
   readonly trackWidthRef: RefObject<number>;
@@ -592,6 +620,7 @@ interface TimelinePlayheadOptions {
 interface TimelinePlayheadClock {
   readonly duration: number | null;
   readonly scrubTime: number | null;
+  readonly pendingSeekTime: number | null;
 }
 
 /** Playhead step when the track has no measured width yet. */
@@ -604,19 +633,30 @@ const PLAYHEAD_MIN_STEP_PERCENT = 0.05;
  */
 function useTimelinePlayhead({
   duration,
+  pendingSeekTime,
   readVisualDuration,
   scrubTime,
   trackWidthRef,
 }: TimelinePlayheadOptions) {
   const playheadRef = useRef<HTMLSpanElement>(null);
-  const clockRef = useRef<TimelinePlayheadClock>({ duration, scrubTime });
+  const clockRef = useRef<TimelinePlayheadClock>({
+    duration,
+    pendingSeekTime,
+    scrubTime,
+  });
   const writtenPositionRef = useRef<string | null>(null);
 
   const readPlayheadTime = () => {
     const clock = clockRef.current;
 
-    if (clock.scrubTime !== null) {
-      return clock.scrubTime;
+    const held = resolveTimelineTime(
+      clock.scrubTime,
+      clock.pendingSeekTime,
+      null,
+    );
+
+    if (held !== null) {
+      return held;
     }
 
     return clampTimelineTime(
@@ -640,7 +680,7 @@ function useTimelinePlayhead({
     const stepPercent = readPixelStepPercent(trackWidthRef.current) / 2;
     const clock = clockRef.current;
     const time =
-      clock.scrubTime ??
+      resolveTimelineTime(clock.scrubTime, clock.pendingSeekTime, null) ??
       clampTimelineTime(readouts.currentTime ?? 0, clock.duration);
     const position = quantizePercent(time, visualDuration, stepPercent);
 
@@ -653,7 +693,7 @@ function useTimelinePlayhead({
   };
 
   useLayoutEffect(() => {
-    clockRef.current = { duration, scrubTime };
+    clockRef.current = { duration, pendingSeekTime, scrubTime };
     // Read here, where layout has already run. The tick that writes the
     // playhead must never measure, or it forces a layout per frame.
     trackWidthRef.current = playheadRef.current?.offsetWidth ?? 0;
@@ -690,6 +730,14 @@ function useTimelineSeekGesture({
   const [scrubTime, setScrubTime] = useState<number | null>(null);
   const scrubTimeRef = useRef<number | null>(null);
   /**
+   * Where a committed seek is going, held until the picture arrives. The
+   * player's reported time still describes the frame on screen during the wait,
+   * so falling back to it would walk the playhead back to where the viewer
+   * started, which on a slow source is most of the wait.
+   */
+  const [pendingSeekTime, setPendingSeekTime] = useState<number | null>(null);
+  const pendingSeekRef = useRef<number | null>(null);
+  /**
    * The gesture outlives the scrub position. The settle writer clears that
    * position as soon as the player reports it reached the drag target, which
    * during a drag happens while the pointer is still down, so a release keyed
@@ -715,26 +763,33 @@ function useTimelineSeekGesture({
     }
 
     gestureActiveRef.current = false;
-    onSeek(
-      clamp(
-        scrubTimeRef.current ?? readLiveReadouts().currentTime ?? 0,
-        0,
-        duration,
-      ),
+
+    const target = clamp(
+      scrubTimeRef.current ?? readLiveReadouts().currentTime ?? 0,
+      0,
+      duration,
     );
+
+    pendingSeekRef.current = target;
+    setPendingSeekTime(target);
+    onSeek(target);
   };
 
   useLiveReadoutWriter((readouts) => {
-    const target = scrubTimeRef.current;
-
-    if (
+    const landedOn = (target: number | null) =>
       target !== null &&
       readouts.currentTime !== null &&
       Math.abs(readouts.currentTime - target) <=
-        TIMELINE_SCRUB_SETTLE_EPSILON_SECONDS
-    ) {
+        TIMELINE_SCRUB_SETTLE_EPSILON_SECONDS;
+
+    if (landedOn(scrubTimeRef.current)) {
       scrubTimeRef.current = null;
       setScrubTime(null);
+    }
+
+    if (landedOn(pendingSeekRef.current)) {
+      pendingSeekRef.current = null;
+      setPendingSeekTime(null);
     }
   });
 
@@ -746,6 +801,8 @@ function useTimelineSeekGesture({
     gestureActiveRef.current = false;
     scrubTimeRef.current = null;
     setScrubTime(null);
+    pendingSeekRef.current = null;
+    setPendingSeekTime(null);
   }, [disabled, duration]);
 
   return {
@@ -763,6 +820,7 @@ function useTimelineSeekGesture({
       }
     },
     onScrubEnd: releaseSeek,
+    pendingSeekTime,
     onScrubStart(nextTime: number) {
       gestureActiveRef.current = true;
       moveTo(nextTime);
