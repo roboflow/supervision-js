@@ -60,6 +60,10 @@ interface Segment {
 }
 
 const DEFAULT_CHUNK_BYTES = 4 * 1024 * 1024;
+/** Granularity at which a streaming read is banked. Mediabunny never asks
+ *  the network for less than half a mebibyte, so every read it makes banks
+ *  at least one block. */
+export const READ_BLOCK_BYTES = 512 * 1024;
 const RANGE_HEADER = /^bytes=(\d+)-(\d*)$/;
 
 const segmentEnd = (segment: Segment): number =>
@@ -216,24 +220,39 @@ export function createSourceResidency(
    * rather than lengthening it. */
   const foregroundIdle = (): boolean => foregroundReads === 0;
 
+  /* The demuxer opens a read as an open-ended range and abandons the response
+   * the moment it holds what it asked for, and a transform whose reader walked
+   * away runs neither its flush nor its cancel in Chrome. Bytes are banked as
+   * they arrive, in blocks, so an abandoned read leaves behind what it pulled
+   * and the walk has no reason to pull it again. */
   const teeInto = (start: number, response: Response): Response => {
     if (!response.body) return response;
-    const chunks: Uint8Array[] = [];
+    let blockStart = start;
+    let block: Uint8Array[] = [];
+    let blockBytes = 0;
+    const bank = () => {
+      if (disposed || blockBytes === 0) return;
+      const banked = new Uint8Array(blockBytes);
+      let at = 0;
+      for (const chunk of block) {
+        banked.set(chunk, at);
+        at += chunk.length;
+      }
+      store.insert(blockStart, banked);
+      store.evictTo(options.budgetBytes, focus);
+      blockStart += blockBytes;
+      block = [];
+      blockBytes = 0;
+    };
     const stream = response.body.pipeThrough(
       new TransformStream<Uint8Array, Uint8Array>({
         transform(chunk, controller) {
-          chunks.push(chunk);
           controller.enqueue(chunk);
+          block.push(chunk);
+          blockBytes += chunk.length;
+          if (blockBytes >= READ_BLOCK_BYTES) bank();
         },
-        flush() {
-          if (disposed) return;
-          let offset = start;
-          for (const chunk of chunks) {
-            store.insert(offset, chunk);
-            offset += chunk.length;
-          }
-          store.evictTo(options.budgetBytes, focus);
-        },
+        flush: bank,
       }),
     );
     return new Response(stream, {

@@ -1,9 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createSourceResidency } from "./source-residency";
+import { READ_BLOCK_BYTES, createSourceResidency } from "./source-residency";
 
 const URL_UNDER_TEST = "https://example.test/clip.mov";
 const TOTAL = 4096;
+/* Sized off the block the residency banks in, so an abandoned read stops on
+ * a block boundary and the counts below are exact. */
+const PIECE = READ_BLOCK_BYTES / 8;
+const ABANDON_AT = READ_BLOCK_BYTES * 2;
+const STREAMED_TOTAL = READ_BLOCK_BYTES * 6;
 
 const body = (start: number, length: number): Uint8Array<ArrayBuffer> =>
   Uint8Array.from({ length }, (_, index) => (start + index) % 251);
@@ -29,6 +34,59 @@ const read = async (response: Response): Promise<Uint8Array> =>
   new Uint8Array(await response.arrayBuffer());
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+/** Serves a range in pieces, so a reader can walk away part-way through one. */
+function pieceFetch(total: number, pieceBytes: number) {
+  let served = 0;
+  const impl = async (_input: unknown, init?: RequestInit) => {
+    const header = new Headers(init?.headers ?? undefined).get("Range");
+    const match = header ? /^bytes=(\d+)-(\d*)$/.exec(header) : null;
+    const start = match ? Number(match[1]) : 0;
+    const end = match && match[2] ? Number(match[2]) : total - 1;
+    let cursor = start;
+    /* A zero high-water mark keeps the fake network from producing a piece
+     * nobody read, so the byte counts below describe the reads themselves. */
+    const stream = new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          const length = Math.min(pieceBytes, end + 1 - cursor);
+          if (length <= 0) {
+            controller.close();
+            return;
+          }
+          controller.enqueue(body(cursor, length));
+          cursor += length;
+          served += length;
+        },
+      },
+      { highWaterMark: 0 },
+    );
+    return new Response(stream, {
+      status: 206,
+      headers: {
+        "Content-Length": String(end - start + 1),
+        "Content-Range": `bytes ${start}-${end}/${total}`,
+      },
+    });
+  };
+  return {
+    fetchImpl: impl as unknown as typeof fetch,
+    servedBytes: () => served,
+  };
+}
+
+/** Reads `bytes` off a response and then abandons it, the way the demuxer
+ *  abandons a read once it holds what it asked for. */
+async function abandonAfter(response: Response, bytes: number): Promise<void> {
+  const reader = response.body!.getReader();
+  let read = 0;
+  while (read < bytes) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    read += value.length;
+  }
+  await reader.cancel();
+}
 
 describe("createSourceResidency", () => {
   it("serves a repeat read from what the first read left behind", async () => {
@@ -156,6 +214,51 @@ describe("createSourceResidency", () => {
     }
 
     expect(residency.snapshot().ranges).toEqual([{ start: 2048, end: 4096 }]);
+  });
+
+  it("holds what a read delivered before its reader walked away", async () => {
+    const network = pieceFetch(STREAMED_TOTAL, PIECE);
+    const residency = createSourceResidency({
+      url: URL_UNDER_TEST,
+      budgetBytes: STREAMED_TOTAL,
+      fetchImpl: network.fetchImpl,
+    });
+
+    await abandonAfter(
+      await residency.fetchFn(URL_UNDER_TEST, {
+        headers: { Range: "bytes=0-" },
+      }),
+      ABANDON_AT,
+    );
+    await settle();
+
+    expect(residency.snapshot().ranges).toEqual([
+      { start: 0, end: ABANDON_AT },
+    ]);
+  });
+
+  it("does not pull a second time what an abandoned read already delivered", async () => {
+    const network = pieceFetch(STREAMED_TOTAL, PIECE);
+    const residency = createSourceResidency({
+      url: URL_UNDER_TEST,
+      budgetBytes: STREAMED_TOTAL,
+      chunkBytes: READ_BLOCK_BYTES,
+      fetchImpl: network.fetchImpl,
+    });
+
+    await abandonAfter(
+      await residency.fetchFn(URL_UNDER_TEST, {
+        headers: { Range: "bytes=0-" },
+      }),
+      ABANDON_AT,
+    );
+    await settle();
+
+    residency.startWarming();
+    await vi.waitFor(() => {
+      expect(residency.snapshot().residentBytes).toBe(STREAMED_TOTAL);
+    });
+    expect(network.servedBytes()).toBe(STREAMED_TOTAL);
   });
 
   it("holds nothing once disposed", async () => {
