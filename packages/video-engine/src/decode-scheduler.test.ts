@@ -736,6 +736,42 @@ describe("DecodeScheduler", () => {
     });
   });
 
+  describe("prefetch generation", () => {
+    it("play pulls leave the generation where it is", async () => {
+      const { scheduler } = setup({ frames: [0, 1, 2, 3] });
+      await scheduler.open();
+      await scheduler.whenSettled();
+
+      scheduler.attachPlay(0);
+      const before = scheduler.getStats().prefetchState.generation;
+      scheduler.next();
+      await tick();
+      scheduler.next();
+      await tick();
+
+      expect(scheduler.getStats().prefetchState.generation).toBe(before);
+
+      scheduler.detachPlay();
+      await scheduler.whenSettled();
+    });
+
+    it("a sweep cancelled before it finishes moves the generation", async () => {
+      // A keyframe every 0.25s puts 17 of them inside the sweep span, so the
+      // sweep opened by the seed is still walking when the seek arrives.
+      const keyframes = Array.from({ length: 41 }, (_, index) => index * 0.25);
+      const { scheduler } = setup({ keyframes });
+      await scheduler.open();
+      const before = scheduler.getStats().prefetchState.generation;
+
+      scheduler.seekTo(asSec(5));
+      await scheduler.whenSettled();
+
+      expect(scheduler.getStats().prefetchState.generation).toBeGreaterThan(
+        before,
+      );
+    });
+  });
+
   describe("gesture-shaped prefetch window", () => {
     it("a reversal aims the window behind the playhead within one gesture", async () => {
       const h = setup({ now: tickingClock(200) });

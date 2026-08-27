@@ -205,9 +205,12 @@ export class DecodeScheduler implements ScrubCursor {
   /** Outstanding background prefetch chain, or null once it unwinds. Awaited
    *  only by close(), so teardown cannot outrun a sweep still holding a decoder. */
   private prefetchTask: Promise<void> | null = null;
-  /** Bumped by every foreground gesture; a running prefetch bails when it
+  /** Bumped when a running prefetch is cancelled; that prefetch bails when it
    *  sees the token move, which is how cancellation propagates. */
   private prefetchGen = 0;
+  /** Whether a sweep is still depending on the live token. Cleared both by the
+   *  cancellation that supersedes the sweep and by the sweep finishing. */
+  private prefetchArmed = false;
   /** Woken when the token moves, so a sweep parked on a decode unwinds at the
    *  gesture rather than at the end of the decode it is parked on. */
   private abandonResolvers: Array<() => void> = [];
@@ -998,8 +1001,15 @@ export class DecodeScheduler implements ScrubCursor {
    * stays so close() can await teardown.
    */
   private abandonPrefetch(): void {
-    this.prefetchGen++;
+    // Only an armed token has a sweep to cancel: a play pull cancels here on
+    // every frame, and playback schedules no sweeps at all, so an unguarded
+    // bump measures the play pump rather than prefetch.
+    if (this.prefetchArmed) {
+      this.prefetchArmed = false;
+      this.prefetchGen++;
+    }
     const pending = this.abandonResolvers;
+    if (pending.length === 0) return;
     this.abandonResolvers = [];
     pending.forEach((r) => r());
   }
@@ -1022,6 +1032,7 @@ export class DecodeScheduler implements ScrubCursor {
     this.abandonPrefetch();
     const gen = this.prefetchGen;
     const prev = this.prefetchTask;
+    this.prefetchArmed = true;
     const sweep = (async () => {
       try {
         await prev?.catch(() => undefined);
@@ -1032,7 +1043,9 @@ export class DecodeScheduler implements ScrubCursor {
       }
     })();
     const task: Promise<void> = sweep.finally(() => {
-      if (this.prefetchTask === task) this.prefetchTask = null;
+      if (this.prefetchTask !== task) return;
+      this.prefetchTask = null;
+      this.prefetchArmed = false;
     });
     this.prefetchTask = task;
   }

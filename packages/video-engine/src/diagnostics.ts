@@ -158,6 +158,11 @@ export interface CounterDiagnostics {
   readonly seekCoalesceDepth: number;
   readonly probeRoundTrips: number;
   readonly prefetchInFlight: boolean;
+  /**
+   * Background sweeps cancelled since the source opened, as a running total, so
+   * a rate is only ever the delta between two snapshots. Playback schedules no
+   * sweeps, so a clip that only plays never moves this.
+   */
   readonly prefetchGeneration: number;
   readonly nextPending: number;
   /** How long the cursor has been draining a seek uninterrupted, in ms; 0 when
