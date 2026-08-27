@@ -53,6 +53,7 @@ const expectedWebRuntimeExports = [
   "MediaSourceStatus",
   "RegionRendererComposeMode",
   "RegionRendererCoverageKind",
+  "RegionRendererMediaEffectKind",
   "RegionRendererRegionKind",
   "RegionRendererSizeSpace",
   "RegionRendererSourceKind",

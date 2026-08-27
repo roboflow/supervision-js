@@ -382,6 +382,47 @@ describe("pixi region layer", () => {
     expect(mediaTexture.destroy).not.toHaveBeenCalled();
   });
 
+  it("keeps one prepared media effect on a pooled region display", () => {
+    FakeBlurFilter.instances = [];
+    const mediaTexture = new FakeTexture({
+      source: { height: 200, width: 300 },
+    });
+    const layer = createPixiRegionLayer({
+      ...createTestBackend(mediaTexture),
+      Assets: { load: vi.fn(), unload: vi.fn() } as never,
+      BlurFilter: FakeBlurFilter as never,
+      Container: FakeContainer as never,
+      GifSprite: FakeGifSprite as never,
+      Sprite: FakeSprite as never,
+      detectionTimeline: createTimeline(frame),
+      regionRenderers: [
+        annotationRenderers.region({
+          id: "player-blur",
+          region: { kind: "bounds" },
+          source: {
+            effect: { kind: "blur", strength: 10 },
+            kind: "media",
+            region: { kind: "bounds" },
+          },
+          target: { className: "player" },
+        }),
+      ],
+    });
+    const container = layer.createContainer() as unknown as FakeContainer;
+
+    layer.drawFrame(1);
+    const display = container.children[0] as FakeSprite;
+    const filter = display.filters?.[0] as FakeBlurFilter;
+    layer.drawFrame(1);
+
+    expect(filter.options).toMatchObject({ strength: 10 });
+    expect(FakeBlurFilter.instances).toHaveLength(1);
+    expect(display.filters).toEqual([filter]);
+
+    layer.destroy();
+    expect(filter.destroy).toHaveBeenCalledOnce();
+  });
+
   it("clips a media crop to the detection polygon", () => {
     const mediaTexture = new FakeTexture({
       source: { height: 200, width: 300 },
@@ -689,6 +730,7 @@ class FakeContainer {
 
 class FakeSprite {
   readonly effects: unknown[] = [];
+  filters: readonly unknown[] | null = null;
   readonly anchor = { set: vi.fn() };
   readonly destroy = vi.fn();
   readonly position = {
@@ -739,6 +781,24 @@ class FakeAlphaMask {
 
   get mask() {
     return this.options.mask;
+  }
+}
+
+class FakeBlurFilter {
+  static instances: FakeBlurFilter[] = [];
+
+  readonly destroy = vi.fn();
+  padding = 0;
+
+  constructor(
+    readonly options: {
+      readonly kernelSize?: number;
+      readonly quality?: number;
+      readonly repeatEdgePixels?: boolean;
+      readonly strength?: number;
+    },
+  ) {
+    FakeBlurFilter.instances.push(this);
   }
 }
 

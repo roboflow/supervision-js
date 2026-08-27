@@ -23,6 +23,7 @@ export const docsAnnotationRendererIds = [
   "polylines",
   "keypoints",
   "regions",
+  "region-effects",
 ] as const;
 
 export type DocsAnnotationRendererId =
@@ -333,6 +334,11 @@ export const docsAnnotationRenderers: Readonly<
     description:
       "Media crops and asset overlays anchored to detection geometry",
     title: "Regions",
+  },
+  "region-effects": {
+    controls: [],
+    description: "Bounded media effects and focus composition",
+    title: "Region Effects",
   },
 };
 

@@ -22,6 +22,7 @@ import type {
   DemoFixtureSummary,
 } from "../fixtures/demo-fixtures";
 import {
+  demoFixtureCatalog,
   demoFixtures,
   defaultDemoFixture,
   type DemoFixtureDefinition,
@@ -147,7 +148,7 @@ export function useDemoRenderer(
 ): DemoRendererState {
   const [initialFixture] = useState(
     () =>
-      demoFixtures.find(
+      demoFixtureCatalog.find(
         (fixture) => fixture.sampleName === options.initialFixtureId,
       ) ?? defaultDemoFixture,
   );

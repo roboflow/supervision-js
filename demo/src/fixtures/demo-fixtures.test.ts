@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 
 import { KeypointVisibility, type DetectionFrame } from "supervision";
 import { computeDetectionMaskRect } from "supervision/editing";
-import { demoFixtures } from "./demo-fixtures";
+import { demoFixtureCatalog, demoFixtures } from "./demo-fixtures";
 
 const MAX_POLYGON_POINTS = 48;
 const fixturesRoot = fileURLToPath(new URL("../../fixtures", import.meta.url));
@@ -54,6 +54,22 @@ describe("fixture geometry", () => {
 });
 
 describe("geometry showcase fixture", () => {
+  it("keeps documentation-only privacy media out of the general demo selector", () => {
+    expect(
+      demoFixtureCatalog.find(
+        ({ sampleName }) => sampleName === "people_privacy_segmentation",
+      ),
+    ).toMatchObject({
+      datasetId: "people_privacy_segmentation_v1",
+      showInDemo: false,
+    });
+    expect(
+      demoFixtures.some(
+        ({ sampleName }) => sampleName === "people_privacy_segmentation",
+      ),
+    ).toBe(false);
+  });
+
   it("exposes the demo samples with their documented geometry", () => {
     expect(
       demoFixtures.map(({ displayName, sampleName }) => ({

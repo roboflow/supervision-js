@@ -1,0 +1,24 @@
+{
+  "datasetId": "people_privacy_segmentation_v1",
+  "displayName": "People Privacy Effects",
+  "inferenceLabel": "Frozen SAM3 person segmentation",
+  "media": {
+    "file": "people_privacy.webm",
+    "loadingStatusLabel": "loading 3s person privacy fixture",
+    "normalizeInBrowser": false,
+    "readyStatusLabel": "3s person fixture | frozen SAM3 masks | VP9 WebM"
+  },
+  "presentation": {
+    "boxesEnabled": false,
+    "focusEnabled": false,
+    "keypointsEnabled": false,
+    "labelsEnabled": false,
+    "masksEnabled": false,
+    "polygonsEnabled": false,
+    "polylinesEnabled": false
+  },
+  "sampleName": "people_privacy_segmentation",
+  "schema": "supervision-js.demo.fixture-meta",
+  "showInDemo": false,
+  "version": 1
+}

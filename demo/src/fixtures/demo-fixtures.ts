@@ -97,11 +97,19 @@ export interface DemoFixtureDefinition {
   readonly presentationDefaults?: DemoFixturePresentationDefaults;
   readonly presentationAvailability?: DemoPresentationAvailability;
   readonly sampleName: string;
+  /** Whether the fixture appears in the general demo sample selector. */
+  readonly showInDemo: boolean;
   readonly mediaReadyStatusLabel: string;
   readonly videoSrc: string;
 }
 
-export const demoFixtures = createDemoFixtures();
+/** Every committed fixture that can be loaded by a focused documentation view. */
+export const demoFixtureCatalog = createDemoFixtures();
+
+/** The curated fixture subset presented by the general interactive demo. */
+export const demoFixtures = demoFixtureCatalog.filter(
+  (fixture) => fixture.showInDemo,
+);
 
 export const defaultDemoFixture = requireDemoFixture(
   demoFixtures.find(
@@ -312,10 +320,6 @@ function createDemoFixtures(): readonly DemoFixtureDefinition[] {
         return [];
       }
 
-      if (meta.showInDemo === false) {
-        return [];
-      }
-
       const basePath = metaPath.replace(/\/fixture\.meta\.json$/, "");
       const manifestPath = `${basePath}/detections.manifest.json`;
       const mediaPath = normalizeFixturePath(basePath, meta.media.file);
@@ -342,6 +346,7 @@ function createDemoFixtures(): readonly DemoFixtureDefinition[] {
           presentationDefaults: meta.presentation,
           presentationAvailability: meta.presentationAvailability,
           sampleName: meta.sampleName,
+          showInDemo: meta.showInDemo !== false,
           videoSrc,
         } satisfies DemoFixtureDefinition,
       ];

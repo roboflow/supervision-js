@@ -7,9 +7,9 @@ summary: Place media crops or image assets over detection-owned regions.
 
 The region annotation renderer places a crop of the current media frame or a
 browser-loadable image over a region owned by a semantic detection. It supports
-media effects such as an enlarged head alongside static icons, badges, logos,
-and animated GIFs. Application code never receives a Pixi texture, animation
-source, or display object.
+bounded media effects alongside static icons, badges, logos, and animated GIFs.
+Application code never receives a Pixi texture, animation source, filter, or
+display object.
 
 <div class="supervision-layer-playground">
   <iframe
@@ -26,6 +26,67 @@ patch, synthetic head window, or runtime keypoint is used for that mode.
 Switch to class-specific SVG team badges or a looping fire GIF, then tune the
 head scale or fixed screen-pixel asset size, offset, rotation, and media-crop
 mirror controls.
+
+## Blur or pixelate a semantic region
+
+`source.effect` applies a bounded effect to a crop of the renderer-owned media
+frame. Pair it with mask coverage when the detection has a segmentation mask so
+only the semantic silhouette is visible. The included privacy fixture contains
+frozen SAM3 `person` masks, not playground-only geometry.
+
+<div class="supervision-layer-playground">
+  <iframe
+    data-supervision-playground-src="demo/?embed=annotation-renderer&amp;renderer=region-effects"
+    loading="lazy"
+    title="Interactive region privacy effects playground"
+  ></iframe>
+</div>
+
+```ts
+session.setPresentation({
+  renderers: [
+    annotationRenderers.region({
+      id: "person-pixelate",
+      target: { className: "person" },
+      source: {
+        kind: "media",
+        region: { kind: "bounds" },
+        coverage: { kind: "mask" },
+        effect: { kind: "pixelate", size: 12 },
+      },
+      region: { kind: "bounds" },
+      compose: { mode: "over" },
+    }),
+  ],
+});
+```
+
+`effect: { kind: "blur", strength }` and `effect: { kind: "pixelate", size }`
+are the supported bounded media effects. Their values are in media pixels and
+are intentionally clamped by the browser backend. The renderer reuses the
+presented media texture and prepared coverage; it does not start a second
+decoder or read a composited canvas through the CPU.
+
+### Spotlight is focus, not a second region renderer
+
+The complementary effect — dimming the scene while preserving selected semantic
+targets — is already covered by `BaseFocusStyle`. Use it for interactive focus
+or an ambient spotlight; do not add a background-overlay region descriptor that
+duplicates its interaction and transition behavior.
+
+```ts
+session.setPresentation({
+  focusStyle: new BaseFocusStyle({
+    targetMode: FocusTargetMode.Ambient,
+    fill: { color: 0x020617, alpha: 0.55 },
+  }),
+  renderers: [],
+});
+```
+
+The playground exposes this existing focus composition next to blur and
+pixelation so the visual choice is clear, while the public API keeps one owner
+for each responsibility.
 
 ## Enlarge a region from the current media frame
 

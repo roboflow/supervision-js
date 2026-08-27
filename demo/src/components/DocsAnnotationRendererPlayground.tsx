@@ -15,6 +15,7 @@ import { useDemoRenderer } from "../hooks/useDemoRenderer";
 import type { DemoPresentationSettings } from "../presentation/demo-presentation";
 import { RendererViewport } from "./RendererViewport";
 import { DocsRegionAnnotationRendererPlayground } from "./DocsRegionAnnotationRendererPlayground";
+import { DocsRegionEffectsPlayground } from "./DocsRegionEffectsPlayground";
 
 export function DocsAnnotationRendererPlayground({
   renderer,
@@ -24,6 +25,9 @@ export function DocsAnnotationRendererPlayground({
   if (renderer === "regions") {
     return <DocsRegionAnnotationRendererPlayground />;
   }
+  if (renderer === "region-effects") {
+    return <DocsRegionEffectsPlayground />;
+  }
 
   return <DocsStyleAnnotationRendererPlayground renderer={renderer} />;
 }
@@ -31,7 +35,10 @@ export function DocsAnnotationRendererPlayground({
 function DocsStyleAnnotationRendererPlayground({
   renderer,
 }: {
-  readonly renderer: Exclude<DocsAnnotationRendererId, "regions">;
+  readonly renderer: Exclude<
+    DocsAnnotationRendererId,
+    "regions" | "region-effects"
+  >;
 }) {
   const definition = docsAnnotationRenderers[renderer];
   const fixtureName = "basketball fixture";

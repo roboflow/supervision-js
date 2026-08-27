@@ -32,11 +32,12 @@ The responsibilities stay separate:
 - PixiJS containers, shaders, textures, and prepared artifacts remain private
   backend details.
 
-The focused playgrounds below use the frozen basketball fixture, a real
-`MediaSession`, and the same style contracts available from the published
-`supervision` package. Change a control to update both the scene and its
-minimal code snippet. The polyline playground uses the fixture's committed,
-motion-gated basketball trajectory rather than inventing geometry at runtime.
+The focused playgrounds below use committed fixtures, a real `MediaSession`,
+and the same style contracts available from the published `supervision`
+package. Change a control to update both the scene and its minimal code
+snippet. The polyline playground uses the basketball fixture's committed,
+motion-gated trajectory rather than inventing geometry at runtime; the Region
+effects playground uses a separate frozen person-segmentation fixture.
 
 - [Boxes](./annotation-renderers/boxes.md)
 - [Ellipse](./annotation-renderers/ellipse.md)

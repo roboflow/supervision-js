@@ -133,6 +133,11 @@ for canonical closed polygons. Asset transforms may use an
 explicit media- or screen-space size; screen-space assets stay the same visible
 size across differently sized detections and viewport zoom. Multiple region
 descriptors may coexist when each has a unique `id`.
+Media sources may also request bounded `blur` or `pixelate` effects through
+`source.effect`; those semantic settings stay independent of the browser filter
+implementation and operate on the renderer-owned current frame. Use the
+existing `BaseFocusStyle` for a complementary ambient or interactive spotlight,
+rather than a second background-overlay renderer.
 Do not pass Pixi display objects or custom drawing callbacks: the public API
 describes semantic renderer configuration while the browser backend owns
 composition and resource lifetime.
