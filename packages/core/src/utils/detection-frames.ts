@@ -83,9 +83,23 @@ export function copySortedDetectionFrames(
     .sort((left, right) => left.mediaTime - right.mediaTime);
 }
 
+/** Returned by the plain copier when it meets a value only structuredClone can
+ *  carry, so the caller pays for that only when the metadata needs it. */
+const NOT_PLAIN = Symbol("not-plain-metadata");
+
 function copyDetectionMetadata(
   metadata: Record<string, unknown>,
 ): Record<string, unknown> {
+  // Detection metadata is almost always a handful of strings and numbers, and a
+  // window rebuild copies it once per detection, tens of thousands of times a
+  // second while scrubbing. structuredClone serialises; walking the object does
+  // not, so it is the fallback rather than the default.
+  const plain = copyPlainMetadata(metadata);
+
+  if (plain !== NOT_PLAIN) {
+    return plain as Record<string, unknown>;
+  }
+
   const clone = (
     globalThis as {
       readonly structuredClone?: <TValue>(value: TValue) => TValue;
@@ -97,6 +111,48 @@ function copyDetectionMetadata(
   }
 
   return copyMetadataValue(metadata) as Record<string, unknown>;
+}
+
+function copyPlainMetadata(value: unknown): unknown | typeof NOT_PLAIN {
+  if (value === null || typeof value !== "object") {
+    return typeof value === "function" || typeof value === "symbol"
+      ? NOT_PLAIN
+      : value;
+  }
+
+  if (Array.isArray(value)) {
+    const copied: unknown[] = [];
+
+    for (const entry of value) {
+      const child = copyPlainMetadata(entry);
+
+      if (child === NOT_PLAIN) {
+        return NOT_PLAIN;
+      }
+
+      copied.push(child);
+    }
+
+    return copied;
+  }
+
+  if (Object.getPrototypeOf(value) !== Object.prototype) {
+    return NOT_PLAIN;
+  }
+
+  const copied: Record<string, unknown> = {};
+
+  for (const [key, entry] of Object.entries(value)) {
+    const child = copyPlainMetadata(entry);
+
+    if (child === NOT_PLAIN) {
+      return NOT_PLAIN;
+    }
+
+    copied[key] = child;
+  }
+
+  return copied;
 }
 
 function copyMetadataValue(value: unknown): unknown {

@@ -11,6 +11,38 @@ import {
 } from "#utils/detection-frames";
 
 describe("detection frame utilities", () => {
+  it("carries metadata a plain copy would flatten", () => {
+    const recordedAt = new Date("2026-08-26T12:00:00.000Z");
+    const source = [
+      {
+        detections: [
+          {
+            className: "player",
+            confidence: 1,
+            id: "a",
+            metadata: { nested: { recordedAt }, tags: ["one", "two"] },
+            rect: { height: 2, width: 2, x: 1, y: 1 },
+          },
+        ],
+        endTime: 1,
+        frameIndex: 0,
+        mediaTime: 0,
+      },
+    ];
+
+    const copied = copySortedDetectionFrames(source);
+    const carried = copied[0]?.detections[0]?.metadata as {
+      nested: { recordedAt: Date };
+    };
+
+    expect(carried.recordedAt).toBeUndefined();
+    expect(carried.nested.recordedAt).toBeInstanceOf(Date);
+    expect(carried.nested.recordedAt.toISOString()).toBe(
+      "2026-08-26T12:00:00.000Z",
+    );
+    expect(carried.nested).not.toBe(source[0]?.detections[0]?.metadata);
+  });
+
   it("selects interval frames until their exclusive end time", () => {
     const frames: DetectionFrame[] = [
       { detections: [], endTime: 2, mediaTime: 0 },
