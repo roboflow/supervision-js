@@ -1,11 +1,13 @@
 import {
   DetectionFrameSelectionMode,
+  MediaSessionMode,
   createBrowserColdDetectionFrameStore,
   createMediaSession,
   createVideoEngineMediaRendererSource,
   type ColdDetectionFrameStoreWriteSummary,
   type DecodedVideoSampleSink,
   type MediaSession,
+  type MediaSessionDetectionOptions,
   type MediaRendererSource,
   type WritableDetectionFrameSource,
 } from "supervision";
@@ -31,12 +33,29 @@ import type {
   UploadInferenceStateSetter,
 } from "./demo-session-types";
 import {
+  applyDemoDetectionOptions,
+  applyDemoRendererOptions,
+  applyDemoSessionMode,
+  applyDemoSessionPlaybackGate,
+  describeMissingNormalization,
+  resolveDemoSessionConfiguration,
+} from "./session-options";
+import {
   addTimelineRange,
   appendTimelineRange,
   createBatchTimelineRange,
   createDetectionFrameTimelineRange,
   removeTimelineRange,
 } from "./timeline-ranges";
+
+/**
+ * SAM3 reads its frames back out of the opened video-engine source, so this
+ * session cannot hand the clip to `createMediaSession` as a `Blob`, which is
+ * the only shape `normalize` acts on.
+ */
+const UPLOAD_NORMALIZATION_BLOCKED = describeMissingNormalization(
+  "SAM3 inference reads frames back from the video engine source, which normalizing would replace.",
+);
 
 export interface UploadRunRequest {
   readonly apiKey: string;
@@ -65,6 +84,46 @@ export async function createUploadSession(
   });
 
   const presentation = createDemoPresentation(options.presentationSettings);
+  const baseDetections: MediaSessionDetectionOptions = {
+    appendable: {
+      chunkDurationSeconds: UPLOAD_DETECTION_CHUNK_SECONDS,
+      clearOnCreate: true,
+      datasetId,
+      store,
+    },
+    sync: {
+      frameIndexOriginTime: 0,
+      frameRate: TARGET_UPLOAD_FRAME_RATE,
+      selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
+    },
+  };
+  const detections = applyDemoDetectionOptions(
+    baseDetections,
+    options.sessionOptions,
+  );
+  const renderer = applyDemoRendererOptions(
+    createDemoRendererOptions(options),
+    options.sessionOptions,
+  );
+  const mode = applyDemoSessionMode(
+    MediaSessionMode.File,
+    options.sessionOptions,
+  );
+  const playbackGate = applyDemoSessionPlaybackGate(
+    undefined,
+    options.sessionOptions,
+  );
+
+  options.onSessionConfiguration(
+    resolveDemoSessionConfiguration({
+      detections,
+      mode,
+      normalizable: UPLOAD_NORMALIZATION_BLOCKED,
+      playbackGate,
+      renderer,
+    }),
+  );
+
   const isImageUpload = options.uploadRun.file.type.startsWith("image/");
   let preparedMedia: PreparedUploadMedia | undefined;
   let sampleSink: DecodedVideoSampleSink | undefined;
@@ -84,19 +143,7 @@ export async function createUploadSession(
 
     session = await createMediaSession({
       container: options.container,
-      detections: {
-        appendable: {
-          chunkDurationSeconds: UPLOAD_DETECTION_CHUNK_SECONDS,
-          clearOnCreate: true,
-          datasetId,
-          store,
-        },
-        sync: {
-          frameIndexOriginTime: 0,
-          frameRate: TARGET_UPLOAD_FRAME_RATE,
-          selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
-        },
-      },
+      detections,
       media: options.tapMediaSource(
         tapSampleSink(
           createVideoEngineMediaRendererSource({
@@ -114,9 +161,11 @@ export async function createUploadSession(
           },
         ),
       ),
+      mode,
       presentation,
       onState: options.onSessionState,
-      renderer: createDemoRendererOptions(options),
+      playbackGate,
+      renderer,
     });
   } catch (error) {
     session?.destroy();

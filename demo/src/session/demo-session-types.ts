@@ -14,6 +14,10 @@ import type {
 import type { PreparedUploadMedia } from "../media/upload-media";
 import type { DemoPresentationSettings } from "../presentation/demo-presentation";
 import type { DemoRenderQuality } from "./render-quality";
+import type {
+  DemoSessionConfiguration,
+  DemoSessionOptions,
+} from "./session-options";
 
 export enum DemoSourceMode {
   Fixture = "fixture",
@@ -61,10 +65,14 @@ export interface DemoSessionCallbacks {
     diagnostics: RenderPreparationDiagnostics,
   ) => void;
   readonly onRendererState: (state: MediaRendererState) => void;
+  readonly onSessionConfiguration: (
+    configuration: DemoSessionConfiguration,
+  ) => void;
   readonly onSessionState: (state: MediaSessionState) => void;
   readonly onSourceState: (state: MediaSourceState) => void;
   readonly presentationSettings: DemoPresentationSettings;
   readonly renderQuality: DemoRenderQuality;
+  readonly sessionOptions: DemoSessionOptions;
   readonly tapMediaSource: (source: MediaRendererSource) => MediaRendererSource;
 }
 

@@ -6,9 +6,8 @@ import { DetectionFrameRetentionMode } from "supervision-js-core";
 import type { RenderPreparationOptions } from "#types/render-preparation";
 import type {
   MediaSessionAppendableDetectionOptions,
-  MediaSessionDetectionOptions,
   MediaSessionMode,
-  MediaSessionRendererOptions,
+  MediaSessionOptions,
 } from "#types/media-session";
 import { MediaSessionMode as SessionMode } from "#types/media-session";
 
@@ -69,12 +68,20 @@ export interface ResolvedMediaSessionDefaults {
   readonly renderPreparation: RenderPreparationOptions;
 }
 
-export function resolveMediaSessionDefaults(options: {
-  readonly detections?: MediaSessionDetectionOptions;
-  readonly mode?: MediaSessionMode;
-  readonly playbackGate?: boolean;
-  readonly renderer?: MediaSessionRendererOptions;
-}): ResolvedMediaSessionDefaults {
+/**
+ * The detection-buffer and render-preparation configuration a session created
+ * with these options actually runs on.
+ *
+ * `createMediaSession` resolves its options through this, so a host can read
+ * the numbers a session will use, and show or log them, without restating the
+ * defaults itself.
+ */
+export function resolveMediaSessionDefaults(
+  options: Pick<
+    MediaSessionOptions,
+    "detections" | "mode" | "playbackGate" | "renderer"
+  >,
+): ResolvedMediaSessionDefaults {
   const mode = options.mode ?? SessionMode.File;
   const appendableDetections =
     options.detections?.appendable ?? options.detections?.writable;

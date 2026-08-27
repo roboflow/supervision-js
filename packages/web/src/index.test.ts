@@ -149,6 +149,7 @@ describe("package entrypoint", () => {
       "projectDetectionFrameForTracking",
       "projectDetectionFrames",
       "resolveDetectionClassColorStyle",
+      "resolveMediaSessionDefaults",
       "toMediaSourceError",
     ]);
     expect(entrypoint.createMediaRenderer).toEqual(expect.any(Function));

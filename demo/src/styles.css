@@ -1377,6 +1377,85 @@ fieldset {
   outline-offset: 2px;
 }
 
+.session-options {
+  background: rgba(7, 9, 13, 0.52);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 9px;
+}
+
+.session-options .inspector-card__header button {
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  color: var(--muted-strong);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 650;
+  min-height: 25px;
+  padding: 3px 8px;
+}
+
+.session-options .inspector-card__header button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.075);
+  border-color: var(--line-strong);
+  color: #ffffff;
+}
+
+.session-options .inspector-card__header button:disabled {
+  color: rgba(255, 255, 255, 0.28);
+  cursor: not-allowed;
+}
+
+.session-options__hint {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 560;
+  line-height: 1.35;
+  margin: 0;
+}
+
+.render-control--number {
+  display: grid;
+  gap: 4px;
+}
+
+.render-control--number input {
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 650;
+  min-height: 30px;
+  min-width: 0;
+  padding: 0 8px;
+  width: 100%;
+}
+
+.render-control--number input:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.render-control-note {
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 560;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.render-control-note code {
+  color: var(--muted-strong);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
 .selection-panel {
   background: rgba(7, 9, 13, 0.52);
   border: 1px solid var(--line);
@@ -3354,6 +3433,7 @@ fieldset {
 .source-controls,
 .quality-controls,
 .selection-panel,
+.session-options,
 .render-controls,
 .status-panel,
 .benchmark-card,
@@ -3367,6 +3447,7 @@ fieldset {
 .source-controls__mode button,
 .source-actions button,
 .selection-panel .inspector-card__header button,
+.session-options .inspector-card__header button,
 .render-controls__tabs button,
 .render-control,
 .render-control--toggle,
@@ -3393,6 +3474,7 @@ fieldset {
 .source-controls__mode button:hover:not(:disabled, [aria-pressed="true"]),
 .source-actions button:hover:not(:disabled),
 .selection-panel .inspector-card__header button:hover,
+.session-options .inspector-card__header button:hover:not(:disabled),
 .render-controls__tabs button:hover:not([aria-pressed="true"]),
 .render-control__segments button:hover:not(:disabled, [aria-pressed="true"]) {
   background: #f5f3ff;
@@ -3403,6 +3485,7 @@ fieldset {
 .source-field input,
 .source-field textarea,
 .quality-controls__input-row input[type="number"],
+.render-control--number input,
 .quality-controls__toggle,
 .selection-details,
 .source-progress,
@@ -3422,6 +3505,7 @@ fieldset {
 
 .source-controls__mode button:disabled,
 .source-actions button:disabled,
+.session-options .inspector-card__header button:disabled,
 .render-control__segments button:disabled {
   background: #f4f4f5;
   color: #9ca3af;
@@ -3443,6 +3527,8 @@ fieldset {
 
 .source-field span,
 .selection-panel__hint,
+.session-options__hint,
+.render-control-note,
 .selection-details--empty span,
 .selection-details__title span,
 .selection-details__grid dt,
@@ -3648,6 +3734,7 @@ fieldset {
 .source-controls,
 .quality-controls,
 .selection-panel,
+.session-options,
 .render-controls,
 .status-panel {
   border-color: #e7e2fb;

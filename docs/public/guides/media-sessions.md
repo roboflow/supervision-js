@@ -59,6 +59,29 @@ decodes, seeks and presents frames itself and reports the media time of the
 frame it put on screen. Passing a URL or a `Blob` directly keeps the renderer
 pulling samples instead.
 
+## Reading The Resolved Defaults
+
+`resolveMediaSessionDefaults()` reports the detection-buffer and
+render-preparation configuration a session built from a given set of options
+will actually run on:
+
+```ts
+import { MediaSessionMode, resolveMediaSessionDefaults } from "supervision";
+
+const defaults = resolveMediaSessionDefaults({
+  detections: { sync: { frameRate: 24 } },
+  mode: MediaSessionMode.File,
+});
+
+defaults.detectionBuffer.bufferAheadSeconds;
+defaults.renderPreparation.maskFrame?.prefetchFrameCount;
+```
+
+`createMediaSession()` resolves its own options through the same function, so a
+host that surfaces these numbers is showing the ones the session uses rather
+than a copy that can drift. Frame counts follow the detection frame rate, so
+they answer differently for a 24Hz source than for a 30Hz one.
+
 ## Minimal Start
 
 For a plain browser app, the smallest useful session is:

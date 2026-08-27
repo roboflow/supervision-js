@@ -107,6 +107,10 @@ export type {
   PreparedAnnotationWindowSnapshot,
 } from "#renderers/prepared-annotation-window";
 export { createMediaSession } from "#sessions/media-session";
+export {
+  resolveMediaSessionDefaults,
+  type ResolvedMediaSessionDefaults,
+} from "#sessions/media-session-defaults";
 export type {
   MediaFrameCapture,
   MediaFrameCaptureOptions,

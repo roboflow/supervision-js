@@ -70,12 +70,20 @@ import {
   createUploadSession,
   type UploadRunRequest,
 } from "../session/upload-session";
+import {
+  emptyDemoSessionOptions,
+  type DemoSessionConfiguration,
+  type DemoSessionOptions,
+} from "../session/session-options";
 
 export { DemoSourceMode };
 export type { DemoDetectionSourceState, DemoMediaState, UploadInferenceState };
 
 export interface DemoRendererState {
   readonly canUseRenderer: boolean;
+  readonly sessionConfiguration: DemoSessionConfiguration | null;
+  readonly sessionOptions: DemoSessionOptions;
+  readonly setSessionOptions: (options: DemoSessionOptions) => void;
   readonly detectionSourceState: DemoDetectionSourceState;
   readonly containerRef: RefCallback<HTMLDivElement>;
   readonly duration: number | null;
@@ -229,6 +237,8 @@ export function useDemoRenderer(
   const rateChangedAtRef = useRef(Number.NEGATIVE_INFINITY);
   const uploadAbortRef = useRef<AbortController | null>(null);
   const uploadFileRef = useRef<File | null>(null);
+  /** Where the reopen an option change forces should resume, when it can. */
+  const restoreTimeRef = useRef<number | null>(null);
   const presentationSettingsRef = useRef<DemoPresentationSettings>(
     initialPresentationSettings,
   );
@@ -276,6 +286,11 @@ export function useDemoRenderer(
   const [uploadRun, setUploadRun] = useState<
     (UploadRunRequest & { readonly id: number }) | null
   >(null);
+  const [sessionOptions, setSessionOptionsState] = useState<DemoSessionOptions>(
+    emptyDemoSessionOptions,
+  );
+  const [sessionConfiguration, setSessionConfiguration] =
+    useState<DemoSessionConfiguration | null>(null);
   const activeFixture =
     demoFixtures.find((fixture) => fixture.sampleName === sampleFixtureId) ??
     defaultDemoFixture;
@@ -422,11 +437,13 @@ export function useDemoRenderer(
             onMediaState: setMediaState,
             onRenderPreparationDiagnostics: publishRenderPreparation,
             onRendererState,
+            onSessionConfiguration: setSessionConfiguration,
             onSessionState: sessionStatePublisher.publish,
             onSourceState: setSourceState,
             presentationSettings: presentationSettingsRef.current,
             presentationTransform,
             renderQuality,
+            sessionOptions,
             tapMediaSource,
           });
 
@@ -445,11 +462,13 @@ export function useDemoRenderer(
             onMediaState: setMediaState,
             onRenderPreparationDiagnostics: publishRenderPreparation,
             onRendererState,
+            onSessionConfiguration: setSessionConfiguration,
             onSessionState: sessionStatePublisher.publish,
             onSourceState: setSourceState,
             onUploadState: setUploadInferenceState,
             presentationSettings: presentationSettingsRef.current,
             renderQuality,
+            sessionOptions,
             tapMediaSource,
             uploadRun,
           });
@@ -474,6 +493,7 @@ export function useDemoRenderer(
             renderer;
         }
         syncRendererState(renderer);
+        await restorePlayhead(renderer, restoreTimeRef);
         await runPlaybackRequest(
           renderer.play(),
           renderer,
@@ -508,6 +528,7 @@ export function useDemoRenderer(
     fixtureDetectionSourceTransform,
     fixtureFrameTransform,
     presentationTransform,
+    sessionOptions,
     sourceMode,
     stage,
     stageAttached,
@@ -745,7 +766,16 @@ export function useDemoRenderer(
     [syncRendererState],
   );
 
+  const setSessionOptions = useCallback((options: DemoSessionOptions) => {
+    restoreTimeRef.current = keepsPlayhead(options)
+      ? readRestorableTime(rendererRef.current)
+      : null;
+    setSessionOptionsState(options);
+  }, []);
+
   const setSourceMode = useCallback((mode: DemoSourceMode) => {
+    restoreTimeRef.current = null;
+
     if (mode === DemoSourceMode.Fixture) {
       uploadAbortRef.current?.abort();
       setUploadRun(null);
@@ -756,6 +786,7 @@ export function useDemoRenderer(
   }, []);
 
   const setSampleFixtureId = useCallback((sampleName: string) => {
+    restoreTimeRef.current = null;
     uploadAbortRef.current?.abort();
     setUploadRun(null);
     setUploadInferenceState(initialUploadInferenceState);
@@ -920,9 +951,12 @@ export function useDemoRenderer(
     sampleFixtureId,
     sampleFixtures: demoFixtures,
     selectedDetectionPick,
+    sessionConfiguration,
+    sessionOptions,
     setSampleFixtureId,
     setPresentationSettings,
     setRenderQuality: setRenderQualityLive,
+    setSessionOptions,
     setSourceMode,
     setUploadApiKey,
     setUploadClassNames,
@@ -1017,6 +1051,37 @@ function createThrottledPublisher<Value>(
       publishPendingValue();
     },
   };
+}
+
+/**
+ * Progressive normalization opens on output that has only been produced from
+ * the start of the clip, so a reopen into it has nowhere to resume to.
+ */
+function keepsPlayhead(options: DemoSessionOptions) {
+  return options.normalize !== true || options.normalizeStream !== true;
+}
+
+function readRestorableTime(renderer: MediaRenderer | null) {
+  const currentTime = renderer?.getState().currentTime;
+
+  return typeof currentTime === "number" && currentTime > 0
+    ? currentTime
+    : null;
+}
+
+async function restorePlayhead(
+  renderer: MediaRenderer,
+  restoreTimeRef: { current: number | null },
+) {
+  const restoreTime = restoreTimeRef.current;
+
+  restoreTimeRef.current = null;
+
+  if (restoreTime === null) {
+    return;
+  }
+
+  await renderer.seek(restoreTime).catch(() => undefined);
 }
 
 /** Says why a playback request the viewer made failed, and settles the readout

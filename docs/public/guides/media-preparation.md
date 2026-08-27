@@ -72,3 +72,58 @@ const session = await createMediaSession({
 
 This keeps media decoding and annotation rendering in the same renderer-owned
 composition while the normalized media becomes available.
+
+## What The Session Shortcut Gives Up
+
+`normalize` makes the session build its own renderer source: an object URL for a
+full transcode, a streaming pull source for a progressive one. Neither is the
+video-engine source, so this route has no presented-frame channel, and an
+enabled playback gate holds every frame the renderer pulls rather than only the
+start of playback.
+
+Normalized bytes reach the engine perfectly well; there is simply no option that
+asks `createMediaSession()` for both. A host that wants both normalizes first
+and passes the result as an engine blob source:
+
+```ts
+import {
+  createMediaSession,
+  createVideoEngineMediaRendererSource,
+  prepareMedia,
+} from "supervision";
+import { SourceKind } from "supervision-js-video-engine";
+
+const prepared = await prepareMedia(file);
+
+const session = await createMediaSession({
+  container,
+  media: createVideoEngineMediaRendererSource({
+    source: { blob: prepared.normalizedMedia.blob, kind: SourceKind.Blob },
+  }),
+});
+```
+
+## Normalization Defaults
+
+Normalization is opt-in, and every field below is optional. Left unset, a
+session normalizes to this profile:
+
+| Option                           | Default                            |
+| -------------------------------- | ---------------------------------- |
+| `container`                      | `MediaNormalizationContainer.WebM` |
+| `video.codec`                    | VP9 for `WebM`, AVC for `Mp4`      |
+| `video.frameRate`                | `30`                               |
+| `video.keyFrameInterval`         | `1` second                         |
+| `video.forceTranscode`           | `true`                             |
+| `video.width` / `video.height`   | the source's display size          |
+| `video.bitrate`                  | unset, so the encoder chooses      |
+| `audio.discard`                  | `true`                             |
+| `stream` (session shortcut only) | `false`                            |
+
+The frame rate is the one to watch. A variable-rate input normalizes onto a
+constant 30Hz grid, which is what makes `frameIndex` a usable address for
+detections computed against the normalized media.
+
+`video.forceTranscode` defaults to `true`, so an input that already matches the
+target profile is still re-encoded. Set it to `false` when a compatible stream
+should be copied through instead.

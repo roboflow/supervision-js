@@ -61,7 +61,8 @@ export type MediaSessionMedia =
 export interface MediaSessionNormalizationOptions extends MediaNormalizationOptions {
   /**
    * When true, media normalization may expose progressive output before the
-   * entire input has finished normalizing.
+   * entire input has finished normalizing. Defaults to false, which opens the
+   * session only once the complete normalized blob exists.
    */
   readonly stream?: boolean;
 }

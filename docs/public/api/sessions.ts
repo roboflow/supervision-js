@@ -6,6 +6,7 @@
 
 export {
   createMediaSession,
+  resolveMediaSessionDefaults,
   MediaSessionActivityKind,
   MediaSessionActivityStatus,
   MediaSessionMode,
@@ -29,4 +30,5 @@ export {
   type MediaSessionStateListener,
   type MediaSessionStateUnsubscribe,
   type MediaSessionWritableDetectionOptions,
+  type ResolvedMediaSessionDefaults,
 } from "supervision";

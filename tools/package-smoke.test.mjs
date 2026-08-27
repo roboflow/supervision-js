@@ -102,6 +102,7 @@ const expectedWebRuntimeExports = [
   "projectDetectionFrameForTracking",
   "projectDetectionFrames",
   "resolveDetectionClassColorStyle",
+  "resolveMediaSessionDefaults",
   "toMediaSourceError",
 ];
 

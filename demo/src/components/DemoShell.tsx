@@ -13,6 +13,7 @@ export function DemoShell({
   qualityControls,
   renderControls,
   selectionPanel,
+  sessionOptionsPanel,
   sourceControls,
   statusPanel,
   viewport,
@@ -27,6 +28,7 @@ export function DemoShell({
   readonly qualityControls: ReactNode;
   readonly renderControls: ReactNode;
   readonly selectionPanel: ReactNode;
+  readonly sessionOptionsPanel: ReactNode;
   readonly sourceControls: ReactNode;
   readonly statusPanel: ReactNode;
   readonly viewport: ReactNode;
@@ -90,6 +92,7 @@ export function DemoShell({
           <aside className="demo-shell__inspector" aria-label="Demo controls">
             {sourceControls}
             {qualityControls}
+            {sessionOptionsPanel}
             {selectionPanel}
             {renderControls}
             {mode === DemoViewMode.Debug ? performanceStrip : null}
