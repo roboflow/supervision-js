@@ -138,10 +138,8 @@ export class FrameTimeline {
    * The frame a decoded sample is.
    *
    * A decoded timestamp has been through the WebCodecs microsecond plane, so
-   * it can miss its own tick by up to half a microsecond, and the two framings
-   * in play disagree by a whole one: mediabunny's sinks truncate to
-   * microseconds and the engine's own decode session rounds. Snapping to the
-   * nearer neighbour absorbs both by four orders of magnitude, since the
+   * it can miss its own tick by up to half a microsecond. Snapping to the
+   * nearer neighbour absorbs that by four orders of magnitude, since the
    * narrowest real frame gap measured across the fixtures is 31667 us.
    */
   indexOfDecoded(timeS: number): number {

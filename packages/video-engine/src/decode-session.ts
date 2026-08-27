@@ -45,6 +45,25 @@ export interface VideoDecoderLike {
   close(): void;
 }
 
+/**
+ * One decoded picture and the timing of the packet that produced it.
+ *
+ * The timing is the container's rather than `VideoFrame.timestamp`, matching
+ * what mediabunny's sinks publish on every other decode path: where a picture
+ * sits is a fact about the file, not about what a platform decoder stamped on
+ * it.
+ */
+interface DecodedPicture {
+  readonly frame: VideoFrame;
+  readonly timestampS: number;
+  readonly durationS: number;
+}
+
+interface PacketTiming {
+  readonly timestampS: number;
+  readonly durationS: number;
+}
+
 export interface DecodeSessionOptions {
   readonly packets: PacketSource;
   readonly config: VideoDecoderConfig;
@@ -179,8 +198,9 @@ export class DecodeSession implements SessionFrameSource {
    *  forward seek can reach without re-anchoring. */
   private spanEndS = Infinity;
   private exhausted = true;
-  private inFlight = 0;
-  private readonly decoded: VideoFrame[] = [];
+  /** Timings the decoder still owes pictures for, in presentation order. */
+  private readonly pending: PacketTiming[] = [];
+  private readonly decoded: DecodedPicture[] = [];
   private wake: (() => void) | null = null;
   /**
    * Latched once the decoder is judged unable to decode this source at all.
@@ -232,7 +252,7 @@ export class DecodeSession implements SessionFrameSource {
    *  handed out. */
   get reachableFromS(): number {
     const queued = this.decoded[0];
-    if (queued) return queued.timestamp / MICROSECONDS_PER_SECOND;
+    if (queued) return queued.timestampS;
     return this.reachable;
   }
 
@@ -257,15 +277,15 @@ export class DecodeSession implements SessionFrameSource {
     let handedOutS: number | null = null;
     let seenEpoch = this.epoch;
     for (;;) {
-      const frame = await this.exclusive(() => {
+      const picture = await this.exclusive(() => {
         if (handedOutS === null) return this.land(startS);
         if (seenEpoch !== this.epoch) return this.resumeAfter(handedOutS);
         return this.pull(Infinity);
       });
-      if (!frame) return;
-      handedOutS = frame.timestamp / MICROSECONDS_PER_SECOND;
+      if (!picture) return;
+      handedOutS = picture.timestampS;
       seenEpoch = this.epoch;
-      yield videoFrameSample(frame);
+      yield videoFrameSample(picture);
     }
   }
 
@@ -286,7 +306,7 @@ export class DecodeSession implements SessionFrameSource {
     let positioned = false;
     let seenEpoch = 0;
     for (;;) {
-      const frame = await this.exclusive(async () => {
+      const picture = await this.exclusive(async () => {
         if (!positioned) {
           await this.positionFor(startS);
           positioned = true;
@@ -295,9 +315,9 @@ export class DecodeSession implements SessionFrameSource {
         }
         return this.pull(endS);
       });
-      if (!frame) return;
+      if (!picture) return;
       seenEpoch = this.epoch;
-      yield videoFrameSample(frame);
+      yield videoFrameSample(picture);
     }
   }
 
@@ -321,14 +341,13 @@ export class DecodeSession implements SessionFrameSource {
    * Re-positions and discards the frames already handed out, so a walk picks
    * up exactly where it left off however far away the decoder was taken.
    */
-  private async resumeAfter(afterS: number): Promise<VideoFrame | null> {
+  private async resumeAfter(afterS: number): Promise<DecodedPicture | null> {
     await this.positionFor(afterS);
     for (;;) {
-      const frame = await this.pull(Infinity);
-      if (!frame) return null;
-      if (frame.timestamp / MICROSECONDS_PER_SECOND > afterS + BOUND_EPSILON_S)
-        return frame;
-      frame.close();
+      const picture = await this.pull(Infinity);
+      if (!picture) return null;
+      if (picture.timestampS > afterS + BOUND_EPSILON_S) return picture;
+      picture.frame.close();
     }
   }
 
@@ -347,14 +366,14 @@ export class DecodeSession implements SessionFrameSource {
 
   /** Decodes through `targetS` and returns the last frame at or before it,
    *  closing the frames walked past. */
-  private async land(targetS: number): Promise<VideoFrame | null> {
+  private async land(targetS: number): Promise<DecodedPicture | null> {
     await this.positionFor(targetS);
-    let landed: VideoFrame | null = null;
+    let landed: DecodedPicture | null = null;
     for (;;) {
-      const frame = await this.pull(targetS);
-      if (!frame) return landed;
-      landed?.close();
-      landed = frame;
+      const picture = await this.pull(targetS);
+      if (!picture) return landed;
+      landed?.frame.close();
+      landed = picture;
     }
   }
 
@@ -374,7 +393,7 @@ export class DecodeSession implements SessionFrameSource {
    *  put the head past frames the session can still serve. */
   private async readHeadS(): Promise<number | null> {
     const queued = this.decoded[0];
-    if (queued) return queued.timestamp / MICROSECONDS_PER_SECOND;
+    if (queued) return queued.timestampS;
     const packet = await this.peek();
     return packet ? packet.timestamp : null;
   }
@@ -407,7 +426,7 @@ export class DecodeSession implements SessionFrameSource {
    *  output from the old anchor can land against the new one. */
   private quiesce(): void {
     this.decoder?.reset();
-    this.inFlight = 0;
+    this.pending.length = 0;
     this.discardDecoded();
   }
 
@@ -433,7 +452,7 @@ export class DecodeSession implements SessionFrameSource {
   /** One frame at or before `boundS`, or null once the bound is passed. A frame
    *  decoded past the bound stays queued for the next read rather than being
    *  handed out or thrown away. */
-  private async pull(boundS: number): Promise<VideoFrame | null> {
+  private async pull(boundS: number): Promise<DecodedPicture | null> {
     // Every hand-out moves the decoder forward past that frame.
     for (;;) {
       if (this.closed) return null;
@@ -441,17 +460,12 @@ export class DecodeSession implements SessionFrameSource {
       await this.fill();
       const ready = this.decoded[0];
       if (ready) {
-        if (
-          ready.timestamp / MICROSECONDS_PER_SECOND >
-          boundS + BOUND_EPSILON_S
-        ) {
-          return null;
-        }
+        if (ready.timestampS > boundS + BOUND_EPSILON_S) return null;
         this.decoded.shift();
-        this.reachable = ready.timestamp / MICROSECONDS_PER_SECOND;
+        this.reachable = ready.timestampS;
         return ready;
       }
-      if (this.inFlight === 0) return null;
+      if (this.pending.length === 0) return null;
       // Nothing is left to submit at end of stream, so a flush is the only
       // way to get the last frames out.
       if (this.exhausted) await this.drain();
@@ -469,14 +483,17 @@ export class DecodeSession implements SessionFrameSource {
   private async fill(): Promise<void> {
     while (
       this.decoder &&
-      this.inFlight < DECODER_PIPELINE_CHUNKS &&
+      this.pending.length < DECODER_PIPELINE_CHUNKS &&
       this.decoded.length < READY_FRAMES
     ) {
       const packet = await this.peek();
       if (!packet) return;
       if (this.closed) return;
       this.peeked = null;
-      this.inFlight++;
+      this.awaitTiming({
+        timestampS: packet.timestamp,
+        durationS: packet.duration,
+      });
       // The chunk that opens the decode is the only one submitted as a key
       // chunk: a later sync sample is a recovery point, not an IDR, and the
       // decoder verifies the claim. It is the same chunk that carries the
@@ -512,13 +529,13 @@ export class DecodeSession implements SessionFrameSource {
     const decoder = this.decoder;
     if (!decoder) return;
     await decoder.flush();
-    this.inFlight = 0;
+    this.pending.length = 0;
     this.keyPacket.rearm();
   }
 
   private awaitOutput(): Promise<void> {
     return new Promise<void>((resolve, reject) => {
-      const owed = this.inFlight;
+      const owed = this.pending.length;
       const timer = setTimeout(() => {
         this.wake = null;
         // Drop the work this was waiting on before handing the failure
@@ -556,14 +573,25 @@ export class DecodeSession implements SessionFrameSource {
     });
   }
 
+  /**
+   * Files a submitted chunk's timing in presentation order, which is the order
+   * pictures come back in and is not the order chunks go in on a B-frame
+   * source.
+   */
+  private awaitTiming(timing: PacketTiming): void {
+    let at = this.pending.length;
+    while (at > 0 && this.pending[at - 1].timestampS > timing.timestampS) at--;
+    this.pending.splice(at, 0, timing);
+  }
+
   private receive(frame: VideoFrame): void {
     this.framesDecodedCount += 1;
-    if (this.closed) {
+    const timing = this.pending.shift();
+    if (this.closed || !timing) {
       frame.close();
       return;
     }
-    this.inFlight--;
-    this.decoded.push(frame);
+    this.decoded.push({ frame, ...timing });
     this.wake?.();
   }
 
@@ -585,17 +613,21 @@ export class DecodeSession implements SessionFrameSource {
   }
 
   private discardDecoded(): void {
-    for (const frame of this.decoded) frame.close();
+    for (const picture of this.decoded) picture.frame.close();
     this.decoded.length = 0;
   }
 }
 
 /** A decoded frame in the runtime's own sample vocabulary, so a session frame
  *  and a VideoSampleSink frame reach the renderer the same way. */
-function videoFrameSample(frame: VideoFrame): VideoSampleLike {
+function videoFrameSample({
+  frame,
+  timestampS,
+  durationS,
+}: DecodedPicture): VideoSampleLike {
   return {
-    timestamp: frame.timestamp / MICROSECONDS_PER_SECOND,
-    duration: (frame.duration ?? 0) / MICROSECONDS_PER_SECOND,
+    timestamp: timestampS,
+    duration: durationS,
     toVideoFrame: () => frame.clone(),
     draw: (ctx, dx, dy, dWidth, dHeight) => {
       ctx.drawImage(
