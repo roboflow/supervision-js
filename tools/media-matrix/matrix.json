@@ -10,6 +10,8 @@
     "stamping": "Every encoded clip carries its frame index in its own pixels. The 16-bit stamp addresses 65,536 frames; a clip longer than that sets stampWraps and its identity checks are modulo 65,536. The two reference entries are unmodified originals and carry no stamp.",
     "reproducibility": "Every clip is byte-reproducible on a fixed ffmpeg build and thread count except the bytes-per-GOP sweep, whose x264 rate control does not settle to the same output twice. Those declare reproducible: false and their digests record what a run produced rather than what a rebuild will match.",
     "declaredRateAxis": "The 10x mismatch large.mp4 carries (600 declared, 56.4 delivered) does not reproduce synthetically: ffprobe derives r_frame_rate from the whole duration table, not from the shortest interval, so a hand-built pattern lands nearer 2x. reference-large-screen carries the extreme end of this axis; declared-rate-lie and declared-rate-honest bracket it.",
+    "identityOracle": "The stamp read off a presented frame is compared against that frame presentation ordinal, which is what PresentedFrameId.index carries and what frame-timeline.ts binary-searches the container tick table for. No frame rate appears in the comparison. The engine also publishes MediaFrameDiagnostics.estimatedFrameIndex, which is round((t - t0) x rate) seeded from a 120-packet prefix; the matrix records that per clip as engineFrameRateReading and never asserts against it, because on large.mp4 the prefix reads 57.07 fps against a true 56.38 and the published index is 2,856 frames wrong by the end.",
+    "stampAffectsBytes": "Every clip except baseline-unstamped and the two references carries a drawn stamp, which adds bytes on a CRF encode and steals them on the CBR bytes-per-GOP arms. Read any byte figure against baseline-unstamped rather than as the file own.",
     "referenceEntries": "The two originals are probed in place and recorded by digest. They are never copied into the repository and never re-encoded."
   },
   "sources": [
@@ -37,7 +39,9 @@
     "container": "how the bytes are wrapped, and when the index arrives",
     "gopStructure": "all-intra, open GOP, and everything between",
     "bFrames": "how far decode order diverges from presentation order",
-    "frameRate": "including the fractional rates where index arithmetic drifts",
+    "frameRate": "the fractional rates and the variable timing where index arithmetic drifts; deliberately not a load sweep",
+    "exactCacheMode": "which of the exact frame cache two limits binds, a byte budget or a 13-slot floor, which swap places at 2.5811 MP a frame. Both real files sit on the floor at 13 slots, and a clip below the flip is measured with a cache several times deeper than they get.",
+    "stampCost": "what drawing the frame stamp adds to a clip bytes, so every other byte figure can be read against a control",
     "timebase": "the tick table decoded timestamps get snapped onto",
     "startTimestamp": "whether media time and elapsed time are the same number",
     "duration": "one frame to seventy seconds",
@@ -117,6 +121,50 @@
         "-movflags",
         "+faststart"
       ],
+      "tags": ["smoke"]
+    },
+    {
+      "id": "baseline-unstamped",
+      "tier": "baseline",
+      "axis": "stampCost",
+      "varies": "the baseline with no frame stamp drawn on it: the control every other byte figure is read against",
+      "browserSupport": "expected",
+      "extension": "mp4",
+      "encoder": "libx264",
+      "source": {
+        "kind": "encode",
+        "from": "large-screen",
+        "startSeconds": 1200,
+        "frames": 300
+      },
+      "video": {
+        "width": 640,
+        "height": 352,
+        "frameRate": "30"
+      },
+      "outputArgs": [
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "23",
+        "-sc_threshold",
+        "0",
+        "-profile:v",
+        "high",
+        "-pix_fmt",
+        "yuv420p",
+        "-g",
+        "60",
+        "-keyint_min",
+        "60",
+        "-bf",
+        "2",
+        "-movflags",
+        "+faststart"
+      ],
+      "stamped": false,
       "tags": ["smoke"]
     },
     {
@@ -1142,96 +1190,10 @@
       "tags": []
     },
     {
-      "id": "frame-rate-24",
-      "tier": "variation",
-      "axis": "frameRate",
-      "varies": "24 fps",
-      "browserSupport": "expected",
-      "extension": "mp4",
-      "encoder": "libx264",
-      "source": {
-        "kind": "encode",
-        "from": "large-screen",
-        "startSeconds": 1200,
-        "frames": 300
-      },
-      "video": {
-        "width": 640,
-        "height": 352,
-        "frameRate": "24"
-      },
-      "outputArgs": [
-        "-c:v",
-        "libx264",
-        "-preset",
-        "veryfast",
-        "-crf",
-        "23",
-        "-sc_threshold",
-        "0",
-        "-profile:v",
-        "high",
-        "-pix_fmt",
-        "yuv420p",
-        "-g",
-        "60",
-        "-keyint_min",
-        "60",
-        "-bf",
-        "2",
-        "-movflags",
-        "+faststart"
-      ],
-      "tags": []
-    },
-    {
-      "id": "frame-rate-25",
-      "tier": "variation",
-      "axis": "frameRate",
-      "varies": "25 fps",
-      "browserSupport": "expected",
-      "extension": "mp4",
-      "encoder": "libx264",
-      "source": {
-        "kind": "encode",
-        "from": "large-screen",
-        "startSeconds": 1200,
-        "frames": 300
-      },
-      "video": {
-        "width": 640,
-        "height": 352,
-        "frameRate": "25"
-      },
-      "outputArgs": [
-        "-c:v",
-        "libx264",
-        "-preset",
-        "veryfast",
-        "-crf",
-        "23",
-        "-sc_threshold",
-        "0",
-        "-profile:v",
-        "high",
-        "-pix_fmt",
-        "yuv420p",
-        "-g",
-        "60",
-        "-keyint_min",
-        "60",
-        "-bf",
-        "2",
-        "-movflags",
-        "+faststart"
-      ],
-      "tags": []
-    },
-    {
       "id": "frame-rate-2997",
       "tier": "variation",
       "axis": "frameRate",
-      "varies": "29.97 fps, where round(mediaTime * frameRate) drifts",
+      "varies": "29.97 fps, where an index computed as round(time x rate) drifts against the tick table",
       "browserSupport": "expected",
       "extension": "mp4",
       "encoder": "libx264",
@@ -1271,53 +1233,10 @@
       "tags": []
     },
     {
-      "id": "frame-rate-50",
-      "tier": "variation",
-      "axis": "frameRate",
-      "varies": "50 fps",
-      "browserSupport": "expected",
-      "extension": "mp4",
-      "encoder": "libx264",
-      "source": {
-        "kind": "encode",
-        "from": "large-screen",
-        "startSeconds": 1200,
-        "frames": 300
-      },
-      "video": {
-        "width": 640,
-        "height": 352,
-        "frameRate": "50"
-      },
-      "outputArgs": [
-        "-c:v",
-        "libx264",
-        "-preset",
-        "veryfast",
-        "-crf",
-        "23",
-        "-sc_threshold",
-        "0",
-        "-profile:v",
-        "high",
-        "-pix_fmt",
-        "yuv420p",
-        "-g",
-        "60",
-        "-keyint_min",
-        "60",
-        "-bf",
-        "2",
-        "-movflags",
-        "+faststart"
-      ],
-      "tags": []
-    },
-    {
       "id": "frame-rate-5994",
       "tier": "variation",
       "axis": "frameRate",
-      "varies": "59.94 fps",
+      "varies": "59.94 fps, the same arithmetic at twice the rate",
       "browserSupport": "expected",
       "extension": "mp4",
       "encoder": "libx264",
@@ -1331,49 +1250,6 @@
         "width": 640,
         "height": 352,
         "frameRate": "60000/1001"
-      },
-      "outputArgs": [
-        "-c:v",
-        "libx264",
-        "-preset",
-        "veryfast",
-        "-crf",
-        "23",
-        "-sc_threshold",
-        "0",
-        "-profile:v",
-        "high",
-        "-pix_fmt",
-        "yuv420p",
-        "-g",
-        "60",
-        "-keyint_min",
-        "60",
-        "-bf",
-        "2",
-        "-movflags",
-        "+faststart"
-      ],
-      "tags": []
-    },
-    {
-      "id": "frame-rate-120",
-      "tier": "variation",
-      "axis": "frameRate",
-      "varies": "120 fps",
-      "browserSupport": "expected",
-      "extension": "mp4",
-      "encoder": "libx264",
-      "source": {
-        "kind": "encode",
-        "from": "large-screen",
-        "startSeconds": 1200,
-        "frames": 300
-      },
-      "video": {
-        "width": 640,
-        "height": 352,
-        "frameRate": "120"
       },
       "outputArgs": [
         "-c:v",
@@ -1445,6 +1321,92 @@
         "90000"
       ],
       "tags": []
+    },
+    {
+      "id": "cache-below-flip",
+      "tier": "variation",
+      "axis": "exactCacheMode",
+      "varies": "1.28 MP a frame, where the 128 MiB byte budget binds and the cache holds 26 frames, twice what either real file gets",
+      "browserSupport": "expected",
+      "extension": "mp4",
+      "encoder": "libx264",
+      "source": {
+        "kind": "encode",
+        "from": "p-square",
+        "startSeconds": 4,
+        "frames": 96
+      },
+      "video": {
+        "width": 1132,
+        "height": 1132,
+        "frameRate": "15"
+      },
+      "outputArgs": [
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "23",
+        "-sc_threshold",
+        "0",
+        "-profile:v",
+        "high",
+        "-pix_fmt",
+        "yuv420p",
+        "-g",
+        "30",
+        "-keyint_min",
+        "30",
+        "-bf",
+        "2",
+        "-movflags",
+        "+faststart"
+      ],
+      "tags": ["heavy"]
+    },
+    {
+      "id": "cache-above-flip",
+      "tier": "variation",
+      "axis": "exactCacheMode",
+      "varies": "2.62 MP a frame, a whisker over, where the 13-slot floor binds as it does for both real files",
+      "browserSupport": "expected",
+      "extension": "mp4",
+      "encoder": "libx264",
+      "source": {
+        "kind": "encode",
+        "from": "p-square",
+        "startSeconds": 4,
+        "frames": 96
+      },
+      "video": {
+        "width": 1620,
+        "height": 1620,
+        "frameRate": "15"
+      },
+      "outputArgs": [
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "23",
+        "-sc_threshold",
+        "0",
+        "-profile:v",
+        "high",
+        "-pix_fmt",
+        "yuv420p",
+        "-g",
+        "30",
+        "-keyint_min",
+        "30",
+        "-bf",
+        "2",
+        "-movflags",
+        "+faststart"
+      ],
+      "tags": ["heavy"]
     },
     {
       "id": "codec-h264-baseline",

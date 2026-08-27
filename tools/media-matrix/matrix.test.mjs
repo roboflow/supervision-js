@@ -109,6 +109,35 @@ test("a clip longer than the stamp's range says so", () => {
   }
 });
 
+test("the identity oracle is the presentation ordinal, with no frame rate in it", () => {
+  assert.match(matrix.notes.identityOracle, /PresentedFrameId\.index/);
+  assert.match(matrix.notes.identityOracle, /never asserts/);
+  assert.doesNotMatch(
+    matrix.notes.identityOracle.replace(/estimatedFrameIndex[\s\S]*$/, ""),
+    /round\(/,
+    "the oracle itself must not derive an index from a frame rate",
+  );
+});
+
+test("the byte figures have an unstamped control to be read against", () => {
+  const control = matrix.clips.filter((clip) => clip.stamped === false);
+
+  assert.equal(control.length, 1, "exactly one unstamped control");
+  assert.equal(control[0].axis, "stampCost");
+  assert.ok(
+    matrix.clips.some((clip) => clip.id === "baseline"),
+    "the control needs the clip it controls for",
+  );
+  assert.match(matrix.notes.stampAffectsBytes, /baseline-unstamped/);
+});
+
+test("clips sit on both sides of the exact cache mode flip", () => {
+  const flip = matrix.clips.filter((clip) => clip.axis === "exactCacheMode");
+
+  assert.equal(flip.length, 2, "the flip is bracketed");
+  assert.match(matrix.axes.exactCacheMode, /2\.5811/);
+});
+
 test("a clip that cannot be rebuilt byte for byte says so", () => {
   for (const clip of matrix.clips) {
     if ("reproducible" in clip) {

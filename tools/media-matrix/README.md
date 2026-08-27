@@ -128,9 +128,31 @@ actually pays.
 frame identity from something nobody could measure into a one-line assertion:
 
 ```text
-read the blocks off the frame on screen  ->  the index the encoder wrote
-compare against round(mediaTime * frameRate)  ->  the index the engine believes
+read the blocks off the presented frame  ->  the index the encoder wrote
+compare against frameId.index            ->  the frame the engine says it painted
 ```
+
+**No frame rate appears in that comparison, deliberately.** `PresentedFrameId`
+carries `{ index, ticks }` across the presentation seam in the container's own
+integer grain, and `frame-timeline.ts` binary-searches the tick table for it.
+The comment on `presented-frame-channel.ts` names NTSC 30000/1001 as exactly why
+a millisecond derivation was abandoned.
+
+The engine separately publishes `MediaFrameDiagnostics.estimatedFrameIndex`,
+which _is_ `round((t - t0) * rate)`, seeded from a frame rate read off a
+120-packet prefix (`readTrackFps` in `decode-source.ts`). That is public API and
+it is worth watching, so the matrix **records it and never asserts against it**.
+Measured on the two real files:
+
+|                  | prefix rate | true rate |  error |     drift at end | off by a frame after |
+| ---------------- | ----------: | --------: | -----: | ---------------: | -------------------: |
+| X-ray inspection |     15.0000 |   15.0000 |     0% |         0 frames |                never |
+| screen recording |     57.0743 |   56.3834 | +1.23% | **2,856 frames** |           **1.45 s** |
+
+No prefix length fixes that: sampled across the file the local rate runs 55.6 to
+58.0 and never equals the global average, which rare long gaps set. A matrix
+built only on the square file would have shipped `round(t * rate)` as its oracle
+and passed.
 
 A disagreement is exact, attributable, and reproducible. It works on a phone,
 because it needs nothing but a screenshot.
@@ -202,6 +224,24 @@ the engine actually pays:
 `colour` and `shape` stay as themselves. They are correctness axes rather than
 load ones, and each needs one clip, not a sweep.
 
+## Two things that make the numbers readable
+
+**The stamp costs bytes.** It is drawn into the picture, so on a CRF encode it
+adds bits and on the CBR bytes-per-GOP arms it steals them. `baseline-unstamped`
+is the same clip with nothing drawn on it, and the delta is the control every
+other byte figure is read against: at the baseline's size the stamp costs
+**+35.5% on the file and +36.3% per GOP**. The two `reference` entries are
+probed unstamped, so their numbers are the files' own.
+
+**The exact frame cache has one hard mode flip**, at **2.5811 MP a frame**:
+below it the 128 MiB byte budget sets the slot count, at or above it a 13-slot
+floor does (`resolveCacheBudgets` in `cache-budget.ts`). Both real files sit on
+the floor at 13 slots. A 0.225 MP clip gets 149. Every clip's manifest entry says
+which side it is on and how many exact slots it would get, because a seek or
+memory figure taken on the wrong side is taken with a cache several times deeper
+than the file it stands in for. `cache-below-flip` and `cache-above-flip` bracket
+it at 26 slots and 13.
+
 ## The matrix definition
 
 `matrix.json` lists every clip: an id, its tier and axis, what it varies in
@@ -258,6 +298,20 @@ Two things had to be true for that to mean anything, and neither was free:
 
 `--update-digests` rewrites the pin from a run. It merges, so a partial run does
 not drop the clips it did not build.
+
+## Coverage
+
+Every run's manifest carries a `coverage` block: how many of the matrix's
+producible clips have ever been built, which have never been built, and which
+this toolchain cannot build at all. **An entry nobody has produced is an ffmpeg
+argument list nothing has ever checked**, and four of the first pass's entries
+turned out to be accepted and silently inert, so an unbuilt entry is not a safe
+assumption.
+
+At the time of writing, 89 of 93 have been built. The four outstanding are the
+`xl` frame-count clips, which exist to measure the million-frame ceiling and are
+most of the full build's time and disk. `legacy-theora-ogv` is reported
+separately: this ffmpeg has no libtheora, so it cannot be built here at all.
 
 ## Verification
 

@@ -38,6 +38,22 @@ const SELECT_TERM_LIMIT = 48;
  * writes, so without this a WebM rebuilt from identical input has a different
  * digest and the pin can never mean anything. */
 const BITEXACT_ARGS = ["-fflags", "+bitexact", "-flags:v", "+bitexact"];
+/**
+ * The engine reads a source's frame rate from a 120-packet prefix
+ * (readTrackFps in packages/video-engine/src/decode-source.ts). On a
+ * variable-rate file that prefix is not the file's rate, so the matrix measures
+ * both and records what the difference costs.
+ */
+const ENGINE_FPS_PREFIX_PACKETS = 120;
+/**
+ * The exact frame cache takes the larger of a byte budget and a slot floor
+ * (resolveCacheBudgets in packages/video-engine/src/cache-budget.ts). At the
+ * assumed 8 GB the budget is 128 MiB and the floor is 13 slots of
+ * width x height x 4, so the two swap places at this frame size. Which side a
+ * clip sits on decides whether it is measured with tens of cached frames or
+ * with exactly thirteen.
+ */
+const EXACT_CACHE_FLIP_MEGAPIXELS = (128 * 1024 * 1024) / (13 * 4) / 1e6;
 const MANIFEST_SCHEMA = "supervision-js.tools.media-matrix.manifest";
 const DIGESTS_SCHEMA = "supervision-js.tools.media-matrix.digests";
 
@@ -124,6 +140,7 @@ async function main() {
       maxStampedFrameIndex: MAX_STAMPED_FRAME_INDEX,
     },
     clips: selected.map((clip) => results.get(clip.id)).filter(Boolean),
+    coverage: await readCoverage(matrix, results),
   };
 
   await writeJson(path.join(options.outputDir, "manifest.json"), manifest);
@@ -276,7 +293,10 @@ async function pipeStampedSource(clip, encoder, context) {
     decoder.child.stdout,
     width * height * 3,
   )) {
-    applyFrameStamp(frame, { frameIndex: frameCount, height, width });
+    if (clip.stamped !== false) {
+      applyFrameStamp(frame, { frameIndex: frameCount, height, width });
+    }
+
     await writeFrame(encoder.child.stdin, frame);
     frameCount += 1;
   }
@@ -361,6 +381,7 @@ async function finishClip(clip, outputPath, context) {
   await assertDecodable(outputPath, probed);
 
   const stampable =
+    clip.stamped !== false &&
     clip.source.kind !== "reference" &&
     probed.width &&
     isStampable({ height: probed.height, width: probed.width });
@@ -383,7 +404,13 @@ async function finishClip(clip, outputPath, context) {
     reproducible: clip.reproducible !== false,
     roundTrip: stampable
       ? await roundTrip(outputPath, probed, clip)
-      : { checked: false, reason: "not stampable" },
+      : {
+          checked: false,
+          reason:
+            clip.stamped === false
+              ? "deliberately unstamped, so its bytes are the control"
+              : "not stampable",
+        },
     sha256: await sha256File(outputPath),
     stamp: stampable
       ? stampGeometry({ height: probed.height, width: probed.width })
@@ -433,7 +460,16 @@ async function probe(filePath) {
     ]),
   );
 
-  return { ...describeStream(stream), ...summarisePackets(packets), rotation };
+  const described = describeStream(stream);
+  const summarised = summarisePackets(packets);
+
+  return {
+    ...described,
+    ...summarised,
+    ...engineFrameRateReading(described, summarised),
+    exactCache: exactCacheReading(described.megapixelsPerFrame),
+    rotation,
+  };
 }
 
 function describeStream(stream) {
@@ -468,6 +504,66 @@ function describeStream(stream) {
     startTime: numberOrNull(stream.start_time),
     timeBase: stream.time_base,
     width,
+  };
+}
+
+/**
+ * What the engine's own frame rate reading costs on this file. It seeds
+ * estimatedFrameIndex, which is round((t - t0) * rate); on a file whose opening
+ * packets are not representative, that index walks away from the frame actually
+ * on screen. Reported, never asserted: the matrix's identity oracle is the
+ * presentation ordinal, which needs no frame rate at all.
+ */
+function engineFrameRateReading(described, summarised) {
+  const tickSeconds = parseRational(described.timeBase);
+  const span = summarised.ptsSpan;
+
+  if (!tickSeconds || !span || span.frames < 2 || span.prefixFrames < 2) {
+    return { engineFrameRateReading: null };
+  }
+
+  const prefixRate =
+    (span.prefixFrames - 1) /
+    ((span.prefixLastPts - span.firstPts) * tickSeconds);
+  const globalRate =
+    (span.frames - 1) / ((span.lastPts - span.firstPts) * tickSeconds);
+  const elapsed = (span.lastPts - span.firstPts) * tickSeconds;
+  const publishedLastIndex = Math.round(elapsed * prefixRate);
+  const rateGap = Math.abs(prefixRate - globalRate);
+
+  return {
+    engineFrameRateReading: {
+      driftFramesAtEnd: publishedLastIndex - (span.frames - 1),
+      errorPercent: round(((prefixRate - globalRate) / globalRate) * 100, 4),
+      globalFrameRate: round(globalRate, 4),
+      prefixFrameRate: round(prefixRate, 4),
+      prefixPackets: span.prefixFrames,
+      secondsToOneFrameOfDrift:
+        rateGap > 0 && 1 / rateGap <= elapsed ? round(1 / rateGap, 3) : null,
+    },
+  };
+}
+
+/**
+ * Which of the exact cache's two limits binds at this frame size, and how many
+ * frames it therefore holds. A clip on the wrong side of the flip is measured
+ * with a cache many times deeper than the file it stands in for.
+ */
+function exactCacheReading(megapixelsPerFrame) {
+  if (!megapixelsPerFrame) {
+    return null;
+  }
+
+  const frameBytes = megapixelsPerFrame * 1e6 * 4;
+  const slots = Math.max(13, Math.floor((128 * 1024 * 1024) / frameBytes));
+
+  return {
+    binds:
+      megapixelsPerFrame >= EXACT_CACHE_FLIP_MEGAPIXELS
+        ? "slotFloor"
+        : "byteBudget",
+    exactSlots: slots,
+    flipMegapixels: round(EXACT_CACHE_FLIP_MEGAPIXELS, 4),
   };
 }
 
@@ -509,9 +605,18 @@ function summarisePackets(packets) {
     0,
   );
 
+  const prefix = presentationOrder.slice(0, ENGINE_FPS_PREFIX_PACKETS);
+
   return {
     bytesPerFrameMean: Math.round(totalBytes / decodeOrder.length),
     firstPts: presentationOrder[0].pts,
+    ptsSpan: {
+      firstPts: presentationOrder[0].pts,
+      frames: presentationOrder.length,
+      lastPts: presentationOrder[presentationOrder.length - 1].pts,
+      prefixFrames: prefix.length,
+      prefixLastPts: prefix[prefix.length - 1].pts,
+    },
     frameCount: decodeOrder.length,
     gopBytes: distribution(gopBytes),
     gopFrames: distribution(
@@ -790,6 +895,48 @@ async function readToolchain() {
   };
 }
 
+/**
+ * Which of the matrix's clips have ever been produced, from the digest pin plus
+ * this run. A matrix that silently holds entries nobody has built is worse than
+ * a smaller one that says so, because every unbuilt entry is an ffmpeg argument
+ * list nothing has ever checked.
+ */
+async function readCoverage(matrix, results) {
+  const pinned = new Set(
+    Object.keys((await readJsonOrNull(DIGESTS_FILE))?.clips ?? {}),
+  );
+
+  for (const [id, result] of results) {
+    if (result.status === "ok") {
+      pinned.add(id);
+    }
+  }
+
+  const unavailable = new Set(
+    [...results]
+      .filter(([, result]) => result.status === "unavailable")
+      .map(([id]) => id),
+  );
+  const producible = matrix.clips.filter(
+    (clip) => clip.source.kind !== "reference" && !unavailable.has(clip.id),
+  );
+  const neverBuilt = producible.filter((clip) => !pinned.has(clip.id));
+  const describe = (clip) => ({
+    id: clip.id,
+    axis: clip.axis,
+    tags: clip.tags ?? [],
+  });
+
+  return {
+    builtAtLeastOnce: producible.length - neverBuilt.length,
+    neverBuilt: neverBuilt.map(describe),
+    producibleClips: producible.length,
+    unavailableOnThisToolchain: matrix.clips
+      .filter((clip) => unavailable.has(clip.id))
+      .map(describe),
+  };
+}
+
 /* ----------------------------------------------------------------- digests */
 
 async function reconcileDigests(manifest, toolchain) {
@@ -998,6 +1145,17 @@ function printSummary(manifest) {
     );
   }
 
+  const { builtAtLeastOnce, neverBuilt, producibleClips } = manifest.coverage;
+
+  console.log(
+    `matrix coverage: ${builtAtLeastOnce}/${producibleClips} clips built at least once${
+      neverBuilt.length > 0
+        ? `, ${neverBuilt.length} never built (${[
+            ...new Set(neverBuilt.map((clip) => clip.axis)),
+          ].join(", ")})`
+        : ""
+    }`,
+  );
   console.log(
     `manifest: ${path.relative(ROOT_DIR, path.join(options.outputDir, "manifest.json"))}`,
   );
