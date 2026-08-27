@@ -24,6 +24,7 @@ describe("media renderer transport", () => {
       onPlaybackRate: vi.fn(),
       onPlaybackState: vi.fn(),
       onPlayheadTime: (mediaTime) => published.push(mediaTime),
+      onScrubbing: vi.fn(),
       onSeeking: vi.fn(),
     });
 
@@ -47,6 +48,7 @@ describe("media renderer transport", () => {
       onPlaybackRate: vi.fn(),
       onPlaybackState: (state) => playbackStates.push(state),
       onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
       onSeeking: (next) => seeking.push(next),
     });
 
@@ -67,9 +69,10 @@ describe("media renderer transport", () => {
     expect(seeking.at(-1)).toBe(false);
   });
 
-  it("calls a held gesture the viewer's own hand rather than a seek", () => {
+  it("reports a gesture apart from the settle it lands in", () => {
     const producer = createProducer();
     const seeking: boolean[] = [];
+    const scrubbing: boolean[] = [];
 
     const transport = createMediaRendererTransport({
       channel: producer.channel,
@@ -77,6 +80,7 @@ describe("media renderer transport", () => {
       onPlaybackRate: vi.fn(),
       onPlaybackState: vi.fn(),
       onPlayheadTime: vi.fn(),
+      onScrubbing: (next) => scrubbing.push(next),
       onSeeking: (next) => seeking.push(next),
     });
 
@@ -84,7 +88,45 @@ describe("media renderer transport", () => {
     producer.setSeeking(true);
     producer.land(120);
 
-    expect(seeking.at(-1)).toBe(false);
+    expect({
+      scrubbing: scrubbing.at(-1),
+      seeking: seeking.at(-1),
+    }).toStrictEqual({ scrubbing: true, seeking: true });
+  });
+
+  /**
+   * The producer answers on its own thread, so nothing it says lands between
+   * the hand going down and the drag that follows. A settle reported just
+   * before would otherwise stand for the whole drag.
+   */
+  it("says the hand is down without waiting for the producer to speak", async () => {
+    const producer = createProducer();
+    const seeking: boolean[] = [];
+    const scrubbing: boolean[] = [];
+
+    const transport = createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: (next) => scrubbing.push(next),
+      onSeeking: (next) => seeking.push(next),
+    });
+
+    producer.setStatus("PAUSED");
+    producer.setSeeking(true);
+
+    transport.scrub(secondsAt(200));
+    const withHandDown = scrubbing.at(-1);
+
+    await transport.commit(secondsAt(200));
+
+    expect({ afterCommit: scrubbing.at(-1), withHandDown }).toStrictEqual({
+      afterCommit: false,
+      withHandDown: true,
+    });
+    expect(seeking.at(-1)).toBe(true);
   });
 
   it("stops reporting a wait once a producer already at speed is asked to play", async () => {
@@ -100,6 +142,7 @@ describe("media renderer transport", () => {
       onPlaybackRate: vi.fn(),
       onPlaybackState: (state) => playbackStates.push(state),
       onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
       onSeeking: vi.fn(),
       waitForReadiness: () => readiness,
     });

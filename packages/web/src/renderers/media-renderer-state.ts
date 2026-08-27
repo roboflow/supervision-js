@@ -57,6 +57,7 @@ export interface MediaRendererRuntimeState {
   setPlaying(): void;
   setBuffering(): void;
   setSeeking(seeking: boolean): void;
+  setScrubbing(scrubbing: boolean): void;
   setPaused(): void;
   setRenderError(error: unknown): void;
   markDestroyed(): void;
@@ -88,6 +89,7 @@ export function createMediaRendererRuntimeState(
   let drawnMaskFrameTime: number | null = null;
   let maskHeldStale = false;
   let seeking = false;
+  let scrubbing = false;
   let lastFrameRenderTimings: MediaFrameRenderTimings | null = null;
   let currentFrameDuration = 0;
   let destroyed = false;
@@ -121,6 +123,7 @@ export function createMediaRendererRuntimeState(
     playbackGateReach: options.getPlaybackGateReach(),
     playbackState,
     presentedFrames,
+    scrubbing,
     seeking,
     rendererBackend,
     source: { ...sourceState },
@@ -295,6 +298,15 @@ export function createMediaRendererRuntimeState(
       }
 
       seeking = next;
+      emitState();
+    },
+
+    setScrubbing(next) {
+      if (next === scrubbing) {
+        return;
+      }
+
+      scrubbing = next;
       emitState();
     },
 

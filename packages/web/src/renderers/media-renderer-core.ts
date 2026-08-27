@@ -753,6 +753,7 @@ export async function createMediaRendererCore(
         loop: options.loop !== false,
         onPlaybackRate: adoptPlaybackRate,
         onPlaybackState: adoptTransportPlaybackState,
+        onScrubbing: (scrubbing) => runtimeState.setScrubbing(scrubbing),
         onSeeking: (seeking) => runtimeState.setSeeking(seeking),
         onPlayheadTime: (currentTime) => {
           runtimeState.recordPlayheadTime(currentTime);

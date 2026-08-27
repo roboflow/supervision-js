@@ -149,11 +149,14 @@ export function createViewportOverlay(
  * decodes, and no activity is reported for the gap. `playbackState` cannot
  * stand in: it keeps reporting whatever the transport settled on before the
  * seek, so a wait of any length reads as paused or playing.
+ *
+ * A drag reports the same landings, and there the playhead is already where the
+ * viewer's hand put it: they are leading the picture, not waiting on it.
  */
 function selectSeekTarget(sessionState: MediaSessionState | null) {
-  return sessionState?.renderer?.seeking
-    ? sessionState.renderer.currentTime
-    : null;
+  const renderer = sessionState?.renderer;
+
+  return renderer?.seeking && !renderer.scrubbing ? renderer.currentTime : null;
 }
 
 function selectViewportActivity(sessionState: MediaSessionState | null) {

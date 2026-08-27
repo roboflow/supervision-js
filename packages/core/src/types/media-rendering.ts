@@ -226,12 +226,22 @@ export interface MediaRendererState {
    * playing.
    *
    * A scrub sets this on every tick, so a host that draws it owes the viewer a
-   * delay before it appears.
+   * delay before it appears, and owes them `scrubbing` too: a viewer dragging
+   * the playhead is not waiting for the picture, they are leading it.
    *
    * Optional so a host holding a state it built before this field existed still
    * satisfies the type.
    */
   readonly seeking?: boolean;
+  /**
+   * Whether a drag is open on the playhead. True from the first scrub of a
+   * gesture until the seek that lands it, which is what separates a viewer
+   * leading the picture from one waiting on it.
+   *
+   * Optional so a host holding a state it built before this field existed still
+   * satisfies the type.
+   */
+  readonly scrubbing?: boolean;
   readonly detectionBuffer: DetectionBufferState;
   readonly lastFrameRenderTimings: MediaFrameRenderTimings | null;
   readonly source: MediaSourceState;

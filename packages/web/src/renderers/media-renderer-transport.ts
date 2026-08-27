@@ -28,8 +28,17 @@ export interface MediaRendererTransportOptions {
    * The playhead has moved to a frame that is not on screen yet. Reported apart
    * from `onPlaybackState` because the state a seek settles from is the one the
    * transport keeps reporting throughout it.
+   *
+   * True for a scrub as well as for a landing, so pair it with `onScrubbing` to
+   * tell a viewer who is waiting from one who is dragging.
    */
   readonly onSeeking: (seeking: boolean) => void;
+  /**
+   * A drag is open on the playhead. Published as the drag opens and closes
+   * without waiting for the producer, whose next word on a slow source is
+   * seconds away.
+   */
+  readonly onScrubbing: (scrubbing: boolean) => void;
   /**
    * Buffered playback. Held before the producer is asked to run, because the
    * producer paces itself afterwards and a renderer that waited mid-playback
@@ -44,7 +53,9 @@ export interface MediaRendererTransportOptions {
  *
  * A drag is a pair: every `scrub` belongs to one gesture the producer is told
  * about, and the `commit` that lands it releases that gesture, so a producer
- * that froze itself for the drag is the one deciding whether to resume.
+ * that froze itself for the drag is the one deciding whether to resume. The
+ * drag and the settle travel as separate signals: which of the two a viewer is
+ * looking at is the host's judgement, not the transport's.
  */
 export function createMediaRendererTransport(
   options: MediaRendererTransportOptions,
@@ -59,12 +70,18 @@ export function createMediaRendererTransport(
   // the readiness that arrives afterwards.
   let playbackIntent = 0;
 
+  const publishSeekSignals = () => {
+    options.onScrubbing(gestureInFlight);
+    options.onSeeking(isSettling(channel.getStatus(), channel.getSeeking()));
+  };
+
   const releaseGesture = async () => {
     if (!gestureInFlight) {
       return;
     }
 
     gestureInFlight = false;
+    publishSeekSignals();
     await channel.endInteractiveSeek();
   };
 
@@ -105,9 +122,7 @@ export function createMediaRendererTransport(
       settledState = state;
     }
 
-    // A held gesture is the viewer's own hand on the playhead, not a wait: the
-    // producer sits in the mechanical pause it asked for.
-    options.onSeeking(!gestureInFlight && isSettling(status, seeking));
+    publishSeekSignals();
     options.onPlaybackState(state);
   };
   const publishPlayheadTime = () => {
@@ -187,6 +202,7 @@ export function createMediaRendererTransport(
       if (!gestureInFlight && landingRelease === null) {
         gestureInFlight = true;
         channel.beginInteractiveSeek();
+        publishSeekSignals();
       }
 
       channel.scrub(mediaTime * MILLISECONDS_PER_SECOND, "gesture");

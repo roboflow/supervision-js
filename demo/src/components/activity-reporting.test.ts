@@ -289,6 +289,60 @@ describe("session activity reporting", () => {
     expect(overlay?.detail).toContain("47.130");
   });
 
+  /**
+   * Recorded on the demo under a 400ms link: a commit's settle was still in
+   * flight 208ms later when the viewer grabbed the playhead again, and the
+   * drag ran on for another 1.5s. Replayed through the gate, the wait card
+   * stood for 389ms of a drag whose picture was tracking the hand the whole
+   * time.
+   */
+  it("says nothing while the viewer is the one moving the playhead", () => {
+    const HAND_DOWN_MS = 208;
+    const HAND_UP_MS = 1710;
+    const rendererAt = (nowMs: number) =>
+      ({
+        currentTime: 47.13,
+        playbackState: MediaRendererPlaybackState.Paused,
+        scrubbing: nowMs >= HAND_DOWN_MS && nowMs < HAND_UP_MS,
+        seeking: true,
+      }) as unknown as MediaRendererState;
+
+    let gate = IDLE_OVERLAY_GATE;
+    let visibleDuringDragMs = 0;
+    let visibleAfterDrag = false;
+
+    for (let nowMs = 0; nowMs <= HAND_UP_MS + 600; nowMs += 10) {
+      const result = advanceOverlayGate(
+        gate,
+        {
+          hasOverlay:
+            createViewportOverlay(
+              selectViewportSessionState(sessionState([], rendererAt(nowMs))),
+              null,
+              mediaState,
+            ) !== null,
+          isError: false,
+        },
+        nowMs,
+      );
+
+      gate = result.state;
+
+      if (result.visible && nowMs >= HAND_DOWN_MS && nowMs < HAND_UP_MS) {
+        visibleDuringDragMs += 10;
+      }
+
+      visibleAfterDrag ||= result.visible && nowMs >= HAND_UP_MS;
+    }
+
+    // The settle the release lands in is a wait again, so the card is not
+    // simply muted for the whole sequence.
+    expect({ visibleAfterDrag, visibleDuringDragMs }).toStrictEqual({
+      visibleAfterDrag: true,
+      visibleDuringDragMs: 0,
+    });
+  });
+
   it("stays quiet once the seek has landed", () => {
     const landed = {
       currentTime: 47.13,
