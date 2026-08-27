@@ -951,6 +951,140 @@ describe("ScrubController resuming after a parked loop", () => {
   });
 });
 
+describe("ScrubController resuming after a starved walk", () => {
+  const INTERVAL_S = 1 / 30;
+
+  function starved(): {
+    cursor: FakeCursor;
+    clock: FakeClock;
+    controller: ScrubController;
+    painted: number[];
+  } {
+    const painted: number[] = [];
+    const cursor = new FakeCursor();
+    cursor.track = { ...cursor.track, durationS: asSec(600) };
+    const clock = new FakeClock();
+    const controller = new ScrubController({
+      cursor,
+      clock,
+      onPaint: (frame) => painted.push(frame.timestampS),
+      onEnded: () => undefined,
+      cacheSkipNearMs: 100,
+    });
+    controller.bindCanvas(makeCanvas());
+    return { cursor, clock, controller, painted };
+  }
+
+  /** The render loop keeps ticking through a wait on the network. A clock
+   *  moved in one step reads as a parked loop, so this walks it forward one
+   *  display interval per rendered frame. */
+  async function runClock(
+    clock: FakeClock,
+    fromS: number,
+    forS: number,
+  ): Promise<void> {
+    const stepS = 1 / 60;
+    for (let elapsed = stepS; elapsed <= forS; elapsed += stepS) {
+      clock.setT(fromS + elapsed);
+      await flushRaf();
+    }
+  }
+
+  /** A seek during playback: the walk re-attaches at the target and the clock
+   *  runs on while the decode is still fetching. */
+  async function waitOnSeek(
+    clock: FakeClock,
+    controller: ScrubController,
+    targetS: number,
+    waitS: number,
+  ): Promise<void> {
+    controller.beginPlay(targetS);
+    clock.play(targetS);
+    await flushRaf();
+    await runClock(clock, targetS, waitS);
+  }
+
+  it("playback resumes at the frame the seek landed on", async () => {
+    const { cursor, clock, controller } = starved();
+    await waitOnSeek(clock, controller, 30, 2);
+
+    cursor.emit(canvasFrameAt(30));
+
+    expect(clock.now()).toBeCloseTo(30, 5);
+    controller.dispose();
+  });
+
+  it("the frames the wait covered are played, not flashed past", async () => {
+    const { cursor, clock, controller } = starved();
+    await waitOnSeek(clock, controller, 30, 2);
+
+    cursor.emit(canvasFrameAt(30));
+    cursor.emit(canvasFrameAt(30 + INTERVAL_S));
+    cursor.emit(canvasFrameAt(30 + INTERVAL_S * 2));
+
+    expect(controller.getRealtimeStats().playQueueDepth).toBe(3);
+    expect(controller.getRealtimeStats().droppedFramesTotal).toBe(0);
+    controller.dispose();
+  });
+
+  it("a wait short enough to catch up leaves the clock where it is", async () => {
+    const { cursor, clock, controller } = starved();
+    await waitOnSeek(clock, controller, 30, 0.4);
+
+    cursor.emit(canvasFrameAt(30));
+
+    expect(clock.now()).toBeCloseTo(30.4, 5);
+    controller.dispose();
+  });
+
+  it("a high playback rate is not read as a starved walk", async () => {
+    const { cursor, clock, controller } = starved();
+    controller.beginPlay(30);
+    clock.play(30);
+    clock.setRate(8);
+    await flushRaf();
+    // 400ms of wall time at 8x, which is 96 source frames of clock travel:
+    // a backlog to work off, not a wait the viewer sat through.
+    await runClock(clock, 30, 3.2);
+
+    cursor.emit(canvasFrameAt(30));
+
+    expect(clock.now()).toBeCloseTo(33.2, 5);
+    controller.dispose();
+  });
+
+  it("a walk starved mid-playback resumes from where it ran dry", async () => {
+    const { cursor, clock, controller } = starved();
+    controller.beginPlay(30);
+    clock.play(30);
+    await flushRaf();
+    cursor.emit(canvasFrameAt(30));
+    await flushRaf();
+
+    await runClock(clock, 30, 2);
+    cursor.emit(canvasFrameAt(30 + INTERVAL_S));
+
+    expect(clock.now()).toBeCloseTo(30 + INTERVAL_S, 5);
+    controller.dispose();
+  });
+
+  it("a parked loop still seeks past the absence it woke from", async () => {
+    const { cursor, clock, controller } = starved();
+    controller.beginPlay(0);
+    clock.play(0);
+    await flushRaf();
+    clock.setT(30);
+    await flushRaf();
+
+    // The walk re-attached at 30; the frame it produces there must not read
+    // as a wait the viewer sat through and pull the clock back to 0.
+    cursor.emit(canvasFrameAt(30));
+
+    expect(clock.now()).toBeCloseTo(30, 5);
+    controller.dispose();
+  });
+});
+
 describe("ScrubController play queue provenance", () => {
   function playing(): {
     cursor: FakeCursor;

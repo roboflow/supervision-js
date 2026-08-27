@@ -7,22 +7,34 @@
  * hold; sample (zero-copy) frames pin a decoder slot each, so the controller
  * keeps those at a depth of one to spare the WebCodecs pool.
  *
- * REANCHOR_TICK_GAP_MS is the wall time between two playing render ticks past
- * which the play walk re-anchors at the playhead. Below it the backlog a tick
- * finds is worked off frame by frame; above it, the frames in between are ones
- * no loop was running to show, so the walk seeks past them.
+ * REANCHOR_STALL_MS is the wall time past which a picture standing still stops
+ * being a hitch to work through and becomes a stretch to re-anchor across. Two
+ * gaps are measured against it, and they settle in opposite directions.
  *
- * Wall time is the reading that separates the two cases. A tick 16ms after the
- * last one is a display doing its job however far a high rate moved the media
- * clock; a tick seconds after the last one is a loop nothing was driving.
+ * A gap between playing render ticks is a loop nothing was driving, which a
+ * hidden tab produces. Nobody was watching, so the clock is the truth and the
+ * walk seeks forward onto the playhead.
  *
- * Half a second is where the two costs cross at 1x. A backlog costs one decode
- * per source frame in it, measured at 240 frames a second on the 30fps demo clip
- * (4.2ms each), against a keyframe-anchored seek at p95 47ms on the same clip:
- * half a second of 30fps backlog is 15 frames, so 63ms of decode against that
- * 47ms, and every higher rate puts more frames in the same gap. It also sits an
- * order of magnitude above the worst gap a foreground loop produces, which
- * leaves a long task or a GC pause to the frame-by-frame path.
+ * A gap between the walk's deliveries is a pipeline with nothing to show while
+ * the loop ran, which a seek onto unbuffered ground produces. The viewer sat
+ * through it waiting on a position they asked for, so the frame is the truth
+ * and the clock is pulled back onto it. Left to catch up instead, the walk
+ * replays the whole wait at decode speed on its way to the playhead: measured
+ * against the deployed demo over six seeks, a mean 2.4x for a second, peaking
+ * at 24x, with 44 source frames flashed past.
+ *
+ * Wall time is the reading in both, so a high rate legitimately moving the
+ * media clock several frames per gap is not read as an absence.
+ *
+ * Half a second is where the tick-gap costs cross at 1x. A backlog costs one
+ * decode per source frame in it, measured at 240 frames a second on the 30fps
+ * demo clip (4.2ms each), against a keyframe-anchored seek at p95 47ms on the
+ * same clip: half a second of 30fps backlog is 15 frames, so 63ms of decode
+ * against that 47ms, and every higher rate puts more frames in the same gap. It
+ * clears the worst legitimate gap of either kind by the same order: a foreground
+ * loop leaves a long task or a GC pause to the frame-by-frame path, and forty
+ * seconds of network-fed playback of the demo clip held its picture still for at
+ * most 51ms.
  *
  * The present cadence is how often playback puts a frame on screen: the rate's
  * whole demand cut to the share of it the machine has been paying for, and never
@@ -85,7 +97,7 @@
 export const PLAYBACK = {
   READ_AHEAD_CANVAS: 3,
   PRESENT_CADENCE_EVIDENCE_FRAMES: 3,
-  REANCHOR_TICK_GAP_MS: 500,
+  REANCHOR_STALL_MS: 500,
   PRESENT_CADENCE_STEP: 0.75,
   PRESENT_CADENCE_SLACK: 0.25,
   PRESENT_CADENCE_HZ: 60,

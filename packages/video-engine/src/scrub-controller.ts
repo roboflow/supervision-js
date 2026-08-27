@@ -165,6 +165,10 @@ export class ScrubController {
   /** Media time the previous playing tick read, so a tick can price its own
    *  span in source frames. Null until the session's second tick. */
   private lastTickS: number | null = null;
+  /** Clock reading at the play walk's last delivery, or null when no walk is
+   *  attached. Set at the attach too, so the walk's opening frame is priced
+   *  against the wait for it. */
+  private lastDeliveryS: number | null = null;
   /** Source frames this tick may pull past the one it paints, refreshed per
    *  tick from the span the clock covered. Sourced from ticks so a loop that
    *  stops (a hidden tab parks rAF) takes the pull chain down with it. */
@@ -220,9 +224,11 @@ export class ScrubController {
         if (diagnosticsEnabled) this.droppedFrames += 1;
         return;
       }
+      this.reanchorStarvedWalk(frame);
       this.playQueue.push(frame);
       this.walkDelivered += 1;
       const t = this.deps.clock.now();
+      this.lastDeliveryS = t;
       this.dropFramesTheClockHasPassed(t);
       if (this.playQueue.length < this.readAhead()) {
         this.deps.cursor.next();
@@ -457,8 +463,9 @@ export class ScrubController {
     const previous = this.lastTickS;
     if (previous === null) return false;
     const wallMs = ((t - previous) / this.deps.clock.rate) * 1000;
-    if (wallMs <= PLAYBACK.REANCHOR_TICK_GAP_MS) return false;
+    if (wallMs <= PLAYBACK.REANCHOR_STALL_MS) return false;
     this.lastTickS = t;
+    this.lastDeliveryS = t;
     this.catchUpBudget = 0;
     this.resetCadenceTracking();
     this.droppedFramesTotal += this.playQueue.length;
@@ -469,6 +476,29 @@ export class ScrubController {
     this.deps.cursor.attachPlay(t);
     this.deps.cursor.next();
     return true;
+  }
+
+  /**
+   * Puts the clock back onto the frame a starved walk has just delivered.
+   *
+   * A seek onto unbuffered ground leaves the render loop ticking with nothing
+   * to paint, so no tick gap ever opens and reanchorParkedWalk never sees it;
+   * what stopped is the walk. The clock runs through the whole wait, so the
+   * frame the viewer asked for arrives that far behind it, and a walk left to
+   * catch up spends the wait replaying it at decode speed: the position they
+   * asked to see, flashed past on the way to one they did not.
+   */
+  private reanchorStarvedWalk(frame: ScrubFrame): void {
+    const since = this.lastDeliveryS;
+    if (since === null) return;
+    const wallMs =
+      ((this.deps.clock.now() - since) / this.deps.clock.rate) * 1000;
+    if (wallMs <= PLAYBACK.REANCHOR_STALL_MS) return;
+    this.deps.clock.seek(frame.timestampS);
+    this.lastTickS = null;
+    this.catchUpBudget = 0;
+    this.lastPresentTickS = null;
+    this.resetCadenceTracking();
   }
 
   /**
@@ -597,6 +627,7 @@ export class ScrubController {
     this.stoppedAtS = null;
     this.paintedSincePlay = false;
     this.lastTickS = null;
+    this.lastDeliveryS = startS;
     this.catchUpBudget = 0;
     this.lastPresentTickS = null;
     this.resetCadenceTracking();
@@ -615,6 +646,7 @@ export class ScrubController {
     this.stoppedAtS = this.playSessionLive ? null : this.deps.clock.now();
     this.deps.cursor.detachPlay();
     this.lastTickS = null;
+    this.lastDeliveryS = null;
     this.catchUpBudget = 0;
     this.lastPresentTickS = null;
     this.resetCadenceTracking();
