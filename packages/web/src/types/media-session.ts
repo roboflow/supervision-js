@@ -273,10 +273,15 @@ export interface MediaSessionOptions {
    * both its detections and its prepared annotation artifacts, so a preview
    * opens annotated rather than opening bare and filling in.
    *
-   * Off by default, which starts playback at once and draws annotations as they
-   * land. `true` turns on `detections.playbackGate` and
-   * `renderer.renderPreparation.playbackGate` together, each with its own
+   * On by default. `false` starts playback at once and draws annotations as
+   * they land, which suits a host that cares about cadence more than overlays.
+   * The switch answers for `detections.playbackGate` and
+   * `renderer.renderPreparation.playbackGate` together, each keeping its own
    * lookahead; set either one's `enabled` to answer for that gate alone.
+   *
+   * The detection gate only applies to a session with appendable detections,
+   * since a source that is complete before playback starts has nothing to wait
+   * for. `true` turns it on for any session.
    *
    * What it holds depends on who owns the playhead. A source the renderer pulls
    * decoded samples from is held frame by frame, for as long as playback runs.

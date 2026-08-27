@@ -143,8 +143,10 @@ export interface DetectionTimelineContext {
  */
 export interface DetectionPlaybackGateOptions {
   /**
-   * Pause playback while the requested detection window is unavailable.
-   * Defaults to false.
+   * Pause playback while the requested detection window is unavailable. A
+   * session with appendable detections turns this on by default, since a source
+   * still being written is the case worth waiting for; `playbackGate: false` on
+   * the session turns it off.
    */
   readonly enabled?: boolean;
   /**
@@ -257,8 +259,9 @@ export interface DetectionFrameSource {
    * Optional coverage hook. Resolve when the source has enough data to answer
    * `loadFrames` for the requested range.
    *
-   * Playback awaits it only under an enabled detection playback gate, which is
-   * off by default; otherwise a caller that wants to wait awaits it itself. A
+   * Playback awaits it under an enabled detection playback gate, which a
+   * session with appendable detections gets by default; otherwise a caller that
+   * wants to wait awaits it itself. A
    * composed source fans it out to the entries it composes.
    */
   waitForRange?(range: DetectionFrameSourceVersionRange): Promise<void>;

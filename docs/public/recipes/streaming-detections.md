@@ -43,10 +43,11 @@ Playback does not wait for appended detections. A frame the source does not
 cover yet presents without annotations and draws them when the append covering
 it lands, so inference falling behind slows annotations rather than the video.
 
-Pass `playbackGate: true` to `createMediaSession` when you would rather the
-video hold for its predictions and for the artifacts that draw them. The gate is
-off by default, so a session that never mentions it keeps the picture moving.
-That one switch turns on `detections.playbackGate` and
+A session holds for its predictions and for the artifacts that draw them by
+default, so a preview opens annotated rather than opening bare and filling in.
+Pass `playbackGate: false` to `createMediaSession` when you would rather the
+picture keep moving and the annotations land as they arrive.
+That one switch answers for `detections.playbackGate` and
 `renderer.renderPreparation.playbackGate` together; set either one's `enabled`
 to answer for that gate alone, or its `requiredAheadSeconds` to tune the
 lookahead it waits for.

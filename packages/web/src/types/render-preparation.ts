@@ -127,7 +127,10 @@ export interface RenderPreparationMaskFrameOptions {
  */
 export interface RenderPreparationPlaybackGateOptions {
   /**
-   * Pause playback while required artifacts are unprepared. Defaults to false.
+   * Pause playback while required artifacts are unprepared. A session turns
+   * this on by default, so a preview opens with its annotations rather than
+   * opening bare; `playbackGate: false` on the session turns it off. A renderer
+   * created directly leaves it off.
    */
   readonly enabled?: boolean;
   /**

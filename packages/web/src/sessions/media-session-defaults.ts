@@ -36,16 +36,18 @@ const STREAM_DETECTION_BUFFER_DEFAULTS = {
 } satisfies DetectionBufferOptions;
 
 /**
- * The gates ship off, so these carry only the lookahead a host inherits once it
- * turns one on for itself.
+ * Playback waits for annotations unless a host says otherwise, so a viewer sees
+ * a frame and the marks that belong to it together rather than a picture that
+ * fills in afterwards. `playbackGate: false` on the session, or either gate's
+ * own `enabled`, turns it off.
  */
 const DETECTION_PLAYBACK_GATE_DEFAULTS = {
-  enabled: false,
+  enabled: true,
   requiredAheadSeconds: 2,
 };
 
 const RENDER_PREPARATION_PLAYBACK_GATE_DEFAULTS = {
-  enabled: false,
+  enabled: true,
   minimumAheadSeconds: 0.25,
   requiredAheadSeconds: 1,
 };
@@ -89,8 +91,8 @@ export function resolveMediaSessionDefaults(options: {
     mode === SessionMode.Stream
       ? STREAM_DETECTION_BUFFER_DEFAULTS
       : FILE_DETECTION_BUFFER_DEFAULTS;
-  const sessionPlaybackGate = options.playbackGate === true;
-  const inheritsGateLookahead = hasAppendableDetections || sessionPlaybackGate;
+  const inheritsGateLookahead =
+    hasAppendableDetections || options.playbackGate === true;
   const detectionPlaybackGate =
     options.detections?.playbackGate ??
     userDetectionBuffer?.playbackGate ??
@@ -107,7 +109,9 @@ export function resolveMediaSessionDefaults(options: {
               : undefined),
             // The session switch is the coarse answer; a gate's own `enabled`
             // is the specific one and wins.
-            ...(sessionPlaybackGate ? { enabled: true } : undefined),
+            ...(options.playbackGate === false
+              ? { enabled: false }
+              : undefined),
             ...userDetectionBuffer?.playbackGate,
             ...options.detections?.playbackGate,
           },
@@ -141,7 +145,7 @@ export function resolveMediaSessionDefaults(options: {
     },
     playbackGate: {
       ...RENDER_PREPARATION_PLAYBACK_GATE_DEFAULTS,
-      ...(sessionPlaybackGate ? { enabled: true } : undefined),
+      ...(options.playbackGate === false ? { enabled: false } : undefined),
       ...userRenderPreparation?.playbackGate,
     },
   };

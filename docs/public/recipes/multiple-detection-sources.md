@@ -141,8 +141,8 @@ frame by frame for as long as playback runs. A source that presents its own
 frames owns the playhead and paces itself, which is what
 `createVideoEngineMediaRendererSource` returns and what most video sessions run
 on. There the gate holds the start of playback and nothing after it. The gate
-is off by default, and `playbackGate: true` on `createMediaSession` turns it on
-alongside the render-preparation gate.
+is on by default alongside the render-preparation gate, and
+`playbackGate: false` on `createMediaSession` turns both off.
 
 `order` controls draw order. Lower sources compose first. Higher sources render
 later and appear on top.
@@ -221,7 +221,7 @@ const source = createCompositeDetectionFrameSource({
 - Set `requiredForCoverage: false` when a source should not hold the coverage
   wait, whether that wait is your own `waitForRange` call on
   `session.detectionSource` or an enabled `detections.playbackGate`. Your own
-  call works on any session; the gate is off by default and holds a media source
+  call works on any session; the gate is on by default and holds a media source
   the renderer pulls decoded samples from frame by frame, while a source that
   presents its own frames, such as `createVideoEngineMediaRendererSource`, is
   held only at the start of playback.

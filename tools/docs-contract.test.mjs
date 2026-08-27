@@ -156,15 +156,34 @@ function proseSentences(source) {
     .split(/(?<=[.;:])\s+/);
 }
 
-test("every playback-gate surface documents a gate that ships off", async () => {
-  // The playback gate is real, off until a host asks for it, and holds a
-  // producer that owns its own playhead only at the start of playback, so every
-  // surface that names it has to say which sources it reaches. Prose asserting
-  // that the gate is a no-op everywhere, or that it is simply on, compiles
-  // cleanly, and nothing else compares the surfaces against each other.
+test("every playback-gate surface states the default the code ships", async () => {
+  // The gate holds a producer that owns its own playhead only at the start of
+  // playback, so every surface that names it has to say which sources it
+  // reaches. The default is read from the resolver rather than from a phrase,
+  // because a surface can name a scope and still describe the wrong default.
+  const defaultsSource = await readFile(
+    path.join(rootDir, "packages/web/src/sessions/media-session-defaults.ts"),
+    "utf8",
+  );
+  const readsGateEnabled = (constantName) => {
+    const match = new RegExp(
+      `const ${constantName} = \\{[^}]*?enabled: (true|false)`,
+      "s",
+    ).exec(defaultsSource);
+
+    assert.ok(match, `${constantName} no longer declares an enabled default`);
+
+    return match[1] === "true";
+  };
+  const gateShipsOn =
+    readsGateEnabled("DETECTION_PLAYBACK_GATE_DEFAULTS") &&
+    readsGateEnabled("RENDER_PREPARATION_PLAYBACK_GATE_DEFAULTS");
   const namesTheGate = /playbackGate|playback gate/;
-  const statesDefaultOff =
-    /off by default|off unless|the gate off, which is the default/i;
+  // Prose is reflowed to a column, so a stated default can straddle a line
+  // break and a naive pattern would miss it.
+  const statesTheDefault = gateShipsOn
+    ? /on\s+by\s+default|holds[\s\S]{0,120}?by\s+default/i
+    : /off\s+by\s+default|off\s+unless|the gate off, which is the default/i;
   const namesThePulledPath = /pulls? (?:decoded )?samples|pulling samples/i;
   const namesTheExemptSource =
     /presents? its own frames|push-presented|presented-frame channel|VideoEngineMediaSource|VideoEngineMediaRendererSource/i;
@@ -188,8 +207,10 @@ test("every playback-gate surface documents a gate that ships off", async () => 
       failures.push(`${surface} never names the playback gate`);
     }
 
-    if (!statesDefaultOff.test(source)) {
-      failures.push(`${surface} never states that the gate is off by default`);
+    if (!statesTheDefault.test(source)) {
+      failures.push(
+        `${surface} never states that the gate ships ${gateShipsOn ? "on" : "off"} by default`,
+      );
     }
 
     if (

@@ -142,7 +142,10 @@ export function TimelineView({
       }
 
       if (hoverLineRef.current !== null) {
-        hoverLineRef.current.style.transform = `translateX(${offset}px)`;
+        // Centred on the offset, like the label above it and like the playhead
+        // marker, whose own rule centres a 2px bar. Anchoring this one by its
+        // left edge left it sitting beside the playhead at the same time.
+        hoverLineRef.current.style.transform = `translateX(${offset}px) translateX(-50%)`;
       }
     },
     [],

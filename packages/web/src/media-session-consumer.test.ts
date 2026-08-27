@@ -14,7 +14,7 @@ import {
 } from "../../../test/media-renderer-harness";
 
 describe("media session consumer workflows", () => {
-  it("plays an appendable session whose predictions have not arrived", async () => {
+  it("plays an ungated appendable session whose predictions have not arrived", async () => {
     resetMocks();
     mediaMock.samples = [createMockSample(0, 0), createMockSample(0.04, 0)];
     const { createMediaSession, MediaRendererPlaybackState } =
@@ -25,6 +25,9 @@ describe("media session consumer workflows", () => {
         appendable: { datasetId: "no-predictions-yet" },
       },
       media: "sample.mp4",
+      // A session with appendable detections waits for coverage by default, and
+      // this one is about what a host gets when it opts out.
+      playbackGate: false,
       renderer: {
         autoPlay: false,
         loop: false,

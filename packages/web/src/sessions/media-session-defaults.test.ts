@@ -41,7 +41,7 @@ describe("media session defaults", () => {
         scheduleBatchSize: 16,
       },
       playbackGate: {
-        enabled: false,
+        enabled: true,
         minimumAheadSeconds: 0.25,
         requiredAheadSeconds: 1,
       },
@@ -92,7 +92,7 @@ describe("media session defaults", () => {
     });
   });
 
-  it("defaults appendable stream sessions to ungated prediction playback and rolling retention", () => {
+  it("defaults appendable stream sessions to gated prediction playback and rolling retention", () => {
     const appendable = {
       datasetId: "stream",
     };
@@ -109,7 +109,7 @@ describe("media session defaults", () => {
     });
 
     expect(defaults.detectionBuffer.playbackGate).toEqual({
-      enabled: false,
+      enabled: true,
       requiredAheadSeconds: 2,
     });
     expect(retention).toEqual({
@@ -135,7 +135,7 @@ describe("media session defaults", () => {
     });
 
     expect(defaults.detectionBuffer.playbackGate).toEqual({
-      enabled: false,
+      enabled: true,
       requiredAheadSeconds: 2,
     });
     expect(retention).toEqual({
