@@ -542,11 +542,13 @@ function formatMaskFrame(rendererState: MediaRendererState | null) {
     return "-";
   }
 
-  if (rendererState.drawnMaskFrameTime === null) {
+  const drawnMaskFrameTime = rendererState.drawnMaskFrameTime ?? null;
+
+  if (drawnMaskFrameTime === null) {
     return "none";
   }
 
-  const drawn = formatExactTime(rendererState.drawnMaskFrameTime);
+  const drawn = formatExactTime(drawnMaskFrameTime);
 
   if (!rendererState.maskHeldStale) {
     return drawn;
@@ -557,7 +559,7 @@ function formatMaskFrame(rendererState: MediaRendererState | null) {
     detectionFrameTime === null
       ? ""
       : ` | ${formatMilliseconds(
-          (detectionFrameTime - rendererState.drawnMaskFrameTime) * 1000,
+          (detectionFrameTime - drawnMaskFrameTime) * 1000,
         )} behind`;
 
   return `${drawn} | held${behind}`;
