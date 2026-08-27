@@ -33,6 +33,11 @@ const DEFAULT_OUTPUT_DIR = path.join(TOOL_DIR, "output");
 const DEFAULT_SOURCE_DIR =
   process.env.MEDIA_MATRIX_SOURCE_DIR ?? "/Users/caio/Downloads/aaa/as/Raw";
 const DEFAULT_VERIFY_FRAMES = 12;
+const SELECT_TERM_LIMIT = 48;
+/* Matroska stamps a random segment UID and a wall-clock date into every file it
+ * writes, so without this a WebM rebuilt from identical input has a different
+ * digest and the pin can never mean anything. */
+const BITEXACT_ARGS = ["-fflags", "+bitexact", "-flags:v", "+bitexact"];
 const MANIFEST_SCHEMA = "supervision-js.tools.media-matrix.manifest";
 const DIGESTS_SCHEMA = "supervision-js.tools.media-matrix.digests";
 
@@ -195,6 +200,7 @@ async function encodeClip(clip, outputPath, context) {
     "-i",
     "-",
     ...threadArgs(),
+    ...BITEXACT_ARGS,
     /* Input and output rates are the same number on purpose: any conversion
      * here would duplicate or drop frames, and the stamp would stop naming the
      * position the frame ends up at. */
@@ -209,9 +215,15 @@ async function encodeClip(clip, outputPath, context) {
 
   try {
     if (clip.source.from === "synthetic") {
-      const frame = Buffer.alloc(width * height * 3);
-
       for (let index = 0; index < clip.source.frames; index += 1) {
+        /* A fresh buffer a frame. A stream write keeps the buffer it was handed
+         * until the pipe drains, so drawing the next frame into a reused one
+         * rewrites bytes that have not been sent yet, and the encoder receives a
+         * frame spliced from two. It reads back as a valid stamp, because the
+         * stamp is a small part of the picture, which is exactly why nothing
+         * downstream would catch it. */
+        const frame = Buffer.alloc(width * height * 3);
+
         drawSyntheticFrame(frame, { frameIndex: index, height, width });
         await writeFrame(encoder.child.stdin, frame);
         frameCount += 1;
@@ -291,6 +303,7 @@ async function remuxClip(clip, outputPath, context) {
     ...(clip.inputArgs ?? []),
     "-i",
     path.join(context.clipDir, path.basename(from.file)),
+    ...BITEXACT_ARGS,
     ...clip.outputArgs,
     outputPath,
   ]);
@@ -367,6 +380,7 @@ async function finishClip(clip, outputPath, context) {
     },
     id: clip.id,
     probed,
+    reproducible: clip.reproducible !== false,
     roundTrip: stampable
       ? await roundTrip(outputPath, probed, clip)
       : { checked: false, reason: "not stampable" },
@@ -574,15 +588,24 @@ async function roundTrip(filePath, probed, clip) {
 
   const indexes = sampleIndexes(frameCount, options.verifyFrames);
   const { height, width } = probed;
-  /* -noautorotate so a rotated clip reports the stamp as stored rather than as
-   * a player would turn it; rotation is recorded separately. */
+  /* A select expression naming every wanted frame overruns ffmpeg's expression
+   * parser past a few dozen terms, so a dense sample decodes the whole clip and
+   * picks its frames out of the stream instead. */
+  const wanted = new Set(indexes);
+  const useSelect = indexes.length <= SELECT_TERM_LIMIT;
+  /* -noautorotate so a rotated clip reports the stamp as stored rather than as a
+   * player would turn it; rotation is recorded separately. */
   const decoder = spawnFfmpeg([
     "-noautorotate",
     "-i",
     filePath,
     ...threadArgs(),
-    "-vf",
-    `select='${indexes.map((index) => `eq(n\\,${index})`).join("+")}'`,
+    ...(useSelect
+      ? [
+          "-vf",
+          `select='${indexes.map((index) => `eq(n\\,${index})`).join("+")}'`,
+        ]
+      : []),
     "-fps_mode",
     "passthrough",
     "-an",
@@ -594,16 +617,22 @@ async function roundTrip(filePath, probed, clip) {
   ]);
 
   const reads = [];
-  let position = 0;
+  let decoded = -1;
 
   for await (const frame of readFrames(
     decoder.child.stdout,
     width * height * 3,
   )) {
-    const expected = indexes[position];
+    decoded += 1;
+
+    const expected = useSelect ? indexes[reads.length] : decoded;
 
     if (expected === undefined) {
       break;
+    }
+
+    if (!useSelect && !wanted.has(decoded)) {
+      continue;
     }
 
     const stamp = readFrameStamp(frame, { height, width });
@@ -617,7 +646,6 @@ async function roundTrip(filePath, probed, clip) {
       requested: expected,
       ...(stamp.reason ? { reason: stamp.reason } : {}),
     });
-    position += 1;
   }
 
   await decoder.done;
@@ -789,8 +817,11 @@ async function reconcileDigests(manifest, toolchain) {
         (clip) => `  ${clip.id}: pinned ${clip.pinned}, built ${clip.sha256}`,
       )
       .join("\n");
+    /* A clip the matrix marks as not reproducible drifts by its own encoder's
+     * nature, so failing on it would fail every run. */
+    const unexpected = drifted.filter((clip) => clip.reproducible !== false);
 
-    if (sameToolchain && !options.updateDigests) {
+    if (sameToolchain && unexpected.length > 0 && !options.updateDigests) {
       throw new Error(
         `Rebuilding on the pinned ffmpeg at the pinned thread count produced different bytes:\n${detail}\nPass --update-digests once you know why.`,
       );

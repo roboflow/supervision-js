@@ -86,9 +86,27 @@ npm run matrix:media -- --jobs 8 --threads 0 --update-digests
 Run this on an **idle** machine. Encoding is CPU-saturating and would ruin any
 measurement taken beside it.
 
+**Budget 15 to 25 minutes and about 700 MB.** Extrapolated from measured builds
+at `--threads 4 --jobs 1`: 77 cheap clips at roughly 0.5s each, the 2840x2840
+clip at 41.6s and 14.1 MB, the 65,536-frame clip at 16.4s and 9.7 MB (about
+4,000 synthetic frames a second, 155 bytes a frame). The four `xl` clips are
+most of both totals; `--skip-xl` drops them and leaves a build of a couple of
+minutes.
+
+| group   | clips | time at `--jobs 1` |         disk |
+| ------- | ----: | -----------------: | -----------: |
+| cheap   |    77 |          about 40s | about 110 MB |
+| `heavy` |    14 |      about 3.5 min | about 215 MB |
+| `xl`    |     4 |       about 12 min | about 370 MB |
+
 ## What comes back
 
-`output/manifest.json` records, for every clip:
+`output/manifest.json` describes **the run that wrote it**, not everything the
+clips directory happens to hold, so a benchmark can state exactly which clips and
+which bytes it measured. `clip-digests.json` is the accumulating record: it
+merges, so a partial run does not drop what it did not build.
+
+For every clip in the run it records:
 
 - **What was asked for**: the source, the excerpt, and the exact ffmpeg argument
   list.
@@ -225,9 +243,18 @@ Derived clips (`remux`, `rename`) must appear after the clip they read.
 `clip-digests.json` pins the sha256 of every clip that has been built, so a
 benchmark run can state which bytes it measured. Rebuilding on the pinned ffmpeg
 **at the pinned thread count** must reproduce them, and the generator fails if it
-does not; on a different ffmpeg or thread count a difference is reported rather
-than failed, because x264 and x265 split work across frames and produce different
-bytes at a different thread count.
+does not. On a different ffmpeg or thread count a difference is reported rather
+than failed, because x264 and x265 split work across frames.
+
+Two things had to be true for that to mean anything, and neither was free:
+
+- Matroska stamps a random segment UID and a wall-clock date into every file, so
+  every WebM and MKV rebuilt to a new digest. Every encode and remux now passes
+  `-fflags +bitexact -flags:v +bitexact`.
+- x264's rate control does not settle to the same bytes twice under `-b:v`, even
+  at one thread with a single lookahead thread. The bytes-per-GOP sweep declares
+  `"reproducible": false`, which exempts it from the hard failure and gets it
+  reported instead. Everything else reproduces exactly.
 
 `--update-digests` rewrites the pin from a run. It merges, so a partial run does
 not drop the clips it did not build.

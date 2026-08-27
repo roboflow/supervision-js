@@ -4,128 +4,128 @@
   "toolchain": { "ffmpeg": "8.1.1", "platform": "darwin arm64", "threads": 4 },
   "clips": {
     "baseline": {
-      "bytes": 190998,
-      "sha256": "b41a66ed4a76b7b94cbfae29f72952e32c02af44ce9ba0c90cee0b4f2f1af63a"
+      "bytes": 190961,
+      "sha256": "d6f92bb317c2cae39547ddcdd6e484b20c00a3a4501f9b174ad5d0e060878ccb"
     },
     "bframes-pyramid": {
-      "bytes": 165728,
-      "sha256": "6b7015901e534f89afd7627c13711148e0d3f25d654aa120bb7bcd725a74c494"
+      "bytes": 165691,
+      "sha256": "3bcf2eb17fe963a450f0176702c8f2db3c38fc7eabf40246ebd709e5f7d9c309"
     },
     "chroma-yuv444p": {
-      "bytes": 193579,
-      "sha256": "9b9790effe27ceddf5b74802a2aee5b0eb947966efbba4d370f1097aa715ecca"
+      "bytes": 193542,
+      "sha256": "b318f823a957f77876be06f25228f2d084738f6e37b5bac6ebccd662cbb043fb"
     },
     "codec-av1-mp4": {
-      "bytes": 236907,
-      "sha256": "b13a8d5f6a9c5264eac2d5c2e278264d7c7487d5147786b48feb6c3789ae7e66"
+      "bytes": 236870,
+      "sha256": "0bcf53975060a5bccac36863e78ed21c31f03753ea10f70d1118d2ffc88a5f0e"
     },
     "codec-hevc-10bit-hvc1": {
-      "bytes": 222361,
-      "sha256": "bb27061f7139ca48681b38bd6a32dca4e54d11c6130bad85a543e3e3772b9631"
+      "bytes": 222324,
+      "sha256": "2e40889d9e9c1c511617c93a9303b9509a7f6d90eb1970f94004f193219004fa"
     },
     "codec-hevc-8bit-hvc1": {
-      "bytes": 220029,
-      "sha256": "dbe40e83b45d8e9b6ab6fa4920ca82baeca49161b402433b4b798d81897160da"
+      "bytes": 219992,
+      "sha256": "6d90d0432e0b98120e13b35f560d0bd027de0768ed6263c66183abe6510405be"
     },
     "codec-vp9-webm": {
-      "bytes": 239651,
-      "sha256": "d16048c15a6e43cf37991b7bdf8f97d3fe3c50e17dd6ef186b68cd21eb2e59b0"
+      "bytes": 239588,
+      "sha256": "7fde02219903bdde711febc4f7852008513b2def1311c540e7d886033c6c4713"
     },
     "colour-hdr-pq": {
-      "bytes": 222511,
-      "sha256": "66b98ffff8b6ab28ec969d37e666067487b210723f4b166f46f8cd95d1305504"
+      "bytes": 222474,
+      "sha256": "2896c70b6af72d37338ea1f26c797874e6137370d619a28614db5ddb85543e69"
     },
     "combo-hevc10-vfr-nonzero-start": {
-      "bytes": 224765,
-      "sha256": "fcc7c8c40d2d0cbfa81dd786cd239d332d9edcdd981b2b1a07cc544679d8b055"
+      "bytes": 224728,
+      "sha256": "0e87af5dacf9c42b917dcf959c9043717233f9e232e4b5616bec564cb82f935b"
     },
     "combo-mpegts-interlaced-2997": {
       "bytes": 277864,
       "sha256": "754bdca4407dbc1ce8ecdda8031e8e2f62bd5d364d98c4734d911c18abc1d294"
     },
     "combo-phone-hevc10-rotated": {
-      "bytes": 222361,
-      "sha256": "d29dd6e5920b214185a4552130abffbb8af80849a9fcf36776101548d1f56b64"
+      "bytes": 222324,
+      "sha256": "deef90454408cda5ec10f0f1ab0680dd770a61777eb07835bc4160dc0aa5a479"
     },
     "combo-rotated-vfr-mkv": {
-      "bytes": 191661,
-      "sha256": "a8f8b8f98d38439a6d9eca3149c8c2098c9fbf5cf2d9ac5b3c3501ee1d8df7db"
+      "bytes": 191586,
+      "sha256": "996c913936ae0d608aefef2ff1cfeef4ee2b8469c71428338aec50adbeae85b7"
     },
     "container-mkv-h264": {
-      "bytes": 190004,
-      "sha256": "6fd7bbe2067167e916bad35af89dbadbde519d9709cf37cd8853dc5338d9f946"
+      "bytes": 189922,
+      "sha256": "b8bc4e938a7cd507cfe66372a2456800ca010ac2c283bb18345bff45f739df98"
     },
     "container-moov-at-end": {
-      "bytes": 190998,
-      "sha256": "ff8c3dd6a394b2a9cd3b2469b3dd669545018467f04966afec5d807df99a2b99"
+      "bytes": 190961,
+      "sha256": "3f3018ecab9186bd2789178dc2451f6ecf5740efe055b8f62cc878e95a2b76ed"
     },
     "container-mpegts-h264": {
       "bytes": 266396,
       "sha256": "4f2e583b661150ec1b04c881bebb5a901e7fdf84d2dce1bf36c50fa42eabf127"
     },
     "declared-rate-honest": {
-      "bytes": 169085,
-      "sha256": "c03e41dc8a2363286da01b9892ea6ee7b9548c10a939ab2f781e56ecb8936adc"
+      "bytes": 169048,
+      "sha256": "1ce24f9fe2db235fbc44c0b5fa3739fd9ec02710824f97b05bcccde858b26ca8"
     },
     "declared-rate-lie": {
-      "bytes": 183194,
-      "sha256": "a8ef256d6cb01eb934dca14afb1cf34c376f9e57a04e6ea1ca8aa1ab28e25f56"
+      "bytes": 183157,
+      "sha256": "4e24fe373b270654c4eaef05d7e24464a619cd8946f33b15de44b3a2f075643b"
     },
     "duration-single-frame": {
-      "bytes": 26550,
-      "sha256": "ec5af4be5a48ade76a1b3556da910c531e4c2eeb5d4231bab0f605b191106fd5"
+      "bytes": 26513,
+      "sha256": "acead283d4148e9e08bce699f2f87a404a48a8624f553534e7a42b1da03394bf"
     },
     "frame-count-1024": {
-      "bytes": 161091,
-      "sha256": "368d0f592078f37ebcb223f2f5c02bd5cb0a6528ff4d141188a273077a6828ba"
+      "bytes": 161222,
+      "sha256": "a397326efba04869f44308d502511550faf3087ee210f1f1c2d0608db568ffe6"
     },
     "frame-rate-2997": {
-      "bytes": 191086,
-      "sha256": "cda3da28c4f05126557967d5e45f6a6d96a1bb6c65beec1d79a3b57d7350d705"
+      "bytes": 191049,
+      "sha256": "7c0c6447c7b2e40834269b15c2e47e3e84c464ce9502b630509cf80d04c8aef5"
     },
     "frame-rate-variable": {
-      "bytes": 194875,
-      "sha256": "8ed8e67d14bd886b4ce59902873cc28120c9d684f78dd4569701a09143102421"
+      "bytes": 194838,
+      "sha256": "60bbcc01e700a53e7743aec71440f6879e2339b5d464d0d3d7b2d9f51e5a505a"
     },
     "frames-per-gop-15": {
-      "bytes": 575857,
-      "sha256": "0d5a5a43babe264fc49f33573f0b19e707704cc55bc4c333cb9f8161b95451c8"
+      "bytes": 575820,
+      "sha256": "849ca35ff2d1dc1843c9a9dc6caf4d766d96783da1935cdab58444c8eb296e64"
     },
     "frames-per-gop-300": {
-      "bytes": 89243,
-      "sha256": "5e8583a8a1e57b9c8f4b13b476d71b39b8ab3e2242689fbd9840867fbd0c9e3a"
+      "bytes": 89206,
+      "sha256": "e08474febb52e90494c64293efd72c80005d5a85f2e9d205ec92e405e6d14646"
     },
     "gop-bytes-half-megabyte": {
-      "bytes": 1796766,
-      "sha256": "2cc4df12831769382acac25a9ad67dbc76a5d98b7e33011f91499e79806b13a4"
+      "bytes": 1797928,
+      "sha256": "498f2e63d3189304f288c525a9bdfe52091e84d35de011779620bac744df25e8"
     },
     "interlaced-tff-h264": {
-      "bytes": 201858,
-      "sha256": "cfd9ed5aa376fc03f55b86e1da1f24b205586749cd0b9af164bf9f5eb1e7f851"
+      "bytes": 201821,
+      "sha256": "a15a3487e6f82474f85a9123108cb8c72bed09cf2e9bb3640f4bd558dabfbd9e"
     },
     "legacy-dnxhr-sq-mov": {
-      "bytes": 19661652,
-      "sha256": "93fe1bc5b11a3b9c8d48b4086e1a4c34f69a97456e28f89cebea1336eb6d916c"
+      "bytes": 19661619,
+      "sha256": "dd5383fb54feaff96e04b37bd586acff1356b8b25c77e175c91b2ea924a39936"
     },
     "legacy-dv-ntsc": {
       "bytes": 36000000,
       "sha256": "ecfc4507add6ca138ed680a71dbce1eb71061b835e3cc5278f03e6df90270356"
     },
     "legacy-mpeg4-avi": {
-      "bytes": 757832,
-      "sha256": "dd501b21f7302524e317687e6054f3ddfb01954e617aab159b9e1109394f0f24"
+      "bytes": 757628,
+      "sha256": "8349de8174aa7bd24e9f67ea851bf0e3a14bd97b70959e29414544a6a22ba32c"
     },
     "legacy-prores-422-mov": {
-      "bytes": 34046776,
-      "sha256": "f52d3f0467520b4dd2a476b9510de5ab119b4f1abe786f08f40b0f2c50a0c456"
+      "bytes": 34046743,
+      "sha256": "562718196847bb6f59b67e4cdc643a35c1fa4a684b214c330eb060c7bce6e3cb"
     },
     "mislabelled-mkv-as-mp4": {
-      "bytes": 190004,
-      "sha256": "6fd7bbe2067167e916bad35af89dbadbde519d9709cf37cd8853dc5338d9f946"
+      "bytes": 189922,
+      "sha256": "b8bc4e938a7cd507cfe66372a2456800ca010ac2c283bb18345bff45f739df98"
     },
     "mislabelled-webm-as-mp4": {
-      "bytes": 239651,
-      "sha256": "d16048c15a6e43cf37991b7bdf8f97d3fe3c50e17dd6ef186b68cd21eb2e59b0"
+      "bytes": 239588,
+      "sha256": "7fde02219903bdde711febc4f7852008513b2def1311c540e7d886033c6c4713"
     },
     "reference-large-screen": {
       "bytes": 2158377943,
@@ -136,20 +136,20 @@
       "sha256": "66a83237bc7d95fd8f9852a5feac8dc1c477ec7981a796417c18e759efc9e107"
     },
     "rotation-90": {
-      "bytes": 190998,
-      "sha256": "1678db09724fb60de20b6cbc493796030a524f99a47ac03590ca875b280fecc5"
+      "bytes": 190961,
+      "sha256": "36e840ef30f2c19f47d0a4e1df08b3c358638e9eeeeff75fe964c7ed1f0d20d6"
     },
     "start-pts-nonzero": {
-      "bytes": 191010,
-      "sha256": "4904be6d898a9eac92e9008dcb45cb94f54bb2501333223c42a40235aae2c306"
+      "bytes": 190973,
+      "sha256": "c7760491f2339cf32e119a9e131ac4f2e0533e8aa8e2f065a41c835d8b197760"
     },
     "throughput-4mps": {
-      "bytes": 561813,
-      "sha256": "fd46a9a76e6372b550992c5dc57819975beb95b17fa2592275dbee2061594aa8"
+      "bytes": 561776,
+      "sha256": "80e3b35944f3c55b188af798f63d529c31ea3c3324ae326054c9bd5145e5b9c7"
     },
     "timebase-10007": {
-      "bytes": 193590,
-      "sha256": "b140c1c5858ac8649125fa27444348c5cb45cf69e1e9c853782abe9137e52c9a"
+      "bytes": 193553,
+      "sha256": "4148f5ab1ecdd821605fe50f6d6d674e9e1e2819ea7b5f4a678d270949c1a29a"
     }
   }
 }

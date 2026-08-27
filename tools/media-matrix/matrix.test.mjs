@@ -109,6 +109,27 @@ test("a clip longer than the stamp's range says so", () => {
   }
 });
 
+test("a clip that cannot be rebuilt byte for byte says so", () => {
+  for (const clip of matrix.clips) {
+    if ("reproducible" in clip) {
+      assert.equal(
+        typeof clip.reproducible,
+        "boolean",
+        `${clip.id} reproducible`,
+      );
+    }
+  }
+
+  const declared = matrix.clips.filter((clip) => clip.reproducible === false);
+
+  assert.ok(declared.length > 0, "no clip declares itself non-reproducible");
+  assert.ok(
+    declared.every((clip) => clip.axis === "gopBytes"),
+    "only the rate-controlled sweep should be exempt from the digest pin",
+  );
+  assert.match(matrix.notes.reproducibility, /reproducible: false/);
+});
+
 test("the two real sources and the inclusion rule are recorded", () => {
   assert.deepEqual([...sourceIds].sort(), ["large-screen", "p-square"]);
 

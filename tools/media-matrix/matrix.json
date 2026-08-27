@@ -8,6 +8,7 @@
     "derivedQuantitiesNotKnobs": "The load axes are derived quantities, not encoder knobs. A frame-rate sweep moves pixel throughput, frame budget and frames-per-GOP together and cannot say which one bit; 15 fps at 8 MP and 120 fps at 1 MP demand almost the same throughput and give an eight-fold different budget to meet it in, and that pair says something a sweep cannot. Codec, container, timebase and rotation stay as themselves, because they are correctness axes rather than load ones.",
     "heldConstant": "Every encoded clip is a short excerpt of one of the two real sources, re-encoded at a small size, so content is held constant and only the encoding varies. Changing the declared frame rate changes how fast the content plays; that is expected and does not affect frame identity, because ordinals map one to one through the pipeline.",
     "stamping": "Every encoded clip carries its frame index in its own pixels. The 16-bit stamp addresses 65,536 frames; a clip longer than that sets stampWraps and its identity checks are modulo 65,536. The two reference entries are unmodified originals and carry no stamp.",
+    "reproducibility": "Every clip is byte-reproducible on a fixed ffmpeg build and thread count except the bytes-per-GOP sweep, whose x264 rate control does not settle to the same output twice. Those declare reproducible: false and their digests record what a run produced rather than what a rebuild will match.",
     "declaredRateAxis": "The 10x mismatch large.mp4 carries (600 declared, 56.4 delivered) does not reproduce synthetically: ffprobe derives r_frame_rate from the whole duration table, not from the shortest interval, so a hand-built pattern lands nearer 2x. reference-large-screen carries the extreme end of this axis; declared-rate-lie and declared-rate-honest bracket it.",
     "referenceEntries": "The two originals are probed in place and recorded by digest. They are never copied into the repository and never re-encoded."
   },
@@ -337,6 +338,7 @@
         "-movflags",
         "+faststart"
       ],
+      "reproducible": false,
       "tags": ["heavy"]
     },
     {
@@ -386,6 +388,7 @@
         "-movflags",
         "+faststart"
       ],
+      "reproducible": false,
       "tags": ["heavy"]
     },
     {
@@ -435,6 +438,7 @@
         "-movflags",
         "+faststart"
       ],
+      "reproducible": false,
       "tags": ["heavy"]
     },
     {
@@ -484,6 +488,7 @@
         "-movflags",
         "+faststart"
       ],
+      "reproducible": false,
       "tags": ["heavy"]
     },
     {
