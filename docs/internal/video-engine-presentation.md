@@ -1,6 +1,6 @@
 # Video Engine Presentation
 
-Video is push-only. A video media source is engine-backed: the engine owns the
+An engine-backed video media source presents by pushing. The engine owns the
 playhead and the decoder, and it announces every frame it has decided is on
 screen. The scene composites that frame and draws every annotation layer from
 the same moment. The engine holds no canvas and paints nothing, and there is
@@ -232,8 +232,8 @@ The pull machinery still exists and still runs. It serves:
 - `createMediaStreamRendererSource()` for browser `MediaStream` inputs.
 
 A pull scene keeps Pixi's ticker, has no prepared annotation window, and reports
-no render count. Deleting that machinery is a planned, separate decision, so
-none of it is precedent: new video work goes through the engine-backed source
+no render count. None of it is precedent for the push path: new video work goes
+through the engine-backed source
 and the push path described above.
 
 ## A cost recorded for a deferred decision

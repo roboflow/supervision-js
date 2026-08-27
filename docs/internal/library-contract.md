@@ -158,11 +158,13 @@ scene adapters, workers, and prepared-artifact implementation details belong to
 
 ## Media Boundary
 
-Video presentation is push-based and engine-backed: the media source announces
-every frame it puts on screen and the renderer composites it, with no pull loop
-and no second clock. Mediabunny remains the adapter behind the `src` path,
-media normalization and preparation, and browser `MediaStream` inputs, and the
-session contract is shaped around neither engine's types.
+Mediabunny remains the default adapter for reading, decoding, and normalizing
+media: the `src` path, a `Blob`, normalization output, and browser `MediaStream`
+inputs all open through it. A host that passes
+`createVideoEngineMediaRendererSource()` gets an engine-backed source instead,
+which announces every frame it puts on screen so the renderer composites with no
+pull loop and no second clock. The session contract is shaped around neither
+engine's types.
 [`video-engine-presentation.md`](video-engine-presentation.md) is the contract
 for the push path and describes what the pull path still covers.
 

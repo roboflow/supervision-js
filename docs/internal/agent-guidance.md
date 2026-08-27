@@ -109,12 +109,14 @@ toolbar value is a checked presentation mirror.
 - Keep renderer orchestration provider-agnostic. The public/default renderer
   factory may wire Mediabunny and Pixi defaults, but the renderer core should
   depend on small media-source and scene contracts rather than vendor modules.
-- Video is push-only: an engine-backed media source announces every presented
-  frame and the scene composites it. `supervision-js-video-engine` and
-  `supervision-js-video-engine/analysis` are the only entries that carry code,
-  ESLint enforces that, and the remaining pull machinery is legacy rather than a
-  model to copy. Read [`video-engine-presentation.md`](video-engine-presentation.md)
-  before changing any of it.
+- An engine-backed media source announces every presented frame and the scene
+  composites it. It is opt-in: `createMediaSession()` reaches it only when a host
+  passes `createVideoEngineMediaRendererSource()`, and the pull path still serves
+  the `src` route, normalization output, and `MediaStream` inputs.
+  `supervision-js-video-engine` and `supervision-js-video-engine/analysis` are the
+  only entries that carry code, and ESLint enforces that. Read
+  [`video-engine-presentation.md`](video-engine-presentation.md) before changing
+  any of it.
 - Treat [`docs/public/guides/public-api.md`](../public/guides/public-api.md) as
   the public boundary. Prefer `createMediaSession()` for normal consumers,
   advanced renderer/detection/media hooks for serious integrations, and keep
