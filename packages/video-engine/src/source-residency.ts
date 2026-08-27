@@ -92,7 +92,7 @@ class ByteStore {
     }));
   }
 
-  /** The held run covering `offset`, or null. */
+  /** The held run from `offset` to the end of its run, or null. */
   runAt(offset: number): Uint8Array | null {
     for (const segment of this.#segments) {
       if (segment.start > offset) return null;
