@@ -14,13 +14,13 @@ import { MediaSessionMode as SessionMode } from "#types/media-session";
 const DEFAULT_FRAME_RATE = 30;
 
 /**
- * The refresh interval rebuilds a window that already covers the playhead. A
- * gap the window does not reach reloads immediately whatever this says, so this
- * only decides how often covered ground is derived again. A file's detections do
- * not change under it, and rebuilding a 10 second window every half second cost
- * 13 rebuilds a second at 8x playback, each one re-deriving a byte-identical
- * buffer. A stream keeps a short interval below, because there the source really
- * does gain data.
+ * The refresh interval rebuilds a window that already covers the playhead. A gap
+ * the window does not reach reloads immediately whatever this says, so this only
+ * decides how often covered ground is derived again, and a file's detections do
+ * not change under it. Rebuilding a 10 second window every half second cost 15
+ * rebuilds a second at 8x playback, each re-deriving a window overlapping the
+ * one it replaced by 95%. A stream keeps the short interval below, because there
+ * the source really does gain data.
  */
 const FILE_DETECTION_BUFFER_DEFAULTS = {
   bufferAheadSeconds: 10,
