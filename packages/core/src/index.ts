@@ -197,6 +197,7 @@ export {
   encodeBinaryMask,
   encodeBinaryMaskWithBounds,
   encodeDetectionMaskPayload,
+  extractDetectionMaskRectRuns,
   extractMaskContour,
   extractMaskRectRuns,
   isDeflatedBase64DetectionMaskPayload,

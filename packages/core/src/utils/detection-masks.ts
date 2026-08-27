@@ -6,6 +6,7 @@ import {
   type TopLeftRect,
 } from "#types/detections";
 import {
+  decodeCompressedRleCounts,
   decodeCompressedRleMask,
   encodeCompressedRleCounts,
 } from "#utils/detection-frames";
@@ -285,15 +286,200 @@ export function extractMaskRectRuns(
   height: number,
 ): readonly MaskRectRun[] | undefined {
   assertMaskDimensions(data, width, height);
+  const rects = mergeRowSpansIntoRects(data, width, height, 0, 0);
+  return rects.length > 0 ? rects : undefined;
+}
+
+/**
+ * The rect runs of a compressed-RLE mask, without holding the mask's raster.
+ *
+ * A mask is the size of the whole frame, so reading a silhouette that covers a
+ * fraction of one percent of it otherwise costs a megabytes-wide allocation and
+ * a pass over every pixel. The counts carry the occupied box, so the raster and
+ * the pass are that box.
+ */
+export function extractDetectionMaskRectRuns(
+  mask: DetectionMask,
+): readonly MaskRectRun[] | undefined {
+  if (mask.encoding !== DetectionMaskEncoding.CompressedRle) {
+    throw new Error(`Unsupported detection mask encoding: ${mask.encoding}`);
+  }
+
+  const { height, width } = mask;
+  assertMaskSize(width, height);
+
+  const counts = decodeCompressedRleCounts(mask.counts);
+  const bounds = computeCompressedRleBounds(counts, width, height);
+
+  if (!bounds) {
+    return undefined;
+  }
+
+  const { left, top } = bounds;
+  const boundsWidth = bounds.width;
+  const boundsHeight = bounds.height;
+  const boundsBuffer = new Uint8Array(boundsWidth * boundsHeight);
+  const pixels = width * height;
+  let offset = 0;
+
+  for (let index = 0; index < counts.length; index += 1) {
+    const start = offset;
+    offset += counts[index] ?? 0;
+
+    if (!isForegroundRun(index) || start >= pixels) {
+      continue;
+    }
+
+    const end = Math.min(offset, pixels);
+    let cursor = start;
+
+    while (cursor < end) {
+      const column = Math.floor(cursor / height);
+      const columnEnd = Math.min(end, (column + 1) * height);
+      let target =
+        (cursor - column * height - top) * boundsWidth + (column - left);
+
+      for (let step = columnEnd - cursor; step > 0; step -= 1) {
+        boundsBuffer[target] = 1;
+        target += boundsWidth;
+      }
+
+      cursor = columnEnd;
+    }
+  }
+
+  const rects = mergeRowSpansIntoRects(
+    boundsBuffer,
+    boundsWidth,
+    boundsHeight,
+    left,
+    top,
+  );
+  return rects.length > 0 ? rects : undefined;
+}
+
+/** Counts alternate background, foreground, starting on background. */
+function isForegroundRun(index: number) {
+  return index % 2 === 1;
+}
+
+/**
+ * The occupied box of a compressed-RLE mask, read from the counts alone.
+ *
+ * COCO runs are column-major, so a run confined to one column bounds its own
+ * rows, and a run that reaches the next column has already spanned a full
+ * column top to bottom.
+ */
+function computeCompressedRleBounds(
+  counts: readonly number[],
+  width: number,
+  height: number,
+) {
+  const pixels = width * height;
+  let left = width;
+  let top = height;
+  let right = -1;
+  let bottom = -1;
+  let offset = 0;
+
+  for (let index = 0; index < counts.length; index += 1) {
+    const start = offset;
+    offset += counts[index] ?? 0;
+
+    if (!isForegroundRun(index) || start >= pixels) {
+      continue;
+    }
+
+    const end = Math.min(offset, pixels) - 1;
+    const startColumn = Math.floor(start / height);
+    const endColumn = Math.floor(end / height);
+
+    if (startColumn < left) {
+      left = startColumn;
+    }
+
+    if (endColumn > right) {
+      right = endColumn;
+    }
+
+    if (startColumn !== endColumn) {
+      top = 0;
+      bottom = height - 1;
+      continue;
+    }
+
+    const startRow = start - startColumn * height;
+    const endRow = end - endColumn * height;
+
+    if (startRow < top) {
+      top = startRow;
+    }
+
+    if (endRow > bottom) {
+      bottom = endRow;
+    }
+  }
+
+  return right < 0
+    ? null
+    : {
+        height: bottom - top + 1,
+        left,
+        top,
+        width: right - left + 1,
+      };
+}
+
+/** Open rects, one per span of the row above, in the order they opened. */
+interface OpenMaskSpans {
+  readonly openedAt: Int32Array;
+  readonly runWidth: Int32Array;
+  readonly startX: Int32Array;
+  readonly topY: Int32Array;
+}
+
+function createOpenMaskSpans(capacity: number): OpenMaskSpans {
+  return {
+    openedAt: new Int32Array(capacity),
+    runWidth: new Int32Array(capacity),
+    startX: new Int32Array(capacity),
+    topY: new Int32Array(capacity),
+  };
+}
+
+/**
+ * Emits rects in the coordinates of the raster the given window was cut from,
+ * not the window's own.
+ *
+ * A span continues the rect above it when its start and width both match, and
+ * the row above holds exactly one open rect per span, so walking both in
+ * ascending x pairs them without a lookup.
+ */
+function mergeRowSpansIntoRects(
+  data: Uint8Array,
+  width: number,
+  height: number,
+  offsetX: number,
+  offsetY: number,
+): MaskRectRun[] {
   const rects: MaskRectRun[] = [];
-  const openRects = new Map<string, TopLeftRect>();
+  // Spans need a gap between them, so a row holds at most half its width.
+  const capacity = (width >> 1) + 2;
+  const closed = new Int32Array(capacity);
+  let open = createOpenMaskSpans(capacity);
+  let next = createOpenMaskSpans(capacity);
+  let openCount = 0;
+  let opened = 0;
 
   for (let y = 0; y < height; y += 1) {
-    const activeSpans = new Set<string>();
+    const row = y * width;
+    let nextCount = 0;
+    let closedCount = 0;
+    let cursor = 0;
     let x = 0;
 
     while (x < width) {
-      while (x < width && !data[y * width + x]) {
+      while (x < width && data[row + x] === 0) {
         x += 1;
       }
 
@@ -303,39 +489,100 @@ export function extractMaskRectRuns(
 
       const startX = x;
 
-      while (x < width && data[y * width + x]) {
+      while (x < width && data[row + x] !== 0) {
         x += 1;
       }
 
       const runWidth = x - startX;
-      const key = `${startX}:${runWidth}`;
-      const openRect = openRects.get(key);
-      activeSpans.add(key);
 
-      if (openRect && openRect.y + openRect.height === y) {
-        openRects.set(key, { ...openRect, height: openRect.height + 1 });
+      while (cursor < openCount && open.startX[cursor] < startX) {
+        closed[closedCount] = cursor;
+        closedCount += 1;
+        cursor += 1;
+      }
+
+      if (
+        cursor < openCount &&
+        open.startX[cursor] === startX &&
+        open.runWidth[cursor] === runWidth
+      ) {
+        next.openedAt[nextCount] = open.openedAt[cursor];
+        next.topY[nextCount] = open.topY[cursor];
+        cursor += 1;
       } else {
-        if (openRect) {
-          rects.push(openRect);
+        if (cursor < openCount && open.startX[cursor] === startX) {
+          closed[closedCount] = cursor;
+          closedCount += 1;
+          cursor += 1;
         }
 
-        openRects.set(key, { height: 1, width: runWidth, x: startX, y });
+        next.openedAt[nextCount] = opened;
+        next.topY[nextCount] = y;
+        opened += 1;
       }
+
+      next.runWidth[nextCount] = runWidth;
+      next.startX[nextCount] = startX;
+      nextCount += 1;
     }
 
-    for (const [key, openRect] of openRects) {
-      if (!activeSpans.has(key)) {
-        rects.push(openRect);
-        openRects.delete(key);
-      }
+    while (cursor < openCount) {
+      closed[closedCount] = cursor;
+      closedCount += 1;
+      cursor += 1;
     }
+
+    pushClosedRects(rects, open, closed, closedCount, y, offsetX, offsetY);
+
+    const carried = open;
+    open = next;
+    next = carried;
+    openCount = nextCount;
   }
 
-  rects.push(...openRects.values());
-  return rects.length > 0 ? rects : undefined;
+  for (let index = 0; index < openCount; index += 1) {
+    closed[index] = index;
+  }
+
+  pushClosedRects(rects, open, closed, openCount, height, offsetX, offsetY);
+  return rects;
 }
 
-function assertMaskDimensions(data: Uint8Array, width: number, height: number) {
+/** Rects leave in the order they opened, which is not their order across a row. */
+function pushClosedRects(
+  rects: MaskRectRun[],
+  open: OpenMaskSpans,
+  closed: Int32Array,
+  closedCount: number,
+  bottomY: number,
+  offsetX: number,
+  offsetY: number,
+) {
+  for (let index = 1; index < closedCount; index += 1) {
+    const span = closed[index];
+    const openedAt = open.openedAt[span];
+    let sorted = index - 1;
+
+    while (sorted >= 0 && open.openedAt[closed[sorted]] > openedAt) {
+      closed[sorted + 1] = closed[sorted];
+      sorted -= 1;
+    }
+
+    closed[sorted + 1] = span;
+  }
+
+  for (let index = 0; index < closedCount; index += 1) {
+    const span = closed[index];
+    rects.push({
+      height: bottomY - open.topY[span],
+      width: open.runWidth[span],
+      x: open.startX[span] + offsetX,
+      y: open.topY[span] + offsetY,
+    });
+  }
+}
+
+function assertMaskSize(width: number, height: number) {
   if (!Number.isInteger(width) || width <= 0) {
     throw new Error("Mask width must be a positive integer.");
   }
@@ -343,6 +590,10 @@ function assertMaskDimensions(data: Uint8Array, width: number, height: number) {
   if (!Number.isInteger(height) || height <= 0) {
     throw new Error("Mask height must be a positive integer.");
   }
+}
+
+function assertMaskDimensions(data: Uint8Array, width: number, height: number) {
+  assertMaskSize(width, height);
 
   if (data.length !== width * height) {
     throw new Error("Mask data length must equal width * height.");

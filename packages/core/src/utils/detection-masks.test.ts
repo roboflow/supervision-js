@@ -9,6 +9,7 @@ import {
   encodeBinaryMask,
   encodeBinaryMaskWithBounds,
   encodeDetectionMaskPayload,
+  extractDetectionMaskRectRuns,
   extractMaskContour,
   extractMaskRectRuns,
   isDeflatedBase64DetectionMaskPayload,
@@ -54,6 +55,37 @@ describe("detection mask utilities", () => {
     expect(isDeflatedBase64DetectionMaskPayload(`${"A".repeat(100)}-`)).toBe(
       false,
     );
+  });
+
+  it("reads rect runs off a compressed mask without holding its raster", () => {
+    const width = 10;
+    const height = 8;
+    const raster = new Uint8Array(width * height);
+
+    for (let y = 2; y < height; y += 1) {
+      raster[y * width + 7] = 1;
+    }
+
+    for (let y = 5; y < height; y += 1) {
+      raster[y * width + 3] = 1;
+    }
+
+    const runs = extractDetectionMaskRectRuns(
+      encodeBinaryMask(raster, width, height),
+    );
+
+    // Nothing touches the raster's first row or column, and the run that opens
+    // later sits left of the one that opens first.
+    expect(runs).toEqual([
+      { height: 6, width: 1, x: 7, y: 2 },
+      { height: 3, width: 1, x: 3, y: 5 },
+    ]);
+    expect(runs).toEqual(extractMaskRectRuns(raster, width, height));
+    expect(
+      extractDetectionMaskRectRuns(
+        encodeBinaryMask(new Uint8Array(width * height), width, height),
+      ),
+    ).toBeUndefined();
   });
 
   it("extracts bounds, borders, contours, and merged row runs", () => {
