@@ -35,6 +35,19 @@ describe("region coverage mask", () => {
     expect(getContext).toHaveBeenCalledWith("2d");
   });
 
+  it("leaves the shared program alive when one mask is destroyed", () => {
+    const shader = createShaderStub();
+    const mask = createPixiRegionCoverageMask(
+      createMaskOptions(vi.fn(() => shader)),
+    );
+
+    mask.destroy();
+
+    // Pixi caches a GpuProgram by its source, so every coverage mask holds the
+    // same one; destroying it nulls the layout the others still render through.
+    expect(shader.destroy).toHaveBeenCalledWith();
+  });
+
   it("names the resources both programs read", () => {
     const program = buildProgram();
 

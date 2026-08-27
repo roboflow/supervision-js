@@ -679,7 +679,7 @@ function createDemoLabelStyle(settings: DemoPresentationSettings): LabelStyle {
     placement: settings.labelPlacement,
     shouldRender: (detection) =>
       passesConfidenceThreshold(detection, settings) &&
-      hasDrawnGeometry(detection, settings),
+      hasAnchorableGeometry(detection),
     textStyle: (detection) => ({
       color: resolveClassStyle(detection, settings).labelText,
       fontFamily:
@@ -704,7 +704,7 @@ function createDemoInteractionStyle(
     ),
     shouldRender: (detection) =>
       passesConfidenceThreshold(detection, settings) &&
-      hasDrawnGeometry(detection, settings),
+      hasAnchorableGeometry(detection),
   });
 }
 
@@ -915,22 +915,19 @@ function passesTrajectoryConfidenceThreshold(
 }
 
 /**
- * Whether any enabled layer draws geometry this detection actually carries.
+ * Whether the detection carries geometry a label or highlight can sit on.
  *
- * Each geometry layer draws only its own field, so a detection whose fields
- * are all either absent or switched off contributes nothing to the picture,
- * and a label or hover highlight over it would name a shape that is not there.
+ * A mask counts because the mask highlight anchors to the mask itself, while
+ * a label anchors to the rect or, failing that, to the bounds of the polygon,
+ * polyline, or keypoint points.
  */
-function hasDrawnGeometry(
-  detection: Detection,
-  settings: DemoPresentationSettings,
-) {
+function hasAnchorableGeometry(detection: Detection) {
   return (
-    (settings.boxesEnabled && detection.rect !== undefined) ||
-    (settings.masksEnabled && detection.mask !== undefined) ||
-    (settings.polygonsEnabled && detection.polygon !== undefined) ||
-    (settings.polylinesEnabled && detection.polyline !== undefined) ||
-    (settings.keypointsEnabled && detection.keypoints !== undefined)
+    detection.rect !== undefined ||
+    detection.mask !== undefined ||
+    detection.polygon !== undefined ||
+    detection.polyline !== undefined ||
+    detection.keypoints !== undefined
   );
 }
 

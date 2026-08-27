@@ -129,7 +129,9 @@ export function createPixiRegionCoverageMask(options: {
     destroy() {
       effect.destroy();
       display.destroy();
-      shader.destroy(true);
+      // Never destroy(true): the program cache is keyed by source and shared
+      // by every shader built from it; a destroyed entry poisons the rebuild.
+      shader.destroy();
       geometry.destroy();
       placeholderSource.destroy();
     },
@@ -167,7 +169,9 @@ export function createPixiRegionCoverageMask(options: {
       shader.resources.uSampler = source.style;
     } catch {
       try {
-        shader.destroy(true);
+        // Never destroy(true): the program cache is keyed by source and shared
+        // by every shader built from it; a destroyed entry poisons the rebuild.
+        shader.destroy();
       } catch {
         // Pixi may already have invalidated this shader resource group.
       }

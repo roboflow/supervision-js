@@ -38,6 +38,34 @@ const rectangleDetection: Detection = {
   rect: { height: 40, width: 20, x: 10, y: 12 },
 };
 
+const maskOnlyDetection: Detection = {
+  className: "horse",
+  confidence: 0.9,
+  mask: {
+    counts: "04",
+    encoding: DetectionMaskEncoding.CompressedRle,
+    height: 2,
+    width: 2,
+  },
+};
+
+const polygonOnlyDetection: Detection = {
+  className: "court",
+  confidence: 0.9,
+  polygon: {
+    points: [
+      { x: 0, y: 0 },
+      { x: 20, y: 0 },
+      { x: 20, y: 10 },
+    ],
+  },
+};
+
+const geometrylessDetection: Detection = {
+  className: "horse",
+  confidence: 0.9,
+};
+
 const vectorDetection: Detection = {
   className: "person",
   confidence: 0.9,
@@ -430,43 +458,44 @@ describe("demo presentation", () => {
     );
   });
 
-  it("drops the label when no enabled layer draws the detection", () => {
-    const settings = {
+  it("keeps the label when no geometry layer is enabled", () => {
+    const presentation = createDemoPresentation({
       ...defaultDemoPresentationSettings,
       boxesEnabled: false,
       keypointsEnabled: false,
       labelsEnabled: true,
       masksEnabled: false,
       polygonsEnabled: false,
-      polylinesEnabled: true,
-    };
-    const presentation = createDemoPresentation(settings);
+      polylinesEnabled: false,
+    });
     const context = {
       detectionIndex: 0,
       frame: { detections: [detection], mediaTime: 0 },
       mediaTime: 0,
     };
 
+    expect(presentation.labelStyle?.resolve(detection, context)).toMatchObject({
+      rect: detection.rect,
+      text: "horse",
+    });
     expect(
-      presentation.labelStyle?.resolve(detection, context),
-    ).toBeUndefined();
-    expect(
-      presentation.interactionStyle?.resolve(detection, {
+      presentation.labelStyle?.resolve(geometrylessDetection, {
         ...context,
-        point: { x: 12, y: 14 },
-        state: DetectionInteractionState.Hovered,
-        target: DetectionPickTarget.Mask,
+        frame: { detections: [geometrylessDetection], mediaTime: 0 },
       }),
     ).toBeUndefined();
     expect(
-      createDemoPresentation({
-        ...settings,
-        masksEnabled: true,
-      }).labelStyle?.resolve(detection, context),
-    ).toMatchObject({ text: "horse" });
+      presentation.interactionStyle?.resolve(geometrylessDetection, {
+        ...context,
+        frame: { detections: [geometrylessDetection], mediaTime: 0 },
+        point: { x: 12, y: 14 },
+        state: DetectionInteractionState.Hovered,
+        target: DetectionPickTarget.Box,
+      }),
+    ).toBeUndefined();
   });
 
-  it("keeps the label only for detections the enabled geometry layer carries", () => {
+  it("anchors the label on carried geometry the enabled layer does not draw", () => {
     const presentation = createDemoPresentation({
       ...defaultDemoPresentationSettings,
       boxesEnabled: false,
@@ -477,24 +506,49 @@ describe("demo presentation", () => {
       polylinesEnabled: false,
     });
     const frame = {
-      detections: [rectangleDetection, vectorDetection],
+      detections: [rectangleDetection, polygonOnlyDetection],
       mediaTime: 0,
     };
 
-    expect(
-      presentation.labelStyle?.resolve(vectorDetection, {
-        detectionIndex: 1,
-        frame,
-        mediaTime: 0,
-      }),
-    ).toMatchObject({ text: "person" });
     expect(
       presentation.labelStyle?.resolve(rectangleDetection, {
         detectionIndex: 0,
         frame,
         mediaTime: 0,
       }),
-    ).toBeUndefined();
+    ).toMatchObject({ rect: rectangleDetection.rect, text: "horse" });
+    expect(
+      presentation.labelStyle?.resolve(polygonOnlyDetection, {
+        detectionIndex: 1,
+        frame,
+        mediaTime: 0,
+      }),
+    ).toMatchObject({
+      rect: { height: 10, width: 20, x: 10, y: 5 },
+      text: "court",
+    });
+  });
+
+  it("keeps the hover highlight for a detection carrying only a mask", () => {
+    const presentation = createDemoPresentation({
+      ...defaultDemoPresentationSettings,
+      boxesEnabled: false,
+      keypointsEnabled: false,
+      masksEnabled: true,
+      polygonsEnabled: false,
+      polylinesEnabled: false,
+    });
+
+    expect(
+      presentation.interactionStyle?.resolve(maskOnlyDetection, {
+        detectionIndex: 0,
+        frame: { detections: [maskOnlyDetection], mediaTime: 0 },
+        mediaTime: 0,
+        point: { x: 12, y: 14 },
+        state: DetectionInteractionState.Hovered,
+        target: DetectionPickTarget.Mask,
+      })?.maskStyle,
+    ).toBeTruthy();
   });
 
   it("toggles each vector layer independently without touching the other styles", () => {
