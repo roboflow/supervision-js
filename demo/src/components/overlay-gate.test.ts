@@ -82,6 +82,28 @@ describe("advanceOverlayGate", () => {
     expect(cleared.visible).toBe(true);
   });
 
+  /**
+   * The two waits the appear delay sits between, measured on the deployed
+   * preview and on the same build served from localhost: 210ms is the longest
+   * a committed seek took with the frame already in hand, and 306ms is the
+   * shortest one that went to the network. A threshold that stops separating
+   * them is showing waits nobody is waiting on, or hiding waits that last
+   * seconds.
+   */
+  it("separates a seek that had the frame from one that went to the network", () => {
+    const wait = (durationMs: number) =>
+      run([
+        ...Array.from({ length: Math.ceil(durationMs / 10) }, (_, tick) => ({
+          atMs: tick * 10,
+          hasOverlay: true,
+        })),
+        { atMs: durationMs, hasOverlay: false },
+      ]);
+
+    expect(wait(210).some((result) => result.visible)).toBe(false);
+    expect(wait(306).some((result) => result.visible)).toBe(true);
+  });
+
   it("asks to be woken when the gate would change with no new input", () => {
     const [pending] = run([{ atMs: 0, hasOverlay: true }]);
 
