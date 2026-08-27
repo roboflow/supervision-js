@@ -16,14 +16,18 @@ import { mediaFailureHeadline } from "./media-failure-copy";
 /**
  * The picture never waits for these, so they read as background progress rather
  * than as conditions the viewer has to sit through. The control bar reports
- * them: buffering on the play button and in the state chip, the prepared window
- * and the detection buffer in their own timeline lanes.
+ * them: the prepared window and the detection buffer in their own timeline
+ * lanes.
+ *
+ * Playback buffering is not among them. A picture that has stopped while the
+ * next bytes arrive is the viewer waiting, and on a remote source it stops for
+ * hundreds of milliseconds at a time. The overlay's own delay decides whether
+ * any given one is long enough to be worth saying.
  */
 export const BACKGROUND_ACTIVITY_KINDS: ReadonlySet<MediaSessionActivityKind> =
   new Set([
     MediaSessionActivityKind.DetectionsBuffering,
     MediaSessionActivityKind.DetectionsLoading,
-    MediaSessionActivityKind.PlaybackBuffering,
     MediaSessionActivityKind.RenderPreparing,
   ]);
 
