@@ -352,6 +352,45 @@ describe("media session consumer workflows", () => {
     session.destroy();
   });
 
+  it("forwards the percentage-bar renderer style from session presentation", async () => {
+    resetMocks();
+    mediaMock.samples = [createMockSample(0, 0)];
+    const { annotationRenderers, createMediaSession } = await import("./index");
+    const resolve = vi.fn(() => ({
+      background: { alpha: 0.8, color: 0x000000 },
+      backgroundRect: { height: 6, width: 20, x: 20, y: 8 },
+      fill: { alpha: 1, color: 0x00ff00 },
+      value: 0.75,
+      valueRect: { height: 6, width: 15, x: 17.5, y: 8 },
+    }));
+    const session = await createMediaSession({
+      container: createContainer(),
+      detections: {
+        frames: [
+          {
+            detections: [
+              {
+                className: "player",
+                rect: { height: 40, width: 20, x: 20, y: 30 },
+              },
+            ],
+            frameIndex: 0,
+            mediaTime: 0,
+          },
+        ],
+      },
+      media: "sample.mp4",
+      presentation: {
+        renderers: [annotationRenderers.percentageBar({ style: { resolve } })],
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(resolve).toHaveBeenCalled();
+    });
+    session.destroy();
+  });
+
   it("delivers detection picks through session interaction callbacks", async () => {
     resetMocks();
     mediaMock.samples = [createMockSample(0, 0)];

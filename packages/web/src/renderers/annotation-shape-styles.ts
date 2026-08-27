@@ -76,22 +76,30 @@ function lowerPercentageBarInstructions(
   bar: PercentageBarDrawInstruction,
   target: ShapeDrawInstruction[],
 ) {
-  if (bar.background || bar.border) {
+  if (bar.background) {
     target.push({
       closed: true,
+      fill: bar.background,
       kind: ShapeInstructionKind.Path,
       segments: [rectToPolygonPoints(bar.backgroundRect)],
-      ...(bar.background ? { fill: bar.background } : {}),
-      ...(bar.border ? { stroke: bar.border } : {}),
     });
   }
 
   if (bar.fill && bar.valueRect.width > 0) {
     target.push({
       closed: true,
+      fill: bar.fill,
       kind: ShapeInstructionKind.Path,
       segments: [rectToPolygonPoints(bar.valueRect)],
-      fill: bar.fill,
+    });
+  }
+
+  if (bar.border) {
+    target.push({
+      closed: true,
+      kind: ShapeInstructionKind.Path,
+      segments: [rectToPolygonPoints(bar.backgroundRect)],
+      stroke: bar.border,
     });
   }
 }

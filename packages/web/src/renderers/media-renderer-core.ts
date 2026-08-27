@@ -81,6 +81,7 @@ export async function createMediaRendererCore(
     maskHaloStyle: options.maskHaloStyle,
     maskStyle: options.maskStyle,
     markerStyle: options.markerStyle,
+    percentageBarStyle: options.percentageBarStyle,
     polygonStyle: options.polygonStyle,
     polylineStyle: options.polylineStyle,
     renderers: options.renderers,

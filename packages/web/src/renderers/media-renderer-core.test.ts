@@ -985,6 +985,36 @@ describe("media renderer core", () => {
 
     renderer.destroy();
   });
+
+  it("passes percentageBarStyle through to scene creation on initialization", async () => {
+    resetMocks();
+
+    const percentageBarStyle = {
+      resolve: vi.fn(),
+    };
+    let receivedSceneOptions: MediaRendererSceneOptions | undefined;
+    const scene = createScene();
+    const renderer = await createMediaRendererCore(
+      {
+        autoPlay: false,
+        container: {} as HTMLElement,
+        percentageBarStyle,
+        source: createSource([
+          createMockSample(0, 0) as unknown as DecodedVideoSample,
+        ]),
+      } satisfies MediaRendererOptions,
+      {
+        createScene: vi.fn(async (options) => {
+          receivedSceneOptions = options;
+          return scene;
+        }),
+        openMediaSource: vi.fn(),
+      },
+    );
+
+    expect(receivedSceneOptions?.percentageBarStyle).toBe(percentageBarStyle);
+    renderer.destroy();
+  });
 });
 
 /**
