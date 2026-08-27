@@ -85,10 +85,11 @@ npm run fixture:geometry:create -- \
 
 That last flag has no committed value. `detections.manifest.json` records this
 fixture's segmentation input as `../basketball_sam3/detections.json` at sha256
-`5fad854b...`, and the file at that path is now the merged 25fps timeline at
-sha256 `2052a6ac...`. Rebuilding against it would land every head mask on a
-different frame grid. The committed chunks stay authoritative until a 30fps
-segmentation input is committed alongside them.
+`5fad854b...`, and the file `npm run fixture:sam3:restore` rebuilds at that path
+is the merged 25fps timeline that `../basketball_sam3/detections.manifest.json`
+records at sha256 `2052a6ac...`. Rebuilding against it would land every head
+mask on a different frame grid. The committed chunks stay
+authoritative until a 30fps segmentation input is committed alongside them.
 
 The gap-filled heads alone can be rebuilt without that input, because the
 committed chunks already carry every observed head and every frozen player

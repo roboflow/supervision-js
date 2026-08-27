@@ -19,7 +19,8 @@ demo loads them from committed JSON chunks instead of calling SAM3 at runtime.
 
 - `1min-horse-video.mov`: original source media copied by the fixture tool
 - `raw-sam3.jsonl`: SAM3 responses with image payloads and API key omitted
-- `detections.json`: normalized detection timeline
+- `detections.json`: normalized detection timeline, git-ignored and rebuilt by
+  `npm run fixture:sam3:restore -- --sample-name horse_trail`
 - `detections.manifest.json` and `detections/`: chunked demo runtime source
 
 Temporary extracted frames are written outside the fixture folder at

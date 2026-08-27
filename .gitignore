@@ -24,6 +24,11 @@ __pycache__/
 tools/sam3-fixture/output/
 tools/geometry-fixture/output/
 
+# Build intermediates the demo never reads; npm run fixture:sam3:restore
+# rebuilds them from the committed raw-sam3.jsonl captures
+demo/fixtures/basketball_sam3/detections.json
+demo/fixtures/horse_trail/detections.json
+
 npm-debug.log*
 yarn-debug.log*
 pnpm-debug.log*

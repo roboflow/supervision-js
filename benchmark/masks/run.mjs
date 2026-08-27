@@ -7,6 +7,7 @@ import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
 import zlib from "node:zlib";
+import { readChunkedDetections } from "../../tools/lib/read-chunked-detections.mjs";
 
 const rootDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -198,11 +199,10 @@ function parseArgs(argv) {
 
 async function loadFixture() {
   const manifestPath = path.join(fixtureDir, "detections.manifest.json");
-  const detectionsPath = path.join(fixtureDir, "detections.json");
   const metaPath = path.join(fixtureDir, "fixture.meta.json");
   const [manifest, detections, meta] = await Promise.all([
     readJson(manifestPath),
-    readJson(detectionsPath),
+    readChunkedDetections(manifestPath),
     readJson(metaPath),
   ]);
 
@@ -227,9 +227,8 @@ async function measureSourceBytes(manifest, mediaPath) {
       filePath,
     })),
   );
-  const [manifestStats, detectionsStats, videoStats] = await Promise.all([
+  const [manifestStats, videoStats] = await Promise.all([
     fs.stat(path.join(fixtureDir, "detections.manifest.json")),
-    fs.stat(path.join(fixtureDir, "detections.json")),
     fs.stat(mediaPath),
   ]);
 
@@ -242,7 +241,6 @@ async function measureSourceBytes(manifest, mediaPath) {
       bytes: chunk.bytes,
       src: path.relative(fixtureDir, chunk.filePath),
     })),
-    detectionsJsonBytes: detectionsStats.size,
     manifestBytes: manifestStats.size,
     videoBytes: videoStats.size,
   };

@@ -118,7 +118,7 @@ demo/fixtures/<sample-name>/
   README.md
   <original-media-file>
   raw-sam3.jsonl
-  detections.json
+  detections.json            (git-ignored on committed samples)
   detections.manifest.json
   detections/
     000000.json
@@ -129,6 +129,26 @@ demo/fixtures/<sample-name>/
 payloads. Extracted JPEG frames and the source frame manifest are temporary and
 written under `tools/sam3-fixture/output/<sample-name>/` as `frames.jsonl` and
 `frames.meta.json`, which git ignores.
+
+## Restoring `detections.json`
+
+`detections.json` is a build intermediate, not shipped data: the demo and both
+mask benchmarks read `detections.manifest.json` plus `detections/*.json`. The
+committed samples git-ignore the single file and rebuild it on demand.
+
+```sh
+npm run fixture:sam3:restore
+npm run fixture:sam3:restore -- --sample-name basketball_sam3
+```
+
+The restore normalizes the committed `raw-sam3.jsonl` through
+`--normalize-only`, then checks the result against the sha256 the fixture was
+committed at. `basketball_sam3` takes seconds; `horse_trail` takes about 22
+minutes.
+
+Rebuilding the geometry fixture needs a restore first. It reads the pre-merge
+SAM3 timeline from `detections.json`, and the chunks beside that file are its
+own output and already carry the merged geometry.
 
 ## Rebuilding a v1 Fixture's Proxy
 
@@ -185,6 +205,12 @@ npm run fixture:sam3:chunk -- \
 `fixture:sam3:extract` writes `frames.meta.json` next to its `--output`.
 `fixture:sam3:run` reads the source frame rate, frame count, duration, and first
 timestamp from it; pass `--frames-meta` to point somewhere else.
+
+`--normalize-only` rebuilds `--detections-output` from an existing
+`--raw-output` alone, with no `--input`, no model call and no
+`ROBOFLOW_API_KEY`. Any manifest carrying a `video` block serves as
+`--frames-meta`, including a fixture's own `detections.manifest.json`, which is
+what `fixture:sam3:restore` passes.
 
 `tools/geometry-fixture/run-pose.py` reads the same extracted frames, so a pose
 run for a merged fixture lands on the grid its detections were inferred on

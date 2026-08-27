@@ -96,7 +96,7 @@ score between `0.10` and `0.23`.
 ## Files
 
     fixture.meta.json          demo discovery metadata
-    detections.json            normalized detection timeline
+    detections.json            normalized SAM3 timeline, git-ignored
     detections.manifest.json   chunk manifest with geometry counts and provenance
     detections/*.json          one-second DetectionFrame chunks (compact JSON)
     raw-sam3.jsonl             SAM3 responses, image payloads and key omitted
@@ -111,11 +111,20 @@ block of `detections.manifest.json`.
 
 ## Regeneration
 
-The merge is deterministic given the committed inputs and needs no network:
+The merge is deterministic given the committed inputs and needs no network. It
+reads the pre-merge SAM3 timeline from `detections.json`, which is git-ignored,
+so restore that first:
 
 ```bash
+npm run fixture:sam3:restore -- --sample-name basketball_sam3
 npm run fixture:geometry:create
 ```
+
+The restore renormalizes the committed `raw-sam3.jsonl` and verifies the result
+against the sha256 this fixture was committed at, which `detections.manifest.json`
+also records under `provenance.sources`. The chunks are the merge's own output
+and already carry polygons, polylines and keypoints, so they cannot stand in for
+that input.
 
 Both raw inputs behind that merge have a committed path back to them. Both models
 read one extraction of the source's own frames, so a full rebuild is four

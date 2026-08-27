@@ -34,14 +34,16 @@ if (options.help) {
   process.exit(0);
 }
 
-if (!options.input || !options.rawOutput) {
+if (!options.rawOutput || (!options.input && !options.normalizeOnly)) {
   printHelp();
-  throw new Error("--input and --raw-output are required.");
+  throw new Error(
+    "--raw-output is required, and --input unless --normalize-only is set.",
+  );
 }
 
 const apiKey = process.env.ROBOFLOW_API_KEY;
 
-if (!apiKey) {
+if (!apiKey && !options.normalizeOnly) {
   throw new Error(
     "ROBOFLOW_API_KEY is required. The key must come from the environment and must not be written into fixture files.",
   );
@@ -56,6 +58,13 @@ async function main(runOptions, apiKeyValue) {
   );
 
   await mkdir(path.dirname(runOptions.rawOutput), { recursive: true });
+
+  // Normalization is a pure function of the raw capture, so a committed capture
+  // rebuilds the fixture byte for byte.
+  if (runOptions.normalizeOnly) {
+    await writeNormalizedDetections(runOptions, sourceVideo);
+    return;
+  }
 
   const rawStream = createWriteStream(runOptions.rawOutput, { flags: "a" });
 
@@ -97,6 +106,10 @@ async function main(runOptions, apiKeyValue) {
     });
   }
 
+  await writeNormalizedDetections(runOptions, sourceVideo);
+}
+
+async function writeNormalizedDetections(runOptions, sourceVideo) {
   if (runOptions.detectionsOutput) {
     const rawRecords = await readRawRecords(runOptions.rawOutput);
     const detectionsFixture = normalizeSam3Responses(rawRecords, {
@@ -186,6 +199,9 @@ function parseArgs(args) {
       case "--help":
       case "-h":
         parsed.help = true;
+        break;
+      case "--normalize-only":
+        parsed.normalizeOnly = true;
         break;
       case "--input":
         parsed.input = readFlagValue(args, (index += 1), arg);
@@ -334,6 +350,9 @@ Options:
   --frames-meta <path>                default: ${FRAMES_MANIFEST_FILE} next to --input
   --model-id <id>                    default: sam3/sam3_final
   --nms-iou-threshold <0..1>          default: 0.5
+  --normalize-only                   rebuild --detections-output from an
+                                     existing --raw-output; no model call, no
+                                     --input, no ROBOFLOW_API_KEY
   --sample-name <name>
   --source-file <filename>`);
 }

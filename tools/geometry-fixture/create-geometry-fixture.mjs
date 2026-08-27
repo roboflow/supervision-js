@@ -2,9 +2,12 @@
 /**
  * Builds the combined geometry showcase fixture from offline model inputs:
  *
- * 1. the committed SAM3 segmentation timeline
+ * 1. the SAM3 segmentation timeline
  *    (`demo/fixtures/basketball_sam3/detections.json`), whose masks are
- *    converted into bounded simplified polygons on the same detections; and
+ *    converted into bounded simplified polygons on the same detections. That
+ *    file is git-ignored, so run `npm run fixture:sam3:restore` first; the
+ *    chunks beside it are this script's own output and already carry the merged
+ *    geometry, so they cannot stand in for it; and
  * 2. a raw pose JSONL produced once by `run-pose.py`, normalized here into
  *    center-based rects, zero-based COCO skeleton edges, and an explicit
  *    visibility policy; and optionally
