@@ -19,8 +19,9 @@ artifacts/supervision-<version>.tgz
 
 The manual GitHub Actions workflow at
 `.github/workflows/publish-npm.yml` recreates and independently validates that
-artifact before publishing it. It runs only from `main` and is gated by the
-`npm-publish` GitHub environment.
+artifact before publishing it. Stable `latest` releases run only from `main`;
+an explicit prerelease may run from a `release/*` branch with the `next` tag.
+Every publish is gated by the `npm-publish` GitHub environment.
 
 `latest` is the default tag for a reviewed, general-availability release. A
 stable publish updates the default version that `npm install supervision`
@@ -108,6 +109,16 @@ package version.
    commit the workflow published. Then verify that public installation guidance,
    the toolbar version, and the documentation deployment match the stable
    release.
+
+### Prerelease Procedure
+
+Use a dedicated `release/*` branch when an integration needs to consume an
+unmerged commit. Set `packages/web/package.json` to a unique SemVer prerelease
+such as `0.2.0-next.0`, update the lockfile and docs toolbar mirror, then run
+**Publish npm package** from that release branch with `next`. npm versions are
+immutable: each later prerelease needs a new version such as
+`0.2.0-next.1`; the `next` dist-tag moves to that newest version. A release
+branch can never publish `latest` or create a stable GitHub Release.
 
 ## Recovery
 

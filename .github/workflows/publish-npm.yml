@@ -27,7 +27,9 @@ concurrency:
 
 jobs:
   publish:
-    if: github.ref == 'refs/heads/main'
+    if: >-
+      github.ref == 'refs/heads/main' ||
+      (startsWith(github.ref, 'refs/heads/release/') && inputs.dist_tag == 'next')
     name: Verify and publish supervision
     runs-on: ubuntu-latest
     environment:
