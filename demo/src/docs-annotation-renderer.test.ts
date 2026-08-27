@@ -31,7 +31,7 @@ describe("docs annotation renderers", () => {
                   ? ["ellipsesEnabled"]
                   : renderer === "mask-halo"
                     ? ["maskHaloEnabled"]
-                    : renderer === "regions"
+                    : renderer === "regions" || renderer === "region-effects"
                       ? []
                       : [`${renderer}Enabled`];
 

@@ -24,6 +24,7 @@ import type {
 import {
   demoFixtures,
   defaultDemoFixture,
+  resolveDemoFixture,
   type DemoFixtureDefinition,
 } from "../fixtures/demo-fixtures";
 import {
@@ -145,11 +146,8 @@ const initialUploadInferenceState: UploadInferenceState = {
 export function useDemoRenderer(
   options: UseDemoRendererOptions = {},
 ): DemoRendererState {
-  const [initialFixture] = useState(
-    () =>
-      demoFixtures.find(
-        (fixture) => fixture.sampleName === options.initialFixtureId,
-      ) ?? defaultDemoFixture,
+  const [initialFixture] = useState(() =>
+    resolveDemoFixture(options.initialFixtureId),
   );
   const [fixtureFrameTransform] = useState(() => options.fixtureFrameTransform);
   const [fixtureDetectionSourceTransform] = useState(
@@ -219,9 +217,7 @@ export function useDemoRenderer(
   const [uploadRun, setUploadRun] = useState<
     (UploadRunRequest & { readonly id: number }) | null
   >(null);
-  const activeFixture =
-    demoFixtures.find((fixture) => fixture.sampleName === sampleFixtureId) ??
-    defaultDemoFixture;
+  const activeFixture = resolveDemoFixture(sampleFixtureId);
 
   const syncRendererState = useCallback((renderer: MediaRenderer) => {
     const state = renderer.getState();

@@ -16,10 +16,7 @@ const fixtureMetaModules = import.meta.glob(
   },
 ) as Record<string, DemoFixtureMeta>;
 const fixtureManifestUrls = import.meta.glob(
-  [
-    "../../fixtures/*/detections.manifest.json",
-    "!../../fixtures/basketball_sam3/detections.manifest.json",
-  ],
+  "../../fixtures/*/detections.manifest.json",
   {
     eager: true,
     import: "default",
@@ -27,10 +24,7 @@ const fixtureManifestUrls = import.meta.glob(
   },
 ) as Record<string, string>;
 const fixtureMediaUrls = import.meta.glob(
-  [
-    "../../fixtures/**/*.{mp4,MP4,mov,MOV,m4v,M4V,webm,WEBM}",
-    "!../../fixtures/**/*.normalized.webm",
-  ],
+  "../../fixtures/**/*.{mp4,MP4,mov,MOV,m4v,M4V,webm,WEBM}",
   {
     eager: true,
     import: "default",
@@ -38,10 +32,7 @@ const fixtureMediaUrls = import.meta.glob(
   },
 ) as Record<string, string>;
 const sampleDetectionChunkUrls = import.meta.glob(
-  [
-    "../../fixtures/*/detections/*.json",
-    "!../../fixtures/basketball_sam3/detections/*.json",
-  ],
+  "../../fixtures/*/detections/*.json",
   {
     eager: true,
     import: "default",
@@ -97,17 +88,33 @@ export interface DemoFixtureDefinition {
   readonly presentationDefaults?: DemoFixturePresentationDefaults;
   readonly presentationAvailability?: DemoPresentationAvailability;
   readonly sampleName: string;
+  /** Whether the fixture appears in the general demo sample selector. */
+  readonly showInDemo: boolean;
   readonly mediaReadyStatusLabel: string;
   readonly videoSrc: string;
 }
 
-export const demoFixtures = createDemoFixtures();
+/** Every committed fixture that can be loaded by a focused documentation view. */
+export const demoFixtureCatalog = createDemoFixtures();
+
+/** The curated fixture subset presented by the general interactive demo. */
+export const demoFixtures = demoFixtureCatalog.filter(
+  (fixture) => fixture.showInDemo,
+);
 
 export const defaultDemoFixture = requireDemoFixture(
   demoFixtures.find(
     (fixture) => fixture.sampleName === DEFAULT_FIXTURE_SAMPLE_NAME,
   ) ?? demoFixtures[0],
 );
+
+/** Resolves focused documentation fixtures as well as selector-visible samples. */
+export function resolveDemoFixture(sampleName: string | undefined) {
+  return (
+    demoFixtureCatalog.find((fixture) => fixture.sampleName === sampleName) ??
+    defaultDemoFixture
+  );
+}
 
 /** Per-geometry detection counts reported by generated fixture manifests. */
 export interface DemoFixtureGeometrySummary {
@@ -312,10 +319,6 @@ function createDemoFixtures(): readonly DemoFixtureDefinition[] {
         return [];
       }
 
-      if (meta.showInDemo === false) {
-        return [];
-      }
-
       const basePath = metaPath.replace(/\/fixture\.meta\.json$/, "");
       const manifestPath = `${basePath}/detections.manifest.json`;
       const mediaPath = normalizeFixturePath(basePath, meta.media.file);
@@ -342,6 +345,7 @@ function createDemoFixtures(): readonly DemoFixtureDefinition[] {
           presentationDefaults: meta.presentation,
           presentationAvailability: meta.presentationAvailability,
           sampleName: meta.sampleName,
+          showInDemo: meta.showInDemo !== false,
           videoSrc,
         } satisfies DemoFixtureDefinition,
       ];

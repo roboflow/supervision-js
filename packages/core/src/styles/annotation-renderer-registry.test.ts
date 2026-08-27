@@ -17,6 +17,8 @@ import { BasePolylineStyle } from "#styles/polyline-style";
 import {
   annotationRendererKinds,
   annotationRenderers,
+  RegionRendererCoverageKind,
+  RegionRendererMediaEffectKind,
 } from "#types/annotation-renderer";
 
 type IsExact<TLeft, TRight> = [TLeft] extends [TRight]
@@ -212,6 +214,37 @@ describe("annotation renderer registry", () => {
         flip: { horizontal: true },
         scale: 3,
       },
+    });
+
+    expect(
+      annotationRenderers.region({
+        id: "person-pixelate",
+        region: { kind: "bounds" },
+        source: {
+          coverage: { kind: RegionRendererCoverageKind.Mask },
+          effect: {
+            kind: RegionRendererMediaEffectKind.Pixelate,
+            size: 12,
+          },
+          kind: "media",
+          region: { kind: "bounds" },
+        },
+        target: { className: "person" },
+      }),
+    ).toEqual({
+      id: "person-pixelate",
+      kind: "region",
+      region: { kind: "bounds" },
+      source: {
+        coverage: { kind: RegionRendererCoverageKind.Mask },
+        effect: {
+          kind: RegionRendererMediaEffectKind.Pixelate,
+          size: 12,
+        },
+        kind: "media",
+        region: { kind: "bounds" },
+      },
+      target: { className: "person" },
     });
   });
 });
