@@ -1,5 +1,6 @@
 import { MarkerShape, type DetectionFrame } from "supervision";
 import {
+  createDemoPolylineShadowStroke,
   demoMarkerPositionOffsets,
   type DemoMarkerPosition,
   type DemoPresentationSettings,
@@ -532,16 +533,22 @@ export function createDocsAnnotationRendererSnippet(
     }),
   ],
 });`;
-    case "polylines":
+    case "polylines": {
+      const shadow = createDemoPolylineShadowStroke(
+        settings.polylineStrokeWidth,
+      );
+
       return `session.setPresentation({
   renderers: [
     annotationRenderers.polyline({
       style: new BasePolylineStyle({
+        shadowStroke: { alpha: ${formatNumber(shadow.alpha)}, color: ${formatColor(shadow.color)}, width: ${formatNumber(shadow.width)} },
         stroke: { width: ${formatNumber(settings.polylineStrokeWidth)} },
       }),
     }),
   ],
 });`;
+    }
     case "keypoints":
       return `session.setPresentation({
   renderers: [

@@ -234,6 +234,8 @@ const fixture = {
     },
     polyline: {
       algorithm: BASKETBALL_TRACE_ALGORITHM,
+      confidencePolicy:
+        "metadata.trajectoryConfidence is the median SAM3 confidence of the observations composing the drawn window; the detection's own confidence stays its single frame's raw score",
       derivedFrom:
         "motion-gated nearest-neighbor association across SAM3 basketball detections on the shared frame grid",
       interpolation: "none",
@@ -752,6 +754,7 @@ function attachBasketballCenterTrace(
   }
 
   const observation = {
+    confidence: basketball.confidence,
     mediaTime,
     x: basketball.rect.x,
     y: basketball.rect.y,
@@ -781,12 +784,36 @@ function attachBasketballCenterTrace(
             metadata: {
               ...detection.metadata,
               trajectoryTrackId: BASKETBALL_TRACE_TRACK_ID,
+              ...(polyline
+                ? {
+                    trajectoryConfidence: medianConfidence(trace),
+                  }
+                : {}),
             },
           }
         : detection,
     ),
     previousObservation: observation,
   };
+}
+
+/**
+ * How much of the drawn path the model stood behind.
+ *
+ * A drawn window spans up to a second of observations, so its own detection's
+ * score answers a question about a single frame and not about the path. The
+ * median holds against the one-frame dropouts that punctuate this clip and
+ * still falls when a whole segment is weak.
+ */
+function medianConfidence(trace) {
+  const sorted = trace
+    .map(({ confidence }) => confidence)
+    .sort((a, b) => a - b);
+  const middle = sorted.length / 2;
+
+  return sorted.length % 2 === 0
+    ? (sorted[middle - 1] + sorted[middle]) / 2
+    : sorted[Math.floor(middle)];
 }
 
 function normalizePoseFrame(rawDetections, frame) {

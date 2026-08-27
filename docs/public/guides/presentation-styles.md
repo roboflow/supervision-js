@@ -174,6 +174,7 @@ const polygonStyle = new BasePolygonStyle({
 });
 
 const polylineStyle = new BasePolylineStyle({
+  shadowStroke: { alpha: 0.55, color: 0x000000, width: 6 },
   stroke: { alpha: 1, color: 0x38bdf8, width: 4 },
 });
 
@@ -197,6 +198,10 @@ session.setPresentation({
 `BaseKeypointStyle` draws `NotLabeled` points as absent, `Occluded` points as
 crosses, and `Visible` points as circles. Pass `definitions` when class-specific
 skeleton vertices and edges need their own colors.
+
+`shadowStroke` draws a contrast stroke under a polyline or under skeleton edges,
+so a thin class-colored line still reads where the media beneath it happens to
+share that color. The default polyline and keypoint styles both carry one.
 
 ## Consistent Class Colors
 

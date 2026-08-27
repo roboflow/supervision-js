@@ -11,6 +11,7 @@ import { KeypointVisibility, type DetectionFrame } from "supervision";
 import { computeDetectionMaskRect } from "supervision/editing";
 import {
   constrainDemoPresentationSettings,
+  createDemoPresentation,
   defaultDemoPresentationSettings,
   type DemoPresentationLayerSetting,
 } from "../presentation/demo-presentation";
@@ -304,6 +305,62 @@ describe("geometry showcase fixture", () => {
 
     expect(geometryChunks.length).toBeGreaterThan(0);
     expect(violations).toBe(0);
+  });
+
+  it("keeps the basketball trace drawn for as long as the track holds", () => {
+    const fixture = demoFixtures.find(
+      (candidate) => candidate.sampleName === "basketball_sam3",
+    )!;
+    const presentation = createDemoPresentation(
+      constrainDemoPresentationSettings(
+        { ...defaultDemoPresentationSettings, ...fixture.presentationDefaults },
+        fixture.presentationAvailability,
+      ),
+    );
+    const drawn: boolean[] = [];
+    let untracked = 0;
+
+    for (const chunk of geometryChunks) {
+      for (const frame of chunk.frames) {
+        for (const [detectionIndex, detection] of frame.detections.entries()) {
+          if (!detection.polyline) continue;
+
+          const trackConfidence = detection.metadata?.trajectoryConfidence;
+
+          if (
+            typeof trackConfidence !== "number" ||
+            trackConfidence < 0 ||
+            trackConfidence > 1
+          ) {
+            untracked += 1;
+          }
+
+          drawn.push(
+            presentation.polylineStyle?.resolve(detection, {
+              detectionIndex,
+              frame,
+              mediaTime: frame.mediaTime,
+            }) !== undefined,
+          );
+        }
+      }
+    }
+
+    // The reported symptom: the trail starts, then blinks out. A frame the
+    // fixture's own default threshold hides between two frames it shows is one
+    // blink, whatever the run of frames around it does.
+    const blinks = drawn.filter(
+      (shown, index) =>
+        !shown &&
+        index > 0 &&
+        drawn[index - 1] === true &&
+        drawn[index + 1] === true,
+    ).length;
+
+    expect(drawn.length).toBeGreaterThan(0);
+    expect(untracked).toBe(0);
+    expect(blinks).toBe(0);
+    expect(drawn.filter(Boolean).length / drawn.length).toBeGreaterThan(0.9);
   });
 
   it("stores the basketball trace on one masked frozen identity", () => {

@@ -83,6 +83,16 @@ Detections are committed unfiltered, down to `0.10`. `fixture.meta.json` opens
 the demo at a `0.5` confidence gate, which leaves 2462 of the 5948 detections
 visible. A surface that needs the full timeline has to set its own threshold.
 
+A drawn trajectory spans up to a second of observations, so the detection's own
+score answers a question about one frame rather than about the path, and a
+single weak frame would erase a path built from twenty-five strong ones. The
+frame carrying a polyline therefore also carries
+`metadata.trajectoryConfidence`: the median SAM3 confidence of the observations
+composing that window. Filter a trajectory on it and every other layer on
+`confidence`. Under the fixture's own `0.5` gate that draws the trail across the
+whole tracked run and hides the final restarted segment, whose observations all
+score between `0.10` and `0.23`.
+
 ## Files
 
     fixture.meta.json          demo discovery metadata

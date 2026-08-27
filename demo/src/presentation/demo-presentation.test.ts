@@ -608,6 +608,73 @@ describe("demo presentation", () => {
     });
   });
 
+  it("filters a trajectory on the track's confidence and every other layer on the frame's", () => {
+    const presentation = createDemoPresentation({
+      ...defaultDemoPresentationSettings,
+      confidenceThreshold: 0.5,
+    });
+    const weakFrameOfStrongTrack: Detection = {
+      className: "basketball",
+      confidence: 0.11,
+      metadata: { trajectoryConfidence: 0.86 },
+      polyline: {
+        points: [
+          { x: 0, y: 0 },
+          { x: 4, y: 4 },
+        ],
+      },
+      rect: { height: 34, width: 34, x: 10, y: 12 },
+    };
+    const strongFrameOfWeakTrack: Detection = {
+      ...weakFrameOfStrongTrack,
+      confidence: 0.9,
+      metadata: { trajectoryConfidence: 0.17 },
+    };
+    const context = {
+      detectionIndex: 0,
+      frame: { detections: [weakFrameOfStrongTrack], mediaTime: 0 },
+      mediaTime: 0,
+    };
+
+    expect(
+      presentation.polylineStyle?.resolve(weakFrameOfStrongTrack, context),
+    ).toBeDefined();
+    expect(
+      presentation.boxStyle?.resolve(weakFrameOfStrongTrack, context),
+    ).toBeUndefined();
+    expect(
+      presentation.polylineStyle?.resolve(strongFrameOfWeakTrack, context),
+    ).toBeUndefined();
+  });
+
+  it("draws a trajectory over a contrast stroke so it reads on any media", () => {
+    const presentation = createDemoPresentation(
+      defaultDemoPresentationSettings,
+    );
+    const trajectory: Detection = {
+      className: "basketball",
+      confidence: 0.9,
+      polyline: {
+        points: [
+          { x: 0, y: 0 },
+          { x: 4, y: 4 },
+        ],
+      },
+    };
+
+    expect(
+      presentation.polylineStyle?.resolve(trajectory, {
+        detectionIndex: 0,
+        frame: { detections: [trajectory], mediaTime: 0 },
+        mediaTime: 0,
+      })?.shadowStroke,
+    ).toMatchObject({
+      alpha: 0.55,
+      color: 0x000000,
+      width: defaultDemoPresentationSettings.polylineStrokeWidth + 2,
+    });
+  });
+
   it("filters vector layers through the shared confidence threshold", () => {
     const presentation = createDemoPresentation({
       ...defaultDemoPresentationSettings,

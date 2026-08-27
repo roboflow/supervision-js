@@ -419,13 +419,30 @@ function createDemoPolylineStyle(
   settings: DemoPresentationSettings,
 ): PolylineStyle {
   return new BasePolylineStyle({
-    shouldRender: (detection) => passesConfidenceThreshold(detection, settings),
+    shadowStroke: createDemoPolylineShadowStroke(settings.polylineStrokeWidth),
+    shouldRender: (detection) =>
+      passesTrajectoryConfidenceThreshold(detection, settings),
     stroke: (detection) => ({
       alpha: 1,
       color: resolveClassStyle(detection, settings).stroke,
       width: settings.polylineStrokeWidth,
     }),
   });
+}
+
+/**
+ * Contrast under a path that crosses whatever the media happens to show.
+ *
+ * A trajectory is drawn in its class color so it stays tied to the object it
+ * describes, and the basketball's orange over a wooden court is the case where
+ * that color alone leaves the path unreadable.
+ */
+export function createDemoPolylineShadowStroke(strokeWidth: number) {
+  return {
+    alpha: 0.55,
+    color: 0x000000,
+    width: strokeWidth + 2,
+  };
 }
 
 function createDemoKeypointStyle(
@@ -744,14 +761,18 @@ function createDemoInteractionPolylineStyle(
 ): PolylineStyle {
   const isSelected = state === DetectionInteractionState.Selected;
 
+  const strokeWidth = isSelected
+    ? settings.interactionSelectedStrokeWidth
+    : settings.interactionHoverStrokeWidth;
+
   return new BasePolylineStyle({
-    shouldRender: (detection) => passesConfidenceThreshold(detection, settings),
+    shadowStroke: createDemoPolylineShadowStroke(strokeWidth),
+    shouldRender: (detection) =>
+      passesTrajectoryConfidenceThreshold(detection, settings),
     stroke: (detection) => ({
       alpha: 1,
       color: resolveClassStyle(detection, settings).stroke,
-      width: isSelected
-        ? settings.interactionSelectedStrokeWidth
-        : settings.interactionHoverStrokeWidth,
+      width: strokeWidth,
     }),
   });
 }
@@ -869,6 +890,28 @@ function passesConfidenceThreshold(
   settings: DemoPresentationSettings,
 ) {
   return (detection.confidence ?? 1) >= settings.confidenceThreshold;
+}
+
+/**
+ * The confidence threshold applied to a path rather than to a frame.
+ *
+ * Every other layer draws what the detection is claimed to be at this moment,
+ * so its own confidence is the number to filter on. A trajectory draws up to a
+ * second of accepted observations, and filtering that on the newest frame's
+ * score lets one weak frame erase a path built from twenty-five strong ones,
+ * which a viewer reads as the trail blinking. A fixture that measures its own
+ * tracks publishes that measurement, and the threshold keeps biting: a path
+ * whose observations are weak throughout still disappears.
+ */
+function passesTrajectoryConfidenceThreshold(
+  detection: Detection,
+  settings: DemoPresentationSettings,
+) {
+  const trajectoryConfidence = detection.metadata?.trajectoryConfidence;
+
+  return typeof trajectoryConfidence === "number"
+    ? trajectoryConfidence >= settings.confidenceThreshold
+    : passesConfidenceThreshold(detection, settings);
 }
 
 /**
