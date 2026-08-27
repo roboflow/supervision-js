@@ -242,6 +242,12 @@ memory figure taken on the wrong side is taken with a cache several times deeper
 than the file it stands in for. `cache-below-flip` and `cache-above-flip` bracket
 it at 26 slots and 13.
 
+**The matrix is still lopsided here**: 87 of the 91 built clips sit on the byte
+budget and 4 on the floor. Bracketing the flip and labelling every clip makes
+that visible rather than fixing it. Any seek, scrub or memory number taken on a
+byte-budget clip is taken with a deeper cache than either real file gets, and
+should be read next to a `slotFloor` clip before it is believed.
+
 ## The matrix definition
 
 `matrix.json` lists every clip: an id, its tier and axis, what it varies in
