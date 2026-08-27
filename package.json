@@ -89,7 +89,7 @@
     "benchmark:masks:gpu:dev": "vite --config benchmark/masks/gpu/vite.config.ts --host 127.0.0.1 --port 5176",
     "benchmark:masks:gpu:build": "tsc --noEmit -p benchmark/masks/gpu/tsconfig.json && vite build --config benchmark/masks/gpu/vite.config.ts",
     "fixture:sam3:dev": "npm run build && vite --config tools/sam3-fixture/vite.config.ts",
-    "fixture:sam3:restore": "node tools/sam3-fixture/restore-detections.mjs",
+    "fixture:sam3:restore": "npm run build -w supervision-js-core && node tools/sam3-fixture/restore-detections.mjs",
     "fixture:sam3:build": "npm run build && tsc --noEmit -p tools/sam3-fixture/tsconfig.json && vite build --config tools/sam3-fixture/vite.config.ts",
     "fixture:sam3:chunk": "node tools/sam3-fixture/chunk-detections.mjs",
     "fixture:sam3:create": "node tools/sam3-fixture/create-fixture.mjs",
