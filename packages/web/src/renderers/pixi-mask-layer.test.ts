@@ -159,6 +159,47 @@ describe("pixi mask layer", () => {
     expect(layer.getActiveIdMaskFrameTexture()).toBeNull();
   });
 
+  it("holds a mask across the step the playhead takes at the rate it plays", () => {
+    const holdsAcross = (playbackRate: number, mediaTime: number) => {
+      const layer = createPixiMaskLayer({
+        BufferImageSource: FakeBufferImageSource as never,
+        ImageSource: FakeImageSource as never,
+        Sprite: FakeSprite as never,
+        Texture: FakeTexture as never,
+        detectionTimeline: {} as never,
+        maskStyle: new BaseMaskStyle(),
+      });
+      const sprite = layer.createSprite({
+        height: 80,
+        width: 120,
+      }) as FakeSprite;
+
+      layer.setPlaybackRate(playbackRate);
+      preparedWindow.frame = {
+        detectionFrame: { detections: [], mediaTime: 0.1 },
+        key: "mask-frame",
+        maskFrame: idMaskFrame(),
+        maskStatus: "prepared",
+      };
+      layer.drawFrame(0.1);
+
+      preparedWindow.frame = {
+        detectionFrame: { detections: [], mediaTime },
+        key: "owed-frame",
+        maskStatus: "pending",
+      };
+      layer.drawFrame(mediaTime);
+
+      return sprite.visible;
+    };
+
+    // Two 30 fps steps: what eight-times playback puts between painted frames,
+    // and further than one-times playback ever travels between them.
+    expect(holdsAcross(1, 0.1667)).toBe(false);
+    expect(holdsAcross(8, 0.1667)).toBe(true);
+    expect(holdsAcross(8, 0.6)).toBe(false);
+  });
+
   it("says which frame it is holding, and stops saying so once it lets go", () => {
     const layer = createPixiMaskLayer({
       BufferImageSource: FakeBufferImageSource as never,

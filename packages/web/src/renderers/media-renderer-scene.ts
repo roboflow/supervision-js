@@ -131,6 +131,12 @@ export interface MediaRendererScene {
    * again.
    */
   setPlaybackActive?(active: boolean): void;
+  /**
+   * How fast media time runs against the clock. Tolerances a layer holds in
+   * media seconds cover a distance that grows with the rate, so a layer that
+   * means "about a frame" has to know it.
+   */
+  setPlaybackRate?(playbackRate: number): void;
   setTimelineContext?(context: MediaRendererSceneTimelineContext): void;
   presentSample(sample: DecodedVideoSample): PresentedMediaSample;
   /**

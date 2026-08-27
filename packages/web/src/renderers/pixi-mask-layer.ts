@@ -51,7 +51,13 @@ import type {
   UniformGroup as PixiUniformGroup,
 } from "pixi.js";
 
-const MAX_PENDING_MASK_HOLD_SECONDS = 0.05;
+/**
+ * How far a held mask may lag the frame it is drawn over, measured on the clock
+ * the viewer watches rather than in media time: the same media gap covers eight
+ * times the ground at eight times speed, and would be a different promise at
+ * every rate.
+ */
+const MAX_PENDING_MASK_LAG_SECONDS = 0.05;
 /**
  * Wall-clock ceiling on that hold. The hold exists so a cook that lands within
  * a frame or two replaces the raster before anyone sees a gap, and most land in
@@ -130,7 +136,7 @@ type UniformGroupConstructor = new (
  * `drawnFrameTime` is the DETECTION frame the visible raster belongs to, which
  * is not always the frame the rest of the present drew: with the cook short of
  * the presented frame, the layer keeps the previous mask up for up to
- * MAX_PENDING_MASK_HOLD_SECONDS of media time. `heldStale` is that branch, and
+ * MAX_PENDING_MASK_LAG_SECONDS of playback. `heldStale` is that branch, and
  * it separates a late cook from the layers resolving different frames, which
  * have different fixes.
  */
@@ -163,6 +169,9 @@ export interface PixiMaskLayer {
   getActiveIdMaskFrameTexture(): PixiActiveIdMaskFrameTexture | null;
   getActiveRegionMaskCoverage(): PixiActiveRegionMaskCoverage | null;
   setPlaybackActive(active: boolean): void;
+  /** How fast media time runs against the clock, which sets how much media a
+   *  held mask may lag by. */
+  setPlaybackRate(playbackRate: number): void;
   setTimelineContext(context: PreparedRenderTimelineContext): void;
   setMaskStyle(maskStyle: MaskStyle | null | undefined): void;
   setMaskHaloStyle(maskHaloStyle: MaskHaloStyle | null | undefined): void;
@@ -260,6 +269,7 @@ export function createPixiMaskLayer(options: {
   let visibleMaskMediaTime: number | null = null;
   let heldStale = false;
   let heldSinceMs: number | null = null;
+  let playbackRate = 1;
   let holdExpiryTimer: ReturnType<typeof setTimeout> | null = null;
   let isDestroyed = false;
   const maskTextures = new Map<string, PixiTexture>();
@@ -453,6 +463,10 @@ export function createPixiMaskLayer(options: {
         frame: coverage,
         getTexture: (entry) => getRegionMaskTexture(frameKey, entry),
       };
+    },
+
+    setPlaybackRate(rate) {
+      playbackRate = rate;
     },
 
     setPlaybackActive(active) {
@@ -714,7 +728,7 @@ export function createPixiMaskLayer(options: {
     return (
       visibleMaskMediaTime !== null &&
       Math.abs(mediaTime - visibleMaskMediaTime) <=
-        MAX_PENDING_MASK_HOLD_SECONDS
+        MAX_PENDING_MASK_LAG_SECONDS * playbackRate
     );
   }
 

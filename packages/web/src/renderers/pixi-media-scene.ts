@@ -262,6 +262,7 @@ export async function createPixiMediaScene(
   let currentVisibility: AnnotationVisibility | undefined = options.visibility;
   let currentMediaTime = 0;
   let isPlaybackActive = true;
+  let playbackRate = 1;
   let displayBrightness = 1;
   let displayContrast = 1;
   let viewportScale = 1;
@@ -1076,6 +1077,11 @@ export async function createPixiMediaScene(
       maskLayer?.setPlaybackActive(active);
     },
 
+    setPlaybackRate(rate) {
+      playbackRate = rate;
+      maskLayer?.setPlaybackRate(rate);
+    },
+
     setTimelineContext(context) {
       timelineContext = context;
       maskLayer?.setTimelineContext(context);
@@ -1617,6 +1623,7 @@ export async function createPixiMediaScene(
       });
 
       maskLayer.setPlaybackActive(isPlaybackActive);
+      maskLayer.setPlaybackRate(playbackRate);
 
       if (timelineContext) {
         maskLayer.setTimelineContext(timelineContext);

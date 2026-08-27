@@ -105,6 +105,10 @@ export async function createMediaRendererCore(
     isSeekGestureInFlight = false;
     publishPlaybackActivity();
   };
+  const adoptPlaybackRate = (playbackRate: number) => {
+    runtimeState.setPlaybackRate(playbackRate);
+    mediaScene?.setPlaybackRate?.(playbackRate);
+  };
   const runtimeState = createMediaRendererRuntimeState({
     fit,
     playbackRate: initialPlaybackRate,
@@ -439,7 +443,7 @@ export async function createMediaRendererCore(
       }
 
       playbackController?.setPlaybackRate(playbackRate);
-      runtimeState.setPlaybackRate(playbackRate);
+      adoptPlaybackRate(playbackRate);
     },
 
     async refresh() {
@@ -693,6 +697,7 @@ export async function createMediaRendererCore(
       visibility: currentPresentation.visibility,
     });
     publishPlaybackActivity();
+    mediaScene.setPlaybackRate?.(runtimeState.snapshot().playbackRate);
     runtimeState.setRendererBackend(mediaScene.rendererBackend);
     detectionTimeline.setTimelineContext?.({
       duration: metadata.duration,
@@ -717,7 +722,7 @@ export async function createMediaRendererCore(
       transport = createMediaRendererTransport({
         channel: presentedFrameChannel,
         loop: options.loop !== false,
-        onPlaybackRate: runtimeState.setPlaybackRate,
+        onPlaybackRate: adoptPlaybackRate,
         onPlaybackState: adoptTransportPlaybackState,
         onPlayheadTime: (currentTime) => {
           runtimeState.recordPlayheadTime(currentTime);
