@@ -958,21 +958,19 @@ describe("ScrubController resuming after a starved walk", () => {
     cursor: FakeCursor;
     clock: FakeClock;
     controller: ScrubController;
-    painted: number[];
   } {
-    const painted: number[] = [];
     const cursor = new FakeCursor();
     cursor.track = { ...cursor.track, durationS: asSec(600) };
     const clock = new FakeClock();
     const controller = new ScrubController({
       cursor,
       clock,
-      onPaint: (frame) => painted.push(frame.timestampS),
+      onPaint: () => undefined,
       onEnded: () => undefined,
       cacheSkipNearMs: 100,
     });
     controller.bindCanvas(makeCanvas());
-    return { cursor, clock, controller, painted };
+    return { cursor, clock, controller };
   }
 
   /** The render loop keeps ticking through a wait on the network. A clock
