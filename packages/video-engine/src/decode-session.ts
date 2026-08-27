@@ -59,6 +59,13 @@ interface DecodedPicture {
   readonly durationS: number;
 }
 
+/**
+ * Half a microsecond: a submitted timestamp survives the round trip through the
+ * decoder as whole microseconds, so anything closer than this is the same
+ * packet and anything further is a decoder counting on a clock of its own.
+ */
+const TIMING_MATCH_S = 5e-7;
+
 interface PacketTiming {
   readonly timestampS: number;
   readonly durationS: number;
@@ -584,9 +591,25 @@ export class DecodeSession implements SessionFrameSource {
     this.pending.splice(at, 0, timing);
   }
 
+  /**
+   * A decoder that echoes the timestamp it was handed names its own pending
+   * entry, which survives an output being dropped. One that counts from an
+   * origin of its own names nothing, and position is all that is left. Taking
+   * position alone would let a single dropped output shift every picture after
+   * it onto the wrong detections, permanently and without a symptom.
+   */
+  private claimTiming(frame: VideoFrame): PacketTiming | undefined {
+    const submittedS = frame.timestamp / MICROSECONDS_PER_SECOND;
+    const at = this.pending.findIndex(
+      (timing) => Math.abs(timing.timestampS - submittedS) <= TIMING_MATCH_S,
+    );
+
+    return at === -1 ? this.pending.shift() : this.pending.splice(at, 1)[0];
+  }
+
   private receive(frame: VideoFrame): void {
     this.framesDecodedCount += 1;
-    const timing = this.pending.shift();
+    const timing = this.claimTiming(frame);
     if (this.closed || !timing) {
       frame.close();
       return;

@@ -141,10 +141,12 @@ class FakeDecoder implements VideoDecoderLike {
   private readonly output: (frame: VideoFrame) => void;
   private held: FakeFrame[] = [];
   private firstChunkUs: number | null = null;
+  private decodedCount = 0;
 
   constructor(
     init: VideoDecoderInit,
     private readonly stamp: StampMicroseconds,
+    private readonly dropEvery = 0,
   ) {
     this.output = init.output;
   }
@@ -169,6 +171,12 @@ class FakeDecoder implements VideoDecoderLike {
         this.closed = true;
       },
     };
+    this.decodedCount += 1;
+
+    if (this.dropEvery > 0 && this.decodedCount % this.dropEvery === 0) {
+      return;
+    }
+
     this.held.push(frame);
     queueMicrotask(() => this.emit());
   }
@@ -190,11 +198,11 @@ class FakeDecoder implements VideoDecoderLike {
   }
 }
 
-function openSession(stamp: StampMicroseconds): DecodeSession {
+function openSession(stamp: StampMicroseconds, dropEvery = 0): DecodeSession {
   return new DecodeSession({
     packets: new FixturePacketSource(),
     config: CONFIG,
-    createDecoder: (init) => new FakeDecoder(init, stamp),
+    createDecoder: (init) => new FakeDecoder(init, stamp, dropEvery),
   });
 }
 
@@ -255,5 +263,38 @@ describe.each([
     }
 
     expect(published).toEqual([150, 151, 152, 153, 154].map((i) => i * 1000));
+  });
+});
+
+describe("a decoder that silently drops an output", () => {
+  it.each(SEEKS)(
+    "still draws frame $frameIndex's detections over frame $frameIndex's pixels",
+    async ({ targetS, frameIndex }) => {
+      // Pairing each picture with the earliest packet still owed would shift
+      // every picture after the drop onto a neighbour's detections, and stay
+      // shifted, which is what a wrong position looks like on screen.
+      const session = openSession(echo, 7);
+
+      expect(await seekTo(session, targetS)).toEqual({
+        pictureIndex: frameIndex,
+        detectionFrameIndex: frameIndex,
+      });
+    },
+  );
+
+  it("publishes the container's own timestamps across a playback walk", async () => {
+    const session = openSession(echo, 7);
+    const published: number[] = [];
+
+    for await (const sample of session.framesFrom(6.0)) {
+      published.push(Math.round(sample.timestamp * TICK_RATE));
+      sample.close();
+      if (published.length === 5) break;
+    }
+
+    for (const [at, ticks] of published.entries()) {
+      expect(ticks % 1000).toBe(0);
+      if (at > 0) expect(ticks).toBeGreaterThan(published[at - 1] as number);
+    }
   });
 });
