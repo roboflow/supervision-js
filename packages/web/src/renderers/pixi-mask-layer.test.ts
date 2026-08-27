@@ -42,6 +42,7 @@ vi.mock("#render-preparation/prepared-render-window", () => ({
         () => preparedWindow.frame?.maskStatus === "prepared",
       ),
       setMaskStyle: vi.fn(),
+      setPlaybackActive: vi.fn(),
       setTimelineContext: vi.fn(),
       waitForReady: vi.fn(() => Promise.resolve()),
     };
@@ -160,7 +161,11 @@ describe("pixi mask layer", () => {
   });
 
   it("holds a mask across the step the playhead takes at the rate it plays", () => {
-    const holdsAcross = (playbackRate: number, mediaTime: number) => {
+    const holdsAcross = (
+      playbackRate: number,
+      mediaTime: number,
+      playing = true,
+    ) => {
       const layer = createPixiMaskLayer({
         BufferImageSource: FakeBufferImageSource as never,
         ImageSource: FakeImageSource as never,
@@ -175,6 +180,7 @@ describe("pixi mask layer", () => {
       }) as FakeSprite;
 
       layer.setPlaybackRate(playbackRate);
+      layer.setPlaybackActive(playing);
       preparedWindow.frame = {
         detectionFrame: { detections: [], mediaTime: 0.1 },
         key: "mask-frame",
@@ -198,6 +204,11 @@ describe("pixi mask layer", () => {
     expect(holdsAcross(1, 0.1667)).toBe(false);
     expect(holdsAcross(8, 0.1667)).toBe(true);
     expect(holdsAcross(8, 0.6)).toBe(false);
+
+    // A stopped playhead covers no ground, so the rate stops widening the hold.
+    // Otherwise pausing a fast run leaves its last mask over a frame it does not
+    // belong to, and nothing arrives to replace it.
+    expect(holdsAcross(8, 0.1667, false)).toBe(false);
   });
 
   it("says which frame it is holding, and stops saying so once it lets go", () => {

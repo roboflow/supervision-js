@@ -270,6 +270,7 @@ export function createPixiMaskLayer(options: {
   let heldStale = false;
   let heldSinceMs: number | null = null;
   let playbackRate = 1;
+  let playbackActive = false;
   let holdExpiryTimer: ReturnType<typeof setTimeout> | null = null;
   let isDestroyed = false;
   const maskTextures = new Map<string, PixiTexture>();
@@ -470,6 +471,7 @@ export function createPixiMaskLayer(options: {
     },
 
     setPlaybackActive(active) {
+      playbackActive = active;
       preparedRenderWindow.setPlaybackActive(active);
     },
 
@@ -724,11 +726,19 @@ export function createPixiMaskLayer(options: {
     haloRenderer?.hide();
   }
 
+  /**
+   * A stopped playhead covers no ground however fast it was going, so the rate
+   * only widens this while media time is actually running. Holding the playing
+   * tolerance into a pause leaves the last mask of a fast run sitting over a
+   * frame it does not belong to, with nothing arriving to replace it.
+   */
   function canHoldVisibleMaskFor(mediaTime: number) {
+    const lagBudget =
+      MAX_PENDING_MASK_LAG_SECONDS * (playbackActive ? playbackRate : 1);
+
     return (
       visibleMaskMediaTime !== null &&
-      Math.abs(mediaTime - visibleMaskMediaTime) <=
-        MAX_PENDING_MASK_LAG_SECONDS * playbackRate
+      Math.abs(mediaTime - visibleMaskMediaTime) <= lagBudget
     );
   }
 
