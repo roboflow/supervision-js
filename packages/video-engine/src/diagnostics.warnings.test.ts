@@ -147,6 +147,7 @@ function healthySnapshot(): DiagnosticsSnapshot {
       seekDrainingForMs: 0,
     },
     memory: { jsHeapUsedBytes: 50 * 1024 * 1024 },
+    sourceResidency: null,
     nativeFps: 30,
     rate: 1,
     presentedRate: null,

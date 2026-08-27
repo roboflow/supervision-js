@@ -181,6 +181,7 @@ function snapshotWith(
       seekDrainingForMs: 0,
     },
     memory: { jsHeapUsedBytes: null },
+    sourceResidency: null,
     nativeFps: 30,
     rate: 1,
     presentedRate: null,

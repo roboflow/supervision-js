@@ -39,6 +39,7 @@ import {
   type RequestId,
   type ResponseEvent,
   type SerializedViewport,
+  type SourceResidencyConfig,
 } from "./worker-protocol";
 
 /**
@@ -97,6 +98,16 @@ export interface VideoEngineOptions {
    * only in where a frame is composited, the GPU versus a 2D context.
    */
   prefer2d?: boolean;
+  /**
+   * Hold the source's bytes in this process and serve the demuxer's reads from
+   * them, so a position read once is read locally ever after. Off by default:
+   * it spends memory the host has to be willing to spend, and prefetching
+   * spends the viewer's link on bytes they may never watch.
+   *
+   * Only a `SourceKind.Url` source can use this. A Blob source is already local
+   * and a Stream source is consumed once, so neither has anything to hold.
+   */
+  sourceResidency?: SourceResidencyConfig;
 }
 
 /**
@@ -181,6 +192,7 @@ export class VideoEngine {
       cacheSkipNearMs: this.options.cacheSkipNearMs,
       decodeStrategy: this.options.decodeStrategy,
       prefer2d: this.options.prefer2d,
+      sourceResidency: this.options.sourceResidency,
     };
     try {
       const response = await this.request((requestId) => ({

@@ -214,6 +214,20 @@ export interface Warning {
  * are evaluated once, worker-side, so the HUD and an exported trace always show
  * the same diagnoses.
  */
+/**
+ * Source bytes this process holds, for a host that wants to show a viewer how
+ * much of the clip is local. Null unless the engine was loaded with
+ * `sourceResidency`; nothing else in the runtime can answer it, because the
+ * demuxer's own reads and the browser cache are both opaque from here.
+ */
+export interface SourceResidencyDiagnostics {
+  readonly ranges: readonly { readonly start: number; readonly end: number }[];
+  readonly residentBytes: number;
+  readonly totalBytes: number | null;
+  readonly prefetchedBytes: number;
+  readonly warming: boolean;
+}
+
 export interface DiagnosticsSnapshot {
   /**
    * Which presentation the engine was loaded for. `renderer` and the geometry
@@ -234,6 +248,7 @@ export interface DiagnosticsSnapshot {
   readonly playSeek: PlaySeekDiagnostics;
   readonly counters: CounterDiagnostics;
   readonly memory: MemoryDiagnostics;
+  readonly sourceResidency: SourceResidencyDiagnostics | null;
   readonly nativeFps: number | null;
   /** Media seconds per wall second the transport was told to run at. */
   readonly rate: number;

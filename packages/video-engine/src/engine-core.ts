@@ -1,6 +1,7 @@
 import { type MediaClock, PerformanceMediaClock } from "./clock";
 import { DIAGNOSTICS, FRAME_CACHE } from "./constants";
 import { createScrubCursor } from "./create-scrub-cursor";
+import { urlRequestInit } from "./decode-source";
 import { nativeResolution } from "./decode-resolution";
 import type { FrameId, FrameLanding, FrameTimeline } from "./frame-timeline";
 import {
@@ -25,12 +26,17 @@ import {
   type EngineTrace,
 } from "./trace-recorder";
 import {
+  createSourceResidency,
+  type SourceResidency,
+} from "./source-residency";
+import {
   asSec,
   canvasBindingRefused,
   type EngineReadySnapshot,
   PlaybackStatus,
   type PresentationMode,
   resolvePlaybackRate,
+  SourceKind,
   type VideoEngineError,
 } from "./types";
 import {
@@ -85,6 +91,7 @@ export class EngineCore {
     ((event: PresentedFrameEvent, transfer: Transferable[]) => void) | null;
   private readonly clock: MediaClock;
   private cursor: ScrubCursor | null = null;
+  private residency: SourceResidency | null = null;
   private controller: ScrubController | null = null;
   private canvas: OffscreenCanvas | null = null;
   private viewport: SerializedViewport | null = null;
@@ -180,8 +187,17 @@ export class EngineCore {
     if (this.canvas && this.presentation === "frames")
       throw canvasBindingRefused();
     this.emitStatus(PlaybackStatus.Loading);
+    this.residency =
+      config.sourceResidency && config.source.kind === SourceKind.Url
+        ? createSourceResidency({
+            url: config.source.url,
+            budgetBytes: config.sourceResidency.budgetBytes,
+            requestInit: urlRequestInit(config.source.crossOrigin)?.requestInit,
+          })
+        : null;
     this.cursor = await createScrubCursor({
       source: config.source,
+      sourceResidency: this.residency ?? undefined,
       decodeStrategy: config.decodeStrategy ?? nativeResolution(),
       viewport: this.viewport ?? { displayWidth: null, devicePixelRatio: 1 },
       prefer2d: config.prefer2d,
@@ -235,6 +251,7 @@ export class EngineCore {
     };
     this.emit({ type: "duration", durationMs: this.durationMs });
     this.emitStatus(PlaybackStatus.Ready);
+    if (config.sourceResidency?.prefetch) this.residency?.startWarming();
     return this.metadata;
   }
 
@@ -510,6 +527,8 @@ export class EngineCore {
     this.controller = null;
     await this.cursor?.close();
     this.cursor = null;
+    this.residency?.dispose();
+    this.residency = null;
     this.emitStatus(PlaybackStatus.Idle);
   }
 
@@ -576,6 +595,20 @@ export class EngineCore {
     return frame === null ? null : this.timeline().landingAt(frame.index);
   }
 
+  /**
+   * Points the background walk at where the viewer is, as a byte offset. The
+   * file's own byte layout is not exposed, so this reads position as a share of
+   * duration: enough to order the walk outward from the playhead, and wrong by
+   * at most the amount the bitrate varies.
+   */
+  private aimResidency(mediaMs: number): void {
+    const residency = this.residency;
+    if (!residency || this.durationMs <= 0) return;
+    const totalBytes = residency.snapshot().totalBytes;
+    if (totalBytes === null) return;
+    residency.focusAt((mediaMs / this.durationMs) * totalBytes);
+  }
+
   private onPaint(
     frame: ScrubFrame,
     catchUpMs?: number,
@@ -592,6 +625,7 @@ export class EngineCore {
     const { frame: frameId, mediaTimeS } = landing;
     const mediaTimeMs = mediaTimeS * 1000;
     this.lastPaintedId = frameId;
+    this.aimResidency(mediaTimeMs);
     // Only a crisp frame names where the walk landed. The coarse stand-in
     // that paints the instant a seek is issued can be a long way off.
     if (this.awaitingSeekPaint && frame.quality === "exact") {
@@ -856,6 +890,7 @@ export class EngineCore {
         paintedFrames: this.paintSeq,
         droppedFrames: realtimeRaw.droppedFramesTotal,
       },
+      sourceResidency: this.residency?.snapshot() ?? null,
       cacheBytes: {
         exactBytes,
         previewBytes,

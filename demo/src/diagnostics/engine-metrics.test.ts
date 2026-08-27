@@ -84,6 +84,7 @@ function snapshotWithSeeks(ledger: SeekLedger): DiagnosticsSnapshot {
       seekDrainingForMs: 0,
     },
     memory: { jsHeapUsedBytes: null },
+    sourceResidency: null,
     nativeFps: 30,
     rate: 1,
     presentedRate: 1,

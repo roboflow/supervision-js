@@ -67,6 +67,13 @@ export interface SerializedViewport {
  * engine. Omits `clock` (a class instance the worker constructs itself) and
  * `source` (carried separately on the load command).
  */
+export interface SourceResidencyConfig {
+  /** Ceiling on held source bytes. */
+  readonly budgetBytes: number;
+  /** Pull the parts of the file nobody has read yet, while the link is idle. */
+  readonly prefetch?: boolean;
+}
+
 export interface EngineLoadConfig {
   readonly source: VideoSource;
   /** Defaults to "canvas". "frames" leaves the engine canvas-less and routes
@@ -79,6 +86,7 @@ export interface EngineLoadConfig {
   readonly decodeStrategy?: DecodeResolutionStrategy;
   /** Pin the 2D renderer; unset prefers WebGPU with a 2D fallback. */
   readonly prefer2d?: boolean;
+  readonly sourceResidency?: SourceResidencyConfig;
 }
 
 // ---------------------------------------------------------------------------

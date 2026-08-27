@@ -10,6 +10,7 @@ import {
 import type { DecodeResolutionStrategy } from "./decode-resolution";
 import { FrameCache } from "./frame-cache";
 import type { ScrubCursor, ScrubCursorFactory } from "./scrub-cursor";
+import type { SourceResidency } from "./source-residency";
 import type { VideoEngineError, VideoSource } from "./types";
 
 /** On-screen canvas measurements the decode strategy reasons over. */
@@ -55,6 +56,8 @@ export interface CreateScrubCursorOptions {
    * then nobody is awaiting one; this is how it reaches the transport.
    */
   onDecodeFailure?: (error: VideoEngineError) => void;
+  /** Serves the demuxer's byte reads from what this process already holds. */
+  sourceResidency?: SourceResidency;
   signal?: AbortSignal;
 }
 

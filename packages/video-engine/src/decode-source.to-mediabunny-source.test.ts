@@ -6,6 +6,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { toMediabunnySource } from "./decode-source";
+import { createSourceResidency } from "./source-residency";
 import { SourceKind } from "./types";
 
 vi.mock("mediabunny", () => ({
@@ -52,5 +53,18 @@ describe("toMediabunnySource", () => {
       mode: "cors",
       credentials: "include",
     });
+  });
+
+  it("routes the demuxer's reads through a residency when one is given", () => {
+    const residency = createSourceResidency({
+      url: URL_STRING,
+      budgetBytes: 1024,
+      fetchImpl: (async () => new Response()) as unknown as typeof fetch,
+    });
+    const source = toMediabunnySource(
+      { kind: SourceKind.Url, url: URL_STRING },
+      residency,
+    ) as unknown as { options?: { fetchFn?: typeof fetch } };
+    expect(source.options?.fetchFn).toBe(residency.fetchFn);
   });
 });

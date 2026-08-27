@@ -23,6 +23,7 @@ import {
   type DecodeResolutionStrategy,
 } from "./decode-resolution";
 import { FrameTimeline } from "./frame-timeline";
+import type { SourceResidency } from "./source-residency";
 import type { KeyframeProbe } from "./keyframe-index";
 import {
   idempotentSample,
@@ -518,7 +519,7 @@ async function openInput(
   const { source } = options;
   const input = new Input({
     formats: ALL_FORMATS,
-    source: toMediabunnySource(source),
+    source: toMediabunnySource(source, options.sourceResidency),
   });
   const videoTrack = await input.getPrimaryVideoTrack();
   if (!videoTrack) {
@@ -710,7 +711,7 @@ export function detectWebgpuImport(): boolean {
   return typeof proto?.importExternalTexture === "function";
 }
 
-function urlRequestInit(
+export function urlRequestInit(
   crossOrigin: UrlVideoSource["crossOrigin"],
 ): { requestInit: RequestInit } | undefined {
   if (!crossOrigin) return undefined;
@@ -724,10 +725,20 @@ function urlRequestInit(
 
 export function toMediabunnySource(
   source: VideoSource,
+  residency?: SourceResidency,
 ): UrlSource | BlobSource | ReadableStreamSource {
   switch (source.kind) {
-    case SourceKind.Url:
-      return new UrlSource(source.url, urlRequestInit(source.crossOrigin));
+    case SourceKind.Url: {
+      const requestInit = urlRequestInit(source.crossOrigin);
+      const options = {
+        ...requestInit,
+        ...(residency ? { fetchFn: residency.fetchFn } : {}),
+      };
+      return new UrlSource(
+        source.url,
+        requestInit || residency ? options : undefined,
+      );
+    }
     case SourceKind.Blob:
       return new BlobSource(source.blob);
     case SourceKind.Stream:

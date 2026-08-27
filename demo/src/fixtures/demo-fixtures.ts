@@ -7,7 +7,10 @@ import {
   type DetectionFrame,
   type MediaRendererSource,
 } from "supervision";
-import { SourceKind } from "supervision-js-video-engine";
+import {
+  SourceKind,
+  type SourceResidencyConfig,
+} from "supervision-js-video-engine";
 import { delayDetectionFetch } from "../diagnostics/slow-work";
 import type { DisplayBoxResolutionOptions } from "supervision-js-video-engine";
 import type {
@@ -271,6 +274,7 @@ export function resolveDemoFixturePlaybackSrc(
 export function createDemoFixtureMedia(
   definition: DemoFixtureDefinition = defaultDemoFixture,
   display?: DisplayBoxResolutionOptions,
+  sourceResidency?: SourceResidencyConfig,
 ): MediaRendererSource {
   return createVideoEngineMediaRendererSource({
     display,
@@ -278,6 +282,7 @@ export function createDemoFixtureMedia(
       kind: SourceKind.Url,
       url: resolveDemoFixturePlaybackSrc(definition),
     },
+    sourceResidency,
   });
 }
 

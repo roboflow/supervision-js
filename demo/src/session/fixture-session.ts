@@ -20,6 +20,7 @@ import {
 } from "../fixtures/demo-fixtures";
 import { createDemoPresentation } from "../presentation/demo-presentation";
 import { readDemoDisplayBox } from "./decode-resolution";
+import { readDemoSourceResidency } from "./source-residency";
 import { createDemoRendererOptions } from "./demo-session-renderer";
 import type { DemoSessionCallbacks } from "./demo-session-types";
 import {
@@ -162,6 +163,7 @@ async function createFixtureSessionMedia(options: {
       createDemoFixtureMedia(
         options.definition,
         readDemoDisplayBox(options.container, options.renderQuality),
+        readDemoSourceResidency(globalThis.location?.search ?? ""),
       ),
     );
   }

@@ -1,0 +1,26 @@
+import type { SourceResidencyConfig } from "supervision-js-video-engine";
+
+const DEFAULT_BUDGET_MB = 160;
+
+/**
+ * Reads the residency flag off the page URL, so the two arms can be compared on
+ * one deployed build: `?residency=hold` serves repeat reads from bytes already
+ * pulled, `?residency=prefetch` also walks the rest of the file in the
+ * background. `?residencyMb=` sets the ceiling.
+ */
+export function readDemoSourceResidency(
+  search: string,
+): SourceResidencyConfig | undefined {
+  const params = new URLSearchParams(search);
+  const mode = params.get("residency");
+  if (mode !== "hold" && mode !== "prefetch") return undefined;
+  const requestedMb = Number(params.get("residencyMb"));
+  const budgetMb =
+    Number.isFinite(requestedMb) && requestedMb > 0
+      ? requestedMb
+      : DEFAULT_BUDGET_MB;
+  return {
+    budgetBytes: Math.round(budgetMb * 1024 * 1024),
+    prefetch: mode === "prefetch",
+  };
+}

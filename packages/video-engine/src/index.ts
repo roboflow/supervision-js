@@ -72,5 +72,9 @@ export { VideoEngineError, VideoEngineErrorCode } from "./types";
 export type { Warning, WarningSeverity } from "./diagnostics";
 
 /* ----------------------------------------------------------------- instruments */
-export type { DiagnosticsSnapshot } from "./diagnostics";
+export type {
+  DiagnosticsSnapshot,
+  SourceResidencyDiagnostics,
+} from "./diagnostics";
+export type { SourceResidencyConfig } from "./worker-protocol";
 export { DIAGNOSTICS, TRACE_RING_BOUNDS } from "./constants";
