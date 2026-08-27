@@ -4121,9 +4121,26 @@ fieldset {
   font-variant-numeric: tabular-nums;
 }
 
+.engine-timeline__stage {
+  position: relative;
+}
+
+/* The marker sits over the chart rather than inside it: a write to any node in
+   an inline SVG re-marks the whole subtree, and this one moves every frame. */
+.engine-timeline__playhead-track {
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+  transform: translateX(var(--engine-timeline-playhead, 0%));
+  will-change: transform;
+}
+
 .engine-timeline__playhead {
-  stroke: #ffffff;
-  stroke-width: 1.5;
+  background: #ffffff;
+  bottom: 0;
+  left: 0;
+  position: absolute;
+  width: 1.5px;
 }
 
 .engine-timeline__screen {

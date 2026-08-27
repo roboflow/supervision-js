@@ -56,7 +56,7 @@ export const EngineDiagnosticsTimeline = memo(
   }: {
     readonly snapshot: DiagnosticsSnapshot;
   }) {
-    const playheadRef = useRef<SVGLineElement | null>(null);
+    const playheadRef = useRef<HTMLSpanElement | null>(null);
     const clockRef = useRef<{
       atMs: number;
       playheadMs: number;
@@ -90,16 +90,14 @@ export const EngineDiagnosticsTimeline = memo(
 
         if (line && clock) {
           const elapsedMs = clock.playing ? performance.now() - clock.atMs : 0;
-          // The line stays at x=0 and rides a transform: an SVG geometry
-          // attribute write invalidates layout for the whole column, which
-          // carries no containment, while a transform stays on the compositor.
-          const x = `translateX(${
-            clamp01((clock.playheadMs + elapsedMs) / durationMs) * VIEW_WIDTH
-          }px)`;
+          // Writing anything on a node inside the SVG re-marks the whole
+          // subtree, transforms included, so the marker is an HTML element over
+          // the chart and moves on a custom property the compositor can take.
+          const x = `${clamp01((clock.playheadMs + elapsedMs) / durationMs) * 100}%`;
 
           if (x !== drawnX) {
             drawnX = x;
-            line.style.transform = x;
+            line.style.setProperty("--engine-timeline-playhead", x);
           }
         }
 
@@ -142,120 +140,119 @@ export const EngineDiagnosticsTimeline = memo(
 
     return (
       <div className="engine-timeline">
-        <svg
-          aria-label="Video engine cache, prefetch and GOP heat timeline"
-          className="engine-timeline__svg"
-          preserveAspectRatio="none"
-          role="img"
-          viewBox={`0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}`}
-        >
-          {Array.from({ length: LANE_COUNT }, (_, lane) => (
-            <rect
-              className="engine-timeline__lane"
-              height={LANE_HEIGHT}
-              key={`lane-${lane}`}
-              width={VIEW_WIDTH}
-              x={0}
-              y={laneY(lane)}
-            />
-          ))}
+        <div className="engine-timeline__stage">
+          <svg
+            aria-label="Video engine cache, prefetch and GOP heat timeline"
+            className="engine-timeline__svg"
+            preserveAspectRatio="none"
+            role="img"
+            viewBox={`0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}`}
+          >
+            {Array.from({ length: LANE_COUNT }, (_, lane) => (
+              <rect
+                className="engine-timeline__lane"
+                height={LANE_HEIGHT}
+                key={`lane-${lane}`}
+                width={VIEW_WIDTH}
+                x={0}
+                y={laneY(lane)}
+              />
+            ))}
 
-          {gopGaps.map((gap) => (
-            <rect
-              className="engine-timeline__heat"
-              height={LANE_HEIGHT}
-              key={`heat-${gap.startMs}`}
-              style={
-                { "--engine-heat": heatColor(gap.lengthSeconds) } as HeatStyle
-              }
-              width={Math.max(1, toX(gap.endMs) - toX(gap.startMs))}
-              x={toX(gap.startMs)}
-              y={laneY(LANE_HEAT)}
-            />
-          ))}
+            {gopGaps.map((gap) => (
+              <rect
+                className="engine-timeline__heat"
+                height={LANE_HEIGHT}
+                key={`heat-${gap.startMs}`}
+                style={
+                  { "--engine-heat": heatColor(gap.lengthSeconds) } as HeatStyle
+                }
+                width={Math.max(1, toX(gap.endMs) - toX(gap.startMs))}
+                x={toX(gap.startMs)}
+                y={laneY(LANE_HEAT)}
+              />
+            ))}
 
-          {scheduler?.cache.exactTimestampsMs.map((ms) => (
-            <rect
-              className="engine-timeline__exact"
-              height={LANE_HEIGHT}
-              key={`exact-${ms}`}
-              width={exactWidth}
-              x={toX(ms - exactHalfMs)}
-              y={laneY(LANE_EXACT)}
-            />
-          ))}
+            {scheduler?.cache.exactTimestampsMs.map((ms) => (
+              <rect
+                className="engine-timeline__exact"
+                height={LANE_HEIGHT}
+                key={`exact-${ms}`}
+                width={exactWidth}
+                x={toX(ms - exactHalfMs)}
+                y={laneY(LANE_EXACT)}
+              />
+            ))}
 
-          {scheduler?.cache.previewTimestampsMs.map((ms) => (
-            <rect
-              className="engine-timeline__preview"
-              height={LANE_HEIGHT}
-              key={`preview-${ms}`}
-              width={previewWidth}
-              x={toX(ms - previewHalfMs)}
-              y={laneY(LANE_PREVIEW)}
-            />
-          ))}
+            {scheduler?.cache.previewTimestampsMs.map((ms) => (
+              <rect
+                className="engine-timeline__preview"
+                height={LANE_HEIGHT}
+                key={`preview-${ms}`}
+                width={previewWidth}
+                x={toX(ms - previewHalfMs)}
+                y={laneY(LANE_PREVIEW)}
+              />
+            ))}
 
-          {/* Where the next sweep WOULD decode: one tick per planned target,
+            {/* Where the next sweep WOULD decode: one tick per planned target,
             recomputed on every broadcast, so a hole in the plan shows as a gap
             rather than hiding under a solid band. */}
-          {scheduler?.prefetch?.targetsMs.map((ms) => (
-            <rect
-              className="engine-timeline__prefetch"
-              height={LANE_HEIGHT}
-              key={`prefetch-${ms}`}
-              width={2}
-              x={toX(ms)}
-              y={laneY(LANE_PREFETCH)}
-            />
-          ))}
+            {scheduler?.prefetch?.targetsMs.map((ms) => (
+              <rect
+                className="engine-timeline__prefetch"
+                height={LANE_HEIGHT}
+                key={`prefetch-${ms}`}
+                width={2}
+                x={toX(ms)}
+                y={laneY(LANE_PREFETCH)}
+              />
+            ))}
 
-          {keyframesMs.map((ms) => (
-            <line
-              className="engine-timeline__keyframe"
-              key={`keyframe-${ms}`}
-              x1={toX(ms)}
-              x2={toX(ms)}
-              y1={laneY(LANE_KEYFRAME)}
-              y2={laneY(LANE_KEYFRAME) + LANE_HEIGHT}
-            />
-          ))}
+            {keyframesMs.map((ms) => (
+              <line
+                className="engine-timeline__keyframe"
+                key={`keyframe-${ms}`}
+                x1={toX(ms)}
+                x2={toX(ms)}
+                y1={laneY(LANE_KEYFRAME)}
+                y2={laneY(LANE_KEYFRAME) + LANE_HEIGHT}
+              />
+            ))}
 
-          {AXIS_FRACTIONS.map((fraction) => (
-            <text
-              className="engine-timeline__axis"
-              key={`axis-${fraction}`}
-              textAnchor={
-                fraction === 0 ? "start" : fraction === 1 ? "end" : "middle"
-              }
-              x={fraction * VIEW_WIDTH}
-              y={12}
-            >
-              {`${((fraction * durationMs) / MILLISECONDS_PER_SECOND).toFixed(0)}s`}
-            </text>
-          ))}
+            {AXIS_FRACTIONS.map((fraction) => (
+              <text
+                className="engine-timeline__axis"
+                key={`axis-${fraction}`}
+                textAnchor={
+                  fraction === 0 ? "start" : fraction === 1 ? "end" : "middle"
+                }
+                x={fraction * VIEW_WIDTH}
+                y={12}
+              >
+                {`${((fraction * durationMs) / MILLISECONDS_PER_SECOND).toFixed(0)}s`}
+              </text>
+            ))}
 
-          {/* The frame the engine last put out, coloured by its quality; its
+            {/* The frame the engine last put out, coloured by its quality; its
             distance from the playhead is the live landing error. */}
-          {snapshot.screen ? (
-            <line
-              className={`engine-timeline__screen engine-timeline__screen--${snapshot.screen.quality}`}
-              x1={toX(snapshot.screen.mediaTimeMs)}
-              x2={toX(snapshot.screen.mediaTimeMs)}
-              y1={AXIS_HEIGHT - 2}
-              y2={VIEW_HEIGHT}
+            {snapshot.screen ? (
+              <line
+                className={`engine-timeline__screen engine-timeline__screen--${snapshot.screen.quality}`}
+                x1={toX(snapshot.screen.mediaTimeMs)}
+                x2={toX(snapshot.screen.mediaTimeMs)}
+                y1={AXIS_HEIGHT - 2}
+                y2={VIEW_HEIGHT}
+              />
+            ) : null}
+          </svg>
+          <span className="engine-timeline__playhead-track" ref={playheadRef}>
+            <span
+              className="engine-timeline__playhead"
+              style={{ top: `${((AXIS_HEIGHT - 2) / VIEW_HEIGHT) * 100}%` }}
             />
-          ) : null}
-
-          <line
-            className="engine-timeline__playhead"
-            ref={playheadRef}
-            x1={0}
-            x2={0}
-            y1={AXIS_HEIGHT - 2}
-            y2={VIEW_HEIGHT}
-          />
-        </svg>
+          </span>
+        </div>
         <div className="engine-timeline__legend">
           <LegendSwatch modifier="short-gop" label="short GOP" />
           <LegendSwatch modifier="long-gop" label="long GOP" />
