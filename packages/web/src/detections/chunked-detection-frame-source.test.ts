@@ -247,11 +247,17 @@ describe("createChunkedDetectionFrameSource", () => {
     });
 
     await source.loadFrames(0, 10);
+
+    const chunksInRange = fetchChunk.mock.calls.length;
+
     await source.loadFrames(19.5, 30);
     fetchChunk.mockClear();
     await source.loadFrames(0, 10);
 
-    expect(fetchChunk).toHaveBeenCalledTimes(9);
+    // A cap narrower than the two windows evicts the first, so revisiting it
+    // costs every chunk the range covers rather than some remembered subset.
+    expect(chunksInRange).toBeGreaterThan(0);
+    expect(fetchChunk).toHaveBeenCalledTimes(chunksInRange);
   });
 
   it("retries a chunk request after a failed load", async () => {
