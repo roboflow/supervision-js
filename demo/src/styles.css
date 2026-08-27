@@ -1999,6 +1999,24 @@ fieldset {
   outline: none;
 }
 
+/* A range input reserves half a thumb at each end and maps a click across what
+ * is left, so a click lands earlier than where it was aimed and the gap widens
+ * with the thumb. The playhead beside it is drawn across the whole track. A
+ * zero-width thumb is what makes the two agree; the input carries opacity 0 and
+ * the thumb was never visible. */
+.timeline-view__input::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 100%;
+  width: 0;
+}
+
+.timeline-view__input::-moz-range-thumb {
+  border: 0;
+  height: 100%;
+  width: 0;
+}
+
 /* Groups the diagnostics lanes into one surface so they read as secondary to
  * the strip above them. */
 .timeline-view__cluster {
