@@ -25,6 +25,12 @@ export interface MediaRendererTransportOptions {
   readonly onPlaybackState: (state: MediaRendererPlaybackState) => void;
   readonly onPlayheadTime: (mediaTime: number) => void;
   /**
+   * The playhead has moved to a frame that is not on screen yet. Reported apart
+   * from `onPlaybackState` because the state a seek settles from is the one the
+   * transport keeps reporting throughout it.
+   */
+  readonly onSeeking: (seeking: boolean) => void;
+  /**
    * Buffered playback. Held before the producer is asked to run, because the
    * producer paces itself afterwards and a renderer that waited mid-playback
    * would be holding a picture it does not drive.
@@ -99,6 +105,9 @@ export function createMediaRendererTransport(
       settledState = state;
     }
 
+    // A held gesture is the viewer's own hand on the playhead, not a wait: the
+    // producer sits in the mechanical pause it asked for.
+    options.onSeeking(!gestureInFlight && isSettling(status, seeking));
     options.onPlaybackState(state);
   };
   const publishPlayheadTime = () => {

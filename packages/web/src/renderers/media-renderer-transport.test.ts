@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { MediaRendererPlaybackState } from "#types/media-renderer";
 import { createMediaRendererTransport } from "./media-renderer-transport";
 import type {
   PresentedFrameChannel,
+  PresentedFrameChannelStatus,
   PresentedFramePlayhead,
 } from "./presented-frame-channel";
 
@@ -22,6 +24,7 @@ describe("media renderer transport", () => {
       onPlaybackRate: vi.fn(),
       onPlaybackState: vi.fn(),
       onPlayheadTime: (mediaTime) => published.push(mediaTime),
+      onSeeking: vi.fn(),
     });
 
     for (let index = 0; index < FRAME_COUNT; index += 1) {
@@ -31,6 +34,57 @@ describe("media renderer transport", () => {
     expect(published.map(frameNamedBy)).toStrictEqual(
       Array.from({ length: FRAME_COUNT }, (_, index) => index),
     );
+  });
+
+  it("reports a seek the settled playback state cannot show", () => {
+    const producer = createProducer();
+    const playbackStates: MediaRendererPlaybackState[] = [];
+    const seeking: boolean[] = [];
+
+    createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: (state) => playbackStates.push(state),
+      onPlayheadTime: vi.fn(),
+      onSeeking: (next) => seeking.push(next),
+    });
+
+    producer.setStatus("PAUSED");
+    producer.setSeeking(true);
+    producer.land(120);
+    const duringSeek = {
+      playbackState: playbackStates.at(-1),
+      seeking: seeking.at(-1),
+    };
+    producer.setSeeking(false);
+    producer.land(120);
+
+    expect(duringSeek).toStrictEqual({
+      playbackState: MediaRendererPlaybackState.Paused,
+      seeking: true,
+    });
+    expect(seeking.at(-1)).toBe(false);
+  });
+
+  it("calls a held gesture the viewer's own hand rather than a seek", () => {
+    const producer = createProducer();
+    const seeking: boolean[] = [];
+
+    const transport = createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onSeeking: (next) => seeking.push(next),
+    });
+
+    transport.scrub(secondsAt(120));
+    producer.setSeeking(true);
+    producer.land(120);
+
+    expect(seeking.at(-1)).toBe(false);
   });
 });
 
@@ -53,7 +107,10 @@ function frameNamedBy(mediaTime: number): number {
 
 function createProducer() {
   const listeners = new Set<() => void>();
+  const stateListeners = new Set<() => void>();
   let playhead = landingAt(0);
+  let seeking = false;
+  let status: PresentedFrameChannelStatus = "PLAYING";
   const channel: PresentedFrameChannel = {
     beginInteractiveSeek: vi.fn(),
     commit: vi.fn(async () => undefined),
@@ -61,8 +118,8 @@ function createProducer() {
     getDurationMs: () => secondsAt(FRAME_COUNT) * 1000,
     getPlaybackRate: () => 1,
     getPlayhead: () => playhead,
-    getSeeking: () => false,
-    getStatus: () => "PLAYING",
+    getSeeking: () => seeking,
+    getStatus: () => status,
     onPresentedFrame: vi.fn(),
     pause: vi.fn(),
     play: vi.fn(async () => undefined),
@@ -72,10 +129,21 @@ function createProducer() {
     subscribe: (signal, listener) => {
       if (signal === "time") {
         listeners.add(listener);
+      } else {
+        stateListeners.add(listener);
       }
 
-      return () => listeners.delete(listener);
+      return () => {
+        listeners.delete(listener);
+        stateListeners.delete(listener);
+      };
     },
+  };
+
+  const announce = () => {
+    for (const listener of stateListeners) {
+      listener();
+    }
   };
 
   return {
@@ -87,6 +155,17 @@ function createProducer() {
       for (const listener of listeners) {
         listener();
       }
+      announce();
+    },
+
+    setSeeking(next: boolean) {
+      seeking = next;
+      announce();
+    },
+
+    setStatus(next: PresentedFrameChannelStatus) {
+      status = next;
+      announce();
     },
   };
 }

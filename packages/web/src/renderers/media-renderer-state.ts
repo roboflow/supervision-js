@@ -56,6 +56,7 @@ export interface MediaRendererRuntimeState {
   setLoading(): void;
   setPlaying(): void;
   setBuffering(): void;
+  setSeeking(seeking: boolean): void;
   setPaused(): void;
   setRenderError(error: unknown): void;
   markDestroyed(): void;
@@ -86,6 +87,7 @@ export function createMediaRendererRuntimeState(
   let activeDetectionCount = 0;
   let drawnMaskFrameTime: number | null = null;
   let maskHeldStale = false;
+  let seeking = false;
   let lastFrameRenderTimings: MediaFrameRenderTimings | null = null;
   let currentFrameDuration = 0;
   let destroyed = false;
@@ -119,6 +121,7 @@ export function createMediaRendererRuntimeState(
     playbackGateReach: options.getPlaybackGateReach(),
     playbackState,
     presentedFrames,
+    seeking,
     rendererBackend,
     source: { ...sourceState },
   });
@@ -283,6 +286,15 @@ export function createMediaRendererRuntimeState(
 
     setPaused() {
       playbackState = MediaRendererPlaybackState.Paused;
+      emitState();
+    },
+
+    setSeeking(next) {
+      if (next === seeking) {
+        return;
+      }
+
+      seeking = next;
       emitState();
     },
 

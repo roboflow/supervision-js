@@ -128,6 +128,22 @@ session.subscribe((state) => {
 Use `activities` when the app needs to explain why playback or presentation is
 blocked.
 
+### Seeking
+
+A seek moves the playhead at once and the picture follows when the frame
+decodes. `playbackState` keeps reporting whatever playback settled on before the
+seek, so it cannot stand in for that gap; read `seeking` on the renderer state
+instead:
+
+```ts
+session.subscribe((state) => {
+  spinner.hidden = !state.renderer?.seeking;
+});
+```
+
+Every tick of a scrub sets it, so an app that draws it owes the viewer a delay
+before it appears, or a drag will strobe.
+
 ## Streaming Detections
 
 Use `detections.appendable` when predictions arrive over time:

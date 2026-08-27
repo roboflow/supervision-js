@@ -219,6 +219,19 @@ export interface MediaRendererState {
   readonly playbackGateReach?: PlaybackGateReach;
   /** Whether that hold is what is on screen right now. */
   readonly maskHeldStale?: boolean;
+  /**
+   * Whether the playhead has been moved to a frame that is not on screen yet.
+   * `playbackState` cannot answer this: it keeps reporting what the transport
+   * settled on before the seek, so a seek of any length reads as paused or
+   * playing.
+   *
+   * A scrub sets this on every tick, so a host that draws it owes the viewer a
+   * delay before it appears.
+   *
+   * Optional so a host holding a state it built before this field existed still
+   * satisfies the type.
+   */
+  readonly seeking?: boolean;
   readonly detectionBuffer: DetectionBufferState;
   readonly lastFrameRenderTimings: MediaFrameRenderTimings | null;
   readonly source: MediaSourceState;
