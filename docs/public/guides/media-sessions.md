@@ -42,7 +42,22 @@ The default path is intentionally boring:
 - detections are optional;
 - render preparation uses the built-in worker strategy when available;
 - state is available through `getState()` and `subscribe()`;
+- playback does not wait for annotations, so a frame presents as soon as it is
+  decoded and its overlays appear when they are ready;
 - advanced buffering, retention, interaction, and diagnostics are opt-in.
+
+Pass `playbackGate: true` when annotations matter more than starting quickly. It
+turns on both the detection-coverage and the render-preparation gates, and the
+session reports a buffering activity while it waits. What it delivers depends on
+the source. A source the renderer pulls samples from is held frame by frame. A
+source that presents its own frames, which is what `openVideoEngineMediaSource`
+returns, is held at the start of playback and not after it, because there the
+source owns the playhead.
+
+Video files are opened through `createVideoEngineMediaRendererSource`, which
+decodes, seeks and presents frames itself and reports the media time of the
+frame it put on screen. Passing a URL or a `Blob` directly keeps the renderer
+pulling samples instead.
 
 ## Minimal Start
 

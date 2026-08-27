@@ -86,7 +86,16 @@ export interface DetectionBufferOptions extends DetectionFrameSelectionOptions {
    */
   readonly bufferBehindSeconds?: number;
   /**
-   * Minimum media-time movement before refreshing the hot detection window.
+   * Minimum media-time movement before the hot detection window is rebuilt.
+   *
+   * This governs refreshes of ground the window already covers. A media time
+   * the window does not cover loads immediately whatever this says, so raising
+   * it costs coverage nothing and only reduces repeated work.
+   *
+   * A session defaults it to 2.5 seconds for a file, whose detections do not
+   * change while it plays, and to 0.25 seconds for a stream, where the source
+   * gains data under the window. A renderer created directly leaves it unset,
+   * which refreshes whenever the playhead moves.
    */
   readonly refreshIntervalSeconds?: number;
   /**
