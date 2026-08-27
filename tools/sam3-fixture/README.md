@@ -143,8 +143,11 @@ npm run fixture:sam3:restore -- --sample-name basketball_sam3
 
 The restore normalizes the committed `raw-sam3.jsonl` through
 `--normalize-only`, then checks the result against the sha256 the fixture was
-committed at. `basketball_sam3` takes seconds; `horse_trail` takes about 22
-minutes.
+committed at, which `restorable-detections.json` pins. The demo fixture tests
+read the same pin to check each chunk manifest's
+`provenance.sources[].inputSha256`, which no longer has a file beside it to
+hash, so a regenerated fixture has to update the pin. `basketball_sam3` takes
+seconds; `horse_trail` takes about 22 minutes.
 
 Rebuilding the geometry fixture needs a restore first. It reads the pre-merge
 SAM3 timeline from `detections.json`, and the chunks beside that file are its

@@ -43,6 +43,19 @@ const maskDerivedGeometry: DemoFixtureGeometrySummary = {
 
 const MAX_POLYGON_POINTS = 48;
 const fixturesRoot = fileURLToPath(new URL("../../fixtures", import.meta.url));
+const restorableDetections = readJson<{
+  readonly fixtures: readonly {
+    readonly detectionsSha256: string;
+    readonly sampleName: string;
+  }[];
+}>(
+  fileURLToPath(
+    new URL(
+      "../../../tools/sam3-fixture/restorable-detections.json",
+      import.meta.url,
+    ),
+  ),
+);
 const fixturePaths = readdirSync(fixturesRoot, { withFileTypes: true })
   .filter((entry) => entry.isDirectory())
   .map((entry) => join(fixturesRoot, entry.name));
@@ -189,7 +202,7 @@ describe("geometry showcase fixture", () => {
 
     for (const source of provenance.sources) {
       expect(source.inputSha256).toBe(
-        sourceSha256(readFileSync(resolve(geometryFixturePath, source.input))),
+        committedSourceSha256(resolve(geometryFixturePath, source.input)),
       );
     }
   });
@@ -736,9 +749,7 @@ describe("basketball region fixture", () => {
     ).toBeGreaterThan(0);
     expect(headSource).toBeDefined();
     expect(headSource?.inputSha256).toBe(
-      sourceSha256(
-        readFileSync(resolve(regionsFixturePath, headSource!.input)),
-      ),
+      committedSourceSha256(resolve(regionsFixturePath, headSource!.input)),
     );
   });
 });
@@ -794,6 +805,32 @@ function readJson<T>(path: string): T {
 
 function sha256(content: Buffer) {
   return createHash("sha256").update(content).digest("hex");
+}
+
+/**
+ * A fixture's `detections.json` is a git-ignored build intermediate, so a clean
+ * checkout holds no bytes to hash. Its digest is pinned where the restore tool
+ * reads it, and that tool checks the rebuilt file against the same pin, so the
+ * two records cannot drift apart unnoticed.
+ */
+function committedSourceSha256(inputPath: string) {
+  if (existsSync(inputPath)) {
+    return sourceSha256(readFileSync(inputPath));
+  }
+
+  const pinned = restorableDetections.fixtures.find(
+    (fixture) =>
+      resolve(fixturesRoot, fixture.sampleName, "detections.json") ===
+      inputPath,
+  );
+
+  if (!pinned) {
+    throw new Error(
+      `${inputPath} is neither committed nor restorable, so its provenance digest describes nothing.`,
+    );
+  }
+
+  return pinned.detectionsSha256;
 }
 
 function sourceSha256(content: Buffer) {

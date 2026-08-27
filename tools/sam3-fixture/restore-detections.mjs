@@ -14,22 +14,22 @@ const ROOT_DIR = path.resolve(
 const RUN_SAM3_SCRIPT = path.join(ROOT_DIR, "tools/sam3-fixture/run-sam3.mjs");
 
 /**
- * Each fixture's `detections.json` is a build intermediate: the demo reads the
- * committed chunks, and only the offline geometry merge still consumes the
- * single file. The digests are the bytes the committed capture normalizes to,
- * and `basketball_sam3` also records its own under
- * `provenance.sources[].inputSha256` in the chunk manifest.
+ * `detections.json` is a git-ignored build intermediate, so this pinned digest
+ * is the only committed record of its bytes. The demo fixture tests read the
+ * same file to check each chunk manifest's `provenance.sources[].inputSha256`,
+ * which has no file beside it to hash.
  */
-const FIXTURES = [
-  {
-    dir: "demo/fixtures/basketball_sam3",
-    sha256: "2052a6acc0be93832da42ec656a16ffebed9b9bf3d6252d32a9dbe18588cef99",
-  },
-  {
-    dir: "demo/fixtures/horse_trail",
-    sha256: "fb3eeb098bf6a9467e04e35a67df249babca19201fc6b3d989f8c1c8ec7cdfce",
-  },
-];
+const PINNED_DIGESTS_FILE = path.join(
+  ROOT_DIR,
+  "tools/sam3-fixture/restorable-detections.json",
+);
+const FIXTURES = JSON.parse(
+  await readFile(PINNED_DIGESTS_FILE, "utf8"),
+).fixtures.map((fixture) => ({
+  dir: `demo/fixtures/${fixture.sampleName}`,
+  sampleName: fixture.sampleName,
+  sha256: fixture.detectionsSha256,
+}));
 
 const options = parseArgs(process.argv.slice(2));
 
@@ -107,23 +107,18 @@ function sha256File(filePath) {
 }
 
 function selectFixtures(sampleNames) {
-  const fixtures = FIXTURES.map((fixture) => ({
-    ...fixture,
-    sampleName: path.basename(fixture.dir),
-  }));
-
   if (sampleNames.length === 0) {
-    return fixtures;
+    return FIXTURES;
   }
 
   return sampleNames.map((sampleName) => {
-    const fixture = fixtures.find((entry) => entry.sampleName === sampleName);
+    const fixture = FIXTURES.find((entry) => entry.sampleName === sampleName);
 
     if (!fixture) {
       throw new Error(
-        `Unknown sample name ${sampleName}. Known: ${fixtures
-          .map((entry) => entry.sampleName)
-          .join(", ")}.`,
+        `Unknown sample name ${sampleName}. Known: ${FIXTURES.map(
+          (entry) => entry.sampleName,
+        ).join(", ")}.`,
       );
     }
 
@@ -177,5 +172,5 @@ the fixture was committed at. Calls no model and needs no API key.
 
 Options:
   --sample-name <name>               can be repeated; default: every fixture
-                                     (${FIXTURES.map((fixture) => path.basename(fixture.dir)).join(", ")})`);
+                                     (${FIXTURES.map((fixture) => fixture.sampleName).join(", ")})`);
 }
