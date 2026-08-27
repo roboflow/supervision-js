@@ -10,7 +10,38 @@ import type {
   DemoMediaState,
   UploadInferenceState,
 } from "../session/demo-session-types";
+import { formatExactTime } from "../format";
 import { mediaFailureHeadline } from "./media-failure-copy";
+
+/**
+ * The picture never waits for these, so they read as background progress rather
+ * than as conditions the viewer has to sit through. The control bar reports
+ * them: buffering on the play button and in the state chip, the prepared window
+ * and the detection buffer in their own timeline lanes.
+ */
+export const BACKGROUND_ACTIVITY_KINDS: ReadonlySet<MediaSessionActivityKind> =
+  new Set([
+    MediaSessionActivityKind.DetectionsBuffering,
+    MediaSessionActivityKind.DetectionsLoading,
+    MediaSessionActivityKind.PlaybackBuffering,
+    MediaSessionActivityKind.RenderPreparing,
+  ]);
+
+export function selectViewportSessionState(
+  sessionState: MediaSessionState | null,
+): MediaSessionState | null {
+  if (sessionState === null) {
+    return null;
+  }
+
+  const activities = sessionState.activities.filter(
+    (activity) => !BACKGROUND_ACTIVITY_KINDS.has(activity.kind),
+  );
+
+  return activities.length === sessionState.activities.length
+    ? sessionState
+    : { ...sessionState, activities };
+}
 
 export function sameViewportOverlay(
   previousOverlay: ViewportOverlay | null,
@@ -63,6 +94,18 @@ export function createViewportOverlay(
     };
   }
 
+  const seekTarget = selectSeekTarget(sessionState);
+
+  if (seekTarget !== null) {
+    return {
+      detail: `Moving to ${formatExactTime(seekTarget)}`,
+      kicker: "Seeking",
+      label: "Finding the frame",
+      progress: null,
+      tone: "waiting",
+    };
+  }
+
   if (
     uploadInferenceState &&
     (uploadInferenceState.status === "preparing" ||
@@ -97,20 +140,53 @@ export function createViewportOverlay(
   return null;
 }
 
+/**
+ * A seek moves the playhead at once and the picture follows whenever the frame
+ * decodes, and no activity is reported for the gap. `playbackState` cannot
+ * stand in: it keeps reporting whatever the transport settled on before the
+ * seek, so a wait of any length reads as paused or playing.
+ */
+function selectSeekTarget(sessionState: MediaSessionState | null) {
+  return sessionState?.renderer?.seeking
+    ? sessionState.renderer.currentTime
+    : null;
+}
+
 function selectViewportActivity(sessionState: MediaSessionState | null) {
   if (!sessionState) {
     return null;
   }
 
   return (
+    sessionState.activities.find(isErrorActivity) ??
+    selectPreRendererNormalization(sessionState) ??
     sessionState.activities.find((activity) => activity.blockingPlayback) ??
     sessionState.activities.find((activity) => activity.blockingPresentation) ??
-    sessionState.activities.find(
-      (activity) => activity.status === MediaSessionActivityStatus.Error,
-    ) ??
     sessionState.activities.find(isForegroundActivity) ??
     null
   );
+}
+
+/**
+ * Media that needs normalizing is normalized before there is a renderer to show
+ * it, so the session reports opening media for the whole of that wait as well.
+ * Only one of the two can say how far along it is. Once the picture is up, a
+ * progressive normalization runs behind it and is background again.
+ */
+function selectPreRendererNormalization(sessionState: MediaSessionState) {
+  if (sessionState.renderer) {
+    return null;
+  }
+
+  return (
+    sessionState.activities.find(
+      (activity) => activity.kind === MediaSessionActivityKind.MediaNormalizing,
+    ) ?? null
+  );
+}
+
+function isErrorActivity(activity: MediaSessionActivity) {
+  return activity.status === MediaSessionActivityStatus.Error;
 }
 
 function isForegroundActivity(activity: MediaSessionActivity) {

@@ -5,10 +5,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import {
-  MediaRendererPlaybackState,
-  MediaSessionActivityKind,
-} from "supervision";
+import { MediaRendererPlaybackState } from "supervision";
 import { BenchmarksPanel } from "./components/BenchmarksPanel";
 import { ControlBar } from "./components/ControlBar";
 import { DemoShell } from "./components/DemoShell";
@@ -23,8 +20,10 @@ import { QualityControls } from "./components/QualityControls";
 import { RenderControls } from "./components/RenderControls";
 import { RendererViewport } from "./components/RendererViewport";
 import { useViewportOverlay } from "./hooks/useViewportOverlay";
+import { selectViewportSessionState } from "./components/viewport-overlay";
 import { SelectionPanel } from "./components/SelectionPanel";
 import { SessionOptionsPanel } from "./components/SessionOptionsPanel";
+import { SlowWorkPanel } from "./components/SlowWorkPanel";
 import { SourceControls } from "./components/SourceControls";
 import { StatusPanel } from "./components/StatusPanel";
 import { resolveDemoDocsUrl } from "./docs-url";
@@ -42,20 +41,6 @@ const docsUrl = resolveDemoDocsUrl(
   globalThis.location,
 );
 const allowUpload = import.meta.env.VITE_DEMO_ALLOW_UPLOAD !== "false";
-
-/**
- * The picture never waits for annotations, so these read as background progress
- * rather than as conditions the viewer has to sit through. The control bar
- * reports them: buffering on the play button and in the state chip, the
- * prepared window and the detection buffer in their own timeline lanes.
- */
-const BACKGROUND_ACTIVITY_KINDS: ReadonlySet<MediaSessionActivityKind> =
-  new Set([
-    MediaSessionActivityKind.DetectionsBuffering,
-    MediaSessionActivityKind.DetectionsLoading,
-    MediaSessionActivityKind.PlaybackBuffering,
-    MediaSessionActivityKind.RenderPreparing,
-  ]);
 
 export function App() {
   const searchParams = new URLSearchParams(globalThis.location.search);
@@ -163,21 +148,10 @@ function DemoApp() {
         : [],
     [demo.sourceMode, demo.uploadInferenceState.processingRanges],
   );
-  const viewportSessionState = useMemo(() => {
-    const sessionState = demo.sessionState;
-
-    if (sessionState === null) {
-      return null;
-    }
-
-    const activities = sessionState.activities.filter(
-      (activity) => !BACKGROUND_ACTIVITY_KINDS.has(activity.kind),
-    );
-
-    return activities.length === sessionState.activities.length
-      ? sessionState
-      : { ...sessionState, activities };
-  }, [demo.sessionState]);
+  const viewportSessionState = useMemo(
+    () => selectViewportSessionState(demo.sessionState),
+    [demo.sessionState],
+  );
   const viewportOverlay = useViewportOverlay(
     viewportSessionState,
     demo.sourceMode === DemoSourceMode.Upload
@@ -248,11 +222,15 @@ function DemoApp() {
           />
         }
         sessionOptionsPanel={
-          <SessionOptionsPanel
-            configuration={demo.sessionConfiguration}
-            onChange={demo.setSessionOptions}
-            options={demo.sessionOptions}
-          />
+          <>
+            <SessionOptionsPanel
+              configuration={demo.sessionConfiguration}
+              onChange={demo.setSessionOptions}
+              options={demo.sessionOptions}
+              playbackGateReach={demo.rendererState?.playbackGateReach ?? null}
+            />
+            <SlowWorkPanel onReopenSession={demo.reopenSession} />
+          </>
         }
         selectionPanel={
           <SelectionPanel

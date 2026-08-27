@@ -509,7 +509,7 @@ function formatHotBufferRange(readouts: LiveReadouts) {
     : formatTimeRange(startTime, endTime);
 }
 
-function formatRequestedRange(readouts: LiveReadouts) {
+export function formatRequestedRange(readouts: LiveReadouts) {
   const { endTime, startTime } = readRequestedRange(readouts);
 
   if (startTime === null || endTime === null) {
@@ -521,7 +521,7 @@ function formatRequestedRange(readouts: LiveReadouts) {
     : "same as hot";
 }
 
-function formatPreparedWindow(readouts: LiveReadouts) {
+export function formatPreparedWindow(readouts: LiveReadouts) {
   const prepared = readLivePreparedWindow(readouts);
 
   return prepared === null

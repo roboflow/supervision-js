@@ -8,6 +8,7 @@ import {
   type MediaRendererSource,
 } from "supervision";
 import { SourceKind } from "supervision-js-video-engine";
+import { delayDetectionFetch } from "../diagnostics/slow-work";
 import type { DisplayBoxResolutionOptions } from "supervision-js-video-engine";
 import type {
   DemoPresentationAvailability,
@@ -332,6 +333,8 @@ const fetchDemoFixtureDetectionChunk = async (
   if (!chunkUrl) {
     throw new Error(`Unknown fixture detection chunk: ${chunk.src}`);
   }
+
+  await delayDetectionFetch();
 
   const response = await fetch(chunkUrl);
 

@@ -131,6 +131,7 @@ export interface DemoRendererState {
   readonly playPlayback: () => Promise<void>;
   readonly refreshDetections: () => Promise<void>;
   readonly refreshPresentation: () => void;
+  readonly reopenSession: () => void;
   readonly setRenderQuality: (quality: DemoRenderQuality) => void;
   readonly setSampleFixtureId: (sampleName: string) => void;
   readonly setSourceMode: (mode: DemoSourceMode) => void;
@@ -222,6 +223,7 @@ export function useDemoRenderer(
    * it re-runs, and a view-mode switch only takes the viewport off screen.
    */
   const [stageAttached, setStageAttached] = useState(false);
+  const [sessionEpoch, setSessionEpoch] = useState(0);
   const [stage] = useState(() =>
     createDemoStage(document.createElement("div"), () => {
       setStageAttached(true);
@@ -341,7 +343,14 @@ export function useDemoRenderer(
       renderPreparationPublisher.publish(diagnostics);
     };
     const sessionStatePublisher = createThrottledPublisher(
-      setSessionState,
+      (state: MediaSessionState) => {
+        setSessionState(state);
+        if (import.meta.env.DEV) {
+          (
+            globalThis as { __demoSessionState?: MediaSessionState }
+          ).__demoSessionState = state;
+        }
+      },
       isActive,
       RENDERER_READOUT_INTERVAL_MS,
     );
@@ -528,6 +537,7 @@ export function useDemoRenderer(
     fixtureDetectionSourceTransform,
     fixtureFrameTransform,
     presentationTransform,
+    sessionEpoch,
     sessionOptions,
     sourceMode,
     stage,
@@ -737,6 +747,10 @@ export function useDemoRenderer(
     }
   }, [syncRendererState]);
 
+  const reopenSession = useCallback(() => {
+    setSessionEpoch((current) => current + 1);
+  }, []);
+
   const refreshPresentation = useCallback(() => {
     const renderer = rendererRef.current;
     if (!renderer) return;
@@ -941,6 +955,7 @@ export function useDemoRenderer(
     playPlayback,
     refreshDetections,
     refreshPresentation,
+    reopenSession,
     presentationAvailability:
       sourceMode === DemoSourceMode.Fixture
         ? activeFixture.presentationAvailability
