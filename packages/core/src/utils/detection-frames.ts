@@ -37,50 +37,56 @@ export function copySortedDetectionFrames(
   validateDetectionFrames(detectionFrames ?? []);
 
   return (detectionFrames ?? [])
-    .map((frame) => ({
-      detections: frame.detections.map((detection) => ({
-        ...detection,
-        attributes: detection.attributes
-          ? [...detection.attributes]
-          : undefined,
-        keypoints: detection.keypoints
-          ? {
-              boxRelative: detection.keypoints.boxRelative
-                ? [...detection.keypoints.boxRelative]
-                : undefined,
-              edges: detection.keypoints.edges.map(
-                (edge) => [edge[0], edge[1]] as const,
-              ),
-              points: detection.keypoints.points.map((point) => ({ ...point })),
-              visibility: detection.keypoints.visibility
-                ? [...detection.keypoints.visibility]
-                : undefined,
-            }
-          : undefined,
-        mask: detection.mask ? { ...detection.mask } : undefined,
-        metadata: detection.metadata
-          ? copyDetectionMetadata(detection.metadata)
-          : undefined,
-        polygon: detection.polygon
-          ? {
-              points: detection.polygon.points.map((point) => ({ ...point })),
-            }
-          : undefined,
-        polyline: detection.polyline
-          ? {
-              points: detection.polyline.points.map((point) => ({ ...point })),
-            }
-          : undefined,
-        rect: detection.rect ? { ...detection.rect } : undefined,
-      })),
-      coordinateSpace: frame.coordinateSpace
-        ? { ...frame.coordinateSpace }
-        : undefined,
-      endTime: frame.endTime,
-      frameIndex: frame.frameIndex,
-      mediaTime: frame.mediaTime,
-    }))
+    .map(copyDetectionFrame)
     .sort((left, right) => left.mediaTime - right.mediaTime);
+}
+
+/**
+ * One frame's deep copy, for a caller that already knows which frames it is
+ * keeping and only needs the ones it does not hold.
+ */
+export function copyDetectionFrame(frame: DetectionFrame): DetectionFrame {
+  return {
+    detections: frame.detections.map((detection) => ({
+      ...detection,
+      attributes: detection.attributes ? [...detection.attributes] : undefined,
+      keypoints: detection.keypoints
+        ? {
+            boxRelative: detection.keypoints.boxRelative
+              ? [...detection.keypoints.boxRelative]
+              : undefined,
+            edges: detection.keypoints.edges.map(
+              (edge) => [edge[0], edge[1]] as const,
+            ),
+            points: detection.keypoints.points.map((point) => ({ ...point })),
+            visibility: detection.keypoints.visibility
+              ? [...detection.keypoints.visibility]
+              : undefined,
+          }
+        : undefined,
+      mask: detection.mask ? { ...detection.mask } : undefined,
+      metadata: detection.metadata
+        ? copyDetectionMetadata(detection.metadata)
+        : undefined,
+      polygon: detection.polygon
+        ? {
+            points: detection.polygon.points.map((point) => ({ ...point })),
+          }
+        : undefined,
+      polyline: detection.polyline
+        ? {
+            points: detection.polyline.points.map((point) => ({ ...point })),
+          }
+        : undefined,
+      rect: detection.rect ? { ...detection.rect } : undefined,
+    })),
+    coordinateSpace: frame.coordinateSpace
+      ? { ...frame.coordinateSpace }
+      : undefined,
+    endTime: frame.endTime,
+    frameIndex: frame.frameIndex,
+    mediaTime: frame.mediaTime,
+  };
 }
 
 /** Returned by the plain copier when it meets a value only structuredClone can

@@ -10,9 +10,11 @@ import {
 } from "#types/detection-timeline";
 import type { DetectionFrame } from "#types/detections";
 import {
+  copyDetectionFrame,
   copySortedDetectionFrames,
   detectionFrameOverlapsRange,
   selectDetectionFrame,
+  validateDetectionFrames,
 } from "#utils/detection-frames";
 
 const DEFAULT_BUFFER_AHEAD_SECONDS = 5;
@@ -190,13 +192,13 @@ export function createBufferedDetectionTimeline(
         }
 
         const committedSourceVersion = getSourceVersion(sourceRanges);
-        const loadedBuffer = copySortedDetectionFrames(frameRanges.flat());
+        const loadedFrames = frameRanges.flat();
 
         buffer =
           bufferedSourceVersion !== null &&
           bufferedSourceVersion === committedSourceVersion
-            ? reuseBufferedFrameSnapshots(buffer, loadedBuffer)
-            : loadedBuffer;
+            ? reuseBufferedFrameSnapshots(buffer, loadedFrames)
+            : copySortedDetectionFrames(loadedFrames);
         bufferedVersionRange = versionRange;
         bufferedSourceVersion = committedSourceVersion;
         state = {
@@ -891,18 +893,29 @@ function mergeIncrementalFrames(
   return Array.from(framesByIdentity.values()).sort(compareDetectionFrames);
 }
 
+/**
+ * Keeps the frame already held wherever the source returned one this buffer
+ * knows, and copies only what is new. Copying everything first and then
+ * discarding it is the same result for a great deal more work: a window rebuilt
+ * while a gesture moves inside it re-derives hundreds of frames it already has.
+ */
 function reuseBufferedFrameSnapshots(
   currentFrames: readonly DetectionFrame[],
   loadedFrames: readonly DetectionFrame[],
 ) {
+  validateDetectionFrames(loadedFrames);
+
   const currentFramesByIdentity = new Map(
     currentFrames.map((frame) => [getDetectionFrameIdentity(frame), frame]),
   );
 
-  return loadedFrames.map(
-    (frame) =>
-      currentFramesByIdentity.get(getDetectionFrameIdentity(frame)) ?? frame,
-  );
+  return loadedFrames
+    .map(
+      (frame) =>
+        currentFramesByIdentity.get(getDetectionFrameIdentity(frame)) ??
+        copyDetectionFrame(frame),
+    )
+    .sort(compareDetectionFrames);
 }
 
 function getDetectionFrameIdentity(frame: DetectionFrame) {
