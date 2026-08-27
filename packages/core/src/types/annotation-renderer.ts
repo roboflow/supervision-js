@@ -6,6 +6,7 @@ import type { LabelStyle } from "#types/label-style";
 import type { MaskHaloStyle } from "#types/mask-halo-style";
 import type { MaskStyle } from "#types/mask-style";
 import type { MarkerStyle } from "#types/marker-style";
+import type { PercentageBarStyle } from "#types/percentage-bar-style";
 import type { PolygonStyle } from "#types/polygon-style";
 import type { PolylineStyle } from "#types/polyline-style";
 import type { AnnotationStyleContext } from "#types/style";
@@ -26,6 +27,7 @@ export const annotationRendererKinds = [
   "mask",
   "maskHalo",
   "marker",
+  "percentageBar",
   "polygon",
   "polyline",
   "region",
@@ -50,6 +52,7 @@ export type AnnotationRenderer =
   | MaskAnnotationRenderer
   | MaskHaloAnnotationRenderer
   | MarkerAnnotationRenderer
+  | PercentageBarAnnotationRenderer
   | PolygonAnnotationRenderer
   | PolylineAnnotationRenderer
   | RegionAnnotationRenderer;
@@ -114,6 +117,11 @@ export interface MaskHaloAnnotationRenderer extends BaseAnnotationRenderer {
 export interface MarkerAnnotationRenderer extends BaseAnnotationRenderer {
   readonly kind: "marker";
   readonly style?: MarkerStyle | null;
+}
+
+export interface PercentageBarAnnotationRenderer extends BaseAnnotationRenderer {
+  readonly kind: "percentageBar";
+  readonly style?: PercentageBarStyle | null;
 }
 
 export interface PolygonAnnotationRenderer extends BaseAnnotationRenderer {
@@ -330,6 +338,9 @@ export type AnnotationRendererFactory = {
   readonly marker: (
     options?: AnnotationRendererStyleOptions<"marker">,
   ) => MarkerAnnotationRenderer;
+  readonly percentageBar: (
+    options?: AnnotationRendererStyleOptions<"percentageBar">,
+  ) => PercentageBarAnnotationRenderer;
   readonly polygon: (
     options?: AnnotationRendererStyleOptions<"polygon">,
   ) => PolygonAnnotationRenderer;
@@ -362,6 +373,8 @@ export const annotationRenderers: AnnotationRendererFactory = {
   mask: (options) => createAnnotationRenderer("mask", options),
   maskHalo: (options) => createAnnotationRenderer("maskHalo", options),
   marker: (options) => createAnnotationRenderer("marker", options),
+  percentageBar: (options) =>
+    createAnnotationRenderer("percentageBar", options),
   polygon: (options) => createAnnotationRenderer("polygon", options),
   polyline: (options) => createAnnotationRenderer("polyline", options),
   region: (options) => ({ kind: "region", ...options }),

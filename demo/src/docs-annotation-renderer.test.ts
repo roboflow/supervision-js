@@ -31,9 +31,11 @@ describe("docs annotation renderers", () => {
                   ? ["ellipsesEnabled"]
                   : renderer === "mask-halo"
                     ? ["maskHaloEnabled"]
-                    : renderer === "regions"
-                      ? []
-                      : [`${renderer}Enabled`];
+                    : renderer === "percentage-bar"
+                      ? ["percentageBarsEnabled"]
+                      : renderer === "regions"
+                        ? []
+                        : [`${renderer}Enabled`];
 
       expect(enabled).toEqual(expectedEnabled);
     }
@@ -104,6 +106,19 @@ describe("docs annotation renderers", () => {
       "y: detection.rect.y + detection.rect.height / 2 - radiusY,",
     );
     expect(ellipseSnippet).toContain("alpha: 1,");
+    const percentageBarSnippet = createDocsAnnotationRendererSnippet(
+      "percentage-bar",
+      {
+        ...defaultDemoPresentationSettings,
+        percentageBarFillAlpha: 0.9,
+        percentageBarHeight: 12,
+      },
+    );
+    expect(percentageBarSnippet).toContain(
+      "annotationRenderers.percentageBar({",
+    );
+    expect(percentageBarSnippet).toContain("height: 12");
+    expect(percentageBarSnippet).toContain("alpha: 0.9");
   });
 
   it("exposes marker shape and bounding-box position controls", () => {

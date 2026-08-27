@@ -34,6 +34,7 @@ const expectedStyleFields = {
   mask: "maskStyle",
   maskHalo: "maskHaloStyle",
   marker: "markerStyle",
+  percentageBar: "percentageBarStyle",
   polygon: "polygonStyle",
   polyline: "polylineStyle",
 } as const satisfies Record<
@@ -59,6 +60,7 @@ const styleFieldPairingIsExact: {
   mask: true,
   maskHalo: true,
   marker: true,
+  percentageBar: true,
   polygon: true,
   polyline: true,
 };
@@ -78,6 +80,7 @@ const expectedCanonicalStyles = {
   // capability is opt-in, so it never appears in the default presentation.
   maskHalo: null,
   marker: null,
+  percentageBar: null,
   polygon: BasePolygonStyle,
   polyline: BasePolylineStyle,
 } as const satisfies Record<

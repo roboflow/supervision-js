@@ -7,6 +7,7 @@ import type {
 import { BaseLabelStyle } from "#styles/label-style";
 import { BaseMaskStyle } from "#styles/mask-style";
 import { BaseMarkerStyle } from "#styles/marker-style";
+import { BasePercentageBarStyle } from "#styles/percentage-bar-style";
 import { BaseKeypointStyle } from "#styles/keypoint-style";
 import { BasePolygonStyle } from "#styles/polygon-style";
 import { BasePolylineStyle } from "#styles/polyline-style";
@@ -48,6 +49,11 @@ import type {
   MarkerStyleContext,
 } from "#types/marker-style";
 import type {
+  PercentageBarDrawInstruction,
+  PercentageBarStyle,
+  PercentageBarStyleContext,
+} from "#types/percentage-bar-style";
+import type {
   PolygonDrawInstruction,
   PolygonStyle,
   PolygonStyleContext,
@@ -72,6 +78,7 @@ export interface PresentationStyleSet {
   readonly maskHaloStyle?: MaskHaloStyle | null;
   readonly maskStyle?: MaskStyle | null;
   readonly markerStyle?: MarkerStyle | null;
+  readonly percentageBarStyle?: PercentageBarStyle | null;
   readonly polygonStyle?: PolygonStyle | null;
   readonly polylineStyle?: PolylineStyle | null;
 }
@@ -163,6 +170,14 @@ export function createSourceAwarePresentation(
           sourcePresentations,
         )
       : globalPresentation.markerStyle,
+    percentageBarStyle: shouldApplySourceStyle("percentageBarStyle")
+      ? new SourceAwarePercentageBarStyle(
+          normalizeGlobalPercentageBarStyle(
+            globalPresentation.percentageBarStyle,
+          ),
+          sourcePresentations,
+        )
+      : globalPresentation.percentageBarStyle,
     maskHaloStyle: shouldApplySourceStyle("maskHaloStyle")
       ? new SourceAwareMaskHaloStyle(
           normalizeGlobalMaskHaloStyle(globalPresentation.maskHaloStyle),
@@ -361,6 +376,30 @@ class SourceAwareMarkerStyle implements MarkerStyle {
   }
 }
 
+class SourceAwarePercentageBarStyle implements PercentageBarStyle {
+  constructor(
+    private readonly globalStyle: PercentageBarStyle | null,
+    private readonly sourcePresentations: ReadonlyMap<
+      string,
+      SourcePresentation | undefined
+    >,
+  ) {}
+
+  resolve(
+    detection: Detection,
+    context: PercentageBarStyleContext,
+  ): PercentageBarDrawInstruction | undefined {
+    const style = resolveSourceStyle(
+      detection,
+      this.globalStyle,
+      this.sourcePresentations,
+      "percentageBarStyle",
+    );
+
+    return style?.resolve(detection, context);
+  }
+}
+
 class SourceAwarePolygonStyle implements PolygonStyle {
   constructor(
     private readonly globalStyle: PolygonStyle | null,
@@ -475,6 +514,12 @@ function normalizeGlobalMaskHaloStyle(style: MaskHaloStyle | null | undefined) {
 
 function normalizeGlobalMarkerStyle(style: MarkerStyle | null | undefined) {
   return style === undefined ? new BaseMarkerStyle() : style;
+}
+
+function normalizeGlobalPercentageBarStyle(
+  style: PercentageBarStyle | null | undefined,
+) {
+  return style === undefined ? new BasePercentageBarStyle() : style;
 }
 
 function normalizeGlobalPolygonStyle(style: PolygonStyle | null | undefined) {
