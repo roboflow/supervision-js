@@ -1,3 +1,5 @@
+import type { PresentedFrameChannel } from "#renderers/presented-frame-channel";
+
 export interface DecodedVideoSample {
   readonly timestamp: number;
   readonly duration: number;
@@ -47,4 +49,11 @@ export interface DecodedMediaSource {
   readonly input: DisposableMediaInput;
   readonly metadata: DecodedMediaSourceMetadata;
   readonly sampleSink: DecodedVideoSampleSink;
+  /**
+   * A source that owns its own decode clock publishes one, and the renderer
+   * composites the frames it announces rather than asking `sampleSink` for a
+   * frame at a time the renderer chose. `sampleSink` stays required, and still
+   * serves thumbnails and one-off grabs.
+   */
+  readonly engine?: PresentedFrameChannel;
 }

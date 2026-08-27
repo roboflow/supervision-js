@@ -76,6 +76,14 @@ export type {
   DecodedVideoSampleSink,
   DisposableMediaInput,
 } from "#media/media-source";
+export type {
+  PresentedFrameChannel,
+  PresentedFrameChannelSignal,
+  PresentedFrameChannelStatus,
+  PresentedFramePlayhead,
+  PresentedFrameSeekIntent,
+  PresentedFrameSource,
+} from "#renderers/presented-frame-channel";
 export {
   createImageUrlMediaSource,
   createStaticImageMediaSource,

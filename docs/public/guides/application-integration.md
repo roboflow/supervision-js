@@ -118,6 +118,18 @@ session = null;
 `media` accepts a URL string, `File`/`Blob`, or an advanced
 `MediaRendererSource`.
 
+A `MediaRendererSource` opens into a `DecodedMediaSource`, whose `sampleSink`
+answers `getSample(timestamp)` for a time the renderer picks. A source that owns
+its own decode clock cannot answer that without the renderer forming a second
+opinion about which frame belongs on screen, so it publishes a
+`PresentedFrameChannel` as `engine` instead: it announces each frame it puts on
+screen, and the renderer composites that frame and draws every annotation layer
+from the same media time. `sampleSink` stays required either way, and still
+serves thumbnails and one-off frame grabs.
+
+`createVideoEngineMediaRendererSource()` is the implementation of that in this
+package. `PresentedFrameChannel` is exported so a host can implement its own.
+
 ## Add Static Detections
 
 Pass semantic detection frames at session creation:
