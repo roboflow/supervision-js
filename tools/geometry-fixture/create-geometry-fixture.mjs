@@ -52,6 +52,13 @@ const POSE_Z_INDEX_BASE = 100;
 const POSE_TARGET_CLASS_NAMES = ["white team player", "yellow team player"];
 const BASKETBALL_TRACE_ALGORITHM = "basketball-motion-track-v1";
 const BASKETBALL_TRACE_CLASS_NAME = "basketball";
+/**
+ * A trace candidate covering this much of the frame is the scene, not a ball.
+ * The prompt occasionally returns a whole-frame mask at low confidence, and the
+ * association has no reason to prefer the real ball over it once it latches, so
+ * the trace follows a static blob for the rest of the clip.
+ */
+const BASKETBALL_TRACE_MAX_FRAME_COVERAGE = 0.5;
 const BASKETBALL_TRACE_MAX_ASSOCIATION_GAP_SECONDS = 0.1;
 const BASKETBALL_TRACE_MAX_POINTS = 60;
 const BASKETBALL_TRACE_POSITION_TOLERANCE_PIXELS = 12;
@@ -692,6 +699,20 @@ function lerp(from, to, amount) {
   return from + (to - from) * amount;
 }
 
+function coversWholeFrame(detection) {
+  const frameArea =
+    (detection.mask?.width ?? 0) * (detection.mask?.height ?? 0);
+
+  if (frameArea <= 0) {
+    return false;
+  }
+
+  return (
+    (detection.rect.width * detection.rect.height) / frameArea >=
+    BASKETBALL_TRACE_MAX_FRAME_COVERAGE
+  );
+}
+
 function attachBasketballCenterTrace(
   detections,
   mediaTime,
@@ -699,7 +720,9 @@ function attachBasketballCenterTrace(
   previousObservation,
 ) {
   const basketballCandidates = detections.filter(
-    (detection) => detection.className === BASKETBALL_TRACE_CLASS_NAME,
+    (detection) =>
+      detection.className === BASKETBALL_TRACE_CLASS_NAME &&
+      !coversWholeFrame(detection),
   );
 
   const observationIsStale =

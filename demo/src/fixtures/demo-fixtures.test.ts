@@ -322,6 +322,7 @@ describe("geometry showcase fixture", () => {
     let polylineCount = 0;
     let maximumSegmentLength = 0;
     let violations = 0;
+    let widestFrameCoverage = 0;
     const trackedSourceIds = new Set<string>();
 
     for (const chunk of geometryChunks) {
@@ -330,6 +331,16 @@ describe("geometry showcase fixture", () => {
           if (!detection.polyline) continue;
           polylineCount += 1;
           trackedSourceIds.add(String(detection.id ?? ""));
+
+          const frameArea =
+            (detection.mask?.width ?? 0) * (detection.mask?.height ?? 0);
+
+          if (frameArea > 0 && detection.rect) {
+            widestFrameCoverage = Math.max(
+              widestFrameCoverage,
+              (detection.rect.width * detection.rect.height) / frameArea,
+            );
+          }
 
           const previousPoint = detection.polyline.points.at(-2);
           const currentPoint = detection.polyline.points.at(-1);
@@ -361,6 +372,10 @@ describe("geometry showcase fixture", () => {
       }
     }
 
+    // A whole-scene mask answers the prompt at low confidence, and once the
+    // association takes one the trace follows a static blob for the rest of the
+    // clip while every other check here still passes.
+    expect(widestFrameCoverage).toBeLessThan(0.5);
     expect(provenance.polyline).toMatchObject({
       algorithm: "basketball-motion-track-v1",
       derivedFrom:

@@ -33,9 +33,10 @@ describe("detection frame utilities", () => {
     const copied = copySortedDetectionFrames(source);
     const carried = copied[0]?.detections[0]?.metadata as {
       nested: { recordedAt: Date };
+      tags: readonly string[];
     };
 
-    expect(carried.recordedAt).toBeUndefined();
+    expect(carried.tags).toEqual(["one", "two"]);
     expect(carried.nested.recordedAt).toBeInstanceOf(Date);
     expect(carried.nested.recordedAt.toISOString()).toBe(
       "2026-08-26T12:00:00.000Z",
