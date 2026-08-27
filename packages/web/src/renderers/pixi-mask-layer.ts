@@ -52,6 +52,14 @@ import type {
 } from "pixi.js";
 
 const MAX_PENDING_MASK_HOLD_SECONDS = 0.05;
+/**
+ * Wall-clock ceiling on that hold. The hold exists so a cook that lands within
+ * a frame or two replaces the raster before anyone sees a gap, and most land in
+ * tens of milliseconds. Past this the picture is no longer catching up, it is
+ * showing the wrong frame's mask, and a stopped playhead would show it for as
+ * long as the cook takes because nothing else redraws.
+ */
+const MAX_PENDING_MASK_HOLD_WALL_MS = 250;
 const TEXTURE_ROW_ALIGNMENT_BYTES = 4;
 
 type ImageSourceConstructor = new (options: {
@@ -195,6 +203,11 @@ export interface PixiActiveRegionMaskCoverage {
 
 export function createPixiMaskLayer(options: {
   readonly artifactKind?: RenderPreparationArtifactKind;
+  /** Wall clock for the pending-mask hold, injectable for tests. */
+  readonly now?: () => number;
+  /** Called when a held mask has been up as long as the hold allows, so the
+   *  host can redraw and let the layer drop it. */
+  readonly onHoldExpired?: () => void;
   readonly BufferImageSource?: BufferImageSourceConstructor;
   readonly Container?: ContainerConstructor;
   readonly ImageSource: ImageSourceConstructor;
@@ -246,6 +259,8 @@ export function createPixiMaskLayer(options: {
   let isFillVisible = true;
   let visibleMaskMediaTime: number | null = null;
   let heldStale = false;
+  let heldSinceMs: number | null = null;
+  let holdExpiryTimer: ReturnType<typeof setTimeout> | null = null;
   let isDestroyed = false;
   const maskTextures = new Map<string, PixiTexture>();
   const haloTextures = new Map<string, PixiTexture>();
@@ -339,7 +354,19 @@ export function createPixiMaskLayer(options: {
         return;
       }
 
+      if (heldSinceMs === null) {
+        heldSinceMs = now();
+      }
+
+      const heldForMs = now() - heldSinceMs;
+
+      if (heldForMs >= MAX_PENDING_MASK_HOLD_WALL_MS) {
+        hideSprite();
+        return;
+      }
+
       heldStale = true;
+      scheduleHoldExpiry(MAX_PENDING_MASK_HOLD_WALL_MS - heldForMs);
     },
 
     getDrawnState() {
@@ -469,6 +496,7 @@ export function createPixiMaskLayer(options: {
       }
 
       isDestroyed = true;
+      clearHoldExpiry();
       preparedRenderWindow.destroy();
       destroyTextures();
       idMaskRenderer?.destroy();
@@ -477,6 +505,8 @@ export function createPixiMaskLayer(options: {
   };
 
   function showMaskFrame(maskFrame: PreparedMaskFrame, mediaTime: number) {
+    clearHoldExpiry();
+    heldSinceMs = null;
     visibleMaskMediaTime = mediaTime;
     visibleMaskFrameKey = maskFrame.key;
     heldStale = false;
@@ -642,7 +672,35 @@ export function createPixiMaskLayer(options: {
     idMaskRenderer?.hide();
   }
 
+  function now() {
+    return options.now?.() ?? performance.now();
+  }
+
+  function clearHoldExpiry() {
+    if (holdExpiryTimer === null) {
+      return;
+    }
+
+    clearTimeout(holdExpiryTimer);
+    holdExpiryTimer = null;
+  }
+
+  /** A held mask is the only thing on screen that goes stale with nothing left
+   *  to redraw it, so the hold books its own end. */
+  function scheduleHoldExpiry(inMs: number) {
+    if (holdExpiryTimer !== null || !options.onHoldExpired) {
+      return;
+    }
+
+    holdExpiryTimer = setTimeout(() => {
+      holdExpiryTimer = null;
+      options.onHoldExpired?.();
+    }, inMs);
+  }
+
   function hideSprite() {
+    clearHoldExpiry();
+    heldSinceMs = null;
     visibleMaskMediaTime = null;
     visibleMaskFrameKey = null;
     heldStale = false;

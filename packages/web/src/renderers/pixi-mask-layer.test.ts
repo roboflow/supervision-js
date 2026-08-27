@@ -212,6 +212,52 @@ describe("pixi mask layer", () => {
     });
   });
 
+  it("lets go of a held frame once it has been up longer than the hold allows", () => {
+    let clockMs = 0;
+    const holdExpired = vi.fn();
+    const layer = createPixiMaskLayer({
+      BufferImageSource: FakeBufferImageSource as never,
+      ImageSource: FakeImageSource as never,
+      Sprite: FakeSprite as never,
+      Texture: FakeTexture as never,
+      detectionTimeline: {} as never,
+      maskStyle: new BaseMaskStyle(),
+      now: () => clockMs,
+      onHoldExpired: holdExpired,
+    });
+
+    layer.createSprite({ height: 80, width: 120 });
+    preparedWindow.frame = {
+      detectionFrame: { detections: [], mediaTime: 0.1 },
+      key: "mask-frame",
+      maskFrame: idMaskFrame(),
+      maskStatus: "prepared",
+    };
+    layer.drawFrame(0.1);
+
+    preparedWindow.frame = {
+      detectionFrame: { detections: [], mediaTime: 0.1333 },
+      key: "owed-frame",
+      maskStatus: "pending",
+    };
+    layer.drawFrame(0.1333);
+
+    expect(layer.getDrawnState().heldStale).toBe(true);
+
+    // A stopped playhead redraws nothing on its own, so the hold books the
+    // redraw that ends it.
+    expect(holdExpired).toHaveBeenCalledTimes(0);
+
+    clockMs = 400;
+    layer.drawFrame(0.1333);
+
+    expect(layer.getDrawnState()).toEqual({
+      drawnFrameKey: null,
+      drawnFrameTime: null,
+      heldStale: false,
+    });
+  });
+
   it("keeps the held frame's region coverage while its successor cooks", () => {
     const layer = createPixiMaskLayer({
       BufferImageSource: FakeBufferImageSource as never,

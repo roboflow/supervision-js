@@ -429,6 +429,7 @@ export async function createPixiMediaScene(
   const initialMaskPreparationStyle = resolveMaskPreparationStyle();
   let maskLayer = initialMaskPreparationStyle
     ? createPixiMaskLayer({
+        onHoldExpired: redrawAnnotationsNow,
         BlurFilter,
         BufferImageSource,
         Container,
@@ -1594,6 +1595,7 @@ export async function createPixiMediaScene(
   function ensureMaskLayer(preparationStyle: MaskStyle) {
     if (!maskLayer) {
       maskLayer = createPixiMaskLayer({
+        onHoldExpired: redrawAnnotationsNow,
         BlurFilter,
         BufferImageSource,
         Container,
@@ -2115,6 +2117,16 @@ export async function createPixiMediaScene(
     if (
       annotationWindow.getReadinessToken(currentMediaTime) === drawnReadiness
     ) {
+      return;
+    }
+
+    redrawAnnotationsNow();
+  }
+
+  /** Redraws the frame on screen whether or not its readiness moved, for a
+   *  layer that went stale on wall clock rather than on new data. */
+  function redrawAnnotationsNow() {
+    if (isPresenting || isDestroyed) {
       return;
     }
 
