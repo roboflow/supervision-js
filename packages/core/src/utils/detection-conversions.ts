@@ -44,17 +44,14 @@ export function rasterizeRectToMask(
   const topLeft = centerRectToTopLeftRect(rect);
   const left = Math.max(0, Math.round(topLeft.x));
   const top = Math.max(0, Math.round(topLeft.y));
-  const right = Math.min(
-    dimensions.width - 1,
-    Math.round(rect.x + rect.width / 2),
-  );
+  const right = Math.min(dimensions.width, Math.round(topLeft.x + rect.width));
   const bottom = Math.min(
-    dimensions.height - 1,
-    Math.round(rect.y + rect.height / 2),
+    dimensions.height,
+    Math.round(topLeft.y + rect.height),
   );
 
-  for (let y = top; y <= bottom; y += 1) {
-    for (let x = left; x <= right; x += 1) {
+  for (let y = top; y < bottom; y += 1) {
+    for (let x = left; x < right; x += 1) {
       data[y * dimensions.width + x] = 1;
     }
   }
@@ -99,13 +96,13 @@ export function rasterizePolygonToMask(
     intersections.sort((left, right) => left - right);
 
     for (let index = 0; index < intersections.length - 1; index += 2) {
-      const left = Math.max(0, Math.ceil(intersections[index]!));
+      const left = Math.max(0, Math.round(intersections[index]!));
       const right = Math.min(
-        dimensions.width - 1,
-        Math.floor(intersections[index + 1]!),
+        dimensions.width,
+        Math.round(intersections[index + 1]!),
       );
 
-      for (let x = left; x <= right; x += 1) {
+      for (let x = left; x < right; x += 1) {
         data[y * dimensions.width + x] = 1;
       }
     }
