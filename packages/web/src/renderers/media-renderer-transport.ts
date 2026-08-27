@@ -24,6 +24,12 @@ export interface MediaRendererTransportOptions {
   readonly onPlaybackRate: (rate: number) => void;
   readonly onPlaybackState: (state: MediaRendererPlaybackState) => void;
   readonly onPlayheadTime: (mediaTime: number) => void;
+  /**
+   * Buffered playback. Held before the producer is asked to run, because the
+   * producer paces itself afterwards and a renderer that waited mid-playback
+   * would be holding a picture it does not drive.
+   */
+  readonly waitForReadiness?: (mediaTime: number) => Promise<void>;
 }
 
 /**
@@ -41,6 +47,11 @@ export function createMediaRendererTransport(
   let gestureInFlight = false;
   let landingRelease: Promise<void> | null = null;
   let settledState: MediaRendererPlaybackState | null = null;
+  let readinessHold = false;
+  // Anything that settles playback other than the hold itself invalidates the
+  // play the hold is waiting for, so a pause taken during it is not undone by
+  // the readiness that arrives afterwards.
+  let playbackIntent = 0;
 
   const releaseGesture = async () => {
     if (!gestureInFlight) {
@@ -80,7 +91,9 @@ export function createMediaRendererTransport(
     const state =
       gestureInFlight && status !== "ERRORED"
         ? MediaRendererPlaybackState.Paused
-        : resolveTransportPlaybackState(status, seeking, settledState);
+        : readinessHold && status !== "ERRORED"
+          ? MediaRendererPlaybackState.Buffering
+          : resolveTransportPlaybackState(status, seeking, settledState);
 
     if (!gestureInFlight && !isSettling(status, seeking)) {
       settledState = state;
@@ -107,12 +120,30 @@ export function createMediaRendererTransport(
       // previous playback until it does. Recording the ask here is what lets a
       // second toggle arriving in that window flip it.
       settledState = MediaRendererPlaybackState.Playing;
+      const intent = ++playbackIntent;
       await releaseGesture();
+
+      if (options.waitForReadiness) {
+        readinessHold = true;
+        publishPlaybackState();
+        try {
+          await options.waitForReadiness(channel.getPlayhead().mediaTimeS);
+        } finally {
+          readinessHold = false;
+        }
+
+        if (intent !== playbackIntent) {
+          publishPlaybackState();
+          return;
+        }
+      }
+
       await channel.play();
     },
 
     pause() {
       settledState = MediaRendererPlaybackState.Paused;
+      playbackIntent++;
       // A pause ends the producer's mechanical hold, so it lands ahead of the
       // release the open gesture still owes.
       channel.pause();
@@ -140,6 +171,7 @@ export function createMediaRendererTransport(
       // A drag whose landing seek is still releasing the producer is the drag
       // this scrub belongs to. Opening a second one there would stop the
       // picture for a gesture nobody is holding, and nothing would release it.
+      playbackIntent++;
       if (!gestureInFlight && landingRelease === null) {
         gestureInFlight = true;
         channel.beginInteractiveSeek();
@@ -176,6 +208,7 @@ export function createMediaRendererTransport(
     },
 
     destroy() {
+      playbackIntent++;
       for (const unsubscribe of unsubscribes) {
         unsubscribe();
       }

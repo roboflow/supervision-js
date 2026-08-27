@@ -157,11 +157,11 @@ function proseSentences(source) {
 }
 
 test("every playback-gate surface documents a gate that ships off", async () => {
-  // The playback gate is real, off until a host asks for it, and honoured only
-  // where the renderer pulls decoded samples, so every surface that names it
-  // has to say all three. Prose asserting that the gate is a no-op everywhere,
-  // or that it is simply on, compiles cleanly, and nothing else compares the
-  // surfaces against each other.
+  // The playback gate is real, off until a host asks for it, and holds a
+  // producer that owns its own playhead only at the start of playback, so every
+  // surface that names it has to say which sources it reaches. Prose asserting
+  // that the gate is a no-op everywhere, or that it is simply on, compiles
+  // cleanly, and nothing else compares the surfaces against each other.
   const namesTheGate = /playbackGate|playback gate/;
   const statesDefaultOff =
     /off by default|off unless|the gate off, which is the default/i;

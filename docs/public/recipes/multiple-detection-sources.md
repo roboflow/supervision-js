@@ -135,13 +135,14 @@ fans out to: predictions here, not drafts. Awaiting `waitForRange` on
 while drafts may still be loading. That call is yours to make and works on any
 session, whatever media backs it.
 
-An enabled `detections.playbackGate` awaits that same waiter, but it reaches
-only a media source the renderer pulls decoded samples from, such as a URL or a
-`Blob`. A source that presents its own frames owns the playhead and paces
-itself. That is what `createVideoEngineMediaRendererSource` returns, and what
-most video sessions run on. Setting `detections.playbackGate` on a source that
-presents its own frames is accepted and ignored, with no wait, no buffering
-report and no error. The gate is off by default.
+An enabled `detections.playbackGate` awaits that same waiter. A media source
+the renderer pulls decoded samples from, such as a URL or a `Blob`, is held
+frame by frame for as long as playback runs. A source that presents its own
+frames owns the playhead and paces itself, which is what
+`createVideoEngineMediaRendererSource` returns and what most video sessions run
+on. There the gate holds the start of playback and nothing after it. The gate
+is off by default, and `playbackGate: true` on `createMediaSession` turns it on
+alongside the render-preparation gate.
 
 `order` controls draw order. Lower sources compose first. Higher sources render
 later and appear on top.
@@ -220,9 +221,9 @@ const source = createCompositeDetectionFrameSource({
 - Set `requiredForCoverage: false` when a source should not hold the coverage
   wait, whether that wait is your own `waitForRange` call on
   `session.detectionSource` or an enabled `detections.playbackGate`. Your own
-  call works on any session; the gate is off by default and reaches only a media
-  source the renderer pulls decoded samples from, so on a source that presents
-  its own frames, such as `createVideoEngineMediaRendererSource`, enabling it
-  does nothing.
+  call works on any session; the gate is off by default and holds a media source
+  the renderer pulls decoded samples from frame by frame, while a source that
+  presents its own frames, such as `createVideoEngineMediaRendererSource`, is
+  held only at the start of playback.
 - Do not combine `detections.sources` with single-source inputs such as
   `frames`, `source`, or `appendable`.

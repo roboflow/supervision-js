@@ -168,6 +168,49 @@ describe("media session defaults", () => {
     });
   });
 
+  it("turns both gates on from the session-level switch", () => {
+    const defaults = resolveMediaSessionDefaults({
+      detections: {
+        source: { loadFrames: async () => [] },
+      },
+      mode: MediaSessionMode.File,
+      playbackGate: true,
+      renderer: {},
+    });
+
+    expect(defaults.detectionBuffer.playbackGate).toEqual({
+      enabled: true,
+      requiredAheadSeconds: 2,
+    });
+    expect(defaults.renderPreparation.playbackGate).toEqual({
+      enabled: true,
+      minimumAheadSeconds: 0.25,
+      requiredAheadSeconds: 1,
+    });
+  });
+
+  it("lets a single gate opt back out of the session-level switch", () => {
+    const defaults = resolveMediaSessionDefaults({
+      detections: {
+        playbackGate: { enabled: false },
+        source: { loadFrames: async () => [] },
+      },
+      mode: MediaSessionMode.File,
+      playbackGate: true,
+      renderer: {},
+    });
+
+    expect(defaults.detectionBuffer.playbackGate).toEqual({
+      enabled: false,
+      requiredAheadSeconds: 2,
+    });
+    expect(defaults.renderPreparation.playbackGate).toEqual({
+      enabled: true,
+      minimumAheadSeconds: 0.25,
+      requiredAheadSeconds: 1,
+    });
+  });
+
   it("preserves explicit tuning overrides", () => {
     const appendable = {
       datasetId: "upload",

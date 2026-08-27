@@ -36,7 +36,6 @@ import {
   RenderPreparationMode,
   RenderPreparationWorkerStatus,
   type RenderPreparationDiagnostics,
-  type RenderPreparationPlaybackGateOptions,
 } from "#types/render-preparation";
 import { createOffsetDetectionFrameSource } from "#detections/offset-detection-frame-source";
 import { createMediaRendererRuntimeState } from "./media-renderer-state";
@@ -173,6 +172,31 @@ export async function createMediaRendererCore(
     }
 
     options.renderPreparation?.onDiagnostics?.(diagnostics);
+  };
+
+  const detectionPlaybackGate = options.detectionBuffer?.playbackGate;
+  const renderPreparationPlaybackGate = options.renderPreparation?.playbackGate;
+  const shouldGateDetectionPlayback = detectionPlaybackGate?.enabled === true;
+  const shouldGateRenderPreparationPlayback =
+    renderPreparationPlaybackGate?.enabled === true;
+  const shouldGatePlayback =
+    shouldGateDetectionPlayback || shouldGateRenderPreparationPlayback;
+
+  const waitForPlaybackReadiness = async (mediaTime: number) => {
+    if (shouldGateDetectionPlayback) {
+      await detectionTimeline?.prepare(mediaTime, {
+        duration: runtimeState.duration(),
+        firstTimestamp,
+        gatePlayback: true,
+      });
+    }
+
+    if (shouldGateRenderPreparationPlayback) {
+      await mediaScene?.waitForRenderPreparation?.(
+        mediaTime,
+        renderPreparationPlaybackGate ?? {},
+      );
+    }
   };
 
   const presentSample = (sample: DecodedVideoSample) => {
@@ -699,6 +723,11 @@ export async function createMediaRendererCore(
           runtimeState.recordPlayheadTime(currentTime);
           detectionTimeline?.prefetch(currentTime);
         },
+        // The producer paces itself once it is running, so the gate reaches the
+        // one moment the renderer still decides: whether to start it at all.
+        waitForReadiness: shouldGatePlayback
+          ? waitForPlaybackReadiness
+          : undefined,
       });
       if (initialPlaybackRate !== 1) {
         transport.setPlaybackRate(initialPlaybackRate);
@@ -723,47 +752,10 @@ export async function createMediaRendererCore(
 
     await prepareAndPresentSample(firstSample);
     runtimeState.setReady();
-    const detectionPlaybackGate = options.detectionBuffer?.playbackGate;
-    const renderPreparationPlaybackGate =
-      options.renderPreparation?.playbackGate;
-    const shouldGateDetectionPlayback = detectionPlaybackGate?.enabled === true;
-    const shouldGateRenderPreparationPlayback =
-      renderPreparationPlaybackGate?.enabled === true;
-    const shouldGatePlayback =
-      shouldGateDetectionPlayback || shouldGateRenderPreparationPlayback;
     const waitForSample = shouldGatePlayback
       ? (sample: DecodedVideoSample) =>
-          waitForPlaybackReadiness(sample, {
-            detectionEnabled: shouldGateDetectionPlayback,
-            renderPreparationEnabled: shouldGateRenderPreparationPlayback,
-            renderPreparationOptions: renderPreparationPlaybackGate,
-          })
+          waitForPlaybackReadiness(sample.timestamp)
       : undefined;
-
-    async function waitForPlaybackReadiness(
-      sample: DecodedVideoSample,
-      waitOptions: {
-        readonly detectionEnabled: boolean;
-        readonly renderPreparationEnabled: boolean;
-        readonly renderPreparationOptions:
-          RenderPreparationPlaybackGateOptions | undefined;
-      },
-    ) {
-      if (waitOptions.detectionEnabled) {
-        await detectionTimeline?.prepare(sample.timestamp, {
-          duration: runtimeState.duration(),
-          firstTimestamp,
-          gatePlayback: true,
-        });
-      }
-
-      if (waitOptions.renderPreparationEnabled) {
-        await mediaScene?.waitForRenderPreparation?.(
-          sample.timestamp,
-          waitOptions.renderPreparationOptions ?? {},
-        );
-      }
-    }
 
     playbackController = createMediaPlaybackController({
       duration: runtimeState.duration(),

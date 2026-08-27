@@ -82,6 +82,9 @@ export async function createFixtureSession(
         ),
       ),
       onState: options.onSessionState,
+      // A fixture ships its detections with it, so a playground that opens
+      // unannotated is only ever waiting on preparation.
+      playbackGate: true,
       presentation,
       renderer: createDemoRendererOptions(options),
     });

@@ -190,13 +190,14 @@ export interface MediaSessionDetectionOptions {
    * session treats detection coverage as part of media readiness and reports
    * buffering while it waits. Merges over `buffer.playbackGate`.
    *
-   * The wait is the renderer holding a decoded sample back, so it applies only
-   * when the renderer pulls samples: a URL, a `Blob`, or any `media` source
-   * without a presented-frame channel. A source that presents its own frames
-   * drives the playhead itself and never consults this option, which is what
+   * The sustained wait is the renderer holding a decoded sample back, so it
+   * lasts the length of playback only when the renderer pulls samples: a URL, a
+   * `Blob`, or any `media` source without a presented-frame channel. A source
+   * that presents its own frames drives the playhead itself, which is what
    * `createVideoEngineMediaRendererSource` returns and therefore what most
-   * video sessions actually run on. Enabling the gate there changes nothing
-   * and reports nothing; gate that playback at the producer instead.
+   * video sessions actually run on. There the gate holds the start of playback
+   * and nothing after it, so a preview opens covered and a producer already
+   * running keeps its own pace.
    */
   readonly playbackGate?: DetectionPlaybackGateOptions;
 
@@ -267,6 +268,24 @@ export interface MediaSessionOptions {
    * Detection frames or sources to render with the media.
    */
   readonly detections?: MediaSessionDetectionOptions;
+  /**
+   * Buffered playback: hold the picture until the frame it is about to show has
+   * both its detections and its prepared annotation artifacts, so a preview
+   * opens annotated rather than opening bare and filling in.
+   *
+   * Off by default, which starts playback at once and draws annotations as they
+   * land. `true` turns on `detections.playbackGate` and
+   * `renderer.renderPreparation.playbackGate` together, each with its own
+   * lookahead; set either one's `enabled` to answer for that gate alone.
+   *
+   * What it holds depends on who owns the playhead. A source the renderer pulls
+   * decoded samples from is held frame by frame, for as long as playback runs.
+   * A source that presents its own frames, which is what
+   * `createVideoEngineMediaRendererSource` returns, is held at the start of
+   * playback only: the session reports buffering until the frame it will resume
+   * on is covered, and once the producer is running it paces itself.
+   */
+  readonly playbackGate?: boolean;
   /**
    * Aggregate loading, playback, buffering, processing, and error state.
    */

@@ -43,24 +43,27 @@ Playback does not wait for appended detections. A frame the source does not
 cover yet presents without annotations and draws them when the append covering
 it lands, so inference falling behind slows annotations rather than the video.
 
-Pass `detections.playbackGate: { enabled: true, requiredAheadSeconds }` when you
-would rather the video hold for its predictions. It is off by default, so a
-session that never mentions it keeps the picture moving.
+Pass `playbackGate: true` to `createMediaSession` when you would rather the
+video hold for its predictions and for the artifacts that draw them. The gate is
+off by default, so a session that never mentions it keeps the picture moving.
+That one switch turns on `detections.playbackGate` and
+`renderer.renderPreparation.playbackGate` together; set either one's `enabled`
+to answer for that gate alone, or its `requiredAheadSeconds` to tune the
+lookahead it waits for.
 
 ### Which Sources The Gate Reaches
 
-The gate is the renderer holding a decoded sample back before it draws it, so it
-only works when the renderer is the one pulling samples. That is the case for
-the `media` inputs above: a URL, a `File`, or a `Blob`.
+The sustained gate is the renderer holding a decoded sample back before it
+draws it. It lasts the length of playback wherever the renderer pulls samples,
+which is the case for the `media` inputs above: a URL, a `File`, or a `Blob`.
 
 A media source that presents its own frames owns the playhead, and the renderer
 follows it rather than pacing it. `createVideoEngineMediaRendererSource` and
 `openVideoEngineMediaSource` return that kind of source, and they are what most
-hosts render video through. Setting `detections.playbackGate` on a source that
-presents its own frames is accepted and ignored, with playback running at its
-normal pace, nothing reporting a wait, and no error raised. Hold playback at the
-producer in that case, or start the session paused and wait on coverage
-yourself:
+hosts render video through. There the gate holds the start of playback and
+nothing after it: the session reports buffering until detections cover the frame
+it will resume on, and a producer already running keeps its own pace. Wait on
+coverage yourself when a mid-playback stall matters:
 
 ```ts
 await session.detectionSource?.waitForRange?.({ startTime: 0, endTime: 2 });

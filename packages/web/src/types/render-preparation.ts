@@ -208,9 +208,10 @@ export interface RenderPreparationOptions {
    * presented. Off by default: the picture moves and unprepared layers are
    * simply absent from it until preparation catches up.
    *
-   * Only a media source the renderer pulls decoded samples from can be held.
-   * On a source that presents its own frames, such as
-   * `openVideoEngineMediaSource`, this option does nothing at all. See
+   * A media source the renderer pulls decoded samples from is held frame by
+   * frame. A source that presents its own frames, such as
+   * `openVideoEngineMediaSource`, is held at the start of playback and not
+   * after it, because the producer owns the playhead once it is running. See
    * {@link RenderPreparationPlaybackGateOptions}.
    */
   readonly playbackGate?: RenderPreparationPlaybackGateOptions;

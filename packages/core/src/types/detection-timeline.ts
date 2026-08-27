@@ -98,14 +98,14 @@ export interface DetectionBufferOptions extends DetectionFrameSelectionOptions {
    * requested lookahead before it loads, so playback stalls rather than
    * showing an unannotated frame.
    *
-   * The stall lives in the renderer's own sample pump, so only a media source
-   * the renderer pulls decoded samples from can be held by it. A source that
-   * presents its own frames owns the playhead and the renderer follows it; the
-   * browser package's video-engine source, `openVideoEngineMediaSource`, is
-   * that kind of source, and it is the one most hosts render video through. A
-   * gate set on a source that presents its own frames is accepted and ignored,
-   * with no wait, no buffering report and no error, so ask that producer for
-   * readiness instead.
+   * The stall lives in the renderer's own sample pump, so a media source the
+   * renderer pulls decoded samples from is held frame by frame, for as long as
+   * playback runs. A source that presents its own frames owns the playhead and
+   * the renderer follows it; the browser package's video-engine source,
+   * `openVideoEngineMediaSource`, is that kind of source, and it is the one
+   * most hosts render video through. There the gate holds the start of playback
+   * and nothing after it: coverage is awaited before the producer is asked to
+   * run, and a producer already running paces itself.
    */
   readonly playbackGate?: DetectionPlaybackGateOptions;
 }

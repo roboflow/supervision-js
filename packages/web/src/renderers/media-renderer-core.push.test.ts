@@ -475,7 +475,86 @@ describe("media renderer over a push-based media source", () => {
 
     expect(renderer.getState().currentTime).toBe(0);
   });
+
+  it("holds the producer until prepared artifacts cover the frame it starts on", async () => {
+    const producer = createProducer();
+    const preparation = createPendingRenderPreparation();
+    const renderer = await createRenderer(
+      producer,
+      createScene(preparation.scene),
+      { renderPreparation: { playbackGate: { enabled: true } } },
+    );
+
+    const play = renderer.play();
+    await Promise.resolve();
+
+    expect(preparation.waitForRenderPreparation).toHaveBeenCalledWith(
+      0,
+      expect.objectContaining({ enabled: true }),
+    );
+    expect(producer.play).not.toHaveBeenCalled();
+    expect(renderer.getState().playbackState).toBe(
+      MediaRendererPlaybackState.Buffering,
+    );
+
+    preparation.resolve();
+    await play;
+
+    expect(producer.play).toHaveBeenCalledOnce();
+    renderer.destroy();
+  });
+
+  it("starts the producer at once when no gate is enabled", async () => {
+    const producer = createProducer();
+    const preparation = createPendingRenderPreparation();
+    const renderer = await createRenderer(
+      producer,
+      createScene(preparation.scene),
+    );
+
+    await renderer.play();
+
+    expect(preparation.waitForRenderPreparation).not.toHaveBeenCalled();
+    expect(producer.play).toHaveBeenCalledOnce();
+    renderer.destroy();
+  });
+
+  it("abandons a held play the viewer paused before readiness landed", async () => {
+    const producer = createProducer();
+    const preparation = createPendingRenderPreparation();
+    const renderer = await createRenderer(
+      producer,
+      createScene(preparation.scene),
+      { renderPreparation: { playbackGate: { enabled: true } } },
+    );
+
+    const play = renderer.play();
+    await Promise.resolve();
+    renderer.pause();
+    preparation.resolve();
+    await play;
+
+    expect(producer.play).not.toHaveBeenCalled();
+    expect(producer.pause).toHaveBeenCalledOnce();
+    renderer.destroy();
+  });
 });
+
+function createPendingRenderPreparation() {
+  let release: (() => void) | undefined;
+  const waitForRenderPreparation = vi.fn(
+    () =>
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+  );
+
+  return {
+    resolve: () => release?.(),
+    scene: { waitForRenderPreparation },
+    waitForRenderPreparation,
+  };
+}
 
 async function createRenderer(
   producer: ReturnType<typeof createProducer>,
@@ -595,7 +674,9 @@ function createProducer() {
   };
 }
 
-function createScene(): MediaRendererScene {
+function createScene(
+  overrides: Partial<MediaRendererScene> = {},
+): MediaRendererScene {
   return {
     destroy: vi.fn(),
     initializeMedia: vi.fn(),
@@ -613,5 +694,6 @@ function createScene(): MediaRendererScene {
     setPresentation: vi.fn(),
     setRenderQuality: vi.fn(),
     setTimelineContext: vi.fn(),
+    ...overrides,
   };
 }

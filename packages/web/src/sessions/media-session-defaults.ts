@@ -30,7 +30,7 @@ const STREAM_DETECTION_BUFFER_DEFAULTS = {
  * The gates ship off, so these carry only the lookahead a host inherits once it
  * turns one on for itself.
  */
-const APPENDABLE_PREDICTION_GATE_DEFAULTS = {
+const DETECTION_PLAYBACK_GATE_DEFAULTS = {
   enabled: false,
   requiredAheadSeconds: 2,
 };
@@ -61,6 +61,7 @@ export interface ResolvedMediaSessionDefaults {
 export function resolveMediaSessionDefaults(options: {
   readonly detections?: MediaSessionDetectionOptions;
   readonly mode?: MediaSessionMode;
+  readonly playbackGate?: boolean;
   readonly renderer?: MediaSessionRendererOptions;
 }): ResolvedMediaSessionDefaults {
   const mode = options.mode ?? SessionMode.File;
@@ -79,10 +80,12 @@ export function resolveMediaSessionDefaults(options: {
     mode === SessionMode.Stream
       ? STREAM_DETECTION_BUFFER_DEFAULTS
       : FILE_DETECTION_BUFFER_DEFAULTS;
+  const sessionPlaybackGate = options.playbackGate === true;
+  const inheritsGateLookahead = hasAppendableDetections || sessionPlaybackGate;
   const detectionPlaybackGate =
     options.detections?.playbackGate ??
     userDetectionBuffer?.playbackGate ??
-    (hasAppendableDetections ? APPENDABLE_PREDICTION_GATE_DEFAULTS : null);
+    (inheritsGateLookahead ? DETECTION_PLAYBACK_GATE_DEFAULTS : null);
   const detectionBuffer = {
     ...baseDetectionBuffer,
     ...options.detections?.sync,
@@ -90,9 +93,12 @@ export function resolveMediaSessionDefaults(options: {
     ...(detectionPlaybackGate
       ? {
           playbackGate: {
-            ...(hasAppendableDetections
-              ? APPENDABLE_PREDICTION_GATE_DEFAULTS
+            ...(inheritsGateLookahead
+              ? DETECTION_PLAYBACK_GATE_DEFAULTS
               : undefined),
+            // The session switch is the coarse answer; a gate's own `enabled`
+            // is the specific one and wins.
+            ...(sessionPlaybackGate ? { enabled: true } : undefined),
             ...userDetectionBuffer?.playbackGate,
             ...options.detections?.playbackGate,
           },
@@ -126,6 +132,7 @@ export function resolveMediaSessionDefaults(options: {
     },
     playbackGate: {
       ...RENDER_PREPARATION_PLAYBACK_GATE_DEFAULTS,
+      ...(sessionPlaybackGate ? { enabled: true } : undefined),
       ...userRenderPreparation?.playbackGate,
     },
   };
