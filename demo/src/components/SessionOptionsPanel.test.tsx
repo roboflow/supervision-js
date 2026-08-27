@@ -38,20 +38,65 @@ const configuration = resolveDemoSessionConfiguration({
 });
 
 interface ControlProps {
+  readonly children?: ReactNode;
+  readonly description?: string;
   readonly label?: string;
   readonly optionPath?: string;
+  readonly title?: string;
   readonly tooltip?: string;
+  readonly value?: ReactNode;
+}
+
+function renderPanel(): ReactElement<ControlProps>[] {
+  return collect(
+    SessionOptionsPanel.type({
+      configuration,
+      onChange: () => {},
+      options: {},
+      playbackGateReach: PlaybackGateReach.StartOfPlayback,
+    }),
+  );
 }
 
 function renderControls(): ReactElement<ControlProps>[] {
-  const panel = SessionOptionsPanel.type({
-    configuration,
-    onChange: () => {},
-    options: {},
-    playbackGateReach: PlaybackGateReach.StartOfPlayback,
-  });
+  return renderPanel().filter((node) => node.props.optionPath !== undefined);
+}
 
-  return collect(panel).filter((node) => node.props.optionPath !== undefined);
+function renderSections(): ReactElement<ControlProps>[] {
+  return renderPanel().filter((node) => node.props.title !== undefined);
+}
+
+function renderReadouts(): ReactElement<ControlProps>[] {
+  return renderPanel().filter(
+    (node) => node.props.label !== undefined && node.props.value !== undefined,
+  );
+}
+
+function renderProse(): string[] {
+  return renderPanel()
+    .flatMap((node) => [
+      node.props.description,
+      node.props.tooltip,
+      typeof node.props.value === "string" ? node.props.value : undefined,
+      node.props.optionPath === undefined && node.props.title === undefined
+        ? flatten(node.props.children)
+        : undefined,
+    ])
+    .filter((text): text is string => (text ?? "").length > 0);
+}
+
+function flatten(node: ReactNode): string {
+  if (typeof node === "string") {
+    return node;
+  }
+
+  if (Array.isArray(node)) {
+    return node.map((child) => flatten(child)).join("");
+  }
+
+  return isValidElement<{ readonly children?: ReactNode }>(node)
+    ? flatten(node.props.children)
+    : "";
 }
 
 function collect(
@@ -65,7 +110,7 @@ function collect(
     return found;
   }
 
-  if (!isValidElement<{ readonly children?: ReactNode } & ControlProps>(node)) {
+  if (!isValidElement<ControlProps>(node)) {
     return found;
   }
 
@@ -112,6 +157,50 @@ describe("SessionOptionsPanel", () => {
         .map(
           (control) => `${control.props.label} / ${control.props.optionPath}`,
         ),
+    ).toEqual([]);
+  });
+
+  it("introduces every group the same way, in the same place", () => {
+    expect(
+      renderSections()
+        .filter((section) => (section.props.description ?? "").length === 0)
+        .map((section) => section.props.title),
+    ).toEqual([]);
+  });
+
+  it("tells the two playback gates apart by the option each one sets", () => {
+    const paths = renderControls().map((control) => control.props.optionPath);
+
+    expect(
+      paths.filter((path, index) => paths.indexOf(path) !== index),
+    ).toEqual([]);
+  });
+
+  it("says how far a playback gate reaches once", () => {
+    expect(
+      renderReadouts().filter(
+        (readout) => readout.props.label === "Playback gate reach",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("explains a control without pointing at where it sits", () => {
+    expect(
+      renderProse().filter((text) => /\b(above|below)\b/i.test(text)),
+    ).toEqual([]);
+  });
+
+  it("explains the video, not the machinery that draws it", () => {
+    const machinery =
+      /artifacts?\b|prepared run|gate that is on|presents its own frames|hands the renderer/i;
+    /* `Prepared window` capitalised names a reading a viewer can go and find,
+     * so only the lower-case phrase counts as jargon. */
+    const jargonWindow = /prepared window/;
+
+    expect(
+      renderProse().filter(
+        (text) => machinery.test(text) || jargonWindow.test(text),
+      ),
     ).toEqual([]);
   });
 });

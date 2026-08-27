@@ -1441,19 +1441,26 @@ fieldset {
   text-align: left;
 }
 
+/* Two of these options differ only in the path under them, so the path wraps
+ * here rather than ending in the ellipsis that would hide the difference. */
+.session-options .render-control__path {
+  overflow-wrap: break-word;
+  white-space: normal;
+}
+
 /* A tooltip wider than the group it opens in scrolls the whole inspector
  * sideways. */
 .session-options .diagnostic-label__tip {
   width: 232px;
 }
 
-/* This readout carries a sentence where the others carry a figure. */
-.session-options .session-options__reach {
+/* These readouts carry a sentence where the others carry a figure. */
+.session-options .session-options__state {
   grid-template-columns: minmax(0, 1fr);
   white-space: normal;
 }
 
-.session-options .session-options__reach .readout__value {
+.session-options .session-options__state .readout__value {
   font-family: var(--font-sans);
   font-size: 11px;
   font-weight: 560;
@@ -1462,7 +1469,7 @@ fieldset {
   text-overflow: clip;
 }
 
-.session-options .session-options__reach .readout__label {
+.session-options .session-options__state .readout__label {
   font-size: 11px;
 }
 
@@ -2601,6 +2608,14 @@ fieldset {
   min-width: 0;
 }
 
+.render-control-section__description {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 560;
+  line-height: 1.4;
+  margin: 0;
+}
+
 .render-control-section__header {
   align-items: center;
   display: flex;
@@ -3058,11 +3073,15 @@ fieldset {
   color: #ffffff;
 }
 
+/* A grid item is sized by its content unless it is told it may shrink, and a
+ * long option path is one unbreakable run. Without this the row grows past the
+ * column and takes the slider and its figure off the edge with it. */
 .render-control__label {
   align-items: baseline;
   display: flex;
   gap: 8px;
   justify-content: space-between;
+  min-width: 0;
 }
 
 .render-control__label strong {

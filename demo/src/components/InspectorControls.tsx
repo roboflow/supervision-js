@@ -1,9 +1,14 @@
-import { useState, type CSSProperties, type ReactNode } from "react";
+import { Fragment, useState, type CSSProperties, type ReactNode } from "react";
 
 import { DiagnosticLabel } from "./DiagnosticLabel";
 
+/**
+ * `description` sits outside the collapsible body on purpose: a reader deciding
+ * which group to open can only decide from what a closed group still shows.
+ */
 export function ControlSection({
   children,
+  description,
   enabled,
   evalHook,
   onToggleEnabled,
@@ -11,6 +16,7 @@ export function ControlSection({
   toggleDisabled = false,
 }: {
   readonly children: ReactNode;
+  readonly description?: string;
   readonly enabled?: boolean;
   readonly evalHook?: string;
   readonly onToggleEnabled?: (enabled: boolean) => void;
@@ -48,11 +54,18 @@ export function ControlSection({
           </label>
         ) : null}
       </div>
+      {description === undefined ? null : (
+        <p className="render-control-section__description">{description}</p>
+      )}
       {open ? (
         <div className="render-control-section__body">{children}</div>
       ) : null}
     </section>
   );
+}
+
+export function ControlSubheading({ children }: { readonly children: string }) {
+  return <h4 className="render-control-section__subheading">{children}</h4>;
 }
 
 export function ToggleControl({
@@ -254,10 +267,32 @@ function ControlName({
         <DiagnosticLabel label={label} tooltip={tooltip} />
       )}
       {optionPath === undefined ? null : (
-        <code className="render-control__path">{optionPath}</code>
+        <code className="render-control__path">
+          {breakAtSegments(optionPath)}
+        </code>
       )}
     </span>
   );
+}
+
+/**
+ * A path is one unbreakable run, so a column narrow enough to need a second
+ * line breaks it mid-word. `<wbr>` offers the breaks at the dots and adds no
+ * character, so a copied path is still the path.
+ */
+function breakAtSegments(optionPath: string) {
+  const segments = optionPath.split(".");
+
+  return segments.map((segment, index) => (
+    <Fragment key={`${segment}-${String(index)}`}>
+      {segment}
+      {index === segments.length - 1 ? null : (
+        <>
+          .<wbr />
+        </>
+      )}
+    </Fragment>
+  ));
 }
 
 export function ControlNote({ children }: { readonly children: ReactNode }) {

@@ -13,6 +13,7 @@ import {
 import {
   ControlNote,
   ControlSection,
+  ControlSubheading,
   NumberControl,
   SegmentedControl,
   SliderControl,
@@ -27,14 +28,16 @@ import {
 
 const AUTO = "auto";
 const UNSET = "unset";
+const STATE_READOUT_CLASS = "session-options__state";
 
+/** When the wait happens. What is waited for is the Waiting for reading. */
 const gateReachSentences: Record<PlaybackGateReach, string> = {
   [PlaybackGateReach.EveryFrame]:
-    "This source hands the renderer decoded frames, so a gate that is on holds every frame, for as long as the clip runs.",
+    "Every frame waits for what it needs, for as long as the clip runs.",
   [PlaybackGateReach.Off]:
-    "No gate is on. The picture moves, and a frame missing its annotations or masks is drawn without them.",
+    "Nothing holds the picture. A frame is drawn with whatever has arrived by the time it is shown.",
   [PlaybackGateReach.StartOfPlayback]:
-    "This source presents its own frames, so a gate that is on holds only the start of playback. After that, frames play whether their annotations and masks are ready or not.",
+    "The video waits once, at the start. After that it keeps going even if annotations or masks fall behind.",
 };
 
 export const SessionOptionsPanel = memo(function SessionOptionsPanel({
@@ -71,8 +74,9 @@ export const SessionOptionsPanel = memo(function SessionOptionsPanel({
         </button>
       </header>
       <p className="session-options__hint">
-        Changing one reopens the clip and picks up where you left off. Every
-        value shown is the one the open session is running on.
+        These are set when the clip opens. Changing one reopens it and picks up
+        where you left off, and every value shown is the one the open session is
+        running on.
       </p>
       {configuration === null ? (
         <p className="session-options__hint">Waiting for a clip to open.</p>
@@ -106,6 +110,10 @@ function SessionOptionControls({
   const detectionGate = buffer.playbackGate;
   const maskFrame = configuration.resolved.renderPreparation.maskFrame;
   const preparationGate = configuration.resolved.renderPreparation.playbackGate;
+  const waitingForAnnotations =
+    options.detectionGateEnabled ?? detectionGate?.enabled ?? false;
+  const waitingForMasks =
+    options.preparationGateEnabled ?? preparationGate?.enabled ?? false;
   const container =
     options.normalizeContainer ?? MediaNormalizationContainer.WebM;
   const normalizing = options.normalize === true;
@@ -116,7 +124,10 @@ function SessionOptionControls({
 
   return (
     <>
-      <ControlSection title="Lifecycle">
+      <ControlSection
+        description="What kind of video this is, and whether the picture keeps up with annotations that arrive while it plays."
+        title="Lifecycle"
+      >
         <SegmentedControl
           label="Mode"
           onChange={(value) => onUpdate("mode", value)}
@@ -125,9 +136,22 @@ function SessionOptionControls({
             { label: "File", value: MediaSessionMode.File },
             { label: "Stream", value: MediaSessionMode.Stream },
           ]}
-          tooltip="Whether the video has an end. File keeps 10s of annotations ahead of the playhead and 0.5s behind, and rebuilds that window every 2.5s. Stream keeps 5s each way and rebuilds four times a second, because the source is still growing. Every default in the two loading groups moves with this. `mode`, default File."
+          tooltip="Whether the video has an end. File loads 10s of annotations ahead of the playhead and 0.5s behind, and looks for more every 2.5s. Stream loads 5s each way and looks four times a second, because more video is still arriving. Switching this moves every loading default in the panel. `mode`, default File."
           value={options.mode ?? configuration.mode}
         />
+        <ToggleControl
+          checked={options.autoRefresh ?? configuration.autoRefresh}
+          label="Auto refresh"
+          onChange={(checked) => onUpdate("autoRefresh", checked)}
+          optionPath="detections.autoRefresh"
+          tooltip="Redraws the frame on screen as soon as annotations covering it arrive. This clip has all of them before it opens, so nothing changes here; you see it while an upload is still being inferred. Off, the picture only redraws when your own code calls `session.refresh()`. `detections.autoRefresh`, default on."
+        />
+      </ControlSection>
+
+      <ControlSection
+        description="Two gates can hold the video: one until the frame's annotations have loaded, one until its masks have been drawn. Playback gate sets both at once, and each gate's own switch beats it."
+        title="Playback gates"
+      >
         <SegmentedControl
           label="Playback gate"
           onChange={(value) =>
@@ -139,77 +163,32 @@ function SessionOptionControls({
             { label: "Off", value: "off" },
             { label: "On", value: "on" },
           ]}
-          tooltip="On, the video starts with its boxes and masks already drawn on it. Off, the picture moves at once and the overlays appear as they land, which is what you want for skimming a long clip. Unset waits for masks and not for annotations. `playbackGate`; this workbench passes on."
+          tooltip="On, the video opens with its boxes and masks already on it. Off, the picture moves at once and they appear as they land, which is what you want for skimming a long clip. Unset waits for masks but not for annotations, unless annotations are still being written. `playbackGate`; this workbench opens a sample clip On and an upload Unset."
           value={writeTriState(
             options.playbackGate ?? configuration.playbackGate,
           )}
         />
-        <PlaybackGateReachReadout reach={playbackGateReach} />
-        <ToggleControl
-          checked={options.autoRefresh ?? configuration.autoRefresh}
-          label="Auto refresh"
-          onChange={(checked) => onUpdate("autoRefresh", checked)}
-          optionPath="detections.autoRefresh"
-          tooltip="The frame on screen repaints the moment annotations covering it arrive. There is nothing to see on this clip, whose annotations are all present before it opens; it shows while an upload is still being inferred. `detections.autoRefresh`, default on. Off leaves every repaint to `session.refresh()`."
+        <Readout
+          className={STATE_READOUT_CLASS}
+          label="Waiting for"
+          value={describeWait(waitingForAnnotations, waitingForMasks)}
         />
-        <ControlNote>
-          The switch above answers for both <code>playbackGate.enabled</code>{" "}
-          toggles below at once, and either one overrules it. Unset leaves the
-          detection one off unless annotations are still being written, and
-          leaves the render preparation one on.
-        </ControlNote>
-      </ControlSection>
-
-      <ControlSection title="Detection buffer">
-        <SliderControl
-          label="Buffer ahead seconds"
-          max={30}
-          min={0}
-          onChange={(value) => onUpdate("bufferAheadSeconds", value)}
-          optionPath="buffer.bufferAheadSeconds"
-          step={0.5}
-          tooltip="Boxes turn up late after you skip forward? Raise this. Costs memory on a long video. Masks are never drawn further ahead than annotations are loaded, so lowering it shortens the prepared run as well. `detections.buffer.bufferAheadSeconds`, default 10s for a file and 5s for a stream."
-          value={options.bufferAheadSeconds ?? buffer.bufferAheadSeconds ?? 0}
-          valueLabel={formatSeconds(
-            options.bufferAheadSeconds ?? buffer.bufferAheadSeconds,
-          )}
-        />
-        <SliderControl
-          label="Buffer behind seconds"
-          max={30}
-          min={0}
-          onChange={(value) => onUpdate("bufferBehindSeconds", value)}
-          optionPath="buffer.bufferBehindSeconds"
-          step={0.5}
-          tooltip="Boxes blink out when you step or scrub backwards? Raise this. Costs memory and nothing else. `detections.buffer.bufferBehindSeconds`, default 0.5s for a file and 5s for a stream."
-          value={options.bufferBehindSeconds ?? buffer.bufferBehindSeconds ?? 0}
-          valueLabel={formatSeconds(
-            options.bufferBehindSeconds ?? buffer.bufferBehindSeconds,
-          )}
-        />
-        <SliderControl
-          label="Refresh interval seconds"
-          max={10}
-          min={0}
-          onChange={(value) => onUpdate("refreshIntervalSeconds", value)}
-          optionPath="buffer.refreshIntervalSeconds"
-          step={0.05}
-          tooltip="Nothing on screen moves with this on a file, whose annotations are fixed: ground the loaded window has not reached is fetched the moment the playhead needs it whatever this says. Raising it saves repeated work. On a stream the source gains data underneath, and this is how often that data is picked up. `detections.buffer.refreshIntervalSeconds`, default 2.5s for a file and 0.25s for a stream."
+        <Readout
+          className={STATE_READOUT_CLASS}
+          label="Playback gate reach"
           value={
-            options.refreshIntervalSeconds ?? buffer.refreshIntervalSeconds ?? 0
+            playbackGateReach === null
+              ? "Waiting for the clip to open."
+              : gateReachSentences[playbackGateReach]
           }
-          valueLabel={formatSeconds(
-            options.refreshIntervalSeconds ?? buffer.refreshIntervalSeconds,
-          )}
         />
+        <ControlSubheading>Until the annotations load</ControlSubheading>
         <ToggleControl
-          checked={
-            options.detectionGateEnabled ?? detectionGate?.enabled ?? false
-          }
+          checked={waitingForAnnotations}
           label="Playback gate enabled"
           onChange={(checked) => onUpdate("detectionGateEnabled", checked)}
-          optionPath="playbackGate.enabled"
-          tooltip="Annotations alone hold the video back, whatever the Lifecycle switch says. Off, a frame whose boxes have not loaded is drawn without them. `detections.playbackGate.enabled`, on here because the session switch is on."
+          optionPath="detections.playbackGate.enabled"
+          tooltip="The video waits for the boxes and labels that belong to the frame it is about to show. Off, that frame is drawn without them and they appear once they load. `detections.playbackGate.enabled`; off unless Playback gate is On or annotations are still being written."
         />
         <SliderControl
           label="Required ahead seconds"
@@ -218,9 +197,9 @@ function SessionOptionControls({
           onChange={(value) =>
             onUpdate("detectionGateRequiredAheadSeconds", value)
           }
-          optionPath="playbackGate.requiredAheadSeconds"
+          optionPath="detections.playbackGate.requiredAheadSeconds"
           step={0.25}
-          tooltip="Seconds of annotations that have to be loaded before the video is allowed to move. A clip whose annotations are already in memory meets any figure instantly; the wait shows while they are still being fetched or written, and a bigger number then means a longer pause before the first frame. At 0 nothing is waited for. `detections.playbackGate.requiredAheadSeconds`, default 2s."
+          tooltip="How many seconds of annotations have to be loaded before the video is allowed to move. A clip whose annotations are already in memory clears any figure at once; the wait shows while they are still being fetched or written, and a bigger number then means a longer pause before the first frame. At 0 the video does not wait. `detections.playbackGate.requiredAheadSeconds`, default 2s."
           value={
             options.detectionGateRequiredAheadSeconds ??
             detectionGate?.requiredAheadSeconds ??
@@ -231,100 +210,13 @@ function SessionOptionControls({
               detectionGate?.requiredAheadSeconds,
           )}
         />
-        <PlaybackGateReachReadout reach={playbackGateReach} />
-      </ControlSection>
-
-      <ControlSection title="Render preparation">
-        <SegmentedControl
-          label="Mode"
-          onChange={(value) => onUpdate("preparationMode", value)}
-          optionPath="renderPreparation.mode"
-          options={[
-            { label: "Auto", value: RenderPreparationMode.Auto },
-            { label: "Main thread", value: RenderPreparationMode.MainThread },
-            { label: "Worker", value: RenderPreparationMode.Worker },
-          ]}
-          tooltip="Segmentation masks are turned into pixels before they can be drawn. Main thread does that on the thread that draws the video, so a crowded frame stutters. Worker moves it off that thread. `renderer.renderPreparation.mode`, default Auto, which takes Worker wherever workers exist; this workbench opens on Worker."
-          value={options.preparationMode ?? configuration.preparationMode}
-        />
-        <NumberControl
-          label="Worker count"
-          max={8}
-          min={1}
-          onChange={(value) => onUpdate("maskWorkerCount", value)}
-          optionPath="maskFrame.workerCount"
-          placeholder="auto"
-          step={1}
-          tooltip="Masks that can be turned into pixels at the same time. More of them refill the run of ready masks faster after a jump, and compete with video decode for the machine. The Workers readout below reads busy out of this number. `renderer.renderPreparation.maskFrame.workerCount`; empty takes half this machine's cores capped at 4, and an explicit value is capped at 8."
-          value={options.maskWorkerCount ?? maskFrame?.workerCount}
-        />
-        <NumberControl
-          label="Prefetch frame count"
-          min={1}
-          onChange={(value) => onUpdate("maskPrefetchFrameCount", value)}
-          optionPath="maskFrame.prefetchFrameCount"
-          step={1}
-          tooltip="Frames of masks kept drawn ahead of the picture while it plays. Too few and masks drop out mid-shot on a crowded clip. The Prepared window readout below shows how many are actually there. A paused clip ignores this and keeps one batch ahead. `renderer.renderPreparation.maskFrame.prefetchFrameCount`, default 7 seconds' worth for a file and 3 for a stream, counted at the annotation frame rate."
-          value={
-            options.maskPrefetchFrameCount ?? maskFrame?.prefetchFrameCount
-          }
-        />
-        <NumberControl
-          label="Max cache frame count"
-          min={1}
-          onChange={(value) => onUpdate("maskMaxCacheFrameCount", value)}
-          optionPath="maskFrame.maxCacheFrameCount"
-          step={1}
-          tooltip="Drawn masks held in memory before the oldest are dropped. Below the prefetch count, masks the playhead is about to reach are thrown out and drawn a second time. Above it, the cost is memory. `renderer.renderPreparation.maskFrame.maxCacheFrameCount`, default 8 seconds' worth for a file and 5 for a stream."
-          value={
-            options.maskMaxCacheFrameCount ?? maskFrame?.maxCacheFrameCount
-          }
-        />
-        <NumberControl
-          label="Max pending frame count"
-          min={1}
-          onChange={(value) => onUpdate("maskMaxPendingFrameCount", value)}
-          optionPath="maskFrame.maxPendingFrameCount"
-          step={1}
-          tooltip="A ceiling on frames queued for a free worker, so a jump cannot pile up unbounded work. The Cook readout on the transport bar shows that queue as its `q` figure. `renderer.renderPreparation.maskFrame.maxPendingFrameCount`, default 24."
-          value={
-            options.maskMaxPendingFrameCount ?? maskFrame?.maxPendingFrameCount
-          }
-        />
-        <NumberControl
-          label="Schedule batch size"
-          min={1}
-          onChange={(value) => onUpdate("maskScheduleBatchSize", value)}
-          optionPath="maskFrame.scheduleBatchSize"
-          step={1}
-          tooltip="Frames sent for drawing in one pass. It also sets how far a paused clip works ahead: one batch plus the frame under the playhead. Raise it and stepping forward lands on a mask that is already drawn. `renderer.renderPreparation.maskFrame.scheduleBatchSize`, default 16."
-          value={options.maskScheduleBatchSize ?? maskFrame?.scheduleBatchSize}
-        />
-        <SliderControl
-          label="Scan interval seconds"
-          max={1}
-          min={0.02}
-          onChange={(value) => onUpdate("maskScanIntervalSeconds", value)}
-          optionPath="maskFrame.scanIntervalSeconds"
-          step={0.02}
-          tooltip="How often the run of ready masks is checked and topped up. On this clip the run refills within a few hundred milliseconds at every setting on the slider, so there is nothing here to watch; it is a lever for a machine that cannot keep up. `renderer.renderPreparation.maskFrame.scanIntervalSeconds`, default 0.1s."
-          value={
-            options.maskScanIntervalSeconds ??
-            maskFrame?.scanIntervalSeconds ??
-            0.02
-          }
-          valueLabel={formatSeconds(
-            options.maskScanIntervalSeconds ?? maskFrame?.scanIntervalSeconds,
-          )}
-        />
+        <ControlSubheading>Until the masks are drawn</ControlSubheading>
         <ToggleControl
-          checked={
-            options.preparationGateEnabled ?? preparationGate?.enabled ?? false
-          }
+          checked={waitingForMasks}
           label="Playback gate enabled"
           onChange={(checked) => onUpdate("preparationGateEnabled", checked)}
-          optionPath="playbackGate.enabled"
-          tooltip="Masks alone hold the video back, whatever the Lifecycle switch says. Off, the picture moves and a frame whose mask is not drawn yet shows without it. `renderer.renderPreparation.playbackGate.enabled`, default on for a session."
+          optionPath="renderPreparation.playbackGate.enabled"
+          tooltip="The video waits for the masks that belong to the frame it is about to show to be turned into pixels. Off, that frame is drawn without its masks. `renderer.renderPreparation.playbackGate.enabled`, on by default."
         />
         <SliderControl
           label="Minimum ahead seconds"
@@ -333,9 +225,9 @@ function SessionOptionControls({
           onChange={(value) =>
             onUpdate("preparationGateMinimumAheadSeconds", value)
           }
-          optionPath="playbackGate.minimumAheadSeconds"
+          optionPath="renderPreparation.playbackGate.minimumAheadSeconds"
           step={0.25}
-          tooltip="Drop below this much drawn mask ahead of the playhead and the video stops. It then stays stopped until the required lead is reached, so setting the two apart keeps a clip that is only just keeping up from stuttering in and out. Nothing on this clip gets near the floor, so raising it changes nothing you can see here. `renderer.renderPreparation.playbackGate.minimumAheadSeconds`, default 0.25s, and capped by the required lead."
+          tooltip="How little drawn mask can be left in front of the playhead before the video stops. It then stays stopped until Required ahead seconds is met, so setting the two apart keeps a clip that is only just keeping up from stuttering in and out. Nothing on this clip gets near the floor, so raising it changes nothing you can see here. `renderer.renderPreparation.playbackGate.minimumAheadSeconds`, default 0.25s, and never more than the required figure."
           value={
             options.preparationGateMinimumAheadSeconds ??
             preparationGate?.minimumAheadSeconds ??
@@ -353,9 +245,9 @@ function SessionOptionControls({
           onChange={(value) =>
             onUpdate("preparationGateRequiredAheadSeconds", value)
           }
-          optionPath="playbackGate.requiredAheadSeconds"
+          optionPath="renderPreparation.playbackGate.requiredAheadSeconds"
           step={0.25}
-          tooltip="Seconds of drawn masks that end a stop once one has started. The clip is held for about a second when it opens; on a machine that draws masks this quickly the figure asked for barely changes that, so expect it to bite on a denser clip. `renderer.renderPreparation.playbackGate.requiredAheadSeconds`, default 1s."
+          tooltip="How much drawn mask has to be in front of the playhead before a stop ends. This clip is held about a second when it opens, and this machine draws masks fast enough that the figure barely changes that, so expect it to bite on a denser clip. `renderer.renderPreparation.playbackGate.requiredAheadSeconds`, default 1s."
           value={
             options.preparationGateRequiredAheadSeconds ??
             preparationGate?.requiredAheadSeconds ??
@@ -366,16 +258,147 @@ function SessionOptionControls({
               preparationGate?.requiredAheadSeconds,
           )}
         />
-        <PlaybackGateReachReadout reach={playbackGateReach} />
-        <ControlNote>
-          The frame counts above are seconds converted at this clip&apos;s
-          annotation frame rate, so their defaults read differently on every
-          clip. An empty worker count lets the library size the pool from the
-          machine.
-        </ControlNote>
       </ControlSection>
 
-      <ControlSection title="Renderer">
+      <ControlSection
+        description="How much of the annotation track is held in memory around the playhead, and how often the library looks for more."
+        title="Detection buffer"
+      >
+        <SliderControl
+          label="Buffer ahead seconds"
+          max={30}
+          min={0}
+          onChange={(value) => onUpdate("bufferAheadSeconds", value)}
+          optionPath="buffer.bufferAheadSeconds"
+          step={0.5}
+          tooltip="Boxes turn up late after you skip forward? Raise this. It costs memory on a long video. Masks are never drawn further ahead than the annotations are loaded, so lowering it shortens the mask lead too. `detections.buffer.bufferAheadSeconds`, default 10s for a file and 5s for a stream."
+          value={options.bufferAheadSeconds ?? buffer.bufferAheadSeconds ?? 0}
+          valueLabel={formatSeconds(
+            options.bufferAheadSeconds ?? buffer.bufferAheadSeconds,
+          )}
+        />
+        <SliderControl
+          label="Buffer behind seconds"
+          max={30}
+          min={0}
+          onChange={(value) => onUpdate("bufferBehindSeconds", value)}
+          optionPath="buffer.bufferBehindSeconds"
+          step={0.5}
+          tooltip="Boxes blink out when you step or scrub backwards? Raise this. It costs memory and nothing else. `detections.buffer.bufferBehindSeconds`, default 0.5s for a file and 5s for a stream."
+          value={options.bufferBehindSeconds ?? buffer.bufferBehindSeconds ?? 0}
+          valueLabel={formatSeconds(
+            options.bufferBehindSeconds ?? buffer.bufferBehindSeconds,
+          )}
+        />
+        <SliderControl
+          label="Refresh interval seconds"
+          max={10}
+          min={0}
+          onChange={(value) => onUpdate("refreshIntervalSeconds", value)}
+          optionPath="buffer.refreshIntervalSeconds"
+          step={0.05}
+          tooltip="How often already loaded annotations are read again. A file's annotations never change, so nothing on screen moves with this: a stretch the buffer has not reached yet is fetched the moment you get there whatever this says, and raising it only saves repeated work. On a stream more annotations keep arriving, and this is how often they are picked up. `detections.buffer.refreshIntervalSeconds`, default 2.5s for a file and 0.25s for a stream."
+          value={
+            options.refreshIntervalSeconds ?? buffer.refreshIntervalSeconds ?? 0
+          }
+          valueLabel={formatSeconds(
+            options.refreshIntervalSeconds ?? buffer.refreshIntervalSeconds,
+          )}
+        />
+      </ControlSection>
+
+      <ControlSection
+        description="Segmentation masks are turned into pixels before they can be drawn. Frame counts here are seconds converted at this clip's annotation frame rate, so their defaults read differently on every clip."
+        title="Render preparation"
+      >
+        <SegmentedControl
+          label="Mode"
+          onChange={(value) => onUpdate("preparationMode", value)}
+          optionPath="renderPreparation.mode"
+          options={[
+            { label: "Auto", value: RenderPreparationMode.Auto },
+            { label: "Main thread", value: RenderPreparationMode.MainThread },
+            { label: "Worker", value: RenderPreparationMode.Worker },
+          ]}
+          tooltip="Where masks are turned into pixels. Main thread does it on the same thread that draws the video, so a crowded frame stutters. Worker moves it off that thread. `renderer.renderPreparation.mode`, default Auto, which takes Worker wherever workers exist; this workbench opens on Worker."
+          value={options.preparationMode ?? configuration.preparationMode}
+        />
+        <NumberControl
+          label="Worker count"
+          max={8}
+          min={1}
+          onChange={(value) => onUpdate("maskWorkerCount", value)}
+          optionPath="maskFrame.workerCount"
+          placeholder="auto"
+          step={1}
+          tooltip="How many masks can be turned into pixels at once. More of them catch up faster after you jump, and compete with the video itself for the machine. The Workers reading counts the busy ones out of this number. `renderer.renderPreparation.maskFrame.workerCount`; empty takes half this machine's cores capped at 4, and a figure you type is capped at 8."
+          value={options.maskWorkerCount ?? maskFrame?.workerCount}
+        />
+        <NumberControl
+          label="Prefetch frame count"
+          min={1}
+          onChange={(value) => onUpdate("maskPrefetchFrameCount", value)}
+          optionPath="maskFrame.prefetchFrameCount"
+          step={1}
+          tooltip="How many frames of masks are kept drawn ahead of the picture while it plays. Too few and masks drop out mid-shot on a crowded clip. The Prepared window reading says how many are actually there. A paused clip ignores this and keeps one batch ahead. `renderer.renderPreparation.maskFrame.prefetchFrameCount`, default 7 seconds' worth for a file and 3 for a stream, counted at the annotation frame rate."
+          value={
+            options.maskPrefetchFrameCount ?? maskFrame?.prefetchFrameCount
+          }
+        />
+        <NumberControl
+          label="Max cache frame count"
+          min={1}
+          onChange={(value) => onUpdate("maskMaxCacheFrameCount", value)}
+          optionPath="maskFrame.maxCacheFrameCount"
+          step={1}
+          tooltip="How many drawn masks are held in memory before the oldest are dropped. Set it under the prefetch count and masks the playhead is about to reach get thrown out and drawn a second time. Set it over, and all it costs is memory. `renderer.renderPreparation.maskFrame.maxCacheFrameCount`, default 8 seconds' worth for a file and 5 for a stream."
+          value={
+            options.maskMaxCacheFrameCount ?? maskFrame?.maxCacheFrameCount
+          }
+        />
+        <NumberControl
+          label="Max pending frame count"
+          min={1}
+          onChange={(value) => onUpdate("maskMaxPendingFrameCount", value)}
+          optionPath="maskFrame.maxPendingFrameCount"
+          step={1}
+          tooltip="A ceiling on how many frames can queue up waiting for a free worker, so one big jump cannot pile up unbounded work. The Cook reading shows that queue as its `q` figure. `renderer.renderPreparation.maskFrame.maxPendingFrameCount`, default 24."
+          value={
+            options.maskMaxPendingFrameCount ?? maskFrame?.maxPendingFrameCount
+          }
+        />
+        <NumberControl
+          label="Schedule batch size"
+          min={1}
+          onChange={(value) => onUpdate("maskScheduleBatchSize", value)}
+          optionPath="maskFrame.scheduleBatchSize"
+          step={1}
+          tooltip="How many frames are sent off to be drawn in one go. It also sets how far a paused clip works ahead: one batch plus the frame under the playhead. Raise it and stepping forward lands on a mask that is already drawn. `renderer.renderPreparation.maskFrame.scheduleBatchSize`, default 16."
+          value={options.maskScheduleBatchSize ?? maskFrame?.scheduleBatchSize}
+        />
+        <SliderControl
+          label="Scan interval seconds"
+          max={1}
+          min={0.02}
+          onChange={(value) => onUpdate("maskScanIntervalSeconds", value)}
+          optionPath="maskFrame.scanIntervalSeconds"
+          step={0.02}
+          tooltip="How often the library checks whether enough masks are drawn ahead, and starts more. On this clip it catches up within a few hundred milliseconds at every setting on the slider, so there is nothing here to watch; it is a lever for a machine that cannot keep up. `renderer.renderPreparation.maskFrame.scanIntervalSeconds`, default 0.1s."
+          value={
+            options.maskScanIntervalSeconds ??
+            maskFrame?.scanIntervalSeconds ??
+            0.02
+          }
+          valueLabel={formatSeconds(
+            options.maskScanIntervalSeconds ?? maskFrame?.scanIntervalSeconds,
+          )}
+        />
+      </ControlSection>
+
+      <ControlSection
+        description="How the picture sits in its box, what it does when you point at it, and what it does when it reaches the end."
+        title="Renderer"
+      >
         <SegmentedControl
           label="Fit"
           onChange={(value) => onUpdate("fit", value)}
@@ -415,21 +438,24 @@ function SessionOptionControls({
         />
       </ControlSection>
 
-      <ControlSection title="Normalization">
+      <ControlSection
+        description="Rewrites the file into a format the browser can step through before anything plays. The converted video then feeds the picture, so the video engine stops driving it and its readings go quiet."
+        title="Normalization"
+      >
         <ToggleControl
           checked={normalizing}
           disabled={!configuration.normalizable.supported}
           label="Normalize"
           onChange={(checked) => onUpdate("normalize", checked || undefined)}
           optionPath="normalize"
-          tooltip="The file is converted to a known format before anything plays, so a codec the browser cannot step through, or a wandering frame rate, becomes one it can. The whole file is converted first, which takes a while on a long clip. The converted result feeds the picture from then on, so the engine readouts go quiet. `normalize`, off by default."
+          tooltip="Converts the file before anything plays, so a codec the browser cannot step through, or a frame rate that wanders, becomes one it can. The whole file is converted first, which takes a while on a long clip. `normalize`, off by default."
         />
         {configuration.normalizable.supported ? null : (
           <ControlNote>{configuration.normalizable.reason}</ControlNote>
         )}
         {normalizing || !configuration.normalizable.supported ? null : (
           <ControlNote>
-            Normalize is off, so nothing below it applies.
+            Normalize is off, so the rest of this group does nothing.
           </ControlNote>
         )}
         <ToggleControl
@@ -449,7 +475,7 @@ function SessionOptionControls({
             { label: "WebM", value: MediaNormalizationContainer.WebM },
             { label: "MP4", value: MediaNormalizationContainer.Mp4 },
           ]}
-          tooltip="The file the converted video is written into. It decides which codecs are available and which one Auto takes below. `normalize.container`, default WebM."
+          tooltip="The file the converted video is written into. It decides which video codecs are on offer and which one Auto picks. `normalize.container`, default WebM."
           value={container}
         />
         <SegmentedControl
@@ -568,8 +594,8 @@ function SessionOptionControls({
         />
         {!normalizing || keepingAudio ? null : (
           <ControlNote>
-            Audio is being discarded, so the two rows below have nothing to act
-            on.
+            Audio is being discarded, so Audio codec and Audio bitrate have
+            nothing to act on.
           </ControlNote>
         )}
         <SegmentedControl
@@ -599,11 +625,8 @@ function SessionOptionControls({
           value={options.normalizeAudioBitrate}
         />
         <ControlNote>
-          The converted result plays in place of the original, so the video
-          engine stops feeding the picture: its diagnostics and the presented
-          rate go quiet, and the gates above start holding every frame.
-          Converted bytes reach the engine only when a host builds a{" "}
-          <code>SourceKind.Blob</code> engine source from them; this option
+          Converted bytes reach the video engine only when a host builds a{" "}
+          <code>SourceKind.Blob</code> engine source from them, and this option
           cannot ask for that.
         </ControlNote>
       </ControlSection>
@@ -611,20 +634,16 @@ function SessionOptionControls({
   );
 }
 
-function PlaybackGateReachReadout({
-  reach,
-}: {
-  readonly reach: PlaybackGateReach | null;
-}) {
-  return (
-    <Readout
-      className="session-options__reach"
-      label="Playback gate reach"
-      value={
-        reach === null ? "Waiting for the renderer." : gateReachSentences[reach]
-      }
-    />
-  );
+function describeWait(annotations: boolean, masks: boolean) {
+  if (annotations && masks) {
+    return "Annotations and masks.";
+  }
+
+  if (annotations) {
+    return "Annotations only.";
+  }
+
+  return masks ? "Masks only." : "Nothing.";
 }
 
 function writeAuto<Value extends string>(value: Value | undefined) {
