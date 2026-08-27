@@ -35,6 +35,7 @@ import {
   VideoEngineError,
   VideoEngineErrorCode,
   type DecodePath,
+  type UrlVideoSource,
   type VideoSource,
 } from "./types";
 
@@ -370,7 +371,6 @@ export async function openScrubSource(
   if (
     zeroCopyViable({
       prefer2d: options.prefer2d ?? false,
-      strategy: opened.strategy,
       decodesNative: opened.strategy.kind === "native",
       webgpuImportAvailable: detectWebgpuImport(),
     })
@@ -637,8 +637,6 @@ async function readFrameTimeline(videoTrack: unknown): Promise<FrameTimeline> {
 export interface ZeroCopyContext {
   /** True when the consumer pinned the 2D renderer. */
   readonly prefer2d: boolean;
-  /** The decode strategy the source will open with. */
-  readonly strategy: DecodeResolutionStrategy;
   /** Whether decode runs at the source's native size (the strategy requests no
    *  downscale). A downscale rules the path out: the sample arrives native, so
    *  importing it zero-copy would paint at the wrong resolution. */
@@ -712,12 +710,24 @@ export function detectWebgpuImport(): boolean {
   return typeof proto?.importExternalTexture === "function";
 }
 
+function urlRequestInit(
+  crossOrigin: UrlVideoSource["crossOrigin"],
+): { requestInit: RequestInit } | undefined {
+  if (!crossOrigin) return undefined;
+  return {
+    requestInit: {
+      mode: "cors",
+      credentials: crossOrigin === "use-credentials" ? "include" : "omit",
+    },
+  };
+}
+
 export function toMediabunnySource(
   source: VideoSource,
 ): UrlSource | BlobSource | ReadableStreamSource {
   switch (source.kind) {
     case SourceKind.Url:
-      return new UrlSource(source.url);
+      return new UrlSource(source.url, urlRequestInit(source.crossOrigin));
     case SourceKind.Blob:
       return new BlobSource(source.blob);
     case SourceKind.Stream:

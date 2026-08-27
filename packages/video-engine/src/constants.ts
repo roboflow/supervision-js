@@ -176,8 +176,10 @@ export const FRAME_TIMELINE = {
  * window width, and slots past it would be speculative history the preview tier
  * already answers.
  *
- * PREVIEW_SLOTS_*: the preview slot count is its byte budget over the downscaled
- * frame size, clamped to this range. At a 79th of a crisp slot it carries the
+ * PREVIEW_SLOTS_MAX: the preview slot count is its byte budget over the
+ * downscaled frame size, capped here. No floor pairs with it: raising a starved
+ * count means overspending the byte budget, when the frame width is what a wide
+ * preview has to give up. At a 79th of a crisp slot the tier carries the
  * timeline coverage an 8MP source cannot afford crisply: 163 slots against the
  * exact tier's 13, 11s of a 15fps clip.
  *
@@ -209,7 +211,6 @@ export const FRAME_CACHE = {
   PREVIEW_BUDGET_BYTES_PER_GB: 8 * 1024 * 1024,
   PREVIEW_BUDGET_BYTES_MIN: 24 * 1024 * 1024,
   PREVIEW_BUDGET_BYTES_MAX: 96 * 1024 * 1024,
-  PREVIEW_SLOTS_MIN: 48,
   PREVIEW_SLOTS_MAX: 512,
 } as const;
 

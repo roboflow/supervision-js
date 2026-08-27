@@ -265,6 +265,9 @@ export class VideoEngine {
    * covering it before it reaches the store or the worker; the table lives on
    * this thread, so the playhead lands on a frame in the same tick the gesture
    * arrives, with no round trip.
+   *
+   * intent steers what the cache prepares next. Ignored when cacheStrategy is
+   * "none": that backend has no access modes to switch and no prefetch to aim.
    */
   scrub = (target: SeekTarget, intent?: SeekIntent): void => {
     const index = this.snap(target);

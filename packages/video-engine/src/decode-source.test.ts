@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { nativeResolution, viewportResolution } from "./decode-resolution";
 import {
   decodeSessionViable,
   detectVideoDecoder,
@@ -42,7 +41,6 @@ const PROBE: KeyframeProbe = {
 describe("zeroCopyViable", () => {
   const base = {
     prefer2d: false,
-    strategy: nativeResolution(),
     decodesNative: true,
     webgpuImportAvailable: true,
   };
@@ -63,16 +61,6 @@ describe("zeroCopyViable", () => {
     expect(zeroCopyViable({ ...base, webgpuImportAvailable: false })).toBe(
       false,
     );
-  });
-
-  it("a viewport strategy with a downscale stays on the canvas path", () => {
-    expect(
-      zeroCopyViable({
-        ...base,
-        strategy: viewportResolution(),
-        decodesNative: false,
-      }),
-    ).toBe(false);
   });
 });
 

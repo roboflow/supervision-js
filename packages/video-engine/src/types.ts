@@ -32,30 +32,29 @@ export enum SourceKind {
 export interface UrlVideoSource {
   kind: SourceKind.Url;
   url: string;
-  id?: string;
+  /** The engine fetches rather than building an element, so these reach the
+   *  request as the CORS fetch they stand for. Undeclared leaves the request at
+   *  the demuxer's own same-origin default. */
   crossOrigin?: "anonymous" | "use-credentials";
 }
 
 export interface BlobVideoSource {
   kind: SourceKind.Blob;
   blob: Blob;
-  id?: string;
 }
 
 export interface StreamVideoSource {
   kind: SourceKind.Stream;
   stream: ReadableStream<Uint8Array>;
+  /** Declared container type. The demuxer sniffs the bytes and never reads
+   *  this; it travels so a host can report what the media is. */
   mimeType: string;
-  id?: string;
 }
 
 /**
  * Source descriptor. Discriminated so each backend can route without runtime
  * sniffing and so the future mediabunny v2 StreamSource slots in as a new
  * variant rather than a refactor.
- *
- * Pass a stable `id` when the same underlying media is consumed by multiple
- * players so adapters can share metadata probes.
  */
 export type VideoSource = UrlVideoSource | BlobVideoSource | StreamVideoSource;
 

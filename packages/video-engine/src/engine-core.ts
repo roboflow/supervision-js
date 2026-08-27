@@ -704,10 +704,16 @@ export class EngineCore {
     }
   }
 
-  /** Lazily allocate the trace rings and begin capturing. windowMs is advisory:
-   *  the rings are fixed-capacity, so they already bound the captured window. */
-  traceArm(_windowMs: number): void {
-    this.traceRecorder = new TraceRecorder(this.traceEnvironment());
+  /** Lazily allocate the trace rings and begin capturing. windowMs sizes the
+   *  snapshot ring alone: the event ring is fed by paints and gestures at no
+   *  fixed rate, so wall clock cannot size it. */
+  traceArm(windowMs: number): void {
+    this.traceRecorder = new TraceRecorder(
+      this.traceEnvironment(),
+      undefined,
+      DIAGNOSTICS.TRACE_EVENT_CAP,
+      snapshotCapForWindow(windowMs),
+    );
     this.stoppedTrace = null;
   }
 
@@ -991,4 +997,11 @@ function nearestKeyframeDistanceS(
     if (nearestMs === null || distanceMs < nearestMs) nearestMs = distanceMs;
   }
   return nearestMs === null ? null : nearestMs / 1000;
+}
+
+/** Snapshots needed to reach back windowMs at the broadcast rate, bounded by
+ *  the ceiling that caps what an armed capture costs in memory. */
+function snapshotCapForWindow(windowMs: number): number {
+  const wanted = Math.round((windowMs / 1000) * DIAGNOSTICS.BROADCAST_HZ);
+  return Math.min(DIAGNOSTICS.TRACE_SNAPSHOT_CAP, Math.max(1, wanted));
 }

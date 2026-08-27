@@ -1,6 +1,7 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { MediaClock } from "./clock";
+import { DIAGNOSTICS } from "./constants";
 import * as factoryModule from "./create-scrub-cursor";
 import { EngineCore } from "./engine-core";
 import { setDiagnosticsEnabled } from "./scrub-controller";
@@ -905,6 +906,23 @@ describe("EngineCore", () => {
         .map((e) => e.status);
       expect(statuses).toContain(PlaybackStatus.Playing);
       expect(statuses).toContain(PlaybackStatus.Paused);
+
+      await engine.dispose();
+    });
+
+    it("the armed window sizes the snapshot ring, up to the memory ceiling", async () => {
+      const { engine } = setup();
+      await engine.load(LOAD_CONFIG);
+
+      engine.traceArm(10_000);
+      expect(engine.traceExport()?.coverage.snapshots.capacity).toBe(
+        (10_000 / 1000) * DIAGNOSTICS.BROADCAST_HZ,
+      );
+
+      engine.traceArm(24 * 60 * 60 * 1000);
+      expect(engine.traceExport()?.coverage.snapshots.capacity).toBe(
+        DIAGNOSTICS.TRACE_SNAPSHOT_CAP,
+      );
 
       await engine.dispose();
     });
