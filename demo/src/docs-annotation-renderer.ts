@@ -1,4 +1,8 @@
-import { MarkerShape, type DetectionFrame } from "supervision";
+import {
+  MarkerShape,
+  PercentageBarPlacement,
+  type DetectionFrame,
+} from "supervision";
 import {
   demoMarkerPositionOffsets,
   type DemoMarkerPosition,
@@ -18,6 +22,7 @@ export const docsAnnotationRendererIds = [
   "masks",
   "mask-halo",
   "markers",
+  "percentage-bar",
   "labels",
   "polygons",
   "polylines",
@@ -38,7 +43,7 @@ export interface DocsAnnotationRendererControl {
 }
 
 export type DocsAnnotationRendererSelectSetting =
-  "markerPosition" | "markerShape";
+  "markerPosition" | "markerShape" | "percentageBarPlacement";
 
 export interface DocsAnnotationRendererSelectControl {
   readonly key: DocsAnnotationRendererSelectSetting;
@@ -240,6 +245,43 @@ export const docsAnnotationRenderers: Readonly<
     ],
     title: "Markers",
   },
+  "percentage-bar": {
+    controls: [
+      {
+        key: "percentageBarHeight",
+        label: "Height",
+        max: 24,
+        min: 2,
+        step: 1,
+        unit: "pixels",
+      },
+      {
+        key: "percentageBarFillAlpha",
+        label: "Fill opacity",
+        max: 1,
+        min: 0.1,
+        step: 0.05,
+        unit: "percent",
+      },
+    ],
+    description: "Proportional metric bars anchored to bounding boxes",
+    selects: [
+      {
+        key: "percentageBarPlacement",
+        label: "Placement",
+        options: [
+          { label: "Top", value: PercentageBarPlacement.Top },
+          { label: "Bottom", value: PercentageBarPlacement.Bottom },
+          { label: "Inside Top", value: PercentageBarPlacement.InsideTop },
+          {
+            label: "Inside Bottom",
+            value: PercentageBarPlacement.InsideBottom,
+          },
+        ],
+      },
+    ],
+    title: "Percentage Bar",
+  },
   labels: {
     controls: [
       {
@@ -363,6 +405,7 @@ export function createDocsAnnotationRendererPresentation(
     maskHaloEnabled: renderer === "mask-halo",
     masksEnabled: renderer === "masks" || renderer === "polylines",
     markersEnabled: renderer === "markers",
+    percentageBarsEnabled: renderer === "percentage-bar",
     ...(renderer === "markers"
       ? {
           markerPosition: "bottom-center" as const,
@@ -503,6 +546,18 @@ export function createDocsAnnotationRendererSnippet(
     }),
   ],
 });`;
+    case "percentage-bar":
+      return `session.setPresentation({
+  renderers: [
+    annotationRenderers.percentageBar({
+      style: new BasePercentageBarStyle({
+        fill: { alpha: ${formatNumber(settings.percentageBarFillAlpha)} },
+        height: ${formatNumber(settings.percentageBarHeight)},
+        placement: PercentageBarPlacement.${percentageBarPlacementMemberNames[settings.percentageBarPlacement]},
+      }),
+    }),
+  ],
+});`;
     case "labels":
       return `session.setPresentation({
   renderers: [
@@ -579,6 +634,15 @@ const markerShapeMemberNames: Readonly<Record<MarkerShape, string>> = {
   [MarkerShape.Cross]: "Cross",
   [MarkerShape.Square]: "Square",
   [MarkerShape.Triangle]: "Triangle",
+};
+
+const percentageBarPlacementMemberNames: Readonly<
+  Record<PercentageBarPlacement, string>
+> = {
+  [PercentageBarPlacement.Top]: "Top",
+  [PercentageBarPlacement.Bottom]: "Bottom",
+  [PercentageBarPlacement.InsideTop]: "InsideTop",
+  [PercentageBarPlacement.InsideBottom]: "InsideBottom",
 };
 
 function formatMarkerCoordinate(axis: "x" | "y", position: DemoMarkerPosition) {

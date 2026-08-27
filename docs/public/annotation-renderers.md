@@ -7,6 +7,7 @@ children:
   - ./annotation-renderers/masks.md
   - ./annotation-renderers/mask-halo.md
   - ./annotation-renderers/markers.md
+  - ./annotation-renderers/percentage-bar.md
   - ./annotation-renderers/labels.md
   - ./annotation-renderers/polygons.md
   - ./annotation-renderers/polylines.md
@@ -44,6 +45,7 @@ motion-gated basketball trajectory rather than inventing geometry at runtime.
 - [Masks](./annotation-renderers/masks.md)
 - [Mask Halo](./annotation-renderers/mask-halo.md)
 - [Markers](./annotation-renderers/markers.md)
+- [Percentage Bar](./annotation-renderers/percentage-bar.md)
 - [Labels](./annotation-renderers/labels.md)
 - [Polygons](./annotation-renderers/polygons.md)
 - [Polylines](./annotation-renderers/polylines.md)

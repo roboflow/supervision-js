@@ -147,4 +147,47 @@ describe("annotation shape styles", () => {
       },
     ]);
   });
+
+  it("lowers percentage bar geometry into background and value closed paths", () => {
+    const style = resolveAnnotationShapeStyle({
+      percentageBarStyle: {
+        resolve: () => ({
+          background: { alpha: 0.75, color: 0x0f172a },
+          backgroundRect: { height: 10, width: 50, x: 25, y: 5 },
+          fill: { alpha: 1, color: 0x00ff66 },
+          value: 0.6,
+          valueRect: { height: 10, width: 30, x: 15, y: 5 },
+        }),
+      },
+    });
+
+    expect(style?.resolve(detection, context)).toEqual([
+      {
+        closed: true,
+        fill: { alpha: 0.75, color: 0x0f172a },
+        kind: ShapeInstructionKind.Path,
+        segments: [
+          [
+            { x: 0, y: 0 },
+            { x: 50, y: 0 },
+            { x: 50, y: 10 },
+            { x: 0, y: 10 },
+          ],
+        ],
+      },
+      {
+        closed: true,
+        fill: { alpha: 1, color: 0x00ff66 },
+        kind: ShapeInstructionKind.Path,
+        segments: [
+          [
+            { x: 0, y: 0 },
+            { x: 30, y: 0 },
+            { x: 30, y: 10 },
+            { x: 0, y: 10 },
+          ],
+        ],
+      },
+    ]);
+  });
 });

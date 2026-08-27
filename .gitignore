@@ -33,3 +33,7 @@ pnpm-debug.log*
 .env
 .env.*
 !.env.example
+
+# Local working notes
+docs/internal/bug-audit-findings.md
+docs/internal/feature-and-bug-proposals.md

@@ -4,6 +4,7 @@ import { BaseKeypointStyle } from "#styles/keypoint-style";
 import { BaseLabelStyle } from "#styles/label-style";
 import { BaseMaskStyle } from "#styles/mask-style";
 import { BaseMarkerStyle } from "#styles/marker-style";
+import { BasePercentageBarStyle } from "#styles/percentage-bar-style";
 import type { MaskHaloStyle } from "#types/mask-halo-style";
 import { BasePolygonStyle } from "#styles/polygon-style";
 import { BasePolylineStyle } from "#styles/polyline-style";
@@ -280,6 +281,19 @@ export function createDefaultPolylineStyle(
       alpha: 1,
       color: getClassColor(detection),
       width: DEFAULT_OUTLINE_WIDTH,
+    }),
+  });
+}
+
+export function createDefaultPercentageBarStyle(
+  options: DefaultAnnotationPresentationOptions = {},
+): BasePercentageBarStyle {
+  const getClassColor = createClassColorResolver(options);
+
+  return new BasePercentageBarStyle({
+    fill: (detection) => ({
+      alpha: 1,
+      color: getClassColor(detection),
     }),
   });
 }

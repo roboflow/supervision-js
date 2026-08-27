@@ -524,6 +524,7 @@ export async function createMediaRendererCore(
       maskHaloStyle: currentPresentation.maskHaloStyle,
       maskStyle: currentPresentation.maskStyle,
       markerStyle: currentPresentation.markerStyle,
+      percentageBarStyle: currentPresentation.percentageBarStyle,
       maxDevicePixelRatio: options.maxDevicePixelRatio,
       onPresentationUpdate(presentedSample) {
         if (!runtimeState.isDestroyed()) {

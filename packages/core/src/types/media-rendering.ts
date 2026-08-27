@@ -8,6 +8,7 @@ import type { LabelStyle } from "#types/label-style";
 import type { MaskHaloStyle } from "#types/mask-halo-style";
 import type { MaskStyle } from "#types/mask-style";
 import type { MarkerStyle } from "#types/marker-style";
+import type { PercentageBarStyle } from "#types/percentage-bar-style";
 import type { Point } from "#types/detections";
 import type { ViewportTransform } from "#types/viewport";
 import type { PolygonStyle } from "#types/polygon-style";
@@ -217,6 +218,7 @@ export interface MediaRendererPresentation {
   readonly maskHaloStyle?: MaskHaloStyle | null;
   readonly maskStyle?: MaskStyle | null;
   readonly markerStyle?: MarkerStyle | null;
+  readonly percentageBarStyle?: PercentageBarStyle | null;
   readonly polygonStyle?: PolygonStyle | null;
   readonly polylineStyle?: PolylineStyle | null;
   readonly ellipseStyle?: EllipseStyle | null;
