@@ -125,11 +125,12 @@ export interface DetectionTimelineContext {
  *
  * That wait is something the renderer does between pulling one decoded sample
  * and drawing it, so it reaches only a media source the renderer pulls samples
- * from. A source that presents its own frames runs the playhead itself and is
- * never asked to hold, which covers the browser package's video-engine source,
- * `openVideoEngineMediaSource`. Enabling the gate on one of those is silent:
- * playback keeps its normal pace and no state reports a wait that is not
- * happening.
+ * from. A source that presents its own frames runs the playhead itself, which
+ * covers the browser package's video-engine source, `openVideoEngineMediaSource`.
+ * There the gate holds the start of playback and nothing after it: the wait runs
+ * once, before the producer is told to play, and the renderer reports
+ * `Buffering` for its duration. Once the producer is running, a frame the
+ * coverage does not reach presents without annotations rather than waiting.
  */
 export interface DetectionPlaybackGateOptions {
   /**

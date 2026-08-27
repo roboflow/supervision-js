@@ -751,6 +751,11 @@ function useTimelineSeekGesture({
       const clampedTime = moveTo(nextTime);
 
       if (clampedTime !== null) {
+        // A keyboard step on the slider changes its value with no pointer down,
+        // and the scrub below still holds the player for a gesture. Marking it
+        // here is what lets the keyup release it; without this the player stays
+        // held for a drag nobody is making.
+        gestureActiveRef.current = true;
         onScrub(clampedTime);
       }
     },

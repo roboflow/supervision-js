@@ -119,10 +119,11 @@ export interface RenderPreparationMaskFrameOptions {
  * presents its own frames owns the playhead and paces itself; that is the
  * video-engine source, `openVideoEngineMediaSource` and the
  * `createVideoEngineMediaRendererSource` wrapper around it, which is what most
- * video sessions render through. Enabling this gate on a source that presents
- * its own frames is accepted and ignored, silently: playback runs at its
- * normal pace and unprepared layers stay absent until preparation catches up,
- * exactly as if the gate were off.
+ * video sessions render through. On a source that presents its own frames the gate
+ * holds the start of playback and nothing after it: the wait runs once, before
+ * the producer is told to play, and the renderer reports `Buffering` while it
+ * does. Once the producer is running, unprepared layers stay absent until
+ * preparation catches up.
  */
 export interface RenderPreparationPlaybackGateOptions {
   /**

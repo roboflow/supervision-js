@@ -90,18 +90,16 @@ export const EngineDiagnosticsTimeline = memo(
 
         if (line && clock) {
           const elapsedMs = clock.playing ? performance.now() - clock.atMs : 0;
-          const x = String(
-            clamp01((clock.playheadMs + elapsedMs) / durationMs) * VIEW_WIDTH,
-          );
+          // The line stays at x=0 and rides a transform: an SVG geometry
+          // attribute write invalidates layout for the whole column, which
+          // carries no containment, while a transform stays on the compositor.
+          const x = `translateX(${
+            clamp01((clock.playheadMs + elapsedMs) / durationMs) * VIEW_WIDTH
+          }px)`;
 
-          // Chrome invalidates layout on an SVG geometry attribute write even
-          // when the value is identical, and this column carries no
-          // containment, so a stopped playhead relayouts and repaints it at the
-          // display refresh rate.
           if (x !== drawnX) {
             drawnX = x;
-            line.setAttribute("x1", x);
-            line.setAttribute("x2", x);
+            line.style.transform = x;
           }
         }
 

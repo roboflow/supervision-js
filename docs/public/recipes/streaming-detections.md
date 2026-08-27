@@ -125,5 +125,5 @@ session.subscribe((state) => {
 `playbackBlocked` means playback should wait; media buffering and session errors
 raise it. Detection coverage raises it only through a gate that is both enabled
 and reached, so with the default gate off, or on a source that presents its own
-frames, coverage never blocks playback. `presentationBlocked` means the visual
+frames, coverage blocks only the start of playback. `presentationBlocked` means the visual
 frame is still preparing an artifact while playback continues.
