@@ -1,6 +1,4 @@
 import {
-  BaseFocusStyle,
-  FocusTargetMode,
   RegionRendererCoverageKind,
   RegionRendererMediaEffectKind,
   annotationRenderers,
@@ -10,15 +8,23 @@ import {
 export const RegionEffectsPlaygroundMode = {
   Blur: "blur",
   Pixelate: "pixelate",
-  Spotlight: "spotlight",
 } as const;
 
 export type RegionEffectsPlaygroundMode =
   (typeof RegionEffectsPlaygroundMode)[keyof typeof RegionEffectsPlaygroundMode];
 
+export const RegionEffectsPlaygroundTarget = {
+  WhiteTeam: "white team player",
+  YellowTeam: "yellow team player",
+} as const;
+
+export type RegionEffectsPlaygroundTarget =
+  (typeof RegionEffectsPlaygroundTarget)[keyof typeof RegionEffectsPlaygroundTarget];
+
 export interface RegionEffectsPlaygroundSettings {
   readonly intensity: number;
   readonly mode: RegionEffectsPlaygroundMode;
+  readonly targetClassName: RegionEffectsPlaygroundTarget;
 }
 
 const modeDefaults: Readonly<
@@ -27,14 +33,12 @@ const modeDefaults: Readonly<
   [RegionEffectsPlaygroundMode.Blur]: {
     intensity: 12,
     mode: RegionEffectsPlaygroundMode.Blur,
+    targetClassName: RegionEffectsPlaygroundTarget.YellowTeam,
   },
   [RegionEffectsPlaygroundMode.Pixelate]: {
     intensity: 12,
     mode: RegionEffectsPlaygroundMode.Pixelate,
-  },
-  [RegionEffectsPlaygroundMode.Spotlight]: {
-    intensity: 0.55,
-    mode: RegionEffectsPlaygroundMode.Spotlight,
+    targetClassName: RegionEffectsPlaygroundTarget.YellowTeam,
   },
 };
 
@@ -43,32 +47,24 @@ export const initialRegionEffectsPlaygroundSettings =
 
 export function createRegionEffectsPlaygroundSettings(
   mode: RegionEffectsPlaygroundMode,
+  targetClassName = initialRegionEffectsPlaygroundSettings.targetClassName,
 ): RegionEffectsPlaygroundSettings {
-  return modeDefaults[mode];
+  return {
+    ...modeDefaults[mode],
+    targetClassName,
+  };
 }
 
 export function createRegionEffectsPlaygroundPresentation(
   settings: RegionEffectsPlaygroundSettings,
   presentation: MediaRendererPresentation,
 ): MediaRendererPresentation {
-  if (settings.mode === RegionEffectsPlaygroundMode.Spotlight) {
-    return {
-      ...presentation,
-      focusStyle: new BaseFocusStyle({
-        fill: { alpha: settings.intensity, color: 0x020617 },
-        targetMode: FocusTargetMode.Ambient,
-      }),
-      renderers: [],
-    };
-  }
-
   return {
     ...presentation,
-    focusStyle: null,
     renderers: [
       annotationRenderers.region({
         compose: { mode: "over" },
-        id: `person-${settings.mode}`,
+        id: `${settings.targetClassName}-${settings.mode}`,
         region: { kind: "bounds" },
         source: {
           coverage: { kind: RegionRendererCoverageKind.Mask },
@@ -85,7 +81,7 @@ export function createRegionEffectsPlaygroundPresentation(
           kind: "media",
           region: { kind: "bounds" },
         },
-        target: { className: "person" },
+        target: { className: settings.targetClassName },
       }),
     ],
   };
@@ -94,16 +90,6 @@ export function createRegionEffectsPlaygroundPresentation(
 export function createRegionEffectsPlaygroundSnippet(
   settings: RegionEffectsPlaygroundSettings,
 ) {
-  if (settings.mode === RegionEffectsPlaygroundMode.Spotlight) {
-    return `session.setPresentation({
-  focusStyle: new BaseFocusStyle({
-    targetMode: FocusTargetMode.Ambient,
-    fill: { color: 0x020617, alpha: ${settings.intensity.toFixed(2)} },
-  }),
-  renderers: [],
-});`;
-  }
-
   const effect =
     settings.mode === RegionEffectsPlaygroundMode.Blur
       ? `kind: "blur", strength: ${settings.intensity.toFixed(0)}`
@@ -112,8 +98,8 @@ export function createRegionEffectsPlaygroundSnippet(
   return `session.setPresentation({
   renderers: [
     annotationRenderers.region({
-      id: "person-${settings.mode}",
-      target: { className: "person" },
+      id: "${settings.targetClassName}-${settings.mode}",
+      target: { className: "${settings.targetClassName}" },
       source: {
         kind: "media",
         region: { kind: "bounds" },

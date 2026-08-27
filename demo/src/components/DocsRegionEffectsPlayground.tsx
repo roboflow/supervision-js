@@ -9,8 +9,10 @@ import {
   createRegionEffectsPlaygroundSnippet,
   initialRegionEffectsPlaygroundSettings,
   RegionEffectsPlaygroundMode,
+  RegionEffectsPlaygroundTarget,
   type RegionEffectsPlaygroundMode as RegionEffectsPlaygroundModeValue,
   type RegionEffectsPlaygroundSettings,
+  type RegionEffectsPlaygroundTarget as RegionEffectsPlaygroundTargetValue,
 } from "../docs-region-effects";
 import { useDemoRenderer } from "../hooks/useDemoRenderer";
 import { RendererViewport } from "./RendererViewport";
@@ -29,7 +31,7 @@ export function DocsRegionEffectsPlayground() {
     [],
   );
   const demo = useDemoRenderer({
-    initialFixtureId: "people_privacy_segmentation",
+    initialFixtureId: "basketball_sam3",
     initialPresentationSettings: {
       boxesEnabled: false,
       focusEnabled: false,
@@ -66,18 +68,27 @@ export function DocsRegionEffectsPlayground() {
   );
   const updateMode = useCallback(
     (mode: RegionEffectsPlaygroundModeValue) =>
-      updateSettings(createRegionEffectsPlaygroundSettings(mode)),
+      updateSettings(
+        createRegionEffectsPlaygroundSettings(
+          mode,
+          settingsRef.current.targetClassName,
+        ),
+      ),
     [updateSettings],
   );
-  const isSpotlight = settings.mode === RegionEffectsPlaygroundMode.Spotlight;
-  const controlLabel = isSpotlight
-    ? "Background dim"
-    : settings.mode === RegionEffectsPlaygroundMode.Blur
+  const updateTarget = useCallback(
+    (targetClassName: RegionEffectsPlaygroundTargetValue) =>
+      updateSettings({
+        ...settingsRef.current,
+        targetClassName,
+      }),
+    [updateSettings],
+  );
+  const controlLabel =
+    settings.mode === RegionEffectsPlaygroundMode.Blur
       ? "Blur strength"
       : "Pixel block size";
-  const valueLabel = isSpotlight
-    ? `${Math.round(settings.intensity * 100)}%`
-    : `${settings.intensity.toFixed(0)}px`;
+  const valueLabel = `${settings.intensity.toFixed(0)}px`;
 
   return (
     <main
@@ -99,14 +110,12 @@ export function DocsRegionEffectsPlayground() {
             <p>Annotation renderer</p>
             <h1>Region effects</h1>
             <span>
-              {isSpotlight
-                ? "Existing focus composition, kept separate from the region API"
-                : "Prepared, exact-mask privacy effects on the live media frame"}
+              Prepared, exact-mask media effects on selected basketball players
             </span>
           </div>
           <button
             aria-label={
-              isPlaying ? "Pause privacy fixture" : "Play privacy fixture"
+              isPlaying ? "Pause basketball fixture" : "Play basketball fixture"
             }
             disabled={!demo.canUseRenderer}
             onClick={demo.onTogglePlayback}
@@ -135,13 +144,32 @@ export function DocsRegionEffectsPlayground() {
                 }
                 value={RegionEffectsPlaygroundMode.Pixelate}
               />
-              <EffectModeControl
-                checked={isSpotlight}
-                label="Spotlight"
-                onChange={() =>
-                  updateMode(RegionEffectsPlaygroundMode.Spotlight)
+            </div>
+          </fieldset>
+          <fieldset className="docs-layer-playground__asset-type docs-layer-playground__asset-type--sources">
+            <legend>Apply to</legend>
+            <div>
+              <TargetControl
+                checked={
+                  settings.targetClassName ===
+                  RegionEffectsPlaygroundTarget.YellowTeam
                 }
-                value={RegionEffectsPlaygroundMode.Spotlight}
+                label="Yellow team"
+                onChange={() =>
+                  updateTarget(RegionEffectsPlaygroundTarget.YellowTeam)
+                }
+                value={RegionEffectsPlaygroundTarget.YellowTeam}
+              />
+              <TargetControl
+                checked={
+                  settings.targetClassName ===
+                  RegionEffectsPlaygroundTarget.WhiteTeam
+                }
+                label="White team"
+                onChange={() =>
+                  updateTarget(RegionEffectsPlaygroundTarget.WhiteTeam)
+                }
+                value={RegionEffectsPlaygroundTarget.WhiteTeam}
               />
             </div>
           </fieldset>
@@ -151,15 +179,15 @@ export function DocsRegionEffectsPlayground() {
               <output>{valueLabel}</output>
             </span>
             <input
-              max={isSpotlight ? 0.9 : 32}
-              min={isSpotlight ? 0.1 : 2}
+              max={32}
+              min={2}
               onChange={(event) =>
                 updateSettings({
                   ...settingsRef.current,
                   intensity: Number(event.currentTarget.value),
                 })
               }
-              step={isSpotlight ? 0.05 : 1}
+              step={1}
               type="range"
               value={settings.intensity}
             />
@@ -184,6 +212,31 @@ export function DocsRegionEffectsPlayground() {
         </div>
       </section>
     </main>
+  );
+}
+
+function TargetControl({
+  checked,
+  label,
+  onChange,
+  value,
+}: {
+  readonly checked: boolean;
+  readonly label: string;
+  readonly onChange: () => void;
+  readonly value: RegionEffectsPlaygroundTargetValue;
+}) {
+  return (
+    <label>
+      <input
+        checked={checked}
+        name="region-effect-target"
+        onChange={onChange}
+        type="radio"
+        value={value}
+      />
+      <span>{label}</span>
+    </label>
   );
 }
 

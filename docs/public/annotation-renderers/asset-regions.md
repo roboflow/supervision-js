@@ -30,9 +30,8 @@ mirror controls.
 ## Add visual effects
 
 Use [Region effects](./region-effects.md) to blur or pixelate an exact semantic
-region of the current media frame. That focused page also contrasts those
-bounded media effects with the existing focus/spotlight composition, using one
-interactive privacy fixture and live code snippet.
+region of the current media frame with one focused basketball playground and a
+live code snippet.
 
 ## Enlarge a region from the current media frame
 

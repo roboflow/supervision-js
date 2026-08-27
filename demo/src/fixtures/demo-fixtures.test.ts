@@ -54,20 +54,16 @@ describe("fixture geometry", () => {
 });
 
 describe("geometry showcase fixture", () => {
-  it("keeps documentation-only privacy media out of the general demo selector", () => {
+  it("keeps the pre-normalized basketball effect fixture out of the general demo selector", () => {
     expect(
       demoFixtureCatalog.find(
-        ({ sampleName }) => sampleName === "people_privacy_segmentation",
+        ({ sampleName }) => sampleName === "basketball_sam3",
       ),
     ).toMatchObject({
-      datasetId: "people_privacy_segmentation_v1",
+      datasetId: "basketball_sam3_v1",
+      normalizeInBrowser: false,
       showInDemo: false,
     });
-    expect(
-      demoFixtures.some(
-        ({ sampleName }) => sampleName === "people_privacy_segmentation",
-      ),
-    ).toBe(false);
   });
 
   it("exposes the demo samples with their documented geometry", () => {

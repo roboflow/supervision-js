@@ -3,10 +3,10 @@
   "displayName": "9s basketball sample",
   "inferenceLabel": "SAM3",
   "media": {
-    "file": "../basketball_sample/basketball_sample.mp4",
-    "loadingStatusLabel": "stream-normalizing 9s basketball sample",
-    "normalizeInBrowser": true,
-    "readyStatusLabel": "9s basketball sample source MP4 | browser-normalized WebM 30fps"
+    "file": "basketball_sample.normalized.webm",
+    "loadingStatusLabel": "loading pre-normalized 9s basketball sample",
+    "normalizeInBrowser": false,
+    "readyStatusLabel": "9s basketball sample | committed WebM 30fps"
   },
   "sampleName": "basketball_sam3",
   "schema": "supervision-js.demo.sam3-fixture-meta",

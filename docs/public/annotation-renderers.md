@@ -36,9 +36,8 @@ The responsibilities stay separate:
 The focused playgrounds below use committed fixtures, a real `MediaSession`,
 and the same style contracts available from the published `supervision`
 package. Change a control to update both the scene and its minimal code
-snippet. The polyline playground uses the basketball fixture's committed,
-motion-gated trajectory rather than inventing geometry at runtime; the Region
-effects playground uses a separate frozen person-segmentation fixture.
+snippet. The polyline and Region effects playgrounds reuse the basketball
+fixture's committed semantic data rather than inventing geometry at runtime.
 
 - [Boxes](./annotation-renderers/boxes.md)
 - [Ellipse](./annotation-renderers/ellipse.md)

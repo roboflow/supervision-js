@@ -16,10 +16,7 @@ const fixtureMetaModules = import.meta.glob(
   },
 ) as Record<string, DemoFixtureMeta>;
 const fixtureManifestUrls = import.meta.glob(
-  [
-    "../../fixtures/*/detections.manifest.json",
-    "!../../fixtures/basketball_sam3/detections.manifest.json",
-  ],
+  "../../fixtures/*/detections.manifest.json",
   {
     eager: true,
     import: "default",
@@ -27,10 +24,7 @@ const fixtureManifestUrls = import.meta.glob(
   },
 ) as Record<string, string>;
 const fixtureMediaUrls = import.meta.glob(
-  [
-    "../../fixtures/**/*.{mp4,MP4,mov,MOV,m4v,M4V,webm,WEBM}",
-    "!../../fixtures/**/*.normalized.webm",
-  ],
+  "../../fixtures/**/*.{mp4,MP4,mov,MOV,m4v,M4V,webm,WEBM}",
   {
     eager: true,
     import: "default",
@@ -38,10 +32,7 @@ const fixtureMediaUrls = import.meta.glob(
   },
 ) as Record<string, string>;
 const sampleDetectionChunkUrls = import.meta.glob(
-  [
-    "../../fixtures/*/detections/*.json",
-    "!../../fixtures/basketball_sam3/detections/*.json",
-  ],
+  "../../fixtures/*/detections/*.json",
   {
     eager: true,
     import: "default",

@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
-  FocusTargetMode,
   RegionRendererCoverageKind,
   RegionRendererMediaEffectKind,
 } from "supervision";
 import {
   RegionEffectsPlaygroundMode,
+  RegionEffectsPlaygroundTarget,
   createRegionEffectsPlaygroundPresentation,
   createRegionEffectsPlaygroundSettings,
   createRegionEffectsPlaygroundSnippet,
@@ -21,6 +21,9 @@ describe("region effects documentation playground", () => {
     expect(presentation.renderers).toEqual([
       expect.objectContaining({
         kind: "region",
+        target: {
+          className: RegionEffectsPlaygroundTarget.YellowTeam,
+        },
         source: expect.objectContaining({
           coverage: { kind: RegionRendererCoverageKind.Mask },
           effect: {
@@ -40,23 +43,21 @@ describe("region effects documentation playground", () => {
     ).toContain('effect: { kind: "pixelate", size: 12 }');
   });
 
-  it("reuses focus instead of adding a competing background renderer", () => {
+  it("keeps the selected basketball class in the renderer and code snippet", () => {
+    const settings = createRegionEffectsPlaygroundSettings(
+      RegionEffectsPlaygroundMode.Pixelate,
+      RegionEffectsPlaygroundTarget.WhiteTeam,
+    );
     const presentation = createRegionEffectsPlaygroundPresentation(
-      createRegionEffectsPlaygroundSettings(
-        RegionEffectsPlaygroundMode.Spotlight,
-      ),
+      settings,
       {},
     );
 
-    expect(presentation.renderers).toEqual([]);
-    expect(presentation.focusStyle?.resolve).toEqual(expect.any(Function));
-    expect(
-      createRegionEffectsPlaygroundSnippet(
-        createRegionEffectsPlaygroundSettings(
-          RegionEffectsPlaygroundMode.Spotlight,
-        ),
-      ),
-    ).toContain("FocusTargetMode.Ambient");
-    expect(FocusTargetMode.Ambient).toBe("ambient");
+    expect(presentation.renderers?.[0]).toMatchObject({
+      target: { className: RegionEffectsPlaygroundTarget.WhiteTeam },
+    });
+    expect(createRegionEffectsPlaygroundSnippet(settings)).toContain(
+      'target: { className: "white team player" }',
+    );
   });
 });
