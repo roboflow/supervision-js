@@ -29,7 +29,7 @@ describe("media session defaults", () => {
       bufferAheadSeconds: 10,
       bufferBehindSeconds: 0.5,
       frameRate: 30,
-      refreshIntervalSeconds: 0.5,
+      refreshIntervalSeconds: 2.5,
       selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
     });
     expect(defaults.renderPreparation).toMatchObject({
