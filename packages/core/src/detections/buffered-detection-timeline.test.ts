@@ -271,6 +271,35 @@ describe("buffered detection timeline", () => {
     await initialLoad;
   });
 
+  /**
+   * Recorded on the demo: a seek opened eleven chunk requests carrying between
+   * 5.2 and 12.4 MB, all of them before the frame it landed on could be drawn,
+   * on the same link the video was being read over. Six of sixteen seeks then
+   * took over a second to show a picture, the worst 3215ms.
+   */
+  it("fetches the frame a jump lands on before the lead behind it", async () => {
+    const source = {
+      loadFrames: vi.fn(async () => frames),
+    };
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 10,
+      bufferBehindSeconds: 0.5,
+      refreshIntervalSeconds: 2.5,
+      source,
+    });
+
+    await timeline.prepare(0);
+    source.loadFrames.mockClear();
+    timeline.prefetch(40);
+
+    await vi.waitFor(() => expect(timeline.getState().bufferEndTime).toBe(50));
+
+    expect(source.loadFrames.mock.calls).toStrictEqual([
+      [39.5, 40],
+      [39.5, 50],
+    ]);
+  });
+
   it("can refresh the hot buffer continuously before it reaches the end", async () => {
     const source = {
       loadFrames: vi.fn(async () => frames),

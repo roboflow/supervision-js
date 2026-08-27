@@ -31,6 +31,16 @@ const DEFAULT_BUFFER_BEHIND_SECONDS = 0.5;
 const REFILL_LEAD_FRACTION = 0.5;
 const MIN_REFILL_LEAD_SECONDS = 1;
 
+/**
+ * How far ahead of the playhead a load reaches.
+ *
+ * At a one-second chunking the lead is a dozen chunk requests on the same link
+ * the video is read over, and only the chunk under the playhead carries the
+ * frame the picture is waiting to draw. `covering` asks for that one; the lead
+ * follows once it lands.
+ */
+type DetectionBufferLead = "covering" | "full";
+
 interface DetectionBufferLoadPlan {
   readonly endTime: number;
   readonly sourceRanges: readonly DetectionFrameSourceVersionRange[];
@@ -134,17 +144,24 @@ export function createBufferedDetectionTimeline(
     bufferedVersionRange !== null &&
     bufferedSourceVersion === getSourceVersion(getBufferedSourceRanges());
 
-  const getLoadRange = (mediaTime: number) => {
+  const getLoadRange = (
+    mediaTime: number,
+    lead: DetectionBufferLead = "full",
+  ) => {
     const comparableMediaTime = getComparableMediaTime(mediaTime);
     const startTime = comparableMediaTime - bufferBehindSeconds;
-    const endTime = comparableMediaTime + bufferAheadSeconds;
+    const endTime =
+      comparableMediaTime + (lead === "full" ? bufferAheadSeconds : 0);
 
     return createLoadPlan(startTime, endTime);
   };
 
-  const loadWindow = (mediaTime: number) => {
+  const loadWindow = (
+    mediaTime: number,
+    lead: DetectionBufferLead = "full",
+  ) => {
     const comparableMediaTime = getComparableMediaTime(mediaTime);
-    const { endTime, sourceRanges, startTime } = getLoadRange(mediaTime);
+    const { endTime, sourceRanges, startTime } = getLoadRange(mediaTime, lead);
     const versionRange = { endTime, startTime };
     const sourceVersion = getSourceVersion(sourceRanges);
 
@@ -230,6 +247,18 @@ export function createBufferedDetectionTimeline(
         }
       });
 
+    if (lead === "covering") {
+      // Chained past the clearing of `inFlight`, which would otherwise be
+      // handed back to the widening load as a window that already answers.
+      void promise
+        .then(() => {
+          if (!destroyed && currentLoadId === loadId) {
+            void loadWindow(mediaTime).catch(() => undefined);
+          }
+        })
+        .catch(() => undefined);
+    }
+
     inFlight = {
       endTime,
       id: currentLoadId,
@@ -304,7 +333,10 @@ export function createBufferedDetectionTimeline(
     );
   };
 
-  const refreshBuffer = async (mediaTime: number) => {
+  const refreshBuffer = async (
+    mediaTime: number,
+    lead: DetectionBufferLead = "full",
+  ) => {
     if (isBuffered(mediaTime)) {
       return;
     }
@@ -326,10 +358,10 @@ export function createBufferedDetectionTimeline(
         return;
       }
 
-      return refreshBuffer(mediaTime);
+      return refreshBuffer(mediaTime, lead);
     }
 
-    await loadWindow(mediaTime);
+    await loadWindow(mediaTime, lead);
   };
 
   /**
@@ -495,10 +527,18 @@ export function createBufferedDetectionTimeline(
         continue;
       }
 
+      // A playhead the window does not reach is a jump rather than the window
+      // rolling forward, and the frame under it is the one thing the picture
+      // cannot draw without. A window that still spans it, however stale, is
+      // missing no such frame.
+      const lead: DetectionBufferLead = isInsideBufferedRange(mediaTime)
+        ? "full"
+        : "covering";
+
       await (
         isBuffered(mediaTime) || shouldRefreshRollingWindow(mediaTime)
-          ? loadWindow(mediaTime)
-          : refreshBuffer(mediaTime)
+          ? loadWindow(mediaTime, lead)
+          : refreshBuffer(mediaTime, lead)
       ).catch(() => undefined);
     }
   }
