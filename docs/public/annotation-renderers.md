@@ -12,6 +12,7 @@ children:
   - ./annotation-renderers/polylines.md
   - ./annotation-renderers/keypoints-and-skeletons.md
   - ./annotation-renderers/asset-regions.md
+  - ./annotation-renderers/region-effects.md
 ---
 
 # Annotation Renderers
@@ -50,6 +51,7 @@ effects playground uses a separate frozen person-segmentation fixture.
 - [Polylines](./annotation-renderers/polylines.md)
 - [Keypoints and skeletons](./annotation-renderers/keypoints-and-skeletons.md)
 - [Regions](./annotation-renderers/asset-regions.md)
+- [Region effects](./annotation-renderers/region-effects.md)
 
 ## Renderer Configuration
 

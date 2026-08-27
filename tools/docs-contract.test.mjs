@@ -268,6 +268,7 @@ test("every fixture-backed annotation renderer has a focused live playground", a
     "polylines",
     "keypoints",
     "regions",
+    "region-effects",
   ];
   const pages = {
     boxes: "boxes.md",
@@ -281,6 +282,7 @@ test("every fixture-backed annotation renderer has a focused live playground", a
     polygons: "polygons.md",
     polylines: "polylines.md",
     regions: "asset-regions.md",
+    "region-effects": "region-effects.md",
   };
   const factories = {
     boxes: "box",
@@ -294,6 +296,7 @@ test("every fixture-backed annotation renderer has a focused live playground", a
     polygons: "polygon",
     polylines: "polyline",
     regions: "region",
+    "region-effects": "region",
   };
   const annotationRendererIndex = await readFile(
     path.join(publicDocsDir, "annotation-renderers.md"),

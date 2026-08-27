@@ -27,66 +27,12 @@ Switch to class-specific SVG team badges or a looping fire GIF, then tune the
 head scale or fixed screen-pixel asset size, offset, rotation, and media-crop
 mirror controls.
 
-## Blur or pixelate a semantic region
+## Add visual effects
 
-`source.effect` applies a bounded effect to a crop of the renderer-owned media
-frame. Pair it with mask coverage when the detection has a segmentation mask so
-only the semantic silhouette is visible. The included privacy fixture contains
-frozen SAM3 `person` masks, not playground-only geometry.
-
-<div class="supervision-layer-playground">
-  <iframe
-    data-supervision-playground-src="demo/?embed=annotation-renderer&amp;renderer=region-effects"
-    loading="lazy"
-    title="Interactive region privacy effects playground"
-  ></iframe>
-</div>
-
-```ts
-session.setPresentation({
-  renderers: [
-    annotationRenderers.region({
-      id: "person-pixelate",
-      target: { className: "person" },
-      source: {
-        kind: "media",
-        region: { kind: "bounds" },
-        coverage: { kind: "mask" },
-        effect: { kind: "pixelate", size: 12 },
-      },
-      region: { kind: "bounds" },
-      compose: { mode: "over" },
-    }),
-  ],
-});
-```
-
-`effect: { kind: "blur", strength }` and `effect: { kind: "pixelate", size }`
-are the supported bounded media effects. Their values are in media pixels and
-are intentionally clamped by the browser backend. The renderer reuses the
-presented media texture and prepared coverage; it does not start a second
-decoder or read a composited canvas through the CPU.
-
-### Spotlight is focus, not a second region renderer
-
-The complementary effect — dimming the scene while preserving selected semantic
-targets — is already covered by `BaseFocusStyle`. Use it for interactive focus
-or an ambient spotlight; do not add a background-overlay region descriptor that
-duplicates its interaction and transition behavior.
-
-```ts
-session.setPresentation({
-  focusStyle: new BaseFocusStyle({
-    targetMode: FocusTargetMode.Ambient,
-    fill: { color: 0x020617, alpha: 0.55 },
-  }),
-  renderers: [],
-});
-```
-
-The playground exposes this existing focus composition next to blur and
-pixelation so the visual choice is clear, while the public API keeps one owner
-for each responsibility.
+Use [Region effects](./region-effects.md) to blur or pixelate an exact semantic
+region of the current media frame. That focused page also contrasts those
+bounded media effects with the existing focus/spotlight composition, using one
+interactive privacy fixture and live code snippet.
 
 ## Enlarge a region from the current media frame
 
