@@ -137,6 +137,7 @@ export class VideoEngine {
   private readonly diagnosticsStore = new DiagnosticsStore();
   private readonly createWorker: () => EngineWorkerPort;
   private port: EngineWorkerPort | null = null;
+  private disposed = false;
   private lastTrace: EngineTrace | null = null;
   private traceArmed = false;
   private readonly pending = new Map<
@@ -490,9 +491,14 @@ export class VideoEngine {
    * rejects rather than hanging, and terminates the worker. The dispose ack is
    * awaited first so the worker closes its cursor cleanly before the realm is
    * killed.
+   *
+   * The engine is inert afterwards. A fire-and-forget command is dropped and an
+   * awaitable one rejects with {@link VideoEngineErrorCode.Aborted}; neither
+   * starts another worker.
    */
   async dispose(): Promise<void> {
     const port = this.port;
+    this.disposed = true;
     if (!port) {
       this.store.writeStatus(PlaybackStatus.Idle);
       return;
@@ -650,8 +656,11 @@ export class VideoEngine {
    * VideoEngine built during render (e.g. a useState initializer) never leaks
    * a worker when React discards a duplicate.
    */
-  private ensurePort(): EngineWorkerPort {
+  private ensurePort(): EngineWorkerPort | null {
     if (this.port) return this.port;
+    // A command arriving after teardown must not spawn a replacement worker:
+    // nothing would hold it, so nothing would ever terminate it.
+    if (this.disposed) return null;
     const port = this.createWorker();
     port.addEventListener("message", this.onWorkerMessage);
     this.port = port;
@@ -662,6 +671,14 @@ export class VideoEngine {
     build: (requestId: RequestId) => AwaitableCommand,
   ): Promise<ResponseEvent> {
     const port = this.ensurePort();
+    if (!port) {
+      return Promise.reject(
+        new VideoEngineError(
+          VideoEngineErrorCode.Aborted,
+          "video engine disposed",
+        ),
+      );
+    }
     const requestId = this.nextRequestId++;
     return new Promise<ResponseEvent>((resolve, reject) => {
       // Backstop a wedged worker: a command whose reply never lands (the
@@ -688,7 +705,7 @@ export class VideoEngine {
     command: FireAndForgetCommand,
     transfer: Transferable[] = [],
   ): void {
-    this.ensurePort().postMessage(command, transfer);
+    this.ensurePort()?.postMessage(command, transfer);
   }
 
   private rejectAllPending(reason: unknown): void {

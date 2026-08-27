@@ -378,6 +378,28 @@ describe("VideoEngine", () => {
     expect(getPort()?.terminated).toBe(true);
   });
 
+  it("a command arriving after dispose spawns no replacement worker", async () => {
+    vi.spyOn(factoryModule, "createScrubCursor").mockResolvedValue(
+      makeFakeCursor(),
+    );
+    const clock = new FakeClock();
+    const ports: FakeWorkerPort[] = [];
+    const engine = new VideoEngine({ source: LOAD_CONFIG.source }, () => {
+      const port = new FakeWorkerPort(clock);
+      ports.push(port);
+      return port;
+    });
+    await engine.load();
+    await engine.dispose();
+
+    engine.stopDiagnostics();
+    expect(ports).toHaveLength(1);
+    expect(ports[0].terminated).toBe(true);
+    await expect(engine.play()).rejects.toMatchObject({
+      code: VideoEngineErrorCode.Aborted,
+    });
+  });
+
   describe("command timeout backstop", () => {
     /** A port that accepts commands but never replies, modeling a worker
      *  wedged on a hung decode its own watchdog could not recover. */
