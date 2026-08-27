@@ -646,6 +646,85 @@ describe("media renderer core", () => {
     renderer.destroy();
   });
 
+  it("keeps the latest seek when an older prepare resolves afterward", async () => {
+    resetMocks();
+
+    const prepareGate = createDeferred<void>();
+    let releaseOlderPrepare: (() => void) | undefined;
+    const olderPrepareEntered = new Promise<void>((resolve) => {
+      releaseOlderPrepare = resolve;
+    });
+    const olderSample = createMockSample(
+      0.5,
+      0.5,
+    ) as unknown as DecodedVideoSample;
+    const latestSample = createMockSample(
+      1.5,
+      0.5,
+    ) as unknown as DecodedVideoSample;
+    const samples = [
+      createMockSample(0, 2),
+      olderSample,
+      latestSample,
+    ] as unknown as DecodedVideoSample[];
+    const detectionSource = {
+      loadFrames: vi.fn(async (startTime: number) => {
+        if (startTime === 0.5) {
+          releaseOlderPrepare?.();
+          await prepareGate.promise;
+        }
+
+        return [];
+      }),
+    };
+    const scene = createScene();
+    const renderer = await createMediaRendererCore(
+      {
+        autoPlay: false,
+        container: {} as HTMLElement,
+        detectionBuffer: {
+          bufferAheadSeconds: 0,
+          bufferBehindSeconds: 0,
+          frameRate: 30,
+          selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
+        },
+        detectionSource,
+        loop: false,
+        source: createSource(samples, {
+          duration: 2,
+        }),
+      } satisfies MediaRendererOptions,
+      {
+        createScene: vi.fn(async () => scene),
+        openMediaSource: vi.fn(),
+      },
+    );
+
+    vi.mocked(scene.presentSample).mockClear();
+
+    const olderRequest = renderer.seek(0.5);
+    await olderPrepareEntered;
+
+    const latestRequest = renderer.seek(1.5);
+    await latestRequest;
+
+    expect(renderer.getState().currentTime).toBe(1.5);
+
+    prepareGate.resolve();
+    await olderRequest;
+
+    expect(renderer.getState().currentTime).toBe(1.5);
+    expect(scene.presentSample).not.toHaveBeenCalledWith(
+      expect.objectContaining({ timestamp: 0.5 }),
+    );
+    expect(scene.presentSample).toHaveBeenLastCalledWith(
+      expect.objectContaining({ timestamp: 1.5 }),
+    );
+    expect(olderSample.close).toHaveBeenCalledTimes(1);
+
+    renderer.destroy();
+  });
+
   it("steps through decoded samples without a host-owned decoder", async () => {
     resetMocks();
 
