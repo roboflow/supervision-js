@@ -203,7 +203,9 @@ export function createPixiMaskHaloRenderer(options: {
     destroy() {
       for (const pass of passes) {
         pass.mesh.destroy();
-        pass.shader.destroy(true);
+        // Never destroy(true): the program cache is keyed by source and shared
+        // by every shader built from it, including other halos still rendering.
+        pass.shader.destroy();
       }
 
       passes.length = 0;
@@ -289,7 +291,7 @@ export function createPixiMaskHaloRenderer(options: {
       pass.shader.resources.uSampler = source.style;
     } catch {
       try {
-        pass.shader.destroy(true);
+        pass.shader.destroy();
       } catch {
         // Pixi has already invalidated this shader's resource group.
       }

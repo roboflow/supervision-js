@@ -36,6 +36,7 @@ describe("mask halo palette", () => {
 });
 
 function createHarness() {
+  const shaders: { destroy: ReturnType<typeof vi.fn> }[] = [];
   const getContext = vi.fn();
 
   vi.stubGlobal("document", {
@@ -69,6 +70,8 @@ function createHarness() {
       readonly style = {};
 
       constructor(readonly _options: unknown) {}
+
+      destroy() {}
     } as never,
     Mesh: class {
       visible = true;
@@ -95,10 +98,16 @@ function createHarness() {
       ) {}
     },
     Shader: {
-      from: () => ({
-        destroy() {},
-        resources: {} as Record<string, unknown>,
-      }),
+      from: () => {
+        const shader = {
+          destroy: vi.fn(),
+          resources: {} as Record<string, unknown>,
+        };
+
+        shaders.push(shader);
+
+        return shader;
+      },
     } as never,
     UniformGroup: class {
       readonly uniforms: Record<string, unknown> = {};
@@ -121,6 +130,7 @@ function createHarness() {
     getContext,
     meshes,
     renderer,
+    shaders,
     texture,
     uniformGroups,
   };
@@ -186,5 +196,27 @@ describe("mask halo renderer", () => {
 
     renderer.hide();
     expect(renderer.display.visible).toBe(false);
+  });
+
+  it("leaves the shared program alive when one halo is destroyed", () => {
+    const { frame, renderer, shaders, texture } = createHarness();
+
+    renderer.render(frame, texture as never, [
+      {
+        palette: buildMaskHaloPalette(
+          new Map([[1, { alpha: 1, color: 0xffffff }]]),
+        ),
+        spread: 10,
+      },
+    ]);
+    expect(shaders.length).toBeGreaterThan(0);
+
+    renderer.destroy();
+
+    // Pixi caches a GpuProgram by its source, so every halo pass holds the same
+    // one; destroying it nulls the layout the other halos still render through.
+    for (const shader of shaders) {
+      expect(shader.destroy).toHaveBeenCalledWith();
+    }
   });
 });
