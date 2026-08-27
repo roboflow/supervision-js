@@ -3,13 +3,18 @@ import { RegionRendererMediaEffectKind } from "supervision-js-core";
 import { createPixiRegionEffect } from "#renderers/pixi-region-effect";
 
 describe("pixi region effects", () => {
-  it("creates one bounded blur filter and keeps it attached across redraws", () => {
-    const filter = { destroy: vi.fn(), padding: 0 };
+  it("keeps blur strength stable in media pixels across viewport scales", () => {
+    const filters: Array<{
+      destroy: ReturnType<typeof vi.fn>;
+      padding: number;
+    }> = [];
     const BlurFilter = vi.fn(function BlurFilter(options) {
-      Object.assign(filter, { options });
+      const filter = { destroy: vi.fn(), options, padding: 0 };
+      filters.push(filter);
       return filter;
     });
-    const display: { filters?: readonly (typeof filter)[] | null } = {};
+    const display: { filters?: readonly (typeof filters)[number][] | null } =
+      {};
     const effect = createPixiRegionEffect({
       BlurFilter: BlurFilter as never,
       effect: {
@@ -19,25 +24,46 @@ describe("pixi region effects", () => {
     });
 
     expect(effect).toBeDefined();
-    effect?.apply(display);
-    effect?.apply(display);
+    effect?.apply(display as never, 0.5);
+    effect?.apply(display as never, 0.5);
     expect(BlurFilter).toHaveBeenCalledWith({
       kernelSize: 5,
       quality: 2,
       repeatEdgePixels: true,
-      strength: 10,
+      strength: 5,
     });
-    expect(display.filters).toEqual([filter]);
-    expect(filter.padding).toBe(20);
+    expect(filters).toHaveLength(1);
+    expect(display.filters).toEqual([filters[0]]);
+    expect(filters[0]?.padding).toBe(10);
+
+    effect?.apply(display as never, 2);
+    expect(BlurFilter).toHaveBeenLastCalledWith({
+      kernelSize: 5,
+      quality: 2,
+      repeatEdgePixels: true,
+      strength: 20,
+    });
+    expect(filters).toHaveLength(2);
+    expect(filters[0]?.destroy).toHaveBeenCalledOnce();
+    expect(display.filters).toEqual([filters[1]]);
 
     effect?.destroy();
     expect(display.filters).toBeNull();
-    expect(filter.destroy).toHaveBeenCalledOnce();
+    expect(filters[1]?.destroy).toHaveBeenCalledOnce();
   });
 
-  it("creates a pixelate shader without exposing the Pixi filter contract", () => {
-    const filter = { destroy: vi.fn(), padding: 0 };
-    const from = vi.fn(() => filter);
+  it("scales pixel blocks with the viewport without exposing the Pixi filter contract", () => {
+    const filters: Array<{
+      destroy: ReturnType<typeof vi.fn>;
+      padding: number;
+    }> = [];
+    const from = vi.fn(() => {
+      const filter = { destroy: vi.fn(), padding: 0 };
+      filters.push(filter);
+      return filter;
+    });
+    const display: { filters?: readonly (typeof filters)[number][] | null } =
+      {};
     const effect = createPixiRegionEffect({
       Filter: { from } as never,
       defaultFilterVert: "default-filter-vertex",
@@ -48,6 +74,7 @@ describe("pixi region effects", () => {
     });
 
     expect(effect).toBeDefined();
+    effect?.apply(display as never, 0.5);
     expect(from).toHaveBeenCalledWith(
       expect.objectContaining({
         gl: expect.objectContaining({
@@ -56,10 +83,21 @@ describe("pixi region effects", () => {
         }),
         resources: {
           regionEffectUniforms: {
-            uBlockSize: { type: "f32", value: 14 },
+            uBlockSize: { type: "f32", value: 7 },
           },
         },
       }),
     );
+    effect?.apply(display as never, 2);
+    expect(from).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        resources: {
+          regionEffectUniforms: {
+            uBlockSize: { type: "f32", value: 28 },
+          },
+        },
+      }),
+    );
+    expect(filters[0]?.destroy).toHaveBeenCalledOnce();
   });
 });

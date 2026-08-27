@@ -23,7 +23,14 @@ type BlurFilterConstructor = new (options: {
 type FilterFactory = Pick<typeof PixiFilterClass, "from">;
 
 export interface PixiRegionEffect {
-  apply(display: PixiFilterDisplay): void;
+  /**
+   * Applies the effect at the current media-to-viewport scale.
+   *
+   * Public effect sizes are expressed in media pixels, while Pixi evaluates a
+   * filter over the scaled display texture. Rebuild only when that scale
+   * changes so the filter's rendered-pixel inputs remain semantically stable.
+   */
+  apply(display: PixiFilterDisplay, viewportScale?: number): void;
   destroy(): void;
 }
 
@@ -40,18 +47,32 @@ export function createPixiRegionEffect(options: {
   readonly Filter?: FilterFactory;
   readonly effect: RegionRendererMediaEffect;
 }): PixiRegionEffect | undefined {
-  const filter = createFilter(options);
-
-  if (!filter) {
+  if (
+    (options.effect.kind === RegionRendererMediaEffectKind.Blur &&
+      !options.BlurFilter) ||
+    (options.effect.kind === RegionRendererMediaEffectKind.Pixelate &&
+      (!options.Filter || !options.defaultFilterVert))
+  ) {
     return undefined;
   }
 
+  let filter: PixiFilter | undefined;
+  let filterViewportScale: number | undefined;
   let display: PixiFilterDisplay | undefined;
   let destroyed = false;
 
   return {
-    apply(nextDisplay) {
+    apply(nextDisplay, viewportScale = 1) {
       if (destroyed) return;
+      const nextViewportScale = positiveFinite(viewportScale, 1);
+      if (filterViewportScale !== nextViewportScale) {
+        const nextFilter = createFilter(options, nextViewportScale);
+        if (!nextFilter) return;
+        detachFilter(display, filter);
+        filter?.destroy?.();
+        filter = nextFilter;
+        filterViewportScale = nextViewportScale;
+      }
       if (
         display === nextDisplay &&
         display.filters?.length === 1 &&
@@ -62,35 +83,39 @@ export function createPixiRegionEffect(options: {
       if (
         display &&
         display !== nextDisplay &&
+        filter &&
         display.filters?.includes(filter)
       ) {
         display.filters = null;
       }
       display = nextDisplay;
-      display.filters = [filter];
+      if (filter) display.filters = [filter];
     },
 
     destroy() {
       if (destroyed) return;
       destroyed = true;
-      if (display?.filters?.includes(filter)) {
-        display.filters = null;
-      }
-      filter.destroy?.();
+      detachFilter(display, filter);
+      filter?.destroy?.();
+      filter = undefined;
       display = undefined;
     },
   };
 }
 
-function createFilter(options: {
-  readonly BlurFilter?: BlurFilterConstructor;
-  readonly defaultFilterVert?: string;
-  readonly Filter?: FilterFactory;
-  readonly effect: RegionRendererMediaEffect;
-}): PixiFilter | undefined {
+function createFilter(
+  options: {
+    readonly BlurFilter?: BlurFilterConstructor;
+    readonly defaultFilterVert?: string;
+    readonly Filter?: FilterFactory;
+    readonly effect: RegionRendererMediaEffect;
+  },
+  viewportScale: number,
+): PixiFilter | undefined {
   if (options.effect.kind === RegionRendererMediaEffectKind.Blur) {
     if (!options.BlurFilter) return undefined;
-    const strength = clampFinite(options.effect.strength, 8, 0, 64);
+    const strength =
+      clampFinite(options.effect.strength, 8, 0, 64) * viewportScale;
     const filter = new options.BlurFilter({
       kernelSize: 5,
       quality: 2,
@@ -106,7 +131,8 @@ function createFilter(options: {
   }
 
   if (!options.Filter || !options.defaultFilterVert) return undefined;
-  const blockSize = clampFinite(options.effect.size, 12, 1, 128);
+  const blockSize =
+    clampFinite(options.effect.size, 12, 1, 128) * viewportScale;
   const filter = options.Filter.from({
     gl: { fragment: pixelateFragmentShader, vertex: options.defaultFilterVert },
     gpu: undefined,
@@ -119,6 +145,19 @@ function createFilter(options: {
 
   filter.padding = 0;
   return filter;
+}
+
+function detachFilter(
+  display: PixiFilterDisplay | undefined,
+  filter: PixiFilter | undefined,
+) {
+  if (filter && display?.filters?.includes(filter)) {
+    display.filters = null;
+  }
+}
+
+function positiveFinite(value: number, fallback: number) {
+  return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
 function clampFinite(

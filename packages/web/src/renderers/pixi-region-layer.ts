@@ -308,7 +308,7 @@ export function createPixiRegionLayer(options: {
               sourceSize,
               viewportScale,
             );
-            updateEffect(entry, renderer);
+            updateEffect(entry, renderer, viewportScale);
             if (
               renderer.source.kind === RegionRendererSourceKind.Media &&
               mediaCrop &&
@@ -641,6 +641,7 @@ export function createPixiRegionLayer(options: {
   function updateEffect(
     entry: RegionSpriteEntry,
     renderer: RegionAnnotationRenderer,
+    viewportScale: number,
   ) {
     const effect =
       renderer.source.kind === RegionRendererSourceKind.Media
@@ -661,7 +662,7 @@ export function createPixiRegionLayer(options: {
         effect,
       });
     }
-    entry.effect?.apply(entry.display);
+    entry.effect?.apply(entry.display, viewportScale);
   }
 
   function removeCoverageMask(entry: RegionSpriteEntry) {

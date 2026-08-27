@@ -382,7 +382,7 @@ describe("pixi region layer", () => {
     expect(mediaTexture.destroy).not.toHaveBeenCalled();
   });
 
-  it("keeps one prepared media effect on a pooled region display", () => {
+  it("keeps prepared media effects sized in media pixels across viewport changes", () => {
     FakeBlurFilter.instances = [];
     const mediaTexture = new FakeTexture({
       source: { height: 200, width: 300 },
@@ -410,17 +410,23 @@ describe("pixi region layer", () => {
     });
     const container = layer.createContainer() as unknown as FakeContainer;
 
-    layer.drawFrame(1);
+    layer.drawFrame(1, 0.5);
     const display = container.children[0] as FakeSprite;
     const filter = display.filters?.[0] as FakeBlurFilter;
-    layer.drawFrame(1);
+    layer.drawFrame(1, 0.5);
 
-    expect(filter.options).toMatchObject({ strength: 10 });
+    expect(filter.options).toMatchObject({ strength: 5 });
     expect(FakeBlurFilter.instances).toHaveLength(1);
     expect(display.filters).toEqual([filter]);
 
-    layer.destroy();
+    layer.drawFrame(1, 2);
+    const scaledFilter = display.filters?.[0] as FakeBlurFilter;
+    expect(FakeBlurFilter.instances).toHaveLength(2);
+    expect(scaledFilter.options).toMatchObject({ strength: 20 });
     expect(filter.destroy).toHaveBeenCalledOnce();
+
+    layer.destroy();
+    expect(scaledFilter.destroy).toHaveBeenCalledOnce();
   });
 
   it("clips a media crop to the detection polygon", () => {
