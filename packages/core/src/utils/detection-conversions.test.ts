@@ -95,4 +95,37 @@ describe("detection geometry conversions", () => {
     expect(merged).toHaveLength(1);
     expect(merged[0]?.rect).toEqual({ height: 10, width: 12, x: 5, y: 6 });
   });
+
+  it("preserves exact rectangle dimensions and parity between box and polygon rasterization", () => {
+    const sampleBox: Detection = {
+      id: "square-3x3",
+      rect: { height: 3, width: 3, x: 2.5, y: 2.5 },
+    };
+    const dimensions = { height: 10, width: 10 };
+
+    const boxMask = convertDetectionBoxToMask(sampleBox, dimensions);
+    const polyMask = convertDetectionPolygonToMask(
+      convertDetectionBoxToPolygon(sampleBox),
+      dimensions,
+    );
+
+    const boxPixels = decodeCompressedRleMask(boxMask.mask!).data;
+    const polyPixels = decodeCompressedRleMask(polyMask.mask!).data;
+
+    // Both must match bit-for-bit.
+    expect(boxPixels).toEqual(polyPixels);
+
+    // 3x3 rectangle centered at (2.5, 2.5) covers [1, 4) in x and y (exactly 9 pixels).
+    const activePixelCount = boxPixels.filter((pixel) => pixel === 1).length;
+    expect(activePixelCount).toBe(9);
+
+    // Pixel boundaries: indices (1,1) to (3,3) are active; (4,4) is outside.
+    expect(boxPixels[1 * 10 + 1]).toBe(1);
+    expect(boxPixels[3 * 10 + 3]).toBe(1);
+    expect(boxPixels[4 * 10 + 4]).toBe(0);
+
+    // Converting mask back to box recovers original exact geometry without expansion.
+    const recovered = convertDetectionMaskToBox(boxMask);
+    expect(recovered.rect).toEqual(sampleBox.rect);
+  });
 });
