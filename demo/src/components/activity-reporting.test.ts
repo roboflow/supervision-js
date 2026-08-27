@@ -11,6 +11,7 @@ import {
 } from "supervision";
 
 import type { LiveReadouts } from "../hooks/live-readouts";
+import type { UploadInferenceState } from "../session/demo-session-types";
 import { advanceOverlayGate, IDLE_OVERLAY_GATE } from "./overlay-gate";
 import {
   formatLiveCook,
@@ -337,6 +338,23 @@ describe("session activity reporting", () => {
     }
 
     expect(everVisible).toBe(shown);
+  });
+
+  it("counts inference frames in the viewport overlay", () => {
+    const overlay = createViewportOverlay(
+      selectViewportSessionState(sessionState([], renderer)),
+      {
+        completedFrames: 42,
+        status: "running",
+        statusLabel: "SAM3 frames streaming into cold storage",
+        totalFrames: 168,
+      } as unknown as UploadInferenceState,
+      mediaState,
+    );
+
+    expect(overlay?.label).toBe("SAM3 frames streaming into cold storage");
+    expect(overlay?.detail).toBe("42/168 frames");
+    expect(overlay?.progress).toBe(0.25);
   });
 
   it("reports an unavailable prepared window rather than a blank one", () => {
