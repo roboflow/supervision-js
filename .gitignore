@@ -23,7 +23,6 @@ __pycache__/
 *.py[cod]
 tools/sam3-fixture/output/
 tools/geometry-fixture/output/
-tools/media-matrix/output/
 
 # Build intermediates the demo never reads; npm run fixture:sam3:restore
 # rebuilds them from the committed raw-sam3.jsonl captures

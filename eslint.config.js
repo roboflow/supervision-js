@@ -10,7 +10,6 @@ export default [
       "docs/site/**",
       "tools/sam3-fixture/output/**",
       "tools/geometry-fixture/output/**",
-      "tools/media-matrix/output/**",
     ],
   },
   {

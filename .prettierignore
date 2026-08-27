@@ -1,6 +1,5 @@
 tools/sam3-fixture/output/
 tools/geometry-fixture/output/
-tools/media-matrix/output/
 tools/sam3-fixture/dist/
 tools/sam3-fixture/frames*.jsonl
 tools/sam3-fixture/raw*.jsonl
