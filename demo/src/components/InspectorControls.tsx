@@ -1,5 +1,7 @@
 import { useState, type CSSProperties, type ReactNode } from "react";
 
+import { DiagnosticLabel } from "./DiagnosticLabel";
+
 export function ControlSection({
   children,
   enabled,
@@ -59,12 +61,16 @@ export function ToggleControl({
   evalHook,
   label,
   onChange,
+  optionPath,
+  tooltip,
 }: {
   readonly checked: boolean;
   readonly disabled?: boolean;
   readonly evalHook?: string;
   readonly label: string;
   readonly onChange: (checked: boolean) => void;
+  readonly optionPath?: string;
+  readonly tooltip?: string;
 }) {
   return (
     <label
@@ -72,12 +78,13 @@ export function ToggleControl({
       data-eval={evalHook}
     >
       <input
+        aria-label={label}
         checked={checked}
         disabled={disabled}
         onChange={(event) => onChange(event.currentTarget.checked)}
         type="checkbox"
       />
-      <span>{label}</span>
+      <ControlName label={label} optionPath={optionPath} tooltip={tooltip} />
     </label>
   );
 }
@@ -86,22 +93,26 @@ export function SegmentedControl<Value extends string>({
   disabled = false,
   label,
   onChange,
+  optionPath,
   options,
+  tooltip,
   value,
 }: {
   readonly disabled?: boolean;
   readonly label: string;
   readonly onChange: (value: Value) => void;
+  readonly optionPath?: string;
   readonly options: readonly {
     readonly label: string;
     readonly value: Value;
   }[];
+  readonly tooltip?: string;
   readonly value: Value;
 }) {
   return (
     <div className="render-control render-control--segmented">
       <span className="render-control__label">
-        <span>{label}</span>
+        <ControlName label={label} optionPath={optionPath} tooltip={tooltip} />
       </span>
       <div className="render-control__segments">
         {options.map((option) => (
@@ -127,7 +138,9 @@ export function SliderControl({
   max,
   min,
   onChange,
+  optionPath,
   step,
+  tooltip,
   value,
   valueLabel,
 }: {
@@ -137,7 +150,9 @@ export function SliderControl({
   readonly max: number;
   readonly min: number;
   readonly onChange: (value: number) => void;
+  readonly optionPath?: string;
   readonly step: number;
+  readonly tooltip?: string;
   readonly value: number;
   readonly valueLabel: string;
 }) {
@@ -150,10 +165,11 @@ export function SliderControl({
       style={{ "--control-progress": `${progress}%` } as SliderControlStyle}
     >
       <span className="render-control__label">
-        <span>{label}</span>
+        <ControlName label={label} optionPath={optionPath} tooltip={tooltip} />
         <strong>{valueLabel}</strong>
       </span>
       <input
+        aria-label={label}
         disabled={disabled}
         max={max}
         min={min}
@@ -173,8 +189,10 @@ export function NumberControl({
   max,
   min,
   onChange,
+  optionPath,
   placeholder,
   step,
+  tooltip,
   value,
 }: {
   readonly disabled?: boolean;
@@ -182,16 +200,19 @@ export function NumberControl({
   readonly max?: number;
   readonly min?: number;
   readonly onChange: (value: number | undefined) => void;
+  readonly optionPath?: string;
   readonly placeholder?: string;
   readonly step?: number;
+  readonly tooltip?: string;
   readonly value: number | undefined;
 }) {
   return (
     <label className="render-control render-control--number">
       <span className="render-control__label">
-        <span>{label}</span>
+        <ControlName label={label} optionPath={optionPath} tooltip={tooltip} />
       </span>
       <input
+        aria-label={label}
         disabled={disabled}
         inputMode="decimal"
         max={max}
@@ -208,6 +229,34 @@ export function NumberControl({
         value={value === undefined ? "" : String(value)}
       />
     </label>
+  );
+}
+
+/**
+ * A tooltip target inside a wrapping `<label>` lands in the labelled control's
+ * accessible name, tooltip sentence and all, which is why every control here
+ * carries its own `aria-label`.
+ */
+function ControlName({
+  label,
+  optionPath,
+  tooltip,
+}: {
+  readonly label: string;
+  readonly optionPath?: string;
+  readonly tooltip?: string;
+}) {
+  return (
+    <span className="render-control__name">
+      {tooltip === undefined ? (
+        <span>{label}</span>
+      ) : (
+        <DiagnosticLabel label={label} tooltip={tooltip} />
+      )}
+      {optionPath === undefined ? null : (
+        <code className="render-control__path">{optionPath}</code>
+      )}
+    </span>
   );
 }
 

@@ -92,7 +92,7 @@ export function DemoShell({
           <aside className="demo-shell__inspector" aria-label="Demo controls">
             {sourceControls}
             {qualityControls}
-            {sessionOptionsPanel}
+            {mode === DemoViewMode.Debug ? sessionOptionsPanel : null}
             {selectionPanel}
             {renderControls}
             {mode === DemoViewMode.Debug ? performanceStrip : null}

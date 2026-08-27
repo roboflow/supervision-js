@@ -1418,6 +1418,54 @@ fieldset {
   margin: 0;
 }
 
+/* The tooltip target is sized here for a whole phrase: it wraps, and it drops
+ * the widened hit area that would push it off the column edge. */
+.session-options .diagnostic-label {
+  max-width: 100%;
+}
+
+.session-options .diagnostic-label__name {
+  font-size: 11px;
+  font-weight: 620;
+  letter-spacing: 0;
+  line-height: 14px;
+  margin: 0;
+  overflow: visible;
+  padding: 0;
+  white-space: normal;
+}
+
+.session-options .render-control--toggle {
+  gap: 8px;
+  justify-content: flex-start;
+  text-align: left;
+}
+
+/* A tooltip wider than the group it opens in scrolls the whole inspector
+ * sideways. */
+.session-options .diagnostic-label__tip {
+  width: 232px;
+}
+
+/* This readout carries a sentence where the others carry a figure. */
+.session-options .session-options__reach {
+  grid-template-columns: minmax(0, 1fr);
+  white-space: normal;
+}
+
+.session-options .session-options__reach .readout__value {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 560;
+  line-height: 1.35;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.session-options .session-options__reach .readout__label {
+  font-size: 11px;
+}
+
 .render-control--number {
   display: grid;
   gap: 4px;
@@ -3004,6 +3052,26 @@ fieldset {
   font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 620;
+}
+
+.render-control__name {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.render-control__path {
+  color: #9ca3af;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 12px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .class-style-card {
