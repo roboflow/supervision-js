@@ -3,7 +3,20 @@ import type {
   PresentedFrame,
   PresentedFrameHandler,
 } from "supervision-js-video-engine";
-import type { MediaRendererSource } from "supervision";
+import type {
+  DecodedMediaSource,
+  MediaRendererSource,
+  PresentedFrameChannel,
+} from "supervision";
+
+/**
+ * The channel an engine-backed source publishes. It is the public contract plus
+ * the richer frame the engine hands its own diagnostics, which carries the
+ * media time in milliseconds and the quality tier the generic contract leaves out.
+ */
+interface EnginePresentedFrameChannel extends PresentedFrameChannel {
+  onPresentedFrame(handler: PresentedFrameHandler): void;
+}
 
 const DEFAULT_RING_CAPACITY = 300;
 const MILLISECONDS_PER_SECOND = 1000;
@@ -44,10 +57,6 @@ export interface PresentedFrameTap {
 export interface PresentedFrameTapOptions {
   readonly capacity?: number;
   readonly now?: () => number;
-}
-
-interface PresentedFrameProducer {
-  onPresentedFrame(handler: PresentedFrameHandler): void;
 }
 
 /**
@@ -194,29 +203,19 @@ export function createPresentedFrameTap(
 }
 
 function readPresentedFrameProducer(
-  opened: unknown,
-): PresentedFrameProducer | null {
-  if (typeof opened !== "object" || opened === null) {
-    return null;
-  }
+  opened: DecodedMediaSource,
+): EnginePresentedFrameChannel | null {
+  const { engine } = opened;
 
-  const { engine } = opened as { readonly engine?: unknown };
-
-  if (typeof engine !== "object" || engine === null) {
-    return null;
-  }
-
-  const candidate = engine as Partial<PresentedFrameProducer>;
-
-  return typeof candidate.onPresentedFrame === "function"
-    ? (engine as PresentedFrameProducer)
+  return typeof engine?.onPresentedFrame === "function"
+    ? (engine as EnginePresentedFrameChannel)
     : null;
 }
 
-function tapProducer<Producer extends PresentedFrameProducer>(
-  producer: Producer,
+function tapProducer(
+  producer: EnginePresentedFrameChannel,
   record: (presented: PresentedFrame) => void,
-): Producer {
+): EnginePresentedFrameChannel {
   return new Proxy(producer, {
     get(target, property, receiver) {
       if (property !== "onPresentedFrame") {
