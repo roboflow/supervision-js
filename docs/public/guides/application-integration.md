@@ -264,6 +264,40 @@ self-contained, so it does not need adjacent JavaScript chunks. Its message
 protocol is internal; applications should only use it through
 `workerFactory`.
 
+## Serving Media And Detections Over The Network
+
+A session given a URL never downloads the whole file. It reads the media with
+HTTP range requests, so the origin serving it must answer `Range` with `206
+Partial Content` and advertise `Accept-Ranges: bytes`. An origin that ignores
+`Range` and returns the whole body on every read makes seeking cost a full
+download.
+
+Cache headers decide what a second visit to the same part of the timeline costs.
+Scrubbing revisits byte ranges and detection chunks constantly, and the browser
+reuses them only if the response allows it:
+
+| Response header                                 | What a repeat read costs                                                                                                                                                       |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `Cache-Control: no-cache`                       | A round trip every time, even when the browser already holds the bytes. `no-cache` permits storage but requires revalidation before every reuse.                               |
+| `Cache-Control: public, max-age=..., immutable` | Nothing. The browser answers from its own cache with no request.                                                                                                               |
+| A weak `ETag` (`W/"..."`)                       | The bytes again. [RFC 9110](https://www.rfc-editor.org/rfc/rfc9110#field.if-range) forbids a weak validator in `If-Range`, so a cached partial response cannot be revalidated. |
+
+Serve media and detection chunks under content-addressed URLs, where the name
+changes whenever the bytes change, and mark them immutable. Bundlers that
+fingerprint asset filenames give this for free. Keep `no-cache` for the entry
+documents that point at them, so a new build is picked up immediately.
+
+Detection chunks follow the same rules and are worth the most attention, because
+there are many of them and each one is small: a chunk that revalidates spends
+its entire cost on latency rather than on data.
+
+Two costs remain no matter how the origin is configured. Seeking into a region
+the session has never read costs one round trip plus the decode from the
+preceding keyframe, and a longer keyframe interval makes that decode longer. Set
+`detectionBuffer.bufferAheadSeconds` and
+`renderPreparation.maskFrame.prefetchFrameCount` against the latency the
+application actually sees, not against a local file.
+
 ## Verification Checklist
 
 Before considering an integration complete:
@@ -273,9 +307,11 @@ Before considering an integration complete:
    build when workers are enabled.
 3. The viewer element has a non-zero width and height.
 4. Media renders from the same URL/File type used in production.
-5. At least one known detection appears at the expected media coordinate.
-6. Session state and errors are surfaced to the host UI.
-7. Navigating away destroys the session without leaving a canvas or active
+5. A remote origin answers `Range` with `206` and marks immutable assets
+   cacheable.
+6. At least one known detection appears at the expected media coordinate.
+7. Session state and errors are surfaced to the host UI.
+8. Navigating away destroys the session without leaving a canvas or active
    playback behind.
 
 ## Common Integration Mistakes

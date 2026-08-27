@@ -17,6 +17,7 @@ import {
 } from "../docs-region-annotation-renderer";
 import { useDemoRenderer } from "../hooks/useDemoRenderer";
 import { RendererViewport } from "./RendererViewport";
+import { useViewportOverlay } from "../hooks/useViewportOverlay";
 
 const regionPlaygroundAssets = {
   fireGif: playerFireUrl,
@@ -83,6 +84,12 @@ export function DocsRegionAnnotationRendererPlayground() {
   const showsIcons = settings.mode === RegionPlaygroundMode.StaticIcons;
   const showsMediaCrop = settings.mode === RegionPlaygroundMode.MediaCrop;
 
+  const viewportOverlay = useViewportOverlay(
+    demo.sessionState,
+    null,
+    demo.mediaState,
+  );
+
   return (
     <main
       className="docs-layer-playground"
@@ -91,9 +98,8 @@ export function DocsRegionAnnotationRendererPlayground() {
       <section className="docs-layer-playground__stage">
         <RendererViewport
           containerRef={demo.containerRef}
-          mediaState={demo.mediaState}
-          sessionState={demo.sessionState}
-          uploadInferenceState={null}
+          explained={viewportOverlay.explained}
+          overlay={viewportOverlay.overlay}
         />
       </section>
 

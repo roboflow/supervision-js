@@ -14,6 +14,7 @@ import {
 import { useDemoRenderer } from "../hooks/useDemoRenderer";
 import type { DemoPresentationSettings } from "../presentation/demo-presentation";
 import { RendererViewport } from "./RendererViewport";
+import { useViewportOverlay } from "../hooks/useViewportOverlay";
 import { DocsRegionAnnotationRendererPlayground } from "./DocsRegionAnnotationRendererPlayground";
 
 export function DocsAnnotationRendererPlayground({
@@ -92,6 +93,12 @@ function DocsStyleAnnotationRendererPlayground({
     [demo.presentationSettings, demo.setPresentationSettings],
   );
 
+  const viewportOverlay = useViewportOverlay(
+    demo.sessionState,
+    null,
+    demo.mediaState,
+  );
+
   return (
     <main
       className="docs-layer-playground"
@@ -100,9 +107,8 @@ function DocsStyleAnnotationRendererPlayground({
       <section className="docs-layer-playground__stage">
         <RendererViewport
           containerRef={demo.containerRef}
-          mediaState={demo.mediaState}
-          sessionState={demo.sessionState}
-          uploadInferenceState={null}
+          explained={viewportOverlay.explained}
+          overlay={viewportOverlay.overlay}
         />
       </section>
 

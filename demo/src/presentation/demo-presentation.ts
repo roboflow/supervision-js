@@ -441,7 +441,7 @@ export function createDemoPolylineShadowStroke(strokeWidth: number) {
   return {
     alpha: 0.55,
     color: 0x000000,
-    width: strokeWidth + 2,
+    width: strokeWidth + 1,
   };
 }
 

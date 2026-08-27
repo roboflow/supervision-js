@@ -668,11 +668,33 @@ describe("demo presentation", () => {
         frame: { detections: [trajectory], mediaTime: 0 },
         mediaTime: 0,
       })?.shadowStroke,
-    ).toMatchObject({
-      alpha: 0.55,
-      color: 0x000000,
-      width: defaultDemoPresentationSettings.polylineStrokeWidth + 2,
+    ).toMatchObject({ alpha: 0.55, color: 0x000000 });
+  });
+
+  it("keeps the class color the majority of the drawn trajectory", () => {
+    const presentation = createDemoPresentation(
+      defaultDemoPresentationSettings,
+    );
+    const trajectory = {
+      className: "basketball",
+      confidence: 0.9,
+      polyline: {
+        points: [
+          { x: 0, y: 0 },
+          { x: 4, y: 4 },
+        ],
+      },
+    };
+    const resolved = presentation.polylineStyle?.resolve(trajectory, {
+      detectionIndex: 0,
+      frame: { detections: [trajectory], mediaTime: 0 },
+      mediaTime: 0,
     });
+    const strokeWidth = resolved?.stroke?.width ?? 0;
+    const shadowWidth = resolved?.shadowStroke?.width ?? 0;
+
+    expect(shadowWidth).toBeGreaterThan(strokeWidth);
+    expect(shadowWidth).toBeLessThan(strokeWidth * 2);
   });
 
   it("filters vector layers through the shared confidence threshold", () => {

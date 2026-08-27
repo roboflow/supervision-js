@@ -7,6 +7,7 @@ import {
 } from "../presentation/demo-presentation";
 import { useDemoRenderer } from "../hooks/useDemoRenderer";
 import { RendererViewport } from "./RendererViewport";
+import { useViewportOverlay } from "../hooks/useViewportOverlay";
 
 const docsUrl = resolveDemoDocsUrl(
   import.meta.env.VITE_SUPERVISION_DOCS_URL,
@@ -63,6 +64,12 @@ export function DocsBasketballPlayground() {
     [demo.presentationSettings, demo.setPresentationSettings],
   );
 
+  const viewportOverlay = useViewportOverlay(
+    demo.sessionState,
+    null,
+    demo.mediaState,
+  );
+
   return (
     <main
       className="docs-playground"
@@ -71,9 +78,8 @@ export function DocsBasketballPlayground() {
       <div className="docs-playground__stage">
         <RendererViewport
           containerRef={demo.containerRef}
-          mediaState={demo.mediaState}
-          sessionState={demo.sessionState}
-          uploadInferenceState={null}
+          explained={viewportOverlay.explained}
+          overlay={viewportOverlay.overlay}
         />
         <div className="docs-playground__stage-copy">
           <span>Live fixture</span>

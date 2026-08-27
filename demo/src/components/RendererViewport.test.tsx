@@ -10,6 +10,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createDemoStage } from "../hooks/useDemoRenderer";
 import { RendererViewport } from "./RendererViewport";
+import { createViewportOverlay } from "./viewport-overlay";
 
 type ViewportRef = (element: HTMLDivElement | null) => (() => void) | void;
 
@@ -69,9 +70,11 @@ function renderViewport(
 ) {
   return RendererViewport.type({
     containerRef,
-    mediaState: { errorMessage: null, status },
-    sessionState,
-    uploadInferenceState: null,
+    explained: true,
+    overlay: createViewportOverlay(sessionState, null, {
+      errorMessage: null,
+      status,
+    }),
   });
 }
 

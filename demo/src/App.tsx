@@ -22,7 +22,9 @@ import { PresentationDiagnostics } from "./components/PresentationDiagnostics";
 import { QualityControls } from "./components/QualityControls";
 import { RenderControls } from "./components/RenderControls";
 import { RendererViewport } from "./components/RendererViewport";
+import { useViewportOverlay } from "./hooks/useViewportOverlay";
 import { SelectionPanel } from "./components/SelectionPanel";
+import { SessionOptionsPanel } from "./components/SessionOptionsPanel";
 import { SourceControls } from "./components/SourceControls";
 import { StatusPanel } from "./components/StatusPanel";
 import { resolveDemoDocsUrl } from "./docs-url";
@@ -176,6 +178,13 @@ function DemoApp() {
       ? sessionState
       : { ...sessionState, activities };
   }, [demo.sessionState]);
+  const viewportOverlay = useViewportOverlay(
+    viewportSessionState,
+    demo.sourceMode === DemoSourceMode.Upload
+      ? demo.uploadInferenceState
+      : null,
+    demo.mediaState,
+  );
   const styleClassNames = useMemo(
     () =>
       demo.sourceMode === DemoSourceMode.Upload
@@ -207,13 +216,8 @@ function DemoApp() {
         viewport={
           <RendererViewport
             containerRef={demo.containerRef}
-            mediaState={demo.mediaState}
-            sessionState={viewportSessionState}
-            uploadInferenceState={
-              demo.sourceMode === DemoSourceMode.Upload
-                ? demo.uploadInferenceState
-                : null
-            }
+            explained={viewportOverlay.explained}
+            overlay={viewportOverlay.overlay}
           />
         }
         sourceControls={
@@ -241,6 +245,13 @@ function DemoApp() {
             disabled={!demo.canUseRenderer}
             onChange={demo.setRenderQuality}
             quality={demo.renderQuality}
+          />
+        }
+        sessionOptionsPanel={
+          <SessionOptionsPanel
+            configuration={demo.sessionConfiguration}
+            onChange={demo.setSessionOptions}
+            options={demo.sessionOptions}
           />
         }
         selectionPanel={

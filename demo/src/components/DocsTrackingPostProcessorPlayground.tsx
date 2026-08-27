@@ -13,6 +13,7 @@ import {
 } from "../docs-tracking";
 import { useDemoRenderer } from "../hooks/useDemoRenderer";
 import { RendererViewport } from "./RendererViewport";
+import { useViewportOverlay } from "../hooks/useViewportOverlay";
 
 const emptyDiagnostics: DetectionPostProcessingDiagnostics = {
   activeTrackCount: 0,
@@ -268,6 +269,12 @@ export function DocsTrackingPostProcessorPlayground() {
     })();
   }, [controller, demo, isPlaying, showPresentation]);
 
+  const viewportOverlay = useViewportOverlay(
+    demo.sessionState,
+    null,
+    demo.mediaState,
+  );
+
   return (
     <main
       className="docs-layer-playground docs-tracking-playground"
@@ -276,9 +283,8 @@ export function DocsTrackingPostProcessorPlayground() {
       <section className="docs-layer-playground__stage">
         <RendererViewport
           containerRef={demo.containerRef}
-          mediaState={demo.mediaState}
-          sessionState={demo.sessionState}
-          uploadInferenceState={null}
+          explained={viewportOverlay.explained}
+          overlay={viewportOverlay.overlay}
         />
         <div aria-live="polite" className="docs-tracking-playground__badge">
           <span>
