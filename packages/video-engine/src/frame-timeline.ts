@@ -29,6 +29,32 @@ export interface FrameTimelineData {
 }
 
 /**
+ * One entry per presentation instant.
+ *
+ * A container may carry several coded pictures on one timestamp, and they
+ * occupy no time between them: a decode for that instant answers with a single
+ * picture, so the rest are frames no reader can reach or name. Counting them
+ * would leave a step across the group moving the picture nowhere, and a search
+ * for a time inside it answering with the group's last entry whatever it was
+ * asked.
+ */
+function oneEntryPerInstant(data: FrameTimelineData): FrameTimelineData {
+  const { ticks } = data;
+  let at = 1;
+  while (at < ticks.length && ticks[at] !== ticks[at - 1]) at += 1;
+  if (at === ticks.length) return data;
+  const distinct = new Float64Array(ticks.length);
+  distinct.set(ticks.subarray(0, at));
+  let size = at;
+  for (let i = at + 1; i < ticks.length; i += 1) {
+    if (ticks[i] === distinct[size - 1]) continue;
+    distinct[size] = ticks[i];
+    size += 1;
+  }
+  return { ...data, ticks: distinct.slice(0, size) };
+}
+
+/**
  * Every real frame of one track, in presentation order, by its container tick
  * timestamp.
  *
@@ -56,7 +82,7 @@ export class FrameTimeline {
         `FrameTimeline: tick rate ${data.tickRate} is not positive`,
       );
     }
-    return new FrameTimeline(data);
+    return new FrameTimeline(oneEntryPerInstant(data));
   }
 
   /** A synthetic constant-rate table. Tests and fakes only. The default tick

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { FrameTimeline } from "./frame-timeline";
 
 import horseTicks from "../test/fixtures/horse-trail-ticks.json";
+import variableRateTicks from "../test/fixtures/variable-rate-ticks.json";
 
 /**
  * A table whose frame gaps never settle, at a tick rate that is not a multiple
@@ -35,9 +36,27 @@ function horseTrail(): FrameTimeline {
   });
 }
 
+/**
+ * A screen-recorder shape: 74 of this clip's 300 packets share a presentation
+ * timestamp with the packet before them, so the container names 226 instants
+ * with 300 packets.
+ */
+function variableRate(): FrameTimeline {
+  const ticks = [...variableRateTicks.decodeOrderTicks].sort((a, b) => a - b);
+  const last = variableRateTicks.decodeOrderTicks.indexOf(
+    ticks[ticks.length - 1],
+  );
+  return FrameTimeline.from({
+    lastDurationTicks: variableRateTicks.decodeOrderDurationTicks[last],
+    tickRate: variableRateTicks.tickRate,
+    ticks: Float64Array.from(ticks),
+  });
+}
+
 const TABLES: Array<[string, () => FrameTimeline]> = [
   ["a synthetic VFR table", syntheticVfr],
   ["the horse fixture's own tick table", horseTrail],
+  ["the variable-rate fixture's own tick table", variableRate],
 ];
 
 describe.each(TABLES)("FrameTimeline over %s", (_name, build) => {
@@ -153,6 +172,22 @@ describe("FrameTimeline construction", () => {
         ticks: Float64Array.from([0, 1]),
       }),
     ).toThrow(RangeError);
+  });
+
+  it("packets sharing a presentation timestamp name one frame", () => {
+    const timeline = FrameTimeline.from({
+      lastDurationTicks: 3000,
+      tickRate: 90_000,
+      ticks: Float64Array.from([0, 3000, 9000, 12_000, 12_000, 15_000]),
+    });
+
+    expect(timeline.frameCount).toBe(5);
+    expect(timeline.ticksAt(3)).toBe(12_000);
+    expect(timeline.ticksAt(4)).toBe(15_000);
+  });
+
+  it("the variable-rate fixture names 226 frames, not 300 packets", () => {
+    expect(variableRate().frameCount).toBe(226);
   });
 
   it("a uniform table lands every frame on its own whole tick", () => {

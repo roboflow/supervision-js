@@ -4,6 +4,7 @@ import type { MediaClock } from "./clock";
 import { DIAGNOSTICS } from "./constants";
 import * as factoryModule from "./create-scrub-cursor";
 import { EngineCore } from "./engine-core";
+import { FrameTimeline } from "./frame-timeline";
 import { setDiagnosticsEnabled } from "./scrub-controller";
 import {
   ScrubCursorState,
@@ -25,6 +26,7 @@ import {
   LOAD_CONFIG,
   makeFakeCursor,
   makeScrubFrame,
+  replaceProperty,
 } from "../test/fake-engine-deps";
 
 beforeAll(() => {
@@ -468,6 +470,33 @@ describe("EngineCore", () => {
     // Past the last frame of the fake's 1000-frame table.
     clock.seek(35);
     expect(await engine.step(1)).toBeNull();
+    await engine.dispose();
+  });
+
+  it("a burst of steps moves the picture on a source that names one instant twice", async () => {
+    const clock = new FakeClock();
+    const { engine, cursor } = setup(clock);
+    // The variable-rate fixture's own shape: two packets on tick 12000, two
+    // more on tick 24000.
+    replaceProperty(
+      cursor.track,
+      "timeline",
+      FrameTimeline.from({
+        lastDurationTicks: 3000,
+        tickRate: 90_000,
+        ticks: Float64Array.from([
+          0, 3000, 9000, 12_000, 12_000, 15_000, 21_000, 24_000, 24_000, 27_000,
+        ]),
+      }),
+    );
+    await engine.load(LOAD_CONFIG);
+
+    const walked: number[] = [];
+    for (let i = 0; i < 6; i++)
+      walked.push((await engine.step(1))?.frame.ticks ?? -1);
+
+    expect(walked).toEqual([3000, 9000, 12_000, 15_000, 21_000, 24_000]);
+    expect(cursor.seekToFrameCalls.map((frame) => frame.ticks)).toEqual(walked);
     await engine.dispose();
   });
 
