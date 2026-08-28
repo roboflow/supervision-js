@@ -18,6 +18,14 @@ const UNPINNED_CACHE_FLOOR_CHUNKS = 12;
  * left to hand back, because every chunk outside it was evicted to make room.
  */
 const CACHED_WINDOW_COUNT = 2;
+/**
+ * Chunk requests in flight at once when the caller sets no cap. A buffer window
+ * spans dozens of chunk files, and they queue behind the same connection the
+ * media's own range reads use, so an unbounded fan-out buys detection frames by
+ * starving decode. Four is the ceiling automatic mask preparation holds itself
+ * to against the same contention.
+ */
+const DEFAULT_MAX_CONCURRENT_CHUNK_FETCHES = 4;
 
 export function createChunkedDetectionFrameSource(
   options: ChunkedDetectionFrameSourceOptions,
@@ -27,11 +35,17 @@ export function createChunkedDetectionFrameSource(
     options.fetchChunk ??
     ((chunk) => fetchJsonDetectionFrameChunk(chunk, options.baseUrl));
   const pinnedMaxCachedChunks = options.maxCachedChunks;
+  const maxConcurrentChunkFetches =
+    options.maxConcurrentChunkFetches ?? DEFAULT_MAX_CONCURRENT_CHUNK_FETCHES;
   let cacheCapacity = pinnedMaxCachedChunks ?? UNPINNED_CACHE_FLOOR_CHUNKS;
   let destroyed = false;
 
   if (cacheCapacity <= 0) {
     throw new Error("maxCachedChunks must be greater than 0.");
+  }
+
+  if (maxConcurrentChunkFetches <= 0) {
+    throw new Error("maxConcurrentChunkFetches must be greater than 0.");
   }
 
   return {
@@ -52,8 +66,10 @@ export function createChunkedDetectionFrameSource(
         return [];
       }
 
-      const loadedChunks = await Promise.all(
-        chunks.map((chunk) => loadChunk(chunk, fetchChunk, chunkCache)),
+      const loadedChunks = await mapWithConcurrency(
+        chunks,
+        maxConcurrentChunkFetches,
+        (chunk) => loadChunk(chunk, fetchChunk, chunkCache),
       );
 
       if (pinnedMaxCachedChunks === undefined) {
@@ -122,6 +138,33 @@ function loadChunk(
 
   chunkCache.set(chunk.chunkIndex, chunkPromise);
   return chunkPromise;
+}
+
+/** Result order follows item order. Workers pull from a shared cursor, so a
+ *  slow item holds up only its own slot. */
+async function mapWithConcurrency<Item, Result>(
+  items: readonly Item[],
+  concurrency: number,
+  loadItem: (item: Item) => Promise<Result>,
+): Promise<Result[]> {
+  const results: Result[] = new Array<Result>(items.length);
+  let nextIndex = 0;
+
+  const workers = Array.from(
+    { length: Math.min(concurrency, items.length) },
+    async () => {
+      while (nextIndex < items.length) {
+        const itemIndex = nextIndex;
+
+        nextIndex += 1;
+        results[itemIndex] = await loadItem(items[itemIndex]);
+      }
+    },
+  );
+
+  await Promise.all(workers);
+
+  return results;
 }
 
 function trimChunkCache(

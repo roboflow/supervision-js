@@ -260,6 +260,41 @@ describe("createChunkedDetectionFrameSource", () => {
     expect(fetchChunk).toHaveBeenCalledTimes(chunksInRange);
   });
 
+  it("holds a wide window to the default number of chunk requests in flight", async () => {
+    const manifest = createSecondChunkManifest(40);
+    const tracker = createFetchTracker();
+    const source = createChunkedDetectionFrameSource({
+      fetchChunk: tracker.fetchChunk,
+      manifest,
+    });
+
+    const load = source.loadFrames(0, 39);
+
+    await tracker.settleAll();
+    await load;
+
+    expect(tracker.requestCount).toBe(40);
+    expect(tracker.peakInFlight).toBe(4);
+  });
+
+  it("holds a wide window to an explicit number of chunk requests in flight", async () => {
+    const manifest = createSecondChunkManifest(40);
+    const tracker = createFetchTracker();
+    const source = createChunkedDetectionFrameSource({
+      fetchChunk: tracker.fetchChunk,
+      manifest,
+      maxConcurrentChunkFetches: 2,
+    });
+
+    const load = source.loadFrames(0, 39);
+
+    await tracker.settleAll();
+    await load;
+
+    expect(tracker.requestCount).toBe(40);
+    expect(tracker.peakInFlight).toBe(2);
+  });
+
   it("retries a chunk request after a failed load", async () => {
     const manifest = createManifest();
     const fetchChunk = vi
@@ -280,6 +315,60 @@ describe("createChunkedDetectionFrameSource", () => {
     expect(fetchChunk).toHaveBeenCalledTimes(2);
   });
 });
+
+/**
+ * A chunk loader that settles only when the test says so, so the number of
+ * requests standing open at once is observable.
+ */
+function createFetchTracker() {
+  const releases: (() => void)[] = [];
+  let inFlight = 0;
+  let peak = 0;
+  let requestCount = 0;
+
+  const fetchChunk: DetectionFrameChunkFetch = (chunk) => {
+    inFlight += 1;
+    requestCount += 1;
+    peak = Math.max(peak, inFlight);
+
+    return new Promise<DetectionFrameChunk>((resolve) => {
+      releases.push(() => {
+        inFlight -= 1;
+        resolve({
+          frames: [
+            {
+              detections: [],
+              endTime: chunk.chunkIndex + 1,
+              frameIndex: chunk.chunkIndex,
+              mediaTime: chunk.chunkIndex,
+            },
+          ],
+        });
+      });
+    });
+  };
+
+  async function settleAll() {
+    while (releases.length > 0) {
+      releases.shift()?.();
+
+      for (let tick = 0; tick < 8; tick += 1) {
+        await Promise.resolve();
+      }
+    }
+  }
+
+  return {
+    fetchChunk,
+    get peakInFlight() {
+      return peak;
+    },
+    get requestCount() {
+      return requestCount;
+    },
+    settleAll,
+  };
+}
 
 function createManifest(): DetectionFrameChunkManifest {
   return {
