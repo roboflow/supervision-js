@@ -1,5 +1,6 @@
 import type { SerializableMaskInstruction } from "#render-preparation/mask-preparation-worker-protocol";
 import type {
+  PreparedIdMaskPlane,
   PreparedRegionMaskCoverageEntry,
   PreparedRegionMaskCoverageFrame,
 } from "#render-preparation/mask-frame-artifact";
@@ -138,6 +139,17 @@ export function createIdMaskRasterFrame(
     // puts the caller on the RGBA composite, which draws the same picture.
     return undefined;
   }
+}
+
+export function createIdMaskPlane(
+  instructions: readonly SerializableMaskInstruction[],
+  maxRasterWidth?: number,
+): PreparedIdMaskPlane | undefined {
+  const frame = createIdMaskRasterFrame(instructions, maxRasterWidth);
+
+  return frame
+    ? { data: frame.data, height: frame.height, width: frame.width }
+    : undefined;
 }
 
 function compositeInstruction(

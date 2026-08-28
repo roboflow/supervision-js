@@ -1,6 +1,7 @@
 import type { DetectionMask, Point } from "supervision-js-core";
 import type { MaskStrokeStyle } from "supervision-js-core";
 import type {
+  PreparedIdMaskPlane,
   PreparedMaskFrameKind,
   PreparedRegionMaskCoverageFrame,
 } from "./mask-frame-artifact";
@@ -55,7 +56,7 @@ export interface MaskPreparationWorkerCompleteMessage {
   readonly fillPalette?: Float32Array<ArrayBuffer>;
   readonly hasStroke?: boolean;
   readonly height?: number;
-  readonly idMaskData?: Uint8Array<ArrayBuffer>;
+  readonly idMaskPlane?: PreparedIdMaskPlane;
   readonly imageBitmap?: ImageBitmap;
   readonly imageData?: ImageData;
   readonly key: string;

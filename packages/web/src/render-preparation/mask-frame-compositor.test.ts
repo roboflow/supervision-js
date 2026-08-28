@@ -13,6 +13,7 @@ import {
 import {
   compositeMaskFrame,
   createIdMaskFrame,
+  createIdMaskPlane,
   createIdMaskRasterFrame,
   createRegionMaskCoverageFrame,
 } from "./mask-frame-compositor";
@@ -191,6 +192,33 @@ describe("mask frame compositor", () => {
     expect([...frame!.strokeWidths.slice(1, 4)]).toEqual([1, 1, 0]);
     expect(frame!.maxStrokeWidth).toBe(1);
     expect(frame!.hasStroke).toBe(true);
+  });
+
+  it("caps the ID plane the RGBA composite carries", () => {
+    const instructions = [
+      {
+        alpha: 0.5,
+        color: 0xff0000,
+        detectionIndex: 0,
+        mask: {
+          counts: encodeCompressedRleCounts([0, 32]),
+          encoding: DetectionMaskEncoding.CompressedRle,
+          height: 4,
+          width: 8,
+        },
+      },
+    ];
+    const plane = createIdMaskPlane(instructions, 4);
+
+    expect(plane).toEqual({
+      data: new Uint8Array(8).fill(1),
+      height: 2,
+      width: 4,
+    });
+    expect(createIdMaskPlane(instructions)).toMatchObject({
+      height: 4,
+      width: 8,
+    });
   });
 
   it("keeps thick mask strokes on the ID-mask path", () => {

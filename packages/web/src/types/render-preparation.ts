@@ -119,11 +119,11 @@ export interface RenderPreparationMaskFrameOptions {
  * presents its own frames owns the playhead and paces itself; that is the
  * video-engine source, `openVideoEngineMediaSource` and the
  * `createVideoEngineMediaRendererSource` wrapper around it, which is what most
- * video sessions render through. On a source that presents its own frames the gate
- * holds the start of playback and nothing after it: the wait runs once, before
- * the producer is told to play, and the renderer reports `Buffering` while it
- * does. Once the producer is running, unprepared layers stay absent until
- * preparation catches up.
+ * video sessions render through. On a source that presents its own frames this
+ * gate holds the start of playback and nothing after it: the wait runs once,
+ * before the producer is told to play, and the renderer reports `Buffering`
+ * while it does. Once the producer is running, unprepared layers stay absent
+ * until preparation catches up.
  */
 export interface RenderPreparationPlaybackGateOptions {
   /**
@@ -211,12 +211,13 @@ export interface RenderPreparationOptions {
    * Hold playback until prepared artifacts cover the frame about to be
    * presented.
    *
-   * **This option reaches two different distances depending on the source, and
-   * the renderer reports which one it got as `playbackGateReach` on its state.**
-   * A source the renderer pulls samples from is held at every frame. A source
-   * that presents its own frames is held only at the start of playback, because
-   * the producer owns the playhead once it is running, and frames after that
-   * arrive whether their artifacts are ready or not.
+   * **This option reaches two different distances depending on the source.** A
+   * source the renderer pulls samples from is held at every frame. A source that
+   * presents its own frames is held only at the start of playback, because
+   * stopping the producer mid-run needs an answer about coverage that render
+   * preparation cannot give without waiting for it, so frames after the start
+   * arrive whether their artifacts are ready or not. `playbackGateReach` on the
+   * renderer's state reports the furthest any of its gates reaches.
    *
    * A renderer created directly leaves this off. `createMediaSession()` turns it
    * on, so a session opens with its annotations rather than opening bare; pass

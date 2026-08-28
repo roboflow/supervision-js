@@ -1,5 +1,6 @@
 import {
   compositeMaskFrame,
+  createIdMaskPlane,
   createIdMaskRasterFrame,
   createRegionMaskCoverageFrame,
 } from "#render-preparation/mask-frame-compositor";
@@ -93,15 +94,16 @@ function prepareMaskFrame(message: MaskPreparationWorkerRequest) {
       preparedPixels.height,
     );
     const imageBitmap = createImageBitmapFromImageData(imageData);
-    // The halo lays this plane into a canvas sized from the composite, so a
-    // raster width of its own would shear every row.
-    const idMaskData = createIdMaskRasterFrame(message.job.instructions)?.data;
-    const idMaskTransfers = idMaskData ? [idMaskData.buffer] : [];
+    const idMaskPlane = createIdMaskPlane(
+      message.job.instructions,
+      message.job.maxRasterWidth,
+    );
+    const idMaskTransfers = idMaskPlane ? [idMaskPlane.data.buffer] : [];
 
     if (imageBitmap) {
       workerScope.postMessage(
         {
-          idMaskData,
+          idMaskPlane,
           imageBitmap,
           key: message.job.key,
           regionMaskCoverage,
@@ -115,7 +117,7 @@ function prepareMaskFrame(message: MaskPreparationWorkerRequest) {
 
     workerScope.postMessage(
       {
-        idMaskData,
+        idMaskPlane,
         imageData,
         key: message.job.key,
         regionMaskCoverage,

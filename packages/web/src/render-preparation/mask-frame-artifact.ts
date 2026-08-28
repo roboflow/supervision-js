@@ -31,14 +31,22 @@ export interface PreparedRegionMaskCoverageFrame {
   readonly entries: readonly PreparedRegionMaskCoverageEntry[];
 }
 
+/**
+ * The uncomposited detection-id plane carried alongside the RGBA composite, so
+ * id-keyed effects such as the mask halo still have a plane to read when the id
+ * raster could not be cooked. It carries its own size because it honors the
+ * same raster cap as the id raster while the composite is cooked at the
+ * instructions' own resolution.
+ */
+export interface PreparedIdMaskPlane {
+  readonly data: Uint8Array<ArrayBuffer>;
+  readonly height: number;
+  readonly width: number;
+}
+
 export interface PreparedRgbaMaskFrame {
   readonly height: number;
-  /**
-   * The uncomposited detection-id plane carried alongside the RGBA composite,
-   * so id-keyed effects such as the mask halo still have a plane to read when
-   * the id raster could not be cooked.
-   */
-  readonly idMaskData?: Uint8Array<ArrayBuffer>;
+  readonly idMaskPlane?: PreparedIdMaskPlane;
   readonly key: string;
   readonly kind: PreparedMaskFrameKind.RgbaImage;
   readonly regionMaskCoverage?: PreparedRegionMaskCoverageFrame;

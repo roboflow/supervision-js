@@ -1,5 +1,6 @@
 import {
   compositeMaskFrame,
+  createIdMaskPlane,
   createIdMaskRasterFrame,
   createRegionMaskCoverageFrame,
 } from "#render-preparation/mask-frame-compositor";
@@ -250,9 +251,7 @@ function createMainThreadMaskFramePreparer(
           canvas.height = 0;
         },
         height: preparedPixels.height,
-        // The halo lays this plane into a canvas sized from the composite, so
-        // a raster width of its own would shear every row.
-        idMaskData: createIdMaskRasterFrame(job.instructions)?.data,
+        idMaskPlane: createIdMaskPlane(job.instructions, job.maxRasterWidth),
         key: job.key,
         kind: PreparedMaskFrameKind.RgbaImage,
         regionMaskCoverage,
@@ -499,7 +498,7 @@ function createPreparedFrameFromWorkerResponse(
         message.imageBitmap?.close();
       },
       height: message.imageBitmap.height,
-      idMaskData: message.idMaskData,
+      idMaskPlane: message.idMaskPlane,
       key: message.key,
       kind: PreparedMaskFrameKind.RgbaImage,
       regionMaskCoverage: message.regionMaskCoverage,
@@ -529,7 +528,7 @@ function createPreparedFrameFromWorkerResponse(
       canvas.height = 0;
     },
     height: message.imageData.height,
-    idMaskData: message.idMaskData,
+    idMaskPlane: message.idMaskPlane,
     key: message.key,
     kind: PreparedMaskFrameKind.RgbaImage,
     regionMaskCoverage: message.regionMaskCoverage,
