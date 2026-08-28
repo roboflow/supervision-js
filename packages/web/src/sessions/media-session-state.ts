@@ -58,44 +58,64 @@ export function createMediaSessionStateSnapshot({
     );
   }
 
-  if (renderer?.playbackState === MediaRendererPlaybackState.Buffering) {
-    activities.push(
-      createActivity({
-        blockingPlayback: true,
-        kind: MediaSessionActivityKind.PlaybackBuffering,
-        label: "Buffering playback",
-        status: MediaSessionActivityStatus.Waiting,
-      }),
-    );
-  }
+  const stoppedForPlayback =
+    renderer?.playbackState === MediaRendererPlaybackState.Buffering;
+  const awaitingCoverage =
+    renderer?.detectionBuffer.status === DetectionBufferStatus.AwaitingCoverage;
+  const loadingDetections =
+    renderer?.detectionBuffer.status === DetectionBufferStatus.Loading;
+  const preparingActiveFrame = (renderPreparation?.artifacts ?? []).some(
+    (artifact) =>
+      artifact.activeFrame?.status ===
+      RenderPreparationArtifactFrameStatus.Pending,
+  );
 
+  // A picture stopped for its annotations is not stopped for its own bytes, and
+  // a host shown both reads the vaguer one first and tells the viewer the wrong
+  // thing. Only the reason nothing more specific claims is reported here.
   if (
-    renderer?.detectionBuffer.status === DetectionBufferStatus.AwaitingCoverage
+    stoppedForPlayback &&
+    !awaitingCoverage &&
+    !loadingDetections &&
+    !preparingActiveFrame
   ) {
     activities.push(
       createActivity({
         blockingPlayback: true,
-        kind: MediaSessionActivityKind.DetectionsAwaitingCoverage,
-        label: "Waiting for detections",
+        detail: "This part of the video has not downloaded yet",
+        kind: MediaSessionActivityKind.PlaybackBuffering,
+        label: "Waiting for more video",
         status: MediaSessionActivityStatus.Waiting,
       }),
     );
   }
 
-  if (renderer?.detectionBuffer.status === DetectionBufferStatus.Loading) {
-    const blockingPlayback =
-      renderer.playbackState === MediaRendererPlaybackState.Buffering;
-
+  if (awaitingCoverage) {
     activities.push(
       createActivity({
-        blockingPlayback,
-        kind: blockingPlayback
+        blockingPlayback: true,
+        detail: "The model has not reached this frame yet",
+        kind: MediaSessionActivityKind.DetectionsAwaitingCoverage,
+        label: "Waiting for the model",
+        status: MediaSessionActivityStatus.Waiting,
+      }),
+    );
+  }
+
+  if (loadingDetections) {
+    activities.push(
+      createActivity({
+        blockingPlayback: stoppedForPlayback,
+        detail: stoppedForPlayback
+          ? "The detections for this part have not arrived yet"
+          : null,
+        kind: stoppedForPlayback
           ? MediaSessionActivityKind.DetectionsBuffering
           : MediaSessionActivityKind.DetectionsLoading,
-        label: blockingPlayback
-          ? "Waiting for detection buffer"
+        label: stoppedForPlayback
+          ? "Waiting for detections"
           : "Loading detections",
-        status: blockingPlayback
+        status: stoppedForPlayback
           ? MediaSessionActivityStatus.Waiting
           : MediaSessionActivityStatus.Running,
       }),
@@ -112,19 +132,26 @@ export function createMediaSessionStateSnapshot({
       continue;
     }
 
+    const holdingPlayback = activeFrameIsPending && stoppedForPlayback;
+
     activities.push(
       createActivity({
         artifactKind: artifact.kind,
+        blockingPlayback: holdingPlayback,
         blockingPresentation: activeFrameIsPending,
-        detail: activeFrameIsPending
-          ? `Active frame ${artifact.activeFrame.mediaTime.toFixed(
-              3,
-            )}s is waiting for ${artifact.kind}`
-          : null,
+        detail: holdingPlayback
+          ? "The masks for this frame are not drawn yet"
+          : activeFrameIsPending
+            ? `Active frame ${artifact.activeFrame.mediaTime.toFixed(
+                3,
+              )}s is waiting for ${artifact.kind}`
+            : null,
         kind: MediaSessionActivityKind.RenderPreparing,
-        label: activeFrameIsPending
-          ? "Preparing active render artifact"
-          : "Preparing render artifacts",
+        label: holdingPlayback
+          ? "Waiting for the masks"
+          : activeFrameIsPending
+            ? "Preparing active render artifact"
+            : "Preparing render artifacts",
         pendingCount: artifact.pendingCount,
         preparedCount: artifact.preparedCount,
         progress: totalCount > 0 ? artifact.preparedCount / totalCount : 0,

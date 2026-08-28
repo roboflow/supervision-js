@@ -1,47 +1,62 @@
 import { describe, expect, it } from "vitest";
 import { MediaSessionActivityKind } from "supervision";
 
-import {
-  BACKGROUND_ACTIVITY_KINDS,
-  selectViewportSessionState,
-} from "./viewport-overlay";
+import { selectViewportSessionState } from "./viewport-overlay";
 
-function sessionWith(kinds: readonly MediaSessionActivityKind[]) {
+function sessionWith(
+  activities: readonly {
+    readonly blockingPlayback: boolean;
+    readonly kind: MediaSessionActivityKind;
+  }[],
+) {
   return {
-    activities: kinds.map((kind) => ({ kind })),
+    activities,
   } as unknown as Parameters<typeof selectViewportSessionState>[0];
 }
 
-describe("BACKGROUND_ACTIVITY_KINDS", () => {
-  it("keeps a stopped picture out of the background", () => {
-    // A picture that has stopped while the next bytes arrive is the viewer
-    // waiting, and on a remote source it stops for hundreds of milliseconds at
-    // a time with nothing else on screen to say so.
-    expect(
-      BACKGROUND_ACTIVITY_KINDS.has(MediaSessionActivityKind.PlaybackBuffering),
-    ).toBe(false);
-  });
-
-  it("leaves the work the picture never waits for in the background", () => {
-    for (const kind of [
-      MediaSessionActivityKind.DetectionsBuffering,
-      MediaSessionActivityKind.DetectionsLoading,
-      MediaSessionActivityKind.RenderPreparing,
-    ]) {
-      expect(BACKGROUND_ACTIVITY_KINDS.has(kind)).toBe(true);
-    }
-  });
-
-  it("passes a buffering picture through to the viewport", () => {
+describe("selectViewportSessionState", () => {
+  it("leaves work that runs behind a moving picture off the viewport", () => {
     const state = selectViewportSessionState(
       sessionWith([
-        MediaSessionActivityKind.PlaybackBuffering,
-        MediaSessionActivityKind.RenderPreparing,
+        { blockingPlayback: true, kind: MediaSessionActivityKind.MediaOpening },
+        {
+          blockingPlayback: false,
+          kind: MediaSessionActivityKind.DetectionsLoading,
+        },
+        {
+          blockingPlayback: false,
+          kind: MediaSessionActivityKind.RenderPreparing,
+        },
       ]),
     );
 
     expect(state?.activities.map((activity) => activity.kind)).toStrictEqual([
-      MediaSessionActivityKind.PlaybackBuffering,
+      MediaSessionActivityKind.MediaOpening,
+    ]);
+  });
+
+  /**
+   * The same subsystem is background work while the picture moves and the
+   * viewer's wait once it has stopped the picture, and only the second one owes
+   * the viewer an explanation.
+   */
+  it("shows that work once it is what stopped the picture", () => {
+    const state = selectViewportSessionState(
+      sessionWith([
+        {
+          blockingPlayback: true,
+          kind: MediaSessionActivityKind.RenderPreparing,
+        },
+        {
+          blockingPlayback: true,
+          kind: MediaSessionActivityKind.DetectionsBuffering,
+        },
+      ]),
+    );
+
+    expect(state?.activities.map((activity) => activity.kind)).toStrictEqual([
+      MediaSessionActivityKind.RenderPreparing,
+      MediaSessionActivityKind.DetectionsBuffering,
     ]);
   });
 });

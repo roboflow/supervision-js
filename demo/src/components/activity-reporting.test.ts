@@ -13,10 +13,7 @@ import {
 import type { LiveReadouts } from "../hooks/live-readouts";
 import type { UploadInferenceState } from "../session/demo-session-types";
 import { advanceOverlayGate, IDLE_OVERLAY_GATE } from "./overlay-gate";
-import {
-  formatLiveCook,
-  readLiveStatePresentation,
-} from "./live-readout-format";
+import { formatLiveCook } from "./live-readout-format";
 import { formatPreparedWindow, formatRequestedRange } from "./TimelineView";
 import {
   BACKGROUND_ACTIVITY_KINDS,
@@ -77,10 +74,11 @@ function sessionState(
 function overlayFor(
   activities: readonly MediaSessionActivity[],
   rendererState: MediaRendererState | null,
+  uploadInferenceState: UploadInferenceState | null = null,
 ) {
   return createViewportOverlay(
     selectViewportSessionState(sessionState(activities, rendererState)),
-    null,
+    uploadInferenceState,
     mediaState,
   );
 }
@@ -95,6 +93,7 @@ const overlayCases = [
         label: "Opening media",
       }),
     ],
+    kicker: "Media",
     kind: MediaSessionActivityKind.MediaOpening,
     label: "Opening media",
     renderer: null,
@@ -115,6 +114,7 @@ const overlayCases = [
         progress: 0.42,
       }),
     ],
+    kicker: "Media",
     kind: MediaSessionActivityKind.MediaNormalizing,
     label: "Normalizing media",
     renderer: null,
@@ -123,13 +123,57 @@ const overlayCases = [
     activities: [
       activity({
         blockingPlayback: true,
-        kind: MediaSessionActivityKind.DetectionsAwaitingCoverage,
+        kind: MediaSessionActivityKind.PlaybackBuffering,
+        label: "Waiting for more video",
+        status: MediaSessionActivityStatus.Waiting,
+      }),
+    ],
+    kicker: "Playback",
+    kind: MediaSessionActivityKind.PlaybackBuffering,
+    label: "Waiting for more video",
+    renderer,
+  },
+  {
+    activities: [
+      activity({
+        blockingPlayback: true,
+        kind: MediaSessionActivityKind.DetectionsBuffering,
         label: "Waiting for detections",
         status: MediaSessionActivityStatus.Waiting,
       }),
     ],
-    kind: MediaSessionActivityKind.DetectionsAwaitingCoverage,
+    kicker: "Detections",
+    kind: MediaSessionActivityKind.DetectionsBuffering,
     label: "Waiting for detections",
+    renderer,
+  },
+  {
+    activities: [
+      activity({
+        blockingPlayback: true,
+        kind: MediaSessionActivityKind.DetectionsAwaitingCoverage,
+        label: "Waiting for the model",
+        status: MediaSessionActivityStatus.Waiting,
+      }),
+    ],
+    kicker: "Model",
+    kind: MediaSessionActivityKind.DetectionsAwaitingCoverage,
+    label: "Waiting for the model",
+    renderer,
+  },
+  {
+    activities: [
+      activity({
+        blockingPlayback: true,
+        blockingPresentation: true,
+        kind: MediaSessionActivityKind.RenderPreparing,
+        label: "Waiting for the masks",
+        status: MediaSessionActivityStatus.Waiting,
+      }),
+    ],
+    kicker: "Masks",
+    kind: MediaSessionActivityKind.RenderPreparing,
+    label: "Waiting for the masks",
     renderer,
   },
   {
@@ -143,6 +187,7 @@ const overlayCases = [
         status: MediaSessionActivityStatus.Error,
       }),
     ],
+    kicker: "Error",
     kind: MediaSessionActivityKind.Error,
     label: "Renderer error",
     renderer,
@@ -155,33 +200,6 @@ const overlayCases = [
  * while the library reports that activity.
  */
 const controlBarCases = [
-  {
-    kind: MediaSessionActivityKind.PlaybackBuffering,
-    read: () =>
-      readLiveStatePresentation({
-        ...idleReadouts,
-        playbackState: MediaRendererPlaybackState.Buffering,
-      }).label,
-    reported: "Buffering",
-    surface: "the State chip",
-  },
-  {
-    kind: MediaSessionActivityKind.DetectionsBuffering,
-    read: () =>
-      readLiveStatePresentation({
-        ...idleReadouts,
-        detectionBuffer: {
-          bufferEndTime: 4,
-          bufferStartTime: 0,
-          requestedEndTime: 14,
-          requestedStartTime: 0,
-          status: DetectionBufferStatus.Loading,
-        },
-        playbackState: MediaRendererPlaybackState.Buffering,
-      } as unknown as LiveReadouts).label,
-    reported: "Buffering",
-    surface: "the State chip",
-  },
   {
     kind: MediaSessionActivityKind.DetectionsLoading,
     read: () =>
@@ -235,7 +253,10 @@ describe("session activity reporting", () => {
   it.each(overlayCases)("names $kind in the viewport overlay", (entry) => {
     const overlay = overlayFor(entry.activities, entry.renderer);
 
-    expect(overlay?.label).toBe(entry.label);
+    expect({ kicker: overlay?.kicker, label: overlay?.label }).toStrictEqual({
+      kicker: entry.kicker,
+      label: entry.label,
+    });
   });
 
   it("shows how far along a normalization is", () => {
@@ -252,12 +273,11 @@ describe("session activity reporting", () => {
     expect(entry.read()).toBe(entry.reported);
   });
 
-  it("keeps background activities out of the overlay", () => {
+  it("keeps work that is not stopping the picture out of the overlay", () => {
     for (const kind of BACKGROUND_ACTIVITY_KINDS) {
       const overlay = overlayFor(
         [
           activity({
-            blockingPlayback: true,
             blockingPresentation: true,
             kind,
             label: kind,
@@ -298,8 +318,15 @@ describe("session activity reporting", () => {
       mediaState,
     );
 
-    expect(overlay?.label).toBe("Finding the frame");
-    expect(overlay?.detail).toContain("47.130");
+    expect({
+      detail: overlay?.detail,
+      kicker: overlay?.kicker,
+      label: overlay?.label,
+    }).toStrictEqual({
+      detail: "Getting that frame ready",
+      kicker: "Playback",
+      label: "Jumping to 47.13s",
+    });
   });
 
   /**
@@ -406,6 +433,44 @@ describe("session activity reporting", () => {
     }
 
     expect(everVisible).toBe(shown);
+  });
+
+  /**
+   * Recorded on a two-second upload: the picture sat blank for ten seconds
+   * while inference ran, and the frame count that would have made the wait
+   * legible was already on a card in the left rail the whole time.
+   */
+  it("puts the model's own frame count on the wait it is causing", () => {
+    const overlay = overlayFor(
+      [
+        activity({
+          blockingPlayback: true,
+          detail: "The model has not reached this frame yet",
+          kind: MediaSessionActivityKind.DetectionsAwaitingCoverage,
+          label: "Waiting for the model",
+          status: MediaSessionActivityStatus.Waiting,
+        }),
+      ],
+      renderer,
+      {
+        completedFrames: 39,
+        status: "running",
+        statusLabel: "Running the model",
+        totalFrames: 60,
+      } as unknown as UploadInferenceState,
+    );
+
+    expect({
+      detail: overlay?.detail,
+      kicker: overlay?.kicker,
+      label: overlay?.label,
+      progress: overlay?.progress,
+    }).toStrictEqual({
+      detail: "39/60 frames",
+      kicker: "Model",
+      label: "Waiting for the model",
+      progress: 0.65,
+    });
   });
 
   it("counts inference frames in the viewport overlay", () => {

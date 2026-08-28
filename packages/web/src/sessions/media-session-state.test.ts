@@ -115,6 +115,11 @@ describe("media session state", () => {
     ]);
   });
 
+  /**
+   * A local file already in memory, held while inference runs, reported both as
+   * a stopped picture and as a wait for the model. A host reading the vaguer of
+   * the two first tells the viewer the video is still downloading.
+   */
   it("separates waiting for a detection producer from loading detections", () => {
     const state = createMediaSessionStateSnapshot({
       errorMessage: null,
@@ -136,13 +141,8 @@ describe("media session state", () => {
       expect.objectContaining({
         blockingPlayback: true,
         blockingPresentation: false,
-        kind: MediaSessionActivityKind.PlaybackBuffering,
-        status: MediaSessionActivityStatus.Waiting,
-      }),
-      expect.objectContaining({
-        blockingPlayback: true,
-        blockingPresentation: false,
         kind: MediaSessionActivityKind.DetectionsAwaitingCoverage,
+        label: "Waiting for the model",
         status: MediaSessionActivityStatus.Waiting,
       }),
     ]);
@@ -208,12 +208,6 @@ describe("media session state", () => {
     expect(state.playbackBlocked).toBe(true);
     expect(state.presentationBlocked).toBe(false);
     expect(state.activities).toEqual([
-      expect.objectContaining({
-        blockingPlayback: true,
-        blockingPresentation: false,
-        kind: MediaSessionActivityKind.PlaybackBuffering,
-        status: MediaSessionActivityStatus.Waiting,
-      }),
       expect.objectContaining({
         blockingPlayback: true,
         blockingPresentation: false,
@@ -441,6 +435,85 @@ describe("media session state", () => {
       playbackBlocked: false,
       presentationBlocked: false,
       status: MediaSessionStatus.Destroyed,
+    });
+  });
+  /**
+   * A local file already in memory, held at the start of playback while its
+   * masks rasterize. Reported as a stopped picture alone, it reads as a slow
+   * network on a file that is not being fetched at all.
+   */
+  it("names the masks when they are what stopped the picture", () => {
+    const state = createMediaSessionStateSnapshot({
+      errorMessage: null,
+      media: {
+        inputMetadata: null,
+        normalizedMedia: null,
+        objectUrl: null,
+      },
+      normalization: null,
+      renderPreparation: {
+        artifacts: [
+          {
+            activeFrame: {
+              key: "1.500",
+              mediaTime: 1.5,
+              status: RenderPreparationArtifactFrameStatus.Pending,
+            },
+            kind: RenderPreparationArtifactKind.MaskFrame,
+            pendingCount: 3,
+            preparedCount: 9,
+          },
+        ],
+        executionMode: RenderPreparationExecutionMode.Worker,
+        message: null,
+        workerStatus: RenderPreparationWorkerStatus.Ready,
+      },
+      renderer: createRendererState({
+        detectionBufferStatus: DetectionBufferStatus.Ready,
+        playbackState: MediaRendererPlaybackState.Buffering,
+      }),
+    });
+
+    expect(
+      state.activities.map((entry) => ({
+        blockingPlayback: entry.blockingPlayback,
+        kind: entry.kind,
+        label: entry.label,
+      })),
+    ).toStrictEqual([
+      {
+        blockingPlayback: true,
+        kind: MediaSessionActivityKind.RenderPreparing,
+        label: "Waiting for the masks",
+      },
+    ]);
+  });
+
+  it("names detections still arriving apart from video still arriving", () => {
+    const stoppedFor = (detectionBufferStatus: DetectionBufferStatus) =>
+      createMediaSessionStateSnapshot({
+        errorMessage: null,
+        media: {
+          inputMetadata: null,
+          normalizedMedia: null,
+          objectUrl: null,
+        },
+        normalization: null,
+        renderPreparation: null,
+        renderer: createRendererState({
+          detectionBufferStatus,
+          playbackState: MediaRendererPlaybackState.Buffering,
+        }),
+      }).activities.map((activity) => activity.label);
+
+    expect({
+      detections: stoppedFor(DetectionBufferStatus.Loading),
+      media: stoppedFor(DetectionBufferStatus.Ready),
+      model: stoppedFor(DetectionBufferStatus.AwaitingCoverage),
+    }).toStrictEqual({
+      detections: ["Waiting for detections"],
+      media: ["Waiting for more video"],
+      model: ["Waiting for the model"],
     });
   });
 });

@@ -1,7 +1,6 @@
 import {
   MediaSessionActivityKind,
   MediaSessionActivityStatus,
-  MediaSessionStatus,
   type MediaSessionActivity,
   type MediaSessionState,
 } from "supervision";
@@ -10,19 +9,20 @@ import type {
   DemoMediaState,
   UploadInferenceState,
 } from "../session/demo-session-types";
-import { formatExactTime } from "../format";
+import { formatTime } from "../format";
 import { mediaFailureHeadline } from "./media-failure-copy";
 
 /**
- * The picture never waits for these, so they read as background progress rather
- * than as conditions the viewer has to sit through. The control bar reports
- * them: the prepared window and the detection buffer in their own timeline
- * lanes.
+ * Work that runs behind a moving picture, which reads as background progress
+ * rather than as a condition the viewer has to sit through. The control bar
+ * reports it: the prepared window and the detection buffer in their own
+ * timeline lanes.
  *
- * Playback buffering is not among them. A picture that has stopped while the
- * next bytes arrive is the viewer waiting, and on a remote source it stops for
- * hundreds of milliseconds at a time. The overlay's own delay decides whether
- * any given one is long enough to be worth saying.
+ * The same work can also be what stopped the picture, and then it is the
+ * viewer's wait and belongs on screen. On a remote source the picture stops for
+ * hundreds of milliseconds at a time with nothing else to say so, and the
+ * overlay's own delay decides whether any given one lasted long enough to be
+ * worth saying.
  */
 export const BACKGROUND_ACTIVITY_KINDS: ReadonlySet<MediaSessionActivityKind> =
   new Set([
@@ -30,6 +30,21 @@ export const BACKGROUND_ACTIVITY_KINDS: ReadonlySet<MediaSessionActivityKind> =
     MediaSessionActivityKind.DetectionsLoading,
     MediaSessionActivityKind.RenderPreparing,
   ]);
+
+/**
+ * The part of the player a wait belongs to, so the headline can say what is
+ * being waited for without repeating whose wait it is.
+ */
+const ACTIVITY_KICKERS: Record<MediaSessionActivityKind, string> = {
+  [MediaSessionActivityKind.DetectionsAwaitingCoverage]: "Model",
+  [MediaSessionActivityKind.DetectionsBuffering]: "Detections",
+  [MediaSessionActivityKind.DetectionsLoading]: "Detections",
+  [MediaSessionActivityKind.Error]: "Error",
+  [MediaSessionActivityKind.MediaNormalizing]: "Media",
+  [MediaSessionActivityKind.MediaOpening]: "Media",
+  [MediaSessionActivityKind.PlaybackBuffering]: "Playback",
+  [MediaSessionActivityKind.RenderPreparing]: "Masks",
+};
 
 export function selectViewportSessionState(
   sessionState: MediaSessionState | null,
@@ -39,7 +54,9 @@ export function selectViewportSessionState(
   }
 
   const activities = sessionState.activities.filter(
-    (activity) => !BACKGROUND_ACTIVITY_KINDS.has(activity.kind),
+    (activity) =>
+      activity.blockingPlayback ||
+      !BACKGROUND_ACTIVITY_KINDS.has(activity.kind),
   );
 
   return activities.length === sessionState.activities.length
@@ -84,11 +101,19 @@ export function createViewportOverlay(
   const activity = selectViewportActivity(sessionState);
 
   if (activity) {
+    // The picture is held for the model, and how far the model has got is
+    // counted elsewhere on the page. Saying it here is what gives the wait an
+    // end in sight.
+    const inferenceProgress =
+      activity.kind === MediaSessionActivityKind.DetectionsAwaitingCoverage
+        ? readInferenceProgress(uploadInferenceState)
+        : null;
+
     return {
-      detail: formatActivityDetail(activity),
-      kicker: formatSessionStatus(sessionState?.status ?? null),
+      detail: inferenceProgress?.detail ?? formatActivityDetail(activity),
+      kicker: ACTIVITY_KICKERS[activity.kind],
       label: mediaFailureHeadline(activity.errorKind) ?? activity.label,
-      progress: activity.progress ?? null,
+      progress: inferenceProgress?.progress ?? activity.progress ?? null,
       tone:
         activity.status === MediaSessionActivityStatus.Error
           ? "error"
@@ -102,9 +127,9 @@ export function createViewportOverlay(
 
   if (seekTarget !== null) {
     return {
-      detail: `Moving to ${formatExactTime(seekTarget)}`,
-      kicker: "Seeking",
-      label: "Finding the frame",
+      detail: "Getting that frame ready",
+      kicker: "Playback",
+      label: `Jumping to ${formatTime(seekTarget)}`,
       progress: null,
       tone: "waiting",
     };
@@ -115,18 +140,13 @@ export function createViewportOverlay(
     (uploadInferenceState.status === "preparing" ||
       uploadInferenceState.status === "running")
   ) {
+    const inferenceProgress = readInferenceProgress(uploadInferenceState);
+
     return {
-      detail:
-        uploadInferenceState.totalFrames > 0
-          ? `${uploadInferenceState.completedFrames}/${uploadInferenceState.totalFrames} frames`
-          : null,
-      kicker: "Inference",
+      detail: inferenceProgress?.detail ?? null,
+      kicker: uploadInferenceState.status === "preparing" ? "Media" : "Model",
       label: uploadInferenceState.statusLabel,
-      progress:
-        uploadInferenceState.totalFrames > 0
-          ? uploadInferenceState.completedFrames /
-            uploadInferenceState.totalFrames
-          : null,
+      progress: inferenceProgress?.progress ?? null,
       tone: "active",
     };
   }
@@ -134,7 +154,7 @@ export function createViewportOverlay(
   if (!sessionState && mediaState.status) {
     return {
       detail: mediaState.errorMessage,
-      kicker: mediaState.errorMessage ? "Error" : "Loading",
+      kicker: mediaState.errorMessage ? "Error" : "Media",
       label: mediaState.status,
       progress: null,
       tone: mediaState.errorMessage ? "error" : "active",
@@ -142,6 +162,21 @@ export function createViewportOverlay(
   }
 
   return null;
+}
+
+function readInferenceProgress(
+  uploadInferenceState: UploadInferenceState | null,
+) {
+  if (!uploadInferenceState || uploadInferenceState.totalFrames <= 0) {
+    return null;
+  }
+
+  const { completedFrames, totalFrames } = uploadInferenceState;
+
+  return {
+    detail: `${completedFrames}/${totalFrames} frames`,
+    progress: completedFrames / totalFrames,
+  };
 }
 
 /**
@@ -205,13 +240,6 @@ function isForegroundActivity(activity: MediaSessionActivity) {
 }
 
 function formatActivityDetail(activity: MediaSessionActivity) {
-  if (
-    activity.pendingCount !== undefined &&
-    activity.preparedCount !== undefined
-  ) {
-    return `${activity.preparedCount} ready, ${activity.pendingCount} pending`;
-  }
-
   if (activity.errorMessage) {
     return activity.errorMessage;
   }
@@ -220,25 +248,12 @@ function formatActivityDetail(activity: MediaSessionActivity) {
     return activity.detail;
   }
 
+  if (
+    activity.pendingCount !== undefined &&
+    activity.preparedCount !== undefined
+  ) {
+    return `${activity.preparedCount} ready, ${activity.pendingCount} pending`;
+  }
+
   return null;
-}
-
-function formatSessionStatus(status: MediaSessionStatus | null) {
-  if (!status) {
-    return "Session";
-  }
-
-  if (status === MediaSessionStatus.Buffering) {
-    return "Waiting";
-  }
-
-  if (status === MediaSessionStatus.Loading) {
-    return "Loading";
-  }
-
-  if (status === MediaSessionStatus.Error) {
-    return "Error";
-  }
-
-  return "Processing";
 }
