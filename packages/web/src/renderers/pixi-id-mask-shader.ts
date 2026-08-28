@@ -1,4 +1,12 @@
 import {
+  ID_MASK_STROKE_WIDTH_LANES,
+  idMaskFillPaletteWgslField,
+  idMaskPaletteGlsl,
+  idMaskPaletteWgsl,
+  idMaskStrokePaletteWgslField,
+  idMaskStrokeWidthsWgslField,
+} from "#renderers/mask-palette";
+import {
   tintedMaskVertexGlsl,
   tintedMaskVertexWgsl,
 } from "#renderers/mask-vertex";
@@ -92,8 +100,8 @@ export function createPixiIdMaskShaderRenderer(options: {
       value: new Float32Array(MAX_ID_MASK_PALETTE_ENTRIES * 4),
     },
     uStrokeWidths: {
-      size: MAX_ID_MASK_PALETTE_ENTRIES,
-      type: "f32",
+      size: ID_MASK_STROKE_WIDTH_LANES,
+      type: "vec4<f32>",
       value: new Float32Array(MAX_ID_MASK_PALETTE_ENTRIES),
     },
     uTextureSize: {
@@ -240,35 +248,14 @@ in vec2 vUV;
 in vec4 vColor;
 
 uniform sampler2D uTexture;
-uniform vec4 uFillPalette[${MAX_ID_MASK_PALETTE_ENTRIES}];
-uniform vec4 uStrokePalette[${MAX_ID_MASK_PALETTE_ENTRIES}];
-uniform float uStrokeWidths[${MAX_ID_MASK_PALETTE_ENTRIES}];
 uniform vec2 uTextureSize;
 uniform float uBorderEnabled;
 uniform float uMaxStrokeWidth;
-
+${idMaskPaletteGlsl}
 out vec4 finalColor;
 
 float sampleMaskId(vec2 uv) {
   return floor(texture(uTexture, uv).r * 255.0 + 0.5);
-}
-
-vec4 readFill(float maskId) {
-  int paletteIndex = int(clamp(maskId, 0.0, float(${MAX_ID_MASK_PALETTE_ENTRIES - 1})));
-
-  return uFillPalette[paletteIndex];
-}
-
-vec4 readStroke(float maskId) {
-  int paletteIndex = int(clamp(maskId, 0.0, float(${MAX_ID_MASK_PALETTE_ENTRIES - 1})));
-
-  return uStrokePalette[paletteIndex];
-}
-
-float readStrokeWidth(float maskId) {
-  int paletteIndex = int(clamp(maskId, 0.0, float(${MAX_ID_MASK_PALETTE_ENTRIES - 1})));
-
-  return uStrokeWidths[paletteIndex];
 }
 
 vec4 premultiplyAlpha(vec4 color) {
@@ -351,18 +338,13 @@ void main(void) {
 }
 `;
 
-// A WGSL uniform array needs a 16-byte element stride, while Pixi uploads an f32
-// uniform array tightly packed, so uStrokeWidths is read back as vec4 lanes. That
-// only lines up while the palette entry count stays a multiple of four.
-const ID_MASK_STROKE_WIDTH_LANES = MAX_ID_MASK_PALETTE_ENTRIES / 4;
-
 const idMaskFragmentWgsl = `
 struct MaskUniforms {
   uBorderEnabled: f32,
-  uFillPalette: array<vec4<f32>, ${MAX_ID_MASK_PALETTE_ENTRIES}>,
+  ${idMaskFillPaletteWgslField}
   uMaxStrokeWidth: f32,
-  uStrokePalette: array<vec4<f32>, ${MAX_ID_MASK_PALETTE_ENTRIES}>,
-  uStrokeWidths: array<vec4<f32>, ${ID_MASK_STROKE_WIDTH_LANES}>,
+  ${idMaskStrokePaletteWgslField}
+  ${idMaskStrokeWidthsWgslField}
   uTextureSize: vec2<f32>,
 }
 
@@ -373,25 +355,7 @@ struct MaskUniforms {
 fn sampleMaskId(uv: vec2<f32>) -> f32 {
   return floor(textureSampleLevel(uTexture, uSampler, uv, 0.0).r * 255.0 + 0.5);
 }
-
-fn paletteIndex(maskId: f32) -> i32 {
-  return i32(clamp(maskId, 0.0, ${MAX_ID_MASK_PALETTE_ENTRIES - 1}.0));
-}
-
-fn readFill(maskId: f32) -> vec4<f32> {
-  return maskUniforms.uFillPalette[paletteIndex(maskId)];
-}
-
-fn readStroke(maskId: f32) -> vec4<f32> {
-  return maskUniforms.uStrokePalette[paletteIndex(maskId)];
-}
-
-fn readStrokeWidth(maskId: f32) -> f32 {
-  let index = paletteIndex(maskId);
-
-  return maskUniforms.uStrokeWidths[index / 4][index % 4];
-}
-
+${idMaskPaletteWgsl}
 fn premultiplyAlpha(color: vec4<f32>) -> vec4<f32> {
   return vec4<f32>(color.rgb * color.a, color.a);
 }

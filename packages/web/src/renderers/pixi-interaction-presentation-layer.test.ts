@@ -402,7 +402,7 @@ describe("pixi interaction presentation layer", () => {
       `int radius = int(min(uMaxStrokeWidth, float(${MAX_INTERACTION_STROKE_RADIUS})));`,
     );
     expect(descriptor.gpu.fragment.source).toContain(
-      `let radius = i32(min(interactionMaskUniforms.uMaxStrokeWidth, ${MAX_INTERACTION_STROKE_RADIUS}.0));`,
+      `let radius = i32(min(maskUniforms.uMaxStrokeWidth, ${MAX_INTERACTION_STROKE_RADIUS}.0));`,
     );
 
     for (const source of [
@@ -506,7 +506,7 @@ function uploadedStrokeWidth(options: {
   });
 
   const uniforms = FakeShaderFactory.descriptors.at(-1)!.resources
-    .interactionMaskUniforms as FakeUniformGroup;
+    .maskUniforms as FakeUniformGroup;
 
   return (uniforms.uniforms.uStrokeWidths as Float32Array)[1];
 }

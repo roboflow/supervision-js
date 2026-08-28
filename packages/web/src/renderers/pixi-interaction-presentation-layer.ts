@@ -1,4 +1,12 @@
 import {
+  ID_MASK_STROKE_WIDTH_LANES,
+  idMaskFillPaletteWgslField,
+  idMaskPaletteGlsl,
+  idMaskPaletteWgsl,
+  idMaskStrokePaletteWgslField,
+  idMaskStrokeWidthsWgslField,
+} from "#renderers/mask-palette";
+import {
   tintedMaskVertexGlsl,
   tintedMaskVertexWgsl,
 } from "#renderers/mask-vertex";
@@ -658,8 +666,8 @@ function createInteractionMaskRenderer(options: {
       value: strokePalette,
     },
     uStrokeWidths: {
-      size: MAX_ID_MASK_PALETTE_ENTRIES,
-      type: "f32",
+      size: ID_MASK_STROKE_WIDTH_LANES,
+      type: "vec4<f32>",
       value: strokeWidths,
     },
     uTextureSize: {
@@ -800,7 +808,7 @@ function createInteractionMaskRenderer(options: {
         },
       },
       resources: {
-        interactionMaskUniforms: uniforms,
+        maskUniforms: uniforms,
         uSampler: placeholderSource.style,
         uTexture: placeholderSource,
       },
@@ -873,32 +881,13 @@ in vec2 vUV;
 in vec4 vColor;
 
 uniform sampler2D uTexture;
-uniform vec4 uFillPalette[${MAX_ID_MASK_PALETTE_ENTRIES}];
-uniform vec4 uStrokePalette[${MAX_ID_MASK_PALETTE_ENTRIES}];
-uniform float uStrokeWidths[${MAX_ID_MASK_PALETTE_ENTRIES}];
 uniform vec2 uTextureSize;
 uniform float uMaxStrokeWidth;
-
+${idMaskPaletteGlsl}
 out vec4 finalColor;
 
 float sampleMaskId(vec2 uv) {
   return floor(texture(uTexture, uv).r * 255.0 + 0.5);
-}
-
-int paletteIndex(float maskId) {
-  return int(clamp(maskId, 0.0, float(${MAX_ID_MASK_PALETTE_ENTRIES - 1})));
-}
-
-vec4 readFill(float maskId) {
-  return uFillPalette[paletteIndex(maskId)];
-}
-
-vec4 readStroke(float maskId) {
-  return uStrokePalette[paletteIndex(maskId)];
-}
-
-float readStrokeWidth(float maskId) {
-  return uStrokeWidths[paletteIndex(maskId)];
 }
 
 vec4 premultiplyAlpha(vec4 color) {
@@ -982,46 +971,23 @@ void main(void) {
 }
 `;
 
-// A WGSL uniform array needs a 16-byte element stride, while Pixi uploads an f32
-// uniform array tightly packed, so uStrokeWidths is read back as vec4 lanes. That
-// only lines up while the palette entry count stays a multiple of four.
-const INTERACTION_STROKE_WIDTH_LANES = MAX_ID_MASK_PALETTE_ENTRIES / 4;
-
 const interactionMaskFragmentWgsl = `
 struct InteractionMaskUniforms {
-  uFillPalette: array<vec4<f32>, ${MAX_ID_MASK_PALETTE_ENTRIES}>,
+  ${idMaskFillPaletteWgslField}
   uMaxStrokeWidth: f32,
-  uStrokePalette: array<vec4<f32>, ${MAX_ID_MASK_PALETTE_ENTRIES}>,
-  uStrokeWidths: array<vec4<f32>, ${INTERACTION_STROKE_WIDTH_LANES}>,
+  ${idMaskStrokePaletteWgslField}
+  ${idMaskStrokeWidthsWgslField}
   uTextureSize: vec2<f32>,
 }
 
-@group(2) @binding(0) var<uniform> interactionMaskUniforms: InteractionMaskUniforms;
+@group(2) @binding(0) var<uniform> maskUniforms: InteractionMaskUniforms;
 @group(2) @binding(1) var uTexture: texture_2d<f32>;
 @group(2) @binding(2) var uSampler: sampler;
 
 fn sampleMaskId(uv: vec2<f32>) -> f32 {
   return floor(textureSampleLevel(uTexture, uSampler, uv, 0.0).r * 255.0 + 0.5);
 }
-
-fn paletteIndex(maskId: f32) -> i32 {
-  return i32(clamp(maskId, 0.0, ${MAX_ID_MASK_PALETTE_ENTRIES - 1}.0));
-}
-
-fn readFill(maskId: f32) -> vec4<f32> {
-  return interactionMaskUniforms.uFillPalette[paletteIndex(maskId)];
-}
-
-fn readStroke(maskId: f32) -> vec4<f32> {
-  return interactionMaskUniforms.uStrokePalette[paletteIndex(maskId)];
-}
-
-fn readStrokeWidth(maskId: f32) -> f32 {
-  let index = paletteIndex(maskId);
-
-  return interactionMaskUniforms.uStrokeWidths[index / 4][index % 4];
-}
-
+${idMaskPaletteWgsl}
 fn premultiplyAlpha(color: vec4<f32>) -> vec4<f32> {
   return vec4<f32>(color.rgb * color.a, color.a);
 }
@@ -1035,7 +1001,7 @@ fn differs(left: f32, right: f32) -> bool {
 // The winning candidate is the max-(offsetY, offsetX) passing offset, so the
 // scan runs backwards and exits on the first hit.
 fn findNeighborStrokeId(uv: vec2<f32>, centerId: f32, texel: vec2<f32>) -> f32 {
-  let radius = i32(min(interactionMaskUniforms.uMaxStrokeWidth, ${MAX_INTERACTION_STROKE_RADIUS}.0));
+  let radius = i32(min(maskUniforms.uMaxStrokeWidth, ${MAX_INTERACTION_STROKE_RADIUS}.0));
 
   for (var offsetY = radius; offsetY >= -radius; offsetY -= 1) {
     for (var offsetX = radius; offsetX >= -radius; offsetX -= 1) {
@@ -1074,14 +1040,14 @@ fn mainFragment(
   @location(1) vColor: vec4<f32>,
 ) -> @location(0) vec4<f32> {
   let centerId = sampleMaskId(vUV);
-  let texel = 1.0 / interactionMaskUniforms.uTextureSize;
+  let texel = 1.0 / maskUniforms.uTextureSize;
 
   if (centerId > 0.5) {
     let fill = readFill(centerId);
     let stroke = readStroke(centerId);
 
     if (
-      interactionMaskUniforms.uMaxStrokeWidth > 0.0 &&
+      maskUniforms.uMaxStrokeWidth > 0.0 &&
       readStrokeWidth(centerId) > 0.0 &&
       stroke.a > 0.0 &&
       isBoundary(vUV, centerId, texel)
@@ -1092,7 +1058,7 @@ fn mainFragment(
     return premultiplyAlpha(fill * vColor);
   }
 
-  if (interactionMaskUniforms.uMaxStrokeWidth > 0.0) {
+  if (maskUniforms.uMaxStrokeWidth > 0.0) {
     let strokeId = findNeighborStrokeId(vUV, centerId, texel);
 
     if (strokeId > 0.5) {

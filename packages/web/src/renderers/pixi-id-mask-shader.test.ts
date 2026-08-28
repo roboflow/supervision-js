@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { MAX_ID_MASK_STROKE_WIDTH } from "#render-preparation/mask-frame-compositor";
+import {
+  MAX_ID_MASK_PALETTE_ENTRIES,
+  MAX_ID_MASK_STROKE_WIDTH,
+} from "#render-preparation/mask-frame-compositor";
+import { ID_MASK_STROKE_WIDTH_LANES } from "#renderers/mask-palette";
 import { createPixiIdMaskShaderRenderer } from "#renderers/pixi-id-mask-shader";
 
 type ShaderDescriptor = {
@@ -103,6 +107,48 @@ describe("pixi ID-mask shader", () => {
       expect(source).not.toContain(`offsetY = -${MAX_ID_MASK_STROKE_WIDTH}`);
       expect(source).not.toContain(`offsetX = -${MAX_ID_MASK_STROKE_WIDTH}`);
     }
+  });
+
+  it("reads the stroke widths as four-wide lanes in both programs", () => {
+    vi.stubGlobal("document", {
+      createElement: vi.fn(() => ({
+        getContext: vi.fn(),
+        height: 0,
+        width: 0,
+      })),
+    });
+
+    createPixiIdMaskShaderRenderer({
+      ImageSource: FakeImageSource as never,
+      Mesh: FakeMesh as never,
+      MeshGeometry: FakeMeshGeometry as never,
+      Shader: FakeShaderFactory as never,
+      UniformGroup: FakeUniformGroup as never,
+      mediaHeight: 80,
+      mediaWidth: 120,
+    });
+
+    const descriptor = FakeShaderFactory.descriptors[0]!;
+    const group = descriptor.resources.maskUniforms as FakeUniformGroup;
+    const strokeWidths = group.uniforms.uStrokeWidths as {
+      readonly size: number;
+      readonly type: string;
+      readonly value: Float32Array;
+    };
+
+    expect(descriptor.gl.fragment).toContain(
+      `uniform vec4 uStrokeWidths[${ID_MASK_STROKE_WIDTH_LANES}];`,
+    );
+    expect(descriptor.gpu.fragment.source).toContain(
+      `uStrokeWidths: array<vec4<f32>, ${ID_MASK_STROKE_WIDTH_LANES}>,`,
+    );
+    // The lanes address the same tightly packed floats the compositor writes,
+    // so the upload has to name them as vectors or the two disagree.
+    expect(strokeWidths).toMatchObject({
+      size: ID_MASK_STROKE_WIDTH_LANES,
+      type: "vec4<f32>",
+    });
+    expect(strokeWidths.value).toHaveLength(MAX_ID_MASK_PALETTE_ENTRIES);
   });
 });
 

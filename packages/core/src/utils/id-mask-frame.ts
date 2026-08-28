@@ -1,7 +1,13 @@
 import type { MaskDrawInstruction } from "#types/mask-style";
 import { decodeCompressedRleCounts } from "#utils/detection-frames";
 
-export const MAX_ID_MASK_PALETTE_ENTRIES = 64;
+/**
+ * Palette slots an id raster can name, one of them the background. A GLSL
+ * fragment stage is guaranteed only 224 uniform vectors, and a palette entry
+ * costs 2.25 of them, so this stays a multiple of four and well inside that
+ * budget; past it a frame draws from the RGBA composite instead.
+ */
+export const MAX_ID_MASK_PALETTE_ENTRIES = 80;
 export const MAX_ID_MASK_STROKE_WIDTH = 16;
 
 export interface IdMaskInstruction extends MaskDrawInstruction {

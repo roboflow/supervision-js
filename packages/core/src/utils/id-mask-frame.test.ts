@@ -170,6 +170,44 @@ describe("id mask frame artifacts", () => {
 
     expect(frame).toBeUndefined();
   });
+
+  it("takes the last palette slot and refuses the one past it", () => {
+    const paletteEntry = (detectionIndex: number) => ({
+      alpha: 1,
+      color: 0xffffff,
+      detectionIndex,
+      mask: {
+        counts: encodeCompressedRleCounts([0, 1]),
+        encoding: DetectionMaskEncoding.CompressedRle,
+        height: 1,
+        width: 1,
+      },
+    });
+    // Mask id zero is the background, so the last detection the palette can
+    // name sits one index below the last slot.
+    const lastNamedDetection = MAX_ID_MASK_PALETTE_ENTRIES - 2;
+    const accepted = createIdMaskFrame([paletteEntry(lastNamedDetection)]);
+
+    expect(accepted?.data[0]).toBe(MAX_ID_MASK_PALETTE_ENTRIES - 1);
+    expect(accepted?.fillPalette).toHaveLength(MAX_ID_MASK_PALETTE_ENTRIES * 4);
+    expect(
+      createIdMaskFrame([paletteEntry(lastNamedDetection + 1)]),
+    ).toBeUndefined();
+  });
+
+  it("cooks a frame of 65 detections rather than handing it to the compositor", () => {
+    const frame = createIdMaskFrame(
+      Array.from({ length: 65 }, (_unused, detectionIndex) =>
+        maskInstruction(detectionIndex, 1, 1, () => true),
+      ),
+    );
+
+    expect(frame?.data[0]).toBe(65);
+  });
+
+  it("keeps the palette a multiple of the four-wide stroke lanes the shaders read", () => {
+    expect(MAX_ID_MASK_PALETTE_ENTRIES % 4).toBe(0);
+  });
 });
 
 function maskInstruction(
