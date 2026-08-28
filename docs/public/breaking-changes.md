@@ -5,7 +5,7 @@ summary: Every removal and behavior change an application has to answer for when
 
 # Breaking Changes
 
-This covers the browser package `supervision` at `0.2.0`, against the release
+This covers the browser package `supervision` at `0.2.0-next.0`, against the release
 before it.
 
 The list is derived rather than remembered. The public surface is pinned as

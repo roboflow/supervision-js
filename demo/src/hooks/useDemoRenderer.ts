@@ -264,6 +264,21 @@ export function useDemoRenderer(
   const presentationSettingsRef = useRef<DemoPresentationSettings>(
     initialPresentationSettings,
   );
+  /**
+   * The presentation the renderer is actually showing. A focused playground
+   * composes renderers over the settings, so the session cannot answer
+   * questions about what draws by reading the settings alone.
+   */
+  const presentationRef = useRef<MediaRendererPresentation | null>(null);
+  const applyPresentation = useCallback(
+    (settings: DemoPresentationSettings) => {
+      const base = createDemoPresentation(settings);
+      const presentation = presentationTransform?.(base) ?? base;
+      presentationRef.current = presentation;
+      return presentation;
+    },
+    [presentationTransform],
+  );
   const [rendererState, setRendererState] = useState<MediaRendererState | null>(
     null,
   );
@@ -452,6 +467,9 @@ export function useDemoRenderer(
 
     resetRendererView(container, sourceMode);
 
+    const presentation = applyPresentation(presentationSettingsRef.current);
+    const readPresentation = () => presentationRef.current ?? presentation;
+
     void (async () => {
       try {
         if (sourceMode === DemoSourceMode.Fixture) {
@@ -472,9 +490,8 @@ export function useDemoRenderer(
             onSessionConfiguration: setSessionConfiguration,
             onSessionState: sessionStatePublisher.publish,
             onSourceState: setSourceState,
-            presentationSettings: presentationSettingsRef.current,
-            presentationTransform,
-            readPresentationSettings: () => presentationSettingsRef.current,
+            presentation,
+            readPresentation,
             renderQuality,
             pipeline,
             sessionOptions,
@@ -500,7 +517,7 @@ export function useDemoRenderer(
             onSessionState: sessionStatePublisher.publish,
             onSourceState: setSourceState,
             onUploadState: setUploadInferenceState,
-            presentationSettings: presentationSettingsRef.current,
+            presentation,
             pipeline,
             renderQuality,
             sessionOptions,
@@ -749,8 +766,9 @@ export function useDemoRenderer(
           : undefined,
       );
 
-      const drewAnnotations = demoPresentationDrawsAnnotations(
-        presentationSettingsRef.current,
+      const drewAnnotations = Boolean(
+        presentationRef.current &&
+        demoPresentationDrawsAnnotations(presentationRef.current),
       );
 
       presentationSettingsRef.current = constrainedSettings;
@@ -761,18 +779,13 @@ export function useDemoRenderer(
         return;
       }
 
-      const presentation = createDemoPresentation(constrainedSettings);
-      renderer.setPresentation(
-        presentationTransform?.(presentation) ?? presentation,
-      );
+      const presentation = applyPresentation(constrainedSettings);
+      renderer.setPresentation(presentation);
 
       // Detections stop loading while no layer draws them, and a paused
       // playhead never asks again on its own, so the first layer switched back
       // on would otherwise annotate nothing until playback resumed.
-      if (
-        !drewAnnotations &&
-        demoPresentationDrawsAnnotations(constrainedSettings)
-      ) {
+      if (!drewAnnotations && demoPresentationDrawsAnnotations(presentation)) {
         void renderer.refresh();
       }
 
@@ -780,7 +793,7 @@ export function useDemoRenderer(
     },
     [
       activeFixture.presentationAvailability,
-      presentationTransform,
+      applyPresentation,
       sourceMode,
       syncRendererState,
     ],
@@ -809,14 +822,11 @@ export function useDemoRenderer(
   const refreshPresentation = useCallback(() => {
     const renderer = rendererRef.current;
     if (!renderer) return;
-    const presentation = createDemoPresentation(
-      presentationSettingsRef.current,
-    );
     renderer.setPresentation(
-      presentationTransform?.(presentation) ?? presentation,
+      applyPresentation(presentationSettingsRef.current),
     );
     syncRendererState(renderer);
-  }, [presentationTransform, syncRendererState]);
+  }, [applyPresentation, syncRendererState]);
 
   const setRenderQualityLive = useCallback(
     (quality: DemoRenderQuality) => {

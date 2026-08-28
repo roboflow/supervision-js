@@ -7,7 +7,8 @@ summary: What the 0.2.0 browser release lets an application do, what changed und
 
 ## 0.2.0
 
-The browser package `supervision` is at `0.2.0`. This release replaces the
+The browser package `supervision` is at `0.2.0-next.0`, a prerelease on the `next`
+tag. This release replaces the
 video path.
 
 ### Play A Video And Land On The Frame You Asked For
@@ -86,7 +87,7 @@ const defaults = resolveMediaSessionDefaults({ mode, detections });
 
 ### The Engine Installs Separately
 
-The video engine ships as `supervision-js-web-video-engine` at `0.1.0`, versioned
+The video engine ships as `supervision-js-web-video-engine` at `0.1.0-next.0`, versioned
 independently. `supervision` declares it as an optional peer and loads it
 through a dynamic import, so installing `supervision` does not install it:
 

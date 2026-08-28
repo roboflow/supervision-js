@@ -26,7 +26,6 @@ import {
 } from "../media/upload-media";
 import { PipelineNodeId } from "../pipeline/pipeline-descriptor";
 import type { PipelineRecorder } from "../pipeline/pipeline-recorder";
-import { createDemoPresentation } from "../presentation/demo-presentation";
 import { readDemoDisplayBox } from "./decode-resolution";
 import { createDemoRendererOptions } from "./demo-session-renderer";
 import { UPLOAD_DETECTION_CHUNK_SECONDS } from "./demo-session-config";
@@ -91,7 +90,7 @@ export async function createUploadSession(
     status: "ready | waiting for SAM3 frames",
   });
 
-  const presentation = createDemoPresentation(options.presentationSettings);
+  const presentation = options.presentation;
   const baseDetections: MediaSessionDetectionOptions = {
     appendable: {
       chunkDurationSeconds: UPLOAD_DETECTION_CHUNK_SECONDS,

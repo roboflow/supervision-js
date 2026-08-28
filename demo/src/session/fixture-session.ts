@@ -6,7 +6,6 @@ import {
   type MediaSessionDetectionOptions,
   type MediaSessionMedia,
   type MediaSessionNormalizationOptions,
-  type MediaRendererPresentation,
 } from "supervision";
 import type {
   DemoFixtureDefinition,
@@ -22,10 +21,7 @@ import {
 } from "../fixtures/demo-fixtures";
 import { PipelineNodeId } from "../pipeline/pipeline-descriptor";
 import type { PipelineRecorder } from "../pipeline/pipeline-recorder";
-import {
-  createDemoPresentation,
-  demoPresentationDrawsAnnotations,
-} from "../presentation/demo-presentation";
+import { demoPresentationDrawsAnnotations } from "../presentation/demo-presentation";
 import { readDemoDisplayBox } from "./decode-resolution";
 import { readDemoSourceResidency } from "./source-residency";
 import { createDemoRendererOptions } from "./demo-session-renderer";
@@ -62,9 +58,6 @@ export async function createFixtureSession(
     readonly definition: DemoFixtureDefinition;
     readonly fixtureFrameTransform?: DemoFixtureFrameTransform;
     readonly fixtureDetectionSourceTransform?: DemoFixtureDetectionSourceTransform;
-    readonly presentationTransform?: (
-      presentation: MediaRendererPresentation,
-    ) => MediaRendererPresentation;
   } & DemoSessionCallbacks,
 ): Promise<MediaSession> {
   const manifest = await loadDemoFixtureDetectionManifest(options.definition);
@@ -93,19 +86,15 @@ export async function createFixtureSession(
     status: options.definition.mediaReadyStatusLabel,
   });
 
-  const basePresentation = createDemoPresentation(options.presentationSettings);
-  const presentation =
-    options.presentationTransform?.(basePresentation) ?? basePresentation;
-  const readPresentationSettings =
-    options.readPresentationSettings ?? (() => options.presentationSettings);
+  const presentation = options.presentation;
+  const readPresentation = options.readPresentation ?? (() => presentation);
   const baseDetections: MediaSessionDetectionOptions = {
     buffer: {
       // Fixture detections are chunk files fetched over the same link the
-      // video is read over, and a workbench with every layer switched off
+      // video is read over, and a workbench whose presentation draws nothing
       // draws none of them. The window it already holds stays loaded, so
       // switching a layer back on annotates the frame on screen at once.
-      enabled: () =>
-        demoPresentationDrawsAnnotations(readPresentationSettings()),
+      enabled: () => demoPresentationDrawsAnnotations(readPresentation()),
     },
     source: detectionSource.detectionSource,
     sync: {

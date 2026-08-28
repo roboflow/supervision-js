@@ -15,6 +15,7 @@ import {
   type RegionPlaygroundMode as RegionPlaygroundModeValue,
   type RegionPlaygroundSettings,
 } from "../docs-region-annotation-renderer";
+import { docsRegionPlaygroundPresentationSettings } from "../docs-annotation-renderer";
 import { useDemoRenderer } from "../hooks/useDemoRenderer";
 import { RendererViewport } from "./RendererViewport";
 import { useViewportOverlay } from "../hooks/useViewportOverlay";
@@ -42,15 +43,7 @@ export function DocsRegionAnnotationRendererPlayground() {
   );
   const demo = useDemoRenderer({
     initialFixtureId: "basketball_regions",
-    initialPresentationSettings: {
-      boxesEnabled: false,
-      focusEnabled: false,
-      keypointsEnabled: false,
-      labelsEnabled: false,
-      masksEnabled: false,
-      polygonsEnabled: false,
-      polylinesEnabled: false,
-    },
+    initialPresentationSettings: docsRegionPlaygroundPresentationSettings,
     presentationTransform,
   });
   const isPlaying =

@@ -14,6 +14,7 @@ import {
   type RegionEffectsPlaygroundSettings,
   type RegionEffectsPlaygroundTarget as RegionEffectsPlaygroundTargetValue,
 } from "../docs-region-effects";
+import { docsRegionPlaygroundPresentationSettings } from "../docs-annotation-renderer";
 import { useDemoRenderer } from "../hooks/useDemoRenderer";
 import { useViewportOverlay } from "../hooks/useViewportOverlay";
 import { RendererViewport } from "./RendererViewport";
@@ -33,15 +34,7 @@ export function DocsRegionEffectsPlayground() {
   );
   const demo = useDemoRenderer({
     initialFixtureId: "basketball_sam3",
-    initialPresentationSettings: {
-      boxesEnabled: false,
-      focusEnabled: false,
-      keypointsEnabled: false,
-      labelsEnabled: false,
-      masksEnabled: false,
-      polygonsEnabled: false,
-      polylinesEnabled: false,
-    },
+    initialPresentationSettings: docsRegionPlaygroundPresentationSettings,
     presentationTransform,
   });
   const isPlaying =

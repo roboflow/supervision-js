@@ -60,7 +60,8 @@ session.setPresentation({
 npm install supervision
 ```
 
-The next browser release is `0.2.0`, prepared for npm's default `latest` tag.
+The next browser release is published as `0.2.0-next.0` on npm's `next` tag first, so an
+application can try the video engine before it reaches `latest`.
 Its package includes the private core dependency. Consumers import
 only the public browser entrypoints:
 

@@ -20,6 +20,15 @@ import {
   defaultDemoPresentationSettings,
   demoPresentationDrawsAnnotations,
 } from "./demo-presentation";
+import { docsRegionPlaygroundPresentationSettings } from "../docs-annotation-renderer";
+import {
+  createRegionPlaygroundRenderers,
+  initialRegionPlaygroundSettings,
+} from "../docs-region-annotation-renderer";
+import {
+  createRegionEffectsPlaygroundPresentation,
+  initialRegionEffectsPlaygroundSettings,
+} from "../docs-region-effects";
 
 const detection: Detection = {
   className: "horse",
@@ -1015,30 +1024,70 @@ describe("demo presentation", () => {
 });
 
 describe("demo annotation demand", () => {
+  const withoutLayers = {
+    ...defaultDemoPresentationSettings,
+    boxesEnabled: false,
+    boxCornersEnabled: false,
+    ellipsesEnabled: false,
+    focusEnabled: false,
+    keypointsEnabled: false,
+    labelsEnabled: false,
+    maskHaloEnabled: false,
+    masksEnabled: false,
+    markersEnabled: false,
+    polygonsEnabled: false,
+    polylinesEnabled: false,
+  };
+
   it("reports no demand only once every layer is switched off", () => {
     expect(
-      demoPresentationDrawsAnnotations(defaultDemoPresentationSettings),
+      demoPresentationDrawsAnnotations(
+        createDemoPresentation(defaultDemoPresentationSettings),
+      ),
     ).toBe(true);
+    expect(
+      demoPresentationDrawsAnnotations(createDemoPresentation(withoutLayers)),
+    ).toBe(false);
 
-    const withoutLayers = {
-      ...defaultDemoPresentationSettings,
-      boxesEnabled: false,
-      boxCornersEnabled: false,
-      ellipsesEnabled: false,
-      focusEnabled: false,
-      keypointsEnabled: false,
-      labelsEnabled: false,
-      masksEnabled: false,
-      markersEnabled: false,
-      polygonsEnabled: false,
-      polylinesEnabled: false,
-    };
+    for (const layer of [
+      "polylinesEnabled",
+      "maskHaloEnabled",
+      "focusEnabled",
+    ] as const) {
+      expect(
+        demoPresentationDrawsAnnotations(
+          createDemoPresentation({ ...withoutLayers, [layer]: true }),
+        ),
+      ).toBe(true);
+    }
+  });
 
-    expect(demoPresentationDrawsAnnotations(withoutLayers)).toBe(false);
+  it("reports demand for renderers a docs playground composed itself", () => {
+    const base = createDemoPresentation({
+      ...withoutLayers,
+      ...docsRegionPlaygroundPresentationSettings,
+    });
+
+    expect(demoPresentationDrawsAnnotations(base)).toBe(false);
+    expect(
+      demoPresentationDrawsAnnotations(
+        createRegionEffectsPlaygroundPresentation(
+          initialRegionEffectsPlaygroundSettings,
+          base,
+        ),
+      ),
+    ).toBe(true);
     expect(
       demoPresentationDrawsAnnotations({
-        ...withoutLayers,
-        polylinesEnabled: true,
+        ...base,
+        renderers: createRegionPlaygroundRenderers(
+          initialRegionPlaygroundSettings,
+          {
+            fireGif: "fire.gif",
+            whiteTeamBadge: "white-team-badge.svg",
+            yellowTeamBadge: "yellow-team-badge.svg",
+          },
+        ),
       }),
     ).toBe(true);
   });
