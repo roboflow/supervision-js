@@ -11,9 +11,11 @@ import type { DiagnosticsSnapshot } from "supervision-js-video-engine";
  * even though every frame handed out was a full decode.
  *
  * Every lane and both markers derive from one snapshot, so they cannot disagree
- * about where "now" is. Only the playhead moves at display cadence: it
- * extrapolates the snapshot clock while playing and mutates the line through a
- * ref, so the SVG never re-renders per frame.
+ * about where "now" is. Neither marker is in the SVG: writing anything on a node
+ * inside an inline SVG re-marks the whole subtree, and both markers move
+ * constantly, so each is an HTML element over the chart driven by a custom
+ * property the compositor can take. That leaves the chart holding only what
+ * stands still, which is what lets it sit behind an equality gate.
  */
 
 const VIEW_WIDTH = 1000;
@@ -28,6 +30,8 @@ const LANE_EXACT = 1;
 const LANE_PREVIEW = 2;
 const LANE_PREFETCH = 3;
 const LANE_KEYFRAME = 4;
+
+const MARKER_TOP_PCT = ((AXIS_HEIGHT - 2) / VIEW_HEIGHT) * 100;
 
 const MILLISECONDS_PER_SECOND = 1000;
 
@@ -50,224 +54,303 @@ interface GopGap {
   readonly startMs: number;
 }
 
-export const EngineDiagnosticsTimeline = memo(
-  function EngineDiagnosticsTimeline({
-    snapshot,
-  }: {
-    readonly snapshot: DiagnosticsSnapshot;
-  }) {
-    const playheadRef = useRef<HTMLSpanElement | null>(null);
-    const clockRef = useRef<{
-      atMs: number;
-      playheadMs: number;
-      playing: boolean;
-    } | null>(null);
-    const durationMs =
-      (snapshot.track?.durationS ?? 0) * MILLISECONDS_PER_SECOND;
+interface ChartProps {
+  readonly durationMs: number;
+  readonly scheduler: DiagnosticsSnapshot["scheduler"];
+}
 
-    useEffect(() => {
-      if (snapshot.playheadMs === null) {
-        return;
-      }
+export function EngineDiagnosticsTimeline({
+  snapshot,
+}: {
+  readonly snapshot: DiagnosticsSnapshot;
+}) {
+  const playheadRef = useRef<HTMLSpanElement | null>(null);
+  const screenRef = useRef<HTMLSpanElement | null>(null);
+  const clockRef = useRef<{
+    atMs: number;
+    playheadMs: number;
+    playing: boolean;
+  } | null>(null);
+  const durationMs = (snapshot.track?.durationS ?? 0) * MILLISECONDS_PER_SECOND;
+  const screenMs = snapshot.screen?.mediaTimeMs ?? null;
 
-      clockRef.current = {
-        atMs: performance.now(),
-        playheadMs: snapshot.playheadMs,
-        playing: snapshot.status === "PLAYING",
-      };
-    }, [snapshot]);
-
-    useEffect(() => {
-      if (durationMs <= 0) {
-        return undefined;
-      }
-
-      let frame = 0;
-      let drawnX: string | null = null;
-      const tick = () => {
-        const line = playheadRef.current;
-        const clock = clockRef.current;
-
-        if (line && clock) {
-          const elapsedMs = clock.playing ? performance.now() - clock.atMs : 0;
-          // Writing anything on a node inside the SVG re-marks the whole
-          // subtree, transforms included, so the marker is an HTML element over
-          // the chart and moves on a custom property the compositor can take.
-          const x = `${clamp01((clock.playheadMs + elapsedMs) / durationMs) * 100}%`;
-
-          if (x !== drawnX) {
-            drawnX = x;
-            line.style.setProperty("--engine-timeline-playhead", x);
-          }
-        }
-
-        frame = requestAnimationFrame(tick);
-      };
-
-      frame = requestAnimationFrame(tick);
-
-      return () => {
-        cancelAnimationFrame(frame);
-      };
-    }, [durationMs]);
-
-    if (durationMs <= 0) {
-      return <p className="engine-timeline__unavailable">timeline n/a</p>;
+  useEffect(() => {
+    if (snapshot.playheadMs === null) {
+      return;
     }
 
-    const toX = (ms: number) => clamp01(ms / durationMs) * VIEW_WIDTH;
-    const scheduler = snapshot.scheduler;
-    // A cached frame answers a scrub anywhere within its tolerance, on BOTH
-    // sides, so its mark is the tolerance across and centred on the frame.
-    const spanWidth = (toleranceMs: number) =>
-      Math.max(2, ((2 * toleranceMs) / durationMs) * VIEW_WIDTH);
-    const exactHalfMs = scheduler?.exactToleranceMs ?? 0;
-    const previewHalfMs = scheduler?.previewToleranceMs ?? 0;
-    const exactWidth = scheduler ? spanWidth(exactHalfMs) : 2;
-    const previewWidth = scheduler ? spanWidth(previewHalfMs) : 2;
-    const keyframesMs = scheduler?.keyframesMs ?? [];
-    // Until enough keyframes are known, the gaps between the few discovered ones
-    // are an artefact of the walk, and every one of them paints as a long GOP.
-    const gopGaps =
-      keyframesMs.length >= GOP_MIN_SAMPLE
-        ? buildGopGaps(keyframesMs, durationMs)
-        : [];
-    // In frames presentation the engine paints nothing: this marker is the last
-    // frame it handed to the host, and whether the host composited it is a
-    // question only the host can answer.
-    const screenLabel =
-      snapshot.presentation === "frames" ? "handed out" : "on screen";
+    clockRef.current = {
+      atMs: performance.now(),
+      playheadMs: snapshot.playheadMs,
+      playing: snapshot.status === "PLAYING",
+    };
+  }, [snapshot]);
 
-    return (
-      <div className="engine-timeline">
-        <div className="engine-timeline__stage">
-          <svg
-            aria-label="Video engine cache, prefetch and GOP heat timeline"
-            className="engine-timeline__svg"
-            preserveAspectRatio="none"
-            role="img"
-            viewBox={`0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}`}
-          >
-            {Array.from({ length: LANE_COUNT }, (_, lane) => (
-              <rect
-                className="engine-timeline__lane"
-                height={LANE_HEIGHT}
-                key={`lane-${lane}`}
-                width={VIEW_WIDTH}
-                x={0}
-                y={laneY(lane)}
-              />
-            ))}
+  useEffect(() => {
+    const track = screenRef.current;
 
-            {gopGaps.map((gap) => (
-              <rect
-                className="engine-timeline__heat"
-                height={LANE_HEIGHT}
-                key={`heat-${gap.startMs}`}
-                style={
-                  { "--engine-heat": heatColor(gap.lengthSeconds) } as HeatStyle
-                }
-                width={Math.max(1, toX(gap.endMs) - toX(gap.startMs))}
-                x={toX(gap.startMs)}
-                y={laneY(LANE_HEAT)}
-              />
-            ))}
+    if (!track || screenMs === null || durationMs <= 0) {
+      return;
+    }
 
-            {scheduler?.cache.exactTimestampsMs.map((ms) => (
-              <rect
-                className="engine-timeline__exact"
-                height={LANE_HEIGHT}
-                key={`exact-${ms}`}
-                width={exactWidth}
-                x={toX(ms - exactHalfMs)}
-                y={laneY(LANE_EXACT)}
-              />
-            ))}
-
-            {scheduler?.cache.previewTimestampsMs.map((ms) => (
-              <rect
-                className="engine-timeline__preview"
-                height={LANE_HEIGHT}
-                key={`preview-${ms}`}
-                width={previewWidth}
-                x={toX(ms - previewHalfMs)}
-                y={laneY(LANE_PREVIEW)}
-              />
-            ))}
-
-            {/* Where the next sweep WOULD decode: one tick per planned target,
-            recomputed on every broadcast, so a hole in the plan shows as a gap
-            rather than hiding under a solid band. */}
-            {scheduler?.prefetch?.targetsMs.map((ms) => (
-              <rect
-                className="engine-timeline__prefetch"
-                height={LANE_HEIGHT}
-                key={`prefetch-${ms}`}
-                width={2}
-                x={toX(ms)}
-                y={laneY(LANE_PREFETCH)}
-              />
-            ))}
-
-            {keyframesMs.map((ms) => (
-              <line
-                className="engine-timeline__keyframe"
-                key={`keyframe-${ms}`}
-                x1={toX(ms)}
-                x2={toX(ms)}
-                y1={laneY(LANE_KEYFRAME)}
-                y2={laneY(LANE_KEYFRAME) + LANE_HEIGHT}
-              />
-            ))}
-
-            {AXIS_FRACTIONS.map((fraction) => (
-              <text
-                className="engine-timeline__axis"
-                key={`axis-${fraction}`}
-                textAnchor={
-                  fraction === 0 ? "start" : fraction === 1 ? "end" : "middle"
-                }
-                x={fraction * VIEW_WIDTH}
-                y={12}
-              >
-                {`${((fraction * durationMs) / MILLISECONDS_PER_SECOND).toFixed(0)}s`}
-              </text>
-            ))}
-
-            {/* The frame the engine last put out, coloured by its quality; its
-            distance from the playhead is the live landing error. */}
-            {snapshot.screen ? (
-              <line
-                className={`engine-timeline__screen engine-timeline__screen--${snapshot.screen.quality}`}
-                x1={toX(snapshot.screen.mediaTimeMs)}
-                x2={toX(snapshot.screen.mediaTimeMs)}
-                y1={AXIS_HEIGHT - 2}
-                y2={VIEW_HEIGHT}
-              />
-            ) : null}
-          </svg>
-          <span className="engine-timeline__playhead-track" ref={playheadRef}>
-            <span
-              className="engine-timeline__playhead"
-              style={{ top: `${((AXIS_HEIGHT - 2) / VIEW_HEIGHT) * 100}%` }}
-            />
-          </span>
-        </div>
-        <div className="engine-timeline__legend">
-          <LegendSwatch modifier="short-gop" label="short GOP" />
-          <LegendSwatch modifier="long-gop" label="long GOP" />
-          <LegendSwatch modifier="exact" label="exact cache" />
-          <LegendSwatch modifier="preview" label="preview cache" />
-          <LegendSwatch modifier="prefetch" label="next sweep (planned)" />
-          <LegendSwatch modifier="keyframe" label="keyframe (discovered)" />
-          <LegendSwatch modifier="playhead" label="playhead (engine clock)" />
-          <LegendSwatch modifier="crisp" label={`${screenLabel} (crisp)`} />
-          <LegendSwatch modifier="coarse" label={`${screenLabel} (coarse)`} />
-        </div>
-      </div>
+    track.style.setProperty(
+      "--engine-timeline-screen",
+      `${clamp01(screenMs / durationMs) * 100}%`,
     );
-  },
-);
+  }, [durationMs, screenMs]);
+
+  useEffect(() => {
+    if (durationMs <= 0) {
+      return undefined;
+    }
+
+    let frame = 0;
+    let drawnX: string | null = null;
+    const tick = () => {
+      const line = playheadRef.current;
+      const clock = clockRef.current;
+
+      if (line && clock) {
+        const elapsedMs = clock.playing ? performance.now() - clock.atMs : 0;
+        const x = `${clamp01((clock.playheadMs + elapsedMs) / durationMs) * 100}%`;
+
+        if (x !== drawnX) {
+          drawnX = x;
+          line.style.setProperty("--engine-timeline-playhead", x);
+        }
+      }
+
+      frame = requestAnimationFrame(tick);
+    };
+
+    frame = requestAnimationFrame(tick);
+
+    return () => {
+      cancelAnimationFrame(frame);
+    };
+  }, [durationMs]);
+
+  if (durationMs <= 0) {
+    return <p className="engine-timeline__unavailable">timeline n/a</p>;
+  }
+
+  // In frames presentation the engine paints nothing: this marker is the last
+  // frame it handed to the host, and whether the host composited it is a
+  // question only the host can answer.
+  const screenLabel =
+    snapshot.presentation === "frames" ? "handed out" : "on screen";
+
+  return (
+    <div className="engine-timeline">
+      <div className="engine-timeline__stage">
+        <TimelineChart durationMs={durationMs} scheduler={snapshot.scheduler} />
+        <span className="engine-timeline__playhead-track" ref={playheadRef}>
+          <span
+            className="engine-timeline__playhead"
+            style={{ top: `${MARKER_TOP_PCT}%` }}
+          />
+        </span>
+        {/* The frame the engine last put out, coloured by its quality; its
+        distance from the playhead is the live landing error. */}
+        <span className="engine-timeline__screen-track" ref={screenRef}>
+          {snapshot.screen ? (
+            <span
+              className={`engine-timeline__screen engine-timeline__screen--${snapshot.screen.quality}`}
+              style={{ top: `${MARKER_TOP_PCT}%` }}
+            />
+          ) : null}
+        </span>
+      </div>
+      <TimelineLegend screenLabel={screenLabel} />
+    </div>
+  );
+}
+
+/**
+ * The lanes, and nothing that moves. The tap hands out a fresh object every
+ * broadcast, so the gate compares the values drawn: the lanes change on decode
+ * and cache activity, not on the clock.
+ */
+const TimelineChart = memo(function TimelineChart({
+  durationMs,
+  scheduler,
+}: ChartProps) {
+  const toX = (ms: number) => clamp01(ms / durationMs) * VIEW_WIDTH;
+  // A cached frame answers a scrub anywhere within its tolerance, on BOTH
+  // sides, so its mark is the tolerance across and centred on the frame.
+  const spanWidth = (toleranceMs: number) =>
+    Math.max(2, ((2 * toleranceMs) / durationMs) * VIEW_WIDTH);
+  const exactHalfMs = scheduler?.exactToleranceMs ?? 0;
+  const previewHalfMs = scheduler?.previewToleranceMs ?? 0;
+  const exactWidth = scheduler ? spanWidth(exactHalfMs) : 2;
+  const previewWidth = scheduler ? spanWidth(previewHalfMs) : 2;
+  const keyframesMs = scheduler?.keyframesMs ?? [];
+  // Until enough keyframes are known, the gaps between the few discovered ones
+  // are an artefact of the walk, and every one of them paints as a long GOP.
+  const gopGaps =
+    keyframesMs.length >= GOP_MIN_SAMPLE
+      ? buildGopGaps(keyframesMs, durationMs)
+      : [];
+
+  return (
+    <svg
+      aria-label="Video engine cache, prefetch and GOP heat timeline"
+      className="engine-timeline__svg"
+      preserveAspectRatio="none"
+      role="img"
+      viewBox={`0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}`}
+    >
+      {Array.from({ length: LANE_COUNT }, (_, lane) => (
+        <rect
+          className="engine-timeline__lane"
+          height={LANE_HEIGHT}
+          key={`lane-${lane}`}
+          width={VIEW_WIDTH}
+          x={0}
+          y={laneY(lane)}
+        />
+      ))}
+
+      {gopGaps.map((gap) => (
+        <rect
+          className="engine-timeline__heat"
+          height={LANE_HEIGHT}
+          key={`heat-${gap.startMs}`}
+          style={{ "--engine-heat": heatColor(gap.lengthSeconds) } as HeatStyle}
+          width={Math.max(1, toX(gap.endMs) - toX(gap.startMs))}
+          x={toX(gap.startMs)}
+          y={laneY(LANE_HEAT)}
+        />
+      ))}
+
+      {scheduler?.cache.exactTimestampsMs.map((ms) => (
+        <rect
+          className="engine-timeline__exact"
+          height={LANE_HEIGHT}
+          key={`exact-${ms}`}
+          width={exactWidth}
+          x={toX(ms - exactHalfMs)}
+          y={laneY(LANE_EXACT)}
+        />
+      ))}
+
+      {scheduler?.cache.previewTimestampsMs.map((ms) => (
+        <rect
+          className="engine-timeline__preview"
+          height={LANE_HEIGHT}
+          key={`preview-${ms}`}
+          width={previewWidth}
+          x={toX(ms - previewHalfMs)}
+          y={laneY(LANE_PREVIEW)}
+        />
+      ))}
+
+      {/* Where the next sweep WOULD decode: one tick per planned target, so a
+      hole in the plan shows as a gap rather than hiding under a solid band. */}
+      {scheduler?.prefetch?.targetsMs.map((ms) => (
+        <rect
+          className="engine-timeline__prefetch"
+          height={LANE_HEIGHT}
+          key={`prefetch-${ms}`}
+          width={2}
+          x={toX(ms)}
+          y={laneY(LANE_PREFETCH)}
+        />
+      ))}
+
+      {keyframesMs.map((ms) => (
+        <line
+          className="engine-timeline__keyframe"
+          key={`keyframe-${ms}`}
+          x1={toX(ms)}
+          x2={toX(ms)}
+          y1={laneY(LANE_KEYFRAME)}
+          y2={laneY(LANE_KEYFRAME) + LANE_HEIGHT}
+        />
+      ))}
+
+      {AXIS_FRACTIONS.map((fraction) => (
+        <text
+          className="engine-timeline__axis"
+          key={`axis-${fraction}`}
+          textAnchor={
+            fraction === 0 ? "start" : fraction === 1 ? "end" : "middle"
+          }
+          x={fraction * VIEW_WIDTH}
+          y={12}
+        >
+          {`${((fraction * durationMs) / MILLISECONDS_PER_SECOND).toFixed(0)}s`}
+        </text>
+      ))}
+    </svg>
+  );
+}, chartUnchanged);
+
+export function chartUnchanged(previous: ChartProps, next: ChartProps) {
+  if (previous.durationMs !== next.durationMs) {
+    return false;
+  }
+
+  const before = previous.scheduler;
+  const after = next.scheduler;
+
+  if (before === null || after === null) {
+    return before === after;
+  }
+
+  return (
+    before.exactToleranceMs === after.exactToleranceMs &&
+    before.previewToleranceMs === after.previewToleranceMs &&
+    sameSeries(before.keyframesMs, after.keyframesMs) &&
+    sameSeries(before.cache.exactTimestampsMs, after.cache.exactTimestampsMs) &&
+    sameSeries(
+      before.cache.previewTimestampsMs,
+      after.cache.previewTimestampsMs,
+    ) &&
+    sameSeries(before.prefetch?.targetsMs, after.prefetch?.targetsMs)
+  );
+}
+
+function sameSeries(
+  before: readonly number[] | undefined,
+  after: readonly number[] | undefined,
+) {
+  if (before === after) {
+    return true;
+  }
+
+  if (!before || !after || before.length !== after.length) {
+    return false;
+  }
+
+  for (let index = 0; index < before.length; index += 1) {
+    if (before[index] !== after[index]) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+const TimelineLegend = memo(function TimelineLegend({
+  screenLabel,
+}: {
+  readonly screenLabel: string;
+}) {
+  return (
+    <div className="engine-timeline__legend">
+      <LegendSwatch modifier="short-gop" label="short GOP" />
+      <LegendSwatch modifier="long-gop" label="long GOP" />
+      <LegendSwatch modifier="exact" label="exact cache" />
+      <LegendSwatch modifier="preview" label="preview cache" />
+      <LegendSwatch modifier="prefetch" label="next sweep (planned)" />
+      <LegendSwatch modifier="keyframe" label="keyframe (discovered)" />
+      <LegendSwatch modifier="playhead" label="playhead (engine clock)" />
+      <LegendSwatch modifier="crisp" label={`${screenLabel} (crisp)`} />
+      <LegendSwatch modifier="coarse" label={`${screenLabel} (coarse)`} />
+    </div>
+  );
+});
 
 function LegendSwatch({
   label,
