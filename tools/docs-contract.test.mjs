@@ -185,8 +185,12 @@ test("every playback-gate surface states the default the code ships", async () =
     ? /on\s+by\s+default|holds[\s\S]{0,120}?by\s+default/i
     : /off\s+by\s+default|off\s+unless|the gate off, which is the default/i;
   const namesThePulledPath = /pulls? (?:decoded )?samples|pulling samples/i;
+  /* A symbol name does not count. Naming the one implementation that presents
+   * its own frames satisfied this check while saying nothing about the contract,
+   * which is how an engine symbol came to sit in a core type that cannot even
+   * resolve it. */
   const namesTheExemptSource =
-    /presents? its own frames|push-presented|presented-frame channel|VideoEngineMediaSource|VideoEngineMediaRendererSource/i;
+    /presents? its own frames|push-presented|presented-frame channel/i;
   // A no-op claim is honest when it says which sources it is about and false
   // when it stands alone, so each claim is judged against its own sentence
   // rather than against the file.
