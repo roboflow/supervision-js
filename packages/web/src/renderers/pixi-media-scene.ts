@@ -2075,6 +2075,7 @@ export async function createPixiMediaScene(
       drawFocusWithNothingToCut(
         mediaTime,
         maskLayer?.getDrawnState().drawnFrameTime ?? null,
+        true,
       );
       return;
     }
@@ -2102,11 +2103,13 @@ export async function createPixiMediaScene(
   function drawFocusWithNothingToCut(
     mediaTime: number,
     heldMaskFrameTime: number | null,
+    isMaskArtifactOwed = false,
   ) {
     focusLayer?.drawFrame({
       frame: undefined,
       heldMaskFrameTime,
       hoveredPick: null,
+      isMaskArtifactOwed,
       mediaTime,
       selectedPick: null,
     });

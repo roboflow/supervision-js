@@ -131,6 +131,7 @@ export interface PixiFocusLayerFrameContext {
   readonly heldMaskFrameTime?: number | null;
   readonly hoveredPick: DetectionPickResult | null;
   readonly idMaskArtifact?: PixiFocusMaskArtifact | null;
+  readonly isMaskArtifactOwed?: boolean;
   readonly mediaTime: number;
   readonly selectedPick: DetectionPickResult | null;
   readonly viewportScale?: number;
@@ -185,6 +186,7 @@ export function createPixiFocusLayer(options: {
   let cutoutMediaTime: number | null = null;
   let cutoutFrameTime: number | null = null;
   let drawnOverlayWithoutCutout: FocusFill | null = null;
+  let isDrawnFocusCleared = false;
   let isHoldingOverlay = false;
   let holdStartedAtMs: number | null = null;
   // A frame can fall back to a composited RGBA texture when its colored ID-mask
@@ -245,7 +247,11 @@ export function createPixiFocusLayer(options: {
       }
 
       if (!context.frame) {
-        holdOverlay(context.mediaTime, context.heldMaskFrameTime ?? null);
+        holdOverlay(
+          context.mediaTime,
+          context.heldMaskFrameTime ?? null,
+          context.isMaskArtifactOwed === true,
+        );
         return;
       }
 
@@ -529,7 +535,11 @@ export function createPixiFocusLayer(options: {
    * Everything dimmed for a moment reads as a pause; the picture flashing to
    * full brightness and back reads as a fault.
    */
-  function holdOverlay(mediaTime: number, heldMaskFrameTime: number | null) {
+  function holdOverlay(
+    mediaTime: number,
+    heldMaskFrameTime: number | null,
+    isMaskArtifactOwed: boolean,
+  ) {
     if (!heldFill) {
       transitionToHidden();
       return;
@@ -540,6 +550,13 @@ export function createPixiFocusLayer(options: {
     if (focusDisplay) focusDisplay.visible = true;
 
     if (isDrawnCutoutStillCurrent(mediaTime, heldMaskFrameTime)) {
+      return;
+    }
+
+    if (isMaskArtifactOwed) {
+      // The mask is absent from this frame as well, so a dim with no hole cut
+      // in it darkens the subject itself: a harsher absence than no focus.
+      clearDrawnFocus();
       return;
     }
 
@@ -586,12 +603,14 @@ export function createPixiFocusLayer(options: {
   }
 
   function markCutoutDrawn(mediaTime: number, frameTime: number) {
+    isDrawnFocusCleared = false;
     cutoutMediaTime = mediaTime;
     cutoutFrameTime = frameTime;
     drawnOverlayWithoutCutout = null;
   }
 
   function resetHeldFocus() {
+    isDrawnFocusCleared = false;
     cutoutMediaTime = null;
     cutoutFrameTime = null;
     drawnOverlayWithoutCutout = null;
@@ -612,6 +631,19 @@ export function createPixiFocusLayer(options: {
     );
   }
 
+  function clearDrawnFocus() {
+    if (isDrawnFocusCleared) {
+      return;
+    }
+
+    isDrawnFocusCleared = true;
+    cutoutMediaTime = null;
+    cutoutFrameTime = null;
+    drawnOverlayWithoutCutout = null;
+    idMaskRenderer?.hide();
+    hideVectorFocus();
+  }
+
   function drawOverlayWithoutCutout(fill: FocusFill) {
     if (
       drawnOverlayWithoutCutout?.alpha === fill.alpha &&
@@ -620,6 +652,7 @@ export function createPixiFocusLayer(options: {
       return;
     }
 
+    isDrawnFocusCleared = false;
     cutoutMediaTime = null;
     cutoutFrameTime = null;
     drawnOverlayWithoutCutout = fill;

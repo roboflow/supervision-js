@@ -826,6 +826,157 @@ describe("pixi focus layer", () => {
     expect(mesh.shader.resources.uTexture).not.toBe(textureSource);
   });
 
+  it("draws nothing on an owed frame instead of dimming the whole picture", () => {
+    vi.stubGlobal("document", {
+      createElement: vi.fn(() => ({
+        getContext: vi.fn(),
+        height: 0,
+        width: 0,
+      })),
+    });
+
+    const { artifact, layer, mesh, textureSource } = createIdMaskFocus();
+
+    layer.drawFrame({
+      frame: maskFrame,
+      hoveredPick: null,
+      idMaskArtifact: artifact,
+      mediaTime: maskFrame.mediaTime,
+      selectedPick: null,
+    });
+
+    const uniforms = mesh.shader.resources.focusUniforms as FakeUniformGroup;
+    const updatesAfterDraw = uniforms.update.mock.calls.length;
+
+    layer.drawFrame({
+      frame: undefined,
+      heldMaskFrameTime: null,
+      hoveredPick: null,
+      isMaskArtifactOwed: true,
+      mediaTime: maskFrame.mediaTime + 0.0667,
+      selectedPick: null,
+    });
+
+    expect(mesh.visible).toBe(false);
+    expect(mesh.shader.resources.uTexture).toBe(textureSource);
+    expect(uniforms.update).toHaveBeenCalledTimes(updatesAfterDraw);
+  });
+
+  it("draws no full-frame dim on an owed frame the vector cutout cannot cover", () => {
+    const selectedPick = {
+      detection: frame.detections[0]!,
+      detectionIndex: 0,
+      frame,
+      mediaTime: frame.mediaTime,
+      point: { x: 15, y: 20 },
+      target: DetectionPickTarget.Box,
+    };
+    const layer = createPixiFocusLayer({
+      Graphics: FakeGraphics as never,
+      focusStyle: new BaseFocusStyle({
+        cornerRadius: 6,
+        fill: { alpha: 0.5, color: 0x000000 },
+        shape: BoxShape.RoundedRect,
+      }),
+    });
+    const display = layer.createDisplay({
+      height: 80,
+      width: 120,
+    }) as FakeGraphics;
+
+    layer.drawFrame({
+      frame,
+      hoveredPick: null,
+      mediaTime: frame.mediaTime,
+      selectedPick,
+    });
+    layer.drawFrame({
+      frame: undefined,
+      hoveredPick: null,
+      isMaskArtifactOwed: true,
+      mediaTime: frame.mediaTime + 0.5,
+      selectedPick: null,
+    });
+
+    expect(display.rect).toHaveBeenCalledOnce();
+    expect(display.fill).toHaveBeenCalledOnce();
+    expect(display.visible).toBe(false);
+  });
+
+  it("keeps the cutout of the raster the mask layer holds up on an owed frame", () => {
+    vi.stubGlobal("document", {
+      createElement: vi.fn(() => ({
+        getContext: vi.fn(),
+        height: 0,
+        width: 0,
+      })),
+    });
+
+    const { artifact, layer, mesh, textureSource } = createIdMaskFocus();
+
+    layer.drawFrame({
+      frame: maskFrame,
+      hoveredPick: null,
+      idMaskArtifact: artifact,
+      mediaTime: maskFrame.mediaTime,
+      selectedPick: null,
+    });
+
+    const uniforms = mesh.shader.resources.focusUniforms as FakeUniformGroup;
+    const updatesAfterDraw = uniforms.update.mock.calls.length;
+
+    layer.drawFrame({
+      frame: undefined,
+      heldMaskFrameTime: maskFrame.mediaTime,
+      hoveredPick: null,
+      isMaskArtifactOwed: true,
+      mediaTime: maskFrame.mediaTime + 0.0667,
+      selectedPick: null,
+    });
+
+    expect(mesh.visible).toBe(true);
+    expect(mesh.shader.resources.uTexture).toBe(textureSource);
+    expect(uniforms.update).toHaveBeenCalledTimes(updatesAfterDraw);
+  });
+
+  it("cuts out again on the frame whose artifact the cook delivers", () => {
+    vi.stubGlobal("document", {
+      createElement: vi.fn(() => ({
+        getContext: vi.fn(),
+        height: 0,
+        width: 0,
+      })),
+    });
+
+    const { artifact, layer, mesh, textureSource } = createIdMaskFocus();
+
+    layer.drawFrame({
+      frame: maskFrame,
+      hoveredPick: null,
+      idMaskArtifact: artifact,
+      mediaTime: maskFrame.mediaTime,
+      selectedPick: null,
+    });
+    layer.drawFrame({
+      frame: undefined,
+      heldMaskFrameTime: null,
+      hoveredPick: null,
+      isMaskArtifactOwed: true,
+      mediaTime: maskFrame.mediaTime + 0.0667,
+      selectedPick: null,
+    });
+    layer.drawFrame({
+      frame: maskFrame,
+      hoveredPick: null,
+      idMaskArtifact: artifact,
+      mediaTime: maskFrame.mediaTime + 0.1,
+      selectedPick: null,
+    });
+
+    expect(mesh.visible).toBe(true);
+    expect(mesh.shader.resources.uTexture).toBe(textureSource);
+  });
+
   it("fades a held overlay out instead of cutting it when nothing arrives", () => {
     const selectedPick = {
       detection: frame.detections[0]!,
