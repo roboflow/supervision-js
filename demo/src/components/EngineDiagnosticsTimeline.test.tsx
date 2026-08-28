@@ -12,7 +12,7 @@ import {
 
 function timelineMarkup(presentation: PresentationMode): string {
   return renderToStaticMarkup(
-    <EngineDiagnosticsTimeline snapshot={snapshot(presentation)} />,
+    <EngineDiagnosticsTimeline live snapshot={snapshot(presentation)} />,
   );
 }
 
@@ -234,6 +234,7 @@ describe("timeline markers", () => {
   it("keeps both moving markers out of the SVG", () => {
     const markup = renderToStaticMarkup(
       <EngineDiagnosticsTimeline
+        live
         snapshot={{
           ...snapshot("canvas"),
           scheduler: scheduler(),

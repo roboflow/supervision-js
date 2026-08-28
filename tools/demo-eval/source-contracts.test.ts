@@ -62,6 +62,48 @@ describe("the timeline drag release", () => {
   });
 });
 
+/* Opening Debug is not a request for live engine readings. Asking the engine
+ * about itself starts a worker broadcast ten times a second, flips on the
+ * per-frame counters and walks the whole file for keyframes, and every push
+ * re-renders eight metric groups and a timeline. The panel therefore holds the
+ * broadcast open only for as long as someone has asked it to, and a single
+ * reading closes it again. */
+describe("the engine diagnostics panel", () => {
+  const source = read("components/EngineDiagnostics.tsx");
+
+  const held = blockAfter(source, "function useEngineDiagnostics(");
+
+  it("holds the broadcast open only while it is asked to read", () => {
+    expect(held).toContain("if (!live || !visible)");
+    expect(held).toContain("const stop = tap.start()");
+  });
+
+  it("closes the broadcast again after a single reading", () => {
+    expect(held).toContain("return tap.readOnce(setHeld)");
+  });
+
+  it("puts the offer on the panel", () => {
+    expect(source).toContain("Read while it runs");
+  });
+});
+
+/* The playhead is geometry: it carries no figure anyone reads off it, and a
+ * page-wide writer already runs the marks on this page on a band of its own.
+ * A private animation frame per open panel writes on every frame the picture
+ * paints, and every frame that writes anything is charged a style pass, a
+ * layout and a paint. */
+describe("the engine diagnostics timeline", () => {
+  const source = read("components/EngineDiagnosticsTimeline.tsx");
+
+  it("moves its playhead on the shared writer's geometry band", () => {
+    expect(source).toContain('useLiveReadoutWriter(writePlayhead, "geometry")');
+  });
+
+  it("keeps its own animation frame out of it", () => {
+    expect(source).not.toContain("requestAnimationFrame");
+  });
+});
+
 /* The harness reaches the demo's controls through `data-eval` ids rather than
  * through class names and button text, because it once reached through those
  * and an upstream redesign moved them: three scenarios stopped measuring and

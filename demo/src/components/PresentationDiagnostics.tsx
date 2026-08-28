@@ -100,7 +100,7 @@ export const PresentationDiagnostics = memo(function PresentationDiagnostics({
   );
 });
 
-function PresentedFrameTimeline({
+export function PresentedFrameTimeline({
   detectionRanges,
   duration,
   playheadTime,
@@ -190,12 +190,70 @@ function TimelineLane({
   );
 }
 
+/**
+ * Whether a poll found the same picture it drew last time. Each sample is
+ * assembled fresh, so identity says nothing and the values have to be read.
+ *
+ * Every record the frames lane draws arrives counted, so the count answers for
+ * the lane behind it.
+ */
+export function presentationSampleUnchanged(
+  previous: PresentationDiagnosticsSample,
+  next: PresentationDiagnosticsSample,
+): boolean {
+  return (
+    previous.presentedCount === next.presentedCount &&
+    previous.presentedPerSecond === next.presentedPerSecond &&
+    previous.renderCount === next.renderCount &&
+    sameFrame(previous.lastPresented, next.lastPresented) &&
+    sameBands(previous.readinessBands, next.readinessBands)
+  );
+}
+
+function sameFrame(
+  previous: PresentedFrameRecord | null,
+  next: PresentedFrameRecord | null,
+) {
+  if (previous === null || next === null) {
+    return previous === next;
+  }
+
+  return (
+    previous.paintSeq === next.paintSeq &&
+    previous.frameIndex === next.frameIndex &&
+    previous.mediaTimeS === next.mediaTimeS &&
+    previous.quality === next.quality
+  );
+}
+
+function sameBands(
+  previous: readonly ReadinessBand[] | null,
+  next: readonly ReadinessBand[] | null,
+) {
+  if (previous === null || next === null) {
+    return previous === next;
+  }
+
+  return (
+    previous.length === next.length &&
+    previous.every(
+      (band, index) =>
+        band.startTime === next[index].startTime &&
+        band.endTime === next[index].endTime,
+    )
+  );
+}
+
 function usePolledSample(readSample: () => PresentationDiagnosticsSample) {
   const [sample, setSample] = useState(() => readSample());
 
   useEffect(() => {
     const handle = window.setInterval(() => {
-      setSample(readSample());
+      setSample((current) => {
+        const next = readSample();
+
+        return presentationSampleUnchanged(current, next) ? current : next;
+      });
     }, POLL_INTERVAL_MS);
 
     return () => {

@@ -22,11 +22,17 @@ interface EngineDiagnosticsProducer {
 export interface EngineDiagnosticsTap {
   /** Allocates the worker's rolling trace rings; disarm keeps what they hold. */
   armTrace(): void;
+  /** Whether a video engine source is open, broadcast or no broadcast. */
+  attached(): boolean;
   disarmTrace(): void;
   /** The assembled capture, or null when nothing was armed. */
   exportTrace(): Promise<unknown>;
   /** Null until a video engine source opens, and again after it closes. */
   read(): DiagnosticsSnapshot | null;
+  /** One reading: holds the broadcast open until a push carries a snapshot,
+   *  hands that snapshot over and closes it again. The returned call abandons
+   *  a reading still waiting for its push. */
+  readOnce(onReading: (snapshot: DiagnosticsSnapshot) => void): () => void;
   /** Turns the worker broadcast on, and off again through the returned stop.
    *  Idempotent: repeated starts share one broadcast. */
   start(): () => void;
@@ -69,9 +75,32 @@ export function createEngineDiagnosticsTap(): EngineDiagnosticsTap {
     producer?.stopDiagnostics();
   };
 
+  const startReading = () => {
+    readers += 1;
+    attach();
+    let stopped = false;
+
+    return () => {
+      if (stopped) {
+        return;
+      }
+
+      stopped = true;
+      readers -= 1;
+
+      if (readers === 0) {
+        detach();
+      }
+    };
+  };
+
   return {
     armTrace() {
       producer?.armTrace(TRACE_RING_BOUNDS.snapshotWindowMs);
+    },
+
+    attached() {
+      return producer !== null;
     },
 
     disarmTrace() {
@@ -86,24 +115,30 @@ export function createEngineDiagnosticsTap(): EngineDiagnosticsTap {
       return producer?.getLatestDiagnostics() ?? null;
     },
 
-    start() {
-      readers += 1;
-      attach();
-      let stopped = false;
+    readOnce(onReading) {
+      const stop = startReading();
+      const release = () => {
+        listeners.delete(waitForSnapshot);
+        stop();
+      };
+      // A source opening notifies too, and it carries no reading with it.
+      const waitForSnapshot = () => {
+        const snapshot = producer?.getLatestDiagnostics();
 
-      return () => {
-        if (stopped) {
+        if (!snapshot) {
           return;
         }
 
-        stopped = true;
-        readers -= 1;
-
-        if (readers === 0) {
-          detach();
-        }
+        release();
+        onReading(snapshot);
       };
+
+      listeners.add(waitForSnapshot);
+
+      return release;
     },
+
+    start: startReading,
 
     subscribe(listener) {
       listeners.add(listener);

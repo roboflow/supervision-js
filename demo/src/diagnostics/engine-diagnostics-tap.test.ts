@@ -148,6 +148,74 @@ describe("createEngineDiagnosticsTap", () => {
     expect(second.starts).toEqual([DIAGNOSTICS.BROADCAST_HZ]);
   });
 
+  it("reports an open engine whether or not anything is reading it", async () => {
+    const engine = createFakeEngine();
+    const tap = createEngineDiagnosticsTap();
+
+    expect(tap.attached()).toBe(false);
+
+    await openTapped(tap, engine);
+
+    expect(tap.attached()).toBe(true);
+    expect(engine.starts).toEqual([]);
+  });
+
+  /* One reading, and the worker goes quiet again: the panel that asks for it
+   * shows every figure the engine reports without the broadcast, the per-frame
+   * counters and the keyframe walk running behind it for the whole session. */
+  it("closes the broadcast again once a single reading has landed", async () => {
+    const engine = createFakeEngine();
+    const tap = createEngineDiagnosticsTap();
+    await openTapped(tap, engine);
+
+    const reading = vi.fn();
+    tap.readOnce(reading);
+
+    expect(engine.starts).toEqual([DIAGNOSTICS.BROADCAST_HZ]);
+    expect(engine.stops).toBe(0);
+
+    engine.snapshot = { status: "PLAYING" } as DiagnosticsSnapshot;
+    engine.broadcast();
+
+    expect(engine.stops).toBe(1);
+    expect(engine.listeners).toBe(0);
+    expect(reading).toHaveBeenCalledExactlyOnceWith(engine.snapshot);
+
+    engine.broadcast();
+
+    expect(engine.stops).toBe(1);
+  });
+
+  it("holds a single reading open until a push carries one", async () => {
+    const engine = createFakeEngine();
+    const tap = createEngineDiagnosticsTap();
+    await openTapped(tap, engine);
+
+    const reading = vi.fn();
+    tap.readOnce(reading);
+    engine.broadcast();
+
+    expect(engine.stops).toBe(0);
+    expect(reading).not.toHaveBeenCalled();
+
+    engine.snapshot = { status: "PAUSED" } as DiagnosticsSnapshot;
+    engine.broadcast();
+
+    expect(engine.stops).toBe(1);
+  });
+
+  it("abandons a reading that is still waiting", async () => {
+    const engine = createFakeEngine();
+    const tap = createEngineDiagnosticsTap();
+    await openTapped(tap, engine);
+
+    const abandon = tap.readOnce(vi.fn());
+    abandon();
+
+    expect(engine.stops).toBe(1);
+    expect(engine.listeners).toBe(0);
+  });
+
   it("arms the trace over the window the engine's own rings keep", async () => {
     const engine = createFakeEngine();
     const tap = createEngineDiagnosticsTap();

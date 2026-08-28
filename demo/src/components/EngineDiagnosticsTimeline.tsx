@@ -1,5 +1,13 @@
-import { memo, useEffect, useRef, type CSSProperties } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useRef,
+  type CSSProperties,
+} from "react";
 import type { DiagnosticsSnapshot } from "supervision-js-web-video-engine";
+
+import { useLiveReadoutWriter } from "../hooks/live-readouts";
 
 /**
  * The engine's coverage timeline, lane for lane: GOP heat, what each cache tier
@@ -60,12 +68,15 @@ interface ChartProps {
 }
 
 export function EngineDiagnosticsTimeline({
+  live,
   snapshot,
 }: {
+  readonly live: boolean;
   readonly snapshot: DiagnosticsSnapshot;
 }) {
   const playheadRef = useRef<HTMLSpanElement | null>(null);
   const playheadStepsRef = useRef(0);
+  const drawnPlayheadRef = useRef<string | null>(null);
   const screenRef = useRef<HTMLSpanElement | null>(null);
   const clockRef = useRef<{
     atMs: number;
@@ -83,9 +94,11 @@ export function EngineDiagnosticsTimeline({
     clockRef.current = {
       atMs: performance.now(),
       playheadMs: snapshot.playheadMs,
-      playing: snapshot.status === "PLAYING",
+      // A held panel has no clock arriving to correct an extrapolation, so the
+      // marker sits on the reading it was taken with.
+      playing: live && snapshot.status === "PLAYING",
     };
-  }, [snapshot]);
+  }, [live, snapshot]);
 
   useEffect(() => {
     const track = screenRef.current;
@@ -101,7 +114,7 @@ export function EngineDiagnosticsTimeline({
   }, [durationMs, screenMs]);
 
   // How many places along the track the marker can actually occupy. The write
-  // below is skipped whenever the next frame would put it back on the one it is
+  // below is skipped whenever it would put the marker back on the one it is
   // already on, and that is only ever true against a real count of pixels.
   useEffect(() => {
     const track = playheadRef.current;
@@ -123,38 +136,30 @@ export function EngineDiagnosticsTimeline({
     };
   }, [durationMs]);
 
-  useEffect(() => {
-    if (durationMs <= 0) {
-      return undefined;
+  // The playhead moves geometry rather than a figure anyone reads off it, so it
+  // rides the shared writer's slower band with the other marks on this page.
+  const writePlayhead = useCallback(() => {
+    const line = playheadRef.current;
+    const clock = clockRef.current;
+
+    if (!line || !clock || durationMs <= 0) {
+      return;
     }
 
-    let frame = 0;
-    let drawnX: string | null = null;
-    const tick = () => {
-      const line = playheadRef.current;
-      const clock = clockRef.current;
+    const elapsedMs = clock.playing ? performance.now() - clock.atMs : 0;
+    const along = clamp01((clock.playheadMs + elapsedMs) / durationMs);
+    const steps = playheadStepsRef.current;
+    const x = `${(steps > 0 ? Math.round(along * steps) / steps : along) * 100}%`;
 
-      if (line && clock) {
-        const elapsedMs = clock.playing ? performance.now() - clock.atMs : 0;
-        const along = clamp01((clock.playheadMs + elapsedMs) / durationMs);
-        const steps = playheadStepsRef.current;
-        const x = `${(steps > 0 ? Math.round(along * steps) / steps : along) * 100}%`;
+    if (x === drawnPlayheadRef.current) {
+      return;
+    }
 
-        if (x !== drawnX) {
-          drawnX = x;
-          line.style.setProperty("--engine-timeline-playhead", x);
-        }
-      }
-
-      frame = requestAnimationFrame(tick);
-    };
-
-    frame = requestAnimationFrame(tick);
-
-    return () => {
-      cancelAnimationFrame(frame);
-    };
+    drawnPlayheadRef.current = x;
+    line.style.setProperty("--engine-timeline-playhead", x);
   }, [durationMs]);
+
+  useLiveReadoutWriter(writePlayhead, "geometry");
 
   if (durationMs <= 0) {
     return <p className="engine-timeline__unavailable">timeline n/a</p>;

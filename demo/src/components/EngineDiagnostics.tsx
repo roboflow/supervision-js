@@ -35,21 +35,36 @@ export const EngineDiagnostics = memo(function EngineDiagnostics({
 }: {
   readonly tap: EngineDiagnosticsTap;
 }) {
-  const snapshot = useEngineDiagnostics(tap);
+  const [live, setLive] = useState(false);
+  const [readings, setReadings] = useState(0);
+  const readOnce = useCallback(() => {
+    setReadings((count) => count + 1);
+  }, []);
+  const attached = useEngineAttachment(tap);
+  const snapshot = useEngineDiagnostics(tap, live, readings);
 
   return (
     <section className="engine-panel" aria-label="Video engine diagnostics">
       <header className="engine-panel__header">
         <h2 className="engine-panel__title">Video Engine</h2>
         <span className="engine-panel__rate">
-          {snapshot?.status ?? "idle"} · {DIAGNOSTICS.BROADCAST_HZ}Hz
+          {readCadence(live, snapshot)}
         </span>
-        <EngineTraceRecorder attached={snapshot !== null} tap={tap} />
+        <EngineTraceRecorder attached={attached} tap={tap} />
       </header>
+
+      <EngineReadingControl
+        attached={attached}
+        live={live}
+        onReadOnce={readOnce}
+        onSetLive={setLive}
+      />
 
       {snapshot === null ? (
         <p className="engine-panel__empty">
-          waiting for the first broadcast from the engine worker
+          {attached
+            ? "Nothing read yet. The engine assembles no diagnostics about itself until something asks it to."
+            : "No video engine source is open on this path, so there is nothing to read."}
         </p>
       ) : (
         <>
@@ -72,11 +87,76 @@ export const EngineDiagnostics = memo(function EngineDiagnostics({
           ))}
           <section className="engine-panel__group">
             <h3 className="engine-panel__group-title">Coverage</h3>
-            <EngineDiagnosticsTimeline snapshot={snapshot} />
+            <EngineDiagnosticsTimeline live={live} snapshot={snapshot} />
           </section>
         </>
       )}
     </section>
+  );
+});
+
+/**
+ * What the panel is doing, in the place that carries the broadcast rate: live
+ * readings name their rate, a single reading names itself as held, so a figure
+ * standing still is never mistaken for a runtime standing still.
+ */
+function readCadence(live: boolean, snapshot: DiagnosticsSnapshot | null) {
+  if (snapshot === null) {
+    return "not reading";
+  }
+
+  return live
+    ? `${snapshot.status} · ${DIAGNOSTICS.BROADCAST_HZ}Hz`
+    : `${snapshot.status} · held`;
+}
+
+/**
+ * Asking the engine about itself is what makes it broadcast, count every frame
+ * and walk the whole file for its keyframes, so the panel asks only when told
+ * to. One reading is enough to see every figure below; the switch is for
+ * watching one of them move.
+ */
+const EngineReadingControl = memo(function EngineReadingControl({
+  attached,
+  live,
+  onReadOnce,
+  onSetLive,
+}: {
+  readonly attached: boolean;
+  readonly live: boolean;
+  readonly onReadOnce: () => void;
+  readonly onSetLive: (live: boolean) => void;
+}) {
+  return (
+    <div className="engine-panel__live">
+      <DiagnosticLabel
+        label="Engine readings"
+        tooltip="The engine reports nothing about what it is holding unless it is asked to, and asking makes the worker broadcast ten times a second, count every frame and walk the whole file for keyframes for as long as it is asked. Read once takes a single reading and stops; the panel holds it until something asks again."
+      />
+      <button
+        className="engine-panel__button"
+        disabled={!attached || live}
+        onClick={onReadOnce}
+        title={
+          live
+            ? "Already reading while it runs"
+            : "Take one reading and stop again"
+        }
+        type="button"
+      >
+        read once
+      </button>
+      <label className="engine-panel__switch">
+        <input
+          checked={live}
+          onChange={(event) => {
+            onSetLive(event.currentTarget.checked);
+          }}
+          type="checkbox"
+        />
+        <span>Read while it runs</span>
+      </label>
+    </div>
   );
 });
 
@@ -136,7 +216,7 @@ function EngineTraceRecorder({
       <button
         aria-label={armed ? "Disarm trace recorder" : "Arm trace recorder"}
         aria-pressed={armed}
-        className={`engine-recorder__button${armed ? " engine-recorder__button--armed" : ""}`}
+        className={`engine-panel__button${armed ? " engine-panel__button--armed" : ""}`}
         disabled={!attached}
         onClick={toggleArm}
         title={`Trace recorder: the rings keep the last ${windowSeconds}s`}
@@ -145,7 +225,7 @@ function EngineTraceRecorder({
         rec
       </button>
       <button
-        className="engine-recorder__button"
+        className="engine-panel__button"
         disabled={!attached || (!armed && !hasCapture)}
         onClick={() => {
           void download();
@@ -315,14 +395,41 @@ function EngineMetric({
 }
 
 /**
- * Holds the broadcast open for as long as the panel is mounted and the tab is
- * visible, and re-reads on every push. The engine assembles nothing while
- * nobody is subscribed, so a closed Debug tab costs the worker nothing.
+ * Whether an engine source is open at all, which is what the trace recorder
+ * answers to: a path with no engine on it has nothing to record, and one that
+ * nobody is reading still does.
  */
-function useEngineDiagnostics(tap: EngineDiagnosticsTap) {
+function useEngineAttachment(tap: EngineDiagnosticsTap) {
+  const subscribe = useCallback(
+    (listener: () => void) => tap.subscribe(listener),
+    [tap],
+  );
+  const attached = useCallback(() => tap.attached(), [tap]);
+
+  return useSyncExternalStore(subscribe, attached, attached);
+}
+
+/**
+ * Holds the broadcast open for as long as the panel is asked to read and the
+ * tab is visible, and re-reads on every push. The engine assembles nothing
+ * while nobody is subscribed, so a Debug tab nobody has asked costs the worker
+ * nothing.
+ *
+ * A single reading holds it open only until the first push lands, and what it
+ * left behind is kept here, so the panel goes on showing every figure it read
+ * while the worker goes back to silence. Keeping it here rather than reading
+ * the engine back is also what makes "held" true: another surface asking for
+ * the same broadcast cannot quietly animate a panel that stopped asking.
+ */
+function useEngineDiagnostics(
+  tap: EngineDiagnosticsTap,
+  live: boolean,
+  readings: number,
+) {
   const [visible, setVisible] = useState(
     () => typeof document === "undefined" || !document.hidden,
   );
+  const [held, setHeld] = useState(() => tap.read());
 
   useEffect(() => {
     const onVisibilityChange = () => {
@@ -337,18 +444,32 @@ function useEngineDiagnostics(tap: EngineDiagnosticsTap) {
   }, []);
 
   useEffect(() => {
-    if (!visible) {
+    if (!live || !visible) {
       return undefined;
     }
 
-    return tap.start();
-  }, [tap, visible]);
+    const stop = tap.start();
+
+    return () => {
+      setHeld(tap.read());
+      stop();
+    };
+  }, [live, tap, visible]);
+
+  useEffect(() => {
+    if (readings === 0 || live) {
+      return undefined;
+    }
+
+    return tap.readOnce(setHeld);
+  }, [live, readings, tap]);
 
   const subscribe = useCallback(
-    (listener: () => void) => tap.subscribe(listener),
-    [tap],
+    (listener: () => void) => (live ? tap.subscribe(listener) : () => {}),
+    [live, tap],
   );
-  const read = useCallback(() => tap.read(), [tap]);
+  const read = useCallback(() => (live ? tap.read() : null), [live, tap]);
+  const broadcast = useSyncExternalStore(subscribe, read, read);
 
-  return useSyncExternalStore(subscribe, read, read);
+  return broadcast ?? held;
 }
