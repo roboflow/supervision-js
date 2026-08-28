@@ -56,6 +56,10 @@ const wrapped: FakeVideoFrame[] = [];
 
 class FakeVideoFrame {
   closeCount = 0;
+  /** Detachment as WebCodecs defines it: a closed frame reports no format.
+   *  It is the only thing a holder of the frame can read to tell the two
+   *  states apart. */
+  format: string | null = "RGBA";
 
   constructor(
     readonly source: unknown,
@@ -66,6 +70,7 @@ class FakeVideoFrame {
 
   close(): void {
     this.closeCount += 1;
+    this.format = null;
   }
 }
 
@@ -524,6 +529,40 @@ describe("VideoEngine in frames presentation", () => {
 
     expect(wrapped).toHaveLength(1);
     expect(wrapped[0].closeCount).toBe(1);
+    await engine.dispose();
+  });
+
+  it("names a handler that keeps the frames it is handed", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { engine, cursor } = setupFacade();
+    const held: PresentedFrame[] = [];
+    engine.toHandle().onPresentedFrame((presented) => held.push(presented));
+    await engine.load();
+
+    for (let i = 1; i <= 9; i += 1) {
+      cursor.emit(asSec(i));
+      await flushRaf();
+    }
+
+    expect(held).toHaveLength(9);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toContain("onPresentedFrame");
+    await engine.dispose();
+  });
+
+  it("says nothing to a handler that closes, however long it runs", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { engine, cursor } = setupFacade();
+    engine.toHandle().onPresentedFrame((presented) => presented.frame.close());
+    await engine.load();
+
+    for (let i = 1; i <= 20; i += 1) {
+      cursor.emit(asSec(i));
+      await flushRaf();
+    }
+
+    expect(wrapped).toHaveLength(20);
+    expect(warn).not.toHaveBeenCalled();
     await engine.dispose();
   });
 

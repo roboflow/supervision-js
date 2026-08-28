@@ -50,6 +50,14 @@ import {
  */
 export type SeekTarget = number | FrameId;
 
+/**
+ * Deliveries between the frame the ownership check watches and the read of it.
+ * Past any legitimate double buffer and well under the decoder's frame pool, so
+ * a host that never closes is named while frames are still flowing rather than
+ * after the pool it starved has stopped them.
+ */
+const FRAME_OWNERSHIP_CHECK_GAP = 8;
+
 export interface VideoEngineOptions {
   source: VideoSource;
   /**
@@ -173,6 +181,12 @@ export class VideoEngine {
   private timeline: FrameTimeline | null = null;
   private transferredCanvas: HTMLCanvasElement | null = null;
   private presentedFrameHandler: PresentedFrameHandler | null = null;
+  /** Deliveries counted toward the one frame-ownership check, frozen past it,
+   *  and the frame that check reads. Weak, so watching costs the frame no
+   *  lifetime: a host that closes and drops it leaves nothing to find, which is
+   *  itself the answer. */
+  private presentedDeliveries = 0;
+  private watchedFrame: WeakRef<VideoFrame> | null = null;
   private cachedHandle: VideoEngineHandle | null = null;
   /** WebGPU support is a main-thread fact the worker cannot cheaply probe, so
    *  the facade fills it onto each diagnostics snapshot for the warning rules. */
@@ -656,6 +670,36 @@ export class VideoEngine {
       quality: event.quality,
       frame: event.frame,
     });
+    this.checkFrameOwnership(event.frame);
+  }
+
+  /**
+   * Says out loud that this host does not close the frames it is handed.
+   * Nothing else in the runtime can: the frame left the worker on the transfer
+   * list, so no engine-side counter ever sees it again, and the decoder it
+   * starves reports the damage as a hung decode instead.
+   *
+   * One frame is watched and read once, so the check costs a host that closes a
+   * single allocation for the whole session and every later delivery one
+   * predicted-false branch.
+   */
+  private checkFrameOwnership(frame: VideoFrame): void {
+    const deliveries = this.presentedDeliveries;
+    if (deliveries > FRAME_OWNERSHIP_CHECK_GAP) return;
+    this.presentedDeliveries = deliveries + 1;
+    if (deliveries === 0) {
+      this.watchedFrame = new WeakRef(frame);
+      return;
+    }
+    if (deliveries < FRAME_OWNERSHIP_CHECK_GAP) return;
+    const watched = this.watchedFrame?.deref();
+    this.watchedFrame = null;
+    if (!watched || watched.format === null) return;
+    console.warn(
+      `[video-engine] a frame handed to onPresentedFrame was still open ${FRAME_OWNERSHIP_CHECK_GAP} frames later. ` +
+        "Each presented frame is the handler's to close(); one left open pins a decoder buffer, " +
+        "and a few of them stall decode, which surfaces later as a hung decode rather than as this.",
+    );
   }
 
   private settle(response: ResponseEvent): void {
