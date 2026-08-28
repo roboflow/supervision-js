@@ -187,10 +187,16 @@ A prepared mask frame is an id raster, one byte per pixel naming the detection
 that owns it, next to the fill and stroke palettes the shader reads. Both the
 worker and the main-thread preparer build that raster first and answer with a
 composited RGBA frame only when it cannot represent the frame, which is a
-detection index at or past the 64-entry palette ceiling.
+detection index at or past the 80-entry palette ceiling.
 `mask-frame-preparer.test.ts` pins both answers by name with "builds ID-mask
 rasters on the main thread" and "falls back to a composited RGBA frame past the
 ID palette". Either artifact draws the same picture.
+
+The ceiling is what a GLSL fragment stage can afford. WebGL2 guarantees only 224
+uniform vectors, and a scalar uniform array is charged a whole vector per
+element, so reading the stroke widths four to a vector takes an entry from three
+vectors to 2.25 and the ceiling from 74 entries to 98. `mask-palette.ts` holds
+the declarations and lookups both mask fragment stages share.
 
 The raster is prepared at the width the picture can show rather than at media
 width, so a 1080p mask on a smaller viewport carries display-resolution bytes.
