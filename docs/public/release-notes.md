@@ -112,6 +112,25 @@ entry point condemns itself rather than the session, and a decode failure the
 runtime has given up on is terminal, so nothing afterwards reports the source as
 healthy. A file whose entry points are all usable decodes with no extra probing.
 
+### A Video Recorded In Portrait Plays The Right Way Up
+
+Any clip carrying rotation metadata played wrong, which is every portrait
+recording from a phone. At 90 and 270 degrees the reported size was portrait
+while the landscape picture was painted into it unturned, so the orientation and
+the aspect were both wrong. At 180 the size was right and the picture was upside
+down. Clips with no rotation metadata were always correct.
+
+Two places dropped the turn. The decode session drew a decoded frame without
+applying it, and a frame converted back for the GPU loses it on every path,
+including the demuxer's own, because turning the pixels there would cost a copy
+per frame. The turn now reaches the session's draw, and it travels with the
+frame for the renderers to apply, so a rotated clip paints the same on both and
+an unrotated one pays nothing.
+
+A frame handed to a host presenting its own frames carries its rotation, so a
+host compositing for itself is not given pixels that contradict the dimensions
+beside them.
+
 ### Stepping Moves One Frame On A Variable-Rate Clip
 
 On a clip whose frames are not evenly spaced, a step forward sometimes did not
