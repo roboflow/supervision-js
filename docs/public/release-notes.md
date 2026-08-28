@@ -112,6 +112,28 @@ entry point condemns itself rather than the session, and a decode failure the
 runtime has given up on is terminal, so nothing afterwards reports the source as
 healthy. A file whose entry points are all usable decodes with no extra probing.
 
+### Stepping Moves One Frame On A Variable-Rate Clip
+
+On a clip whose frames are not evenly spaced, a step forward sometimes did not
+move the picture and the next one moved it by two, seeks landed up to two frames
+past the frame asked for, and the reported frame count counted packets rather
+than frames the clip presents.
+
+The frame table recorded one entry per packet, and such files carry several
+packets sharing a presentation timestamp with no time between them, so two
+entries named an instant that can only ever produce one picture. Entries naming
+the same instant now collapse when the table is built. A clip with no coincident
+timestamps is unchanged, down to the same allocations.
+
+### A Looping Clip Opens Its Next Lap On The First Frame
+
+On a heavy clip the lap after a loop started a few frames in, and those frames
+were decoded and discarded before anything reached the screen. Playback starts
+its clock before the walk reopens at the loop point, so the replay's opening
+frames arrive behind it and the rule that discards frames the clock has outrun
+dropped them. That rule now waits until the session has painted once, since
+before that there is no picture for the clock to have outrun.
+
 ### A Seek Made Before The First Frame Lands Where It Was Aimed
 
 Seeking as the very first thing a session does was accepted and then silently
