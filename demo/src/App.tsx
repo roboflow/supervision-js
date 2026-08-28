@@ -241,8 +241,11 @@ function DemoApp() {
         }
         pipelinePanel={
           <PipelinePanel
+            configuration={demo.sessionConfiguration}
             descriptor={demo.pipelineDescriptor}
             engineDiagnosticsTap={demo.engineDiagnosticsTap}
+            onChangeOptions={demo.setSessionOptions}
+            options={demo.sessionOptions}
           />
         }
         sessionOptionsPanel={
@@ -280,6 +283,7 @@ function DemoApp() {
             processedRanges={processedRanges}
             processingRanges={processingRanges}
             sourceResidency={sourceResidency}
+            waitLabel={viewportOverlay.overlay?.label ?? null}
           />
         }
         renderControls={

@@ -3862,6 +3862,7 @@ fieldset {
 .pipeline-panel,
 .render-controls,
 .status-panel,
+.status-group,
 .benchmark-card,
 .benchmark-metric-card,
 .benchmark-comparison-card {
@@ -3953,6 +3954,9 @@ fieldset {
   color: var(--text);
 }
 
+.status-group__title,
+.presented-timeline__label,
+.presented-timeline__legend-item,
 .source-field span,
 .selection-panel__hint,
 .session-options__hint,
@@ -3969,6 +3973,19 @@ fieldset {
 .readout__label,
 .performance-metric span {
   color: var(--muted);
+}
+
+.presented-timeline__lane {
+  background: rgba(124, 58, 237, 0.1);
+}
+
+.presented-timeline__playhead {
+  background: var(--text);
+}
+
+.readout--danger {
+  background: #fef2f2;
+  border-color: rgba(220, 38, 38, 0.35);
 }
 
 .renderer-viewport {
@@ -4323,19 +4340,23 @@ fieldset {
   width: 17px;
 }
 
-@media (max-width: 780px) {
+/* Must match the width the stacked layout starts at. A gap between the two
+ * leaves the column stacked inside a shell still sized for one screen, which
+ * collapses the picture to a sliver. */
+@media (max-width: 760px) {
   .demo-shell__workspace {
     grid-template-columns: minmax(0, 1fr);
   }
 
   .demo-shell__inspector {
     max-height: 42dvh;
+    overflow: auto;
   }
 }
 
 .engine-panel {
   background: rgba(8, 11, 16, 0.78);
-  border: 1px solid var(--line);
+  border: 1px solid rgba(8, 11, 16, 0.9);
   border-radius: var(--radius-lg);
   display: grid;
   gap: 8px;
@@ -4918,4 +4939,63 @@ fieldset {
   font-family: var(--font-mono);
   font-size: 0.78rem;
   margin: 0;
+}
+
+/* The ring is motion carrying a status, so with motion turned down it holds
+ * still and says the same thing as a complete ring. */
+@media (prefers-reduced-motion: reduce) {
+  .transport__play[data-buffering] .transport__ring {
+    animation: none;
+    border-color: rgba(124, 58, 237, 0.85);
+  }
+}
+
+/* A finger covers roughly a 44px square, and every control here was drawn for a
+ * cursor. The buttons keep the size they read at and grow an invisible target
+ * around them, the way the step buttons already do; the rows that own a full
+ * line of the column grow for real, because there is nothing beside them to
+ * collide with. The dense diagnostics are left alone: their rows are 11px apart
+ * and a 44px target on each would cover its neighbours. */
+@media (pointer: coarse) {
+  .demo-shell__mode a,
+  .demo-shell__mode button,
+  .source-controls__mode button,
+  .source-actions button,
+  .render-controls__tabs button,
+  .render-control__segments button,
+  .quality-controls__toggle,
+  .quality-controls__input-row input[type="number"],
+  .selection-panel .inspector-card__header button,
+  .session-options .inspector-card__header button {
+    min-height: 44px;
+  }
+
+  /* Wide enough that two neighbouring targets do not overlap: at the cursor
+   * gap each button's target ate part of the one beside it. */
+  .transport {
+    gap: 14px;
+  }
+
+  .transport__play,
+  .transport__step {
+    position: relative;
+  }
+
+  .transport__play::after,
+  .transport__step::after {
+    content: "";
+    height: 44px;
+    inset: 50% auto auto 50%;
+    min-width: 44px;
+    position: absolute;
+    translate: -50% -50%;
+    width: 100%;
+  }
+
+  /* The scrub target reaches down over the lanes below it, which are read-only,
+   * so a thumb gets a 44px band without the strip itself getting taller. */
+  .timeline-view__input {
+    align-self: start;
+    height: 44px;
+  }
 }

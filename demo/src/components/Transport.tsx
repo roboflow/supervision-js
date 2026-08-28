@@ -17,6 +17,7 @@ export const Transport = memo(function Transport({
   onTogglePlayback,
   playbackRate,
   presentedRate,
+  waitLabel,
 }: {
   readonly atClipEnd: boolean;
   readonly disabled: boolean;
@@ -27,6 +28,9 @@ export const Transport = memo(function Transport({
   readonly onTogglePlayback: () => void;
   readonly playbackRate: number;
   readonly presentedRate: number | null;
+  /** The wait the viewport notice is currently naming, or null while no notice
+   *  is on screen. */
+  readonly waitLabel: string | null;
 }) {
   const action: TransportAction = isPlaying
     ? "pause"
@@ -34,6 +38,13 @@ export const Transport = memo(function Transport({
       ? "replay"
       : "play";
   const label = TRANSPORT_LABELS[action];
+  /**
+   * The notice withholds itself for a quarter second and withholds its detail
+   * for over half of one, so a hitch shorter than that is reported by nothing
+   * else. The ring covers that opening and stands down the moment the notice
+   * takes over, so the two never report the same wait at the same time.
+   */
+  const ringing = isBuffering && waitLabel === null;
   const sustained = isPlaybackRateSustained(playbackRate, presentedRate);
   const speedLabel = formatPlaybackRate(playbackRate);
   const speedTitle =
@@ -54,10 +65,14 @@ export const Transport = memo(function Transport({
         -1
       </button>
       <button
-        aria-label={isBuffering ? `${label}, buffering` : label}
+        aria-label={
+          isBuffering
+            ? `${label}, ${(waitLabel ?? "buffering").toLowerCase()}`
+            : label
+        }
         className="transport__play"
         data-action={action}
-        data-buffering={isBuffering ? "" : undefined}
+        data-buffering={ringing ? "" : undefined}
         disabled={disabled}
         onClick={onTogglePlayback}
         title={`${label} (Space)`}

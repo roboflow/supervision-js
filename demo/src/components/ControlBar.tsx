@@ -43,6 +43,9 @@ interface ControlBarProps {
   readonly processedRanges: readonly TimelineRange[];
   readonly processingRanges: readonly TimelineRange[];
   readonly sourceResidency: SourceResidencyDiagnostics | null;
+  /** The wait the viewport notice is currently naming, or null while no notice
+   *  is on screen. */
+  readonly waitLabel: string | null;
 }
 
 export const ControlBar = memo(function ControlBar({
@@ -60,6 +63,7 @@ export const ControlBar = memo(function ControlBar({
   processedRanges,
   processingRanges,
   sourceResidency,
+  waitLabel,
 }: ControlBarProps) {
   countControlBarRender();
 
@@ -80,6 +84,7 @@ export const ControlBar = memo(function ControlBar({
           onTogglePlayback={onTogglePlayback}
           playbackRate={playbackRate}
           presentedRate={presentedRate}
+          waitLabel={waitLabel}
         />
         <p className="control-bar__timecode">
           <LiveReadoutText

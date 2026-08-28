@@ -22,6 +22,7 @@ const baseProps: ControlBarProps = {
   processedRanges: [],
   processingRanges: [],
   sourceResidency: null,
+  waitLabel: null,
 };
 
 /** One change each, so a prop the comparator stops watching fails a case. */
@@ -53,6 +54,7 @@ const otherPropChanges: readonly Partial<ControlBarProps>[] = [
       warming: false,
     },
   },
+  { waitLabel: "Waiting for more video" },
 ];
 
 function withProps(changes: Partial<ControlBarProps>): ControlBarProps {
