@@ -123,7 +123,7 @@ describe.each(TABLES)("FrameTimeline over %s", (_name, build) => {
     let previous = 0;
     let regression: { at: number; from: number; to: number } | null = null;
 
-    for (let t = timeline.timeAt(0); t < end; t += step) {
+    for (let t: number = timeline.timeAt(0); t < end; t += step) {
       const index = timeline.indexAtOrBefore(t);
       if (index < previous) {
         regression ??= { at: t, from: previous, to: index };
