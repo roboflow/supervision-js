@@ -501,7 +501,9 @@ export function createPixiInteractionLayer(options: {
   }
 
   function followSelectedPicks(frame: DetectionFrame | undefined) {
-    if (selectedPicks.length === 0) {
+    // An absent frame means detection data for this time has not arrived, not
+    // that the selection left the video, and a dropped selection never returns.
+    if (!frame || selectedPicks.length === 0) {
       return;
     }
 
