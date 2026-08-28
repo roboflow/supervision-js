@@ -26,6 +26,9 @@ const NAL_TYPE_MASK = 0x1f;
  */
 const ACCESS_UNIT_DELIMITER = 9;
 
+/** Coded slice of an IDR picture. */
+const IDR_SLICE = 5;
+
 /**
  * Scalable and multiview extension NALs. A decoder configured from an avcC
  * record decodes the base layer and reads none of them, and Chromium's key-frame
@@ -127,6 +130,29 @@ function frameNalUnits(
     offset += unit.length;
   }
   return framed;
+}
+
+/**
+ * Whether this access unit carries an IDR slice.
+ *
+ * A container's sync table names sync samples, and an H.264 sync sample is
+ * usually an ordinary I picture rather than an IDR. The two differ in what a
+ * decoder may assume about the pictures that follow: an IDR empties the
+ * reference list, so nothing after it can name a picture from before it, while
+ * an I picture leaves the list standing and the next reference frame is free to
+ * name pictures the entry point never decoded. Only the IDR is an entry point
+ * the bitstream cannot invalidate.
+ *
+ * Unreadable framing reads as not-IDR: the caller's fallback is to enter
+ * further back, which costs a walk and is never wrong.
+ */
+export function isIdrAccessUnit(
+  packetBytes: Uint8Array,
+  prefixWidth: number,
+): boolean {
+  const units = nalUnits(packetBytes, prefixWidth);
+  if (!units) return false;
+  return units.some((unit) => nalType(unit) === IDR_SLICE);
 }
 
 /**

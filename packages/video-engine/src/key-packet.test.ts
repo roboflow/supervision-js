@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  isIdrAccessUnit,
   KeyPacketRequirement,
   nalPrefixWidth,
   openingKeyPacket,
@@ -33,6 +34,7 @@ const PACKET = Uint8Array.of(
 const AUD_NAL = [0x09, 0x30];
 const SPS_NAL = [0x67, 0x42, 0x40, 0x33];
 const SLICE_NAL = [0x41, 0x9a, 0x02];
+const IDR_SLICE_NAL = [0x65, 0x88, 0x84];
 /** A scalable-extension NAL (type 20). */
 const EXTENSION_NAL = [0x14, 0x80, 0x00];
 
@@ -168,6 +170,22 @@ describe("openingKeyPacket", () => {
       ...SEI_NAL,
       ...bytes(packet),
     ]);
+  });
+});
+
+describe("isIdrAccessUnit", () => {
+  it("names the access unit that empties the reference list", () => {
+    expect(isIdrAccessUnit(framed4([AUD_NAL, IDR_SLICE_NAL]), 4)).toBe(true);
+  });
+
+  it("does not name an ordinary intra sync sample", () => {
+    // What a container's sync table is full of, and what an open GOP's first
+    // reference picture is entitled to predict across.
+    expect(isIdrAccessUnit(framed4([AUD_NAL, SLICE_NAL]), 4)).toBe(false);
+  });
+
+  it("does not name a packet whose framing cannot be walked", () => {
+    expect(isIdrAccessUnit(framed4([SPS_NAL, IDR_SLICE_NAL]), 2)).toBe(false);
   });
 });
 

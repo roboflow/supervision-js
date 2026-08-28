@@ -497,8 +497,16 @@ function webCodecsDecoder(init: VideoDecoderInit): VideoDecoderLike {
     configure: (config) => decoder.configure(config),
     decode: (chunk) => decoder.decode(new EncodedVideoChunk(chunk)),
     flush: () => decoder.flush(),
-    reset: () => decoder.reset(),
-    close: () => decoder.close(),
+    // Reporting an error closes a WebCodecs decoder, and both of these throw
+    // on one that is already closed. Teardown of a decoder that failed is a
+    // routine path, so the platform's rule is answered here rather than left
+    // for every caller to remember.
+    reset: () => {
+      if (decoder.state !== "closed") decoder.reset();
+    },
+    close: () => {
+      if (decoder.state !== "closed") decoder.close();
+    },
   };
 }
 

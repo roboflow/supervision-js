@@ -104,6 +104,14 @@ export class EngineCore {
     devicePixelRatio: number;
   } | null = null;
   private metadata: EngineReadySnapshot | null = null;
+  /**
+   * The decoder failure the runtime has given up on, latched. Nothing the
+   * transport is asked to do afterwards can decode a frame, so nothing it is
+   * asked to do may report otherwise: a play() that answered "playing" over a
+   * decoder that had already been condemned is how a source with one unusable
+   * entry point read as healthy for the rest of the session.
+   */
+  private decodeFailure: VideoEngineError | null = null;
   private presentation: PresentationMode = "canvas";
   private durationMs = 0;
   private paintSeq = 0;
@@ -186,6 +194,8 @@ export class EngineCore {
     // only be judged here, where the mode first exists.
     if (this.canvas && this.presentation === "frames")
       throw canvasBindingRefused();
+    // The verdict belongs to the source that earned it, not to the engine.
+    this.decodeFailure = null;
     this.emitStatus(PlaybackStatus.Loading);
     this.residency =
       config.sourceResidency && config.source.kind === SourceKind.Url
@@ -263,6 +273,7 @@ export class EngineCore {
 
   play(): void {
     if (!this.cursor || !this.controller) return;
+    if (this.decodeFailure) return this.republishFailure();
     // Resume-from-end: a play after the clock crossed duration would tick
     // straight to Ended. Snap back to 0 first.
     const durS = this.durationMs / 1000;
@@ -292,6 +303,7 @@ export class EngineCore {
     this.playing = false;
     this.clock.pause();
     this.controller?.endPlay();
+    if (this.decodeFailure) return this.republishFailure();
     this.emitStatus(PlaybackStatus.Paused);
   }
 
@@ -498,10 +510,18 @@ export class EngineCore {
    * sees and what the engine is doing agree.
    */
   private handleDecodeFailure(error: VideoEngineError): void {
+    this.decodeFailure ??= error;
     this.playing = false;
     this.clock.pause();
     this.controller?.endPlay();
-    this.emitStatus(PlaybackStatus.Errored, error);
+    this.republishFailure();
+  }
+
+  /** Says the failure again for whoever just asked the transport to move. A
+   *  consumer that only listens for changes has already been told; one that
+   *  reads the status after its own command has to find the same answer. */
+  private republishFailure(): void {
+    this.emitStatus(PlaybackStatus.Errored, this.decodeFailure);
   }
 
   beginInteractiveSeek(): void {
@@ -574,6 +594,7 @@ export class EngineCore {
     this.playing = false;
     this.clock.pause();
     this.controller?.endPlay();
+    if (this.decodeFailure) return this.republishFailure();
     this.emitStatus(PlaybackStatus.Ended);
   }
 
@@ -979,6 +1000,7 @@ export class EngineCore {
 
   private statusString(): string {
     if (!this.cursor) return PlaybackStatus.Idle;
+    if (this.decodeFailure) return PlaybackStatus.Errored;
     return this.playing ? PlaybackStatus.Playing : PlaybackStatus.Paused;
   }
 

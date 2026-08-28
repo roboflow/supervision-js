@@ -664,3 +664,305 @@ describe("DecodeSession readers sharing one decoder", () => {
     expect(MS(next.value?.timestamp ?? -1)).toBe(533);
   });
 });
+
+/**
+ * An open GOP, as most encoders emit one: the container's sync table names five
+ * entry points and only the first is an IDR. Two of the other four are followed
+ * by a reference picture that names pictures from before them, which a decoder
+ * opened at that sync sample never decoded, and Chromium answers that with a
+ * fatal decode error and no frames.
+ *
+ * Measured on `gop-open.mp4` and `combo-open-gop-pyramid-2997-90k.mp4`: sync
+ * samples at 0s, 2s, 4s, 6s and 8s, of which 2s and 6s are the ones a fresh
+ * decoder cannot open.
+ */
+describe("DecodeSession open GOP", () => {
+  const OPEN_GOP_FPS = 30;
+  const OPEN_GOP_FRAME_S = 1 / OPEN_GOP_FPS;
+  const OPEN_GOP_FRAMES = 300;
+  const SYNC_EVERY = 60;
+  /** Sync samples whose next reference picture names a picture from before
+   *  them, in frame indices: 2s and 6s at 30fps. */
+  const UNOPENABLE = new Set([60, 180]);
+  /** How far back that picture reaches, in frames. */
+  const REACH_BACK = 4;
+  const PREFIX_WIDTH = 4;
+  const NO_REFERENCE = 0xffff;
+
+  /** One access unit, AVCC-framed: a slice NAL whose header says whether it is
+   *  an IDR, carrying the index of the earliest picture it references. */
+  function accessUnit(index: number): Uint8Array {
+    const idr = index === 0;
+    // Every sync sample is an intra picture and predicts from nothing; only
+    // the first is an IDR, so only the first empties the reference list.
+    const refsFrom =
+      index % SYNC_EVERY === 0
+        ? NO_REFERENCE
+        : UNOPENABLE.has(index - 1)
+          ? index - 1 - REACH_BACK
+          : index - 1;
+    const nal = Uint8Array.of(
+      idr ? 0x65 : 0x41,
+      (refsFrom >> 8) & 0xff,
+      refsFrom & 0xff,
+    );
+    const unit = new Uint8Array(PREFIX_WIDTH + nal.length);
+    unit[3] = nal.length;
+    unit.set(nal, PREFIX_WIDTH);
+    return unit;
+  }
+
+  /** The slice NAL of an access unit, skipping whatever the session prepended
+   *  to make the chunk a legal entry point. */
+  function sliceOf(bytes: Uint8Array): Uint8Array | null {
+    let offset = 0;
+    while (offset + PREFIX_WIDTH <= bytes.length) {
+      const length =
+        (bytes[offset] << 24) |
+        (bytes[offset + 1] << 16) |
+        (bytes[offset + 2] << 8) |
+        bytes[offset + 3];
+      const unit = bytes.subarray(
+        offset + PREFIX_WIDTH,
+        offset + PREFIX_WIDTH + length,
+      );
+      const type = unit[0] & 0x1f;
+      if (type === 1 || type === 5) return unit;
+      offset += PREFIX_WIDTH + length;
+    }
+    return null;
+  }
+
+  function openGopPackets(): EncodedPacketLike[] {
+    return Array.from({ length: OPEN_GOP_FRAMES }, (_, i) => ({
+      data: accessUnit(i),
+      type: i % SYNC_EVERY === 0 ? ("key" as const) : ("delta" as const),
+      timestamp: i * OPEN_GOP_FRAME_S,
+      duration: OPEN_GOP_FRAME_S,
+    }));
+  }
+
+  class OpenGopPacketSource implements PacketSource {
+    readonly keyProbes: Array<{
+      timestamp: number;
+      options?: PacketRetrievalOptionsLike;
+    }> = [];
+    private readonly all = openGopPackets();
+
+    /** With verification on, only a true IDR answers; the container's own sync
+     *  table answers otherwise, which is the mediabunny contract the session
+     *  reads both anchors through. */
+    private keysUpTo(
+      timestamp: number,
+      verify: boolean | undefined,
+    ): EncodedPacketLike[] {
+      return this.all.filter(
+        (p) =>
+          p.type === "key" &&
+          p.timestamp <= timestamp + 1e-9 &&
+          (!verify || (p.data[PREFIX_WIDTH] & 0x1f) === 5),
+      );
+    }
+
+    async getKeyPacket(
+      timestamp: number,
+      options?: PacketRetrievalOptionsLike,
+    ): Promise<EncodedPacketLike | null> {
+      this.keyProbes.push({ timestamp, options });
+      const keys = this.keysUpTo(timestamp, options?.verifyKeyPackets);
+      return keys.length ? read(keys[keys.length - 1], options) : null;
+    }
+
+    async getNextKeyPacket(
+      packet: EncodedPacketLike,
+      options?: PacketRetrievalOptionsLike,
+    ): Promise<EncodedPacketLike | null> {
+      const next = this.all.find(
+        (p) => p.type === "key" && p.timestamp > packet.timestamp + 1e-9,
+      );
+      return next ? read(next, options) : null;
+    }
+
+    async *packets(
+      startPacket?: EncodedPacketLike,
+    ): AsyncGenerator<EncodedPacketLike, void, unknown> {
+      const from = startPacket
+        ? this.all.findIndex((p) => p.timestamp >= startPacket.timestamp - 1e-9)
+        : 0;
+      for (let i = from; i < this.all.length; i++) yield read(this.all[i]);
+    }
+  }
+
+  /**
+   * Decodes what it can reconstruct. A chunk naming a picture from before the
+   * one the decode opened at has nothing to predict from, so the decoder
+   * reports a fatal error and takes nothing further, exactly as a WebCodecs
+   * decoder does once it has errored.
+   */
+  class OpenGopDecoder implements VideoDecoderLike {
+    readonly chunks: EncodedVideoChunkInit[] = [];
+    errors = 0;
+    private openedAtIndex = Number.POSITIVE_INFINITY;
+    /** Set the moment the failure is reported, not the moment it happens: a
+     *  WebCodecs decode is acknowledged synchronously and answered on the codec
+     *  thread, so chunks submitted in between are taken and produce nothing. */
+    private dead = false;
+    private failing = false;
+    private readonly output: (frame: VideoFrame) => void;
+    private readonly error: (error: DOMException) => void;
+
+    constructor(init: VideoDecoderInit) {
+      this.output = init.output;
+      this.error = init.error as (error: DOMException) => void;
+    }
+
+    configure(): void {}
+
+    decode(chunk: EncodedVideoChunkInit): void {
+      if (this.dead) throw new DOMException("closed", "InvalidStateError");
+      this.chunks.push(chunk);
+      const index = Math.round((chunk.timestamp / 1e6) * OPEN_GOP_FPS);
+      if (chunk.type === "key") this.openedAtIndex = index;
+      const slice = sliceOf(chunk.data as Uint8Array);
+      const refsFrom = ((slice?.[1] ?? 0) << 8) | (slice?.[2] ?? 0);
+      if (refsFrom !== NO_REFERENCE && refsFrom < this.openedAtIndex) {
+        this.failing = true;
+        this.errors += 1;
+        queueMicrotask(() => {
+          this.dead = true;
+          this.error(new DOMException("Decoding error.", "EncodingError"));
+        });
+        return;
+      }
+      if (this.failing) return;
+      const frame = {
+        timestamp: chunk.timestamp,
+        duration: chunk.duration ?? 0,
+        close: () => undefined,
+      };
+      queueMicrotask(() => {
+        if (!this.dead) this.output(frame as unknown as VideoFrame);
+      });
+    }
+
+    async flush(): Promise<void> {}
+    reset(): void {}
+    close(): void {}
+  }
+
+  function openGopSession(): {
+    session: DecodeSession;
+    packets: OpenGopPacketSource;
+    decoders: OpenGopDecoder[];
+  } {
+    const packets = new OpenGopPacketSource();
+    const decoders: OpenGopDecoder[] = [];
+    const session = new DecodeSession({
+      packets,
+      config: CONFIG,
+      createDecoder: (init) => {
+        const decoder = new OpenGopDecoder(init);
+        decoders.push(decoder);
+        return decoder;
+      },
+      outputTimeoutMs: 200,
+    });
+    return { session, packets, decoders };
+  }
+
+  const ANCHORS_S = [0, 2, 4, 6, 8];
+
+  it("every sync sample paints, including the ones no decoder can open at", async () => {
+    const { session } = openGopSession();
+
+    const landed: Array<number | null> = [];
+    for (const anchorS of ANCHORS_S) {
+      const frame = await session.frameAt(anchorS);
+      landed.push(frame ? Math.round(frame.timestamp * 1000) : null);
+      frame?.close();
+    }
+
+    expect(landed).toEqual([0, 2000, 4000, 6000, 8000]);
+  });
+
+  it("a failed entry point condemns itself, not the session", async () => {
+    const { session, decoders } = openGopSession();
+
+    // 2s is one of the two that cannot be opened at, and 4s is a healthy one
+    // after it.
+    await (await session.frameAt(2))?.close();
+    const afterFailure = await session.frameAt(4);
+
+    expect(Math.round(afterFailure?.timestamp ?? -1)).toBe(4);
+    expect(decoders.filter((d) => d.errors > 0)).toHaveLength(1);
+    afterFailure?.close();
+  });
+
+  it("the unopenable entry point is entered from the previous IDR", async () => {
+    const { session, packets } = openGopSession();
+
+    const frame = await session.frameAt(6);
+
+    // The container's table answered first; when that answer decoded nothing
+    // the anchor is resolved again, reads its own entry point struck off, and
+    // asks the bitstream for the last IDR instead.
+    expect(packets.keyProbes.map((p) => p.options?.verifyKeyPackets)).toEqual([
+      false,
+      false,
+      true,
+    ]);
+    expect(Math.round(frame?.timestamp ?? -1)).toBe(6);
+    frame?.close();
+  });
+
+  it("a re-seek into a condemned GOP does not re-open at the entry point that failed", async () => {
+    const { session, decoders } = openGopSession();
+
+    (await session.frameAt(6))?.close();
+    (await session.frameAt(0))?.close();
+    const landed = await session.frameAt(6);
+
+    // Struck off for good: coming back reads the sync table, sees the entry
+    // point rejected, and enters from the IDR without spending another decode
+    // error to learn that again.
+    expect(Math.round(landed?.timestamp ?? -1)).toBe(6);
+    expect(decoders.reduce((n, d) => n + d.errors, 0)).toBe(1);
+    landed?.close();
+  });
+
+  it("a forward seek inside a recovered span costs no second recovery", async () => {
+    const { session, packets, decoders } = openGopSession();
+
+    (await session.frameAt(6))?.close();
+    const probesAfterRecovery = packets.keyProbes.length;
+    const landed = await session.frameAt(6.5);
+
+    // The span the pre-roll bought runs to the next entry point still worth
+    // anchoring at, so the walk continues rather than starting over.
+    expect(Math.round((landed?.timestamp ?? -1) * 1000)).toBe(6500);
+    expect(packets.keyProbes).toHaveLength(probesAfterRecovery);
+    expect(decoders).toHaveLength(2);
+    landed?.close();
+  });
+
+  it("a source whose only entry point is an unopenable IDR still stalls", async () => {
+    const packets = new OpenGopPacketSource();
+    const session = new DecodeSession({
+      packets,
+      config: CONFIG,
+      createDecoder: (init) => {
+        const decoder = new OpenGopDecoder(init);
+        queueMicrotask(() =>
+          (init.error as (e: DOMException) => void)(
+            new DOMException("Decoding error.", "EncodingError"),
+          ),
+        );
+        return decoder;
+      },
+      outputTimeoutMs: 200,
+    });
+
+    await expect(session.frameAt(6)).rejects.toThrow(/reported an error/);
+    await expect(session.frameAt(0)).rejects.toThrow(/reported an error/);
+  });
+});

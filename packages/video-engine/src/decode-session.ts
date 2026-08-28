@@ -1,4 +1,8 @@
-import { KeyPacketRequirement, nalPrefixWidth } from "./key-packet";
+import {
+  isIdrAccessUnit,
+  KeyPacketRequirement,
+  nalPrefixWidth,
+} from "./key-packet";
 import type { VideoSampleLike } from "./scrub-cursor";
 import { VideoEngineError, VideoEngineErrorCode } from "./types";
 
@@ -71,6 +75,28 @@ interface PacketTiming {
   readonly durationS: number;
 }
 
+/**
+ * The packet a decode was opened from, and whether anything further back is
+ * left to try if it turns out not to decode.
+ *
+ * A sync sample is only a promise that a decoder may *start* there, and on an
+ * open GOP that promise is not kept: the first reference picture after a
+ * non-IDR entry point is free to name reference pictures from before it, and a
+ * decoder that entered at the sync sample never decoded those. So an anchor is
+ * a hypothesis until a picture comes back, and `hasFallback` is what says
+ * whether a failed hypothesis leaves the session anywhere else to go.
+ */
+interface DecodeEntry {
+  readonly anchor: EncodedPacketLike;
+  /** Whole-microsecond timestamp, the identity a float timestamp cannot be. */
+  readonly key: number;
+  readonly hasFallback: boolean;
+}
+
+function anchorKey(timestampS: number): number {
+  return Math.round(timestampS * MICROSECONDS_PER_SECOND);
+}
+
 export interface DecodeSessionOptions {
   readonly packets: PacketSource;
   readonly config: VideoDecoderConfig;
@@ -94,6 +120,15 @@ export interface DecodeSessionOptions {
  * the start of a full-data walk.
  */
 const ANCHOR_PROBE: PacketRetrievalOptionsLike = { verifyKeyPackets: false };
+
+/**
+ * The fallback anchor read: the last IDR at or before the target, found by
+ * reading bitstreams rather than trusting the sync table. Reached only once an
+ * optimistic anchor has actually failed, since it drags the entry point back to
+ * the previous IDR and every picture between there and the target is decoded
+ * and thrown away.
+ */
+const IDR_PROBE: PacketRetrievalOptionsLike = { verifyKeyPackets: true };
 
 /** The packet that closes the anchor span is read for its timestamp alone. */
 const SPAN_END_PROBE: PacketRetrievalOptionsLike = {
@@ -197,6 +232,7 @@ export interface SessionFrameSource {
  */
 export class DecodeSession implements SessionFrameSource {
   private readonly keyPacket: KeyPacketRequirement;
+  private readonly prefixWidth: number;
   private decoder: VideoDecoderLike | null = null;
   private iterator: AsyncGenerator<EncodedPacketLike, void, unknown> | null =
     null;
@@ -216,6 +252,25 @@ export class DecodeSession implements SessionFrameSource {
    * error the caller can show.
    */
   private stalledError: VideoEngineError | null = null;
+  /**
+   * The current entry point's failure, held only until the walk that is owed a
+   * picture decides what it means. It condemns the anchor, never the session:
+   * a source whose sync table names one bad entry point still decodes from
+   * every other one, and latching the first failure is what turned a seek into
+   * a poisoned GOP into a player that never painted again.
+   */
+  private anchorError: VideoEngineError | null = null;
+  /** The entry currently feeding the decoder, or null before the first one. */
+  private entry: DecodeEntry | null = null;
+  /** Entry points a decoder error has ruled out, by whole-microsecond
+   *  timestamp. Only ever grows: a bitstream does not change. */
+  private readonly rejectedAnchors = new Set<number>();
+  /** Where the live retrieval wants to be, so a re-anchor after a failed entry
+   *  aims at the position the caller asked for rather than the anchor's. */
+  private entryTargetS = 0;
+  /** The last picture handed out since the caller last chose a position, so a
+   *  re-anchor mid-walk resumes rather than replays. */
+  private servedS = -Infinity;
   private closed = false;
   private anchors = 0;
   private framesDecodedCount = 0;
@@ -239,6 +294,7 @@ export class DecodeSession implements SessionFrameSource {
         `DecodeSession: ${options.config.codec} is not AVCC-framed H.264`,
       );
     }
+    this.prefixWidth = prefixWidth;
     this.keyPacket = new KeyPacketRequirement(prefixWidth);
   }
 
@@ -387,10 +443,12 @@ export class DecodeSession implements SessionFrameSource {
   private async positionFor(targetS: number): Promise<void> {
     if (this.closed) return;
     if (this.stalledError) throw this.stalledError;
+    this.entryTargetS = targetS;
     if (this.decoder && !this.exhausted) {
       const headS = await this.readHeadS();
       if (headS !== null && targetS >= headS && targetS < this.spanEndS) return;
     }
+    this.servedS = -Infinity;
     await this.anchorAt(targetS);
   }
 
@@ -406,27 +464,78 @@ export class DecodeSession implements SessionFrameSource {
   }
 
   private async anchorAt(targetS: number): Promise<void> {
-    const anchor = await this.options.packets.getKeyPacket(
-      targetS,
-      ANCHOR_PROBE,
-    );
+    const entry = await this.resolveEntry(targetS);
     void this.iterator?.return();
     this.iterator = null;
     this.peeked = null;
     this.exhausted = true;
+    this.entry = null;
+    this.anchorError = null;
     this.quiesce();
-    if (!anchor || this.closed) return;
-    const next = await this.options.packets.getNextKeyPacket(
-      anchor,
-      SPAN_END_PROBE,
-    );
-    this.spanEndS = next ? next.timestamp : Infinity;
+    if (!entry || this.closed) return;
+    this.spanEndS = await this.spanEndAfter(entry.anchor, targetS);
     this.configureDecoder();
-    this.iterator = this.options.packets.packets(anchor);
+    this.iterator = this.options.packets.packets(entry.anchor);
+    this.entry = entry;
     this.exhausted = false;
     this.anchors++;
     this.epoch++;
-    this.reachable = anchor.timestamp;
+    this.reachable = entry.anchor.timestamp;
+  }
+
+  /**
+   * The packet to open a decode of `targetS` from: the container's own sync
+   * sample, unless a decoder has already proved that one is not a legal entry
+   * point, in which case the last verified IDR at or before the target.
+   *
+   * A sync sample that is itself an IDR is already the furthest-back entry
+   * worth reaching for, so a failure there is a failure of the source.
+   */
+  private async resolveEntry(targetS: number): Promise<DecodeEntry | null> {
+    const sync = await this.options.packets.getKeyPacket(targetS, ANCHOR_PROBE);
+    if (sync) {
+      const key = anchorKey(sync.timestamp);
+      if (!this.rejectedAnchors.has(key)) {
+        return {
+          anchor: sync,
+          key,
+          hasFallback: !isIdrAccessUnit(sync.data, this.prefixWidth),
+        };
+      }
+    }
+    const idr = await this.options.packets.getKeyPacket(targetS, IDR_PROBE);
+    if (!idr) return null;
+    return { anchor: idr, key: anchorKey(idr.timestamp), hasFallback: false };
+  }
+
+  /**
+   * Where the span a forward seek can reach without re-anchoring ends: the
+   * first sync sample past the target that is still worth anchoring at.
+   *
+   * Skipping the rejected ones is what keeps the pre-roll paid for once. Ending
+   * the span at an entry point already known not to decode would send the very
+   * next seek into that GOP back to the same rejected anchor and back through
+   * the same walk to recover from it.
+   */
+  private async spanEndAfter(
+    anchor: EncodedPacketLike,
+    targetS: number,
+  ): Promise<number> {
+    let key: EncodedPacketLike = anchor;
+    for (;;) {
+      const next = await this.options.packets.getNextKeyPacket(
+        key,
+        SPAN_END_PROBE,
+      );
+      if (!next) return Infinity;
+      if (
+        next.timestamp > targetS + BOUND_EPSILON_S &&
+        !this.rejectedAnchors.has(anchorKey(next.timestamp))
+      ) {
+        return next.timestamp;
+      }
+      key = next;
+    }
   }
 
   /** Drops the work in flight and the frames it produced, in one turn, so no
@@ -439,10 +548,17 @@ export class DecodeSession implements SessionFrameSource {
 
   private configureDecoder(): void {
     try {
-      this.decoder ??= this.options.createDecoder({
-        output: (frame) => this.receive(frame),
-        error: (error) => this.fail(error),
-      });
+      if (!this.decoder) {
+        // Named so the callback can check that the decoder reporting the
+        // failure is still the one driving the session: a decoder dropped for
+        // erroring may report again afterwards, and that report must not
+        // condemn the anchor built to replace it.
+        const built: VideoDecoderLike = this.options.createDecoder({
+          output: (frame) => this.receive(frame),
+          error: (error) => this.fail(built, error),
+        });
+        this.decoder = built;
+      }
       // Without prompt per-frame emission a session that never flushes has
       // no way to get its frames out, so the whole flush-free design rests
       // here.
@@ -464,20 +580,56 @@ export class DecodeSession implements SessionFrameSource {
     for (;;) {
       if (this.closed) return null;
       if (this.stalledError) throw this.stalledError;
+      const failed = this.anchorError;
+      if (failed) {
+        await this.enterFurtherBack(failed);
+        continue;
+      }
       await this.fill();
       const ready = this.decoded[0];
       if (ready) {
+        // Re-entering further back re-decodes ground the walk already
+        // covered, and the caller has seen those pictures.
+        if (ready.timestampS <= this.servedS + BOUND_EPSILON_S) {
+          this.decoded.shift();
+          ready.frame.close();
+          continue;
+        }
         if (ready.timestampS > boundS + BOUND_EPSILON_S) return null;
         this.decoded.shift();
         this.reachable = ready.timestampS;
+        this.servedS = ready.timestampS;
         return ready;
       }
+      // The pipeline holds requests a failed decoder will never answer, so
+      // waiting on them is waiting out the ceiling for nothing.
+      if (this.anchorError) continue;
       if (this.pending.length === 0) return null;
       // Nothing is left to submit at end of stream, so a flush is the only
       // way to get the last frames out.
       if (this.exhausted) await this.drain();
       else await this.awaitOutput();
     }
+  }
+
+  /**
+   * Re-opens the decode from the last entry point ahead of the failed one,
+   * which for an open GOP means the previous IDR plus a walk to the target.
+   *
+   * The failed anchor is struck off for the life of the session, so the cost is
+   * paid once per bad entry point rather than once per seek into it. When there
+   * is nothing further back to enter from, the failure is the source's and it
+   * latches here.
+   */
+  private async enterFurtherBack(failure: VideoEngineError): Promise<void> {
+    const entry = this.entry;
+    if (!entry?.hasFallback) throw this.latch(failure);
+    this.rejectedAnchors.add(entry.key);
+    // An errored WebCodecs decoder is already closed and cannot be
+    // reconfigured, so the replacement anchor needs a replacement decoder.
+    this.decoder = null;
+    await this.anchorAt(Math.max(this.entryTargetS, this.servedS));
+    if (!this.entry) throw this.latch(failure);
   }
 
   /**
@@ -490,12 +642,17 @@ export class DecodeSession implements SessionFrameSource {
   private async fill(): Promise<void> {
     while (
       this.decoder &&
+      // The error arrives between two of the reads below, and a decoder that
+      // has reported one is closed: every further chunk is refused, and being
+      // refused is what would condemn the whole session for a failure the
+      // anchor already owns.
+      !this.anchorError &&
       this.pending.length < DECODER_PIPELINE_CHUNKS &&
       this.decoded.length < READY_FRAMES
     ) {
       const packet = await this.peek();
       if (!packet) return;
-      if (this.closed) return;
+      if (this.closed || this.anchorError) return;
       this.peeked = null;
       this.awaitTiming({
         timestampS: packet.timestamp,
@@ -553,16 +710,16 @@ export class DecodeSession implements SessionFrameSource {
         this.quiesce();
         this.exhausted = true;
         // Which failure this is turns on the output counter, not on the
-        // timer: a decoder that has handed frames back and then gone
-        // quiet is one a rebuild can recover, and a decoder that has
-        // answered a full pipeline of requests with nothing at all never
-        // started, so rebuilding it just runs the same failure again.
+        // timer: a decoder that has handed frames back and then gone quiet
+        // is one a rebuild can recover, and a decoder that has answered a
+        // full pipeline of requests with nothing at all may never have been
+        // given a legal place to start, which is the anchor's to answer for.
         if (this.framesDecodedCount === 0) {
-          reject(
-            this.stall(
-              `the decoder acknowledged ${owed} decode requests and produced no frame`,
-            ),
+          this.anchorError ??= new VideoEngineError(
+            VideoEngineErrorCode.DecoderStalled,
+            `DecodeSession: the decoder acknowledged ${owed} decode requests and produced no frame`,
           );
+          resolve();
           return;
         }
         reject(
@@ -618,8 +775,13 @@ export class DecodeSession implements SessionFrameSource {
     this.wake?.();
   }
 
-  private fail(error: unknown): void {
-    this.stall("the decoder reported an error", error);
+  private fail(from: VideoDecoderLike, error: unknown): void {
+    if (from !== this.decoder) return;
+    this.anchorError ??= new VideoEngineError(
+      VideoEngineErrorCode.DecoderStalled,
+      "DecodeSession: the decoder reported an error",
+      error,
+    );
     this.wake?.();
   }
 
@@ -627,11 +789,17 @@ export class DecodeSession implements SessionFrameSource {
    *  cause a caller is handed is the one that started the failure rather than
    *  whichever consequence surfaced last. */
   private stall(what: string, cause?: unknown): VideoEngineError {
-    this.stalledError ??= new VideoEngineError(
-      VideoEngineErrorCode.DecoderStalled,
-      `DecodeSession: ${what}`,
-      cause,
+    return this.latch(
+      new VideoEngineError(
+        VideoEngineErrorCode.DecoderStalled,
+        `DecodeSession: ${what}`,
+        cause,
+      ),
     );
+  }
+
+  private latch(error: VideoEngineError): VideoEngineError {
+    this.stalledError ??= error;
     return this.stalledError;
   }
 

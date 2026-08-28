@@ -698,6 +698,40 @@ describe("EngineCore", () => {
     await engine.dispose();
   });
 
+  it("the transport cannot leave the decode failure behind", async () => {
+    const clock = new FakeClock();
+    const cursor = makeFakeCursor();
+    const decode: { reportFailure?: (error: VideoEngineError) => void } = {};
+    vi.spyOn(factoryModule, "createScrubCursor").mockImplementation(
+      async (options) => {
+        decode.reportFailure = options.onDecodeFailure;
+        return cursor;
+      },
+    );
+    const events: MirrorEvent[] = [];
+    const engine = new EngineCore({
+      emit: (event) => events.push(event),
+      clock,
+    });
+    await engine.load(LOAD_CONFIG);
+    decode.reportFailure?.(
+      new VideoEngineError(
+        VideoEngineErrorCode.DecoderStalled,
+        "the decoder never started",
+      ),
+    );
+
+    engine.play();
+    // Nothing about pressing play makes the source decodable, so a transport
+    // that answers "playing" is describing a picture that will never change.
+    expect(statusesOf(events).at(-1)).toBe(PlaybackStatus.Errored);
+    expect(clock.playing).toBe(false);
+
+    engine.pause();
+    expect(statusesOf(events).at(-1)).toBe(PlaybackStatus.Errored);
+    await engine.dispose();
+  });
+
   describe("diagnostics broadcast", () => {
     it("diagnosticsStart posts a diag snapshot at the requested cadence", async () => {
       vi.useFakeTimers();
