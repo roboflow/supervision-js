@@ -77,7 +77,7 @@ import {
   type UploadRunRequest,
 } from "../session/upload-session";
 import {
-  emptyDemoSessionOptions,
+  scrubbableDemoSessionOptions,
   type DemoSessionConfiguration,
   type DemoSessionOptions,
 } from "../session/session-options";
@@ -320,7 +320,7 @@ export function useDemoRenderer(
     (UploadRunRequest & { readonly id: number }) | null
   >(null);
   const [sessionOptions, setSessionOptionsState] = useState<DemoSessionOptions>(
-    emptyDemoSessionOptions,
+    scrubbableDemoSessionOptions,
   );
   const [sessionConfiguration, setSessionConfiguration] =
     useState<DemoSessionConfiguration | null>(null);
