@@ -98,6 +98,34 @@ The engine also stands alone. Nothing in it depends on `supervision`, so an
 application that wants frame-accurate decoding, scrubbing, or offline frame
 extraction without the annotation stack can use it on its own.
 
+### Files Whose Groups Do Not Start With A Keyframe Now Play
+
+Most encoders emit open GOPs by default. In such a file, some of the entry
+points the container advertises cannot legally be decoded from, because the
+picture after them refers back to pictures a fresh decoder never had. Opening at
+one produced a black player that still reported it was playing.
+
+An entry point is now resolved rather than assumed. When a decoder rejects the
+container's, the engine resolves it again from the bitstream, lands on the
+enclosing keyframe, and walks forward to the frame that was asked for. A failed
+entry point condemns itself rather than the session, and a decode failure the
+runtime has given up on is terminal, so nothing afterwards reports the source as
+healthy. A file whose entry points are all usable decodes with no extra probing.
+
+### A Seek Made Before The First Frame Lands Where It Was Aimed
+
+Seeking as the very first thing a session does was accepted and then silently
+reverted to the start. A pending seek records the frame it aimed at, so a frame
+decoded for something else is not mistaken for its answer.
+
+### Composed Detections Keep Their Own Frame
+
+A session composing detections from more than one source rebuilt each slot's
+media time from a nominal frame rate, which put the marks on the neighbouring
+frame for any clip not running at exactly that rate. Sources are paired by the
+frame index both sides already carry, so a clip's real rate cannot walk the
+pairing off.
+
 ## What Changed Underneath
 
 - **Presentation is push, not pull.** The producer presents a frame and the
