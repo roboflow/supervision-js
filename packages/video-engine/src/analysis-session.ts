@@ -99,10 +99,28 @@ export class AnalysisSession {
   async extractFrames(
     timestampsS: readonly number[],
   ): Promise<ExtractedFrame[]> {
-    if (this.closed || timestampsS.length === 0) return [];
     const sorted = [...timestampsS].sort((a, b) => a - b);
     const frames: ExtractedFrame[] = [];
-    const iter = this.sink.canvasesAtTimestamps(sorted);
+    for await (const frame of this.framesAtTimestamps(sorted)) {
+      if (frame) frames.push(frame);
+    }
+    return frames;
+  }
+
+  /**
+   * One frame per requested timestamp, in the order asked for, `null` where no
+   * frame covers it, so a caller pairing frames with its own indices keeps the
+   * gaps attributable. Timestamps that climb decode in a single pass over the
+   * track: one seek and GOP walk for the whole set.
+   *
+   * A consumer that finishes with each frame before pulling the next holds one
+   * frame of memory; {@link extractFrames} holds the whole set.
+   */
+  async *framesAtTimestamps(
+    timestampsS: readonly number[],
+  ): AsyncGenerator<ExtractedFrame | null, void, unknown> {
+    if (this.closed || timestampsS.length === 0) return;
+    const iter = this.sink.canvasesAtTimestamps(timestampsS);
     try {
       for (
         let result = await iter.next();
@@ -110,16 +128,15 @@ export class AnalysisSession {
         result = await iter.next()
       ) {
         if (this.closed) break;
-        if (result.value) frames.push(this.copyFrame(result.value));
+        yield result.value ? this.copyFrame(result.value) : null;
       }
     } catch (error) {
-      // A concurrent close() disposes the source mid-decode; resolve with
-      // the frames gathered so far rather than rejecting on the teardown.
+      // A concurrent close() disposes the source mid-decode; end the stream on
+      // the frames already yielded rather than throwing on the teardown.
       if (!this.closed) throw error;
     } finally {
       void iter.return();
     }
-    return frames;
   }
 
   async close(): Promise<void> {

@@ -23,6 +23,16 @@ export interface DecodedVideoSampleSink {
     endTimestamp?: number,
     options?: { skipLiveWait?: boolean },
   ): AsyncGenerator<DecodedVideoSample, void, unknown>;
+  /**
+   * A sample per timestamp, in the order asked for, `null` where no frame
+   * covers it, over a single pass across the track. Optional: a caller with a
+   * whole set in hand takes this where a source offers it, and otherwise pays
+   * a seek per {@link DecodedVideoSampleSink.getSample}.
+   */
+  samplesAtTimestamps?(
+    timestamps: Iterable<number>,
+    options?: { skipLiveWait?: boolean },
+  ): AsyncGenerator<DecodedVideoSample | null, void, unknown>;
 }
 
 export interface DisposableMediaInput {

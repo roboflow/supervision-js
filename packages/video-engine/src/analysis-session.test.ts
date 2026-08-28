@@ -32,6 +32,8 @@ const SRC = { width: 1280, height: 720 } as unknown as OffscreenCanvas;
 
 class FakeSink implements CanvasFrameSource {
   readonly atTimestampsCalls: number[] = [];
+  /** One entry per iterator driven, which is one seek and GOP walk each. */
+  readonly passes: number[][] = [];
 
   constructor(private readonly missing = new Set<number>()) {}
 
@@ -44,8 +46,12 @@ class FakeSink implements CanvasFrameSource {
   async *canvasesAtTimestamps(
     timestamps: Iterable<number>,
   ): AsyncGenerator<WrappedCanvasLike | null, void, unknown> {
+    const pass: number[] = [];
+    this.passes.push(pass);
+
     for (const t of timestamps) {
       this.atTimestampsCalls.push(t);
+      pass.push(t);
       yield this.missing.has(t) ? null : { canvas: SRC, timestamp: t };
     }
   }
@@ -129,9 +135,48 @@ describe("AnalysisSession", () => {
     expect(frames.map((f) => f.timestampS)).toEqual([1, 3]);
   });
 
+  it("extractFrames decodes the whole set in one pass", async () => {
+    const { session, sink } = makeSession();
+    await session.extractFrames([1, 2, 3]);
+
+    expect(sink.passes).toEqual([[1, 2, 3]]);
+  });
+
   it("extractFrames is empty for empty input", async () => {
     const { session } = makeSession();
     expect(await session.extractFrames([])).toEqual([]);
+  });
+
+  it("framesAtTimestamps decodes the whole set in one pass", async () => {
+    const { session, sink } = makeSession();
+    const frames = [];
+    for await (const frame of session.framesAtTimestamps([1, 2, 3])) {
+      frames.push(frame);
+    }
+
+    expect(sink.passes).toEqual([[1, 2, 3]]);
+    expect(frames.map((f) => f?.timestampS)).toEqual([1, 2, 3]);
+  });
+
+  it("framesAtTimestamps keeps a gap on the timestamp it belongs to", async () => {
+    const { session } = makeSession({ missing: new Set([2]) });
+    const frames = [];
+    for await (const frame of session.framesAtTimestamps([1, 2, 3])) {
+      frames.push(frame);
+    }
+
+    expect(frames.map((f) => f?.timestampS ?? null)).toEqual([1, null, 3]);
+  });
+
+  it("framesAtTimestamps yields in the order asked for", async () => {
+    const { session, sink } = makeSession();
+    const frames = [];
+    for await (const frame of session.framesAtTimestamps([3, 1, 2])) {
+      frames.push(frame);
+    }
+
+    expect(sink.passes).toEqual([[3, 1, 2]]);
+    expect(frames.map((f) => f?.timestampS)).toEqual([3, 1, 2]);
   });
 
   it("close disposes the source and stops extraction", async () => {

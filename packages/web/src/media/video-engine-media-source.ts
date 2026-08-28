@@ -217,6 +217,14 @@ function createAnalysisFrameReader(options: {
         yield createSample(frame, options.frameDuration);
       }
     },
+    async *samplesAtTimestamps(timestamps) {
+      if (closed) return;
+      const session = await openSession();
+
+      for await (const frame of session.framesAtTimestamps([...timestamps])) {
+        yield frame ? createSample(frame, options.frameDuration) : null;
+      }
+    },
   };
 
   const close = async () => {

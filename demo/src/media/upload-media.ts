@@ -1,4 +1,8 @@
-import type { DecodedVideoSampleSink, MediaRenderer } from "supervision";
+import type {
+  DecodedVideoSample,
+  DecodedVideoSampleSink,
+  MediaRenderer,
+} from "supervision";
 
 export const TARGET_UPLOAD_FRAME_RATE = 30;
 const IMAGE_MEDIA_DURATION_SECONDS = 1;
@@ -107,45 +111,74 @@ export async function* extractInferenceFrameBatches(options: {
     throw new Error("Unable to create upload inference canvas.");
   }
 
-  let frames: ExtractedInferenceFrame[] = [];
-
   for (
-    let frameIndex = 0;
-    frameIndex < options.media.frameCount;
-    frameIndex += 1
+    let startFrameIndex = 0;
+    startFrameIndex < options.media.frameCount;
+    startFrameIndex += batchSize
   ) {
     throwIfAborted(options.signal);
 
-    const sample = await options.sampleSink.getSample(
-      (frameIndex + 0.5) / options.media.frameRate,
-      { skipLiveWait: true },
+    const count = Math.min(
+      batchSize,
+      options.media.frameCount - startFrameIndex,
     );
+    const timestamps = Array.from(
+      { length: count },
+      (_, offset) => (startFrameIndex + offset + 0.5) / options.media.frameRate,
+    );
+    const frames: ExtractedInferenceFrame[] = [];
+    let offset = 0;
 
-    if (!sample) {
-      throw new Error(`Unable to decode uploaded frame #${frameIndex}.`);
+    for await (const sample of readBatchSamples(
+      options.sampleSink,
+      timestamps,
+    )) {
+      throwIfAborted(options.signal);
+
+      const frameIndex = startFrameIndex + offset;
+
+      offset += 1;
+
+      if (!sample) {
+        throw new Error(`Unable to decode uploaded frame #${frameIndex}.`);
+      }
+
+      try {
+        sample.draw(context, 0, 0, canvas.width, canvas.height);
+      } finally {
+        sample.close();
+      }
+
+      frames.push({
+        duration: sample.duration,
+        frameIndex,
+        imageBase64: await canvasToJpegBase64(canvas, quality),
+        mediaTime: sample.timestamp,
+      });
     }
 
-    try {
-      sample.draw(context, 0, 0, canvas.width, canvas.height);
-    } finally {
-      sample.close();
-    }
-
-    frames.push({
-      duration: sample.duration,
-      frameIndex,
-      imageBase64: await canvasToJpegBase64(canvas, quality),
-      mediaTime: sample.timestamp,
-    });
-
-    if (frames.length === batchSize) {
+    if (frames.length > 0) {
       yield frames;
-      frames = [];
     }
   }
+}
 
-  if (frames.length > 0) {
-    yield frames;
+function readBatchSamples(
+  sampleSink: DecodedVideoSampleSink,
+  timestamps: readonly number[],
+): AsyncGenerator<DecodedVideoSample | null, void, unknown> {
+  return (
+    sampleSink.samplesAtTimestamps?.(timestamps, { skipLiveWait: true }) ??
+    readSamplesOneAtATime(sampleSink, timestamps)
+  );
+}
+
+async function* readSamplesOneAtATime(
+  sampleSink: DecodedVideoSampleSink,
+  timestamps: readonly number[],
+): AsyncGenerator<DecodedVideoSample | null, void, unknown> {
+  for (const timestamp of timestamps) {
+    yield await sampleSink.getSample(timestamp, { skipLiveWait: true });
   }
 }
 

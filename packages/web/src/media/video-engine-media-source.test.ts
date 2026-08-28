@@ -33,6 +33,7 @@ const engine = vi.hoisted(() => ({
 const analysis = vi.hoisted(() => ({
   close: vi.fn(async () => undefined),
   extractFrames: vi.fn(),
+  framesAtTimestamps: vi.fn(),
   open: vi.fn(),
 }));
 
@@ -90,18 +91,23 @@ function createFrames(timestamps: readonly number[]): FakeFrame[] {
  * timestamp past the end of the track.
  */
 function stubExtraction(frames: readonly FakeFrame[]) {
+  const covering = (timestamp: number) =>
+    frames.reduce<FakeFrame | null>(
+      (found, frame) => (frame.timestampS <= timestamp + 1e-6 ? frame : found),
+      null,
+    );
+
   analysis.extractFrames.mockImplementation(
     async (timestamps: readonly number[]) =>
       timestamps
-        .map((timestamp) =>
-          frames.reduce<FakeFrame | null>(
-            (covering, frame) =>
-              frame.timestampS <= timestamp + 1e-6 ? frame : covering,
-            null,
-          ),
-        )
+        .map(covering)
         .filter((frame): frame is FakeFrame => frame !== null),
   );
+  analysis.framesAtTimestamps.mockImplementation(async function* (
+    timestamps: readonly number[],
+  ) {
+    for (const timestamp of timestamps) yield covering(timestamp);
+  });
 }
 
 async function collectTimestamps(
@@ -120,6 +126,7 @@ describe("video engine media source", () => {
     analysis.open.mockResolvedValue({
       close: analysis.close,
       extractFrames: analysis.extractFrames,
+      framesAtTimestamps: analysis.framesAtTimestamps,
     });
     stubExtraction(createFrames([0, 0.04, 0.08]));
   });
@@ -203,6 +210,38 @@ describe("video engine media source", () => {
       30,
       40,
     );
+  });
+
+  it("grabs a set of timestamps in one extraction", async () => {
+    const source = await openVideoEngineMediaSource({ source: urlSource });
+
+    const timestamps = [];
+    for await (const sample of source.sampleSink.samplesAtTimestamps!([
+      0.01, 0.05, 0.09,
+    ])) {
+      timestamps.push(sample?.timestamp ?? null);
+    }
+
+    expect(analysis.framesAtTimestamps).toHaveBeenCalledTimes(1);
+    expect(analysis.framesAtTimestamps).toHaveBeenCalledWith([
+      0.01, 0.05, 0.09,
+    ]);
+    expect(analysis.extractFrames).not.toHaveBeenCalled();
+    expect(timestamps).toEqual([0, 0.04, 0.08]);
+  });
+
+  it("keeps a gap on the timestamp it belongs to", async () => {
+    stubExtraction(createFrames([0.04]));
+    const source = await openVideoEngineMediaSource({ source: urlSource });
+
+    const timestamps = [];
+    for await (const sample of source.sampleSink.samplesAtTimestamps!([
+      0.01, 0.05,
+    ])) {
+      timestamps.push(sample?.timestamp ?? null);
+    }
+
+    expect(timestamps).toEqual([null, 0.04]);
   });
 
   it("refuses to draw a closed sample", async () => {
