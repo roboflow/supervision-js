@@ -237,6 +237,14 @@ export interface MediaRendererState {
    * delay before it appears, and owes them `scrubbing` too: a viewer dragging
    * the playhead is not waiting for the picture, they are leading it.
    *
+   * It answers for the transport, which settles one message before the frame it
+   * landed on reaches this thread. In that window the picture on screen is the
+   * cached stand-in the seek painted on its way out, which can be a quarter of a
+   * second from the frame requested, while this already reads false. A host that
+   * needs "is the right picture up" should compare the presented frame's own
+   * media time; reading a position the instant a seek resolves can return a
+   * frame that was never asked for.
+   *
    * Optional so a host holding a state it built before this field existed still
    * satisfies the type.
    */
