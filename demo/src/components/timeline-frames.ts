@@ -10,7 +10,7 @@
 import {
   FrameTimeline,
   type FrameTimelineData,
-} from "supervision-js-video-engine";
+} from "supervision-js-web-video-engine";
 
 /** A frame, by the two names a readout needs. */
 export interface TimelineFrame {

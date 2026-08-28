@@ -16,7 +16,7 @@ import {
 import type {
   SourceResidencyConfig,
   VideoEngineOptions,
-} from "supervision-js-video-engine";
+} from "supervision-js-web-video-engine";
 
 import { DEMO_SOURCE_RESIDENCY_BUDGET_MB } from "./source-residency";
 

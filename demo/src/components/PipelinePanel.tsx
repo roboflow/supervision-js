@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useState } from "react";
-import type { DiagnosticsSnapshot } from "supervision-js-video-engine";
+import type { DiagnosticsSnapshot } from "supervision-js-web-video-engine";
 
 import type { EngineDiagnosticsTap } from "../diagnostics/engine-diagnostics-tap";
 import { formatMb } from "../diagnostics/engine-metrics";

@@ -8,9 +8,9 @@ import {
   type DetectionFrame,
   type MediaRendererSource,
 } from "supervision";
-import { SourceKind } from "supervision-js-video-engine";
+import { SourceKind } from "supervision-js-web-video-engine";
 import { delayDetectionFetch } from "../diagnostics/slow-work";
-import type { DisplayBoxResolutionOptions } from "supervision-js-video-engine";
+import type { DisplayBoxResolutionOptions } from "supervision-js-web-video-engine";
 import type {
   DemoPresentationAvailability,
   DemoPresentationLayerSetting,

@@ -1,4 +1,4 @@
-import type { DiagnosticsSnapshot } from "supervision-js-video-engine";
+import type { DiagnosticsSnapshot } from "supervision-js-web-video-engine";
 
 /**
  * The engine diagnostics panel's metric registry, mirrored for the demo.

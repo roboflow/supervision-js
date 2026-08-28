@@ -151,8 +151,8 @@ const packageConfig = {
   external(source) {
     return (
       source === "mediabunny" ||
-      source === "supervision-js-video-engine" ||
-      source.startsWith("supervision-js-video-engine/") ||
+      source === "supervision-js-web-video-engine" ||
+      source.startsWith("supervision-js-web-video-engine/") ||
       source === "pixi.js" ||
       source.startsWith("pixi.js/") ||
       source === "supervision-js-core"

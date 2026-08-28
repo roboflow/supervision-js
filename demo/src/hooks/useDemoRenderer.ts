@@ -17,7 +17,7 @@ import {
   type MediaSourceState,
   type RenderPreparationDiagnostics,
 } from "supervision";
-import type { FrameTimelineData } from "supervision-js-video-engine";
+import type { FrameTimelineData } from "supervision-js-web-video-engine";
 import {
   createEngineDiagnosticsTap,
   type EngineDiagnosticsTap,

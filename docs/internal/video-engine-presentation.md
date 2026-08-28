@@ -14,10 +14,10 @@ law for future edits.
 ## The Engine Boundary
 
 The engine is the `packages/video-engine` workspace, published on its own as
-`supervision-js-video-engine`. Two specifiers carry code, and nothing else:
-`supervision-js-video-engine` and `supervision-js-video-engine/analysis`, the
+`supervision-js-web-video-engine`. Two specifiers carry code, and nothing else:
+`supervision-js-web-video-engine` and `supervision-js-web-video-engine/analysis`, the
 second being the only one that pulls Mediabunny. A third export,
-`supervision-js-video-engine/worker`, is the built worker as a deployment asset
+`supervision-js-web-video-engine/worker`, is the built worker as a deployment asset
 for hosts whose CSP forbids `blob:` workers. `no-restricted-imports` in
 `eslint.config.js` errors on any other entry, and on relative paths into
 `packages/video-engine/src`, so importers cannot bind themselves to the engine's

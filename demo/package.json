@@ -13,7 +13,7 @@
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "supervision": "file:../packages/web",
-    "supervision-js-video-engine": "file:../packages/video-engine"
+    "supervision-js-web-video-engine": "file:../packages/video-engine"
   },
   "devDependencies": {
     "@types/react": "^19.2.18",

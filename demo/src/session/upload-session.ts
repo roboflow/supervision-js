@@ -11,7 +11,7 @@ import {
   type MediaRendererSource,
   type WritableDetectionFrameSource,
 } from "supervision";
-import { SourceKind } from "supervision-js-video-engine";
+import { SourceKind } from "supervision-js-web-video-engine";
 import type {
   DemoFixtureDetectionSourceSummary,
   DemoFixtureSummary,

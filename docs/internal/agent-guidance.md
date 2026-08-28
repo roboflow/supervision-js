@@ -113,7 +113,7 @@ toolbar value is a checked presentation mirror.
   composites it. It is opt-in: `createMediaSession()` reaches it only when a host
   passes `createVideoEngineMediaRendererSource()`, and the pull path still serves
   the `src` route, normalization output, and `MediaStream` inputs.
-  `supervision-js-video-engine` and `supervision-js-video-engine/analysis` are the
+  `supervision-js-web-video-engine` and `supervision-js-web-video-engine/analysis` are the
   only entries that carry code, and ESLint enforces that. Read
   [`video-engine-presentation.md`](video-engine-presentation.md) before changing
   any of it.
@@ -212,7 +212,7 @@ watchers running next to the demo server. `npm run demo:dev` builds once before
 starting the server, and `npm run dev:demo` does not build at all, so under
 either of those every library edit needs `npm run build` before the browser can
 run it. The watchers rebuild JavaScript only; `npm run build` is also what
-refreshes the `supervision` and `supervision-js-video-engine` declarations the
+refreshes the `supervision` and `supervision-js-web-video-engine` declarations the
 demo typechecks against.
 
 For focused iterative work, use separate terminals:

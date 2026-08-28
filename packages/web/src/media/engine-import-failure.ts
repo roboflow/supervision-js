@@ -1,4 +1,4 @@
-export const VIDEO_ENGINE_PACKAGE = "supervision-js-video-engine";
+export const VIDEO_ENGINE_PACKAGE = "supervision-js-web-video-engine";
 export const VIDEO_ENGINE_ANALYSIS_ENTRY = `${VIDEO_ENGINE_PACKAGE}/analysis`;
 
 const MISSING_MODULE_ERROR_CODES = new Set([

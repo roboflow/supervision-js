@@ -23,7 +23,7 @@ describe("engine import failure", () => {
         VIDEO_ENGINE_PACKAGE,
       ),
     ).toThrow(
-      /openVideoEngineMediaSource needs "supervision-js-video-engine".*npm install supervision-js-video-engine/s,
+      /openVideoEngineMediaSource needs "supervision-js-web-video-engine".*npm install supervision-js-web-video-engine/s,
     );
   });
 
@@ -33,7 +33,7 @@ describe("engine import failure", () => {
         nodeNotFound(VIDEO_ENGINE_ANALYSIS_ENTRY),
         VIDEO_ENGINE_ANALYSIS_ENTRY,
       ),
-    ).toThrow(/needs "supervision-js-video-engine\/analysis"/);
+    ).toThrow(/needs "supervision-js-web-video-engine\/analysis"/);
   });
 
   it("keeps the original failure as the cause", () => {
@@ -65,7 +65,7 @@ describe("engine import failure", () => {
     expect(
       isEngineResolutionFailure(
         new Error(
-          "Failed to fetch dynamically imported module: https://cdn.example.com/supervision-js-video-engine/dist/index.js",
+          "Failed to fetch dynamically imported module: https://cdn.example.com/supervision-js-web-video-engine/dist/index.js",
         ),
       ),
     ).toBe(true);

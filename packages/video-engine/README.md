@@ -1,4 +1,4 @@
-# supervision-js-video-engine
+# supervision-js-web-video-engine
 
 Frame-accurate video decoding, scrubbing, and playback for the browser, built on
 [WebCodecs](https://developer.mozilla.org/docs/Web/API/WebCodecs_API) and
@@ -9,7 +9,7 @@ playhead on the frame a caller asked for.
 ## Installation
 
 ```sh
-npm install supervision-js-video-engine
+npm install supervision-js-web-video-engine
 ```
 
 [`supervision`](https://www.npmjs.com/package/supervision) declares this package
@@ -22,11 +22,11 @@ The engine also stands alone. Nothing in it depends on `supervision`.
 
 ## Entry Points
 
-| Entry                                  | Contents                                                                                               |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `supervision-js-video-engine`          | `VideoEngine`, the frame timeline, seek units, decode-resolution strategies, errors and diagnostics    |
-| `supervision-js-video-engine/analysis` | `AnalysisSession`, `FrameExtractor`, `FrameWalker` for pulling frames out of a source without a player |
-| `supervision-js-video-engine/worker`   | The decode worker as a module URL                                                                      |
+| Entry                                      | Contents                                                                                               |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| `supervision-js-web-video-engine`          | `VideoEngine`, the frame timeline, seek units, decode-resolution strategies, errors and diagnostics    |
+| `supervision-js-web-video-engine/analysis` | `AnalysisSession`, `FrameExtractor`, `FrameWalker` for pulling frames out of a source without a player |
+| `supervision-js-web-video-engine/worker`   | The decode worker as a module URL                                                                      |
 
 The two module entries are split so that importing a player type never pulls the
 demuxer into a bundle: opening a source reaches it, reading state does not.

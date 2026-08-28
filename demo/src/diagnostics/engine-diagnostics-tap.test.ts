@@ -4,7 +4,7 @@ import {
   DIAGNOSTICS,
   TRACE_RING_BOUNDS,
   type DiagnosticsSnapshot,
-} from "supervision-js-video-engine";
+} from "supervision-js-web-video-engine";
 import type { MediaRendererSource } from "supervision";
 import {
   createEngineDiagnosticsTap,

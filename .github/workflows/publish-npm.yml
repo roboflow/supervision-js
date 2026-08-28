@@ -115,13 +115,13 @@ jobs:
           set -euo pipefail
           version="$(node -p "require('./packages/video-engine/package.json').version")"
 
-          if published_version="$(npm view "supervision-js-video-engine@${version}" version 2>/dev/null)"; then
+          if published_version="$(npm view "supervision-js-web-video-engine@${version}" version 2>/dev/null)"; then
             if [[ "${published_version}" != "${version}" ]]; then
-              echo "Unexpected published version for supervision-js-video-engine@${version}: ${published_version}" >&2
+              echo "Unexpected published version for supervision-js-web-video-engine@${version}: ${published_version}" >&2
               exit 1
             fi
 
-            echo "supervision-js-video-engine@${version} is already published; this release does not change it."
+            echo "supervision-js-web-video-engine@${version} is already published; this release does not change it."
             echo "published=false" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
@@ -148,9 +148,9 @@ jobs:
           fi
 
           shopt -s nullglob
-          archives=(artifacts/engine/supervision-js-video-engine-*.tgz)
+          archives=(artifacts/engine/supervision-js-web-video-engine-*.tgz)
           if [ "${#archives[@]}" -ne 1 ]; then
-            echo "Expected exactly one generated supervision-js-video-engine tarball." >&2
+            echo "Expected exactly one generated supervision-js-web-video-engine tarball." >&2
             exit 1
           fi
           npm publish "./${archives[0]}" --access public --tag "${DIST_TAG}"
@@ -213,18 +213,18 @@ jobs:
           version="$(node -p "require('./packages/video-engine/package.json').version")"
 
           for attempt in {1..12}; do
-            published_version="$(npm view "supervision-js-video-engine@${DIST_TAG}" version 2>/dev/null || true)"
+            published_version="$(npm view "supervision-js-web-video-engine@${DIST_TAG}" version 2>/dev/null || true)"
             if [[ "${published_version}" == "${version}" ]]; then
               exit 0
             fi
 
             if [[ "${attempt}" -lt 12 ]]; then
-              echo "Waiting for supervision-js-video-engine@${DIST_TAG} to resolve to ${version} (attempt ${attempt}/12)."
+              echo "Waiting for supervision-js-web-video-engine@${DIST_TAG} to resolve to ${version} (attempt ${attempt}/12)."
               sleep 5
             fi
           done
 
-          echo "supervision-js-video-engine@${DIST_TAG} did not resolve to ${version} after 60 seconds; saw ${published_version:-nothing}." >&2
+          echo "supervision-js-web-video-engine@${DIST_TAG} did not resolve to ${version} after 60 seconds; saw ${published_version:-nothing}." >&2
           exit 1
 
       - name: Verify published npm dist-tag

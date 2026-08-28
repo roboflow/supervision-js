@@ -1,7 +1,7 @@
 # npm Release Operations
 
 This repository publishes two public packages: `supervision` and
-`supervision-js-video-engine`. The root workspace, `supervision-js-trackers`,
+`supervision-js-web-video-engine`. The root workspace, `supervision-js-trackers`,
 `supervision-js-core`, and `supervision-js-react-native` remain private. The
 tracker workspace is compiled into core rather than shipped as another
 installable package.
@@ -9,11 +9,11 @@ installable package.
 `supervision` is published as the portable tarball assembled by
 `tools/pack-web-tarball.mjs`; it embeds the private core package without
 exposing the workspace-relative `file:../core` dependency.
-`supervision-js-video-engine` depends only on registry packages, so `npm pack`
+`supervision-js-web-video-engine` depends only on registry packages, so `npm pack`
 on its workspace already produces a portable archive. It is the optional peer
 that `supervision` loads through a dynamic import, and the install command
 `supervision` names when that import fails is `npm install
-supervision-js-video-engine`.
+supervision-js-web-video-engine`.
 
 ## Release Boundary
 
@@ -22,7 +22,7 @@ generated file per package:
 
 ```text
 artifacts/supervision-<version>.tgz
-artifacts/engine/supervision-js-video-engine-<version>.tgz
+artifacts/engine/supervision-js-web-video-engine-<version>.tgz
 ```
 
 The engine archive is written to its own directory so the browser archive's
@@ -50,7 +50,7 @@ published and skips it.
 
 ## Publication Access
 
-The package names are `supervision` and `supervision-js-video-engine`; the
+The package names are `supervision` and `supervision-js-web-video-engine`; the
 repository remains `supervision-js`. Keep this ownership and security posture in
 place:
 
@@ -82,13 +82,13 @@ release of a new public package, a maintainer registers the name from their own
 machine and then configures its trusted publisher:
 
 ```sh
-npm trust github supervision-js-video-engine \
+npm trust github supervision-js-web-video-engine \
   --file publish-npm.yml \
   --repository roboflow/supervision-js \
   --environment npm-publish
 ```
 
-`npm trust list supervision-js-video-engine` reads back what was registered.
+`npm trust list supervision-js-web-video-engine` reads back what was registered.
 
 `npm trust` needs npm 11.10 or later. Without it, the fallback is one manual
 authenticated publish of a placeholder version below the first real release,
@@ -113,7 +113,7 @@ SemVer itself treats `0.y.z` as initial development. A package's first release
 enters that line at `0.1.0`. Changes limited to private React Native
 experiments do not by themselves change either published version.
 
-`packages/web/package.json` declares `supervision-js-video-engine` as an
+`packages/web/package.json` declares `supervision-js-web-video-engine` as an
 optional peer with a caret range. Bump that range whenever the engine's minor
 version moves, because a `0.x` caret stops at the next minor and a stale range
 tells consumers to install an engine the browser package cannot use.
@@ -151,7 +151,7 @@ tells consumers to install an engine the browser package cannot use.
    npm view supervision dist-tags --json
    npm view supervision@<version> version
    npm pack supervision@<version>
-   npm view supervision-js-video-engine dist-tags --json
+   npm view supervision-js-web-video-engine dist-tags --json
    ```
 
 7. Confirm that the GitHub Release `v<version>` points at the same `main`

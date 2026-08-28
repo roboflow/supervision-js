@@ -21,7 +21,7 @@ import {
   createMediaSession,
   createVideoEngineMediaRendererSource,
 } from "supervision";
-import { SourceKind } from "supervision-js-video-engine";
+import { SourceKind } from "supervision-js-web-video-engine";
 
 const session = await createMediaSession({
   container,
@@ -86,12 +86,12 @@ const defaults = resolveMediaSessionDefaults({ mode, detections });
 
 ### The Engine Installs Separately
 
-The video engine ships as `supervision-js-video-engine` at `0.1.0`, versioned
+The video engine ships as `supervision-js-web-video-engine` at `0.1.0`, versioned
 independently. `supervision` declares it as an optional peer and loads it
 through a dynamic import, so installing `supervision` does not install it:
 
 ```sh
-npm install supervision-js-video-engine
+npm install supervision-js-web-video-engine
 ```
 
 The engine also stands alone. Nothing in it depends on `supervision`, so an

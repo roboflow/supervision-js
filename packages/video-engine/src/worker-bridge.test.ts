@@ -11,7 +11,7 @@ describe("createEngineWorker", () => {
     const blobs: Array<{ options?: BlobPropertyBag; parts?: BlobPart[] }> = [];
     const workerCalls: Array<{ options?: WorkerOptions; url: string | URL }> =
       [];
-    const createObjectURL = vi.fn(() => "blob:supervision-js-video-engine");
+    const createObjectURL = vi.fn(() => "blob:supervision-js-web-video-engine");
 
     class FakeBlob {
       constructor(parts?: BlobPart[], options?: BlobPropertyBag) {
@@ -41,12 +41,12 @@ describe("createEngineWorker", () => {
     expect(createObjectURL).toHaveBeenCalledTimes(1);
     expect(workerCalls).toEqual([
       {
-        options: { name: "supervision-js-video-engine" },
-        url: "blob:supervision-js-video-engine",
+        options: { name: "supervision-js-web-video-engine" },
+        url: "blob:supervision-js-web-video-engine",
       },
       {
-        options: { name: "supervision-js-video-engine" },
-        url: "blob:supervision-js-video-engine",
+        options: { name: "supervision-js-web-video-engine" },
+        url: "blob:supervision-js-web-video-engine",
       },
     ]);
   });

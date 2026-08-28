@@ -13,11 +13,11 @@ import type {
   VideoEngine,
   VideoEngineOptions,
   VideoSource,
-} from "supervision-js-video-engine";
+} from "supervision-js-web-video-engine";
 import type {
   AnalysisSession,
   ExtractedFrame,
-} from "supervision-js-video-engine/analysis";
+} from "supervision-js-web-video-engine/analysis";
 
 import { resolveDisplayPixelRatio } from "./display-pixel-ratio";
 import {
@@ -128,7 +128,7 @@ export function createVideoEngineMediaRendererSource(
  */
 async function importEngineEntry() {
   try {
-    return await import("supervision-js-video-engine");
+    return await import("supervision-js-web-video-engine");
   } catch (error) {
     rethrowEngineImportFailure(error, VIDEO_ENGINE_PACKAGE);
   }
@@ -136,7 +136,7 @@ async function importEngineEntry() {
 
 async function importAnalysisEntry() {
   try {
-    return await import("supervision-js-video-engine/analysis");
+    return await import("supervision-js-web-video-engine/analysis");
   } catch (error) {
     rethrowEngineImportFailure(error, VIDEO_ENGINE_ANALYSIS_ENTRY);
   }

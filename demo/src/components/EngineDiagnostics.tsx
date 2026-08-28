@@ -10,7 +10,7 @@ import {
   TRACE_RING_BOUNDS,
   type DiagnosticsSnapshot,
   type Warning,
-} from "supervision-js-video-engine";
+} from "supervision-js-web-video-engine";
 import type { EngineDiagnosticsTap } from "../diagnostics/engine-diagnostics-tap";
 import {
   engineMetricGroups,

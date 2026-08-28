@@ -17,7 +17,7 @@ import { MediaRendererPlaybackState } from "supervision";
 import type {
   FrameTimelineData,
   SourceResidencyDiagnostics,
-} from "supervision-js-video-engine";
+} from "supervision-js-web-video-engine";
 import { formatTime, formatTimeRange, toSourceTimeRange } from "../format";
 import { DemoEvalHook } from "../eval-hooks";
 import {

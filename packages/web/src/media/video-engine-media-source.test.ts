@@ -1,5 +1,5 @@
-import { SourceKind } from "supervision-js-video-engine";
-import type { UrlVideoSource } from "supervision-js-video-engine";
+import { SourceKind } from "supervision-js-web-video-engine";
+import type { UrlVideoSource } from "supervision-js-web-video-engine";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -57,9 +57,9 @@ const analysisModule = vi.hoisted(() => () => ({
   AnalysisSession: { open: analysis.open },
 }));
 
-vi.mock("supervision-js-video-engine", engineModule);
+vi.mock("supervision-js-web-video-engine", engineModule);
 
-vi.mock("supervision-js-video-engine/analysis", analysisModule);
+vi.mock("supervision-js-web-video-engine/analysis", analysisModule);
 
 const READY_SNAPSHOT: ReadySnapshot = {
   canDecode: true,

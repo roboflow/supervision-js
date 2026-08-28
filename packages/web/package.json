@@ -103,10 +103,10 @@
     "supervision-js-core": "file:../core"
   },
   "peerDependencies": {
-    "supervision-js-video-engine": "^0.1.0"
+    "supervision-js-web-video-engine": "^0.1.0"
   },
   "peerDependenciesMeta": {
-    "supervision-js-video-engine": {
+    "supervision-js-web-video-engine": {
       "optional": true
     }
   }

@@ -1,6 +1,6 @@
 import { EMBEDDED_ENGINE_WORKER_SOURCE } from "./embedded-engine-worker";
 
-const WORKER_NAME = "supervision-js-video-engine";
+const WORKER_NAME = "supervision-js-web-video-engine";
 let workerUrl: string | undefined;
 
 /**

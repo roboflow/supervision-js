@@ -1,5 +1,5 @@
 import { MediaErrorKind } from "supervision-js-core";
-import type { VideoEngineErrorCode } from "supervision-js-video-engine";
+import type { VideoEngineErrorCode } from "supervision-js-web-video-engine";
 
 /**
  * The kind each engine refusal already stands for. An engine failure names its

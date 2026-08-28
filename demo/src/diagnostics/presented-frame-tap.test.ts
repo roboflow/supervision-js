@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type {
   PresentedFrame,
   PresentedFrameHandler,
-} from "supervision-js-video-engine";
+} from "supervision-js-web-video-engine";
 import type { MediaRendererSource } from "supervision";
 import {
   createPresentedFrameTap,

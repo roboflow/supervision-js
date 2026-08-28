@@ -1,4 +1,4 @@
-import type { FrameTimelineData } from "supervision-js-video-engine";
+import type { FrameTimelineData } from "supervision-js-web-video-engine";
 import type { MediaRendererSource } from "supervision";
 
 /**

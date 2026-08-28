@@ -13,7 +13,7 @@ import {
 import {
   SourceKind,
   type EngineReadySnapshot,
-} from "supervision-js-video-engine";
+} from "supervision-js-web-video-engine";
 
 import {
   PipelineNodeId,

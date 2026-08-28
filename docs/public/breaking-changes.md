@@ -124,7 +124,7 @@ nothing either way.
 
 ### The Video Engine Is An Optional Peer Dependency
 
-`supervision` declares `supervision-js-video-engine` as an optional peer and
+`supervision` declares `supervision-js-web-video-engine` as an optional peer and
 reaches it through a dynamic import. Installing `supervision` does not install
 it. An application that opens a video-engine media source installs it as well,
 and `supervision` names the missing package if that import fails at runtime.

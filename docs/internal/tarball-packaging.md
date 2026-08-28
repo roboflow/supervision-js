@@ -5,7 +5,7 @@ consumer installation channel: consumers install the stable package with
 `npm install supervision`. This document exists for maintainers who validate
 or change the packaging path.
 
-Only `supervision` needs an assembled tarball. `supervision-js-video-engine`
+Only `supervision` needs an assembled tarball. `supervision-js-web-video-engine`
 depends on registry packages alone, so plain `npm pack` on its workspace already
 produces a portable archive; [The Video Engine Archive](#the-video-engine-archive)
 covers it.
@@ -60,9 +60,9 @@ The source tree, package boundary checks, and Rollup externals are unchanged.
 `pixi.js` and `mediabunny` stay ordinary dependencies and are installed from the
 registry by the consumer.
 
-`supervision-js-video-engine` is external to the build as well, and the packer leaves
+`supervision-js-web-video-engine` is external to the build as well, and the packer leaves
 it alone. The published JavaScript keeps its dynamic
-`import("supervision-js-video-engine")`, which runs only when a caller opens a
+`import("supervision-js-web-video-engine")`, which runs only when a caller opens a
 video-engine media source, so importing either entrypoint never reaches for it.
 An application that does open such a source installs the engine itself, which is
 why `supervision` declares it as an optional peer dependency.
@@ -76,7 +76,7 @@ npm run package:engine:tarball
 That command builds `packages/video-engine` and writes a single archive:
 
 ```text
-artifacts/engine/supervision-js-video-engine-<version>.tgz
+artifacts/engine/supervision-js-web-video-engine-<version>.tgz
 ```
 
 The archive lives under `artifacts/engine/` rather than beside the browser
