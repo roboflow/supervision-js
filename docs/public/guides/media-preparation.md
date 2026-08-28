@@ -95,7 +95,7 @@ import {
   createVideoEngineMediaRendererSource,
   prepareMedia,
 } from "supervision";
-import { SourceKind } from "supervision-js-web-video-engine";
+import { SourceKind } from "supervision/web-video-engine";
 
 const prepared = await prepareMedia(file);
 

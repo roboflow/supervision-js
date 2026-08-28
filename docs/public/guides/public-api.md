@@ -158,15 +158,15 @@ not the first thing most users should reach for:
 - `createVideoEngineMediaRendererSource()` and `openVideoEngineMediaSource()`
   for video presented by the Roboflow video engine, which owns the playhead and
   announces each frame it puts on screen while the renderer composites it with
-  annotations drawn from that frame's own timestamp. `supervision` does not
-  bundle the engine: it imports `supervision-js-web-video-engine` dynamically at the
-  moment one of these opens a source, so importing `supervision` costs nothing
-  for an application that never opens one, and an application that does needs
-  that specifier resolvable in its own build. Pass `display` to size the decode
-  to the box the frames are painted into; without it they decode at the source's
-  full resolution however small that box is. Under this source the renderer also
-  answers `getRenderCount()` and `getPreparedAnnotationWindow()`, which report
-  `null` for pulled media;
+  annotations drawn from that frame's own timestamp. Both are also exported from
+  `supervision/web-video-engine`, alongside the engine's own types; the subpath
+  and the root give the same two functions. The engine is loaded dynamically at
+  the moment one of these opens a source, so an application that never opens one
+  pays nothing in its bundle to import `supervision`. Pass `display` to size the
+  decode to the box the frames are painted into; without it they decode at the
+  source's full resolution however small that box is. Under this source the
+  renderer also answers `getRenderCount()` and `getPreparedAnnotationWindow()`,
+  which report `null` for pulled media;
 - `DetectionFrameSource` for caller-owned range loading. `loadFrames` receives
   optional `DetectionFrameLoadOptions`; a source that returns its own frames
   unchanged can ignore it, while a source that flattens child frames uses

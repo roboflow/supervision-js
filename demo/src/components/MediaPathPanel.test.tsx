@@ -86,8 +86,14 @@ describe("MediaPathPanel", () => {
     }
   });
 
-  it("says what installing each one takes, because one of them is a second package", () => {
-    expect(prose(render())).toContain("supervision-js-web-video-engine");
+  it("says which import reaches each one, because both come from one package", () => {
+    const text = prose(render());
+
+    for (const path of demoMediaPathOrder) {
+      expect(text).toContain(demoMediaPathCopy[path].imports);
+    }
+
+    expect(text).toContain("supervision/web-video-engine");
   });
 
   it("marks the one a clip opens on", () => {

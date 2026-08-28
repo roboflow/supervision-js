@@ -472,7 +472,7 @@ export async function checkExports(repository, documents) {
           continue;
         }
 
-        const exported = await readExportedNames(entry, exportCache);
+        const exported = await readExportedNames(entry, exportCache, workspace);
 
         for (const name of claim.names) {
           if (!exported.has(name)) {
@@ -1042,7 +1042,26 @@ function decodeEntities(text) {
 }
 
 async function resolveEntrySource(workspace, subpath) {
-  const entry = workspace.manifest.exports?.[subpath];
+  return resolveManifestTarget(
+    workspace,
+    workspace.manifest.exports?.[subpath],
+  );
+}
+
+/**
+ * The build may stage an `imports` specifier in from another workspace, so the
+ * source path a public entry mirrors need not exist and the declaration is the
+ * only statement of what the specifier carries.
+ */
+async function resolveInternalSource(workspace, specifier) {
+  return resolveManifestTarget(
+    workspace,
+    workspace.manifest.imports?.[specifier],
+    true,
+  );
+}
+
+async function resolveManifestTarget(workspace, entry, readBuilt = false) {
   const declaration =
     typeof entry === "string" ? entry : (entry?.types ?? entry?.import);
 
@@ -1050,19 +1069,27 @@ async function resolveEntrySource(workspace, subpath) {
     return null;
   }
 
-  const source = path.join(
-    workspace.absolute,
-    declaration
-      .replace(/^\.\//, "")
+  const built = declaration.replace(/^\.\//, "");
+  const candidates = [
+    built
       .replace(/^dist\//, "src/")
       .replace(/\.d\.ts$/, ".ts")
       .replace(/\.js$/, ".ts"),
-  );
+    ...(readBuilt ? [built] : []),
+  ];
 
-  return (await isFile(source)) ? source : null;
+  for (const candidate of candidates) {
+    const source = path.join(workspace.absolute, candidate);
+
+    if (await isFile(source)) {
+      return source;
+    }
+  }
+
+  return null;
 }
 
-async function readExportedNames(file, cache, seen = new Set()) {
+async function readExportedNames(file, cache, workspace, seen = new Set()) {
   const cached = cache.get(file);
 
   if (cached) {
@@ -1126,14 +1153,19 @@ async function readExportedNames(file, cache, seen = new Set()) {
   });
 
   for (const wildcard of wildcards) {
-    if (!wildcard.startsWith(".")) {
-      continue;
-    }
-
-    const resolved = await resolveRelativeSource(path.dirname(file), wildcard);
+    const resolved = wildcard.startsWith("#")
+      ? await resolveInternalSource(workspace, wildcard)
+      : wildcard.startsWith(".")
+        ? await resolveRelativeSource(path.dirname(file), wildcard)
+        : null;
 
     if (resolved) {
-      for (const name of await readExportedNames(resolved, cache, seen)) {
+      for (const name of await readExportedNames(
+        resolved,
+        cache,
+        workspace,
+        seen,
+      )) {
         names.add(name);
       }
     }

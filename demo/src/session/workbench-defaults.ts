@@ -5,13 +5,10 @@ import {
 } from "./session-options";
 
 /**
- * The media path the workbench opens on.
- *
- * `supervision-js-web-video-engine` is a peer dependency a consumer installs
- * separately, so a project that installs only `supervision` reads clips through
- * Mediabunny. Opening there is what someone arriving from the library's docs
- * expects to see. Set this to {@link DemoMediaPath.Engine} to open on the
- * engine.
+ * The media path the workbench opens on. Mediabunny is what
+ * `createMediaSession` reaches for when it is handed a clip and nothing else,
+ * so the workbench opens on what someone arriving from the library's docs
+ * already has.
  */
 export const DEMO_DEFAULT_MEDIA_PATH = DemoMediaPath.Mediabunny;
 

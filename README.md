@@ -68,17 +68,13 @@ only the public browser entrypoints:
 ```ts
 import { createMediaSession } from "supervision";
 import { createMaskBrushEditor } from "supervision/editing";
+import { createVideoEngineMediaRendererSource } from "supervision/web-video-engine";
 ```
 
-That release also publishes the video engine as its own package, versioned
-independently. `supervision` declares `supervision-js-video-engine` as an
-optional peer and loads it through a dynamic import, so installing
-`supervision` does not install it. An application that opens a video-engine
-media source installs it as well:
-
-```sh
-npm install supervision-js-video-engine
-```
+The video engine is one of those entrypoints, so opening a video file takes
+nothing further to install and every install carries the engine. `supervision`
+loads it through a dynamic import at the moment a video source opens, so an
+application that only annotates still images emits none of its code.
 
 ## Documentation And Demo
 

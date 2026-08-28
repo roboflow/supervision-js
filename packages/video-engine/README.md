@@ -6,27 +6,30 @@ Frame-accurate video decoding, scrubbing, and playback for the browser, built on
 thread, addresses frames by identity rather than by timestamp, and keeps the
 playhead on the frame a caller asked for.
 
-## Installation
+## Where It Is Published
 
-```sh
-npm install supervision-js-web-video-engine
+Nowhere on its own. This is a private workspace of the `supervision-js`
+repository, like `supervision-js-core`. Its build is staged into
+[`supervision`](https://www.npmjs.com/package/supervision), which is the one
+published package, and applications reach the engine from there:
+
+```ts
+import { VideoEngine } from "supervision/web-video-engine";
 ```
 
-[`supervision`](https://www.npmjs.com/package/supervision) declares this package
-as an **optional** peer dependency and loads it through a dynamic import, so
-installing `supervision` does not install the engine. Add it when an application
-opens a video-engine media source; `supervision` says so by name if that import
-fails at runtime.
+`supervision` loads it through a dynamic import at the moment a video source
+opens, so an application that never opens one emits none of this code.
 
-The engine also stands alone. Nothing in it depends on `supervision`.
+Nothing here depends on `supervision`. The dependency runs one way, which is
+what lets the browser package treat the engine as a leaf it can load late.
 
 ## Entry Points
 
-| Entry                                      | Contents                                                                                               |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
-| `supervision-js-web-video-engine`          | `VideoEngine`, the frame timeline, seek units, decode-resolution strategies, errors and diagnostics    |
-| `supervision-js-web-video-engine/analysis` | `AnalysisSession`, `FrameExtractor`, `FrameWalker` for pulling frames out of a source without a player |
-| `supervision-js-web-video-engine/worker`   | The decode worker as a module URL                                                                      |
+| Entry                                   | Contents                                                                                               |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `supervision/web-video-engine`          | `VideoEngine`, the frame timeline, seek units, decode-resolution strategies, errors and diagnostics    |
+| `supervision/web-video-engine/analysis` | `AnalysisSession`, `FrameExtractor`, `FrameWalker` for pulling frames out of a source without a player |
+| `supervision/web-video-engine/worker`   | The decode worker as a module URL                                                                      |
 
 The two module entries are split so that importing a player type never pulls the
 demuxer into a bundle: opening a source reaches it, reading state does not.

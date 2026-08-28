@@ -162,12 +162,18 @@ ratio.
 accepted and nothing reads either one. The renderer is video-only and audio
 playback is deferred, so setting them changes nothing either way.
 
-### The Video Engine Is An Optional Peer Dependency
+### The Package Carries The Video Engine
 
-`supervision` declares `supervision-js-web-video-engine` as an optional peer and
-reaches it through a dynamic import. Installing `supervision` does not install
-it. An application that opens a video-engine media source installs it as well,
-and `supervision` names the missing package if that import fails at runtime.
+Video files open through the Roboflow video engine, and the engine is part of
+`supervision`, reachable at `supervision/web-video-engine`. There is no second
+package to install and nothing in an application to change.
+
+The download is bigger for everyone, including an application that only ever
+annotates still images: the tarball is 1,732,755 bytes, against 654,101 for the
+same package without the engine in it. Bundle size is the part that stays
+conditional. `supervision` reaches the engine through a dynamic import at the
+moment a video source opens, so an application that never opens one emits none
+of the engine's code.
 
 ## Reproducing This List
 

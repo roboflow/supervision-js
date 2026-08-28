@@ -22,7 +22,7 @@ import {
   createMediaSession,
   createVideoEngineMediaRendererSource,
 } from "supervision";
-import { SourceKind } from "supervision-js-web-video-engine";
+import { SourceKind } from "supervision/web-video-engine";
 
 const session = await createMediaSession({
   container,
@@ -94,8 +94,13 @@ of its own, so nothing extra has to be installed to open a video source:
 import { createVideoEngineMediaRendererSource } from "supervision/web-video-engine";
 ```
 
-`supervision` reaches it through a dynamic import, so an application that only
-annotates images never downloads the engine or its decode worker.
+Install size is what pays for that. The tarball is 1,732,755 bytes, against
+654,101 for the same package without the engine in it, and every consumer
+downloads it whether or not it opens a video.
+
+What an application ships stays conditional. `supervision` reaches the engine
+through a dynamic import, so an application that only annotates images emits
+none of the engine or its decode worker.
 
 ### Files Whose Groups Do Not Start With A Keyframe Now Play
 
