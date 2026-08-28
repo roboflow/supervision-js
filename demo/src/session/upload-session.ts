@@ -24,6 +24,8 @@ import {
   prepareUploadedImageMedia,
   type PreparedUploadMedia,
 } from "../media/upload-media";
+import { PipelineNodeId } from "../pipeline/pipeline-descriptor";
+import type { PipelineRecorder } from "../pipeline/pipeline-recorder";
 import { createDemoPresentation } from "../presentation/demo-presentation";
 import { readDemoDisplayBox } from "./decode-resolution";
 import { createDemoRendererOptions } from "./demo-session-renderer";
@@ -137,6 +139,9 @@ export async function createUploadSession(
   );
 
   const isImageUpload = options.uploadRun.file.type.startsWith("image/");
+
+  recordUploadPath(options.pipeline, options.uploadRun.file, isImageUpload);
+
   let preparedMedia: PreparedUploadMedia | undefined;
   let sampleSink: DecodedVideoSampleSink | undefined;
   let session: MediaSession | undefined;
@@ -228,7 +233,7 @@ export async function createUploadSession(
     processedRanges: [],
     processingRanges: [],
     status: "running",
-    statusLabel: "running SAM3",
+    statusLabel: "Running the model",
     totalFrames: preparedMedia.frameCount,
   });
 
@@ -246,6 +251,60 @@ export async function createUploadSession(
   });
 
   return session;
+}
+
+const UPLOAD_SITE = "demo/session/upload-session.ts › createUploadSession";
+
+function recordUploadPath(
+  pipeline: PipelineRecorder,
+  file: File,
+  isImageUpload: boolean,
+) {
+  pipeline.record(PipelineNodeId.IntakeUploadFile, UPLOAD_SITE, [
+    { label: "file", value: file.name },
+    { label: "type", value: file.type === "" ? "not stated" : file.type },
+    { label: "size", value: `${file.size} bytes` },
+  ]);
+  pipeline.bypass(
+    PipelineNodeId.IntakeFixtureUrl,
+    "This session is playing your file, not one of the sample clips.",
+  );
+  pipeline.bypass(
+    PipelineNodeId.IntakeFixtureProxy,
+    "Stand-ins belong to the sample clips, and this is your own file.",
+  );
+  pipeline.bypass(
+    PipelineNodeId.IntakeConversionRefetch,
+    "The file is already on this machine, so there was nothing to download.",
+  );
+
+  if (isImageUpload) {
+    pipeline.record(PipelineNodeId.IntakeUploadImageRecode, UPLOAD_SITE);
+  } else {
+    pipeline.bypass(
+      PipelineNodeId.IntakeUploadImageRecode,
+      "A moving clip is opened as it is; only a still picture is re-encoded first.",
+    );
+  }
+
+  const sam3 =
+    "SAM3 reads frames back out of the opened clip as it labels them, so converting the file would replace the very thing it is reading from.";
+
+  pipeline.record(PipelineNodeId.ConditioningNone, UPLOAD_SITE);
+  pipeline.bypass(PipelineNodeId.ConditioningWholeFile, sam3);
+  pipeline.bypass(PipelineNodeId.ConditioningProgressive, sam3);
+  pipeline.record(PipelineNodeId.DetectionsNearestFrameIndex, UPLOAD_SITE, [
+    { label: "detections a second", value: String(TARGET_UPLOAD_FRAME_RATE) },
+    {
+      label: "why",
+      value:
+        "SAM3 is asked for frames on an even grid, so a detection's position is the count it was taken at",
+    },
+  ]);
+  pipeline.bypass(
+    PipelineNodeId.DetectionsInterval,
+    "SAM3 returns a label per frame it was given and no stretch of time to pair against.",
+  );
 }
 
 /** Hands the opened source's pull path to the inference pass, so the upload is
@@ -318,7 +377,6 @@ async function runUploadInference(options: {
           batchRange,
         ),
         status: "running",
-        statusLabel: "SAM3 requests in flight",
       }));
 
       for await (const detectionFrame of inferSam3FrameBatchStream({
@@ -360,7 +418,6 @@ async function runUploadInference(options: {
             createDetectionFrameTimelineRange(detectionFrame),
           ),
           status: "running",
-          statusLabel: "SAM3 frames streaming into cold storage",
           totalFrames: options.preparedMedia.frameCount,
         }));
       }
@@ -372,7 +429,6 @@ async function runUploadInference(options: {
           batchRange,
         ),
         status: "running",
-        statusLabel: "SAM3 batch complete",
       }));
     }
 
@@ -386,7 +442,7 @@ async function runUploadInference(options: {
           summary?.detectionCount ?? current.inferredDetections,
         processingRanges: [],
         status: "ready",
-        statusLabel: "SAM3 inference complete",
+        statusLabel: "The model has finished",
         totalFrames: options.preparedMedia.frameCount,
       }));
     }
@@ -414,7 +470,7 @@ function handleUploadInferenceError(
       ...current,
       processingRanges: [],
       status: "idle",
-      statusLabel: "upload inference canceled",
+      statusLabel: "Model run canceled",
     }));
     options.onDetectionSourceState({
       datasetId: options.detectionSource.datasetId,

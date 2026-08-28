@@ -312,12 +312,52 @@ export interface MediaSessionOptions {
 }
 
 /**
+ * Which of the session's media branches ran.
+ *
+ * The five differ in whether the clip is converted first and in who ends up
+ * reading it, and from outside they were indistinguishable: two of them leave
+ * every other field on {@link MediaSessionMediaState} null.
+ */
+export enum MediaSessionMediaBranch {
+  /** A URL, `URL` or `Request` went to the renderer untouched. */
+  Url = "url",
+  /** A source the caller had already built went to the renderer untouched. */
+  RendererSource = "rendererSource",
+  /** A file the session was not asked to convert, played from an object URL. */
+  BlobObjectUrl = "blobObjectUrl",
+  /** A file converted in full first, played from the conversion's object URL. */
+  NormalizedObjectUrl = "normalizedObjectUrl",
+  /** A file converted while it plays, read through the conversion's source. */
+  ProgressiveSource = "progressiveSource",
+}
+
+/**
+ * What the session did with the media it was handed, recorded as it did it.
+ *
+ * The renderer opens a `src` and a `source` through different readers, so which
+ * of the two a branch set decides which one opens the clip. Nothing else
+ * reports it.
+ */
+export interface MediaSessionMediaPreparation {
+  readonly branch: MediaSessionMediaBranch;
+  /** Which of the renderer's two media options this branch filled in. */
+  readonly opened: "src" | "source";
+}
+
+/**
  * Prepared media state visible to host applications.
  */
 export interface MediaSessionMediaState {
   readonly inputMetadata: MediaNormalizationInputMetadata | null;
   readonly normalizedMedia: NormalizedMedia | ProgressiveNormalizedMedia | null;
   readonly objectUrl: string | null;
+  /**
+   * Null until the session has prepared its media.
+   *
+   * Optional so a host holding a state it built before this field existed still
+   * satisfies the type.
+   */
+  readonly preparation?: MediaSessionMediaPreparation | null;
 }
 
 export interface MediaSessionNormalizationState {

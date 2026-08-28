@@ -94,6 +94,7 @@ describe("package entrypoint", () => {
       "MediaRendererPlaybackState",
       "MediaSessionActivityKind",
       "MediaSessionActivityStatus",
+      "MediaSessionMediaBranch",
       "MediaSessionMode",
       "MediaSessionStatus",
       "MediaSourceError",

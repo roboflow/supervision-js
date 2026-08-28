@@ -10,6 +10,7 @@ const slots = [
   "benchmarksPanel",
   "controlBar",
   "performanceStrip",
+  "pipelinePanel",
   "presentationDiagnostics",
   "qualityControls",
   "renderControls",
@@ -63,6 +64,7 @@ function collect(node: ReactNode, found: string[] = []): string[] {
 
 const debugOnly: readonly DemoShellSlot[] = [
   "performanceStrip",
+  "pipelinePanel",
   "presentationDiagnostics",
   "sessionOptionsPanel",
   "statusPanel",

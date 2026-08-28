@@ -47,6 +47,7 @@ const expectedWebRuntimeExports = [
   "MediaRendererPlaybackState",
   "MediaSessionActivityKind",
   "MediaSessionActivityStatus",
+  "MediaSessionMediaBranch",
   "MediaSessionMode",
   "MediaSessionStatus",
   "MediaSourceError",

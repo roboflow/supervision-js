@@ -9,6 +9,7 @@ export function DemoShell({
   mode,
   onModeChange,
   performanceStrip,
+  pipelinePanel,
   presentationDiagnostics,
   qualityControls,
   renderControls,
@@ -24,6 +25,7 @@ export function DemoShell({
   readonly mode: DemoViewMode;
   readonly onModeChange: (mode: DemoViewMode) => void;
   readonly performanceStrip: ReactNode;
+  readonly pipelinePanel: ReactNode;
   readonly presentationDiagnostics: ReactNode;
   readonly qualityControls: ReactNode;
   readonly renderControls: ReactNode;
@@ -92,6 +94,7 @@ export function DemoShell({
           <aside className="demo-shell__inspector" aria-label="Demo controls">
             {sourceControls}
             {qualityControls}
+            {mode === DemoViewMode.Debug ? pipelinePanel : null}
             {mode === DemoViewMode.Debug ? sessionOptionsPanel : null}
             {selectionPanel}
             {renderControls}

@@ -231,6 +231,11 @@ export class EngineCore {
       Math.round(this.cursor.track.durationS * 1000),
     );
     this.metadata = {
+      // Recorded here rather than where the caller passed it: the cursor above
+      // has resolved, so the demuxer really was opened over this kind of
+      // reader. toMediabunnySource maps the three kinds one for one and
+      // substitutes nothing, so what opened is what was named.
+      byteSource: config.source.kind,
       durationMs: this.durationMs,
       nativeFps:
         nativeFps === null
