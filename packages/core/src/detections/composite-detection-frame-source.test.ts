@@ -293,6 +293,45 @@ describe("createCompositeDetectionFrameSource", () => {
     expect(frame?.coordinateSpace).toBeUndefined();
   });
 
+  it("reaches every written grid index when the clip is slower than the grid", async () => {
+    const source = createCompositeDetectionFrameSource({
+      frameIndexOriginTime: 0,
+      frameRate: 30,
+      selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
+      sources: [{ frames: createSampledGridFrames(24, 30, 10), id: "sam3" }],
+    });
+
+    const frames = await source.loadFrames(0, 10 / 30);
+
+    expect(frames.map((frame) => frame.frameIndex)).toEqual([
+      0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
+    ]);
+    expect(frames.map((frame) => frame.detections[0]?.className)).toEqual([
+      "grid-0",
+      "grid-1",
+      "grid-2",
+      "grid-3",
+      "grid-4",
+      "grid-5",
+      "grid-6",
+      "grid-7",
+      "grid-8",
+      "grid-9",
+    ]);
+    expect(frames.map((frame) => frame.mediaTime)).toEqual([
+      0 / 24,
+      1 / 24,
+      2 / 24,
+      2 / 24,
+      3 / 24,
+      4 / 24,
+      5 / 24,
+      6 / 24,
+      6 / 24,
+      7 / 24,
+    ]);
+  });
+
   it("rejects invalid source declarations", () => {
     expect(() =>
       createCompositeDetectionFrameSource({
@@ -320,6 +359,33 @@ describe("createCompositeDetectionFrameSource", () => {
     );
   });
 });
+
+/**
+ * Frames as an inference pass on an even grid writes them: it asks the decoder
+ * for the middle of each grid slot, gets back whichever sample the clip really
+ * displays then, and stores that sample's own timestamp against the slot's
+ * index. A clip slower than the grid answers consecutive slots with one sample.
+ */
+function createSampledGridFrames(
+  realFrameRate: number,
+  gridFrameRate: number,
+  gridSlotCount: number,
+): DetectionFrame[] {
+  return Array.from({ length: gridSlotCount }, (_, frameIndex) => {
+    const requestedTime = (frameIndex + 0.5) / gridFrameRate;
+    const mediaTime = Math.floor(requestedTime * realFrameRate) / realFrameRate;
+
+    return {
+      detections: [{ className: `grid-${frameIndex}`, rect }],
+      endTime: Math.max(
+        mediaTime + 1 / realFrameRate,
+        (frameIndex + 1.5) / gridFrameRate,
+      ),
+      frameIndex,
+      mediaTime,
+    };
+  });
+}
 
 function createEmptySource() {
   return {

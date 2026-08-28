@@ -32,6 +32,15 @@ interface LoadedCompositeSource extends NormalizedCompositeSource {
   readonly frames: readonly DetectionFrame[];
 }
 
+interface GridCompositeSource extends LoadedCompositeSource {
+  readonly framesByIndex: ReadonlyMap<number, DetectionFrame>;
+}
+
+interface GridSlot {
+  readonly frameIndex: number;
+  readonly mediaTime: number;
+}
+
 export function createCompositeDetectionFrameSource(
   options: CompositeDetectionFrameSourceOptions,
 ): DetectionFrameSource {
@@ -199,7 +208,6 @@ function composeIntervalFrames(
       mediaTime,
       endTimeForFrame,
       { ...options, selectionMode: DetectionFrameSelectionMode.Interval },
-      undefined,
       coordinateSpace,
     );
 
@@ -211,6 +219,18 @@ function composeIntervalFrames(
   return frames;
 }
 
+/**
+ * One composed frame per inference grid index the children wrote.
+ *
+ * Children are paired on the index their producer labelled, and the composed
+ * frame keeps the media time they reported for it. `frameRate` states the grid
+ * a producer was asked for, not the one the clip plays at, and a slower clip
+ * answers consecutive indexes with the same decoded sample: a timeline placed
+ * by that rate then asks for a time two indexes share, which can only ever
+ * reach one of them and leaves the other's detections stranded. Pairing on the
+ * index reaches every one and keeps each frame's detections on the frame they
+ * were computed for.
+ */
 function composeNearestFrameIndexFrames(
   sources: readonly LoadedCompositeSource[],
   startTime: number,
@@ -224,43 +244,32 @@ function composeNearestFrameIndexFrames(
     return null;
   }
 
-  const indexedFrames = sources.flatMap((source) =>
-    source.frames.filter((frame) => frame.frameIndex !== undefined),
-  );
-  const firstIndexedFrame = indexedFrames[0];
+  const gridSources = sources.map((source) => ({
+    ...source,
+    framesByIndex: indexFramesByFrameIndex(source, options),
+  }));
+  const gridSlots = mergeGridSlots(gridSources);
 
-  if (!firstIndexedFrame || firstIndexedFrame.frameIndex === undefined) {
+  if (gridSlots.length === 0) {
     return null;
   }
 
-  const originTime =
-    options.frameIndexOriginTime ??
-    firstIndexedFrame.mediaTime - firstIndexedFrame.frameIndex / frameRate;
-  const frameIndexes = [
-    ...new Set(
-      indexedFrames
-        .map((frame) => frame.frameIndex)
-        .filter((frameIndex): frameIndex is number => frameIndex !== undefined),
-    ),
-  ].sort((left, right) => left - right);
+  const gridStep = measureGridStep(gridSlots) ?? 1 / frameRate;
   const frames: DetectionFrame[] = [];
 
-  for (const frameIndex of frameIndexes) {
-    const mediaTime = originTime + frameIndex / frameRate;
-
-    if (mediaTime < startTime || mediaTime >= endTime) {
+  for (const slot of gridSlots) {
+    if (slot.mediaTime < startTime || slot.mediaTime >= endTime) {
       continue;
     }
 
-    const frame = composeFrameAtTime(
-      sources,
-      mediaTime,
-      Math.min(mediaTime + 1 / frameRate, endTime),
+    const frame = composeFrameAtFrameIndex(
+      gridSources,
+      slot,
+      Math.min(slot.mediaTime + gridStep, endTime),
       {
         ...options,
         selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
       },
-      frameIndex,
       coordinateSpace,
     );
 
@@ -269,7 +278,109 @@ function composeNearestFrameIndexFrames(
     }
   }
 
-  return frames;
+  return frames.sort((left, right) => left.mediaTime - right.mediaTime);
+}
+
+function indexFramesByFrameIndex(
+  source: LoadedCompositeSource,
+  options: DetectionFrameSelectionOptions,
+): ReadonlyMap<number, DetectionFrame> {
+  const framesByIndex = new Map<number, DetectionFrame>();
+  const selectionMode = source.sync?.selectionMode ?? options.selectionMode;
+
+  if (selectionMode !== DetectionFrameSelectionMode.NearestFrameIndex) {
+    return framesByIndex;
+  }
+
+  for (const frame of source.frames) {
+    if (frame.frameIndex !== undefined) {
+      framesByIndex.set(frame.frameIndex, frame);
+    }
+  }
+
+  return framesByIndex;
+}
+
+/**
+ * Where each grid index sits in the media, taken as the earliest time any child
+ * reported for it. Children on one grid watched the same source frame, and the
+ * earliest of their answers is where that frame starts.
+ */
+function mergeGridSlots(sources: readonly GridCompositeSource[]): GridSlot[] {
+  const mediaTimes = new Map<number, number>();
+
+  for (const source of sources) {
+    for (const [frameIndex, frame] of source.framesByIndex) {
+      const mediaTime = mediaTimes.get(frameIndex);
+
+      if (mediaTime === undefined || frame.mediaTime < mediaTime) {
+        mediaTimes.set(frameIndex, frame.mediaTime);
+      }
+    }
+  }
+
+  return [...mediaTimes]
+    .map(([frameIndex, mediaTime]) => ({ frameIndex, mediaTime }))
+    .sort((left, right) => left.frameIndex - right.frameIndex);
+}
+
+/**
+ * How long one grid index stands, read off the slots across the widest index
+ * span they cover. A clip whose real rate differs from `frameRate` would end
+ * every composed frame a little short or a little long of where the next index
+ * is due, and that error accumulates for as long as the clip plays.
+ */
+function measureGridStep(gridSlots: readonly GridSlot[]) {
+  const firstSlot = gridSlots[0];
+  const lastSlot = gridSlots[gridSlots.length - 1];
+  const indexSpan = lastSlot.frameIndex - firstSlot.frameIndex;
+  const step = (lastSlot.mediaTime - firstSlot.mediaTime) / indexSpan;
+
+  return indexSpan > 0 && Number.isFinite(step) && step > 0 ? step : undefined;
+}
+
+function composeFrameAtFrameIndex(
+  sources: readonly GridCompositeSource[],
+  slot: GridSlot,
+  endTime: number,
+  options: DetectionFrameSelectionOptions,
+  coordinateSpace?: DetectionCoordinateSpace,
+): DetectionFrame | undefined {
+  const detections: Detection[] = [];
+
+  for (const source of sources) {
+    const activeFrame =
+      source.framesByIndex.size > 0
+        ? source.framesByIndex.get(slot.frameIndex)
+        : selectDetectionFrame(source.frames, slot.mediaTime, {
+            ...options,
+            ...source.sync,
+          });
+
+    if (!activeFrame) {
+      continue;
+    }
+
+    activeFrame.detections.forEach((detection, sourceDetectionIndex) => {
+      detections.push(
+        copyDetectionWithSource(detection, source.id, sourceDetectionIndex),
+      );
+    });
+  }
+
+  if (detections.length === 0) {
+    return undefined;
+  }
+
+  return {
+    detections,
+    endTime,
+    frameIndex: slot.frameIndex,
+    mediaTime: slot.mediaTime,
+    // Children were projected before composition, so a composed frame is
+    // already in the coordinate space the renderer presents.
+    ...(coordinateSpace ? { coordinateSpace } : {}),
+  };
 }
 
 function composeFrameAtTime(
@@ -277,7 +388,6 @@ function composeFrameAtTime(
   mediaTime: number,
   endTime: number,
   options: DetectionFrameSelectionOptions,
-  frameIndex?: number,
   coordinateSpace?: DetectionCoordinateSpace,
 ): DetectionFrame | undefined {
   const detections: Detection[] = [];
@@ -311,8 +421,7 @@ function composeFrameAtTime(
   return {
     detections,
     endTime,
-    frameIndex:
-      frameIndex ?? resolveComposedFrameIndex(activeFrameIndexes) ?? undefined,
+    frameIndex: resolveComposedFrameIndex(activeFrameIndexes) ?? undefined,
     mediaTime,
     // Children were projected before composition, so a composed frame is
     // already in the coordinate space the renderer presents.
