@@ -119,13 +119,19 @@ describe.each(TABLES)("FrameTimeline over %s", (_name, build) => {
 
   it("is monotone in time", () => {
     const step = 1 / timeline.tickRate;
+    const end = timeline.timeAt(timeline.frameCount - 1);
     let previous = 0;
-    let t: number = timeline.timeAt(0);
-    for (; t < timeline.timeAt(timeline.frameCount - 1); t += step) {
+    let regression: { at: number; from: number; to: number } | null = null;
+
+    for (let t = timeline.timeAt(0); t < end; t += step) {
       const index = timeline.indexAtOrBefore(t);
-      expect(index).toBeGreaterThanOrEqual(previous);
+      if (index < previous) {
+        regression ??= { at: t, from: previous, to: index };
+      }
       previous = index;
     }
+
+    expect(regression).toBeNull();
   });
 
   it("a time before the first frame answers the first frame", () => {
