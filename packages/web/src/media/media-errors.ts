@@ -1,4 +1,25 @@
 import { MediaErrorKind } from "supervision-js-core";
+import type { VideoEngineErrorCode } from "supervision-js-video-engine";
+
+/**
+ * The kind each engine refusal already stands for. An engine failure names its
+ * own cause in `code`, and reading that beats re-deriving it from the message:
+ * the text of a container refusal says "demuxer", the text of a wedged worker
+ * says "timed out", and the patterns below would file both under the wrong
+ * kind. Written as a total record so a new engine code fails the build here.
+ */
+const ENGINE_CODE_KINDS: Record<VideoEngineErrorCode, MediaErrorKind> = {
+  ABORTED: MediaErrorKind.Unknown,
+  BACKEND_CRASHED: MediaErrorKind.Decode,
+  CONTAINER_UNREADABLE: MediaErrorKind.Unreadable,
+  DECODER_STALLED: MediaErrorKind.Decode,
+  DECODE_UNSUPPORTED: MediaErrorKind.UnsupportedFormat,
+  NO_VIDEO_TRACK: MediaErrorKind.NoVideoTrack,
+  PRESENTATION_MISMATCH: MediaErrorKind.Unknown,
+  RATE_UNSUPPORTED: MediaErrorKind.Unknown,
+  SOURCE_UNREADABLE: MediaErrorKind.Unreadable,
+  VIDEO_TRACK_UNREADABLE: MediaErrorKind.UnsupportedFormat,
+};
 
 const UNSUPPORTED_FORMAT_PATTERN =
   /unsupported|not supported|no (?:matching )?(?:decoder|codec)|codec/i;
@@ -48,10 +69,9 @@ export function toMediaSourceError(
   }
 
   const message = error instanceof Error ? error.message : fallbackMessage;
+  const kind = engineCodeKind(error) ?? classifyMediaErrorMessage(message);
 
-  return new MediaSourceError(classifyMediaErrorMessage(message), message, {
-    cause: error,
-  });
+  return new MediaSourceError(kind, message, { cause: error });
 }
 
 /**
@@ -62,6 +82,13 @@ export function toMediaSourceError(
  */
 export function getMediaErrorKind(error: unknown): MediaErrorKind {
   return toMediaSourceError(error).kind;
+}
+
+function engineCodeKind(error: unknown): MediaErrorKind | null {
+  const code = (error as { readonly code?: unknown } | null | undefined)?.code;
+  return typeof code === "string" && code in ENGINE_CODE_KINDS
+    ? ENGINE_CODE_KINDS[code as VideoEngineErrorCode]
+    : null;
 }
 
 function classifyMediaErrorMessage(message: string): MediaErrorKind {

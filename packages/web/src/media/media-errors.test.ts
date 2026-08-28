@@ -33,6 +33,45 @@ describe("media errors", () => {
     }
   });
 
+  it("reads an engine refusal's own code rather than its message", () => {
+    const cases: ReadonlyArray<[string, string, MediaErrorKind]> = [
+      [
+        "CONTAINER_UNREADABLE",
+        "openInput: the demuxer does not read this file's container",
+        MediaErrorKind.Unreadable,
+      ],
+      [
+        "VIDEO_TRACK_UNREADABLE",
+        "openInput: the container opened and the demuxer parsed no track out of it",
+        MediaErrorKind.UnsupportedFormat,
+      ],
+      [
+        "NO_VIDEO_TRACK",
+        "openInput: the container's tracks read and none of them carries video",
+        MediaErrorKind.NoVideoTrack,
+      ],
+      [
+        "BACKEND_CRASHED",
+        "video engine command timed out waiting for the worker",
+        MediaErrorKind.Decode,
+      ],
+    ];
+
+    for (const [code, message, kind] of cases) {
+      expect(
+        getMediaErrorKind(Object.assign(new Error(message), { code })),
+      ).toBe(kind);
+    }
+  });
+
+  it("ignores a code that is not an engine refusal", () => {
+    const domLike = Object.assign(new Error("The operation was aborted."), {
+      code: 20,
+    });
+
+    expect(getMediaErrorKind(domLike)).toBe(MediaErrorKind.Network);
+  });
+
   it("keeps a kind chosen at the point of failure", () => {
     const error = new MediaSourceError(
       MediaErrorKind.NoVideoTrack,

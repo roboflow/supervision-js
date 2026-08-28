@@ -243,7 +243,7 @@ describe("RendererViewport", () => {
     );
 
     expect(overlayText(overlay)).toContain(
-      "This browser cannot decode this video",
+      "The video in this file is in a format we cannot play. Convert it to H.264 MP4 and try again.",
     );
     expect(overlayText(overlay)).toContain(message);
   });

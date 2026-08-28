@@ -103,6 +103,22 @@ export enum PlaybackStatus {
 export enum VideoEngineErrorCode {
   DecodeUnsupported = "DECODE_UNSUPPORTED",
   SourceUnreadable = "SOURCE_UNREADABLE",
+  /**
+   * The demuxer refused the file outright: its container is not one this build
+   * reads, so no track was ever listed and no decoder was ever asked.
+   */
+  ContainerUnreadable = "CONTAINER_UNREADABLE",
+  /**
+   * The container opened and the demuxer parsed no track at all out of it. The
+   * file's streams are in formats it does not carry, so their video cannot be
+   * reached even though it is there.
+   */
+  VideoTrackUnreadable = "VIDEO_TRACK_UNREADABLE",
+  /**
+   * The container opened, its tracks listed, and none of them is video. This
+   * is the only case where the file itself is what lacks video.
+   */
+  NoVideoTrack = "NO_VIDEO_TRACK",
   BackendCrashed = "BACKEND_CRASHED",
   Aborted = "ABORTED",
   /** A canvas was offered to an engine loaded in "frames" presentation mode,
@@ -197,6 +213,16 @@ export interface EngineReadySnapshot extends VideoMetadata {
    * one of its own pointer positions to a frame without asking.
    */
   readonly timeline: FrameTimelineData;
+  /**
+   * The kind of reader the demuxer was opened over, recorded once the open
+   * succeeded. A host knows what it asked for; only the engine knows what it
+   * got, and the three kinds differ in what they can do afterwards — a stream
+   * cannot be rewound or reopened, and only a URL is fetched.
+   *
+   * Optional so a host holding a snapshot it built before this field existed
+   * still satisfies the type.
+   */
+  readonly byteSource?: SourceKind;
 }
 
 /**

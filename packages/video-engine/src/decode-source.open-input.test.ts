@@ -20,6 +20,8 @@ interface FakeTrackConfig {
   codec?: string;
   firstTimestamp: number;
   hasTrack?: boolean;
+  containerUnreadable?: boolean;
+  otherTrackCount?: number;
   packetCount?: number;
 }
 
@@ -51,47 +53,63 @@ class FakeVideoTrack {
   }
 }
 
-vi.mock("mediabunny", () => ({
-  ALL_FORMATS: [],
-  UrlSource: class {
-    constructor(readonly url: string) {}
-  },
-  BlobSource: class {},
-  ReadableStreamSource: class {},
-  Input: class {
-    getPrimaryVideoTrack(): Promise<FakeVideoTrack | null> {
-      return Promise.resolve(
-        trackConfig.hasTrack === false ? null : new FakeVideoTrack(),
-      );
-    }
-    dispose(): void {}
-  },
-  CanvasSink: class {
-    constructor(
-      readonly track: unknown,
-      readonly opts: unknown,
-    ) {}
-  },
-  VideoSampleSink: class {},
-  EncodedPacketSink: class {
-    constructor(readonly track: unknown) {}
-    async *packets(): AsyncGenerator<
-      { timestamp: number; duration: number },
-      void,
-      unknown
-    > {
-      const count = trackConfig.packetCount ?? 5;
-      // Decode order, which on a real B-frame source is not presentation
-      // order: the table has to sort itself.
-      for (const step of [...Array(count).keys()].reverse()) {
-        yield {
-          timestamp: trackConfig.firstTimestamp + step / 30,
-          duration: 1 / 30,
-        };
+vi.mock("mediabunny", () => {
+  class FakeUnsupportedInputFormatError extends Error {}
+  return {
+    ALL_FORMATS: [],
+    UnsupportedInputFormatError: FakeUnsupportedInputFormatError,
+    UrlSource: class {
+      constructor(readonly url: string) {}
+    },
+    BlobSource: class {},
+    ReadableStreamSource: class {},
+    Input: class {
+      getPrimaryVideoTrack(): Promise<FakeVideoTrack | null> {
+        if (trackConfig.containerUnreadable) {
+          return Promise.reject(
+            new FakeUnsupportedInputFormatError(
+              "Input has an unsupported or unrecognizable format.",
+            ),
+          );
+        }
+        return Promise.resolve(
+          trackConfig.hasTrack === false ? null : new FakeVideoTrack(),
+        );
       }
-    }
-  },
-}));
+      getTracks(): Promise<unknown[]> {
+        return Promise.resolve(
+          Array(trackConfig.otherTrackCount ?? 0).fill({}),
+        );
+      }
+      dispose(): void {}
+    },
+    CanvasSink: class {
+      constructor(
+        readonly track: unknown,
+        readonly opts: unknown,
+      ) {}
+    },
+    VideoSampleSink: class {},
+    EncodedPacketSink: class {
+      constructor(readonly track: unknown) {}
+      async *packets(): AsyncGenerator<
+        { timestamp: number; duration: number },
+        void,
+        unknown
+      > {
+        const count = trackConfig.packetCount ?? 5;
+        // Decode order, which on a real B-frame source is not presentation
+        // order: the table has to sort itself.
+        for (const step of [...Array(count).keys()].reverse()) {
+          yield {
+            timestamp: trackConfig.firstTimestamp + step / 30,
+            duration: 1 / 30,
+          };
+        }
+      }
+    },
+  };
+});
 
 const SOURCE: VideoSource = {
   kind: SourceKind.Url,
@@ -134,10 +152,33 @@ describe("openInput decodability (T4a)", () => {
     expect(error).toBeInstanceOf(VideoEngineError);
   });
 
-  it("no video track also surfaces DecodeUnsupported", async () => {
+  it("a container the demuxer will not open blames the container", async () => {
+    trackConfig = {
+      canDecode: true,
+      containerUnreadable: true,
+      firstTimestamp: 0,
+    };
+    await expect(openDecodeSource({ source: SOURCE })).rejects.toMatchObject({
+      code: VideoEngineErrorCode.ContainerUnreadable,
+    });
+  });
+
+  it("a container that opens with no track parsed out of it does not blame the file", async () => {
     trackConfig = { canDecode: true, firstTimestamp: 0, hasTrack: false };
     await expect(openDecodeSource({ source: SOURCE })).rejects.toMatchObject({
-      code: VideoEngineErrorCode.DecodeUnsupported,
+      code: VideoEngineErrorCode.VideoTrackUnreadable,
+    });
+  });
+
+  it("listed tracks with no video among them is the one case that says the file has none", async () => {
+    trackConfig = {
+      canDecode: true,
+      firstTimestamp: 0,
+      hasTrack: false,
+      otherTrackCount: 2,
+    };
+    await expect(openDecodeSource({ source: SOURCE })).rejects.toMatchObject({
+      code: VideoEngineErrorCode.NoVideoTrack,
     });
   });
 

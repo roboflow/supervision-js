@@ -5,6 +5,7 @@ import {
   EncodedPacketSink,
   Input,
   ReadableStreamSource,
+  UnsupportedInputFormatError,
   UrlSource,
   VideoSampleSink,
 } from "mediabunny";
@@ -511,9 +512,13 @@ interface OpenedInput {
 
 /** Opens the input, resolves the primary video track, and runs the decode
  *  resolution math, the work every path shares before one is chosen.
- *  Throws VideoEngineError(DecodeUnsupported) when no video track exists or the
- *  browser cannot decode the track's codec, so an undecodable source surfaces a
- *  typed state instead of a silent stall. */
+ *
+ *  Four ways to get no frames out of a file, and each one throws its own code
+ *  so a host can say which happened: the container is not one the demuxer
+ *  reads (ContainerUnreadable), the container reads but nothing inside it does
+ *  (VideoTrackUnreadable), the tracks read and none is video (NoVideoTrack), or
+ *  the video track reads and the browser has no decoder for its codec
+ *  (DecodeUnsupported). */
 async function openInput(
   options: CreateScrubCursorOptions,
 ): Promise<OpenedInput> {
@@ -526,13 +531,7 @@ async function openInput(
       options.urlSource,
     ),
   });
-  const videoTrack = await input.getPrimaryVideoTrack();
-  if (!videoTrack) {
-    throw new VideoEngineError(
-      VideoEngineErrorCode.DecodeUnsupported,
-      "openInput: source has no video track",
-    );
-  }
+  const videoTrack = await resolveVideoTrack(input);
   if (!(await videoTrack.canDecode())) {
     const decoderConfig = await videoTrack.getDecoderConfig();
     throw new VideoEngineError(
@@ -577,6 +576,41 @@ async function openInput(
       timeline,
     },
   };
+}
+
+/**
+ * The primary video track, or the typed refusal that says which of the three
+ * ways to reach no track this file took. Only the last of them, where the
+ * demuxer listed tracks and none was video, is a statement about the file
+ * itself; the other two say what this build can read.
+ */
+async function resolveVideoTrack(
+  input: Input,
+): Promise<OpenedInput["videoTrack"]> {
+  let videoTrack: Awaited<ReturnType<Input["getPrimaryVideoTrack"]>>;
+  try {
+    videoTrack = await input.getPrimaryVideoTrack();
+  } catch (error) {
+    if (error instanceof UnsupportedInputFormatError) {
+      throw new VideoEngineError(
+        VideoEngineErrorCode.ContainerUnreadable,
+        "openInput: the demuxer does not read this file's container",
+        error,
+      );
+    }
+    throw error;
+  }
+  if (videoTrack) return videoTrack;
+  const tracks = await input.getTracks();
+  throw tracks.length === 0
+    ? new VideoEngineError(
+        VideoEngineErrorCode.VideoTrackUnreadable,
+        "openInput: the container opened and the demuxer parsed no track out of it",
+      )
+    : new VideoEngineError(
+        VideoEngineErrorCode.NoVideoTrack,
+        "openInput: the container's tracks read and none of them carries video",
+      );
 }
 
 interface TrackWithTimeResolution {
