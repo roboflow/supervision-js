@@ -1,4 +1,7 @@
-import { tintedMaskVertexWgsl } from "#renderers/mask-vertex-wgsl";
+import {
+  tintedMaskVertexGlsl,
+  tintedMaskVertexWgsl,
+} from "#renderers/mask-vertex";
 import { PreparedMaskFrameKind } from "#render-preparation/mask-frame-artifact";
 import type { PreparedIdMaskFrame } from "#render-preparation/mask-frame-artifact";
 import { BaseFocusStyle } from "supervision-js-core";
@@ -868,7 +871,7 @@ function createFocusIdMaskRenderer(options: {
     return options.Shader.from({
       gl: {
         fragment: focusIdMaskFragmentShader,
-        vertex: focusIdMaskVertexShader,
+        vertex: tintedMaskVertexGlsl,
       },
       gpu: {
         fragment: {
@@ -922,32 +925,6 @@ function createPlaceholderCanvas() {
 
   return canvas;
 }
-
-const focusIdMaskVertexShader = `#version 300 es
-precision highp float;
-
-in vec2 aPosition;
-in vec2 aUV;
-
-uniform mat3 uProjectionMatrix;
-uniform mat3 uWorldTransformMatrix;
-uniform vec4 uWorldColorAlpha;
-uniform mat3 uTransformMatrix;
-uniform vec4 uColor;
-
-out vec2 vUV;
-out vec4 vColor;
-
-void main(void) {
-  mat3 modelViewProjectionMatrix =
-    uProjectionMatrix * uWorldTransformMatrix * uTransformMatrix;
-
-  gl_Position =
-    vec4((modelViewProjectionMatrix * vec3(aPosition, 1.0)).xy, 0.0, 1.0);
-  vUV = aUV;
-  vColor = uWorldColorAlpha * uColor;
-}
-`;
 
 const focusIdMaskFragmentShader = `#version 300 es
 precision highp float;

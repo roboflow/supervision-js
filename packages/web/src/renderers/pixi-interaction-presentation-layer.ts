@@ -1,4 +1,7 @@
-import { tintedMaskVertexWgsl } from "#renderers/mask-vertex-wgsl";
+import {
+  tintedMaskVertexGlsl,
+  tintedMaskVertexWgsl,
+} from "#renderers/mask-vertex";
 import {
   createDetectionPickKey,
   DetectionPickTarget,
@@ -784,7 +787,7 @@ function createInteractionMaskRenderer(options: {
     return options.Shader.from({
       gl: {
         fragment: interactionMaskFragmentShader,
-        vertex: interactionMaskVertexShader,
+        vertex: tintedMaskVertexGlsl,
       },
       gpu: {
         fragment: {
@@ -861,32 +864,6 @@ function createPlaceholderCanvas() {
 
   return canvas;
 }
-
-const interactionMaskVertexShader = `#version 300 es
-precision highp float;
-
-in vec2 aPosition;
-in vec2 aUV;
-
-uniform mat3 uProjectionMatrix;
-uniform mat3 uWorldTransformMatrix;
-uniform vec4 uWorldColorAlpha;
-uniform mat3 uTransformMatrix;
-uniform vec4 uColor;
-
-out vec2 vUV;
-out vec4 vColor;
-
-void main(void) {
-  mat3 modelViewProjectionMatrix =
-    uProjectionMatrix * uWorldTransformMatrix * uTransformMatrix;
-
-  gl_Position =
-    vec4((modelViewProjectionMatrix * vec3(aPosition, 1.0)).xy, 0.0, 1.0);
-  vUV = aUV;
-  vColor = uWorldColorAlpha * uColor;
-}
-`;
 
 const interactionMaskFragmentShader = `#version 300 es
 precision highp float;

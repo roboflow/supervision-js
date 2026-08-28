@@ -1,4 +1,4 @@
-import { untintedMaskVertexWgsl } from "#renderers/mask-vertex-wgsl";
+import { untintedMaskVertexWgsl } from "#renderers/mask-vertex";
 import type { PreparedRegionMaskCoverageEntry } from "#render-preparation/mask-frame-artifact";
 import type {
   AlphaMask as PixiAlphaMask,

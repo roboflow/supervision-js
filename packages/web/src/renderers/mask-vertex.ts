@@ -61,3 +61,34 @@ const tintAssignment = `
 export const tintedMaskVertexWgsl = `${maskVertexPrologue}${tintVarying}${maskVertexBody}${tintAssignment}${maskVertexEpilogue}`;
 
 export const untintedMaskVertexWgsl = `${maskVertexPrologue}${maskVertexBody}${maskVertexEpilogue}`;
+
+/**
+ * The GL counterpart of the tinted vertex stage. Pixi caches a program under
+ * both of its stages' source text, so shaders that share this one still get a
+ * program each from their own fragment stage.
+ */
+export const tintedMaskVertexGlsl = `#version 300 es
+precision highp float;
+
+in vec2 aPosition;
+in vec2 aUV;
+
+uniform mat3 uProjectionMatrix;
+uniform mat3 uWorldTransformMatrix;
+uniform vec4 uWorldColorAlpha;
+uniform mat3 uTransformMatrix;
+uniform vec4 uColor;
+
+out vec2 vUV;
+out vec4 vColor;
+
+void main(void) {
+  mat3 modelViewProjectionMatrix =
+    uProjectionMatrix * uWorldTransformMatrix * uTransformMatrix;
+
+  gl_Position =
+    vec4((modelViewProjectionMatrix * vec3(aPosition, 1.0)).xy, 0.0, 1.0);
+  vUV = aUV;
+  vColor = uWorldColorAlpha * uColor;
+}
+`;

@@ -4,7 +4,9 @@ import { describe, expect, it } from "vitest";
  * A Pixi shader built with a GLSL program alone draws nothing under the WebGPU
  * renderer and raises nothing while doing it: no exception, no failed draw, no
  * type error. The modules are discovered from the directory, so a shader added
- * later is covered without being registered anywhere.
+ * later is covered without being registered anywhere. A module that holds a
+ * stage several shaders draw with writes no shader of its own and is reached
+ * through the ones that import it.
  */
 const fsModuleName = "node:fs";
 const { readFileSync, readdirSync } = (await import(fsModuleName)) as {
@@ -39,9 +41,17 @@ describe("shader programs", () => {
     const glslFiles = readRendererFiles().filter((file) =>
       readSource(file).includes("#version 300 es"),
     );
+    const sharedStageFiles = shaderFiles.flatMap((file) =>
+      readImportedFiles(readSource(file)),
+    );
 
     expect(shaderFiles).not.toHaveLength(0);
-    expect(glslFiles.filter((file) => !shaderFiles.includes(file))).toEqual([]);
+    expect(
+      glslFiles.filter(
+        (file) =>
+          !shaderFiles.includes(file) && !sharedStageFiles.includes(file),
+      ),
+    ).toEqual([]);
     expect(programs.length).toBeGreaterThanOrEqual(shaderFiles.length);
   });
 
@@ -140,10 +150,14 @@ function readTemplate(source: string, name: string): string {
   throw new Error(`no template literal declares ${name}`);
 }
 
-function readImportedSources(source: string): readonly string[] {
+function readImportedFiles(source: string): readonly string[] {
   return [...source.matchAll(/from "(?:\.\/|#renderers\/)([\w-]+)"/g)].map(
-    (match) => readSource(`${match[1]!}.ts`),
+    (match) => `${match[1]!}.ts`,
   );
+}
+
+function readImportedSources(source: string): readonly string[] {
+  return readImportedFiles(source).map((file) => readSource(file));
 }
 
 function findTemplate(source: string, name: string): string | undefined {
