@@ -1,4 +1,5 @@
 import { RENDER_ENGINE_PREFERENCE } from "#constants/media-renderer";
+import { resolveDisplayPixelRatio } from "#media/display-pixel-ratio";
 import {
   BasePolygonStyle,
   RegionRendererCoverageKind,
@@ -2757,16 +2758,9 @@ function applyBackdropColor(
   backdrop.style.backgroundColor = `#${color.toString(16).padStart(6, "0")}`;
 }
 
-function resolvePixiResolution(maxDevicePixelRatio: number | undefined) {
-  const devicePixelRatio = window.devicePixelRatio || 1;
-
-  if (
-    maxDevicePixelRatio === undefined ||
-    !Number.isFinite(maxDevicePixelRatio) ||
-    maxDevicePixelRatio <= 0
-  ) {
-    return devicePixelRatio;
-  }
-
-  return Math.min(devicePixelRatio, maxDevicePixelRatio);
+export function resolvePixiResolution(maxDevicePixelRatio: number | undefined) {
+  return resolveDisplayPixelRatio({
+    devicePixelRatio: window.devicePixelRatio,
+    maxDevicePixelRatio,
+  });
 }

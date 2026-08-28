@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   canReuseMaskVisibilityArtifacts,
   observePixiContainerResize,
+  resolvePixiResolution,
 } from "./pixi-media-scene";
 import {
   createPixiSceneLayerSlot,
@@ -122,5 +123,38 @@ describe("Pixi media scene layer stacking", () => {
       "focus",
       "interaction",
     ]);
+  });
+});
+
+describe("Pixi media scene presentation resolution", () => {
+  it("holds a scene that states no ceiling to the ratio the decode uses", () => {
+    vi.stubGlobal("window", { devicePixelRatio: 3 });
+
+    expect(resolvePixiResolution(undefined)).toBe(2);
+  });
+
+  it("treats a ceiling that is not a usable number as none stated", () => {
+    vi.stubGlobal("window", { devicePixelRatio: 3 });
+
+    expect(resolvePixiResolution(Number.NaN)).toBe(2);
+    expect(resolvePixiResolution(0)).toBe(2);
+  });
+
+  it("takes a stated ceiling below the default", () => {
+    vi.stubGlobal("window", { devicePixelRatio: 3 });
+
+    expect(resolvePixiResolution(1.5)).toBe(1.5);
+  });
+
+  it("takes a stated ceiling above the default", () => {
+    vi.stubGlobal("window", { devicePixelRatio: 3 });
+
+    expect(resolvePixiResolution(3)).toBe(3);
+  });
+
+  it("never rasterizes above the ratio the viewer's display has", () => {
+    vi.stubGlobal("window", { devicePixelRatio: 1 });
+
+    expect(resolvePixiResolution(3)).toBe(1);
   });
 });

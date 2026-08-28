@@ -45,7 +45,6 @@ export function readDemoDisplayBox(
     boxWidth: box.width,
     boxHeight: box.height,
     devicePixelRatio,
-    maxDevicePixelRatio:
-      getDemoMaxDevicePixelRatio(renderQuality) ?? devicePixelRatio,
+    maxDevicePixelRatio: getDemoMaxDevicePixelRatio(renderQuality),
   };
 }
