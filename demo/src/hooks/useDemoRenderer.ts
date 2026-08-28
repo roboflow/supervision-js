@@ -17,6 +17,7 @@ import {
   type MediaSourceState,
   type RenderPreparationDiagnostics,
 } from "supervision";
+import type { FrameTimelineData } from "supervision-js-video-engine";
 import {
   createEngineDiagnosticsTap,
   type EngineDiagnosticsTap,
@@ -35,6 +36,8 @@ import type {
   DemoFixtureFrameTransform,
   DemoFixtureSummary,
 } from "../fixtures/demo-fixtures";
+import type { PipelineDescriptor } from "../pipeline/pipeline-descriptor";
+import { createPipelineRecorder } from "../pipeline/pipeline-recorder";
 import {
   clearLiveReadouts,
   publishLiveRenderPreparation,
@@ -49,10 +52,12 @@ import {
   constrainDemoPresentationSettings,
   createDemoPresentation,
   defaultDemoPresentationSettings,
+  demoPresentationDrawsAnnotations,
   type DemoPresentationAvailability,
   type DemoPresentationSettings,
 } from "../presentation/demo-presentation";
 import { defaultPlaybackRate } from "../session/playback-rate";
+import { tapFrameTimeline } from "../session/frame-timeline-source";
 import { createFixtureSession } from "../session/fixture-session";
 import { DEFAULT_UPLOAD_CLASS_NAMES } from "../session/demo-session-config";
 import {
@@ -89,6 +94,12 @@ export interface DemoRendererState {
   readonly duration: number | null;
   readonly errorMessage: string | null;
   readonly fixtureSummary: DemoFixtureSummary | null;
+  /**
+   * Every real frame of the open source, in presentation order, by the
+   * container's own timestamps. Null until a source opens, and again once it
+   * closes: a surface holding no table may show a position but never a frame.
+   */
+  readonly frameTimeline: FrameTimelineData | null;
   readonly hoveredDetectionPick: DetectionPickResult | null;
   readonly mediaState: DemoMediaState;
   readonly playbackRate: number;
@@ -97,6 +108,11 @@ export interface DemoRendererState {
   readonly presentedRate: number | null;
   /** The engine's own diagnostics broadcast, for the parity surface. */
   readonly engineDiagnosticsTap: EngineDiagnosticsTap;
+  /**
+   * The path this session actually took, stamped as it opened. Null until a
+   * session finishes opening, and frozen from then until the next one.
+   */
+  readonly pipelineDescriptor: PipelineDescriptor | null;
   readonly readPresentationDiagnostics: () => PresentationDiagnosticsSample;
   readonly presentationSettings: DemoPresentationSettings;
   readonly presentationAvailability?: DemoPresentationAvailability;
@@ -174,7 +190,7 @@ const initialUploadInferenceState: UploadInferenceState = {
   processedRanges: [],
   processingRanges: [],
   status: "idle",
-  statusLabel: "choose media, API key, and prompts",
+  statusLabel: "Choose a file, an API key, and prompts",
   totalFrames: 0,
 };
 
@@ -213,9 +229,15 @@ export function useDemoRenderer(
       globalThis as { __demoEngineDiagnostics?: EngineDiagnosticsTap }
     ).__demoEngineDiagnostics = engineDiagnosticsTap;
   }
+  const [frameTimeline, setFrameTimeline] = useState<FrameTimelineData | null>(
+    null,
+  );
   const tapMediaSource = useCallback(
     (source: MediaRendererSource) =>
-      engineDiagnosticsTap.tap(presentedFrameTap.tap(source)),
+      tapFrameTimeline(
+        engineDiagnosticsTap.tap(presentedFrameTap.tap(source)),
+        setFrameTimeline,
+      ),
     [engineDiagnosticsTap, presentedFrameTap],
   );
   /**
@@ -293,6 +315,8 @@ export function useDemoRenderer(
   );
   const [sessionConfiguration, setSessionConfiguration] =
     useState<DemoSessionConfiguration | null>(null);
+  const [pipelineDescriptor, setPipelineDescriptor] =
+    useState<PipelineDescriptor | null>(null);
   const activeFixture =
     demoFixtures.find((fixture) => fixture.sampleName === sampleFixtureId) ??
     defaultDemoFixture;
@@ -312,6 +336,9 @@ export function useDemoRenderer(
     const container = stage.host;
     const runId = effectRunRef.current + 1;
     effectRunRef.current = runId;
+    const pipeline = createPipelineRecorder({ epoch: runId });
+    const tapSessionMediaSource = (source: MediaRendererSource) =>
+      pipeline.tap(tapMediaSource(source));
     let activeSession: MediaSession | undefined;
     let renderer: MediaRenderer | undefined;
     let lastPlaybackState: MediaRendererPlaybackState | null = null;
@@ -451,9 +478,11 @@ export function useDemoRenderer(
             onSourceState: setSourceState,
             presentationSettings: presentationSettingsRef.current,
             presentationTransform,
+            readPresentationSettings: () => presentationSettingsRef.current,
             renderQuality,
+            pipeline,
             sessionOptions,
-            tapMediaSource,
+            tapMediaSource: tapSessionMediaSource,
           });
 
           activeSession = session;
@@ -476,9 +505,10 @@ export function useDemoRenderer(
             onSourceState: setSourceState,
             onUploadState: setUploadInferenceState,
             presentationSettings: presentationSettingsRef.current,
+            pipeline,
             renderQuality,
             sessionOptions,
-            tapMediaSource,
+            tapMediaSource: tapSessionMediaSource,
             uploadRun,
           });
 
@@ -502,6 +532,19 @@ export function useDemoRenderer(
             renderer;
         }
         syncRendererState(renderer);
+        // Every stamp has landed by now and none of them moves again, so the
+        // diagram is built once and never re-rendered while the picture plays.
+        const descriptor = pipeline.seal({
+          media: activeSession?.media ?? null,
+          rendererState: renderer.getState(),
+        });
+
+        setPipelineDescriptor(descriptor);
+        if (import.meta.env.DEV) {
+          (
+            globalThis as { __demoPipeline?: PipelineDescriptor }
+          ).__demoPipeline = descriptor;
+        }
         await restorePlayhead(renderer, restoreTimeRef);
         await runPlaybackRequest(
           renderer.play(),
@@ -519,6 +562,7 @@ export function useDemoRenderer(
 
     return () => {
       cleanedUp = true;
+      pipeline.close();
       clearLiveReadouts();
       renderPreparationPublisher.cancel();
       sessionStatePublisher.cancel();
@@ -709,6 +753,10 @@ export function useDemoRenderer(
           : undefined,
       );
 
+      const drewAnnotations = demoPresentationDrawsAnnotations(
+        presentationSettingsRef.current,
+      );
+
       presentationSettingsRef.current = constrainedSettings;
       setPresentationSettingsState(constrainedSettings);
 
@@ -721,6 +769,17 @@ export function useDemoRenderer(
       renderer.setPresentation(
         presentationTransform?.(presentation) ?? presentation,
       );
+
+      // Detections stop loading while no layer draws them, and a paused
+      // playhead never asks again on its own, so the first layer switched back
+      // on would otherwise annotate nothing until playback resumed.
+      if (
+        !drewAnnotations &&
+        demoPresentationDrawsAnnotations(constrainedSettings)
+      ) {
+        void renderer.refresh();
+      }
+
       syncRendererState(renderer);
     },
     [
@@ -855,7 +914,7 @@ export function useDemoRenderer(
     setUploadInferenceState({
       ...initialUploadInferenceState,
       status: "preparing",
-      statusLabel: "preparing uploaded media",
+      statusLabel: "Opening media",
     });
     setUploadRun({
       apiKey: trimmedApiKey,
@@ -870,7 +929,7 @@ export function useDemoRenderer(
     setUploadInferenceState((current) => ({
       ...current,
       status: "idle",
-      statusLabel: "upload inference canceled",
+      statusLabel: "Model run canceled",
     }));
   }, []);
 
@@ -884,13 +943,14 @@ export function useDemoRenderer(
     setDetectionSourceState(initialDetectionSourceState);
     setErrorMessage(null);
     setFixtureSummary(null);
+    setFrameTimeline(null);
     setHoveredDetectionPick(null);
     setMediaState({
       errorMessage: null,
       status:
         nextSourceMode === DemoSourceMode.Fixture
           ? activeFixture.mediaLoadingStatusLabel
-          : "waiting for upload inference",
+          : "Nothing loaded yet",
     });
     setPresentedRate(null);
     setRendererState(null);
@@ -933,6 +993,7 @@ export function useDemoRenderer(
     duration,
     errorMessage,
     fixtureSummary,
+    frameTimeline,
     hoveredDetectionPick,
     mediaState,
     onCancelUploadInference,
@@ -948,6 +1009,7 @@ export function useDemoRenderer(
     playbackState,
     presentationSettings,
     engineDiagnosticsTap,
+    pipelineDescriptor,
     presentedRate,
     readPresentationDiagnostics,
     getCurrentTime,

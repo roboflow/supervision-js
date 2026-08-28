@@ -12,6 +12,7 @@ import type {
   DemoFixtureSummary,
 } from "../fixtures/demo-fixtures";
 import type { PreparedUploadMedia } from "../media/upload-media";
+import type { PipelineRecorder } from "../pipeline/pipeline-recorder";
 import type { DemoPresentationSettings } from "../presentation/demo-presentation";
 import type { DemoRenderQuality } from "./render-quality";
 import type {
@@ -70,7 +71,15 @@ export interface DemoSessionCallbacks {
   ) => void;
   readonly onSessionState: (state: MediaSessionState) => void;
   readonly onSourceState: (state: MediaSourceState) => void;
+  /** Where each step of the session stamps that it ran, for the path diagram. */
+  readonly pipeline: PipelineRecorder;
   readonly presentationSettings: DemoPresentationSettings;
+  /**
+   * The presentation settings as they stand now. The layer toggles change them
+   * without reopening the session, so a session that acts on them past its own
+   * creation has to ask rather than keep the snapshot above.
+   */
+  readonly readPresentationSettings?: () => DemoPresentationSettings;
   readonly renderQuality: DemoRenderQuality;
   readonly sessionOptions: DemoSessionOptions;
   readonly tapMediaSource: (source: MediaRendererSource) => MediaRendererSource;

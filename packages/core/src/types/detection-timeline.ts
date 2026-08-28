@@ -29,15 +29,21 @@ export enum DetectionFrameSelectionMode {
    * nominal frame rate drift against a clip whose real rate differs, and once
    * that drift passes the half-millisecond selection tolerance a playhead
    * landing on a frame boundary selects the previous frame's detections.
-   * {@link DetectionFrameSelectionMode.NearestFrameIndex} compares indices and
-   * carries none of this.
+   *
+   * A frame that carries no `endTime` stays active until the next frame starts,
+   * which bridges an index the source never produced.
+   * {@link DetectionFrameSelectionMode.NearestFrameIndex} bounds each frame to
+   * one grid step instead, so a missing index reads as no detections.
    */
   Interval = "interval",
 
   /**
-   * Select from a known inference frame grid using `frameIndex`, `frameRate`,
-   * and optional `frameIndexOriginTime`. This is useful when inference was run
-   * on normalized frames and playback should snap detections to that grid.
+   * Select from a known inference frame grid using `frameIndex` and
+   * `frameRate`. This is useful when inference was run on normalized frames and
+   * playback should snap detections to that grid.
+   *
+   * A frame speaks for one grid step starting at its own media time, and an
+   * index the source never produced selects nothing rather than a neighbour.
    */
   NearestFrameIndex = "nearestFrameIndex",
 }
@@ -48,12 +54,18 @@ export interface DetectionFrameSelectionOptions {
    */
   readonly selectionMode?: DetectionFrameSelectionMode;
   /**
-   * Inference frame rate used by `NearestFrameIndex`.
+   * Nominal inference frame rate, and the grid step `NearestFrameIndex` falls
+   * back to. With two or more indexed frames buffered the step is measured from
+   * their own media times, so a rate that disagrees with the clip's real one
+   * cannot walk selection off the grid.
    */
   readonly frameRate?: number;
   /**
-   * Media timestamp for inference frame index 0. Defaults to the first indexed
-   * frame's time minus `frameIndex / frameRate`.
+   * Media timestamp for inference frame index 0.
+   *
+   * Selection no longer reads this: each buffered frame carries the media time
+   * its index sits at, which is the same statement without an origin to
+   * extrapolate from.
    */
   readonly frameIndexOriginTime?: number;
 }
@@ -83,6 +95,22 @@ export interface DetectionFrameSourceChanges {
 }
 
 export interface DetectionBufferOptions extends DetectionFrameSelectionOptions {
+  /**
+   * Whether the window keeps loading, asked again every time a load is about
+   * to start.
+   *
+   * Loading stays on when this is unset, so a host that hides its annotations
+   * while keeping them buffered behaves as it always has. Turned off, nothing
+   * is fetched: no rolling prefetch, no per-frame `prepare`, and no playback
+   * gate wait. The window already loaded is kept and still answers
+   * `selectFrame`, so turning it back on resumes from where it stopped instead
+   * of reloading ground it still holds.
+   *
+   * A predicate is read at each of those points rather than captured, which is
+   * how a host drives this from state that changes while the timeline lives
+   * without rebuilding it and throwing the window away.
+   */
+  readonly enabled?: boolean | (() => boolean);
   /**
    * Seconds of detections to keep loaded ahead of playback.
    */

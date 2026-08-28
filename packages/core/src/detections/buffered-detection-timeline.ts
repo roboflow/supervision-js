@@ -153,6 +153,10 @@ export function createBufferedDetectionTimeline(
       0,
     );
   };
+  const isLoadingEnabled = () =>
+    typeof options.enabled === "function"
+      ? options.enabled()
+      : options.enabled !== false;
   const isBufferFresh = () =>
     bufferedVersionRange !== null &&
     bufferedSourceVersion === getSourceVersion(getBufferedSourceRanges());
@@ -382,6 +386,10 @@ export function createBufferedDetectionTimeline(
    * answers, so the load lands behind annotations that never went away.
    */
   const shouldPrefetch = (mediaTime: number) => {
+    if (!isLoadingEnabled()) {
+      return false;
+    }
+
     if (!isBuffered(mediaTime)) {
       return true;
     }
@@ -413,7 +421,7 @@ export function createBufferedDetectionTimeline(
 
   const timeline: BufferedDetectionTimeline = {
     async prepare(mediaTime, prepareOptions) {
-      if (destroyed) {
+      if (destroyed || !isLoadingEnabled()) {
         return;
       }
 
@@ -432,6 +440,7 @@ export function createBufferedDetectionTimeline(
     needsPlaybackGateWait(mediaTime, prepareOptions) {
       if (
         destroyed ||
+        !isLoadingEnabled() ||
         !playbackGate?.enabled ||
         !options.source.waitForRange ||
         !options.source.getAvailableRanges ||
@@ -449,7 +458,7 @@ export function createBufferedDetectionTimeline(
     },
 
     prefetch(mediaTime) {
-      if (destroyed) {
+      if (destroyed || !isLoadingEnabled()) {
         return;
       }
 

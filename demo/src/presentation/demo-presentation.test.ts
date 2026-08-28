@@ -18,6 +18,7 @@ import {
   constrainDemoPresentationSettings,
   createDemoPresentation,
   defaultDemoPresentationSettings,
+  demoPresentationDrawsAnnotations,
 } from "./demo-presentation";
 
 const detection: Detection = {
@@ -1010,5 +1011,35 @@ describe("demo presentation", () => {
       targetMode: FocusTargetMode.HoveredAndSelected,
       targets: [selectedPick, hoveredPick],
     });
+  });
+});
+
+describe("demo annotation demand", () => {
+  it("reports no demand only once every layer is switched off", () => {
+    expect(
+      demoPresentationDrawsAnnotations(defaultDemoPresentationSettings),
+    ).toBe(true);
+
+    const withoutLayers = {
+      ...defaultDemoPresentationSettings,
+      boxesEnabled: false,
+      boxCornersEnabled: false,
+      ellipsesEnabled: false,
+      focusEnabled: false,
+      keypointsEnabled: false,
+      labelsEnabled: false,
+      masksEnabled: false,
+      markersEnabled: false,
+      polygonsEnabled: false,
+      polylinesEnabled: false,
+    };
+
+    expect(demoPresentationDrawsAnnotations(withoutLayers)).toBe(false);
+    expect(
+      demoPresentationDrawsAnnotations({
+        ...withoutLayers,
+        polylinesEnabled: true,
+      }),
+    ).toBe(true);
   });
 });

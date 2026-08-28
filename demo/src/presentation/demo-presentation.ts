@@ -144,6 +144,16 @@ const demoPresentationLayerSettings: readonly DemoPresentationLayerSetting[] = [
   "polylinesEnabled",
 ];
 
+/**
+ * Whether any layer would draw a detection, which is what the workbench asks
+ * before it lets the detection buffer keep loading.
+ */
+export function demoPresentationDrawsAnnotations(
+  settings: DemoPresentationSettings,
+): boolean {
+  return demoPresentationLayerSettings.some((key) => settings[key]);
+}
+
 export function constrainDemoPresentationSettings(
   settings: DemoPresentationSettings,
   availability?: DemoPresentationAvailability,
