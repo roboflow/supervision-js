@@ -36,6 +36,7 @@ import {
   VideoEngineError,
   VideoEngineErrorCode,
   type DecodePath,
+  type UrlSourceReadConfig,
   type UrlVideoSource,
   type VideoSource,
 } from "./types";
@@ -519,7 +520,11 @@ async function openInput(
   const { source } = options;
   const input = new Input({
     formats: ALL_FORMATS,
-    source: toMediabunnySource(source, options.sourceResidency),
+    source: toMediabunnySource(
+      source,
+      options.sourceResidency,
+      options.urlSource,
+    ),
   });
   const videoTrack = await input.getPrimaryVideoTrack();
   if (!videoTrack) {
@@ -726,17 +731,23 @@ export function urlRequestInit(
 export function toMediabunnySource(
   source: VideoSource,
   residency?: SourceResidency,
+  urlSource?: UrlSourceReadConfig,
 ): UrlSource | BlobSource | ReadableStreamSource {
   switch (source.kind) {
     case SourceKind.Url: {
-      const requestInit = urlRequestInit(source.crossOrigin);
       const options = {
-        ...requestInit,
+        ...urlRequestInit(source.crossOrigin),
         ...(residency ? { fetchFn: residency.fetchFn } : {}),
+        ...(urlSource?.maxCacheSize === undefined
+          ? {}
+          : { maxCacheSize: urlSource.maxCacheSize }),
+        ...(urlSource?.parallelism === undefined
+          ? {}
+          : { parallelism: urlSource.parallelism }),
       };
       return new UrlSource(
         source.url,
-        requestInit || residency ? options : undefined,
+        Object.keys(options).length > 0 ? options : undefined,
       );
     }
     case SourceKind.Blob:

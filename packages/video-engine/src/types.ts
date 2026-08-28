@@ -38,6 +38,17 @@ export interface UrlVideoSource {
   crossOrigin?: "anonymous" | "use-credentials";
 }
 
+/**
+ * Mediabunny's own read tuning for a URL source, passed straight through to its
+ * `UrlSource`. Every field absent leaves mediabunny's defaults in place.
+ */
+export interface UrlSourceReadConfig {
+  /** Range requests the demuxer may have in flight at once. */
+  readonly parallelism?: number;
+  /** Ceiling on the bytes mediabunny's own read cache holds. */
+  readonly maxCacheSize?: number;
+}
+
 export interface BlobVideoSource {
   kind: SourceKind.Blob;
   blob: Blob;

@@ -273,6 +273,7 @@ describe("package entrypoint", () => {
       Ready: "ready",
     });
     expect(entrypoint.MediaSessionActivityKind).toEqual({
+      DetectionsAwaitingCoverage: "detectionsAwaitingCoverage",
       DetectionsBuffering: "detectionsBuffering",
       DetectionsLoading: "detectionsLoading",
       Error: "error",
@@ -293,6 +294,7 @@ describe("package entrypoint", () => {
       Prepared: "prepared",
     });
     expect(entrypoint.DetectionBufferStatus).toEqual({
+      AwaitingCoverage: "awaitingCoverage",
       Destroyed: "destroyed",
       Error: "error",
       Idle: "idle",

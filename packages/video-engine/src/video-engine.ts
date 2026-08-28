@@ -19,6 +19,7 @@ import {
   type PresentationMode,
   resolvePlaybackRate,
   SourceKind,
+  type UrlSourceReadConfig,
   VideoEngineError,
   VideoEngineErrorCode,
   type VideoSource,
@@ -108,6 +109,12 @@ export interface VideoEngineOptions {
    * and a Stream source is consumed once, so neither has anything to hold.
    */
   sourceResidency?: SourceResidencyConfig;
+  /**
+   * Read tuning handed to mediabunny for a `SourceKind.Url` source: how many
+   * range requests it may run at once, and how many bytes its own reader keeps.
+   * Nothing here is read for a Blob or Stream source.
+   */
+  urlSource?: UrlSourceReadConfig;
 }
 
 /**
@@ -193,6 +200,7 @@ export class VideoEngine {
       decodeStrategy: this.options.decodeStrategy,
       prefer2d: this.options.prefer2d,
       sourceResidency: this.options.sourceResidency,
+      urlSource: this.options.urlSource,
     };
     try {
       const response = await this.request((requestId) => ({

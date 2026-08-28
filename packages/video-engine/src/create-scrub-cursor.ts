@@ -11,7 +11,11 @@ import type { DecodeResolutionStrategy } from "./decode-resolution";
 import { FrameCache } from "./frame-cache";
 import type { ScrubCursor, ScrubCursorFactory } from "./scrub-cursor";
 import type { SourceResidency } from "./source-residency";
-import type { VideoEngineError, VideoSource } from "./types";
+import type {
+  UrlSourceReadConfig,
+  VideoEngineError,
+  VideoSource,
+} from "./types";
 
 /** On-screen canvas measurements the decode strategy reasons over. */
 export interface ScrubViewport {
@@ -58,6 +62,8 @@ export interface CreateScrubCursorOptions {
   onDecodeFailure?: (error: VideoEngineError) => void;
   /** Serves the demuxer's byte reads from what this process already holds. */
   sourceResidency?: SourceResidency;
+  /** Read tuning for a URL source, passed through to mediabunny. */
+  urlSource?: UrlSourceReadConfig;
   signal?: AbortSignal;
 }
 

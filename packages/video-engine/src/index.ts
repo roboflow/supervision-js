@@ -18,6 +18,7 @@ export { SourceKind } from "./types";
 export type {
   BlobVideoSource,
   StreamVideoSource,
+  UrlSourceReadConfig,
   UrlVideoSource,
   VideoMetadata,
   VideoSource,

@@ -198,6 +198,7 @@ export class EngineCore {
     this.cursor = await createScrubCursor({
       source: config.source,
       sourceResidency: this.residency ?? undefined,
+      urlSource: config.urlSource,
       decodeStrategy: config.decodeStrategy ?? nativeResolution(),
       viewport: this.viewport ?? { displayWidth: null, devicePixelRatio: 1 },
       prefer2d: config.prefer2d,
@@ -393,7 +394,7 @@ export class EngineCore {
     }
     this.emit({ type: "seeking", seeking: true });
     this.cursor.seekTo(asSec(tSec));
-    await this.cursor.idle();
+    await this.cursor.seekSettled();
     this.pushTraceEvent({
       type: "seek",
       targetMs: tSec * 1000,
@@ -419,7 +420,7 @@ export class EngineCore {
     }
     this.emit({ type: "seeking", seeking: true });
     this.cursor.seekToKey(asSec(tSec));
-    await this.cursor.idle();
+    await this.cursor.seekSettled();
     this.pushTraceEvent({
       type: "seek",
       targetMs: timeMs,

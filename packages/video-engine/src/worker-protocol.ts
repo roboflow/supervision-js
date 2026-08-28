@@ -8,6 +8,7 @@ import type {
   EngineReadySnapshot,
   PlaybackStatus,
   PresentationMode,
+  UrlSourceReadConfig,
   VideoEngineErrorCode,
   VideoSource,
 } from "./types";
@@ -87,6 +88,7 @@ export interface EngineLoadConfig {
   /** Pin the 2D renderer; unset prefers WebGPU with a 2D fallback. */
   readonly prefer2d?: boolean;
   readonly sourceResidency?: SourceResidencyConfig;
+  readonly urlSource?: UrlSourceReadConfig;
 }
 
 // ---------------------------------------------------------------------------
