@@ -26,8 +26,8 @@ describe("media session defaults", () => {
     });
 
     expect(defaults.detectionBuffer).toEqual({
-      bufferAheadSeconds: 10,
-      bufferBehindSeconds: 0.5,
+      bufferAheadSeconds: 6,
+      bufferBehindSeconds: 5,
       frameRate: 30,
       refreshIntervalSeconds: 2.5,
       selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
@@ -243,7 +243,7 @@ describe("media session defaults", () => {
 
     expect(defaults.detectionBuffer).toMatchObject({
       bufferAheadSeconds: 3,
-      bufferBehindSeconds: 0.5,
+      bufferBehindSeconds: 5,
       playbackGate: {
         enabled: false,
         requiredAheadSeconds: 4,

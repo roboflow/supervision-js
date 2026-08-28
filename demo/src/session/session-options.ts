@@ -118,13 +118,6 @@ export interface DemoSessionOptions {
 export const emptyDemoSessionOptions: DemoSessionOptions = {};
 
 /**
- * What the workbench asks for when it opens a clip, over what the library picks
- * for itself. Nothing: a visitor arriving from the docs should meet the session
- * the docs describe, so anything put here has to be worth the difference.
- */
-export const scrubbableDemoSessionOptions: DemoSessionOptions = {};
-
-/**
  * What the open session actually runs on: the library's own resolution of the
  * options it was handed, alongside the ones it resolves for itself. A panel
  * displaying this is displaying the session rather than a copy of it, so a

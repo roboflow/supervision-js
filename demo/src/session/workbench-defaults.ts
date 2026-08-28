@@ -1,8 +1,4 @@
-import {
-  DemoMediaPath,
-  scrubbableDemoSessionOptions,
-  type DemoSessionOptions,
-} from "./session-options";
+import { DemoMediaPath, type DemoSessionOptions } from "./session-options";
 
 /**
  * The media path the workbench opens on. Mediabunny is what
@@ -21,7 +17,6 @@ export const DEMO_DEFAULT_MEDIA_PATH = DemoMediaPath.Mediabunny;
  * path nobody asked for.
  */
 export const demoInitialSessionOptions: DemoSessionOptions = {
-  ...scrubbableDemoSessionOptions,
   mediaPath: DEMO_DEFAULT_MEDIA_PATH,
 };
 

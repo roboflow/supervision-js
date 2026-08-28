@@ -114,7 +114,7 @@ describe("demo session options", () => {
       resolveMediaSessionDefaults({ detections }).detectionBuffer,
     ).toMatchObject({
       bufferAheadSeconds: 4,
-      bufferBehindSeconds: 0.5,
+      bufferBehindSeconds: 5,
       refreshIntervalSeconds: 2.5,
     });
   });

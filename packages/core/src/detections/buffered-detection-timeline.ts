@@ -19,8 +19,8 @@ import {
   validateDetectionFrames,
 } from "#utils/detection-frames";
 
-const DEFAULT_BUFFER_AHEAD_SECONDS = 5;
-const DEFAULT_BUFFER_BEHIND_SECONDS = 0.5;
+const DEFAULT_BUFFER_AHEAD_SECONDS = 6;
+const DEFAULT_BUFFER_BEHIND_SECONDS = 5;
 /**
  * Share of the ahead window that must still lead the playhead when the next
  * window is fetched.

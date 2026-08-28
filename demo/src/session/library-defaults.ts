@@ -147,7 +147,7 @@ export function listDemoLibraryDepartures(options: {
     library: formatOptionSeconds(libraryBuffer.bufferBehindSeconds),
     setting: "Buffer behind",
     value: formatOptionSeconds(buffer.bufferBehindSeconds),
-    why: "This workbench is scrubbed backwards as often as forwards, and the library's file default holds twenty times more ahead of the playhead than behind it. Matching the two directions stops annotations blinking out during a backward drag.",
+    why: "Seconds of annotation held behind the playhead.",
   });
   compare(departures, {
     library: formatOptionSeconds(libraryBuffer.refreshIntervalSeconds),
