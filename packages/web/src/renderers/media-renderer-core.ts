@@ -697,15 +697,6 @@ export async function createMediaRendererCore(
             )
           : detectionSource,
       ...options.detectionBuffer,
-      ...(options.detectionTimelineOrigin ===
-        DetectionTimelineOrigin.MediaStart &&
-      options.detectionBuffer?.frameIndexOriginTime !== undefined
-        ? {
-            frameIndexOriginTime:
-              options.detectionBuffer.frameIndexOriginTime +
-              metadata.firstTimestamp,
-          }
-        : {}),
     });
     const presentedFrameChannel = resolvePresentedFrameChannel(mediaSource);
 

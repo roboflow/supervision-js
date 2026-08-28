@@ -63,9 +63,9 @@ export interface DetectionFrameSelectionOptions {
   /**
    * Media timestamp for inference frame index 0.
    *
-   * Selection no longer reads this: each buffered frame carries the media time
-   * its index sits at, which is the same statement without an origin to
-   * extrapolate from.
+   * @deprecated Selection does not read this. Each buffered frame carries the
+   * media time its index sits at, which states the same thing without an origin
+   * to extrapolate from.
    */
   readonly frameIndexOriginTime?: number;
 }
