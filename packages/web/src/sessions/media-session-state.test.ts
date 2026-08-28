@@ -17,6 +17,7 @@ import {
 import {
   MediaSessionActivityKind,
   MediaSessionActivityStatus,
+  MediaSessionMediaBranch,
   MediaSessionStatus,
 } from "#types/media-session";
 
@@ -548,6 +549,41 @@ describe("media session state", () => {
         status: MediaSessionActivityStatus.Waiting,
       },
     ]);
+  });
+
+  it("blames a transfer only where the session opened one", () => {
+    const stoppedOn = (branch: MediaSessionMediaBranch | undefined) =>
+      createMediaSessionStateSnapshot({
+        errorMessage: null,
+        media: {
+          inputMetadata: null,
+          normalizedMedia: null,
+          objectUrl: null,
+          preparation: branch ? { branch, opened: "src" } : null,
+        },
+        normalization: null,
+        renderPreparation: null,
+        renderer: createRendererState({
+          detectionBufferStatus: DetectionBufferStatus.Ready,
+          playbackState: MediaRendererPlaybackState.Buffering,
+        }),
+      }).activities[0].detail;
+
+    expect({
+      blob: stoppedOn(MediaSessionMediaBranch.BlobObjectUrl),
+      normalized: stoppedOn(MediaSessionMediaBranch.NormalizedObjectUrl),
+      progressive: stoppedOn(MediaSessionMediaBranch.ProgressiveSource),
+      rendererSource: stoppedOn(MediaSessionMediaBranch.RendererSource),
+      unknown: stoppedOn(undefined),
+      url: stoppedOn(MediaSessionMediaBranch.Url),
+    }).toStrictEqual({
+      blob: "This part of the video is still being read",
+      normalized: "This part of the video is still being read",
+      progressive: "This part of the video is still being read",
+      rendererSource: "This part of the video is still being read",
+      unknown: "This part of the video is still being read",
+      url: "This part of the video has not downloaded yet",
+    });
   });
 
   it("names detections still arriving apart from video still arriving", () => {

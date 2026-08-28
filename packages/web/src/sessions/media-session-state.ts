@@ -13,6 +13,7 @@ import {
 import {
   MediaSessionActivityKind,
   MediaSessionActivityStatus,
+  MediaSessionMediaBranch,
   MediaSessionStatus,
   type MediaSessionActivity,
   type MediaSessionMediaState,
@@ -85,7 +86,7 @@ export function createMediaSessionStateSnapshot({
     activities.push(
       createActivity({
         blockingPlayback: true,
-        detail: "This part of the video has not downloaded yet",
+        detail: playbackBufferingDetail(media),
         kind: MediaSessionActivityKind.PlaybackBuffering,
         label: "Waiting for more video",
         status: MediaSessionActivityStatus.Waiting,
@@ -227,6 +228,20 @@ export function createMediaSessionStateSnapshot({
     renderer,
     status: resolveSessionStatus(renderer, activities, errorMessage),
   };
+}
+
+/**
+ * Why the picture is short of video, in terms the session can stand behind.
+ *
+ * A transfer is certain on one branch only. A file opened from the device, and
+ * a source the host built and the session cannot see into, both stop while the
+ * bytes are read and decoded with nothing arriving over a network, so naming a
+ * download there describes an event that cannot happen.
+ */
+function playbackBufferingDetail(media: MediaSessionMediaState) {
+  return media.preparation?.branch === MediaSessionMediaBranch.Url
+    ? "This part of the video has not downloaded yet"
+    : "This part of the video is still being read";
 }
 
 /** How far a lead the gate is banking has come, against what it has to reach. */
