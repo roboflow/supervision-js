@@ -6,7 +6,7 @@ const MISSING_MODULE_ERROR_CODES = new Set([
   "MODULE_NOT_FOUND",
 ]);
 const MISSING_MODULE_MESSAGE =
-  /cannot find (?:module|package)|failed to (?:resolve|fetch dynamically imported) module/i;
+  /cannot find (?:module|package)|failed to (?:resolve|fetch dynamically imported) module|could not resolve/i;
 const QUOTED_SPECIFIER = /['"]([^'"]+)['"]/;
 const MAX_WRAPPED_ERROR_DEPTH = 8;
 
@@ -53,6 +53,12 @@ export function isEngineResolutionFailure(error: unknown): boolean {
  * Node and bundlers quote the specifier they failed to resolve, so a dependency
  * missing from an engine that is installed is told apart by whose name is
  * quoted; a browser reports an unquoted URL, which carries the package name too.
+ *
+ * Each bundler words this differently and one of them stubs the import with an
+ * error of its own, so the wording is matched as well as the code. A build that
+ * names the engine first and its importer second is the engine failing to
+ * resolve; one that names a dependency first is that dependency's problem, and
+ * reading only the first quoted specifier keeps the two apart.
  */
 function namesUnresolvedEngine(error: Error): boolean {
   const code = "code" in error ? String(error.code) : "";

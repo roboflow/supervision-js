@@ -61,6 +61,29 @@ describe("engine import failure", () => {
     expect(isEngineResolutionFailure(nodeNotFound("mediabunny"))).toBe(false);
   });
 
+  it("reads the stub a bundler builds in place of an optional peer", () => {
+    expect(() =>
+      rethrowEngineImportFailure(
+        new Error(
+          'Could not resolve "supervision-js-web-video-engine" imported by ' +
+            '"supervision". Is it installed?',
+        ),
+        VIDEO_ENGINE_PACKAGE,
+      ),
+    ).toThrow(/npm install supervision-js-web-video-engine/);
+  });
+
+  it("blames a dependency the engine itself could not resolve", () => {
+    const thrown = new Error(
+      'Could not resolve "mediabunny" imported by ' +
+        '"supervision-js-web-video-engine". Is it installed?',
+    );
+
+    expect(() =>
+      rethrowEngineImportFailure(thrown, VIDEO_ENGINE_PACKAGE),
+    ).toThrow(thrown);
+  });
+
   it("reads a browser failure, which quotes no specifier", () => {
     expect(
       isEngineResolutionFailure(
