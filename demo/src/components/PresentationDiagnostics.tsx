@@ -127,10 +127,10 @@ function PresentedFrameTimeline({
   return (
     <div className="presented-timeline" aria-hidden="true">
       <TimelineLane label="Frames" playheadLeft={playheadLeft}>
-        {ticks.map((tick, index) => (
+        {ticks.map((tick) => (
           <span
             className={`presented-timeline__tick presented-timeline__tick--${tick.quality}`}
-            key={`${index}-${tick.wallTimeMs}`}
+            key={tick.paintSeq}
             style={
               {
                 "--timeline-left": toPercent(tick.mediaTimeS, duration),

@@ -1582,10 +1582,91 @@ fieldset {
   --state-color: var(--danger);
 }
 
+.pipeline-legend__item--pick {
+  --state-color: var(--violet);
+}
+
+/* Round, hollow and violet: the same marker the branches someone can pick
+   carry, so the legend entry is a sample, not a description of one. */
+.pipeline-legend__pick {
+  background: #ffffff;
+  border: 1px solid var(--state-color);
+  border-radius: 50%;
+  flex: 0 0 auto;
+  height: 5px;
+  width: 5px;
+}
+
+.pipeline-legend__item--pick .diagnostic-label__name {
+  color: var(--violet);
+}
+
+/* The picture and the row targets over it are one stack. Both are laid out in
+   percentages of the same viewBox, so a diagram scaled down to a narrow column
+   keeps every target over the row it answers for. */
 .pipeline-diagram {
+  max-width: 300px;
+  position: relative;
+  width: 100%;
+}
+
+.pipeline-diagram__picture {
   display: block;
   height: auto;
-  max-width: 100%;
+  width: 100%;
+}
+
+.pipeline-diagram__rows {
+  inset: 0;
+  position: absolute;
+}
+
+/* Written against the wrapper so the row beats the inline-flex, statically
+   positioned box every other target in this workbench is. */
+.pipeline-diagram .pipeline-diagram__row {
+  height: var(--row-height);
+  left: 5.3333%;
+  position: absolute;
+  top: var(--row-top);
+  width: 92.6667%;
+}
+
+.pipeline-diagram .pipeline-diagram__row--head {
+  left: 10%;
+  width: 88%;
+}
+
+.pipeline-diagram__target {
+  background: none;
+  border: 0;
+  border-radius: 4px;
+  cursor: help;
+  inset: 0;
+  padding: 0;
+  position: absolute;
+  transition: background-color 120ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.pipeline-diagram__target--pick {
+  cursor: pointer;
+}
+
+/* The row sits over the drawing, so its highlight has to be something the
+   label underneath still reads through. */
+.pipeline-diagram__target:hover,
+.pipeline-diagram__target:focus-visible {
+  background: rgb(124 58 237 / 9%);
+}
+
+/* Violet is what a control answers in everywhere else in this workbench, so a
+   row that only explains itself is never ringed in it. */
+.pipeline-diagram__target:focus-visible {
+  outline: 1px solid var(--line-strong);
+}
+
+.pipeline-diagram__target--pick:hover,
+.pipeline-diagram__target--pick:focus-visible {
+  outline: 1px solid var(--violet);
 }
 
 .pipeline-diagram__trunk {
@@ -1652,14 +1733,6 @@ fieldset {
   --state-color: var(--danger);
 }
 
-.pipeline-diagram__hit {
-  fill: transparent;
-}
-
-.pipeline-diagram__node:hover .pipeline-diagram__hit {
-  fill: var(--surface-soft);
-}
-
 .pipeline-diagram__lead {
   stroke: var(--green);
   stroke-width: 2;
@@ -1669,10 +1742,6 @@ fieldset {
   fill: #ffffff;
   stroke: var(--line-strong);
   stroke-width: 1;
-}
-
-.pipeline-diagram__node:hover .pipeline-diagram__box {
-  stroke: var(--violet);
 }
 
 .pipeline-diagram__dot {
@@ -1721,12 +1790,34 @@ fieldset {
   text-decoration-color: var(--danger);
 }
 
-.pipeline-diagram__stamp {
+.pipeline-diagram__trailing {
   fill: var(--muted);
   font-family: var(--font-mono);
   font-size: 8.5px;
   font-variant-numeric: tabular-nums;
   font-weight: 620;
+}
+
+/* The offer to move the session onto a branch, in the colour every other
+   control in this workbench acts in. */
+.pipeline-diagram__trailing--pick {
+  fill: var(--violet);
+  font-family: var(--font-sans);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+/* The same offer, on a session no control can make it on. It stays drawn: the
+   sentence saying why is on the row, and a choice removed reads as a choice
+   that never existed. */
+.pipeline-diagram__trailing--blocked {
+  fill: var(--muted);
+  font-family: var(--font-sans);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-decoration: line-through;
 }
 
 .pipeline-live {
@@ -2469,14 +2560,12 @@ fieldset {
 .diagnostic-label__tip {
   background: var(--text);
   border-radius: 4px;
-  bottom: 100%;
   color: #ffffff;
   font-family: var(--font-sans);
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0;
   line-height: 1.35;
-  margin-bottom: 8px;
   opacity: 0;
   padding: 7px 9px;
   pointer-events: none;
@@ -2487,6 +2576,18 @@ fieldset {
   transition: opacity 120ms cubic-bezier(0.2, 0, 0, 1);
   width: 268px;
   z-index: 6;
+}
+
+.diagnostic-label__tip--above {
+  bottom: 100%;
+  margin-bottom: 8px;
+}
+
+/* A target near the top of a scrolling column has nothing above it, so the
+   sentence opens downward, where the panel still holds it. */
+.diagnostic-label__tip--below {
+  margin-top: 8px;
+  top: 100%;
 }
 
 .diagnostic-label__tip--start {
@@ -4659,6 +4760,7 @@ fieldset {
 }
 
 .engine-timeline__stage {
+  overflow: hidden;
   position: relative;
 }
 

@@ -65,6 +65,7 @@ export function EngineDiagnosticsTimeline({
   readonly snapshot: DiagnosticsSnapshot;
 }) {
   const playheadRef = useRef<HTMLSpanElement | null>(null);
+  const playheadStepsRef = useRef(0);
   const screenRef = useRef<HTMLSpanElement | null>(null);
   const clockRef = useRef<{
     atMs: number;
@@ -99,6 +100,29 @@ export function EngineDiagnosticsTimeline({
     );
   }, [durationMs, screenMs]);
 
+  // How many places along the track the marker can actually occupy. The write
+  // below is skipped whenever the next frame would put it back on the one it is
+  // already on, and that is only ever true against a real count of pixels.
+  useEffect(() => {
+    const track = playheadRef.current;
+
+    if (!track || typeof ResizeObserver === "undefined") {
+      return undefined;
+    }
+
+    const observer = new ResizeObserver(([entry]) => {
+      playheadStepsRef.current = Math.round(
+        entry.contentRect.width * (globalThis.devicePixelRatio || 1),
+      );
+    });
+
+    observer.observe(track);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [durationMs]);
+
   useEffect(() => {
     if (durationMs <= 0) {
       return undefined;
@@ -112,7 +136,9 @@ export function EngineDiagnosticsTimeline({
 
       if (line && clock) {
         const elapsedMs = clock.playing ? performance.now() - clock.atMs : 0;
-        const x = `${clamp01((clock.playheadMs + elapsedMs) / durationMs) * 100}%`;
+        const along = clamp01((clock.playheadMs + elapsedMs) / durationMs);
+        const steps = playheadStepsRef.current;
+        const x = `${(steps > 0 ? Math.round(along * steps) / steps : along) * 100}%`;
 
         if (x !== drawnX) {
           drawnX = x;
