@@ -9,6 +9,7 @@ import {
   type DetectionTimelineContext,
 } from "#types/detection-timeline";
 import type { DetectionFrame } from "#types/detections";
+import { isRangeCovered } from "#utils/detection-ranges";
 import { startWaitBound } from "#utils/wait-bound";
 import {
   copyDetectionFrame,
@@ -428,6 +429,25 @@ export function createBufferedDetectionTimeline(
       anchorWindowToPlayhead(mediaTime);
     },
 
+    needsPlaybackGateWait(mediaTime, prepareOptions) {
+      if (
+        destroyed ||
+        !playbackGate?.enabled ||
+        !options.source.waitForRange ||
+        !options.source.getAvailableRanges ||
+        hasAbandonedGate()
+      ) {
+        return false;
+      }
+
+      const availableRanges = options.source.getAvailableRanges();
+
+      return !createPlaybackGateCoveragePlan(
+        mediaTime,
+        prepareOptions,
+      ).sourceRanges.every((range) => isRangeCovered(range, availableRanges));
+    },
+
     prefetch(mediaTime) {
       if (destroyed) {
         return;
@@ -641,17 +661,13 @@ export function createBufferedDetectionTimeline(
     );
   }
 
-  async function waitForPlaybackGate(
+  function createPlaybackGateCoveragePlan(
     mediaTime: number,
     prepareOptions: DetectionBufferPrepareOptions | undefined,
   ) {
-    if (!playbackGate?.enabled || !options.source.waitForRange) {
-      return;
-    }
-
     const requiredAheadSeconds = Math.max(
       0,
-      playbackGate.requiredAheadSeconds ?? 0,
+      playbackGate?.requiredAheadSeconds ?? 0,
     );
     const comparableMediaTime = getComparableMediaTime(mediaTime);
     const endTime = getRequiredCoverageEndTime({
@@ -663,18 +679,36 @@ export function createBufferedDetectionTimeline(
       requiredAheadSeconds,
     });
 
-    if (
+    // A lead clamped away at the end of media, or asked for as zero, still
+    // leaves the frame under the playhead to wait for.
+    return createLoadPlan(
+      comparableMediaTime,
+      Math.max(comparableMediaTime, endTime),
+    );
+  }
+
+  function hasAbandonedGate() {
+    return (
       abandonedGateSourceVersion !== null &&
       getSourceVersion() <= abandonedGateSourceVersion
-    ) {
+    );
+  }
+
+  async function waitForPlaybackGate(
+    mediaTime: number,
+    prepareOptions: DetectionBufferPrepareOptions | undefined,
+  ) {
+    if (!playbackGate?.enabled || !options.source.waitForRange) {
       return;
     }
 
-    // A lead clamped away at the end of media, or asked for as zero, still
-    // leaves the frame under the playhead to wait for.
-    const coveragePlan = createLoadPlan(
-      comparableMediaTime,
-      Math.max(comparableMediaTime, endTime),
+    if (hasAbandonedGate()) {
+      return;
+    }
+
+    const coveragePlan = createPlaybackGateCoveragePlan(
+      mediaTime,
+      prepareOptions,
     );
 
     state = {
@@ -763,9 +797,29 @@ export function createBufferedDetectionTimeline(
     const { endTime, startTime } = getLoadRange(mediaTime);
 
     return (
-      Math.abs(startTime - state.bufferStartTime) >= refreshIntervalSeconds ||
-      Math.abs(endTime - state.bufferEndTime) >= refreshIntervalSeconds
+      getWindowDrift(startTime, state.bufferStartTime) >=
+        refreshIntervalSeconds ||
+      getWindowDrift(endTime, state.bufferEndTime) >= refreshIntervalSeconds
     );
+  }
+
+  /**
+   * How far a planned edge sits from the window's, counted the short way around
+   * a looping timeline. A plan is stated on the first lap and the window on the
+   * playhead's, so across the loop point the two state the same edge a whole lap
+   * apart; measured straight, that reads as a window a full lap stale and
+   * rebuilds it on every frame until the plan stops reaching behind zero.
+   */
+  function getWindowDrift(planTime: number, bufferTime: number) {
+    const drift = Math.abs(planTime - bufferTime);
+
+    if (!isLoopingTimeline() || timelineContext.duration === null) {
+      return drift;
+    }
+
+    const wrappedDrift = modulo(drift, timelineContext.duration);
+
+    return Math.min(wrappedDrift, timelineContext.duration - wrappedDrift);
   }
 
   function createLoadPlan(

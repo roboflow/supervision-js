@@ -113,14 +113,14 @@ export interface DetectionBufferOptions extends DetectionFrameSelectionOptions {
    * requested lookahead before it loads, so playback stalls rather than
    * showing an unannotated frame.
    *
-   * The stall lives in the renderer's own sample pump, so a media source the
-   * renderer pulls decoded samples from is held frame by frame, for as long as
-   * playback runs. A source that presents its own frames owns the playhead and
-   * the renderer follows it; the browser package's video-engine source,
-   * `openVideoEngineMediaSource`, is that kind of source, and it is the one
-   * most hosts render video through. There the gate holds the start of playback
-   * and nothing after it: coverage is awaited before the producer is asked to
-   * run, and a producer already running paces itself.
+   * A media source the renderer pulls decoded samples from stalls in the
+   * renderer's own sample pump, frame by frame. A source that presents its own
+   * frames owns the playhead and the renderer follows it; the browser
+   * package's video-engine source, `openVideoEngineMediaSource`, is that kind
+   * of source, and it is the one most hosts render video through. There the
+   * renderer stops the producer instead: coverage is awaited before it is asked
+   * to run, and again whenever it reaches a frame the source cannot answer for
+   * yet, which it resumes from on its own once the coverage arrives.
    */
   readonly playbackGate?: DetectionPlaybackGateOptions;
 }
@@ -138,14 +138,16 @@ export interface DetectionTimelineContext {
  * waits for the requested coverage before the next frame is presented, and the
  * renderer reports buffering for as long as that wait lasts.
  *
- * That wait is something the renderer does between pulling one decoded sample
- * and drawing it, so it reaches only a media source the renderer pulls samples
- * from. A source that presents its own frames runs the playhead itself, which
- * covers the browser package's video-engine source, `openVideoEngineMediaSource`.
- * There the gate holds the start of playback and nothing after it: the wait runs
- * once, before the producer is told to play, and the renderer reports
- * `Buffering` for its duration. Once the producer is running, a frame the
- * coverage does not reach presents without annotations rather than waiting.
+ * On a media source the renderer pulls samples from, that wait happens between
+ * pulling one decoded sample and drawing it. A source that presents its own
+ * frames runs the playhead itself, which covers the browser package's
+ * video-engine source, `openVideoEngineMediaSource`. There the renderer stops
+ * the producer for the wait and starts it again afterwards, before playback
+ * begins and again at any frame the source cannot answer for yet.
+ *
+ * Either way the renderer reports `Buffering` for as long as the wait lasts,
+ * and `maxWaitSeconds` bounds it, so a producer that has stopped answering
+ * costs that wait once rather than stranding the picture.
  */
 export interface DetectionPlaybackGateOptions {
   /**
@@ -414,6 +416,20 @@ export interface BufferedDetectionTimeline {
     mediaTime: number,
     options?: DetectionBufferPrepareOptions,
   ): Promise<void>;
+  /**
+   * Whether a gated `prepare` at `mediaTime` would wait, answered without
+   * starting the wait.
+   *
+   * A caller driving a source that runs its own playhead uses this to decide
+   * whether to stop it, which it cannot do by awaiting: the wait is the thing
+   * it is deciding about. False whenever waiting is not on the table at all,
+   * which covers a disabled gate, a source that reports neither coverage nor a
+   * way to wait for it, and a source the gate has already given up on.
+   */
+  needsPlaybackGateWait?(
+    mediaTime: number,
+    options?: DetectionBufferPrepareOptions,
+  ): boolean;
   prefetch(mediaTime: number): void;
   setTimelineContext?(context: DetectionTimelineContext): void;
   selectFrame(mediaTime: number): DetectionFrame | undefined;

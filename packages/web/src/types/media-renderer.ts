@@ -200,17 +200,14 @@ export interface MediaRenderer extends MediaRendererStateController {
    * media source that pushes presented frames runs under: the count moves when
    * something on screen changed, so a paused, untouched renderer holds it
    * still. It is `null` when the renderer pulls samples instead, because Pixi's
-   * ticker then paints every animation frame and no count describes that.
-   * `playbackGateReach` on the renderer's state says which kind of source is
-   * open, so a host reading `null` here can tell that apart from an error.
+   * ticker then paints every animation frame and no count describes that, so a
+   * `null` here is an answer rather than a failure.
    */
   getRenderCount(): number | null;
   /**
    * Span and per-frame readiness of the prepared annotation window, for
    * instruments; null when the scene free-runs on the ticker or no window
-   * exists. `playbackGateReach` on the renderer's state says which kind of
-   * source is open, so a host reading `null` here can tell that apart from an
-   * error.
+   * exists, so a `null` here is an answer rather than a failure.
    */
   getPreparedAnnotationWindow(): PreparedAnnotationWindowSnapshot | null;
   destroy(): void;

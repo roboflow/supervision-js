@@ -683,6 +683,85 @@ describe("buffered detection timeline", () => {
     expect(timeline.selectFrame(3)?.detections[0]?.id).toBe("late");
   });
 
+  it("says a gated prepare would wait before anything has started waiting", async () => {
+    const source = createWritableDetectionFrameSource({
+      datasetId: "stream",
+      store: createMemoryColdDetectionFrameStore(),
+    });
+
+    await source.appendFrames([
+      { detections: [{ id: "opening" }], endTime: 1, mediaTime: 0 },
+    ]);
+
+    const waitForRange = vi.spyOn(source, "waitForRange");
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 2,
+      bufferBehindSeconds: 0,
+      playbackGate: { enabled: true },
+      source,
+    });
+
+    expect(timeline.needsPlaybackGateWait?.(0.5)).toBe(false);
+    expect(timeline.needsPlaybackGateWait?.(2)).toBe(true);
+
+    await source.appendFrames([
+      { detections: [{ id: "late" }], endTime: 3, mediaTime: 2 },
+    ]);
+
+    expect(timeline.needsPlaybackGateWait?.(2)).toBe(false);
+    expect(waitForRange).not.toHaveBeenCalled();
+  });
+
+  it("stops asking to wait on a source the gate has already given up on", async () => {
+    const source = createWritableDetectionFrameSource({
+      datasetId: "stream",
+      store: createMemoryColdDetectionFrameStore(),
+    });
+
+    await source.appendFrames([
+      { detections: [{ id: "opening" }], endTime: 1, mediaTime: 0 },
+    ]);
+
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 2,
+      bufferBehindSeconds: 0,
+      playbackGate: { enabled: true, maxWaitSeconds: 0.01 },
+      source,
+    });
+
+    expect(timeline.needsPlaybackGateWait?.(2)).toBe(true);
+
+    await timeline.prepare(2, { gatePlayback: true });
+
+    // The producer still covers nothing past a second, so a caller that asked
+    // per frame would hold the picture again for every frame of the rest of
+    // the clip.
+    expect(timeline.needsPlaybackGateWait?.(2)).toBe(false);
+
+    await source.appendFrames([
+      { detections: [{ id: "late" }], endTime: 4, mediaTime: 3 },
+    ]);
+
+    expect(timeline.needsPlaybackGateWait?.(5)).toBe(true);
+  });
+
+  it("never asks to wait on a source that cannot report its coverage", async () => {
+    const coverage = createDeferred<void>();
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 1,
+      bufferBehindSeconds: 0,
+      playbackGate: { enabled: true, requiredAheadSeconds: 2 },
+      source: {
+        loadFrames: vi.fn(async () => [frames[0]]),
+        waitForRange: vi.fn(() => coverage.promise),
+      },
+    });
+
+    expect(timeline.needsPlaybackGateWait?.(1)).toBe(false);
+
+    coverage.resolve();
+  });
+
   it("loads without waiting for source coverage when the caller does not gate", async () => {
     const coverage = createDeferred<void>();
     const source = {
@@ -973,6 +1052,37 @@ describe("buffered detection timeline", () => {
     for (let mediaTime = 0; mediaTime < 9; mediaTime += 1 / 30) {
       await timeline.prepare(mediaTime);
     }
+
+    expect(source.loadFrames).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the window it has across a loop wrap", async () => {
+    const source = {
+      loadFrames: vi.fn(async () => []),
+    };
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 10,
+      bufferBehindSeconds: 0.5,
+      refreshIntervalSeconds: 2.5,
+      source,
+    });
+
+    timeline.setTimelineContext?.({ duration: 30, loop: true });
+    await timeline.prepare(29, { duration: 30, firstTimestamp: 0 });
+    source.loadFrames.mockClear();
+
+    // The clock restarts at 0 while the window built at 29 still answers, and
+    // the reach behind the playhead points back into the lap that just ended.
+    for (let frame = 0; frame <= 15; frame += 1) {
+      timeline.prefetch(frame / 30);
+      await settlePrefetch();
+    }
+
+    expect(source.loadFrames).not.toHaveBeenCalled();
+
+    // A window 2.5 seconds behind the playhead is stale on the interval alone.
+    timeline.prefetch(1.5);
+    await settlePrefetch();
 
     expect(source.loadFrames).toHaveBeenCalledOnce();
   });
@@ -1377,6 +1487,12 @@ describe("buffered detection timeline", () => {
     pending.resolve([]);
   });
 });
+
+async function settlePrefetch() {
+  for (let tick = 0; tick < 12; tick += 1) {
+    await Promise.resolve();
+  }
+}
 
 function createLoopingTimeline() {
   return createBufferedDetectionTimeline({

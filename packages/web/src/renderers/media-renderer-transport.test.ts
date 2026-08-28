@@ -174,16 +174,194 @@ function frameNamedBy(mediaTime: number): number {
   return -1;
 }
 
+describe("mid-playback readiness holds", () => {
+  it("stops the picture at the first frame nothing can annotate and starts it again when the annotations land", async () => {
+    const producer = createProducer();
+    const playbackStates: MediaRendererPlaybackState[] = [];
+    let coveredThroughSeconds = 2;
+    let releaseWait = () => {};
+
+    createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      holdForReadiness: (mediaTime) =>
+        mediaTime > coveredThroughSeconds
+          ? new Promise<void>((resolve) => {
+              releaseWait = resolve;
+            })
+          : null,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: (state) => playbackStates.push(state),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+    });
+
+    producer.play(120);
+    const held = {
+      pastCoverage: secondsAt(producer.landedIndex) > coveredThroughSeconds,
+      playbackState: playbackStates.at(-1),
+      withinOneFrameOfCoverage:
+        secondsAt(producer.landedIndex - 1) <= coveredThroughSeconds,
+    };
+
+    coveredThroughSeconds = 10;
+    releaseWait();
+    await vi.waitFor(() =>
+      expect(producer.channel.endInteractiveSeek).toHaveBeenCalled(),
+    );
+
+    producer.play(120);
+
+    expect(held).toStrictEqual({
+      pastCoverage: true,
+      playbackState: MediaRendererPlaybackState.Buffering,
+      withinOneFrameOfCoverage: true,
+    });
+    expect(producer.landedIndex).toBe(120);
+    expect(playbackStates.at(-1)).toBe(MediaRendererPlaybackState.Playing);
+  });
+
+  it("lets the picture go when a producer stops answering, and does not stop it again for every frame after", async () => {
+    const producer = createProducer();
+    // The gate bounds its own wait and remembers the source it gave up on, so
+    // the second question it is asked answers no rather than waiting again.
+    let gaveUp = false;
+
+    createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      holdForReadiness: () =>
+        gaveUp
+          ? null
+          : Promise.resolve().then(() => {
+              gaveUp = true;
+            }),
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+    });
+
+    producer.play(120);
+    await vi.waitFor(() =>
+      expect(producer.channel.endInteractiveSeek).toHaveBeenCalled(),
+    );
+    producer.play(120);
+
+    expect(producer.landedIndex).toBe(120);
+    expect(producer.channel.beginInteractiveSeek).toHaveBeenCalledTimes(1);
+  });
+
+  it("starts the producer again when the wait it was holding for fails", async () => {
+    const producer = createProducer();
+    let held = 0;
+
+    createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      holdForReadiness: () =>
+        (held += 1) === 1
+          ? Promise.reject(new Error("Detection source is gone."))
+          : null,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+    });
+
+    producer.play(120);
+    await vi.waitFor(() =>
+      expect(producer.channel.endInteractiveSeek).toHaveBeenCalled(),
+    );
+    producer.play(120);
+
+    expect(producer.landedIndex).toBe(120);
+  });
+
+  it("leaves a producer alone when nothing can say whether waiting would help", () => {
+    const producer = createProducer();
+
+    createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+      waitForReadiness: async () => undefined,
+    });
+
+    producer.play(120);
+
+    expect(producer.landedIndex).toBe(120);
+    expect(producer.channel.beginInteractiveSeek).not.toHaveBeenCalled();
+  });
+
+  it("hands a drag the hold rather than resuming under it", async () => {
+    const producer = createProducer();
+    let releaseWait = () => {};
+
+    const transport = createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      holdForReadiness: () =>
+        new Promise<void>((resolve) => {
+          releaseWait = resolve;
+        }),
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+    });
+
+    producer.play(120);
+    transport.scrub(secondsAt(200));
+    releaseWait();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(producer.channel.endInteractiveSeek).not.toHaveBeenCalled();
+
+    await transport.commit(secondsAt(200));
+
+    expect(producer.channel.endInteractiveSeek).toHaveBeenCalled();
+  });
+});
+
 function createProducer() {
   const listeners = new Set<() => void>();
   const stateListeners = new Set<() => void>();
   let playhead = landingAt(0);
   let seeking = false;
+  let frozen = false;
   let status: PresentedFrameChannelStatus = "PLAYING";
   const channel: PresentedFrameChannel = {
-    beginInteractiveSeek: vi.fn(),
+    // The engine's own latch: a mechanical pause arms it, a second one is a
+    // no-op, and the release resumes only what the latch paused.
+    beginInteractiveSeek: vi.fn(() => {
+      if (frozen || status !== "PLAYING") {
+        return;
+      }
+
+      frozen = true;
+      status = "PAUSED";
+      announce();
+    }),
     commit: vi.fn(async () => undefined),
-    endInteractiveSeek: vi.fn(async () => undefined),
+    endInteractiveSeek: vi.fn(async () => {
+      if (!frozen) {
+        return;
+      }
+
+      frozen = false;
+      status = "PLAYING";
+      announce();
+    }),
     getDurationMs: () => secondsAt(FRAME_COUNT) * 1000,
     getPlaybackRate: () => 1,
     getPlayhead: () => playhead,
@@ -218,6 +396,10 @@ function createProducer() {
   return {
     channel,
 
+    get landedIndex() {
+      return playhead.frame.index;
+    },
+
     land(index: number) {
       playhead = landingAt(index);
 
@@ -225,6 +407,17 @@ function createProducer() {
         listener();
       }
       announce();
+    },
+
+    /** Walks frames forward, stopping wherever the producer is frozen. */
+    play(throughIndex: number) {
+      for (
+        let index = playhead.frame.index + 1;
+        index <= throughIndex && !frozen;
+        index += 1
+      ) {
+        this.land(index);
+      }
     },
 
     setSeeking(next: boolean) {

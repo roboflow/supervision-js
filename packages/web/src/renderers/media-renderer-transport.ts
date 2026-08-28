@@ -39,12 +39,18 @@ export interface MediaRendererTransportOptions {
    * seconds away.
    */
   readonly onScrubbing: (scrubbing: boolean) => void;
-  /**
-   * Buffered playback. Held before the producer is asked to run, because the
-   * producer paces itself afterwards and a renderer that waited mid-playback
-   * would be holding a picture it does not drive.
-   */
+  /** Buffered playback. Awaited before the producer is asked to run. */
   readonly waitForReadiness?: (mediaTime: number) => Promise<void>;
+  /**
+   * A bounded wait for whatever annotates `mediaTime`, or null when nothing is
+   * missing. Asked on every playhead move, so answering null has to be cheap.
+   *
+   * This is what stops a producer already at speed, so what it waits for has to
+   * be something that gives up on its own. Left out, playback is held once and
+   * never again, and a producer outrunning whatever feeds it runs on past
+   * frames that have nothing to draw.
+   */
+  readonly holdForReadiness?: (mediaTime: number) => Promise<void> | null;
 }
 
 /**
@@ -64,11 +70,13 @@ export function createMediaRendererTransport(
   let gestureInFlight = false;
   let landingRelease: Promise<void> | null = null;
   let settledState: MediaRendererPlaybackState | null = null;
-  let readinessHold = false;
   // Anything that settles playback other than the hold itself invalidates the
   // play the hold is waiting for, so a pause taken during it is not undone by
   // the readiness that arrives afterwards.
   let playbackIntent = 0;
+  /** Intent a readiness wait belongs to, or null while none is running. */
+  let readinessHoldIntent: number | null = null;
+  const isHoldingForReadiness = () => readinessHoldIntent === playbackIntent;
 
   const publishSeekSignals = () => {
     options.onScrubbing(gestureInFlight);
@@ -114,7 +122,7 @@ export function createMediaRendererTransport(
     const state =
       gestureInFlight && status !== "ERRORED"
         ? MediaRendererPlaybackState.Paused
-        : readinessHold && status !== "ERRORED"
+        : isHoldingForReadiness() && status !== "ERRORED"
           ? MediaRendererPlaybackState.Buffering
           : resolveTransportPlaybackState(status, seeking, settledState);
 
@@ -125,8 +133,57 @@ export function createMediaRendererTransport(
     publishSeekSignals();
     options.onPlaybackState(state);
   };
+  /**
+   * Stops the producer while the frame it has reached waits for what annotates
+   * it, and starts it again once that arrives.
+   *
+   * The producer's own mechanical pause is what holds it, the same one a drag
+   * uses, so a drag arriving mid-hold takes the hold over rather than fighting
+   * it and the release it lands with is the one that resumes.
+   */
+  const holdForReadiness = async (wait: Promise<void>) => {
+    const intent = playbackIntent;
+
+    readinessHoldIntent = intent;
+    channel.beginInteractiveSeek();
+    publishPlaybackState();
+
+    try {
+      await wait;
+    } catch {
+      // A wait that failed is over, and the release below is the only thing
+      // that starts the producer again. Whoever owns the failure reports it.
+    } finally {
+      if (readinessHoldIntent === intent) {
+        readinessHoldIntent = null;
+      }
+    }
+
+    if (!gestureInFlight) {
+      await channel.endInteractiveSeek();
+    }
+
+    publishPlaybackState();
+  };
+
   const publishPlayheadTime = () => {
     options.onPlayheadTime(channel.getPlayhead().mediaTimeS);
+
+    if (
+      !options.holdForReadiness ||
+      readinessHoldIntent !== null ||
+      gestureInFlight ||
+      channel.getStatus() !== "PLAYING" ||
+      channel.getSeeking()
+    ) {
+      return;
+    }
+
+    const wait = options.holdForReadiness(channel.getPlayhead().mediaTimeS);
+
+    if (wait) {
+      void holdForReadiness(wait);
+    }
   };
   const publishPlaybackRate = () => {
     options.onPlaybackRate(channel.getPlaybackRate());
@@ -148,12 +205,14 @@ export function createMediaRendererTransport(
       await releaseGesture();
 
       if (options.waitForReadiness) {
-        readinessHold = true;
+        readinessHoldIntent = intent;
         publishPlaybackState();
         try {
           await options.waitForReadiness(channel.getPlayhead().mediaTimeS);
         } finally {
-          readinessHold = false;
+          if (readinessHoldIntent === intent) {
+            readinessHoldIntent = null;
+          }
         }
 
         if (intent !== playbackIntent) {
