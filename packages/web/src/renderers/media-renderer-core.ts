@@ -116,7 +116,10 @@ export async function createMediaRendererCore(
     getPlaybackGateReach: () =>
       !shouldGatePlayback
         ? PlaybackGateReach.Off
-        : presentsOwnFrames
+        : // Stopping a producer that owns the playhead is something only the
+          // detection gate does, so a self-presenting source held for render
+          // preparation alone still waits once and never again.
+          presentsOwnFrames && !shouldGateDetectionPlayback
           ? PlaybackGateReach.StartOfPlayback
           : PlaybackGateReach.EveryFrame,
     getDetectionBufferState: () =>
@@ -208,6 +211,31 @@ export async function createMediaRendererCore(
         renderPreparationPlaybackGate ?? {},
       );
     }
+  };
+
+  /**
+   * The detection gate alone, because it is the one that bounds its own wait
+   * and gives up on a producer that has stopped answering. Render preparation
+   * waits until the artifacts exist, which is a wait to start playback and
+   * never one to stop it with.
+   */
+  const holdForDetectionCoverage = (mediaTime: number) => {
+    const prepareOptions = {
+      duration: runtimeState.duration(),
+      firstTimestamp,
+    };
+
+    if (
+      detectionTimeline?.needsPlaybackGateWait?.(mediaTime, prepareOptions) !==
+      true
+    ) {
+      return null;
+    }
+
+    return detectionTimeline.prepare(mediaTime, {
+      ...prepareOptions,
+      gatePlayback: true,
+    });
   };
 
   const presentSample = (sample: DecodedVideoSample) => {
@@ -757,10 +785,11 @@ export async function createMediaRendererCore(
           runtimeState.recordPlayheadTime(currentTime);
           detectionTimeline?.prefetch(currentTime);
         },
-        // The producer paces itself once it is running, so the gate reaches the
-        // one moment the renderer still decides: whether to start it at all.
         waitForReadiness: shouldGatePlayback
           ? waitForPlaybackReadiness
+          : undefined,
+        holdForReadiness: shouldGateDetectionPlayback
+          ? holdForDetectionCoverage
           : undefined,
       });
       if (initialPlaybackRate !== 1) {

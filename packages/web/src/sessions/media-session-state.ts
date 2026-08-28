@@ -6,6 +6,8 @@ import {
 } from "#types/media-renderer";
 import {
   RenderPreparationArtifactFrameStatus,
+  RenderPreparationGateHoldReason,
+  type RenderPreparationArtifactDiagnostics,
   type RenderPreparationDiagnostics,
 } from "#types/render-preparation";
 import {
@@ -67,7 +69,8 @@ export function createMediaSessionStateSnapshot({
   const preparingActiveFrame = (renderPreparation?.artifacts ?? []).some(
     (artifact) =>
       artifact.activeFrame?.status ===
-      RenderPreparationArtifactFrameStatus.Pending,
+        RenderPreparationArtifactFrameStatus.Pending ||
+      Boolean(artifact.gateHold),
   );
 
   // A picture stopped for its annotations is not stopped for its own bytes, and
@@ -127,35 +130,57 @@ export function createMediaSessionStateSnapshot({
     const activeFrameIsPending =
       artifact.activeFrame?.status ===
       RenderPreparationArtifactFrameStatus.Pending;
+    // A gate banking a lead in front of a finished frame leaves nothing else to
+    // report: the frame is prepared and the queue can be empty, so a loop that
+    // reads only those two says nothing and the wait is described upstream as a
+    // transfer that is not happening.
+    const holdingForLead =
+      artifact.gateHold?.reason ===
+      RenderPreparationGateHoldReason.LeadBelowRequirement;
 
-    if (artifact.pendingCount <= 0 && !activeFrameIsPending) {
+    if (
+      artifact.pendingCount <= 0 &&
+      !activeFrameIsPending &&
+      !holdingForLead
+    ) {
       continue;
     }
 
-    const holdingPlayback = activeFrameIsPending && stoppedForPlayback;
+    const holdingPlayback =
+      (activeFrameIsPending || Boolean(artifact.gateHold)) &&
+      stoppedForPlayback;
+    const waiting = activeFrameIsPending || holdingForLead;
 
     activities.push(
       createActivity({
         artifactKind: artifact.kind,
         blockingPlayback: holdingPlayback,
         blockingPresentation: activeFrameIsPending,
-        detail: holdingPlayback
-          ? "The masks for this frame are not drawn yet"
-          : activeFrameIsPending
-            ? `Active frame ${artifact.activeFrame.mediaTime.toFixed(
+        detail: activeFrameIsPending
+          ? holdingPlayback
+            ? "The masks for this frame are not drawn yet"
+            : `Active frame ${artifact.activeFrame.mediaTime.toFixed(
                 3,
               )}s is waiting for ${artifact.kind}`
+          : holdingForLead
+            ? "This frame is ready; the video starts once enough is drawn ahead of it"
             : null,
         kind: MediaSessionActivityKind.RenderPreparing,
-        label: holdingPlayback
-          ? "Waiting for the masks"
-          : activeFrameIsPending
-            ? "Preparing active render artifact"
+        label: activeFrameIsPending
+          ? holdingPlayback
+            ? "Waiting for the masks"
+            : "Preparing active render artifact"
+          : holdingForLead
+            ? "Drawing ahead of the video"
             : "Preparing render artifacts",
         pendingCount: artifact.pendingCount,
         preparedCount: artifact.preparedCount,
-        progress: totalCount > 0 ? artifact.preparedCount / totalCount : 0,
-        status: activeFrameIsPending
+        progress: holdingForLead
+          ? leadProgress(artifact)
+          : totalCount > 0
+            ? artifact.preparedCount / totalCount
+            : 0,
+        status: waiting
           ? MediaSessionActivityStatus.Waiting
           : MediaSessionActivityStatus.Running,
       }),
@@ -202,6 +227,20 @@ export function createMediaSessionStateSnapshot({
     renderer,
     status: resolveSessionStatus(renderer, activities, errorMessage),
   };
+}
+
+/** How far a lead the gate is banking has come, against what it has to reach. */
+function leadProgress(artifact: RenderPreparationArtifactDiagnostics) {
+  const requiredAheadSeconds = artifact.gateHold?.requiredAheadSeconds ?? 0;
+
+  if (requiredAheadSeconds <= 0) {
+    return 0;
+  }
+
+  return Math.min(
+    (artifact.preparedAheadSeconds ?? 0) / requiredAheadSeconds,
+    1,
+  );
 }
 
 function createActivity(

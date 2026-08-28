@@ -39,7 +39,7 @@ const STATE_READOUT_CLASS = "session-options__state";
 /** When the wait happens. What is waited for is the Waiting for reading. */
 const gateReachSentences: Record<PlaybackGateReach, string> = {
   [PlaybackGateReach.EveryFrame]:
-    "Every frame waits for what it needs, for as long as the clip runs.",
+    "Every frame waits for what it needs, for as long as the clip runs. A wait that drags on gives up and the picture moves.",
   [PlaybackGateReach.Off]:
     "Nothing holds the picture. A frame is drawn with whatever has arrived by the time it is shown.",
   [PlaybackGateReach.StartOfPlayback]:
@@ -169,7 +169,7 @@ function SessionOptionControls({
       </ControlSection>
 
       <ControlSection
-        description="Two gates can hold the video: one until the frame's annotations have loaded, one until its masks have been drawn. Playback gate sets both at once, and each gate's own switch beats it."
+        description="Two gates can hold the video: one until the frame's annotations have loaded, one until its masks have been drawn. The mask gate holds twice, once for the frame on screen and again to bank a run of drawn masks ahead of it, and the overlay names which one you are waiting on. Playback gate sets both at once, and each gate's own switch beats it."
         title="Playback gates"
       >
         <SegmentedControl
@@ -267,7 +267,7 @@ function SessionOptionControls({
           }
           optionPath="renderPreparation.playbackGate.requiredAheadSeconds"
           step={0.25}
-          tooltip="How much drawn mask has to be in front of the playhead before a stop ends. This clip is held about a second when it opens, and this machine draws masks fast enough that the figure barely changes that, so expect it to bite on a denser clip. `renderer.renderPreparation.playbackGate.requiredAheadSeconds`, default 1s."
+          tooltip="How much drawn mask has to be in front of the playhead before a stop ends. This is the wait the overlay calls Drawing ahead of the video, where the frame on screen is already finished and the gate is banking a runway in front of it. At 0 that wait is off and the video waits only for the frame it is about to show, which is the other half of this gate. This clip is held about a second when it opens, and this machine draws masks fast enough that the figure barely changes that, so expect it to bite on a denser clip. `renderer.renderPreparation.playbackGate.requiredAheadSeconds`, default 1s."
           value={
             options.preparationGateRequiredAheadSeconds ??
             preparationGate?.requiredAheadSeconds ??

@@ -36,10 +36,7 @@ import type { ScrubFrame } from "./scrub-cursor";
  * GPU execution is verified in a browser, not in CI: a worker test environment
  * has no adapter, so createRenderer falls back to the 2D renderer there.
  */
-const SHADER = /* wgsl */ `
-@group(0) @binding(0) var samp: sampler;
-@group(0) @binding(1) var tex: texture_2d<f32>;
-
+const VERTEX_STAGE = /* wgsl */ `
 struct VsOut {
     @builtin(position) pos: vec4f,
     @location(0) uv: vec2f,
@@ -54,33 +51,24 @@ struct VsOut {
     out.uv = p * vec2f(0.5, -0.5) + vec2f(0.5, 0.5);
     return out;
 }
+`;
 
+const SHADER = /* wgsl */ `
+@group(0) @binding(0) var samp: sampler;
+@group(0) @binding(1) var tex: texture_2d<f32>;
+${VERTEX_STAGE}
 @fragment fn fs(in: VsOut) -> @location(0) vec4f {
     return textureSample(tex, samp, in.uv);
 }
 `;
 
 /** External-texture variant. textureSampleBaseClampToEdge is the only sampling
- *  builtin valid for texture_external; the vertex stage is shared in spirit but
- *  declared inline so this module is self-contained per pipeline. */
+ *  builtin valid for texture_external, so the two routes cannot be one module
+ *  however much of their source they share. */
 const EXTERNAL_SHADER = /* wgsl */ `
 @group(0) @binding(0) var samp: sampler;
 @group(0) @binding(1) var tex: texture_external;
-
-struct VsOut {
-    @builtin(position) pos: vec4f,
-    @location(0) uv: vec2f,
-};
-
-@vertex fn vs(@builtin(vertex_index) i: u32) -> VsOut {
-    var corners = array<vec2f, 3>(vec2f(-1.0, -1.0), vec2f(3.0, -1.0), vec2f(-1.0, 3.0));
-    var out: VsOut;
-    let p = corners[i];
-    out.pos = vec4f(p, 0.0, 1.0);
-    out.uv = p * vec2f(0.5, -0.5) + vec2f(0.5, 0.5);
-    return out;
-}
-
+${VERTEX_STAGE}
 @fragment fn fs(in: VsOut) -> @location(0) vec4f {
     return textureSampleBaseClampToEdge(tex, samp, in.uv);
 }

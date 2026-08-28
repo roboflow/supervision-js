@@ -174,15 +174,19 @@ export interface MediaSourceState {
 /**
  * What a playback gate holds back.
  *
- * A source the renderer pulls samples from can be held at every frame, because
- * the renderer decides when each one is drawn. A source that presents its own
- * frames owns the playhead once it is running, so the only moment left to hold
- * is the start.
+ * A source the renderer pulls samples from can be held between any two frames,
+ * because the renderer decides when each one is drawn. A source that presents
+ * its own frames owns the playhead, so holding it means stopping the producer
+ * and starting it again, which the detection gate does and the
+ * render-preparation gate does not.
  */
 export enum PlaybackGateReach {
   /** No gate: the picture moves and unprepared layers are absent from it. */
   Off = "off",
-  /** Every frame waits for the artifacts it needs. */
+  /**
+   * Playback waits to begin, and stops again at any frame whose artifacts are
+   * missing, until they arrive or the gate's own wait bound gives up on them.
+   */
   EveryFrame = "everyFrame",
   /** Playback waits to begin; frames after that are not held. */
   StartOfPlayback = "startOfPlayback",

@@ -95,6 +95,41 @@ function createSample(timestamp: number): DecodedVideoSample {
   };
 }
 
+/**
+ * A decoder answers with the frame being displayed at the requested time, not a
+ * frame minted at that time, so a request lands on the clip's own grid and the
+ * sample carries that grid's duration.
+ */
+function createNativeGridSink(nativeFrameRate: number): DecodedVideoSampleSink {
+  const nativeDuration = 1 / nativeFrameRate;
+
+  return {
+    async getSample(timestamp) {
+      return snapped(timestamp);
+    },
+    async *samples() {},
+    async *samplesAtTimestamps(timestamps) {
+      for (const timestamp of timestamps) {
+        yield snapped(timestamp);
+      }
+    },
+  };
+
+  function snapped(timestamp: number): DecodedVideoSample {
+    const displayTime =
+      Math.floor(timestamp / nativeDuration + 1e-9) * nativeDuration;
+
+    return {
+      close() {},
+      draw(target) {
+        (target as unknown as RecordingContext).drawn = displayTime;
+      },
+      duration: nativeDuration,
+      timestamp: displayTime,
+    };
+  }
+}
+
 function createSink(options: { batched: boolean; missing?: number }) {
   const passes: number[][] = [];
   const singleGrabs: number[] = [];
@@ -212,5 +247,23 @@ describe("extractInferenceFrameBatches", () => {
 
     expect(sink.singleGrabs).toHaveLength(4);
     expect(batches.map((batch) => batch.length)).toEqual([2, 2]);
+  });
+
+  it.each([
+    ["59.94fps, faster than the grid", 60000 / 1001],
+    ["60fps", 60],
+    ["30fps, the grid itself", 30],
+    ["23.976fps, slower than the grid", 24000 / 1001],
+  ])("declares coverage that meets the next sample at %s", async (_, fps) => {
+    installEncodeGlobals();
+    const sink = createNativeGridSink(fps);
+
+    const frames = (await collect(sink, 90)).flat();
+
+    for (const [index, frame] of frames.slice(0, -1).entries()) {
+      expect(frame.mediaTime + frame.duration).toBeGreaterThanOrEqual(
+        frames[index + 1].mediaTime - 1e-6,
+      );
+    }
   });
 });

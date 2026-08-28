@@ -743,7 +743,9 @@ export function createPixiMaskLayer(options: {
   /**
    * The halo reads detection ids out of the red channel, which the id raster
    * already carries. Where preparation degraded to the RGBA composite the ids
-   * ride along uncomposited, so they still need a texture built for them.
+   * ride along uncomposited, so they still need a texture built for them. The
+   * halo mesh spans the media rect and samples this over 0..1, so the plane's
+   * own capped size is what the texture is built at, not the composite's.
    */
   function getHaloTexture(maskFrame: PreparedRgbaMaskFrame) {
     const existingTexture = haloTextures.get(maskFrame.key);
@@ -752,7 +754,9 @@ export function createPixiMaskLayer(options: {
       return existingTexture;
     }
 
-    if (!maskFrame.idMaskData || typeof document === "undefined") {
+    const idMaskPlane = maskFrame.idMaskPlane;
+
+    if (!idMaskPlane || typeof document === "undefined") {
       return undefined;
     }
 
@@ -763,18 +767,18 @@ export function createPixiMaskLayer(options: {
       return undefined;
     }
 
-    canvas.width = maskFrame.width;
-    canvas.height = maskFrame.height;
+    canvas.width = idMaskPlane.width;
+    canvas.height = idMaskPlane.height;
 
     const imageData = context.createImageData(
-      maskFrame.width,
-      maskFrame.height,
+      idMaskPlane.width,
+      idMaskPlane.height,
     );
 
-    for (let index = 0; index < maskFrame.idMaskData.length; index += 1) {
+    for (let index = 0; index < idMaskPlane.data.length; index += 1) {
       const offset = index * 4;
 
-      imageData.data[offset] = maskFrame.idMaskData[index]!;
+      imageData.data[offset] = idMaskPlane.data[index]!;
       imageData.data[offset + 3] = 255;
     }
 
@@ -785,10 +789,10 @@ export function createPixiMaskLayer(options: {
       source: new options.ImageSource({
         autoGenerateMipmaps: false,
         dynamic: false,
-        height: maskFrame.height,
+        height: idMaskPlane.height,
         resource: canvas,
         scaleMode: "nearest",
-        width: maskFrame.width,
+        width: idMaskPlane.width,
       }),
     });
 

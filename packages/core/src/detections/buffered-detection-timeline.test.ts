@@ -158,10 +158,11 @@ describe("buffered detection timeline", () => {
 
     await timeline.prepare(1.73);
 
-    expect(timeline.selectFrame(1.73)?.frameIndex).toBe(52);
+    expect(timeline.selectFrame(1.73)?.frameIndex).toBe(51);
+    expect(timeline.selectFrame(52 / 30)?.frameIndex).toBe(52);
   });
 
-  it("selects nearest 30fps frame indexes from the hot buffer", async () => {
+  it("selects the covering 30fps frame index from the hot buffer", async () => {
     const indexedFrames: DetectionFrame[] = Array.from(
       { length: 4 },
       (_, index) => ({
@@ -181,13 +182,14 @@ describe("buffered detection timeline", () => {
 
     await timeline.prepare(0);
 
-    expect(timeline.selectFrame(0.49 / 30)?.frameIndex).toBe(0);
-    expect(timeline.selectFrame(0.5 / 30)?.frameIndex).toBe(1);
-    expect(timeline.selectFrame(2.49 / 30)?.frameIndex).toBe(2);
-    expect(timeline.selectFrame(2.5 / 30)?.frameIndex).toBe(3);
+    expect(timeline.selectFrame(0.5 / 30)?.frameIndex).toBe(0);
+    expect(timeline.selectFrame(0.9 / 30)?.frameIndex).toBe(0);
+    expect(timeline.selectFrame(1 / 30)?.frameIndex).toBe(1);
+    expect(timeline.selectFrame(2.5 / 30)?.frameIndex).toBe(2);
+    expect(timeline.selectFrame(3 / 30)?.frameIndex).toBe(3);
   });
 
-  it("uses a one-frame indexed gap but does not synthesize larger missing gaps", async () => {
+  it("leaves every missing frame index without detections", async () => {
     const indexedFrames: DetectionFrame[] = [
       {
         detections: [{ id: "frame-10" }],
@@ -218,7 +220,9 @@ describe("buffered detection timeline", () => {
 
     await timeline.prepare(11 / 30);
 
-    expect(timeline.selectFrame(11 / 30)?.frameIndex).toBe(12);
+    expect(timeline.selectFrame(10 / 30)?.frameIndex).toBe(10);
+    expect(timeline.selectFrame(11 / 30)).toBeUndefined();
+    expect(timeline.selectFrame(12 / 30)?.frameIndex).toBe(12);
     expect(timeline.selectFrame(16 / 30)).toBeUndefined();
   });
 
@@ -1485,6 +1489,76 @@ describe("buffered detection timeline", () => {
     expect(source.loadFrames).toHaveBeenNthCalledWith(3, 39.5, 50);
 
     pending.resolve([]);
+  });
+
+  it("loads nothing while the buffer is switched off", async () => {
+    let enabled = true;
+    const source = createCountingSecondFrameSource();
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 5,
+      bufferBehindSeconds: 0.5,
+      enabled: () => enabled,
+      source,
+    });
+
+    await timeline.prepare(0);
+    expect(source.loadFrames).toHaveBeenCalledTimes(1);
+
+    enabled = false;
+
+    await timeline.prepare(30);
+    timeline.prefetch(30);
+    timeline.prefetch(60);
+    await settlePrefetch();
+
+    expect(source.loadFrames).toHaveBeenCalledTimes(1);
+    expect(timeline.getState().status).toBe(DetectionBufferStatus.Ready);
+  });
+
+  it("resumes onto the window it was already holding", async () => {
+    let enabled = true;
+    const source = createCountingSecondFrameSource();
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 5,
+      bufferBehindSeconds: 0.5,
+      source,
+      enabled: () => enabled,
+    });
+
+    await timeline.prepare(0);
+    enabled = false;
+    timeline.prefetch(3);
+    await settlePrefetch();
+
+    expect(source.loadFrames).toHaveBeenCalledTimes(1);
+    expect(timeline.getState().bufferEndTime).toBe(5);
+    expect(timeline.selectFrame(3)?.mediaTime).toBe(3);
+
+    enabled = true;
+    timeline.prefetch(3);
+    await vi.waitFor(() => expect(source.loadFrames).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(timeline.getState().bufferEndTime).toBe(8));
+    expect(source.loadFrames).toHaveBeenLastCalledWith(2.5, 8);
+    expect(timeline.selectFrame(3)?.mediaTime).toBe(3);
+  });
+
+  it("skips the playback gate wait while the buffer is switched off", async () => {
+    const waitForRange = vi.fn(async () => undefined);
+    const timeline = createBufferedDetectionTimeline({
+      enabled: false,
+      playbackGate: { enabled: true },
+      source: {
+        getAvailableRanges: () => [],
+        loadFrames: vi.fn(async () => []),
+        waitForRange,
+      },
+    });
+
+    expect(timeline.needsPlaybackGateWait?.(0)).toBe(false);
+
+    await timeline.prepare(0, { gatePlayback: true });
+
+    expect(waitForRange).not.toHaveBeenCalled();
   });
 });
 

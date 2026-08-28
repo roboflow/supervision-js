@@ -11,6 +11,7 @@ import {
   RenderPreparationArtifactFrameStatus,
   RenderPreparationArtifactKind,
   RenderPreparationExecutionMode,
+  RenderPreparationGateHoldReason,
   RenderPreparationWorkerStatus,
 } from "#types/render-preparation";
 import {
@@ -485,6 +486,66 @@ describe("media session state", () => {
         blockingPlayback: true,
         kind: MediaSessionActivityKind.RenderPreparing,
         label: "Waiting for the masks",
+      },
+    ]);
+  });
+
+  /**
+   * Shot 1: 84 of 84 frames prepared, the frame on screen among them, and the
+   * gate still holding to bank a lead. Nothing is pending and the active frame
+   * is ready, so every earlier signal reads clear and the wait was described as
+   * a download on a file sitting on the viewer's own disk.
+   */
+  it("names a lead being banked rather than blaming the transfer", () => {
+    const state = createMediaSessionStateSnapshot({
+      errorMessage: null,
+      media: {
+        inputMetadata: null,
+        normalizedMedia: null,
+        objectUrl: null,
+      },
+      normalization: null,
+      renderPreparation: {
+        artifacts: [
+          {
+            activeFrame: {
+              key: "0.167",
+              mediaTime: 0.1668,
+              status: RenderPreparationArtifactFrameStatus.Prepared,
+            },
+            gateHold: {
+              reason: RenderPreparationGateHoldReason.LeadBelowRequirement,
+              requiredAheadSeconds: 1,
+            },
+            kind: RenderPreparationArtifactKind.MaskFrame,
+            pendingCount: 0,
+            preparedAheadSeconds: 0.25,
+            preparedCount: 84,
+          },
+        ],
+        executionMode: RenderPreparationExecutionMode.Worker,
+        message: null,
+        workerStatus: RenderPreparationWorkerStatus.Ready,
+      },
+      renderer: createRendererState({
+        detectionBufferStatus: DetectionBufferStatus.Ready,
+        playbackState: MediaRendererPlaybackState.Buffering,
+      }),
+    });
+
+    expect(state.activities).toStrictEqual([
+      {
+        artifactKind: RenderPreparationArtifactKind.MaskFrame,
+        blockingPlayback: true,
+        blockingPresentation: false,
+        detail:
+          "This frame is ready; the video starts once enough is drawn ahead of it",
+        kind: MediaSessionActivityKind.RenderPreparing,
+        label: "Drawing ahead of the video",
+        pendingCount: 0,
+        preparedCount: 84,
+        progress: 0.25,
+        status: MediaSessionActivityStatus.Waiting,
       },
     ]);
   });

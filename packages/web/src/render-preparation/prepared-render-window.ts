@@ -18,7 +18,9 @@ import {
   RenderPreparationExecutionMode,
   RenderPreparationArtifactFrameStatus,
   RenderPreparationArtifactKind,
+  RenderPreparationGateHoldReason,
   RenderPreparationWorkerStatus,
+  type RenderPreparationGateHoldDiagnostics,
   type RenderPreparationOptions,
   type RenderPreparationPlaybackGateOptions,
 } from "#types/render-preparation";
@@ -189,6 +191,10 @@ export function createPreparedRenderWindow(options: {
   // timeline key therefore represents a source revision for that artifact.
   const observedMaskFrames = new Map<string, DetectionFrame>();
   const readinessWaiters = new Set<() => void>();
+  const activeReadinessWaits = new Set<{
+    readonly mediaTime: number;
+    readonly requiredAheadSeconds: number;
+  }>();
   let scheduledQueuePump: ScheduledPreparationTask | undefined;
   let terminalPreparationError: Error | null = null;
 
@@ -697,28 +703,35 @@ export function createPreparedRenderWindow(options: {
       }
 
       return new Promise((resolve, reject) => {
+        const activeWait = {
+          mediaTime,
+          requiredAheadSeconds: getRequiredAheadSeconds(waitOptions),
+        };
+        const endWait = () => {
+          readinessWaiters.delete(checkReady);
+          activeReadinessWaits.delete(activeWait);
+        };
         const checkReady = () => {
           if (terminalPreparationError) {
-            readinessWaiters.delete(checkReady);
+            endWait();
             reject(terminalPreparationError);
             return;
           }
 
           if (
             !isDestroyed &&
-            !isReadyForPresentation(
-              mediaTime,
-              getRequiredAheadSeconds(waitOptions),
-            )
+            !isReadyForPresentation(mediaTime, activeWait.requiredAheadSeconds)
           ) {
             return;
           }
 
-          readinessWaiters.delete(checkReady);
+          endWait();
           resolve();
         };
 
         readinessWaiters.add(checkReady);
+        activeReadinessWaits.add(activeWait);
+        emitDiagnostics();
       });
     },
 
@@ -819,6 +832,7 @@ export function createPreparedRenderWindow(options: {
     const status = maskFramePreparer.getStatus();
     const preparedAhead = getPreparedAheadDiagnostics();
     const maxInFlightCount = getMaxInFlightMaskFrameCount();
+    const gateHold = getGateHold();
 
     options.renderPreparation?.onDiagnostics?.({
       artifacts: [
@@ -832,6 +846,7 @@ export function createPreparedRenderWindow(options: {
                 ),
               }
             : null,
+          gateHold,
           inFlightCount: inFlightMaskFrames.size,
           kind: options.artifactKind ?? RenderPreparationArtifactKind.MaskFrame,
           maxInFlightCount,
@@ -1098,18 +1113,25 @@ export function createPreparedRenderWindow(options: {
     );
   }
 
-  function isReadyForPresentation(
+  /**
+   * The hold this gate would apply to the given frame, or null when it would
+   * let playback through. Only the gate can name its own hold: the requirement
+   * a wait has to clear is capped by the live target window, and the distance
+   * to enter a hold is not the distance to leave one, so a host holding the
+   * options still cannot work out which of the two stopped the picture.
+   */
+  function getPresentationHold(
     mediaTime: number,
     requiredAheadSeconds: number,
-  ) {
+  ): RenderPreparationGateHoldDiagnostics | null {
     if (isDestroyed || !maskStyle) {
-      return true;
+      return null;
     }
 
     const detectionFrame = options.detectionTimeline.selectFrame(mediaTime);
 
     if (!detectionFrame) {
-      return true;
+      return null;
     }
 
     const frameRef = {
@@ -1117,25 +1139,58 @@ export function createPreparedRenderWindow(options: {
       mediaTime: detectionFrame.mediaTime,
     };
     const activeStatus = getMaskStatus(frameRef.key);
+    const requiredLeadSeconds = Math.min(
+      Math.max(requiredAheadSeconds, 0),
+      getPreparedTargetAheadSeconds(frameRef),
+    );
 
     if (activeStatus === PreparedRenderFrameMaskStatus.Pending) {
-      return false;
+      return {
+        reason: RenderPreparationGateHoldReason.ActiveFrameUnprepared,
+        requiredAheadSeconds: requiredLeadSeconds,
+      };
     }
 
     if (requiredAheadSeconds <= 0) {
-      return true;
+      return null;
     }
 
-    const availableAheadSeconds = getPreparedTargetAheadSeconds(frameRef);
-    const requiredAvailableAheadSeconds = Math.min(
-      requiredAheadSeconds,
-      availableAheadSeconds,
-    );
+    if (
+      getPreparedAheadDiagnosticsFor(frameRef).seconds >= requiredLeadSeconds
+    ) {
+      return null;
+    }
 
-    return (
-      getPreparedAheadDiagnosticsFor(frameRef).seconds >=
-      requiredAvailableAheadSeconds
-    );
+    return {
+      reason: RenderPreparationGateHoldReason.LeadBelowRequirement,
+      requiredAheadSeconds: requiredLeadSeconds,
+    };
+  }
+
+  function isReadyForPresentation(
+    mediaTime: number,
+    requiredAheadSeconds: number,
+  ) {
+    return getPresentationHold(mediaTime, requiredAheadSeconds) === null;
+  }
+
+  /**
+   * Re-read on every emission rather than cached from the last check, because a
+   * hold ends without anything calling the gate again.
+   */
+  function getGateHold() {
+    for (const wait of activeReadinessWaits) {
+      const hold = getPresentationHold(
+        wait.mediaTime,
+        wait.requiredAheadSeconds,
+      );
+
+      if (hold) {
+        return hold;
+      }
+    }
+
+    return null;
   }
 
   function notifyReadinessWaiters() {

@@ -654,7 +654,11 @@ describe("pixi mask layer", () => {
       maskFrame: {
         close: vi.fn(),
         height: 2,
-        idMaskData: Uint8Array.from([1, 1, 1, 1]),
+        idMaskPlane: {
+          data: Uint8Array.from([1, 1, 1, 1]),
+          height: 2,
+          width: 2,
+        },
         key: "rgba-mask-frame",
         kind: PreparedMaskFrameKind.RgbaImage,
         source: {},
@@ -667,6 +671,109 @@ describe("pixi mask layer", () => {
     expect(
       uniformGroups.some((group) => group.uniforms.uHaloPalette !== undefined),
     ).toBe(true);
+  });
+
+  it("builds the RGBA fallback halo texture at the ID plane's capped size", () => {
+    const canvases: { height: number; width: number }[] = [];
+
+    vi.stubGlobal("document", {
+      createElement: vi.fn(() => {
+        const canvas = {
+          getContext: () => ({
+            createImageData: (width: number, height: number) => ({
+              data: new Uint8ClampedArray(width * height * 4),
+            }),
+            putImageData: vi.fn(),
+          }),
+          height: 0,
+          width: 0,
+        };
+
+        canvases.push(canvas);
+
+        return canvas;
+      }),
+    });
+
+    const imageSources: unknown[] = [];
+    const layer = createPixiMaskLayer({
+      BlurFilter: class {
+        strength: number;
+
+        constructor(options: { strength: number }) {
+          this.strength = options.strength;
+        }
+      },
+      BufferImageSource: FakeBufferImageSource as never,
+      Container: FakeContainer as never,
+      ImageSource: class extends FakeImageSource {
+        constructor(options: unknown) {
+          super(options);
+          imageSources.push(options);
+        }
+      } as never,
+      Mesh: FakeMesh as never,
+      MeshGeometry: FakeMeshGeometry as never,
+      Rectangle: class {
+        constructor(
+          readonly x: number,
+          readonly y: number,
+          readonly width: number,
+          readonly height: number,
+        ) {}
+      },
+      Shader: { from: () => ({ destroy() {}, resources: {} }) } as never,
+      Sprite: FakeSprite as never,
+      Texture: FakeTexture as never,
+      UniformGroup: FakeUniformGroup as never,
+      detectionTimeline: {
+        selectFrame: () => ({
+          detections: [
+            {
+              mask: {
+                counts: "04",
+                encoding: "compressedRle",
+                height: 4,
+                width: 8,
+              },
+            },
+          ],
+          mediaTime: 0.1,
+        }),
+      } as never,
+      maskHaloStyle: {
+        resolve: () => ({ alpha: 0.6, color: 0x123456, spread: 8 }),
+      },
+      maskStyle: new BaseMaskStyle(),
+    });
+
+    layer.createSprite({ height: 4, width: 8 });
+    preparedWindow.frame = {
+      detectionFrame: { detections: [], mediaTime: 0.1 },
+      key: "rgba-mask-frame",
+      maskFrame: {
+        close: vi.fn(),
+        height: 4,
+        idMaskPlane: {
+          data: new Uint8Array(4 * 2).fill(1),
+          height: 2,
+          width: 4,
+        },
+        key: "rgba-mask-frame",
+        kind: PreparedMaskFrameKind.RgbaImage,
+        source: {},
+        width: 8,
+      },
+      maskStatus: "prepared",
+    };
+    layer.drawFrame(0.1);
+
+    expect(canvases).toContainEqual(
+      expect.objectContaining({ height: 2, width: 4 }),
+    );
+    expect(imageSources).toContainEqual(
+      expect.objectContaining({ height: 2, width: 4 }),
+    );
   });
 
   it("reports the window's readiness for a media time", () => {

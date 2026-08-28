@@ -150,7 +150,12 @@ export async function* extractInferenceFrameBatches(options: {
       }
 
       frames.push({
-        duration: sample.duration,
+        duration: sampledFrameCoverage(
+          sample.timestamp,
+          sample.duration,
+          frameIndex,
+          options.media,
+        ),
         frameIndex,
         imageBase64: await canvasToJpegBase64(canvas, quality),
         mediaTime: sample.timestamp,
@@ -161,6 +166,31 @@ export async function* extractInferenceFrameBatches(options: {
       yield frames;
     }
   }
+}
+
+/**
+ * How long a sampled frame's detections stand.
+ *
+ * A frame is decoded at its own display time but stands in for the whole grid
+ * step the sample was asked for, and the two differ: a clip faster than the
+ * grid displays each frame for less than a step, so coverage taken from the
+ * display duration stops short of the next sample and the track a viewer sees
+ * as continuous is recorded as a comb of slivers with a hole between every
+ * pair. Reaching the next sample's request time closes them at any frame rate,
+ * and a slower clip keeps its own longer duration.
+ */
+function sampledFrameCoverage(
+  mediaTime: number,
+  sampleDuration: number,
+  frameIndex: number,
+  media: PreparedUploadMedia,
+) {
+  const nextSampleTime = Math.min(
+    (frameIndex + 1.5) / media.frameRate,
+    media.duration,
+  );
+
+  return Math.max(sampleDuration, nextSampleTime - mediaTime);
 }
 
 function readBatchSamples(

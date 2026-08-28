@@ -56,6 +56,34 @@ export enum RenderPreparationArtifactFrameStatus {
 }
 
 /**
+ * Why an enabled render-preparation gate is holding playback.
+ *
+ * The two holds are different events for a viewer. One says the picture is
+ * incomplete; the other says the picture is finished and the gate is banking a
+ * lead in front of it. A host shown only that playback stopped cannot tell them
+ * apart, and describing the second as missing media is wrong on any source.
+ */
+export enum RenderPreparationGateHoldReason {
+  /** The frame about to be presented has no artifact yet. */
+  ActiveFrameUnprepared = "activeFrameUnprepared",
+  /** That frame is ready, and the prepared lead in front of it is short. */
+  LeadBelowRequirement = "leadBelowRequirement",
+}
+
+/**
+ * The hold an enabled gate is applying, absent when it is not holding.
+ */
+export interface RenderPreparationGateHoldDiagnostics {
+  readonly reason: RenderPreparationGateHoldReason;
+  /**
+   * Prepared lead the wait has to reach before it ends, after the target
+   * window's own span has capped it. Against `preparedAheadSeconds` it gives a
+   * host the progress of the wait.
+   */
+  readonly requiredAheadSeconds: number;
+}
+
+/**
  * Worker creation hook for hosts that need custom CSP or deployment handling.
  */
 export interface RenderPreparationWorkerFactory {
@@ -172,6 +200,7 @@ export interface RenderPreparationArtifactWindowDiagnostics {
  */
 export interface RenderPreparationArtifactDiagnostics {
   readonly activeFrame?: RenderPreparationActiveFrameDiagnostics | null;
+  readonly gateHold?: RenderPreparationGateHoldDiagnostics | null;
   readonly inFlightCount?: number;
   readonly kind: RenderPreparationArtifactKind;
   readonly maxInFlightCount?: number;
