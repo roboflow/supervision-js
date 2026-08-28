@@ -55,7 +55,7 @@ describe("detection frame utilities", () => {
     expect(selectDetectionFrame(frames, 3)?.mediaTime).toBe(3);
   });
 
-  it("selects frame-indexed detections on the nearest inference frame grid", () => {
+  it("does not select a grid frame the playhead has not reached", () => {
     const frames: DetectionFrame[] = [
       {
         detections: [],
@@ -70,17 +70,17 @@ describe("detection frame utilities", () => {
         mediaTime: 52 / 30,
       },
     ];
+    const options = {
+      frameRate: 30,
+      selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
+    };
 
     expect(selectDetectionFrame(frames, 1.73)?.frameIndex).toBe(51);
-    expect(
-      selectDetectionFrame(frames, 1.73, {
-        frameRate: 30,
-        selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
-      })?.frameIndex,
-    ).toBe(52);
+    expect(selectDetectionFrame(frames, 1.73, options)?.frameIndex).toBe(51);
+    expect(selectDetectionFrame(frames, 52 / 30, options)?.frameIndex).toBe(52);
   });
 
-  it("selects exact 30fps grid frames with deterministic half-frame rounding", () => {
+  it("selects the 30fps grid frame whose own step contains the playhead", () => {
     const frames: DetectionFrame[] = Array.from({ length: 4 }, (_, index) => ({
       detections: [],
       endTime: (index + 1) / 30,
@@ -93,14 +93,35 @@ describe("detection frame utilities", () => {
     };
 
     expect(selectDetectionFrame(frames, 0, options)?.frameIndex).toBe(0);
-    expect(selectDetectionFrame(frames, 0.49 / 30, options)?.frameIndex).toBe(
-      0,
+    expect(selectDetectionFrame(frames, 0.5 / 30, options)?.frameIndex).toBe(0);
+    expect(selectDetectionFrame(frames, 0.9 / 30, options)?.frameIndex).toBe(0);
+    expect(selectDetectionFrame(frames, 1 / 30, options)?.frameIndex).toBe(1);
+    expect(selectDetectionFrame(frames, 1.5 / 30, options)?.frameIndex).toBe(1);
+    expect(selectDetectionFrame(frames, 3.5 / 30, options)?.frameIndex).toBe(3);
+    expect(selectDetectionFrame(frames, 4 / 30, options)).toBeUndefined();
+  });
+
+  it("selects on the grid the frames describe when the stated rate disagrees", () => {
+    const realFrameStep = 1 / 29.97;
+    const frames: DetectionFrame[] = Array.from(
+      { length: 1500 },
+      (_, index) => ({
+        detections: [],
+        frameIndex: index,
+        mediaTime: index * realFrameStep,
+      }),
     );
-    expect(selectDetectionFrame(frames, 0.5 / 30, options)?.frameIndex).toBe(1);
-    expect(selectDetectionFrame(frames, 1.49 / 30, options)?.frameIndex).toBe(
-      1,
-    );
-    expect(selectDetectionFrame(frames, 1.5 / 30, options)?.frameIndex).toBe(2);
+    const options = {
+      frameRate: 30,
+      selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
+    };
+
+    for (const frameIndex of [0, 1, 800, 1499]) {
+      expect(
+        selectDetectionFrame(frames, frameIndex * realFrameStep, options)
+          ?.frameIndex,
+      ).toBe(frameIndex);
+    }
   });
 
   it("ends a timestamp interval frame half a millisecond before its end time", () => {
@@ -230,7 +251,7 @@ describe("detection frame utilities", () => {
       },
     ]);
 
-    const selectedFrame = selectDetectionFrame(frames, 149 / 30, {
+    const selectedFrame = selectDetectionFrame(frames, 150 / 30, {
       frameRate: 30,
       selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
     });
@@ -240,7 +261,7 @@ describe("detection frame utilities", () => {
     expect(frames[1]?.detections[0]?.className).toBe("nearest");
   });
 
-  it("uses the nearest available frame index for a one-frame detection gap", () => {
+  it("leaves a frame index the source never produced without detections", () => {
     const frames: DetectionFrame[] = [
       {
         detections: [],
@@ -255,13 +276,18 @@ describe("detection frame utilities", () => {
         mediaTime: 150 / 30,
       },
     ];
+    const options = {
+      frameRate: 30,
+      selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
+    };
 
-    expect(
-      selectDetectionFrame(frames, 149 / 30, {
-        frameRate: 30,
-        selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
-      })?.frameIndex,
-    ).toBe(150);
+    expect(selectDetectionFrame(frames, 148 / 30, options)?.frameIndex).toBe(
+      148,
+    );
+    expect(selectDetectionFrame(frames, 149 / 30, options)).toBeUndefined();
+    expect(selectDetectionFrame(frames, 150 / 30, options)?.frameIndex).toBe(
+      150,
+    );
   });
 
   it("does not bridge gaps larger than one missing frame index", () => {
@@ -288,32 +314,31 @@ describe("detection frame utilities", () => {
     ).toBeUndefined();
   });
 
-  it("uses an explicit frame-index origin when buffered media times are rounded", () => {
+  it("selects across buffered media times the producer rounded to milliseconds", () => {
     const frames: DetectionFrame[] = [
       {
         detections: [],
-        endTime: 48 / 30,
         frameIndex: 47,
         mediaTime: 1.567,
       },
       {
         detections: [],
-        endTime: 49 / 30,
         frameIndex: 48,
         mediaTime: 1.6,
       },
     ];
+    const options = {
+      frameRate: 30,
+      selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
+    };
 
-    expect(
-      selectDetectionFrame(frames, (47.5 + 1e-8) / 30, {
-        frameIndexOriginTime: 0,
-        frameRate: 30,
-        selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
-      })?.frameIndex,
-    ).toBe(48);
+    expect(selectDetectionFrame(frames, 47.5 / 30, options)?.frameIndex).toBe(
+      47,
+    );
+    expect(selectDetectionFrame(frames, 1.6, options)?.frameIndex).toBe(48);
   });
 
-  it("does not fall back to a stale interval frame when indexed frames are outside tolerance", () => {
+  it("does not fall back to a stale interval frame past the indexed frame's grid step", () => {
     const frames: DetectionFrame[] = [
       {
         detections: [],
