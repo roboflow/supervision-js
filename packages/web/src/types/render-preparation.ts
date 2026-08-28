@@ -207,7 +207,26 @@ export interface RenderPreparationArtifactDiagnostics {
   readonly maxPendingCount?: number;
   readonly maxPreparedCount?: number;
   readonly pendingCount: number;
+  /**
+   * Frames in the unbroken run of prepared frames starting at the active
+   * detection frame.
+   *
+   * This is a count of frames, not of media time. Above 1x the preparer strides,
+   * so N frames here do not cover N frame durations of playback, and the two
+   * numbers diverge by design. Deriving one from the other is wrong in both
+   * directions.
+   */
   readonly preparedAheadFrameCount?: number;
+  /**
+   * Media-time reach of that same unbroken run, in seconds, measured forward
+   * from the active detection frame and wrapping at the media end on a looping
+   * clip.
+   *
+   * The run stops at the first frame that is not prepared, so this is how long
+   * playback can continue before annotations stop, not the furthest frame
+   * prepared anywhere. It is also what a detection gate compares against its
+   * required lead, so it stays a single comparable scalar.
+   */
   readonly preparedAheadSeconds?: number;
   readonly prefetchCount?: number;
   readonly preparedCount: number;
