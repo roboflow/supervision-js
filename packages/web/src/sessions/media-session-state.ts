@@ -69,6 +69,19 @@ export function createMediaSessionStateSnapshot({
     );
   }
 
+  if (
+    renderer?.detectionBuffer.status === DetectionBufferStatus.AwaitingCoverage
+  ) {
+    activities.push(
+      createActivity({
+        blockingPlayback: true,
+        kind: MediaSessionActivityKind.DetectionsAwaitingCoverage,
+        label: "Waiting for detections",
+        status: MediaSessionActivityStatus.Waiting,
+      }),
+    );
+  }
+
   if (renderer?.detectionBuffer.status === DetectionBufferStatus.Loading) {
     const blockingPlayback =
       renderer.playbackState === MediaRendererPlaybackState.Buffering;

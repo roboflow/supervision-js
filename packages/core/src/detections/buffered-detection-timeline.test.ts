@@ -497,7 +497,7 @@ describe("buffered detection timeline", () => {
     expect(timeline.getState()).toMatchObject({
       requestedEndTime: 3,
       requestedStartTime: 1,
-      status: DetectionBufferStatus.Loading,
+      status: DetectionBufferStatus.AwaitingCoverage,
     });
 
     coverage.resolve();
@@ -551,6 +551,136 @@ describe("buffered detection timeline", () => {
     expect(timeline.getState().status).toBe(DetectionBufferStatus.Ready);
 
     coverage.resolve();
+  });
+
+  it("holds playback until an appendable source covers the frame under the playhead", async () => {
+    const source = createWritableDetectionFrameSource({
+      datasetId: "stream",
+      store: createMemoryColdDetectionFrameStore(),
+    });
+
+    await source.appendFrames([
+      { detections: [{ id: "opening" }], endTime: 1, mediaTime: 0 },
+    ]);
+
+    const loadFrames = vi.spyOn(source, "loadFrames");
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 2,
+      bufferBehindSeconds: 0,
+      playbackGate: { enabled: true },
+      source,
+    });
+    const prepare = timeline.prepare(2, { gatePlayback: true });
+
+    await Promise.resolve();
+
+    expect(loadFrames).not.toHaveBeenCalled();
+    expect(timeline.getState()).toMatchObject({
+      requestedEndTime: 2,
+      requestedStartTime: 2,
+      status: DetectionBufferStatus.AwaitingCoverage,
+    });
+
+    await source.appendFrames([
+      { detections: [{ id: "playhead" }], endTime: 3, mediaTime: 2 },
+    ]);
+    await prepare;
+
+    expect(timeline.getState().status).toBe(DetectionBufferStatus.Ready);
+    expect(timeline.selectFrame(2)?.detections[0]?.id).toBe("playhead");
+  });
+
+  it("reports awaiting coverage while it waits and loading once it fetches", async () => {
+    const coverage = createDeferred<void>();
+    const load = createDeferred<DetectionFrame[]>();
+    const source = {
+      loadFrames: vi.fn(() => load.promise),
+      waitForRange: vi.fn(() => coverage.promise),
+    };
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 1,
+      bufferBehindSeconds: 0,
+      playbackGate: {
+        enabled: true,
+        requiredAheadSeconds: 2,
+      },
+      source,
+    });
+    const prepare = timeline.prepare(1, { gatePlayback: true });
+
+    await Promise.resolve();
+
+    expect(timeline.getState().status).toBe(
+      DetectionBufferStatus.AwaitingCoverage,
+    );
+
+    coverage.resolve();
+    await vi.waitFor(() => expect(source.loadFrames).toHaveBeenCalled());
+
+    expect(timeline.getState().status).toBe(DetectionBufferStatus.Loading);
+
+    load.resolve([frames[1]]);
+    await prepare;
+
+    expect(timeline.getState().status).toBe(DetectionBufferStatus.Ready);
+  });
+
+  it("gives up on coverage the source never produces", async () => {
+    const source = createWritableDetectionFrameSource({
+      datasetId: "stream",
+      store: createMemoryColdDetectionFrameStore(),
+    });
+
+    await source.appendFrames([
+      { detections: [{ id: "opening" }], endTime: 1, mediaTime: 0 },
+    ]);
+
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 2,
+      bufferBehindSeconds: 0,
+      playbackGate: {
+        enabled: true,
+        maxWaitSeconds: 0.01,
+        requiredAheadSeconds: 2,
+      },
+      source,
+    });
+
+    await timeline.prepare(2, { gatePlayback: true });
+
+    expect(timeline.getState().status).toBe(DetectionBufferStatus.Ready);
+  });
+
+  it("waits again only once an abandoned source has gained data", async () => {
+    const source = createWritableDetectionFrameSource({
+      datasetId: "stream",
+      store: createMemoryColdDetectionFrameStore(),
+    });
+
+    await source.appendFrames([
+      { detections: [{ id: "opening" }], endTime: 1, mediaTime: 0 },
+    ]);
+
+    const waitForRange = vi.spyOn(source, "waitForRange");
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 2,
+      bufferBehindSeconds: 0,
+      playbackGate: { enabled: true, maxWaitSeconds: 0.01 },
+      source,
+    });
+
+    await timeline.prepare(2, { gatePlayback: true });
+    await timeline.prepare(2.5, { gatePlayback: true });
+
+    expect(waitForRange).toHaveBeenCalledTimes(1);
+
+    await source.appendFrames([
+      { detections: [{ id: "late" }], endTime: 4, mediaTime: 3 },
+    ]);
+    await timeline.prepare(3, { gatePlayback: true });
+
+    expect(waitForRange).toHaveBeenCalledTimes(2);
+    expect(timeline.selectFrame(3)?.detections[0]?.id).toBe("late");
   });
 
   it("loads without waiting for source coverage when the caller does not gate", async () => {

@@ -38,6 +38,13 @@ export enum MediaSessionStatus {
  * Subsystem currently affecting session readiness or presentation.
  */
 export enum MediaSessionActivityKind {
+  /**
+   * Playback is held waiting for a producer to emit detections for the frame
+   * about to be shown, which is a wait on inference rather than on transfer or
+   * decode. `DetectionsBuffering` is the transfer of detections that already
+   * exist, and `PlaybackBuffering` is the wait for media bytes.
+   */
+  DetectionsAwaitingCoverage = "detectionsAwaitingCoverage",
   DetectionsBuffering = "detectionsBuffering",
   DetectionsLoading = "detectionsLoading",
   Error = "error",

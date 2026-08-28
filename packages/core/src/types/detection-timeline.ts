@@ -6,6 +6,12 @@ import type {
 export enum DetectionBufferStatus {
   Idle = "idle",
   Loading = "loading",
+  /**
+   * The playback gate is holding playback until the source produces detections
+   * for the requested range. {@link DetectionBufferStatus.Loading} fetches
+   * detections the source already has; this one waits on a producer.
+   */
+  AwaitingCoverage = "awaitingCoverage",
   Ready = "ready",
   Error = "error",
   Destroyed = "destroyed",
@@ -151,10 +157,20 @@ export interface DetectionPlaybackGateOptions {
   readonly enabled?: boolean;
   /**
    * Detection lead required ahead of the playback time before an enabled gate
-   * lets playback continue. Defaults to none, and a gate asked for no lead
-   * waits for nothing, so an enabled gate needs one to do anything.
+   * lets playback continue. Defaults to none, which asks only that the frame
+   * about to be presented is covered.
    */
   readonly requiredAheadSeconds?: number;
+  /**
+   * How long an enabled gate holds playback before it gives up and presents the
+   * frame with whatever detections exist. `Infinity` waits indefinitely.
+   *
+   * Inference can fail, fall behind, or be cancelled, and none of those look
+   * any different to the gate from a result still on its way. Once a wait is
+   * abandoned, a source that reports versions is not waited on again until it
+   * gains data, so a producer that has stopped costs one wait, not one a frame.
+   */
+  readonly maxWaitSeconds?: number;
 }
 
 export enum DetectionFrameRetentionMode {
@@ -380,6 +396,14 @@ export interface ChunkedDetectionFrameSourceOptions {
    * which costs a refetch on every load that spans more chunks than the cap.
    */
   readonly maxCachedChunks?: number;
+  /**
+   * Maximum number of chunk requests in flight at once.
+   *
+   * One buffer window can span dozens of chunk files, and they queue behind the
+   * same connection the media's own reads use. Raise it on a transport that is
+   * not competing with a media fetch.
+   */
+  readonly maxConcurrentChunkFetches?: number;
 }
 
 /**

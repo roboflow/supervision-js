@@ -9,6 +9,7 @@ import {
   type DetectionTimelineContext,
 } from "#types/detection-timeline";
 import type { DetectionFrame } from "#types/detections";
+import { startWaitBound } from "#utils/wait-bound";
 import {
   copyDetectionFrame,
   copySortedDetectionFrames,
@@ -30,6 +31,15 @@ const DEFAULT_BUFFER_BEHIND_SECONDS = 0.5;
  */
 const REFILL_LEAD_FRACTION = 0.5;
 const MIN_REFILL_LEAD_SECONDS = 1;
+/**
+ * How long a playback gate holds before it gives up on coverage.
+ *
+ * The gate waits on a producer, and a producer that has failed, stalled, or
+ * fallen far behind is indistinguishable from one that is about to answer. Past
+ * this a frozen picture is the worse of the two outcomes, so the frame is
+ * presented with whatever detections exist.
+ */
+const DEFAULT_PLAYBACK_GATE_MAX_WAIT_SECONDS = 10;
 
 /**
  * How far ahead of the playhead a load reaches.
@@ -116,6 +126,8 @@ export function createBufferedDetectionTimeline(
       }
     | undefined;
   let incrementalRefresh: Promise<void> | undefined;
+  /** Source version the gate last gave up on, or null while it still waits. */
+  let abandonedGateSourceVersion: number | null = null;
   let pendingPrefetch:
     { readonly loadId: number; readonly mediaTime: number } | undefined;
   let prefetchPump: Promise<void> | undefined;
@@ -651,26 +663,39 @@ export function createBufferedDetectionTimeline(
       requiredAheadSeconds,
     });
 
-    if (endTime <= comparableMediaTime) {
+    if (
+      abandonedGateSourceVersion !== null &&
+      getSourceVersion() <= abandonedGateSourceVersion
+    ) {
       return;
     }
 
-    const coveragePlan = createLoadPlan(comparableMediaTime, endTime);
+    // A lead clamped away at the end of media, or asked for as zero, still
+    // leaves the frame under the playhead to wait for.
+    const coveragePlan = createLoadPlan(
+      comparableMediaTime,
+      Math.max(comparableMediaTime, endTime),
+    );
 
     state = {
       ...state,
       errorMessage: null,
       requestedEndTime: coveragePlan.endTime,
       requestedStartTime: coveragePlan.startTime,
-      status: DetectionBufferStatus.Loading,
+      status: DetectionBufferStatus.AwaitingCoverage,
     };
 
     try {
-      await Promise.all(
-        coveragePlan.sourceRanges.map((range) =>
-          options.source.waitForRange?.(range),
+      const covered = await waitForSourceCoverage(
+        coveragePlan.sourceRanges,
+        Math.max(
+          0,
+          playbackGate.maxWaitSeconds ?? DEFAULT_PLAYBACK_GATE_MAX_WAIT_SECONDS,
         ),
       );
+
+      abandonedGateSourceVersion =
+        covered || !options.source.getVersion ? null : getSourceVersion();
     } catch (error) {
       if (!destroyed) {
         state = {
@@ -682,6 +707,47 @@ export function createBufferedDetectionTimeline(
 
       throw error;
     }
+  }
+
+  /**
+   * Resolves true once the source covers every range, false once the wait has
+   * run longer than `maxWaitSeconds`.
+   */
+  async function waitForSourceCoverage(
+    sourceRanges: readonly DetectionFrameSourceVersionRange[],
+    maxWaitSeconds: number,
+  ) {
+    const covered = whenRangesCovered(sourceRanges);
+
+    if (!Number.isFinite(maxWaitSeconds)) {
+      return covered;
+    }
+
+    const bound = startWaitBound(maxWaitSeconds * 1000);
+
+    try {
+      const result = await Promise.race([covered, bound.expired]);
+
+      if (!result) {
+        // The abandoned wait outlives this call, and a rejection it reaches
+        // afterwards has nobody left to hand it to.
+        void covered.catch(() => undefined);
+      }
+
+      return result;
+    } finally {
+      bound.cancel();
+    }
+  }
+
+  async function whenRangesCovered(
+    sourceRanges: readonly DetectionFrameSourceVersionRange[],
+  ) {
+    await Promise.all(
+      sourceRanges.map((range) => options.source.waitForRange?.(range)),
+    );
+
+    return true;
   }
 
   function shouldRefreshRollingWindow(mediaTime: number) {

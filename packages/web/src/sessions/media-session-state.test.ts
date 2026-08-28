@@ -115,6 +115,39 @@ describe("media session state", () => {
     ]);
   });
 
+  it("separates waiting for a detection producer from loading detections", () => {
+    const state = createMediaSessionStateSnapshot({
+      errorMessage: null,
+      media: {
+        inputMetadata: null,
+        normalizedMedia: null,
+        objectUrl: null,
+      },
+      normalization: null,
+      renderPreparation: null,
+      renderer: createRendererState({
+        detectionBufferStatus: DetectionBufferStatus.AwaitingCoverage,
+        playbackState: MediaRendererPlaybackState.Buffering,
+      }),
+    });
+
+    expect(state.playbackBlocked).toBe(true);
+    expect(state.activities).toEqual([
+      expect.objectContaining({
+        blockingPlayback: true,
+        blockingPresentation: false,
+        kind: MediaSessionActivityKind.PlaybackBuffering,
+        status: MediaSessionActivityStatus.Waiting,
+      }),
+      expect.objectContaining({
+        blockingPlayback: true,
+        blockingPresentation: false,
+        kind: MediaSessionActivityKind.DetectionsAwaitingCoverage,
+        status: MediaSessionActivityStatus.Waiting,
+      }),
+    ]);
+  });
+
   it("marks playback buffering as playback-blocking", () => {
     const state = createMediaSessionStateSnapshot({
       errorMessage: null,
