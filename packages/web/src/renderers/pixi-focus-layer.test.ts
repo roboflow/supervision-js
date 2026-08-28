@@ -695,6 +695,72 @@ describe("pixi focus layer", () => {
     expect(uniforms.update).toHaveBeenCalledTimes(updatesAfterDraw);
   });
 
+  it("keeps the cutout of the raster the mask layer is still holding up", () => {
+    vi.stubGlobal("document", {
+      createElement: vi.fn(() => ({
+        getContext: vi.fn(),
+        height: 0,
+        width: 0,
+      })),
+    });
+
+    const { artifact, layer, mesh, textureSource } = createIdMaskFocus();
+
+    layer.drawFrame({
+      frame: maskFrame,
+      hoveredPick: null,
+      idMaskArtifact: artifact,
+      mediaTime: maskFrame.mediaTime,
+      selectedPick: null,
+    });
+
+    const uniforms = mesh.shader.resources.focusUniforms as FakeUniformGroup;
+    const updatesAfterDraw = uniforms.update.mock.calls.length;
+
+    // Two frames of media at twice speed, which is past what this layer holds a
+    // cutout for on its own.
+    layer.drawFrame({
+      frame: undefined,
+      heldMaskFrameTime: maskFrame.mediaTime,
+      hoveredPick: null,
+      mediaTime: maskFrame.mediaTime + 0.0667,
+      selectedPick: null,
+    });
+
+    expect(mesh.visible).toBe(true);
+    expect(mesh.shader.resources.uTexture).toBe(textureSource);
+    expect(uniforms.update).toHaveBeenCalledTimes(updatesAfterDraw);
+  });
+
+  it("dims the whole frame once the raster the cutout came from is gone", () => {
+    vi.stubGlobal("document", {
+      createElement: vi.fn(() => ({
+        getContext: vi.fn(),
+        height: 0,
+        width: 0,
+      })),
+    });
+
+    const { artifact, layer, mesh, textureSource } = createIdMaskFocus();
+
+    layer.drawFrame({
+      frame: maskFrame,
+      hoveredPick: null,
+      idMaskArtifact: artifact,
+      mediaTime: maskFrame.mediaTime,
+      selectedPick: null,
+    });
+    layer.drawFrame({
+      frame: undefined,
+      heldMaskFrameTime: null,
+      hoveredPick: null,
+      mediaTime: maskFrame.mediaTime + 0.0667,
+      selectedPick: null,
+    });
+
+    expect(mesh.shader.resources.uTexture).not.toBe(textureSource);
+  });
+
   it("drops a held cutout the media has moved away from, and dims the whole frame", () => {
     vi.stubGlobal("document", {
       createElement: vi.fn(() => ({

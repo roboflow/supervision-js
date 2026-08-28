@@ -207,9 +207,9 @@ export interface MediaRendererState {
   readonly activeDetectionCount: number;
   /**
    * Detection frame the mask raster on screen belongs to, null when no mask is
-   * up. A frame whose raster is not ready yet draws no mask rather than the
-   * previous frame's, so this either names `activeDetectionFrameTime` or names
-   * nothing.
+   * up. It names `activeDetectionFrameTime`, or the frame beside it while that
+   * frame's own raster is still being prepared, and never anything further off
+   * than that.
    *
    * Optional so a host holding a state it built before this field existed still
    * satisfies the type.
@@ -223,8 +223,9 @@ export interface MediaRendererState {
   readonly playbackGateReach?: PlaybackGateReach;
   /**
    * Whether the raster on screen belongs to a frame other than the one the rest
-   * of the annotations were drawn from. Nothing produces this on purpose; a
-   * host that sees it true is looking at a mask over the wrong picture.
+   * of the annotations were drawn from, which is the neighbouring frame and no
+   * further. It goes true where drawing nothing would have blinked the mask off
+   * for a frame instead.
    */
   readonly maskHeldStale?: boolean;
   /**

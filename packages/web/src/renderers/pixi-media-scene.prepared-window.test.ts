@@ -367,9 +367,9 @@ const paintedMaskStyle: MaskStyle = {
       ? { alpha: 1, color: 0xffffff, mask: detection.mask }
       : undefined,
 };
-/** One 30 fps step apart: the smallest move a viewer can make. */
-const adjacentMaskedFrames: readonly DetectionFrame[] = [
-  {
+/** Three 30 fps steps: the smallest moves a viewer can make. */
+const maskedFrames: readonly DetectionFrame[] = [1, 1.0333, 1.0667].map(
+  (mediaTime, frameIndex) => ({
     detections: [
       {
         className: "player",
@@ -378,22 +378,10 @@ const adjacentMaskedFrames: readonly DetectionFrame[] = [
         rect: makeRect(),
       },
     ],
-    frameIndex: 0,
-    mediaTime: 1,
-  },
-  {
-    detections: [
-      {
-        className: "player",
-        confidence: 0.9,
-        mask: singlePixelMask,
-        rect: makeRect(),
-      },
-    ],
-    frameIndex: 1,
-    mediaTime: 1.0333,
-  },
-];
+    frameIndex,
+    mediaTime,
+  }),
+);
 const emptyPolygonStyle: PolygonStyle = { resolve: () => undefined };
 
 beforeEach(() => {
@@ -465,9 +453,9 @@ describe("the prepared annotation window under push presentation", () => {
     expect(boxGraphics().clear.mock.calls.length).toBeGreaterThan(0);
   });
 
-  it("puts no mask on a frame whose raster is not cooked, however close the last one is", async () => {
+  it("keeps the neighbouring frame's raster on a frame whose cook is owed, and says whose it is", async () => {
     const scene = await createScene({
-      detectionFrames: adjacentMaskedFrames,
+      detectionFrames: maskedFrames,
       maskStyle: paintedMaskStyle,
       renderPreparation: {
         workerFactory: createSelectiveWorkerFactory(["0:1"]),
@@ -485,10 +473,29 @@ describe("the prepared annotation window under push presentation", () => {
 
     scene.present(1033);
 
-    // One 30 fps step is inside every tolerance a hold could be written with,
-    // which is what made the raster of the frame before it look close enough.
     expect(scene.lastPresentation()).toMatchObject({
       activeDetectionFrameTime: 1.0333,
+      drawnMaskFrameTime: 1,
+      maskHeldStale: true,
+    });
+  });
+
+  it("takes the raster off two frames from the one it belongs to", async () => {
+    const scene = await createScene({
+      detectionFrames: maskedFrames,
+      maskStyle: paintedMaskStyle,
+      renderPreparation: {
+        workerFactory: createSelectiveWorkerFactory(["0:1"]),
+      },
+    });
+
+    scene.present(1000);
+    await scene.settleCooks();
+    scene.present(1033);
+    scene.present(1067);
+
+    expect(scene.lastPresentation()).toMatchObject({
+      activeDetectionFrameTime: 1.0667,
       drawnMaskFrameTime: null,
       maskHeldStale: false,
     });

@@ -106,7 +106,8 @@ export interface PresentedMediaSample {
    *  up. Apart from `activeDetectionFrameTime` it names a desync in seconds. */
   readonly drawnMaskFrameTime: number | null;
   /** The raster on screen and the detections over it name different frames,
-   *  which nothing produces on purpose. */
+   *  which is the mask layer holding the neighbouring frame's raster over a
+   *  frame whose own is still being prepared. */
   readonly maskHeldStale: boolean;
   readonly detectionBuffer: DetectionBufferState;
   readonly renderTimings?: MediaFrameRenderTimings;

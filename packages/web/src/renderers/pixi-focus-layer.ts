@@ -123,6 +123,12 @@ export interface PixiFocusMaskArtifact {
 
 export interface PixiFocusLayerFrameContext {
   readonly frame: FocusDrawFrame | undefined;
+  /**
+   * The detection frame the mask raster on screen belongs to, when the mask
+   * layer is holding that raster over the frame being drawn. A cutout cut from
+   * that raster is as current as the mask drawn from it.
+   */
+  readonly heldMaskFrameTime?: number | null;
   readonly hoveredPick: DetectionPickResult | null;
   readonly idMaskArtifact?: PixiFocusMaskArtifact | null;
   readonly mediaTime: number;
@@ -177,6 +183,7 @@ export function createPixiFocusLayer(options: {
   let vectorFocusSignature: VectorFocusSignature | null = null;
   let heldFill: FocusFill | null = null;
   let cutoutMediaTime: number | null = null;
+  let cutoutFrameTime: number | null = null;
   let drawnOverlayWithoutCutout: FocusFill | null = null;
   let isHoldingOverlay = false;
   let holdStartedAtMs: number | null = null;
@@ -238,7 +245,7 @@ export function createPixiFocusLayer(options: {
       }
 
       if (!context.frame) {
-        holdOverlay(context.mediaTime);
+        holdOverlay(context.mediaTime, context.heldMaskFrameTime ?? null);
         return;
       }
 
@@ -275,14 +282,14 @@ export function createPixiFocusLayer(options: {
 
       if (drawIdMaskFocus(context.idMaskArtifact, instruction)) {
         hideVectorFocus();
-        markCutoutDrawn(context.mediaTime);
+        markCutoutDrawn(context.mediaTime, context.frame.mediaTime);
         return;
       }
 
       idMaskRenderer?.hide();
 
       if (drawVectorFocus(instruction, context.frame)) {
-        markCutoutDrawn(context.mediaTime);
+        markCutoutDrawn(context.mediaTime, context.frame.mediaTime);
       }
     },
 
@@ -522,7 +529,7 @@ export function createPixiFocusLayer(options: {
    * Everything dimmed for a moment reads as a pause; the picture flashing to
    * full brightness and back reads as a fault.
    */
-  function holdOverlay(mediaTime: number) {
+  function holdOverlay(mediaTime: number, heldMaskFrameTime: number | null) {
     if (!heldFill) {
       transitionToHidden();
       return;
@@ -532,15 +539,32 @@ export function createPixiFocusLayer(options: {
     targetAlpha = 1;
     if (focusDisplay) focusDisplay.visible = true;
 
-    if (
-      cutoutMediaTime !== null &&
-      Math.abs(mediaTime - cutoutMediaTime) <= HELD_CUTOUT_SECONDS &&
-      isDrawnCutoutIntact()
-    ) {
+    if (isDrawnCutoutStillCurrent(mediaTime, heldMaskFrameTime)) {
       return;
     }
 
     drawOverlayWithoutCutout(heldFill);
+  }
+
+  /**
+   * Whether the cutout already drawn still sits over its subject. One cut from
+   * the raster the mask layer is still holding does by construction, and
+   * dimming the subject out from under a mask that is on screen is the drop a
+   * viewer sees most.
+   */
+  function isDrawnCutoutStillCurrent(
+    mediaTime: number,
+    heldMaskFrameTime: number | null,
+  ) {
+    if (cutoutFrameTime === null || !isDrawnCutoutIntact()) {
+      return false;
+    }
+
+    return (
+      cutoutFrameTime === heldMaskFrameTime ||
+      (cutoutMediaTime !== null &&
+        Math.abs(mediaTime - cutoutMediaTime) <= HELD_CUTOUT_SECONDS)
+    );
   }
 
   function endHold() {
@@ -561,13 +585,15 @@ export function createPixiFocusLayer(options: {
     }
   }
 
-  function markCutoutDrawn(mediaTime: number) {
+  function markCutoutDrawn(mediaTime: number, frameTime: number) {
     cutoutMediaTime = mediaTime;
+    cutoutFrameTime = frameTime;
     drawnOverlayWithoutCutout = null;
   }
 
   function resetHeldFocus() {
     cutoutMediaTime = null;
+    cutoutFrameTime = null;
     drawnOverlayWithoutCutout = null;
     heldFill = null;
     vectorFocusSignature = null;
@@ -595,6 +621,7 @@ export function createPixiFocusLayer(options: {
     }
 
     cutoutMediaTime = null;
+    cutoutFrameTime = null;
     drawnOverlayWithoutCutout = fill;
 
     if (idMaskRenderer) {

@@ -2062,17 +2062,20 @@ export async function createPixiMediaScene(
     }
 
     const editingKind = options.editingEngine?.getState().kind;
+
     if (
       editingKind === AnnotationGestureStateKind.Creating ||
-      editingKind === AnnotationGestureStateKind.DragSelecting ||
-      isFocusArtifactOwed(mediaTime)
+      editingKind === AnnotationGestureStateKind.DragSelecting
     ) {
-      focusLayer.drawFrame({
-        frame: undefined,
-        hoveredPick: null,
+      drawFocusWithNothingToCut(mediaTime, null);
+      return;
+    }
+
+    if (isFocusArtifactOwed(mediaTime)) {
+      drawFocusWithNothingToCut(
         mediaTime,
-        selectedPick: null,
-      });
+        maskLayer?.getDrawnState().drawnFrameTime ?? null,
+      );
       return;
     }
 
@@ -2093,6 +2096,19 @@ export async function createPixiMediaScene(
         filterVisiblePick(interactionState?.selectedPick ?? null),
       ),
       viewportScale,
+    });
+  }
+
+  function drawFocusWithNothingToCut(
+    mediaTime: number,
+    heldMaskFrameTime: number | null,
+  ) {
+    focusLayer?.drawFrame({
+      frame: undefined,
+      heldMaskFrameTime,
+      hoveredPick: null,
+      mediaTime,
+      selectedPick: null,
     });
   }
 

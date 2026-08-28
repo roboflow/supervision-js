@@ -555,14 +555,17 @@ function formatMaskFrame(rendererState: MediaRendererState | null) {
   }
 
   const detectionFrameTime = rendererState.activeDetectionFrameTime;
-  const behind =
-    detectionFrameTime === null
-      ? ""
-      : ` | ${formatMilliseconds(
-          (detectionFrameTime - drawnMaskFrameTime) * 1000,
-        )} behind`;
 
-  return `${drawn} | stale${behind}`;
+  if (detectionFrameTime === null) {
+    return `${drawn} | stale`;
+  }
+
+  // Scrubbing backwards, the raster left up belongs to a frame the playhead has
+  // already passed, so it sits later in media time than the frame under it.
+  const offsetMs = (detectionFrameTime - drawnMaskFrameTime) * 1000;
+  const side = offsetMs < 0 ? "ahead" : "behind";
+
+  return `${drawn} | stale | ${formatMilliseconds(Math.abs(offsetMs))} ${side}`;
 }
 
 function formatAudioSummary(sourceState: MediaSourceState | null) {

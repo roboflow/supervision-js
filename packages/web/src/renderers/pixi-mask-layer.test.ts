@@ -122,13 +122,13 @@ describe("pixi mask layer", () => {
     expect(layer.getActiveIdMaskFrameTexture(0.1)).toBeNull();
   });
 
-  it("takes the mask off screen the moment the frame drawn owes its cook", () => {
+  it("keeps the mask of the frame next to it up while that frame owes its cook", () => {
     const layer = createPixiMaskLayer({
       BufferImageSource: FakeBufferImageSource as never,
       ImageSource: FakeImageSource as never,
       Sprite: FakeSprite as never,
       Texture: FakeTexture as never,
-      detectionTimeline: {} as never,
+      detectionTimeline: detectionTimelineAt([0.1, 0.1333, 0.1667]),
       maskStyle: new BaseMaskStyle(),
     });
     const sprite = layer.createSprite({ height: 80, width: 120 }) as FakeSprite;
@@ -141,7 +141,6 @@ describe("pixi mask layer", () => {
     };
     layer.drawFrame(0.1);
 
-    // One 30 fps step, which is the smallest move there is.
     preparedWindow.frame = {
       detectionFrame: { detections: [], mediaTime: 0.1333 },
       key: "owed-frame",
@@ -149,21 +148,120 @@ describe("pixi mask layer", () => {
     };
     layer.drawFrame(0.1333);
 
-    expect(sprite.visible).toBe(false);
-    expect(layer.getActiveIdMaskFrameTexture(0.1)).toBeNull();
+    expect(sprite.visible).toBe(true);
+    expect(layer.getDrawnState().drawnFrameTime).toBe(0.1);
+    // The layers that pair this raster to detections by position ask for their
+    // own frame, and a held raster is not it.
     expect(layer.getActiveIdMaskFrameTexture(0.1333)).toBeNull();
+    expect(layer.getActiveRegionMaskCoverage(0.1333)).toBeNull();
   });
 
-  it("draws no mask for a frame that owes its cook however fast it was going", () => {
-    const drawsOwedFrame = (mediaTime: number, playing: boolean) => {
-      const layer = createPixiMaskLayer({
+  it("takes the mask off screen two frames from the one it belongs to", () => {
+    const layer = createPixiMaskLayer({
+      BufferImageSource: FakeBufferImageSource as never,
+      ImageSource: FakeImageSource as never,
+      Sprite: FakeSprite as never,
+      Texture: FakeTexture as never,
+      detectionTimeline: detectionTimelineAt([0.1, 0.1333, 0.1667]),
+      maskStyle: new BaseMaskStyle(),
+    });
+    const sprite = layer.createSprite({ height: 80, width: 120 }) as FakeSprite;
+
+    preparedWindow.frame = {
+      detectionFrame: { detections: [], mediaTime: 0.1 },
+      key: "mask-frame",
+      maskFrame: idMaskFrame(),
+      maskStatus: "prepared",
+    };
+    layer.drawFrame(0.1);
+
+    preparedWindow.frame = {
+      detectionFrame: { detections: [], mediaTime: 0.1667 },
+      key: "owed-frame",
+      maskStatus: "pending",
+    };
+    layer.drawFrame(0.1667);
+
+    expect(sprite.visible).toBe(false);
+    expect(layer.getDrawnState().drawnFrameTime).toBeNull();
+    expect(layer.getActiveIdMaskFrameTexture(0.1)).toBeNull();
+    expect(layer.getActiveIdMaskFrameTexture(0.1667)).toBeNull();
+  });
+
+  it("counts that bound in frames of the timeline, not in seconds", () => {
+    const layer = createPixiMaskLayer({
+      BufferImageSource: FakeBufferImageSource as never,
+      ImageSource: FakeImageSource as never,
+      Sprite: FakeSprite as never,
+      Texture: FakeTexture as never,
+      // Detections sampled once a second, so the frame next to 0.1 is a whole
+      // second away and no budget written in seconds would admit it.
+      detectionTimeline: detectionTimelineAt([0.1, 1.1, 2.1]),
+      maskStyle: new BaseMaskStyle(),
+    });
+    const sprite = layer.createSprite({ height: 80, width: 120 }) as FakeSprite;
+
+    preparedWindow.frame = {
+      detectionFrame: { detections: [], mediaTime: 0.1 },
+      key: "mask-frame",
+      maskFrame: idMaskFrame(),
+      maskStatus: "prepared",
+    };
+    layer.drawFrame(0.1);
+
+    preparedWindow.frame = {
+      detectionFrame: { detections: [], mediaTime: 1.1 },
+      key: "owed-frame",
+      maskStatus: "pending",
+    };
+    layer.drawFrame(1.1);
+
+    expect(sprite.visible).toBe(true);
+    expect(layer.getDrawnState().drawnFrameTime).toBe(0.1);
+  });
+
+  it("draws no mask for a frame that has none, next to one that does", () => {
+    const layer = createPixiMaskLayer({
+      BufferImageSource: FakeBufferImageSource as never,
+      ImageSource: FakeImageSource as never,
+      Sprite: FakeSprite as never,
+      Texture: FakeTexture as never,
+      detectionTimeline: detectionTimelineAt([0.1, 0.1333]),
+      maskStyle: new BaseMaskStyle(),
+    });
+    const sprite = layer.createSprite({ height: 80, width: 120 }) as FakeSprite;
+
+    preparedWindow.frame = {
+      detectionFrame: { detections: [], mediaTime: 0.1 },
+      key: "mask-frame",
+      maskFrame: idMaskFrame(),
+      maskStatus: "prepared",
+    };
+    layer.drawFrame(0.1);
+
+    preparedWindow.frame = {
+      detectionFrame: { detections: [], mediaTime: 0.1333 },
+      key: "empty-frame",
+      maskStatus: "empty",
+    };
+    layer.drawFrame(0.1333);
+
+    expect(sprite.visible).toBe(false);
+  });
+
+  it("holds the same one frame however fast the playhead was going", () => {
+    const frameTimes = [0.1, 0.1333, 0.1667, 0.2, 0.2333, 0.2667, 0.3, 0.3333];
+    const createLayer = () =>
+      createPixiMaskLayer({
         BufferImageSource: FakeBufferImageSource as never,
         ImageSource: FakeImageSource as never,
         Sprite: FakeSprite as never,
         Texture: FakeTexture as never,
-        detectionTimeline: {} as never,
+        detectionTimeline: detectionTimelineAt(frameTimes),
         maskStyle: new BaseMaskStyle(),
       });
+    const drawsOwedFrame = (mediaTime: number, playing: boolean) => {
+      const layer = createLayer();
       const sprite = layer.createSprite({
         height: 80,
         width: 120,
@@ -188,14 +286,15 @@ describe("pixi mask layer", () => {
       return sprite.visible;
     };
 
-    // One 30 fps step, and the eight of them eight-times playback covers in the
-    // same wall time. Accepting a mask by how far the playhead travelled is what
-    // left the last mask of a fast run sitting over a paused frame, so no
-    // distance and no playback state buys a frame anything here.
-    for (const mediaTime of [0.1333, 0.3667]) {
-      expect(drawsOwedFrame(mediaTime, true)).toBe(false);
-      expect(drawsOwedFrame(mediaTime, false)).toBe(false);
-    }
+    // A budget in media seconds has to be scaled by the rate to go on meaning
+    // one frame, and that scaling is what put a raster twelve frames old over
+    // the picture after an eight-times run. Nothing here can be handed a rate,
+    // and the playback state the layer does get moves nothing.
+    expect(createLayer()).not.toHaveProperty("setPlaybackRate");
+    expect(drawsOwedFrame(0.1333, true)).toBe(true);
+    expect(drawsOwedFrame(0.1333, false)).toBe(true);
+    expect(drawsOwedFrame(0.3333, true)).toBe(false);
+    expect(drawsOwedFrame(0.3333, false)).toBe(false);
   });
 
   it("names the producer frame the raster on screen was accepted for", () => {
@@ -204,7 +303,7 @@ describe("pixi mask layer", () => {
       ImageSource: FakeImageSource as never,
       Sprite: FakeSprite as never,
       Texture: FakeTexture as never,
-      detectionTimeline: {} as never,
+      detectionTimeline: detectionTimelineAt([0.1, 0.1333, 0.1667]),
       maskStyle: new BaseMaskStyle(),
     });
 
@@ -235,11 +334,11 @@ describe("pixi mask layer", () => {
     });
 
     preparedWindow.frame = {
-      detectionFrame: { detections: [], mediaTime: 0.1333 },
+      detectionFrame: { detections: [], mediaTime: 0.1667 },
       key: "owed-frame",
       maskStatus: "pending",
     };
-    layer.drawFrame(0.1333, { index: 4, ticks: 4004 });
+    layer.drawFrame(0.1667, { index: 4, ticks: 4004 });
 
     expect(layer.getDrawnState()).toEqual({
       drawnFrameId: null,
@@ -288,7 +387,7 @@ describe("pixi mask layer", () => {
       ImageSource: FakeImageSource as never,
       Sprite: FakeSprite as never,
       Texture: FakeTexture as never,
-      detectionTimeline: {} as never,
+      detectionTimeline: detectionTimelineAt([0.1, 0.1333, 0.1667]),
       maskStyle: new BaseMaskStyle(),
     });
     const coverage = regionMaskCoverage();
@@ -303,14 +402,14 @@ describe("pixi mask layer", () => {
     layer.drawFrame(0.1);
 
     preparedWindow.frame = {
-      detectionFrame: { detections: [], mediaTime: 0.1333 },
+      detectionFrame: { detections: [], mediaTime: 0.1667 },
       key: "owed-frame",
       maskStatus: "pending",
     };
-    layer.drawFrame(0.1333);
+    layer.drawFrame(0.1667);
 
     expect(layer.getActiveRegionMaskCoverage(0.1)).toBeNull();
-    expect(layer.getActiveRegionMaskCoverage(0.1333)).toBeNull();
+    expect(layer.getActiveRegionMaskCoverage(0.1667)).toBeNull();
   });
 
   it("leaves the frame on screen whole while a later frame is prefetched", () => {
@@ -799,6 +898,17 @@ describe("pixi mask layer", () => {
     expect(layer.isArtifactPrepared(0.1)).toBe(true);
   });
 });
+
+/**
+ * A detection timeline that answers with the frames it was given, which is what
+ * decides whether two frames are next to each other.
+ */
+function detectionTimelineAt(mediaTimes: readonly number[]) {
+  return {
+    getBufferedFrames: () =>
+      mediaTimes.map((mediaTime) => ({ detections: [], mediaTime })),
+  } as never;
+}
 
 function maskLayerWithDisplayBox(options: {
   readonly acceptsUnalignedTextureRows: boolean;

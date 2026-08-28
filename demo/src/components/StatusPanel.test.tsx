@@ -152,4 +152,28 @@ describe("StatusPanel", () => {
     // Nothing else on the panel names the frame the raster really belongs to.
     expect(String(readout(stale, "Mask Frame").value)).toContain("stale");
   });
+
+  it("says which side of the picture a held raster sits on", () => {
+    const forwards = renderPanel({
+      rendererState: rendererState({
+        activeDetectionFrameTime: 0.1333,
+        drawnMaskFrameTime: 0.1,
+        maskHeldStale: true,
+      }),
+    });
+    const backwards = renderPanel({
+      rendererState: rendererState({
+        activeDetectionFrameTime: 0.1,
+        drawnMaskFrameTime: 0.1333,
+        maskHeldStale: true,
+      }),
+    });
+
+    expect(String(readout(forwards, "Mask Frame").value)).toContain(
+      "33.30ms behind",
+    );
+    expect(String(readout(backwards, "Mask Frame").value)).toContain(
+      "33.30ms ahead",
+    );
+  });
 });
