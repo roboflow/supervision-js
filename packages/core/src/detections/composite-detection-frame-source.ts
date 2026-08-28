@@ -37,8 +37,12 @@ interface GridCompositeSource extends LoadedCompositeSource {
 }
 
 interface GridSlot {
-  readonly frameIndex: number;
+  readonly frameIndex?: number;
   readonly mediaTime: number;
+}
+
+interface IndexedGridSlot extends GridSlot {
+  readonly frameIndex: number;
 }
 
 export function createCompositeDetectionFrameSource(
@@ -220,7 +224,8 @@ function composeIntervalFrames(
 }
 
 /**
- * One composed frame per inference grid index the children wrote.
+ * One composed frame per inference grid index the children wrote, and one per
+ * child frame that carries no index.
  *
  * Children are paired on the index their producer labelled, and the composed
  * frame keeps the media time they reported for it. `frameRate` states the grid
@@ -230,6 +235,13 @@ function composeIntervalFrames(
  * reach one of them and leaves the other's detections stranded. Pairing on the
  * index reaches every one and keeps each frame's detections on the frame they
  * were computed for.
+ *
+ * A frame carrying no index has no grid position to be paired on, so it
+ * composes at its own media time, and every child answers there with whatever
+ * it has standing. That is how a child sitting on a grid index keeps its
+ * detections on screen while an unindexed frame from another child overlaps it.
+ * The composed frame carries no index of its own, because only part of what it
+ * holds sits on the grid.
  */
 function composeNearestFrameIndexFrames(
   sources: readonly LoadedCompositeSource[],
@@ -248,21 +260,25 @@ function composeNearestFrameIndexFrames(
     ...source,
     framesByIndex: indexFramesByFrameIndex(source, options),
   }));
-  const gridSlots = mergeGridSlots(gridSources);
+  const indexedSlots = mergeGridSlots(gridSources);
 
-  if (gridSlots.length === 0) {
+  if (indexedSlots.length === 0) {
     return null;
   }
 
-  const gridStep = measureGridStep(gridSlots) ?? 1 / frameRate;
+  const gridStep = measureGridStep(indexedSlots) ?? 1 / frameRate;
+  const slots: readonly GridSlot[] = [
+    ...indexedSlots,
+    ...mergeUnindexedGridSlots(gridSources, indexedSlots),
+  ];
   const frames: DetectionFrame[] = [];
 
-  for (const slot of gridSlots) {
+  for (const slot of slots) {
     if (slot.mediaTime < startTime || slot.mediaTime >= endTime) {
       continue;
     }
 
-    const frame = composeFrameAtFrameIndex(
+    const frame = composeFrameAtGridSlot(
       gridSources,
       slot,
       Math.min(slot.mediaTime + gridStep, endTime),
@@ -306,7 +322,9 @@ function indexFramesByFrameIndex(
  * reported for it. Children on one grid watched the same source frame, and the
  * earliest of their answers is where that frame starts.
  */
-function mergeGridSlots(sources: readonly GridCompositeSource[]): GridSlot[] {
+function mergeGridSlots(
+  sources: readonly GridCompositeSource[],
+): IndexedGridSlot[] {
   const mediaTimes = new Map<number, number>();
 
   for (const source of sources) {
@@ -325,12 +343,39 @@ function mergeGridSlots(sources: readonly GridCompositeSource[]): GridSlot[] {
 }
 
 /**
+ * Where a frame no producer labelled sits: at the media time it reported, which
+ * is the only handle it has.
+ */
+function mergeUnindexedGridSlots(
+  sources: readonly GridCompositeSource[],
+  indexedSlots: readonly IndexedGridSlot[],
+): GridSlot[] {
+  const indexedSlotTimes = new Set(indexedSlots.map((slot) => slot.mediaTime));
+  const mediaTimes = new Set<number>();
+
+  for (const source of sources) {
+    for (const frame of source.frames) {
+      if (
+        frame.frameIndex === undefined &&
+        !indexedSlotTimes.has(frame.mediaTime)
+      ) {
+        mediaTimes.add(frame.mediaTime);
+      }
+    }
+  }
+
+  return [...mediaTimes]
+    .sort((left, right) => left - right)
+    .map((mediaTime) => ({ mediaTime }));
+}
+
+/**
  * How long one grid index stands, read off the slots across the widest index
  * span they cover. A clip whose real rate differs from `frameRate` would end
  * every composed frame a little short or a little long of where the next index
  * is due, and that error accumulates for as long as the clip plays.
  */
-function measureGridStep(gridSlots: readonly GridSlot[]) {
+function measureGridStep(gridSlots: readonly IndexedGridSlot[]) {
   const firstSlot = gridSlots[0];
   const lastSlot = gridSlots[gridSlots.length - 1];
   const indexSpan = lastSlot.frameIndex - firstSlot.frameIndex;
@@ -339,7 +384,7 @@ function measureGridStep(gridSlots: readonly GridSlot[]) {
   return indexSpan > 0 && Number.isFinite(step) && step > 0 ? step : undefined;
 }
 
-function composeFrameAtFrameIndex(
+function composeFrameAtGridSlot(
   sources: readonly GridCompositeSource[],
   slot: GridSlot,
   endTime: number,
@@ -349,13 +394,7 @@ function composeFrameAtFrameIndex(
   const detections: Detection[] = [];
 
   for (const source of sources) {
-    const activeFrame =
-      source.framesByIndex.size > 0
-        ? source.framesByIndex.get(slot.frameIndex)
-        : selectDetectionFrame(source.frames, slot.mediaTime, {
-            ...options,
-            ...source.sync,
-          });
+    const activeFrame = selectGridSlotFrame(source, slot, options);
 
     if (!activeFrame) {
       continue;
@@ -381,6 +420,42 @@ function composeFrameAtFrameIndex(
     // already in the coordinate space the renderer presents.
     ...(coordinateSpace ? { coordinateSpace } : {}),
   };
+}
+
+/**
+ * What one child has to say at a slot.
+ *
+ * A child that wrote this index answers with the frame it wrote for it, however
+ * far its own media time sits from the slot's. A child on the grid that never
+ * wrote this index answers only with a frame of its own that carries no index
+ * and is standing here: its neighbouring indexes describe media the slot is not
+ * on, and lending one of those would put those detections on a frame they were
+ * not computed for.
+ */
+function selectGridSlotFrame(
+  source: GridCompositeSource,
+  slot: GridSlot,
+  options: DetectionFrameSelectionOptions,
+): DetectionFrame | undefined {
+  const pairedFrame =
+    slot.frameIndex === undefined
+      ? undefined
+      : source.framesByIndex.get(slot.frameIndex);
+
+  if (pairedFrame) {
+    return pairedFrame;
+  }
+
+  const selectedFrame = selectDetectionFrame(source.frames, slot.mediaTime, {
+    ...options,
+    ...source.sync,
+  });
+  const isGridChildAtIndexedSlot =
+    source.framesByIndex.size > 0 && slot.frameIndex !== undefined;
+
+  return isGridChildAtIndexedSlot && selectedFrame?.frameIndex !== undefined
+    ? undefined
+    : selectedFrame;
 }
 
 function composeFrameAtTime(
