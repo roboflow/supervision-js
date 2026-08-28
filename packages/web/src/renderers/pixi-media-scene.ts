@@ -46,7 +46,10 @@ import type {
   FramePresentStep,
   FramePresentTargets,
 } from "./pixi-frame-present";
-import type { PresentedVideoFrame } from "./presented-frame-channel";
+import type {
+  PresentedFrameId,
+  PresentedVideoFrame,
+} from "./presented-frame-channel";
 import { createSceneRenderScheduler } from "./scene-render-scheduler";
 import type { SceneRenderSignature } from "./scene-render-scheduler";
 import { createPreparedAnnotationWindow } from "./prepared-annotation-window";
@@ -262,7 +265,6 @@ export async function createPixiMediaScene(
   let currentVisibility: AnnotationVisibility | undefined = options.visibility;
   let currentMediaTime = 0;
   let isPlaybackActive = true;
-  let playbackRate = 1;
   let displayBrightness = 1;
   let displayContrast = 1;
   let viewportScale = 1;
@@ -388,8 +390,8 @@ export async function createPixiMediaScene(
     Texture,
     UniformGroup,
     detectionTimeline: annotationDetectionTimeline,
-    getActiveRegionMaskCoverage: () =>
-      maskLayer?.getActiveRegionMaskCoverage() ?? null,
+    getActiveRegionMaskCoverage: (detectionFrameTime) =>
+      maskLayer?.getActiveRegionMaskCoverage(detectionFrameTime) ?? null,
     // Under GPU compositing the decoded frame lands in a texture the
     // compositor swaps onto the media sprite, leaving the canvas that
     // stagingTexture wraps empty.
@@ -430,7 +432,6 @@ export async function createPixiMediaScene(
   const initialMaskPreparationStyle = resolveMaskPreparationStyle();
   let maskLayer = initialMaskPreparationStyle
     ? createPixiMaskLayer({
-        onHoldExpired: redrawAnnotationsNow,
         BlurFilter,
         BufferImageSource,
         Container,
@@ -1077,11 +1078,6 @@ export async function createPixiMediaScene(
       maskLayer?.setPlaybackActive(active);
     },
 
-    setPlaybackRate(rate) {
-      playbackRate = rate;
-      maskLayer?.setPlaybackRate(rate);
-    },
-
     setTimelineContext(context) {
       timelineContext = context;
       maskLayer?.setTimelineContext(context);
@@ -1458,7 +1454,6 @@ export async function createPixiMediaScene(
     },
 
     setSelectedDetection(selection, mediaTime) {
-      currentMediaTime = selection?.mediaTime ?? mediaTime;
       const pick =
         interactionLayer?.setSelectedDetection(
           selection === null
@@ -1537,6 +1532,7 @@ export async function createPixiMediaScene(
   ): PresentedMediaSample {
     const detectionFrame = boxState.activeDetectionFrame;
     const maskState = maskLayer?.getDrawnState();
+    const drawnMaskFrameTime = maskState?.drawnFrameTime ?? null;
 
     return {
       activeDetectionCount: countPresentedDetections(
@@ -1548,8 +1544,11 @@ export async function createPixiMediaScene(
       activeDetectionFrameIndex: boxState.activeDetectionFrameIndex,
       activeDetectionFrameTime: boxState.activeDetectionFrameTime,
       detectionBuffer: options.detectionTimeline.getState(),
-      drawnMaskFrameTime: maskState?.drawnFrameTime ?? null,
-      maskHeldStale: maskState?.heldStale ?? false,
+      drawnMaskFrameTime,
+      maskHeldStale:
+        drawnMaskFrameTime !== null &&
+        boxState.activeDetectionFrameTime !== null &&
+        drawnMaskFrameTime !== boxState.activeDetectionFrameTime,
       mediaTime,
       presentedFrameSerial,
     };
@@ -1601,7 +1600,6 @@ export async function createPixiMediaScene(
   function ensureMaskLayer(preparationStyle: MaskStyle) {
     if (!maskLayer) {
       maskLayer = createPixiMaskLayer({
-        onHoldExpired: redrawAnnotationsNow,
         BlurFilter,
         BufferImageSource,
         Container,
@@ -1623,7 +1621,6 @@ export async function createPixiMediaScene(
       });
 
       maskLayer.setPlaybackActive(isPlaybackActive);
-      maskLayer.setPlaybackRate(playbackRate);
 
       if (timelineContext) {
         maskLayer.setTimelineContext(timelineContext);
@@ -2082,7 +2079,9 @@ export async function createPixiMediaScene(
       hoveredPick: withEditingPreview(
         filterVisiblePick(interactionState?.hoveredPick ?? null),
       ),
-      idMaskArtifact: maskLayer?.getActiveIdMaskFrameTexture() ?? null,
+      idMaskArtifact:
+        maskLayer?.getActiveIdMaskFrameTexture(frame?.mediaTime ?? null) ??
+        null,
       mediaTime,
       selectedPick: withEditingPreview(
         filterVisiblePick(interactionState?.selectedPick ?? null),
@@ -2102,7 +2101,9 @@ export async function createPixiMediaScene(
     interactionPresentationLayer.drawFrame({
       frame,
       hoveredPick: interactionState?.hoveredPick ?? null,
-      idMaskArtifact: maskLayer?.getActiveIdMaskFrameTexture() ?? null,
+      idMaskArtifact:
+        maskLayer?.getActiveIdMaskFrameTexture(frame?.mediaTime ?? null) ??
+        null,
       mediaTime,
       selectedPick: interactionState?.selectedPick ?? null,
       selectedPicks: interactionState?.selectedPicks,
@@ -2161,13 +2162,16 @@ export async function createPixiMediaScene(
    * Drawing an uncovered frame is drawing nothing, and the cook still has to be
    * pointed at it or the window would never reach it.
    */
-  function drawMaskFrame(mediaTime: number) {
+  function drawMaskFrame(
+    mediaTime: number,
+    presentedFrameId: PresentedFrameId | null,
+  ) {
     if (!maskLayer) {
       return;
     }
 
     if (isFramePrepared(mediaTime)) {
-      maskLayer.drawFrame(mediaTime);
+      maskLayer.drawFrame(mediaTime, presentedFrameId);
       return;
     }
 

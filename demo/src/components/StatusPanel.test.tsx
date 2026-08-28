@@ -141,16 +141,15 @@ describe("StatusPanel", () => {
     const matched = renderPanel({
       rendererState: rendererState({ drawnMaskFrameTime: 0.1333 }),
     });
-    const held = renderPanel({
+    const stale = renderPanel({
       rendererState: rendererState({
         drawnMaskFrameTime: 0.1,
         maskHeldStale: true,
       }),
     });
 
-    expect(String(readout(matched, "Mask Frame").value)).not.toContain("held");
-    // The mask layer holds the previous raster while its cook catches up, and
-    // nothing else on the panel shows the frame it is really showing.
-    expect(String(readout(held, "Mask Frame").value)).toContain("held");
+    expect(String(readout(matched, "Mask Frame").value)).not.toContain("stale");
+    // Nothing else on the panel names the frame the raster really belongs to.
+    expect(String(readout(stale, "Mask Frame").value)).toContain("stale");
   });
 });

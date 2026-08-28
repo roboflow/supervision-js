@@ -1934,7 +1934,7 @@ describe("package entrypoint", () => {
       expect(pixiMock.spriteInstances[0]?.visible).toBe(false);
 
       const selectionCount = detectionTimeline.selectFrame.mock.calls.length;
-      const activeIdMaskFrameTexture = layer.getActiveIdMaskFrameTexture();
+      const activeIdMaskFrameTexture = layer.getActiveIdMaskFrameTexture(0);
 
       expect(activeIdMaskFrameTexture?.frame.key).toBe("time:0");
       expect(detectionTimeline.selectFrame).toHaveBeenCalledTimes(

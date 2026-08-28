@@ -183,9 +183,9 @@ before writing anything if that size disagrees with the `video.width` and
 `video.height` the fixture's `detections.manifest.json` records. Those two
 numbers are what the demo scales boxes, labels, polygons, polylines, and
 keypoints by, so they have to keep naming the media the detections were computed
-against. A proxy that deliberately shrinks the raster is a different thing, and
-[`fixture-delivery-proxies.md`](../../docs/internal/fixture-delivery-proxies.md)
-covers it.
+against. A proxy that deliberately shrinks the raster is a different thing: the
+geometry is projected from that declaration onto whatever is played, which is
+covered in the detections and rendering guide.
 
 New fixtures need none of this: they pair detections with the source's own
 frames and declare no proxy.

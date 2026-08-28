@@ -203,9 +203,9 @@ export interface MediaRendererState {
   readonly activeDetectionCount: number;
   /**
    * Detection frame the mask raster on screen belongs to, null when no mask is
-   * up. A mask renderer may briefly hold the previous frame's raster while its
-   * data catches up, so this and `activeDetectionFrameTime` can name different
-   * frames over one picture.
+   * up. A frame whose raster is not ready yet draws no mask rather than the
+   * previous frame's, so this either names `activeDetectionFrameTime` or names
+   * nothing.
    *
    * Optional so a host holding a state it built before this field existed still
    * satisfies the type.
@@ -217,7 +217,11 @@ export interface MediaRendererState {
    * reports which one a host got.
    */
   readonly playbackGateReach?: PlaybackGateReach;
-  /** Whether that hold is what is on screen right now. */
+  /**
+   * Whether the raster on screen belongs to a frame other than the one the rest
+   * of the annotations were drawn from. Nothing produces this on purpose; a
+   * host that sees it true is looking at a mask over the wrong picture.
+   */
   readonly maskHeldStale?: boolean;
   /**
    * Whether the playhead has been moved to a frame that is not on screen yet.

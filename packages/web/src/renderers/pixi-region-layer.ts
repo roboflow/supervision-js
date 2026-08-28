@@ -145,7 +145,9 @@ export function createPixiRegionLayer(options: {
     >,
   ) => PixiUniformGroup;
   readonly detectionTimeline: BufferedDetectionTimeline;
-  readonly getActiveRegionMaskCoverage: () => PixiActiveRegionMaskCoverage | null;
+  readonly getActiveRegionMaskCoverage: (
+    detectionFrameTime: number | null,
+  ) => PixiActiveRegionMaskCoverage | null;
   readonly getMediaTexture: () => PixiTexture | undefined;
   readonly onInvalidate?: () => void;
   readonly onAssetError?: (options: {
@@ -521,7 +523,9 @@ export function createPixiRegionLayer(options: {
 
     if (renderer.source.coverage.kind === RegionRendererCoverageKind.Mask) {
       removePolygonCoverageMask(entry);
-      const artifact = options.getActiveRegionMaskCoverage();
+      const artifact = options.getActiveRegionMaskCoverage(
+        currentFrame?.mediaTime ?? null,
+      );
 
       if (!detection.mask || !artifact) {
         removeExactCoverageMask(entry);

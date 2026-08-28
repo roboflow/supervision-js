@@ -14,6 +14,7 @@ import type {
   MaskStyle,
   PolygonStyle,
 } from "supervision-js-core";
+import { PreparedMaskFrameKind } from "#render-preparation/mask-frame-artifact";
 import {
   RenderPreparationArtifactFrameStatus,
   RenderPreparationArtifactKind,
@@ -113,7 +114,10 @@ vi.mock("pixi.js", () => {
 
   class Texture {
     static readonly EMPTY = new Texture();
-    constructor(public readonly options: { source?: unknown } = {}) {}
+    readonly source: unknown;
+    constructor(public readonly options: { source?: unknown } = {}) {
+      this.source = options.source;
+    }
     update = vi.fn();
   }
 
@@ -306,8 +310,88 @@ function createRecordingWorkerFactory(cooks: number[][]) {
   };
 }
 
+/**
+ * Cooks a raster for the frames named and leaves every other job in flight, so
+ * a frame can be on screen with its neighbour's cook still owed.
+ */
+function createSelectiveWorkerFactory(cookedKeys: readonly string[]) {
+  return {
+    createWorker() {
+      const listeners = new Set<(event: { data: unknown }) => void>();
+
+      return {
+        addEventListener(type: string, listener: (event: unknown) => void) {
+          if (type === "message") {
+            listeners.add(listener as (event: { data: unknown }) => void);
+          }
+        },
+        postMessage(message: { job: { key: string }; requestId: number }) {
+          if (!cookedKeys.includes(message.job.key)) {
+            return;
+          }
+
+          for (const listener of listeners) {
+            listener({
+              data: {
+                artifactKind: PreparedMaskFrameKind.IdMask,
+                fillPalette: new Float32Array([1, 1, 1, 1]),
+                height: 1,
+                key: message.job.key,
+                raster: new Uint8Array([1]),
+                requestId: message.requestId,
+                strokePalette: new Float32Array([0, 0, 0, 0]),
+                strokeWidths: new Float32Array([0]),
+                type: "complete",
+                width: 1,
+              },
+            });
+          }
+        },
+        removeEventListener(_type: string, listener: (event: unknown) => void) {
+          listeners.delete(listener as (event: { data: unknown }) => void);
+        },
+        terminate: vi.fn(),
+      } as unknown as Worker;
+    },
+  };
+}
+
 /** Cooks to nothing, so a frame is prepared exactly when its cook has run. */
 const emptyMaskStyle: MaskStyle = { resolve: () => undefined };
+/** Cooks to a raster, so a prepared frame has something to put on screen. */
+const paintedMaskStyle: MaskStyle = {
+  resolve: (detection) =>
+    detection.mask
+      ? { alpha: 1, color: 0xffffff, mask: detection.mask }
+      : undefined,
+};
+/** One 30 fps step apart: the smallest move a viewer can make. */
+const adjacentMaskedFrames: readonly DetectionFrame[] = [
+  {
+    detections: [
+      {
+        className: "player",
+        confidence: 0.9,
+        mask: singlePixelMask,
+        rect: makeRect(),
+      },
+    ],
+    frameIndex: 0,
+    mediaTime: 1,
+  },
+  {
+    detections: [
+      {
+        className: "player",
+        confidence: 0.9,
+        mask: singlePixelMask,
+        rect: makeRect(),
+      },
+    ],
+    frameIndex: 1,
+    mediaTime: 1.0333,
+  },
+];
 const emptyPolygonStyle: PolygonStyle = { resolve: () => undefined };
 
 beforeEach(() => {
@@ -377,6 +461,35 @@ describe("the prepared annotation window under push presentation", () => {
     expect(scene.snapshot()?.playheadPrepared).toBe(false);
     expect(boxGraphics().rect.mock.calls.length).toBeGreaterThan(drawnBefore);
     expect(boxGraphics().clear.mock.calls.length).toBeGreaterThan(0);
+  });
+
+  it("puts no mask on a frame whose raster is not cooked, however close the last one is", async () => {
+    const scene = await createScene({
+      detectionFrames: adjacentMaskedFrames,
+      maskStyle: paintedMaskStyle,
+      renderPreparation: {
+        workerFactory: createSelectiveWorkerFactory(["0:1"]),
+      },
+    });
+
+    scene.present(1000);
+    await scene.settleCooks();
+
+    expect(scene.lastPresentation()).toMatchObject({
+      activeDetectionFrameTime: 1,
+      drawnMaskFrameTime: 1,
+      maskHeldStale: false,
+    });
+
+    scene.present(1033);
+
+    // One 30 fps step is inside every tolerance a hold could be written with,
+    // which is what made the raster of the frame before it look close enough.
+    expect(scene.lastPresentation()).toMatchObject({
+      activeDetectionFrameTime: 1.0333,
+      drawnMaskFrameTime: null,
+      maskHeldStale: false,
+    });
   });
 
   it("renders exactly once when the window reaches the frame on screen", async () => {

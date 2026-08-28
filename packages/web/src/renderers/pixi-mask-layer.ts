@@ -5,7 +5,6 @@ import {
 } from "supervision-js-core";
 import {
   createPreparedRenderWindow,
-  PreparedRenderFrameMaskStatus,
   type PreparedMaskFrame,
   type PreparedRenderTimelineContext,
 } from "#render-preparation/prepared-render-window";
@@ -30,6 +29,7 @@ import type {
   RenderPreparationOptions,
   RenderPreparationPlaybackGateOptions,
 } from "#types/render-preparation";
+import type { PresentedFrameId } from "./presented-frame-channel";
 import type { SerializableMaskInstruction } from "#render-preparation/mask-preparation-worker-protocol";
 import { resolveMaskStyleOpacity } from "supervision-js-core";
 import { createPixiIdMaskShaderRenderer } from "./pixi-id-mask-shader";
@@ -51,21 +51,6 @@ import type {
   UniformGroup as PixiUniformGroup,
 } from "pixi.js";
 
-/**
- * How far a held mask may lag the frame it is drawn over, measured on the clock
- * the viewer watches rather than in media time: the same media gap covers eight
- * times the ground at eight times speed, and would be a different promise at
- * every rate.
- */
-const MAX_PENDING_MASK_LAG_SECONDS = 0.05;
-/**
- * Wall-clock ceiling on that hold. The hold exists so a cook that lands within
- * a frame or two replaces the raster before anyone sees a gap, and most land in
- * tens of milliseconds. Past this the picture is no longer catching up, it is
- * showing the wrong frame's mask, and a stopped playhead would show it for as
- * long as the cook takes because nothing else redraws.
- */
-const MAX_PENDING_MASK_HOLD_WALL_MS = 250;
 const TEXTURE_ROW_ALIGNMENT_BYTES = 4;
 
 type ImageSourceConstructor = new (options: {
@@ -133,17 +118,16 @@ type UniformGroupConstructor = new (
 /**
  * What the mask layer has on screen after its last draw.
  *
- * `drawnFrameTime` is the DETECTION frame the visible raster belongs to, which
- * is not always the frame the rest of the present drew: with the cook short of
- * the presented frame, the layer keeps the previous mask up for up to
- * MAX_PENDING_MASK_LAG_SECONDS of playback. `heldStale` is that branch, and
- * it separates a late cook from the layers resolving different frames, which
- * have different fixes.
+ * `drawnFrameTime` is the detection frame the visible raster belongs to, and it
+ * is the frame the rest of the present drew or the layer draws nothing.
+ * `drawnFrameId` names the producer frame that raster was accepted for, and is
+ * null on a draw the producer did not drive: a pull-path sample and a redraw at
+ * a resting playhead both carry a media time and no frame identity.
  */
 export interface PixiMaskLayerState {
   readonly drawnFrameTime: number | null;
   readonly drawnFrameKey: string | null;
-  readonly heldStale: boolean;
+  readonly drawnFrameId: PresentedFrameId | null;
 }
 
 export interface PixiMaskLayer {
@@ -151,7 +135,10 @@ export interface PixiMaskLayer {
     width: number;
     height: number;
   }): PixiContainer | PixiSprite;
-  drawFrame(mediaTime: number): void;
+  drawFrame(
+    mediaTime: number,
+    presentedFrameId?: PresentedFrameId | null,
+  ): void;
   /** The state the last drawFrame or clearFrame left on screen. */
   getDrawnState(): PixiMaskLayerState;
   /** Puts the media time in front of the cook without drawing it. */
@@ -166,12 +153,19 @@ export interface PixiMaskLayer {
     point: DetectionPickPoint,
     mediaTime: number,
   ): DetectionPickResult | null;
-  getActiveIdMaskFrameTexture(): PixiActiveIdMaskFrameTexture | null;
-  getActiveRegionMaskCoverage(): PixiActiveRegionMaskCoverage | null;
+  /**
+   * The raster on screen, for a caller drawing the same detection frame it
+   * belongs to. Both of these are read by layers that pair the raster to
+   * detections by position, so a raster from any other frame pairs one frame's
+   * silhouettes to another frame's detections.
+   */
+  getActiveIdMaskFrameTexture(
+    detectionFrameTime: number | null,
+  ): PixiActiveIdMaskFrameTexture | null;
+  getActiveRegionMaskCoverage(
+    detectionFrameTime: number | null,
+  ): PixiActiveRegionMaskCoverage | null;
   setPlaybackActive(active: boolean): void;
-  /** How fast media time runs against the clock, which sets how much media a
-   *  held mask may lag by. */
-  setPlaybackRate(playbackRate: number): void;
   setTimelineContext(context: PreparedRenderTimelineContext): void;
   setMaskStyle(maskStyle: MaskStyle | null | undefined): void;
   setMaskHaloStyle(maskHaloStyle: MaskHaloStyle | null | undefined): void;
@@ -212,11 +206,6 @@ export interface PixiActiveRegionMaskCoverage {
 
 export function createPixiMaskLayer(options: {
   readonly artifactKind?: RenderPreparationArtifactKind;
-  /** Wall clock for the pending-mask hold, injectable for tests. */
-  readonly now?: () => number;
-  /** Called when a held mask has been up as long as the hold allows, so the
-   *  host can redraw and let the layer drop it. */
-  readonly onHoldExpired?: () => void;
   readonly BufferImageSource?: BufferImageSourceConstructor;
   readonly Container?: ContainerConstructor;
   readonly ImageSource: ImageSourceConstructor;
@@ -267,11 +256,7 @@ export function createPixiMaskLayer(options: {
   let maskOpacity = resolveMaskStyleOpacity(options.maskStyle);
   let isFillVisible = true;
   let visibleMaskMediaTime: number | null = null;
-  let heldStale = false;
-  let heldSinceMs: number | null = null;
-  let playbackRate = 1;
-  let playbackActive = false;
-  let holdExpiryTimer: ReturnType<typeof setTimeout> | null = null;
+  let visibleMaskFrameId: PresentedFrameId | null = null;
   let isDestroyed = false;
   const maskTextures = new Map<string, PixiTexture>();
   const haloTextures = new Map<string, PixiTexture>();
@@ -336,55 +321,26 @@ export function createPixiMaskLayer(options: {
       return maskContainer;
     },
 
-    drawFrame(mediaTime) {
+    drawFrame(mediaTime, presentedFrameId = null) {
       const preparedFrame = preparedRenderWindow.getFrame(mediaTime);
 
-      if (!preparedFrame) {
+      if (!preparedFrame?.maskFrame) {
         hideSprite();
         return;
       }
 
-      if (preparedFrame.maskFrame) {
-        showMaskFrame(
-          preparedFrame.maskFrame,
-          preparedFrame.detectionFrame.mediaTime,
-        );
-        return;
-      }
-
-      if (
-        preparedFrame.maskStatus === PreparedRenderFrameMaskStatus.Empty ||
-        preparedFrame.maskStatus === PreparedRenderFrameMaskStatus.Disabled
-      ) {
-        hideSprite();
-        return;
-      }
-
-      if (!canHoldVisibleMaskFor(preparedFrame.detectionFrame.mediaTime)) {
-        hideSprite();
-        return;
-      }
-
-      if (heldSinceMs === null) {
-        heldSinceMs = now();
-      }
-
-      const heldForMs = now() - heldSinceMs;
-
-      if (heldForMs >= MAX_PENDING_MASK_HOLD_WALL_MS) {
-        hideSprite();
-        return;
-      }
-
-      heldStale = true;
-      scheduleHoldExpiry(MAX_PENDING_MASK_HOLD_WALL_MS - heldForMs);
+      showMaskFrame(
+        preparedFrame.maskFrame,
+        preparedFrame.detectionFrame.mediaTime,
+        presentedFrameId,
+      );
     },
 
     getDrawnState() {
       return {
         drawnFrameTime: visibleMaskMediaTime,
         drawnFrameKey: visibleMaskFrameKey,
-        heldStale,
+        drawnFrameId: visibleMaskFrameId,
       };
     },
 
@@ -437,24 +393,26 @@ export function createPixiMaskLayer(options: {
       );
     },
 
-    getActiveIdMaskFrameTexture() {
-      const texture = activeIdMaskFrame
-        ? getTexture(activeIdMaskFrame)
-        : undefined;
-
-      if (!activeIdMaskFrame || !texture) {
+    getActiveIdMaskFrameTexture(detectionFrameTime) {
+      if (!activeIdMaskFrame || detectionFrameTime !== visibleMaskMediaTime) {
         return null;
       }
 
-      return { frame: activeIdMaskFrame, texture };
+      const texture = getTexture(activeIdMaskFrame);
+
+      return texture ? { frame: activeIdMaskFrame, texture } : null;
     },
 
-    getActiveRegionMaskCoverage() {
+    getActiveRegionMaskCoverage(detectionFrameTime) {
       const coverage =
         activeIdMaskFrame?.regionMaskCoverage ??
         activeRgbaMaskFrame?.regionMaskCoverage;
 
-      if (!coverage || !visibleMaskFrameKey) {
+      if (
+        !coverage ||
+        !visibleMaskFrameKey ||
+        detectionFrameTime !== visibleMaskMediaTime
+      ) {
         return null;
       }
 
@@ -466,12 +424,7 @@ export function createPixiMaskLayer(options: {
       };
     },
 
-    setPlaybackRate(rate) {
-      playbackRate = rate;
-    },
-
     setPlaybackActive(active) {
-      playbackActive = active;
       preparedRenderWindow.setPlaybackActive(active);
     },
 
@@ -512,7 +465,6 @@ export function createPixiMaskLayer(options: {
       }
 
       isDestroyed = true;
-      clearHoldExpiry();
       preparedRenderWindow.destroy();
       destroyTextures();
       idMaskRenderer?.destroy();
@@ -520,12 +472,14 @@ export function createPixiMaskLayer(options: {
     },
   };
 
-  function showMaskFrame(maskFrame: PreparedMaskFrame, mediaTime: number) {
-    clearHoldExpiry();
-    heldSinceMs = null;
+  function showMaskFrame(
+    maskFrame: PreparedMaskFrame,
+    mediaTime: number,
+    presentedFrameId: PresentedFrameId | null,
+  ) {
     visibleMaskMediaTime = mediaTime;
     visibleMaskFrameKey = maskFrame.key;
-    heldStale = false;
+    visibleMaskFrameId = presentedFrameId;
     activeIdMaskFrame =
       maskFrame.kind === PreparedMaskFrameKind.IdMask ? maskFrame : null;
     activeRgbaMaskFrame =
@@ -688,58 +642,18 @@ export function createPixiMaskLayer(options: {
     idMaskRenderer?.hide();
   }
 
-  function now() {
-    return options.now?.() ?? performance.now();
-  }
-
-  function clearHoldExpiry() {
-    if (holdExpiryTimer === null) {
-      return;
-    }
-
-    clearTimeout(holdExpiryTimer);
-    holdExpiryTimer = null;
-  }
-
-  /** A held mask is the only thing on screen that goes stale with nothing left
-   *  to redraw it, so the hold books its own end. */
-  function scheduleHoldExpiry(inMs: number) {
-    if (holdExpiryTimer !== null || !options.onHoldExpired) {
-      return;
-    }
-
-    holdExpiryTimer = setTimeout(() => {
-      holdExpiryTimer = null;
-      options.onHoldExpired?.();
-    }, inMs);
-  }
-
+  /**
+   * Everything the layer hands other layers is a view of the raster on screen,
+   * so a draw that puts none up has to drop them all in the same step.
+   */
   function hideSprite() {
-    clearHoldExpiry();
-    heldSinceMs = null;
     visibleMaskMediaTime = null;
     visibleMaskFrameKey = null;
-    heldStale = false;
+    visibleMaskFrameId = null;
     activeIdMaskFrame = null;
     activeRgbaMaskFrame = null;
     hideFill();
     haloRenderer?.hide();
-  }
-
-  /**
-   * A stopped playhead covers no ground however fast it was going, so the rate
-   * only widens this while media time is actually running. Holding the playing
-   * tolerance into a pause leaves the last mask of a fast run sitting over a
-   * frame it does not belong to, with nothing arriving to replace it.
-   */
-  function canHoldVisibleMaskFor(mediaTime: number) {
-    const lagBudget =
-      MAX_PENDING_MASK_LAG_SECONDS * (playbackActive ? playbackRate : 1);
-
-    return (
-      visibleMaskMediaTime !== null &&
-      Math.abs(mediaTime - visibleMaskMediaTime) <= lagBudget
-    );
   }
 
   function applyMaskOpacity() {

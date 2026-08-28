@@ -132,10 +132,13 @@ toolbar value is a checked presentation mirror.
   relative when that is clearer.
 - `demo/` is a React + Vite consumer demo.
 - A fixture may declare a second encode of its media as `media.proxyFile` and
-  the demo plays that instead of the source. Read
-  [`fixture-delivery-proxies.md`](fixture-delivery-proxies.md) before making one:
-  detections index presented source frames, so a proxy that changes the frame
-  count or the timestamps moves every annotation and nothing detects it.
+  the demo plays that instead of the source. Two things move every annotation if
+  a proxy gets them wrong. Frame count and timestamps must match the source,
+  because detections index presented source frames. And the manifest's
+  `video.width` and `video.height` must keep naming the media the detections were
+  computed against, never the proxy, because vector geometry is absolute media
+  pixels and is projected from that declaration. Loading refuses a fixture whose
+  manifest size disagrees with the media it plays.
 - `benchmark/initial/` is the isolated Milestone 3 dense-shape benchmark.
   Benchmark renderer code belongs there, not in the package entrypoint or the
   normal demo.

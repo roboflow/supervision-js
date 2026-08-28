@@ -1,6 +1,9 @@
 import type { PixiBoxLayerState } from "./pixi-box-layer";
 import type { PixiRegionLayerState } from "./pixi-region-layer";
-import type { PresentedVideoFrame } from "./presented-frame-channel";
+import type {
+  PresentedFrameId,
+  PresentedVideoFrame,
+} from "./presented-frame-channel";
 
 /**
  * The present's timestamp tripwire, armed in every build including production.
@@ -13,12 +16,20 @@ const PRESENT_TIMESTAMP_TRIPWIRE_ENABLED = true;
 type PresentedFrameStamp = Pick<PresentedVideoFrame, "frameId" | "mediaTimeS">;
 
 /**
- * Every drawing step of a present, each taking the media time in seconds and
- * nothing else. A step that reads a time from anywhere but its argument breaks
- * the guarantee this module exists to hold.
+ * Every drawing step of a present, each taking the media time in seconds. A
+ * step that reads a time from anywhere but its argument breaks the guarantee
+ * this module exists to hold.
+ *
+ * The mask step also takes the producer's name for the frame these pixels are,
+ * because it is the one step that keeps a raster between presents and so is the
+ * one step that can put a raster from one frame over the pixels of another. A
+ * walk with no presented frame hands it null: a pull-path sample and a redraw
+ * at a resting playhead both have a media time and no frame identity.
  */
 export interface FramePresentLayers {
-  readonly drawMask: ((mediaTime: number) => void) | undefined;
+  readonly drawMask:
+    | ((mediaTime: number, presentedFrameId: PresentedFrameId | null) => void)
+    | undefined;
   readonly drawBox: (mediaTime: number) => PixiBoxLayerState;
   readonly drawPolygon: ((mediaTime: number) => void) | undefined;
   readonly drawVector: (mediaTime: number) => void;
@@ -100,7 +111,7 @@ export function drawFramePresentLayers(
   mediaTime: number,
   presented?: PresentedFrameStamp,
 ): FramePresentLayerStates {
-  maybeAt(layers.drawMask, mediaTime, presented);
+  maskAt(layers.drawMask, mediaTime, presented);
   const boxState = at(layers.drawBox, mediaTime, presented);
   maybeAt(layers.drawPolygon, mediaTime, presented);
   at(layers.drawVector, mediaTime, presented);
@@ -133,6 +144,11 @@ export function measureFramePresentLayers(
     step: FramePresentStep,
     draw: ((mediaTime: number) => void) | undefined,
   ) => (draw ? timed(step, draw) : undefined);
+  const timedMask = (draw: FramePresentLayers["drawMask"]) =>
+    draw
+      ? (mediaTime: number, presentedFrameId: PresentedFrameId | null) =>
+          measureStep("drawMask", () => draw(mediaTime, presentedFrameId))
+      : undefined;
 
   return {
     advanceFocus: timed("advanceFocus", layers.advanceFocus),
@@ -148,7 +164,7 @@ export function measureFramePresentLayers(
       layers.drawInteractionPresentation,
     ),
     drawLabel: maybeTimed("drawLabel", layers.drawLabel),
-    drawMask: maybeTimed("drawMask", layers.drawMask),
+    drawMask: timedMask(layers.drawMask),
     drawPolygon: maybeTimed("drawPolygon", layers.drawPolygon),
     drawRegion: timed("drawRegion", layers.drawRegion),
     drawVector: timed("drawVector", layers.drawVector),
@@ -183,6 +199,19 @@ function at<T>(
 ): T {
   if (presented) assertPresentedTimestamp(mediaTime, presented);
   return step(mediaTime);
+}
+
+function maskAt(
+  step: FramePresentLayers["drawMask"],
+  mediaTime: number,
+  presented: PresentedFrameStamp | undefined,
+): void {
+  if (!step) {
+    return;
+  }
+
+  if (presented) assertPresentedTimestamp(mediaTime, presented);
+  step(mediaTime, presented?.frameId ?? null);
 }
 
 function maybeAt(

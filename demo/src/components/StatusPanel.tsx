@@ -533,9 +533,9 @@ function formatInferenceSummary(fixtureSummary: DemoFixtureSummary | null) {
 
 /**
  * Which detection frame the mask raster on screen belongs to, against the frame
- * the boxes over it were drawn from. The mask layer holds the previous raster
- * for a moment while its cook catches up, so the two naming different frames is
- * the desync, stated in seconds.
+ * the boxes over it were drawn from. A frame whose raster is not ready draws no
+ * mask, so the two naming different frames is a mask over the wrong picture,
+ * stated in seconds.
  */
 function formatMaskFrame(rendererState: MediaRendererState | null) {
   if (!rendererState) {
@@ -562,7 +562,7 @@ function formatMaskFrame(rendererState: MediaRendererState | null) {
           (detectionFrameTime - drawnMaskFrameTime) * 1000,
         )} behind`;
 
-  return `${drawn} | held${behind}`;
+  return `${drawn} | stale${behind}`;
 }
 
 function formatAudioSummary(sourceState: MediaSourceState | null) {

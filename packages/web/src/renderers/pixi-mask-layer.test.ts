@@ -86,11 +86,13 @@ describe("pixi mask layer", () => {
     preparedWindow.options?.onPreparedWindowChange?.();
 
     expect(onPreparedWindowChange).toHaveBeenCalledOnce();
-    expect(layer.getActiveIdMaskFrameTexture()).toBeNull();
+    expect(layer.getActiveIdMaskFrameTexture(0.1)).toBeNull();
 
     layer.drawFrame(0.1);
 
-    expect(layer.getActiveIdMaskFrameTexture()?.frame.key).toBe("mask-frame");
+    expect(layer.getActiveIdMaskFrameTexture(0.1)?.frame.key).toBe(
+      "mask-frame",
+    );
   });
 
   it("takes a shown frame off screen when asked to clear", () => {
@@ -117,10 +119,10 @@ describe("pixi mask layer", () => {
     layer.clearFrame();
 
     expect(sprite.visible).toBe(false);
-    expect(layer.getActiveIdMaskFrameTexture()).toBeNull();
+    expect(layer.getActiveIdMaskFrameTexture(0.1)).toBeNull();
   });
 
-  it("holds the whole of a cooked frame over a step that owes its cook", () => {
+  it("takes the mask off screen the moment the frame drawn owes its cook", () => {
     const layer = createPixiMaskLayer({
       BufferImageSource: FakeBufferImageSource as never,
       ImageSource: FakeImageSource as never,
@@ -139,6 +141,7 @@ describe("pixi mask layer", () => {
     };
     layer.drawFrame(0.1);
 
+    // One 30 fps step, which is the smallest move there is.
     preparedWindow.frame = {
       detectionFrame: { detections: [], mediaTime: 0.1333 },
       key: "owed-frame",
@@ -146,26 +149,13 @@ describe("pixi mask layer", () => {
     };
     layer.drawFrame(0.1333);
 
-    // One 30 fps step lands inside the hold; the jump below is past it.
-    expect(sprite.visible).toBe(true);
-    expect(layer.getActiveIdMaskFrameTexture()?.frame.key).toBe("mask-frame");
-
-    preparedWindow.frame = {
-      ...preparedWindow.frame,
-      detectionFrame: { detections: [], mediaTime: 0.3 },
-    };
-    layer.drawFrame(0.3);
-
     expect(sprite.visible).toBe(false);
-    expect(layer.getActiveIdMaskFrameTexture()).toBeNull();
+    expect(layer.getActiveIdMaskFrameTexture(0.1)).toBeNull();
+    expect(layer.getActiveIdMaskFrameTexture(0.1333)).toBeNull();
   });
 
-  it("holds a mask across the step the playhead takes at the rate it plays", () => {
-    const holdsAcross = (
-      playbackRate: number,
-      mediaTime: number,
-      playing = true,
-    ) => {
+  it("draws no mask for a frame that owes its cook however fast it was going", () => {
+    const drawsOwedFrame = (mediaTime: number, playing: boolean) => {
       const layer = createPixiMaskLayer({
         BufferImageSource: FakeBufferImageSource as never,
         ImageSource: FakeImageSource as never,
@@ -179,7 +169,6 @@ describe("pixi mask layer", () => {
         width: 120,
       }) as FakeSprite;
 
-      layer.setPlaybackRate(playbackRate);
       layer.setPlaybackActive(playing);
       preparedWindow.frame = {
         detectionFrame: { detections: [], mediaTime: 0.1 },
@@ -199,19 +188,17 @@ describe("pixi mask layer", () => {
       return sprite.visible;
     };
 
-    // Two 30 fps steps: what eight-times playback puts between painted frames,
-    // and further than one-times playback ever travels between them.
-    expect(holdsAcross(1, 0.1667)).toBe(false);
-    expect(holdsAcross(8, 0.1667)).toBe(true);
-    expect(holdsAcross(8, 0.6)).toBe(false);
-
-    // A stopped playhead covers no ground, so the rate stops widening the hold.
-    // Otherwise pausing a fast run leaves its last mask over a frame it does not
-    // belong to, and nothing arrives to replace it.
-    expect(holdsAcross(8, 0.1667, false)).toBe(false);
+    // One 30 fps step, and the eight of them eight-times playback covers in the
+    // same wall time. Accepting a mask by how far the playhead travelled is what
+    // left the last mask of a fast run sitting over a paused frame, so no
+    // distance and no playback state buys a frame anything here.
+    for (const mediaTime of [0.1333, 0.3667]) {
+      expect(drawsOwedFrame(mediaTime, true)).toBe(false);
+      expect(drawsOwedFrame(mediaTime, false)).toBe(false);
+    }
   });
 
-  it("says which frame it is holding, and stops saying so once it lets go", () => {
+  it("names the producer frame the raster on screen was accepted for", () => {
     const layer = createPixiMaskLayer({
       BufferImageSource: FakeBufferImageSource as never,
       ImageSource: FakeImageSource as never,
@@ -228,12 +215,23 @@ describe("pixi mask layer", () => {
       maskFrame: idMaskFrame(),
       maskStatus: "prepared",
     };
+    layer.drawFrame(0.1, { index: 3, ticks: 3003 });
+
+    expect(layer.getDrawnState()).toEqual({
+      drawnFrameId: { index: 3, ticks: 3003 },
+      drawnFrameKey: "mask-frame",
+      drawnFrameTime: 0.1,
+    });
+
+    // A redraw at a resting playhead draws the same frame and knows only its
+    // time, so the raster stops naming a producer frame rather than naming the
+    // wrong one.
     layer.drawFrame(0.1);
 
     expect(layer.getDrawnState()).toEqual({
+      drawnFrameId: null,
       drawnFrameKey: "mask-frame",
       drawnFrameTime: 0.1,
-      heldStale: false,
     });
 
     preparedWindow.frame = {
@@ -241,32 +239,16 @@ describe("pixi mask layer", () => {
       key: "owed-frame",
       maskStatus: "pending",
     };
-    layer.drawFrame(0.1333);
-
-    // The raster on screen is a frame older than the one the rest of the
-    // present drew, which is the whole reason the hold is worth naming.
-    expect(layer.getDrawnState()).toEqual({
-      drawnFrameKey: "mask-frame",
-      drawnFrameTime: 0.1,
-      heldStale: true,
-    });
-
-    preparedWindow.frame = {
-      ...preparedWindow.frame,
-      detectionFrame: { detections: [], mediaTime: 0.3 },
-    };
-    layer.drawFrame(0.3);
+    layer.drawFrame(0.1333, { index: 4, ticks: 4004 });
 
     expect(layer.getDrawnState()).toEqual({
+      drawnFrameId: null,
       drawnFrameKey: null,
       drawnFrameTime: null,
-      heldStale: false,
     });
   });
 
-  it("lets go of a held frame once it has been up longer than the hold allows", () => {
-    let clockMs = 0;
-    const holdExpired = vi.fn();
+  it("refuses the raster to a layer drawing a different detection frame", () => {
     const layer = createPixiMaskLayer({
       BufferImageSource: FakeBufferImageSource as never,
       ImageSource: FakeImageSource as never,
@@ -274,43 +256,33 @@ describe("pixi mask layer", () => {
       Texture: FakeTexture as never,
       detectionTimeline: {} as never,
       maskStyle: new BaseMaskStyle(),
-      now: () => clockMs,
-      onHoldExpired: holdExpired,
     });
+    const coverage = regionMaskCoverage();
 
     layer.createSprite({ height: 80, width: 120 });
     preparedWindow.frame = {
       detectionFrame: { detections: [], mediaTime: 0.1 },
       key: "mask-frame",
-      maskFrame: idMaskFrame(),
+      maskFrame: { ...idMaskFrame(), regionMaskCoverage: coverage },
       maskStatus: "prepared",
     };
     layer.drawFrame(0.1);
 
-    preparedWindow.frame = {
-      detectionFrame: { detections: [], mediaTime: 0.1333 },
-      key: "owed-frame",
-      maskStatus: "pending",
-    };
-    layer.drawFrame(0.1333);
+    expect(layer.getActiveIdMaskFrameTexture(0.1)?.frame.key).toBe(
+      "mask-frame",
+    );
+    expect(layer.getActiveRegionMaskCoverage(0.1)?.frame).toBe(coverage);
 
-    expect(layer.getDrawnState().heldStale).toBe(true);
-
-    // A stopped playhead redraws nothing on its own, so the hold books the
-    // redraw that ends it.
-    expect(holdExpired).toHaveBeenCalledTimes(0);
-
-    clockMs = 400;
-    layer.drawFrame(0.1333);
-
-    expect(layer.getDrawnState()).toEqual({
-      drawnFrameKey: null,
-      drawnFrameTime: null,
-      heldStale: false,
-    });
+    // The focus, interaction and region layers all pair this raster to
+    // detections by position, so one drawn for another frame pairs one frame's
+    // silhouettes to another frame's detections.
+    expect(layer.getActiveIdMaskFrameTexture(0.1333)).toBeNull();
+    expect(layer.getActiveRegionMaskCoverage(0.1333)).toBeNull();
+    expect(layer.getActiveIdMaskFrameTexture(null)).toBeNull();
+    expect(layer.getActiveRegionMaskCoverage(null)).toBeNull();
   });
 
-  it("keeps the held frame's region coverage while its successor cooks", () => {
+  it("drops the region coverage with the raster it belongs to", () => {
     const layer = createPixiMaskLayer({
       BufferImageSource: FakeBufferImageSource as never,
       ImageSource: FakeImageSource as never,
@@ -337,7 +309,8 @@ describe("pixi mask layer", () => {
     };
     layer.drawFrame(0.1333);
 
-    expect(layer.getActiveRegionMaskCoverage()?.frame).toBe(coverage);
+    expect(layer.getActiveRegionMaskCoverage(0.1)).toBeNull();
+    expect(layer.getActiveRegionMaskCoverage(0.1333)).toBeNull();
   });
 
   it("leaves the frame on screen whole while a later frame is prefetched", () => {
@@ -368,11 +341,13 @@ describe("pixi mask layer", () => {
     layer.prepareFrame(0.5);
 
     expect(sprite.visible).toBe(true);
-    expect(layer.getActiveIdMaskFrameTexture()?.frame.key).toBe("mask-frame");
-    expect(layer.getActiveRegionMaskCoverage()?.frame).toBe(coverage);
+    expect(layer.getActiveIdMaskFrameTexture(0.1)?.frame.key).toBe(
+      "mask-frame",
+    );
+    expect(layer.getActiveRegionMaskCoverage(0.1)?.frame).toBe(coverage);
   });
 
-  it("takes a held frame off screen when its cook is evicted", () => {
+  it("takes the frame on screen off it when its cook is evicted", () => {
     const layer = createPixiMaskLayer({
       BufferImageSource: FakeBufferImageSource as never,
       ImageSource: FakeImageSource as never,
@@ -391,16 +366,12 @@ describe("pixi mask layer", () => {
     };
     layer.drawFrame(0.1);
 
-    preparedWindow.frame = {
-      detectionFrame: { detections: [], mediaTime: 0.1333 },
-      key: "owed-frame",
-      maskStatus: "pending",
-    };
-    layer.drawFrame(0.1333);
+    expect(sprite.visible).toBe(true);
+
     preparedWindow.options?.onMaskFrameEvicted?.("mask-frame");
 
     expect(sprite.visible).toBe(false);
-    expect(layer.getActiveIdMaskFrameTexture()).toBeNull();
+    expect(layer.getActiveIdMaskFrameTexture(0.1)).toBeNull();
   });
 
   it("uploads an odd-width id raster one byte per pixel on a renderer that takes it", () => {
@@ -809,7 +780,8 @@ function uploadIdMask(
   };
   layer.drawFrame(0.1);
 
-  const texture = layer.getActiveIdMaskFrameTexture()?.texture as unknown as {
+  const texture = layer.getActiveIdMaskFrameTexture(0.1)
+    ?.texture as unknown as {
     source: FakeBufferImageSource;
   };
 

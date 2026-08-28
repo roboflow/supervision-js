@@ -108,7 +108,6 @@ export async function createMediaRendererCore(
   };
   const adoptPlaybackRate = (playbackRate: number) => {
     runtimeState.setPlaybackRate(playbackRate);
-    mediaScene?.setPlaybackRate?.(playbackRate);
   };
   let presentsOwnFrames = false;
   const runtimeState = createMediaRendererRuntimeState({
@@ -726,7 +725,6 @@ export async function createMediaRendererCore(
       visibility: currentPresentation.visibility,
     });
     publishPlaybackActivity();
-    mediaScene.setPlaybackRate?.(runtimeState.snapshot().playbackRate);
     runtimeState.setRendererBackend(mediaScene.rendererBackend);
     detectionTimeline.setTimelineContext?.({
       duration: metadata.duration,
@@ -841,6 +839,11 @@ export async function createMediaRendererCore(
         runtimeState.errorMessage() ?? "Media renderer is in error state.",
       );
     }
+
+    // A step lands on a frame, so it closes any drag still open the way a
+    // commit does. Left open, the playhead reads as moving while it rests.
+    endSeekGesture();
+
     if (transport) {
       await transport.step(direction === "forward" ? 1 : -1);
       return;

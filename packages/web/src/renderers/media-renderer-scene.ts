@@ -105,8 +105,8 @@ export interface PresentedMediaSample {
   /** Detection frame the mask raster on screen belongs to, null when no mask is
    *  up. Apart from `activeDetectionFrameTime` it names a desync in seconds. */
   readonly drawnMaskFrameTime: number | null;
-  /** The mask layer is holding the previous frame's raster while its cook
-   *  catches up, which is what put the two frames apart. */
+  /** The raster on screen and the detections over it name different frames,
+   *  which nothing produces on purpose. */
   readonly maskHeldStale: boolean;
   readonly detectionBuffer: DetectionBufferState;
   readonly renderTimings?: MediaFrameRenderTimings;
@@ -131,12 +131,6 @@ export interface MediaRendererScene {
    * again.
    */
   setPlaybackActive?(active: boolean): void;
-  /**
-   * How fast media time runs against the clock. Tolerances a layer holds in
-   * media seconds cover a distance that grows with the rate, so a layer that
-   * means "about a frame" has to know it.
-   */
-  setPlaybackRate?(playbackRate: number): void;
   setTimelineContext?(context: MediaRendererSceneTimelineContext): void;
   presentSample(sample: DecodedVideoSample): PresentedMediaSample;
   /**
