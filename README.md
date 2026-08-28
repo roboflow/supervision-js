@@ -110,6 +110,11 @@ Start with [Application Integration](docs/public/guides/application-integration.
 [Media Sessions](docs/public/guides/media-sessions.md), and the
 [Public API guide](docs/public/guides/public-api.md).
 
+For what this release adds, read
+[Release Notes](docs/public/release-notes.md). For what it removes and what it
+now does differently, read
+[Breaking Changes](docs/public/breaking-changes.md).
+
 ## Current API Status
 
 **Supported browser APIs** include `createMediaSession`, media preparation and
