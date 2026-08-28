@@ -2,7 +2,7 @@ import type {
   FrameQuality,
   PresentedFrame,
   PresentedFrameHandler,
-} from "supervision-js-web-video-engine";
+} from "supervision/web-video-engine";
 import type {
   DecodedMediaSource,
   MediaRendererSource,

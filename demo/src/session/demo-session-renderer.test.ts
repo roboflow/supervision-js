@@ -52,4 +52,13 @@ describe("createDemoRendererOptions", () => {
 
     expect(rendererOptions().diagnostics?.frameTimings).toBe(false);
   });
+
+  /* Auto takes a worker wherever workers exist, so pinning one asked for the
+   * same thing the library would have picked and read as a departure that was
+   * never a choice. */
+  it("leaves the library to place the mask work", () => {
+    useStorage({});
+
+    expect(rendererOptions().renderPreparation?.mode).toBeUndefined();
+  });
 });

@@ -36,10 +36,31 @@
       "types": "./dist/editing.d.ts",
       "import": "./dist/editing.js"
     },
+    "./web-video-engine": {
+      "types": "./dist/web-video-engine/index.d.ts",
+      "import": "./dist/web-video-engine/index.js",
+      "default": "./dist/web-video-engine/index.js"
+    },
+    "./web-video-engine/analysis": {
+      "types": "./dist/web-video-engine/analysis.d.ts",
+      "import": "./dist/web-video-engine/analysis.js",
+      "default": "./dist/web-video-engine/analysis.js"
+    },
+    "./web-video-engine/worker": "./dist/web-video-engine/engine.worker.js",
     "./render-preparation-worker": "./dist/mask-preparation.worker.js",
     "./detection-post-processing-worker": "./dist/tracking.worker.js"
   },
   "imports": {
+    "#web-video-engine": {
+      "types": "./dist/web-video-engine/engine.d.ts",
+      "import": "./dist/web-video-engine/engine.js",
+      "default": "./dist/web-video-engine/engine.js"
+    },
+    "#web-video-engine/analysis": {
+      "types": "./dist/web-video-engine/analysis.d.ts",
+      "import": "./dist/web-video-engine/analysis.js",
+      "default": "./dist/web-video-engine/analysis.js"
+    },
     "#editing/*": {
       "types": "./dist/editing/*.d.ts",
       "import": "./dist/editing/*.js"
@@ -102,12 +123,7 @@
     "pixi.js": "^8.19.0",
     "supervision-js-core": "file:../core"
   },
-  "peerDependencies": {
-    "supervision-js-web-video-engine": "^0.1.0-next.0"
-  },
-  "peerDependenciesMeta": {
-    "supervision-js-web-video-engine": {
-      "optional": true
-    }
+  "devDependencies": {
+    "supervision-js-web-video-engine": "file:../video-engine"
   }
 }

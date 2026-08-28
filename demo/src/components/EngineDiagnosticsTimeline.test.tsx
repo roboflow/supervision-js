@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type {
   DiagnosticsSnapshot,
   PresentationMode,
-} from "supervision-js-web-video-engine";
+} from "supervision/web-video-engine";
 import { describe, expect, it } from "vitest";
 
 import {

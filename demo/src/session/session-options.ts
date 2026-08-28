@@ -16,7 +16,7 @@ import {
 import type {
   SourceResidencyConfig,
   VideoEngineOptions,
-} from "supervision-js-web-video-engine";
+} from "supervision/web-video-engine";
 
 import { DEMO_SOURCE_RESIDENCY_BUDGET_MB } from "./source-residency";
 
@@ -118,16 +118,11 @@ export interface DemoSessionOptions {
 export const emptyDemoSessionOptions: DemoSessionOptions = {};
 
 /**
- * The workbench scrubs backwards as often as forwards, and the library's file
- * default buffers twenty times more ahead of the playhead than behind it. That
- * suits a player. Measured on the horse trail at 2x, a backward drag left the
- * buffered range on 6% of presented frames and flipped the masks on and off
- * twelve times a second; forward dropped nothing. Matching the two directions
- * removes about 40% of that, and measured no cost in presented frame rate.
+ * What the workbench asks for when it opens a clip, over what the library picks
+ * for itself. Nothing: a visitor arriving from the docs should meet the session
+ * the docs describe, so anything put here has to be worth the difference.
  */
-export const scrubbableDemoSessionOptions: DemoSessionOptions = {
-  bufferBehindSeconds: 10,
-};
+export const scrubbableDemoSessionOptions: DemoSessionOptions = {};
 
 /**
  * What the open session actually runs on: the library's own resolution of the

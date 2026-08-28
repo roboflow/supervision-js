@@ -17,7 +17,7 @@ import {
   type MediaSourceState,
   type RenderPreparationDiagnostics,
 } from "supervision";
-import type { FrameTimelineData } from "supervision-js-web-video-engine";
+import type { FrameTimelineData } from "supervision/web-video-engine";
 import {
   createEngineDiagnosticsTap,
   type EngineDiagnosticsTap,
@@ -77,10 +77,10 @@ import {
   type UploadRunRequest,
 } from "../session/upload-session";
 import {
-  scrubbableDemoSessionOptions,
   type DemoSessionConfiguration,
   type DemoSessionOptions,
 } from "../session/session-options";
+import { demoInitialSessionOptions } from "../session/workbench-defaults";
 
 export { DemoSourceMode };
 export type { DemoDetectionSourceState, DemoMediaState, UploadInferenceState };
@@ -320,7 +320,7 @@ export function useDemoRenderer(
     (UploadRunRequest & { readonly id: number }) | null
   >(null);
   const [sessionOptions, setSessionOptionsState] = useState<DemoSessionOptions>(
-    scrubbableDemoSessionOptions,
+    demoInitialSessionOptions,
   );
   const [sessionConfiguration, setSessionConfiguration] =
     useState<DemoSessionConfiguration | null>(null);

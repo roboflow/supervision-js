@@ -5,7 +5,7 @@ import {
   useRef,
   type CSSProperties,
 } from "react";
-import type { DiagnosticsSnapshot } from "supervision-js-web-video-engine";
+import type { DiagnosticsSnapshot } from "supervision/web-video-engine";
 
 import { useLiveReadoutWriter } from "../hooks/live-readouts";
 
@@ -225,7 +225,7 @@ const TimelineChart = memo(function TimelineChart({
 
   return (
     <svg
-      aria-label="Video engine cache, prefetch and GOP heat timeline"
+      aria-label="Web video engine cache, prefetch and GOP heat timeline"
       className="engine-timeline__svg"
       preserveAspectRatio="none"
       role="img"

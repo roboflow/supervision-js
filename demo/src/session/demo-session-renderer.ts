@@ -1,7 +1,6 @@
 import {
   MediaInteractionMode,
   MediaRendererFit,
-  RenderPreparationMode,
   type MediaSessionRendererOptions,
 } from "supervision";
 
@@ -53,7 +52,6 @@ export function createDemoRendererOptions(
         options.container,
         options.renderQuality,
       ),
-      mode: RenderPreparationMode.Worker,
       onDiagnostics: options.onRenderPreparationDiagnostics,
     },
     onSource: options.onSourceState,

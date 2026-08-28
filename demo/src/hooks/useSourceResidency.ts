@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { SourceResidencyDiagnostics } from "supervision-js-web-video-engine";
+import type { SourceResidencyDiagnostics } from "supervision/web-video-engine";
 
 import type { EngineDiagnosticsTap } from "../diagnostics/engine-diagnostics-tap";
 

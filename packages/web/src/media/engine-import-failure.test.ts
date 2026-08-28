@@ -4,7 +4,7 @@ import {
   isEngineResolutionFailure,
   rethrowEngineImportFailure,
   VIDEO_ENGINE_ANALYSIS_ENTRY,
-  VIDEO_ENGINE_PACKAGE,
+  VIDEO_ENGINE_ENTRY,
 } from "./engine-import-failure";
 
 function nodeNotFound(specifier: string): Error {
@@ -16,14 +16,14 @@ function nodeNotFound(specifier: string): Error {
 }
 
 describe("engine import failure", () => {
-  it("names the install command when the engine is not installed", () => {
+  it("says the engine ships with supervision when its chunk does not load", () => {
     expect(() =>
       rethrowEngineImportFailure(
-        nodeNotFound(VIDEO_ENGINE_PACKAGE),
-        VIDEO_ENGINE_PACKAGE,
+        nodeNotFound(VIDEO_ENGINE_ENTRY),
+        VIDEO_ENGINE_ENTRY,
       ),
     ).toThrow(
-      /openVideoEngineMediaSource needs "supervision-js-web-video-engine".*npm install supervision-js-web-video-engine/s,
+      /openVideoEngineMediaSource needs "supervision\/web-video-engine".*lazily loaded chunk of supervision/s,
     );
   });
 
@@ -33,14 +33,14 @@ describe("engine import failure", () => {
         nodeNotFound(VIDEO_ENGINE_ANALYSIS_ENTRY),
         VIDEO_ENGINE_ANALYSIS_ENTRY,
       ),
-    ).toThrow(/needs "supervision-js-web-video-engine\/analysis"/);
+    ).toThrow(/needs "supervision\/web-video-engine\/analysis"/);
   });
 
   it("keeps the original failure as the cause", () => {
-    const original = nodeNotFound(VIDEO_ENGINE_PACKAGE);
+    const original = nodeNotFound(VIDEO_ENGINE_ENTRY);
 
     try {
-      rethrowEngineImportFailure(original, VIDEO_ENGINE_PACKAGE);
+      rethrowEngineImportFailure(original, VIDEO_ENGINE_ENTRY);
       expect.unreachable();
     } catch (error) {
       expect((error as Error).cause).toBe(original);
@@ -51,44 +51,44 @@ describe("engine import failure", () => {
     const thrown = new Error("WebCodecs is unavailable in this browser.");
 
     expect(() =>
-      rethrowEngineImportFailure(thrown, VIDEO_ENGINE_PACKAGE),
+      rethrowEngineImportFailure(thrown, VIDEO_ENGINE_ENTRY),
     ).toThrow(thrown);
   });
 
   it("blames the package the loader actually failed to find", () => {
-    // The engine is installed; something it depends on is not. The engine's
-    // name is in the importer path, so only the quoted specifier settles it.
+    // The engine loaded; something it depends on is missing. The engine's name
+    // is in the importer path, so only the quoted specifier settles it.
     expect(isEngineResolutionFailure(nodeNotFound("mediabunny"))).toBe(false);
   });
 
-  it("reads the stub a bundler builds in place of an optional peer", () => {
+  it("reads the stub a bundler builds in place of a missing chunk", () => {
     expect(() =>
       rethrowEngineImportFailure(
         new Error(
-          'Could not resolve "supervision-js-web-video-engine" imported by ' +
+          'Could not resolve "supervision/web-video-engine" imported by ' +
             '"supervision". Is it installed?',
         ),
-        VIDEO_ENGINE_PACKAGE,
+        VIDEO_ENGINE_ENTRY,
       ),
-    ).toThrow(/npm install supervision-js-web-video-engine/);
+    ).toThrow(/lazily loaded chunk of supervision/);
   });
 
   it("blames a dependency the engine itself could not resolve", () => {
     const thrown = new Error(
       'Could not resolve "mediabunny" imported by ' +
-        '"supervision-js-web-video-engine". Is it installed?',
+        '"supervision/web-video-engine". Is it installed?',
     );
 
     expect(() =>
-      rethrowEngineImportFailure(thrown, VIDEO_ENGINE_PACKAGE),
+      rethrowEngineImportFailure(thrown, VIDEO_ENGINE_ENTRY),
     ).toThrow(thrown);
   });
 
-  it("reads a browser failure, which quotes no specifier", () => {
+  it("reads a browser failure, which names a hashed chunk and no specifier", () => {
     expect(
       isEngineResolutionFailure(
         new Error(
-          "Failed to fetch dynamically imported module: https://cdn.example.com/supervision-js-web-video-engine/dist/index.js",
+          "Failed to fetch dynamically imported module: https://cdn.example.com/assets/web-video-engine-B7xK2p1a.js",
         ),
       ),
     ).toBe(true);
@@ -96,14 +96,16 @@ describe("engine import failure", () => {
 
   it("reads a failure a loader wrapped in its own error", () => {
     const wrapped = new Error("Module load failed", {
-      cause: nodeNotFound(VIDEO_ENGINE_PACKAGE),
+      cause: nodeNotFound(VIDEO_ENGINE_ENTRY),
     });
 
     expect(isEngineResolutionFailure(wrapped)).toBe(true);
   });
 
   it("stops walking a cause chain that points at itself", () => {
-    const looping = new Error("Cannot find module 'supervision-js-video-engin");
+    const looping = new Error(
+      "Cannot find module 'supervision/web-video-engin",
+    );
     Object.defineProperty(looping, "cause", { get: () => looping });
 
     expect(isEngineResolutionFailure(looping)).toBe(false);

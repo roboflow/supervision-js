@@ -36,3 +36,12 @@ export const DEMO_EVAL_HOOKS: readonly string[] = Object.values(DemoEvalHook);
 export function fixtureEvalHook(sampleName: string): string {
   return `fixture:${sampleName}`;
 }
+
+/**
+ * The inspector column shows one tab at a time, so a control in another tab is
+ * not in the DOM at all. The harness picks the tab that owns the control it is
+ * about to drive.
+ */
+export function inspectorTabEvalHook(tab: string): string {
+  return `inspector-tab:${tab}`;
+}

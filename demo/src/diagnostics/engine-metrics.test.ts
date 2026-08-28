@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { DiagnosticsSnapshot } from "supervision-js-web-video-engine";
+import type { DiagnosticsSnapshot } from "supervision/web-video-engine";
 
 import { engineMetricGroups, type MetricDescriptor } from "./engine-metrics";
 

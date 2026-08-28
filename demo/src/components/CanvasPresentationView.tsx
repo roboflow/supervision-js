@@ -5,7 +5,7 @@ import {
   VideoEngine,
   type DiagnosticsSnapshot,
   type EngineReadySnapshot,
-} from "supervision-js-web-video-engine";
+} from "supervision/web-video-engine";
 
 import {
   defaultDemoFixture,
@@ -120,7 +120,7 @@ export function CanvasPresentationView() {
       <header className="canvas-presentation__header">
         <div>
           <span className="canvas-presentation__eyebrow">
-            supervision-js / video engine
+            supervision-js / web video engine
           </span>
           <strong>Canvas presentation</strong>
         </div>

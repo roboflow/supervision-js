@@ -13,14 +13,28 @@ export default defineConfig({
   resolve: {
     alias: [
       {
-        find: /^supervision-js-video-engine$/,
+        find: /^#web-video-engine$/,
         replacement: path.resolve(
           rootDir,
           "packages/video-engine/src/index.ts",
         ),
       },
       {
-        find: /^supervision-js-video-engine\/analysis$/,
+        find: /^#web-video-engine\/analysis$/,
+        replacement: path.resolve(
+          rootDir,
+          "packages/video-engine/src/analysis.ts",
+        ),
+      },
+      {
+        find: /^supervision\/web-video-engine$/,
+        replacement: path.resolve(
+          rootDir,
+          "packages/web/src/web-video-engine/index.ts",
+        ),
+      },
+      {
+        find: /^supervision\/web-video-engine\/analysis$/,
         replacement: path.resolve(
           rootDir,
           "packages/video-engine/src/analysis.ts",

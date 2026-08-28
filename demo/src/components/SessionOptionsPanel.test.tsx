@@ -19,7 +19,6 @@ import {
   resolveDemoSessionConfiguration,
 } from "../session/session-options";
 
-const NO_CHOICE_ON_AN_UPLOAD = "An upload always opens on the video engine.";
 const NO_CONVERSION_ON_AN_UPLOAD = "An upload cannot be converted first.";
 const NO_CONVERSION_ON_THE_ENGINE =
   "Switch the media path to Mediabunny to convert.";
@@ -66,12 +65,38 @@ const uploadConfiguration = resolveDemoSessionConfiguration({
   engine: {},
   engineSource: DemoEngineSource.Blob,
   mediaPath: DemoMediaPath.Engine,
-  mediaPathSupport: describeMissingSupport(NO_CHOICE_ON_AN_UPLOAD),
+  mediaPathSupport: optionSupported,
   mode: MediaSessionMode.File,
   normalizationSupport: describeMissingSupport(NO_CONVERSION_ON_AN_UPLOAD),
   playbackGate: true,
   renderer,
 });
+
+/** Every option the library resolves a value for, whoever supplied it. */
+const LIBRARY_RESOLVED_OPTIONS = [
+  "mode",
+  "detections.autoRefresh",
+  "playbackGate",
+  "detections.playbackGate.enabled",
+  "detections.playbackGate.requiredAheadSeconds",
+  "renderPreparation.playbackGate.enabled",
+  "renderPreparation.playbackGate.minimumAheadSeconds",
+  "renderPreparation.playbackGate.requiredAheadSeconds",
+  "buffer.bufferAheadSeconds",
+  "buffer.bufferBehindSeconds",
+  "buffer.refreshIntervalSeconds",
+  "renderPreparation.mode",
+  "maskFrame.workerCount",
+  "maskFrame.prefetchFrameCount",
+  "maskFrame.maxCacheFrameCount",
+  "maskFrame.maxPendingFrameCount",
+  "maskFrame.scheduleBatchSize",
+  "maskFrame.scanIntervalSeconds",
+  "fit",
+  "interaction.mode",
+  "loop",
+  "autoPlay",
+];
 
 const ENGINE_PATH_OPTIONS = [
   "prefer2d",
@@ -90,7 +115,9 @@ interface ControlProps {
   readonly description?: string;
   readonly disabled?: boolean;
   readonly label?: string;
+  readonly libraryDefault?: string;
   readonly optionPath?: string;
+  readonly origin?: string;
   readonly title?: string;
   readonly tooltip?: string;
   readonly value?: ReactNode;
@@ -264,15 +291,30 @@ describe("SessionOptionsPanel", () => {
 
   it("says why a switched-off option cannot act, in the group it belongs to", () => {
     expect(renderProse(configuration)).toContain(NO_CONVERSION_ON_THE_ENGINE);
-    expect(renderProse(uploadConfiguration)).toContain(NO_CHOICE_ON_AN_UPLOAD);
     expect(renderProse(uploadConfiguration)).toContain(
       NO_CONVERSION_ON_AN_UPLOAD,
     );
   });
 
-  it("lets an upload see the media path it is on without offering to change it", () => {
-    expect(disabledOptions(uploadConfiguration)).toContain("media");
-    expect(disabledOptions(configuration)).not.toContain("media");
+  /* The media path decides which of these groups can act, and it is a panel of
+   * its own now, so the group that cannot act has to name it. */
+  it("sends a reader to the control that would let the switched-off group act", () => {
+    expect(renderProse(mediabunnyConfiguration).join(" ")).toContain(
+      "The Media path control switches it.",
+    );
+  });
+
+  /* The engine group and the normalization group belong to a package and a
+   * step the library does not run on its own, so there is no library value to
+   * measure them against. Every other control is measured, and a new one that
+   * says nothing shows up here. */
+  it("says whether a control is sitting where the library would leave it", () => {
+    expect(
+      renderControls()
+        .filter((control) => control.props.origin !== undefined)
+        .map((control) => control.props.optionPath)
+        .sort(),
+    ).toEqual([...LIBRARY_RESOLVED_OPTIONS].sort());
   });
 
   it("explains the video, not the machinery that draws it", () => {

@@ -1,4 +1,4 @@
-import type { SourceResidencyDiagnostics } from "supervision-js-web-video-engine";
+import type { SourceResidencyDiagnostics } from "supervision/web-video-engine";
 
 import type { TimelineRange } from "../session/demo-session-types";
 

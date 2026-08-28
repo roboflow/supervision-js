@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import type { DiagnosticsSnapshot } from "supervision-js-web-video-engine";
+import type { DiagnosticsSnapshot } from "supervision/web-video-engine";
 import type { MediaRendererSource } from "supervision";
 import { describe, expect, it } from "vitest";
 
@@ -43,7 +43,7 @@ describe("EngineDiagnostics", () => {
 
     expect(
       renderToStaticMarkup(<EngineDiagnostics tap={detached} />),
-    ).toContain("No video engine source is open");
+    ).toContain("No web video engine source is open");
     expect(
       renderToStaticMarkup(<EngineDiagnostics tap={silentTap()} />),
     ).toContain("Nothing read yet");

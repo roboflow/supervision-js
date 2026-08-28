@@ -222,7 +222,7 @@ export const pipelineStages: readonly PipelineStageDefinition[] = [
   {
     arity: "set",
     id: PipelineStageId.EngineServices,
-    question: "What is the video engine doing with them?",
+    question: "What is the web video engine doing with them?",
     title: "Engine services",
   },
   {
@@ -292,7 +292,7 @@ const NOT_RECORDED_BY_THE_SESSION = nothingRecordedIt(
   "the session, as it prepares the media it was handed",
 );
 const NOT_RECORDED_BY_THE_ENGINE = nothingRecordedIt(
-  "the video engine, when it opens a clip",
+  "the web video engine, when it opens a clip",
 );
 const NOT_RECORDED_BY_THE_RENDERER = nothingRecordedIt(
   "the renderer's own state, once it has opened the clip",
@@ -414,7 +414,7 @@ export const pipelineNodes: readonly PipelineNodeDefinition[] = [
   {
     fallback: NOT_RECORDED_BY_THE_ENGINE,
     id: PipelineNodeId.DecoderVideoEngine,
-    label: "Video engine",
+    label: "Web video engine",
     stage: PipelineStageId.Decoder,
   },
   {
@@ -433,7 +433,7 @@ export const pipelineNodes: readonly PipelineNodeDefinition[] = [
     fallback: {
       kind: "unavailable",
       reason:
-        "The library can open a single still picture, but this workbench has no control that reaches it: an uploaded picture is handed to the video engine like everything else.",
+        "The library can open a single still picture, but this workbench has no control that reaches it: an uploaded picture is handed to the web video engine like everything else.",
     },
     id: PipelineNodeId.DecoderStaticImage,
     label: "Still-picture reader",
@@ -469,7 +469,7 @@ export const pipelineNodes: readonly PipelineNodeDefinition[] = [
         "Nothing on this build hands the engine a one-way stream. A stream is read forwards once, so seeking back has nothing left to read and the engine cannot reopen it after a stall. The engine supports it and there is no way to reach it from here.",
     },
     id: PipelineNodeId.BytesEngineStream,
-    label: "A one-way stream, into the video engine",
+    label: "A one-way stream, into the web video engine",
     stage: PipelineStageId.Bytes,
   },
   {

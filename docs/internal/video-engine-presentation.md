@@ -13,31 +13,47 @@ law for future edits.
 
 ## The Engine Boundary
 
-The engine is the `packages/video-engine` workspace, published on its own as
-`supervision-js-web-video-engine`. Two specifiers carry code, and nothing else:
-`supervision-js-web-video-engine` and `supervision-js-web-video-engine/analysis`, the
-second being the only one that pulls Mediabunny. A third export,
-`supervision-js-web-video-engine/worker`, is the built worker as a deployment asset
-for hosts whose CSP forbids `blob:` workers. `no-restricted-imports` in
+The engine is the private `packages/video-engine` workspace, published inside
+`supervision` under the `web-video-engine` subpath. Two specifiers carry code,
+and nothing else: `supervision/web-video-engine` and
+`supervision/web-video-engine/analysis`, the second being the only one that
+pulls Mediabunny. A third export, `supervision/web-video-engine/worker`, is the
+built worker as a deployment asset for hosts whose CSP forbids `blob:` workers.
+
+`supervision/web-video-engine` is a barrel, `packages/web/src/web-video-engine`.
+It re-exports the engine, and beside it the adapter that opens one:
+`createVideoEngineMediaRendererSource` and `openVideoEngineMediaSource` are
+importable from the subpath and from `supervision` itself, and are the same
+functions either way. `#web-video-engine` is the browser package's own alias for
+the staged engine build; only the barrel and the media seam may name it. `no-restricted-imports` in
 `eslint.config.js` errors on any other entry, and on relative paths into
 `packages/video-engine/src`, so importers cannot bind themselves to the engine's
 file layout.
 
 Types and runtime arrive from different places:
 
-- Every typecheck reads the engine's emitted declarations, resolved through the
-  workspace by package name. `npm run typecheck` builds the engine before it
-  reaches `supervision` and the demo, so those declarations are present.
+- Every typecheck reads the engine's emitted declarations. `packages/web`
+  resolves `#web-video-engine` through `paths`, and `npm run typecheck` builds
+  the engine before it reaches `supervision` and the demo, so those declarations
+  are present.
 - Vitest resolves both specifiers to the engine's TypeScript source, through
   aliases in `vitest.config.ts`, the same way it resolves `supervision` and
   `supervision-js-core`.
-- Rollup treats both specifiers as external, so the engine is never bundled
-  into the published `supervision` package.
+- Rollup treats the alias as external and rewrites it to a path relative to
+  each chunk. The engine's own build output is staged into
+  `packages/web/dist/web-video-engine`, its root entry renamed `engine` so the
+  barrel can take `index`, so what the alias names ships beside the entry that
+  reaches for it rather than inside it.
+- The barrel is built as its own Rollup configuration. Given the engine and the
+  entry that lazily loads it in one graph, Rollup hoists the engine into a
+  static import of the main entry, which is the one thing this whole
+  arrangement exists to prevent.
 
 The engine import inside `packages/web/src/media/video-engine-media-source.ts`
-is dynamic for one reason: importing `supervision` must keep working for
-consumers who never open an engine source, and the package smoke test imports
-the built entry with no engine available.
+is dynamic for one reason: the engine embeds a 1.5 MB decode worker, and a
+consumer who only annotates images must not download it. A static import would
+fold the engine into the main entry chunk; the dynamic one splits it out, and
+tree-shaking drops it entirely when nothing opens an engine source.
 
 The adapter exposes the loaded engine as `engine` on the opened source. The
 renderer looks for that property, and finding a presented-frame channel there is

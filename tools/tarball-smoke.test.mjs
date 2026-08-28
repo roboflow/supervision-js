@@ -18,6 +18,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -144,6 +145,71 @@ test("tarball ships both entrypoints with declarations and source maps", () => {
     manifest.exports["./detection-post-processing-worker"],
     "./dist/tracking.worker.js",
   );
+});
+
+test("tarball ships the video engine as its own lazily loaded subpath", () => {
+  for (const entry of [
+    "dist/web-video-engine/index.js",
+    "dist/web-video-engine/index.d.ts",
+    "dist/web-video-engine/engine.js",
+    "dist/web-video-engine/engine.d.ts",
+    "dist/web-video-engine/analysis.js",
+    "dist/web-video-engine/analysis.d.ts",
+    "dist/web-video-engine/engine.worker.js",
+  ]) {
+    assert.ok(
+      existsSync(path.join(extractedDir, entry)),
+      `Expected ${entry} in the tarball`,
+    );
+  }
+
+  const manifest = JSON.parse(
+    readFileSync(path.join(extractedDir, "package.json"), "utf8"),
+  );
+
+  assert.equal(
+    manifest.exports["./web-video-engine"].import,
+    "./dist/web-video-engine/index.js",
+  );
+  assert.equal(
+    manifest.exports["./web-video-engine/analysis"].import,
+    "./dist/web-video-engine/analysis.js",
+  );
+  assert.equal(
+    manifest.exports["./web-video-engine/worker"],
+    "./dist/web-video-engine/engine.worker.js",
+  );
+  assert.equal(
+    manifest.devDependencies?.["supervision-js-web-video-engine"],
+    undefined,
+    "The engine's repository-relative build dependency must not reach npm",
+  );
+
+  // The engine embeds a 1.5 MB decode worker. The main entry reaches it through
+  // a dynamic import, so a consumer who only annotates images never loads it.
+  const index = readFileSync(path.join(extractedDir, "dist/index.js"), "utf8");
+
+  assert.match(index, /import\(['"]\.\/web-video-engine\/engine\.js['"]\)/);
+  assert.deepEqual(
+    [
+      ...index.matchAll(
+        /^(?:import|export)[^\n]*?['"][^'"\n]*web-video-engine[^'"\n]*['"]/gm,
+      ),
+    ].map((match) => match[0]),
+    [],
+    "The main entry must not statically reach the engine",
+  );
+
+  // Every specifier the published engine entries use is relative, so a resolver
+  // that supports nothing else can still read them.
+  const barrel = readFileSync(
+    path.join(extractedDir, "dist/web-video-engine/index.js"),
+    "utf8",
+  );
+
+  assert.match(barrel, /export \* from ['"]\.\/engine\.js['"]/);
+  assert.match(barrel, /createVideoEngineMediaRendererSource/);
+  assert.match(barrel, /from ['"]\.\.\/index\.js['"]/);
 });
 
 test("tarball ships the project license and package README", () => {
@@ -350,7 +416,76 @@ test("clean consumer resolves package entrypoints and the standalone worker", ()
   assert.equal(output.trim(), "function ready function true true");
 });
 
-test("clean consumer builds a browser bundle that imports createMediaSession", () => {
+test("clean consumer resolves the three video engine subpaths", () => {
+  const output = run(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      [
+        'const { VideoEngine, VideoEngineErrorCode } = await import("supervision/web-video-engine");',
+        'const { AnalysisSession } = await import("supervision/web-video-engine/analysis");',
+        'const workerUrl = import.meta.resolve("supervision/web-video-engine/worker");',
+        "console.log(typeof VideoEngine, typeof AnalysisSession, VideoEngineErrorCode.NoVideoTrack, workerUrl.endsWith('/web-video-engine/engine.worker.js'));",
+      ].join("\n"),
+    ],
+    consumerDir,
+  );
+
+  assert.equal(output.trim(), "function function NO_VIDEO_TRACK true");
+});
+
+/**
+ * Builds a throwaway Vite app against the installed tarball and returns the
+ * JavaScript it emitted.
+ */
+function buildConsumerApp(name, entrySource) {
+  const appDir = path.join(consumerDir, name);
+
+  mkdirSync(path.join(appDir, "src"), { recursive: true });
+  writeFileSync(
+    path.join(appDir, "src/main.js"),
+    `${entrySource.join("\n")}\n`,
+  );
+  writeFileSync(
+    path.join(appDir, "index.html"),
+    '<!doctype html>\n<html>\n  <body>\n    <script type="module" src="/src/main.js"></script>\n  </body>\n</html>\n',
+  );
+
+  run(
+    process.execPath,
+    [
+      path.join(consumerDir, "node_modules/vite/bin/vite.js"),
+      "build",
+      "--logLevel",
+      "error",
+    ],
+    appDir,
+  );
+
+  const bundleDir = path.join(appDir, "dist/assets");
+
+  return readdirSync(bundleDir)
+    .filter((entry) => entry.endsWith(".js"))
+    .map((entry) => ({
+      bytes: statSync(path.join(bundleDir, entry)).size,
+      name: entry,
+      source: readFileSync(path.join(bundleDir, entry), "utf8"),
+    }));
+}
+
+/**
+ * A bundler names and minifies chunks as it pleases, so the engine is found by
+ * an export only it provides. Names survive minification; a chunk filename and
+ * the worker's own source text do not.
+ */
+function engineAssets(assets) {
+  return assets.filter((asset) =>
+    asset.source.includes("displayBoxResolution"),
+  );
+}
+
+test("a consumer that never opens a video source does not bundle the engine", () => {
   const rootManifest = JSON.parse(
     readFileSync(path.join(rootDir, "package.json"), "utf8"),
   );
@@ -366,40 +501,40 @@ test("clean consumer builds a browser bundle that imports createMediaSession", (
     consumerDir,
   );
 
-  mkdirSync(path.join(consumerDir, "src"), { recursive: true });
-  writeFileSync(
-    path.join(consumerDir, "src/main.js"),
-    [
-      'import { createMediaSession } from "supervision";',
-      'import { createMaskBrushEditor } from "supervision/editing";',
-      "",
-      "globalThis.supervisionEntrypoints = [",
-      "  createMediaSession,",
-      "  createMaskBrushEditor,",
-      "];",
-      "",
-    ].join("\n"),
-  );
-  writeFileSync(
-    path.join(consumerDir, "index.html"),
-    '<!doctype html>\n<html>\n  <body>\n    <script type="module" src="/src/main.js"></script>\n  </body>\n</html>\n',
-  );
-
-  run(
-    process.execPath,
-    [
-      path.join(consumerDir, "node_modules/vite/bin/vite.js"),
-      "build",
-      "--logLevel",
-      "error",
-    ],
-    consumerDir,
-  );
-
-  const bundleDir = path.join(consumerDir, "dist/assets");
+  const annotatesImages = buildConsumerApp("app-images", [
+    'import { createMediaSession } from "supervision";',
+    'import { createMaskBrushEditor } from "supervision/editing";',
+    "",
+    "globalThis.supervisionEntrypoints = [createMediaSession, createMaskBrushEditor];",
+  ]);
+  const opensVideo = buildConsumerApp("app-video", [
+    'import { createMediaSession } from "supervision";',
+    'import { createVideoEngineMediaRendererSource } from "supervision/web-video-engine";',
+    "",
+    "globalThis.supervisionEntrypoints = [createMediaSession, createVideoEngineMediaRendererSource];",
+  ]);
 
   assert.ok(
-    readdirSync(bundleDir).some((entry) => entry.endsWith(".js")),
-    "Expected the consumer build to emit JavaScript",
+    annotatesImages.length > 0,
+    "Expected the build to emit JavaScript",
+  );
+  assert.deepEqual(
+    engineAssets(annotatesImages).map((asset) => asset.name),
+    [],
+    "The engine must be unreachable from an entry that never opens a video source",
+  );
+
+  // Reaching the engine must split it out rather than fold it into the entry:
+  // its embedded decode worker alone is over a megabyte.
+  const carried = engineAssets(opensVideo);
+
+  assert.ok(carried.length > 0, "Expected the engine in a build that uses it");
+  assert.ok(
+    carried.some((asset) => asset.bytes > 1_000_000),
+    `Expected a chunk carrying the embedded worker, saw ${carried.map((asset) => asset.bytes).join(", ")}`,
+  );
+  assert.ok(
+    annotatesImages.every((asset) => asset.bytes < 1_000_000),
+    "No chunk of an image-only build may be the size of the decode worker",
   );
 });

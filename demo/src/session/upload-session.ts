@@ -11,7 +11,7 @@ import {
   type MediaRendererSource,
   type WritableDetectionFrameSource,
 } from "supervision";
-import { SourceKind } from "supervision-js-web-video-engine";
+import { SourceKind } from "supervision/web-video-engine";
 import type {
   DemoFixtureDetectionSourceSummary,
   DemoFixtureSummary,
@@ -53,15 +53,15 @@ import {
 } from "./timeline-ranges";
 
 /**
- * SAM3 reads its frames back out of the opened video-engine source, so this
+ * SAM3 reads its frames back out of the opened engine source, so this
  * session cannot hand the clip to `createMediaSession` as a `Blob`, which is
  * the only shape `normalize` acts on.
  */
 const UPLOAD_MEDIA_PATH_BLOCKED = describeMissingSupport(
-  "SAM3 inference reads frames back from the video engine as it runs, so an upload always opens on the video engine.",
+  "SAM3 inference reads frames back from the web video engine as it runs, so an upload always opens on the engine.",
 );
 const UPLOAD_NORMALIZATION_BLOCKED = describeMissingSupport(
-  "SAM3 inference reads frames back from the video engine source, which normalizing would replace.",
+  "SAM3 inference reads frames back from the web video engine source, which normalizing would replace.",
 );
 
 export interface UploadRunRequest {

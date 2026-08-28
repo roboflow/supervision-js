@@ -2,6 +2,7 @@ import { isValidElement, type ReactNode } from "react";
 import { describe, expect, it } from "vitest";
 
 import { DemoShell } from "./DemoShell";
+import { DemoInspectorTab } from "../session/inspector-tabs";
 import { DemoViewMode } from "../session/demo-view-mode";
 
 type ShellProps = Parameters<typeof DemoShell>[0];
@@ -9,6 +10,8 @@ type ShellProps = Parameters<typeof DemoShell>[0];
 const slots = [
   "benchmarksPanel",
   "controlBar",
+  "libraryDeparturesPanel",
+  "mediaPathPanel",
   "performanceStrip",
   "pipelinePanel",
   "presentationDiagnostics",
@@ -16,6 +19,7 @@ const slots = [
   "renderControls",
   "selectionPanel",
   "sessionOptionsPanel",
+  "slowWorkPanel",
   "sourceControls",
   "statusPanel",
   "viewport",
@@ -23,21 +27,24 @@ const slots = [
 
 type DemoShellSlot = (typeof slots)[number];
 
-function shellWith(mode: DemoViewMode) {
+function shellWith(mode: DemoViewMode, tab: DemoInspectorTab) {
   const props = Object.fromEntries(
     slots.map((slot) => [slot, <b key={slot}>{slot}</b>]),
   ) as unknown as ShellProps;
 
   return DemoShell({
     ...props,
+    departureCount: 3,
     docsUrl: "https://example.invalid",
     mode,
     onModeChange: () => {},
+    onTabChange: () => {},
+    tab,
   });
 }
 
-function shown(mode: DemoViewMode) {
-  const rendered = new Set(collect(shellWith(mode)));
+function shown(mode: DemoViewMode, tab: DemoInspectorTab) {
+  const rendered = new Set(collect(shellWith(mode, tab)));
 
   return slots.filter((slot) => rendered.has(slot));
 }
@@ -62,26 +69,80 @@ function collect(node: ReactNode, found: string[] = []): string[] {
   return collect(node.props.children, found);
 }
 
-const debugOnly: readonly DemoShellSlot[] = [
+const diagnostics: readonly DemoShellSlot[] = [
   "performanceStrip",
   "pipelinePanel",
   "presentationDiagnostics",
-  "sessionOptionsPanel",
+  "slowWorkPanel",
   "statusPanel",
 ];
 
 describe("DemoShell", () => {
-  it("shows the session options alongside the other Debug diagnostics", () => {
-    const inDebug = shown(DemoViewMode.Debug);
+  it("puts the session options in a tab of their own rather than behind Debug", () => {
+    const inDemo = shown(DemoViewMode.Demo, DemoInspectorTab.Session);
 
-    expect(debugOnly.filter((slot) => !inDebug.includes(slot))).toEqual([]);
-    expect(inDebug).toContain("sourceControls");
+    expect(inDemo).toContain("sessionOptionsPanel");
+    expect(inDemo).toContain("mediaPathPanel");
+    expect(inDemo).toContain("libraryDeparturesPanel");
   });
 
-  it("leaves them out of the two views that are not Debug", () => {
-    expect(
-      shown(DemoViewMode.Demo).filter((slot) => debugOnly.includes(slot)),
-    ).toEqual([]);
-    expect(shown(DemoViewMode.Benchmarks)).toEqual(["benchmarksPanel"]);
+  it("shows one group at a time", () => {
+    expect(shown(DemoViewMode.Demo, DemoInspectorTab.Clip)).toEqual([
+      "controlBar",
+      "selectionPanel",
+      "sourceControls",
+      "viewport",
+    ]);
+    expect(shown(DemoViewMode.Demo, DemoInspectorTab.Style)).toEqual([
+      "controlBar",
+      "qualityControls",
+      "renderControls",
+      "viewport",
+    ]);
+  });
+
+  it("keeps the readings that cost main-thread work behind the Debug switch", () => {
+    const off = shown(DemoViewMode.Demo, DemoInspectorTab.Diagnostics);
+    const on = shown(DemoViewMode.Debug, DemoInspectorTab.Diagnostics);
+
+    expect(diagnostics.filter((slot) => off.includes(slot))).toEqual([]);
+    expect(diagnostics.filter((slot) => !on.includes(slot))).toEqual([]);
+  });
+
+  it("says what the switched-off diagnostics are and what turning them on costs", () => {
+    const prose = flatten(
+      shellWith(DemoViewMode.Demo, DemoInspectorTab.Diagnostics),
+    );
+
+    expect(prose).toContain("Diagnostics are off");
+    expect(prose).toContain("ten points of");
+  });
+
+  it("leaves the inspector out of the benchmarks view", () => {
+    expect(shown(DemoViewMode.Benchmarks, DemoInspectorTab.Clip)).toEqual([
+      "benchmarksPanel",
+    ]);
   });
 });
+
+function flatten(node: ReactNode): string {
+  if (typeof node === "string") {
+    return node;
+  }
+
+  if (Array.isArray(node)) {
+    return node.map((child) => flatten(child)).join(" ");
+  }
+
+  if (!isValidElement<{ readonly children?: ReactNode }>(node)) {
+    return "";
+  }
+
+  if (typeof node.type === "function") {
+    return flatten(
+      (node.type as (props: unknown) => ReactNode)(node.props as unknown),
+    );
+  }
+
+  return flatten(node.props.children);
+}

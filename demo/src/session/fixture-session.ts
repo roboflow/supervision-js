@@ -43,13 +43,17 @@ import {
 } from "./session-options";
 
 /**
- * A fixture ships its detections with it, so a playground that opens
- * unannotated is only ever waiting on preparation.
+ * What a sample asks the session for, which is nothing.
+ *
+ * The library then holds the picture until each frame's masks are drawn and
+ * waits on annotations only where more of them are still being written. A
+ * sample ships its annotations with it, so there is nothing to wait for and
+ * nothing to ask for.
  */
-const FIXTURE_PLAYBACK_GATE = true;
+export const FIXTURE_PLAYBACK_GATE: boolean | undefined = undefined;
 
 const ENGINE_PATH_NORMALIZATION_BLOCKED = describeMissingSupport(
-  "Converting the file replaces it with the conversion, and the video engine never opens that. Switch the media path to Mediabunny to convert.",
+  "Converting the file replaces it with the conversion, and the web video engine never opens that. Switch the media path to Mediabunny to convert.",
 );
 
 export async function createFixtureSession(
@@ -209,7 +213,7 @@ async function createFixtureSessionMedia(options: {
   if (options.mediaPath === DemoMediaPath.Engine) {
     options.pipeline.bypass(
       PipelineNodeId.IntakeConversionRefetch,
-      "The video engine fetches the clip in ranges as it needs them, so nothing downloaded it up front.",
+      "The web video engine fetches the clip in ranges as it needs them, so nothing downloaded it up front.",
     );
 
     return options.tapMediaSource(
@@ -290,7 +294,7 @@ function recordFixtureConditioning(
 ) {
   const engineDriven = mediaPath === DemoMediaPath.Engine;
   const notConverted = engineDriven
-    ? "The video engine is driving this clip and reads the file itself, so converting it was never offered here."
+    ? "The web video engine is driving this clip and reads the file itself, so converting it was never offered here."
     : "Nothing asked for the clip to be converted.";
 
   if (normalize === undefined) {

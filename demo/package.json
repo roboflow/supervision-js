@@ -12,8 +12,7 @@
     "mediabunny": "^1.52.3",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "supervision": "file:../packages/web",
-    "supervision-js-web-video-engine": "file:../packages/video-engine"
+    "supervision": "file:../packages/web"
   },
   "devDependencies": {
     "@types/react": "^19.2.18",

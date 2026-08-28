@@ -1,5 +1,9 @@
 import { Fragment, useState, type CSSProperties, type ReactNode } from "react";
 
+import {
+  DemoOptionOrigin,
+  demoOptionOriginLabels,
+} from "../session/library-defaults";
 import { DiagnosticLabel } from "./DiagnosticLabel";
 
 /**
@@ -73,16 +77,20 @@ export function ToggleControl({
   disabled = false,
   evalHook,
   label,
+  libraryDefault,
   onChange,
   optionPath,
+  origin,
   tooltip,
 }: {
   readonly checked: boolean;
   readonly disabled?: boolean;
   readonly evalHook?: string;
   readonly label: string;
+  readonly libraryDefault?: string;
   readonly onChange: (checked: boolean) => void;
   readonly optionPath?: string;
+  readonly origin?: DemoOptionOrigin;
   readonly tooltip?: string;
 }) {
   return (
@@ -97,7 +105,13 @@ export function ToggleControl({
         onChange={(event) => onChange(event.currentTarget.checked)}
         type="checkbox"
       />
-      <ControlName label={label} optionPath={optionPath} tooltip={tooltip} />
+      <ControlName
+        label={label}
+        libraryDefault={libraryDefault}
+        optionPath={optionPath}
+        origin={origin}
+        tooltip={tooltip}
+      />
     </label>
   );
 }
@@ -105,16 +119,20 @@ export function ToggleControl({
 export function SegmentedControl<Value extends string>({
   disabled = false,
   label,
+  libraryDefault,
   onChange,
   optionPath,
   options,
+  origin,
   tooltip,
   value,
 }: {
   readonly disabled?: boolean;
   readonly label: string;
+  readonly libraryDefault?: string;
   readonly onChange: (value: Value) => void;
   readonly optionPath?: string;
+  readonly origin?: DemoOptionOrigin;
   readonly options: readonly {
     readonly label: string;
     readonly value: Value;
@@ -125,7 +143,13 @@ export function SegmentedControl<Value extends string>({
   return (
     <div className="render-control render-control--segmented">
       <span className="render-control__label">
-        <ControlName label={label} optionPath={optionPath} tooltip={tooltip} />
+        <ControlName
+          label={label}
+          libraryDefault={libraryDefault}
+          optionPath={optionPath}
+          origin={origin}
+          tooltip={tooltip}
+        />
       </span>
       <div className="render-control__segments">
         {options.map((option) => (
@@ -148,10 +172,12 @@ export function SliderControl({
   disabled = false,
   evalHook,
   label,
+  libraryDefault,
   max,
   min,
   onChange,
   optionPath,
+  origin,
   step,
   tooltip,
   value,
@@ -160,10 +186,12 @@ export function SliderControl({
   readonly disabled?: boolean;
   readonly evalHook?: string;
   readonly label: string;
+  readonly libraryDefault?: string;
   readonly max: number;
   readonly min: number;
   readonly onChange: (value: number) => void;
   readonly optionPath?: string;
+  readonly origin?: DemoOptionOrigin;
   readonly step: number;
   readonly tooltip?: string;
   readonly value: number;
@@ -178,7 +206,13 @@ export function SliderControl({
       style={{ "--control-progress": `${progress}%` } as SliderControlStyle}
     >
       <span className="render-control__label">
-        <ControlName label={label} optionPath={optionPath} tooltip={tooltip} />
+        <ControlName
+          label={label}
+          libraryDefault={libraryDefault}
+          optionPath={optionPath}
+          origin={origin}
+          tooltip={tooltip}
+        />
         <strong>{valueLabel}</strong>
       </span>
       <input
@@ -199,10 +233,12 @@ export function SliderControl({
 export function NumberControl({
   disabled = false,
   label,
+  libraryDefault,
   max,
   min,
   onChange,
   optionPath,
+  origin,
   placeholder,
   step,
   tooltip,
@@ -210,10 +246,12 @@ export function NumberControl({
 }: {
   readonly disabled?: boolean;
   readonly label: string;
+  readonly libraryDefault?: string;
   readonly max?: number;
   readonly min?: number;
   readonly onChange: (value: number | undefined) => void;
   readonly optionPath?: string;
+  readonly origin?: DemoOptionOrigin;
   readonly placeholder?: string;
   readonly step?: number;
   readonly tooltip?: string;
@@ -222,7 +260,13 @@ export function NumberControl({
   return (
     <label className="render-control render-control--number">
       <span className="render-control__label">
-        <ControlName label={label} optionPath={optionPath} tooltip={tooltip} />
+        <ControlName
+          label={label}
+          libraryDefault={libraryDefault}
+          optionPath={optionPath}
+          origin={origin}
+          tooltip={tooltip}
+        />
       </span>
       <input
         aria-label={label}
@@ -252,11 +296,15 @@ export function NumberControl({
  */
 function ControlName({
   label,
+  libraryDefault,
   optionPath,
+  origin,
   tooltip,
 }: {
   readonly label: string;
+  readonly libraryDefault?: string;
   readonly optionPath?: string;
+  readonly origin?: DemoOptionOrigin;
   readonly tooltip?: string;
 }) {
   return (
@@ -270,6 +318,39 @@ function ControlName({
         <code className="render-control__path">
           {breakAtSegments(optionPath)}
         </code>
+      )}
+      <ControlOrigin libraryDefault={libraryDefault} origin={origin} />
+    </span>
+  );
+}
+
+/**
+ * Whether this control is sitting where the library would leave it, and what
+ * the library would leave it at when it is not.
+ */
+function ControlOrigin({
+  libraryDefault,
+  origin,
+}: {
+  readonly libraryDefault?: string;
+  readonly origin?: DemoOptionOrigin;
+}) {
+  if (origin === undefined) {
+    return null;
+  }
+
+  const atLibraryDefault = origin === DemoOptionOrigin.Library;
+
+  return (
+    <span
+      className={`render-control__origin render-control__origin--${origin}`}
+    >
+      <span className="render-control__origin-mark" aria-hidden="true" />
+      {demoOptionOriginLabels[origin]}
+      {atLibraryDefault || libraryDefault === undefined ? null : (
+        <span className="render-control__origin-was">
+          library {libraryDefault}
+        </span>
       )}
     </span>
   );

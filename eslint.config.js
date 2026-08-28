@@ -42,21 +42,46 @@ export default [
           patterns: [
             {
               group: [
-                "supervision-js-web-video-engine/*",
-                "!supervision-js-web-video-engine/analysis",
-                "!supervision-js-web-video-engine/worker",
+                "supervision/web-video-engine/*",
+                "!supervision/web-video-engine/analysis",
+                "!supervision/web-video-engine/worker",
               ],
               message:
-                "The video engine exposes three entries: supervision-js-web-video-engine, supervision-js-web-video-engine/analysis, and supervision-js-web-video-engine/worker. Anything else is an internal module.",
+                "The video engine exposes three entries: supervision/web-video-engine, supervision/web-video-engine/analysis, and supervision/web-video-engine/worker. Anything else is an internal module.",
+            },
+            {
+              group: [
+                "supervision-js-web-video-engine",
+                "supervision-js-web-video-engine/**",
+              ],
+              message:
+                "The video engine is a private workspace package that ships inside supervision. Import supervision/web-video-engine or supervision/web-video-engine/analysis.",
+            },
+            {
+              group: ["#web-video-engine", "#web-video-engine/**"],
+              message:
+                "#web-video-engine is the browser package's own alias for the staged engine build. Import supervision/web-video-engine or supervision/web-video-engine/analysis.",
             },
             {
               group: ["**/video-engine/src/**"],
               message:
-                "Import supervision-js-web-video-engine or supervision-js-web-video-engine/analysis. A path into the engine's source binds the importer to its file layout.",
+                "Import supervision/web-video-engine or supervision/web-video-engine/analysis. A path into the engine's source binds the importer to its file layout.",
             },
           ],
         },
       ],
+    },
+  },
+  {
+    /* The media seam and the subpath barrel are the two places that adapt the
+     * staged engine build, so they are the two that may name it. */
+    files: [
+      "packages/web/src/media/video-engine-media-source.ts",
+      "packages/web/src/media/video-engine-media-source.test.ts",
+      "packages/web/src/web-video-engine/index.ts",
+    ],
+    rules: {
+      "no-restricted-imports": "off",
     },
   },
   {

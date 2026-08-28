@@ -30,7 +30,7 @@ jobs:
     if: >-
       github.ref == 'refs/heads/main' ||
       (startsWith(github.ref, 'refs/heads/release/') && inputs.dist_tag == 'next')
-    name: Verify and publish supervision and its video engine
+    name: Verify and publish supervision
     runs-on: ubuntu-latest
     environment:
       name: npm-publish
@@ -101,62 +101,8 @@ jobs:
       - name: Build portable tarball
         run: npm run package:tarball
 
-      - name: Build video engine tarball
-        run: npm run package:engine:tarball
-
       - name: Smoke-test clean consumer
         run: npm run package:tarball:smoke
-
-      - name: Publish video engine tarball
-        id: publish_engine
-        shell: bash
-        env:
-          DIST_TAG: ${{ inputs.dist_tag }}
-          RECOVERY: ${{ steps.release_source.outputs.recovery }}
-        run: |
-          set -euo pipefail
-          version="$(node -p "require('./packages/video-engine/package.json').version")"
-
-          if published_version="$(npm view "supervision-js-web-video-engine@${version}" version 2>/dev/null)"; then
-            if [[ "${published_version}" != "${version}" ]]; then
-              echo "Unexpected published version for supervision-js-web-video-engine@${version}: ${published_version}" >&2
-              exit 1
-            fi
-
-            echo "supervision-js-web-video-engine@${version} is already published; this release does not change it."
-            echo "published=false" >> "${GITHUB_OUTPUT}"
-            exit 0
-          fi
-
-          if [[ "${DIST_TAG}" == "latest" && "${version}" == *-* ]]; then
-            echo "Prerelease version ${version} must use the next tag." >&2
-            exit 1
-          fi
-
-          if [[ "${DIST_TAG}" == "next" && "${version}" != *-* ]]; then
-            echo "Stable version ${version} must use the latest tag." >&2
-            exit 1
-          fi
-
-          # The engine publishes ahead of the step that rejects an
-          # unpublishable recovery source, so it rejects that source itself.
-          if [[ "${RECOVERY}" == "true" ]]; then
-            web_version="$(node -p "require('./packages/web/package.json').version")"
-
-            if ! npm view "supervision@${web_version}" version >/dev/null 2>&1; then
-              echo "Recovery run's supervision@${web_version} is not published; refusing to publish a recovery source." >&2
-              exit 1
-            fi
-          fi
-
-          shopt -s nullglob
-          archives=(artifacts/engine/supervision-js-web-video-engine-*.tgz)
-          if [ "${#archives[@]}" -ne 1 ]; then
-            echo "Expected exactly one generated supervision-js-web-video-engine tarball." >&2
-            exit 1
-          fi
-          npm publish "./${archives[0]}" --access public --tag "${DIST_TAG}"
-          echo "published=true" >> "${GITHUB_OUTPUT}"
 
       - name: Publish generated tarball
         shell: bash
@@ -204,30 +150,6 @@ jobs:
             exit 1
           fi
           npm publish "./${archives[0]}" --access public --tag "${DIST_TAG}"
-
-      - name: Verify published video engine dist-tag
-        if: steps.publish_engine.outputs.published == 'true'
-        shell: bash
-        env:
-          DIST_TAG: ${{ inputs.dist_tag }}
-        run: |
-          set -euo pipefail
-          version="$(node -p "require('./packages/video-engine/package.json').version")"
-
-          for attempt in {1..12}; do
-            published_version="$(npm view "supervision-js-web-video-engine@${DIST_TAG}" version 2>/dev/null || true)"
-            if [[ "${published_version}" == "${version}" ]]; then
-              exit 0
-            fi
-
-            if [[ "${attempt}" -lt 12 ]]; then
-              echo "Waiting for supervision-js-web-video-engine@${DIST_TAG} to resolve to ${version} (attempt ${attempt}/12)."
-              sleep 5
-            fi
-          done
-
-          echo "supervision-js-web-video-engine@${DIST_TAG} did not resolve to ${version} after 60 seconds; saw ${published_version:-nothing}." >&2
-          exit 1
 
       - name: Verify published npm dist-tag
         shell: bash

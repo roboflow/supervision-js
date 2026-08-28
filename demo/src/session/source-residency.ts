@@ -1,4 +1,4 @@
-import type { SourceResidencyConfig } from "supervision-js-web-video-engine";
+import type { SourceResidencyConfig } from "supervision/web-video-engine";
 
 /** Mebibytes held when residency is on and nothing says how many. */
 export const DEMO_SOURCE_RESIDENCY_BUDGET_MB = 160;

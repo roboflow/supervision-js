@@ -5,10 +5,9 @@ consumer installation channel: consumers install the stable package with
 `npm install supervision`. This document exists for maintainers who validate
 or change the packaging path.
 
-Only `supervision` needs an assembled tarball. `supervision-js-web-video-engine`
-depends on registry packages alone, so plain `npm pack` on its workspace already
-produces a portable archive; [The Video Engine Archive](#the-video-engine-archive)
-covers it.
+`supervision` is the only package this repository publishes. Everything else in
+`packages/` is a private workspace that reaches consumers inside that one
+archive.
 
 ## Build The Tarball
 
@@ -17,8 +16,8 @@ npm run package:tarball
 ```
 
 That command builds the internal tracker engines into `supervision-js-core`,
-builds the published `supervision` package, and then writes a single archive to
-the ignored `artifacts/` directory:
+builds the private video engine, builds the published `supervision` package, and
+then writes a single archive to the ignored `artifacts/` directory:
 
 ```text
 artifacts/supervision-<version>.tgz
@@ -60,35 +59,22 @@ The source tree, package boundary checks, and Rollup externals are unchanged.
 `pixi.js` and `mediabunny` stay ordinary dependencies and are installed from the
 registry by the consumer.
 
-`supervision-js-web-video-engine` is external to the build as well, and the packer leaves
-it alone. The published JavaScript keeps its dynamic
-`import("supervision-js-web-video-engine")`, which runs only when a caller opens a
-video-engine media source, so importing either entrypoint never reaches for it.
-An application that does open such a source installs the engine itself, which is
-why `supervision` declares it as an optional peer dependency.
+## How The Private Video Engine Ships
 
-## The Video Engine Archive
+The engine is a `file:../video-engine` build dependency of `packages/web`, and
+its own build already emits the chunking, declarations and source maps the
+engine entries point at. Rather than rebuild any of that, the browser Rollup
+config stages the engine's `dist` into `packages/web/dist/web-video-engine` and
+renames its root entry to `engine`, leaving `index` for the barrel that adds the
+adapter. The packer strips the repository-relative build dependency from the
+manifest npm receives.
 
-```sh
-npm run package:engine:tarball
-```
-
-That command builds `packages/video-engine` and writes a single archive:
-
-```text
-artifacts/engine/supervision-js-web-video-engine-<version>.tgz
-```
-
-The archive lives under `artifacts/engine/` rather than beside the browser
-archive so that neither the packer's cleanup nor the release workflow's
-`artifacts/supervision-*.tgz` glob can match the wrong file. Both would, since
-the engine's name starts with the browser package's name.
-
-The engine's manifest ships `dist` only, exactly as `supervision` does, and it
-declares `mediabunny` as an ordinary registry dependency. Nothing is staged or
-rewritten, so the archive npm receives is the one `npm pack` produces.
-`npm run package:engine:publish:dry-run` recreates it and validates the exact
-argument npm will be given, without publishing.
+The published JavaScript keeps its dynamic
+`import("supervision/web-video-engine")`, which runs only when a caller opens a
+video-engine media source. The engine embeds a 1.5 MB decode worker, so this is
+what keeps that worker out of a consumer who only annotates images: a bundler
+splits the engine into its own chunk, and drops it entirely when nothing
+reachable opens an engine source.
 
 ## Verify The Artifact
 
@@ -106,6 +92,8 @@ the OS temp directory — outside this repository — to check that:
 - the main browser entry embeds the worker source instead of referencing a
   runtime-relative worker URL;
 - `supervision-js-core` is bundled while `pixi.js` and `mediabunny` are not;
+- the three `supervision/web-video-engine` entries ship and resolve, and an
+  entry that never opens a video source emits no engine chunk;
 - tracker engines are embedded in core and do not appear as an install-time
   package or lockfile dependency;
 - a clean archive installation produces a lockfile with no `file:` path;

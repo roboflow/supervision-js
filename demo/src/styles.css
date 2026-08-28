@@ -2370,8 +2370,9 @@ fieldset {
 .render-control button:focus-visible,
 .render-control input:focus-visible,
 .render-controls__tabs button:focus-visible,
-.class-color-control input:focus-visible,
-.render-controls__tabs button:focus-visible {
+.inspector-tabs button:focus-visible,
+.media-path__option:focus-visible,
+.class-color-control input:focus-visible {
   outline: 2px solid var(--violet);
   outline-offset: 2px;
 }
@@ -3977,6 +3978,8 @@ fieldset {
 .selection-panel .inspector-card__header button,
 .session-options .inspector-card__header button,
 .render-controls__tabs button,
+.inspector-tabs button,
+.media-path__option,
 .pipeline-panel__copy,
 .render-control,
 .render-control--toggle,
@@ -3993,6 +3996,8 @@ fieldset {
 .source-controls__mode button[aria-pressed="true"],
 .source-actions__primary,
 .render-controls__tabs button[aria-pressed="true"],
+.inspector-tabs button[aria-pressed="true"],
+.media-path__option[aria-pressed="true"],
 .render-control__segments button[aria-pressed="true"] {
   background: var(--violet);
   border-color: var(--violet);
@@ -4006,6 +4011,8 @@ fieldset {
 .session-options .inspector-card__header button:hover:not(:disabled),
 .pipeline-panel__copy:hover,
 .render-controls__tabs button:hover:not([aria-pressed="true"]),
+.inspector-tabs button:hover:not([aria-pressed="true"]),
+.media-path__option:hover:not(:disabled, [aria-pressed="true"]),
 .render-control__segments button:hover:not(:disabled, [aria-pressed="true"]) {
   background: #f5f3ff;
   border-color: #a78bfa;
@@ -4035,6 +4042,7 @@ fieldset {
 
 .source-controls__mode button:disabled,
 .source-actions button:disabled,
+.media-path__option:disabled,
 .session-options .inspector-card__header button:disabled,
 .render-control__segments button:disabled {
   background: #f4f4f5;
@@ -5090,6 +5098,7 @@ fieldset {
   .source-controls__mode button,
   .source-actions button,
   .render-controls__tabs button,
+  .inspector-tabs button,
   .render-control__segments button,
   .quality-controls__toggle,
   .quality-controls__input-row input[type="number"],
@@ -5125,5 +5134,319 @@ fieldset {
   .timeline-view__input {
     align-self: start;
     height: 44px;
+  }
+}
+
+/* The inspector column shows one group at a time. The strip stays put and only
+ * the group under it scrolls, so the way back to another group is never a
+ * scroll away. */
+.demo-shell__inspector {
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.demo-shell__panels {
+  align-content: start;
+  display: grid;
+  gap: 0.85rem;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-color: #c4b5fd transparent;
+  scrollbar-width: thin;
+}
+
+.demo-shell__panels::-webkit-scrollbar {
+  width: 8px;
+}
+
+.demo-shell__panels::-webkit-scrollbar-thumb {
+  background: #c4b5fd;
+  border-radius: 999px;
+}
+
+.demo-shell__panels::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.inspector-tabs {
+  background: var(--surface-soft);
+  border: 1px solid #e4def9;
+  border-radius: 9px;
+  display: grid;
+  gap: 0.2rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  min-width: 0;
+  padding: 0.2rem;
+}
+
+.inspector-tabs button {
+  align-items: center;
+  background: transparent;
+  border-color: transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 0.7rem;
+  font-weight: 700;
+  gap: 4px;
+  justify-content: center;
+  letter-spacing: 0.01em;
+  min-height: 28px;
+  min-width: 0;
+  padding: 0.3rem 0.35rem;
+}
+
+/* The count of settings this session runs that the library would not, carried
+ * on the tab that owns them so it is legible from the other three. */
+.inspector-tabs__badge {
+  align-items: center;
+  background: var(--amber);
+  border-radius: 999px;
+  color: #ffffff;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  justify-content: center;
+  line-height: 1;
+  min-width: 14px;
+  padding: 2px 4px;
+}
+
+.inspector-tabs button[aria-pressed="true"] .inspector-tabs__badge {
+  background: #ffffff;
+  color: var(--violet);
+}
+
+.media-path {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid #e7e2fb;
+  border-radius: 13px;
+  box-shadow: 0 8px 22px rgba(76, 29, 149, 0.045);
+  display: grid;
+  gap: 0.55rem;
+  min-width: 0;
+  padding: 0.7rem;
+}
+
+.media-path .inspector-card__header {
+  border-bottom: 1px solid #ede9fe;
+  margin-bottom: 0;
+  padding-bottom: 0.7rem;
+}
+
+.media-path__options {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* Both paths are readable at once: a visitor deciding between them should not
+ * have to switch the session to find out what the other one does. */
+.media-path__option {
+  align-items: start;
+  display: grid;
+  gap: 6px;
+  justify-content: stretch;
+  min-height: 0;
+  min-width: 0;
+  padding: 9px 10px;
+  text-align: left;
+  white-space: normal;
+}
+
+.media-path__option-head {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.media-path__option-head strong {
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 740;
+  line-height: 1.2;
+}
+
+.media-path__badge {
+  background: var(--surface-soft);
+  border: 1px solid #ddd6fe;
+  border-radius: 999px;
+  color: var(--violet);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 2px 6px;
+  text-transform: uppercase;
+}
+
+.media-path__option-summary {
+  color: var(--muted-strong);
+  font-size: 10.5px;
+  font-weight: 560;
+  line-height: 1.45;
+}
+
+.media-path__option-facts {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.media-path__fact {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: 4.6rem minmax(0, 1fr);
+  min-width: 0;
+}
+
+.media-path__fact-label {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  line-height: 1.5;
+  text-transform: uppercase;
+}
+
+.media-path__fact-value {
+  color: var(--muted-strong);
+  font-size: 10px;
+  font-weight: 560;
+  line-height: 1.45;
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+
+.media-path__option[aria-pressed="true"] .media-path__option-head strong,
+.media-path__option[aria-pressed="true"] .media-path__option-summary,
+.media-path__option[aria-pressed="true"] .media-path__fact-value {
+  color: #ffffff;
+}
+
+.media-path__option[aria-pressed="true"] .media-path__fact-label {
+  color: rgba(255, 255, 255, 0.74);
+}
+
+.media-path__option[aria-pressed="true"] .media-path__badge {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.4);
+  color: #ffffff;
+}
+
+.library-departures {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  min-width: 0;
+}
+
+.library-departure {
+  border-top: 1px solid #ede9fe;
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding-top: 7px;
+}
+
+.library-departure:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.library-departure dt {
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.library-departure dd {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  min-width: 0;
+}
+
+.library-departure__values {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  min-width: 0;
+}
+
+.library-departure__value {
+  color: var(--violet);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.library-departure__library {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.library-departure__why {
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 560;
+  line-height: 1.4;
+}
+
+/* Every control carries the same line in the same place, so "this is where the
+ * library leaves it" and "this is not" read as one answer rather than two
+ * different notations. */
+.render-control__origin {
+  align-items: baseline;
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 9.5px;
+  font-weight: 640;
+  gap: 4px;
+  letter-spacing: 0.02em;
+  line-height: 12px;
+  min-width: 0;
+}
+
+.render-control__origin-mark {
+  align-self: center;
+  background: currentcolor;
+  border-radius: 999px;
+  flex: 0 0 auto;
+  height: 5px;
+  opacity: 0.6;
+  width: 5px;
+}
+
+.render-control__origin--workbench {
+  color: var(--amber);
+}
+
+.render-control__origin--panel {
+  color: var(--violet);
+}
+
+.render-control__origin-was {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-weight: 600;
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+
+@media (max-width: 760px) {
+  .demo-shell__inspector {
+    overflow: hidden;
+  }
+
+  .demo-shell__panels {
+    overflow: auto;
   }
 }

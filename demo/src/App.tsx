@@ -24,6 +24,8 @@ import { RendererViewport } from "./components/RendererViewport";
 import { useViewportOverlay } from "./hooks/useViewportOverlay";
 import { selectViewportSessionState } from "./components/viewport-overlay";
 import { SelectionPanel } from "./components/SelectionPanel";
+import { LibraryDeparturesPanel } from "./components/LibraryDeparturesPanel";
+import { MediaPathPanel } from "./components/MediaPathPanel";
 import { SessionOptionsPanel } from "./components/SessionOptionsPanel";
 import { SlowWorkPanel } from "./components/SlowWorkPanel";
 import { SourceControls } from "./components/SourceControls";
@@ -41,6 +43,12 @@ import {
   readStoredDemoViewMode,
   writeStoredDemoViewMode,
 } from "./session/demo-view-mode";
+import {
+  DemoInspectorTab,
+  readStoredDemoInspectorTab,
+  writeStoredDemoInspectorTab,
+} from "./session/inspector-tabs";
+import { listDemoLibraryDepartures } from "./session/library-defaults";
 
 const docsUrl = resolveDemoDocsUrl(
   import.meta.env.VITE_SUPERVISION_DOCS_URL,
@@ -147,6 +155,24 @@ function DemoApp() {
     setViewMode(mode);
     writeStoredDemoViewMode(mode);
   }, []);
+  const [inspectorTab, setInspectorTab] = useState(() =>
+    readStoredDemoInspectorTab(DemoInspectorTab.Clip),
+  );
+  const onInspectorTabChange = useCallback((tab: DemoInspectorTab) => {
+    setInspectorTab(tab);
+    writeStoredDemoInspectorTab(tab);
+  }, []);
+  const libraryDepartures = useMemo(
+    () =>
+      demo.sessionConfiguration === null
+        ? null
+        : listDemoLibraryDepartures({
+            configuration: demo.sessionConfiguration,
+            renderQuality: demo.renderQuality,
+            search: globalThis.location?.search ?? "",
+          }),
+    [demo.renderQuality, demo.sessionConfiguration],
+  );
   const processedRanges = useMemo(
     () =>
       demo.sourceMode === DemoSourceMode.Fixture && demo.duration !== null
@@ -202,9 +228,29 @@ function DemoApp() {
       />
       <DemoShell
         benchmarksPanel={<BenchmarksPanel />}
+        departureCount={libraryDepartures?.length ?? null}
         docsUrl={docsUrl}
+        libraryDeparturesPanel={
+          <LibraryDeparturesPanel departures={libraryDepartures} />
+        }
+        mediaPathPanel={
+          demo.sessionConfiguration === null ? null : (
+            <MediaPathPanel
+              onChange={(path) =>
+                demo.setSessionOptions({
+                  ...demo.sessionOptions,
+                  mediaPath: path,
+                })
+              }
+              path={demo.sessionConfiguration.mediaPath}
+              support={demo.sessionConfiguration.mediaPathSupport}
+            />
+          )
+        }
         mode={viewMode}
         onModeChange={onViewModeChange}
+        onTabChange={onInspectorTabChange}
+        tab={inspectorTab}
         viewport={
           <RendererViewport
             containerRef={demo.containerRef}
@@ -249,16 +295,14 @@ function DemoApp() {
           />
         }
         sessionOptionsPanel={
-          <>
-            <SessionOptionsPanel
-              configuration={demo.sessionConfiguration}
-              onChange={demo.setSessionOptions}
-              options={demo.sessionOptions}
-              playbackGateReach={demo.rendererState?.playbackGateReach ?? null}
-            />
-            <SlowWorkPanel onReopenSession={demo.reopenSession} />
-          </>
+          <SessionOptionsPanel
+            configuration={demo.sessionConfiguration}
+            onChange={demo.setSessionOptions}
+            options={demo.sessionOptions}
+            playbackGateReach={demo.rendererState?.playbackGateReach ?? null}
+          />
         }
+        slowWorkPanel={<SlowWorkPanel onReopenSession={demo.reopenSession} />}
         selectionPanel={
           <SelectionPanel
             hoveredDetectionPick={demo.hoveredDetectionPick}

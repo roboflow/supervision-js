@@ -59,6 +59,21 @@ export const COLLAPSIBLE_SECTIONS = [
 
 export const FIXTURE_PREFIX = "fixture:";
 export const VIEW_MODE_PREFIX = "view-mode:";
+export const INSPECTOR_TAB_PREFIX = "inspector-tab:";
+
+/**
+ * The inspector column shows one tab at a time, so every other tab's controls
+ * are not in the DOM at all. Every hook below is stamped in exactly one of
+ * these.
+ */
+export const INSPECTOR_TABS = ["clip", "style", "session", "diagnostics"];
+
+/** The tab that owns the layer toggles and the mask border slider. */
+export const CONTROLS_TAB = "style";
+
+export function inspectorTabHook(tab) {
+  return `${INSPECTOR_TAB_PREFIX}${tab}`;
+}
 
 /** A CSS selector for one hook, ready to drop into a page-side snippet. */
 export function at(hook) {
@@ -86,8 +101,17 @@ export function fixtureHook(sampleName) {
   return `${FIXTURE_PREFIX}${sampleName}`;
 }
 
-const MISSING_HOOKS = `${JSON.stringify(HOOKS)}
-  .filter((hook) => !document.querySelector('[data-eval="' + hook + '"]'))`;
+function selectTab(tab) {
+  return `(() => {
+    const button = document.querySelector('[data-eval="${inspectorTabHook(tab)}"]');
+    if (!button) return false;
+    button.click();
+    return true;
+  })()`;
+}
+
+const PRESENT_HOOKS = `${JSON.stringify(HOOKS)}
+  .filter((hook) => document.querySelector('[data-eval="' + hook + '"]'))`;
 
 const OPEN_SECTIONS = `(() => {
   const opened = [];
@@ -102,17 +126,36 @@ const OPEN_SECTIONS = `(() => {
 })()`;
 
 /**
- * A collapsed section renders no body, so its controls are absent rather than
- * hidden. They are left open for the whole run: collapsing them again between
- * reads would re-render the panel immediately before a sample. Returning to
- * the Demo view mounts a fresh panel, so scenarios that change view call this
- * again afterwards.
+ * Puts the controls this harness drives on the page: the tab that owns them,
+ * then the sections inside it whose bodies are unmounted while collapsed. They
+ * are left open for the whole run, because collapsing them again between reads
+ * would re-render the panel immediately before a sample. Returning to the Demo
+ * view mounts a fresh panel, so scenarios that change view call this again
+ * afterwards.
  */
-export function openControlSections(session) {
+export async function openControls(session) {
+  await session.readJson(selectTab(CONTROLS_TAB));
   return session.readJson(OPEN_SECTIONS);
 }
 
-/** The hooks the demo is no longer stamping, in the order this file names them. */
-export function missingHooks(session) {
-  return session.readJson(`(() => ${MISSING_HOOKS})()`);
+/**
+ * The hooks the demo is no longer stamping.
+ *
+ * One tab's controls are on the page at a time, so a hook absent from the tab
+ * showing is not a hook that moved. Every tab is visited and the hooks seen in
+ * any of them are struck off; what is left is what nothing renders any more.
+ */
+export async function missingHooks(session) {
+  const seen = new Set();
+
+  for (const tab of INSPECTOR_TABS) {
+    await session.readJson(selectTab(tab));
+    await session.readJson(OPEN_SECTIONS);
+    for (const hook of await session.readJson(`(() => ${PRESENT_HOOKS})()`)) {
+      seen.add(hook);
+    }
+  }
+
+  await openControls(session);
+  return HOOKS.filter((hook) => !seen.has(hook));
 }

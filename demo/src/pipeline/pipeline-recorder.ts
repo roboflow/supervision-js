@@ -7,7 +7,7 @@ import {
 import {
   SourceKind,
   type EngineReadySnapshot,
-} from "supervision-js-web-video-engine";
+} from "supervision/web-video-engine";
 
 import {
   PipelineNodeId,
@@ -25,7 +25,7 @@ import {
 
 /**
  * The slice of an opened media source the recorder can observe, named
- * structurally so a source that is not the video engine simply fails to match.
+ * structurally so a source that is not the web video engine fails to match.
  * Reading it costs nothing recurring: `getMetadata` returns the snapshot the
  * engine already resolved when it loaded, and nothing here starts the engine's
  * broadcast.

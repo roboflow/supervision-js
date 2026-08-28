@@ -10,12 +10,7 @@
  */
 
 import { delay, reloadPage } from "./cdp.mjs";
-import {
-  at,
-  Hook,
-  layerToggleSelector,
-  openControlSections,
-} from "./hooks.mjs";
+import { at, Hook, layerToggleSelector, openControls } from "./hooks.mjs";
 import { percentile, round } from "./stats.mjs";
 
 const BLANKING_SEEK_SECONDS = 3;
@@ -166,7 +161,7 @@ const DISTURBED =
 async function resetPage(session) {
   await reloadPage(session);
   await waitForRenderer(session);
-  await openControlSections(session);
+  await openControls(session);
 }
 
 export async function stable(session, attempts, run) {
@@ -1121,7 +1116,7 @@ export async function runFocus(session, info, attempts = 1) {
 
 async function measureFocus(session) {
   await focusPage(session);
-  await openControlSections(session);
+  await openControls(session);
   const geometry = await session.readJson(CANVAS_BOX);
   const restore = await session.readJson(READ_TOGGLE("Focus"));
   if (!restore.found) {

@@ -10,7 +10,7 @@ import {
   TRACE_RING_BOUNDS,
   type DiagnosticsSnapshot,
   type Warning,
-} from "supervision-js-web-video-engine";
+} from "supervision/web-video-engine";
 import type { EngineDiagnosticsTap } from "../diagnostics/engine-diagnostics-tap";
 import {
   engineMetricGroups,
@@ -22,9 +22,9 @@ import { DiagnosticLabel } from "./DiagnosticLabel";
 import { EngineDiagnosticsTimeline } from "./EngineDiagnosticsTimeline";
 
 /**
- * The video engine's own diagnostics, rendered the way the engine renders them:
- * the worker's diagnoses first, the decode-to-screen ledger, then the same eight
- * metric groups under the same names, then the same coverage lanes.
+ * The web video engine's own diagnostics, rendered the way the engine renders
+ * them: the worker's diagnoses first, the decode-to-screen ledger, then the same
+ * eight metric groups under the same names, then the same coverage lanes.
  *
  * The point is comparison. Open the FrameSampler storybook beside this demo and
  * every reading here has a namesake there, so decode, cache, GOP and present can
@@ -44,9 +44,9 @@ export const EngineDiagnostics = memo(function EngineDiagnostics({
   const snapshot = useEngineDiagnostics(tap, live, readings);
 
   return (
-    <section className="engine-panel" aria-label="Video engine diagnostics">
+    <section className="engine-panel" aria-label="Web video engine diagnostics">
       <header className="engine-panel__header">
-        <h2 className="engine-panel__title">Video Engine</h2>
+        <h2 className="engine-panel__title">Web video engine</h2>
         <span className="engine-panel__rate">
           {readCadence(live, snapshot)}
         </span>
@@ -64,7 +64,7 @@ export const EngineDiagnostics = memo(function EngineDiagnostics({
         <p className="engine-panel__empty">
           {attached
             ? "Nothing read yet. The engine assembles no diagnostics about itself until something asks it to."
-            : "No video engine source is open on this path, so there is nothing to read."}
+            : "No web video engine source is open on this path, so there is nothing to read."}
         </p>
       ) : (
         <>

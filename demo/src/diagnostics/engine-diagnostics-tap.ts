@@ -2,7 +2,7 @@ import {
   DIAGNOSTICS,
   TRACE_RING_BOUNDS,
   type DiagnosticsSnapshot,
-} from "supervision-js-web-video-engine";
+} from "supervision/web-video-engine";
 import type { MediaRendererSource } from "supervision";
 
 /**
@@ -22,12 +22,12 @@ interface EngineDiagnosticsProducer {
 export interface EngineDiagnosticsTap {
   /** Allocates the worker's rolling trace rings; disarm keeps what they hold. */
   armTrace(): void;
-  /** Whether a video engine source is open, broadcast or no broadcast. */
+  /** Whether a web video engine source is open, broadcast or no broadcast. */
   attached(): boolean;
   disarmTrace(): void;
   /** The assembled capture, or null when nothing was armed. */
   exportTrace(): Promise<unknown>;
-  /** Null until a video engine source opens, and again after it closes. */
+  /** Null until a web video engine source opens, and again after it closes. */
   read(): DiagnosticsSnapshot | null;
   /** One reading: holds the broadcast open until a push carries a snapshot,
    *  hands that snapshot over and closes it again. The returned call abandons

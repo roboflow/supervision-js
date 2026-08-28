@@ -1,6 +1,13 @@
-export const VIDEO_ENGINE_PACKAGE = "supervision-js-web-video-engine";
-export const VIDEO_ENGINE_ANALYSIS_ENTRY = `${VIDEO_ENGINE_PACKAGE}/analysis`;
+export const VIDEO_ENGINE_ENTRY = "supervision/web-video-engine";
+export const VIDEO_ENGINE_ANALYSIS_ENTRY = `${VIDEO_ENGINE_ENTRY}/analysis`;
 
+/**
+ * A bundler renames the engine chunk after the module it was split from, and a
+ * browser reports the failing chunk's URL rather than the specifier that asked
+ * for it, so the name a failure can be recognised by is the module's, not the
+ * entry's.
+ */
+const VIDEO_ENGINE_MODULE = "web-video-engine";
 const MISSING_MODULE_ERROR_CODES = new Set([
   "ERR_MODULE_NOT_FOUND",
   "MODULE_NOT_FOUND",
@@ -11,9 +18,9 @@ const QUOTED_SPECIFIER = /['"]([^'"]+)['"]/;
 const MAX_WRAPPED_ERROR_DEPTH = 8;
 
 /**
- * The engine is an optional peer, so the common reason its import fails is that
- * nobody installed it, and the raw failure names a package the caller has never
- * heard of.
+ * The engine is a chunk of this package that the browser fetches on demand, so
+ * the raw failure names a URL nobody wrote and reads like a bug in the caller's
+ * own code.
  */
 export function rethrowEngineImportFailure(
   error: unknown,
@@ -21,9 +28,9 @@ export function rethrowEngineImportFailure(
 ): never {
   if (isEngineResolutionFailure(error)) {
     throw new Error(
-      `openVideoEngineMediaSource needs "${entry}", which did not resolve. ` +
-        `${VIDEO_ENGINE_PACKAGE} is an optional peer dependency of supervision ` +
-        `and is not installed with it: run "npm install ${VIDEO_ENGINE_PACKAGE}".`,
+      `openVideoEngineMediaSource needs "${entry}", which did not load. ` +
+        "The video engine is a lazily loaded chunk of supervision, so check " +
+        "that the deployed build still serves every chunk it emitted.",
       { cause: error },
     );
   }
@@ -32,17 +39,17 @@ export function rethrowEngineImportFailure(
 }
 
 /**
- * A missing engine and an engine that loaded and then threw arrive at the same
- * catch, and only the first is answered by installing the package. Loaders that
- * wrap what they caught put the resolution failure under the error they raise,
- * so the whole cause chain is read, bounded because a chain can be cyclic.
+ * An engine that never loaded and an engine that loaded and then threw arrive
+ * at the same catch, and only the first is a deployment problem. Loaders that
+ * wrap what they caught put the load failure under the error they raise, so the
+ * whole cause chain is read, bounded because a chain can be cyclic.
  */
 export function isEngineResolutionFailure(error: unknown): boolean {
   let cursor = error;
 
   for (let depth = 0; depth <= MAX_WRAPPED_ERROR_DEPTH; depth += 1) {
     if (!(cursor instanceof Error)) return false;
-    if (namesUnresolvedEngine(cursor)) return true;
+    if (namesUnloadableEngine(cursor)) return true;
     cursor = cursor.cause;
   }
 
@@ -51,16 +58,16 @@ export function isEngineResolutionFailure(error: unknown): boolean {
 
 /**
  * Node and bundlers quote the specifier they failed to resolve, so a dependency
- * missing from an engine that is installed is told apart by whose name is
- * quoted; a browser reports an unquoted URL, which carries the package name too.
+ * missing from an engine that did load is told apart by whose name is quoted; a
+ * browser reports an unquoted URL, which carries the chunk name too.
  *
  * Each bundler words this differently and one of them stubs the import with an
  * error of its own, so the wording is matched as well as the code. A build that
- * names the engine first and its importer second is the engine failing to
- * resolve; one that names a dependency first is that dependency's problem, and
- * reading only the first quoted specifier keeps the two apart.
+ * names the engine first and its importer second is the engine failing to load;
+ * one that names a dependency first is that dependency's problem, and reading
+ * only the first quoted specifier keeps the two apart.
  */
-function namesUnresolvedEngine(error: Error): boolean {
+function namesUnloadableEngine(error: Error): boolean {
   const code = "code" in error ? String(error.code) : "";
   if (
     !MISSING_MODULE_ERROR_CODES.has(code) &&
@@ -70,5 +77,5 @@ function namesUnresolvedEngine(error: Error): boolean {
   }
 
   const quoted = QUOTED_SPECIFIER.exec(error.message)?.[1];
-  return (quoted ?? error.message).includes(VIDEO_ENGINE_PACKAGE);
+  return (quoted ?? error.message).includes(VIDEO_ENGINE_MODULE);
 }

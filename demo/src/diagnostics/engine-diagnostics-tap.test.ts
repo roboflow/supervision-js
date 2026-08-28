@@ -4,7 +4,7 @@ import {
   DIAGNOSTICS,
   TRACE_RING_BOUNDS,
   type DiagnosticsSnapshot,
-} from "supervision-js-web-video-engine";
+} from "supervision/web-video-engine";
 import type { MediaRendererSource } from "supervision";
 import {
   createEngineDiagnosticsTap,
@@ -85,7 +85,7 @@ async function openTapped(tap: EngineDiagnosticsTap, engine: unknown) {
 }
 
 describe("createEngineDiagnosticsTap", () => {
-  it("reads nothing until a video engine source opens", async () => {
+  it("reads nothing until a web video engine source opens", async () => {
     const tap = createEngineDiagnosticsTap();
 
     expect(tap.read()).toBeNull();

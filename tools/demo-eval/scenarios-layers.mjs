@@ -7,7 +7,7 @@ import {
   Hook,
   LAYER_TOGGLE_HOOKS,
   layerToggleSelector,
-  openControlSections,
+  openControls,
   VIEW_MODE_PREFIX,
   viewModeSelector,
 } from "./hooks.mjs";
@@ -197,7 +197,7 @@ const sampler = (seekSeconds) => `(async () => {
 export async function runLayers(session, info, attempts) {
   await session.send("Page.bringToFront");
   const roundTrip = await checkViewModeRoundTrip(session);
-  await openControlSections(session);
+  await openControls(session);
   const baseline = await session.readJson(READ_CONTROLS);
   assertControls(baseline);
 

@@ -13,17 +13,17 @@ import type {
   VideoEngine,
   VideoEngineOptions,
   VideoSource,
-} from "supervision-js-web-video-engine";
+} from "#web-video-engine";
 import type {
   AnalysisSession,
   ExtractedFrame,
-} from "supervision-js-web-video-engine/analysis";
+} from "#web-video-engine/analysis";
 
 import { resolveDisplayPixelRatio } from "./display-pixel-ratio";
 import {
   rethrowEngineImportFailure,
   VIDEO_ENGINE_ANALYSIS_ENTRY,
-  VIDEO_ENGINE_PACKAGE,
+  VIDEO_ENGINE_ENTRY,
 } from "./engine-import-failure";
 
 const MILLISECONDS_PER_SECOND = 1000;
@@ -121,22 +121,22 @@ export function createVideoEngineMediaRendererSource(
 }
 
 /**
- * The engine arrives via dynamic import so the package entry stays loadable for
- * consumers that never open a video-engine source: the specifier is external to
- * the build, and a static import would make resolving it a precondition of
- * importing the package at all.
+ * The engine ships inside this package, and arrives through a dynamic import so
+ * that it lands in its own chunk: a consumer who only annotates images never
+ * downloads the engine's embedded decode worker. A static import would fold it
+ * into the main entry.
  */
 async function importEngineEntry() {
   try {
-    return await import("supervision-js-web-video-engine");
+    return await import("#web-video-engine");
   } catch (error) {
-    rethrowEngineImportFailure(error, VIDEO_ENGINE_PACKAGE);
+    rethrowEngineImportFailure(error, VIDEO_ENGINE_ENTRY);
   }
 }
 
 async function importAnalysisEntry() {
   try {
-    return await import("supervision-js-web-video-engine/analysis");
+    return await import("#web-video-engine/analysis");
   } catch (error) {
     rethrowEngineImportFailure(error, VIDEO_ENGINE_ANALYSIS_ENTRY);
   }

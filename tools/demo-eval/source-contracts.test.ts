@@ -134,6 +134,23 @@ describe("the eval hook catalogue", () => {
   });
 });
 
+/* The inspector column shows one tab at a time, so a control in another tab is
+ * not in the DOM at all. The harness visits every tab before it decides a hook
+ * has gone missing, and picks the one that owns the layer toggles before it
+ * drives them. A tab this list does not name is a tab the harness never opens,
+ * and every hook inside it reads as missing. */
+describe("the inspector tabs", () => {
+  it("names the same tabs the demo renders", async () => {
+    const demo = await import("../../demo/src/session/inspector-tabs");
+    const harness = await import("./hooks.mjs");
+
+    expect([...harness.INSPECTOR_TABS].sort()).toEqual(
+      Object.values(demo.DemoInspectorTab).sort(),
+    );
+    expect([...harness.INSPECTOR_TABS]).toContain(harness.CONTROLS_TAB);
+  });
+});
+
 /* The harness drives the view the demo remembers by writing the demo's own
  * localStorage key before it measures anything. A renamed key leaves the
  * harness writing one nobody reads, and the run stays green while every number

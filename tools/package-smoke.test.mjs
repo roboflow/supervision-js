@@ -324,6 +324,68 @@ test("public browser declarations do not leak Pixi implementation types", () => 
   }
 });
 
+test("the video engine subpath exports the adapter that opens it", async () => {
+  const barrel = await import("../packages/web/dist/web-video-engine/index.js");
+  const entrypoint = await import("../packages/web/dist/index.js");
+
+  assert.equal(typeof barrel.createVideoEngineMediaRendererSource, "function");
+  assert.equal(typeof barrel.openVideoEngineMediaSource, "function");
+  // One adapter, not a copy per entry: a caller may hand `createMediaSession`
+  // a source built from either specifier.
+  assert.equal(
+    barrel.createVideoEngineMediaRendererSource,
+    entrypoint.createVideoEngineMediaRendererSource,
+  );
+  assert.equal(typeof barrel.VideoEngine, "function");
+  assert.equal(typeof barrel.FrameTimeline, "function");
+  assert.equal(barrel.VideoEngineErrorCode.NoVideoTrack, "NO_VIDEO_TRACK");
+
+  const analysis =
+    await import("../packages/web/dist/web-video-engine/analysis.js");
+
+  assert.equal(typeof analysis.AnalysisSession, "function");
+  assert.equal(typeof analysis.FrameWalker, "function");
+  assert.ok(
+    existsSync(
+      new URL(
+        "../packages/web/dist/web-video-engine/engine.worker.js",
+        import.meta.url,
+      ),
+    ),
+  );
+});
+
+test("the published entries never load the video engine to reach the rest", () => {
+  // The engine embeds a 1.5 MB decode worker. A static import of it anywhere in
+  // the main entry's graph makes every consumer download that worker, whether
+  // or not anything opens a video source.
+  for (const entry of ["index", "editing"]) {
+    const source = readFileSync(
+      new URL(`../packages/web/dist/${entry}.js`, import.meta.url),
+      "utf8",
+    );
+
+    assert.deepEqual(
+      [
+        ...source.matchAll(
+          /^(?:import|export)[^\n]*?["'][^"'\n]*web-video-engine[^"'\n]*["']/gm,
+        ),
+      ].map((match) => match[0]),
+      [],
+      `dist/${entry}.js statically reaches the video engine`,
+    );
+  }
+
+  assert.match(
+    readFileSync(
+      new URL("../packages/web/dist/index.js", import.meta.url),
+      "utf8",
+    ),
+    /import\(["'][^"'\n]*web-video-engine[^"'\n]*["']\)/,
+    "dist/index.js must still reach the engine, through a dynamic import",
+  );
+});
+
 test("built React Native package imports core without importing web", async () => {
   const entrypoint = await import("../packages/react-native/dist/index.js");
 

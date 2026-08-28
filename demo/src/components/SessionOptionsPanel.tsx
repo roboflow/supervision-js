@@ -29,10 +29,26 @@ import {
   type DemoSessionConfiguration,
   type DemoSessionOptions,
 } from "../session/session-options";
+import {
+  readDemoLibraryDefaults,
+  readDemoOptionOrigin,
+} from "../session/library-defaults";
+import {
+  formatOptionCount,
+  formatOptionFlag,
+  formatOptionMebibytes,
+  formatOptionSeconds,
+} from "../session/option-format";
+import {
+  countChangedDemoSessionOptions,
+  demoInitialSessionOptions,
+} from "../session/workbench-defaults";
 import { DEMO_SOURCE_RESIDENCY_BUDGET_MB } from "../session/source-residency";
 
 const AUTO = "auto";
 const UNSET = "unset";
+const ON = "on";
+const OFF = "off";
 const BYTES_PER_MEBIBYTE = 1024 * 1024;
 const STATE_READOUT_CLASS = "session-options__state";
 
@@ -57,9 +73,7 @@ export const SessionOptionsPanel = memo(function SessionOptionsPanel({
   readonly options: DemoSessionOptions;
   readonly playbackGateReach: PlaybackGateReach | null;
 }) {
-  const changedCount = Object.values(options).filter(
-    (value) => value !== undefined,
-  ).length;
+  const changedCount = countChangedDemoSessionOptions(options);
   const update = <Key extends keyof DemoSessionOptions>(
     key: Key,
     value: DemoSessionOptions[Key],
@@ -73,7 +87,7 @@ export const SessionOptionsPanel = memo(function SessionOptionsPanel({
         <h2>Session</h2>
         <button
           disabled={changedCount === 0}
-          onClick={() => onChange({})}
+          onClick={() => onChange(demoInitialSessionOptions)}
           type="button"
         >
           Reset {changedCount === 0 ? "" : changedCount}
@@ -82,7 +96,8 @@ export const SessionOptionsPanel = memo(function SessionOptionsPanel({
       <p className="session-options__hint">
         These are set when the clip opens. Changing one reopens it and picks up
         where you left off, and every value shown is the one the open session is
-        running on.
+        running on. Each control says whether it is sitting where the library
+        would leave it.
       </p>
       {configuration === null ? (
         <p className="session-options__hint">Waiting for a clip to open.</p>
@@ -112,10 +127,15 @@ function SessionOptionControls({
   readonly options: DemoSessionOptions;
   readonly playbackGateReach: PlaybackGateReach | null;
 }) {
+  const library = readDemoLibraryDefaults(configuration);
   const buffer = configuration.resolved.detectionBuffer;
+  const libraryBuffer = library.detectionBuffer;
   const detectionGate = buffer.playbackGate;
+  const libraryDetectionGate = libraryBuffer.playbackGate;
   const maskFrame = configuration.resolved.renderPreparation.maskFrame;
+  const libraryMaskFrame = library.renderPreparation.maskFrame;
   const preparationGate = configuration.resolved.renderPreparation.playbackGate;
+  const libraryPreparationGate = library.renderPreparation.playbackGate;
   const waitingForAnnotations =
     options.detectionGateEnabled ?? detectionGate?.enabled ?? false;
   const waitingForMasks =
@@ -125,7 +145,6 @@ function SessionOptionControls({
   const engine = configuration.engine;
   const engineDriven = configuration.mediaPath === DemoMediaPath.Engine;
   const fetchedSource = configuration.engineSource === DemoEngineSource.Url;
-  const mediaPathSupport = configuration.mediaPathSupport;
   const normalizationSupport = configuration.normalizationSupport;
   const residency =
     options.sourceResidency ??
@@ -150,8 +169,14 @@ function SessionOptionControls({
       >
         <SegmentedControl
           label="Mode"
+          libraryDefault="File"
           onChange={(value) => onUpdate("mode", value)}
           optionPath="mode"
+          origin={readDemoOptionOrigin(
+            options.mode,
+            configuration.mode,
+            MediaSessionMode.File,
+          )}
           options={[
             { label: "File", value: MediaSessionMode.File },
             { label: "Stream", value: MediaSessionMode.Stream },
@@ -162,8 +187,14 @@ function SessionOptionControls({
         <ToggleControl
           checked={options.autoRefresh ?? configuration.autoRefresh}
           label="Auto refresh"
+          libraryDefault="on"
           onChange={(checked) => onUpdate("autoRefresh", checked)}
           optionPath="detections.autoRefresh"
+          origin={readDemoOptionOrigin(
+            options.autoRefresh,
+            options.autoRefresh ?? configuration.autoRefresh,
+            true,
+          )}
           tooltip="Redraws the frame on screen as soon as annotations covering it arrive. This clip has all of them before it opens, so nothing changes here; you see it while an upload is still being inferred. Off, the picture only redraws when your own code calls `session.refresh()`. `detections.autoRefresh`, default on."
         />
       </ControlSection>
@@ -174,14 +205,20 @@ function SessionOptionControls({
       >
         <SegmentedControl
           label="Playback gate"
+          libraryDefault="unset"
           onChange={(value) =>
-            onUpdate("playbackGate", value === UNSET ? UNSET : value === "on")
+            onUpdate("playbackGate", value === UNSET ? UNSET : value === ON)
           }
           optionPath="playbackGate"
+          origin={readDemoOptionOrigin(
+            options.playbackGate,
+            writeTriState(options.playbackGate ?? configuration.playbackGate),
+            UNSET,
+          )}
           options={[
             { label: "Unset", value: UNSET },
-            { label: "Off", value: "off" },
-            { label: "On", value: "on" },
+            { label: "Off", value: OFF },
+            { label: "On", value: ON },
           ]}
           tooltip="On, the video opens with its boxes and masks already on it. Off, the picture moves at once and they appear as they land, which is what you want for skimming a long clip. Unset waits for masks but not for annotations, unless annotations are still being written. `playbackGate`; this workbench opens a sample clip On and an upload Unset."
           value={writeTriState(
@@ -206,18 +243,35 @@ function SessionOptionControls({
         <ToggleControl
           checked={waitingForAnnotations}
           label="Playback gate enabled"
+          libraryDefault={formatOptionFlag(
+            libraryDetectionGate?.enabled ?? false,
+          )}
           onChange={(checked) => onUpdate("detectionGateEnabled", checked)}
           optionPath="detections.playbackGate.enabled"
+          origin={readDemoOptionOrigin(
+            options.detectionGateEnabled,
+            waitingForAnnotations,
+            libraryDetectionGate?.enabled ?? false,
+          )}
           tooltip="The video waits for the boxes and labels that belong to the frame it is about to show. Off, that frame is drawn without them and they appear once they load. `detections.playbackGate.enabled`; off unless Playback gate is On or annotations are still being written."
         />
         <SliderControl
           label="Required ahead seconds"
+          libraryDefault={formatOptionSeconds(
+            libraryDetectionGate?.requiredAheadSeconds,
+          )}
           max={10}
           min={0}
           onChange={(value) =>
             onUpdate("detectionGateRequiredAheadSeconds", value)
           }
           optionPath="detections.playbackGate.requiredAheadSeconds"
+          origin={readDemoOptionOrigin(
+            options.detectionGateRequiredAheadSeconds,
+            options.detectionGateRequiredAheadSeconds ??
+              detectionGate?.requiredAheadSeconds,
+            libraryDetectionGate?.requiredAheadSeconds,
+          )}
           step={0.25}
           tooltip="How many seconds of annotations have to be loaded before the video is allowed to move. A clip whose annotations are already in memory clears any figure at once; the wait shows while they are still being fetched or written, and a bigger number then means a longer pause before the first frame. At 0 it still waits for the frame it is about to show. `detections.playbackGate.requiredAheadSeconds`, default 2s."
           value={
@@ -225,7 +279,7 @@ function SessionOptionControls({
             detectionGate?.requiredAheadSeconds ??
             0
           }
-          valueLabel={formatSeconds(
+          valueLabel={formatOptionSeconds(
             options.detectionGateRequiredAheadSeconds ??
               detectionGate?.requiredAheadSeconds,
           )}
@@ -234,18 +288,35 @@ function SessionOptionControls({
         <ToggleControl
           checked={waitingForMasks}
           label="Playback gate enabled"
+          libraryDefault={formatOptionFlag(
+            libraryPreparationGate?.enabled ?? false,
+          )}
           onChange={(checked) => onUpdate("preparationGateEnabled", checked)}
           optionPath="renderPreparation.playbackGate.enabled"
+          origin={readDemoOptionOrigin(
+            options.preparationGateEnabled,
+            waitingForMasks,
+            libraryPreparationGate?.enabled ?? false,
+          )}
           tooltip="The video waits for the masks that belong to the frame it is about to show to be turned into pixels. Off, that frame is drawn without its masks. `renderer.renderPreparation.playbackGate.enabled`, on by default."
         />
         <SliderControl
           label="Minimum ahead seconds"
+          libraryDefault={formatOptionSeconds(
+            libraryPreparationGate?.minimumAheadSeconds,
+          )}
           max={10}
           min={0}
           onChange={(value) =>
             onUpdate("preparationGateMinimumAheadSeconds", value)
           }
           optionPath="renderPreparation.playbackGate.minimumAheadSeconds"
+          origin={readDemoOptionOrigin(
+            options.preparationGateMinimumAheadSeconds,
+            options.preparationGateMinimumAheadSeconds ??
+              preparationGate?.minimumAheadSeconds,
+            libraryPreparationGate?.minimumAheadSeconds,
+          )}
           step={0.25}
           tooltip="How little drawn mask can be left in front of the playhead before the video stops. It then stays stopped until Required ahead seconds is met, so setting the two apart keeps a clip that is only just keeping up from stuttering in and out. Nothing on this clip gets near the floor, so raising it changes nothing you can see here. `renderer.renderPreparation.playbackGate.minimumAheadSeconds`, default 0.25s, and never more than the required figure."
           value={
@@ -253,19 +324,28 @@ function SessionOptionControls({
             preparationGate?.minimumAheadSeconds ??
             0
           }
-          valueLabel={formatSeconds(
+          valueLabel={formatOptionSeconds(
             options.preparationGateMinimumAheadSeconds ??
               preparationGate?.minimumAheadSeconds,
           )}
         />
         <SliderControl
           label="Required ahead seconds"
+          libraryDefault={formatOptionSeconds(
+            libraryPreparationGate?.requiredAheadSeconds,
+          )}
           max={10}
           min={0}
           onChange={(value) =>
             onUpdate("preparationGateRequiredAheadSeconds", value)
           }
           optionPath="renderPreparation.playbackGate.requiredAheadSeconds"
+          origin={readDemoOptionOrigin(
+            options.preparationGateRequiredAheadSeconds,
+            options.preparationGateRequiredAheadSeconds ??
+              preparationGate?.requiredAheadSeconds,
+            libraryPreparationGate?.requiredAheadSeconds,
+          )}
           step={0.25}
           tooltip="How much drawn mask has to be in front of the playhead before a stop ends. This is the wait the overlay calls Drawing ahead of the video, where the frame on screen is already finished and the gate is banking a runway in front of it. At 0 that wait is off and the video waits only for the frame it is about to show, which is the other half of this gate. This clip is held about a second when it opens, and this machine draws masks fast enough that the figure barely changes that, so expect it to bite on a denser clip. `renderer.renderPreparation.playbackGate.requiredAheadSeconds`, default 1s."
           value={
@@ -273,7 +353,7 @@ function SessionOptionControls({
             preparationGate?.requiredAheadSeconds ??
             0
           }
-          valueLabel={formatSeconds(
+          valueLabel={formatOptionSeconds(
             options.preparationGateRequiredAheadSeconds ??
               preparationGate?.requiredAheadSeconds,
           )}
@@ -286,42 +366,64 @@ function SessionOptionControls({
       >
         <SliderControl
           label="Buffer ahead seconds"
+          libraryDefault={formatOptionSeconds(libraryBuffer.bufferAheadSeconds)}
           max={30}
           min={0}
           onChange={(value) => onUpdate("bufferAheadSeconds", value)}
           optionPath="buffer.bufferAheadSeconds"
+          origin={readDemoOptionOrigin(
+            options.bufferAheadSeconds,
+            options.bufferAheadSeconds ?? buffer.bufferAheadSeconds,
+            libraryBuffer.bufferAheadSeconds,
+          )}
           step={0.5}
           tooltip="Boxes turn up late after you skip forward? Raise this. It costs memory on a long video. Masks are never drawn further ahead than the annotations are loaded, so lowering it shortens the mask lead too. `detections.buffer.bufferAheadSeconds`, default 10s for a file and 5s for a stream."
           value={options.bufferAheadSeconds ?? buffer.bufferAheadSeconds ?? 0}
-          valueLabel={formatSeconds(
+          valueLabel={formatOptionSeconds(
             options.bufferAheadSeconds ?? buffer.bufferAheadSeconds,
           )}
         />
         <SliderControl
           label="Buffer behind seconds"
+          libraryDefault={formatOptionSeconds(
+            libraryBuffer.bufferBehindSeconds,
+          )}
           max={30}
           min={0}
           onChange={(value) => onUpdate("bufferBehindSeconds", value)}
           optionPath="buffer.bufferBehindSeconds"
+          origin={readDemoOptionOrigin(
+            options.bufferBehindSeconds,
+            options.bufferBehindSeconds ?? buffer.bufferBehindSeconds,
+            libraryBuffer.bufferBehindSeconds,
+          )}
           step={0.5}
           tooltip="Boxes blink out when you step or scrub backwards? Raise this. It costs memory and nothing else. `detections.buffer.bufferBehindSeconds`, default 0.5s for a file and 5s for a stream."
           value={options.bufferBehindSeconds ?? buffer.bufferBehindSeconds ?? 0}
-          valueLabel={formatSeconds(
+          valueLabel={formatOptionSeconds(
             options.bufferBehindSeconds ?? buffer.bufferBehindSeconds,
           )}
         />
         <SliderControl
           label="Refresh interval seconds"
+          libraryDefault={formatOptionSeconds(
+            libraryBuffer.refreshIntervalSeconds,
+          )}
           max={10}
           min={0}
           onChange={(value) => onUpdate("refreshIntervalSeconds", value)}
           optionPath="buffer.refreshIntervalSeconds"
+          origin={readDemoOptionOrigin(
+            options.refreshIntervalSeconds,
+            options.refreshIntervalSeconds ?? buffer.refreshIntervalSeconds,
+            libraryBuffer.refreshIntervalSeconds,
+          )}
           step={0.05}
           tooltip="How often already loaded annotations are read again. A file's annotations never change, so nothing on screen moves with this: a stretch the buffer has not reached yet is fetched the moment you get there whatever this says, and raising it only saves repeated work. On a stream more annotations keep arriving, and this is how often they are picked up. `detections.buffer.refreshIntervalSeconds`, default 2.5s for a file and 0.25s for a stream."
           value={
             options.refreshIntervalSeconds ?? buffer.refreshIntervalSeconds ?? 0
           }
-          valueLabel={formatSeconds(
+          valueLabel={formatOptionSeconds(
             options.refreshIntervalSeconds ?? buffer.refreshIntervalSeconds,
           )}
         />
@@ -333,8 +435,14 @@ function SessionOptionControls({
       >
         <SegmentedControl
           label="Mode"
+          libraryDefault="Auto"
           onChange={(value) => onUpdate("preparationMode", value)}
           optionPath="renderPreparation.mode"
+          origin={readDemoOptionOrigin(
+            options.preparationMode,
+            options.preparationMode ?? configuration.preparationMode,
+            RenderPreparationMode.Auto,
+          )}
           options={[
             { label: "Auto", value: RenderPreparationMode.Auto },
             { label: "Main thread", value: RenderPreparationMode.MainThread },
@@ -345,10 +453,16 @@ function SessionOptionControls({
         />
         <NumberControl
           label="Worker count"
+          libraryDefault={formatOptionCount(libraryMaskFrame?.workerCount)}
           max={8}
           min={1}
           onChange={(value) => onUpdate("maskWorkerCount", value)}
           optionPath="maskFrame.workerCount"
+          origin={readDemoOptionOrigin(
+            options.maskWorkerCount,
+            options.maskWorkerCount ?? maskFrame?.workerCount,
+            libraryMaskFrame?.workerCount,
+          )}
           placeholder="auto"
           step={1}
           tooltip="How many masks can be turned into pixels at once. More of them catch up faster after you jump, and compete with the video itself for the machine. The Workers reading counts the busy ones out of this number. `renderer.renderPreparation.maskFrame.workerCount`; empty takes half this machine's cores capped at 4, and a figure you type is capped at 8."
@@ -356,9 +470,17 @@ function SessionOptionControls({
         />
         <NumberControl
           label="Prefetch frame count"
+          libraryDefault={formatOptionCount(
+            libraryMaskFrame?.prefetchFrameCount,
+          )}
           min={1}
           onChange={(value) => onUpdate("maskPrefetchFrameCount", value)}
           optionPath="maskFrame.prefetchFrameCount"
+          origin={readDemoOptionOrigin(
+            options.maskPrefetchFrameCount,
+            options.maskPrefetchFrameCount ?? maskFrame?.prefetchFrameCount,
+            libraryMaskFrame?.prefetchFrameCount,
+          )}
           step={1}
           tooltip="How many frames of masks are kept drawn ahead of the picture while it plays. Too few and masks drop out mid-shot on a crowded clip. The Prepared window reading says how many are actually there. A paused clip ignores this and keeps one batch ahead. `renderer.renderPreparation.maskFrame.prefetchFrameCount`, default 7 seconds' worth for a file and 3 for a stream, counted at the annotation frame rate."
           value={
@@ -367,9 +489,17 @@ function SessionOptionControls({
         />
         <NumberControl
           label="Max cache frame count"
+          libraryDefault={formatOptionCount(
+            libraryMaskFrame?.maxCacheFrameCount,
+          )}
           min={1}
           onChange={(value) => onUpdate("maskMaxCacheFrameCount", value)}
           optionPath="maskFrame.maxCacheFrameCount"
+          origin={readDemoOptionOrigin(
+            options.maskMaxCacheFrameCount,
+            options.maskMaxCacheFrameCount ?? maskFrame?.maxCacheFrameCount,
+            libraryMaskFrame?.maxCacheFrameCount,
+          )}
           step={1}
           tooltip="How many drawn masks are held in memory before the oldest are dropped. Set it under the prefetch count and masks the playhead is about to reach get thrown out and drawn a second time. Set it over, and all it costs is memory. `renderer.renderPreparation.maskFrame.maxCacheFrameCount`, default 8 seconds' worth for a file and 5 for a stream."
           value={
@@ -378,9 +508,17 @@ function SessionOptionControls({
         />
         <NumberControl
           label="Max pending frame count"
+          libraryDefault={formatOptionCount(
+            libraryMaskFrame?.maxPendingFrameCount,
+          )}
           min={1}
           onChange={(value) => onUpdate("maskMaxPendingFrameCount", value)}
           optionPath="maskFrame.maxPendingFrameCount"
+          origin={readDemoOptionOrigin(
+            options.maskMaxPendingFrameCount,
+            options.maskMaxPendingFrameCount ?? maskFrame?.maxPendingFrameCount,
+            libraryMaskFrame?.maxPendingFrameCount,
+          )}
           step={1}
           tooltip="A ceiling on how many frames can queue up waiting for a free worker, so one big jump cannot pile up unbounded work. The Cook reading shows that queue as its `q` figure. `renderer.renderPreparation.maskFrame.maxPendingFrameCount`, default 24."
           value={
@@ -389,19 +527,35 @@ function SessionOptionControls({
         />
         <NumberControl
           label="Schedule batch size"
+          libraryDefault={formatOptionCount(
+            libraryMaskFrame?.scheduleBatchSize,
+          )}
           min={1}
           onChange={(value) => onUpdate("maskScheduleBatchSize", value)}
           optionPath="maskFrame.scheduleBatchSize"
+          origin={readDemoOptionOrigin(
+            options.maskScheduleBatchSize,
+            options.maskScheduleBatchSize ?? maskFrame?.scheduleBatchSize,
+            libraryMaskFrame?.scheduleBatchSize,
+          )}
           step={1}
           tooltip="How many frames are sent off to be drawn in one go. It also sets how far a paused clip works ahead: one batch plus the frame under the playhead. Raise it and stepping forward lands on a mask that is already drawn. `renderer.renderPreparation.maskFrame.scheduleBatchSize`, default 16."
           value={options.maskScheduleBatchSize ?? maskFrame?.scheduleBatchSize}
         />
         <SliderControl
           label="Scan interval seconds"
+          libraryDefault={formatOptionSeconds(
+            libraryMaskFrame?.scanIntervalSeconds,
+          )}
           max={1}
           min={0.02}
           onChange={(value) => onUpdate("maskScanIntervalSeconds", value)}
           optionPath="maskFrame.scanIntervalSeconds"
+          origin={readDemoOptionOrigin(
+            options.maskScanIntervalSeconds,
+            options.maskScanIntervalSeconds ?? maskFrame?.scanIntervalSeconds,
+            libraryMaskFrame?.scanIntervalSeconds,
+          )}
           step={0.02}
           tooltip="How often the library checks whether enough masks are drawn ahead, and starts more. On this clip it catches up within a few hundred milliseconds at every setting on the slider, so there is nothing here to watch; it is a lever for a machine that cannot keep up. `renderer.renderPreparation.maskFrame.scanIntervalSeconds`, default 0.1s."
           value={
@@ -409,7 +563,7 @@ function SessionOptionControls({
             maskFrame?.scanIntervalSeconds ??
             0.02
           }
-          valueLabel={formatSeconds(
+          valueLabel={formatOptionSeconds(
             options.maskScanIntervalSeconds ?? maskFrame?.scanIntervalSeconds,
           )}
         />
@@ -421,8 +575,14 @@ function SessionOptionControls({
       >
         <SegmentedControl
           label="Fit"
+          libraryDefault="Contain"
           onChange={(value) => onUpdate("fit", value)}
           optionPath="fit"
+          origin={readDemoOptionOrigin(
+            options.fit,
+            options.fit ?? configuration.fit,
+            MediaRendererFit.Contain,
+          )}
           options={[
             { label: "Contain", value: MediaRendererFit.Contain },
             { label: "Cover", value: MediaRendererFit.Cover },
@@ -432,8 +592,14 @@ function SessionOptionControls({
         />
         <SegmentedControl
           label="Interaction mode"
+          libraryDefault="Paused only"
           onChange={(value) => onUpdate("interactionMode", value)}
           optionPath="interaction.mode"
+          origin={readDemoOptionOrigin(
+            options.interactionMode,
+            options.interactionMode ?? configuration.interactionMode,
+            MediaInteractionMode.PausedOnly,
+          )}
           options={[
             { label: "Paused only", value: MediaInteractionMode.PausedOnly },
             { label: "Always", value: MediaInteractionMode.Always },
@@ -445,48 +611,40 @@ function SessionOptionControls({
         <ToggleControl
           checked={options.loop ?? configuration.loop}
           label="Loop"
+          libraryDefault="on"
           onChange={(checked) => onUpdate("loop", checked)}
           optionPath="loop"
+          origin={readDemoOptionOrigin(
+            options.loop,
+            options.loop ?? configuration.loop,
+            true,
+          )}
           tooltip="The clip runs again from the top instead of stopping on its last frame. `renderer.loop`, default on."
         />
         <ToggleControl
           checked={options.autoPlay ?? configuration.autoPlay}
           label="Auto play"
+          libraryDefault="on"
           onChange={(checked) => onUpdate("autoPlay", checked)}
           optionPath="autoPlay"
+          origin={readDemoOptionOrigin(
+            options.autoPlay,
+            options.autoPlay ?? configuration.autoPlay,
+            true,
+          )}
           tooltip="The video starts as soon as it is ready. There is nothing to see here either way, because this workbench calls play itself after every reopen. `renderer.autoPlay`, default on in the library and off in this workbench."
         />
       </ControlSection>
 
       <ControlSection
-        description="Which reader opens the clip and turns it into pictures. The Video engine group and the Normalization group each act on one of the two, so this decides which of them can do anything."
-        title="Media path"
-      >
-        <SegmentedControl
-          disabled={!mediaPathSupport.supported}
-          label="Media path"
-          onChange={(value) => onUpdate("mediaPath", value)}
-          optionPath="media"
-          options={[
-            { label: "Video engine", value: DemoMediaPath.Engine },
-            { label: "Mediabunny", value: DemoMediaPath.Mediabunny },
-          ]}
-          tooltip="Video engine opens the clip through this project's own decoder: it decodes in a worker, keeps frames it has already drawn so a drag paints at once, and fetches the file in pieces. Mediabunny gives the library the file's address and lets it read and decode the clip itself, which is the shorter path and the only one that can convert the file first. `media`, the video engine here."
-          value={configuration.mediaPath}
-        />
-        {mediaPathSupport.supported ? null : (
-          <ControlNote>{mediaPathSupport.reason}</ControlNote>
-        )}
-      </ControlSection>
-
-      <ControlSection
-        description="How the clip's own bytes are fetched, and how much decoded picture is kept around the playhead. Nothing here changes what is drawn, only how long you wait to see it."
-        title="Video engine"
+        description="How the clip's own bytes are fetched, and how much decoded picture is kept around the playhead. The whole group belongs to a package the library does not ship, so none of it has a library default. Nothing here changes what is drawn, only how long you wait to see it."
+        title="Web video engine"
       >
         {engineDriven ? null : (
           <ControlNote>
             The media path is Mediabunny, so the library reads and decodes the
-            clip itself and nothing in this group is used.
+            clip itself and nothing in this group is used. The Media path
+            control switches it.
           </ControlNote>
         )}
         {!engineDriven || fetchedSource ? null : (
@@ -574,7 +732,7 @@ function SessionOptionControls({
           step={16}
           tooltip="The ceiling on held bytes, set here in mebibytes. Once it is reached the runs furthest from the playhead are dropped first, so a budget smaller than the file makes residency a window that follows the playhead rather than a copy of the whole clip. `sourceResidency.budgetBytes`, 160 MiB unless the page URL asked for another figure."
           value={residencyBudgetMb}
-          valueLabel={formatMebibytes(residencyBudgetMb)}
+          valueLabel={formatOptionMebibytes(residencyBudgetMb)}
         />
         <NumberControl
           disabled={!fetchedSource}
@@ -605,7 +763,7 @@ function SessionOptionControls({
       </ControlSection>
 
       <ControlSection
-        description="Rewrites the file into a format the browser can step through before anything plays. It belongs to the Mediabunny media path, where the library reads the conversion in place of the clip's own file."
+        description="Rewrites the file into a format the browser can step through before anything plays. It belongs to the Mediabunny media path, where the library reads the conversion in place of the clip's own file. The library converts nothing unless asked, so every value here is off until you turn it on."
         title="Normalization"
       >
         <ToggleControl
@@ -685,7 +843,9 @@ function SessionOptionControls({
           step={0.25}
           tooltip="Seconds between the points a jump can land on directly. Short, and scrubbing and frame stepping land immediately, for more bytes. Long, and every jump decodes a run of frames before it can show one. `normalize.video.keyFrameInterval`, default 1s."
           value={options.normalizeKeyFrameInterval ?? 1}
-          valueLabel={formatSeconds(options.normalizeKeyFrameInterval ?? 1)}
+          valueLabel={formatOptionSeconds(
+            options.normalizeKeyFrameInterval ?? 1,
+          )}
         />
         <NumberControl
           disabled={!normalizing}
@@ -791,7 +951,7 @@ function SessionOptionControls({
           value={options.normalizeAudioBitrate}
         />
         <ControlNote>
-          Converted bytes reach the video engine only when a host builds a{" "}
+          Converted bytes reach the web video engine only when a host builds a{" "}
           <code>SourceKind.Blob</code> engine source from them, and this option
           cannot ask for that.
         </ControlNote>
@@ -826,16 +986,4 @@ function writeTriState(value: boolean | typeof UNSET | undefined) {
 
 function toMebibytes(bytes: number | undefined) {
   return bytes === undefined ? undefined : bytes / BYTES_PER_MEBIBYTE;
-}
-
-function formatMebibytes(value: number) {
-  return `${trimZeros(value)} MiB`;
-}
-
-function formatSeconds(value: number | undefined) {
-  return value === undefined ? "none" : `${trimZeros(value)}s`;
-}
-
-function trimZeros(value: number) {
-  return Number.isInteger(value) ? String(value) : value.toFixed(2);
 }

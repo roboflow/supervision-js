@@ -85,19 +85,17 @@ import { resolveMediaSessionDefaults } from "supervision";
 const defaults = resolveMediaSessionDefaults({ mode, detections });
 ```
 
-### The Engine Installs Separately
+### The Engine Ships Inside `supervision`
 
-The video engine ships as `supervision-js-web-video-engine` at `0.1.0-next.0`, versioned
-independently. `supervision` declares it as an optional peer and loads it
-through a dynamic import, so installing `supervision` does not install it:
+The video engine is a subpath of the one published package rather than a package
+of its own, so nothing extra has to be installed to open a video source:
 
-```sh
-npm install supervision-js-web-video-engine
+```ts
+import { createVideoEngineMediaRendererSource } from "supervision/web-video-engine";
 ```
 
-The engine also stands alone. Nothing in it depends on `supervision`, so an
-application that wants frame-accurate decoding, scrubbing, or offline frame
-extraction without the annotation stack can use it on its own.
+`supervision` reaches it through a dynamic import, so an application that only
+annotates images never downloads the engine or its decode worker.
 
 ### Files Whose Groups Do Not Start With A Keyframe Now Play
 

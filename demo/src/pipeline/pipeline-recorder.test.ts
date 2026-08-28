@@ -13,7 +13,7 @@ import {
 import {
   SourceKind,
   type EngineReadySnapshot,
-} from "supervision-js-web-video-engine";
+} from "supervision/web-video-engine";
 
 import {
   PipelineNodeId,
@@ -444,8 +444,8 @@ function readySnapshot(byteSource: SourceKind): EngineReadySnapshot {
 }
 
 /**
- * A source shaped like the video engine's, whose broadcast controls count their
- * own calls. The recorder must resolve everything structural without touching
+ * A source shaped like the web video engine's, whose broadcast controls count
+ * their own calls. The recorder must resolve everything structural without touching
  * one of them.
  */
 function engineSource(

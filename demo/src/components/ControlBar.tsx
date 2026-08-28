@@ -3,7 +3,7 @@ import { MediaRendererPlaybackState } from "supervision";
 import type {
   FrameTimelineData,
   SourceResidencyDiagnostics,
-} from "supervision-js-web-video-engine";
+} from "supervision/web-video-engine";
 import { formatTime } from "../format";
 import {
   useLiveReadoutWriter,

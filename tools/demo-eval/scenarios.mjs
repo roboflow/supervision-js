@@ -12,7 +12,7 @@ import {
   at,
   FIXTURE_PREFIX,
   fixtureHook,
-  openControlSections,
+  openControls,
   startingAt,
 } from "./hooks.mjs";
 import { percentile, round } from "./stats.mjs";
@@ -126,7 +126,7 @@ export async function openDemoPage(
   const settled = await session.evaluate(
     `localStorage.getItem(${JSON.stringify(VIEW_MODE_STORAGE_KEY)}) ?? "demo"`,
   );
-  if (settled !== "benchmarks") await openControlSections(session);
+  if (settled !== "benchmarks") await openControls(session);
   const fixture = await activeFixture(session);
   return {
     session,
@@ -197,7 +197,7 @@ async function attemptStable(
     }
     await reloadPage(session);
     await waitForRenderer(session, 60_000);
-    await openControlSections(session);
+    await openControls(session);
   };
   let lastReason = null;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {

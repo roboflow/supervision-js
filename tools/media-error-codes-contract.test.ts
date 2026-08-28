@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { VideoEngineErrorCode } from "supervision-js-web-video-engine";
+import { VideoEngineErrorCode } from "supervision/web-video-engine";
 
 import { MEDIA_PRODUCER_ERROR_CODES } from "../packages/web/src/media/media-errors";
 

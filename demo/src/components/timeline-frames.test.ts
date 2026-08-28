@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FrameTimeline } from "supervision-js-web-video-engine";
+import { FrameTimeline } from "supervision/web-video-engine";
 
 import {
   formatTimelineFrame,

@@ -6,7 +6,7 @@ import {
   useState,
   type CSSProperties,
 } from "react";
-import type { DiagnosticsSnapshot } from "supervision-js-web-video-engine";
+import type { DiagnosticsSnapshot } from "supervision/web-video-engine";
 
 import type { EngineDiagnosticsTap } from "../diagnostics/engine-diagnostics-tap";
 import { formatMb } from "../diagnostics/engine-metrics";
@@ -134,7 +134,7 @@ const SHORT_LABELS: Record<PipelineNodeId, string> = {
   [PipelineNodeId.DecoderCameraStream]: "Live camera reader",
   [PipelineNodeId.DecoderMediabunny]: "Mediabunny alone",
   [PipelineNodeId.DecoderStaticImage]: "Still-picture reader",
-  [PipelineNodeId.DecoderVideoEngine]: "Video engine",
+  [PipelineNodeId.DecoderVideoEngine]: "Web video engine",
   [PipelineNodeId.DetectionsInterval]: "By time span",
   [PipelineNodeId.DetectionsNearestFrameIndex]: "By frame count",
   [PipelineNodeId.EngineDecodeScheduler]: "Decode queue",

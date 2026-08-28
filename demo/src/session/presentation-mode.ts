@@ -1,4 +1,4 @@
-import type { PresentationMode } from "supervision-js-web-video-engine";
+import type { PresentationMode } from "supervision/web-video-engine";
 
 /** `?presentation=canvas` hands one page load's pixels to the engine itself. */
 const CANVAS_OVERRIDE = "canvas";
