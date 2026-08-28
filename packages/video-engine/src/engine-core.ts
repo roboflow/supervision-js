@@ -48,6 +48,18 @@ import {
   type SerializedViewport,
 } from "./worker-protocol";
 
+/** A seek waiting on the crisp frame that says where its walk landed. */
+interface AwaitedSeek {
+  /** The frame the seek aimed at. The walk answers at or before it, so this
+   *  is what separates that answer from a frame decoded for an earlier seek. */
+  readonly target: FrameId;
+  /** Whether the answer is the keyframe enclosing the target rather than a
+   *  frame beside it. A key walk can land a whole GOP back, which is too far
+   *  to recognise by position, so its answer is recognised by the keyframe
+   *  flag the scheduler puts on exactly the frame it emits for one. */
+  readonly keyOnly: boolean;
+}
+
 export interface EngineCoreOptions {
   /** Sink for broadcast state. The worker host serializes each event onto
    *  the state plane; tests collect them to assert transitions. */
@@ -128,7 +140,12 @@ export class EngineCore {
    *  as dead. Null until that crisp paint arrives, so a step pressed before it
    *  still falls back to the clock. */
   private seekLanded: FrameId | null = null;
-  private awaitingSeekPaint = false;
+  /** The seek still waiting on that paint, or null when none is. Every paint
+   *  the engine makes runs through this latch, and the render loop paints one
+   *  frame per animation frame from a stash a previous seek may have filled,
+   *  so without the target on it any leftover frame answers for the seek in
+   *  flight and publishes itself as the playhead. */
+  private awaitedSeek: AwaitedSeek | null = null;
   /** Wall stamp of a seek being served by re-anchoring the playback walk, or
    *  null when no such seek is waiting on its crisp frame. */
   private playSeekStartedAtMs: number | null = null;
@@ -347,7 +364,7 @@ export class EngineCore {
     // A scrub moves the playhead off the last step, so the next step must
     // re-base on the scrub target, not the stale step landing.
     this.lastStepLanded = null;
-    this.awaitSeekLanding();
+    this.awaitSeekLanding(target.frame);
     this.clock.seek(target.mediaTimeS);
     this.controller?.tryPaintFromCache(target.mediaTimeS * 1000);
     if (!this.controller) return;
@@ -371,7 +388,7 @@ export class EngineCore {
     this.playSeekStartedAtMs = performance.now();
     // The cache paint each seek path tries first can already have put the
     // crisp frame up, and then the wait is over before the walk restarts.
-    if (!this.awaitingSeekPaint) this.closePlaySeekWait();
+    if (!this.awaitedSeek) this.closePlaySeekWait();
     this.controller?.endPlay();
     this.controller?.beginPlay(tSec);
   }
@@ -397,7 +414,7 @@ export class EngineCore {
     const target = this.timeline().landingAt(frameIndex);
     const tSec = target.mediaTimeS;
     this.lastStepLanded = null;
-    this.awaitSeekLanding();
+    this.awaitSeekLanding(target.frame);
     this.clock.seek(tSec);
     this.controller?.tryPaintFromCache(tSec * 1000);
     // While playing, moving the playhead means re-anchoring the playback
@@ -420,14 +437,20 @@ export class EngineCore {
     this.emit({ type: "seeking", seeking: false });
     // A long GOP can end the walk on a different frame from the one aimed
     // at, and the crisp paint is what recorded which.
-    return this.landingOf(this.seekLanded);
+    const landed = this.landingOf(this.seekLanded);
+    this.closeSeekLanding();
+    return landed;
   }
 
   async seekToKey(timeMs: number): Promise<FrameLanding | null> {
     if (!this.cursor) return null;
     const tSec = timeMs / 1000;
+    const timeline = this.timeline();
+    const target = timeline.idAt(timeline.indexAtOrBefore(asSec(tSec)));
     this.lastStepLanded = null;
-    this.awaitSeekLanding();
+    // Playing, this seek re-anchors the playback walk rather than running a
+    // key walk, and an ordinary walk answers beside the target.
+    this.awaitSeekLanding(target, !this.playing);
     this.clock.seek(tSec);
     this.controller?.tryPaintFromCache(timeMs);
     if (this.playing && this.controller) {
@@ -445,7 +468,9 @@ export class EngineCore {
       keyOnly: true,
     });
     this.emit({ type: "seeking", seeking: false });
-    return this.landingOf(this.seekLanded);
+    const landed = this.landingOf(this.seekLanded);
+    this.closeSeekLanding();
+    return landed;
   }
 
   /**
@@ -598,16 +623,39 @@ export class EngineCore {
     this.emitStatus(PlaybackStatus.Ended);
   }
 
-  private awaitSeekLanding(): void {
+  private awaitSeekLanding(target: FrameId, keyOnly = false): void {
     this.seekLanded = null;
-    this.awaitingSeekPaint = true;
+    this.awaitedSeek = { keyOnly, target };
     this.playSeekStartedAtMs = null;
   }
 
   private forgetSeekLanding(): void {
     this.seekLanded = null;
-    this.awaitingSeekPaint = false;
+    this.awaitedSeek = null;
     this.playSeekStartedAtMs = null;
+  }
+
+  /** Releases the latch of a seek that has already answered its caller. The
+   *  landing rode back on the return value, so a paint arriving after it would
+   *  move the playhead to somewhere the caller was never told about. */
+  private closeSeekLanding(): void {
+    this.awaitedSeek = null;
+  }
+
+  /**
+   * Whether this paint is the landing of the seek waiting on one.
+   *
+   * An exact walk answers at or before the frame it aimed at, and no further
+   * back than the sample next to it, so the target falls inside the answering
+   * frame's own span. That span is the whole test: a frame decoded for some
+   * earlier position sits outside it however recently it was painted.
+   */
+  private answersAwaitedSeek(painted: FrameId, isKeyFrame: boolean): boolean {
+    const awaited = this.awaitedSeek;
+    if (!awaited) return false;
+    if (painted.ticks > awaited.target.ticks) return false;
+    if (awaited.keyOnly) return isKeyFrame;
+    return awaited.target.ticks <= this.timeline().endTicksAt(painted.index);
   }
 
   /** The frame table of the loaded source. Reached only from paths that have
@@ -655,9 +703,12 @@ export class EngineCore {
     this.aimResidency(mediaTimeMs);
     // Only a crisp frame names where the walk landed. The coarse stand-in
     // that paints the instant a seek is issued can be a long way off.
-    if (this.awaitingSeekPaint && frame.quality === "exact") {
+    if (
+      frame.quality === "exact" &&
+      this.answersAwaitedSeek(frameId, frame.isKeyFrame)
+    ) {
       this.seekLanded = frameId;
-      this.awaitingSeekPaint = false;
+      this.awaitedSeek = null;
       this.closePlaySeekWait();
       // Paused paints normally never move the playhead, but the landing
       // of an awaited seek is the one paint that says where the request
