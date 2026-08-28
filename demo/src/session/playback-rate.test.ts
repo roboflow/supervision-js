@@ -87,14 +87,22 @@ describe("sustained playback rate", () => {
     expect(isPlaybackRateSustained(2, 1.2)).toBe(false);
   });
 
+  it("calls out a shortfall at the default rate", () => {
+    expect(isPlaybackRateSustained(1, 0.4)).toBe(false);
+    expect(isPlaybackRateSustained(1, 0.79)).toBe(false);
+  });
+
   it("accepts a picture close enough to the commanded rate", () => {
     expect(isPlaybackRateSustained(4, 3.4)).toBe(true);
     expect(isPlaybackRateSustained(2, 2.1)).toBe(true);
+    expect(isPlaybackRateSustained(1, 0.8)).toBe(true);
+    expect(isPlaybackRateSustained(1, 0.95)).toBe(true);
   });
 
   it("claims no shortfall it cannot see", () => {
     expect(isPlaybackRateSustained(8, null)).toBe(true);
+    expect(isPlaybackRateSustained(1, null)).toBe(true);
+    expect(isPlaybackRateSustained(0.5, 0.1)).toBe(true);
     expect(isPlaybackRateSustained(0.25, 0.05)).toBe(true);
-    expect(isPlaybackRateSustained(1, 0.4)).toBe(true);
   });
 });

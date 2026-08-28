@@ -34,10 +34,13 @@ import type {
 } from "./demo-session-types";
 import {
   applyDemoDetectionOptions,
+  applyDemoEngineOptions,
   applyDemoRendererOptions,
   applyDemoSessionMode,
   applyDemoSessionPlaybackGate,
-  describeMissingNormalization,
+  DemoEngineSource,
+  DemoMediaPath,
+  describeMissingSupport,
   resolveDemoSessionConfiguration,
 } from "./session-options";
 import {
@@ -53,7 +56,10 @@ import {
  * session cannot hand the clip to `createMediaSession` as a `Blob`, which is
  * the only shape `normalize` acts on.
  */
-const UPLOAD_NORMALIZATION_BLOCKED = describeMissingNormalization(
+const UPLOAD_MEDIA_PATH_BLOCKED = describeMissingSupport(
+  "SAM3 inference reads frames back from the video engine as it runs, so an upload always opens on the video engine.",
+);
+const UPLOAD_NORMALIZATION_BLOCKED = describeMissingSupport(
   "SAM3 inference reads frames back from the video engine source, which normalizing would replace.",
 );
 
@@ -114,11 +120,17 @@ export async function createUploadSession(
     options.sessionOptions,
   );
 
+  const engine = applyDemoEngineOptions({}, options.sessionOptions);
+
   options.onSessionConfiguration(
     resolveDemoSessionConfiguration({
       detections,
+      engine,
+      engineSource: DemoEngineSource.Blob,
+      mediaPath: DemoMediaPath.Engine,
+      mediaPathSupport: UPLOAD_MEDIA_PATH_BLOCKED,
       mode,
-      normalizable: UPLOAD_NORMALIZATION_BLOCKED,
+      normalizationSupport: UPLOAD_NORMALIZATION_BLOCKED,
       playbackGate,
       renderer,
     }),
@@ -147,6 +159,7 @@ export async function createUploadSession(
       media: options.tapMediaSource(
         tapSampleSink(
           createVideoEngineMediaRendererSource({
+            ...engine,
             display: readDemoDisplayBox(
               options.container,
               options.renderQuality,

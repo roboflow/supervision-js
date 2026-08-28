@@ -21,13 +21,19 @@ import {
 } from "./InspectorControls";
 import { Readout } from "./Readout";
 import {
+  DemoEngineSource,
+  DemoMediaPath,
+  DemoSourceResidency,
+  readDemoSourceResidencyMode,
   resolveNormalizationVideoCodecLabel,
   type DemoSessionConfiguration,
   type DemoSessionOptions,
 } from "../session/session-options";
+import { DEMO_SOURCE_RESIDENCY_BUDGET_MB } from "../session/source-residency";
 
 const AUTO = "auto";
 const UNSET = "unset";
+const BYTES_PER_MEBIBYTE = 1024 * 1024;
 const STATE_READOUT_CLASS = "session-options__state";
 
 /** When the wait happens. What is waited for is the Waiting for reading. */
@@ -116,7 +122,21 @@ function SessionOptionControls({
     options.preparationGateEnabled ?? preparationGate?.enabled ?? false;
   const container =
     options.normalizeContainer ?? MediaNormalizationContainer.WebM;
-  const normalizing = options.normalize === true;
+  const engine = configuration.engine;
+  const engineDriven = configuration.mediaPath === DemoMediaPath.Engine;
+  const fetchedSource = configuration.engineSource === DemoEngineSource.Url;
+  const mediaPathSupport = configuration.mediaPathSupport;
+  const normalizationSupport = configuration.normalizationSupport;
+  const residency =
+    options.sourceResidency ??
+    readDemoSourceResidencyMode(engine.sourceResidency);
+  const holdingBytes = residency !== DemoSourceResidency.Off;
+  const residencyBudgetMb =
+    options.sourceResidencyBudgetMb ??
+    toMebibytes(engine.sourceResidency?.budgetBytes) ??
+    DEMO_SOURCE_RESIDENCY_BUDGET_MB;
+  const normalizing =
+    normalizationSupport.supported && options.normalize === true;
   const sizedOutput =
     options.normalizeWidth !== undefined &&
     options.normalizeHeight !== undefined;
@@ -199,7 +219,7 @@ function SessionOptionControls({
           }
           optionPath="detections.playbackGate.requiredAheadSeconds"
           step={0.25}
-          tooltip="How many seconds of annotations have to be loaded before the video is allowed to move. A clip whose annotations are already in memory clears any figure at once; the wait shows while they are still being fetched or written, and a bigger number then means a longer pause before the first frame. At 0 the video does not wait. `detections.playbackGate.requiredAheadSeconds`, default 2s."
+          tooltip="How many seconds of annotations have to be loaded before the video is allowed to move. A clip whose annotations are already in memory clears any figure at once; the wait shows while they are still being fetched or written, and a bigger number then means a longer pause before the first frame. At 0 it still waits for the frame it is about to show. `detections.playbackGate.requiredAheadSeconds`, default 2s."
           value={
             options.detectionGateRequiredAheadSeconds ??
             detectionGate?.requiredAheadSeconds ??
@@ -439,21 +459,167 @@ function SessionOptionControls({
       </ControlSection>
 
       <ControlSection
-        description="Rewrites the file into a format the browser can step through before anything plays. The converted video then feeds the picture, so the video engine stops driving it and its readings go quiet."
+        description="Which reader opens the clip and turns it into pictures. The Video engine group and the Normalization group each act on one of the two, so this decides which of them can do anything."
+        title="Media path"
+      >
+        <SegmentedControl
+          disabled={!mediaPathSupport.supported}
+          label="Media path"
+          onChange={(value) => onUpdate("mediaPath", value)}
+          optionPath="media"
+          options={[
+            { label: "Video engine", value: DemoMediaPath.Engine },
+            { label: "Mediabunny", value: DemoMediaPath.Mediabunny },
+          ]}
+          tooltip="Video engine opens the clip through this project's own decoder: it decodes in a worker, keeps frames it has already drawn so a drag paints at once, and fetches the file in pieces. Mediabunny gives the library the file's address and lets it read and decode the clip itself, which is the shorter path and the only one that can convert the file first. `media`, the video engine here."
+          value={configuration.mediaPath}
+        />
+        {mediaPathSupport.supported ? null : (
+          <ControlNote>{mediaPathSupport.reason}</ControlNote>
+        )}
+      </ControlSection>
+
+      <ControlSection
+        description="How the clip's own bytes are fetched, and how much decoded picture is kept around the playhead. Nothing here changes what is drawn, only how long you wait to see it."
+        title="Video engine"
+      >
+        {engineDriven ? null : (
+          <ControlNote>
+            The media path is Mediabunny, so the library reads and decodes the
+            clip itself and nothing in this group is used.
+          </ControlNote>
+        )}
+        {!engineDriven || fetchedSource ? null : (
+          <ControlNote>
+            This clip was opened from a file on your own machine, so there is
+            nothing to fetch: Source residency, Parallelism and Max cache size
+            have nothing to act on.
+          </ControlNote>
+        )}
+        <ControlSubheading>Decoding and scrubbing</ControlSubheading>
+        <ToggleControl
+          checked={options.prefer2d ?? engine.prefer2d ?? false}
+          disabled={!engineDriven}
+          label="Prefer2d"
+          onChange={(checked) => onUpdate("prefer2d", checked)}
+          optionPath="prefer2d"
+          tooltip="Paints every decoded frame through a 2D canvas instead of the GPU. Both paths draw the same frames on the same cadence, so this is how you find out what the GPU is worth on your machine, or rule it out when the picture looks wrong. `prefer2d`; unset prefers WebGPU and falls back to the 2D canvas where WebGPU is missing."
+        />
+        <SegmentedControl
+          disabled={!engineDriven}
+          label="Cache strategy"
+          onChange={(value) => onUpdate("cacheStrategy", value)}
+          optionPath="cacheStrategy"
+          options={[
+            { label: "Tiered", value: "tiered" },
+            { label: "None", value: "none" },
+          ]}
+          tooltip="Tiered keeps a small coarse copy of frames already seen plus a few at full resolution, so dragging the playhead paints something straight away. None throws all of it out and decodes every seek from scratch, which is how you see what the cache is worth. `cacheStrategy`, default tiered."
+          value={options.cacheStrategy ?? engine.cacheStrategy ?? "tiered"}
+        />
+        <NumberControl
+          disabled={!engineDriven}
+          label="Preview capacity"
+          min={1}
+          onChange={(value) => onUpdate("previewCapacity", value)}
+          optionPath="previewCapacity"
+          placeholder="auto"
+          step={1}
+          tooltip="How many of those coarse frames are kept. More of them means a long drag lands more often on a frame already decoded, and each one costs memory. `previewCapacity`; empty sizes it from this machine's memory and the size of a frame."
+          value={options.previewCapacity ?? engine.previewCapacity}
+        />
+        <NumberControl
+          disabled={!engineDriven}
+          label="Preview width"
+          min={16}
+          onChange={(value) => onUpdate("previewWidth", value)}
+          optionPath="previewWidth"
+          placeholder="auto"
+          step={16}
+          tooltip="How wide those coarse frames are, in pixels. Wider is sharper while you drag and fewer of them fit in memory. `previewWidth`; empty follows the box the picture is shown in and never goes past 320."
+          value={options.previewWidth ?? engine.previewWidth}
+        />
+        <NumberControl
+          disabled={!engineDriven}
+          label="Cache skip near ms"
+          min={0}
+          onChange={(value) => onUpdate("cacheSkipNearMs", value)}
+          optionPath="cacheSkipNearMs"
+          placeholder="100"
+          step={10}
+          tooltip="A cached frame this close in time to the one already on screen is refused and the full decode is waited for instead, so stepping one frame forward does not snap back to the frame you were already looking at. `cacheSkipNearMs`, default 100ms."
+          value={options.cacheSkipNearMs ?? engine.cacheSkipNearMs}
+        />
+        <ControlSubheading>Fetching the file</ControlSubheading>
+        <SegmentedControl
+          disabled={!fetchedSource}
+          label="Source residency"
+          onChange={(value) => onUpdate("sourceResidency", value)}
+          optionPath="sourceResidency"
+          options={[
+            { label: "Off", value: DemoSourceResidency.Off },
+            { label: "Hold", value: DemoSourceResidency.Hold },
+            { label: "Prefetch", value: DemoSourceResidency.Prefetch },
+          ]}
+          tooltip="Keeps the video file's bytes in memory as they are read, so a part of the clip read once is never fetched again. Hold keeps what playback and scrubbing pull. Prefetch also walks the rest of the file in the background, so jumping to a part nobody has watched stops waiting on the network. `sourceResidency`, off by default: it costs memory, and prefetching spends the connection on video that may never be watched."
+          value={residency}
+        />
+        <SliderControl
+          disabled={!fetchedSource || !holdingBytes}
+          label="Budget bytes"
+          max={512}
+          min={16}
+          onChange={(value) => onUpdate("sourceResidencyBudgetMb", value)}
+          optionPath="sourceResidency.budgetBytes"
+          step={16}
+          tooltip="The ceiling on held bytes, set here in mebibytes. Once it is reached the runs furthest from the playhead are dropped first, so a budget smaller than the file makes residency a window that follows the playhead rather than a copy of the whole clip. `sourceResidency.budgetBytes`, 160 MiB unless the page URL asked for another figure."
+          value={residencyBudgetMb}
+          valueLabel={formatMebibytes(residencyBudgetMb)}
+        />
+        <NumberControl
+          disabled={!fetchedSource}
+          label="Parallelism"
+          max={16}
+          min={1}
+          onChange={(value) => onUpdate("urlSourceParallelism", value)}
+          optionPath="urlSource.parallelism"
+          placeholder="2"
+          step={1}
+          tooltip="How many requests for video bytes may be in flight at once. More of them can fill a fast connection a single request leaves idle, and can also make each one slower on a thin connection, so this is the knob to move when the picture is waiting on the network rather than on the machine. `parallelism`, default 2."
+          value={options.urlSourceParallelism ?? engine.urlSource?.parallelism}
+        />
+        <NumberControl
+          disabled={!fetchedSource}
+          label="Max cache size"
+          min={1}
+          onChange={(value) => onUpdate("urlSourceMaxCacheMb", value)}
+          optionPath="urlSource.maxCacheSize"
+          placeholder="64 MiB"
+          step={16}
+          tooltip="How many mebibytes of fetched video are kept before the oldest are dropped. On a clip bigger than this figure, coming back to a part you already watched fetches it a second time. Source residency is the separate setting that holds bytes for as long as the session wants them. `maxCacheSize`, default 64 MiB."
+          value={
+            options.urlSourceMaxCacheMb ??
+            toMebibytes(engine.urlSource?.maxCacheSize)
+          }
+        />
+      </ControlSection>
+
+      <ControlSection
+        description="Rewrites the file into a format the browser can step through before anything plays. It belongs to the Mediabunny media path, where the library reads the conversion in place of the clip's own file."
         title="Normalization"
       >
         <ToggleControl
           checked={normalizing}
-          disabled={!configuration.normalizable.supported}
+          disabled={!normalizationSupport.supported}
           label="Normalize"
           onChange={(checked) => onUpdate("normalize", checked || undefined)}
           optionPath="normalize"
           tooltip="Converts the file before anything plays, so a codec the browser cannot step through, or a frame rate that wanders, becomes one it can. The whole file is converted first, which takes a while on a long clip. `normalize`, off by default."
         />
-        {configuration.normalizable.supported ? null : (
-          <ControlNote>{configuration.normalizable.reason}</ControlNote>
+        {normalizationSupport.supported ? null : (
+          <ControlNote>{normalizationSupport.reason}</ControlNote>
         )}
-        {normalizing || !configuration.normalizable.supported ? null : (
+        {normalizing || !normalizationSupport.supported ? null : (
           <ControlNote>
             Normalize is off, so the rest of this group does nothing.
           </ControlNote>
@@ -656,6 +822,14 @@ function writeTriState(value: boolean | typeof UNSET | undefined) {
   }
 
   return value ? "on" : "off";
+}
+
+function toMebibytes(bytes: number | undefined) {
+  return bytes === undefined ? undefined : bytes / BYTES_PER_MEBIBYTE;
+}
+
+function formatMebibytes(value: number) {
+  return `${trimZeros(value)} MiB`;
 }
 
 function formatSeconds(value: number | undefined) {

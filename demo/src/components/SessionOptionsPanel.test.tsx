@@ -12,9 +12,17 @@ import { describe, expect, it } from "vitest";
 
 import { SessionOptionsPanel } from "./SessionOptionsPanel";
 import {
-  normalizationSupported,
+  DemoEngineSource,
+  DemoMediaPath,
+  describeMissingSupport,
+  optionSupported,
   resolveDemoSessionConfiguration,
 } from "../session/session-options";
+
+const NO_CHOICE_ON_AN_UPLOAD = "An upload always opens on the video engine.";
+const NO_CONVERSION_ON_AN_UPLOAD = "An upload cannot be converted first.";
+const NO_CONVERSION_ON_THE_ENGINE =
+  "Switch the media path to Mediabunny to convert.";
 
 const detections: MediaSessionDetectionOptions = {
   frames: [],
@@ -31,15 +39,56 @@ const renderer: MediaSessionRendererOptions = {
 
 const configuration = resolveDemoSessionConfiguration({
   detections,
+  engine: {},
+  engineSource: DemoEngineSource.Url,
+  mediaPath: DemoMediaPath.Engine,
+  mediaPathSupport: optionSupported,
   mode: MediaSessionMode.File,
-  normalizable: normalizationSupported,
+  normalizationSupport: describeMissingSupport(NO_CONVERSION_ON_THE_ENGINE),
   playbackGate: true,
   renderer,
 });
 
+const mediabunnyConfiguration = resolveDemoSessionConfiguration({
+  detections,
+  engine: {},
+  engineSource: DemoEngineSource.None,
+  mediaPath: DemoMediaPath.Mediabunny,
+  mediaPathSupport: optionSupported,
+  mode: MediaSessionMode.File,
+  normalizationSupport: optionSupported,
+  playbackGate: true,
+  renderer,
+});
+
+const uploadConfiguration = resolveDemoSessionConfiguration({
+  detections,
+  engine: {},
+  engineSource: DemoEngineSource.Blob,
+  mediaPath: DemoMediaPath.Engine,
+  mediaPathSupport: describeMissingSupport(NO_CHOICE_ON_AN_UPLOAD),
+  mode: MediaSessionMode.File,
+  normalizationSupport: describeMissingSupport(NO_CONVERSION_ON_AN_UPLOAD),
+  playbackGate: true,
+  renderer,
+});
+
+const ENGINE_PATH_OPTIONS = [
+  "prefer2d",
+  "cacheStrategy",
+  "previewCapacity",
+  "previewWidth",
+  "cacheSkipNearMs",
+  "sourceResidency",
+  "sourceResidency.budgetBytes",
+  "urlSource.parallelism",
+  "urlSource.maxCacheSize",
+];
+
 interface ControlProps {
   readonly children?: ReactNode;
   readonly description?: string;
+  readonly disabled?: boolean;
   readonly label?: string;
   readonly optionPath?: string;
   readonly title?: string;
@@ -47,10 +96,12 @@ interface ControlProps {
   readonly value?: ReactNode;
 }
 
-function renderPanel(): ReactElement<ControlProps>[] {
+function renderPanel(
+  panelConfiguration = configuration,
+): ReactElement<ControlProps>[] {
   return collect(
     SessionOptionsPanel.type({
-      configuration,
+      configuration: panelConfiguration,
       onChange: () => {},
       options: {},
       playbackGateReach: PlaybackGateReach.StartOfPlayback,
@@ -58,8 +109,12 @@ function renderPanel(): ReactElement<ControlProps>[] {
   );
 }
 
-function renderControls(): ReactElement<ControlProps>[] {
-  return renderPanel().filter((node) => node.props.optionPath !== undefined);
+function renderControls(
+  panelConfiguration = configuration,
+): ReactElement<ControlProps>[] {
+  return renderPanel(panelConfiguration).filter(
+    (node) => node.props.optionPath !== undefined,
+  );
 }
 
 function renderSections(): ReactElement<ControlProps>[] {
@@ -72,8 +127,8 @@ function renderReadouts(): ReactElement<ControlProps>[] {
   );
 }
 
-function renderProse(): string[] {
-  return renderPanel()
+function renderProse(panelConfiguration = configuration): string[] {
+  return renderPanel(panelConfiguration)
     .flatMap((node) => [
       node.props.description,
       node.props.tooltip,
@@ -190,6 +245,36 @@ describe("SessionOptionsPanel", () => {
     ).toEqual([]);
   });
 
+  it("keeps an option the other media path owns visible and switched off", () => {
+    const shown = renderControls(mediabunnyConfiguration).map(
+      (control) => control.props.optionPath,
+    );
+
+    expect(ENGINE_PATH_OPTIONS.filter((path) => !shown.includes(path))).toEqual(
+      [],
+    );
+    expect(
+      ENGINE_PATH_OPTIONS.filter(
+        (path) => !disabledOptions(mediabunnyConfiguration).includes(path),
+      ),
+    ).toEqual([]);
+    expect(disabledOptions(configuration)).toContain("normalize");
+    expect(disabledOptions(mediabunnyConfiguration)).not.toContain("normalize");
+  });
+
+  it("says why a switched-off option cannot act, in the group it belongs to", () => {
+    expect(renderProse(configuration)).toContain(NO_CONVERSION_ON_THE_ENGINE);
+    expect(renderProse(uploadConfiguration)).toContain(NO_CHOICE_ON_AN_UPLOAD);
+    expect(renderProse(uploadConfiguration)).toContain(
+      NO_CONVERSION_ON_AN_UPLOAD,
+    );
+  });
+
+  it("lets an upload see the media path it is on without offering to change it", () => {
+    expect(disabledOptions(uploadConfiguration)).toContain("media");
+    expect(disabledOptions(configuration)).not.toContain("media");
+  });
+
   it("explains the video, not the machinery that draws it", () => {
     const machinery =
       /artifacts?\b|prepared run|gate that is on|presents its own frames|hands the renderer/i;
@@ -204,6 +289,12 @@ describe("SessionOptionsPanel", () => {
     ).toEqual([]);
   });
 });
+
+function disabledOptions(panelConfiguration = configuration) {
+  return renderControls(panelConfiguration)
+    .filter((control) => control.props.disabled === true)
+    .map((control) => control.props.optionPath);
+}
 
 /** Whether every word of the option's last segment survives in the label. */
 function sharesWording({ label, optionPath }: ControlProps) {

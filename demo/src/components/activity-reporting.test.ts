@@ -123,6 +123,19 @@ const overlayCases = [
     activities: [
       activity({
         blockingPlayback: true,
+        kind: MediaSessionActivityKind.DetectionsAwaitingCoverage,
+        label: "Waiting for detections",
+        status: MediaSessionActivityStatus.Waiting,
+      }),
+    ],
+    kind: MediaSessionActivityKind.DetectionsAwaitingCoverage,
+    label: "Waiting for detections",
+    renderer,
+  },
+  {
+    activities: [
+      activity({
+        blockingPlayback: true,
         blockingPresentation: true,
         errorMessage: "Renderer failed",
         kind: MediaSessionActivityKind.Error,

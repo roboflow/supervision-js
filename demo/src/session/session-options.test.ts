@@ -12,10 +12,15 @@ import {
 } from "supervision";
 import {
   applyDemoDetectionOptions,
+  applyDemoEngineOptions,
+  applyDemoMediaPath,
   applyDemoRendererOptions,
   applyDemoSessionPlaybackGate,
   buildDemoNormalization,
-  normalizationSupported,
+  DemoEngineSource,
+  DemoMediaPath,
+  DemoSourceResidency,
+  optionSupported,
   resolveDemoSessionConfiguration,
 } from "./session-options";
 
@@ -44,7 +49,58 @@ describe("demo session options", () => {
     );
     expect(applyDemoRendererOptions(baseRenderer, {})).toEqual(baseRenderer);
     expect(applyDemoSessionPlaybackGate(true, {})).toBe(true);
-    expect(buildDemoNormalization({})).toBeUndefined();
+    expect(applyDemoMediaPath({})).toBe(DemoMediaPath.Engine);
+    expect(
+      buildDemoNormalization(DemoMediaPath.Mediabunny, {}),
+    ).toBeUndefined();
+    expect(applyDemoEngineOptions({}, {})).toEqual({});
+  });
+
+  it("leaves the clip to the library only when the panel asks for it", () => {
+    expect(applyDemoMediaPath({ mediaPath: DemoMediaPath.Mediabunny })).toBe(
+      DemoMediaPath.Mediabunny,
+    );
+  });
+
+  it("converts nothing while the video engine is the one opening the clip", () => {
+    expect(
+      buildDemoNormalization(DemoMediaPath.Engine, { normalize: true }),
+    ).toBeUndefined();
+    expect(
+      buildDemoNormalization(DemoMediaPath.Mediabunny, { normalize: true }),
+    ).toEqual({});
+  });
+
+  it("keeps the residency the page URL opened with until the panel says otherwise", () => {
+    const opened = { budgetBytes: 32 * 1024 * 1024, prefetch: false };
+
+    expect(applyDemoEngineOptions({ sourceResidency: opened }, {})).toEqual({
+      sourceResidency: opened,
+    });
+    expect(
+      applyDemoEngineOptions(
+        { sourceResidency: opened },
+        { sourceResidency: DemoSourceResidency.Prefetch },
+      ).sourceResidency,
+    ).toEqual({ budgetBytes: 32 * 1024 * 1024, prefetch: true });
+    expect(
+      applyDemoEngineOptions(
+        { sourceResidency: opened },
+        { sourceResidency: DemoSourceResidency.Off },
+      ).sourceResidency,
+    ).toBeUndefined();
+  });
+
+  it("states the panel's mebibytes as the bytes the engine reads", () => {
+    expect(
+      applyDemoEngineOptions(
+        {},
+        { sourceResidency: DemoSourceResidency.Hold, urlSourceMaxCacheMb: 256 },
+      ),
+    ).toEqual({
+      sourceResidency: { budgetBytes: 160 * 1024 * 1024, prefetch: false },
+      urlSource: { maxCacheSize: 256 * 1024 * 1024 },
+    });
   });
 
   it("changes one buffer knob without disturbing its siblings", () => {
@@ -86,7 +142,7 @@ describe("demo session options", () => {
 
   it("builds normalization only from the fields that were chosen", () => {
     expect(
-      buildDemoNormalization({
+      buildDemoNormalization(DemoMediaPath.Mediabunny, {
         normalize: true,
         normalizeContainer: MediaNormalizationContainer.Mp4,
         normalizeVideoCodec: MediaNormalizationVideoCodec.Avc,
@@ -95,14 +151,17 @@ describe("demo session options", () => {
       container: MediaNormalizationContainer.Mp4,
       video: { codec: MediaNormalizationVideoCodec.Avc },
     });
-    expect(buildDemoNormalization({ normalize: true })).toEqual({});
   });
 
   it("reports the defaults the library resolves for the open session", () => {
     const configuration = resolveDemoSessionConfiguration({
       detections: baseDetections,
+      engine: {},
+      engineSource: DemoEngineSource.Url,
+      mediaPath: DemoMediaPath.Engine,
+      mediaPathSupport: optionSupported,
       mode: MediaSessionMode.File,
-      normalizable: normalizationSupported,
+      normalizationSupport: optionSupported,
       playbackGate: true,
       renderer: baseRenderer,
     });

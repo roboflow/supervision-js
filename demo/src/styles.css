@@ -1994,7 +1994,7 @@ fieldset {
     [gutter] 176px
     [track] minmax(0, 1fr)
     [track-end];
-  grid-template-rows: 12px 16px repeat(5, 9px);
+  grid-template-rows: 12px 16px repeat(6, 9px);
   min-width: 0;
   row-gap: 2px;
 }
@@ -2264,6 +2264,12 @@ fieldset {
 
 .timeline-view__segment--ready {
   background: linear-gradient(90deg, #15803d, #22c55e);
+}
+
+/* Video, where every lane above is annotations, so it is the one lane drawn in
+ * none of their colours. */
+.timeline-view__segment--resident {
+  background: #334155;
 }
 
 .timeline-view__segment--processing {

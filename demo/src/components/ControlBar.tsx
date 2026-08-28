@@ -1,5 +1,6 @@
 import { memo, useRef, useState } from "react";
 import { MediaRendererPlaybackState } from "supervision";
+import type { SourceResidencyDiagnostics } from "supervision-js-video-engine";
 import { formatTime } from "../format";
 import {
   useLiveReadoutWriter,
@@ -37,6 +38,7 @@ interface ControlBarProps {
   readonly presentedRate: number | null;
   readonly processedRanges: readonly TimelineRange[];
   readonly processingRanges: readonly TimelineRange[];
+  readonly sourceResidency: SourceResidencyDiagnostics | null;
 }
 
 export const ControlBar = memo(function ControlBar({
@@ -52,6 +54,7 @@ export const ControlBar = memo(function ControlBar({
   presentedRate,
   processedRanges,
   processingRanges,
+  sourceResidency,
 }: ControlBarProps) {
   countControlBarRender();
 
@@ -108,6 +111,7 @@ export const ControlBar = memo(function ControlBar({
         onSeek={onSeek}
         processedRanges={processedRanges}
         processingRanges={processingRanges}
+        sourceResidency={sourceResidency}
       />
       <p className="control-bar__hints">
         <span>

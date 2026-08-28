@@ -29,6 +29,9 @@ import { StatusPanel } from "./components/StatusPanel";
 import { resolveDemoDocsUrl } from "./docs-url";
 import { parseDocsAnnotationRenderer } from "./docs-annotation-renderer";
 import { DemoSourceMode, useDemoRenderer } from "./hooks/useDemoRenderer";
+import { useSourceResidency } from "./hooks/useSourceResidency";
+import { readDemoSourceResidency } from "./session/source-residency";
+import { applyDemoSourceResidency } from "./session/session-options";
 import { defaultDemoClassNames } from "./presentation/demo-presentation";
 import {
   DemoViewMode,
@@ -41,6 +44,9 @@ const docsUrl = resolveDemoDocsUrl(
   globalThis.location,
 );
 const allowUpload = import.meta.env.VITE_DEMO_ALLOW_UPLOAD !== "false";
+const urlSourceResidency = readDemoSourceResidency(
+  globalThis.location?.search ?? "",
+);
 
 export function App() {
   const searchParams = new URLSearchParams(globalThis.location.search);
@@ -148,6 +154,11 @@ function DemoApp() {
         : [],
     [demo.sourceMode, demo.uploadInferenceState.processingRanges],
   );
+  const sourceResidency = useSourceResidency(
+    demo.engineDiagnosticsTap,
+    applyDemoSourceResidency(urlSourceResidency, demo.sessionOptions) !==
+      undefined,
+  );
   const viewportSessionState = useMemo(
     () => selectViewportSessionState(demo.sessionState),
     [demo.sessionState],
@@ -254,6 +265,7 @@ function DemoApp() {
             presentedRate={demo.presentedRate}
             processedRanges={processedRanges}
             processingRanges={processingRanges}
+            sourceResidency={sourceResidency}
           />
         }
         renderControls={

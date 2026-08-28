@@ -2,9 +2,11 @@
 
 ## Goal
 
-Make dense mask and annotation rendering feel smooth while keeping the renderer
+Make dense mask and polygon rendering feel smooth while keeping the renderer
 truthful about what is ready, what is still being prepared, and what should
-block playback or presentation.
+block playback or presentation. Those two geometries are the ones that have to
+be rasterized before anything can draw them; the other annotation layers draw
+from the detection data and have nothing to prepare.
 
 ## Context
 

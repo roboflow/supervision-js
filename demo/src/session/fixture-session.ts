@@ -25,12 +25,18 @@ import { createDemoRendererOptions } from "./demo-session-renderer";
 import type { DemoSessionCallbacks } from "./demo-session-types";
 import {
   applyDemoDetectionOptions,
+  applyDemoEngineOptions,
+  applyDemoMediaPath,
   applyDemoRendererOptions,
   applyDemoSessionMode,
   applyDemoSessionPlaybackGate,
   buildDemoNormalization,
-  normalizationSupported,
+  DemoEngineSource,
+  DemoMediaPath,
+  describeMissingSupport,
+  optionSupported,
   resolveDemoSessionConfiguration,
+  type DemoEngineOptions,
 } from "./session-options";
 
 /**
@@ -38,6 +44,10 @@ import {
  * unannotated is only ever waiting on preparation.
  */
 const FIXTURE_PLAYBACK_GATE = true;
+
+const ENGINE_PATH_NORMALIZATION_BLOCKED = describeMissingSupport(
+  "Converting the file replaces it with the conversion, and the video engine never opens that. Switch the media path to Mediabunny to convert.",
+);
 
 export async function createFixtureSession(
   options: {
@@ -108,13 +118,32 @@ export async function createFixtureSession(
     FIXTURE_PLAYBACK_GATE,
     options.sessionOptions,
   );
-  const normalize = buildDemoNormalization(options.sessionOptions);
+  const mediaPath = applyDemoMediaPath(options.sessionOptions);
+  const normalize = buildDemoNormalization(mediaPath, options.sessionOptions);
+  const engine = applyDemoEngineOptions(
+    {
+      sourceResidency: readDemoSourceResidency(
+        globalThis.location?.search ?? "",
+      ),
+    },
+    options.sessionOptions,
+  );
 
   options.onSessionConfiguration(
     resolveDemoSessionConfiguration({
       detections,
+      engine,
+      engineSource:
+        mediaPath === DemoMediaPath.Engine
+          ? DemoEngineSource.Url
+          : DemoEngineSource.None,
+      mediaPath,
+      mediaPathSupport: optionSupported,
       mode,
-      normalizable: normalizationSupported,
+      normalizationSupport:
+        mediaPath === DemoMediaPath.Engine
+          ? ENGINE_PATH_NORMALIZATION_BLOCKED
+          : optionSupported,
       playbackGate,
       renderer,
     }),
@@ -127,6 +156,8 @@ export async function createFixtureSession(
       media: await createFixtureSessionMedia({
         container: options.container,
         definition: options.definition,
+        engine,
+        mediaPath,
         normalizing: normalize !== undefined,
         renderQuality: options.renderQuality,
         tapMediaSource: options.tapMediaSource,
@@ -147,25 +178,30 @@ export async function createFixtureSession(
 }
 
 /**
- * `normalize` acts on a `Blob` and nothing else, so asking for it also decides
- * how the clip opens. The session then builds a renderer source of its own,
- * and the engine source this otherwise hands it never reaches the renderer.
+ * `normalize` acts on a `Blob` and nothing else, so converting the clip means
+ * fetching the whole file up front.
  */
 async function createFixtureSessionMedia(options: {
   readonly container: HTMLDivElement;
   readonly definition: DemoFixtureDefinition;
+  readonly engine: DemoEngineOptions;
+  readonly mediaPath: DemoMediaPath;
   readonly normalizing: boolean;
   readonly renderQuality: DemoSessionCallbacks["renderQuality"];
   readonly tapMediaSource: DemoSessionCallbacks["tapMediaSource"];
 }): Promise<MediaSessionMedia> {
-  if (!options.normalizing) {
+  if (options.mediaPath === DemoMediaPath.Engine) {
     return options.tapMediaSource(
       createDemoFixtureMedia(
         options.definition,
         readDemoDisplayBox(options.container, options.renderQuality),
-        readDemoSourceResidency(globalThis.location?.search ?? ""),
+        options.engine,
       ),
     );
+  }
+
+  if (!options.normalizing) {
+    return resolveDemoFixturePlaybackSrc(options.definition);
   }
 
   const response = await fetch(

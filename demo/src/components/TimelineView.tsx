@@ -14,6 +14,7 @@ import {
   useState,
 } from "react";
 import { MediaRendererPlaybackState } from "supervision";
+import type { SourceResidencyDiagnostics } from "supervision-js-video-engine";
 import { formatTime, formatTimeRange, toSourceTimeRange } from "../format";
 import { DemoEvalHook } from "../eval-hooks";
 import {
@@ -23,6 +24,11 @@ import {
 } from "../hooks/live-readouts";
 import type { TimelineRange } from "../session/demo-session-types";
 import { DiagnosticLabel } from "./DiagnosticLabel";
+import {
+  formatSourceResidency,
+  readSourceResidencyRanges,
+  SOURCE_RESIDENCY_TOOLTIP,
+} from "./source-residency-lane";
 import { readLivePreparedWindow } from "./live-readout-format";
 import { LiveReadoutText } from "./LiveReadoutText";
 import { TimelineScrubInput } from "./TimelineScrubInput";
@@ -40,6 +46,7 @@ export function TimelineView({
   onSeek,
   processedRanges = [],
   processingRanges = [],
+  sourceResidency = null,
 }: {
   readonly disabled: boolean;
   readonly duration: number | null;
@@ -47,6 +54,7 @@ export function TimelineView({
   readonly onSeek: (time: number) => void;
   readonly processedRanges?: readonly TimelineRange[];
   readonly processingRanges?: readonly TimelineRange[];
+  readonly sourceResidency?: SourceResidencyDiagnostics | null;
 }) {
   const mediaDuration = duration !== null && duration > 0 ? duration : null;
   const {
@@ -92,6 +100,14 @@ export function TimelineView({
   const processingRangeStyles = useMemo(
     () => createSegmentStyles(processingRanges, mediaDuration),
     [mediaDuration, processingRanges],
+  );
+  const residencyRangeStyles = useMemo(
+    () =>
+      createSegmentStyles(
+        readSourceResidencyRanges(sourceResidency, mediaDuration),
+        mediaDuration,
+      ),
+    [mediaDuration, sourceResidency],
   );
   const axisTicks = createAxisTicks(mediaDuration);
   const stripClassName = [
@@ -385,6 +401,28 @@ export function TimelineView({
         {processingRangeStyles.map(({ key, style }) => (
           <span
             className="timeline-view__segment timeline-view__segment--processing"
+            key={key}
+            style={style}
+          />
+        ))}
+      </div>
+      <span className="timeline-view__lane-head" style={LANE_ROW_STYLES[5]}>
+        <DiagnosticLabel
+          label="Video held"
+          tooltip={SOURCE_RESIDENCY_TOOLTIP}
+        />
+        <span className="timeline-view__lane-value">
+          {formatSourceResidency(sourceResidency)}
+        </span>
+      </span>
+      <div
+        aria-hidden="true"
+        className="timeline-view__lane"
+        style={LANE_ROW_STYLES[5]}
+      >
+        {residencyRangeStyles.map(({ key, style }) => (
+          <span
+            className="timeline-view__segment timeline-view__segment--resident"
             key={key}
             style={style}
           />
@@ -895,7 +933,7 @@ interface TimelineAxisTick {
   readonly left: string;
 }
 
-const LANE_ROW_STYLES: readonly TimelineRowStyle[] = [0, 1, 2, 3, 4].map(
+const LANE_ROW_STYLES: readonly TimelineRowStyle[] = [0, 1, 2, 3, 4, 5].map(
   (index) =>
     ({ "--timeline-row": String(index + LANE_ROW_OFFSET) }) as TimelineRowStyle,
 );

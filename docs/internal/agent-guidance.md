@@ -131,6 +131,11 @@ toolbar value is a checked presentation mirror.
   reads like DefinitelyTyped package space. Same-folder imports may stay
   relative when that is clearer.
 - `demo/` is a React + Vite consumer demo.
+- A fixture may declare a second encode of its media as `media.proxyFile` and
+  the demo plays that instead of the source. Read
+  [`fixture-delivery-proxies.md`](fixture-delivery-proxies.md) before making one:
+  detections index presented source frames, so a proxy that changes the frame
+  count or the timestamps moves every annotation and nothing detects it.
 - `benchmark/initial/` is the isolated Milestone 3 dense-shape benchmark.
   Benchmark renderer code belongs there, not in the package entrypoint or the
   normal demo.

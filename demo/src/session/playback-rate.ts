@@ -56,14 +56,19 @@ export function resolveShuttleCommand(
 
 /**
  * Whether the picture is keeping the promise the commanded rate made. Unknown
- * reads as kept: an unmeasured rate is no evidence of a shortfall. A slowed
- * player always keeps it, so only the sped-up half is judged.
+ * reads as kept: an unmeasured rate is no evidence of a shortfall.
+ *
+ * Below 1x the measurement is not evidence either. The presented rate is
+ * painted media distance over a ~600ms window, so it carries a whole frame of
+ * quantisation error; at a quarter speed on a low-fps source that error is
+ * wider than the shortfall margin, and a healthy pipeline reads as failing.
+ * Slower than 1x is therefore left unjudged, and 1x up is measured.
  */
 export function isPlaybackRateSustained(
   commandedRate: number,
   presentedRate: number | null,
 ) {
-  if (presentedRate === null || commandedRate <= defaultPlaybackRate) {
+  if (presentedRate === null || commandedRate < defaultPlaybackRate) {
     return true;
   }
 

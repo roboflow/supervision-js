@@ -13,6 +13,52 @@ import {
   type MediaSessionRendererOptions,
   type ResolvedMediaSessionDefaults,
 } from "supervision";
+import type {
+  SourceResidencyConfig,
+  VideoEngineOptions,
+} from "supervision-js-video-engine";
+
+import { DEMO_SOURCE_RESIDENCY_BUDGET_MB } from "./source-residency";
+
+const BYTES_PER_MEBIBYTE = 1024 * 1024;
+
+/**
+ * What the video engine is asked to do with the clip's bytes and its decoded
+ * frames. Only a URL source reads `sourceResidency` and `urlSource`.
+ */
+export type DemoEngineOptions = Pick<
+  VideoEngineOptions,
+  | "cacheSkipNearMs"
+  | "cacheStrategy"
+  | "prefer2d"
+  | "previewCapacity"
+  | "previewWidth"
+  | "sourceResidency"
+  | "urlSource"
+>;
+
+/** How much of the clip's bytes this process keeps once they have been read. */
+export enum DemoSourceResidency {
+  Off = "off",
+  Hold = "hold",
+  Prefetch = "prefetch",
+}
+
+/**
+ * What the video engine was handed, if anything. The Mediabunny media path
+ * leaves the clip to the library's own reader, so no engine opens at all.
+ */
+export enum DemoEngineSource {
+  Url = "url",
+  Blob = "blob",
+  None = "none",
+}
+
+/** Which reader opens the clip, and so which of the option groups can act. */
+export enum DemoMediaPath {
+  Engine = "engine",
+  Mediabunny = "mediabunny",
+}
 
 /**
  * The creation-time options the workbench lets a visitor change, held as the
@@ -25,6 +71,8 @@ export interface DemoSessionOptions {
   readonly autoRefresh?: boolean;
   readonly bufferAheadSeconds?: number;
   readonly bufferBehindSeconds?: number;
+  readonly cacheSkipNearMs?: number;
+  readonly cacheStrategy?: DemoEngineOptions["cacheStrategy"];
   readonly detectionGateEnabled?: boolean;
   readonly detectionGateRequiredAheadSeconds?: number;
   readonly fit?: MediaRendererFit;
@@ -36,6 +84,7 @@ export interface DemoSessionOptions {
   readonly maskScanIntervalSeconds?: number;
   readonly maskScheduleBatchSize?: number;
   readonly maskWorkerCount?: number;
+  readonly mediaPath?: DemoMediaPath;
   readonly mode?: MediaSessionMode;
   readonly normalize?: boolean;
   readonly normalizeAudioBitrate?: number;
@@ -52,11 +101,18 @@ export interface DemoSessionOptions {
   readonly normalizeVideoCodec?: MediaNormalizationVideoCodec;
   readonly normalizeWidth?: number;
   readonly playbackGate?: boolean | "unset";
+  readonly prefer2d?: boolean;
   readonly preparationGateEnabled?: boolean;
   readonly preparationGateMinimumAheadSeconds?: number;
   readonly preparationGateRequiredAheadSeconds?: number;
   readonly preparationMode?: RenderPreparationMode;
+  readonly previewCapacity?: number;
+  readonly previewWidth?: number;
   readonly refreshIntervalSeconds?: number;
+  readonly sourceResidency?: DemoSourceResidency;
+  readonly sourceResidencyBudgetMb?: number;
+  readonly urlSourceMaxCacheMb?: number;
+  readonly urlSourceParallelism?: number;
 }
 
 export const emptyDemoSessionOptions: DemoSessionOptions = {};
@@ -71,49 +127,62 @@ export const emptyDemoSessionOptions: DemoSessionOptions = {};
 export interface DemoSessionConfiguration {
   readonly autoPlay: boolean;
   readonly autoRefresh: boolean;
+  readonly engine: DemoEngineOptions;
+  readonly engineSource: DemoEngineSource;
   readonly fit: MediaRendererFit;
   readonly interactionMode: MediaInteractionMode;
   readonly loop: boolean;
+  readonly mediaPath: DemoMediaPath;
+  readonly mediaPathSupport: DemoOptionSupport;
   readonly mode: MediaSessionMode;
-  readonly normalizable: DemoNormalizationSupport;
+  readonly normalizationSupport: DemoOptionSupport;
   readonly playbackGate: boolean | undefined;
   readonly preparationMode: RenderPreparationMode;
   readonly resolved: ResolvedMediaSessionDefaults;
 }
 
-/** Whether this source can be handed to the session as a `Blob` to normalize. */
-export interface DemoNormalizationSupport {
+/**
+ * Whether a group of options can act on this session, and what to tell a visitor
+ * when it cannot. A group that cannot act is shown switched off, never removed.
+ */
+export interface DemoOptionSupport {
   readonly supported: boolean;
   readonly reason: string | null;
 }
 
-export const normalizationSupported: DemoNormalizationSupport = {
+export const optionSupported: DemoOptionSupport = {
   reason: null,
   supported: true,
 };
 
-export function describeMissingNormalization(
-  reason: string,
-): DemoNormalizationSupport {
+export function describeMissingSupport(reason: string): DemoOptionSupport {
   return { reason, supported: false };
 }
 
 export function resolveDemoSessionConfiguration(options: {
   readonly detections: MediaSessionDetectionOptions;
+  readonly engine: DemoEngineOptions;
+  readonly engineSource: DemoEngineSource;
+  readonly mediaPath: DemoMediaPath;
+  readonly mediaPathSupport: DemoOptionSupport;
   readonly mode: MediaSessionMode;
-  readonly normalizable: DemoNormalizationSupport;
+  readonly normalizationSupport: DemoOptionSupport;
   readonly playbackGate: boolean | undefined;
   readonly renderer: MediaSessionRendererOptions;
 }): DemoSessionConfiguration {
   return {
     autoPlay: options.renderer.autoPlay ?? true,
     autoRefresh: options.detections.autoRefresh ?? true,
+    engine: options.engine,
+    engineSource: options.engineSource,
     fit: options.renderer.fit ?? MediaRendererFit.Contain,
     interactionMode:
       options.renderer.interaction?.mode ?? MediaInteractionMode.PausedOnly,
     loop: options.renderer.loop !== false,
+    mediaPath: options.mediaPath,
+    mediaPathSupport: options.mediaPathSupport,
     mode: options.mode,
-    normalizable: options.normalizable,
+    normalizationSupport: options.normalizationSupport,
     playbackGate: options.playbackGate,
     preparationMode:
       options.renderer.renderPreparation?.mode ?? RenderPreparationMode.Auto,
@@ -133,6 +202,10 @@ export function applyDemoSessionMode(
   return options.mode ?? base;
 }
 
+export function applyDemoMediaPath(options: DemoSessionOptions): DemoMediaPath {
+  return options.mediaPath ?? DemoMediaPath.Engine;
+}
+
 export function applyDemoSessionPlaybackGate(
   base: boolean | undefined,
   options: DemoSessionOptions,
@@ -142,6 +215,71 @@ export function applyDemoSessionPlaybackGate(
   }
 
   return options.playbackGate === "unset" ? undefined : options.playbackGate;
+}
+
+/**
+ * The residency the panel asks for, over whatever the page URL opened with. The
+ * budget survives a change of mode, so switching Hold to Prefetch keeps the
+ * ceiling the URL or the slider already set.
+ */
+export function applyDemoSourceResidency(
+  base: SourceResidencyConfig | undefined,
+  options: DemoSessionOptions,
+): SourceResidencyConfig | undefined {
+  const mode = options.sourceResidency ?? readDemoSourceResidencyMode(base);
+
+  if (mode === DemoSourceResidency.Off) {
+    return undefined;
+  }
+
+  return {
+    budgetBytes:
+      options.sourceResidencyBudgetMb === undefined
+        ? (base?.budgetBytes ??
+          DEMO_SOURCE_RESIDENCY_BUDGET_MB * BYTES_PER_MEBIBYTE)
+        : Math.round(options.sourceResidencyBudgetMb * BYTES_PER_MEBIBYTE),
+    prefetch: mode === DemoSourceResidency.Prefetch,
+  };
+}
+
+export function readDemoSourceResidencyMode(
+  residency: SourceResidencyConfig | undefined,
+): DemoSourceResidency {
+  if (residency === undefined) {
+    return DemoSourceResidency.Off;
+  }
+
+  return residency.prefetch
+    ? DemoSourceResidency.Prefetch
+    : DemoSourceResidency.Hold;
+}
+
+export function applyDemoEngineOptions(
+  base: DemoEngineOptions,
+  options: DemoSessionOptions,
+): DemoEngineOptions {
+  const urlSource = definedOnly({
+    maxCacheSize:
+      options.urlSourceMaxCacheMb === undefined
+        ? undefined
+        : Math.round(options.urlSourceMaxCacheMb * BYTES_PER_MEBIBYTE),
+    parallelism: options.urlSourceParallelism,
+  });
+
+  return definedOnly({
+    ...base,
+    ...definedOnly({
+      cacheSkipNearMs: options.cacheSkipNearMs,
+      cacheStrategy: options.cacheStrategy,
+      prefer2d: options.prefer2d,
+      previewCapacity: options.previewCapacity,
+      previewWidth: options.previewWidth,
+    }),
+    sourceResidency: applyDemoSourceResidency(base.sourceResidency, options),
+    urlSource: hasEntries(urlSource)
+      ? { ...base.urlSource, ...urlSource }
+      : base.urlSource,
+  });
 }
 
 export function applyDemoDetectionOptions(
@@ -221,10 +359,15 @@ export function applyDemoRendererOptions(
   };
 }
 
+/**
+ * The session plays the conversion in place of the clip, so an engine source
+ * opened alongside it would never reach the picture.
+ */
 export function buildDemoNormalization(
+  mediaPath: DemoMediaPath,
   options: DemoSessionOptions,
 ): MediaSessionNormalizationOptions | undefined {
-  if (options.normalize !== true) {
+  if (mediaPath === DemoMediaPath.Engine || options.normalize !== true) {
     return undefined;
   }
 

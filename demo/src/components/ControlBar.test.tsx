@@ -20,6 +20,7 @@ const baseProps: ControlBarProps = {
   presentedRate: 8,
   processedRanges: [],
   processingRanges: [],
+  sourceResidency: null,
 };
 
 /** One change each, so a prop the comparator stops watching fails a case. */
@@ -35,6 +36,15 @@ const otherPropChanges: readonly Partial<ControlBarProps>[] = [
   { playbackState: MediaRendererPlaybackState.Paused },
   { processedRanges: [{ endTime: 12, startTime: 4 }] },
   { processingRanges: [{ endTime: 12, startTime: 4 }] },
+  {
+    sourceResidency: {
+      prefetchedBytes: 0,
+      ranges: [{ end: 512, start: 0 }],
+      residentBytes: 512,
+      totalBytes: 1024,
+      warming: false,
+    },
+  },
 ];
 
 function withProps(changes: Partial<ControlBarProps>): ControlBarProps {
@@ -99,10 +109,19 @@ describe("areControlBarPropsEqual", () => {
   it("leaves a slowed picture alone, which no rate can fall behind", () => {
     expect(
       areControlBarPropsEqual(
+        withProps({ playbackRate: 0.5, presentedRate: 0.5 }),
+        withProps({ playbackRate: 0.5, presentedRate: 0.1 }),
+      ),
+    ).toBe(true);
+  });
+
+  it("commits when the picture drops behind at the default speed", () => {
+    expect(
+      areControlBarPropsEqual(
         withProps({ playbackRate: 1, presentedRate: 1 }),
         withProps({ playbackRate: 1, presentedRate: 0.2 }),
       ),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("commits on every prop but the presented rate", () => {
