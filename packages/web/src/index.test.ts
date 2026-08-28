@@ -504,7 +504,7 @@ describe("package entrypoint", () => {
     expect(renderer.getState()).toMatchObject({
       currentTime: 0,
       detectionBuffer: {
-        bufferEndTime: 5,
+        bufferEndTime: 6,
         bufferStartTime: 0,
         detectionCount: 0,
         frameCount: 0,
@@ -1008,12 +1008,12 @@ describe("package entrypoint", () => {
       activeDetectionCount: 1,
       activeDetectionFrameTime: 0.04,
       detectionBuffer: {
-        bufferEndTime: 5,
+        bufferEndTime: 6,
         bufferStartTime: 0,
         detectionCount: 2,
         errorMessage: null,
         frameCount: 2,
-        requestedEndTime: 5,
+        requestedEndTime: 6,
         requestedStartTime: 0,
         status: DetectionBufferStatus.Ready,
       },

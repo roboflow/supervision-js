@@ -55,7 +55,7 @@ describe("the library baseline", () => {
   it("reads the numbers the library picks for a clip at this frame rate", () => {
     const library = readDemoLibraryDefaults(configurationWith({}));
 
-    expect(library.detectionBuffer.bufferBehindSeconds).toBe(0.5);
+    expect(library.detectionBuffer.bufferBehindSeconds).toBe(5);
     expect(library.renderPreparation.maskFrame?.prefetchFrameCount).toBe(
       7 * 24,
     );
