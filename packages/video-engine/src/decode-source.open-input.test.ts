@@ -8,6 +8,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { openDecodeSource } from "./decode-source";
+import type { Rotation } from "./rotation";
 import {
   SourceKind,
   VideoEngineError,
@@ -19,6 +20,11 @@ interface FakeTrackConfig {
   canDecode: boolean;
   codec?: string;
   firstTimestamp: number;
+  /** The track's quarter turn, with the display size already turned by it, the
+   *  way mediabunny reports a track carrying a display matrix. */
+  rotation?: Rotation;
+  displayWidth?: number;
+  displayHeight?: number;
   hasTrack?: boolean;
   containerUnreadable?: boolean;
   otherTrackCount?: number;
@@ -32,8 +38,15 @@ const TICK_RATE = 600;
 let trackConfig: FakeTrackConfig = { canDecode: true, firstTimestamp: 0 };
 
 class FakeVideoTrack {
-  displayWidth = 320;
-  displayHeight = 180;
+  get rotation(): Rotation {
+    return trackConfig.rotation ?? 0;
+  }
+  get displayWidth(): number {
+    return trackConfig.displayWidth ?? 320;
+  }
+  get displayHeight(): number {
+    return trackConfig.displayHeight ?? 180;
+  }
   canDecode(): Promise<boolean> {
     return Promise.resolve(trackConfig.canDecode);
   }
@@ -234,5 +247,34 @@ describe("openInput frame timeline", () => {
     ).track;
 
     expect(firstTimestampS).toBe(timeline.timeAt(0));
+  });
+});
+
+describe("openInput rotation", () => {
+  it("publishes the track's turn beside dimensions it has already been applied to", async () => {
+    trackConfig = {
+      canDecode: true,
+      firstTimestamp: 0,
+      rotation: 270,
+      displayWidth: 180,
+      displayHeight: 320,
+    };
+
+    const handle = await openDecodeSource({ source: SOURCE });
+
+    expect(handle.track.rotation).toBe(270);
+    // Turning here as well would square the turn: mediabunny's display size is
+    // the turned size already.
+    expect([handle.track.width, handle.track.height]).toEqual([180, 320]);
+    expect([handle.track.decodeWidth, handle.track.decodeHeight]).toEqual([
+      180, 320,
+    ]);
+  });
+
+  it("a track with no display matrix publishes no turn", async () => {
+    const handle = await openDecodeSource({ source: SOURCE });
+
+    expect(handle.track.rotation).toBe(0);
+    expect([handle.track.width, handle.track.height]).toEqual([320, 180]);
   });
 });

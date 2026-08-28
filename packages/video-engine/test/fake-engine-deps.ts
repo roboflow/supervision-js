@@ -1,5 +1,6 @@
 import type { MediaClock } from "../src/clock";
 import { type FrameId, FrameTimeline } from "../src/frame-timeline";
+import type { Rotation } from "../src/rotation";
 import {
   ScrubCursorState,
   type FrameQuality,
@@ -27,6 +28,7 @@ export class FakeVideoSample implements VideoSampleLike {
   constructor(
     readonly timestamp: number = 0,
     readonly duration: number = 0,
+    readonly rotation: Rotation = 0,
   ) {}
 
   toVideoFrame(): VideoFrame {
@@ -106,6 +108,9 @@ export interface FakeCursor extends Omit<ScrubCursor, "state"> {
    *  that builds the play queue. */
   onNext: (() => void) | null;
   emit(timestampS: Sec, quality?: FrameQuality): void;
+  /** Hands the subscriber a frame the test built itself, for the cases a canvas
+   *  frame at a timestamp cannot express. */
+  emitFrame(frame: ScrubFrame): void;
 }
 
 export function makeScrubFrame(
@@ -132,6 +137,7 @@ export function makeFakeCursor(): FakeCursor {
       height: 720,
       decodeWidth: 1280,
       decodeHeight: 720,
+      rotation: 0,
       nativeFps: 30,
       durationS: asSec(10),
       firstTimestampS: asSec(0),
@@ -187,6 +193,9 @@ export function makeFakeCursor(): FakeCursor {
     },
     emit(timestampS: Sec, quality?: FrameQuality): void {
       listener?.(makeScrubFrame(timestampS, quality));
+    },
+    emitFrame(frame: ScrubFrame): void {
+      listener?.(frame);
     },
   };
   return cursor;

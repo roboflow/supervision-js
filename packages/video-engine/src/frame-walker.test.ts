@@ -20,6 +20,7 @@ const TRACK: ScrubTrackInfo = {
   height: 720,
   decodeWidth: 1280,
   decodeHeight: 720,
+  rotation: 0,
   nativeFps: FPS,
   durationS: asSec(10),
   firstTimestampS: asSec(0),
@@ -34,6 +35,7 @@ function sampleAt(timestamp: number, duration = FRAME_S): FakeSample {
   return {
     timestamp,
     duration,
+    rotation: 0,
     closed: false,
     toVideoFrame: () => ({}) as VideoFrame,
     draw: () => undefined,
@@ -326,6 +328,7 @@ describe("walkFrames over reordered content", () => {
       packets: new ReorderedPacketSource(),
       config: REORDER_CONFIG,
       createDecoder: (init) => new ReorderingDecoder(init, 2),
+      rotation: 0,
     });
     const source: WalkFrameSource = {
       track: TRACK,
@@ -347,6 +350,7 @@ describe("walkFrames over reordered content", () => {
       packets: new ReorderedPacketSource(),
       config: REORDER_CONFIG,
       createDecoder: (init) => new ReorderingDecoder(init, 2),
+      rotation: 0,
     });
     const source: WalkFrameSource = {
       track: TRACK,

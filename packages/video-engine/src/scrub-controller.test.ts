@@ -6,6 +6,7 @@ import {
   type ScrubCursor,
   type ScrubFrame,
   type ScrubFrameListener,
+  type ScrubTrackInfo,
 } from "./scrub-cursor";
 import { PLAYBACK } from "./constants";
 import { FrameTimeline } from "./frame-timeline";
@@ -60,11 +61,12 @@ class FakeClock implements MediaClock {
 
 class FakeCursor implements ScrubCursor {
   state = ScrubCursorState.Idle;
-  track = {
+  track: ScrubTrackInfo = {
     width: 320,
     height: 180,
     decodeWidth: 320,
     decodeHeight: 180,
+    rotation: 0,
     nativeFps: 30,
     durationS: asSec(5),
     firstTimestampS: asSec(0),
@@ -150,6 +152,7 @@ function sampleFrameAt(ts: number, onClose: () => void): ScrubFrame {
     timestampS: asSec(ts),
     sample: {
       toVideoFrame: () => ({}) as VideoFrame,
+      rotation: 0,
       draw: () => undefined,
       close: onClose,
       timestamp: ts * 1e6,

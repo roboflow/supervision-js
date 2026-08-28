@@ -2,6 +2,7 @@ import type { CreateScrubCursorOptions } from "./create-scrub-cursor";
 import type { FrameCacheStats } from "./frame-cache";
 import type { FrameId, FrameTimeline } from "./frame-timeline";
 import type { GopStats } from "./keyframe-index";
+import type { Rotation } from "./rotation";
 import type { DecodePath, Sec } from "./types";
 
 /**
@@ -39,8 +40,17 @@ export interface ScrubFrameBase {
  * teardown is closed at most once for real.
  */
 export interface VideoSampleLike {
-  /** A fresh VideoFrame per call; the caller closes the returned frame. */
+  /**
+   * A fresh VideoFrame per call; the caller closes the returned frame.
+   *
+   * The frame carries the stored pixels and NOT the track's rotation, on this
+   * and on mediabunny's own implementation, which drops it deliberately. So
+   * whoever takes one owes it the turn named by `rotation` below.
+   */
   toVideoFrame(): VideoFrame;
+  /** The turn the pixels still need, already applied by draw() and dropped by
+   *  toVideoFrame(). */
+  readonly rotation: Rotation;
   draw(
     context: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
     dx: number,
@@ -76,6 +86,15 @@ export interface SampleScrubFrame extends ScrubFrameBase {
 export type ScrubFrame = CanvasScrubFrame | SampleScrubFrame;
 
 /**
+ * The turn a frame's raw pixels still need. A canvas frame has none left: a
+ * CanvasSink decode arrives upright, and a cache blit was drawn through a
+ * sample's own draw, which applies it. Only a live sample still owes one.
+ */
+export function frameRotation(frame: ScrubFrame): Rotation {
+  return frame.kind === "sample" ? frame.sample.rotation : 0;
+}
+
+/**
  * Wraps a raw sample so its close() runs at most once, then no-ops. The
  * lifetime is hard to keep linear: a sample is drawn into the cache, stashed for
  * paint, then closed after paint, and may be closed again on teardown if a
@@ -86,6 +105,7 @@ export function idempotentSample(sample: VideoSampleLike): VideoSampleLike {
   let closed = false;
   return {
     toVideoFrame: () => sample.toVideoFrame(),
+    rotation: sample.rotation,
     draw: (ctx, dx, dy, dWidth, dHeight) =>
       sample.draw(ctx, dx, dy, dWidth, dHeight),
     close: () => {
@@ -272,6 +292,11 @@ export interface ScrubTrackInfo {
   readonly height: number;
   readonly decodeWidth: number;
   readonly decodeHeight: number;
+  /**
+   * The track's quarter turn. Every dimension above is the display size, so all
+   * four already account for it. This exists for the pixels, which do not.
+   */
+  readonly rotation: Rotation;
   readonly nativeFps: number | null;
   readonly durationS: Sec;
   /**

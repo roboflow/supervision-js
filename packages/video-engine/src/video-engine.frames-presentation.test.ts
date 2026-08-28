@@ -12,6 +12,7 @@ import type { MediaClock } from "./clock";
 import * as factoryModule from "./create-scrub-cursor";
 import { displayBoxResolution } from "./decode-resolution";
 import { EngineCore } from "./engine-core";
+import type { Rotation } from "./rotation";
 import { ScrubController, setDiagnosticsEnabled } from "./scrub-controller";
 import type {
   ScrubFrame,
@@ -83,6 +84,7 @@ class FakeSample implements VideoSampleLike {
   constructor(
     readonly timestamp: number = 0,
     readonly duration: number = 0,
+    readonly rotation: Rotation = 0,
   ) {}
 
   toVideoFrame(): VideoFrame {
@@ -498,6 +500,47 @@ describe("VideoEngine in frames presentation", () => {
     expect(wrapped[0].closeCount).toBe(1);
     // The mirror channel keeps carrying the pixel-less frame event.
     expect(engine.getPaintSeq()).toBe(1);
+    await engine.dispose();
+  });
+
+  it("a turned track hands the host the turn its pixels still owe", async () => {
+    const { engine, cursor } = setupFacade();
+    const seen: PresentedFrame[] = [];
+    engine.toHandle().onPresentedFrame((presented) => {
+      seen.push(presented);
+      presented.frame.close();
+    });
+    await engine.load();
+
+    cursor.emitFrame({
+      kind: "sample",
+      sample: new FakeSample(2_000_000, 0, 270),
+      timestampS: asSec(2),
+      width: 720,
+      height: 1280,
+      isKeyFrame: false,
+      quality: "exact",
+    });
+    await flushRaf();
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0].rotation).toBe(270);
+    await engine.dispose();
+  });
+
+  it("an unturned track hands the host a turn of zero", async () => {
+    const { engine, cursor } = setupFacade();
+    const seen: PresentedFrame[] = [];
+    engine.toHandle().onPresentedFrame((presented) => {
+      seen.push(presented);
+      presented.frame.close();
+    });
+    await engine.load();
+
+    cursor.emit(asSec(2));
+    await flushRaf();
+
+    expect(seen[0].rotation).toBe(0);
     await engine.dispose();
   });
 

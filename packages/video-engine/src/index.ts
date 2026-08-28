@@ -38,6 +38,7 @@ export type { PresentationMode } from "./types";
 export type { PresentedFrame } from "./worker-protocol";
 export type { PresentedFrameHandler } from "./video-engine";
 export type { FrameQuality } from "./scrub-cursor";
+export type { Rotation } from "./rotation";
 
 /* ---------------------------------------------------------- naming the frames */
 export { FrameTimeline } from "./frame-timeline";

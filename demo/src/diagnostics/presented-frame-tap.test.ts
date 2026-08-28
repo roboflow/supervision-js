@@ -55,6 +55,7 @@ function createPresentedFrame(mediaTimeMs: number): PresentedFrame {
     mediaTimeS: ticks / TICK_RATE,
     paintSeq: index,
     quality: "exact",
+    rotation: 0,
   };
 }
 

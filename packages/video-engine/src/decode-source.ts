@@ -479,6 +479,7 @@ function sessionHandle(
     packets,
     config,
     createDecoder: webCodecsDecoder,
+    rotation: opened.track.rotation,
   });
   return {
     track: opened.track,
@@ -578,6 +579,7 @@ async function openInput(
       height: displayHeight,
       decodeWidth,
       decodeHeight,
+      rotation: videoTrack.rotation,
       nativeFps,
       durationS,
       firstTimestampS: timeline.timeAt(0),

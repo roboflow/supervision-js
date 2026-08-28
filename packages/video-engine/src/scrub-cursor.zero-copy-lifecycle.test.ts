@@ -34,7 +34,7 @@ beforeAll(() => {
     RENDER_ATTACHMENT: 16,
     COPY_SRC: 1,
   };
-  globals.GPUBufferUsage = { COPY_DST: 8, MAP_READ: 1 };
+  globals.GPUBufferUsage = { COPY_DST: 8, MAP_READ: 1, UNIFORM: 64 };
   globals.GPUMapMode = { READ: 1 };
 });
 
@@ -43,6 +43,7 @@ const TRACK: ScrubTrackInfo = {
   height: 180,
   decodeWidth: 320,
   decodeHeight: 180,
+  rotation: 0,
   nativeFps: 30,
   durationS: asSec(10),
   firstTimestampS: asSec(0),
@@ -581,6 +582,7 @@ function makeFakeGpuRenderer(opts: {
     createCommandEncoder: vi.fn(() => encoder),
     queue: {
       copyExternalImageToTexture: opts.copyExternalImageToTexture,
+      writeBuffer: vi.fn(),
       submit: vi.fn(),
     },
     destroy: vi.fn(),

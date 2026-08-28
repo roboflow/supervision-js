@@ -21,6 +21,7 @@ const TRACK: ScrubTrackInfo = {
   height: 720,
   decodeWidth: 160,
   decodeHeight: 90,
+  rotation: 0,
   nativeFps: 30,
   durationS: asSec(10),
   firstTimestampS: asSec(0),

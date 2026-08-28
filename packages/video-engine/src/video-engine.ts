@@ -668,6 +668,7 @@ export class VideoEngine {
       mediaTimeS: event.mediaTimeS,
       mediaTimeMs: event.mediaTimeMs,
       quality: event.quality,
+      rotation: event.rotation,
       frame: event.frame,
     });
     this.checkFrameOwnership(event.frame);

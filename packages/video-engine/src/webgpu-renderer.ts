@@ -1,7 +1,8 @@
 /// <reference types="@webgpu/types" />
 
+import { type Rotation, uvRotationMatrix } from "./rotation";
 import { DISPLAY_COLOR_SPACE, type Renderer } from "./renderer";
-import type { ScrubFrame } from "./scrub-cursor";
+import { frameRotation, type ScrubFrame } from "./scrub-cursor";
 
 /**
  * WebGPU renderer behind the Renderer seam. It samples each frame across a
@@ -42,13 +43,18 @@ struct VsOut {
     @location(0) uv: vec2f,
 };
 
+// The frame's quarter turn as a 2x2, row-major: (m00, m01, m10, m11).
+@group(0) @binding(2) var<uniform> uvRotation: vec4f;
+
 @vertex fn vs(@builtin(vertex_index) i: u32) -> VsOut {
     var corners = array<vec2f, 3>(vec2f(-1.0, -1.0), vec2f(3.0, -1.0), vec2f(-1.0, 3.0));
     var out: VsOut;
     let p = corners[i];
     out.pos = vec4f(p, 0.0, 1.0);
     // Map clip space to texture space, flipping Y so the frame is upright.
-    out.uv = p * vec2f(0.5, -0.5) + vec2f(0.5, 0.5);
+    let uv = p * vec2f(0.5, -0.5) + vec2f(0.5, 0.5);
+    let d = uv - vec2f(0.5, 0.5);
+    out.uv = vec2f(dot(uvRotation.xy, d), dot(uvRotation.zw, d)) + vec2f(0.5, 0.5);
     return out;
 }
 `;
@@ -84,6 +90,9 @@ const IMPORT_CHECK_SIZE = 64;
  *  chroma siting move the mean by a fraction of a level. */
 const IMPORT_CHECK_TOLERANCE = 3;
 
+/** One vec4f: the frame's quarter turn as a 2x2. */
+const ROTATION_BUFFER_BYTES = 16;
+
 /**
  * Whether a decoded frame may be painted by importing it straight onto the GPU.
  * Unknown until one frame has been rendered both ways and the results compared.
@@ -103,6 +112,10 @@ export class WebGpuRenderer implements Renderer {
   /** The 2D surface a decoded frame is converted through, built on first use. */
   private conversion: OffscreenCanvasRenderingContext2D | null = null;
 
+  /** What the rotation uniform currently holds, so an unturned source pays no
+   *  buffer write per frame. */
+  private uvRotation: Rotation | null = null;
+
   private constructor(
     private readonly canvas: OffscreenCanvas,
     private readonly device: GPUDevice,
@@ -110,6 +123,7 @@ export class WebGpuRenderer implements Renderer {
     private readonly format: GPUTextureFormat,
     private readonly pipeline: GPURenderPipeline,
     private readonly sampler: GPUSampler,
+    private readonly rotationBuffer: GPUBuffer,
   ) {
     this.directImport =
       typeof device.importExternalTexture === "function"
@@ -147,18 +161,27 @@ export class WebGpuRenderer implements Renderer {
       magFilter: "linear",
       minFilter: "linear",
     });
-    return new WebGpuRenderer(
+    const rotationBuffer = device.createBuffer({
+      size: ROTATION_BUFFER_BYTES,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    const renderer = new WebGpuRenderer(
       canvas,
       device,
       context,
       format,
       pipeline,
       sampler,
+      rotationBuffer,
     );
+    renderer.setUvRotation(0);
+    return renderer;
   }
 
   draw(frame: ScrubFrame): void {
     if (this.canvas.width === 0 || this.canvas.height === 0) return;
+    const rotation = frameRotation(frame);
+    this.setUvRotation(rotation);
     if (frame.kind !== "sample") {
       // Size the upload to the SOURCE frame, not the display canvas. A preview
       // (coarse) cache frame is downscaled (e.g. 320px wide) while the canvas is
@@ -176,8 +199,26 @@ export class WebGpuRenderer implements Renderer {
     if (this.directImport === "unknown") {
       this.directImport = "measuring";
       void this.measureDirectImport(frame.sample.toVideoFrame());
+      // The probe encodes its passes before it yields, and leaves the uniform
+      // unturned behind it.
+      this.setUvRotation(rotation);
     }
-    this.drawConverted(frame.sample.toVideoFrame());
+    this.drawConverted(frame.sample.toVideoFrame(), rotation);
+  }
+
+  /**
+   * Points the shader's sampling at the turn this frame's pixels still owe.
+   * Queue writes and submits run in order, so the value a pass reads is the one
+   * written before it was encoded.
+   */
+  private setUvRotation(rotation: Rotation): void {
+    if (this.uvRotation === rotation) return;
+    this.uvRotation = rotation;
+    this.device.queue.writeBuffer(
+      this.rotationBuffer,
+      0,
+      new Float32Array(uvRotationMatrix(rotation)),
+    );
   }
 
   dispose(): void {
@@ -185,6 +226,7 @@ export class WebGpuRenderer implements Renderer {
     this.texture = null;
     this.bindGroup = null;
     this.conversion = null;
+    this.rotationBuffer.destroy();
     this.device.destroy();
   }
 
@@ -203,6 +245,7 @@ export class WebGpuRenderer implements Renderer {
         entries: [
           { binding: 0, resource: this.sampler },
           { binding: 1, resource: external },
+          { binding: 2, resource: { buffer: this.rotationBuffer } },
         ],
       });
       this.renderPass(pipeline, bindGroup);
@@ -213,12 +256,16 @@ export class WebGpuRenderer implements Renderer {
 
   /** Draws the frame through a 2D canvas and uploads that, which is the
    *  conversion the cache blits and the 2D renderer already go through. The
-   *  canvas is display-sized, so the downscale happens once here and the
-   *  shader only has to stretch. */
-  private drawConverted(videoFrame: VideoFrame): void {
+   *  canvas is the display size, or its transpose on a quarter turn, so the
+   *  downscale happens once here and the shader only has to turn and stretch. */
+  private drawConverted(videoFrame: VideoFrame, rotation: Rotation): void {
     try {
-      const width = this.canvas.width;
-      const height = this.canvas.height;
+      // The display canvas is already the turned size, so on a quarter turn the
+      // conversion surface is its transpose: the frame lands unturned and at
+      // its own aspect, and the shader turns it on the way to the screen.
+      const quarterTurn = rotation % 180 !== 0;
+      const width = quarterTurn ? this.canvas.height : this.canvas.width;
+      const height = quarterTurn ? this.canvas.width : this.canvas.height;
       const conversion = this.conversionFor(width, height);
       if (!conversion) return;
       conversion.drawImage(videoFrame, 0, 0, width, height);
@@ -256,6 +303,10 @@ export class WebGpuRenderer implements Renderer {
     const bytesPerRow = size * 4;
     const region = bytesPerRow * size;
     const scratch: { destroy(): void }[] = [];
+    // Both probe routes read the frame unturned: what is being compared is how
+    // the two paths handle colour, and a turn either route applied would only
+    // move where the disagreement is sampled from.
+    this.setUvRotation(0);
     const hold = <T extends { destroy(): void }>(resource: T): T => {
       scratch.push(resource);
       return resource;
@@ -322,6 +373,7 @@ export class WebGpuRenderer implements Renderer {
                 colorSpace: DISPLAY_COLOR_SPACE,
               }),
             },
+            { binding: 2, resource: { buffer: this.rotationBuffer } },
           ],
         }),
         imported.createView(),
@@ -334,6 +386,7 @@ export class WebGpuRenderer implements Renderer {
           entries: [
             { binding: 0, resource: this.sampler },
             { binding: 1, resource: reference.createView() },
+            { binding: 2, resource: { buffer: this.rotationBuffer } },
           ],
         }),
         converted.createView(),
@@ -459,6 +512,7 @@ export class WebGpuRenderer implements Renderer {
       entries: [
         { binding: 0, resource: this.sampler },
         { binding: 1, resource: this.texture.createView() },
+        { binding: 2, resource: { buffer: this.rotationBuffer } },
       ],
     });
   }

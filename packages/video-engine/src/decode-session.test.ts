@@ -7,7 +7,14 @@ import {
   type PacketSource,
   type VideoDecoderLike,
 } from "./decode-session";
+import type { Rotation } from "./rotation";
 import { VideoEngineError, VideoEngineErrorCode } from "./types";
+import {
+  paintedCorners,
+  QUARTER_TURNS,
+  TransformRecorder,
+  turnedSize,
+} from "../test/rotation-probe";
 
 const FPS = 15;
 const FRAME_S = 1 / FPS;
@@ -173,7 +180,10 @@ class FakeDecoder implements VideoDecoderLike {
   }
 }
 
-function openSession(holdFrames = 0): {
+function openSession(
+  holdFrames = 0,
+  rotation: Rotation = 0,
+): {
   session: DecodeSession;
   packets: FakePacketSource;
   decoders: FakeDecoder[];
@@ -183,6 +193,7 @@ function openSession(holdFrames = 0): {
   const session = new DecodeSession({
     packets,
     config: CONFIG,
+    rotation,
     createDecoder: (init) => {
       const decoder = new FakeDecoder(init, holdFrames);
       decoders.push(decoder);
@@ -324,6 +335,7 @@ describe("DecodeSession chunks", () => {
           packets: new FakePacketSource(),
           config: { codec: "vp09.00.10.08" },
           createDecoder: (init) => new FakeDecoder(init),
+          rotation: 0,
         }),
     ).toThrow(/not AVCC-framed H.264/);
   });
@@ -464,6 +476,7 @@ describe("DecodeSession decoder failure", () => {
       config: CONFIG,
       createDecoder,
       outputTimeoutMs: OUTPUT_TIMEOUT_MS,
+      rotation: 0,
     });
     return { session, packets };
   }
@@ -866,6 +879,7 @@ describe("DecodeSession open GOP", () => {
         return decoder;
       },
       outputTimeoutMs: 200,
+      rotation: 0,
     });
     return { session, packets, decoders };
   }
@@ -960,9 +974,56 @@ describe("DecodeSession open GOP", () => {
         return decoder;
       },
       outputTimeoutMs: 200,
+      rotation: 0,
     });
 
     await expect(session.frameAt(6)).rejects.toThrow(/reported an error/);
     await expect(session.frameAt(0)).rejects.toThrow(/reported an error/);
+  });
+});
+
+describe("DecodeSession rotation", () => {
+  it.each(QUARTER_TURNS)(
+    "a %i-degree track's frames draw the way mediabunny's own sinks draw them",
+    async (rotation) => {
+      const { session } = openSession(0, rotation);
+      const [width, height] = turnedSize(rotation);
+      const recorder = new TransformRecorder();
+
+      const sample = await session.frameAt(0.5);
+      sample?.draw(recorder.asContext(), 0, 0, width, height);
+
+      expect(recorder.cornersOver(width, height)).toEqual(
+        paintedCorners(rotation),
+      );
+      sample?.close();
+    },
+  );
+
+  it.each(QUARTER_TURNS)(
+    "carries %i degrees on the frame, since toVideoFrame drops it",
+    async (rotation) => {
+      const { session } = openSession(0, rotation);
+
+      const sample = await session.frameAt(0.5);
+
+      expect(sample?.rotation).toBe(rotation);
+      sample?.close();
+    },
+  );
+
+  it("a track with no rotation metadata is drawn untouched", async () => {
+    const { session } = openSession();
+    const calls: unknown[][] = [];
+    const context = {
+      drawImage: (...args: unknown[]) => calls.push(args),
+    } as unknown as OffscreenCanvasRenderingContext2D;
+
+    const sample = await session.frameAt(0.5);
+    sample?.draw(context, 0, 0, 640, 360);
+
+    expect(sample?.rotation).toBe(0);
+    expect(calls).toEqual([[expect.anything(), 0, 0, 640, 360]]);
+    sample?.close();
   });
 });

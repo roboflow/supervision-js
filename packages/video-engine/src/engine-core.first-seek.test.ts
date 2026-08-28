@@ -130,6 +130,7 @@ function makeSessionCursor(): SessionCursor {
       height: 720,
       decodeWidth: 1280,
       decodeHeight: 720,
+      rotation: 0,
       nativeFps: FPS,
       durationS: asSec(FRAME_COUNT / FPS),
       firstTimestampS: asSec(0),

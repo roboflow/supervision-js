@@ -12,7 +12,9 @@ import {
   PresentedRateMeter,
   type Warning,
 } from "./diagnostics";
+import type { Rotation } from "./rotation";
 import {
+  frameRotation,
   type FrameQuality,
   type ScrubCursor,
   type ScrubFrame,
@@ -730,7 +732,8 @@ export class EngineCore {
       quality: frame.quality,
       ...(catchUpMs === undefined ? {} : { catchUpMs }),
     });
-    if (presented) this.present(presented, landing, frame.quality);
+    if (presented)
+      this.present(presented, landing, frame.quality, frameRotation(frame));
     // Append to the trace event ring only while armed (predicted-false when
     // disarmed), at the same paint point that already fires.
     this.traceRecorder?.pushEvent({
@@ -763,6 +766,7 @@ export class EngineCore {
     frame: VideoFrame,
     landing: FrameLanding,
     quality: FrameQuality,
+    rotation: Rotation,
   ): void {
     const emit = this.emitPresentedFrame;
     if (!emit) {
@@ -777,6 +781,7 @@ export class EngineCore {
         mediaTimeS: landing.mediaTimeS,
         mediaTimeMs: landing.mediaTimeS * 1000,
         quality,
+        rotation,
         frame,
       },
       [frame],

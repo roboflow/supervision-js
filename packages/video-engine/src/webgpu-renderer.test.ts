@@ -5,6 +5,7 @@ import type {
   ScrubFrame,
   VideoSampleLike,
 } from "./scrub-cursor";
+import type { Rotation } from "./rotation";
 import { asSec } from "./types";
 import { WebGpuRenderer } from "./webgpu-renderer";
 
@@ -12,6 +13,7 @@ interface GpuSurfaces {
   configure: Mock;
   importExternalTexture: Mock;
   copyExternalImageToTexture: Mock;
+  writeBuffer: Mock;
   conversions: FakeCanvas[];
 }
 
@@ -46,10 +48,11 @@ const VIDEO_FRAME = {
   close: () => undefined,
 } as VideoFrame;
 
-function sampleFrame(): ScrubFrame {
+function sampleFrame(rotation: Rotation = 0): ScrubFrame {
   const sample = {
     timestamp: 0,
     duration: 0,
+    rotation,
     toVideoFrame: () => VIDEO_FRAME,
     draw: () => undefined,
     close: () => undefined,
@@ -92,6 +95,7 @@ async function createOverFakeGpu(opts: {
     configure: vi.fn(),
     importExternalTexture: vi.fn(() => ({}) as GPUExternalTexture),
     copyExternalImageToTexture: vi.fn(),
+    writeBuffer: vi.fn(),
     conversions,
   };
   const pass = {
@@ -133,6 +137,7 @@ async function createOverFakeGpu(opts: {
     })),
     queue: {
       copyExternalImageToTexture: surfaces.copyExternalImageToTexture,
+      writeBuffer: surfaces.writeBuffer,
       submit: vi.fn(),
     },
     destroy: vi.fn(),
@@ -167,7 +172,7 @@ async function createOverFakeGpu(opts: {
   Object.defineProperty(globalThis, "GPUBufferUsage", {
     configurable: true,
     writable: true,
-    value: { COPY_DST: 8, MAP_READ: 1 },
+    value: { COPY_DST: 8, MAP_READ: 1, UNIFORM: 64 },
   });
   Object.defineProperty(globalThis, "GPUMapMode", {
     configurable: true,
@@ -188,9 +193,19 @@ const uploadSources = (surfaces: GpuSurfaces): unknown[] =>
 
 /** Picks the display-sized 2D surface out of `conversions`, which also holds the
  *  small square one the comparison renders its reference into. */
-const conversionCanvas = (surfaces: GpuSurfaces): FakeCanvas | undefined =>
+const conversionCanvas = (
+  surfaces: GpuSurfaces,
+  width = 320,
+  height = 180,
+): FakeCanvas | undefined =>
   surfaces.conversions.find(
-    (canvas) => canvas.width === 320 && canvas.height === 180,
+    (canvas) => canvas.width === width && canvas.height === height,
+  );
+
+/** Every value written into the shader's rotation uniform, oldest first. */
+const rotationWrites = (surfaces: GpuSurfaces): number[][] =>
+  surfaces.writeBuffer.mock.calls.map((call) =>
+    Array.from(call[2] as Float32Array),
   );
 
 describe("WebGpuRenderer colour space", () => {
@@ -315,5 +330,107 @@ describe("WebGpuRenderer direct import", () => {
     await settle();
 
     expect(surfaces.importExternalTexture).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * The shader's arithmetic and the surfaces it is handed. What a real GPU makes
+ * of them is verified in a browser, as everything else in this file is: a
+ * worker test environment has no adapter, and createRenderer falls back to the
+ * 2D renderer there.
+ */
+describe("WebGpuRenderer rotation", () => {
+  it("points the shader at the turn a rotated frame still owes", async () => {
+    const { renderer, surfaces } = await createOverFakeGpu({
+      canImportExternal: true,
+    });
+
+    renderer.draw(sampleFrame(270));
+
+    expect(rotationWrites(surfaces).at(-1)).toEqual([0, -1, 1, 0]);
+  });
+
+  it("leaves an unrotated frame sampling itself, and writes nothing to say so", async () => {
+    const { renderer, surfaces } = await createOverFakeGpu({
+      canImportExternal: true,
+    });
+
+    renderer.draw(sampleFrame());
+    renderer.draw(canvasFrame());
+
+    expect(rotationWrites(surfaces)).toEqual([[1, 0, 0, 1]]);
+  });
+
+  it("writes the turn once, however many frames carry it", async () => {
+    const { renderer, surfaces } = await createOverFakeGpu({
+      canImportExternal: true,
+      importedMean: 100,
+      convertedMean: 100,
+    });
+    renderer.draw(sampleFrame(90));
+    await settle();
+    surfaces.writeBuffer.mockClear();
+
+    renderer.draw(sampleFrame(90));
+    renderer.draw(sampleFrame(90));
+    renderer.draw(sampleFrame(90));
+
+    expect(rotationWrites(surfaces)).toEqual([]);
+  });
+
+  it("converts a quarter-turned frame through the transpose of the display canvas", async () => {
+    const { renderer, surfaces } = await createOverFakeGpu({
+      canImportExternal: false,
+    });
+
+    renderer.draw(sampleFrame(90));
+
+    const conversion = conversionCanvas(surfaces, 180, 320);
+    expect(conversion?.drawImage).toHaveBeenCalledWith(
+      VIDEO_FRAME,
+      0,
+      0,
+      180,
+      320,
+    );
+    expect(uploadSources(surfaces)).toEqual([conversion]);
+  });
+
+  it("converts an unrotated frame through the display canvas, as before", async () => {
+    const { renderer, surfaces } = await createOverFakeGpu({
+      canImportExternal: false,
+    });
+
+    renderer.draw(sampleFrame());
+
+    const conversion = conversionCanvas(surfaces);
+    expect(conversion?.drawImage).toHaveBeenCalledWith(
+      VIDEO_FRAME,
+      0,
+      0,
+      320,
+      180,
+    );
+    expect(uploadSources(surfaces)).toEqual([conversion]);
+  });
+
+  it("compares the two routes on an unturned frame, so the turn cannot skew it", async () => {
+    const { renderer, surfaces } = await createOverFakeGpu({
+      canImportExternal: true,
+      importedMean: 100,
+      convertedMean: 100,
+    });
+
+    renderer.draw(sampleFrame(180));
+    await settle();
+
+    // Identity at create, the frame's turn, the probe's own reset to unturned,
+    // then the frame's turn again for the paint that follows the probe.
+    expect(rotationWrites(surfaces)).toEqual([
+      [1, 0, 0, 1],
+      [-1, 0, 0, -1],
+      [1, 0, 0, 1],
+      [-1, 0, 0, -1],
+    ]);
   });
 });

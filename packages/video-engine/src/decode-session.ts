@@ -3,6 +3,7 @@ import {
   KeyPacketRequirement,
   nalPrefixWidth,
 } from "./key-packet";
+import { drawRotated, type Rotation } from "./rotation";
 import type { VideoSampleLike } from "./scrub-cursor";
 import { VideoEngineError, VideoEngineErrorCode } from "./types";
 
@@ -101,6 +102,13 @@ export interface DecodeSessionOptions {
   readonly packets: PacketSource;
   readonly config: VideoDecoderConfig;
   readonly createDecoder: (init: VideoDecoderInit) => VideoDecoderLike;
+  /**
+   * The track's quarter turn, which the session's frames carry and its draw
+   * applies. A raw decoded picture holds the stored pixels and nothing about
+   * the display matrix, so this is the only route the turn has here, and a
+   * caller that forgets it paints every portrait recording sideways.
+   */
+  readonly rotation: Rotation;
   /**
    * Ceiling on waiting for one decoder output while chunks are in flight;
    * defaults to OUTPUT_TIMEOUT_MS. Overridable so a test can drive the
@@ -285,8 +293,11 @@ export class DecodeSession implements SessionFrameSource {
 
   private readonly outputTimeoutMs: number;
 
+  private readonly rotation: Rotation;
+
   constructor(private readonly options: DecodeSessionOptions) {
     this.outputTimeoutMs = options.outputTimeoutMs ?? OUTPUT_TIMEOUT_MS;
+    this.rotation = options.rotation;
     const prefixWidth = drivablePrefixWidth(options.config);
     if (prefixWidth === null) {
       throw new VideoEngineError(
@@ -322,7 +333,7 @@ export class DecodeSession implements SessionFrameSource {
   /** The frame at or before `targetS`, or null when nothing precedes it. */
   async frameAt(targetS: number): Promise<VideoSampleLike | null> {
     const landed = await this.exclusive(() => this.land(targetS));
-    return landed ? videoFrameSample(landed) : null;
+    return landed ? videoFrameSample(landed, this.rotation) : null;
   }
 
   /**
@@ -348,7 +359,7 @@ export class DecodeSession implements SessionFrameSource {
       if (!picture) return;
       handedOutS = picture.timestampS;
       seenEpoch = this.epoch;
-      yield videoFrameSample(picture);
+      yield videoFrameSample(picture, this.rotation);
     }
   }
 
@@ -380,7 +391,7 @@ export class DecodeSession implements SessionFrameSource {
       });
       if (!picture) return;
       seenEpoch = this.epoch;
-      yield videoFrameSample(picture);
+      yield videoFrameSample(picture, this.rotation);
     }
   }
 
@@ -811,22 +822,25 @@ export class DecodeSession implements SessionFrameSource {
 
 /** A decoded frame in the runtime's own sample vocabulary, so a session frame
  *  and a VideoSampleSink frame reach the renderer the same way. */
-function videoFrameSample({
-  frame,
-  timestampS,
-  durationS,
-}: DecodedPicture): VideoSampleLike {
+function videoFrameSample(
+  { frame, timestampS, durationS }: DecodedPicture,
+  rotation: Rotation,
+): VideoSampleLike {
+  const quarterTurn = rotation % 180 !== 0;
   return {
     timestamp: timestampS,
     duration: durationS,
+    rotation,
     toVideoFrame: () => frame.clone(),
     draw: (ctx, dx, dy, dWidth, dHeight) => {
-      ctx.drawImage(
+      drawRotated(
+        ctx,
         frame,
+        rotation,
         dx,
         dy,
-        dWidth ?? frame.displayWidth,
-        dHeight ?? frame.displayHeight,
+        dWidth ?? (quarterTurn ? frame.displayHeight : frame.displayWidth),
+        dHeight ?? (quarterTurn ? frame.displayWidth : frame.displayHeight),
       );
     },
     close: () => frame.close(),

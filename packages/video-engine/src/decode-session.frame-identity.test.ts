@@ -203,6 +203,7 @@ function openSession(stamp: StampMicroseconds, dropEvery = 0): DecodeSession {
     packets: new FixturePacketSource(),
     config: CONFIG,
     createDecoder: (init) => new FakeDecoder(init, stamp, dropEvery),
+    rotation: 0,
   });
 }
 

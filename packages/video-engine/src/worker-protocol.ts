@@ -2,6 +2,7 @@ import type { FrameId, FrameLanding } from "./frame-timeline";
 import type { FrameQuality, SeekIntent } from "./scrub-cursor";
 import type { DecodeResolutionStrategy } from "./decode-resolution";
 import type { DiagnosticsSnapshot, EngineDiagnostics } from "./diagnostics";
+import type { Rotation } from "./rotation";
 import type { EngineTrace } from "./trace-recorder";
 import { asPaintSeq, VideoEngineError } from "./types";
 import type {
@@ -265,6 +266,12 @@ export interface PresentedFrame {
    *  speaks it. Derived, never an input to anything. */
   readonly mediaTimeMs: number;
   readonly quality: FrameQuality;
+  /**
+   * Degrees clockwise the pixels still need. A VideoFrame carries no display
+   * matrix, so a host that draws these pixels as they arrive draws a portrait
+   * recording sideways unless it applies this.
+   */
+  readonly rotation: Rotation;
   /** Dimensions are the frame's own (codedWidth/codedHeight), so they are not
    *  restated alongside it. */
   readonly frame: VideoFrame;
