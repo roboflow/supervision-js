@@ -195,7 +195,7 @@ export async function stable(session, attempts, run) {
   );
 }
 
-const SETTLE_AT = `(async (time, deadlineMs) => {
+const SETTLE_AT = `(async (time, deadlineMs, onTheFrame = false) => {
   const renderer = window.__demoRenderer;
   const started = performance.now();
   const rendersBefore = renderer.getRenderCount();
@@ -213,7 +213,13 @@ const SETTLE_AT = `(async (time, deadlineMs) => {
     // The masks being cooked is not the masks being on screen. A screenshot
     // taken between the two reads as a frame that lost its masks.
     const drawn = renderer.getRenderCount() > rendersBefore;
-    if (detectionReady && active?.prepared && drawn) {
+    // A seek resolves when its walk settles, and the frame that walk landed on
+    // reaches this thread a worker message later. Until it does the canvas
+    // holds the cached stand-in the seek painted on its way out, which can be
+    // a quarter of a second from the frame that was asked for.
+    const landed =
+      state.currentTime <= time && time - state.currentTime < framePeriod;
+    if (detectionReady && active?.prepared && drawn && (!onTheFrame || landed)) {
       await new Promise((resolve) => requestAnimationFrame(() => resolve()));
       return {
         settleMs: Math.round(performance.now() - started),
@@ -1059,7 +1065,7 @@ async function walk(session, geometry, stops) {
   const results = [];
   for (const requested of stops) {
     const settled = await session.readJson(
-      `(${SETTLE_AT})(${requested}, ${SCRUB_SETTLE_DEADLINE_MS})`,
+      `(${SETTLE_AT})(${requested}, ${SCRUB_SETTLE_DEADLINE_MS}, true)`,
     );
     await session.readJson(`(async () => {
       window.__demoRenderer.refresh();
