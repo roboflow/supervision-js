@@ -116,6 +116,21 @@ no path is up and the rate is not 1, and a source that presents its own frames
 throws on a rate its producer cannot play, reverse included. A caller no longer
 reads back a rate it never got.
 
+### Nearest-Index Selection Measures The Grid Instead Of Trusting frameRate
+
+In `DetectionFrameSelectionMode.NearestFrameIndex`, the width of a detection
+frame's grid step is measured from the media times the buffered frames carry.
+`frameRate` is now the fallback used when fewer than two indexed frames are
+buffered, rather than the number the grid is built from.
+
+A caller whose `frameRate` matched the clip sees no change. A caller that passed
+a nominal rate the clip does not really run at was previously walked off the grid
+by the accumulating difference, and now is not.
+
+`DetectionFrameSelectionOptions.frameIndexOriginTime` is deprecated alongside
+this and nothing reads it. Each buffered frame carries the media time its index
+sits at, which states the same thing without an origin to extrapolate from.
+
 ### muted Is Deprecated
 
 `MediaSessionRendererOptions.muted` is still accepted and nothing reads it. The
