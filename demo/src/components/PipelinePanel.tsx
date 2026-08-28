@@ -469,12 +469,12 @@ function NodeTarget({
     <ExplainedTarget
       accessibleName={`${stageTitle}. ${node.tooltip}`}
       className={`pipeline-diagram__target${offered ? " pipeline-diagram__target--pick" : ""}`}
-      inert={node.choice !== null && !offered}
       onClick={
         offered && select ? () => onChangeOptions(select(options)) : undefined
       }
       side={readTipSide(node.top, diagram.height)}
       tooltip={node.tooltip}
+      unactionable={node.choice !== null && !offered}
       wrapperClassName="pipeline-diagram__row"
       wrapperStyle={readRowStyle(node.top, node.height + ROW_GAP, diagram)}
     />

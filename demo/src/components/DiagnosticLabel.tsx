@@ -13,18 +13,18 @@ export type ExplainedSide = "above" | "below";
  * screen reader never sees the tooltip open.
  *
  * A target that also acts takes `onClick`. One that would act but cannot takes
- * `inert`, which leaves it focusable: the sentence saying why is the whole
- * reason someone lands on it.
+ * `unactionable`, which leaves it focusable and announced: the sentence saying
+ * why is the whole reason someone lands on it.
  */
 export function ExplainedTarget({
   accessibleName,
   align = "start",
   children,
   className,
-  inert = false,
   onClick,
   side = "above",
   tooltip,
+  unactionable = false,
   wrapperClassName,
   wrapperStyle,
 }: {
@@ -32,10 +32,10 @@ export function ExplainedTarget({
   readonly align?: ExplainedAlign;
   readonly children?: ReactNode;
   readonly className: string;
-  readonly inert?: boolean;
   readonly onClick?: () => void;
   readonly side?: ExplainedSide;
   readonly tooltip: string;
+  readonly unactionable?: boolean;
   readonly wrapperClassName?: string;
   readonly wrapperStyle?: CSSProperties;
 }) {
@@ -49,10 +49,10 @@ export function ExplainedTarget({
       style={wrapperStyle}
     >
       <button
-        aria-disabled={inert || undefined}
+        aria-disabled={unactionable || undefined}
         aria-label={accessibleName}
         className={className}
-        onClick={inert ? undefined : onClick}
+        onClick={unactionable ? undefined : onClick}
         type="button"
       >
         {children}
