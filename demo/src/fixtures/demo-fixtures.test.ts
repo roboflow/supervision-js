@@ -2,7 +2,7 @@
 
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
@@ -595,6 +595,31 @@ describe("fixture playback media", () => {
       expect(resolveDemoFixturePlaybackSrc(fixture)).toBe(
         fixture.proxyVideoSrc,
       );
+    }
+  });
+
+  it("computed its detections against the media it plays", () => {
+    // video.width and video.height are the pixel space every box, label anchor,
+    // polygon, polyline and keypoint is written in, and video.file is the only
+    // record of which media that space belongs to. A manifest naming media the
+    // fixture does not play leaves nothing to catch a swap between two rasters
+    // that happen to share a frame size.
+    for (const fixture of demoFixtures) {
+      const meta = readJson<{
+        readonly media: { readonly file: string; readonly proxyFile?: string };
+      }>(join(fixturesRoot, fixture.sampleName, "fixture.meta.json"));
+      const manifest = readJson<{ readonly video: { readonly file: string } }>(
+        join(fixturesRoot, fixture.sampleName, "detections.manifest.json"),
+      );
+      const played = meta.media.proxyFile ?? meta.media.file;
+
+      expect({
+        played: basename(played),
+        sampleName: fixture.sampleName,
+      }).toEqual({
+        played: basename(manifest.video.file),
+        sampleName: fixture.sampleName,
+      });
     }
   });
 });
