@@ -370,3 +370,26 @@ describe("the tree the numbers came from", () => {
     expect(warning).toContain("does not record which clip");
   });
 });
+
+/* Four sessions of an unchanged build put this between 0.1595 and 0.1628, and
+ * resizing the window alone carries it to 0.1678 inside one session, so a
+ * budget wider than a tenth is wider than anything the metric does on its own.
+ * A quarter of it is a third of the dim. */
+describe("the focus dim budget", () => {
+  it("reports a dim a fifth weaker than the baseline it is measured against", () => {
+    const { rows, regressions } = compareToBaseline(
+      { "focus.dimmedFractionDelta": 0.1597 },
+      baselineOf({ "focus.dimmedFractionDelta": 0.2083 }),
+    );
+    expect(rowFor(rows, "focus.dimmedFractionDelta").verdict).toBe("regressed");
+    expect(regressions).toHaveLength(1);
+  });
+
+  it("leaves the step between two sessions of one build alone", () => {
+    const { rows } = compareToBaseline(
+      { "focus.dimmedFractionDelta": 0.1595 },
+      baselineOf({ "focus.dimmedFractionDelta": 0.1628 }),
+    );
+    expect(rowFor(rows, "focus.dimmedFractionDelta").verdict).toBe("steady");
+  });
+});

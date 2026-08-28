@@ -436,10 +436,15 @@ export const METRICS = [
     unit: "",
     better: "higher",
     /* One paused frame photographed with the overlay off and on, which returns
-     * the same fraction on every pass of a session and stepped once between
-     * two: 0.1628 across thirty passes and 0.1621 across the fourteen after
-     * them, with nothing changed in between. */
+     * the same fraction on every pass of a session and steps between them:
+     * 0.1628 across thirty passes, 0.1621 across the fourteen after them and
+     * 0.1595 in a third session, with nothing changed in between. Resizing the
+     * window carries it to 0.1678 inside one session. The number counts the
+     * pixels the dim pushes past luminance 60, so it moves 0.004 for every
+     * level deeper the dim lands: a quarter of it is a third of the dim, which
+     * is far more than the metric has ever moved on its own. */
     noise: 0.0008,
+    tolerancePercent: 8,
     read: (report) => report.focus?.dimmedFractionDelta,
   },
   {
