@@ -1,14 +1,33 @@
 import { MediaErrorKind } from "supervision-js-core";
-import type { VideoEngineErrorCode } from "supervision-js-web-video-engine";
 
 /**
- * The kind each engine refusal already stands for. An engine failure names its
- * own cause in `code`, and reading that beats re-deriving it from the message:
- * the text of a container refusal says "demuxer", the text of a wedged worker
- * says "timed out", and the patterns below would file both under the wrong
- * kind. Written as a total record so a new engine code fails the build here.
+ * The vocabulary a media producer may name its own failure in. A producer that
+ * states its cause as one of these on `code` is classified by that name; any
+ * other code is classified from the message like an uncoded failure.
  */
-const ENGINE_CODE_KINDS: Record<VideoEngineErrorCode, MediaErrorKind> = {
+export const MEDIA_PRODUCER_ERROR_CODES = [
+  "ABORTED",
+  "BACKEND_CRASHED",
+  "CONTAINER_UNREADABLE",
+  "DECODER_STALLED",
+  "DECODE_UNSUPPORTED",
+  "NO_VIDEO_TRACK",
+  "PRESENTATION_MISMATCH",
+  "RATE_UNSUPPORTED",
+  "SOURCE_UNREADABLE",
+  "VIDEO_TRACK_UNREADABLE",
+] as const;
+
+type MediaProducerErrorCode = (typeof MEDIA_PRODUCER_ERROR_CODES)[number];
+
+/**
+ * The kind each coded refusal already stands for. Reading the code beats
+ * re-deriving the kind from the message: the text of a container refusal says
+ * "demuxer", the text of a wedged worker says "timed out", and the patterns
+ * below would file both under the wrong kind. Written as a total record, so a
+ * code added to the vocabulary above fails the build until it has a kind.
+ */
+const PRODUCER_CODE_KINDS: Record<MediaProducerErrorCode, MediaErrorKind> = {
   ABORTED: MediaErrorKind.Unknown,
   BACKEND_CRASHED: MediaErrorKind.Decode,
   CONTAINER_UNREADABLE: MediaErrorKind.Unreadable,
@@ -69,7 +88,7 @@ export function toMediaSourceError(
   }
 
   const message = error instanceof Error ? error.message : fallbackMessage;
-  const kind = engineCodeKind(error) ?? classifyMediaErrorMessage(message);
+  const kind = producerCodeKind(error) ?? classifyMediaErrorMessage(message);
 
   return new MediaSourceError(kind, message, { cause: error });
 }
@@ -84,10 +103,10 @@ export function getMediaErrorKind(error: unknown): MediaErrorKind {
   return toMediaSourceError(error).kind;
 }
 
-function engineCodeKind(error: unknown): MediaErrorKind | null {
+function producerCodeKind(error: unknown): MediaErrorKind | null {
   const code = (error as { readonly code?: unknown } | null | undefined)?.code;
-  return typeof code === "string" && code in ENGINE_CODE_KINDS
-    ? ENGINE_CODE_KINDS[code as VideoEngineErrorCode]
+  return typeof code === "string" && code in PRODUCER_CODE_KINDS
+    ? PRODUCER_CODE_KINDS[code as MediaProducerErrorCode]
     : null;
 }
 

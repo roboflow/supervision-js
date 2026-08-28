@@ -76,7 +76,20 @@ export interface PresentedFrameSource {
  * asks rather than decides.
  */
 export interface PresentedFrameChannel extends PresentedFrameSource {
+  /**
+   * Runs the playhead forward from where it stands, and from `ENDED` restarts
+   * at the start of the source.
+   *
+   * A channel never loops itself. A renderer told to loop replays by calling
+   * this when the status turns `ENDED`, so a channel that resumes in place
+   * from `ENDED` never loops.
+   */
   play(): Promise<void>;
+  /**
+   * Stops the playhead where it stands. A pause asked for here outranks the
+   * freeze `beginInteractiveSeek` holds, so the `endInteractiveSeek` that ends
+   * the drag has nothing left to resume.
+   */
   pause(): void;
   /** Latest-wins seek for a gesture in flight; returns without settling. */
   scrub(timeMs: number, intent?: PresentedFrameSeekIntent): void;

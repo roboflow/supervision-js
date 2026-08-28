@@ -96,8 +96,9 @@ export function createMediaRendererTransport(
   const publishPlaybackState = () => {
     const status = channel.getStatus();
 
-    // The engine has no loop of its own; its play() from ENDED restarts at
-    // zero, so looping is one replay at the moment the producer announces it.
+    // A producer never loops itself, and its play() from ENDED restarts at the
+    // start of the source, so looping is one replay at the moment the producer
+    // announces the end.
     if (status === "ENDED" && options.loop) {
       void channel.play();
     }

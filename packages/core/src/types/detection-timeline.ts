@@ -147,13 +147,12 @@ export interface DetectionBufferOptions extends DetectionFrameSelectionOptions {
    * showing an unannotated frame.
    *
    * A media source the renderer pulls decoded samples from stalls in the
-   * renderer's own sample pump, frame by frame. A source that presents its own
-   * frames owns the playhead and the renderer follows it; the browser
-   * package's video-engine source, `openVideoEngineMediaSource`, is that kind
-   * of source, and it is the one most hosts render video through. There the
-   * renderer stops the producer instead: coverage is awaited before it is asked
-   * to run, and again whenever it reaches a frame the source cannot answer for
-   * yet, which it resumes from on its own once the coverage arrives.
+   * renderer's own sample pump, frame by frame. A source that
+   * presents its own frames owns the playhead and the renderer follows it.
+   * There the renderer stops the producer instead: coverage is awaited before
+   * it is asked to run, and again whenever it reaches a frame the source
+   * cannot answer for yet, which it resumes from on its own once the coverage
+   * arrives.
    */
   readonly playbackGate?: DetectionPlaybackGateOptions;
 }
@@ -172,9 +171,8 @@ export interface DetectionTimelineContext {
  * renderer reports buffering for as long as that wait lasts.
  *
  * On a media source the renderer pulls samples from, that wait happens between
- * pulling one decoded sample and drawing it. A source that presents its own
- * frames runs the playhead itself, which covers the browser package's
- * video-engine source, `openVideoEngineMediaSource`. There the renderer stops
+ * pulling one decoded sample and drawing it. A source that
+ * presents its own frames runs the playhead itself. There the renderer stops
  * the producer for the wait and starts it again afterwards, before playback
  * begins and again at any frame the source cannot answer for yet.
  *

@@ -144,10 +144,7 @@ export interface RenderPreparationMaskFrameOptions {
  *
  * The renderer can only hold a frame it is about to draw itself, so this gate
  * reaches only a media source it pulls decoded samples from. A source that
- * presents its own frames owns the playhead and paces itself; that is the
- * video-engine source, `openVideoEngineMediaSource` and the
- * `createVideoEngineMediaRendererSource` wrapper around it, which is what most
- * video sessions render through. On a source that presents its own frames this
+ * presents its own frames owns the playhead and paces itself, and there this
  * gate holds the start of playback and nothing after it: the wait runs once,
  * before the producer is told to play, and the renderer reports `Buffering`
  * while it does. Once the producer is running, unprepared layers stay absent

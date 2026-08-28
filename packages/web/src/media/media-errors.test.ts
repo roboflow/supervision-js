@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { MediaErrorKind } from "supervision-js-core";
 import {
+  MEDIA_PRODUCER_ERROR_CODES,
   MediaSourceError,
   getMediaErrorKind,
   isMediaSourceError,
@@ -61,6 +62,32 @@ describe("media errors", () => {
       expect(
         getMediaErrorKind(Object.assign(new Error(message), { code })),
       ).toBe(kind);
+    }
+  });
+
+  it("classifies every code in its vocabulary by the code, not the message", () => {
+    const kinds: Record<
+      (typeof MEDIA_PRODUCER_ERROR_CODES)[number],
+      MediaErrorKind
+    > = {
+      ABORTED: MediaErrorKind.Unknown,
+      BACKEND_CRASHED: MediaErrorKind.Decode,
+      CONTAINER_UNREADABLE: MediaErrorKind.Unreadable,
+      DECODER_STALLED: MediaErrorKind.Decode,
+      DECODE_UNSUPPORTED: MediaErrorKind.UnsupportedFormat,
+      NO_VIDEO_TRACK: MediaErrorKind.NoVideoTrack,
+      PRESENTATION_MISMATCH: MediaErrorKind.Unknown,
+      RATE_UNSUPPORTED: MediaErrorKind.Unknown,
+      SOURCE_UNREADABLE: MediaErrorKind.Unreadable,
+      VIDEO_TRACK_UNREADABLE: MediaErrorKind.UnsupportedFormat,
+    };
+
+    for (const code of MEDIA_PRODUCER_ERROR_CODES) {
+      const failure = Object.assign(new Error("Network request failed."), {
+        code,
+      });
+
+      expect(getMediaErrorKind(failure)).toBe(kinds[code]);
     }
   });
 
