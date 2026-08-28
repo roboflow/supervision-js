@@ -356,6 +356,100 @@ describe("detection frame utilities", () => {
     ).toBeUndefined();
   });
 
+  it("selects a buffered frame the source left unindexed", () => {
+    const frames: DetectionFrame[] = [
+      {
+        detections: [],
+        frameIndex: 0,
+        mediaTime: 0,
+      },
+      {
+        detections: [],
+        mediaTime: 0.01,
+      },
+    ];
+    const options = {
+      frameRate: 30,
+      selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
+    };
+
+    expect(selectDetectionFrame(frames, 0, options)).toBe(frames[0]);
+    expect(selectDetectionFrame(frames, 0.01, options)).toBe(frames[1]);
+    expect(selectDetectionFrame(frames, 0.04, options)).toBe(frames[1]);
+    expect(
+      selectDetectionFrame(frames, 0.01 + 1 / 30, options),
+    ).toBeUndefined();
+  });
+
+  it("reaches an unindexed frame that sits nowhere near an indexed one", () => {
+    const frames: DetectionFrame[] = [
+      {
+        detections: [],
+        mediaTime: 0.01,
+      },
+      {
+        detections: [],
+        frameIndex: 300,
+        mediaTime: 10,
+      },
+    ];
+
+    expect(
+      selectDetectionFrame(frames, 0.02, {
+        frameRate: 30,
+        selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
+      }),
+    ).toBe(frames[0]);
+  });
+
+  it("bounds an unindexed frame to one grid step rather than its end time", () => {
+    const frames: DetectionFrame[] = [
+      {
+        detections: [],
+        frameIndex: 0,
+        mediaTime: 0,
+      },
+      {
+        detections: [],
+        endTime: 0.7,
+        mediaTime: 0.01,
+      },
+    ];
+
+    expect(
+      selectDetectionFrame(frames, 0.4, {
+        frameRate: 30,
+        selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
+      }),
+    ).toBeUndefined();
+  });
+
+  it("leaves a missing index blank while an unindexed frame is buffered", () => {
+    const frames: DetectionFrame[] = [
+      {
+        detections: [],
+        mediaTime: 0,
+      },
+      {
+        detections: [],
+        frameIndex: 10,
+        mediaTime: 10 / 30,
+      },
+      {
+        detections: [],
+        frameIndex: 14,
+        mediaTime: 14 / 30,
+      },
+    ];
+
+    expect(
+      selectDetectionFrame(frames, 12 / 30, {
+        frameRate: 30,
+        selectionMode: DetectionFrameSelectionMode.NearestFrameIndex,
+      }),
+    ).toBeUndefined();
+  });
+
   it("filters frames that overlap a load range", () => {
     const frames: DetectionFrame[] = [
       { detections: [], endTime: 1.5, mediaTime: 0 },

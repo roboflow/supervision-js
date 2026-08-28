@@ -495,21 +495,10 @@ function selectIntervalDetectionFrame(
   detectionFrames: readonly DetectionFrame[],
   mediaTime: number,
 ) {
-  let selectedFrame: DetectionFrame | undefined;
-  let low = 0;
-  let high = detectionFrames.length - 1;
-
-  while (low <= high) {
-    const middle = Math.floor((low + high) / 2);
-    const frame = detectionFrames[middle];
-
-    if (hasDetectionFrameStarted(frame, mediaTime)) {
-      selectedFrame = frame;
-      low = middle + 1;
-    } else {
-      high = middle - 1;
-    }
-  }
+  const selectedFrame = findLastStartedDetectionFrame(
+    detectionFrames,
+    mediaTime,
+  );
 
   return selectedFrame && isDetectionFrameActive(selectedFrame, mediaTime)
     ? selectedFrame
@@ -524,6 +513,11 @@ function selectIntervalDetectionFrame(
  * index the source never produced leaves that step blank: the frames on either
  * side describe media the playhead is not on, and a source still being written
  * has a playback gate to hold the picture rather than a neighbour to borrow.
+ *
+ * A grid the source labelled only in part is still that source describing this
+ * media, so the frame the playhead stands on is the last one to have started,
+ * whether or not an index names it. The step it is held to is measured from the
+ * labelled frames alone.
  */
 function selectNearestFrameIndexDetectionFrame(
   detectionFrames: readonly DetectionFrame[],
@@ -543,7 +537,10 @@ function selectNearestFrameIndexDetectionFrame(
 
   const gridStep =
     measureGridStep(firstIndexedFrame, lastIndexedFrame) ?? 1 / frameRate;
-  const startedFrame = findLastStartedIndexedFrame(detectionFrames, mediaTime);
+  const startedFrame = findLastStartedDetectionFrame(
+    detectionFrames,
+    mediaTime,
+  );
 
   return {
     frame:
@@ -597,34 +594,27 @@ function findIndexedDetectionFrame(
   return undefined;
 }
 
-function findLastStartedIndexedFrame(
+function findLastStartedDetectionFrame(
   detectionFrames: readonly DetectionFrame[],
   mediaTime: number,
 ) {
+  let selectedFrame: DetectionFrame | undefined;
   let low = 0;
   let high = detectionFrames.length - 1;
-  let startedOffset = -1;
 
   while (low <= high) {
     const middle = Math.floor((low + high) / 2);
+    const frame = detectionFrames[middle];
 
-    if (hasDetectionFrameStarted(detectionFrames[middle], mediaTime)) {
-      startedOffset = middle;
+    if (hasDetectionFrameStarted(frame, mediaTime)) {
+      selectedFrame = frame;
       low = middle + 1;
     } else {
       high = middle - 1;
     }
   }
 
-  for (let offset = startedOffset; offset >= 0; offset -= 1) {
-    const frame = detectionFrames[offset];
-
-    if (isIndexedDetectionFrame(frame)) {
-      return frame;
-    }
-  }
-
-  return undefined;
+  return selectedFrame;
 }
 
 function isIndexedDetectionFrame(

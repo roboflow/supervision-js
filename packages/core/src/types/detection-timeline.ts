@@ -44,6 +44,11 @@ export enum DetectionFrameSelectionMode {
    *
    * A frame speaks for one grid step starting at its own media time, and an
    * index the source never produced selects nothing rather than a neighbour.
+   *
+   * A frame carrying no `frameIndex` speaks for its step on the same terms,
+   * reached by the time it starts at rather than by an index that names it. Its
+   * `endTime` does not widen it past that step, so a source that labels only
+   * part of what it writes cannot bridge the indexes it never produced.
    */
   NearestFrameIndex = "nearestFrameIndex",
 }
