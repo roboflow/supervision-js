@@ -110,6 +110,10 @@ Start with [Application Integration](docs/public/guides/application-integration.
 [Media Sessions](docs/public/guides/media-sessions.md), and the
 [Public API guide](docs/public/guides/public-api.md).
 
+For what the browser path does not do, read
+[Browser Support](docs/public/guides/browser-support.md): HEVC in Firefox, the
+cost of presenting a frame without WebGPU, audio, and the frame-count ceiling.
+
 For what this release adds, read
 [Release Notes](docs/public/release-notes.md). For what it removes and what it
 now does differently, read

@@ -19,6 +19,15 @@ const reactNativeExampleSourceDir = path.join(
 );
 
 const publishedPackages = ["core", "react-native", "video-engine", "web"];
+const videoEnginePackage = "supervision-js-web-video-engine";
+const videoEngineSpecifier =
+  /["']supervision-js-web-video-engine(?:\/[^"']*)?["']/g;
+// An import clause carries nothing but identifiers and punctuation, so a
+// specifier reached past anything else is not an import at all: a string
+// constant naming the package reads the same to a regular expression.
+const staticValueImportClause =
+  /^(?:import|export)\s+(?!type\b)[\w${},*\s]*\bfrom\s+$/;
+const sideEffectImportClause = /^import\s+$/;
 // `from` is only an import keyword when it is not itself quoted: a type such as
 // `Pick<typeof Filter, "from">` otherwise swallows the rest of the file as a
 // specifier. A specifier also never spans a line.
@@ -169,6 +178,33 @@ test("web source consumes core through the package boundary", async () => {
       if (pattern.test(source)) {
         failures.push(`${path.relative(rootDir, file)} uses ${label}`);
       }
+    }
+  }
+
+  assert.deepEqual(failures, []);
+});
+
+test("the browser package keeps the video engine an optional peer", async () => {
+  const manifest = JSON.parse(
+    await readFile(path.join(rootDir, "packages/web/package.json"), "utf8"),
+  );
+
+  assert.equal(
+    manifest.peerDependenciesMeta?.[videoEnginePackage]?.optional,
+    true,
+    `${videoEnginePackage} must stay optional so npm leaves it out of a consumer that never opens an engine-backed source`,
+  );
+
+  const files = await listSourceFilesWithoutTests(webSourceDir);
+  const failures = [];
+
+  for (const file of files) {
+    const source = stripComments(await readFile(file, "utf8"));
+
+    for (const statement of staticEngineImports(source)) {
+      failures.push(
+        `${path.relative(rootDir, file)} statically imports ${statement}`,
+      );
     }
   }
 
@@ -395,6 +431,41 @@ async function listSourceFilesWithoutTests(directory) {
   );
 
   return files.flat();
+}
+
+/**
+ * A value import of the engine makes resolving it a precondition of loading the
+ * browser package, which is the failure the optional peer exists to prevent: a
+ * consumer that never opens an engine-backed source, and so never installed the
+ * engine, stops being able to bundle at all. `import type` is erased before a
+ * bundler sees it, and `import()` is how the package is meant to reach the
+ * engine, so neither counts.
+ */
+function staticEngineImports(source) {
+  const statements = [];
+
+  for (const match of source.matchAll(videoEngineSpecifier)) {
+    const preceding = source.slice(0, match.index);
+    const keyword = Math.max(
+      preceding.lastIndexOf("import"),
+      preceding.lastIndexOf("export"),
+    );
+
+    if (keyword === -1) {
+      continue;
+    }
+
+    const clause = preceding.slice(keyword);
+
+    if (
+      staticValueImportClause.test(clause) ||
+      sideEffectImportClause.test(clause)
+    ) {
+      statements.push(`${clause.replaceAll(/\s+/g, " ")}${match[0]}`);
+    }
+  }
+
+  return statements;
 }
 
 function stripComments(source) {

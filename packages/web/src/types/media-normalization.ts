@@ -1,5 +1,13 @@
 import type { MediaRendererSource } from "#types/media-renderer";
 
+/**
+ * The rate {@link normalizeMedia} writes when the caller states none. It lands
+ * a variable-rate input on a constant grid that detection frame indices can
+ * address, and it is the reason a conversion's output is a different frame
+ * sequence from its input unless the input already runs at exactly this rate.
+ */
+export const DEFAULT_NORMALIZATION_FRAME_RATE = 30;
+
 export enum MediaNormalizationContainer {
   WebM = "webm",
   Mp4 = "mp4",

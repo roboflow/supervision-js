@@ -11,6 +11,10 @@ For uploaded files, the browser may not be able to decode the input efficiently
 or consistently. The preparation APIs probe the file, choose a supported target,
 and normalize the video before rendering or inference workflows depend on it.
 
+Normalization does not close every gap. Which codecs a browser will decode, and
+what a browser without WebGPU costs to present a frame, are limits of the
+browser itself. [Browser Support](./browser-support.md) lists them.
+
 ## Probe First
 
 Use `probeMedia()` when the app wants to inspect browser support and explain
@@ -127,3 +131,6 @@ detections computed against the normalized media.
 `video.forceTranscode` defaults to `true`, so an input that already matches the
 target profile is still re-encoded. Set it to `false` when a compatible stream
 should be copied through instead.
+
+`audio.discard` defaults to `true` because nothing in the package plays audio.
+Keeping the track only makes the output larger.

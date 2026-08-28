@@ -119,25 +119,38 @@ extraction without the annotation stack can use it on its own.
 ## Known Limits
 
 These are the things this release does not do. None of them is a bug to be
-reported.
+reported. [Browser Support](./guides/browser-support.md) carries the same four
+with the detail an integration needs.
 
-- **There is no audio path.** The engine decodes video only, a session reports
-  zero audio tracks, and `MediaSessionRendererOptions.muted` is deprecated
-  because nothing reads it. The clock carries a documented seam for an
-  audio-bearing consumer and nothing is wired to it.
 - **Firefox will not decode HEVC.** Firefox 154 plays an HEVC file in its own
   media element while its `VideoDecoder` reports both `hvc1` and `hev1`
   configurations unsupported, so an HEVC source fails at load with
   `DECODE_UNSUPPORTED` rather than at a frame. This is that decoder and not a
   rule about non-Chromium browsers: Safari 18.6 reports `hvc1` and `hev1`
   supported alongside `avc1`, `vp8`, `vp09`, and `av01`, and plays the same
-  file.
-- **Safari pays a staging canvas per presented frame.** It exposes no WebGPU
-  in the page or in a worker, so every present draws the decoded frame into a
-  media-sized 2D canvas and uploads that whole canvas into the sprite's
-  texture. On the demo's default clip that is 24.8 ms per presented frame and
-  about seven tenths of the wall clock during playback. The same frames
-  uploaded straight into a WebGL texture in the same browser take 0.6 ms.
+  file. Nothing in the package decodes HEVC in software, and Firefox is not
+  fixed by anything in this release. The demuxer would accept a registered
+  custom decoder, but the engine worker is a classic script spawned from a
+  Blob with its own copy of the demuxer bundled in, so a decoder registered in
+  the page is registered against a different copy. Reaching it means changing
+  how the worker is built.
+- **A scene without usable WebGPU pays a staging canvas per presented frame.**
+  This is the generic fallback, not a Safari path: the scene takes it whenever
+  there is no WebGPU device, or the device's queue refuses a decoded frame.
+  Every present then draws the frame into a media-sized 2D canvas and uploads
+  that whole canvas into the sprite's texture. Safari exposes no WebGPU in the
+  page or in a worker and takes it for the first reason; Firefox's queue
+  accepts only `ImageBitmap`, `HTMLImageElement`, `HTMLCanvasElement` and
+  `OffscreenCanvas`, and takes it for the second. Measured in Safari on the
+  demo's default clip, that is 24.8 ms per presented frame and about seven
+  tenths of the wall clock during playback. The same frames uploaded straight
+  into a WebGL texture in the same browser take 0.6 ms.
+- **There is no audio path.** Nothing decodes or plays audio on any source,
+  normalization discards audio by default, and
+  `MediaSessionRendererOptions.muted` is deprecated because nothing reads it.
+  Media carrying an audio track still opens and plays with the track ignored.
+  The clock carries a documented seam for an audio-bearing consumer and
+  nothing is wired to it.
 - **A source is capped at one million frames.** The metadata walk that builds
   the frame table is eager, so an endless or heavily fragmented source is
   refused at load rather than being played without frame identity. At 30 fps

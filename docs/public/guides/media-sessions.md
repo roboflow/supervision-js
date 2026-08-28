@@ -33,6 +33,11 @@ session.destroy();
 The host should not need to know how Pixi containers, mask textures, worker
 queues, or detection chunks are wired internally.
 
+What the host does need to know is where the browser stops: which codecs open,
+what a browser without WebGPU costs per frame, that no session plays audio, and
+the frame-count ceiling on a source. [Browser Support](./browser-support.md)
+covers all four.
+
 ## Good Defaults
 
 The default path is intentionally boring:
