@@ -1473,6 +1473,309 @@ fieldset {
   font-size: 11px;
 }
 
+.pipeline-panel {
+  background: rgba(7, 9, 13, 0.52);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 9px;
+}
+
+.pipeline-panel__toggle {
+  align-items: center;
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  flex: 1;
+  gap: 6px;
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+}
+
+.pipeline-panel__chevron {
+  border-bottom: 1px solid var(--muted);
+  border-right: 1px solid var(--muted);
+  flex: none;
+  height: 6px;
+  transform: rotate(45deg);
+  transition: transform 120ms cubic-bezier(0.2, 0, 0, 1);
+  width: 6px;
+}
+
+.pipeline-panel__toggle[aria-expanded="true"] .pipeline-panel__chevron {
+  transform: rotate(-135deg);
+}
+
+.pipeline-panel__copy {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  flex: none;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 650;
+  min-height: 25px;
+  padding: 3px 8px;
+}
+
+/* A tooltip wider than the group it opens in scrolls the whole inspector
+   sideways. */
+.pipeline-panel .diagnostic-label__tip {
+  width: 232px;
+}
+
+.pipeline-panel__ledger {
+  background: #fafafa;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  display: grid;
+  gap: 1px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  min-width: 0;
+  overflow: hidden;
+}
+
+.pipeline-panel__ledger--empty {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.pipeline-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 10px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.pipeline-legend__item {
+  --state-color: var(--muted);
+
+  align-items: center;
+  color: var(--muted);
+  cursor: help;
+  display: flex;
+  font-size: 9px;
+  font-weight: 650;
+  gap: 4px;
+  letter-spacing: 0.02em;
+}
+
+.pipeline-legend__item--live {
+  --state-color: var(--green);
+}
+
+.pipeline-legend__item--waiting {
+  --state-color: var(--amber);
+}
+
+.pipeline-legend__item--idle {
+  --state-color: var(--muted);
+}
+
+.pipeline-legend__item--error {
+  --state-color: var(--danger);
+}
+
+.pipeline-diagram {
+  display: block;
+  height: auto;
+  max-width: 100%;
+}
+
+.pipeline-diagram__trunk {
+  stroke-width: 2;
+}
+
+.pipeline-diagram__trunk--live {
+  stroke: var(--green);
+}
+
+.pipeline-diagram__trunk--waiting {
+  stroke: var(--amber);
+  stroke-dasharray: 2 3;
+}
+
+.pipeline-diagram__tick {
+  stroke: var(--line-strong);
+  stroke-width: 1;
+}
+
+.pipeline-diagram__outlet {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.pipeline-diagram__outlet--live {
+  stroke: var(--green);
+}
+
+.pipeline-diagram__outlet--waiting {
+  stroke: var(--amber);
+}
+
+.pipeline-diagram__stage {
+  fill: var(--muted);
+  font-family: var(--font-sans);
+  font-size: 8px;
+  font-weight: 780;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.pipeline-diagram__node {
+  --state-color: var(--muted);
+
+  cursor: help;
+}
+
+.pipeline-diagram__node--live {
+  --state-color: var(--green);
+}
+
+.pipeline-diagram__node--waiting {
+  --state-color: var(--amber);
+}
+
+.pipeline-diagram__node--idle {
+  --state-color: var(--muted);
+}
+
+.pipeline-diagram__node--error {
+  --state-color: var(--danger);
+}
+
+.pipeline-diagram__hit {
+  fill: transparent;
+}
+
+.pipeline-diagram__node:hover .pipeline-diagram__hit {
+  fill: var(--surface-soft);
+}
+
+.pipeline-diagram__lead {
+  stroke: var(--green);
+  stroke-width: 2;
+}
+
+.pipeline-diagram__box {
+  fill: #ffffff;
+  stroke: var(--line-strong);
+  stroke-width: 1;
+}
+
+.pipeline-diagram__node:hover .pipeline-diagram__box {
+  stroke: var(--violet);
+}
+
+.pipeline-diagram__dot {
+  fill: var(--state-color);
+}
+
+.pipeline-diagram__dot--hollow {
+  fill: #ffffff;
+  stroke: var(--state-color);
+  stroke-width: 1;
+}
+
+.pipeline-diagram__slash {
+  stroke: var(--state-color);
+  stroke-width: 1;
+}
+
+/* The branches read as stubs off the trunk: dashed, thin, and stopping short
+   of the label the taken route carries in a box. */
+.pipeline-diagram__stub {
+  fill: none;
+  stroke: var(--line);
+  stroke-dasharray: 1.5 2.5;
+  stroke-width: 1;
+}
+
+.pipeline-diagram__label {
+  fill: var(--text);
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 640;
+}
+
+.pipeline-diagram__label--branch {
+  fill: var(--muted);
+  font-size: 9px;
+  font-weight: 560;
+}
+
+.pipeline-diagram__node--waiting .pipeline-diagram__label--branch {
+  fill: var(--amber);
+}
+
+.pipeline-diagram__node--error .pipeline-diagram__label--branch {
+  text-decoration: line-through;
+  text-decoration-color: var(--danger);
+}
+
+.pipeline-diagram__stamp {
+  fill: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 620;
+}
+
+.pipeline-live {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 6px;
+  padding-top: 7px;
+}
+
+.pipeline-live__header {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.pipeline-live__switch {
+  align-items: center;
+  color: var(--muted-strong);
+  cursor: pointer;
+  display: flex;
+  flex: none;
+  font-size: 10px;
+  font-weight: 620;
+  gap: 5px;
+}
+
+.pipeline-live__switch input {
+  accent-color: var(--violet);
+  margin: 0;
+}
+
+.pipeline-live__readings {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.pipeline-live__readings .readout {
+  grid-template-columns: minmax(0, 96px) minmax(0, 1fr);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pipeline-panel__chevron {
+    transition: none;
+  }
+}
+
 .render-control--number {
   display: grid;
   gap: 4px;
@@ -2084,7 +2387,11 @@ fieldset {
   grid-row: 1;
   justify-self: start;
   line-height: 12px;
-  min-width: 54px;
+  /* The chip's half width is measured once, as the pointer enters, and the
+   * clamp that keeps it inside the track spends that figure on every move. A
+   * floor wide enough for a frame's index and its timestamp is what keeps the
+   * first measurement worth reusing. */
+  min-width: 104px;
   opacity: 0;
   padding: 2px 6px;
   pointer-events: none;
@@ -2100,10 +2407,14 @@ fieldset {
   opacity: 1;
 }
 
+/* Pulled out to the strip's border box, which is the track column the playhead
+ * is placed in. An absolute child is placed against the padding box, two pixels
+ * narrower, so a guide sharing the playhead's offset drew a pixel to its right
+ * and the hover promised a landing the click did not keep. */
 .timeline-view__hover-line {
   background: rgba(17, 24, 39, 0.5);
   bottom: 0;
-  left: 0;
+  left: -1px;
   opacity: 0;
   pointer-events: none;
   position: absolute;
@@ -2329,9 +2640,12 @@ fieldset {
 
 /* The wrapper spans the strip because a percentage transform resolves against
  * the element's own width, and the 2px mark it carries moves with the frame
- * on show. */
+ * on show. It reaches past the strip's border to span the same track column the
+ * playhead is placed in: measured against the padding box it sits a pixel right
+ * of the playhead at the clip's start and a pixel left of it at the end, and
+ * those two pixels are 3.6 frames of the horse clip on a 1080p screen. */
 .timeline-view__frame-mark {
-  inset: 0;
+  inset: 0 -1px;
   position: absolute;
   transform: translateX(var(--timeline-left));
 }
@@ -3545,6 +3859,7 @@ fieldset {
 .quality-controls,
 .selection-panel,
 .session-options,
+.pipeline-panel,
 .render-controls,
 .status-panel,
 .benchmark-card,
@@ -3560,6 +3875,7 @@ fieldset {
 .selection-panel .inspector-card__header button,
 .session-options .inspector-card__header button,
 .render-controls__tabs button,
+.pipeline-panel__copy,
 .render-control,
 .render-control--toggle,
 .render-control--segmented,
@@ -3586,6 +3902,7 @@ fieldset {
 .source-actions button:hover:not(:disabled),
 .selection-panel .inspector-card__header button:hover,
 .session-options .inspector-card__header button:hover:not(:disabled),
+.pipeline-panel__copy:hover,
 .render-controls__tabs button:hover:not([aria-pressed="true"]),
 .render-control__segments button:hover:not(:disabled, [aria-pressed="true"]) {
   background: #f5f3ff;
@@ -3846,6 +4163,7 @@ fieldset {
 .quality-controls,
 .selection-panel,
 .session-options,
+.pipeline-panel,
 .render-controls,
 .status-panel {
   border-color: #e7e2fb;
@@ -4323,8 +4641,6 @@ fieldset {
   position: relative;
 }
 
-/* The marker sits over the chart rather than inside it: a write to any node in
-   an inline SVG re-marks the whole subtree, and this one moves every frame. */
 .engine-timeline__playhead-track {
   inset: 0;
   pointer-events: none;
@@ -4341,16 +4657,27 @@ fieldset {
   width: 1.5px;
 }
 
+.engine-timeline__screen-track {
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+  transform: translateX(var(--engine-timeline-screen, 0%));
+  will-change: transform;
+}
+
 .engine-timeline__screen {
-  stroke-width: 1.5;
+  bottom: 0;
+  left: 0;
+  position: absolute;
+  width: 1.5px;
 }
 
 .engine-timeline__screen--exact {
-  stroke: #bef264;
+  background: #bef264;
 }
 
 .engine-timeline__screen--preview {
-  stroke: #e879f9;
+  background: #e879f9;
 }
 
 .engine-timeline__unavailable {

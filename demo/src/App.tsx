@@ -14,6 +14,7 @@ import { DocsBasketballPlayground } from "./components/DocsBasketballPlayground"
 import { DocsAnnotationRendererPlayground } from "./components/DocsAnnotationRendererPlayground";
 import { DocsTrackingPostProcessorPlayground } from "./components/DocsTrackingPostProcessorPlayground";
 import { PerformanceStrip } from "./components/PerformanceStrip";
+import { PipelinePanel } from "./components/PipelinePanel";
 import { PlayerHotkeys } from "./components/PlayerHotkeys";
 import { PresentationDiagnostics } from "./components/PresentationDiagnostics";
 import { QualityControls } from "./components/QualityControls";
@@ -232,6 +233,12 @@ function DemoApp() {
             quality={demo.renderQuality}
           />
         }
+        pipelinePanel={
+          <PipelinePanel
+            descriptor={demo.pipelineDescriptor}
+            engineDiagnosticsTap={demo.engineDiagnosticsTap}
+          />
+        }
         sessionOptionsPanel={
           <>
             <SessionOptionsPanel
@@ -255,6 +262,7 @@ function DemoApp() {
           <ControlBar
             canUseRenderer={demo.canUseRenderer}
             duration={demo.duration}
+            frameTimeline={demo.frameTimeline}
             onScrub={demo.onScrub}
             onSeek={demo.onSeek}
             onSetPlaybackRate={demo.onSetPlaybackRate}

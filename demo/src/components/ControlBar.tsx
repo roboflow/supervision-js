@@ -1,6 +1,9 @@
 import { memo, useRef, useState } from "react";
 import { MediaRendererPlaybackState } from "supervision";
-import type { SourceResidencyDiagnostics } from "supervision-js-video-engine";
+import type {
+  FrameTimelineData,
+  SourceResidencyDiagnostics,
+} from "supervision-js-video-engine";
 import { formatTime } from "../format";
 import {
   useLiveReadoutWriter,
@@ -28,6 +31,7 @@ const STATE_TOOLTIP =
 interface ControlBarProps {
   readonly canUseRenderer: boolean;
   readonly duration: number | null;
+  readonly frameTimeline: FrameTimelineData | null;
   readonly onScrub: (time: number) => void;
   readonly onSeek: (time: number) => void;
   readonly onSetPlaybackRate: (rate: number) => void;
@@ -44,6 +48,7 @@ interface ControlBarProps {
 export const ControlBar = memo(function ControlBar({
   canUseRenderer,
   duration,
+  frameTimeline,
   onScrub,
   onSeek,
   onSetPlaybackRate,
@@ -107,6 +112,7 @@ export const ControlBar = memo(function ControlBar({
       <TimelineView
         disabled={!canUseRenderer}
         duration={duration}
+        frameTimeline={frameTimeline}
         onScrub={onScrub}
         onSeek={onSeek}
         processedRanges={processedRanges}

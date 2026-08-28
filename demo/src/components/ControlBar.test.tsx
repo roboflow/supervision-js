@@ -10,6 +10,7 @@ const noop = () => {};
 const baseProps: ControlBarProps = {
   canUseRenderer: true,
   duration: 70.42,
+  frameTimeline: null,
   onScrub: noop,
   onSeek: noop,
   onSetPlaybackRate: noop,
@@ -27,6 +28,13 @@ const baseProps: ControlBarProps = {
 const otherPropChanges: readonly Partial<ControlBarProps>[] = [
   { canUseRenderer: false },
   { duration: 9.13 },
+  {
+    frameTimeline: {
+      lastDurationTicks: 20,
+      tickRate: 600,
+      ticks: Float64Array.of(0, 20, 40),
+    },
+  },
   { onScrub: () => {} },
   { onSeek: () => {} },
   { onSetPlaybackRate: () => {} },

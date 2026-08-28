@@ -14,7 +14,10 @@ import {
   useState,
 } from "react";
 import { MediaRendererPlaybackState } from "supervision";
-import type { SourceResidencyDiagnostics } from "supervision-js-video-engine";
+import type {
+  FrameTimelineData,
+  SourceResidencyDiagnostics,
+} from "supervision-js-video-engine";
 import { formatTime, formatTimeRange, toSourceTimeRange } from "../format";
 import { DemoEvalHook } from "../eval-hooks";
 import {
@@ -31,6 +34,13 @@ import {
 } from "./source-residency-lane";
 import { readLivePreparedWindow } from "./live-readout-format";
 import { LiveReadoutText } from "./LiveReadoutText";
+import {
+  formatTimelineFrame,
+  quantizeScrubTime,
+  readTimelineFrames,
+  resolveScrubTime,
+  resolveTimelineFrame,
+} from "./timeline-frames";
 import { TimelineScrubInput } from "./TimelineScrubInput";
 
 const AXIS_TICK_FRACTIONS = [0, 0.25, 0.5, 0.75, 1] as const;
@@ -42,6 +52,7 @@ const LANE_ROW_OFFSET = 3;
 export function TimelineView({
   disabled,
   duration,
+  frameTimeline = null,
   onScrub,
   onSeek,
   processedRanges = [],
@@ -50,6 +61,7 @@ export function TimelineView({
 }: {
   readonly disabled: boolean;
   readonly duration: number | null;
+  readonly frameTimeline?: FrameTimelineData | null;
   readonly onScrub: (time: number) => void;
   readonly onSeek: (time: number) => void;
   readonly processedRanges?: readonly TimelineRange[];
@@ -57,6 +69,10 @@ export function TimelineView({
   readonly sourceResidency?: SourceResidencyDiagnostics | null;
 }) {
   const mediaDuration = duration !== null && duration > 0 ? duration : null;
+  const frames = useMemo(
+    () => readTimelineFrames(frameTimeline),
+    [frameTimeline],
+  );
   const {
     flushSeek,
     onScrubChange,
@@ -123,21 +139,29 @@ export function TimelineView({
   const hoverLineRef = useRef<HTMLSpanElement>(null);
   const hoverHalfWidthRef = useRef(0);
   const writtenHoverLabelRef = useRef<string | null>(null);
-  const hoverContextRef = useRef({ disabled, mediaDuration });
+  const hoverContextRef = useRef({ disabled, frames, mediaDuration });
 
   useEffect(() => {
-    hoverContextRef.current = { disabled, mediaDuration };
+    hoverContextRef.current = { disabled, frames, mediaDuration };
   });
 
   /**
    * A hover preview answers per pointer move, so it writes the label and the
    * guide straight to their elements: the panel's React state stays the scrub
    * gesture's, and hovering repaints nothing else.
+   *
+   * Both are drawn at the frame the pointer is over, not at the pointer, so
+   * what the label names is what a click there lands on. With no table there is
+   * no frame to name and the pointer's own position is all the readout can
+   * honestly claim.
    */
   const handleHoverMove = useCallback(
     (event: ReactPointerEvent<HTMLElement>) => {
-      const { disabled: isDisabled, mediaDuration: hoverDuration } =
-        hoverContextRef.current;
+      const {
+        disabled: isDisabled,
+        frames: hoverFrames,
+        mediaDuration: hoverDuration,
+      } = hoverContextRef.current;
 
       if (isDisabled || hoverDuration === null) {
         return;
@@ -145,10 +169,21 @@ export function TimelineView({
 
       const rect = event.currentTarget.getBoundingClientRect();
       const offset = clamp(event.clientX - rect.left, 0, rect.width);
+      const frame = resolveTimelineFrame(
+        hoverFrames,
+        offset,
+        rect.width,
+        hoverDuration,
+      );
+      const guideOffset =
+        frame === null ? offset : (frame.timeS / hoverDuration) * rect.width;
       const label = hoverLabelRef.current;
 
       if (label !== null) {
-        const nextLabel = formatTime((offset / rect.width) * hoverDuration);
+        const nextLabel =
+          frame === null
+            ? formatTime((offset / rect.width) * hoverDuration)
+            : formatTimelineFrame(frame);
 
         if (nextLabel !== writtenHoverLabelRef.current) {
           writtenHoverLabelRef.current = nextLabel;
@@ -158,17 +193,24 @@ export function TimelineView({
         const halfWidth = hoverHalfWidthRef.current;
 
         label.style.transform = `translateX(${clamp(
-          offset,
+          guideOffset,
           halfWidth,
           Math.max(halfWidth, rect.width - halfWidth),
         )}px) translateX(-50%)`;
+        // A move shows the readout as well as writing it: a pointer resting on
+        // the strip while a source changes under it crosses no boundary, so no
+        // enter is coming to put back what the change took down.
+        label.classList.add("timeline-view__hover--visible");
       }
 
       if (hoverLineRef.current !== null) {
         // Centred on the offset, like the label above it and like the playhead
         // marker, whose own rule centres a 2px bar. Anchoring this one by its
         // left edge left it sitting beside the playhead at the same time.
-        hoverLineRef.current.style.transform = `translateX(${offset}px) translateX(-50%)`;
+        hoverLineRef.current.style.transform = `translateX(${guideOffset}px) translateX(-50%)`;
+        hoverLineRef.current.classList.add(
+          "timeline-view__hover-line--visible",
+        );
       }
     },
     [],
@@ -186,10 +228,8 @@ export function TimelineView({
 
       if (label !== null) {
         hoverHalfWidthRef.current = label.offsetWidth / 2;
-        label.classList.add("timeline-view__hover--visible");
       }
 
-      hoverLineRef.current?.classList.add("timeline-view__hover-line--visible");
       handleHoverMove(event);
     },
     [handleHoverMove],
@@ -201,8 +241,22 @@ export function TimelineView({
     );
   }, []);
 
+  // A readout left standing while the pointer rests on the strip keeps naming a
+  // frame of the clip that closed, and the next clip has no such frame.
+  useEffect(() => {
+    const label = hoverLabelRef.current;
+
+    if (label !== null) {
+      label.textContent = "";
+    }
+
+    writtenHoverLabelRef.current = null;
+    handleHoverLeave();
+  }, [frames, handleHoverLeave]);
+
   const gestureRef = useRef({
     flushSeek,
+    frames,
     onScrubChange,
     onScrubEnd,
     onScrubStart,
@@ -212,6 +266,7 @@ export function TimelineView({
   useEffect(() => {
     gestureRef.current = {
       flushSeek,
+      frames,
       onScrubChange,
       onScrubEnd,
       onScrubStart,
@@ -220,7 +275,11 @@ export function TimelineView({
   });
 
   const handleSeek = useCallback((event: ChangeEvent<HTMLInputElement>) => {
-    gestureRef.current.onScrubChange(Number(event.currentTarget.value));
+    const gesture = gestureRef.current;
+
+    gesture.onScrubChange(
+      quantizeScrubTime(gesture.frames, Number(event.currentTarget.value)),
+    );
   }, []);
   const handleInputFlush = useCallback(() => {
     gestureRef.current.flushSeek();
@@ -231,6 +290,7 @@ export function TimelineView({
   const handleInputPointerUp = useCallback(() => {
     gestureRef.current.onScrubEnd();
   }, []);
+  const publishedScrubTimeRef = useRef<number | null>(null);
   const handleStripPointer = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (disabled || mediaDuration === null) {
       return;
@@ -239,6 +299,7 @@ export function TimelineView({
     event.currentTarget.setPointerCapture(event.pointerId);
     const nextTime = getPointerTime(event);
 
+    publishedScrubTimeRef.current = nextTime;
     onScrubStart(nextTime);
     onScrubChange(nextTime);
   };
@@ -249,9 +310,20 @@ export function TimelineView({
       return;
     }
 
-    onScrubChange(getPointerTime(event));
+    const nextTime = getPointerTime(event);
+
+    // A quantised drag publishes one value per frame, so a move answering with
+    // the value already published crossed no frame: there is nothing for the
+    // engine to decode and nothing for React to commit.
+    if (nextTime === publishedScrubTimeRef.current) {
+      return;
+    }
+
+    publishedScrubTimeRef.current = nextTime;
+    onScrubChange(nextTime);
   };
   const handleStripPointerUp = () => {
+    publishedScrubTimeRef.current = null;
     onScrubEnd();
   };
   const getPointerTime = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -260,9 +332,13 @@ export function TimelineView({
     }
 
     const rect = event.currentTarget.getBoundingClientRect();
-    const offset = event.clientX - rect.left;
 
-    return clamp(offset / rect.width, 0, 1) * mediaDuration;
+    return resolveScrubTime(
+      frames,
+      event.clientX - rect.left,
+      rect.width,
+      mediaDuration,
+    );
   };
 
   const frameMarkRef = useRef<HTMLSpanElement>(null);
