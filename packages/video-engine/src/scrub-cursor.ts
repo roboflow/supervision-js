@@ -335,6 +335,13 @@ export interface ScrubCursor {
   seekToFrame(frame: FrameId): Promise<ScrubFrame | null>;
   idle(): Promise<void>;
   /**
+   * Resolves at the seek drain's next settle: whichever target it is servicing
+   * has landed. The wait spans one decode. idle() spans the whole gesture,
+   * since a drag re-arms the drain on every pointer move, so a caller that has
+   * to answer while the hand is still down asks this one.
+   */
+  seekSettled(): Promise<void>;
+  /**
    * Registers a frame listener. The cache replays the most recently emitted
    * frame synchronously on subscribe so the seed frame from open() is
    * delivered to controllers that wire up afterwards.

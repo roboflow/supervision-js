@@ -172,6 +172,7 @@ export function makeFakeCursor(): FakeCursor {
       );
     },
     async idle(): Promise<void> {},
+    async seekSettled(): Promise<void> {},
     subscribe(l: ScrubFrameListener): () => void {
       listener = l;
       return (): void => {

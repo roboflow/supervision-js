@@ -192,6 +192,7 @@ export class DecodeScheduler implements ScrubCursor {
   private currentState = ScrubCursorState.Closed;
   private readonly listeners = new Set<ScrubFrameListener>();
   private idleResolvers: Array<() => void> = [];
+  private settleResolvers: Array<() => void> = [];
   private pendingSeekTargetS: number | null = null;
   private pendingSeekKeyOnly = false;
   private seekDraining = false;
@@ -590,6 +591,15 @@ export class DecodeScheduler implements ScrubCursor {
     return new Promise((resolve) => this.idleResolvers.push(resolve));
   }
 
+  seekSettled(): Promise<void> {
+    // seekTo carries no closed guard, so a target armed after close has no
+    // drain left to service it.
+    if (this.closed) return Promise.resolve();
+    if (this.pendingSeekTargetS === null && !this.seekDraining)
+      return Promise.resolve();
+    return new Promise((resolve) => this.settleResolvers.push(resolve));
+  }
+
   subscribe(listener: ScrubFrameListener): () => void {
     this.listeners.add(listener);
     if (this.lastEmittedFrame) listener(this.lastEmittedFrame);
@@ -605,6 +615,7 @@ export class DecodeScheduler implements ScrubCursor {
     this.currentState = ScrubCursorState.Closed;
     this.listeners.clear();
     this.flushIdleResolvers();
+    this.flushSettleResolvers();
     this.lastEmittedFrame = null;
     // Not awaited: a native async generator queues return() behind whatever
     // next() is running, so awaiting it here ties teardown to a decode that
@@ -634,6 +645,10 @@ export class DecodeScheduler implements ScrubCursor {
         this.pendingSeekTargetS = null;
         settledS = t;
         await this.runSeek(asSec(t), keyOnly);
+        // Released per lap: the loop re-arms for as long as the hand keeps
+        // moving, so a waiter held to the bottom of the drain waits out the
+        // whole gesture.
+        this.flushSettleResolvers();
       }
     } finally {
       this.seekDraining = false;
@@ -641,6 +656,7 @@ export class DecodeScheduler implements ScrubCursor {
       // draining would otherwise never fire if close() already ran its one
       // flush, hanging the awaiter. Resolving idle after close is harmless.
       this.flushIdleResolvers();
+      this.flushSettleResolvers();
       if (!this.closed && settledS !== null) {
         // One light, mode-appropriate prefetch around the settle (the
         // exact neighbor window while scrubbing). A heavier eager preview
@@ -1362,6 +1378,12 @@ export class DecodeScheduler implements ScrubCursor {
   private flushIdleResolvers(): void {
     const pending = this.idleResolvers;
     this.idleResolvers = [];
+    pending.forEach((r) => r());
+  }
+
+  private flushSettleResolvers(): void {
+    const pending = this.settleResolvers;
+    this.settleResolvers = [];
     pending.forEach((r) => r());
   }
 }

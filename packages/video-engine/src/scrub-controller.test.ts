@@ -98,6 +98,7 @@ class FakeCursor implements ScrubCursor {
   }
 
   async idle(): Promise<void> {}
+  async seekSettled(): Promise<void> {}
   subscribe(listener: ScrubFrameListener): () => void {
     this.listener = listener;
     return () => {

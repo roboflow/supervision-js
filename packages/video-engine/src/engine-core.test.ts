@@ -244,7 +244,7 @@ describe("EngineCore", () => {
     await engine.dispose();
   });
 
-  it("commit awaits idle, toggles seeking, seeks the cursor, never emits a playhead", async () => {
+  it("commit awaits its seek, toggles seeking, seeks the cursor, never emits a playhead", async () => {
     const clock = new FakeClock();
     const { engine, events, cursor } = setup(clock);
     await engine.load(LOAD_CONFIG);

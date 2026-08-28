@@ -54,6 +54,7 @@ export class CanvasSinkScrubCursor implements ScrubCursor {
   private currentState = ScrubCursorState.Closed;
   private readonly listeners = new Set<ScrubFrameListener>();
   private idleResolvers: Array<() => void> = [];
+  private settleResolvers: Array<() => void> = [];
   private pendingSeekTargetS: number | null = null;
   private pendingSeekKeyOnly = false;
   private seekDraining = false;
@@ -173,6 +174,13 @@ export class CanvasSinkScrubCursor implements ScrubCursor {
     return new Promise((resolve) => this.idleResolvers.push(resolve));
   }
 
+  seekSettled(): Promise<void> {
+    if (this.closed) return Promise.resolve();
+    if (this.pendingSeekTargetS === null && !this.seekDraining)
+      return Promise.resolve();
+    return new Promise((resolve) => this.settleResolvers.push(resolve));
+  }
+
   subscribe(listener: ScrubFrameListener): () => void {
     this.listeners.add(listener);
     // Replay the most recently emitted frame so a controller that wires up
@@ -189,6 +197,7 @@ export class CanvasSinkScrubCursor implements ScrubCursor {
     this.currentState = ScrubCursorState.Closed;
     this.listeners.clear();
     this.flushIdleResolvers();
+    this.flushSettleResolvers();
     this.lastEmittedFrame = null;
     await this.iterator?.return();
     this.iterator = null;
@@ -204,10 +213,12 @@ export class CanvasSinkScrubCursor implements ScrubCursor {
         const keyOnly = this.pendingSeekKeyOnly;
         this.pendingSeekTargetS = null;
         await this.runSeek(asSec(t), keyOnly);
+        this.flushSettleResolvers();
       }
     } finally {
       this.seekDraining = false;
       if (!this.closed) this.flushIdleResolvers();
+      this.flushSettleResolvers();
     }
   }
 
@@ -262,6 +273,12 @@ export class CanvasSinkScrubCursor implements ScrubCursor {
   private flushIdleResolvers(): void {
     const pending = this.idleResolvers;
     this.idleResolvers = [];
+    pending.forEach((r) => r());
+  }
+
+  private flushSettleResolvers(): void {
+    const pending = this.settleResolvers;
+    this.settleResolvers = [];
     pending.forEach((r) => r());
   }
 }

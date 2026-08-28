@@ -111,7 +111,7 @@ describe("handleEngineCommand", () => {
         devicePixelRatio: 1,
       },
     );
-    cursor.idle = async () => {
+    cursor.seekSettled = async () => {
       cursor.emit(asSec(2.002));
       await new Promise<void>((resolve) =>
         requestAnimationFrame(() => resolve()),
@@ -141,7 +141,7 @@ describe("handleEngineCommand", () => {
         devicePixelRatio: 1,
       },
     );
-    cursor.idle = async () => {
+    cursor.seekSettled = async () => {
       cursor.emit(asSec(1.9), "preview");
       await new Promise<void>((resolve) =>
         requestAnimationFrame(() => resolve()),

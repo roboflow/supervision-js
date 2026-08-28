@@ -576,6 +576,68 @@ describe("DecodeScheduler", () => {
     });
   });
 
+  describe("seekSettled", () => {
+    /** Parks every foreground decode past the seed until the test releases it,
+     *  so a lap of the drain stays open while the gesture moves on. */
+    function gated(): {
+      scheduler: DecodeScheduler;
+      releases: Array<() => void>;
+    } {
+      const releases: Array<() => void> = [];
+      const { scheduler } = setup({
+        gateDecode: async (timestampS) => {
+          if (timestampS === 0) return;
+          await new Promise<void>((release) => releases.push(release));
+        },
+      });
+      return { scheduler, releases };
+    }
+
+    it("answers on the decode in flight while a drag keeps re-arming the drain", async () => {
+      const { scheduler, releases } = gated();
+      await scheduler.open();
+
+      scheduler.seekTo(asSec(1));
+      await tick();
+
+      let committed = false;
+      const commit = scheduler.seekSettled().then(() => {
+        committed = true;
+      });
+      let wentIdle = false;
+      const idle = scheduler.idle().then(() => {
+        wentIdle = true;
+      });
+
+      for (let move = 0; move < 8; move++) {
+        scheduler.seekTo(asSec(2 + move));
+        releases.shift()?.();
+        await tick();
+        expect(wentIdle).toBe(false);
+        expect(committed).toBe(true);
+      }
+      await commit;
+
+      for (let i = 0; i < 8 && !wentIdle; i++) {
+        releases.shift()?.();
+        await tick();
+      }
+      await idle;
+      expect(releases).toHaveLength(0);
+      expect(scheduler.isIdle).toBe(true);
+      await scheduler.whenSettled();
+    });
+
+    it("a closed cursor answers instead of waiting on a target nothing will drain", async () => {
+      const { scheduler } = setup();
+      await scheduler.open();
+      await scheduler.close();
+      scheduler.seekTo(asSec(1));
+
+      await expect(scheduler.seekSettled()).resolves.toBeUndefined();
+    });
+  });
+
   describe("prefetch window", () => {
     it("a settled scrub prefetches a window of neighbor frames", async () => {
       const { scheduler, sink, cache } = setup();
