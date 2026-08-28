@@ -17,7 +17,7 @@ internal type losing a field is not listed here.
 
 ## No Export Was Removed
 
-The pinned surface went from 401 exported names to 416: fifteen added, none
+The pinned surface went from 401 exported names to 442: forty-one added, none
 removed. Every import that resolved against the previous release still
 resolves.
 
@@ -86,6 +86,11 @@ the picture until the frame it is about to show has both its detections and the
 prepared artifacts that draw them, so a preview opens annotated instead of
 opening bare and filling in.
 
+Neither underlying default moved. The render-preparation gate already resolved
+to enabled in the previous release, and the detection gate already resolved to
+enabled for a session with appendable detections. What is new is the one switch
+over both, and a gate that reaches a source presenting its own frames.
+
 Pass `playbackGate: false` to start playback at once and draw annotations as
 they land. The switch answers for `detections.playbackGate` and
 `renderer.renderPreparation.playbackGate` together; set either one's `enabled`
@@ -93,11 +98,14 @@ to answer for that gate alone. The detection half applies only to a session
 with appendable detections, since a source that is complete before playback
 starts has nothing to wait for.
 
-What the gate holds depends on who owns the playhead. A source the renderer
-pulls decoded samples from is held frame by frame for as long as playback runs.
-A source that presents its own frames, which is what
-`createVideoEngineMediaRendererSource` returns, is held at the start of
-playback only.
+What the gate holds depends on who owns the playhead and on which half is on. A
+source the renderer pulls decoded samples from is held frame by frame by both
+halves for as long as playback runs. A source that presents its own frames,
+which is what `createVideoEngineMediaRendererSource` returns, is held once at
+the start of playback by the render-preparation half, while the detection half
+stops its producer again at any frame its detections do not cover and starts it
+when they land. `PlaybackGateReach` on the renderer state reports which of those
+a session ran.
 
 ### A File Session Rebuilds Its Detection Window Less Often
 
@@ -150,9 +158,9 @@ ratio.
 
 ### muted Is Deprecated
 
-`MediaSessionRendererOptions.muted` is still accepted and nothing reads it. The
-renderer is video-only and audio playback is deferred, so setting it changes
-nothing either way.
+`MediaSessionRendererOptions.muted` and `MediaRendererOptions.muted` are still
+accepted and nothing reads either one. The renderer is video-only and audio
+playback is deferred, so setting them changes nothing either way.
 
 ### The Video Engine Is An Optional Peer Dependency
 

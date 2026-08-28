@@ -22,6 +22,14 @@ npm install supervision
 The published package includes the internal `supervision-js-core` dependency.
 Consumers must not install `supervision-js-core` separately.
 
+Opening a video file also needs the browser video engine, which `supervision`
+declares as an optional peer dependency and reaches through a dynamic import.
+Still images and camera input do not need it.
+
+```sh
+npm install supervision-js-web-video-engine
+```
+
 ## Supported Consumer
 
 Use:

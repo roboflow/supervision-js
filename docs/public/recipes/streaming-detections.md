@@ -39,14 +39,13 @@ for await (const frames of streamInferenceFrames(file)) {
 }
 ```
 
-Playback does not wait for appended detections. A frame the source does not
-cover yet presents without annotations and draws them when the append covering
-it lands, so inference falling behind slows annotations rather than the video.
-
 A session holds for its predictions and for the artifacts that draw them by
 default, so a preview opens annotated rather than opening bare and filling in.
 Pass `playbackGate: false` to `createMediaSession` when you would rather the
-picture keep moving and the annotations land as they arrive.
+picture keep moving and the annotations land as they arrive: a frame the source
+does not cover yet then presents without annotations and draws them when the
+append covering it lands, so inference falling behind slows annotations rather
+than the video.
 That one switch answers for `detections.playbackGate` and
 `renderer.renderPreparation.playbackGate` together; set either one's `enabled`
 to answer for that gate alone, or its `requiredAheadSeconds` to tune the
@@ -61,10 +60,10 @@ which is the case for the `media` inputs above: a URL, a `File`, or a `Blob`.
 A media source that presents its own frames owns the playhead, and the renderer
 follows it rather than pacing it. `createVideoEngineMediaRendererSource` and
 `openVideoEngineMediaSource` return that kind of source, and they are what most
-hosts render video through. There the gate holds the start of playback and
-nothing after it: the session reports buffering until detections cover the frame
-it will resume on, and a producer already running keeps its own pace. Wait on
-coverage yourself when a mid-playback stall matters:
+hosts render video through. There the render-preparation gate holds the start of
+playback and nothing after it, while the detection gate stops the producer again
+at any frame its detections do not cover and starts it when they land. Wait on
+coverage yourself when you would rather decide where playback stops:
 
 ```ts
 await session.detectionSource?.waitForRange?.({ startTime: 0, endTime: 2 });
@@ -124,7 +123,7 @@ session.subscribe((state) => {
 ```
 
 `playbackBlocked` means playback should wait; media buffering and session errors
-raise it. Detection coverage raises it only through a gate that is both enabled
-and reached, so with the default gate off, or on a source that presents its own
-frames, coverage blocks only the start of playback. `presentationBlocked` means the visual
-frame is still preparing an artifact while playback continues.
+raise it. Detection coverage raises it only through an enabled detection gate,
+so `playbackGate: false` keeps coverage from blocking playback at all.
+`presentationBlocked` means the visual frame is still preparing an artifact
+while playback continues.
