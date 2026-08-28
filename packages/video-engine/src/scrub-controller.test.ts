@@ -209,6 +209,31 @@ describe("ScrubController", () => {
     controller.dispose();
   });
 
+  it("a play session opens on the frame it was anchored on, however long the walk took to reopen", async () => {
+    const cursor = new FakeCursor();
+    const clock = new FakeClock();
+    const onPaint = vi.fn();
+    const controller = new ScrubController({
+      cacheSkipNearMs: 100,
+      clock,
+      cursor,
+      onEnded: () => undefined,
+      onPaint,
+    });
+    controller.bindCanvas(makeCanvas());
+
+    clock.play(0);
+    controller.beginPlay(0);
+    // Reopening the walk cost three frame intervals of wall time, so its
+    // opening frames all arrive behind the clock.
+    clock.setT(3 / 30);
+    for (const index of [0, 1, 2, 3]) cursor.emit(canvasFrameAt(index / 30));
+    await flushRaf();
+
+    expect(onPaint.mock.calls[0]?.[0].timestampS).toBe(0);
+    controller.dispose();
+  });
+
   it("self-priming pump: empty playing ticks keep pulling so a lost bootstrap pull recovers", async () => {
     const cursor = new FakeCursor();
     const clock = new FakeClock();
@@ -291,16 +316,21 @@ describe("ScrubController", () => {
     controller.bindCanvas(makeCanvas());
     controller.beginPlay(0);
     clock.play(0);
+    // The session's opening frame, so what follows is the picture keeping up
+    // rather than the walk opening.
+    cursor.emit(canvasFrameAt(0));
+    await flushRaf();
+    painted.length = 0;
     // Above display refresh over source fps, several frames fall due in the
     // same tick. Serving the oldest would leave the picture a tick further
     // behind the playhead every tick, so the tick has to skip to the newest.
-    clock.setT(0.02);
-    cursor.emit(canvasFrameAt(0));
-    cursor.emit(canvasFrameAt(0.01));
-    cursor.emit(canvasFrameAt(0.02));
+    clock.setT(0.05);
+    cursor.emit(canvasFrameAt(0.03));
+    cursor.emit(canvasFrameAt(0.04));
+    cursor.emit(canvasFrameAt(0.05));
     await flushRaf();
 
-    expect(painted).toEqual([0.02]);
+    expect(painted).toEqual([0.05]);
     expect(controller.getRealtimeStats().droppedFrames).toBe(2);
     expect(controller.getRealtimeStats().playQueueDepth).toBe(0);
     controller.dispose();
@@ -320,15 +350,18 @@ describe("ScrubController", () => {
     controller.bindCanvas(makeCanvas());
     controller.beginPlay(0);
     clock.play(0);
-    clock.setT(0.01);
     cursor.emit(canvasFrameAt(0));
-    cursor.emit(canvasFrameAt(0.01));
-    cursor.emit(canvasFrameAt(0.02));
+    await flushRaf();
+    painted.length = 0;
+    clock.setT(0.04);
+    cursor.emit(canvasFrameAt(0.03));
+    cursor.emit(canvasFrameAt(0.04));
+    cursor.emit(canvasFrameAt(0.05));
     await flushRaf();
 
-    // 0.02 is still in the future: presenting it would show the user a frame
+    // 0.05 is still in the future: presenting it would show the user a frame
     // ahead of the playhead.
-    expect(painted).toEqual([0.01]);
+    expect(painted).toEqual([0.04]);
     expect(controller.getRealtimeStats().playQueueDepth).toBe(1);
     controller.dispose();
   });

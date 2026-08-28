@@ -302,6 +302,12 @@ export class ScrubController {
    * where a consumer can see what the rate cost.
    */
   private dropFramesTheClockHasPassed(t: number): void {
+    // Surplus is what the clock outran while the picture was keeping up. With
+    // nothing on screen yet, the session's opening frame is not surplus: it is
+    // the frame the session was anchored on, and a walk that costs wall time
+    // to open delivers it far enough behind the clock for this rule to drop it
+    // before anything reaches the screen.
+    if (!this.paintedSincePlay) return;
     let dropped = 0;
     while (this.playQueue.length > 1 && this.playQueue[1].timestampS <= t) {
       const stale = this.playQueue.shift();
@@ -808,6 +814,7 @@ export class ScrubController {
       return;
     }
     const presented = this.sink.present(frame);
+    if (playing) this.paintedSincePlay = true;
     this.lastPaintedMs = Math.round(frame.timestampS * 1000);
     this.lastPaintedQuality = frame.quality;
     // The controller owns the sample lifetime: once presented, the live
@@ -825,7 +832,6 @@ export class ScrubController {
     // playing: paused, clock.now() holds the seek target while the canvas
     // shows the landed frame, so the gap would read as a phantom lag.
     if (playing) {
-      this.paintedSincePlay = true;
       this.catchUpMs = Math.max(0, Math.round(t * 1000) - this.lastPaintedMs);
     } else {
       this.catchUpMs = 0;
