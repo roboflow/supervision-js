@@ -75,8 +75,7 @@ function pieceFetch(total: number, pieceBytes: number) {
   };
 }
 
-/** Reads `bytes` off a response and then abandons it, the way the demuxer
- *  abandons a read once it holds what it asked for. */
+/** The demuxer abandons a read once it holds what it asked for; this is that. */
 async function abandonAfter(response: Response, bytes: number): Promise<void> {
   const reader = response.body!.getReader();
   let read = 0;
@@ -86,6 +85,18 @@ async function abandonAfter(response: Response, bytes: number): Promise<void> {
     read += value.length;
   }
   await reader.cancel();
+}
+
+/** A server with no range support: it answers every request with the whole
+ *  file and a 200. */
+function wholeFileFetch(total = TOTAL) {
+  return vi.fn(
+    async () =>
+      new Response(body(0, total), {
+        status: 200,
+        headers: { "Content-Length": String(total) },
+      }),
+  ) as unknown as typeof fetch;
 }
 
 describe("createSourceResidency", () => {
@@ -259,6 +270,23 @@ describe("createSourceResidency", () => {
       expect(residency.snapshot().residentBytes).toBe(STREAMED_TOTAL);
     });
     expect(network.servedBytes()).toBe(STREAMED_TOTAL);
+  });
+
+  it("places a body the server did not range-satisfy at the start of the file", async () => {
+    const residency = createSourceResidency({
+      url: URL_UNDER_TEST,
+      budgetBytes: TOTAL,
+      fetchImpl: wholeFileFetch(),
+    });
+
+    await read(
+      await residency.fetchFn(URL_UNDER_TEST, {
+        headers: { Range: "bytes=1024-" },
+      }),
+    );
+    await settle();
+
+    expect(residency.snapshot().ranges).toEqual([{ start: 0, end: TOTAL }]);
   });
 
   it("holds nothing once disposed", async () => {

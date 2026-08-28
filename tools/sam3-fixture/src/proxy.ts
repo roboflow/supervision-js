@@ -20,6 +20,11 @@ interface ProxyBuildResult {
   readonly version: 1;
   readonly sourceUrl: string;
   readonly sourceSize: number;
+  /** Frame size the source decodes at, which the proxy is re-encoded at. */
+  readonly sourceFrame: {
+    readonly width: number | null;
+    readonly height: number | null;
+  };
   readonly mimeType: string;
   readonly size: number;
   readonly normalized: {
@@ -106,6 +111,10 @@ async function buildFixtureProxy(
     },
     schema: "supervision-js.tools.sam3-fixture.proxy",
     size: normalized.size,
+    sourceFrame: {
+      height: normalized.inputMetadata.primaryVideoHeight,
+      width: normalized.inputMetadata.primaryVideoWidth,
+    },
     sourceSize: sourceBlob.size,
     sourceUrl: options.sourceUrl,
     version: 1,

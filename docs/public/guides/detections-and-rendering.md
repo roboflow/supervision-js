@@ -17,11 +17,33 @@ runtime artifacts.
 2. **Hot detection window**
    Keeps a bounded range of detection frames near the current playback time.
 3. **Prepared render window**
-   Converts hot detections into renderer-friendly artifacts. Masks use prepared
-   frame-level ID-mask artifacts by default.
+   Converts hot detections into renderer-friendly artifacts. Masks and polygons
+   rasterize into frame-level ID-mask artifacts by default; boxes, polylines,
+   and keypoints have nothing to prepare and draw from the detection data.
 4. **Active render frame**
    Presents the one media frame and matching annotation artifacts selected from
    the current playback reference.
+
+## What The Two Playback Gates Wait For
+
+The two gates are not annotations against masks. A mask is one geometry a
+detection can carry, beside boxes, polygons, polylines, and keypoints, so both
+gates are about detections. They differ in which stage above they wait on.
+
+- The detection-coverage gate, `detections.playbackGate`, waits for **arrival**:
+  whether this frame's detections have reached the source at all, or are still
+  being fetched, or are still being written by a producer that is running. It
+  cannot tell one geometry from another, because a frame with no data carries
+  none of them.
+- The render-preparation gate, `renderer.renderPreparation.playbackGate`, waits
+  for **preparation**: whether the geometries that need rasterizing have become
+  the ID-mask artifact that draws them. Masks and polygons take that step. The
+  other geometries have nothing to rasterize, so this gate never waits on them.
+
+Both hold every frame on a media source the renderer pulls samples from, and
+only the start of playback on a source that presents its own frames. See
+[Media Sessions](./media-sessions.md) for the defaults and the single switch
+that answers for both.
 
 ## Detection Contract
 
@@ -67,6 +89,31 @@ const source = createCompositeDetectionFrameSource({
   ],
 });
 ```
+
+## Which Pixels Geometry Is In
+
+A box, a label anchor, a polygon, a polyline, and a keypoint are absolute media
+pixels. The numbers reach the scene whose unit is one media pixel. Present the
+same detections against a raster of a different size and every one of them is
+drawn at the wrong fraction of the picture, far enough off that objects near an
+edge take their labels off the canvas entirely.
+
+Masks are the exception. A `DetectionMask` carries the pixel size its `counts`
+are encoded against, and the mask layer stretches the sprite onto whatever the
+media is, so a mask lands correctly at any raster. That difference is why a
+rescaled source shows correct masks beside misplaced boxes.
+
+Vector geometry is reconciled by declaring where it came from.
+`DetectionFrame.coordinateSpace` names the pixel space a frame's geometry was
+produced in. The media renderer wraps every detection source in
+`createProjectedDetectionFrameSource`, which scales that geometry onto the
+presented frame and leaves masks alone so the ratio is never applied twice.
+
+It is opt-in, and that is the trap: a frame that declares nothing is taken at
+its word as already being in the presented frame's pixels. Any source whose
+geometry was computed against a different raster than the one being played has
+to declare its space, or the annotations are silently wrong rather than
+visibly broken.
 
 ## Why Not Draw Every RLE Mask Every Frame?
 

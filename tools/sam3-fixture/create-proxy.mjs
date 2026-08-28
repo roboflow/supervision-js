@@ -42,7 +42,10 @@ const proxyPath = options.proxyPath
   ? resolve(options.proxyPath)
   : resolve(dirname(sourcePath), DEFAULT_PROXY_FILE);
 const proxyFile = relativeFixturePath(fixtureDir, proxyPath);
-const bitrate = options.bitrate ?? (await deriveBitrate(fixtureDir, options));
+const manifest = JSON.parse(
+  await readFile(resolve(fixtureDir, "detections.manifest.json"), "utf8"),
+);
+const bitrate = options.bitrate ?? deriveBitrate(manifest, options);
 
 const target = await findOrCreatePageTarget(
   options.chromeDebugUrl,
@@ -68,6 +71,8 @@ try {
     })})`,
     { timeoutMs: options.timeoutMs },
   );
+
+  assertProxyKeepsDetectionSpace(manifest, result.sourceFrame, options);
 
   console.log(
     `Encoded ${formatBytes(result.size)} from ${formatBytes(result.sourceSize)}. Writing ${proxyFile}...`,
@@ -117,19 +122,44 @@ try {
   client.close();
 }
 
-async function deriveBitrate(dir, runOptions) {
-  const manifest = JSON.parse(
-    await readFile(resolve(dir, "detections.manifest.json"), "utf8"),
-  );
+function deriveBitrate(manifest, runOptions) {
   const { frameRate, height, width } = manifest.video;
 
   if (!(width > 0 && height > 0 && frameRate > 0)) {
     throw new Error(
-      `${dir}/detections.manifest.json does not describe the proxy frame geometry.`,
+      `demo/fixtures/${runOptions.sampleName}/detections.manifest.json does not say what frame size and rate its detections were computed at.`,
     );
   }
 
   return Math.round(runOptions.bitsPerPixel * width * height * frameRate);
+}
+
+/**
+ * Refuses a proxy the demo would have to draw the fixture's detections onto
+ * blind.
+ *
+ * This tool re-encodes at the source's own frame size, so a source that is not
+ * the media the detections were computed against means the manifest names the
+ * wrong media. A box, a label anchor, a polygon, a polyline, and a keypoint are
+ * all absolute pixels, and the demo places them by trusting those two numbers.
+ */
+function assertProxyKeepsDetectionSpace(manifest, sourceFrame, runOptions) {
+  const { height, width } = manifest.video;
+
+  if (!(sourceFrame.width > 0 && sourceFrame.height > 0)) {
+    console.warn(
+      `Could not read the frame size of ${basename(sourcePath)}, so nothing checked it against the ${width}x${height} its detections were computed at.`,
+    );
+    return;
+  }
+
+  if (sourceFrame.width === width && sourceFrame.height === height) {
+    return;
+  }
+
+  throw new Error(
+    `${basename(sourcePath)} decodes at ${sourceFrame.width}x${sourceFrame.height}, so this proxy would too, but demo/fixtures/${runOptions.sampleName}/detections.manifest.json says its detections were computed at ${width}x${height}. Point --sample-name at the fixture this media belongs to, or make video.width and video.height name the media the detections were computed against.`,
+  );
 }
 
 function relativeFixturePath(fromDir, filePath) {

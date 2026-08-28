@@ -178,6 +178,15 @@ defaults to the committed proxy's own 0.07038 bits per pixel instead. Override
 with `--bits-per-pixel` or an absolute `--bitrate`; neither moves a frame
 boundary.
 
+This proxy re-encodes at the source's own frame size, and the command stops
+before writing anything if that size disagrees with the `video.width` and
+`video.height` the fixture's `detections.manifest.json` records. Those two
+numbers are what the demo scales boxes, labels, polygons, polylines, and
+keypoints by, so they have to keep naming the media the detections were computed
+against. A proxy that deliberately shrinks the raster is a different thing, and
+[`fixture-delivery-proxies.md`](../../docs/internal/fixture-delivery-proxies.md)
+covers it.
+
 New fixtures need none of this: they pair detections with the source's own
 frames and declare no proxy.
 

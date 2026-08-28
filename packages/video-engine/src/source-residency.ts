@@ -222,9 +222,7 @@ export function createSourceResidency(
 
   /* The demuxer opens a read as an open-ended range and abandons the response
    * the moment it holds what it asked for, and a transform whose reader walked
-   * away runs neither its flush nor its cancel in Chrome. Bytes are banked as
-   * they arrive, in blocks, so an abandoned read leaves behind what it pulled
-   * and the walk has no reason to pull it again. */
+   * away runs neither its flush nor its cancel in Chrome. */
   const teeInto = (start: number, response: Response): Response => {
     if (!response.body) return response;
     let blockStart = start;
@@ -274,7 +272,10 @@ export function createSourceResidency(
     try {
       const response = await realFetch(input, init);
       totalBytes ??= totalFromHeaders(response);
-      return start === null ? response : teeInto(start, response);
+      if (start === null || !response.ok) return response;
+      /* A server that ignores the range answers 200 with the whole file, so
+       * what arrives begins at zero whatever was asked for. */
+      return teeInto(response.status === 206 ? start : 0, response);
     } finally {
       foregroundReads -= 1;
     }

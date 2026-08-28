@@ -1,22 +1,21 @@
 import {
   createChunkedDetectionFrameSource,
   createVideoEngineMediaRendererSource,
+  type DetectionCoordinateSpace,
   type DetectionFrameChunkFetch,
   type DetectionFrameChunkManifest,
   type DetectionFrameSource,
   type DetectionFrame,
   type MediaRendererSource,
 } from "supervision";
-import {
-  SourceKind,
-  type SourceResidencyConfig,
-} from "supervision-js-video-engine";
+import { SourceKind } from "supervision-js-video-engine";
 import { delayDetectionFetch } from "../diagnostics/slow-work";
 import type { DisplayBoxResolutionOptions } from "supervision-js-video-engine";
 import type {
   DemoPresentationAvailability,
   DemoPresentationLayerSetting,
 } from "../presentation/demo-presentation";
+import type { DemoEngineOptions } from "../session/session-options";
 
 const fixtureMetaModules = import.meta.glob(
   "../../fixtures/*/fixture.meta.json",
@@ -274,15 +273,15 @@ export function resolveDemoFixturePlaybackSrc(
 export function createDemoFixtureMedia(
   definition: DemoFixtureDefinition = defaultDemoFixture,
   display?: DisplayBoxResolutionOptions,
-  sourceResidency?: SourceResidencyConfig,
+  engine?: DemoEngineOptions,
 ): MediaRendererSource {
   return createVideoEngineMediaRendererSource({
+    ...engine,
     display,
     source: {
       kind: SourceKind.Url,
       url: resolveDemoFixturePlaybackSrc(definition),
     },
-    sourceResidency,
   });
 }
 
@@ -292,10 +291,15 @@ export function createDemoFixtureDetectionSource(
   frameTransform?: DemoFixtureFrameTransform,
   sourceTransform?: DemoFixtureDetectionSourceTransform,
 ): DemoFixtureDetectionSource {
-  const baseDetectionSource = createChunkedDetectionFrameSource({
+  const detectionSpace = resolveDemoFixtureDetectionSpace(manifest);
+  const chunkedDetectionSource = createChunkedDetectionFrameSource({
     baseUrl: definition.detectionsManifestSrc,
     fetchChunk: async (chunk) => {
-      const loaded = await fetchDemoFixtureDetectionChunk(chunk, definition);
+      const loaded = await fetchDemoFixtureDetectionChunk(
+        chunk,
+        definition,
+        detectionSpace,
+      );
 
       return frameTransform
         ? { frames: frameTransform(loaded.frames) }
@@ -303,6 +307,25 @@ export function createDemoFixtureDetectionSource(
     },
     manifest,
   });
+  const baseDetectionSource: DetectionFrameSource = {
+    ...chunkedDetectionSource,
+    async loadFrames(startTime, endTime, options) {
+      const frames = await chunkedDetectionSource.loadFrames(
+        startTime,
+        endTime,
+        options,
+      );
+
+      assertDemoFixtureDetectionSpace(
+        frames,
+        detectionSpace,
+        definition,
+        options?.coordinateSpace,
+      );
+
+      return frames;
+    },
+  };
   const detectionSource =
     sourceTransform?.(baseDetectionSource, manifest) ?? baseDetectionSource;
   let destroyed = false;
@@ -331,6 +354,7 @@ export function createDemoFixtureDetectionSource(
 const fetchDemoFixtureDetectionChunk = async (
   chunk: Parameters<DetectionFrameChunkFetch>[0],
   definition: DemoFixtureDefinition,
+  detectionSpace: DetectionCoordinateSpace | null,
 ) => {
   const chunkUrl =
     sampleDetectionChunkUrls[`${definition.basePath}/${chunk.src}`];
@@ -349,10 +373,74 @@ const fetchDemoFixtureDetectionChunk = async (
     );
   }
 
-  return (await response.json()) as Awaited<
+  const chunkData = (await response.json()) as Awaited<
     ReturnType<DetectionFrameChunkFetch>
   >;
+
+  return detectionSpace
+    ? {
+        frames: chunkData.frames.map((frame) => ({
+          ...frame,
+          coordinateSpace: detectionSpace,
+        })),
+      }
+    : chunkData;
 };
+
+/**
+ * Pixel space the fixture's detections were computed in, as its manifest
+ * records it.
+ *
+ * A fixture's chunks hold rectangles, polygons, polylines, and keypoints in the
+ * pixels of the media the model saw. The demo may play a smaller delivery
+ * proxy of that media instead, so every frame states the space it came from and
+ * lets the renderer scale it onto the frame actually presented.
+ */
+function resolveDemoFixtureDetectionSpace(
+  manifest: DemoFixtureDetectionManifest,
+): DetectionCoordinateSpace | null {
+  const { height, width } = manifest.video;
+
+  return width > 0 && height > 0 ? { height, width } : null;
+}
+
+/**
+ * Refuses to serve detections the demo cannot place on the media it is playing.
+ *
+ * Nothing downstream can notice geometry drawn in the wrong pixel space: boxes
+ * and labels simply land somewhere plausible, or off the canvas entirely.
+ */
+function assertDemoFixtureDetectionSpace(
+  frames: readonly DetectionFrame[],
+  detectionSpace: DetectionCoordinateSpace | null,
+  definition: DemoFixtureDefinition,
+  presentedSpace: DetectionCoordinateSpace | undefined,
+): void {
+  if (!presentedSpace) {
+    return;
+  }
+
+  if (!detectionSpace) {
+    throw new Error(
+      `Fixture ${definition.sampleName} does not say what size its detections were computed at, so the demo cannot tell whether they fit the ${presentedSpace.width}x${presentedSpace.height} media it is playing. Give video.width and video.height real pixel sizes in demo/fixtures/${definition.sampleName}/detections.manifest.json.`,
+    );
+  }
+
+  if (
+    detectionSpace.width === presentedSpace.width &&
+    detectionSpace.height === presentedSpace.height
+  ) {
+    return;
+  }
+
+  if (frames.every((frame) => frame.coordinateSpace)) {
+    return;
+  }
+
+  throw new Error(
+    `Fixture ${definition.sampleName} plays ${presentedSpace.width}x${presentedSpace.height} media while its detections were computed at ${detectionSpace.width}x${detectionSpace.height}, and the loaded frames do not declare which of the two they use. Every frame needs coordinateSpace set to the size the detections were computed at, or every box, label, polygon, polyline, and keypoint is drawn in the wrong place.`,
+  );
+}
 
 function createDemoFixtures(): readonly DemoFixtureDefinition[] {
   const fixtures = Object.entries(fixtureMetaModules).flatMap(

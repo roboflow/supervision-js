@@ -550,13 +550,14 @@ describe("fixture playback media", () => {
     ).toBe("/source.mov");
   });
 
-  it("declares a proxy on exactly the fixtures whose detections were computed on one", () => {
-    // Playback and detection pairing read different files to decide the same
-    // thing: playback prefers meta.media.proxyFile, pairing switches on
-    // manifest.video.firstTimestamp. A fixture carrying both plays a 30fps
-    // transcode while pairing detections by native-fps intervals, drawing every
-    // annotation on the wrong frame.
-    const mismatched = demoFixtures.filter((fixture) => {
+  it("declares a proxy on every fixture whose detections were computed on one", () => {
+    // A fixture without firstTimestamp pairs detections by index-times-rate
+    // against a transcode's frame grid, so it has to play that transcode or
+    // every annotation lands on the wrong frame. The reverse does not hold: a
+    // fixture that pairs by interval may still declare a proxy, as long as the
+    // proxy keeps the source's presentation timestamps and only cheapens
+    // decode.
+    const unplayable = demoFixtures.filter((fixture) => {
       const meta = readJson<{
         readonly media: { readonly proxyFile?: string };
       }>(join(fixturesRoot, fixture.sampleName, "fixture.meta.json"));
@@ -565,12 +566,12 @@ describe("fixture playback media", () => {
       }>(join(fixturesRoot, fixture.sampleName, "detections.manifest.json"));
 
       return (
-        (manifest.video.firstTimestamp === undefined) !==
-        (meta.media.proxyFile !== undefined)
+        manifest.video.firstTimestamp === undefined &&
+        meta.media.proxyFile === undefined
       );
     });
 
-    expect(mismatched.map(({ sampleName }) => sampleName)).toEqual([]);
+    expect(unplayable.map(({ sampleName }) => sampleName)).toEqual([]);
   });
 
   it("plays the proxy file it declares, and it exists", () => {
