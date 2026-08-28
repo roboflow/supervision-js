@@ -476,6 +476,64 @@ test("every fixture-backed annotation renderer has a focused live playground", a
   );
 });
 
+test("every renderer a docs page asks for is one the playground can build", async () => {
+  const rendererModule = await readFile(
+    path.join(rootDir, "demo/src/docs-annotation-renderer.ts"),
+    "utf8",
+  );
+  const playgroundRouter = await readFile(
+    path.join(
+      rootDir,
+      "demo/src/components/DocsAnnotationRendererPlayground.tsx",
+    ),
+    "utf8",
+  );
+  const pageRenderers = (
+    await Promise.all(
+      (await readdir(path.join(publicDocsDir, "annotation-renderers"))).map(
+        (file) =>
+          readFile(
+            path.join(publicDocsDir, "annotation-renderers", file),
+            "utf8",
+          ),
+      ),
+    )
+  ).flatMap(
+    (page) =>
+      page.match(/embed=annotation-renderer&amp;renderer=(?<id>[\w-]+)/)?.groups
+        ?.id ?? [],
+  );
+  const declaredIds = [
+    ...(rendererModule
+      .match(
+        /export const docsAnnotationRendererIds = \[(?<ids>[\s\S]*?)\] as const;/,
+      )
+      ?.groups?.ids.matchAll(/"(?<id>[^"]+)"/g) ?? []),
+  ].map((match) => match.groups.id);
+  const dedicatedPlaygrounds = [
+    ...playgroundRouter.matchAll(/renderer === "(?<id>[^"]+)"/g),
+  ].map((match) => match.groups.id);
+  const snippetCases = [
+    ...(rendererModule
+      .match(
+        /export function createDocsAnnotationRendererSnippet[\s\S]*?\n\}\n/,
+      )?.[0]
+      .matchAll(/case "(?<id>[^"]+)":/g) ?? []),
+  ].map((match) => match.groups.id);
+
+  assert.deepEqual([...pageRenderers].sort(), [...declaredIds].sort());
+
+  for (const renderer of pageRenderers) {
+    // parseDocsAnnotationRenderer falls back to boxes, so an id the demo does
+    // not know renders the wrong playground rather than failing.
+    assert.ok(
+      dedicatedPlaygrounds.includes(renderer) ||
+        snippetCases.includes(renderer),
+      `${renderer} has neither a dedicated playground nor a live code snippet`,
+    );
+  }
+});
+
 test("Render preview trusts only its assigned hostname", async () => {
   const packageJson = JSON.parse(
     await readFile(path.join(rootDir, "package.json"), "utf8"),

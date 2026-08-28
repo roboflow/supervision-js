@@ -148,10 +148,8 @@ const demoPresentationLayerSettings: readonly DemoPresentationLayerSetting[] = [
  * Whether anything in a presentation would draw a detection, which is what the
  * workbench asks before it lets the detection buffer keep loading.
  *
- * A focused experience composes renderers the layer toggles know nothing
- * about, so this reads the presentation the session was handed rather than the
- * settings it was derived from. Focus dims around detections without owning a
- * renderer, so it counts separately.
+ * Focus dims around detections without owning a renderer, so it counts on its
+ * own.
  */
 export function demoPresentationDrawsAnnotations(
   presentation: MediaRendererPresentation,

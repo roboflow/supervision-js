@@ -8,6 +8,7 @@ import {
   type DocsAnnotationRendererControl,
   type DocsAnnotationRendererId,
   type DocsAnnotationRendererSelectControl,
+  type DocsStyleAnnotationRendererId,
   type DocsAnnotationRendererSelectSetting,
   type NumericPresentationSetting,
 } from "../docs-annotation-renderer";
@@ -36,10 +37,7 @@ export function DocsAnnotationRendererPlayground({
 function DocsStyleAnnotationRendererPlayground({
   renderer,
 }: {
-  readonly renderer: Exclude<
-    DocsAnnotationRendererId,
-    "regions" | "region-effects"
-  >;
+  readonly renderer: DocsStyleAnnotationRendererId;
 }) {
   const definition = docsAnnotationRenderers[renderer];
   const fixtureName = "basketball fixture";

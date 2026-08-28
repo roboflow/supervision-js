@@ -264,11 +264,7 @@ export function useDemoRenderer(
   const presentationSettingsRef = useRef<DemoPresentationSettings>(
     initialPresentationSettings,
   );
-  /**
-   * The presentation the renderer is actually showing. A focused playground
-   * composes renderers over the settings, so the session cannot answer
-   * questions about what draws by reading the settings alone.
-   */
+  /** The presentation on screen: the settings above plus composed renderers. */
   const presentationRef = useRef<MediaRendererPresentation | null>(null);
   const applyPresentation = useCallback(
     (settings: DemoPresentationSettings) => {
@@ -591,9 +587,9 @@ export function useDemoRenderer(
     };
   }, [
     activeFixture,
+    applyPresentation,
     fixtureDetectionSourceTransform,
     fixtureFrameTransform,
-    presentationTransform,
     sessionEpoch,
     sessionOptions,
     sourceMode,
