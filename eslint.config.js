@@ -42,17 +42,17 @@ export default [
           patterns: [
             {
               group: [
-                "supervision-js-video-engine/*",
-                "!supervision-js-video-engine/analysis",
-                "!supervision-js-video-engine/worker",
+                "supervision-js-web-video-engine/*",
+                "!supervision-js-web-video-engine/analysis",
+                "!supervision-js-web-video-engine/worker",
               ],
               message:
-                "The video engine exposes three entries: supervision-js-video-engine, supervision-js-video-engine/analysis, and supervision-js-video-engine/worker. Anything else is an internal module.",
+                "The video engine exposes three entries: supervision-js-web-video-engine, supervision-js-web-video-engine/analysis, and supervision-js-web-video-engine/worker. Anything else is an internal module.",
             },
             {
               group: ["**/video-engine/src/**"],
               message:
-                "Import supervision-js-video-engine or supervision-js-video-engine/analysis. A path into the engine's source binds the importer to its file layout.",
+                "Import supervision-js-web-video-engine or supervision-js-web-video-engine/analysis. A path into the engine's source binds the importer to its file layout.",
             },
           ],
         },
