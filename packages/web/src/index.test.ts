@@ -102,6 +102,7 @@ describe("package entrypoint", () => {
       "PlaybackGateReach",
       "RegionRendererComposeMode",
       "RegionRendererCoverageKind",
+      "RegionRendererMediaEffectKind",
       "RegionRendererRegionKind",
       "RegionRendererSizeSpace",
       "RegionRendererSourceKind",
@@ -247,6 +248,10 @@ describe("package entrypoint", () => {
       Hovered: "hovered",
       HoveredAndSelected: "hoveredAndSelected",
       Selected: "selected",
+    });
+    expect(entrypoint.RegionRendererMediaEffectKind).toEqual({
+      Blur: "blur",
+      Pixelate: "pixelate",
     });
     expect(entrypoint.MediaRendererPlaybackState).toEqual({
       Buffering: "buffering",

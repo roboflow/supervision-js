@@ -7,9 +7,9 @@ summary: Place media crops or image assets over detection-owned regions.
 
 The region annotation renderer places a crop of the current media frame or a
 browser-loadable image over a region owned by a semantic detection. It supports
-media effects such as an enlarged head alongside static icons, badges, logos,
-and animated GIFs. Application code never receives a Pixi texture, animation
-source, or display object.
+bounded media effects alongside static icons, badges, logos, and animated GIFs.
+Application code never receives a Pixi texture, animation source, filter, or
+display object.
 
 <div class="supervision-layer-playground">
   <iframe
@@ -26,6 +26,12 @@ patch, synthetic head window, or runtime keypoint is used for that mode.
 Switch to class-specific SVG team badges or a looping fire GIF, then tune the
 head scale or fixed screen-pixel asset size, offset, rotation, and media-crop
 mirror controls.
+
+## Add visual effects
+
+Use [Region effects](./region-effects.md) to blur or pixelate an exact semantic
+region of the current media frame with one focused basketball playground and a
+live code snippet.
 
 ## Enlarge a region from the current media frame
 

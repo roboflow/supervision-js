@@ -55,6 +55,7 @@ const expectedWebRuntimeExports = [
   "PlaybackGateReach",
   "RegionRendererComposeMode",
   "RegionRendererCoverageKind",
+  "RegionRendererMediaEffectKind",
   "RegionRendererRegionKind",
   "RegionRendererSizeSpace",
   "RegionRendererSourceKind",

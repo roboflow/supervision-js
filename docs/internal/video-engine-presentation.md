@@ -236,6 +236,56 @@ no render count. None of it is precedent for the push path: new video work goes
 through the engine-backed source
 and the push path described above.
 
+## The Other Presentation, And What It Costs
+
+`presentation` has two settings and the engine defaults to `"canvas"`, where it
+holds the display canvas and paints every frame itself. Nothing described above
+runs in that mode. `openVideoEngineMediaSource` declares its options as
+`Omit<VideoEngineOptions, "presentation">` and passes `"frames"`, so a consumer
+arriving through `supervision` cannot select canvas at all; reaching it means
+constructing `VideoEngine` directly and calling `bindCanvas`.
+
+The two modes are not a preference. `bindCanvas` calls
+`transferControlToOffscreen`, and that transfer is permanent for the life of the
+element: afterwards `getContext` raises `InvalidStateError: Cannot get context
+from a canvas that has transferred its control to offscreen`, and assigning
+`width` raises `Cannot resize canvas after call to transferControlToOffscreen()`.
+No annotation layer can draw into that canvas again, so canvas mode shows video
+and nothing else. Every layer, the picker, the prepared annotation window and
+the atomic present all belong to frames presentation and have no counterpart
+here.
+
+The demo opens canvas mode on `?presentation=canvas`, with `&sample=` choosing
+the clip, alongside `?decode=native` and `?masks=native`. It is a separate
+player rather than a setting on the usual one, because a session that composites
+annotations has no surface to composite them onto. The page states the
+annotation cost where the flag is offered.
+
+Measured on an Apple M3 Max in Chrome 152 against a real `metal-3` adapter, the
+canvas path holds its source rate with almost no waste. The 70s horse trail at
+30fps painted 299 frames in 10.004s, a measured 29.89 a second against the
+engine's own 30.00, at 1.00x presented rate, 306 frames decoded for 300 painted
+and none dropped. The 9s basketball sample painted 201 frames in 8.042s, 24.99 a
+second on a 25fps source, none dropped. Stepping lands on consecutive source
+frames in both directions, a dragged playhead seeks and repaints, and the WebGPU
+renderer resolves rather than falling back to 2D.
+
+Its console is silent. A preview-sized frame arrives at a different size from a
+full decode, which sends `ensureTexture` through the destroy-and-recreate branch
+that is the renderer's only GPU teardown during playback, and 60 paused scrubs,
+30 scrubs into a playing engine, a 20-step burst, four resizes and a full engine
+teardown produced no uncaptured WebGPU error, no lost device, and no worker
+exception. The worker realm has to be instrumented from the page to see
+that: its CDP target attaches but answers nothing, so a harness that reads only
+the page console is reading the wrong realm and its silence means nothing.
+
+Two behaviours differ from frames presentation and are properties of the mode.
+The render loop is the worker's own `requestAnimationFrame`, so covering the tab
+freezes the painted-frame count while the media clock keeps running: a 9s clip
+covered mid-playback came back ended. And a step burst issued against a playing
+engine starves the playback pull, taking paint rate to zero with frames
+discarded while the status still reads PLAYING.
+
 ## A cost recorded for a deferred decision
 
 These numbers price a decision deferred to its own pull request: moving

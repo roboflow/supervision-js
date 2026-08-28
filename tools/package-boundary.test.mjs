@@ -19,8 +19,11 @@ const reactNativeExampleSourceDir = path.join(
 );
 
 const publishedPackages = ["core", "react-native", "video-engine", "web"];
+// `from` is only an import keyword when it is not itself quoted: a type such as
+// `Pick<typeof Filter, "from">` otherwise swallows the rest of the file as a
+// specifier. A specifier also never spans a line.
 const importSpecifier =
-  /(?:\bfrom\s*|\bimport\s*[(\s]\s*|\brequire\s*\(\s*)["']([^"']+)["']/g;
+  /(?:(?<!["'])\bfrom\s*|\bimport\s*[(\s]\s*|\brequire\s*\(\s*)["']([^"'\n]+)["']/g;
 
 const forbiddenPatterns = [
   {

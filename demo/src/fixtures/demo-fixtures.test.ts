@@ -16,7 +16,10 @@ import {
   type DemoPresentationLayerSetting,
 } from "../presentation/demo-presentation";
 import {
+  defaultDemoFixture,
+  demoFixtureCatalog,
   demoFixtures,
+  resolveDemoFixture,
   resolveDemoFixtureAvailability,
   resolveDemoFixturePlaybackSrc,
   type DemoFixtureGeometrySummary,
@@ -105,6 +108,24 @@ describe("fixture geometry", () => {
 });
 
 describe("geometry showcase fixture", () => {
+  it("resolves the basketball fixture from the catalog and offers it in the selector", () => {
+    expect(
+      demoFixtureCatalog.find(
+        ({ sampleName }) => sampleName === "basketball_sam3",
+      ),
+    ).toMatchObject({
+      datasetId: "basketball_sam3_v1",
+      showInDemo: true,
+    });
+    expect(resolveDemoFixture("basketball_sam3")).toMatchObject({
+      sampleName: "basketball_sam3",
+      videoSrc: expect.any(String),
+    });
+    expect(resolveDemoFixture("not_a_committed_fixture")).toBe(
+      defaultDemoFixture,
+    );
+  });
+
   it("exposes the demo samples with their documented geometry", () => {
     expect(
       demoFixtures.map(({ displayName, sampleName }) => ({
@@ -789,6 +810,7 @@ const baseDefinition = {
   mediaLoadingStatusLabel: "opening sample",
   mediaReadyStatusLabel: "sample ready",
   sampleName: "sample",
+  showInDemo: true,
 } as const;
 
 interface DetectionChunk {

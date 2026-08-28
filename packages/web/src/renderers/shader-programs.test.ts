@@ -25,11 +25,12 @@ interface ShaderProgram {
   readonly fragment: ShaderStage | undefined;
   readonly glStages: readonly string[];
   readonly resources: readonly string[];
+  readonly uniforms: readonly string[];
   readonly vertex: ShaderStage | undefined;
 }
 
-const shaderFiles = readRendererFiles().filter((file) =>
-  readSource(file).includes("Shader.from("),
+const shaderFiles = readRendererFiles().filter(
+  (file) => findProgramCall(readSource(file), 0) >= 0,
 );
 
 const programs: readonly ShaderProgram[] = shaderFiles.flatMap((file) =>
@@ -80,6 +81,13 @@ describe("shader programs", () => {
             !new RegExp(`\\bvar(?:<[^>]*>)?\\s+${resource}\\s*:`).test(wgsl),
         ),
       ).toEqual([]);
+      // A resource declared inline names its uniforms where a UniformGroup
+      // would have held them, and WebGPU reads those off the struct.
+      expect(
+        program.uniforms.filter(
+          (uniform) => !new RegExp(`\\b${uniform}\\s*:`).test(wgsl),
+        ),
+      ).toEqual([]);
     });
   }
 });
@@ -102,7 +110,7 @@ function readShaderPrograms(
   let searchFrom = 0;
 
   for (;;) {
-    const callIndex = source.indexOf("Shader.from(", searchFrom);
+    const callIndex = findProgramCall(source, searchFrom);
 
     if (callIndex < 0) {
       return programs;
@@ -117,9 +125,21 @@ function readShaderPrograms(
       fragment: readStage(source, gpu, "fragment"),
       glStages: readKeys(readNamedBlock(options, "gl")),
       resources: readKeys(readNamedBlock(options, "resources")),
+      uniforms: readKeys(readNamedBlock(options, "resources"), 2),
       vertex: readStage(source, gpu, "vertex"),
     });
   }
+}
+
+/**
+ * A filter is a shader with a stage the renderer supplies, and it declares its
+ * two programs through the same option shape, so both build sites are read the
+ * same way.
+ */
+function findProgramCall(source: string, searchFrom: number): number {
+  const match = /\b(?:Filter|Shader)\.from\(/.exec(source.slice(searchFrom));
+
+  return match?.index === undefined ? -1 : searchFrom + match.index;
 }
 
 function readStage(
@@ -192,10 +212,21 @@ function readNamedBlock(source: string, name: string): string | undefined {
   return readBlock(source, source.indexOf("{", key.index + key[0].length - 1));
 }
 
-function readKeys(block: string | undefined): readonly string[] {
-  return [...(block ?? "").matchAll(/(?:^|[{,])\s*(\w+):/g)].map(
-    (match) => match[1]!,
-  );
+function readKeys(block: string | undefined, depth = 1): readonly string[] {
+  const keys: string[] = [];
+  let level = 0;
+
+  for (const match of (block ?? "").matchAll(/[{}]|(\w+)\s*:/g)) {
+    if (match[0] === "{") {
+      level += 1;
+    } else if (match[0] === "}") {
+      level -= 1;
+    } else if (level === depth) {
+      keys.push(match[1]!);
+    }
+  }
+
+  return keys;
 }
 
 function readBlock(source: string, openIndex: number): string {

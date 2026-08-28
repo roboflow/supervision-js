@@ -12,6 +12,7 @@ children:
   - ./annotation-renderers/polylines.md
   - ./annotation-renderers/keypoints-and-skeletons.md
   - ./annotation-renderers/asset-regions.md
+  - ./annotation-renderers/region-effects.md
 ---
 
 # Annotation Renderers
@@ -32,11 +33,11 @@ The responsibilities stay separate:
 - PixiJS containers, shaders, textures, and prepared artifacts remain private
   backend details.
 
-The focused playgrounds below use the frozen basketball fixture, a real
-`MediaSession`, and the same style contracts available from the published
-`supervision` package. Change a control to update both the scene and its
-minimal code snippet. The polyline playground uses the fixture's committed,
-motion-gated basketball trajectory rather than inventing geometry at runtime.
+The focused playgrounds below use committed fixtures, a real `MediaSession`,
+and the same style contracts available from the published `supervision`
+package. Change a control to update both the scene and its minimal code
+snippet. The polyline and Region effects playgrounds reuse the basketball
+fixture's committed semantic data rather than inventing geometry at runtime.
 
 - [Boxes](./annotation-renderers/boxes.md)
 - [Ellipse](./annotation-renderers/ellipse.md)
@@ -49,6 +50,7 @@ motion-gated basketball trajectory rather than inventing geometry at runtime.
 - [Polylines](./annotation-renderers/polylines.md)
 - [Keypoints and skeletons](./annotation-renderers/keypoints-and-skeletons.md)
 - [Regions](./annotation-renderers/asset-regions.md)
+- [Region effects](./annotation-renderers/region-effects.md)
 
 ## Renderer Configuration
 

@@ -14,7 +14,9 @@ import {
 } from "supervision-js-core";
 import type {
   AlphaMask as PixiAlphaMask,
+  BlurFilter as PixiBlurFilter,
   Container as PixiContainer,
+  Filter as PixiFilter,
   Graphics as PixiGraphics,
   ImageSource as PixiImageSource,
   Mesh as PixiMesh,
@@ -33,6 +35,10 @@ import {
   createPixiRegionCoverageMask,
   type PixiRegionCoverageMask,
 } from "./pixi-region-coverage-mask";
+import {
+  createPixiRegionEffect,
+  type PixiRegionEffect,
+} from "./pixi-region-effect";
 import type { PixiActiveRegionMaskCoverage } from "./pixi-mask-layer";
 
 type RegionAsset = PixiTexture | PixiGifSource;
@@ -57,6 +63,7 @@ interface RegionSpriteEntry {
   readonly sourceKey: string;
   coverageMask?: PixiGraphics;
   exactCoverageMask?: PixiRegionCoverageMask;
+  effect?: PixiRegionEffect;
   active: boolean;
   baseX: number;
   baseY: number;
@@ -92,6 +99,13 @@ export function createPixiRegionLayer(options: {
   readonly AlphaMask: new (options: {
     mask: PixiMesh<PixiMeshGeometry, PixiShader>;
   }) => PixiAlphaMask;
+  readonly BlurFilter?: new (options: {
+    kernelSize?: number;
+    quality?: number;
+    repeatEdgePixels?: boolean;
+    strength?: number;
+  }) => PixiBlurFilter;
+  readonly defaultFilterVert?: string;
   readonly Assets: RegionAssetLoader;
   readonly Container: new () => PixiContainer;
   readonly GifSprite: new (options: {
@@ -99,6 +113,7 @@ export function createPixiRegionLayer(options: {
     readonly loop?: boolean;
     readonly source: PixiGifSource;
   }) => PixiGifSprite;
+  readonly Filter?: typeof PixiFilter;
   readonly Graphics: new () => PixiGraphics;
   readonly ImageSource: new (options: {
     autoGenerateMipmaps?: boolean;
@@ -129,6 +144,10 @@ export function createPixiRegionLayer(options: {
   readonly Shader: {
     from(options: {
       gl: { fragment: string; vertex: string };
+      gpu: {
+        fragment: { entryPoint: string; source: string };
+        vertex: { entryPoint: string; source: string };
+      };
       resources: Record<string, unknown>;
     }): PixiShader;
   };
@@ -295,6 +314,7 @@ export function createPixiRegionLayer(options: {
               sourceSize,
               viewportScale,
             );
+            updateEffect(entry, renderer, viewportScale);
             if (
               renderer.source.kind === RegionRendererSourceKind.Media &&
               mediaCrop &&
@@ -626,6 +646,33 @@ export function createPixiRegionLayer(options: {
     return true;
   }
 
+  function updateEffect(
+    entry: RegionSpriteEntry,
+    renderer: RegionAnnotationRenderer,
+    viewportScale: number,
+  ) {
+    const effect =
+      renderer.source.kind === RegionRendererSourceKind.Media
+        ? renderer.source.effect
+        : undefined;
+
+    if (!effect) {
+      entry.effect?.destroy();
+      entry.effect = undefined;
+      return;
+    }
+
+    if (!entry.effect) {
+      entry.effect = createPixiRegionEffect({
+        BlurFilter: options.BlurFilter,
+        defaultFilterVert: options.defaultFilterVert,
+        Filter: options.Filter,
+        effect,
+      });
+    }
+    entry.effect?.apply(entry.display, viewportScale);
+  }
+
   function removeCoverageMask(entry: RegionSpriteEntry) {
     removePolygonCoverageMask(entry);
     removeExactCoverageMask(entry);
@@ -675,6 +722,8 @@ export function createPixiRegionLayer(options: {
 }
 
 function destroyEntry(entry: RegionSpriteEntry) {
+  entry.effect?.destroy();
+  entry.effect = undefined;
   entry.display.mask = null;
   entry.coverageMask?.removeFromParent();
   entry.coverageMask?.destroy();
@@ -883,7 +932,10 @@ function resolvePoolKey(rendererId: string, src: string) {
 function resolveSourceKey(renderer: RegionAnnotationRenderer) {
   return renderer.source.kind === RegionRendererSourceKind.Asset
     ? `asset:${renderer.source.asset.src}`
-    : RegionRendererSourceKind.Media;
+    : JSON.stringify({
+        effect: renderer.source.effect,
+        kind: RegionRendererSourceKind.Media,
+      });
 }
 
 function resolveSpriteKey(

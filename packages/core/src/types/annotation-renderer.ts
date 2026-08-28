@@ -153,6 +153,15 @@ export const RegionRendererCoverageKind = {
 export type RegionRendererCoverageKind =
   (typeof RegionRendererCoverageKind)[keyof typeof RegionRendererCoverageKind];
 
+/** Filter effects that can be applied to a current-frame media region. */
+export const RegionRendererMediaEffectKind = {
+  Blur: "blur",
+  Pixelate: "pixelate",
+} as const;
+
+export type RegionRendererMediaEffectKind =
+  (typeof RegionRendererMediaEffectKind)[keyof typeof RegionRendererMediaEffectKind];
+
 /** Coordinate space used by an explicit region-renderer size. */
 export const RegionRendererSizeSpace = {
   Media: "media",
@@ -209,6 +218,14 @@ export interface RegionRendererMediaSource {
   /** Optional semantic coverage that removes pixels outside the source shape. */
   readonly coverage?:
     RegionRendererMaskCoverage | RegionRendererPolygonCoverage;
+  /**
+   * Optional bounded effect applied before the media crop is composited.
+   *
+   * The browser backend samples the renderer-owned media texture and keeps its
+   * filters, render targets, and coverage artifacts private. An effect never
+   * creates a second decoder or copies the composited canvas through the CPU.
+   */
+  readonly effect?: RegionRendererMediaEffect;
 }
 
 /** Clips a media crop to the detection's exact semantic mask. */
@@ -220,6 +237,23 @@ export interface RegionRendererMaskCoverage {
 export interface RegionRendererPolygonCoverage {
   readonly kind: typeof RegionRendererCoverageKind.Polygon;
 }
+
+/** Softens pixels in the selected media region. */
+export interface RegionRendererBlurEffect {
+  readonly kind: typeof RegionRendererMediaEffectKind.Blur;
+  /** Blur radius in media pixels. Defaults to `8`. */
+  readonly strength?: number;
+}
+
+/** Reduces the selected media region to square pixel blocks. */
+export interface RegionRendererPixelateEffect {
+  readonly kind: typeof RegionRendererMediaEffectKind.Pixelate;
+  /** Pixel-block size in media pixels. Defaults to `12`. */
+  readonly size?: number;
+}
+
+export type RegionRendererMediaEffect =
+  RegionRendererBlurEffect | RegionRendererPixelateEffect;
 
 export type RegionRendererSource =
   RegionRendererAssetSource | RegionRendererMediaSource;

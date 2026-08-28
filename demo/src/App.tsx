@@ -7,6 +7,7 @@ import {
 } from "react";
 import { MediaRendererPlaybackState } from "supervision";
 import { BenchmarksPanel } from "./components/BenchmarksPanel";
+import { CanvasPresentationView } from "./components/CanvasPresentationView";
 import { ControlBar } from "./components/ControlBar";
 import { DemoShell } from "./components/DemoShell";
 import { EngineDiagnostics } from "./components/EngineDiagnostics";
@@ -31,6 +32,7 @@ import { resolveDemoDocsUrl } from "./docs-url";
 import { parseDocsAnnotationRenderer } from "./docs-annotation-renderer";
 import { DemoSourceMode, useDemoRenderer } from "./hooks/useDemoRenderer";
 import { useSourceResidency } from "./hooks/useSourceResidency";
+import { readDemoPresentationMode } from "./session/presentation-mode";
 import { readDemoSourceResidency } from "./session/source-residency";
 import { applyDemoSourceResidency } from "./session/session-options";
 import { defaultDemoClassNames } from "./presentation/demo-presentation";
@@ -77,6 +79,10 @@ export function App() {
         <DocsTrackingPostProcessorPlayground />
       </EmbeddedPlaygroundFrame>
     );
+  }
+
+  if (readDemoPresentationMode() === "canvas") {
+    return <CanvasPresentationView />;
   }
 
   return <DemoApp />;

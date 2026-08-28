@@ -383,6 +383,7 @@ vi.mock("pixi.js", () => {
   }
 
   class BlurFilter {
+    destroy = vi.fn();
     quality: number;
     strength: number;
 
@@ -457,6 +458,17 @@ vi.mock("pixi.js", () => {
     }
   }
 
+  class Filter {
+    destroy = vi.fn();
+    padding = 0;
+
+    constructor(readonly options: unknown) {}
+
+    static from(options: unknown) {
+      return new Filter(options);
+    }
+  }
+
   return {
     AlphaMask,
     Application,
@@ -465,6 +477,8 @@ vi.mock("pixi.js", () => {
     BufferImageSource,
     CanvasSource,
     Container,
+    defaultFilterVert: "default-filter-vertex",
+    Filter,
     Graphics,
     ImageSource,
     Mesh,

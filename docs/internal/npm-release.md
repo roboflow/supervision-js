@@ -30,8 +30,9 @@ glob cannot match it.
 
 The manual GitHub Actions workflow at
 `.github/workflows/publish-npm.yml` recreates and independently validates both
-artifacts before publishing them. It runs only from `main` and is gated by the
-`npm-publish` GitHub environment.
+artifacts before publishing them. Stable `latest` releases run only from `main`;
+an explicit prerelease may run from a `release/*` branch with the `next` tag.
+Every publish is gated by the `npm-publish` GitHub environment.
 
 `latest` is the default tag for a reviewed, general-availability release. A
 stable publish updates the default version that `npm install supervision`
@@ -158,6 +159,16 @@ tells consumers to install an engine the browser package cannot use.
    commit the workflow published. Then verify that public installation guidance,
    the toolbar version, and the documentation deployment match the stable
    release.
+
+### Prerelease Procedure
+
+Use a dedicated `release/*` branch when an integration needs to consume an
+unmerged commit. Set `packages/web/package.json` to a unique SemVer prerelease
+such as `0.2.0-next.0`, update the lockfile and docs toolbar mirror, then run
+**Publish npm package** from that release branch with `next`. npm versions are
+immutable: each later prerelease needs a new version such as
+`0.2.0-next.1`; the `next` dist-tag moves to that newest version. A release
+branch can never publish `latest` or create a stable GitHub Release.
 
 ## Recovery
 
