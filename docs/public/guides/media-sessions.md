@@ -239,8 +239,8 @@ track ends playback.
 
 ## Renderer Quality
 
-By default the renderer uses the browser's device pixel ratio. Apps that need
-to reduce GPU memory or fill-rate pressure can cap it:
+By default the renderer rasterizes at the display's pixel ratio up to a ceiling
+of 2. Apps that need to reduce GPU memory or fill-rate pressure can lower it:
 
 ```ts
 const session = await createMediaSession({
@@ -253,7 +253,11 @@ const session = await createMediaSession({
 ```
 
 Lower values trade some sharpness for smoother playback on constrained devices
-or busy browsers. Leaving the option unset preserves native device resolution.
+or busy browsers. Leaving the option unset takes the ceiling of 2, which is what
+keeps the picture, the masks drawn onto it, and the decode under both on one
+pixel grid; a mask raster carries one detection per pixel and can only be
+sampled nearest, so a grid it does not share shows as stair-stepped edges. Pass
+`window.devicePixelRatio` to rasterize at the display's full ratio.
 
 Quality can also change at runtime without rebuilding the media session:
 

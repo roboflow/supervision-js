@@ -317,8 +317,10 @@ export interface MediaRendererQuality {
   /**
    * Caps render resolution relative to device pixels.
    *
-   * Use `undefined` or a non-positive value to restore native device
-   * resolution.
+   * Unset, non-finite, or non-positive takes the library's own ceiling of 2,
+   * which is what keeps the presentation surface, the mask rasters drawn onto
+   * it, and the decode under both on one pixel grid. Pass
+   * `window.devicePixelRatio` to rasterize at the display's full ratio.
    */
   readonly maxDevicePixelRatio?: number;
 }

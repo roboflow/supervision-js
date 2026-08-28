@@ -131,6 +131,23 @@ by the accumulating difference, and now is not.
 this and nothing reads it. Each buffered frame carries the media time its index
 sits at, which states the same thing without an origin to extrapolate from.
 
+### An Unset maxDevicePixelRatio Caps At 2
+
+`MediaRendererQuality.maxDevicePixelRatio` left unset, or set to a non-finite or
+non-positive number, now rasterizes the presentation surface at the display's
+pixel ratio up to a ceiling of 2. It previously rasterized at the display's own
+ratio with no ceiling.
+
+On a display at 2x or below nothing changes. Above it, a host that never set the
+option gets a surface at 2 rather than 3, and gets it on the same pixel grid as
+the mask rasters drawn onto it and the decode under both. Those three were sized
+by two different answers to the same question, and a mask raster carries one
+detection id per pixel so it can only be sampled nearest: a grid it did not
+share showed directly as stair-stepped mask edges against a sharp picture.
+
+Pass `window.devicePixelRatio` explicitly to rasterize at the display's full
+ratio.
+
 ### muted Is Deprecated
 
 `MediaSessionRendererOptions.muted` is still accepted and nothing reads it. The
