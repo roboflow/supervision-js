@@ -1,11 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  AnnotationGestureStateKind,
   BaseFocusStyle,
   createArrayDetectionFrameSource,
   createBufferedDetectionTimeline,
   DetectionMaskEncoding,
+  FocusTargetMode,
 } from "supervision-js-core";
 import type {
+  AnnotationEditingEngine,
+  AnnotationEditingState,
   BufferedDetectionTimeline,
   DetectionFrame,
   DetectionMask,
@@ -32,6 +36,10 @@ import { MediaRendererFit } from "#types/media-renderer";
 
 const pixiMock = vi.hoisted(() => ({
   graphics: [] as { clear: () => void; rect: () => void }[],
+  meshes: [] as {
+    shader: { resources: Record<string, unknown> };
+    visible: boolean;
+  }[],
   render: vi.fn(),
 }));
 
@@ -75,6 +83,7 @@ vi.mock("pixi.js", () => {
 
   class Container {
     children: unknown[] = [];
+    on = vi.fn();
     position = { set: vi.fn() };
     scale = { set: vi.fn() };
     addChild(...children: unknown[]) {
@@ -133,9 +142,15 @@ vi.mock("pixi.js", () => {
   }
 
   class Shader {
-    static from = vi.fn(() => new Shader());
-    readonly resources: Record<string, unknown> = {};
+    static from = vi.fn(
+      (options: { resources?: Record<string, unknown> } = {}) =>
+        new Shader(options),
+    );
+    readonly resources: Record<string, unknown>;
     destroy = vi.fn();
+    constructor(options: { resources?: Record<string, unknown> } = {}) {
+      this.resources = options.resources ?? {};
+    }
   }
 
   class UniformGroup {
@@ -153,6 +168,7 @@ vi.mock("pixi.js", () => {
     shader: unknown;
     constructor(options: { shader: unknown }) {
       this.shader = options.shader;
+      pixiMock.meshes.push(this as never);
     }
     destroy = vi.fn();
   }
@@ -395,6 +411,7 @@ beforeEach(() => {
     TEXTURE_BINDING: 4,
   });
   pixiMock.graphics.length = 0;
+  pixiMock.meshes.length = 0;
   pixiMock.render.mockClear();
 });
 
@@ -664,6 +681,42 @@ describe("the prepared annotation window under push presentation", () => {
     expect(maskArtifactStatuses(diagnostics)).toHaveLength(0);
   });
 
+  it("goes quiet on a frame whose focus cutout is owed instead of dimming the picture", async () => {
+    const scene = await createOwedFocusScene();
+
+    scene.present(1000);
+    await scene.settleCooks();
+    const cutout = focusMesh().shader.resources.uTexture;
+
+    scene.present(1033);
+    scene.present(1067);
+
+    expect(focusMesh().visible).toBe(false);
+    expect(focusMesh().shader.resources.uTexture).toBe(cutout);
+  });
+
+  it.each([
+    AnnotationGestureStateKind.Creating,
+    AnnotationGestureStateKind.DragSelecting,
+  ])(
+    "keeps dimming an owed frame a %s gesture is drawing over",
+    async (kind) => {
+      const gesture = createGestureEngineStub();
+      const scene = await createOwedFocusScene(gesture.engine);
+
+      scene.present(1000);
+      await scene.settleCooks();
+      const cutout = focusMesh().shader.resources.uTexture;
+
+      gesture.begin(kind);
+      scene.present(1033);
+      scene.present(1067);
+
+      expect(focusMesh().visible).toBe(true);
+      expect(focusMesh().shader.resources.uTexture).not.toBe(cutout);
+    },
+  );
+
   it("reports no window to a scene that free-runs on the ticker", async () => {
     const { createPixiMediaScene } = await import("./pixi-media-scene");
     const scene = await createPixiMediaScene(
@@ -702,6 +755,7 @@ function boxGraphics() {
 
 async function createScene(
   options: {
+    readonly editingEngine?: AnnotationEditingEngine;
     readonly focusStyle?: FocusStyle | null;
     readonly detectionFrames?: readonly DetectionFrame[];
     readonly maskHaloStyle?: MaskHaloStyle | null;
@@ -723,6 +777,7 @@ async function createScene(
   const scene = await createPixiMediaScene(
     createSceneOptions({
       detectionTimeline,
+      editingEngine: options.editingEngine,
       focusStyle: options.focusStyle ?? null,
       maskHaloStyle: options.maskHaloStyle ?? undefined,
       maskStyle:
@@ -839,5 +894,67 @@ function createSceneOptions(
     shapeStyle: null,
     visibility: undefined,
     ...overrides,
+  };
+}
+
+/**
+ * A scene whose focus has a cutout on the first frame and none to cut on the
+ * two after it: the second holds the first frame's raster, the third has let
+ * go of it.
+ */
+function createOwedFocusScene(editingEngine?: AnnotationEditingEngine) {
+  return createScene({
+    detectionFrames: maskedFrames,
+    editingEngine,
+    focusStyle: new BaseFocusStyle({
+      fill: { alpha: 0.5, color: 0x000000 },
+      targetMode: FocusTargetMode.Ambient,
+    }),
+    maskStyle: paintedMaskStyle,
+    renderPreparation: {
+      workerFactory: createSelectiveWorkerFactory(["0:1"]),
+    },
+  });
+}
+
+function focusMesh() {
+  const mesh = pixiMock.meshes.find(
+    (candidate) => "focusUniforms" in candidate.shader.resources,
+  );
+
+  if (!mesh) {
+    throw new Error("The scene drew no focus mesh.");
+  }
+
+  return mesh;
+}
+
+function createGestureEngineStub() {
+  let kind = AnnotationGestureStateKind.Idle;
+
+  return {
+    begin(next: AnnotationGestureStateKind) {
+      kind = next;
+    },
+    engine: {
+      beginHandleDrag: vi.fn(),
+      cancel: vi.fn(),
+      deleteVertex: vi.fn(() => null),
+      getState: (): AnnotationEditingState => ({
+        activeDetectionId: null,
+        activeHandleId: null,
+        kind,
+        pointerId: null,
+        preview: null,
+      }),
+      hasCreationTool: vi.fn(() => false),
+      keyDown: vi.fn(),
+      pointerDown: vi.fn(),
+      pointerMove: vi.fn(),
+      pointerUp: vi.fn(),
+      setCreationTool: vi.fn(),
+      subscribe: vi.fn(() => () => undefined),
+      subscribeFastTranslate: vi.fn(() => () => undefined),
+    } satisfies AnnotationEditingEngine,
   };
 }
