@@ -1,3 +1,7 @@
+import { mkdtemp, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -5,6 +9,7 @@ import {
   buildBaseline,
   compareProvenance,
   compareToBaseline,
+  loadBaseline,
   median,
   readMetrics,
   recordingGaps,
@@ -206,6 +211,29 @@ describe("comparing against a baseline", () => {
     );
     expect(rowFor(rows, "latency.seek.p95").verdict).toBe("new");
     expect(regressions).toHaveLength(0);
+  });
+});
+
+/* No baseline ships with the repository, so this is the path every machine
+ * takes on its first run: it has to report the absence and leave the exit code
+ * to the scenario verdicts. */
+describe("a machine with no baseline recorded yet", () => {
+  it("reads an absent file as nothing to compare against", async () => {
+    const absent = path.join(
+      os.tmpdir(),
+      `demo-eval-absent-${Date.now()}.json`,
+    );
+    await expect(loadBaseline(absent)).resolves.toBeNull();
+  });
+
+  it("names a baseline it cannot parse instead of failing the run", async () => {
+    const corrupt = path.join(
+      await mkdtemp(path.join(os.tmpdir(), "demo-eval-")),
+      "baseline.json",
+    );
+    await writeFile(corrupt, "{ not json");
+    const loaded = (await loadBaseline(corrupt)) as { unreadable?: string };
+    expect(loaded.unreadable).toContain(corrupt);
   });
 });
 

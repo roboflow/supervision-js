@@ -42,5 +42,6 @@ pnpm-debug.log*
 # Agent working notes, probes and evidence. Never part of the package.
 local_claude/
 
-# Written by every eval run; the baseline is the artifact that belongs in the repo
+# Written by an eval run. A baseline is one machine's numbers, so it stays local.
 tools/demo-eval/report.json
+tools/demo-eval/baseline.json
