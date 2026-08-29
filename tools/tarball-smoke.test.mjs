@@ -207,7 +207,7 @@ test("tarball ships the video engine as its own lazily loaded subpath", () => {
     "utf8",
   );
 
-  assert.match(barrel, /export \* from ['"]\.\/engine\.js['"]/);
+  assert.match(barrel, /from ['"]\.\/engine\.js['"]/);
   assert.match(barrel, /createVideoEngineMediaRendererSource/);
   assert.match(barrel, /from ['"]\.\.\/index\.js['"]/);
 });

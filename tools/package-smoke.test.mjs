@@ -16,7 +16,6 @@ const expectedWebRuntimeExports = [
   "BasePolylineStyle",
   "BoxShape",
   "BoxStrokeAlignment",
-  "ConversionFrameEffect",
   "DEFAULT_DETECTION_CLASS_STYLES",
   "DEFAULT_DETECTION_COLOR_SEQUENCE",
   "DEFAULT_NORMALIZATION_FRAME_RATE",
@@ -36,11 +35,7 @@ const expectedWebRuntimeExports = [
   "MarkerShape",
   "MarkerSizeSpace",
   "MaskRenderMode",
-  "MediaConditionCode",
-  "MediaConditionResponse",
-  "MediaConditionScope",
   "MediaErrorKind",
-  "MediaIndexPlacement",
   "MediaInteractionMode",
   "MediaNormalizationAudioCodec",
   "MediaNormalizationContainer",
@@ -96,9 +91,7 @@ const expectedWebRuntimeExports = [
   "createStaticImageMediaSource",
   "createVideoEngineMediaRendererSource",
   "createWritableDetectionFrameSource",
-  "describeConversionFrameEffect",
   "detectionPostProcessors",
-  "evaluateMediaConditions",
   "getMediaErrorKind",
   "isMediaSourceError",
   "normalizeDetectionClassName",
@@ -109,15 +102,30 @@ const expectedWebRuntimeExports = [
   "prepareMedia",
   "prepareMediaProgressively",
   "probeMedia",
-  "probeMediaConditions",
   "projectDetectionFrame",
   "projectDetectionFrameForTracking",
   "projectDetectionFrames",
-  "readIndexPlacement",
   "resolveDetectionClassColorStyle",
   "resolveMediaSessionDefaults",
-  "summarizeTiming",
   "toMediaSourceError",
+];
+
+const expectedVideoEngineRuntimeExports = [
+  "DIAGNOSTICS",
+  "FrameTimeline",
+  "PLAYBACK_RATE",
+  "PlaybackStatus",
+  "SourceKind",
+  "TRACE_RING_BOUNDS",
+  "VideoEngine",
+  "VideoEngineError",
+  "VideoEngineErrorCode",
+  "cappedResolution",
+  "createVideoEngineMediaRendererSource",
+  "displayBoxResolution",
+  "nativeResolution",
+  "openVideoEngineMediaSource",
+  "viewportResolution",
 ];
 
 const expectedCoreRuntimeExports = [
@@ -352,6 +360,17 @@ test("the video engine subpath exports the adapter that opens it", async () => {
         import.meta.url,
       ),
     ),
+  );
+});
+
+test("built video engine subpath exposes the public runtime API", async () => {
+  // The engine's own entry is wider: its modules export for one another. This
+  // list is the part of it applications may reach.
+  const barrel = await import("../packages/web/dist/web-video-engine/index.js");
+
+  assert.deepEqual(
+    Object.keys(barrel).sort(),
+    expectedVideoEngineRuntimeExports,
   );
 });
 

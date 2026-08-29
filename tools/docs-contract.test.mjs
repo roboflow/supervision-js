@@ -86,6 +86,20 @@ test("Editing API facade covers every editing subpath export", async () => {
   );
 });
 
+test("Video engine API facade covers every video-engine subpath export", async () => {
+  const videoEngineExports = await readNamedExports(
+    path.join(rootDir, "packages/web/src/web-video-engine/index.ts"),
+  );
+  const documentedExports = new Set(
+    await readNamedExports(path.join(publicApiDir, "video-engine.ts")),
+  );
+
+  assert.deepEqual(
+    videoEngineExports.filter((name) => !documentedExports.has(name)).sort(),
+    [],
+  );
+});
+
 test("TypeDoc includes every public API facade", async () => {
   const config = JSON.parse(
     await readFile(path.join(rootDir, "typedoc.json"), "utf8"),
@@ -307,6 +321,7 @@ test("TypeDoc presents public guidance as five navigable sections", async () => 
     "Media Sessions",
     "Rendering",
     "Styles",
+    "Video Engine",
   ]);
 });
 

@@ -10,7 +10,8 @@
     "docs/public/api/styles.ts",
     "docs/public/api/interactions.ts",
     "docs/public/api/media-preparation.ts",
-    "docs/public/api/editing.ts"
+    "docs/public/api/editing.ts",
+    "docs/public/api/video-engine.ts"
   ],
   "excludeInternal": true,
   "excludePrivate": true,
@@ -36,7 +37,8 @@
     "Post Processing",
     "Media Sessions",
     "Rendering",
-    "Styles"
+    "Styles",
+    "Video Engine"
   ],
   "out": "docs/site",
   "plugin": ["typedoc-rhineai-theme"],

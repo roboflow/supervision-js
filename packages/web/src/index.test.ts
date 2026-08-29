@@ -63,7 +63,6 @@ describe("package entrypoint", () => {
       "BasePolylineStyle",
       "BoxShape",
       "BoxStrokeAlignment",
-      "ConversionFrameEffect",
       "DEFAULT_DETECTION_CLASS_STYLES",
       "DEFAULT_DETECTION_COLOR_SEQUENCE",
       "DEFAULT_NORMALIZATION_FRAME_RATE",
@@ -83,11 +82,7 @@ describe("package entrypoint", () => {
       "MarkerShape",
       "MarkerSizeSpace",
       "MaskRenderMode",
-      "MediaConditionCode",
-      "MediaConditionResponse",
-      "MediaConditionScope",
       "MediaErrorKind",
-      "MediaIndexPlacement",
       "MediaInteractionMode",
       "MediaNormalizationAudioCodec",
       "MediaNormalizationContainer",
@@ -143,9 +138,7 @@ describe("package entrypoint", () => {
       "createStaticImageMediaSource",
       "createVideoEngineMediaRendererSource",
       "createWritableDetectionFrameSource",
-      "describeConversionFrameEffect",
       "detectionPostProcessors",
-      "evaluateMediaConditions",
       "getMediaErrorKind",
       "isMediaSourceError",
       "normalizeDetectionClassName",
@@ -156,14 +149,11 @@ describe("package entrypoint", () => {
       "prepareMedia",
       "prepareMediaProgressively",
       "probeMedia",
-      "probeMediaConditions",
       "projectDetectionFrame",
       "projectDetectionFrameForTracking",
       "projectDetectionFrames",
-      "readIndexPlacement",
       "resolveDetectionClassColorStyle",
       "resolveMediaSessionDefaults",
-      "summarizeTiming",
       "toMediaSourceError",
     ]);
     expect(entrypoint.createMediaRenderer).toEqual(expect.any(Function));
@@ -201,13 +191,6 @@ describe("package entrypoint", () => {
     expect(entrypoint.prepareMediaProgressively).toEqual(expect.any(Function));
     expect(entrypoint.MediaPreparationError).toEqual(expect.any(Function));
     expect(entrypoint.probeMedia).toEqual(expect.any(Function));
-    expect(entrypoint.probeMediaConditions).toEqual(expect.any(Function));
-    expect(entrypoint.evaluateMediaConditions).toEqual(expect.any(Function));
-    expect(entrypoint.describeConversionFrameEffect).toEqual(
-      expect.any(Function),
-    );
-    expect(entrypoint.readIndexPlacement).toEqual(expect.any(Function));
-    expect(entrypoint.summarizeTiming).toEqual(expect.any(Function));
     expect(entrypoint.DEFAULT_NORMALIZATION_FRAME_RATE).toBe(30);
     expect(entrypoint.BaseBoxStyle).toEqual(expect.any(Function));
     expect(entrypoint.BaseBoxCornerStyle).toEqual(expect.any(Function));

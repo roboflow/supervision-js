@@ -67,31 +67,6 @@ export {
   MediaPreparationError,
 } from "#media/media-preparation";
 export { probeMedia } from "#media/media-probe";
-export {
-  describeConversionFrameEffect,
-  evaluateMediaConditions,
-} from "#media/media-conditions";
-export {
-  probeMediaConditions,
-  readIndexPlacement,
-  summarizeTiming,
-  type MediaByteReader,
-  type MediaConditionProbeOptions,
-} from "#media/media-condition-probe";
-export {
-  ConversionFrameEffect,
-  MediaConditionCode,
-  MediaConditionResponse,
-  MediaConditionScope,
-  MediaIndexPlacement,
-  type ConversionFrameEffectReport,
-  type MediaCondition,
-  type MediaConditionFacts,
-  type MediaConditionPolicy,
-  type MediaConditionReport,
-  type MediaContainerFacts,
-  type MediaTimingFacts,
-} from "#types/media-conditions";
 
 // Advanced media-source contracts.
 export type {
@@ -105,9 +80,11 @@ export type {
   PresentedFrameChannel,
   PresentedFrameChannelSignal,
   PresentedFrameChannelStatus,
+  PresentedFrameId,
   PresentedFramePlayhead,
   PresentedFrameSeekIntent,
   PresentedFrameSource,
+  PresentedVideoFrame,
 } from "#renderers/presented-frame-channel";
 export {
   createImageUrlMediaSource,
