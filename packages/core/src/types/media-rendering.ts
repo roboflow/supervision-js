@@ -162,8 +162,7 @@ export interface MediaSourceState {
    * Stable failure classification when `status` is `Error`, otherwise `null`.
    *
    * Prefer this over `errorMessage` for control flow. Messages are diagnostic
-   * text and may name vendor internals. Optional so state fixtures written
-   * against the previous shape stay assignable.
+   * text and may name vendor internals.
    */
   readonly errorKind?: MediaErrorKind | null;
 }
@@ -210,9 +209,6 @@ export interface MediaRendererState {
    * up. It names `activeDetectionFrameTime`, or the frame beside it while that
    * frame's own raster is still being prepared, and never anything further off
    * than that.
-   *
-   * Optional so a host holding a state it built before this field existed still
-   * satisfies the type.
    */
   readonly drawnMaskFrameTime?: number | null;
   /**
@@ -245,18 +241,12 @@ export interface MediaRendererState {
    * needs "is the right picture up" should compare the presented frame's own
    * media time; reading a position the instant a seek resolves can return a
    * frame that was never asked for.
-   *
-   * Optional so a host holding a state it built before this field existed still
-   * satisfies the type.
    */
   readonly seeking?: boolean;
   /**
    * Whether a drag is open on the playhead. True from the first scrub of a
    * gesture until the seek that lands it, which is what separates a viewer
    * leading the picture from one waiting on it.
-   *
-   * Optional so a host holding a state it built before this field existed still
-   * satisfies the type.
    */
   readonly scrubbing?: boolean;
   readonly detectionBuffer: DetectionBufferState;

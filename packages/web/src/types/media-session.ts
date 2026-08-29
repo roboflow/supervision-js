@@ -351,12 +351,7 @@ export interface MediaSessionMediaState {
   readonly inputMetadata: MediaNormalizationInputMetadata | null;
   readonly normalizedMedia: NormalizedMedia | ProgressiveNormalizedMedia | null;
   readonly objectUrl: string | null;
-  /**
-   * Null until the session has prepared its media.
-   *
-   * Optional so a host holding a state it built before this field existed still
-   * satisfies the type.
-   */
+  /** Null until the session has prepared its media. */
   readonly preparation?: MediaSessionMediaPreparation | null;
 }
 
@@ -405,9 +400,9 @@ export interface MediaSession {
   /**
    * Optionally append the newest live detection frame.
    *
-   * Optional so controllers written against the previous shape stay
-   * assignable. `createMediaSession` always provides it; see
-   * {@link LiveMediaSession}.
+   * Live ingestion is an added capability, so a controller that does not do it
+   * still satisfies this interface. `createMediaSession` always provides it;
+   * see {@link LiveMediaSession}.
    */
   appendLiveDetectionFrame?(
     frame: DetectionFrame,
@@ -416,7 +411,7 @@ export interface MediaSession {
   /**
    * Optionally close the appendable source's final coverage.
    *
-   * Optional for the same backward-compatibility reason as
+   * Optional for the same reason as
    * {@link MediaSession.appendLiveDetectionFrame}.
    */
   finalizeDetectionCoverage?(
@@ -462,9 +457,9 @@ export interface MediaSession {
 /**
  * Media session that also exposes live detection ingestion.
  *
- * `createMediaSession` returns this shape. Controllers that only satisfy the
- * historical {@link MediaSession} contract stay assignable to it, so live
- * ingestion is an added capability rather than a required one.
+ * `createMediaSession` returns this shape. The members it requires are
+ * optional on {@link MediaSession}, so live ingestion is an added capability
+ * rather than a required one.
  */
 export interface LiveMediaSession extends MediaSession {
   /**

@@ -218,9 +218,6 @@ export interface EngineReadySnapshot extends VideoMetadata {
    * succeeded. A host knows what it asked for; only the engine knows what it
    * got, and the three kinds differ in what they can do afterwards — a stream
    * cannot be rewound or reopened, and only a URL is fetched.
-   *
-   * Optional so a host holding a snapshot it built before this field existed
-   * still satisfies the type.
    */
   readonly byteSource?: SourceKind;
 }

@@ -24,9 +24,10 @@ export interface DiagnosticsTrack {
  * owned, null on the uncached cursor). All plain data, so it crosses the worker
  * boundary by structured clone.
  *
- * This is the legacy getStats shape, kept as a back-compat subset of the richer
- * DiagnosticsSnapshot the broadcast plane carries. Existing getStats consumers
- * read these three fields; the diagnostics instrument reads the superset.
+ * What `getStats` answers with, one round trip per call and no broadcast timer
+ * required. {@link DiagnosticsSnapshot} opens with these same three fields and
+ * carries the rest of the instrument payload, but only while the diagnostics
+ * broadcast is running.
  */
 export interface EngineDiagnostics {
   readonly renderer: RendererName | null;
@@ -200,21 +201,6 @@ export interface Warning {
 }
 
 /**
- * The clone-safe wire snapshot the worker broadcasts at BROADCAST_HZ. A superset
- * of EngineDiagnostics: it keeps renderer/track/scheduler verbatim so legacy
- * readers still resolve, and adds the realtime needles, the pipeline ledger,
- * derived cache bytes, track geometry, GOP block, scrub aggregates, the
- * play-time seek block, counters, memory, the clock/screen pair, and the
- * worker-evaluated warnings. Only plain data crosses the boundary.
- *
- * webgpuAvailable and memory.jsHeapUsedBytes are the fields the worker leaves at
- * their empty value for the main thread to fill after the broadcast, so a rule
- * in evaluateWarnings (which runs in the worker) can never read them, and an
- * exported trace, assembled worker-side, carries the unfilled value. Warnings
- * are evaluated once, worker-side, so the HUD and an exported trace always show
- * the same diagnoses.
- */
-/**
  * Source bytes this process holds, for a host that wants to show a viewer how
  * much of the clip is local. Null unless the engine was loaded with
  * `sourceResidency`; nothing else in the runtime can answer it, because the
@@ -228,6 +214,21 @@ export interface SourceResidencyDiagnostics {
   readonly warming: boolean;
 }
 
+/**
+ * The clone-safe wire snapshot the worker broadcasts at BROADCAST_HZ. A superset
+ * of {@link EngineDiagnostics}: renderer, track and scheduler carry the same
+ * values, and it adds the realtime needles, the pipeline ledger, derived cache
+ * bytes, track geometry, GOP block, scrub aggregates, the play-time seek block,
+ * counters, memory, the clock/screen pair, and the worker-evaluated warnings.
+ * Only plain data crosses the boundary.
+ *
+ * webgpuAvailable and memory.jsHeapUsedBytes are the fields the worker leaves at
+ * their empty value for the main thread to fill after the broadcast, so a rule
+ * in evaluateWarnings (which runs in the worker) can never read them, and an
+ * exported trace, assembled worker-side, carries the unfilled value. Warnings
+ * are evaluated once, worker-side, so the HUD and an exported trace always show
+ * the same diagnoses.
+ */
 export interface DiagnosticsSnapshot {
   /**
    * Which presentation the engine was loaded for. `renderer` and the geometry
