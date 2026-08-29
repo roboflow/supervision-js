@@ -17,6 +17,7 @@ import {
   machineFingerprint,
   median,
   readMetrics,
+  recordingGaps,
   sameMachine,
   saveBaseline,
   sourceFingerprint,
@@ -336,6 +337,18 @@ async function compareAgainstBaseline() {
   const recorded = await loadBaseline(path);
 
   if (values["update-baseline"]) {
+    const gaps = recordingGaps(report);
+    if (gaps.length > 0) {
+      report.baseline = {
+        path,
+        updated: false,
+        reason:
+          `refusing to record a baseline that cannot say ${gaps.join(", ")}; ` +
+          "every later run would read the difference as drift in the library",
+      };
+      process.exitCode = 1;
+      return;
+    }
     const failing = Object.entries(report.verdicts).filter(
       ([, verdict]) => verdict === "fail" || verdict === "invalid-environment",
     );

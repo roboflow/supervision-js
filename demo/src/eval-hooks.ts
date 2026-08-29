@@ -45,3 +45,12 @@ export function fixtureEvalHook(sampleName: string): string {
 export function inspectorTabEvalHook(tab: string): string {
   return `inspector-tab:${tab}`;
 }
+
+/**
+ * Which sample the open session is running, stamped on the shell. The buttons
+ * that set it live in one inspector tab, and only the open tab is in the DOM.
+ */
+export const DemoEvalRunAttribute = {
+  Fixture: "data-eval-fixture",
+  FixtureLabel: "data-eval-fixture-label",
+} as const;

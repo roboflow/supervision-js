@@ -2,6 +2,7 @@ import { isValidElement, type ReactNode } from "react";
 import { describe, expect, it } from "vitest";
 
 import { DemoShell } from "./DemoShell";
+import { DemoEvalRunAttribute } from "../eval-hooks";
 import { DemoInspectorTab } from "../session/inspector-tabs";
 import { DemoViewMode } from "../session/demo-view-mode";
 
@@ -27,13 +28,18 @@ const slots = [
 
 type DemoShellSlot = (typeof slots)[number];
 
-function shellWith(mode: DemoViewMode, tab: DemoInspectorTab) {
+function shellWith(
+  mode: DemoViewMode,
+  tab: DemoInspectorTab,
+  running: Pick<ShellProps, "clip"> = { clip: null },
+) {
   const props = Object.fromEntries(
     slots.map((slot) => [slot, <b key={slot}>{slot}</b>]),
   ) as unknown as ShellProps;
 
   return DemoShell({
     ...props,
+    ...running,
     departureCount: 3,
     docsUrl: "https://example.invalid",
     mode,
@@ -146,3 +152,27 @@ function flatten(node: ReactNode): string {
 
   return flatten(node.props.children);
 }
+
+/* The eval harness reads the clip off the shell. The buttons that set it live
+ * in one inspector tab, and only the open tab is in the DOM, so a run that read
+ * the controls would record whichever tab it left showing. */
+describe("what the shell says the session is running", () => {
+  const running = { clip: { id: "horse_trail", label: "70s horse trail" } };
+
+  it("names the clip in every view and every tab", () => {
+    for (const mode of Object.values(DemoViewMode)) {
+      for (const tab of Object.values(DemoInspectorTab)) {
+        expect(shellWith(mode, tab, running).props).toMatchObject({
+          [DemoEvalRunAttribute.Fixture]: "horse_trail",
+          [DemoEvalRunAttribute.FixtureLabel]: "70s horse trail",
+        });
+      }
+    }
+  });
+
+  it("names nothing when the session is not running a sample", () => {
+    const shell = shellWith(DemoViewMode.Demo, DemoInspectorTab.Clip);
+
+    expect(shell.props[DemoEvalRunAttribute.Fixture]).toBeUndefined();
+  });
+});

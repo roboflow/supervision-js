@@ -12,7 +12,11 @@ import {
   at,
   FIXTURE_PREFIX,
   fixtureHook,
+  Hook,
   openControls,
+  openTab,
+  RUN_ATTRIBUTE,
+  SOURCE_TAB,
   startingAt,
 } from "./hooks.mjs";
 import { percentile, round } from "./stats.mjs";
@@ -127,20 +131,29 @@ export async function openDemoPage(
     `localStorage.getItem(${JSON.stringify(VIEW_MODE_STORAGE_KEY)}) ?? "demo"`,
   );
   if (settled !== "benchmarks") await openControls(session);
-  const fixture = await activeFixture(session);
+  const run = await readRunStamp(session);
   return {
     session,
     targetId: target.id,
-    info: { ...info, viewMode: settled, fixture },
+    info: { ...info, viewMode: settled, ...run },
   };
 }
 
-/** The source the demo opened on, which is the clip every scenario but cadence
- * measures. */
-async function activeFixture(session) {
-  const buttons = await readFixtureButtons(session).catch(() => []);
-  const pressed = buttons.find((button) => button.pressed);
-  return pressed ? { id: pressed.id, label: pressed.label } : null;
+/** The clip the demo opened on. */
+async function readRunStamp(session) {
+  const stamp = await session.readJson(`(() => {
+    const shell = document.querySelector(${at(Hook.Shell)});
+    if (!shell) return null;
+    return {
+      id: shell.getAttribute(${JSON.stringify(RUN_ATTRIBUTE.Fixture)}),
+      label: shell.getAttribute(${JSON.stringify(RUN_ATTRIBUTE.FixtureLabel)}),
+    };
+  })()`);
+  return {
+    fixture: stamp?.id
+      ? { id: stamp.id, label: stamp.label ?? stamp.id }
+      : null,
+  };
 }
 
 async function waitForRenderer(session, timeoutMs) {
@@ -503,6 +516,9 @@ export async function runCadence(session, info, attempts) {
     return await measureCadence(session, fixture, attempts);
   } finally {
     await selectFixture(session, pressed.id).catch(() => {});
+    /* The panel this left open is mounted for every scenario that follows, and
+     * a mounted panel is main-thread work the next one charges to the library. */
+    await openControls(session).catch(() => {});
   }
 }
 
@@ -917,7 +933,8 @@ const FIXTURE_BUTTONS = `[...document.querySelectorAll(${startingAt(FIXTURE_PREF
     disabled: button.disabled,
   }))`;
 
-function readFixtureButtons(session) {
+async function readFixtureButtons(session) {
+  await openTab(session, SOURCE_TAB);
   return session.readJson(FIXTURE_BUTTONS);
 }
 

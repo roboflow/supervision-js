@@ -3,6 +3,12 @@ import { DemoEvalHook, inspectorTabEvalHook } from "../eval-hooks";
 import { DemoInspectorTab } from "../session/inspector-tabs";
 import { DemoViewMode } from "../session/demo-view-mode";
 
+/** The open sample, by the name its source-control button carries. */
+export interface DemoShellClip {
+  readonly id: string;
+  readonly label: string;
+}
+
 const tabLabels: Record<DemoInspectorTab, string> = {
   [DemoInspectorTab.Clip]: "Clip",
   [DemoInspectorTab.Diagnostics]: "Diagnose",
@@ -19,6 +25,7 @@ const tabOrder: readonly DemoInspectorTab[] = [
 
 export function DemoShell({
   benchmarksPanel,
+  clip,
   controlBar,
   departureCount,
   docsUrl,
@@ -41,6 +48,7 @@ export function DemoShell({
   viewport,
 }: {
   readonly benchmarksPanel: ReactNode;
+  readonly clip: DemoShellClip | null;
   readonly controlBar: ReactNode;
   /** How many settings differ from the library, for the Session tab's badge. */
   readonly departureCount: number | null;
@@ -68,7 +76,12 @@ export function DemoShell({
   const diagnosing = mode === DemoViewMode.Debug;
 
   return (
-    <main className={shellClassName} data-eval={DemoEvalHook.Shell}>
+    <main
+      className={shellClassName}
+      data-eval={DemoEvalHook.Shell}
+      data-eval-fixture={clip?.id}
+      data-eval-fixture-label={clip?.label}
+    >
       <header className="demo-shell__header">
         <div className="demo-shell__brand">
           <div className="demo-shell__mark" aria-hidden="true">

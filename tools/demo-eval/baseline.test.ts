@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   METRICS,
+  buildBaseline,
   compareProvenance,
   compareToBaseline,
   median,
   readMetrics,
+  recordingGaps,
   sameMachine,
   spread,
 } from "./baseline.mjs";
@@ -368,6 +370,37 @@ describe("the tree the numbers came from", () => {
   it("reports a baseline that never recorded a clip at all", () => {
     const [warning] = compareProvenance({ ...clean, fixture: null }, clean);
     expect(warning).toContain("does not record which clip");
+  });
+});
+
+/* A run that cannot say what it measured is not a baseline, it is a set of
+ * numbers, and every later run holds itself against it and reports the gap as
+ * drift in the library. */
+describe("recording a baseline", () => {
+  const recordable = {
+    fixture: { id: "horse_trail", label: "70s horse trail" },
+    runs: 1,
+    media: "70.4s at 30fps",
+    viewMode: "demo",
+    source: { consumer: { commit: "abc1234", dirty: false } },
+    values: { "latency.seek.p95": 45 },
+  };
+
+  it("keeps what a later comparison needs", () => {
+    const baseline = buildBaseline(recordable);
+
+    expect(baseline.fixture).toEqual(recordable.fixture);
+  });
+
+  it("refuses to record a run that cannot name its clip", () => {
+    expect(() => buildBaseline({ ...recordable, fixture: null })).toThrow(
+      /which clip it ran on/,
+    );
+  });
+
+  it("names every gap so one run reports them all", () => {
+    expect(recordingGaps({})).toEqual(["which clip it ran on"]);
+    expect(recordingGaps(recordable)).toEqual([]);
   });
 });
 

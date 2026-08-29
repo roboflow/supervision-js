@@ -86,6 +86,17 @@ So a run now resolves every declared id against the live page before it
 measures anything, and reports `contract fail` — which exits 1 — naming the ids
 that have gone missing.
 
+The inspector column shows one tab at a time and mounts nothing from the
+others, so a control is absent rather than hidden whenever its own tab is not
+the one showing. The tool opens the tab that owns the controls it is about to
+drive, and visits every tab before it decides a declared id has gone missing.
+
+Which clip the demo opened on is read off the shell rather than off those
+controls, through the `data-eval-fixture` and `data-eval-fixture-label`
+attributes the demo stamps there. The shell is mounted in every view and every
+tab; the buttons that set the clip are mounted in one tab only, so a run that
+read the buttons would record whichever tab it happened to leave open.
+
 The style panel's sections unmount their bodies while they are collapsed, so
 the layer toggles and the mask border slider are absent rather than hidden
 until something opens them. The tool opens the two it reads and leaves them
@@ -218,6 +229,10 @@ machine, the commit and dirtiness of the checkout, and the clip the scenarios
 ran on, since a working tree is part of what every number here measures. A
 baseline recorded on another processor is somebody else's numbers, and the
 summary says so rather than printing deltas between two machines.
+
+Recording refuses outright, whatever `--allow-failing-baseline` says, when a run
+cannot name the clip it measured. That name cannot be recovered once the run is
+over, and every later run holds its own numbers against it.
 
 The report carries the same three, so a comparison can be checked rather than
 assumed. Every run writes its own commit, whether that tree was dirty, and the

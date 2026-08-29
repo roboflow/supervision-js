@@ -38,6 +38,7 @@ import { readDemoPresentationMode } from "./session/presentation-mode";
 import { readDemoSourceResidency } from "./session/source-residency";
 import { applyDemoSourceResidency } from "./session/session-options";
 import { defaultDemoClassNames } from "./presentation/demo-presentation";
+import { resolveDemoFixture } from "./fixtures/demo-fixtures";
 import {
   DemoViewMode,
   readStoredDemoViewMode,
@@ -203,6 +204,11 @@ function DemoApp() {
       : null,
     demo.mediaState,
   );
+  const clip = useMemo(() => {
+    if (demo.sourceMode !== DemoSourceMode.Fixture) return null;
+    const fixture = resolveDemoFixture(demo.sampleFixtureId);
+    return { id: fixture.sampleName, label: fixture.displayName };
+  }, [demo.sampleFixtureId, demo.sourceMode]);
   const styleClassNames = useMemo(
     () =>
       demo.sourceMode === DemoSourceMode.Upload
@@ -228,6 +234,7 @@ function DemoApp() {
       />
       <DemoShell
         benchmarksPanel={<BenchmarksPanel />}
+        clip={clip}
         departureCount={libraryDepartures?.length ?? null}
         docsUrl={docsUrl}
         libraryDeparturesPanel={

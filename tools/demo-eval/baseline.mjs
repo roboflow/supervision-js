@@ -585,15 +585,38 @@ function commitLine(entry) {
 }
 
 /**
+ * What a run has to state about itself beyond its commit, because none of it
+ * is visible in a millisecond and all of it decides what the milliseconds mean.
+ */
+const RUN_CONDITIONS = [
+  {
+    names: "which clip it ran on",
+    read: (run) => run?.fixture?.id ?? null,
+    unnamed: "a clip it could not name",
+    phrase: (value) => `ran on ${value}`,
+    because: "two clips decode and cook different amounts of work",
+  },
+];
+
+/**
+ * @returns what this run cannot say about itself, so nothing records numbers a
+ * later run has no way to hold its own against.
+ */
+export function recordingGaps(run) {
+  return RUN_CONDITIONS.filter((condition) => condition.read(run) === null).map(
+    (condition) => condition.names,
+  );
+}
+
+/**
  * @returns what stands between these two sets of numbers and a valid
  * comparison, in plain sentences, or nothing when they describe the same tree
- * and the same clip.
+ * and the same run.
  *
  * A percentage is only worth reading when both halves of it measured the same
- * code against the same media. Neither the commit nor the fixture is visible in
- * a number, so a baseline recorded on other code, or from a working tree nobody
- * else can check out, otherwise reports drift that is really the difference
- * between two builds.
+ * code the same way. A baseline recorded on other code, or from a working tree
+ * nobody else can check out, otherwise reports drift that is really the
+ * difference between two builds.
  */
 export function compareProvenance(recorded, current) {
   const warnings = [];
@@ -635,19 +658,20 @@ export function compareProvenance(recorded, current) {
     }
   }
 
-  const recordedFixture = recorded?.fixture?.id ?? null;
-  const currentFixture = current?.fixture?.id ?? null;
-  if (recordedFixture === null && currentFixture !== null) {
-    warnings.push(
-      `the baseline does not record which clip it ran on; this run ran on ` +
-        `${currentFixture}`,
-    );
-  } else if (recordedFixture !== null && recordedFixture !== currentFixture) {
-    warnings.push(
-      `the baseline ran on ${recordedFixture} and this run ran on ` +
-        `${currentFixture ?? "a clip it could not name"}; two clips decode and ` +
-        "cook different amounts of work",
-    );
+  for (const condition of RUN_CONDITIONS) {
+    const before = condition.read(recorded);
+    const after = condition.read(current);
+    if (before === null && after !== null) {
+      warnings.push(
+        `the baseline does not record ${condition.names}; this run ` +
+          condition.phrase(after),
+      );
+    } else if (before !== null && before !== after) {
+      warnings.push(
+        `the baseline ${condition.phrase(before)} and this run ` +
+          `${condition.phrase(after ?? condition.unnamed)}; ${condition.because}`,
+      );
+    }
   }
   return warnings;
 }
@@ -662,6 +686,13 @@ export function buildBaseline({
   values,
   recordedWithFailures = [],
 }) {
+  const gaps = recordingGaps({ fixture });
+  if (gaps.length > 0) {
+    throw new Error(
+      `a baseline that cannot say ${gaps.join(", ")} is not one anything can ` +
+        "be compared against",
+    );
+  }
   return {
     recordedAt: new Date().toISOString(),
     machine: machineFingerprint(),

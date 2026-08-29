@@ -148,6 +148,20 @@ describe("the inspector tabs", () => {
       Object.values(demo.DemoInspectorTab).sort(),
     );
     expect([...harness.INSPECTOR_TABS]).toContain(harness.CONTROLS_TAB);
+    expect([...harness.INSPECTOR_TABS]).toContain(harness.SOURCE_TAB);
+  });
+});
+
+/* Which clip a run measured, and which reader opened it, are the two facts a
+ * later comparison cannot recover and cannot see in a millisecond. The demo
+ * states both on the shell, which is mounted in every view and every tab; the
+ * buttons that set them are each mounted in one tab only. */
+describe("what the shell says the run is", () => {
+  it("reads the attributes the demo stamps", async () => {
+    const demo = await import("../../demo/src/eval-hooks");
+    const harness = await import("./hooks.mjs");
+
+    expect(harness.RUN_ATTRIBUTE).toEqual({ ...demo.DemoEvalRunAttribute });
   });
 });
 

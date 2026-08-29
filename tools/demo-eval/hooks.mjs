@@ -71,6 +71,19 @@ export const INSPECTOR_TABS = ["clip", "style", "session", "diagnostics"];
 /** The tab that owns the layer toggles and the mask border slider. */
 export const CONTROLS_TAB = "style";
 
+/** The tab that owns the sample-clip buttons. */
+export const SOURCE_TAB = "clip";
+
+/**
+ * What the demo stamps on the shell to say which sample the open session is
+ * running, declared by demo/src/eval-hooks.ts. The shell is mounted in every
+ * view and every tab, and the controls that set it are not.
+ */
+export const RUN_ATTRIBUTE = {
+  Fixture: "data-eval-fixture",
+  FixtureLabel: "data-eval-fixture-label",
+};
+
 export function inspectorTabHook(tab) {
   return `${INSPECTOR_TAB_PREFIX}${tab}`;
 }
@@ -134,8 +147,12 @@ const OPEN_SECTIONS = `(() => {
  * afterwards.
  */
 export async function openControls(session) {
-  await session.readJson(selectTab(CONTROLS_TAB));
+  await openTab(session, CONTROLS_TAB);
   return session.readJson(OPEN_SECTIONS);
+}
+
+export function openTab(session, tab) {
+  return session.readJson(selectTab(tab));
 }
 
 /**
@@ -149,7 +166,7 @@ export async function missingHooks(session) {
   const seen = new Set();
 
   for (const tab of INSPECTOR_TABS) {
-    await session.readJson(selectTab(tab));
+    await openTab(session, tab);
     await session.readJson(OPEN_SECTIONS);
     for (const hook of await session.readJson(`(() => ${PRESENT_HOOKS})()`)) {
       seen.add(hook);
