@@ -65,10 +65,8 @@ is what `waitForRange` on `MediaSession.detectionSource` answers.
 
 Rename the property. The boolean keeps its polarity and its default of `true`,
 and the behavior is unchanged. It appears on two public types, and both were
-renamed together: `MediaSessionDetectionSourceOptions` in
-`packages/web/src/types/media-session.ts` and
-`CompositeDetectionFrameSourceEntry` in
-`packages/core/src/types/detection-timeline.ts`.
+renamed together: `MediaSessionDetectionSourceOptions` in Media Sessions and
+`CompositeDetectionFrameSourceEntry` in Detections.
 
 TypeScript reports this as a compile error. A plain JavaScript consumer who had
 set the old name to `false` starts waiting on that source again, and with the
@@ -174,16 +172,5 @@ same package without the engine in it. Bundle size is the part that stays
 conditional. `supervision` reaches the engine through a dynamic import at the
 moment a video source opens, so an application that never opens one emits none
 of the engine's code.
-
-## Reproducing This List
-
-```sh
-git diff 50f447a9068912d68d64ad2c40032453bbdcfb73..HEAD -- docs/public/api
-npm run docs:check
-```
-
-The first prints the public surface diff the list above is derived from. The
-second is the gate that keeps those facades equal to the package's own
-exports, which is what makes the first one trustworthy.
 
 For what the release adds, see [Release Notes](./release-notes.md).

@@ -202,11 +202,8 @@ with the detail an integration needs.
   rule about non-Chromium browsers: Safari 18.6 reports `hvc1` and `hev1`
   supported alongside `avc1`, `vp8`, `vp09`, and `av01`, and plays the same
   file. Nothing in the package decodes HEVC in software, and Firefox is not
-  fixed by anything in this release. The demuxer would accept a registered
-  custom decoder, but the engine worker is a classic script spawned from a
-  Blob with its own copy of the demuxer bundled in, so a decoder registered in
-  the page is registered against a different copy. Reaching it means changing
-  how the worker is built.
+  fixed by anything in this release. Supplying your own decoder is not
+  supported.
 - **A scene without usable WebGPU pays a staging canvas per presented frame.**
   This is the generic fallback, not a Safari path: the scene takes it whenever
   there is no WebGPU device, or the device's queue refuses a decoded frame.
