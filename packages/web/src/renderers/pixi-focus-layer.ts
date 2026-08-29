@@ -2,6 +2,10 @@ import {
   tintedMaskVertexGlsl,
   tintedMaskVertexWgsl,
 } from "#renderers/mask-vertex";
+import {
+  createShaderPlaceholderCanvas,
+  destroyShaderKeepingProgram,
+} from "#renderers/pixi-shader-lifecycle";
 import { PreparedMaskFrameKind } from "#render-preparation/mask-frame-artifact";
 import type { PreparedIdMaskFrame } from "#render-preparation/mask-frame-artifact";
 import { BaseFocusStyle } from "supervision-js-core";
@@ -794,7 +798,7 @@ function createFocusIdMaskRenderer(options: {
     autoGenerateMipmaps: false,
     dynamic: false,
     height: 1,
-    resource: createPlaceholderCanvas(),
+    resource: createShaderPlaceholderCanvas(),
     scaleMode: "nearest",
     width: 1,
   });
@@ -828,7 +832,7 @@ function createFocusIdMaskRenderer(options: {
   return {
     destroy() {
       mesh.destroy();
-      shader.destroy();
+      destroyShaderKeepingProgram(shader);
       geometry.destroy();
       placeholderSource.destroy();
     },
@@ -952,14 +956,7 @@ function createFocusIdMaskRenderer(options: {
   }
 
   function rebuildShader() {
-    try {
-      // Never destroy(true): the program cache is keyed by source and shared
-      // by every shader built from it; a destroyed entry poisons the rebuild.
-      shader.destroy();
-    } catch {
-      // Pixi has already invalidated this shader's resource group.
-    }
-
+    destroyShaderKeepingProgram(shader);
     shader = createShader();
     mesh.shader = shader;
   }
@@ -972,18 +969,6 @@ function writePremultipliedColor(target: Float32Array, fill: FocusFill) {
   target[1] = (((fill.color >> 8) & 0xff) / 255) * alpha;
   target[2] = ((fill.color & 0xff) / 255) * alpha;
   target[3] = alpha;
-}
-
-function createPlaceholderCanvas() {
-  const canvas = document.createElement("canvas");
-
-  canvas.height = 1;
-  canvas.width = 1;
-  // WebGPU rejects a canvas that was never given a rendering context, and Pixi
-  // uploads this placeholder while it builds the shader's first bind group.
-  canvas.getContext("2d");
-
-  return canvas;
 }
 
 const focusIdMaskFragmentShader = `#version 300 es

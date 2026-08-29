@@ -1,4 +1,8 @@
 import { untintedMaskVertexWgsl } from "#renderers/mask-vertex";
+import {
+  createShaderPlaceholderCanvas,
+  destroyShaderKeepingProgram,
+} from "#renderers/pixi-shader-lifecycle";
 import type { PreparedRegionMaskCoverageEntry } from "#render-preparation/mask-frame-artifact";
 import type {
   AlphaMask as PixiAlphaMask,
@@ -110,7 +114,7 @@ export function createPixiRegionCoverageMask(options: {
     autoGenerateMipmaps: false,
     dynamic: false,
     height: 1,
-    resource: createPlaceholderCanvas(),
+    resource: createShaderPlaceholderCanvas(),
     scaleMode: "nearest",
     width: 1,
   });
@@ -129,9 +133,7 @@ export function createPixiRegionCoverageMask(options: {
     destroy() {
       effect.destroy();
       display.destroy();
-      // Never destroy(true): the program cache is keyed by source and shared
-      // by every shader built from it; a destroyed entry poisons the rebuild.
-      shader.destroy();
+      destroyShaderKeepingProgram(shader);
       geometry.destroy();
       placeholderSource.destroy();
     },
@@ -168,13 +170,7 @@ export function createPixiRegionCoverageMask(options: {
       shader.resources.uTexture = source;
       shader.resources.uSampler = source.style;
     } catch {
-      try {
-        // Never destroy(true): the program cache is keyed by source and shared
-        // by every shader built from it; a destroyed entry poisons the rebuild.
-        shader.destroy();
-      } catch {
-        // Pixi may already have invalidated this shader resource group.
-      }
+      destroyShaderKeepingProgram(shader);
       shader = createShader();
       display.shader = shader;
       shader.resources.uTexture = source;
@@ -205,20 +201,6 @@ export function createPixiRegionCoverageMask(options: {
       },
     });
   }
-}
-
-function createPlaceholderCanvas() {
-  if (typeof document === "undefined") {
-    return { height: 1, width: 1 } as HTMLCanvasElement;
-  }
-
-  const canvas = document.createElement("canvas");
-  canvas.height = 1;
-  canvas.width = 1;
-  // WebGPU builds this placeholder into the shader's first bind group, and a
-  // canvas that was never given a rendering context has nothing to bind.
-  canvas.getContext("2d");
-  return canvas;
 }
 
 const regionCoverageMaskVertexShader = `#version 300 es

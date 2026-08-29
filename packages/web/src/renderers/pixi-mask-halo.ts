@@ -2,6 +2,10 @@ import {
   tintedMaskVertexGlsl,
   tintedMaskVertexWgsl,
 } from "#renderers/mask-vertex";
+import {
+  createShaderPlaceholderCanvas,
+  destroyShaderKeepingProgram,
+} from "#renderers/pixi-shader-lifecycle";
 import { MAX_ID_MASK_PALETTE_ENTRIES } from "#render-preparation/mask-frame-compositor";
 import type {
   Detection,
@@ -178,7 +182,7 @@ export function createPixiMaskHaloRenderer(options: {
     autoGenerateMipmaps: false,
     dynamic: false,
     height: 1,
-    resource: createPlaceholderCanvas(),
+    resource: createShaderPlaceholderCanvas(),
     scaleMode: "nearest",
     width: 1,
   });
@@ -206,9 +210,7 @@ export function createPixiMaskHaloRenderer(options: {
     destroy() {
       for (const pass of passes) {
         pass.mesh.destroy();
-        // Never destroy(true): the program cache is keyed by source and shared
-        // by every shader built from it, including other halos still rendering.
-        pass.shader.destroy();
+        destroyShaderKeepingProgram(pass.shader);
       }
 
       passes.length = 0;
@@ -293,12 +295,7 @@ export function createPixiMaskHaloRenderer(options: {
       pass.shader.resources.uTexture = source;
       pass.shader.resources.uSampler = source.style;
     } catch {
-      try {
-        pass.shader.destroy();
-      } catch {
-        // Pixi has already invalidated this shader's resource group.
-      }
-
+      destroyShaderKeepingProgram(pass.shader);
       pass.shader = createShader(pass.uniforms);
       pass.mesh.shader = pass.shader;
       pass.shader.resources.uTexture = source;
@@ -358,18 +355,6 @@ export function buildMaskHaloPalette(
   }
 
   return palette;
-}
-
-function createPlaceholderCanvas() {
-  const canvas = document.createElement("canvas");
-
-  canvas.height = 1;
-  canvas.width = 1;
-  // WebGPU rejects a canvas that was never given a rendering context, and Pixi
-  // uploads this placeholder while it builds the shader's first bind group.
-  canvas.getContext("2d");
-
-  return canvas;
 }
 
 const maskHaloFragmentShader = `#version 300 es

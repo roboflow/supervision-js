@@ -11,6 +11,10 @@ import {
   tintedMaskVertexWgsl,
 } from "#renderers/mask-vertex";
 import {
+  createShaderPlaceholderCanvas,
+  destroyShaderKeepingProgram,
+} from "#renderers/pixi-shader-lifecycle";
+import {
   MAX_ID_MASK_PALETTE_ENTRIES,
   MAX_ID_MASK_STROKE_WIDTH,
 } from "#render-preparation/mask-frame-compositor";
@@ -113,7 +117,7 @@ export function createPixiIdMaskShaderRenderer(options: {
     autoGenerateMipmaps: false,
     dynamic: false,
     height: 1,
-    resource: createPlaceholderCanvas(),
+    resource: createShaderPlaceholderCanvas(),
     scaleMode: "nearest",
     width: 1,
   });
@@ -145,7 +149,7 @@ export function createPixiIdMaskShaderRenderer(options: {
 
     destroy() {
       mesh.destroy();
-      shader.destroy();
+      destroyShaderKeepingProgram(shader);
       geometry.destroy();
       placeholderSource.destroy();
     },
@@ -215,29 +219,10 @@ export function createPixiIdMaskShaderRenderer(options: {
   }
 
   function rebuildShader() {
-    try {
-      // Never destroy(true): the program cache is keyed by source and shared
-      // by every shader built from it; a destroyed entry poisons the rebuild.
-      shader.destroy();
-    } catch {
-      // Pixi has already invalidated this shader's resource group.
-    }
-
+    destroyShaderKeepingProgram(shader);
     shader = createShader();
     mesh.shader = shader;
   }
-}
-
-function createPlaceholderCanvas() {
-  const canvas = document.createElement("canvas");
-
-  canvas.height = 1;
-  canvas.width = 1;
-  // WebGPU rejects a canvas that was never given a rendering context, and Pixi
-  // uploads this placeholder while it builds the shader's first bind group.
-  canvas.getContext("2d");
-
-  return canvas;
 }
 
 const idMaskFragmentShader = `#version 300 es

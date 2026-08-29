@@ -11,6 +11,10 @@ import {
   tintedMaskVertexWgsl,
 } from "#renderers/mask-vertex";
 import {
+  createShaderPlaceholderCanvas,
+  destroyShaderKeepingProgram,
+} from "#renderers/pixi-shader-lifecycle";
+import {
   createDetectionPickKey,
   DetectionPickTarget,
   rebaseDetectionPickToFrame,
@@ -679,7 +683,7 @@ function createInteractionMaskRenderer(options: {
     autoGenerateMipmaps: false,
     dynamic: false,
     height: 1,
-    resource: createPlaceholderCanvas(),
+    resource: createShaderPlaceholderCanvas(),
     scaleMode: "nearest",
     width: 1,
   });
@@ -707,7 +711,7 @@ function createInteractionMaskRenderer(options: {
   return {
     destroy() {
       mesh.destroy();
-      shader.destroy();
+      destroyShaderKeepingProgram(shader);
       geometry.destroy();
       placeholderSource.destroy();
     },
@@ -816,14 +820,7 @@ function createInteractionMaskRenderer(options: {
   }
 
   function rebuildShader() {
-    try {
-      // Never destroy(true): the program cache is keyed by source and shared
-      // by every shader built from it; a destroyed entry poisons the rebuild.
-      shader.destroy();
-    } catch {
-      // Pixi has already invalidated this shader's resource group.
-    }
-
+    destroyShaderKeepingProgram(shader);
     shader = createShader();
     mesh.shader = shader;
   }
@@ -859,18 +856,6 @@ function writePaletteEntry(
   palette[offset + 1] = ((color >> 8) & 0xff) / 255;
   palette[offset + 2] = (color & 0xff) / 255;
   palette[offset + 3] = clampedAlpha;
-}
-
-function createPlaceholderCanvas() {
-  const canvas = document.createElement("canvas");
-
-  canvas.height = 1;
-  canvas.width = 1;
-  // WebGPU rejects a canvas that was never given a rendering context, and Pixi
-  // uploads this placeholder while it builds the shader's first bind group.
-  canvas.getContext("2d");
-
-  return canvas;
 }
 
 const interactionMaskFragmentShader = `#version 300 es
