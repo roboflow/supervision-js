@@ -7,8 +7,7 @@ summary: The installation, runtime, data, and lifecycle contract for integrating
 # Application Integration
 
 Use this page as the integration contract for humans and coding agents adding
-the browser package `supervision` from the `supervision-js` repository to
-another web application.
+the browser package `supervision` to another web application.
 
 ## Installation
 

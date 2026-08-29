@@ -199,9 +199,10 @@ session.setPresentation({
 crosses, and `Visible` points as circles. Pass `definitions` when class-specific
 skeleton vertices and edges need their own colors.
 
-`shadowStroke` draws a contrast stroke under a polyline or under skeleton edges,
-so a thin class-colored line still reads where the media beneath it happens to
-share that color. The default polyline and keypoint styles both carry one.
+A contrast stroke drawn under the line keeps a thin class-colored path readable
+where the media beneath it happens to share that color. `BasePolylineStyle`
+takes it as `shadowStroke`, `BaseKeypointStyle` as `edgeShadowStroke`, and the
+default presentation supplies one for both. Pass `null` to remove it.
 
 ## Consistent Class Colors
 

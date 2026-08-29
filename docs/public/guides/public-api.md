@@ -392,21 +392,17 @@ reason, and hosts without the native module keep the usual fallback
 diagnostics. Rotated videos (portrait phone recordings with a
 `rotation-degrees` track metadata) are rejected with an explicit error until
 the GPU rotation pass lands. The pipeline is validated end-to-end on an
-emulator; physical-device validation and performance numbers are still
-pending, so do not claim production-ready cross-platform file support yet.
+emulator; physical-device validation and performance numbers are still pending.
 
 React Native currently shares editing geometry, picking, and gesture semantics
 through `createReactNativeAnnotationGestureAdapter`. Native hosts own drawing
 editing affordances from `AnnotationOverlayStyle` until a native overlay
 renderer is introduced.
 
-The remaining mobile work is platform implementation and measurement, not a
-second session abstraction: add the Android saved-video source and measure
-whether native-thread prepared windows are needed before introducing them. The experimental
-`./react/live-inference` entrypoint owns the live VisionCamera worklet through
-`useReactNativeLiveInference()`; applications provide model runners and
-serializable configuration, not frame callbacks. This keeps the generic
-`./react` entry usable without the optional Worklets peer.
+The experimental `./react/live-inference` entrypoint owns the live VisionCamera
+worklet through `useReactNativeLiveInference()`; applications provide model
+runners and serializable configuration, not frame callbacks. This keeps the
+generic `./react` entry usable without the optional Worklets peer.
 
 ## Compatibility Posture
 

@@ -6,8 +6,8 @@ summary: What the browser video path does not do, which browsers it costs, and h
 
 # Browser Support
 
-Four things this release does not do. Each is a limit of the browser path as
-shipped, not a defect, and each surfaces the same way every time.
+Four things the browser path does not do. None of them is a defect, and each
+surfaces the same way every time.
 
 ## Firefox Does Not Decode HEVC
 
@@ -26,14 +26,8 @@ This is that decoder rather than a rule about non-Chromium browsers. Safari 18.6
 reports `hvc1` and `hev1` supported alongside `avc1`, `vp8`, `vp09` and `av01`,
 and plays the same file.
 
-There is no software decoder in the package to fall back to. The engine decodes
-through WebCodecs only, and nothing ships a WebAssembly build of an HEVC
-decoder. A route exists in principle, because the demuxer accepts a registered
-custom decoder, but the engine worker is a classic script spawned from a Blob
-with its own copy of the demuxer bundled in, so a decoder an application
-registers in the page is registered against a different copy and the worker
-never sees it. Reaching it means changing how the worker is built, which is its
-own piece of work and is not in this release.
+The package decodes through WebCodecs only. There is no software fallback, and
+supplying your own decoder is not supported.
 
 ## A Video Without WebGPU Pays A Staging Canvas Per Frame
 
@@ -72,9 +66,6 @@ video tracks only, and normalization discards audio by default
 is still accepted, and setting it changes nothing either way. Media that
 carries an audio track still opens and plays; the track is ignored.
 
-The media clock carries a documented seam for a future audio-bearing consumer
-that needs sample-accurate sync. Nothing is wired to it in this release.
-
 ## A Source Is Capped At One Million Frames
 
 Opening a source walks its packets metadata-only to build the table that gives
@@ -88,4 +79,4 @@ container. For scale, a 70-second 30 fps source walks 2113 packets in a measured
 5.7 ms.
 
 An application that needs to render sources longer than the cap needs a
-different frame-addressing scheme than the one this release provides.
+different frame-addressing scheme than the one this package provides.
