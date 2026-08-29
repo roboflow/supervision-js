@@ -314,6 +314,8 @@ describe("the tree the numbers came from", () => {
   const clean = {
     source: { consumer: { commit: "abc1234", dirty: false } },
     fixture: { id: "horse_trail", label: "70s horse trail" },
+    backend: "webgpu",
+    mediaPath: "engine",
   };
 
   it("says nothing when both sides are the same commit and the same clip", () => {
@@ -371,6 +373,39 @@ describe("the tree the numbers came from", () => {
     const [warning] = compareProvenance({ ...clean, fixture: null }, clean);
     expect(warning).toContain("does not record which clip");
   });
+
+  /* The engine media path hands the renderer a presented-frame channel and gets
+   * WebGPU; mediabunny hands it none and gets WebGL. Changing which reader the
+   * demo opens on therefore changes the renderer under every number here, and
+   * the report has to say so rather than list thirty rows that moved. */
+  it("reports a comparison drawn by a different renderer backend", () => {
+    const [warning] = compareProvenance(clean, {
+      ...clean,
+      backend: "webgl",
+    });
+    expect(warning).toContain("webgpu");
+    expect(warning).toContain("webgl");
+    expect(warning).toContain("two different renderers");
+  });
+
+  it("reports a baseline that never recorded a backend at all", () => {
+    const [warning] = compareProvenance({ ...clean, backend: null }, clean);
+    expect(warning).toContain("does not record which renderer backend");
+  });
+
+  it("reports a comparison whose clip was opened by a different reader", () => {
+    const [warning] = compareProvenance(clean, {
+      ...clean,
+      mediaPath: "mediabunny",
+    });
+    expect(warning).toContain("engine");
+    expect(warning).toContain("mediabunny");
+  });
+
+  it("reports a baseline that never recorded a media path at all", () => {
+    const [warning] = compareProvenance({ ...clean, mediaPath: null }, clean);
+    expect(warning).toContain("does not record which media path");
+  });
 });
 
 /* A run that cannot say what it measured is not a baseline, it is a set of
@@ -379,6 +414,8 @@ describe("the tree the numbers came from", () => {
 describe("recording a baseline", () => {
   const recordable = {
     fixture: { id: "horse_trail", label: "70s horse trail" },
+    backend: "webgpu",
+    mediaPath: "engine",
     runs: 1,
     media: "70.4s at 30fps",
     viewMode: "demo",
@@ -390,6 +427,8 @@ describe("recording a baseline", () => {
     const baseline = buildBaseline(recordable);
 
     expect(baseline.fixture).toEqual(recordable.fixture);
+    expect(baseline.backend).toBe("webgpu");
+    expect(baseline.mediaPath).toBe("engine");
   });
 
   it("refuses to record a run that cannot name its clip", () => {
@@ -398,8 +437,18 @@ describe("recording a baseline", () => {
     );
   });
 
+  it("refuses to record a run that cannot name its backend or its path", () => {
+    expect(() =>
+      buildBaseline({ ...recordable, backend: null, mediaPath: null }),
+    ).toThrow(/which renderer backend drew it/);
+  });
+
   it("names every gap so one run reports them all", () => {
-    expect(recordingGaps({})).toEqual(["which clip it ran on"]);
+    expect(recordingGaps({})).toEqual([
+      "which clip it ran on",
+      "which renderer backend drew it",
+      "which media path opened the clip",
+    ]);
     expect(recordingGaps(recordable)).toEqual([]);
   });
 });

@@ -240,6 +240,7 @@ function DemoApp() {
         libraryDeparturesPanel={
           <LibraryDeparturesPanel departures={libraryDepartures} />
         }
+        mediaPath={demo.sessionConfiguration?.mediaPath ?? null}
         mediaPathPanel={
           demo.sessionConfiguration === null ? null : (
             <MediaPathPanel

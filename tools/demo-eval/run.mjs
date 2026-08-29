@@ -116,6 +116,8 @@ const report = {
   source: sourceFingerprint({ consumer: process.cwd() }),
   media: null,
   fixture: null,
+  backend: null,
+  mediaPath: null,
   scenarios: {},
   verdicts: {},
   failures: [],
@@ -158,10 +160,11 @@ async function measure(pass) {
       report.media = {
         duration: mediaInfo.duration,
         frameRate: mediaInfo.frameRate,
-        backend: mediaInfo.backend,
         viewMode: mediaInfo.viewMode,
       };
       report.fixture = mediaInfo.fixture;
+      report.backend = mediaInfo.backend;
+      report.mediaPath = mediaInfo.mediaPath;
       await checkHookContract(page);
     } catch (error) {
       for (const name of demoScenarios) {
@@ -371,8 +374,10 @@ async function compareAgainstBaseline() {
       ),
       runs: repeat,
       media: mediaInfo
-        ? `${mediaInfo.duration}s at ${mediaInfo.frameRate}fps, ${mediaInfo.backend}`
+        ? `${mediaInfo.duration}s at ${mediaInfo.frameRate}fps`
         : null,
+      backend: report.backend,
+      mediaPath: report.mediaPath,
       fixture: report.fixture,
       viewMode: mediaInfo?.viewMode ?? null,
       samples: Object.fromEntries(
@@ -423,6 +428,8 @@ async function compareAgainstBaseline() {
     recordedFrom: recorded.source ?? null,
     recordedFixture: recorded.fixture ?? null,
     recordedView: recorded.viewMode ?? null,
+    recordedBackend: recorded.backend ?? null,
+    recordedMediaPath: recorded.mediaPath ?? null,
     sameMachine: sameMachine(recorded.machine, report.machine),
     provenance: compareProvenance(recorded, report),
     tolerancePercent: comparison.tolerancePercent,
@@ -450,11 +457,13 @@ function printSummary() {
   if (repeat > 1) lines.push(field("passes", repeat));
   if (mediaInfo) {
     lines.push(
-      field(
-        "media",
-        `${mediaInfo.duration}s at ${mediaInfo.frameRate}fps, ${mediaInfo.backend}`,
-      ),
+      field("media", `${mediaInfo.duration}s at ${mediaInfo.frameRate}fps`),
       field("clip", report.fixture?.id ?? "unnamed"),
+      field(
+        "path",
+        `${report.mediaPath ?? "unnamed"}, drawn by ` +
+          `${report.backend ?? "unnamed"}`,
+      ),
       field("view", mediaInfo.viewMode),
     );
   }
@@ -527,6 +536,13 @@ function baselineSummary() {
       "clip",
       `${baseline.recordedFixture?.id ?? "unrecorded"} then, ` +
         `${report.fixture?.id ?? "unnamed"} now`,
+    ),
+    field(
+      "path",
+      `${baseline.recordedMediaPath ?? "unrecorded"} drawn by ` +
+        `${baseline.recordedBackend ?? "unrecorded"} then, ` +
+        `${report.mediaPath ?? "unnamed"} drawn by ` +
+        `${report.backend ?? "unnamed"} now`,
     ),
     field("tolerance", `${baseline.tolerancePercent}% past the noise floor`),
   );

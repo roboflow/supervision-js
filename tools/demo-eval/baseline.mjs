@@ -596,6 +596,24 @@ const RUN_CONDITIONS = [
     phrase: (value) => `ran on ${value}`,
     because: "two clips decode and cook different amounts of work",
   },
+  {
+    names: "which renderer backend drew it",
+    read: (run) => run?.backend ?? null,
+    unnamed: "a backend it could not name",
+    phrase: (value) => `drew through ${value}`,
+    because:
+      "these are two different renderers, and the rows below are the " +
+      "difference between them rather than anything that drifted",
+  },
+  {
+    names: "which media path opened the clip",
+    read: (run) => run?.mediaPath ?? null,
+    unnamed: "a path it could not name",
+    phrase: (value) => `opened the clip on ${value}`,
+    because:
+      "the two paths decode differently, and the path also settles which " +
+      "renderer backend draws",
+  },
 ];
 
 /**
@@ -678,7 +696,9 @@ export function compareProvenance(recorded, current) {
 
 export function buildBaseline({
   runs,
+  backend,
   media,
+  mediaPath,
   fixture,
   viewMode,
   samples,
@@ -686,7 +706,7 @@ export function buildBaseline({
   values,
   recordedWithFailures = [],
 }) {
-  const gaps = recordingGaps({ fixture });
+  const gaps = recordingGaps({ backend, fixture, mediaPath });
   if (gaps.length > 0) {
     throw new Error(
       `a baseline that cannot say ${gaps.join(", ")} is not one anything can ` +
@@ -699,6 +719,8 @@ export function buildBaseline({
     source,
     runs,
     media,
+    backend,
+    mediaPath,
     fixture,
     viewMode,
     recordedWithFailures,

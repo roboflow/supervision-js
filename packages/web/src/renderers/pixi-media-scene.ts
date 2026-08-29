@@ -475,6 +475,8 @@ export async function createPixiMediaScene(
     autoDensity: true,
     autoStart: frameChannel === undefined,
     backgroundColor: options.backgroundColor ?? 0x111111,
+    /* Only the video-engine media path supplies a presented-frame channel, so
+     * which reader opens the clip is also what decides which backend draws. */
     preference: frameChannel ? "webgpu" : RENDER_ENGINE_PREFERENCE,
     resolution: resolvePixiResolution(options.maxDevicePixelRatio),
   });

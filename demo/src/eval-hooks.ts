@@ -47,10 +47,11 @@ export function inspectorTabEvalHook(tab: string): string {
 }
 
 /**
- * Which sample the open session is running, stamped on the shell. The buttons
- * that set it live in one inspector tab, and only the open tab is in the DOM.
+ * What the open session is running, stamped on the shell. The buttons that set
+ * these live one to an inspector tab, and only the open tab is in the DOM.
  */
 export const DemoEvalRunAttribute = {
   Fixture: "data-eval-fixture",
   FixtureLabel: "data-eval-fixture-label",
+  MediaPath: "data-eval-media-path",
 } as const;

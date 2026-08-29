@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { DemoShell } from "./DemoShell";
 import { DemoEvalRunAttribute } from "../eval-hooks";
+import { DemoMediaPath } from "../session/session-options";
 import { DemoInspectorTab } from "../session/inspector-tabs";
 import { DemoViewMode } from "../session/demo-view-mode";
 
@@ -31,7 +32,10 @@ type DemoShellSlot = (typeof slots)[number];
 function shellWith(
   mode: DemoViewMode,
   tab: DemoInspectorTab,
-  running: Pick<ShellProps, "clip"> = { clip: null },
+  running: Pick<ShellProps, "clip" | "mediaPath"> = {
+    clip: null,
+    mediaPath: null,
+  },
 ) {
   const props = Object.fromEntries(
     slots.map((slot) => [slot, <b key={slot}>{slot}</b>]),
@@ -153,26 +157,32 @@ function flatten(node: ReactNode): string {
   return flatten(node.props.children);
 }
 
-/* The eval harness reads the clip off the shell. The buttons that set it live
- * in one inspector tab, and only the open tab is in the DOM, so a run that read
- * the controls would record whichever tab it left showing. */
+/* The eval harness reads the clip and the media path off the shell. Both are
+ * set by buttons that live one to an inspector tab, and only the open tab is in
+ * the DOM, so a run that read the controls would record whichever tab it left
+ * showing. */
 describe("what the shell says the session is running", () => {
-  const running = { clip: { id: "horse_trail", label: "70s horse trail" } };
+  const running = {
+    clip: { id: "horse_trail", label: "70s horse trail" },
+    mediaPath: DemoMediaPath.Mediabunny,
+  };
 
-  it("names the clip in every view and every tab", () => {
+  it("names the clip and the media path in every view and every tab", () => {
     for (const mode of Object.values(DemoViewMode)) {
       for (const tab of Object.values(DemoInspectorTab)) {
         expect(shellWith(mode, tab, running).props).toMatchObject({
           [DemoEvalRunAttribute.Fixture]: "horse_trail",
           [DemoEvalRunAttribute.FixtureLabel]: "70s horse trail",
+          [DemoEvalRunAttribute.MediaPath]: "mediabunny",
         });
       }
     }
   });
 
-  it("names nothing when the session is not running a sample", () => {
+  it("names neither when the session is not running a sample", () => {
     const shell = shellWith(DemoViewMode.Demo, DemoInspectorTab.Clip);
 
     expect(shell.props[DemoEvalRunAttribute.Fixture]).toBeUndefined();
+    expect(shell.props[DemoEvalRunAttribute.MediaPath]).toBeUndefined();
   });
 });

@@ -75,13 +75,14 @@ export const CONTROLS_TAB = "style";
 export const SOURCE_TAB = "clip";
 
 /**
- * What the demo stamps on the shell to say which sample the open session is
- * running, declared by demo/src/eval-hooks.ts. The shell is mounted in every
- * view and every tab, and the controls that set it are not.
+ * What the demo stamps on the shell to say what the open session is running,
+ * declared by demo/src/eval-hooks.ts. The shell is mounted in every view and
+ * every tab, and the controls that set these are not.
  */
 export const RUN_ATTRIBUTE = {
   Fixture: "data-eval-fixture",
   FixtureLabel: "data-eval-fixture-label",
+  MediaPath: "data-eval-media-path",
 };
 
 export function inspectorTabHook(tab) {

@@ -61,7 +61,8 @@ Scenario names: `sync`, `latency`, `layers`, `cadence`, `throttle`, `blanking`,
 `drag`, `playhead`, `backscrub`, `focus`, `battery`.
 
 The run prints a summary and writes
-`{ startedAt, source, media, fixture, scenarios, metrics, verdicts, failures, baseline }`
+`{ startedAt, source, media, fixture, backend, mediaPath, scenarios, metrics,
+verdicts, failures, baseline }`
 to the report path. Both that file and `baseline.json` are written by the tool, so
 `.prettierignore` excludes them from the format check; unlike the report, the
 baseline belongs in the repository, because a baseline nobody else has is not
@@ -91,11 +92,12 @@ others, so a control is absent rather than hidden whenever its own tab is not
 the one showing. The tool opens the tab that owns the controls it is about to
 drive, and visits every tab before it decides a declared id has gone missing.
 
-Which clip the demo opened on is read off the shell rather than off those
-controls, through the `data-eval-fixture` and `data-eval-fixture-label`
-attributes the demo stamps there. The shell is mounted in every view and every
-tab; the buttons that set the clip are mounted in one tab only, so a run that
-read the buttons would record whichever tab it happened to leave open.
+Which clip the demo opened on, and which media path opened it, are read off the
+shell rather than off those controls, through the `data-eval-fixture`,
+`data-eval-fixture-label` and `data-eval-media-path` attributes the demo stamps
+there. The shell is mounted in every view and every tab; the buttons that set
+those values are each mounted in one tab only, so a run that read the buttons
+would record whichever tab it happened to leave open.
 
 The style panel's sections unmount their bodies while they are collapsed, so
 the layer toggles and the mask border slider are absent rather than hidden
@@ -225,25 +227,33 @@ any scenario is failing or invalid, because freezing a broken number as the new
 normal is how a baseline stops meaning anything; `--allow-failing-baseline`
 overrides that on purpose and writes the failing verdicts into the file so
 nobody later reads those numbers as a target. The file also records the
-machine, the commit and dirtiness of the checkout, and the clip the scenarios
-ran on, since a working tree is part of what every number here measures. A
-baseline recorded on another processor is somebody else's numbers, and the
-summary says so rather than printing deltas between two machines.
+machine, the commit and dirtiness of the checkout, the clip the scenarios ran
+on, the media path that opened that clip and the renderer backend that drew it,
+since all of it is part of what every number here measures. A baseline recorded
+on another processor is somebody else's numbers, and the summary says so rather
+than printing deltas between two machines.
 
 Recording refuses outright, whatever `--allow-failing-baseline` says, when a run
-cannot name the clip it measured. That name cannot be recovered once the run is
-over, and every later run holds its own numbers against it.
+cannot name its clip, its media path or its backend. None of the three can be
+recovered once the run is over, and every later run holds its own numbers
+against them.
 
-The report carries the same three, so a comparison can be checked rather than
+The backend is not a free choice made beside the media path. The video-engine
+path hands the renderer a presented-frame channel and gets WebGPU; mediabunny
+hands it none and gets WebGL. Changing which reader the demo opens on therefore
+changes the renderer under every number in the file.
+
+The report carries the same facts, so a comparison can be checked rather than
 assumed. Every run writes its own commit, whether that tree was dirty, and the
-fixture the demo opened on into `report.json`, and prints them at the top of the
-summary. The baseline comparison reads both sides: a percentage taken against a
-baseline recorded on a different commit says so before it prints a single delta,
-so does one where either tree carried uncommitted changes, and so does one where
-the two ran on different clips. None of the three changes the exit code, because
-this repository's own baseline was recorded from a dirty tree and a warning
-nobody can act on is a warning everybody learns to skip. They change what the
-number means, and the summary says which of them applies.
+clip, media path and backend it measured into `report.json`, and prints them at
+the top of the summary. The baseline comparison reads both sides: a percentage
+taken against a baseline recorded on a different commit says so before it prints
+a single delta, so does one where either tree carried uncommitted changes, and
+so does one where the two ran on different clips, opened them through different
+readers, or drew them with different backends. None of them changes the exit
+code, because this repository's own baseline was recorded from a dirty tree and
+a warning nobody can act on is a warning everybody learns to skip. They change
+what the number means, and the summary says which of them applies.
 
 Use `--repeat 3` when recording. Each pass is measured whole, the median of
 each metric becomes the baseline, and the spread is kept beside it so a quiet

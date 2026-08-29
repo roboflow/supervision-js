@@ -139,7 +139,7 @@ export async function openDemoPage(
   };
 }
 
-/** The clip the demo opened on. */
+/** The clip the demo opened on and the reader that opened it. */
 async function readRunStamp(session) {
   const stamp = await session.readJson(`(() => {
     const shell = document.querySelector(${at(Hook.Shell)});
@@ -147,12 +147,14 @@ async function readRunStamp(session) {
     return {
       id: shell.getAttribute(${JSON.stringify(RUN_ATTRIBUTE.Fixture)}),
       label: shell.getAttribute(${JSON.stringify(RUN_ATTRIBUTE.FixtureLabel)}),
+      mediaPath: shell.getAttribute(${JSON.stringify(RUN_ATTRIBUTE.MediaPath)}),
     };
   })()`);
   return {
     fixture: stamp?.id
       ? { id: stamp.id, label: stamp.label ?? stamp.id }
       : null,
+    mediaPath: stamp?.mediaPath ?? null,
   };
 }
 

@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { DemoEvalHook, inspectorTabEvalHook } from "../eval-hooks";
+import type { DemoMediaPath } from "../session/session-options";
 import { DemoInspectorTab } from "../session/inspector-tabs";
 import { DemoViewMode } from "../session/demo-view-mode";
 
@@ -30,6 +31,7 @@ export function DemoShell({
   departureCount,
   docsUrl,
   libraryDeparturesPanel,
+  mediaPath,
   mediaPathPanel,
   mode,
   onModeChange,
@@ -54,6 +56,7 @@ export function DemoShell({
   readonly departureCount: number | null;
   readonly docsUrl: string;
   readonly libraryDeparturesPanel: ReactNode;
+  readonly mediaPath: DemoMediaPath | null;
   readonly mediaPathPanel: ReactNode;
   readonly mode: DemoViewMode;
   readonly onModeChange: (mode: DemoViewMode) => void;
@@ -81,6 +84,7 @@ export function DemoShell({
       data-eval={DemoEvalHook.Shell}
       data-eval-fixture={clip?.id}
       data-eval-fixture-label={clip?.label}
+      data-eval-media-path={mediaPath ?? undefined}
     >
       <header className="demo-shell__header">
         <div className="demo-shell__brand">
