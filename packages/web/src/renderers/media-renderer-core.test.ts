@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createIdleDetectionBufferState } from "supervision-js-core";
 import { DetectionFrameSelectionMode } from "supervision-js-core";
+import { PlaybackGateReach } from "supervision-js-core";
 import type {
   DecodedMediaSource,
   DecodedVideoSample,
@@ -1150,6 +1151,109 @@ describe("media renderer core", () => {
 
     expect(scene.setPresentation).toHaveBeenCalledTimes(2);
     expect(renderer.getState().presentedFrames).toBe(1);
+
+    renderer.destroy();
+  });
+
+  it("reports no gate reach when nothing holds playback", async () => {
+    resetMocks();
+
+    const renderer = await createMediaRendererCore(
+      {
+        autoPlay: false,
+        container: {} as HTMLElement,
+        source: createSource([
+          createMockSample(0, 0) as unknown as DecodedVideoSample,
+        ]),
+      } satisfies MediaRendererOptions,
+      {
+        createScene: vi.fn(async () => createScene()),
+        openMediaSource: vi.fn(),
+      },
+    );
+
+    expect(renderer.getState().playbackGateReach).toBe(PlaybackGateReach.Off);
+
+    renderer.destroy();
+  });
+
+  it("holds every frame of a source the renderer pulls samples from", async () => {
+    resetMocks();
+
+    const renderer = await createMediaRendererCore(
+      {
+        autoPlay: false,
+        container: {} as HTMLElement,
+        renderPreparation: { playbackGate: { enabled: true } },
+        source: createSource([
+          createMockSample(0, 0) as unknown as DecodedVideoSample,
+        ]),
+      } satisfies MediaRendererOptions,
+      {
+        createScene: vi.fn(async () =>
+          createScene({
+            waitForRenderPreparation: vi.fn(async () => undefined),
+          }),
+        ),
+        openMediaSource: vi.fn(),
+      },
+    );
+
+    expect(renderer.getState().playbackGateReach).toBe(
+      PlaybackGateReach.EveryFrame,
+    );
+
+    renderer.destroy();
+  });
+
+  it("holds only the start of playback on a producer that owns the playhead", async () => {
+    resetMocks();
+
+    const producer = createPushProducer();
+    const renderer = await createMediaRendererCore(
+      {
+        autoPlay: false,
+        container: {} as HTMLElement,
+        renderPreparation: { playbackGate: { enabled: true } },
+        source: producer.source,
+      } satisfies MediaRendererOptions,
+      {
+        createScene: vi.fn(async () =>
+          createScene({
+            waitForRenderPreparation: vi.fn(async () => undefined),
+          }),
+        ),
+        openMediaSource: vi.fn(),
+      },
+    );
+
+    expect(renderer.getState().playbackGateReach).toBe(
+      PlaybackGateReach.StartOfPlayback,
+    );
+
+    renderer.destroy();
+  });
+
+  it("holds every frame of a producer the detection gate can stop", async () => {
+    resetMocks();
+
+    const producer = createPushProducer();
+    const renderer = await createMediaRendererCore(
+      {
+        autoPlay: false,
+        container: {} as HTMLElement,
+        detectionBuffer: { playbackGate: { enabled: true } },
+        source: producer.source,
+      } satisfies MediaRendererOptions,
+      {
+        createScene: vi.fn(async () => createScene()),
+        openMediaSource: vi.fn(),
+      },
+    );
+
+    expect(renderer.getState().playbackGateReach).toBe(
+      PlaybackGateReach.EveryFrame,
+    );
 
     renderer.destroy();
   });
