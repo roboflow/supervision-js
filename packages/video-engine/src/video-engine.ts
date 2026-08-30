@@ -140,7 +140,7 @@ export interface EngineWorkerPort {
 }
 
 /**
- * Main-thread facade for the worker-hosted video engine. Owns the worker
+ * Main-thread facade for the worker-hosted web video engine. Owns the worker
  * (spawned lazily on the first command), the mirror store React reads through
  * useSyncExternalStore, and the imperative handle. The decode + render loop runs
  * in the worker (EngineCore); this class never touches a cursor or clock directly.

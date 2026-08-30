@@ -436,7 +436,7 @@ async function writeFixtureMeta(options) {
     media: {
       file: options.sourceFile,
       loadingStatusLabel: `opening ${options.displayName}`,
-      readyStatusLabel: `${options.displayName} | video engine, source ${extname(options.sourceFile).slice(1).toUpperCase()}`,
+      readyStatusLabel: `${options.displayName} | web video engine, source ${extname(options.sourceFile).slice(1).toUpperCase()}`,
     },
     sampleName: options.sampleName,
     schema: "supervision-js.demo.sam3-fixture-meta",

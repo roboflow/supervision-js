@@ -29,7 +29,7 @@ export function rethrowEngineImportFailure(
   if (isEngineResolutionFailure(error)) {
     throw new Error(
       `openVideoEngineMediaSource needs "${entry}", which did not load. ` +
-        "The video engine is a lazily loaded chunk of supervision, so check " +
+        "The web video engine is a lazily loaded chunk of supervision, so check " +
         "that the deployed build still serves every chunk it emitted.",
       { cause: error },
     );

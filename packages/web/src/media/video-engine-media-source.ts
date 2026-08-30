@@ -64,7 +64,7 @@ export interface VideoEngineMediaSource extends DecodedMediaSource {
 }
 
 /**
- * Adapts Roboflow's video engine to the decoded-media source seam.
+ * Adapts the web video engine to the decoded-media source seam.
  *
  * The pull path, `sampleSink`, serves one-off reads such as thumbnails and
  * single frame grabs, decoding each request from scratch through the engine's

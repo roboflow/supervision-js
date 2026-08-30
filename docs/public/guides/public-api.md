@@ -156,7 +156,7 @@ not the first thing most users should reach for:
   screen without opening a second hidden video. No DOM element or vendor object
   crosses that boundary, and every field beyond `mediaTime` is optional;
 - `createVideoEngineMediaRendererSource()` and `openVideoEngineMediaSource()`
-  for video presented by the Roboflow video engine, which owns the playhead and
+  for video presented by the web video engine, which owns the playhead and
   announces each frame it puts on screen while the renderer composites it with
   annotations drawn from that frame's own timestamp. Both are also exported from
   `supervision/web-video-engine`, alongside the engine's own types; the subpath

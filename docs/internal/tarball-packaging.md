@@ -16,8 +16,9 @@ npm run package:tarball
 ```
 
 That command builds the internal tracker engines into `supervision-js-core`,
-builds the private video engine, builds the published `supervision` package, and
-then writes a single archive to the ignored `artifacts/` directory:
+builds the private web video engine, builds the published `supervision`
+package, and then writes a single archive to the ignored `artifacts/`
+directory:
 
 ```text
 artifacts/supervision-<version>.tgz
@@ -59,7 +60,7 @@ The source tree, package boundary checks, and Rollup externals are unchanged.
 `pixi.js` and `mediabunny` stay ordinary dependencies and are installed from the
 registry by the consumer.
 
-## How The Private Video Engine Ships
+## How The Private Web Video Engine Ships
 
 The engine is a `file:../video-engine` build dependency of `packages/web`, and
 its own build already emits the chunking, declarations and source maps the

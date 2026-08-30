@@ -6,7 +6,7 @@
     "file": "../basketball_sample/basketball_sample.mp4",
     "loadingStatusLabel": "opening basketball region effects",
     "proxyFile": "../basketball_sample/proxy-30fps.webm",
-    "readyStatusLabel": "9s basketball sample | video engine, 30fps proxy WebM"
+    "readyStatusLabel": "9s basketball sample | web video engine, 30fps proxy WebM"
   },
   "presentation": {
     "boxesEnabled": false,

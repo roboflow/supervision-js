@@ -23,8 +23,8 @@ import { DEMO_SOURCE_RESIDENCY_BUDGET_MB } from "./source-residency";
 const BYTES_PER_MEBIBYTE = 1024 * 1024;
 
 /**
- * What the video engine is asked to do with the clip's bytes and its decoded
- * frames. Only a URL source reads `sourceResidency` and `urlSource`.
+ * What the web video engine is asked to do with the clip's bytes and its
+ * decoded frames. Only a URL source reads `sourceResidency` and `urlSource`.
  */
 export type DemoEngineOptions = Pick<
   VideoEngineOptions,
@@ -45,7 +45,7 @@ export enum DemoSourceResidency {
 }
 
 /**
- * What the video engine was handed, if anything. The Mediabunny media path
+ * What the web video engine was handed, if anything. The Mediabunny media path
  * leaves the clip to the library's own reader, so no engine opens at all.
  */
 export enum DemoEngineSource {

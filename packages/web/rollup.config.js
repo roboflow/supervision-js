@@ -89,7 +89,7 @@ function stageVideoEngine() {
 
       if (files.length === 0) {
         throw new Error(
-          "The video engine has no build output to stage; build supervision-js-web-video-engine first.",
+          "The web video engine has no build output to stage; build supervision-js-web-video-engine first.",
         );
       }
 

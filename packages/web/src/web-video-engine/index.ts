@@ -1,6 +1,6 @@
 /**
- * The video engine, and the two adapters that hand what it decodes to a media
- * renderer.
+ * The web video engine, and the two adapters that hand what it decodes to a
+ * media renderer.
  *
  * The engine's own barrel is wider than this, because its modules export for
  * one another. A name reaches an application only by being listed here, so

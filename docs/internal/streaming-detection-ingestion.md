@@ -137,7 +137,7 @@ the renderer pulls decoded samples from, such as a URL, a `File` or a `Blob`:
 the renderer awaits `DetectionFrameSource.waitForRange()` for the configured
 lookahead before each frame is presented, and reports buffering while it waits.
 A source that presents its own frames owns the playhead, so the gate is accepted
-and ignored there, which is every session the video engine backs. That is a
+and ignored there, which is every session the web video engine backs. That is a
 deliberate trade of promptness for completeness, so it belongs to the app rather
 than to the ingestion path.
 

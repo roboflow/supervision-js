@@ -47,7 +47,7 @@ export default [
                 "!supervision/web-video-engine/worker",
               ],
               message:
-                "The video engine exposes three entries: supervision/web-video-engine, supervision/web-video-engine/analysis, and supervision/web-video-engine/worker. Anything else is an internal module.",
+                "The web video engine exposes three entries: supervision/web-video-engine, supervision/web-video-engine/analysis, and supervision/web-video-engine/worker. Anything else is an internal module.",
             },
             {
               group: [
@@ -55,7 +55,7 @@ export default [
                 "supervision-js-web-video-engine/**",
               ],
               message:
-                "The video engine is a private workspace package that ships inside supervision. Import supervision/web-video-engine or supervision/web-video-engine/analysis.",
+                "The web video engine is a private workspace package that ships inside supervision. Import supervision/web-video-engine or supervision/web-video-engine/analysis.",
             },
             {
               group: ["#web-video-engine", "#web-video-engine/**"],

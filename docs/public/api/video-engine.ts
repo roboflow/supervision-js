@@ -1,6 +1,6 @@
 /**
- * The video engine that decodes and presents video files, available from the
- * `supervision/web-video-engine` entrypoint.
+ * The web video engine that decodes and presents video files, available from
+ * the `supervision/web-video-engine` entrypoint.
  *
  * The engine owns the playhead and announces every frame it puts on screen. A
  * media session reaches it through the two adapters here, which load it the

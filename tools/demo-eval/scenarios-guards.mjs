@@ -621,7 +621,7 @@ async function measureDrag(session, info) {
     throw new Invalid(
       "the engine kept no record of what it painted, so how far the picture " +
         "trailed the thumb cannot be measured; window.__demoEngineDiagnostics " +
-        "is absent or no video engine source is open",
+        "is absent or no web video engine source is open",
     );
   }
 

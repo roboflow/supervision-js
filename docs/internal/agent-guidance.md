@@ -17,7 +17,7 @@ Before making project-direction or architecture changes, read:
 - [`library-contract.md`](library-contract.md)
 - [`video-engine-presentation.md`](video-engine-presentation.md) before touching
   video presentation, the atomic present, the prepared annotation window, or
-  anything that imports the video engine
+  anything that imports the web video engine
 - [`react-native-architecture.md`](react-native-architecture.md)
 - [`react-native-live-rendering.md`](react-native-live-rendering.md)
 - [`tarball-packaging.md`](tarball-packaging.md)

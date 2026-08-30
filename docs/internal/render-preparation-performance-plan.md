@@ -171,7 +171,7 @@ awaits the scene before presenting a sample and holds until the prepared window
 leads the playhead by `requiredAheadSeconds`, which "buffers playback until
 render preparation reaches the requested lookahead" pins by name. A source that
 presents its own frames owns the playhead, so the gate is accepted and ignored
-there, which is every session the video engine backs.
+there, which is every session the web video engine backs.
 
 The work reaches the host as an activity either way. A `RenderPreparing`
 activity sets `blockingPresentation` while the frame on screen waits for an

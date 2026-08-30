@@ -3,8 +3,8 @@
 This repository publishes one public package: `supervision`. The root workspace,
 `supervision-js-trackers`, `supervision-js-core`,
 `supervision-js-web-video-engine`, and `supervision-js-react-native` remain
-private. The tracker workspace is compiled into core, and the video engine is
-staged into the browser package's `dist`, rather than shipped as further
+private. The tracker workspace is compiled into core, and the web video engine
+is staged into the browser package's `dist`, rather than shipped as further
 installable packages.
 
 `supervision` is published as the portable tarball assembled by

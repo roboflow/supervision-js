@@ -648,7 +648,7 @@ function summariseCadenceWindow(plan, sample, { sourceRateFps, holdLimitMs }) {
   if (!sample.tap) {
     invalid(
       "window.__demoEngineDiagnostics is absent, so the engine's own count of " +
-        "what it painted cannot be read; no video engine source is open",
+        "what it painted cannot be read; no web video engine source is open",
     );
   }
   if (sample.visibility !== "visible") {
