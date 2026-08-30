@@ -4,19 +4,19 @@ import type { DecodeResolutionStrategy } from "./decode-resolution";
 import type { DiagnosticsSnapshot, EngineDiagnostics } from "./diagnostics";
 import type { Rotation } from "./rotation";
 import type { EngineTrace } from "./trace-recorder";
-import { asPaintSeq, VideoEngineError } from "./types";
+import { asPaintSeq, WebVideoEngineError } from "./types";
 import type {
   EngineReadySnapshot,
   PlaybackStatus,
   PresentationMode,
   UrlSourceReadConfig,
-  VideoEngineErrorCode,
+  WebVideoEngineErrorCode,
   VideoSource,
 } from "./types";
 import type { MirrorStore } from "./mirror-store";
 
 /**
- * Wire contract between the main-thread VideoEngine facade and the dedicated
+ * Wire contract between the main-thread WebVideoEngine facade and the dedicated
  * worker that hosts the decode + render loop. Three planes cross the boundary:
  *
  *   - Control plane: EngineCommand, main -> worker. Fire-and-forget commands
@@ -38,23 +38,23 @@ import type { MirrorStore } from "./mirror-store";
 
 export type RequestId = number;
 
-/** A VideoEngineError flattened to its clone-safe fields. cause is dropped at
+/** A WebVideoEngineError flattened to its clone-safe fields. cause is dropped at
  *  the boundary; consumers branch on code, not on the original cause chain. */
 export interface SerializedEngineError {
-  readonly code: VideoEngineErrorCode;
+  readonly code: WebVideoEngineErrorCode;
   readonly message: string;
 }
 
 export function serializeEngineError(
-  error: VideoEngineError,
+  error: WebVideoEngineError,
 ): SerializedEngineError {
   return { code: error.code, message: error.message };
 }
 
 export function deserializeEngineError(
   error: SerializedEngineError | null,
-): VideoEngineError | null {
-  return error ? new VideoEngineError(error.code, error.message) : null;
+): WebVideoEngineError | null {
+  return error ? new WebVideoEngineError(error.code, error.message) : null;
 }
 
 /** Canvas-box measurement taken on the main thread (layout lives there) and
@@ -65,7 +65,7 @@ export interface SerializedViewport {
 }
 
 /**
- * The serializable subset of VideoEngineOptions the worker needs to build the
+ * The serializable subset of WebVideoEngineOptions the worker needs to build the
  * engine. Omits `clock` (a class instance the worker constructs itself) and
  * `source` (carried separately on the load command).
  */

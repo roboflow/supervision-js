@@ -89,7 +89,7 @@ const expectedWebRuntimeExports = [
   "createProjectedDetectionFrameSource",
   "createSortTracker",
   "createStaticImageMediaSource",
-  "createVideoEngineMediaRendererSource",
+  "createWebVideoEngineMediaRendererSource",
   "createWritableDetectionFrameSource",
   "detectionPostProcessors",
   "getMediaErrorKind",
@@ -97,7 +97,7 @@ const expectedWebRuntimeExports = [
   "normalizeDetectionClassName",
   "normalizeMedia",
   "normalizeMediaProgressively",
-  "openVideoEngineMediaSource",
+  "openWebVideoEngineMediaSource",
   "pickDetectionAtPoint",
   "prepareMedia",
   "prepareMediaProgressively",
@@ -117,14 +117,14 @@ const expectedVideoEngineRuntimeExports = [
   "PlaybackStatus",
   "SourceKind",
   "TRACE_RING_BOUNDS",
-  "VideoEngine",
-  "VideoEngineError",
-  "VideoEngineErrorCode",
+  "WebVideoEngine",
+  "WebVideoEngineError",
+  "WebVideoEngineErrorCode",
   "cappedResolution",
-  "createVideoEngineMediaRendererSource",
+  "createWebVideoEngineMediaRendererSource",
   "displayBoxResolution",
   "nativeResolution",
-  "openVideoEngineMediaSource",
+  "openWebVideoEngineMediaSource",
   "viewportResolution",
 ];
 
@@ -336,17 +336,20 @@ test("the video engine subpath exports the adapter that opens it", async () => {
   const barrel = await import("../packages/web/dist/web-video-engine/index.js");
   const entrypoint = await import("../packages/web/dist/index.js");
 
-  assert.equal(typeof barrel.createVideoEngineMediaRendererSource, "function");
-  assert.equal(typeof barrel.openVideoEngineMediaSource, "function");
+  assert.equal(
+    typeof barrel.createWebVideoEngineMediaRendererSource,
+    "function",
+  );
+  assert.equal(typeof barrel.openWebVideoEngineMediaSource, "function");
   // One adapter, not a copy per entry: a caller may hand `createMediaSession`
   // a source built from either specifier.
   assert.equal(
-    barrel.createVideoEngineMediaRendererSource,
-    entrypoint.createVideoEngineMediaRendererSource,
+    barrel.createWebVideoEngineMediaRendererSource,
+    entrypoint.createWebVideoEngineMediaRendererSource,
   );
-  assert.equal(typeof barrel.VideoEngine, "function");
+  assert.equal(typeof barrel.WebVideoEngine, "function");
   assert.equal(typeof barrel.FrameTimeline, "function");
-  assert.equal(barrel.VideoEngineErrorCode.NoVideoTrack, "NO_VIDEO_TRACK");
+  assert.equal(barrel.WebVideoEngineErrorCode.NoVideoTrack, "NO_VIDEO_TRACK");
 
   const analysis =
     await import("../packages/web/dist/web-video-engine/analysis.js");

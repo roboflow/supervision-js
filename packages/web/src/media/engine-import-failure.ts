@@ -28,7 +28,7 @@ export function rethrowEngineImportFailure(
 ): never {
   if (isEngineResolutionFailure(error)) {
     throw new Error(
-      `openVideoEngineMediaSource needs "${entry}", which did not load. ` +
+      `openWebVideoEngineMediaSource needs "${entry}", which did not load. ` +
         "The web video engine is a lazily loaded chunk of supervision, so check " +
         "that the deployed build still serves every chunk it emitted.",
       { cause: error },

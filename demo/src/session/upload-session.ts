@@ -3,7 +3,7 @@ import {
   MediaSessionMode,
   createBrowserColdDetectionFrameStore,
   createMediaSession,
-  createVideoEngineMediaRendererSource,
+  createWebVideoEngineMediaRendererSource,
   type ColdDetectionFrameStoreWriteSummary,
   type DecodedVideoSampleSink,
   type MediaSession,
@@ -162,7 +162,7 @@ export async function createUploadSession(
       detections,
       media: options.tapMediaSource(
         tapSampleSink(
-          createVideoEngineMediaRendererSource({
+          createWebVideoEngineMediaRendererSource({
             ...engine,
             display: readDemoDisplayBox(
               options.container,

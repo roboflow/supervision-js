@@ -14,8 +14,8 @@ import {
 import {
   asSec,
   PlaybackStatus,
-  VideoEngineError,
-  VideoEngineErrorCode,
+  WebVideoEngineError,
+  WebVideoEngineErrorCode,
 } from "./types";
 import type { DiagnosticsEvent, MirrorEvent } from "./worker-protocol";
 import {
@@ -692,7 +692,7 @@ describe("EngineCore", () => {
   it("a decoder that cannot decode stops playback and broadcasts the error", async () => {
     const clock = new FakeClock();
     const cursor = makeFakeCursor();
-    const decode: { reportFailure?: (error: VideoEngineError) => void } = {};
+    const decode: { reportFailure?: (error: WebVideoEngineError) => void } = {};
     vi.spyOn(factoryModule, "createScrubCursor").mockImplementation(
       async (options) => {
         decode.reportFailure = options.onDecodeFailure;
@@ -709,8 +709,8 @@ describe("EngineCore", () => {
     expect(clock.playing).toBe(true);
 
     decode.reportFailure?.(
-      new VideoEngineError(
-        VideoEngineErrorCode.DecoderStalled,
+      new WebVideoEngineError(
+        WebVideoEngineErrorCode.DecoderStalled,
         "the decoder never started",
       ),
     );
@@ -721,7 +721,7 @@ describe("EngineCore", () => {
     expect(statusesOf(events).at(-1)).toBe(PlaybackStatus.Errored);
     const errored = events.at(-1);
     expect(errored?.type === "status" && errored.error).toEqual({
-      code: VideoEngineErrorCode.DecoderStalled,
+      code: WebVideoEngineErrorCode.DecoderStalled,
       message: "the decoder never started",
     });
     await engine.dispose();
@@ -730,7 +730,7 @@ describe("EngineCore", () => {
   it("the transport cannot leave the decode failure behind", async () => {
     const clock = new FakeClock();
     const cursor = makeFakeCursor();
-    const decode: { reportFailure?: (error: VideoEngineError) => void } = {};
+    const decode: { reportFailure?: (error: WebVideoEngineError) => void } = {};
     vi.spyOn(factoryModule, "createScrubCursor").mockImplementation(
       async (options) => {
         decode.reportFailure = options.onDecodeFailure;
@@ -744,8 +744,8 @@ describe("EngineCore", () => {
     });
     await engine.load(LOAD_CONFIG);
     decode.reportFailure?.(
-      new VideoEngineError(
-        VideoEngineErrorCode.DecoderStalled,
+      new WebVideoEngineError(
+        WebVideoEngineErrorCode.DecoderStalled,
         "the decoder never started",
       ),
     );
@@ -1056,12 +1056,12 @@ describe("EngineCore playback rate", () => {
       const { engine } = setup(clock);
       await engine.load(LOAD_CONFIG);
       engine.setPlaybackRate(2);
-      expect(() => engine.setPlaybackRate(rate)).toThrow(VideoEngineError);
+      expect(() => engine.setPlaybackRate(rate)).toThrow(WebVideoEngineError);
       try {
         engine.setPlaybackRate(rate);
       } catch (error) {
-        expect((error as VideoEngineError).code).toBe(
-          VideoEngineErrorCode.RateUnsupported,
+        expect((error as WebVideoEngineError).code).toBe(
+          WebVideoEngineErrorCode.RateUnsupported,
         );
       }
       expect(clock.rate).toBe(2);

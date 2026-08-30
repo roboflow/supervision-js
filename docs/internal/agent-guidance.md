@@ -111,7 +111,7 @@ toolbar value is a checked presentation mirror.
   depend on small media-source and scene contracts rather than vendor modules.
 - An engine-backed media source announces every presented frame and the scene
   composites it. It is opt-in: `createMediaSession()` reaches it only when a host
-  passes `createVideoEngineMediaRendererSource()`, and the pull path still serves
+  passes `createWebVideoEngineMediaRendererSource()`, and the pull path still serves
   the `src` route, normalization output, and `MediaStream` inputs.
   `supervision/web-video-engine` and `supervision/web-video-engine/analysis` are
   the only entries that carry code, and ESLint enforces that. Read

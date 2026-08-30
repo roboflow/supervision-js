@@ -58,8 +58,8 @@ draws it. It lasts the length of playback wherever the renderer pulls samples,
 which is the case for the `media` inputs above: a URL, a `File`, or a `Blob`.
 
 A media source that presents its own frames owns the playhead, and the renderer
-follows it rather than pacing it. `createVideoEngineMediaRendererSource` and
-`openVideoEngineMediaSource` return that kind of source, and they are what most
+follows it rather than pacing it. `createWebVideoEngineMediaRendererSource` and
+`openWebVideoEngineMediaSource` return that kind of source, and they are what most
 hosts render video through. There the render-preparation gate holds the start of
 playback and nothing after it, while the detection gate stops the producer again
 at any frame its detections do not cover and starts it when they land. Wait on

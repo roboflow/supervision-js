@@ -10,8 +10,11 @@
 // Batch frame extraction has its own entry point, `analysis`, because it opens a
 // source directly and reaches the demuxer without going through the engine.
 
-export { VideoEngine } from "./video-engine";
-export type { VideoEngineHandle, VideoEngineOptions } from "./video-engine";
+export { WebVideoEngine } from "./video-engine";
+export type {
+  WebVideoEngineHandle,
+  WebVideoEngineOptions,
+} from "./video-engine";
 
 /* ---------------------------------------------------------------- the source */
 export { SourceKind } from "./types";
@@ -70,7 +73,7 @@ export type {
 } from "./decode-resolution";
 
 /* ----------------------------------------------------------- when it goes wrong */
-export { VideoEngineError, VideoEngineErrorCode } from "./types";
+export { WebVideoEngineError, WebVideoEngineErrorCode } from "./types";
 export type { Warning, WarningSeverity } from "./diagnostics";
 
 /* ----------------------------------------------------------------- instruments */

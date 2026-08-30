@@ -139,7 +139,7 @@ An enabled `detections.playbackGate` awaits that same waiter. A media source
 the renderer pulls decoded samples from, such as a URL or a `Blob`, is held
 frame by frame for as long as playback runs. A source that presents its own
 frames owns the playhead, which is what
-`createVideoEngineMediaRendererSource` returns and what most video sessions run
+`createWebVideoEngineMediaRendererSource` returns and what most video sessions run
 on. There the gate stops that producer at any frame the required sources do not
 cover and starts it again when they do. The gate is on by default alongside the
 render-preparation gate, which holds only the start of playback on such a
@@ -224,7 +224,7 @@ const source = createCompositeDetectionFrameSource({
   `session.detectionSource` or an enabled `detections.playbackGate`. Your own
   call works on any session; the gate is on by default and holds a media source
   the renderer pulls decoded samples from frame by frame, while a source that
-  presents its own frames, such as `createVideoEngineMediaRendererSource`, is
+  presents its own frames, such as `createWebVideoEngineMediaRendererSource`, is
   stopped and restarted at each frame it cannot cover.
 - Do not combine `detections.sources` with single-source inputs such as
   `frames`, `source`, or `appendable`.

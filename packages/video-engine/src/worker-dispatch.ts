@@ -1,5 +1,5 @@
 import type { EngineCore } from "./engine-core";
-import { VideoEngineError, VideoEngineErrorCode } from "./types";
+import { WebVideoEngineError, WebVideoEngineErrorCode } from "./types";
 import {
   type EngineCommand,
   type EngineEvent,
@@ -24,9 +24,9 @@ import {
 export type PostEngineEvent = (event: EngineEvent) => void;
 
 function toSerializedError(error: unknown): SerializedEngineError {
-  if (error instanceof VideoEngineError) return serializeEngineError(error);
+  if (error instanceof WebVideoEngineError) return serializeEngineError(error);
   return {
-    code: VideoEngineErrorCode.BackendCrashed,
+    code: WebVideoEngineErrorCode.BackendCrashed,
     message: error instanceof Error ? error.message : String(error),
   };
 }

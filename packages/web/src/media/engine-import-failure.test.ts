@@ -23,7 +23,7 @@ describe("engine import failure", () => {
         VIDEO_ENGINE_ENTRY,
       ),
     ).toThrow(
-      /openVideoEngineMediaSource needs "supervision\/web-video-engine".*lazily loaded chunk of supervision/s,
+      /openWebVideoEngineMediaSource needs "supervision\/web-video-engine".*lazily loaded chunk of supervision/s,
     );
   });
 

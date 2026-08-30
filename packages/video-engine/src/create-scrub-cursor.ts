@@ -13,7 +13,7 @@ import type { ScrubCursor, ScrubCursorFactory } from "./scrub-cursor";
 import type { SourceResidency } from "./source-residency";
 import type {
   UrlSourceReadConfig,
-  VideoEngineError,
+  WebVideoEngineError,
   VideoSource,
 } from "./types";
 
@@ -59,7 +59,7 @@ export interface CreateScrubCursorOptions {
    * all. A failure after open() cannot surface as a rejected promise, since by
    * then nobody is awaiting one; this is how it reaches the transport.
    */
-  onDecodeFailure?: (error: VideoEngineError) => void;
+  onDecodeFailure?: (error: WebVideoEngineError) => void;
   /** Serves the demuxer's byte reads from what this process already holds. */
   sourceResidency?: SourceResidency;
   /** Read tuning for a URL source, passed through to mediabunny. */

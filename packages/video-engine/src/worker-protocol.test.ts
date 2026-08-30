@@ -4,8 +4,8 @@ import type { DiagnosticsSnapshot } from "./diagnostics";
 import { MirrorStore } from "./mirror-store";
 import {
   PlaybackStatus,
-  VideoEngineError,
-  VideoEngineErrorCode,
+  WebVideoEngineError,
+  WebVideoEngineErrorCode,
 } from "./types";
 import {
   applyMirrorEvent,
@@ -18,19 +18,19 @@ import {
 
 describe("workerProtocol error serialization", () => {
   it("round-trips code and message, drops cause", () => {
-    const original = new VideoEngineError(
-      VideoEngineErrorCode.DecodeUnsupported,
+    const original = new WebVideoEngineError(
+      WebVideoEngineErrorCode.DecodeUnsupported,
       "no codec",
       new Error("inner"),
     );
     const wire = serializeEngineError(original);
     expect(wire).toEqual({
-      code: VideoEngineErrorCode.DecodeUnsupported,
+      code: WebVideoEngineErrorCode.DecodeUnsupported,
       message: "no codec",
     });
     const restored = deserializeEngineError(wire);
-    expect(restored).toBeInstanceOf(VideoEngineError);
-    expect(restored?.code).toBe(VideoEngineErrorCode.DecodeUnsupported);
+    expect(restored).toBeInstanceOf(WebVideoEngineError);
+    expect(restored?.code).toBe(WebVideoEngineErrorCode.DecodeUnsupported);
     expect(restored?.message).toBe("no codec");
     expect(restored?.cause).toBeUndefined();
   });
@@ -67,7 +67,7 @@ describe("isMirrorEvent", () => {
       {
         type: "error",
         requestId: 3,
-        error: { code: VideoEngineErrorCode.Aborted, message: "x" },
+        error: { code: WebVideoEngineErrorCode.Aborted, message: "x" },
       },
     ];
     mirror.forEach((e) => expect(isMirrorEvent(e)).toBe(true));
@@ -150,7 +150,7 @@ describe("applyMirrorEvent", () => {
     applyMirrorEvent(store, {
       type: "status",
       status: PlaybackStatus.Errored,
-      error: { code: VideoEngineErrorCode.SourceUnreadable, message: "404" },
+      error: { code: WebVideoEngineErrorCode.SourceUnreadable, message: "404" },
     });
 
     expect(store.getPlayhead()).toEqual({ frame: FRAME_45, mediaTimeS: 1.5 });
@@ -158,7 +158,9 @@ describe("applyMirrorEvent", () => {
     expect(store.getDurationMs()).toBe(9000);
     expect(store.getSeeking()).toBe(true);
     expect(store.getStatus()).toBe(PlaybackStatus.Errored);
-    expect(store.getError()?.code).toBe(VideoEngineErrorCode.SourceUnreadable);
+    expect(store.getError()?.code).toBe(
+      WebVideoEngineErrorCode.SourceUnreadable,
+    );
   });
 
   it("notifies only the matching channel", () => {

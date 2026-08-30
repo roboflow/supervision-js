@@ -15,7 +15,7 @@ import {
 } from "supervision";
 import type {
   SourceResidencyConfig,
-  VideoEngineOptions,
+  WebVideoEngineOptions,
 } from "supervision/web-video-engine";
 
 import { DEMO_SOURCE_RESIDENCY_BUDGET_MB } from "./source-residency";
@@ -27,7 +27,7 @@ const BYTES_PER_MEBIBYTE = 1024 * 1024;
  * decoded frames. Only a URL source reads `sourceResidency` and `urlSource`.
  */
 export type DemoEngineOptions = Pick<
-  VideoEngineOptions,
+  WebVideoEngineOptions,
   | "cacheSkipNearMs"
   | "cacheStrategy"
   | "prefer2d"

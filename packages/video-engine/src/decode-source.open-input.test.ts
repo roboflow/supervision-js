@@ -11,8 +11,8 @@ import { openDecodeSource } from "./decode-source";
 import type { Rotation } from "./rotation";
 import {
   SourceKind,
-  VideoEngineError,
-  VideoEngineErrorCode,
+  WebVideoEngineError,
+  WebVideoEngineErrorCode,
   type VideoSource,
 } from "./types";
 
@@ -134,10 +134,10 @@ afterEach(() => {
 });
 
 describe("openInput decodability (T4a)", () => {
-  it("an undecodable track surfaces VideoEngineError(DecodeUnsupported)", async () => {
+  it("an undecodable track surfaces WebVideoEngineError(DecodeUnsupported)", async () => {
     trackConfig = { canDecode: false, firstTimestamp: 0 };
     await expect(openDecodeSource({ source: SOURCE })).rejects.toMatchObject({
-      code: VideoEngineErrorCode.DecodeUnsupported,
+      code: WebVideoEngineErrorCode.DecodeUnsupported,
     });
   });
 
@@ -159,10 +159,10 @@ describe("openInput decodability (T4a)", () => {
     );
   });
 
-  it("the thrown value is a typed VideoEngineError, not a bare Error", async () => {
+  it("the thrown value is a typed WebVideoEngineError, not a bare Error", async () => {
     trackConfig = { canDecode: false, firstTimestamp: 0 };
     const error = await openDecodeSource({ source: SOURCE }).catch((e) => e);
-    expect(error).toBeInstanceOf(VideoEngineError);
+    expect(error).toBeInstanceOf(WebVideoEngineError);
   });
 
   it("a container the demuxer will not open blames the container", async () => {
@@ -172,14 +172,14 @@ describe("openInput decodability (T4a)", () => {
       firstTimestamp: 0,
     };
     await expect(openDecodeSource({ source: SOURCE })).rejects.toMatchObject({
-      code: VideoEngineErrorCode.ContainerUnreadable,
+      code: WebVideoEngineErrorCode.ContainerUnreadable,
     });
   });
 
   it("a container that opens with no track parsed out of it does not blame the file", async () => {
     trackConfig = { canDecode: true, firstTimestamp: 0, hasTrack: false };
     await expect(openDecodeSource({ source: SOURCE })).rejects.toMatchObject({
-      code: VideoEngineErrorCode.VideoTrackUnreadable,
+      code: WebVideoEngineErrorCode.VideoTrackUnreadable,
     });
   });
 
@@ -191,7 +191,7 @@ describe("openInput decodability (T4a)", () => {
       otherTrackCount: 2,
     };
     await expect(openDecodeSource({ source: SOURCE })).rejects.toMatchObject({
-      code: VideoEngineErrorCode.NoVideoTrack,
+      code: WebVideoEngineErrorCode.NoVideoTrack,
     });
   });
 
@@ -226,7 +226,7 @@ describe("openInput frame timeline", () => {
   it("a track with no packets fails the load", async () => {
     trackConfig = { canDecode: true, firstTimestamp: 0, packetCount: 0 };
     await expect(openDecodeSource({ source: SOURCE })).rejects.toMatchObject({
-      code: VideoEngineErrorCode.DecodeUnsupported,
+      code: WebVideoEngineErrorCode.DecodeUnsupported,
     });
   });
 

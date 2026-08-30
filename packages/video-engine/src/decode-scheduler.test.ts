@@ -18,7 +18,7 @@ import {
   type ScrubTrackInfo,
   type VideoSampleLike,
 } from "./scrub-cursor";
-import { asSec, VideoEngineError, VideoEngineErrorCode } from "./types";
+import { asSec, WebVideoEngineError, WebVideoEngineErrorCode } from "./types";
 import { installWorkerGlobals } from "../test/fake-engine-deps";
 
 beforeAll(() => {
@@ -1518,14 +1518,14 @@ describe("DecodeScheduler", () => {
       getCanvasCalls = 0;
       async getCanvas(): Promise<WrappedCanvasLike | null> {
         this.getCanvasCalls += 1;
-        throw new VideoEngineError(
-          VideoEngineErrorCode.DecoderStalled,
+        throw new WebVideoEngineError(
+          WebVideoEngineErrorCode.DecoderStalled,
           "DecodeSession: the decoder refused to configure",
         );
       }
       async *canvases(): AsyncGenerator<WrappedCanvasLike, void, unknown> {
-        throw new VideoEngineError(
-          VideoEngineErrorCode.DecoderStalled,
+        throw new WebVideoEngineError(
+          WebVideoEngineErrorCode.DecoderStalled,
           "DecodeSession: the decoder refused to configure",
         );
       }
@@ -1596,10 +1596,10 @@ describe("DecodeScheduler", () => {
 
     function stallSetup(sink: CanvasFrameSource): {
       scheduler: DecodeScheduler;
-      failures: VideoEngineError[];
+      failures: WebVideoEngineError[];
       reopens: Mock;
     } {
-      const failures: VideoEngineError[] = [];
+      const failures: WebVideoEngineError[] = [];
       const handle = (): DecodeSourceHandle => ({
         track: TRACK,
         sink,
@@ -1629,7 +1629,7 @@ describe("DecodeScheduler", () => {
         await vi.advanceTimersByTimeAsync(0);
 
         expect(failures).toHaveLength(1);
-        expect(failures[0].code).toBe(VideoEngineErrorCode.DecoderStalled);
+        expect(failures[0].code).toBe(WebVideoEngineErrorCode.DecoderStalled);
         expect(scheduler.getStats().decoderStalled).toBe(true);
         // The decoder said what is wrong with it; re-opening the source
         // cannot answer that, and doing it anyway is the forever-loop.
@@ -1685,7 +1685,7 @@ describe("DecodeScheduler", () => {
         }
 
         expect(failures).toHaveLength(1);
-        expect(failures[0].code).toBe(VideoEngineErrorCode.DecoderStalled);
+        expect(failures[0].code).toBe(WebVideoEngineErrorCode.DecoderStalled);
         expect(scheduler.getStats().decoderStalled).toBe(true);
         scheduler.detachPlay();
       } finally {
@@ -1767,10 +1767,10 @@ describe("DecodeScheduler", () => {
       opts: { seedHangTimeoutMs?: number; reopen?: boolean } = {},
     ): {
       scheduler: DecodeScheduler;
-      failures: VideoEngineError[];
+      failures: WebVideoEngineError[];
       reopens: Mock;
     } {
-      const failures: VideoEngineError[] = [];
+      const failures: WebVideoEngineError[] = [];
       const handle = (): DecodeSourceHandle => ({
         track: TRACK,
         sink,
@@ -1802,9 +1802,9 @@ describe("DecodeScheduler", () => {
         await vi.advanceTimersByTimeAsync(SEED_MS * ATTEMPTS);
 
         const error = await settled;
-        expect(error).toBeInstanceOf(VideoEngineError);
-        expect((error as VideoEngineError).code).toBe(
-          VideoEngineErrorCode.DecoderStalled,
+        expect(error).toBeInstanceOf(WebVideoEngineError);
+        expect((error as WebVideoEngineError).code).toBe(
+          WebVideoEngineErrorCode.DecoderStalled,
         );
         // The failure the caller is handed is the one the consumer was
         // told about, not a second account of the same silence.
@@ -1894,8 +1894,8 @@ describe("DecodeScheduler", () => {
 
         await vi.advanceTimersByTimeAsync(SEED_MS * ATTEMPTS);
 
-        expect((await settled) as VideoEngineError).toBeInstanceOf(
-          VideoEngineError,
+        expect((await settled) as WebVideoEngineError).toBeInstanceOf(
+          WebVideoEngineError,
         );
         expect(failures).toHaveLength(1);
         // One ceiling, not three: with nothing to rebuild toward, the
@@ -1932,8 +1932,8 @@ describe("DecodeScheduler", () => {
         await new Promise<void>((resolve) =>
           setTimeout(resolve, this.ceilingMs),
         );
-        throw new VideoEngineError(
-          VideoEngineErrorCode.DecoderStalled,
+        throw new WebVideoEngineError(
+          WebVideoEngineErrorCode.DecoderStalled,
           "DecodeSession: the decoder acknowledged 4 decode requests and produced no frame",
         );
       }
@@ -1946,7 +1946,7 @@ describe("DecodeScheduler", () => {
       try {
         const SESSION_CEILING_MS = SEED_MS / 2;
         const session = new NeverStartingSession(SESSION_CEILING_MS);
-        const failures: VideoEngineError[] = [];
+        const failures: WebVideoEngineError[] = [];
         const handle = (): AnySourceHandle => ({
           track: TRACK,
           session,
@@ -1969,8 +1969,8 @@ describe("DecodeScheduler", () => {
         });
         await vi.advanceTimersByTimeAsync(SEED_MS * ATTEMPTS);
 
-        const error = (await settled) as VideoEngineError;
-        expect(error.code).toBe(VideoEngineErrorCode.DecoderStalled);
+        const error = (await settled) as WebVideoEngineError;
+        expect(error.code).toBe(WebVideoEngineErrorCode.DecoderStalled);
         expect(error.message).toContain("produced no frame");
         expect(failures).toEqual([error]);
         expect(failedAt - startedAt).toBe(SESSION_CEILING_MS);

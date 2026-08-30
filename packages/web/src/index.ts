@@ -104,10 +104,10 @@ export {
   toMediaSourceError,
 } from "#media/media-errors";
 export {
-  createVideoEngineMediaRendererSource,
-  openVideoEngineMediaSource,
-  type VideoEngineMediaSource,
-  type VideoEngineMediaSourceOptions,
+  createWebVideoEngineMediaRendererSource,
+  openWebVideoEngineMediaSource,
+  type WebVideoEngineMediaSource,
+  type WebVideoEngineMediaSourceOptions,
 } from "#media/video-engine-media-source";
 
 // Renderer and session primitives.

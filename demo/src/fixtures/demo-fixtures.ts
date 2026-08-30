@@ -1,6 +1,6 @@
 import {
   createChunkedDetectionFrameSource,
-  createVideoEngineMediaRendererSource,
+  createWebVideoEngineMediaRendererSource,
   type DetectionCoordinateSpace,
   type DetectionFrameChunkFetch,
   type DetectionFrameChunkManifest,
@@ -288,7 +288,7 @@ export function createDemoFixtureMedia(
   display?: DisplayBoxResolutionOptions,
   engine?: DemoEngineOptions,
 ): MediaRendererSource {
-  return createVideoEngineMediaRendererSource({
+  return createWebVideoEngineMediaRendererSource({
     ...engine,
     display,
     source: {

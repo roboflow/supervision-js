@@ -14,7 +14,7 @@ repository, like `supervision-js-core`. Its build is staged into
 published package, and applications reach the engine from there:
 
 ```ts
-import { VideoEngine } from "supervision/web-video-engine";
+import { WebVideoEngine } from "supervision/web-video-engine";
 ```
 
 `supervision` loads it through a dynamic import at the moment a video source
@@ -27,7 +27,7 @@ what lets the browser package treat the engine as a leaf it can load late.
 
 | Entry                                   | Contents                                                                                               |
 | --------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `supervision/web-video-engine`          | `VideoEngine`, the frame timeline, seek units, decode-resolution strategies, errors and diagnostics    |
+| `supervision/web-video-engine`          | `WebVideoEngine`, the frame timeline, seek units, decode-resolution strategies, errors and diagnostics |
 | `supervision/web-video-engine/analysis` | `AnalysisSession`, `FrameExtractor`, `FrameWalker` for pulling frames out of a source without a player |
 | `supervision/web-video-engine/worker`   | The decode worker as a module URL                                                                      |
 
@@ -42,8 +42,8 @@ copy, or host a worker file.
 
 WebCodecs and workers. WebGPU is used for presentation where the worker realm
 exposes it and falls back to a 2D canvas everywhere else. An environment that
-cannot decode a source surfaces a `VideoEngineError` with code
-`DECODE_UNSUPPORTED` from `VideoEngine.load`, rather than failing at import.
+cannot decode a source surfaces a `WebVideoEngineError` with code
+`DECODE_UNSUPPORTED` from `WebVideoEngine.load`, rather than failing at import.
 
 ## Documentation
 

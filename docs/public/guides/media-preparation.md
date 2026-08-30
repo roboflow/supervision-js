@@ -92,7 +92,7 @@ and passes the result as an engine blob source:
 ```ts
 import {
   createMediaSession,
-  createVideoEngineMediaRendererSource,
+  createWebVideoEngineMediaRendererSource,
   prepareMedia,
 } from "supervision";
 import { SourceKind } from "supervision/web-video-engine";
@@ -101,7 +101,7 @@ const prepared = await prepareMedia(file);
 
 const session = await createMediaSession({
   container,
-  media: createVideoEngineMediaRendererSource({
+  media: createWebVideoEngineMediaRendererSource({
     source: { blob: prepared.normalizedMedia.blob, kind: SourceKind.Blob },
   }),
 });

@@ -4,7 +4,7 @@ import * as factoryModule from "./create-scrub-cursor";
 import { EngineCore } from "./engine-core";
 import { FrameTimeline } from "./frame-timeline";
 import { asSec, PlaybackStatus } from "./types";
-import { VideoEngine, type EngineWorkerPort } from "./video-engine";
+import { WebVideoEngine, type EngineWorkerPort } from "./video-engine";
 import { handleEngineCommand } from "./worker-dispatch";
 import type { EngineCommand, EngineEvent } from "./worker-protocol";
 import {
@@ -174,7 +174,7 @@ describe("the published playhead is always a frame of the source", () => {
     vi.spyOn(factoryModule, "createScrubCursor").mockResolvedValue(cursor);
     const clock = new FakeClock();
     let port: FakeWorkerPort | null = null;
-    const engine = new VideoEngine({ source: LOAD_CONFIG.source }, () => {
+    const engine = new WebVideoEngine({ source: LOAD_CONFIG.source }, () => {
       port = new FakeWorkerPort(clock);
       return port;
     });
@@ -479,7 +479,7 @@ describe("a published position hands back the frame it came from", () => {
       ntscCursor(),
     );
     const clock = new FakeClock();
-    const engine = new VideoEngine(
+    const engine = new WebVideoEngine(
       { source: LOAD_CONFIG.source },
       () => new FakeWorkerPort(clock),
     );

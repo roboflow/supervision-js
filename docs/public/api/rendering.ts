@@ -7,7 +7,7 @@
 export {
   createMediaRenderer,
   createMediaStreamRendererSource,
-  createVideoEngineMediaRendererSource,
+  createWebVideoEngineMediaRendererSource,
   getMediaErrorKind,
   isMediaSourceError,
   toMediaSourceError,

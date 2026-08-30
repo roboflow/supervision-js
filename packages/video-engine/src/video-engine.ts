@@ -20,8 +20,8 @@ import {
   resolvePlaybackRate,
   SourceKind,
   type UrlSourceReadConfig,
-  VideoEngineError,
-  VideoEngineErrorCode,
+  WebVideoEngineError,
+  WebVideoEngineErrorCode,
   type VideoSource,
 } from "./types";
 import { createEngineWorker } from "./worker-bridge";
@@ -58,7 +58,7 @@ export type SeekTarget = number | FrameId;
  */
 const FRAME_OWNERSHIP_CHECK_GAP = 8;
 
-export interface VideoEngineOptions {
+export interface WebVideoEngineOptions {
   source: VideoSource;
   /**
    * Who owns the pixels, fixed for the life of the engine. Default "canvas":
@@ -158,7 +158,7 @@ export interface EngineWorkerPort {
  * Engine outlives a single React render. Recreate the engine only when the
  * source identity changes.
  */
-export class VideoEngine {
+export class WebVideoEngine {
   private readonly store = new MirrorStore();
   private readonly diagnosticsStore = new DiagnosticsStore();
   private readonly createWorker: () => EngineWorkerPort;
@@ -187,14 +187,14 @@ export class VideoEngine {
    *  itself the answer. */
   private presentedDeliveries = 0;
   private watchedFrame: WeakRef<VideoFrame> | null = null;
-  private cachedHandle: VideoEngineHandle | null = null;
+  private cachedHandle: WebVideoEngineHandle | null = null;
   /** WebGPU support is a main-thread fact the worker cannot cheaply probe, so
    *  the facade fills it onto each diagnostics snapshot for the warning rules. */
   private readonly webgpuAvailable =
     typeof navigator !== "undefined" && "gpu" in navigator;
 
   constructor(
-    private readonly options: VideoEngineOptions,
+    private readonly options: WebVideoEngineOptions,
     createWorker: () => EngineWorkerPort = createEngineWorker,
   ) {
     this.createWorker = createWorker;
@@ -223,8 +223,8 @@ export class VideoEngine {
         config,
       }));
       if (response.type !== "ready") {
-        throw new VideoEngineError(
-          VideoEngineErrorCode.BackendCrashed,
+        throw new WebVideoEngineError(
+          WebVideoEngineErrorCode.BackendCrashed,
           "engine load did not return metadata",
         );
       }
@@ -237,7 +237,7 @@ export class VideoEngine {
       // Aborted is dispose draining this request, and dispose has already
       // settled the store on Idle. Anything else is a real load failure the
       // surface must be able to render.
-      if (error.code !== VideoEngineErrorCode.Aborted) {
+      if (error.code !== WebVideoEngineErrorCode.Aborted) {
         this.store.writeStatus(PlaybackStatus.Errored, error);
       }
       throw error;
@@ -527,7 +527,7 @@ export class VideoEngine {
    * killed.
    *
    * The engine is inert afterwards. A fire-and-forget command is dropped and an
-   * awaitable one rejects with {@link VideoEngineErrorCode.Aborted}; neither
+   * awaitable one rejects with {@link WebVideoEngineErrorCode.Aborted}; neither
    * starts another worker.
    */
   async dispose(): Promise<void> {
@@ -551,9 +551,9 @@ export class VideoEngine {
       port.terminate();
       this.port = null;
       this.rejectAllPending(
-        new VideoEngineError(
-          VideoEngineErrorCode.Aborted,
-          "video engine disposed",
+        new WebVideoEngineError(
+          WebVideoEngineErrorCode.Aborted,
+          "web video engine disposed",
         ),
       );
       this.store.writeStatus(PlaybackStatus.Idle);
@@ -565,7 +565,7 @@ export class VideoEngine {
    * handle keeps a stable identity for the lifetime of the engine (consumers
    * may list it in useEffect deps).
    */
-  toHandle(): VideoEngineHandle {
+  toHandle(): WebVideoEngineHandle {
     if (this.cachedHandle) return this.cachedHandle;
     this.cachedHandle = {
       play: this.play,
@@ -718,7 +718,7 @@ export class VideoEngine {
   /**
    * Spawns the worker on first use and wires the state plane into the mirror
    * store. Deferring the spawn keeps construction side-effect-free, so a
-   * VideoEngine built during render (e.g. a useState initializer) never leaks
+   * WebVideoEngine built during render (e.g. a useState initializer) never leaks
    * a worker when React discards a duplicate.
    */
   private ensurePort(): EngineWorkerPort | null {
@@ -738,9 +738,9 @@ export class VideoEngine {
     const port = this.ensurePort();
     if (!port) {
       return Promise.reject(
-        new VideoEngineError(
-          VideoEngineErrorCode.Aborted,
-          "video engine disposed",
+        new WebVideoEngineError(
+          WebVideoEngineErrorCode.Aborted,
+          "web video engine disposed",
         ),
       );
     }
@@ -755,9 +755,9 @@ export class VideoEngine {
         if (!this.pending.has(requestId)) return;
         this.pending.delete(requestId);
         reject(
-          new VideoEngineError(
-            VideoEngineErrorCode.BackendCrashed,
-            "video engine command timed out waiting for the worker",
+          new WebVideoEngineError(
+            WebVideoEngineErrorCode.BackendCrashed,
+            "web video engine command timed out waiting for the worker",
           ),
         );
       }, HANG_RECOVERY.WORKER_COMMAND_TIMEOUT_MS);
@@ -811,9 +811,9 @@ export class VideoEngine {
   private requireTimeline(): FrameTimeline {
     const timeline = this.timeline;
     if (!timeline) {
-      throw new VideoEngineError(
-        VideoEngineErrorCode.BackendCrashed,
-        "video engine moved before load resolved its frame timeline",
+      throw new WebVideoEngineError(
+        WebVideoEngineErrorCode.BackendCrashed,
+        "web video engine moved before load resolved its frame timeline",
       );
     }
     return timeline;
@@ -830,7 +830,7 @@ export class VideoEngine {
 
 /**
  * Spawning the worker can fail outright with a DOMException, so not every
- * throw on the way to a loaded engine arrives as a VideoEngineError.
+ * throw on the way to a loaded engine arrives as a WebVideoEngineError.
  */
 /**
  * The engine worker is spawned from a Blob object URL, whose base URL is opaque:
@@ -858,10 +858,10 @@ function readPageHeapBytes(): number | null {
   return timing.memory?.usedJSHeapSize ?? null;
 }
 
-function toEngineError(cause: unknown): VideoEngineError {
-  if (cause instanceof VideoEngineError) return cause;
-  return new VideoEngineError(
-    VideoEngineErrorCode.BackendCrashed,
+function toEngineError(cause: unknown): WebVideoEngineError {
+  if (cause instanceof WebVideoEngineError) return cause;
+  return new WebVideoEngineError(
+    WebVideoEngineErrorCode.BackendCrashed,
     cause instanceof Error ? cause.message : String(cause),
     cause,
   );
@@ -882,7 +882,7 @@ export type PresentedFrameHandler = (presented: PresentedFrame) => void;
  * consumer that latches onto the handle does not also depend on the shape of
  * getPlaybackState.
  */
-export interface VideoEngineHandle {
+export interface WebVideoEngineHandle {
   play(): Promise<void>;
   pause(): void;
   togglePlayback(): void;

@@ -8,10 +8,10 @@
  * pass-through configuration, and the React imperative handle stay inside.
  */
 export {
-  createVideoEngineMediaRendererSource,
-  openVideoEngineMediaSource,
-  type VideoEngineMediaSource,
-  type VideoEngineMediaSourceOptions,
+  createWebVideoEngineMediaRendererSource,
+  openWebVideoEngineMediaSource,
+  type WebVideoEngineMediaSource,
+  type WebVideoEngineMediaSourceOptions,
 } from "supervision";
 export {
   DIAGNOSTICS,
@@ -20,9 +20,9 @@ export {
   PlaybackStatus,
   SourceKind,
   TRACE_RING_BOUNDS,
-  VideoEngine,
-  VideoEngineError,
-  VideoEngineErrorCode,
+  WebVideoEngine,
+  WebVideoEngineError,
+  WebVideoEngineErrorCode,
   cappedResolution,
   displayBoxResolution,
   nativeResolution,
@@ -54,10 +54,10 @@ export type {
   StreamVideoSource,
   TickRate,
   UrlVideoSource,
-  VideoEngineOptions,
   VideoMetadata,
   VideoSource,
   ViewportResolutionOptions,
   Warning,
   WarningSeverity,
+  WebVideoEngineOptions,
 } from "#web-video-engine";

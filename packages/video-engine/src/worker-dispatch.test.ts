@@ -10,7 +10,7 @@ import {
 
 import * as factoryModule from "./create-scrub-cursor";
 import { EngineCore } from "./engine-core";
-import { asSec, VideoEngineError, VideoEngineErrorCode } from "./types";
+import { asSec, WebVideoEngineError, WebVideoEngineErrorCode } from "./types";
 import { handleEngineCommand, type PostEngineEvent } from "./worker-dispatch";
 import type { EngineEvent, MirrorEvent } from "./worker-protocol";
 import {
@@ -190,10 +190,13 @@ describe("handleEngineCommand", () => {
     expect(ack.landing).toBeUndefined();
   });
 
-  it("a VideoEngineError posts an error response preserving the code", async () => {
+  it("a WebVideoEngineError posts an error response preserving the code", async () => {
     const { engine, posts, post, createCursor } = setup();
     createCursor.mockRejectedValueOnce(
-      new VideoEngineError(VideoEngineErrorCode.DecodeUnsupported, "no codec"),
+      new WebVideoEngineError(
+        WebVideoEngineErrorCode.DecodeUnsupported,
+        "no codec",
+      ),
     );
     await handleEngineCommand(
       engine,
@@ -205,7 +208,7 @@ describe("handleEngineCommand", () => {
         type: "error",
         requestId: 9,
         error: {
-          code: VideoEngineErrorCode.DecodeUnsupported,
+          code: WebVideoEngineErrorCode.DecodeUnsupported,
           message: "no codec",
         },
       },
@@ -224,7 +227,10 @@ describe("handleEngineCommand", () => {
       {
         type: "error",
         requestId: 11,
-        error: { code: VideoEngineErrorCode.BackendCrashed, message: "kaboom" },
+        error: {
+          code: WebVideoEngineErrorCode.BackendCrashed,
+          message: "kaboom",
+        },
       },
     ]);
   });

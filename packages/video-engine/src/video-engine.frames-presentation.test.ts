@@ -19,8 +19,8 @@ import type {
   ScrubFrameListener,
   VideoSampleLike,
 } from "./scrub-cursor";
-import { asSec, VideoEngineError, VideoEngineErrorCode } from "./types";
-import { type EngineWorkerPort, VideoEngine } from "./video-engine";
+import { asSec, WebVideoEngineError, WebVideoEngineErrorCode } from "./types";
+import { type EngineWorkerPort, WebVideoEngine } from "./video-engine";
 import { handleEngineCommand } from "./worker-dispatch";
 import type {
   DiagnosticsEvent,
@@ -133,11 +133,11 @@ function fakeCanvas(): OffscreenCanvas {
 }
 
 /** Runs `act` expecting the engine to refuse it, and returns the refusal. */
-function refusal(act: () => void): VideoEngineError {
+function refusal(act: () => void): WebVideoEngineError {
   try {
     act();
   } catch (error) {
-    if (error instanceof VideoEngineError) return error;
+    if (error instanceof WebVideoEngineError) return error;
     throw error;
   }
   throw new Error("expected the canvas to be refused");
@@ -245,7 +245,7 @@ describe("EngineCore in frames presentation", () => {
       }),
     );
 
-    expect(error.code).toBe(VideoEngineErrorCode.PresentationMismatch);
+    expect(error.code).toBe(WebVideoEngineErrorCode.PresentationMismatch);
     expect(engine.getStats()?.renderer).toBeNull();
     await engine.dispose();
   });
@@ -255,7 +255,7 @@ describe("EngineCore in frames presentation", () => {
     engine.setCanvas(fakeCanvas(), { displayWidth: 1280, devicePixelRatio: 1 });
 
     await expect(engine.load(FRAMES_CONFIG)).rejects.toMatchObject({
-      code: VideoEngineErrorCode.PresentationMismatch,
+      code: WebVideoEngineErrorCode.PresentationMismatch,
     });
   });
 
@@ -465,12 +465,12 @@ class FakeWorkerPort implements EngineWorkerPort {
   }
 }
 
-describe("VideoEngine in frames presentation", () => {
-  function setupFacade(): { engine: VideoEngine; cursor: FakeCursor } {
+describe("WebVideoEngine in frames presentation", () => {
+  function setupFacade(): { engine: WebVideoEngine; cursor: FakeCursor } {
     const cursor = makeFakeCursor();
     vi.spyOn(factoryModule, "createScrubCursor").mockResolvedValue(cursor);
     const clock = new FakeClock();
-    const engine = new VideoEngine(
+    const engine = new WebVideoEngine(
       { source: LOAD_CONFIG.source, presentation: "frames" },
       () => new FakeWorkerPort(clock),
     );
@@ -615,7 +615,7 @@ describe("VideoEngine in frames presentation", () => {
 
     const error = refusal(() => engine.bindCanvas({} as HTMLCanvasElement));
 
-    expect(error.code).toBe(VideoEngineErrorCode.PresentationMismatch);
+    expect(error.code).toBe(WebVideoEngineErrorCode.PresentationMismatch);
     await engine.dispose();
   });
 });

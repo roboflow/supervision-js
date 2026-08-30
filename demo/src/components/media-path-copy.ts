@@ -35,7 +35,7 @@ export const demoMediaPathCopy: Record<DemoMediaPath, DemoMediaPathCopy> = {
     goodAt:
       "Scrubbing and frame stepping. A drag paints from frames it already decoded instead of waiting, and jumping into the middle of a long file fetches only the ranges it needs.",
     imports:
-      "createVideoEngineMediaRendererSource, from supervision/web-video-engine. Pass what it returns as the media.",
+      "createWebVideoEngineMediaRendererSource, from supervision/web-video-engine. Pass what it returns as the media.",
     label: "Web video engine",
     pickWhen:
       "Pick it for annotation work: scrubbing, stepping frame by frame, and long files served over the network.",

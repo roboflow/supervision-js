@@ -329,7 +329,7 @@ export interface ScrubTrackInfo {
  *     frame as a keyframe result.
  *   - next is VFR-correct and a no-op while paused (no iterator attached),
  *     so it never advances media time across a paused canvas. The 1/fps step
- *     approximation lives in VideoEngine.step, not here.
+ *     approximation lives in WebVideoEngine.step, not here.
  *   - isIdle is true only when no seek is draining and no pull is in flight.
  *   - subscribe replays the most recent frame to a new listener so the seed
  *     frame from open() is never dropped.

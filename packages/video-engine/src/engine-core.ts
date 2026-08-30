@@ -39,7 +39,7 @@ import {
   type PresentationMode,
   resolvePlaybackRate,
   SourceKind,
-  type VideoEngineError,
+  type WebVideoEngineError,
 } from "./types";
 import {
   type DiagnosticsEvent,
@@ -125,7 +125,7 @@ export class EngineCore {
    * decoder that had already been condemned is how a source with one unusable
    * entry point read as healthy for the rest of the session.
    */
-  private decodeFailure: VideoEngineError | null = null;
+  private decodeFailure: WebVideoEngineError | null = null;
   private presentation: PresentationMode = "canvas";
   private durationMs = 0;
   private paintSeq = 0;
@@ -157,7 +157,7 @@ export class EngineCore {
   private playSeekMaxMs = 0;
   /** The frame the last paint put up, for the diagnostics screen readout. */
   private lastPaintedId: FrameId | null = null;
-  /** Mirrors VideoEngine's interactive-seek latch: true when a drag paused a
+  /** Mirrors WebVideoEngine's interactive-seek latch: true when a drag paused a
    *  playing engine, so endInteractiveSeek knows to resume. */
   private resumeAfterInteractiveSeek = false;
 
@@ -279,7 +279,7 @@ export class EngineCore {
       timeline: this.cursor.track.timeline.toData(),
       codec: null,
       // Reaching here means the open path's canDecode() check passed:
-      // openInput throws VideoEngineError(DecodeUnsupported) before the
+      // openInput throws WebVideoEngineError(DecodeUnsupported) before the
       // cursor is built when the codec is undecodable, so a resolved cursor
       // is decodable by construction.
       canDecode: true,
@@ -519,7 +519,7 @@ export class EngineCore {
    *  exported trace shows the playback-state timeline alongside paints/seeks. */
   private emitStatus(
     status: PlaybackStatus,
-    error: VideoEngineError | null = null,
+    error: WebVideoEngineError | null = null,
   ): void {
     this.emit({
       type: "status",
@@ -536,7 +536,7 @@ export class EngineCore {
    * again. Stop the transport first, then report, so the status a consumer
    * sees and what the engine is doing agree.
    */
-  private handleDecodeFailure(error: VideoEngineError): void {
+  private handleDecodeFailure(error: WebVideoEngineError): void {
     this.decodeFailure ??= error;
     this.playing = false;
     this.clock.pause();
@@ -586,7 +586,7 @@ export class EngineCore {
   }
 
   /** True only when the cursor exists and reports settled. Mirrors
-   *  VideoEngine.isIdle for tests; the facade derives its own from state. */
+   *  WebVideoEngine.isIdle for tests; the facade derives its own from state. */
   isIdle(): boolean {
     const cursor = this.cursor;
     if (!cursor) return true;

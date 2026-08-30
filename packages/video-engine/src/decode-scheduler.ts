@@ -23,8 +23,8 @@ import { ScrubTrajectory } from "./scrub-trajectory";
 import {
   asSec,
   type Sec,
-  VideoEngineError,
-  VideoEngineErrorCode,
+  WebVideoEngineError,
+  WebVideoEngineErrorCode,
 } from "./types";
 
 export interface DecodeSchedulerOptions {
@@ -63,7 +63,7 @@ export interface DecodeSchedulerOptions {
    * accepts every command and answers none of them, so without this the
    * transport reads as playing over a canvas that will never change again.
    */
-  readonly onDecodeFailure?: (error: VideoEngineError) => void;
+  readonly onDecodeFailure?: (error: WebVideoEngineError) => void;
 }
 
 const DEFAULT_EXACT_TOLERANCE_MS = 50;
@@ -179,11 +179,12 @@ export class DecodeScheduler implements ScrubCursor {
   /** The failure markStalled latched, so a caller still awaiting a decode is
    *  handed the same one the consumer was told about rather than a parallel
    *  account of it. */
-  private stallFailure: VideoEngineError | null = null;
+  private stallFailure: WebVideoEngineError | null = null;
   /** Decode requests the live provider has left unanswered in a row; see
    *  MAX_UNANSWERED_DECODES. */
   private unansweredDecodes = 0;
-  private readonly onDecodeFailure: ((error: VideoEngineError) => void) | null;
+  private readonly onDecodeFailure:
+    ((error: WebVideoEngineError) => void) | null;
 
   private iterator: AsyncGenerator<DecodedFrame, void, unknown> | null = null;
   private nextInFlight: Promise<void> = Promise.resolve();
@@ -332,8 +333,8 @@ export class DecodeScheduler implements ScrubCursor {
     }
     const failure =
       this.stallFailure ??
-      new VideoEngineError(
-        VideoEngineErrorCode.DecoderStalled,
+      new WebVideoEngineError(
+        WebVideoEngineErrorCode.DecoderStalled,
         `video decode: the first frame went undecoded across ${HANG_RECOVERY.SEED_DECODE_ATTEMPTS} attempts on the ${this.provider.decodePath} path`,
       );
     this.markStalled(failure);
@@ -910,16 +911,16 @@ export class DecodeScheduler implements ScrubCursor {
   private noteUnanswered(reason: unknown): void {
     this.unansweredDecodes += 1;
     if (
-      reason instanceof VideoEngineError &&
-      reason.code === VideoEngineErrorCode.DecoderStalled
+      reason instanceof WebVideoEngineError &&
+      reason.code === WebVideoEngineErrorCode.DecoderStalled
     ) {
       this.markStalled(reason);
       return;
     }
     if (this.unansweredDecodes >= MAX_UNANSWERED_DECODES) {
       this.markStalled(
-        new VideoEngineError(
-          VideoEngineErrorCode.DecoderStalled,
+        new WebVideoEngineError(
+          WebVideoEngineErrorCode.DecoderStalled,
           `video decode: ${this.unansweredDecodes} decode requests in a row went unanswered on the ${this.provider.decodePath} path`,
           reason,
         ),
@@ -930,7 +931,7 @@ export class DecodeScheduler implements ScrubCursor {
   }
 
   /** Latches the terminal decoder failure and hands it out exactly once. */
-  private markStalled(error: VideoEngineError): void {
+  private markStalled(error: WebVideoEngineError): void {
     if (this.decoderStalled) return;
     this.decoderStalled = true;
     this.stallFailure = error;

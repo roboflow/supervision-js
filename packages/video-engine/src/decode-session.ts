@@ -5,7 +5,7 @@ import {
 } from "./key-packet";
 import { drawRotated, type Rotation } from "./rotation";
 import type { VideoSampleLike } from "./scrub-cursor";
-import { VideoEngineError, VideoEngineErrorCode } from "./types";
+import { WebVideoEngineError, WebVideoEngineErrorCode } from "./types";
 
 /**
  * One packet as the session submits it. Mirrors the fields of mediabunny's
@@ -259,7 +259,7 @@ export class DecodeSession implements SessionFrameSource {
    * same failure, which is what turns a silent forever-retry into one honest
    * error the caller can show.
    */
-  private stalledError: VideoEngineError | null = null;
+  private stalledError: WebVideoEngineError | null = null;
   /**
    * The current entry point's failure, held only until the walk that is owed a
    * picture decides what it means. It condemns the anchor, never the session:
@@ -267,7 +267,7 @@ export class DecodeSession implements SessionFrameSource {
    * every other one, and latching the first failure is what turned a seek into
    * a poisoned GOP into a player that never painted again.
    */
-  private anchorError: VideoEngineError | null = null;
+  private anchorError: WebVideoEngineError | null = null;
   /** The entry currently feeding the decoder, or null before the first one. */
   private entry: DecodeEntry | null = null;
   /** Entry points a decoder error has ruled out, by whole-microsecond
@@ -300,8 +300,8 @@ export class DecodeSession implements SessionFrameSource {
     this.rotation = options.rotation;
     const prefixWidth = drivablePrefixWidth(options.config);
     if (prefixWidth === null) {
-      throw new VideoEngineError(
-        VideoEngineErrorCode.DecodeUnsupported,
+      throw new WebVideoEngineError(
+        WebVideoEngineErrorCode.DecodeUnsupported,
         `DecodeSession: ${options.config.codec} is not AVCC-framed H.264`,
       );
     }
@@ -632,7 +632,7 @@ export class DecodeSession implements SessionFrameSource {
    * is nothing further back to enter from, the failure is the source's and it
    * latches here.
    */
-  private async enterFurtherBack(failure: VideoEngineError): Promise<void> {
+  private async enterFurtherBack(failure: WebVideoEngineError): Promise<void> {
     const entry = this.entry;
     if (!entry?.hasFallback) throw this.latch(failure);
     this.rejectedAnchors.add(entry.key);
@@ -726,16 +726,16 @@ export class DecodeSession implements SessionFrameSource {
         // full pipeline of requests with nothing at all may never have been
         // given a legal place to start, which is the anchor's to answer for.
         if (this.framesDecodedCount === 0) {
-          this.anchorError ??= new VideoEngineError(
-            VideoEngineErrorCode.DecoderStalled,
+          this.anchorError ??= new WebVideoEngineError(
+            WebVideoEngineErrorCode.DecoderStalled,
             `DecodeSession: the decoder acknowledged ${owed} decode requests and produced no frame`,
           );
           resolve();
           return;
         }
         reject(
-          new VideoEngineError(
-            VideoEngineErrorCode.BackendCrashed,
+          new WebVideoEngineError(
+            WebVideoEngineErrorCode.BackendCrashed,
             `DecodeSession: decoder produced no output in ${this.outputTimeoutMs}ms with ${owed} chunks in flight`,
           ),
         );
@@ -788,8 +788,8 @@ export class DecodeSession implements SessionFrameSource {
 
   private fail(from: VideoDecoderLike, error: unknown): void {
     if (from !== this.decoder) return;
-    this.anchorError ??= new VideoEngineError(
-      VideoEngineErrorCode.DecoderStalled,
+    this.anchorError ??= new WebVideoEngineError(
+      WebVideoEngineErrorCode.DecoderStalled,
       "DecodeSession: the decoder reported an error",
       error,
     );
@@ -799,17 +799,17 @@ export class DecodeSession implements SessionFrameSource {
   /** Latches the terminal failure and returns it. First writer wins, so the
    *  cause a caller is handed is the one that started the failure rather than
    *  whichever consequence surfaced last. */
-  private stall(what: string, cause?: unknown): VideoEngineError {
+  private stall(what: string, cause?: unknown): WebVideoEngineError {
     return this.latch(
-      new VideoEngineError(
-        VideoEngineErrorCode.DecoderStalled,
+      new WebVideoEngineError(
+        WebVideoEngineErrorCode.DecoderStalled,
         `DecodeSession: ${what}`,
         cause,
       ),
     );
   }
 
-  private latch(error: VideoEngineError): VideoEngineError {
+  private latch(error: WebVideoEngineError): WebVideoEngineError {
     this.stalledError ??= error;
     return this.stalledError;
   }

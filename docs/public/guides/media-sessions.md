@@ -57,11 +57,11 @@ on, the session reports a buffering activity while it waits. The detection gate
 applies to a session with appendable detections, and `playbackGate: true` turns
 it on for any session. What the wait costs depends on the source. A source the
 renderer pulls samples from is held frame by frame by both gates. A source that
-presents its own frames, which is what `openVideoEngineMediaSource` returns, is
+presents its own frames, which is what `openWebVideoEngineMediaSource` returns, is
 held at the start of playback by the render-preparation gate and stopped again
 by the detection gate at any frame its detections do not cover.
 
-Video files are opened through `createVideoEngineMediaRendererSource`, which
+Video files are opened through `createWebVideoEngineMediaRendererSource`, which
 decodes, seeks and presents frames itself and reports the media time of the
 frame it put on screen. Passing a URL or a `Blob` directly keeps the renderer
 pulling samples instead.

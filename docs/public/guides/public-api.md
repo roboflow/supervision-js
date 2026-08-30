@@ -155,7 +155,7 @@ not the first thing most users should reach for:
   display time — so a host can correlate transport-side results with what is on
   screen without opening a second hidden video. No DOM element or vendor object
   crosses that boundary, and every field beyond `mediaTime` is optional;
-- `createVideoEngineMediaRendererSource()` and `openVideoEngineMediaSource()`
+- `createWebVideoEngineMediaRendererSource()` and `openWebVideoEngineMediaSource()`
   for video presented by the web video engine, which owns the playhead and
   announces each frame it puts on screen while the renderer composites it with
   annotations drawn from that frame's own timestamp. Both are also exported from

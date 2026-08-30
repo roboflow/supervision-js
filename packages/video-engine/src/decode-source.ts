@@ -34,8 +34,8 @@ import {
 import {
   asSec,
   SourceKind,
-  VideoEngineError,
-  VideoEngineErrorCode,
+  WebVideoEngineError,
+  WebVideoEngineErrorCode,
   type DecodePath,
   type UrlSourceReadConfig,
   type UrlVideoSource,
@@ -543,8 +543,8 @@ async function openInput(
   const videoTrack = await resolveVideoTrack(input);
   if (!(await videoTrack.canDecode())) {
     const decoderConfig = await videoTrack.getDecoderConfig();
-    throw new VideoEngineError(
-      VideoEngineErrorCode.DecodeUnsupported,
+    throw new WebVideoEngineError(
+      WebVideoEngineErrorCode.DecodeUnsupported,
       `openInput: browser cannot decode this video track's codec ${
         decoderConfig?.codec ?? "(unknown)"
       }`,
@@ -602,8 +602,8 @@ async function resolveVideoTrack(
     videoTrack = await input.getPrimaryVideoTrack();
   } catch (error) {
     if (error instanceof UnsupportedInputFormatError) {
-      throw new VideoEngineError(
-        VideoEngineErrorCode.ContainerUnreadable,
+      throw new WebVideoEngineError(
+        WebVideoEngineErrorCode.ContainerUnreadable,
         "openInput: the demuxer does not read this file's container",
         error,
       );
@@ -613,12 +613,12 @@ async function resolveVideoTrack(
   if (videoTrack) return videoTrack;
   const tracks = await input.getTracks();
   throw tracks.length === 0
-    ? new VideoEngineError(
-        VideoEngineErrorCode.VideoTrackUnreadable,
+    ? new WebVideoEngineError(
+        WebVideoEngineErrorCode.VideoTrackUnreadable,
         "openInput: the container opened and the demuxer parsed no track out of it",
       )
-    : new VideoEngineError(
-        VideoEngineErrorCode.NoVideoTrack,
+    : new WebVideoEngineError(
+        WebVideoEngineErrorCode.NoVideoTrack,
         "openInput: the container's tracks read and none of them carries video",
       );
 }
@@ -654,8 +654,8 @@ async function readFrameTimeline(videoTrack: unknown): Promise<FrameTimeline> {
   })) {
     const at = Math.round(packet.timestamp * tickRate);
     if (ticks.length >= FRAME_TIMELINE.MAX_FRAMES) {
-      throw new VideoEngineError(
-        VideoEngineErrorCode.DecodeUnsupported,
+      throw new WebVideoEngineError(
+        WebVideoEngineErrorCode.DecodeUnsupported,
         `openInput: source video track carries more than ${FRAME_TIMELINE.MAX_FRAMES} frames`,
       );
     }
@@ -666,8 +666,8 @@ async function readFrameTimeline(videoTrack: unknown): Promise<FrameTimeline> {
     }
   }
   if (ticks.length === 0) {
-    throw new VideoEngineError(
-      VideoEngineErrorCode.DecodeUnsupported,
+    throw new WebVideoEngineError(
+      WebVideoEngineErrorCode.DecodeUnsupported,
       "openInput: source video track has no frames",
     );
   }

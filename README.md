@@ -68,7 +68,7 @@ only the public browser entrypoints:
 ```ts
 import { createMediaSession } from "supervision";
 import { createMaskBrushEditor } from "supervision/editing";
-import { createVideoEngineMediaRendererSource } from "supervision/web-video-engine";
+import { createWebVideoEngineMediaRendererSource } from "supervision/web-video-engine";
 ```
 
 The web video engine is one of those entrypoints, so opening a video file takes

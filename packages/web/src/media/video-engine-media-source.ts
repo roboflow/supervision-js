@@ -10,8 +10,8 @@ import type {
   DecodeResolutionStrategy,
   DisplayBoxResolutionOptions,
   EngineReadySnapshot,
-  VideoEngine,
-  VideoEngineOptions,
+  WebVideoEngine,
+  WebVideoEngineOptions,
   VideoSource,
 } from "#web-video-engine";
 import type {
@@ -31,8 +31,8 @@ const DEFAULT_FRAME_RATE = 30;
 const TIMESTAMP_EPSILON_SECONDS = 1e-6;
 const FRAMES_PRESENTATION_PREVIEW_MAX_WIDTH_PX = 320;
 
-export interface VideoEngineMediaSourceOptions extends Omit<
-  VideoEngineOptions,
+export interface WebVideoEngineMediaSourceOptions extends Omit<
+  WebVideoEngineOptions,
   "presentation"
 > {
   /**
@@ -55,12 +55,12 @@ export interface VideoEngineMediaSourceOptions extends Omit<
   readonly frameDecodeStrategy?: DecodeResolutionStrategy;
 }
 
-export interface VideoEngineMediaSource extends DecodedMediaSource {
+export interface WebVideoEngineMediaSource extends DecodedMediaSource {
   /**
    * The loaded engine. Naming the renderer's channel in the type is what fails
    * the build if the engine's transport stops answering that seam.
    */
-  readonly engine: VideoEngine & PresentedFrameChannel;
+  readonly engine: WebVideoEngine & PresentedFrameChannel;
 }
 
 /**
@@ -73,12 +73,12 @@ export interface VideoEngineMediaSource extends DecodedMediaSource {
  * earns the screen, so a compositor subscribes to `engine` and never pulls
  * samples here.
  */
-export async function openVideoEngineMediaSource(
-  options: VideoEngineMediaSourceOptions,
-): Promise<VideoEngineMediaSource> {
-  const { VideoEngine, displayBoxResolution } = await importEngineEntry();
+export async function openWebVideoEngineMediaSource(
+  options: WebVideoEngineMediaSourceOptions,
+): Promise<WebVideoEngineMediaSource> {
+  const { WebVideoEngine, displayBoxResolution } = await importEngineEntry();
   const { display, frameDecodeStrategy, ...engineOptions } = options;
-  const engine = new VideoEngine({
+  const engine = new WebVideoEngine({
     decodeStrategy: display ? displayBoxResolution(display) : undefined,
     previewWidth: framesPreviewWidth(display),
     ...engineOptions,
@@ -110,12 +110,12 @@ export async function openVideoEngineMediaSource(
   }
 }
 
-export function createVideoEngineMediaRendererSource(
-  options: VideoEngineMediaSourceOptions,
+export function createWebVideoEngineMediaRendererSource(
+  options: WebVideoEngineMediaSourceOptions,
 ): MediaRendererSource {
   return {
     open() {
-      return openVideoEngineMediaSource(options);
+      return openWebVideoEngineMediaSource(options);
     },
   };
 }
@@ -255,7 +255,8 @@ function createSample(
       closed = true;
     },
     draw(context, dx, dy, dWidth = frame.width, dHeight = frame.height) {
-      if (closed) throw new Error("Cannot draw a closed video engine frame.");
+      if (closed)
+        throw new Error("Cannot draw a closed web video engine frame.");
       context.drawImage(frame.canvas, dx, dy, dWidth, dHeight);
     },
     duration,

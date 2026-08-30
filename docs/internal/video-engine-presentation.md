@@ -22,7 +22,7 @@ built worker as a deployment asset for hosts whose CSP forbids `blob:` workers.
 
 `supervision/web-video-engine` is a barrel, `packages/web/src/web-video-engine`.
 It re-exports the engine, and beside it the adapter that opens one:
-`createVideoEngineMediaRendererSource` and `openVideoEngineMediaSource` are
+`createWebVideoEngineMediaRendererSource` and `openWebVideoEngineMediaSource` are
 importable from the subpath and from `supervision` itself, and are the same
 functions either way. `#web-video-engine` is the browser package's own alias for
 the staged engine build; only the barrel and the media seam may name it. `no-restricted-imports` in
@@ -232,7 +232,7 @@ producer ends and loop is on".
 ## Where To See It Running
 
 The demo is the integration, not a separate experiment. Fixture videos and
-uploaded files both open through `createVideoEngineMediaRendererSource()`, and
+uploaded files both open through `createWebVideoEngineMediaRendererSource()`, and
 the diagnostics panel reads the presented-frame stream through a tap that
 records and forwards while holding nothing, plus the renderer's own render count
 and prepared-window snapshot.

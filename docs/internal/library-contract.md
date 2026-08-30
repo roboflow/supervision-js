@@ -161,7 +161,7 @@ scene adapters, workers, and prepared-artifact implementation details belong to
 Mediabunny remains the default adapter for reading, decoding, and normalizing
 media: the `src` path, a `Blob`, normalization output, and browser `MediaStream`
 inputs all open through it. A host that passes
-`createVideoEngineMediaRendererSource()` gets an engine-backed source instead,
+`createWebVideoEngineMediaRendererSource()` gets an engine-backed source instead,
 which announces every frame it puts on screen so the renderer composites with no
 pull loop and no second clock. The session contract is shaped around neither
 engine's types.

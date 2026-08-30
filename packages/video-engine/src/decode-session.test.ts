@@ -8,7 +8,7 @@ import {
   type VideoDecoderLike,
 } from "./decode-session";
 import type { Rotation } from "./rotation";
-import { VideoEngineError, VideoEngineErrorCode } from "./types";
+import { WebVideoEngineError, WebVideoEngineErrorCode } from "./types";
 import {
   paintedCorners,
   QUARTER_TURNS,
@@ -483,12 +483,12 @@ describe("DecodeSession decoder failure", () => {
 
   async function codeOf(
     work: Promise<unknown>,
-  ): Promise<VideoEngineErrorCode | string> {
+  ): Promise<WebVideoEngineErrorCode | string> {
     try {
       await work;
       return "resolved";
     } catch (error) {
-      return error instanceof VideoEngineError ? error.code : String(error);
+      return error instanceof WebVideoEngineError ? error.code : String(error);
     }
   }
 
@@ -504,7 +504,7 @@ describe("DecodeSession decoder failure", () => {
     );
 
     await expect(codeOf(session.frameAt(0.5))).resolves.toBe(
-      VideoEngineErrorCode.DecoderStalled,
+      WebVideoEngineErrorCode.DecoderStalled,
     );
   });
 
@@ -537,7 +537,7 @@ describe("DecodeSession decoder failure", () => {
     });
 
     await expect(codeOf(session.frameAt(0.5))).resolves.toBe(
-      VideoEngineErrorCode.DecoderStalled,
+      WebVideoEngineErrorCode.DecoderStalled,
     );
   });
 
@@ -551,7 +551,7 @@ describe("DecodeSession decoder failure", () => {
     // pipe could tell: the only evidence is that none came back.
     expect(silent.chunks.length).toBeGreaterThan(0);
     expect(session.framesDecoded).toBe(0);
-    expect(code).toBe(VideoEngineErrorCode.DecoderStalled);
+    expect(code).toBe(WebVideoEngineErrorCode.DecoderStalled);
   });
 
   it("the silent-decoder failure is latched, so a retry does not wait it out again", async () => {
@@ -575,7 +575,7 @@ describe("DecodeSession decoder failure", () => {
     const code = await codeOf(session.frameAt(6));
 
     expect(session.framesDecoded).toBeGreaterThan(0);
-    expect(code).toBe(VideoEngineErrorCode.BackendCrashed);
+    expect(code).toBe(WebVideoEngineErrorCode.BackendCrashed);
   });
 });
 

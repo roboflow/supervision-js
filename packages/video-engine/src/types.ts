@@ -100,7 +100,7 @@ export enum PlaybackStatus {
   Errored = "ERRORED",
 }
 
-export enum VideoEngineErrorCode {
+export enum WebVideoEngineErrorCode {
   DecodeUnsupported = "DECODE_UNSUPPORTED",
   SourceUnreadable = "SOURCE_UNREADABLE",
   /**
@@ -138,14 +138,14 @@ export enum VideoEngineErrorCode {
 }
 
 /**
- * Thrown by createScrubCursor / VideoEngine.load when decode is unsupported
- * or the source is unreadable. Branch on `error.code` (VideoEngineErrorCode)
+ * Thrown by createScrubCursor / WebVideoEngine.load when decode is unsupported
+ * or the source is unreadable. Branch on `error.code` (WebVideoEngineErrorCode)
  * to differentiate decode failures from network failures.
  */
-export class VideoEngineError extends Error {
-  readonly code: VideoEngineErrorCode;
+export class WebVideoEngineError extends Error {
+  readonly code: WebVideoEngineErrorCode;
   readonly cause?: unknown;
-  constructor(code: VideoEngineErrorCode, message: string, cause?: unknown) {
+  constructor(code: WebVideoEngineErrorCode, message: string, cause?: unknown) {
     super(message);
     this.code = code;
     this.cause = cause;
@@ -154,9 +154,9 @@ export class VideoEngineError extends Error {
 
 /** Shared by the facade and the core so a host gets the same refusal wherever
  *  its canvas is caught. */
-export function canvasBindingRefused(): VideoEngineError {
-  return new VideoEngineError(
-    VideoEngineErrorCode.PresentationMismatch,
+export function canvasBindingRefused(): WebVideoEngineError {
+  return new WebVideoEngineError(
+    WebVideoEngineErrorCode.PresentationMismatch,
     'presentation "frames" leaves the canvas to the host: this engine paints nothing and hands out VideoFrames instead',
   );
 }
@@ -177,8 +177,8 @@ export function resolvePlaybackRate(rate: number): number {
     rate < PLAYBACK_RATE.MIN ||
     rate > PLAYBACK_RATE.MAX
   ) {
-    throw new VideoEngineError(
-      VideoEngineErrorCode.RateUnsupported,
+    throw new WebVideoEngineError(
+      WebVideoEngineErrorCode.RateUnsupported,
       `playback rate ${rate} is outside the supported forward range ${PLAYBACK_RATE.MIN}-${PLAYBACK_RATE.MAX}; reverse playback is not supported`,
     );
   }
@@ -187,7 +187,7 @@ export function resolvePlaybackRate(rate: number): number {
 
 export interface PlaybackState {
   status: PlaybackStatus;
-  error: VideoEngineError | null;
+  error: WebVideoEngineError | null;
 }
 
 export interface VideoMetadata {

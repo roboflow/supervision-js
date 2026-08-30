@@ -17,7 +17,7 @@ export const CANVAS_PRESENTATION_NOTICE =
 /**
  * Which side of the engine's presentation fork this page load runs.
  *
- * The demo reaches the engine through `createVideoEngineMediaRendererSource`,
+ * The demo reaches the engine through `createWebVideoEngineMediaRendererSource`,
  * whose options type removes `presentation` and pins "frames", so the engine's
  * own default is unreachable from the supported path. This is the door to it:
  * canvas mode is opened by constructing the engine directly and giving it the

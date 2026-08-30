@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   PlaybackStatus,
   SourceKind,
-  VideoEngine,
+  WebVideoEngine,
   type DiagnosticsSnapshot,
   type EngineReadySnapshot,
 } from "supervision/web-video-engine";
@@ -31,7 +31,7 @@ export function CanvasPresentationView() {
   const fixture = useSelectedFixture();
   const playbackSrc = resolveDemoFixturePlaybackSrc(fixture);
   const [mount, setMount] = useState<HTMLDivElement | null>(null);
-  const engineRef = useRef<VideoEngine | null>(null);
+  const engineRef = useRef<WebVideoEngine | null>(null);
   const [metadata, setMetadata] = useState<EngineReadySnapshot | null>(null);
   const [diagnostics, setDiagnostics] = useState<DiagnosticsSnapshot | null>(
     null,
@@ -53,7 +53,7 @@ export function CanvasPresentationView() {
     canvas.className = "canvas-presentation__canvas";
     mount.append(canvas);
 
-    const engine = new VideoEngine({
+    const engine = new WebVideoEngine({
       presentation: "canvas",
       source: { kind: SourceKind.Url, url: playbackSrc },
     });

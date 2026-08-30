@@ -51,7 +51,7 @@ Import the supported JavaScript entrypoints:
 ```ts
 import { createMediaSession } from "supervision";
 import { createMaskBrushEditor } from "supervision/editing";
-import { createVideoEngineMediaRendererSource } from "supervision/web-video-engine";
+import { createWebVideoEngineMediaRendererSource } from "supervision/web-video-engine";
 ```
 
 ## Minimal Browser Integration
@@ -134,7 +134,7 @@ screen, and the renderer composites that frame and draws every annotation layer
 from the same media time. `sampleSink` stays required either way, and still
 serves thumbnails and one-off frame grabs.
 
-`createVideoEngineMediaRendererSource()` is the implementation of that in this
+`createWebVideoEngineMediaRendererSource()` is the implementation of that in this
 package. `PresentedFrameChannel` is exported so a host can implement its own.
 
 ## Add Static Detections

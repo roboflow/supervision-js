@@ -208,7 +208,7 @@ test("tarball ships the video engine as its own lazily loaded subpath", () => {
   );
 
   assert.match(barrel, /from ['"]\.\/engine\.js['"]/);
-  assert.match(barrel, /createVideoEngineMediaRendererSource/);
+  assert.match(barrel, /createWebVideoEngineMediaRendererSource/);
   assert.match(barrel, /from ['"]\.\.\/index\.js['"]/);
 });
 
@@ -423,10 +423,10 @@ test("clean consumer resolves the three video engine subpaths", () => {
       "--input-type=module",
       "-e",
       [
-        'const { VideoEngine, VideoEngineErrorCode } = await import("supervision/web-video-engine");',
+        'const { WebVideoEngine, WebVideoEngineErrorCode } = await import("supervision/web-video-engine");',
         'const { AnalysisSession } = await import("supervision/web-video-engine/analysis");',
         'const workerUrl = import.meta.resolve("supervision/web-video-engine/worker");',
-        "console.log(typeof VideoEngine, typeof AnalysisSession, VideoEngineErrorCode.NoVideoTrack, workerUrl.endsWith('/web-video-engine/engine.worker.js'));",
+        "console.log(typeof WebVideoEngine, typeof AnalysisSession, WebVideoEngineErrorCode.NoVideoTrack, workerUrl.endsWith('/web-video-engine/engine.worker.js'));",
       ].join("\n"),
     ],
     consumerDir,
@@ -509,9 +509,9 @@ test("a consumer that never opens a video source does not bundle the engine", ()
   ]);
   const opensVideo = buildConsumerApp("app-video", [
     'import { createMediaSession } from "supervision";',
-    'import { createVideoEngineMediaRendererSource } from "supervision/web-video-engine";',
+    'import { createWebVideoEngineMediaRendererSource } from "supervision/web-video-engine";',
     "",
-    "globalThis.supervisionEntrypoints = [createMediaSession, createVideoEngineMediaRendererSource];",
+    "globalThis.supervisionEntrypoints = [createMediaSession, createWebVideoEngineMediaRendererSource];",
   ]);
 
   assert.ok(

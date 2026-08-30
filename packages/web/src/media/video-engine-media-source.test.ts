@@ -3,8 +3,8 @@ import type { UrlVideoSource } from "#web-video-engine";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  createVideoEngineMediaRendererSource,
-  openVideoEngineMediaSource,
+  createWebVideoEngineMediaRendererSource,
+  openWebVideoEngineMediaSource,
 } from "./video-engine-media-source";
 
 type ReadySnapshot = {
@@ -43,7 +43,7 @@ const engineModule = vi.hoisted(() => () => ({
     kind: "displayBox",
     ...(options as object),
   }),
-  VideoEngine: class {
+  WebVideoEngine: class {
     readonly dispose = engine.dispose;
     readonly load = engine.load;
 
@@ -132,7 +132,7 @@ describe("video engine media source", () => {
   });
 
   it("reads metadata from the engine ready snapshot", async () => {
-    const source = await openVideoEngineMediaSource({ source: urlSource });
+    const source = await openWebVideoEngineMediaSource({ source: urlSource });
 
     expect(source.metadata).toEqual({
       audioTrackCount: 0,
@@ -153,7 +153,7 @@ describe("video engine media source", () => {
   });
 
   it("reports the declared mime type of a stream source", async () => {
-    const source = await openVideoEngineMediaSource({
+    const source = await openWebVideoEngineMediaSource({
       source: {
         kind: SourceKind.Stream,
         mimeType: "video/webm",
@@ -167,14 +167,14 @@ describe("video engine media source", () => {
   it("leaves the frame rate unknown when the engine reports none", async () => {
     engine.load.mockResolvedValue({ ...READY_SNAPSHOT, nativeFps: null });
 
-    const source = await openVideoEngineMediaSource({ source: urlSource });
+    const source = await openWebVideoEngineMediaSource({ source: urlSource });
 
     expect(source.metadata.estimatedFrameRate).toBeNull();
     expect(source.metadata.estimatedFrameCount).toBeNull();
   });
 
   it("opens the analysis entry only once the first frame is pulled", async () => {
-    const source = await openVideoEngineMediaSource({
+    const source = await openWebVideoEngineMediaSource({
       frameDecodeStrategy: { kind: "capped", maxWidth: 320 },
       source: urlSource,
     });
@@ -191,7 +191,7 @@ describe("video engine media source", () => {
   });
 
   it("grabs a single frame at the requested timestamp", async () => {
-    const source = await openVideoEngineMediaSource({ source: urlSource });
+    const source = await openWebVideoEngineMediaSource({ source: urlSource });
 
     const sample = await source.sampleSink.getSample(0.05);
 
@@ -213,7 +213,7 @@ describe("video engine media source", () => {
   });
 
   it("grabs a set of timestamps in one extraction", async () => {
-    const source = await openVideoEngineMediaSource({ source: urlSource });
+    const source = await openWebVideoEngineMediaSource({ source: urlSource });
 
     const timestamps = [];
     for await (const sample of source.sampleSink.samplesAtTimestamps!([
@@ -232,7 +232,7 @@ describe("video engine media source", () => {
 
   it("keeps a gap on the timestamp it belongs to", async () => {
     stubExtraction(createFrames([0.04]));
-    const source = await openVideoEngineMediaSource({ source: urlSource });
+    const source = await openWebVideoEngineMediaSource({ source: urlSource });
 
     const timestamps = [];
     for await (const sample of source.sampleSink.samplesAtTimestamps!([
@@ -245,7 +245,7 @@ describe("video engine media source", () => {
   });
 
   it("refuses to draw a closed sample", async () => {
-    const source = await openVideoEngineMediaSource({ source: urlSource });
+    const source = await openWebVideoEngineMediaSource({ source: urlSource });
     const sample = await source.sampleSink.getSample(0);
 
     sample?.close();
@@ -256,7 +256,7 @@ describe("video engine media source", () => {
   });
 
   it("walks one frame at a time and stops at the end of the track", async () => {
-    const source = await openVideoEngineMediaSource({ source: urlSource });
+    const source = await openWebVideoEngineMediaSource({ source: urlSource });
 
     const timestamps = await collectTimestamps(source.sampleSink.samples(0));
 
@@ -264,7 +264,7 @@ describe("video engine media source", () => {
   });
 
   it("stops walking at the requested end timestamp", async () => {
-    const source = await openVideoEngineMediaSource({ source: urlSource });
+    const source = await openWebVideoEngineMediaSource({ source: urlSource });
 
     const timestamps = await collectTimestamps(
       source.sampleSink.samples(0, 0.05),
@@ -275,7 +275,7 @@ describe("video engine media source", () => {
 
   it("yields nothing when no frame covers the requested start", async () => {
     stubExtraction(createFrames([5]));
-    const source = await openVideoEngineMediaSource({ source: urlSource });
+    const source = await openWebVideoEngineMediaSource({ source: urlSource });
 
     const timestamps = await collectTimestamps(source.sampleSink.samples(0));
 
@@ -283,7 +283,7 @@ describe("video engine media source", () => {
   });
 
   it("disposes the engine and the opened analysis entry", async () => {
-    const source = await openVideoEngineMediaSource({ source: urlSource });
+    const source = await openWebVideoEngineMediaSource({ source: urlSource });
     await source.sampleSink.getSample(0);
 
     source.input.dispose();
@@ -296,13 +296,13 @@ describe("video engine media source", () => {
     engine.load.mockRejectedValue(new Error("source unreadable"));
 
     await expect(
-      openVideoEngineMediaSource({ source: urlSource }),
+      openWebVideoEngineMediaSource({ source: urlSource }),
     ).rejects.toThrowError("source unreadable");
     expect(engine.dispose).toHaveBeenCalledTimes(1);
   });
 
   it("opens the same source through the renderer source contract", async () => {
-    const rendererSource = createVideoEngineMediaRendererSource({
+    const rendererSource = createWebVideoEngineMediaRendererSource({
       source: urlSource,
     });
 
@@ -315,7 +315,7 @@ describe("video engine media source", () => {
   });
 
   it("leaves the decode resolution to the engine when no display box is given", async () => {
-    const rendererSource = createVideoEngineMediaRendererSource({
+    const rendererSource = createWebVideoEngineMediaRendererSource({
       source: urlSource,
     });
 
@@ -326,7 +326,7 @@ describe("video engine media source", () => {
   });
 
   it("decodes to the display box the caller composites into", async () => {
-    const rendererSource = createVideoEngineMediaRendererSource({
+    const rendererSource = createWebVideoEngineMediaRendererSource({
       display: {
         boxWidth: 1080,
         boxHeight: 854,
@@ -349,7 +349,7 @@ describe("video engine media source", () => {
   });
 
   it("lets an explicit decode strategy win over the display box", async () => {
-    const rendererSource = createVideoEngineMediaRendererSource({
+    const rendererSource = createWebVideoEngineMediaRendererSource({
       decodeStrategy: { kind: "native" },
       display: { boxWidth: 1080, boxHeight: 854, devicePixelRatio: 2 },
       source: urlSource,
@@ -362,7 +362,7 @@ describe("video engine media source", () => {
   });
 
   it("holds scrub previews to one width across every box big enough for them", async () => {
-    const rendererSource = createVideoEngineMediaRendererSource({
+    const rendererSource = createWebVideoEngineMediaRendererSource({
       display: {
         boxWidth: 1080,
         boxHeight: 854,
@@ -379,7 +379,7 @@ describe("video engine media source", () => {
   });
 
   it("keeps a scrub preview no wider than the device pixels of a small box", async () => {
-    const rendererSource = createVideoEngineMediaRendererSource({
+    const rendererSource = createWebVideoEngineMediaRendererSource({
       display: {
         boxWidth: 180,
         boxHeight: 320,
@@ -396,7 +396,7 @@ describe("video engine media source", () => {
   });
 
   it("caps an unstated pixel-ratio ceiling the way the decode strategy does", async () => {
-    const rendererSource = createVideoEngineMediaRendererSource({
+    const rendererSource = createWebVideoEngineMediaRendererSource({
       display: { boxWidth: 100, boxHeight: 200, devicePixelRatio: 3 },
       source: urlSource,
     });
@@ -408,7 +408,7 @@ describe("video engine media source", () => {
   });
 
   it("lets the caller size scrub previews themselves", async () => {
-    const rendererSource = createVideoEngineMediaRendererSource({
+    const rendererSource = createWebVideoEngineMediaRendererSource({
       previewWidth: 480,
       source: urlSource,
     });

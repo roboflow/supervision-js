@@ -53,7 +53,7 @@ describe("media errors", () => {
       ],
       [
         "BACKEND_CRASHED",
-        "video engine command timed out waiting for the worker",
+        "web video engine command timed out waiting for the worker",
         MediaErrorKind.Decode,
       ],
     ];

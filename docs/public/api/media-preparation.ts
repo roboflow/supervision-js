@@ -17,7 +17,7 @@ export {
   MediaProbeStatus,
   normalizeMedia,
   normalizeMediaProgressively,
-  openVideoEngineMediaSource,
+  openWebVideoEngineMediaSource,
   prepareMedia,
   prepareMediaProgressively,
   probeMedia,
@@ -56,6 +56,6 @@ export {
   type ProgressivePreparedMedia,
   type ProgressiveNormalizedMedia,
   type StaticImageSource,
-  type VideoEngineMediaSource,
-  type VideoEngineMediaSourceOptions,
+  type WebVideoEngineMediaSource,
+  type WebVideoEngineMediaSourceOptions,
 } from "supervision";

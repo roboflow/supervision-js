@@ -17,10 +17,10 @@ import { setDiagnosticsEnabled } from "./scrub-controller";
 import { TRACE_SCHEMA } from "./trace-recorder";
 import {
   PlaybackStatus,
-  VideoEngineError,
-  VideoEngineErrorCode,
+  WebVideoEngineError,
+  WebVideoEngineErrorCode,
 } from "./types";
-import { VideoEngine, type EngineWorkerPort } from "./video-engine";
+import { WebVideoEngine, type EngineWorkerPort } from "./video-engine";
 import { handleEngineCommand } from "./worker-dispatch";
 import type { EngineCommand, EngineEvent } from "./worker-protocol";
 import {
@@ -89,7 +89,7 @@ class FakeWorkerPort implements EngineWorkerPort {
 }
 
 function setup(): {
-  engine: VideoEngine;
+  engine: WebVideoEngine;
   clock: FakeClock;
   cursor: FakeCursor;
   createCursor: MockInstance;
@@ -101,14 +101,14 @@ function setup(): {
     .mockResolvedValue(cursor);
   const clock = new FakeClock();
   let port: FakeWorkerPort | null = null;
-  const engine = new VideoEngine({ source: LOAD_CONFIG.source }, () => {
+  const engine = new WebVideoEngine({ source: LOAD_CONFIG.source }, () => {
     port = new FakeWorkerPort(clock);
     return port;
   });
   return { engine, clock, cursor, createCursor, getPort: () => port };
 }
 
-describe("VideoEngine", () => {
+describe("WebVideoEngine", () => {
   it("load returns metadata and broadcasts Loading then Ready", async () => {
     const { engine } = setup();
     const statuses: PlaybackStatus[] = [];
@@ -125,10 +125,13 @@ describe("VideoEngine", () => {
   it("a failed load rejects with the engine error code preserved", async () => {
     const { engine, createCursor } = setup();
     createCursor.mockRejectedValueOnce(
-      new VideoEngineError(VideoEngineErrorCode.DecodeUnsupported, "no codec"),
+      new WebVideoEngineError(
+        WebVideoEngineErrorCode.DecodeUnsupported,
+        "no codec",
+      ),
     );
     await expect(engine.load()).rejects.toMatchObject({
-      code: VideoEngineErrorCode.DecodeUnsupported,
+      code: WebVideoEngineErrorCode.DecodeUnsupported,
       message: "no codec",
     });
     await engine.dispose();
@@ -137,8 +140,8 @@ describe("VideoEngine", () => {
   it("a failed load lands in Errored with the error attached", async () => {
     const { engine, createCursor } = setup();
     createCursor.mockRejectedValueOnce(
-      new VideoEngineError(
-        VideoEngineErrorCode.SourceUnreadable,
+      new WebVideoEngineError(
+        WebVideoEngineErrorCode.SourceUnreadable,
         "404 fetching source",
       ),
     );
@@ -150,7 +153,7 @@ describe("VideoEngine", () => {
     expect(statuses).toEqual([PlaybackStatus.Loading, PlaybackStatus.Errored]);
     const state = engine.toHandle().getPlaybackState();
     expect(state.status).toBe(PlaybackStatus.Errored);
-    expect(state.error?.code).toBe(VideoEngineErrorCode.SourceUnreadable);
+    expect(state.error?.code).toBe(WebVideoEngineErrorCode.SourceUnreadable);
     expect(state.error?.message).toBe("404 fetching source");
     await engine.dispose();
   });
@@ -158,8 +161,8 @@ describe("VideoEngine", () => {
   it("a load retried after a failure clears the error and reaches Ready", async () => {
     const { engine, createCursor } = setup();
     createCursor.mockRejectedValueOnce(
-      new VideoEngineError(
-        VideoEngineErrorCode.SourceUnreadable,
+      new WebVideoEngineError(
+        WebVideoEngineErrorCode.SourceUnreadable,
         "connection reset",
       ),
     );
@@ -180,12 +183,12 @@ describe("VideoEngine", () => {
   });
 
   it("a worker that cannot be spawned lands in Errored as a backend crash", async () => {
-    const engine = new VideoEngine({ source: LOAD_CONFIG.source }, () => {
+    const engine = new WebVideoEngine({ source: LOAD_CONFIG.source }, () => {
       throw new Error("Worker construction blocked");
     });
 
     await expect(engine.load()).rejects.toMatchObject({
-      code: VideoEngineErrorCode.BackendCrashed,
+      code: WebVideoEngineErrorCode.BackendCrashed,
       message: "Worker construction blocked",
     });
     expect(engine.getStatus()).toBe(PlaybackStatus.Errored);
@@ -212,13 +215,13 @@ describe("VideoEngine", () => {
       terminate(): void {}
     }
 
-    const engine = new VideoEngine(
+    const engine = new WebVideoEngine(
       { source: LOAD_CONFIG.source },
       () => new LoadStallingPort(),
     );
     const pending = engine.load();
     const assertion = expect(pending).rejects.toMatchObject({
-      code: VideoEngineErrorCode.Aborted,
+      code: WebVideoEngineErrorCode.Aborted,
     });
 
     await engine.dispose();
@@ -384,7 +387,7 @@ describe("VideoEngine", () => {
     );
     const clock = new FakeClock();
     const ports: FakeWorkerPort[] = [];
-    const engine = new VideoEngine({ source: LOAD_CONFIG.source }, () => {
+    const engine = new WebVideoEngine({ source: LOAD_CONFIG.source }, () => {
       const port = new FakeWorkerPort(clock);
       ports.push(port);
       return port;
@@ -396,7 +399,7 @@ describe("VideoEngine", () => {
     expect(ports).toHaveLength(1);
     expect(ports[0].terminated).toBe(true);
     await expect(engine.play()).rejects.toMatchObject({
-      code: VideoEngineErrorCode.Aborted,
+      code: WebVideoEngineErrorCode.Aborted,
     });
   });
 
@@ -414,13 +417,13 @@ describe("VideoEngine", () => {
 
     it("an awaitable command whose worker never replies rejects and drops its pending entry", async () => {
       vi.useFakeTimers();
-      const engine = new VideoEngine(
+      const engine = new WebVideoEngine(
         { source: LOAD_CONFIG.source },
         () => new SilentWorkerPort(),
       );
       const pending = engine.load();
       const assertion = expect(pending).rejects.toMatchObject({
-        code: VideoEngineErrorCode.BackendCrashed,
+        code: WebVideoEngineErrorCode.BackendCrashed,
       });
 
       await vi.advanceTimersByTimeAsync(
@@ -538,7 +541,7 @@ describe("VideoEngine", () => {
   });
 });
 
-describe("VideoEngine page heap", () => {
+describe("WebVideoEngine page heap", () => {
   const USED_JS_HEAP_BYTES = 7_113_863;
 
   it("the facade fills in the heap the worker realm cannot read", async () => {
@@ -571,7 +574,7 @@ describe("VideoEngine page heap", () => {
   });
 });
 
-describe("VideoEngine playback rate", () => {
+describe("WebVideoEngine playback rate", () => {
   it("setPlaybackRate reaches the worker clock and wakes the rate channel once", async () => {
     const { engine, clock } = setup();
     await engine.load();
@@ -608,7 +611,9 @@ describe("VideoEngine playback rate", () => {
       const { engine, clock } = setup();
       await engine.load();
       expect(() => engine.setPlaybackRate(rate)).toThrow(
-        expect.objectContaining({ code: VideoEngineErrorCode.RateUnsupported }),
+        expect.objectContaining({
+          code: WebVideoEngineErrorCode.RateUnsupported,
+        }),
       );
       expect(clock.rate).toBe(1);
       expect(engine.getPlaybackRate()).toBe(1);
