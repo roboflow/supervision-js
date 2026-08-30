@@ -115,7 +115,7 @@ export function listDemoLibraryDepartures(options: {
       library: "Mediabunny, the reader the library ships with",
       setting: "Media path",
       value: "Web video engine",
-      why: "The web video engine is a separate package. A project that installs only `supervision` reads the clip through Mediabunny.",
+      why: "`createMediaSession` reads a clip through Mediabunny on its own. The web video engine is the other reader in the same package, reached by importing `supervision/web-video-engine`.",
     });
   }
 
