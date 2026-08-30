@@ -1,3 +1,4 @@
+import { readDemoMediaPathOverride } from "./media-path-override";
 import { DemoMediaPath, type DemoSessionOptions } from "./session-options";
 
 /**
@@ -8,6 +9,10 @@ import { DemoMediaPath, type DemoSessionOptions } from "./session-options";
  */
 export const DEMO_DEFAULT_MEDIA_PATH = DemoMediaPath.Mediabunny;
 
+const requestedMediaPath = readDemoMediaPathOverride(
+  typeof location === "undefined" ? "" : location.search,
+);
+
 /**
  * The options the workbench opens a clip on, over the ones the library would
  * pick for itself.
@@ -17,7 +22,7 @@ export const DEMO_DEFAULT_MEDIA_PATH = DemoMediaPath.Mediabunny;
  * path nobody asked for.
  */
 export const demoInitialSessionOptions: DemoSessionOptions = {
-  mediaPath: DEMO_DEFAULT_MEDIA_PATH,
+  mediaPath: requestedMediaPath ?? DEMO_DEFAULT_MEDIA_PATH,
 };
 
 /** How many options the visitor has moved off what the workbench opened on. */

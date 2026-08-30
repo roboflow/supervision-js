@@ -101,6 +101,23 @@ and collapsing around each read would re-render the panel immediately before a
 sample. Returning to the Demo view mounts a fresh panel, so the scenarios that
 change view open them again afterwards.
 
+## Pinning the media path
+
+The workbench opens on Mediabunny, so a run that does not say otherwise measures
+the library's own reader, not the engine. On that path `throttle` presents no
+frames, `blanking` prepares none, `drag` and `cadence` return
+`invalid-environment`, and `latency` and `backscrub` miss their limits by an
+order of magnitude, so the numbers are unusable as an engine baseline.
+
+Name the path in the URL:
+
+```
+node tools/demo-eval/run.mjs --url 'http://localhost:5173/?mediaPath=engine'
+```
+
+Every report records the path it ran on as `mediaPath`, so a run that forgot the
+flag can be told from one that did not.
+
 ## The baseline
 
 A threshold catches a fall off a cliff. It does not catch a number walking from
