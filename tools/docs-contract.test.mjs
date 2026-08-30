@@ -323,7 +323,7 @@ test("TypeDoc presents public guidance as five navigable sections", async () => 
     "Media Sessions",
     "Rendering",
     "Styles",
-    "Video Engine",
+    "Web Video Engine",
   ]);
 });
 

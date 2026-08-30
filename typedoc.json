@@ -38,7 +38,7 @@
     "Media Sessions",
     "Rendering",
     "Styles",
-    "Video Engine"
+    "Web Video Engine"
   ],
   "out": "docs/site",
   "plugin": ["typedoc-rhineai-theme"],

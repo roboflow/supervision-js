@@ -44,6 +44,3 @@ pnpm-debug.log*
 tools/demo-eval/report.json
 tools/demo-eval/baseline.json
 
-# Not committed, and never has been. Present only so `prettier --check .`
-# does not walk it; prettier reads this file and not .git/info/exclude.
-local_claude/

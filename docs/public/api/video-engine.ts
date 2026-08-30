@@ -7,7 +7,7 @@
  * moment one of them opens a source, so an application that only ever renders
  * still images never downloads it.
  *
- * @module Video Engine
+ * @module Web Video Engine
  */
 
 export {
