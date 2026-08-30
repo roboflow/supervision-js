@@ -51,7 +51,8 @@ The default path is intentionally boring:
   reach the screen together rather than the picture filling in afterwards;
 - advanced buffering, retention, interaction, and diagnostics are opt-in.
 
-Pass `playbackGate: false` when starting quickly matters more than annotations.
+Both gates are on by default. Pass `playbackGate: false` when starting quickly
+matters more than annotations.
 It turns off both the detection-coverage and the render-preparation gates; left
 on, the session reports a buffering activity while it waits. The detection gate
 applies to a session with appendable detections, and `playbackGate: true` turns

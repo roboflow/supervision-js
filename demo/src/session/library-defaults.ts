@@ -203,11 +203,10 @@ export function listDemoLibraryDepartures(options: {
 
   if (renderQuality !== undefined) {
     departures.push({
-      library:
-        "none, so the canvas follows the viewer's own device pixel ratio",
+      library: "2, the ceiling every grid uses when the option is unset",
       setting: "Max device pixel ratio",
       value: formatDemoRenderQualityValue(renderQuality),
-      why: "A ceiling keeps the picture comparable between a laptop and a phone, and is what the Quality control moves. No limit returns it to the library's own answer.",
+      why: "A ceiling keeps the picture comparable between a laptop and a phone, and is what the Quality control moves. Clearing it returns the clip to the library's own ceiling.",
     });
   }
 

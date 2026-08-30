@@ -153,6 +153,8 @@ const playbackGateSurfaces = [
   "packages/core/src/types/detection-timeline.ts",
   "packages/web/src/types/media-session.ts",
   "packages/web/src/types/render-preparation.ts",
+  "docs/public/guides/detections-and-rendering.md",
+  "docs/public/guides/media-sessions.md",
   "docs/public/recipes/multiple-detection-sources.md",
   "docs/public/recipes/streaming-detections.md",
 ];

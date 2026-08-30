@@ -26,7 +26,7 @@ runtime artifacts.
 
 ## What The Two Playback Gates Wait For
 
-The two gates are not annotations against masks. A mask is one geometry a
+Both gates are on by default. The two gates are not annotations against masks. A mask is one geometry a
 detection can carry, beside boxes, polygons, polylines, and keypoints, so both
 gates are about detections. They differ in which stage above they wait on.
 
