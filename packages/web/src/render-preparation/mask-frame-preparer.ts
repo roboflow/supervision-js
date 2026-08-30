@@ -300,6 +300,7 @@ function createPreparedIdMaskFrame(
     maxStrokeWidth: frame.maxStrokeWidth,
     raster: frame.data,
     regionMaskCoverage,
+    sourceWidth: frame.sourceWidth,
     strokePalette: frame.strokePalette,
     strokeWidths: frame.strokeWidths,
     width: frame.width,
@@ -469,7 +470,8 @@ function createPreparedFrameFromWorkerResponse(
       !message.strokePalette ||
       !message.strokeWidths ||
       !message.width ||
-      !message.height
+      !message.height ||
+      !message.sourceWidth
     ) {
       throw new Error(
         "Mask preparation worker returned an incomplete ID mask artifact.",
@@ -486,6 +488,7 @@ function createPreparedFrameFromWorkerResponse(
       maxStrokeWidth: message.maxStrokeWidth ?? 0,
       raster: message.raster,
       regionMaskCoverage: message.regionMaskCoverage,
+      sourceWidth: message.sourceWidth,
       strokePalette: message.strokePalette,
       strokeWidths: message.strokeWidths,
       width: message.width,

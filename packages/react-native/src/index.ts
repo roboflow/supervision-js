@@ -1087,6 +1087,7 @@ export function createReactNativeLiveIdMaskArtifact(
     maxStrokeWidth: strokeWidth,
     opacity: options.fillOpacity ?? 1,
     scale,
+    sourceWidth: width,
     strokePalette,
     strokeWidths,
     width,

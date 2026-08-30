@@ -65,6 +65,7 @@ describe("mask frame compositor", () => {
       kind: PreparedMaskFrameKind.IdMask,
       maxStrokeWidth: frame!.maxStrokeWidth,
       raster: frame!.data,
+      sourceWidth: frame!.sourceWidth,
       strokePalette: frame!.strokePalette,
       strokeWidths: frame!.strokeWidths,
       width: frame!.width,

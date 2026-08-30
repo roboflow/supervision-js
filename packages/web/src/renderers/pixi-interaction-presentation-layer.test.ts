@@ -11,6 +11,7 @@ import {
 import type {
   Detection,
   DetectionFrame,
+  IdMaskFrame,
   InteractionStyleContext,
 } from "supervision-js-core";
 import {
@@ -445,7 +446,134 @@ describe("pixi interaction presentation layer", () => {
       );
     }
   });
+
+  it("measures a narrow mask's stroke on the grid the whole frame shares", () => {
+    const maskFrame = createIdMaskFrame([
+      twoMaskFrameInstruction({ detectionIndex: 0, height: 80, width: 120 }),
+      twoMaskFrameInstruction({ detectionIndex: 1, height: 40, width: 60 }),
+    ])!;
+
+    expect(uploadedNarrowMaskStrokeWidth(maskFrame)).toBe(
+      maskFrame.strokeWidths[2],
+    );
+  });
 });
+
+const TWO_MASK_FRAME_STROKE_WIDTH = 4;
+
+function twoMaskFrameInstruction(mask: {
+  readonly detectionIndex: number;
+  readonly height: number;
+  readonly width: number;
+}) {
+  return {
+    alpha: 1,
+    color: 0x00ff00,
+    detectionIndex: mask.detectionIndex,
+    mask: {
+      counts: encodeCompressedRleCounts([0, 1]),
+      encoding: DetectionMaskEncoding.CompressedRle,
+      height: mask.height,
+      width: mask.width,
+    },
+    stroke: { alpha: 1, color: 0xffffff, width: TWO_MASK_FRAME_STROKE_WIDTH },
+  };
+}
+
+function uploadedNarrowMaskStrokeWidth(maskFrame: IdMaskFrame) {
+  vi.stubGlobal("document", {
+    createElement: vi.fn(() => ({
+      getContext: vi.fn(),
+      height: 0,
+      width: 0,
+    })),
+  });
+
+  const twoDetectionFrame: DetectionFrame = {
+    detections: [
+      {
+        className: "player",
+        id: "player-1",
+        rect: { height: 60, width: 100, x: 60, y: 40 },
+      },
+      {
+        className: "player",
+        id: "player-2",
+        rect: { height: 30, width: 20, x: 20, y: 30 },
+      },
+    ],
+    frameIndex: 3,
+    mediaTime: 0.1,
+  };
+  const layer = createPixiInteractionPresentationLayer({
+    Container: FakeContainer as never,
+    Graphics: FakeGraphics as never,
+    ImageSource: FakeImageSource as never,
+    Mesh: FakeMesh as never,
+    MeshGeometry: FakeMeshGeometry as never,
+    Shader: FakeShaderFactory as never,
+    Text: FakeText as never,
+    UniformGroup: FakeUniformGroup as never,
+    interactionStyle: {
+      resolve: () => ({
+        maskStyle: {
+          resolve: () => ({
+            alpha: 1,
+            color: 0x00ff00,
+            mask: {
+              counts: "",
+              encoding: DetectionMaskEncoding.CompressedRle,
+              height: 40,
+              width: 60,
+            },
+            stroke: {
+              alpha: 1,
+              color: 0xffffff,
+              width: TWO_MASK_FRAME_STROKE_WIDTH,
+            },
+          }),
+        },
+      }),
+    } as never,
+  });
+
+  layer.createDisplay({ height: 80, width: 120 });
+  layer.drawFrame({
+    frame: twoDetectionFrame,
+    hoveredPick: null,
+    idMaskArtifact: {
+      frame: {
+        close() {},
+        fillPalette: maskFrame.fillPalette,
+        hasStroke: maskFrame.hasStroke,
+        height: maskFrame.height,
+        key: "mask-frame",
+        kind: PreparedMaskFrameKind.IdMask,
+        maxStrokeWidth: maskFrame.maxStrokeWidth,
+        raster: maskFrame.data,
+        sourceWidth: maskFrame.sourceWidth,
+        strokePalette: maskFrame.strokePalette,
+        strokeWidths: maskFrame.strokeWidths,
+        width: maskFrame.width,
+      },
+      texture: { source: { style: {} } } as never,
+    },
+    mediaTime: twoDetectionFrame.mediaTime,
+    selectedPick: {
+      detection: twoDetectionFrame.detections[1]!,
+      detectionIndex: 1,
+      frame: twoDetectionFrame,
+      mediaTime: twoDetectionFrame.mediaTime,
+      point: { x: 15, y: 20 },
+      target: DetectionPickTarget.Mask,
+    },
+  });
+
+  const uniforms = FakeShaderFactory.descriptors.at(-1)!.resources
+    .maskUniforms as FakeUniformGroup;
+
+  return (uniforms.uniforms.uStrokeWidths as Float32Array)[2];
+}
 
 function maskLayerStrokeWidth(strokeWidth: number) {
   const maskFrame = createIdMaskFrame([
@@ -520,6 +648,7 @@ function uploadedStrokeWidth(options: {
         height: 80,
         key: "mask-frame",
         kind: PreparedMaskFrameKind.IdMask,
+        sourceWidth: mask.width,
         width: options.rasterWidth,
       },
       texture: { source: { style: {} } },

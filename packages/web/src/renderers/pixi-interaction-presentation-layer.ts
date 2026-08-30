@@ -764,7 +764,7 @@ function createInteractionMaskRenderer(options: {
           );
           strokeWidths[maskId] = resolveIdMaskStrokeTexels(
             instruction.stroke.width,
-            instruction.mask.width,
+            frame.sourceWidth,
             frame.width,
           );
           maxStrokeWidth = Math.max(maxStrokeWidth, strokeWidths[maskId] ?? 0);

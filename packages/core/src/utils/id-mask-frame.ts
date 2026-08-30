@@ -20,6 +20,8 @@ export interface IdMaskFrame {
   readonly hasStroke: boolean;
   readonly height: number;
   readonly maxStrokeWidth: number;
+  /** The frame-wide mask width every stroke on this raster is scaled against. */
+  readonly sourceWidth: number;
   readonly strokePalette: Float32Array<ArrayBuffer>;
   readonly strokeWidths: Float32Array<ArrayBuffer>;
   readonly width: number;
@@ -110,6 +112,7 @@ export function createIdMaskFrame(
     hasStroke,
     height,
     maxStrokeWidth,
+    sourceWidth: maskWidth,
     strokePalette,
     strokeWidths,
     width,

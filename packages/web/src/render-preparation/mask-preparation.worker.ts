@@ -59,6 +59,7 @@ function prepareMaskFrame(message: MaskPreparationWorkerRequest) {
           raster: idMaskFrame.data,
           regionMaskCoverage,
           requestId: message.requestId,
+          sourceWidth: idMaskFrame.sourceWidth,
           strokePalette: idMaskFrame.strokePalette,
           strokeWidths: idMaskFrame.strokeWidths,
           type: MaskPreparationWorkerMessageType.Complete,

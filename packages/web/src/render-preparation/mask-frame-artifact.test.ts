@@ -22,6 +22,7 @@ function createFrame(raster: Uint8Array<ArrayBuffer>): PreparedIdMaskFrame {
     kind: PreparedMaskFrameKind.IdMask,
     maxStrokeWidth: 0,
     raster,
+    sourceWidth: WIDTH,
     strokePalette: new Float32Array(new ArrayBuffer(0)),
     strokeWidths: new Float32Array(new ArrayBuffer(0)),
     width: WIDTH,

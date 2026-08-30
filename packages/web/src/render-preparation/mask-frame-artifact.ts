@@ -64,6 +64,8 @@ export interface PreparedIdMaskFrame {
   readonly maxStrokeWidth: number;
   readonly raster: Uint8Array<ArrayBuffer>;
   readonly regionMaskCoverage?: PreparedRegionMaskCoverageFrame;
+  /** The frame-wide mask width every stroke on this raster is scaled against. */
+  readonly sourceWidth: number;
   readonly strokePalette: Float32Array<ArrayBuffer>;
   readonly strokeWidths: Float32Array<ArrayBuffer>;
   readonly width: number;

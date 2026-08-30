@@ -472,6 +472,7 @@ describe("media session integration", () => {
         maxStrokeWidth: 1,
         raster: new Uint8Array([1, 0, 0, 0]),
         requestId: message.requestId,
+        sourceWidth: 2,
         strokePalette: new Float32Array([0, 0, 0, 0, 1, 1, 1, 1]),
         strokeWidths: new Float32Array([0, 1]),
         type: "complete",

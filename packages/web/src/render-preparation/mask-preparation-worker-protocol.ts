@@ -64,6 +64,7 @@ export interface MaskPreparationWorkerCompleteMessage {
   readonly raster?: Uint8Array<ArrayBuffer>;
   readonly regionMaskCoverage?: PreparedRegionMaskCoverageFrame;
   readonly requestId: number;
+  readonly sourceWidth?: number;
   readonly strokePalette?: Float32Array<ArrayBuffer>;
   readonly strokeWidths?: Float32Array<ArrayBuffer>;
   readonly type: MaskPreparationWorkerMessageType.Complete;

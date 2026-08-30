@@ -357,6 +357,7 @@ function createSelectiveWorkerFactory(cookedKeys: readonly string[]) {
                 key: message.job.key,
                 raster: new Uint8Array([1]),
                 requestId: message.requestId,
+                sourceWidth: 1,
                 strokePalette: new Float32Array([0, 0, 0, 0]),
                 strokeWidths: new Float32Array([0]),
                 type: "complete",
