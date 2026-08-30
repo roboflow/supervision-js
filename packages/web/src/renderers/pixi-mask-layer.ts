@@ -35,6 +35,11 @@ import type {
   RenderPreparationOptions,
   RenderPreparationPlaybackGateOptions,
 } from "#types/render-preparation";
+import type {
+  InjectedMeshConstructor,
+  InjectedMeshGeometryConstructor,
+  InjectedShaderFactory,
+} from "#renderers/injected-pixi";
 import type { PresentedFrameId } from "./presented-frame-channel";
 import type { SerializableMaskInstruction } from "#render-preparation/mask-preparation-worker-protocol";
 import { resolveMaskStyleOpacity } from "supervision-js-core";
@@ -50,8 +55,6 @@ import type {
   Container as PixiContainer,
   ImageSource as PixiImageSource,
   Mesh as PixiMesh,
-  MeshGeometry as PixiMeshGeometry,
-  Shader as PixiShader,
   Sprite as PixiSprite,
   Texture as PixiTexture,
   UniformGroup as PixiUniformGroup,
@@ -91,26 +94,6 @@ type SpriteConstructor = new (options?: {
 }) => PixiSprite;
 
 type ContainerConstructor = new () => PixiContainer;
-
-type MeshConstructor = new (options: {
-  geometry: PixiMeshGeometry;
-  shader: PixiShader;
-}) => PixiMesh;
-
-type MeshGeometryConstructor = new (options: {
-  indices: Uint32Array;
-  positions: Float32Array;
-  shrinkBuffersToFit: boolean;
-  topology: "triangle-list";
-  uvs: Float32Array;
-}) => PixiMeshGeometry;
-
-type ShaderFactory = {
-  from(options: {
-    gl: { fragment: string; vertex: string };
-    resources: Record<string, unknown>;
-  }): PixiShader;
-};
 
 type UniformGroupConstructor = new (
   uniforms: Record<
@@ -216,9 +199,9 @@ export function createPixiMaskLayer(options: {
   readonly BufferImageSource?: BufferImageSourceConstructor;
   readonly Container?: ContainerConstructor;
   readonly ImageSource: ImageSourceConstructor;
-  readonly Mesh?: MeshConstructor;
-  readonly MeshGeometry?: MeshGeometryConstructor;
-  readonly Shader?: ShaderFactory;
+  readonly Mesh?: InjectedMeshConstructor<PixiMesh>;
+  readonly MeshGeometry?: InjectedMeshGeometryConstructor;
+  readonly Shader?: InjectedShaderFactory;
   readonly Sprite: SpriteConstructor;
   readonly Texture: TextureConstructorWithEmpty;
   readonly UniformGroup?: UniformGroupConstructor;

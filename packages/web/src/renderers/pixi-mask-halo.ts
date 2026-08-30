@@ -1,3 +1,8 @@
+import type {
+  InjectedMeshConstructor,
+  InjectedMeshGeometryConstructor,
+  InjectedShaderFactory,
+} from "#renderers/injected-pixi";
 import {
   tintedMaskVertexGlsl,
   tintedMaskVertexWgsl,
@@ -28,11 +33,6 @@ type PixiMaskHaloMesh = PixiMesh<PixiMeshGeometry, PixiShader>;
 
 type ContainerConstructor = new () => PixiContainer;
 
-type MeshConstructor = new (options: {
-  geometry: PixiMeshGeometry;
-  shader: PixiShader;
-}) => PixiMaskHaloMesh;
-
 type ImageSourceConstructor = new (options: {
   autoGenerateMipmaps?: boolean;
   dynamic: boolean;
@@ -41,25 +41,6 @@ type ImageSourceConstructor = new (options: {
   scaleMode?: "linear" | "nearest";
   width: number;
 }) => PixiImageSource;
-
-type MeshGeometryConstructor = new (options: {
-  indices: Uint32Array;
-  positions: Float32Array;
-  shrinkBuffersToFit: boolean;
-  topology: "triangle-list";
-  uvs: Float32Array;
-}) => PixiMeshGeometry;
-
-type ShaderFactory = {
-  from(options: {
-    gl: { fragment: string; vertex: string };
-    gpu: {
-      fragment: { entryPoint: string; source: string };
-      vertex: { entryPoint: string; source: string };
-    };
-    resources: Record<string, unknown>;
-  }): PixiShader;
-};
 
 type UniformGroupConstructor = new (
   uniforms: Record<
@@ -163,9 +144,9 @@ export function createPixiMaskHaloRenderer(options: {
   readonly Container: ContainerConstructor;
   readonly Rectangle: RectangleConstructor;
   readonly ImageSource: ImageSourceConstructor;
-  readonly Mesh: MeshConstructor;
-  readonly MeshGeometry: MeshGeometryConstructor;
-  readonly Shader: ShaderFactory;
+  readonly Mesh: InjectedMeshConstructor<PixiMaskHaloMesh>;
+  readonly MeshGeometry: InjectedMeshGeometryConstructor;
+  readonly Shader: InjectedShaderFactory;
   readonly UniformGroup: UniformGroupConstructor;
   readonly mediaHeight: number;
   readonly mediaWidth: number;
