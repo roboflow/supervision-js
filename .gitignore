@@ -39,12 +39,11 @@ pnpm-debug.log*
 .env.*
 !.env.example
 
-# Agent working notes, probes and evidence. Never part of the package.
-local_claude/
 
 # Written by an eval run. A baseline is one machine's numbers, so it stays local.
 tools/demo-eval/report.json
 tools/demo-eval/baseline.json
 
-# Analysis output from the understand-anything tooling. Regenerated on demand.
-.understand-anything/
+# Working notes and probes. 13GB locally; never part of the package,
+# and un-ignoring it puts that in reach of `git add`.
+local_claude/

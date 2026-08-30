@@ -18,7 +18,6 @@ import {
   type DemoFixtureDetectionManifest,
 } from "./demo-fixtures";
 
-/** Frame size of the committed `horse_trail/proxy-1080p.mp4` delivery proxy. */
 const HORSE_PROXY_SPACE: DetectionCoordinateSpace = {
   height: 1080,
   width: 806,

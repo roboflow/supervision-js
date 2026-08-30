@@ -36,13 +36,10 @@ transcode and no resampled grid.
 
 ## Geometry coverage
 
-Not every detection carries every kind, and the counts say which:
-
-    boxes       5948   every detection
-    masks       5948   every detection
-    polygons    5948   derived from every mask
-    keypoints   2005   34 percent of detections
-    polyline     224   one trace segment per frame but the first
+Not every detection carries every kind. The counts live in the `geometry` block
+of `detections.manifest.json`, which the generator writes and the demo reads.
+Boxes, masks and polygons cover every detection; keypoints and the trajectory
+polyline do not.
 
 Keypoint coverage is partial by design. Pose association is one-to-one center
 rect IoU at a minimum of `0.3` against `white team player` and

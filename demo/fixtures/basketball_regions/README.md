@@ -67,7 +67,7 @@ ROBOFLOW_API_KEY="..." npm run fixture:sam3:run -- \
   --class head \
   --concurrency 10 \
   --sample-name basketball_regions_head \
-  --source-file basketball_sample.normalized.webm
+  --source-file basketball_sample.mp4
 ```
 
 Then rebuild the Region fixture from the committed segmentation, pose, and head

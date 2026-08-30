@@ -21,9 +21,9 @@ const DEFAULT_CHROME_DEBUG_URL = "http://127.0.0.1:9223";
 const DEFAULT_PROXY_FILE = "proxy-30fps.webm";
 const SLICE_BYTES = 524_288;
 /**
- * Rate of `basketball_sam3/basketball_sample.normalized.webm`, the one surviving
- * proxy from the original fixture runs. Mediabunny's own default has since risen
- * about sixfold, which turns a 70 second 1504x2016 sample into 627MB.
+ * Target rate for a delivery proxy. Mediabunny's own default encodes a 70 second
+ * 1504x2016 sample to roughly 627MB, which is too large to commit, so a proxy is
+ * encoded to this rate instead.
  */
 const REFERENCE_BITS_PER_PIXEL = 0.07038;
 

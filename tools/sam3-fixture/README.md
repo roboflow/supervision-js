@@ -167,16 +167,13 @@ npm run fixture:sam3:proxy -- --sample-name horse_trail
 ```
 
 The command writes `proxy-30fps.webm` beside the fixture's source media and adds
-`media.proxyFile` to `fixture.meta.json`. It reuses the same
-`normalizeMedia` call the v1 pipeline used (WebM, VP9, `forceTranscode`, 30fps,
-1 second key frame interval), which reproduces the committed
-`basketball_sample.normalized.webm` timestamp for timestamp.
+`media.proxyFile` to `fixture.meta.json`. It calls `normalizeMedia` with WebM,
+VP9, `forceTranscode`, 30fps and a 1 second key frame interval.
 
-Mediabunny's default quality has risen about sixfold since those fixtures were
-made, which turns the 70 second 1504x2016 horse sample into 627MB, so the rate
-defaults to the committed proxy's own 0.07038 bits per pixel instead. Override
-with `--bits-per-pixel` or an absolute `--bitrate`; neither moves a frame
-boundary.
+Mediabunny's default quality encodes the 70 second 1504x2016 horse sample to
+roughly 627MB, which is too large to commit, so the command targets a fixed rate
+instead. Override with `--bits-per-pixel` or an absolute `--bitrate`; neither
+moves a frame boundary.
 
 This proxy re-encodes at the source's own frame size, and the command stops
 before writing anything if that size disagrees with the `video.width` and
