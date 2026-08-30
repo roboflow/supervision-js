@@ -19,6 +19,7 @@ import {
   SOURCE_TAB,
   startingAt,
 } from "./hooks.mjs";
+import { Invalid, waitForRenderer } from "./renderer-ready.mjs";
 import { percentile, round } from "./stats.mjs";
 
 const VIEWPORT = { width: 1500, height: 1150, deviceScaleFactor: 1 };
@@ -82,8 +83,6 @@ const CADENCE_LATE_FRAME_FRACTION = 0.02;
  * This is wide because its job is catching one of them going blind, which puts
  * them twenty apart, and not the tenths they honestly differ by. */
 const CADENCE_AGREEMENT_LIMIT_FPS = 1.5;
-
-class Invalid extends Error {}
 
 function invalid(reason) {
   throw new Invalid(reason);
@@ -158,38 +157,6 @@ async function readRunStamp(session) {
   };
 }
 
-async function waitForRenderer(session, timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
-  let last = null;
-  while (Date.now() < deadline) {
-    // A page mid-navigation answers every evaluate with "target navigated or
-    // closed", which is what waiting for it to come back looks like.
-    last = await session
-      .readJson(
-        `(() => {
-      const renderer = window.__demoRenderer;
-      if (!renderer) return { ready: false, reason: "window.__demoRenderer is absent" };
-      const state = renderer.getState();
-      if (state.source.status !== "ready" || !(state.duration > 0)) {
-        return { ready: false, reason: "media source status " + state.source.status };
-      }
-      return {
-        ready: true,
-        duration: state.duration,
-        frameRate: state.source.estimatedFrameRate,
-        backend: state.rendererBackend,
-        mediaWidth: state.mediaWidth,
-        mediaHeight: state.mediaHeight,
-      };
-    })()`,
-      )
-      .catch((error) => ({ ready: false, reason: error.message }));
-    if (last.ready) return last;
-    await delay(500);
-  }
-  invalid(`demo renderer never became ready: ${last?.reason ?? "no response"}`);
-}
-
 /**
  * Runs one measurement attempt and discards it when the page navigated while it
  * was in flight: a dev-server reload silently restarts the renderer mid-window.
@@ -207,11 +174,11 @@ async function attemptStable(
 ) {
   const recover = async () => {
     if (keepPage) {
-      await waitForRenderer(session, 60_000);
+      await waitForRenderer(session);
       return;
     }
     await reloadPage(session);
-    await waitForRenderer(session, 60_000);
+    await waitForRenderer(session);
     await openControls(session);
   };
   let lastReason = null;

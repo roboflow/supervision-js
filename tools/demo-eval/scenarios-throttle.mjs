@@ -2,6 +2,7 @@
  * against the rates the player has to hold to still be worth watching. */
 
 import { delay } from "./cdp.mjs";
+import { Invalid, waitForRenderer } from "./renderer-ready.mjs";
 import { percentile, round } from "./stats.mjs";
 
 /* Chrome's throttle divides the CPU every thread of the renderer process gets.
@@ -26,8 +27,6 @@ const MIN_ADVANCE_RATIO = 0.25;
 const PRESENTED_RATE_FLOOR = 0.9;
 const COVERAGE_FLOOR = 0.97;
 const TASK_CEILING_MS = 200;
-
-class Invalid extends Error {}
 
 const SAMPLER = `(async () => {
   const renderer = window.__demoRenderer;
@@ -230,25 +229,6 @@ function judge(measured, info) {
     );
   }
   return failures;
-}
-
-async function waitForRenderer(session, timeoutMs = 60_000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const ready = await session
-      .evaluate(
-        `(() => {
-          const renderer = window.__demoRenderer;
-          if (!renderer) return false;
-          const state = renderer.getState();
-          return state.source.status === "ready" && state.duration > 0;
-        })()`,
-      )
-      .catch(() => false);
-    if (ready) return;
-    await delay(500);
-  }
-  throw new Invalid("the demo renderer never came back after the reload");
 }
 
 export function throttleDetail(scenario, field) {

@@ -11,6 +11,7 @@
 
 import { delay, reloadPage } from "./cdp.mjs";
 import { at, Hook, layerToggleSelector, openControls } from "./hooks.mjs";
+import { Invalid, waitForRenderer } from "./renderer-ready.mjs";
 import { percentile, round } from "./stats.mjs";
 
 const BLANKING_SEEK_SECONDS = 3;
@@ -101,8 +102,6 @@ const FOCUS_SEEK_SECONDS = 12;
 const FOCUS_DIM_DELTA_FLOOR = 0.02;
 const FOCUS_CUTOUT_FLOOR = 0.02;
 
-class Invalid extends Error {}
-
 const VISIBILITY = `document.visibilityState`;
 
 async function focusPage(session) {
@@ -115,27 +114,6 @@ async function focusPage(session) {
         "and every number taken from it is a measurement of nothing",
     );
   }
-}
-
-async function waitForRenderer(session, timeoutMs = 60_000) {
-  const deadline = Date.now() + timeoutMs;
-  let last = null;
-  while (Date.now() < deadline) {
-    last = await session.readJson(`(() => {
-      const renderer = window.__demoRenderer;
-      if (!renderer) return { ready: false, reason: "window.__demoRenderer is absent" };
-      const state = renderer.getState();
-      if (state.source.status !== "ready" || !(state.duration > 0)) {
-        return { ready: false, reason: "media source status " + state.source.status };
-      }
-      return { ready: true };
-    })()`);
-    if (last.ready) return;
-    await delay(500);
-  }
-  throw new Invalid(
-    `the demo renderer never became ready: ${last?.reason ?? "no response"}`,
-  );
 }
 
 /* A dev-server hot patch remounts the app mid-scenario, and every call still

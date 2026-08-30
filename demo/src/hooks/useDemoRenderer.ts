@@ -865,9 +865,7 @@ export function useDemoRenderer(
     uploadAbortRef.current?.abort();
     setUploadRun(null);
     setUploadInferenceState(initialUploadInferenceState);
-    const fixture =
-      demoFixtures.find((candidate) => candidate.sampleName === sampleName) ??
-      defaultDemoFixture;
+    const fixture = resolveDemoFixture(sampleName);
     const nextPresentationSettings = constrainDemoPresentationSettings(
       {
         ...defaultDemoPresentationSettings,

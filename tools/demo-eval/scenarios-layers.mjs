@@ -11,6 +11,7 @@ import {
   VIEW_MODE_PREFIX,
   viewModeSelector,
 } from "./hooks.mjs";
+import { Invalid, waitForRenderer } from "./renderer-ready.mjs";
 import { percentile, round } from "./stats.mjs";
 
 const SEEK_SECONDS = 2;
@@ -77,8 +78,6 @@ const CONFIGS = [
     border: "baseline",
   },
 ];
-
-class Invalid extends Error {}
 
 const READ_CONTROLS = `(() => {
   const toggles = {};
@@ -592,25 +591,6 @@ async function restore(session, baseline) {
       })()`,
     )
     .catch(() => {});
-}
-
-async function waitForRenderer(session, timeoutMs = 60_000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const ready = await session
-      .evaluate(
-        `(() => {
-          const renderer = window.__demoRenderer;
-          if (!renderer) return false;
-          const state = renderer.getState();
-          return state.source.status === "ready" && state.duration > 0;
-        })()`,
-      )
-      .catch(() => false);
-    if (ready) return;
-    await delay(500);
-  }
-  throw new Invalid("the demo renderer never became ready after a page reload");
 }
 
 export function layersDetail(scenario, field) {
