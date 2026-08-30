@@ -23,7 +23,7 @@ const DEFAULT_FRAME_RATE = 30;
  * the source really does gain data.
  */
 const FILE_DETECTION_BUFFER_DEFAULTS = {
-  bufferAheadSeconds: 6,
+  bufferAheadSeconds: 10,
   bufferBehindSeconds: 5,
   refreshIntervalSeconds: 2.5,
 } satisfies DetectionBufferOptions;

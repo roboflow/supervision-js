@@ -21,6 +21,8 @@ let detectionTimeline: BufferedDetectionTimeline;
 
 beforeEach(async () => {
   detectionTimeline = createBufferedDetectionTimeline({
+    bufferAheadSeconds: 2,
+    bufferBehindSeconds: 0.5,
     source: createArrayDetectionFrameSource(frames),
   });
   await detectionTimeline.prepare(0);

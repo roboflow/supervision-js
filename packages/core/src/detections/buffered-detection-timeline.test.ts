@@ -56,6 +56,19 @@ describe("buffered detection timeline", () => {
     expect(timeline.selectFrame(0.5)).toBeUndefined();
   });
 
+  it("buffers ten seconds ahead and five behind when asked for no window", async () => {
+    const timeline = createBufferedDetectionTimeline({
+      source: createArrayDetectionFrameSource(frames),
+    });
+
+    await timeline.prepare(20);
+
+    const state = timeline.getState();
+
+    expect(state.requestedStartTime).toBe(15);
+    expect(state.requestedEndTime).toBe(30);
+  });
+
   it("exposes copied buffered frames for background preparation", async () => {
     const timeline = createBufferedDetectionTimeline({
       bufferAheadSeconds: 2,

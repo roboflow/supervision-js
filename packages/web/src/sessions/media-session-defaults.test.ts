@@ -26,7 +26,7 @@ describe("media session defaults", () => {
     });
 
     expect(defaults.detectionBuffer).toEqual({
-      bufferAheadSeconds: 6,
+      bufferAheadSeconds: 10,
       bufferBehindSeconds: 5,
       frameRate: 30,
       refreshIntervalSeconds: 2.5,
