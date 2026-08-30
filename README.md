@@ -61,7 +61,7 @@ npm install supervision
 ```
 
 The next browser release is published as `0.2.0-next.0` on npm's `next` tag first, so an
-application can try the video engine before it reaches `latest`.
+application can try the web video engine before it reaches `latest`.
 Its package includes the private core dependency. Consumers import
 only the public browser entrypoints:
 
@@ -71,7 +71,7 @@ import { createMaskBrushEditor } from "supervision/editing";
 import { createVideoEngineMediaRendererSource } from "supervision/web-video-engine";
 ```
 
-The video engine is one of those entrypoints, so opening a video file takes
+The web video engine is one of those entrypoints, so opening a video file takes
 nothing further to install and every install carries the engine. `supervision`
 loads it through a dynamic import at the moment a video source opens, so an
 application that only annotates still images emits none of its code.
@@ -110,11 +110,6 @@ Start with [Application Integration](docs/public/guides/application-integration.
 For what the browser path does not do, read
 [Browser Support](docs/public/guides/browser-support.md): HEVC in Firefox, the
 cost of presenting a frame without WebGPU, audio, and the frame-count ceiling.
-
-For what this release adds, read
-[Release Notes](docs/public/release-notes.md). For what it removes and what it
-now does differently, read
-[Breaking Changes](docs/public/breaking-changes.md).
 
 ## Current API Status
 
