@@ -120,20 +120,17 @@ the sprite's texture. Both steps land inside the present: Pixi's GL texture
 system uploads from the `update()` call rather than at render time, so this cost
 follows presented frames rather than the renders `renderPresent` coalesces.
 
-The upload is what Safari costs: on the demo's default clip it runs once per
-presented frame at 24.8 ms, and about seven tenths of the wall clock goes into
-it during playback. It is not the pixels. The same frames uploaded straight from
-the decoded VideoFrame into a WebGL texture, in the same browser, take 0.6 ms
-each, measured with a forced readback after every upload so neither figure can
-be work WebKit deferred, and the pixel that comes back is the staging route's
-colour rather than the black a bad upload gives. Part of that gap is per-pixel
-and part of it is that the staging surface is media-sized whatever the decode
-delivers, so a decode below media size is drawn back up before it is uploaded.
-It is sized that way because `captureFrame` reads it, and a capture is
-media-sized on both paths. Anything that stops writing that canvas therefore
-owns the captured pixels, the decode sizes the sprite has to keep ignoring, and
-a per-browser answer to whether this WebGL context takes a VideoFrame at all,
-which is the question `acceptsVideoFrameUpload` already asks the GPU queue.
+The upload is what Safari costs: it runs once per presented frame, and it
+dominates the wall clock during playback. It is not the pixels. The same frames
+uploaded straight from the decoded VideoFrame into a WebGL texture, in the same
+browser, cost a small fraction of that. Part of that gap is per-pixel and part
+of it is that the staging surface is media-sized whatever the decode delivers,
+so a decode below media size is drawn back up before it is uploaded. It is sized
+that way because `captureFrame` reads it, and a capture is media-sized on both
+paths. Anything that stops writing that canvas therefore owns the captured
+pixels, the decode sizes the sprite has to keep ignoring, and a per-browser
+answer to whether this WebGL context takes a VideoFrame at all, which is the
+question `acceptsVideoFrameUpload` already asks the GPU queue.
 
 That settles the upload and nothing else. A source only reaches the compositor
 once WebCodecs has decoded it, and `openInput` refuses a track whose codec

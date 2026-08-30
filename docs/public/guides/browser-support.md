@@ -45,12 +45,12 @@ Two browsers take the second path today, for different reasons:
   decoded frame. The scene asks once when it is built and routes the frames
   through the staging canvas rather than letting each present fail.
 
-The cost is real. On the demo's default clip in Safari the staging route runs
-once per presented frame at 24.8 ms, about seven tenths of the wall clock during
-playback. The same frames uploaded straight into a WebGL texture in the same
-browser take 0.6 ms. It is not the pixels: part of the gap is per-pixel work,
-and part is that the staging surface is media-sized whatever the decode
-delivers, so a decode below media size is drawn back up before it is uploaded.
+The cost is real. In Safari the staging route runs once per presented frame, and
+it dominates the wall clock during playback. The same frames uploaded straight
+into a WebGL texture in the same browser cost a small fraction of that. It is
+not the pixels: part of the gap is per-pixel work, and part is that the staging
+surface is media-sized whatever the decode delivers, so a decode below media
+size is drawn back up before it is uploaded.
 
 Nothing is lost, and no application has to opt in or out. What it costs is
 headroom, so a heavy annotation load on a large clip has less of it in these
