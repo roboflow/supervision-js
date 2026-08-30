@@ -49,7 +49,10 @@ vi.mock("#render-preparation/prepared-render-window", () => ({
   }),
 }));
 
-import { createPixiMaskLayer } from "#renderers/pixi-mask-layer";
+import {
+  createPixiMaskLayer,
+  PixiMaskLayerIdMaskStatus,
+} from "#renderers/pixi-mask-layer";
 import type { IdMaskDisplayBox } from "#renderers/pixi-mask-layer";
 
 beforeEach(() => {
@@ -320,6 +323,7 @@ describe("pixi mask layer", () => {
       drawnFrameId: { index: 3, ticks: 3003 },
       drawnFrameKey: "mask-frame",
       drawnFrameTime: 0.1,
+      idMaskStatus: PixiMaskLayerIdMaskStatus.Present,
     });
 
     // A redraw at a resting playhead draws the same frame and knows only its
@@ -331,6 +335,7 @@ describe("pixi mask layer", () => {
       drawnFrameId: null,
       drawnFrameKey: "mask-frame",
       drawnFrameTime: 0.1,
+      idMaskStatus: PixiMaskLayerIdMaskStatus.Present,
     });
 
     preparedWindow.frame = {
@@ -344,6 +349,7 @@ describe("pixi mask layer", () => {
       drawnFrameId: null,
       drawnFrameKey: null,
       drawnFrameTime: null,
+      idMaskStatus: PixiMaskLayerIdMaskStatus.None,
     });
   });
 
@@ -872,6 +878,61 @@ describe("pixi mask layer", () => {
     );
     expect(imageSources).toContainEqual(
       expect.objectContaining({ height: 2, width: 4 }),
+    );
+  });
+
+  it("says when the frame on screen cannot answer for detection ids", () => {
+    const layer = createPixiMaskLayer({
+      BufferImageSource: FakeBufferImageSource as never,
+      ImageSource: FakeImageSource as never,
+      Sprite: FakeSprite as never,
+      Texture: FakeTexture as never,
+      detectionTimeline: {} as never,
+      maskStyle: new BaseMaskStyle(),
+    });
+
+    layer.createSprite({ height: 80, width: 120 });
+
+    expect(layer.getDrawnState().idMaskStatus).toBe(
+      PixiMaskLayerIdMaskStatus.None,
+    );
+
+    preparedWindow.frame = {
+      detectionFrame: { detections: [], mediaTime: 0.1 },
+      key: "mask-frame",
+      maskFrame: idMaskFrame(),
+      maskStatus: "prepared",
+    };
+    layer.drawFrame(0.1);
+
+    expect(layer.getDrawnState().idMaskStatus).toBe(
+      PixiMaskLayerIdMaskStatus.Present,
+    );
+
+    preparedWindow.frame = {
+      detectionFrame: { detections: [], mediaTime: 0.2 },
+      key: "rgba-mask-frame",
+      maskFrame: {
+        close: vi.fn(),
+        height: 80,
+        key: "rgba-mask-frame",
+        kind: PreparedMaskFrameKind.RgbaImage,
+        source: {},
+        width: 120,
+      },
+      maskStatus: "prepared",
+    };
+    layer.drawFrame(0.2);
+
+    expect(layer.getActiveIdMaskFrameTexture(0.2)).toBeNull();
+    expect(layer.getDrawnState().idMaskStatus).toBe(
+      PixiMaskLayerIdMaskStatus.Absent,
+    );
+
+    layer.clearFrame();
+
+    expect(layer.getDrawnState().idMaskStatus).toBe(
+      PixiMaskLayerIdMaskStatus.None,
     );
   });
 

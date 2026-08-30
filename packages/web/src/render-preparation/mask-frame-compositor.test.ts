@@ -11,11 +11,13 @@ import {
   type PreparedIdMaskFrame,
 } from "./mask-frame-artifact";
 import {
+  canIdMaskPaletteNameFrame,
   compositeMaskFrame,
   createIdMaskFrame,
   createIdMaskPlane,
   createIdMaskRasterFrame,
   createRegionMaskCoverageFrame,
+  MAX_ID_MASK_PALETTE_ENTRIES,
 } from "./mask-frame-compositor";
 
 describe("mask frame compositor", () => {
@@ -431,4 +433,60 @@ function readPixel(
   const offset = (y * canvasWidth + x) * 4;
 
   return [data[offset], data[offset + 1], data[offset + 2], data[offset + 3]];
+}
+
+describe("id mask palette reach", () => {
+  it("counts a detection's index in the frame, not the masks the frame carries", () => {
+    const oneDistantMask = [
+      maskedDetectionAt(MAX_ID_MASK_PALETTE_ENTRIES + 40),
+    ];
+
+    expect(canIdMaskPaletteNameFrame(oneDistantMask)).toBe(false);
+    expect(createIdMaskRasterFrame(oneDistantMask)).toBeUndefined();
+  });
+
+  it("cannot carry an ID plane for a frame it could not name", () => {
+    const overflowing = [
+      maskedDetectionAt(0),
+      maskedDetectionAt(MAX_ID_MASK_PALETTE_ENTRIES - 1),
+    ];
+
+    expect(canIdMaskPaletteNameFrame(overflowing)).toBe(false);
+    expect(createIdMaskPlane(overflowing)).toBeUndefined();
+    expect(compositeMaskFrame(overflowing)).toBeDefined();
+  });
+
+  it("reaches the last slot the palette holds", () => {
+    const lastNameable = [maskedDetectionAt(MAX_ID_MASK_PALETTE_ENTRIES - 2)];
+
+    expect(canIdMaskPaletteNameFrame(lastNameable)).toBe(true);
+    expect(createIdMaskPlane(lastNameable)).toBeDefined();
+  });
+
+  it("ignores a coverage-only instruction the raster never draws", () => {
+    const coverageOnly = [
+      maskedDetectionAt(0),
+      {
+        ...maskedDetectionAt(MAX_ID_MASK_PALETTE_ENTRIES + 40),
+        visible: false,
+      },
+    ];
+
+    expect(canIdMaskPaletteNameFrame(coverageOnly)).toBe(true);
+    expect(createIdMaskRasterFrame(coverageOnly)).toBeDefined();
+  });
+});
+
+function maskedDetectionAt(detectionIndex: number) {
+  return {
+    alpha: 0.5,
+    color: 0xff0000,
+    detectionIndex,
+    mask: {
+      counts: encodeCompressedRleCounts([0, 1, 3]),
+      encoding: DetectionMaskEncoding.CompressedRle,
+      height: 2,
+      width: 2,
+    },
+  };
 }

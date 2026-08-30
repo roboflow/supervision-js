@@ -105,6 +105,21 @@ type UniformGroupConstructor = new (
 ) => PixiUniformGroup;
 
 /**
+ * Whether the frame on screen can answer for detection ids. Hover, selection
+ * and focus highlighting all cut their shapes out of the id raster, so a frame
+ * that reaches the screen without one draws its whole picture while those three
+ * have nothing to cut from.
+ */
+export enum PixiMaskLayerIdMaskStatus {
+  /** A mask frame is on screen and carries no id raster. */
+  Absent = "absent",
+  /** No mask frame is on screen. */
+  None = "none",
+  /** The id raster is on screen. */
+  Present = "present",
+}
+
+/**
  * What the mask layer has on screen after its last draw.
  *
  * `drawnFrameTime` is the detection frame the visible raster belongs to. It is
@@ -118,6 +133,7 @@ export interface PixiMaskLayerState {
   readonly drawnFrameTime: number | null;
   readonly drawnFrameKey: string | null;
   readonly drawnFrameId: PresentedFrameId | null;
+  readonly idMaskStatus: PixiMaskLayerIdMaskStatus;
 }
 
 export interface PixiMaskLayer {
@@ -333,6 +349,7 @@ export function createPixiMaskLayer(options: {
         drawnFrameTime: visibleMaskMediaTime,
         drawnFrameKey: visibleMaskFrameKey,
         drawnFrameId: visibleMaskFrameId,
+        idMaskStatus: resolveIdMaskStatus(),
       };
     },
 
@@ -491,6 +508,16 @@ export function createPixiMaskLayer(options: {
     }
 
     showRgbaMaskFrame(maskFrame);
+  }
+
+  function resolveIdMaskStatus() {
+    if (activeIdMaskFrame) {
+      return PixiMaskLayerIdMaskStatus.Present;
+    }
+
+    return activeRgbaMaskFrame
+      ? PixiMaskLayerIdMaskStatus.Absent
+      : PixiMaskLayerIdMaskStatus.None;
   }
 
   function getTexture(maskFrame: PreparedMaskFrame) {

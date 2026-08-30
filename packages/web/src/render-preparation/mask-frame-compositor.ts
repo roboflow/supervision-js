@@ -10,6 +10,7 @@ import {
   decodeCompressedRleMask,
   encodeBinaryMask,
   rasterizePolygonToMask,
+  resolveIdMaskPaletteId,
   type IdMaskInstruction,
   type IdMaskFrame,
 } from "supervision-js-core";
@@ -141,10 +142,33 @@ export function createIdMaskRasterFrame(
   }
 }
 
+/**
+ * Whether the palette has a slot for every detection this frame masks. An id
+ * names a detection by its index in the frame, so one masked detection past the
+ * last slot leaves the whole frame without an id raster however few masks it
+ * carries.
+ */
+export function canIdMaskPaletteNameFrame(
+  instructions: readonly SerializableMaskInstruction[],
+) {
+  return instructions.every(
+    (instruction) =>
+      instruction.visible === false ||
+      resolveIdMaskPaletteId(instruction.detectionIndex) !== undefined,
+  );
+}
+
 export function createIdMaskPlane(
   instructions: readonly SerializableMaskInstruction[],
   maxRasterWidth?: number,
 ): PreparedIdMaskPlane | undefined {
+  // The plane carries the ids a failed cook could not. A frame the palette
+  // cannot name has none to carry, and cooking it again reaches the same
+  // refusal after rasterizing every mask a second time.
+  if (!canIdMaskPaletteNameFrame(instructions)) {
+    return undefined;
+  }
+
   const frame = createIdMaskRasterFrame(instructions, maxRasterWidth);
 
   return frame
