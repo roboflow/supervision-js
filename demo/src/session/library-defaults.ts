@@ -112,7 +112,7 @@ export function listDemoLibraryDepartures(options: {
 
   if (configuration.mediaPath === DemoMediaPath.Engine) {
     departures.push({
-      library: "Mediabunny, the reader the library ships with",
+      library: "Mediabunny",
       setting: "Media path",
       value: "Web video engine",
       why: "`createMediaSession` reads a clip through Mediabunny on its own. The web video engine is the other reader in the same package, reached by importing `supervision/web-video-engine`.",
