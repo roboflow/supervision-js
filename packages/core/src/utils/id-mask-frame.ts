@@ -48,7 +48,6 @@ export function createIdMaskFrame(
     width === maskWidth
       ? maskHeight
       : Math.max(1, Math.round((width * maskHeight) / maskWidth));
-  const strokeScale = width / maskWidth;
   const scaledAxes =
     width === maskWidth
       ? undefined
@@ -67,16 +66,13 @@ export function createIdMaskFrame(
   let maxStrokeWidth = 0;
 
   for (const instruction of instructions) {
-    const detectionMaskId = instruction.detectionIndex + 1;
+    const detectionMaskId = resolveIdMaskPaletteId(instruction.detectionIndex);
 
-    if (
-      detectionMaskId <= 0 ||
-      detectionMaskId >= MAX_ID_MASK_PALETTE_ENTRIES
-    ) {
+    if (detectionMaskId === undefined) {
       return undefined;
     }
 
-    writePaletteEntry(
+    writeIdMaskPaletteEntry(
       fillPalette,
       detectionMaskId,
       instruction.color,
@@ -84,15 +80,16 @@ export function createIdMaskFrame(
     );
 
     if (instruction.stroke && instruction.stroke.width > 0) {
-      const strokeWidth = Math.min(
-        resolveStrokeTexels(instruction.stroke.width, strokeScale),
-        MAX_ID_MASK_STROKE_WIDTH,
+      const strokeWidth = resolveIdMaskStrokeTexels(
+        instruction.stroke.width,
+        maskWidth,
+        width,
       );
 
       hasStroke = true;
       strokeWidths[detectionMaskId] = strokeWidth;
       maxStrokeWidth = Math.max(maxStrokeWidth, strokeWidth);
-      writePaletteEntry(
+      writeIdMaskPaletteEntry(
         strokePalette,
         detectionMaskId,
         instruction.stroke.color,
@@ -223,10 +220,22 @@ function resolveRasterWidth(maskWidth: number, maxWidth: number | undefined) {
  * A stroke is measured in texels of the raster it is drawn on, so a coarser
  * raster measures it in coarser texels. A stroke of a texel or more keeps at
  * least one, the thinnest line the shader can draw; a narrower one keeps its
- * own width, which the shader draws as an inner boundary at any scale.
+ * own width, which the shader draws as an inner boundary at any scale. The
+ * ceiling is the widest neighbourhood the shaders scan, so a wider stroke would
+ * be drawn at the ceiling anyway and every layer drawing the same annotation
+ * has to arrive at the same width.
  */
-function resolveStrokeTexels(strokeWidth: number, scale: number) {
-  return Math.max(strokeWidth * scale, Math.min(strokeWidth, 1));
+export function resolveIdMaskStrokeTexels(
+  strokeWidth: number,
+  maskWidth: number,
+  rasterWidth: number,
+) {
+  const scale = maskWidth > 0 ? rasterWidth / maskWidth : 1;
+
+  return Math.min(
+    Math.max(strokeWidth * scale, Math.min(strokeWidth, 1)),
+    MAX_ID_MASK_STROKE_WIDTH,
+  );
 }
 
 interface ScaledMaskAxes {
@@ -262,13 +271,26 @@ function createMaskAxisMap(
   return map;
 }
 
-function writePaletteEntry(
+/**
+ * The palette slot a detection index names, or undefined when the palette has
+ * no slot for it. Slot zero is the background, so the ids start at one and the
+ * last detection the palette can name sits one index below the last slot.
+ */
+export function resolveIdMaskPaletteId(detectionIndex: number) {
+  const detectionMaskId = detectionIndex + 1;
+
+  return detectionMaskId > 0 && detectionMaskId < MAX_ID_MASK_PALETTE_ENTRIES
+    ? detectionMaskId
+    : undefined;
+}
+
+export function writeIdMaskPaletteEntry(
   palette: Float32Array,
-  id: number,
+  detectionMaskId: number,
   color: number,
   alpha: number,
 ) {
-  const offset = id * 4;
+  const offset = detectionMaskId * 4;
 
   palette[offset] = ((color >> 16) & 0xff) / 255;
   palette[offset + 1] = ((color >> 8) & 0xff) / 255;

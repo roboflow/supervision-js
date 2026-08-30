@@ -240,6 +240,9 @@ export {
   MAX_ID_MASK_PALETTE_ENTRIES,
   MAX_ID_MASK_STROKE_WIDTH,
   createIdMaskFrame,
+  resolveIdMaskPaletteId,
+  resolveIdMaskStrokeTexels,
+  writeIdMaskPaletteEntry,
   type IdMaskFrame,
   type IdMaskInstruction,
 } from "#utils/id-mask-frame";

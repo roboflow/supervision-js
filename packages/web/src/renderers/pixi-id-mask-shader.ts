@@ -1,3 +1,8 @@
+import type {
+  InjectedMeshConstructor,
+  InjectedMeshGeometryConstructor,
+  InjectedShaderFactory,
+} from "#renderers/injected-pixi";
 import {
   ID_MASK_STROKE_WIDTH_LANES,
   idMaskFillPaletteWgslField,
@@ -30,11 +35,6 @@ import type {
 
 type PixiIdMaskMesh = PixiMesh<PixiMeshGeometry, PixiShader>;
 
-type MeshConstructor = new (options: {
-  geometry: PixiMeshGeometry;
-  shader: PixiShader;
-}) => PixiIdMaskMesh;
-
 type ImageSourceConstructor = new (options: {
   autoGenerateMipmaps?: boolean;
   dynamic: boolean;
@@ -43,25 +43,6 @@ type ImageSourceConstructor = new (options: {
   scaleMode?: "linear" | "nearest";
   width: number;
 }) => PixiImageSource;
-
-type MeshGeometryConstructor = new (options: {
-  indices: Uint32Array;
-  positions: Float32Array;
-  shrinkBuffersToFit: boolean;
-  topology: "triangle-list";
-  uvs: Float32Array;
-}) => PixiMeshGeometry;
-
-type ShaderFactory = {
-  from(options: {
-    gl: { fragment: string; vertex: string };
-    gpu: {
-      fragment: { entryPoint: string; source: string };
-      vertex: { entryPoint: string; source: string };
-    };
-    resources: Record<string, unknown>;
-  }): PixiShader;
-};
 
 type UniformGroupConstructor = new (
   uniforms: Record<
@@ -83,9 +64,9 @@ export interface PixiIdMaskShaderRenderer {
 
 export function createPixiIdMaskShaderRenderer(options: {
   readonly ImageSource: ImageSourceConstructor;
-  readonly Mesh: MeshConstructor;
-  readonly MeshGeometry: MeshGeometryConstructor;
-  readonly Shader: ShaderFactory;
+  readonly Mesh: InjectedMeshConstructor<PixiIdMaskMesh>;
+  readonly MeshGeometry: InjectedMeshGeometryConstructor;
+  readonly Shader: InjectedShaderFactory;
   readonly UniformGroup: UniformGroupConstructor;
   readonly mediaHeight: number;
   readonly mediaWidth: number;

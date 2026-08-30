@@ -18,8 +18,14 @@ import {
   createDetectionPickKey,
   DetectionPickTarget,
   rebaseDetectionPickToFrame,
+  resolveIdMaskPaletteId,
+  resolveIdMaskStrokeTexels,
+  writeIdMaskPaletteEntry,
 } from "supervision-js-core";
-import { MAX_ID_MASK_PALETTE_ENTRIES } from "#render-preparation/mask-frame-compositor";
+import {
+  MAX_ID_MASK_PALETTE_ENTRIES,
+  MAX_ID_MASK_STROKE_WIDTH,
+} from "#render-preparation/mask-frame-compositor";
 import { PreparedMaskFrameKind } from "#render-preparation/mask-frame-artifact";
 import type { PreparedIdMaskFrame } from "#render-preparation/mask-frame-artifact";
 import { createPixiBoxLayer } from "#renderers/pixi-box-layer";
@@ -57,8 +63,6 @@ import type {
   Texture as PixiTexture,
   UniformGroup as PixiUniformGroup,
 } from "pixi.js";
-
-export const MAX_INTERACTION_STROKE_RADIUS = 12;
 
 type PixiInteractionMesh = PixiMesh<PixiMeshGeometry, PixiShader>;
 
@@ -736,13 +740,15 @@ function createInteractionMaskRenderer(options: {
       let maxStrokeWidth = 0;
 
       for (const { detectionIndex, instruction } of instructions) {
-        const maskId = detectionIndex + 1;
+        const maskId = resolveIdMaskPaletteId(detectionIndex);
 
-        if (maskId <= 0 || maskId >= MAX_ID_MASK_PALETTE_ENTRIES) {
+        // A raster naming this detection is one the palette accepted, so an id
+        // it cannot hold is an id no texel of this raster carries either.
+        if (maskId === undefined) {
           continue;
         }
 
-        writePaletteEntry(
+        writeIdMaskPaletteEntry(
           fillPalette,
           maskId,
           instruction.color,
@@ -750,19 +756,16 @@ function createInteractionMaskRenderer(options: {
         );
 
         if (instruction.stroke && instruction.stroke.width > 0) {
-          writePaletteEntry(
+          writeIdMaskPaletteEntry(
             strokePalette,
             maskId,
             instruction.stroke.color,
             instruction.stroke.alpha,
           );
-          strokeWidths[maskId] = Math.min(
-            resolveRasterStrokeTexels(
-              instruction.stroke.width,
-              instruction.mask.width,
-              frame.width,
-            ),
-            MAX_INTERACTION_STROKE_RADIUS,
+          strokeWidths[maskId] = resolveIdMaskStrokeTexels(
+            instruction.stroke.width,
+            instruction.mask.width,
+            frame.width,
           );
           maxStrokeWidth = Math.max(maxStrokeWidth, strokeWidths[maskId] ?? 0);
         }
@@ -775,10 +778,7 @@ function createInteractionMaskRenderer(options: {
         frame.width,
         frame.height,
       ]);
-      uniforms.uniforms.uMaxStrokeWidth = Math.min(
-        maxStrokeWidth,
-        MAX_INTERACTION_STROKE_RADIUS,
-      );
+      uniforms.uniforms.uMaxStrokeWidth = maxStrokeWidth;
       uniforms.update();
       mesh.visible = true;
     },
@@ -826,38 +826,6 @@ function createInteractionMaskRenderer(options: {
   }
 }
 
-/**
- * A stroke is measured in texels of the raster the shader samples, so a raster
- * cooked below the mask's own resolution measures it in coarser texels. A
- * stroke of a texel or more keeps at least one, the thinnest line the shader
- * can draw; a narrower one keeps its own width, which the shader draws as an
- * inner boundary at any scale.
- */
-function resolveRasterStrokeTexels(
-  strokeWidth: number,
-  maskWidth: number,
-  rasterWidth: number,
-) {
-  const scale = maskWidth > 0 ? rasterWidth / maskWidth : 1;
-
-  return Math.max(strokeWidth * scale, Math.min(strokeWidth, 1));
-}
-
-function writePaletteEntry(
-  palette: Float32Array,
-  maskId: number,
-  color: number,
-  alpha: number,
-) {
-  const offset = maskId * 4;
-  const clampedAlpha = Math.max(0, Math.min(alpha, 1));
-
-  palette[offset] = ((color >> 16) & 0xff) / 255;
-  palette[offset + 1] = ((color >> 8) & 0xff) / 255;
-  palette[offset + 2] = (color & 0xff) / 255;
-  palette[offset + 3] = clampedAlpha;
-}
-
 const interactionMaskFragmentShader = `#version 300 es
 precision highp float;
 precision highp int;
@@ -888,7 +856,7 @@ bool differs(float left, float right) {
 // The winning candidate is the max-(offsetY, offsetX) passing offset, so the
 // scan runs backwards and exits on the first hit.
 float findNeighborStrokeId(float centerId, vec2 texel) {
-  int radius = int(min(uMaxStrokeWidth, float(${MAX_INTERACTION_STROKE_RADIUS})));
+  int radius = int(min(uMaxStrokeWidth, float(${MAX_ID_MASK_STROKE_WIDTH})));
 
   for (int offsetY = radius; offsetY >= -radius; offsetY -= 1) {
     for (int offsetX = radius; offsetX >= -radius; offsetX -= 1) {
@@ -986,7 +954,7 @@ fn differs(left: f32, right: f32) -> bool {
 // The winning candidate is the max-(offsetY, offsetX) passing offset, so the
 // scan runs backwards and exits on the first hit.
 fn findNeighborStrokeId(uv: vec2<f32>, centerId: f32, texel: vec2<f32>) -> f32 {
-  let radius = i32(min(maskUniforms.uMaxStrokeWidth, ${MAX_INTERACTION_STROKE_RADIUS}.0));
+  let radius = i32(min(maskUniforms.uMaxStrokeWidth, ${MAX_ID_MASK_STROKE_WIDTH}.0));
 
   for (var offsetY = radius; offsetY >= -radius; offsetY -= 1) {
     for (var offsetX = radius; offsetX >= -radius; offsetX -= 1) {

@@ -1,10 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { createPixiInteractionPresentationLayer } from "#renderers/pixi-interaction-presentation-layer";
 import {
-  MAX_INTERACTION_STROKE_RADIUS,
-  createPixiInteractionPresentationLayer,
-} from "#renderers/pixi-interaction-presentation-layer";
-import { BaseBoxStyle, BaseInteractionStyle } from "supervision-js-core";
+  BaseBoxStyle,
+  BaseInteractionStyle,
+  MAX_ID_MASK_STROKE_WIDTH,
+  createIdMaskFrame,
+  encodeCompressedRleCounts,
+} from "supervision-js-core";
 import type {
   Detection,
   DetectionFrame,
@@ -12,6 +15,7 @@ import type {
 } from "supervision-js-core";
 import {
   DetectionInteractionState,
+  DetectionMaskEncoding,
   DetectionPickTarget,
 } from "supervision-js-core";
 import { PreparedMaskFrameKind } from "#render-preparation/mask-frame-artifact";
@@ -399,10 +403,10 @@ describe("pixi interaction presentation layer", () => {
     const descriptor = FakeShaderFactory.descriptors.at(-1)!;
 
     expect(descriptor.gl.fragment).toContain(
-      `int radius = int(min(uMaxStrokeWidth, float(${MAX_INTERACTION_STROKE_RADIUS})));`,
+      `int radius = int(min(uMaxStrokeWidth, float(${MAX_ID_MASK_STROKE_WIDTH})));`,
     );
     expect(descriptor.gpu.fragment.source).toContain(
-      `let radius = i32(min(maskUniforms.uMaxStrokeWidth, ${MAX_INTERACTION_STROKE_RADIUS}.0));`,
+      `let radius = i32(min(maskUniforms.uMaxStrokeWidth, ${MAX_ID_MASK_STROKE_WIDTH}.0));`,
     );
 
     for (const source of [
@@ -411,12 +415,8 @@ describe("pixi interaction presentation layer", () => {
     ]) {
       expect(source).toContain("offsetY = radius; offsetY >= -radius");
       expect(source).toContain("offsetX = radius; offsetX >= -radius");
-      expect(source).not.toContain(
-        `offsetY = -${MAX_INTERACTION_STROKE_RADIUS}`,
-      );
-      expect(source).not.toContain(
-        `offsetX = -${MAX_INTERACTION_STROKE_RADIUS}`,
-      );
+      expect(source).not.toContain(`offsetY = -${MAX_ID_MASK_STROKE_WIDTH}`);
+      expect(source).not.toContain(`offsetX = -${MAX_ID_MASK_STROKE_WIDTH}`);
     }
   });
 
@@ -434,7 +434,37 @@ describe("pixi interaction presentation layer", () => {
       0.5,
     );
   });
+
+  it("gives a wide stroke the width the mask layer drew it at", () => {
+    for (const strokeWidth of [
+      MAX_ID_MASK_STROKE_WIDTH - 2,
+      MAX_ID_MASK_STROKE_WIDTH + 10,
+    ]) {
+      expect(uploadedStrokeWidth({ rasterWidth: 120, strokeWidth })).toBe(
+        maskLayerStrokeWidth(strokeWidth),
+      );
+    }
+  });
 });
+
+function maskLayerStrokeWidth(strokeWidth: number) {
+  const maskFrame = createIdMaskFrame([
+    {
+      alpha: 1,
+      color: 0x00ff00,
+      detectionIndex: 0,
+      mask: {
+        counts: encodeCompressedRleCounts([0, 1]),
+        encoding: DetectionMaskEncoding.CompressedRle,
+        height: 80,
+        width: 120,
+      },
+      stroke: { alpha: 1, color: 0xffffff, width: strokeWidth },
+    },
+  ]);
+
+  return maskFrame!.strokeWidths[1];
+}
 
 function uploadedStrokeWidth(options: {
   readonly rasterWidth: number;
