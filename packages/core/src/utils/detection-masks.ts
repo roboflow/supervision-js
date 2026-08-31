@@ -7,7 +7,6 @@ import {
 } from "#types/detections";
 import {
   decodeCompressedRleCounts,
-  decodeCompressedRleMask,
   encodeCompressedRleCounts,
 } from "#utils/detection-frames";
 
@@ -209,9 +208,18 @@ export function computeMaskBounds(
 export function computeDetectionMaskRect(
   mask: DetectionMask,
 ): Rect | undefined {
-  const decoded = decodeCompressedRleMask(mask);
-  const bounds = computeMaskBounds(decoded.data, decoded.width, decoded.height);
-  return bounds ?? undefined;
+  const { bounds } = readCompressedRleMask(mask);
+
+  if (!bounds) {
+    return undefined;
+  }
+
+  return {
+    height: bounds.height,
+    width: bounds.width,
+    x: bounds.left + bounds.width / 2,
+    y: bounds.top + bounds.height / 2,
+  };
 }
 
 export function detectMaskBorders(
@@ -301,15 +309,8 @@ export function extractMaskRectRuns(
 export function extractDetectionMaskRectRuns(
   mask: DetectionMask,
 ): readonly MaskRectRun[] | undefined {
-  if (mask.encoding !== DetectionMaskEncoding.CompressedRle) {
-    throw new Error(`Unsupported detection mask encoding: ${mask.encoding}`);
-  }
-
   const { height, width } = mask;
-  assertMaskSize(width, height);
-
-  const counts = decodeCompressedRleCounts(mask.counts);
-  const bounds = computeCompressedRleBounds(counts, width, height);
+  const { bounds, counts } = readCompressedRleMask(mask);
 
   if (!bounds) {
     return undefined;
@@ -356,6 +357,20 @@ export function extractDetectionMaskRectRuns(
     top,
   );
   return rects.length > 0 ? rects : undefined;
+}
+
+function readCompressedRleMask(mask: DetectionMask) {
+  if (mask.encoding !== DetectionMaskEncoding.CompressedRle) {
+    throw new Error(`Unsupported detection mask encoding: ${mask.encoding}`);
+  }
+
+  assertMaskSize(mask.width, mask.height);
+  const counts = decodeCompressedRleCounts(mask.counts);
+
+  return {
+    bounds: computeCompressedRleBounds(counts, mask.width, mask.height),
+    counts,
+  };
 }
 
 /** Counts alternate background, foreground, starting on background. */
