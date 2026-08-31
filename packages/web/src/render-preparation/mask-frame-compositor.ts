@@ -7,6 +7,7 @@ import type {
 import type { MaskStrokeStyle } from "supervision-js-core";
 import {
   createIdMaskFrame,
+  decodeCompressedRleCounts,
   decodeCompressedRleMask,
   encodeBinaryMask,
   rasterizePolygonToMask,
@@ -25,6 +26,13 @@ interface DecodedMaskPixels {
   readonly data: Uint8Array;
   readonly height: number;
   readonly width: number;
+}
+
+interface MaskBounds {
+  readonly maxX: number;
+  readonly maxY: number;
+  readonly minX: number;
+  readonly minY: number;
 }
 
 interface RgbaColor {
@@ -181,13 +189,17 @@ function compositeInstruction(
   canvasWidth: number,
   instruction: IdMaskInstruction,
 ) {
-  const decodedMask = decodeCompressedRleMask(instruction.mask);
   const fill = resolveRgbaColor(instruction.color, instruction.alpha);
+  const bounds = compositeMaskFill(rgba, canvasWidth, instruction.mask, fill);
 
-  compositeMaskFill(rgba, canvasWidth, decodedMask, fill);
-
-  if (instruction.stroke) {
-    compositeMaskStroke(rgba, canvasWidth, decodedMask, instruction.stroke);
+  if (instruction.stroke && bounds) {
+    compositeMaskStroke(
+      rgba,
+      canvasWidth,
+      decodeCompressedRleMask(instruction.mask),
+      bounds,
+      instruction.stroke,
+    );
   }
 }
 
@@ -217,29 +229,73 @@ function materializeMaskInstructions(
     });
 }
 
+/**
+ * Compressed RLE counts runs down each column in turn, so a foreground run is
+ * a contiguous walk down one column that wraps into the next.
+ */
 function compositeMaskFill(
   rgba: Uint8ClampedArray,
   canvasWidth: number,
-  decodedMask: DecodedMaskPixels,
+  mask: IdMaskInstruction["mask"],
   fill: RgbaColor,
-) {
-  for (let y = 0; y < decodedMask.height; y += 1) {
-    for (let x = 0; x < decodedMask.width; x += 1) {
-      const maskOffset = y * decodedMask.width + x;
+): MaskBounds | undefined {
+  const counts = decodeCompressedRleCounts(mask.counts);
+  const maskWidth = mask.width;
+  const maskHeight = mask.height;
+  const maskArea = maskWidth * maskHeight;
+  let maskOffset = 0;
+  let minX = maskWidth;
+  let minY = maskHeight;
+  let maxX = -1;
+  let maxY = -1;
 
-      if (!decodedMask.data[maskOffset]) {
-        continue;
+  for (let index = 0; index < counts.length; index += 1) {
+    const runLength = counts[index] ?? 0;
+
+    if (index % 2 === 0 || runLength <= 0) {
+      maskOffset += runLength;
+      continue;
+    }
+
+    let columnX = Math.floor(maskOffset / maskHeight);
+    let columnY = maskOffset - columnX * maskHeight;
+
+    for (let step = 0; step < runLength; step += 1) {
+      // A run can outlast the columns the mask has; the pixel it then names
+      // is wherever that column-major offset lands when read back row-major.
+      const rowMajorOffset = columnY * maskWidth + columnX;
+
+      if (rowMajorOffset < maskArea) {
+        const x = rowMajorOffset % maskWidth;
+        const y = (rowMajorOffset - x) / maskWidth;
+
+        writePixel(rgba, canvasWidth, x, y, fill);
+
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x);
+        maxY = Math.max(maxY, y);
       }
 
-      writePixel(rgba, canvasWidth, x, y, fill);
+      columnY += 1;
+
+      if (columnY === maskHeight) {
+        columnY = 0;
+        columnX += 1;
+      }
     }
+
+    maskOffset += runLength;
   }
+
+  return maxX < minX || maxY < minY ? undefined : { maxX, maxY, minX, minY };
 }
 
 function compositeMaskStroke(
   rgba: Uint8ClampedArray,
   canvasWidth: number,
   decodedMask: DecodedMaskPixels,
+  bounds: MaskBounds,
   stroke: MaskStrokeStyle,
 ) {
   const width = Math.round(stroke.width);
@@ -250,8 +306,8 @@ function compositeMaskStroke(
 
   const strokeColor = resolveRgbaColor(stroke.color, stroke.alpha);
 
-  for (let y = 0; y < decodedMask.height; y += 1) {
-    for (let x = 0; x < decodedMask.width; x += 1) {
+  for (let y = bounds.minY; y <= bounds.maxY; y += 1) {
+    for (let x = bounds.minX; x <= bounds.maxX; x += 1) {
       if (
         !isMaskPixel(decodedMask, x, y) ||
         !isBoundaryPixel(decodedMask, x, y)

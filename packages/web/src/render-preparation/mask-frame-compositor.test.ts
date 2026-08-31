@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   DetectionMaskEncoding,
+  encodeBinaryMask,
   encodeCompressedRleCounts,
 } from "supervision-js-core";
 
@@ -18,6 +19,7 @@ import {
   createIdMaskRasterFrame,
   createRegionMaskCoverageFrame,
   MAX_ID_MASK_PALETTE_ENTRIES,
+  type CompositedMaskFrame,
 } from "./mask-frame-compositor";
 
 describe("mask frame compositor", () => {
@@ -490,3 +492,129 @@ function maskedDetectionAt(detectionIndex: number) {
     },
   };
 }
+
+const FALLBACK_WIDTH = 12;
+const FALLBACK_HEIGHT = 8;
+
+const FALLBACK_LEGEND: Record<
+  string,
+  readonly [number, number, number, number]
+> = {
+  ".": [0, 0, 0, 0],
+  0: [255, 0, 0, 255],
+  1: [0, 255, 0, 128],
+  2: [0, 0, 255, 255],
+  3: [0, 255, 255, 255],
+  4: [255, 165, 0, 255],
+  a: [0, 0, 128, 255],
+  b: [128, 128, 0, 255],
+  c: [128, 0, 128, 128],
+  d: [128, 128, 128, 255],
+};
+
+function rectMask(x0: number, x1: number, y0: number, y1: number) {
+  const data = new Uint8Array(FALLBACK_WIDTH * FALLBACK_HEIGHT);
+
+  for (let y = y0; y <= y1; y += 1) {
+    for (let x = x0; x <= x1; x += 1) {
+      data[y * FALLBACK_WIDTH + x] = 1;
+    }
+  }
+
+  return encodeBinaryMask(data, FALLBACK_WIDTH, FALLBACK_HEIGHT);
+}
+
+function paintedGrid(frame: CompositedMaskFrame) {
+  const rows: string[] = [];
+
+  for (let y = 0; y < frame.height; y += 1) {
+    let row = "";
+
+    for (let x = 0; x < frame.width; x += 1) {
+      const offset = (y * frame.width + x) * 4;
+      const pixel = [...frame.data.slice(offset, offset + 4)];
+      const symbol = Object.entries(FALLBACK_LEGEND).find(([, color]) =>
+        color.every((channel, index) => channel === pixel[index]),
+      );
+
+      row += symbol ? symbol[0] : `[${pixel.join(",")}]`;
+    }
+
+    rows.push(row);
+  }
+
+  return rows;
+}
+
+const overlappingStrokedMasks = [
+  {
+    alpha: 1,
+    color: 0xff0000,
+    detectionIndex: 0,
+    mask: rectMask(1, 5, 1, 4),
+    stroke: { alpha: 1, color: 0x000080, width: 1 },
+  },
+  {
+    alpha: 0.5,
+    color: 0x00ff00,
+    detectionIndex: 1,
+    mask: rectMask(3, 8, 2, 6),
+    stroke: { alpha: 1, color: 0x808000, width: 1 },
+  },
+  {
+    alpha: 1,
+    color: 0x0000ff,
+    detectionIndex: 2,
+    mask: rectMask(6, 10, 0, 3),
+    stroke: { alpha: 0.5, color: 0x800080, width: 2 },
+  },
+  {
+    alpha: 1,
+    color: 0x00ffff,
+    detectionIndex: 3,
+    mask: rectMask(2, 9, 5, 7),
+    stroke: { alpha: 1, color: 0x808080, width: 1 },
+  },
+  {
+    alpha: 1,
+    color: 0xffa500,
+    detectionIndex: 4,
+    mask: rectMask(0, 3, 0, 1),
+  },
+] as const;
+
+describe("rgba mask fallback", () => {
+  it("paints overlapping fills and strokes pixel for pixel", () => {
+    expect(paintedGrid(compositeMaskFrame(overlappingStrokedMasks)!)).toEqual([
+      "4444cc22222c",
+      "4444cc22222c",
+      "a0b1cc22222c",
+      "a0b1cc22222c",
+      "addddddddddc",
+      "ad33333333dc",
+      ".d33333333d.",
+      ".d33333333d.",
+    ]);
+  });
+
+  it("keeps the pixels a run that overruns the plane wraps onto", () => {
+    // Six foreground pixels from offset 10 outlast the 4x3 plane, so the run
+    // carries on into columns the mask does not have and those offsets read
+    // back row-major onto pixels it never walked over.
+    const frame = compositeMaskFrame([
+      {
+        alpha: 1,
+        color: 0xff0000,
+        detectionIndex: 0,
+        mask: {
+          counts: encodeCompressedRleCounts([10, 6]),
+          encoding: DetectionMaskEncoding.CompressedRle,
+          height: 3,
+          width: 4,
+        },
+      },
+    ]);
+
+    expect(paintedGrid(frame!)).toEqual(["....", "00.0", "0..0"]);
+  });
+});
