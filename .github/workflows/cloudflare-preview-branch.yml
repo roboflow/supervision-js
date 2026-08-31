@@ -1,0 +1,130 @@
+name: Manage Cloudflare preview branch
+
+on:
+  pull_request_target:
+    types:
+      - closed
+      - labeled
+      - reopened
+      - synchronize
+      - unlabeled
+
+permissions: {}
+
+concurrency:
+  group: cloudflare-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  update-preview-branch:
+    if: >-
+      github.event.action == 'closed' ||
+      (github.event.action == 'unlabeled' && github.event.label.name == 'cloudflare-preview') ||
+      contains(github.event.pull_request.labels.*.name, 'cloudflare-preview')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Reconcile preview branch and status comment
+        uses: actions/github-script@373c709c69115d41ff229c7e5df9f8788daa9553 # v9.0.0
+        with:
+          script: |
+            const marker = "<!-- cloudflare-pages-preview -->";
+            const previewLabel = "cloudflare-preview";
+            const pullRequest = context.payload.pull_request;
+            const previewBranch = `preview/pr-${pullRequest.number}`;
+            const previewRef = `heads/${previewBranch}`;
+            const previewUrl = `https://preview-pr-${pullRequest.number}.supervision-js-preview.pages.dev/`;
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const enabled = pullRequest.labels.some(({ name }) => name === previewLabel);
+
+            async function upsertComment(body) {
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                ...context.repo,
+                issue_number: pullRequest.number,
+                per_page: 100,
+              });
+              const existing = comments.find(({ body: commentBody }) =>
+                commentBody?.includes(marker),
+              );
+
+              if (existing) {
+                await github.rest.issues.updateComment({
+                  ...context.repo,
+                  comment_id: existing.id,
+                  body,
+                });
+                return;
+              }
+
+              await github.rest.issues.createComment({
+                ...context.repo,
+                issue_number: pullRequest.number,
+                body,
+              });
+            }
+
+            async function deletePreviewRef() {
+              try {
+                await github.rest.git.deleteRef({
+                  ...context.repo,
+                  ref: previewRef,
+                });
+              } catch (error) {
+                if (error.status !== 404 && error.status !== 422) throw error;
+              }
+            }
+
+            if (!enabled || context.payload.action === "closed") {
+              await deletePreviewRef();
+
+              if (context.payload.action !== "closed") {
+                await upsertComment([
+                  marker,
+                  "### Cloudflare preview",
+                  "",
+                  "Preview deployment disabled. Add the `cloudflare-preview` label to publish it again.",
+                ].join("\n"));
+              }
+              return;
+            }
+
+            try {
+              try {
+                await github.rest.git.updateRef({
+                  ...context.repo,
+                  ref: previewRef,
+                  sha: pullRequest.head.sha,
+                  force: true,
+                });
+              } catch (error) {
+                if (error.status !== 404) throw error;
+
+                await github.rest.git.createRef({
+                  ...context.repo,
+                  ref: `refs/${previewRef}`,
+                  sha: pullRequest.head.sha,
+                });
+              }
+
+              await upsertComment([
+                marker,
+                "### Cloudflare preview",
+                "",
+                `⏳ Preview queued for \`${pullRequest.head.sha.slice(0, 7)}\`.`,
+                "",
+                `[Open the stable preview](${previewUrl}) once the Cloudflare check completes.`,
+              ].join("\n"));
+            } catch (error) {
+              await upsertComment([
+                marker,
+                "### Cloudflare preview",
+                "",
+                `❌ Could not queue the preview for \`${pullRequest.head.sha.slice(0, 7)}\`.`,
+                "",
+                `[View the GitHub Actions run](${runUrl}).`,
+              ].join("\n"));
+              throw error;
+            }

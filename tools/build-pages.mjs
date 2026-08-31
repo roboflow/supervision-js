@@ -7,6 +7,7 @@ import {
   readFile,
   readdir,
   rm,
+  stat,
   writeFile,
 } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
@@ -15,8 +16,9 @@ import { fileURLToPath } from "node:url";
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const pagesDirectory = resolve(projectRoot, "dist/pages");
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+const maximumStaticFileSize = 25 * 1024 * 1024;
 // Relative asset URLs let the same static artifact work at the root of a
-// custom domain (Render) and below a project prefix (GitHub Pages).
+// Cloudflare preview and below the GitHub Pages project prefix.
 const staticAppBasePath = "./";
 
 await main();
@@ -49,7 +51,7 @@ async function main() {
   await writeFile(join(pagesDirectory, ".nojekyll"), "");
 
   await verifyPagesArtifact();
-  console.log(`GitHub Pages artifact ready at ${pagesDirectory}.`);
+  console.log(`Static site artifact ready at ${pagesDirectory}.`);
 }
 
 async function copyDirectoryContents(source, destination) {
@@ -94,6 +96,44 @@ async function verifyPagesArtifact() {
       "Static application assets must use relative URLs so the artifact works under a project URL prefix.",
     );
   }
+
+  const oversizedFiles = (await listFilesRecursively(pagesDirectory)).filter(
+    ({ size }) => size > maximumStaticFileSize,
+  );
+
+  if (oversizedFiles.length > 0) {
+    throw new Error(
+      `Static artifact contains files larger than 25 MiB: ${oversizedFiles
+        .map(({ path, size }) => `${path} (${size} bytes)`)
+        .join(", ")}`,
+    );
+  }
+}
+
+async function listFilesRecursively(directory, relativeDirectory = "") {
+  const entries = await readdir(join(directory, relativeDirectory), {
+    withFileTypes: true,
+  });
+  const files = await Promise.all(
+    entries.map(async (entry) => {
+      const relativePath = join(relativeDirectory, entry.name);
+
+      if (entry.isDirectory()) {
+        return listFilesRecursively(directory, relativePath);
+      }
+
+      if (!entry.isFile()) return [];
+
+      return [
+        {
+          path: relativePath,
+          size: (await stat(join(directory, relativePath))).size,
+        },
+      ];
+    }),
+  );
+
+  return files.flat();
 }
 
 function runNpm(arguments_, environment = {}) {

@@ -7,7 +7,7 @@ authors:
   - given-names: Roboflow
     email: support@roboflow.com
 repository-code: https://github.com/roboflow/supervision-js
-url: https://supervision-js-demo.onrender.com/
+url: https://roboflow.github.io/supervision-js/
 abstract: >-
   supervision-js provides browser-native media rendering, annotation styling,
   interaction, and editing primitives for computer vision applications.

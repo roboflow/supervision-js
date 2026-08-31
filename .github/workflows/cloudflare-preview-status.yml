@@ -1,0 +1,85 @@
+name: Report Cloudflare preview status
+
+on:
+  check_run:
+    types:
+      - completed
+
+permissions: {}
+
+jobs:
+  report-preview-status:
+    if: startsWith(github.event.check_run.check_suite.head_branch, 'preview/pr-')
+    runs-on: ubuntu-latest
+    permissions:
+      checks: read
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Update preview status comment
+        uses: actions/github-script@373c709c69115d41ff229c7e5df9f8788daa9553 # v9.0.0
+        with:
+          script: |
+            const marker = "<!-- cloudflare-pages-preview -->";
+            const checkRun = context.payload.check_run;
+            const branch = checkRun.check_suite?.head_branch ?? "";
+            const appIdentity = `${checkRun.app?.slug ?? ""} ${checkRun.app?.name ?? ""}`.toLowerCase();
+            const match = /^preview\/pr-(\d+)$/.exec(branch);
+
+            if (!match || !appIdentity.includes("cloudflare")) return;
+
+            const pullRequestNumber = Number(match[1]);
+            const previewRef = `heads/${branch}`;
+            const previewUrl = `https://preview-pr-${pullRequestNumber}.supervision-js-preview.pages.dev/`;
+
+            let currentRef;
+            try {
+              currentRef = await github.rest.git.getRef({
+                ...context.repo,
+                ref: previewRef,
+              });
+            } catch (error) {
+              if (error.status === 404) return;
+              throw error;
+            }
+
+            if (currentRef.data.object.sha !== checkRun.head_sha) return;
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              ...context.repo,
+              issue_number: pullRequestNumber,
+              per_page: 100,
+            });
+            const existing = comments.find(({ body }) => body?.includes(marker));
+            const shortSha = checkRun.head_sha.slice(0, 7);
+            const detailsLine = checkRun.details_url
+              ? `[View Cloudflare build details](${checkRun.details_url}).`
+              : "Cloudflare did not provide a build-details URL.";
+            const succeeded = checkRun.conclusion === "success";
+            const body = [
+              marker,
+              "### Cloudflare preview",
+              "",
+              succeeded
+                ? `✅ Preview updated for \`${shortSha}\`.`
+                : `❌ Preview failed for \`${shortSha}\` (${checkRun.conclusion ?? "unknown"}).`,
+              "",
+              succeeded ? `[Open the preview](${previewUrl}).` : detailsLine,
+              ...(succeeded ? [detailsLine] : []),
+            ].join("\n");
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                ...context.repo,
+                comment_id: existing.id,
+                body,
+              });
+              return;
+            }
+
+            await github.rest.issues.createComment({
+              ...context.repo,
+              issue_number: pullRequestNumber,
+              body,
+            });
