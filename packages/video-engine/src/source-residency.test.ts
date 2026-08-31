@@ -75,6 +75,17 @@ function pieceFetch(total: number, pieceBytes: number) {
   };
 }
 
+/** Reads a body to its end, which is what makes the residency bank it. A
+ *  stream-served body drained this way copies nothing itself, so a copy count
+ *  taken around it is the residency's own. */
+const drain = async (response: Response): Promise<void> => {
+  const reader = response.body!.getReader();
+  for (;;) {
+    const { done } = await reader.read();
+    if (done) return;
+  }
+};
+
 /** The demuxer abandons a read once it holds what it asked for; this is that. */
 async function abandonAfter(response: Response, bytes: number): Promise<void> {
   const reader = response.body!.getReader();
@@ -97,6 +108,28 @@ function wholeFileFetch(total = TOTAL) {
         headers: { "Content-Length": String(total) },
       }),
   ) as unknown as typeof fetch;
+}
+
+/** Bytes moved by every `Uint8Array.prototype.set` call while it is installed. */
+function countCopiedBytes(): {
+  copied: () => number;
+  restore: () => void;
+} {
+  const original = Uint8Array.prototype.set;
+  let copied = 0;
+  Uint8Array.prototype.set = function set(
+    source: ArrayLike<number>,
+    offset?: number,
+  ): void {
+    copied += source.length;
+    original.call(this, source, offset);
+  };
+  return {
+    copied: () => copied,
+    restore: () => {
+      Uint8Array.prototype.set = original;
+    },
+  };
 }
 
 describe("createSourceResidency", () => {
@@ -205,6 +238,36 @@ describe("createSourceResidency", () => {
     expect(residency.snapshot().prefetchedBytes).toBe(TOTAL - 1024);
   });
 
+  it("stops warming once the budget is full instead of polling for room", async () => {
+    const residency = createSourceResidency({
+      url: URL_UNDER_TEST,
+      budgetBytes: 2048,
+      fetchImpl: networkFetch(),
+    });
+
+    await read(
+      await residency.fetchFn(URL_UNDER_TEST, {
+        headers: { Range: "bytes=0-1023" },
+      }),
+    );
+    await settle();
+
+    residency.startWarming();
+    await vi.waitFor(() => {
+      expect(residency.snapshot().warming).toBe(false);
+    });
+
+    const settledSnapshot = residency.snapshot();
+    expect(settledSnapshot.residentBytes).toBeLessThanOrEqual(2048);
+
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(residency.snapshot().warming).toBe(false);
+    expect(residency.snapshot().prefetchedBytes).toBe(
+      settledSnapshot.prefetchedBytes,
+    );
+  });
+
   it("drops the runs furthest from the focus offset when the budget is met", async () => {
     const residency = createSourceResidency({
       url: URL_UNDER_TEST,
@@ -287,6 +350,82 @@ describe("createSourceResidency", () => {
     await settle();
 
     expect(residency.snapshot().ranges).toEqual([{ start: 0, end: TOTAL }]);
+  });
+
+  it("holds no more than the budget after one sequential read", async () => {
+    const total = 16 * 1024;
+    const budget = 4 * 1024;
+    const residency = createSourceResidency({
+      url: URL_UNDER_TEST,
+      budgetBytes: budget,
+      fetchImpl: networkFetch(total),
+    });
+
+    await read(
+      await residency.fetchFn(URL_UNDER_TEST, {
+        headers: { Range: `bytes=0-${total - 1}` },
+      }),
+    );
+    await settle();
+
+    expect(residency.snapshot().residentBytes).toBeLessThanOrEqual(budget);
+    expect(residency.snapshot().ranges).toEqual([{ start: 0, end: budget }]);
+  });
+
+  it("keeps the window at the focus offset when it narrows a run", async () => {
+    const total = 16 * 1024;
+    const budget = 4 * 1024;
+    const network = networkFetch(total);
+    const residency = createSourceResidency({
+      url: URL_UNDER_TEST,
+      budgetBytes: budget,
+      fetchImpl: network,
+    });
+
+    residency.focusAt(8192);
+    await read(
+      await residency.fetchFn(URL_UNDER_TEST, {
+        headers: { Range: `bytes=0-${total - 1}` },
+      }),
+    );
+    await settle();
+
+    expect(residency.snapshot().ranges).toEqual([{ start: 8192, end: 12288 }]);
+    const served = await residency.fetchFn(URL_UNDER_TEST, {
+      headers: { Range: "bytes=8192-" },
+    });
+    expect(await read(served)).toEqual(body(8192, budget));
+    expect(network).toHaveBeenCalledTimes(1);
+  });
+
+  it("banks a run of sequential reads without recopying what it holds", async () => {
+    const reads = 2000;
+    const readBytes = 2 * 1024;
+    const total = reads * readBytes;
+    const residency = createSourceResidency({
+      url: URL_UNDER_TEST,
+      budgetBytes: total,
+      fetchImpl: pieceFetch(total, readBytes).fetchImpl,
+    });
+
+    const copies = countCopiedBytes();
+    try {
+      for (let index = 0; index < reads; index += 1) {
+        const start = index * readBytes;
+        await drain(
+          await residency.fetchFn(URL_UNDER_TEST, {
+            headers: { Range: `bytes=${start}-${start + readBytes - 1}` },
+          }),
+        );
+        await settle();
+      }
+    } finally {
+      copies.restore();
+    }
+
+    const { residentBytes } = residency.snapshot();
+    expect(residentBytes).toBe(total);
+    expect(copies.copied()).toBeLessThan(4 * residentBytes);
   });
 
   it("holds nothing once disposed", async () => {

@@ -56,7 +56,9 @@ export interface SourceResidency {
 
 interface Segment {
   start: number;
-  bytes: Uint8Array;
+  /** Held bytes: a window into `capacity`, which carries spare room to append into. */
+  view: Uint8Array;
+  capacity: Uint8Array;
 }
 
 const DEFAULT_CHUNK_BYTES = 4 * 1024 * 1024;
@@ -67,7 +69,11 @@ export const READ_BLOCK_BYTES = 512 * 1024;
 const RANGE_HEADER = /^bytes=(\d+)-(\d*)$/;
 
 const segmentEnd = (segment: Segment): number =>
-  segment.start + segment.bytes.length;
+  segment.start + segment.view.length;
+
+/** Where a run's held window sits inside its buffer. */
+const viewOffset = (segment: Segment): number =>
+  segment.view.byteOffset - segment.capacity.byteOffset;
 
 function readRangeHeader(init: RequestInit | undefined): number | null {
   const headers = new Headers(init?.headers ?? undefined);
@@ -78,8 +84,10 @@ function readRangeHeader(init: RequestInit | undefined): number | null {
 }
 
 /**
- * Bytes held in one buffer per contiguous run, merged on insert so a lookup is
- * a single scan and a served range is a single subarray with nothing copied.
+ * Bytes held in one buffer per contiguous run, so a lookup is a single scan and
+ * a served range is a subarray with nothing copied. Insert is where copying
+ * happens: a run keeps spare capacity so an append that extends it writes into
+ * that room, and only a backward or overlapping insert re-materializes the run.
  */
 class ByteStore {
   #segments: Segment[] = [];
@@ -101,7 +109,7 @@ class ByteStore {
     for (const segment of this.#segments) {
       if (segment.start > offset) return null;
       if (segmentEnd(segment) > offset) {
-        return segment.bytes.subarray(offset - segment.start);
+        return segment.view.subarray(offset - segment.start);
       }
     }
     return null;
@@ -118,25 +126,45 @@ class ByteStore {
   insert(start: number, bytes: Uint8Array): void {
     if (bytes.length === 0) return;
     const end = start + bytes.length;
+    const index = this.#segments.findIndex(
+      (segment) => segmentEnd(segment) === start,
+    );
+    const extended = index === -1 ? undefined : this.#segments[index];
+    if (extended) {
+      const following = this.#segments[index + 1];
+      if (!following || end < following.start) {
+        appendInto(extended, bytes);
+        this.#bytes += bytes.length;
+        return;
+      }
+    }
     const kept: Segment[] = [];
-    let merged: Segment = { start, bytes };
+    let merged: Segment = { start, view: bytes, capacity: bytes };
     for (const segment of this.#segments) {
       if (segmentEnd(segment) < merged.start || segment.start > end) {
         kept.push(segment);
         continue;
       }
-      this.#bytes -= segment.bytes.length;
+      this.#bytes -= segment.view.length;
       merged = joinSegments(segment, merged);
     }
     kept.push(merged);
     kept.sort((left, right) => left.start - right.start);
     this.#segments = kept;
-    this.#bytes += merged.bytes.length;
+    this.#bytes += merged.view.length;
   }
 
-  /** Drops whole runs, furthest from `focus` first, until the budget is met. */
+  /**
+   * Brings held bytes under the budget: whole runs go first, furthest from
+   * `focus`, and a lone run that has outgrown the budget is narrowed to a
+   * `budgetBytes` window at `focus`.
+   */
   evictTo(budgetBytes: number, focus: number): void {
-    while (this.#bytes > budgetBytes && this.#segments.length > 1) {
+    while (this.#bytes > budgetBytes) {
+      if (this.#segments.length <= 1) {
+        this.#narrowToBudget(budgetBytes, focus);
+        return;
+      }
       let worstIndex = 0;
       let worstDistance = -1;
       for (const [index, segment] of this.#segments.entries()) {
@@ -150,8 +178,25 @@ class ByteStore {
         }
       }
       const [dropped] = this.#segments.splice(worstIndex, 1);
-      if (dropped) this.#bytes -= dropped.bytes.length;
+      if (dropped) this.#bytes -= dropped.view.length;
     }
+  }
+
+  #narrowToBudget(budgetBytes: number, focus: number): void {
+    const segment = this.#segments[0];
+    if (!segment) return;
+    if (budgetBytes <= 0) {
+      this.clear();
+      return;
+    }
+    const windowStart = Math.min(
+      Math.max(focus, segment.start),
+      segmentEnd(segment) - budgetBytes,
+    );
+    const offset = viewOffset(segment) + (windowStart - segment.start);
+    segment.view = segment.capacity.subarray(offset, offset + budgetBytes);
+    segment.start = windowStart;
+    this.#bytes = budgetBytes;
   }
 
   clear(): void {
@@ -160,13 +205,34 @@ class ByteStore {
   }
 }
 
+/**
+ * Extends a run in place, growing its buffer geometrically when the spare room
+ * runs out. The growth copy carries only the held window, so a run releases
+ * whatever narrowing dropped off its front.
+ */
+function appendInto(segment: Segment, bytes: Uint8Array): void {
+  const offset = viewOffset(segment);
+  const tail = offset + segment.view.length;
+  if (tail + bytes.length <= segment.capacity.length) {
+    segment.capacity.set(bytes, tail);
+    segment.view = segment.capacity.subarray(offset, tail + bytes.length);
+    return;
+  }
+  const held = segment.view.length + bytes.length;
+  const grown = new Uint8Array(Math.max(held, segment.view.length * 2));
+  grown.set(segment.view, 0);
+  grown.set(bytes, segment.view.length);
+  segment.capacity = grown;
+  segment.view = grown.subarray(0, held);
+}
+
 function joinSegments(left: Segment, right: Segment): Segment {
   const start = Math.min(left.start, right.start);
   const end = Math.max(segmentEnd(left), segmentEnd(right));
   const bytes = new Uint8Array(end - start);
-  bytes.set(left.bytes, left.start - start);
-  bytes.set(right.bytes, right.start - start);
-  return { start, bytes };
+  bytes.set(left.view, left.start - start);
+  bytes.set(right.view, right.start - start);
+  return { start, view: bytes, capacity: bytes };
 }
 
 function partialResponse(
@@ -331,7 +397,13 @@ export function createSourceResidency(
     walking = true;
     try {
       while (warming && !disposed) {
-        if (!foregroundIdle() || store.residentBytes >= options.budgetBytes) {
+        /* A store holding its whole budget cannot take the rest of the file, so
+         * the walk is finished rather than waiting for room that never comes. */
+        if (store.residentBytes >= options.budgetBytes) {
+          warming = false;
+          break;
+        }
+        if (!foregroundIdle()) {
           await new Promise((resolve) => setTimeout(resolve, 100));
           continue;
         }
