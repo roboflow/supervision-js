@@ -365,17 +365,37 @@ test("every fixture-backed annotation renderer has a focused live playground", a
   );
 });
 
-test("Render preview trusts only its assigned hostname", async () => {
+test("local static preview binds only to loopback", async () => {
   const packageJson = JSON.parse(
     await readFile(path.join(rootDir, "package.json"), "utf8"),
   );
   const serveCommand = packageJson.scripts["pages:serve"];
 
-  assert.match(
-    serveCommand,
-    /__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=\$\{RENDER_EXTERNAL_HOSTNAME:-supervision-js-demo\.onrender\.com\}/,
+  assert.match(serveCommand, /--host 127\.0\.0\.1/);
+  assert.doesNotMatch(serveCommand, /RENDER_|allowedHosts=(?:true|\*)/);
+});
+
+test("Cloudflare previews are label-gated without repository secrets", async () => {
+  const branchWorkflow = await readFile(
+    path.join(rootDir, ".github/workflows/cloudflare-preview-branch.yml"),
+    "utf8",
   );
-  assert.doesNotMatch(serveCommand, /allowedHosts=(?:true|\*)/);
+  const statusWorkflow = await readFile(
+    path.join(rootDir, ".github/workflows/cloudflare-preview-status.yml"),
+    "utf8",
+  );
+
+  assert.match(branchWorkflow, /pull_request_target:/);
+  assert.match(branchWorkflow, /cloudflare-preview/);
+  assert.match(branchWorkflow, /preview\/pr-\$\{pullRequest\.number\}/);
+  assert.doesNotMatch(branchWorkflow, /actions\/checkout|secrets\./);
+  assert.match(statusWorkflow, /check_run:/);
+  assert.match(statusWorkflow, /cloudflare-pages-preview/);
+  assert.match(
+    statusWorkflow,
+    /currentRef\.data\.object\.sha !== checkRun\.head_sha/,
+  );
+  assert.doesNotMatch(statusWorkflow, /actions\/checkout|secrets\./);
 });
 
 test("deployed site presents docs at the root and the workbench at /demo/", async () => {

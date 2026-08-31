@@ -71,11 +71,11 @@ import { createMaskBrushEditor } from "supervision/editing";
 
 ## Documentation And Demo
 
-The public demo and generated API reference are hosted on Render:
+The public demo and generated API reference are hosted on GitHub Pages:
 
-- [Documentation](https://supervision-js-demo.onrender.com/)
-- [Demo](https://supervision-js-demo.onrender.com/demo/)
-- [Vanilla example](https://supervision-js-demo.onrender.com/examples/vanilla/)
+- [Documentation](https://roboflow.github.io/supervision-js/)
+- [Demo](https://roboflow.github.io/supervision-js/demo/)
+- [Vanilla example](https://roboflow.github.io/supervision-js/examples/vanilla/)
 
 Hosted surfaces deliberately use public fixtures only. Media upload and SAM3
 inference flows remain local development features because they require the Vite

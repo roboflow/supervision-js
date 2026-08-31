@@ -3,9 +3,9 @@
 The public proof of concept is deployed as a static GitHub Pages site. A push
 to `main` runs `.github/workflows/deploy-pages.yml` with no repository secrets.
 
-The same `dist/pages` artifact is also served publicly by the existing Render
-resource. See [Render Deployment](render-deployment.md) for that service's
-source and runtime configuration.
+The same `dist/pages` artifact is used for label-gated Cloudflare Pages pull
+request previews. See
+[Cloudflare Preview Deployment](cloudflare-preview-deployment.md).
 
 `npm run pages:build` assembles `dist/pages` with this layout:
 
@@ -13,10 +13,9 @@ source and runtime configuration.
 - `/demo/` contains the fixture-only demo workbench;
 - `/examples/vanilla/` contains the minimal vanilla example.
 
-The fixture demo and vanilla example use relative asset URLs. The artifact
-therefore works both at the root of a custom domain and at GitHub Pages'
-project URL (`https://roboflow.github.io/supervision-js/`) before a custom
-domain is configured.
+The fixture demo and vanilla example use relative application asset URLs. The
+large horse-trail source video is served separately from the public R2 fixture
+origin so the artifact remains below static-host per-file limits.
 
 The workflow checks out Git LFS assets before building, then uses the standard
 GitHub Pages artifact and deployment actions. GitHub Pages must be configured

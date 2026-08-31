@@ -23,9 +23,9 @@ describe("resolveDemoDocsUrl", () => {
   it("returns from the deployed demo route to root docs", () => {
     expect(
       resolveDemoDocsUrl(undefined, {
-        hostname: "supervision-js-demo.onrender.com",
-        href: "https://supervision-js-demo.onrender.com/demo/?embed=docs-playground",
+        hostname: "preview-pr-123.supervision-js-preview.pages.dev",
+        href: "https://preview-pr-123.supervision-js-preview.pages.dev/demo/?embed=docs-playground",
       }),
-    ).toBe("https://supervision-js-demo.onrender.com/");
+    ).toBe("https://preview-pr-123.supervision-js-preview.pages.dev/");
   });
 });

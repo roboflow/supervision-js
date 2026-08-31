@@ -108,6 +108,9 @@ describe("geometry showcase fixture", () => {
       keypointsEnabled: false,
       polygonsEnabled: false,
     });
+    expect(fixture?.videoSrc).toBe(
+      "https://assets.supervision.roboflow.com/fixtures/horse_trail/1min-horse-video.mov",
+    );
   });
 
   it("defaults the basketball keypoint sample to keypoints and labels", () => {

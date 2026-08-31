@@ -24,7 +24,10 @@ const fixtureManifestUrls = import.meta.glob(
   },
 ) as Record<string, string>;
 const fixtureMediaUrls = import.meta.glob(
-  "../../fixtures/**/*.{mp4,MP4,mov,MOV,m4v,M4V,webm,WEBM}",
+  [
+    "../../fixtures/**/*.{mp4,MP4,mov,MOV,m4v,M4V,webm,WEBM}",
+    "!../../fixtures/horse_trail/1min-horse-video.mov",
+  ],
   {
     eager: true,
     import: "default",
@@ -41,6 +44,15 @@ const sampleDetectionChunkUrls = import.meta.glob(
 ) as Record<string, string>;
 
 const DEFAULT_FIXTURE_SAMPLE_NAME = "horse_trail";
+const HORSE_TRAIL_MEDIA_PATH =
+  "../../fixtures/horse_trail/1min-horse-video.mov";
+const DEFAULT_HORSE_TRAIL_VIDEO_URL =
+  "https://assets.supervision.roboflow.com/fixtures/horse_trail/1min-horse-video.mov";
+const externalFixtureMediaUrls: Readonly<Record<string, string>> = {
+  [HORSE_TRAIL_MEDIA_PATH]:
+    import.meta.env.VITE_DEMO_HORSE_TRAIL_VIDEO_URL?.trim() ||
+    DEFAULT_HORSE_TRAIL_VIDEO_URL,
+};
 
 export const DEMO_FIXTURE_META_SCHEMA = "supervision-js.demo.fixture-meta";
 /** Original mask-only metadata schema kept for existing SAM3 fixtures. */
@@ -323,7 +335,8 @@ function createDemoFixtures(): readonly DemoFixtureDefinition[] {
       const manifestPath = `${basePath}/detections.manifest.json`;
       const mediaPath = normalizeFixturePath(basePath, meta.media.file);
       const detectionsManifestSrc = fixtureManifestUrls[manifestPath];
-      const videoSrc = fixtureMediaUrls[mediaPath];
+      const videoSrc =
+        externalFixtureMediaUrls[mediaPath] ?? fixtureMediaUrls[mediaPath];
 
       if (!detectionsManifestSrc || !videoSrc) {
         console.warn(
