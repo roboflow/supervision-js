@@ -1210,7 +1210,7 @@ describe("media renderer core", () => {
     renderer.destroy();
   });
 
-  it("holds only the start of playback on a producer that owns the playhead", async () => {
+  it("holds every frame of a producer the render-preparation gate can stop", async () => {
     resetMocks();
 
     const producer = createPushProducer();
@@ -1232,7 +1232,7 @@ describe("media renderer core", () => {
     );
 
     expect(renderer.getState().playbackGateReach).toBe(
-      PlaybackGateReach.StartOfPlayback,
+      PlaybackGateReach.EveryFrame,
     );
 
     renderer.destroy();

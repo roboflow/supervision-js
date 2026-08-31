@@ -42,6 +42,13 @@ export interface MediaRendererRuntimeState {
     width: number;
   };
   setSourceReady(metadata: DecodedMediaSourceMetadata): void;
+  /** Whether the picture is stopped on a read the source has not answered. */
+  setSourceAwaitingRead(awaitingRead: boolean): void;
+  /**
+   * Whether the render-preparation gate has given up on artifacts it stopped
+   * playback for.
+   */
+  setRenderPreparationGateAbandoned(abandoned: boolean): void;
   /** A playhead that moved. Emits, so a readout follows a seek before its
    *  frame lands. */
   recordPlayheadTime(currentTime: number): void;
@@ -88,6 +95,7 @@ export function createMediaRendererRuntimeState(
   let activeDetectionCount = 0;
   let drawnMaskFrameTime: number | null = null;
   let maskHeldStale = false;
+  let renderPreparationGateAbandoned = false;
   let seeking = false;
   let scrubbing = false;
   let lastFrameRenderTimings: MediaFrameRenderTimings | null = null;
@@ -123,6 +131,7 @@ export function createMediaRendererRuntimeState(
     playbackGateReach: options.getPlaybackGateReach(),
     playbackState,
     presentedFrames,
+    renderPreparationGateAbandoned,
     scrubbing,
     seeking,
     rendererBackend,
@@ -220,6 +229,24 @@ export function createMediaRendererRuntimeState(
     setSourceReady(metadata) {
       sourceState = createReadyMediaSourceState(metadata);
       emitSourceState();
+    },
+
+    setSourceAwaitingRead(awaitingRead) {
+      if (sourceState.awaitingRead === awaitingRead) {
+        return;
+      }
+
+      setSourceState({ awaitingRead });
+      emitState();
+    },
+
+    setRenderPreparationGateAbandoned(abandoned) {
+      if (renderPreparationGateAbandoned === abandoned) {
+        return;
+      }
+
+      renderPreparationGateAbandoned = abandoned;
+      emitState();
     },
 
     recordPlayheadTime(nextCurrentTime) {

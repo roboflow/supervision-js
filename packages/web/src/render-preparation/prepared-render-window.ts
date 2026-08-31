@@ -75,6 +75,22 @@ export interface PreparedRenderWindow {
    */
   isArtifactPrepared(mediaTime: number): boolean;
   /**
+   * Frames preparation has finished, counted up across the window's life. Read
+   * twice, it separates preparation that is slow from preparation that is
+   * stuck: the count moves for a cook that lands however far behind the
+   * playhead it is, and a cook that lands and is then evicted still counts.
+   */
+  getPreparationProgress(): number;
+  /**
+   * Whether `waitForReady` would wait, answered without scheduling anything.
+   * Asked on every playhead move of a source that has to be stopped to be
+   * held, where opening a wait that resolves immediately still costs the stop.
+   */
+  needsPlaybackGateWait(
+    mediaTime: number,
+    options: RenderPreparationPlaybackGateOptions,
+  ): boolean;
+  /**
    * Resolves once the media time may be presented. `signal` is how a caller
    * that has moved on says so: aborting resolves the wait and drops the hold it
    * was placing on preparation, because a caller that walked away re-checks
@@ -191,6 +207,7 @@ export function createPreparedRenderWindow(options: {
   let isPlayheadSettled = true;
   let isDestroyed = false;
   let generation = 0;
+  let preparationProgress = 0;
   const preparedMaskFrames = new Map<string, PreparedMaskFrame>();
   const pendingMaskFrames = new Map<string, PendingMaskFrame>();
   const queuedMaskFrameKeys: string[] = [];
@@ -329,6 +346,7 @@ export function createPreparedRenderWindow(options: {
 
       if (instructions.length === 0) {
         emptyMaskFrameKeys.add(key);
+        preparationProgress += 1;
         pendingMaskFrames.delete(key);
         inFlightMaskFrames.delete(job);
         schedulePreparedTargetBatch();
@@ -364,6 +382,7 @@ export function createPreparedRenderWindow(options: {
 
           if (!maskFrame) {
             emptyMaskFrameKeys.add(key);
+            preparationProgress += 1;
             schedulePreparedTargetBatch();
             emitDiagnostics();
             pumpMaskFrameQueue();
@@ -371,6 +390,7 @@ export function createPreparedRenderWindow(options: {
           }
 
           preparedMaskFrames.set(key, maskFrame);
+          preparationProgress += 1;
           evictPreparedMaskFrames();
           options.onMaskFramePrepared?.(maskFrame);
           schedulePreparedTargetBatch();
@@ -675,6 +695,10 @@ export function createPreparedRenderWindow(options: {
   return {
     getFrame,
 
+    getPreparationProgress() {
+      return preparationProgress;
+    },
+
     isArtifactPrepared(mediaTime) {
       if (isDestroyed || !maskStyle) {
         return true;
@@ -689,6 +713,17 @@ export function createPreparedRenderWindow(options: {
       return (
         getMaskStatus(getFrameKey(detectionFrame)) !==
         PreparedRenderFrameMaskStatus.Pending
+      );
+    },
+
+    needsPlaybackGateWait(mediaTime, waitOptions) {
+      if (isDestroyed || waitOptions.enabled === false) {
+        return false;
+      }
+
+      return !isReadyForPresentation(
+        mediaTime,
+        getMinimumAheadSeconds(waitOptions),
       );
     },
 

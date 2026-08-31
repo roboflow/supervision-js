@@ -403,6 +403,65 @@ describe("mid-playback readiness holds", () => {
 
     expect(producer.channel.endInteractiveSeek).toHaveBeenCalled();
   });
+
+  it("gives the producer back when a pause supersedes a play that took a hold over", async () => {
+    const producer = createProducer();
+    let enterWait = () => {};
+    const waitEntered = new Promise<void>((resolve) => {
+      enterWait = resolve;
+    });
+    const transport = createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      holdForReadiness: () => new Promise<void>(() => {}),
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+      waitForReadiness: (_mediaTime, signal) => {
+        enterWait();
+
+        return new Promise<void>((resolve) => {
+          signal.addEventListener("abort", () => resolve());
+        });
+      },
+    });
+
+    producer.land(1);
+
+    const playing = transport.play();
+
+    await waitEntered;
+    transport.pause();
+    await playing;
+
+    expect(producer.channel.beginInteractiveSeek).toHaveBeenCalledOnce();
+    expect(producer.channel.endInteractiveSeek).toHaveBeenCalledOnce();
+  });
+
+  it("gives the producer back when the wait a play made fails under it", async () => {
+    const producer = createProducer();
+    const transport = createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      holdForReadiness: () => new Promise<void>(() => {}),
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+      waitForReadiness: () =>
+        Promise.reject(new Error("Annotations are gone.")),
+    });
+
+    producer.land(1);
+
+    await expect(transport.play()).rejects.toThrow("Annotations are gone.");
+
+    expect(producer.channel.beginInteractiveSeek).toHaveBeenCalledOnce();
+    expect(producer.channel.endInteractiveSeek).toHaveBeenCalledOnce();
+  });
 });
 
 function createProducer() {

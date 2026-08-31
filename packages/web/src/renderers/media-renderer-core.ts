@@ -50,6 +50,18 @@ import type {
   MediaRendererSceneOptions,
 } from "./media-renderer-scene";
 
+const MILLISECONDS_PER_SECOND = 1000;
+
+/**
+ * Two seconds of frozen picture for masks that have not been cooked.
+ *
+ * Preparation is local work, so a lead it cannot rebuild in this long is one it
+ * is losing rather than one that is late, and every further second is spent on
+ * a picture that has stopped. The detection gate waits five times as long
+ * because what it waits on is a model somewhere else.
+ */
+const DEFAULT_RENDER_PREPARATION_GATE_MAX_WAIT_SECONDS = 2;
+
 export interface MediaRendererCoreProviders {
   openMediaSource(src: string | URL | Request): Promise<DecodedMediaSource>;
   createScene(options: MediaRendererSceneOptions): Promise<MediaRendererScene>;
@@ -109,19 +121,11 @@ export async function createMediaRendererCore(
   const adoptPlaybackRate = (playbackRate: number) => {
     runtimeState.setPlaybackRate(playbackRate);
   };
-  let presentsOwnFrames = false;
   const runtimeState = createMediaRendererRuntimeState({
     fit,
     playbackRate: initialPlaybackRate,
     getPlaybackGateReach: () =>
-      !shouldGatePlayback
-        ? PlaybackGateReach.Off
-        : // Stopping a producer that owns the playhead is something only the
-          // detection gate does, so a self-presenting source held for render
-          // preparation alone still waits once and never again.
-          presentsOwnFrames && !shouldGateDetectionPlayback
-          ? PlaybackGateReach.StartOfPlayback
-          : PlaybackGateReach.EveryFrame,
+      shouldGatePlayback ? PlaybackGateReach.EveryFrame : PlaybackGateReach.Off,
     getDetectionBufferState: () =>
       detectionTimeline?.getState() ?? createIdleDetectionBufferState(),
     onFrame: options.onFrame,
@@ -195,6 +199,37 @@ export async function createMediaRendererCore(
     renderPreparationPlaybackGate?.enabled === true;
   const shouldGatePlayback =
     shouldGateDetectionPlayback || shouldGateRenderPreparationPlayback;
+  const renderPreparationGateMaxWaitSeconds = Math.max(
+    0,
+    renderPreparationPlaybackGate?.maxWaitSeconds ??
+      DEFAULT_RENDER_PREPARATION_GATE_MAX_WAIT_SECONDS,
+  );
+  /**
+   * Where preparation stood when the hold that last gave up opened, or null
+   * while the gate is armed. Preparation that has finished a frame since is
+   * preparation that is running, however far behind the playhead it still is,
+   * and the gate is worth spending again on it. The frame that says so lands
+   * during the hold on a machine where cooking and decoding contend for one
+   * core, which is why the mark is the hold's start and not its end.
+   */
+  let abandonedGateProgress: number | null = null;
+
+  const readRenderPreparationProgress = () =>
+    mediaScene?.getRenderPreparationProgress?.() ?? 0;
+
+  const hasAbandonedRenderPreparationGate = () =>
+    abandonedGateProgress !== null &&
+    readRenderPreparationProgress() <= abandonedGateProgress;
+
+  const armRenderPreparationGate = () => {
+    abandonedGateProgress = null;
+    runtimeState.setRenderPreparationGateAbandoned(false);
+  };
+
+  const abandonRenderPreparationGate = (progressAtHoldStart: number) => {
+    abandonedGateProgress = progressAtHoldStart;
+    runtimeState.setRenderPreparationGateAbandoned(true);
+  };
 
   const waitForPlaybackReadiness = async (
     mediaTime: number,
@@ -214,15 +249,10 @@ export async function createMediaRendererCore(
         renderPreparationPlaybackGate ?? {},
         signal,
       );
+      armRenderPreparationGate();
     }
   };
 
-  /**
-   * The detection gate alone, because it is the one that bounds its own wait
-   * and gives up on a producer that has stopped answering. Render preparation
-   * waits until the artifacts exist, which is a wait to start playback and
-   * never one to stop it with.
-   */
   const holdForDetectionCoverage = (mediaTime: number) => {
     const prepareOptions = {
       duration: runtimeState.duration(),
@@ -240,6 +270,112 @@ export async function createMediaRendererCore(
       ...prepareOptions,
       gatePlayback: true,
     });
+  };
+
+  const waitForRenderPreparationWithin = async (
+    mediaTime: number,
+    signal: AbortSignal,
+  ) => {
+    const bound = new AbortController();
+    const abortBound = () => bound.abort();
+    const progressAtHoldStart = readRenderPreparationProgress();
+    const expiry = Number.isFinite(renderPreparationGateMaxWaitSeconds)
+      ? setTimeout(() => {
+          abandonRenderPreparationGate(progressAtHoldStart);
+          bound.abort();
+        }, renderPreparationGateMaxWaitSeconds * MILLISECONDS_PER_SECOND)
+      : undefined;
+
+    signal.addEventListener("abort", abortBound);
+
+    try {
+      await mediaScene?.waitForRenderPreparation?.(
+        mediaTime,
+        renderPreparationPlaybackGate ?? {},
+        bound.signal,
+      );
+    } finally {
+      clearTimeout(expiry);
+      signal.removeEventListener("abort", abortBound);
+    }
+  };
+
+  /**
+   * Stopping a producer for artifacts is only safe with a way back out of it,
+   * because preparation that has fallen behind is indistinguishable from a cook
+   * still on its way. The bound is that way out, and giving up holds only until
+   * preparation finishes another frame: a preparer that is merely losing to the
+   * playhead is still a preparer, and the picture it feeds is worth stopping
+   * for again. One that has finished nothing since is stuck, and the gate stays
+   * out of its way rather than spending the bound once a frame on it.
+   */
+  const holdForRenderPreparation = (mediaTime: number, signal: AbortSignal) => {
+    if (
+      mediaScene?.needsRenderPreparationWait?.(
+        mediaTime,
+        renderPreparationPlaybackGate ?? {},
+      ) !== true
+    ) {
+      armRenderPreparationGate();
+
+      return null;
+    }
+
+    if (hasAbandonedRenderPreparationGate()) {
+      return null;
+    }
+
+    armRenderPreparationGate();
+
+    return waitForRenderPreparationWithin(mediaTime, signal);
+  };
+
+  const holdForPlaybackReadiness = (mediaTime: number, signal: AbortSignal) => {
+    const holds: Promise<unknown>[] = [];
+    /* Each hold has to be cancellable by the end of the combined one, because
+       a hold whose sibling failed is a hold on a playback intent that is over,
+       and the transport drops its handle on the combined wait without reaching
+       what is still running underneath it. */
+    const combinedHold = new AbortController();
+    const abortHolds = () => combinedHold.abort();
+
+    if (signal.aborted) {
+      abortHolds();
+    } else {
+      signal.addEventListener("abort", abortHolds, { once: true });
+    }
+
+    const detectionHold = shouldGateDetectionPlayback
+      ? holdForDetectionCoverage(mediaTime)
+      : null;
+    const renderPreparationHold = shouldGateRenderPreparationPlayback
+      ? holdForRenderPreparation(mediaTime, combinedHold.signal)
+      : null;
+
+    if (detectionHold) {
+      holds.push(detectionHold);
+    }
+
+    if (renderPreparationHold) {
+      holds.push(renderPreparationHold);
+    }
+
+    if (holds.length === 0) {
+      signal.removeEventListener("abort", abortHolds);
+
+      return null;
+    }
+
+    const held = Promise.all(holds).then(() => undefined);
+
+    void held
+      .catch(() => undefined)
+      .finally(() => {
+        signal.removeEventListener("abort", abortHolds);
+        abortHolds();
+      });
+
+    return held;
   };
 
   const presentSample = (sample: DecodedVideoSample) => {
@@ -704,7 +840,6 @@ export async function createMediaRendererCore(
     });
     const presentedFrameChannel = resolvePresentedFrameChannel(mediaSource);
 
-    presentsOwnFrames = presentedFrameChannel !== null;
     const mediaDimensions = runtimeState.recordMediaMetadata(metadata);
     mediaScene = await providers.createScene({
       annotationOverlayStyle: currentPresentation.annotationOverlayStyle,
@@ -783,8 +918,8 @@ export async function createMediaRendererCore(
         waitForReadiness: shouldGatePlayback
           ? waitForPlaybackReadiness
           : undefined,
-        holdForReadiness: shouldGateDetectionPlayback
-          ? holdForDetectionCoverage
+        holdForReadiness: shouldGatePlayback
+          ? holdForPlaybackReadiness
           : undefined,
       });
       if (initialPlaybackRate !== 1) {

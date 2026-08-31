@@ -1194,6 +1194,22 @@ export async function createPixiMediaScene(
       });
     },
 
+    getRenderPreparationProgress() {
+      return (
+        (maskLayer?.getPreparationProgress() ?? 0) +
+        (polygonLayer?.getPreparationProgress() ?? 0)
+      );
+    },
+
+    needsRenderPreparationWait(mediaTime, gateOptions) {
+      return (
+        maskLayer?.needsRenderPreparationWait(mediaTime, gateOptions) ===
+          true ||
+        polygonLayer?.needsRenderPreparationWait(mediaTime, gateOptions) ===
+          true
+      );
+    },
+
     waitForRenderPreparation(mediaTime, gateOptions, signal) {
       return Promise.all([
         maskLayer?.waitForRenderPreparation(mediaTime, gateOptions, signal),

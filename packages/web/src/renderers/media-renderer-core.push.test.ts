@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createIdleDetectionBufferState } from "supervision-js-core";
+import type { DetectionFrameSource } from "supervision-js-core";
 import type { DecodedMediaSource } from "#media/media-source";
 import {
   MediaRendererPlaybackState,
@@ -520,6 +521,438 @@ describe("media renderer over a push-based media source", () => {
     renderer.destroy();
   });
 
+  it("stops a running producer at a frame whose masks are not prepared", async () => {
+    const producer = createProducer();
+    const preparation = createStuckRenderPreparation();
+    const renderer = await createRenderer(
+      producer,
+      createScene(preparation.scene),
+      { renderPreparation: { playbackGate: { enabled: true } } },
+    );
+
+    producer.setStatus("PLAYING");
+    producer.setTimeMs(1000);
+
+    expect(preparation.waitForRenderPreparation).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ enabled: true }),
+      expect.any(AbortSignal),
+    );
+    expect(producer.beginInteractiveSeek).toHaveBeenCalledOnce();
+    expect(renderer.getState().playbackState).toBe(
+      MediaRendererPlaybackState.Buffering,
+    );
+
+    preparation.prepare();
+    await vi.waitFor(() =>
+      expect(producer.endInteractiveSeek).toHaveBeenCalledOnce(),
+    );
+    expect(renderer.getState().playbackState).toBe(
+      MediaRendererPlaybackState.Playing,
+    );
+
+    renderer.destroy();
+  });
+
+  it("gives the producer back when the masks never arrive, and does not stop it again every frame after", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const producer = createProducer();
+      const preparation = createStuckRenderPreparation();
+      const renderer = await createRenderer(
+        producer,
+        createScene(preparation.scene),
+        { renderPreparation: { playbackGate: { enabled: true } } },
+      );
+
+      producer.setStatus("PLAYING");
+      producer.setTimeMs(1000);
+
+      expect(producer.endInteractiveSeek).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(2000);
+
+      expect(producer.endInteractiveSeek).toHaveBeenCalledOnce();
+      expect(renderer.getState()).toMatchObject({
+        playbackState: MediaRendererPlaybackState.Playing,
+        renderPreparationGateAbandoned: true,
+      });
+
+      producer.setTimeMs(2000);
+
+      expect(producer.beginInteractiveSeek).toHaveBeenCalledOnce();
+
+      renderer.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("waits again once the masks have caught the playhead up", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const producer = createProducer();
+      const preparation = createStuckRenderPreparation();
+      const renderer = await createRenderer(
+        producer,
+        createScene(preparation.scene),
+        { renderPreparation: { playbackGate: { enabled: true } } },
+      );
+
+      producer.setStatus("PLAYING");
+      producer.setTimeMs(1000);
+      await vi.advanceTimersByTimeAsync(2000);
+
+      preparation.prepare();
+      producer.setTimeMs(2000);
+
+      expect(renderer.getState().renderPreparationGateAbandoned).toBe(false);
+
+      preparation.stall();
+      producer.setTimeMs(3000);
+
+      expect(producer.beginInteractiveSeek).toHaveBeenCalledTimes(2);
+
+      renderer.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("holds again for a preparer that is losing, and stays out of a stopped one's way", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const producer = createProducer();
+      const preparation = createStuckRenderPreparation();
+      const renderer = await createRenderer(
+        producer,
+        createScene(preparation.scene),
+        { renderPreparation: { playbackGate: { enabled: true } } },
+      );
+
+      producer.setStatus("PLAYING");
+      producer.setTimeMs(1000);
+      await vi.advanceTimersByTimeAsync(2000);
+
+      expect(renderer.getState().renderPreparationGateAbandoned).toBe(true);
+
+      preparation.completeFrame();
+      producer.setTimeMs(2000);
+
+      expect(producer.beginInteractiveSeek).toHaveBeenCalledTimes(2);
+      expect(renderer.getState().renderPreparationGateAbandoned).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(2000);
+
+      expect(renderer.getState().renderPreparationGateAbandoned).toBe(true);
+
+      producer.setTimeMs(3000);
+
+      expect(producer.beginInteractiveSeek).toHaveBeenCalledTimes(2);
+
+      renderer.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    { cooks: "always" as const, label: "every frame it can" },
+    {
+      cooks: "while stopped" as const,
+      label: "only while the picture is stopped",
+    },
+  ])(
+    "keeps stopping for a preparer that finishes $label",
+    async ({ cooks }) => {
+      vi.useFakeTimers();
+
+      try {
+        const producer = createProducer();
+        const preparation = createStuckRenderPreparation();
+        const renderer = await createRenderer(
+          producer,
+          createScene(preparation.scene),
+          { renderPreparation: { playbackGate: { enabled: true } } },
+        );
+
+        producer.setStatus("PLAYING");
+
+        const { holds, mediaTimeMs } = await driveThrottledPlayback(
+          producer,
+          preparation,
+          cooks,
+        );
+
+        expect({ holds, mediaTimeMs }).toEqual({
+          holds: 10,
+          mediaTimeMs: 2500,
+        });
+
+        renderer.destroy();
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it("stops once for a preparer that finishes nothing, and plays the rest through", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const producer = createProducer();
+      const preparation = createStuckRenderPreparation();
+      const renderer = await createRenderer(
+        producer,
+        createScene(preparation.scene),
+        { renderPreparation: { playbackGate: { enabled: true } } },
+      );
+
+      producer.setStatus("PLAYING");
+
+      const { holds, mediaTimeMs } = await driveThrottledPlayback(
+        producer,
+        preparation,
+        "never",
+      );
+
+      expect({ holds, mediaTimeMs }).toEqual({ holds: 1, mediaTimeMs: 18250 });
+
+      renderer.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("holds for the bound the caller asked for", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const producer = createProducer();
+      const preparation = createStuckRenderPreparation();
+      const renderer = await createRenderer(
+        producer,
+        createScene(preparation.scene),
+        {
+          renderPreparation: {
+            playbackGate: { enabled: true, maxWaitSeconds: 5 },
+          },
+        },
+      );
+
+      producer.setStatus("PLAYING");
+      producer.setTimeMs(1000);
+      await vi.advanceTimersByTimeAsync(2000);
+
+      expect(renderer.getState().renderPreparationGateAbandoned).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(3000);
+
+      expect(renderer.getState().renderPreparationGateAbandoned).toBe(true);
+
+      renderer.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("never gives up on a gate the caller left unbounded", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const producer = createProducer();
+      const preparation = createStuckRenderPreparation();
+      const renderer = await createRenderer(
+        producer,
+        createScene(preparation.scene),
+        {
+          renderPreparation: {
+            playbackGate: { enabled: true, maxWaitSeconds: Infinity },
+          },
+        },
+      );
+
+      producer.setStatus("PLAYING");
+      producer.setTimeMs(1000);
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(renderer.getState().renderPreparationGateAbandoned).toBe(false);
+      expect(producer.endInteractiveSeek).not.toHaveBeenCalled();
+
+      renderer.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([-1, -Infinity])(
+    "gives the producer straight back on a bound of %s",
+    async (maxWaitSeconds) => {
+      vi.useFakeTimers();
+
+      try {
+        const producer = createProducer();
+        const preparation = createStuckRenderPreparation();
+        const renderer = await createRenderer(
+          producer,
+          createScene(preparation.scene),
+          {
+            renderPreparation: {
+              playbackGate: { enabled: true, maxWaitSeconds },
+            },
+          },
+        );
+
+        producer.setStatus("PLAYING");
+        producer.setTimeMs(1000);
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(renderer.getState().renderPreparationGateAbandoned).toBe(true);
+
+        renderer.destroy();
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it("arms the gate again on the wait a play makes before it starts", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const producer = createProducer();
+      const preparation = createStuckRenderPreparation();
+      const renderer = await createRenderer(
+        producer,
+        createScene(preparation.scene),
+        { renderPreparation: { playbackGate: { enabled: true } } },
+      );
+
+      producer.setStatus("PLAYING");
+      producer.setTimeMs(1000);
+      await vi.advanceTimersByTimeAsync(2000);
+
+      expect(renderer.getState().renderPreparationGateAbandoned).toBe(true);
+
+      const play = renderer.play();
+
+      await vi.advanceTimersByTimeAsync(0);
+      preparation.prepare();
+      await play;
+
+      expect(renderer.getState().renderPreparationGateAbandoned).toBe(false);
+
+      renderer.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("ends the mask hold when the detection hold beside it fails", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const producer = createProducer();
+      const preparation = createStuckRenderPreparation();
+      const renderer = await createRenderer(
+        producer,
+        createScene(preparation.scene),
+        {
+          detectionBuffer: { playbackGate: { enabled: true } },
+          detectionSource: createFailingDetectionSource(),
+          renderPreparation: { playbackGate: { enabled: true } },
+        },
+      );
+
+      producer.setStatus("PLAYING");
+      producer.setTimeMs(1000);
+      await vi.advanceTimersByTimeAsync(2000);
+
+      expect(renderer.getState().renderPreparationGateAbandoned).toBe(false);
+
+      renderer.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the producer stopped when a play lands during a mask hold", async () => {
+    const producer = createProducer();
+    const preparation = createStuckRenderPreparation();
+    const renderer = await createRenderer(
+      producer,
+      createScene(preparation.scene),
+      { renderPreparation: { playbackGate: { enabled: true } } },
+    );
+
+    producer.setStatus("PLAYING");
+    producer.setTimeMs(1000);
+    const play = renderer.play();
+
+    await vi.waitFor(() =>
+      expect(preparation.waitForRenderPreparation).toHaveBeenCalledTimes(2),
+    );
+
+    expect(producer.endInteractiveSeek).not.toHaveBeenCalled();
+    expect(producer.play).not.toHaveBeenCalled();
+
+    preparation.prepare();
+    await play;
+
+    expect(producer.endInteractiveSeek).toHaveBeenCalledOnce();
+    expect(producer.play).toHaveBeenCalledOnce();
+    renderer.destroy();
+  });
+
+  it("drops a mask hold the viewer paused out from under", async () => {
+    const producer = createProducer();
+    const preparation = createStuckRenderPreparation();
+    const renderer = await createRenderer(
+      producer,
+      createScene(preparation.scene),
+      { renderPreparation: { playbackGate: { enabled: true } } },
+    );
+
+    producer.setStatus("PLAYING");
+    producer.setTimeMs(1000);
+    renderer.pause();
+
+    await vi.waitFor(() =>
+      expect(producer.endInteractiveSeek).toHaveBeenCalledOnce(),
+    );
+
+    renderer.destroy();
+  });
+
+  it("holds a running producer for detections and masks together", async () => {
+    const producer = createProducer();
+    const preparation = createStuckRenderPreparation();
+    const renderer = await createRenderer(
+      producer,
+      createScene(preparation.scene),
+      {
+        detectionBuffer: { playbackGate: { enabled: true } },
+        renderPreparation: { playbackGate: { enabled: true } },
+      },
+    );
+
+    producer.setStatus("PLAYING");
+    producer.setTimeMs(1000);
+
+    expect(preparation.waitForRenderPreparation).toHaveBeenCalledOnce();
+    expect(producer.beginInteractiveSeek).toHaveBeenCalledOnce();
+
+    preparation.prepare();
+    await vi.waitFor(() =>
+      expect(producer.endInteractiveSeek).toHaveBeenCalledOnce(),
+    );
+
+    renderer.destroy();
+  });
+
   it("abandons a held play the viewer paused before readiness landed", async () => {
     const producer = createProducer();
     const preparation = createPendingRenderPreparation();
@@ -540,6 +973,98 @@ describe("media renderer over a push-based media source", () => {
     renderer.destroy();
   });
 });
+
+/**
+ * A scene whose artifacts are never cooked until the test says so, answering
+ * the gate's cheap question the way the prepared window would.
+ */
+function createStuckRenderPreparation() {
+  let isPrepared = false;
+  let progress = 0;
+  const releases = new Set<() => void>();
+  const needsRenderPreparationWait = vi.fn(() => !isPrepared);
+  const getRenderPreparationProgress = vi.fn(() => progress);
+  const waitForRenderPreparation = vi.fn(
+    (_mediaTime: number, _gateOptions: unknown, signal?: AbortSignal) =>
+      new Promise<void>((resolve) => {
+        releases.add(resolve);
+        signal?.addEventListener("abort", () => resolve());
+      }),
+  );
+
+  return {
+    /** A cook that landed somewhere behind a playhead it still cannot cover. */
+    completeFrame() {
+      progress += 1;
+    },
+    getRenderPreparationProgress,
+    needsRenderPreparationWait,
+    prepare() {
+      isPrepared = true;
+      progress += 1;
+
+      for (const release of releases) {
+        release();
+      }
+
+      releases.clear();
+    },
+    scene: {
+      getRenderPreparationProgress,
+      needsRenderPreparationWait,
+      waitForRenderPreparation,
+    },
+    stall: () => {
+      isPrepared = false;
+    },
+    waitForRenderPreparation,
+  };
+}
+
+/**
+ * Twenty seconds on a machine where cooking and decoding contend for one core:
+ * the playhead only moves while the producer is running, so a cook scheduled
+ * `while stopped` lands during a hold and never during playback.
+ */
+async function driveThrottledPlayback(
+  producer: ReturnType<typeof createProducer>,
+  preparation: ReturnType<typeof createStuckRenderPreparation>,
+  cooks: "always" | "never" | "while stopped",
+) {
+  const stepMs = 250;
+  let mediaTimeMs = 0;
+
+  for (let step = 0; step < 80; step += 1) {
+    const stopped =
+      producer.beginInteractiveSeek.mock.calls.length >
+      producer.endInteractiveSeek.mock.calls.length;
+
+    if (cooks === "always" || (cooks === "while stopped" && stopped)) {
+      preparation.completeFrame();
+    }
+
+    if (!stopped) {
+      mediaTimeMs += stepMs;
+      producer.setTimeMs(mediaTimeMs);
+    }
+
+    await vi.advanceTimersByTimeAsync(stepMs);
+  }
+
+  return {
+    holds: producer.beginInteractiveSeek.mock.calls.length,
+    mediaTimeMs,
+  };
+}
+
+/** A detection source whose coverage wait fails rather than lands. */
+function createFailingDetectionSource(): DetectionFrameSource {
+  return {
+    getAvailableRanges: () => [],
+    loadFrames: async () => [],
+    waitForRange: () => Promise.reject(new Error("Detections are gone.")),
+  };
+}
 
 function createPendingRenderPreparation() {
   let release: (() => void) | undefined;

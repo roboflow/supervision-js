@@ -151,6 +151,13 @@ export interface PixiMaskLayer {
   prepareFrame(mediaTime: number): void;
   clearFrame(): void;
   isArtifactPrepared(mediaTime: number): boolean;
+  /** Frames this layer's preparation has finished, counted up over its life. */
+  getPreparationProgress(): number;
+  /** Whether `waitForRenderPreparation` would wait, scheduling nothing. */
+  needsRenderPreparationWait(
+    mediaTime: number,
+    options: RenderPreparationPlaybackGateOptions,
+  ): boolean;
   waitForRenderPreparation(
     mediaTime: number,
     options: RenderPreparationPlaybackGateOptions,
@@ -364,6 +371,14 @@ export function createPixiMaskLayer(options: {
 
     isArtifactPrepared(mediaTime) {
       return preparedRenderWindow.isArtifactPrepared(mediaTime);
+    },
+
+    getPreparationProgress() {
+      return preparedRenderWindow.getPreparationProgress();
+    },
+
+    needsRenderPreparationWait(mediaTime, gateOptions) {
+      return preparedRenderWindow.needsPlaybackGateWait(mediaTime, gateOptions);
     },
 
     waitForRenderPreparation(mediaTime, gateOptions, signal) {

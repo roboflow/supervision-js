@@ -196,6 +196,63 @@ describe("prepared render window", () => {
     }
   });
 
+  it("counts up as preparation finishes frames", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const renderWindow = createPreparedRenderWindow({
+        detectionTimeline: createTimeline(frames),
+        maskStyle: new BaseMaskStyle(),
+      });
+
+      expect(renderWindow.getPreparationProgress()).toBe(0);
+
+      renderWindow.getFrame(0);
+      await vi.runOnlyPendingTimersAsync();
+
+      expect(renderWindow.getFrame(0)?.maskFrame).toBeDefined();
+      expect(renderWindow.getPreparationProgress()).toBeGreaterThan(0);
+
+      renderWindow.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("counts a frame whose cook produced no artifact", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const renderWindow = createPreparedRenderWindow({
+        detectionTimeline: createTimeline(frames),
+        maskStyle: new BaseMaskStyle(),
+        resolveInstructions: () => [
+          {
+            alpha: 1,
+            color: 0x00ff66,
+            detectionIndex: 0,
+            mask: frames[0]!.detections[0]!.mask!,
+            visible: false,
+          },
+        ],
+      });
+
+      renderWindow.getFrame(0);
+      await vi.runOnlyPendingTimersAsync();
+
+      expect(renderWindow.getFrame(0)?.maskStatus).toBe(
+        PreparedRenderFrameMaskStatus.Empty,
+      );
+      expect(renderWindow.getPreparationProgress()).toBeGreaterThan(0);
+
+      renderWindow.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("rebuilds the active mask artifact when semantic content changes at the same frame key", async () => {
     vi.useFakeTimers();
     resetMocks();
@@ -1207,6 +1264,61 @@ describe("prepared render window", () => {
       await expect(
         renderWindow.waitForReady(0, { requiredAheadSeconds: 0 }),
       ).rejects.toThrow("worker crashed");
+
+      renderWindow.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("answers whether a wait would hold, and schedules nothing to answer it", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const fakeWorker = createFakeMaskPreparationWorker({
+        autoComplete: false,
+      });
+      const renderWindow = createPreparedRenderWindow({
+        detectionTimeline: createTimeline(manyFrames),
+        maskStyle: new BaseMaskStyle(),
+        renderPreparation: {
+          maskFrame: {
+            maxPendingFrameCount: 4,
+            prefetchFrameCount: 4,
+            scheduleBatchSize: 4,
+            scanIntervalSeconds: 0,
+            workerCount: 1,
+          },
+          mode: RenderPreparationMode.Worker,
+          workerFactory: {
+            createWorker: () => fakeWorker.worker,
+          },
+        },
+      });
+      const gateOptions = { enabled: true, requiredAheadSeconds: 0.04 };
+
+      expect(renderWindow.needsPlaybackGateWait(0, gateOptions)).toBe(true);
+
+      await vi.runOnlyPendingTimersAsync();
+
+      expect(fakeWorker.messages).toHaveLength(0);
+
+      renderWindow.getFrame(0);
+      await vi.runOnlyPendingTimersAsync();
+      fakeWorker.completeNext();
+      await flushMaskPreparationTimers(2);
+      fakeWorker.completeNext();
+      await flushMaskPreparationTimers(2);
+
+      const ready = vi.fn();
+
+      expect(renderWindow.needsPlaybackGateWait(0, gateOptions)).toBe(false);
+
+      void renderWindow.waitForReady(0, gateOptions).then(ready);
+      await Promise.resolve();
+
+      expect(ready).toHaveBeenCalledOnce();
 
       renderWindow.destroy();
     } finally {

@@ -27,6 +27,8 @@ export interface PixiPolygonLayer {
   prepareFrame(mediaTime: number, viewportScale?: number): void;
   clearFrame: PixiMaskLayer["clearFrame"];
   isArtifactPrepared: PixiMaskLayer["isArtifactPrepared"];
+  getPreparationProgress: PixiMaskLayer["getPreparationProgress"];
+  needsRenderPreparationWait: PixiMaskLayer["needsRenderPreparationWait"];
   getVectorFallbackStyle(): PolygonStyle;
   setPolygonStyle(polygonStyle: PolygonStyle | null | undefined): void;
   setTimelineContext: PixiMaskLayer["setTimelineContext"];
@@ -105,6 +107,8 @@ export function createPixiPolygonLayer(
 
     isArtifactPrepared: rasterLayer.isArtifactPrepared,
 
+    getPreparationProgress: rasterLayer.getPreparationProgress,
+
     getVectorFallbackStyle() {
       return vectorFallbackStyle;
     },
@@ -121,6 +125,7 @@ export function createPixiPolygonLayer(
       );
     },
 
+    needsRenderPreparationWait: rasterLayer.needsRenderPreparationWait,
     setTimelineContext: rasterLayer.setTimelineContext,
     waitForRenderPreparation: rasterLayer.waitForRenderPreparation,
   };

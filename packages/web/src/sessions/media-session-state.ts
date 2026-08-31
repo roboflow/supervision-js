@@ -131,52 +131,57 @@ export function createMediaSessionStateSnapshot({
     const activeFrameIsPending =
       artifact.activeFrame?.status ===
       RenderPreparationArtifactFrameStatus.Pending;
-    // A gate banking a lead in front of a finished frame leaves nothing else to
-    // report: the frame is prepared and the queue can be empty, so a loop that
-    // reads only those two says nothing and the wait is described upstream as a
-    // transfer that is not happening.
-    const holdingForLead =
-      artifact.gateHold?.reason ===
-      RenderPreparationGateHoldReason.LeadBelowRequirement;
+    const gateHold = artifact.gateHold ?? null;
+    const leadHold =
+      gateHold?.reason === RenderPreparationGateHoldReason.LeadBelowRequirement
+        ? gateHold
+        : null;
+    // The gate holds the frame about to be presented, which is not the frame on
+    // screen: a hold can name an unprepared frame ahead while the presented one
+    // is prepared and the queue behind it is empty. Reading only those two says
+    // nothing at all, and the picture stops with no activity to explain it.
+    const waitingForFrame =
+      activeFrameIsPending || (gateHold !== null && leadHold === null);
 
     if (
       artifact.pendingCount <= 0 &&
       !activeFrameIsPending &&
-      !holdingForLead
+      gateHold === null
     ) {
       continue;
     }
 
     const holdingPlayback =
-      (activeFrameIsPending || Boolean(artifact.gateHold)) &&
-      stoppedForPlayback;
-    const waiting = activeFrameIsPending || holdingForLead;
+      (activeFrameIsPending || gateHold !== null) && stoppedForPlayback;
+    const waiting = activeFrameIsPending || gateHold !== null;
 
     activities.push(
       createActivity({
         artifactKind: artifact.kind,
         blockingPlayback: holdingPlayback,
         blockingPresentation: activeFrameIsPending,
-        detail: activeFrameIsPending
-          ? holdingPlayback
+        detail: leadHold
+          ? `Starting again at ${leadHold.requiredAheadSeconds.toFixed(
+              1,
+            )}s of masks ready`
+          : holdingPlayback && waitingForFrame
             ? "The masks for this frame are not drawn yet"
-            : `Active frame ${artifact.activeFrame.mediaTime.toFixed(
-                3,
-              )}s is waiting for ${artifact.kind}`
-          : holdingForLead
-            ? "This frame is ready; the video starts once enough is drawn ahead of it"
-            : null,
+            : activeFrameIsPending
+              ? `Active frame ${artifact.activeFrame.mediaTime.toFixed(
+                  3,
+                )}s is waiting for ${artifact.kind}`
+              : null,
         kind: MediaSessionActivityKind.RenderPreparing,
-        label: activeFrameIsPending
-          ? holdingPlayback
-            ? "Waiting for the masks"
-            : "Preparing active render artifact"
-          : holdingForLead
-            ? "Drawing ahead of the video"
+        label: leadHold
+          ? "Catching the masks up"
+          : waitingForFrame
+            ? holdingPlayback
+              ? "Waiting for the masks"
+              : "Preparing active render artifact"
             : "Preparing render artifacts",
         pendingCount: artifact.pendingCount,
         preparedCount: artifact.preparedCount,
-        progress: holdingForLead
+        progress: leadHold
           ? leadProgress(artifact)
           : totalCount > 0
             ? artifact.preparedCount / totalCount
@@ -184,6 +189,17 @@ export function createMediaSessionStateSnapshot({
         status: waiting
           ? MediaSessionActivityStatus.Waiting
           : MediaSessionActivityStatus.Running,
+      }),
+    );
+  }
+
+  if (renderer?.renderPreparationGateAbandoned === true) {
+    activities.push(
+      createActivity({
+        detail: "The video is playing without them",
+        kind: MediaSessionActivityKind.RenderPreparationAbandoned,
+        label: "Masks could not keep up",
+        status: MediaSessionActivityStatus.Waiting,
       }),
     );
   }

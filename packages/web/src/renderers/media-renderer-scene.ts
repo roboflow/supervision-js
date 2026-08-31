@@ -141,6 +141,21 @@ export interface MediaRendererScene {
   captureFrame?(
     options: MediaFrameCaptureOptions | undefined,
   ): Promise<MediaFrameCapture>;
+  /**
+   * Whether `waitForRenderPreparation` would wait, scheduling nothing. A source
+   * that owns its own playhead is held by stopping it, so the renderer needs
+   * this answer before it opens a wait rather than from the wait itself.
+   */
+  needsRenderPreparationWait?(
+    mediaTime: number,
+    options: RenderPreparationPlaybackGateOptions,
+  ): boolean;
+  /**
+   * Frames render preparation has finished, counted up over the scene's life.
+   * A gate that gave up reads this to tell preparation that is slow from
+   * preparation that is stuck: only the second deserves to stay given up on.
+   */
+  getRenderPreparationProgress?(): number;
   waitForRenderPreparation?(
     mediaTime: number,
     options: RenderPreparationPlaybackGateOptions,

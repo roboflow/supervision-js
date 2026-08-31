@@ -142,13 +142,15 @@ export interface RenderPreparationMaskFrameOptions {
  * On, playback waits until the prepared window leads the playhead, so masks and
  * polygons arrive with their frame rather than after it.
  *
- * The renderer can only hold a frame it is about to draw itself, so this gate
- * reaches only a media source it pulls decoded samples from. A source that
- * presents its own frames owns the playhead and paces itself, and there this
- * gate holds the start of playback and nothing after it: the wait runs once,
- * before the producer is told to play, and the renderer reports `Buffering`
- * while it does. Once the producer is running, unprepared layers stay absent
- * until preparation catches up.
+ * A source the renderer pulls samples from is held between the sample it
+ * decoded and the draw. A source that presents its own frames owns the
+ * playhead, so it is held by stopping the producer and starting it again,
+ * before playback begins and at any frame after it whose artifacts are
+ * missing. The renderer reports `Buffering` for as long as either wait lasts.
+ *
+ * `maxWaitSeconds` bounds the wait that stops a running producer, so
+ * preparation that has stopped producing costs one wait and the frames after
+ * it are drawn without their artifacts.
  */
 export interface RenderPreparationPlaybackGateOptions {
   /**
@@ -158,6 +160,20 @@ export interface RenderPreparationPlaybackGateOptions {
    * created directly leaves it off.
    */
   readonly enabled?: boolean;
+  /**
+   * How long an enabled gate stops a producer already running for artifacts
+   * that are not prepared, before it gives up and lets the frames through
+   * without them. `Infinity` holds indefinitely. It does not bound the wait
+   * before playback begins, nor the per-sample wait of a renderer that pulls
+   * its own samples: both of those hold until preparation answers.
+   *
+   * Preparation falls behind for as long as the machine is losing, and that
+   * looks no different to the gate from a cook still on its way. A gate that
+   * gave up holds off until preparation finishes another frame, so a machine
+   * that is merely slow keeps stopping the picture and catching up, and one
+   * that has stopped producing costs one wait rather than one a frame.
+   */
+  readonly maxWaitSeconds?: number;
   /**
    * Prepared lead that is enough not to start a wait at all. Defaults to
    * `requiredAheadSeconds` and is capped by it: playback stalls only below this
@@ -256,13 +272,11 @@ export interface RenderPreparationOptions {
    * Hold playback until prepared artifacts cover the frame about to be
    * presented.
    *
-   * **This option reaches two different distances depending on the source.** A
-   * source the renderer pulls samples from is held at every frame. A source that
-   * presents its own frames is held only at the start of playback, because
-   * stopping the producer mid-run needs an answer about coverage that render
-   * preparation cannot give without waiting for it, so frames after the start
-   * arrive whether their artifacts are ready or not. `playbackGateReach` on the
-   * renderer's state reports the furthest any of its gates reaches.
+   * Both kinds of source are held at every frame: one between its decoded
+   * sample and the draw, the other by stopping the producer that owns the
+   * playhead and starting it again. `maxWaitSeconds` is what makes stopping a
+   * running producer safe, and `playbackGateReach` on the renderer's state
+   * reports the furthest any of its gates reaches.
    *
    * A renderer created directly leaves this off. `createMediaSession()` turns it
    * on, so a session opens with its annotations rather than opening bare; pass

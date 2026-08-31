@@ -718,6 +718,45 @@ describe("the prepared annotation window under push presentation", () => {
     },
   );
 
+  it("tells the playback gate to wait for a presented frame whose cooks are owed", async () => {
+    const scene = await createScene();
+
+    scene.present(1000);
+
+    expect(scene.scene.needsRenderPreparationWait?.(1, { enabled: true })).toBe(
+      true,
+    );
+    expect(scene.scene.getRenderPreparationProgress?.()).toBe(0);
+
+    await scene.settleCooks();
+
+    expect(scene.scene.needsRenderPreparationWait?.(1, { enabled: true })).toBe(
+      false,
+    );
+    expect(scene.scene.getRenderPreparationProgress?.()).toBeGreaterThan(0);
+  });
+
+  it("holds the gate open until the cooks for the presented frame land", async () => {
+    const scene = await createScene();
+
+    scene.present(1000);
+    let released = false;
+    const wait = scene.scene
+      .waitForRenderPreparation?.(1, { enabled: true })
+      .then(() => {
+        released = true;
+      });
+
+    await Promise.resolve();
+
+    expect(released).toBe(false);
+
+    await scene.settleCooks();
+    await wait;
+
+    expect(released).toBe(true);
+  });
+
   it("reports no window to a scene that free-runs on the ticker", async () => {
     const { createPixiMediaScene } = await import("./pixi-media-scene");
     const scene = await createPixiMediaScene(

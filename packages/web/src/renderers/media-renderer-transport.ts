@@ -52,8 +52,15 @@ export interface MediaRendererTransportOptions {
    * be something that gives up on its own. Left out, playback is held once and
    * never again, and a producer outrunning whatever feeds it runs on past
    * frames that have nothing to draw.
+   *
+   * `signal` aborts once anything else settles playback, so a hold the viewer
+   * has already paused or seeked past is not still holding a play nobody asked
+   * for.
    */
-  readonly holdForReadiness?: (mediaTime: number) => Promise<void> | null;
+  readonly holdForReadiness?: (
+    mediaTime: number,
+    signal: AbortSignal,
+  ) => Promise<void> | null;
 }
 
 /**
@@ -79,6 +86,8 @@ export function createMediaRendererTransport(
   let playbackIntent = 0;
   /** Intent a readiness wait belongs to, or null while none is running. */
   let readinessHoldIntent: number | null = null;
+  /** Whether a readiness hold still owes the producer its release. */
+  let readinessFreezeHeld = false;
   let activeReadinessWait: AbortController | undefined;
   const isHoldingForReadiness = () => readinessHoldIntent === playbackIntent;
 
@@ -105,7 +114,19 @@ export function createMediaRendererTransport(
     }
 
     gestureInFlight = false;
+    // The producer holds one freeze, so a drag that took it over from a
+    // readiness hold is releasing that hold's too.
+    readinessFreezeHeld = false;
     publishSeekSignals();
+    await channel.endInteractiveSeek();
+  };
+
+  const releaseReadinessFreeze = async () => {
+    if (!readinessFreezeHeld || gestureInFlight) {
+      return;
+    }
+
+    readinessFreezeHeld = false;
     await channel.endInteractiveSeek();
   };
 
@@ -158,10 +179,14 @@ export function createMediaRendererTransport(
    * uses, so a drag arriving mid-hold takes the hold over rather than fighting
    * it and the release it lands with is the one that resumes.
    */
-  const holdForReadiness = async (wait: Promise<void>) => {
+  const holdForReadiness = async (
+    wait: Promise<void>,
+    readinessWait: AbortController,
+  ) => {
     const intent = playbackIntent;
 
     readinessHoldIntent = intent;
+    readinessFreezeHeld = true;
     channel.beginInteractiveSeek();
     publishPlaybackState();
 
@@ -171,13 +196,20 @@ export function createMediaRendererTransport(
       // A wait that failed is over, and the release below is the only thing
       // that starts the producer again. Whoever owns the failure reports it.
     } finally {
+      if (activeReadinessWait === readinessWait) {
+        activeReadinessWait = undefined;
+      }
+
       if (readinessHoldIntent === intent) {
         readinessHoldIntent = null;
       }
     }
 
-    if (!gestureInFlight) {
-      await channel.endInteractiveSeek();
+    // A play that superseded this hold is waiting for readiness of its own,
+    // and the producer running before that lands is what the wait is there to
+    // prevent. It inherits the freeze and releases it when it starts playback.
+    if (readinessHoldIntent === null) {
+      await releaseReadinessFreeze();
     }
 
     publishPlaybackState();
@@ -196,10 +228,15 @@ export function createMediaRendererTransport(
       return;
     }
 
-    const wait = options.holdForReadiness(channel.getPlayhead().mediaTimeS);
+    const readinessWait = new AbortController();
+    const wait = options.holdForReadiness(
+      channel.getPlayhead().mediaTimeS,
+      readinessWait.signal,
+    );
 
     if (wait) {
-      void holdForReadiness(wait);
+      activeReadinessWait = readinessWait;
+      void holdForReadiness(wait, readinessWait);
     }
   };
   const publishPlaybackRate = () => {
@@ -235,11 +272,15 @@ export function createMediaRendererTransport(
         activeReadinessWait = readinessWait;
         readinessHoldIntent = intent;
         publishPlaybackState();
+
+        let readinessLanded = false;
+
         try {
           await options.waitForReadiness(
             channel.getPlayhead().mediaTimeS,
             readinessWait.signal,
           );
+          readinessLanded = true;
         } finally {
           if (activeReadinessWait === readinessWait) {
             activeReadinessWait = undefined;
@@ -247,6 +288,12 @@ export function createMediaRendererTransport(
 
           if (readinessHoldIntent === intent) {
             readinessHoldIntent = null;
+          }
+
+          // A wait that failed takes the play with it, and the producer is
+          // still frozen for a hold this play took over.
+          if (!readinessLanded && intent === playbackIntent) {
+            void releaseReadinessFreeze();
           }
         }
 
@@ -256,6 +303,7 @@ export function createMediaRendererTransport(
         }
       }
 
+      await releaseReadinessFreeze();
       await channel.play();
       // A producer already at speed reports no change, so nothing else would
       // retire the hold's own Buffering and it would stand for good.
@@ -266,8 +314,9 @@ export function createMediaRendererTransport(
       settledState = MediaRendererPlaybackState.Paused;
       beginPlaybackIntent();
       // A pause ends the producer's mechanical hold, so it lands ahead of the
-      // release the open gesture still owes.
+      // releases a readiness hold or an open gesture still owe.
       channel.pause();
+      void releaseReadinessFreeze();
       void releaseGesture();
     },
 

@@ -141,6 +141,12 @@ export interface MediaRendererAssetError {
  */
 export interface MediaSourceState {
   readonly status: MediaSourceStatus;
+  /**
+   * True while the renderer is waiting on a read it cannot draw without.
+   * Prefetch that runs behind a moving picture is not a wait and leaves this
+   * false, so this is set only where the picture has stopped for the source.
+   */
+  readonly awaitingRead?: boolean;
   readonly canRead: boolean | null;
   readonly formatName: string | null;
   readonly formatMimeType: string | null;
@@ -176,8 +182,8 @@ export interface MediaSourceState {
  * A source the renderer pulls samples from can be held between any two frames,
  * because the renderer decides when each one is drawn. A source that presents
  * its own frames owns the playhead, so holding it means stopping the producer
- * and starting it again, which the detection gate does and the
- * render-preparation gate does not.
+ * and starting it again, and a gate that stops one has to bound its own wait
+ * or a producer nothing answers for never runs again.
  */
 export enum PlaybackGateReach {
   /** No gate: the picture moves and unprepared layers are absent from it. */
@@ -217,6 +223,12 @@ export interface MediaRendererState {
    * reports which one a host got.
    */
   readonly playbackGateReach?: PlaybackGateReach;
+  /**
+   * The render-preparation gate stopped playback for artifacts that never
+   * arrived and gave up on them, so the picture is moving without them. False
+   * again once preparation covers the playhead.
+   */
+  readonly renderPreparationGateAbandoned?: boolean;
   /**
    * Whether the raster on screen belongs to a frame other than the one the rest
    * of the annotations were drawn from, which is the neighbouring frame and no

@@ -50,7 +50,23 @@ export enum MediaSessionActivityKind {
   Error = "error",
   MediaNormalizing = "mediaNormalizing",
   MediaOpening = "mediaOpening",
+  /**
+   * The picture is waiting on media the source has not handed over yet, which
+   * is the bytes and their decode rather than anything downstream of them.
+   * `PlaybackBuffering` is what a transport reports once it has already
+   * stopped; this is reported from the read itself, including the reads a seek
+   * makes while the transport still reads as paused.
+   */
+  MediaSourceReading = "mediaSourceReading",
   PlaybackBuffering = "playbackBuffering",
+  /**
+   * The render-preparation gate held the picture for artifacts that never
+   * arrived and let it go. Nothing is blocked: the frames reaching the screen
+   * are the ones whose artifacts were given up on. What is waited on is
+   * preparation finishing another frame, which is what lets the gate hold the
+   * picture again; `RenderPreparing` covers the holds that are running.
+   */
+  RenderPreparationAbandoned = "renderPreparationAbandoned",
   RenderPreparing = "renderPreparing",
 }
 
