@@ -1,9 +1,5 @@
-/** Gaps below this are the same frame stored twice with float slop, not two
- *  frames: keys are whole milliseconds, so anything closer straddles one key. */
-const MIN_LEARNABLE_INTERVAL_MS = 1;
-
 /**
- * Two-tier frame cache, keyed by millisecond timestamp.
+ * Two-tier frame cache.
  *
  * The preview tier holds many downscaled frames: a long, coarse history that
  * answers a scrub instantly while the crisp frame decodes. The exact tier holds
@@ -14,16 +10,31 @@ const MIN_LEARNABLE_INTERVAL_MS = 1;
  * served it. Only an exact hit is full-resolution; a preview hit still owes the
  * caller a crisp decode.
  *
+ * The exact tier is keyed by the timeline's identity for the frame, so two
+ * source frames can never share a slot at any frame rate. The preview tier is
+ * keyed by rounded millisecond, which merges frames spaced under a millisecond;
+ * it is the tier whose answer is already declared approximate, and it never
+ * claims to be the frame at the target.
+ *
  * Both tiers store OffscreenCanvas blits, never VideoFrames: a raw-frame cache
  * pins decoder output, stalling the decoder and growing VRAM without bound. A
  * frame fed as a live VideoSample is drawn into the blit and never retained, so
  * the no-retention rule holds on the zero-copy path too.
  */
 
+import type { FrameId } from "./frame-timeline";
 import type { VideoSampleLike } from "./scrub-cursor";
 
 /** RGBA bytes per cached pixel, used to turn a RAM budget into a slot count. */
 const BYTES_PER_PIXEL = 4;
+
+/** Width of the grid the preview tier's keys land on, since `putPreview` keys
+ *  by rounded millisecond. */
+const PREVIEW_KEY_GRID_MS = 1;
+
+/** The exact tier's keys are frame identities, which are not times, so no two
+ *  of them can name one frame. */
+const FRAME_IDENTITY_KEY_GRID_MS = 0;
 
 /**
  * What the cache can blit into a tier: an already-decoded canvas/image, or a
@@ -62,11 +73,12 @@ export interface FrameCacheStats {
   readonly exactTimestampsMs: number[];
   readonly previewTimestampsMs: number[];
   /** Configured source frame interval: the visual width of each cached mark on
-   *  the timeline. Keys are per-millisecond, so this is a display width and
-   *  not the grid entries land on. */
+   *  the timeline. Nothing is keyed by it, so this is a display width and not
+   *  the grid entries land on. */
   readonly bucketMs: number;
-  /** Frames dropped to LRU pressure per tier, and puts that landed in an
-   *  occupied bucket (re-decodes collapsed onto one slot). */
+  /** Frames dropped to LRU pressure per tier, and puts that overwrote a live
+   *  key: a frame decoded again on the exact tier, and on the preview tier
+   *  either that or two frames sharing one rounded millisecond. */
   readonly exactEvictions: number;
   readonly previewEvictions: number;
   readonly bucketCollapses: number;
@@ -90,10 +102,7 @@ export interface FrameCacheOptions {
   /** Coarse-tier slot count. */
   readonly previewCapacity: number;
   /** Source frame interval in ms, reported to diagnostics as the timeline mark
-   *  width. It does not key the tiers: a grid this wide rounds two adjacent
-   *  frames onto one slot wherever the rounded interval exceeds the true one
-   *  (24, 60fps and their pulldown rates), so each frame is keyed by its own
-   *  millisecond instead. */
+   *  width. It keys nothing. */
   readonly bucketMs: number;
   /** Floor on exact-tier slots, applied even when the byte budget would yield
    *  fewer. Lets a caller that owns the prefetch-window width guarantee a full
@@ -132,22 +141,33 @@ export class FrameCache {
       Math.max(0, options.exactBudgetBytes),
       exactCapacity * frameBytes,
     );
-    this.exact = new TierStore(exactCapacity, exactWidth, exactHeight);
+    this.exact = new TierStore(
+      exactCapacity,
+      exactWidth,
+      exactHeight,
+      FRAME_IDENTITY_KEY_GRID_MS,
+    );
     this.preview = new TierStore(
       Math.max(0, Math.floor(options.previewCapacity)),
       previewWidth,
       previewHeight,
+      PREVIEW_KEY_GRID_MS,
     );
   }
 
-  /** Store a crisp full-resolution frame for the exact (scrub) tier. */
+  /**
+   * Store a crisp full-resolution frame for the exact (scrub) tier under
+   * `frame`, the timeline's name for it. `timestampMs` is the decoded
+   * timestamp, which is what lookups match on and what a hit reports back.
+   */
   putExact(
+    frame: FrameId,
     timestampMs: number,
     src: CacheBlitSource,
     srcWidth: number,
     srcHeight: number,
   ): void {
-    this.exact.put(timestampMs, src, srcWidth, srcHeight);
+    this.exact.put(frame.ticks, timestampMs, src, srcWidth, srcHeight);
   }
 
   /** Store a downscaled frame for the coarse preview tier. */
@@ -157,7 +177,13 @@ export class FrameCache {
     srcWidth: number,
     srcHeight: number,
   ): void {
-    this.preview.put(timestampMs, src, srcWidth, srcHeight);
+    this.preview.put(
+      Math.round(timestampMs),
+      timestampMs,
+      src,
+      srcWidth,
+      srcHeight,
+    );
   }
 
   /**
@@ -282,14 +308,14 @@ interface TierEntry {
 
 /**
  * One cache tier: a fixed-capacity, MRU-ordered set of OffscreenCanvas copies
- * keyed by whole-millisecond timestamp. Overflow evicts the least-recently-used
- * entry; only re-decodes of one frame share a key, since two source frames a
- * millisecond apart would need a rate past 500fps. Lookups match on the stored
- * frame's true timestamp, so a cache-served frame carries the same timestamp a
- * fresh decode would.
+ * under keys its owner assigns. A put onto a live key overwrites that slot in
+ * place, so an owner that lets two frames share a key loses one of them
+ * silently; overflow past capacity evicts the least-recently-used entry
+ * instead. Lookups match on the stored frame's true timestamp and never on the
+ * key, so a cache-served frame carries the same timestamp a fresh decode would.
  */
-class TierStore {
-  /** MRU-ordered bucket keys. Index 0 is the LRU, the last index is the MRU. */
+export class TierStore {
+  /** MRU-ordered keys. Index 0 is the LRU, the last index is the MRU. */
   private readonly keys: number[] = [];
   private readonly entries = new Map<number, TierEntry>();
   /** Canvases released by eviction, held for the next put to fill. */
@@ -307,6 +333,10 @@ class TierStore {
     readonly capacity: number,
     readonly width: number,
     readonly height: number,
+    /** Width of the grid the owner's keys round onto, or 0 when a key names a
+     *  frame outright. Two entries closer together than this are one frame
+     *  whose two decodes rounded onto either side of a key boundary. */
+    private readonly keyGridMs: number,
   ) {}
 
   /** Frames dropped to the LRU policy; a cache-pressure signal for diagnostics. */
@@ -314,12 +344,13 @@ class TierStore {
     return this.evictionCount;
   }
 
-  /** Puts that landed in an occupied bucket (re-decodes collapsed to one slot). */
+  /** Puts that landed on a key already live, collapsing both onto one slot. */
   get bucketCollapses(): number {
     return this.bucketCollapseCount;
   }
 
   put(
+    key: number,
     timestampMs: number,
     src: CacheBlitSource,
     srcWidth: number,
@@ -327,7 +358,6 @@ class TierStore {
   ): void {
     // capacity 0 is the disabled-tier shape; skip the OffscreenCanvas alloc.
     if (this.capacity === 0) return;
-    const key = this.key(timestampMs);
     const existing = this.entries.get(key);
     // Allocating an accelerated canvas at these sizes costs several times the
     // blit that fills it, so an evicted slot's canvas is reused rather than
@@ -437,8 +467,8 @@ class TierStore {
    * the next frame, which is what a decode for it returns. Answering it from
    * this tier would paint a frame no decode for that time ever produces, so a
    * candidate outside its own frame's span is not eligible however generous the
-   * caller's tolerance is. Until the tier has seen two frames it has no spacing
-   * to bound with and the caller's tolerance stands alone.
+   * caller's tolerance is. Until the tier has learned a frame gap it has no
+   * spacing to bound with and the caller's tolerance stands alone.
    */
   private nearest(
     timestampMs: number,
@@ -452,9 +482,8 @@ class TierStore {
     for (const key of this.keys) {
       const entry = this.entries.get(key);
       if (!entry) continue;
-      // Against the frame's real timestamp, not its key: the key is
-      // rounded, so it can sit the far side of the target from the frame it
-      // holds.
+      // Against the frame's real timestamp, not its key: a key names the
+      // frame, and nothing says it is a time at all.
       if (atOrBefore && entry.timestampMs > timestampMs) continue;
       const delta = Math.abs(entry.timestampMs - timestampMs);
       if (delta >= spanMs) continue;
@@ -466,21 +495,19 @@ class TierStore {
     return bestKey === null ? null : { key: bestKey, delta: bestDelta };
   }
 
-  /** Narrows the learned frame interval to the smallest gap seen so far. It
-   *  only ever tightens, so a tier that has watched an unrepresentative stretch
-   *  of a variable-rate source bounds lookups too tightly (a decode) rather
-   *  than too loosely (the wrong frame). */
+  /** Narrows the learned frame interval to the smallest gap seen so far. A gap
+   *  at or below the key grid is one frame that rounded onto two keys rather
+   *  than two frames, so it is no interval at all; what survives is a gap
+   *  between two frames, and never zero. It only ever tightens, so a tier that
+   *  has watched an unrepresentative stretch of a variable-rate source bounds
+   *  lookups too tightly (a decode) rather than too loosely (the wrong frame). */
   private observeSpacing(timestampMs: number): void {
     for (const entry of this.entries.values()) {
       const gap = Math.abs(entry.timestampMs - timestampMs);
-      if (gap < MIN_LEARNABLE_INTERVAL_MS) continue;
+      if (gap <= this.keyGridMs) continue;
       if (this.observedIntervalMs === null || gap < this.observedIntervalMs) {
         this.observedIntervalMs = gap;
       }
     }
-  }
-
-  private key(timestampMs: number): number {
-    return Math.round(timestampMs);
   }
 }

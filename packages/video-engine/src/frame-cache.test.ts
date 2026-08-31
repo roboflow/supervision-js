@@ -1,6 +1,12 @@
 import { beforeAll, describe, expect, it } from "vitest";
 
-import { FrameCache, type FrameCacheOptions, FrameTier } from "./frame-cache";
+import {
+  FrameCache,
+  type FrameCacheOptions,
+  FrameTier,
+  TierStore,
+} from "./frame-cache";
+import { type FrameId, FrameTimeline } from "./frame-timeline";
 import { installWorkerGlobals } from "../test/fake-engine-deps";
 
 beforeAll(() => {
@@ -24,6 +30,17 @@ const BASE: FrameCacheOptions = {
 function makeCache(overrides: Partial<FrameCacheOptions> = {}): FrameCache {
   return new FrameCache({ ...BASE, ...overrides });
 }
+
+/**
+ * Frame identity on a millisecond tick grid, which is what these cases assume
+ * of their source: two puts a fraction of a millisecond apart are the one frame
+ * a decoder answered twice, and anything further apart is two frames. The cases
+ * that need a finer grid build a real timeline and take identities from it.
+ */
+const frameAt = (timestampMs: number): FrameId => ({
+  index: Math.round(timestampMs),
+  ticks: Math.round(timestampMs),
+});
 
 describe("FrameCache", () => {
   describe("preview tier", () => {
@@ -105,7 +122,7 @@ describe("FrameCache", () => {
   describe("exact tier", () => {
     it("stores a full-resolution copy and tags the hit Exact", () => {
       const cache = makeCache({ exactBudgetBytes: 64 * MB });
-      cache.putExact(1000, SRC, 320, 180);
+      cache.putExact(frameAt(1000), 1000, SRC, 320, 180);
 
       const hit = cache.get(1000, 50, 50);
       expect(hit?.tier).toBe(FrameTier.Exact);
@@ -118,8 +135,8 @@ describe("FrameCache", () => {
       // A 30fps grid: frames 33ms apart, and a 50ms tolerance reaches both
       // neighbours of a target between them.
       const cache = makeCache({ exactBudgetBytes: 64 * MB, bucketMs: 33 });
-      cache.putExact(1000, SRC, 320, 180);
-      cache.putExact(1033, SRC, 320, 180);
+      cache.putExact(frameAt(1000), 1000, SRC, 320, 180);
+      cache.putExact(frameAt(1033), 1033, SRC, 320, 180);
 
       // A decode for 1010 returns the frame at 1000. The cache has to agree,
       // or the same pointer position paints a different frame depending on
@@ -137,9 +154,9 @@ describe("FrameCache", () => {
         exactHeight: 100,
         exactBudgetBytes: 100000,
       });
-      cache.putExact(0, SRC, 100, 100);
-      cache.putExact(1000, SRC, 100, 100);
-      cache.putExact(2000, SRC, 100, 100);
+      cache.putExact(frameAt(0), 0, SRC, 100, 100);
+      cache.putExact(frameAt(1000), 1000, SRC, 100, 100);
+      cache.putExact(frameAt(2000), 2000, SRC, 100, 100);
 
       expect(cache.stats.exactCapacity).toBe(2);
       expect(cache.stats.exactSize).toBe(2);
@@ -153,12 +170,12 @@ describe("FrameCache", () => {
         exactHeight: 100,
         exactBudgetBytes: 100000,
       });
-      cache.putExact(0, SRC, 100, 100);
+      cache.putExact(frameAt(0), 0, SRC, 100, 100);
       const first = cache.get(0, 50, 50)?.canvas;
-      cache.putExact(1000, SRC, 100, 100);
+      cache.putExact(frameAt(1000), 1000, SRC, 100, 100);
       // Evicts bucket 0, releasing its canvas after this put took its own.
-      cache.putExact(2000, SRC, 100, 100);
-      cache.putExact(3000, SRC, 100, 100);
+      cache.putExact(frameAt(2000), 2000, SRC, 100, 100);
+      cache.putExact(frameAt(3000), 3000, SRC, 100, 100);
 
       expect(cache.get(0, 50, 50)).toBeNull();
       expect(cache.get(3000, 50, 50)?.canvas).toBe(first);
@@ -171,8 +188,8 @@ describe("FrameCache", () => {
         exactBudgetBytes: 1,
       });
       expect(cache.stats.exactCapacity).toBe(1);
-      cache.putExact(0, SRC, 100, 100);
-      cache.putExact(1000, SRC, 100, 100);
+      cache.putExact(frameAt(0), 0, SRC, 100, 100);
+      cache.putExact(frameAt(1000), 1000, SRC, 100, 100);
 
       expect(cache.get(0, 50, 50)).toBeNull();
       expect(cache.get(1000, 50, 50)?.tier).toBe(FrameTier.Exact);
@@ -219,7 +236,8 @@ describe("FrameCache", () => {
       const frameBytes = 100 * 100 * 4;
       expect(cache.stats.exactBudgetBytes).toBe(13 * frameBytes);
 
-      for (let i = 0; i < 13; i++) cache.putExact(i * 1000, SRC, 100, 100);
+      for (let i = 0; i < 13; i++)
+        cache.putExact(frameAt(i * 1000), i * 1000, SRC, 100, 100);
       const stats = cache.stats;
       const residentBytes = stats.exactSize * frameBytes;
       const pct = (residentBytes / stats.exactBudgetBytes) * 100;
@@ -232,8 +250,8 @@ describe("FrameCache", () => {
       // 15fps frames sit 66.67ms apart, so a 67ms grid rounds frames 100 and
       // 101 onto one key and the second overwrites the first.
       const cache = makeCache({ exactBudgetBytes: 64 * MB, bucketMs: 67 });
-      cache.putExact(6667, SRC, 320, 180);
-      cache.putExact(6733, SRC, 320, 180);
+      cache.putExact(frameAt(6667), 6667, SRC, 320, 180);
+      cache.putExact(frameAt(6733), 6733, SRC, 320, 180);
 
       expect(cache.stats.exactSize).toBe(2);
       expect(cache.stats.bucketCollapses).toBe(0);
@@ -241,11 +259,40 @@ describe("FrameCache", () => {
       expect(cache.get(6733, 50, 50)?.timestampMs).toBe(6733);
     });
 
+    it("two frames under a millisecond apart keep a slot each", () => {
+      // Nothing in the engine rejects a source past 1000fps, and both of these
+      // frames round to the same millisecond.
+      const timeline = FrameTimeline.uniform(2000, 8);
+      const first = timeline.landingAt(1);
+      const second = timeline.landingAt(2);
+      const cache = makeCache({ exactBudgetBytes: 64 * MB });
+      cache.putExact(first.frame, first.mediaTimeS * 1000, SRC, 320, 180);
+      cache.putExact(second.frame, second.mediaTimeS * 1000, SRC, 320, 180);
+
+      expect(cache.stats.exactSize).toBe(2);
+      expect(cache.stats.bucketCollapses).toBe(0);
+      expect(cache.get(0.5, 50, 50)?.timestampMs).toBe(0.5);
+      expect(cache.get(1, 50, 50)?.timestampMs).toBe(1);
+    });
+
+    it("learns a frame span narrower than a millisecond", () => {
+      const timeline = FrameTimeline.uniform(2000, 8);
+      const first = timeline.landingAt(1);
+      const second = timeline.landingAt(2);
+      const cache = makeCache({ exactBudgetBytes: 64 * MB });
+      cache.putExact(first.frame, first.mediaTimeS * 1000, SRC, 320, 180);
+      cache.putExact(second.frame, second.mediaTimeS * 1000, SRC, 320, 180);
+
+      // 1.6ms is past the span of the last resident frame, so it belongs to
+      // one the cache does not hold.
+      expect(cache.get(1.6, 50, 50)).toBeNull();
+    });
+
     it("a frame keeps its own timestamp when it is not a whole millisecond", () => {
       // A 1/600-timebase source puts frames at 33.3333ms, and a cache-served
       // paint is what most scrub positions read.
       const cache = makeCache({ exactBudgetBytes: 64 * MB, bucketMs: 33 });
-      cache.putExact(100 / 3, SRC, 320, 180);
+      cache.putExact(frameAt(100 / 3), 100 / 3, SRC, 320, 180);
 
       expect(cache.get(100 / 3, 5, 5)?.timestampMs).toBe(100 / 3);
     });
@@ -254,8 +301,8 @@ describe("FrameCache", () => {
       // 33.33ms apart, so a neighbour's timestamp sits well inside a 50ms
       // reach of this one.
       const cache = makeCache({ exactBudgetBytes: 64 * MB, bucketMs: 33 });
-      cache.putExact(1000, SRC, 320, 180);
-      cache.putExact(1033, SRC, 320, 180);
+      cache.putExact(frameAt(1000), 1000, SRC, 320, 180);
+      cache.putExact(frameAt(1033), 1033, SRC, 320, 180);
 
       expect(cache.get(1000, 50, 50)?.timestampMs).toBe(1000);
       expect(cache.get(1033, 50, 50)?.timestampMs).toBe(1033);
@@ -265,14 +312,14 @@ describe("FrameCache", () => {
 
     it("falls back to the caller's tolerance until a second frame reveals the spacing", () => {
       const cache = makeCache({ exactBudgetBytes: 64 * MB, bucketMs: 33 });
-      cache.putExact(1000, SRC, 320, 180);
+      cache.putExact(frameAt(1000), 1000, SRC, 320, 180);
 
       // A lone frame is no evidence of how far apart frames are.
       expect(cache.get(1040, 50, 50)?.timestampMs).toBe(1000);
 
       // Its neighbour puts the source's 33ms spacing on the record, and
       // 1040 is a frame past 1000.
-      cache.putExact(967, SRC, 320, 180);
+      cache.putExact(frameAt(967), 967, SRC, 320, 180);
       expect(cache.get(1040, 50, 50)).toBeNull();
     });
 
@@ -280,8 +327,8 @@ describe("FrameCache", () => {
       // The declared interval claims 30fps; the frames are 15fps, where a
       // target 50ms past a frame is still that frame's.
       const cache = makeCache({ exactBudgetBytes: 64 * MB, bucketMs: 33 });
-      cache.putExact(0, SRC, 320, 180);
-      cache.putExact(67, SRC, 320, 180);
+      cache.putExact(frameAt(0), 0, SRC, 320, 180);
+      cache.putExact(frameAt(67), 67, SRC, 320, 180);
 
       expect(cache.get(50, 50, 50)?.timestampMs).toBe(0);
     });
@@ -290,8 +337,8 @@ describe("FrameCache", () => {
       // 24fps, where no frame lands on a whole millisecond. The peek path is
       // handed a raw pointer position, so most lookups fall between frames.
       const cache = makeCache({ exactBudgetBytes: 64 * MB, bucketMs: 42 });
-      cache.putExact(1000 / 24, SRC, 320, 180);
-      cache.putExact(2000 / 24, SRC, 320, 180);
+      cache.putExact(frameAt(1000 / 24), 1000 / 24, SRC, 320, 180);
+      cache.putExact(frameAt(2000 / 24), 2000 / 24, SRC, 320, 180);
 
       // 83ms is a fraction of a millisecond short of the second frame, which
       // the position has not reached: a decode for it returns the first.
@@ -303,8 +350,8 @@ describe("FrameCache", () => {
       // the target equals the stored timestamp to the bit. Excluding it would
       // send every on-frame seek to the previous frame.
       const cache = makeCache({ exactBudgetBytes: 64 * MB, bucketMs: 42 });
-      cache.putExact(1000 / 24, SRC, 320, 180);
-      cache.putExact(2000 / 24, SRC, 320, 180);
+      cache.putExact(frameAt(1000 / 24), 1000 / 24, SRC, 320, 180);
+      cache.putExact(frameAt(2000 / 24), 2000 / 24, SRC, 320, 180);
 
       expect(cache.get(2000 / 24, 50, 50)?.timestampMs).toBe(2000 / 24);
     });
@@ -313,8 +360,8 @@ describe("FrameCache", () => {
       // 15fps: the frame span is wider than the 50ms constant, so the
       // constant is what binds.
       const cache = makeCache({ exactBudgetBytes: 64 * MB, bucketMs: 67 });
-      cache.putExact(0, SRC, 320, 180);
-      cache.putExact(67, SRC, 320, 180);
+      cache.putExact(frameAt(0), 0, SRC, 320, 180);
+      cache.putExact(frameAt(67), 67, SRC, 320, 180);
 
       expect(cache.get(40, 50, 50)?.timestampMs).toBe(0);
       expect(cache.get(60, 50, 50)).toBeNull();
@@ -327,7 +374,7 @@ describe("FrameCache", () => {
         exactBudgetBytes: 64 * MB,
         previewCapacity: 8,
       });
-      cache.putExact(1000, SRC, 320, 180);
+      cache.putExact(frameAt(1000), 1000, SRC, 320, 180);
 
       const peeked = cache.peek(1000, 50, 50);
       expect(peeked?.tier).toBe(FrameTier.Exact);
@@ -360,11 +407,11 @@ describe("FrameCache", () => {
         exactHeight: 100,
         exactBudgetBytes: 80000,
       });
-      cache.putExact(0, SRC, 100, 100);
-      cache.putExact(1000, SRC, 100, 100);
+      cache.putExact(frameAt(0), 0, SRC, 100, 100);
+      cache.putExact(frameAt(1000), 1000, SRC, 100, 100);
       // Touch 0 so 1000 becomes the LRU victim of the next put.
       cache.bumpExact(0);
-      cache.putExact(2000, SRC, 100, 100);
+      cache.putExact(frameAt(2000), 2000, SRC, 100, 100);
 
       expect(cache.get(1000, 50, 50)).toBeNull();
       expect(cache.get(0, 50, 50)?.tier).toBe(FrameTier.Exact);
@@ -378,12 +425,12 @@ describe("FrameCache", () => {
         exactHeight: 100,
         exactBudgetBytes: 80000,
       });
-      cache.putExact(0, SRC, 100, 100);
-      cache.putExact(33, SRC, 100, 100);
+      cache.putExact(frameAt(0), 0, SRC, 100, 100);
+      cache.putExact(frameAt(33), 33, SRC, 100, 100);
       // The scheduler bumps with the gesture's position, which is not a
       // frame timestamp.
       cache.bumpExact(10);
-      cache.putExact(67, SRC, 100, 100);
+      cache.putExact(frameAt(67), 67, SRC, 100, 100);
 
       expect(cache.get(33, 50, 50)).toBeNull();
       expect(cache.get(0, 50, 50)?.timestampMs).toBe(0);
@@ -395,7 +442,7 @@ describe("FrameCache", () => {
         exactHeight: 100,
         exactBudgetBytes: 64 * MB,
       });
-      cache.putExact(0, SRC, 100, 100);
+      cache.putExact(frameAt(0), 0, SRC, 100, 100);
       cache.bumpExact(0);
       expect(cache.stats.exactHits).toBe(0);
     });
@@ -418,7 +465,7 @@ describe("FrameCache", () => {
         exactBudgetBytes: 64 * MB,
         previewCapacity: 8,
       });
-      cache.putExact(1000, SRC, 320, 180);
+      cache.putExact(frameAt(1000), 1000, SRC, 320, 180);
       cache.putPreview(1000, SRC, 320, 180);
 
       const hit = cache.get(1000, 50, 50);
@@ -432,7 +479,7 @@ describe("FrameCache", () => {
         exactBudgetBytes: 64 * MB,
         previewCapacity: 8,
       });
-      cache.putExact(1000, SRC, 320, 180);
+      cache.putExact(frameAt(1000), 1000, SRC, 320, 180);
       cache.putPreview(5000, SRC, 320, 180);
 
       const hit = cache.get(5000, 50, 50);
@@ -444,7 +491,7 @@ describe("FrameCache", () => {
   describe("disabled tiers", () => {
     it("drops puts when both tiers are zero-capacity", () => {
       const cache = makeCache();
-      cache.putExact(1000, SRC, 320, 180);
+      cache.putExact(frameAt(1000), 1000, SRC, 320, 180);
       cache.putPreview(1000, SRC, 320, 180);
 
       expect(cache.stats.exactCapacity).toBe(0);
@@ -461,7 +508,7 @@ describe("FrameCache", () => {
         exactBudgetBytes: 64 * MB,
         previewCapacity: 8,
       });
-      cache.putExact(1000, SRC, 320, 180);
+      cache.putExact(frameAt(1000), 1000, SRC, 320, 180);
       cache.putPreview(2000, SRC, 320, 180);
 
       cache.get(1000, 50, 50);
@@ -475,8 +522,8 @@ describe("FrameCache", () => {
 
     it("exposes resident timestamps and bucket size for diagnostics", () => {
       const cache = makeCache({ exactBudgetBytes: 64 * MB, bucketMs: 1 });
-      cache.putExact(1000, SRC, 320, 180);
-      cache.putExact(2000, SRC, 320, 180);
+      cache.putExact(frameAt(1000), 1000, SRC, 320, 180);
+      cache.putExact(frameAt(2000), 2000, SRC, 320, 180);
 
       const stats = cache.stats;
       expect([...stats.exactTimestampsMs].sort((a, b) => a - b)).toEqual([
@@ -495,7 +542,7 @@ describe("FrameCache", () => {
       expect(cache.stats.exactCapacity).toBe(2);
       expect(cache.stats.previewCapacity).toBe(5);
 
-      cache.putExact(0, SRC, 100, 100);
+      cache.putExact(frameAt(0), 0, SRC, 100, 100);
       cache.putPreview(0, SRC, 320, 180);
       expect(cache.stats.exactSize).toBe(1);
       expect(cache.stats.previewSize).toBe(1);
@@ -508,7 +555,7 @@ describe("FrameCache", () => {
         exactBudgetBytes: 64 * MB,
         previewCapacity: 8,
       });
-      cache.putExact(1000, SRC, 320, 180);
+      cache.putExact(frameAt(1000), 1000, SRC, 320, 180);
       cache.putPreview(2000, SRC, 320, 180);
       cache.clear();
 
@@ -527,9 +574,9 @@ describe("FrameCache", () => {
         exactHeight: 100,
         exactBudgetBytes: 100000,
       });
-      cache.putExact(0, SRC, 100, 100);
-      cache.putExact(1000, SRC, 100, 100);
-      cache.putExact(2000, SRC, 100, 100);
+      cache.putExact(frameAt(0), 0, SRC, 100, 100);
+      cache.putExact(frameAt(1000), 1000, SRC, 100, 100);
+      cache.putExact(frameAt(2000), 2000, SRC, 100, 100);
 
       expect(cache.stats.exactEvictions).toBe(1);
       expect(cache.stats.previewEvictions).toBe(0);
@@ -537,9 +584,9 @@ describe("FrameCache", () => {
 
     it("re-decoding one frame increments bucketCollapses", () => {
       const cache = makeCache({ exactBudgetBytes: 64 * MB, bucketMs: 100 });
-      // One frame decoded twice: same millisecond, so one slot.
-      cache.putExact(1010.2, SRC, 320, 180);
-      cache.putExact(1010.4, SRC, 320, 180);
+      // One frame decoded twice: same identity, so one slot.
+      cache.putExact(frameAt(1010.2), 1010.2, SRC, 320, 180);
+      cache.putExact(frameAt(1010.4), 1010.4, SRC, 320, 180);
 
       expect(cache.stats.bucketCollapses).toBe(1);
       expect(cache.stats.exactSize).toBe(1);
@@ -547,8 +594,8 @@ describe("FrameCache", () => {
 
     it("distinct frames never count as a collapse", () => {
       const cache = makeCache({ exactBudgetBytes: 64 * MB, bucketMs: 100 });
-      cache.putExact(1010, SRC, 320, 180);
-      cache.putExact(1020, SRC, 320, 180);
+      cache.putExact(frameAt(1010), 1010, SRC, 320, 180);
+      cache.putExact(frameAt(1020), 1020, SRC, 320, 180);
 
       expect(cache.stats.bucketCollapses).toBe(0);
       expect(cache.stats.exactSize).toBe(2);
@@ -576,13 +623,39 @@ describe("FrameCache", () => {
         exactHeight: 100,
         exactBudgetBytes: 64 * MB,
       });
-      cache.putExact(0, SRC, 100, 100);
-      cache.putExact(1000, SRC, 100, 100);
+      cache.putExact(frameAt(0), 0, SRC, 100, 100);
+      cache.putExact(frameAt(1000), 1000, SRC, 100, 100);
 
       const stats = cache.stats;
       const exactBytes =
         stats.exactSize * stats.exactFrameWidth * stats.exactFrameHeight * 4;
       expect(exactBytes).toBe(2 * 100 * 100 * 4);
     });
+  });
+});
+
+/** The grid the preview tier's keys land on, since `putPreview` keys by rounded
+ *  millisecond. A tier keyed by frame identity passes 0. */
+const ROUNDED_MS_KEY_GRID = 1;
+
+describe("TierStore spacing", () => {
+  it("does not learn a gap under the key grid as the frame interval", () => {
+    const tier = new TierStore(4, 32, 18, ROUNDED_MS_KEY_GRID);
+    // One frame whose PTS lands on 1000.5ms, decoded twice with the
+    // half-microsecond slop a WebCodecs timestamp carries: it rounds onto two
+    // keys, so both copies are resident a thousandth of a millisecond apart.
+    tier.put(1000, 1000.4995, SRC, 320, 180);
+    tier.put(1001, 1000.5005, SRC, 320, 180);
+
+    expect(tier.get(1000.6, 50, true)?.timestampMs).toBe(1000.5005);
+  });
+
+  it("bounds an at-or-before lookup by a learned interval", () => {
+    const tier = new TierStore(4, 32, 18, ROUNDED_MS_KEY_GRID);
+    tier.put(0, 0, SRC, 320, 180);
+    tier.put(33, 33.367, SRC, 320, 180);
+
+    expect(tier.get(40, 50, true)?.timestampMs).toBe(33.367);
+    expect(tier.get(80, 50, true)).toBeNull();
   });
 });

@@ -1133,7 +1133,13 @@ export class DecodeScheduler implements ScrubCursor {
             this.cache.putPreview(ms, blit, w, h);
             this.prefetchPreviewFrames += 1;
           } else {
-            this.cache.putExact(ms, blit, w, h);
+            this.cache.putExact(
+              this.frameIdOf(frame.timestamp),
+              ms,
+              blit,
+              w,
+              h,
+            );
             this.prefetchExactFrames += 1;
           }
           // A swept sample is drawn into the cache and never emitted, so
@@ -1281,6 +1287,15 @@ export class DecodeScheduler implements ScrubCursor {
     return this.lastEmittedFrame ? this.lastEmittedFrame.timestampS : asSec(0);
   }
 
+  /** The timeline's name for a decoded frame, which is what the exact cache
+   *  tier stores it under. Two decodes of one frame land on one identity
+   *  however their microsecond timestamps differ, and two frames never share
+   *  one however close together the source puts them. */
+  private frameIdOf(timestampS: number): FrameId {
+    const { timeline } = this.trackInfo;
+    return timeline.idAt(timeline.indexOfDecoded(timestampS));
+  }
+
   private emitDecoded(
     decoded: DecodedFrame,
     isKey: boolean,
@@ -1288,9 +1303,8 @@ export class DecodeScheduler implements ScrubCursor {
   ): void {
     this.foregroundDecodes += 1;
     if (isKey) this.keyframeAnchoredEmits += 1;
-    // The cache buckets on its own rounded key and reports back whatever
-    // timestamp it was handed, so rounding here would make every cache-served
-    // paint claim a time no frame has.
+    // The cache reports back whatever timestamp it was handed, so rounding
+    // here would make every cache-served paint claim a time no frame has.
     const ms = decoded.timestamp * 1000;
     const w = this.trackInfo.decodeWidth;
     const h = this.trackInfo.decodeHeight;
@@ -1298,7 +1312,9 @@ export class DecodeScheduler implements ScrubCursor {
     // Blit into the cache first. The cache draws the sample and retains only
     // the blit, so the live sample below is still valid for the controller to
     // paint and then close.
-    if (cacheExact) this.cache.putExact(ms, blit, w, h);
+    if (cacheExact) {
+      this.cache.putExact(this.frameIdOf(decoded.timestamp), ms, blit, w, h);
+    }
     // Always seed the coarse tier too, on every path. The exact tier serves a
     // scrub back over the exact spot; the long preview tier lets a re-scrub
     // near (not on) this spot paint an instant coarse frame while a crisp one
@@ -1337,7 +1353,7 @@ export class DecodeScheduler implements ScrubCursor {
     const w = this.trackInfo.decodeWidth;
     const h = this.trackInfo.decodeHeight;
     const blit = decoded.kind === "sample" ? decoded.sample : decoded.canvas;
-    this.cache.putExact(ms, blit, w, h);
+    this.cache.putExact(this.frameIdOf(decoded.timestamp), ms, blit, w, h);
     this.cache.putPreview(ms, blit, w, h);
     if (decoded.kind === "sample") decoded.sample.close();
   }
