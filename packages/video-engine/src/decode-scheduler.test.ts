@@ -575,6 +575,29 @@ describe("DecodeScheduler", () => {
       expect(scheduler.peekCached(1000)).toBeNull();
       expect(scheduler.state).toBe(ScrubCursorState.Closed);
     });
+
+    it("a step decode landing after close never reaches presentation", async () => {
+      const releases: Array<() => void> = [];
+      const { scheduler, cache } = setup({
+        frames: [0, 1, 2, 3],
+        gateDecode: async (timestampS) => {
+          if (timestampS === 0) return;
+          await new Promise<void>((release) => releases.push(release));
+        },
+      });
+      await scheduler.open();
+
+      const stepped = scheduler.seekToFrame(TIMELINE.idAt(60));
+      await scheduler.close();
+      releases.shift()?.();
+
+      await expect(stepped).resolves.toBeNull();
+      expect(cache.stats.exactSize).toBe(0);
+      expect(scheduler.peekCached(2000)).toBeNull();
+      // subscribe replays the last frame emitted, so a listener attached after
+      // the late decode settles sees one only if that decode was emitted.
+      expect(record(scheduler)).toHaveLength(0);
+    });
   });
 
   describe("seekSettled", () => {
