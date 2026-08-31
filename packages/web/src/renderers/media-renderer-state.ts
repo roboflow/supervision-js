@@ -34,6 +34,7 @@ export interface MediaRendererRuntimeState {
   isDestroyed(): boolean;
   isError(): boolean;
   isPlaybackActive(): boolean;
+  playbackRate(): number;
   isBuffering(): boolean;
   isPlaying(): boolean;
   emitSourceState(): void;
@@ -247,6 +248,10 @@ export function createMediaRendererRuntimeState(
 
       renderPreparationGateAbandoned = abandoned;
       emitState();
+    },
+
+    playbackRate() {
+      return playbackRate;
     },
 
     recordPlayheadTime(nextCurrentTime) {

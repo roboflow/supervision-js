@@ -47,7 +47,6 @@ const DETECTION_PLAYBACK_GATE_DEFAULTS = {
 
 const RENDER_PREPARATION_PLAYBACK_GATE_DEFAULTS = {
   enabled: true,
-  minimumAheadSeconds: 0.25,
   requiredAheadSeconds: 1,
 };
 

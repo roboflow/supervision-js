@@ -161,8 +161,8 @@ function createSampleSink(): DecodedVideoSampleSink {
 
 const GATE_OPTIONS = {
   enabled: true,
-  minimumAheadSeconds: 0.25,
-  requiredAheadSeconds: 1,
+  resumeAtSeconds: 0.3,
+  stopBelowSeconds: 0.1,
 };
 
 function createGateRenderWindow(options: {
@@ -269,9 +269,7 @@ describe("pull playback under the render preparation gate", () => {
 
     const presentedWhileStarved = presented.length;
     const heldWhileStarved = diagnostics.some(
-      (entry) =>
-        entry.artifacts?.[0]?.gateHold?.reason ===
-        RenderPreparationGateHoldReason.LeadBelowRequirement,
+      (entry) => (entry.artifacts?.[0]?.gateHold ?? null) !== null,
     );
 
     for (let tick = 0; tick < 100; tick += 1) {

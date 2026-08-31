@@ -16,11 +16,14 @@ import {
   RenderPreparationExecutionMode,
   RenderPreparationMode,
   RenderPreparationWorkerStatus,
+  type RenderPreparationPlaybackGateOptions,
+  type ResolvedRenderPreparationGateThresholds,
 } from "#types/render-preparation";
 
 import {
   createDeferred,
   createMockSample,
+  domMock,
   flushAnimationFrame,
   resetMocks,
 } from "../../../../test/media-renderer-harness";
@@ -127,6 +130,165 @@ describe("media renderer core", () => {
     renderer.destroy();
   });
 
+  it.each([{ bankAheadSeconds: 1 }, { bankAheadSeconds: 4 }])(
+    "stops and resumes at the same leads whether the gate banks $bankAheadSeconds seconds",
+    async ({ bankAheadSeconds }) => {
+      resetMocks();
+
+      const heldWait = createHeldRenderPreparation();
+      const scene = createScene({ waitForRenderPreparation: heldWait });
+      const renderer = await createMediaRendererCore(
+        createGatedRendererOptions({ requiredAheadSeconds: bankAheadSeconds }),
+        {
+          createScene: vi.fn(async () => scene),
+          openMediaSource: vi.fn(),
+        },
+      );
+
+      await renderer.play();
+      flushAnimationFrame(40);
+
+      await vi.waitFor(() => {
+        expect(heldWait).toHaveBeenCalled();
+      });
+
+      const thresholds = heldWait.mock.calls[0]?.[1];
+
+      renderer.destroy();
+
+      expect(thresholds).toEqual({
+        enabled: true,
+        resumeAtSeconds: expect.closeTo(0.3, 10),
+        stopBelowSeconds: expect.closeTo(0.1, 10),
+      });
+    },
+  );
+
+  /* A gate that stops on the lead that just released it never gets a frame out.
+     The rows that press on it are the requirements too small to fund the
+     margin once the rate has multiplied the wall-clock thresholds. */
+  it("stops below the lead it resumes at, at every bank, rate and wall setting", async () => {
+    const wallSettings = [
+      {},
+      { resumeMarginWallSeconds: 0 },
+      { stopBelowWallSeconds: 0 },
+      { resumeMarginWallSeconds: 0.05, stopBelowWallSeconds: 0.4 },
+    ];
+    const rows: Array<{
+      readonly resumeAtSeconds: number;
+      readonly stopBelowSeconds: number;
+      readonly wall: RenderPreparationPlaybackGateOptions;
+      readonly playbackRate: number;
+      readonly requiredAheadSeconds: number;
+    }> = [];
+
+    for (const wall of wallSettings) {
+      for (const requiredAheadSeconds of [0.04, 0.1, 0.25, 1, 4]) {
+        for (const playbackRate of [1, 2, 8]) {
+          const thresholds = await readGateThresholds({
+            playbackGate: { enabled: true, requiredAheadSeconds, ...wall },
+            playbackRate,
+          });
+
+          rows.push({
+            playbackRate,
+            requiredAheadSeconds,
+            resumeAtSeconds: thresholds.resumeAtSeconds,
+            stopBelowSeconds: thresholds.stopBelowSeconds,
+            wall,
+          });
+        }
+      }
+    }
+
+    expect(
+      rows.filter((row) => row.stopBelowSeconds >= row.resumeAtSeconds),
+    ).toEqual([]);
+  });
+
+  /* Both thresholds at zero is the lead gate switched off, and the only hold
+     left is the frame under the playhead being uncooked. */
+  it.each([
+    { playbackGate: { requiredAheadSeconds: 0 } },
+    {
+      playbackGate: {
+        requiredAheadSeconds: 4,
+        resumeMarginWallSeconds: 0,
+        stopBelowWallSeconds: 0,
+      },
+    },
+  ])(
+    "asks for no lead at all under $playbackGate",
+    async ({ playbackGate }) => {
+      const thresholds = await readGateThresholds({
+        playbackGate: { enabled: true, ...playbackGate },
+        playbackRate: 8,
+      });
+
+      expect(thresholds).toEqual({
+        enabled: true,
+        resumeAtSeconds: 0,
+        stopBelowSeconds: 0,
+      });
+    },
+  );
+
+  it("re-asks the gate at the rate a change mid-hold left in force", async () => {
+    resetMocks();
+
+    const heldWait = createHeldRenderPreparation();
+    const scene = createScene({ waitForRenderPreparation: heldWait });
+    const renderer = await createMediaRendererCore(
+      createGatedRendererOptions({ requiredAheadSeconds: 4 }),
+      {
+        createScene: vi.fn(async () => scene),
+        openMediaSource: vi.fn(),
+      },
+    );
+
+    await renderer.play();
+    flushAnimationFrame(40);
+
+    await vi.waitFor(() => {
+      expect(heldWait).toHaveBeenCalled();
+    });
+
+    const heldSignal = heldWait.mock.calls[0]?.[2];
+
+    renderer.setPlaybackRate(8);
+
+    await vi.waitFor(() => {
+      expect(heldSignal?.aborted).toBe(true);
+    });
+
+    let elapsedMs = 40;
+
+    await vi.waitFor(() => {
+      if (domMock.rafCallbacks.length > 0) {
+        elapsedMs += 40;
+        flushAnimationFrame(elapsedMs);
+      }
+
+      expect(heldWait.mock.calls.length).toBeGreaterThan(1);
+    });
+
+    const reArmedThresholds = heldWait.mock.calls.at(-1)?.[1];
+
+    renderer.destroy();
+
+    expect({
+      abandonedTheStaleHold: heldSignal?.aborted,
+      reArmedThresholds,
+    }).toEqual({
+      abandonedTheStaleHold: true,
+      reArmedThresholds: {
+        enabled: true,
+        resumeAtSeconds: expect.closeTo(2.4, 10),
+        stopBelowSeconds: expect.closeTo(0.8, 10),
+      },
+    });
+  });
+
   it("buffers playback until render preparation reaches the requested lookahead", async () => {
     resetMocks();
 
@@ -168,7 +330,8 @@ describe("media renderer core", () => {
         0.04,
         {
           enabled: true,
-          requiredAheadSeconds: 0.04,
+          resumeAtSeconds: 0.04,
+          stopBelowSeconds: 0.02,
         },
         expect.any(AbortSignal),
       );
@@ -360,6 +523,187 @@ describe("media renderer core", () => {
 
     renderPreparation.resolve();
     renderer.destroy();
+  });
+
+  it("gives up on a preparer that answers nothing at the start of playback", async () => {
+    resetMocks();
+    vi.useFakeTimers();
+
+    try {
+      const preparation = createStuckRenderPreparation();
+      const scene = createScene(preparation.scene);
+      const renderer = await createGatedPullRenderer(scene);
+
+      await renderer.play();
+      flushAnimationFrame(40);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(scene.presentSample).toHaveBeenCalledOnce();
+      expect(renderer.getState().playbackState).toBe(
+        MediaRendererPlaybackState.Buffering,
+      );
+
+      await vi.advanceTimersByTimeAsync(2000);
+
+      expect(scene.presentSample).toHaveBeenCalledTimes(2);
+      expect(renderer.getState()).toMatchObject({
+        playbackState: MediaRendererPlaybackState.Playing,
+        renderPreparationGateAbandoned: true,
+      });
+
+      renderer.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops once for a preparer that finishes nothing, and draws the samples after it", async () => {
+    resetMocks();
+    vi.useFakeTimers();
+
+    try {
+      const preparation = createStuckRenderPreparation();
+      const scene = createScene(preparation.scene);
+      const renderer = await createGatedPullRenderer(scene);
+
+      await renderer.play();
+      flushAnimationFrame(40);
+      await vi.advanceTimersByTimeAsync(2000);
+
+      await runFrozenPlaybackFrames(scene);
+
+      expect(scene.waitForRenderPreparation).toHaveBeenCalledOnce();
+      expect(scene.presentSample).toHaveBeenCalledTimes(3);
+
+      renderer.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("holds every sample again once a play asks for the picture anew", async () => {
+    resetMocks();
+    vi.useFakeTimers();
+
+    try {
+      const preparation = createStuckRenderPreparation();
+      const scene = createScene(preparation.scene);
+      const renderer = await createGatedPullRenderer(scene);
+
+      await renderer.play();
+      flushAnimationFrame(40);
+      await vi.advanceTimersByTimeAsync(2000);
+
+      expect(renderer.getState().renderPreparationGateAbandoned).toBe(true);
+
+      renderer.pause();
+      await renderer.play();
+      await runFrozenPlaybackFrames(scene);
+
+      expect(scene.waitForRenderPreparation).toHaveBeenCalledTimes(2);
+      expect(renderer.getState()).toMatchObject({
+        playbackState: MediaRendererPlaybackState.Buffering,
+        renderPreparationGateAbandoned: false,
+      });
+
+      renderer.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("holds a sample again once the playhead is back inside covered artifacts", async () => {
+    resetMocks();
+    vi.useFakeTimers();
+
+    try {
+      const preparation = createCoveredRenderPreparation();
+      const scene = createScene(preparation.scene);
+      const renderer = await createGatedPullRenderer(scene, 0.05, 8);
+
+      await renderer.play();
+      flushAnimationFrame(40);
+      await vi.advanceTimersByTimeAsync(60);
+
+      expect(renderer.getState().renderPreparationGateAbandoned).toBe(true);
+
+      preparation.cover();
+      await vi.advanceTimersByTimeAsync(40);
+      await runFrozenPlaybackFrames(scene);
+
+      expect(renderer.getState().renderPreparationGateAbandoned).toBe(false);
+
+      preparation.uncover();
+
+      const waitsBeforeLoss =
+        preparation.waitForRenderPreparation.mock.calls.length;
+
+      await vi.advanceTimersByTimeAsync(40);
+      await runFrozenPlaybackFrames(scene);
+
+      expect(
+        preparation.waitForRenderPreparation.mock.calls.length,
+      ).toBeGreaterThan(waitsBeforeLoss);
+      expect(renderer.getState().playbackState).toBe(
+        MediaRendererPlaybackState.Buffering,
+      );
+
+      renderer.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("never gives up on a sample the caller left the gate unbounded for", async () => {
+    resetMocks();
+    vi.useFakeTimers();
+
+    try {
+      const preparation = createStuckRenderPreparation();
+      const scene = createScene(preparation.scene);
+      const renderer = await createGatedPullRenderer(scene, Infinity);
+
+      await renderer.play();
+      flushAnimationFrame(40);
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(scene.presentSample).toHaveBeenCalledOnce();
+      expect(renderer.getState()).toMatchObject({
+        playbackState: MediaRendererPlaybackState.Buffering,
+        renderPreparationGateAbandoned: false,
+      });
+
+      renderer.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("holds no sample at all on a bound of zero", async () => {
+    resetMocks();
+    vi.useFakeTimers();
+
+    try {
+      const preparation = createStuckRenderPreparation();
+      const scene = createScene(preparation.scene);
+      const renderer = await createGatedPullRenderer(scene, 0);
+
+      await renderer.play();
+      flushAnimationFrame(40);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(scene.presentSample).toHaveBeenCalledTimes(2);
+      expect(renderer.getState().renderPreparationGateAbandoned).toBe(true);
+
+      await runFrozenPlaybackFrames(scene);
+
+      expect(scene.waitForRenderPreparation).toHaveBeenCalledOnce();
+      expect(scene.presentSample).toHaveBeenCalledTimes(3);
+
+      renderer.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("surfaces strict worker failures", async () => {
@@ -1264,6 +1608,118 @@ describe("media renderer core", () => {
 });
 
 /**
+ * A scene that answers the gate's cheap coverage question while its progress
+ * count never moves, the way a playhead sent back into a window cooked before
+ * the hold does.
+ */
+function createCoveredRenderPreparation() {
+  let isCovered = false;
+  const releases = new Set<() => void>();
+  const getRenderPreparationProgress = vi.fn(() => 0);
+  const needsRenderPreparationWait = vi.fn(() => !isCovered);
+  const waitForRenderPreparation = vi.fn(
+    (_mediaTime: number, _gateOptions: unknown, signal?: AbortSignal) =>
+      new Promise<void>((resolve) => {
+        if (isCovered) {
+          resolve();
+
+          return;
+        }
+
+        releases.add(resolve);
+        signal?.addEventListener("abort", () => resolve());
+      }),
+  );
+
+  return {
+    cover() {
+      isCovered = true;
+
+      for (const release of releases) {
+        release();
+      }
+
+      releases.clear();
+    },
+    scene: {
+      getRenderPreparationProgress,
+      needsRenderPreparationWait,
+      waitForRenderPreparation,
+    },
+    uncover: () => {
+      isCovered = false;
+    },
+    waitForRenderPreparation,
+  };
+}
+
+/**
+ * A scene whose artifacts are never cooked, answering the gate the way a
+ * preparer that has stopped producing would.
+ */
+function createStuckRenderPreparation() {
+  const getRenderPreparationProgress = vi.fn(() => 0);
+  const waitForRenderPreparation = vi.fn(
+    (_mediaTime: number, _gateOptions: unknown, signal?: AbortSignal) =>
+      new Promise<void>((resolve) => {
+        signal?.addEventListener("abort", () => resolve());
+      }),
+  );
+
+  return {
+    scene: { getRenderPreparationProgress, waitForRenderPreparation },
+  };
+}
+
+/**
+ * Drives playback frames one frame duration past the frozen clock, until the
+ * scene presents another sample or the attempts run out.
+ *
+ * Fake timers own `performance.now()`, which is what the controller paces
+ * playback against, so a frame timestamp has to be read off that clock rather
+ * than counted from zero.
+ */
+async function runFrozenPlaybackFrames(scene: MediaRendererScene) {
+  const presentedBefore = countPresentedSamples(scene);
+
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    if (countPresentedSamples(scene) > presentedBefore) {
+      return;
+    }
+
+    if (domMock.rafCallbacks.length > 0) {
+      flushAnimationFrame(performance.now() + 40);
+    }
+
+    await vi.advanceTimersByTimeAsync(0);
+  }
+}
+
+async function createGatedPullRenderer(
+  scene: MediaRendererScene,
+  maxWaitSeconds?: number,
+  sampleCount = 3,
+) {
+  const samples = Array.from({ length: sampleCount }, (_frame, index) =>
+    createMockSample(index * 0.04, 0),
+  ) as unknown as DecodedVideoSample[];
+
+  return createMediaRendererCore(
+    {
+      autoPlay: false,
+      container: {} as HTMLElement,
+      loop: false,
+      renderPreparation: { playbackGate: { enabled: true, maxWaitSeconds } },
+      source: createSource(samples, { duration: sampleCount * 0.04 }),
+    } satisfies MediaRendererOptions,
+    {
+      createScene: vi.fn(async () => scene),
+      openMediaSource: vi.fn(),
+    },
+  );
+}
+
+/**
  * Drives playback frames until the scene presents another sample.
  *
  * The controller queues decoded samples asynchronously, so one animation frame
@@ -1284,6 +1740,68 @@ async function presentNextSample(scene: MediaRendererScene, now: number) {
 
 function countPresentedSamples(scene: MediaRendererScene) {
   return vi.mocked(scene.presentSample).mock.calls.length;
+}
+
+/** The thresholds a gated renderer hands the scene on its first hold. */
+async function readGateThresholds(options: {
+  readonly playbackGate: RenderPreparationPlaybackGateOptions;
+  readonly playbackRate: number;
+}): Promise<ResolvedRenderPreparationGateThresholds> {
+  resetMocks();
+
+  const heldWait = createHeldRenderPreparation();
+  const scene = createScene({ waitForRenderPreparation: heldWait });
+  const renderer = await createMediaRendererCore(
+    createGatedRendererOptions(options.playbackGate, options.playbackRate),
+    {
+      createScene: vi.fn(async () => scene),
+      openMediaSource: vi.fn(),
+    },
+  );
+
+  await renderer.play();
+  flushAnimationFrame(40);
+
+  await vi.waitFor(() => {
+    expect(heldWait).toHaveBeenCalled();
+  });
+
+  const thresholds = heldWait.mock.calls[0]?.[1];
+
+  renderer.destroy();
+
+  return thresholds as ResolvedRenderPreparationGateThresholds;
+}
+
+/** A gate hold that only ends when the renderer walks away from it. */
+function createHeldRenderPreparation() {
+  return vi.fn(
+    (_mediaTime: number, _thresholds: unknown, signal?: AbortSignal) =>
+      new Promise<void>((resolve) => {
+        signal?.addEventListener("abort", () => resolve(), { once: true });
+      }),
+  );
+}
+
+function createGatedRendererOptions(
+  playbackGate: RenderPreparationPlaybackGateOptions,
+  playbackRate?: number,
+): MediaRendererOptions {
+  return {
+    autoPlay: false,
+    container: {} as HTMLElement,
+    loop: false,
+    playbackRate,
+    renderPreparation: {
+      playbackGate: { enabled: true, ...playbackGate },
+    },
+    source: createSource(
+      Array.from({ length: 40 }, (_, index) =>
+        createMockSample(index * 0.04, 0),
+      ) as unknown as DecodedVideoSample[],
+      { duration: 1.6 },
+    ),
+  } satisfies MediaRendererOptions;
 }
 
 function createScene(

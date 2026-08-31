@@ -42,7 +42,6 @@ describe("media session defaults", () => {
       },
       playbackGate: {
         enabled: true,
-        minimumAheadSeconds: 0.25,
         requiredAheadSeconds: 1,
       },
     });
@@ -163,7 +162,6 @@ describe("media session defaults", () => {
     });
     expect(defaults.renderPreparation.playbackGate).toEqual({
       enabled: true,
-      minimumAheadSeconds: 0.25,
       requiredAheadSeconds: 1,
     });
   });
@@ -184,7 +182,6 @@ describe("media session defaults", () => {
     });
     expect(defaults.renderPreparation.playbackGate).toEqual({
       enabled: true,
-      minimumAheadSeconds: 0.25,
       requiredAheadSeconds: 1,
     });
   });
@@ -206,7 +203,6 @@ describe("media session defaults", () => {
     });
     expect(defaults.renderPreparation.playbackGate).toEqual({
       enabled: true,
-      minimumAheadSeconds: 0.25,
       requiredAheadSeconds: 1,
     });
   });
@@ -257,7 +253,6 @@ describe("media session defaults", () => {
       },
       playbackGate: {
         enabled: false,
-        minimumAheadSeconds: 0.25,
         requiredAheadSeconds: 1,
       },
     });

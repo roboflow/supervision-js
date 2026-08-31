@@ -41,7 +41,7 @@ import type {
 } from "supervision-js-core";
 import type {
   RenderPreparationOptions,
-  RenderPreparationPlaybackGateOptions,
+  ResolvedRenderPreparationGateThresholds,
 } from "#types/render-preparation";
 import type { MaskBrushPreviewOptions } from "#editing/mask-brush-editor";
 import type { PresentedFrameSource } from "./presented-frame-channel";
@@ -148,7 +148,7 @@ export interface MediaRendererScene {
    */
   needsRenderPreparationWait?(
     mediaTime: number,
-    options: RenderPreparationPlaybackGateOptions,
+    options: ResolvedRenderPreparationGateThresholds,
   ): boolean;
   /**
    * Frames render preparation has finished, counted up over the scene's life.
@@ -158,7 +158,7 @@ export interface MediaRendererScene {
   getRenderPreparationProgress?(): number;
   waitForRenderPreparation?(
     mediaTime: number,
-    options: RenderPreparationPlaybackGateOptions,
+    options: ResolvedRenderPreparationGateThresholds,
     signal?: AbortSignal,
   ): Promise<void>;
   setRenderQuality(maxDevicePixelRatio: number | undefined): void;

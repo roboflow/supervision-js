@@ -120,8 +120,8 @@ const GATE_FRAME_RATE = 25;
 const SESSION_MASK_CACHE_FRAME_COUNT = 200;
 const SESSION_PLAYBACK_GATE_OPTIONS = {
   enabled: true,
-  minimumAheadSeconds: 0.25,
-  requiredAheadSeconds: 1,
+  resumeAtSeconds: 0.3,
+  stopBelowSeconds: 0.1,
 };
 const gateFrames = Array.from({ length: 400 }, (_, frameIndex) => ({
   detections: [
@@ -137,6 +137,17 @@ const gateFrames = Array.from({ length: 400 }, (_, frameIndex) => ({
   frameIndex,
   mediaTime: frameIndex / GATE_FRAME_RATE,
 })) satisfies DetectionFrame[];
+
+/**
+ * A clip whose detections arrive one every two frames, and one that turns up
+ * later between two of them: the shape a source still appending records leaves
+ * in a window that is otherwise cooked.
+ */
+const SPARSE_FRAME_PITCH = 2 / GATE_FRAME_RATE;
+const SPARSE_FRAMES = Array.from({ length: 12 }, (_, index) =>
+  createGateFrame(index * 2),
+) satisfies DetectionFrame[];
+const LATE_FRAME = createGateFrame(5) satisfies DetectionFrame;
 
 describe("prepared render window", () => {
   it("keeps prepared overlap across an immutable rolling buffer refresh", async () => {
@@ -1182,11 +1193,11 @@ describe("prepared render window", () => {
         renderWindow as unknown as {
           waitForReady(
             mediaTime: number,
-            options: { readonly requiredAheadSeconds: number },
+            options: { readonly resumeAtSeconds: number },
           ): Promise<void>;
         }
       )
-        .waitForReady(0, { requiredAheadSeconds: 0.08 })
+        .waitForReady(0, { resumeAtSeconds: 0.08 })
         .then(ready);
 
       await vi.runOnlyPendingTimersAsync();
@@ -1239,7 +1250,8 @@ describe("prepared render window", () => {
         },
       });
       const readiness = renderWindow.waitForReady(0, {
-        requiredAheadSeconds: 0,
+        resumeAtSeconds: 0,
+        stopBelowSeconds: 0,
       });
       const rejection = expect(readiness).rejects.toThrow("worker crashed");
 
@@ -1262,7 +1274,10 @@ describe("prepared render window", () => {
 
       expect(fakeWorker.messages).toHaveLength(messageCount);
       await expect(
-        renderWindow.waitForReady(0, { requiredAheadSeconds: 0 }),
+        renderWindow.waitForReady(0, {
+          resumeAtSeconds: 0,
+          stopBelowSeconds: 0,
+        }),
       ).rejects.toThrow("worker crashed");
 
       renderWindow.destroy();
@@ -1296,7 +1311,11 @@ describe("prepared render window", () => {
           },
         },
       });
-      const gateOptions = { enabled: true, requiredAheadSeconds: 0.04 };
+      const gateOptions = {
+        enabled: true,
+        resumeAtSeconds: 0.04,
+        stopBelowSeconds: 0.04,
+      };
 
       expect(renderWindow.needsPlaybackGateWait(0, gateOptions)).toBe(true);
 
@@ -1363,8 +1382,8 @@ describe("prepared render window", () => {
 
       void renderWindow
         .waitForReady(0, {
-          minimumAheadSeconds: 0.04,
-          requiredAheadSeconds: 0.12,
+          resumeAtSeconds: 0.12,
+          stopBelowSeconds: 0.04,
         })
         .then(ready);
       await Promise.resolve();
@@ -1411,7 +1430,7 @@ describe("prepared render window", () => {
       const ready = vi.fn();
 
       void renderWindow
-        .waitForReady(0.04, { requiredAheadSeconds: 0.08 })
+        .waitForReady(0.04, { resumeAtSeconds: 0.08, stopBelowSeconds: 0.08 })
         .then(ready);
 
       fakeWorker.completeNext();
@@ -2117,9 +2136,10 @@ describe("prepared render window", () => {
       scanIntervalSeconds: 0.1,
       scheduleBatchSize: 16,
     });
-    expect(defaults.renderPreparation.playbackGate).toEqual(
-      SESSION_PLAYBACK_GATE_OPTIONS,
-    );
+    expect(defaults.renderPreparation.playbackGate).toEqual({
+      enabled: true,
+      requiredAheadSeconds: 1,
+    });
   });
 
   it("keeps preparing for a holding gate after the playhead has jumped", async () => {
@@ -2167,16 +2187,177 @@ describe("prepared render window", () => {
     }
   });
 
+  it("banks a lead past a frame the scheduler is already cooking", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const fakeWorker = createFakeMaskPreparationWorker({
+        autoComplete: false,
+      });
+      const diagnostics: RenderPreparationDiagnostics[] = [];
+      const detectionTimeline = createAppendableFloorTimeline(SPARSE_FRAMES);
+      const renderWindow = createGateRenderWindow({
+        detectionTimeline,
+        onDiagnostics: (next) => diagnostics.push(next),
+        worker: fakeWorker.worker,
+      });
+
+      renderWindow.setPlaybackActive(true);
+      renderWindow.getFrame(0);
+
+      for (let index = 0; index < SPARSE_FRAMES.length; index += 1) {
+        await flushMaskPreparationTimers(2);
+        fakeWorker.completeNext();
+      }
+
+      await flushMaskPreparationTimers(2);
+      detectionTimeline.append(LATE_FRAME);
+      renderWindow.getFrame(0);
+      await flushMaskPreparationTimers(2);
+
+      const artifact = diagnostics[diagnostics.length - 1]?.artifacts?.[0];
+
+      renderWindow.destroy();
+
+      expect({
+        activeStatus: artifact?.activeFrame?.status,
+        preparedAheadFrameCount: artifact?.preparedAheadFrameCount,
+        preparedAheadSeconds: artifact?.preparedAheadSeconds,
+      }).toEqual({
+        activeStatus: RenderPreparationArtifactFrameStatus.Prepared,
+        preparedAheadFrameCount: SPARSE_FRAMES.length,
+        preparedAheadSeconds: SPARSE_FRAME_PITCH * (SPARSE_FRAMES.length - 1),
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("holds the picture for an uncooked frame under the playhead", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const fakeWorker = createFakeMaskPreparationWorker({
+        autoComplete: false,
+      });
+      const diagnostics: RenderPreparationDiagnostics[] = [];
+      const detectionTimeline = createAppendableFloorTimeline(SPARSE_FRAMES);
+      const renderWindow = createGateRenderWindow({
+        detectionTimeline,
+        onDiagnostics: (next) => diagnostics.push(next),
+        worker: fakeWorker.worker,
+      });
+
+      renderWindow.setPlaybackActive(true);
+      renderWindow.getFrame(0);
+
+      for (let index = 0; index < SPARSE_FRAMES.length; index += 1) {
+        await flushMaskPreparationTimers(2);
+        fakeWorker.completeNext();
+      }
+
+      await flushMaskPreparationTimers(2);
+      detectionTimeline.append(LATE_FRAME);
+      renderWindow.getFrame(0);
+      await flushMaskPreparationTimers(2);
+
+      const abandonedWait = new AbortController();
+      const held = renderWindow.needsPlaybackGateWait(
+        LATE_FRAME.mediaTime,
+        SESSION_PLAYBACK_GATE_OPTIONS,
+      );
+
+      void renderWindow.waitForReady(
+        LATE_FRAME.mediaTime,
+        SESSION_PLAYBACK_GATE_OPTIONS,
+        abandonedWait.signal,
+      );
+
+      const gateHold =
+        diagnostics[diagnostics.length - 1]?.artifacts?.[0]?.gateHold;
+
+      abandonedWait.abort();
+      renderWindow.destroy();
+
+      expect({ gateHold, held }).toEqual({
+        gateHold: {
+          reason: RenderPreparationGateHoldReason.ActiveFrameUnprepared,
+          requiredAheadSeconds: SESSION_PLAYBACK_GATE_OPTIONS.resumeAtSeconds,
+        },
+        held: true,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("holds a cooked frame whose prepared lead is short of the requirement", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const fakeWorker = createFakeMaskPreparationWorker({
+        autoComplete: false,
+      });
+      const diagnostics: RenderPreparationDiagnostics[] = [];
+      const renderWindow = createGateRenderWindow({
+        onDiagnostics: (next) => diagnostics.push(next),
+        worker: fakeWorker.worker,
+      });
+      const abandonedWait = new AbortController();
+
+      renderWindow.setPlaybackActive(true);
+      renderWindow.getFrame(gateFrameTime(0));
+      await flushMaskPreparationTimers(2);
+      fakeWorker.completeNext();
+      await flushMaskPreparationTimers(2);
+
+      void renderWindow.waitForReady(
+        gateFrameTime(0),
+        SESSION_PLAYBACK_GATE_OPTIONS,
+        abandonedWait.signal,
+      );
+
+      const artifact = diagnostics[diagnostics.length - 1]?.artifacts?.[0];
+
+      abandonedWait.abort();
+      renderWindow.destroy();
+
+      expect({
+        activeStatus: artifact?.activeFrame?.status,
+        gateHold: artifact?.gateHold,
+        preparedAheadFrameCount: artifact?.preparedAheadFrameCount,
+        preparedAheadSeconds: artifact?.preparedAheadSeconds,
+      }).toEqual({
+        activeStatus: RenderPreparationArtifactFrameStatus.Prepared,
+        gateHold: {
+          reason: RenderPreparationGateHoldReason.LeadBelowRequirement,
+          requiredAheadSeconds: SESSION_PLAYBACK_GATE_OPTIONS.resumeAtSeconds,
+        },
+        preparedAheadFrameCount: 1,
+        preparedAheadSeconds: 0,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /* The session banks a second, and a stop does not last until it is full: the
+   * picture comes back at the stop threshold plus its margin, so banking more
+   * buys cooked frames rather than a longer freeze. Only a cache too small to
+   * hold even that margin moves the release. */
   it.each([
-    { expectedLeadSeconds: 0.92, maxCacheFrameCount: 24 },
-    { expectedLeadSeconds: 0.92, maxCacheFrameCount: 24.5 },
-    { expectedLeadSeconds: 1, maxCacheFrameCount: 26 },
+    { expectedLeadSeconds: 0.2, maxCacheFrameCount: 6 },
+    { expectedLeadSeconds: 0.32, maxCacheFrameCount: 24 },
+    { expectedLeadSeconds: 0.32, maxCacheFrameCount: 26 },
     {
-      expectedLeadSeconds: 1,
+      expectedLeadSeconds: 0.32,
       maxCacheFrameCount: SESSION_MASK_CACHE_FRAME_COUNT,
     },
   ])(
-    "releases a one-second gate once the lead reaches $expectedLeadSeconds on a $maxCacheFrameCount frame cache",
+    "releases a gate banking a second at a lead of $expectedLeadSeconds on a $maxCacheFrameCount frame cache",
     async ({ expectedLeadSeconds, maxCacheFrameCount }) => {
       vi.useFakeTimers();
       resetMocks();
@@ -2260,8 +2441,7 @@ describe("prepared render window", () => {
 
       expect(gateHold).toEqual({
         reason: RenderPreparationGateHoldReason.ActiveFrameUnprepared,
-        requiredAheadSeconds:
-          SESSION_PLAYBACK_GATE_OPTIONS.requiredAheadSeconds,
+        requiredAheadSeconds: SESSION_PLAYBACK_GATE_OPTIONS.resumeAtSeconds,
       });
     } finally {
       vi.useRealTimers();
@@ -2607,6 +2787,59 @@ function createRolledBufferTimeline(
     prefetch: vi.fn(),
     selectFrame: vi.fn((mediaTime: number) =>
       detectionFrames.find((frame) => frame.mediaTime === mediaTime),
+    ),
+  };
+}
+
+function createGateFrame(frameIndex: number): DetectionFrame {
+  return {
+    detections: [
+      {
+        mask: {
+          counts: "021",
+          encoding: DetectionMaskEncoding.CompressedRle,
+          height: 2,
+          width: 2,
+        },
+      },
+    ],
+    frameIndex,
+    mediaTime: gateFrameTime(frameIndex),
+  };
+}
+
+function createAppendableFloorTimeline(
+  initialFrames: readonly DetectionFrame[],
+): BufferedDetectionTimeline & {
+  append(frame: DetectionFrame): void;
+} {
+  let frames = [...initialFrames];
+
+  return {
+    append(frame) {
+      frames = [...frames, frame].sort(
+        (left, right) => left.mediaTime - right.mediaTime,
+      );
+    },
+    destroy: vi.fn(),
+    getBufferedFrames: vi.fn(() => frames),
+    getState: vi.fn(() => ({
+      bufferEndTime: 5,
+      bufferStartTime: 0,
+      detectionCount: frames.reduce(
+        (total, frame) => total + frame.detections.length,
+        0,
+      ),
+      errorMessage: null,
+      frameCount: frames.length,
+      requestedEndTime: 5,
+      requestedStartTime: 0,
+      status: DetectionBufferStatus.Ready,
+    })),
+    prepare: vi.fn(),
+    prefetch: vi.fn(),
+    selectFrame: vi.fn((mediaTime: number) =>
+      [...frames].reverse().find((frame) => frame.mediaTime <= mediaTime),
     ),
   };
 }

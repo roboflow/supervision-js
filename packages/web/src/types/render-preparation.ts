@@ -148,9 +148,9 @@ export interface RenderPreparationMaskFrameOptions {
  * before playback begins and at any frame after it whose artifacts are
  * missing. The renderer reports `Buffering` for as long as either wait lasts.
  *
- * `maxWaitSeconds` bounds the wait that stops a running producer, so
- * preparation that has stopped producing costs one wait and the frames after
- * it are drawn without their artifacts.
+ * `maxWaitSeconds` bounds every one of those waits, so preparation that has
+ * stopped producing costs one wait and the frames after it are drawn without
+ * their artifacts.
  */
 export interface RenderPreparationPlaybackGateOptions {
   /**
@@ -161,11 +161,12 @@ export interface RenderPreparationPlaybackGateOptions {
    */
   readonly enabled?: boolean;
   /**
-   * How long an enabled gate stops a producer already running for artifacts
-   * that are not prepared, before it gives up and lets the frames through
-   * without them. `Infinity` holds indefinitely. It does not bound the wait
-   * before playback begins, nor the per-sample wait of a renderer that pulls
-   * its own samples: both of those hold until preparation answers.
+   * How long an enabled gate holds the picture for artifacts that are not
+   * prepared, before it gives up and lets the frames through without them.
+   * Defaults to two seconds, and bounds every wait the gate makes: the one
+   * before playback begins, the one that stops a running producer at a frame,
+   * and the per-sample one of a renderer that pulls its own samples. `Infinity`
+   * holds indefinitely, and `0` never holds for artifacts at all.
    *
    * Preparation falls behind for as long as the machine is losing, and that
    * looks no different to the gate from a cook still on its way. A gate that
@@ -175,19 +176,52 @@ export interface RenderPreparationPlaybackGateOptions {
    */
   readonly maxWaitSeconds?: number;
   /**
-   * Prepared lead that is enough not to start a wait at all. Defaults to
-   * `requiredAheadSeconds` and is capped by it: playback stalls only below this
-   * lead, and a stall then clears only once the lead reaches
-   * `requiredAheadSeconds`. Setting it lower buys hysteresis, so a lead
-   * hovering at the requirement does not stutter.
+   * How long the prepared lead may fall to before playback stops, in seconds
+   * of the viewer's own time. Defaults to 0.1s. A rate multiplies it, because
+   * one wall second of runway is eight seconds of timeline at 8x, and a
+   * `requiredAheadSeconds` too small to fund the margin holds it below the lead
+   * that ends a stop rather than letting the two meet.
    */
-  readonly minimumAheadSeconds?: number;
+  readonly stopBelowWallSeconds?: number;
   /**
-   * Prepared lead a wait in progress must reach before an enabled gate lets
-   * playback continue. Defaults to none, which asks only that the frame about
-   * to be presented is no longer pending.
+   * How much lead a stop banks on top of `stopBelowWallSeconds` before
+   * playback resumes, in seconds of the viewer's own time. Defaults to 0.2s,
+   * so a stop lasts about as long as it takes to cook that margin and no
+   * longer. This is what sets the length of a stop; `requiredAheadSeconds`
+   * only caps it.
+   */
+  readonly resumeMarginWallSeconds?: number;
+  /**
+   * Ceiling on the lead the two thresholds above may ask for, in seconds of
+   * timeline. Defaults to none, which asks only that the frame about to be
+   * presented is no longer pending.
+   *
+   * It buys no cooked frames: how far ahead preparation cooks and how much of
+   * that it keeps are the prepared window's own prefetch and cache spans, sized
+   * by the session rather than by this. The gate reads them only as a second
+   * ceiling, so a span too small to hold the lead lowers it further. All this can
+   * do is shorten a stop, by holding the resume lead below what the wall clock
+   * asked for. With the default thresholds that lead is 0.3s of timeline per
+   * unit of rate, so a ceiling only starts to bite once the rate lifts the lead
+   * above it: the 1s a session sets first does so near 3.3x.
    */
   readonly requiredAheadSeconds?: number;
+}
+
+/**
+ * The two lead thresholds a gate is applying right now, in seconds of
+ * timeline, which is the only unit a prepared window can compare a lead
+ * against. The wall-clock options above describe how long a viewer is left
+ * looking at a still picture; turning those into timeline needs the playback
+ * rate, so the renderer resolves them per call and the window stays blind to
+ * the rate.
+ */
+export interface ResolvedRenderPreparationGateThresholds {
+  readonly enabled?: boolean;
+  /** Lead at or above which a stop that is running ends. */
+  readonly resumeAtSeconds: number;
+  /** Lead below which playback stops. */
+  readonly stopBelowSeconds: number;
 }
 
 /**

@@ -506,6 +506,103 @@ describe("media renderer over a push-based media source", () => {
     renderer.destroy();
   });
 
+  it("gives up on a preparer that answers nothing at the start of playback", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const producer = createProducer();
+      const preparation = createStuckRenderPreparation();
+      const renderer = await createRenderer(
+        producer,
+        createScene(preparation.scene),
+        { renderPreparation: { playbackGate: { enabled: true } } },
+      );
+
+      const play = renderer.play();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(producer.play).not.toHaveBeenCalled();
+      expect(renderer.getState().playbackState).toBe(
+        MediaRendererPlaybackState.Buffering,
+      );
+
+      await vi.advanceTimersByTimeAsync(2000);
+      await play;
+
+      expect(producer.play).toHaveBeenCalledOnce();
+      expect(renderer.getState().renderPreparationGateAbandoned).toBe(true);
+
+      renderer.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("never starts the producer on a gate the caller left unbounded", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const producer = createProducer();
+      const preparation = createStuckRenderPreparation();
+      const renderer = await createRenderer(
+        producer,
+        createScene(preparation.scene),
+        {
+          renderPreparation: {
+            playbackGate: { enabled: true, maxWaitSeconds: Infinity },
+          },
+        },
+      );
+
+      let playSettled = false;
+      const play = renderer.play().then(() => {
+        playSettled = true;
+      });
+
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(playSettled).toBe(false);
+      expect(producer.play).not.toHaveBeenCalled();
+      expect(renderer.getState().renderPreparationGateAbandoned).toBe(false);
+
+      preparation.prepare();
+      await play;
+
+      renderer.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("starts the producer without holding it at all on a bound of zero", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const producer = createProducer();
+      const preparation = createStuckRenderPreparation();
+      const renderer = await createRenderer(
+        producer,
+        createScene(preparation.scene),
+        {
+          renderPreparation: {
+            playbackGate: { enabled: true, maxWaitSeconds: 0 },
+          },
+        },
+      );
+
+      const play = renderer.play();
+      await vi.advanceTimersByTimeAsync(0);
+      await play;
+
+      expect(producer.play).toHaveBeenCalledOnce();
+      expect(renderer.getState().renderPreparationGateAbandoned).toBe(true);
+
+      renderer.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("starts the producer at once when no gate is enabled", async () => {
     const producer = createProducer();
     const preparation = createPendingRenderPreparation();
@@ -606,6 +703,40 @@ describe("media renderer over a push-based media source", () => {
       await vi.advanceTimersByTimeAsync(2000);
 
       preparation.prepare();
+      producer.setTimeMs(2000);
+
+      expect(renderer.getState().renderPreparationGateAbandoned).toBe(false);
+
+      preparation.stall();
+      producer.setTimeMs(3000);
+
+      expect(producer.beginInteractiveSeek).toHaveBeenCalledTimes(2);
+
+      renderer.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("holds again once the playhead is back inside covered artifacts", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const producer = createProducer();
+      const preparation = createStuckRenderPreparation();
+      const renderer = await createRenderer(
+        producer,
+        createScene(preparation.scene),
+        { renderPreparation: { playbackGate: { enabled: true } } },
+      );
+
+      producer.setStatus("PLAYING");
+      producer.setTimeMs(1000);
+      await vi.advanceTimersByTimeAsync(2000);
+
+      expect(renderer.getState().renderPreparationGateAbandoned).toBe(true);
+
+      preparation.cover();
       producer.setTimeMs(2000);
 
       expect(renderer.getState().renderPreparationGateAbandoned).toBe(false);
@@ -996,6 +1127,16 @@ function createStuckRenderPreparation() {
     /** A cook that landed somewhere behind a playhead it still cannot cover. */
     completeFrame() {
       progress += 1;
+    },
+    /** Artifacts that were cooked before the hold, so no progress count moves. */
+    cover() {
+      isPrepared = true;
+
+      for (const release of releases) {
+        release();
+      }
+
+      releases.clear();
     },
     getRenderPreparationProgress,
     needsRenderPreparationWait,

@@ -22,7 +22,7 @@ import {
   RenderPreparationWorkerStatus,
   type RenderPreparationGateHoldDiagnostics,
   type RenderPreparationOptions,
-  type RenderPreparationPlaybackGateOptions,
+  type ResolvedRenderPreparationGateThresholds,
 } from "#types/render-preparation";
 import { canReuseMaskStyleArtifacts } from "supervision-js-core";
 
@@ -88,7 +88,7 @@ export interface PreparedRenderWindow {
    */
   needsPlaybackGateWait(
     mediaTime: number,
-    options: RenderPreparationPlaybackGateOptions,
+    options: ResolvedRenderPreparationGateThresholds,
   ): boolean;
   /**
    * Resolves once the media time may be presented. `signal` is how a caller
@@ -98,7 +98,7 @@ export interface PreparedRenderWindow {
    */
   waitForReady(
     mediaTime: number,
-    options: RenderPreparationPlaybackGateOptions,
+    options: ResolvedRenderPreparationGateThresholds,
     signal?: AbortSignal,
   ): Promise<void>;
   /**
@@ -219,7 +219,7 @@ export function createPreparedRenderWindow(options: {
   const readinessWaiters = new Set<() => void>();
   const activeReadinessWaits = new Set<{
     readonly mediaTime: number;
-    readonly requiredAheadSeconds: number;
+    readonly resumeAtSeconds: number;
   }>();
   let scheduledQueuePump: ScheduledPreparationTask | undefined;
   let terminalPreparationError: Error | null = null;
@@ -723,7 +723,7 @@ export function createPreparedRenderWindow(options: {
 
       return !isReadyForPresentation(
         mediaTime,
-        getMinimumAheadSeconds(waitOptions),
+        getStopBelowSeconds(waitOptions),
       );
     },
 
@@ -742,16 +742,14 @@ export function createPreparedRenderWindow(options: {
         return Promise.reject(terminalPreparationError);
       }
 
-      if (
-        isReadyForPresentation(mediaTime, getMinimumAheadSeconds(waitOptions))
-      ) {
+      if (isReadyForPresentation(mediaTime, getStopBelowSeconds(waitOptions))) {
         return Promise.resolve();
       }
 
       return new Promise((resolve, reject) => {
         const activeWait = {
           mediaTime,
-          requiredAheadSeconds: getRequiredAheadSeconds(waitOptions),
+          resumeAtSeconds: getResumeAtSeconds(waitOptions),
         };
         const endWait = () => {
           readinessWaiters.delete(checkReady);
@@ -771,7 +769,7 @@ export function createPreparedRenderWindow(options: {
 
           if (
             !isDestroyed &&
-            !isReadyForPresentation(mediaTime, activeWait.requiredAheadSeconds)
+            !isReadyForPresentation(mediaTime, activeWait.resumeAtSeconds)
           ) {
             return;
           }
@@ -1082,6 +1080,16 @@ export function createPreparedRenderWindow(options: {
     return getPreparedAheadDiagnosticsFor(activeMaskFrame);
   }
 
+  /**
+   * How far prepared work reaches in front of a frame, and how much of that
+   * reach is finished. The walk crosses a frame the scheduler already holds
+   * without counting it and stops at one nobody has asked for: a queued or
+   * in-flight frame is runway that arrives on its own, while a gap no job
+   * covers is runway that never fills. A source still appending detections
+   * drops a fresh uncooked frame into this span on every record it writes.
+   * Whether the frame about to be presented is itself ready is a separate
+   * question, asked separately.
+   */
   function getPreparedAheadDiagnosticsFor(frameRef: {
     readonly key: string;
     readonly mediaTime: number;
@@ -1108,12 +1116,15 @@ export function createPreparedRenderWindow(options: {
     for (const frame of frames.slice(activeFrameIndex)) {
       const key = getFrameKey(frame);
 
-      if (!preparedMaskFrames.has(key) && !emptyMaskFrameKeys.has(key)) {
-        break;
+      if (preparedMaskFrames.has(key) || emptyMaskFrameKeys.has(key)) {
+        frameCount += 1;
+        latestPreparedTime = frame.mediaTime;
+        continue;
       }
 
-      frameCount += 1;
-      latestPreparedTime = frame.mediaTime;
+      if (!pendingMaskFrames.has(key)) {
+        break;
+      }
     }
 
     return {
@@ -1266,10 +1277,7 @@ export function createPreparedRenderWindow(options: {
    */
   function getGateHold() {
     for (const wait of activeReadinessWaits) {
-      const hold = getPresentationHold(
-        wait.mediaTime,
-        wait.requiredAheadSeconds,
-      );
+      const hold = getPresentationHold(wait.mediaTime, wait.resumeAtSeconds);
 
       if (hold) {
         return hold;
@@ -1285,20 +1293,18 @@ export function createPreparedRenderWindow(options: {
     }
   }
 
-  function getRequiredAheadSeconds(
-    waitOptions: RenderPreparationPlaybackGateOptions,
+  function getResumeAtSeconds(
+    waitOptions: ResolvedRenderPreparationGateThresholds,
   ) {
-    return Math.max(waitOptions.requiredAheadSeconds ?? 0, 0);
+    return Math.max(waitOptions.resumeAtSeconds, 0);
   }
 
-  function getMinimumAheadSeconds(
-    waitOptions: RenderPreparationPlaybackGateOptions,
+  function getStopBelowSeconds(
+    waitOptions: ResolvedRenderPreparationGateThresholds,
   ) {
-    const requiredAheadSeconds = getRequiredAheadSeconds(waitOptions);
-
     return Math.min(
-      Math.max(waitOptions.minimumAheadSeconds ?? requiredAheadSeconds, 0),
-      requiredAheadSeconds,
+      Math.max(waitOptions.stopBelowSeconds, 0),
+      getResumeAtSeconds(waitOptions),
     );
   }
 

@@ -33,7 +33,7 @@ import { RenderPreparationArtifactKind } from "#types/render-preparation";
 import type {
   RenderPreparationMaskFrameOptions,
   RenderPreparationOptions,
-  RenderPreparationPlaybackGateOptions,
+  ResolvedRenderPreparationGateThresholds,
 } from "#types/render-preparation";
 import type {
   InjectedMeshConstructor,
@@ -156,11 +156,11 @@ export interface PixiMaskLayer {
   /** Whether `waitForRenderPreparation` would wait, scheduling nothing. */
   needsRenderPreparationWait(
     mediaTime: number,
-    options: RenderPreparationPlaybackGateOptions,
+    options: ResolvedRenderPreparationGateThresholds,
   ): boolean;
   waitForRenderPreparation(
     mediaTime: number,
-    options: RenderPreparationPlaybackGateOptions,
+    options: ResolvedRenderPreparationGateThresholds,
     signal?: AbortSignal,
   ): Promise<void>;
   pickDetectionAtPoint(

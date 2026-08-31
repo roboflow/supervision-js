@@ -37,6 +37,7 @@ import {
   RenderPreparationMode,
   RenderPreparationWorkerStatus,
   type RenderPreparationDiagnostics,
+  type ResolvedRenderPreparationGateThresholds,
 } from "#types/render-preparation";
 import { createOffsetDetectionFrameSource } from "#detections/offset-detection-frame-source";
 import { createMediaRendererRuntimeState } from "./media-renderer-state";
@@ -61,6 +62,29 @@ const MILLISECONDS_PER_SECOND = 1000;
  * because what it waits on is a model somewhere else.
  */
 const DEFAULT_RENDER_PREPARATION_GATE_MAX_WAIT_SECONDS = 2;
+
+/**
+ * A tenth of a second of runway left, and a fifth of a second more banked
+ * before the picture moves again.
+ *
+ * A viewer counts a stop in their own seconds rather than seconds of timeline,
+ * so both are wall-clock and the playback rate converts them. The resume is
+ * the stop plus a margin, which fixes the length of a stop at that margin: how
+ * deep a bank preparation aims for is then a question about memory and cooks
+ * alone.
+ */
+const DEFAULT_RENDER_PREPARATION_GATE_STOP_BELOW_WALL_SECONDS = 0.1;
+const DEFAULT_RENDER_PREPARATION_GATE_RESUME_MARGIN_WALL_SECONDS = 0.2;
+
+/**
+ * Ceiling on a stop threshold as a share of the lead that ends the stop.
+ *
+ * A requirement too small to fund the margin caps the resume lead below the
+ * stop threshold the wall clock asks for, and a gate that stops and resumes at
+ * one lead stops again on the frame it just released. Half the resume lead is
+ * the widest stop threshold that still leaves a stop something to wait for.
+ */
+const RENDER_PREPARATION_GATE_MAX_STOP_SHARE_OF_RESUME = 0.5;
 
 export interface MediaRendererCoreProviders {
   openMediaSource(src: string | URL | Request): Promise<DecodedMediaSource>;
@@ -118,8 +142,23 @@ export async function createMediaRendererCore(
     isSeekGestureInFlight = false;
     publishPlaybackActivity();
   };
+  /**
+   * A hold reads the rate once, so the thresholds it is waiting on are the
+   * ones the old rate implied. Ending the hold hands the next frame back to
+   * the gate, which asks again at the rate now in force.
+   */
+  let renderPreparationRateEpoch = new AbortController();
   const adoptPlaybackRate = (playbackRate: number) => {
+    if (playbackRate === runtimeState.playbackRate()) {
+      return;
+    }
+
     runtimeState.setPlaybackRate(playbackRate);
+
+    const supersededHolds = renderPreparationRateEpoch;
+
+    renderPreparationRateEpoch = new AbortController();
+    supersededHolds.abort();
   };
   const runtimeState = createMediaRendererRuntimeState({
     fit,
@@ -232,6 +271,50 @@ export async function createMediaRendererCore(
       DEFAULT_RENDER_PREPARATION_GATE_MAX_WAIT_SECONDS,
   );
   /**
+   * The gate's wall-clock thresholds in seconds of timeline, which is the unit
+   * a prepared lead is measured in. A rate is how many seconds of timeline a
+   * second of runway is worth, so at 8x a tenth of a second of picture is
+   * eight tenths of a second of frames.
+   *
+   * `requiredAheadSeconds` is a ceiling on the resume lead, and the stop
+   * threshold is held under that lead: a requirement of a single frame still
+   * buys a stop that ends higher than it began, at the price of a band
+   * narrower than the wall clock asked for. Zero on both sides is the one pair
+   * that meets, and there the lead gate is off and only an unprepared frame
+   * under the playhead stops the picture.
+   */
+  const resolveRenderPreparationGateThresholds =
+    (): ResolvedRenderPreparationGateThresholds => {
+      const playbackRate = runtimeState.playbackRate();
+      const bankSeconds = Math.max(
+        renderPreparationPlaybackGate?.requiredAheadSeconds ?? 0,
+        0,
+      );
+      const stopBelowWallSeconds = Math.max(
+        renderPreparationPlaybackGate?.stopBelowWallSeconds ??
+          DEFAULT_RENDER_PREPARATION_GATE_STOP_BELOW_WALL_SECONDS,
+        0,
+      );
+      const resumeMarginWallSeconds = Math.max(
+        renderPreparationPlaybackGate?.resumeMarginWallSeconds ??
+          DEFAULT_RENDER_PREPARATION_GATE_RESUME_MARGIN_WALL_SECONDS,
+        0,
+      );
+      const resumeAtSeconds = Math.min(
+        bankSeconds,
+        (stopBelowWallSeconds + resumeMarginWallSeconds) * playbackRate,
+      );
+
+      return {
+        enabled: renderPreparationPlaybackGate?.enabled,
+        resumeAtSeconds,
+        stopBelowSeconds: Math.min(
+          stopBelowWallSeconds * playbackRate,
+          resumeAtSeconds * RENDER_PREPARATION_GATE_MAX_STOP_SHARE_OF_RESUME,
+        ),
+      };
+    };
+  /**
    * Where preparation stood when the hold that last gave up opened, or null
    * while the gate is armed. Preparation that has finished a frame since is
    * preparation that is running, however far behind the playhead it still is,
@@ -258,26 +341,104 @@ export async function createMediaRendererCore(
     runtimeState.setRenderPreparationGateAbandoned(true);
   };
 
+  /**
+   * Holds the picture for prepared artifacts, under the gate's bound.
+   *
+   * Preparation that has fallen behind is indistinguishable from a cook still
+   * on its way, and the bound is the way back out of a hold on one that will
+   * never answer. Giving up lasts only until preparation finishes another
+   * frame: a preparer that is merely losing to the playhead is still a
+   * preparer, and the picture it feeds is worth stopping for again. One that
+   * has finished nothing since is stuck, and the gate stays out of its way
+   * rather than spending the bound once a frame on it.
+   */
+  const waitForRenderPreparationWithin = async (
+    mediaTime: number,
+    signal: AbortSignal,
+  ) => {
+    const bound = new AbortController();
+    const abortBound = () => bound.abort();
+    const rateEpoch = renderPreparationRateEpoch.signal;
+    const progressAtHoldStart = readRenderPreparationProgress();
+    const expiry = Number.isFinite(renderPreparationGateMaxWaitSeconds)
+      ? setTimeout(() => {
+          abandonRenderPreparationGate(progressAtHoldStart);
+          bound.abort();
+        }, renderPreparationGateMaxWaitSeconds * MILLISECONDS_PER_SECOND)
+      : undefined;
+
+    signal.addEventListener("abort", abortBound);
+    rateEpoch.addEventListener("abort", abortBound);
+
+    try {
+      await mediaScene?.waitForRenderPreparation?.(
+        mediaTime,
+        resolveRenderPreparationGateThresholds(),
+        bound.signal,
+      );
+    } finally {
+      clearTimeout(expiry);
+      signal.removeEventListener("abort", abortBound);
+      rateEpoch.removeEventListener("abort", abortBound);
+    }
+  };
+
+  const waitForDetectionCoverage = (mediaTime: number) =>
+    detectionTimeline?.prepare(mediaTime, {
+      duration: runtimeState.duration(),
+      firstTimestamp,
+      gatePlayback: true,
+    });
+
+  /**
+   * The wait a play makes before the picture starts moving. A play is a fresh
+   * intent, so it arms a gate an earlier run gave up on: the frame the viewer
+   * is about to be shown is the one they asked to see annotated.
+   */
   const waitForPlaybackReadiness = async (
     mediaTime: number,
-    signal?: AbortSignal,
+    signal: AbortSignal,
   ) => {
     if (shouldGateDetectionPlayback) {
-      await detectionTimeline?.prepare(mediaTime, {
-        duration: runtimeState.duration(),
-        firstTimestamp,
-        gatePlayback: true,
-      });
+      await waitForDetectionCoverage(mediaTime);
     }
 
     if (shouldGateRenderPreparationPlayback) {
-      await mediaScene?.waitForRenderPreparation?.(
-        mediaTime,
-        renderPreparationPlaybackGate ?? {},
-        signal,
-      );
       armRenderPreparationGate();
+      await waitForRenderPreparationWithin(mediaTime, signal);
     }
+  };
+
+  /**
+   * A gate that gave up comes back on preparation finishing another frame, and
+   * on the playhead reaching frames preparation finished already: a loop or a
+   * seek back lands inside a window that is covered, and coverage cooked before
+   * the hold moves no progress count.
+   */
+  const holdForSampleReadiness = async (
+    mediaTime: number,
+    signal: AbortSignal,
+  ) => {
+    if (shouldGateDetectionPlayback) {
+      await waitForDetectionCoverage(mediaTime);
+    }
+
+    if (!shouldGateRenderPreparationPlayback) {
+      return;
+    }
+
+    const isRenderPreparationCovered =
+      mediaScene?.needsRenderPreparationWait?.(
+        mediaTime,
+        resolveRenderPreparationGateThresholds(),
+      ) === false;
+
+    if (!isRenderPreparationCovered && hasAbandonedRenderPreparationGate()) {
+      return;
+    }
+
+    armRenderPreparationGate();
+    await waitForRenderPreparationWithin(mediaTime, signal);
   };
 
   const holdForDetectionCoverage = (mediaTime: number) => {
@@ -299,48 +460,11 @@ export async function createMediaRendererCore(
     });
   };
 
-  const waitForRenderPreparationWithin = async (
-    mediaTime: number,
-    signal: AbortSignal,
-  ) => {
-    const bound = new AbortController();
-    const abortBound = () => bound.abort();
-    const progressAtHoldStart = readRenderPreparationProgress();
-    const expiry = Number.isFinite(renderPreparationGateMaxWaitSeconds)
-      ? setTimeout(() => {
-          abandonRenderPreparationGate(progressAtHoldStart);
-          bound.abort();
-        }, renderPreparationGateMaxWaitSeconds * MILLISECONDS_PER_SECOND)
-      : undefined;
-
-    signal.addEventListener("abort", abortBound);
-
-    try {
-      await mediaScene?.waitForRenderPreparation?.(
-        mediaTime,
-        renderPreparationPlaybackGate ?? {},
-        bound.signal,
-      );
-    } finally {
-      clearTimeout(expiry);
-      signal.removeEventListener("abort", abortBound);
-    }
-  };
-
-  /**
-   * Stopping a producer for artifacts is only safe with a way back out of it,
-   * because preparation that has fallen behind is indistinguishable from a cook
-   * still on its way. The bound is that way out, and giving up holds only until
-   * preparation finishes another frame: a preparer that is merely losing to the
-   * playhead is still a preparer, and the picture it feeds is worth stopping
-   * for again. One that has finished nothing since is stuck, and the gate stays
-   * out of its way rather than spending the bound once a frame on it.
-   */
   const holdForRenderPreparation = (mediaTime: number, signal: AbortSignal) => {
     if (
       mediaScene?.needsRenderPreparationWait?.(
         mediaTime,
-        renderPreparationPlaybackGate ?? {},
+        resolveRenderPreparationGateThresholds(),
       ) !== true
     ) {
       armRenderPreparationGate();
@@ -480,6 +604,10 @@ export async function createMediaRendererCore(
         return;
       }
 
+      // A source the renderer pulls samples from has no readiness wait of its
+      // own: its start of playback is the first per-sample hold, so the fresh
+      // intent arms the gate here.
+      armRenderPreparationGate();
       runtimeState.setPlaying();
       playbackController.play();
     },
@@ -974,7 +1102,7 @@ export async function createMediaRendererCore(
     runtimeState.setReady();
     const waitForSample = shouldGatePlayback
       ? (sample: DecodedVideoSample, signal: AbortSignal) =>
-          waitForPlaybackReadiness(sample.timestamp, signal)
+          holdForSampleReadiness(sample.timestamp, signal)
       : undefined;
 
     playbackController = createMediaPlaybackController({

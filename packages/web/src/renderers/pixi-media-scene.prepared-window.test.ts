@@ -723,16 +723,24 @@ describe("the prepared annotation window under push presentation", () => {
 
     scene.present(1000);
 
-    expect(scene.scene.needsRenderPreparationWait?.(1, { enabled: true })).toBe(
-      true,
-    );
+    expect(
+      scene.scene.needsRenderPreparationWait?.(1, {
+        enabled: true,
+        resumeAtSeconds: 0,
+        stopBelowSeconds: 0,
+      }),
+    ).toBe(true);
     expect(scene.scene.getRenderPreparationProgress?.()).toBe(0);
 
     await scene.settleCooks();
 
-    expect(scene.scene.needsRenderPreparationWait?.(1, { enabled: true })).toBe(
-      false,
-    );
+    expect(
+      scene.scene.needsRenderPreparationWait?.(1, {
+        enabled: true,
+        resumeAtSeconds: 0,
+        stopBelowSeconds: 0,
+      }),
+    ).toBe(false);
     expect(scene.scene.getRenderPreparationProgress?.()).toBeGreaterThan(0);
   });
 
@@ -742,7 +750,11 @@ describe("the prepared annotation window under push presentation", () => {
     scene.present(1000);
     let released = false;
     const wait = scene.scene
-      .waitForRenderPreparation?.(1, { enabled: true })
+      .waitForRenderPreparation?.(1, {
+        enabled: true,
+        resumeAtSeconds: 0,
+        stopBelowSeconds: 0,
+      })
       .then(() => {
         released = true;
       });
