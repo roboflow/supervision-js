@@ -42,7 +42,9 @@ const ACTIVITY_KICKERS: Record<MediaSessionActivityKind, string> = {
   [MediaSessionActivityKind.Error]: "Error",
   [MediaSessionActivityKind.MediaNormalizing]: "Media",
   [MediaSessionActivityKind.MediaOpening]: "Media",
+  [MediaSessionActivityKind.MediaSourceReading]: "Media",
   [MediaSessionActivityKind.PlaybackBuffering]: "Playback",
+  [MediaSessionActivityKind.RenderPreparationAbandoned]: "Masks",
   [MediaSessionActivityKind.RenderPreparing]: "Masks",
 };
 
@@ -62,6 +64,16 @@ export function selectViewportSessionState(
   return activities.length === sessionState.activities.length
     ? sessionState
     : { ...sessionState, activities };
+}
+
+/**
+ * The viewer has the playhead under their hand, so the picture is following
+ * them rather than making them wait.
+ */
+export function isViewerLeadingPlayback(
+  sessionState: MediaSessionState | null,
+) {
+  return sessionState?.renderer?.scrubbing === true;
 }
 
 export function sameViewportOverlay(

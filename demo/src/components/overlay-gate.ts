@@ -1,5 +1,14 @@
-/** An overlay that appears and vanishes inside a quarter second reads as a glitch. */
-export const OVERLAY_APPEAR_DELAY_MS = 250;
+/** An overlay that appears and vanishes inside a fifth of a second reads as a glitch. */
+export const OVERLAY_APPEAR_DELAY_MS = 200;
+
+/**
+ * A hold released for a frame or two and taken again is one wait, not two. A
+ * pulled source consults its gate at every frame, so a stutter arrives as a
+ * train of short holds with a single presented frame between them: 42ms at
+ * 24fps, and up to three of those once the state has crossed React. Past that
+ * the picture has been moving long enough for the wait to have ended.
+ */
+export const OVERLAY_GAP_FORGIVENESS_MS = 120;
 
 /**
  * Scrubbing produces a run of brief waits back to back. Without a floor on how
@@ -14,6 +23,8 @@ export const OVERLAY_MINIMUM_DWELL_MS = 400;
 export const OVERLAY_EXPLAIN_DELAY_MS = 600;
 
 export interface OverlayGateState {
+  /** When the overlay's reason last went away, so a gap can be measured. */
+  readonly clearedSinceMs: number | null;
   readonly pendingSinceMs: number | null;
   readonly shownSinceMs: number | null;
 }
@@ -27,27 +38,51 @@ export interface OverlayGateResult {
 }
 
 export const IDLE_OVERLAY_GATE: OverlayGateState = {
+  clearedSinceMs: null,
   pendingSinceMs: null,
   shownSinceMs: null,
 };
 
-/** Errors are not waits, so they skip the appear delay. The dwell still applies. */
+/**
+ * Errors are not waits, so they skip the appear delay. The dwell still applies.
+ *
+ * `isSuppressed` is the viewer taking the picture over, which is not a wait
+ * ending: there is nothing left to protect from strobing, so the dwell is given
+ * up rather than sat out over a picture that is tracking their hand.
+ */
 export function advanceOverlayGate(
   state: OverlayGateState,
-  { hasOverlay, isError }: { hasOverlay: boolean; isError: boolean },
+  {
+    hasOverlay,
+    isError,
+    isSuppressed = false,
+  }: { hasOverlay: boolean; isError: boolean; isSuppressed?: boolean },
   nowMs: number,
 ): OverlayGateResult {
   if (isError) {
     return {
       explained: true,
-      state: { pendingSinceMs: null, shownSinceMs: nowMs },
+      state: {
+        clearedSinceMs: null,
+        pendingSinceMs: null,
+        shownSinceMs: nowMs,
+      },
       visible: true,
       wakeInMs: null,
     };
   }
 
+  if (isSuppressed) {
+    return {
+      explained: false,
+      state: IDLE_OVERLAY_GATE,
+      visible: false,
+      wakeInMs: null,
+    };
+  }
+
   if (hasOverlay) {
-    const pendingSinceMs = state.pendingSinceMs ?? nowMs;
+    const pendingSinceMs = resumablePendingSinceMs(state, nowMs) ?? nowMs;
 
     if (state.shownSinceMs !== null) {
       return shownResult(state.shownSinceMs, pendingSinceMs, nowMs);
@@ -58,7 +93,7 @@ export function advanceOverlayGate(
     if (waitedMs < OVERLAY_APPEAR_DELAY_MS) {
       return {
         explained: false,
-        state: { pendingSinceMs, shownSinceMs: null },
+        state: { clearedSinceMs: null, pendingSinceMs, shownSinceMs: null },
         visible: false,
         wakeInMs: OVERLAY_APPEAR_DELAY_MS - waitedMs,
       };
@@ -67,10 +102,19 @@ export function advanceOverlayGate(
     return shownResult(nowMs, pendingSinceMs, nowMs);
   }
 
+  const clearedSinceMs = state.clearedSinceMs ?? nowMs;
+
   if (state.shownSinceMs === null) {
     return {
       explained: false,
-      state: IDLE_OVERLAY_GATE,
+      state:
+        state.pendingSinceMs === null
+          ? IDLE_OVERLAY_GATE
+          : {
+              clearedSinceMs,
+              pendingSinceMs: state.pendingSinceMs,
+              shownSinceMs: null,
+            },
       visible: false,
       wakeInMs: null,
     };
@@ -81,7 +125,11 @@ export function advanceOverlayGate(
   if (dwelledMs < OVERLAY_MINIMUM_DWELL_MS) {
     return {
       explained: dwelledMs >= OVERLAY_EXPLAIN_DELAY_MS,
-      state: { pendingSinceMs: null, shownSinceMs: state.shownSinceMs },
+      state: {
+        clearedSinceMs,
+        pendingSinceMs: state.pendingSinceMs,
+        shownSinceMs: state.shownSinceMs,
+      },
       visible: true,
       wakeInMs: OVERLAY_MINIMUM_DWELL_MS - dwelledMs,
     };
@@ -95,6 +143,17 @@ export function advanceOverlayGate(
   };
 }
 
+function resumablePendingSinceMs(state: OverlayGateState, nowMs: number) {
+  if (
+    state.clearedSinceMs !== null &&
+    nowMs - state.clearedSinceMs >= OVERLAY_GAP_FORGIVENESS_MS
+  ) {
+    return null;
+  }
+
+  return state.pendingSinceMs;
+}
+
 function shownResult(
   shownSinceMs: number,
   pendingSinceMs: number,
@@ -104,7 +163,7 @@ function shownResult(
 
   return {
     explained: pendingMs >= OVERLAY_EXPLAIN_DELAY_MS,
-    state: { pendingSinceMs, shownSinceMs },
+    state: { clearedSinceMs: null, pendingSinceMs, shownSinceMs },
     visible: true,
     wakeInMs:
       pendingMs < OVERLAY_EXPLAIN_DELAY_MS

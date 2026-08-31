@@ -287,7 +287,9 @@ describe("package entrypoint", () => {
       Error: "error",
       MediaNormalizing: "mediaNormalizing",
       MediaOpening: "mediaOpening",
+      MediaSourceReading: "mediaSourceReading",
       PlaybackBuffering: "playbackBuffering",
+      RenderPreparationAbandoned: "renderPreparationAbandoned",
       RenderPreparing: "renderPreparing",
     });
     expect(entrypoint.MediaSessionActivityStatus).toEqual({

@@ -14,13 +14,14 @@ export interface OverlayGate {
 export function useOverlayGate(input: {
   hasOverlay: boolean;
   isError: boolean;
+  isSuppressed: boolean;
 }): OverlayGate {
   const stateRef = useRef<OverlayGateState>(IDLE_OVERLAY_GATE);
   const [gate, setGate] = useState<OverlayGate>({
     explained: false,
     visible: false,
   });
-  const { hasOverlay, isError } = input;
+  const { hasOverlay, isError, isSuppressed } = input;
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -28,7 +29,7 @@ export function useOverlayGate(input: {
     const settle = () => {
       const result = advanceOverlayGate(
         stateRef.current,
-        { hasOverlay, isError },
+        { hasOverlay, isError, isSuppressed },
         performance.now(),
       );
 
@@ -48,7 +49,7 @@ export function useOverlayGate(input: {
     settle();
 
     return () => clearTimeout(timer);
-  }, [hasOverlay, isError]);
+  }, [hasOverlay, isError, isSuppressed]);
 
   return gate;
 }

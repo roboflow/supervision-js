@@ -319,6 +319,55 @@ describe("media session state", () => {
     ]);
   });
 
+  it("says the masks were given up on while the picture keeps moving", () => {
+    const state = createMediaSessionStateSnapshot({
+      errorMessage: null,
+      media: {
+        inputMetadata: null,
+        normalizedMedia: null,
+        objectUrl: null,
+      },
+      normalization: null,
+      renderPreparation: null,
+      renderer: createRendererState({
+        detectionBufferStatus: DetectionBufferStatus.Ready,
+        playbackState: MediaRendererPlaybackState.Playing,
+        renderPreparationGateAbandoned: true,
+      }),
+    });
+
+    expect(state.activities).toEqual([
+      expect.objectContaining({
+        blockingPlayback: false,
+        blockingPresentation: false,
+        kind: MediaSessionActivityKind.RenderPreparationAbandoned,
+        label: "Masks could not keep up",
+        status: MediaSessionActivityStatus.Waiting,
+      }),
+    ]);
+    expect(state.playbackBlocked).toBe(false);
+    expect(state.status).toBe(MediaSessionStatus.Playing);
+  });
+
+  it("says nothing about the masks once preparation covers the playhead again", () => {
+    const state = createMediaSessionStateSnapshot({
+      errorMessage: null,
+      media: {
+        inputMetadata: null,
+        normalizedMedia: null,
+        objectUrl: null,
+      },
+      normalization: null,
+      renderPreparation: null,
+      renderer: createRendererState({
+        detectionBufferStatus: DetectionBufferStatus.Ready,
+        playbackState: MediaRendererPlaybackState.Playing,
+      }),
+    });
+
+    expect(state.activities).toEqual([]);
+  });
+
   it("reports renderer errors as blocking errors", () => {
     const state = createMediaSessionStateSnapshot({
       errorMessage: null,
@@ -539,10 +588,9 @@ describe("media session state", () => {
         artifactKind: RenderPreparationArtifactKind.MaskFrame,
         blockingPlayback: true,
         blockingPresentation: false,
-        detail:
-          "This frame is ready; the video starts once enough is drawn ahead of it",
+        detail: "Starting again at 1.0s of masks ready",
         kind: MediaSessionActivityKind.RenderPreparing,
-        label: "Drawing ahead of the video",
+        label: "Catching the masks up",
         pendingCount: 0,
         preparedCount: 84,
         progress: 0.25,
@@ -586,6 +634,121 @@ describe("media session state", () => {
     });
   });
 
+  /**
+   * Shot 2: the gate holds on the frame it is about to present while the frame
+   * on screen is prepared and the queue behind it has momentarily drained. The
+   * hold and the presented frame describe different frames, so every field the
+   * loop used to read said the artifact had nothing to report.
+   */
+  it("names a hold taken on the frame ahead of the one on screen", () => {
+    const state = createMediaSessionStateSnapshot({
+      errorMessage: null,
+      media: {
+        inputMetadata: null,
+        normalizedMedia: null,
+        objectUrl: null,
+      },
+      normalization: null,
+      renderPreparation: {
+        artifacts: [
+          {
+            activeFrame: {
+              key: "2.000",
+              mediaTime: 2,
+              status: RenderPreparationArtifactFrameStatus.Prepared,
+            },
+            gateHold: {
+              reason: RenderPreparationGateHoldReason.ActiveFrameUnprepared,
+              requiredAheadSeconds: 1,
+            },
+            kind: RenderPreparationArtifactKind.MaskFrame,
+            pendingCount: 0,
+            preparedCount: 42,
+          },
+        ],
+        executionMode: RenderPreparationExecutionMode.Worker,
+        message: null,
+        workerStatus: RenderPreparationWorkerStatus.Ready,
+      },
+      renderer: createRendererState({
+        detectionBufferStatus: DetectionBufferStatus.Ready,
+        playbackState: MediaRendererPlaybackState.Buffering,
+      }),
+    });
+
+    expect({
+      labels: state.activities.map((activity) => activity.label),
+      playbackBlocked: state.playbackBlocked,
+    }).toStrictEqual({
+      labels: ["Waiting for the masks"],
+      playbackBlocked: true,
+    });
+  });
+
+  /**
+   * Measured after a scrub: two strictly sequential range reads of the clip,
+   * 534KB then 657KB at roughly 490KB/s, with the picture stopped for the two
+   * seconds they took. A seek does not pass through the transport, so nothing
+   * downstream of the read had anything to report.
+   */
+  it("names the source read the picture is stopped on", () => {
+    const state = createMediaSessionStateSnapshot({
+      errorMessage: null,
+      media: {
+        inputMetadata: null,
+        normalizedMedia: null,
+        objectUrl: null,
+      },
+      normalization: null,
+      renderPreparation: null,
+      renderer: createRendererState({
+        detectionBufferStatus: DetectionBufferStatus.Ready,
+        playbackState: MediaRendererPlaybackState.Playing,
+        sourceAwaitingRead: true,
+      }),
+    });
+
+    expect({
+      activities: state.activities.map((activity) => ({
+        detail: activity.detail,
+        kind: activity.kind,
+        label: activity.label,
+      })),
+      playbackBlocked: state.playbackBlocked,
+    }).toStrictEqual({
+      activities: [
+        {
+          detail: "The video for this part has not arrived yet",
+          kind: MediaSessionActivityKind.MediaSourceReading,
+          label: "Loading the video",
+        },
+      ],
+      playbackBlocked: true,
+    });
+  });
+
+  it("reports a stopped picture once, on the read rather than the transport", () => {
+    const state = createMediaSessionStateSnapshot({
+      errorMessage: null,
+      media: {
+        inputMetadata: null,
+        normalizedMedia: null,
+        objectUrl: null,
+      },
+      normalization: null,
+      renderPreparation: null,
+      renderer: createRendererState({
+        detectionBufferStatus: DetectionBufferStatus.Ready,
+        playbackState: MediaRendererPlaybackState.Buffering,
+        sourceAwaitingRead: true,
+      }),
+    });
+
+    expect(state.activities.map((activity) => activity.kind)).toStrictEqual([
+      MediaSessionActivityKind.MediaSourceReading,
+    ]);
+  });
+
   it("names detections still arriving apart from video still arriving", () => {
     const stoppedFor = (detectionBufferStatus: DetectionBufferStatus) =>
       createMediaSessionStateSnapshot({
@@ -618,6 +781,8 @@ describe("media session state", () => {
 function createRendererState(options: {
   readonly detectionBufferStatus: DetectionBufferStatus;
   readonly playbackState: MediaRendererPlaybackState;
+  readonly renderPreparationGateAbandoned?: boolean;
+  readonly sourceAwaitingRead?: boolean;
   readonly sourceErrorKind?: MediaErrorKind | null;
   readonly sourceErrorMessage?: string | null;
   readonly sourceStatus?: MediaSourceStatus;
@@ -647,9 +812,12 @@ function createRendererState(options: {
     mediaWidth: 0,
     playbackState: options.playbackState,
     presentedFrames: 0,
+    renderPreparationGateAbandoned:
+      options.renderPreparationGateAbandoned ?? false,
     rendererBackend: "test",
     source: {
       audioTrackCount: null,
+      awaitingRead: options.sourceAwaitingRead ?? false,
       canRead: null,
       duration: null,
       errorKind: options.sourceErrorKind ?? null,

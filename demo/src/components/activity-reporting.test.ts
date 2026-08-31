@@ -18,6 +18,7 @@ import { formatPreparedWindow, formatRequestedRange } from "./TimelineView";
 import {
   BACKGROUND_ACTIVITY_KINDS,
   createViewportOverlay,
+  isViewerLeadingPlayback,
   selectViewportSessionState,
 } from "./viewport-overlay";
 
@@ -137,6 +138,21 @@ const overlayCases = [
     activities: [
       activity({
         blockingPlayback: true,
+        detail: "The video for this part has not arrived yet",
+        kind: MediaSessionActivityKind.MediaSourceReading,
+        label: "Loading the video",
+        status: MediaSessionActivityStatus.Waiting,
+      }),
+    ],
+    kicker: "Media",
+    kind: MediaSessionActivityKind.MediaSourceReading,
+    label: "Loading the video",
+    renderer,
+  },
+  {
+    activities: [
+      activity({
+        blockingPlayback: true,
         kind: MediaSessionActivityKind.DetectionsBuffering,
         label: "Waiting for detections",
         status: MediaSessionActivityStatus.Waiting,
@@ -174,6 +190,23 @@ const overlayCases = [
     kicker: "Masks",
     kind: MediaSessionActivityKind.RenderPreparing,
     label: "Waiting for the masks",
+    renderer,
+  },
+  {
+    /* Nothing is blocked: the gate gave up on these masks and the picture is
+     * running without them, which is the one case the viewer has no other way
+     * of telling from masks that simply have none. */
+    activities: [
+      activity({
+        detail: "The video is playing without them",
+        kind: MediaSessionActivityKind.RenderPreparationAbandoned,
+        label: "Masks could not keep up",
+        status: MediaSessionActivityStatus.Waiting,
+      }),
+    ],
+    kicker: "Masks",
+    kind: MediaSessionActivityKind.RenderPreparationAbandoned,
+    label: "Masks could not keep up",
     renderer,
   },
   {
@@ -362,6 +395,9 @@ describe("session activity reporting", () => {
               mediaState,
             ) !== null,
           isError: false,
+          isSuppressed: isViewerLeadingPlayback(
+            sessionState([], rendererAt(nowMs)),
+          ),
         },
         nowMs,
       );

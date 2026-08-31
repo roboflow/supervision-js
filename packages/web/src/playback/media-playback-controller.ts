@@ -37,6 +37,12 @@ export function createMediaPlaybackController(options: {
   readonly onError: (error: unknown) => void;
   readonly onWaiting?: () => void;
   readonly onResume?: () => void;
+  /**
+   * The picture has run out of decoded samples and cannot draw the next frame
+   * until the source produces one. Prefetch running behind a moving picture
+   * does not report here.
+   */
+  readonly onSourceWait?: (waiting: boolean) => void;
 }): MediaPlaybackController {
   let destroyed = false;
   let playing = false;
@@ -253,10 +259,16 @@ export function createMediaPlaybackController(options: {
       return;
     }
 
-    await waitForQueuedSample;
-    // Let an iterator publish immediately available adjacent samples without
-    // making live playback wait for the next network frame.
-    await Promise.resolve();
+    options.onSourceWait?.(true);
+
+    try {
+      await waitForQueuedSample;
+      // Let an iterator publish immediately available adjacent samples without
+      // making live playback wait for the next network frame.
+      await Promise.resolve();
+    } finally {
+      options.onSourceWait?.(false);
+    }
   };
 
   const shouldPresentSample = (

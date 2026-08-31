@@ -2,6 +2,7 @@ import { useRef } from "react";
 
 import {
   createViewportOverlay,
+  isViewerLeadingPlayback,
   type ViewportOverlay,
 } from "../components/viewport-overlay";
 import type {
@@ -25,6 +26,7 @@ export function useViewportOverlay(
   const gate = useOverlayGate({
     hasOverlay: overlay !== null,
     isError: overlay?.tone === "error",
+    isSuppressed: isViewerLeadingPlayback(sessionState),
   });
 
   if (overlay) {

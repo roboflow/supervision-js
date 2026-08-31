@@ -5,6 +5,7 @@ import type { MediaSourceState } from "#types/media-renderer";
 export function createLoadingMediaSourceState(): MediaSourceState {
   return {
     audioTrackCount: null,
+    awaitingRead: false,
     canRead: null,
     duration: null,
     estimatedFrameCount: null,
@@ -28,6 +29,7 @@ export function createReadyMediaSourceState(
 ): MediaSourceState {
   return {
     audioTrackCount: metadata.audioTrackCount,
+    awaitingRead: false,
     canRead: metadata.canRead,
     duration: metadata.duration,
     estimatedFrameCount: metadata.estimatedFrameCount ?? null,
