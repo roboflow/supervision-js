@@ -9,15 +9,15 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "mediabunny": "^1.52.3",
+    "mediabunny": "^1.55.5",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "supervision": "file:../packages/web"
   },
   "devDependencies": {
     "@types/react": "^19.2.18",
-    "@types/react-dom": "^19.2.4",
-    "@vitejs/plugin-react": "^6.0.5",
-    "vite": "^8.2.1"
+    "@types/react-dom": "^19.2.5",
+    "@vitejs/plugin-react": "^6.1.1",
+    "vite": "^8.2.2"
   }
 }
