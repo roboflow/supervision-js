@@ -2269,27 +2269,24 @@ fieldset {
   scale: 1;
 }
 
-/* Buffering already shows in the state chip; the ring says the same thing where
- * the pointer already is. */
-.transport__ring {
-  border: 2px solid transparent;
-  border-radius: 5px;
-  border-top-color: rgba(124, 58, 237, 0.85);
-  inset: -4px;
+.transport__play[data-buffering] .transport__glyph {
   opacity: 0;
-  pointer-events: none;
-  position: absolute;
-  transition: opacity 160ms cubic-bezier(0.2, 0, 0, 1);
+  scale: 0.72;
 }
 
-.transport__play[data-buffering] .transport__ring {
-  animation: transport-spin 820ms linear infinite;
+.transport__play[data-buffering] .transport__glyph--busy {
+  animation: transport-busy 720ms linear infinite;
   opacity: 1;
+  scale: 1;
 }
 
-@keyframes transport-spin {
+.transport__glyph--busy {
+  transform-origin: 50% 50%;
+}
+
+@keyframes transport-busy {
   to {
-    transform: rotate(1turn);
+    rotate: 1turn;
   }
 }
 
@@ -5077,12 +5074,9 @@ fieldset {
   margin: 0;
 }
 
-/* The ring is motion carrying a status, so with motion turned down it holds
- * still and says the same thing as a complete ring. */
 @media (prefers-reduced-motion: reduce) {
-  .transport__play[data-buffering] .transport__ring {
+  .transport__play[data-buffering] .transport__glyph--busy {
     animation: none;
-    border-color: rgba(124, 58, 237, 0.85);
   }
 }
 

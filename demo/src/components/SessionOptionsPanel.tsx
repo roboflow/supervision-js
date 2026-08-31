@@ -301,32 +301,61 @@ function SessionOptionControls({
           tooltip="The video waits for the masks that belong to the frame it is about to show to be turned into pixels. Off, that frame is drawn without its masks. `renderer.renderPreparation.playbackGate.enabled`, on by default."
         />
         <SliderControl
-          label="Minimum ahead seconds"
+          label="Stop below wall seconds"
           libraryDefault={formatOptionSeconds(
-            libraryPreparationGate?.minimumAheadSeconds,
+            libraryPreparationGate?.stopBelowWallSeconds,
           )}
-          max={10}
+          max={2}
           min={0}
           onChange={(value) =>
-            onUpdate("preparationGateMinimumAheadSeconds", value)
+            onUpdate("preparationGateStopBelowWallSeconds", value)
           }
-          optionPath="renderPreparation.playbackGate.minimumAheadSeconds"
+          optionPath="renderPreparation.playbackGate.stopBelowWallSeconds"
           origin={readDemoOptionOrigin(
-            options.preparationGateMinimumAheadSeconds,
-            options.preparationGateMinimumAheadSeconds ??
-              preparationGate?.minimumAheadSeconds,
-            libraryPreparationGate?.minimumAheadSeconds,
+            options.preparationGateStopBelowWallSeconds,
+            options.preparationGateStopBelowWallSeconds ??
+              preparationGate?.stopBelowWallSeconds,
+            libraryPreparationGate?.stopBelowWallSeconds,
           )}
-          step={0.25}
-          tooltip="How little drawn mask can be left in front of the playhead before the video stops. It then stays stopped until Required ahead seconds is met, so setting the two apart keeps a clip that is only just keeping up from stuttering in and out. Nothing on this clip gets near the floor, so raising it changes nothing you can see here. `renderer.renderPreparation.playbackGate.minimumAheadSeconds`, default 0.25s, and never more than the required figure."
+          step={0.05}
+          tooltip="How little drawn mask can be left in front of the playhead before the video stops, counted in seconds of your own time. At 4x each of these seconds is four seconds of the clip, so the gate asks for four times as many drawn frames to leave the same picture running. `renderer.renderPreparation.playbackGate.stopBelowWallSeconds`, default 0.1s, and never more than half the mask a stop waits for."
           value={
-            options.preparationGateMinimumAheadSeconds ??
-            preparationGate?.minimumAheadSeconds ??
+            options.preparationGateStopBelowWallSeconds ??
+            preparationGate?.stopBelowWallSeconds ??
             0
           }
           valueLabel={formatOptionSeconds(
-            options.preparationGateMinimumAheadSeconds ??
-              preparationGate?.minimumAheadSeconds,
+            options.preparationGateStopBelowWallSeconds ??
+              preparationGate?.stopBelowWallSeconds,
+          )}
+        />
+        <SliderControl
+          label="Resume margin wall seconds"
+          libraryDefault={formatOptionSeconds(
+            libraryPreparationGate?.resumeMarginWallSeconds,
+          )}
+          max={2}
+          min={0}
+          onChange={(value) =>
+            onUpdate("preparationGateResumeMarginWallSeconds", value)
+          }
+          optionPath="renderPreparation.playbackGate.resumeMarginWallSeconds"
+          origin={readDemoOptionOrigin(
+            options.preparationGateResumeMarginWallSeconds,
+            options.preparationGateResumeMarginWallSeconds ??
+              preparationGate?.resumeMarginWallSeconds,
+            libraryPreparationGate?.resumeMarginWallSeconds,
+          )}
+          step={0.05}
+          tooltip="A stop ends once the drawn mask in front of the playhead is this much longer than the figure that stopped it, counted in seconds of your own time. This is what sets the length of a stop: raise it and every stop lasts longer, lower it and the video is quicker to start again. `renderer.renderPreparation.playbackGate.resumeMarginWallSeconds`, default 0.2s."
+          value={
+            options.preparationGateResumeMarginWallSeconds ??
+            preparationGate?.resumeMarginWallSeconds ??
+            0
+          }
+          valueLabel={formatOptionSeconds(
+            options.preparationGateResumeMarginWallSeconds ??
+              preparationGate?.resumeMarginWallSeconds,
           )}
         />
         <SliderControl
@@ -347,7 +376,7 @@ function SessionOptionControls({
             libraryPreparationGate?.requiredAheadSeconds,
           )}
           step={0.25}
-          tooltip="How much drawn mask has to be in front of the playhead before a stop ends. This is the wait the overlay calls Drawing ahead of the video, where the frame on screen is already finished and the gate is banking a runway in front of it. At 0 that wait is off and the video waits only for the frame it is about to show, which is the other half of this gate. This clip is held about a second when it opens, and this machine draws masks fast enough that the figure barely changes that, so expect it to bite on a denser clip. `renderer.renderPreparation.playbackGate.requiredAheadSeconds`, default 1s."
+          tooltip="A ceiling on how much mask the two wall-clock figures may ask for, in seconds of the clip, rather than a wait of its own. It buys no drawn frames, since how far ahead preparation runs is sized with the clip, not with this; the gate reads that span only as a second ceiling, so a span too small to hold the lead lowers it further. All it can do is shorten a stop by capping the mask that stop waits for. Those two ask for 0.3s of clip at 1x and twice that at 2x, so a 1s ceiling only starts to bite past about 3.3x. At 0 the video waits only for the frame it is about to show. `renderer.renderPreparation.playbackGate.requiredAheadSeconds`, default 1s."
           value={
             options.preparationGateRequiredAheadSeconds ??
             preparationGate?.requiredAheadSeconds ??

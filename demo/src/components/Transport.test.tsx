@@ -39,6 +39,12 @@ function playButton(changes: Partial<TransportProps>): PlayButtonProps {
   return found[0].props;
 }
 
+function glyphClassNames(changes: Partial<TransportProps>): string[] {
+  return collect(Transport.type({ ...baseProps, ...changes }))
+    .map((node) => node.props.className ?? "")
+    .filter((className) => className.startsWith("transport__glyph "));
+}
+
 function collect(
   node: ReactNode,
   found: ReactElement<PlayButtonProps>[] = [],
@@ -61,22 +67,28 @@ function collect(
 }
 
 describe("Transport", () => {
-  it("rings while a hitch is younger than the notice that would name it", () => {
+  it("spins while the transport is waiting", () => {
     expect(playButton({ isBuffering: true })["data-buffering"]).toBe("");
   });
 
-  it("stands the ring down once the notice is naming the wait", () => {
+  it("keeps spinning while the notice names the wait beside it", () => {
     expect(
       playButton({ isBuffering: true, waitLabel: "Waiting for more video" })[
         "data-buffering"
       ],
-    ).toBeUndefined();
+    ).toBe("");
   });
 
-  it("never rings while the transport is not waiting", () => {
+  it("never spins while the transport is not waiting", () => {
     expect(
       playButton({ waitLabel: "Waiting for the model" })["data-buffering"],
     ).toBeUndefined();
+  });
+
+  it("carries a spinner to put in the action glyph's place", () => {
+    expect(glyphClassNames({ isBuffering: true })).toContain(
+      "transport__glyph transport__glyph--busy",
+    );
   });
 
   it("names the wait the notice named, rather than the engine's own word", () => {

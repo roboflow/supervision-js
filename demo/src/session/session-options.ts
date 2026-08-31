@@ -103,8 +103,9 @@ export interface DemoSessionOptions {
   readonly playbackGate?: boolean | "unset";
   readonly prefer2d?: boolean;
   readonly preparationGateEnabled?: boolean;
-  readonly preparationGateMinimumAheadSeconds?: number;
   readonly preparationGateRequiredAheadSeconds?: number;
+  readonly preparationGateResumeMarginWallSeconds?: number;
+  readonly preparationGateStopBelowWallSeconds?: number;
   readonly preparationMode?: RenderPreparationMode;
   readonly previewCapacity?: number;
   readonly previewWidth?: number;
@@ -320,8 +321,9 @@ export function applyDemoRendererOptions(
   });
   const preparationGate = definedOnly({
     enabled: options.preparationGateEnabled,
-    minimumAheadSeconds: options.preparationGateMinimumAheadSeconds,
     requiredAheadSeconds: options.preparationGateRequiredAheadSeconds,
+    resumeMarginWallSeconds: options.preparationGateResumeMarginWallSeconds,
+    stopBelowWallSeconds: options.preparationGateStopBelowWallSeconds,
   });
 
   return {

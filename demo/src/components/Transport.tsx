@@ -38,13 +38,6 @@ export const Transport = memo(function Transport({
       ? "replay"
       : "play";
   const label = TRANSPORT_LABELS[action];
-  /**
-   * The notice withholds itself for a quarter second and withholds its detail
-   * for over half of one, so a hitch shorter than that is reported by nothing
-   * else. The ring covers that opening and stands down the moment the notice
-   * takes over, so the two never report the same wait at the same time.
-   */
-  const ringing = isBuffering && waitLabel === null;
   const sustained = isPlaybackRateSustained(playbackRate, presentedRate);
   const speedLabel = formatPlaybackRate(playbackRate);
   const speedTitle =
@@ -72,7 +65,7 @@ export const Transport = memo(function Transport({
         }
         className="transport__play"
         data-action={action}
-        data-buffering={ringing ? "" : undefined}
+        data-buffering={isBuffering ? "" : undefined}
         disabled={disabled}
         onClick={onTogglePlayback}
         title={`${label} (Space)`}
@@ -119,8 +112,28 @@ export const Transport = memo(function Transport({
             />
             <path d="M8 0.9 11.1 3.1 8 5.3Z" fill="currentColor" />
           </svg>
+          <svg
+            className="transport__glyph transport__glyph--busy"
+            viewBox="0 0 16 16"
+          >
+            <circle
+              cx="8"
+              cy="8"
+              fill="none"
+              opacity="0.35"
+              r="5.7"
+              stroke="currentColor"
+              strokeWidth="1.8"
+            />
+            <path
+              d="M8 2.3A5.7 5.7 0 0 1 13.7 8"
+              fill="none"
+              stroke="currentColor"
+              strokeLinecap="round"
+              strokeWidth="1.8"
+            />
+          </svg>
         </span>
-        <span aria-hidden="true" className="transport__ring" />
       </button>
       <button
         aria-label="Next frame"
