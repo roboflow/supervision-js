@@ -286,6 +286,29 @@ describe("FrameCache", () => {
       expect(cache.get(50, 50, 50)?.timestampMs).toBe(0);
     });
 
+    it("a target between two frames answers with the one behind it", () => {
+      // 24fps, where no frame lands on a whole millisecond. The peek path is
+      // handed a raw pointer position, so most lookups fall between frames.
+      const cache = makeCache({ exactBudgetBytes: 64 * MB, bucketMs: 42 });
+      cache.putExact(1000 / 24, SRC, 320, 180);
+      cache.putExact(2000 / 24, SRC, 320, 180);
+
+      // 83ms is a fraction of a millisecond short of the second frame, which
+      // the position has not reached: a decode for it returns the first.
+      expect(cache.get(83, 50, 50)?.timestampMs).toBe(1000 / 24);
+    });
+
+    it("a frame answers for its own fractional timestamp with a neighbour resident", () => {
+      // The seek path queries at the frame time the tick table produced, so
+      // the target equals the stored timestamp to the bit. Excluding it would
+      // send every on-frame seek to the previous frame.
+      const cache = makeCache({ exactBudgetBytes: 64 * MB, bucketMs: 42 });
+      cache.putExact(1000 / 24, SRC, 320, 180);
+      cache.putExact(2000 / 24, SRC, 320, 180);
+
+      expect(cache.get(2000 / 24, 50, 50)?.timestampMs).toBe(2000 / 24);
+    });
+
     it("the caller's tolerance still bounds a lookup inside one frame's span", () => {
       // 15fps: the frame span is wider than the 50ms constant, so the
       // constant is what binds.

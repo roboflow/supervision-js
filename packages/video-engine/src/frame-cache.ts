@@ -1,8 +1,3 @@
-/** Absorbs the sub-millisecond error in a frame timestamp that a whole-number
- *  bucket grid cannot represent, so a frame sitting exactly on the target is not
- *  read as sitting after it. */
-const BUCKET_EPSILON_MS = 1;
-
 /** Gaps below this are the same frame stored twice with float slop, not two
  *  frames: keys are whole milliseconds, so anything closer straddles one key. */
 const MIN_LEARNABLE_INTERVAL_MS = 1;
@@ -460,8 +455,7 @@ class TierStore {
       // Against the frame's real timestamp, not its key: the key is
       // rounded, so it can sit the far side of the target from the frame it
       // holds.
-      if (atOrBefore && entry.timestampMs > timestampMs + BUCKET_EPSILON_MS)
-        continue;
+      if (atOrBefore && entry.timestampMs > timestampMs) continue;
       const delta = Math.abs(entry.timestampMs - timestampMs);
       if (delta >= spanMs) continue;
       if (delta < bestDelta) {

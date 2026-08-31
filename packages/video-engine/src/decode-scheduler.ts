@@ -687,7 +687,7 @@ export class DecodeScheduler implements ScrubCursor {
 
   private async runExactSeek(t: Sec): Promise<void> {
     this.exactSeeks += 1;
-    const ms = Math.round(t * 1000);
+    const ms = t * 1000;
     const cached = this.cache.get(ms, this.exactTolMs, this.previewTolMs);
     const painted = cached !== null && this.worthPainting(cached, ms);
     if (painted) this.emitCached(cached);
