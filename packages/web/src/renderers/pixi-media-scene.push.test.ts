@@ -625,6 +625,28 @@ describe("push-presented Pixi scene", () => {
     expect(scene.getRenderCount?.()).toBe((settled ?? 0) + 1);
   });
 
+  it.each(
+    Object.keys(
+      createPopulatedPresentation(),
+    ) as (keyof MediaRendererPresentation)[],
+  )("repaints when %s alone changes", async (field) => {
+    const channel = createChannel();
+    const { createPixiMediaScene } = await import("./pixi-media-scene");
+    const scene = await createPixiMediaScene(
+      createSceneOptions(channel.channel),
+    );
+    scene.initializeMedia({ height: 240, width: 320 });
+    channel.present(presentedFrame(2000));
+
+    const applied = createPopulatedPresentation();
+    scene.setPresentation(applied, 2);
+    const settled = scene.getRenderCount?.();
+
+    scene.setPresentation(changePresentationField(applied, field), 2);
+
+    expect(scene.getRenderCount?.()).toBe((settled ?? 0) + 1);
+  });
+
   it("renders a display adjustment once, and a repeat of it never", async () => {
     const channel = createChannel();
     const { createPixiMediaScene } = await import("./pixi-media-scene");
@@ -852,6 +874,47 @@ async function applyDisplayAdjustment(scene: MediaRendererScene) {
 
   scene.setDisplayAdjustments?.({ brightness: 1.4, contrast: 0.8 });
   await vi.waitFor(() => expect(pixiMock.displayFilters).toHaveLength(built));
+}
+
+/**
+ * `Required` is what keeps the cases exhaustive: a presentation field added to
+ * the contract lands here as a missing property.
+ */
+function createPopulatedPresentation(): Required<MediaRendererPresentation> {
+  return {
+    annotationOverlayStyle: {},
+    backgroundColor: 0x101010,
+    boxCornerStyle: createStyle(),
+    boxStyle: createStyle(),
+    ellipseStyle: createStyle(),
+    focusStyle: createStyle(),
+    interactionStyle: createStyle(),
+    keypointStyle: createStyle(),
+    labelStyle: createStyle(),
+    markerStyle: createStyle(),
+    maskHaloStyle: createStyle(),
+    maskStyle: createStyle(),
+    polygonStyle: createStyle(),
+    polylineStyle: createStyle(),
+    renderers: [annotationRenderers.marker()],
+    visibility: {},
+  };
+}
+
+/** Styles compare by identity, so a fresh one is a changed one. */
+function createStyle() {
+  return { resolve: () => undefined };
+}
+
+function changePresentationField(
+  applied: Required<MediaRendererPresentation>,
+  field: keyof MediaRendererPresentation,
+): MediaRendererPresentation {
+  if (field === "backgroundColor") {
+    return { ...applied, backgroundColor: applied.backgroundColor + 1 };
+  }
+
+  return { ...applied, [field]: createPopulatedPresentation()[field] };
 }
 
 function createDeferred<T>() {

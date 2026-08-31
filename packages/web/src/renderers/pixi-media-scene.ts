@@ -23,6 +23,7 @@ import {
   createViewportController,
   resolveAnnotationRendererStyleFields,
   resolveAnnotationStyleState,
+  type AnnotationRendererStyleField,
 } from "supervision-js-core";
 import type { AnnotationVisibility } from "supervision-js-core";
 import type { Point } from "supervision-js-core";
@@ -114,6 +115,16 @@ const REGION_COVERAGE_ONLY_MASK_STYLE: MaskStyle = {
  */
 const STATIC_FOCUS_SETTLE_MS = 10_000;
 
+/** The presentation fields a render answers to that no renderer kind owns. */
+const RENDERED_PRESENTATION_TAIL = [
+  "annotationOverlayStyle",
+  "backgroundColor",
+  "focusStyle",
+  "interactionStyle",
+  "renderers",
+  "visibility",
+] as const;
+
 /**
  * Presentation fields a render answers to. The style half comes from the
  * renderer registry, so a renderer kind added there joins it on its own.
@@ -121,13 +132,24 @@ const STATIC_FOCUS_SETTLE_MS = 10_000;
 const RENDERED_PRESENTATION_FIELDS: readonly (keyof MediaRendererPresentation)[] =
   [
     ...resolveAnnotationRendererStyleFields(annotationRendererKinds),
-    "annotationOverlayStyle",
-    "backgroundColor",
-    "focusStyle",
-    "interactionStyle",
-    "renderers",
-    "visibility",
+    ...RENDERED_PRESENTATION_TAIL,
   ];
+
+/**
+ * A presentation field neither half names is applied and then never repainted:
+ * `setPresentation` ends in `renderOnChange`, which draws only when the
+ * signature these fields build differs from the one on screen.
+ */
+type UnrenderedPresentationField = Exclude<
+  keyof MediaRendererPresentation,
+  AnnotationRendererStyleField | (typeof RENDERED_PRESENTATION_TAIL)[number]
+>;
+
+const _renderedPresentationFieldsAreExhaustive: [
+  UnrenderedPresentationField,
+] extends [never]
+  ? true
+  : never = true;
 
 type FrameDrawTimings = {
   -readonly [
