@@ -368,6 +368,86 @@ describe("FrameCache", () => {
     });
   });
 
+  describe("variable frame rate", () => {
+    /**
+     * Frames at 0, 10, 1000, 1010: two tight pairs a second apart, the shape a
+     * source takes when it holds on a still and then resumes. The tier learns
+     * the smallest gap it has seen, which the tight pairs put at 10ms, and the
+     * frame at 10 is on screen for the whole second after it. The 10ms comes
+     * from those timestamps alone; `bucketMs` reaches diagnostics and keys
+     * nothing, so it is a parameter here rather than the source of the spacing.
+     */
+    function vfrCache(bucketMs = 1): FrameCache {
+      const cache = makeCache({ exactBudgetBytes: 64 * MB, bucketMs });
+      for (const timestampMs of [0, 10, 1000, 1010]) {
+        cache.putExact(frameAt(timestampMs), timestampMs, SRC, 320, 180);
+      }
+      return cache;
+    }
+
+    it("a frame reaches the shortest spacing learned, not its own span", () => {
+      const cache = vfrCache();
+
+      // 1000ms of tolerance covers every target's distance to the frame at 10,
+      // so the learned 10ms spacing is the only thing left that can reject one.
+      // The frame owns 990ms of this source and answers for the first 10 of
+      // them: the frames at 0 and 10 together cover 20ms of [0, 1000), so a
+      // sweep of that span is served 2.000% from the cache and decodes 98.000%.
+      expect(cache.get(19.999, 1000, 1000)?.timestampMs).toBe(10);
+      expect(cache.get(20, 1000, 1000)).toBeNull();
+      expect(cache.get(500, 1000, 1000)).toBeNull();
+      expect(cache.get(999.999, 1000, 1000)).toBeNull();
+    });
+
+    it("what it does answer with is the frame at or before the target", () => {
+      const cache = vfrCache();
+
+      expect(cache.get(0, 50, 50)?.timestampMs).toBe(0);
+      expect(cache.get(5, 50, 50)?.timestampMs).toBe(0);
+      expect(cache.get(10, 50, 50)?.timestampMs).toBe(10);
+      expect(cache.get(15, 50, 50)?.timestampMs).toBe(10);
+      expect(cache.get(1000, 50, 50)?.timestampMs).toBe(1000);
+      expect(cache.get(1005, 50, 50)?.timestampMs).toBe(1000);
+      expect(cache.get(1010, 50, 50)?.timestampMs).toBe(1010);
+      expect(cache.get(1015, 50, 50)?.timestampMs).toBe(1010);
+    });
+
+    it("a generous tolerance does not widen the reach past the spacing", () => {
+      const cache = vfrCache();
+
+      // The frame at 1000 sits 5ms ahead of this target and deep inside the
+      // tolerance, and a decode for 995 would never return it.
+      expect(cache.get(995, 5000, 5000)).toBeNull();
+      expect(cache.get(500, 5000, 5000)).toBeNull();
+
+      // The learned spacing is what rejects them. The same two frames with
+      // the tight pairs never seen leave the 10ms gap unlearned, and the
+      // frame at 0 answers across the whole second.
+      const sparse = makeCache({ exactBudgetBytes: 64 * MB });
+      sparse.putExact(frameAt(0), 0, SRC, 320, 180);
+      sparse.putExact(frameAt(1000), 1000, SRC, 320, 180);
+      expect(sparse.get(500, 5000, 5000)?.timestampMs).toBe(0);
+    });
+
+    it("bucketMs is a diagnostics mark width and keys nothing", () => {
+      const narrow = vfrCache(1);
+      const wide = vfrCache(999);
+
+      // Both tiers bound lookups by the gap between the timestamps they were
+      // handed, so bucketMs 999 and bucketMs 1 answer every probe alike and
+      // differ only in the number stats reports.
+      for (const probe of [0, 5, 10, 15, 19.999, 20, 500, 995, 1000, 1005]) {
+        expect(wide.get(probe, 1000, 1000)?.timestampMs ?? null).toBe(
+          narrow.get(probe, 1000, 1000)?.timestampMs ?? null,
+        );
+      }
+      expect(wide.get(1005, 1000, 1000)?.timestampMs).toBe(1000);
+      expect(wide.get(500, 1000, 1000)).toBeNull();
+      expect(wide.stats.bucketMs).toBe(999);
+      expect(narrow.stats.bucketMs).toBe(1);
+    });
+  });
+
   describe("peek", () => {
     it("returns the same hit as get but does not count it", () => {
       const cache = makeCache({
@@ -638,6 +718,11 @@ describe("FrameCache", () => {
  *  millisecond. A tier keyed by frame identity passes 0. */
 const ROUNDED_MS_KEY_GRID = 1;
 
+/** What the exact tier passes: its keys are frame identities rather than
+ *  rounded times, so no gap between two stored frames is a key-rounding
+ *  artifact. */
+const FRAME_IDENTITY_KEY_GRID = 0;
+
 describe("TierStore spacing", () => {
   it("does not learn a gap under the key grid as the frame interval", () => {
     const tier = new TierStore(4, 32, 18, ROUNDED_MS_KEY_GRID);
@@ -657,5 +742,30 @@ describe("TierStore spacing", () => {
 
     expect(tier.get(40, 50, true)?.timestampMs).toBe(33.367);
     expect(tier.get(80, 50, true)).toBeNull();
+  });
+
+  it("holds a learned interval after every frame that taught it is evicted", () => {
+    const tier = new TierStore(2, 32, 18, FRAME_IDENTITY_KEY_GRID);
+    // A tight pair teaches a 10ms interval, then a pair five seconds later
+    // fills both slots and evicts both of them. The interval only ever narrows,
+    // so it outlives the frames that justified it: nothing 10ms apart is
+    // resident, yet a 10ms bound still governs a lookup handed 5000ms.
+    tier.put(0, 0, SRC, 320, 180);
+    tier.put(10, 10, SRC, 320, 180);
+    tier.put(5000, 5000, SRC, 320, 180);
+    tier.put(6000, 6000, SRC, 320, 180);
+    expect(tier.timestampsSnapshot()).toEqual([5000, 6000]);
+
+    expect(tier.get(5009, 5000, true)?.timestampMs).toBe(5000);
+    expect(tier.get(5010, 5000, true)).toBeNull();
+    expect(tier.get(5500, 5000, true)).toBeNull();
+
+    // The same two survivors in a tier that never saw the tight pair carry a
+    // 1000ms interval, so the history and not the residents is what decides.
+    const fresh = new TierStore(2, 32, 18, FRAME_IDENTITY_KEY_GRID);
+    fresh.put(5000, 5000, SRC, 320, 180);
+    fresh.put(6000, 6000, SRC, 320, 180);
+
+    expect(fresh.get(5500, 5000, true)?.timestampMs).toBe(5000);
   });
 });
