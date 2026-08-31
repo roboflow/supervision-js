@@ -66,6 +66,11 @@ const DEFAULT_CHUNK_BYTES = 4 * 1024 * 1024;
  *  the network for less than half a mebibyte, so every read it makes banks
  *  at least one block. */
 export const READ_BLOCK_BYTES = 512 * 1024;
+/** How long a delivered chunk may sit unclaimed before the walk stops deferring
+ *  to the read that produced it. It measures the gap between a chunk and the
+ *  consumer's next pull, not the wait for the server, so a slow link reads as
+ *  a live read while a reader that walked away frees the link. */
+export const FOREGROUND_STALL_MS = 250;
 const RANGE_HEADER = /^bytes=(\d+)-(\d*)$/;
 
 const segmentEnd = (segment: Segment): number =>
@@ -277,20 +282,55 @@ export function createSourceResidency(
   let focus = 0;
   let warming = false;
   let walking = false;
-  let foregroundReads = 0;
   let disposed = false;
   const warmAborts = new Set<AbortController>();
+  const foregroundHolds = new Set<() => void>();
 
   /* A background chunk shares one connection and one link with the read the
    * viewer is waiting on, so the walk stands down while a read is outstanding
-   * rather than lengthening it. */
-  const foregroundIdle = (): boolean => foregroundReads === 0;
+   * rather than lengthening it. A read is outstanding from the request until
+   * its body ends, is cancelled, errors, or leaves a chunk unclaimed for
+   * FOREGROUND_STALL_MS. */
+  const foregroundIdle = (): boolean => foregroundHolds.size === 0;
+
+  /** One read's claim on the link, given back by `release` — idempotent, so
+   *  every end of the read can call it. A reader that walks away calls no end
+   *  at all, so the claim also lapses on its own: `idle` arms the stall ceiling
+   *  once a chunk is delivered, and `pulling` stands it down while the consumer
+   *  is waiting on the server. */
+  const holdForeground = () => {
+    let stall: ReturnType<typeof setTimeout> | undefined;
+    const release = (): void => {
+      clearTimeout(stall);
+      foregroundHolds.delete(release);
+    };
+    foregroundHolds.add(release);
+    return {
+      release,
+      pulling: () => {
+        clearTimeout(stall);
+      },
+      idle: () => {
+        if (!foregroundHolds.has(release)) return;
+        clearTimeout(stall);
+        stall = setTimeout(release, FOREGROUND_STALL_MS);
+      },
+    };
+  };
 
   /* The demuxer opens a read as an open-ended range and abandons the response
-   * the moment it holds what it asked for, and a transform whose reader walked
-   * away runs neither its flush nor its cancel in Chrome. */
-  const teeInto = (start: number, response: Response): Response => {
-    if (!response.body) return response;
+   * the moment it holds what it asked for, and a stream whose reader walked
+   * away runs neither its close nor its cancel in Chrome. */
+  const teeInto = (
+    start: number,
+    response: Response,
+    hold: ReturnType<typeof holdForeground>,
+  ): Response => {
+    if (!response.body) {
+      hold.release();
+      return response;
+    }
+    const source = response.body.getReader();
     let blockStart = start;
     let block: Uint8Array[] = [];
     let blockBytes = 0;
@@ -308,17 +348,40 @@ export function createSourceResidency(
       block = [];
       blockBytes = 0;
     };
-    const stream = response.body.pipeThrough(
-      new TransformStream<Uint8Array, Uint8Array>({
-        transform(chunk, controller) {
-          controller.enqueue(chunk);
-          block.push(chunk);
-          blockBytes += chunk.length;
+    /* A zero high-water mark keeps the wrapper from pulling bytes the reader
+     * never asked for, which would be banked out of a range nobody read. */
+    const stream = new ReadableStream<Uint8Array>(
+      {
+        async pull(controller) {
+          hold.pulling();
+          let chunk: ReadableStreamReadResult<Uint8Array>;
+          try {
+            chunk = await source.read();
+          } catch (error) {
+            hold.release();
+            throw error;
+          }
+          if (chunk.done) {
+            bank();
+            hold.release();
+            controller.close();
+            return;
+          }
+          controller.enqueue(chunk.value);
+          block.push(chunk.value);
+          blockBytes += chunk.value.length;
           if (blockBytes >= READ_BLOCK_BYTES) bank();
+          hold.idle();
         },
-        flush: bank,
-      }),
+        cancel(reason) {
+          bank();
+          hold.release();
+          return source.cancel(reason);
+        },
+      },
+      { highWaterMark: 0 },
     );
+    hold.idle();
     return new Response(stream, {
       status: response.status,
       statusText: response.statusText,
@@ -334,17 +397,22 @@ export function createSourceResidency(
         return partialResponse(held, start, totalBytes);
       }
     }
-    foregroundReads += 1;
+    const hold = holdForeground();
+    let response: Response;
     try {
-      const response = await realFetch(input, init);
-      totalBytes ??= totalFromHeaders(response);
-      if (start === null || !response.ok) return response;
-      /* A server that ignores the range answers 200 with the whole file, so
-       * what arrives begins at zero whatever was asked for. */
-      return teeInto(response.status === 206 ? start : 0, response);
-    } finally {
-      foregroundReads -= 1;
+      response = await realFetch(input, init);
+    } catch (error) {
+      hold.release();
+      throw error;
     }
+    totalBytes ??= totalFromHeaders(response);
+    if (start === null || !response.ok) {
+      hold.release();
+      return response;
+    }
+    /* A server that ignores the range answers 200 with the whole file, so
+     * what arrives begins at zero whatever was asked for. */
+    return teeInto(response.status === 206 ? start : 0, response, hold);
   };
 
   /** The first gap at or after `from`, bounded by the chunk size. */
@@ -444,6 +512,7 @@ export function createSourceResidency(
       warming = false;
       for (const controller of warmAborts) controller.abort();
       warmAborts.clear();
+      for (const release of [...foregroundHolds]) release();
       store.clear();
     },
   };

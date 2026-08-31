@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { READ_BLOCK_BYTES, createSourceResidency } from "./source-residency";
+import {
+  FOREGROUND_STALL_MS,
+  READ_BLOCK_BYTES,
+  createSourceResidency,
+} from "./source-residency";
 
 const URL_UNDER_TEST = "https://example.test/clip.mov";
 const TOTAL = 4096;
@@ -35,10 +39,13 @@ const read = async (response: Response): Promise<Uint8Array> =>
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-/** Serves a range in pieces, so a reader can walk away part-way through one. */
-function pieceFetch(total: number, pieceBytes: number) {
+/** Serves a range in pieces, so a reader can walk away part-way through one.
+ *  `pieceDelayMs` is the server's own latency ahead of each piece. */
+function pieceFetch(total: number, pieceBytes: number, pieceDelayMs = 0) {
   let served = 0;
+  let requestCount = 0;
   const impl = async (_input: unknown, init?: RequestInit) => {
+    requestCount += 1;
     const header = new Headers(init?.headers ?? undefined).get("Range");
     const match = header ? /^bytes=(\d+)-(\d*)$/.exec(header) : null;
     const start = match ? Number(match[1]) : 0;
@@ -48,11 +55,14 @@ function pieceFetch(total: number, pieceBytes: number) {
      * nobody read, so the byte counts below describe the reads themselves. */
     const stream = new ReadableStream<Uint8Array>(
       {
-        pull(controller) {
+        async pull(controller) {
           const length = Math.min(pieceBytes, end + 1 - cursor);
           if (length <= 0) {
             controller.close();
             return;
+          }
+          if (pieceDelayMs > 0) {
+            await new Promise((resolve) => setTimeout(resolve, pieceDelayMs));
           }
           controller.enqueue(body(cursor, length));
           cursor += length;
@@ -72,6 +82,7 @@ function pieceFetch(total: number, pieceBytes: number) {
   return {
     fetchImpl: impl as unknown as typeof fetch,
     servedBytes: () => served,
+    requests: () => requestCount,
   };
 }
 
@@ -131,6 +142,11 @@ function countCopiedBytes(): {
     },
   };
 }
+
+/** A link slow enough that every gap between chunks outlasts the stall ceiling,
+ *  so a walk that reads server latency as an abandoned body issues a request of
+ *  its own part-way through the reads below. */
+const SLOW_PIECE_MS = FOREGROUND_STALL_MS + 100;
 
 describe("createSourceResidency", () => {
   it("serves a repeat read from what the first read left behind", async () => {
@@ -335,6 +351,143 @@ describe("createSourceResidency", () => {
     expect(network.servedBytes()).toBe(STREAMED_TOTAL);
   });
 
+  it("holds the walk down until a foreground body is read to its end", async () => {
+    const network = pieceFetch(STREAMED_TOTAL, PIECE, SLOW_PIECE_MS);
+    const residency = createSourceResidency({
+      url: URL_UNDER_TEST,
+      budgetBytes: STREAMED_TOTAL,
+      chunkBytes: PIECE,
+      fetchImpl: network.fetchImpl,
+    });
+
+    const response = await residency.fetchFn(URL_UNDER_TEST, {
+      headers: { Range: `bytes=0-${PIECE * 3 - 1}` },
+    });
+    residency.startWarming();
+    const reader = response.body!.getReader();
+    for (;;) {
+      const { done } = await reader.read();
+      if (done) break;
+      expect(network.requests()).toBe(1);
+    }
+
+    await vi.waitFor(
+      () => {
+        expect(residency.snapshot().prefetchedBytes).toBeGreaterThan(0);
+      },
+      { timeout: SLOW_PIECE_MS * 4 },
+    );
+  });
+
+  it("gives the walk back the link when a foreground body is cancelled", async () => {
+    const network = pieceFetch(STREAMED_TOTAL, PIECE, SLOW_PIECE_MS);
+    const residency = createSourceResidency({
+      url: URL_UNDER_TEST,
+      budgetBytes: STREAMED_TOTAL,
+      chunkBytes: PIECE,
+      fetchImpl: network.fetchImpl,
+    });
+
+    const response = await residency.fetchFn(URL_UNDER_TEST, {
+      headers: { Range: "bytes=0-" },
+    });
+    residency.startWarming();
+    const reader = response.body!.getReader();
+    for (let piece = 0; piece < 2; piece += 1) {
+      await reader.read();
+      expect(network.requests()).toBe(1);
+    }
+
+    await reader.cancel();
+
+    await vi.waitFor(
+      () => {
+        expect(residency.snapshot().prefetchedBytes).toBeGreaterThan(0);
+      },
+      { timeout: SLOW_PIECE_MS * 4 },
+    );
+  });
+
+  it("keeps the link for a read whose consumer is still pulling", async () => {
+    const network = pieceFetch(STREAMED_TOTAL, PIECE, SLOW_PIECE_MS);
+    const residency = createSourceResidency({
+      url: URL_UNDER_TEST,
+      budgetBytes: STREAMED_TOTAL,
+      chunkBytes: PIECE,
+      fetchImpl: network.fetchImpl,
+    });
+
+    const response = await residency.fetchFn(URL_UNDER_TEST, {
+      headers: { Range: "bytes=0-" },
+    });
+    residency.startWarming();
+    const reader = response.body!.getReader();
+    for (let piece = 0; piece < 2; piece += 1) await reader.read();
+
+    expect(network.requests()).toBe(1);
+    expect(residency.snapshot().prefetchedBytes).toBe(0);
+    /* A walk left pulling on this slow link would still be banking bytes while
+     * a later test counts copies. */
+    residency.dispose();
+  });
+
+  it("gives the walk back the link when a foreground reader walks away", async () => {
+    const network = pieceFetch(STREAMED_TOTAL, PIECE);
+    const residency = createSourceResidency({
+      url: URL_UNDER_TEST,
+      budgetBytes: STREAMED_TOTAL,
+      chunkBytes: READ_BLOCK_BYTES,
+      fetchImpl: network.fetchImpl,
+    });
+
+    const response = await residency.fetchFn(URL_UNDER_TEST, {
+      headers: { Range: `bytes=0-${READ_BLOCK_BYTES - 1}` },
+    });
+    residency.startWarming();
+    await response.body!.getReader().read();
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(residency.snapshot().prefetchedBytes).toBe(0);
+
+    await vi.waitFor(() => {
+      expect(residency.snapshot().prefetchedBytes).toBeGreaterThan(0);
+    });
+  });
+
+  it("gives the walk back the link when a foreground request fails", async () => {
+    const network = pieceFetch(STREAMED_TOTAL, PIECE);
+    let failing = false;
+    const fetchImpl: typeof fetch = async (input, init) => {
+      if (failing) throw new Error("network down");
+      return network.fetchImpl(input, init);
+    };
+    const residency = createSourceResidency({
+      url: URL_UNDER_TEST,
+      budgetBytes: STREAMED_TOTAL,
+      chunkBytes: READ_BLOCK_BYTES,
+      fetchImpl,
+    });
+
+    await drain(
+      await residency.fetchFn(URL_UNDER_TEST, {
+        headers: { Range: `bytes=0-${READ_BLOCK_BYTES - 1}` },
+      }),
+    );
+    await settle();
+
+    failing = true;
+    await expect(
+      residency.fetchFn(URL_UNDER_TEST, {
+        headers: { Range: `bytes=${READ_BLOCK_BYTES}-` },
+      }),
+    ).rejects.toThrow("network down");
+    failing = false;
+
+    residency.startWarming();
+    await vi.waitFor(() => {
+      expect(residency.snapshot().prefetchedBytes).toBeGreaterThan(0);
+    });
+  });
+
   it("places a body the server did not range-satisfy at the start of the file", async () => {
     const residency = createSourceResidency({
       url: URL_UNDER_TEST,
@@ -444,5 +597,27 @@ describe("createSourceResidency", () => {
     residency.dispose();
 
     expect(residency.snapshot().residentBytes).toBe(0);
+  });
+
+  it("leaves no stall ceiling running for a read still open at dispose", async () => {
+    vi.useFakeTimers();
+    try {
+      const residency = createSourceResidency({
+        url: URL_UNDER_TEST,
+        budgetBytes: STREAMED_TOTAL,
+        fetchImpl: pieceFetch(STREAMED_TOTAL, PIECE).fetchImpl,
+      });
+
+      await residency.fetchFn(URL_UNDER_TEST, {
+        headers: { Range: "bytes=0-" },
+      });
+      expect(vi.getTimerCount()).toBe(1);
+
+      residency.dispose();
+
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
