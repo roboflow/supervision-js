@@ -67,6 +67,7 @@ export function createMediaSessionStateSnapshot({
     renderer?.detectionBuffer.status === DetectionBufferStatus.AwaitingCoverage;
   const loadingDetections =
     renderer?.detectionBuffer.status === DetectionBufferStatus.Loading;
+  const awaitingSourceRead = renderer?.source.awaitingRead === true;
   const preparingActiveFrame = (renderPreparation?.artifacts ?? []).some(
     (artifact) =>
       artifact.activeFrame?.status ===
@@ -74,11 +75,24 @@ export function createMediaSessionStateSnapshot({
       Boolean(artifact.gateHold),
   );
 
+  if (awaitingSourceRead) {
+    activities.push(
+      createActivity({
+        blockingPlayback: true,
+        detail: "The video for this part has not arrived yet",
+        kind: MediaSessionActivityKind.MediaSourceReading,
+        label: "Loading the video",
+        status: MediaSessionActivityStatus.Waiting,
+      }),
+    );
+  }
+
   // A picture stopped for its annotations is not stopped for its own bytes, and
   // a host shown both reads the vaguer one first and tells the viewer the wrong
   // thing. Only the reason nothing more specific claims is reported here.
   if (
     stoppedForPlayback &&
+    !awaitingSourceRead &&
     !awaitingCoverage &&
     !loadingDetections &&
     !preparingActiveFrame

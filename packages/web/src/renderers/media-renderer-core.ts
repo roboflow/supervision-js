@@ -142,6 +142,33 @@ export async function createMediaRendererCore(
   let sampleSink: DecodedVideoSampleSink | undefined;
   let firstTimestamp = 0;
   let navigationVersion = 0;
+  let outstandingSourceReads = 0;
+
+  const beginSourceRead = () => {
+    outstandingSourceReads += 1;
+
+    if (outstandingSourceReads === 1) {
+      runtimeState.setSourceAwaitingRead(true);
+    }
+  };
+
+  const endSourceRead = () => {
+    outstandingSourceReads -= 1;
+
+    if (outstandingSourceReads === 0) {
+      runtimeState.setSourceAwaitingRead(false);
+    }
+  };
+
+  const trackSourceRead = async <TRead>(read: Promise<TRead>) => {
+    beginSourceRead();
+
+    try {
+      return await read;
+    } finally {
+      endSourceRead();
+    }
+  };
 
   const adoptTransportPlaybackState = (state: MediaRendererPlaybackState) => {
     // Not gated on isError: the producer owns playback truth here, so a
@@ -533,9 +560,9 @@ export async function createMediaRendererCore(
       playbackController.pause();
 
       try {
-        const sample = await sampleSink.getSample(targetTime, {
-          skipLiveWait: true,
-        });
+        const sample = await trackSourceRead(
+          sampleSink.getSample(targetTime, { skipLiveWait: true }),
+        );
 
         if (!sample) {
           throw new Error("No decoded video sample was found for seek.");
@@ -968,6 +995,13 @@ export async function createMediaRendererCore(
           runtimeState.setPlaying();
         }
       },
+      onSourceWait(waiting) {
+        if (waiting) {
+          beginSourceRead();
+        } else {
+          endSourceRead();
+        }
+      },
       onWaiting() {
         if (runtimeState.isPlaybackActive()) {
           runtimeState.setBuffering();
@@ -1021,16 +1055,20 @@ export async function createMediaRendererCore(
 
     try {
       if (direction === "backward") {
-        sample = await sampleSink.getSample(
-          Math.max(firstTimestamp, currentTime - epsilon),
-          { skipLiveWait: true },
+        sample = await trackSourceRead(
+          sampleSink.getSample(
+            Math.max(firstTimestamp, currentTime - epsilon),
+            {
+              skipLiveWait: true,
+            },
+          ),
         );
       } else {
         const iterator = sampleSink.samples(currentTime + epsilon, undefined, {
           skipLiveWait: true,
         });
         try {
-          const result = await iterator.next();
+          const result = await trackSourceRead(iterator.next());
           sample = result.done ? null : result.value;
         } finally {
           await iterator.return?.();
