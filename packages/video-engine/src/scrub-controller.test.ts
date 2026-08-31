@@ -1429,9 +1429,13 @@ describe("ScrubController adaptive present cadence", () => {
   const SOURCE_FPS = 30;
 
   interface Machine {
-    readonly rate: number;
+    readonly rate: number | ((wallS: number) => number);
     readonly displayHz: number;
     readonly wallS: number;
+    /** Media second the run seeks the playhead to on the tick at this wall
+     *  second, or null for a tick that does not seek. The transport keeps
+     *  running across it, which is what makes it a seek and not a stop. */
+    readonly seekTo?: (wallS: number) => number | null;
     /** Frames a second this machine decodes when it presents nothing, as a
      *  figure or as one that changes over the run. */
     readonly decodesPerSecond: number | ((wallS: number) => number);
@@ -1485,7 +1489,11 @@ describe("ScrubController adaptive present cadence", () => {
       cacheSkipNearMs: 100,
     });
     controller.bindCanvas(makeCanvas());
-    clock.setRate(machine.rate);
+    const rateAt =
+      typeof machine.rate === "function"
+        ? machine.rate
+        : (): number => machine.rate as number;
+    clock.setRate(rateAt(0));
     controller.beginPlay(0);
     clock.play(0);
     const budgetAt =
@@ -1494,10 +1502,33 @@ describe("ScrubController adaptive present cadence", () => {
         : (): number => machine.decodesPerSecond as number;
     const ticks = Math.round(machine.displayHz * machine.wallS);
     let spent = 0;
+    // A leg is timed from where the previous one left the playhead, so a rate
+    // change moves it on from there and leaves the legs already played alone.
+    let rate = rateAt(0);
+    let mediaS = 0;
+    let legWallS = 0;
+    let legMediaS = 0;
     for (let tick = 1; tick <= ticks; tick++) {
       cursor.fund(budgetAt(wallS) / machine.displayHz - spent);
+      const commanded = rateAt(tick / machine.displayHz);
+      if (commanded !== rate) {
+        legWallS = wallS;
+        legMediaS = mediaS;
+        rate = commanded;
+        clock.setRate(rate);
+      }
       wallS = tick / machine.displayHz;
-      clock.setT(wallS * machine.rate);
+      mediaS = legMediaS + (wallS - legWallS) * rate;
+      clock.setT(mediaS);
+      const target = machine.seekTo?.(wallS) ?? null;
+      if (target !== null) {
+        legWallS = wallS;
+        legMediaS = target;
+        mediaS = target;
+        clock.seek(mediaS);
+        controller.endPlay();
+        controller.beginPlay(mediaS);
+      }
       const before = painted.length;
       await flushRaf();
       spent = (painted.length - before) * machine.presentCost;
@@ -1540,6 +1571,10 @@ describe("ScrubController adaptive present cadence", () => {
   let roomySample120At4x: Run;
   let strainedSample120: Run;
   let relievedSample120: Run;
+  let roomy120Stepping: Run;
+  let strained120Stepping: Run;
+  let hitched120: Run;
+  let sought120: Run;
 
   beforeAll(async () => {
     roomy60At4x = await play({ ...ROOMY, rate: 4, displayHz: 60, wallS: 1 });
@@ -1585,6 +1620,34 @@ describe("ScrubController adaptive present cadence", () => {
       displayHz: 120,
       wallS: 6,
       decodesPerSecond: (wallS) => (wallS < 3 ? 180 : 900),
+    });
+    roomy120Stepping = await play({
+      ...ROOMY,
+      rate: (wallS) => (wallS < 1 ? 1 : wallS < 2 ? 8 : 1),
+      displayHz: 120,
+      wallS: 3,
+    });
+    strained120Stepping = await play({
+      ...STRAINED,
+      rate: (wallS) => (wallS < 2 ? 8 : wallS < 4 ? 1 : 8),
+      displayHz: 120,
+      wallS: 6,
+    });
+    hitched120 = await play({
+      ...ROOMY,
+      // Sized to what 4x on this panel asks of it. A machine banking several
+      // times that pays for a blackout out of the surplus and never feels one.
+      decodesPerSecond: (wallS) => (wallS >= 1 && wallS < 1.4 ? 0 : 300),
+      rate: 4,
+      displayHz: 120,
+      wallS: 3,
+    });
+    sought120 = await play({
+      ...STRAINED,
+      rate: 4,
+      displayHz: 120,
+      wallS: 6,
+      seekTo: (wallS) => (wallS >= 3 && wallS < 3.3 ? 40 + wallS * 8 : null),
     });
   }, 300_000);
 
@@ -1776,6 +1839,84 @@ describe("ScrubController adaptive present cadence", () => {
    */
   it("a machine with room on the zero-copy path presents every frame the panel offers", () => {
     expect(roomySample120At4x.painted.length).toBeGreaterThanOrEqual(116);
+  });
+
+  /**
+   * The share is a statement about the machine and not about the rate it was
+   * measured at, so a pipeline keeping up at 1x is keeping up the moment 8x is
+   * asked for. Its opening half second at 8x fills every slot the panel offers,
+   * with no band to climb first, and the legs either side of it paint the
+   * source's own frames because that is the whole of what 1x asks for.
+   */
+  it("a machine with room opens a new rate at the full panel offer", () => {
+    const windows = presentsPerSecondByWindow(roomy120Stepping, WINDOW_S);
+    const [openingAt8x, settledAt8x] = windows.slice(2, 4);
+
+    expect(Math.max(...windows.slice(0, 2))).toBeLessThanOrEqual(
+      SOURCE_FPS * 1.1,
+    );
+    expect(openingAt8x).toBeGreaterThanOrEqual(116);
+    expect(openingAt8x).toBeGreaterThanOrEqual(settledAt8x * 0.98);
+    expect(Math.max(...windows.slice(4))).toBeLessThanOrEqual(SOURCE_FPS * 1.1);
+  });
+
+  /**
+   * A share the machine's own shortfall bought is still its share after a leg
+   * that had no way to read it. 1x asks for exactly the source rate the cadence
+   * floors at, so no frame over that leg can be declined for cadence, and this
+   * machine is still behind the playhead when 8x is asked for again: the pump
+   * opens the second leg where the first one left it. A pump opening every leg
+   * at a full share would shed the same ground again each time, and buy those
+   * presents out of the decodes the picture is waiting on.
+   */
+  it("a shed share outlives a leg the source-fps floor covers", () => {
+    const windows = presentsPerSecondByWindow(strained120Stepping, WINDOW_S);
+    const shedAt8x = windows.slice(1, 4);
+    const backAt8x = windows.slice(8);
+
+    expect(windows[0]).toBeGreaterThan(Math.max(...shedAt8x));
+    expect(Math.max(...shedAt8x)).toBeLessThanOrEqual(SOURCE_FPS * 1.5);
+    expect(backAt8x[0]).toBeLessThanOrEqual(Math.max(...shedAt8x) * 1.2);
+    expect(Math.max(...backAt8x)).toBeLessThanOrEqual(
+      Math.max(...shedAt8x) * 1.2,
+    );
+  });
+
+  /**
+   * A hitch too short to re-anchor across is one the pump works through: the
+   * picture comes back onto the playhead at the rate that was commanded, and
+   * the cadence back to the offer it was filling. A burst of seeks is not a
+   * machine that changed either, since the transport never stopped, so the
+   * share the run has measured is still the truth about it and the shed rate
+   * carries straight through the burst.
+   */
+  it("the cadence comes back from a hitch and rides through a burst of seeks", () => {
+    // Half-second windows would smear a hitch shorter than one of them.
+    const windowS = 0.25;
+    const hitch = presentsPerSecondByWindow(hitched120, windowS);
+    const beforeHitch = hitch.slice(1, 5);
+    const duringHitch = hitch.slice(5, 7);
+    const afterHitch = hitch.slice(-2);
+    const last = hitched120.painted.length - 1;
+
+    expect(Math.min(...duringHitch)).toBeLessThan(Math.min(...beforeHitch) / 2);
+    expect(Math.min(...afterHitch)).toBeGreaterThanOrEqual(
+      Math.min(...beforeHitch) * 0.95,
+    );
+    expect(
+      achievedRate(hitched120, Math.floor(last / 2), last),
+    ).toBeGreaterThanOrEqual(4 * 0.95);
+
+    const seeks = presentsPerSecondByWindow(sought120, windowS);
+    const settled = seeks.slice(4, 12);
+    const throughSeeks = seeks.slice(12);
+
+    expect(Math.max(...throughSeeks)).toBeLessThanOrEqual(
+      Math.max(...settled) * 1.1,
+    );
+    expect(Math.min(...throughSeeks)).toBeGreaterThanOrEqual(
+      Math.min(...settled) * 0.9,
+    );
   });
 });
 
