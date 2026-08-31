@@ -9,9 +9,15 @@ import { DemoMediaPath, type DemoSessionOptions } from "./session-options";
  */
 export const DEMO_DEFAULT_MEDIA_PATH = DemoMediaPath.Mediabunny;
 
-const requestedMediaPath = readDemoMediaPathOverride(
-  typeof location === "undefined" ? "" : location.search,
-);
+/**
+ * The path the workbench actually opens on: the one named in the query string
+ * if there is one, and the shipped default otherwise. The two differ only when
+ * a harness has pinned the path, and the panel has to say which it got.
+ */
+export const DEMO_OPENING_MEDIA_PATH =
+  readDemoMediaPathOverride(
+    typeof location === "undefined" ? "" : location.search,
+  ) ?? DEMO_DEFAULT_MEDIA_PATH;
 
 /**
  * The options the workbench opens a clip on, over the ones the library would
@@ -22,7 +28,7 @@ const requestedMediaPath = readDemoMediaPathOverride(
  * path nobody asked for.
  */
 export const demoInitialSessionOptions: DemoSessionOptions = {
-  mediaPath: requestedMediaPath ?? DEMO_DEFAULT_MEDIA_PATH,
+  mediaPath: DEMO_OPENING_MEDIA_PATH,
 };
 
 /** How many options the visitor has moved off what the workbench opened on. */

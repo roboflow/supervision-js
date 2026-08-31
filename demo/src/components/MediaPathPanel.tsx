@@ -1,6 +1,6 @@
 import { memo } from "react";
 
-import { DEMO_DEFAULT_MEDIA_PATH } from "../session/workbench-defaults";
+import { DEMO_OPENING_MEDIA_PATH } from "../session/workbench-defaults";
 import {
   DemoMediaPath,
   type DemoOptionSupport,
@@ -67,7 +67,7 @@ function MediaPathOption({
     >
       <span className="media-path__option-head">
         <strong>{copy.label}</strong>
-        {path === DEMO_DEFAULT_MEDIA_PATH ? (
+        {path === DEMO_OPENING_MEDIA_PATH ? (
           <span className="media-path__badge">opens here</span>
         ) : null}
       </span>
