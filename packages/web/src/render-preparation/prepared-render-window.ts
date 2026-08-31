@@ -74,9 +74,16 @@ export interface PreparedRenderWindow {
    * nothing. True when there is nothing to cook: no style, no frame there.
    */
   isArtifactPrepared(mediaTime: number): boolean;
+  /**
+   * Resolves once the media time may be presented. `signal` is how a caller
+   * that has moved on says so: aborting resolves the wait and drops the hold it
+   * was placing on preparation, because a caller that walked away re-checks
+   * whatever it does next anyway. Without one, an abandoned wait holds forever.
+   */
   waitForReady(
     mediaTime: number,
     options: RenderPreparationPlaybackGateOptions,
+    signal?: AbortSignal,
   ): Promise<void>;
   /**
    * Whether the playhead is moving. A window over a resting playhead covers a
@@ -132,9 +139,11 @@ export function createPreparedRenderWindow(options: {
   const maskFrameOptions = options.renderPreparation?.maskFrame;
   const maxMaskFrameCacheSize = Math.max(
     1,
-    options.maxMaskFrameCacheSize ??
-      maskFrameOptions?.maxCacheFrameCount ??
-      DEFAULT_MASK_FRAME_CACHE_SIZE,
+    Math.floor(
+      options.maxMaskFrameCacheSize ??
+        maskFrameOptions?.maxCacheFrameCount ??
+        DEFAULT_MASK_FRAME_CACHE_SIZE,
+    ) || DEFAULT_MASK_FRAME_CACHE_SIZE,
   );
   const prefetchFrameCount = resolvePreparedWindowFrameCount(options);
   const preparedWindowScanIntervalSeconds = Math.max(
@@ -636,7 +645,9 @@ export function createPreparedRenderWindow(options: {
       return;
     }
 
-    if (!isPlayheadSettled && !batchOptions.force) {
+    /* A wait held at the gate does not ask again until it is let through, so
+       the hold is what has to keep preparation running. */
+    if (!isPlayheadSettled && !batchOptions.force && getGateHold() === null) {
       return;
     }
 
@@ -681,8 +692,8 @@ export function createPreparedRenderWindow(options: {
       );
     },
 
-    waitForReady(mediaTime, waitOptions) {
-      if (waitOptions.enabled === false) {
+    waitForReady(mediaTime, waitOptions, signal) {
+      if (waitOptions.enabled === false || signal?.aborted) {
         return Promise.resolve();
       }
 
@@ -710,6 +721,11 @@ export function createPreparedRenderWindow(options: {
         const endWait = () => {
           readinessWaiters.delete(checkReady);
           activeReadinessWaits.delete(activeWait);
+          signal?.removeEventListener("abort", abandonWait);
+        };
+        const abandonWait = () => {
+          endWait();
+          resolve();
         };
         const checkReady = () => {
           if (terminalPreparationError) {
@@ -731,6 +747,7 @@ export function createPreparedRenderWindow(options: {
 
         readinessWaiters.add(checkReady);
         activeReadinessWaits.add(activeWait);
+        signal?.addEventListener("abort", abandonWait);
         emitDiagnostics();
       });
     },
@@ -1088,6 +1105,39 @@ export function createPreparedRenderWindow(options: {
     return lastPreparedWindowFrames.length - activeFrameIndex;
   }
 
+  /**
+   * The furthest a run of prepared frames starting here can ever reach. The run
+   * is read out of a cache holding a fixed number of frames, and eviction takes
+   * the frame farthest from the playhead, so a lead demanded beyond this span
+   * is one no amount of preparation delivers. Unbounded while the playhead sits
+   * outside the scanned window, the only place the span can be read from.
+   */
+  function getCacheReachableAheadSeconds(frameRef: {
+    readonly key: string;
+    readonly mediaTime: number;
+  }) {
+    const activeFrameIndex = lastPreparedWindowFrames.findIndex(
+      (frame) => getFrameKey(frame) === frameRef.key,
+    );
+
+    if (activeFrameIndex < 0) {
+      return Number.POSITIVE_INFINITY;
+    }
+
+    const lastReachableFrame =
+      lastPreparedWindowFrames[
+        Math.min(
+          lastPreparedWindowFrames.length,
+          activeFrameIndex + maxMaskFrameCacheSize,
+        ) - 1
+      ];
+
+    return timeline.getFrameDistance(
+      lastReachableFrame.mediaTime,
+      frameRef.mediaTime,
+    );
+  }
+
   function getPreparedTargetAheadSeconds(frameRef: {
     readonly key: string;
     readonly mediaTime: number;
@@ -1142,6 +1192,7 @@ export function createPreparedRenderWindow(options: {
     const requiredLeadSeconds = Math.min(
       Math.max(requiredAheadSeconds, 0),
       getPreparedTargetAheadSeconds(frameRef),
+      getCacheReachableAheadSeconds(frameRef),
     );
 
     if (activeStatus === PreparedRenderFrameMaskStatus.Pending) {

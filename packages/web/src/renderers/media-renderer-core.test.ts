@@ -164,10 +164,14 @@ describe("media renderer core", () => {
     flushAnimationFrame(40);
 
     await vi.waitFor(() => {
-      expect(scene.waitForRenderPreparation).toHaveBeenCalledWith(0.04, {
-        enabled: true,
-        requiredAheadSeconds: 0.04,
-      });
+      expect(scene.waitForRenderPreparation).toHaveBeenCalledWith(
+        0.04,
+        {
+          enabled: true,
+          requiredAheadSeconds: 0.04,
+        },
+        expect.any(AbortSignal),
+      );
     });
     expect(scene.presentSample).toHaveBeenCalledOnce();
     expect(renderer.getState().playbackState).toBe(

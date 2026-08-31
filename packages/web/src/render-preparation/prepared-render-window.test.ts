@@ -14,10 +14,13 @@ import {
   type DetectionFrame,
 } from "supervision-js-core";
 import type { MaskStyle } from "supervision-js-core";
+import { resolveMediaSessionDefaults } from "#sessions/media-session-defaults";
+import { MediaSessionMode } from "#types/media-session";
 import {
   RenderPreparationArtifactKind,
   RenderPreparationArtifactFrameStatus,
   RenderPreparationExecutionMode,
+  RenderPreparationGateHoldReason,
   RenderPreparationMode,
   RenderPreparationWorkerStatus,
   type RenderPreparationDiagnostics,
@@ -112,6 +115,27 @@ const horseTrailFrames = Array.from({ length: 340 }, (_, frameIndex) => ({
   detections: [],
   frameIndex,
   mediaTime: frameIndex * HORSE_TRAIL_FRAME_PITCH_SECONDS,
+})) satisfies DetectionFrame[];
+const GATE_FRAME_RATE = 25;
+const SESSION_MASK_CACHE_FRAME_COUNT = 200;
+const SESSION_PLAYBACK_GATE_OPTIONS = {
+  enabled: true,
+  minimumAheadSeconds: 0.25,
+  requiredAheadSeconds: 1,
+};
+const gateFrames = Array.from({ length: 400 }, (_, frameIndex) => ({
+  detections: [
+    {
+      mask: {
+        counts: "021",
+        encoding: DetectionMaskEncoding.CompressedRle,
+        height: 2,
+        width: 2,
+      },
+    },
+  ],
+  frameIndex,
+  mediaTime: frameIndex / GATE_FRAME_RATE,
 })) satisfies DetectionFrame[];
 
 describe("prepared render window", () => {
@@ -1967,6 +1991,236 @@ describe("prepared render window", () => {
       vi.useRealTimers();
     }
   });
+
+  it("resolves a 25fps file session to the settings the gate tests run at", () => {
+    const defaults = resolveMediaSessionDefaults({
+      detections: { frames: [], sync: { frameRate: GATE_FRAME_RATE } },
+      mode: MediaSessionMode.File,
+    });
+
+    expect(defaults.renderPreparation.maskFrame).toEqual({
+      maxCacheFrameCount: SESSION_MASK_CACHE_FRAME_COUNT,
+      maxPendingFrameCount: 24,
+      prefetchFrameCount: 175,
+      scanIntervalSeconds: 0.1,
+      scheduleBatchSize: 16,
+    });
+    expect(defaults.renderPreparation.playbackGate).toEqual(
+      SESSION_PLAYBACK_GATE_OPTIONS,
+    );
+  });
+
+  it("keeps preparing for a holding gate after the playhead has jumped", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const fakeWorker = createFakeMaskPreparationWorker();
+      const diagnostics: RenderPreparationDiagnostics[] = [];
+      const renderWindow = createGateRenderWindow({
+        onDiagnostics: (next) => diagnostics.push(next),
+        worker: fakeWorker.worker,
+      });
+
+      renderWindow.setPlaybackActive(true);
+      renderWindow.getFrame(gateFrameTime(0));
+      renderWindow.getFrame(gateFrameTime(25));
+
+      let resolved = false;
+
+      void renderWindow
+        .waitForReady(gateFrameTime(50), SESSION_PLAYBACK_GATE_OPTIONS)
+        .then(() => {
+          resolved = true;
+        });
+
+      for (let pass = 0; pass < 400 && !resolved; pass += 1) {
+        await flushMaskPreparationTimers(1);
+      }
+
+      const artifact = diagnostics[diagnostics.length - 1]?.artifacts?.[0];
+      const gateResolved = resolved;
+
+      renderWindow.destroy();
+
+      expect({
+        gateHold: artifact?.gateHold?.reason ?? null,
+        resolved: gateResolved,
+      }).toEqual({
+        gateHold: null,
+        resolved: true,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    { expectedLeadSeconds: 0.92, maxCacheFrameCount: 24 },
+    { expectedLeadSeconds: 0.92, maxCacheFrameCount: 24.5 },
+    { expectedLeadSeconds: 1, maxCacheFrameCount: 26 },
+    {
+      expectedLeadSeconds: 1,
+      maxCacheFrameCount: SESSION_MASK_CACHE_FRAME_COUNT,
+    },
+  ])(
+    "releases a one-second gate once the lead reaches $expectedLeadSeconds on a $maxCacheFrameCount frame cache",
+    async ({ expectedLeadSeconds, maxCacheFrameCount }) => {
+      vi.useFakeTimers();
+      resetMocks();
+
+      try {
+        const fakeWorker = createFakeMaskPreparationWorker();
+        const diagnostics: RenderPreparationDiagnostics[] = [];
+        const renderWindow = createGateRenderWindow({
+          maxCacheFrameCount,
+          onDiagnostics: (next) => diagnostics.push(next),
+          worker: fakeWorker.worker,
+        });
+
+        renderWindow.setPlaybackActive(true);
+        renderWindow.getFrame(gateFrameTime(0));
+
+        let leadSecondsAtRelease: number | null = null;
+        let resolved = false;
+
+        void renderWindow
+          .waitForReady(gateFrameTime(0), SESSION_PLAYBACK_GATE_OPTIONS)
+          .then(() => {
+            leadSecondsAtRelease =
+              diagnostics[diagnostics.length - 1]?.artifacts?.[0]
+                ?.preparedAheadSeconds ?? null;
+            resolved = true;
+          });
+
+        for (let pass = 0; pass < 400 && !resolved; pass += 1) {
+          await flushMaskPreparationTimers(1);
+        }
+
+        const releaseLead = leadSecondsAtRelease;
+        const gateResolved = resolved;
+
+        renderWindow.destroy();
+
+        expect({
+          leadSecondsAtRelease: releaseLead,
+          resolved: gateResolved,
+        }).toEqual({
+          leadSecondsAtRelease: expectedLeadSeconds,
+          resolved: true,
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it("asks for the whole requirement while the playhead sits off the scanned window", () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const fakeWorker = createFakeMaskPreparationWorker();
+      const diagnostics: RenderPreparationDiagnostics[] = [];
+      const renderWindow = createGateRenderWindow({
+        detectionTimeline: createRolledBufferTimeline(
+          gateFrames,
+          gateFrameTime(100),
+        ),
+        onDiagnostics: (next) => diagnostics.push(next),
+        worker: fakeWorker.worker,
+      });
+      const abandonedWait = new AbortController();
+
+      renderWindow.setPlaybackActive(true);
+
+      void renderWindow.waitForReady(
+        gateFrameTime(50),
+        SESSION_PLAYBACK_GATE_OPTIONS,
+        abandonedWait.signal,
+      );
+
+      const gateHold =
+        diagnostics[diagnostics.length - 1]?.artifacts?.[0]?.gateHold;
+
+      abandonedWait.abort();
+      renderWindow.destroy();
+
+      expect(gateHold).toEqual({
+        reason: RenderPreparationGateHoldReason.ActiveFrameUnprepared,
+        requiredAheadSeconds:
+          SESSION_PLAYBACK_GATE_OPTIONS.requiredAheadSeconds,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("lets the dragged playhead suppress preparation again once an abandoned wait is aborted", async () => {
+    vi.useFakeTimers();
+    resetMocks();
+
+    try {
+      const fakeWorker = createFakeMaskPreparationWorker();
+      const diagnostics: RenderPreparationDiagnostics[] = [];
+      const renderWindow = createGateRenderWindow({
+        onDiagnostics: (next) => diagnostics.push(next),
+        worker: fakeWorker.worker,
+      });
+      const abandonedWait = new AbortController();
+      const dragPlayhead = async (fromFrameIndex: number) => {
+        for (let step = 0; step < 4; step += 1) {
+          renderWindow.getFrame(gateFrameTime(fromFrameIndex + step * 40));
+          await flushMaskPreparationTimers(40);
+        }
+
+        return (
+          diagnostics[diagnostics.length - 1]?.artifacts?.[0]
+            ?.preparedAheadFrameCount ?? 0
+        );
+      };
+
+      renderWindow.setPlaybackActive(true);
+      renderWindow.getFrame(gateFrameTime(0));
+      await flushMaskPreparationTimers(2);
+
+      void renderWindow.waitForReady(
+        gateFrameTime(200),
+        SESSION_PLAYBACK_GATE_OPTIONS,
+        abandonedWait.signal,
+      );
+      await flushMaskPreparationTimers(2);
+      renderWindow.setMaskStyle(createArtifactStableMaskStyle(0.5));
+
+      const preparedAheadWhileHeld = await dragPlayhead(0);
+      const heldReason =
+        diagnostics[diagnostics.length - 1]?.artifacts?.[0]?.gateHold?.reason ??
+        null;
+
+      abandonedWait.abort();
+
+      const preparedAheadAfterAbort = await dragPlayhead(240);
+      const abandonedReason =
+        diagnostics[diagnostics.length - 1]?.artifacts?.[0]?.gateHold?.reason ??
+        null;
+
+      renderWindow.destroy();
+
+      expect({
+        abandonedReason,
+        heldReason,
+        preparedAheadAfterAbort,
+        preparedAheadWhileHeld,
+      }).toEqual({
+        abandonedReason: null,
+        heldReason: RenderPreparationGateHoldReason.ActiveFrameUnprepared,
+        preparedAheadAfterAbort: 1,
+        preparedAheadWhileHeld: 20,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 function createPausedScopeRenderWindow(options: {
@@ -2209,6 +2463,42 @@ function createBufferedSpanTimeline(
   };
 }
 
+/**
+ * A timeline whose buffer has rolled forward off the frame the playhead is
+ * parked on: the frame still resolves, and no scan of the buffer can reach it.
+ */
+function createRolledBufferTimeline(
+  detectionFrames: readonly DetectionFrame[],
+  bufferStartTime: number,
+): BufferedDetectionTimeline {
+  const bufferedFrames = detectionFrames.filter(
+    (frame) => frame.mediaTime >= bufferStartTime,
+  );
+  const bufferEndTime =
+    (bufferedFrames[bufferedFrames.length - 1]?.mediaTime ?? bufferStartTime) +
+    1 / GATE_FRAME_RATE;
+
+  return {
+    destroy: vi.fn(),
+    getBufferedFrames: vi.fn(() => bufferedFrames),
+    getState: vi.fn(() => ({
+      bufferEndTime,
+      bufferStartTime,
+      detectionCount: bufferedFrames.length,
+      errorMessage: null,
+      frameCount: bufferedFrames.length,
+      requestedEndTime: bufferEndTime,
+      requestedStartTime: bufferStartTime,
+      status: DetectionBufferStatus.Ready,
+    })),
+    prepare: vi.fn(),
+    prefetch: vi.fn(),
+    selectFrame: vi.fn((mediaTime: number) =>
+      detectionFrames.find((frame) => frame.mediaTime === mediaTime),
+    ),
+  };
+}
+
 function createFloorTimeline(
   detectionFrames: readonly DetectionFrame[],
 ): BufferedDetectionTimeline {
@@ -2228,4 +2518,35 @@ function rgbaSource(maskFrame: PreparedMaskFrame | undefined) {
   return maskFrame?.kind === PreparedMaskFrameKind.RgbaImage
     ? maskFrame.source
     : undefined;
+}
+
+function gateFrameTime(frameIndex: number) {
+  return frameIndex / GATE_FRAME_RATE;
+}
+
+function createGateRenderWindow(options: {
+  readonly detectionTimeline?: BufferedDetectionTimeline;
+  readonly maxCacheFrameCount?: number;
+  readonly onDiagnostics: (diagnostics: RenderPreparationDiagnostics) => void;
+  readonly worker: Worker;
+}) {
+  return createPreparedRenderWindow({
+    detectionTimeline:
+      options.detectionTimeline ?? createFloorTimeline(gateFrames),
+    maskStyle: new BaseMaskStyle(),
+    renderPreparation: {
+      maskFrame: {
+        maxCacheFrameCount:
+          options.maxCacheFrameCount ?? SESSION_MASK_CACHE_FRAME_COUNT,
+        maxPendingFrameCount: 24,
+        prefetchFrameCount: 175,
+        scanIntervalSeconds: 0.1,
+        scheduleBatchSize: 16,
+        workerCount: 1,
+      },
+      mode: RenderPreparationMode.Worker,
+      onDiagnostics: options.onDiagnostics,
+      workerFactory: { createWorker: () => options.worker },
+    },
+  });
 }

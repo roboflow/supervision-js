@@ -154,6 +154,7 @@ export interface PixiMaskLayer {
   waitForRenderPreparation(
     mediaTime: number,
     options: RenderPreparationPlaybackGateOptions,
+    signal?: AbortSignal,
   ): Promise<void>;
   pickDetectionAtPoint(
     point: DetectionPickPoint,
@@ -365,8 +366,8 @@ export function createPixiMaskLayer(options: {
       return preparedRenderWindow.isArtifactPrepared(mediaTime);
     },
 
-    waitForRenderPreparation(mediaTime, gateOptions) {
-      return preparedRenderWindow.waitForReady(mediaTime, gateOptions);
+    waitForRenderPreparation(mediaTime, gateOptions, signal) {
+      return preparedRenderWindow.waitForReady(mediaTime, gateOptions, signal);
     },
 
     pickDetectionAtPoint(point, mediaTime) {

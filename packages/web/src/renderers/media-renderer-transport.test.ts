@@ -155,6 +155,78 @@ describe("media renderer transport", () => {
     // Nothing else retires the wait the hold published on its way in.
     expect(playbackStates.at(-1)).toBe(MediaRendererPlaybackState.Playing);
   });
+
+  it("tells the gate that a play a pause superseded is never coming", async () => {
+    const producer = createProducer();
+    let abandoned = false;
+    let enterWait = () => {};
+    const waitEntered = new Promise<void>((resolve) => {
+      enterWait = resolve;
+    });
+    const transport = createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+      waitForReadiness: (_mediaTime, signal) => {
+        enterWait();
+
+        return new Promise<void>((resolve) => {
+          signal.addEventListener("abort", () => {
+            abandoned = true;
+            resolve();
+          });
+        });
+      },
+    });
+
+    const playing = transport.play();
+
+    await waitEntered;
+    transport.pause();
+    await playing;
+
+    expect(abandoned).toBe(true);
+  });
+
+  it("leaves no gate hold behind when a play supersedes one still releasing a drag", async () => {
+    const producer = createProducer();
+    const readinessSignals: AbortSignal[] = [];
+    const transport = createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+      waitForReadiness: (_mediaTime, signal) => {
+        readinessSignals.push(signal);
+
+        return new Promise<void>((resolve) => {
+          signal.addEventListener("abort", () => resolve());
+        });
+      },
+    });
+
+    transport.scrub(0.1);
+
+    const superseded = transport.play();
+    const current = transport.play();
+
+    await Promise.resolve();
+    transport.pause();
+    await Promise.all([superseded, current]);
+
+    expect({
+      abandonedCount: readinessSignals.filter((signal) => signal.aborted)
+        .length,
+      startedCount: readinessSignals.length,
+    }).toEqual({ abandonedCount: 1, startedCount: 1 });
+  });
 });
 
 const secondsAt = (index: number) => (index * TICKS_PER_FRAME) / TICK_RATE;

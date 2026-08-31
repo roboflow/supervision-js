@@ -40,7 +40,10 @@ export interface MediaRendererTransportOptions {
    */
   readonly onScrubbing: (scrubbing: boolean) => void;
   /** Buffered playback. Awaited before the producer is asked to run. */
-  readonly waitForReadiness?: (mediaTime: number) => Promise<void>;
+  readonly waitForReadiness?: (
+    mediaTime: number,
+    signal: AbortSignal,
+  ) => Promise<void>;
   /**
    * A bounded wait for whatever annotates `mediaTime`, or null when nothing is
    * missing. Asked on every playhead move, so answering null has to be cheap.
@@ -76,7 +79,20 @@ export function createMediaRendererTransport(
   let playbackIntent = 0;
   /** Intent a readiness wait belongs to, or null while none is running. */
   let readinessHoldIntent: number | null = null;
+  let activeReadinessWait: AbortController | undefined;
   const isHoldingForReadiness = () => readinessHoldIntent === playbackIntent;
+
+  /**
+   * Supersedes every playback intent still in flight. A readiness wait is
+   * awaited bare, so this is the only moment the gate can be told the play it
+   * is holding open is over.
+   */
+  const beginPlaybackIntent = () => {
+    activeReadinessWait?.abort();
+    activeReadinessWait = undefined;
+
+    return ++playbackIntent;
+  };
 
   const publishSeekSignals = () => {
     options.onScrubbing(gestureInFlight);
@@ -202,15 +218,33 @@ export function createMediaRendererTransport(
       // previous playback until it does. Recording the ask here is what lets a
       // second toggle arriving in that window flip it.
       settledState = MediaRendererPlaybackState.Playing;
-      const intent = ++playbackIntent;
+      const intent = beginPlaybackIntent();
       await releaseGesture();
 
+      /* A play superseded while the gesture was releasing must not open a
+         readiness hold: nothing would be left holding the one that replaced
+         it. */
+      if (intent !== playbackIntent) {
+        publishPlaybackState();
+        return;
+      }
+
       if (options.waitForReadiness) {
+        const readinessWait = new AbortController();
+
+        activeReadinessWait = readinessWait;
         readinessHoldIntent = intent;
         publishPlaybackState();
         try {
-          await options.waitForReadiness(channel.getPlayhead().mediaTimeS);
+          await options.waitForReadiness(
+            channel.getPlayhead().mediaTimeS,
+            readinessWait.signal,
+          );
         } finally {
+          if (activeReadinessWait === readinessWait) {
+            activeReadinessWait = undefined;
+          }
+
           if (readinessHoldIntent === intent) {
             readinessHoldIntent = null;
           }
@@ -230,7 +264,7 @@ export function createMediaRendererTransport(
 
     pause() {
       settledState = MediaRendererPlaybackState.Paused;
-      playbackIntent++;
+      beginPlaybackIntent();
       // A pause ends the producer's mechanical hold, so it lands ahead of the
       // release the open gesture still owes.
       channel.pause();
@@ -258,7 +292,7 @@ export function createMediaRendererTransport(
       // A drag whose landing seek is still releasing the producer is the drag
       // this scrub belongs to. Opening a second one there would stop the
       // picture for a gesture nobody is holding, and nothing would release it.
-      playbackIntent++;
+      beginPlaybackIntent();
       if (!gestureInFlight && landingRelease === null) {
         gestureInFlight = true;
         channel.beginInteractiveSeek();
@@ -296,7 +330,7 @@ export function createMediaRendererTransport(
     },
 
     destroy() {
-      playbackIntent++;
+      beginPlaybackIntent();
       for (const unsubscribe of unsubscribes) {
         unsubscribe();
       }

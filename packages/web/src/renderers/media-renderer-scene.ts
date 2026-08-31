@@ -144,6 +144,7 @@ export interface MediaRendererScene {
   waitForRenderPreparation?(
     mediaTime: number,
     options: RenderPreparationPlaybackGateOptions,
+    signal?: AbortSignal,
   ): Promise<void>;
   setRenderQuality(maxDevicePixelRatio: number | undefined): void;
   setDisplayAdjustments?(adjustments: MediaDisplayAdjustments): void;

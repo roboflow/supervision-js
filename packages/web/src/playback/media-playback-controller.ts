@@ -28,7 +28,10 @@ export function createMediaPlaybackController(options: {
   readonly initialMediaTime: number;
   readonly playbackRate?: number;
   readonly presentSample: (sample: DecodedVideoSample) => void;
-  readonly waitForSample?: (sample: DecodedVideoSample) => Promise<void>;
+  readonly waitForSample?: (
+    sample: DecodedVideoSample,
+    signal: AbortSignal,
+  ) => Promise<void>;
   readonly onCurrentTimeChange: (currentTime: number) => void;
   readonly onEnded: () => void;
   readonly onError: (error: unknown) => void;
@@ -50,6 +53,7 @@ export function createMediaPlaybackController(options: {
     | { readonly iteratorId: number; readonly promise: Promise<void> }
     | undefined;
   let activeSampleIteratorExhausted = false;
+  let activeSampleWait: AbortController | undefined;
   const queuedSampleWaiters = new Set<() => void>();
 
   const notifyQueuedSampleWaiters = () => {
@@ -66,6 +70,17 @@ export function createMediaPlaybackController(options: {
 
   const isPlaybackRunActive = (runId: number) =>
     !destroyed && playing && playbackRunId === runId;
+
+  /**
+   * Starts the run that supersedes every earlier one. A readiness wait is
+   * awaited bare, so this is the only moment anything knows the sample it was
+   * started for will never be presented, and the only chance to say so.
+   */
+  const beginPlaybackRun = () => {
+    activeSampleWait?.abort();
+    activeSampleWait = undefined;
+    playbackRunId += 1;
+  };
 
   const schedulePlaybackFrame = (runId: number) => {
     if (!isPlaybackRunActive(runId) || animationFrameHandle !== undefined) {
@@ -133,7 +148,7 @@ export function createMediaPlaybackController(options: {
     }
 
     playing = false;
-    playbackRunId += 1;
+    beginPlaybackRun();
     cancelScheduledFrame();
     closeQueuedSamples();
     stopActiveSampleIterator();
@@ -305,7 +320,7 @@ export function createMediaPlaybackController(options: {
     if (playableEnd !== null && requestedMediaTime >= playableEnd) {
       if (!options.loop) {
         playing = false;
-        playbackRunId += 1;
+        beginPlaybackRun();
         closeQueuedSamples();
         stopActiveSampleIterator();
         options.onEnded();
@@ -345,7 +360,7 @@ export function createMediaPlaybackController(options: {
 
       if (activeSampleIteratorExhausted && sampleQueue.length === 0) {
         playing = false;
-        playbackRunId += 1;
+        beginPlaybackRun();
         stopActiveSampleIterator();
         options.onEnded();
         return;
@@ -396,11 +411,18 @@ export function createMediaPlaybackController(options: {
       didNotifyWaiting = true;
       options.onWaiting?.();
     }, 0);
+    const sampleWait = new AbortController();
+
+    activeSampleWait = sampleWait;
 
     try {
-      await options.waitForSample(sample);
+      await options.waitForSample(sample, sampleWait.signal);
     } finally {
       clearTimeout(waitingTimer);
+
+      if (activeSampleWait === sampleWait) {
+        activeSampleWait = undefined;
+      }
     }
 
     if (!didNotifyWaiting) {
@@ -418,7 +440,7 @@ export function createMediaPlaybackController(options: {
       }
 
       playing = true;
-      playbackRunId += 1;
+      beginPlaybackRun();
       playbackOriginMediaTime = currentTime;
       playbackOriginNow = performance.now();
       resetSampleIterator(currentTime);
@@ -432,7 +454,7 @@ export function createMediaPlaybackController(options: {
       }
 
       playing = false;
-      playbackRunId += 1;
+      beginPlaybackRun();
       cancelScheduledFrame();
       closeQueuedSamples();
       stopActiveSampleIterator();
@@ -446,7 +468,7 @@ export function createMediaPlaybackController(options: {
       const shouldResume = playing;
 
       playing = false;
-      playbackRunId += 1;
+      beginPlaybackRun();
       cancelScheduledFrame();
       closeQueuedSamples();
       stopActiveSampleIterator();
@@ -459,7 +481,7 @@ export function createMediaPlaybackController(options: {
       }
 
       playing = true;
-      playbackRunId += 1;
+      beginPlaybackRun();
       resetSampleIterator(mediaTime);
       startSamplePrefetch(playbackRunId);
       schedulePlaybackFrame(playbackRunId);
@@ -490,7 +512,7 @@ export function createMediaPlaybackController(options: {
 
       destroyed = true;
       playing = false;
-      playbackRunId += 1;
+      beginPlaybackRun();
       cancelScheduledFrame();
       closeQueuedSamples();
       stopActiveSampleIterator();

@@ -1194,10 +1194,10 @@ export async function createPixiMediaScene(
       });
     },
 
-    waitForRenderPreparation(mediaTime, gateOptions) {
+    waitForRenderPreparation(mediaTime, gateOptions, signal) {
       return Promise.all([
-        maskLayer?.waitForRenderPreparation(mediaTime, gateOptions),
-        polygonLayer?.waitForRenderPreparation(mediaTime, gateOptions),
+        maskLayer?.waitForRenderPreparation(mediaTime, gateOptions, signal),
+        polygonLayer?.waitForRenderPreparation(mediaTime, gateOptions, signal),
       ]).then(() => undefined);
     },
 

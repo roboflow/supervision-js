@@ -491,6 +491,7 @@ describe("media renderer over a push-based media source", () => {
     expect(preparation.waitForRenderPreparation).toHaveBeenCalledWith(
       0,
       expect.objectContaining({ enabled: true }),
+      expect.any(AbortSignal),
     );
     expect(producer.play).not.toHaveBeenCalled();
     expect(renderer.getState().playbackState).toBe(

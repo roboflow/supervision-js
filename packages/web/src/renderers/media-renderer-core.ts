@@ -196,7 +196,10 @@ export async function createMediaRendererCore(
   const shouldGatePlayback =
     shouldGateDetectionPlayback || shouldGateRenderPreparationPlayback;
 
-  const waitForPlaybackReadiness = async (mediaTime: number) => {
+  const waitForPlaybackReadiness = async (
+    mediaTime: number,
+    signal?: AbortSignal,
+  ) => {
     if (shouldGateDetectionPlayback) {
       await detectionTimeline?.prepare(mediaTime, {
         duration: runtimeState.duration(),
@@ -209,6 +212,7 @@ export async function createMediaRendererCore(
       await mediaScene?.waitForRenderPreparation?.(
         mediaTime,
         renderPreparationPlaybackGate ?? {},
+        signal,
       );
     }
   };
@@ -807,8 +811,8 @@ export async function createMediaRendererCore(
     await prepareAndPresentSample(firstSample);
     runtimeState.setReady();
     const waitForSample = shouldGatePlayback
-      ? (sample: DecodedVideoSample) =>
-          waitForPlaybackReadiness(sample.timestamp)
+      ? (sample: DecodedVideoSample, signal: AbortSignal) =>
+          waitForPlaybackReadiness(sample.timestamp, signal)
       : undefined;
 
     playbackController = createMediaPlaybackController({
