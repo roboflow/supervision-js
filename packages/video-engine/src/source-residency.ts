@@ -270,6 +270,16 @@ function totalFromHeaders(response: Response): number | null {
     : null;
 }
 
+const holdCounts = new WeakMap<SourceResidency, () => number>();
+
+/**
+ * Outstanding claims on the link, for this module's own tests: they drive every
+ * way a read can end and assert the count comes back to zero.
+ */
+export function outstandingForegroundHolds(residency: SourceResidency): number {
+  return holdCounts.get(residency)?.() ?? 0;
+}
+
 export function createSourceResidency(
   options: SourceResidencyOptions,
 ): SourceResidency {
@@ -334,6 +344,9 @@ export function createSourceResidency(
     let blockStart = start;
     let block: Uint8Array[] = [];
     let blockBytes = 0;
+    /* Banking allocates, and an allocation that fails would strand the link,
+     * so every bank is reached with the claim already given back or its stall
+     * ceiling already armed. */
     const bank = () => {
       if (disposed || blockBytes === 0) return;
       const banked = new Uint8Array(blockBytes);
@@ -362,20 +375,20 @@ export function createSourceResidency(
             throw error;
           }
           if (chunk.done) {
-            bank();
             hold.release();
+            bank();
             controller.close();
             return;
           }
           controller.enqueue(chunk.value);
           block.push(chunk.value);
           blockBytes += chunk.value.length;
-          if (blockBytes >= READ_BLOCK_BYTES) bank();
           hold.idle();
+          if (blockBytes >= READ_BLOCK_BYTES) bank();
         },
         cancel(reason) {
-          bank();
           hold.release();
+          bank();
           return source.cancel(reason);
         },
       },
@@ -485,7 +498,7 @@ export function createSourceResidency(
     }
   };
 
-  return {
+  const residency: SourceResidency = {
     fetchFn,
     snapshot: () => ({
       ranges: store.ranges(),
@@ -516,4 +529,6 @@ export function createSourceResidency(
       store.clear();
     },
   };
+  holdCounts.set(residency, () => foregroundHolds.size);
+  return residency;
 }

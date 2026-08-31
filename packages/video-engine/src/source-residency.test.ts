@@ -4,7 +4,9 @@ import {
   FOREGROUND_STALL_MS,
   READ_BLOCK_BYTES,
   createSourceResidency,
+  outstandingForegroundHolds,
 } from "./source-residency";
+import type { SourceResidency } from "./source-residency";
 
 const URL_UNDER_TEST = "https://example.test/clip.mov";
 const TOTAL = 4096;
@@ -148,6 +150,96 @@ function countCopiedBytes(): {
  *  its own part-way through the reads below. */
 const SLOW_PIECE_MS = FOREGROUND_STALL_MS + 100;
 
+interface ScriptedRequest {
+  /** Answers with a 206 whose body the test then drives piece by piece. */
+  answer(): void;
+  /** Answers with a response of the test's own making. */
+  answerWith(response: Response): void;
+  /** Fails the request before any response arrives. */
+  refuse(error: Error): void;
+  push(length: number): void;
+  end(): void;
+  fail(error: Error): void;
+}
+
+/** A network the test drives by hand: a request waits until the test answers
+ *  it and a body waits until the test pushes into it, so a read can be held
+ *  open at any point one of its ends would fire. */
+function scriptedFetch(total = STREAMED_TOTAL) {
+  const requests: ScriptedRequest[] = [];
+  const impl = async (_input: unknown, init?: RequestInit) => {
+    const header = new Headers(init?.headers ?? undefined).get("Range");
+    const match = header ? /^bytes=(\d+)-(\d*)$/.exec(header) : null;
+    const start = match ? Number(match[1]) : 0;
+    const end = match && match[2] ? Number(match[2]) : total - 1;
+    let cursor = start;
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    let answer!: (response: Response) => void;
+    let refuse!: (error: Error) => void;
+    const answered = new Promise<Response>((resolve, reject) => {
+      answer = resolve;
+      refuse = reject;
+    });
+    const stream = new ReadableStream<Uint8Array>({
+      start: (given) => {
+        controller = given;
+      },
+    });
+    requests.push({
+      answer: () =>
+        answer(
+          new Response(stream, {
+            status: 206,
+            headers: {
+              "Content-Length": String(end - start + 1),
+              "Content-Range": `bytes ${start}-${end}/${total}`,
+            },
+          }),
+        ),
+      answerWith: answer,
+      refuse,
+      push: (length) => {
+        controller.enqueue(body(cursor, length));
+        cursor += length;
+      },
+      end: () => controller.close(),
+      fail: (error) => controller.error(error),
+    });
+    return answered;
+  };
+  return {
+    fetchImpl: impl as unknown as typeof fetch,
+    request: (index = 0): ScriptedRequest => requests[index]!,
+    count: () => requests.length,
+  };
+}
+
+/** Opens a read and answers it, leaving its body for the test to drive. */
+async function openRead(
+  residency: SourceResidency,
+  network: ReturnType<typeof scriptedFetch>,
+): Promise<ReadableStreamDefaultReader<Uint8Array>> {
+  const pending = residency.fetchFn(URL_UNDER_TEST, {
+    headers: { Range: "bytes=0-" },
+  });
+  await settle();
+  network.request().answer();
+  return (await pending).body!.getReader();
+}
+
+/** Fails the next copy, which is what banking a block does first. */
+function failNextCopy(): { restore: () => void } {
+  const original = Uint8Array.prototype.set;
+  const restore = () => {
+    Uint8Array.prototype.set = original;
+  };
+  Uint8Array.prototype.set = function set(): void {
+    restore();
+    throw new RangeError("out of memory");
+  };
+  return { restore };
+}
+
 describe("createSourceResidency", () => {
   it("serves a repeat read from what the first read left behind", async () => {
     const network = networkFetch();
@@ -252,6 +344,7 @@ describe("createSourceResidency", () => {
     });
     expect(residency.snapshot().ranges).toEqual([{ start: 0, end: TOTAL }]);
     expect(residency.snapshot().prefetchedBytes).toBe(TOTAL - 1024);
+    residency.dispose();
   });
 
   it("stops warming once the budget is full instead of polling for room", async () => {
@@ -282,6 +375,7 @@ describe("createSourceResidency", () => {
     expect(residency.snapshot().prefetchedBytes).toBe(
       settledSnapshot.prefetchedBytes,
     );
+    residency.dispose();
   });
 
   it("drops the runs furthest from the focus offset when the budget is met", async () => {
@@ -349,6 +443,7 @@ describe("createSourceResidency", () => {
       expect(residency.snapshot().residentBytes).toBe(STREAMED_TOTAL);
     });
     expect(network.servedBytes()).toBe(STREAMED_TOTAL);
+    residency.dispose();
   });
 
   it("holds the walk down until a foreground body is read to its end", async () => {
@@ -377,6 +472,7 @@ describe("createSourceResidency", () => {
       },
       { timeout: SLOW_PIECE_MS * 4 },
     );
+    residency.dispose();
   });
 
   it("gives the walk back the link when a foreground body is cancelled", async () => {
@@ -406,6 +502,7 @@ describe("createSourceResidency", () => {
       },
       { timeout: SLOW_PIECE_MS * 4 },
     );
+    residency.dispose();
   });
 
   it("keeps the link for a read whose consumer is still pulling", async () => {
@@ -451,6 +548,7 @@ describe("createSourceResidency", () => {
     await vi.waitFor(() => {
       expect(residency.snapshot().prefetchedBytes).toBeGreaterThan(0);
     });
+    residency.dispose();
   });
 
   it("gives the walk back the link when a foreground request fails", async () => {
@@ -486,6 +584,7 @@ describe("createSourceResidency", () => {
     await vi.waitFor(() => {
       expect(residency.snapshot().prefetchedBytes).toBeGreaterThan(0);
     });
+    residency.dispose();
   });
 
   it("places a body the server did not range-satisfy at the start of the file", async () => {
@@ -619,5 +718,388 @@ describe("createSourceResidency", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  /* Every way a read can end, driven one at a time and then two at once, each
+   * asserting the claim the read took on the link is given back exactly once. */
+  describe("the claim a read holds on the link", () => {
+    it("takes a claim for a network read and none for one it serves itself", async () => {
+      const network = scriptedFetch();
+      const residency = createSourceResidency({
+        url: URL_UNDER_TEST,
+        budgetBytes: STREAMED_TOTAL,
+        fetchImpl: network.fetchImpl,
+      });
+
+      const pending = residency.fetchFn(URL_UNDER_TEST, {
+        headers: { Range: "bytes=0-" },
+      });
+      await settle();
+      expect(outstandingForegroundHolds(residency)).toBe(1);
+
+      network.request().answer();
+      const response = await pending;
+      network.request().push(PIECE);
+      network.request().end();
+      await drain(response);
+      await settle();
+      expect(outstandingForegroundHolds(residency)).toBe(0);
+
+      const stored = await residency.fetchFn(URL_UNDER_TEST, {
+        headers: { Range: "bytes=0-" },
+      });
+      expect(network.count()).toBe(1);
+      await read(stored);
+      expect(outstandingForegroundHolds(residency)).toBe(0);
+    });
+
+    it("gives the claim back when the request itself fails", async () => {
+      const network = scriptedFetch();
+      const residency = createSourceResidency({
+        url: URL_UNDER_TEST,
+        budgetBytes: STREAMED_TOTAL,
+        fetchImpl: network.fetchImpl,
+      });
+
+      const pending = residency.fetchFn(URL_UNDER_TEST, {
+        headers: { Range: "bytes=0-" },
+      });
+      await settle();
+      expect(outstandingForegroundHolds(residency)).toBe(1);
+
+      network.request().refuse(new Error("network down"));
+      await expect(pending).rejects.toThrow("network down");
+      expect(outstandingForegroundHolds(residency)).toBe(0);
+    });
+
+    it("gives the claim back when the server answers with a failure", async () => {
+      const network = scriptedFetch();
+      const residency = createSourceResidency({
+        url: URL_UNDER_TEST,
+        budgetBytes: STREAMED_TOTAL,
+        fetchImpl: network.fetchImpl,
+      });
+
+      const pending = residency.fetchFn(URL_UNDER_TEST, {
+        headers: { Range: "bytes=0-" },
+      });
+      await settle();
+      expect(outstandingForegroundHolds(residency)).toBe(1);
+
+      network.request().answerWith(new Response("gone", { status: 404 }));
+      expect((await pending).status).toBe(404);
+      expect(outstandingForegroundHolds(residency)).toBe(0);
+    });
+
+    it("gives the claim back for a read that asked for no range", async () => {
+      const network = scriptedFetch();
+      const residency = createSourceResidency({
+        url: URL_UNDER_TEST,
+        budgetBytes: STREAMED_TOTAL,
+        fetchImpl: network.fetchImpl,
+      });
+
+      const pending = residency.fetchFn(URL_UNDER_TEST);
+      await settle();
+      expect(outstandingForegroundHolds(residency)).toBe(1);
+
+      network.request().answer();
+      await pending;
+      expect(outstandingForegroundHolds(residency)).toBe(0);
+    });
+
+    it("gives the claim back for a response that carries no body", async () => {
+      const network = scriptedFetch();
+      const residency = createSourceResidency({
+        url: URL_UNDER_TEST,
+        budgetBytes: STREAMED_TOTAL,
+        fetchImpl: network.fetchImpl,
+      });
+
+      const pending = residency.fetchFn(URL_UNDER_TEST, {
+        headers: { Range: "bytes=0-" },
+      });
+      await settle();
+      expect(outstandingForegroundHolds(residency)).toBe(1);
+
+      network.request().answerWith(new Response(null, { status: 206 }));
+      await pending;
+      expect(outstandingForegroundHolds(residency)).toBe(0);
+    });
+
+    it("gives the claim back when the body errors part-way", async () => {
+      const network = scriptedFetch();
+      const residency = createSourceResidency({
+        url: URL_UNDER_TEST,
+        budgetBytes: STREAMED_TOTAL,
+        fetchImpl: network.fetchImpl,
+      });
+
+      const reader = await openRead(residency, network);
+      network.request().push(PIECE);
+      await reader.read();
+      expect(outstandingForegroundHolds(residency)).toBe(1);
+
+      const broken = reader.read();
+      network.request().fail(new Error("body broke"));
+      await expect(broken).rejects.toThrow("body broke");
+      expect(outstandingForegroundHolds(residency)).toBe(0);
+    });
+
+    it("gives the claim back when the reader cancels part-way", async () => {
+      const network = scriptedFetch();
+      const residency = createSourceResidency({
+        url: URL_UNDER_TEST,
+        budgetBytes: STREAMED_TOTAL,
+        fetchImpl: network.fetchImpl,
+      });
+
+      const reader = await openRead(residency, network);
+      network.request().push(PIECE);
+      await reader.read();
+      expect(outstandingForegroundHolds(residency)).toBe(1);
+
+      await reader.cancel();
+      expect(outstandingForegroundHolds(residency)).toBe(0);
+    });
+
+    it("gives the claim back for a body nobody ever reads", async () => {
+      const network = scriptedFetch();
+      const residency = createSourceResidency({
+        url: URL_UNDER_TEST,
+        budgetBytes: STREAMED_TOTAL,
+        fetchImpl: network.fetchImpl,
+      });
+
+      const pending = residency.fetchFn(URL_UNDER_TEST, {
+        headers: { Range: "bytes=0-" },
+      });
+      await settle();
+      network.request().answer();
+      await pending;
+      expect(outstandingForegroundHolds(residency)).toBe(1);
+
+      await new Promise((resolve) =>
+        setTimeout(resolve, FOREGROUND_STALL_MS + 50),
+      );
+      expect(outstandingForegroundHolds(residency)).toBe(0);
+    });
+
+    it("keeps the claim while the consumer waits on the server", async () => {
+      const network = scriptedFetch();
+      const residency = createSourceResidency({
+        url: URL_UNDER_TEST,
+        budgetBytes: STREAMED_TOTAL,
+        fetchImpl: network.fetchImpl,
+      });
+
+      const reader = await openRead(residency, network);
+      const waiting = reader.read();
+      await new Promise((resolve) =>
+        setTimeout(resolve, FOREGROUND_STALL_MS + 50),
+      );
+      expect(outstandingForegroundHolds(residency)).toBe(1);
+
+      network.request().push(PIECE);
+      await waiting;
+      await reader.cancel();
+      expect(outstandingForegroundHolds(residency)).toBe(0);
+    });
+
+    it("does not take the claim again once a stalled read has lapsed", async () => {
+      const network = scriptedFetch();
+      const residency = createSourceResidency({
+        url: URL_UNDER_TEST,
+        budgetBytes: STREAMED_TOTAL,
+        fetchImpl: network.fetchImpl,
+      });
+
+      const reader = await openRead(residency, network);
+      network.request().push(PIECE);
+      await reader.read();
+      expect(outstandingForegroundHolds(residency)).toBe(1);
+
+      await new Promise((resolve) =>
+        setTimeout(resolve, FOREGROUND_STALL_MS + 50),
+      );
+      expect(outstandingForegroundHolds(residency)).toBe(0);
+
+      network.request().push(PIECE);
+      await reader.read();
+      expect(outstandingForegroundHolds(residency)).toBe(0);
+
+      network.request().end();
+      await reader.read();
+      expect(outstandingForegroundHolds(residency)).toBe(0);
+    });
+
+    it("gives the claim back when the source is disposed mid-read", async () => {
+      const network = scriptedFetch();
+      const residency = createSourceResidency({
+        url: URL_UNDER_TEST,
+        budgetBytes: STREAMED_TOTAL,
+        fetchImpl: network.fetchImpl,
+      });
+
+      const reader = await openRead(residency, network);
+      network.request().push(PIECE);
+      await reader.read();
+      expect(outstandingForegroundHolds(residency)).toBe(1);
+
+      residency.dispose();
+      expect(outstandingForegroundHolds(residency)).toBe(0);
+    });
+
+    it("gives the claim back when a dispose and an in-flight pull race", async () => {
+      vi.useFakeTimers();
+      try {
+        const network = scriptedFetch();
+        const residency = createSourceResidency({
+          url: URL_UNDER_TEST,
+          budgetBytes: STREAMED_TOTAL,
+          fetchImpl: network.fetchImpl,
+        });
+
+        const pending = residency.fetchFn(URL_UNDER_TEST, {
+          headers: { Range: "bytes=0-" },
+        });
+        await vi.advanceTimersByTimeAsync(0);
+        network.request().answer();
+        const reader = (await pending).body!.getReader();
+
+        const inFlight = reader.read();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(outstandingForegroundHolds(residency)).toBe(1);
+
+        residency.dispose();
+        expect(outstandingForegroundHolds(residency)).toBe(0);
+
+        network.request().push(PIECE);
+        await inFlight;
+        await vi.advanceTimersByTimeAsync(0);
+        expect(outstandingForegroundHolds(residency)).toBe(0);
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("gives the claim back once when a cancel and the body's end race", async () => {
+      const network = scriptedFetch();
+      const residency = createSourceResidency({
+        url: URL_UNDER_TEST,
+        budgetBytes: STREAMED_TOTAL,
+        fetchImpl: network.fetchImpl,
+      });
+
+      const reader = await openRead(residency, network);
+      network.request().push(PIECE);
+      await reader.read();
+      expect(outstandingForegroundHolds(residency)).toBe(1);
+
+      const stranded = reader.read();
+      await settle();
+      await reader.cancel();
+      await stranded;
+      await settle();
+      expect(outstandingForegroundHolds(residency)).toBe(0);
+    });
+
+    it("lets the claim lapse when banking a block mid-body fails", async () => {
+      const network = scriptedFetch();
+      const residency = createSourceResidency({
+        url: URL_UNDER_TEST,
+        budgetBytes: STREAMED_TOTAL,
+        fetchImpl: network.fetchImpl,
+      });
+
+      const reader = await openRead(residency, network);
+      network.request().push(READ_BLOCK_BYTES);
+      const failing = failNextCopy();
+      try {
+        await reader.read();
+      } finally {
+        failing.restore();
+      }
+      await expect(reader.read()).rejects.toThrow("out of memory");
+      expect(outstandingForegroundHolds(residency)).toBe(1);
+
+      await new Promise((resolve) =>
+        setTimeout(resolve, FOREGROUND_STALL_MS + 50),
+      );
+      expect(outstandingForegroundHolds(residency)).toBe(0);
+    });
+
+    it("gives the claim back when banking the last block fails", async () => {
+      const network = scriptedFetch();
+      const residency = createSourceResidency({
+        url: URL_UNDER_TEST,
+        budgetBytes: STREAMED_TOTAL,
+        fetchImpl: network.fetchImpl,
+      });
+
+      const reader = await openRead(residency, network);
+      network.request().push(PIECE);
+      await reader.read();
+      expect(outstandingForegroundHolds(residency)).toBe(1);
+
+      network.request().end();
+      const failing = failNextCopy();
+      try {
+        await expect(reader.read()).rejects.toThrow("out of memory");
+      } finally {
+        failing.restore();
+      }
+      expect(outstandingForegroundHolds(residency)).toBe(0);
+    });
+
+    it("gives the claim back when banking a cancelled read fails", async () => {
+      const network = scriptedFetch();
+      const residency = createSourceResidency({
+        url: URL_UNDER_TEST,
+        budgetBytes: STREAMED_TOTAL,
+        fetchImpl: network.fetchImpl,
+      });
+
+      const reader = await openRead(residency, network);
+      network.request().push(PIECE);
+      await reader.read();
+      expect(outstandingForegroundHolds(residency)).toBe(1);
+
+      const failing = failNextCopy();
+      try {
+        await expect(reader.cancel()).rejects.toThrow("out of memory");
+      } finally {
+        failing.restore();
+      }
+      expect(outstandingForegroundHolds(residency)).toBe(0);
+    });
+
+    it("gives the claim back when banking fails with no ceiling left to catch it", async () => {
+      const network = scriptedFetch();
+      const residency = createSourceResidency({
+        url: URL_UNDER_TEST,
+        budgetBytes: STREAMED_TOTAL,
+        fetchImpl: network.fetchImpl,
+      });
+
+      const reader = await openRead(residency, network);
+      network.request().push(PIECE);
+      await reader.read();
+
+      const pulling = reader.read();
+      await settle();
+      expect(outstandingForegroundHolds(residency)).toBe(1);
+
+      const failing = failNextCopy();
+      try {
+        await expect(reader.cancel()).rejects.toThrow("out of memory");
+      } finally {
+        failing.restore();
+      }
+      await pulling;
+
+      expect(outstandingForegroundHolds(residency)).toBe(0);
+    });
   });
 });
