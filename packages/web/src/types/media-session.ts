@@ -191,14 +191,12 @@ export interface MediaSessionDetectionOptions {
    * session treats detection coverage as part of media readiness and reports
    * buffering while it waits. Merges over `buffer.playbackGate`.
    *
-   * The sustained wait is the renderer holding a decoded sample back, so it
-   * lasts the length of playback only when the renderer pulls samples: a URL, a
-   * `Blob`, or any `media` source without a presented-frame channel. A source
-   * that presents its own frames drives the playhead itself, which is what
-   * `createWebVideoEngineMediaRendererSource` returns and therefore what most
-   * video sessions actually run on. There the gate holds the start of playback
-   * and nothing after it, so a preview opens covered and a producer already
-   * running keeps its own pace.
+   * The wait lasts for the length of playback on both kinds of media source. A
+   * source the renderer pulls samples from is held between decoding and drawing
+   * a frame. A source that presents its own frames drives the playhead itself,
+   * which is what `createWebVideoEngineMediaRendererSource` returns and therefore
+   * what most video sessions run on. There the renderer stops the producer at a
+   * frame its detections do not cover and starts it again when they arrive.
    */
   readonly playbackGate?: DetectionPlaybackGateOptions;
 
@@ -289,12 +287,12 @@ export interface MediaSessionOptions {
    * since a source that is complete before playback starts has nothing to wait
    * for. `true` turns it on for any session.
    *
-   * What it holds depends on who owns the playhead. A source the renderer pulls
-   * decoded samples from is held frame by frame, for as long as playback runs.
-   * A source that presents its own frames, which is what
-   * `createWebVideoEngineMediaRendererSource` returns, is held at the start of
-   * playback only: the session reports buffering until the frame it will resume
-   * on is covered, and once the producer is running it paces itself.
+   * Both kinds of source are held frame by frame for as long as playback runs.
+   * A source the renderer pulls decoded samples from waits between decoding and
+   * drawing. A source that presents its own frames, which is what
+   * `createWebVideoEngineMediaRendererSource` returns, is stopped when detection
+   * coverage or prepared artifacts are missing and started again when the wait
+   * settles.
    */
   readonly playbackGate?: boolean;
   /**

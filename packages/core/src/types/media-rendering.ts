@@ -218,9 +218,7 @@ export interface MediaRendererState {
    */
   readonly drawnMaskFrameTime?: number | null;
   /**
-   * How far the playback gate reaches on the source this renderer opened.
-   * The same option means different things to the two kinds of source, and this
-   * reports which one a host got.
+   * How far the active playback gates reach on the source this renderer opened.
    */
   readonly playbackGateReach?: PlaybackGateReach;
   /**

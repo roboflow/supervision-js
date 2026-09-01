@@ -209,10 +209,9 @@ function proseSentences(source) {
     .split(/(?<=[.;:])\s+/);
 }
 
-test("every playback-gate surface states the default the code ships", async () => {
-  // The gate holds a producer that owns its own playhead only at the start of
-  // playback, so every surface that names it has to say which sources it
-  // reaches. The default is read from the resolver rather than from a phrase,
+test("every playback-gate surface states the default and reach the code ships", async () => {
+  // Every gate reaches every frame on both source kinds, through different
+  // mechanics. The default is read from the resolver rather than from a phrase,
   // because a surface can name a scope and still describe the wrong default.
   const defaultsSource = await readFile(
     path.join(rootDir, "packages/web/src/sessions/media-session-defaults.ts"),
@@ -237,24 +236,27 @@ test("every playback-gate surface states the default the code ships", async () =
   const statesTheDefault = gateShipsOn
     ? /on\s+by\s+default|holds[\s\S]{0,120}?by\s+default/i
     : /off\s+by\s+default|off\s+unless|the gate off, which is the default/i;
-  const namesThePulledPath = /pulls? (?:decoded )?samples|pulling samples/i;
+  const namesThePulledPath =
+    /pulls?\s+(?:a\s+)?(?:decoded\s+)?samples?|pulling\s+samples/i;
   /* A symbol name does not count. Naming the one implementation that presents
    * its own frames satisfied this check while saying nothing about the contract,
    * which is how an engine symbol came to sit in a core type that cannot even
    * resolve it. */
-  const namesTheExemptSource =
-    /presents? its own frames|push-presented|presented-frame channel/i;
+  const namesThePresentedPath =
+    /presents?\s+its\s+own\s+frames|push-presented|presented-frame\s+channel/i;
   // A no-op claim is honest when it says which sources it is about and false
   // when it stands alone, so each claim is judged against its own sentence
   // rather than against the file.
   const scopesTheClaim = new RegExp(
-    `${namesThePulledPath.source}|${namesTheExemptSource.source}`,
+    `${namesThePulledPath.source}|${namesThePresentedPath.source}`,
     "i",
   );
   const claimsNoGate = [
     /accepted and ignored/i,
     /(?:playback|presentation) (?:is )?never (?:gated|awaits|waits)/i,
   ];
+  const claimsStartOnly =
+    /holds? only the start of playback|held at the start of playback|holds? the start of playback and nothing after|held at the start only/i;
   const failures = [];
 
   for (const surface of playbackGateSurfaces) {
@@ -272,7 +274,7 @@ test("every playback-gate surface states the default the code ships", async () =
 
     if (
       !namesThePulledPath.test(source) ||
-      !namesTheExemptSource.test(source)
+      !namesThePresentedPath.test(source)
     ) {
       failures.push(
         `${surface} never states which media sources the gate reaches`,
@@ -280,6 +282,12 @@ test("every playback-gate surface states the default the code ships", async () =
     }
 
     for (const sentence of proseSentences(source)) {
+      if (claimsStartOnly.test(sentence)) {
+        failures.push(
+          `${surface} documents a start-only gate, but both source kinds are gated at every frame`,
+        );
+      }
+
       if (
         claimsNoGate.some((claim) => claim.test(sentence)) &&
         !scopesTheClaim.test(sentence)

@@ -40,10 +40,11 @@ gates are about detections. They differ in which stage above they wait on.
   the ID-mask artifact that draws them. Masks and polygons take that step. The
   other geometries have nothing to rasterize, so this gate never waits on them.
 
-Both hold every frame on a media source the renderer pulls samples from. On a
-source that presents its own frames, the render-preparation gate holds only the
-start of playback, while the detection gate stops the producer again at any
-frame its detections do not cover. See
+Both gates hold every frame on either kind of media source. A source the
+renderer pulls samples from waits between decoding and drawing. On a source
+that presents its own frames, the renderer stops the producer when detection
+coverage or prepared artifacts are missing and starts it again when the wait
+settles. See
 [Media Sessions](./media-sessions.md) for the defaults and the single switch
 that answers for both.
 

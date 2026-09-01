@@ -135,15 +135,15 @@ fans out to: predictions here, not drafts. Awaiting `waitForRange` on
 while drafts may still be loading. That call is yours to make and works on any
 session, whatever media backs it.
 
-An enabled `detections.playbackGate` awaits that same waiter. A media source
-the renderer pulls decoded samples from, such as a URL or a `Blob`, is held
-frame by frame for as long as playback runs. A source that presents its own
-frames owns the playhead, which is what
-`createWebVideoEngineMediaRendererSource` returns and what most video sessions run
-on. There the gate stops that producer at any frame the required sources do not
-cover and starts it again when they do. The gate is on by default alongside the
-render-preparation gate, which holds only the start of playback on such a
-source, and `playbackGate: false` on `createMediaSession` turns both off.
+An enabled `detections.playbackGate` awaits that same waiter. Both playback
+gates hold every frame for as long as playback runs. A media source the renderer
+pulls decoded samples from, such as a URL or a `Blob`, waits between decoding
+and drawing. A source that presents its own frames owns the playhead, which is
+what `createWebVideoEngineMediaRendererSource` returns and what most video
+sessions run on. The renderer stops that producer when required detections or
+prepared artifacts are missing and starts it again when the wait settles. Both
+gates are on by default, and `playbackGate: false` on `createMediaSession` turns
+both off.
 
 `order` controls draw order. Lower sources compose first. Higher sources render
 later and appear on top.

@@ -53,17 +53,17 @@ lookahead it waits for.
 
 ### Which Sources The Gate Reaches
 
-The sustained gate is the renderer holding a decoded sample back before it
-draws it. It lasts the length of playback wherever the renderer pulls samples,
-which is the case for the `media` inputs above: a URL, a `File`, or a `Blob`.
+Both gates hold every frame for as long as playback runs. For the `media` inputs
+above, a URL, a `File`, or a `Blob`, the renderer pulls a decoded sample and
+holds it before drawing.
 
 A media source that presents its own frames owns the playhead, and the renderer
 follows it rather than pacing it. `createWebVideoEngineMediaRendererSource` and
-`openWebVideoEngineMediaSource` return that kind of source, and they are what most
-hosts render video through. There the render-preparation gate holds the start of
-playback and nothing after it, while the detection gate stops the producer again
-at any frame its detections do not cover and starts it when they land. Wait on
-coverage yourself when you would rather decide where playback stops:
+`openWebVideoEngineMediaSource` return that kind of source, and they are what
+most hosts render video through. The renderer stops that producer when detection
+coverage or prepared artifacts are missing and starts it again when the wait
+settles. Wait on coverage yourself when you would rather decide where playback
+stops:
 
 ```ts
 await session.detectionSource?.waitForRange?.({ startTime: 0, endTime: 2 });

@@ -56,11 +56,11 @@ matters more than annotations.
 It turns off both the detection-coverage and the render-preparation gates; left
 on, the session reports a buffering activity while it waits. The detection gate
 applies to a session with appendable detections, and `playbackGate: true` turns
-it on for any session. What the wait costs depends on the source. A source the
-renderer pulls samples from is held frame by frame by both gates. A source that
-presents its own frames, which is what `openWebVideoEngineMediaSource` returns, is
-held at the start of playback by the render-preparation gate and stopped again
-by the detection gate at any frame its detections do not cover.
+it on for any session. Both gates hold every frame. A source the renderer pulls
+samples from waits between decoding and drawing. A source that presents its own
+frames, which is what `openWebVideoEngineMediaSource` returns, is stopped when
+detection coverage or prepared artifacts are missing and started again when the
+wait settles.
 
 Video files are opened through `createWebVideoEngineMediaRendererSource`, which
 decodes, seeks and presents frames itself and reports the media time of the
