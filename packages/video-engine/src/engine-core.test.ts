@@ -194,6 +194,29 @@ describe("EngineCore", () => {
     await engine.dispose();
   });
 
+  it("pause and step stay on the picture when playback falls behind", async () => {
+    const clock = new FakeClock();
+    const { engine, events, cursor } = setup(clock);
+    await engine.load(LOAD_CONFIG);
+    bindFakeCanvas(engine);
+
+    engine.play();
+    clock.seek(5);
+    cursor.emit(asSec(5));
+    await flushRaf();
+    expect(playheadsOf(events).at(-1)).toBe(5);
+
+    // The media clock keeps advancing while an overloaded renderer cannot put
+    // up another frame before the pause command arrives.
+    clock.seek(6.6);
+
+    engine.pause();
+    expect(clock.now()).toBe(5);
+    expect((await engine.step(1))?.frame.index).toBe(FRAME(5) + 1);
+
+    await engine.dispose();
+  });
+
   it("togglePlayback alternates between play and pause", async () => {
     const clock = new FakeClock();
     const { engine } = setup(clock);

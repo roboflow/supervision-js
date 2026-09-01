@@ -339,6 +339,13 @@ export class EngineCore {
     const wasPlaying = this.playing;
     this.playing = false;
     this.clock.pause();
+    // Under load the wall clock can lead the frame on screen. A pause belongs
+    // to the picture the viewer stopped, so make that frame the settled
+    // position before ending the playback walk. Resume and single-frame steps
+    // must not jump across catch-up work that was never presented.
+    if (wasPlaying && this.lastPaintedId) {
+      this.clock.seek(this.timeline().timeAt(this.lastPaintedId.index));
+    }
     this.controller?.endPlay();
     if (wasPlaying) this.abandonAwaitedSeek();
     if (this.decodeFailure) return this.republishFailure();
