@@ -328,10 +328,7 @@ function createRecordingWorkerFactory(cooks: number[][]) {
   };
 }
 
-/**
- * Cooks a raster for the frames named and leaves every other job in flight, so
- * a frame can be on screen with its neighbour's cook still owed.
- */
+/** Cooks a raster for the frames named and leaves every other job in flight. */
 function createSelectiveWorkerFactory(cookedKeys: readonly string[]) {
   return {
     createWorker() {
@@ -471,7 +468,7 @@ describe("the prepared annotation window under push presentation", () => {
     expect(boxGraphics().clear.mock.calls.length).toBeGreaterThan(0);
   });
 
-  it("keeps the neighbouring frame's raster on a frame whose cook is owed, and says whose it is", async () => {
+  it("takes the previous raster off a frame whose own cook is owed", async () => {
     const scene = await createScene({
       detectionFrames: maskedFrames,
       maskStyle: paintedMaskStyle,
@@ -493,27 +490,6 @@ describe("the prepared annotation window under push presentation", () => {
 
     expect(scene.lastPresentation()).toMatchObject({
       activeDetectionFrameTime: 1.0333,
-      drawnMaskFrameTime: 1,
-      maskHeldStale: true,
-    });
-  });
-
-  it("takes the raster off two frames from the one it belongs to", async () => {
-    const scene = await createScene({
-      detectionFrames: maskedFrames,
-      maskStyle: paintedMaskStyle,
-      renderPreparation: {
-        workerFactory: createSelectiveWorkerFactory(["0:1"]),
-      },
-    });
-
-    scene.present(1000);
-    await scene.settleCooks();
-    scene.present(1033);
-    scene.present(1067);
-
-    expect(scene.lastPresentation()).toMatchObject({
-      activeDetectionFrameTime: 1.0667,
       drawnMaskFrameTime: null,
       maskHeldStale: false,
     });

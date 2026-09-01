@@ -2196,8 +2196,7 @@ export async function createPixiMediaScene(
     redrawAnnotationsNow();
   }
 
-  /** Redraws the frame on screen whether or not its readiness moved, for a
-   *  layer that went stale on wall clock rather than on new data. */
+  /** Redraws the frame on screen whether or not its readiness moved. */
   function redrawAnnotationsNow() {
     if (isPresenting || isDestroyed) {
       return;

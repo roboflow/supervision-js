@@ -156,7 +156,7 @@ describe("StatusPanel", () => {
     expect(String(readout(stale, "Mask Frame").value)).toContain("stale");
   });
 
-  it("says which side of the picture a held raster sits on", () => {
+  it("says which side of the picture a mismatched raster sits on", () => {
     const forwards = renderPanel({
       rendererState: rendererState({
         activeDetectionFrameTime: 0.1333,

@@ -5,9 +5,7 @@ import {
 } from "supervision-js-core";
 import {
   createPreparedRenderWindow,
-  PreparedRenderFrameMaskStatus,
   type PreparedMaskFrame,
-  type PreparedRenderFrame,
   type PreparedRenderTimelineContext,
 } from "#render-preparation/prepared-render-window";
 import {
@@ -19,11 +17,7 @@ import {
   type PreparedRegionMaskCoverageFrame,
   type PreparedRgbaMaskFrame,
 } from "#render-preparation/mask-frame-artifact";
-import { getBufferedDetectionTimelineFrameSnapshot } from "supervision-js-core";
-import type {
-  BufferedDetectionTimeline,
-  DetectionFrame,
-} from "supervision-js-core";
+import type { BufferedDetectionTimeline } from "supervision-js-core";
 import type {
   DetectionPickPoint,
   DetectionPickResult,
@@ -122,9 +116,8 @@ export enum PixiMaskLayerIdMaskStatus {
 /**
  * What the mask layer has on screen after its last draw.
  *
- * `drawnFrameTime` is the detection frame the visible raster belongs to. It is
- * the frame the rest of the present drew, or the frame beside it while that
- * frame's own cook is owed, or the layer draws nothing.
+ * `drawnFrameTime` is the detection frame the visible raster belongs to, and it
+ * is the frame the rest of the present drew or the layer draws nothing.
  * `drawnFrameId` names the producer frame that raster was accepted for, and is
  * null on a draw the producer did not drive: a pull-path sample and a redraw at
  * a resting playhead both carry a media time and no frame identity.
@@ -347,9 +340,7 @@ export function createPixiMaskLayer(options: {
         return;
       }
 
-      if (!preparedFrame || !canHoldVisibleMaskOver(preparedFrame)) {
-        hideSprite();
-      }
+      hideSprite();
     },
 
     getDrawnState() {
@@ -675,41 +666,6 @@ export function createPixiMaskLayer(options: {
     }
 
     idMaskRenderer?.hide();
-  }
-
-  /**
-   * Whether the raster on screen may stand over a frame whose own cook has not
-   * landed, which it may for exactly the frame beside its own.
-   *
-   * The bound is counted in frames of the timeline and never in seconds. A span
-   * of seconds only means one frame at one frame rate and one playback rate, so
-   * it has to be scaled by the rate to go on meaning it, and that scaling is
-   * what once left a raster twelve frames old on the picture after a fast run.
-   */
-  function canHoldVisibleMaskOver(preparedFrame: PreparedRenderFrame) {
-    return (
-      preparedFrame.maskStatus === PreparedRenderFrameMaskStatus.Pending &&
-      visibleMaskMediaTime !== null &&
-      isNeighbouringDetectionFrame(
-        visibleMaskMediaTime,
-        preparedFrame.detectionFrame.mediaTime,
-      )
-    );
-  }
-
-  function isNeighbouringDetectionFrame(
-    mediaTime: number,
-    otherMediaTime: number,
-  ) {
-    const frames = getBufferedDetectionTimelineFrameSnapshot(
-      options.detectionTimeline,
-    );
-    const index = indexOfDetectionFrameAt(frames, mediaTime);
-    const otherIndex = indexOfDetectionFrameAt(frames, otherMediaTime);
-
-    return (
-      index !== -1 && otherIndex !== -1 && Math.abs(index - otherIndex) === 1
-    );
   }
 
   /**
@@ -1089,31 +1045,4 @@ function expandIdsToRgba(ids: Uint8Array): Uint8Array<ArrayBuffer> {
   }
 
   return rgba;
-}
-
-/** Where the frame sits in the timeline's buffer, which is held in media-time
- *  order, or -1 for a time no frame of detections sits on. */
-function indexOfDetectionFrameAt(
-  frames: readonly DetectionFrame[],
-  mediaTime: number,
-) {
-  let low = 0;
-  let high = frames.length - 1;
-
-  while (low <= high) {
-    const middle = (low + high) >>> 1;
-    const frameTime = frames[middle].mediaTime;
-
-    if (frameTime === mediaTime) {
-      return middle;
-    }
-
-    if (frameTime < mediaTime) {
-      low = middle + 1;
-    } else {
-      high = middle - 1;
-    }
-  }
-
-  return -1;
 }

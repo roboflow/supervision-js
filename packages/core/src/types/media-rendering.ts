@@ -210,9 +210,8 @@ export interface MediaRendererState {
   readonly activeDetectionCount: number;
   /**
    * Detection frame the mask raster on screen belongs to, null when no mask is
-   * up. It names `activeDetectionFrameTime`, or the frame beside it while that
-   * frame's own raster is still being prepared, and never anything further off
-   * than that.
+   * up. A renderer should either name `activeDetectionFrameTime` or draw no
+   * raster; another value exposes a presentation invariant breach.
    */
   readonly drawnMaskFrameTime?: number | null;
   /**
@@ -227,9 +226,8 @@ export interface MediaRendererState {
   readonly renderPreparationGateAbandoned?: boolean;
   /**
    * Whether the raster on screen belongs to a frame other than the one the rest
-   * of the annotations were drawn from, which is the neighbouring frame and no
-   * further. It goes true where drawing nothing would have blinked the mask off
-   * for a frame instead.
+   * of the annotations were drawn from. Renderers report the mismatch instead
+   * of hiding it so diagnostics can fail loudly.
    */
   readonly maskHeldStale?: boolean;
   /**

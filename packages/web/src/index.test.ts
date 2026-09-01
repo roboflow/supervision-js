@@ -1765,7 +1765,7 @@ describe("package entrypoint", () => {
 
       expect(sprite.visible).toBe(true);
 
-      layer.drawFrame(0.52);
+      layer.drawFrame(0.04);
 
       expect(sprite.visible).toBe(false);
 

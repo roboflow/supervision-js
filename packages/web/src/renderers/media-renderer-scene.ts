@@ -105,9 +105,8 @@ export interface PresentedMediaSample {
   /** Detection frame the mask raster on screen belongs to, null when no mask is
    *  up. Apart from `activeDetectionFrameTime` it names a desync in seconds. */
   readonly drawnMaskFrameTime: number | null;
-  /** The raster on screen and the detections over it name different frames,
-   *  which is the mask layer holding the neighbouring frame's raster over a
-   *  frame whose own is still being prepared. */
+  /** The raster on screen and the detections over it name different frames.
+   *  This is an invariant breach: a pending mask must leave the frame bare. */
   readonly maskHeldStale: boolean;
   readonly detectionBuffer: DetectionBufferState;
   readonly renderTimings?: MediaFrameRenderTimings;
