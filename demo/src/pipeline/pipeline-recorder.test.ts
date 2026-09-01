@@ -4,8 +4,8 @@ import {
   MediaRendererFit,
   MediaRendererPlaybackState,
   MediaSessionMediaBranch,
+  MediaSessionMode,
   MediaSourceStatus,
-  PlaybackGateReach,
   type MediaRendererSource,
   type MediaRendererState,
   type MediaSessionMediaState,
@@ -26,6 +26,12 @@ import {
 } from "./pipeline-descriptor";
 import { createPipelineRecorder } from "./pipeline-recorder";
 import { formatPipelineTrace } from "./pipeline-trace";
+import {
+  DemoEngineSource,
+  DemoMediaPath,
+  optionSupported,
+  resolveDemoSessionConfiguration,
+} from "../session/session-options";
 
 /** Everything the engine would refuse to answer without its broadcast running. */
 interface BroadcastSpy {
@@ -103,6 +109,7 @@ describe("pipeline recorder", () => {
     await tapped.open();
 
     const descriptor = recorder.seal({
+      configuration: sessionConfiguration(),
       media: mediaState(MediaSessionMediaBranch.RendererSource, "source"),
       rendererState: rendererState(),
     });
@@ -244,42 +251,47 @@ describe("pipeline recorder", () => {
     );
   });
 
-  it("treats holding playback only at the start as proof the engine drives the frames", () => {
+  it("records detection and mask waits as concurrent session policies", () => {
     const recorder = createPipelineRecorder({ epoch: 1, now: clock() });
     const descriptor = recorder.seal({
+      configuration: sessionConfiguration(),
       media: null,
-      rendererState: {
-        ...rendererState(),
-        playbackGateReach: PlaybackGateReach.StartOfPlayback,
-      },
+      rendererState: rendererState(),
     });
 
-    expect(statusOf(descriptor, PipelineNodeId.PlaybackStartOnly)).toBe(
+    expect(statusOf(descriptor, PipelineNodeId.PlaybackDetectionGate)).toBe(
       PipelineNodeStatus.Taken,
     );
-    expect(statusOf(descriptor, PipelineNodeId.PresentationFrames)).toBe(
+    expect(statusOf(descriptor, PipelineNodeId.PlaybackPreparationGate)).toBe(
       PipelineNodeStatus.Taken,
+    );
+    expect(statusOf(descriptor, PipelineNodeId.PlaybackNothingHeld)).toBe(
+      PipelineNodeStatus.Bypassed,
+    );
+    expect(descriptor.conflictingStages).not.toContain(
+      PipelineStageId.Playback,
     );
   });
 
-  it("does not read holding every frame as proof of either kind of source", () => {
+  it("records when both waits are disabled", () => {
     const recorder = createPipelineRecorder({ epoch: 1, now: clock() });
     const descriptor = recorder.seal({
+      configuration: sessionConfiguration({
+        detectionGateEnabled: false,
+        preparationGateEnabled: false,
+      }),
       media: null,
-      rendererState: {
-        ...rendererState(),
-        playbackGateReach: PlaybackGateReach.EveryFrame,
-      },
+      rendererState: rendererState(),
     });
 
-    expect(statusOf(descriptor, PipelineNodeId.PlaybackEveryFrame)).toBe(
+    expect(statusOf(descriptor, PipelineNodeId.PlaybackNothingHeld)).toBe(
       PipelineNodeStatus.Taken,
     );
-    expect(statusOf(descriptor, PipelineNodeId.PresentationFrames)).toBe(
-      PipelineNodeStatus.Unknown,
+    expect(statusOf(descriptor, PipelineNodeId.PlaybackDetectionGate)).toBe(
+      PipelineNodeStatus.Bypassed,
     );
-    expect(statusOf(descriptor, PipelineNodeId.PresentationPull)).toBe(
-      PipelineNodeStatus.Unknown,
+    expect(statusOf(descriptor, PipelineNodeId.PlaybackPreparationGate)).toBe(
+      PipelineNodeStatus.Bypassed,
     );
   });
 
@@ -495,7 +507,6 @@ function rendererState(): MediaRendererState {
     lastFrameRenderTimings: null,
     mediaHeight: 720,
     mediaWidth: 1280,
-    playbackGateReach: PlaybackGateReach.StartOfPlayback,
     playbackRate: 1,
     playbackState: MediaRendererPlaybackState.Paused,
     presentedFrames: 0,
@@ -519,4 +530,34 @@ function rendererState(): MediaRendererState {
       videoTrackCount: 1,
     },
   };
+}
+
+function sessionConfiguration(
+  options: {
+    readonly detectionGateEnabled?: boolean;
+    readonly preparationGateEnabled?: boolean;
+  } = {},
+) {
+  return resolveDemoSessionConfiguration({
+    detections: {
+      frames: [],
+      playbackGate: {
+        enabled: options.detectionGateEnabled ?? true,
+      },
+    },
+    engine: {},
+    engineSource: DemoEngineSource.Url,
+    mediaPath: DemoMediaPath.Engine,
+    mediaPathSupport: optionSupported,
+    mode: MediaSessionMode.File,
+    normalizationSupport: optionSupported,
+    playbackGate: undefined,
+    renderer: {
+      renderPreparation: {
+        playbackGate: {
+          enabled: options.preparationGateEnabled ?? true,
+        },
+      },
+    },
+  });
 }

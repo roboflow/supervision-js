@@ -96,6 +96,10 @@ export const StatusPanel = memo(function StatusPanel({
     preparedWindowArtifact,
     sourceState?.estimatedFrameRate ?? null,
   );
+  const blockingActivity =
+    sessionState?.activities.find(
+      (activity) => activity.blockingPlayback || activity.blockingPresentation,
+    ) ?? null;
 
   return (
     <section className="status-panel" aria-label="Renderer status">
@@ -105,6 +109,10 @@ export const StatusPanel = memo(function StatusPanel({
           value={fixtureSummary?.fixtureName ?? "loading"}
         />
         <Readout label="State" value={playbackState ?? "-"} />
+        <Readout
+          label="Navigation"
+          value={formatNavigationState(rendererState)}
+        />
         <Readout
           label="Speed"
           tone={
@@ -310,6 +318,24 @@ export const StatusPanel = memo(function StatusPanel({
           label="Active Frame"
           value={preparedWindowArtifact?.activeFrame?.status ?? "-"}
         />
+        <Readout
+          label="Mask Readiness"
+          tone={preparedWindowArtifact?.gateHold ? "danger" : "default"}
+          value={formatPreparationGateLead(preparedWindowArtifact)}
+        />
+        <Readout
+          label="Mask Wait"
+          tone={
+            rendererState?.renderPreparationGateAbandoned ? "danger" : "default"
+          }
+          value={
+            rendererState
+              ? rendererState.renderPreparationGateAbandoned
+                ? "gave up | playback continuing"
+                : "clear"
+              : "-"
+          }
+        />
         {renderPreparationDiagnostics?.message ? (
           <Readout
             label="Message"
@@ -327,6 +353,19 @@ export const StatusPanel = memo(function StatusPanel({
 
       <StatusGroup title="Session">
         <Readout label="State" value={sessionState?.status ?? "-"} />
+        <Readout
+          label="Current Blocker"
+          tone={blockingActivity ? "danger" : "default"}
+          value={
+            sessionState
+              ? blockingActivity
+                ? [blockingActivity.label, blockingActivity.detail]
+                    .filter(Boolean)
+                    .join(" | ")
+                : "none"
+              : "-"
+          }
+        />
         <Readout
           label="Activities"
           value={
@@ -371,6 +410,17 @@ export const StatusPanel = memo(function StatusPanel({
           }
         />
         <Readout label="Media" value={mediaState.status} />
+        <Readout
+          label="Source Read"
+          tone={rendererState?.source.awaitingRead ? "danger" : "default"}
+          value={
+            rendererState
+              ? rendererState.source.awaitingRead
+                ? "waiting for bytes or decode"
+                : "idle"
+              : "-"
+          }
+        />
         <Readout
           label="Inference"
           value={formatInferenceSummary(fixtureSummary)}
@@ -566,6 +616,33 @@ function formatMaskFrame(rendererState: MediaRendererState | null) {
   const side = offsetMs < 0 ? "ahead" : "behind";
 
   return `${drawn} | stale | ${formatMilliseconds(Math.abs(offsetMs))} ${side}`;
+}
+
+function formatNavigationState(rendererState: MediaRendererState | null) {
+  if (!rendererState) {
+    return "-";
+  }
+
+  if (rendererState.scrubbing) {
+    return rendererState.seeking ? "scrubbing | seeking" : "scrubbing";
+  }
+
+  return rendererState.seeking ? "seeking" : "settled";
+}
+
+function formatPreparationGateLead(
+  artifact: ReturnType<typeof selectPreparedWindowArtifact>,
+) {
+  if (!artifact) {
+    return "-";
+  }
+
+  const prepared = formatExactTime(artifact.preparedAheadSeconds ?? 0);
+  const required = artifact.gateHold?.requiredAheadSeconds;
+
+  return required === undefined
+    ? `${prepared} ready | clear`
+    : `${prepared} ready | ${formatExactTime(required)} needed`;
 }
 
 function formatAudioSummary(sourceState: MediaSourceState | null) {

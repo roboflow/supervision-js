@@ -18,8 +18,9 @@
  * - Detections follows the sample's own manifest: a sample that records the
  *   time each detection covers is paired on time, one that does not has its
  *   position rebuilt from the count. Neither is chosen.
- * - Playback's three branches are one reading computed from two independent
- *   gates and the kind of source, so no single control lands on a branch.
+ * - Playback is a concurrent policy assembled from two independent controls.
+ *   The Session panel owns both controls, so the diagram records them rather
+ *   than offering a second way to change them.
  * - Source residency is a three-way setting drawn as one node, and the node
  *   reads unknown unless the engine's live readings are on, so a click here
  *   could only guess which of the three the session is on.

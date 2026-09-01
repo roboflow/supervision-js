@@ -132,10 +132,42 @@ export function listDemoLibraryDepartures(options: {
     why: "How much annotation has to be loaded before the picture may move.",
   });
   compare(departures, {
+    library: formatOptionSeconds(libraryDetectionGate?.maxWaitSeconds),
+    setting: "Annotation max wait",
+    value: formatOptionSeconds(detectionGate?.maxWaitSeconds),
+    why: "How long one annotation wait may hold the picture before giving up.",
+  });
+  compare(departures, {
     library: formatOptionFlag(libraryPreparationGate?.enabled),
     setting: "Waits for masks",
     value: formatOptionFlag(preparationGate?.enabled),
     why: "Whether the picture is held until the frame's masks have been drawn.",
+  });
+  compare(departures, {
+    library: formatOptionSeconds(libraryPreparationGate?.maxWaitSeconds),
+    setting: "Mask max wait",
+    value: formatOptionSeconds(preparationGate?.maxWaitSeconds),
+    why: "How long one mask wait may hold the picture before giving up.",
+  });
+  compare(departures, {
+    library: formatOptionSeconds(libraryPreparationGate?.stopBelowWallSeconds),
+    setting: "Mask stop threshold",
+    value: formatOptionSeconds(preparationGate?.stopBelowWallSeconds),
+    why: "How little prepared mask runway may remain before playback stops.",
+  });
+  compare(departures, {
+    library: formatOptionSeconds(
+      libraryPreparationGate?.resumeMarginWallSeconds,
+    ),
+    setting: "Mask resume margin",
+    value: formatOptionSeconds(preparationGate?.resumeMarginWallSeconds),
+    why: "How much mask runway a stop banks before playback resumes.",
+  });
+  compare(departures, {
+    library: formatOptionSeconds(libraryPreparationGate?.requiredAheadSeconds),
+    setting: "Masks required ahead",
+    value: formatOptionSeconds(preparationGate?.requiredAheadSeconds),
+    why: "The ceiling on how much prepared mask lead a stop may require.",
   });
   compare(departures, {
     library: formatOptionSeconds(libraryBuffer.bufferAheadSeconds),

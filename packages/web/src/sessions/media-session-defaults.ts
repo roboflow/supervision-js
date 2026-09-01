@@ -4,6 +4,11 @@ import type {
 } from "supervision-js-core";
 import { DetectionFrameRetentionMode } from "supervision-js-core";
 import type { RenderPreparationOptions } from "#types/render-preparation";
+import {
+  DEFAULT_RENDER_PREPARATION_GATE_MAX_WAIT_SECONDS,
+  DEFAULT_RENDER_PREPARATION_GATE_RESUME_MARGIN_WALL_SECONDS,
+  DEFAULT_RENDER_PREPARATION_GATE_STOP_BELOW_WALL_SECONDS,
+} from "#constants/media-renderer";
 import type {
   MediaSessionAppendableDetectionOptions,
   MediaSessionMode,
@@ -42,12 +47,17 @@ const STREAM_DETECTION_BUFFER_DEFAULTS = {
  */
 const DETECTION_PLAYBACK_GATE_DEFAULTS = {
   enabled: true,
+  maxWaitSeconds: 10,
   requiredAheadSeconds: 2,
 };
 
 const RENDER_PREPARATION_PLAYBACK_GATE_DEFAULTS = {
   enabled: true,
+  maxWaitSeconds: DEFAULT_RENDER_PREPARATION_GATE_MAX_WAIT_SECONDS,
   requiredAheadSeconds: 1,
+  resumeMarginWallSeconds:
+    DEFAULT_RENDER_PREPARATION_GATE_RESUME_MARGIN_WALL_SECONDS,
+  stopBelowWallSeconds: DEFAULT_RENDER_PREPARATION_GATE_STOP_BELOW_WALL_SECONDS,
 };
 
 const MASK_FRAME_DEFAULTS = {
@@ -110,6 +120,11 @@ export function resolveMediaSessionDefaults(
     ...(detectionPlaybackGate
       ? {
           playbackGate: {
+            // The detection timeline applies this bound even when a caller
+            // enables only the specific gate and leaves the session switch
+            // unset. Resolving it here makes the session snapshot describe the
+            // runtime that will actually open.
+            maxWaitSeconds: DETECTION_PLAYBACK_GATE_DEFAULTS.maxWaitSeconds,
             ...(inheritsGateLookahead
               ? DETECTION_PLAYBACK_GATE_DEFAULTS
               : undefined),

@@ -193,8 +193,6 @@ export enum PlaybackGateReach {
    * missing, until they arrive or the gate's own wait bound gives up on them.
    */
   EveryFrame = "everyFrame",
-  /** Playback waits to begin; frames after that are not held. */
-  StartOfPlayback = "startOfPlayback",
 }
 
 export interface MediaRendererState {

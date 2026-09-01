@@ -1,11 +1,16 @@
 import type { ReactElement } from "react";
 import { describe, expect, it } from "vitest";
+import {
+  RenderPreparationArtifactFrameStatus,
+  RenderPreparationArtifactKind,
+} from "supervision";
 
 import type { PresentationDiagnosticsSample } from "../diagnostics/presentation-diagnostics";
 import type { PresentedFrameRecord } from "../diagnostics/presented-frame-tap";
 import {
   presentationSampleUnchanged,
   PresentedFrameTimeline,
+  readPreparationGateTargetRanges,
 } from "./PresentationDiagnostics";
 
 const RING_CAPACITY = 300;
@@ -78,6 +83,7 @@ function tickKeys(presentedCount: number) {
     PresentedFrameTimeline({
       detectionRanges: [],
       duration: 70,
+      gateTargetRanges: [],
       playheadTime: 1,
       readinessBands: [],
       ticks: ring(presentedCount),
@@ -99,6 +105,36 @@ describe("presented frame ticks", () => {
     expect(after).toHaveLength(RING_CAPACITY);
     expect(before[0]).toBe("40");
     expect(after.slice(0, RING_CAPACITY - 8)).toEqual(before.slice(8));
+  });
+});
+
+describe("render-preparation gate target", () => {
+  const heldArtifact = {
+    activeFrame: {
+      key: "mask:9.5",
+      mediaTime: 9.5,
+      status: RenderPreparationArtifactFrameStatus.Pending,
+    },
+    gateHold: {
+      reason: "leadBelowRequirement" as never,
+      requiredAheadSeconds: 1.25,
+    },
+    kind: RenderPreparationArtifactKind.MaskFrame,
+    pendingCount: 1,
+    preparedCount: 2,
+  };
+
+  it("draws the active gate target and wraps it at the end of a looping clip", () => {
+    expect(readPreparationGateTargetRanges(heldArtifact, 10)).toEqual([
+      { endTime: 10, startTime: 9.5 },
+      { endTime: 0.75, startTime: 0 },
+    ]);
+  });
+
+  it("draws no target when the gate is clear", () => {
+    expect(
+      readPreparationGateTargetRanges({ ...heldArtifact, gateHold: null }, 10),
+    ).toEqual([]);
   });
 });
 

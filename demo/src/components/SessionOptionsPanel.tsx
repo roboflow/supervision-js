@@ -58,8 +58,6 @@ const gateReachSentences: Record<PlaybackGateReach, string> = {
     "Every frame waits for what it needs, for as long as the clip runs. A wait that drags on gives up and the picture moves.",
   [PlaybackGateReach.Off]:
     "Nothing holds the picture. A frame is drawn with whatever has arrived by the time it is shown.",
-  [PlaybackGateReach.StartOfPlayback]:
-    "The video waits once, at the start. After that it keeps going even if annotations or masks fall behind.",
 };
 
 export const SessionOptionsPanel = memo(function SessionOptionsPanel({
@@ -220,7 +218,7 @@ function SessionOptionControls({
             { label: "Off", value: OFF },
             { label: "On", value: ON },
           ]}
-          tooltip="On, the video opens with its boxes and masks already on it. Off, the picture moves at once and they appear as they land, which is what you want for skimming a long clip. Unset waits for masks but not for annotations, unless annotations are still being written. `playbackGate`; this workbench opens a sample clip On and an upload Unset."
+          tooltip="On, the video opens with its boxes and masks already on it. Off, the picture moves at once and they appear as they land, which is what you want for skimming a long clip. Unset leaves each gate to its own default: a bundled sample waits for masks only; an upload also waits for appendable detections. `playbackGate`; this workbench opens both sample clips and uploads Unset."
           value={writeTriState(
             options.playbackGate ?? configuration.playbackGate,
           )}
@@ -273,7 +271,7 @@ function SessionOptionControls({
             libraryDetectionGate?.requiredAheadSeconds,
           )}
           step={0.25}
-          tooltip="How many seconds of annotations have to be loaded before the video is allowed to move. A clip whose annotations are already in memory clears any figure at once; the wait shows while they are still being fetched or written, and a bigger number then means a longer pause before the first frame. At 0 it still waits for the frame it is about to show. `detections.playbackGate.requiredAheadSeconds`, default 2s."
+          tooltip="How many seconds of annotations have to be loaded before the video is allowed to move. A clip whose annotations are already in memory clears any figure at once; while annotations are fetched or written, the gate checks this lead before playback starts and again whenever the playhead outruns coverage. At 0 it still waits for the frame it is about to show. `detections.playbackGate.requiredAheadSeconds`, default 2s when the session-level gate or appendable detections enable it."
           value={
             options.detectionGateRequiredAheadSeconds ??
             detectionGate?.requiredAheadSeconds ??
@@ -282,6 +280,33 @@ function SessionOptionControls({
           valueLabel={formatOptionSeconds(
             options.detectionGateRequiredAheadSeconds ??
               detectionGate?.requiredAheadSeconds,
+          )}
+        />
+        <SliderControl
+          label="Annotation max wait seconds"
+          libraryDefault={formatOptionSeconds(
+            libraryDetectionGate?.maxWaitSeconds,
+          )}
+          max={30}
+          min={0}
+          onChange={(value) => onUpdate("detectionGateMaxWaitSeconds", value)}
+          optionPath="detections.playbackGate.maxWaitSeconds"
+          origin={readDemoOptionOrigin(
+            options.detectionGateMaxWaitSeconds,
+            options.detectionGateMaxWaitSeconds ??
+              detectionGate?.maxWaitSeconds,
+            libraryDetectionGate?.maxWaitSeconds,
+          )}
+          step={0.5}
+          tooltip="How long one annotation wait may freeze the picture before the gate gives up and presents with whatever annotations exist. A producer that has stopped answering costs one bounded wait instead of stranding playback. `detections.playbackGate.maxWaitSeconds`, default 10s."
+          value={
+            options.detectionGateMaxWaitSeconds ??
+            detectionGate?.maxWaitSeconds ??
+            0
+          }
+          valueLabel={formatOptionSeconds(
+            options.detectionGateMaxWaitSeconds ??
+              detectionGate?.maxWaitSeconds,
           )}
         />
         <ControlSubheading>Until the masks are drawn</ControlSubheading>
@@ -299,6 +324,33 @@ function SessionOptionControls({
             libraryPreparationGate?.enabled ?? false,
           )}
           tooltip="The video waits for the masks that belong to the frame it is about to show to be turned into pixels. Off, that frame is drawn without its masks. `renderer.renderPreparation.playbackGate.enabled`, on by default."
+        />
+        <SliderControl
+          label="Mask max wait seconds"
+          libraryDefault={formatOptionSeconds(
+            libraryPreparationGate?.maxWaitSeconds,
+          )}
+          max={10}
+          min={0}
+          onChange={(value) => onUpdate("preparationGateMaxWaitSeconds", value)}
+          optionPath="renderPreparation.playbackGate.maxWaitSeconds"
+          origin={readDemoOptionOrigin(
+            options.preparationGateMaxWaitSeconds,
+            options.preparationGateMaxWaitSeconds ??
+              preparationGate?.maxWaitSeconds,
+            libraryPreparationGate?.maxWaitSeconds,
+          )}
+          step={0.25}
+          tooltip="How long one mask-preparation wait may freeze the picture before the gate gives up and lets frames through without masks. It can hold again after preparation makes progress. `renderer.renderPreparation.playbackGate.maxWaitSeconds`, default 2s."
+          value={
+            options.preparationGateMaxWaitSeconds ??
+            preparationGate?.maxWaitSeconds ??
+            0
+          }
+          valueLabel={formatOptionSeconds(
+            options.preparationGateMaxWaitSeconds ??
+              preparationGate?.maxWaitSeconds,
+          )}
         />
         <SliderControl
           label="Stop below wall seconds"
@@ -427,7 +479,7 @@ function SessionOptionControls({
             libraryBuffer.bufferBehindSeconds,
           )}
           step={0.5}
-          tooltip="Boxes blink out when you step or scrub backwards? Raise this. It costs memory and nothing else. `detections.buffer.bufferBehindSeconds`, default 0.5s for a file and 5s for a stream."
+          tooltip="Boxes blink out when you step or scrub backwards? Raise this. It costs memory and nothing else. `detections.buffer.bufferBehindSeconds`, default 5s for both files and streams."
           value={options.bufferBehindSeconds ?? buffer.bufferBehindSeconds ?? 0}
           valueLabel={formatOptionSeconds(
             options.bufferBehindSeconds ?? buffer.bufferBehindSeconds,
@@ -666,7 +718,7 @@ function SessionOptionControls({
       </ControlSection>
 
       <ControlSection
-        description="How the clip's own bytes are fetched, and how much decoded picture is kept around the playhead. The whole group belongs to a package the library does not ship, so none of it has a library default. Nothing here changes what is drawn, only how long you wait to see it."
+        description="How the web video engine fetches the clip's bytes and keeps decoded frames around the playhead. It ships from the package's `supervision/web-video-engine` entry point and is opt-in; the default media path remains Mediabunny."
         title="Web video engine"
       >
         {engineDriven ? null : (

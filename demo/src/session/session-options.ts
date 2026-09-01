@@ -74,6 +74,7 @@ export interface DemoSessionOptions {
   readonly cacheSkipNearMs?: number;
   readonly cacheStrategy?: DemoEngineOptions["cacheStrategy"];
   readonly detectionGateEnabled?: boolean;
+  readonly detectionGateMaxWaitSeconds?: number;
   readonly detectionGateRequiredAheadSeconds?: number;
   readonly fit?: MediaRendererFit;
   readonly interactionMode?: MediaInteractionMode;
@@ -103,6 +104,7 @@ export interface DemoSessionOptions {
   readonly playbackGate?: boolean | "unset";
   readonly prefer2d?: boolean;
   readonly preparationGateEnabled?: boolean;
+  readonly preparationGateMaxWaitSeconds?: number;
   readonly preparationGateRequiredAheadSeconds?: number;
   readonly preparationGateResumeMarginWallSeconds?: number;
   readonly preparationGateStopBelowWallSeconds?: number;
@@ -294,6 +296,7 @@ export function applyDemoDetectionOptions(
   });
   const playbackGate = definedOnly({
     enabled: options.detectionGateEnabled,
+    maxWaitSeconds: options.detectionGateMaxWaitSeconds,
     requiredAheadSeconds: options.detectionGateRequiredAheadSeconds,
   });
 
@@ -321,6 +324,7 @@ export function applyDemoRendererOptions(
   });
   const preparationGate = definedOnly({
     enabled: options.preparationGateEnabled,
+    maxWaitSeconds: options.preparationGateMaxWaitSeconds,
     requiredAheadSeconds: options.preparationGateRequiredAheadSeconds,
     resumeMarginWallSeconds: options.preparationGateResumeMarginWallSeconds,
     stopBelowWallSeconds: options.preparationGateStopBelowWallSeconds,

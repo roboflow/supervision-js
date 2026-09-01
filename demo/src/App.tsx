@@ -360,6 +360,7 @@ function DemoApp() {
               detectionRanges={processedRanges}
               duration={demo.duration}
               readSample={demo.readPresentationDiagnostics}
+              renderPreparationDiagnostics={demo.renderPreparationDiagnostics}
             />
           </>
         }

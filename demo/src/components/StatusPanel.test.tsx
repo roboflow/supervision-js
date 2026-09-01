@@ -4,6 +4,9 @@ import {
   MediaErrorKind,
   MediaRendererFit,
   MediaRendererPlaybackState,
+  MediaSessionActivityKind,
+  MediaSessionActivityStatus,
+  MediaSessionStatus,
   MediaSourceStatus,
   type MediaRendererState,
   type MediaSourceState,
@@ -174,6 +177,77 @@ describe("StatusPanel", () => {
     );
     expect(String(readout(backwards, "Mask Frame").value)).toContain(
       "33.30ms ahead",
+    );
+  });
+
+  it("separates navigation, source reads, and a mask wait that gave up", () => {
+    const tree = renderPanel({
+      renderPreparationDiagnostics: {
+        artifacts: [
+          {
+            activeFrame: { key: "mask:4", mediaTime: 4, status: "pending" },
+            gateHold: {
+              reason: "leadBelowRequirement",
+              requiredAheadSeconds: 1,
+            },
+            kind: "maskFrame",
+            pendingCount: 2,
+            preparedAheadSeconds: 0.25,
+            preparedCount: 3,
+          },
+        ],
+        executionMode: "worker",
+        message: null,
+        workerStatus: "ready",
+      } as PanelProps["renderPreparationDiagnostics"],
+      rendererState: rendererState({
+        renderPreparationGateAbandoned: true,
+        scrubbing: true,
+        seeking: true,
+        source: { ...sourceState(0), awaitingRead: true },
+      }),
+    });
+
+    expect(readout(tree, "Navigation").value).toBe("scrubbing | seeking");
+    expect(readout(tree, "Source Read").value).toBe(
+      "waiting for bytes or decode",
+    );
+    expect(readout(tree, "Mask Wait").value).toBe(
+      "gave up | playback continuing",
+    );
+    expect(String(readout(tree, "Mask Readiness").value)).toContain("needed");
+  });
+
+  it("names the activity that is currently blocking playback", () => {
+    const tree = renderPanel({
+      sessionState: {
+        activities: [
+          {
+            blockingPlayback: true,
+            blockingPresentation: false,
+            detail: "The masks for this frame are not drawn yet",
+            kind: MediaSessionActivityKind.RenderPreparing,
+            label: "Waiting for the masks",
+            status: MediaSessionActivityStatus.Waiting,
+          },
+        ],
+        errorMessage: null,
+        media: {
+          inputMetadata: null,
+          normalizedMedia: null,
+          objectUrl: null,
+        },
+        normalization: null,
+        playbackBlocked: true,
+        presentationBlocked: false,
+        renderPreparation: null,
+        renderer: null,
+        status: MediaSessionStatus.Buffering,
+      },
+    });
+
+    expect(readout(tree, "Current Blocker").value).toBe(
+      "Waiting for the masks | The masks for this frame are not drawn yet",
     );
   });
 });

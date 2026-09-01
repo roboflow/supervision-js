@@ -176,6 +176,7 @@ describe("demo session options", () => {
     );
     expect(configuration.resolved.detectionBuffer.playbackGate).toEqual({
       enabled: true,
+      maxWaitSeconds: 10,
       requiredAheadSeconds: 2,
     });
     // Seven seconds of prefetch and eight of cache, at the detection rate.

@@ -5,11 +5,16 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
+import type {
+  RenderPreparationArtifactDiagnostics,
+  RenderPreparationDiagnostics,
+} from "supervision";
 import type { PresentationDiagnosticsSample } from "../diagnostics/presentation-diagnostics";
 import type { PresentedFrameRecord } from "../diagnostics/presented-frame-tap";
 import type { ReadinessBand } from "../diagnostics/renderer-readiness";
 import { formatExactTime, formatInteger } from "../format";
 import type { TimelineRange } from "../session/demo-session-types";
+import { selectPreparedWindowArtifact } from "../render-preparation";
 import { Readout } from "./Readout";
 
 const POLL_INTERVAL_MS = 250;
@@ -27,14 +32,23 @@ export const PresentationDiagnostics = memo(function PresentationDiagnostics({
   detectionRanges,
   duration,
   readSample,
+  renderPreparationDiagnostics,
 }: {
   readonly detectionRanges: readonly TimelineRange[];
   readonly duration: number | null;
   readonly readSample: () => PresentationDiagnosticsSample;
+  readonly renderPreparationDiagnostics: RenderPreparationDiagnostics | null;
 }) {
   const sample = usePolledSample(readSample);
   const playheadTime =
     sample.lastPresented === null ? null : sample.lastPresented.mediaTimeS;
+  const preparationArtifact = selectPreparedWindowArtifact(
+    renderPreparationDiagnostics,
+  );
+  const gateTargetRanges = readPreparationGateTargetRanges(
+    preparationArtifact,
+    duration,
+  );
 
   return (
     <section className="status-group" aria-label="Presented frames">
@@ -80,10 +94,15 @@ export const PresentationDiagnostics = memo(function PresentationDiagnostics({
                 )}`
           }
         />
+        <Readout
+          label="Mask Lead"
+          value={formatMaskLead(preparationArtifact)}
+        />
       </div>
       <PresentedFrameTimeline
         detectionRanges={detectionRanges}
         duration={duration}
+        gateTargetRanges={gateTargetRanges}
         playheadTime={playheadTime}
         readinessBands={sample.readinessBands}
         ticks={sample.ticks}
@@ -95,6 +114,9 @@ export const PresentationDiagnostics = memo(function PresentationDiagnostics({
         <span className="presented-timeline__legend-item presented-timeline__legend-item--preview">
           preview
         </span>
+        <span className="presented-timeline__legend-item presented-timeline__legend-item--gate-target">
+          mask wait target
+        </span>
       </div>
     </section>
   );
@@ -103,12 +125,14 @@ export const PresentationDiagnostics = memo(function PresentationDiagnostics({
 export function PresentedFrameTimeline({
   detectionRanges,
   duration,
+  gateTargetRanges,
   playheadTime,
   readinessBands,
   ticks,
 }: {
   readonly detectionRanges: readonly TimelineRange[];
   readonly duration: number | null;
+  readonly gateTargetRanges: readonly TimelineRange[];
   readonly playheadTime: number | null;
   readonly readinessBands: readonly ReadinessBand[] | null;
   readonly ticks: readonly PresentedFrameRecord[];
@@ -149,6 +173,13 @@ export function PresentedFrameTimeline({
         ))}
       </TimelineLane>
       <TimelineLane label="Prepared" playheadLeft={playheadLeft}>
+        {gateTargetRanges.map((range) => (
+          <span
+            className="presented-timeline__band presented-timeline__band--gate-target"
+            key={`gate-${range.startTime}-${range.endTime}`}
+            style={createBandStyle(range.startTime, range.endTime, duration)}
+          />
+        ))}
         {readinessBands === null ? (
           <span className="presented-timeline__unavailable">unavailable</span>
         ) : (
@@ -163,6 +194,48 @@ export function PresentedFrameTimeline({
       </TimelineLane>
     </div>
   );
+}
+
+export function readPreparationGateTargetRanges(
+  artifact: RenderPreparationArtifactDiagnostics | null,
+  duration: number | null,
+): readonly TimelineRange[] {
+  const startTime = artifact?.activeFrame?.mediaTime;
+  const requiredAheadSeconds = artifact?.gateHold?.requiredAheadSeconds;
+
+  if (
+    startTime === undefined ||
+    requiredAheadSeconds === undefined ||
+    duration === null ||
+    duration <= 0 ||
+    requiredAheadSeconds <= 0
+  ) {
+    return [];
+  }
+
+  const start = ((startTime % duration) + duration) % duration;
+  const span = Math.min(requiredAheadSeconds, duration);
+  const end = start + span;
+
+  return end <= duration
+    ? [{ endTime: end, startTime: start }]
+    : [
+        { endTime: duration, startTime: start },
+        { endTime: end - duration, startTime: 0 },
+      ];
+}
+
+function formatMaskLead(artifact: RenderPreparationArtifactDiagnostics | null) {
+  if (!artifact) {
+    return UNAVAILABLE;
+  }
+
+  const prepared = formatExactTime(artifact.preparedAheadSeconds ?? 0);
+  const required = artifact.gateHold?.requiredAheadSeconds;
+
+  return required === undefined
+    ? `${prepared} ready | clear`
+    : `${prepared} ready | ${formatExactTime(required)} target`;
 }
 
 function TimelineLane({

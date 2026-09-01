@@ -71,9 +71,8 @@ export enum PipelineNodeId {
   DetectionsInterval = "detections.interval",
 
   PlaybackNothingHeld = "playback.nothingHeld",
-  PlaybackEveryFrame = "playback.everyFrame",
-  PlaybackStartOnly = "playback.startOnly",
-  PlaybackDetectionHold = "playback.detectionHold",
+  PlaybackDetectionGate = "playback.detectionGate",
+  PlaybackPreparationGate = "playback.preparationGate",
 }
 
 export enum PipelineNodeStatus {
@@ -244,7 +243,7 @@ export const pipelineStages: readonly PipelineStageDefinition[] = [
     title: "Detections",
   },
   {
-    arity: "fork",
+    arity: "set",
     id: PipelineStageId.Playback,
     question: "What holds the picture back?",
     title: "Playback",
@@ -584,27 +583,15 @@ export const pipelineNodes: readonly PipelineNodeDefinition[] = [
     stage: PipelineStageId.Playback,
   },
   {
-    fallback: NOT_RECORDED_BY_THE_RENDERER,
-    id: PipelineNodeId.PlaybackEveryFrame,
-    label: "Every frame waits for its annotations",
+    fallback: NOT_RECORDED_BY_THE_SESSION,
+    id: PipelineNodeId.PlaybackDetectionGate,
+    label: "Waits for detections before any frame",
     stage: PipelineStageId.Playback,
   },
   {
-    fallback: NOT_RECORDED_BY_THE_RENDERER,
-    id: PipelineNodeId.PlaybackStartOnly,
-    label: "Only the start waits",
-    stage: PipelineStageId.Playback,
-  },
-  {
-    fallback: {
-      kind: "unknown",
-      reason:
-        "Waiting on detections and waiting on drawn artwork both come out as the same reading, so which of the two is doing the holding cannot be told apart from here.",
-      wouldBeReportedBy:
-        "the renderer's state, once it separates the two reasons it waits",
-    },
-    id: PipelineNodeId.PlaybackDetectionHold,
-    label: "Held for detections in particular",
+    fallback: NOT_RECORDED_BY_THE_SESSION,
+    id: PipelineNodeId.PlaybackPreparationGate,
+    label: "Waits for masks before any frame",
     stage: PipelineStageId.Playback,
   },
 ];

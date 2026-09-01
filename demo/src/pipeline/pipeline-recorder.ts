@@ -1,7 +1,6 @@
 import type { MediaRendererSource, MediaRendererState } from "supervision";
 import {
   MediaSessionMediaBranch,
-  PlaybackGateReach,
   type MediaSessionMediaState,
 } from "supervision";
 import {
@@ -22,6 +21,7 @@ import {
   type PipelineNode,
   type PipelineStage,
 } from "./pipeline-descriptor";
+import type { DemoSessionConfiguration } from "../session/session-options";
 
 /**
  * The slice of an opened media source the recorder can observe, named
@@ -52,6 +52,8 @@ interface BypassedRecord {
 type PipelineRecord = TakenRecord | BypassedRecord;
 
 export interface PipelineSessionObservations {
+  /** The resolved settings the open session reported back to the workbench. */
+  readonly configuration?: DemoSessionConfiguration | null;
   /** What the session recorded doing with the media it was handed. */
   readonly media: MediaSessionMediaState | null;
   /** The renderer's own state, read once the session has finished opening. */
@@ -86,6 +88,8 @@ const SITE_SESSION_MEDIA =
   "packages/web/src/sessions/media-session-media.ts › prepareSessionMedia";
 const SITE_RENDERER_STATE =
   "packages/web/src/renderers/media-renderer-core.ts › createMediaRendererRuntimeState";
+const SITE_SESSION_CONFIGURATION =
+  "demo/session/session-options.ts › resolveDemoSessionConfiguration";
 
 export function createPipelineRecorder(options: {
   readonly epoch: number;
@@ -259,7 +263,6 @@ export function createPipelineRecorder(options: {
     }
 
     recordCompositor(state.rendererBackend);
-    recordPlayback(state.playbackGateReach);
   };
 
   const recordCompositor = (backend: string | null) => {
@@ -285,31 +288,83 @@ export function createPipelineRecorder(options: {
     }
   };
 
-  const recordPlayback = (reach: PlaybackGateReach | undefined) => {
-    const reached = reach === undefined ? undefined : playbackNodes[reach];
-
-    if (reached === undefined) {
+  const recordPlayback = (
+    configuration: DemoSessionConfiguration | null | undefined,
+  ) => {
+    if (!configuration) {
       return;
     }
 
-    recordOneOf(
-      Object.values(playbackNodes),
-      reached,
-      SITE_RENDERER_STATE,
-      "The renderer reported holding the picture back a different amount, and it reports one amount.",
+    const detectionGate = configuration.resolved.detectionBuffer.playbackGate;
+    const preparationGate =
+      configuration.resolved.renderPreparation.playbackGate;
+    const detectionEnabled = detectionGate?.enabled === true;
+    const preparationEnabled = preparationGate?.enabled === true;
+
+    if (!detectionEnabled && !preparationEnabled) {
+      record(PipelineNodeId.PlaybackNothingHeld, SITE_SESSION_CONFIGURATION);
+      bypass(
+        PipelineNodeId.PlaybackDetectionGate,
+        "The resolved detection wait is off.",
+      );
+      bypass(
+        PipelineNodeId.PlaybackPreparationGate,
+        "The resolved mask wait is off.",
+      );
+      return;
+    }
+
+    bypass(
+      PipelineNodeId.PlaybackNothingHeld,
+      "At least one resolved playback wait is on.",
     );
 
-    if (reach === PlaybackGateReach.StartOfPlayback) {
-      // Only a source that announces its own frames can be held at the start
-      // and then left alone, so this reading is proof of that arrangement on
-      // its own. The other two readings are not: either can come from either
-      // kind of source.
-      record(PipelineNodeId.PresentationFrames, SITE_RENDERER_STATE, [
+    if (detectionEnabled) {
+      record(PipelineNodeId.PlaybackDetectionGate, SITE_SESSION_CONFIGURATION, [
         {
-          label: "seen as",
-          value: "playback held only at the start, which only this kind allows",
+          label: "required lead",
+          value: formatGateLead(detectionGate?.requiredAheadSeconds),
+        },
+        {
+          label: "maximum wait",
+          value: formatGateWait(detectionGate?.maxWaitSeconds),
         },
       ]);
+    } else {
+      bypass(
+        PipelineNodeId.PlaybackDetectionGate,
+        "The resolved detection wait is off.",
+      );
+    }
+
+    if (preparationEnabled) {
+      record(
+        PipelineNodeId.PlaybackPreparationGate,
+        SITE_SESSION_CONFIGURATION,
+        [
+          {
+            label: "required lead ceiling",
+            value: formatGateLead(preparationGate?.requiredAheadSeconds),
+          },
+          {
+            label: "maximum wait",
+            value: formatGateWait(preparationGate?.maxWaitSeconds),
+          },
+          {
+            label: "stop / resume margin",
+            value: `${formatGateSeconds(
+              preparationGate?.stopBelowWallSeconds,
+            )} / ${formatGateSeconds(
+              preparationGate?.resumeMarginWallSeconds,
+            )}`,
+          },
+        ],
+      );
+    } else {
+      bypass(
+        PipelineNodeId.PlaybackPreparationGate,
+        "The resolved mask wait is off.",
+      );
     }
   };
 
@@ -322,6 +377,7 @@ export function createPipelineRecorder(options: {
     seal(observations) {
       recordSessionMedia(observations.media);
       recordRendererState(observations.rendererState);
+      recordPlayback(observations.configuration);
 
       return buildPipelineDescriptor({
         epoch: options.epoch,
@@ -349,12 +405,6 @@ const engineByteNodes: Record<SourceKind, PipelineNodeId> = {
   [SourceKind.Url]: PipelineNodeId.BytesUrlSource,
 };
 
-const playbackNodes: Record<PlaybackGateReach, PipelineNodeId> = {
-  [PlaybackGateReach.EveryFrame]: PipelineNodeId.PlaybackEveryFrame,
-  [PlaybackGateReach.Off]: PipelineNodeId.PlaybackNothingHeld,
-  [PlaybackGateReach.StartOfPlayback]: PipelineNodeId.PlaybackStartOnly,
-};
-
 const sessionMediaNodes: Record<MediaSessionMediaBranch, PipelineNodeId> = {
   [MediaSessionMediaBranch.BlobObjectUrl]:
     PipelineNodeId.SessionMediaBlobObjectUrl,
@@ -366,6 +416,20 @@ const sessionMediaNodes: Record<MediaSessionMediaBranch, PipelineNodeId> = {
     PipelineNodeId.SessionMediaRendererSource,
   [MediaSessionMediaBranch.Url]: PipelineNodeId.SessionMediaUrl,
 };
+
+function formatGateLead(value: number | undefined) {
+  return value === undefined ? "current frame" : formatGateSeconds(value);
+}
+
+function formatGateWait(value: number | undefined) {
+  return value === Number.POSITIVE_INFINITY
+    ? "unbounded"
+    : formatGateSeconds(value);
+}
+
+function formatGateSeconds(value: number | undefined) {
+  return value === undefined ? "not reported" : `${value} s`;
+}
 
 /**
  * Turns the stamps into the drawn diagram. Pure, and it never throws: a

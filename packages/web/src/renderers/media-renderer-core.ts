@@ -25,6 +25,11 @@ import {
   type MediaPlaybackController,
 } from "#playback/media-playback-controller";
 import {
+  DEFAULT_RENDER_PREPARATION_GATE_MAX_WAIT_SECONDS,
+  DEFAULT_RENDER_PREPARATION_GATE_RESUME_MARGIN_WALL_SECONDS,
+  DEFAULT_RENDER_PREPARATION_GATE_STOP_BELOW_WALL_SECONDS,
+} from "#constants/media-renderer";
+import {
   DetectionTimelineOrigin,
   MediaRendererFit,
   MediaRendererPlaybackState,
@@ -65,8 +70,6 @@ const MILLISECONDS_PER_SECOND = 1000;
  * a picture that has stopped. The detection gate waits five times as long
  * because what it waits on is a model somewhere else.
  */
-const DEFAULT_RENDER_PREPARATION_GATE_MAX_WAIT_SECONDS = 2;
-
 export function resolveRenderPreparationMaxWaitSeconds(
   value: number | undefined,
 ): number {
@@ -90,9 +93,6 @@ export function resolveRenderPreparationMaxWaitSeconds(
  * deep a bank preparation aims for is then a question about memory and cooks
  * alone.
  */
-const DEFAULT_RENDER_PREPARATION_GATE_STOP_BELOW_WALL_SECONDS = 0.1;
-const DEFAULT_RENDER_PREPARATION_GATE_RESUME_MARGIN_WALL_SECONDS = 0.2;
-
 /**
  * Ceiling on a stop threshold as a share of the lead that ends the stop.
  *

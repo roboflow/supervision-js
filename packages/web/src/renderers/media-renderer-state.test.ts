@@ -131,17 +131,13 @@ describe("media renderer runtime state", () => {
   });
 
   it("reports how far the playback gate reaches on this source", () => {
-    for (const reach of [
-      PlaybackGateReach.Off,
-      PlaybackGateReach.EveryFrame,
-      PlaybackGateReach.StartOfPlayback,
-    ]) {
+    for (const reach of [PlaybackGateReach.Off, PlaybackGateReach.EveryFrame]) {
       const runtimeState = createRuntimeState({
         getPlaybackGateReach: () => reach,
       });
 
-      // One option holds every frame on a pulled source and only the start on a
-      // source that presents its own, so a host has to be able to read which.
+      // Both source kinds can be held before any frame. The state distinguishes
+      // that policy from letting frames through with incomplete layers.
       expect(runtimeState.snapshot().playbackGateReach).toBe(reach);
     }
   });

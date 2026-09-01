@@ -3739,6 +3739,7 @@ fieldset {
   font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 620;
+  font-variant-numeric: tabular-nums;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3819,6 +3820,11 @@ fieldset {
   background: var(--green);
 }
 
+.presented-timeline__band--gate-target {
+  background: rgba(255, 190, 92, 0.14);
+  box-shadow: inset 0 0 0 1px var(--amber);
+}
+
 .presented-timeline__playhead {
   background: #ffffff;
   bottom: 0;
@@ -3865,6 +3871,11 @@ fieldset {
 
 .presented-timeline__legend-item--preview::before {
   background: var(--amber);
+}
+
+.presented-timeline__legend-item--gate-target::before {
+  background: rgba(255, 190, 92, 0.14);
+  box-shadow: inset 0 0 0 1px var(--amber);
 }
 
 @media (max-width: 1200px) {

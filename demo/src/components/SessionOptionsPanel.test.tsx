@@ -78,8 +78,10 @@ const LIBRARY_RESOLVED_OPTIONS = [
   "detections.autoRefresh",
   "playbackGate",
   "detections.playbackGate.enabled",
+  "detections.playbackGate.maxWaitSeconds",
   "detections.playbackGate.requiredAheadSeconds",
   "renderPreparation.playbackGate.enabled",
+  "renderPreparation.playbackGate.maxWaitSeconds",
   "renderPreparation.playbackGate.stopBelowWallSeconds",
   "renderPreparation.playbackGate.resumeMarginWallSeconds",
   "renderPreparation.playbackGate.requiredAheadSeconds",
@@ -132,7 +134,7 @@ function renderPanel(
       configuration: panelConfiguration,
       onChange: () => {},
       options: {},
-      playbackGateReach: PlaybackGateReach.StartOfPlayback,
+      playbackGateReach: PlaybackGateReach.EveryFrame,
     }),
   );
 }
@@ -305,10 +307,9 @@ describe("SessionOptionsPanel", () => {
     );
   });
 
-  /* The engine group and the normalization group belong to a package and a
-   * step the library does not run on its own, so there is no library value to
-   * measure them against. Every other control is measured, and a new one that
-   * says nothing shows up here. */
+  /* The engine group is an opt-in entry point and normalization is an opt-in
+   * step, so neither has a session default to compare against. Every resolved
+   * session control is measured, and a new one that says nothing shows up here. */
   it("says whether a control is sitting where the library would leave it", () => {
     expect(
       renderControls()

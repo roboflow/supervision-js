@@ -348,6 +348,7 @@ export function useDemoRenderer(
       pipeline.tap(tapMediaSource(source));
     let activeSession: MediaSession | undefined;
     let renderer: MediaRenderer | undefined;
+    let openedSessionConfiguration: DemoSessionConfiguration | null = null;
     let lastPlaybackState: MediaRendererPlaybackState | null = null;
     let lastPublishedPlaybackState: MediaRendererPlaybackState | null = null;
     let cleanedUp = false;
@@ -465,6 +466,12 @@ export function useDemoRenderer(
 
     const presentation = applyPresentation(presentationSettingsRef.current);
     const readPresentation = () => presentationRef.current ?? presentation;
+    const onSessionConfiguration = (
+      configuration: DemoSessionConfiguration,
+    ) => {
+      openedSessionConfiguration = configuration;
+      setSessionConfiguration(configuration);
+    };
 
     void (async () => {
       try {
@@ -483,7 +490,7 @@ export function useDemoRenderer(
             onMediaState: setMediaState,
             onRenderPreparationDiagnostics: publishRenderPreparation,
             onRendererState,
-            onSessionConfiguration: setSessionConfiguration,
+            onSessionConfiguration,
             onSessionState: sessionStatePublisher.publish,
             onSourceState: setSourceState,
             presentation,
@@ -509,7 +516,7 @@ export function useDemoRenderer(
             onMediaState: setMediaState,
             onRenderPreparationDiagnostics: publishRenderPreparation,
             onRendererState,
-            onSessionConfiguration: setSessionConfiguration,
+            onSessionConfiguration,
             onSessionState: sessionStatePublisher.publish,
             onSourceState: setSourceState,
             onUploadState: setUploadInferenceState,
@@ -544,6 +551,7 @@ export function useDemoRenderer(
         // Every stamp has landed by now and none of them moves again, so the
         // diagram is built once and never re-rendered while the picture plays.
         const descriptor = pipeline.seal({
+          configuration: openedSessionConfiguration,
           media: activeSession?.media ?? null,
           rendererState: renderer.getState(),
         });

@@ -5,7 +5,7 @@ import type { TimelineRange } from "../session/demo-session-types";
 const BYTES_PER_MEBIBYTE = 1024 * 1024;
 
 export const SOURCE_RESIDENCY_TOOLTIP =
-  "The stretches of the video file this page is holding, so a seek into one costs no network at all. It counts what this session has pulled since it opened and nothing else: the browser may still be holding more from an earlier visit, and there is no way to ask it. The engine keeps bytes only when the page is opened with ?residency=hold or ?residency=prefetch, and this reads off when it was not. Each band is placed by its bytes' share of the file, so its edges land within the bitrate's own variation of the moment they name rather than on a frame.";
+  "The stretches of the video file this page is holding, so a seek into one costs no network at all. It counts what this session has pulled since it opened and nothing else: the browser may still be holding more from an earlier visit, and there is no way to ask it. The engine keeps bytes only when Source residency is Hold or Prefetch in the Session panel, or the matching URL override selects one; this reads off otherwise. Each band is placed by its bytes' share of the file, so its edges land within the bitrate's own variation of the moment they name rather than on a frame.";
 
 /**
  * Places held byte runs on the clock by their share of the file. Offsets are all

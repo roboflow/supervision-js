@@ -42,7 +42,10 @@ describe("media session defaults", () => {
       },
       playbackGate: {
         enabled: true,
+        maxWaitSeconds: 2,
         requiredAheadSeconds: 1,
+        resumeMarginWallSeconds: 0.2,
+        stopBelowWallSeconds: 0.1,
       },
     });
   });
@@ -109,6 +112,7 @@ describe("media session defaults", () => {
 
     expect(defaults.detectionBuffer.playbackGate).toEqual({
       enabled: true,
+      maxWaitSeconds: 10,
       requiredAheadSeconds: 2,
     });
     expect(retention).toEqual({
@@ -135,6 +139,7 @@ describe("media session defaults", () => {
 
     expect(defaults.detectionBuffer.playbackGate).toEqual({
       enabled: true,
+      maxWaitSeconds: 10,
       requiredAheadSeconds: 2,
     });
     expect(retention).toEqual({
@@ -158,11 +163,15 @@ describe("media session defaults", () => {
 
     expect(defaults.detectionBuffer.playbackGate).toEqual({
       enabled: true,
+      maxWaitSeconds: 10,
       requiredAheadSeconds: 2,
     });
     expect(defaults.renderPreparation.playbackGate).toEqual({
       enabled: true,
+      maxWaitSeconds: 2,
       requiredAheadSeconds: 1,
+      resumeMarginWallSeconds: 0.2,
+      stopBelowWallSeconds: 0.1,
     });
   });
 
@@ -178,11 +187,15 @@ describe("media session defaults", () => {
 
     expect(defaults.detectionBuffer.playbackGate).toEqual({
       enabled: true,
+      maxWaitSeconds: 10,
       requiredAheadSeconds: 2,
     });
     expect(defaults.renderPreparation.playbackGate).toEqual({
       enabled: true,
+      maxWaitSeconds: 2,
       requiredAheadSeconds: 1,
+      resumeMarginWallSeconds: 0.2,
+      stopBelowWallSeconds: 0.1,
     });
   });
 
@@ -199,11 +212,15 @@ describe("media session defaults", () => {
 
     expect(defaults.detectionBuffer.playbackGate).toEqual({
       enabled: false,
+      maxWaitSeconds: 10,
       requiredAheadSeconds: 2,
     });
     expect(defaults.renderPreparation.playbackGate).toEqual({
       enabled: true,
+      maxWaitSeconds: 2,
       requiredAheadSeconds: 1,
+      resumeMarginWallSeconds: 0.2,
+      stopBelowWallSeconds: 0.1,
     });
   });
 
@@ -242,6 +259,7 @@ describe("media session defaults", () => {
       bufferBehindSeconds: 5,
       playbackGate: {
         enabled: false,
+        maxWaitSeconds: 10,
         requiredAheadSeconds: 4,
       },
     });
@@ -253,7 +271,10 @@ describe("media session defaults", () => {
       },
       playbackGate: {
         enabled: false,
+        maxWaitSeconds: 2,
         requiredAheadSeconds: 1,
+        resumeMarginWallSeconds: 0.2,
+        stopBelowWallSeconds: 0.1,
       },
     });
     expect(retention).toEqual({

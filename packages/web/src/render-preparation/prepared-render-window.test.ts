@@ -2138,7 +2138,10 @@ describe("prepared render window", () => {
     });
     expect(defaults.renderPreparation.playbackGate).toEqual({
       enabled: true,
+      maxWaitSeconds: 2,
       requiredAheadSeconds: 1,
+      resumeMarginWallSeconds: 0.2,
+      stopBelowWallSeconds: 0.1,
     });
   });
 

@@ -5,7 +5,7 @@
   "media": {
     "file": "1min-horse-video.mov",
     "loadingStatusLabel": "opening 70s horse trail",
-    "readyStatusLabel": "70s horse trail | web video engine, source MOV"
+    "readyStatusLabel": "70s horse trail | source MOV"
   },
   "presentation": {
     "boxesEnabled": false,

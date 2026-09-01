@@ -81,9 +81,11 @@ composition while the normalized media becomes available.
 
 `normalize` makes the session build its own renderer source: an object URL for a
 full transcode, a streaming pull source for a progressive one. Neither is the
-video-engine source, so this route has no presented-frame channel, and an
-enabled render-preparation gate holds every frame the renderer pulls rather than
-only the start of playback.
+video-engine source, so this route has no presented-frame channel. The
+render-preparation playback gate is on by default and can hold before any frame:
+between decoded samples on a source from which the renderer pulls samples, or by stopping and
+restarting a source that presents its own frames. Normalization changes which
+source the renderer opens, not that reach.
 
 Normalized bytes reach the engine perfectly well; there is simply no option that
 asks `createMediaSession()` for both. A host that wants both normalizes first
