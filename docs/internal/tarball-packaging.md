@@ -63,12 +63,15 @@ registry by the consumer.
 ## How The Private Web Video Engine Ships
 
 The engine is a `file:../video-engine` build dependency of `packages/web`, and
-its own build already emits the chunking, declarations and source maps the
-engine entries point at. Rather than rebuild any of that, the browser Rollup
-config stages the engine's `dist` into `packages/web/dist/web-video-engine` and
-renames its root entry to `engine`, leaving `index` for the barrel that adds the
-adapter. The packer strips the repository-relative build dependency from the
-manifest npm receives.
+its own build already emits the chunking and declarations the engine entries
+point at. Rather than rebuild those, the browser Rollup config stages the
+engine's JavaScript, declarations, and chunks into
+`packages/web/dist/web-video-engine` and renames its root entry to `engine`,
+leaving `index` for the barrel that adds the adapter. Relocated engine source
+maps are omitted and their `sourceMappingURL` comments are stripped because the
+original maps name paths that staging changes. The public `index` barrel keeps
+its own valid maps. The packer strips the repository-relative build dependency
+from the manifest npm receives.
 
 The published JavaScript keeps its dynamic
 `import("supervision/web-video-engine")`, which runs only when a caller opens a
@@ -87,7 +90,8 @@ npm run package:tarball:smoke
 The smoke suite inspects the archive and then builds a throwaway npm project in
 the OS temp directory — outside this repository — to check that:
 
-- both JavaScript entrypoints, their declarations and source maps are present;
+- the root and editing JavaScript entrypoints, their declarations and valid
+  source maps are present;
 - the standalone render-preparation worker is present, has no sibling chunk
   imports, and is exported as `supervision/render-preparation-worker`;
 - the main browser entry embeds the worker source instead of referencing a
@@ -95,6 +99,7 @@ the OS temp directory — outside this repository — to check that:
 - `supervision-js-core` is bundled while `pixi.js` and `mediabunny` are not;
 - the three `supervision/web-video-engine` entries ship and resolve, and an
   entry that never opens a video source emits no engine chunk;
+- relocated engine entries carry no stale source maps or source-map comments;
 - tracker engines are embedded in core and do not appear as an install-time
   package or lockfile dependency;
 - a clean archive installation produces a lockfile with no `file:` path;

@@ -1,11 +1,12 @@
 import { beforeAll, describe, expect, it, vi, type Mock } from "vitest";
 
-import { PLAYBACK, HANG_RECOVERY } from "./constants";
-import { DecodeScheduler } from "./decode-scheduler";
+import { DIAGNOSTICS, PLAYBACK, HANG_RECOVERY } from "./constants";
+import { boundedKeyframeTimestamps, DecodeScheduler } from "./decode-scheduler";
 import type {
   AnySourceHandle,
   CanvasFrameSource,
   DecodeSourceHandle,
+  SampleSourceHandle,
   WrappedCanvasLike,
 } from "./decode-source";
 import type { SessionFrameSource } from "./decode-session";
@@ -203,6 +204,18 @@ function record(scheduler: DecodeScheduler): ScrubFrame[] {
   return frames;
 }
 
+describe("boundedKeyframeTimestamps", () => {
+  it("keeps diagnostic payloads capped while preserving both endpoints", () => {
+    const keyframes = Array.from({ length: 10_000 }, (_, index) => index / 10);
+
+    const bounded = boundedKeyframeTimestamps(keyframes);
+
+    expect(bounded).toHaveLength(DIAGNOSTICS.KEYFRAME_TIMESTAMPS_CAP);
+    expect(bounded[0]).toBe(0);
+    expect(bounded.at(-1)).toBe(999_900);
+  });
+});
+
 describe("DecodeScheduler", () => {
   describe("foreground decode", () => {
     it("open seeds the first frame, emits it, and caches it", async () => {
@@ -365,6 +378,40 @@ describe("DecodeScheduler", () => {
       expect(frames.map((f) => f.timestampS)).toEqual([1]);
     });
 
+    it("uses variable-rate frame identity for exact cache hits", async () => {
+      const timeline = FrameTimeline.from({
+        tickRate: 1000,
+        ticks: Float64Array.of(0, 1000, 1001),
+        lastDurationTicks: 1,
+      });
+      const track: ScrubTrackInfo = {
+        ...TRACK,
+        durationS: asSec(1.002),
+        timeline,
+      };
+      const sink = new FakeSink();
+      const cache = makeCache();
+      cache.putExact(timeline.idAt(0), 0, SRC, 320, 180);
+      cache.putExact(timeline.idAt(1), 1000, SRC, 320, 180);
+      const source: DecodeSourceHandle = {
+        track,
+        sink,
+        keyframeProbe: new FakeKeyframeProbe([0]),
+        dispose: async () => undefined,
+      };
+      const scheduler = new DecodeScheduler({ source, cache });
+      const frames = record(scheduler);
+
+      scheduler.seekTo(asSec(0.999));
+      await scheduler.idle();
+      scheduler.seekTo(asSec(1));
+      await scheduler.idle();
+
+      expect(frames.map((frame) => frame.timestampS)).toEqual([0, 1]);
+      expect(sink.getCanvasCalls).toEqual([]);
+      await scheduler.close();
+    });
+
     it("a preview-only hit paints coarse, then decodes the crisp frame", async () => {
       const { scheduler, sink, cache } = setup();
       await scheduler.open();
@@ -395,6 +442,38 @@ describe("DecodeScheduler", () => {
       expect(frames[0].timestampS).toBe(7);
       expect(frames[0].isKeyFrame).toBe(true);
       expect(cache.stats.previewSize).toBe(previewBefore + 1);
+    });
+
+    it("does not emit a key seek superseded while its decode is in flight", async () => {
+      let releaseFirst!: () => void;
+      let releaseSecond!: () => void;
+      const first = new Promise<void>((resolve) => {
+        releaseFirst = resolve;
+      });
+      const second = new Promise<void>((resolve) => {
+        releaseSecond = resolve;
+      });
+      const { scheduler } = setup({
+        gateDecode: async (timestampS) => {
+          if (timestampS === 2) await first;
+          if (timestampS === 4) await second;
+        },
+      });
+      await scheduler.open();
+      const frames = record(scheduler);
+      frames.length = 0;
+
+      scheduler.seekToKey(asSec(2));
+      await tick();
+      scheduler.seekToKey(asSec(4));
+      releaseFirst();
+      await tick();
+      expect(frames).toHaveLength(0);
+
+      releaseSecond();
+      await scheduler.idle();
+      expect(frames.map((frame) => frame.timestampS)).toEqual([4]);
+      await scheduler.close();
     });
 
     it("a source with one keyframe answers distinct targets distinctly", async () => {
@@ -1166,12 +1245,12 @@ describe("DecodeScheduler", () => {
       await scheduler.open();
       await scheduler.whenSettled();
 
-      // Each target is unique and 1s apart, starting past the seeded frame
-      // at 0, so every seek is a fresh decode (a cache miss) recording one
-      // latency sample. More seeks than the 64-sample ring, which must not
-      // grow unbounded.
+      // Each target is a distinct frame well inside the finite timeline,
+      // starting past the seeded frame at 0, so every seek is a fresh decode
+      // (a cache miss) recording one latency sample. More seeks than the
+      // 64-sample ring, which must not grow unbounded.
       for (let i = 1; i <= 80; i++) {
-        scheduler.seekTo(asSec(i * 1));
+        scheduler.seekTo(asSec(i / 3));
         await scheduler.whenSettled();
       }
 
@@ -1411,6 +1490,53 @@ describe("DecodeScheduler", () => {
       });
       return { scheduler, hangingSink };
     }
+
+    it("closes a live sample that arrives after the seed watchdog abandoned it", async () => {
+      vi.useFakeTimers();
+      try {
+        let answer!: (sample: VideoSampleLike | null) => void;
+        const late = {
+          close: vi.fn(),
+          draw: vi.fn(),
+          duration: 33_333,
+          rotation: 0,
+          timestamp: 0,
+          toVideoFrame: vi.fn(() => ({}) as VideoFrame),
+        } satisfies VideoSampleLike;
+        const source: SampleSourceHandle = {
+          track: TRACK,
+          sampleSink: {
+            getSample: vi.fn(
+              () =>
+                new Promise<VideoSampleLike | null>((resolve) => {
+                  answer = resolve;
+                }),
+            ),
+            async *samples() {},
+            async *samplesAtTimestamps() {},
+          },
+          keyframeProbe: new FakeKeyframeProbe([0]),
+          dispose: async () => undefined,
+        };
+        const scheduler = new DecodeScheduler({
+          source,
+          cache: makeCache(),
+          reopen: null,
+          seedHangTimeoutMs: 10,
+        });
+        const opening = scheduler.open().catch(() => undefined);
+
+        await vi.advanceTimersByTimeAsync(10);
+        answer(late);
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(late.close).toHaveBeenCalledOnce();
+        await opening;
+        await scheduler.close();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
 
     it("a hung seek clears seekDraining after the watchdog, unfreezing later seeks", async () => {
       vi.useFakeTimers();

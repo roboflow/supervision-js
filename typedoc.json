@@ -11,7 +11,8 @@
     "docs/public/api/interactions.ts",
     "docs/public/api/media-preparation.ts",
     "docs/public/api/editing.ts",
-    "docs/public/api/video-engine.ts"
+    "docs/public/api/video-engine.ts",
+    "docs/public/api/video-engine-analysis.ts"
   ],
   "excludeInternal": true,
   "excludePrivate": true,
@@ -38,7 +39,8 @@
     "Media Sessions",
     "Rendering",
     "Styles",
-    "Web Video Engine"
+    "Web Video Engine",
+    "Web Video Engine Analysis"
   ],
   "out": "docs/site",
   "plugin": ["typedoc-rhineai-theme"],

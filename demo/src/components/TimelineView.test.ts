@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveTimelineTime } from "./TimelineView";
+import { resolveTimelineTime, settlePendingTimelineSeek } from "./TimelineView";
 
 describe("resolveTimelineTime", () => {
   it("follows the drag while a pointer is down", () => {
@@ -28,5 +28,19 @@ describe("resolveTimelineTime", () => {
 
   it("keeps a target of zero, which is a position and not an absence", () => {
     expect(resolveTimelineTime(null, 0, 47.3)).toBe(0);
+  });
+});
+
+describe("settlePendingTimelineSeek", () => {
+  it("clears the target only when its own seek finishes", () => {
+    expect(
+      settlePendingTimelineSeek({ runId: 4, target: 34.46 }, 4),
+    ).toBeNull();
+  });
+
+  it("keeps a newer target when an older seek finishes later", () => {
+    const pending = { runId: 5, target: 58 };
+
+    expect(settlePendingTimelineSeek(pending, 4)).toBe(pending);
   });
 });

@@ -160,6 +160,23 @@ describe.each(TABLES)("FrameTimeline over %s", (_name, build) => {
 });
 
 describe("FrameTimeline construction", () => {
+  it("drops pre-roll and clamps only the frame straddling public zero", () => {
+    const timeline = FrameTimeline.from({
+      lastDurationTicks: 20,
+      tickRate: 600,
+      ticks: Float64Array.from([-40, -20, 10, 30]),
+    });
+
+    expect(Array.from(timeline.toData().ticks)).toEqual([0, 10, 30]);
+    expect(Array.from(timeline.toData().sourceTicks ?? [])).toEqual([
+      -20, 10, 30,
+    ]);
+    expect(timeline.timeAt(0)).toBe(0);
+    expect(timeline.sourceTimeAt(0)).toBe(-1 / 30);
+    expect(timeline.fromSourceTime(-1 / 30)).toBe(0);
+    expect(timeline.toSourceTime(10 / 600)).toBe(10 / 600);
+  });
+
   it("a track with no frames has no timeline", () => {
     expect(() =>
       FrameTimeline.from({

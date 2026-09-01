@@ -209,10 +209,13 @@ describe("openInput track origin (T4b)", () => {
     expect(handle.track.firstTimestampS).toBe(2.5);
   });
 
-  it("a negative first timestamp flows through verbatim", async () => {
-    trackConfig = { canDecode: true, firstTimestamp: -0.4 };
+  it("negative pre-roll is hidden without losing a straddling frame's source address", async () => {
+    trackConfig = { canDecode: true, firstTimestamp: -0.02 };
     const handle = await openDecodeSource({ source: SOURCE });
-    expect(handle.track.firstTimestampS).toBe(-0.4);
+    expect(handle.track.firstTimestampS).toBe(0);
+    expect(handle.track.timeline.timeAt(0)).toBe(0);
+    expect(handle.track.timeline.sourceTimeAt(0)).toBe(-0.02);
+    expect(handle.track.timeline.toData().sourceTicks?.[0]).toBe(-12);
   });
 
   it("the origin defaults to 0 when the track reports zero", async () => {

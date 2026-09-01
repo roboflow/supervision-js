@@ -72,9 +72,11 @@ function privateCoreResolver() {
 
 /**
  * The engine is a private workspace package, so an installed `supervision` has
- * no other copy of it to resolve. Its own build already emitted the chunking,
- * declarations and source maps the engine entries point at, and rebuilding them
- * here would produce a second copy of a 1.5 MB embedded worker.
+ * no other copy of it to resolve. Its own build already emitted the chunking
+ * and declarations the engine entries point at, and rebuilding them here would
+ * produce a second copy of a 1.5 MB embedded worker. Source maps are omitted:
+ * staging renames and relocates files, so the original maps no longer describe
+ * the published paths.
  */
 function stageVideoEngine() {
   return {
@@ -94,9 +96,16 @@ function stageVideoEngine() {
       }
 
       for (const file of files) {
-        const staged = stagedVideoEngineName(
-          path.relative(videoEngineDistDir, file).split(path.sep).join("/"),
-        );
+        const relativePath = path
+          .relative(videoEngineDistDir, file)
+          .split(path.sep)
+          .join("/");
+
+        if (relativePath.endsWith(".map")) {
+          continue;
+        }
+
+        const staged = stagedVideoEngineName(relativePath);
 
         this.emitFile({
           fileName: path.posix.join(videoEngineStagedDir, staged.name),
@@ -109,20 +118,27 @@ function stageVideoEngine() {
 }
 
 function stagedVideoEngineName(relativePath) {
-  const match = /^index(\.d\.ts|\.js)(\.map)?$/.exec(relativePath);
+  const match = /^index(\.d\.ts|\.js)$/.exec(relativePath);
 
   if (!match) {
-    return { name: relativePath, source: (file) => readFileSync(file) };
+    return { name: relativePath, source: readStagedVideoEngineFile };
   }
 
   return {
-    name: `${videoEngineStagedRoot}${match[1]}${match[2] ?? ""}`,
+    name: `${videoEngineStagedRoot}${match[1]}`,
     source: (file) =>
-      readFileSync(file, "utf8").replaceAll(
+      readStagedVideoEngineFile(file).replaceAll(
         `index${match[1]}`,
         `${videoEngineStagedRoot}${match[1]}`,
       ),
   };
+}
+
+function readStagedVideoEngineFile(file) {
+  return readFileSync(file, "utf8").replace(
+    /\r?\n\/\/# sourceMappingURL=[^\r\n]+\s*$/,
+    "\n",
+  );
 }
 
 /**

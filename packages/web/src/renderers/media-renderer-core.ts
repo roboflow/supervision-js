@@ -45,7 +45,11 @@ import {
   createMediaRendererTransport,
   type MediaRendererTransport,
 } from "./media-renderer-transport";
-import { resolvePresentedFrameChannel } from "./presented-frame-channel";
+import {
+  createProtectedPresentedFrameSource,
+  resolvePresentedFrameChannel,
+  type ProtectedPresentedFrameSource,
+} from "./presented-frame-channel";
 import type {
   MediaRendererScene,
   MediaRendererSceneOptions,
@@ -62,6 +66,19 @@ const MILLISECONDS_PER_SECOND = 1000;
  * because what it waits on is a model somewhere else.
  */
 const DEFAULT_RENDER_PREPARATION_GATE_MAX_WAIT_SECONDS = 2;
+
+export function resolveRenderPreparationMaxWaitSeconds(
+  value: number | undefined,
+): number {
+  if (value === undefined) {
+    return DEFAULT_RENDER_PREPARATION_GATE_MAX_WAIT_SECONDS;
+  }
+  if (value === Number.POSITIVE_INFINITY) return value;
+  if (Number.isNaN(value)) {
+    return DEFAULT_RENDER_PREPARATION_GATE_MAX_WAIT_SECONDS;
+  }
+  return Math.max(0, value);
+}
 
 /**
  * A tenth of a second of runway left, and a fifth of a second more banked
@@ -139,6 +156,7 @@ export async function createMediaRendererCore(
     );
   };
   const endSeekGesture = () => {
+    cancelPullScrubPreview();
     isSeekGestureInFlight = false;
     publishPlaybackActivity();
   };
@@ -178,10 +196,25 @@ export async function createMediaRendererCore(
   let mediaInput: DisposableMediaInput | undefined;
   let playbackController: MediaPlaybackController | undefined;
   let transport: MediaRendererTransport | undefined;
+  let protectedPresentedFrames: ProtectedPresentedFrameSource | undefined;
+  let pushPresentationReady = false;
   let sampleSink: DecodedVideoSampleSink | undefined;
   let firstTimestamp = 0;
   let navigationVersion = 0;
   let outstandingSourceReads = 0;
+  let pendingPullScrubTime: number | null = null;
+  let pullScrubEpoch = 0;
+  let pullScrubReadInFlight = false;
+  let pullScrubScheduled = false;
+
+  const cancelPullScrubPreview = () => {
+    pendingPullScrubTime = null;
+    pullScrubEpoch += 1;
+
+    if (pullScrubReadInFlight) {
+      navigationVersion += 1;
+    }
+  };
 
   const beginSourceRead = () => {
     outstandingSourceReads += 1;
@@ -227,7 +260,7 @@ export async function createMediaRendererCore(
         runtimeState.setPaused();
         break;
       case MediaRendererPlaybackState.Ready:
-        runtimeState.setReady();
+        if (pushPresentationReady) runtimeState.setReady();
         break;
       case MediaRendererPlaybackState.Loading:
         runtimeState.setLoading();
@@ -265,11 +298,10 @@ export async function createMediaRendererCore(
     renderPreparationPlaybackGate?.enabled === true;
   const shouldGatePlayback =
     shouldGateDetectionPlayback || shouldGateRenderPreparationPlayback;
-  const renderPreparationGateMaxWaitSeconds = Math.max(
-    0,
-    renderPreparationPlaybackGate?.maxWaitSeconds ??
-      DEFAULT_RENDER_PREPARATION_GATE_MAX_WAIT_SECONDS,
-  );
+  const renderPreparationGateMaxWaitSeconds =
+    resolveRenderPreparationMaxWaitSeconds(
+      renderPreparationPlaybackGate?.maxWaitSeconds,
+    );
   /**
    * The gate's wall-clock thresholds in seconds of timeline, which is the unit
    * a prepared lead is measured in. A rate is how many seconds of timeline a
@@ -442,20 +474,21 @@ export async function createMediaRendererCore(
   };
 
   const holdForDetectionCoverage = (mediaTime: number) => {
-    const prepareOptions = {
-      duration: runtimeState.duration(),
-      firstTimestamp,
-    };
-
     if (
-      detectionTimeline?.needsPlaybackGateWait?.(mediaTime, prepareOptions) !==
-      true
+      !detectionTimeline ||
+      (detectionTimeline.needsBufferPrepare?.(mediaTime) !== true &&
+        detectionTimeline.needsPlaybackGateWait?.(mediaTime, {
+          duration: runtimeState.duration(),
+          firstTimestamp,
+          gatePlayback: true,
+        }) !== true)
     ) {
       return null;
     }
 
     return detectionTimeline.prepare(mediaTime, {
-      ...prepareOptions,
+      duration: runtimeState.duration(),
+      firstTimestamp,
       gatePlayback: true,
     });
   };
@@ -468,65 +501,68 @@ export async function createMediaRendererCore(
       ) !== true
     ) {
       armRenderPreparationGate();
-
       return null;
     }
 
-    if (hasAbandonedRenderPreparationGate()) {
-      return null;
-    }
+    if (hasAbandonedRenderPreparationGate()) return null;
 
     armRenderPreparationGate();
-
     return waitForRenderPreparationWithin(mediaTime, signal);
   };
 
-  const holdForPlaybackReadiness = (mediaTime: number, signal: AbortSignal) => {
-    const holds: Promise<unknown>[] = [];
-    /* Each hold has to be cancellable by the end of the combined one, because
-       a hold whose sibling failed is a hold on a playback intent that is over,
-       and the transport drops its handle on the combined wait without reaching
-       what is still running underneath it. */
-    const combinedHold = new AbortController();
-    const abortHolds = () => combinedHold.abort();
-
+  /** Detaches a readiness source that does not implement cancellation itself.
+   * Its eventual rejection remains owned while a superseding frame can start
+   * its own guard immediately. */
+  const abortableReadiness = (
+    wait: Promise<unknown>,
+    signal: AbortSignal,
+  ): Promise<void> => {
     if (signal.aborted) {
-      abortHolds();
-    } else {
-      signal.addEventListener("abort", abortHolds, { once: true });
+      void wait.catch(() => undefined);
+      return Promise.resolve();
     }
+    let onAbort = () => {};
+    const aborted = new Promise<void>((resolve) => {
+      onAbort = resolve;
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
+    void wait.catch(() => undefined);
+    return Promise.race([wait.then(() => undefined), aborted]).finally(() => {
+      signal.removeEventListener("abort", onAbort);
+    });
+  };
 
-    const detectionHold = shouldGateDetectionPlayback
+  const holdForPresentationReadiness = (
+    mediaTime: number,
+    signal: AbortSignal,
+  ): Promise<void> | null => {
+    const combined = new AbortController();
+    const abortCombined = () => combined.abort();
+    if (signal.aborted) abortCombined();
+    else signal.addEventListener("abort", abortCombined, { once: true });
+
+    const holds: Promise<void>[] = [];
+    const detection = shouldGateDetectionPlayback
       ? holdForDetectionCoverage(mediaTime)
       : null;
-    const renderPreparationHold = shouldGateRenderPreparationPlayback
-      ? holdForRenderPreparation(mediaTime, combinedHold.signal)
+    const preparation = shouldGateRenderPreparationPlayback
+      ? holdForRenderPreparation(mediaTime, combined.signal)
       : null;
-
-    if (detectionHold) {
-      holds.push(detectionHold);
-    }
-
-    if (renderPreparationHold) {
-      holds.push(renderPreparationHold);
-    }
+    if (detection) holds.push(abortableReadiness(detection, combined.signal));
+    if (preparation)
+      holds.push(abortableReadiness(preparation, combined.signal));
 
     if (holds.length === 0) {
-      signal.removeEventListener("abort", abortHolds);
-
+      signal.removeEventListener("abort", abortCombined);
       return null;
     }
 
-    const held = Promise.all(holds).then(() => undefined);
-
-    void held
-      .catch(() => undefined)
+    return Promise.all(holds)
+      .then(() => undefined)
       .finally(() => {
-        signal.removeEventListener("abort", abortHolds);
-        abortHolds();
+        signal.removeEventListener("abort", abortCombined);
+        combined.abort();
       });
-
-    return held;
   };
 
   const presentSample = (sample: DecodedVideoSample) => {
@@ -572,6 +608,97 @@ export async function createMediaRendererCore(
         sample.close();
       }
     }
+  };
+
+  const seekPullSample = async (targetTime: number) => {
+    if (!playbackController || !sampleSink) {
+      throw new Error("Media renderer is not ready.");
+    }
+
+    // A seek taken while buffering should resume playback, not strand it:
+    // buffering means playback was requested and is waiting for data.
+    const wasPlaying = runtimeState.isPlaybackActive();
+    const requestVersion = ++navigationVersion;
+
+    playbackController.pause();
+
+    try {
+      const sample = await trackSourceRead(
+        sampleSink.getSample(targetTime, { skipLiveWait: true }),
+      );
+
+      if (!sample) {
+        throw new Error("No decoded video sample was found for seek.");
+      }
+      if (requestVersion !== navigationVersion || runtimeState.isDestroyed()) {
+        sample.close();
+        return;
+      }
+
+      await prepareAndPresentSample(
+        sample,
+        () =>
+          requestVersion === navigationVersion && !runtimeState.isDestroyed(),
+      );
+
+      if (requestVersion !== navigationVersion || runtimeState.isDestroyed()) {
+        return;
+      }
+
+      playbackController.seek(runtimeState.currentTime());
+
+      if (wasPlaying) {
+        runtimeState.setPlaying();
+        playbackController.play();
+      } else if (runtimeState.isBuffering()) {
+        // Seeking always leaves the controller paused. Settle the reported
+        // state so the session is paused rather than perpetually buffering.
+        runtimeState.setPaused();
+      }
+    } catch (error) {
+      if (requestVersion !== navigationVersion || runtimeState.isDestroyed()) {
+        return;
+      }
+      runtimeState.setRenderError(error);
+      throw error;
+    }
+  };
+
+  const schedulePullScrubPreview = () => {
+    if (
+      pullScrubScheduled ||
+      pullScrubReadInFlight ||
+      pendingPullScrubTime === null
+    ) {
+      return;
+    }
+
+    pullScrubScheduled = true;
+    const scheduledEpoch = pullScrubEpoch;
+
+    queueMicrotask(() => {
+      pullScrubScheduled = false;
+
+      if (
+        scheduledEpoch !== pullScrubEpoch ||
+        pendingPullScrubTime === null ||
+        runtimeState.isDestroyed()
+      ) {
+        schedulePullScrubPreview();
+        return;
+      }
+
+      const targetTime = pendingPullScrubTime;
+      pendingPullScrubTime = null;
+      pullScrubReadInFlight = true;
+
+      void seekPullSample(targetTime)
+        .catch(() => undefined)
+        .finally(() => {
+          pullScrubReadInFlight = false;
+          schedulePullScrubPreview();
+        });
+    });
   };
 
   const renderer: MediaRenderer = {
@@ -676,66 +803,7 @@ export async function createMediaRendererCore(
         return;
       }
 
-      if (!playbackController || !sampleSink) {
-        throw new Error("Media renderer is not ready.");
-      }
-
-      // A seek taken while buffering should resume playback, not strand it:
-      // buffering means playback was requested and is waiting for data.
-      const wasPlaying = runtimeState.isPlaybackActive();
-      const requestVersion = ++navigationVersion;
-
-      playbackController.pause();
-
-      try {
-        const sample = await trackSourceRead(
-          sampleSink.getSample(targetTime, { skipLiveWait: true }),
-        );
-
-        if (!sample) {
-          throw new Error("No decoded video sample was found for seek.");
-        }
-        if (
-          requestVersion !== navigationVersion ||
-          runtimeState.isDestroyed()
-        ) {
-          sample.close();
-          return;
-        }
-
-        await prepareAndPresentSample(
-          sample,
-          () =>
-            requestVersion === navigationVersion && !runtimeState.isDestroyed(),
-        );
-
-        if (
-          requestVersion !== navigationVersion ||
-          runtimeState.isDestroyed()
-        ) {
-          return;
-        }
-
-        playbackController.seek(runtimeState.currentTime());
-
-        if (wasPlaying) {
-          runtimeState.setPlaying();
-          playbackController.play();
-        } else if (runtimeState.isBuffering()) {
-          // Seeking always leaves the controller paused. Settle the reported
-          // state so the session is paused rather than perpetually buffering.
-          runtimeState.setPaused();
-        }
-      } catch (error) {
-        if (
-          requestVersion !== navigationVersion ||
-          runtimeState.isDestroyed()
-        ) {
-          return;
-        }
-        runtimeState.setRenderError(error);
-        throw error;
-      }
+      await seekPullSample(targetTime);
     },
 
     scrub(mediaTime) {
@@ -757,7 +825,13 @@ export async function createMediaRendererCore(
         return;
       }
 
-      void renderer.seek(targetTime).catch(() => undefined);
+      pendingPullScrubTime = targetTime;
+
+      if (pullScrubReadInFlight) {
+        navigationVersion += 1;
+      }
+
+      schedulePullScrubPreview();
     },
 
     async stepForward() {
@@ -932,7 +1006,9 @@ export async function createMediaRendererCore(
         return;
       }
 
+      cancelPullScrubPreview();
       runtimeState.markDestroyed();
+      protectedPresentedFrames?.destroy();
       transport?.destroy();
       playbackController?.destroy();
       stopActiveIterator();
@@ -994,6 +1070,17 @@ export async function createMediaRendererCore(
       ...options.detectionBuffer,
     });
     const presentedFrameChannel = resolvePresentedFrameChannel(mediaSource);
+    protectedPresentedFrames = presentedFrameChannel
+      ? createProtectedPresentedFrameSource(presentedFrameChannel, (error) => {
+          // A scene that can no longer accept pixels cannot recover because
+          // the producer keeps running. Cut off future frames and state
+          // signals before publishing the rendering failure.
+          protectedPresentedFrames?.destroy();
+          transport?.destroy();
+          presentedFrameChannel.pause();
+          if (!runtimeState.isDestroyed()) runtimeState.setRenderError(error);
+        })
+      : undefined;
 
     const mediaDimensions = runtimeState.recordMediaMetadata(metadata);
     mediaScene = await providers.createScene({
@@ -1026,7 +1113,7 @@ export async function createMediaRendererCore(
       },
       polygonStyle: currentPresentation.polygonStyle,
       polylineStyle: currentPresentation.polylineStyle,
-      presentedFrames: presentedFrameChannel ?? undefined,
+      presentedFrames: protectedPresentedFrames?.source,
       regionRenderers: resolveRegionRenderers(currentPresentation),
       previewOverlay: options.previewOverlay,
       renderPreparation: options.renderPreparation
@@ -1073,14 +1160,36 @@ export async function createMediaRendererCore(
         waitForReadiness: shouldGatePlayback
           ? waitForPlaybackReadiness
           : undefined,
-        holdForReadiness: shouldGatePlayback
-          ? holdForPlaybackReadiness
+        waitForPresentationReadiness: shouldGatePlayback
+          ? holdForPresentationReadiness
           : undefined,
+        invalidatePresentedFrame: () => protectedPresentedFrames?.invalidate(),
+        beginPresentedFrameNavigation: () =>
+          protectedPresentedFrames!.beginNavigation(),
       });
+      protectedPresentedFrames?.activate((presented, signal) =>
+        transport!.protectPresentation(presented.mediaTimeS, signal),
+      );
       if (initialPlaybackRate !== 1) {
         transport.setPlaybackRate(initialPlaybackRate);
       }
       detectionTimeline?.prefetch(metadata.firstTimestamp);
+      // Loading is not complete until the scene has accepted real media
+      // pixels. A paused, non-autoplay source otherwise reports Ready over a
+      // blank compositor because the producer's load settled before a frame
+      // consumer existed.
+      await presentedFrameChannel.commit(
+        metadata.firstTimestamp * MILLISECONDS_PER_SECOND,
+      );
+      await protectedPresentedFrames?.waitForFirstPresentation();
+      // The first accepted frame does not prove the presentation path stayed
+      // healthy until initialization finished. A producer may emit a newer
+      // replacement before commit() resolves, and that handoff can fail after
+      // the first-presentation latch has already opened. Preserve that fatal
+      // state instead of publishing Ready over it or starting autoplay on a
+      // producer the error path just stopped.
+      if (runtimeState.isDestroyed() || runtimeState.isError()) return renderer;
+      pushPresentationReady = true;
       runtimeState.setReady();
 
       if (options.autoPlay ?? true) {

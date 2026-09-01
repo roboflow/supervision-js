@@ -63,7 +63,7 @@ export function TimelineView({
   readonly duration: number | null;
   readonly frameTimeline?: FrameTimelineData | null;
   readonly onScrub: (time: number) => void;
-  readonly onSeek: (time: number) => void;
+  readonly onSeek: (time: number) => Promise<void> | void;
   readonly processedRanges?: readonly TimelineRange[];
   readonly processingRanges?: readonly TimelineRange[];
   readonly sourceResidency?: SourceResidencyDiagnostics | null;
@@ -287,7 +287,7 @@ export function TimelineView({
   const handleInputPointerDown = useCallback(() => {
     gestureRef.current.onScrubStart(gestureRef.current.readPlayheadTime());
   }, []);
-  const handleInputPointerUp = useCallback(() => {
+  const handleInputPointerEnd = useCallback(() => {
     gestureRef.current.onScrubEnd();
   }, []);
   const publishedScrubTimeRef = useRef<number | null>(null);
@@ -322,7 +322,7 @@ export function TimelineView({
     publishedScrubTimeRef.current = nextTime;
     onScrubChange(nextTime);
   };
-  const handleStripPointerUp = () => {
+  const handleStripPointerEnd = () => {
     publishedScrubTimeRef.current = null;
     onScrubEnd();
   };
@@ -396,8 +396,10 @@ export function TimelineView({
         onPointerDown={handleStripPointer}
         onPointerEnter={handleHoverEnter}
         onPointerLeave={handleHoverLeave}
+        onLostPointerCapture={handleStripPointerEnd}
+        onPointerCancel={handleStripPointerEnd}
         onPointerMove={handleStripPointerMove}
-        onPointerUp={handleStripPointerUp}
+        onPointerUp={handleStripPointerEnd}
       >
         <span className="timeline-view__frame-mark" ref={frameMarkRef}>
           <span className="timeline-view__marker timeline-view__marker--active-frame" />
@@ -411,11 +413,13 @@ export function TimelineView({
         onBlur={handleInputFlush}
         onChange={handleSeek}
         onKeyUp={handleInputFlush}
+        onLostPointerCapture={handleInputPointerEnd}
+        onPointerCancel={handleInputPointerEnd}
         onPointerDown={handleInputPointerDown}
         onPointerEnter={handleHoverEnter}
         onPointerLeave={handleHoverLeave}
         onPointerMove={handleHoverMove}
-        onPointerUp={handleInputPointerUp}
+        onPointerUp={handleInputPointerEnd}
       />
       {LIVE_LANES.map((lane, index) => (
         <Fragment key={lane.key}>
@@ -824,10 +828,25 @@ interface TimelineSeekGestureOptions {
   readonly disabled: boolean;
   readonly duration: number | null;
   readonly onScrub: (time: number) => void;
-  readonly onSeek: (time: number) => void;
+  readonly onSeek: (time: number) => Promise<void> | void;
 }
 
-const TIMELINE_SCRUB_SETTLE_EPSILON_SECONDS = 0.05;
+interface PendingTimelineSeek {
+  readonly runId: number;
+  readonly target: number;
+}
+
+/**
+ * A completion belongs only to the seek that created it. An older request may
+ * finish after a newer one, and must not release the newer target's playhead
+ * latch.
+ */
+export function settlePendingTimelineSeek(
+  pending: PendingTimelineSeek | null,
+  completedRunId: number,
+): PendingTimelineSeek | null {
+  return pending?.runId === completedRunId ? null : pending;
+}
 
 /**
  * Splits a timeline drag into the two things a player answers differently:
@@ -850,12 +869,12 @@ function useTimelineSeekGesture({
    * started, which on a slow source is most of the wait.
    */
   const [pendingSeekTime, setPendingSeekTime] = useState<number | null>(null);
-  const pendingSeekRef = useRef<number | null>(null);
+  const pendingSeekRef = useRef<PendingTimelineSeek | null>(null);
+  const seekRunRef = useRef(0);
   /**
-   * The gesture outlives the scrub position. The settle writer clears that
-   * position as soon as the player reports it reached the drag target, which
-   * during a drag happens while the pointer is still down, so a release keyed
-   * on the position never fires and the producer is never told the drag ended.
+   * Pointer cancellation and lost capture may both follow the same drag. This
+   * latch makes every termination path idempotent, so exactly one commit ends
+   * the producer's interactive-seek hold.
    */
   const gestureActiveRef = useRef(false);
 
@@ -884,28 +903,25 @@ function useTimelineSeekGesture({
       duration,
     );
 
-    pendingSeekRef.current = target;
+    scrubTimeRef.current = null;
+    setScrubTime(null);
+    const runId = seekRunRef.current + 1;
+    seekRunRef.current = runId;
+    pendingSeekRef.current = { runId, target };
     setPendingSeekTime(target);
-    onSeek(target);
+    const settle = () => {
+      const next = settlePendingTimelineSeek(pendingSeekRef.current, runId);
+
+      if (next === pendingSeekRef.current) {
+        return;
+      }
+
+      pendingSeekRef.current = next;
+      setPendingSeekTime(next?.target ?? null);
+    };
+
+    void Promise.resolve(onSeek(target)).then(settle, settle);
   };
-
-  useLiveReadoutWriter((readouts) => {
-    const landedOn = (target: number | null) =>
-      target !== null &&
-      readouts.currentTime !== null &&
-      Math.abs(readouts.currentTime - target) <=
-        TIMELINE_SCRUB_SETTLE_EPSILON_SECONDS;
-
-    if (landedOn(scrubTimeRef.current)) {
-      scrubTimeRef.current = null;
-      setScrubTime(null);
-    }
-
-    if (landedOn(pendingSeekRef.current)) {
-      pendingSeekRef.current = null;
-      setPendingSeekTime(null);
-    }
-  });
 
   useEffect(() => {
     if (!disabled && duration !== null) {

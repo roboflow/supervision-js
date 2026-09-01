@@ -124,6 +124,44 @@ function selectPreviewTargets(
     .sort((a, b) => a - b);
 }
 
+/** Bounds the clone payload while preserving the first and last discovered
+ * anchors and sampling the interior evenly. GOP statistics still use the full
+ * index; only the diagnostic lane is thinned. */
+export function boundedKeyframeTimestamps(
+  keyframesS: readonly number[],
+): number[] {
+  const cap = DIAGNOSTICS.KEYFRAME_TIMESTAMPS_CAP;
+  if (keyframesS.length <= cap) {
+    return keyframesS.map((seconds) => Math.round(seconds * 1000));
+  }
+  return Array.from({ length: cap }, (_, index) => {
+    const sourceIndex = Math.round(
+      (index * (keyframesS.length - 1)) / (cap - 1),
+    );
+    return Math.round(keyframesS[sourceIndex] * 1000);
+  });
+}
+
+/** Releases a live sample produced after its watchdog caller abandoned it. */
+function closeLateDecodeResult(result: unknown): void {
+  if (!result || typeof result !== "object") return;
+  const candidate =
+    "value" in result && result.value && typeof result.value === "object"
+      ? result.value
+      : result;
+  if (
+    "kind" in candidate &&
+    candidate.kind === "sample" &&
+    "sample" in candidate &&
+    candidate.sample &&
+    typeof candidate.sample === "object" &&
+    "close" in candidate.sample &&
+    typeof candidate.sample.close === "function"
+  ) {
+    candidate.sample.close();
+  }
+}
+
 /** How the consumer is moving, which shapes the prefetch window. */
 enum AccessMode {
   Idle = "idle",
@@ -349,7 +387,8 @@ export class DecodeScheduler implements ScrubCursor {
   peekCached(timeMs: number): ScrubFrame | null {
     // Non-counting: the authoritative seek for this same gesture also reads
     // the cache, so counting both would double-book every scrub's hit rate.
-    const hit = this.cache.peek(timeMs, this.exactTolMs, this.previewTolMs);
+    const target = this.frameAtTime(timeMs / 1000);
+    const hit = this.cache.peekForFrame(target, timeMs, this.previewTolMs);
     return hit ? this.frameFromCache(hit) : null;
   }
 
@@ -412,7 +451,7 @@ export class DecodeScheduler implements ScrubCursor {
       },
       gop: this.keyframeIndex.gopStats(this.trackInfo.durationS),
       probeRoundTrips: this.keyframeIndex.probeCount,
-      keyframesMs: this.keyframeIndex.known.map((s) => Math.round(s * 1000)),
+      keyframesMs: boundedKeyframeTimestamps(this.keyframeIndex.known),
       prefetch: this.prefetchPlanMs(),
       prefetchState: {
         inFlight: this.prefetchTask !== null,
@@ -688,7 +727,11 @@ export class DecodeScheduler implements ScrubCursor {
   private async runExactSeek(t: Sec): Promise<void> {
     this.exactSeeks += 1;
     const ms = t * 1000;
-    const cached = this.cache.get(ms, this.exactTolMs, this.previewTolMs);
+    const cached = this.cache.getForFrame(
+      this.frameAtTime(t),
+      ms,
+      this.previewTolMs,
+    );
     const painted = cached !== null && this.worthPainting(cached, ms);
     if (painted) this.emitCached(cached);
     // An exact hit is the crisp frame already; a coarse preview hit still
@@ -790,6 +833,13 @@ export class DecodeScheduler implements ScrubCursor {
       if (frame?.kind === "sample") frame.sample.close();
       return;
     }
+    // A newer target owns the screen. Key seeks can land a whole GOP back, so
+    // unlike gesture-shaped exact seeks there is no useful stale paint to
+    // salvage for the request that replaced this one.
+    if (this.pendingSeekTargetS !== null) {
+      this.cacheDecoded(frame);
+      return;
+    }
     this.emitDecoded(frame, true);
   }
 
@@ -863,8 +913,8 @@ export class DecodeScheduler implements ScrubCursor {
   ): Promise<Watchdogged<T>> {
     if (this.decoderDead || this.decoderStalled) {
       // The caller built the decode before this could refuse it, so its
-      // rejection still needs an owner even though nobody wants the value.
-      void work.catch(() => undefined);
+      // terminal result still needs an owner even though nobody wants it.
+      void work.then(closeLateDecodeResult, () => undefined);
       return UNANSWERED;
     }
     // An abandoned sweep leaves its decode running with this timer still
@@ -873,18 +923,26 @@ export class DecodeScheduler implements ScrubCursor {
     const issuedAgainst = this.provider;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let reason: unknown = null;
+    let rejected = false;
     const hang = new Promise<typeof HUNG>((resolve) => {
       timer = setTimeout(() => resolve(HUNG), timeoutMs);
     });
     try {
       const result = await Promise.race([
         work.catch((cause: unknown) => {
+          rejected = true;
           reason = cause;
           return HUNG;
         }),
         hang,
       ]);
       if (result === HUNG) {
+        if (!rejected) {
+          // Native decode promises cannot be cancelled. If the timed-out work
+          // eventually hands back a live sample, close it instead of leaking a
+          // decoder slot after the caller has moved on.
+          void work.then(closeLateDecodeResult, () => undefined);
+        }
         if (issuedAgainst !== this.provider) return UNANSWERED;
         if (booked) this.noteUnanswered(reason);
         else void this.recoverDecoder();
@@ -1083,7 +1141,7 @@ export class DecodeScheduler implements ScrubCursor {
     // oldest insertion and the first LRU victim once the window fills. It is
     // also the frame on screen and the most likely target of a micro-adjust,
     // so promote it back to most-recently-used after the neighbors land.
-    this.cache.bumpExact(aroundS * 1000);
+    this.cache.bumpExactFrame(this.frameAtTime(aroundS));
   }
 
   private async runPreviewSweep(aroundS: Sec, gen: number): Promise<void> {
@@ -1294,6 +1352,12 @@ export class DecodeScheduler implements ScrubCursor {
   private frameIdOf(timestampS: number): FrameId {
     const { timeline } = this.trackInfo;
     return timeline.idAt(timeline.indexOfDecoded(timestampS));
+  }
+
+  /** The timeline identity of the frame covering a presentation time. */
+  private frameAtTime(timestampS: number): FrameId {
+    const { timeline } = this.trackInfo;
+    return timeline.idAt(timeline.indexAtOrBefore(timestampS));
   }
 
   private emitDecoded(

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createIdleDetectionBufferState } from "supervision-js-core";
-import type { DetectionFrameSource } from "supervision-js-core";
+import type { DetectionFrame, DetectionFrameSource } from "supervision-js-core";
 import type { DecodedMediaSource } from "#media/media-source";
 import {
   MediaRendererPlaybackState,
@@ -14,6 +14,7 @@ import type {
   PresentedFrameChannel,
   PresentedFrameChannelSignal,
   PresentedFrameChannelStatus,
+  PresentedVideoFrame,
 } from "./presented-frame-channel";
 
 describe("media renderer over a push-based media source", () => {
@@ -456,6 +457,170 @@ describe("media renderer over a push-based media source", () => {
 
     renderer.destroy();
   });
+
+  it("holds a pushed frame until its advertised detections are in the buffer", async () => {
+    const producer = createProducer();
+    const secondWindow = createDeferred<readonly DetectionFrame[]>();
+    const source: DetectionFrameSource = {
+      getAvailableRanges: () => [{ endTime: 4, startTime: 0 }],
+      loadFrames: vi.fn(async (startTime) =>
+        startTime < 1
+          ? [{ detections: [], frameIndex: 0, mediaTime: 0 }]
+          : secondWindow.promise,
+      ),
+      waitForRange: vi.fn(async () => undefined),
+    };
+    const renderer = await createRenderer(producer, createScene(), {
+      detectionBuffer: {
+        bufferAheadSeconds: 0,
+        bufferBehindSeconds: 0,
+        playbackGate: { enabled: true },
+      },
+      detectionSource: source,
+    });
+    await vi.waitFor(() => expect(source.loadFrames).toHaveBeenCalled());
+
+    const presented = producer.present(2000);
+    await vi.waitFor(() =>
+      expect(source.loadFrames).toHaveBeenCalledWith(
+        2,
+        2,
+        expect.objectContaining({
+          coordinateSpace: { height: 720, width: 1280 },
+        }),
+      ),
+    );
+
+    expect(presented.frame.close).not.toHaveBeenCalled();
+
+    secondWindow.resolve([{ detections: [], frameIndex: 1, mediaTime: 2 }]);
+    await vi.waitFor(() =>
+      expect(presented.frame.close).toHaveBeenCalledOnce(),
+    );
+
+    renderer.destroy();
+  });
+
+  it("enters Error and stops the producer when the scene rejects a later frame", async () => {
+    const producer = createProducer();
+    let presentations = 0;
+    const renderer = await createRenderer(
+      producer,
+      createScene(),
+      {},
+      (presented) => {
+        presentations += 1;
+        presented.frame.close();
+        if (presentations > 1) throw new Error("later scene upload failed");
+      },
+    );
+
+    const failed = producer.present(1000);
+
+    expect(renderer.getState()).toMatchObject({
+      playbackState: MediaRendererPlaybackState.Error,
+      source: { errorMessage: "later scene upload failed" },
+    });
+    expect(producer.pause).toHaveBeenCalledOnce();
+    expect(failed.frame.close).toHaveBeenCalledOnce();
+    renderer.destroy();
+  });
+
+  it("does not overwrite an initialization-time scene failure with Ready", async () => {
+    const producer = createProducer();
+    producer.commit.mockImplementationOnce(async (nextTimeMs: number) => {
+      producer.present(nextTimeMs);
+      producer.present(nextTimeMs + 1000);
+    });
+    let presentations = 0;
+
+    const renderer = await createRenderer(
+      producer,
+      createScene(),
+      { autoPlay: true },
+      (presented) => {
+        presentations += 1;
+        presented.frame.close();
+        if (presentations > 1) {
+          throw new Error("initial replacement upload failed");
+        }
+      },
+    );
+
+    expect(renderer.getState()).toMatchObject({
+      playbackState: MediaRendererPlaybackState.Error,
+      source: { errorMessage: "initial replacement upload failed" },
+    });
+    expect(producer.pause).toHaveBeenCalledOnce();
+    expect(producer.play).not.toHaveBeenCalled();
+    renderer.destroy();
+  });
+
+  it.each([
+    [
+      "seek",
+      2,
+      (renderer: Awaited<ReturnType<typeof createRenderer>>) =>
+        renderer.seek(2),
+    ],
+    [
+      "step",
+      1,
+      (renderer: Awaited<ReturnType<typeof createRenderer>>) =>
+        renderer.stepForward(),
+    ],
+  ])(
+    "keeps %s pending until the guarded landing reaches the scene",
+    async (_name, targetTime, navigate) => {
+      const producer = createProducer();
+      const landingWindow = createDeferred<readonly DetectionFrame[]>();
+      const source: DetectionFrameSource = {
+        getAvailableRanges: () => [{ endTime: 4, startTime: 0 }],
+        loadFrames: vi.fn(async (startTime) =>
+          startTime < 1
+            ? [{ detections: [], frameIndex: 0, mediaTime: 0 }]
+            : landingWindow.promise,
+        ),
+        waitForRange: vi.fn(async () => undefined),
+      };
+      const renderer = await createRenderer(producer, createScene(), {
+        detectionBuffer: {
+          bufferAheadSeconds: 0,
+          bufferBehindSeconds: 0,
+          playbackGate: { enabled: true },
+        },
+        detectionSource: source,
+      });
+      let settled = false;
+
+      const navigation = navigate(renderer).then(() => {
+        settled = true;
+      });
+      await vi.waitFor(() =>
+        expect(source.loadFrames).toHaveBeenCalledWith(
+          targetTime,
+          targetTime,
+          expect.objectContaining({
+            coordinateSpace: { height: 720, width: 1280 },
+          }),
+        ),
+      );
+      await Promise.resolve();
+
+      expect(settled).toBe(false);
+
+      landingWindow.resolve([
+        {
+          detections: [],
+          frameIndex: targetTime,
+          mediaTime: targetTime,
+        },
+      ]);
+      await navigation;
+      expect(settled).toBe(true);
+      renderer.destroy();
+    },
+  );
 
   it("reads the playhead from the producer", async () => {
     const producer = createProducer();
@@ -1113,7 +1278,9 @@ function createStuckRenderPreparation() {
   let isPrepared = false;
   let progress = 0;
   const releases = new Set<() => void>();
-  const needsRenderPreparationWait = vi.fn(() => !isPrepared);
+  const needsRenderPreparationWait = vi.fn(
+    (mediaTime: number) => mediaTime > 0 && !isPrepared,
+  );
   const getRenderPreparationProgress = vi.fn(() => progress);
   const waitForRenderPreparation = vi.fn(
     (_mediaTime: number, _gateOptions: unknown, signal?: AbortSignal) =>
@@ -1227,8 +1394,10 @@ async function createRenderer(
   producer: ReturnType<typeof createProducer>,
   scene: MediaRendererScene,
   overrides: Partial<MediaRendererOptions> = {},
+  presentFrame: (presented: PresentedVideoFrame) => void = (presented) =>
+    presented.frame.close(),
 ) {
-  return createMediaRendererCore(
+  const renderer = await createMediaRendererCore(
     {
       autoPlay: false,
       container: {} as HTMLElement,
@@ -1236,10 +1405,22 @@ async function createRenderer(
       ...overrides,
     } satisfies MediaRendererOptions,
     {
-      createScene: async () => scene,
+      createScene: async (sceneOptions) => {
+        // A real push scene subscribes while it is being built and owns every
+        // VideoFrame it accepts. This harness keeps that ownership boundary
+        // without needing Pixi just to acknowledge the first presentation.
+        sceneOptions.presentedFrames?.onPresentedFrame(presentFrame);
+        return scene;
+      },
       openMediaSource: vi.fn(),
     },
   );
+  // Initialization recommits the first frame so Ready means real pixels have
+  // reached the scene. Individual transport tests start after that contract.
+  producer.commit.mockClear();
+  producer.beginInteractiveSeek.mockClear();
+  producer.endInteractiveSeek.mockClear();
+  return renderer;
 }
 
 function createProducer() {
@@ -1258,10 +1439,30 @@ function createProducer() {
   let seeking = false;
   let timeMs = 0;
   let rate = 1;
+  let frameHandler: Parameters<PresentedFrameChannel["onPresentedFrame"]>[0] = (
+    presented,
+  ) => presented.frame.close();
+  let paintSeq = 0;
+
+  const present = (nextTimeMs: number) => {
+    timeMs = nextTimeMs;
+    const index = Math.trunc(timeMs / 1000);
+    const presented = {
+      frame: { close: vi.fn() } as unknown as VideoFrame,
+      frameId: { index, ticks: timeMs },
+      mediaTimeS: timeMs / 1000,
+      paintSeq: ++paintSeq,
+    };
+    frameHandler(presented);
+    announce("time");
+    return presented;
+  };
 
   const engine: PresentedFrameChannel = {
     beginInteractiveSeek: vi.fn(),
-    commit: vi.fn(async () => undefined),
+    commit: vi.fn(async (nextTimeMs: number) => {
+      present(nextTimeMs);
+    }),
     endInteractiveSeek: vi.fn(async () => undefined),
     getDurationMs: () => 4000,
     getPlaybackRate: () => rate,
@@ -1271,7 +1472,9 @@ function createProducer() {
       frame: { index: Math.trunc(timeMs / 1000), ticks: timeMs },
       mediaTimeS: timeMs / 1000,
     }),
-    onPresentedFrame: vi.fn(),
+    onPresentedFrame: vi.fn((handler) => {
+      frameHandler = handler;
+    }),
     pause: vi.fn(),
     play: vi.fn(async () => undefined),
     scrub: vi.fn(),
@@ -1283,7 +1486,9 @@ function createProducer() {
       rate = next;
       announce("rate");
     }),
-    step: vi.fn(async () => undefined),
+    step: vi.fn(async (direction: 1 | -1) => {
+      present(Math.max(0, Math.min(4000, timeMs + direction * 1000)));
+    }),
     subscribe: (signal, listener) => {
       listeners.get(signal)?.add(listener);
       return () => listeners.get(signal)?.delete(listener);
@@ -1321,6 +1526,7 @@ function createProducer() {
     getSample,
     pause: engine.pause as ReturnType<typeof vi.fn>,
     play: engine.play as ReturnType<typeof vi.fn>,
+    present,
     samples,
     scrub: engine.scrub as ReturnType<typeof vi.fn>,
     setPlaybackRate: engine.setPlaybackRate as ReturnType<typeof vi.fn>,
@@ -1333,12 +1539,22 @@ function createProducer() {
       announce("state");
     },
     setTimeMs(next: number) {
-      timeMs = next;
-      announce("time");
+      present(next);
     },
     source,
     step: engine.step as ReturnType<typeof vi.fn>,
   };
+}
+
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+
+  return { promise, reject, resolve };
 }
 
 function createScene(

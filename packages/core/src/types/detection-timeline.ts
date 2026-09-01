@@ -448,6 +448,18 @@ export interface BufferedDetectionTimeline {
     options?: DetectionBufferPrepareOptions,
   ): Promise<void>;
   /**
+   * Whether `prepare(mediaTime)` still has to put or keep that time in the hot
+   * buffer.
+   *
+   * Source coverage and hot-buffer coverage are separate: a finite source can
+   * advertise its complete range while the currently loaded window is
+   * elsewhere. An older load can also be about to replace a buffer that still
+   * answers the requested time. Push renderers use this answer to keep a newly
+   * presented frame behind its matching detections without preparing every
+   * already-hot frame.
+   */
+  needsBufferPrepare?(mediaTime: number): boolean;
+  /**
    * Whether a gated `prepare` at `mediaTime` would wait, answered without
    * starting the wait.
    *

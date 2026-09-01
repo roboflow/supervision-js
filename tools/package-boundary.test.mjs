@@ -439,12 +439,15 @@ test("published packages declare every package their source imports", async () =
     // cannot resolve one at install time and must inline it at build time
     // instead. Declaring it would ship a manifest npm cannot satisfy.
     const declared = new Set([
-      ...internalPackages,
       // A package always resolves its own name, which is how the browser
       // package reaches the engine subpath it publishes.
       manifest.name,
       ...Object.keys(manifest.dependencies ?? {}),
       ...Object.keys(manifest.peerDependencies ?? {}),
+      ...Object.keys(manifest.optionalDependencies ?? {}),
+      ...Object.keys(manifest.devDependencies ?? {}).filter((dependency) =>
+        internalPackages.has(dependency),
+      ),
     ]);
     const files = await listSourceFilesWithoutTests(
       path.join(packageDir, "src"),
@@ -470,7 +473,7 @@ async function listInternalWorkspacePackages() {
   const entries = await readdir(path.join(rootDir, "packages"), {
     withFileTypes: true,
   });
-  const names = [];
+  const names = new Set();
 
   for (const entry of entries) {
     if (!entry.isDirectory()) {
@@ -485,7 +488,7 @@ async function listInternalWorkspacePackages() {
     );
 
     if (manifest.private === true) {
-      names.push(manifest.name);
+      names.add(manifest.name);
     }
   }
 

@@ -33,6 +33,14 @@ const rootDir = path.resolve(
 );
 const artifactsDir = path.join(rootDir, "artifacts");
 
+function listFiles(directory) {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const entryPath = path.join(directory, entry.name);
+
+    return entry.isDirectory() ? listFiles(entryPath) : [entryPath];
+  });
+}
+
 function run(command, args, cwd) {
   const result = spawnSync(command, args, { cwd, shell: false, stdio: "pipe" });
 
@@ -160,6 +168,32 @@ test("tarball ships the video engine as its own lazily loaded subpath", () => {
     assert.ok(
       existsSync(path.join(extractedDir, entry)),
       `Expected ${entry} in the tarball`,
+    );
+  }
+
+  const stagedFiles = listFiles(
+    path.join(extractedDir, "dist/web-video-engine"),
+  );
+
+  assert.deepEqual(
+    stagedFiles.filter(
+      (file) =>
+        file.endsWith(".map") &&
+        !/^index(?:\.js|\.d\.ts)\.map$/.test(path.basename(file)),
+    ),
+    [],
+    "Relocated engine files must not ship source maps for their old paths",
+  );
+
+  for (const file of stagedFiles.filter(
+    (entry) =>
+      /\.(?:js|d\.ts)$/.test(entry) &&
+      !/^index(?:\.js|\.d\.ts)$/.test(path.basename(entry)),
+  )) {
+    assert.doesNotMatch(
+      readFileSync(file, "utf8"),
+      /sourceMappingURL=/,
+      `${path.relative(extractedDir, file)} must not reference an omitted map`,
     );
   }
 

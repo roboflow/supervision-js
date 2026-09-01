@@ -166,6 +166,39 @@ function sampleFrameAt(ts: number, onClose: () => void): ScrubFrame {
 }
 
 describe("ScrubController", () => {
+  it("keeps exactly one animation loop across repeated canvas binds", () => {
+    let nextHandle = 0;
+    const request = vi
+      .spyOn(globalThis, "requestAnimationFrame")
+      .mockImplementation(() => ++nextHandle);
+    const cancel = vi
+      .spyOn(globalThis, "cancelAnimationFrame")
+      .mockImplementation(() => undefined);
+    try {
+      const controller = new ScrubController({
+        cursor: new FakeCursor(),
+        clock: new FakeClock(),
+        onPaint: () => undefined,
+        onEnded: () => undefined,
+        cacheSkipNearMs: 100,
+      });
+      const first = makeCanvas();
+      const second = makeCanvas();
+
+      controller.bindCanvas(first);
+      controller.bindCanvas(first);
+      controller.bindCanvas(second);
+
+      expect(request).toHaveBeenCalledTimes(2);
+      expect(cancel).toHaveBeenCalledExactlyOnceWith(1);
+      controller.dispose();
+      expect(cancel).toHaveBeenLastCalledWith(2);
+    } finally {
+      request.mockRestore();
+      cancel.mockRestore();
+    }
+  });
+
   it("rAF tick paints stashed frame when paused", async () => {
     const cursor = new FakeCursor();
     const clock = new FakeClock();

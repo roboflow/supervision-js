@@ -33,7 +33,7 @@ interface ControlBarProps {
   readonly duration: number | null;
   readonly frameTimeline: FrameTimelineData | null;
   readonly onScrub: (time: number) => void;
-  readonly onSeek: (time: number) => void;
+  readonly onSeek: (time: number) => Promise<void> | void;
   readonly onSetPlaybackRate: (rate: number) => void;
   readonly onStepFrame: (direction: 1 | -1) => void;
   readonly onTogglePlayback: () => void;

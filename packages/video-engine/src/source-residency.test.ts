@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  ByteStore,
   FOREGROUND_STALL_MS,
   READ_BLOCK_BYTES,
   createSourceResidency,
@@ -40,6 +41,19 @@ const read = async (response: Response): Promise<Uint8Array> =>
   new Uint8Array(await response.arrayBuffer());
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+describe("ByteStore", () => {
+  it("releases backing-array headroom when one run is narrowed", () => {
+    const store = new ByteStore();
+    store.insert(0, body(0, 16 * 1024));
+
+    store.evictTo(4 * 1024, 8 * 1024);
+
+    expect(store.residentBytes).toBe(4 * 1024);
+    expect(store.allocatedBytes).toBe(4 * 1024);
+    expect(store.ranges()).toEqual([{ start: 8 * 1024, end: 12 * 1024 }]);
+  });
+});
 
 /** Serves a range in pieces, so a reader can walk away part-way through one.
  *  `pieceDelayMs` is the server's own latency ahead of each piece. */
@@ -121,6 +135,57 @@ function wholeFileFetch(total = TOTAL) {
         headers: { "Content-Length": String(total) },
       }),
   ) as unknown as typeof fetch;
+}
+
+/** The first range establishes the file length; every background range after
+ * that is ignored and streamed from byte zero. */
+function rangeIgnoringWarmFetch(
+  total: number,
+  pieceBytes: number,
+  supportedRangeRequests = 1,
+) {
+  let requests = 0;
+  const servedPerRequest: number[] = [];
+  const fetchImpl = vi.fn(async (_input: unknown, init?: RequestInit) => {
+    const request = requests++;
+    servedPerRequest[request] = 0;
+    const header = new Headers(init?.headers ?? undefined).get("Range");
+    const match = header ? /^bytes=(\d+)-(\d*)$/.exec(header) : null;
+    if (request < supportedRangeRequests && match) {
+      const start = Number(match[1]);
+      const end = match[2] ? Number(match[2]) : total - 1;
+      const bytes = body(start, end - start + 1);
+      servedPerRequest[request] = bytes.length;
+      return new Response(bytes, {
+        status: 206,
+        headers: {
+          "Content-Length": String(bytes.length),
+          "Content-Range": `bytes ${start}-${end}/${total}`,
+        },
+      });
+    }
+    let cursor = 0;
+    const stream = new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          if (cursor >= total) {
+            controller.close();
+            return;
+          }
+          const length = Math.min(pieceBytes, total - cursor);
+          controller.enqueue(body(cursor, length));
+          cursor += length;
+          servedPerRequest[request] += length;
+        },
+      },
+      { highWaterMark: 0 },
+    );
+    return new Response(stream, {
+      status: 200,
+      headers: { "Content-Length": String(total) },
+    });
+  }) as unknown as typeof fetch;
+  return { fetchImpl, servedPerRequest };
 }
 
 /** Bytes moved by every `Uint8Array.prototype.set` call while it is installed. */
@@ -344,6 +409,90 @@ describe("createSourceResidency", () => {
     });
     expect(residency.snapshot().ranges).toEqual([{ start: 0, end: TOTAL }]);
     expect(residency.snapshot().prefetchedBytes).toBe(TOTAL - 1024);
+    residency.dispose();
+  });
+
+  it("streams range-ignoring 200 responses only through the retained window", async () => {
+    const pieceBytes = 1024;
+    const total = pieceBytes * 8;
+    const budgetBytes = pieceBytes * 4;
+    const network = rangeIgnoringWarmFetch(total, pieceBytes);
+    const residency = createSourceResidency({
+      url: URL_UNDER_TEST,
+      budgetBytes,
+      chunkBytes: pieceBytes,
+      fetchImpl: network.fetchImpl,
+    });
+
+    await drain(
+      await residency.fetchFn(URL_UNDER_TEST, {
+        headers: { Range: `bytes=0-${pieceBytes - 1}` },
+      }),
+    );
+    await settle();
+    residency.startWarming();
+    await vi.waitFor(() => expect(residency.snapshot().warming).toBe(false));
+
+    expect(residency.snapshot()).toMatchObject({
+      ranges: [{ start: 0, end: budgetBytes }],
+      residentBytes: budgetBytes,
+    });
+    // Once range ignorance is known, the one response already streaming from
+    // byte zero fills the rest of the budget. Re-requesting each chunk would
+    // keep memory bounded while turning a B-byte warm into quadratic traffic.
+    expect(network.fetchImpl).toHaveBeenCalledTimes(2);
+    expect(network.servedPerRequest.slice(1)).toEqual([
+      pieceBytes + budgetBytes,
+    ]);
+    expect(
+      network.servedPerRequest.reduce((sum, bytes) => sum + bytes, 0),
+    ).toBe(pieceBytes * 2 + budgetBytes);
+    expect(
+      await read(
+        await residency.fetchFn(URL_UNDER_TEST, {
+          headers: { Range: `bytes=${pieceBytes * 3}-` },
+        }),
+      ),
+    ).toEqual(body(pieceBytes * 3, pieceBytes));
+    residency.dispose();
+  });
+
+  it("fills a sparse resident budget with one range-ignoring response", async () => {
+    const pieceBytes = 1024;
+    const total = pieceBytes * 8;
+    const budgetBytes = pieceBytes * 4;
+    const network = rangeIgnoringWarmFetch(total, pieceBytes, 2);
+    const residency = createSourceResidency({
+      url: URL_UNDER_TEST,
+      budgetBytes,
+      chunkBytes: pieceBytes,
+      fetchImpl: network.fetchImpl,
+    });
+
+    for (const start of [0, pieceBytes * 2]) {
+      await drain(
+        await residency.fetchFn(URL_UNDER_TEST, {
+          headers: { Range: `bytes=${start}-${start + pieceBytes - 1}` },
+        }),
+      );
+      await settle();
+    }
+    expect(residency.snapshot().ranges).toEqual([
+      { start: 0, end: pieceBytes },
+      { start: pieceBytes * 2, end: pieceBytes * 3 },
+    ]);
+
+    residency.startWarming();
+    await vi.waitFor(() => expect(residency.snapshot().warming).toBe(false));
+
+    expect(network.fetchImpl).toHaveBeenCalledTimes(3);
+    expect(network.servedPerRequest.slice(2)).toEqual([
+      pieceBytes + budgetBytes,
+    ]);
+    expect(residency.snapshot()).toMatchObject({
+      ranges: [{ start: 0, end: budgetBytes }],
+      residentBytes: budgetBytes,
+    });
     residency.dispose();
   });
 
@@ -678,7 +827,7 @@ describe("createSourceResidency", () => {
     const { residentBytes } = residency.snapshot();
     expect(residentBytes).toBe(total);
     expect(copies.copied()).toBeLessThan(4 * residentBytes);
-  });
+  }, 15_000);
 
   it("holds nothing once disposed", async () => {
     const residency = createSourceResidency({

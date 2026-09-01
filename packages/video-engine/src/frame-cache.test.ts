@@ -147,6 +147,22 @@ describe("FrameCache", () => {
       expect(cache.get(1033, 50, 50)?.timestampMs).toBe(1033);
     });
 
+    it("never answers one variable-rate frame with a neighbouring exact entry", () => {
+      const cache = makeCache({ exactBudgetBytes: 64 * MB, bucketMs: 33 });
+      const timeline = FrameTimeline.from({
+        tickRate: 1000,
+        ticks: Float64Array.of(0, 49, 50),
+        lastDurationTicks: 100,
+      });
+      cache.putExact(timeline.idAt(1), 49, SRC, 320, 180);
+
+      // The next frame starts only 1ms later. A timestamp-tolerance lookup
+      // would call the 49ms canvas an exact hit for the 50ms frame even though
+      // the container gives them distinct identities.
+      expect(cache.getForFrame(timeline.idAt(2), 50, 0)).toBeNull();
+      expect(cache.getForFrame(timeline.idAt(1), 49, 0)?.timestampMs).toBe(49);
+    });
+
     it("derives slot count from the RAM budget and evicts past it", () => {
       // 100x100x4 = 40_000 bytes/frame; a 100_000-byte budget yields 2 slots.
       const cache = makeCache({

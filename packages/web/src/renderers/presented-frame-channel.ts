@@ -70,6 +70,272 @@ export interface PresentedFrameSource {
   onPresentedFrame(handler: (presented: PresentedVideoFrame) => void): void;
 }
 
+export interface ProtectedPresentedFrameSource {
+  readonly source: PresentedFrameSource;
+  /** Starts forwarding through the asynchronous pre-presentation guard. */
+  activate(
+    protect: (
+      presented: PresentedVideoFrame,
+      signal: AbortSignal,
+    ) => Promise<void> | null,
+  ): void;
+  /** Invalidates a frame waiting on readiness before a new navigation. */
+  invalidate(): void;
+  /** Opens an acknowledgment for one settling navigation. The producer may
+   *  emit its landing before its command promise resumes, so accepted frame
+   *  identities are retained until the caller names the producer's result. */
+  beginNavigation(): PresentedFrameNavigation;
+  /** Resolves after the downstream scene has synchronously accepted a frame. */
+  waitForFirstPresentation(): Promise<void>;
+  destroy(): void;
+}
+
+export interface PresentedFrameNavigation {
+  /** Resolves only after the scene has synchronously accepted this frame. */
+  waitFor(frameId: PresentedFrameId): Promise<void>;
+  /** Releases the acknowledgment when its producer command fails. */
+  cancel(): void;
+}
+
+interface PresentedFrameNavigationTicket {
+  readonly accepted: Set<string>;
+  readonly promise: Promise<void>;
+  readonly reject: (error: unknown) => void;
+  readonly resolve: () => void;
+  settled: boolean;
+  target: string | null;
+}
+
+/**
+ * Holds the newest producer frame until both the scene and its readiness guard
+ * can accept it. A superseding frame aborts the old guard and closes the old
+ * VideoFrame, so stale readiness can never authorize presentation after a new
+ * seek. The downstream handler owns a frame only after the guard succeeds.
+ */
+export function createProtectedPresentedFrameSource(
+  upstream: PresentedFrameSource,
+  onPresentationError: (error: unknown) => void = () => undefined,
+): ProtectedPresentedFrameSource {
+  let downstream: ((presented: PresentedVideoFrame) => void) | null = null;
+  let protect:
+    | ((
+        presented: PresentedVideoFrame,
+        signal: AbortSignal,
+      ) => Promise<void> | null)
+    | null = null;
+  let pending: PresentedVideoFrame | null = null;
+  let active: {
+    readonly controller: AbortController;
+    readonly frame: PresentedVideoFrame;
+    readonly generation: number;
+    closed: boolean;
+    handedOff: boolean;
+  } | null = null;
+  let navigation: PresentedFrameNavigationTicket | null = null;
+  let generation = 0;
+  let destroyed = false;
+  let firstPresented = false;
+  let resolveFirstPresentation!: () => void;
+  let rejectFirstPresentation!: (error: unknown) => void;
+  const firstPresentation = new Promise<void>((resolve, reject) => {
+    resolveFirstPresentation = resolve;
+    rejectFirstPresentation = reject;
+  });
+  // A retained seed can fail its guard during activate(), before the core has
+  // reached its await. Keep the rejection owned until that caller observes it.
+  void firstPresentation.catch(() => undefined);
+
+  const closeRun = (run: NonNullable<typeof active>) => {
+    if (run.closed || run.handedOff) return;
+    run.closed = true;
+    run.frame.frame.close();
+  };
+
+  const frameKey = (frameId: PresentedFrameId) =>
+    `${frameId.index}:${frameId.ticks}`;
+
+  const settleNavigation = (
+    ticket: NonNullable<typeof navigation>,
+    error?: unknown,
+  ) => {
+    if (ticket.settled) return;
+    ticket.settled = true;
+    if (navigation === ticket) navigation = null;
+    if (error === undefined) ticket.resolve();
+    else ticket.reject(error);
+  };
+
+  const acceptNavigationFrame = (frameId: PresentedFrameId) => {
+    const ticket = navigation;
+    if (!ticket || ticket.settled) return;
+    const accepted = frameKey(frameId);
+    ticket.accepted.add(accepted);
+    if (ticket.target === accepted) settleNavigation(ticket);
+  };
+
+  const failPresentation = (error: unknown) => {
+    if (!firstPresented) rejectFirstPresentation(error);
+    if (navigation) settleNavigation(navigation, error);
+    if (firstPresented) onPresentationError(error);
+  };
+
+  const cancelActive = () => {
+    const run = active;
+    if (!run) return;
+    active = null;
+    run.controller.abort();
+    closeRun(run);
+  };
+
+  const pump = () => {
+    if (destroyed || active || !pending || !downstream || !protect) return;
+    const frame = pending;
+    pending = null;
+    const controller = new AbortController();
+    const run = {
+      closed: false,
+      controller,
+      frame,
+      generation,
+      handedOff: false,
+    };
+    active = run;
+
+    const handOff = () => {
+      if (
+        destroyed ||
+        controller.signal.aborted ||
+        run.generation !== generation
+      ) {
+        closeRun(run);
+        return;
+      }
+      if (active === run) active = null;
+      run.handedOff = true;
+      try {
+        downstream!(frame);
+      } catch (error) {
+        failPresentation(error);
+        return;
+      }
+      acceptNavigationFrame(frame.frameId);
+      if (!firstPresented) {
+        firstPresented = true;
+        resolveFirstPresentation();
+      }
+    };
+
+    let guarded: Promise<void> | null;
+    try {
+      guarded = protect(frame, controller.signal);
+    } catch (error) {
+      active = null;
+      closeRun(run);
+      failPresentation(error);
+      pump();
+      return;
+    }
+    if (!guarded) {
+      handOff();
+      pump();
+      return;
+    }
+
+    void guarded
+      .then(() => {
+        handOff();
+      })
+      .catch((error) => {
+        closeRun(run);
+        if (!controller.signal.aborted) failPresentation(error);
+      })
+      .finally(() => {
+        if (active === run) active = null;
+        pump();
+      });
+  };
+
+  upstream.onPresentedFrame((presented) => {
+    if (destroyed) {
+      presented.frame.close();
+      return;
+    }
+    generation += 1;
+    cancelActive();
+    pending?.frame.close();
+    pending = presented;
+    pump();
+  });
+
+  return {
+    source: {
+      onPresentedFrame(handler) {
+        downstream = handler;
+        pump();
+      },
+    },
+    activate(nextProtect) {
+      protect = nextProtect;
+      pump();
+    },
+    invalidate() {
+      generation += 1;
+      cancelActive();
+      pending?.frame.close();
+      pending = null;
+      if (navigation) settleNavigation(navigation);
+    },
+    beginNavigation() {
+      generation += 1;
+      cancelActive();
+      pending?.frame.close();
+      pending = null;
+      if (navigation) settleNavigation(navigation);
+      let resolve!: () => void;
+      let reject!: (error: unknown) => void;
+      const promise = new Promise<void>((onResolve, onReject) => {
+        resolve = onResolve;
+        reject = onReject;
+      });
+      // A scene may fail before the transport reaches waitFor(). Keep the
+      // rejection owned until the navigation command observes it.
+      void promise.catch(() => undefined);
+      const ticket: PresentedFrameNavigationTicket = {
+        accepted: new Set<string>(),
+        promise,
+        reject,
+        resolve,
+        settled: false,
+        target: null,
+      };
+      navigation = ticket;
+      return {
+        waitFor(frameId) {
+          if (ticket.settled) return ticket.promise;
+          ticket.target = frameKey(frameId);
+          if (ticket.accepted.has(ticket.target)) settleNavigation(ticket);
+          return ticket.promise;
+        },
+        cancel() {
+          settleNavigation(ticket);
+        },
+      };
+    },
+    waitForFirstPresentation: () => firstPresentation,
+    destroy() {
+      if (destroyed) return;
+      destroyed = true;
+      generation += 1;
+      cancelActive();
+      pending?.frame.close();
+      pending = null;
+      if (navigation) settleNavigation(navigation);
+      upstream.onPresentedFrame((presented) => presented.frame.close());
+      if (!firstPresented) resolveFirstPresentation();
+    },
+  };
+}
+
 /**
  * The frame plane plus the transport that moves it. Everything below the frames
  * is the playhead, and the producer owns it: a renderer holding this channel
@@ -93,7 +359,9 @@ export interface PresentedFrameChannel extends PresentedFrameSource {
   pause(): void;
   /** Latest-wins seek for a gesture in flight; returns without settling. */
   scrub(timeMs: number, intent?: PresentedFrameSeekIntent): void;
-  /** Seek that settles: resolves once the producer has landed on `timeMs`. */
+  /** Seek that settles: resolves once the producer has presented its landing.
+   * Recommitting the current time must replay or retain that presentation for
+   * a newly subscribed frame consumer. */
   commit(timeMs: number): Promise<void>;
   /** Walks one real source frame in presentation order. */
   step(direction: 1 | -1): Promise<void>;

@@ -61,6 +61,13 @@ const FRAME_OWNERSHIP_CHECK_GAP = 8;
 export interface WebVideoEngineOptions {
   source: VideoSource;
   /**
+   * Creates the worker that hosts decode and presentation. Omit it to use the
+   * embedded Blob worker. A host whose Content Security Policy disallows
+   * `blob:` workers can return a Worker created from the separately exported
+   * `supervision/web-video-engine/worker` URL instead.
+   */
+  workerFactory?: () => Worker;
+  /**
    * Who owns the pixels, fixed for the life of the engine. Default "canvas":
    * the engine holds the display canvas bindCanvas transfers to it and paints
    * every frame that earns the screen. Under "frames" it holds no canvas,
@@ -195,9 +202,10 @@ export class WebVideoEngine {
 
   constructor(
     private readonly options: WebVideoEngineOptions,
-    createWorker: () => EngineWorkerPort = createEngineWorker,
+    createWorker?: () => EngineWorkerPort,
   ) {
-    this.createWorker = createWorker;
+    this.createWorker =
+      createWorker ?? options.workerFactory ?? createEngineWorker;
   }
 
   async load(): Promise<EngineReadySnapshot> {

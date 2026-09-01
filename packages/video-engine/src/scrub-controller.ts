@@ -540,6 +540,8 @@ export class ScrubController {
       this.clearPlayQueue();
       return;
     }
+    if (this.boundCanvas === el) return;
+    this.stop();
     const w = this.deps.cursor.track.decodeWidth;
     const h = this.deps.cursor.track.decodeHeight;
     if (w > 0 && h > 0) {
@@ -713,6 +715,7 @@ export class ScrubController {
   }
 
   private start(): void {
+    if (this.rafHandle !== 0) return;
     const tick = (): void => {
       if (this.disposed) return;
       const t = this.deps.clock.now();
@@ -863,7 +866,7 @@ export class ScrubController {
   }
 
   private stop(): void {
-    if (this.rafHandle) cancelAnimationFrame(this.rafHandle);
+    if (this.rafHandle !== 0) cancelAnimationFrame(this.rafHandle);
     this.rafHandle = 0;
   }
 }

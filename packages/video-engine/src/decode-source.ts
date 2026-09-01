@@ -24,6 +24,7 @@ import {
   type DecodeResolutionStrategy,
 } from "./decode-resolution";
 import { FrameTimeline } from "./frame-timeline";
+import type { KeyframePacketLike } from "./keyframe-index";
 import type { SourceResidency } from "./source-residency";
 import type { KeyframeProbe } from "./keyframe-index";
 import {
@@ -259,6 +260,157 @@ const sampleFrame = (s: VideoSampleLike): DecodedFrame => ({
   timestamp: s.timestamp,
 });
 
+function sampleAtPresentationTime(
+  sample: VideoSampleLike,
+  timestamp: number,
+): VideoSampleLike {
+  const owned = idempotentSample(sample);
+  return {
+    toVideoFrame: () => owned.toVideoFrame(),
+    rotation: owned.rotation,
+    draw: (ctx, dx, dy, dWidth, dHeight) =>
+      owned.draw(ctx, dx, dy, dWidth, dHeight),
+    close: () => owned.close(),
+    timestamp,
+    duration: owned.duration,
+  };
+}
+
+function presentationCanvasSource(
+  source: CanvasFrameSource,
+  timeline: FrameTimeline,
+): CanvasFrameSource {
+  const wrap = (frame: WrappedCanvasLike | null): WrappedCanvasLike | null =>
+    frame
+      ? {
+          canvas: frame.canvas,
+          timestamp: timeline.fromSourceTime(frame.timestamp),
+        }
+      : null;
+  return {
+    async getCanvas(timestampS) {
+      return wrap(await source.getCanvas(timeline.toSourceTime(timestampS)));
+    },
+    async *canvases(startS) {
+      for await (const frame of source.canvases(
+        timeline.toSourceTime(startS),
+      )) {
+        yield wrap(frame)!;
+      }
+    },
+    async *canvasesAtTimestamps(timestamps) {
+      const sourceTimestamps = Array.from(timestamps, (timestamp) =>
+        timeline.toSourceTime(timestamp),
+      );
+      for await (const frame of source.canvasesAtTimestamps(sourceTimestamps)) {
+        yield wrap(frame);
+      }
+    },
+  };
+}
+
+function presentationSampleSource(
+  source: SampleFrameSource,
+  timeline: FrameTimeline,
+): SampleFrameSource {
+  const wrap = (sample: VideoSampleLike | null): VideoSampleLike | null =>
+    sample
+      ? sampleAtPresentationTime(
+          sample,
+          timeline.fromSourceTime(sample.timestamp),
+        )
+      : null;
+  return {
+    async getSample(timestampS) {
+      return wrap(await source.getSample(timeline.toSourceTime(timestampS)));
+    },
+    async *samples(startS) {
+      for await (const sample of source.samples(
+        timeline.toSourceTime(startS),
+      )) {
+        yield wrap(sample)!;
+      }
+    },
+    async *samplesAtTimestamps(timestamps) {
+      const sourceTimestamps = Array.from(timestamps, (timestamp) =>
+        timeline.toSourceTime(timestamp),
+      );
+      for await (const sample of source.samplesAtTimestamps(sourceTimestamps)) {
+        yield wrap(sample);
+      }
+    },
+  };
+}
+
+function presentationSessionSource(
+  source: SessionFrameSource,
+  timeline: FrameTimeline,
+): SessionFrameSource {
+  const wrap = (sample: VideoSampleLike | null): VideoSampleLike | null =>
+    sample
+      ? sampleAtPresentationTime(
+          sample,
+          timeline.fromSourceTime(sample.timestamp),
+        )
+      : null;
+  return {
+    async frameAt(targetS) {
+      return wrap(await source.frameAt(timeline.toSourceTime(targetS)));
+    },
+    async *framesFrom(startS) {
+      for await (const sample of source.framesFrom(
+        timeline.toSourceTime(startS),
+      )) {
+        yield wrap(sample)!;
+      }
+    },
+    async *framesCovering(startS, endS) {
+      for await (const sample of source.framesCovering(
+        timeline.toSourceTime(startS),
+        timeline.toSourceTime(endS),
+      )) {
+        yield wrap(sample)!;
+      }
+    },
+    get reachableFromS() {
+      return source.reachableFromS === -Infinity
+        ? -Infinity
+        : timeline.fromSourceTime(source.reachableFromS);
+    },
+    get framesDecoded() {
+      return source.framesDecoded;
+    },
+  };
+}
+
+function presentationKeyframeProbe(
+  source: KeyframeProbe,
+  timeline: FrameTimeline,
+): KeyframeProbe {
+  const sourcePackets = new WeakMap<object, KeyframePacketLike>();
+  const wrap = (
+    packet: KeyframePacketLike | null,
+  ): KeyframePacketLike | null => {
+    if (!packet) return null;
+    const mapped = {
+      timestamp: timeline.fromSourceTime(packet.timestamp),
+    };
+    sourcePackets.set(mapped, packet);
+    return mapped;
+  };
+  return {
+    async getKeyPacket(timestamp, options) {
+      return wrap(
+        await source.getKeyPacket(timeline.toSourceTime(timestamp), options),
+      );
+    },
+    async getNextKeyPacket(packet, options) {
+      const sourcePacket = sourcePackets.get(packet) ?? packet;
+      return wrap(await source.getNextKeyPacket(sourcePacket, options));
+    },
+  };
+}
+
 function sampleProvider(handle: SampleSourceHandle): FrameProvider {
   let yielded = 0;
   const count = (s: VideoSampleLike): DecodedFrame => {
@@ -435,14 +587,18 @@ function canvasHandle(
   // canvas the frame is drawn into; it does NOT reduce decode cost. The codec
   // decodes the full coded frame regardless, and CanvasSink resizes after, so
   // the win is paint work and cached-blit memory, not decode throughput.
-  const sink = new CanvasSink(opened.videoTrack, {
+  const source = new CanvasSink(opened.videoTrack, {
     poolSize,
     width: opened.track.decodeWidth,
   });
+  const { timeline } = opened.track;
   return {
     track: opened.track,
-    sink,
-    keyframeProbe: new EncodedPacketSink(opened.videoTrack),
+    sink: presentationCanvasSource(source, timeline),
+    keyframeProbe: presentationKeyframeProbe(
+      new EncodedPacketSink(opened.videoTrack),
+      timeline,
+    ),
     dispose: async () => {
       opened.input.dispose();
     },
@@ -452,10 +608,17 @@ function canvasHandle(
 /** The zero-copy sample path: a VideoSampleSink in place of the CanvasSink. It
  *  takes no width, so frames arrive at the source's own dimensions. */
 function sampleHandle(opened: OpenedInput): SampleSourceHandle {
+  const { timeline } = opened.track;
   return {
     track: opened.track,
-    sampleSink: new VideoSampleSink(opened.videoTrack),
-    keyframeProbe: new EncodedPacketSink(opened.videoTrack),
+    sampleSink: presentationSampleSource(
+      new VideoSampleSink(opened.videoTrack),
+      timeline,
+    ),
+    keyframeProbe: presentationKeyframeProbe(
+      new EncodedPacketSink(opened.videoTrack),
+      timeline,
+    ),
     dispose: async () => {
       opened.input.dispose();
     },
@@ -481,10 +644,11 @@ function sessionHandle(
     createDecoder: webCodecsDecoder,
     rotation: opened.track.rotation,
   });
+  const { timeline } = opened.track;
   return {
     track: opened.track,
-    session,
-    keyframeProbe: packets,
+    session: presentationSessionSource(session, timeline),
+    keyframeProbe: presentationKeyframeProbe(packets, timeline),
     dispose: async () => {
       session.close();
       opened.input.dispose();

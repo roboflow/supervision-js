@@ -1573,6 +1573,59 @@ describe("buffered detection timeline", () => {
 
     expect(waitForRange).not.toHaveBeenCalled();
   });
+
+  it("reports whether a media time still needs hot-buffer preparation", async () => {
+    let enabled = true;
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 1,
+      bufferBehindSeconds: 1,
+      enabled: () => enabled,
+      source: createCountingSecondFrameSource(),
+    });
+
+    expect(timeline.needsBufferPrepare?.(2)).toBe(true);
+
+    await timeline.prepare(2);
+
+    expect(timeline.needsBufferPrepare?.(2)).toBe(false);
+    expect(timeline.needsBufferPrepare?.(4)).toBe(true);
+
+    enabled = false;
+    expect(timeline.needsBufferPrepare?.(4)).toBe(false);
+
+    timeline.destroy();
+    enabled = true;
+    expect(timeline.needsBufferPrepare?.(2)).toBe(false);
+  });
+
+  it("keeps a buffered navigation target ahead of an older rolling load", async () => {
+    const rollingLoad = createDeferred<readonly DetectionFrame[]>();
+    const source = createCountingSecondFrameSource();
+    const timeline = createBufferedDetectionTimeline({
+      bufferAheadSeconds: 10,
+      bufferBehindSeconds: 1,
+      source,
+    });
+
+    await timeline.prepare(45);
+    source.loadFrames.mockImplementationOnce(() => rollingLoad.promise);
+    timeline.prefetch(50.2);
+    await vi.waitFor(() => expect(source.loadFrames).toHaveBeenCalledTimes(2));
+
+    timeline.prefetch(44.8);
+    await settlePrefetch();
+    expect(timeline.needsBufferPrepare?.(44.8)).toBe(false);
+
+    rollingLoad.resolve([{ detections: [], endTime: 51, mediaTime: 50 }]);
+    await settlePrefetch();
+
+    expect(timeline.getState()).toMatchObject({
+      bufferEndTime: 55,
+      bufferStartTime: 44,
+      status: DetectionBufferStatus.Ready,
+    });
+    expect(timeline.selectFrame(44.8)?.mediaTime).toBe(44);
+  });
 });
 
 async function settlePrefetch() {

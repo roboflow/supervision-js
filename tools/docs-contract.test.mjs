@@ -72,32 +72,66 @@ test("generated API facades cover every browser package export", async () => {
   );
 });
 
-test("Editing API facade covers every editing subpath export", async () => {
-  const editingExports = await readNamedExports(
-    path.join(rootDir, "packages/web/src/editing.ts"),
+test("every typed package subpath has a complete API facade", async () => {
+  const manifest = JSON.parse(
+    await readFile(path.join(rootDir, "packages/web/package.json"), "utf8"),
   );
-  const documentedExports = new Set(
-    await readNamedExports(path.join(publicApiDir, "editing.ts")),
-  );
+  const facadeBySubpath = new Map([
+    [
+      ".",
+      [
+        "detections.ts",
+        // Editing types are intentionally dual-exported from the root and
+        // the tree-shakeable editing subpath, so this one facade covers both.
+        "editing.ts",
+        "interactions.ts",
+        "media-preparation.ts",
+        "post-processing.ts",
+        "rendering.ts",
+        "sessions.ts",
+        "styles.ts",
+      ],
+    ],
+    ["./editing", ["editing.ts"]],
+    ["./web-video-engine", ["video-engine.ts"]],
+    ["./web-video-engine/analysis", ["video-engine-analysis.ts"]],
+  ]);
+  const sourceBySubpath = new Map([
+    [".", "packages/web/src/index.ts"],
+    ["./editing", "packages/web/src/editing.ts"],
+    ["./web-video-engine", "packages/web/src/web-video-engine/index.ts"],
+    ["./web-video-engine/analysis", "packages/video-engine/src/analysis.ts"],
+  ]);
+  const typedSubpaths = Object.entries(manifest.exports)
+    .filter(
+      ([, target]) =>
+        typeof target === "object" && target !== null && "types" in target,
+    )
+    .map(([subpath]) => subpath)
+    .sort();
 
-  assert.deepEqual(
-    editingExports.filter((name) => !documentedExports.has(name)).sort(),
-    [],
-  );
-});
+  assert.deepEqual([...facadeBySubpath.keys()].sort(), typedSubpaths);
 
-test("Video engine API facade covers every video-engine subpath export", async () => {
-  const videoEngineExports = await readNamedExports(
-    path.join(rootDir, "packages/web/src/web-video-engine/index.ts"),
-  );
-  const documentedExports = new Set(
-    await readNamedExports(path.join(publicApiDir, "video-engine.ts")),
-  );
+  for (const subpath of typedSubpaths) {
+    const sourceExports = await readNamedExports(
+      path.join(rootDir, sourceBySubpath.get(subpath)),
+    );
+    const documentedExports = new Set(
+      (
+        await Promise.all(
+          facadeBySubpath
+            .get(subpath)
+            .map((facade) => readNamedExports(path.join(publicApiDir, facade))),
+        )
+      ).flat(),
+    );
 
-  assert.deepEqual(
-    videoEngineExports.filter((name) => !documentedExports.has(name)).sort(),
-    [],
-  );
+    assert.deepEqual(
+      sourceExports.filter((name) => !documentedExports.has(name)).sort(),
+      [],
+      `${subpath} has exports missing from its TypeDoc facade`,
+    );
+  }
 });
 
 test("TypeDoc includes every public API facade", async () => {
@@ -146,7 +180,10 @@ test("documentation toolbar mirrors the browser package manifest version", async
 
   assert.equal(packageName, packageJson.name);
   assert.equal(packageVersion, packageJson.version);
-  assert.equal(packageReleaseStatus, "");
+  assert.equal(
+    packageReleaseStatus,
+    packageJson.version.includes("-next.") ? "next preview" : "",
+  );
 });
 
 const playbackGateSurfaces = [
@@ -257,7 +294,7 @@ test("every playback-gate surface states the default the code ships", async () =
   assert.deepEqual(failures, []);
 });
 
-test("public installation guidance uses the stable browser package", async () => {
+test("public installation guidance distinguishes stable and preview installs", async () => {
   const consumerDocs = [
     path.join(rootDir, "README.md"),
     path.join(publicDocsDir, "index.md"),
@@ -269,7 +306,10 @@ test("public installation guidance uses the stable browser package", async () =>
     const source = await readFile(file, "utf8");
 
     assert.match(source, /npm install supervision(?:\n|`|<)/);
-    assert.doesNotMatch(source, /npm install supervision@/);
+
+    if (source.includes("supervision/web-video-engine")) {
+      assert.match(source, /npm install supervision@next(?:\n|`|<)/);
+    }
   }
 });
 
@@ -324,6 +364,7 @@ test("TypeDoc presents public guidance as five navigable sections", async () => 
     "Rendering",
     "Styles",
     "Web Video Engine",
+    "Web Video Engine Analysis",
   ]);
 });
 
@@ -640,6 +681,21 @@ test("copyable integration examples typecheck", async () => {
     ".docs-react-integration.tsx",
     ts.JsxEmit.ReactJSX,
   );
+});
+
+test("the 0.2 interaction-style migration example typechecks", async () => {
+  const migration = await readFile(
+    path.join(publicDocsDir, "guides/migrating-to-0.2.md"),
+    "utf8",
+  );
+
+  for (const removed of ["shape", "cornerRadius", "stroke", "fill"]) {
+    assert.match(migration, new RegExp(`\\b${removed}\\b`));
+  }
+
+  const [, after] = findCodeBlocks(migration, "ts");
+  assert.ok(after, "Missing the migrated BaseInteractionStyle example.");
+  assertTypechecks(after, ".docs-0.2-interaction-migration.ts");
 });
 
 test("every path a document names exists", async () => {

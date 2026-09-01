@@ -726,6 +726,7 @@ describe("media renderer core", () => {
       {
         createScene: vi.fn(async (options) => {
           sceneOptions = options;
+          acceptPresentedFrames(options);
           return createScene();
         }),
         openMediaSource: vi.fn(),
@@ -995,6 +996,204 @@ describe("media renderer core", () => {
     renderer.destroy();
   });
 
+  it("coalesces a synchronous pull scrub burst to its latest preview", async () => {
+    resetMocks();
+
+    const getSample = vi.fn(async (timestamp: number) =>
+      createMockSampleAsDecoded(timestamp),
+    );
+    const renderer = await createMediaRendererCore(
+      createPullRendererOptions(getSample),
+      {
+        createScene: vi.fn(async () => createScene()),
+        openMediaSource: vi.fn(),
+      },
+    );
+
+    for (let index = 0; index < 240; index += 1) {
+      renderer.scrub(index / 10);
+    }
+
+    expect(getSample).not.toHaveBeenCalled();
+    await vi.waitFor(() => {
+      expect(getSample).toHaveBeenCalledTimes(1);
+    });
+    expect(getSample).toHaveBeenLastCalledWith(23.9, {
+      skipLiveWait: true,
+    });
+
+    renderer.destroy();
+  });
+
+  it("lets an explicit seek cancel a scheduled pull scrub burst", async () => {
+    resetMocks();
+
+    const getSample = vi.fn(async (timestamp: number) =>
+      createMockSampleAsDecoded(timestamp),
+    );
+    const scene = createScene();
+    const renderer = await createMediaRendererCore(
+      createPullRendererOptions(getSample),
+      {
+        createScene: vi.fn(async () => scene),
+        openMediaSource: vi.fn(),
+      },
+    );
+
+    for (let index = 0; index < 240; index += 1) {
+      renderer.scrub(index / 10);
+    }
+    await renderer.seek(7.25);
+    await Promise.resolve();
+
+    expect(getSample).toHaveBeenCalledTimes(1);
+    expect(getSample).toHaveBeenCalledWith(7.25, { skipLiveWait: true });
+    expect(scene.presentSample).toHaveBeenLastCalledWith(
+      expect.objectContaining({ timestamp: 7.25 }),
+    );
+
+    renderer.destroy();
+  });
+
+  it("keeps at most one pull scrub read in flight and one latest pending target", async () => {
+    resetMocks();
+
+    const firstRead = createDeferred<DecodedVideoSample | null>();
+    const getSample = vi
+      .fn<(timestamp: number) => Promise<DecodedVideoSample | null>>()
+      .mockImplementationOnce(() => firstRead.promise)
+      .mockImplementation(async (timestamp) =>
+        createMockSampleAsDecoded(timestamp),
+      );
+    const renderer = await createMediaRendererCore(
+      createPullRendererOptions(getSample),
+      {
+        createScene: vi.fn(async () => createScene()),
+        openMediaSource: vi.fn(),
+      },
+    );
+
+    renderer.scrub(1);
+    await vi.waitFor(() => {
+      expect(getSample).toHaveBeenCalledTimes(1);
+    });
+
+    for (let index = 1; index < 240; index += 1) {
+      renderer.scrub(2 + index / 10);
+    }
+    expect(getSample).toHaveBeenCalledTimes(1);
+
+    const staleSample = createMockSample(
+      1,
+      0.1,
+    ) as unknown as DecodedVideoSample;
+    firstRead.resolve(staleSample);
+
+    await vi.waitFor(() => {
+      expect(getSample).toHaveBeenCalledTimes(2);
+    });
+    expect(staleSample.close).toHaveBeenCalledTimes(1);
+    expect(getSample).toHaveBeenLastCalledWith(25.9, {
+      skipLiveWait: true,
+    });
+
+    renderer.destroy();
+  });
+
+  it("cancels a scheduled pull scrub when pause settles the gesture", async () => {
+    resetMocks();
+
+    const getSample = vi.fn(async (timestamp: number) =>
+      createMockSampleAsDecoded(timestamp),
+    );
+    const renderer = await createMediaRendererCore(
+      createPullRendererOptions(getSample),
+      {
+        createScene: vi.fn(async () => createScene()),
+        openMediaSource: vi.fn(),
+      },
+    );
+
+    renderer.scrub(4);
+    renderer.pause();
+    await Promise.resolve();
+
+    expect(getSample).not.toHaveBeenCalled();
+
+    renderer.destroy();
+  });
+
+  it("runs a new pull scrub queued before a cancelled preview microtask exits", async () => {
+    resetMocks();
+
+    const getSample = vi.fn(async (timestamp: number) =>
+      createMockSampleAsDecoded(timestamp),
+    );
+    const renderer = await createMediaRendererCore(
+      createPullRendererOptions(getSample),
+      {
+        createScene: vi.fn(async () => createScene()),
+        openMediaSource: vi.fn(),
+      },
+    );
+
+    renderer.scrub(1);
+    renderer.pause();
+    renderer.scrub(2);
+
+    await vi.waitFor(() => {
+      expect(getSample).toHaveBeenCalledTimes(1);
+    });
+    expect(getSample).toHaveBeenCalledWith(2, { skipLiveWait: true });
+
+    renderer.destroy();
+  });
+
+  it("runs a new pull scrub after a cancelled in-flight preview settles", async () => {
+    resetMocks();
+
+    const firstRead = createDeferred<DecodedVideoSample | null>();
+    const getSample = vi
+      .fn<(timestamp: number) => Promise<DecodedVideoSample | null>>()
+      .mockImplementationOnce(() => firstRead.promise)
+      .mockImplementation(async (timestamp) =>
+        createMockSampleAsDecoded(timestamp),
+      );
+    const scene = createScene();
+    const renderer = await createMediaRendererCore(
+      createPullRendererOptions(getSample),
+      {
+        createScene: vi.fn(async () => scene),
+        openMediaSource: vi.fn(),
+      },
+    );
+
+    renderer.scrub(1);
+    await vi.waitFor(() => {
+      expect(getSample).toHaveBeenCalledTimes(1);
+    });
+
+    renderer.pause();
+    renderer.scrub(2);
+    expect(getSample).toHaveBeenCalledTimes(1);
+
+    const staleSample = createMockSampleAsDecoded(1);
+    firstRead.resolve(staleSample);
+
+    await vi.waitFor(() => {
+      expect(getSample).toHaveBeenCalledTimes(2);
+    });
+    expect(staleSample.close).toHaveBeenCalledTimes(1);
+    expect(getSample).toHaveBeenLastCalledWith(2, { skipLiveWait: true });
+    await vi.waitFor(() => {
+      expect(scene.presentSample).toHaveBeenLastCalledWith(
+        expect.objectContaining({ timestamp: 2 }),
+      );
+    });
+
+    renderer.destroy();
+  });
+
   it("keeps the latest seek when an older prepare resolves afterward", async () => {
     resetMocks();
 
@@ -1158,6 +1357,7 @@ describe("media renderer core", () => {
       {
         createScene: vi.fn(async (options) => {
           sceneOptions = options;
+          acceptPresentedFrames(options);
           return createScene();
         }),
         openMediaSource: vi.fn(),
@@ -1410,6 +1610,7 @@ describe("media renderer core", () => {
       {
         createScene: vi.fn(async (options) => {
           sceneOptions = options;
+          acceptPresentedFrames(options);
           return createScene();
         }),
         openMediaSource: vi.fn(),
@@ -1447,6 +1648,7 @@ describe("media renderer core", () => {
       {
         createScene: vi.fn(async (options) => {
           sceneOptions = options;
+          acceptPresentedFrames(options);
           return createScene();
         }),
         openMediaSource: vi.fn(),
@@ -1486,6 +1688,7 @@ describe("media renderer core", () => {
       {
         createScene: vi.fn(async (options) => {
           sceneOptions = options;
+          acceptPresentedFrames(options);
           return scene;
         }),
         openMediaSource: vi.fn(),
@@ -1538,11 +1741,12 @@ describe("media renderer core", () => {
         ]),
       } satisfies MediaRendererOptions,
       {
-        createScene: vi.fn(async () =>
-          createScene({
+        createScene: vi.fn(async (options) => {
+          acceptPresentedFrames(options);
+          return createScene({
             waitForRenderPreparation: vi.fn(async () => undefined),
-          }),
-        ),
+          });
+        }),
         openMediaSource: vi.fn(),
       },
     );
@@ -1566,11 +1770,12 @@ describe("media renderer core", () => {
         source: producer.source,
       } satisfies MediaRendererOptions,
       {
-        createScene: vi.fn(async () =>
-          createScene({
+        createScene: vi.fn(async (options) => {
+          acceptPresentedFrames(options);
+          return createScene({
             waitForRenderPreparation: vi.fn(async () => undefined),
-          }),
-        ),
+          });
+        }),
         openMediaSource: vi.fn(),
       },
     );
@@ -1594,7 +1799,10 @@ describe("media renderer core", () => {
         source: producer.source,
       } satisfies MediaRendererOptions,
       {
-        createScene: vi.fn(async () => createScene()),
+        createScene: vi.fn(async (options) => {
+          acceptPresentedFrames(options);
+          return createScene();
+        }),
         openMediaSource: vi.fn(),
       },
     );
@@ -1879,6 +2087,49 @@ function createSource(
   };
 }
 
+function createPullRendererOptions(
+  getSample: (timestamp: number) => Promise<DecodedVideoSample | null>,
+): MediaRendererOptions {
+  const initialSample = createMockSample(
+    0,
+    0.1,
+  ) as unknown as DecodedVideoSample;
+
+  return {
+    autoPlay: false,
+    container: {} as HTMLElement,
+    loop: false,
+    source: {
+      open: vi.fn(async () => ({
+        input: { dispose: vi.fn() },
+        metadata: {
+          audioTrackCount: 0,
+          canRead: true,
+          duration: 30,
+          firstTimestamp: 0,
+          formatMimeType: "video/mp4",
+          formatName: "MP4",
+          mimeType: "video/mp4",
+          primaryVideoHeight: 720,
+          primaryVideoWidth: 1280,
+          trackCount: 1,
+          videoTrackCount: 1,
+        },
+        sampleSink: {
+          getSample,
+          async *samples() {
+            yield initialSample;
+          },
+        },
+      })),
+    },
+  } satisfies MediaRendererOptions;
+}
+
+function createMockSampleAsDecoded(timestamp: number): DecodedVideoSample {
+  return createMockSample(timestamp, 0.1) as unknown as DecodedVideoSample;
+}
+
 function createPresentedSample(mediaTime: number, presentedFrameSerial = 1) {
   return {
     activeDetectionCount: 0,
@@ -1890,6 +2141,12 @@ function createPresentedSample(mediaTime: number, presentedFrameSerial = 1) {
     mediaTime,
     presentedFrameSerial,
   };
+}
+
+function acceptPresentedFrames(options: MediaRendererSceneOptions) {
+  options.presentedFrames?.onPresentedFrame((presented) => {
+    presented.frame.close();
+  });
 }
 
 /**
@@ -1904,10 +2161,24 @@ function createPushProducer() {
     ["time", new Set()],
   ]);
   let timeMs = 0;
+  let paintSeq = 0;
+  let frameHandler: Parameters<PresentedFrameChannel["onPresentedFrame"]>[0] = (
+    presented,
+  ) => presented.frame.close();
+  const present = (nextTimeMs: number) => {
+    timeMs = nextTimeMs;
+    frameHandler({
+      frame: { close: vi.fn() } as unknown as VideoFrame,
+      frameId: { index: Math.trunc(timeMs / 1000), ticks: timeMs },
+      mediaTimeS: timeMs / 1000,
+      paintSeq: ++paintSeq,
+    });
+    for (const listener of listeners.get("time") ?? []) listener();
+  };
 
   const engine: PresentedFrameChannel = {
     beginInteractiveSeek: vi.fn(),
-    commit: vi.fn(async () => undefined),
+    commit: vi.fn(async (nextTimeMs: number) => present(nextTimeMs)),
     endInteractiveSeek: vi.fn(async () => undefined),
     getDurationMs: () => 4000,
     getPlaybackRate: () => 1,
@@ -1917,7 +2188,9 @@ function createPushProducer() {
       frame: { index: Math.trunc(timeMs / 1000), ticks: timeMs },
       mediaTimeS: timeMs / 1000,
     }),
-    onPresentedFrame: vi.fn(),
+    onPresentedFrame: vi.fn((handler) => {
+      frameHandler = handler;
+    }),
     pause: vi.fn(),
     play: vi.fn(async () => undefined),
     scrub: vi.fn(),
@@ -1954,10 +2227,7 @@ function createPushProducer() {
 
   return {
     setTimeMs(next: number) {
-      timeMs = next;
-      for (const listener of listeners.get("time") ?? []) {
-        listener();
-      }
+      present(next);
     },
     source: { open: async () => source },
   };

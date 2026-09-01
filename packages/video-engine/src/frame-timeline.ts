@@ -26,6 +26,10 @@ export interface FrameTimelineData {
   readonly tickRate: TickRate;
   readonly ticks: Float64Array;
   readonly lastDurationTicks: number;
+  /** Original source timestamps when presentation pre-roll was removed. The
+   *  public `ticks` stay zero-based while decode requests retain the addresses
+   *  needed to reach a frame straddling presentation time zero. */
+  readonly sourceTicks?: Float64Array;
 }
 
 /**
@@ -44,14 +48,56 @@ function oneEntryPerInstant(data: FrameTimelineData): FrameTimelineData {
   while (at < ticks.length && ticks[at] !== ticks[at - 1]) at += 1;
   if (at === ticks.length) return data;
   const distinct = new Float64Array(ticks.length);
+  const distinctSource = data.sourceTicks
+    ? new Float64Array(ticks.length)
+    : undefined;
   distinct.set(ticks.subarray(0, at));
+  if (distinctSource) distinctSource.set(data.sourceTicks!.subarray(0, at));
   let size = at;
   for (let i = at + 1; i < ticks.length; i += 1) {
     if (ticks[i] === distinct[size - 1]) continue;
     distinct[size] = ticks[i];
+    if (distinctSource) distinctSource[size] = data.sourceTicks![i];
     size += 1;
   }
-  return { ...data, ticks: distinct.slice(0, size) };
+  return {
+    ...data,
+    ticks: distinct.slice(0, size),
+    ...(distinctSource ? { sourceTicks: distinctSource.slice(0, size) } : {}),
+  };
+}
+
+function normalizePresentationOrigin(
+  data: FrameTimelineData,
+): FrameTimelineData {
+  if (data.sourceTicks !== undefined || !(data.ticks[0] < 0)) return data;
+  let firstVisible = 0;
+  while (firstVisible < data.ticks.length) {
+    const end =
+      firstVisible + 1 < data.ticks.length
+        ? data.ticks[firstVisible + 1]
+        : data.ticks[firstVisible] + data.lastDurationTicks;
+    if (end > 0) break;
+    firstVisible += 1;
+  }
+  if (firstVisible === data.ticks.length) {
+    throw new RangeError(
+      "FrameTimeline: a track containing only pre-roll has no presentation timeline",
+    );
+  }
+  const sourceTicks = data.ticks.slice(firstVisible);
+  const ticks = sourceTicks.slice();
+  if (ticks[0] < 0) ticks[0] = 0;
+  const lastDurationTicks =
+    ticks.length === 1 && sourceTicks[0] < 0
+      ? data.lastDurationTicks + sourceTicks[0]
+      : data.lastDurationTicks;
+  return {
+    ...data,
+    lastDurationTicks,
+    sourceTicks,
+    ticks,
+  };
 }
 
 /**
@@ -82,7 +128,9 @@ export class FrameTimeline {
         `FrameTimeline: tick rate ${data.tickRate} is not positive`,
       );
     }
-    return new FrameTimeline(oneEntryPerInstant(data));
+    return new FrameTimeline(
+      oneEntryPerInstant(normalizePresentationOrigin(data)),
+    );
   }
 
   /** A synthetic constant-rate table. Tests and fakes only. The default tick
@@ -118,6 +166,27 @@ export class FrameTimeline {
 
   timeAt(index: number): Sec {
     return asSec(this.ticksAt(index) / this.data.tickRate);
+  }
+
+  /** Timestamp passed to the decoder for the named presentation frame. */
+  sourceTimeAt(index: number): Sec {
+    const at = this.clampIndex(index);
+    return asSec(
+      (this.data.sourceTicks?.[at] ?? this.ticksArray[at]) / this.data.tickRate,
+    );
+  }
+
+  /** Maps a public presentation time onto the container's source clock. */
+  toSourceTime(timeS: number): Sec {
+    if (this.data.sourceTicks && timeS <= this.timeAt(0)) {
+      return this.sourceTimeAt(0);
+    }
+    return asSec(timeS);
+  }
+
+  /** Maps a decoded/container timestamp onto the public presentation clock. */
+  fromSourceTime(timeS: number): Sec {
+    return asSec(this.data.sourceTicks ? Math.max(0, timeS) : timeS);
   }
 
   idAt(index: number): FrameId {

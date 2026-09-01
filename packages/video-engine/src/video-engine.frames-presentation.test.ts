@@ -234,6 +234,47 @@ describe("EngineCore in frames presentation", () => {
     await engine.dispose();
   });
 
+  it("closes the frame and rejects the command when host delivery throws", async () => {
+    const cursor = makeFakeCursor();
+    vi.spyOn(factoryModule, "createScrubCursor").mockResolvedValue(cursor);
+    const events: MirrorEvent[] = [];
+    const posts: EngineEvent[] = [];
+    const engine = new EngineCore({
+      emit: (event) => events.push(event),
+      emitPresentedFrame: () => {
+        throw new DOMException("frame could not be cloned", "DataCloneError");
+      },
+      clock: new FakeClock(),
+    });
+    await engine.load(FRAMES_CONFIG);
+    const handled = handleEngineCommand(
+      engine,
+      { type: "commit", requestId: 17, frameIndex: 30 },
+      (event) => posts.push(event),
+    );
+
+    cursor.emit(asSec(1));
+    await flushRaf();
+    await handled;
+
+    expect(posts).toEqual([
+      {
+        type: "error",
+        requestId: 17,
+        error: {
+          code: WebVideoEngineErrorCode.BackendCrashed,
+          message: "video frame presentation failed",
+        },
+      },
+    ]);
+    expect(wrapped.at(-1)?.closeCount).toBe(1);
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: "status", status: "ERRORED" }),
+    );
+    expect(events.at(-1)).toEqual({ type: "seeking", seeking: false });
+    await engine.dispose();
+  });
+
   it("binding a canvas is refused", async () => {
     const { engine } = setupCore({ clock: new FakeClock() });
     await engine.load(FRAMES_CONFIG);

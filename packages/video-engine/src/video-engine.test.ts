@@ -230,6 +230,32 @@ describe("WebVideoEngine", () => {
     expect(engine.getStatus()).toBe(PlaybackStatus.Idle);
   });
 
+  it("dispose rejects an in-flight presented-frame commit through the worker protocol", async () => {
+    vi.spyOn(factoryModule, "createScrubCursor").mockResolvedValue(
+      makeFakeCursor(),
+    );
+    const ports: FakeWorkerPort[] = [];
+    const engine = new WebVideoEngine(
+      { presentation: "frames", source: LOAD_CONFIG.source },
+      () => {
+        const port = new FakeWorkerPort(new FakeClock());
+        ports.push(port);
+        return port;
+      },
+    );
+    await engine.load();
+    const pending = engine.commit(2000);
+    const assertion = expect(pending).rejects.toMatchObject({
+      code: WebVideoEngineErrorCode.Aborted,
+    });
+
+    await engine.dispose();
+    await assertion;
+
+    expect(ports[0]?.terminated).toBe(true);
+    expect(engine.getStatus()).toBe(PlaybackStatus.Idle);
+  });
+
   it("play awaits an ack and starts the clock; pause settles synchronously", async () => {
     const { engine, clock } = setup();
     await engine.load();

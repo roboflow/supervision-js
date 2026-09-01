@@ -1,7 +1,7 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { MediaClock } from "./clock";
-import { DIAGNOSTICS } from "./constants";
+import { DIAGNOSTICS, HANG_RECOVERY } from "./constants";
 import * as factoryModule from "./create-scrub-cursor";
 import { EngineCore } from "./engine-core";
 import { FrameTimeline } from "./frame-timeline";
@@ -246,15 +246,28 @@ describe("EngineCore", () => {
     await engine.dispose();
   });
 
-  it("commit awaits its seek, toggles seeking, seeks the cursor, never emits a playhead", async () => {
+  it("commit resolves only after its crisp landing paints", async () => {
     const clock = new FakeClock();
     const { engine, events, cursor } = setup(clock);
     await engine.load(LOAD_CONFIG);
-    await engine.commit(FRAME(2));
+    bindFakeCanvas(engine);
+    let settled = false;
+    const committed = engine.commit(FRAME(2)).then((landing) => {
+      settled = true;
+      return landing;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    cursor.emit(asSec(2));
+    await flushRaf();
+    expect(await committed).toEqual({
+      frame: { index: FRAME(2), ticks: 60_000 },
+      mediaTimeS: 2,
+    });
     expect(cursor.seekToCalls.at(-1)).toBeCloseTo(2);
     expect(clock.now()).toBeCloseTo(2);
     expect(seekingOf(events)).toEqual([true, false]);
-    expect(hasPlayhead(events)).toBe(false);
+    expect(playheadsOf(events).at(-1)).toBe(2);
     await engine.dispose();
   });
 
@@ -262,9 +275,13 @@ describe("EngineCore", () => {
     const clock = new FakeClock();
     const { engine, cursor } = setup(clock);
     await engine.load(LOAD_CONFIG);
+    bindFakeCanvas(engine);
     engine.play();
     const seeksBefore = cursor.seekToCalls.length;
-    await engine.commit(FRAME(2));
+    const committed = engine.commit(FRAME(2));
+    cursor.emit(asSec(2));
+    await flushRaf();
+    await committed;
 
     // Seeking the cursor here would leave the playback walk at its old
     // position, so playback would carry on from there and the commit would
@@ -279,9 +296,13 @@ describe("EngineCore", () => {
     const clock = new FakeClock();
     const { engine, cursor } = setup(clock);
     await engine.load(LOAD_CONFIG);
+    bindFakeCanvas(engine);
     engine.play();
     const keySeeksBefore = cursor.seekToKeyCalls.length;
-    await engine.seekToKey(3000);
+    const sought = engine.seekToKey(3000);
+    cursor.emit(asSec(3));
+    await flushRaf();
+    await sought;
 
     expect(cursor.seekToKeyCalls.length).toBe(keySeeksBefore);
     expect(cursor.attachPlayCalls).toBe(2);
@@ -298,15 +319,16 @@ describe("EngineCore", () => {
     engine.play();
     const seeksBefore = cursor.seekToCalls.length;
 
-    await engine.commit(FRAME(2));
+    const committed = engine.commit(FRAME(2));
     // The walk decodes for this long before its crisp frame reaches the
     // canvas.
-    vi.advanceTimersByTime(50);
+    await vi.advanceTimersByTimeAsync(50);
     cursor.emit(asSec(2));
-    vi.advanceTimersByTime(20);
+    await vi.advanceTimersByTimeAsync(20);
+    await committed;
 
     engine.diagnosticsStart(10);
-    vi.advanceTimersByTime(100);
+    await vi.advanceTimersByTimeAsync(100);
 
     const { playSeek } = diags[0].snapshot;
     expect(playSeek.seeks).toBe(1);
@@ -336,10 +358,12 @@ describe("EngineCore", () => {
 
     vi.useFakeTimers();
     engine.play();
-    await engine.commit(FRAME(2));
+    const committed = engine.commit(FRAME(2));
+    await vi.advanceTimersByTimeAsync(20);
+    await committed;
 
     engine.diagnosticsStart(10);
-    vi.advanceTimersByTime(100);
+    await vi.advanceTimersByTimeAsync(100);
 
     const { playSeek } = diags[0].snapshot;
     expect(playSeek.seeks).toBe(1);
@@ -361,13 +385,15 @@ describe("EngineCore", () => {
     bindFakeCanvas(engine);
     engine.play();
 
-    await engine.commit(FRAME(2));
-    await engine.commit(FRAME(4));
+    const superseded = engine.commit(FRAME(2));
+    const current = engine.commit(FRAME(4));
+    await superseded;
     cursor.emit(asSec(4));
-    vi.advanceTimersByTime(20);
+    await vi.advanceTimersByTimeAsync(20);
+    await current;
 
     engine.diagnosticsStart(10);
-    vi.advanceTimersByTime(100);
+    await vi.advanceTimersByTimeAsync(100);
 
     const { playSeek } = diags[0].snapshot;
     expect(playSeek.seeks).toBe(2);
@@ -378,6 +404,86 @@ describe("EngineCore", () => {
     await engine.dispose();
   });
 
+  it("a stale paint cannot settle the latest overlapping commit", async () => {
+    const { engine, cursor } = setup(new FakeClock());
+    await engine.load(LOAD_CONFIG);
+    bindFakeCanvas(engine);
+
+    const superseded = engine.commit(FRAME(2));
+    const current = engine.commit(FRAME(4));
+    await expect(superseded).resolves.toBeNull();
+    let currentSettled = false;
+    void current.then(() => {
+      currentSettled = true;
+    });
+
+    cursor.emit(asSec(2));
+    await flushRaf();
+    expect(currentSettled).toBe(false);
+
+    cursor.emit(asSec(4));
+    await flushRaf();
+    await expect(current).resolves.toMatchObject({ mediaTimeS: 4 });
+    await engine.dispose();
+  });
+
+  it("settles an awaited commit when its canvas is unbound", async () => {
+    const { engine } = setup(new FakeClock());
+    await engine.load(LOAD_CONFIG);
+    bindFakeCanvas(engine);
+
+    const committed = engine.commit(FRAME(2));
+    engine.setCanvas(null);
+
+    await expect(committed).resolves.toBeNull();
+    await engine.dispose();
+  });
+
+  it.each([
+    ["commit", (engine: EngineCore) => engine.commit(FRAME(2))],
+    ["key seek", (engine: EngineCore) => engine.seekToKey(2000)],
+  ])(
+    "settles a playing %s when pause stops its walk before presentation",
+    async (_name, seek) => {
+      const { engine } = setup(new FakeClock());
+      await engine.load(LOAD_CONFIG);
+      bindFakeCanvas(engine);
+      engine.play();
+
+      const pending = seek(engine);
+      engine.pause();
+
+      await expect(pending).resolves.toBeNull();
+      await engine.dispose();
+    },
+  );
+
+  it("settles a playing commit when EOF wins before its frame paints", async () => {
+    const { engine } = setup(new FakeClock());
+    await engine.load(LOAD_CONFIG);
+    bindFakeCanvas(engine);
+    engine.play();
+
+    const pending = engine.commit(FRAME(10));
+    await flushRaf();
+
+    await expect(pending).resolves.toBeNull();
+    await engine.dispose();
+  });
+
+  it.each([
+    ["commit", (engine: EngineCore) => engine.commit(FRAME(2))],
+    ["key seek", (engine: EngineCore) => engine.seekToKey(2000)],
+  ])("settles a %s issued before any canvas is bound", async (_name, seek) => {
+    const { engine, events } = setup(new FakeClock());
+    await engine.load(LOAD_CONFIG);
+
+    await expect(seek(engine)).resolves.toBeNull();
+
+    expect(seekingOf(events).slice(-2)).toEqual([true, false]);
+    await engine.dispose();
+  });
+
   it("a cursor seek after one while playing is left to the scheduler to time", async () => {
     const clock = new FakeClock();
     const { engine, diags, cursor } = setup(clock);
@@ -385,11 +491,15 @@ describe("EngineCore", () => {
     bindFakeCanvas(engine);
     engine.play();
 
-    await engine.commit(FRAME(2));
+    const playingCommit = engine.commit(FRAME(2));
+    cursor.emit(asSec(2));
+    await flushRaf();
+    await playingCommit;
     engine.pause();
-    await engine.commit(FRAME(4));
+    const committed = engine.commit(FRAME(4));
     cursor.emit(asSec(4));
     await flushRaf();
+    await committed;
 
     vi.useFakeTimers();
     engine.diagnosticsStart(10);
@@ -399,7 +509,7 @@ describe("EngineCore", () => {
     expect(playSeek.seeks).toBe(1);
     // The landing that paints here is the paused seek's, and the scheduler
     // times that one.
-    expect(playSeek.samples).toBe(0);
+    expect(playSeek.samples).toBe(1);
 
     engine.diagnosticsStop();
     vi.useRealTimers();
@@ -414,15 +524,16 @@ describe("EngineCore", () => {
     bindFakeCanvas(engine);
     engine.play();
 
-    await engine.commit(FRAME(2));
+    const committed = engine.commit(FRAME(2));
     engine.pause();
     // The engine sits idle for this long between the seek and its frame.
-    vi.advanceTimersByTime(5000);
+    await vi.advanceTimersByTimeAsync(5000);
     cursor.emit(asSec(2));
-    vi.advanceTimersByTime(20);
+    await vi.advanceTimersByTimeAsync(20);
+    await committed;
 
     engine.diagnosticsStart(10);
-    vi.advanceTimersByTime(100);
+    await vi.advanceTimersByTimeAsync(100);
 
     const { playSeek, screen } = diags[0].snapshot;
     // The crisp frame really did reach the canvas, which is what makes the
@@ -441,7 +552,11 @@ describe("EngineCore", () => {
   it("seekToKey lands on the key sample and toggles seeking", async () => {
     const { engine, events, cursor } = setup();
     await engine.load(LOAD_CONFIG);
-    await engine.seekToKey(3000);
+    bindFakeCanvas(engine);
+    const sought = engine.seekToKey(3000);
+    cursor.emitFrame({ ...makeScrubFrame(2), isKeyFrame: true });
+    await flushRaf();
+    expect((await sought)?.mediaTimeS).toBe(2);
     expect(cursor.seekToKeyCalls.at(-1)).toBeCloseTo(3);
     expect(seekingOf(events)).toEqual([true, false]);
     await engine.dispose();
@@ -540,10 +655,14 @@ describe("EngineCore", () => {
     cursor.emit(asSec(4.967), "preview");
     await flushRaf();
     expect(playheadsOf(events).length).toBe(before);
+    // A crisp adjacent frame from an older walk cannot acknowledge this
+    // target merely because its timestamp is close.
     cursor.emit(asSec(4.967));
     await flushRaf();
-    // 4.967s is not a frame of a 30fps source; the frame covering it is.
-    expect(playheadsOf(events).at(-1)).toBe(149 / 30);
+    expect(playheadsOf(events).length).toBe(before);
+    cursor.emit(asSec(5));
+    await flushRaf();
+    expect(playheadsOf(events).at(-1)).toBe(5);
   });
 
   it("a step after a seek walks from the frame the seek landed on", async () => {
@@ -552,14 +671,15 @@ describe("EngineCore", () => {
     await engine.load(LOAD_CONFIG);
     bindFakeCanvas(engine);
 
-    // A marker or a pointer names a time between two samples, and the walk
-    // lands on the sample at or before it. Stepping back from the requested
-    // frame would re-decode the sample already on screen.
+    // The seek does not accept the adjacent frame still arriving from the old
+    // walk; the next step starts from the exact frame that acknowledged it.
     engine.scrub(FRAME(5));
     cursor.emit(asSec(4.967));
     await flushRaf();
+    cursor.emit(asSec(5));
+    await flushRaf();
 
-    expect((await engine.step(-1))?.frame.index).toBe(148);
+    expect((await engine.step(-1))?.frame.index).toBe(149);
     await engine.dispose();
   });
 
@@ -761,6 +881,191 @@ describe("EngineCore", () => {
     await engine.dispose();
   });
 
+  it.each([
+    ["commit", (engine: EngineCore) => engine.commit(FRAME(2))],
+    ["key seek", (engine: EngineCore) => engine.seekToKey(2000)],
+  ])(
+    "a %s rejects promptly when decode failed before the command",
+    async (_name, seek) => {
+      const cursor = makeFakeCursor();
+      const decode: { reportFailure?: (error: WebVideoEngineError) => void } =
+        {};
+      vi.spyOn(factoryModule, "createScrubCursor").mockImplementation(
+        async (options) => {
+          decode.reportFailure = options.onDecodeFailure;
+          return cursor;
+        },
+      );
+      const engine = new EngineCore({ emit: () => undefined });
+      await engine.load(LOAD_CONFIG);
+      decode.reportFailure?.(
+        new WebVideoEngineError(
+          WebVideoEngineErrorCode.DecoderStalled,
+          "decoder is terminal",
+        ),
+      );
+
+      await expect(seek(engine)).rejects.toMatchObject({
+        code: WebVideoEngineErrorCode.DecoderStalled,
+      });
+      await engine.dispose();
+    },
+  );
+
+  it.each([
+    ["commit", (engine: EngineCore) => engine.commit(FRAME(2))],
+    ["key seek", (engine: EngineCore) => engine.seekToKey(2000)],
+  ])(
+    "a %s rejects when decode fails while its presentation is pending",
+    async (_name, seek) => {
+      const cursor = makeFakeCursor();
+      const decode: { reportFailure?: (error: WebVideoEngineError) => void } =
+        {};
+      vi.spyOn(factoryModule, "createScrubCursor").mockImplementation(
+        async (options) => {
+          decode.reportFailure = options.onDecodeFailure;
+          return cursor;
+        },
+      );
+      const engine = new EngineCore({ emit: () => undefined });
+      await engine.load(LOAD_CONFIG);
+      bindFakeCanvas(engine);
+      cursor.seekSettled = () => new Promise<void>(() => undefined);
+      const pending = seek(engine);
+      const assertion = expect(pending).rejects.toMatchObject({
+        code: WebVideoEngineErrorCode.DecoderStalled,
+      });
+
+      decode.reportFailure?.(
+        new WebVideoEngineError(
+          WebVideoEngineErrorCode.DecoderStalled,
+          "decoder failed during movement",
+        ),
+      );
+
+      await assertion;
+      await engine.dispose();
+    },
+  );
+
+  it.each([
+    ["commit", (engine: EngineCore) => engine.commit(FRAME(2))],
+    ["key seek", (engine: EngineCore) => engine.seekToKey(2000)],
+  ])(
+    "a %s rejects explicitly when its seek settles without a matching paint",
+    async (_name, seek) => {
+      vi.useFakeTimers();
+      try {
+        const { engine, events } = setup(new FakeClock());
+        await engine.load(LOAD_CONFIG);
+        bindFakeCanvas(engine);
+        const pending = seek(engine);
+        let settled = false;
+        void pending.then(
+          () => {
+            settled = true;
+          },
+          () => {
+            settled = true;
+          },
+        );
+        const assertion = expect(pending).rejects.toMatchObject({
+          code: WebVideoEngineErrorCode.DecoderStalled,
+          message: expect.stringContaining("without presenting"),
+        });
+
+        await vi.advanceTimersByTimeAsync(
+          HANG_RECOVERY.PRESENTATION_LATCH_TIMEOUT_MS - 1,
+        );
+        expect(settled).toBe(false);
+        expect(hasPlayhead(events)).toBe(false);
+
+        await vi.advanceTimersByTimeAsync(1);
+        await assertion;
+        expect(seekingOf(events).slice(-2)).toEqual([true, false]);
+        expect(hasPlayhead(events)).toBe(false);
+        await engine.dispose();
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it("a matching paint clears the presentation deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const { engine, cursor, events } = setup(new FakeClock());
+      await engine.load(LOAD_CONFIG);
+      bindFakeCanvas(engine);
+      const committed = engine.commit(FRAME(2));
+
+      await vi.advanceTimersByTimeAsync(
+        HANG_RECOVERY.PRESENTATION_LATCH_TIMEOUT_MS - 100,
+      );
+      cursor.emit(asSec(2));
+      await vi.advanceTimersByTimeAsync(20);
+      await expect(committed).resolves.toMatchObject({ mediaTimeS: 2 });
+      const eventCount = events.length;
+
+      await vi.advanceTimersByTimeAsync(200);
+      expect(events).toHaveLength(eventCount);
+      await engine.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("an old presentation deadline cannot reject the seek that replaced it", async () => {
+    vi.useFakeTimers();
+    try {
+      const { engine, cursor } = setup(new FakeClock());
+      await engine.load(LOAD_CONFIG);
+      bindFakeCanvas(engine);
+      const first = engine.commit(FRAME(2));
+
+      await vi.advanceTimersByTimeAsync(
+        HANG_RECOVERY.PRESENTATION_LATCH_TIMEOUT_MS / 2,
+      );
+      const second = engine.commit(FRAME(4));
+      await expect(first).resolves.toBeNull();
+
+      await vi.advanceTimersByTimeAsync(
+        HANG_RECOVERY.PRESENTATION_LATCH_TIMEOUT_MS / 2,
+      );
+      let secondSettled = false;
+      void second.then(
+        () => {
+          secondSettled = true;
+        },
+        () => {
+          secondSettled = true;
+        },
+      );
+      expect(secondSettled).toBe(false);
+
+      cursor.emit(asSec(4));
+      await vi.advanceTimersByTimeAsync(20);
+      await expect(second).resolves.toMatchObject({ mediaTimeS: 4 });
+      await engine.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("dispose rejects a commit whose presentation is still pending", async () => {
+    const { engine } = setup(new FakeClock());
+    await engine.load(LOAD_CONFIG);
+    bindFakeCanvas(engine);
+    const pending = engine.commit(FRAME(2));
+    const assertion = expect(pending).rejects.toMatchObject({
+      code: WebVideoEngineErrorCode.Aborted,
+    });
+
+    await engine.dispose();
+
+    await assertion;
+  });
+
   describe("diagnostics broadcast", () => {
     it("diagnosticsStart posts a diag snapshot at the requested cadence", async () => {
       vi.useFakeTimers();
@@ -944,13 +1249,20 @@ describe("EngineCore", () => {
 
     it("the trace ring records scrub, seek, step, and status events, not just paints", async () => {
       const clock = new FakeClock();
-      const { engine } = setup(clock);
+      const { engine, cursor } = setup(clock);
       await engine.load(LOAD_CONFIG);
       engine.traceArm(60000);
 
       engine.scrub(FRAME(2));
-      await engine.commit(FRAME(3));
-      await engine.seekToKey(4000);
+      bindFakeCanvas(engine);
+      const committed = engine.commit(FRAME(3));
+      cursor.emit(asSec(3));
+      await flushRaf();
+      await committed;
+      const keySought = engine.seekToKey(4000);
+      cursor.emitFrame({ ...makeScrubFrame(4), isKeyFrame: true });
+      await flushRaf();
+      await keySought;
       await engine.step(1);
       engine.play();
       engine.pause();

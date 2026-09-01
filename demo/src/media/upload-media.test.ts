@@ -249,6 +249,39 @@ describe("extractInferenceFrameBatches", () => {
     expect(batches.map((batch) => batch.length)).toEqual([2, 2]);
   });
 
+  it("closes a yielded sample when cancellation lands before drawing", async () => {
+    installEncodeGlobals();
+    const controller = new AbortController();
+    const close = vi.fn();
+    const sample = { ...createSample(0), close };
+    const sink: DecodedVideoSampleSink = {
+      async getSample() {
+        return null;
+      },
+      async *samples() {},
+      async *samplesAtTimestamps() {
+        controller.abort();
+        yield sample;
+      },
+    };
+
+    const collectCancelled = async () => {
+      for await (const _ of extractInferenceFrameBatches({
+        batchSize: 1,
+        media: media(1),
+        sampleSink: sink,
+        signal: controller.signal,
+      })) {
+        // The abort rejects before a batch can be yielded.
+      }
+    };
+
+    await expect(collectCancelled()).rejects.toThrowError(
+      "Upload media processing was aborted.",
+    );
+    expect(close).toHaveBeenCalledOnce();
+  });
+
   it.each([
     ["59.94fps, faster than the grid", 60000 / 1001],
     ["60fps", 60],

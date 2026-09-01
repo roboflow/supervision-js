@@ -236,6 +236,7 @@ export const DIAGNOSTICS = {
   TRACE_EVENT_CAP: 2000,
   TRACE_SNAPSHOT_CAP: 600,
   SCRUB_LATENCY_RING: 64,
+  KEYFRAME_TIMESTAMPS_CAP: 512,
 } as const;
 
 /**
@@ -287,10 +288,19 @@ export const TRACE_RING_BOUNDS = {
  * reply before the facade gives up on it.
  */
 const DECODE_HANG_TIMEOUT_MS = 30_000;
+const WORKER_COMMAND_TIMEOUT_MS = DECODE_HANG_TIMEOUT_MS + 15_000;
 
 export const HANG_RECOVERY = {
   DECODE_HANG_TIMEOUT_MS,
   SEED_HANG_TIMEOUT_MS: 8_000,
   SEED_DECODE_ATTEMPTS: 3,
-  WORKER_COMMAND_TIMEOUT_MS: DECODE_HANG_TIMEOUT_MS + 15_000,
+  /**
+   * A movement whose decode settled without a matching crisp paint is ended
+   * here, while the worker can still return its specific failure through the
+   * command channel. The remaining margin belongs to message delivery and
+   * main-thread scheduling; without it the facade replaces the useful verdict
+   * with its generic worker-command timeout.
+   */
+  PRESENTATION_LATCH_TIMEOUT_MS: WORKER_COMMAND_TIMEOUT_MS - 5_000,
+  WORKER_COMMAND_TIMEOUT_MS,
 } as const;

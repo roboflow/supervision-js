@@ -153,6 +153,24 @@ function horseCursor(): FakeCursor {
     cursor.seekToFrameCalls.push(frame);
     return makeScrubFrame(decodedTimeAt(frame.index));
   };
+  let pendingSeek: { keyOnly: boolean; timeS: number } | null = null;
+  cursor.seekTo = (timeS) => {
+    cursor.seekToCalls.push(timeS);
+    pendingSeek = { keyOnly: false, timeS };
+  };
+  cursor.seekToKey = (timeS) => {
+    cursor.seekToKeyCalls.push(timeS);
+    pendingSeek = { keyOnly: true, timeS };
+  };
+  cursor.seekSettled = async () => {
+    const pending = pendingSeek;
+    pendingSeek = null;
+    if (!pending) return;
+    const index = cursor.track.timeline.indexAtOrBefore(asSec(pending.timeS));
+    const frame = makeScrubFrame(decodedTimeAt(index));
+    cursor.emitFrame(pending.keyOnly ? { ...frame, isKeyFrame: true } : frame);
+    await flushRaf();
+  };
   return cursor;
 }
 

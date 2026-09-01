@@ -18,6 +18,8 @@ import type {
   AnalysisSession,
   ExtractedFrame,
 } from "#web-video-engine/analysis";
+import { MediaSourceError, toMediaSourceError } from "#media/media-errors";
+import { MediaErrorKind } from "supervision-js-core";
 
 import { resolveDisplayPixelRatio } from "./display-pixel-ratio";
 import {
@@ -76,17 +78,24 @@ export interface WebVideoEngineMediaSource extends DecodedMediaSource {
 export async function openWebVideoEngineMediaSource(
   options: WebVideoEngineMediaSourceOptions,
 ): Promise<WebVideoEngineMediaSource> {
-  const { WebVideoEngine, displayBoxResolution } = await importEngineEntry();
-  const { display, frameDecodeStrategy, ...engineOptions } = options;
-  const engine = new WebVideoEngine({
-    decodeStrategy: display ? displayBoxResolution(display) : undefined,
-    previewWidth: framesPreviewWidth(display),
-    ...engineOptions,
-    presentation: "frames",
-  });
+  let engine: WebVideoEngine | undefined;
+  let retainedFrames:
+    ReturnType<typeof retainFramesUntilSubscribed> | undefined;
 
   try {
-    const snapshot = await engine.load();
+    const { WebVideoEngine, displayBoxResolution } = await importEngineEntry();
+    const { display, frameDecodeStrategy, ...engineOptions } = options;
+    engine = new WebVideoEngine({
+      decodeStrategy: display ? displayBoxResolution(display) : undefined,
+      previewWidth: framesPreviewWidth(display),
+      ...engineOptions,
+      presentation: "frames",
+    });
+    const openedEngine = engine;
+    // The engine can present its seed before open() returns and before the
+    // renderer can register. Retain only the newest frame across that gap.
+    retainedFrames = retainFramesUntilSubscribed(openedEngine);
+    const snapshot = await openedEngine.load();
     const frames = createAnalysisFrameReader({
       decodeStrategy: frameDecodeStrategy,
       frameDuration: resolveFrameDuration(snapshot.nativeFps),
@@ -94,20 +103,76 @@ export async function openWebVideoEngineMediaSource(
     });
 
     return {
-      engine,
+      engine: openedEngine,
       input: {
         dispose() {
+          retainedFrames?.dispose();
           void frames.close();
-          void engine.dispose();
+          void openedEngine.dispose();
         },
       },
       metadata: createMetadata(options.source, snapshot),
       sampleSink: frames.sampleSink,
     };
   } catch (error) {
-    await engine.dispose();
-    throw error;
+    retainedFrames?.dispose();
+    await engine?.dispose();
+    throw toWebVideoEngineMediaSourceError(error);
   }
+}
+
+function retainFramesUntilSubscribed(engine: WebVideoEngine) {
+  type PresentedFrameHandler = Parameters<
+    WebVideoEngine["onPresentedFrame"]
+  >[0];
+  const registerUpstream = engine.onPresentedFrame.bind(engine);
+  let downstream: PresentedFrameHandler | null = null;
+  let pending: Parameters<PresentedFrameHandler>[0] | null = null;
+  let disposed = false;
+
+  registerUpstream((presented) => {
+    if (disposed) {
+      presented.frame.close();
+      return;
+    }
+    if (downstream) {
+      downstream(presented);
+      return;
+    }
+    pending?.frame.close();
+    pending = presented;
+  });
+
+  engine.onPresentedFrame = (handler) => {
+    downstream = handler;
+    const retained = pending;
+    pending = null;
+    if (retained) handler(retained);
+  };
+
+  return {
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      pending?.frame.close();
+      pending = null;
+      downstream = (presented) => presented.frame.close();
+    },
+  };
+}
+
+function toWebVideoEngineMediaSourceError(error: unknown): MediaSourceError {
+  if (
+    error instanceof DOMException &&
+    (error.name === "SecurityError" || error.name === "NotSupportedError")
+  ) {
+    return new MediaSourceError(
+      MediaErrorKind.EnvironmentUnsupported,
+      "The browser environment could not start the web video engine worker.",
+      { cause: error },
+    );
+  }
+  return toMediaSourceError(error, "Unable to open this video source.");
 }
 
 export function createWebVideoEngineMediaRendererSource(
@@ -172,11 +237,15 @@ function createAnalysisFrameReader(options: {
 
   const openSession = () => {
     sessionPromise ??= (async () => {
-      const { AnalysisSession } = await importAnalysisEntry();
-      return AnalysisSession.open({
-        decodeStrategy: options.decodeStrategy,
-        source: options.source,
-      });
+      try {
+        const { AnalysisSession } = await importAnalysisEntry();
+        return await AnalysisSession.open({
+          decodeStrategy: options.decodeStrategy,
+          source: options.source,
+        });
+      } catch (error) {
+        throw toMediaSourceError(error, "Unable to open video frame analysis.");
+      }
     })();
     return sessionPromise;
   };
@@ -185,9 +254,13 @@ function createAnalysisFrameReader(options: {
     timestamp: number,
   ): Promise<ExtractedFrame | null> => {
     if (closed) return null;
-    const session = await openSession();
-    const [frame] = await session.extractFrames([timestamp]);
-    return frame ?? null;
+    try {
+      const session = await openSession();
+      const [frame] = await session.extractFrames([timestamp]);
+      return frame ?? null;
+    } catch (error) {
+      throw toMediaSourceError(error, "Unable to decode this video frame.");
+    }
   };
 
   const sampleSink: DecodedVideoSampleSink = {
@@ -219,10 +292,13 @@ function createAnalysisFrameReader(options: {
     },
     async *samplesAtTimestamps(timestamps) {
       if (closed) return;
-      const session = await openSession();
-
-      for await (const frame of session.framesAtTimestamps([...timestamps])) {
-        yield frame ? createSample(frame, options.frameDuration) : null;
+      try {
+        const session = await openSession();
+        for await (const frame of session.framesAtTimestamps([...timestamps])) {
+          yield frame ? createSample(frame, options.frameDuration) : null;
+        }
+      } catch (error) {
+        throw toMediaSourceError(error, "Unable to decode these video frames.");
       }
     },
   };

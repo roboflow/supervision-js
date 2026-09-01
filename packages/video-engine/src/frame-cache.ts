@@ -187,6 +187,43 @@ export class FrameCache {
   }
 
   /**
+   * Best cached answer for a named source frame. The exact tier is looked up
+   * only by `frame` identity; time is used solely for the approximate preview
+   * fallback. This keeps a long variable-rate frame from borrowing a crisp
+   * neighbour merely because both timestamps fit a millisecond tolerance.
+   */
+  getForFrame(
+    frame: FrameId,
+    timestampMs: number,
+    previewTolMs: number,
+  ): CachedFrame | null {
+    const exact = this.exact.getByKey(frame.ticks);
+    if (exact) {
+      this.exactHits += 1;
+      return { ...exact, tier: FrameTier.Exact };
+    }
+    const coarse = this.preview.get(timestampMs, previewTolMs);
+    if (coarse) {
+      this.previewHits += 1;
+      return { ...coarse, tier: FrameTier.Preview };
+    }
+    this.misses += 1;
+    return null;
+  }
+
+  /** Non-accounting form of {@link getForFrame}. */
+  peekForFrame(
+    frame: FrameId,
+    timestampMs: number,
+    previewTolMs: number,
+  ): CachedFrame | null {
+    const exact = this.exact.getByKey(frame.ticks);
+    if (exact) return { ...exact, tier: FrameTier.Exact };
+    const coarse = this.preview.get(timestampMs, previewTolMs);
+    return coarse ? { ...coarse, tier: FrameTier.Preview } : null;
+  }
+
+  /**
    * Best cached frame for `timestampMs`, consulting the exact tier then the
    * preview tier: a crisp hit within `exactTolMs`, else a coarse hit within
    * `previewTolMs`, else null. The two tolerances differ because the exact tier
@@ -263,6 +300,11 @@ export class FrameCache {
    */
   bumpExact(timestampMs: number): void {
     this.exact.touch(timestampMs);
+  }
+
+  /** Promotes one exact frame by identity. */
+  bumpExactFrame(frame: FrameId): void {
+    this.exact.touchKey(frame.ticks);
   }
 
   clear(): void {
@@ -427,6 +469,14 @@ export class TierStore {
     return { canvas: entry.canvas, timestampMs: entry.timestampMs };
   }
 
+  /** Retrieves exactly one owner-assigned key and promotes it to MRU. */
+  getByKey(key: number): TierHit | null {
+    const entry = this.entries.get(key);
+    if (!entry) return null;
+    this.bump(key);
+    return { canvas: entry.canvas, timestampMs: entry.timestampMs };
+  }
+
   /** Promotes the entry nearest `timestampMs` to most-recently-used. Scans
    *  rather than keys off the timestamp: callers pass a gesture position, which
    *  is not a frame timestamp, so a keyed lookup would miss the very frame on
@@ -434,6 +484,11 @@ export class TierStore {
   touch(timestampMs: number): void {
     const best = this.nearest(timestampMs, false);
     if (best) this.bump(best.key);
+  }
+
+  /** Promotes an owner-assigned key without a timestamp scan. */
+  touchKey(key: number): void {
+    if (this.entries.has(key)) this.bump(key);
   }
 
   clear(): void {

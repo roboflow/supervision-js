@@ -227,6 +227,199 @@ describe("media renderer transport", () => {
       startedCount: readinessSignals.length,
     }).toEqual({ abandonedCount: 1, startedCount: 1 });
   });
+
+  it.each([
+    [
+      "commit",
+      (transport: ReturnType<typeof createMediaRendererTransport>) =>
+        transport.commit(secondsAt(12)),
+    ],
+    [
+      "step",
+      (transport: ReturnType<typeof createMediaRendererTransport>) =>
+        transport.step(1),
+    ],
+  ])(
+    "keeps a settling %s pending until the scene accepts its landing",
+    async (_name, navigate) => {
+      const producer = createProducer();
+      if (_name === "step") {
+        vi.mocked(producer.channel.step).mockImplementationOnce(async () => {
+          producer.land(1);
+        });
+      }
+      let accept = () => {};
+      const accepted = new Promise<void>((resolve) => {
+        accept = resolve;
+      });
+      const waitFor = vi.fn(() => accepted);
+      const transport = createMediaRendererTransport({
+        beginPresentedFrameNavigation: () => ({
+          cancel: vi.fn(),
+          waitFor,
+        }),
+        channel: producer.channel,
+        loop: false,
+        onPlaybackRate: vi.fn(),
+        onPlaybackState: vi.fn(),
+        onPlayheadTime: vi.fn(),
+        onScrubbing: vi.fn(),
+        onSeeking: vi.fn(),
+      });
+      let settled = false;
+
+      const committing = navigate(transport).then(() => {
+        settled = true;
+      });
+      await vi.waitFor(() =>
+        expect(waitFor).toHaveBeenCalledWith(
+          producer.channel.getPlayhead().frame,
+        ),
+      );
+
+      expect(settled).toBe(false);
+
+      accept();
+      await committing;
+      expect(settled).toBe(true);
+    },
+  );
+
+  it("settles a boundary step without waiting for a frame the producer does not emit", async () => {
+    const producer = createProducer();
+    const cancel = vi.fn();
+    const waitFor = vi.fn(() => new Promise<void>(() => undefined));
+    const transport = createMediaRendererTransport({
+      beginPresentedFrameNavigation: () => ({ cancel, waitFor }),
+      channel: producer.channel,
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+    });
+
+    await expect(transport.step(-1)).resolves.toBeUndefined();
+
+    expect(producer.channel.step).toHaveBeenCalledExactlyOnceWith(-1);
+    expect(producer.landedIndex).toBe(0);
+    expect(waitFor).not.toHaveBeenCalled();
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the newer presentation hold when an older guard aborts", async () => {
+    const producer = createProducer();
+    const playbackStates: MediaRendererPlaybackState[] = [];
+    let releaseFirst = () => {};
+    let releaseSecond = () => {};
+    const first = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const second = new Promise<void>((resolve) => {
+      releaseSecond = resolve;
+    });
+    let calls = 0;
+    const transport = createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: (state) => playbackStates.push(state),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+      waitForPresentationReadiness: () => (++calls === 1 ? first : second),
+    });
+    const firstAbort = new AbortController();
+    const secondAbort = new AbortController();
+    const older = transport.protectPresentation(1, firstAbort.signal);
+    const newer = transport.protectPresentation(2, secondAbort.signal);
+
+    firstAbort.abort();
+    releaseFirst();
+    await older;
+    producer.setStatus("PAUSED");
+
+    expect(playbackStates.at(-1)).toBe(MediaRendererPlaybackState.Buffering);
+
+    releaseSecond();
+    await newer;
+  });
+
+  it("releases an older presentation hold when its replacement needs no wait", async () => {
+    const producer = createProducer();
+    let releaseFirst = () => {};
+    const first = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let calls = 0;
+    const transport = createMediaRendererTransport({
+      channel: producer.channel,
+      loop: false,
+      onPlaybackRate: vi.fn(),
+      onPlaybackState: vi.fn(),
+      onPlayheadTime: vi.fn(),
+      onScrubbing: vi.fn(),
+      onSeeking: vi.fn(),
+      waitForPresentationReadiness: () => (++calls === 1 ? first : null),
+    });
+    const firstAbort = new AbortController();
+    const older = transport.protectPresentation(1, firstAbort.signal);
+
+    firstAbort.abort();
+    expect(transport.protectPresentation(2, new AbortController().signal)).toBe(
+      null,
+    );
+    releaseFirst();
+    await older;
+    await vi.waitFor(() =>
+      expect(producer.channel.endInteractiveSeek).toHaveBeenCalledOnce(),
+    );
+  });
+
+  it.each(["play", "pause"] as const)(
+    "%s settles a navigation ticket it supersedes",
+    async (action) => {
+      const producer = createProducer();
+      let releaseNavigation = () => {};
+      const invalidatePresentedFrame = vi.fn(() => releaseNavigation());
+      const beginPresentedFrameNavigation = vi.fn(() => {
+        const accepted = new Promise<void>((resolve) => {
+          releaseNavigation = resolve;
+        });
+        return {
+          cancel: releaseNavigation,
+          waitFor: () => accepted,
+        };
+      });
+      const transport = createMediaRendererTransport({
+        beginPresentedFrameNavigation,
+        channel: producer.channel,
+        invalidatePresentedFrame,
+        loop: false,
+        onPlaybackRate: vi.fn(),
+        onPlaybackState: vi.fn(),
+        onPlayheadTime: vi.fn(),
+        onScrubbing: vi.fn(),
+        onSeeking: vi.fn(),
+      });
+      let seekSettled = false;
+      const seeking = transport.commit(secondsAt(12)).then(() => {
+        seekSettled = true;
+      });
+      await vi.waitFor(() =>
+        expect(beginPresentedFrameNavigation).toHaveBeenCalledOnce(),
+      );
+      expect(seekSettled).toBe(false);
+
+      if (action === "play") await transport.play();
+      else transport.pause();
+      await seeking;
+
+      expect(seekSettled).toBe(true);
+      expect(invalidatePresentedFrame).toHaveBeenCalledTimes(2);
+    },
+  );
 });
 
 const secondsAt = (index: number) => (index * TICKS_PER_FRAME) / TICK_RATE;

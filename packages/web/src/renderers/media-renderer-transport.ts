@@ -2,6 +2,7 @@ import { MediaRendererPlaybackState } from "#types/media-renderer";
 import type {
   PresentedFrameChannel,
   PresentedFrameChannelStatus,
+  PresentedFrameNavigation,
 } from "./presented-frame-channel";
 
 const MILLISECONDS_PER_SECOND = 1000;
@@ -14,6 +15,11 @@ export interface MediaRendererTransport {
   commit(mediaTime: number): Promise<void>;
   step(direction: 1 | -1): Promise<void>;
   setPlaybackRate(rate: number): void;
+  /** Holds a producer frame before the scene can display it. */
+  protectPresentation(
+    mediaTime: number,
+    signal: AbortSignal,
+  ): Promise<void> | null;
   destroy(): void;
 }
 
@@ -61,6 +67,16 @@ export interface MediaRendererTransportOptions {
     mediaTime: number,
     signal: AbortSignal,
   ) => Promise<void> | null;
+  /** Readiness required before a producer frame may enter the scene. */
+  readonly waitForPresentationReadiness?: (
+    mediaTime: number,
+    signal: AbortSignal,
+  ) => Promise<void> | null;
+  /** Drops a guarded frame synchronously when navigation supersedes it. */
+  readonly invalidatePresentedFrame?: () => void;
+  /** Opens an acknowledgment that settles after the scene accepts the frame
+   *  where the producer's navigation landed. */
+  readonly beginPresentedFrameNavigation?: () => PresentedFrameNavigation;
 }
 
 /**
@@ -89,7 +105,14 @@ export function createMediaRendererTransport(
   /** Whether a readiness hold still owes the producer its release. */
   let readinessFreezeHeld = false;
   let activeReadinessWait: AbortController | undefined;
-  const isHoldingForReadiness = () => readinessHoldIntent === playbackIntent;
+  let presentationWait = 0;
+  let presentationHold: {
+    readonly intent: number;
+    readonly wait: number;
+  } | null = null;
+  const isHoldingForReadiness = () =>
+    readinessHoldIntent === playbackIntent ||
+    presentationHold?.intent === playbackIntent;
 
   /**
    * Supersedes every playback intent still in flight. A readiness wait is
@@ -251,6 +274,9 @@ export function createMediaRendererTransport(
 
   const transport: MediaRendererTransport = {
     async play() {
+      options.invalidatePresentedFrame?.();
+      presentationWait += 1;
+      presentationHold = null;
       // The producer answers on its own thread, so its status still reads the
       // previous playback until it does. Recording the ask here is what lets a
       // second toggle arriving in that window flip it.
@@ -311,6 +337,9 @@ export function createMediaRendererTransport(
     },
 
     pause() {
+      options.invalidatePresentedFrame?.();
+      presentationWait += 1;
+      presentationHold = null;
       settledState = MediaRendererPlaybackState.Paused;
       beginPlaybackIntent();
       // A pause ends the producer's mechanical hold, so it lands ahead of the
@@ -341,6 +370,9 @@ export function createMediaRendererTransport(
       // A drag whose landing seek is still releasing the producer is the drag
       // this scrub belongs to. Opening a second one there would stop the
       // picture for a gesture nobody is holding, and nothing would release it.
+      options.invalidatePresentedFrame?.();
+      presentationWait += 1;
+      presentationHold = null;
       beginPlaybackIntent();
       if (!gestureInFlight && landingRelease === null) {
         gestureInFlight = true;
@@ -352,6 +384,10 @@ export function createMediaRendererTransport(
     },
 
     async commit(mediaTime) {
+      options.invalidatePresentedFrame?.();
+      const navigationPresentation = ++presentationWait;
+      presentationHold = null;
+      beginPlaybackIntent();
       // Releasing first is what keeps a drag from freezing the picture on
       // release: the producer resumes on its own terms, and the landing decode
       // for a cold region no longer sits between the pointer coming up and
@@ -360,25 +396,98 @@ export function createMediaRendererTransport(
       landingRelease = release;
       try {
         await release;
+        if (navigationPresentation === presentationWait) {
+          await releaseReadinessFreeze();
+        }
       } finally {
         if (landingRelease === release) {
           landingRelease = null;
         }
       }
 
-      await channel.commit(mediaTime * MILLISECONDS_PER_SECOND);
+      const presentation = options.beginPresentedFrameNavigation?.();
+      try {
+        await channel.commit(mediaTime * MILLISECONDS_PER_SECOND);
+        await presentation?.waitFor(channel.getPlayhead().frame);
+      } catch (error) {
+        presentation?.cancel();
+        throw error;
+      }
     },
 
     async step(direction) {
+      options.invalidatePresentedFrame?.();
+      const navigationPresentation = ++presentationWait;
+      presentationHold = null;
+      beginPlaybackIntent();
       await releaseGesture();
-      await channel.step(direction);
+      if (navigationPresentation === presentationWait) {
+        await releaseReadinessFreeze();
+      }
+      const presentation = options.beginPresentedFrameNavigation?.();
+      const before = channel.getPlayhead().frame;
+      try {
+        await channel.step(direction);
+        const after = channel.getPlayhead().frame;
+        if (before.index === after.index && before.ticks === after.ticks) {
+          // A boundary step intentionally emits no replacement frame. The
+          // frame already on screen remains authoritative, but it predates
+          // this navigation ticket and therefore cannot acknowledge it.
+          presentation?.cancel();
+        } else {
+          await presentation?.waitFor(after);
+        }
+      } catch (error) {
+        presentation?.cancel();
+        throw error;
+      }
     },
 
     setPlaybackRate(rate) {
       channel.setPlaybackRate(rate);
     },
 
+    protectPresentation(mediaTime, signal) {
+      if (!options.waitForPresentationReadiness) return null;
+      const guarded = options.waitForPresentationReadiness(mediaTime, signal);
+      if (!guarded) {
+        if (presentationHold) {
+          presentationWait += 1;
+          presentationHold = null;
+          void releaseReadinessFreeze().then(publishPlaybackState);
+        }
+        return null;
+      }
+      const wait = ++presentationWait;
+      const intent = playbackIntent;
+      presentationHold = { intent, wait };
+      readinessFreezeHeld = true;
+      channel.beginInteractiveSeek();
+      publishPlaybackState();
+
+      return (async () => {
+        try {
+          await guarded;
+        } catch {
+          // A readiness provider failure degrades annotations, not media. The
+          // provider's diagnostics own the error while the frame stays visible.
+        } finally {
+          if (presentationHold?.wait === wait) {
+            presentationHold = null;
+          }
+          // An aborted frame hands the existing freeze to a newer frame. A
+          // navigation increments presentationWait and releases explicitly.
+          if (wait === presentationWait && !signal.aborted) {
+            await releaseReadinessFreeze();
+            publishPlaybackState();
+          }
+        }
+      })();
+    },
+
     destroy() {
+      presentationWait += 1;
+      presentationHold = null;
       beginPlaybackIntent();
       for (const unsubscribe of unsubscribes) {
         unsubscribe();

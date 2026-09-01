@@ -23,4 +23,13 @@ describe("hang recovery ceilings", () => {
       HANG_RECOVERY.WORKER_COMMAND_TIMEOUT_MS,
     );
   });
+
+  it("ends a missing presentation while its specific error can still cross the worker boundary", () => {
+    expect(HANG_RECOVERY.DECODE_HANG_TIMEOUT_MS).toBeLessThan(
+      HANG_RECOVERY.PRESENTATION_LATCH_TIMEOUT_MS,
+    );
+    expect(HANG_RECOVERY.PRESENTATION_LATCH_TIMEOUT_MS).toBeLessThan(
+      HANG_RECOVERY.WORKER_COMMAND_TIMEOUT_MS,
+    );
+  });
 });

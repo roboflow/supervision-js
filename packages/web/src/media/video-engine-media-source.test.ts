@@ -1,7 +1,10 @@
 import { SourceKind } from "#web-video-engine";
 import type { UrlVideoSource } from "#web-video-engine";
+import type { PresentedVideoFrame } from "#renderers/presented-frame-channel";
+import { MediaErrorKind } from "supervision-js-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { MediaSourceError } from "./media-errors";
 import {
   createWebVideoEngineMediaRendererSource,
   openWebVideoEngineMediaSource,
@@ -27,7 +30,16 @@ type FakeFrame = {
 const engine = vi.hoisted(() => ({
   dispose: vi.fn(async () => undefined),
   load: vi.fn(),
+  onPresentedFrame: vi.fn(),
   options: [] as unknown[],
+  presentedHandler: null as
+    | ((presented: {
+        frame: { close(): void };
+        frameId: { index: number; ticks: number };
+        mediaTimeS: number;
+        paintSeq: number;
+      }) => void)
+    | null,
 }));
 
 const analysis = vi.hoisted(() => ({
@@ -46,6 +58,7 @@ const engineModule = vi.hoisted(() => () => ({
   WebVideoEngine: class {
     readonly dispose = engine.dispose;
     readonly load = engine.load;
+    onPresentedFrame = engine.onPresentedFrame;
 
     constructor(options: unknown) {
       engine.options.push(options);
@@ -85,6 +98,18 @@ function createFrames(timestamps: readonly number[]): FakeFrame[] {
   }));
 }
 
+function presentedFrame(mediaTimeS: number, close = vi.fn()) {
+  return {
+    frame: { close },
+    frameId: {
+      index: Math.round(mediaTimeS * 1000),
+      ticks: Math.round(mediaTimeS * 1000),
+    },
+    mediaTimeS,
+    paintSeq: Math.round(mediaTimeS * 1000) + 1,
+  };
+}
+
 /**
  * Answers like mediabunny's canvas sink: the last frame starting at or before
  * the timestamp, nothing before the first frame, and the final frame for every
@@ -122,6 +147,10 @@ describe("video engine media source", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     engine.options.length = 0;
+    engine.presentedHandler = null;
+    engine.onPresentedFrame.mockImplementation((handler) => {
+      engine.presentedHandler = handler;
+    });
     engine.load.mockResolvedValue(READY_SNAPSHOT);
     analysis.open.mockResolvedValue({
       close: analysis.close,
@@ -299,6 +328,94 @@ describe("video engine media source", () => {
       openWebVideoEngineMediaSource({ source: urlSource }),
     ).rejects.toThrowError("source unreadable");
     expect(engine.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("retains only the newest seed until the renderer subscribes", async () => {
+    let finishLoad!: (snapshot: ReadySnapshot) => void;
+    engine.load.mockReturnValue(
+      new Promise<ReadySnapshot>((resolve) => {
+        finishLoad = resolve;
+      }),
+    );
+    const opening = openWebVideoEngineMediaSource({ source: urlSource });
+    await vi.waitFor(() => expect(engine.presentedHandler).not.toBeNull());
+    const replaced = presentedFrame(0);
+    const retained = presentedFrame(0.04);
+    engine.presentedHandler!(replaced);
+    engine.presentedHandler!(retained);
+    expect(replaced.frame.close).toHaveBeenCalledOnce();
+
+    finishLoad(READY_SNAPSHOT);
+    const source = await opening;
+    const accepted = vi.fn((presented: PresentedVideoFrame) =>
+      presented.frame.close(),
+    );
+    source.engine.onPresentedFrame(accepted);
+
+    expect(accepted).toHaveBeenCalledExactlyOnceWith(retained);
+    expect(retained.frame.close).toHaveBeenCalledOnce();
+  });
+
+  it("closes an unclaimed retained seed when the source is disposed", async () => {
+    const source = await openWebVideoEngineMediaSource({ source: urlSource });
+    const retained = presentedFrame(0);
+    engine.presentedHandler!(retained);
+
+    source.input.dispose();
+
+    expect(retained.frame.close).toHaveBeenCalledOnce();
+  });
+
+  it("forwards an injected worker factory into the engine", async () => {
+    const workerFactory = vi.fn(() => ({}) as Worker);
+
+    await openWebVideoEngineMediaSource({ source: urlSource, workerFactory });
+
+    expect(engine.options.at(-1)).toMatchObject({
+      presentation: "frames",
+      source: urlSource,
+      workerFactory,
+    });
+  });
+
+  it("classifies a worker blocked by browser policy as unsupported", async () => {
+    const blocked = new DOMException("worker blocked", "SecurityError");
+    engine.load.mockRejectedValue(blocked);
+
+    await expect(
+      openWebVideoEngineMediaSource({ source: urlSource }),
+    ).rejects.toMatchObject({
+      cause: blocked,
+      kind: MediaErrorKind.EnvironmentUnsupported,
+      name: "MediaSourceError",
+    });
+    expect(engine.dispose).toHaveBeenCalledOnce();
+  });
+
+  it("wraps failures raised while a timestamp batch is being iterated", async () => {
+    const failure = new Error("decoder failed during batch iteration");
+    analysis.framesAtTimestamps.mockImplementation(() => ({
+      async next() {
+        throw failure;
+      },
+      [Symbol.asyncIterator]() {
+        return this;
+      },
+    }));
+    const source = await openWebVideoEngineMediaSource({ source: urlSource });
+
+    const consume = async () => {
+      for await (const _sample of source.sampleSink.samplesAtTimestamps!([0])) {
+        // The iterator fails before producing a sample.
+      }
+    };
+
+    await expect(consume()).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof MediaSourceError &&
+        error.kind === MediaErrorKind.Decode &&
+        error.cause === failure,
+    );
   });
 
   it("opens the same source through the renderer source contract", async () => {

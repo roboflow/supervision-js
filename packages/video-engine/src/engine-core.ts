@@ -1,5 +1,5 @@
 import { type MediaClock, PerformanceMediaClock } from "./clock";
-import { DIAGNOSTICS, FRAME_CACHE } from "./constants";
+import { DIAGNOSTICS, FRAME_CACHE, HANG_RECOVERY } from "./constants";
 import { createScrubCursor } from "./create-scrub-cursor";
 import { urlRequestInit } from "./decode-source";
 import { nativeResolution } from "./decode-resolution";
@@ -39,7 +39,8 @@ import {
   type PresentationMode,
   resolvePlaybackRate,
   SourceKind,
-  type WebVideoEngineError,
+  WebVideoEngineError,
+  WebVideoEngineErrorCode,
 } from "./types";
 import {
   type DiagnosticsEvent,
@@ -52,6 +53,7 @@ import {
 
 /** A seek waiting on the crisp frame that says where its walk landed. */
 interface AwaitedSeek {
+  readonly generation: number;
   /** The frame the seek aimed at. The walk answers at or before it, so this
    *  is what separates that answer from a frame decoded for an earlier seek. */
   readonly target: FrameId;
@@ -60,6 +62,19 @@ interface AwaitedSeek {
    *  to recognise by position, so its answer is recognised by the keyframe
    *  flag the scheduler puts on exactly the frame it emits for one. */
   readonly keyOnly: boolean;
+  readonly resolve: (landing: FrameLanding | null) => void;
+  /** Fire-and-forget scrubs have no promise consumer, while commit/key seek
+   *  callers must learn that a terminal decoder failure made their landing
+   *  impossible. */
+  readonly rejectOnFailure: boolean;
+  readonly reject: (error: WebVideoEngineError) => void;
+  /** Ends a command whose cursor settled without ever painting its answer. */
+  readonly presentationTimer: ReturnType<typeof setTimeout>;
+}
+
+interface SeekLandingWait {
+  readonly generation: number;
+  readonly presented: Promise<FrameLanding | null>;
 }
 
 export interface EngineCoreOptions {
@@ -148,6 +163,7 @@ export class EngineCore {
    *  so without the target on it any leftover frame answers for the seek in
    *  flight and publishes itself as the playhead. */
   private awaitedSeek: AwaitedSeek | null = null;
+  private seekGeneration = 0;
   /** Wall stamp of a seek being served by re-anchoring the playback walk, or
    *  null when no such seek is waiting on its crisp frame. */
   private playSeekStartedAtMs: number | null = null;
@@ -197,6 +213,7 @@ export class EngineCore {
     this.canvas = canvas;
     if (viewport) this.viewport = viewport;
     this.controller?.bindCanvas(canvas);
+    if (!canvas && this.presentation === "canvas") this.abandonAwaitedSeek();
   }
 
   async load(config: EngineLoadConfig): Promise<EngineReadySnapshot> {
@@ -241,7 +258,7 @@ export class EngineCore {
               // still honored as an explicit caller override.
               previewCapacity: config.previewCapacity,
             },
-      onDecodeFailure: (error) => this.handleDecodeFailure(error),
+      onDecodeFailure: (error) => this.handleTerminalFailure(error),
     });
     const nativeFps = this.cursor.track.nativeFps;
     this.controller = new ScrubController({
@@ -319,9 +336,11 @@ export class EngineCore {
     // A pause anyone asked for outranks the drag's own, so releasing the
     // drag has nothing left to resume.
     this.resumeAfterInteractiveSeek = false;
+    const wasPlaying = this.playing;
     this.playing = false;
     this.clock.pause();
     this.controller?.endPlay();
+    if (wasPlaying) this.abandonAwaitedSeek();
     if (this.decodeFailure) return this.republishFailure();
     this.emitStatus(PlaybackStatus.Paused);
   }
@@ -366,7 +385,7 @@ export class EngineCore {
     // A scrub moves the playhead off the last step, so the next step must
     // re-base on the scrub target, not the stale step landing.
     this.lastStepLanded = null;
-    this.awaitSeekLanding(target.frame);
+    void this.awaitSeekLanding(target.frame);
     this.clock.seek(target.mediaTimeS);
     this.controller?.tryPaintFromCache(target.mediaTimeS * 1000);
     if (!this.controller) return;
@@ -413,10 +432,11 @@ export class EngineCore {
 
   async commit(frameIndex: number): Promise<FrameLanding | null> {
     if (!this.cursor) return null;
+    if (this.decodeFailure) throw this.decodeFailure;
     const target = this.timeline().landingAt(frameIndex);
     const tSec = target.mediaTimeS;
     this.lastStepLanded = null;
-    this.awaitSeekLanding(target.frame);
+    const wait = this.awaitSeekLanding(target.frame, false, true);
     this.clock.seek(tSec);
     this.controller?.tryPaintFromCache(tSec * 1000);
     // While playing, moving the playhead means re-anchoring the playback
@@ -425,12 +445,33 @@ export class EngineCore {
     // reads as ignored.
     if (this.playing && this.controller) {
       this.reanchorPlayback(tSec);
-      this.pushTraceEvent({ type: "seek", targetMs: tSec * 1000 });
-      return null;
+      const landed = await wait.presented;
+      if (!this.isCurrentSeek(wait.generation)) return landed;
+      this.pushTraceEvent({
+        type: "seek",
+        targetMs: tSec * 1000,
+        landedMs:
+          landed?.mediaTimeS === undefined
+            ? undefined
+            : landed.mediaTimeS * 1000,
+      });
+      return landed;
     }
     this.emit({ type: "seeking", seeking: true });
     this.cursor.seekTo(asSec(tSec));
-    await this.cursor.seekSettled();
+    let landed: FrameLanding | null;
+    try {
+      [, landed] = await Promise.all([
+        this.cursor.seekSettled(),
+        wait.presented,
+      ]);
+    } catch (error) {
+      if (this.isCurrentSeek(wait.generation)) {
+        this.emit({ type: "seeking", seeking: false });
+      }
+      throw error;
+    }
+    if (!this.isCurrentSeek(wait.generation)) return landed;
     this.pushTraceEvent({
       type: "seek",
       targetMs: tSec * 1000,
@@ -439,30 +480,52 @@ export class EngineCore {
     this.emit({ type: "seeking", seeking: false });
     // A long GOP can end the walk on a different frame from the one aimed
     // at, and the crisp paint is what recorded which.
-    const landed = this.landingOf(this.seekLanded);
     this.closeSeekLanding();
     return landed;
   }
 
   async seekToKey(timeMs: number): Promise<FrameLanding | null> {
     if (!this.cursor) return null;
+    if (this.decodeFailure) throw this.decodeFailure;
     const tSec = timeMs / 1000;
     const timeline = this.timeline();
     const target = timeline.idAt(timeline.indexAtOrBefore(asSec(tSec)));
     this.lastStepLanded = null;
     // Playing, this seek re-anchors the playback walk rather than running a
     // key walk, and an ordinary walk answers beside the target.
-    this.awaitSeekLanding(target, !this.playing);
+    const wait = this.awaitSeekLanding(target, !this.playing, true);
     this.clock.seek(tSec);
     this.controller?.tryPaintFromCache(timeMs);
     if (this.playing && this.controller) {
       this.reanchorPlayback(tSec);
-      this.pushTraceEvent({ type: "seek", targetMs: timeMs, keyOnly: true });
-      return null;
+      const landed = await wait.presented;
+      if (!this.isCurrentSeek(wait.generation)) return landed;
+      this.pushTraceEvent({
+        type: "seek",
+        targetMs: timeMs,
+        landedMs:
+          landed?.mediaTimeS === undefined
+            ? undefined
+            : landed.mediaTimeS * 1000,
+        keyOnly: true,
+      });
+      return landed;
     }
     this.emit({ type: "seeking", seeking: true });
     this.cursor.seekToKey(asSec(tSec));
-    await this.cursor.seekSettled();
+    let landed: FrameLanding | null;
+    try {
+      [, landed] = await Promise.all([
+        this.cursor.seekSettled(),
+        wait.presented,
+      ]);
+    } catch (error) {
+      if (this.isCurrentSeek(wait.generation)) {
+        this.emit({ type: "seeking", seeking: false });
+      }
+      throw error;
+    }
+    if (!this.isCurrentSeek(wait.generation)) return landed;
     this.pushTraceEvent({
       type: "seek",
       targetMs: timeMs,
@@ -470,7 +533,6 @@ export class EngineCore {
       keyOnly: true,
     });
     this.emit({ type: "seeking", seeking: false });
-    const landed = this.landingOf(this.seekLanded);
     this.closeSeekLanding();
     return landed;
   }
@@ -530,17 +592,16 @@ export class EngineCore {
   }
 
   /**
-   * The decoder cannot decode this source, and nothing else was going to say
-   * so: a stalled decoder keeps accepting commands and the clock keeps
-   * running, so playback reads as healthy over a canvas that will never change
-   * again. Stop the transport first, then report, so the status a consumer
-   * sees and what the engine is doing agree.
+   * The runtime can no longer deliver pixels, whether decoding stopped or the
+   * frames handoff failed. Stop the transport first, then report, so the status
+   * a consumer sees and what the engine is doing agree.
    */
-  private handleDecodeFailure(error: WebVideoEngineError): void {
+  private handleTerminalFailure(error: WebVideoEngineError): void {
     this.decodeFailure ??= error;
     this.playing = false;
     this.clock.pause();
     this.controller?.endPlay();
+    this.failAwaitedSeek(this.decodeFailure);
     this.republishFailure();
   }
 
@@ -576,6 +637,12 @@ export class EngineCore {
       this.stoppedTrace = this.traceRecorder.assemble();
     }
     this.traceRecorder = null;
+    this.failAwaitedSeek(
+      new WebVideoEngineError(
+        WebVideoEngineErrorCode.Aborted,
+        "web video engine disposed",
+      ),
+    );
     this.controller?.dispose();
     this.controller = null;
     await this.cursor?.close();
@@ -621,27 +688,89 @@ export class EngineCore {
     this.playing = false;
     this.clock.pause();
     this.controller?.endPlay();
+    this.abandonAwaitedSeek();
     if (this.decodeFailure) return this.republishFailure();
     this.emitStatus(PlaybackStatus.Ended);
   }
 
-  private awaitSeekLanding(target: FrameId, keyOnly = false): void {
+  private awaitSeekLanding(
+    target: FrameId,
+    keyOnly = false,
+    rejectOnFailure = false,
+  ): SeekLandingWait {
+    this.abandonAwaitedSeek();
     this.seekLanded = null;
-    this.awaitedSeek = { keyOnly, target };
+    const generation = ++this.seekGeneration;
     this.playSeekStartedAtMs = null;
+    if (this.presentation === "canvas" && this.canvas === null) {
+      return { generation, presented: Promise.resolve(null) };
+    }
+    const presented = new Promise<FrameLanding | null>((resolve, reject) => {
+      const presentationTimer = setTimeout(() => {
+        const awaited = this.awaitedSeek;
+        if (
+          !awaited ||
+          awaited.generation !== generation ||
+          !this.isCurrentSeek(generation)
+        ) {
+          return;
+        }
+        this.awaitedSeek = null;
+        const error = new WebVideoEngineError(
+          WebVideoEngineErrorCode.DecoderStalled,
+          "video decode settled without presenting the requested frame",
+        );
+        if (awaited.rejectOnFailure) awaited.reject(error);
+        else awaited.resolve(null);
+      }, HANG_RECOVERY.PRESENTATION_LATCH_TIMEOUT_MS);
+      const awaited: AwaitedSeek = {
+        generation,
+        keyOnly,
+        presentationTimer,
+        reject: (error) => reject(error),
+        rejectOnFailure,
+        resolve,
+        target,
+      };
+      this.awaitedSeek = awaited;
+    });
+    return { generation, presented };
+  }
+
+  private isCurrentSeek(generation: number): boolean {
+    return generation === this.seekGeneration;
   }
 
   private forgetSeekLanding(): void {
     this.seekLanded = null;
-    this.awaitedSeek = null;
+    this.abandonAwaitedSeek();
     this.playSeekStartedAtMs = null;
+  }
+
+  private abandonAwaitedSeek(): void {
+    const awaited = this.awaitedSeek;
+    if (!awaited) return;
+    this.awaitedSeek = null;
+    clearTimeout(awaited.presentationTimer);
+    awaited.resolve(null);
+  }
+
+  /** Ends an impossible landing. Awaitable movement rejects with the engine's
+   *  terminal error; a scrub has no consumer, so it is released quietly. */
+  private failAwaitedSeek(error: WebVideoEngineError): void {
+    const awaited = this.awaitedSeek;
+    if (!awaited) return;
+    this.awaitedSeek = null;
+    clearTimeout(awaited.presentationTimer);
+    if (awaited.rejectOnFailure) awaited.reject(error);
+    else awaited.resolve(null);
   }
 
   /** Releases the latch of a seek that has already answered its caller. The
    *  landing rode back on the return value, so a paint arriving after it would
    *  move the playhead to somewhere the caller was never told about. */
   private closeSeekLanding(): void {
-    this.awaitedSeek = null;
+    this.abandonAwaitedSeek();
   }
 
   /**
@@ -657,7 +786,7 @@ export class EngineCore {
     if (!awaited) return false;
     if (painted.ticks > awaited.target.ticks) return false;
     if (awaited.keyOnly) return isKeyFrame;
-    return awaited.target.ticks <= this.timeline().endTicksAt(painted.index);
+    return awaited.target.ticks < this.timeline().endTicksAt(painted.index);
   }
 
   /** The frame table of the loaded source. Reached only from paths that have
@@ -666,10 +795,6 @@ export class EngineCore {
     const cursor = this.cursor;
     if (!cursor) throw new Error("EngineCore: no source is loaded");
     return cursor.track.timeline;
-  }
-
-  private landingOf(frame: FrameId | null): FrameLanding | null {
-    return frame === null ? null : this.timeline().landingAt(frame.index);
   }
 
   /**
@@ -703,23 +828,14 @@ export class EngineCore {
     const mediaTimeMs = mediaTimeS * 1000;
     this.lastPaintedId = frameId;
     this.aimResidency(mediaTimeMs);
-    // Only a crisp frame names where the walk landed. The coarse stand-in
-    // that paints the instant a seek is issued can be a long way off.
-    if (
+    // Only a crisp frame names where the walk landed. Keep its latch armed
+    // until frames-mode delivery succeeds: selecting the right frame is not a
+    // presentation if transferring its pixels to the host throws.
+    const answeredSeek =
       frame.quality === "exact" &&
       this.answersAwaitedSeek(frameId, frame.isKeyFrame)
-    ) {
-      this.seekLanded = frameId;
-      this.awaitedSeek = null;
-      this.closePlaySeekWait();
-      // Paused paints normally never move the playhead, but the landing
-      // of an awaited seek is the one paint that says where the request
-      // really settled; without this the readout keeps the requested
-      // time, which almost never falls on a sample.
-      if (!this.clock.playing) {
-        this.emit({ type: "playhead", frameId, mediaTimeS });
-      }
-    }
+        ? this.awaitedSeek
+        : null;
     // Position and quality ride every paint. A consumer that only learns a
     // paint happened cannot tell whether the picture matches the playhead,
     // nor a crisp frame from the coarse stand-in, which is the whole
@@ -732,8 +848,36 @@ export class EngineCore {
       quality: frame.quality,
       ...(catchUpMs === undefined ? {} : { catchUpMs }),
     });
-    if (presented)
-      this.present(presented, landing, frame.quality, frameRotation(frame));
+    if (presented) {
+      try {
+        this.present(presented, landing, frame.quality, frameRotation(frame));
+      } catch (error) {
+        this.handleTerminalFailure(
+          error instanceof WebVideoEngineError
+            ? error
+            : new WebVideoEngineError(
+                WebVideoEngineErrorCode.BackendCrashed,
+                "video frame presentation failed",
+                error,
+              ),
+        );
+        return;
+      }
+    }
+    if (answeredSeek && this.awaitedSeek === answeredSeek) {
+      this.seekLanded = frameId;
+      this.awaitedSeek = null;
+      clearTimeout(answeredSeek.presentationTimer);
+      this.closePlaySeekWait();
+      // Paused paints normally never move the playhead, but the landing
+      // of an awaited seek is the one paint that says where the request
+      // really settled; without this the readout keeps the requested
+      // time, which almost never falls on a sample.
+      if (!this.clock.playing) {
+        this.emit({ type: "playhead", frameId, mediaTimeS });
+      }
+      answeredSeek.resolve(landing);
+    }
     // Append to the trace event ring only while armed (predicted-false when
     // disarmed), at the same paint point that already fires.
     this.traceRecorder?.pushEvent({
@@ -773,19 +917,27 @@ export class EngineCore {
       frame.close();
       return;
     }
-    emit(
-      {
-        type: "presentedFrame",
-        paintSeq: this.paintSeq,
-        frameId: landing.frame,
-        mediaTimeS: landing.mediaTimeS,
-        mediaTimeMs: landing.mediaTimeS * 1000,
-        quality,
-        rotation,
-        frame,
-      },
-      [frame],
-    );
+    try {
+      emit(
+        {
+          type: "presentedFrame",
+          paintSeq: this.paintSeq,
+          frameId: landing.frame,
+          mediaTimeS: landing.mediaTimeS,
+          mediaTimeMs: landing.mediaTimeS * 1000,
+          quality,
+          rotation,
+          frame,
+        },
+        [frame],
+      );
+    } catch (error) {
+      // A failed structured-clone/transfer leaves ownership with this realm.
+      // Close it here; the controller deliberately handed that obligation to
+      // onPaint and has no reference left with which to recover it.
+      frame.close();
+      throw error;
+    }
   }
 
   // -----------------------------------------------------------------------

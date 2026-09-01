@@ -21,8 +21,10 @@ export const TimelineScrubInput = memo(function TimelineScrubInput({
   onChange,
   onKeyUp,
   onPointerDown,
+  onPointerCancel,
   onPointerEnter,
   onPointerLeave,
+  onLostPointerCapture,
   onPointerMove,
   onPointerUp,
 }: {
@@ -32,6 +34,8 @@ export const TimelineScrubInput = memo(function TimelineScrubInput({
   readonly onBlur: () => void;
   readonly onChange: (event: ChangeEvent<HTMLInputElement>) => void;
   readonly onKeyUp: () => void;
+  readonly onLostPointerCapture: () => void;
+  readonly onPointerCancel: () => void;
   readonly onPointerDown: () => void;
   readonly onPointerEnter: (event: ReactPointerEvent<HTMLElement>) => void;
   readonly onPointerLeave: () => void;
@@ -49,6 +53,8 @@ export const TimelineScrubInput = memo(function TimelineScrubInput({
       onBlur={onBlur}
       onChange={onChange}
       onKeyUp={onKeyUp}
+      onLostPointerCapture={onLostPointerCapture}
+      onPointerCancel={onPointerCancel}
       onPointerDown={onPointerDown}
       onPointerEnter={onPointerEnter}
       onPointerLeave={onPointerLeave}

@@ -338,6 +338,38 @@ export function createBufferedDetectionTimeline(
     );
   };
 
+  const inFlightCovers = (mediaTime: number) => {
+    if (!inFlight) {
+      return true;
+    }
+
+    const comparableMediaTime = getComparableMediaTime(mediaTime);
+    return (
+      comparableMediaTime >= inFlight.startTime &&
+      comparableMediaTime <= inFlight.endTime
+    );
+  };
+
+  const supersedeLoadOutside = (mediaTime: number) => {
+    if (!inFlight || inFlightCovers(mediaTime)) {
+      return;
+    }
+
+    const keepsCurrentBuffer = isBuffered(mediaTime);
+    loadId += 1;
+    inFlight = undefined;
+    if (keepsCurrentBuffer) {
+      state = {
+        ...state,
+        errorMessage: null,
+        requestedEndTime: state.bufferEndTime,
+        requestedStartTime: state.bufferStartTime,
+        status: DetectionBufferStatus.Ready,
+      };
+      notifyBufferChanged();
+    }
+  };
+
   const isInsideBufferedRange = (mediaTime: number) => {
     const comparableMediaTime = getComparableMediaTime(mediaTime);
 
@@ -355,6 +387,11 @@ export function createBufferedDetectionTimeline(
     lead: DetectionBufferLead = "full",
   ) => {
     if (isBuffered(mediaTime)) {
+      // A backwards navigation may land in the retained buffer while a rolling
+      // prefetch for the old playhead is about to replace it. The navigation
+      // is current truth; do not let that older load evict its detections after
+      // the frame has been accepted.
+      supersedeLoadOutside(mediaTime);
       return;
     }
 
@@ -437,6 +474,14 @@ export function createBufferedDetectionTimeline(
       anchorWindowToPlayhead(mediaTime);
     },
 
+    needsBufferPrepare(mediaTime) {
+      return (
+        !destroyed &&
+        isLoadingEnabled() &&
+        (!isBuffered(mediaTime) || !inFlightCovers(mediaTime))
+      );
+    },
+
     needsPlaybackGateWait(mediaTime, prepareOptions) {
       if (
         destroyed ||
@@ -463,6 +508,7 @@ export function createBufferedDetectionTimeline(
       }
 
       anchorWindowToPlayhead(mediaTime);
+      supersedeLoadOutside(mediaTime);
 
       if (!shouldPrefetch(mediaTime)) {
         return;

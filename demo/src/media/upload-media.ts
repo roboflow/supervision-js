@@ -133,32 +133,36 @@ export async function* extractInferenceFrameBatches(options: {
       options.sampleSink,
       timestamps,
     )) {
-      throwIfAborted(options.signal);
-
       const frameIndex = startFrameIndex + offset;
 
       offset += 1;
 
       if (!sample) {
+        throwIfAborted(options.signal);
         throw new Error(`Unable to decode uploaded frame #${frameIndex}.`);
       }
 
+      const { duration, timestamp } = sample;
+
       try {
+        throwIfAborted(options.signal);
         sample.draw(context, 0, 0, canvas.width, canvas.height);
       } finally {
         sample.close();
       }
 
+      throwIfAborted(options.signal);
+
       frames.push({
         duration: sampledFrameCoverage(
-          sample.timestamp,
-          sample.duration,
+          timestamp,
+          duration,
           frameIndex,
           options.media,
         ),
         frameIndex,
         imageBase64: await canvasToJpegBase64(canvas, quality),
-        mediaTime: sample.timestamp,
+        mediaTime: timestamp,
       });
     }
 

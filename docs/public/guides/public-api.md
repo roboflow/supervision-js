@@ -24,6 +24,12 @@ Install the current browser release with `npm install supervision`. See
 [Application Integration](application-integration.md) for the supported
 consumer workflow.
 
+The web video engine subpaths are currently available from the `0.2` preview:
+
+```sh
+npm install supervision@next
+```
+
 The split keeps detections, timelines, styles, retention policies, source
 composition, and picking contracts reusable without making Pixi, Mediabunny,
 workers, or browser storage part of those core concepts.
@@ -408,6 +414,9 @@ generic `./react` entry usable without the optional Worklets peer.
 
 The package is pre-1.0. The strongest compatibility promise is around the
 session-first model:
+
+See [Migrating to 0.2](migrating-to-0.2.md) for source changes required by the
+preview, including interaction presentation options.
 
 1. one media item maps to one session;
 2. detections are semantic input;

@@ -9,6 +9,7 @@ import {
 } from "vitest";
 
 import * as factoryModule from "./create-scrub-cursor";
+import { HANG_RECOVERY } from "./constants";
 import { EngineCore } from "./engine-core";
 import { asSec, WebVideoEngineError, WebVideoEngineErrorCode } from "./types";
 import { handleEngineCommand, type PostEngineEvent } from "./worker-dispatch";
@@ -146,6 +147,11 @@ describe("handleEngineCommand", () => {
       await new Promise<void>((resolve) =>
         requestAnimationFrame(() => resolve()),
       );
+      expect(posts).toHaveLength(0);
+      cursor.emit(asSec(2));
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => resolve()),
+      );
     };
     await handleEngineCommand(
       engine,
@@ -155,7 +161,10 @@ describe("handleEngineCommand", () => {
     expect(posts).toHaveLength(1);
     const [ack] = posts;
     if (ack.type !== "ack") throw new Error(`expected ack, got ${ack.type}`);
-    expect(ack.landing).toBeUndefined();
+    expect(ack.landing).toEqual({
+      frame: { index: 60, ticks: 60000 },
+      mediaTimeS: 2,
+    });
   });
 
   it("step posts an ack carrying the frame the caller cannot predict", async () => {
@@ -213,6 +222,46 @@ describe("handleEngineCommand", () => {
         },
       },
     ]);
+  });
+
+  it("posts the presentation-latch failure before the facade command deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const { engine, posts, post } = setup();
+      await engine.load(LOAD_CONFIG);
+      engine.setCanvas(
+        new FakeOffscreenCanvas(1280, 720) as unknown as OffscreenCanvas,
+        { displayWidth: 1280, devicePixelRatio: 1 },
+      );
+      const handled = handleEngineCommand(
+        engine,
+        { type: "commit", requestId: 12, frameIndex: 60 },
+        post,
+      );
+
+      await vi.advanceTimersByTimeAsync(
+        HANG_RECOVERY.PRESENTATION_LATCH_TIMEOUT_MS,
+      );
+      await handled;
+
+      expect(HANG_RECOVERY.PRESENTATION_LATCH_TIMEOUT_MS).toBeLessThan(
+        HANG_RECOVERY.WORKER_COMMAND_TIMEOUT_MS,
+      );
+      expect(posts).toEqual([
+        {
+          type: "error",
+          requestId: 12,
+          error: {
+            code: WebVideoEngineErrorCode.DecoderStalled,
+            message:
+              "video decode settled without presenting the requested frame",
+          },
+        },
+      ]);
+      await engine.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("an unexpected throw maps to BackendCrashed with the message preserved", async () => {

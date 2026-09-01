@@ -94,12 +94,20 @@ function readRangeHeader(init: RequestInit | undefined): number | null {
  * happens: a run keeps spare capacity so an append that extends it writes into
  * that room, and only a backward or overlapping insert re-materializes the run.
  */
-class ByteStore {
+export class ByteStore {
   #segments: Segment[] = [];
   #bytes = 0;
 
   get residentBytes(): number {
     return this.#bytes;
+  }
+
+  /** Bytes retained by backing arrays, including append headroom. */
+  get allocatedBytes(): number {
+    return this.#segments.reduce(
+      (total, segment) => total + segment.capacity.byteLength,
+      0,
+    );
   }
 
   ranges(): ResidentRange[] {
@@ -199,7 +207,9 @@ class ByteStore {
       segmentEnd(segment) - budgetBytes,
     );
     const offset = viewOffset(segment) + (windowStart - segment.start);
-    segment.view = segment.capacity.subarray(offset, offset + budgetBytes);
+    const retained = segment.capacity.slice(offset, offset + budgetBytes);
+    segment.capacity = retained;
+    segment.view = retained;
     segment.start = windowStart;
     this.#bytes = budgetBytes;
   }
@@ -460,12 +470,57 @@ export function createSourceResidency(
       });
       if (!response.ok) return false;
       totalBytes ??= totalFromHeaders(response);
-      const bytes = new Uint8Array(await response.arrayBuffer());
+      if (!response.body) return false;
+      const responseStart = response.status === 206 ? gap.start : 0;
+      const remainingBudget = Math.max(
+        0,
+        options.budgetBytes - store.residentBytes,
+      );
+      if (remainingBudget === 0) return true;
+      // A range-ignorant origin may stream the entire file. Walk past bytes
+      // before the requested gap, retain only a budget-bounded window, and
+      // cancel as soon as that window is complete. This avoids materialising
+      // an arbitrarily large 200 body before eviction has a chance to run.
+      const retainStart = gap.start;
+      const retainBytes =
+        response.status === 206
+          ? Math.min(gap.end - retainStart, remainingBudget)
+          : options.budgetBytes;
+      const retainEnd = Math.min(
+        retainStart + retainBytes,
+        totalBytes ?? Number.POSITIVE_INFINITY,
+      );
+      const retained = new Uint8Array(Math.max(0, retainEnd - retainStart));
+      const reader = response.body.getReader();
+      let cursor = responseStart;
+      let retainedBytes = 0;
+      let pulledBytes = 0;
+      for (;;) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        const chunkStart = cursor;
+        const chunkEnd = chunkStart + chunk.value.length;
+        pulledBytes += chunk.value.length;
+        const copyStart = Math.max(chunkStart, retainStart);
+        const copyEnd = Math.min(chunkEnd, retainEnd);
+        if (copyEnd > copyStart) {
+          retained.set(
+            chunk.value.subarray(copyStart - chunkStart, copyEnd - chunkStart),
+            copyStart - retainStart,
+          );
+          retainedBytes += copyEnd - copyStart;
+        }
+        cursor = chunkEnd;
+        if (cursor >= retainEnd) {
+          await reader.cancel();
+          break;
+        }
+      }
       if (disposed) return false;
-      store.insert(gap.start, bytes);
-      prefetchedBytes += bytes.length;
+      store.insert(retainStart, retained.subarray(0, retainedBytes));
+      prefetchedBytes += pulledBytes;
       store.evictTo(options.budgetBytes, focus);
-      return true;
+      return retainedBytes > 0;
     } catch {
       return false;
     } finally {
