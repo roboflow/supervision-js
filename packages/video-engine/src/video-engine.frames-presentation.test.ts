@@ -75,8 +75,9 @@ class FakeVideoFrame {
   }
 }
 
-/** A sample whose draw() is a trap: reaching it would mean the frames path went
- *  through a canvas instead of taking the frame straight out of the sample. */
+/** A sample whose draw() is a trap: frames presentation takes a VideoFrame out
+ *  of the sample before materializing it, rather than asking the sample to draw
+ *  through the canvas-renderer path. */
 class FakeSample implements VideoSampleLike {
   closeCount = 0;
   readonly handedOut: FakeVideoFrame[] = [];
@@ -199,6 +200,125 @@ describe("EngineCore in frames presentation", () => {
       mediaTimeS: 1.5,
       quality: "exact",
     });
+    await engine.dispose();
+  });
+
+  it("releases a decoder sample after materializing the host frame", async () => {
+    const { engine, presented, cursor } = setupCore({ clock: new FakeClock() });
+    const sample = new FakeSample(1_500_000);
+    await engine.load(FRAMES_CONFIG);
+
+    cursor.emitFrame({
+      kind: "sample",
+      sample,
+      timestampS: asSec(1.5),
+      width: 320,
+      height: 180,
+      isKeyFrame: false,
+      quality: "exact",
+    });
+    await flushRaf();
+
+    expect(presented).toHaveLength(1);
+    expect(sample.closeCount).toBe(1);
+    await engine.dispose();
+  });
+
+  it("advances playback only for a frame the host displayed, not one it discarded", async () => {
+    const { engine, events, presented, cursor } = setupCore({
+      clock: new FakeClock(),
+    });
+    const sample = new FakeSample(2_000_000);
+    await engine.load(FRAMES_CONFIG);
+    events.length = 0;
+
+    cursor.emitFrame({
+      kind: "sample",
+      sample,
+      timestampS: asSec(2),
+      width: 320,
+      height: 180,
+      isKeyFrame: false,
+      quality: "exact",
+    });
+    await flushRaf();
+
+    expect(events.filter((event) => event.type === "playhead")).toEqual([]);
+    expect(sample.closeCount).toBe(1);
+
+    engine.play();
+    const event = presented[0].event;
+    engine.acknowledgePresentedFrame(
+      event.paintSeq,
+      event.frameId,
+      event.navigationGeneration,
+    );
+
+    expect(events.filter((event) => event.type === "playhead")).toEqual([
+      {
+        type: "playhead",
+        frameId: { index: 60, ticks: 60000 },
+        mediaTimeS: 2,
+      },
+    ]);
+    expect(sample.closeCount).toBe(1);
+    await engine.dispose();
+  });
+
+  it("steps from a host frame whose display completed just after pause", async () => {
+    const clock = new FakeClock();
+    const { engine, presented, cursor } = setupCore({ clock });
+    await engine.load(FRAMES_CONFIG);
+
+    cursor.emit(asSec(5));
+    await flushRaf();
+    const first = presented[0].event;
+    engine.acknowledgePresentedFrame(
+      first.paintSeq,
+      first.frameId,
+      first.navigationGeneration,
+    );
+
+    cursor.emit(asSec(5.2));
+    await flushRaf();
+    expect(presented.at(-1)?.event.frameId.index).toBe(156);
+
+    // Pause first settles on frame 150. The host's already-queued refresh then
+    // makes frame 156 the actual resting picture.
+    engine.play();
+    clock.seek(6.6);
+    engine.pause();
+    expect(clock.now()).toBe(5);
+    const second = presented[1].event;
+    engine.acknowledgePresentedFrame(
+      second.paintSeq,
+      second.frameId,
+      second.navigationGeneration,
+    );
+    expect(clock.now()).toBe(5.2);
+
+    expect((await engine.step(1))?.frame.index).toBe(157);
+    await engine.dispose();
+  });
+
+  it("ignores a displayed-frame acknowledgement from before a newer navigation", async () => {
+    const clock = new FakeClock();
+    const { engine, presented, cursor } = setupCore({ clock });
+    await engine.load(FRAMES_CONFIG);
+
+    cursor.emit(asSec(5));
+    await flushRaf();
+    const stale = presented[0].event;
+
+    engine.scrub(300);
+    expect(clock.now()).toBe(10);
+    engine.acknowledgePresentedFrame(
+      stale.paintSeq,
+      stale.frameId,
+      stale.navigationGeneration,
+    );
+
+    expect(clock.now()).toBe(10);
     await engine.dispose();
   });
 
@@ -436,7 +556,7 @@ describe("ScrubController in frames presentation", () => {
     return { controller, deliver: listeners[0], paints };
   }
 
-  it("a sample hands over its own frame, with no detour through a canvas", async () => {
+  it("materializes a sample into an independent frame for the host", async () => {
     const { controller, deliver, paints } = setupController();
     const sample = new FakeSample(500_000);
 
@@ -453,11 +573,15 @@ describe("ScrubController in frames presentation", () => {
 
     expect(paints).toHaveLength(1);
     expect(sample.handedOut).toHaveLength(1);
-    expect(paints[0].presented).toBe(sample.handedOut[0]);
-    // The sample is spent, but the frame taken out of it is a separate
-    // reference the receiver still owns.
+    expect(wrapped).toHaveLength(2);
+    expect(paints[0].presented).toBe(wrapped[1] as unknown as VideoFrame);
+    expect(wrapped[1].source).toBeInstanceOf(FakeOffscreenCanvas);
+    expect(wrapped[1].init?.timestamp).toBe(500_000);
+    // Materialization spends both the sample and its decoder-backed frame. The
+    // independently wrapped canvas frame remains owned by the receiver.
     expect(sample.closeCount).toBe(1);
-    expect(sample.handedOut[0].closeCount).toBe(0);
+    expect(sample.handedOut[0].closeCount).toBe(1);
+    expect(wrapped[1].closeCount).toBe(0);
     controller.dispose();
   });
 
@@ -478,6 +602,7 @@ describe("ScrubController in frames presentation", () => {
 
 class FakeWorkerPort implements EngineWorkerPort {
   readonly engine: EngineCore;
+  readonly posts: EngineCommand[] = [];
   private listener: ((event: MessageEvent<EngineEvent>) => void) | null = null;
 
   constructor(clock: MediaClock) {
@@ -489,6 +614,7 @@ class FakeWorkerPort implements EngineWorkerPort {
   }
 
   postMessage(command: EngineCommand): void {
+    this.posts.push(command);
     void handleEngineCommand(this.engine, command, (out) => this.deliver(out));
   }
 
@@ -507,15 +633,20 @@ class FakeWorkerPort implements EngineWorkerPort {
 }
 
 describe("WebVideoEngine in frames presentation", () => {
-  function setupFacade(): { engine: WebVideoEngine; cursor: FakeCursor } {
+  function setupFacade(): {
+    engine: WebVideoEngine;
+    cursor: FakeCursor;
+    port: FakeWorkerPort;
+  } {
     const cursor = makeFakeCursor();
     vi.spyOn(factoryModule, "createScrubCursor").mockResolvedValue(cursor);
     const clock = new FakeClock();
+    const port = new FakeWorkerPort(clock);
     const engine = new WebVideoEngine(
       { source: LOAD_CONFIG.source, presentation: "frames" },
-      () => new FakeWorkerPort(clock),
+      () => port,
     );
-    return { engine, cursor };
+    return { engine, cursor, port };
   }
 
   it("the registered consumer receives identity and pixels together and owns them", async () => {
@@ -541,6 +672,30 @@ describe("WebVideoEngine in frames presentation", () => {
     expect(wrapped[0].closeCount).toBe(1);
     // The mirror channel keeps carrying the pixel-less frame event.
     expect(engine.getPaintSeq()).toBe(1);
+    await engine.dispose();
+  });
+
+  it("reports display and release as separate host decisions", async () => {
+    const { engine, cursor, port } = setupFacade();
+    const seen: PresentedFrame[] = [];
+    engine.toHandle().onPresentedFrame((presented) => seen.push(presented));
+    await engine.load();
+
+    cursor.emit(asSec(2));
+    await flushRaf();
+
+    expect(engine.getTimeMs()).toBe(0);
+    const acknowledge = vi
+      .spyOn(port.engine, "acknowledgePresentedFrame")
+      .mockImplementation(() => undefined);
+    await engine.play();
+    seen[0].acknowledgePresentation();
+    expect(engine.getTimeMs()).toBe(2000);
+    expect(acknowledge).toHaveBeenCalledWith(1, { index: 60, ticks: 60000 }, 1);
+    expect(wrapped[0].closeCount).toBe(0);
+
+    seen[0].frame.close();
+    expect(wrapped[0].closeCount).toBe(1);
     await engine.dispose();
   });
 

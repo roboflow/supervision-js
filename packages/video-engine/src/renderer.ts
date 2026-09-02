@@ -115,7 +115,24 @@ export class TransferFrameSink implements FrameSink {
   readonly name = null;
 
   present(frame: ScrubFrame): VideoFrame {
-    if (frame.kind === "sample") return frame.sample.toVideoFrame();
+    if (frame.kind === "sample") {
+      const source = frame.sample.toVideoFrame();
+      try {
+        const canvas = new OffscreenCanvas(frame.width, frame.height);
+        const context = canvas.getContext("2d", {
+          alpha: false,
+          colorSpace: DISPLAY_COLOR_SPACE,
+        });
+        if (!context) throw new Error("2D frame transfer unavailable");
+        context.drawImage(source, 0, 0, frame.width, frame.height);
+        context.getImageData(0, 0, 1, 1);
+        return new VideoFrame(canvas, {
+          timestamp: Math.round(frame.timestampS * 1e6),
+        });
+      } finally {
+        source.close();
+      }
+    }
     return new VideoFrame(frame.source, {
       timestamp: Math.round(frame.timestampS * 1e6),
     });

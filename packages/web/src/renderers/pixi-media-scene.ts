@@ -328,7 +328,7 @@ export async function createPixiMediaScene(
   let isPresenting = false;
   let isDestroyed = false;
   let displayFrameHandle: number | null = null;
-  let hasDeferredPresentRender = false;
+  let deferredPresentedFrame: PresentedVideoFrame | null = null;
   /**
    * The detection under an editing gesture. The base layers hide it while the
    * annotation overlay draws its live preview, so an edit never shows beside a
@@ -1523,6 +1523,8 @@ export async function createPixiMediaScene(
         cancelDisplayFrame(displayFrameHandle);
         displayFrameHandle = null;
       }
+      deferredPresentedFrame?.frame.close();
+      deferredPresentedFrame = null;
       unsubscribeDetectionTimeline?.();
       disconnectContainerResizeObserver();
       app.cancelResize?.();
@@ -2309,11 +2311,24 @@ export async function createPixiMediaScene(
   }
 
   function handlePresentedFrame(presented: PresentedVideoFrame) {
-    if (!mediaCompositor) {
+    if (!mediaCompositor || isDestroyed) {
       presented.frame.close();
       return;
     }
 
+    // The producer may outrun the display refresh. Keep only its newest frame
+    // for the next refresh, and never acknowledge a superseded frame as
+    // presented: neither its pixels nor its annotations reached the canvas.
+    if (displayFrameHandle !== null) {
+      deferredPresentedFrame?.frame.close();
+      deferredPresentedFrame = presented;
+      return;
+    }
+
+    presentFrameNow(presented);
+  }
+
+  function presentFrameNow(presented: PresentedVideoFrame) {
     // Scheduling a cook notifies, and a notification that drew or rendered
     // here would put a second render inside one present.
     isPresenting = true;
@@ -2352,30 +2367,30 @@ export async function createPixiMediaScene(
   /**
    * Renders a present at most once per display refresh. Frames arrive as
    * messages from the producer's own thread, so a main thread that falls
-   * behind takes a whole burst in one refresh and submits a scene per frame
-   * that only the last of can reach the screen. Deferring costs no latency:
-   * the skipped render is replaced before the refresh it would have made.
+   * behind keeps only the latest frame for the next refresh. Coalescing before
+   * the atomic present is important: a skipped frame must not upload pixels,
+   * draw annotations, or advance the producer's presented playhead.
    */
   function renderPresent() {
-    if (displayFrameHandle !== null) {
-      hasDeferredPresentRender = true;
-      return;
-    }
-
     renderScene();
-    displayFrameHandle = requestDisplayFrame(flushDeferredPresentRender);
+    displayFrameHandle = requestDisplayFrame(flushDeferredPresentedFrame);
   }
 
-  function flushDeferredPresentRender() {
+  function flushDeferredPresentedFrame() {
     displayFrameHandle = null;
+    const deferred = deferredPresentedFrame;
+    deferredPresentedFrame = null;
 
-    if (!hasDeferredPresentRender || isDestroyed) {
+    if (!deferred) {
       return;
     }
 
-    hasDeferredPresentRender = false;
-    renderScene();
-    displayFrameHandle = requestDisplayFrame(flushDeferredPresentRender);
+    if (isDestroyed) {
+      deferred.frame.close();
+      return;
+    }
+
+    presentFrameNow(deferred);
   }
 
   function renderNow() {

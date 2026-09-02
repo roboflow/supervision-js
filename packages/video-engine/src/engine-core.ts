@@ -173,6 +173,10 @@ export class EngineCore {
   private playSeekMaxMs = 0;
   /** The frame the last paint put up, for the diagnostics screen readout. */
   private lastPaintedId: FrameId | null = null;
+  /** Last frame the host confirmed reached its display surface. */
+  private lastHostFrame: FrameLanding | null = null;
+  /** Rejects an older refresh that completes after a newer one in one epoch. */
+  private lastHostPaintSeq = 0;
   /** Mirrors WebVideoEngine's interactive-seek latch: true when a drag paused a
    *  playing engine, so endInteractiveSeek knows to resume. */
   private resumeAfterInteractiveSeek = false;
@@ -217,6 +221,7 @@ export class EngineCore {
   }
 
   async load(config: EngineLoadConfig): Promise<EngineReadySnapshot> {
+    this.beginPresentationGeneration();
     this.presentation = config.presentation ?? "canvas";
     this.displayBox =
       config.decodeStrategy?.kind === "displayBox"
@@ -243,6 +248,7 @@ export class EngineCore {
         : null;
     this.cursor = await createScrubCursor({
       source: config.source,
+      presentation: this.presentation,
       sourceResidency: this.residency ?? undefined,
       urlSource: config.urlSource,
       decodeStrategy: config.decodeStrategy ?? nativeResolution(),
@@ -314,6 +320,7 @@ export class EngineCore {
     // straight to Ended. Snap back to 0 first.
     const durS = this.durationMs / 1000;
     if (durS > 0 && this.clock.now() >= durS) {
+      this.beginPresentationGeneration();
       const first = this.timeline().landingAt(0);
       this.clock.seek(first.mediaTimeS);
       this.emit({
@@ -343,8 +350,20 @@ export class EngineCore {
     // to the picture the viewer stopped, so make that frame the settled
     // position before ending the playback walk. Resume and single-frame steps
     // must not jump across catch-up work that was never presented.
-    if (wasPlaying && this.lastPaintedId) {
-      this.clock.seek(this.timeline().timeAt(this.lastPaintedId.index));
+    const stoppedFrame =
+      this.presentation === "frames"
+        ? (this.lastHostFrame?.frame ?? null)
+        : this.lastPaintedId;
+    if (wasPlaying && stoppedFrame) {
+      const stopped = this.timeline().landingAt(stoppedFrame.index);
+      this.clock.seek(stopped.mediaTimeS);
+      if (this.presentation === "frames") {
+        this.emit({
+          type: "playhead",
+          frameId: stopped.frame,
+          mediaTimeS: stopped.mediaTimeS,
+        });
+      }
     }
     this.controller?.endPlay();
     if (wasPlaying) this.abandonAwaitedSeek();
@@ -564,6 +583,7 @@ export class EngineCore {
       timeline.idAt(timeline.indexAtOrBefore(this.clock.now()));
     const target = timeline.landingAt(base.index + direction);
     if (target.frame.index === base.index) return null;
+    this.beginPresentationGeneration();
     const next = await this.cursor.seekToFrame(target.frame);
     if (!next) return null;
     this.lastStepLanded = target.frame;
@@ -644,6 +664,7 @@ export class EngineCore {
       this.stoppedTrace = this.traceRecorder.assemble();
     }
     this.traceRecorder = null;
+    this.beginPresentationGeneration();
     this.failAwaitedSeek(
       new WebVideoEngineError(
         WebVideoEngineErrorCode.Aborted,
@@ -707,7 +728,7 @@ export class EngineCore {
   ): SeekLandingWait {
     this.abandonAwaitedSeek();
     this.seekLanded = null;
-    const generation = ++this.seekGeneration;
+    const generation = this.beginPresentationGeneration();
     this.playSeekStartedAtMs = null;
     if (this.presentation === "canvas" && this.canvas === null) {
       return { generation, presented: Promise.resolve(null) };
@@ -903,8 +924,49 @@ export class EngineCore {
     });
     // Two sources of truth gated by clock state. Playing: paint owns time.
     // Paused: the main thread owns it, so stay quiet.
-    if (!this.clock.playing) return;
+    if (!this.clock.playing || this.presentation === "frames") return;
     this.emit({ type: "playhead", frameId, mediaTimeS });
+  }
+
+  /** Makes only a frame the host actually rendered authoritative for playback
+   *  time and pause settlement. An older navigation or refresh cannot move the
+   *  clock backward after a newer frame has won. */
+  acknowledgePresentedFrame(
+    paintSeq: number,
+    frameId: FrameId,
+    navigationGeneration: number,
+  ): void {
+    if (
+      !this.cursor ||
+      navigationGeneration !== this.seekGeneration ||
+      paintSeq <= this.lastHostPaintSeq
+    ) {
+      return;
+    }
+    const landing = this.timeline().landingAt(frameId.index);
+    if (landing.frame.ticks !== frameId.ticks) return;
+    this.lastHostPaintSeq = paintSeq;
+    this.lastHostFrame = landing;
+    if (this.presentation !== "frames") return;
+    // A display refresh already queued on the host can finish just after the
+    // pause command. That frame is now the picture the user is looking at, so
+    // the paused worker clock must follow it; otherwise the next +1 step bases
+    // itself on the older frame pause first observed and appears to jump back.
+    if (!this.playing) {
+      this.clock.seek(landing.mediaTimeS);
+      return;
+    }
+    this.emit({
+      type: "playhead",
+      frameId: landing.frame,
+      mediaTimeS: landing.mediaTimeS,
+    });
+  }
+
+  private beginPresentationGeneration(): number {
+    this.lastHostFrame = null;
+    this.lastHostPaintSeq = 0;
+    return ++this.seekGeneration;
   }
 
   /**
@@ -924,11 +986,13 @@ export class EngineCore {
       frame.close();
       return;
     }
+    const paintSeq = this.paintSeq;
     try {
       emit(
         {
           type: "presentedFrame",
-          paintSeq: this.paintSeq,
+          paintSeq,
+          navigationGeneration: this.seekGeneration,
           frameId: landing.frame,
           mediaTimeS: landing.mediaTimeS,
           mediaTimeMs: landing.mediaTimeS * 1000,

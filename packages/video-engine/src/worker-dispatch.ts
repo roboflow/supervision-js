@@ -64,6 +64,13 @@ export async function handleEngineCommand(
     case "togglePlayback":
       engine.togglePlayback();
       return;
+    case "acknowledgePresentedFrame":
+      engine.acknowledgePresentedFrame(
+        command.paintSeq,
+        command.frameId,
+        command.navigationGeneration,
+      );
+      return;
     case "beginInteractiveSeek":
       engine.beginInteractiveSeek();
       return;

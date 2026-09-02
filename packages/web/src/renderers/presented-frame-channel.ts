@@ -30,6 +30,8 @@ export interface PresentedVideoFrame {
    */
   readonly mediaTimeS: number;
   readonly frame: VideoFrame;
+  /** Present when the producer distinguishes frame delivery from display. */
+  readonly acknowledgePresentation?: () => void;
 }
 
 /** Where the producer's playhead sits, named as a frame of the source. */
@@ -213,7 +215,24 @@ export function createProtectedPresentedFrameSource(
       if (active === run) active = null;
       run.handedOff = true;
       try {
-        downstream!(frame);
+        const acknowledge = frame.acknowledgePresentation;
+        downstream!(
+          acknowledge
+            ? {
+                ...frame,
+                acknowledgePresentation: () => {
+                  if (
+                    destroyed ||
+                    controller.signal.aborted ||
+                    run.generation !== generation
+                  ) {
+                    return;
+                  }
+                  acknowledge();
+                },
+              }
+            : frame,
+        );
       } catch (error) {
         failPresentation(error);
         return;

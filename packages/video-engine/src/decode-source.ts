@@ -530,7 +530,10 @@ export async function openScrubSource(
       webgpuImportAvailable: detectWebgpuImport(),
     })
   ) {
-    return sampleHandle(opened);
+    return sampleHandle(opened, options.presentation === "frames");
+  }
+  if (options.presentation === "frames") {
+    return sampleHandle(opened, true);
   }
   return canvasHandle(opened, options.poolSize ?? SCRUB.DEFAULT_POOL_SIZE);
 }
@@ -607,12 +610,18 @@ function canvasHandle(
 
 /** The zero-copy sample path: a VideoSampleSink in place of the CanvasSink. It
  *  takes no width, so frames arrive at the source's own dimensions. */
-function sampleHandle(opened: OpenedInput): SampleSourceHandle {
+function sampleHandle(
+  opened: OpenedInput,
+  optimizeForLatency = false,
+): SampleSourceHandle {
   const { timeline } = opened.track;
   return {
     track: opened.track,
     sampleSink: presentationSampleSource(
-      new VideoSampleSink(opened.videoTrack),
+      new VideoSampleSink(
+        opened.videoTrack,
+        optimizeForLatency ? { optimizeForLatency: true } : undefined,
+      ),
       timeline,
     ),
     keyframeProbe: presentationKeyframeProbe(

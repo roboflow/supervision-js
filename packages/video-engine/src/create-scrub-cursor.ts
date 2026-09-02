@@ -11,6 +11,7 @@ import type { DecodeResolutionStrategy } from "./decode-resolution";
 import { FrameCache } from "./frame-cache";
 import type { ScrubCursor, ScrubCursorFactory } from "./scrub-cursor";
 import type { SourceResidency } from "./source-residency";
+import type { PresentationMode } from "./types";
 import type {
   UrlSourceReadConfig,
   WebVideoEngineError,
@@ -37,6 +38,9 @@ export interface ScrubCacheConfig {
 
 export interface CreateScrubCursorOptions {
   source: VideoSource;
+  /** How decoded pixels leave the worker. Host-frame presentation keeps samples
+   * available until the selected output can be copied for transfer. */
+  presentation?: PresentationMode;
   /**
    * Decides the resolution frames are held and painted at: the display canvas
    * backing store and every cache blit. Combined with the viewport and the

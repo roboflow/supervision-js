@@ -114,6 +114,12 @@ export type FireAndForgetCommand =
     }
   | { readonly type: "pause" }
   | { readonly type: "togglePlayback" }
+  | {
+      readonly type: "acknowledgePresentedFrame";
+      readonly paintSeq: number;
+      readonly frameId: FrameId;
+      readonly navigationGeneration: number;
+    }
   | { readonly type: "beginInteractiveSeek" }
   // Fire-and-forget because the facade has already validated the rate against
   // the same range the core does, so the only reply worth waiting for is the
@@ -256,8 +262,10 @@ export interface DiagnosticsEvent {
  * Identity rides in the same message as the pixels and is reachable nowhere
  * else, so what a consumer holds and what it believes it holds cannot drift.
  */
-export interface PresentedFrame {
+interface PresentedFramePayload {
   readonly paintSeq: number;
+  /** Navigation epoch in which the worker selected these pixels. */
+  readonly navigationGeneration: number;
   /** Which frame of the source these pixels are. */
   readonly frameId: FrameId;
   /** `frameId.ticks / tickRate`, the one seconds value anyone publishes. */
@@ -277,13 +285,23 @@ export interface PresentedFrame {
   readonly frame: VideoFrame;
 }
 
+/** A frame delivered to the host. Acknowledging means its pixels and matching
+ *  layers reached the host surface. A frame discarded before display is closed
+ *  without being acknowledged. */
+export interface PresentedFrame extends Omit<
+  PresentedFramePayload,
+  "navigationGeneration"
+> {
+  acknowledgePresentation(): void;
+}
+
 /**
  * The pixel plane, worker -> main. A fourth EngineEvent arm, neither a
  * MirrorEvent nor a ResponseEvent: it is the only channel a presented frame has,
  * and the VideoFrame rides this message's transfer list, so the worker's
  * reference is detached the moment it is posted.
  */
-export interface PresentedFrameEvent extends PresentedFrame {
+export interface PresentedFrameEvent extends PresentedFramePayload {
   readonly type: "presentedFrame";
 }
 

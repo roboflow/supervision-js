@@ -93,6 +93,7 @@ export function presentVideoFrame(
 
     targets.render();
     targets.completePresentation(mediaTime, boxState, regionState);
+    presented.acknowledgePresentation?.();
   } finally {
     presented.frame.close();
   }

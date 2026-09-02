@@ -500,8 +500,9 @@ export class WebVideoEngine {
   /**
    * Registers THE consumer of presented frames, in "frames" presentation mode.
    * A second registration replaces the first, so at most one holder exists.
-   * The handler owns every frame it is given and must close() it; one left
-   * open pins a decoder buffer and stalls the decoder.
+   * After synchronously drawing the frame and its matching layers, the handler
+   * calls acknowledgePresentation(), then close(). A discarded frame is only
+   * closed. One left open pins a decoder buffer and stalls the decoder.
    *
    * There is deliberately no counterpart that reports the frame most recently
    * presented. A frame readable apart from the message that carried it can be
@@ -670,6 +671,7 @@ export class WebVideoEngine {
       event.frame.close();
       return;
     }
+    let acknowledged = false;
     handler({
       paintSeq: event.paintSeq,
       frameId: event.frameId,
@@ -678,6 +680,21 @@ export class WebVideoEngine {
       quality: event.quality,
       rotation: event.rotation,
       frame: event.frame,
+      acknowledgePresentation: () => {
+        if (acknowledged) return;
+        acknowledged = true;
+        // The compositor just finished this exact frame on this thread. Move
+        // the visible playhead now; the worker round trip only records the
+        // same landing for pause settlement and would make the timeline trail
+        // pixels that are already on screen.
+        this.store.writePlayhead(event.frameId, event.mediaTimeS);
+        this.post({
+          type: "acknowledgePresentedFrame",
+          paintSeq: event.paintSeq,
+          frameId: event.frameId,
+          navigationGeneration: event.navigationGeneration,
+        });
+      },
     });
     this.checkFrameOwnership(event.frame);
   }
@@ -875,10 +892,9 @@ function toEngineError(cause: unknown): WebVideoEngineError {
   );
 }
 
-/**
- * Receives one presented frame and owns it: it must close() the VideoFrame, and
- * the identity it is judged against arrives in the same object, never fetched.
- */
+/** Receives one presented frame and owns it. After drawing its pixels and
+ * matching layers, call acknowledgePresentation(), then close(). If it is
+ * discarded before display, only close it. */
 export type PresentedFrameHandler = (presented: PresentedFrame) => void;
 
 /**
@@ -938,7 +954,8 @@ export interface WebVideoEngineHandle {
   /**
    * Registers the single consumer of presented frames ("frames" presentation
    * mode). Registering again replaces the previous consumer. The handler owns
-   * each frame and must close() it.
+   * each frame; a displayed frame is acknowledged before it is closed, while a
+   * discarded frame is only closed.
    */
   onPresentedFrame(handler: PresentedFrameHandler): void;
   subscribe(channel: EngineChannel, listener: () => void): () => void;

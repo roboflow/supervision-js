@@ -95,6 +95,35 @@ describe("presented frame channel", () => {
     protectedSource.destroy();
   });
 
+  it("does not acknowledge a handed-off frame after navigation invalidates it", () => {
+    let emit!: (presented: PresentedVideoFrame) => void;
+    const upstream: PresentedFrameSource = {
+      onPresentedFrame(handler) {
+        emit = handler;
+      },
+    };
+    const protectedSource = createProtectedPresentedFrameSource(upstream);
+    const acknowledgePresentation = vi.fn();
+    let acknowledge!: () => void;
+    protectedSource.source.onPresentedFrame((owned) => {
+      acknowledge = owned.acknowledgePresentation!;
+    });
+    protectedSource.activate(() => null);
+
+    emit({
+      acknowledgePresentation,
+      frame: { close: vi.fn() } as unknown as VideoFrame,
+      frameId: { index: 11, ticks: 11000 },
+      mediaTimeS: 11,
+      paintSeq: 1,
+    });
+    protectedSource.beginNavigation();
+    acknowledge();
+
+    expect(acknowledgePresentation).not.toHaveBeenCalled();
+    protectedSource.destroy();
+  });
+
   it("reports a scene failure after the first presentation without reclaiming its frame", async () => {
     let emit!: (presented: PresentedVideoFrame) => void;
     const upstream: PresentedFrameSource = {

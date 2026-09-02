@@ -211,11 +211,13 @@ export class FakeOffscreenCanvas {
   getContext(): {
     drawImage: () => void;
     clearRect: () => void;
+    getImageData: () => void;
     canvas: FakeOffscreenCanvas;
   } {
     return {
       drawImage: (): void => undefined,
       clearRect: (): void => undefined,
+      getImageData: (): void => undefined,
       canvas: this,
     };
   }

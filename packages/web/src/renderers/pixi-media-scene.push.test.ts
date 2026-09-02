@@ -532,7 +532,7 @@ describe("push-presented Pixi scene", () => {
   });
 
   it("closes every frame of a burst even though most of them never render", async () => {
-    stubAnimationFrames();
+    const frames = stubAnimationFrames();
     const channel = createChannel();
     const { createPixiMediaScene } = await import("./pixi-media-scene");
     const scene = await createPixiMediaScene(
@@ -547,9 +547,15 @@ describe("push-presented Pixi scene", () => {
     }
 
     expect(scene.getRenderCount?.()).toBe(1);
-    for (const presented of burst) {
+    for (const presented of burst.slice(0, -1)) {
       expect(presented.frame.close).toHaveBeenCalledTimes(1);
     }
+    expect(burst.at(-1)?.frame.close).not.toHaveBeenCalled();
+
+    frames.run();
+
+    expect(scene.getRenderCount?.()).toBe(2);
+    expect(burst.at(-1)?.frame.close).toHaveBeenCalledTimes(1);
   });
 
   it("leaves Pixi's ticker unused so nothing free-runs", async () => {
