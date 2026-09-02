@@ -3,9 +3,13 @@ import { describe, expect, it } from "vitest";
 import {
   RenderPreparationArtifactFrameStatus,
   RenderPreparationArtifactKind,
+  type MediaRenderer,
 } from "supervision";
 
-import type { PresentationDiagnosticsSample } from "../diagnostics/presentation-diagnostics";
+import {
+  samplePresentationDiagnostics,
+  type PresentationDiagnosticsSample,
+} from "../diagnostics/presentation-diagnostics";
 import type { PresentedFrameRecord } from "../diagnostics/presented-frame-tap";
 import {
   presentationSampleUnchanged,
@@ -46,6 +50,7 @@ function sample(
     lastPresented: records.at(-1) ?? null,
     presentedCount,
     presentedPerSecond: 30,
+    presentedTime: records.at(-1)?.mediaTimeS ?? null,
     readinessBands: [{ startTime: 0, endTime: 4 }],
     renderCount: presentedCount,
     ticks: records,
@@ -108,6 +113,53 @@ describe("presented frame ticks", () => {
   });
 });
 
+describe("accepted presentation time", () => {
+  it("does not promote an upstream handoff before the scene accepts it", () => {
+    const handedOut = record(30);
+    const renderer = {
+      getPreparedAnnotationWindow: () => null,
+      getRenderCount: () => 0,
+      getState: () => ({ presentedFrames: 0, presentedTime: null }),
+    } as unknown as MediaRenderer;
+    const tap = {
+      read: () => ({
+        lastPresented: handedOut,
+        presentedCount: 1,
+        presentedPerSecond: 1,
+        records: [handedOut],
+      }),
+    } as never;
+
+    expect(samplePresentationDiagnostics({ renderer, tap })).toMatchObject({
+      lastPresented: handedOut,
+      presentedCount: 0,
+      presentedTime: null,
+    });
+  });
+
+  it("reports no on-screen time for a legacy renderer instead of relabeling a handoff", () => {
+    const handedOut = record(30);
+    const renderer = {
+      getPreparedAnnotationWindow: () => null,
+      getRenderCount: () => 0,
+      getState: () => ({ currentTime: 30, presentedFrames: 0 }),
+    } as unknown as MediaRenderer;
+    const tap = {
+      read: () => ({
+        lastPresented: handedOut,
+        presentedCount: 1,
+        presentedPerSecond: 1,
+        records: [handedOut],
+      }),
+    } as never;
+
+    expect(samplePresentationDiagnostics({ renderer, tap })).toMatchObject({
+      lastPresented: handedOut,
+      presentedTime: null,
+    });
+  });
+});
+
 describe("render-preparation gate target", () => {
   const heldArtifact = {
     activeFrame: {
@@ -151,6 +203,12 @@ describe("presentationSampleUnchanged", () => {
       presentationSampleUnchanged(
         before,
         sample(120, { presentedPerSecond: 29 }),
+      ),
+    ).toBe(false);
+    expect(
+      presentationSampleUnchanged(
+        before,
+        sample(120, { presentedTime: before.presentedTime! + 1 }),
       ),
     ).toBe(false);
     expect(

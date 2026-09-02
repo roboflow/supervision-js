@@ -69,7 +69,13 @@ export function isLiveAtClipEnd(readouts: LiveReadouts) {
 }
 
 export function formatLiveTimecode(readouts: LiveReadouts) {
-  return formatExactTime(readouts.currentTime);
+  return formatExactTime(readLivePresentedTime(readouts));
+}
+
+/** The picture's timestamp, already normalized when an older renderer does
+ * not report one separately. */
+export function readLivePresentedTime(readouts: LiveReadouts) {
+  return readouts.presentedTime;
 }
 
 export function formatLiveDetectionTime(readouts: LiveReadouts) {

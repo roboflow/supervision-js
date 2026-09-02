@@ -1701,7 +1701,21 @@ describe("media renderer core", () => {
     await renderer.refresh();
 
     expect(scene.setPresentation).toHaveBeenCalledTimes(2);
-    expect(renderer.getState().presentedFrames).toBe(1);
+    expect(scene.setPresentation).toHaveBeenNthCalledWith(
+      1,
+      expect.anything(),
+      0.04,
+    );
+    expect(scene.setPresentation).toHaveBeenNthCalledWith(
+      2,
+      expect.anything(),
+      0.04,
+    );
+    expect(renderer.getState()).toMatchObject({
+      currentTime: 0.08,
+      presentedFrames: 1,
+      presentedTime: 0.04,
+    });
 
     renderer.destroy();
   });

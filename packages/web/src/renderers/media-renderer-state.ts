@@ -29,6 +29,7 @@ interface MediaRendererRuntimeStateOptions {
 
 export interface MediaRendererRuntimeState {
   currentTime(): number;
+  presentedTime(): number | null;
   duration(): number | null;
   errorMessage(): string | null;
   isDestroyed(): boolean;
@@ -90,6 +91,7 @@ export function createMediaRendererRuntimeState(
   let rendererBackend: string | null = null;
   /** Frames put on screen, not paints. */
   let presentedFrames = 0;
+  let presentedTime: number | null = null;
   let presentedFrameSerial = 0;
   let activeDetectionFrameTime: number | null = null;
   let activeDetectionFrameIndex: number | null = null;
@@ -132,6 +134,7 @@ export function createMediaRendererRuntimeState(
     playbackGateReach: options.getPlaybackGateReach(),
     playbackState,
     presentedFrames,
+    presentedTime,
     renderPreparationGateAbandoned,
     scrubbing,
     seeking,
@@ -169,8 +172,14 @@ export function createMediaRendererRuntimeState(
     options.onState?.(createStateSnapshot());
   };
 
-  const adoptPresentedSample = (sample: PresentedMediaSample) => {
-    currentTime = sample.mediaTime;
+  const adoptPresentedSample = (
+    sample: PresentedMediaSample,
+    adoptCurrentTime: boolean,
+  ) => {
+    if (adoptCurrentTime) {
+      currentTime = sample.mediaTime;
+    }
+    presentedTime = sample.mediaTime;
     activeDetectionFrameIndex = sample.activeDetectionFrameIndex;
     activeDetectionFrameTime = sample.activeDetectionFrameTime;
     activeDetectionCount = sample.activeDetectionCount;
@@ -181,6 +190,10 @@ export function createMediaRendererRuntimeState(
   return {
     currentTime() {
       return currentTime;
+    },
+
+    presentedTime() {
+      return presentedTime;
     },
 
     duration() {
@@ -280,7 +293,7 @@ export function createMediaRendererRuntimeState(
       currentFrameDuration = sample.duration ?? currentFrameDuration;
       presentedFrames += 1;
       presentedFrameSerial = sample.presentedFrameSerial;
-      adoptPresentedSample(sample);
+      adoptPresentedSample(sample, true);
       lastFrameRenderTimings = sample.renderTimings ?? null;
 
       options.onFrame?.(createFrameDiagnostics(sample));
@@ -288,12 +301,14 @@ export function createMediaRendererRuntimeState(
     },
 
     recordPresentationUpdate(sample) {
-      if (sample.presentedFrameSerial !== presentedFrameSerial) {
+      const isNewPresentedFrame =
+        sample.presentedFrameSerial !== presentedFrameSerial;
+      if (isNewPresentedFrame) {
         presentedFrames += 1;
         presentedFrameSerial = sample.presentedFrameSerial;
       }
 
-      adoptPresentedSample(sample);
+      adoptPresentedSample(sample, isNewPresentedFrame);
       lastFrameRenderTimings = sample.renderTimings ?? lastFrameRenderTimings;
 
       emitState();

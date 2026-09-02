@@ -40,8 +40,7 @@ export const PresentationDiagnostics = memo(function PresentationDiagnostics({
   readonly renderPreparationDiagnostics: RenderPreparationDiagnostics | null;
 }) {
   const sample = usePolledSample(readSample);
-  const playheadTime =
-    sample.lastPresented === null ? null : sample.lastPresented.mediaTimeS;
+  const playheadTime = sample.presentedTime;
   const preparationArtifact = selectPreparedWindowArtifact(
     renderPreparationDiagnostics,
   );
@@ -67,7 +66,7 @@ export const PresentationDiagnostics = memo(function PresentationDiagnostics({
           }
         />
         <Readout
-          label="Presented/s"
+          label="Handed out/s"
           value={
             sample.presentedPerSecond === null
               ? UNAVAILABLE
@@ -75,17 +74,17 @@ export const PresentationDiagnostics = memo(function PresentationDiagnostics({
           }
         />
         <Readout
-          label="Playhead"
+          label="On screen"
           value={
             playheadTime === null ? UNAVAILABLE : formatExactTime(playheadTime)
           }
         />
         <Readout
-          label="Quality"
+          label="Handoff quality"
           value={sample.lastPresented?.quality ?? UNAVAILABLE}
         />
         <Readout
-          label="Frame"
+          label="Handoff frame"
           value={
             sample.lastPresented === null
               ? UNAVAILABLE
@@ -150,7 +149,7 @@ export function PresentedFrameTimeline({
 
   return (
     <div className="presented-timeline" aria-hidden="true">
-      <TimelineLane label="Frames" playheadLeft={playheadLeft}>
+      <TimelineLane label="Handed out" playheadLeft={playheadLeft}>
         {ticks.map((tick) => (
           <span
             className={`presented-timeline__tick presented-timeline__tick--${tick.quality}`}
@@ -277,6 +276,7 @@ export function presentationSampleUnchanged(
   return (
     previous.presentedCount === next.presentedCount &&
     previous.presentedPerSecond === next.presentedPerSecond &&
+    previous.presentedTime === next.presentedTime &&
     previous.renderCount === next.renderCount &&
     sameFrame(previous.lastPresented, next.lastPresented) &&
     sameBands(previous.readinessBands, next.readinessBands)

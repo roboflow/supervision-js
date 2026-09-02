@@ -10,6 +10,7 @@ import type {
 export interface LiveReadouts {
   readonly activeDetectionFrameTime: number | null;
   readonly currentTime: number | null;
+  readonly presentedTime: number | null;
   readonly detectionBuffer: DetectionBufferState | null;
   readonly duration: number | null;
   readonly playbackRate: number;
@@ -29,6 +30,7 @@ export type LiveReadoutCadence = "geometry" | "text";
 const idleReadouts: LiveReadouts = {
   activeDetectionFrameTime: null,
   currentTime: null,
+  presentedTime: null,
   detectionBuffer: null,
   duration: null,
   playbackRate: 1,
@@ -136,6 +138,10 @@ export function publishLiveRendererState(
     playbackRate: state.playbackRate,
     playbackState: state.playbackState,
     presentedRate,
+    presentedTime:
+      state.presentedTime === undefined
+        ? state.currentTime
+        : state.presentedTime,
     seeking: state.seeking === true,
     sourceFrameRate: state.source.estimatedFrameRate ?? null,
   };

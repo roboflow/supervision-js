@@ -60,15 +60,17 @@ describe("media renderer runtime state", () => {
     });
   });
 
-  it("counts no new frame when the scene redraws the frame on screen at a moved playhead", () => {
+  it("keeps an advanced playhead when the scene redraws the retained frame", () => {
     const state = createRuntimeState();
 
     state.recordPresentationUpdate(createPresentedFrame(0.04, 1));
-    state.recordPresentationUpdate(createPresentedFrame(0.08, 1));
+    state.recordPlayheadTime(0.08);
+    state.recordPresentationUpdate(createPresentedFrame(0.04, 1));
 
     expect(state.snapshot()).toMatchObject({
       currentTime: 0.08,
       presentedFrames: 1,
+      presentedTime: 0.04,
     });
   });
 
@@ -89,6 +91,26 @@ describe("media renderer runtime state", () => {
     expect(state.snapshot()).toMatchObject({
       currentTime: 0.08,
       presentedFrames: 0,
+    });
+  });
+
+  it("keeps an advanced producer playhead separate from the frame on screen", () => {
+    const state = createRuntimeState();
+
+    state.recordPresentationUpdate({
+      ...createPresentedFrame(1, 1),
+      activeDetectionFrameIndex: 30,
+      activeDetectionFrameTime: 1,
+    });
+    state.recordPlayheadTime(4 / 3);
+    state.setPaused();
+
+    expect(state.snapshot()).toMatchObject({
+      activeDetectionFrameIndex: 30,
+      activeDetectionFrameTime: 1,
+      currentTime: 4 / 3,
+      playbackState: "paused",
+      presentedTime: 1,
     });
   });
 

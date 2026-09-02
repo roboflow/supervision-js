@@ -877,7 +877,8 @@ export async function createMediaRendererCore(
         throw new Error("Media renderer is not ready.");
       }
 
-      const mediaTime = runtimeState.currentTime();
+      const mediaTime =
+        runtimeState.presentedTime() ?? runtimeState.currentTime();
       const requestVersion = navigationVersion;
       await detectionTimeline?.prepare(mediaTime, {
         duration: runtimeState.duration(),
@@ -942,9 +943,11 @@ export async function createMediaRendererCore(
       }
 
       currentPresentation = resolvePresentation(presentation);
+      const mediaTime =
+        runtimeState.presentedTime() ?? runtimeState.currentTime();
       const presentedSample = mediaScene?.setPresentation(
         currentPresentation,
-        runtimeState.currentTime(),
+        mediaTime,
       );
 
       if (presentedSample) {

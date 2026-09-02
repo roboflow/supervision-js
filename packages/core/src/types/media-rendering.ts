@@ -199,6 +199,12 @@ export interface MediaRendererState {
   readonly rendererBackend: string | null;
   readonly playbackState: MediaRendererPlaybackState;
   readonly fit: MediaRendererFit;
+  /**
+   * Media time of the pixels currently composited, or `null` before the first
+   * frame reaches the scene. Unlike `currentTime`, this does not move when a
+   * producer advances its playhead ahead of the picture under load.
+   */
+  readonly presentedTime?: number | null;
   readonly currentTime: number;
   readonly playbackRate: number;
   readonly duration: number | null;

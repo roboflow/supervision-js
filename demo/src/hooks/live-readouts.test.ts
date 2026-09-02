@@ -10,6 +10,7 @@ import {
   readLiveReadouts,
   subscribeLiveReadouts,
 } from "./live-readouts";
+import { formatLiveTimecode } from "../components/live-readout-format";
 
 const frames: (() => void)[] = [];
 /* The store keeps the clock reading of its last write across tests, as a real
@@ -29,7 +30,10 @@ function advance(ms: number) {
   runFrame();
 }
 
-function rendererState(currentTime: number) {
+function rendererState(
+  currentTime: number,
+  presentedTime: number | null = currentTime,
+) {
   return {
     activeDetectionFrameTime: currentTime,
     currentTime,
@@ -37,6 +41,7 @@ function rendererState(currentTime: number) {
     duration: 10,
     playbackRate: 1,
     playbackState: "playing",
+    presentedTime,
     source: { estimatedFrameRate: 30 },
   } as unknown as MediaRendererState;
 }
@@ -151,6 +156,34 @@ describe("live readouts", () => {
     expect(readLiveReadouts().currentTime).toBe(4);
 
     stop();
+  });
+
+  it("publishes the frame on screen separately from an advanced playhead", () => {
+    publishLiveRendererState(rendererState(4 / 3, 1), null);
+
+    expect(readLiveReadouts()).toMatchObject({
+      currentTime: 4 / 3,
+      presentedTime: 1,
+    });
+    expect(formatLiveTimecode(readLiveReadouts())).toBe("1.0000s");
+  });
+
+  it("does not replace an explicit missing picture with the transport clock", () => {
+    publishLiveRendererState(rendererState(4 / 3, null), null);
+
+    expect(readLiveReadouts()).toMatchObject({
+      currentTime: 4 / 3,
+      presentedTime: null,
+    });
+    expect(formatLiveTimecode(readLiveReadouts())).toBe("-");
+  });
+
+  it("uses the transport clock only for an older renderer without picture time", () => {
+    const state = { ...rendererState(4 / 3), presentedTime: undefined };
+
+    publishLiveRendererState(state, null);
+
+    expect(formatLiveTimecode(readLiveReadouts())).toBe("1.3333s");
   });
 
   it("stops writing when nothing new is published", () => {
